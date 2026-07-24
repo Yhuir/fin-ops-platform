@@ -135,6 +135,7 @@ EXPECTED_MIGRATIONS = [
     "0119_turnover_ledger_scope_summaries.sql",
     "0120_bank_transaction_category_legacy_lookup.sql",
     "0121_app_health_scope_evidence_hot_path.sql",
+    "0122_cost_statistics_access_convergence_hot_paths.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -298,7 +299,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 122)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 123)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -890,6 +891,10 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "bank_transactions_month_updated_idx",
             "invoices_month_updated_idx",
             "oa_applications_application_updated_idx",
+            "read_model_dirty_scopes_workbench_latest_version_idx",
+            "read_model_dirty_scopes_bank_detail_latest_version_idx",
+            "workbench_exception_cases_scope_updated_idx",
+            "workbench_row_overrides_scope_updated_idx",
             "temporary_object_key",
             "source_storage_uri",
             "verified_at",

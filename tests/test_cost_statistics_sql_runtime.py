@@ -147,6 +147,14 @@ class CostStatisticsSqlReadRepositoryStub:
         self.source_versions = source_versions
         self.source_settings = source_settings or _cost_statistics_source_settings_fixture()
 
+    def list_active_cost_statistics_dependencies(
+        self,
+        *,
+        project_scope: str,
+    ) -> list[dict[str, object]]:
+        del project_scope
+        return []
+
     def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
         return cost_statistics_fresh_gate(
             scope_key=scope_key,
@@ -454,6 +462,74 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
         )
         self.assertEqual(runtime.cost_refreshes, [])
 
+    def test_all_access_short_circuits_heavy_proofs_while_dependency_refresh_is_active(
+        self,
+    ) -> None:
+        class Runtime(CostStatisticsRuntimeStub):
+            def enqueue_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
+                raise AssertionError(
+                    f"active durable refresh must not enqueue another scope: {scope_key} {reason}"
+                )
+
+        class Repository:
+            def list_active_cost_statistics_dependencies(
+                self,
+                *,
+                project_scope: str,
+            ) -> list[dict[str, object]]:
+                self.project_scope = project_scope
+                return [
+                    {
+                        "scope_type": "workbench",
+                        "scope_key": "2026-03",
+                        "status": "processing",
+                    },
+                    {
+                        "scope_type": "cost_statistics",
+                        "scope_key": "active:2026-04",
+                        "status": "pending",
+                    },
+                ]
+
+            def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
+                raise AssertionError(f"active refresh must stop the heavyweight gate: {scope_key}")
+
+            def get_cost_statistics_page(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("active refresh must stop Cost payload I/O")
+
+        repository = Repository()
+
+        def unexpected_bulk_workbench_proof(
+        ) -> tuple[dict[str, dict[str, object]], dict[str, dict[str, object]]]:
+            raise AssertionError("active refresh must stop canonical Workbench bulk proof")
+
+        service = CostStatisticsQueryService(
+            runtime_service=Runtime(),
+            sql_read_repository=repository,
+            tag_selection_mapper=AppSettingsService.cost_statistics_tag_selection_payload_from_settings,
+            workbench_dependency_versions_provider=_fresh_workbench_dependency_versions,
+            workbench_dependency_versions_by_scope_provider=unexpected_bulk_workbench_proof,
+            workbench_refresh_enqueuer=_enqueue_workbench_dependency_refresh,
+        )
+
+        payload, _cache_hit, _etag, _not_modified = service.get_explorer_page(
+            scope="all",
+            view="time",
+            project_scope="active",
+            filters={},
+            cursor=None,
+            page_size=50,
+        )
+
+        self.assertEqual(repository.project_scope, "active")
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["refresh_dependency"], "durable_queue")
+        self.assertEqual(
+            payload["refresh_scope_keys"],
+            ["2026-03", "active:2026-04"],
+        )
+        self.assertFalse(payload["refresh_enqueued"])
+
     def test_month_access_refreshes_only_cost_after_workbench_dependency_is_fresh(self) -> None:
         class Runtime(CostStatisticsRuntimeStub):
             def __init__(self) -> None:
@@ -533,6 +609,14 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
                 return True
 
         class Repository:
+            def list_active_cost_statistics_dependencies(
+                self,
+                *,
+                project_scope: str,
+            ) -> list[dict[str, object]]:
+                del project_scope
+                return []
+
             def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
                 raise AssertionError(f"stale Workbench must stop parent Cost gate I/O: {scope_key}")
 
@@ -602,6 +686,14 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
                 return True
 
         class Repository:
+            def list_active_cost_statistics_dependencies(
+                self,
+                *,
+                project_scope: str,
+            ) -> list[dict[str, object]]:
+                del project_scope
+                return []
+
             def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
                 return {
                     **cost_statistics_fresh_gate(
@@ -654,6 +746,14 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
         class Repository:
             def __init__(self) -> None:
                 self.gate_calls: list[str] = []
+
+            def list_active_cost_statistics_dependencies(
+                self,
+                *,
+                project_scope: str,
+            ) -> list[dict[str, object]]:
+                del project_scope
+                return []
 
             def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
                 self.gate_calls.append(scope_key)
@@ -900,6 +1000,14 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.transaction_calls: list[tuple[str, str]] = []
 
+            def list_active_cost_statistics_dependencies(
+                self,
+                *,
+                project_scope: str,
+            ) -> list[dict[str, object]]:
+                del project_scope
+                return []
+
             def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
                 return cost_statistics_fresh_gate(scope_key=scope_key, source_versions=source_versions)
 
@@ -971,6 +1079,14 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
         source_versions = _cost_statistics_source_versions_fixture("active:all")
 
         class Repository:
+            def list_active_cost_statistics_dependencies(
+                self,
+                *,
+                project_scope: str,
+            ) -> list[dict[str, object]]:
+                del project_scope
+                return []
+
             def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
                 return cost_statistics_fresh_gate(
                     scope_key=scope_key,
@@ -1905,6 +2021,19 @@ class CostStatisticsReadModelRepositoryPortTests(unittest.TestCase):
             def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
                 return {"scope_key": scope_key, "published_source_version": 7}
 
+            def list_active_cost_statistics_dependencies(
+                self,
+                *,
+                project_scope: str,
+            ) -> list[dict[str, object]]:
+                return [
+                    {
+                        "scope_type": "cost_statistics",
+                        "scope_key": f"{project_scope}:2026-05",
+                        "status": "pending",
+                    }
+                ]
+
             def get_cost_statistics_page(self, **query: object) -> dict[str, object]:
                 return {"view": query["view"], "rows": []}
 
@@ -1976,6 +2105,16 @@ class CostStatisticsReadModelRepositoryPortTests(unittest.TestCase):
         self.assertEqual(
             port.get_cost_statistics_freshness_gate(scope_key="active:2026-05")["published_source_version"],
             7,
+        )
+        self.assertEqual(
+            port.list_active_cost_statistics_dependencies(project_scope="active"),
+            [
+                {
+                    "scope_type": "cost_statistics",
+                    "scope_key": "active:2026-05",
+                    "status": "pending",
+                }
+            ],
         )
         self.assertEqual(port.get_cost_statistics_page(view="time"), {"view": "time", "rows": []})
         self.assertEqual(
@@ -2644,6 +2783,59 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(len(connection.fetch_one_calls), 1)
         self.assertEqual(connection.fetch_all_calls, [])
 
+    def test_repository_lists_only_active_cost_parent_dependencies(self) -> None:
+        class Connection:
+            def __init__(self) -> None:
+                self.fetch_all_calls: list[tuple[str, tuple[object, ...]]] = []
+
+            def fetch_all(
+                self,
+                sql: str,
+                params: tuple[object, ...] = (),
+            ) -> list[dict[str, object]]:
+                self.fetch_all_calls.append((" ".join(sql.lower().split()), params))
+                return [
+                    {
+                        "scope_type": "workbench",
+                        "scope_key": "2026-03",
+                        "status": "processing",
+                    },
+                    {
+                        "scope_type": "cost_statistics",
+                        "scope_key": "active:2026-04",
+                        "status": "pending",
+                    },
+                ]
+
+        connection = Connection()
+        dependencies = PostgresReadModelRepository(
+            connection
+        ).list_active_cost_statistics_dependencies(project_scope="active")
+
+        self.assertEqual(
+            dependencies,
+            [
+                {
+                    "scope_type": "workbench",
+                    "scope_key": "2026-03",
+                    "status": "processing",
+                },
+                {
+                    "scope_type": "cost_statistics",
+                    "scope_key": "active:2026-04",
+                    "status": "pending",
+                },
+            ],
+        )
+        self.assertEqual(len(connection.fetch_all_calls), 1)
+        sql, params = connection.fetch_all_calls[0]
+        self.assertIn("from job.outbox_events", sql)
+        self.assertIn("status in ('pending', 'processing')", sql)
+        self.assertIn("'workbench.read_model.refresh'", sql)
+        self.assertIn("'bank_detail.read_model.refresh'", sql)
+        self.assertIn("'cost_statistics.read_model.refresh'", sql)
+        self.assertEqual(params, ("active:%",))
+
     def test_repository_month_gate_keeps_current_rows_but_marks_global_statistics_stale(
         self,
     ) -> None:
@@ -3126,6 +3318,9 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             "SqlCostStats",
             (),
             {
+                "list_active_cost_statistics_dependencies": (
+                    lambda _self, *, project_scope: []
+                ),
                 "get_cost_statistics_freshness_gate": lambda _self, *, scope_key: {
                     **cost_statistics_fresh_gate(
                         scope_key=scope_key,

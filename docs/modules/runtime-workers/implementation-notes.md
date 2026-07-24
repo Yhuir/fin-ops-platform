@@ -12,8 +12,9 @@
 - `*_read_model_not_fresh` 可携带 `parent_scope_keys=YYYY-MM,...` 表示同一 read model 的 parent shard 依赖；runtime worker 必须允许这类 same-scope parent refresh。若错误包含 `parent_generation_inconsistent`，即使 readiness 显示 fresh，也要强制补投 parent scope，因为 consistency failure 比 readiness 更接近发布边界。
 - Same-scope parent dependency 的当前 event 必须使用 retry 级别退避，而不是全局 `dependency_not_fresh_delay_seconds` 的快速 retry；否则 RabbitMQ transport 下 `all` 聚合事件会被快速重新发布并抢占父月 shard，形成 backlog/refreshing 风暴。
 - App Status read model registry、runtime worker registry、RabbitMQ dispatch、SLO smoke、migration storage contract 和 Redis/deploy env 模板必须保持本地 parity；生产 worker/read model 不允许新增第二套手写清单。
-- `cost-tax` worker 只保留 `tax_offset.read_model.refresh` 兼容职责；`cost_statistics.read_model.refresh` 的唯一 worker owner 是 `cost-statistics`。
+- `cost-tax` worker 只保留 `tax_offset.read_model.refresh` 兼容职责；`cost_statistics.read_model.refresh` 只由 `cost-statistics` 与 `cost-statistics-secondary` 两个同合同 bounded consumer 处理，二者不拥有第二投影或事实源。
 - `job.outbox_events` worker claim hot path 是 runtime worker I/O 边界的一部分；active queue 必须保留 event-type-first priority index，不能靠业务 handler 内部 sleep/retry 或页面补丁掩盖 pickup 尾延迟。
+- Workbench 与 Cost 的 sibling month 可各由两个 bounded PostgreSQL consumer 并行 claim；Workbench `all` fan-out 只能由 primary claim。每个 required instance 必须使用独立 worker kind，避免 App Health heartbeat 交叉满足。
 
 ## 记录模板
 
@@ -31,6 +32,14 @@
 ```
 
 ## 历史记录
+
+## 2026-07-24 - Workbench/Cost sibling month bounded parallel consumers
+
+- 目标：消除同一访问触发的 2026-02/2026-03 sibling month 在单 worker lane 串行排队，保持页面 access-to-fresh `p99<=3s`，不改变普通写事务。
+- 影响范围：只修改 runtime worker registry、registry-derived manifest/deploy contracts、App Health required heartbeats 与对应测试；handler、event payload、durable queue、scope policy、projection 和业务 API 不变。
+- 关键决策：保留 `workbench` primary 处理 month + `all` fan-out，新增 `workbench-secondary` 处理同 event type 但排除 `all`；保留 `cost-statistics` primary 并新增同 event type 的 `cost-statistics-secondary`。两个 secondary 均 PostgreSQL only，不引入第二 transport 或新队列；独立 worker kind确保实例级健康门真实有效。
+- 旧路径与简化：没有恢复历史 Workbench aggregate lane，没有新增协调器、分片调度表、动态 autoscaling 或 per-page queue。deploy 继续完全由 registry 派生，两个 secondary 复用现有 owner env example。
+- 测试与验证：registry/deploy/migration/Cost 定向合同合计 `182 passed`，真实临时 PostgreSQL Cost integration `6 passed`。生产发布后必须证明两个新增 instance 均为 current-effective、sibling months 不再串行、queue drain 且 System Audit 通过。
 
 ## 2026-07-22 - Invoice lifecycle 的 pending-invoice 依赖 scope 收敛
 

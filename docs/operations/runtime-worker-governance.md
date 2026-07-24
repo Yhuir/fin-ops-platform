@@ -54,7 +54,7 @@ invoice usage/output collection backfill、App Health/workbench performance 和 
   `fin-ops-worker@*.service`，对已启用、运行或失败但不在 registry 中的实例执行 stop/disable；不删除实例 env，
   因而可通过恢复含该 registration 的 release 受控回滚。禁止把 WIP 性能 worker 或手工 systemd 实例留在
   registry 外长期运行，也禁止通过给未知实例补空参数来绕过 registration contract。
-- PostgreSQL durable queue worker 的 idle poll 基线是 `0.05s`；单一 `workbench` worker 使用 `0.01s`，同时处理月份 shard 与 `all` fan-out command。普通写不投递页面 refresh；被访问的具体月份由 query owner 收敛，`month=all` 页面直接组合 active 月分片。显式 `all` command 只列出月份并经统一 gateway 投递，不构建或发布全局 generation。新增 read model worker 不能把
+- PostgreSQL durable queue worker 的 idle poll 基线是 `0.05s`；`workbench` primary 与 `workbench-secondary` 复用 `0.01s` env，primary 处理月份 shard 与 `all` fan-out command，secondary 通过 registry 排除 `all`、只并行 drain 月份 shard。`cost-statistics` / `cost-statistics-secondary` 同样竞争同一 PostgreSQL exact-scope queue；secondary 不接 RabbitMQ、不拥有新 producer。普通写不投递页面 refresh；被访问的具体月份由 query owner 收敛，`month=all` 页面直接组合 active 月分片。显式 `all` command 只列出月份并经统一 gateway 投递，不构建或发布全局 generation。新增 read model worker 不能把
   `--poll-interval-seconds 2`、`0.25`、`0.1` 或 `5` 作为默认值；`workbench-matching` 是独立脏 scope 批处理例外，
   使用 `0.25s` poll 支撑精确 OA/ETC relation enrichment 的 3 秒写后可读 SLO。发布 helper 会把已有 env 中精确命中的历史 `--poll-interval-seconds 2|0.25|0.1|0.05`
   迁移到当前 release env 示例声明的 poll 值，并只对 `workbench-matching` 把旧 `5s` 迁移为当前值。该迁移不会重写 RabbitMQ 灰度或自定义事件。
@@ -66,7 +66,7 @@ invoice usage/output collection backfill、App Health/workbench performance 和 
   不能每个 0.05s poll 都写 `job.runtime_worker_heartbeats`；`processing`、`deferred`、`failed`、`stopping`、`stopped`
   必须即时写入，保证 App Health 和故障定位不丢关键状态。
 - 同一 event type 确有当前吞吐隔离需求时，只允许使用 worker registry / worker env 暴露的 claim scope include/exclude。
-  Workbench 不拆 lane：单一 `workbench` registration claim 月份 shard 与 `all` fan-out command。scope policy 仍是
+  当前生产证据只授权 `workbench-secondary` 排除 `all`，使跨月 shard 并行；primary 仍 claim 月份与 `all`。Cost secondary 不拆业务 lane，只竞争同一规范 event。scope policy 仍是
   read model contract 的事实源，queue 层只做 claim，不承载业务 scope 校验。
 - `job.outbox_events` active queue claim hot path 必须保留 `outbox_events_claim_event_type_priority_idx`。
   该索引按 `event_type/status/priority rank/available_at/created_at/id` 支撑 worker lane claim，减少 grouped read model smoke
@@ -705,7 +705,7 @@ cd "$release_src"
 - refresh `active:YYYY-MM` 或 `all:YYYY-MM` 时，普通事件从对应 Workbench 月 read model 全量构建；带有效 `relation_deltas` 的 active 月事件只读取目标 Workbench rows 与成本自有 bank-flow 标签并替换目标成本行。queue 以 case-keyed object 合并并限制 200 case，非法/超限 metadata 回退普通全月路径。两种发布都要求同一非负 `source_version` CAS；成功完成后才入队 parent，竞态失败保持 refreshing，不写 Redis、不完成新 dirty、不 fan-out。
 - 普通 refresh `active:all` 或 `all:all` 只从当前已物化月份 rows/metadata 重建廉价 parent rollup，不得按 `app_status_readiness` 枚举历史月份或补投 child。child freshness 与精确补投只归页面 Cost gate；readiness 缺行是诊断状态，不能把一个访问驱动的 parent 退化成全历史 rebuild。
 - 只有显式 maintenance/reset 产生的 `force_refresh=true` parent 才枚举全部当前月份 shard，经 `ReadModelRefreshGateway` 传播 force 并等待后续 shard→parent 收敛。普通 API miss/stale、月份完成和 `cost_statistics_shard_converged` 都不能进入该全量分支。
-- 页面读取 `active:all` / `all:all` 时，query owner 不能只看 parent 自身 readiness。它先用 set-based canonical Workbench month proofs 与 active generations 找出 exact stale Workbench scopes；这些 upstream 全部 fresh 后，Cost gate 再比较每个 concrete child 的嵌入 Workbench/Bank Detail versions、latest dirty 与 parent `source_shards`，并只 enqueue exact stale Cost children。child 成功后沿既有 month→parent enqueue 收敛；禁止把访问驱动 exact scopes 退化为普通写后 fan-out 或无条件 `all` command。
+- 页面读取 `active:all` / `all:all` 时，query owner 不能只看 parent 自身 readiness。它先读取 exact active outbox：WorkBench、Bank Detail 或当前 project Cost event 已在 `pending/processing` 时直接返回 refreshing，不重复全月份 proof，也不新增 event；dirty pending 但 active event 已消失的 orphan 不得走该快路径。队列 drain 后再用 set-based canonical Workbench month proofs 与 active generations 找出 exact stale Workbench scopes；这些 upstream 全部 fresh 后，Cost gate 再比较每个 concrete child 的嵌入 Workbench/Bank Detail versions、latest dirty 与 parent `source_shards`，并只 enqueue exact stale Cost children。child 成功后沿既有 month→parent enqueue 收敛；禁止把访问驱动 exact scopes 退化为普通写后 fan-out 或无条件 `all` command。
 - 普通 parent worker 从 `read_model.cost_statistics_rows` 与 `read_model.cost_statistics_bank_flow_rows` 的月份 rows 聚合生成父 scope；它可以在 child 仍有 current dirty 时先发布一版 rollup，但页面 gate 必须继续 fail-closed，最后一个 child 完成后的既有 month→parent 事件会发布最终 lineage。parent metadata 不保存 `time_rows` / `bank_flow_time_rows`。parent snapshot 与过期月份 scope 的 metadata/两类 rows 删除必须在同一次 source-version 条件事务中发布，之后才用同一版本完成父 dirty scope。两张行表都只承载月份 shard 明细，不承载 `active:all` / `all:all` parent rows；禁止回读 child JSON arrays。
 - 成本 projection 发布成功或拒绝时都不得写/删 Redis；旧 `cost_statistics:explorer:{scope}` 无版本 writer 已删除。Redis 仅由 API query owner 在 PostgreSQL fresh gate 后写 versioned cache，不属于 worker/readiness 事实链路。
 - 父 scope 不直接读取 `read_model.workbench_groups(scope_key='all')` 的全量 JSON payload；工作台 `all` scope 超时不能再成为成本统计全期间父 scope rebuild 的关键路径。

@@ -103,11 +103,20 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
             ),
         )
 
-    def test_workbench_registration_claims_month_and_all_scopes(self) -> None:
+    def test_workbench_primary_claims_all_and_secondary_only_claims_month_scopes(self) -> None:
         workbench = registration_by_instance_name()["workbench"]
+        secondary = registration_by_instance_name()["workbench-secondary"]
 
         self.assertEqual(workbench.claim_scope_keys, ())
         self.assertEqual(workbench.exclude_claim_scope_keys, ())
+        self.assertEqual(secondary.claim_scope_keys, ())
+        self.assertEqual(secondary.exclude_claim_scope_keys, ("all",))
+        self.assertEqual(
+            secondary.event_types,
+            ("workbench.read_model.refresh",),
+        )
+        self.assertEqual(secondary.worker_kind, "workbench-secondary-read-model")
+        self.assertFalse(secondary.rabbitmq_eligible)
         self.assertNotIn("workbench-aggregate", registration_by_instance_name())
         self.assertEqual(
             worker_command_args(workbench, transport="postgres"),
@@ -150,6 +159,17 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
         self.assertEqual(APP_STATUS_READ_MODEL_REGISTRY["cost_statistics"].worker_instance, "cost-statistics")
         self.assertEqual(APP_STATUS_READ_MODEL_REGISTRY["tax_offset"].worker_instance, "tax-offset")
         self.assertEqual(APP_STATUS_READ_MODEL_REGISTRY["bank_flow_rule_batch"].worker_instance, "bank-flow-rule-batch")
+        cost_secondary = registrations["cost-statistics-secondary"]
+        self.assertTrue(cost_secondary.required)
+        self.assertEqual(
+            cost_secondary.worker_kind,
+            "cost-statistics-secondary-read-model",
+        )
+        self.assertEqual(
+            cost_secondary.event_types,
+            ("cost_statistics.read_model.refresh",),
+        )
+        self.assertFalse(cost_secondary.rabbitmq_eligible)
 
     def test_cost_tax_worker_no_longer_consumes_cost_statistics_refreshes(self) -> None:
         registration = registration_by_instance_name()["cost-tax"]

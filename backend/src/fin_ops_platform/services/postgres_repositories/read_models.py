@@ -7397,6 +7397,49 @@ class PostgresSummaryReadModelRepository:
             ),
         }
 
+    def list_active_cost_statistics_dependencies(
+        self,
+        *,
+        project_scope: str,
+    ) -> list[dict[str, Any]]:
+        normalized_project_scope = text(project_scope)
+        if normalized_project_scope not in {"active", "all"}:
+            return []
+        rows = self._connection.fetch_all(
+            """
+            select scope_type, scope_key, status
+            from job.outbox_events
+            where tenant_id = 'default'
+              and status in ('pending', 'processing')
+              and (
+                    event_type in (
+                        'workbench.read_model.refresh',
+                        'bank_detail.read_model.refresh'
+                    )
+                    or (
+                        event_type = 'cost_statistics.read_model.refresh'
+                        and scope_key like %s
+                    )
+              )
+            order by
+                case status when 'processing' then 0 else 1 end,
+                available_at,
+                created_at,
+                id
+            limit 100
+            """,
+            (f"{normalized_project_scope}:%",),
+        )
+        return [
+            {
+                "scope_type": text(row.get("scope_type")),
+                "scope_key": text(row.get("scope_key")),
+                "status": text(row.get("status")),
+            }
+            for row in rows
+            if text(row.get("scope_key"))
+        ]
+
     def get_cost_statistics_page(
         self,
         *,
@@ -9815,6 +9858,16 @@ class PostgresReadModelRepository:
 
     def get_cost_statistics_freshness_gate(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         return self._summary_read_model_repository.get_cost_statistics_freshness_gate(*args, **kwargs)
+
+    def list_active_cost_statistics_dependencies(
+        self,
+        *args: Any,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        return self._summary_read_model_repository.list_active_cost_statistics_dependencies(
+            *args,
+            **kwargs,
+        )
 
     def get_cost_statistics_page(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         return self._summary_read_model_repository.get_cost_statistics_page(*args, **kwargs)

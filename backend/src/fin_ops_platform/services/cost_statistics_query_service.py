@@ -453,6 +453,22 @@ class CostStatisticsQueryService:
                     ),
                 )
         elif scope_month == "all":
+            active_dependencies = [
+                dict(item)
+                for item in list(
+                    self._sql_read_repository.list_active_cost_statistics_dependencies(
+                        project_scope=str(scope_key).split(":", 1)[0]
+                    )
+                    or []
+                )
+                if isinstance(item, dict)
+            ]
+            if active_dependencies:
+                return None, None, self._active_dependency_refresh_payload(
+                    scope_key=scope_key,
+                    active_dependencies=active_dependencies,
+                    empty_payload_factory=empty_payload_factory,
+                )
             expected_by_scope, active_by_scope = (
                 self._workbench_dependency_versions_by_scope_provider()
             )
@@ -559,6 +575,32 @@ class CostStatisticsQueryService:
             refresh_reason=refresh_reason,
             stale_reasons=freshness.stale_reasons,
         )
+
+    @staticmethod
+    def _active_dependency_refresh_payload(
+        *,
+        scope_key: str,
+        active_dependencies: list[dict[str, Any]],
+        empty_payload_factory: Any,
+    ) -> dict[str, Any]:
+        payload = dict(empty_payload_factory())
+        payload["read_model_status"] = "refreshing"
+        payload["read_model_scope_key"] = scope_key
+        payload["read_model_stale_reasons"] = [
+            "cost_statistics_dependency_refresh_in_progress"
+        ]
+        payload["refresh_reason"] = "cost_statistics_dependency_refresh_in_progress"
+        payload["refresh_dependency"] = "durable_queue"
+        payload["refresh_scope_keys"] = list(
+            dict.fromkeys(
+                scope_key
+                for item in active_dependencies
+                for scope_key in [str(item.get("scope_key") or "").strip()]
+                if scope_key
+            )
+        )
+        payload["refresh_enqueued"] = False
+        return payload
 
     def _workbench_dependency_non_fresh_payload(
         self,

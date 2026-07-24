@@ -2,6 +2,14 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-07-24 - access-time `all` 快速 refreshing 与 sibling month 并行
+
+- Service/API contract：`tests/test_cost_statistics_sql_runtime.py` 证明 `scope=all` 发现 durable outbox active dependency 后立即返回现有 `refreshing` envelope，不执行 Workbench canonical bulk proof、Cost dependency gate、payload read 或重复 enqueue；没有 active event 时仍走完整 fail-closed proof。month scope 不使用该短路，保留“当前 rows fresh、全期间 statistics refreshing”的既有合同。
+- Repository/PostgreSQL：同文件锁定 repository port 与 event-type-first active outbox SQL；`tests/test_cost_statistics_postgres_integration.py` 在真实临时 PostgreSQL 证明只返回 `pending/processing` 且与当前 Cost project 或全局 Workbench/Bank Detail 相关的 dependency，排除 done 与其它 Cost project。
+- Worker/deploy/regression：`tests/test_runtime_worker_registry.py` 证明 Workbench primary 唯一 claim `all`、secondary 只 claim month，Cost 两个 required PostgreSQL consumer 使用独立 worker kind；`tests/test_deploy_runtime_examples.py` 证明 registry 派生 manifest/env，不新增手写部署清单；`tests/test_postgres_migrations.py` 与 disposable PostgreSQL integration 保护 0122 索引。
+- 已运行定向结果：不含浏览器 183 suite 的 backend contract `182 passed`；真实临时 PostgreSQL `6 passed`，数据库自动删除。按用户指示不手动触发、不等待与本改动无关的耗时 CI；发布前只补 lint/docs/diff/边界定向门，发布后以 test-owned confirm→withdraw、恢复、worker heartbeat、页面 access-to-fresh p95/p99 与 System Audit 为最终证明。
+- 七类决策：1 业务规则未变，不新增 business-core 测试；2 service、3 既有 API refreshing shape、4 read model/worker、6 生产可逆写→访问→恢复、7 Cost/registry/migration/deploy 回归适用。5 frontend 不适用，因为页面组件、交互与 HTTP shape 未变。
+
 ## 2026-07-24 - normal parent 精确收敛与 force 全量隔离
 
 - Service/worker：`tests/test_cost_statistics_sql_runtime.py` 证明普通 API parent 与 `cost_statistics_shard_converged` parent 直接重建廉价 rollup，绝不调用已删除的 readiness shard discovery；显式 force parent 仍枚举全部当前月份、向每个 child 传播 `force_refresh`，并等待后续收敛。

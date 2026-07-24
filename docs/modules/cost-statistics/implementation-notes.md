@@ -1,5 +1,13 @@
 # 成本统计 实施记录
 
+## 2026-07-24 - access-time `all` 收敛热路径
+
+- 生产 test-owned confirm/withdraw 证明普通写事务保持零 Cost fan-out，但首次访问 `active:all` / `all:all` 仍需 `13.807–25.885s`。Cost worker 自身 `p95=505.077ms`，真正长尾来自 `all` 轮询反复执行 Workbench canonical bulk proof 与 Cost child proof；同时单一 Workbench/Cost consumer 串行处理两个 sibling month，Workbench 单月约 `1.5–2.8s`，累计超过页面 `3s` 收敛门槛。
+- 最小修复只增加一个 Cost repository 窄读：`scope=all` 先查询 PostgreSQL durable outbox 中仍为 `pending/processing` 的 Workbench、Bank Detail 或同 project Cost dependency。存在 active dependency 时直接返回既有 `refreshing` 合同，不重复执行重型 canonical proof、不重复 enqueue；active outbox 排空后仍必须执行完整 freshness/source-lineage/dirty-scope 证明，因此 dirty orphan 不会被误报 fresh。
+- Workbench 与 Cost 各增加一个同 event type 的 required PostgreSQL consumer，以两个 bounded consumer 并行处理 sibling month。Workbench primary 继续唯一拥有 `all` fan-out，secondary 明确排除 `all`；两个 secondary 使用独立 worker kind，App Health 不能用 primary heartbeat 冒充其存活。没有新增 producer、read model、queue、协调器、缓存、表或写后 fan-out。
+- migration `0122_cost_statistics_access_convergence_hot_paths.sql` 只补 4 个既有证明路径索引：Workbench/Bank Detail latest dirty-version，以及 Workbench exception/override scope update。它不改变业务数据、API shape 或模块职责。
+- 本地定向证据：Cost/service/registry/deploy/migration `182 passed`；一次性可见名称临时 PostgreSQL 应用 migrations through 0122 后 Cost integration `6 passed`，临时库自动删除。生产发布后仍须用同一 test-owned 可逆 fixture 复跑 write→access→fresh、恢复、queue drain 与 System Audit，并以 `p95<=1.5s / p99<=3s` 判定；在此之前不得记录为完成。
+
 ## 2026-07-24 - normal parent readiness fan-out 删除
 
 - production test-owned relation round 证明写事务零 Cost fan-out、Cost query 也只选择 2026-02/2026-03 exact children；但每个 child 完成后，旧 parent handler 调用 `missing_or_stale_cost_statistics_shards(...)`，把未保留 current readiness row 的历史月份全部视为 stale。单 shard handler p95 仅约 0.55s，页面仍因 42 个历史 scope 排队约 10s，真实瓶颈是错误 scope amplification，不是成本 SQL 算法。

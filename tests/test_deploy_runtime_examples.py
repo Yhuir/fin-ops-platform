@@ -167,16 +167,44 @@ class DeployRuntimeExampleTests(unittest.TestCase):
             deploy_control.rindex("restart_services\n"),
         )
 
-    def test_main_workbench_worker_owns_month_and_all_fan_out_scopes(self) -> None:
+    def test_workbench_primary_owns_all_and_secondary_only_drains_month_scopes(self) -> None:
         helper = ENSURE_RUNTIME_WORKERS.read_text(encoding="utf-8")
         workbench_env = (WORKER_ENV_DIR / "fin-ops.worker.workbench.env.example").read_text(encoding="utf-8")
         required = {registration.instance_name: registration for registration in RUNTIME_WORKER_REGISTRY if registration.required}
 
         self.assertNotIn("workbench-aggregate", required)
+        self.assertIn("workbench-secondary", required)
+        self.assertEqual(required["workbench-secondary"].exclude_claim_scope_keys, ("all",))
+        self.assertEqual(
+            required["workbench-secondary"].env_example,
+            "fin-ops.worker.workbench.env.example",
+        )
         self.assertNotIn("--exclude-claim-scope-key all", workbench_env)
         self.assertNotIn("--claim-scope-key all", workbench_env)
         self.assertNotIn("migrate_workbench_scope_split", helper)
         self.assertNotIn("migrate_workbench_aggregate_drain", helper)
+
+    def test_cost_statistics_secondary_reuses_the_same_bounded_worker_contract(self) -> None:
+        required = {
+            registration.instance_name: registration
+            for registration in RUNTIME_WORKER_REGISTRY
+            if registration.required
+        }
+
+        self.assertIn("cost-statistics-secondary", required)
+        self.assertEqual(
+            required["cost-statistics-secondary"].event_types,
+            ("cost_statistics.read_model.refresh",),
+        )
+        self.assertEqual(
+            required["cost-statistics-secondary"].worker_kind,
+            "cost-statistics-secondary-read-model",
+        )
+        self.assertEqual(
+            required["cost-statistics-secondary"].env_example,
+            "fin-ops.worker.cost-statistics.env.example",
+        )
+        self.assertFalse(required["cost-statistics-secondary"].rabbitmq_eligible)
 
     def test_rabbitmq_dispatcher_env_includes_invoice_usage_collection_events(self) -> None:
         env_example = DISPATCHER_ENV.read_text()
