@@ -135,6 +135,7 @@ EXPECTED_MIGRATION_FILES = [
     "0121_app_health_scope_evidence_hot_path.sql",
     "0122_cost_statistics_access_convergence_hot_paths.sql",
     "0123_drop_legacy_cost_statistics_bank_flow_rows.sql",
+    "0124_bank_detail_canonical_source_proof.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (

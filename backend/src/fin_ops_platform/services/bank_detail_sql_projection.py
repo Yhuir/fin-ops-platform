@@ -94,6 +94,14 @@ class BankDetailSqlProjectionBuilder:
         source_versions = self._source_versions(
             source_version=source_version,
             row_count=len(transaction_rows),
+            context_row_count=len(auto_category_context_rows),
+            bank_transactions_updated_at=max(
+                (
+                    text(row.get("bank_transaction_updated_at")) or ""
+                    for row in auto_category_context_rows
+                ),
+                default="",
+            ),
             relation_source_versions=relation_source_versions,
             category_source_signature=self._category_source_signature(
                 normalized_scope_key,
@@ -214,6 +222,7 @@ class BankDetailSqlProjectionBuilder:
                    summary,
                    remark,
                    bank_text_fields,
+                   updated_at::text as bank_transaction_updated_at,
                    raw_payload
             from app.bank_transactions
             where txn_date >= %s::date
@@ -560,6 +569,7 @@ class BankDetailSqlProjectionBuilder:
             "summary_text": text_fields["summary_text"],
             "note_text": text_fields["note_text"],
             "bank_text_fields": row.get("bank_text_fields") if isinstance(row.get("bank_text_fields"), list) else [],
+            "bank_transaction_updated_at": text(row.get("bank_transaction_updated_at")),
             "raw_payload": raw_payload,
         }
 
@@ -754,6 +764,8 @@ class BankDetailSqlProjectionBuilder:
         *,
         source_version: int | None,
         row_count: int,
+        context_row_count: int,
+        bank_transactions_updated_at: str,
         relation_source_versions: dict[str, Any] | None = None,
         category_source_signature: str = "",
         source_signature: str = "",
@@ -770,6 +782,8 @@ class BankDetailSqlProjectionBuilder:
             ),
             "bank_detail_source_signature": source_signature,
             "row_count": row_count,
+            "bank_transactions_context_row_count": context_row_count,
+            "bank_transactions_updated_at": bank_transactions_updated_at,
         }
 
     def _category_source_signature(

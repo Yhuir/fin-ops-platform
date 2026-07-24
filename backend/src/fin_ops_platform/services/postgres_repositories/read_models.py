@@ -2880,6 +2880,16 @@ class PostgresBankReadModelRepository:
             if include_relation_source_versions
             else {}
         )
+        current_bank_source_summaries = self._bank_detail_canonical_source_summaries(
+            scope_keys=[
+                scope_key
+                for scope_key in _dedupe_preserve_order(
+                    [*normalized_scope_keys, *statistics_scope_keys]
+                )
+                if MONTH_SCOPE_RE.match(scope_key)
+            ],
+            connection=executor,
+        )
 
         def status_for(scope_key_values: list[str], *, require_statistics: bool = False) -> str:
             statuses = {
@@ -2900,6 +2910,37 @@ class PostgresBankReadModelRepository:
             ):
                 return "schema_mismatch"
             if any(text(by_scope[scope_key].get("status")) != "fresh" for scope_key in scope_key_values):
+                return "stale"
+            if any(
+                not isinstance(current_bank_source_summaries.get(scope_key), dict)
+                or int_value(by_scope[scope_key].get("row_count"), -1)
+                != int_value(current_bank_source_summaries[scope_key].get("row_count"), -2)
+                or int_value(
+                    (
+                        by_scope[scope_key].get("source_versions")
+                        if isinstance(by_scope[scope_key].get("source_versions"), dict)
+                        else {}
+                    ).get("bank_transactions_context_row_count"),
+                    -1,
+                )
+                != int_value(
+                    current_bank_source_summaries[scope_key].get("context_row_count"),
+                    -2,
+                )
+                or text(
+                    (
+                        by_scope[scope_key].get("source_versions")
+                        if isinstance(by_scope[scope_key].get("source_versions"), dict)
+                        else {}
+                    ).get("bank_transactions_updated_at")
+                )
+                != text(
+                    current_bank_source_summaries[scope_key].get(
+                        "bank_transactions_updated_at"
+                    )
+                )
+                for scope_key in scope_key_values
+            ):
                 return "stale"
             if any(
                 text(
@@ -3027,6 +3068,58 @@ class PostgresBankReadModelRepository:
                 for scope_key, row in dirty_by_scope.items()
                 if scope_key in normalized_scope_keys
             ],
+        }
+
+    def _bank_detail_canonical_source_summaries(
+        self,
+        *,
+        scope_keys: list[str],
+        connection: Any | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        normalized_scope_keys = _dedupe_preserve_order(
+            str(scope_key).strip()
+            for scope_key in list(scope_keys or [])
+            if MONTH_SCOPE_RE.match(str(scope_key).strip())
+        )
+        if not normalized_scope_keys:
+            return {}
+        executor = connection or self._connection
+        rows = executor.fetch_all(
+            """
+            /* bank_detail_canonical_source_summaries */
+            with requested_scopes as (
+                select requested.scope_key,
+                       to_date(requested.scope_key || '-01', 'YYYY-MM-DD') as month_start
+                from unnest(%s::text[]) as requested(scope_key)
+            )
+            select requested.scope_key,
+                   count(bank.id) filter (
+                       where bank.txn_date >= requested.month_start
+                         and bank.txn_date < requested.month_start + interval '1 month'
+                   )::integer as row_count,
+                   count(bank.id)::integer as context_row_count,
+                   max(bank.updated_at)::text as bank_transactions_updated_at
+            from requested_scopes requested
+            left join app.bank_transactions bank
+              on bank.txn_date >= requested.month_start - interval '2 days'
+             and bank.txn_date < requested.month_start + interval '1 month 2 days'
+             and bank.status <> 'deleted'
+            group by requested.scope_key
+            order by requested.scope_key
+            """,
+            (normalized_scope_keys,),
+        )
+        return {
+            scope_key: {
+                "row_count": int_value(row.get("row_count"), 0),
+                "context_row_count": int_value(row.get("context_row_count"), 0),
+                "bank_transactions_updated_at": text(
+                    row.get("bank_transactions_updated_at")
+                ),
+            }
+            for row in rows
+            if isinstance(row, dict)
+            and (scope_key := text(row.get("scope_key")))
         }
 
 

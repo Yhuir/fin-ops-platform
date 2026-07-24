@@ -137,6 +137,7 @@ EXPECTED_MIGRATIONS = [
     "0121_app_health_scope_evidence_hot_path.sql",
     "0122_cost_statistics_access_convergence_hot_paths.sql",
     "0123_drop_legacy_cost_statistics_bank_flow_rows.sql",
+    "0124_bank_detail_canonical_source_proof.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -298,7 +299,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 124)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 125)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -1506,6 +1507,35 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             normalized_sql,
             "drop table if exists read_model.cost_statistics_bank_flow_rows;",
         )
+
+    def test_bank_detail_canonical_source_proof_backfill_preserves_mismatched_scopes(
+        self,
+    ) -> None:
+        sql = strip_sql_comments(
+            (
+                MIGRATIONS_DIR
+                / "0124_bank_detail_canonical_source_proof.sql"
+            ).read_text(encoding="utf-8")
+        ).lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn("with canonical_source as", normalized_sql)
+        self.assertIn(
+            "update read_model.bank_detail_scopes scope set source_versions = "
+            "scope.source_versions || jsonb_build_object(",
+            normalized_sql,
+        )
+        self.assertIn(
+            "'bank_transactions_context_row_count', canonical.context_row_count",
+            normalized_sql,
+        )
+        self.assertIn(
+            "'bank_transactions_updated_at', canonical.bank_transactions_updated_at",
+            normalized_sql,
+        )
+        self.assertIn("scope.row_count = canonical.row_count", normalized_sql)
+        self.assertNotIn("insert into job.", normalized_sql)
+        self.assertNotIn("update job.", normalized_sql)
 
     def test_oa_pending_payment_freshness_gate_has_scope_private_latest_version_index(self) -> None:
         sql = strip_sql_comments(

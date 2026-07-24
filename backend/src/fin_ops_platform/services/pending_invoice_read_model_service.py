@@ -127,9 +127,14 @@ class PendingInvoiceReadModelService:
                 source_payload=payload,
             )
 
-        if include_statistics:
-            self._gate_statistics(payload)
+        statistics_refresh_scope_keys = (
+            self._gate_statistics(payload) if include_statistics else []
+        )
         if refresh_status != "fresh":
+            self._enqueue_refresh_scope_keys(
+                statistics_refresh_scope_keys,
+                reason="api_statistics_source_versions_stale",
+            )
             return self.payload_response(payload, read_model_status=refresh_status, scope_key=scope_key)
 
         expected_source_versions = require_expected_source_versions(
@@ -146,15 +151,17 @@ class PendingInvoiceReadModelService:
             actual=actual_source_versions,
         )
         if stale_reasons:
-            refresh_scope_keys = self._refresh_scope_keys_for_source_mismatch(
+            row_refresh_scope_keys = self._refresh_scope_keys_for_source_mismatch(
                 direction=direction,
                 filter_name=filter_name,
                 expected=expected_source_versions,
                 actual=actual_source_versions,
                 payload=payload,
             )
-            for refresh_scope_key in refresh_scope_keys:
-                self.enqueue_refresh(refresh_scope_key, reason="api_source_versions_stale")
+            self._enqueue_refresh_scope_keys(
+                [*statistics_refresh_scope_keys, *row_refresh_scope_keys],
+                reason="api_source_versions_stale",
+            )
             if list(payload.get("rows") or []):
                 result = self.payload_response(payload, read_model_status="refreshing", scope_key=scope_key)
                 result["read_model_stale_reasons"] = list(stale_reasons)
@@ -168,9 +175,13 @@ class PendingInvoiceReadModelService:
                 stale_reasons=stale_reasons,
             )
 
+        self._enqueue_refresh_scope_keys(
+            statistics_refresh_scope_keys,
+            reason="api_statistics_source_versions_stale",
+        )
         return self.payload_response(payload, read_model_status=refresh_status, scope_key=scope_key)
 
-    def _gate_statistics(self, payload: dict[str, Any]) -> None:
+    def _gate_statistics(self, payload: dict[str, Any]) -> list[str]:
         status = str(payload.get("statistics_status") or "stale")
         actual_by_scope = (
             payload.get("statistics_source_versions_by_scope")
@@ -204,14 +215,13 @@ class PendingInvoiceReadModelService:
                 )
         stale_scope_keys = list(dict.fromkeys(stale_scope_keys))
         if status == "fresh" and isinstance(payload.get("statistics"), dict) and not stale_scope_keys:
-            return
+            return []
         payload["statistics"] = None
         payload["statistics_status"] = "refreshing"
         refresh_scope_keys = stale_scope_keys
         if not refresh_scope_keys and status not in {"fresh", "refreshing"}:
             refresh_scope_keys = ["expense:all", "income:all"]
-        for scope_key in refresh_scope_keys:
-            self.enqueue_refresh(scope_key, reason="api_statistics_source_versions_stale")
+        return refresh_scope_keys
 
     def _refresh_scope_keys_for_source_mismatch(
         self,
@@ -554,11 +564,7 @@ class PendingInvoiceReadModelService:
 
     def enqueue_refreshes_for_scope(self, *, direction: str, filter_name: str, reason: str) -> list[str]:
         scope_keys = ["expense:all", "income:all"] if direction == "all" else [self.scope_key(direction=direction, filter_name=filter_name)]
-        return [
-            scope_key
-            for scope_key in scope_keys
-            if self.enqueue_refresh(scope_key, reason=reason)
-        ]
+        return self._enqueue_refresh_scope_keys(scope_keys, reason=reason)
 
     def invalidate_base_scopes(self, reason: str) -> list[str]:
         scope_keys = [
@@ -571,17 +577,29 @@ class PendingInvoiceReadModelService:
             "income:no_invoice_required",
             "income:cash_income",
         ]
-        return [
-            scope_key
-            for scope_key in scope_keys
-            if self.enqueue_refresh(scope_key, reason=reason)
-        ]
+        return self._enqueue_refresh_scope_keys(scope_keys, reason=reason)
 
     def enqueue_refresh(self, scope_key: str, *, reason: str) -> bool:
+        return bool(self._enqueue_refresh_scope_keys([scope_key], reason=reason))
+
+    def _enqueue_refresh_scope_keys(self, scope_keys: list[str], *, reason: str) -> list[str]:
+        normalized_scope_keys = list(
+            dict.fromkeys(
+                str(scope_key or "").strip()
+                for scope_key in list(scope_keys or [])
+                if str(scope_key or "").strip()
+            )
+        )
+        if not normalized_scope_keys:
+            return []
         refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
         if not refresh_gateway.can_enqueue():
-            return False
-        return bool(refresh_gateway.enqueue_one("pending_invoice", scope_key, reason=reason))
+            return []
+        return refresh_gateway.enqueue_many(
+            "pending_invoice",
+            normalized_scope_keys,
+            reason=reason,
+        )
 
     @staticmethod
     def scope_key(*, direction: str, filter_name: str | None = None) -> str:

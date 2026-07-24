@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from fin_ops_platform.services.read_model_freshness import source_version_mismatch_reasons
+from fin_ops_platform.services.read_model_freshness import (
+    require_expected_source_versions,
+    source_version_mismatch_reasons,
+)
 from fin_ops_platform.services.read_model_query_gateway import ReadModelQueryGateway
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
@@ -34,7 +37,11 @@ class TurnoverLedgerQueryService:
         view: str | None = None,
     ) -> dict[str, Any]:
         _ = view
-        expected_source_versions = self._source_versions_provider()
+        expected_source_versions = dict(self._source_versions_provider())
+        expected_source_version_contract = require_expected_source_versions(
+            expected_source_versions,
+            context="turnover_ledger:list_ledger",
+        )
         freshness_view = self._freshness_view()
         if not isinstance(freshness_view, dict):
             return self._non_fresh_payload(
@@ -58,7 +65,7 @@ class TurnoverLedgerQueryService:
         )
         refresh_status = str(freshness_view.get("refresh_status") or "fresh").strip().lower()
         stale_reasons = source_version_mismatch_reasons(
-            expected=expected_source_versions,
+            expected=expected_source_version_contract,
             actual=actual_source_versions,
         )
         if refresh_status != "fresh":

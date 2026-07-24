@@ -276,78 +276,110 @@ class RuntimeQueueRepository:
         trace_id: str | None = None,
         metadata: dict[str, object] | None = None,
     ) -> RuntimeQueueEvent | None:
+        events = self.enqueue_read_model_refreshes_if_inactive(
+            scope_type=scope_type,
+            scope_keys=[scope_key],
+            reason=reason,
+            tenant_id=tenant_id,
+            priority=priority,
+            trace_id=trace_id,
+            metadata=metadata,
+        )
+        return events[0] if events else None
+
+    def enqueue_read_model_refreshes_if_inactive(
+        self,
+        *,
+        scope_type: str,
+        scope_keys: Iterable[str],
+        reason: str,
+        tenant_id: str = "default",
+        priority: str = "normal",
+        trace_id: str | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> list[RuntimeQueueEvent]:
         normalized_tenant_id = str(tenant_id or "default").strip() or "default"
         normalized_scope_type = str(scope_type or "").strip()
-        normalized_scope_key = str(scope_key or "").strip()
-        if not normalized_scope_type or not normalized_scope_key:
-            raise RuntimeQueueDataError("scope_type and scope_key are required for read model refresh.")
+        normalized_scope_keys = list(
+            dict.fromkeys(
+                str(scope_key or "").strip()
+                for scope_key in list(scope_keys or [])
+                if str(scope_key or "").strip()
+            )
+        )
+        if not normalized_scope_type or not normalized_scope_keys:
+            raise RuntimeQueueDataError("scope_type and scope_keys are required for read model refresh.")
         event_type = f"{normalized_scope_type}.read_model.refresh"
-        lock_key = f"{normalized_tenant_id}:{normalized_scope_type}:{normalized_scope_key}"
+        lock_keys = sorted(
+            f"{normalized_tenant_id}:{normalized_scope_type}:{scope_key}"
+            for scope_key in normalized_scope_keys
+        )
+        incoming_metadata = _safe_read_model_refresh_metadata(metadata)
         with self._connection.transaction() as transaction:
             transaction.execute(
-                "select pg_advisory_xact_lock(hashtextextended(%s, 0))",
-                (lock_key,),
-            )
-            active_row = transaction.fetch_one(
                 """
-                select
-                    id::text as event_id,
-                    tenant_id,
-                    event_type,
-                    aggregate_type,
-                    aggregate_id,
-                    scope_type,
-                    scope_key,
-                    dedupe_key,
-                    payload,
-                    attempts,
-                    status,
-                    schema_version,
-                    source_version,
-                    priority,
-                    trace_id
+                select pg_advisory_xact_lock(hashtextextended(lock_key, 0))
+                from unnest(%s::text[]) as locks(lock_key)
+                order by lock_key
+                """,
+                (lock_keys,),
+            )
+            active_rows = transaction.fetch_all(
+                """
+                select distinct on (scope_key)
+                       scope_key, payload
                 from job.outbox_events
                 where tenant_id = %s
                   and event_type = %s
                   and scope_type = %s
-                  and scope_key = %s
+                  and scope_key = any(%s::text[])
                   and status in ('pending', 'processing')
                 order by
+                    scope_key,
                     case status when 'processing' then 0 else 1 end,
                     created_at,
                     id
-                limit 1
                 """,
                 (
                     normalized_tenant_id,
                     event_type,
                     normalized_scope_type,
-                    normalized_scope_key,
+                    normalized_scope_keys,
                 ),
             )
-            if active_row is not None:
-                incoming_metadata = _safe_read_model_refresh_metadata(metadata)
-                active_payload = active_row.get("payload")
+            active_by_scope = {
+                str(row.get("scope_key") or "").strip(): row
+                for row in active_rows
+                if isinstance(row, dict) and str(row.get("scope_key") or "").strip()
+            }
+            refreshes = []
+            for scope_key in normalized_scope_keys:
+                active_payload = active_by_scope.get(scope_key, {}).get("payload")
                 active_metadata = (
                     active_payload.get("metadata")
                     if isinstance(active_payload, dict)
                     and isinstance(active_payload.get("metadata"), dict)
                     else {}
                 )
-                if _refresh_metadata_covers(
+                if scope_key in active_by_scope and _refresh_metadata_covers(
                     active_metadata=active_metadata,
                     incoming_metadata=incoming_metadata,
                 ):
-                    return None
-            return self.enqueue_read_model_refresh_in_transaction(
+                    continue
+                refreshes.append(
+                    {
+                        "scope_type": normalized_scope_type,
+                        "scope_key": scope_key,
+                        "reason": reason,
+                        "metadata": metadata,
+                    }
+                )
+            return self.enqueue_read_model_refreshes_in_transaction(
                 transaction=transaction,
-                scope_type=normalized_scope_type,
-                scope_key=normalized_scope_key,
-                reason=reason,
+                refreshes=refreshes,
                 tenant_id=normalized_tenant_id,
                 priority=priority,
                 trace_id=trace_id,
-                metadata=metadata,
             )
 
     def enqueue_read_model_refreshes_in_transaction(

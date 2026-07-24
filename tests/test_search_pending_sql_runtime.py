@@ -46,6 +46,19 @@ class QueueRecorder:
         self.completed.append((tenant_id, scope_type, scope_key))
 
 
+class AtomicBatchQueueRecorder(QueueRecorder):
+    def __init__(self) -> None:
+        super().__init__()
+        self.refresh_batches: list[dict[str, object]] = []
+
+    def enqueue_read_model_refreshes_if_inactive(
+        self,
+        **kwargs: object,
+    ) -> list[RuntimeQueueEvent]:
+        self.refresh_batches.append(dict(kwargs))
+        return []
+
+
 class _PendingInvoiceRowsTestResponse:
     def __init__(self, *, status_code: HTTPStatus, payload: dict[str, object]) -> None:
         self.status_code = int(status_code)
@@ -588,6 +601,16 @@ class SearchPendingConnection:
                     "source_versions": _pending_invoice_expected_source_versions(),
                 }
             ] if self.pending_scope_exists else []
+        if "/* bank_detail_canonical_source_summaries */" in normalized:
+            return [
+                {
+                    "scope_key": scope_key,
+                    "row_count": 0,
+                    "context_row_count": 0,
+                    "bank_transactions_updated_at": "",
+                }
+                for scope_key in list(params[0] if params else [])
+            ]
         if "from read_model.bank_detail_scopes" in normalized:
             requested_scope = params[1][0] if len(params) > 1 else "2026-05"
             return [
@@ -601,6 +624,8 @@ class SearchPendingConnection:
                     "source_versions": {
                         "bank_detail_signature": "empty-v1",
                         "bank_transaction_category_source_signature": BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE,
+                        "bank_transactions_context_row_count": 0,
+                        "bank_transactions_updated_at": "",
                         "workbench_relation_source_versions": {
                             "source": "workbench_pair_relations",
                             "scope_key": requested_scope,
@@ -2008,6 +2033,8 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             {
                 "bank_detail_signature": "empty-v1",
                 "bank_transaction_category_source_signature": BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE,
+                "bank_transactions_context_row_count": 0,
+                "bank_transactions_updated_at": "",
                 "workbench_relation_source_versions": {
                     "source": "workbench_pair_relations",
                     "scope_key": "2026-05",
@@ -3024,22 +3051,29 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             [("pending_invoice", "expense:all:2026-02", "api_source_versions_stale")],
         )
 
-    def test_pending_invoice_statistics_dependency_mismatch_enqueues_only_changed_month_shard(self) -> None:
+    def test_pending_invoice_statistics_and_rows_mismatch_enqueue_one_atomic_scope_batch(self) -> None:
         current_versions = {
             **_pending_invoice_expected_source_versions(),
             "workbench_relation_source_versions": {
                 "2026-02": {"relation_count": 2, "relation_updated_at": "new"},
-                "2026-03": {"relation_count": 1, "relation_updated_at": "same"},
+                "2026-03": {"relation_count": 2, "relation_updated_at": "new"},
             },
         }
-        stale_expense_versions = {
+        stale_statistics_versions = {
             **current_versions,
             "workbench_relation_source_versions": {
                 "2026-02": {"relation_count": 1, "relation_updated_at": "old"},
-                "2026-03": {"relation_count": 1, "relation_updated_at": "same"},
+                "2026-03": {"relation_count": 2, "relation_updated_at": "new"},
             },
         }
-        queue = QueueRecorder()
+        stale_row_versions = {
+            **current_versions,
+            "workbench_relation_source_versions": {
+                "2026-02": {"relation_count": 2, "relation_updated_at": "new"},
+                "2026-03": {"relation_count": 1, "relation_updated_at": "old"},
+            },
+        }
+        queue = AtomicBatchQueueRecorder()
         service = PendingInvoiceReadModelService(
             repository=type(
                 "PendingRepo",
@@ -3060,10 +3094,10 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                         "summary": {"total_rows": 1},
                         "refresh_status": "fresh",
                         **_pending_invoice_statistics_contract(
-                            expense_versions=stale_expense_versions,
+                            expense_versions=stale_statistics_versions,
                             income_versions=current_versions,
                         ),
-                        "source_versions": current_versions,
+                        "source_versions": stale_row_versions,
                     },
                 },
             )(),
@@ -3073,13 +3107,27 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
 
         payload = service.rows({"direction": ["expense"], "filter": ["all"]})
 
-        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertEqual(payload["statistics_status"], "refreshing")
         self.assertIsNone(payload["statistics"])
         self.assertEqual(
-            queue.refreshes,
-            [("pending_invoice", "expense:all:2026-02", "api_statistics_source_versions_stale")],
+            queue.refresh_batches,
+            [
+                {
+                    "scope_type": "pending_invoice",
+                    "scope_keys": [
+                        "expense:all:2026-02",
+                        "expense:all:2026-03",
+                    ],
+                    "reason": "api_source_versions_stale",
+                    "tenant_id": "default",
+                    "priority": "normal",
+                    "trace_id": None,
+                    "metadata": None,
+                }
+            ],
         )
+        self.assertEqual(queue.refreshes, [])
 
     def test_pending_invoice_in_flight_statistics_with_current_proof_do_not_enqueue_parent_scopes(self) -> None:
         current_versions = _pending_invoice_expected_source_versions()

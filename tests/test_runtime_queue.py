@@ -1531,12 +1531,14 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
     def test_atomic_read_model_enqueue_returns_none_without_mutating_active_scope(self) -> None:
         transaction = FakeTransaction(
             rows=[
-                event_row(
-                    event_type="bank_detail.read_model.refresh",
-                    scope_type="bank_detail",
-                    scope_key="2026-04",
-                    status="processing",
-                )
+                [
+                    event_row(
+                        event_type="bank_detail.read_model.refresh",
+                        scope_type="bank_detail",
+                        scope_key="2026-04",
+                        status="processing",
+                    )
+                ]
             ]
         )
         repository = RuntimeQueueRepository(FakeConnection(transaction))
@@ -1549,7 +1551,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         )
 
         self.assertIsNone(event)
-        self.assertEqual([method for method, _sql, _params in transaction.calls], ["execute", "fetch_one"])
+        self.assertEqual([method for method, _sql, _params in transaction.calls], ["execute", "fetch_all"])
         self.assertIn("pg_advisory_xact_lock", transaction.calls[0][1])
         self.assertNotIn(
             "job.read_model_dirty_scopes",
@@ -1557,33 +1559,87 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         )
         self.assertEqual(transaction.outcomes, ["commit"])
 
+    def test_atomic_batch_enqueue_locks_once_and_writes_only_uncovered_scopes(self) -> None:
+        transaction = FakeTransaction(
+            rows=[
+                [
+                    event_row(
+                        event_type="pending_invoice.read_model.refresh",
+                        scope_type="pending_invoice",
+                        scope_key="expense:all:2026-02",
+                        status="processing",
+                        payload={},
+                    )
+                ],
+                [
+                    event_row(
+                        event_id="event-2",
+                        event_type="pending_invoice.read_model.refresh",
+                        aggregate_type="read_model",
+                        aggregate_id="expense:all:2026-03",
+                        scope_type="pending_invoice",
+                        scope_key="expense:all:2026-03",
+                        dedupe_key=(
+                            "pending_invoice.read_model.refresh:"
+                            "pending_invoice:expense:all:2026-03"
+                        ),
+                        source_version=8,
+                    )
+                ],
+            ]
+        )
+        connection = FakeConnection(transaction)
+        repository = RuntimeQueueRepository(connection)
+
+        events = repository.enqueue_read_model_refreshes_if_inactive(
+            scope_type="pending_invoice",
+            scope_keys=["expense:all:2026-02", "expense:all:2026-03"],
+            reason="api_source_versions_stale",
+        )
+
+        self.assertEqual([event.event_id for event in events], ["event-2"])
+        self.assertEqual(connection.transaction_open_count, 1)
+        self.assertEqual(
+            [method for method, _sql, _params in transaction.calls],
+            ["execute", "fetch_all", "fetch_all"],
+        )
+        self.assertIn("pg_advisory_xact_lock", transaction.calls[0][1])
+        self.assertIn("scope_key = any", " ".join(transaction.calls[1][1].lower().split()))
+        batch_params = transaction.calls[2][2]
+        self.assertNotIn("expense:all:2026-02", batch_params)
+        self.assertIn("expense:all:2026-03", batch_params)
+        self.assertEqual(transaction.outcomes, ["commit"])
+
     def test_atomic_read_model_enqueue_merges_new_relation_delta_into_active_scope(self) -> None:
         transaction = FakeTransaction(
             rows=[
-                event_row(
-                    event_type="turnover_ledger.read_model.refresh",
-                    scope_type="turnover_ledger",
-                    scope_key="2026-04",
-                    status="processing",
-                    payload={
-                        "metadata": {
-                            "row_ids": ["bank-1"],
-                            "relation_deltas": {
-                                "case-1": {"status": "active", "row_ids": ["bank-1"]}
+                [
+                    event_row(
+                        event_type="turnover_ledger.read_model.refresh",
+                        scope_type="turnover_ledger",
+                        scope_key="2026-04",
+                        status="processing",
+                        payload={
+                            "metadata": {
+                                "row_ids": ["bank-1"],
+                                "relation_deltas": {
+                                    "case-1": {"status": "active", "row_ids": ["bank-1"]}
+                                },
                             },
                         }
-                    },
-                ),
-                {"source_version": 9},
-                event_row(
-                    event_type="turnover_ledger.read_model.refresh",
-                    aggregate_type="read_model",
-                    aggregate_id="2026-04",
-                    scope_type="turnover_ledger",
-                    scope_key="2026-04",
-                    dedupe_key="turnover_ledger.read_model.refresh:turnover_ledger:2026-04",
-                    source_version=9,
-                ),
+                    )
+                ],
+                [
+                    event_row(
+                        event_type="turnover_ledger.read_model.refresh",
+                        aggregate_type="read_model",
+                        aggregate_id="2026-04",
+                        scope_type="turnover_ledger",
+                        scope_key="2026-04",
+                        dedupe_key="turnover_ledger.read_model.refresh:turnover_ledger:2026-04",
+                        source_version=9,
+                    )
+                ],
             ]
         )
         repository = RuntimeQueueRepository(FakeConnection(transaction))
@@ -1603,7 +1659,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIsNotNone(event)
         self.assertEqual(
             [method for method, _sql, _params in transaction.calls],
-            ["execute", "fetch_one", "fetch_one", "fetch_one"],
+            ["execute", "fetch_all", "fetch_all"],
         )
 
     def test_atomic_read_model_enqueue_keeps_identical_relation_delta_coalesced(self) -> None:
@@ -1615,13 +1671,15 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         }
         transaction = FakeTransaction(
             rows=[
-                event_row(
-                    event_type="turnover_ledger.read_model.refresh",
-                    scope_type="turnover_ledger",
-                    scope_key="2026-04",
-                    status="processing",
-                    payload={"metadata": metadata},
-                )
+                [
+                    event_row(
+                        event_type="turnover_ledger.read_model.refresh",
+                        scope_type="turnover_ledger",
+                        scope_key="2026-04",
+                        status="processing",
+                        payload={"metadata": metadata},
+                    )
+                ]
             ]
         )
         repository = RuntimeQueueRepository(FakeConnection(transaction))
@@ -1634,36 +1692,39 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         )
 
         self.assertIsNone(event)
-        self.assertEqual([method for method, _sql, _params in transaction.calls], ["execute", "fetch_one"])
+        self.assertEqual([method for method, _sql, _params in transaction.calls], ["execute", "fetch_all"])
 
     def test_atomic_read_model_enqueue_does_not_let_partial_event_cover_full_refresh(self) -> None:
         transaction = FakeTransaction(
             rows=[
-                event_row(
-                    event_type="turnover_ledger.read_model.refresh",
-                    scope_type="turnover_ledger",
-                    scope_key="2026-04",
-                    status="processing",
-                    payload={
-                        "metadata": {
-                            "row_ids": ["bank-1"],
-                            "case_ids": ["case-1"],
-                            "relation_deltas": {
-                                "case-1": {"status": "active", "row_ids": ["bank-1"]}
+                [
+                    event_row(
+                        event_type="turnover_ledger.read_model.refresh",
+                        scope_type="turnover_ledger",
+                        scope_key="2026-04",
+                        status="processing",
+                        payload={
+                            "metadata": {
+                                "row_ids": ["bank-1"],
+                                "case_ids": ["case-1"],
+                                "relation_deltas": {
+                                    "case-1": {"status": "active", "row_ids": ["bank-1"]}
+                                },
                             },
                         }
-                    },
-                ),
-                {"source_version": 9},
-                event_row(
-                    event_type="turnover_ledger.read_model.refresh",
-                    aggregate_type="read_model",
-                    aggregate_id="2026-04",
-                    scope_type="turnover_ledger",
-                    scope_key="2026-04",
-                    dedupe_key="turnover_ledger.read_model.refresh:turnover_ledger:2026-04",
-                    source_version=9,
-                ),
+                    )
+                ],
+                [
+                    event_row(
+                        event_type="turnover_ledger.read_model.refresh",
+                        aggregate_type="read_model",
+                        aggregate_id="2026-04",
+                        scope_type="turnover_ledger",
+                        scope_key="2026-04",
+                        dedupe_key="turnover_ledger.read_model.refresh:turnover_ledger:2026-04",
+                        source_version=9,
+                    )
+                ],
             ]
         )
         repository = RuntimeQueueRepository(FakeConnection(transaction))
@@ -1677,7 +1738,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIsNotNone(event)
         self.assertEqual(
             [method for method, _sql, _params in transaction.calls],
-            ["execute", "fetch_one", "fetch_one", "fetch_one"],
+            ["execute", "fetch_all", "fetch_all"],
         )
 
     def test_atomic_read_model_enqueue_full_covers_partial_but_not_force(self) -> None:
@@ -1688,7 +1749,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             status="pending",
             payload={},
         )
-        partial_transaction = FakeTransaction(rows=[full_active])
+        partial_transaction = FakeTransaction(rows=[[full_active]])
         partial_repository = RuntimeQueueRepository(FakeConnection(partial_transaction))
 
         partial_event = partial_repository.enqueue_read_model_refresh_if_inactive(
@@ -1707,22 +1768,23 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIsNone(partial_event)
         self.assertEqual(
             [method for method, _sql, _params in partial_transaction.calls],
-            ["execute", "fetch_one"],
+            ["execute", "fetch_all"],
         )
 
         force_transaction = FakeTransaction(
             rows=[
-                full_active,
-                {"source_version": 10},
-                event_row(
-                    event_type="turnover_ledger.read_model.refresh",
-                    aggregate_type="read_model",
-                    aggregate_id="2026-04",
-                    scope_type="turnover_ledger",
-                    scope_key="2026-04",
-                    dedupe_key="turnover_ledger.read_model.refresh:turnover_ledger:2026-04",
-                    source_version=10,
-                ),
+                [full_active],
+                [
+                    event_row(
+                        event_type="turnover_ledger.read_model.refresh",
+                        aggregate_type="read_model",
+                        aggregate_id="2026-04",
+                        scope_type="turnover_ledger",
+                        scope_key="2026-04",
+                        dedupe_key="turnover_ledger.read_model.refresh:turnover_ledger:2026-04",
+                        source_version=10,
+                    )
+                ],
             ]
         )
         force_repository = RuntimeQueueRepository(FakeConnection(force_transaction))
@@ -1737,23 +1799,24 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIsNotNone(force_event)
         self.assertEqual(
             [method for method, _sql, _params in force_transaction.calls],
-            ["execute", "fetch_one", "fetch_one", "fetch_one"],
+            ["execute", "fetch_all", "fetch_all"],
         )
 
     def test_atomic_read_model_enqueue_creates_event_when_scope_is_inactive(self) -> None:
         transaction = FakeTransaction(
             rows=[
-                None,
-                {"source_version": 8},
-                event_row(
-                    event_type="bank_detail.read_model.refresh",
-                    aggregate_type="read_model",
-                    aggregate_id="2026-04",
-                    scope_type="bank_detail",
-                    scope_key="2026-04",
-                    dedupe_key="bank_detail.read_model.refresh:bank_detail:2026-04",
-                    source_version=8,
-                ),
+                [],
+                [
+                    event_row(
+                        event_type="bank_detail.read_model.refresh",
+                        aggregate_type="read_model",
+                        aggregate_id="2026-04",
+                        scope_type="bank_detail",
+                        scope_key="2026-04",
+                        dedupe_key="bank_detail.read_model.refresh:bank_detail:2026-04",
+                        source_version=8,
+                    )
+                ],
             ]
         )
         repository = RuntimeQueueRepository(FakeConnection(transaction))
@@ -1769,7 +1832,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertEqual(event.source_version, 8)
         self.assertEqual(
             [method for method, _sql, _params in transaction.calls],
-            ["execute", "fetch_one", "fetch_one", "fetch_one"],
+            ["execute", "fetch_all", "fetch_all"],
         )
         self.assertEqual(transaction.outcomes, ["commit"])
 

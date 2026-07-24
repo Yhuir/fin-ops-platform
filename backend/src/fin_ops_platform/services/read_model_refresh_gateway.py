@@ -58,12 +58,33 @@ class ReadModelRefreshGateway:
             normalized_scope_type,
             scope_keys,
         )
+        if not normalized_scope_keys:
+            return []
         enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
         enqueue_if_inactive = getattr(
             self._queue_repository,
             "enqueue_read_model_refresh_if_inactive",
             None,
         )
+        enqueue_many_if_inactive = getattr(
+            self._queue_repository,
+            "enqueue_read_model_refreshes_if_inactive",
+            None,
+        )
+        if callable(enqueue_many_if_inactive) and self._reason_uses_active_coalescing(
+            reason=reason,
+            metadata=metadata,
+        ):
+            enqueue_many_if_inactive(
+                scope_type=normalized_scope_type,
+                scope_keys=normalized_scope_keys,
+                reason=reason,
+                tenant_id=tenant_id,
+                priority=priority,
+                trace_id=trace_id,
+                metadata=metadata,
+            )
+            return normalized_scope_keys
         for scope_key in normalized_scope_keys:
             if callable(enqueue):
                 enqueue_kwargs = self._enqueue_kwargs(
@@ -108,6 +129,8 @@ class ReadModelRefreshGateway:
             normalized_scope_type,
             scope_keys,
         )
+        if not normalized_scope_keys:
+            return []
         enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
         if not callable(enqueue):
             return []
@@ -116,6 +139,27 @@ class ReadModelRefreshGateway:
             "enqueue_read_model_refresh_if_inactive",
             None,
         )
+        enqueue_many_if_inactive = getattr(
+            self._queue_repository,
+            "enqueue_read_model_refreshes_if_inactive",
+            None,
+        )
+        if callable(enqueue_many_if_inactive) and self._reason_uses_active_coalescing(
+            reason=reason,
+            metadata=metadata,
+        ):
+            return list(
+                enqueue_many_if_inactive(
+                    scope_type=normalized_scope_type,
+                    scope_keys=normalized_scope_keys,
+                    reason=reason,
+                    tenant_id=tenant_id,
+                    priority=priority,
+                    trace_id=trace_id,
+                    metadata=metadata,
+                )
+                or []
+            )
         events: list[Any] = []
         for scope_key in normalized_scope_keys:
             enqueue_kwargs = self._enqueue_kwargs(

@@ -433,6 +433,51 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         )
         self.assertNotEqual(after_done.event_id, first.event_id)
 
+    def test_atomic_batch_read_model_enqueue_only_creates_uncovered_exact_scopes(self) -> None:
+        initial = self.runtime_queue.enqueue_read_model_refreshes_if_inactive(
+            scope_type="pending_invoice",
+            scope_keys=["expense:all:2026-02", "expense:all:2026-03"],
+            reason="api_source_versions_stale",
+        )
+
+        self.assertEqual(
+            [event.scope_key for event in initial],
+            ["expense:all:2026-02", "expense:all:2026-03"],
+        )
+        self.assertEqual(
+            self.runtime_queue.enqueue_read_model_refreshes_if_inactive(
+                scope_type="pending_invoice",
+                scope_keys=["expense:all:2026-02", "expense:all:2026-03"],
+                reason="api_source_versions_stale",
+            ),
+            [],
+        )
+
+        mixed = self.runtime_queue.enqueue_read_model_refreshes_if_inactive(
+            scope_type="pending_invoice",
+            scope_keys=["expense:all:2026-02", "expense:all:2026-04"],
+            reason="api_source_versions_stale",
+        )
+
+        self.assertEqual([event.scope_key for event in mixed], ["expense:all:2026-04"])
+        counts = self.connection.fetch_one(
+            """
+            select
+                count(*) filter (where status in ('pending', 'processing'))::integer
+                    as active_event_count,
+                (
+                    select count(*)::integer
+                    from job.read_model_dirty_scopes
+                    where scope_type = 'pending_invoice'
+                      and status in ('pending', 'processing')
+                ) as active_dirty_count
+            from job.outbox_events
+            where event_type = 'pending_invoice.read_model.refresh'
+            """
+        )
+        self.assertEqual(counts["active_event_count"], 3)
+        self.assertEqual(counts["active_dirty_count"], 3)
+
     def test_runtime_queue_claim_next_sets_processing_lock_and_attempts(self) -> None:
         event = self.runtime_queue.enqueue(event_type="runtime.integration.claim", payload={"claim": True})
 

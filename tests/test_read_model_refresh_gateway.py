@@ -46,6 +46,19 @@ class AtomicQueueRecorder(EventAwareQueueRecorder):
         return self.event
 
 
+class BulkAtomicQueueRecorder(AtomicQueueRecorder):
+    def __init__(self) -> None:
+        super().__init__(event=None)
+        self.atomic_refresh_batches: list[dict[str, object]] = []
+
+    def enqueue_read_model_refreshes_if_inactive(self, **kwargs: object) -> list[object]:
+        self.atomic_refresh_batches.append(dict(kwargs))
+        return [
+            SimpleNamespace(event_id=f"event-{index + 1}")
+            for index, _scope_key in enumerate(kwargs["scope_keys"])
+        ]
+
+
 class ReadModelRefreshGatewayTests(unittest.TestCase):
     def test_cost_statistics_policy_normalizes_validates_and_dedupes_legacy_scopes(self) -> None:
         from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
@@ -473,6 +486,36 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
         )
         self.assertEqual(queue.active_event_checks, [])
         self.assertEqual(queue.active_checks, [])
+        self.assertEqual(queue.refreshes, [])
+
+    def test_api_refresh_batches_exact_scopes_in_one_atomic_repository_call(self) -> None:
+        from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
+
+        queue = BulkAtomicQueueRecorder()
+        gateway = ReadModelRefreshGateway(queue_repository=queue)
+
+        events = gateway.enqueue_many_events(
+            "pending_invoice",
+            ["expense:all:2026-02", "expense:all:2026-03"],
+            reason="api_source_versions_stale",
+        )
+
+        self.assertEqual([event.event_id for event in events], ["event-1", "event-2"])
+        self.assertEqual(
+            queue.atomic_refresh_batches,
+            [
+                {
+                    "scope_type": "pending_invoice",
+                    "scope_keys": ["expense:all:2026-02", "expense:all:2026-03"],
+                    "reason": "api_source_versions_stale",
+                    "tenant_id": "default",
+                    "priority": "normal",
+                    "trace_id": None,
+                    "metadata": None,
+                }
+            ],
+        )
+        self.assertEqual(queue.atomic_refreshes, [])
         self.assertEqual(queue.refreshes, [])
 
     def test_atomic_active_scope_returns_no_duplicate_event(self) -> None:
