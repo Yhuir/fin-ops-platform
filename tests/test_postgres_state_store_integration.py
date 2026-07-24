@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from fin_ops_platform.postgres import migrate
 from fin_ops_platform.services.etc_reconciliation_models import SourceFileKind
@@ -18,7 +19,11 @@ from fin_ops_platform.services.etc_service import (
     EtcInvoiceStatus,
     EtcService,
 )
-from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.postgres_connection import (
+    PostgresConnection,
+    PostgresSettings,
+    PostgresTransaction,
+)
 from fin_ops_platform.services.postgres_repositories.bank_transaction_category import (
     PostgresBankTransactionCategoryRepository,
 )
@@ -246,6 +251,139 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
                 page_size=50,
                 detail_level="summary",
             )
+        )
+
+    def test_workbench_generation_copy_persists_typed_rows_before_activation(self) -> None:
+        self.store.save_workbench_read_models(
+            {
+                "read_models": {
+                    "2026-05": {
+                        "scope_key": "2026-05",
+                        "generated_at": datetime.now(UTC).isoformat(),
+                        "payload": {
+                            "month": "2026-05",
+                            "paired": {"groups": []},
+                            "unpaired": {
+                                "groups": [
+                                    {
+                                        "group_id": "unpaired:bank-copy-1",
+                                        "bank_rows": [
+                                            {
+                                                "id": "bank-copy-1",
+                                                "type": "bank",
+                                                "source_kind": "bank",
+                                                "trade_time": "2026-05-08",
+                                                "amount": "10.50",
+                                            }
+                                        ],
+                                    }
+                                ]
+                            },
+                        },
+                        "source_versions": {"source_version": 9},
+                    }
+                }
+            },
+            changed_scope_keys={"2026-05"},
+        )
+
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                """
+                select concat(
+                    count(*) filter (where generation.status = 'active'), ':',
+                    count(distinct rows.row_id), ':',
+                    count(distinct groups.group_id), ':',
+                    count(distinct group_rows.row_id)
+                )
+                from read_model.workbench_generations generation
+                left join read_model.workbench_rows rows
+                  on rows.generation_id = generation.generation_id
+                 and rows.scope_key = generation.scope_key
+                left join read_model.workbench_groups groups
+                  on groups.generation_id = generation.generation_id
+                 and groups.scope_key = generation.scope_key
+                left join read_model.workbench_group_rows group_rows
+                  on group_rows.generation_id = generation.generation_id
+                 and group_rows.scope_key = generation.scope_key
+                where generation.scope_key = '2026-05'
+                """,
+            ),
+            "1:1:1:1",
+        )
+
+    def test_workbench_generation_copy_failure_rolls_back_before_activation(self) -> None:
+        copy_calls = 0
+        original_copy_rows = PostgresTransaction.copy_rows
+
+        def fail_second_copy(
+            transaction: PostgresTransaction,
+            sql: str,
+            params_seq: list[tuple],
+        ) -> int:
+            nonlocal copy_calls
+            copy_calls += 1
+            if copy_calls == 2:
+                raise RuntimeError("injected COPY failure")
+            return original_copy_rows(transaction, sql, params_seq)
+
+        with (
+            patch.object(PostgresTransaction, "copy_rows", fail_second_copy),
+            self.assertRaisesRegex(RuntimeError, "injected COPY failure"),
+        ):
+            self.store.save_workbench_read_models(
+                {
+                    "read_models": {
+                        "2026-05": {
+                            "scope_key": "2026-05",
+                            "generated_at": datetime.now(UTC).isoformat(),
+                            "payload": {
+                                "month": "2026-05",
+                                "paired": {"groups": []},
+                                "unpaired": {
+                                    "groups": [
+                                        {
+                                            "group_id": "unpaired:bank-copy-rollback",
+                                            "bank_rows": [
+                                                {
+                                                    "id": "bank-copy-rollback",
+                                                    "type": "bank",
+                                                    "source_kind": "bank",
+                                                    "trade_time": "2026-05-08",
+                                                    "amount": "10.50",
+                                                }
+                                            ],
+                                        }
+                                    ]
+                                },
+                            },
+                            "source_versions": {"source_version": 9},
+                        }
+                    }
+                },
+                changed_scope_keys={"2026-05"},
+            )
+
+        self.assertEqual(copy_calls, 2)
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                """
+                select concat(
+                    count(*) filter (where status = 'active'), ':',
+                    count(*) filter (where status = 'failed'), ':',
+                    (select count(*) from read_model.workbench_rows where scope_key = '2026-05'), ':',
+                    (select count(*) from read_model.workbench_groups where scope_key = '2026-05'), ':',
+                    (select count(*) from read_model.workbench_group_rows where scope_key = '2026-05'), ':',
+                    (select count(*) from read_model.workbench_snapshots where scope_key = '2026-05'), ':',
+                    (select count(*) from read_model.workbench_summary where scope_key = '2026-05')
+                )
+                from read_model.workbench_generations
+                where scope_key = '2026-05'
+                """,
+            ),
+            "0:1:0:0:0:0:0",
         )
 
     def test_workbench_generation_accepts_explicitly_incomplete_active_relation_only(self) -> None:

@@ -68,7 +68,7 @@
 
 ## Read model 与 worker
 
-- `workbench` 使用 active-generation scoped publish；月分片发布必须原子。
+- `workbench` 使用 active-generation scoped publish；月分片发布必须原子。`workbench_rows`、`workbench_groups`、`workbench_group_rows` 三个已测量的大批量 generation 表通过 psycopg `COPY FROM STDIN` 写入，snapshot/summary/stats/active 切换仍复用原事务和既有表；COPY失败整体回滚，禁止引入第二 writer、staging 表或异步发布层。
 - `month=all` 查询组合 active 月分片，并在分页前做唯一 canonical owner 仲裁。
 - 月 generation 原子发布事务同时更新 `read_model.workbench_generation_stats(scope_key='all')`；该统计只组合 active month shards，明确排除历史 materialized `scope_key='all'` generation，并复用既有表，不新增全局 generation、worker、queue、缓存或共享 read model。默认 `/api/workbench/groups` 只接受与当前 active-month generation-set digest 精确一致的统计；统计缺失或查询期间 generation-set 切换时 fail closed，由现有 facade 返回 `202 refreshing` 并通过 `ReadModelRefreshGateway` 重建。
 - 默认 `month=all` combined initial 在同一个 repeatable-read 事务中只读取一次 active generation/source/freshness context，复用 canonical summary 的 zone counts，并批量读取 paired/unpaired 两区各 50 组首页与可见成员；包括事务设置在内最多 10 条数据库语句。active generation-set digest 必须先按 `(scope_key, generation_id)` 规范排序，不能依赖不同 SQL 调用方的升序或降序；首屏 SQL/Redis payload 的 `read_model_version` 必须与请求开始时 freshness gate 的 active generation-set version 完全一致。不一致时返回 `202 refreshing`、入队现有 Workbench refresh，且不得缓存或返回旧 groups。initial cache schema 必须在此合同变更时独立升级以淘汰旧 payload。带搜索、筛选或排序的首屏同样固定 50 组并走既有窄 `/groups` 查询；后续分页保持 `expected_read_model_version` 绑定，不复制筛选 SQL或忽略查询条件。

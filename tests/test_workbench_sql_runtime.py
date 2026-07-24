@@ -1163,6 +1163,17 @@ class WorkbenchWriteConnection:
         return 1
 
 
+class CopyWorkbenchWriteConnection(WorkbenchWriteConnection):
+    def __init__(self) -> None:
+        super().__init__()
+        self.copy_calls: list[tuple[str, list[tuple]]] = []
+
+    def copy_rows(self, sql: str, params_seq: list[tuple]) -> int:
+        rows = list(params_seq)
+        self.copy_calls.append((" ".join(sql.lower().split()), rows))
+        return len(rows)
+
+
 def all_scope_group_row_ids(connection: WorkbenchWriteConnection, group_id: str, pane: str) -> list[str]:
     return [
         str(params[4])
@@ -4495,6 +4506,60 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertNotIn("on conflict (generation_id, scope_key, zone, group_id)", sql)
         self.assertNotIn("on conflict (generation_id, scope_key, zone, group_id, pane, row_role, row_id)", sql)
         self.assertIn("status = 'active'", sql)
+
+    def test_repository_copies_workbench_generation_rows_before_atomic_activation(self) -> None:
+        connection = CopyWorkbenchWriteConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_workbench_read_models(
+            {
+                "read_models": {
+                    "2026-05": {
+                        "scope_key": "2026-05",
+                        "generated_at": "2026-07-24T10:00:00+00:00",
+                        "payload": {
+                            "month": "2026-05",
+                            "paired": {"groups": []},
+                            "unpaired": {
+                                "groups": [
+                                    {
+                                        "group_id": "unpaired:bank-1",
+                                        "bank_rows": [
+                                            {
+                                                "id": "bank-1",
+                                                "type": "bank",
+                                                "source_kind": "bank",
+                                                "amount": "10.00",
+                                            }
+                                        ],
+                                    }
+                                ]
+                            },
+                        },
+                        "source_versions": {"source_version": 6},
+                    }
+                }
+            },
+            changed_scope_keys={"2026-05"},
+        )
+
+        self.assertEqual(
+            [
+                sql.split("(", 1)[0].strip()
+                for sql, _rows in connection.copy_calls
+            ],
+            [
+                "copy read_model.workbench_rows",
+                "copy read_model.workbench_groups",
+                "copy read_model.workbench_group_rows",
+            ],
+        )
+        self.assertTrue(all(rows for _sql, rows in connection.copy_calls))
+        executed_sql = "\n".join(sql for sql, _params in connection.executed)
+        self.assertNotIn("insert into read_model.workbench_rows(", executed_sql)
+        self.assertNotIn("insert into read_model.workbench_groups(", executed_sql)
+        self.assertNotIn("insert into read_model.workbench_group_rows(", executed_sql)
+        self.assertIn("status = 'active'", executed_sql)
 
     def test_repository_publishes_one_exact_all_scope_stats_set_after_month_generations_activate(self) -> None:
         class CanonicalStatsWriteConnection(WorkbenchWriteConnection):

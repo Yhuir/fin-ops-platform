@@ -4,7 +4,7 @@ import re
 from collections import defaultdict
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Callable
 
 from fin_ops_platform.services.cost_statistics_bank_accounts import (
     bank_accounts_from_settings_payload,
@@ -22,6 +22,11 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
     is_completed_workflow_status,
 )
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
+from fin_ops_platform.services.read_model_freshness import (
+    require_expected_source_versions,
+    source_version_mismatch_reasons,
+)
+from fin_ops_platform.services.workbench_sql_projection import WorkbenchSqlProjectionBuilder
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 PROJECT_SCOPES = {"active", "all"}
@@ -41,12 +46,20 @@ class CostStatisticsSqlProjectionBuilder:
         connection: Any,
         read_model_repository: Any | None = None,
         bank_transaction_tag_read_facade: Any | None = None,
+        workbench_dependency_versions_provider: Callable[
+            [str], tuple[dict[str, object], dict[str, object]]
+        ]
+        | None = None,
     ) -> None:
         self._connection = connection
         self._read_model_repository = CostStatisticsReadModelRepositoryPort(
             read_model_repository or PostgresReadModelRepository(connection)
         )
         self._bank_transaction_tag_read_facade = bank_transaction_tag_read_facade
+        self._workbench_dependency_versions_provider = (
+            workbench_dependency_versions_provider
+            or self._current_workbench_dependency_versions
+        )
         self._settings_payload_cache: dict[str, Any] | None = None
 
     def list_cost_statistics_scope_shards(self, scope_key: str) -> list[str]:
@@ -105,6 +118,7 @@ class CostStatisticsSqlProjectionBuilder:
             project_scope, month = _parse_cost_scope_key(scope_key)
             if month == "all":
                 raise ValueError("month scope rebuild requires a concrete YYYY-MM scope.")
+            self._require_fresh_workbench_dependency(month)
             workbench_groups = self._cost_groups_from_workbench(month)
             bank_detail_payload = self._bank_detail_snapshot_payload(
                 month,
@@ -140,6 +154,30 @@ class CostStatisticsSqlProjectionBuilder:
             )
         finally:
             self._settings_payload_cache = None
+
+    def _current_workbench_dependency_versions(
+        self,
+        scope_key: str,
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        expected = WorkbenchSqlProjectionBuilder(
+            connection=self._connection
+        ).source_versions_for_scope(scope_key)
+        actual = self._read_model_repository.active_workbench_source_versions(
+            scope_key=scope_key
+        )
+        return expected, actual
+
+    def _require_fresh_workbench_dependency(self, scope_key: str) -> None:
+        expected, actual = self._workbench_dependency_versions_provider(scope_key)
+        expected = require_expected_source_versions(
+            expected,
+            context=f"cost_statistics_workbench_dependency:{scope_key}",
+        )
+        if source_version_mismatch_reasons(expected=expected, actual=actual):
+            raise RuntimeError(
+                "workbench_read_model_not_fresh: "
+                f"operation=cost_statistics_month_projection status=stale scope_keys={scope_key}"
+            )
 
     def rebuild_cost_statistics_parent_scope(
         self,

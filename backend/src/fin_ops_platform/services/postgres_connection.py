@@ -326,6 +326,19 @@ class PostgresTransaction:
                 affected += int(cursor.rowcount or 0)
         return affected
 
+    def copy_rows(self, sql: str, params_seq: list[tuple[Any, ...]]) -> int:
+        if not params_seq:
+            return 0
+        with self._connection.cursor() as cursor:
+            started_at = monotonic()
+            try:
+                with cursor.copy(sql) as copy:
+                    for row in params_seq:
+                        copy.write_row(row)
+            finally:
+                record_database_query((monotonic() - started_at) * 1000)
+        return len(params_seq)
+
 
 def _split_insert_values_sql(sql: str) -> tuple[str, str, str] | None:
     raw_sql = str(sql or "")

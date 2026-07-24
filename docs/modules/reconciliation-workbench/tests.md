@@ -2,6 +2,12 @@
 
 日期：2026-07-22
 
+## 2026-07-24 Workbench generation 批量发布回归
+
+- `tests/test_workbench_sql_runtime.py` 证明 rows、groups、group_rows 三张热点 generation 表使用同一事务内 PostgreSQL `COPY`，旧多值 `INSERT` 不再承担这三段写入，activation 仍在全部数据成功后执行。
+- `tests/test_postgres_connection.py` 覆盖 `copy_rows(...)` 的 cursor 生命周期、typed row 传递与计时边界；`tests/test_postgres_state_store_integration.py` 在 disposable PostgreSQL 证明 JSONB、数组、日期、numeric 行真实落库后才激活 generation，并证明任一 COPY 中途失败会回滚全部 payload、保留一条既有 `failed` 诊断且绝不留下 active 状态。
+- 没有新增第二 writer、staging 表、缓存或 worker；不支持 `COPY` 的测试连接保留既有批量写 fallback，生产 psycopg 只走原生 COPY。
+
 ## 2026-07-22 Turnover 人工闭环冻结要求分区回归
 
 - Business core：`turnover_manual_closure` active relation 只拥有同组关系，不无条件代表完成；OA/发票四种冻结 requirement 组合按 OR 聚合，未知、空或缺失 snapshot fail closed。要求 OA 的 bank-only case 保持完整 unpaired，补齐要求后才以同 case paired；`batch_accounting` 与 ETC 显式完成合同保持隔离。

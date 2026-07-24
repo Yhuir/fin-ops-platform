@@ -33,11 +33,31 @@ class FakeCursor:
         self.connection.executemany_calls.append((" ".join(sql.lower().split()), rows))
         self.rowcount = len(rows)
 
+    def copy(self, sql: str) -> "FakeCopy":
+        return FakeCopy(self.connection, " ".join(sql.lower().split()))
+
+
+class FakeCopy:
+    def __init__(self, connection: "FakeRawConnection", sql: str) -> None:
+        self.connection = connection
+        self.sql = sql
+        self.rows: list[tuple] = []
+
+    def __enter__(self) -> "FakeCopy":
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.connection.copy_calls.append((self.sql, self.rows))
+
+    def write_row(self, row: tuple) -> None:
+        self.rows.append(row)
+
 
 class FakeRawConnection:
     def __init__(self) -> None:
         self.executed: list[tuple[str, tuple]] = []
         self.executemany_calls: list[tuple[str, list[tuple]]] = []
+        self.copy_calls: list[tuple[str, list[tuple]]] = []
 
     def cursor(self) -> FakeCursor:
         return FakeCursor(self)
@@ -128,6 +148,30 @@ class PostgresConnectionTests(unittest.TestCase):
         self.assertEqual(affected, 2)
         self.assertEqual(connection.executed, [])
         self.assertEqual(len(connection.executemany_calls), 1)
+
+    def test_copy_rows_streams_rows_through_one_copy_statement(self) -> None:
+        connection = FakeRawConnection()
+        transaction = PostgresTransaction(connection)
+        rows = [
+            ("gen-1", "row-1", "2026-07-24T10:00:00+00:00"),
+            ("gen-1", "row-2", "2026-07-24T10:00:00+00:00"),
+        ]
+
+        affected = transaction.copy_rows(
+            "copy read_model.workbench_rows(generation_id, row_id, generated_at) from stdin",
+            rows,
+        )
+
+        self.assertEqual(affected, 2)
+        self.assertEqual(
+            connection.copy_calls,
+            [
+                (
+                    "copy read_model.workbench_rows(generation_id, row_id, generated_at) from stdin",
+                    rows,
+                )
+            ],
+        )
 
 
 if __name__ == "__main__":

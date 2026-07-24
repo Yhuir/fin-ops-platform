@@ -1,5 +1,5 @@
 ---
-status: local_candidate_verified
+status: performance_fix_local_verified
 trigger: "Access-triggered read model candidate emitted zero write fan-out but production still showed cost bank-tag blocked for 121s, Workbench visible after 6.13s, and unrelated input-invoice-usage visible after 37.7s."
 created: 2026-07-24
 updated: 2026-07-24
@@ -17,11 +17,11 @@ updated: 2026-07-24
 
 ## Current Focus
 
-- hypothesis: the first `0aaea2df` production candidate exposed two shared access-path defects, not a need to restore write fan-out: Bank Detail lacked a canonical bank-fact proof and Pending Invoice opened one transaction/query sequence per stale month.
-- test: deterministic Bank/queue/Pending/shared-gateway tests, migration guards, lint/docs and disposable PostgreSQL canonical-freshness + atomic-batch tests pass.
-- expecting: a canonical bank row/context change makes only the exact Bank Detail month non-fresh; one Pending request unions row/statistics stale scopes and creates at most one task per scope through one transaction.
-- next_action: emit one corrected candidate commit/push/deploy and rerun the approved reversible production fixture plus per-page SLO/Audit/drain proof.
-- reasoning_checkpoint: production read-only Workbench samples show recent exact-scope handlers around 1.45–2.07s and warm GETs 0.28–1.00s; the observed 6.13s coincided with erroneous repeated Cost/probe load and is not evidence for a speculative Workbench rewrite.
+- hypothesis: after the Bank/Pending repair reached production, the remaining SLO misses came from two measured shared roots: Cost access enqueued Workbench before Cost and therefore required a second GET, while Workbench persisted three generation tables through large multi-values INSERT statements.
+- test: one Cost access now ensures exact Workbench and matching Cost children; Cost workers fail closed/defer before payload I/O until Workbench versions match; the existing atomic Workbench generation transaction uses PostgreSQL COPY for only the three measured hot tables.
+- expecting: no write fan-out returns; first Cost access converges without a second request, and Workbench generation write tail is materially shorter without a second writer or staging architecture.
+- next_action: close docs/diff gates, commit/push/deploy one candidate, then rerun the approved reversible production fixture plus every affected page SLO/Audit/drain proof.
+- reasoning_checkpoint: production fresh reads were at most 2.32s, while cold Workbench was 5.15s, Turnover 4.25s, Cost all about 7.66s and one Cost project/all access exceeded 120s; handler timings isolated Cost dependency sequencing and Workbench generation persistence rather than HTTP rendering or canonical source-version SQL.
 - tdd_checkpoint: complete; production validation remains.
 
 ## Evidence
@@ -34,6 +34,9 @@ updated: 2026-07-24
 - 2026-07-24: after exact Workbench month access and exact cost scope access, System Audit returned 16/16 pass, integrity pass, freshness fresh, and queue drained.
 - 2026-07-24: release `main-0aaea2df-20260724151422` was rejected before fixture mutation. Bank Details reported fresh while ten July canonical rows were absent from its projection; Pending Invoice cold stale access took 10.663s and executed 124 SQL statements while warm access took 720ms.
 - 2026-07-24: local repair adds one set-based canonical bank proof, one atomic multi-scope access enqueue, and migration `0124` to establish proof baselines only where historical projection/canonical row counts agree. Shared gateway/architecture/migration impact regression passes 513/513 (1 skipped); focused Bank/Pending/backend regression passes 407/407; grouped disposable PostgreSQL passes 88/88. Lint/docs/diff gates pass.
+- 2026-07-24: production fresh read probes passed 52/52 with a 2.32s maximum, but cold/access probes measured Workbench 5.15s, Turnover 4.25s, Cost all about 7.66s, and one Cost project/all request over 120s.
+- 2026-07-24: the final local performance repair passes a 330-test direct set and a 355-test API/gateway/repository/bootstrap/regression set (one environment skip), plus three disposable-PostgreSQL tests for default Cost dependency SQL, typed COPY/atomic activation and failure rollback. Lint/docs/diff gates pass; production performance proof is still pending.
+- 2026-07-24: a fair disposable-PostgreSQL comparison reset the same schema before every 600-row generation and interleaved both writers. Three runs each measured multi-values INSERT median 313.94ms versus COPY median 184.95ms (`0.59x`, about 41% shorter); this is local diagnostic evidence, not the production `<3s` gate.
 
 ## Eliminated
 
@@ -48,3 +51,9 @@ updated: 2026-07-24
 - fix: both `time` and `bank_tag` now use a Bank Detail-backed profile for explorer/detail/export and final export verification. Repository queries read freshness-gated `bank_detail_rows`; transaction point lookup is constrained by the same month/year/all scope as its gate, so one fresh scope cannot expose another stale scope. Cost projection/publish/Audit no longer own bank-flow rows. Migration 0123 drops the duplicate table. The runner retries unresolved consumers only, uses consumer-semantic assertions, and executes the inverse recovery mutation before read-side baselines. App Health seeds each read model through its formal access gateway and worker.
 - verification: the earlier candidate passed disposable PostgreSQL backend 231/231, write-operation runner 55/55, Cost frontend 32/32 and production frontend build, but production correctly rejected it on Bank false-fresh and Pending cold-access latency. The corrected candidate passes focused Bank/Pending/backend 407/407, shared gateway/architecture/migration impact 513/513 (1 skipped), grouped real PostgreSQL 88/88, and lint/docs/diff gates. Corrected production mutation/access/SLO proof remains pending. No 183-browser suite or meaningless full CI is planned.
 - files_changed: Cost route/query/source-version/projection/repository/Audit, write-operation smoke runner, PostgreSQL migration/test fixtures, App Health/Audit/Cost tests, Cost frontend API/page/test, and current architecture/module/operations docs.
+
+## Final performance-root follow-up
+
+- root_cause: Cost query access sequenced Workbench enqueue before Cost enqueue, so the first request could not schedule the complete dependency chain. Workbench generation then wrote hundreds of rows through three large multi-values INSERT statements, producing the remaining measured persistence tail.
+- fix: the same access now ensures exact Workbench and matching Cost child scopes; Cost projection compares canonical/active Workbench versions before payload I/O and lets the existing worker defer contract order the dependency. The existing Workbench atomic transaction uses native psycopg COPY only for rows, groups and group_rows, then activates the generation as before.
+- verification: local unit/service/read-model/worker/architecture/lint and disposable PostgreSQL typed-COPY tests pass. Commit, deploy, production `<3s`, concurrency, zero unrelated I/O, System Audit and queue-drain proof remain open.

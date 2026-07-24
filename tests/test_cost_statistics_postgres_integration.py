@@ -29,6 +29,23 @@ class CostStatisticsPostgresIntegrationTests(unittest.TestCase):
         )
         self.repository = PostgresReadModelRepository(self.connection)
 
+    def test_month_projection_checks_real_workbench_versions_before_payload_io(self) -> None:
+        builder = CostStatisticsSqlProjectionBuilder(
+            connection=self.connection,
+            read_model_repository=self.repository,
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "workbench_read_model_not_fresh: "
+            "operation=cost_statistics_month_projection status=stale scope_keys=2026-05",
+        ):
+            builder.rebuild_cost_statistics_read_model_scope(
+                "active:2026-05",
+                tenant_id="default",
+                source_version=1,
+            )
+
     def test_all_facet_views_execute_through_psycopg_placeholder_parser(self) -> None:
         self.connection.execute(
             """

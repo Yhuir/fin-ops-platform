@@ -288,6 +288,41 @@ class RuntimeWorkerTests(unittest.TestCase):
             [("bank_detail", "2026-05", "dependency_not_fresh")],
         )
 
+    def test_cost_statistics_workbench_dependency_refresh_is_exact_and_worker_owned(self) -> None:
+        claimed = RuntimeQueueEvent(
+            **{
+                **event("cost_statistics.read_model.refresh").__dict__,
+                "scope_type": "cost_statistics",
+                "scope_key": "active:2026-05",
+                "priority": "normal",
+            }
+        )
+        queue = FakeQueue(claimed)
+
+        def fail_not_fresh(_event: RuntimeQueueEvent) -> None:
+            raise RuntimeError(
+                "workbench_read_model_not_fresh: "
+                "operation=cost_statistics_month_projection status=stale scope_keys=2026-05"
+            )
+
+        worker = RuntimeWorker(
+            queue_repository=queue,
+            config=RuntimeWorkerConfig(
+                worker_id="worker-1",
+                event_types=["cost_statistics.read_model.refresh"],
+            ),
+            handlers={"cost_statistics.read_model.refresh": fail_not_fresh},
+        )
+
+        self.assertEqual(worker.run_once(), RuntimeWorkerResult.DEFERRED)
+        self.assertEqual(
+            [
+                (item["scope_type"], item["scope_key"], item["reason"])
+                for item in queue.enqueued_read_model_refreshes
+            ],
+            [("workbench", "2026-05", "dependency_not_fresh")],
+        )
+
     def test_run_once_expands_invoice_lifecycle_pending_invoice_dependency_to_valid_direction_scopes(self) -> None:
         claimed = RuntimeQueueEvent(
             **{

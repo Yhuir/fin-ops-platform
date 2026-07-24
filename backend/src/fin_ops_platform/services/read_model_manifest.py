@@ -361,6 +361,7 @@ READ_MODEL_MANIFEST: dict[str, ReadModelManifestEntry] = {
         repository_owner="CostStatisticsReadModelRepositoryPort",
         permission_owner="cost_statistics_api_session",
         test_owner="tests/test_cost_statistics_sql_runtime.py",
+        read_dependencies=("workbench", "bank_detail"),
     ),
     "tax_offset": ReadModelManifestEntry(
         key="tax_offset",

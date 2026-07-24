@@ -427,6 +427,25 @@ def _execute_many(connection: Any, sql: str, params_seq: list[Any]) -> int:
     return affected
 
 
+def _write_workbench_generation_rows(
+    connection: Any,
+    *,
+    copy_sql: str,
+    insert_sql: str,
+    params_seq: list[tuple[Any, ...]],
+    generated_at_index: int,
+) -> int:
+    copy_rows = getattr(connection, "copy_rows", None)
+    # ponytail: COPY only the three measured generation hot tables; keep the
+    # existing writer when a fake/non-Postgres connection or default timestamp is used.
+    if callable(copy_rows) and all(
+        len(params) > generated_at_index and params[generated_at_index] not in (None, "")
+        for params in params_seq
+    ):
+        return int(copy_rows(copy_sql, params_seq) or 0)
+    return _execute_many(connection, insert_sql, params_seq)
+
+
 def _should_execute_many_values(sql: str) -> bool:
     normalized = " ".join(str(sql or "").lower().split())
     return (
@@ -14307,9 +14326,17 @@ class PostgresReadModelRepository:
                             empty_jsonb,
                         ),
                     )
-                _execute_many(
+                _write_workbench_generation_rows(
                     connection,
-                    """
+                    copy_sql="""
+                    copy read_model.workbench_rows(
+                        generation_id, row_id, scope_month, scope_key, source_kind, status, project_id, project_name,
+                        counterparty_name, amount, object_identity_key, object_identity_kind,
+                        object_identity_source, object_identity_confidence,
+                        source_versions, generated_at, cache_status, payload, raw_payload
+                    ) from stdin
+                    """,
+                    insert_sql="""
                     insert into read_model.workbench_rows(
                         generation_id, row_id, scope_month, scope_key, source_kind, status, project_id, project_name,
                         counterparty_name, amount, object_identity_key, object_identity_kind,
@@ -14321,7 +14348,8 @@ class PostgresReadModelRepository:
                         %s, coalesce(%s::timestamptz, now()), %s, %s, %s
                     )
                     """,
-                    workbench_row_params,
+                    params_seq=workbench_row_params,
+                    generated_at_index=15,
                 )
                 workbench_group_params: list[tuple[Any, ...]] = []
                 workbench_group_row_params: list[tuple[Any, ...]] = []
@@ -14389,9 +14417,17 @@ class PostgresReadModelRepository:
                                 empty_jsonb,
                             ),
                         )
-                _execute_many(
+                _write_workbench_generation_rows(
                     connection,
-                    """
+                    copy_sql="""
+                    copy read_model.workbench_groups(
+                        generation_id, group_id, scope_key, scope_month, zone, status, group_type, source_kinds,
+                        row_count, searchable_text, oa_sort_min, oa_sort_max, bank_sort_min, bank_sort_max,
+                        invoice_sort_min, invoice_sort_max, source_versions, generated_at, cache_status,
+                        payload, raw_payload
+                    ) from stdin
+                    """,
+                    insert_sql="""
                     insert into read_model.workbench_groups(
                         generation_id, group_id, scope_key, scope_month, zone, status, group_type, source_kinds,
                         row_count, searchable_text, oa_sort_min, oa_sort_max, bank_sort_min, bank_sort_max,
@@ -14403,11 +14439,20 @@ class PostgresReadModelRepository:
                         %s, coalesce(%s::timestamptz, now()), %s, %s, %s
                     )
                     """,
-                    workbench_group_params,
+                    params_seq=workbench_group_params,
+                    generated_at_index=17,
                 )
-                _execute_many(
+                _write_workbench_generation_rows(
                     connection,
-                    """
+                    copy_sql="""
+                    copy read_model.workbench_group_rows(
+                        generation_id, scope_key, scope_month, zone, group_id, pane, row_id, row_role, row_index,
+                        source_kind, status, time_value, time_date, column_values, searchable_text,
+                        object_identity_key, object_identity_kind, object_identity_source, object_identity_confidence,
+                        source_versions, generated_at, cache_status, payload, raw_payload
+                    ) from stdin
+                    """,
+                    insert_sql="""
                     insert into read_model.workbench_group_rows(
                         generation_id, scope_key, scope_month, zone, group_id, pane, row_id, row_role, row_index,
                         source_kind, status, time_value, time_date, column_values, searchable_text,
@@ -14419,7 +14464,8 @@ class PostgresReadModelRepository:
                         %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s, %s
                     )
                     """,
-                    workbench_group_row_params,
+                    params_seq=workbench_group_row_params,
+                    generated_at_index=20,
                 )
                 self._activate_workbench_generation(
                     connection,
