@@ -35,6 +35,17 @@ class EventAwareQueueRecorder(QueueRecorder):
         return key in self.active_events
 
 
+class AtomicQueueRecorder(EventAwareQueueRecorder):
+    def __init__(self, *, event: object | None) -> None:
+        super().__init__()
+        self.event = event
+        self.atomic_refreshes: list[dict[str, object]] = []
+
+    def enqueue_read_model_refresh_if_inactive(self, **kwargs: object) -> object | None:
+        self.atomic_refreshes.append(dict(kwargs))
+        return self.event
+
+
 class ReadModelRefreshGatewayTests(unittest.TestCase):
     def test_cost_statistics_policy_normalizes_validates_and_dedupes_legacy_scopes(self) -> None:
         from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
@@ -292,7 +303,28 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
         for scope_type, scope_key, reason in (
             ("bank_detail", "2026-02", "pending_invoice_sql_projection"),
             ("bank_detail", "2026-02", "downstream_bank_tag_read"),
+            ("bank_detail", "2026-02", "bank_detail_relation_tags_read"),
+            ("bank_detail", "2026-02", "cost_statistics_bank_detail_dependency_stale"),
             ("workbench", "2026-02", "cost_statistics_workbench_dependency_stale"),
+            ("workbench_relation", "2026-02", "bank_details_relation_tag_projection"),
+            ("workbench", "2026-02", "fan_out_command_scope"),
+            ("input_invoice_usage", "2026-02", "input_invoice_usage_filter_options"),
+            ("input_invoice_usage", "2026-02", "input_invoice_usage_month_shard"),
+            ("input_invoice_usage", "2026-02", "input_invoice_usage_rows"),
+            ("invoice_lifecycle", "2026-02", "invoice_lifecycle_access_dependency"),
+            ("invoice_lifecycle", "2026-02", "invoice_lifecycle_month_shard"),
+            ("workbench_relation", "2026-02", "invoice_usage_collection_sql_projection"),
+            ("bank_detail", "2026-02", "migration_missing"),
+            ("oa_pending_payment", "2026-02", "oa_pending_payment_month_shard"),
+            ("output_invoice_collection", "2026-02", "output_invoice_collection_month_shard"),
+            ("output_invoice_collection", "2026-02", "output_invoice_collection_rows"),
+            ("pending_invoice", "expense:all:2026-02", "pending_invoice_month_shard"),
+            ("workbench_relation", "2026-02", "relation_dependency_gate"),
+            ("search", "2026-02", "search_all_shard"),
+            ("tax_offset", "2026-02", "tax_offset_all_shard"),
+            ("workbench", "2026-02", "workbench_all_shard"),
+            ("workbench_relation", "2026-02", "workbench_relation_write_precondition"),
+            ("workbench_relation", "2026-02", "workbench_relation_month_shard"),
         ):
             with self.subTest(reason=reason):
                 queue = QueueRecorder()
@@ -414,6 +446,49 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
         )
 
         self.assertEqual(queue.active_event_checks, [("default", "cost_statistics", "active:all")])
+        self.assertEqual(queue.refreshes, [])
+
+    def test_api_refresh_uses_atomic_enqueue_without_check_then_enqueue_race(self) -> None:
+        from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
+
+        queue = AtomicQueueRecorder(event=SimpleNamespace(event_id="event-1"))
+        gateway = ReadModelRefreshGateway(queue_repository=queue)
+
+        events = gateway.enqueue_many_events(
+            "bank_detail",
+            ["2026-02"],
+            reason="api_page_stale",
+        )
+
+        self.assertEqual([event.event_id for event in events], ["event-1"])
+        self.assertEqual(
+            queue.atomic_refreshes,
+            [
+                {
+                    "scope_type": "bank_detail",
+                    "scope_key": "2026-02",
+                    "reason": "api_page_stale",
+                }
+            ],
+        )
+        self.assertEqual(queue.active_event_checks, [])
+        self.assertEqual(queue.active_checks, [])
+        self.assertEqual(queue.refreshes, [])
+
+    def test_atomic_active_scope_returns_no_duplicate_event(self) -> None:
+        from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
+
+        queue = AtomicQueueRecorder(event=None)
+        gateway = ReadModelRefreshGateway(queue_repository=queue)
+
+        events = gateway.enqueue_many_events(
+            "cost_statistics",
+            ["active:all"],
+            reason="cost_statistics_shard_converged",
+        )
+
+        self.assertEqual(events, [])
+        self.assertEqual(len(queue.atomic_refreshes), 1)
         self.assertEqual(queue.refreshes, [])
 
     def test_mutating_refresh_reason_still_bumps_active_scope(self) -> None:

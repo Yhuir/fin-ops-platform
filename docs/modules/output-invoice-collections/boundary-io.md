@@ -35,7 +35,7 @@
 | 收款/状态写入 | output invoice collection services | 同一事务写 status/reminder/red relation/receipt/counter/audit/idempotency facts，不写 read-model dirty/outbox；收据编号设置是直接配置保存且始终零 read-model job |
 | 写后 scope hints | `output_invoice_collection_freshness_metadata(...)` | 按发票所属月份返回 affected/read-model scope hints；`freshness_targets=[]`、`operation_barrier_targets=[]`，未知月份不回退 `all` |
 | Refresh scope | `output_invoice_collection` manifest | month or `all`；`all` 是 fan-out command。显式运维 `force_refresh=true` 必须传播到 month shard 并绕过 unchanged fast path，重新生成目标 scope rows；不得改收款、收据或 relation facts |
-| Relation upstream freshness | `workbench_relation` month scope | projection 在读取 relation source versions、执行 unchanged-scope 判断或写 rows 前必须先通过 fresh gate；non-fresh 交 worker defer。当前 input/output 页面共用月份 relation source-version proof，因此任一发票 relation 改变都刷新本 scope；若关系不含销项发票，rows 必须作为 isolation baseline 保持不变 |
+| Relation upstream freshness | `workbench_relation` month scope | projection 在执行 unchanged 判断或写 rows 前必须先通过 fresh gate；non-fresh 交 worker defer。embedded relation proof 按本月 canonical 销项发票 IDs 计算，只覆盖实际触达这些发票的 active relation。bank-bank、纯进项或其它无销项成员的关系变化不得刷新本 scope。 |
 | OA projection source version | OA projection sync worker | `workbench_relation_source_versions.oa_projection_updated_at` 是本 read model 的完整性合同；OA projection 更新受影响月份时必须经正式 refresh gateway 同时置脏本 scope，不能让 queue drained 后仍保留旧 embedded relation versions |
 
 ## 输出 I/O
@@ -43,7 +43,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | 收款 rows/details/statistics | 前端页面 | fresh/status 可见；linked 多销项发票 relation 输出单条 row，`invoiceRelations.summaries` 包含全部成员发票，`invoiceRelations.totalWithTax` 为成员净额。主 rows 响应的 `statistics` 从完整 `output_invoice_collection` 投影按唯一发票成员 ID 计算发票、OA/收入流水关联、收款及补集、红字和已开收据；忽略当前 keyword/filter/month/sort/page。`pagination.total` 仍是表格行数/配对组行数；任一 child scope non-fresh 时统计不可用，合法 fresh 空集才返回零。 |
-| 页面 Audit icon | AppHealth operations audit API | admin-only；active canonical 销项发票（含 collapsed members）是 independent expected-set，成员/金额/scope 与共享 relation 的受影响月份双向 edge 必须在同一只读一致性快照中相等；relation source-version 仅有全局 `workbench_pair_relations_updated_at` 前进时，只有该时间点之后的 relation 与本月 canonical/PostgreSQL/OA source-link 发票 identity 相交才判为本页 mismatch，纯银行关系变化不得污染本页 integrity；其它版本差异仍 fail closed。此规则只收窄只读 Audit 分类，页面 fresh gate 仍按完整 source-version 合同按访问触发刷新，精确化由 Phase 27 负责；只有结构化 integrity=pass、freshness=fresh、queue=drained 且 database snapshot 已启用才显示成功，unknown/live-query 不得伪装 fresh，问题数显示为 sample |
+| 页面 Audit icon | AppHealth operations audit API | admin-only；active canonical 销项发票（含 collapsed members）是 independent expected-set，成员/金额/scope 与共享 relation 的受影响月份双向 edge 必须在同一只读一致性快照中相等。页面 freshness 与 Audit 共用 consumer-semantic relation 边界；纯银行或仅进项关系变化不得令本页 mismatch。只有 integrity=pass、freshness=fresh、queue=drained 且 database snapshot 已启用才显示成功。 |
 | lifecycle/status result | API | 写后可恢复、可审计 |
 | 写后页面收敛 | 前端页面 | lifecycle/receipt/关系/设置写成功后不调用 operation barrier；仅当前 active 页面重跑 rows GET。GET 返回 non-fresh 时再按服务端精确 targets 进入访问时 freshness 等待，不能把旧 rows 当 fresh |
 | Dirty scope | runtime queue | `output_invoice_collection.read_model.refresh` |
@@ -90,7 +90,7 @@
 - 红冲确认/撤回、状态/提醒、收据创建/作废/重开和编号设置的 canonical recovery 与普通写零 fan-out 必须持续覆盖。
 - 已删除标题计数的 `page_size=1` 二次请求；标题统计只能消费 rows 主响应，禁止恢复独立 title-total I/O。
 - `output_invoice_collection_statistics_schema_version` 负责生产旧 scope 的统计元数据回填；source version 相同但缺少合法统计元数据时也必须重建，不能走 unchanged skip。批量导出的所有分页均传 `include_statistics=false`，不重复读取、校验或透传页面标题统计；每一页仍执行 rows freshness、schema 和 source-version gate。
-- 默认 `month=all` 是页面聚合视图，不是 refresh scope。fresh gate 通过 `output_invoice_collection_scope_source_versions(...)` 读取有效月份 shard，并批量比较每月已嵌入与当前 `workbench_relation` source versions；只 enqueue mismatch 的具体月份，禁止 rows/export/detail/统计异常回退 `output_invoice_collection:all`。
+- 默认 `month=all` 是页面聚合视图，不是 refresh scope。fresh gate 通过 `output_invoice_collection_scope_source_versions(...)` 读取有效月份 shard，并通过 `output_invoice_collection_relation_source_versions(...)` 比较每月 consumer-semantic relation proof；只 enqueue mismatch 的具体月份。具体月 rows 与跨月标题统计独立收敛，禁止异常回退 `output_invoice_collection:all`。
 - `output_invoice_collection_scope_source_versions(...)` 必须在同一 SQL statement snapshot 内同时读取 scope dirty 状态和同 scope active outbox event。已有 `pending|processing` event 的阻塞月份只返回 `refreshing`，不得再次进入 enqueue candidates；页面下一轮 normal GET 再观察该 event 发布后的 fresh proof。
 - 标题统计 freshness 与 rows 共用 durable dirty scope、已发布 metadata 和 source-version proof。投影已经发布且 dirty scope 已完成后，worker 正在收尾的 outbox event 不得再次把统计降级为 refreshing，也不得由页面轮询创建下一代相同月份任务；outbox `pending/processing` 只用于 active enqueue coalescing 和运维可观测性。
 - 关联详情抽屉从当前行 `invoice.issueDate` 传递 `month`。detail miss 或 repository unavailable 只刷新该具体月份；无法证明月份时 fail closed，不做全历史重建。

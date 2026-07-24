@@ -621,6 +621,18 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             tenant_id=tenant_id,
         )
 
+    def input_invoice_usage_relation_source_versions(
+        self,
+        *,
+        scope_keys: list[str],
+        tenant_id: str = "default",
+    ) -> dict[str, dict[str, Any]]:
+        return self._invoice_usage_relation_source_versions(
+            scope_keys=scope_keys,
+            invoice_type="input",
+            tenant_id=tenant_id,
+        )
+
     def list_input_invoice_usage_filter_options(
         self,
         *,
@@ -661,6 +673,93 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             row_builder=_input_invoice_usage_read_model_record,
             statistics_metadata=statistics_metadata,
         )
+
+    def output_invoice_collection_relation_source_versions(
+        self,
+        *,
+        scope_keys: list[str],
+        tenant_id: str = "default",
+    ) -> dict[str, dict[str, Any]]:
+        return self._invoice_usage_relation_source_versions(
+            scope_keys=scope_keys,
+            invoice_type="output",
+            tenant_id=tenant_id,
+        )
+
+    def _invoice_usage_relation_source_versions(
+        self,
+        *,
+        scope_keys: list[str],
+        invoice_type: str,
+        tenant_id: str,
+    ) -> dict[str, dict[str, Any]]:
+        del tenant_id
+        normalized_scope_keys = _dedupe_preserve_order(
+            scope_key
+            for scope_key in scope_keys
+            if MONTH_SCOPE_RE.match(str(scope_key or "").strip())
+        )
+        if not normalized_scope_keys:
+            return {}
+        rows = self._connection.fetch_all(
+            """
+            /* invoice_usage_relation_source_versions */
+            with requested_scopes as (
+                select unnest(%s::text[]) as scope_key
+            ),
+            invoice_scope_ids as (
+                select
+                    requested.scope_key,
+                    coalesce(
+                        array_agg(distinct coalesce(invoice.legacy_mongo_id, invoice.id::text))
+                            filter (where invoice.id is not null),
+                        array[]::text[]
+                    ) as row_ids
+                from requested_scopes requested
+                left join app.invoices invoice
+                  on to_char(
+                         coalesce(invoice.invoice_month, date_trunc('month', invoice.invoice_date)),
+                         'YYYY-MM'
+                     ) = requested.scope_key
+                 and invoice.invoice_type = %s
+                 and invoice.status <> 'deleted'
+                group by requested.scope_key
+            )
+            select
+                scope.scope_key,
+                count(relation.*)::integer as relation_count,
+                coalesce(max(relation.updated_at)::text, '') as relation_updated_at
+            from invoice_scope_ids scope
+            left join app.workbench_pair_relations relation
+              on relation.status = 'active'
+             and relation.row_ids && scope.row_ids
+            group by scope.scope_key
+            order by scope.scope_key
+            """,
+            (normalized_scope_keys, invoice_type),
+        )
+        versions = {
+            scope_key: {
+                "source": "workbench_pair_relations",
+                "scope_key": scope_key,
+                "consumer": f"{invoice_type}_invoice",
+                "relation_count": 0,
+                "relation_updated_at": "",
+            }
+            for scope_key in normalized_scope_keys
+        }
+        for row in rows:
+            scope_key = text(row.get("scope_key"))
+            if scope_key not in versions:
+                continue
+            versions[scope_key] = {
+                "source": "workbench_pair_relations",
+                "scope_key": scope_key,
+                "consumer": f"{invoice_type}_invoice",
+                "relation_count": int_value(row.get("relation_count"), 0),
+                "relation_updated_at": text(row.get("relation_updated_at")) or "",
+            }
+        return versions
 
     def mark_input_invoice_usage_scope(
         self,
@@ -2780,23 +2879,30 @@ class PostgresBankReadModelRepository:
             for scope_key in normalized_scope_keys
             if scope_key in by_scope and text(by_scope[scope_key].get("generated_at"))
         ]
-        all_signatures = {
-            scope_key: {
-                "schema_version": int_value(by_scope[scope_key].get("schema_version"), 0),
-                "status": text(by_scope[scope_key].get("status")) or "",
-                "row_count": int_value(by_scope[scope_key].get("row_count"), 0),
-                "source_version": int_value(by_scope[scope_key].get("source_version"), 0),
-                "source_versions": by_scope[scope_key].get("source_versions") if isinstance(by_scope[scope_key].get("source_versions"), dict) else {},
-                "statistics": _bank_detail_scope_statistics(by_scope[scope_key].get("raw_payload")),
-                "generated_at": text(by_scope[scope_key].get("generated_at")),
-                "last_error": text(by_scope[scope_key].get("last_error")),
+        signature_scope_keys = sorted(
+            set(statistics_scope_keys).union(normalized_scope_keys)
+        )
+        all_signatures: dict[str, dict[str, Any]] = {}
+        for scope_key in signature_scope_keys:
+            scope_row = by_scope.get(scope_key, {})
+            all_signatures[scope_key] = {
+                "freshness_status": status_for([scope_key]),
+                "schema_version": int_value(scope_row.get("schema_version"), 0),
+                "status": text(scope_row.get("status")) or "",
+                "row_count": int_value(scope_row.get("row_count"), 0),
+                "source_version": int_value(scope_row.get("source_version"), 0),
+                "source_versions": (
+                    scope_row.get("source_versions")
+                    if isinstance(scope_row.get("source_versions"), dict)
+                    else {}
+                ),
+                "statistics": _bank_detail_scope_statistics(scope_row.get("raw_payload")),
+                "generated_at": text(scope_row.get("generated_at")),
+                "last_error": text(scope_row.get("last_error")),
                 "dirty_status": text(dirty_by_scope.get(scope_key, {}).get("status")),
                 "dirty_source_version": int_value(dirty_by_scope.get(scope_key, {}).get("source_version"), 0),
                 "dirty_last_error": text(dirty_by_scope.get(scope_key, {}).get("last_error")),
             }
-            for scope_key in statistics_scope_keys
-            if scope_key in by_scope
-        }
         signatures = {
             scope_key: all_signatures[scope_key]
             for scope_key in normalized_scope_keys
@@ -6905,6 +7011,7 @@ class PostgresSummaryReadModelRepository:
                 statistics_children.has_failed as statistics_child_has_failed,
                 statistics_children.has_active as statistics_child_has_active,
                 parent_children.workbench_refresh_scope_keys,
+                parent_children.bank_detail_refresh_scope_keys,
                 parent_children.child_refresh_scope_keys,
                 parent_children.has_failed as parent_child_has_failed,
                 parent_children.has_active as parent_child_has_active,
@@ -7091,15 +7198,26 @@ class PostgresSummaryReadModelRepository:
                             )
                         ) as workbench_not_fresh,
                         (
+                            state.bank_detail_schema_version is null
+                            or state.bank_detail_schema_version <> %s
+                            or state.bank_detail_status <> 'fresh'
+                            or state.bank_detail_dirty_status in ('pending', 'processing', 'failed')
+                            or (
+                                state.bank_detail_dirty_status is not null
+                                and (
+                                    state.bank_detail_dirty_status <> 'done'
+                                    or state.bank_detail_source_version
+                                       <> state.bank_detail_dirty_source_version
+                                )
+                            )
+                        ) as bank_detail_not_fresh,
+                        (
                             not state.child_present
                             or state.child_schema_version <> %s
                             or coalesce(
                                 state.child_source_versions->'workbench_source_versions',
                                 '{}'::jsonb
                             ) <> coalesce(state.active_workbench_source_versions, '{}'::jsonb)
-                            or state.bank_detail_schema_version is null
-                            or state.bank_detail_schema_version <> %s
-                            or state.bank_detail_status <> 'fresh'
                             or coalesce(
                                 state.child_source_versions->'bank_detail_source_versions',
                                 '{}'::jsonb
@@ -7115,16 +7233,7 @@ class PostgresSummaryReadModelRepository:
                                        <> state.child_dirty_source_version
                                 )
                             )
-                            or state.bank_detail_dirty_status in ('pending', 'processing', 'failed')
-                            or (
-                                state.bank_detail_dirty_status is not null
-                                and (
-                                    state.bank_detail_dirty_status <> 'done'
-                                    or state.bank_detail_source_version
-                                       <> state.bank_detail_dirty_source_version
-                                )
-                            )
-                        ) as child_not_fresh
+                        ) as cost_child_not_fresh
                     from child_states state
                 ),
                 aggregated as (
@@ -7142,8 +7251,20 @@ class PostgresSummaryReadModelRepository:
                             array[]::text[]
                         ) as workbench_refresh_scope_keys,
                         coalesce(
+                            array_agg(month_key order by month_key)
+                                filter (
+                                    where not workbench_not_fresh
+                                      and bank_detail_not_fresh
+                                ),
+                            array[]::text[]
+                        ) as bank_detail_refresh_scope_keys,
+                        coalesce(
                             array_agg(child_scope_key order by child_scope_key)
-                                filter (where not workbench_not_fresh and child_not_fresh),
+                                filter (
+                                    where not workbench_not_fresh
+                                      and not bank_detail_not_fresh
+                                      and cost_child_not_fresh
+                                ),
                             array[]::text[]
                         ) as child_refresh_scope_keys,
                         coalesce(
@@ -7166,6 +7287,7 @@ class PostgresSummaryReadModelRepository:
                 )
                 select
                     workbench_refresh_scope_keys,
+                    bank_detail_refresh_scope_keys,
                     child_refresh_scope_keys,
                     has_failed,
                     has_active,
@@ -7195,8 +7317,8 @@ class PostgresSummaryReadModelRepository:
             limit 1
             """,
             (
-                COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
                 BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
+                COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
                 normalized_scope_key,
             ),
         )
@@ -7249,6 +7371,7 @@ class PostgresSummaryReadModelRepository:
             if isinstance(row.get("bank_detail_source_versions"), dict)
             else {}
         )
+        bank_detail_refresh_scope_keys: list[str] = []
         if scope_month != "all":
             dependency_statuses = {
                 text(row.get("workbench_dirty_status")),
@@ -7272,13 +7395,17 @@ class PostgresSummaryReadModelRepository:
                 stale_reasons.append("workbench_published_source_version_mismatch")
             bank_detail_schema_version = int_value(row.get("bank_detail_schema_version"), 0)
             bank_detail_status = text(row.get("bank_detail_status"))
+            bank_detail_dependency_not_fresh = False
             if bank_detail_schema_version == 0:
+                bank_detail_dependency_not_fresh = True
                 refresh_status = "stale" if refresh_status == "fresh" else refresh_status
                 stale_reasons.append("bank_detail_scope_missing")
             elif bank_detail_schema_version != BANK_DETAIL_READ_MODEL_SCHEMA_VERSION:
+                bank_detail_dependency_not_fresh = True
                 refresh_status = "stale" if refresh_status == "fresh" else refresh_status
                 stale_reasons.append("bank_detail_schema_version_mismatch")
             if not bank_detail_source_versions:
+                bank_detail_dependency_not_fresh = True
                 refresh_status = "stale" if refresh_status == "fresh" else refresh_status
                 stale_reasons.append("bank_detail_source_versions_missing")
             if (
@@ -7286,11 +7413,21 @@ class PostgresSummaryReadModelRepository:
                 and int_value(row.get("bank_detail_source_version"), -1)
                 != int_value(row.get("bank_detail_dirty_source_version"), -1)
             ):
+                bank_detail_dependency_not_fresh = True
                 refresh_status = "stale" if refresh_status == "fresh" else refresh_status
                 stale_reasons.append("bank_detail_published_source_version_mismatch")
             if bank_detail_status != "fresh":
+                bank_detail_dependency_not_fresh = True
                 refresh_status = "stale" if refresh_status == "fresh" else refresh_status
                 stale_reasons.append("bank_detail_scope_not_fresh")
+            if text(row.get("bank_detail_dirty_status")) in {
+                "pending",
+                "processing",
+                "failed",
+            }:
+                bank_detail_dependency_not_fresh = True
+            if bank_detail_dependency_not_fresh:
+                bank_detail_refresh_scope_keys = [scope_month]
         parent_workbench_refresh_scope_keys = list(
             dict.fromkeys(
                 normalized
@@ -7299,6 +7436,16 @@ class PostgresSummaryReadModelRepository:
                 if normalized
             )
         )
+        parent_bank_detail_refresh_scope_keys = list(
+            dict.fromkeys(
+                normalized
+                for value in list(row.get("bank_detail_refresh_scope_keys") or [])
+                for normalized in [str(value or "").strip()]
+                if normalized
+            )
+        )
+        if scope_month == "all":
+            bank_detail_refresh_scope_keys = parent_bank_detail_refresh_scope_keys
         parent_child_refresh_scope_keys = list(
             dict.fromkeys(
                 normalized
@@ -7312,6 +7459,7 @@ class PostgresSummaryReadModelRepository:
         parent_source_shards_match = row.get("parent_source_shards_match") is True
         parent_proof_non_fresh = bool(
             parent_workbench_refresh_scope_keys
+            or parent_bank_detail_refresh_scope_keys
             or parent_child_refresh_scope_keys
             or not parent_source_shards_match
         )
@@ -7324,6 +7472,8 @@ class PostgresSummaryReadModelRepository:
                 refresh_status = "stale"
             if parent_workbench_refresh_scope_keys:
                 stale_reasons.append("cost_statistics_parent_workbench_dependency_not_fresh")
+            if parent_bank_detail_refresh_scope_keys:
+                stale_reasons.append("cost_statistics_parent_bank_detail_dependency_not_fresh")
             if parent_child_refresh_scope_keys:
                 stale_reasons.append("cost_statistics_parent_child_scope_not_fresh")
             if not parent_source_shards_match:
@@ -7377,6 +7527,7 @@ class PostgresSummaryReadModelRepository:
             "refresh_status": refresh_status,
             "stale_reasons": stale_reasons,
             "workbench_refresh_scope_keys": parent_workbench_refresh_scope_keys,
+            "bank_detail_refresh_scope_keys": bank_detail_refresh_scope_keys,
             "child_refresh_scope_keys": parent_child_refresh_scope_keys,
             "statistics": statistics,
             "statistics_status": statistics_status,
@@ -7396,49 +7547,6 @@ class PostgresSummaryReadModelRepository:
                 else None
             ),
         }
-
-    def list_active_cost_statistics_dependencies(
-        self,
-        *,
-        project_scope: str,
-    ) -> list[dict[str, Any]]:
-        normalized_project_scope = text(project_scope)
-        if normalized_project_scope not in {"active", "all"}:
-            return []
-        rows = self._connection.fetch_all(
-            """
-            select scope_type, scope_key, status
-            from job.outbox_events
-            where tenant_id = 'default'
-              and status in ('pending', 'processing')
-              and (
-                    event_type in (
-                        'workbench.read_model.refresh',
-                        'bank_detail.read_model.refresh'
-                    )
-                    or (
-                        event_type = 'cost_statistics.read_model.refresh'
-                        and scope_key like %s
-                    )
-              )
-            order by
-                case status when 'processing' then 0 else 1 end,
-                available_at,
-                created_at,
-                id
-            limit 100
-            """,
-            (f"{normalized_project_scope}:%",),
-        )
-        return [
-            {
-                "scope_type": text(row.get("scope_type")),
-                "scope_key": text(row.get("scope_key")),
-                "status": text(row.get("status")),
-            }
-            for row in rows
-            if text(row.get("scope_key"))
-        ]
 
     def get_cost_statistics_page(
         self,
@@ -9859,16 +9967,6 @@ class PostgresReadModelRepository:
     def get_cost_statistics_freshness_gate(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         return self._summary_read_model_repository.get_cost_statistics_freshness_gate(*args, **kwargs)
 
-    def list_active_cost_statistics_dependencies(
-        self,
-        *args: Any,
-        **kwargs: Any,
-    ) -> list[dict[str, Any]]:
-        return self._summary_read_model_repository.list_active_cost_statistics_dependencies(
-            *args,
-            **kwargs,
-        )
-
     def get_cost_statistics_page(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         return self._summary_read_model_repository.get_cost_statistics_page(*args, **kwargs)
 
@@ -10085,6 +10183,9 @@ class PostgresReadModelRepository:
     def input_invoice_usage_scope_source_versions(self, **kwargs: Any) -> dict[str, Any]:
         return self._invoice_usage_collection_repository.input_invoice_usage_scope_source_versions(**kwargs)
 
+    def input_invoice_usage_relation_source_versions(self, **kwargs: Any) -> dict[str, dict[str, Any]]:
+        return self._invoice_usage_collection_repository.input_invoice_usage_relation_source_versions(**kwargs)
+
     def save_input_invoice_usage_rows(self, **kwargs: Any) -> None:
         self._invoice_usage_collection_repository.save_input_invoice_usage_rows(**kwargs)
 
@@ -10105,6 +10206,9 @@ class PostgresReadModelRepository:
 
     def output_invoice_collection_scope_source_versions(self, **kwargs: Any) -> dict[str, Any]:
         return self._invoice_usage_collection_repository.output_invoice_collection_scope_source_versions(**kwargs)
+
+    def output_invoice_collection_relation_source_versions(self, **kwargs: Any) -> dict[str, dict[str, Any]]:
+        return self._invoice_usage_collection_repository.output_invoice_collection_relation_source_versions(**kwargs)
 
     def get_output_invoice_collection_row_by_row_id(self, row_id: str) -> dict[str, Any] | None:
         return self._invoice_usage_collection_repository.get_output_invoice_collection_row_by_row_id(row_id)

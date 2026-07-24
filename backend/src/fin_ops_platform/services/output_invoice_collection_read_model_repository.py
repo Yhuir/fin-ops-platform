@@ -53,6 +53,22 @@ class OutputInvoiceCollectionReadModelRepositoryPort:
         )
         return dict(payload) if isinstance(payload, dict) else {}
 
+    def output_invoice_collection_relation_source_versions(
+        self,
+        *,
+        scope_keys: list[str],
+        tenant_id: str = "default",
+    ) -> dict[str, dict[str, object]]:
+        payload = self._repository.output_invoice_collection_relation_source_versions(
+            scope_keys=scope_keys,
+            tenant_id=tenant_id,
+        )
+        return {
+            str(scope_key): dict(source_versions)
+            for scope_key, source_versions in dict(payload or {}).items()
+            if isinstance(source_versions, dict)
+        }
+
     def save_output_invoice_collection_rows(
         self,
         *,

@@ -44,6 +44,11 @@ class InputInvoiceUsageReadModelFreshGateService:
                 None,
             ),
             relation_reader=workbench_relation_reader,
+            relation_source_versions_loader=getattr(
+                repository,
+                "input_invoice_usage_relation_source_versions",
+                None,
+            ),
             expected_source_versions=expected_source_versions,
             requires_sql_runtime=requires_sql_read_model_runtime,
             context="input_invoice_usage_read_model",

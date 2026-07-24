@@ -65,6 +65,7 @@ class CostStatisticsQueryService:
             [], tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]
         ],
         workbench_refresh_enqueuer: Callable[..., bool],
+        bank_detail_refresh_enqueuer: Callable[..., bool] | None = None,
     ) -> None:
         self._runtime_service = runtime_service
         self._sql_read_repository = sql_read_repository
@@ -74,6 +75,7 @@ class CostStatisticsQueryService:
             workbench_dependency_versions_by_scope_provider
         )
         self._workbench_refresh_enqueuer = workbench_refresh_enqueuer
+        self._bank_detail_refresh_enqueuer = bank_detail_refresh_enqueuer
         self._read_model_query_gateway = ReadModelQueryGateway(
             queue_repository=ReadModelRefreshQueueAdapter(
                 scope_type="cost_statistics",
@@ -453,22 +455,6 @@ class CostStatisticsQueryService:
                     ),
                 )
         elif scope_month == "all":
-            active_dependencies = [
-                dict(item)
-                for item in list(
-                    self._sql_read_repository.list_active_cost_statistics_dependencies(
-                        project_scope=str(scope_key).split(":", 1)[0]
-                    )
-                    or []
-                )
-                if isinstance(item, dict)
-            ]
-            if active_dependencies:
-                return None, None, self._active_dependency_refresh_payload(
-                    scope_key=scope_key,
-                    active_dependencies=active_dependencies,
-                    empty_payload_factory=empty_payload_factory,
-                )
             expected_by_scope, active_by_scope = (
                 self._workbench_dependency_versions_by_scope_provider()
             )
@@ -523,6 +509,16 @@ class CostStatisticsQueryService:
                 empty_payload_factory=empty_payload_factory,
                 stale_reasons=gate_reasons or ("workbench_dependency_not_fresh",),
             )
+        bank_detail_refresh_scope_keys = self._normalized_refresh_scope_keys(
+            gate.get("bank_detail_refresh_scope_keys")
+        )
+        if bank_detail_refresh_scope_keys:
+            return gate, None, self._bank_detail_dependency_non_fresh_payload(
+                scope_key=scope_key,
+                bank_detail_scope_keys=bank_detail_refresh_scope_keys,
+                empty_payload_factory=empty_payload_factory,
+                stale_reasons=gate_reasons or ("bank_detail_dependency_not_fresh",),
+            )
         if gate_status != "fresh":
             return gate, None, self._cost_statistics_non_fresh_gate_payload(
                 scope_key=scope_key,
@@ -576,30 +572,28 @@ class CostStatisticsQueryService:
             stale_reasons=freshness.stale_reasons,
         )
 
-    @staticmethod
-    def _active_dependency_refresh_payload(
+    def _bank_detail_dependency_non_fresh_payload(
+        self,
         *,
         scope_key: str,
-        active_dependencies: list[dict[str, Any]],
+        bank_detail_scope_keys: tuple[str, ...],
         empty_payload_factory: Any,
+        stale_reasons: tuple[str, ...],
     ) -> dict[str, Any]:
         payload = dict(empty_payload_factory())
         payload["read_model_status"] = "refreshing"
         payload["read_model_scope_key"] = scope_key
-        payload["read_model_stale_reasons"] = [
-            "cost_statistics_dependency_refresh_in_progress"
-        ]
-        payload["refresh_reason"] = "cost_statistics_dependency_refresh_in_progress"
-        payload["refresh_dependency"] = "durable_queue"
-        payload["refresh_scope_keys"] = list(
-            dict.fromkeys(
-                scope_key
-                for item in active_dependencies
-                for scope_key in [str(item.get("scope_key") or "").strip()]
-                if scope_key
+        payload["read_model_stale_reasons"] = list(stale_reasons)
+        payload["refresh_reason"] = "cost_statistics_bank_detail_dependency_stale"
+        payload["refresh_dependency"] = "bank_detail"
+        payload["refresh_scope_keys"] = list(bank_detail_scope_keys)
+        payload["refresh_enqueued"] = bool(
+            callable(self._bank_detail_refresh_enqueuer)
+            and self._bank_detail_refresh_enqueuer(
+                list(bank_detail_scope_keys),
+                reason="cost_statistics_bank_detail_dependency_stale",
             )
         )
-        payload["refresh_enqueued"] = False
         return payload
 
     def _workbench_dependency_non_fresh_payload(

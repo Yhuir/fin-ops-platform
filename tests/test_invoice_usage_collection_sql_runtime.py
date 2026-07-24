@@ -919,6 +919,8 @@ class RecordingInvoiceRelationReadRepository:
         self.pruned_output: list[str] | None = None
         self.pruned_oa: list[str] | None = None
         self.workbench_relation_versions_by_scope: dict[str, dict[str, object]] = {}
+        self.input_relation_versions_by_scope: dict[str, dict[str, object]] = {}
+        self.output_relation_versions_by_scope: dict[str, dict[str, object]] = {}
         self.existing_source_versions_by_method: dict[str, dict[str, object]] = {}
         self.existing_row_count_by_method: dict[str, int] = {}
         self.existing_statistics_by_method: dict[str, dict[str, object]] = {}
@@ -1038,6 +1040,32 @@ class RecordingInvoiceRelationReadRepository:
     def workbench_relation_source_versions(self, *, scope_key: str, tenant_id: str = "default") -> dict[str, object]:
         _ = tenant_id
         return dict(self.workbench_relation_versions_by_scope.get(str(scope_key), {}))
+
+    def input_invoice_usage_relation_source_versions(
+        self,
+        *,
+        scope_keys: list[str],
+        tenant_id: str = "default",
+    ) -> dict[str, dict[str, object]]:
+        _ = tenant_id
+        return {
+            scope_key: dict(self.input_relation_versions_by_scope[scope_key])
+            for scope_key in scope_keys
+            if scope_key in self.input_relation_versions_by_scope
+        }
+
+    def output_invoice_collection_relation_source_versions(
+        self,
+        *,
+        scope_keys: list[str],
+        tenant_id: str = "default",
+    ) -> dict[str, dict[str, object]]:
+        _ = tenant_id
+        return {
+            scope_key: dict(self.output_relation_versions_by_scope[scope_key])
+            for scope_key in scope_keys
+            if scope_key in self.output_relation_versions_by_scope
+        }
 
 
 class WriteRecordingConnection:
@@ -2201,6 +2229,52 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertIn("jsonb_array_elements", executed_sql)
         self.assertIn("invoice_id = any(%s)", executed_sql)
 
+    def test_invoice_relation_source_versions_count_only_relations_touching_consumer_invoices(self) -> None:
+        class Connection:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+            def fetch_all(
+                self,
+                sql: str,
+                params: tuple[object, ...] = (),
+            ) -> list[dict[str, object]]:
+                self.calls.append((sql, params))
+                return [
+                    {
+                        "scope_key": "2026-02",
+                        "relation_count": 2,
+                        "relation_updated_at": "2026-07-24 09:01:00+08",
+                    }
+                ]
+
+        connection = Connection()
+        repository = PostgresReadModelRepository(connection)
+
+        versions = repository.input_invoice_usage_relation_source_versions(
+            scope_keys=["2026-02"],
+        )
+
+        self.assertEqual(
+            versions,
+            {
+                "2026-02": {
+                    "source": "workbench_pair_relations",
+                    "scope_key": "2026-02",
+                    "consumer": "input_invoice",
+                    "relation_count": 2,
+                    "relation_updated_at": "2026-07-24 09:01:00+08",
+                }
+            },
+        )
+        sql, params = connection.calls[0]
+        normalized_sql = " ".join(sql.lower().split())
+        self.assertIn("/* invoice_usage_relation_source_versions */", sql)
+        self.assertIn("invoice.invoice_type = %s", normalized_sql)
+        self.assertIn("relation.row_ids && scope.row_ids", normalized_sql)
+        self.assertNotIn("relation.month_scope", normalized_sql)
+        self.assertEqual(params, (["2026-02"], "input"))
+
     def test_input_api_miss_enqueues_refresh_without_live_scan(self) -> None:
         queue = QueueRecorder()
         app = object.__new__(Application)
@@ -3029,9 +3103,14 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
 
     def test_input_projection_keeps_current_scope_relation_versions_after_cross_month_fallback(self) -> None:
         read_repository = RecordingInvoiceRelationReadRepository()
-        read_repository.workbench_relation_versions_by_scope = {
-            "2026-05": {"source_version": "workbench_relation:2026-05"}
+        relation_source_versions = {
+            "source": "workbench_pair_relations",
+            "scope_key": "2026-05",
+            "consumer": "input_invoice",
+            "relation_count": 1,
+            "relation_updated_at": "2026-05-31T08:00:00+00:00",
         }
+        read_repository.input_relation_versions_by_scope = {"2026-05": relation_source_versions}
         invoice = self._invoice("input-invoice-cross-month", InvoiceType.INPUT, total="75799.00")
         bank = self._bank("bank-cross-month", "75799.00")
         relation_facade = CrossMonthVersionWorkbenchRelationFacade(
@@ -3057,7 +3136,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
 
         expected_source_versions = {
             **input_invoice_usage_source_versions(),
-            "workbench_relation_source_versions": {"source_version": "workbench_relation:2026-05"},
+            "workbench_relation_source_versions": relation_source_versions,
         }
         self.assertEqual(result["source_versions"], expected_source_versions)
         self.assertIsNotNone(read_repository.saved_input)
@@ -3150,15 +3229,48 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
 
     def test_projection_builder_marks_empty_invoice_scopes_with_source_versions(self) -> None:
         read_repository = RecordingInvoiceRelationReadRepository()
+        input_relation_source_versions = {
+            "source": "workbench_pair_relations",
+            "scope_key": "2026-05",
+            "consumer": "input_invoice",
+            "relation_count": 0,
+            "relation_updated_at": "",
+        }
+        output_relation_source_versions = {
+            "source": "workbench_pair_relations",
+            "scope_key": "2026-05",
+            "consumer": "output_invoice",
+            "relation_count": 0,
+            "relation_updated_at": "",
+        }
+        read_repository.input_relation_versions_by_scope = {
+            "2026-05": input_relation_source_versions,
+        }
+        read_repository.output_relation_versions_by_scope = {
+            "2026-05": output_relation_source_versions,
+        }
         builder = InvoiceUsageCollectionSqlProjectionBuilder(connection=EmptyTransactionConnection())
+        builder._read_repository = read_repository
         builder._output_invoice_collection_read_model_repository = read_repository
         builder._input_invoice_usage_read_model_repository = read_repository
 
         builder.mark_input_invoice_usage_scope_empty("2026-05")
         builder.mark_output_invoice_collection_scope_empty("2026-05")
 
-        self.assertEqual(read_repository.marked_input["source_versions"], input_invoice_usage_source_versions())
-        self.assertEqual(read_repository.marked_output["source_versions"], output_invoice_collection_source_versions())
+        self.assertEqual(
+            read_repository.marked_input["source_versions"],
+            {
+                **input_invoice_usage_source_versions(),
+                "workbench_relation_source_versions": input_relation_source_versions,
+            },
+        )
+        self.assertEqual(
+            read_repository.marked_output["source_versions"],
+            {
+                **output_invoice_collection_source_versions(),
+                "workbench_relation_source_versions": output_relation_source_versions,
+            },
+        )
 
     def test_projection_builder_prunes_invoice_usage_collection_scope_shards(self) -> None:
         read_repository = RecordingInvoiceRelationReadRepository()

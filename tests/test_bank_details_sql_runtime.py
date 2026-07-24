@@ -690,6 +690,72 @@ class BankTransactionTagReadFacadeTests(unittest.TestCase):
         self.assertEqual(queue.enqueued[0]["reason"], "unit_test")
         self.assertIn("read_model_not_fresh", payload["stale_reasons"])
 
+    def test_get_by_transaction_ids_refreshes_only_scope_with_effective_source_drift(self) -> None:
+        queue = CaptureRuntimeQueueRepository()
+        repository = FakeBankTaggedReadRepository(
+            by_ids_payload={
+                "read_model_status": "stale",
+                "rows": [],
+                "source_versions": {},
+                "read_model_scope_keys": ["2026-01", "2026-02", "2026-03"],
+                "read_model_scope_signatures": {
+                    "2026-01": {"freshness_status": "fresh"},
+                    "2026-02": {"freshness_status": "stale"},
+                    "2026-03": {"freshness_status": "fresh"},
+                },
+                "missing_transaction_ids": [],
+            }
+        )
+        facade = BankTransactionTagReadFacade(
+            read_model_repository=repository,
+            queue_repository=queue,
+        )
+
+        payload = facade.get_by_transaction_ids(
+            ["txn-jan", "txn-feb", "txn-mar"],
+            require_fresh=True,
+            scope_keys_hint=["2026-01", "2026-02", "2026-03"],
+        )
+
+        self.assertEqual(payload["status"], "stale")
+        self.assertEqual(
+            [item["scope_key"] for item in queue.enqueued],
+            ["2026-02"],
+        )
+
+    def test_get_by_transaction_ids_refreshes_only_missing_scope(self) -> None:
+        queue = CaptureRuntimeQueueRepository()
+        repository = FakeBankTaggedReadRepository(
+            by_ids_payload={
+                "read_model_status": "missing",
+                "rows": [],
+                "source_versions": {},
+                "read_model_scope_keys": ["2026-01", "2026-02", "2026-03"],
+                "read_model_scope_signatures": {
+                    "2026-01": {"freshness_status": "fresh"},
+                    "2026-02": {"freshness_status": "missing"},
+                    "2026-03": {"freshness_status": "fresh"},
+                },
+                "missing_transaction_ids": [],
+            }
+        )
+        facade = BankTransactionTagReadFacade(
+            read_model_repository=repository,
+            queue_repository=queue,
+        )
+
+        payload = facade.get_by_transaction_ids(
+            ["txn-jan", "txn-feb", "txn-mar"],
+            require_fresh=True,
+            scope_keys_hint=["2026-01", "2026-02", "2026-03"],
+        )
+
+        self.assertEqual(payload["status"], "missing")
+        self.assertEqual(
+            [item["scope_key"] for item in queue.enqueued],
+            ["2026-02"],
+        )
+
     def test_get_by_transaction_ids_refreshes_only_blocking_dirty_scopes(self) -> None:
         queue = CaptureRuntimeQueueRepository()
         repository = FakeBankTaggedReadRepository(
@@ -1167,6 +1233,14 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertEqual(payload["read_model_status"], "stale")
         self.assertEqual(payload["statistics_status"], "stale")
         self.assertEqual(payload["statistics_refresh_scope_keys"], ["2026-05"])
+        self.assertEqual(
+            payload["read_model_scope_signatures"]["2026-05"]["freshness_status"],
+            "stale",
+        )
+        self.assertEqual(
+            payload["read_model_scope_signatures"]["2026-06"]["freshness_status"],
+            "fresh",
+        )
         relation_summary_calls = [
             (sql, params)
             for method, sql, params in connection.calls
@@ -1178,6 +1252,42 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         normalized_sql = " ".join(relation_sql.lower().split())
         self.assertIn("left join app.workbench_pair_relations", normalized_sql)
         self.assertIn("relation.row_ids && scope.row_ids", normalized_sql)
+
+    def test_scope_summary_includes_missing_requested_scope_signature(self) -> None:
+        connection = FakeConnection(
+            rows=[
+                [
+                    scope_row(
+                        "2026-05",
+                        source_versions={
+                            "source_version": 3,
+                            "bank_transaction_category_source_signature": BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE,
+                            "workbench_relation_source_versions": {
+                                "source": "workbench_pair_relations",
+                                "scope_key": "2026-05",
+                                "relation_count": 0,
+                                "relation_updated_at": "",
+                            },
+                        },
+                    ),
+                ],
+            ],
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.bank_detail_scope_summary(
+            scope_keys=["2026-05", "2026-06"],
+        )
+
+        self.assertEqual(payload["read_model_status"], "missing")
+        self.assertEqual(
+            payload["read_model_scope_signatures"]["2026-05"]["freshness_status"],
+            "fresh",
+        )
+        self.assertEqual(
+            payload["read_model_scope_signatures"]["2026-06"]["freshness_status"],
+            "missing",
+        )
 
     def test_scope_summary_keeps_relation_source_current_when_proof_matches(self) -> None:
         relation_proof = {

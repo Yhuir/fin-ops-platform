@@ -265,6 +265,79 @@ class RuntimeQueueRepository:
                 metadata=metadata,
             )
 
+    def enqueue_read_model_refresh_if_inactive(
+        self,
+        *,
+        scope_type: str,
+        scope_key: str,
+        reason: str,
+        tenant_id: str = "default",
+        priority: str = "normal",
+        trace_id: str | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> RuntimeQueueEvent | None:
+        normalized_tenant_id = str(tenant_id or "default").strip() or "default"
+        normalized_scope_type = str(scope_type or "").strip()
+        normalized_scope_key = str(scope_key or "").strip()
+        if not normalized_scope_type or not normalized_scope_key:
+            raise RuntimeQueueDataError("scope_type and scope_key are required for read model refresh.")
+        event_type = f"{normalized_scope_type}.read_model.refresh"
+        lock_key = f"{normalized_tenant_id}:{normalized_scope_type}:{normalized_scope_key}"
+        with self._connection.transaction() as transaction:
+            transaction.execute(
+                "select pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (lock_key,),
+            )
+            active_row = transaction.fetch_one(
+                """
+                select
+                    id::text as event_id,
+                    tenant_id,
+                    event_type,
+                    aggregate_type,
+                    aggregate_id,
+                    scope_type,
+                    scope_key,
+                    dedupe_key,
+                    payload,
+                    attempts,
+                    status,
+                    schema_version,
+                    source_version,
+                    priority,
+                    trace_id
+                from job.outbox_events
+                where tenant_id = %s
+                  and event_type = %s
+                  and scope_type = %s
+                  and scope_key = %s
+                  and status in ('pending', 'processing')
+                order by
+                    case status when 'processing' then 0 else 1 end,
+                    created_at,
+                    id
+                limit 1
+                """,
+                (
+                    normalized_tenant_id,
+                    event_type,
+                    normalized_scope_type,
+                    normalized_scope_key,
+                ),
+            )
+            if active_row is not None:
+                return None
+            return self.enqueue_read_model_refresh_in_transaction(
+                transaction=transaction,
+                scope_type=normalized_scope_type,
+                scope_key=normalized_scope_key,
+                reason=reason,
+                tenant_id=normalized_tenant_id,
+                priority=priority,
+                trace_id=trace_id,
+                metadata=metadata,
+            )
+
     def enqueue_read_model_refreshes_in_transaction(
         self,
         *,

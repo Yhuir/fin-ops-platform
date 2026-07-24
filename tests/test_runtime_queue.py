@@ -1528,6 +1528,68 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             ),
         )
 
+    def test_atomic_read_model_enqueue_returns_none_without_mutating_active_scope(self) -> None:
+        transaction = FakeTransaction(
+            rows=[
+                event_row(
+                    event_type="bank_detail.read_model.refresh",
+                    scope_type="bank_detail",
+                    scope_key="2026-04",
+                    status="processing",
+                )
+            ]
+        )
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        event = repository.enqueue_read_model_refresh_if_inactive(
+            tenant_id="tenant-a",
+            scope_type="bank_detail",
+            scope_key="2026-04",
+            reason="api_page_stale",
+        )
+
+        self.assertIsNone(event)
+        self.assertEqual([method for method, _sql, _params in transaction.calls], ["execute", "fetch_one"])
+        self.assertIn("pg_advisory_xact_lock", transaction.calls[0][1])
+        self.assertNotIn(
+            "job.read_model_dirty_scopes",
+            " ".join(sql for _method, sql, _params in transaction.calls),
+        )
+        self.assertEqual(transaction.outcomes, ["commit"])
+
+    def test_atomic_read_model_enqueue_creates_event_when_scope_is_inactive(self) -> None:
+        transaction = FakeTransaction(
+            rows=[
+                None,
+                {"source_version": 8},
+                event_row(
+                    event_type="bank_detail.read_model.refresh",
+                    aggregate_type="read_model",
+                    aggregate_id="2026-04",
+                    scope_type="bank_detail",
+                    scope_key="2026-04",
+                    dedupe_key="bank_detail.read_model.refresh:bank_detail:2026-04",
+                    source_version=8,
+                ),
+            ]
+        )
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        event = repository.enqueue_read_model_refresh_if_inactive(
+            tenant_id="tenant-a",
+            scope_type="bank_detail",
+            scope_key="2026-04",
+            reason="api_page_stale",
+        )
+
+        self.assertEqual(event.event_id, "event-1")
+        self.assertEqual(event.source_version, 8)
+        self.assertEqual(
+            [method for method, _sql, _params in transaction.calls],
+            ["execute", "fetch_one", "fetch_one", "fetch_one"],
+        )
+        self.assertEqual(transaction.outcomes, ["commit"])
+
     def test_read_model_refresh_is_fresh_checks_no_active_or_failed_dirty_scope(self) -> None:
         class DirectFetchConnection:
             def __init__(self, row: dict[str, object] | None) -> None:

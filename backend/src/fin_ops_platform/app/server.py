@@ -1386,6 +1386,7 @@ class Application:
                 self._cost_statistics_workbench_dependency_versions_by_scope
             ),
             workbench_refresh_enqueuer=self._enqueue_workbench_read_model_refresh,
+            bank_detail_refresh_enqueuer=self._bank_detail_read_model_refresh_producer().enqueue,
         )
         self._cost_statistics_api_routes = CostStatisticsApiRoutes(
             query_service=self._cost_statistics_query_service,

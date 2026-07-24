@@ -59,8 +59,28 @@ class ReadModelRefreshGateway:
             scope_keys,
         )
         enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
+        enqueue_if_inactive = getattr(
+            self._queue_repository,
+            "enqueue_read_model_refresh_if_inactive",
+            None,
+        )
         for scope_key in normalized_scope_keys:
             if callable(enqueue):
+                enqueue_kwargs = self._enqueue_kwargs(
+                    normalized_scope_type,
+                    scope_key,
+                    reason,
+                    tenant_id,
+                    priority,
+                    trace_id,
+                    metadata,
+                )
+                if callable(enqueue_if_inactive) and self._reason_uses_active_coalescing(
+                    reason=reason,
+                    metadata=metadata,
+                ):
+                    enqueue_if_inactive(**enqueue_kwargs)
+                    continue
                 if self._should_coalesce_active_refresh(
                     tenant_id=tenant_id,
                     scope_type=normalized_scope_type,
@@ -69,7 +89,7 @@ class ReadModelRefreshGateway:
                     metadata=metadata,
                 ):
                     continue
-                enqueue(**self._enqueue_kwargs(normalized_scope_type, scope_key, reason, tenant_id, priority, trace_id, metadata))
+                enqueue(**enqueue_kwargs)
         return normalized_scope_keys
 
     def enqueue_many_events(
@@ -91,8 +111,30 @@ class ReadModelRefreshGateway:
         enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
         if not callable(enqueue):
             return []
+        enqueue_if_inactive = getattr(
+            self._queue_repository,
+            "enqueue_read_model_refresh_if_inactive",
+            None,
+        )
         events: list[Any] = []
         for scope_key in normalized_scope_keys:
+            enqueue_kwargs = self._enqueue_kwargs(
+                normalized_scope_type,
+                scope_key,
+                reason,
+                tenant_id,
+                priority,
+                trace_id,
+                metadata,
+            )
+            if callable(enqueue_if_inactive) and self._reason_uses_active_coalescing(
+                reason=reason,
+                metadata=metadata,
+            ):
+                event = enqueue_if_inactive(**enqueue_kwargs)
+                if event is not None:
+                    events.append(event)
+                continue
             if self._should_coalesce_active_refresh(
                 tenant_id=tenant_id,
                 scope_type=normalized_scope_type,
@@ -101,8 +143,19 @@ class ReadModelRefreshGateway:
                 metadata=metadata,
             ):
                 continue
-            events.append(enqueue(**self._enqueue_kwargs(normalized_scope_type, scope_key, reason, tenant_id, priority, trace_id, metadata)))
+            events.append(enqueue(**enqueue_kwargs))
         return events
+
+    @staticmethod
+    def _reason_uses_active_coalescing(
+        *,
+        reason: str,
+        metadata: dict[str, object] | None,
+    ) -> bool:
+        return not (
+            isinstance(metadata, dict)
+            and metadata.get("force_refresh") is True
+        ) and _reason_is_active_coalescible(reason)
 
     def _should_coalesce_active_refresh(
         self,
@@ -113,9 +166,10 @@ class ReadModelRefreshGateway:
         reason: str,
         metadata: dict[str, object] | None,
     ) -> bool:
-        if isinstance(metadata, dict) and metadata.get("force_refresh") is True:
-            return False
-        if not _reason_is_active_coalescible(reason):
+        if not self._reason_uses_active_coalescing(
+            reason=reason,
+            metadata=metadata,
+        ):
             return False
         checker = getattr(self._queue_repository, "read_model_refresh_event_is_active", None)
         if not callable(checker):
@@ -152,10 +206,29 @@ _ACTIVE_COALESCED_REFRESH_REASONS = {
     "pending_invoice_sql_projection",
     "bank_detail_all_shard",
     "bank_detail_relation_tags_read",
+    "bank_details_relation_tag_projection",
     "cost_statistics_workbench_dependency_stale",
+    "cost_statistics_bank_detail_dependency_stale",
     "cost_statistics_all_shard",
     "cost_statistics_shard_converged",
+    "fan_out_command_scope",
+    "input_invoice_usage_filter_options",
+    "input_invoice_usage_month_shard",
+    "input_invoice_usage_rows",
+    "invoice_lifecycle_access_dependency",
+    "invoice_lifecycle_month_shard",
+    "invoice_usage_collection_sql_projection",
+    "migration_missing",
+    "oa_pending_payment_month_shard",
+    "output_invoice_collection_month_shard",
+    "output_invoice_collection_rows",
+    "pending_invoice_month_shard",
+    "relation_dependency_gate",
+    "search_all_shard",
+    "tax_offset_all_shard",
+    "workbench_all_shard",
     "workbench_relation_write_precondition",
+    "workbench_relation_month_shard",
 }
 
 

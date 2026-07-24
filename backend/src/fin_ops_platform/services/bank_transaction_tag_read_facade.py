@@ -515,12 +515,24 @@ def _refresh_scope_keys_for_non_fresh_payload(
     )
     if dirty_scope_keys:
         return dirty_scope_keys
-    return _dedupe_preserve_order(
+    signature_dirty_scope_keys = _dedupe_preserve_order(
         scope_key
         for scope_key in list(scope_keys or [])
         if isinstance(scope_signatures.get(scope_key), dict)
         and text(scope_signatures[scope_key].get("dirty_status")) in {"pending", "processing", "failed"}
     )
+    if signature_dirty_scope_keys:
+        return signature_dirty_scope_keys
+    freshness_scoped_keys = _dedupe_preserve_order(
+        scope_key
+        for scope_key in list(scope_keys or [])
+        if isinstance(scope_signatures.get(scope_key), dict)
+        and text(scope_signatures[scope_key].get("freshness_status"))
+        not in {"", "fresh", "refreshing"}
+    )
+    if freshness_scoped_keys:
+        return freshness_scoped_keys
+    return []
 
 
 def _dedupe_preserve_order(values: Any) -> list[str]:

@@ -31,7 +31,7 @@ from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRe
 
 ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
-SOURCE_VERSION = "input-invoice-usage:v3-confirmed-relation-component-groups"
+SOURCE_VERSION = "input-invoice-usage:v4-semantic-relation-scope"
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 
 TARGET_APPLICANTS = {

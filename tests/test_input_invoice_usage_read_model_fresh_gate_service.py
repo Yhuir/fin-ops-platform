@@ -146,6 +146,124 @@ class InputInvoiceUsageReadModelFreshGateServiceTests(unittest.TestCase):
         self.assertEqual(payload["statistics_status"], "refreshing")
         self.assertEqual(enqueued, [])
 
+    def test_semantic_relation_proof_ignores_unrelated_bank_only_relation_change(self) -> None:
+        relation_proof = {
+            "source": "workbench_pair_relations",
+            "scope_key": "2026-02",
+            "consumer": "input_invoice",
+            "relation_count": 1,
+            "relation_updated_at": "2026-07-24 09:00:00+08",
+        }
+
+        class Repository(RowsRepository):
+            def input_invoice_usage_relation_source_versions(
+                self,
+                *,
+                scope_keys: list[str],
+                tenant_id: str,
+            ) -> dict[str, dict[str, object]]:
+                del tenant_id
+                return {scope_key: dict(relation_proof) for scope_key in scope_keys}
+
+        enqueued: list[tuple[str, str]] = []
+        service = InputInvoiceUsageReadModelFreshGateService(
+            repository=Repository(
+                {
+                    "rows": [],
+                    "pagination": {"page": 1, "pageSize": 50, "total": 0},
+                    "refresh_status": "fresh",
+                    "source_versions": {"schema": "v1"},
+                    "statistics": {"invoice_count": 0},
+                    "statistics_status": "fresh",
+                    "statistics_source_versions": {"schema": "v1"},
+                },
+                scope_state={
+                    "scope_keys": ["2026-02"],
+                    "source_versions_by_scope": {
+                        "2026-02": {
+                            "schema": "v1",
+                            "workbench_relation_source_versions": relation_proof,
+                        }
+                    },
+                    "blocking_scope_keys": [],
+                },
+            ),
+            requires_sql_read_model_runtime=lambda: True,
+            enqueue_refresh=lambda scope_key, reason: enqueued.append((scope_key, reason)) or True,
+            expected_source_versions=lambda **_: {"schema": "v1"},
+            workbench_relation_reader=None,
+            statistics_overlay=lambda: {"oa_reverse_batch_count": 0},
+        )
+
+        payload = service.rows({"month": ["2026-06"]})
+
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(payload["statistics_status"], "fresh")
+        self.assertEqual(enqueued, [])
+
+    def test_semantic_relation_proof_refreshes_only_changed_statistics_shard(self) -> None:
+        embedded_proof = {
+            "source": "workbench_pair_relations",
+            "scope_key": "2026-02",
+            "consumer": "input_invoice",
+            "relation_count": 1,
+            "relation_updated_at": "2026-07-24 09:00:00+08",
+        }
+        current_proof = {
+            **embedded_proof,
+            "relation_count": 2,
+            "relation_updated_at": "2026-07-24 09:01:00+08",
+        }
+
+        class Repository(RowsRepository):
+            def input_invoice_usage_relation_source_versions(
+                self,
+                *,
+                scope_keys: list[str],
+                tenant_id: str,
+            ) -> dict[str, dict[str, object]]:
+                del tenant_id
+                return {scope_key: dict(current_proof) for scope_key in scope_keys}
+
+        enqueued: list[tuple[str, str]] = []
+        service = InputInvoiceUsageReadModelFreshGateService(
+            repository=Repository(
+                {
+                    "rows": [],
+                    "pagination": {"page": 1, "pageSize": 50, "total": 0},
+                    "refresh_status": "fresh",
+                    "source_versions": {"schema": "v1"},
+                    "statistics": {"invoice_count": 0},
+                    "statistics_status": "fresh",
+                    "statistics_source_versions": {"schema": "v1"},
+                },
+                scope_state={
+                    "scope_keys": ["2026-02"],
+                    "source_versions_by_scope": {
+                        "2026-02": {
+                            "schema": "v1",
+                            "workbench_relation_source_versions": embedded_proof,
+                        }
+                    },
+                    "blocking_scope_keys": [],
+                },
+            ),
+            requires_sql_read_model_runtime=lambda: True,
+            enqueue_refresh=lambda scope_key, reason: enqueued.append((scope_key, reason)) or True,
+            expected_source_versions=lambda **_: {"schema": "v1"},
+            workbench_relation_reader=None,
+            statistics_overlay=lambda: {"oa_reverse_batch_count": 0},
+        )
+
+        payload = service.rows({"month": ["2026-06"]})
+
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(payload["statistics_status"], "refreshing")
+        self.assertEqual(
+            enqueued,
+            [("2026-02", "api_statistics_relation_dependency_stale")],
+        )
+
     def test_all_scope_fails_closed_without_dependency_port_or_all_refresh(self) -> None:
         enqueued: list[tuple[str, str]] = []
         repository = DependencyBlockedRepository(

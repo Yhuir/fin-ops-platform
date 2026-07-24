@@ -921,7 +921,7 @@ PYTHONPATH="$release_src/backend/src" \
 `bank_detail` source versions、transaction tags 或 month rows 时必须统一复用 `downstream_bank_tag_read`，不能另造绕过
 active coalescing 的 reason。它们只能确保目标
 read model 有 refresh 在跑；当同一 `tenant_id + scope_type + scope_key` 已经 `pending` 或 `processing` 时，
-`ReadModelRefreshGateway` 必须 coalesce，不应 bump `source_version`，否则 downstream projection 会追逐移动目标。
+`ReadModelRefreshGateway` 必须通过 `enqueue_read_model_refresh_if_inactive(...)` coalesce，不应 bump `source_version`，否则 downstream projection 会追逐移动目标。该 repository 入口在一个事务内用 PostgreSQL advisory lock 串行化 exact `tenant/type/key`，再检查/写入 outbox；禁止恢复先查 active、后另开事务 enqueue 的竞态。
 active 的事实判断必须读取 exact `job.outbox_events` 的 `pending/processing` 事件；dirty scope 仍负责阻断 freshness，
 但不能单独证明 worker 还会继续推进。若 dirty 为 pending/processing 而同 scope 已没有 active event，说明 handler
 返回 `refreshing` 后留下了 orphan dirty，下一次 ensure 必须允许重新 enqueue。Workbench 重建进行中仍会有 active

@@ -12,7 +12,6 @@ from fin_ops_platform.services.postgres_repositories.read_models import (
     BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
     PostgresReadModelRepository,
 )
-from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 from tests.postgres_test_utils import (
     apply_test_migrations,
     require_postgres_test_database_url,
@@ -177,58 +176,6 @@ class CostStatisticsPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(gate["workbench_refresh_scope_keys"], [])
         self.assertEqual(gate["child_refresh_scope_keys"], ["active:2026-03"])
         self.assertIn("cost_statistics_parent_child_scope_not_fresh", gate["stale_reasons"])
-
-    def test_parent_dependency_fast_path_reads_only_active_relevant_outbox_scopes(self) -> None:
-        queue = RuntimeQueueRepository(self.connection)
-        queue.enqueue_read_model_refresh(
-            scope_type="workbench",
-            scope_key="2026-03",
-            reason="api_workbench_access",
-        )
-        queue.enqueue_read_model_refresh(
-            scope_type="bank_detail",
-            scope_key="2026-04",
-            reason="api_bank_detail_access",
-        )
-        queue.enqueue_read_model_refresh(
-            scope_type="cost_statistics",
-            scope_key="active:2026-05",
-            reason="api_page_stale",
-        )
-        queue.enqueue_read_model_refresh(
-            scope_type="cost_statistics",
-            scope_key="all:2026-06",
-            reason="api_page_stale",
-        )
-        completed = queue.enqueue_read_model_refresh(
-            scope_type="workbench",
-            scope_key="2026-07",
-            reason="api_workbench_access",
-        )
-        self.connection.execute(
-            """
-            update job.outbox_events
-            set status = 'done', processed_at = now()
-            where id = %s::uuid
-            """,
-            (completed.event_id,),
-        )
-
-        dependencies = self.repository.list_active_cost_statistics_dependencies(
-            project_scope="active"
-        )
-
-        self.assertEqual(
-            {
-                (item["scope_type"], item["scope_key"], item["status"])
-                for item in dependencies
-            },
-            {
-                ("workbench", "2026-03", "pending"),
-                ("bank_detail", "2026-04", "pending"),
-                ("cost_statistics", "active:2026-05", "pending"),
-            },
-        )
 
     def test_split_transaction_detail_aggregates_all_cost_allocations(self) -> None:
         self.connection.execute(

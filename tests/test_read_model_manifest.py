@@ -554,6 +554,7 @@ class ReadModelManifestTests(unittest.TestCase):
         }
         required_input_ports = {
             "list_input_invoice_usage_rows",
+            "input_invoice_usage_relation_source_versions",
             "save_input_invoice_usage_rows",
             "mark_input_invoice_usage_scope",
             "prune_input_invoice_usage_scope_shards",
@@ -561,6 +562,7 @@ class ReadModelManifestTests(unittest.TestCase):
         }
         required_output_ports = {
             "list_output_invoice_collection_rows",
+            "output_invoice_collection_relation_source_versions",
             "get_output_invoice_collection_row_by_row_id",
             "save_output_invoice_collection_rows",
             "mark_output_invoice_collection_scope",

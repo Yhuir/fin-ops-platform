@@ -13,7 +13,7 @@
 
 ## 当前决策
 
-- 默认 all scope 查询不得因为月份间嵌套 `workbench_relation_source_versions` 不同而清空基础 `source_versions`；API freshness 只要求服务端期望的基础 source version 字段匹配。
+- 默认 all scope 查询先枚举有效月份 shard，再分别比较 base versions 与按该月进项发票 IDs 计算的 consumer-semantic canonical relation proof；不得用全局或整月 `workbench_relation` 版本让无关 bank-bank/销项关系污染本页 freshness。
 - `以发票反提 OA` 第一版前端只暴露 `创建 OA 草稿`，后端保留 batch 作为内部状态对象；创建草稿使用目标 OA 申请人的已配置凭据/token，OA 提交由用户在 OA 系统手动完成。
 - 设置页新增 `OA 申请人凭据管理`，第一版只展示目标 OA 申请人、OA 登录账号和 `已配置`/`未配置` 状态；密码保存/更新成功后不回显，且不能进入普通 app settings payload。
 - Phase 1 已落地后端凭据管理：`app.oa_applicant_credentials.encrypted_password` 使用 PostgreSQL `pgcrypto` 加密落库；生产保存/读取密钥来自 `FIN_OPS_OA_APPLICANT_CREDENTIAL_KEY`。
@@ -23,8 +23,8 @@
 - OA reverse evidence detected 后的 OA/发票 relation 写入必须通过 `WorkbenchRelationCommandService.confirm_relation(...)`，relation mode 为 `input_invoice_oa_reverse`；relation read model 不 fresh 或 command service 缺失时 fail fast，不先推进本地 batch。
 - 只有 Workbench active relation 通过 `WorkbenchRelationReadFacade` 进入进项发票使用情况页面的已关联口径；未正式化的自动匹配 decision 不再作为本页 candidate relation 展示。历史 `candidate` payload 只做兼容未关联处理，不参与支付状态或 confirmed relation 判断。
 - `+N` 详情展开优先读取 `read_model.input_invoice_usage_rows` 单行 payload；SQL read model stale/missing 时返回 refreshing 并入队刷新，不在详情接口中触发全量 live rebuild。
-- 月份 shard 构建时，当前 workbench relation scope 的 unlinked/empty row 不能阻止按发票 row id 定向补查跨月 linked group；补查用于展示 OA/银行流水/发票摘要，但 read model 的 `workbench_relation_source_versions` 仍按当前 shard scope 保存。
-- 支付状态规则保存、OA reverse 草稿创建和 OA submitted/manual status 写成功后，页面必须先等待当前 scope 的 `input_invoice_usage` operation barrier fresh，再重新读取 rows；barrier blocked/timeout 只提示后台同步未完成，不能提前读旧投影。
+- 月份 shard 构建时，当前 workbench relation scope 的 unlinked/empty row 不能阻止按发票 row id 定向补查跨月 linked group；补查用于展示 OA/银行流水/发票摘要，freshness proof 则固定为当前 shard 进项发票集合的 consumer-semantic canonical relation proof。
+- 支付状态规则保存、OA reverse 草稿创建和 OA submitted/manual status 写成功后立即结束命令阻塞，不生成普通页面 operation barrier target。当前可见页重跑 normal GET，由 input fresh gate 只为 exact stale month 入队；隐藏页和其它窗口在访问/重新激活时独立收敛。
 - `以发票反提 OA` 的草稿提交确认弹窗可以由用户取消；取消、父页面重渲染和 preview reload 都不能清空当前草稿 batch，状态为 `oa_draft_created` 的 batch 必须出现在 `暂存` 页签。暂存列表不展示 OA 草稿链接，只展示两项处理动作。
 - OA reverse preview 中已有 active/linked OA 关系的发票仍然不是可创建候选，但需要作为 rejected display row 返回给前端，展示 `已关联oa` chip、禁用勾选；没有 active OA relation 的发票统一展示 `未关联oa`。历史 `candidate` 兼容值归入 `未关联oa`，drawer 只支持 `全部/已经关联oa/未关联oa` 表头筛选，并在候选发票清单提供搜索。
 - 2026-06-11 测试闭环审计确认：本模块 P0/P1 已有测试覆盖 read model all scope、OA 反提、凭据加密、目标申请人 token provider、未提交回滚、已提交历史、设置页 UI 和进项页面 drawer；本轮不新增重复测试，主要补齐测试矩阵并同步长期 API 契约。
@@ -733,3 +733,4 @@
 - 目标：标题同时展示进项发票、OA/流水关联和付款完整性，且始终代表页面投影全期间数据。
 - 决策：rows 主响应从 `input_invoice_usage` 完整投影展开 `invoiceRelations.summaries`，按唯一发票 ID 返回 `statistics` / `statistics_status`；筛选、月份、排序和分页不参与统计。Page Audit 保持 canonical expected-set 独立对照。
 - 旧链路：删除前端 `titleInvoiceCount`、`loadTitleTotal`、`queryAffectsTitleTotal` 与 `page_size=1` 额外标题请求，禁止恢复第二浏览器 I/O。
+- 2026-07-24：relation freshness 改为按月份进项发票 IDs 的 consumer-semantic proof，bank-bank/纯销项关系不再令进项页 stale；source version 提升到 `input-invoice-usage:v4-semantic-relation-scope`。

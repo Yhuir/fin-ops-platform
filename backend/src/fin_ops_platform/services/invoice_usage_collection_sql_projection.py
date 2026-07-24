@@ -82,7 +82,10 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
             payment_status_rules_version=self._payment_rules_provider.rules_source_version(),
             oa_reverse_batch_source_version=None,
         )
-        relation_source_versions = self._workbench_relation_source_versions_for_scope(normalized_scope_key)
+        relation_source_versions = self._invoice_relation_source_versions_for_scope(
+            normalized_scope_key,
+            invoice_type=InvoiceType.INPUT,
+        )
         if relation_source_versions:
             source_versions["workbench_relation_source_versions"] = relation_source_versions
         unchanged = None
@@ -128,7 +131,10 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         normalized_scope_key = self._month_scope(scope_key)
         self._require_fresh_workbench_relation_scope(normalized_scope_key)
         source_versions = output_invoice_collection_source_versions()
-        relation_source_versions = self._workbench_relation_source_versions_for_scope(normalized_scope_key)
+        relation_source_versions = self._invoice_relation_source_versions_for_scope(
+            normalized_scope_key,
+            invoice_type=InvoiceType.OUTPUT,
+        )
         if relation_source_versions:
             source_versions["workbench_relation_source_versions"] = relation_source_versions
         unchanged = None
@@ -166,13 +172,20 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         return {"scope_key": normalized_scope_key, "row_count": len(rows), "source_versions": source_versions}
 
     def mark_input_invoice_usage_scope_empty(self, scope_key: str) -> None:
+        source_versions = input_invoice_usage_source_versions(
+            payment_status_rules_version=self._payment_rules_provider.rules_source_version(),
+            oa_reverse_batch_source_version=None,
+        )
+        relation_source_versions = self._invoice_relation_source_versions_for_scope(
+            scope_key,
+            invoice_type=InvoiceType.INPUT,
+        )
+        if relation_source_versions:
+            source_versions["workbench_relation_source_versions"] = relation_source_versions
         self._input_invoice_usage_read_model_repository.mark_input_invoice_usage_scope(
             scope_key=scope_key,
             row_count=0,
-            source_versions=input_invoice_usage_source_versions(
-                payment_status_rules_version=self._payment_rules_provider.rules_source_version(),
-                oa_reverse_batch_source_version=None,
-            ),
+            source_versions=source_versions,
             statistics_metadata=_invoice_relation_statistics_metadata(
                 [],
                 summary_kind="input",
@@ -181,10 +194,17 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         )
 
     def mark_output_invoice_collection_scope_empty(self, scope_key: str) -> None:
+        source_versions = output_invoice_collection_source_versions()
+        relation_source_versions = self._invoice_relation_source_versions_for_scope(
+            scope_key,
+            invoice_type=InvoiceType.OUTPUT,
+        )
+        if relation_source_versions:
+            source_versions["workbench_relation_source_versions"] = relation_source_versions
         self._output_invoice_collection_read_model_repository.mark_output_invoice_collection_scope(
             scope_key=scope_key,
             row_count=0,
-            source_versions=output_invoice_collection_source_versions(),
+            source_versions=source_versions,
             statistics_metadata=_invoice_relation_statistics_metadata(
                 [],
                 summary_kind="output",
@@ -238,13 +258,31 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
             require_fresh_relations=True,
         )
 
-    def _workbench_relation_source_versions_for_scope(self, scope_key: str) -> dict[str, object]:
-        source_versions_loader = getattr(self._read_repository, "workbench_relation_source_versions", None)
+    def _invoice_relation_source_versions_for_scope(
+        self,
+        scope_key: str,
+        *,
+        invoice_type: InvoiceType,
+    ) -> dict[str, object]:
+        method_name = (
+            "input_invoice_usage_relation_source_versions"
+            if invoice_type == InvoiceType.INPUT
+            else "output_invoice_collection_relation_source_versions"
+        )
+        source_versions_loader = getattr(self._read_repository, method_name, None)
         if callable(source_versions_loader):
-            source_versions = source_versions_loader(scope_key=scope_key)
-            if isinstance(source_versions, dict) and source_versions:
+            source_versions_by_scope = source_versions_loader(
+                scope_keys=[scope_key],
+                tenant_id="default",
+            )
+            source_versions = (
+                source_versions_by_scope.get(scope_key)
+                if isinstance(source_versions_by_scope, dict)
+                else None
+            )
+            if isinstance(source_versions, dict):
                 return dict(source_versions)
-        return dict(self._workbench_relation_read_facade.last_source_versions)
+        return {}
 
     def _require_fresh_workbench_relation_scope(self, scope_key: str) -> None:
         payload = self._workbench_relation_read_facade.list_by_month(

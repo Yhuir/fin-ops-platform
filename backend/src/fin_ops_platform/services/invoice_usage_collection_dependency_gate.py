@@ -21,9 +21,11 @@ class InvoiceUsageCollectionDependencyGate:
         expected_source_versions: Callable[..., dict[str, object]],
         requires_sql_runtime: Callable[[], bool],
         context: str,
+        relation_source_versions_loader: Callable[..., dict[str, dict[str, object]]] | None = None,
     ) -> None:
         self._scope_state_loader = scope_state_loader
         self._relation_reader = relation_reader
+        self._relation_source_versions_loader = relation_source_versions_loader
         self._expected_source_versions = expected_source_versions
         self._requires_sql_runtime = requires_sql_runtime
         self._context = str(context or "invoice_usage_collection").strip()
@@ -41,7 +43,10 @@ class InvoiceUsageCollectionDependencyGate:
             "source_versions_for_scopes",
             None,
         )
-        if not callable(self._scope_state_loader) or not callable(relation_loader):
+        if not callable(self._scope_state_loader) or (
+            not callable(self._relation_source_versions_loader)
+            and not callable(relation_loader)
+        ):
             return self._result(
                 status="unavailable",
                 blocking_scope_keys=(
@@ -72,17 +77,33 @@ class InvoiceUsageCollectionDependencyGate:
         )
         if not scope_keys:
             return self._result(status="fresh")
-        relation_state = relation_loader(
-            scope_keys,
-            require_fresh=True,
-            reason=reason,
-        )
-        if not isinstance(relation_state, dict):
+        if callable(self._relation_source_versions_loader):
+            relation_versions_by_scope = self._relation_source_versions_loader(
+                scope_keys=scope_keys,
+                tenant_id="default",
+            )
             relation_state = {
-                "status": "unavailable",
-                "refresh_scope_keys": scope_keys,
-                "stale_reasons": ["workbench_relation_status_unavailable"],
+                "status": "fresh",
+                "read_model_scope_source_versions": (
+                    relation_versions_by_scope
+                    if isinstance(relation_versions_by_scope, dict)
+                    else {}
+                ),
+                "refresh_scope_keys": [],
+                "stale_reasons": [],
             }
+        else:
+            relation_state = relation_loader(
+                scope_keys,
+                require_fresh=True,
+                reason=reason,
+            )
+            if not isinstance(relation_state, dict):
+                relation_state = {
+                    "status": "unavailable",
+                    "refresh_scope_keys": scope_keys,
+                    "stale_reasons": ["workbench_relation_status_unavailable"],
+                }
         return invoice_relation_dependency_status(
             scope_state=scope_state,
             relation_state=relation_state,

@@ -61,7 +61,7 @@ filter config、filters JSON 解析和排序字段校验由 `input_invoice_usage
 
 页面首屏和筛选态由 rows 与 filter-options 两个读接口共同证明 fresh。前端必须合并两者的 `readModelStatus` / `read_model_status`：任一接口返回 `stale`、`missing`、`schema_mismatch`、`refreshing` 或等价非 fresh 状态时，页面整体进入刷新诊断，不展示普通空态，不启用导出，也不把另一接口的 fresh 空 rows 当成最终事实。
 
-`input_invoice_usage:all` 在 refresh 链路中是 fan-out 到月份 shard 的控制 scope；页面默认 all 查询的 freshness 证明来自实际 rows/month scopes 和 active dirty/outbox 状态。month scope 必须继续严格比对对应月份 `workbench_relation` source versions；all 查询不能直接使用全局 `workbench_relation:all` source versions 作为 expected contract，否则会把已 fresh 的月份 shard 误判为 stale 并反复显示“正在刷新”。
+`input_invoice_usage:all` 在 refresh 链路中是 fan-out 到月份 shard 的控制 scope；页面默认 all 查询的 freshness 证明来自实际 rows/month scopes 和 active dirty/outbox 状态。month scope 严格比对该月进项发票 IDs 对应的 consumer-semantic relation proof；all 查询不能使用全局 `workbench_relation:all` source versions，否则无关 bank-bank/销项关系会误判 stale。
 
 默认 all 页面查询不得 enqueue 该控制 scope；query gate 通过轻量 scope/source-version port 枚举有效月份并只刷新 mismatch shard。关联详情抽屉携带当前行月份，无法证明月份时零 enqueue。`all` 只供显式 maintenance/reapply/repair。
 

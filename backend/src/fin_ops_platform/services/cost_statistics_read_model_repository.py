@@ -31,16 +31,6 @@ class CostStatisticsReadModelRepositoryPort:
         payload = self._repository.get_cost_statistics_freshness_gate(scope_key=scope_key)
         return dict(payload) if isinstance(payload, dict) else None
 
-    def list_active_cost_statistics_dependencies(
-        self,
-        *,
-        project_scope: str,
-    ) -> list[dict[str, Any]]:
-        payload = self._repository.list_active_cost_statistics_dependencies(
-            project_scope=project_scope
-        )
-        return [dict(item) for item in list(payload or []) if isinstance(item, dict)]
-
     def get_cost_statistics_page(self, **query: Any) -> dict[str, Any] | None:
         payload = self._repository.get_cost_statistics_page(**query)
         return dict(payload) if isinstance(payload, dict) else None
