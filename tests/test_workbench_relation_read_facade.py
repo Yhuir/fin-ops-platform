@@ -699,7 +699,7 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
         payload = facade.source_versions_for_scopes(
             ["2026-01", "2026-02"],
             require_fresh=True,
-            reason="bank_details_page_access",
+            reason="downstream_workbench_relation_read",
         )
 
         self.assertEqual(payload["status"], "stale")
@@ -710,7 +710,7 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
         self.assertEqual(expected_calls, [["2026-01", "2026-02"]])
         self.assertEqual(
             queue.refreshes,
-            [("workbench_relation", "2026-02", "bank_details_page_access")],
+            [("workbench_relation", "2026-02", "downstream_workbench_relation_read")],
         )
 
     def test_batch_accounting_repository_uses_fixed_statement_counts(self) -> None:

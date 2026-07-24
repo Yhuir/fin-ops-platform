@@ -8011,7 +8011,6 @@ class Application:
                 lambda: {},
             ),
             category_mutation_writer=category_mutation_writer,
-            workbench_relation_reader=self._workbench_relation_read_facade(),
         )
 
     def _bank_transaction_category_mutation_writer(self) -> BankTransactionCategoryMutationWriter | None:

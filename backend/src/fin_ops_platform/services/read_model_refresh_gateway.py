@@ -247,6 +247,7 @@ class ReadModelRefreshGateway:
 _ACTIVE_COALESCED_REFRESH_REASONS = {
     "dependency_not_fresh",
     "downstream_bank_tag_read",
+    "downstream_workbench_relation_read",
     "pending_invoice_sql_projection",
     "bank_detail_all_shard",
     "bank_detail_relation_tags_read",

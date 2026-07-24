@@ -327,6 +327,7 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
             ("invoice_lifecycle", "2026-02", "invoice_lifecycle_access_dependency"),
             ("invoice_lifecycle", "2026-02", "invoice_lifecycle_month_shard"),
             ("workbench_relation", "2026-02", "invoice_usage_collection_sql_projection"),
+            ("workbench_relation", "2026-02", "downstream_workbench_relation_read"),
             ("bank_detail", "2026-02", "migration_missing"),
             ("oa_pending_payment", "2026-02", "oa_pending_payment_month_shard"),
             ("output_invoice_collection", "2026-02", "output_invoice_collection_month_shard"),

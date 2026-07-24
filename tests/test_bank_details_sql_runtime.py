@@ -1932,7 +1932,7 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             [{"date_from": "2026-05-01", "date_to": "2026-05-31"}],
         )
 
-    def test_application_transactions_bulk_checks_relation_page_dependency(self) -> None:
+    def test_application_transactions_trusts_own_canonical_relation_scope_proof(self) -> None:
         class SqlReadRepository:
             @staticmethod
             def bank_detail_scope_keys_for_range(**_kwargs: object) -> list[str]:
@@ -1965,19 +1965,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
                     "pagination": {"page": 1, "page_size": 100, "total": 0},
                 }
 
-        class RelationReader:
-            def __init__(self) -> None:
-                self.calls: list[dict[str, object]] = []
-
-            def source_versions_for_scopes(self, scope_keys: list[str], **kwargs: object) -> dict[str, object]:
-                self.calls.append({"scope_keys": list(scope_keys), **dict(kwargs)})
-                return {
-                    "status": "stale",
-                    "refresh_enqueued": True,
-                    "stale_reasons": ["2026-03:workbench_pair_relations_updated_at_mismatch"],
-                }
-
-        relation_reader = RelationReader()
         service = BankDetailsApplicationService(
             app_settings_service=SimpleNamespace(
                 get_bank_auto_tag_rules_payload=lambda **_kwargs: {"version": 1, "active_rules": []}
@@ -1991,7 +1978,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             affected_months_provider=lambda _transaction_ids: [],
             available_month_scope_keys_provider=lambda: ["2026-02", "2026-03"],
             enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
-            workbench_relation_reader=relation_reader,
         )
 
         payload = service.transactions_payload(
@@ -2003,22 +1989,9 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             page_size=100,
         )
 
-        self.assertEqual(payload["read_model_status"], "refreshing")
-        self.assertEqual(payload["read_model_dependency_statuses"], {"workbench_relation": "stale"})
-        self.assertEqual(
-            payload["read_model_stale_reasons"],
-            ["workbench_relation:2026-03:workbench_pair_relations_updated_at_mismatch"],
-        )
-        self.assertEqual(
-            relation_reader.calls,
-            [
-                {
-                    "scope_keys": ["2026-02", "2026-03"],
-                    "require_fresh": True,
-                    "reason": "bank_details_page_access",
-                }
-            ],
-        )
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertNotIn("read_model_dependency_statuses", payload)
+        self.assertNotIn("read_model_stale_reasons", payload)
 
     def test_application_transactions_missing_sql_scope_enqueues_refresh_without_legacy_scan(self) -> None:
         class SqlReadRepository:

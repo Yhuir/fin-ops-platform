@@ -1007,7 +1007,7 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(result.payload["read_model_status"], "fresh")
         self.assertEqual(source_freshness_calls, 1)
 
-    def test_groups_missing_exact_generation_stats_enqueues_refresh_and_returns_accepted(self) -> None:
+    def test_groups_repository_miss_enqueues_refresh_and_returns_accepted(self) -> None:
         class Repository:
             @staticmethod
             def get_workbench_groups_freshness_status(**_kwargs: object) -> dict[str, object]:

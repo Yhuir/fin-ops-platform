@@ -2535,6 +2535,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "bank_details_service:",
             "_bank_details_service",
             "BankDetailsService",
+            "workbench_relation_reader",
+            "_workbench_relation_reader",
+            "_with_page_relation_freshness",
+            "bank_details_page_access",
+            "read_model_dependency_statuses",
             "requires_sql_read_model_runtime",
             ".list_accounts(",
             ".list_transactions(",
@@ -2602,6 +2607,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for removed_helper_name in sorted(removed_application_helpers):
             if removed_helper_name in factory_source:
                 violations.append(f"BankDetailsApplicationService factory still injects removed helper {removed_helper_name}")
+        if "workbench_relation_reader=" in factory_source:
+            violations.append("BankDetailsApplicationService factory still injects the redundant relation projection gate")
         for retained_callback in (
             "_bank_detail_auto_category_suggestion_provider",
             "_bank_detail_available_month_scope_provider",

@@ -2902,8 +2902,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             )
         )
         self.assertFalse(any("g.generation_id = %s" in sql and "gen-active" in params for sql, params in all_queries))
-        self.assertTrue(any("from read_model.workbench_generation_stats" in sql for sql, _params in all_queries))
-        self.assertFalse(any("count(distinct (r.pane" in sql for sql, _params in all_queries))
+        self.assertFalse(any("from read_model.workbench_generation_stats" in sql for sql, _params in all_queries))
+        self.assertTrue(any("count(distinct (r.pane" in sql for sql, _params in all_queries))
 
 
     def test_batch_accounting_loader_reads_only_active_workbench_generations(self) -> None:
@@ -2965,9 +2965,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         )
         self.assertTrue(
             any(
-                "from read_model.workbench_generation_stats" in sql
-                and params == (COMPOSED_ALL_VERSION, "all", "paired")
-                for sql, params in connection.fetch_one_calls
+                "count(distinct (r.pane" in sql
+                for sql, _params in connection.fetch_one_calls
             )
         )
         self.assertTrue(
@@ -3017,7 +3016,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             canonical_query,
         )
 
-    def test_repository_composed_all_groups_counts_use_exact_generation_stats(self) -> None:
+    def test_repository_composed_all_groups_ignore_legacy_published_stats(self) -> None:
         connection = WorkbenchGenerationStatsConnection()
         repository = PostgresReadModelRepository(connection)
 
@@ -3026,36 +3025,14 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         assert page is not None
         self.assertEqual(page["total"], 2)
         self.assertEqual(page["row_counts"], {"oa": 3, "bank": 4, "invoice": 5, "rows": 12})
-        self.assertTrue(
+        self.assertFalse(
             any("from read_model.workbench_generation_stats" in sql for sql, _params in connection.fetch_one_calls)
         )
-        self.assertFalse(
+        self.assertTrue(
             any(
                 "count(distinct (r.pane, coalesce(nullif(r.object_identity_key, ''), r.row_id))) filter" in sql
                 for sql, _params in connection.fetch_one_calls
             )
-        )
-
-    def test_repository_composed_all_groups_missing_generation_stats_fails_closed(self) -> None:
-        class MissingAllGenerationStatsConnection(ActiveWorkbenchGenerationConnection):
-            def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
-                normalized = " ".join(sql.lower().split())
-                if "from read_model.workbench_generation_stats" in normalized:
-                    self.fetch_one_calls.append((normalized, params))
-                    return None
-                return super().fetch_one(sql, params)
-
-        connection = MissingAllGenerationStatsConnection()
-        repository = PostgresReadModelRepository(connection)
-
-        page = repository.get_workbench_groups_page(scope_key="all", zone="paired", page=1, page_size=25)
-
-        self.assertIsNone(page)
-        self.assertTrue(
-            any("from read_model.workbench_generation_stats" in sql for sql, _params in connection.fetch_one_calls)
-        )
-        self.assertFalse(
-            any("count(distinct" in sql for sql, _params in connection.fetch_one_calls)
         )
 
     def test_repository_composed_all_groups_generation_switch_fails_closed(self) -> None:
@@ -4656,7 +4633,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertNotIn("insert into read_model.workbench_group_rows(", executed_sql)
         self.assertIn("status = 'active'", executed_sql)
 
-    def test_repository_publishes_one_exact_all_scope_stats_set_after_month_generations_activate(self) -> None:
+    def test_repository_month_publish_does_not_recompute_all_scope_statistics(self) -> None:
         class CanonicalStatsWriteConnection(WorkbenchWriteConnection):
             def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
                 normalized = " ".join(sql.lower().split())
@@ -4731,24 +4708,13 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             for statement, params in connection.executed
             if "insert into read_model.workbench_generation_stats" in statement and params[1] == "all"
         ]
-        self.assertEqual(len(all_scope_stat_writes), 2)
-        self.assertEqual({params[2] for params in all_scope_stat_writes}, {"paired", "unpaired"})
-        self.assertEqual(len({params[0] for params in all_scope_stat_writes}), 1)
-        self.assertTrue(str(all_scope_stat_writes[0][0]).startswith("workbench:all:active-generation-set:"))
-        stats_by_zone = {params[2]: params for params in all_scope_stat_writes}
-        self.assertEqual(stats_by_zone["paired"][3:8], (2, 3, 4, 5, 12))
-        self.assertEqual(stats_by_zone["unpaired"][3:8], (7, 8, 18, 28, 54))
-        page_statistics = stats_by_zone["paired"][8].obj["page_statistics"]
-        self.assertEqual(page_statistics["bank_transaction_count"], 22)
-        self.assertEqual(page_statistics["unpaired_object_count"], 54)
-        self.assertEqual(page_statistics["incomplete_group_count"], 4)
-        stale_stats_delete = next(
-            params
-            for statement, params in connection.executed
-            if "delete from read_model.workbench_generation_stats" in statement
-            and "scope_key = 'all'" in statement
+        self.assertEqual(all_scope_stat_writes, [])
+        self.assertFalse(
+            any(
+                "with canonical_groups as" in sql and "canonical_members as" in sql
+                for sql, _params in connection.fetch_one_calls
+            )
         )
-        self.assertEqual(stale_stats_delete, (all_scope_stat_writes[0][0],))
 
     def test_repository_publish_leaves_generation_retention_to_the_timer(self) -> None:
         connection = WorkbenchWriteConnection()

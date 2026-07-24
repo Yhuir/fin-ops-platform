@@ -55,7 +55,6 @@ class BankDetailsApplicationService:
         suggestion_provider: Callable[[str], dict[str, object] | None] | None = None,
         bank_transaction_tags_provider: Callable[[], dict[str, object]] | None = None,
         category_mutation_writer: Any | None = None,
-        workbench_relation_reader: Any | None = None,
     ) -> None:
         self._app_settings_service = app_settings_service
         self._bank_transaction_category_service = bank_transaction_category_service
@@ -75,7 +74,6 @@ class BankDetailsApplicationService:
         self._suggestion_provider = suggestion_provider
         self._bank_transaction_tags_provider = bank_transaction_tags_provider
         self._category_mutation_writer = category_mutation_writer
-        self._workbench_relation_reader = workbench_relation_reader
         self._category_mutation_lock = RLock()
 
     def accounts_payload(self, *, date_from: str | None, date_to: str | None) -> dict[str, object]:
@@ -823,63 +821,13 @@ class BankDetailsApplicationService:
         if callable(summary_loader):
             summary = summary_loader(scope_keys=scope_keys)
             if isinstance(summary, dict):
-                return self._with_page_relation_freshness(
-                    self._with_auto_tag_rule_freshness(summary),
-                    scope_keys=scope_keys,
-                )
+                return self._with_auto_tag_rule_freshness(summary)
         return {
             "read_model_status": "missing",
             "read_model_scope_keys": scope_keys,
             "read_model_generated_at": None,
             "read_model_scope_signatures": {},
         }
-
-    def _with_page_relation_freshness(
-        self,
-        scope_summary: dict[str, object],
-        *,
-        scope_keys: list[str],
-    ) -> dict[str, object]:
-        concrete_scope_keys = self._bank_detail_concrete_scope_keys(scope_keys)
-        relation_status_loader = getattr(self._workbench_relation_reader, "source_versions_for_scopes", None)
-        if not concrete_scope_keys or not callable(relation_status_loader):
-            return scope_summary
-        relation_status_payload = relation_status_loader(
-            concrete_scope_keys,
-            require_fresh=True,
-            reason="bank_details_page_access",
-        )
-        if not isinstance(relation_status_payload, dict):
-            relation_status_payload = {
-                "status": "unavailable",
-                "refresh_enqueued": False,
-                "stale_reasons": ["workbench_relation_status_unavailable"],
-            }
-        relation_status = str(relation_status_payload.get("status") or "unavailable")
-        result = dict(scope_summary)
-        result["read_model_dependency_statuses"] = {"workbench_relation": relation_status}
-        if relation_status == "fresh":
-            return result
-        current_status = str(result.get("read_model_status") or "missing")
-        if current_status == "fresh":
-            result["read_model_status"] = (
-                "refreshing"
-                if bool(relation_status_payload.get("refresh_enqueued"))
-                else relation_status
-            )
-        result["read_model_stale_reasons"] = list(
-            dict.fromkeys(
-                [
-                    *list(result.get("read_model_stale_reasons") or []),
-                    *[
-                        f"workbench_relation:{reason}"
-                        for reason in list(relation_status_payload.get("stale_reasons") or [])
-                        if str(reason).strip()
-                    ],
-                ]
-            )
-        )
-        return result
 
     def _with_auto_tag_rule_freshness(self, scope_summary: dict[str, object]) -> dict[str, object]:
         if str(scope_summary.get("read_model_status") or "") != "fresh":
@@ -946,7 +894,6 @@ class BankDetailsApplicationService:
             "read_model_scope_keys": list(summary.get("read_model_scope_keys") or scope_keys),
             "read_model_generated_at": summary.get("read_model_generated_at"),
             "read_model_stale_reasons": list(summary.get("read_model_stale_reasons") or []),
-            "read_model_dependency_statuses": dict(summary.get("read_model_dependency_statuses") or {}),
             "refresh_enqueued": refresh_enqueued,
             "refresh_reason": refresh_reason,
             "date_from": date_from,
@@ -982,7 +929,6 @@ class BankDetailsApplicationService:
                 "read_model_scope_keys": list(summary.get("read_model_scope_keys") or scope_keys),
                 "read_model_generated_at": summary.get("read_model_generated_at"),
                 "read_model_stale_reasons": list(summary.get("read_model_stale_reasons") or []),
-                "read_model_dependency_statuses": dict(summary.get("read_model_dependency_statuses") or {}),
                 "refresh_enqueued": refresh_enqueued,
                 "refresh_reason": refresh_reason,
                 "cache_status": "bypass",

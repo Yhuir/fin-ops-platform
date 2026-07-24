@@ -12482,8 +12482,11 @@ class PostgresReadModelRepository:
                 )
                 if normalized_scope_key == "all":
                     statistics = result.get("summary", {}).get("statistics")
+                elif result["read_model_status"] == "fresh":
+                    all_summary = self._get_workbench_all_canonical_summary_counts()
+                    statistics = all_summary.get("statistics")
                 else:
-                    statistics = self._workbench_published_all_page_statistics()
+                    statistics = None
                 result["statistics"] = (
                     dict(statistics)
                     if result["read_model_status"] == "fresh" and isinstance(statistics, dict)
@@ -12798,62 +12801,6 @@ class PostgresReadModelRepository:
                     jsonb({"summary_zone_counts": counts, "page_statistics": page_statistics}),
                 ),
             )
-
-    def _publish_workbench_all_generation_stats(self, connection: Any) -> None:
-        active_month_version = self._workbench_active_month_generation_version(connection)
-        generation_id = text(active_month_version.get("version"))
-        if not generation_id:
-            raise RuntimeError("Workbench all-scope generation stats require active month generations.")
-        transaction_repository = PostgresReadModelRepository(connection)
-        summary = transaction_repository._get_workbench_all_canonical_summary_counts()
-        self._upsert_workbench_generation_stats(
-            connection,
-            generation_id=generation_id,
-            scope_key="all",
-            summary_payload={"summary": summary},
-        )
-        connection.execute(
-            """
-            delete from read_model.workbench_generation_stats
-            where scope_key = 'all'
-              and generation_id <> %s
-            """,
-            (generation_id,),
-        )
-
-    def _workbench_published_all_page_statistics(self) -> dict[str, int] | None:
-        if self._workbench_summary_read_model_status(scope_key="all") != "fresh":
-            return None
-        active_version = self._workbench_active_month_generation_version(self._connection)
-        generation_id = text(active_version.get("version"))
-        if not generation_id:
-            return None
-        rows = self._connection.fetch_all(
-            """
-            select zone, payload
-            from read_model.workbench_generation_stats
-            where generation_id = %s
-              and scope_key = 'all'
-              and zone in ('paired', 'unpaired')
-              and status_bucket = 'all'
-            order by zone
-            """,
-            (generation_id,),
-        )
-        if len(rows) != 2:
-            return None
-        page_statistics: list[dict[str, int]] = []
-        for row in rows:
-            payload = row.get("payload") if isinstance(row, dict) else None
-            statistics = payload.get("page_statistics") if isinstance(payload, dict) else None
-            if not isinstance(statistics, dict):
-                return None
-            page_statistics.append(
-                {str(key): int_value(value, 0) for key, value in statistics.items()}
-            )
-        if page_statistics[0] != page_statistics[1]:
-            return None
-        return page_statistics[0]
 
     def _workbench_generation_stats_for_groups_page(
         self,
@@ -13180,13 +13127,17 @@ class PostgresReadModelRepository:
             column_filters=normalized_column_filters,
             time_filters=normalized_time_filters,
         )
-        generation_stats_eligible = bool(active_generation_id) and not any(
-            (
-                text(status),
-                text(source_kind),
-                normalized_search,
-                normalized_column_filters,
-                normalized_time_filters,
+        generation_stats_eligible = (
+            bool(active_generation_id)
+            and not composed_all_scope
+            and not any(
+                (
+                    text(status),
+                    text(source_kind),
+                    normalized_search,
+                    normalized_column_filters,
+                    normalized_time_filters,
+                )
             )
         )
         materialized_counts = (
@@ -13198,8 +13149,6 @@ class PostgresReadModelRepository:
             if generation_stats_eligible
             else None
         )
-        if composed_all_scope and generation_stats_eligible and materialized_counts is None:
-            return None
         matching_group_ids: list[str] | None = None
         if materialized_counts is None:
             if composed_all_scope:
@@ -14509,7 +14458,6 @@ class PostgresReadModelRepository:
                         summary_count=1,
                     )
                     published_scope_keys.add(scope_key)
-                self._publish_workbench_all_generation_stats(connection)
         try:
             run_in_transaction(self._connection, write)
         except Exception as exc:
