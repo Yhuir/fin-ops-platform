@@ -14,6 +14,12 @@
 
 ## 历史记录
 
+## 2026-07-25 - Write-operation apply 证据持久化
+
+- 生产 apply runner 已实际完成 6 次 test-owned confirm/withdraw 并返回 0，但 SSH stdout 证据文件为 0 字节；API release metrics、写状态、队列和 fixture recovery 证明业务执行成功，stdout 不能继续作为唯一证据载体。
+- deploy-control 复用 runner 既有 `--output`，先将 dry-run/apply JSON 写入 `mktemp` 创建的 mode-600 临时报告，再单次输出并由 `EXIT` trap 精确删除。runner 非零退出仍输出 JSON 并保留原退出码，报告缺失则 fail closed。
+- 临时文件只承载单次验证报告，不是业务备份或恢复点；该修复不改变业务 API、read model、queue、worker、事实源或页面 I/O。
+
 ## 2026-07-25 - 跨月关系生产验证 scope 上限
 
 - test-owned Turnover closure 生产证据证明，同一关系可以同时影响两个 canonical 月份和 Workbench `all` 组合视图；Cost 还需要一个绑定 fixture 身份的流水视图，以及 `project_scope=active/all` 两个 Workbench-dependent 视图。

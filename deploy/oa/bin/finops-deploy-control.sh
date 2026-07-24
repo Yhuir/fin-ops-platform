@@ -759,6 +759,9 @@ write_operation_e2e_smoke() {
     export PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
     export FIN_OPS_DATA_DIR="${FIN_OPS_DATA_DIR:-/opt/fin-ops/data}"
     local apply_args=()
+    local report_path runner_status
+    report_path="$(mktemp /tmp/finops-write-e2e-report.XXXXXX.json)"
+    trap 'rm -f -- "$report_path"' EXIT
     if [[ "$mode" == "--apply-stdin" ]]; then
       local admin_token approval_ticket
       IFS= read -r admin_token
@@ -770,7 +773,7 @@ write_operation_e2e_smoke() {
       apply_args=(--apply)
     fi
     cd "$src"
-    "$API_PYTHON" -m fin_ops_platform.tools.write_operation_e2e_smoke \
+    if "$API_PYTHON" -m fin_ops_platform.tools.write_operation_e2e_smoke \
       --scenario "$scenario" \
       --base-url https://www.yn-sourcing.com \
       --api-prefix /fin-ops-api \
@@ -778,7 +781,15 @@ write_operation_e2e_smoke() {
       --refresh-target-ms 30000 \
       --http-target-ms 1000 \
       --timeout-seconds 120 \
-      "${apply_args[@]}"
+      --output "$report_path" \
+      "${apply_args[@]}" >/dev/null; then
+      runner_status=0
+    else
+      runner_status=$?
+    fi
+    [[ -s "$report_path" ]] || die "write-operation E2E runner did not produce a JSON report"
+    cat -- "$report_path"
+    exit "$runner_status"
   )
 }
 
