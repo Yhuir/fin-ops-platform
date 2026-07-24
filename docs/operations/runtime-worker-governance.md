@@ -155,6 +155,10 @@ event 或 worker instance 时，必须先更新 registry，再让 deploy/preflig
 - 首批 receipt 完成后，consumer gate 对 `202` / `read_model_not_fresh` / dependency `503` 在总 timeout
   内继续轮询，因为这些状态属于合法的 access-time convergence；业务字段断言失败和单次 fresh 响应超过页面 SLO
   不可重试，仍立即失败，防止 eventual consistency 轮询掩盖错误内容或性能退化。
+- 同一 checkpoint 声明的多个 consumer 代表同时打开或同时恢复可见的页面，runner 每轮必须有界并发探测，
+  并按 scenario 顺序输出结果；禁止串行 HTTP 探测把前一个页面的请求/重建时间累计到后一个页面。失败结果必须保留
+  已解析的 `path`，使首次不可重试 SLO failure 与后续 fresh 结果使用同一 identity，不能出现报告总状态 fail、
+  展示行却全部 pass 的证据漂移。
 - no-OA withdraw 候选必须同时满足 `app.no_oa_bank_batches.status='submitted'`、`relation.status='active'`
   和 `relation.relation_mode='no_oa_bank_batch'`，不能把 bank-flow rule batch 关系误送到 no-OA endpoint。
 

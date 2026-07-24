@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Barrier
 import unittest
 from unittest.mock import patch
 
@@ -1457,6 +1458,106 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(consumer["results"][0]["error"], "consumer_read_model_not_fresh")
         self.assertEqual(audit["status"], "fail")
         self.assertEqual(audit["error"], "system_audit_snapshot_missing")
+
+    def test_checkpoint_consumers_probe_open_pages_in_parallel_and_keep_scenario_order(self) -> None:
+        checkpoint = write_operation_e2e_smoke.WriteCheckpoint(
+            name="parallel-pages",
+            operations=("workbench_relation_confirm_cross_page",),
+            steps=(),
+            consumers=tuple(
+                write_operation_e2e_smoke.ConsumerProbe(
+                    probe=http_slo_probe.HttpProbe(
+                        name,
+                        f"/api/{name}",
+                        target_ms=1000,
+                    ),
+                    assertions=(
+                        write_operation_e2e_smoke.JsonPointerAssertion(
+                            "/rows/0/visible",
+                            "equals",
+                            True,
+                        ),
+                    ),
+                    page_key=name,
+                    role="affected",
+                )
+                for name in ("page-a", "page-b")
+            ),
+        )
+        both_requests_started = Barrier(2)
+
+        def request_fn(*_args) -> http_slo_probe.HttpProbeResponse:
+            both_requests_started.wait(timeout=2)
+            return http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=b'{"read_model_status":"fresh","refresh_enqueued":false,"rows":[{"visible":true}]}',
+            )
+
+        result = write_operation_e2e_smoke._collect_checkpoint_consumers(
+            checkpoint,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            headers={"Authorization": "Bearer token"},
+            timeout_seconds=1,
+            request_fn=request_fn,
+            variables={},
+            strict=True,
+        )
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(
+            [item["name"] for item in result["results"]],
+            ["page-a", "page-b"],
+        )
+
+    def test_consumer_slo_failure_keeps_resolved_path_for_terminal_result_identity(self) -> None:
+        checkpoint = write_operation_e2e_smoke.WriteCheckpoint(
+            name="slow-page",
+            operations=("workbench_relation_confirm_cross_page",),
+            steps=(),
+            consumers=(
+                write_operation_e2e_smoke.ConsumerProbe(
+                    probe=http_slo_probe.HttpProbe(
+                        "slow-page",
+                        "/api/pages/${month}",
+                        target_ms=1,
+                    ),
+                    assertions=(
+                        write_operation_e2e_smoke.JsonPointerAssertion(
+                            "/rows/0/visible",
+                            "equals",
+                            True,
+                        ),
+                    ),
+                    page_key="slow-page",
+                    role="affected",
+                ),
+            ),
+        )
+
+        with patch(
+            "fin_ops_platform.tools.write_operation_e2e_smoke.monotonic",
+            side_effect=[10.0, 10.002],
+        ):
+            result = write_operation_e2e_smoke._collect_checkpoint_consumers(
+                checkpoint,
+                base_url="https://example.test",
+                api_prefix="/fin-ops-api",
+                headers={"Authorization": "Bearer token"},
+                timeout_seconds=1,
+                request_fn=lambda *_args: http_slo_probe.HttpProbeResponse(
+                    status_code=200,
+                    headers={"content-type": "application/json"},
+                    body=b'{"read_model_status":"fresh","refresh_enqueued":false,"rows":[{"visible":true}]}',
+                ),
+                variables={"month": "2026-07"},
+                strict=True,
+            )
+
+        self.assertEqual(result["status"], "fail")
+        self.assertEqual(result["results"][0]["path"], "/api/pages/2026-07")
+        self.assertEqual(result["results"][0]["error"], "consumer_slo_miss:2.0>1")
 
     def test_consumer_wait_retries_refreshing_and_affected_business_visibility(self) -> None:
         checkpoint = _strict_checkpoint("confirm", key="confirm-key", relation_state_after="active")

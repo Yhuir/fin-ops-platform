@@ -1832,3 +1832,10 @@
 - 最小修复只扩展现有 source-version SQL：month scope 覆盖该月对象与 active relation 跨月成员，`all` 覆盖全量对象；generation rebuild 与 normal GET 继续复用同一 expected vector。canonical 变化本身不投递页面 target，只有访问相关 scope 才返回 refreshing、经现有 gateway 精确入队并由既有 worker 原子发布。
 - `month=all` 的 active-generation-set proof 必须从 active month generations 汇总同一组 canonical timestamps；只扩展 expected SQL 而不扩展 `_workbench_composed_all_source_versions(...)` 会让月分片已 fresh、all 仍永久 stale。汇总继续复用既有 helper，并按字段取 active shards 最新值。
 - 不新增表、索引、缓存、queue、worker、registry、API 字段或 fallback；旧 generation 因缺少新增 proof keys 在访问时自然失效，不保留兼容分支。
+
+## 2026-07-24 - 生产访问收敛验证器并发与失败 identity 修正
+
+- 首轮 Phase 27 生产可逆关系验证最终业务断言均 fresh/pass，但五个 consumer 每轮按顺序 GET，导致前序页面的 freshness SQL 与重建排队时间被累计到后序页面；该数字不能证明“两个页面同时打开”时各页面的独立访问耗时。
+- `write_operation_e2e_smoke` 现在对同一 checkpoint 的 consumer 使用最多 16 个有界线程并发探测，并继续按 scenario 顺序输出；这只修正生产证明 I/O，不改变页面、API、queue、worker 或 read model 运行时架构。
+- 首次 fresh HTTP 超过页面 SLO 仍是不可重试失败。异常结果现在始终保存已解析 `path`，与后续成功结果使用同一 `(page_key, name, path)` identity，避免总状态保留失败但展示结果被后续 pass 覆盖。
+- 定向测试覆盖两个页面确实同时发起请求、输出顺序稳定，以及 SLO exception 保留 resolved path；不需要运行 183 个浏览器测试或完整 CI。

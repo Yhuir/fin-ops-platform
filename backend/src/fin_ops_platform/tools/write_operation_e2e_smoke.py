@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -33,6 +34,7 @@ DEFAULT_LIMIT = 2_000
 MIN_WRITE_SLO_EVENT_SAMPLE_LIMIT = 200
 MAX_TEST_OWNED_RELATION_ROW_IDS = 20
 MAX_AFFECTED_CONSUMER_SCOPES_PER_PAGE = 2
+MAX_PARALLEL_CONSUMER_PROBES = 16
 SYSTEM_AUDIT_PATH = "/api/operations/app-health/page-audit?page=app-health-operations"
 CONFIRM_PREVIEW_PATH = "/api/workbench/actions/confirm-link/preview"
 CONFIRM_MUTATION_PATH = "/api/workbench/actions/confirm-link"
@@ -1355,99 +1357,132 @@ def _collect_checkpoint_consumers(
             require_auth=True,
             request_fn=lambda url, request_headers, timeout: request_fn(url, "GET", request_headers, None, timeout),
         )
-    results: list[dict[str, Any]] = []
-    for consumer in checkpoint.consumers:
-        if not consumer.assertions:
-            results.append({"name": consumer.probe.name, "status": "fail", "error": "consumer_assertion_required"})
-            continue
-        try:
-            path, payload, read_model_status = _request_fresh_consumer_payload(
-                consumer,
-                base_url=base_url,
-                api_prefix=api_prefix,
-                headers=headers,
-                timeout_seconds=timeout_seconds,
-                request_fn=request_fn,
-                variables=variables,
-            )
-            if consumer.role == "isolation":
-                assertions = [
-                    _evaluate_isolation_assertion(
-                        consumer,
-                        assertion,
-                        payload=payload,
-                        baseline=isolation_baseline or {},
-                    )
-                    for assertion in consumer.assertions
-                ]
-            else:
-                assertions = [
-                    _evaluate_json_assertion(assertion, payload=payload, variables=variables)
-                    for assertion in consumer.assertions
-                ]
-                if _requires_cost_access_refresh_proof(consumer, path=path):
-                    baseline_fingerprint = str((causal_baseline or {}).get(_consumer_causal_key(consumer, path)) or "")
-                    current_fingerprint = _cost_source_versions_fingerprint(payload)
-                    source_version_changed = bool(
-                        baseline_fingerprint and current_fingerprint != baseline_fingerprint
-                    )
-                    assertions.append(
-                        {
-                            "pointer": "/source_versions",
-                            "operator": "changed",
-                            "status": "pass" if source_version_changed else "fail",
-                            **(
-                                {"error": "consumer_source_version_unchanged"}
-                                if not source_version_changed
-                                else {}
-                            ),
-                        }
-                    )
-            failed = [assertion for assertion in assertions if assertion["status"] != "pass"]
-            operation_commit_to_visible_ms = _operation_commit_to_visible_ms(operation_commit_ack_monotonic)
-            results.append(
-                {
-                    "name": consumer.probe.name,
-                    "page_key": consumer.page_key,
-                    "role": consumer.role,
-                    "path": path,
-                    "status": "fail" if failed else "pass",
-                    "read_model_status": read_model_status,
-                    "assertions": assertions,
-                    **(
-                        {
-                            "operation_commit_to_visible_ms": operation_commit_to_visible_ms,
-                            "operation_commit_clock": "successful_mutation_response_received",
-                        }
-                        if operation_commit_to_visible_ms is not None
-                        else {}
-                    ),
-                }
-            )
-        except Exception as exc:
-            operation_commit_to_visible_ms = _operation_commit_to_visible_ms(operation_commit_ack_monotonic)
-            results.append(
-                {
-                    "name": consumer.probe.name,
-                    "page_key": consumer.page_key,
-                    "role": consumer.role,
-                    "status": "fail",
-                    "error": str(exc) or exc.__class__.__name__,
-                    **(
-                        {
-                            "operation_commit_to_visible_ms": operation_commit_to_visible_ms,
-                            "operation_commit_clock": "successful_mutation_response_received",
-                        }
-                        if operation_commit_to_visible_ms is not None
-                        else {}
-                    ),
-                }
-            )
+    def collect_consumer(consumer: ConsumerProbe) -> dict[str, Any]:
+        return _collect_checkpoint_consumer(
+            consumer,
+            base_url=base_url,
+            api_prefix=api_prefix,
+            headers=headers,
+            timeout_seconds=timeout_seconds,
+            request_fn=request_fn,
+            variables=variables,
+            isolation_baseline=isolation_baseline,
+            causal_baseline=causal_baseline,
+            operation_commit_ack_monotonic=operation_commit_ack_monotonic,
+        )
+    worker_count = min(len(checkpoint.consumers), MAX_PARALLEL_CONSUMER_PROBES)
+    with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="consumer-probe") as executor:
+        results = list(executor.map(collect_consumer, checkpoint.consumers))
     return {
         "status": "pass" if all(result["status"] == "pass" for result in results) else "fail",
         "consumer_count": len(results),
         "results": results,
     }
+
+
+def _collect_checkpoint_consumer(
+    consumer: ConsumerProbe,
+    *,
+    base_url: str,
+    api_prefix: str,
+    headers: Mapping[str, str],
+    timeout_seconds: float,
+    request_fn: RequestFn,
+    variables: Mapping[str, Any],
+    isolation_baseline: Mapping[str, Any] | None,
+    causal_baseline: Mapping[str, Any] | None,
+    operation_commit_ack_monotonic: float | None,
+) -> dict[str, Any]:
+    path = str(_resolve_value(consumer.probe.path, variables))
+    if not consumer.assertions:
+        return {
+            "name": consumer.probe.name,
+            "page_key": consumer.page_key,
+            "role": consumer.role,
+            "path": path,
+            "status": "fail",
+            "error": "consumer_assertion_required",
+        }
+    try:
+        path, payload, read_model_status = _request_fresh_consumer_payload(
+            consumer,
+            base_url=base_url,
+            api_prefix=api_prefix,
+            headers=headers,
+            timeout_seconds=timeout_seconds,
+            request_fn=request_fn,
+            variables=variables,
+        )
+        if consumer.role == "isolation":
+            assertions = [
+                _evaluate_isolation_assertion(
+                    consumer,
+                    assertion,
+                    payload=payload,
+                    baseline=isolation_baseline or {},
+                )
+                for assertion in consumer.assertions
+            ]
+        else:
+            assertions = [
+                _evaluate_json_assertion(assertion, payload=payload, variables=variables)
+                for assertion in consumer.assertions
+            ]
+            if _requires_cost_access_refresh_proof(consumer, path=path):
+                baseline_fingerprint = str((causal_baseline or {}).get(_consumer_causal_key(consumer, path)) or "")
+                current_fingerprint = _cost_source_versions_fingerprint(payload)
+                source_version_changed = bool(
+                    baseline_fingerprint and current_fingerprint != baseline_fingerprint
+                )
+                assertions.append(
+                    {
+                        "pointer": "/source_versions",
+                        "operator": "changed",
+                        "status": "pass" if source_version_changed else "fail",
+                        **(
+                            {"error": "consumer_source_version_unchanged"}
+                            if not source_version_changed
+                            else {}
+                        ),
+                    }
+                )
+        failed = [assertion for assertion in assertions if assertion["status"] != "pass"]
+        operation_commit_to_visible_ms = _operation_commit_to_visible_ms(operation_commit_ack_monotonic)
+        return {
+            "name": consumer.probe.name,
+            "page_key": consumer.page_key,
+            "role": consumer.role,
+            "path": path,
+            "status": "fail" if failed else "pass",
+            "read_model_status": read_model_status,
+            "assertions": assertions,
+            **(
+                {
+                    "operation_commit_to_visible_ms": operation_commit_to_visible_ms,
+                    "operation_commit_clock": "successful_mutation_response_received",
+                }
+                if operation_commit_to_visible_ms is not None
+                else {}
+            ),
+        }
+    except Exception as exc:
+        operation_commit_to_visible_ms = _operation_commit_to_visible_ms(operation_commit_ack_monotonic)
+        return {
+            "name": consumer.probe.name,
+            "page_key": consumer.page_key,
+            "role": consumer.role,
+            "path": path,
+            "status": "fail",
+            "error": str(exc) or exc.__class__.__name__,
+            **(
+                {
+                    "operation_commit_to_visible_ms": operation_commit_to_visible_ms,
+                    "operation_commit_clock": "successful_mutation_response_received",
+                }
+                if operation_commit_to_visible_ms is not None
+                else {}
+            ),
+        }
 
 
 _RETRYABLE_CONSUMER_ERRORS = {
