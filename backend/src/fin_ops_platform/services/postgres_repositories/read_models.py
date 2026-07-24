@@ -8010,117 +8010,6 @@ class PostgresSummaryReadModelRepository:
 
         return run_in_transaction(self._connection, publish)
 
-    def publish_cost_statistics_relation_delta(
-        self,
-        *,
-        tenant_id: str,
-        scope_key: str,
-        source_version: int,
-        model: dict[str, Any],
-        replacement_rows: list[dict[str, Any]],
-        affected_transaction_ids: list[str],
-        affected_group_ids: list[str],
-    ) -> bool:
-        normalized_tenant_id = text(tenant_id)
-        normalized_scope_key = text(scope_key)
-        if normalized_tenant_id is None or normalized_scope_key is None:
-            raise ValueError("tenant_id and scope_key are required for cost statistics relation delta publish.")
-        if isinstance(source_version, bool) or not isinstance(source_version, int) or source_version < 0:
-            raise ValueError("source_version must be a non-negative integer for cost statistics relation delta publish.")
-        if _is_cost_statistics_parent_scope(normalized_scope_key, payload=model):
-            raise ValueError("cost statistics relation delta requires a concrete month scope.")
-
-        transaction_ids = sorted({value for item in affected_transaction_ids if (value := text(item))})
-        group_ids = sorted({value for item in affected_group_ids if (value := text(item))})
-
-        def publish(connection: Any) -> bool:
-            current = connection.fetch_one(
-                """
-                select source_version
-                from job.read_model_dirty_scopes
-                where tenant_id = %s
-                  and scope_type = 'cost_statistics'
-                  and scope_key = %s
-                  and status in ('pending', 'processing')
-                for update
-                """,
-                (normalized_tenant_id, normalized_scope_key),
-            )
-            if current is None or int_value(current.get("source_version"), -1) != source_version:
-                return False
-            connection.execute(
-                """
-                delete from read_model.cost_statistics_rows
-                where scope_key = %s
-                  and (
-                    transaction_id = any(%s::text[])
-                    or group_id = any(%s::text[])
-                  )
-                """,
-                (normalized_scope_key, transaction_ids, group_ids),
-            )
-            source_versions = model.get("source_versions") if isinstance(model.get("source_versions"), dict) else {}
-            connection.execute(
-                """
-                update read_model.cost_statistics_rows
-                set source_versions = %s::jsonb,
-                    generated_at = coalesce(%s::timestamptz, generated_at),
-                    cache_status = %s,
-                    updated_at = now()
-                where scope_key = %s
-                """,
-                (
-                    jsonb(source_versions),
-                    text(model.get("generated_at")),
-                    text(model.get("cache_status") or "ready") or "ready",
-                    normalized_scope_key,
-                ),
-            )
-            delta_model = dict(model)
-            delta_payload = dict(delta_model.get("payload") or {})
-            delta_payload["time_rows"] = list(replacement_rows)
-            delta_model["payload"] = delta_payload
-            self._insert_cost_statistics_rows(
-                connection,
-                scope_key=normalized_scope_key,
-                payload=delta_model,
-            )
-            count_row = connection.fetch_one(
-                "select count(*)::integer as row_count from read_model.cost_statistics_rows where scope_key = %s",
-                (normalized_scope_key,),
-            )
-            entry_count = int_value((count_row or {}).get("row_count"), 0)
-            metadata_model = dict(model)
-            metadata_model["payload"] = _cost_statistics_aggregate_payload(
-                connection,
-                project_scope=text(model.get("project_scope")) or normalized_scope_key.split(":", 1)[0],
-                scope_keys=[normalized_scope_key],
-                bank_accounts=list((model.get("payload") or {}).get("bank_accounts") or [])
-                if isinstance(model.get("payload"), dict)
-                else [],
-            )
-            metadata_model["entry_count"] = entry_count
-            self._save_generic_read_model_snapshots(
-                connection,
-                {"read_models": {normalized_scope_key: metadata_model}},
-                table="read_model.cost_statistics_read_models",
-                changed_scope_keys={normalized_scope_key},
-                default_project_scope="all",
-            )
-            connection.execute(
-                """
-                update read_model.cost_statistics_read_models
-                set published_source_version = %s,
-                    entry_count = %s,
-                    updated_at = now()
-                where scope_key = %s
-                """,
-                (source_version, entry_count, normalized_scope_key),
-            )
-            return True
-
-        return run_in_transaction(self._connection, publish)
-
     def acknowledge_unchanged_cost_statistics_scope(
         self,
         *,
@@ -9983,9 +9872,6 @@ class PostgresReadModelRepository:
 
     def publish_cost_statistics_read_models(self, *args: Any, **kwargs: Any) -> bool:
         return self._summary_read_model_repository.publish_cost_statistics_read_models(*args, **kwargs)
-
-    def publish_cost_statistics_relation_delta(self, *args: Any, **kwargs: Any) -> bool:
-        return self._summary_read_model_repository.publish_cost_statistics_relation_delta(*args, **kwargs)
 
     def acknowledge_unchanged_cost_statistics_scope(self, *args: Any, **kwargs: Any) -> bool:
         return self._summary_read_model_repository.acknowledge_unchanged_cost_statistics_scope(*args, **kwargs)

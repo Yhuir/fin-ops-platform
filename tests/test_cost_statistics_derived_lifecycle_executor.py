@@ -124,7 +124,7 @@ class CostStatisticsDerivedLifecycleExecutorTests(unittest.TestCase):
                 {
                     "scope_keys": ["all"],
                     "reason": "settings_project_status_changed",
-                    "metadata": None,
+                    "metadata": {"force_refresh": True},
                 }
             ],
         )
@@ -155,7 +155,7 @@ class CostStatisticsDerivedLifecycleExecutorTests(unittest.TestCase):
                 {
                     "scope_keys": ["all"],
                     "reason": "derived_lifecycle_cost_statistics",
-                    "metadata": None,
+                    "metadata": {"force_refresh": True},
                 }
             ],
         )

@@ -1860,53 +1860,6 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         )
         self.assertEqual(changed["status"], "pass")
 
-    def test_cost_all_causal_timeline_reports_exact_delta_and_parent_segments(self) -> None:
-        root_created_at = datetime(2026, 7, 18, 1, 0, 0, tzinfo=timezone.utc)
-        workbench_published_at = root_created_at + timedelta(milliseconds=400)
-        active_all_created_at = root_created_at + timedelta(milliseconds=650)
-        active_all_processed_at = root_created_at + timedelta(milliseconds=900)
-        connection = FakeConnection(
-            [
-                {
-                    "root_event_id": "cost-delta-event-1",
-                    "root_created_at": root_created_at,
-                    "cost_event_id": "cost-month-1",
-                    "cost_scope_key": "active:2026-07",
-                    "cost_reason": "cost_statistics_relation_delta",
-                    "cost_status": "done",
-                    "cost_created_at": workbench_published_at,
-                    "cost_processed_at": active_all_created_at,
-                },
-                {
-                    "root_event_id": "cost-delta-event-1",
-                    "root_created_at": root_created_at,
-                    "cost_event_id": "cost-all-1",
-                    "cost_scope_key": "active:all",
-                    "cost_reason": "cost_statistics_shard_converged",
-                    "cost_status": "done",
-                    "cost_created_at": active_all_created_at,
-                    "cost_processed_at": active_all_processed_at,
-                },
-            ]
-        )
-
-        result = write_operation_e2e_smoke._collect_cost_all_causal_timeline(
-            connection,
-            tenant_id="default",
-            root_event_ids=["cost-delta-event-1"],
-        )
-
-        self.assertEqual(result["status"], "pass")
-        self.assertEqual(result["target_scope_key"], "active:all")
-        self.assertEqual(result["cost_month_reason"], "cost_statistics_relation_delta")
-        self.assertEqual(result["commit_to_cost_month_ms"], 650.0)
-        self.assertEqual(result["cost_month_to_active_all_ms"], 250.0)
-        self.assertEqual(result["commit_to_active_all_ms"], 900.0)
-        self.assertEqual(
-            connection.fetch_all_calls[0][1],
-            ("default", ["cost-delta-event-1"], "default"),
-        )
-
     def test_admin_system_audit_preflight_blocks_first_mutation(self) -> None:
         scenario = write_operation_e2e_smoke.WriteScenario(
             name="closure",

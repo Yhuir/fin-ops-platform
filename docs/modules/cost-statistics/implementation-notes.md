@@ -1,5 +1,13 @@
 # 成本统计 实施记录
 
+## 2026-07-24 - normal parent readiness fan-out 删除
+
+- production test-owned relation round 证明写事务零 Cost fan-out、Cost query 也只选择 2026-02/2026-03 exact children；但每个 child 完成后，旧 parent handler 调用 `missing_or_stale_cost_statistics_shards(...)`，把未保留 current readiness row 的历史月份全部视为 stale。单 shard handler p95 仅约 0.55s，页面仍因 42 个历史 scope 排队约 10s，真实瓶颈是错误 scope amplification，不是成本 SQL 算法。
+- 修复采用最小二分合同：normal parent event 永远只重建小型 rollup；显式 `force_refresh=true` parent 才枚举全部当前月份并传播 force。global invalidation 与 derived maintenance 的 parent 入口统一显式标记 force；普通 API miss/stale、statistics、month completion 和 shard-converged 不需要 reason 白名单。
+- 删除 projection 对 `read_model.app_status_readiness` 的 child discovery 和 service fallback。精确 child 判定仍只归 `get_cost_statistics_freshness_gate(...)` 的 durable dirty + Workbench/Bank Detail lineage + parent `source_shards` 证明；parent 即使在部分 child 未完成时先发布，也会被该 gate fail-closed，最后一个 child 的既有 parent 事件发布最终 lineage。
+- 27-06 遗留复审同时确认旧 `cost_statistics_relation_delta` 已无普通写 producer、无显式运维 owner，却仍保留 worker/projection/repository 与 smoke 因果解析，属于无主兼容路径。本轮物理删除整条 production delta I/O 与“root write trace 必须出现 Cost event”的旧验证；生产 smoke改由 zero-fanout receipt、Cost access GET 的 source-version变化、业务断言和 `operation_commit_to_visible_ms` 证明完整闭环。SLO audit仍保留旧 reason作为出现即失败的回归签名。
+- 无 migration、表、索引、依赖、endpoint、worker、queue、缓存、前端或 API shape 变化。显式全量维护能力未削弱，普通访问不再可能因 readiness 缺行扩张到全历史。
+
 ## 2026-07-24 - 全期间访问的 exact child freshness 证明
 
 - 生产 test-owned turnover confirm/withdraw 证明普通写事务确实实现零 downstream fan-out，但也暴露真实 false-fresh：`active:all` / `all:all` parent 自身为 `done/fresh` 时，`active:2026-03` / `all:2026-03` 仍嵌入旧 Workbench 与 Bank Detail versions；Cost explorer 因只检查 parent key 返回 `200/fresh`，System Audit 正确阻断。精确访问两个 2026-03 child 后约 1.17s 收敛，Audit 恢复 16/16，证明问题在 query proof，不在 canonical write 或 worker 发布。
@@ -11,7 +19,7 @@
 
 - 普通 relation/turnover/bank-flow 写入与 Workbench generation publish 均不再投递 Cost。`CostStatisticsQueryService` 先比较 canonical Workbench expected versions 与 active generation；上游 stale 时只 enqueue 当前 Workbench 月份并返回 `refresh_dependency=workbench`，不同时 enqueue Cost。Workbench fresh 后的下一次 GET 才允许 enqueue 当前 Cost scope。
 - Cost 页面首次访问、轻量 relation 提示、focus/hidden→visible 均复用正常 explorer GET。refreshing 使用 150ms 间隔、最长 3s 的页面自身有界重试；无 operation barrier、无全局 App Status 轮询、无新 worker/表/协调器。
-- 本条取代下方历史记录中“`cost_statistics_relation_delta` 为普通写入可达主链”和“`workbench_shard_published` 保证 Cost 最终收敛”的描述。现存 delta worker/repository 能力暂不是普通写可达路径，将在 27-06 按旧代码门禁分类，不得作为 fallback。
+- 本条取代下方历史记录中“`cost_statistics_relation_delta` 为普通写入可达主链”和“`workbench_shard_published` 保证 Cost 最终收敛”的描述；相关 producer、worker/projection/repository 与 write-trace smoke 已在 2026-07-24 旧代码门禁中删除，不存在运维或兼容 fallback。
 
 ## 2026-07-22 - 银行流水中心 OA 成本资格与多 OA 明确金额拆分
 

@@ -4,9 +4,25 @@ import unittest
 class QueueRecorder:
     def __init__(self) -> None:
         self.refreshes: list[tuple[str, str, str]] = []
+        self.refresh_details: list[dict[str, object]] = []
 
-    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
+    def enqueue_read_model_refresh(
+        self,
+        *,
+        scope_type: str,
+        scope_key: str,
+        reason: str,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
         self.refreshes.append((scope_type, scope_key, reason))
+        self.refresh_details.append(
+            {
+                "scope_type": scope_type,
+                "scope_key": scope_key,
+                "reason": reason,
+                "metadata": dict(metadata) if isinstance(metadata, dict) else None,
+            }
+        )
 
 
 class CostStatisticsRuntimeServiceTests(unittest.TestCase):
@@ -41,6 +57,33 @@ class CostStatisticsRuntimeServiceTests(unittest.TestCase):
             [
                 ("cost_statistics", "active:2026-05", "unit_test"),
                 ("cost_statistics", "all:2026-05", "unit_test"),
+            ],
+        )
+
+    def test_global_invalidation_marks_parent_refreshes_as_explicit_force(self) -> None:
+        from fin_ops_platform.services.cost_statistics_runtime_service import CostStatisticsRuntimeService
+
+        queue = QueueRecorder()
+        service = CostStatisticsRuntimeService(queue_repository=queue)
+
+        invalidated = service.invalidate_read_models()
+
+        self.assertEqual(invalidated, ["active:all", "all:all"])
+        self.assertEqual(
+            queue.refresh_details,
+            [
+                {
+                    "scope_type": "cost_statistics",
+                    "scope_key": "active:all",
+                    "reason": "cost_statistics_read_model_invalidated",
+                    "metadata": {"force_refresh": True},
+                },
+                {
+                    "scope_type": "cost_statistics",
+                    "scope_key": "all:all",
+                    "reason": "cost_statistics_read_model_invalidated",
+                    "metadata": {"force_refresh": True},
+                },
             ],
         )
 

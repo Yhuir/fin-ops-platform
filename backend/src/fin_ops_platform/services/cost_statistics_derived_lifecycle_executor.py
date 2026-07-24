@@ -18,14 +18,17 @@ class CostStatisticsDerivedLifecycleExecutor:
     def execute(self, domain_plan: dict[str, object]) -> dict[str, object]:
         scope_keys = self._domain_plan_scope_keys(domain_plan)
         reason = str(domain_plan.get("reason") or "derived_lifecycle_cost_statistics")
-        target_scope_keys = ["all"] if "all" in scope_keys else scope_keys
+        target_scope_keys = ["all"] if "all" in scope_keys else scope_keys or ["all"]
+        refresh_metadata = self._read_model_refresh_metadata(domain_plan)
+        if "all" in target_scope_keys:
+            refresh_metadata = {**(refresh_metadata or {}), "force_refresh": True}
         enqueued = self._enqueue_refresh(
-            target_scope_keys or ["all"],
+            target_scope_keys,
             reason=reason,
-            metadata=self._read_model_refresh_metadata(domain_plan),
+            metadata=refresh_metadata,
         )
         deleted_scope_keys = (
-            self._runtime_service.refresh_scope_keys_from_scope_keys(list(target_scope_keys or ["all"]))
+            self._runtime_service.refresh_scope_keys_from_scope_keys(list(target_scope_keys))
             if enqueued
             else []
         )

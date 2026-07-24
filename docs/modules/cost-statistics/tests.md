@@ -2,6 +2,13 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-07-24 - normal parent 精确收敛与 force 全量隔离
+
+- Service/worker：`tests/test_cost_statistics_sql_runtime.py` 证明普通 API parent 与 `cost_statistics_shard_converged` parent 直接重建廉价 rollup，绝不调用已删除的 readiness shard discovery；显式 force parent 仍枚举全部当前月份、向每个 child 传播 `force_refresh`，并等待后续收敛。
+- Explicit operations：`tests/test_cost_statistics_runtime_service.py` 与 `tests/test_cost_statistics_derived_lifecycle_executor.py` 证明 global invalidation、settings reset 和无 scope 的显式 maintenance 都把 parent 标记为 force；月度精确 invalidation 不会升级为全量。
+- Old-path deletion：`CostStatisticsSqlProjectionBuilder.missing_or_stale_cost_statistics_shards(...)`、Cost relation-delta handler/projection/repository publisher 和 write-trace causal smoke均已删除。生产代码不再从 `read_model.app_status_readiness` 推导 Cost child jobs，也没有隐藏的行级 delta兼容路径；query repository 的 durable dirty + child lineage gate仍是唯一精确 freshness owner。architecture guard要求这些符号在 production runtime保持为零，SLO audit只把旧 reason当作禁止回归 signature。
+- 七类决策：1 无新业务规则；2 service/显式 lifecycle、4 read model/worker、6 生产 test-owned confirm→withdraw、7 Cost/Workbench/queue/Audit 回归适用。3 API shape 与 5 frontend 未变，不新增对应测试；生产 E2E/SLO 和 System Audit 是最终门禁。
+
 ## 2026-07-22 - OA 配对流水漏统修复与 v11 重投影
 
 - Business core：`tests/test_cost_statistics_sql_projection_rules.py` 覆盖旧 OA 排除标记/借还款不再否决、缺失维度 fallback、一银行多 OA 6万/4万精确拆分、金额不闭合不推断、多银行不拆分、active completed project 与银行原生月份去重。
@@ -309,7 +316,7 @@
 | scope gateway/legacy cleanup | P0 | `tests/test_read_model_refresh_gateway.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_read_model_scope_contract.py` | covered | legacy scope normalize、非法 scope reject、production checker dry-run/apply/replacement dedupe。 |
 | SQL runtime fresh/miss/stale | P0 | `tests/test_cost_statistics_sql_runtime.py` | covered | SQL read model read、PostgreSQL-first gate、Redis cache、API miss enqueue、malformed explorer payload requeue、详情 identity point lookup、production requires SQL model。 |
 | parent scope aggregation | P0 | `tests/test_cost_statistics_sql_runtime.py` | covered | `active:all` / `all:all` 从两张 materialized shard row tables 聚合，不读 Workbench all payload或 child JSON arrays；parent metadata 不保存两类大数组。 |
-| parent waits for shard readiness | P0 | `tests/test_cost_statistics_sql_runtime.py`、`tests/test_app_status_overview_service.py` | covered | 普通 refresh 的 missing/stale shards 入队，父 scope refreshing；shards converged 后发布 parent fresh。显式 force parent 枚举全部 shards 并透传 force metadata，forced month 绕过 relation delta 与 unchanged shortcut。 |
+| parent rollup / explicit force isolation | P0 | `tests/test_cost_statistics_sql_runtime.py`、`tests/test_cost_statistics_runtime_service.py`、`tests/test_cost_statistics_derived_lifecycle_executor.py` | covered | 普通 parent 直接发布结构化 rollup，不读取 readiness、不补投历史 child；shards converged 后再次发布最终 lineage。只有显式 force parent 枚举全部当前 shards并透传 force metadata，forced month绕过 unchanged shortcut执行完整重建。 |
 | App Status scope-level semantics | P0 | `tests/test_app_status_overview_service.py`、`tests/test_runtime_monitoring.py` | covered | 父 scope failed blocks；月份 shard failed/unavailable busy；scope details preserved。 |
 | 首屏 SLO 探针与有界聚合 | P2 | `tests/test_http_slo_probe.py`、`tests/test_cost_statistics_sql_runtime.py` | covered | 认证态 SLO 只探测页面实际使用的 explorer；父 scope 从已物化月份 shard 聚合，不读 Workbench 全量 payload。 |
 | legacy warmup / HTTP / full-view deletion | P0 | `tests/test_platform_runtime_boundary_guards.py`、`tests/test_read_model_architecture_guards.py`、`tests/test_cost_statistics_api.py`、`tests/test_cost_statistics_sql_runtime.py` | covered | warmup scheduler/retry/registry、旧 root/project route、full-view query/repository/manifest、projection Redis compat dependency 与前端 mock/type 均已删除；静态 guard 禁止回归。 |

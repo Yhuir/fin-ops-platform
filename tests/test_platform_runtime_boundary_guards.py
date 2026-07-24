@@ -2725,7 +2725,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_relation_cost_refresh_has_transactional_delta_and_publish_convergence_owners(self) -> None:
+    def test_relation_cost_refresh_uses_access_time_dependency_without_delta_owner(self) -> None:
         uow_source = (SERVICES_ROOT / "workbench_uow.py").read_text(encoding="utf-8")
         facade_source = (SERVICES_ROOT / "workbench_write_facade.py").read_text(encoding="utf-8")
         relation_repository_source = (
@@ -2745,6 +2745,13 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         cost_projection_source = (SERVICES_ROOT / "cost_statistics_sql_projection.py").read_text(
             encoding="utf-8"
         )
+        cost_repository_port_source = (SERVICES_ROOT / "cost_statistics_read_model_repository.py").read_text(
+            encoding="utf-8"
+        )
+        postgres_read_models_source = (
+            SERVICES_ROOT / "postgres_repositories" / "read_models.py"
+        ).read_text(encoding="utf-8")
+        e2e_smoke_source = (TOOLS_ROOT / "write_operation_e2e_smoke.py").read_text(encoding="utf-8")
         page_source = (REPO_ROOT / "web/src/pages/CostStatisticsPage.tsx").read_text(encoding="utf-8")
         cost_query_source = (SERVICES_ROOT / "cost_statistics_query_service.py").read_text(encoding="utf-8")
         server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
@@ -2807,14 +2814,26 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("Cost refresh worker still recognizes Workbench publish fan-out")
         if "from app.workbench_pair_relations" in cost_projection_source:
             violations.append("Cost projection still reads the relation module canonical table directly")
-        for required in (
-            "rebuild_cost_statistics_relation_delta",
-            "_active_workbench_rows_by_ids",
-            "publish_cost_statistics_relation_delta",
-            "_normalize_relation_deltas",
+        for owner, source in (
+            ("Cost refresh worker", cost_refresh_source),
+            ("Cost projection", cost_projection_source),
+            ("Cost repository port", cost_repository_port_source),
+            ("PostgreSQL read-model repository", postgres_read_models_source),
         ):
-            if required not in cost_projection_source:
-                violations.append(f"Cost projection is missing isolated relation delta behavior {required}")
+            for forbidden in (
+                "rebuild_cost_statistics_relation_delta",
+                "publish_cost_statistics_relation_delta",
+                "_active_workbench_rows_by_ids",
+                "_normalize_relation_deltas",
+            ):
+                if forbidden in source:
+                    violations.append(f"{owner} retains deleted relation delta path {forbidden}")
+        for forbidden in (
+            "_collect_cost_all_causal_timeline",
+            "cost_active_all_causal_events_missing_or_incomplete",
+        ):
+            if forbidden in e2e_smoke_source:
+                violations.append(f"write-operation E2E retains old Cost write-trace requirement {forbidden}")
         for required in (
             "tenant_id=event.tenant_id",
             "priority=priority",

@@ -338,7 +338,10 @@ READ_MODEL_MANIFEST: dict[str, ReadModelManifestEntry] = {
         partition_key_contract="cost statistics active/all month scope plus queryable parent aggregate scope",
         scoped_incremental_target="cost statistics month shards and parent rollup summaries",
         full_rebuild_fallback="gateway force refresh normalizes legacy all/month scopes into active/all month shards and parent rollup rebuild",
-        freshness_proof_contract="ReadModelQueryGateway expected schema/source_versions plus app_status readiness for shard and parent scopes",
+        freshness_proof_contract=(
+            "dependency-bound PostgreSQL schema/source_versions/current dirty proof plus exact child lineage "
+            "and parent source_shards"
+        ),
         force_refresh_contract="gateway_force_refresh",
         operation_barrier_contract="app_status_registry_target",
         repository_port_contract=(

@@ -45,7 +45,6 @@ class CostStatisticsReadModelRefreshService:
                 scope_key,
                 tenant_id=event.tenant_id,
                 source_version=source_version,
-                relation_deltas=_event_relation_deltas(event),
                 force_refresh=force_refresh,
             )
         payload = result if isinstance(result, dict) else {"scope_key": scope_key}
@@ -89,25 +88,8 @@ class CostStatisticsReadModelRefreshService:
         *,
         tenant_id: str,
         source_version: int,
-        relation_deltas: list[dict[str, object]],
         force_refresh: bool,
     ) -> dict[str, Any]:
-        if relation_deltas:
-            if not force_refresh:
-                rebuild_delta = getattr(self._projection_builder, "rebuild_cost_statistics_relation_delta", None)
-                if not callable(rebuild_delta):
-                    raise RuntimeError("Projection builder does not expose rebuild_cost_statistics_relation_delta.")
-                result = rebuild_delta(
-                    scope_key,
-                    tenant_id=tenant_id,
-                    source_version=source_version,
-                    relation_deltas=relation_deltas,
-                )
-                payload = result if isinstance(result, dict) else {"scope_key": scope_key}
-                payload.setdefault("refresh_kind", "relation_delta")
-                if payload.get("published") is False:
-                    payload["readiness_status"] = "refreshing"
-                return payload
         rebuild_month = getattr(self._projection_builder, "rebuild_cost_statistics_month_scope", None)
         if not callable(rebuild_month):
             raise RuntimeError("Projection builder does not expose rebuild_cost_statistics_month_scope.")
@@ -135,11 +117,7 @@ class CostStatisticsReadModelRefreshService:
         trace_id: str | None,
         force_refresh: bool,
     ) -> dict[str, Any]:
-        pending_shards = (
-            self._all_shards(scope_key)
-            if force_refresh
-            else self._missing_or_stale_shards(scope_key)
-        )
+        pending_shards = self._all_shards(scope_key) if force_refresh else []
         if pending_shards:
             enqueued_scope_keys = self._enqueue_scope_keys(
                 pending_shards,
@@ -171,15 +149,6 @@ class CostStatisticsReadModelRefreshService:
         payload.setdefault("refresh_kind", "parent")
         payload["readiness_status"] = "refreshing" if payload.get("published") is False else "fresh"
         return payload
-
-    def _missing_or_stale_shards(self, scope_key: str) -> list[str]:
-        missing_or_stale = getattr(self._projection_builder, "missing_or_stale_cost_statistics_shards", None)
-        if callable(missing_or_stale):
-            return [str(item).strip() for item in list(missing_or_stale(scope_key) or []) if str(item).strip()]
-        list_shards = getattr(self._projection_builder, "list_cost_statistics_scope_shards", None)
-        if not callable(list_shards):
-            return []
-        return [str(item).strip() for item in list(list_shards(scope_key) or []) if str(item).strip()]
 
     def _all_shards(self, scope_key: str) -> list[str]:
         list_shards = getattr(self._projection_builder, "list_cost_statistics_scope_shards", None)
@@ -252,27 +221,3 @@ def _event_force_refresh(event: RuntimeQueueEvent) -> bool:
         return True
     metadata = event.payload.get("metadata")
     return isinstance(metadata, dict) and metadata.get("force_refresh") is True
-
-
-def _event_relation_deltas(event: RuntimeQueueEvent) -> list[dict[str, object]]:
-    metadata = event.payload.get("metadata")
-    raw_deltas = metadata.get("relation_deltas") if isinstance(metadata, dict) else None
-    if not isinstance(raw_deltas, dict):
-        return []
-    result: list[dict[str, object]] = []
-    for raw_case_id, raw_delta in raw_deltas.items():
-        case_id = str(raw_case_id or "").strip()
-        if not case_id or not isinstance(raw_delta, dict):
-            continue
-        status = str(raw_delta.get("status") or "").strip().lower()
-        raw_row_ids = raw_delta.get("row_ids")
-        raw_items = list(raw_row_ids) if isinstance(raw_row_ids, (list, tuple, set)) else []
-        row_ids = [
-            normalized
-            for item in raw_items
-            for normalized in [str(item or "").strip()]
-            if normalized
-        ]
-        if status in {"active", "cancelled"} and row_ids:
-            result.append({"case_id": case_id, "status": status, "row_ids": list(dict.fromkeys(row_ids))})
-    return result

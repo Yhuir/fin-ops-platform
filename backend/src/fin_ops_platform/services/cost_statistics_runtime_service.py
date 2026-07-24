@@ -70,7 +70,13 @@ class CostStatisticsRuntimeService:
         except ValueError:
             return 60
 
-    def enqueue_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
+    def enqueue_read_model_refresh(
+        self,
+        scope_key: str,
+        *,
+        reason: str,
+        force_refresh: bool = False,
+    ) -> bool:
         from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
         gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
@@ -80,6 +86,7 @@ class CostStatisticsRuntimeService:
             "cost_statistics",
             [scope_key],
             reason=reason,
+            metadata={"force_refresh": True} if force_refresh else None,
         )
         return bool(enqueued_scope_keys)
 
@@ -119,7 +126,11 @@ class CostStatisticsRuntimeService:
         return [
             scope_key
             for scope_key in self.normalize_scope_keys(scope_keys)
-            if self.enqueue_read_model_refresh(scope_key, reason=reason)
+            if self.enqueue_read_model_refresh(
+                scope_key,
+                reason=reason,
+                force_refresh=scope_key.endswith(":all"),
+            )
         ]
 
     def rebuild_read_model_scope(self, scope_key: str) -> dict[str, Any]:

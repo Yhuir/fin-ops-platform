@@ -258,11 +258,11 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
             )
         )
 
-    def test_cost_relation_delta_dedupe_merges_cases_and_overwrites_same_case(self) -> None:
+    def test_relation_delta_metadata_dedupe_merges_cases_and_overwrites_same_case(self) -> None:
         first = self.runtime_queue.enqueue_read_model_refresh(
-            scope_type="cost_statistics",
-            scope_key="active:2026-05",
-            reason="cost_statistics_relation_delta",
+            scope_type="turnover_ledger",
+            scope_key="2026-05",
+            reason="turnover_relation_changed",
             metadata={
                 "relation_deltas": {
                     "CASE-A": {"status": "active", "row_ids": ["oa-a", "bank-a"]},
@@ -270,9 +270,9 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
             },
         )
         second = self.runtime_queue.enqueue_read_model_refresh(
-            scope_type="cost_statistics",
-            scope_key="active:2026-05",
-            reason="cost_statistics_relation_delta",
+            scope_type="turnover_ledger",
+            scope_key="2026-05",
+            reason="turnover_relation_changed",
             metadata={
                 "relation_deltas": {
                     "CASE-B": {"status": "active", "row_ids": ["oa-b", "bank-b"]},
@@ -280,9 +280,9 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
             },
         )
         third = self.runtime_queue.enqueue_read_model_refresh(
-            scope_type="cost_statistics",
-            scope_key="active:2026-05",
-            reason="cost_statistics_relation_delta",
+            scope_type="turnover_ledger",
+            scope_key="2026-05",
+            reason="turnover_relation_changed",
             metadata={
                 "relation_deltas": {
                     "CASE-A": {"status": "cancelled", "row_ids": ["oa-a", "bank-a"]},

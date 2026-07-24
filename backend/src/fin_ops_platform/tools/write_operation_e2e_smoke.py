@@ -942,25 +942,6 @@ def _run_checkpoint(
             write_slo=write_slo,
             post_api=post_api,
         )
-    if _checkpoint_requires_cost_all_causal_proof(checkpoint, variables=variables):
-        causal_timeline = _collect_cost_all_causal_timeline(
-            connection,
-            tenant_id=tenant_id,
-            root_event_ids=list(event_ids or []),
-        )
-        post_api["causal_timeline"] = causal_timeline
-        if causal_timeline["status"] != "pass":
-            post_api["status"] = "fail"
-            post_api["error"] = "cost_all_causal_timeline_incomplete"
-            return _failed_checkpoint(
-                checkpoint,
-                started_at=started_at,
-                step_results=step_results,
-                mutation_committed=mutation_committed,
-                mutation_ambiguous=mutation_ambiguous,
-                write_slo=write_slo,
-                post_api=post_api,
-            )
     system_audit = _wait_for_system_audit(
         checkpoint,
         base_url=base_url,
@@ -1404,7 +1385,7 @@ def _collect_checkpoint_consumers(
                     _evaluate_json_assertion(assertion, payload=payload, variables=variables)
                     for assertion in consumer.assertions
                 ]
-                if _requires_cost_all_causal_proof(consumer, path=path):
+                if _requires_cost_access_refresh_proof(consumer, path=path):
                     baseline_fingerprint = str((causal_baseline or {}).get(_consumer_causal_key(consumer, path)) or "")
                     current_fingerprint = _cost_source_versions_fingerprint(payload)
                     source_version_changed = bool(
@@ -1617,7 +1598,7 @@ def _capture_consumer_causal_baseline(
     consumers = [
         consumer
         for consumer in checkpoint.consumers
-        if _requires_cost_all_causal_proof(
+        if _requires_cost_access_refresh_proof(
             consumer,
             path=str(_resolve_value(consumer.probe.path, variables)),
         )
@@ -1644,7 +1625,7 @@ def _capture_consumer_causal_baseline(
     return {"status": "pass", "values": values}
 
 
-def _requires_cost_all_causal_proof(consumer: ConsumerProbe, *, path: str) -> bool:
+def _requires_cost_access_refresh_proof(consumer: ConsumerProbe, *, path: str) -> bool:
     return (
         consumer.role == "affected"
         and consumer.page_key == "cost-statistics"
@@ -1652,169 +1633,6 @@ def _requires_cost_all_causal_proof(consumer: ConsumerProbe, *, path: str) -> bo
         and "scope=all" in path
         and "project_scope=active" in path
     )
-
-
-def _checkpoint_requires_cost_all_causal_proof(
-    checkpoint: WriteCheckpoint,
-    *,
-    variables: Mapping[str, Any],
-) -> bool:
-    return any(
-        _requires_cost_all_causal_proof(
-            consumer,
-            path=str(_resolve_value(consumer.probe.path, variables)),
-        )
-        for consumer in checkpoint.consumers
-    )
-
-
-def _collect_cost_all_causal_timeline(
-    connection: Any,
-    *,
-    tenant_id: str,
-    root_event_ids: Sequence[str],
-) -> dict[str, Any]:
-    normalized_event_ids = [str(event_id).strip() for event_id in root_event_ids if str(event_id).strip()]
-    if not normalized_event_ids:
-        return {"status": "fail", "error": "cost_causal_root_event_ids_missing"}
-    rows = connection.fetch_all(
-        """
-        with roots as (
-          select
-            id::text as root_event_id,
-            trace_id as root_trace_id,
-            scope_type as root_scope_type,
-            scope_key as root_scope_key,
-            coalesce(payload->>'reason', raw_payload->>'reason') as root_reason,
-            status as root_status,
-            created_at as root_created_at,
-            processed_at as root_processed_at
-          from job.outbox_events
-          where tenant_id = %s
-            and id::text = any(%s)
-        ), cost_events as (
-          select
-            roots.root_event_id,
-            roots.root_created_at,
-            roots.root_event_id as cost_event_id,
-            roots.root_scope_key as cost_scope_key,
-            roots.root_reason as cost_reason,
-            roots.root_status as cost_status,
-            roots.root_created_at as cost_created_at,
-            roots.root_processed_at as cost_processed_at
-          from roots
-          where roots.root_scope_type = 'cost_statistics'
-          union all
-          select
-            roots.root_event_id,
-            roots.root_created_at,
-            child.id::text as cost_event_id,
-            child.scope_key as cost_scope_key,
-            coalesce(child.payload->>'reason', child.raw_payload->>'reason') as cost_reason,
-            child.status as cost_status,
-            child.created_at as cost_created_at,
-            child.processed_at as cost_processed_at
-          from roots
-          join job.outbox_events child
-            on child.tenant_id = %s
-           and child.trace_id = coalesce(roots.root_trace_id, roots.root_event_id)
-           and child.id::text <> roots.root_event_id
-          where child.scope_type = 'cost_statistics'
-        )
-        select *
-        from cost_events
-        order by root_created_at, cost_created_at, cost_event_id
-        """,
-        (str(tenant_id or "default"), normalized_event_ids, str(tenant_id or "default")),
-    )
-    candidates: list[dict[str, Any]] = []
-    for row in rows:
-        if (
-            str(row.get("cost_scope_key") or "") != "active:all"
-            or str(row.get("cost_reason") or "") != "cost_statistics_shard_converged"
-        ):
-            continue
-        root_event_id = str(row.get("root_event_id") or "")
-        root_created_at = row.get("root_created_at")
-        parent_processed_at = row.get("cost_processed_at")
-        month_rows = [
-            candidate
-            for candidate in rows
-            if str(candidate.get("root_event_id") or "") == root_event_id
-            and str(candidate.get("cost_scope_key") or "").startswith("active:")
-            and str(candidate.get("cost_scope_key") or "") != "active:all"
-            and str(candidate.get("cost_reason") or "")
-            in {"cost_statistics_relation_delta", "workbench_shard_published"}
-            and str(candidate.get("cost_status") or "") == "done"
-            and candidate.get("cost_processed_at") is not None
-        ]
-        month_row = min(
-            month_rows,
-            key=lambda candidate: (
-                0 if str(candidate.get("cost_reason") or "") == "cost_statistics_relation_delta" else 1,
-                candidate.get("cost_processed_at"),
-            ),
-            default=None,
-        )
-        month_processed_at = month_row.get("cost_processed_at") if isinstance(month_row, dict) else None
-        if (
-            str(row.get("cost_status") or "") != "done"
-            or root_created_at is None
-            or month_processed_at is None
-            or parent_processed_at is None
-        ):
-            continue
-        candidates.append(
-            {
-                "root_event_id": root_event_id,
-                "active_all_event_id": str(row.get("cost_event_id") or ""),
-                "root_created_at": root_created_at,
-                "cost_month_event_id": str((month_row or {}).get("cost_event_id") or ""),
-                "cost_month_reason": str((month_row or {}).get("cost_reason") or ""),
-                "cost_month_processed_at": month_processed_at,
-                "active_all_processed_at": parent_processed_at,
-            }
-        )
-    if not candidates:
-        return {"status": "fail", "error": "cost_active_all_causal_events_missing_or_incomplete"}
-    selected = max(candidates, key=lambda item: item["active_all_processed_at"])
-    observed_at = datetime.now(UTC)
-    return {
-        "status": "pass",
-        "root_event_id": selected["root_event_id"],
-        "active_all_event_id": selected["active_all_event_id"],
-        "cost_month_event_id": selected["cost_month_event_id"],
-        "cost_month_reason": selected["cost_month_reason"],
-        "target_scope_key": "active:all",
-        "commit_to_cost_month_ms": _datetime_elapsed_ms(
-            selected["root_created_at"], selected["cost_month_processed_at"]
-        ),
-        "cost_month_to_active_all_ms": _datetime_elapsed_ms(
-            selected["cost_month_processed_at"], selected["active_all_processed_at"]
-        ),
-        "commit_to_active_all_ms": _datetime_elapsed_ms(
-            selected["root_created_at"], selected["active_all_processed_at"]
-        ),
-        "commit_to_api_business_value_observed_ms": _datetime_elapsed_ms(
-            selected["root_created_at"], observed_at
-        ),
-        "root_created_at": _iso_datetime(selected["root_created_at"]),
-        "cost_month_processed_at": _iso_datetime(selected["cost_month_processed_at"]),
-        "active_all_processed_at": _iso_datetime(selected["active_all_processed_at"]),
-        "api_business_value_observed_at": observed_at.isoformat(),
-    }
-
-
-def _datetime_elapsed_ms(started_at: Any, completed_at: Any) -> float:
-    if not isinstance(started_at, datetime) or not isinstance(completed_at, datetime):
-        raise ValueError("causal_timeline_timestamp_invalid")
-    return round(max(0.0, (completed_at - started_at).total_seconds()) * 1000, 3)
-
-
-def _iso_datetime(value: Any) -> str:
-    if not isinstance(value, datetime):
-        raise ValueError("causal_timeline_timestamp_invalid")
-    return value.isoformat()
 
 
 def _consumer_causal_key(consumer: ConsumerProbe, path: str) -> str:
