@@ -63,6 +63,53 @@ class CostStatisticsPostgresIntegrationTests(unittest.TestCase):
                 self.assertEqual(len(facets), 1)
                 self.assertTrue(facets[0]["percentage_label"].endswith("%"))
 
+    def test_bank_flow_views_preserve_stable_bank_page_identity(self) -> None:
+        self.connection.execute(
+            f"""
+            insert into read_model.bank_detail_rows(
+                tenant_id, transaction_id, scope_key, scope_month, account_key,
+                bank_name, account_last4, trade_time_sort, trade_date,
+                direction, direction_label, amount,
+                effective_category_code, effective_category_label,
+                effective_category_primary_label, effective_category_sub_label,
+                effective_category_label_path, schema_version, payload
+            )
+            values (
+                'default', '64bf2e9b-0ccb-59da-b89e-bf537be30b56',
+                '2026-03', '2026-03-01', 'test-account',
+                '工商银行', '0001', '2026-03-05', '2026-03-05',
+                'expense', '支出', 200000,
+                'repayment', '归还借款', '外部往来款', '归还借款',
+                array['外部往来款', '归还借款'], {BANK_DETAIL_READ_MODEL_SCHEMA_VERSION},
+                '{{"id": "txn_imported_1348", "trade_time": "2026-03-05"}}'::jsonb
+            )
+            """
+        )
+
+        page = self.repository.get_cost_statistics_page(
+            project_scope="active",
+            scope_kind="month",
+            scope_value="2026-03",
+            view="bank_tag",
+            filters={
+                "bank_tag_primary_label": "外部往来款",
+                "bank_tag_sub_label": "归还借款",
+            },
+            selected_tag_codes=None,
+            cursor_values=None,
+            page_size=50,
+        )
+        detail = self.repository.get_cost_statistics_transaction(
+            project_scope="active",
+            transaction_id="txn_imported_1348",
+            dependency_profile="bank_flow",
+            scope_kind="month",
+            scope_value="2026-03",
+        )
+
+        self.assertEqual(page["rows"][0]["transaction_id"], "txn_imported_1348")
+        self.assertEqual(detail["transaction_id"], "txn_imported_1348")
+
     def test_parent_freshness_gate_returns_exact_child_when_embedded_workbench_version_drifts(
         self,
     ) -> None:
