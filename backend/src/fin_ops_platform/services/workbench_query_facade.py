@@ -36,7 +36,6 @@ class WorkbenchQueryFacade:
         is_default_initial_query: Callable[..., bool] | None = None,
         oa_status_provider: Callable[[], object] | None = None,
         serialize_value: Callable[[object], object] | None = None,
-        page_dependency_status: Callable[[str], dict[str, object]] | None = None,
     ) -> None:
         self._repository = repository
         self._redis_helper = redis_helper
@@ -57,7 +56,6 @@ class WorkbenchQueryFacade:
         self._is_default_initial_query = is_default_initial_query
         self._oa_status_provider = oa_status_provider
         self._serialize_value = serialize_value or (lambda value: value)
-        self._page_dependency_status = page_dependency_status
 
     def initial_page(
         self,
@@ -85,44 +83,10 @@ class WorkbenchQueryFacade:
                     "message": "Workbench SQL initial page repository is not configured.",
                 },
             )
-        dependency_status_payload = self._page_dependency_status_payload(scope_key)
         cacheable_query = bool(
             callable(self._is_default_initial_query)
             and self._is_default_initial_query(paired_query, unpaired_query)
         )
-        dependency_cache_status = (
-            str(dependency_status_payload.get("status") or "fresh")
-            if isinstance(dependency_status_payload, dict)
-            else "fresh"
-        )
-        if dependency_cache_status != "fresh":
-            if dependency_cache_status in {"refreshing", "stale", "missing", "schema_mismatch"}:
-                dependency_scope_keys = (
-                    list(dependency_status_payload.get("refresh_scope_keys") or [])
-                    if isinstance(dependency_status_payload, dict)
-                    else []
-                )
-                refresh_scope_keys = (
-                    [scope_key]
-                    if scope_key != "all"
-                    else [
-                        str(candidate).strip()
-                        for candidate in dependency_scope_keys
-                        if str(candidate).strip() and str(candidate).strip() != "all"
-                    ]
-                )
-                for refresh_scope_key in dict.fromkeys(refresh_scope_keys):
-                    self._enqueue_refresh(
-                        refresh_scope_key,
-                        reason="api_initial_page_relation_dependency_stale",
-                    )
-            return self._non_fresh_initial_page_result(
-                current_month=current_month,
-                scope_key=scope_key,
-                read_model_status=dependency_cache_status,
-                dependency_status_payload=dependency_status_payload,
-                reason="relation_dependency_gate",
-            )
         refresh_status_payload: dict[str, object] | None = None
         if cacheable_query:
             try:
@@ -148,7 +112,10 @@ class WorkbenchQueryFacade:
         statistics_cache_version = expected_payload_version
         if cacheable_query and scope_key != "all":
             try:
-                statistics_status_payload = self._groups_refresh_status_payload("all")
+                statistics_status_payload = self._groups_refresh_status_payload(
+                    "all",
+                    enqueue_non_fresh=False,
+                )
             except Exception as error:
                 if not self._transient_read_model_error(error):
                     raise
@@ -185,15 +152,11 @@ class WorkbenchQueryFacade:
         )
         payload: object = None
         loaded_from_cache = False
-        cache_status_allows_read = (
-            refresh_status in {"fresh", "refreshing"}
-            and dependency_cache_status == "fresh"
-        )
+        cache_status_allows_read = refresh_status in {"fresh", "refreshing"}
         if scope_key != "all":
             cache_status_allows_read = (
                 refresh_status == "fresh"
                 and statistics_cache_status == "fresh"
-                and dependency_cache_status == "fresh"
             )
         if cache_key and cache_status_allows_read:
             get_cached = getattr(self._redis_helper, "get_json", None)
@@ -330,8 +293,6 @@ class WorkbenchQueryFacade:
                 *stale_reasons,
             ]
         initial_status = str(payload.get("read_model_status") or "fresh")
-        self._apply_page_dependency_status(payload, dependency_status_payload)
-        initial_status = str(payload.get("read_model_status") or initial_status)
         statistics_cache_is_fresh = scope_key == "all" or statistics_cache_status == "fresh"
         if not loaded_from_cache and cacheable_query and initial_status == "fresh" and statistics_cache_is_fresh:
             resolved_cache_key = (
@@ -352,9 +313,7 @@ class WorkbenchQueryFacade:
         if "oa_status" not in payload and callable(self._oa_status_provider):
             payload["oa_status"] = self._serialize_value(self._oa_status_provider())
         if initial_status != "fresh":
-            if dependency_cache_status in {"refreshing", "stale", "missing", "schema_mismatch"}:
-                self._enqueue_refresh(scope_key, reason="api_initial_page_relation_dependency_stale")
-            elif (
+            if (
                 initial_status != "refreshing"
                 and refresh_status not in {"refreshing", "stale"}
             ):
@@ -977,7 +936,12 @@ class WorkbenchQueryFacade:
             self._normalize_refresh_status(payload if isinstance(payload, dict) else {}, scope_key=scope_key, payload_is_dict=isinstance(payload, dict)),
         )
 
-    def _groups_refresh_status_payload(self, scope_key: str) -> dict[str, object] | None:
+    def _groups_refresh_status_payload(
+        self,
+        scope_key: str,
+        *,
+        enqueue_non_fresh: bool = True,
+    ) -> dict[str, object] | None:
         get_refresh_status = getattr(self._repository, "get_workbench_groups_freshness_status", None)
         if not callable(get_refresh_status):
             get_refresh_status = getattr(self._repository, "get_workbench_refresh_status", None)
@@ -992,19 +956,40 @@ class WorkbenchQueryFacade:
             else raw_refresh_status
         )
         refresh_status = str(refresh_status_payload.get("read_model_status") or "fresh")
-        if refresh_status not in {"fresh", "refreshing"}:
-            self._enqueue_refresh(scope_key, reason="api_groups_source_versions_stale")
+        if enqueue_non_fresh and refresh_status not in {"fresh", "refreshing"}:
+            refresh_scope_keys = self._refresh_scope_keys(
+                refresh_status_payload,
+                requested_scope_key=scope_key,
+            )
+            for refresh_scope_key in refresh_scope_keys:
+                self._enqueue_refresh(
+                    refresh_scope_key,
+                    reason="api_groups_source_versions_stale",
+                )
         return refresh_status_payload
 
-    def _page_dependency_status_payload(self, scope_key: str) -> dict[str, object] | None:
-        if not callable(self._page_dependency_status):
-            return None
-        payload = self._page_dependency_status(scope_key)
-        return dict(payload) if isinstance(payload, dict) else {
-            "status": "unavailable",
-            "refresh_enqueued": False,
-            "stale_reasons": ["page_dependency_status_unavailable"],
-        }
+    @staticmethod
+    def _refresh_scope_keys(
+        refresh_status_payload: dict[str, object],
+        *,
+        requested_scope_key: str,
+    ) -> list[str]:
+        if requested_scope_key != "all":
+            return [requested_scope_key]
+        explicit_scope_keys = [
+            str(scope_key).strip()
+            for scope_key in list(refresh_status_payload.get("refresh_scope_keys") or [])
+            if str(scope_key).strip() and str(scope_key).strip() != "all"
+        ]
+        failed_scope_keys = [
+            str(scope.get("scope_key") or "").strip()
+            for scope in list(refresh_status_payload.get("dirty_scopes") or [])
+            if isinstance(scope, dict)
+            and str(scope.get("status") or "") == "failed"
+            and str(scope.get("scope_key") or "").strip() not in {"", "all"}
+        ]
+        exact_scope_keys = list(dict.fromkeys([*explicit_scope_keys, *failed_scope_keys]))
+        return exact_scope_keys or ["all"]
 
     def _non_fresh_initial_page_result(
         self,
@@ -1013,7 +998,6 @@ class WorkbenchQueryFacade:
         scope_key: str,
         read_model_status: str,
         read_model_version: str | None = None,
-        dependency_status_payload: dict[str, object] | None = None,
         reason: str,
     ) -> WorkbenchQueryResult:
         payload: dict[str, object] = {
@@ -1034,46 +1018,13 @@ class WorkbenchQueryFacade:
             "read_model_version": read_model_version,
             "generated_at": None,
         }
-        self._apply_page_dependency_status(payload, dependency_status_payload)
-        effective_status = str(payload.get("read_model_status") or read_model_status)
         self._emit_status_metric(
             endpoint="/api/workbench",
             scope_key=scope_key,
-            read_model_status=effective_status,
+            read_model_status=read_model_status,
             reason=reason,
         )
         return WorkbenchQueryResult(HTTPStatus.OK, payload)
-
-    @staticmethod
-    def _apply_page_dependency_status(
-        payload: dict[str, object],
-        dependency_status_payload: dict[str, object] | None,
-    ) -> None:
-        if not isinstance(dependency_status_payload, dict):
-            return
-        status = str(dependency_status_payload.get("status") or "unavailable")
-        payload["read_model_dependency_statuses"] = {"workbench_relation": status}
-        if status == "fresh":
-            return
-        refresh_enqueued = bool(dependency_status_payload.get("refresh_enqueued"))
-        payload["read_model_status"] = "refreshing" if refresh_enqueued else status
-        dependency_reasons = [
-            f"workbench_relation:{reason}"
-            for reason in list(dependency_status_payload.get("stale_reasons") or [])
-            if str(reason).strip()
-        ]
-        payload["read_model_stale_reasons"] = list(
-            dict.fromkeys(
-                [
-                    *list(
-                        payload.get("read_model_stale_reasons")
-                        if isinstance(payload.get("read_model_stale_reasons"), list)
-                        else []
-                    ),
-                    *dependency_reasons,
-                ]
-            )
-        )
 
     def _read_model_temporarily_unavailable_result(
         self,

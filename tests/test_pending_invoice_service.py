@@ -630,6 +630,26 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         self.assertEqual([row["bank_transaction"]["bank_short_name"] for row in normalized], ["中行", "中行", "中行"])
         self.assertNotIn("bank_short_name", rows[0]["bank_transaction"])
 
+    def test_normalize_row_payloads_uses_request_scoped_settings_without_reloading(self) -> None:
+        service = PendingInvoiceQueryService(
+            import_service=ImportNormalizationService(existing_transactions=[], existing_invoices=[]),
+            category_service=BankTransactionCategoryService(),
+            app_settings_provider=lambda: (_ for _ in ()).throw(
+                AssertionError("request-scoped settings must be reused")
+            ),
+        )
+
+        normalized = service.normalize_row_payloads(
+            [{"id": "txn-1", "bank_transaction": {"account_no": "6222000000001234"}}],
+            settings_payload={
+                "bank_account_mappings": [
+                    {"last4": "1234", "bank_name": "中国银行", "short_name": "中行"},
+                ]
+            },
+        )
+
+        self.assertEqual(normalized[0]["bank_transaction"]["bank_short_name"], "中行")
+
     def test_transaction_rows_collapse_multi_bank_relation_into_one_grouped_row(self) -> None:
         vendor = self._counterparty("cp_vendor", "Vendor A")
         txn_1 = self._bank_transaction("txn_group_1", TransactionDirection.OUTFLOW, "Vendor A", "120.00")

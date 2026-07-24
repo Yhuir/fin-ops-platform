@@ -2,6 +2,13 @@
 
 日期：2026-07-22
 
+## 2026-07-25 访问时 exact Workbench proof 与 consumer 隔离
+
+- `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_all_freshness_returns_only_exact_canonical_mismatch_scopes` 证明 `month=all` 使用 canonical/active-generation bulk proof，只返回真实变化月份。
+- `tests/test_workbench_query_facade.py::WorkbenchQueryFacadeTests::test_initial_all_page_enqueues_only_exact_workbench_mismatch_scopes` 证明 initial freshness gate 只入队 exact Workbench scopes，不退化成 `workbench:all`。
+- `tests/test_workbench_query_facade.py::WorkbenchQueryFacadeTests::test_month_initial_does_not_enqueue_unrelated_all_statistics_scopes` 证明单月页面只读取 all-period 统计 generation 状态用于 cache/fail-closed，不得因此入队其它月份。
+- 关联台不消费 `workbench_relation` distribution，已删除 combined initial 的 relation dependency callback、阻塞、状态字段和双投递；其它实际消费者的 relation gate 不变。
+
 ## 2026-07-24 Workbench generation 批量发布回归
 
 - `tests/test_workbench_sql_runtime.py` 证明 rows、groups、group_rows 三张热点 generation 表使用同一事务内 PostgreSQL `COPY`，旧多值 `INSERT` 不再承担这三段写入，activation 仍在全部数据成功后执行。

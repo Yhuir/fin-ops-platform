@@ -1376,6 +1376,28 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             ],
         )
 
+    def test_pending_invoice_source_provider_reuses_request_settings_payload(self) -> None:
+        provider = PendingInvoiceSourceVersionsProvider(
+            settings_provider=lambda: (_ for _ in ()).throw(
+                AssertionError("request-scoped settings must prevent a second settings load")
+            ),
+            attachment_invoice_parser_version_provider=lambda: "parser-v1",
+            oa_projection_sync_version_provider=lambda: "oa-sync-v1",
+            repository=None,
+        )
+        settings_payload = {
+            "bank_transaction_tags": {"version": 7},
+            "pending_invoice_tag_groups": {"version": 8},
+        }
+
+        source_versions = provider(
+            query={"direction": ["expense"]},
+            settings_payload=settings_payload,
+        )
+
+        self.assertEqual(source_versions["bank_auto_tag_rules_version"], 7)
+        self.assertEqual(source_versions["pending_invoice_tag_groups_version"], 8)
+
     def test_pending_invoice_filtered_source_provider_uses_direction_wide_dependencies(self) -> None:
         class PendingSourceVersionRepository:
             def __init__(self) -> None:
@@ -2976,7 +2998,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         service = PendingInvoiceReadModelService(
             repository=None,
             queue_repository=QueueRecorder(),
-            row_normalizer=lambda rows: rows,
+            row_normalizer=lambda rows, **_kwargs: rows,
             settings_provider=lambda: {},
             source_versions_provider=lambda: {"pending_invoice_read_model_schema_version": "2026-06-pending-invoice-oa-identity-v2"},
         )
@@ -2989,7 +3011,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         service = PendingInvoiceReadModelService(
             repository=type("PendingRepo", (), {"list_pending_invoice_rows": lambda *_args, **_kwargs: None})(),
             queue_repository=queue,
-            row_normalizer=lambda rows: rows,
+            row_normalizer=lambda rows, **_kwargs: rows,
             settings_provider=lambda: {},
             source_versions_provider=lambda: {"pending_invoice_read_model_schema_version": "2026-06-pending-invoice-oa-identity-v2"},
         )
@@ -3050,6 +3072,78 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             queue.refreshes,
             [("pending_invoice", "expense:all:2026-02", "api_source_versions_stale")],
         )
+
+    def test_pending_invoice_rows_loads_settings_once_for_all_request_consumers(self) -> None:
+        settings_payload = {
+            "bank_transaction_tags": {"version": 9, "items": [{"code": "A1"}]},
+            "pending_invoice_tag_groups": {"version": 3},
+            "pending_output_invoice_tag_groups": {"version": 4},
+            "bank_account_mappings": [],
+        }
+        settings_calls = 0
+        source_settings: list[dict[str, object] | None] = []
+        normalized_settings: list[dict[str, object]] = []
+        expected_versions = _pending_invoice_expected_source_versions()
+
+        def settings_provider() -> dict[str, object]:
+            nonlocal settings_calls
+            settings_calls += 1
+            return settings_payload
+
+        def source_versions_provider(
+            **kwargs: object,
+        ) -> dict[str, object]:
+            source_settings.append(kwargs.get("settings_payload"))  # type: ignore[arg-type]
+            return expected_versions
+
+        def normalize_rows(
+            rows: list[dict[str, object]],
+            *,
+            settings_payload: dict[str, object],
+        ) -> list[dict[str, object]]:
+            normalized_settings.append(settings_payload)
+            return rows
+
+        service = PendingInvoiceReadModelService(
+            repository=type(
+                "PendingRepo",
+                (),
+                {
+                    "list_pending_invoice_rows": lambda *_args, **_kwargs: {
+                        "direction": "expense",
+                        "filter": "all",
+                        "rows": [
+                            {
+                                "id": "txn-1",
+                                "invoice_acquisition_status": {"code": "paid_pending_invoice"},
+                                "input_invoices": {"primary": None, "summaries": []},
+                                "oa": {"primary": None, "summaries": []},
+                            }
+                        ],
+                        "pagination": {"page": 1, "page_size": 50, "total": 1},
+                        "summary": {"total_rows": 1},
+                        "refresh_status": "fresh",
+                        **_pending_invoice_statistics_contract(
+                            expense_versions=expected_versions,
+                            income_versions=expected_versions,
+                        ),
+                        "source_versions": expected_versions,
+                    },
+                },
+            )(),
+            queue_repository=QueueRecorder(),
+            row_normalizer=normalize_rows,
+            settings_provider=settings_provider,
+            source_versions_provider=source_versions_provider,
+        )
+
+        payload = service.rows({"direction": ["expense"], "filter": ["all"]})
+
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(settings_calls, 1)
+        self.assertGreaterEqual(len(source_settings), 3)
+        self.assertTrue(all(item is settings_payload for item in source_settings))
+        self.assertEqual(normalized_settings, [settings_payload])
 
     def test_pending_invoice_statistics_and_rows_mismatch_enqueue_one_atomic_scope_batch(self) -> None:
         current_versions = {
@@ -3206,7 +3300,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         service = PendingInvoiceReadModelService(
             repository=repository,
             queue_repository=QueueRecorder(),
-            row_normalizer=lambda rows: rows,
+            row_normalizer=lambda rows, **_kwargs: rows,
             settings_provider=lambda: {},
             source_versions_provider=_pending_invoice_expected_source_versions,
         )
@@ -3261,7 +3355,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         service = PendingInvoiceReadModelService(
             repository=repository,
             queue_repository=QueueRecorder(),
-            row_normalizer=lambda rows: rows,
+            row_normalizer=lambda rows, **_kwargs: rows,
             settings_provider=lambda: {},
             source_versions_provider=lambda: expected_versions,
         )

@@ -426,6 +426,9 @@ from fin_ops_platform.services.workbench_confirm_link_context_relation_read_port
 from fin_ops_platform.services.workbench_events_active_stream_registry import WorkbenchEventsActiveStreamRegistry
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import WorkbenchReconciliationDirtyQueue
 from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryFacade
+from fin_ops_platform.services.workbench_query_freshness_service import (
+    WorkbenchQueryFreshnessService,
+)
 from fin_ops_platform.services.workbench_relation_grouping import (
     WorkbenchRelationGroupingService,
     WorkbenchRelationPreviewGroupingService,
@@ -672,21 +675,6 @@ class Application:
         )
         self._workbench_relation_facade = facade
         return facade
-
-    def _workbench_page_relation_status(self, scope_key: str) -> dict[str, object]:
-        relation_facade = self._workbench_relation_read_facade()
-        source_versions_for_month = getattr(relation_facade, "source_versions_for_month", None)
-        if relation_facade is None or not callable(source_versions_for_month):
-            return {
-                "status": "unavailable",
-                "refresh_enqueued": False,
-                "stale_reasons": ["workbench_relation_read_facade_unavailable"],
-            }
-        return source_versions_for_month(
-            scope_key,
-            require_fresh=True,
-            reason="reconciliation_workbench_page_access",
-        )
 
     def _workbench_relation_expected_source_versions(self, scope_key: str) -> dict[str, object]:
         state_store = getattr(self, "_state_store", None)
@@ -2653,6 +2641,9 @@ class Application:
         repository = getattr(self, "_workbench_sql_read_repository", None)
         runtime_container = getattr(self, "_runtime_repositories", None)
         query_service = getattr(self, "_workbench_query_service", None)
+        source_freshness = self._workbench_query_freshness_service(
+            repository=repository,
+        )
         return WorkbenchQueryFacade(
             repository=repository,
             redis_helper=getattr(runtime_container, "redis_helper", None),
@@ -2662,7 +2653,7 @@ class Application:
             emit_status_metric=self._emit_workbench_read_model_status_metric,
             missing_read_model_error=self._is_missing_workbench_groups_read_model_error,
             transient_read_model_error=self._is_transient_workbench_read_model_error,
-            refresh_status_with_source_freshness=self._workbench_refresh_status_with_source_freshness,
+            refresh_status_with_source_freshness=source_freshness.apply,
             normalize_refresh_status_payload=self._workbench_refresh_status_payload_normalizer().normalize,
             groups_redis_version_key=self._workbench_groups_redis_version_key,
             groups_cache_key_from_version=self._workbench_groups_redis_cache_key_from_version,
@@ -2673,12 +2664,22 @@ class Application:
             is_default_initial_query=is_default_workbench_initial_query,
             oa_status_provider=getattr(query_service, "oa_status_payload", None),
             serialize_value=Application._serialize_value,
-            page_dependency_status=(
-                self._workbench_page_relation_status
-                if getattr(self, "_workbench_relation_sql_read_repository", None) is not None
-                or getattr(self, "_workbench_relation_facade", None) is not None
-                else None
+        )
+
+    def _workbench_query_freshness_service(
+        self,
+        *,
+        repository: object | None = None,
+    ) -> WorkbenchQueryFreshnessService:
+        state_store = getattr(self, "_state_store", None)
+        return WorkbenchQueryFreshnessService(
+            connection=getattr(state_store, "_connection", None),
+            repository=(
+                repository
+                if repository is not None
+                else getattr(self, "_workbench_sql_read_repository", None)
             ),
+            single_scope_stale_reasons=self._workbench_sql_read_model_stale_reasons,
         )
 
     def _workbench_write_facade(self) -> WorkbenchWriteFacade:
@@ -7240,9 +7241,10 @@ class Application:
     def _workbench_refresh_status_payload_provider(self) -> WorkbenchRefreshStatusPayloadProvider:
         provider = getattr(self, "_workbench_refresh_status_payload_provider_instance", None)
         if provider is None:
+            source_freshness = self._workbench_query_freshness_service()
             provider = WorkbenchRefreshStatusPayloadProvider(
                 repository_provider=lambda: getattr(self, "_workbench_sql_read_repository", None),
-                source_freshness=self._workbench_refresh_status_with_source_freshness,
+                source_freshness=source_freshness.apply,
                 normalizer=self._workbench_refresh_status_payload_normalizer(),
             )
             self._workbench_refresh_status_payload_provider_instance = provider
@@ -9689,41 +9691,6 @@ class Application:
             else:
                 rows.append(row)
         result["rows"] = rows
-        return result
-
-    def _workbench_refresh_status_source_versions(self, payload: dict[str, object]) -> dict[str, object]:
-        generations = payload.get("generations") if isinstance(payload.get("generations"), list) else []
-        active_generation_id = str(payload.get("active_generation_id") or "")
-        for generation in generations:
-            if not isinstance(generation, dict):
-                continue
-            if str(generation.get("generation_id") or "") != active_generation_id:
-                continue
-            source_versions = generation.get("source_versions")
-            return dict(source_versions) if isinstance(source_versions, dict) else {}
-        source_versions = payload.get("source_versions")
-        return dict(source_versions) if isinstance(source_versions, dict) else {}
-
-    def _workbench_refresh_status_with_source_freshness(
-        self,
-        status_payload: dict[str, object],
-        *,
-        scope_key: str | None = None,
-    ) -> dict[str, object]:
-        reasons = self._workbench_sql_read_model_stale_reasons(
-            self._workbench_refresh_status_source_versions(status_payload),
-            scope_key=scope_key,
-        )
-        if not reasons:
-            return status_payload
-        result = dict(status_payload)
-        existing_reasons = result.get("read_model_stale_reasons")
-        result["read_model_stale_reasons"] = [
-            *list(existing_reasons if isinstance(existing_reasons, list) else []),
-            *[reason for reason in reasons if reason not in (existing_reasons if isinstance(existing_reasons, list) else [])],
-        ]
-        if str(result.get("read_model_status") or "fresh") == "fresh":
-            result["read_model_status"] = "stale"
         return result
 
     def _workbench_read_model_source_versions(self) -> dict[str, object]:

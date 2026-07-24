@@ -206,8 +206,15 @@ class PendingInvoiceQueryService:
             tag_groups=self._pending_invoice_tag_groups(direction=normalized_direction),
         )
 
-    def normalize_row_payloads(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        bank_account_mappings = self._bank_account_mappings_by_last4()
+    def normalize_row_payloads(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        settings_payload: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        bank_account_mappings = self._bank_account_mappings_by_last4(
+            settings_payload=settings_payload,
+        )
         return [self._normalize_row_payload(row, bank_account_mappings=bank_account_mappings) for row in rows]
 
     def _normalize_row_payload(
@@ -268,8 +275,16 @@ class PendingInvoiceQueryService:
     def _group_for_category(category_code: str | None, tag_groups: dict[str, set[str]], *, direction: str) -> str | None:
         return pending_invoice_group_for_category(category_code, tag_groups, direction=direction)
 
-    def _bank_account_mappings_by_last4(self) -> dict[str, dict[str, str]]:
-        settings = self._app_settings_provider()
+    def _bank_account_mappings_by_last4(
+        self,
+        *,
+        settings_payload: dict[str, Any] | None = None,
+    ) -> dict[str, dict[str, str]]:
+        settings = (
+            settings_payload
+            if isinstance(settings_payload, dict)
+            else self._app_settings_provider()
+        )
         mappings: dict[str, dict[str, str]] = {}
         for item in list(settings.get("bank_account_mappings") or []):
             if not isinstance(item, dict):

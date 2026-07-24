@@ -1520,6 +1520,47 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_page_freshness_does_not_depend_on_relation_read_model(self) -> None:
+        server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
+        facade_source = (
+            SERVICES_ROOT / "workbench_query_facade.py"
+        ).read_text(encoding="utf-8")
+        freshness_source = (
+            SERVICES_ROOT / "workbench_query_freshness_service.py"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        for forbidden in (
+            "_workbench_page_relation_status",
+            "page_dependency_status",
+            "api_initial_page_relation_dependency_stale",
+            "read_model_dependency_statuses",
+        ):
+            if forbidden in server_source or forbidden in facade_source:
+                violations.append(
+                    f"Workbench page freshness still depends on relation projection marker {forbidden}"
+                )
+        if "def _workbench_refresh_status_with_source_freshness" in server_source:
+            violations.append(
+                "server.py still owns Workbench source freshness business logic"
+            )
+        for required in (
+            "list_workbench_scope_shards",
+            "source_versions_for_scopes",
+            "active_workbench_source_versions_by_scope",
+            'result["refresh_scope_keys"]',
+        ):
+            if required not in freshness_source:
+                violations.append(
+                    f"Workbench exact all-scope freshness is missing {required}"
+                )
+        if "WorkbenchQueryFreshnessService" not in server_source:
+            violations.append(
+                "server.py does not assemble the Workbench query freshness service"
+            )
+
+        self.assertEqual(violations, [])
+
     def test_pending_invoice_write_routes_use_route_owner(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
@@ -6822,7 +6863,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for marker in (
             "WorkbenchRefreshStatusPayloadProvider(",
             "repository_provider=lambda: getattr(self, \"_workbench_sql_read_repository\", None)",
-            "source_freshness=self._workbench_refresh_status_with_source_freshness",
+            "source_freshness = self._workbench_query_freshness_service()",
+            "source_freshness=source_freshness.apply",
             "normalizer=self._workbench_refresh_status_payload_normalizer()",
         ):
             if marker not in provider_builder_source:

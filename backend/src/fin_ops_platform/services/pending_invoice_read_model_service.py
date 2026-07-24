@@ -20,9 +20,9 @@ from fin_ops_platform.services.read_model_freshness import (
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
 
-RowNormalizer = Callable[[list[dict[str, Any]]], list[dict[str, Any]]]
+RowNormalizer = Callable[..., list[dict[str, Any]]]
 SettingsProvider = Callable[[], dict[str, Any]]
-SourceVersionsProvider = Callable[[], dict[str, Any]]
+SourceVersionsProvider = Callable[..., dict[str, Any]]
 DEPENDENCY_SOURCE_VERSION_KEYS = (
     "bank_detail_source_versions",
     "workbench_relation_source_versions",
@@ -127,18 +127,29 @@ class PendingInvoiceReadModelService:
                 source_payload=payload,
             )
 
+        raw_settings_payload = self._settings_provider()
+        settings_payload = raw_settings_payload if isinstance(raw_settings_payload, dict) else {}
         statistics_refresh_scope_keys = (
-            self._gate_statistics(payload) if include_statistics else []
+            self._gate_statistics(payload, settings_payload=settings_payload) if include_statistics else []
         )
         if refresh_status != "fresh":
             self._enqueue_refresh_scope_keys(
                 statistics_refresh_scope_keys,
                 reason="api_statistics_source_versions_stale",
             )
-            return self.payload_response(payload, read_model_status=refresh_status, scope_key=scope_key)
+            return self.payload_response(
+                payload,
+                read_model_status=refresh_status,
+                scope_key=scope_key,
+                settings_payload=settings_payload,
+            )
 
         expected_source_versions = require_expected_source_versions(
-            self.expected_source_versions(query=query, payload=payload),
+            self.expected_source_versions(
+                query=query,
+                payload=payload,
+                settings_payload=settings_payload,
+            ),
             context=f"pending_invoice_rows:{scope_key}",
         )
         actual_source_versions = (
@@ -163,7 +174,12 @@ class PendingInvoiceReadModelService:
                 reason="api_source_versions_stale",
             )
             if list(payload.get("rows") or []):
-                result = self.payload_response(payload, read_model_status="refreshing", scope_key=scope_key)
+                result = self.payload_response(
+                    payload,
+                    read_model_status="refreshing",
+                    scope_key=scope_key,
+                    settings_payload=settings_payload,
+                )
                 result["read_model_stale_reasons"] = list(stale_reasons)
                 return result
             return self.refreshing_payload(
@@ -179,9 +195,19 @@ class PendingInvoiceReadModelService:
             statistics_refresh_scope_keys,
             reason="api_statistics_source_versions_stale",
         )
-        return self.payload_response(payload, read_model_status=refresh_status, scope_key=scope_key)
+        return self.payload_response(
+            payload,
+            read_model_status=refresh_status,
+            scope_key=scope_key,
+            settings_payload=settings_payload,
+        )
 
-    def _gate_statistics(self, payload: dict[str, Any]) -> list[str]:
+    def _gate_statistics(
+        self,
+        payload: dict[str, Any],
+        *,
+        settings_payload: dict[str, Any],
+    ) -> list[str]:
         status = str(payload.get("statistics_status") or "stale")
         actual_by_scope = (
             payload.get("statistics_source_versions_by_scope")
@@ -200,6 +226,7 @@ class PendingInvoiceReadModelService:
                 self.expected_source_versions(
                     query={"direction": [direction], "filter": ["all"]},
                     payload={"direction": direction, "filter": "all"},
+                    settings_payload=settings_payload,
                 ),
                 context=f"pending_invoice_statistics:{direction}",
             )
@@ -442,6 +469,7 @@ class PendingInvoiceReadModelService:
         *,
         query: dict[str, list[str]] | None = None,
         payload: dict[str, Any] | None = None,
+        settings_payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         provider = self._source_versions_provider
         if not callable(provider):
@@ -450,12 +478,20 @@ class PendingInvoiceReadModelService:
             parameters = signature(provider).parameters
         except (TypeError, ValueError):
             return require_expected_source_versions(provider() or {}, context="pending_invoice_read_model")
-        if any(parameter.kind == parameter.VAR_KEYWORD for parameter in parameters.values()) or {
-            "query",
-            "payload",
-        }.intersection(parameters):
+        accepts_kwargs = any(
+            parameter.kind == parameter.VAR_KEYWORD
+            for parameter in parameters.values()
+        )
+        provider_kwargs: dict[str, object] = {}
+        if accepts_kwargs or "query" in parameters:
+            provider_kwargs["query"] = query or {}
+        if accepts_kwargs or "payload" in parameters:
+            provider_kwargs["payload"] = payload or {}
+        if accepts_kwargs or "settings_payload" in parameters:
+            provider_kwargs["settings_payload"] = settings_payload
+        if provider_kwargs:
             return require_expected_source_versions(
-                provider(query=query or {}, payload=payload or {}) or {},
+                provider(**provider_kwargs) or {},
                 context="pending_invoice_read_model",
             )
         return require_expected_source_versions(provider() or {}, context="pending_invoice_read_model")
@@ -495,6 +531,7 @@ class PendingInvoiceReadModelService:
         *,
         read_model_status: str,
         scope_key: str,
+        settings_payload: dict[str, Any],
     ) -> dict[str, Any]:
         result = dict(payload)
         summary = result.get("summary")
@@ -509,8 +546,10 @@ class PendingInvoiceReadModelService:
             result["summary"] = summary
         rows = result.get("rows")
         if isinstance(rows, list) and callable(self._row_normalizer):
-            result["rows"] = self._row_normalizer([row for row in rows if isinstance(row, dict)])
-        settings_payload = self._settings_provider()
+            result["rows"] = self._row_normalizer(
+                [row for row in rows if isinstance(row, dict)],
+                settings_payload=settings_payload,
+            )
         bank_transaction_tags = (
             settings_payload.get("bank_transaction_tags")
             if isinstance(settings_payload, dict)
@@ -687,9 +726,15 @@ class PendingInvoiceSourceVersionsProvider:
         *,
         query: dict[str, list[str]] | None = None,
         payload: dict[str, Any] | None = None,
+        settings_payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        resolved_settings = (
+            settings_payload
+            if isinstance(settings_payload, dict)
+            else self._settings_provider()
+        )
         return pending_invoice_source_versions(
-            self._settings_provider(),
+            resolved_settings,
             attachment_invoice_parser_version=self._attachment_invoice_parser_version_provider(),
             oa_projection_sync_version=self._oa_projection_sync_version_provider(),
             direction=str((query or {}).get("direction", ["all"])[0] or "all"),

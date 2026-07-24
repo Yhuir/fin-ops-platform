@@ -34,6 +34,9 @@ from fin_ops_platform.services.workbench_read_model_version import (
     WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION,
 )
 from fin_ops_platform.services.workbench_read_model_refresh import WorkbenchReadModelRefreshService
+from fin_ops_platform.services.workbench_query_freshness_service import (
+    WorkbenchQueryFreshnessService,
+)
 from fin_ops_platform.services.workbench_sql_projection import (
     WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
     WorkbenchSqlProjectionBuilder,
@@ -1722,6 +1725,98 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         versions = app._workbench_sql_read_model_source_versions("all")
 
         self.assertEqual(versions["builder"], WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
+
+    def test_workbench_all_freshness_returns_only_exact_canonical_mismatch_scopes(self) -> None:
+        class BulkBuilder:
+            def __init__(self, **_kwargs: object) -> None:
+                pass
+
+            @staticmethod
+            def list_workbench_scope_shards(_scope_key: str) -> list[str]:
+                return ["2026-02", "2026-03"]
+
+            @staticmethod
+            def source_versions_for_scopes(_scope_keys: list[str]) -> dict[str, dict[str, object]]:
+                return {
+                    "2026-02": {"builder": "current", "relation_version": "same"},
+                    "2026-03": {"builder": "current", "relation_version": "new"},
+                }
+
+        class Repository:
+            @staticmethod
+            def active_workbench_source_versions_by_scope(
+                *,
+                scope_keys: list[str],
+            ) -> dict[str, dict[str, object]]:
+                active_versions = {
+                    "2026-02": {"builder": "current", "relation_version": "same", "source_version": 10},
+                    "2026-03": {"builder": "current", "relation_version": "old", "source_version": 11},
+                }
+                return {scope_key: active_versions[scope_key] for scope_key in scope_keys}
+
+        connection = SimpleNamespace(fetch_all=lambda *_args, **_kwargs: [])
+        service = WorkbenchQueryFreshnessService(
+            connection=connection,
+            repository=Repository(),
+            single_scope_stale_reasons=lambda *_args, **_kwargs: [],
+        )
+
+        with patch(
+            "fin_ops_platform.services.workbench_query_freshness_service.WorkbenchSqlProjectionBuilder",
+            BulkBuilder,
+        ):
+            result = service.apply(
+                {
+                    "scope_key": "all",
+                    "read_model_status": "fresh",
+                    "read_model_version": "generation-set-1",
+                },
+                scope_key="all",
+            )
+
+        self.assertEqual(result["read_model_status"], "stale")
+        self.assertEqual(result["refresh_scope_keys"], ["2026-03"])
+        self.assertEqual(
+            result["read_model_stale_reasons"],
+            ["2026-03:relation_version_mismatch"],
+        )
+
+    def test_workbench_all_freshness_keeps_non_sql_fallback_contract(self) -> None:
+        calls: list[tuple[object, str | None]] = []
+
+        def stale_reasons(
+            source_versions: object,
+            *,
+            scope_key: str | None = None,
+        ) -> list[str]:
+            calls.append((source_versions, scope_key))
+            return ["builder_mismatch"]
+
+        service = WorkbenchQueryFreshnessService(
+            connection=None,
+            repository=None,
+            single_scope_stale_reasons=stale_reasons,
+        )
+
+        result = service.apply(
+            {
+                "scope_key": "all",
+                "read_model_status": "fresh",
+                "active_generation_id": "generation-set-1",
+                "generations": [
+                    {
+                        "generation_id": "generation-set-1",
+                        "source_versions": {"builder": "old"},
+                    }
+                ],
+            },
+            scope_key="all",
+        )
+
+        self.assertEqual(calls, [({"builder": "old"}, "all")])
+        self.assertEqual(result["read_model_status"], "stale")
+        self.assertEqual(result["read_model_stale_reasons"], ["builder_mismatch"])
+        self.assertEqual(result["refresh_scope_keys"], [])
 
     def test_workbench_v6_rejects_v5_month_all_and_cache_versions(self) -> None:
         app = object.__new__(Application)

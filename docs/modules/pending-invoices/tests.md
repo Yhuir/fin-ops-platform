@@ -16,6 +16,12 @@
 - 覆盖点：filter-options freshness gate 显式 `include_statistics=false`；全部命中月份的 `workbench_pair_relations` count/max(updated_at) 在一次批量 SQL 中返回，禁止恢复逐月 `fetch_one` N+1；每月 source-version payload shape 保持不变。
 - 验证命令：见 Phase 27 最终 verification 与生产 SLO 证据。
 
+## 2026-07-25 - rows 请求内 settings I/O 去重
+
+- 变更类型：只读请求热路径性能修复，不改变 API shape、read-model scope、worker 或业务口径。
+- 新增/更新测试：`test_pending_invoice_source_provider_reuses_request_settings_payload`、`test_pending_invoice_rows_loads_settings_once_for_all_request_consumers`、`test_normalize_row_payloads_uses_request_scoped_settings_without_reloading`。
+- 覆盖点：同一 rows 请求的 statistics、当前 scope source proof、bank tags 和银行账号名称归一复用同一个 settings payload；禁止恢复多次 `get_settings_payload()`，避免一个请求重复执行设置 repository 查询。
+
 ## 2026-07-05 - pending invoice boundary close
 
 - 变更类型：旧同步读链路删除与 route/read-model 边界收口。
