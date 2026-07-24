@@ -1,5 +1,11 @@
 # 成本统计 实施记录
 
+## 2026-07-25 - Workbench 执行版本放大根因修复
+
+- 生产只读证据显示，同一 Workbench scope 的连续 Cost dependency refresh 除 `source_version` 外业务 proof、row/group count完全相同；重复事件原因均为 `cost_statistics_workbench_dependency_stale`。因此瓶颈不是业务数据持续变化或第二套 queue，而是 Cost 的 query、worker和parent/child SQL对同一 dependency使用了不同相等语义。
+- 修复复用 `cost_statistics_source_versions.py` 的现有 consumer-semantic边界：统一移除 Workbench active-generation执行游标 `source_version`，保留builder/schema/关系事实等全部业务字段；真实业务变化仍 fail closed。System Audit SQL同步使用相同排除集合。
+- 未新增表、migration、queue、worker、cache、协调器、fallback或第二投影；存储 schema和API shape不变，因此不 bump projection schema。最终性能与队列收敛仍以候选生产验证为准。
+
 ## 2026-07-24 - exact Cost scope 与 Workbench dependency 同次登记
 
 - release `main-c4edf63a-20260724201915` 已把 Cost handler降到约 78–328ms，confirm/withdraw写入分别约 347/233ms且零 forbidden fan-out；但页面轮询先等 Workbench、再登记 Cost child、再等待 parent，`project/all` 仍需约 12.6/11.2 秒才业务可见。

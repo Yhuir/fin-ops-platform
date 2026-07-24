@@ -345,6 +345,10 @@ class CostStatisticsPageAuditTests(unittest.TestCase):
         proof_sql, proof_params = proof_calls[0]
         self.assertEqual(proof_sql.count("limit %s"), 3)
         self.assertEqual(proof_params, (51, "default", "default", 51, "default", 51))
+        self.assertEqual(proof_sql.count("- 'source_version'"), 4)
+        self.assertEqual(proof_sql.count("- 'workbench_relation_source_versions'"), 2)
+        self.assertEqual(proof_sql.count("- 'bank_transactions_context_row_count'"), 2)
+        self.assertEqual(proof_sql.count("- 'bank_transactions_updated_at'"), 2)
         self.assertNotIn("/* check: source_versions_mismatch */", proof_sql)
         self.assertNotIn("/* check: cost_upstream_source_versions */", proof_sql)
         self.assertNotIn("/* check: cost_parent_source_shards */", proof_sql)

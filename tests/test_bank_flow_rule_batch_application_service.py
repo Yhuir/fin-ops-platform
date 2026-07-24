@@ -998,7 +998,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
             affected_scope_keys_for_tag_codes=lambda codes: ["2026-05"] if codes == ["fee"] else []
         )
         service._commit_tag_rule_update = (  # type: ignore[method-assign]
-            lambda **kwargs: commit_calls.append(dict(kwargs)) or False
+            lambda **kwargs: commit_calls.append(dict(kwargs))
         )
 
         result = service.update_tag_selection(
@@ -1012,9 +1012,8 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         self.assertTrue(result["eligibility_changed"])
         self.assertEqual(result["eligibility_changed_tag_codes"], ["fee"])
         self.assertEqual(result["affected_scope_keys"], ["2026-05"])
-        self.assertFalse(result["refresh_enqueued"])
-        self.assertEqual(commit_calls[0]["affected_scope_keys"], ["2026-05"])
-        self.assertEqual(set(commit_calls[0]), {"prepared", "affected_scope_keys"})
+        self.assertNotIn("refresh_enqueued", result)
+        self.assertEqual(set(commit_calls[0]), {"prepared"})
 
     def test_update_tag_selection_noop_does_not_enqueue_refresh(self) -> None:
         settings = RecordingBankFlowRuleSettings()
@@ -1059,7 +1058,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         service = object.__new__(BankFlowRuleBatchApplicationService)
         service._app_settings_service = settings
         service._commit_tag_rule_update = (  # type: ignore[method-assign]
-            lambda **kwargs: commit_calls.append(dict(kwargs)) or False
+            lambda **kwargs: commit_calls.append(dict(kwargs))
         )
 
         result = service.update_tag_selection(
@@ -1068,9 +1067,9 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         )
 
         self.assertFalse(result["eligibility_changed"])
-        self.assertFalse(result["refresh_enqueued"])
+        self.assertNotIn("refresh_enqueued", result)
         self.assertEqual(result["affected_scope_keys"], [])
-        self.assertEqual(commit_calls[0]["affected_scope_keys"], [])
+        self.assertEqual(set(commit_calls[0]), {"prepared"})
 
     def test_commit_tag_rule_update_uses_one_postgres_transaction_for_settings_only(self) -> None:
         settings = RecordingBankFlowRuleSettings()
@@ -1101,13 +1100,9 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         )
         service._app_settings_service = settings
 
-        enqueued = service._commit_tag_rule_update(
-            prepared=prepared,
-            affected_scope_keys=["2026-05", "2026-06"],
-        )
+        service._commit_tag_rule_update(prepared=prepared)
 
         transaction = connection.recording_transaction
-        self.assertFalse(enqueued)
         self.assertEqual(calls, [("settings", transaction)])
         self.assertIsNone(transaction.exited_with)
         self.assertEqual(len(settings.accepted_updates), 1)
@@ -1135,16 +1130,12 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         )
         service._app_settings_service = settings
 
-        enqueued = service._commit_tag_rule_update(
-            prepared=prepared,
-            affected_scope_keys=["2026-05"],
-        )
+        service._commit_tag_rule_update(prepared=prepared)
 
-        self.assertFalse(enqueued)
         self.assertIsNone(connection.recording_transaction.exited_with)
         self.assertEqual(len(settings.accepted_updates), 1)
 
-    def test_commit_tag_rule_update_rejects_stale_database_version_before_enqueue(self) -> None:
+    def test_commit_tag_rule_update_rejects_stale_database_version_without_queue_io(self) -> None:
         settings = RecordingBankFlowRuleSettings()
         prepared = settings.normalize_bank_flow_rule_batch_tag_rules_update(
             {"expected_version": 7, "rules": []},
@@ -1166,46 +1157,14 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         service._app_settings_service = settings
 
         with self.assertRaises(AppSettingsValidationError) as context:
-            service._commit_tag_rule_update(
-                prepared=prepared,
-                affected_scope_keys=["2026-05"],
-            )
+            service._commit_tag_rule_update(prepared=prepared)
 
         self.assertEqual(context.exception.error_code, "bank_flow_rule_batch_tag_rules_version_conflict")
         self.assertIs(connection.recording_transaction.exited_with, AppSettingsValidationError)
         self.assertEqual(enqueue_calls, [])
         self.assertEqual(settings.accepted_updates, [])
 
-    def test_commit_tag_rule_update_ignores_refresh_queue_result(self) -> None:
-        settings = RecordingBankFlowRuleSettings()
-        prepared = settings.normalize_bank_flow_rule_batch_tag_rules_update(
-            {"expected_version": 7, "rules": []},
-            actor_id="finance-user",
-        )
-        connection = RecordingTransactionConnection()
-        service = object.__new__(BankFlowRuleBatchApplicationService)
-        service._state_store = SimpleNamespace(
-            storage_backend="postgres",
-            _connection=connection,
-            save_app_settings_for_bank_flow_rule_version_in_transaction=(
-                lambda payload, *, expected_version, transaction: payload
-            ),
-        )
-        service._queue_repository = SimpleNamespace(
-            enqueue_read_model_refreshes_in_transaction=lambda **_kwargs: [object()],
-        )
-        service._app_settings_service = settings
-
-        enqueued = service._commit_tag_rule_update(
-            prepared=prepared,
-            affected_scope_keys=["2026-05", "2026-06"],
-        )
-
-        self.assertFalse(enqueued)
-        self.assertIsNone(connection.recording_transaction.exited_with)
-        self.assertEqual(len(settings.accepted_updates), 1)
-
-    def test_commit_tag_rule_update_saves_local_settings_without_refresh_enqueue(self) -> None:
+    def test_commit_tag_rule_update_saves_local_settings_without_queue_io(self) -> None:
         settings = RecordingBankFlowRuleSettings()
         prepared = settings.normalize_bank_flow_rule_batch_tag_rules_update(
             {"expected_version": 7, "rules": []},
@@ -1217,17 +1176,10 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
             storage_backend="local",
             save_app_settings=lambda payload: saved_snapshots.append(dict(payload)),
         )
-        service._read_model_refresh_producer = SimpleNamespace(
-            enqueue_scope_keys=lambda *_args, **_kwargs: [],
-        )
         service._app_settings_service = settings
 
-        enqueued = service._commit_tag_rule_update(
-            prepared=prepared,
-            affected_scope_keys=["2026-05"],
-        )
+        service._commit_tag_rule_update(prepared=prepared)
 
-        self.assertFalse(enqueued)
         self.assertEqual(saved_snapshots, [prepared["next_snapshot"]])
         self.assertEqual(len(settings.accepted_updates), 1)
 

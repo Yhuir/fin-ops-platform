@@ -15,6 +15,7 @@ from fin_ops_platform.services.cost_statistics_read_model_repository import Cost
 from fin_ops_platform.services.cost_statistics_source_versions import (
     COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
     cost_statistics_source_versions,
+    cost_statistics_workbench_dependency_source_versions,
 )
 from fin_ops_platform.services.live_workbench_service import format_decimal
 from fin_ops_platform.services.postgres_repositories.common import row_payload
@@ -171,10 +172,13 @@ class CostStatisticsSqlProjectionBuilder:
     def _require_fresh_workbench_dependency(self, scope_key: str) -> None:
         expected, actual = self._workbench_dependency_versions_provider(scope_key)
         expected = require_expected_source_versions(
-            expected,
+            cost_statistics_workbench_dependency_source_versions(expected),
             context=f"cost_statistics_workbench_dependency:{scope_key}",
         )
-        if source_version_mismatch_reasons(expected=expected, actual=actual):
+        if source_version_mismatch_reasons(
+            expected=expected,
+            actual=cost_statistics_workbench_dependency_source_versions(actual),
+        ):
             raise RuntimeError(
                 "workbench_read_model_not_fresh: "
                 f"operation=cost_statistics_month_projection status=stale scope_keys={scope_key}"

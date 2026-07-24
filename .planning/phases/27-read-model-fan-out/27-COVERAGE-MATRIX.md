@@ -174,6 +174,7 @@
 | `enqueue-tax-server` | `backend/src/fin_ops_platform/app/server.py` | `.enqueue_read_model_refresh(` | `1` | `retain` | access/explicit force-refresh thin helper，经 gateway；无普通写 fan-out caller |
 | `enqueue-cost-runtime` | `backend/src/fin_ops_platform/services/cost_statistics_runtime_service.py` | `.enqueue_read_model_refresh(` | `1` | `retain` | access/force refresh gateway wrapper |
 | `enqueue-cost-query` | `backend/src/fin_ops_platform/services/cost_statistics_query_service.py` | `.enqueue_read_model_refresh(` | `3` | `retain` | access-time dependency-bound exact Workbench/Cost child/parent miss-stale owner |
+| `enqueue-runtime-queue-batch-delegate` | `backend/src/fin_ops_platform/services/runtime_queue.py` | `.enqueue_read_model_refreshes_in_transaction(` | `1` | `retain` | 原子 inactive-scope 去重入口的事务内批量委托；属于 durable queue 内部边界，不是业务 fan-out producer |
 | `barrier-cost-page` | `web/src/pages/CostStatisticsPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | 页面首次/事件/hidden→visible 均复用正常 GET；refreshing 使用 3s 有界自身重试 |
 | `barrier-input-page` | `web/src/pages/InputInvoiceUsagePage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | ordinary writes改为 visible scope normal GET；OA reverse 也不等待跨页 barrier |
 | `barrier-batch-accounting-page` | `web/src/pages/BatchAccountingPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | relation commit 后当前可见页面正常 GET，无跨页 targets |

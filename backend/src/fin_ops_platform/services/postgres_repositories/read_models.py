@@ -7756,13 +7756,19 @@ class PostgresSummaryReadModelRepository:
                             or coalesce(
                                 state.child_source_versions->'workbench_source_versions',
                                 '{}'::jsonb
-                            ) <> coalesce(state.active_workbench_source_versions, '{}'::jsonb)
+                            ) - 'source_version'
+                              <> coalesce(state.active_workbench_source_versions, '{}'::jsonb)
+                                 - 'source_version'
                             or coalesce(
                                 state.child_source_versions->'bank_detail_source_versions',
                                 '{}'::jsonb
                             ) - 'source_version' - 'workbench_relation_source_versions'
+                              - 'bank_transactions_context_row_count'
+                              - 'bank_transactions_updated_at'
                                <> coalesce(state.bank_detail_source_versions, '{}'::jsonb)
                                   - 'source_version' - 'workbench_relation_source_versions'
+                                  - 'bank_transactions_context_row_count'
+                                  - 'bank_transactions_updated_at'
                             or coalesce(
                                 state.child_dirty_status in ('pending', 'processing', 'failed'),
                                 false

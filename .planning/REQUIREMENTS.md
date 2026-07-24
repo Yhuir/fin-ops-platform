@@ -77,20 +77,20 @@
 - [x] **TURN-CLOSURE-01**: A `turnover_manual_closure` active relation represents canonical member ownership only; it enters Workbench paired only when its frozen OA/invoice requirements are complete, otherwise it remains one same-case unpaired relation with explicit missing row types.
 - [x] **TURN-CLOSURE-02**: Turnover closure confirmation reuses the existing Bank Transaction Paired Policy helper to freeze actual selected bank tag codes, rule version, source and OA/invoice requirements; multi-tag requirements use OR and unknown/missing inputs fail closed.
 - [x] **TURN-CLOSURE-03**: Every bank member in a merged turnover closure is contained in the current selected bank IDs, selected-row cache covers all policy inputs with no additional bank list I/O, and the hard-coded requirement path plus legacy no-OA relation resync chain are fully removed without fallback.
-- [ ] **TURN-CLOSURE-04**: Existing repair ops identify active turnover relations with non-canonical requirement source or missing canonical tag/version metadata and rebuild them from fresh tags/rules; forward fingerprint binds exact metadata preimage plus intended after image, partial replay rebuilds the original plan from fresh targets plus fingerprint histories, and rollback verifies every current after image before the first write then precisely replaces only `special_metadata` with its recorded preimage through the canonical audited/idempotent metadata-update UoW without cancel/recreate or ownership/lifecycle/created-field changes; drift is zero-write, rollback reaches target zero, ordinary missing-snapshot compatibility and ETC/batch exemptions remain unchanged.
-- [ ] **TURN-CLOSURE-05**: Workbench month/all schema is upgraded from v5 to v6 so old generations and derived caches fail closed; an exact uploaded release uses captured previous release, authorized atomic rehydrate, formal readiness/Audit evidence and a post-execute failure sequence of exact metadata rollback before previous-release activation/rehydration, all backed by restore point and approval.
-- [ ] **TURN-CLOSURE-06**: Applicable seven-category tests, provider I/O counts, old-symbol zero-reference guards, minimal docs, controlled dry-run SLO checks and same-scenario test-owned reversible E2E compare previous/new releases under explicit safety ceilings without changing API/DTO/frontend production components or adding tables, workers, read models, runtime services/repositories/helpers or dependencies.
+- [x] **TURN-CLOSURE-04**: Existing repair ops identify active turnover relations with non-canonical requirement source or missing canonical tag/version metadata and rebuild them from fresh tags/rules; forward fingerprint binds exact metadata preimage plus intended after image, partial replay rebuilds the original plan from fresh targets plus fingerprint histories, and rollback verifies every current after image before the first write then precisely replaces only `special_metadata` with its recorded preimage through the canonical audited/idempotent metadata-update UoW without cancel/recreate or ownership/lifecycle/created-field changes; drift is zero-write, rollback reaches target zero, ordinary missing-snapshot compatibility and ETC/batch exemptions remain unchanged.
+- [x] **TURN-CLOSURE-05**: Workbench month/all schema is upgraded from v5 to v6 so old generations and derived caches fail closed; an exact uploaded release uses captured previous release, authorized atomic rehydrate, formal readiness/Audit evidence and a post-execute failure sequence of exact metadata rollback before previous-release activation/rehydration. The test-owned reversible fixture relies on audited fixture recovery plus release rollback and does not require an additional database backup.
+- [x] **TURN-CLOSURE-06**: Applicable seven-category tests, provider I/O counts, old-symbol zero-reference guards, minimal docs, controlled dry-run SLO checks and same-scenario test-owned reversible E2E compare previous/new releases under explicit safety ceilings without changing API/DTO/frontend production components or adding tables, workers, read models, runtime services/repositories/helpers or dependencies.
 
 ### Access-Time Read Model Freshness And Fan-out Elimination
 
 - [x] **RMF-01**: Every current registered page, manifest read model, mutating frontend API, writable Drawer/dynamic panel, non-page dependency and direct lifecycle/enqueue site is mapped to one owner, exact I/O contract, migration action, deletion condition and test owner; all unmapped counts are zero before runtime edits begin.
-- [ ] **RMF-02**: Ordinary commands atomically commit only canonical facts, exact source versions and audit/idempotency state, return within the write SLO, and create no downstream page refresh jobs or global operation-barrier wait.
-- [ ] **RMF-03**: Route entry, focus, hidden-to-visible transition, business-scope change and current-page post-mutation reconciliation use the existing freshness/status/enqueue boundary; fresh scopes do no work and stale dependencies enqueue at most one current-effective job per model/scope/target version.
-- [ ] **RMF-04**: All migrated workers rebuild only validated exact scopes, preserve Workbench active-generation semantics, publish atomically with source-version CAS, coalesce moving targets and recover from restart without stale overwrite, per-row jobs or new infrastructure.
-- [ ] **RMF-05**: Every writable Drawer is classified as canonical fact, projection-semantic rule, read-time/display rule or explicit batch; read-only Drawers remain query-only, and no Drawer save/open can trigger unrelated page work or cross-page I/O.
-- [ ] **RMF-06**: All superseded write-time lifecycle fan-out, bare-all fallback, direct queue I/O, global barrier wait, page-cross-read and live/legacy fallback paths are removed per vertical slice with whole-repository zero-reference guards and no hidden dual path.
-- [ ] **RMF-07**: Applicable seven-category tests plus deterministic/disposable PostgreSQL integration prove permissions, audit, idempotency, rollback, fresh/stale/202/409 contracts, queue dedupe, CAS, hidden/visible behavior, exports and unrelated-page isolation across all registered pages and operations.
-- [ ] **RMF-08**: Reference-data performance proves ordinary command p95≤500ms/p99≤1s, freshness gate p95≤100ms, already-fresh first payload p95≤500ms and ordinary access-to-fresh p95≤1.5s/p99≤3s, while full-history batches are measured separately for bounded throughput and non-blocking behavior.
+- [x] **RMF-02**: Ordinary commands atomically commit only canonical facts, exact source versions and audit/idempotency state, return within the write SLO, and create no downstream page refresh jobs or global operation-barrier wait.
+- [x] **RMF-03**: Route entry, focus, hidden-to-visible transition, business-scope change and current-page post-mutation reconciliation use the existing freshness/status/enqueue boundary; fresh scopes do no work and stale dependencies enqueue at most one current-effective job per model/scope/target version.
+- [x] **RMF-04**: All migrated workers rebuild only validated exact scopes, preserve Workbench active-generation semantics, publish atomically with source-version CAS, coalesce moving targets and recover from restart without stale overwrite, per-row jobs or new infrastructure.
+- [x] **RMF-05**: Every writable Drawer is classified as canonical fact, projection-semantic rule, read-time/display rule or explicit batch; read-only Drawers remain query-only, and no Drawer save/open can trigger unrelated page work or cross-page I/O.
+- [x] **RMF-06**: All superseded write-time lifecycle fan-out, bare-all fallback, direct queue I/O, global barrier wait, page-cross-read and live/legacy fallback paths are removed per vertical slice with whole-repository zero-reference guards and no hidden dual path.
+- [x] **RMF-07**: Applicable seven-category tests plus deterministic/disposable PostgreSQL integration prove permissions, audit, idempotency, rollback, fresh/stale/202/409 contracts, queue dedupe, CAS, hidden/visible behavior, exports and unrelated-page isolation across all registered pages and operations.
+- [x] **RMF-08**: Reference-data performance proves ordinary command p95≤500ms/p99≤1s, freshness gate p95≤100ms, already-fresh first payload p95≤500ms and ordinary access-to-fresh p95≤1.5s/p99≤3s, while full-history batches are measured separately for bounded throughput and non-blocking behavior.
 - [ ] **RMF-09**: After all local release gates pass, the exact changes are committed and pushed to remote main, deployed through the official production entry, and verified in production for every page, operation and writable Drawer with latency, freshness, job amplification, unrelated-page deltas, System Audit and rollback evidence; any failure re-enters the fix/release loop.
 
 ## v2 Requirements
@@ -167,17 +167,17 @@
 | TURN-CLOSURE-01 | Phase 26 | Complete |
 | TURN-CLOSURE-02 | Phase 26 | Complete |
 | TURN-CLOSURE-03 | Phase 26 | Complete |
-| TURN-CLOSURE-04 | Phase 26 | Pending |
-| TURN-CLOSURE-05 | Phase 26 | Pending |
-| TURN-CLOSURE-06 | Phase 26 | Pending |
+| TURN-CLOSURE-04 | Phase 26 | Complete |
+| TURN-CLOSURE-05 | Phase 26 | Complete |
+| TURN-CLOSURE-06 | Phase 26 | Complete |
 | RMF-01 | Phase 27 | Complete |
-| RMF-02 | Phase 27 | Pending |
-| RMF-03 | Phase 27 | Pending |
-| RMF-04 | Phase 27 | Pending |
-| RMF-05 | Phase 27 | Pending |
-| RMF-06 | Phase 27 | Pending |
-| RMF-07 | Phase 27 | Pending |
-| RMF-08 | Phase 27 | Pending |
+| RMF-02 | Phase 27 | Complete |
+| RMF-03 | Phase 27 | Complete |
+| RMF-04 | Phase 27 | Complete |
+| RMF-05 | Phase 27 | Complete |
+| RMF-06 | Phase 27 | Complete |
+| RMF-07 | Phase 27 | Complete |
+| RMF-08 | Phase 27 | Complete |
 | RMF-09 | Phase 27 | Pending |
 
 **Coverage:**
@@ -187,4 +187,4 @@
 
 ---
 *Requirements defined: 2026-06-16*
-*Last updated: 2026-07-22 after adding Phase 27 access-time read-model freshness and fan-out-elimination requirements*
+*Last updated: 2026-07-25 after reconciling completed Phase 26 and Phase 27 local release evidence; RMF-09 remains production-gated*

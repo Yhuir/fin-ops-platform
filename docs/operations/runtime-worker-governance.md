@@ -244,7 +244,7 @@ sudo -n /usr/local/sbin/finops-deploy-control read-model-refresh <release-name> 
 如果 downstream refresh handler 抛出 `*_read_model_not_fresh` / `read_model_not_fresh`，runtime worker
 会调用 `RuntimeQueueRepository.defer_event(...)`，把该 outbox event 短延迟放回 `pending`，生产模板默认 0.25 秒后
 重新 claim。这只用于依赖顺序竞态，不写 fresh readiness、不缓存 payload，也不进入 failed/dead-letter。
-`cost-statistics` downstream projection 在任何 payload I/O 前先比较 canonical Workbench expected versions 与 active generation；不一致时抛出 `workbench_read_model_not_fresh`，manifest只允许精确补投同月 Workbench并短延迟defer。Workbench匹配后，projection只能做一次无队列副作用的 bank-detail dependency snapshot read，并显式检查返回的 freshness。该快照在一个 `REPEATABLE READ READ ONLY` transaction 内同时读取目标月全部 rows、正式关系引用的跨月流水 ID 和全部涉及 scope 的 signatures；旧的 source-version、transaction-id、month-row 三次独立读取不得恢复。不得让
+`cost-statistics` downstream projection 在任何 payload I/O 前先按 Cost consumer semantic proof 比较 canonical Workbench expected versions 与 active generation；active-generation 执行游标 `source_version` 不参与相等判断，其余业务 proof 不一致时仍抛出 `workbench_read_model_not_fresh`，manifest只允许精确补投同月 Workbench并短延迟defer。Workbench匹配后，projection只能做一次无队列副作用的 bank-detail dependency snapshot read，并显式检查返回的 freshness。该快照在一个 `REPEATABLE READ READ ONLY` transaction 内同时读取目标月全部 rows、正式关系引用的跨月流水 ID 和全部涉及 scope 的 signatures；旧的 source-version、transaction-id、month-row 三次独立读取不得恢复。不得让
 read facade 在该 projection 内部因 `require_fresh=True` 自动 enqueue。同一读取同时承担 status check 和 enqueue 会产生
 TOCTOU：dependency event 可在状态读取后、enqueue active-check 前完成/ack，随后过时的 non-fresh 结果又创建同 scope
 event。依赖 enqueue 必须由 runtime worker 的异常边界单点负责；API/query miss 的正常 refresh enqueue 合同不受此限制。
@@ -706,7 +706,7 @@ cd "$release_src"
 
 处理规则：
 
-- refresh `active:YYYY-MM` 或 `all:YYYY-MM` 时，worker 从对应 active Workbench generation与 fresh Bank Detail snapshot全量构建该月 OA allocation `cost_statistics_rows`。旧 relation delta producer/handler/publisher 已删除，不得恢复行级兼容路径。发布要求同一非负 `source_version` CAS；成功完成后才入队 parent，竞态失败保持 refreshing，不写 Redis、不完成新 dirty、不 fan-out。
+- refresh `active:YYYY-MM` 或 `all:YYYY-MM` 时，worker 先按 Cost consumer semantic proof验证对应 active Workbench generation，仅忽略其执行游标 `source_version`，再与 fresh Bank Detail snapshot全量构建该月 OA allocation `cost_statistics_rows`。真实 Workbench 业务 proof变化仍必须 fail closed。旧 relation delta producer/handler/publisher 已删除，不得恢复行级兼容路径。发布要求同一非负 `source_version` CAS；成功完成后才入队 parent，竞态失败保持 refreshing，不写 Redis、不完成新 dirty、不 fan-out。
 - 普通 refresh `active:all` 或 `all:all` 只从当前已物化月份 rows/metadata 重建廉价 parent rollup，不得按 `app_status_readiness` 枚举历史月份或补投 child。child freshness 与精确补投只归页面 Cost gate；readiness 缺行是诊断状态，不能把一个访问驱动的 parent 退化成全历史 rebuild。
 - 只有显式 maintenance/reset 产生的 `force_refresh=true` parent 才枚举全部当前月份 shard，经 `ReadModelRefreshGateway` 传播 force 并等待后续 shard→parent 收敛。普通 API miss/stale、月份完成和 `cost_statistics_shard_converged` 都不能进入该全量分支。
 - 页面读取 `project|bank|expense_type` 的月份或 `active:all` / `all:all` 时，query owner不能只看 parent readiness。它先读取现有 Cost gate：gate 已 non-fresh 时跳过 canonical 全量证明，只 ensure gate 返回的 exact upstream/child。只有 gate 可 fresh 时才用 canonical/set-based Workbench month proofs与 active generations找出 exact stale Workbench scopes；上游 stale 时只 ensure这些 Workbench months，不提前创建 Cost event。页面后续访问在 Workbench fresh 后才 enqueue exact Cost child，child完成后收敛parent。Cost worker在任何 payload I/O 前仍用 manifest dependency fail closed处理真实竞态，依赖匹配后才发布。禁止 known-stale dependency重试风暴和 sibling project/page scope。`time|bank_tag` 使用独立 Bank Detail profile，只检查/ensure Bank Detail exact month scopes并直接读取其 rows，不入队 Workbench或Cost。global statistics可独立 non-fresh，不能反向阻塞这两个视图。

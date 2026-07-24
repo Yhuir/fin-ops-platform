@@ -87,6 +87,7 @@ describe("bank flow rule batch API", () => {
       }),
     );
     expect(saved.version).toBe(4);
+    expect(saved).not.toHaveProperty("refreshEnqueued");
   });
 
   test("resets all submitted flow rule batches through the reset endpoint", async () => {

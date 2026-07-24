@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 27 Plan 03 completed; Plan 27-04 invoice-family write and Drawer migration next.
-last_updated: "2026-07-23T04:24:02+08:00"
-last_activity: 2026-07-23 - Phase 27 Plan 03 relation-heavy ordinary writes now converge only on consumer access
+stopped_at: Phase 27 Plan 06 and post-b483 corrective candidate verified locally; Plan 27-07 exact release and production proof next.
+last_updated: "2026-07-25T01:15:00+08:00"
+last_activity: 2026-07-25 - Reconciled Phase 26/27 completion state and verified the Cost semantic-proof corrective candidate
 progress:
   total_phases: 23
-  completed_phases: 2
-  total_plans: 35
-  completed_plans: 28
-  percent: 80
+  completed_phases: 3
+  total_plans: 37
+  completed_plans: 35
+  percent: 95
 ---
 
 # Project State
@@ -21,22 +21,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-16)
 
 **Core value:** Preserve production finance workflow correctness while improving individual pages through isolated, reviewable GSD phases.
-**Current focus:** Phase 27 access-time exact-scope freshness migration and removal of ordinary write-time global fan-out; Phase 26 frozen Turnover correctness remains an invariant and its performance closure is consumed by Phase 27.
+**Current focus:** Phase 27 Plan 27-07 exact-candidate release and one complete production correctness/performance matrix. Phase 26 frozen Turnover correctness is complete and remains a non-regression invariant.
 
 ## Current Position
 
 Phase: 27 of 27 (按页面访问收敛 Read Model)
-Plan: 27-04 of 27-07
-Status: Plan 27-03 relation-heavy write migration complete; invoice-family write/Drawer migration next
-Last activity: 2026-07-23 - Workbench, bank-flow/no-OA, batch-accounting and Turnover writes now have zero ordinary downstream fan-out
+Plan: 27-07 of 27-07
+Status: Plans 27-01 through 27-06 complete; post-b483 Cost/Workbench proof correction passes local gates; exact release and L4 production proof remain
+Last activity: 2026-07-25 - Current diff passed targeted backend/frontend, disposable PostgreSQL, lint, build, docs and production-equivalent runtime contract checks
 
-Progress: [████████░░] 80%
+Progress: [█████████░] 95%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 21
+- Total plans completed: 35
 - Baseline planning docs completed: 1
 - Average duration: N/A
 - Total execution time: 0 hours
@@ -51,6 +51,10 @@ Progress: [████████░░] 80%
 
 ### Decisions
 
+- Phase 27 corrective candidate: Cost compares the Workbench business proof but ignores only the active-generation execution cursor `source_version`; query, worker, parent/child SQL and System Audit now use the same semantic contract, while real business-proof drift remains fail closed.
+- Phase 27 corrective candidate: Bank-flow tag-rule save returns exact informational affected months with empty write targets and no dead `refresh_enqueued` DTO; current-page normal GET owns access-time convergence.
+- Phase 27 release: Reuse the Phase 27-06 full-repository/183-browser evidence for unchanged behavior and run current-diff targeted gates plus real disposable PostgreSQL; do not rerun the unrelated 183-browser suite or redundant full CI.
+- Phase 26 reconciliation: Plans 26-01 through 26-05 and their production follow-up fixes are complete in current history; no Phase 26 implementation is repeated during Phase 27.
 - Phase 27-03: Ordinary Workbench relation, bank-flow/no-OA, batch-accounting and Turnover writes persist canonical facts/history/idempotency/audit only; freshness and operation-barrier targets are empty.
 - Phase 27-03: Current visible consumers reconcile through normal GET, hidden consumers do no page I/O until visible, and existing lightweight notifications only trigger independent GETs in already visible windows.
 - Phase 27-03: Workbench keeps active-generation atomic publish but no longer publishes Cost refreshes; Cost access first converges exact Workbench months and only then its own exact scope.
@@ -118,6 +122,7 @@ None yet.
 
 ### Blockers/Concerns
 
+- Phase 27 has one remaining blocker only: deploy the exact new candidate once and pass the complete L4 production matrix, including Cost/Workbench/Turnover SLO, zero write fan-out, exact access-time enqueue, queue/worker convergence, restored test-owned fixture and final System Audit.
 - Phase 21 Release A full local gate is zero-failure: backend 4182 passed / 33 explicitly environment-gated skipped；frontend 835/835；Chromium 177/177；production build passed. 首次远端分支 CI 揭示一个既有测试模块依赖未声明的 `pytest`，且 4 个顶层测试未被 `unittest discover` 执行；现已改为标准 `unittest.TestCase`。第二次远端 CI 暴露 Vitest 文件并行下的全局 I/O/监听器竞争与 cross-realm Blob 断言；前端测试现固定单 worker，Blob 以 size/MIME 合同断言。第三次远端 CI 证明多个前端测试把页面/抽屉壳出现误当成异步数据 I/O 完成；相关测试现以用户可见数据行、详情字段或当前 DOM 节点作为 readiness anchor。第四次远端 CI 进一步暴露 OA 反提历史时间依赖执行机本地时区；该业务时间现显式按 `Asia/Shanghai` 格式化，并由语义表格 readiness + 精确时间断言保护。与 CI 一致的 Node 20 全量运行最终 71 files / 835 tests 全绿，且不再出现 `MaxListenersExceededWarning`。统一门禁还捕获 import confirm 在持久化前发布 matching 的竞态；已改为 durable delta 成功后才发布所有下游信号，并将 4 项 import-processing 测试纳入 `unittest discover`。
 - 第五次远程 CI 为 176/177；唯一失败是待找发票文本选择 E2E 用元素 bounding-box 中线做像素拖拽，在 CI 字体/换行布局下落到空白区。测试现对同一可见文本节点执行 Playwright 浏览器文本选择，仍精确验证 `window.getSelection()`，不改业务 UI、不加 retry、不放宽结果。
 - 第六次远程 CI 的唯一失败是 ETC 统一批次列表测试等待静态 list 容器后同步读取异步批次行；现以 `etc-batch-unsubmitted-01` 业务行作为 readiness anchor，不改 ETC 业务链路与 I/O。
@@ -162,6 +167,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-07-23
-Stopped at: Phase 27 Plan 03 completed; Plan 27-04 invoice-family write and Drawer migration remains.
-Resume file: .planning/phases/27-read-model-fan-out/27-03-SUMMARY.md
+Last session: 2026-07-25
+Stopped at: Phase 27 corrective candidate passed local gates; pre-push diff/secret/deploy-readiness review remains before Plan 27-07 production release.
+Resume file: .planning/phases/27-read-model-fan-out/27-VERIFICATION.md

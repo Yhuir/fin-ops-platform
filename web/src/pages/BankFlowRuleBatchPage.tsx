@@ -103,7 +103,6 @@ const EMPTY_TAG_SELECTION: BankFlowRuleBatchTagSelection = {
   readModelScopeKeys: [],
   freshnessTargets: [],
   operationBarrierTargets: [],
-  refreshEnqueued: false,
 };
 
 const SELF_SUB_LABEL = "主标签本身";

@@ -512,15 +512,17 @@ Plans:
   3. Merged closure bank members are a subset of selected bank IDs, selected-row cache covers every policy input with zero additional bank list I/O, and invalid supersets conflict before relation mutation.
   4. The turnover completion bypass, hard-coded metadata and legacy no-OA active-relation resync chain are deleted with no fallback or old runtime references; API/DTO/frontend production code and unrelated relation modes remain unchanged.
   5. Existing repair ops safely repair active legacy-invalid turnover snapshots with metadata-preimage+after-image fingerprint, original-plan reconstruction for audited/idempotent partial execution, and history-based in-place exact metadata rollback; relation members/status/mode/lifecycle/created fields remain unchanged, while Workbench v6 plus existing atomic rehydrate prevents v5 generation/cache from appearing fresh.
-  6. Seven-category tests, provider call counts, exact current/previous release evidence, formal readiness/identity/Page/System Audit, controlled dry-run SLO and same-scenario reversible E2E pass; post-execute failure rolls metadata back before previous-release activation/rehydration, with backup and approval.
+  6. Seven-category tests, provider call counts, exact current/previous release evidence, formal readiness/identity/Page/System Audit, controlled dry-run SLO and same-scenario reversible E2E pass; post-execute failure rolls metadata back before previous-release activation/rehydration. The test-owned reversible fixture uses audited fixture recovery and release rollback without creating an additional database backup.
 
-**Plans:** 3 plans
+**Plans:** 5 plans
 
 Plans:
 
 - [x] 26-01-PLAN — TDD online root-cause fix, selected-member invariant, real policy snapshot, legacy sync deletion, minimal docs and isolated regression coverage.
 - [x] 26-02-PLAN — Historical repair target expansion, Workbench v6 and automatic verification; production dry-run found zero metadata-repair targets but exposed a separate lifecycle dependency loop before final closure.
-- [ ] 26-03-PLAN — Minimal invoice-lifecycle dependency-scope repair, regression/docs, exact-release deployment, queue drain, affected-page Audit and performance closure.
+- [x] 26-03-PLAN — Minimal invoice-lifecycle dependency-scope repair, regression/docs, exact-release deployment, queue drain, affected-page Audit and performance closure.
+- [x] 26-04-PLAN — Strict-versus-legacy invoice provenance and ETC imported/closed Audit classification closure.
+- [x] 26-05-PLAN — Invoice-page relation relevance Audit closure and restored test-owned Turnover fixture proof.
 
 ### Phase 27: 按页面访问收敛 Read Model、消除写后全局 Fan-out 并完成全页面生产性能验证
 
@@ -543,9 +545,9 @@ Plans:
 - [x] 27-01-PLAN — Freeze the mechanically checked page, operation, Drawer, read-model and legacy-call coverage contract.
 - [x] 27-02-PLAN — Prove the architecture vertically on bank-details and cost-statistics fact/rule/batch behavior.
 - [x] 27-03-PLAN — Migrate Workbench, bank-flow, batch-accounting and Turnover relation-heavy writes.
-- [ ] 27-04-PLAN — Migrate pending/input/OA/output invoice-family rules, facts, Drawers and strict consumers.
-- [ ] 27-05-PLAN — Complete imports, tax, ETC, settings, App Health and minimal page activation behavior.
-- [ ] 27-06-PLAN — Delete superseded fan-out paths and close all local correctness/performance gates.
+- [x] 27-04-PLAN — Migrate pending/input/OA/output invoice-family rules, facts, Drawers and strict consumers.
+- [x] 27-05-PLAN — Complete imports, tax, ETC, settings, App Health and minimal page activation behavior.
+- [x] 27-06-PLAN — Delete superseded fan-out paths and close all local correctness/performance gates.
 - [ ] 27-07-PLAN — Commit/push main, deploy the exact release and run every-page/every-operation production validation.
 
 ---

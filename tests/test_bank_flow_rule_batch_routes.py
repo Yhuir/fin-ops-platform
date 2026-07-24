@@ -41,7 +41,6 @@ class FakeBankFlowRuleBatchApplicationService:
             "read_model_scope_keys": ["2026-05"],
             "freshness_targets": [],
             "operation_barrier_targets": [],
-            "refresh_enqueued": False,
         }
 
     def submit_batch(self, batch_id, *, actor, expected_version, note, relation_mode):  # type: ignore[no-untyped-def]
@@ -144,7 +143,7 @@ class BankFlowRuleBatchRoutesTests(unittest.TestCase):
         self.assertEqual(update_payload["read_model_scope_keys"], ["2026-05"])
         self.assertEqual(update_payload["freshness_targets"], [])
         self.assertEqual(update_payload["operation_barrier_targets"], [])
-        self.assertFalse(update_payload["refresh_enqueued"])
+        self.assertNotIn("refresh_enqueued", update_payload)
         self.assertEqual(conflict_status, HTTPStatus.CONFLICT)
         self.assertEqual(conflict_payload["error"], "bank_flow_rule_batch_tag_rules_version_conflict")
 

@@ -43,7 +43,7 @@
 - 未提交候选还必须排除任一 canonical active relation 已占用的银行流水；worker 和提交入口均不得用可能滞后的 Workbench relation read model 代替 canonical relation source bundle。
 - 旧 `selected_tag_codes` 不迁移为新事实源；实现时应移除或只作为只读 legacy 输入清理，所有流水重新按新规则计算。
 - 页面提交的是银行流水批量关系事实。由于未提交资格已经排除需单据标签，新 relation 的冻结 requirement 必须为双 false；active relation 决定 ownership。规则保存不追溯改写既有 relation metadata。
-- 规则资格变化只 enqueue 受影响未提交月份；资格未变化的语义更新不重算。保存 API 不等待 worker，页面先清空旧选择和候选，再在后台等待月份 read model 收敛。
+- 规则资格变化只返回信息性的受影响未提交月份；资格未变化的语义更新不重算。保存 API 不写 dirty/outbox，也不返回伪造的 `refresh_enqueued`；页面先清空旧选择和候选，再由当前页面的正常 GET 触发精确月份收敛。
 - 从本页面提交且银行流水超过 3 条时，关联台以折叠形式展示；1 到 3 条可展开展示。
 - 本页 linked 提示只显示“已有未撤回关联”和 OA/发票数量，不向用户渲染内部 relation case id；case id 仍保留在 API 数据与 Audit 证据中。
 

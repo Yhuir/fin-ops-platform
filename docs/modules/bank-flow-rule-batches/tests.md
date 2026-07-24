@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 1. Business core unit tests | 适用 | 覆盖 OA/发票四种组合只有双 false 合格、缺规则 fail closed、实际变化 version +1、semantic no-op version 不变、未知/停用/重复标签与 legacy selected 输入 fail fast，以及已提交历史不受当前资格影响。 |
 | 2. Service-layer tests | 适用 | 覆盖数据库锁内只合并规则字段并保留并发写入的无关 settings；规则/submit/withdraw/reset 只保存 canonical facts/version/audit 且零 queue I/O；worker/submit 对目标 bank row 只调用一次 canonical relation source bundle，旧 relation facade 调用次数为零；真实 service projection 不为 canonical active relation 已占用的行生成未提交批次。 |
-| 3. API contract tests | 适用 | 覆盖 GET/PUT shape、乐观锁、正式 bank-flow 错误码、`read_model_version`、占用冲突 `409` 及结构化 details、mutation 空 targets、history snapshot、no-OA legacy I/O 不受影响。 |
+| 3. API contract tests | 适用 | 覆盖 GET/PUT shape、乐观锁、正式 bank-flow 错误码、`read_model_version`、占用冲突 `409` 及结构化 details、mutation 空 targets 且不输出伪写时 `refresh_enqueued`、history snapshot、no-OA legacy I/O 不受影响。 |
 | 4. Read model, cache, and background job tests | 适用 | 覆盖独立 producer/scope、稳定 eligibility signature、canonical relation rows/source versions 同 snapshot、worker unchanged skip、`force_refresh` 真实重建、cross-case overlap Audit blocking、stale/refreshing/fresh；worker 启动禁止全量 relation snapshot 和 relation read-model facade。 |
 | 5. Frontend component and interaction tests | 适用 | 抽屉继续显示全部 active tags；未提交主/子标签只显示 OA/发票双 false 标签，submitted/history 保留实际历史标签；read-model status/version 或手工刷新变化清除旧 Audit；linked 提示保留 OA/发票计数但不渲染内部 case id；覆盖 loading/error/empty/stale、分页、权限、提交/撤回/reset。 |
 | 6. End-to-end business-flow integration tests | 适用 | 覆盖真实 `BankBatchService` + worker 使用 canonical active relation 时只产出 submitted 历史、零 unsubmitted；生产发布后强制月份重建、列表/Audit/freshness/worker drain 共同验收。 |

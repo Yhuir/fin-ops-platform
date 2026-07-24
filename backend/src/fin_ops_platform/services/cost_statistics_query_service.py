@@ -16,6 +16,7 @@ from fin_ops_platform.services.cost_statistics_source_versions import (
     cost_statistics_bank_flow_source_versions,
     cost_statistics_semantic_source_versions,
     cost_statistics_source_versions,
+    cost_statistics_workbench_dependency_source_versions,
 )
 from fin_ops_platform.services.read_model_freshness import (
     require_expected_source_versions,
@@ -531,12 +532,16 @@ class CostStatisticsQueryService:
                 self._workbench_dependency_versions_provider(scope_month)
             )
             expected_workbench_versions = require_expected_source_versions(
-                expected_workbench_versions,
+                cost_statistics_workbench_dependency_source_versions(
+                    expected_workbench_versions
+                ),
                 context="cost_statistics_workbench_dependency",
             )
             workbench_stale_reasons = source_version_mismatch_reasons(
                 expected=expected_workbench_versions,
-                actual=active_workbench_versions,
+                actual=cost_statistics_workbench_dependency_source_versions(
+                    active_workbench_versions
+                ),
             )
             if workbench_stale_reasons:
                 return gate, None, self._workbench_dependency_non_fresh_payload(
@@ -555,12 +560,16 @@ class CostStatisticsQueryService:
             workbench_stale_scope_keys: list[str] = []
             for workbench_scope_key in sorted(expected_by_scope):
                 expected_workbench_versions = require_expected_source_versions(
-                    expected_by_scope.get(workbench_scope_key),
+                    cost_statistics_workbench_dependency_source_versions(
+                        expected_by_scope.get(workbench_scope_key)
+                    ),
                     context=f"cost_statistics_workbench_dependency:{workbench_scope_key}",
                 )
                 scope_stale_reasons = source_version_mismatch_reasons(
                     expected=expected_workbench_versions,
-                    actual=active_by_scope.get(workbench_scope_key),
+                    actual=cost_statistics_workbench_dependency_source_versions(
+                        active_by_scope.get(workbench_scope_key)
+                    ),
                 )
                 if not scope_stale_reasons:
                     continue

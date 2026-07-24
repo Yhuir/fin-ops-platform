@@ -1,6 +1,6 @@
 # Bank Transaction Paired Policy / 流水规则批量处理模块边界与 I/O
 
-日期：2026-07-23
+日期：2026-07-25
 
 ## 模块化状态
 
@@ -45,7 +45,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 标签规则 payload | 前端抽屉 | 返回 `active_tags`、`rules`、`requirements_by_tag_code`、`version`、`bank_auto_tag_rules_version`、`permissions`。不返回 `selected_tag_codes` / `inactive_selected_tag_codes`，不返回可编辑左侧标签字段。 |
+| 标签规则 payload | 前端抽屉 | 返回 `active_tags`、`rules`、`requirements_by_tag_code`、`version`、`bank_auto_tag_rules_version`、`permissions`。PUT 额外返回信息性的 `affected_months` / scope 与空 write targets；不返回 `selected_tag_codes` / `inactive_selected_tag_codes`、写时 `refresh_enqueued` 或可编辑左侧标签字段。 |
 | 标签规则保存副作用 | settings owner / 当前页查询 | 先计算保存前后未提交资格集合的对称差。数据库锁内只把新规则合并进当时最新 settings，通过 CAS 保护并发保存的权限等无关字段；不在写事务中生成 dirty scope/outbox。资格未变化时零投影工作，完全相同为 no-op。页面保存成功后仅重跑当前正常 GET，由 access-time source-version gate 在必要时 enqueue 当前 scope。禁止读取或改写 existing Workbench/turnover relation，既有 relation metadata 保持提交时的历史快照。 |
 | 批次列表 payload | 页面 | 返回 summary、当前页 rows、status bucket、`read_model_status`、`read_model_version`、stale reasons、scope keys 和分页信息。summary 由 SQL 对完整 summary filter 范围聚合，包含每个状态的 batch count、row count 和冻结标签文本，不能由当前页推算；非 fresh 不能展示为真实空态。未提交标签只来自当前双 false 资格集合；已提交/历史标签来自实际聚合历史。 |
 | 页面关系提示 | 页面 | linked 行只显示业务提示“已有未撤回关联”和 OA/发票数量。`relation_case_ids` 保留为提交冲突和 Audit 的机器 I/O，不得渲染 `bank_flow_rule_batch_*` 等内部 case id。 |

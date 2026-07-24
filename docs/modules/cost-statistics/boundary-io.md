@@ -1,6 +1,6 @@
 # 成本统计模块边界与 I/O
 
-日期：2026-07-24
+日期：2026-07-25
 
 ## 模块化状态
 
@@ -86,7 +86,7 @@
 - `bank_accounts` 的来源是 settings owner 的银行账户映射，投影层通过 `cost_statistics_bank_accounts.py` 归一为 parent 小型 metadata，并以 `bank_account_mappings_fingerprint` 纳入 source version。page repository 合并该 metadata 与结构化 rows 输出银行 facets；禁止恢复浏览器端 `bank_accounts + time_rows` 全量合并。
 - Upstream read model 输入：全月月份 shard 消费 Workbench active generation；当前访问必须先证明该 active generation 已追上 canonical expected versions。父 scope 只读取月份 metadata，并以两次 SQL aggregate 生成小型 metadata，不加载月份业务 rows、Workbench `all`、历史 generation 或 child JSON arrays。
 - Relation identity：普通访问收敛只消费 Workbench active generation 中的正式 `case:<case_id>` identity；禁止行级历史 delta、裸 `case_id`、双 identity 或放宽 Audit。
-- Audit lineage：月份 scope 已保存的 `workbench_source_versions` 必须与同一 snapshot 中当前 active generation 精确相等；`bank_detail_source_versions` 只排除 Cost 不消费的执行计数 `source_version` 与嵌套 `workbench_relation_source_versions`，其余已知及未来新增字段必须与当前 bank-detail scope 精确相等，且 Bank Detail 本身仍须 fresh/drained。父 scope 的 `cost_statistics_parent_source=materialized_shards`、`source_shard_count`、`source_shards` 必须直接来自当前同 project scope 的全部 concrete month metadata，而不是从非空业务 rows 反推，确保合法空月份也进入精确证明。无需新增 lineage 表。
+- Audit lineage：月份 scope 已保存的 `workbench_source_versions` 与同一 snapshot 中当前 active generation 按 Cost consumer semantic proof 比较，只排除执行游标 `source_version`，其余当前及未来业务字段必须精确相等；`bank_detail_source_versions` 只排除 Cost 不消费的执行计数 `source_version`、嵌套 `workbench_relation_source_versions` 与 canonical gate 专用 context/update proof，其余已知及未来新增字段必须与当前 bank-detail scope 精确相等，且 Bank Detail 本身仍须 fresh/drained。query gate、month worker、parent/child SQL 与 System Audit 必须使用同一语义。父 scope 的 `cost_statistics_parent_source=materialized_shards`、`source_shard_count`、`source_shards` 必须直接来自当前同 project scope 的全部 concrete month metadata，而不是从非空业务 rows 反推，确保合法空月份也进入精确证明。无需新增 lineage 表。
 - 父 scope 正式重建会删除不再存在于 Workbench active month shard 集合中的旧 Cost month metadata与 `cost_statistics_rows`；旧 shard 不得继续进入 Audit、parent rollup 或页面月份集合。projection不写删旧无版本 Redis key；versioned cache 由 namespace/TTL 自然淘汰。
 - `active:all` / `all:all` 的 OA summary 与 project/expense聚合从 current concrete `cost_statistics_rows` 重算；全流水统计直接从 fresh Bank Detail month rows聚合，不在 Cost parent重复物化。Audit必须使用相同边界。
 - 页面标题 `statistics` 的银行总数、收支、项目/费用/标签数继续由 `active:all` / `all:all` parent 提供并绑定同一 freshness gate；`statistics.cost_transaction_count` 例外由当前 explorer 单条 SQL按 parent 全期间集合与标签规则覆盖为唯一 OA 成本流水数，不随 view、时间范围、下钻 filter、cursor 或 pagination 变化，也不按 allocation row 重复计数。parent/child 非 fresh 时仍返回 `statistics=null`。

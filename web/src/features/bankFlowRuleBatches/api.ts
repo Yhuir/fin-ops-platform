@@ -170,8 +170,6 @@ type ApiBankFlowRuleBatchTagSelection = {
   freshnessTargets?: unknown;
   operation_barrier_targets?: unknown;
   operationBarrierTargets?: unknown;
-  refresh_enqueued?: boolean | null;
-  refreshEnqueued?: boolean | null;
 };
 
 type ApiBankFlowRuleBatchesResponse = {
@@ -529,7 +527,6 @@ function mapTagSelection(payload: ApiBankFlowRuleBatchTagSelection = {}): BankFl
     readModelScopeKeys: unknownStringList(payload.read_model_scope_keys ?? payload.readModelScopeKeys),
     freshnessTargets,
     operationBarrierTargets: operationTargets.length > 0 ? operationTargets : freshnessTargets,
-    refreshEnqueued: Boolean(payload.refresh_enqueued ?? payload.refreshEnqueued),
   };
 }
 

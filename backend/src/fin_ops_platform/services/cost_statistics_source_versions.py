@@ -42,17 +42,27 @@ def cost_statistics_source_versions(
     return source_versions
 
 
+def cost_statistics_workbench_dependency_source_versions(
+    source_versions: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Return the Workbench business proof consumed by Cost."""
+
+    return {
+        key: value
+        for key, value in dict(source_versions or {}).items()
+        if key != "source_version"
+    }
+
+
 def cost_statistics_semantic_source_versions(source_versions: dict[str, Any]) -> dict[str, Any]:
     """Remove upstream generation counters that Cost does not consume."""
 
     normalized = dict(source_versions or {})
     workbench = normalized.get("workbench_source_versions")
     if isinstance(workbench, dict):
-        normalized["workbench_source_versions"] = {
-            key: value
-            for key, value in workbench.items()
-            if key != "source_version"
-        }
+        normalized["workbench_source_versions"] = (
+            cost_statistics_workbench_dependency_source_versions(workbench)
+        )
     bank_detail = normalized.get("bank_detail_source_versions")
     if isinstance(bank_detail, dict):
         normalized["bank_detail_source_versions"] = {

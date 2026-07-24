@@ -129,7 +129,7 @@ class CostStatisticsPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(page["summary"]["income_transaction_count"], 0)
         self.assertEqual(detail["transaction_id"], "txn_imported_1348")
 
-    def test_parent_freshness_gate_returns_exact_child_when_embedded_workbench_version_drifts(
+    def test_parent_freshness_gate_ignores_workbench_execution_version_but_keeps_business_drift(
         self,
     ) -> None:
         child_source_versions = {
@@ -139,7 +139,10 @@ class CostStatisticsPostgresIntegrationTests(unittest.TestCase):
             "bank_auto_tag_rules_version": 1,
             "bank_account_mappings_fingerprint": "[]",
             "oa_projection_sync_version": "test",
-            "workbench_source_versions": {"source_version": 7},
+            "workbench_source_versions": {
+                "builder": "workbench-month-v6",
+                "source_version": 7,
+            },
             "bank_detail_source_versions": {"source_version": 1, "signature": "bank-v1"},
         }
         parent_source_versions = {
@@ -174,7 +177,8 @@ class CostStatisticsPostgresIntegrationTests(unittest.TestCase):
             )
             values (
                 'cost-parent-workbench-2026-03', 'default', '2026-03', 'active',
-                '{"source_version": 8}'::jsonb, now(), now()
+                '{"builder": "workbench-month-v6", "source_version": 8}'::jsonb,
+                now(), now()
             )
             """
         )
@@ -236,6 +240,22 @@ class CostStatisticsPostgresIntegrationTests(unittest.TestCase):
             ),
         )
 
+        gate = self.repository.get_cost_statistics_freshness_gate(scope_key="active:all")
+
+        self.assertEqual(gate["refresh_status"], "fresh")
+        self.assertEqual(gate["child_refresh_scope_keys"], [])
+        self.assertEqual(gate["bank_flow_refresh_status"], "fresh")
+
+        self.connection.execute(
+            """
+            update read_model.workbench_generations
+            set source_versions = '{
+                "builder": "changed-workbench-business-proof",
+                "source_version": 9
+            }'::jsonb
+            where generation_id = 'cost-parent-workbench-2026-03'
+            """
+        )
         gate = self.repository.get_cost_statistics_freshness_gate(scope_key="active:all")
 
         self.assertEqual(gate["refresh_status"], "stale")

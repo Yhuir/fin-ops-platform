@@ -747,7 +747,6 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 result,
                 changed_tag_codes=[],
                 affected_scope_keys=[],
-                refresh_enqueued=False,
             )
 
         before_eligible = self._eligible_bank_flow_rule_batch_tag_codes(previous_public)
@@ -762,15 +761,11 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 "affected_months": affected_scope_keys,
             },
         }
-        refresh_enqueued = self._commit_tag_rule_update(
-            prepared=prepared,
-            affected_scope_keys=affected_scope_keys,
-        )
+        self._commit_tag_rule_update(prepared=prepared)
         return self._tag_rule_update_response(
             result,
             changed_tag_codes=changed_tag_codes,
             affected_scope_keys=affected_scope_keys,
-            refresh_enqueued=refresh_enqueued,
         )
 
     def _affected_scope_keys_for_tag_rule_change(self, changed_tag_codes: list[str]) -> list[str]:
@@ -834,16 +829,14 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         self,
         *,
         prepared: dict[str, Any],
-        affected_scope_keys: list[str],
-    ) -> bool:
-        _ = affected_scope_keys
+    ) -> None:
         state_store = self._state_store
         if state_store is None:
             self._app_settings_service.accept_bank_flow_rule_batch_tag_rules_update(
                 next_snapshot=dict(prepared.get("next_snapshot") or {}),
                 audit_event=dict(prepared.get("audit_event") or {}),
             )
-            return False
+            return
         if self._state_store_backend() == "postgres":
             connection = getattr(state_store, "_connection", None)
             save_settings = getattr(
@@ -871,7 +864,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 next_snapshot=dict(saved_snapshot),
                 audit_event=audit_event,
             )
-            return False
+            return
 
         next_snapshot = dict(prepared.get("next_snapshot") or {})
         save_app_settings = getattr(state_store, "save_app_settings", None)
@@ -884,7 +877,6 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             next_snapshot=next_snapshot,
             audit_event=dict(prepared.get("audit_event") or {}),
         )
-        return False
 
     @staticmethod
     def _tag_rule_update_response(
@@ -892,14 +884,12 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         *,
         changed_tag_codes: list[str],
         affected_scope_keys: list[str],
-        refresh_enqueued: bool,
     ) -> dict[str, Any]:
         return {
             **payload,
             "eligibility_changed": bool(changed_tag_codes),
             "eligibility_changed_tag_codes": list(changed_tag_codes),
             "affected_months": list(affected_scope_keys),
-            "refresh_enqueued": bool(refresh_enqueued),
             **write_target_envelope(
                 scope_keys=affected_scope_keys,
                 targets=[],

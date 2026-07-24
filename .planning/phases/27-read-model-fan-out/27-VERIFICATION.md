@@ -1,24 +1,44 @@
 # Phase 27 Release Candidate Verification
 
-> Local status: **pass**. Production L4 status: **pending Plan 27-07**. Local success does not authorize claiming production latency or completion.
+> Current post-`b483e63df` corrective candidate local status: **pass**. Production L4 status: **pending Plan 27-07**. Local success does not authorize claiming production latency or completion.
+
+## 2026-07-25 corrective candidate
+
+The deployed `b483e63df` baseline proved fast zero-fan-out writes but exposed a shared Cost/Workbench proof defect: Workbench active generations with identical business source proof and a newer execution-only `source_version` repeatedly made Cost query, worker and parent/child SQL disagree about freshness. Production evidence showed each repeated event completed once and retained generations had identical business proof, so the root cause was semantic version amplification rather than a missing queue lock or nondeterministic business rebuild.
+
+The corrective candidate:
+
+- uses one existing helper to remove only Workbench's execution cursor `source_version` from the Cost dependency proof;
+- applies the same contract to concrete/all query gates, the Cost month worker, parent/child SQL and System Audit;
+- keeps every remaining Workbench business proof field fail closed, with a real-business-drift regression;
+- aligns the Cost SQL gate with the already-existing Bank Detail semantic helper;
+- removes the bank-flow tag-rule write helper's ignored scope parameter, constant false return, dead backend response field and dead frontend mapping;
+- preserves informational `affected_months` and empty write targets, so the current page's normal GET remains the only refresh owner;
+- adds no dependency, migration, table, queue, worker, cache, endpoint, coordinator or fallback.
 
 ## Release gates
 
-| Gate | Result | Evidence |
+| Gate | Result | Current evidence |
 | --- | --- | --- |
-| Backend full | pass | `bash scripts/verify.sh all`: 4,299 passed, 51 environment-gated skipped, 0 failed |
-| Frontend full | pass | 75 files / 890 tests passed in 184.76s |
-| Production build | pass | TypeScript + Vite build; existing third-party CSS minify warnings and 502.24kB main chunk warning only |
-| Deterministic Chromium full | pass | 183/183 passed in 9.7m |
-| Docs | pass | `bash scripts/verify.sh all` includes docs check |
+| Backend full ancestor baseline | pass / retained | Phase 27-06: `bash scripts/verify.sh all` — 4,299 passed, 51 explicitly environment-gated skipped, 0 failed. Current diff does not modify unrelated modules. |
+| Current backend affected slices | pass | Cost 150; bank/gateway shared architecture 119; Workbench/Turnover/production runners 508; final inventory/legacy/worker/bank-flow gate 378. All completed with 0 failures. |
+| Frontend full ancestor baseline | pass / retained | Phase 27-06: 75 files / 890 tests. Current frontend diff is limited to removal of the dead bank-flow write field. |
+| Current frontend affected slices | pass | Bank-flow/OA/route activation 76/76; Cost API/page 38/38. |
+| Production build | pass | Current TypeScript + Vite build. Existing third-party HeroUI CSS warnings, Node deprecation warning and >500kB main-chunk warning only. |
+| Deterministic Chromium full | pass / not redundantly rerun | Phase 27-06: 183/183 in 9.7m. Per current task policy, the unrelated suite was not rerun; current behavior is protected by targeted component/service/API/PostgreSQL tests and must be proven once in production. |
+| Disposable PostgreSQL | pass | 38/38 real PostgreSQL integration tests across Cost, Bank Detail, runtime infrastructure and Turnover; test database was dropped and verified absent. |
+| Runtime contract | pass | `bash scripts/verify.sh runtime-check` against fully migrated disposable PostgreSQL, schema version 124; test database was dropped and verified absent. |
+| Docs | pass | `bash scripts/verify.sh docs` |
 | Lint | pass | `bash scripts/verify.sh lint` |
 | Diff whitespace | pass | `git diff --check` |
-| Infra smoke | partial by environment | 63 passed; 19 skipped because local `FIN_OPS_TEST_DATABASE_URL`/RabbitMQ were absent; no skipped cleanup failure |
-| Runtime check | not runnable locally | fails closed because local runtime env does not configure `FIN_OPS_APP_STORAGE_BACKEND`; production runtime check remains blocking after deploy |
+| Infra smoke | targeted real PostgreSQL replacement pass | Relevant repository/runtime PostgreSQL suites ran directly against disposable PostgreSQL. RabbitMQ was not started locally; it remains optional wakeup and not the freshness fact owner. |
 
 Additional targeted evidence:
 
-- 289 affected backend tests passed, including 80 subtests; no failed or relaxed assertion.
+- The current Cost suite first failed closed when a test fixture contained only the ignored execution cursor and no business proof. The fixture was corrected to include a business `builder` field; no production check or assertion was relaxed.
+- Parent/all access tests prove execution-version-only drift creates no Workbench refresh and enqueues only the exact stale Cost child.
+- Real PostgreSQL proves execution-only Workbench version `7 → 8` remains fresh, then a changed `builder` business proof makes exactly `active:2026-03` stale.
+- Bank-flow service/API/frontend tests prove rule-save queue I/O is impossible on PostgreSQL and local persistence branches and that the write payload no longer exposes `refresh_enqueued` / `refreshEnqueued`.
 - Strict Browser diagnostics: 9/9 passed after adding the required success-state visible-error guard to the new cost rule flow.
 - Three newly identified Drawer performance gaps passed individually and in the complete 183-test run: cost tag rule save, output receipt settings save and turnover relation extra save.
 - `27-REFERENCE-PERFORMANCE.md`: 543/543 operation records passed, 450 unique operation IDs, settled p95 1.370s, p99 1.769s, max 2.591s on deterministic reference data.
@@ -92,10 +112,10 @@ Static guards enforce all of the above and fail if an ordinary mutation, service
 
 ## Known local environment gaps
 
-- 本机没有 disposable PostgreSQL/RabbitMQ runtime env，所以 `infra-smoke` 的 19 个 external-infra tests 合法跳过；没有使用 `ignore_errors=True`、skip marker 或 relaxed assertion 隐藏清理问题。
-- 本机不是已部署生产 runtime，`runtime-check` 对缺少 `FIN_OPS_APP_STORAGE_BACKEND` fail closed。Plan 27-07 必须在生产 release 上复跑 readiness/runtime/worker checks。
+- 本机已用真实 disposable PostgreSQL 完成 38 个集成测试和完整 migration/runtime contract check；测试数据库均已删除。未启动 RabbitMQ，因为它只是可选 wakeup，不是 read-model 状态事实源；生产仍必须核对 transport/worker registry。
+- disposable runtime 没有 systemd worker 进程，runtime check 中对应缺失提示属于测试环境事实，不可替代 Plan 27-07 的生产 readiness/runtime/worker checks。
 - Vite 第三方 HeroUI CSS 仍产生空 `:is()` minify warning，main entry 502.24kB 仍触发既有 chunk warning；本次未新增依赖或扩大 chunk。这些不是 Phase 27 引入的失败，但仍是独立前端债务。
 
 ## Remaining blocking risk
 
-唯一 blocking 工作是 L4 production：exact main SHA 部署、17 页真实 HTTP/browser、15 read model current-effective、生产 p50/p95/p99/max、test-owned relation confirm→withdraw 三轮、零 ordinary downstream jobs、零 unrelated dirty delta、最终 fixture inactive、System Audit 与 rollback release 证据。完成前 Phase 27 不得标记 complete。
+唯一 blocking 工作是 L4 production：exact main SHA 部署、17 页真实 HTTP/browser、15 read model current-effective、生产 p50/p95/p99/max、Cost project/all + Workbench + Turnover access DAG、test-owned relation confirm→withdraw 三轮、零 ordinary downstream jobs、零 unrelated dirty delta、最终 fixture inactive、System Audit 与 rollback release 证据。完成前 Phase 27 不得标记 complete。

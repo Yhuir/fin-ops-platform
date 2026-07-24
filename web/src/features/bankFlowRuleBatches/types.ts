@@ -215,7 +215,6 @@ export type BankFlowRuleBatchTagSelection = {
   readModelScopeKeys: string[];
   freshnessTargets: ReadModelOperationBarrierTarget[];
   operationBarrierTargets: ReadModelOperationBarrierTarget[];
-  refreshEnqueued: boolean;
 };
 
 export type SaveBankFlowRuleBatchTagSelectionRequest = {

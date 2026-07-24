@@ -49,6 +49,8 @@
 
 2026-07-24 起 `scope=all` 不再只信任 Cost parent 自身 readiness。query owner 复用 Workbench canonical source-version builder，以一次 set-based SQL 比较全部 canonical month scopes 与 active generations；只 enqueue drift 的 Workbench 月份。Workbench 全部 fresh 后，Cost repository gate 再逐月比较 Cost child 的 Workbench/Bank Detail lineage 与 parent `source_shards`，只 enqueue drift 的 Cost child；children fresh 后才允许重建 parent。concrete month 的主表只受当前月 proof 阻断，但页面同时展示的全期间 `statistics` 复用同一 parent-child proof：parent drift 时当前月 rows 仍可 fresh，global statistics 置为 stale 并 ensure exact child。此当前合同补充了 2026-07-23 的访问时门禁，并取代下方 05-12 历史记录中“页面完全没有 expected-source provider”的旧结论；未新增 endpoint、worker、queue、cache 或协调器。
 
+2026-07-25 起 Cost 对 Workbench dependency 只比较实际消费的业务 proof；active generation 的执行游标 `source_version` 不参与 query gate、month worker、parent/child SQL 或 System Audit 的 stale 判定。builder/schema、关系事实版本等业务字段仍必须精确一致并 fail closed。该修复复用现有 source-version helper，不改变存储 schema、scope、queue、worker 或 API，也不会让一次内容未变的 Workbench 发布反复重建 Cost。
+
 同日生产 performance round 进一步证明：普通页面访问已精确选出 2026-02/2026-03 child，但旧 parent handler 又按易失 `app_status_readiness` 缺行把 42 个历史 shard 全部补投，造成约 10 秒可见延迟。该旧路径已删除：normal parent event 只做结构化 rollup，child freshness 只由上述 repository gate 决定；只有 settings reset/显式 maintenance 的 `force_refresh=true` parent 才全量枚举当前月份。该修复不新增 reason registry、协调器、表、worker、queue 或缓存。
 
 2026-07-24 的全量链路审阅进一步删除了重复的全银行 Cost 投影：`time|bank_tag` 已有唯一、结构化且 freshness-gated 的 Bank Detail read model，再复制到 `read_model.cost_statistics_bank_flow_rows` 只会增加 worker、Audit和版本一致性 I/O。当前 query/detail/export按 `view` 使用两个显式 profile：全流水视图直接读取 Bank Detail，OA allocation视图读取 Cost。migration `0123` 删除旧复制表，writer、query、Audit和测试 fixture均无 dual-read/fallback；global statistics可独立 non-fresh，但不能阻塞已 fresh 的当前视图 rows。

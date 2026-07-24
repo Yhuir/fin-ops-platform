@@ -25,7 +25,7 @@ from tests.app_test_support import build_local_state_application as build_applic
 def _cost_statistics_gate_snapshot(app, scope_key: str) -> dict[str, object]:
     _project_scope, month = str(scope_key).split(":", 1)
     source_settings = app._app_settings_service.get_cost_statistics_source_settings_payload()
-    dependency_versions = {"source_version": 1} if month != "all" else None
+    dependency_versions = {"builder": "test-workbench", "source_version": 1} if month != "all" else None
     return {
         "source_settings": source_settings,
         "workbench_source_versions": dict(dependency_versions or {}),

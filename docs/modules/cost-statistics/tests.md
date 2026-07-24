@@ -2,6 +2,13 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-07-25 - Workbench 执行 generation 不再放大 Cost 刷新
+
+- Business/service：`tests/test_cost_statistics_sql_runtime.py` 证明 Workbench 仅 `source_version` 不同时，month query、all parent query 和 month projection 都继续使用同一业务 proof，不补投 Workbench、不 defer Cost；builder/关系事实等真实业务 proof 改变仍判 stale。
+- Read model/Audit/API：同文件与 `tests/test_cost_statistics_page_audit.py` 锁定 Cost parent/child SQL、System Audit 和 Python helper 使用相同字段排除；`tests/test_cost_statistics_api.py` 的 fixture同时保留业务 proof与执行版本，保护 explorer/detail/export正常合同。
+- 七类决策：1 source-proof 业务等价、2 query/projection service、3 explorer/detail/export API、4 parent/child read model与worker gate、7 Cost/Workbench/Audit回归适用；5 前端和6新跨模块流程不适用，因为页面行为与业务流程未改，既有 PageRouteHost/Cost流程定向测试继续承担回归。
+- 未测风险：生产 `<3s`、重复 Workbench event 消失、Turnover稳定性、queue/dirty/worker与System Audit收敛仍必须由唯一候选部署后的同一条可恢复 fixture 证明。
+
 ## 2026-07-24 - 页面访问按依赖顺序登记 exact Workbench 与 Cost
 
 - Service/read model：`tests/test_cost_statistics_sql_runtime.py` 证明 month/all 页面 gate 已 non-fresh 时跳过 canonical Workbench proof，只 ensure gate 返回的 exact upstream/child scope；gate 可 fresh但 Workbench stale时只 ensure exact Workbench，不在同次访问预投 Cost。后续访问确认 Workbench fresh后才stage同 project的当前 exact Cost child，不登记 sibling。Cost projection仍在任何 payload I/O 前比较 canonical Workbench expected versions 与 active generation，不匹配时按 manifest dependency fail closed/defer并精确补投 child。`tests/test_cost_statistics_postgres_integration.py` 保护默认 provider 的真实 PostgreSQL查询和同一 fail-closed合同。
