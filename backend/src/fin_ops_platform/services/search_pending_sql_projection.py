@@ -28,6 +28,7 @@ from fin_ops_platform.services.invoice_lifecycle_policy import INVOICE_LIFECYCLE
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload, text, text_list
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
+from fin_ops_platform.services.workbench_relation_modes import TURNOVER_MANUAL_CLOSURE_RELATION_MODE
 from fin_ops_platform.services.workbench_sql_projection import WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
 
 
@@ -643,7 +644,11 @@ class SearchPendingSqlProjectionBuilder:
         )
         source_reader = getattr(self._read_model_repository, "list_active_workbench_relation_source_rows", None)
         rows = (
-            source_reader(row_ids=transaction_ids, include_member_summaries=True)
+            source_reader(
+                row_ids=transaction_ids,
+                include_member_summaries=True,
+                exclude_relation_modes=[TURNOVER_MANUAL_CLOSURE_RELATION_MODE],
+            )
             if callable(source_reader)
             else []
         )
@@ -653,7 +658,14 @@ class SearchPendingSqlProjectionBuilder:
         summary_reader = getattr(self._read_model_repository, "workbench_relation_source_summary_from_source", None)
         if not callable(summary_reader):
             return {}
-        return dict(summary_reader(scope_key=month, row_ids=text_list(row_ids), include_row_ids=True))
+        return dict(
+            summary_reader(
+                scope_key=month,
+                row_ids=text_list(row_ids),
+                include_row_ids=True,
+                exclude_relation_modes=[TURNOVER_MANUAL_CLOSURE_RELATION_MODE],
+            )
+        )
 
     def _pending_invoice_source_versions(self, direction: str = "all") -> dict[str, object]:
         settings = _settings_payload(self._connection)

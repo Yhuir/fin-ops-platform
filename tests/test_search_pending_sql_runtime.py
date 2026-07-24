@@ -3753,6 +3753,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
                 normalized = " ".join(sql.lower().split())
                 if "from app.workbench_pair_relations" in normalized:
+                    self.relation_row_params = params
                     return [
                         {
                             "case_id": "case-source-pending",
@@ -3811,6 +3812,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
                 normalized = " ".join(sql.lower().split())
                 if "from app.workbench_pair_relations" in normalized:
+                    self.relation_version_params = params
                     return {"relation_count": 1, "relation_updated_at": "2026-05-20 10:00:00"}
                 return super().fetch_one(sql, params)
 
@@ -3818,8 +3820,9 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             def get_by_row_ids(self, *_args: object, **_kwargs: object) -> dict[str, object]:
                 raise AssertionError("source fast path must not read relation read model")
 
+        connection = SourceRelationConnection()
         builder = SearchPendingSqlProjectionBuilder(
-            connection=SourceRelationConnection(),
+            connection=connection,
             workbench_relation_read_facade=FailingRelationFacade(),
             relation_rows_from_source=True,
         )
@@ -3839,6 +3842,11 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(
             builder._pending_invoice_relation_source_versions["source"],
             "workbench_pair_relations",
+        )
+        self.assertEqual(connection.relation_row_params, (["txn-1"], ["turnover_manual_closure"]))
+        self.assertEqual(
+            connection.relation_version_params,
+            (["turnover_manual_closure"], "2026-05-01", ["txn-1"]),
         )
 
     def test_pending_invoice_sql_projection_collapses_multi_bank_relation_members(self) -> None:

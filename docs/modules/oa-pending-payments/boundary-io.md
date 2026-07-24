@@ -139,7 +139,7 @@
 - `GET /api/oa-pending-payments` 的既有主响应增加 `statistics`，统计严格来自 OA 待付款页面自身投影时实际拉取的 OA、银行流水和进项发票全集，不读取统一事实源的汇总结果，也不受搜索、筛选、排序或分页影响。
 - Worker 在同一次月份投影中拉取完整流水/进项库存，按稳定业务身份生成数量和 membership digest；流水 digest 同时绑定 direction，发票 digest 同时绑定 invoice type。统计与 digest 随月份分片原子发布到既有 `raw_payload.statistics` / `source_versions`，不新增表。
 - API freshness 热路径在同一个 set-based query-state SQL 中读取 scope metadata、dirty/outbox，并按请求月份批量重算 `app.bank_transactions` / `app.invoices` 的紧凑 membership digest；不加载页面行、不调用 live query service，也不逐月 N+1。当前 coverage digest 必须与 projection 发布值相等；新增、删除或更新流水/进项发票后即使 writer 零 fan-out，下一次访问也只把真实变化月份判 refreshing。全量查询只有在所有相关分片和覆盖 digest 均存在且 scope fresh 时返回统计，否则 `statistics=null`，禁止用旧统计冒充 fresh。
-- 当前 projector/source contract 为 `2026-07-24-access-coverage-v5`；旧 v4 scope 把 projection 自带 coverage 当 expected proof，必须在访问时判 stale 后重建。
+- 当前 projector/source contract 为 `2026-07-25-shared-relation-v6`；projector 与 source proof 都只消费 eligible active relation，并排除 Turnover 专属 `turnover_manual_closure`。旧 v5 payload 在访问时按版本判 stale 后重建，不得继续显示专属 closure relation。
 - `all` rebuild 必须覆盖只有流水或进项发票、没有 OA source watermark 的月份；真实 OA watermark 后到时必须淘汰 coverage-only vector。inventory 缩小时只 prune read-model shard，不能删除 integration 或 canonical facts。
 - 跨 scope 重复 row identity 检查属于独立 Page Audit/发布质量约束，不在正常页面 freshness 请求中执行全表 `GROUP BY`；月度页面的全量标题统计只重复校验紧凑 scope 元数据和版本令牌。
 - Page Audit 在独立只读查询中从 canonical facts、关系事实和投影行重算数量及 membership digest，并与已发布值比较；它只证明页面拉取和投影完整性，不把统一事实源汇总值作为页面统计输入。

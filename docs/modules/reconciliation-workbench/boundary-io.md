@@ -136,4 +136,4 @@ Release A 已删除运行时链路且禁止恢复；旧表物理存储只为短�
 - 关联台既有 combined initial 响应增加 `statistics`，统计只组合当前 active monthly generations 中页面实际拉取的 OA、银行流水、进项/销项发票、已配对组和未配对对象；不读取统一事实源汇总，也不受页面筛选、排序或分页影响。
 - all-period statistics 由 query repository 从当前 active monthly generations 的 canonical group/member owner 集合计算；combined initial 在 repeatable-read 快照内复用该结果，单月 summary 使用同一 set-based查询但不入队其它月份或 `all`。
 - 单月页面只收敛自己访问的 exact month；全期间统计查询不是页面明细 freshness owner，也不能把统计计算变成写 I/O 或发布阻塞。
-- Page Audit 使用 active generations、groups 和 members 独立重算核心统计，与发布值比较；统计复用既有 active-generation/read-model 边界，不新增 endpoint、表、worker、队列或共享 I/O。
+- Page Audit 证明 active generations、groups、members、summary 和 generation counts 的结构化 owner 一致；`month=all` 标题统计由正常页面查询在同一 active-generation 快照即时计算，不再读取或要求已退役的 `workbench_generation_stats(scope_key='all')` 发布值。生产 HTTP/SLO 验证负责证明该只读计算可用且满足耗时目标，不新增 endpoint、表、worker、队列或共享 I/O。

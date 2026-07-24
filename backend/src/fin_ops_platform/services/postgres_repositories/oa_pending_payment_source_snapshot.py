@@ -17,6 +17,7 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
     PostgresOAProjectionRepository,
     is_completed_workflow_status,
 )
+from fin_ops_platform.services.workbench_relation_modes import TURNOVER_MANUAL_CLOSURE_RELATION_MODE
 
 
 OA_PENDING_PAYMENT_COVERAGE_ONLY_SCHEMA_VERSION = 1
@@ -81,10 +82,12 @@ def oa_pending_payment_workbench_relation_versions_by_scope(
           on source.scope_key = requested.scope_key
         left join app.workbench_pair_relations relation
           on source.row_id = any(relation.row_ids)
+         and relation.status = 'active'
+         and relation.relation_mode <> %s
         group by requested.scope_key
         order by requested.scope_key
         """,
-        (normalized_scope_keys,),
+        (normalized_scope_keys, TURNOVER_MANUAL_CLOSURE_RELATION_MODE),
     )
     versions = {
         scope_key: {

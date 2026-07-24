@@ -2303,8 +2303,8 @@ def _embedded_relation_source_summary_query(
         """,
         (
             tenant_id,
-            tenant_id,
             TURNOVER_MANUAL_CLOSURE_RELATION_MODE,
+            tenant_id,
             tenant_id,
             limit,
         ),

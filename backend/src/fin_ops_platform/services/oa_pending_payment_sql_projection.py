@@ -27,9 +27,10 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_s
 from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
 from fin_ops_platform.services.postgres_repositories.read_models import MONTH_SCOPE_RE, PostgresReadModelRepository
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
+from fin_ops_platform.services.workbench_relation_modes import TURNOVER_MANUAL_CLOSURE_RELATION_MODE
 
 
-OA_PENDING_PAYMENT_POSTGRES_PROJECTOR_VERSION = "2026-07-24-access-coverage-v5"
+OA_PENDING_PAYMENT_POSTGRES_PROJECTOR_VERSION = "2026-07-25-shared-relation-v6"
 
 
 def oa_pending_payment_base_source_versions() -> dict[str, object]:
@@ -280,7 +281,9 @@ def _active_relations(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         dict(relation)
         for relation in dict(relations or {}).values()
-        if isinstance(relation, dict) and str(relation.get("status") or "active").strip() == "active"
+        if isinstance(relation, dict)
+        and str(relation.get("status") or "active").strip() == "active"
+        and str(relation.get("relation_mode") or "").strip() != TURNOVER_MANUAL_CLOSURE_RELATION_MODE
     ]
 
 

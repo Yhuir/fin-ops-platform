@@ -121,7 +121,7 @@ class CostStatisticsPageAuditTests(unittest.TestCase):
             len(connection.fetch_one_calls) + len(connection.fetch_all_calls),
             COST_STATISTICS_AUDIT_QUERY_BUDGET,
         )
-        self.assertEqual(COST_STATISTICS_AUDIT_QUERY_BUDGET, 25)
+        self.assertEqual(COST_STATISTICS_AUDIT_QUERY_BUDGET, 24)
         relation_queries = [
             sql for sql, _params in connection.fetch_all_calls if "/* check: relation_edge_equality */" in sql
         ]

@@ -30,7 +30,7 @@ COST_STATISTICS_AUDIT_EVENT_TYPES = (
     "bank_detail.read_model.refresh",
     "workbench_relation.read_model.refresh",
 )
-COST_STATISTICS_AUDIT_QUERY_BUDGET = 25
+COST_STATISTICS_AUDIT_QUERY_BUDGET = 24
 
 _EXACT_SET_ISSUE_MESSAGES = {
     "cost_statistics_scope_row_count_mismatch": (

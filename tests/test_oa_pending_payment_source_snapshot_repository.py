@@ -33,9 +33,14 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
                 },
             },
         )
-        self.assertEqual(connection.params, (["2026-06", "2026-05"],))
+        self.assertEqual(
+            connection.params,
+            (["2026-06", "2026-05"], "turnover_manual_closure"),
+        )
         self.assertIn("source.row_id = any(relation.row_ids)", connection.sql)
         self.assertIn("source.scope_month = to_date(requested.scope_key, 'YYYY-MM')", connection.sql)
+        self.assertIn("relation.status = 'active'", connection.sql)
+        self.assertIn("relation.relation_mode <> %s", connection.sql)
 
     def test_complete_snapshot_replaces_status_and_admission_in_one_canonical_transaction(self) -> None:
         connection = FakeConnection()

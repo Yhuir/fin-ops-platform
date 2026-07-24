@@ -10,6 +10,7 @@ from fin_ops_platform.services.oa_pending_payment_read_model_refresh import (
 )
 from fin_ops_platform.services.oa_pending_payment_sql_projection import (
     OaPendingPaymentSqlProjectionBuilder,
+    _active_relations,
     _oa_pending_payment_statistics,
 )
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
@@ -120,6 +121,21 @@ class OaPendingPaymentReadModelRefreshTests(unittest.TestCase):
 
 
 class OaPendingPaymentSqlProjectionBuilderTests(unittest.TestCase):
+    def test_turnover_manual_closure_is_not_an_oa_consumer_relation(self) -> None:
+        relations = _active_relations(
+            {
+                "pair_relations": {
+                    "shared": {"status": "active", "relation_mode": "manual"},
+                    "closure": {
+                        "status": "active",
+                        "relation_mode": "turnover_manual_closure",
+                    },
+                }
+            }
+        )
+
+        self.assertEqual(relations, [{"status": "active", "relation_mode": "manual"}])
+
     def test_all_scope_inventory_unions_oa_bank_and_input_invoice_months(self) -> None:
         connection = ScopeInventoryConnection()
         builder = OaPendingPaymentSqlProjectionBuilder(
