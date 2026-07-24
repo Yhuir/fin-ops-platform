@@ -14,6 +14,13 @@
 
 ## 历史记录
 
+## 2026-07-25 - 跨月关系生产验证 scope 上限
+
+- test-owned Turnover closure 生产证据证明，同一关系可以同时影响两个 canonical 月份和 Workbench `all` 组合视图；Cost 还需要一个绑定 fixture 身份的流水视图，以及 `project_scope=active/all` 两个 Workbench-dependent 视图。
+- write-operation runner 因此允许同一受影响页面最多三个明确 consumer scope probe；第 4 个重复 scope 继续 fail fast，isolation 页面仍必须恰好一个 probe。
+- 同一受影响页面至少一个 probe 必须绑定 test-owned row/case 身份；其它精确 scope 仍必须执行 registered API、fresh gate 和非空业务根断言，但聚合视图无需伪造不存在的行身份。
+- 该调整只修正生产验证输入边界，不改变页面 query owner、read model scope、queue、worker、写路径或运行时 fan-out。
+
 ## 2026-07-24 - 写响应到页面可见的真实性能门禁
 
 - 生产 round 8 暴露 runner 只检查最后一次 consumer GET 的 `target_ms`，却把 `operation_commit_to_visible_ms` 作为非阻断观测；因此 11–12 秒才 fresh 的页面仍可能被标记 pass。

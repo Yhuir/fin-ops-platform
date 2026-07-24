@@ -32,7 +32,7 @@ DEFAULT_POLL_INTERVAL_SECONDS = 0.5
 DEFAULT_LIMIT = 2_000
 MIN_WRITE_SLO_EVENT_SAMPLE_LIMIT = 200
 MAX_TEST_OWNED_RELATION_ROW_IDS = 20
-MAX_AFFECTED_CONSUMER_SCOPES_PER_PAGE = 2
+MAX_AFFECTED_CONSUMER_SCOPES_PER_PAGE = 3
 MAX_PARALLEL_CONSUMER_PROBES = 16
 SYSTEM_AUDIT_PATH = "/api/operations/app-health/page-audit?page=app-health-operations"
 CONFIRM_PREVIEW_PATH = "/api/workbench/actions/confirm-link/preview"
@@ -2077,7 +2077,7 @@ def _validate_checkpoint_consumers_and_rows(
     if set(page_keys) != set(expected_roles) or invalid_scope_counts:
         raise ValueError(
             f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} consumers must exactly match "
-            "the registered affected and isolation pages; an affected page may declare at most two exact "
+            "the registered affected and isolation pages; an affected page may declare at most three exact "
             "scope probes, while an isolation page must declare exactly one."
         )
     if any(consumer.role != expected_roles[consumer.page_key] for consumer in checkpoint.consumers):
@@ -2130,20 +2130,29 @@ def _validate_checkpoint_consumers_and_rows(
             "/workbench_pair_relation/case_id",
         }
     }
-    for consumer in checkpoint.consumers:
-        if consumer.role != "affected":
-            continue
+    for page_key in {
+        consumer.page_key
+        for consumer in checkpoint.consumers
+        if consumer.role == "affected"
+    }:
+        page_consumers = [
+            consumer
+            for consumer in checkpoint.consumers
+            if consumer.page_key == page_key
+        ]
         if not any(
             _assertion_binds_fixture_identity(
                 assertion,
                 row_ids=set(row_ids),
                 captured_names=captured_names,
             )
+            for consumer in page_consumers
             for assertion in consumer.assertions
         ):
             raise ValueError(
-                f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} affected consumer "
-                f"{consumer.page_key!r} must assert a test-owned row or preview-captured identity."
+                f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} affected page "
+                f"{page_key!r} must have at least one consumer asserting a test-owned row "
+                "or preview-captured identity."
             )
 
 
