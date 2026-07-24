@@ -647,17 +647,14 @@ class WorkbenchIdempotencyApiCompatibilityTests(unittest.TestCase):
 
     @contextmanager
     def _suppress_background_persistence(self, app: Application):
-        with (
-            patch.object(app, "_schedule_workbench_pair_relation_persist") as pair_relation_persist,
-            patch.object(app, "_schedule_workbench_read_model_persist") as read_model_persist,
-        ):
-            yield pair_relation_persist, read_model_persist
+        with patch.object(app, "_schedule_workbench_pair_relation_persist") as pair_relation_persist:
+            yield pair_relation_persist
 
     def test_confirm_link_accepts_optional_idempotency_key_without_response_shape_change(self) -> None:
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)
 
-        with self._suppress_background_persistence(app) as (pair_relation_persist, read_model_persist):
+        with self._suppress_background_persistence(app) as pair_relation_persist:
             response = self._post(
                 app,
                 "/api/workbench/actions/confirm-link",
@@ -679,7 +676,6 @@ class WorkbenchIdempotencyApiCompatibilityTests(unittest.TestCase):
         self.assertEqual(payload["case_id"], "CASE-IDEM-COMPAT")
         self.assertCountEqual(payload["affected_row_ids"], row_ids)
         self.assertEqual(pair_relation_persist.call_count, 1)
-        self.assertEqual(read_model_persist.call_count, 0)
 
 
 if __name__ == "__main__":

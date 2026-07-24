@@ -49,10 +49,7 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)
 
-        with (
-            patch.object(app, "_schedule_workbench_pair_relation_persist"),
-            patch.object(app, "_schedule_workbench_read_model_persist"),
-        ):
+        with patch.object(app, "_schedule_workbench_pair_relation_persist"):
             confirm_response = self._post(
                 app,
                 "/api/workbench/actions/confirm-link",
@@ -88,10 +85,7 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)
 
-        with (
-            patch.object(app, "_schedule_workbench_pair_relation_persist"),
-            patch.object(app, "_schedule_workbench_read_model_persist"),
-        ):
+        with patch.object(app, "_schedule_workbench_pair_relation_persist"):
             confirm_response = self._post(
                 app,
                 "/api/workbench/actions/confirm-link",

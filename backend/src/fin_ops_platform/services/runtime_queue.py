@@ -352,6 +352,50 @@ class RuntimeQueueRepository:
                 for row in active_rows
                 if isinstance(row, dict) and str(row.get("scope_key") or "").strip()
             }
+            inactive_scope_keys = [
+                scope_key
+                for scope_key in normalized_scope_keys
+                if scope_key not in active_by_scope
+            ]
+            latest_done_by_scope: dict[str, dict[str, object]] = {}
+            if incoming_metadata.get("freshness_token") and inactive_scope_keys:
+                latest_done_rows = transaction.fetch_all(
+                    """
+                    select distinct on (event.scope_key)
+                           event.scope_key, event.payload
+                    from job.outbox_events event
+                    where event.tenant_id = %s
+                      and event.event_type = %s
+                      and event.scope_type = %s
+                      and event.scope_key = any(%s::text[])
+                      and event.status = 'done'
+                      and not exists (
+                          select 1
+                          from job.read_model_dirty_scopes dirty
+                          where dirty.tenant_id = event.tenant_id
+                            and dirty.scope_type = event.scope_type
+                            and dirty.scope_key = event.scope_key
+                            and dirty.status in ('pending', 'processing', 'failed')
+                      )
+                    order by
+                        event.scope_key,
+                        event.processed_at desc nulls last,
+                        event.updated_at desc,
+                        event.created_at desc,
+                        event.id desc
+                    """,
+                    (
+                        normalized_tenant_id,
+                        event_type,
+                        normalized_scope_type,
+                        inactive_scope_keys,
+                    ),
+                )
+                latest_done_by_scope = {
+                    str(row.get("scope_key") or "").strip(): row
+                    for row in latest_done_rows
+                    if isinstance(row, dict) and str(row.get("scope_key") or "").strip()
+                }
             refreshes = []
             for scope_key in normalized_scope_keys:
                 active_payload = active_by_scope.get(scope_key, {}).get("payload")
@@ -363,6 +407,18 @@ class RuntimeQueueRepository:
                 )
                 if scope_key in active_by_scope and _refresh_metadata_covers(
                     active_metadata=active_metadata,
+                    incoming_metadata=incoming_metadata,
+                ):
+                    continue
+                latest_done_payload = latest_done_by_scope.get(scope_key, {}).get("payload")
+                latest_done_metadata = (
+                    latest_done_payload.get("metadata")
+                    if isinstance(latest_done_payload, dict)
+                    and isinstance(latest_done_payload.get("metadata"), dict)
+                    else {}
+                )
+                if scope_key in latest_done_by_scope and _refresh_metadata_covers(
+                    active_metadata=latest_done_metadata,
                     incoming_metadata=incoming_metadata,
                 ):
                     continue
@@ -2475,6 +2531,9 @@ def _safe_read_model_refresh_metadata(metadata: dict[str, object] | None) -> dic
     relation_deltas = _normalized_relation_deltas(metadata.get("relation_deltas"))
     if relation_deltas:
         result["relation_deltas"] = relation_deltas
+    freshness_token = str(metadata.get("freshness_token") or "").strip()
+    if freshness_token:
+        result["freshness_token"] = freshness_token[:128]
     if metadata.get("force_refresh") is True:
         result["force_refresh"] = True
     return result
@@ -2499,6 +2558,10 @@ def _refresh_metadata_covers(
         return active_is_force
     if active_is_force:
         return True
+    incoming_freshness_token = str(incoming_metadata.get("freshness_token") or "").strip()
+    active_freshness_token = str(active_metadata.get("freshness_token") or "").strip()
+    if incoming_freshness_token and incoming_freshness_token != active_freshness_token:
+        return False
     if not incoming_is_partial:
         return not active_is_partial
     if not active_is_partial:

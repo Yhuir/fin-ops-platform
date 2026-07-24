@@ -97,11 +97,8 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
 
     @contextmanager
     def _suppress_background_persistence(self, app: Application):
-        with (
-            patch.object(app, "_schedule_workbench_pair_relation_persist") as pair_relation_persist,
-            patch.object(app, "_schedule_workbench_read_model_persist") as read_model_persist,
-        ):
-            yield pair_relation_persist, read_model_persist
+        with patch.object(app, "_schedule_workbench_pair_relation_persist") as pair_relation_persist:
+            yield pair_relation_persist
 
     def _install_confirm_link_uow(self, app: Application) -> tuple[_RecordingConnection, _RecordingDirtyOutboxWriter, list[dict[str, object]]]:
         connection = _RecordingConnection()
@@ -240,7 +237,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)
 
-        with self._suppress_background_persistence(app) as (pair_relation_persist, read_model_persist):
+        with self._suppress_background_persistence(app) as pair_relation_persist:
             first_response = self._post(
                 app,
                 "/api/workbench/actions/confirm-link",
@@ -270,7 +267,6 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
             ["confirm_link", "confirm_link"],
         )
         self.assertEqual(pair_relation_persist.call_count, 2)
-        self.assertEqual(read_model_persist.call_count, 0)
 
     def test_confirm_link_uses_uow_transaction_when_available(self) -> None:
         app = self._build_app()
@@ -285,7 +281,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
             idempotency_store=_RecordingIdempotencyStore(),
         )
 
-        with self._suppress_background_persistence(app) as (pair_relation_persist, read_model_persist):
+        with self._suppress_background_persistence(app) as pair_relation_persist:
             response = self._post(
                 app,
                 "/api/workbench/actions/confirm-link",
@@ -304,7 +300,6 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         self.assertTrue(payload["operation_projection"]["after"]["paired_groups"])
         self.assertEqual(payload["outbox_event_ids"], [call["event_id"] for call in writer.calls])
         self.assertEqual(pair_relation_persist.call_count, 0)
-        self.assertEqual(read_model_persist.call_count, 0)
         self.assertEqual(connection.opened, 1)
         self.assertEqual(connection.commits, 1)
         self.assertEqual(connection.rollbacks, 0)
@@ -537,7 +532,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
             )
         connection, writer, persisted = self._install_cancel_link_uow(app)
 
-        with self._suppress_background_persistence(app) as (pair_relation_persist, read_model_persist):
+        with self._suppress_background_persistence(app) as pair_relation_persist:
             cancel_response = self._post(
                 app,
                 "/api/workbench/actions/cancel-link",
@@ -554,7 +549,6 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         self.assertEqual(payload["case_id"], "CASE-CANCEL-UOW")
         self.assertCountEqual(payload["affected_row_ids"], row_ids)
         self.assertEqual(pair_relation_persist.call_count, 0)
-        self.assertEqual(read_model_persist.call_count, 0)
         self.assertEqual(connection.opened, 1)
         self.assertEqual(connection.commits, 1)
         self.assertEqual(connection.rollbacks, 0)
@@ -729,7 +723,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
             )
         connection, writer, persisted = self._install_cancel_link_uow(app)
 
-        with self._suppress_background_persistence(app) as (pair_relation_persist, read_model_persist):
+        with self._suppress_background_persistence(app) as pair_relation_persist:
             cancel_response = self._post(
                 app,
                 "/api/workbench/actions/cancel-link",
@@ -746,7 +740,6 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         self.assertEqual(writer.calls, [])
         self.assertEqual(persisted, [])
         self.assertEqual(pair_relation_persist.call_count, 0)
-        self.assertEqual(read_model_persist.call_count, 0)
         self.assertIsNotNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-CANCEL-STALE-NEW"))
 
     def test_duplicate_mark_exception_reuses_existing_case_and_replays_success(self) -> None:
@@ -869,7 +862,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         row_ids = self._default_open_row_ids(app)
         invoice_row_id = row_ids[2]
 
-        with self._suppress_background_persistence(app) as (pair_relation_persist, read_model_persist):
+        with self._suppress_background_persistence(app) as pair_relation_persist:
             confirm_response = self._post(
                 app,
                 "/api/workbench/actions/confirm-link",
@@ -895,7 +888,6 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         self.assertEqual(app._workbench_exception_case_service.snapshot()["cases"], {})
         self.assertNotIn(invoice_row_id, app._workbench_override_service.snapshot()["row_overrides"])
         self.assertEqual(pair_relation_persist.call_count, 1)
-        self.assertEqual(read_model_persist.call_count, 0)
 
     def test_stale_cancel_after_replaced_cancels_current_relation_by_row_id(self) -> None:
         app = self._build_app()
@@ -925,7 +917,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)
 
-        with self._suppress_background_persistence(app) as (pair_relation_persist, read_model_persist):
+        with self._suppress_background_persistence(app) as pair_relation_persist:
             old_response = self._post(
                 app,
                 "/api/workbench/actions/confirm-link",
@@ -960,7 +952,6 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
             ["confirm_link", "confirm_link"],
         )
         self.assertEqual(pair_relation_persist.call_count, 2)
-        self.assertEqual(read_model_persist.call_count, 0)
 
     def test_stale_exception_after_relation_returns_conflict_and_preserves_relation(self) -> None:
         app = self._build_app()
@@ -988,10 +979,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)
 
-        with (
-            patch.object(app, "_schedule_workbench_pair_relation_persist"),
-            patch.object(app, "_schedule_workbench_read_model_persist", side_effect=RuntimeError("mock read model scheduling failure")),
-        ):
+        with patch.object(app, "_schedule_workbench_pair_relation_persist"):
             response = self._post(
                 app,
                 "/api/workbench/actions/confirm-link",
@@ -1008,7 +996,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)
 
-        with self._suppress_background_persistence(app) as (pair_relation_persist, read_model_persist):
+        with self._suppress_background_persistence(app) as pair_relation_persist:
             confirm_response = self._post(
                 app,
                 "/api/workbench/actions/confirm-link",
@@ -1031,16 +1019,12 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
             ["confirm_link", "withdraw_link"],
         )
         self.assertEqual(pair_relation_persist.call_count, 2)
-        self.assertEqual(read_model_persist.call_count, 0)
 
     def test_withdraw_link_enqueues_zero_derived_lifecycle_events(self) -> None:
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)
 
-        with (
-            patch.object(app, "_schedule_workbench_pair_relation_persist"),
-            patch.object(app, "_schedule_workbench_read_model_persist"),
-        ):
+        with patch.object(app, "_schedule_workbench_pair_relation_persist"):
             confirm_response = self._post(
                 app,
                 "/api/workbench/actions/confirm-link",
@@ -1060,10 +1044,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)
 
-        with (
-            patch.object(app, "_schedule_workbench_pair_relation_persist"),
-            patch.object(app, "_schedule_workbench_read_model_persist"),
-        ):
+        with patch.object(app, "_schedule_workbench_pair_relation_persist"):
             confirm_response = self._post(
                 app,
                 "/api/workbench/actions/confirm-link",
@@ -1088,7 +1069,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
             )
         connection, writer, persisted = self._install_withdraw_link_uow(app)
 
-        with self._suppress_background_persistence(app) as (pair_relation_persist, read_model_persist):
+        with self._suppress_background_persistence(app) as pair_relation_persist:
             withdraw_response = self._post(
                 app,
                 "/api/workbench/actions/withdraw-link",
@@ -1106,7 +1087,6 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         self.assertEqual(payload["affected_months"], ["2026-03"])
         self.assertCountEqual(payload["affected_row_ids"], row_ids)
         self.assertEqual(pair_relation_persist.call_count, 0)
-        self.assertEqual(read_model_persist.call_count, 0)
         self.assertEqual(connection.opened, 1)
         self.assertEqual(connection.commits, 1)
         self.assertEqual(connection.rollbacks, 0)
@@ -1148,7 +1128,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)
 
-        with self._suppress_background_persistence(app) as (pair_relation_persist, read_model_persist):
+        with self._suppress_background_persistence(app) as pair_relation_persist:
             first_confirm = self._post(
                 app,
                 "/api/workbench/actions/confirm-link",
@@ -1183,7 +1163,6 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         self.assertIsNotNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-WITHDRAW-EXPECTED-NEW"))
         self.assertEqual(len(app._workbench_pair_relation_service.list_history()), history_count)
         self.assertEqual(pair_relation_persist.call_count, 2)
-        self.assertEqual(read_model_persist.call_count, 0)
 
     def test_withdraw_link_does_not_call_removed_read_model_scheduler(self) -> None:
         app = self._build_app()
@@ -1197,10 +1176,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
             )
         self.assertEqual(confirm_response.status_code, 200, confirm_response.body)
 
-        with (
-            patch.object(app, "_schedule_workbench_pair_relation_persist"),
-            patch.object(app, "_schedule_workbench_read_model_persist", side_effect=RuntimeError("mock withdraw read model failure")),
-        ):
+        with patch.object(app, "_schedule_workbench_pair_relation_persist"):
             response = self._post(app, "/api/workbench/actions/withdraw-link", {"month": "2026-03", "row_ids": row_ids})
 
         self.assertEqual(response.status_code, 200, response.body)
@@ -1219,7 +1195,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
             row_types=["oa", "bank", "invoice"],
         )
 
-        with self._suppress_background_persistence(app) as (pair_relation_persist, read_model_persist):
+        with self._suppress_background_persistence(app) as pair_relation_persist:
             first_pass = self._post(
                 app,
                 "/api/workbench/actions/confirm-cash-pass-through",
@@ -1287,7 +1263,6 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
             ],
         )
         self.assertEqual(pair_relation_persist.call_count, 6)
-        self.assertEqual(read_model_persist.call_count, 0)
 
     def test_stale_cash_special_updates_first_active_relation_for_rows_current_behavior(self) -> None:
         app = self._build_app()
@@ -1353,7 +1328,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
                 )
                 history_count = len(app._workbench_pair_relation_service.list_history())
 
-                with self._suppress_background_persistence(app) as (pair_relation_persist, read_model_persist):
+                with self._suppress_background_persistence(app) as pair_relation_persist:
                     response = self._post(
                         app,
                         path,
@@ -1377,17 +1352,13 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
                 self.assertEqual(new_relation["special_metadata"], existing_metadata)
                 self.assertEqual(len(app._workbench_pair_relation_service.list_history()), history_count)
                 self.assertEqual(pair_relation_persist.call_count, 0)
-                self.assertEqual(read_model_persist.call_count, 0)
 
     def test_cash_special_does_not_call_removed_read_model_scheduler(self) -> None:
         app = self._build_app()
         row_ids = ["oa-cash-failure-current", "bank-cash-failure-current"]
         self._create_cash_special_relation(app, case_id="CASE-CASH-SCHEDULE-FAIL", row_ids=row_ids, row_types=["oa", "bank"])
 
-        with (
-            patch.object(app, "_schedule_workbench_pair_relation_persist"),
-            patch.object(app, "_schedule_workbench_read_model_persist", side_effect=RuntimeError("mock cash read model failure")),
-        ):
+        with patch.object(app, "_schedule_workbench_pair_relation_persist"):
             response = self._post(
                 app,
                 "/api/workbench/actions/confirm-cash-pass-through",
@@ -1403,8 +1374,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         app = self._build_app()
         bank_row = self._default_open_rows(app)["bank"]
 
-        with patch.object(app, "_schedule_workbench_read_model_persist") as read_model_persist:
-            first_response = self._post(
+        first_response = self._post(
                 app,
                 "/api/workbench/actions/update-bank-exception",
                 {
@@ -1415,7 +1385,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
                     "comment": "first fee",
                 },
             )
-            second_response = self._post(
+        second_response = self._post(
                 app,
                 "/api/workbench/actions/update-bank-exception",
                 {
@@ -1425,20 +1395,18 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
                     "relation_label": "银行手续费",
                     "comment": "second fee",
                 },
-            )
+        )
 
         self.assertEqual(first_response.status_code, 200, first_response.body)
         self.assertEqual(second_response.status_code, 200, second_response.body)
         self.assertEqual(_json_response(first_response)["exception_case_id"], _json_response(second_response)["exception_case_id"])
         self.assertEqual(len(app._workbench_exception_case_service.snapshot()["cases"]), 1)
-        self.assertEqual(read_model_persist.call_count, 0)
 
     def test_update_bank_exception_with_different_legacy_code_keeps_active_case_conflict(self) -> None:
         app = self._build_app()
         bank_row = self._default_open_rows(app)["bank"]
 
-        with patch.object(app, "_schedule_workbench_read_model_persist") as read_model_persist:
-            first_response = self._post(
+        first_response = self._post(
                 app,
                 "/api/workbench/actions/update-bank-exception",
                 {
@@ -1448,7 +1416,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
                     "relation_label": "银行手续费",
                 },
             )
-            conflicting_response = self._post(
+        conflicting_response = self._post(
                 app,
                 "/api/workbench/actions/update-bank-exception",
                 {
@@ -1457,13 +1425,12 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
                     "relation_code": "other_exception",
                     "relation_label": "其他异常",
                 },
-            )
+        )
 
         self.assertEqual(first_response.status_code, 200, first_response.body)
         self.assertEqual(conflicting_response.status_code, 409, conflicting_response.body)
         self.assertEqual(_json_response(conflicting_response)["error"], "active_exception_case_conflict")
         self.assertEqual(len(app._workbench_exception_case_service.snapshot()["cases"]), 1)
-        self.assertEqual(read_model_persist.call_count, 0)
 
     def test_update_bank_exception_after_pair_relation_returns_conflict_current_behavior(self) -> None:
         app = self._build_app()
@@ -1498,8 +1465,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         app = self._build_app()
         bank_row = self._default_open_rows(app)["bank"]
 
-        with patch.object(app, "_schedule_workbench_read_model_persist", side_effect=RuntimeError("mock bank exception schedule failure")):
-            response = self._post(
+        response = self._post(
                 app,
                 "/api/workbench/actions/update-bank-exception",
                 {
@@ -1508,7 +1474,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
                     "relation_code": "bank_fee",
                     "relation_label": "银行手续费",
                 },
-            )
+        )
 
         self.assertEqual(response.status_code, 200, response.body)
         self.assertEqual(len(app._workbench_exception_case_service.snapshot()["cases"]), 1)
@@ -1519,8 +1485,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         rows = self._default_open_rows(app)
         row_ids = [rows["oa"]["id"], rows["bank"]["id"]]
 
-        with patch.object(app, "_schedule_workbench_read_model_persist") as read_model_persist:
-            first_response = self._post(
+        first_response = self._post(
                 app,
                 "/api/workbench/actions/oa-bank-exception",
                 {
@@ -1531,7 +1496,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
                     "comment": "first mismatch",
                 },
             )
-            second_response = self._post(
+        second_response = self._post(
                 app,
                 "/api/workbench/actions/oa-bank-exception",
                 {
@@ -1541,13 +1506,12 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
                     "exception_label": "金额不一致，继续异常",
                     "comment": "second mismatch",
                 },
-            )
+        )
 
         self.assertEqual(first_response.status_code, 200, first_response.body)
         self.assertEqual(second_response.status_code, 200, second_response.body)
         self.assertEqual(_json_response(first_response)["exception_case_id"], _json_response(second_response)["exception_case_id"])
         self.assertEqual(len(app._workbench_exception_case_service.snapshot()["cases"]), 1)
-        self.assertEqual(read_model_persist.call_count, 0)
 
     def test_oa_bank_exception_after_pair_relation_returns_conflict_and_preserves_relation(self) -> None:
         app = self._build_app()
@@ -1582,8 +1546,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         rows = self._default_open_rows(app)
         row_ids = [rows["oa"]["id"], rows["bank"]["id"]]
 
-        with patch.object(app, "_schedule_workbench_read_model_persist", side_effect=RuntimeError("mock oa bank schedule failure")):
-            response = self._post(
+        response = self._post(
                 app,
                 "/api/workbench/actions/oa-bank-exception",
                 {
@@ -1592,7 +1555,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
                     "exception_code": "oa_bank_amount_mismatch",
                     "exception_label": "金额不一致，继续异常",
                 },
-            )
+        )
 
         self.assertEqual(response.status_code, 200, response.body)
         self.assertEqual(len(app._workbench_exception_case_service.snapshot()["cases"]), 1)

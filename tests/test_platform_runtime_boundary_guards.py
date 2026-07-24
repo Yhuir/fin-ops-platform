@@ -2846,6 +2846,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "workbench_dependency_versions_provider",
             "source_version_mismatch_reasons(",
             "_workbench_dependency_non_fresh_payload(",
+            "enqueue_read_model_refreshes(",
             'payload["refresh_dependency"] = "workbench"',
             'refresh_reason = "cost_statistics_workbench_dependency_stale"',
         ):
@@ -2855,9 +2856,21 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "self._workbench_sql_read_model_source_versions(scope_key)",
             'active_source_versions(scope_key=scope_key)',
             "workbench_refresh_enqueuer=self._enqueue_workbench_read_model_refresh",
+            "read_model_freshness_token(",
         ):
             if required not in server_source:
                 violations.append(f"Application composition is missing Cost dependency I/O {required}")
+        for removed_workbench_persist_path in (
+            "_schedule_workbench_read_model_persist",
+            "_rebuild_workbench_read_models_in_background",
+            "_workbench_read_model_persist_version",
+            "_pending_workbench_read_model_scope_keys",
+            "FIN_OPS_WORKBENCH_PERSIST_ASYNC",
+        ):
+            if removed_workbench_persist_path in server_source:
+                violations.append(
+                    f"Application retains removed Workbench background persist path {removed_workbench_persist_path}"
+                )
         if "workbench_shard_published" in cost_refresh_source:
             violations.append("Cost refresh worker still recognizes Workbench publish fan-out")
         if "from app.workbench_pair_relations" in cost_projection_source:
@@ -2886,9 +2899,12 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "tenant_id=event.tenant_id",
             "priority=priority",
             "trace_id=event.trace_id",
+            '"freshness_token": freshness_token',
         ):
             if required not in cost_refresh_source:
                 violations.append(f"Cost shard/parent causal metadata propagation is missing {required}")
+        if "def cost_statistics_parent_freshness_token(" not in cost_projection_source:
+            violations.append("Cost parent projection no longer exposes its canonical child-shard freshness target")
 
         handler_start = page_source.index("  const handleWorkbenchRelationMutation = useCallback")
         handler_end = page_source.index("  const handleManualRefresh", handler_start)

@@ -80,7 +80,7 @@
 
 1. 收到 `active:all` 或 `all:all` refresh。
 2. 普通 parent event只从当前已物化 OA月份 metadata/rows构建廉价 rollup；不得根据 readiness枚举或补投 child。
-3. child freshness只由页面的 workbench profile gate判定；gate只把证明漂移的 exact Workbench/Bank Detail/Cost scopes经 `ReadModelRefreshGateway` 入队。
+3. child freshness只由页面的workbench profile gate判定；Workbench stale时，同次只把证明漂移的exact Workbench与当前project/page所需的exact Cost child经`ReadModelRefreshGateway`入队，不直接stage parent或sibling。Cost child依赖未fresh时defer，成功后再收敛parent；相同canonical target由共享queue原子去重。
 4. parent或任一 required child non-fresh时页面返回 `refreshing`，不写 fake rows。
 5. worker从 `read_model.cost_statistics_rows` 聚合 OA parent metadata并计算 obsolete Cost scopes；全银行统计直接来自 fresh Bank Detail rows，不进入 parent复制表。
 6. repository 在同一事务内通过现有 partial unique index 锁定唯一 active 父 dirty row；仅当其 `source_version` 与事件版本精确相等时，原子发布 parent snapshot 并删除过期月份 rows。拒绝发布时不写 SQL/Redis。

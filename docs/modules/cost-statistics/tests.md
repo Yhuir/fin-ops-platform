@@ -11,8 +11,8 @@
 
 ## 2026-07-24 - 页面访问按依赖顺序登记 exact Workbench 与 Cost
 
-- Service/read model：`tests/test_cost_statistics_sql_runtime.py` 证明 month/all 页面 gate 已 non-fresh 时跳过 canonical Workbench proof，只 ensure gate 返回的 exact upstream/child scope；gate 可 fresh但 Workbench stale时只 ensure exact Workbench，不在同次访问预投 Cost。后续访问确认 Workbench fresh后才stage同 project的当前 exact Cost child，不登记 sibling。Cost projection仍在任何 payload I/O 前比较 canonical Workbench expected versions 与 active generation，不匹配时按 manifest dependency fail closed/defer并精确补投 child。`tests/test_cost_statistics_postgres_integration.py` 保护默认 provider 的真实 PostgreSQL查询和同一 fail-closed合同。
-- Worker/manifest：`tests/test_runtime_worker.py` 与 `tests/test_read_model_manifest.py` 继续证明意外进入 worker 的 `workbench_read_model_not_fresh` 只补投同月 Workbench并短延迟defer；正常页面访问不再提前制造必然defer的Cost任务。
+- Service/read model：`tests/test_cost_statistics_sql_runtime.py`证明month/all页面gate已non-fresh时跳过canonical Workbench proof并使用gate返回的exact upstream/child scope；gate可fresh但Workbench stale时，同次只ensure exact Workbench与当前project/page所需的exact Cost child，不登记parent或sibling。Cost projection仍在任何payload I/O前比较canonical Workbench expected versions与active generation，不匹配时按manifest dependency fail closed/defer。`tests/test_cost_statistics_postgres_integration.py`保护默认provider的真实PostgreSQL查询和同一fail-closed合同。
+- Worker/queue：`tests/test_runtime_worker.py`与`tests/test_read_model_manifest.py`证明Cost child依赖non-fresh时只补投同月Workbench并短延迟defer；`tests/test_runtime_queue.py`和真实PostgreSQL integration证明相同target在active/完成窗口被原子合并、不同target保留follow-up、dirty orphan/failed不被历史done短路。`tests/test_app_postgres_mode.py`证明已有Workbench projection才附target token，missing projection仍可自愈；parent enqueue测试证明token来自当前child-shard版本集合。
 - 回归：`tests/test_read_model_architecture_guards.py` 继续要求 access enqueue 走共享 gateway；普通 relation 写零 fan-out、Bank Detail profile 与 parent rollup 合同不变。生产 `<3s` 仍以候选部署后的 test-owned fixture 为最终门禁。
 
 ## 2026-07-24 - 全流水视图复用 Bank Detail 与旧复制表删除

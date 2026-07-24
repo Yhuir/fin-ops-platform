@@ -4,6 +4,7 @@ import unittest
 
 from fin_ops_platform.services.read_model_freshness import (
     normalize_source_versions,
+    read_model_freshness_token,
     require_expected_source_versions,
     resolve_read_model_freshness,
     source_version_mismatch_reasons,
@@ -13,6 +14,28 @@ from fin_ops_platform.services.workbench_read_model_service import WorkbenchRead
 
 
 class ReadModelFreshnessTests(unittest.TestCase):
+    def test_freshness_token_is_stable_for_equivalent_source_versions_and_scope_bound(self) -> None:
+        first = read_model_freshness_token(
+            scope_type="workbench",
+            scope_key="2026-05",
+            expected_source_versions={"relation": {"b": 2, "a": 1}, "builder": "v6"},
+        )
+        second = read_model_freshness_token(
+            scope_type="workbench",
+            scope_key="2026-05",
+            expected_source_versions={"builder": "v6", "relation": {"a": 1, "b": 2}},
+        )
+
+        self.assertEqual(first, second)
+        self.assertNotEqual(
+            first,
+            read_model_freshness_token(
+                scope_type="workbench",
+                scope_key="2026-06",
+                expected_source_versions={"builder": "v6", "relation": {"a": 1, "b": 2}},
+            ),
+        )
+
     def test_normalize_source_versions_drops_empty_values_and_stringifies(self) -> None:
         self.assertEqual(
             normalize_source_versions({"source_version": 3, "empty": "", "none": None}),

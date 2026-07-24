@@ -22,6 +22,7 @@ class WorkbenchQueryFreshnessService:
         self._connection = connection
         self._repository = repository
         self._single_scope_stale_reasons = single_scope_stale_reasons
+        self._expected_source_versions_by_scope: dict[str, dict[str, object]] = {}
 
     def apply(
         self,
@@ -77,6 +78,13 @@ class WorkbenchQueryFreshnessService:
         builder = WorkbenchSqlProjectionBuilder(connection=self._connection)
         scope_keys = builder.list_workbench_scope_shards("all")
         expected_by_scope = builder.source_versions_for_scopes(scope_keys)
+        self._expected_source_versions_by_scope.update(
+            {
+                str(scope_key).strip(): dict(source_versions)
+                for scope_key, source_versions in expected_by_scope.items()
+                if str(scope_key).strip() and isinstance(source_versions, dict)
+            }
+        )
         active_versions_loader = getattr(
             self._repository,
             "active_workbench_source_versions_by_scope",
@@ -103,6 +111,12 @@ class WorkbenchQueryFreshnessService:
             refresh_scope_keys.append(scope_key)
             reasons.extend(f"{scope_key}:{reason}" for reason in scope_reasons)
         return reasons, refresh_scope_keys
+
+    def expected_source_versions(self, scope_key: str) -> dict[str, object] | None:
+        source_versions = self._expected_source_versions_by_scope.get(
+            str(scope_key or "").strip()
+        )
+        return dict(source_versions) if source_versions else None
 
     @staticmethod
     def _status_source_versions(payload: dict[str, object]) -> dict[str, object]:

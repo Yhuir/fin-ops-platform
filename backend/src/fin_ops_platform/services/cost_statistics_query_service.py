@@ -683,7 +683,27 @@ class CostStatisticsQueryService:
             )
             for workbench_scope_key in workbench_scope_keys
         ]
-        payload["refresh_enqueued"] = any(refresh_results)
+        project_scope = str(scope_key or "").split(":", 1)[0]
+        dependency_months = sorted(
+            month
+            for month in self._runtime_service.months_from_workbench_scope_keys(
+                list(workbench_scope_keys)
+            )
+            if month != "all"
+        )
+        cost_scope_keys = [
+            self._runtime_service.request_scope_key(month, project_scope)
+            for month in dependency_months
+        ]
+        cost_refresh_scope_keys = (
+            self._runtime_service.enqueue_read_model_refreshes(
+                cost_scope_keys,
+                reason=refresh_reason,
+            )
+            if cost_scope_keys
+            else []
+        )
+        payload["refresh_enqueued"] = bool(cost_refresh_scope_keys) or any(refresh_results)
         return payload
 
     def _cost_statistics_non_fresh_gate_payload(

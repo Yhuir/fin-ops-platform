@@ -77,18 +77,32 @@ class CostStatisticsRuntimeService:
         reason: str,
         force_refresh: bool = False,
     ) -> bool:
+        return bool(
+            self.enqueue_read_model_refreshes(
+                [scope_key],
+                reason=reason,
+                force_refresh=force_refresh,
+            )
+        )
+
+    def enqueue_read_model_refreshes(
+        self,
+        scope_keys: list[str],
+        *,
+        reason: str,
+        force_refresh: bool = False,
+    ) -> list[str]:
         from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
         gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
         if not gateway.can_enqueue():
-            return False
-        enqueued_scope_keys = gateway.enqueue_many(
+            return []
+        return gateway.enqueue_many(
             "cost_statistics",
-            [scope_key],
+            scope_keys,
             reason=reason,
             metadata={"force_refresh": True} if force_refresh else None,
         )
-        return bool(enqueued_scope_keys)
 
     @staticmethod
     def months_from_workbench_scope_keys(scope_keys: list[str]) -> set[str]:

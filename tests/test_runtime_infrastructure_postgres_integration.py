@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import unittest
 
 from fin_ops_platform.postgres import migrate
@@ -477,6 +478,120 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(counts["active_event_count"], 3)
         self.assertEqual(counts["active_dirty_count"], 3)
+
+    def test_completed_freshness_target_coalesces_concurrent_stale_callers(self) -> None:
+        first = self.runtime_queue.enqueue_read_model_refresh_if_inactive(
+            scope_type="workbench",
+            scope_key="2026-04",
+            reason="api_groups_stale",
+            metadata={"freshness_token": "target-a"},
+        )
+        assert first is not None
+        self.assertTrue(
+            self.runtime_queue.complete_read_model_refresh(
+                tenant_id="default",
+                scope_type="workbench",
+                scope_key="2026-04",
+                source_version=first.source_version,
+            )
+        )
+        self.connection.fetch_one(
+            """
+            update job.outbox_events
+            set status = 'done', processed_at = clock_timestamp()
+            where id = %s
+            returning id
+            """,
+            (first.event_id,),
+        )
+
+        def enqueue_same_target(_index: int) -> str | None:
+            connection = PostgresConnection(
+                PostgresSettings(
+                    database_url=self.database_url,
+                    pool_enabled=False,
+                )
+            )
+            event = RuntimeQueueRepository(connection).enqueue_read_model_refresh_if_inactive(
+                scope_type="workbench",
+                scope_key="2026-04",
+                reason="api_groups_stale",
+                metadata={"freshness_token": "target-a"},
+            )
+            return event.event_id if event is not None else None
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            results = list(executor.map(enqueue_same_target, range(4)))
+
+        self.assertEqual(results, [None, None, None, None])
+        event_count = self.connection.fetch_one(
+            """
+            select count(*)::integer as count
+            from job.outbox_events
+            where event_type = 'workbench.read_model.refresh'
+              and scope_key = '2026-04'
+            """
+        )
+        self.assertEqual(event_count["count"], 1)
+
+        second = self.runtime_queue.enqueue_read_model_refresh_if_inactive(
+            scope_type="workbench",
+            scope_key="2026-04",
+            reason="api_groups_stale",
+            metadata={"freshness_token": "target-b"},
+        )
+        assert second is not None
+        self.assertTrue(
+            self.runtime_queue.complete_read_model_refresh(
+                tenant_id="default",
+                scope_type="workbench",
+                scope_key="2026-04",
+                source_version=second.source_version,
+            )
+        )
+        self.connection.fetch_one(
+            """
+            update job.outbox_events
+            set status = 'done', processed_at = clock_timestamp()
+            where id = %s
+            returning id
+            """,
+            (second.event_id,),
+        )
+
+        third = self.runtime_queue.enqueue_read_model_refresh_if_inactive(
+            scope_type="workbench",
+            scope_key="2026-04",
+            reason="api_groups_stale",
+            metadata={"freshness_token": "target-a"},
+        )
+        assert third is not None
+        self.connection.fetch_one(
+            """
+            update job.outbox_events
+            set status = 'done', processed_at = clock_timestamp()
+            where id = %s
+            returning id
+            """,
+            (third.event_id,),
+        )
+        self.connection.fetch_one(
+            """
+            update job.read_model_dirty_scopes
+            set status = 'failed', last_error = 'fixture failed dirty scope'
+            where scope_type = 'workbench'
+              and scope_key = '2026-04'
+            returning id
+            """,
+        )
+
+        recovered = self.runtime_queue.enqueue_read_model_refresh_if_inactive(
+            scope_type="workbench",
+            scope_key="2026-04",
+            reason="api_groups_stale",
+            metadata={"freshness_token": "target-a"},
+        )
+        self.assertIsNotNone(recovered)
 
     def test_runtime_queue_claim_next_sets_processing_lock_and_attempts(self) -> None:
         event = self.runtime_queue.enqueue(event_type="runtime.integration.claim", payload={"claim": True})

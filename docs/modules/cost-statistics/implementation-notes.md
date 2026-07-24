@@ -1,5 +1,11 @@
 # 成本统计 实施记录
 
+## 2026-07-25 - 页面访问 child pipeline 与完成窗口 target 去重
+
+- 第一候选生产矩阵证明普通confirm/withdraw已在约152–482ms返回且写后零页面fan-out，单个Cost月scope约0.8–1.4秒；但Workbench同scope在刚完成后仍被轮询重新入队，Cost all/project继续串行等待Workbench→child→parent，出现约4.2–13.9秒。System Audit 16/16、15/15 read models、queue/worker与fixture恢复均通过，真实剩余根因是完成窗口任务放大和串行空档，不是事实源错误或SQL单次算法。
+- 修复保持现有PostgreSQL durable queue与worker：`project|bank|expense_type`访问发现Workbench stale时，同次batch stage当前project/page所需的exact Cost child，并ensure exact Workbench；不直接stage parent或sibling。Cost worker在依赖non-fresh时沿现有manifest短延迟defer，成功child再走既有month→parent。
+- Workbench access与Cost parent producer使用规范scope+canonical expected versions计算稳定`freshness_token`。共享queue在同一advisory lock内让active/最新成功同target覆盖轮询，不同target保留follow-up；dirty pending/processing/failed与missing projection禁止历史done短路。没有新增表、migration、queue、worker、cache、协调器或API字段。
+
 ## 2026-07-25 - Workbench 执行版本放大根因修复
 
 - 生产只读证据显示，同一 Workbench scope 的连续 Cost dependency refresh 除 `source_version` 外业务 proof、row/group count完全相同；重复事件原因均为 `cost_statistics_workbench_dependency_stale`。因此瓶颈不是业务数据持续变化或第二套 queue，而是 Cost 的 query、worker和parent/child SQL对同一 dependency使用了不同相等语义。
@@ -9,7 +15,7 @@
 ## 2026-07-24 - exact Cost scope 与 Workbench dependency 同次登记
 
 - release `main-c4edf63a-20260724201915` 已把 Cost handler降到约 78–328ms，confirm/withdraw写入分别约 347/233ms且零 forbidden fan-out；但页面轮询先等 Workbench、再登记 Cost child、再等待 parent，`project/all` 仍需约 12.6/11.2 秒才业务可见。
-- round 9 证明只登记 parent仍保留 Workbench→Cost child→Cost parent串行空档。当前最小修复在同一次访问中先 ensure exact Workbench；月份只登记当前 Cost scope，parent一次登记同一页面/同 project scope的exact children与parent。Cost worker继续以 manifest dependency fail closed/defer；不登记 sibling project/page scope、不恢复写后事件、不增加 coordinator/cache/queue。最终 `<3s` 结论只由候选部署后的同一可恢复 fixture 决定。
+- round 9证明只登记parent仍保留Workbench→Cost child→Cost parent串行空档。该轮尝试曾在同次访问登记children与parent；2026-07-25生产证据后已收窄为只stage当前project/page的exact children，不直接stage parent，parent只由成功child收敛。Cost worker继续以manifest dependency fail closed/defer；不登记sibling project/page scope、不恢复写后事件、不增加coordinator/cache/queue。最终`<3s`结论只由候选部署后的同一可恢复fixture决定。
 
 ## 2026-07-24 - `time|bank_tag` 直接复用 Bank Detail，删除 Cost 复制投影
 
@@ -47,9 +53,9 @@
 - 边界与性能：没有新增表、migration、worker、queue、Redis、HTTP、协调器、writer target 或兼容 fallback；普通写仍为零页面 outbox。warm path 使用 bounded set-based SQL，不做月份 N+1；stale path 的 enqueue 数等于实际漂移月份。旧 parent-only fresh 假设被测试和文档删除，不能以 App Status/Audit 后置识别代替页面 gate。
 - 真实 PostgreSQL 门禁首次复现出无 dirty row 时 `IN (...)` 产生 `NULL`，使 `NOT workbench_not_fresh` 仍为 `NULL` 并漏掉真实漂移 child；共享 gate 将两项 proof `coalesce(..., false)` 后，一次性测试库实际应用全部 migrations，Cost lineage 与 bulk canonical proof 两模块 `12/12` 通过，测试库已删除。
 
-## 2026-07-23 - Workbench→Cost 访问时两阶段收敛
+## 2026-07-23 - Workbench→Cost 访问时两阶段收敛（历史方案，已由2026-07-25 child pipeline取代）
 
-- 普通 relation/turnover/bank-flow 写入与 Workbench generation publish 均不再投递 Cost。`CostStatisticsQueryService` 先比较 canonical Workbench expected versions 与 active generation；上游 stale 时只 enqueue 当前 Workbench 月份并返回 `refresh_dependency=workbench`，不同时 enqueue Cost。Workbench fresh 后的下一次 GET 才允许 enqueue 当前 Cost scope。
+- 当时的实现是上游stale时只enqueue当前Workbench月份，下一次GET才enqueue Cost scope；第一候选生产性能矩阵证明该串行空档无法满足`<3s`，现已由2026-07-25同次exact Workbench+Cost child pipeline取代。普通relation/turnover/bank-flow写入与Workbench generation publish仍保持零Cost投递。
 - Cost 页面首次访问、轻量 relation 提示、focus/hidden→visible 均复用正常 explorer GET。refreshing 使用 150ms 间隔、最长 3s 的页面自身有界重试；无 operation barrier、无全局 App Status 轮询、无新 worker/表/协调器。
 - 本条取代下方历史记录中“`cost_statistics_relation_delta` 为普通写入可达主链”和“`workbench_shard_published` 保证 Cost 最终收敛”的描述；相关 producer、worker/projection/repository 与 write-trace smoke 已在 2026-07-24 旧代码门禁中删除，不存在运维或兼容 fallback。
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import json
 from typing import Any
 
@@ -28,6 +29,29 @@ def require_expected_source_versions(source_versions: Any, *, context: str) -> d
     if not normalized:
         raise ValueError(f"{context} missing expected source versions.")
     return normalized
+
+
+def read_model_freshness_token(
+    *,
+    scope_type: str,
+    scope_key: str,
+    expected_source_versions: Any,
+) -> str:
+    normalized_scope_type = str(scope_type or "").strip()
+    normalized_scope_key = str(scope_key or "").strip()
+    if not normalized_scope_type or not normalized_scope_key:
+        raise ValueError("read model freshness token requires scope_type and scope_key.")
+    payload = {
+        "scope_type": normalized_scope_type,
+        "scope_key": normalized_scope_key,
+        "source_versions": require_expected_source_versions(
+            expected_source_versions,
+            context=f"{normalized_scope_type}:{normalized_scope_key}",
+        ),
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
 
 def source_version_mismatch_reasons(

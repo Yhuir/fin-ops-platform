@@ -171,12 +171,28 @@ class CostStatisticsReadModelRefreshService:
         project_scope = str(scope_key or "").split(":", 1)[0]
         if project_scope not in {"active", "all"}:
             return
+        parent_scope_key = f"{project_scope}:all"
+        parent_token = getattr(
+            self._projection_builder,
+            "cost_statistics_parent_freshness_token",
+            None,
+        )
+        if not callable(parent_token):
+            raise RuntimeError(
+                "Projection builder does not expose cost_statistics_parent_freshness_token."
+            )
+        freshness_token = parent_token(parent_scope_key)
         self._enqueue_scope_keys(
-            [f"{project_scope}:all"],
+            [parent_scope_key],
             reason="cost_statistics_shard_converged",
             tenant_id=tenant_id,
             priority=priority,
             trace_id=trace_id,
+            metadata=(
+                {"freshness_token": freshness_token}
+                if freshness_token
+                else None
+            ),
         )
 
     def _enqueue_scope_keys(
@@ -188,10 +204,14 @@ class CostStatisticsReadModelRefreshService:
         priority: str,
         trace_id: str | None,
         force_refresh: bool = False,
+        metadata: dict[str, object] | None = None,
     ) -> list[str]:
         refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
         if not refresh_gateway.can_enqueue():
             return []
+        refresh_metadata = dict(metadata or {})
+        if force_refresh:
+            refresh_metadata["force_refresh"] = True
         return refresh_gateway.enqueue_many(
             "cost_statistics",
             scope_keys,
@@ -199,7 +219,7 @@ class CostStatisticsReadModelRefreshService:
             tenant_id=tenant_id,
             priority=priority,
             trace_id=trace_id,
-            metadata={"force_refresh": True} if force_refresh else None,
+            metadata=refresh_metadata or None,
         )
 
 

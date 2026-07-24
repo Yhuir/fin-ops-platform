@@ -1610,6 +1610,147 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("expense:all:2026-03", batch_params)
         self.assertEqual(transaction.outcomes, ["commit"])
 
+    def test_atomic_read_model_enqueue_coalesces_same_active_freshness_target(self) -> None:
+        metadata = {"freshness_token": "target-a"}
+        transaction = FakeTransaction(
+            rows=[
+                [
+                    event_row(
+                        event_type="workbench.read_model.refresh",
+                        scope_type="workbench",
+                        scope_key="2026-04",
+                        status="processing",
+                        payload={"metadata": metadata},
+                    )
+                ]
+            ]
+        )
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        event = repository.enqueue_read_model_refresh_if_inactive(
+            scope_type="workbench",
+            scope_key="2026-04",
+            reason="api_groups_stale",
+            metadata=metadata,
+        )
+
+        self.assertIsNone(event)
+        self.assertEqual(
+            [method for method, _sql, _params in transaction.calls],
+            ["execute", "fetch_all"],
+        )
+
+    def test_atomic_read_model_enqueue_preserves_new_freshness_target_behind_active_event(self) -> None:
+        transaction = FakeTransaction(
+            rows=[
+                [
+                    event_row(
+                        event_type="workbench.read_model.refresh",
+                        scope_type="workbench",
+                        scope_key="2026-04",
+                        status="processing",
+                        payload={"metadata": {"freshness_token": "target-a"}},
+                    )
+                ],
+                [
+                    event_row(
+                        event_type="workbench.read_model.refresh",
+                        aggregate_type="read_model",
+                        aggregate_id="2026-04",
+                        scope_type="workbench",
+                        scope_key="2026-04",
+                        dedupe_key="workbench.read_model.refresh:workbench:2026-04",
+                        source_version=9,
+                    )
+                ],
+            ]
+        )
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        event = repository.enqueue_read_model_refresh_if_inactive(
+            scope_type="workbench",
+            scope_key="2026-04",
+            reason="api_groups_stale",
+            metadata={"freshness_token": "target-b"},
+        )
+
+        self.assertIsNotNone(event)
+        self.assertEqual(
+            [method for method, _sql, _params in transaction.calls],
+            ["execute", "fetch_all", "fetch_all"],
+        )
+
+    def test_atomic_read_model_enqueue_coalesces_latest_completed_freshness_target(self) -> None:
+        transaction = FakeTransaction(
+            rows=[
+                [],
+                [
+                    event_row(
+                        event_type="workbench.read_model.refresh",
+                        scope_type="workbench",
+                        scope_key="2026-04",
+                        status="done",
+                        payload={"metadata": {"freshness_token": "target-a"}},
+                    )
+                ],
+            ]
+        )
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        event = repository.enqueue_read_model_refresh_if_inactive(
+            scope_type="workbench",
+            scope_key="2026-04",
+            reason="api_groups_stale",
+            metadata={"freshness_token": "target-a"},
+        )
+
+        self.assertIsNone(event)
+        self.assertEqual(
+            [method for method, _sql, _params in transaction.calls],
+            ["execute", "fetch_all", "fetch_all"],
+        )
+        latest_done_sql = " ".join(transaction.calls[2][1].lower().split())
+        self.assertIn("event.status = 'done'", latest_done_sql)
+        self.assertIn("dirty.status in ('pending', 'processing', 'failed')", latest_done_sql)
+
+    def test_atomic_read_model_enqueue_uses_only_latest_completed_freshness_target(self) -> None:
+        transaction = FakeTransaction(
+            rows=[
+                [],
+                [
+                    event_row(
+                        event_type="workbench.read_model.refresh",
+                        scope_type="workbench",
+                        scope_key="2026-04",
+                        status="done",
+                        payload={"metadata": {"freshness_token": "target-b"}},
+                    )
+                ],
+                [
+                    event_row(
+                        event_type="workbench.read_model.refresh",
+                        aggregate_type="read_model",
+                        aggregate_id="2026-04",
+                        scope_type="workbench",
+                        scope_key="2026-04",
+                        dedupe_key="workbench.read_model.refresh:workbench:2026-04",
+                        source_version=10,
+                    )
+                ],
+            ]
+        )
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        event = repository.enqueue_read_model_refresh_if_inactive(
+            scope_type="workbench",
+            scope_key="2026-04",
+            reason="api_groups_stale",
+            metadata={"freshness_token": "target-a"},
+        )
+
+        self.assertIsNotNone(event)
+        self.assertEqual(event.source_version, 10)
+
     def test_atomic_read_model_enqueue_merges_new_relation_delta_into_active_scope(self) -> None:
         transaction = FakeTransaction(
             rows=[

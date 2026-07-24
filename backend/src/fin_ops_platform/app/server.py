@@ -341,6 +341,7 @@ from fin_ops_platform.services.postgres_repositories.workbench_relation import P
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.read_model_freshness import (
     normalize_source_versions,
+    read_model_freshness_token,
     require_expected_source_versions,
     source_version_mismatch_reasons,
 )
@@ -1147,9 +1148,6 @@ class Application:
             known_months_loader=self._list_search_months,
             workbench_rows_loader=self._list_workbench_search_rows,
         )
-        self._workbench_read_model_persist_version = 0
-        self._workbench_read_model_persist_version_lock = Lock()
-        self._pending_workbench_read_model_scope_keys: set[str] = set()
         self._workbench_pair_relation_persist_version = 0
         self._pending_workbench_pair_relation_case_ids: set[str] = set()
         self._workbench_group_detail_api_routes = self._build_workbench_group_detail_api_routes()
@@ -2641,15 +2639,61 @@ class Application:
         repository = getattr(self, "_workbench_sql_read_repository", None)
         runtime_container = getattr(self, "_runtime_repositories", None)
         query_service = getattr(self, "_workbench_query_service", None)
+        expected_source_versions_by_scope: dict[str, dict[str, object]] = {}
+
+        def expected_source_versions(scope_key: str | None) -> dict[str, object]:
+            normalized_scope_key = str(scope_key or "").strip() or "all"
+            if normalized_scope_key not in expected_source_versions_by_scope:
+                expected_source_versions_by_scope[normalized_scope_key] = dict(
+                    self._workbench_sql_read_model_source_versions(
+                        normalized_scope_key
+                    )
+                )
+            return dict(expected_source_versions_by_scope[normalized_scope_key])
+
+        def stale_reasons(
+            source_versions: object,
+            *,
+            scope_key: str | None = None,
+        ) -> list[str]:
+            return source_version_mismatch_reasons(
+                expected=require_expected_source_versions(
+                    expected_source_versions(scope_key),
+                    context="workbench_sql_read_model",
+                ),
+                actual=source_versions if isinstance(source_versions, dict) else {},
+            )
+
         source_freshness = self._workbench_query_freshness_service(
             repository=repository,
+            single_scope_stale_reasons=stale_reasons,
         )
+
+        def enqueue_refresh(
+            scope_key: str,
+            *,
+            reason: str,
+            metadata: dict[str, object] | None = None,
+        ) -> bool:
+            target_source_versions = (
+                source_freshness.expected_source_versions(scope_key)
+                or expected_source_versions_by_scope.get(
+                    str(scope_key or "").strip() or "all"
+                )
+            )
+            return self._enqueue_workbench_read_model_refresh(
+                scope_key,
+                reason=reason,
+                metadata=metadata,
+                expected_source_versions=target_source_versions,
+            )
+
         return WorkbenchQueryFacade(
             repository=repository,
             redis_helper=getattr(runtime_container, "redis_helper", None),
-            enqueue_refresh=self._enqueue_workbench_read_model_refresh,
+            enqueue_refresh=enqueue_refresh,
             scope_key_for_month=self._workbench_read_model_scope_key,
-            stale_reasons=self._workbench_sql_read_model_stale_reasons,
+            stale_reasons=stale_reasons,
             emit_status_metric=self._emit_workbench_read_model_status_metric,
             missing_read_model_error=self._is_missing_workbench_groups_read_model_error,
             transient_read_model_error=self._is_transient_workbench_read_model_error,
@@ -2670,6 +2714,7 @@ class Application:
         self,
         *,
         repository: object | None = None,
+        single_scope_stale_reasons: Callable[..., list[str]] | None = None,
     ) -> WorkbenchQueryFreshnessService:
         state_store = getattr(self, "_state_store", None)
         return WorkbenchQueryFreshnessService(
@@ -2679,7 +2724,10 @@ class Application:
                 if repository is not None
                 else getattr(self, "_workbench_sql_read_repository", None)
             ),
-            single_scope_stale_reasons=self._workbench_sql_read_model_stale_reasons,
+            single_scope_stale_reasons=(
+                single_scope_stale_reasons
+                or self._workbench_sql_read_model_stale_reasons
+            ),
         )
 
     def _workbench_write_facade(self) -> WorkbenchWriteFacade:
@@ -3583,11 +3631,36 @@ class Application:
         *,
         reason: str,
         metadata: dict[str, object] | None = None,
+        expected_source_versions: dict[str, object] | None = None,
     ) -> bool:
         refresh_gateway = self._read_model_refresh_gateway()
         if not refresh_gateway.can_enqueue():
             return False
-        return bool(refresh_gateway.enqueue_one("workbench", scope_key, reason=reason, metadata=metadata))
+        refresh_metadata = dict(metadata or {})
+        if str(reason or "").startswith("api_") or reason == "cost_statistics_workbench_dependency_stale":
+            repository = getattr(self, "_workbench_sql_read_repository", None)
+            active_source_versions = getattr(repository, "active_workbench_source_versions", None)
+            if callable(active_source_versions):
+                actual = dict(active_source_versions(scope_key=scope_key) or {})
+                if actual:
+                    refresh_metadata["freshness_token"] = read_model_freshness_token(
+                        scope_type="workbench",
+                        scope_key=scope_key,
+                        expected_source_versions=(
+                            expected_source_versions
+                            or self._workbench_sql_read_model_source_versions(
+                                scope_key
+                            )
+                        ),
+                    )
+        return bool(
+            refresh_gateway.enqueue_one(
+                "workbench",
+                scope_key,
+                reason=reason,
+                metadata=refresh_metadata or None,
+            )
+        )
 
     def _handle_api_oa_sync_status(self) -> Response:
         return self._json_response(HTTPStatus.OK, self._oa_sync_status_payload())
@@ -9915,122 +9988,6 @@ class Application:
     ) -> None:
         self._workbench_pair_relation_persist_version = service.version
         self._pending_workbench_pair_relation_case_ids = service.pending_case_ids
-
-    def _schedule_workbench_read_model_persist(
-        self,
-        *,
-        changed_scope_keys: list[str] | None = None,
-        request_id: str | None = None,
-        action_name: str | None = None,
-    ) -> None:
-        if self._state_store is None:
-            return
-        normalized_scope_keys = [
-            str(scope_key)
-            for scope_key in list(changed_scope_keys or [])
-            if str(scope_key).strip()
-        ]
-        if not normalized_scope_keys:
-            return
-        with self._workbench_read_model_persist_version_lock:
-            self._pending_workbench_read_model_scope_keys.update(normalized_scope_keys)
-            self._workbench_read_model_persist_version += 1
-            version = self._workbench_read_model_persist_version
-        if not self._workbench_persist_async_enabled():
-            self._rebuild_workbench_read_models_in_background(
-                version=version,
-                scope_keys=normalized_scope_keys,
-                request_id=request_id,
-                action_name=action_name,
-            )
-            return
-        Thread(
-            target=self._rebuild_workbench_read_models_in_background,
-            kwargs={
-                "version": version,
-                "scope_keys": normalized_scope_keys,
-                "request_id": request_id,
-                "action_name": action_name,
-            },
-            daemon=True,
-        ).start()
-
-    @staticmethod
-    def _workbench_persist_async_enabled() -> bool:
-        override = os.getenv("FIN_OPS_WORKBENCH_PERSIST_ASYNC")
-        if override is not None:
-            return override.strip().lower() not in {"0", "false", "no", "off"}
-        return "unittest" not in sys.modules
-
-    def _rebuild_workbench_read_models_in_background(
-        self,
-        *,
-        version: int,
-        scope_keys: list[str],
-        request_id: str | None = None,
-        action_name: str | None = None,
-    ) -> None:
-        if self._state_store is None:
-            return
-        with self._workbench_read_model_persist_version_lock:
-            if version != self._workbench_read_model_persist_version:
-                return
-            pending_scope_keys = sorted(self._pending_workbench_read_model_scope_keys)
-            self._pending_workbench_read_model_scope_keys.clear()
-        scope_keys_to_rebuild = pending_scope_keys or [
-            str(scope_key)
-            for scope_key in list(scope_keys or [])
-            if str(scope_key).strip()
-        ]
-        if not scope_keys_to_rebuild:
-            return
-        rebuild_started_at = monotonic()
-        legacy_scope_keys: list[str] = []
-        for scope_key in scope_keys_to_rebuild:
-            scope_started_at = monotonic()
-            result = self.rebuild_workbench_read_model_scope(scope_key, persist=False)
-            if not (isinstance(result, dict) and result.get("projection") == "sql"):
-                legacy_scope_keys.append(scope_key)
-            if request_id is not None and action_name is not None:
-                self._emit_workbench_action_timing(
-                    request_id=request_id,
-                    action_name=action_name,
-                    phase="rebuild_read_model_scope",
-                    duration_ms=self._duration_ms(scope_started_at),
-                    detail=scope_key,
-                )
-        if not legacy_scope_keys:
-            if request_id is not None and action_name is not None:
-                self._emit_workbench_action_timing(
-                    request_id=request_id,
-                    action_name=action_name,
-                    phase="background_total",
-                    duration_ms=self._duration_ms(rebuild_started_at),
-                    detail=",".join(scope_keys_to_rebuild),
-                )
-            return
-        persist_started_at = monotonic()
-        snapshot = self._workbench_read_model_service.snapshot_scope_keys(legacy_scope_keys)
-        self._persist_workbench_read_models_best_effort(
-            snapshot=snapshot,
-            changed_scope_keys=legacy_scope_keys,
-            operation="background_rebuild_read_models",
-        )
-        if request_id is not None and action_name is not None:
-            self._emit_workbench_action_timing(
-                request_id=request_id,
-                action_name=action_name,
-                phase="persist_read_models",
-                duration_ms=self._duration_ms(persist_started_at),
-                detail=",".join(legacy_scope_keys),
-            )
-            self._emit_workbench_action_timing(
-                request_id=request_id,
-                action_name=action_name,
-                phase="background_total",
-                duration_ms=self._duration_ms(rebuild_started_at),
-                detail=",".join(scope_keys_to_rebuild),
-            )
 
     def rebuild_workbench_read_model_scope(self, scope_key: str, *, persist: bool = True) -> dict[str, object]:
         normalized_scope_key = str(scope_key or "").strip() or "all"

@@ -24,6 +24,7 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
 )
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.read_model_freshness import (
+    read_model_freshness_token,
     require_expected_source_versions,
     source_version_mismatch_reasons,
 )
@@ -83,6 +84,22 @@ class CostStatisticsSqlProjectionBuilder:
             for row in rows
             if MONTH_RE.match(str(row.get("scope_key") or ""))
         ]
+
+    def cost_statistics_parent_freshness_token(self, scope_key: str) -> str | None:
+        project_scope, month = _parse_cost_scope_key(scope_key)
+        if month != "all":
+            raise ValueError("parent freshness token requires an all scope.")
+        if self._read_model_repository.get_cost_statistics_scope_metadata(scope_key=scope_key) is None:
+            return None
+        return read_model_freshness_token(
+            scope_type="cost_statistics",
+            scope_key=scope_key,
+            expected_source_versions={
+                "source_shards": self._cost_statistics_shard_versions(
+                    project_scope=project_scope
+                )
+            },
+        )
 
     def rebuild_cost_statistics_read_model_scope(
         self,

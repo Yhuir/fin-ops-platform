@@ -8,6 +8,8 @@
 - `tests/test_workbench_query_facade.py::WorkbenchQueryFacadeTests::test_initial_all_page_enqueues_only_exact_workbench_mismatch_scopes` 证明 initial freshness gate 只入队 exact Workbench scopes，不退化成 `workbench:all`。
 - `tests/test_workbench_query_facade.py::WorkbenchQueryFacadeTests::test_month_initial_does_not_enqueue_unrelated_all_statistics_scopes` 证明单月页面只读取 all-period 统计 generation 状态用于 cache/fail-closed，不得因此入队其它月份。
 - 关联台不消费 `workbench_relation` distribution，已删除 combined initial 的 relation dependency callback、阻塞、状态字段和双投递；其它实际消费者的 relation gate 不变。
+- `tests/test_app_postgres_mode.py`证明access enqueue只在既有active projection存在时附canonical `freshness_token`，并复用调用方已计算的expected versions、不重复canonical proof；missing projection仍按普通enqueue自愈。`tests/test_runtime_queue.py`与真实PostgreSQL integration证明同target并发/完成窗口去重、A→B→A latest-target语义、不同target follow-up及failed dirty恢复。
+- `tests/test_platform_runtime_boundary_guards.py`、Workbench write/idempotency/stale与Batch Accounting回归机械禁止`_schedule_workbench_read_model_persist`、后台rebuild线程、旧async env和测试monkeypatch重新进入生产/测试链路。
 
 ## 2026-07-24 Workbench generation 批量发布回归
 

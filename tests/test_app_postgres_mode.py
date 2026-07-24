@@ -6,8 +6,9 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from fin_ops_platform.app.server import build_application
+from fin_ops_platform.app.server import Application, build_application
 from fin_ops_platform.services.postgres_connection import PostgresConfigurationError
+from fin_ops_platform.services.read_model_freshness import read_model_freshness_token
 
 
 class FakeSqlProjectionBuilder:
@@ -310,11 +311,85 @@ class AppPostgresModeTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir, patch("fin_ops_platform.app.server.build_state_store", return_value=store):
             app = build_application(data_dir=Path(temp_dir))
             result = app.rebuild_workbench_read_model_scope("2026-02")
-            app._rebuild_workbench_read_models_in_background(version=0, scope_keys=["2026-03"])
 
         self.assertEqual(result["projection"], "sql")
-        self.assertEqual(projection_builder.rebuilt_scope_keys, ["2026-02", "2026-03"])
+        self.assertEqual(projection_builder.rebuilt_scope_keys, ["2026-02"])
         self.assertEqual(store.saved_workbench_read_models, 0)
+
+    def test_workbench_access_refresh_carries_target_only_when_projection_exists(self) -> None:
+        class Gateway:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            @staticmethod
+            def can_enqueue() -> bool:
+                return True
+
+            def enqueue_one(
+                self,
+                scope_type: str,
+                scope_key: str,
+                *,
+                reason: str,
+                metadata: dict[str, object] | None = None,
+            ) -> list[str]:
+                self.calls.append(
+                    {
+                        "scope_type": scope_type,
+                        "scope_key": scope_key,
+                        "reason": reason,
+                        "metadata": metadata,
+                    }
+                )
+                return [scope_key]
+
+        expected = {"builder": "workbench-v6", "relation": "v2"}
+        gateway = Gateway()
+        app = Application.__new__(Application)
+        app._read_model_refresh_gateway = lambda: gateway
+        app._workbench_sql_read_model_source_versions = lambda _scope_key: (_ for _ in ()).throw(
+            AssertionError("precomputed target must not repeat canonical Workbench proof")
+        )
+        app._workbench_sql_read_repository = type(
+            "Repository",
+            (),
+            {
+                "active_workbench_source_versions": staticmethod(
+                    lambda **_kwargs: {"builder": "workbench-v6", "relation": "v1"}
+                )
+            },
+        )()
+
+        self.assertTrue(
+            app._enqueue_workbench_read_model_refresh(
+                "2026-05",
+                reason="api_groups_stale",
+                expected_source_versions=expected,
+            )
+        )
+        self.assertEqual(
+            gateway.calls[0]["metadata"],
+            {
+                "freshness_token": read_model_freshness_token(
+                    scope_type="workbench",
+                    scope_key="2026-05",
+                    expected_source_versions=expected,
+                )
+            },
+        )
+
+        app._workbench_sql_read_repository = type(
+            "MissingRepository",
+            (),
+            {"active_workbench_source_versions": staticmethod(lambda **_kwargs: {})},
+        )()
+        self.assertTrue(
+            app._enqueue_workbench_read_model_refresh(
+                "2026-06",
+                reason="api_groups_miss",
+            )
+        )
+        self.assertIsNone(gateway.calls[1]["metadata"])
 
 
 if __name__ == "__main__":

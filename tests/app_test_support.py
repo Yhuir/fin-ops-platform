@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Callable
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application
@@ -210,21 +211,35 @@ def build_grouped_workbench_projection(
 
 
 class FreshWorkbenchWriteGateRepository:
-    def __init__(self, version: str) -> None:
+    def __init__(
+        self,
+        version: str,
+        *,
+        source_versions_provider: Callable[[str], dict[str, object]],
+    ) -> None:
         self.version = str(version)
+        self._source_versions_provider = source_versions_provider
 
-    def get_workbench_groups_freshness_status(self, **_kwargs: object) -> dict[str, object]:
+    def get_workbench_groups_freshness_status(
+        self,
+        *,
+        scope_key: str,
+        **_kwargs: object,
+    ) -> dict[str, object]:
         return {
             "read_model_status": "fresh",
             "read_model_version": self.version,
+            "source_versions": self._source_versions_provider(scope_key),
         }
 
 
 def install_fresh_workbench_write_gate(application: Application, *, version: str = "test-generation-1") -> str:
     """Install only the generation precondition I/O required by local write-contract tests."""
 
-    application._workbench_sql_read_repository = FreshWorkbenchWriteGateRepository(version)  # noqa: SLF001
-    application._workbench_sql_read_model_stale_reasons = lambda *_args, **_kwargs: []  # noqa: SLF001
+    application._workbench_sql_read_repository = FreshWorkbenchWriteGateRepository(  # noqa: SLF001
+        version,
+        source_versions_provider=application._workbench_sql_read_model_source_versions,  # noqa: SLF001
+    )
     return str(version)
 
 

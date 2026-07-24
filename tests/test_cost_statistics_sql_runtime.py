@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import unittest
 from http import HTTPStatus
 
@@ -135,6 +136,27 @@ class CostStatisticsRuntimeStub:
     def enqueue_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
         del scope_key, reason
         return True
+
+    def enqueue_read_model_refreshes(
+        self,
+        scope_keys: list[str],
+        *,
+        reason: str,
+    ) -> list[str]:
+        return [
+            scope_key
+            for scope_key in scope_keys
+            if self.enqueue_read_model_refresh(scope_key, reason=reason)
+        ]
+
+    @staticmethod
+    def months_from_workbench_scope_keys(scope_keys: list[str]) -> set[str]:
+        return {
+            part
+            for scope_key in scope_keys
+            for part in str(scope_key).split(":")
+            if part == "all" or re.fullmatch(r"\d{4}-\d{2}", part)
+        }
 
 
 class CostStatisticsSqlReadRepositoryStub:
@@ -806,7 +828,7 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
         self.assertEqual(workbench_refreshes, [])
         self.assertEqual(runtime.cost_refreshes, [("active:2026-03", "api_page_stale")])
 
-    def test_month_access_waits_to_stage_cost_scope_until_workbench_is_fresh(self) -> None:
+    def test_month_access_pipelines_exact_cost_scope_behind_stale_workbench(self) -> None:
         class Runtime(CostStatisticsRuntimeStub):
             def __init__(self) -> None:
                 self.cost_refreshes: list[tuple[str, str]] = []
@@ -864,10 +886,15 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
         )
         self.assertEqual(
             runtime.cost_refreshes,
-            [],
+            [
+                (
+                    "active:2026-05",
+                    "cost_statistics_workbench_dependency_stale",
+                )
+            ],
         )
 
-    def test_month_refresh_poll_skips_canonical_workbench_proof_and_cost_enqueue(self) -> None:
+    def test_month_refresh_poll_skips_canonical_proof_and_keeps_one_exact_cost_waiter(self) -> None:
         class Runtime(CostStatisticsRuntimeStub):
             def __init__(self) -> None:
                 self.cost_refreshes: list[tuple[str, str]] = []
@@ -927,9 +954,17 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             workbench_refreshes,
             [("2026-05", "cost_statistics_workbench_dependency_stale")],
         )
-        self.assertEqual(runtime.cost_refreshes, [])
+        self.assertEqual(
+            runtime.cost_refreshes,
+            [
+                (
+                    "active:2026-05",
+                    "cost_statistics_workbench_dependency_stale",
+                )
+            ],
+        )
 
-    def test_parent_access_waits_to_stage_cost_children_until_workbench_is_fresh(self) -> None:
+    def test_parent_access_pipelines_only_exact_cost_children_behind_stale_workbench(self) -> None:
         class Runtime(CostStatisticsRuntimeStub):
             def __init__(self) -> None:
                 self.cost_refreshes: list[tuple[str, str]] = []
@@ -1006,7 +1041,16 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
         )
         self.assertEqual(
             runtime.cost_refreshes,
-            [],
+            [
+                (
+                    "active:2026-03",
+                    "cost_statistics_workbench_dependency_stale",
+                ),
+                (
+                    "active:2026-04",
+                    "cost_statistics_workbench_dependency_stale",
+                ),
+            ],
         )
 
     def test_parent_access_refreshes_exact_stale_cost_children_instead_of_parent(self) -> None:
@@ -4041,6 +4085,10 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.rebuilt: list[tuple[str, str, int]] = []
 
+            @staticmethod
+            def cost_statistics_parent_freshness_token(_scope_key: str) -> str:
+                return "parent-target"
+
             def rebuild_cost_statistics_month_scope(
                 self,
                 scope_key: str,
@@ -4085,6 +4133,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                     "tenant_id": "tenant-a",
                     "priority": "high",
                     "trace_id": "trace-cost-month",
+                    "metadata": {"freshness_token": "parent-target"},
                 }
             ],
         )
@@ -4094,6 +4143,10 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         class FakeBuilder:
             def __init__(self) -> None:
                 self.month_calls: list[tuple[str, str, int, bool]] = []
+
+            @staticmethod
+            def cost_statistics_parent_freshness_token(_scope_key: str) -> None:
+                return None
 
             def rebuild_cost_statistics_month_scope(
                 self,
@@ -4145,6 +4198,10 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         class FakeBuilder:
             def __init__(self) -> None:
                 self.month_calls: list[tuple[str, str, int]] = []
+
+            @staticmethod
+            def cost_statistics_parent_freshness_token(_scope_key: str) -> None:
+                return None
 
             def rebuild_cost_statistics_month_scope(
                 self,

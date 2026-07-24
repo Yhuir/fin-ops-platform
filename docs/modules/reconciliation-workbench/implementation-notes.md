@@ -1,5 +1,11 @@
 # 关联台 实施记录
 
+## 2026-07-25 - 完成窗口 target 去重与旧 background persist 删除
+
+- 第一候选生产只读事件时间线显示，同一`2026-02` scope在页面轮询期间连续消费10992→10995等多个执行版本，但canonical业务target没有相应次数变化；写API已零read-model fan-out，放大发生在active event刚done到页面再次poll的完成窗口。
+- Workbench访问producer仅在active projection存在时，用exact scope与canonical expected source versions生成稳定`freshness_token`；projection missing不附token，保持首次自愈。query facade按单次请求复用freshness gate已经计算的expected versions，bulk all-scope proof也把同一次结果直接交给enqueue，不为生成token重复执行canonical proof。共享runtime queue在原有advisory lock内比较active/最新成功target；不同target保留必要follow-up，dirty orphan/failed不被历史done吞掉。
+- 删除未再被生产调用的`_schedule_workbench_read_model_persist`、后台重建线程、版本锁/pending set与`FIN_OPS_WORKBENCH_PERSIST_ASYNC`分支。正式生产链只保留访问时gateway→durable queue→Workbench worker→active generation原子发布；旧测试改为直接断言符号不存在，不保留no-op兼容入口。
+
 ## 2026-07-24 - 并发月份 generation-set 原子发布
 
 - production round 8 中两个 Workbench 月份由两个 worker并行完成，但旧 per-month advisory lock允许两个发布事务分别基于中间 active month set写 all-scope stats；最终 generation-set digest可能没有对应统计，confirm checkpoint System Audit因此 fail closed，并出现约 3.25–3.33秒的 handler争用。

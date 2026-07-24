@@ -1342,29 +1342,26 @@ class BatchAccountingApiTests(unittest.TestCase):
         def fail_persist(*_args, **_kwargs):
             raise AssertionError("batch accounting route must not call legacy pair relation persist")
 
-        def fail_workbench_persist(*_args, **_kwargs):
-            raise AssertionError("batch accounting route must not call legacy workbench read model persist")
-
         app._schedule_workbench_pair_relation_persist = fail_persist
-        with patch.object(app, "_schedule_workbench_read_model_persist", side_effect=fail_workbench_persist):
-            response = app.handle_request(
-                "POST",
-                "/api/batch-accounting/submit",
-                json.dumps(
-                    {
-                        "year": "2026",
-                        "bank_row_id": "txn_imported_202601_batch_001",
-                        "oa_row_ids": ["oa-exp-ba-001"],
-                        "note": "财务确认差额闭环",
-                    }
-                ),
-            )
+        response = app.handle_request(
+            "POST",
+            "/api/batch-accounting/submit",
+            json.dumps(
+                {
+                    "year": "2026",
+                    "bank_row_id": "txn_imported_202601_batch_001",
+                    "oa_row_ids": ["oa-exp-ba-001"],
+                    "note": "财务确认差额闭环",
+                }
+            ),
+        )
 
         self.assertEqual(response.status_code, 200, response.body)
         payload = json.loads(response.body)
         self.assertEqual(payload["affected_scope_keys"], ["2026-01"])
         self.assertEqual(payload["affected_months"], ["2026-01"])
         self.assertFalse(hasattr(app, "_execute_derived_data_lifecycle_event"))
+        self.assertFalse(hasattr(app, "_schedule_workbench_read_model_persist"))
 
     def test_submit_creates_batch_accounting_relation_with_current_invoice_rows(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
