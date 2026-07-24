@@ -253,6 +253,41 @@ class RuntimeWorkerTests(unittest.TestCase):
         deferred_payloads = [payload for _worker_id, _kind, status, payload in queue.heartbeats if status == "deferred"]
         self.assertEqual(deferred_payloads[0]["dependency_refreshes"], [{"scope_type": "bank_detail", "scope_key": "2026-04"}])
 
+    def test_cost_statistics_dependency_refresh_is_exact_and_worker_owned(self) -> None:
+        claimed = RuntimeQueueEvent(
+            **{
+                **event("cost_statistics.read_model.refresh").__dict__,
+                "scope_type": "cost_statistics",
+                "scope_key": "active:2026-05",
+                "priority": "normal",
+            }
+        )
+        queue = FakeQueue(claimed)
+
+        def fail_not_fresh(_event: RuntimeQueueEvent) -> None:
+            raise RuntimeError(
+                "bank_detail_read_model_not_fresh: "
+                "operation=month_snapshot status=missing scope_keys=2026-05"
+            )
+
+        worker = RuntimeWorker(
+            queue_repository=queue,
+            config=RuntimeWorkerConfig(
+                worker_id="worker-1",
+                event_types=["cost_statistics.read_model.refresh"],
+            ),
+            handlers={"cost_statistics.read_model.refresh": fail_not_fresh},
+        )
+
+        self.assertEqual(worker.run_once(), RuntimeWorkerResult.DEFERRED)
+        self.assertEqual(
+            [
+                (item["scope_type"], item["scope_key"], item["reason"])
+                for item in queue.enqueued_read_model_refreshes
+            ],
+            [("bank_detail", "2026-05", "dependency_not_fresh")],
+        )
+
     def test_run_once_expands_invoice_lifecycle_pending_invoice_dependency_to_valid_direction_scopes(self) -> None:
         claimed = RuntimeQueueEvent(
             **{

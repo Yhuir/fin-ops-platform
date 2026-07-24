@@ -308,7 +308,7 @@ class CostStatisticsSqlProjectionBuilder:
         payload = snapshot_for_month(
             month,
             include_transaction_ids=include_transaction_ids,
-            require_fresh=True,
+            require_fresh=False,
             reason="downstream_bank_tag_read",
         )
         if not isinstance(payload, dict) or str(payload.get("status") or "").strip().lower() != "fresh":

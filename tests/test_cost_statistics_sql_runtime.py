@@ -3577,7 +3577,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(len(tag_facade.snapshot_calls), 1)
         self.assertEqual(tag_facade.snapshot_calls[0][1]["include_transaction_ids"], ["bank-1"])
         self.assertEqual(tag_facade.snapshot_calls[0][1]["reason"], "downstream_bank_tag_read")
-        self.assertEqual(tag_facade.snapshot_calls[0][1]["require_fresh"], True)
+        self.assertEqual(tag_facade.snapshot_calls[0][1]["require_fresh"], False)
         self.assertEqual(
             snapshot["read_models"]["active:2026-05"]["source_versions"]["bank_detail_source_versions"],
             {"bank_detail_scope_version": "bank-detail-v2"},
@@ -3695,7 +3695,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(tag_facade.month_calls, [])
         self.assertEqual(len(tag_facade.snapshot_calls), 1)
         self.assertEqual(tag_facade.snapshot_calls[0][1]["reason"], "downstream_bank_tag_read")
-        self.assertEqual(tag_facade.snapshot_calls[0][1]["require_fresh"], True)
+        self.assertEqual(tag_facade.snapshot_calls[0][1]["require_fresh"], False)
 
     def test_cost_statistics_source_version_mapper_includes_gate_dependency_snapshots(self) -> None:
         source_versions = cost_statistics_source_versions(
