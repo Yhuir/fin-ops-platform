@@ -74,6 +74,7 @@ class AuditInputInvoiceUsageReadModelToolTests(unittest.TestCase):
         self.assertIn("invoice.invoice_type = %s", source_version_sql)
         self.assertIn("relation.row_ids && scope.row_ids", source_version_sql)
         self.assertIn("canonical.source_versions as current_relation_versions", source_version_sql)
+        self.assertNotIn("invoice_scope.tenant_id", source_version_sql)
 
     def test_outbox_backlog_is_a_real_queue_failure(self) -> None:
         report = run_input_invoice_usage_audit(

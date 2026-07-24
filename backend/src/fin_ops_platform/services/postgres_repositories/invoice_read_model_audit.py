@@ -717,6 +717,7 @@ def _source_version_mismatch_issues(
     tenant_id: str,
     limit: int,
 ) -> list[AuditIssue]:
+    del tenant_id
     rows = connection.fetch_all(
         f"""
         /* check: source_version_mismatch */
@@ -736,8 +737,7 @@ def _source_version_mismatch_issues(
                  ) = invoice_scope.scope_key
              and invoice.invoice_type = %s
              and invoice.status <> 'deleted'
-            where invoice_scope.tenant_id = %s
-              and invoice_scope.scope_key ~ '^[0-9]{{4}}-[0-9]{{2}}$'
+            where invoice_scope.scope_key ~ '^[0-9]{{4}}-[0-9]{{2}}$'
             group by invoice_scope.scope_key
         ),
         canonical_relation_versions as (
@@ -764,15 +764,14 @@ def _source_version_mismatch_issues(
         from {contract.scopes_table} invoice_scope
         join canonical_relation_versions canonical
           on canonical.scope_key = invoice_scope.scope_key
-        where invoice_scope.tenant_id = %s
-          and coalesce(
+        where coalesce(
                   invoice_scope.source_versions->'workbench_relation_source_versions',
                   '{{}}'::jsonb
               ) <> canonical.source_versions
         order by invoice_scope.scope_key
         limit %s
         """,
-        (contract.direction, tenant_id, tenant_id, limit),
+        (contract.direction, limit),
     )
     return [
         AuditIssue(
