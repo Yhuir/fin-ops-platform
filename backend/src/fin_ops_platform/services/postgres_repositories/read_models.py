@@ -11539,10 +11539,10 @@ class PostgresReadModelRepository:
         return []
 
     @staticmethod
-    def _lock_workbench_generation_scope(connection: Any, *, scope_key: str) -> None:
+    def _lock_workbench_generation_set(connection: Any) -> None:
         connection.execute(
             "select pg_advisory_xact_lock(hashtext(%s))",
-            (f"workbench_generation:{str(scope_key or 'all').strip() or 'all'}",),
+            ("workbench_generation_set",),
         )
 
     @staticmethod
@@ -14146,18 +14146,22 @@ class PostgresReadModelRepository:
         changed_scope_keys: set[str] | None = None,
     ) -> set[str]:
         started_generations: list[tuple[str, str, dict[str, Any]]] = []
+        prepared_generations: list[tuple[str, str, int, int]] = []
         published_scope_keys: set[str] = set()
 
         def write(connection: Any) -> None:
             read_models = snapshot.get("read_models") if isinstance(snapshot, dict) else None
+            read_model_items = list(iter_mapping(read_models))
             if changed_scope_keys is not None:
-                present_scope_keys = {scope_key for scope_key, _ in iter_mapping(read_models)}
+                present_scope_keys = {scope_key for scope_key, _ in read_model_items}
                 if set(changed_scope_keys) - present_scope_keys:
                     raise ValueError("changed_scope_keys must reference payloads written in this call.")
-            for scope_key, payload in iter_mapping(read_models):
-                if changed_scope_keys is not None and scope_key not in changed_scope_keys:
-                    continue
-                self._lock_workbench_generation_scope(connection, scope_key=scope_key)
+            writable_items = [
+                (scope_key, payload)
+                for scope_key, payload in read_model_items
+                if changed_scope_keys is None or scope_key in changed_scope_keys
+            ]
+            for scope_key, payload in writable_items:
                 if scope_key == "all":
                     raise ValueError("all-scope is composed from active month shards and must not be materialized.")
                 grouped_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
@@ -14471,16 +14475,20 @@ class PostgresReadModelRepository:
                     params_seq=workbench_group_row_params,
                     generated_at_index=20,
                 )
-                self._activate_workbench_generation(
-                    connection,
-                    scope_key=scope_key,
-                    generation_id=generation_id,
-                    row_count=row_count,
-                    group_count=group_count,
-                    summary_count=1,
-                )
-                published_scope_keys.add(scope_key)
-            if published_scope_keys:
+                prepared_generations.append((scope_key, generation_id, row_count, group_count))
+            if prepared_generations:
+                # ponytail: COPY stays parallel; only the short activation/stats section shares one lock.
+                self._lock_workbench_generation_set(connection)
+                for scope_key, generation_id, row_count, group_count in prepared_generations:
+                    self._activate_workbench_generation(
+                        connection,
+                        scope_key=scope_key,
+                        generation_id=generation_id,
+                        row_count=row_count,
+                        group_count=group_count,
+                        summary_count=1,
+                    )
+                    published_scope_keys.add(scope_key)
                 self._publish_workbench_all_generation_stats(connection)
         try:
             run_in_transaction(self._connection, write)

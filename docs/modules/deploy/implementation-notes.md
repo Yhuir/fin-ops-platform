@@ -14,6 +14,11 @@
 
 ## 历史记录
 
+## 2026-07-24 - 写响应到页面可见的真实性能门禁
+
+- 生产 round 8 暴露 runner 只检查最后一次 consumer GET 的 `target_ms`，却把 `operation_commit_to_visible_ms` 作为非阻断观测；因此 11–12 秒才 fresh 的页面仍可能被标记 pass。
+- runner 现在用同一个 consumer `target_ms` 同时约束单次 fresh GET 与成功 mutation response 到首次 fresh/业务断言通过的总耗时，超限返回 `consumer_visibility_slo_miss`。不改变业务 API、queue、worker或页面，只修复生产验收 I/O 的真实性。
+
 ## 2026-07-23 - 受影响页面多 scope 生产验证边界
 
 - Cost Statistics 正式页面使用 `project_scope=active`，同一 API 的 `project_scope=all` 仍是导出/后端合同；只访问其中一个 scope 不能证明另一个 scope 已收敛，也不能用运行时 sibling enqueue 伪造覆盖。

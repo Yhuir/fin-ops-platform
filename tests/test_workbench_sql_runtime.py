@@ -4608,6 +4608,29 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             changed_scope_keys={"2026-04", "2026-05"},
         )
 
+        generation_set_locks = [
+            params[0]
+            for statement, params in connection.executed
+            if "pg_advisory_xact_lock" in statement
+        ]
+        self.assertEqual(generation_set_locks, ["workbench_generation_set"])
+        lock_index = next(
+            index
+            for index, (statement, _params) in enumerate(connection.executed)
+            if "pg_advisory_xact_lock" in statement
+        )
+        prepared_summary_indices = [
+            index
+            for index, (statement, _params) in enumerate(connection.executed)
+            if "insert into read_model.workbench_summary" in statement
+        ]
+        activation_indices = [
+            index
+            for index, (statement, _params) in enumerate(connection.executed)
+            if "set status = 'active'" in statement and "status = 'building'" in statement
+        ]
+        self.assertGreater(lock_index, max(prepared_summary_indices))
+        self.assertLess(lock_index, min(activation_indices))
         all_scope_stat_writes = [
             params
             for statement, params in connection.executed

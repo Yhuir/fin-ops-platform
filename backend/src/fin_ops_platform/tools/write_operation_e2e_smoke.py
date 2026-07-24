@@ -1368,14 +1368,28 @@ def _collect_checkpoint_consumer(
             ]
         failed = [assertion for assertion in assertions if assertion["status"] != "pass"]
         operation_commit_to_visible_ms = _operation_commit_to_visible_ms(operation_commit_ack_monotonic)
+        visibility_slo_miss = (
+            operation_commit_to_visible_ms is not None
+            and operation_commit_to_visible_ms > consumer.probe.target_ms
+        )
         return {
             "name": consumer.probe.name,
             "page_key": consumer.page_key,
             "role": consumer.role,
             "path": path,
-            "status": "fail" if failed else "pass",
+            "status": "fail" if failed or visibility_slo_miss else "pass",
             "read_model_status": read_model_status,
             "assertions": assertions,
+            **(
+                {
+                    "error": (
+                        f"consumer_visibility_slo_miss:{round(operation_commit_to_visible_ms, 3)}"
+                        f">{round(consumer.probe.target_ms, 3)}"
+                    )
+                }
+                if visibility_slo_miss
+                else {}
+            ),
             **(
                 {
                     "operation_commit_to_visible_ms": operation_commit_to_visible_ms,

@@ -20,7 +20,7 @@
 | `TURNOVER-E2E-001` | 页面 ready、fresh grouped ledger 和正向 chip | P0 | 进入 `/turnover-ledger` 后显示外部往来标题、summary、family tab 和 grouped table；展开对方后只用真实 flow rows 操作；只展示正向 chip：`已关联 OA`、`已关联 发票`、`收支闭环`。 |
 | `TURNOVER-E2E-002` | 标签准入保存 access closure | P0 | 用户在标签设置中修改 selected tag codes 后，必须 `PUT /api/turnover-ledger/tag-selection`，带 `expected_version` 和 `selected_tag_codes`；成功响应 target 为空，随后只重读当前台账并显示成功反馈。 |
 | `TURNOVER-E2E-003` | 手动零差额闭环 confirm | P0 | 用户选择同一 group 的真实 flow rows，至少一收一支且差额为 0；提交前重拉 grouped 台账并用最新 row versions 生成 `expected_versions`；成功响应 targets 为空，只重跑当前页面 normal GET，不得 fallback `all`、等待 barrier、显示“操作失败”或产生浏览器隐藏错误。 |
-| `TURNOVER-E2E-004` | 成本统计 access convergence | P0 | 手动闭环成功时不得直投 Cost；进入成本统计后，成本页必须通过 Workbench dependency→Cost 自身两阶段 gate 展示外部往来闭环成本项目、费用类型、金额、银行流水和银行账户证据。 |
+| `TURNOVER-E2E-004` | 成本统计 access convergence | P0 | 手动闭环成功时不得直投 Cost；进入成本统计后，页面同次登记 exact Workbench dependency 与 requested Cost scope，由 worker dependency gate 顺序收敛，并展示外部往来闭环成本项目、费用类型、金额、银行流水和银行账户证据。 |
 | `TURNOVER-E2E-005` | 撤回闭环和 grouped recovery | P0 | 已闭环 flow row 选择后 toolbar 必须显示撤回入口；撤回只撤回同一 `cash_closure_case_id` 的闭环关系，成功后通过当前页 normal GET 移除 `收支闭环`，不能误删 OA-bank 历史关系或触发跨页面 jobs。 |
 | `TURNOVER-E2E-006` | Workbench/OA 合并边界 | P0 | 手动闭环可合并既有 `oa + bank` active relation，并通过 `WorkbenchRelationCommandService` 形成同一个 `turnover_manual_closure` case；包含 invoice 或其他 row type 的 relation 必须拒绝并转关联台处理。 |
 | `TURNOVER-E2E-007` | read model stale/missing/refreshing 防 false-empty | P0 | `turnover_ledger` 或 Workbench relation context 非 fresh 时不得伪装 fresh；页面必须展示诊断并阻断依赖最新 flow row version 的写操作；projection 不得保存半成品 read model。 |

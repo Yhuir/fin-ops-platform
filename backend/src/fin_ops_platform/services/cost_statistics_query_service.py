@@ -674,8 +674,12 @@ class CostStatisticsQueryService:
             )
             for workbench_scope_key in workbench_scope_keys
         ]
-        # ponytail: existing page polling re-enters the Cost gate after Workbench is fresh.
-        payload["refresh_enqueued"] = any(refresh_results)
+        cost_refresh_enqueued = self._runtime_service.enqueue_read_model_refresh(
+            scope_key,
+            reason="api_workbench_dependency_stale",
+        )
+        # ponytail: stage only the requested Cost scope; its worker already owns exact dependency ordering.
+        payload["refresh_enqueued"] = bool(cost_refresh_enqueued) or any(refresh_results)
         return payload
 
     def _cost_statistics_non_fresh_gate_payload(

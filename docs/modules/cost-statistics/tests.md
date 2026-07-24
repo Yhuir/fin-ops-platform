@@ -2,9 +2,9 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
-## 2026-07-24 - 页面自动轮询依次收敛 Workbench 与 Cost
+## 2026-07-24 - 同次页面访问登记 exact Workbench 与 Cost
 
-- Service/read model：`tests/test_cost_statistics_sql_runtime.py` 证明 month/all 页面发现 stale Workbench 时只 ensure exact Workbench scope且不提前投递Cost；依赖 fresh 后的下一次页面自动轮询才由既有 Cost gate enqueue同 project scope的 exact child。Cost projection仍在任何 payload I/O 前比较 canonical Workbench expected versions 与 active generation，不匹配时 fail closed。`tests/test_cost_statistics_postgres_integration.py` 保护默认 provider 的真实 PostgreSQL查询和同一 fail-closed合同。
+- Service/read model：`tests/test_cost_statistics_sql_runtime.py` 证明 month/all 页面发现 stale Workbench 时先 ensure exact Workbench scope，并只 stage同 project的当前 requested Cost scope，不登记 sibling。Cost projection仍在任何 payload I/O 前比较 canonical Workbench expected versions 与 active generation，不匹配时按 manifest dependency fail closed/defer并精确补投 child。`tests/test_cost_statistics_postgres_integration.py` 保护默认 provider 的真实 PostgreSQL查询和同一 fail-closed合同。
 - Worker/manifest：`tests/test_runtime_worker.py` 与 `tests/test_read_model_manifest.py` 继续证明意外进入 worker 的 `workbench_read_model_not_fresh` 只补投同月 Workbench并短延迟defer；正常页面访问不再提前制造必然defer的Cost任务。
 - 回归：`tests/test_read_model_architecture_guards.py` 继续要求 access enqueue 走共享 gateway；普通 relation 写零 fan-out、Bank Detail profile 与 parent rollup 合同不变。生产 `<3s` 仍以候选部署后的 test-owned fixture 为最终门禁。
 
@@ -442,7 +442,7 @@ PYTHONPATH=backend/src scripts/check-read-model-scope-contracts.py --help
 
 ## Nightly CI 覆盖
 
-`bash scripts/verify.sh all` 会运行 backend unittest discover、frontend Vitest、deterministic Playwright smoke 和 build，覆盖完整成本统计、App Status、read model gateway、前端测试集、成本统计 browser 主流程和 Workbench→Cost 访问时两阶段收敛。单轮模块验证只跑最小闭环。
+`bash scripts/verify.sh all` 会运行 backend unittest discover、frontend Vitest、deterministic Playwright smoke 和 build，覆盖完整成本统计、App Status、read model gateway、前端测试集、成本统计 browser 主流程和 Workbench→Cost dependency-ordered 收敛。单轮模块验证只跑最小闭环。
 
 ## 未测风险
 
@@ -470,7 +470,7 @@ PYTHONPATH=backend/src scripts/check-read-model-scope-contracts.py --help
 - `tests/test_cost_statistics_sql_runtime.py`：先检测 canonical Workbench expected/active version；上游 stale 只 enqueue 精确 Workbench 月份且停止 Cost I/O，上游 fresh 后 Cost stale 才 enqueue 当前 Cost scope。
 - `tests/test_workbench_sql_runtime.py`：Workbench generation publish 完成不触碰 Cost queue，不产生 `workbench_shard_published`。
 - `web/src/test/CostStatisticsPage.test.tsx`：relation 提示后只调用 normal explorer GET，明确断言零 operation barrier；refreshing 进入 3s 有界自身重试。
-- `tests/test_platform_runtime_boundary_guards.py`：机械禁止 relation/turnover/Workbench publish 恢复 Cost fan-out，并要求 query owner 的两阶段依赖 I/O。
+- `tests/test_platform_runtime_boundary_guards.py`：机械禁止 relation/turnover/Workbench publish 恢复 Cost fan-out，并要求 query owner 同次登记 exact Workbench 与 requested Cost scope、worker依赖排序的 I/O。
 
 下方 2026-07-18 条目是历史 delta 合同验证记录，已被上述当前门禁取代；它不得被用来恢复普通写后 Cost fan-out。
 

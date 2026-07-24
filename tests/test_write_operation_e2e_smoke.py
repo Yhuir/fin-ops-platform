@@ -1559,6 +1559,58 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(result["results"][0]["path"], "/api/pages/2026-07")
         self.assertEqual(result["results"][0]["error"], "consumer_slo_miss:2.0>1")
 
+    def test_consumer_visibility_slo_is_measured_from_successful_mutation_response(self) -> None:
+        checkpoint = write_operation_e2e_smoke.WriteCheckpoint(
+            name="slow-convergence",
+            operations=("workbench_relation_confirm_cross_page",),
+            steps=(),
+            consumers=(
+                write_operation_e2e_smoke.ConsumerProbe(
+                    probe=http_slo_probe.HttpProbe(
+                        "slow-convergence",
+                        "/api/pages/slow-convergence",
+                        target_ms=3000,
+                    ),
+                    assertions=(
+                        write_operation_e2e_smoke.JsonPointerAssertion(
+                            "/rows/0/visible",
+                            "equals",
+                            True,
+                        ),
+                    ),
+                    page_key="slow-convergence",
+                    role="affected",
+                ),
+            ),
+        )
+
+        with patch(
+            "fin_ops_platform.tools.write_operation_e2e_smoke.monotonic",
+            side_effect=[20.0, 20.1, 23.1],
+        ):
+            result = write_operation_e2e_smoke._collect_checkpoint_consumers(
+                checkpoint,
+                base_url="https://example.test",
+                api_prefix="/fin-ops-api",
+                headers={"Authorization": "Bearer token"},
+                timeout_seconds=1,
+                request_fn=lambda *_args: http_slo_probe.HttpProbeResponse(
+                    status_code=200,
+                    headers={"content-type": "application/json"},
+                    body=b'{"read_model_status":"fresh","refresh_enqueued":false,"rows":[{"visible":true}]}',
+                ),
+                variables={},
+                strict=True,
+                operation_commit_ack_monotonic=20.0,
+            )
+
+        self.assertEqual(result["status"], "fail")
+        self.assertEqual(
+            result["results"][0]["error"],
+            "consumer_visibility_slo_miss:3100.0>3000",
+        )
+        self.assertEqual(result["results"][0]["operation_commit_to_visible_ms"], 3100.0)
+
     def test_consumer_wait_retries_refreshing_and_affected_business_visibility(self) -> None:
         checkpoint = _strict_checkpoint("confirm", key="confirm-key", relation_state_after="active")
         attempts = 0

@@ -1,5 +1,10 @@
 # 成本统计 实施记录
 
+## 2026-07-24 - exact Cost scope 与 Workbench dependency 同次登记
+
+- release `main-c4edf63a-20260724201915` 已把 Cost handler降到约 78–328ms，confirm/withdraw写入分别约 347/233ms且零 forbidden fan-out；但页面轮询先等 Workbench、再登记 Cost child、再等待 parent，`project/all` 仍需约 12.6/11.2 秒才业务可见。
+- 最小修复在发现 Workbench stale 的同一次 Cost访问中先 ensure exact Workbench，再只登记当前请求的唯一 Cost scope。Cost worker继续以 manifest dependency fail closed/defer并精确补投 child；不登记 sibling、不恢复写后事件、不增加 coordinator/cache/queue。最终 `<3s` 结论只由候选部署后的同一可恢复 fixture 决定。
+
 ## 2026-07-24 - `time|bank_tag` 直接复用 Bank Detail，删除 Cost 复制投影
 
 - 全量扫描确认 `time|bank_tag` 的唯一业务输入本来就是 Bank Detail结构化 rows；继续复制到 Cost表会增加一次 projection写入、一次版本同步、Audit SQL和删除/parent rollup I/O，却不提供新业务能力。

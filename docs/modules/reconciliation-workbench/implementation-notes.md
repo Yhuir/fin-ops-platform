@@ -1,5 +1,10 @@
 # 关联台 实施记录
 
+## 2026-07-24 - 并发月份 generation-set 原子发布
+
+- production round 8 中两个 Workbench 月份由两个 worker并行完成，但旧 per-month advisory lock允许两个发布事务分别基于中间 active month set写 all-scope stats；最终 generation-set digest可能没有对应统计，confirm checkpoint System Audit因此 fail closed，并出现约 3.25–3.33秒的 handler争用。
+- 最小修复保留 payload计算与 generation staging/COPY并行；重型数据写完后才用单个 `workbench_generation_set` transaction lock串行化 active切换和 all-scope stats。没有新增表、worker、queue、缓存、协调器或第二 read model；若该短发布段生产仍超过3秒，先优化既有 stats SQL，不拆分原子发布合同。
+
 ## 2026-07-23 - 访问时 canonical proof 去重
 
 - 生产 test-owned turnover closure 证明普通 confirm 已在 `198.312ms` 内提交且写后页面 refresh event 为零，但首次访问 stale Workbench groups 为 `1548.125ms`，超过单次 HTTP 1 秒门槛；请求 profile 显示约 `1471.805ms` 为数据库时间。

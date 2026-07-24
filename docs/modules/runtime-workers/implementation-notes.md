@@ -1,5 +1,10 @@
 # Runtime Worker 实施记录
 
+## 2026-07-24 - Workbench generation-set 原子发布与 Cost exact staging
+
+- 生产并发访问证明两个 Workbench 月份可以并行计算，但旧的 per-month publish lock 允许两个事务分别用中间 active-month set 写 all-scope stats；最终 generation-set digest 可能没有对应 stats，System Audit 因此在 confirm checkpoint fail closed，同时保存/统计争用把 handler 拉到约 3.3 秒。
+- 最小修复保留 payload计算与 generation staging/COPY并行，只在重型数据写完后用一个 `workbench_generation_set` advisory transaction lock串行化 active切换与 all-scope stats。Cost 访问在 ensure exact Workbench 后只 stage 当前请求的唯一 Cost scope，worker继续以既有 manifest dependency defer/精确补投，不增加协调器、队列、表或 sibling fan-out。
+
 ## 2026-07-24 - exact scope refresh 覆盖关系
 
 - ensure/wakeup 原子去重不再只按 scope 判断：同一 scope 的覆盖顺序是 `force > full scope > partial delta`。新 delta/full/force 若未被 active event 语义覆盖，必须原子合并或创建 processing 后续事件；相同任务才 no-op。
