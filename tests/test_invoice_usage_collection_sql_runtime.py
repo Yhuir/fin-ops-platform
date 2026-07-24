@@ -1353,7 +1353,28 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         versions = app._input_invoice_usage_expected_source_versions(scope_key="all")
 
         self.assertNotIn("input_invoice_usage_oa_reverse_batch_source_version", versions)
+        self.assertNotIn("workbench_relation_source_versions", versions)
         self.assertEqual(versions["input_invoice_usage_statistics_schema_version"], 2)
+
+    def test_output_expected_versions_leave_relation_proof_to_semantic_dependency_gate(self) -> None:
+        app = object.__new__(Application)
+        app._workbench_relation_sql_read_repository = type(
+            "BroadRelationRepository",
+            (),
+            {
+                "workbench_relation_source_versions": lambda *_args, **_kwargs: {
+                    "broad_generation": 99,
+                }
+            },
+        )()
+
+        versions = app._output_invoice_collection_expected_source_versions(scope_key="2026-05")
+
+        self.assertNotIn("workbench_relation_source_versions", versions)
+        self.assertEqual(
+            versions["output_invoice_collection_source_version"],
+            output_invoice_collection_source_versions()["output_invoice_collection_source_version"],
+        )
 
     def test_input_statistics_overlay_uses_live_oa_reverse_batch_count(self) -> None:
         class StatisticsConnection:
@@ -2429,7 +2450,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertIn("input_invoice_usage_source_version_missing", payload["read_model_stale_reasons"])
         self.assertEqual(queue.refreshes, [("input_invoice_usage", "2026-05", "api_source_versions_stale")])
 
-    def test_input_api_relation_source_version_mismatch_enqueues_refresh_without_stale_rows(self) -> None:
+    def test_input_api_ignores_broad_workbench_relation_version_when_semantic_proof_is_fresh(self) -> None:
         queue = QueueRecorder()
         app = object.__new__(Application)
         app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
@@ -2475,13 +2496,12 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         response = _input_invoice_usage_rows_response(app, {"month": ["2026-05"], "page": ["1"], "page_size": ["50"]})
         payload = json.loads(response.body)
 
-        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
-        self.assertEqual(payload["rows"], [])
-        self.assertEqual(payload["read_model_status"], "refreshing")
-        self.assertIn("workbench_relation_source_versions_mismatch", payload["read_model_stale_reasons"])
-        self.assertEqual(queue.refreshes, [("input_invoice_usage", "2026-05", "api_source_versions_stale")])
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertNotIn("read_model_stale_reasons", payload)
+        self.assertEqual(queue.refreshes, [])
 
-    def test_input_api_relation_source_versions_come_from_workbench_relation_repository(self) -> None:
+    def test_input_api_does_not_reintroduce_broad_relation_proof_from_workbench_repository(self) -> None:
         queue = QueueRecorder()
         app = object.__new__(Application)
         app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
@@ -2531,13 +2551,12 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         response = _input_invoice_usage_rows_response(app, {"month": ["2026-05"], "page": ["1"], "page_size": ["50"]})
         payload = json.loads(response.body)
 
-        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
-        self.assertEqual(payload["rows"], [])
-        self.assertEqual(payload["read_model_status"], "refreshing")
-        self.assertIn("workbench_relation_source_versions_mismatch", payload["read_model_stale_reasons"])
-        self.assertEqual(queue.refreshes, [("input_invoice_usage", "2026-05", "api_source_versions_stale")])
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertNotIn("read_model_stale_reasons", payload)
+        self.assertEqual(queue.refreshes, [])
 
-    def test_output_api_relation_source_versions_come_from_workbench_relation_repository(self) -> None:
+    def test_output_api_does_not_reintroduce_broad_relation_proof_from_workbench_repository(self) -> None:
         queue = QueueRecorder()
         app = object.__new__(Application)
         app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
@@ -2591,11 +2610,10 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         )
         payload = json.loads(response.body)
 
-        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
-        self.assertEqual(payload["rows"], [])
-        self.assertEqual(payload["read_model_status"], "refreshing")
-        self.assertIn("workbench_relation_source_versions_mismatch", payload["read_model_stale_reasons"])
-        self.assertEqual(queue.refreshes, [("output_invoice_collection", "2026-05", "api_source_versions_stale")])
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertNotIn("read_model_stale_reasons", payload)
+        self.assertEqual(queue.refreshes, [])
 
     def test_input_api_all_scope_uses_rows_when_month_relation_versions_differ(self) -> None:
         base_versions = input_invoice_usage_source_versions()
@@ -2894,7 +2912,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertEqual(queue.refreshes, [("output_invoice_collection", "2026-05", "api_stale")])
 
-    def test_output_api_relation_source_version_mismatch_enqueues_refresh_without_stale_rows(self) -> None:
+    def test_output_api_ignores_broad_workbench_relation_version_when_semantic_proof_is_fresh(self) -> None:
         queue = QueueRecorder()
         app = object.__new__(Application)
         app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
@@ -2947,11 +2965,10 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         )
         payload = json.loads(response.body)
 
-        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
-        self.assertEqual(payload["rows"], [])
-        self.assertEqual(payload["read_model_status"], "refreshing")
-        self.assertIn("workbench_relation_source_versions_mismatch", payload["read_model_stale_reasons"])
-        self.assertEqual(queue.refreshes, [("output_invoice_collection", "2026-05", "api_source_versions_stale")])
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertNotIn("read_model_stale_reasons", payload)
+        self.assertEqual(queue.refreshes, [])
 
     def test_projection_builder_persists_invoice_relation_source_versions(self) -> None:
         read_repository = RecordingInvoiceRelationReadRepository()

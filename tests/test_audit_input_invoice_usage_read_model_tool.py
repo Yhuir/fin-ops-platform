@@ -70,14 +70,10 @@ class AuditInputInvoiceUsageReadModelToolTests(unittest.TestCase):
         source_version_sql = next(
             sql for sql, _params in connection.fetch_all_calls if _check_name(sql) == "source_version_mismatch"
         )
-        self.assertIn("embedded_relation_versions - 'workbench_pair_relations_updated_at'", source_version_sql)
-        self.assertIn("current_relation_versions - 'workbench_pair_relations_updated_at'", source_version_sql)
-        self.assertIn("app.workbench_pair_relations changed_relation", source_version_sql)
-        self.assertIn("active_invoice.invoice_id = any(changed_relation.row_ids)", source_version_sql)
-        self.assertIn("active_invoice.postgres_invoice_id = any(changed_relation.row_ids)", source_version_sql)
-        self.assertIn("changed_relation.row_ids && active_invoice.source_workbench_row_ids", source_version_sql)
-        self.assertIn("active_invoice.scope_key = invoice_versions.scope_key", source_version_sql)
-        self.assertIn("changed_relation.updated_at >", source_version_sql)
+        self.assertIn("'consumer', 'input_invoice'", source_version_sql)
+        self.assertIn("invoice.invoice_type = %s", source_version_sql)
+        self.assertIn("relation.row_ids && scope.row_ids", source_version_sql)
+        self.assertIn("canonical.source_versions as current_relation_versions", source_version_sql)
 
     def test_outbox_backlog_is_a_real_queue_failure(self) -> None:
         report = run_input_invoice_usage_audit(

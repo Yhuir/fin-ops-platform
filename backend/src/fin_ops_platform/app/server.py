@@ -6572,17 +6572,11 @@ class Application:
         return self._output_invoice_collection_read_model_fresh_gate().relation_details(row_id, query)
 
     def _input_invoice_usage_expected_source_versions(self, scope_key: str | None = None) -> dict[str, object]:
-        source_versions = input_invoice_usage_source_versions(
+        del scope_key
+        return input_invoice_usage_source_versions(
             payment_status_rules_version=self._input_invoice_usage_payment_rules_provider().rules_source_version(),
             oa_reverse_batch_source_version=None,
         )
-        relation_source_versions = self._workbench_relation_source_versions_from_repository(
-            getattr(self, "_workbench_relation_sql_read_repository", None),
-            scope_key=scope_key,
-        )
-        if relation_source_versions:
-            source_versions["workbench_relation_source_versions"] = relation_source_versions
-        return source_versions
 
     def _input_invoice_usage_statistics_overlay(self) -> dict[str, object]:
         state_store = getattr(self, "_state_store", None)
@@ -6595,27 +6589,12 @@ class Application:
         return {"oa_reverse_batch_count": 0}
 
     def _output_invoice_collection_expected_source_versions(self, scope_key: str | None = None) -> dict[str, object]:
-        source_versions = output_invoice_collection_source_versions()
-        relation_source_versions = self._workbench_relation_source_versions_from_repository(
-            getattr(self, "_workbench_relation_sql_read_repository", None),
-            scope_key=scope_key,
-        )
-        if relation_source_versions:
-            source_versions["workbench_relation_source_versions"] = relation_source_versions
-        return source_versions
+        del scope_key
+        return output_invoice_collection_source_versions()
 
     def _oa_pending_payment_expected_source_versions(self, scope_key: str | None = None) -> dict[str, object]:
         del scope_key
         return oa_pending_payment_base_source_versions()
-
-    @staticmethod
-    def _workbench_relation_source_versions_from_repository(repository: object | None, *, scope_key: str | None) -> dict[str, object]:
-        if str(scope_key or "").strip() == "all":
-            return {}
-        source_versions_loader = getattr(repository, "workbench_relation_source_versions", None)
-        if not callable(source_versions_loader):
-            return {}
-        return dict(source_versions_loader(scope_key=scope_key or "all") or {})
 
     def _enqueue_input_invoice_usage_read_model_refresh(
         self,
