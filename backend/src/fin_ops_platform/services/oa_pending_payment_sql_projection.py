@@ -29,7 +29,7 @@ from fin_ops_platform.services.postgres_repositories.read_models import MONTH_SC
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 
 
-OA_PENDING_PAYMENT_POSTGRES_PROJECTOR_VERSION = "2026-07-22-page-inventory-v4"
+OA_PENDING_PAYMENT_POSTGRES_PROJECTOR_VERSION = "2026-07-24-access-coverage-v5"
 
 
 def oa_pending_payment_base_source_versions() -> dict[str, object]:
@@ -328,7 +328,10 @@ def _oa_pending_payment_statistics(
             from app.invoices invoice
             where invoice.invoice_month = to_date(%s, 'YYYY-MM')
               and invoice.status <> 'deleted'
-              and invoice.invoice_type = %s
+              and (
+                  invoice.invoice_type in (%s, %s)
+                  or invoice.invoice_type like %s
+              )
         )
         select
             bank_coverage.row_count as bank_transaction_count,
@@ -340,7 +343,13 @@ def _oa_pending_payment_statistics(
         from bank_coverage
         cross join invoice_coverage
         """,
-        (scope_key, scope_key, InvoiceType.INPUT.value),
+        (
+            scope_key,
+            scope_key,
+            InvoiceType.INPUT.value,
+            f"{InvoiceType.INPUT.value}_invoice",
+            "进项%",
+        ),
     ) or {}
     completed_ids = {str(record.id) for record in completed_records if str(getattr(record, "id", "")).strip()}
     in_progress_ids = {

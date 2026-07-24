@@ -132,17 +132,10 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
             admission_records=[completed_record, record],
             payment_statuses=payment_statuses,
         )
-        initial_event = self.queue.claim_next(
-            "oa-admission-isolation-integration",
-            event_types=["oa_pending_payment.read_model.refresh"],
-        )
-        self.assertIsNotNone(initial_event)
-        assert initial_event is not None
-        self.assertTrue(
-            self.queue.complete(
-                initial_event.event_id,
+        self.assertIsNone(
+            self.queue.claim_next(
                 "oa-admission-isolation-integration",
-                result_payload={"published": True},
+                event_types=["oa_pending_payment.read_model.refresh"],
             )
         )
         before = self.connection.fetch_one(
@@ -250,7 +243,7 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
                 (row["event_type"], row["scope_type"], row["scope_key"])
                 for row in incremental_outbox_rows
             ],
-            [("oa_pending_payment.read_model.refresh", "oa_pending_payment", "2026-05")],
+            [],
         )
 
     def test_in_progress_to_completed_removes_admission_and_reports_shared_fact_change(self) -> None:
@@ -383,6 +376,47 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
         self.assertIsNotNone(fresh.etag)
         self.assertEqual(not_modified.status, HTTPStatus.NOT_MODIFIED)
         self.assertEqual(not_modified.payload, {})
+
+        self.connection.execute(
+            """
+            insert into app.bank_transactions(
+                legacy_mongo_id,
+                account_no,
+                txn_direction,
+                counterparty_name_raw,
+                amount,
+                signed_amount,
+                txn_date,
+                txn_month,
+                status
+            )
+            values (
+                'oa-pending-new-bank',
+                '6222',
+                'outflow',
+                '测试对手方',
+                100,
+                -100,
+                '2026-05-20',
+                '2026-05-01',
+                'active'
+            )
+            """
+        )
+        changed_state = OaPendingPaymentReadModelRepositoryPort(
+            self.read_repository
+        ).query_state(
+            scope_key="2026-05",
+            tenant_id="default",
+            base_source_versions=oa_pending_payment_base_source_versions(),
+        )
+
+        self.assertEqual(changed_state["status"], "refreshing")
+        self.assertEqual(changed_state["blocking_scope_keys"], ["2026-05"])
+        self.assertIn(
+            "2026-05:source_versions_mismatch",
+            changed_state["stale_reasons"],
+        )
 
 
 def _record() -> OAApplicationRecord:

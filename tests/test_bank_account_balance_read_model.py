@@ -14,14 +14,26 @@ from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
 class FakeConnection:
-    def __init__(self, rows: list[object] | None = None) -> None:
+    def __init__(
+        self,
+        rows: list[object] | None = None,
+        one_rows: list[dict[str, object] | None] | None = None,
+    ) -> None:
         self.rows = list(rows or [])
+        self.one_rows = list(one_rows or [])
         self.calls: list[tuple[str, str, tuple[object, ...]]] = []
 
     def fetch_all(self, sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
         self.calls.append(("fetch_all", sql, params))
         value = self.rows.pop(0) if self.rows else []
         return list(value) if isinstance(value, list) else []
+
+    def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object] | None:
+        self.calls.append(("fetch_one", sql, params))
+        return self.one_rows.pop(0) if self.one_rows else {
+            "source_row_count": 0,
+            "source_updated_at": None,
+        }
 
     def execute(self, sql: str, params: tuple[object, ...] = ()) -> int:
         self.calls.append(("execute", sql, params))
@@ -202,7 +214,13 @@ class BankAccountBalanceProjectionTests(unittest.TestCase):
                         "latest_bank_serial_no": "002",
                     },
                 ]
-            ]
+            ],
+            one_rows=[
+                {
+                    "source_row_count": 4,
+                    "source_updated_at": "2026-04-02 09:00:00+00:00",
+                }
+            ],
         )
 
         result = BankAccountBalanceProjectionBuilder(
@@ -217,6 +235,12 @@ class BankAccountBalanceProjectionTests(unittest.TestCase):
         self.assertEqual(by_account_no["6222000011116386"]["latest_balance_transaction_id"], "txn-latest-balance")
         self.assertEqual(by_account_no["6222000011116386"]["transaction_total_count"], 3)
         self.assertEqual(by_account_no["9558800011116386"]["latest_balance"], "200.00")
+        self.assertEqual(
+            by_account_no["6222000011116386"]["source_versions"][
+                "bank_account_balance_source_row_count"
+            ],
+            4,
+        )
         self.assertNotEqual(
             by_account_no["6222000011116386"]["account_identity"],
             by_account_no["9558800011116386"]["account_identity"],
@@ -248,7 +272,13 @@ class BankAccountBalanceProjectionTests(unittest.TestCase):
                         "transaction_total_count": 1,
                     }
                 ]
-            ]
+            ],
+            one_rows=[
+                {
+                    "source_row_count": 1,
+                    "source_updated_at": "2026-04-02 09:00:00+00:00",
+                }
+            ],
         )
 
         BankAccountBalanceProjectionBuilder(
@@ -323,7 +353,10 @@ class BankAccountBalanceProjectionTests(unittest.TestCase):
                         "status": "fresh",
                         "row_count": 2,
                         "source_version": 1,
-                        "source_versions": {},
+                        "source_versions": {
+                            "bank_account_balance_source_row_count": 4,
+                            "bank_account_balance_source_updated_at": "2026-04-02 09:00:00+00:00",
+                        },
                         "generated_at": "2026-04-02 10:00:00",
                     }
                 ],
@@ -363,7 +396,13 @@ class BankAccountBalanceProjectionTests(unittest.TestCase):
                 [
                     {"account_key": "acct:one", "transaction_count": 1},
                 ],
-            ]
+            ],
+            one_rows=[
+                {
+                    "source_row_count": 4,
+                    "source_updated_at": "2026-04-02 09:00:00+00:00",
+                }
+            ],
         )
         repository = PostgresReadModelRepository(connection)
 
@@ -425,14 +464,18 @@ class BankAccountBalanceProjectionTests(unittest.TestCase):
                         "status": "fresh",
                         "row_count": 0,
                         "source_version": 1,
-                        "source_versions": {},
+                        "source_versions": {
+                            "bank_account_balance_source_row_count": 0,
+                            "bank_account_balance_source_updated_at": "",
+                        },
                         "generated_at": "2026-04-02 10:00:00",
                     }
                 ],
                 [],
                 [],
                 [],
-            ]
+            ],
+            one_rows=[{"source_row_count": 0, "source_updated_at": None}],
         )
         repository = PostgresReadModelRepository(connection)
 
@@ -442,6 +485,40 @@ class BankAccountBalanceProjectionTests(unittest.TestCase):
         self.assertEqual(payload["accounts"], [])
         self.assertIsNone(payload["total_balance"])
         self.assertEqual(payload["balance_read_model_status"], "fresh")
+
+    def test_repository_marks_balance_projection_stale_when_canonical_bank_source_changes(self) -> None:
+        connection = FakeConnection(
+            rows=[
+                [
+                    {
+                        "scope_key": "all",
+                        "scope_type": "bank_account_balance",
+                        "schema_version": BANK_ACCOUNT_BALANCE_READ_MODEL_SCHEMA_VERSION,
+                        "status": "fresh",
+                        "row_count": 1,
+                        "source_version": 1,
+                        "source_versions": {
+                            "bank_account_balance_source_row_count": 4,
+                            "bank_account_balance_source_updated_at": "2026-04-02 09:00:00+00:00",
+                        },
+                        "generated_at": "2026-04-02 10:00:00",
+                    }
+                ],
+                [],
+            ],
+            one_rows=[
+                {
+                    "source_row_count": 5,
+                    "source_updated_at": "2026-07-24 16:00:00+00:00",
+                }
+            ],
+        )
+
+        summary = PostgresReadModelRepository(
+            connection
+        ).bank_account_balance_scope_summary()
+
+        self.assertEqual(summary["read_model_status"], "stale")
 
 
 if __name__ == "__main__":

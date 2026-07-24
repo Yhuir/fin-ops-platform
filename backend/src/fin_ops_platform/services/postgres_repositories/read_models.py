@@ -52,7 +52,7 @@ from fin_ops_platform.services.workbench_read_model_version import (
 MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
 BANK_DETAIL_READ_MODEL_SCHEMA_VERSION = 11
 BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE = hashlib.sha256(b"[]").hexdigest()
-BANK_ACCOUNT_BALANCE_READ_MODEL_SCHEMA_VERSION = 1
+BANK_ACCOUNT_BALANCE_READ_MODEL_SCHEMA_VERSION = 2
 BANK_DETAIL_PURPOSE_TEXT_LABELS = ("用途", "交易用途")
 BANK_DETAIL_SUMMARY_TEXT_LABELS = ("摘要",)
 BANK_DETAIL_NOTE_TEXT_LABELS = ("备注", "附言", "客户附言")
@@ -1426,10 +1426,64 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             /* check: oa_pending_payment_query_state */
             with requested as (
                 select %s::text as scope_key, %s::text as tenant_id
+            ), bank_coverage as (
+                select
+                    to_char(bank.txn_month, 'YYYY-MM') as scope_key,
+                    count(distinct coalesce(bank.legacy_mongo_id, bank.id::text))::integer as row_count,
+                    md5(coalesce(string_agg(
+                        concat(
+                            coalesce(bank.legacy_mongo_id, bank.id::text),
+                            '|',
+                            coalesce(bank.txn_direction, '')
+                        ),
+                        E'\n' order by coalesce(bank.legacy_mongo_id, bank.id::text)
+                    ), '')) as membership_digest
+                from app.bank_transactions bank
+                cross join requested
+                where bank.txn_month is not null
+                  and bank.status <> 'deleted'
+                  and (
+                      requested.scope_key = 'all'
+                      or bank.txn_month = to_date(requested.scope_key, 'YYYY-MM')
+                  )
+                group by bank.txn_month
+            ), invoice_coverage as (
+                select
+                    to_char(
+                        coalesce(invoice.invoice_month, date_trunc('month', invoice.invoice_date)),
+                        'YYYY-MM'
+                    ) as scope_key,
+                    count(distinct coalesce(invoice.legacy_mongo_id, invoice.id::text))::integer as row_count,
+                    md5(coalesce(string_agg(
+                        concat(
+                            coalesce(invoice.legacy_mongo_id, invoice.id::text),
+                            '|',
+                            coalesce(invoice.invoice_type, '')
+                        ),
+                        E'\n' order by coalesce(invoice.legacy_mongo_id, invoice.id::text)
+                    ), '')) as membership_digest
+                from app.invoices invoice
+                cross join requested
+                where coalesce(invoice.invoice_month, date_trunc('month', invoice.invoice_date)) is not null
+                  and invoice.status <> 'deleted'
+                  and (
+                      invoice.invoice_type in ('input', 'input_invoice')
+                      or invoice.invoice_type like '进项%%'
+                  )
+                  and (
+                      requested.scope_key = 'all'
+                      or coalesce(invoice.invoice_month, date_trunc('month', invoice.invoice_date))
+                          = to_date(requested.scope_key, 'YYYY-MM')
+                  )
+                group by 1
             ), target_scopes as (
                 select scope_key
                 from requested
                 where scope_key <> 'all'
+                union
+                select scope_key from bank_coverage
+                union
+                select scope_key from invoice_coverage
                 union
                 select substring(watermark.sync_key from length(%s) + 1)
                 from app.oa_sync_watermarks watermark, requested
@@ -1467,6 +1521,10 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 pending_relation_watermark.version as pending_relation_version,
                 latest_dirty.status as dirty_status,
                 latest_dirty.source_version as dirty_source_version,
+                bank_coverage.row_count as current_bank_coverage_row_count,
+                bank_coverage.membership_digest as current_bank_coverage_digest,
+                invoice_coverage.row_count as current_input_invoice_coverage_row_count,
+                invoice_coverage.membership_digest as current_input_invoice_coverage_digest,
                 exists (
                     select 1
                     from job.outbox_events outbox
@@ -1483,6 +1541,10 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
               on source_watermark.sync_key = %s || target.scope_key
             left join app.oa_sync_watermarks pending_relation_watermark
               on pending_relation_watermark.sync_key = %s || target.scope_key
+            left join bank_coverage
+              on bank_coverage.scope_key = target.scope_key
+            left join invoice_coverage
+              on invoice_coverage.scope_key = target.scope_key
             left join lateral (
                 select dirty.status, dirty.source_version
                 from job.read_model_dirty_scopes dirty
@@ -1530,6 +1592,15 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 if isinstance(row.get("actual_source_versions"), dict)
                 else {}
             )
+            empty_coverage_digest = hashlib.md5(b"").hexdigest()
+            current_bank_coverage_signature = (
+                f"rows:{int_value(row.get('current_bank_coverage_row_count'), 0)}|digest:"
+                f"{text(row.get('current_bank_coverage_digest')) or empty_coverage_digest}"
+            )
+            current_input_invoice_coverage_signature = (
+                f"rows:{int_value(row.get('current_input_invoice_coverage_row_count'), 0)}|digest:"
+                f"{text(row.get('current_input_invoice_coverage_digest')) or empty_coverage_digest}"
+            )
             coverage_only = (
                 int_value(
                     actual_versions.get("oa_pending_payment_coverage_only_schema_version"),
@@ -1564,14 +1635,12 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             input_invoice_coverage_signature = text(
                 actual_versions.get("oa_pending_payment_input_invoice_coverage_signature")
             ) or ""
-            # Coverage digests are projection-owned inventory evidence persisted at
-            # refresh time. The request hot path validates their presence and relies
-            # on the durable dirty/outbox event version to invalidate them; only the
-            # independent Page Audit recomputes canonical membership for comparison.
-            expected_versions["oa_pending_payment_bank_coverage_signature"] = bank_coverage_signature
+            expected_versions[
+                "oa_pending_payment_bank_coverage_signature"
+            ] = current_bank_coverage_signature
             expected_versions[
                 "oa_pending_payment_input_invoice_coverage_signature"
-            ] = input_invoice_coverage_signature
+            ] = current_input_invoice_coverage_signature
             actual_versions_by_scope[row_scope_key] = actual_versions
             expected_versions_by_scope[row_scope_key] = expected_versions
             reasons: list[str] = []
@@ -2054,6 +2123,8 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         tenant_id: str,
     ) -> dict[str, Any]:
         normalized_scope_key = _invoice_relation_scope_key(scope_key)
+        invoice_direction = "input" if scope_type == "input_invoice_usage" else "output"
+        localized_prefix = "进项" if invoice_direction == "input" else "销项"
         rows = self._connection.fetch_all(
             f"""
             with projection_scopes as (
@@ -2063,6 +2134,26 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                     %s = 'all'
                     and scope_key <> 'all'
                 ) or scope_key = %s
+            ), canonical_scopes as (
+                select
+                    to_char(
+                        coalesce(invoice_month, date_trunc('month', invoice_date)),
+                        'YYYY-MM'
+                    ) as scope_key,
+                    count(*)::integer as source_row_count,
+                    max(updated_at)::text as source_updated_at
+                from app.invoices
+                where status <> 'deleted'
+                  and (
+                      invoice_type in (%s, %s)
+                      or invoice_type like %s
+                  )
+                  and coalesce(invoice_month, date_trunc('month', invoice_date)) is not null
+                  and (
+                      %s = 'all'
+                      or coalesce(invoice_month, date_trunc('month', invoice_date)) = to_date(%s, 'YYYY-MM')
+                  )
+                group by 1
             ),
             active_dirty as (
                 select distinct on (scope_key)
@@ -2081,6 +2172,8 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             requested_scopes as (
                 select scope_key from projection_scopes
                 union
+                select scope_key from canonical_scopes
+                union
                 select scope_key from active_dirty
                 union
                 select %s where %s <> 'all'
@@ -2089,6 +2182,8 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                    projection.row_count,
                    projection.source_versions,
                    projection.cache_status,
+                   canonical.source_row_count,
+                   canonical.source_updated_at,
                    dirty.dirty_status,
                    exists (
                        select 1
@@ -2101,10 +2196,16 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                    ) as has_active_event
             from requested_scopes requested
             left join projection_scopes projection using (scope_key)
+            left join canonical_scopes canonical using (scope_key)
             left join active_dirty dirty using (scope_key)
             order by requested.scope_key
             """,
             (
+                normalized_scope_key,
+                normalized_scope_key,
+                invoice_direction,
+                f"{invoice_direction}_invoice",
+                f"{localized_prefix}%",
                 normalized_scope_key,
                 normalized_scope_key,
                 tenant_id,
@@ -2119,6 +2220,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             ),
         )
         source_versions_by_scope: dict[str, dict[str, Any]] = {}
+        canonical_source_versions_by_scope: dict[str, dict[str, Any]] = {}
         statuses_by_scope: dict[str, str] = {}
         blocking_scope_keys: list[str] = []
         active_event_scope_keys: list[str] = []
@@ -2133,6 +2235,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 for row in rows
                 if row.get("row_count") is None
                 or int_value(row.get("row_count"), 0) > 0
+                or int_value(row.get("source_row_count"), 0) > 0
                 or text(row.get("dirty_status")) in {"pending", "processing", "failed"}
             ]
         for row in effective_rows:
@@ -2145,6 +2248,15 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 else {}
             )
             source_versions_by_scope[current_scope_key] = dict(source_versions)
+            canonical_source_versions_by_scope[current_scope_key] = {
+                "invoice_usage_source_row_count": int_value(
+                    row.get("source_row_count"),
+                    0,
+                ),
+                "invoice_usage_source_updated_at": text(
+                    row.get("source_updated_at")
+                ),
+            }
             dirty_status = text(row.get("dirty_status"))
             cache_status = text(row.get("cache_status"))
             if dirty_status in {"pending", "processing"}:
@@ -2165,6 +2277,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         return {
             "scope_keys": list(source_versions_by_scope),
             "source_versions_by_scope": source_versions_by_scope,
+            "canonical_source_versions_by_scope": canonical_source_versions_by_scope,
             "statuses_by_scope": statuses_by_scope,
             "blocking_scope_keys": blocking_scope_keys,
             "active_event_scope_keys": active_event_scope_keys,
@@ -3155,6 +3268,37 @@ class PostgresBankReadModelRepository:
         )
         row = rows[0] if rows else None
         dirty_row = dirty_rows[0] if dirty_rows else None
+        source_row = executor.fetch_one(
+            """
+            select count(*)::integer as source_row_count,
+                   max(updated_at)::text as source_updated_at
+            from app.bank_transactions
+            where (
+                balance is not null
+                or account_no is not null
+                or raw_payload is not null
+              )
+              and coalesce(nullif(status, ''), 'active') not in (
+                'deleted', 'void', 'voided', 'cancelled', 'canceled', 'ignored'
+              )
+            """
+        ) or {}
+        actual_source_versions = (
+            row.get("source_versions")
+            if isinstance((row or {}).get("source_versions"), dict)
+            else {}
+        )
+        source_proof_matches = (
+            int_value(
+                actual_source_versions.get("bank_account_balance_source_row_count"),
+                -1,
+            )
+            == int_value(source_row.get("source_row_count"), 0)
+            and text(
+                actual_source_versions.get("bank_account_balance_source_updated_at")
+            )
+            == text(source_row.get("source_updated_at"))
+        )
         dirty_status = text((dirty_row or {}).get("status"))
         if dirty_status in {"pending", "processing"}:
             status = "refreshing"
@@ -3165,6 +3309,8 @@ class PostgresBankReadModelRepository:
         elif int_value(row.get("schema_version"), 0) != BANK_ACCOUNT_BALANCE_READ_MODEL_SCHEMA_VERSION:
             status = "schema_mismatch"
         elif text(row.get("status")) != "fresh":
+            status = "stale"
+        elif not source_proof_matches:
             status = "stale"
         else:
             status = "fresh"

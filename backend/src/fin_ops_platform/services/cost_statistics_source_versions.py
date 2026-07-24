@@ -43,15 +43,28 @@ def cost_statistics_source_versions(
 
 
 def cost_statistics_semantic_source_versions(source_versions: dict[str, Any]) -> dict[str, Any]:
-    """Remove Bank Detail provenance fields that Cost does not consume."""
+    """Remove upstream generation counters that Cost does not consume."""
 
     normalized = dict(source_versions or {})
+    workbench = normalized.get("workbench_source_versions")
+    if isinstance(workbench, dict):
+        normalized["workbench_source_versions"] = {
+            key: value
+            for key, value in workbench.items()
+            if key != "source_version"
+        }
     bank_detail = normalized.get("bank_detail_source_versions")
     if isinstance(bank_detail, dict):
         normalized["bank_detail_source_versions"] = {
             key: value
             for key, value in bank_detail.items()
-            if key not in {"source_version", "workbench_relation_source_versions"}
+            if key
+            not in {
+                "source_version",
+                "workbench_relation_source_versions",
+                "bank_transactions_context_row_count",
+                "bank_transactions_updated_at",
+            }
         }
     return normalized
 

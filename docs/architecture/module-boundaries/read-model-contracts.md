@@ -44,7 +44,9 @@ Phase 27 把“普通写后同步等待所有受影响页面”迁移为“canon
 - 普通写 HTTP、fresh 页面读取、stale 页 exact-scope enqueue/首屏分别计时。稳定 warm path 目标小于 1 秒，exact-scope stale convergence 的产品上限目标小于 3 秒；达不到时必须报告真实数据量、query/worker/queue 分段耗时，不能扩大同步等待来掩盖。
 - `explicit-batch` 的 3 秒只约束 job acceptance/canonical commit；full-history convergence 使用独立 bounded job SLO。把全历史重建承诺为 3 秒既不真实，也不属于普通页面加载合同。
 - strict stale consumer 在 required dependency non-fresh 时必须 fail closed；可以返回 refreshing 并由 exact dependency enqueue 收敛，不能回退 live scan、旧 snapshot 或宽泛跨页面 barrier。
-- input/output invoice consumer 的 relation source proof 必须按具体 invoice type 与 scope 的 canonical invoice IDs 计算；只含 bank/OA 或另一 invoice type 的 relation 不是该页面依赖。页面 rows freshness 与全局标题 statistics 分开表达，但 statistics 只能补投同一页面真正 stale 的 month shards。
+- input/output invoice consumer 的完整 proof 必须同时覆盖两部分：按具体 invoice type/scope 批量计算的 canonical 发票库存数量与 `max(updated_at)`，以及只触达这些 canonical invoice IDs 的 relation source proof。只含 bank/OA、另一 invoice type，或只有静态规则版本都不能证明页面 fresh。页面 rows freshness 与全局标题 statistics 分开表达，但 statistics 只能补投同一页面真正 stale 的 month shards。
+- OA 待付款的银行/进项库存统计属于页面 projection 业务内容，query-state 必须按请求 scopes 用一次 set-based canonical membership digest 与已发布 coverage proof 比较；不能把旧 projection 自带 digest 当作当前 expected proof，也不能依赖 writer dirty 广播。
+- downstream semantic dependency comparison 必须排除只代表执行批次或全局发布 generation 的易变 counter。特别是 Cost 不得因 Workbench `source_version` 单独变化而把所有历史月份判 stale；schema、builder、scope 级 canonical 更新时间、业务 signature、row count 和规则版本仍必须 fail closed。
 
 每个 vertical slice 的删除顺序固定为：先建立并测试 read-side canonical drift proof；再迁移写返回与当前页面 exact reconcile；最后删除旧 lifecycle target、事务内 downstream fan-out、前端 cross-page barrier、重复 helper 和旧断言。禁止用 compatibility fallback 同时保留两条生产主链路。
 

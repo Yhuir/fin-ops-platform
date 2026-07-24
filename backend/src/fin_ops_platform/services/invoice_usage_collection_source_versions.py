@@ -78,6 +78,11 @@ def invoice_relation_dependency_status(
         if isinstance(scope_state.get("source_versions_by_scope"), dict)
         else {}
     )
+    canonical_versions_by_scope = (
+        scope_state.get("canonical_source_versions_by_scope")
+        if isinstance(scope_state.get("canonical_source_versions_by_scope"), dict)
+        else {}
+    )
     relation_versions_by_scope = (
         relation_state.get("read_model_scope_source_versions")
         if isinstance(relation_state.get("read_model_scope_source_versions"), dict)
@@ -96,8 +101,20 @@ def invoice_relation_dependency_status(
     stale_reasons: list[str] = []
     for scope_key in scope_keys:
         consumer_versions = consumer_versions_by_scope.get(scope_key)
+        canonical_versions = canonical_versions_by_scope.get(scope_key)
+        required_scope_source_versions = require_expected_source_versions(
+            {
+                **required_base_source_versions,
+                **(
+                    canonical_versions
+                    if isinstance(canonical_versions, dict)
+                    else {}
+                ),
+            },
+            context=f"invoice_usage_collection_source_dependency:{scope_key}",
+        )
         mismatch_reasons = source_version_mismatch_reasons(
-            expected=required_base_source_versions,
+            expected=required_scope_source_versions,
             actual=consumer_versions if isinstance(consumer_versions, dict) else {},
         )
         if mismatch_reasons:

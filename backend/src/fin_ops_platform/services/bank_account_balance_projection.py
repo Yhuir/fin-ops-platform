@@ -29,11 +29,13 @@ class BankAccountBalanceProjectionBuilder:
 
     def rebuild_bank_account_balance_read_model(self, *, source_version: int | None = None) -> dict[str, Any]:
         rows = self._load_account_balance_rows()
+        source_proof = self._load_source_proof()
         generated_at = datetime.now(UTC).isoformat()
         source_versions = {
             "source_version": source_version,
             "bank_account_balance_schema_version": BANK_ACCOUNT_BALANCE_READ_MODEL_SCHEMA_VERSION,
             "row_count": len(rows),
+            **source_proof,
         }
         balance_rows = []
         for row in rows:
@@ -63,6 +65,27 @@ class BankAccountBalanceProjectionBuilder:
             )
         self._read_model_repository.save_bank_account_balances(rows=balance_rows)
         return {"scope_key": "all", "row_count": len(balance_rows), "generated_at": generated_at}
+
+    def _load_source_proof(self) -> dict[str, Any]:
+        row = self._connection.fetch_one(
+            """
+            select count(*)::integer as source_row_count,
+                   max(updated_at)::text as source_updated_at
+            from app.bank_transactions
+            where (
+                balance is not null
+                or account_no is not null
+                or raw_payload is not null
+              )
+              and coalesce(nullif(status, ''), 'active') not in (
+                'deleted', 'void', 'voided', 'cancelled', 'canceled', 'ignored'
+              )
+            """
+        ) or {}
+        return {
+            "bank_account_balance_source_row_count": int(row.get("source_row_count") or 0),
+            "bank_account_balance_source_updated_at": text(row.get("source_updated_at")) or "",
+        }
 
     def _load_account_balance_rows(self) -> list[dict[str, Any]]:
         return list(

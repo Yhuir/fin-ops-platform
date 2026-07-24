@@ -82,6 +82,12 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
             payment_status_rules_version=self._payment_rules_provider.rules_source_version(),
             oa_reverse_batch_source_version=None,
         )
+        source_versions.update(
+            self._invoice_inventory_source_versions(
+                normalized_scope_key,
+                invoice_type=InvoiceType.INPUT,
+            )
+        )
         relation_source_versions = self._invoice_relation_source_versions_for_scope(
             normalized_scope_key,
             invoice_type=InvoiceType.INPUT,
@@ -131,6 +137,12 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         normalized_scope_key = self._month_scope(scope_key)
         self._require_fresh_workbench_relation_scope(normalized_scope_key)
         source_versions = output_invoice_collection_source_versions()
+        source_versions.update(
+            self._invoice_inventory_source_versions(
+                normalized_scope_key,
+                invoice_type=InvoiceType.OUTPUT,
+            )
+        )
         relation_source_versions = self._invoice_relation_source_versions_for_scope(
             normalized_scope_key,
             invoice_type=InvoiceType.OUTPUT,
@@ -176,6 +188,12 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
             payment_status_rules_version=self._payment_rules_provider.rules_source_version(),
             oa_reverse_batch_source_version=None,
         )
+        source_versions.update(
+            self._invoice_inventory_source_versions(
+                scope_key,
+                invoice_type=InvoiceType.INPUT,
+            )
+        )
         relation_source_versions = self._invoice_relation_source_versions_for_scope(
             scope_key,
             invoice_type=InvoiceType.INPUT,
@@ -195,6 +213,12 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
 
     def mark_output_invoice_collection_scope_empty(self, scope_key: str) -> None:
         source_versions = output_invoice_collection_source_versions()
+        source_versions.update(
+            self._invoice_inventory_source_versions(
+                scope_key,
+                invoice_type=InvoiceType.OUTPUT,
+            )
+        )
         relation_source_versions = self._invoice_relation_source_versions_for_scope(
             scope_key,
             invoice_type=InvoiceType.OUTPUT,
@@ -238,6 +262,37 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
             "source_versions": source_versions,
             "skipped": True,
             "skip_reason": "source_versions_unchanged",
+        }
+
+    def _invoice_inventory_source_versions(
+        self,
+        scope_key: str,
+        *,
+        invoice_type: InvoiceType,
+    ) -> dict[str, object]:
+        localized_prefix = "进项" if invoice_type == InvoiceType.INPUT else "销项"
+        row = self._connection.fetch_one(
+            """
+            select count(*)::integer as source_row_count,
+                   max(updated_at)::text as source_updated_at
+            from app.invoices
+            where status <> 'deleted'
+              and (
+                  invoice_type in (%s, %s)
+                  or invoice_type like %s
+              )
+              and coalesce(invoice_month, date_trunc('month', invoice_date)) = to_date(%s, 'YYYY-MM')
+            """,
+            (
+                invoice_type.value,
+                f"{invoice_type.value}_invoice",
+                f"{localized_prefix}%",
+                scope_key,
+            ),
+        ) or {}
+        return {
+            "invoice_usage_source_row_count": int(row.get("source_row_count") or 0),
+            "invoice_usage_source_updated_at": str(row.get("source_updated_at") or ""),
         }
 
     def _input_service(self) -> InputInvoiceUsageQueryService:

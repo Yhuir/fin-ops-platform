@@ -8,6 +8,51 @@ from fin_ops_platform.services.input_invoice_usage_read_model_fresh_gate_service
 
 
 class InputInvoiceUsageReadModelFreshGateServiceTests(unittest.TestCase):
+    def test_canonical_invoice_change_enqueues_only_affected_month_before_rows_query(self) -> None:
+        enqueued: list[tuple[str, str]] = []
+        repository = DependencyBlockedRepository(
+            scope_state={
+                "scope_keys": ["2026-07"],
+                "source_versions_by_scope": {
+                    "2026-07": {
+                        "schema": "v1",
+                        "invoice_usage_source_row_count": 129,
+                        "invoice_usage_source_updated_at": "old",
+                        "workbench_relation_source_versions": {
+                            "relation_generation": 1
+                        },
+                    }
+                },
+                "canonical_source_versions_by_scope": {
+                    "2026-07": {
+                        "invoice_usage_source_row_count": 142,
+                        "invoice_usage_source_updated_at": "new",
+                    }
+                },
+                "blocking_scope_keys": [],
+            }
+        )
+        service = InputInvoiceUsageReadModelFreshGateService(
+            repository=repository,
+            requires_sql_read_model_runtime=lambda: True,
+            enqueue_refresh=lambda scope_key, reason: enqueued.append(
+                (scope_key, reason)
+            )
+            or True,
+            expected_source_versions=lambda **_: {"schema": "v1"},
+            workbench_relation_reader=FreshRelationReader(),
+            statistics_overlay=lambda: {"oa_reverse_batch_count": 0},
+        )
+
+        payload = service.rows({})
+
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(repository.rows_calls, 0)
+        self.assertEqual(
+            enqueued,
+            [("2026-07", "api_relation_dependency_stale")],
+        )
+
     def test_all_scope_relation_mismatch_enqueues_only_exact_months_before_rows_query(self) -> None:
         enqueued: list[tuple[str, str]] = []
         repository = DependencyBlockedRepository(

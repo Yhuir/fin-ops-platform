@@ -369,11 +369,19 @@ def _read_model_source_version_mismatch_issues(
            or not source_versions ? 'workbench_source_versions'
            or not source_versions ? 'bank_detail_source_versions'
            or coalesce(source_versions->'workbench_source_versions', '{}'::jsonb)
+                  - 'source_version'
               <> coalesce(current_workbench_source_versions, '{}'::jsonb)
+                  - 'source_version'
            or coalesce(source_versions->'bank_detail_source_versions', '{}'::jsonb)
-                  - 'source_version' - 'workbench_relation_source_versions'
+                  - 'source_version'
+                  - 'workbench_relation_source_versions'
+                  - 'bank_transactions_context_row_count'
+                  - 'bank_transactions_updated_at'
               <> coalesce(current_bank_detail_source_versions, '{}'::jsonb)
-                  - 'source_version' - 'workbench_relation_source_versions'
+                  - 'source_version'
+                  - 'workbench_relation_source_versions'
+                  - 'bank_transactions_context_row_count'
+                  - 'bank_transactions_updated_at'
         order by scope_key
         limit %s
     ),

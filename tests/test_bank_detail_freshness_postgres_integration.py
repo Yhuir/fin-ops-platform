@@ -9,6 +9,9 @@ from fin_ops_platform.services.postgres_repositories.read_models import (
     BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
     PostgresBankReadModelRepository,
 )
+from fin_ops_platform.services.bank_account_balance_projection import (
+    BankAccountBalanceProjectionBuilder,
+)
 from tests.postgres_test_utils import (
     apply_test_migrations,
     apply_test_migrations_through,
@@ -143,6 +146,37 @@ class BankDetailFreshnessPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(
             summary["read_model_scope_signatures"]["2026-07"]["row_count"],
             1,
+        )
+
+    def test_canonical_bank_update_invalidates_account_balance_projection(self) -> None:
+        self._insert_bank_transaction(
+            legacy_mongo_id="bank-balance-one",
+            txn_date="2026-07-10",
+            updated_at="2026-07-24 01:00:00+00",
+        )
+        BankAccountBalanceProjectionBuilder(
+            connection=self.connection,
+            read_model_repository=self.repository,
+        ).rebuild_bank_account_balance_read_model(source_version=1)
+
+        self.assertEqual(
+            self.repository.bank_account_balance_scope_summary()[
+                "read_model_status"
+            ],
+            "fresh",
+        )
+
+        self._insert_bank_transaction(
+            legacy_mongo_id="bank-balance-two",
+            txn_date="2026-07-11",
+            updated_at="2026-07-24 02:00:00+00",
+        )
+
+        self.assertEqual(
+            self.repository.bank_account_balance_scope_summary()[
+                "read_model_status"
+            ],
+            "stale",
         )
 
     def _insert_bank_transaction(

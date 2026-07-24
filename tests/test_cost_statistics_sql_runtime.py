@@ -2126,6 +2126,9 @@ class CostStatisticsDirectBankFlowGateConnection:
                         "source_version": 11,
                         "bank_auto_tag_rules_version": 7,
                         "bank_transaction_category_source_signature": "category-signature",
+                        "row_count": 2,
+                        "bank_transactions_context_row_count": 2,
+                        "bank_transactions_updated_at": "2026-07-24T00:00:00+00:00",
                         "workbench_relation_source_versions": {
                             "source_version": 99,
                         },
@@ -2142,6 +2145,15 @@ class CostStatisticsDirectBankFlowGateConnection:
                 {
                     "scope_key": "2026-05",
                     "source_signature": "category-signature",
+                }
+            ]
+        if "/* bank_detail_canonical_source_summaries */" in normalized:
+            return [
+                {
+                    "scope_key": "2026-05",
+                    "row_count": 2,
+                    "context_row_count": 2,
+                    "bank_transactions_updated_at": "2026-07-24T00:00:00+00:00",
                 }
             ]
         raise AssertionError(f"unexpected SQL: {normalized}")
@@ -2459,6 +2471,9 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                         "source_versions": {
                             "bank_auto_tag_rules_version": 7,
                             "bank_transaction_category_source_signature": "category-signature",
+                            "row_count": 2,
+                            "bank_transactions_context_row_count": 2,
+                            "bank_transactions_updated_at": "2026-07-24T00:00:00+00:00",
                         },
                     }
                 },
@@ -4192,9 +4207,11 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                     "source_version": 10,
                     "bank_detail_source_signature": "same-business-data",
                     "bank_auto_tag_rules_version": 7,
+                    "bank_transactions_context_row_count": 1,
+                    "bank_transactions_updated_at": "old",
                     "workbench_relation_source_versions": {"source_version": 30},
                 },
-                "workbench_source_versions": {"source_version": 20},
+                "workbench_source_versions": {"source_version": 21},
             }
         )
         second = cost_statistics_semantic_source_versions(
@@ -4203,6 +4220,8 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                     "source_version": 11,
                     "bank_detail_source_signature": "same-business-data",
                     "bank_auto_tag_rules_version": 7,
+                    "bank_transactions_context_row_count": 2,
+                    "bank_transactions_updated_at": "new",
                     "workbench_relation_source_versions": {"source_version": 31},
                 },
                 "workbench_source_versions": {"source_version": 20},
@@ -4210,7 +4229,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         )
 
         self.assertEqual(first, second)
-        self.assertEqual(first["workbench_source_versions"]["source_version"], 20)
+        self.assertNotIn("source_version", first["workbench_source_versions"])
         self.assertNotIn("workbench_relation_source_versions", first["bank_detail_source_versions"])
         self.assertNotEqual(
             first,
@@ -4262,7 +4281,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             _fresh_workbench_dependency_versions_by_scope
         )
         app._app_settings_service = CostStatisticsAppSettingsStub()
-        current_workbench_versions = {"builder": "workbench-v5", "source_version": 2511}
+        current_workbench_versions = {"builder": "workbench-v6", "source_version": 2511}
         old_workbench_versions = {"builder": "workbench-v5", "source_version": 2504}
 
         class SqlCostStats:

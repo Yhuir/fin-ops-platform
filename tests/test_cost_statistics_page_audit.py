@@ -349,15 +349,22 @@ class CostStatisticsPageAuditTests(unittest.TestCase):
         self.assertNotIn("/* check: cost_upstream_source_versions */", proof_sql)
         self.assertNotIn("/* check: cost_parent_source_shards */", proof_sql)
         self.assertIn(
-            "source_versions->'bank_detail_source_versions', '{}'::jsonb)\n"
-            "                  - 'source_version' - 'workbench_relation_source_versions'",
+            "source_versions->'workbench_source_versions', '{}'::jsonb)\n"
+            "                  - 'source_version'",
             proof_sql,
         )
         self.assertIn(
-            "current_bank_detail_source_versions, '{}'::jsonb)\n"
-            "                  - 'source_version' - 'workbench_relation_source_versions'",
+            "current_workbench_source_versions, '{}'::jsonb)\n"
+            "                  - 'source_version'",
             proof_sql,
         )
+        for field in (
+            "source_version",
+            "workbench_relation_source_versions",
+            "bank_transactions_context_row_count",
+            "bank_transactions_updated_at",
+        ):
+            self.assertEqual(proof_sql.count(f"- '{field}'"), 2 if field != "source_version" else 4)
 
     def test_business_value_proofs_use_one_query_and_preserve_each_issue_contract(self) -> None:
         issue_rows = [

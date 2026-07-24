@@ -220,14 +220,39 @@ class OaPendingPaymentReadModelQueryTests(unittest.TestCase):
         )
         self.assertNotIn("group by duplicate_row.row_id", state_sql)
         self.assertNotIn("having count(*) > 1", state_sql)
-        self.assertNotIn("from app.bank_transactions", state_sql)
-        self.assertNotIn("from app.invoices", state_sql)
+        self.assertIn("from app.bank_transactions", state_sql)
+        self.assertIn("from app.invoices", state_sql)
         self.assertIn("'dead_lettered'", state_sql)
         self.assertIn(
             "order by dirty.source_version desc, dirty.updated_at desc, dirty.id desc",
             state_sql,
         )
         self.assertNotIn("read_model.workbench_relation_scopes", state_sql)
+
+    def test_current_bank_and_invoice_coverage_change_marks_scope_stale(self) -> None:
+        base_versions = {"schema": 1}
+        row = _fresh_state_row(
+            scope_key="2026-07",
+            base_versions=base_versions,
+            snapshot_version=3,
+            event_source_version=7,
+        )
+        row["current_bank_coverage_row_count"] = 11
+        row["current_bank_coverage_digest"] = "bank-new"
+        row["current_input_invoice_coverage_row_count"] = 14
+        row["current_input_invoice_coverage_digest"] = "invoice-new"
+
+        state = PostgresInvoiceUsageCollectionReadModelRepository(
+            QueryStateConnection([row])
+        ).oa_pending_payment_query_state(
+            scope_key="2026-07",
+            tenant_id="default",
+            base_source_versions=base_versions,
+        )
+
+        self.assertEqual(state["status"], "refreshing")
+        self.assertEqual(state["blocking_scope_keys"], ["2026-07"])
+        self.assertIn("2026-07:source_versions_mismatch", state["stale_reasons"])
 
     def test_all_scope_query_state_leaves_duplicate_detection_to_page_audit(self) -> None:
         base_versions = {"schema": 1}
@@ -386,7 +411,37 @@ class QueryStateConnection:
                 }
                 for scope_key in params[0]
             ]
-        return deepcopy(self.rows)
+        rows = deepcopy(self.rows)
+        for row in rows:
+            versions = (
+                row.get("actual_source_versions")
+                if isinstance(row.get("actual_source_versions"), dict)
+                else {}
+            )
+            bank_signature = str(
+                versions.get("oa_pending_payment_bank_coverage_signature") or ""
+            )
+            invoice_signature = str(
+                versions.get("oa_pending_payment_input_invoice_coverage_signature")
+                or ""
+            )
+            row.setdefault(
+                "current_bank_coverage_row_count",
+                int(bank_signature.split("|", 1)[0].removeprefix("rows:") or 0),
+            )
+            row.setdefault(
+                "current_bank_coverage_digest",
+                bank_signature.split("digest:", 1)[-1],
+            )
+            row.setdefault(
+                "current_input_invoice_coverage_row_count",
+                int(invoice_signature.split("|", 1)[0].removeprefix("rows:") or 0),
+            )
+            row.setdefault(
+                "current_input_invoice_coverage_digest",
+                invoice_signature.split("digest:", 1)[-1],
+            )
+        return rows
 
 
 def _fresh_state_row(

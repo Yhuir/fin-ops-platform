@@ -1504,6 +1504,44 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
             ),
         )
 
+    def test_all_scope_keeps_canonical_nonempty_month_when_projection_is_empty(self) -> None:
+        class CanonicalScopeConnection:
+            def fetch_all(self, _sql: str, _params: tuple = ()) -> list[dict]:
+                return [
+                    {
+                        "scope_key": "2026-05",
+                        "row_count": 1,
+                        "source_row_count": 1,
+                        "source_versions": input_invoice_usage_source_versions(),
+                        "cache_status": "fresh",
+                    },
+                    {
+                        "scope_key": "2026-07",
+                        "row_count": 0,
+                        "source_row_count": 13,
+                        "source_versions": {},
+                        "cache_status": "fresh",
+                    },
+                ]
+
+        repository = PostgresInvoiceUsageCollectionReadModelRepository(
+            CanonicalScopeConnection()
+        )
+
+        payload = repository.input_invoice_usage_scope_source_versions(
+            scope_key="all",
+        )
+
+        self.assertEqual(payload["scope_keys"], ["2026-05", "2026-07"])
+        self.assertEqual(payload["blocking_scope_keys"], ["2026-07"])
+        self.assertEqual(
+            payload["canonical_source_versions_by_scope"]["2026-07"],
+            {
+                "invoice_usage_source_row_count": 13,
+                "invoice_usage_source_updated_at": None,
+            },
+        )
+
     def test_input_repository_returns_fresh_empty_scope_without_api_miss(self) -> None:
         repository = PostgresReadModelRepository(
             InvoiceReadModelConnection(input_rows=[], dirty=False, scope_exists=True)
@@ -2991,18 +3029,38 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         input_result = builder.rebuild_input_invoice_usage_read_model_scope("2026-05")
         output_result = builder.rebuild_output_invoice_collection_read_model_scope("2026-05")
 
-        self.assertEqual(input_result["source_versions"], input_invoice_usage_source_versions())
-        self.assertEqual(output_result["source_versions"], output_invoice_collection_source_versions())
+        expected_input_versions = {
+            **input_invoice_usage_source_versions(),
+            "invoice_usage_source_row_count": 0,
+            "invoice_usage_source_updated_at": "",
+        }
+        expected_output_versions = {
+            **output_invoice_collection_source_versions(),
+            "invoice_usage_source_row_count": 0,
+            "invoice_usage_source_updated_at": "",
+        }
+        self.assertEqual(input_result["source_versions"], expected_input_versions)
+        self.assertEqual(output_result["source_versions"], expected_output_versions)
         self.assertIsNotNone(read_repository.saved_input)
         self.assertIsNotNone(read_repository.saved_output)
-        self.assertEqual(read_repository.saved_input["source_versions"], input_invoice_usage_source_versions())
-        self.assertEqual(read_repository.saved_output["source_versions"], output_invoice_collection_source_versions())
+        self.assertEqual(
+            read_repository.saved_input["source_versions"],
+            expected_input_versions,
+        )
+        self.assertEqual(
+            read_repository.saved_output["source_versions"],
+            expected_output_versions,
+        )
         self.assertEqual(input_result["row_count"], 1)
         self.assertEqual(output_result["row_count"], 1)
 
     def test_projection_builder_skips_unchanged_input_scope_without_resaving_rows(self) -> None:
         read_repository = RecordingInvoiceRelationReadRepository()
-        expected_source_versions = input_invoice_usage_source_versions()
+        expected_source_versions = {
+            **input_invoice_usage_source_versions(),
+            "invoice_usage_source_row_count": 0,
+            "invoice_usage_source_updated_at": "",
+        }
         read_repository.existing_source_versions_by_method["list_input_invoice_usage_rows"] = expected_source_versions
         read_repository.existing_row_count_by_method["list_input_invoice_usage_rows"] = 154
         read_repository.existing_statistics_by_method["list_input_invoice_usage_rows"] = {"invoice_count": 154}
@@ -3153,6 +3211,8 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
 
         expected_source_versions = {
             **input_invoice_usage_source_versions(),
+            "invoice_usage_source_row_count": 0,
+            "invoice_usage_source_updated_at": "",
             "workbench_relation_source_versions": relation_source_versions,
         }
         self.assertEqual(result["source_versions"], expected_source_versions)
@@ -3278,6 +3338,8 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
             read_repository.marked_input["source_versions"],
             {
                 **input_invoice_usage_source_versions(),
+                "invoice_usage_source_row_count": 0,
+                "invoice_usage_source_updated_at": "",
                 "workbench_relation_source_versions": input_relation_source_versions,
             },
         )
@@ -3285,6 +3347,8 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
             read_repository.marked_output["source_versions"],
             {
                 **output_invoice_collection_source_versions(),
+                "invoice_usage_source_row_count": 0,
+                "invoice_usage_source_updated_at": "",
                 "workbench_relation_source_versions": output_relation_source_versions,
             },
         )
