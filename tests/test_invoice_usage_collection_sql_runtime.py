@@ -2331,8 +2331,12 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertIn("/* invoice_usage_relation_source_versions */", sql)
         self.assertIn("invoice.invoice_type = %s", normalized_sql)
         self.assertIn("relation.row_ids && scope.row_ids", normalized_sql)
+        self.assertIn("relation.relation_mode <> %s", normalized_sql)
         self.assertNotIn("relation.month_scope", normalized_sql)
-        self.assertEqual(params, (["2026-02"], "input"))
+        self.assertEqual(
+            params,
+            (["2026-02"], "input", "turnover_manual_closure"),
+        )
 
     def test_input_api_miss_enqueues_refresh_without_live_scan(self) -> None:
         queue = QueueRecorder()

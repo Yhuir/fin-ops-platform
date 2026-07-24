@@ -19,6 +19,7 @@ from fin_ops_platform.services.bank_transaction_category_service import (
 from fin_ops_platform.services.postgres_repositories.common import decimal_text, int_value, text, text_list
 from fin_ops_platform.services.postgres_repositories.read_models import BANK_DETAIL_READ_MODEL_SCHEMA_VERSION, PostgresReadModelRepository
 from fin_ops_platform.services.workbench_relation_read_facade import FRESH_WORKBENCH_RELATION_STATUS, WorkbenchRelationReadFacade
+from fin_ops_platform.services.workbench_relation_modes import TURNOVER_MANUAL_CLOSURE_RELATION_MODE
 from fin_ops_platform.services.workbench_row_identity import looks_like_invoice_workbench_row_id
 
 PURPOSE_TEXT_LABELS = ("用途", "交易用途")
@@ -397,7 +398,10 @@ class BankDetailSqlProjectionBuilder:
         relation_lookup_ids = text_list([*normalized_transaction_ids, *normalized_aliases])
         source_reader = getattr(self._read_model_repository, "list_active_workbench_relation_source_rows", None)
         rows = (
-            source_reader(row_ids=relation_lookup_ids)
+            source_reader(
+                row_ids=relation_lookup_ids,
+                exclude_relation_modes=[TURNOVER_MANUAL_CLOSURE_RELATION_MODE],
+            )
             if callable(source_reader)
             else []
         )
@@ -739,6 +743,7 @@ class BankDetailSqlProjectionBuilder:
                 scope_key=scope_key,
                 row_ids=normalized_row_ids,
                 include_row_ids=bool(normalized_row_ids),
+                exclude_relation_modes=[TURNOVER_MANUAL_CLOSURE_RELATION_MODE],
             )
         )
 

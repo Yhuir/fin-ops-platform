@@ -419,7 +419,7 @@ class BatchAccountingBulkRelationConnection:
                     "source_versions": {"workbench_relation_schema_version": "bulk-v1"},
                     "dirty_status": self.dirty_status if scope_key == self.dirty_scope else None,
                 }
-                for scope_key in params[0]
+                for scope_key in params[2]
             ]
         if "from read_model.workbench_relation_rows" in normalized:
             return [
@@ -629,7 +629,7 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
                             "source_versions": {"workbench_relation_schema_version": "v1"},
                             "dirty_status": None,
                         }
-                        for scope_key in params[0]
+                        for scope_key in params[2]
                     ]
                 return []
 
@@ -641,7 +641,50 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
         self.assertEqual(payload["read_model_status"], "fresh")
         self.assertEqual(payload["read_model_scope_keys"], ["2026-01", "2026-02"])
         self.assertEqual(len(connection.calls), 2)
-        self.assertEqual(connection.calls[1][1][0], ["2026-01", "2026-02"])
+        self.assertEqual(connection.calls[1][1][2], ["2026-01", "2026-02"])
+
+    def test_legacy_turnover_closure_distribution_is_stale_and_rebuilds_exact_scope(self) -> None:
+        class Connection:
+            @staticmethod
+            def fetch_all(sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
+                normalized_sql = " ".join(sql.lower().split())
+                if "from unnest(%s::text[]) with ordinality" in normalized_sql:
+                    return [
+                        {
+                            "scope_key": scope_key,
+                            "scope_exists": True,
+                            "source_versions": {"workbench_relation_schema_version": "v1"},
+                            "dirty_status": None,
+                            "excluded_relation_mode_present": True,
+                        }
+                        for scope_key in params[2]
+                    ]
+                return []
+
+        queue = QueueRecorder()
+        facade = WorkbenchRelationReadFacade(
+            read_model_repository=PostgresReadModelRepository(Connection()),
+            queue_repository=queue,
+            expected_source_versions=lambda _scope_key: {
+                "workbench_relation_schema_version": "v1"
+            },
+            expected_source_versions_by_scope=lambda scope_keys: {
+                scope_key: {"workbench_relation_schema_version": "v1"}
+                for scope_key in scope_keys
+            },
+        )
+
+        payload = facade.source_versions_for_scopes(
+            ["2026-02"],
+            reason="downstream_workbench_relation_read",
+        )
+
+        self.assertEqual(payload["status"], "stale")
+        self.assertEqual(payload["refresh_scope_keys"], ["2026-02"])
+        self.assertEqual(
+            queue.refreshes,
+            [("workbench_relation", "2026-02", "downstream_workbench_relation_read")],
+        )
 
     def test_scope_summary_repository_reads_many_relation_scopes_in_one_query(self) -> None:
         connection = BatchAccountingBulkRelationConnection(dirty_scope="2026-02", dirty_status="processing")

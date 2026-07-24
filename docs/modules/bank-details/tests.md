@@ -450,3 +450,8 @@ cd web && npm test -- --run src/test/WorkbenchSelection.test.tsx src/test/NoOaBa
 - 本轮不运行真实生产 Postgres/RabbitMQ/Redis worker drain；真实导入、backfill 和多页面 smoke 需要 staging 或夜间环境验证。
 - 前端 Vitest 覆盖交互和 API mapper；当前 Browser e2e 覆盖默认首屏、fresh 空态、Workbench confirm fan-out、candidate/linked 标签负面语义、银行导入后列表显示、真实导出下载、账户/月度/关键字/分类筛选导出、分页状态不限制导出、120 行长列表/宽字段/窄屏/菜单遮挡、自动标签 drawer 保存/重应用 freshness、候选确认/撤销、外部往来三层人工补分类/清除、`read_export_only` 导出与写入口禁用、forbidden/expired session gate、admin 分类写入，以及 account/transaction read model refreshing/stale/schema_mismatch/missing 和网络恢复负面状态，但不覆盖 withdraw、真实历史多账户组合、真实生产超大数据性能、真实 XLSX 完整解析和每个 account/transaction status 的笛卡尔组合。
 - 银行明细对 pending invoices、turnover、no-OA、cost/tax 的 fan-out 仍需在对应模块轮次继续矩阵化；本模块只记录上游影响和已有关键保护。
+
+## 2026-07-25 - relation tag eligibility 回归
+
+- `tests/test_bank_details_sql_runtime.py` 与 `tests/test_audit_page_business_read_model_tool.py` 证明 canonical relation tag/source summary 排除不生成银行页面关系标签的 `turnover_manual_closure`。
+- 本次不改变 Bank Details API、页面交互、分类业务规则或 projection schema；既有页面/API 回归继续适用，生产隔离由 Phase 27 test-owned closure fixture 验证。

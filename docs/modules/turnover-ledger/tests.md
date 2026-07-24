@@ -516,3 +516,8 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api tests.
 - Business core：repair 回归覆盖 active Turnover 旧 source、缺 tag/version、真实规则覆盖旧写死 requirements，以及 ordinary missing snapshot、ETC、batch 和 inactive 豁免合同。
 - Service：forward fingerprint 同时绑定完整 metadata preimage 与 intended after image；partial execute、partial rollback、幂等重放和任一 drift 首写前零写入均有测试。rollback 通过现有 command 原地精确恢复 metadata，不 cancel/recreate relation。
 - Read model：Workbench month/all 升级 v6 后，旧 v5 generation 与派生 cache key 均不能冒充 fresh；生产 repair、rehydrate 和可逆写证据必须停在受控 operator checkpoint 执行。
+
+## 2026-07-25 - Turnover 专属 relation eligibility
+
+- `tests/test_turnover_ledger_postgres_integration.py` 证明 `turnover_manual_closure` 继续推进 Turnover 自身 canonical proof，但不推进共享 relation source version。
+- `tests/test_audit_page_business_read_model_tool.py` 证明 Turnover Audit 的共享 edge 子集排除该专属 mode；Turnover row/source freshness 与 Workbench 主 generation 仍覆盖真实 closure。

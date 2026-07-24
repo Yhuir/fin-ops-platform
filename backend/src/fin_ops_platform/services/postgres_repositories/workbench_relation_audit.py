@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fin_ops_platform.services.postgres_repositories.audit_report import AuditIssue
+from fin_ops_platform.services.workbench_relation_modes import TURNOVER_MANUAL_CLOSURE_RELATION_MODE
 
 
 def workbench_relation_edge_equality_issues(
@@ -23,7 +24,13 @@ def workbench_relation_edge_equality_issues(
     rows = connection.fetch_all(
         """
         /* check: relation_edge_equality */
-        with active_relation_members as (
+        with eligible_active_relations as (
+            select *
+            from app.workbench_pair_relations
+            where status = 'active'
+              and relation_mode <> %s
+        ),
+        active_relation_members as (
             select
                 relation.case_id,
                 relation.month_scope,
@@ -46,19 +53,17 @@ def workbench_relation_edge_equality_issues(
                         end
                     else lower(coalesce(relation.row_types[member.ordinality], ''))
                 end as row_type
-            from app.workbench_pair_relations relation
+            from eligible_active_relations relation
             join lateral unnest(relation.row_ids) with ordinality
               as member(row_id, ordinality) on true
             left join app.invoices invoice
               on coalesce(invoice.legacy_mongo_id, invoice.id::text) = member.row_id
              and invoice.status <> 'deleted'
-            where relation.status = 'active'
         ),
         relation_scope_candidates as (
             select relation.case_id, to_char(relation.month_scope, 'YYYY-MM') as scope_key
-            from app.workbench_pair_relations relation
-            where relation.status = 'active'
-              and relation.month_scope is not null
+            from eligible_active_relations relation
+            where relation.month_scope is not null
             union
             select member.case_id, to_char(bank.txn_month, 'YYYY-MM')
             from active_relation_members member
@@ -157,7 +162,7 @@ def workbench_relation_edge_equality_issues(
         order by mismatch_kind, scope_key, case_id, row_id
         limit %s
         """,
-        (tenant_id, tenant_id, limit),
+        (TURNOVER_MANUAL_CLOSURE_RELATION_MODE, tenant_id, tenant_id, limit),
     )
     return [
         AuditIssue(

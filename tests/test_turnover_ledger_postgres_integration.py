@@ -314,11 +314,17 @@ class TurnoverLedgerPostgresIntegrationTests(unittest.TestCase):
             insert into app.workbench_pair_relations(
                 case_id, relation_mode, status, month_scope, row_ids, row_types, raw_payload,
                 created_at, updated_at
-            ) values (
-                'case-delta-version', 'turnover_manual_closure', 'withdrawn', '2026-03-01',
-                array['txn-target', 'txn-peer'], array['bank', 'bank'], '{}'::jsonb,
-                '2026-07-20 15:00:00+08', '2026-07-20 15:00:00+08'
-            )
+            ) values
+                (
+                    'case-delta-version', 'manual_confirmed', 'withdrawn', '2026-03-01',
+                    array['txn-target', 'txn-peer'], array['bank', 'bank'], '{}'::jsonb,
+                    '2026-07-20 15:00:00+08', '2026-07-20 15:00:00+08'
+                ),
+                (
+                    'case-turnover-closure-version', 'turnover_manual_closure', 'withdrawn', '2026-03-01',
+                    array['txn-target', 'txn-peer'], array['bank', 'bank'], '{}'::jsonb,
+                    '2026-07-20 16:00:00+08', '2026-07-20 16:00:00+08'
+                )
             """
         )
 

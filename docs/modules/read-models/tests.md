@@ -617,3 +617,9 @@ git diff --check
 - `tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_read_model_refresh_is_active_checks_pending_or_processing_dirty_scope` 锁定 active 事实源为 exact dirty scope，不允许回退 outbox-only 判断。
 - `tests/test_runtime_infrastructure_postgres_integration.py::RuntimeInfrastructurePostgresIntegrationTests::test_active_refresh_remains_true_after_outbox_completion_until_dirty_scope_completes` 在 disposable PostgreSQL 复现 outbox 已 done、projection dirty 仍 pending 的真实时序；dirty 完成前 active 必须为 true，完成后才为 false。
 - 七类决策：service-layer、read model/cache/background job、跨模块 E2E 和 existing feature regression 适用；前两类由上述 unit/真实 PostgreSQL覆盖，E2E 与回归由 Phase 27 test-owned confirm/withdraw、全页面 HTTP/SSE 和 System Audit 生产门禁覆盖。business core、API contract、frontend interaction 不新增测试，因为本修复不改变业务规则、HTTP shape 或 UI 状态机。
+
+## 2026-07-25 - shared relation eligibility 与 Workbench polling proof
+
+- `tests/test_workbench_relation_sql_projection.py`、`tests/test_postgres_repositories_boundaries.py`、`tests/test_workbench_relation_read_facade.py` 证明共享 relation rows/groups/source version 排除 `turnover_manual_closure`，旧污染只使 exact scope stale 并通过正式 worker 自愈。
+- `tests/test_bank_details_sql_runtime.py`、`tests/test_search_pending_sql_runtime.py`、`tests/test_audit_page_business_read_model_tool.py` 证明 Bank Details、Pending Invoice 与共享 Audit 使用同一 eligibility，Turnover 专属关系不产生非 consumer I/O。
+- `tests/test_workbench_sql_runtime.py` 证明 exact active outbox refresh 直接返回 `refreshing` 并跳过重复 canonical/schema proof；dirty 没有 active event 时标记 stale、返回 exact re-enqueue scope并继续完整 proof。业务规则、HTTP shape、权限和前端状态机未改变，因此业务核心、API、前端专项测试不新增；跨模块 E2E 与性能由 Phase 27 同一生产 fixture 验证。

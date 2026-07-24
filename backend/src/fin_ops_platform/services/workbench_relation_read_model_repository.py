@@ -98,13 +98,17 @@ class WorkbenchRelationReadModelRepositoryPort:
         *,
         row_ids: list[str],
         include_member_summaries: bool = False,
+        exclude_relation_modes: list[str] | None = None,
         tenant_id: str = "default",
     ) -> list[dict[str, object]]:
-        rows = self._repository.list_active_workbench_relation_source_rows(
-            row_ids=row_ids,
-            include_member_summaries=include_member_summaries,
-            tenant_id=tenant_id,
-        )
+        kwargs: dict[str, object] = {
+            "row_ids": row_ids,
+            "include_member_summaries": include_member_summaries,
+            "tenant_id": tenant_id,
+        }
+        if exclude_relation_modes is not None:
+            kwargs["exclude_relation_modes"] = list(exclude_relation_modes)
+        rows = self._repository.list_active_workbench_relation_source_rows(**kwargs)
         return [dict(row) for row in list(rows or []) if isinstance(row, dict)]
 
     def workbench_relation_source_bundle_from_source(
@@ -128,6 +132,7 @@ class WorkbenchRelationReadModelRepositoryPort:
         row_ids: list[str] | None = None,
         include_row_ids: bool = False,
         relation_modes: list[str] | None = None,
+        exclude_relation_modes: list[str] | None = None,
         tenant_id: str = "default",
     ) -> dict[str, object]:
         kwargs: dict[str, object] = {
@@ -138,6 +143,8 @@ class WorkbenchRelationReadModelRepositoryPort:
         }
         if relation_modes is not None:
             kwargs["relation_modes"] = list(relation_modes)
+        if exclude_relation_modes is not None:
+            kwargs["exclude_relation_modes"] = list(exclude_relation_modes)
         payload = self._repository.workbench_relation_source_summary_from_source(
             **kwargs,
         )

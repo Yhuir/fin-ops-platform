@@ -759,8 +759,50 @@ def test_workbench_relation_delta_source_versions_preserve_unrelated_sources() -
     sql, params = connection.fetched_one[0]
     assert "from read_model.workbench_relation_scopes scope" in sql
     assert "where relation.row_ids && %s::text[]" in sql
+    assert "relation.relation_mode <> %s" in sql
     assert "from app.bank_transactions" not in sql
-    assert params == (["txn-1", "oa-1"], "default", "2026-05")
+    assert params == (
+        ["txn-1", "oa-1"],
+        "turnover_manual_closure",
+        "default",
+        "2026-05",
+    )
+
+
+def test_workbench_relation_source_reads_can_exclude_turnover_closure_mode() -> None:
+    class RelationSourceConnection(RecordingConnection):
+        def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+            self.fetched_one.append((" ".join(sql.split()), params))
+            return {"relation_count": 0, "relation_updated_at": ""}
+
+        def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+            self.fetched_all.append((" ".join(sql.split()), params))
+            return []
+
+    connection = RelationSourceConnection()
+    repository = PostgresReadModelRepository(connection)
+
+    repository.workbench_relation_source_summary_from_source(
+        scope_key="2026-05",
+        row_ids=["txn-1"],
+        include_row_ids=True,
+        exclude_relation_modes=["turnover_manual_closure"],
+    )
+    repository.list_active_workbench_relation_source_rows(
+        row_ids=["txn-1"],
+        exclude_relation_modes=["turnover_manual_closure"],
+    )
+
+    summary_sql, summary_params = connection.fetched_one[0]
+    rows_sql, rows_params = connection.fetched_all[0]
+    assert "not (relation_mode = any(%s::text[]))" in summary_sql
+    assert summary_params == (
+        ["turnover_manual_closure"],
+        "2026-05-01",
+        ["txn-1"],
+    )
+    assert "not (relation_mode = any(%s::text[]))" in rows_sql
+    assert rows_params == (["txn-1"], ["turnover_manual_closure"])
 
 
 def test_no_oa_bank_batch_empty_snapshot_deletes_events_before_batches() -> None:

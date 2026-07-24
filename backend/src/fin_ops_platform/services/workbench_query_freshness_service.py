@@ -29,6 +29,9 @@ class WorkbenchQueryFreshnessService:
         *,
         scope_key: str | None = None,
     ) -> dict[str, object]:
+        if status_payload.get("active_refresh_in_progress") is True:
+            return status_payload
+
         normalized_scope_key = str(scope_key or "").strip() or "all"
         refresh_scope_keys: list[str] = []
         if normalized_scope_key == "all" and self._supports_bulk_proof():
@@ -53,7 +56,7 @@ class WorkbenchQueryFreshnessService:
             dict.fromkeys([*existing_reasons, *reasons])
         )
         result["refresh_scope_keys"] = list(dict.fromkeys(refresh_scope_keys))
-        if str(result.get("read_model_status") or "fresh") == "fresh":
+        if str(result.get("read_model_status") or "fresh") in {"fresh", "refreshing"}:
             result["read_model_status"] = "stale"
         return result
 

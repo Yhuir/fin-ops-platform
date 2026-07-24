@@ -925,8 +925,16 @@ read model 有 refresh 在跑；当同一 `tenant_id + scope_type + scope_key` �
 active 的事实判断必须读取 exact `job.outbox_events` 的 `pending/processing` 事件；dirty scope 仍负责阻断 freshness，
 但不能单独证明 worker 还会继续推进。若 dirty 为 pending/processing 而同 scope 已没有 active event，说明 handler
 返回 `refreshing` 后留下了 orphan dirty，下一次 ensure 必须允许重新 enqueue。Workbench 重建进行中仍会有 active
-event，成本统计依赖检查必须复用它，不得让下游访问把 in-flight publish supersede。
+event，成本统计依赖检查必须复用它，不得让下游访问把 in-flight publish supersede。Workbench normal GET 的
+freshness view 已证明 exact `pending/processing` outbox event 后必须直接返回 `refreshing`，不得在每个 polling
+request 重跑全月份 canonical generation proof 或 schema scan；dirty 没有 active event 时标记 stale 并返回 exact
+scope 重新入队，不能隐藏 orphan dirty。
 上述 coalesce 仅适用于普通 ensure/wakeup；显式 `force_refresh=true` 必须保留独立 durable event 语义。
+
+共享 `workbench_relation` worker 只投影共享 consumer 使用的 eligible relation modes。`turnover_manual_closure`
+由 Workbench active generation 与 Turnover Ledger 直接读取 canonical relation，不进入共享 rows/groups/source
+version；Bank Details、Pending Invoice 与共享 relation Audit 使用同一排除条件。历史 scope 若含该 mode，只在
+exact scope 被访问时经正式 gateway/worker 重建，禁止为清理旧投影新增全局 migration 或写后 fan-out。
 
 普通 canonical 写入只推进 owner facts/version/audit，不创建页面 dirty/outbox；当前页或后续被访问页通过 expected
 source version 发现 mismatch 后使用上述 ensure 边界入队。只有 manifest 明确登记的 import/reapply/repair、显式

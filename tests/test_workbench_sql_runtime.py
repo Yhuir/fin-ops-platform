@@ -438,6 +438,7 @@ class WorkbenchSummaryGroupsConnection(WorkbenchSqlReadConnection):
                     "updated_at": "2026-05-22T09:31:00+00:00",
                     "last_error": "worker timeout" if self.dirty_status == "failed" else None,
                     "source_version": 7,
+                    "active_event": self.dirty_status in {"pending", "processing"},
                 }
             ]
         if "from job.runtime_worker_heartbeats" in normalized:
@@ -1780,6 +1781,63 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             result["read_model_stale_reasons"],
             ["2026-03:relation_version_mismatch"],
         )
+
+    def test_workbench_refreshing_freshness_skips_duplicate_canonical_proof(self) -> None:
+        class FailIfConstructedBuilder:
+            def __init__(self, **_kwargs: object) -> None:
+                raise AssertionError("refreshing scope must not repeat canonical source proof")
+
+        service = WorkbenchQueryFreshnessService(
+            connection=SimpleNamespace(fetch_all=lambda *_args, **_kwargs: []),
+            repository=SimpleNamespace(active_workbench_source_versions_by_scope=lambda **_kwargs: {}),
+            single_scope_stale_reasons=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("refreshing scope must not repeat single-scope source proof")
+            ),
+        )
+        payload = {
+            "scope_key": "all",
+            "read_model_status": "refreshing",
+            "active_refresh_in_progress": True,
+            "dirty_scopes": [{"scope_key": "2026-03", "status": "processing"}],
+        }
+
+        with patch(
+            "fin_ops_platform.services.workbench_query_freshness_service.WorkbenchSqlProjectionBuilder",
+            FailIfConstructedBuilder,
+        ):
+            result = service.apply(payload, scope_key="all")
+
+        self.assertIs(result, payload)
+
+    def test_workbench_refreshing_without_active_event_runs_canonical_proof(self) -> None:
+        calls: list[str | None] = []
+
+        def stale_reasons(
+            _source_versions: object,
+            *,
+            scope_key: str | None = None,
+        ) -> list[str]:
+            calls.append(scope_key)
+            return ["builder_mismatch"]
+
+        service = WorkbenchQueryFreshnessService(
+            connection=None,
+            repository=None,
+            single_scope_stale_reasons=stale_reasons,
+        )
+
+        result = service.apply(
+            {
+                "scope_key": "2026-03",
+                "read_model_status": "refreshing",
+                "active_refresh_in_progress": False,
+            },
+            scope_key="2026-03",
+        )
+
+        self.assertEqual(calls, ["2026-03"])
+        self.assertEqual(result["read_model_status"], "stale")
+        self.assertEqual(result["refresh_scope_keys"], ["2026-03"])
 
     def test_workbench_all_freshness_keeps_non_sql_fallback_contract(self) -> None:
         calls: list[tuple[object, str | None]] = []
@@ -5194,7 +5252,11 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         class SqlWorkbench:
             def get_workbench_refresh_status(self, **_kwargs):
-                return {"read_model_status": "refreshing", "dirty_scopes": [{"scope_key": "all"}]}
+                return {
+                    "read_model_status": "refreshing",
+                    "active_refresh_in_progress": True,
+                    "dirty_scopes": [{"scope_key": "all"}],
+                }
 
             def get_workbench_groups_page(self, **kwargs):
                 page_calls.append(kwargs)
@@ -6448,6 +6510,56 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("generation_metadata_actual_mismatch", status["read_model_stale_reasons"])
         self.assertIsNone(status["last_error"])
         self.assertFalse(any("duplicate_identity_counts as" in sql for sql, _params in connection.fetch_all_calls))
+
+    def test_groups_freshness_skips_builder_schema_scan_while_scope_is_refreshing(self) -> None:
+        connection = ActiveWorkbenchGenerationConnection(dirty_status="processing")
+        repository = PostgresReadModelRepository(connection)
+
+        status = repository.get_workbench_groups_freshness_status(scope_key="2026-05")
+
+        self.assertEqual(status["read_model_status"], "refreshing")
+        self.assertTrue(status["active_refresh_in_progress"])
+        dirty_sql = next(
+            sql
+            for sql, _params in connection.fetch_all_calls
+            if "from job.read_model_dirty_scopes dirty" in sql
+        )
+        self.assertIn("from job.outbox_events event", dirty_sql)
+        self.assertIn("event.status in ('pending', 'processing')", dirty_sql)
+        self.assertFalse(
+            any(
+                "from read_model.workbench_groups" in sql
+                and "current_group_count" in sql
+                for sql, _params in connection.fetch_one_calls
+            )
+        )
+
+    def test_groups_freshness_marks_orphan_dirty_scope_stale_for_exact_reenqueue(self) -> None:
+        class OrphanDirtyScopeConnection(ActiveWorkbenchGenerationConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                if "from job.read_model_dirty_scopes dirty" in normalized:
+                    self.fetch_all_calls.append((normalized, params))
+                    return [
+                        {
+                            "scope_key": "2026-05",
+                            "status": "processing",
+                            "updated_at": "2026-05-22T09:31:00+00:00",
+                            "last_error": None,
+                            "source_version": 13,
+                            "active_event": False,
+                        }
+                    ]
+                return super().fetch_all(sql, params)
+
+        repository = PostgresReadModelRepository(OrphanDirtyScopeConnection())
+
+        status = repository.get_workbench_groups_freshness_status(scope_key="2026-05")
+
+        self.assertEqual(status["read_model_status"], "stale")
+        self.assertFalse(status["active_refresh_in_progress"])
+        self.assertEqual(status["refresh_scope_keys"], ["2026-05"])
+        self.assertIn("orphan_dirty_scope", status["read_model_stale_reasons"])
 
     def test_repository_treats_covered_dirty_workbench_scope_as_fresh(self) -> None:
         class CoveredDirtyScopeConnection(ActiveWorkbenchGenerationConnection):

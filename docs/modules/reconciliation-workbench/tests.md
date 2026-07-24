@@ -150,3 +150,8 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_w
 - `web/src/test/WorkbenchSelection.test.tsx` 保护已选 OA + 银行流水在 OA 同步期间禁用确认/异常操作并展示真实原因；关联台专属 `/api/oa-sync/status` 返回 synced 后，即使全局 App Health 仍是旧 dirty 快照，也必须在既有 3 秒轮询周期内自动恢复按钮且保留同 generation 选择。
 - `web/src/test/WorkbenchZone.test.tsx` 保护选择区禁用原因的可见与可访问输出；`web/e2e/workbench-stale-error-flow.spec.ts` 保护 Chromium 下 OA dirty/refreshing 的按钮、提示和零 mutation 请求。
 - 性能不新增 I/O：门禁复用既有 OA status 轮询和已加载的 Workbench page status/version，不新增 API、轮询器、worker、read model 或跨页面状态。
+
+## 2026-07-25 Workbench active-refresh polling 回归
+
+- `tests/test_workbench_sql_runtime.py` 证明 exact scope 有 `pending/processing` outbox event 时直接返回 `refreshing`，不重复执行全月份 canonical proof或 schema scan；dirty 没有 active event 时标记 stale并返回 exact re-enqueue scope。
+- `tests/test_workbench_relation_sql_projection.py` 证明 `turnover_manual_closure` 保留在 Workbench 主 generation 的 canonical 输入，但不进入共享 `workbench_relation` distribution。

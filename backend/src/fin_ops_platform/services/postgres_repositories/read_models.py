@@ -49,6 +49,7 @@ from fin_ops_platform.services.workbench_read_model_version import (
     WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION,
     WorkbenchReadModelVersionConflictError,
 )
+from fin_ops_platform.services.workbench_relation_modes import TURNOVER_MANUAL_CLOSURE_RELATION_MODE
 MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
 BANK_DETAIL_READ_MODEL_SCHEMA_VERSION = 11
 BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE = hashlib.sha256(b"[]").hexdigest()
@@ -809,11 +810,16 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             from invoice_scope_ids scope
             left join app.workbench_pair_relations relation
               on relation.status = 'active'
+             and relation.relation_mode <> %s
              and relation.row_ids && scope.row_ids
             group by scope.scope_key
             order by scope.scope_key
             """,
-            (normalized_scope_keys, invoice_type),
+            (
+                normalized_scope_keys,
+                invoice_type,
+                TURNOVER_MANUAL_CLOSURE_RELATION_MODE,
+            ),
         )
         versions = {
             scope_key: {
@@ -2917,6 +2923,7 @@ class PostgresBankReadModelRepository:
             from bank_scope_ids scope
             left join app.workbench_pair_relations relation
               on relation.status = 'active'
+             and relation.relation_mode <> %s
              and (
                     relation.month_scope = scope.scope_month
                     or relation.row_ids && scope.row_ids
@@ -2924,7 +2931,7 @@ class PostgresBankReadModelRepository:
             group by scope.scope_month
             order by scope.scope_month
             """,
-            (scope_months,),
+            (scope_months, TURNOVER_MANUAL_CLOSURE_RELATION_MODE),
         )
         summaries = {
             scope_key: {
@@ -5225,6 +5232,7 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
                 from pending_scopes
                 left join app.workbench_pair_relations relations
                   on relations.status = 'active'
+                 and relations.relation_mode <> %s
                  and (
                     relations.month_scope = pending_scopes.scope_month
                     or relations.row_ids && pending_scopes.row_ids
@@ -5232,7 +5240,7 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
                 group by pending_scopes.scope_key
                 order by pending_scopes.scope_key
                 """,
-                tuple(params),
+                tuple([*params, TURNOVER_MANUAL_CLOSURE_RELATION_MODE]),
             )
         result: dict[str, Any] = {}
         for row in scope_rows:
@@ -6570,7 +6578,8 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
         if not normalized_scope_keys:
             return False
         for scope_key in normalized_scope_keys:
-            if self._workbench_relation_scope_row(scope_key=scope_key, tenant_id=tenant_id) is None:
+            scope_row = self._workbench_relation_scope_row(scope_key=scope_key, tenant_id=tenant_id)
+            if scope_row is None or bool(scope_row.get("excluded_relation_mode_present")):
                 return False
             if self._refresh_status(scope_type="workbench_relation", scope_key=scope_key) != "fresh":
                 return False
@@ -6587,12 +6596,21 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
         executor = connection or self._connection
         return executor.fetch_one(
             """
-            select scope_key, row_count, group_count, source_versions, cache_status
-            from read_model.workbench_relation_scopes
-            where tenant_id = %s
-              and scope_key = %s
+            select scope.scope_key, scope.row_count, scope.group_count,
+                   scope.source_versions, scope.cache_status,
+                   exists (
+                       select 1
+                       from read_model.workbench_relation_groups relation_group
+                       where relation_group.tenant_id = scope.tenant_id
+                         and relation_group.scope_key = scope.scope_key
+                         and relation_group.relation_status = 'linked'
+                         and relation_group.payload->>'relation_mode' = %s
+                   ) as excluded_relation_mode_present
+            from read_model.workbench_relation_scopes scope
+            where scope.tenant_id = %s
+              and scope.scope_key = %s
             """,
-            (tenant_id, scope_key),
+            (TURNOVER_MANUAL_CLOSURE_RELATION_MODE, tenant_id, scope_key),
         )
 
 
@@ -6670,6 +6688,9 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
             elif not scope_exists or not isinstance(source_versions, dict):
                 statuses.append("missing")
                 stale_reasons.append(f"{scope_key}:read_model_missing")
+            elif bool(proof.get("excluded_relation_mode_present")):
+                statuses.append("stale")
+                stale_reasons.append(f"{scope_key}:excluded_relation_mode_present")
             else:
                 statuses.append("fresh")
         status = "fresh"
@@ -6712,7 +6733,9 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
                 union
                 select month_scope as scope_month
                 from app.workbench_pair_relations
-                where month_scope is not null and status = 'active'
+                where month_scope is not null
+                  and status = 'active'
+                  and relation_mode <> %s
                 union
                 select scope_month
                 from read_model.workbench_relation_scopes
@@ -6721,7 +6744,7 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
             where scope_month is not null
             order by scope_key
             """,
-            (tenant_id,),
+            (TURNOVER_MANUAL_CLOSURE_RELATION_MODE, tenant_id),
         )
         return _dedupe_preserve_order(
             text(row.get("scope_key"))
@@ -6734,21 +6757,29 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
         *,
         row_ids: list[str],
         include_member_summaries: bool = False,
+        exclude_relation_modes: list[str] | None = None,
         tenant_id: str = "default",
     ) -> list[dict[str, Any]]:
         _ = tenant_id
         normalized_row_ids = text_list(row_ids)
         if not normalized_row_ids:
             return []
+        normalized_excluded_modes = text_list(exclude_relation_modes)
+        excluded_mode_clause = ""
+        params: list[Any] = [normalized_row_ids]
+        if normalized_excluded_modes:
+            excluded_mode_clause = "and not (relation_mode = any(%s::text[]))"
+            params.append(normalized_excluded_modes)
         rows = self._connection.fetch_all(
-            """
+            f"""
             select case_id, status, relation_mode, row_ids, row_types, amount_check, raw_payload
             from app.workbench_pair_relations
             where status = 'active'
               and row_ids && %s::text[]
+              {excluded_mode_clause}
             order by updated_at desc, case_id
             """,
-            (normalized_row_ids,),
+            tuple(params),
         )
         result = [dict(row) for row in rows if isinstance(row, dict)]
         if not include_member_summaries:
@@ -6934,12 +6965,14 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
         row_ids: list[str] | None = None,
         include_row_ids: bool = False,
         relation_modes: list[str] | None = None,
+        exclude_relation_modes: list[str] | None = None,
         tenant_id: str = "default",
     ) -> dict[str, Any]:
         _ = tenant_id
         normalized_scope_key = text(scope_key) or ""
         normalized_row_ids = text_list(row_ids)
         normalized_relation_modes = text_list(relation_modes)
+        normalized_excluded_modes = text_list(exclude_relation_modes)
         where = ["status = 'active'"]
         params: list[Any] = []
         if relation_modes is not None:
@@ -6947,6 +6980,9 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
                 raise ValueError("relation_modes must contain at least one mode when supplied.")
             where.append("relation_mode = any(%s)")
             params.append(normalized_relation_modes)
+        if normalized_excluded_modes:
+            where.append("not (relation_mode = any(%s::text[]))")
+            params.append(normalized_excluded_modes)
         month = month_start(normalized_scope_key)
         if month and include_row_ids and normalized_row_ids:
             where.append("(month_scope = %s::date or row_ids && %s::text[])")
@@ -6992,7 +7028,9 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
             scope_key=text(scope_key) or "all",
             tenant_id=tenant_id,
         )
-        return dict(scope_row) if isinstance(scope_row, dict) else None
+        if not isinstance(scope_row, dict) or bool(scope_row.get("excluded_relation_mode_present")):
+            return None
+        return dict(scope_row)
 
 
     def _workbench_relation_groups_for_scope_group_ids(
@@ -7042,6 +7080,9 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
             if scope_status != "fresh":
                 status = "refreshing" if scope_status == "refreshing" else "stale"
                 stale_reasons.append(f"{scope_status}:{scope_key}")
+            elif bool(scope_row.get("excluded_relation_mode_present")):
+                status = "stale"
+                stale_reasons.append(f"excluded_relation_mode_present:{scope_key}")
             if not source_versions and isinstance(scope_row.get("source_versions"), dict):
                 source_versions = dict(scope_row.get("source_versions"))
             if isinstance(scope_row.get("source_versions"), dict):
@@ -7084,13 +7125,19 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
                   select max(relation.updated_at)
                   from app.workbench_pair_relations relation
                   where relation.row_ids && %s::text[]
+                    and relation.relation_mode <> %s
                 )
               )::text as pair_relations_updated_at
             from read_model.workbench_relation_scopes scope
             where scope.tenant_id = %s
               and scope.scope_key = %s
             """,
-            (normalized_row_ids, tenant_id, normalized_scope_key),
+            (
+                normalized_row_ids,
+                TURNOVER_MANUAL_CLOSURE_RELATION_MODE,
+                tenant_id,
+                normalized_scope_key,
+            ),
         )
         payload = row if isinstance(row, dict) else {}
         source_versions = payload.get("source_versions")
@@ -7114,7 +7161,15 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
             select requested.scope_key,
                    (scope.scope_key is not null) as scope_exists,
                    scope.source_versions,
-                   dirty.status as dirty_status
+                   dirty.status as dirty_status,
+                   exists (
+                       select 1
+                       from read_model.workbench_relation_groups relation_group
+                       where relation_group.tenant_id = %s
+                         and relation_group.scope_key = requested.scope_key
+                         and relation_group.relation_status = 'linked'
+                         and relation_group.payload->>'relation_mode' = %s
+                   ) as excluded_relation_mode_present
             from unnest(%s::text[]) with ordinality as requested(scope_key, position)
             left join read_model.workbench_relation_scopes scope
               on scope.tenant_id = %s
@@ -7131,7 +7186,13 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
             ) dirty on true
             order by requested.position
             """,
-            (normalized_scope_keys, tenant_id, tenant_id),
+            (
+                tenant_id,
+                TURNOVER_MANUAL_CLOSURE_RELATION_MODE,
+                normalized_scope_keys,
+                tenant_id,
+                tenant_id,
+            ),
         )
 
     def _batch_accounting_relation_payload_from_rows(
@@ -7170,6 +7231,9 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
                 scope_status = "refreshing" if dirty_status in {"pending", "processing"} else "stale"
                 status = scope_status
                 stale_reasons.append(f"{scope_status}:{scope_key}")
+            elif bool(proof.get("excluded_relation_mode_present")):
+                status = "stale"
+                stale_reasons.append(f"excluded_relation_mode_present:{scope_key}")
             proof_source_versions = proof.get("source_versions")
             if isinstance(proof_source_versions, dict):
                 scope_source_versions[scope_key] = dict(proof_source_versions)
@@ -13589,17 +13653,28 @@ class PostgresReadModelRepository:
 
     def get_workbench_groups_freshness_status(self, *, scope_key: str | None = None) -> dict[str, Any]:
         normalized_scope_key = str(scope_key or "all").strip() or "all"
-        scope_clause = "" if normalized_scope_key == "all" else "and scope_key = %s"
+        scope_clause = "" if normalized_scope_key == "all" else "and dirty.scope_key = %s"
         params = () if normalized_scope_key == "all" else (normalized_scope_key,)
         dirty_rows = self._connection.fetch_all(
             f"""
-            select scope_key, status, updated_at::text as updated_at, last_error, source_version
-            from job.read_model_dirty_scopes
-            where tenant_id = 'default'
-              and scope_type = 'workbench'
-              and status in ('pending', 'processing', 'failed')
+            select dirty.scope_key, dirty.status,
+                   dirty.updated_at::text as updated_at,
+                   dirty.last_error, dirty.source_version,
+                   exists (
+                       select 1
+                       from job.outbox_events event
+                       where event.tenant_id = dirty.tenant_id
+                         and event.event_type = 'workbench.read_model.refresh'
+                         and event.scope_type = dirty.scope_type
+                         and event.scope_key = dirty.scope_key
+                         and event.status in ('pending', 'processing')
+                   ) as active_event
+            from job.read_model_dirty_scopes dirty
+            where dirty.tenant_id = 'default'
+              and dirty.scope_type = 'workbench'
+              and dirty.status in ('pending', 'processing', 'failed')
               {scope_clause}
-            order by updated_at desc
+            order by dirty.updated_at desc
             limit 50
             """,
             params,
@@ -13652,6 +13727,7 @@ class PostgresReadModelRepository:
                 "updated_at": text(row.get("updated_at")),
                 "last_error": text(row.get("last_error")),
                 "source_version": int_value(row.get("source_version"), 0),
+                "active_event": bool(row.get("active_event")),
             }
             for row in dirty_rows
             if isinstance(row, dict)
@@ -13668,20 +13744,30 @@ class PostgresReadModelRepository:
             )
         ]
         failed_scopes = [scope for scope in dirty_scopes if scope.get("status") == "failed"]
-        schema_status = self._workbench_groups_schema_status(scope_key=normalized_scope_key)
+        orphan_scope_keys = [
+            text(scope.get("scope_key"))
+            for scope in pending_scopes
+            if not bool(scope.get("active_event")) and text(scope.get("scope_key"))
+        ]
+        active_refresh_in_progress = bool(pending_scopes) and not orphan_scope_keys
         read_model_status = "fresh"
         stale_reasons: list[str] = []
         if not active_generation_id:
             read_model_status = "unavailable"
             stale_reasons.append("active_generation_missing")
-        elif pending_scopes:
+        elif orphan_scope_keys:
+            read_model_status = "stale"
+            stale_reasons.append("orphan_dirty_scope")
+        elif active_refresh_in_progress:
             read_model_status = "refreshing"
         elif failed_scopes:
             read_model_status = "stale"
             stale_reasons.append("refresh_failed")
-        elif schema_status != "fresh":
-            read_model_status = "stale"
-            stale_reasons.append("builder_schema_mismatch")
+        else:
+            schema_status = self._workbench_groups_schema_status(scope_key=normalized_scope_key)
+            if schema_status != "fresh":
+                read_model_status = "stale"
+                stale_reasons.append("builder_schema_mismatch")
         return {
             "scope_key": normalized_scope_key,
             "read_model_status": read_model_status,
@@ -13690,6 +13776,8 @@ class PostgresReadModelRepository:
             "generated_at": generated_at,
             "source_versions": active_source_versions,
             "dirty_scopes": dirty_scopes,
+            "active_refresh_in_progress": active_refresh_in_progress,
+            "refresh_scope_keys": orphan_scope_keys,
             "read_model_stale_reasons": stale_reasons,
             "last_error": next((scope.get("last_error") for scope in failed_scopes if scope.get("last_error")), None),
         }

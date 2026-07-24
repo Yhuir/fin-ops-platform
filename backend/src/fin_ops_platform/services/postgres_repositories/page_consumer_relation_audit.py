@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fin_ops_platform.services.postgres_repositories.audit_report import AuditIssue
+from fin_ops_platform.services.workbench_relation_modes import TURNOVER_MANUAL_CLOSURE_RELATION_MODE
 
 
 OA_PENDING_PAYMENT_CONSUMER = "oa_pending_payment_summaries"
@@ -749,6 +750,7 @@ def _turnover_ledger_sql(*, tenant_id: str, limit: int) -> tuple[str, tuple[Any,
                      then relation.value->'row_ids' else '[]'::jsonb end
             ) with ordinality member(row_id, ordinality) on true
             where lower(coalesce(relation.value->>'relation_status', 'linked')) in ('linked', 'active')
+              and coalesce(relation.value->>'relation_mode', '') <> %s
         ),
         consumer_edges as (
             select anchor_id, case_id, row_id, row_type, min(scope_key) as scope_key
@@ -782,7 +784,7 @@ def _turnover_ledger_sql(*, tenant_id: str, limit: int) -> tuple[str, tuple[Any,
         order by mismatch_kind, subject_id, case_id, row_type, row_id
         limit %s
         """,
-        (tenant_id, limit),
+        (tenant_id, TURNOVER_MANUAL_CLOSURE_RELATION_MODE, limit),
     )
 
 

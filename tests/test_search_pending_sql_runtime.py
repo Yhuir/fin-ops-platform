@@ -3640,7 +3640,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(
             connection.relation_source_summary_params,
-            [("expense",)],
+            [("expense", "turnover_manual_closure")],
         )
         self.assertEqual(
             source_versions,

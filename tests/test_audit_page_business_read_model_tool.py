@@ -422,6 +422,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("coalesce(source.legacy_mongo_id, source.id::text)", queried_sql)
         self.assertIn("source.id::text", queried_sql)
         self.assertIn("relation.row_ids && identities.row_ids", queried_sql)
+        self.assertIn("relation.relation_mode <> %s", queried_sql)
 
     def test_bank_detail_audit_proves_linked_relation_tag_case_and_status_contract(self) -> None:
         connection = FakeConnection()
@@ -607,7 +608,8 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("group_row.bank_transaction_ids && anchor.anchor_bank_row_ids", consumer_sql)
         self.assertIn("shared_edge_missing_consumer", consumer_sql)
         self.assertIn("consumer_edge_not_shared", consumer_sql)
-        self.assertEqual(params, ("default", 51))
+        self.assertIn("relation.value->>'relation_mode'", consumer_sql)
+        self.assertEqual(params, ("default", "turnover_manual_closure", 51))
         self.assertIn("consumer_relation_edge_equality", report["audit_contract"]["proof_checks"])
 
     def test_turnover_flow_missing_relation_member_is_blocking(self) -> None:
@@ -800,7 +802,14 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
             domain_key="pending_invoices",
         )
 
-        relation_sql = next(sql for sql, _params in connection.fetch_all_calls if "relation_edge_equality" in sql)
+        relation_sql, params = next(
+            (sql, params)
+            for sql, params in connection.fetch_all_calls
+            if "relation_edge_equality" in sql
+        )
+        self.assertIn("eligible_active_relations", relation_sql)
+        self.assertIn("relation_mode <> %s", relation_sql)
+        self.assertEqual(params[0], "turnover_manual_closure")
         self.assertIn("relation_scope_candidates", relation_sql)
         self.assertIn("expected_edges", relation_sql)
         self.assertIn("projected_group_edges", relation_sql)
@@ -854,8 +863,8 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertNotIn("relation_scope.source_versions as relation_source_versions", fresh_gate_sql)
         self.assertIn("dead_lettered", fresh_gate_sql)
         self.assertNotIn("select relation_scope.scope_key", target_inventory_sql)
-        self.assertNotIn("from app.bank_transactions", fresh_gate_sql)
-        self.assertNotIn("from app.invoices", fresh_gate_sql)
+        self.assertIn("from app.bank_transactions", fresh_gate_sql)
+        self.assertIn("from app.invoices", fresh_gate_sql)
         statistics_sql = next(
             sql
             for sql, _params in connection.fetch_all_calls
@@ -1083,7 +1092,7 @@ class BankDetailAuditPostgresTests(unittest.TestCase):
     def tearDown(self) -> None:
         truncate_test_database(self.database_url)
 
-    def test_cross_month_relation_membership_is_part_of_each_bank_scope_expected_summary(self) -> None:
+    def test_turnover_manual_closure_is_excluded_from_bank_scope_relation_summary(self) -> None:
         self.connection.execute(
             """
             insert into app.bank_transactions(
@@ -1094,7 +1103,7 @@ class BankDetailAuditPostgresTests(unittest.TestCase):
                 ('bank-mar', '6222', 'outflow', '测试往来', 100, -100, '2026-03-01', '2026-03-01', 'active', '{}'::jsonb)
             """
         )
-        relation = self.connection.fetch_one(
+        self.connection.execute(
             """
             insert into app.workbench_pair_relations(
                 case_id, relation_mode, status, month_scope, row_ids, row_types, updated_at
@@ -1103,17 +1112,15 @@ class BankDetailAuditPostgresTests(unittest.TestCase):
                 array['bank-feb', 'bank-mar'], array['bank', 'bank'],
                 '2026-07-13 08:00:00+00'::timestamptz
             )
-            returning updated_at::text as relation_updated_at
             """
         )
-        relation_updated_at = str((relation or {})["relation_updated_at"])
         for scope_key in ("2026-02", "2026-03"):
             source_versions = {
                 "workbench_relation_source_versions": {
                     "source": "workbench_pair_relations",
                     "scope_key": scope_key,
-                    "relation_count": 1,
-                    "relation_updated_at": relation_updated_at,
+                    "relation_count": 0,
+                    "relation_updated_at": "",
                 }
             }
             self.connection.execute(
@@ -1141,7 +1148,7 @@ class BankDetailAuditPostgresTests(unittest.TestCase):
             set source_versions = jsonb_set(
                 source_versions,
                 '{workbench_relation_source_versions,relation_count}',
-                '0'::jsonb
+                '1'::jsonb
             )
             where scope_key = '2026-02'
             """
@@ -1149,7 +1156,7 @@ class BankDetailAuditPostgresTests(unittest.TestCase):
         mismatches = self.connection.fetch_all(sql, params)
 
         self.assertEqual([row["scope_key"] for row in mismatches], ["2026-02"])
-        self.assertEqual(mismatches[0]["current_relation_versions"]["relation_count"], 1)
+        self.assertEqual(mismatches[0]["current_relation_versions"]["relation_count"], 0)
 
 
 def _check_name(sql: str) -> str:
@@ -1169,6 +1176,7 @@ def _fresh_oa_pending_payment_query_state_row() -> dict[str, object]:
         "payment_status_signature": "payment",
         "oa_pending_payment_source_signature": "source",
         "oa_pending_payment_relation_version": 1,
+        "oa_pending_payment_workbench_pair_relations_updated_at": "",
         "oa_pending_payment_bank_coverage_signature": "rows:1|digest:bank",
         "oa_pending_payment_input_invoice_coverage_signature": "rows:1|digest:invoice",
         "oa_pending_payment_event_source_version": 1,
@@ -1190,6 +1198,10 @@ def _fresh_oa_pending_payment_query_state_row() -> dict[str, object]:
         "pending_relation_version": 1,
         "dirty_status": "done",
         "dirty_source_version": 1,
+        "current_bank_coverage_row_count": 1,
+        "current_bank_coverage_digest": "bank",
+        "current_input_invoice_coverage_row_count": 1,
+        "current_input_invoice_coverage_digest": "invoice",
         "outbox_blocking": False,
     }
 

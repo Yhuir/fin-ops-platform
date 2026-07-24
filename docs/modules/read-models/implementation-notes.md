@@ -1845,3 +1845,9 @@
 - `write_operation_e2e_smoke` 现在对同一 checkpoint 的 consumer 使用最多 16 个有界线程并发探测，并继续按 scenario 顺序输出；这只修正生产证明 I/O，不改变页面、API、queue、worker 或 read model 运行时架构。
 - 首次 fresh HTTP 超过页面 SLO 仍是不可重试失败。异常结果现在始终保存已解析 `path`，与后续成功结果使用同一 `(page_key, name, path)` identity，避免总状态保留失败但展示结果被后续 pass 覆盖。
 - 定向测试覆盖两个页面确实同时发起请求、输出顺序稳定，以及 SLO exception 保留 resolved path；不需要运行 183 个浏览器测试或完整 CI。
+
+## 2026-07-25 - relation eligibility 与 active polling 共享根因
+
+- 生产可逆 Turnover closure 证明普通写零 fan-out，但 active relation 期间共享 relation Audit 把专用 `turnover_manual_closure` 当作所有页面依赖，且 Workbench polling 在 worker active 时重复扫描全月份 canonical proof。
+- 修复复用现有 relation repository/gateway：共享 distribution、Bank Details、Pending Invoice 与 Audit 使用同一排除 mode；Workbench/Turnover/Cost 保留各自 canonical proof。旧污染只在 exact scope 访问时重建，不新增 migration、queue、worker、cache、schema 或 fallback。
+- Workbench freshness service 在 current-effective active refresh 时直接返回 `refreshing`，active event 消失后继续完整 proof 与 orphan recovery。

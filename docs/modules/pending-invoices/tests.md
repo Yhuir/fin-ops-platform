@@ -202,3 +202,8 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_worker_manifest
 - 根因：待找发票的 OA 列只消费 `workbench_relation` distribution 的 `linked_oa`，而 `workbench_relation` 生成 OA summary 时旧完成态 predicate 只接受 `completed`/空值。历史 OA projection 行若保留 `已完成`、`approved` 或 `2` 等完成态别名，canonical relation 仍可包含 OA row id，但 distribution 的 `linked_oa` 为空，导致 145 类已配对行在待找发票 OA 列为空。
 - 修复：完成态识别收敛到 OA projection 边界并 bump `OA_PROJECTION_SYNC_VERSION`，让 relation/pending read model 重新生成；待找发票不新增附件/OA raw payload fallback。
 - 新增测试：`tests/test_workbench_relation_sql_projection.py::WorkbenchRelationSqlProjectionTests::test_rebuild_keeps_oa_summary_for_legacy_completed_workflow_status`、`tests/test_oa_projection_sync_service.py::OaProjectionSyncServiceTests::test_oa_sync_treats_legacy_completed_workflow_aliases_as_completed`。
+
+## 2026-07-25 - shared relation source eligibility
+
+- `tests/test_search_pending_sql_runtime.py` 与 `tests/test_postgres_repositories_boundaries.py` 证明 pending/search worker 的 relation rows/source summary 排除 Turnover 专属 `turnover_manual_closure`。
+- `tests/test_audit_page_business_read_model_tool.py` 证明该专用关系不使 Pending Invoice consumer/Audit stale；HTTP shape、规则保存、attach/status 写合同和前端交互不变。

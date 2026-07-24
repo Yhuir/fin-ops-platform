@@ -30,6 +30,7 @@ from fin_ops_platform.services.postgres_repositories.read_models import (
 from fin_ops_platform.services.postgres_repositories.workbench_relation_audit import (
     workbench_relation_edge_equality_issues,
 )
+from fin_ops_platform.services.workbench_relation_modes import TURNOVER_MANUAL_CLOSURE_RELATION_MODE
 
 
 _SAFE_IDENTIFIER_RE = re.compile(r"^[a-zA-Z0-9_.]+$")
@@ -2279,6 +2280,7 @@ def _embedded_relation_source_summary_query(
             join scope_bank_identities identities on identities.scope_key = {alias}.scope_key
             left join app.workbench_pair_relations relation
               on relation.status = 'active'
+             and relation.relation_mode <> %s
              and (
                     relation.month_scope = ({alias}.scope_key || '-01')::date
                  or relation.row_ids && identities.row_ids
@@ -2299,7 +2301,13 @@ def _embedded_relation_source_summary_query(
         order by {alias}.scope_key
         limit %s
         """,
-        (tenant_id, tenant_id, tenant_id, limit),
+        (
+            tenant_id,
+            tenant_id,
+            TURNOVER_MANUAL_CLOSURE_RELATION_MODE,
+            tenant_id,
+            limit,
+        ),
         f"{domain}_relation_source_versions_mismatch",
     )
 

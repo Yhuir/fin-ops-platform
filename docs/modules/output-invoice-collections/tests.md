@@ -144,6 +144,8 @@ bash scripts/verify.sh docs
 
 ## 未测风险
 
+- 2026-07-25 定向回归：`tests/test_invoice_usage_collection_sql_runtime.py::InvoiceUsageCollectionSqlRuntimeTests::test_invoice_usage_relation_source_versions_use_invoice_identity_overlap` 同时保护进项/销项 canonical relation proof 排除 Turnover 专属 `turnover_manual_closure`，避免共享 distribution 与页面 source version 漂移；真实生产 worker 收敛仍由 Phase 27 候选验证承担。
+
 - 真实生产 PostgreSQL 大数据、历史半迁移和 source version mismatch 全量回放未由本地单元测试证明。
 - 本地 synthetic page-size guard 不替代真实 PostgreSQL EXPLAIN、锁等待、浏览器滚动或真实导出下载性能。
 - 真实 RabbitMQ/Redis/systemd `invoice-usage-collection` 与 `invoice-lifecycle` worker drain、heartbeat 和 backlog 需要 staging/生产前 smoke。

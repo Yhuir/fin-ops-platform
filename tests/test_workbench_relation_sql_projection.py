@@ -462,7 +462,7 @@ class RemovedOaMemberRelationProjectionConnection(CrossMonthRelationProjectionCo
                 return [
                     {
                         "case_id": "turnover:target",
-                        "relation_mode": "turnover_manual_closure",
+                        "relation_mode": "manual_confirmed",
                         "month_scope": "2026-04-01",
                         "row_ids": ["bank-nanjing"],
                         "row_types": ["bank"],
@@ -514,6 +514,48 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         self.assertEqual(self._statement_count(connection, "from app.bank_transactions"), 1)
         self.assertEqual(self._statement_count(connection, "from app.oa_applications"), 1)
         self.assertEqual(self._statement_count(connection, "from app.invoices"), 1)
+
+    def test_shared_distribution_excludes_turnover_manual_closure_relations(self) -> None:
+        class TurnoverClosureConnection(WorkbenchRelationProjectionConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
+                normalized = " ".join(sql.lower().split())
+                if "from app.workbench_pair_relations" in normalized:
+                    self.sql_statements.append(sql)
+                    if "relation_mode <> %s" in normalized:
+                        self.assert_turnover_mode_parameter(params)
+                        return []
+                    return [
+                        {
+                            "case_id": "turnover:closure",
+                            "relation_mode": "turnover_manual_closure",
+                            "month_scope": "2026-01-01",
+                            "row_ids": ["txn-tian-196"],
+                            "row_types": ["bank"],
+                            "source_versions": {},
+                            "raw_payload": {},
+                        }
+                    ]
+                return super().fetch_all(sql, params)
+
+            @staticmethod
+            def assert_turnover_mode_parameter(params: tuple) -> None:
+                if "turnover_manual_closure" not in params:
+                    raise AssertionError("shared distribution must parameterize the excluded relation mode")
+
+        repository = CaptureWorkbenchRelationRepository()
+        connection = TurnoverClosureConnection()
+        builder = WorkbenchRelationSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=repository,
+        )
+
+        builder.rebuild_workbench_relation_read_model_scope("2026-01")
+
+        saved = repository.saved[0]
+        self.assertEqual(saved["groups"], [])
+        rows_by_id = {row["row_id"]: row for row in saved["rows"]}
+        self.assertEqual(rows_by_id["txn-tian-196"]["relation_status"], "unlinked")
+        self.assertEqual(rows_by_id["txn-tian-196"]["group_ids"], [])
 
     def test_rebuild_excludes_unlinked_bank_rows_claimed_by_in_progress_oa(self) -> None:
         repository = CaptureWorkbenchRelationRepository()
@@ -783,7 +825,10 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
             "2026-07-14-formal-linked-unlinked-v1",
         )
         self.assertNotIn("workbench_reconciliation_decisions_updated_at", source_versions)
-        self.assertEqual(connection.fetch_one_calls[0][1], ("2026-04-01",))
+        self.assertEqual(
+            connection.fetch_one_calls[0][1],
+            ("2026-04-01", "turnover_manual_closure"),
+        )
         sql = connection.fetch_one_calls[0][0]
         self.assertIn("with scope as", sql)
         self.assertIn("scoped_relations as", sql)
@@ -808,8 +853,12 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         self.assertEqual(list(source_versions_by_scope), ["2026-04", "2026-05"])
         self.assertEqual(len(connection.fetch_all_calls), 1)
         sql, params = connection.fetch_all_calls[0]
-        self.assertEqual(params, (["2026-04-01", "2026-05-01"],))
+        self.assertEqual(
+            params,
+            (["2026-04-01", "2026-05-01"], "turnover_manual_closure"),
+        )
         self.assertIn("with requested_scopes as", sql)
+        self.assertIn("eligible_relations as", sql)
         self.assertIn("scoped_relations as", sql)
         self.assertIn("relation.row_ids && objects.row_ids", sql)
         self.assertIn("active_relation_row_ids as", sql)

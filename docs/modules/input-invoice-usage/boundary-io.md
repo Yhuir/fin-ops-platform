@@ -37,14 +37,14 @@
 | OA reverse 写操作 | `input_invoice_usage_oa_reverse_service.py` | 必须带 OA applicant context 和审计 |
 | OA reverse scope hints | `InputInvoiceUsageOaReverseService.batch_payload(..., include_write_targets=True)` | 从 batch invoice display rows 提取受影响 invoice month，作为 `affected_scope_keys` / `read_model_scope_keys` 信息性提示；所有普通 batch/evidence 状态写返回空 `freshness_targets` / `operation_barrier_targets`，不得无月份退回写时 `all` fan-out |
 | Refresh scope | `input_invoice_usage` manifest | month or `all`；`all` 是 fan-out command。显式运维 `force_refresh=true` 必须传播到 month shard 并绕过 unchanged fast path，重新生成并覆盖目标 scope rows；不得写 canonical invoice 或 relation facts |
-| Relation upstream freshness | `workbench_relation` month scope | projection 执行 unchanged 判断或写 rows 前必须先通过 fresh gate；embedded proof 按本月 canonical 进项发票 IDs 计算，只统计实际触达这些 IDs 的 active relation。non-fresh 抛出已登记 dependency-not-fresh 错误交 worker defer，禁止并行落盘旧版本 |
+| Relation upstream freshness | `workbench_relation` month scope | projection 执行 unchanged 判断或写 rows 前必须先通过 fresh gate；embedded proof 按本月 canonical 进项发票 IDs 计算，只统计实际触达这些 IDs 的 active payment relation，并排除只服务 Workbench/Turnover/Cost 的 `turnover_manual_closure`。non-fresh 抛出已登记 dependency-not-fresh 错误交 worker defer，禁止并行落盘旧版本 |
 
 ## 输出 I/O
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | 使用情况 rows/details/statistics | 前端页面 | fresh/status 可见；confirmed relation group 是优先行边界，组内发票/OA/流水各显示一次合计与 `+N`，未 linked 发票按 identity 兜底；all scope 读取多个 month shard 时按 read model row id 去重。主 rows 响应的 `statistics` 从完整 `input_invoice_usage` 投影按唯一发票成员 ID 计算发票、OA/流水关联、付款及补集，并补充本模块 OA reverse 批次数；忽略当前 keyword/filter/month/sort/page。`pagination.total` 仍是表格行数/配对组行数；任一 child scope non-fresh 时统计不可用，合法 fresh 空集才返回零。 |
-| 页面 Audit icon | AppHealth operations audit API | admin-only；active canonical 进项发票（含 collapsed members）是 independent expected-set，成员/金额/scope 与共享 relation 的受影响月份双向 edge 必须在同一只读一致性快照中相等。页面 freshness 与 Audit 共用 consumer-semantic relation 边界：每月 proof 只统计实际触达该月进项发票 IDs 的 active relation；纯银行或仅销项关系变化不得令本页 mismatch。只有结构化 integrity=pass、freshness=fresh、queue=drained 且 database snapshot 已启用才显示成功。 |
+| 页面 Audit icon | AppHealth operations audit API | admin-only；active canonical 进项发票（含 collapsed members）是 independent expected-set，成员/金额/scope 与共享 relation 的受影响月份双向 edge 必须在同一只读一致性快照中相等。页面 freshness 与 Audit 共用 consumer-semantic relation 边界：每月 proof 只统计实际触达该月进项发票 IDs 的 active payment relation，并排除 `turnover_manual_closure`；纯银行或仅销项关系变化不得令本页 mismatch。只有结构化 integrity=pass、freshness=fresh、queue=drained 且 database snapshot 已启用才显示成功。 |
 | 支付状态 | rows/filter/export/read model | 只消费 `workbench_relation` distribution 中 confirmed/linked 关系；多 OA/多流水用 linked 合计与发票价税合计比对；无 active relation 或历史 candidate 兼容值不参与 `已付款` 判断 |
 | OA reverse 本地状态 | API/OA drawer | draft/staged/submitted/not_submitted 只落 `app.input_invoice_usage_oa_reverse_batches`，canonical commit 后立即释放按钮并让当前页正常 GET；不在写响应链 enqueue 统计或等待 barrier |
 | OA reverse relation 结果 | Workbench relation / API | evidence detected 写入 canonical relation 后返回月份 hints；`input_invoice_usage` 与 relation distribution 均由被访问 owner 自行检测版本差异并收敛，不从 Drawer fan-out |
@@ -90,7 +90,7 @@
 - OA reverse 变更必须覆盖权限、凭证、审计和 read model recovery。
 - 已删除标题计数的 `page_size=1` 二次请求；标题统计只能消费 rows 主响应，禁止恢复独立 title-total I/O。
 - `input_invoice_usage_statistics_schema_version` 负责生产旧 scope 的统计元数据回填；source version 相同但缺少合法统计元数据时也必须重建，不能走 unchanged skip。批量导出的所有分页均传 `include_statistics=false`，不重复读取、校验或透传页面标题统计；每一页仍执行 rows freshness、schema 和 source-version gate。
-- 默认 `month=all` 只表示页面查询视图，不是 refresh 命令。fresh gate 通过 `input_invoice_usage_scope_source_versions(...)` 一次读取有效月份 shard 的 base/source status，再通过 `input_invoice_usage_relation_source_versions(...)` 批量比较每月 consumer-semantic canonical relation proof；只 enqueue mismatch 的具体月份。具体月 rows 可保持 fresh，跨月标题统计独立返回 `statistics_status=refreshing` 并只补投其 stale shard；禁止失败回退 `input_invoice_usage:all`。
+- 默认 `month=all` 只表示页面查询视图，不是 refresh 命令。fresh gate 通过 `input_invoice_usage_scope_source_versions(...)` 一次读取有效月份 shard 的 base/source status，再通过 `input_invoice_usage_relation_source_versions(...)` 批量比较每月 consumer-semantic canonical payment relation proof；该 proof 与共享 distribution 一致排除 `turnover_manual_closure`，只 enqueue mismatch 的具体月份。具体月 rows 可保持 fresh，跨月标题统计独立返回 `statistics_status=refreshing` 并只补投其 stale shard；禁止失败回退 `input_invoice_usage:all`。
 - `input_invoice_usage_scope_source_versions(...)` 的同一 set-based SQL 还必须把 canonical 进项发票月份库存纳入 scope inventory，并按月返回发票数量与 `max(updated_at)`。projection 发布相同 proof；未关联的新发票、新月份、删除或更新都会在下一次页面访问时只阻断真实变化月份。不得再用静态规则版本或 relation proof 代替 canonical 发票完整性，也不得由 import writer 恢复跨页面 fan-out。销项发票集合使用同一共享合同。
 - 本次 canonical inventory 合同版本为 `input-invoice-usage:v5-canonical-invoice-inventory`；旧 scope 缺少 proof 必须重建，不得沿用 v4 relation-only vector。
 - `input_invoice_usage_scope_source_versions(...)` 必须在同一 SQL statement snapshot 内同时读取 scope dirty 状态和同 scope active outbox event。已有 `pending|processing` event 的阻塞月份只返回 `refreshing`，不得再次进入 enqueue candidates；页面下一轮 normal GET 再观察该 event 发布后的 fresh proof。

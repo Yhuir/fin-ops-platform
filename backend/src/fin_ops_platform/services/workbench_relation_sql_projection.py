@@ -10,6 +10,7 @@ from fin_ops_platform.services.postgres_repositories.common import int_value, mo
 from fin_ops_platform.services.postgres_repositories.oa_projection import COMPLETED_WORKFLOW_STATUS_SQL, OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.workbench_relation_read_model_repository import WorkbenchRelationReadModelRepositoryPort
+from fin_ops_platform.services.workbench_relation_modes import TURNOVER_MANUAL_CLOSURE_RELATION_MODE
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
@@ -444,9 +445,10 @@ class WorkbenchRelationSqlProjectionBuilder:
             from app.workbench_pair_relations
             where status = 'active'
               and (month_scope = %s::date or row_ids && %s::text[])
+              and relation_mode <> %s
             order by updated_at, case_id
             """,
-            (month_start(month), row_ids),
+            (month_start(month), row_ids, TURNOVER_MANUAL_CLOSURE_RELATION_MODE),
         )
 
     def _active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:
@@ -458,9 +460,10 @@ class WorkbenchRelationSqlProjectionBuilder:
             from app.workbench_pair_relations
             where status = 'active'
               and row_ids && %s::text[]
+              and relation_mode <> %s
             order by updated_at, case_id
             """,
-            (row_ids,),
+            (row_ids, TURNOVER_MANUAL_CLOSURE_RELATION_MODE),
         )
 
     def _pending_claimed_bank_transaction_ids_for_month(self, month: str) -> list[str]:
@@ -500,12 +503,17 @@ class WorkbenchRelationSqlProjectionBuilder:
             row = self._connection.fetch_one(
                 """
                 select
-                  (select max(updated_at)::text from app.workbench_pair_relations) as pair_relations_updated_at,
+                  (
+                    select max(updated_at)::text
+                    from app.workbench_pair_relations
+                    where relation_mode <> %s
+                  ) as pair_relations_updated_at,
                   (select max(updated_at)::text from app.bank_transaction_relation_claims where status = 'active') as oa_pending_payment_bank_claims_updated_at,
                   (select max(updated_at)::text from app.bank_transactions) as bank_transactions_updated_at,
                   (select max(updated_at)::text from app.invoices) as invoices_updated_at,
                   (select max(updated_at)::text from app.oa_applications) as oa_projection_updated_at
-                """
+                """,
+                (TURNOVER_MANUAL_CLOSURE_RELATION_MODE,),
             )
         else:
             row = self._connection.fetch_one(
@@ -538,8 +546,11 @@ class WorkbenchRelationSqlProjectionBuilder:
                 scoped_relations as (
                     select relation.status, relation.updated_at, relation.row_ids
                     from app.workbench_pair_relations relation, scope, month_object_array objects
-                    where relation.month_scope = scope.scope_month
-                       or relation.row_ids && objects.row_ids
+                    where relation.relation_mode <> %s
+                      and (
+                           relation.month_scope = scope.scope_month
+                        or relation.row_ids && objects.row_ids
+                      )
                 ),
                 active_relation_row_ids as (
                     select distinct unnest(row_ids) as row_id
@@ -596,7 +607,7 @@ class WorkbenchRelationSqlProjectionBuilder:
                 + """
                   ) as oa_projection_updated_at
                 """,
-                (scope_month,),
+                (scope_month, TURNOVER_MANUAL_CLOSURE_RELATION_MODE),
             )
         return _source_versions_payload(row)
 
@@ -617,6 +628,11 @@ class WorkbenchRelationSqlProjectionBuilder:
             """
             with requested_scopes as (
                 select unnest(%s::date[]) as scope_month
+            ),
+            eligible_relations as (
+                select status, updated_at, month_scope, row_ids
+                from app.workbench_pair_relations
+                where relation_mode <> %s
             ),
             month_objects as (
                 select scopes.scope_month, coalesce(bank.legacy_mongo_id, bank.id::text) as row_id
@@ -652,11 +668,11 @@ class WorkbenchRelationSqlProjectionBuilder:
             scoped_relations as (
                 select scopes.scope_month, relation.status, relation.updated_at, relation.row_ids
                 from requested_scopes scopes
-                join app.workbench_pair_relations relation on relation.month_scope = scopes.scope_month
+                join eligible_relations relation on relation.month_scope = scopes.scope_month
                 union
                 select objects.scope_month, relation.status, relation.updated_at, relation.row_ids
                 from month_object_arrays objects
-                join app.workbench_pair_relations relation on relation.row_ids && objects.row_ids
+                join eligible_relations relation on relation.row_ids && objects.row_ids
             ),
             active_relation_row_ids as (
                 select distinct relations.scope_month, unnest(relations.row_ids) as row_id
@@ -751,7 +767,7 @@ class WorkbenchRelationSqlProjectionBuilder:
             left join oa_versions oa using (scope_month)
             order by scopes.scope_month
             """,
-            (scope_months,),
+            (scope_months, TURNOVER_MANUAL_CLOSURE_RELATION_MODE),
         )
         payload_by_scope = {
             text(row.get("scope_key")): _source_versions_payload(row)

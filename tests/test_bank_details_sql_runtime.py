@@ -1272,9 +1272,13 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         ]
         self.assertEqual(len(relation_summary_calls), 1)
         relation_sql, relation_params = relation_summary_calls[0]
-        self.assertEqual(relation_params, (["2026-05-01", "2026-06-01"],))
+        self.assertEqual(
+            relation_params,
+            (["2026-05-01", "2026-06-01"], "turnover_manual_closure"),
+        )
         normalized_sql = " ".join(relation_sql.lower().split())
         self.assertIn("left join app.workbench_pair_relations", normalized_sql)
+        self.assertIn("relation.relation_mode <> %s", normalized_sql)
         self.assertIn("relation.row_ids && scope.row_ids", normalized_sql)
 
     def test_scope_summary_detects_canonical_bank_source_change_with_one_set_based_query(self) -> None:
@@ -2862,6 +2866,7 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
                     "scope_key": "2026-02",
                     "row_ids": ["txn_imported_1278", "efdb0ec0-9a97-5a0d-9ec4-e4f5eaf918a0"],
                     "include_row_ids": True,
+                    "exclude_relation_modes": ["turnover_manual_closure"],
                 }
             ],
         )
@@ -3352,7 +3357,17 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
         relation_call = next(
             call for call in connection.calls if "from app.workbench_pair_relations" in " ".join(call[1].lower().split())
         )
-        self.assertEqual(relation_call[2], (["txn_imported_1", "uuid-bank-1"],))
+        self.assertEqual(
+            relation_call[2],
+            (
+                ["txn_imported_1", "uuid-bank-1"],
+                ["turnover_manual_closure"],
+            ),
+        )
+        self.assertIn(
+            "not (relation_mode = any(%s::text[]))",
+            " ".join(relation_call[1].lower().split()),
+        )
 
     def test_normalized_row_splits_bank_text_fields_for_bank_detail_table(self) -> None:
         builder = BankDetailSqlProjectionBuilder(connection=FakeConnection())
