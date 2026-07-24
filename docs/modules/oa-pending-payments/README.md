@@ -41,7 +41,7 @@ Workbench confirm / withdraw
   -> 月份 read model 原子发布/CAS
   -> fresh gate
   -> 单一 rows 聚合 API（rows + summary + filterOptions + ETag）
-  -> 页面 500ms 条件检查 / 202 barrier / fresh 重读
+  -> 页面 500ms 条件 GET / 202 后继续本页 normal GET / fresh 重读
 ```
 
 页面热路径和 read model worker 都不得访问 Mongo/MySQL。外部系统变化尚未进入 PostgreSQL 时，属于 OA sync lag；一旦 PostgreSQL canonical snapshot 已提交，动态 source version、访问时 dirty/outbox、CAS 和 fresh gate 必须阻止旧 rows 被伪装成 fresh。
@@ -56,7 +56,7 @@ completed OA 投影直接读取 canonical Workbench relation，因此月份 sour
 - `200` 返回 rows、pagination、summary、`filterConfig`、`filterOptions`、freshness proof 和 `ETag`。
 - 同一 normalized query 在版本未变且仍 fresh 时返回 `304`，不得执行 rows/facet 聚合。
 - dirty、source mismatch、scope missing 或 queue 活跃时返回 `202` 和由本次访问 freshness boundary 产生的精确月份 `operationBarrierTargets`，不返回旧 rows。
-- 可见页面每 500ms 最多发起一个条件 GET；tab 隐藏时停止，恢复可见时立即检查。收到 `202` 后立即隐藏旧 rows，等待该访问 target fresh 再完整读取一次。普通写命令不投递或等待页面 target。
+- 可见页面每 500ms 最多发起一个 rows 条件 GET；tab 隐藏时停止，恢复可见时立即检查。收到 `202` 后立即隐藏旧 rows，并继续通过同一个页面 rows GET 收敛到 fresh；不得改走 `/api/operation-barrier/status`。普通写命令不投递或等待页面 target。
 - `paymentStatus` 只有 `paid` / `unpaid`，由后端 lifecycle/read model 判定；页面不得按金额或候选关系自行推断。
 
 ## Completed 与 in-progress

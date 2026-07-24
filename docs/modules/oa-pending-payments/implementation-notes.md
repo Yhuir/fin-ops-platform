@@ -1,5 +1,11 @@
 # OA待付款核对 实施记录
 
+## 2026-07-24 - 普通页面 202 收敛删除旧 operation-barrier I/O
+
+- 生产证据：Phase 27 统一生产路由 smoke 在无用户点击时观察到 `POST /api/operation-barrier/status`。全量 caller 核对确认 `OaPendingPaymentsPage` 的普通 rows `202` 分支仍等待 barrier；覆盖矩阵却把该 caller 误记成显式 Audit/reconcile，属于旧链遗漏。
+- 最小修复：删除普通页面对 `waitForOperationFreshness` 的依赖；`202` 立即隐藏旧 rows 后，复用现有可见页 500ms、单 in-flight、hidden 暂停、恢复可见立即检查的 rows GET，直到同一 query 返回 fresh。后端 `202` 精确 target DTO、显式 OA Audit 和银行规则显式 reapply 合同不变。
+- 边界与测试：不新增 coordinator、hook、endpoint、worker、queue 或缓存。组件回归证明 `202 -> current rows GET -> fresh` 且 barrier 为 0；定向 Browser 与生产 17-route smoke 负责证明普通页面访问不再产生 barrier POST。
+
 ## 2026-07-23 - Workbench 撤回后的访问时 freshness 漏洞
 
 - 生产证据：test-owned Workbench relation 通过正式 API 撤回后，`oa_pending_payment` queue 已 drained、scope 被标记 fresh，但 Page Audit 仍发现同一 case 的 OA、银行流水和进项发票 3 条 `consumer_edge_not_shared`；旧 OA rows 仍保存已撤回 relation summaries。

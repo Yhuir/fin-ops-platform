@@ -36,7 +36,6 @@ import type {
   LinkOaPendingPaymentBankTransactionsResponse,
   WritebackOaPendingPaymentPaidResponse,
 } from "../features/oaPendingPayments/types";
-import { waitForOperationFreshness } from "../features/operationBarrier/api";
 import { fetchPendingInvoiceRules, savePendingInvoiceRules } from "../features/pendingInvoices/api";
 
 const initialQuery: OaPendingPaymentQuery = {
@@ -167,7 +166,7 @@ export default function OaPendingPaymentsPage() {
       setError(null);
     }
     try {
-      let result = await fetchOaPendingPaymentRows({
+      const result = await fetchOaPendingPaymentRows({
         ...query,
         etag: mode === "conditional" ? etagRef.current ?? undefined : undefined,
         signal,
@@ -180,37 +179,8 @@ export default function OaPendingPaymentsPage() {
       if (result.status === "refreshing" || !isReadModelFresh(responseStatus)) {
         clearVisibleReadModel();
         setReadModelStatus(responseStatus === "fresh" ? "refreshing" : responseStatus);
-        const targets = result.payload.operationBarrierTargets ?? [];
-        if (targets.length === 0) {
-          setConditionalPollingEnabled(false);
-          return;
-        }
-        try {
-          await waitForOperationFreshness(targets, { signal });
-        } catch {
-          if (!signal?.aborted && requestId === requestIdRef.current) {
-            setReadModelStatus("refreshing");
-            setConditionalPollingEnabled(false);
-          }
-          return;
-        }
-        if (signal?.aborted || requestId !== requestIdRef.current) {
-          return;
-        }
-        result = await fetchOaPendingPaymentRows({ ...query, signal });
-        if (
-          signal?.aborted
-          || requestId !== requestIdRef.current
-          || result.status === "not_modified"
-          || result.status === "refreshing"
-          || !isReadModelFresh(readModelStatusFromPayloads(result.payload))
-        ) {
-          clearVisibleReadModel();
-          setReadModelStatus("refreshing");
-          setConditionalPollingEnabled(false);
-          return;
-        }
-        etagRef.current = result.etag;
+        setConditionalPollingEnabled(true);
+        return;
       }
       applyRowsPayload(result.payload);
       setConditionalPollingEnabled(Boolean(result.etag));

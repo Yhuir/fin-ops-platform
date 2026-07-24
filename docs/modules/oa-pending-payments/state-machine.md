@@ -1,6 +1,6 @@
 # OA 待付款核对状态机
 
-日期：2026-07-17
+日期：2026-07-24
 
 > 修改业务状态、UI 状态、read model、worker、Audit 或写回流程前必须读取本文件。页面不得自行推断付款状态或 freshness。
 
@@ -45,7 +45,7 @@ in-progress 同步当前只保留原始/上下文化附件文件元数据，不�
 4. 无论 MySQL 本次新写还是此前已为 paid，都调用 PostgreSQL `record_paid_statuses(records=...)`。
 5. PG writer 同事务更新 payment-status snapshot、月份 source watermark/version，不写页面 dirty/outbox。
 6. 若步骤 5 失败，返回 `oa_payment_status_snapshot_write_failed`；不声称页面已完成同步。命令可安全重试，下一次 OA sync 也会修复。
-7. 前端收到成功后重跑当前 rows normal GET；若访问 gate 发现 mismatch，它才返回访问产生的 exact scope target，页面等待该 target 后读取新版本。写命令本身不等待或返回下游页面重建。
+7. 前端收到成功后重跑当前 rows normal GET；若访问 gate 发现 mismatch，页面继续按 500ms、单 in-flight 合同检查同一个 rows GET 直到读取新版本。写命令本身不等待或返回下游页面重建。
 
 ### `link-bank-transactions`
 
@@ -65,11 +65,11 @@ in-progress 同步当前只保留原始/上下文化附件文件元数据，不�
 | `ready` | `200` 且 fresh | 展示 rows、summary、filters，并保存当前 query 的 ETag |
 | `checking` | 可见 tab 的 500ms 条件 GET | 保留当前 fresh rows；同一时刻最多一个请求 |
 | `unchanged` | `304` | 不更新 rows，不执行完整聚合/渲染 |
-| `refreshing` | `202` / dirty / source mismatch | 立即隐藏旧 rows，停止条件轮询，展示“新数据正在生成”，等待本次页面访问产生的精确 target |
+| `refreshing` | `202` / dirty / source mismatch | 立即隐藏旧 rows，展示“新数据正在生成”，保持可见页单 in-flight 的 500ms rows GET；不调用共享 operation barrier |
 | `empty` | fresh `200` 且 total=0 | 真实空态；不得由 `202` 或错误推断 |
-| `error` | 请求、barrier 或合同失败 | 不显示旧 rows；提供明确错误与重试 |
+| `error` | rows 请求或合同失败 | 不显示旧 rows；提供明确错误与重试 |
 | `hidden` | document/tab 不可见 | 取消条件检查；恢复可见时立即检查一次 |
-| `mutation_waiting` | 写命令成功 | 命令立即结束后执行本页 normal GET；只有 GET 判定 non-fresh 才等待其 exact target |
+| `mutation_waiting` | 写命令成功 | 命令立即结束后执行本页 normal GET；non-fresh 继续复用同一 rows GET，不等待跨 API barrier |
 
 query、分页、排序、筛选、view mode、认证或 contract revision 变化时，取消旧请求并清除不匹配 ETag；晚到响应不得覆盖新 query。
 

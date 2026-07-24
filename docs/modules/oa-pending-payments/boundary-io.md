@@ -1,6 +1,6 @@
 # OA 待付款核对模块边界与 I/O
 
-日期：2026-07-22
+日期：2026-07-24
 
 ## 模块化状态
 
@@ -15,7 +15,7 @@
 
 - OA 待付款页面查询、筛选、排序、详情和 OA 专属 Audit 展示。
 - `/api/oa-pending-payments` 下所有 read/write endpoint 的单次鉴权执行；route 只经显式 read-session/write-auth ports 调用共享 identity/policy owner，不重复经过全局前置 guard。
-- `oa_pending_payment` read model、freshness gate、ETag 条件读取，以及页面访问 non-fresh 时的精确 operation barrier targets。
+- `oa_pending_payment` read model、freshness gate、ETag 条件读取，以及页面访问 non-fresh 时的本页 normal GET 收敛。
 - OA payment-status/admission integration snapshot 与 source watermark canonical commit；页面访问时的精确月份 refresh 由 query freshness boundary 负责。
 - in-progress pending relation、bank claim、promotion 和付款状态写回编排。
 
@@ -47,7 +47,7 @@
 | read model publish | `read_model.oa_pending_payment_*` | 月份原子 replace、source vector、event source version 和 CAS；月份 rows 只能含同月 OA 主行，relation group row identity 必须含 month scope。`all` freshness gate 与 Page Audit 都把跨 scope 重复 `row_id` 作为阻断错误，列表不得用 `DISTINCT ON` 或 Python 去重隐藏错误；旧 event 不得清新 dirty |
 | latest dirty index | `job.read_model_dirty_scopes` | 只索引 `scope_type='oa_pending_payment'`，键顺序与 gate 的 `(tenant, scope type, scope, source version DESC, updated_at DESC, id DESC)` 完全一致；不得扩大 predicate 让其它页面承担该索引写入或存储成本 |
 | dirty/outbox | runtime queue | 权威 OA sync 的 complete snapshot repository 与 `OAProjectionSyncService` 都不 enqueue 页面 refresh。页面 paid writeback 的 `record_paid_statuses` 同样只更新 PG status/watermark。completed、admission 或 payment-status 的任何真实变化都由各消费页访问时的 canonical source-vector mismatch 触发自身精确 refresh；禁止恢复 OA/Workbench/shared fan-out。 |
-| write result | 前端 | 返回受影响月份/scope hints，`enqueued=false` 且 freshness/barrier targets 为空；重复命令幂等，部分外部成功时明确可重试。当前可见页随后正常 GET，只有 GET non-fresh 才等待精确 barrier |
+| write result | 前端 | 返回受影响月份/scope hints，`enqueued=false` 且 freshness/barrier targets 为空；重复命令幂等，部分外部成功时明确可重试。当前可见页随后正常 GET；GET non-fresh 时按现有 500ms、单 in-flight 合同继续检查同一个 rows GET，不调用共享 operation barrier |
 | Audit status | OA 标题附件 | 中文状态与去重样本；内部 code 仅作次级诊断，外部 sync lag 不冒充 integrity pass |
 
 ## 事实与持久化所有权

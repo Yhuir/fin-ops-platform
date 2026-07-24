@@ -2862,6 +2862,23 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_oa_pending_page_non_fresh_access_retries_its_own_rows_get(self) -> None:
+        page_source = (WEB_SRC_ROOT / "pages" / "OaPendingPaymentsPage.tsx").read_text(encoding="utf-8")
+
+        for forbidden in (
+            "waitForOperationFreshness",
+            '../features/operationBarrier/api',
+            "/api/operation-barrier/status",
+        ):
+            self.assertNotIn(forbidden, page_source)
+        for required in (
+            "fetchOaPendingPaymentRows({",
+            "setConditionalPollingEnabled(true)",
+            "CONDITIONAL_REFRESH_INTERVAL_MS",
+            'document.visibilityState !== "visible"',
+        ):
+            self.assertIn(required, page_source)
+
     def test_cost_statistics_query_runtime_do_not_keep_legacy_live_fallbacks(self) -> None:
         query_path = SERVICES_ROOT / "cost_statistics_query_service.py"
         runtime_path = SERVICES_ROOT / "cost_statistics_runtime_service.py"

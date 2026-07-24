@@ -1,6 +1,6 @@
 # OA 待付款核对测试责任
 
-日期：2026-07-22
+日期：2026-07-24
 
 ## 风险模型
 
@@ -81,8 +81,8 @@
 
 - initial loading、fresh/empty/error/refreshing、`202`立即隐藏旧 rows。
 - 可见 tab 500ms 条件 GET、hidden暂停、恢复可见立即检查、最多一个 in-flight、unmount/query change cancel、晚响应隔离。
-- `304` 保留 fresh rows；新 `200` 更新 ETag/payload；barrier后完整重读。
-- mutation成功后隐藏旧 rows并等待 barrier；失败保留明确反馈。
+- `304` 保留 fresh rows；新 `200` 更新 ETag/payload；`202` 后只重试当前 rows normal GET，完整重读时不调用 operation barrier。
+- mutation成功后隐藏旧 rows并通过当前 rows GET 收敛；失败保留明确反馈。
 - 搜索、筛选、排序、分页、view toggle、drawer、权限控制。
 - OA 专属 Audit 五种中文文案和 issue samples；共享组件默认行为回归。
 
@@ -93,8 +93,8 @@
 本地 deterministic Browser 覆盖：
 
 - fresh rows 首屏、筛选/排序、detail。
-- `202 -> hide rows -> barrier -> fresh`。
-- writeback-paid / link-bank -> barrier -> 新 rows。
+- `202 -> hide rows -> current rows GET -> fresh`，且普通页面 I/O 的 operation barrier 请求为 0。
+- writeback-paid / link-bank -> 当前 rows GET -> 新 rows。
 - 旧 filter endpoint请求次数为 0。
 
 入口：`web/e2e/oa-pending-payments-flow.spec.ts`、`oa-pending-payments-nonfresh-flow.spec.ts`、`oa-pending-payments-confirm-paid-flow.spec.ts`、`oa-pending-payments-bank-link-flow.spec.ts`。
