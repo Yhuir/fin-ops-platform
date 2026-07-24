@@ -5,6 +5,11 @@
 - ensure/wakeup 原子去重不再只按 scope 判断：同一 scope 的覆盖顺序是 `force > full scope > partial delta`。新 delta/full/force 若未被 active event 语义覆盖，必须原子合并或创建 processing 后续事件；相同任务才 no-op。
 - 该变化只在既有 PostgreSQL durable queue/repository 边界内完成，不增加协调器、transport、worker 或状态事实源；真实 PostgreSQL relation metadata merge 与定向 queue tests 已通过。
 
+## 2026-07-24 - dependency handler proof 覆盖旧 readiness
+
+- 生产并发访问证明 downstream handler 已用 canonical facts 判定 `*_read_model_not_fresh` 时，`app_status_readiness` 仍可能暂时显示依赖 fresh。旧 `already_fresh` 短路会阻止真实 dependency refresh，使 downstream event 每 250ms 原地 defer。
+- Runtime worker 继续先跳过 active dependency；非 active 时直接委托现有 gateway 做 normalize、validate 和 durable 原子去重。没有新增 coordinator、queue、状态表或兼容分支。
+
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
@@ -14,6 +19,7 @@
 - `invoice_lifecycle:YYYY-MM` 遇到 pending-invoice 依赖未 fresh 时，worker 必须补投同月 `expense:all:YYYY-MM` 与 `income:all:YYYY-MM`，禁止生成 scope policy 会拒绝的裸月份。
 - 非事务 read model refresh producer 由 architecture guard 约束：不得绕过 `ReadModelRefreshGateway` 直接调用 `RuntimeQueueRepository.enqueue_read_model_refresh(...)`。
 - `bank_detail:all` 是显式 fan-out 命令，不是 downstream `*_read_model_not_fresh` 可自动推导的稳定 freshness 依赖 scope；下游 all-scope event 只能等待或补投可识别的具体月份 shard。
+- Downstream handler 基于 canonical facts 抛出 `*_read_model_not_fresh` 后，该证明高于可能滞后的 readiness；worker 只允许 active dependency 短路，非 active dependency 必须交给正式 gateway 原子去重并补投。
 - `*_read_model_not_fresh` 可携带 `parent_scope_keys=YYYY-MM,...` 表示同一 read model 的 parent shard 依赖；runtime worker 必须允许这类 same-scope parent refresh。若错误包含 `parent_generation_inconsistent`，即使 readiness 显示 fresh，也要强制补投 parent scope，因为 consistency failure 比 readiness 更接近发布边界。
 - Same-scope parent dependency 的当前 event 必须使用 retry 级别退避，而不是全局 `dependency_not_fresh_delay_seconds` 的快速 retry；否则 RabbitMQ transport 下 `all` 聚合事件会被快速重新发布并抢占父月 shard，形成 backlog/refreshing 风暴。
 - App Status read model registry、runtime worker registry、RabbitMQ dispatch、SLO smoke、migration storage contract 和 Redis/deploy env 模板必须保持本地 parity；生产 worker/read model 不允许新增第二套手写清单。
@@ -534,12 +540,12 @@
 - Closure gate 外部缺口：未配置真实 user/admin auth 时，authenticated HTTP/SSE gate 会失败；未提供 `--write-scenario`、`--apply-write-scenarios` 和 `--write-approval-ticket` 时，write-operation E2E 必须保持 input_required。生产 route/API base path 的 gate 配置也必须与公网部署路径匹配，不能用本机 API 端口验证 SPA page shell。
 - 验证命令：生产 systemd status；生产本机 `/health`、`/health/ready`；生产 `runtime_sync_closure_gate --base-url http://127.0.0.1:18001 --api-prefix '' --allow-unauthenticated-http --json`；生产 direct `read_model_slo_smoke --critical-only --apply --target-ms 5000 --timeout-seconds 90`；生产 PostgreSQL 只读状态聚合。
 
-## 2026-06-20 - Dependency refresh already-fresh guard
+## 2026-06-20 - Dependency refresh already-fresh guard（已于 2026-07-24 取代）
 
 - 目标：修复生产 Workbench bank/turnover withdraw 后 `pending_invoice` read model 慢尾。只读证据显示 pending handler 自身耗时只有约 `25-176ms`，但多个 pending scope 因 `bank_detail_read_model_not_fresh` 反复 defer，并连续补投 `bank_detail:2026-03`，把 source version 从 `44635` bump 到 `44638`，导致下游等待被自身依赖 refresh 放大到约 `9.8s`。
 - 影响范围：`RuntimeWorker._enqueue_dependency_refreshes(...)`；不改变业务写接口、read model scope contract、queue schema 或 handler projection。
-- 关键决策：已有 guard 会在依赖 scope active 时不补投；本轮新增依赖 scope 已 fresh 时也不补投，只在 heartbeat payload 中记录 `already_fresh` 并继续 defer 当前事件。这样多个下游 scope 在依赖已经 fresh 后不会继续 bump 依赖 source version。
-- 测试覆盖：`tests/test_runtime_worker.py::RuntimeWorkerTests::test_run_once_does_not_bump_dependency_refresh_when_scope_already_fresh`，并保留 `already_active` 回归。
+- 历史决策：当时新增 readiness fresh 短路以避免重复 bump；2026-07-24 生产证据证明 handler canonical proof 与 readiness 发生冲突时，该短路会让真实依赖永远不修复，现已删除。active guard 与 durable gateway 原子去重继续承担防重复职责。
+- 测试覆盖：原 `test_run_once_does_not_bump_dependency_refresh_when_scope_already_fresh` 已由 `test_run_once_handler_proof_overrides_stale_fresh_readiness` 取代，并保留 `already_active` 回归。
 - 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_runtime_worker.py tests/test_write_operation_slo_audit.py -q`；`python3 -m py_compile backend/src/fin_ops_platform/services/runtime_worker.py tests/test_runtime_worker.py`。
 - 未测风险：该修复尚未发布到生产，也未在真实 Workbench withdraw 场景重跑；`workbench:all` aggregate 约 `20.8s` 和 `cost_statistics` 2026-03 约 `7.2s` 仍需后续独立优化或重新归类为后台追赶 SLO。
 

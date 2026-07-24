@@ -314,13 +314,10 @@ class RuntimeWorker:
         for dependency in dependencies:
             scope_type = dependency["scope_type"]
             scope_key = dependency["scope_key"]
-            force_refresh = dependency.get("force_refresh") is True
             if self._dependency_refresh_is_active(event.tenant_id, scope_type, scope_key):
                 enqueued.append({"scope_type": scope_type, "scope_key": scope_key, "status": "already_active"})
                 continue
-            if not force_refresh and self._dependency_refresh_is_fresh(event.tenant_id, scope_type, scope_key):
-                enqueued.append({"scope_type": scope_type, "scope_key": scope_key, "status": "already_fresh"})
-                continue
+            # ponytail: the handler's canonical proof beats stale readiness; the durable gateway owns dedupe.
             try:
                 normalized_scope_keys = self._read_model_refresh_gateway.enqueue_one(
                     scope_type,
@@ -354,12 +351,6 @@ class RuntimeWorker:
             return False
         return bool(checker(tenant_id=tenant_id, scope_type=scope_type, scope_key=scope_key))
 
-    def _dependency_refresh_is_fresh(self, tenant_id: str, scope_type: str, scope_key: str) -> bool:
-        checker = getattr(self._queue, "read_model_refresh_is_fresh", None)
-        if not callable(checker):
-            return False
-        return bool(checker(tenant_id=tenant_id, scope_type=scope_type, scope_key=scope_key))
-
     def _retry_delay_for_attempt(self, attempts: int) -> int:
         exponent = max(0, int(attempts or 1) - 1)
         return int(self._config.retry_delay_seconds * (2**exponent))
@@ -382,17 +373,13 @@ class RuntimeWorker:
             if not scope_type:
                 continue
             parent_scope_keys = cls._parent_scope_keys_from_error(normalized)
-            force_refresh = "parent_generation_inconsistent" in normalized
             if scope_type == str(event.scope_type or "") and parent_scope_keys:
                 for parent_scope_key in parent_scope_keys:
                     identity = (scope_type, parent_scope_key)
                     if identity in seen:
                         continue
                     seen.add(identity)
-                    payload: dict[str, Any] = {"scope_type": scope_type, "scope_key": parent_scope_key}
-                    if force_refresh:
-                        payload["force_refresh"] = True
-                    dependencies.append(payload)
+                    dependencies.append({"scope_type": scope_type, "scope_key": parent_scope_key})
                 continue
             if scope_type == str(event.scope_type or ""):
                 continue

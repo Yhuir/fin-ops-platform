@@ -454,7 +454,7 @@ class RuntimeWorkerTests(unittest.TestCase):
             [{"scope_type": "bank_detail", "scope_key": "2026-04", "status": "already_active"}],
         )
 
-    def test_run_once_does_not_bump_dependency_refresh_when_scope_already_fresh(self) -> None:
+    def test_run_once_handler_proof_overrides_stale_fresh_readiness(self) -> None:
         claimed = RuntimeQueueEvent(
             **{
                 **event("pending_invoice.read_model.refresh").__dict__,
@@ -477,13 +477,23 @@ class RuntimeWorkerTests(unittest.TestCase):
         )
 
         self.assertEqual(worker.run_once(), RuntimeWorkerResult.DEFERRED)
-        self.assertEqual(queue.active_read_model_refresh_checks, [("tenant-a", "bank_detail", "2026-03")])
-        self.assertEqual(queue.fresh_read_model_refresh_checks, [("tenant-a", "bank_detail", "2026-03")])
-        self.assertEqual(queue.enqueued_read_model_refreshes, [])
+        self.assertEqual(
+            queue.active_read_model_refresh_checks,
+            [
+                ("tenant-a", "bank_detail", "2026-03"),
+                ("tenant-a", "bank_detail", "2026-03"),
+            ],
+        )
+        self.assertEqual(queue.fresh_read_model_refresh_checks, [])
+        self.assertEqual(len(queue.enqueued_read_model_refreshes), 1)
+        dependency = queue.enqueued_read_model_refreshes[0]
+        self.assertEqual(dependency["scope_type"], "bank_detail")
+        self.assertEqual(dependency["scope_key"], "2026-03")
+        self.assertEqual(dependency["reason"], "dependency_not_fresh")
         deferred_payloads = [payload for _worker_id, _kind, status, payload in queue.heartbeats if status == "deferred"]
         self.assertEqual(
             deferred_payloads[0]["dependency_refreshes"],
-            [{"scope_type": "bank_detail", "scope_key": "2026-03", "status": "already_fresh"}],
+            [{"scope_type": "bank_detail", "scope_key": "2026-03"}],
         )
 
     def test_run_once_requeues_same_scope_parent_when_generation_is_inconsistent(self) -> None:
