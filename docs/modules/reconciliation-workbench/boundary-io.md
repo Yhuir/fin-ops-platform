@@ -79,7 +79,7 @@
 - 对外不存在独立 Workbench summary HTTP 合同。`PostgresReadModelRepository.get_workbench_summary(...)` 只是 combined initial 同快照组合所需的内部窄 I/O，不得重新从 route/facade 公开。
 - collapsed-summary 是展示形态而不是第三种关系状态：repository 必须分别物化 `summary_row` 与全部 `collapsed_rows`；未配对 ETC summary 仍是一个 canonical singleton owner，旧 candidate/decision `case_id` 或 relation mode 不得泄漏为关系归属。
 - matching scope、workbench scope 和 workbench_relation scope 都以 PostgreSQL durable queue/state 为事实源；Redis 只缓存 fresh payload，RabbitMQ 只做可选唤醒。
-- relation UoW/turnover writer 不拥有成本计算、存储或下游刷新 I/O；repository、自动匹配命令和 lifecycle registry 不声明成本 I/O。Workbench generation publish 也不再发布 Cost fan-out。Cost 访问先检查 Workbench canonical expected/active generation 版本；上游 stale 时 ensure 当前 exact Workbench 月份并只 stage 当前请求的唯一 Cost scope。Cost worker 以 manifest dependency fail closed/defer，依赖 fresh 后才发布；禁止 sibling scope、写后 fan-out或第二协调链路。
+- relation UoW/turnover writer 不拥有成本计算、存储或下游刷新 I/O；repository、自动匹配命令和 lifecycle registry 不声明成本 I/O。Workbench generation publish 也不再发布 Cost fan-out。Cost 访问先检查 Workbench canonical expected/active generation 版本；上游 stale 时 ensure 当前 exact Workbench 月份。Cost月份请求只stage当前scope，parent请求一次stage同一页面/同 project scope的exact children与parent。Cost worker 以 manifest dependency fail closed/defer，依赖 fresh 后才发布；禁止 sibling project/page scope、写后 fan-out或第二协调链路。
 - Search 本地即时查询与 ignored rows 是 repository 窄读接口，不是新的 read model/projection/cache；它们必须固定到 active generation，且不能反向依赖页面 assembler。
 - Release A 上线后先执行一次全量 Workbench rehydrate，使旧 `open`/candidate/decision generation 被新的 paired/unpaired generation 原子替换；不得原地修改旧 active generation。Release B 的旧状态 drop migration 只在 A 的零访问和数据安全证据通过后创建，并使用届时下一个可用版本；不得复用已被 OA 使用的 0104。
 

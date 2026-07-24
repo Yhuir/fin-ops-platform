@@ -3,7 +3,7 @@
 ## 2026-07-24 - exact Cost scope 与 Workbench dependency 同次登记
 
 - release `main-c4edf63a-20260724201915` 已把 Cost handler降到约 78–328ms，confirm/withdraw写入分别约 347/233ms且零 forbidden fan-out；但页面轮询先等 Workbench、再登记 Cost child、再等待 parent，`project/all` 仍需约 12.6/11.2 秒才业务可见。
-- 最小修复在发现 Workbench stale 的同一次 Cost访问中先 ensure exact Workbench，再只登记当前请求的唯一 Cost scope。Cost worker继续以 manifest dependency fail closed/defer并精确补投 child；不登记 sibling、不恢复写后事件、不增加 coordinator/cache/queue。最终 `<3s` 结论只由候选部署后的同一可恢复 fixture 决定。
+- round 9 证明只登记 parent仍保留 Workbench→Cost child→Cost parent串行空档。当前最小修复在同一次访问中先 ensure exact Workbench；月份只登记当前 Cost scope，parent一次登记同一页面/同 project scope的exact children与parent。Cost worker继续以 manifest dependency fail closed/defer；不登记 sibling project/page scope、不恢复写后事件、不增加 coordinator/cache/queue。最终 `<3s` 结论只由候选部署后的同一可恢复 fixture 决定。
 
 ## 2026-07-24 - `time|bank_tag` 直接复用 Bank Detail，删除 Cost 复制投影
 
@@ -950,3 +950,10 @@
 - 决策：只在共享 bank-flow SQL I/O 边界把 canonical direction 映射为 Cost 契约的 `支出|收入`，并让页面 Audit 使用同一映射；父聚合 source vector 增加一个语义版本，使旧错误 statistics 只重建父 scope，不让 Workbench-backed 月 shard 全量失效；不新增缓存、协调器、队列或兼容分支。
 - 验证：Cost SQL/Audit/API/App Health 定向测试通过；一次性 PostgreSQL 用真实 `支|收` 行验证 time/bank-tag summary 与父 scope statistics。生产 `<3s`、System Audit 和队列收敛仍由部署后 fixture 门禁证明。
 - 文档影响：模块职责、API shape、read-model scope、worker 和依赖方向均未改变，`boundary-io.md` 不适用。
+
+## 2026-07-24 Parent 访问依赖并行提交
+
+- 生产 round 9 证明 `project/all` 仍按 Workbench→Cost child→Cost parent 串行发现，确认/恢复可见耗时为 `15.675s` / `11.401s`，而 Cost child handler 本身约 `0.33s`。
+- `CostStatisticsQueryService` 已经持有 parent 的 exact Workbench month scopes，因此复用现有 runtime gateway，在同一次访问中提交同 project scope 的 Cost month children和请求 parent；月份请求仍只提交当前 scope，禁止 sibling project/page scope。
+- 不新增协调器、队列、缓存、worker类型或版本账本；manifest dependency gate继续 fail closed，PostgreSQL active dedupe继续合并重复任务。
+- 定向 service/read-model测试覆盖月份不扩散和parent精确 children + parent；最终 `<3s` 仍须部署后用同一 test-owned fixture证明。

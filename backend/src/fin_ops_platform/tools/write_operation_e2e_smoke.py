@@ -822,6 +822,7 @@ def _run_checkpoint(
     response_receipt_present = _RESPONSE_OUTBOX_EVENT_IDS in variables
     response_event_ids = _response_outbox_event_ids(variables.get(_RESPONSE_OUTBOX_EVENT_IDS))
     event_ids: list[str] | None = response_event_ids or None
+    write_slo: dict[str, Any] | None = None
     if idempotency_key:
         if not response_receipt_present:
             try:
@@ -832,34 +833,7 @@ def _run_checkpoint(
                 )
                 event_ids = durable_event_ids or None
             except Exception as exc:
-                return _failed_checkpoint(
-                    checkpoint,
-                    started_at=started_at,
-                    step_results=step_results,
-                    mutation_committed=mutation_committed,
-                    mutation_ambiguous=mutation_ambiguous,
-                    write_slo={"status": "fail", "error": str(exc) or exc.__class__.__name__},
-                )
-    write_slo = _wait_for_write_slo(
-        connection,
-        operations=checkpoint.operations,
-        tenant_id=tenant_id,
-        started_at=started_at,
-        target_ms=refresh_target_ms,
-        timeout_seconds=timeout_seconds,
-        poll_interval_seconds=poll_interval_seconds,
-        limit=limit,
-        event_ids=event_ids,
-    )
-    if write_slo["status"] != "pass":
-        return _failed_checkpoint(
-            checkpoint,
-            started_at=started_at,
-            step_results=step_results,
-            mutation_committed=mutation_committed,
-            mutation_ambiguous=mutation_ambiguous,
-            write_slo=write_slo,
-        )
+                write_slo = {"status": "fail", "error": str(exc) or exc.__class__.__name__}
     post_api = _wait_for_checkpoint_consumers(
         checkpoint,
         base_url=base_url,
@@ -873,7 +847,19 @@ def _run_checkpoint(
         isolation_baseline=isolation_baseline.get("values", {}),
         operation_commit_ack_monotonic=mutation_commit_ack_monotonic,
     )
-    if post_api["status"] not in {"pass", "skipped"}:
+    if write_slo is None:
+        write_slo = _wait_for_write_slo(
+            connection,
+            operations=checkpoint.operations,
+            tenant_id=tenant_id,
+            started_at=started_at,
+            target_ms=refresh_target_ms,
+            timeout_seconds=timeout_seconds,
+            poll_interval_seconds=poll_interval_seconds,
+            limit=limit,
+            event_ids=event_ids,
+        )
+    if write_slo["status"] != "pass" or post_api["status"] not in {"pass", "skipped"}:
         return _failed_checkpoint(
             checkpoint,
             started_at=started_at,
@@ -1281,6 +1267,7 @@ def _collect_checkpoint_consumers(
     isolation_baseline: Mapping[str, Any] | None = None,
     operation_commit_ack_monotonic: float | None = None,
     consumers: Sequence[ConsumerProbe] | None = None,
+    access_started_monotonic_by_consumer: dict[tuple[str, str, str], float] | None = None,
 ) -> dict[str, Any]:
     selected_consumers = tuple(checkpoint.consumers if consumers is None else consumers)
     if not selected_consumers:
@@ -1297,7 +1284,22 @@ def _collect_checkpoint_consumers(
             require_auth=True,
             request_fn=lambda url, request_headers, timeout: request_fn(url, "GET", request_headers, None, timeout),
         )
+    access_started = (
+        access_started_monotonic_by_consumer
+        if access_started_monotonic_by_consumer is not None
+        else {}
+    )
+
     def collect_consumer(consumer: ConsumerProbe) -> dict[str, Any]:
+        key = (
+            consumer.page_key,
+            consumer.probe.name,
+            str(_resolve_value(consumer.probe.path, variables)),
+        )
+        consumer_access_started = access_started.get(key)
+        if consumer_access_started is None:
+            consumer_access_started = monotonic()
+            access_started[key] = consumer_access_started
         return _collect_checkpoint_consumer(
             consumer,
             base_url=base_url,
@@ -1308,6 +1310,7 @@ def _collect_checkpoint_consumers(
             variables=variables,
             isolation_baseline=isolation_baseline,
             operation_commit_ack_monotonic=operation_commit_ack_monotonic,
+            access_started_monotonic=consumer_access_started,
         )
     worker_count = min(len(selected_consumers), MAX_PARALLEL_CONSUMER_PROBES)
     with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="consumer-probe") as executor:
@@ -1329,7 +1332,8 @@ def _collect_checkpoint_consumer(
     request_fn: RequestFn,
     variables: Mapping[str, Any],
     isolation_baseline: Mapping[str, Any] | None,
-    operation_commit_ack_monotonic: float | None,
+    operation_commit_ack_monotonic: float | None = None,
+    access_started_monotonic: float | None = None,
 ) -> dict[str, Any]:
     path = str(_resolve_value(consumer.probe.path, variables))
     if not consumer.assertions:
@@ -1367,10 +1371,10 @@ def _collect_checkpoint_consumer(
                 for assertion in consumer.assertions
             ]
         failed = [assertion for assertion in assertions if assertion["status"] != "pass"]
-        operation_commit_to_visible_ms = _operation_commit_to_visible_ms(operation_commit_ack_monotonic)
+        access_to_visible_ms = _elapsed_ms_since(access_started_monotonic)
+        operation_commit_to_visible_ms = _elapsed_ms_since(operation_commit_ack_monotonic)
         visibility_slo_miss = (
-            operation_commit_to_visible_ms is not None
-            and operation_commit_to_visible_ms > consumer.probe.target_ms
+            access_to_visible_ms is not None and access_to_visible_ms > consumer.probe.target_ms
         )
         return {
             "name": consumer.probe.name,
@@ -1383,11 +1387,19 @@ def _collect_checkpoint_consumer(
             **(
                 {
                     "error": (
-                        f"consumer_visibility_slo_miss:{round(operation_commit_to_visible_ms, 3)}"
+                        f"consumer_visibility_slo_miss:{round(access_to_visible_ms, 3)}"
                         f">{round(consumer.probe.target_ms, 3)}"
                     )
                 }
                 if visibility_slo_miss
+                else {}
+            ),
+            **(
+                {
+                    "access_to_visible_ms": access_to_visible_ms,
+                    "access_to_visible_clock": "first_consumer_access_started",
+                }
+                if access_to_visible_ms is not None
                 else {}
             ),
             **(
@@ -1400,7 +1412,8 @@ def _collect_checkpoint_consumer(
             ),
         }
     except Exception as exc:
-        operation_commit_to_visible_ms = _operation_commit_to_visible_ms(operation_commit_ack_monotonic)
+        access_to_visible_ms = _elapsed_ms_since(access_started_monotonic)
+        operation_commit_to_visible_ms = _elapsed_ms_since(operation_commit_ack_monotonic)
         return {
             "name": consumer.probe.name,
             "page_key": consumer.page_key,
@@ -1408,6 +1421,14 @@ def _collect_checkpoint_consumer(
             "path": path,
             "status": "fail",
             "error": str(exc) or exc.__class__.__name__,
+            **(
+                {
+                    "access_to_visible_ms": access_to_visible_ms,
+                    "access_to_visible_clock": "first_consumer_access_started",
+                }
+                if access_to_visible_ms is not None
+                else {}
+            ),
             **(
                 {
                     "operation_commit_to_visible_ms": operation_commit_to_visible_ms,
@@ -1426,10 +1447,10 @@ _RETRYABLE_CONSUMER_ERRORS = {
 }
 
 
-def _operation_commit_to_visible_ms(operation_commit_ack_monotonic: float | None) -> float | None:
-    if operation_commit_ack_monotonic is None:
+def _elapsed_ms_since(started_monotonic: float | None) -> float | None:
+    if started_monotonic is None:
         return None
-    return round(max(0.0, monotonic() - operation_commit_ack_monotonic) * 1000, 3)
+    return round(max(0.0, monotonic() - started_monotonic) * 1000, 3)
 
 
 def _consumer_result_key(item: Mapping[str, Any]) -> tuple[str, str, str]:
@@ -1469,7 +1490,7 @@ def _wait_for_checkpoint_consumers(
     operation_commit_ack_monotonic: float | None = None,
 ) -> dict[str, Any]:
     deadline = monotonic() + max(1.0, timeout_seconds)
-    first_visible_ms: dict[tuple[str, str, str], float] = {}
+    access_started_monotonic_by_consumer: dict[tuple[str, str, str], float] = {}
     settled: dict[tuple[str, str, str], dict[str, Any]] = {}
     pending = list(checkpoint.consumers)
     while True:
@@ -1485,13 +1506,11 @@ def _wait_for_checkpoint_consumers(
             isolation_baseline=isolation_baseline,
             operation_commit_ack_monotonic=operation_commit_ack_monotonic,
             consumers=pending,
+            access_started_monotonic_by_consumer=access_started_monotonic_by_consumer,
         )
         unresolved: list[ConsumerProbe] = []
         for consumer, item in zip(pending, list(result.get("results") or []), strict=True):
             key = _consumer_result_key(item)
-            elapsed = item.get("operation_commit_to_visible_ms")
-            if item.get("status") == "pass" and isinstance(elapsed, int | float):
-                first_visible_ms.setdefault(key, float(elapsed))
             if item.get("status") == "pass" or not _consumer_failure_is_retryable(item):
                 settled[key] = dict(item)
             else:
@@ -1510,10 +1529,6 @@ def _wait_for_checkpoint_consumers(
                 ]
                 for consumer in checkpoint.consumers
             ]
-            for item in ordered_results:
-                key = _consumer_result_key(item)
-                if key in first_visible_ms:
-                    item["operation_commit_to_visible_ms"] = first_visible_ms[key]
             return {
                 "status": "pass" if all(item.get("status") == "pass" for item in ordered_results) else "fail",
                 "consumer_count": len(ordered_results),

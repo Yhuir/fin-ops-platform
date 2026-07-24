@@ -1538,7 +1538,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
 
         with patch(
             "fin_ops_platform.tools.write_operation_e2e_smoke.monotonic",
-            side_effect=[10.0, 10.002],
+            side_effect=[9.999, 10.0, 10.002, 10.003],
         ):
             result = write_operation_e2e_smoke._collect_checkpoint_consumers(
                 checkpoint,
@@ -1559,7 +1559,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(result["results"][0]["path"], "/api/pages/2026-07")
         self.assertEqual(result["results"][0]["error"], "consumer_slo_miss:2.0>1")
 
-    def test_consumer_visibility_slo_is_measured_from_successful_mutation_response(self) -> None:
+    def test_consumer_visibility_slo_is_measured_from_first_page_access(self) -> None:
         checkpoint = write_operation_e2e_smoke.WriteCheckpoint(
             name="slow-convergence",
             operations=("workbench_relation_confirm_cross_page",),
@@ -1586,7 +1586,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
 
         with patch(
             "fin_ops_platform.tools.write_operation_e2e_smoke.monotonic",
-            side_effect=[20.0, 20.1, 23.1],
+            side_effect=[20.1, 20.1, 20.2, 23.0, 23.1],
         ):
             result = write_operation_e2e_smoke._collect_checkpoint_consumers(
                 checkpoint,
@@ -1604,11 +1604,8 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 operation_commit_ack_monotonic=20.0,
             )
 
-        self.assertEqual(result["status"], "fail")
-        self.assertEqual(
-            result["results"][0]["error"],
-            "consumer_visibility_slo_miss:3100.0>3000",
-        )
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["results"][0]["access_to_visible_ms"], 2900.0)
         self.assertEqual(result["results"][0]["operation_commit_to_visible_ms"], 3100.0)
 
     def test_consumer_wait_retries_refreshing_and_affected_business_visibility(self) -> None:
@@ -1683,6 +1680,11 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
 
         self.assertEqual(converged["status"], "pass")
         self.assertEqual(attempts, 2)
+        self.assertGreaterEqual(converged["results"][0]["access_to_visible_ms"], 0)
+        self.assertEqual(
+            converged["results"][0]["access_to_visible_clock"],
+            "first_consumer_access_started",
+        )
         self.assertGreaterEqual(converged["results"][0]["operation_commit_to_visible_ms"], 0)
         self.assertEqual(
             converged["results"][0]["operation_commit_clock"],
@@ -2112,6 +2114,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             fixture_ownership="test_owned",
         )
         audit_count = 0
+        checkpoint_order: list[str] = []
 
         def request_fn(
             url: str, method: str, headers, body, timeout_seconds: float
@@ -2121,6 +2124,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 audit_count += 1
                 response = _system_audit_payload(f"system-audit:{audit_count}")
             elif url.endswith("/api/consumer"):
+                checkpoint_order.append("consumer")
                 response = {"read_model_status": "fresh", "refresh_enqueued": False, "rows": [{"linked": True}]}
             else:
                 response = {"ok": True}
@@ -2129,6 +2133,10 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 headers={"content-type": "application/json"},
                 body=json.dumps(response).encode(),
             )
+
+        def wait_for_write_slo(*_args, **_kwargs):
+            checkpoint_order.append("write_slo")
+            return {"status": "pass", "results": []}
 
         timestamps = iter(
             [
@@ -2147,7 +2155,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             ),
             patch(
                 "fin_ops_platform.tools.write_operation_e2e_smoke._wait_for_write_slo",
-                return_value={"status": "pass", "results": []},
+                side_effect=wait_for_write_slo,
             ) as wait_slo,
         ):
             report = write_operation_e2e_smoke.run_write_operation_e2e_smoke(
@@ -2167,6 +2175,10 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertNotEqual(result["checkpoints"][0]["started_at"], result["checkpoints"][1]["started_at"])
         self.assertEqual(wait_slo.call_args_list[0].kwargs["event_ids"], ["event-confirm"])
         self.assertEqual(wait_slo.call_args_list[1].kwargs["event_ids"], ["event-withdraw"])
+        self.assertEqual(
+            checkpoint_order,
+            ["consumer", "write_slo", "consumer", "write_slo"],
+        )
         self.assertNotEqual(
             result["checkpoints"][0]["system_audit"]["system_audit_id"],
             result["checkpoints"][1]["system_audit"]["system_audit_id"],
@@ -2342,7 +2354,12 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 audit_count += 1
                 payload = _system_audit_payload(f"system-audit:slo-recovery:{audit_count}")
                 status = 200
-            elif url.endswith("/api/isolation") and mutation_started and not refresh_ready:
+            elif (
+                url.endswith("/api/isolation")
+                and mutation_started
+                and execute_count == 1
+                and not refresh_ready
+            ):
                 payload = {"read_model_status": "refreshing", "refresh_enqueued": True}
                 status = 202
             else:

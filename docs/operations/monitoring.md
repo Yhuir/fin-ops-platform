@@ -627,7 +627,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_e2e_smo
 ```
 
 说明：`write_operation_scenario_discovery --limit 1` 用来生成每类 operation 最多 1 条最小闭环 scenario；
-`write_operation_e2e_smoke` 的写后 SLO 事件读取会按当前 scenario 的 operation expectation 过滤 outbox，并保持有效采样窗口下限。每个 consumer 的 `target_ms` 同时是单次 fresh HTTP 上限和 mutation 成功响应到该 consumer 首次 fresh、业务断言通过的总耗时上限；后一计时包含 exact enqueue、worker、依赖和重试，不能只用最后一次快速 GET 冒充收敛通过。
+`write_operation_e2e_smoke` 的写后 SLO 事件读取会按当前 scenario 的 operation expectation 过滤 outbox，并保持有效采样窗口下限。runner 在 mutation 成功后先并发执行 consumer 的正常页面 GET，再执行 zero-fan-out 审计，避免验证器自身阻塞访问触发。每个 consumer 的 `target_ms` 同时是单次 fresh HTTP 上限和该 consumer 首次访问到 fresh、业务断言通过的总耗时上限；后一计时包含 exact enqueue、worker、依赖和重试，不能只用最后一次快速 GET 冒充收敛通过。`operation_commit_to_visible_ms` 仅保留为端到端观察值。
 因此主控 workflow 可以继续使用最小 scenario 输入；审计会拒绝同一写事务产生的任何普通页面 refresh，并由 post API probes 验证页面访问时收敛。
 
 执行前要求：
@@ -636,7 +636,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_e2e_smo
 - `--apply` 必须带审批引用；缺少 `--approval-ticket` / `FIN_OPS_WRITE_E2E_APPROVAL_TICKET` 会返回 `status=approval_missing`，且不会连接 Postgres 或发起 mutating HTTP。
 - 每个 mutating step 必须有预期状态码；工具不会把 409/403/500 继续包装成已同步。
 - mutating step 如果拿到 `text/html` 或 HTML 页面壳，即使状态码匹配，也会按 `html_response_for_api_probe` 失败并跳过 write SLO claim；这通常表示 API prefix、Nginx fallback 或路径配置错误。
-- 正式 relation confirm/withdraw 同步完成权限、freshness、canonical 校验、事务关系写和幂等提交；普通写必须零页面 dirty/outbox。生产 standing correctness smoke 的 HTTP 写响应门禁固定为 `5000ms`，未显式收紧 scenario 时页面访问到 fresh 的 correctness 上限为 `30000ms`、总等待上限为 `120s`，fresh consumer HTTP 读取门禁为 `1000ms`。性能 closure 的 scenario 必须把每个相关 consumer `target_ms` 设为 `3000` 或更低；runner 会直接检查成功写响应到首次 fresh/业务可见的总耗时，超限即失败。最终仍汇总 access p95 `1000ms`、p99 `3000ms`，不能用 correctness 上限或最后一次快速 GET 冒充性能结果。
+- 正式 relation confirm/withdraw 同步完成权限、freshness、canonical 校验、事务关系写和幂等提交；普通写必须零页面 dirty/outbox。生产 standing correctness smoke 的 HTTP 写响应门禁固定为 `5000ms`，未显式收紧 scenario 时页面访问到 fresh 的 correctness 上限为 `30000ms`、总等待上限为 `120s`，fresh consumer HTTP 读取门禁为 `1000ms`。性能 closure 的 scenario 必须把每个相关 consumer `target_ms` 设为 `3000` 或更低；runner 会直接检查每个 consumer 首次页面访问到 fresh/业务可见的总耗时，超限即失败。最终仍汇总 access p95 `1000ms`、p99 `3000ms`，不能用 correctness 上限、mutation 后但访问前的空闲时间或最后一次快速 GET 冒充性能结果。
 - 写步骤成功后，工具优先以事务 response receipt 的 exact event IDs 为因果边界，拒绝 operation profile 中任何 forbidden page refresh；随后 post API probes 触发消费页自身 fresh gate，并验证 access-time dirty/outbox/worker/fresh 证据。只有没有 receipt 的旧式只读性能审计才使用数据库 `clock_timestamp()` 时间窗。
 - post API probe 只用于验证写后页面首屏 API；最终仍要结合登录态 HTTP SLO、App Health 和审计记录。
 - 输出不包含 token、cookie、Authorization header，也不输出 scenario 请求 body，只记录路径、状态码、耗时和 outbox/readiness 结果。

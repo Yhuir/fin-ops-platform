@@ -786,7 +786,7 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             [("active:2026-05", "api_workbench_dependency_stale")],
         )
 
-    def test_parent_access_stages_only_requested_cost_parent_behind_stale_workbench(self) -> None:
+    def test_parent_access_stages_exact_cost_children_and_parent_behind_stale_workbench(self) -> None:
         class Runtime(CostStatisticsRuntimeStub):
             def __init__(self) -> None:
                 self.cost_refreshes: list[tuple[str, str]] = []
@@ -860,7 +860,11 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
         )
         self.assertEqual(
             runtime.cost_refreshes,
-            [("active:all", "api_workbench_dependency_stale")],
+            [
+                ("active:2026-03", "api_workbench_dependency_stale"),
+                ("active:2026-04", "api_workbench_dependency_stale"),
+                ("active:all", "api_workbench_dependency_stale"),
+            ],
         )
 
     def test_parent_access_refreshes_exact_stale_cost_children_instead_of_parent(self) -> None:

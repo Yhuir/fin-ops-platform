@@ -674,12 +674,28 @@ class CostStatisticsQueryService:
             )
             for workbench_scope_key in workbench_scope_keys
         ]
-        cost_refresh_enqueued = self._runtime_service.enqueue_read_model_refresh(
-            scope_key,
-            reason="api_workbench_dependency_stale",
+        project_scope = scope_key.split(":", 1)[0]
+        cost_scope_keys = (
+            tuple(
+                dict.fromkeys(
+                    self._runtime_service.request_scope_key(month, project_scope)
+                    for month in (*workbench_scope_keys, "all")
+                )
+            )
+            if scope_key.endswith(":all")
+            else (scope_key,)
         )
-        # ponytail: stage only the requested Cost scope; its worker already owns exact dependency ordering.
-        payload["refresh_enqueued"] = bool(cost_refresh_enqueued) or any(refresh_results)
+        # ponytail: stage only this page's exact children and parent; the worker owns dependency order.
+        cost_refresh_results = [
+            bool(
+                self._runtime_service.enqueue_read_model_refresh(
+                    cost_scope_key,
+                    reason="api_workbench_dependency_stale",
+                )
+            )
+            for cost_scope_key in cost_scope_keys
+        ]
+        payload["refresh_enqueued"] = any(cost_refresh_results) or any(refresh_results)
         return payload
 
     def _cost_statistics_non_fresh_gate_payload(
