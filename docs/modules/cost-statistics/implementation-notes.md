@@ -942,6 +942,6 @@
 
 - 目标：停止 Cost 全局 statistics 永久 stale 后反复刷新无变化 `all:all` 父 scope。
 - 根因：Bank Detail 的事实字段是 `direction=expense|income`，`direction_label=支|收` 仅用于短标签显示；Cost bank-flow SQL 错把短标签当成 `支出|收入` 统计字段，生产 1,014 条流水因此被统计为支出 0、收入 0。
-- 决策：只在共享 bank-flow SQL I/O 边界把 canonical direction 映射为 Cost 契约的 `支出|收入`，并让页面 Audit 使用同一映射；不新增缓存、协调器、队列或兼容分支。
+- 决策：只在共享 bank-flow SQL I/O 边界把 canonical direction 映射为 Cost 契约的 `支出|收入`，并让页面 Audit 使用同一映射；父聚合 source vector 增加一个语义版本，使旧错误 statistics 只重建父 scope，不让 Workbench-backed 月 shard 全量失效；不新增缓存、协调器、队列或兼容分支。
 - 验证：Cost SQL/Audit/API/App Health 定向测试通过；一次性 PostgreSQL 用真实 `支|收` 行验证 time/bank-tag summary 与父 scope statistics。生产 `<3s`、System Audit 和队列收敛仍由部署后 fixture 门禁证明。
 - 文档影响：模块职责、API shape、read-model scope、worker 和依赖方向均未改变，`boundary-io.md` 不适用。

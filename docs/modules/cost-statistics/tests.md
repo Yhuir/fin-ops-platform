@@ -463,7 +463,7 @@ PYTHONPATH=backend/src scripts/check-read-model-scope-contracts.py --help
 
 - `tests/test_cost_statistics_postgres_integration.py` 使用正式 `direction=expense|income` 与短标签 `direction_label=支|收`，证明 bank-flow 页面 summary 和父 scope statistics 正确得到支出/收入计数。
 - `tests/test_cost_statistics_page_audit.py` 与 `tests/test_audit_page_business_read_model_tool.py` 锁定 Audit 使用同一 canonical direction 映射，防止业务页面与审计证明再次分叉。
-- 生产门禁：Cost time 页不得再出现“有流水但支出/收入均为 0”，statistics 必须 fresh，不得持续生成 `source_versions_unchanged` 的 `all:all` refresh。
+- 生产门禁：Cost time 页不得再出现“有流水但支出/收入均为 0”，statistics 必须 fresh；父 aggregate 版本变化只允许重建 `active:all` / `all:all`，不得 fan-out 月 shard，也不得持续生成 `source_versions_unchanged` 的 `all:all` refresh。
 
 ## 2026-07-23 relation 后访问时可见性门禁
 

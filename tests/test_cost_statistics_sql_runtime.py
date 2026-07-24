@@ -4656,6 +4656,12 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(len(payload["expense_type_rows"]), 2)
         self.assertEqual(payload["bank_accounts"][0]["payment_account_label"], "工商银行 账户 0001")
         self.assertEqual(snapshot["read_models"]["active:all"]["source_versions"]["source_shard_count"], 2)
+        self.assertEqual(
+            snapshot["read_models"]["active:all"]["source_versions"][
+                "cost_statistics_parent_aggregate_schema_version"
+            ],
+            "2026-07-bank-flow-direction-v1",
+        )
         self.assertFalse(any("read_model.cost_statistics_rows" in sql for sql, _params in connection.fetch_all_calls))
         self.assertFalse(any("read_model.cost_statistics_bank_flow_rows" in sql for sql, _params in connection.fetch_all_calls))
         self.assertEqual(

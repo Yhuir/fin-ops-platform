@@ -37,6 +37,7 @@ UNATTRIBUTED_PROJECT_NAME = "未归集项目"
 UNCATEGORIZED_EXPENSE_TYPE = "未分类"
 MULTI_PROJECT_NAME = "多项目"
 MULTI_EXPENSE_TYPE = "多费用类型"
+COST_STATISTICS_PARENT_AGGREGATE_SCHEMA_VERSION = "2026-07-bank-flow-direction-v1"
 
 
 class CostStatisticsSqlProjectionBuilder:
@@ -201,6 +202,9 @@ class CostStatisticsSqlProjectionBuilder:
             source_versions = {
                 **self._source_versions("all"),
                 "cost_statistics_parent_source": "materialized_shards",
+                "cost_statistics_parent_aggregate_schema_version": (
+                    COST_STATISTICS_PARENT_AGGREGATE_SCHEMA_VERSION
+                ),
                 "source_shard_count": len(shard_versions),
                 "source_shards": shard_versions,
             }
