@@ -104,7 +104,11 @@ _COST_STATISTICS_BANK_FLOW_SOURCE_SQL = f"""
                 then bank_name || ' 账户 ' || account_last4
             else coalesce(nullif(btrim(bank_name), ''), nullif(btrim(account_last4), ''), '')
         end as payment_account_label,
-        direction_label as direction,
+        case direction
+            when 'expense' then '支出'
+            when 'income' then '收入'
+            else direction_label
+        end as direction,
         coalesce(nullif(purpose, ''), nullif(summary, ''), '') as remark,
         ''::text as project_id,
         '未配对OA'::text as project_name,

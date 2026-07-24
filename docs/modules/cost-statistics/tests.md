@@ -459,6 +459,12 @@ PYTHONPATH=backend/src scripts/check-read-model-scope-contracts.py --help
 - 真实数据库结果：CI 因未配置 `FIN_OPS_TEST_DATABASE_URL` 明确跳过 PostgreSQL 集成；随后使用显式 host 的一次性本机 PostgreSQL 应用全部 migrations，首次发现并修复无 dirty row 时 SQL 三值逻辑漏报，复跑 `tests.test_cost_statistics_postgres_integration` 与 `tests.test_batch_accounting_postgres_integration` 为 `12/12`，临时库自动删除。
 - 发布后门禁：使用 test-owned 可逆 relation fixture，在不预读 concrete child 的前提下访问 Cost all；必须由 all GET 自身发现 drift、只生成 exact month/child refresh、`<=3s` 收敛为 fresh，随后 System Audit `16/16`。同时分别量测 all 与 concrete-month warm p95/p99，证明包含 global statistics child proof 后仍满足页面 SLO。
 
+## 2026-07-24 Bank Detail direction 契约回归
+
+- `tests/test_cost_statistics_postgres_integration.py` 使用正式 `direction=expense|income` 与短标签 `direction_label=支|收`，证明 bank-flow 页面 summary 和父 scope statistics 正确得到支出/收入计数。
+- `tests/test_cost_statistics_page_audit.py` 与 `tests/test_audit_page_business_read_model_tool.py` 锁定 Audit 使用同一 canonical direction 映射，防止业务页面与审计证明再次分叉。
+- 生产门禁：Cost time 页不得再出现“有流水但支出/收入均为 0”，statistics 必须 fresh，不得持续生成 `source_versions_unchanged` 的 `all:all` refresh。
+
 ## 2026-07-23 relation 后访问时可见性门禁
 
 - `tests/test_cost_statistics_sql_runtime.py`：先检测 canonical Workbench expected/active version；上游 stale 只 enqueue 精确 Workbench 月份且停止 Cost I/O，上游 fresh 后 Cost stale 才 enqueue 当前 Cost scope。

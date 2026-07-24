@@ -95,7 +95,7 @@ class CostStatisticsPostgresIntegrationTests(unittest.TestCase):
                 'default', '64bf2e9b-0ccb-59da-b89e-bf537be30b56',
                 '2026-03', '2026-03-01', 'test-account',
                 '工商银行', '0001', '2026-03-05', '2026-03-05',
-                'expense', '支出', 200000,
+                'expense', '支', 200000,
                 'repayment', '归还借款', '外部往来款', '归还借款',
                 array['外部往来款', '归还借款'], {BANK_DETAIL_READ_MODEL_SCHEMA_VERSION},
                 '{{"id": "txn_imported_1348", "trade_time": "2026-03-05"}}'::jsonb
@@ -125,6 +125,8 @@ class CostStatisticsPostgresIntegrationTests(unittest.TestCase):
         )
 
         self.assertEqual(page["rows"][0]["transaction_id"], "txn_imported_1348")
+        self.assertEqual(page["summary"]["expense_transaction_count"], 1)
+        self.assertEqual(page["summary"]["income_transaction_count"], 0)
         self.assertEqual(detail["transaction_id"], "txn_imported_1348")
 
     def test_parent_freshness_gate_returns_exact_child_when_embedded_workbench_version_drifts(
@@ -394,10 +396,10 @@ class CostStatisticsPostgresIntegrationTests(unittest.TestCase):
             values
                 ('default', 'current', '2026-05', '2026-05-01', 'current-account',
                  '工商银行', '0001', '2026-05-02', '2026-05-02',
-                 'expense', '支出', 20, {BANK_DETAIL_READ_MODEL_SCHEMA_VERSION}),
+                 'expense', '支', 20, {BANK_DETAIL_READ_MODEL_SCHEMA_VERSION}),
                 ('default', 'obsolete', '2026-04', '2026-04-01', 'obsolete-account',
                  '工商银行', '0001', '2026-04-02', '2026-04-02',
-                 'income', '收入', 999, {BANK_DETAIL_READ_MODEL_SCHEMA_VERSION})
+                 'income', '收', 999, {BANK_DETAIL_READ_MODEL_SCHEMA_VERSION})
             """
         )
         builder = CostStatisticsSqlProjectionBuilder(

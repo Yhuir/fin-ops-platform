@@ -1214,7 +1214,11 @@ def _key_display_field_issues(
                 select scope_key as month_key,
                        transaction_id as row_key,
                        transaction_id,
-                       direction_label as direction,
+                       case direction
+                           when 'expense' then '支出'
+                           when 'income' then '收入'
+                           else direction_label
+                       end as direction,
                        effective_category_code as bank_tag_code
                 from read_model.bank_detail_rows
                 where tenant_id = %s

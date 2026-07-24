@@ -938,3 +938,10 @@
 - 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_refresh_gateway tests.test_runtime_worker_read_model_refresh_scopes -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_cost_statistics_sql_runtime.CostStatisticsSqlRuntimeTests.test_generic_cost_statistics_enqueue_expands_month_scopes -v`。
 - 未测风险：阶段 1 未执行真实生产库清理。
 - 后续事项：已由后续 scope contract 检查/清理入口补齐。
+## 2026-07-24 Bank Detail 收支方向契约修复
+
+- 目标：停止 Cost 全局 statistics 永久 stale 后反复刷新无变化 `all:all` 父 scope。
+- 根因：Bank Detail 的事实字段是 `direction=expense|income`，`direction_label=支|收` 仅用于短标签显示；Cost bank-flow SQL 错把短标签当成 `支出|收入` 统计字段，生产 1,014 条流水因此被统计为支出 0、收入 0。
+- 决策：只在共享 bank-flow SQL I/O 边界把 canonical direction 映射为 Cost 契约的 `支出|收入`，并让页面 Audit 使用同一映射；不新增缓存、协调器、队列或兼容分支。
+- 验证：Cost SQL/Audit/API/App Health 定向测试通过；一次性 PostgreSQL 用真实 `支|收` 行验证 time/bank-tag summary 与父 scope statistics。生产 `<3s`、System Audit 和队列收敛仍由部署后 fixture 门禁证明。
+- 文档影响：模块职责、API shape、read-model scope、worker 和依赖方向均未改变，`boundary-io.md` 不适用。

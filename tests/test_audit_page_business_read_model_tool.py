@@ -749,7 +749,8 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
         self.assertIn("cost_summary_recalculation", queried_sql)
         self.assertIn("from read_model.bank_detail_rows", queried_sql)
-        self.assertIn("direction_label as direction", queried_sql)
+        self.assertIn("when 'expense' then '支出'", queried_sql)
+        self.assertIn("when 'income' then '收入'", queried_sql)
         self.assertIn("effective_category_code as bank_tag_code", queried_sql)
         self.assertIn(
             "select project_scope || ':all' as scope_key",

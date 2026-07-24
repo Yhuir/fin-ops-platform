@@ -464,7 +464,8 @@ class CostStatisticsPageAuditTests(unittest.TestCase):
         self.assertNotIn("model.payload->'payload'->'bank_flow_time_rows'", queried_sql)
         self.assertNotIn("cost_statistics_bank_flow_rows", queried_sql)
         self.assertIn("from read_model.bank_detail_rows", business_sql)
-        self.assertIn("direction_label as direction", business_sql)
+        self.assertIn("when 'expense' then '支出'", business_sql)
+        self.assertIn("when 'income' then '收入'", business_sql)
         self.assertIn("expected_bank_scope_rows as (", business_sql)
         self.assertIn(
             "select project_scope || ':all' as scope_key",
