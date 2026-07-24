@@ -3365,6 +3365,33 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(gate_sql.count("- 'bank_transactions_context_row_count'"), 2)
         self.assertEqual(gate_sql.count("- 'bank_transactions_updated_at'"), 2)
 
+    def test_repository_month_gate_accepts_workbench_generation_covering_dirty_version(
+        self,
+    ) -> None:
+        connection = CostStatisticsReadConnection(
+            read_model_row={
+                "scope_key": "active:2026-05",
+                "schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+                "source_versions": _cost_statistics_source_versions_fixture("active:2026-05"),
+                "published_source_version": 7,
+                "workbench_source_versions": {
+                    "builder": "workbench-month-v6",
+                    "source_version": 8,
+                },
+                "workbench_dirty_source_version": 7,
+                "workbench_dirty_status": "processing",
+            },
+            dirty_status="done",
+            dirty_source_version=7,
+        )
+
+        gate = PostgresReadModelRepository(connection).get_cost_statistics_freshness_gate(
+            scope_key="active:2026-05"
+        )
+
+        self.assertEqual(gate["refresh_status"], "fresh")
+        self.assertEqual(gate["workbench_refresh_scope_keys"], [])
+
     def test_repository_month_gate_keeps_current_rows_but_marks_global_statistics_stale(
         self,
     ) -> None:
@@ -3396,6 +3423,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
     def test_repository_cost_statistics_gate_handles_done_failed_mismatch_and_pruned_history(self) -> None:
         cases = (
             ("done", 7, 7, "fresh", []),
+            ("done", 6, 7, "fresh", []),
             ("failed", 8, 7, "failed", ["dirty_scope_failed"]),
             ("done", 8, 7, "stale", ["published_source_version_mismatch"]),
             (None, None, 7, "fresh", []),
@@ -3422,7 +3450,14 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
 
     def test_repository_cost_statistics_gate_fails_closed_for_dependency_state_and_version_drift(self) -> None:
         cases = (
-            ({"workbench_dirty_status": "pending"}, "refreshing", "cost_statistics_dependency_refreshing"),
+            (
+                {
+                    "workbench_dirty_status": "pending",
+                    "workbench_dirty_source_version": 2,
+                },
+                "refreshing",
+                "cost_statistics_dependency_refreshing",
+            ),
             ({"bank_detail_dirty_status": "failed"}, "failed", "cost_statistics_dependency_dirty_scope_failed"),
             (
                 {"source_settings": {"bank_transaction_tags": [], "bank_account_mappings": []}},

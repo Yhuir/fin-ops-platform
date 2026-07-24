@@ -7782,18 +7782,25 @@ class PostgresSummaryReadModelRepository:
                     select
                         state.*,
                         (
-                            coalesce(
-                                state.workbench_dirty_status in ('pending', 'processing', 'failed'),
-                                false
-                            )
+                            state.workbench_dirty_status = 'failed'
                             or (
                                 state.workbench_dirty_status is not null
                                 and (
-                                    state.workbench_dirty_status <> 'done'
-                                    or coalesce(
-                                        state.active_workbench_source_versions->>'source_version',
-                                        ''
-                                    ) <> coalesce(state.workbench_dirty_source_version::text, '')
+                                    state.workbench_dirty_status
+                                        not in ('done', 'pending', 'processing', 'failed')
+                                    or case
+                                        when coalesce(
+                                            state.active_workbench_source_versions->>'source_version',
+                                            ''
+                                        ) ~ '^[0-9]+$'
+                                        then (
+                                            state.active_workbench_source_versions->>'source_version'
+                                        )::bigint < coalesce(
+                                            state.workbench_dirty_source_version,
+                                            0
+                                        )
+                                        else true
+                                    end
                                 )
                             )
                         ) as workbench_not_fresh,
@@ -7810,7 +7817,7 @@ class PostgresSummaryReadModelRepository:
                                 and (
                                     state.bank_detail_dirty_status <> 'done'
                                     or state.bank_detail_source_version
-                                       <> state.bank_detail_dirty_source_version
+                                       < state.bank_detail_dirty_source_version
                                 )
                             )
                         ) as bank_detail_not_fresh,
@@ -7842,7 +7849,7 @@ class PostgresSummaryReadModelRepository:
                                 and (
                                     state.child_dirty_status <> 'done'
                                     or state.child_published_source_version
-                                       <> state.child_dirty_source_version
+                                       < state.child_dirty_source_version
                                 )
                             )
                         ) as cost_child_not_fresh
@@ -7988,7 +7995,9 @@ class PostgresSummaryReadModelRepository:
             refresh_status = "failed"
             stale_reasons.append("dirty_scope_failed")
         elif published_source_version is not None and dirty_status is not None and (
-            dirty_status != "done" or dirty_source_version != published_source_version
+            dirty_status != "done"
+            or dirty_source_version is None
+            or dirty_source_version > published_source_version
         ):
             refresh_status = "stale"
             stale_reasons.append("published_source_version_mismatch")
@@ -8023,10 +8032,26 @@ class PostgresSummaryReadModelRepository:
         bank_flow_child_refresh_scope_keys: list[str] = []
         month_workbench_dependency_not_fresh = False
         if scope_month != "all":
+            workbench_dirty_status = text(row.get("workbench_dirty_status"))
+            workbench_dirty_source_version = (
+                int_value(row.get("workbench_dirty_source_version"), -1)
+                if row.get("workbench_dirty_source_version") is not None
+                else None
+            )
+            active_workbench_source_version = _source_version_value(
+                workbench_source_versions
+            )
+            workbench_dirty_covered = bool(
+                workbench_dirty_status in {"done", "pending", "processing"}
+                and workbench_dirty_source_version is not None
+                and active_workbench_source_version is not None
+                and active_workbench_source_version >= workbench_dirty_source_version
+            )
             dependency_statuses = {
-                text(row.get("workbench_dirty_status")),
                 text(row.get("bank_detail_dirty_status")),
             }
+            if not workbench_dirty_covered:
+                dependency_statuses.add(workbench_dirty_status)
             if "failed" in dependency_statuses:
                 refresh_status = "failed"
                 stale_reasons.append("cost_statistics_dependency_dirty_scope_failed")
@@ -8038,18 +8063,18 @@ class PostgresSummaryReadModelRepository:
                 refresh_status = "stale" if refresh_status == "fresh" else refresh_status
                 stale_reasons.append("workbench_source_versions_missing")
             elif (
-                row.get("workbench_dirty_source_version") is not None
-                and int_value(workbench_source_versions.get("source_version"), -1)
-                != int_value(row.get("workbench_dirty_source_version"), -1)
+                workbench_dirty_source_version is not None
+                and (
+                    active_workbench_source_version is None
+                    or active_workbench_source_version < workbench_dirty_source_version
+                )
             ):
                 month_workbench_dependency_not_fresh = True
                 refresh_status = "stale" if refresh_status == "fresh" else refresh_status
                 stale_reasons.append("workbench_published_source_version_mismatch")
-            if text(row.get("workbench_dirty_status")) in {
-                "pending",
-                "processing",
-                "failed",
-            }:
+            if workbench_dirty_status in {"pending", "processing", "failed"} and not (
+                workbench_dirty_covered
+            ):
                 month_workbench_dependency_not_fresh = True
             bank_detail_schema_version = int_value(row.get("bank_detail_schema_version"), 0)
             bank_detail_status = text(row.get("bank_detail_status"))
@@ -8069,7 +8094,7 @@ class PostgresSummaryReadModelRepository:
             if (
                 row.get("bank_detail_dirty_source_version") is not None
                 and int_value(row.get("bank_detail_source_version"), -1)
-                != int_value(row.get("bank_detail_dirty_source_version"), -1)
+                < int_value(row.get("bank_detail_dirty_source_version"), -1)
             ):
                 bank_detail_dependency_not_fresh = True
                 refresh_status = "stale" if refresh_status == "fresh" else refresh_status
@@ -8231,7 +8256,9 @@ class PostgresSummaryReadModelRepository:
             statistics_status = "refreshing"
         elif statistics_dirty_status is not None and (
             statistics_dirty_status != "done"
-            or statistics_dirty_source_version != statistics_published_source_version
+            or statistics_dirty_source_version is None
+            or statistics_published_source_version is None
+            or statistics_dirty_source_version > statistics_published_source_version
         ):
             statistics_status = "stale"
         if parent_proof_non_fresh:

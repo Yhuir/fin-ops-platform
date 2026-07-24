@@ -184,6 +184,14 @@ class CostStatisticsPostgresIntegrationTests(unittest.TestCase):
         )
         self.connection.execute(
             """
+            insert into job.read_model_dirty_scopes(
+                tenant_id, scope_type, scope_key, source_version, status
+            )
+            values ('default', 'workbench', '2026-03', 7, 'done')
+            """
+        )
+        self.connection.execute(
+            """
             insert into read_model.bank_detail_scopes(
                 tenant_id, scope_type, scope_key, scope_month, schema_version,
                 status, row_count, source_version, source_versions, generated_at
@@ -238,6 +246,17 @@ class CostStatisticsPostgresIntegrationTests(unittest.TestCase):
                 json.dumps(parent_source_versions),
                 COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
             ),
+        )
+        self.connection.execute(
+            """
+            insert into job.read_model_dirty_scopes(
+                tenant_id, scope_type, scope_key, source_version, status
+            )
+            values
+                ('default', 'bank_detail', '2026-03', 0, 'done'),
+                ('default', 'cost_statistics', 'active:2026-03', 6, 'done'),
+                ('default', 'cost_statistics', 'active:all', 6, 'done')
+            """
         )
 
         gate = self.repository.get_cost_statistics_freshness_gate(scope_key="active:all")
