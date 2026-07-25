@@ -39,7 +39,7 @@
 - [ ] **AUDIT-01**: Every page registered in `web/src/app/pageRegistry.tsx` has an explicit fail-closed Audit contract or an explicit non-read-model operational proof contract.
 - [ ] **AUDIT-02**: Every page Audit compares an independently owned canonical expected set with the complete page projection in both directions.
 - [ ] **AUDIT-03**: Every page Audit independently recalculates all registered business-critical display fields and summary totals.
-- [ ] **AUDIT-04**: Canonical relation edges, shared `workbench_relation` edges, Workbench active-generation edges, and every page consumer projection are equal in both directions.
+- [x] **AUDIT-04**: Canonical relation edges, shared `workbench_relation` edges, Workbench active-generation edges, and every page consumer projection are equal in both directions.
 - [ ] **AUDIT-05**: Audit results are produced from one system-level repeatable-read read-only snapshot and bind the current audit/source/read-model/relation/config/generation versions.
 - [ ] **AUDIT-06**: Freshness, queue and readiness use one manifest-driven current-effective policy across Audit, App Status, operation barriers and SLO smoke.
 - [ ] **AUDIT-07**: `fan_out_command/all` historical readiness is diagnostic-only while current dirty/outbox failures remain blocking; queryable parent readiness remains blocking.
@@ -138,7 +138,7 @@
 | AUDIT-01 | Phase 19 | Pending |
 | AUDIT-02 | Phase 19 | Pending |
 | AUDIT-03 | Phase 19 | Pending |
-| AUDIT-04 | Phase 19 | Pending |
+| AUDIT-04 | Phase 19 | Complete |
 | AUDIT-05 | Phase 19 | Pending |
 | AUDIT-06 | Phase 19 | Pending |
 | AUDIT-07 | Phase 19 | Pending |

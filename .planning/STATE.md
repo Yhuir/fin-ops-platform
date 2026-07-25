@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 30-03-PLAN.md
-last_updated: "2026-07-25T19:15:48.734Z"
+stopped_at: Completed 30-04-PLAN.md with safe production blocker
+last_updated: "2026-07-25T19:51:00.376Z"
 last_activity: 2026-07-25 -- Phase 30 execution started
 progress:
   total_phases: 27
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 ## Current Position
 
 Phase: 30 (workbench-concurrent-recovery-performance) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-07-25 -- Phase 30 execution started
 
@@ -48,6 +48,7 @@ Progress: [██████████] 100% (Phase 29)
 | 28 | 1/1 | 1h 40m | 1h 40m |
 | Phase 30 P02 | 31min | 3 tasks | 17 files |
 | Phase 30 P03 | 24min | 3 tasks | 14 files |
+| Phase 30 P04 | 24min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -127,6 +128,9 @@ Progress: [██████████] 100% (Phase 29)
 - [Phase 30]: Keep group_type=selection preview-only; require zone/status=unpaired and leave ordinary Workbench mapping strict.
 - [Phase 30]: Share one synchronous confirm/withdraw pending guard and drop success responses after selection or read-model version drift.
 - [Phase 30]: Derive user-visible Workbench errors only from approved code/status mappings while retaining status/code/requestId.
+- [Phase 30]: Production relation apply requires one fixed root-owned mode-0600 bank_oa_invoice scenario with explicit test-owned ownership, confirm, withdraw and recovery; legacy scenarios are not upgraded by inference.
+- [Phase 30]: Candidate A 3bf46e797 remains active and healthy; Candidate B is not used for fixture provisioning.
+- [Phase 30]: Missing sanctioned production scenario provisioning fails closed before mutation; no direct SQL, arbitrary scenario file or secret access is permitted.
 
 ### Roadmap Evolution
 
@@ -166,6 +170,7 @@ None yet.
 - Hotfix 发布前基线仍显示云南立孚 520 关系为 unpaired；破坏性 migration 0104 已明确从 Release A 延后，只有 repaired release 激活后才允许运行已登记的 rehydrate、等待 worker drain 并执行生产 System Audit。
 - 17/17 pages expose ready v17 proofs and local System Audit is complete; authorized production read-only execution has not occurred.
 - External bank/OA/invoice/ETC control evidence remains unregistered/unknown, so end-to-end external source completeness is still unproven.
+- Phase 30-04 production full-chain validation is blocked before mutation: live deploy-control lacks read-only relation scenario discovery/root-owned provisioning, while the configured fixed scenario is legacy and not test-owned with confirm/withdraw recovery.
 
 ### Quick Tasks Completed
 
@@ -196,6 +201,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-07-25T19:15:48.726Z
-Stopped at: Completed 30-03-PLAN.md
+Last session: 2026-07-25T19:51:00.368Z
+Stopped at: Completed 30-04-PLAN.md with safe production blocker
 Resume file: None
