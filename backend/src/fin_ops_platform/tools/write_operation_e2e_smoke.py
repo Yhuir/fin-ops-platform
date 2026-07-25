@@ -5,7 +5,9 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 import json
+from math import ceil
 from pathlib import Path
+from statistics import median
 from time import monotonic, sleep
 from typing import Any, Callable, Mapping, Sequence, TextIO
 import os
@@ -30,6 +32,9 @@ DEFAULT_HTTP_TARGET_MS = 1_000.0
 DEFAULT_TIMEOUT_SECONDS = 90.0
 DEFAULT_POLL_INTERVAL_SECONDS = 0.5
 DEFAULT_LIMIT = 2_000
+DEFAULT_RELATION_PREVIEW_SAMPLES = 1
+MAX_RELATION_PREVIEW_SAMPLES = 20
+RELATION_PREVIEW_TARGET_MS = 3_000.0
 MIN_WRITE_SLO_EVENT_SAMPLE_LIMIT = 200
 MAX_TEST_OWNED_RELATION_ROW_IDS = 20
 MAX_AFFECTED_CONSUMER_SCOPES_PER_PAGE = 3
@@ -185,6 +190,15 @@ class WriteScenario:
     shape: str | None = None
 
 
+def _bounded_relation_preview_samples(value: str) -> int:
+    samples = int(value)
+    if not 1 <= samples <= MAX_RELATION_PREVIEW_SAMPLES:
+        raise argparse.ArgumentTypeError(
+            f"relation preview samples must be between 1 and {MAX_RELATION_PREVIEW_SAMPLES}"
+        )
+    return samples
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run controlled authenticated write-operation E2E SLO smoke scenarios.",
@@ -209,6 +223,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--http-target-ms", type=float, default=DEFAULT_HTTP_TARGET_MS)
     parser.add_argument("--timeout-seconds", type=float, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--poll-interval-seconds", type=float, default=DEFAULT_POLL_INTERVAL_SECONDS)
+    parser.add_argument(
+        "--relation-preview-samples",
+        type=_bounded_relation_preview_samples,
+        default=DEFAULT_RELATION_PREVIEW_SAMPLES,
+        help=(
+            "Repeat each canonical relation preview without repeating its mutation "
+            f"(1-{MAX_RELATION_PREVIEW_SAMPLES}, default: {DEFAULT_RELATION_PREVIEW_SAMPLES})."
+        ),
+    )
     parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--json", action="store_true", help="Print JSON output. This is the default output shape.")
@@ -284,6 +307,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         refresh_target_ms=refresh_target_ms,
         timeout_seconds=max(1.0, float(args.timeout_seconds)),
         poll_interval_seconds=max(0.05, float(args.poll_interval_seconds)),
+        relation_preview_samples=int(args.relation_preview_samples),
         limit=max(1, int(args.limit)),
     )
     encoded = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True, default=str)
@@ -440,12 +464,30 @@ def run_write_operation_e2e_smoke(
     refresh_target_ms: float = DEFAULT_REFRESH_TARGET_MS,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS,
+    relation_preview_samples: int = DEFAULT_RELATION_PREVIEW_SAMPLES,
     limit: int = DEFAULT_LIMIT,
     request_fn: RequestFn | None = None,
 ) -> dict[str, Any]:
     auth_configured = any(str(key).lower() in {"authorization", "cookie"} for key in dict(headers))
     approval_reference = str(approval_reference or "").strip()
     plan = [_scenario_plan_payload(scenario) for scenario in scenarios]
+    if not 1 <= int(relation_preview_samples) <= MAX_RELATION_PREVIEW_SAMPLES:
+        return {
+            "version": 1,
+            "status": "input_error",
+            "generated_at": datetime.now(UTC).isoformat(),
+            "base_url": http_slo_probe._normalized_base_url(base_url),
+            "api_prefix": api_prefix,
+            "auth_configured": auth_configured,
+            "approval_configured": bool(approval_reference),
+            "scenario_count": len(scenarios),
+            "error": "relation_preview_samples_out_of_bounds",
+            "message": (
+                "relation preview samples must be between "
+                f"1 and {MAX_RELATION_PREVIEW_SAMPLES}."
+            ),
+            "planned_scenarios": plan,
+        }
     if not scenarios:
         return {
             "version": 1,
@@ -505,6 +547,7 @@ def run_write_operation_e2e_smoke(
             refresh_target_ms=refresh_target_ms,
             timeout_seconds=timeout_seconds,
             poll_interval_seconds=poll_interval_seconds,
+            relation_preview_samples=int(relation_preview_samples),
             limit=limit,
             request_fn=request,
         )
@@ -562,6 +605,7 @@ def _run_one_scenario(
     poll_interval_seconds: float,
     limit: int,
     request_fn: RequestFn,
+    relation_preview_samples: int = DEFAULT_RELATION_PREVIEW_SAMPLES,
 ) -> dict[str, Any]:
     checkpoints = scenario.checkpoints or (
         WriteCheckpoint(
@@ -620,6 +664,7 @@ def _run_one_scenario(
             refresh_target_ms=refresh_target_ms,
             timeout_seconds=timeout_seconds,
             poll_interval_seconds=poll_interval_seconds,
+            relation_preview_samples=relation_preview_samples,
             limit=limit,
             request_fn=request_fn,
             variables=variables,
@@ -651,6 +696,7 @@ def _run_one_scenario(
                     refresh_target_ms=refresh_target_ms,
                     timeout_seconds=timeout_seconds,
                     poll_interval_seconds=poll_interval_seconds,
+                    relation_preview_samples=relation_preview_samples,
                     limit=limit,
                     request_fn=request_fn,
                     variables=variables,
@@ -676,6 +722,13 @@ def _run_one_scenario(
         **({"preflight": preflight} if preflight is not None else {}),
         **({"recovery": recovery} if recovery is not None else {}),
     }
+    relation_preview_sampling = {
+        str(item["relation_preview_sampling"]["operation"]): item["relation_preview_sampling"]
+        for item in checkpoint_results
+        if isinstance(item.get("relation_preview_sampling"), dict)
+    }
+    if relation_preview_sampling:
+        payload["relation_preview_sampling"] = relation_preview_sampling
     # Preserve the established single-checkpoint report shape without retaining a second execution path.
     if len(checkpoint_results) == 1:
         first = checkpoint_results[0]
@@ -709,6 +762,7 @@ def _run_checkpoint(
     audit_ids: set[str],
     strict: bool,
     prepared_isolation_baseline: Mapping[str, Any] | None = None,
+    relation_preview_samples: int = DEFAULT_RELATION_PREVIEW_SAMPLES,
 ) -> dict[str, Any]:
     started_at = _database_timestamp(connection)
     variables.pop(_RESPONSE_OUTBOX_EVENT_IDS, None)
@@ -740,6 +794,7 @@ def _run_checkpoint(
     mutation_ambiguous = False
     mutation_commit_ack_monotonic: float | None = None
     idempotency_key: str | None = None
+    relation_preview_sampling: dict[str, Any] | None = None
     for step in checkpoint.steps:
         try:
             resolved_step = _resolved_step(step, variables)
@@ -779,17 +834,40 @@ def _run_checkpoint(
                 if idempotency_key is not None:
                     raise ValueError(f"checkpoint {checkpoint.name!r} must contain exactly one mutation step.")
                 idempotency_key = key
-        executed = _execute_step(
-            resolved_step,
-            base_url=base_url,
-            api_prefix=api_prefix,
-            headers=headers,
-            target_ms=write_target_ms,
-            timeout_seconds=timeout_seconds,
-            request_fn=request_fn,
-        )
+        is_relation_preview = resolved_step.path in {
+            CONFIRM_PREVIEW_PATH,
+            WITHDRAW_PREVIEW_PATH,
+        }
+        sample_count = relation_preview_samples if is_relation_preview else 1
+        sample_results: list[WriteStepResult] = []
+        executed: _ExecutedStep | None = None
+        for _sample_index in range(sample_count):
+            executed = _execute_step(
+                resolved_step,
+                base_url=base_url,
+                api_prefix=api_prefix,
+                headers=headers,
+                target_ms=(
+                    RELATION_PREVIEW_TARGET_MS
+                    if is_relation_preview
+                    else write_target_ms
+                ),
+                timeout_seconds=timeout_seconds,
+                request_fn=request_fn,
+                enforce_target=not is_relation_preview,
+            )
+            sample_results.append(executed.result)
+            variables.update(executed.captures)
+            if executed.result.status != "pass":
+                break
+        if is_relation_preview:
+            relation_preview_sampling = _relation_preview_sampling_report(
+                resolved_step.path,
+                sample_results,
+            )
+        if executed is None:
+            raise AssertionError("write step execution produced no result")
         step_results.append(executed.result)
-        variables.update(executed.captures)
         if (
             resolved_step.mutation
             and executed.committed
@@ -818,6 +896,7 @@ def _run_checkpoint(
             step_results=step_results,
             mutation_committed=mutation_committed,
             mutation_ambiguous=mutation_ambiguous,
+            relation_preview_sampling=relation_preview_sampling,
         )
     response_receipt_present = _RESPONSE_OUTBOX_EVENT_IDS in variables
     response_event_ids = _response_outbox_event_ids(variables.get(_RESPONSE_OUTBOX_EVENT_IDS))
@@ -868,6 +947,7 @@ def _run_checkpoint(
             mutation_ambiguous=mutation_ambiguous,
             write_slo=write_slo,
             post_api=post_api,
+            relation_preview_sampling=relation_preview_sampling,
         )
     system_audit = _wait_for_system_audit(
         checkpoint,
@@ -889,6 +969,7 @@ def _run_checkpoint(
             write_slo=write_slo,
             post_api=post_api,
             system_audit=system_audit,
+            relation_preview_sampling=relation_preview_sampling,
         )
     system_audit_id = system_audit.get("system_audit_id")
     if system_audit_id:
@@ -903,6 +984,7 @@ def _run_checkpoint(
                 write_slo=write_slo,
                 post_api=post_api,
                 system_audit=system_audit,
+                relation_preview_sampling=relation_preview_sampling,
             )
         audit_ids.add(str(system_audit_id))
     return {
@@ -917,6 +999,11 @@ def _run_checkpoint(
         "write_slo": write_slo,
         "post_api": post_api,
         "system_audit": system_audit,
+        **(
+            {"relation_preview_sampling": relation_preview_sampling}
+            if relation_preview_sampling is not None
+            else {}
+        ),
     }
 
 
@@ -930,6 +1017,7 @@ def _failed_checkpoint(
     write_slo: dict[str, Any] | None = None,
     post_api: dict[str, Any] | None = None,
     system_audit: dict[str, Any] | None = None,
+    relation_preview_sampling: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "name": checkpoint.name,
@@ -942,6 +1030,59 @@ def _failed_checkpoint(
         "write_slo": write_slo or {"status": "skipped", "reason": "write_step_failed"},
         "post_api": post_api or {"status": "skipped", "reason": "previous_gate_failed"},
         "system_audit": system_audit or {"status": "skipped", "reason": "previous_gate_failed"},
+        **(
+            {"relation_preview_sampling": relation_preview_sampling}
+            if relation_preview_sampling is not None
+            else {}
+        ),
+    }
+
+
+def _relation_preview_sampling_report(
+    path: str,
+    results: Sequence[WriteStepResult],
+) -> dict[str, Any]:
+    elapsed_values = sorted(
+        float(result.elapsed_ms)
+        for result in results
+        if result.elapsed_ms is not None
+    )
+    p50_ms = round(float(median(elapsed_values)), 3) if elapsed_values else None
+    p95_ms = (
+        round(elapsed_values[max(0, ceil(len(elapsed_values) * 0.95) - 1)], 3)
+        if elapsed_values
+        else None
+    )
+    max_ms = round(max(elapsed_values), 3) if elapsed_values else None
+    correctness_status = (
+        "pass"
+        if results and all(result.status == "pass" for result in results)
+        else "fail"
+    )
+    performance_status = (
+        "pass"
+        if p95_ms is not None and p95_ms <= RELATION_PREVIEW_TARGET_MS
+        else "miss"
+    )
+    return {
+        "operation": "confirm" if path == CONFIRM_PREVIEW_PATH else "withdraw",
+        "count": len(results),
+        "p50_ms": p50_ms,
+        "p95_ms": p95_ms,
+        "max_ms": max_ms,
+        "target_ms": RELATION_PREVIEW_TARGET_MS,
+        "request_ids": [
+            str(result.request_id)
+            for result in results
+            if str(result.request_id or "").strip()
+        ],
+        "correctness_status": correctness_status,
+        "performance_status": performance_status,
+        "errors": [
+            str(result.error)
+            for result in results
+            if str(result.error or "").strip()
+        ],
     }
 
 
@@ -954,6 +1095,7 @@ def _execute_step(
     target_ms: float,
     timeout_seconds: float,
     request_fn: RequestFn,
+    enforce_target: bool = True,
 ) -> _ExecutedStep:
     url = http_slo_probe.resolve_probe_url(base_url, step.path, api_prefix=api_prefix)
     body = json.dumps(step.json_body, ensure_ascii=False).encode("utf-8") if step.json_body is not None else None
@@ -991,7 +1133,7 @@ def _execute_step(
             error = html_api_error
         elif not status_ok:
             error = f"unexpected_status:{response.status_code}"
-        elif elapsed_ms > target_ms:
+        elif enforce_target and elapsed_ms > target_ms:
             error = f"write_step_slo_miss:{elapsed_rounded}>{round(target_ms, 3)}"
         result = WriteStepResult(
             name=step.name,
