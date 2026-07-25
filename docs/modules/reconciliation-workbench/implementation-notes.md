@@ -97,6 +97,7 @@
 - 测试：backend 锁定轻量 port 与 timeout fallback；frontend 锁定 refreshing 期间 3 次 status poll、完整页面恰好 2 次，并验证撤回后的三类 singleton 数据完整性。
 - 首个候选生产证据：confirm/withdraw 均约 `296–323ms`，写后零 fan-out、最终数据和恢复断言、queue drain、worker、System Audit 全部通过；轻量 refresh-status 为 `241–372ms`，Workbench worker handler 为 `1.278–1.925s`。剩余 Workbench 首次 fresh 读取为 `3.776–5.235s`，请求数据库 p95 约 `3.260s`，证明慢点已从状态轮询/worker 收敛到新 generation 发布后的第一次 groups SQL。
 - SQL 根因与修复：带搜索的 all-scope count 把全部 active members 强制 `MATERIALIZED`，形成优化屏障；搜索和最终成员计数都要重新扫描该临时集合。保留原 SQL owner、事实和返回合同，仅改为 `NOT MATERIALIZED`。20 万 active member 的临时 PostgreSQL 17 对照中，旧计划写/读 3747 个 temp blocks、`258.863ms`；新计划无 temp I/O、`94.614ms`。没有新增 cache、表、索引、migration、worker 或第二 freshness 系统。
+- 最终生产闭环：release `main-f06711b7-20260725213147` 已激活。`/api/workbench/groups` 滚动 p95 从首候选 `3476.949ms` 降到 `2882.325ms`，发布后 5 次 hot all-scope 搜索为 `340–756ms`；confirm/withdraw、完整配对数据、输入隔离、写后零 fan-out、eventual fresh、durable drain、24 workers 和 System Audit 全部通过。六 consumer 并发仍有 Workbench `4616.117ms` 尾样本，因此硬 3 秒保证继续延期，不以平均值冒充绝对 SLO。
 
 ## 当前决策
 

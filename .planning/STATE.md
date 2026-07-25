@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Executing Phase 29 Workbench access performance Plan 29-01.
-last_updated: "2026-07-25T21:00:00+08:00"
-last_activity: 2026-07-25 - Workbench access hot path baseline and root cause frozen
+status: complete
+stopped_at: Phase 29 complete; production release main-f06711b7-20260725213147 is active and verified.
+last_updated: "2026-07-25T21:40:10+08:00"
+last_activity: 2026-07-25 - Workbench access performance production proof complete
 progress:
   total_phases: 24
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 38
-  completed_plans: 37
-  percent: 97
+  completed_plans: 38
+  percent: 100
 ---
 
 # Project State
@@ -21,22 +21,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-16)
 
 **Core value:** Preserve production finance workflow correctness while improving individual pages through isolated, reviewable GSD phases.
-**Current focus:** Phase 29 removes repeated full Workbench payload polling while preserving Phase 27 correctness, isolation and zero-fan-out contracts.
+**Current focus:** Phase 29 is complete; Workbench uses bounded full payload reads plus lightweight freshness waiting, with production correctness and performance proof.
 
 ## Current Position
 
 Phase: 29 of 29 (关联台写后与访问恢复性能)
 Plan: 29-01 of 29-01
-Status: Executing; baseline/root cause frozen, implementation pending
-Last activity: 2026-07-25 - Current production handler p50/p95/p99 and public status/full payload polling hot paths measured
+Status: Complete; implementation, consolidated production validation and SQL root correction are active
+Last activity: 2026-07-25 - Release `main-f06711b7-20260725213147` verified with reversible confirm/withdraw fixture
 
-Progress: [█████████░] 97% (Phase 29)
+Progress: [██████████] 100% (Phase 29)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 37
+- Total plans completed: 38
 - Baseline planning docs completed: 1
 - Average duration: N/A
 - Total execution time: 1 hour 40 minutes
@@ -51,6 +51,12 @@ Progress: [█████████░] 97% (Phase 29)
 
 ### Decisions
 
+- Phase 29 closure: Workbench operation recovery performs one trigger combined-initial load, lightweight public refresh-status waiting and one final fresh combined-initial load; repeated full payload polling is deleted.
+- Phase 29 SQL root fix: the existing all-scope active-member CTE is `NOT MATERIALIZED`, so search/source/column/time predicates can reach existing tables and indexes. The same SQL owner, generation, exact totals, row counts and matching IDs remain authoritative; no cache, table, index, migration or second query path was added.
+- Phase 29 production release: `main-f06711b7-20260725213147` is active. Rolling Workbench `/groups` p95 improved from `3476.949 ms` to `2882.325 ms` (about 17.1%); hot all-scope searched reads were `340–756 ms`, and the worker p95 was `1799.628 ms`.
+- Phase 29 correctness proof: reversible confirm/withdraw writes were `270.306/164.554 ms`; all business/input-isolation assertions, final fresh consumers, zero forbidden fan-out, durable drain, 24-worker effectiveness and System Audit passed. The fixture was restored inactive and the temporary scenario file was deleted.
+- Phase 29 performance boundary: six-consumer concurrency still produced a slowest Workbench sample of `4616.117 ms`; the deferred hard 3-second SLO is not claimed. Cost recovery `5986–6212 ms` and Turnover confirm `3815.665 ms` remain independent follow-ups, not Workbench correctness blockers.
+- Phase 29 verification: final corrective slices passed 278 backend and 64 frontend tests, production build, ruff/docs/diff gates and a PostgreSQL 200k-member plan comparison. The unrelated 183-browser suite and full CI were intentionally not run.
 - Phase 29 scope: reuse the existing lightweight Workbench groups freshness repository port for public status and replace repeated operation-time combined initial polling with one trigger load, lightweight status waiting and one final fresh load. No projection rewrite, cache, table, index, migration, queue, worker, coordinator or second freshness system is allowed.
 - Phase 28 closure: Cost active-recovery polling first performs one lightweight durable-state gate; only the no-active-recovery path executes the complete fail-closed statistics proof. No new cache, table, index, queue, worker, coordinator, frontend poller or write-time fan-out was added.
 - Phase 28 closure: Candidate A `d8e4c5946` reduced the exact `2026-02` Cost recovery sample from 7432.418 ms to 723.151 ms. Its full production chain exposed one shared queue defect: a completed `force_refresh=true` event could cover a later freshness target. The root was fixed once in `RuntimeQueueRepository` by `b6e814b05`; no page-specific fallback was introduced.
@@ -136,6 +142,7 @@ None yet.
 
 ### Blockers/Concerns
 
+- Phase 29 has no remaining correctness, isolation, recovery, runtime or data-safety blocker. The deliberately deferred hard 3-second concurrent SLO, Cost/Turnover tail latency, unavailable RabbitMQ management metrics and external control evidence `unknown` are explicit non-blocking follow-ups.
 - Phase 28 has no remaining correctness, isolation, recovery, runtime or data-safety blocker. Non-blocking follow-ups are the deliberately deferred hard 3-second SLO, unavailable RabbitMQ management metrics and external bank/OA/invoice/ETC control evidence remaining unknown; PostgreSQL durable queue evidence is drained and authoritative.
 - Phase 21 Release A full local gate is zero-failure: backend 4182 passed / 33 explicitly environment-gated skipped；frontend 835/835；Chromium 177/177；production build passed. 首次远端分支 CI 揭示一个既有测试模块依赖未声明的 `pytest`，且 4 个顶层测试未被 `unittest discover` 执行；现已改为标准 `unittest.TestCase`。第二次远端 CI 暴露 Vitest 文件并行下的全局 I/O/监听器竞争与 cross-realm Blob 断言；前端测试现固定单 worker，Blob 以 size/MIME 合同断言。第三次远端 CI 证明多个前端测试把页面/抽屉壳出现误当成异步数据 I/O 完成；相关测试现以用户可见数据行、详情字段或当前 DOM 节点作为 readiness anchor。第四次远端 CI 进一步暴露 OA 反提历史时间依赖执行机本地时区；该业务时间现显式按 `Asia/Shanghai` 格式化，并由语义表格 readiness + 精确时间断言保护。与 CI 一致的 Node 20 全量运行最终 71 files / 835 tests 全绿，且不再出现 `MaxListenersExceededWarning`。统一门禁还捕获 import confirm 在持久化前发布 matching 的竞态；已改为 durable delta 成功后才发布所有下游信号，并将 4 项 import-processing 测试纳入 `unittest discover`。
 - 第五次远程 CI 为 176/177；唯一失败是待找发票文本选择 E2E 用元素 bounding-box 中线做像素拖拽，在 CI 字体/换行布局下落到空白区。测试现对同一可见文本节点执行 Playwright 浏览器文本选择，仍精确验证 `window.getSelection()`，不改业务 UI、不加 retry、不放宽结果。
@@ -182,5 +189,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-07-25
-Stopped at: Phase 28 complete; production release `main-b6e814b0-20260725192427` is active and verified.
-Resume file: .planning/phases/28-cost-statistics-recovery-performance/28-01-SUMMARY.md
+Stopped at: Phase 29 complete; production release `main-f06711b7-20260725213147` is active and verified.
+Resume file: .planning/phases/29-workbench-access-performance/29-01-SUMMARY.md

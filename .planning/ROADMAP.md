@@ -585,6 +585,6 @@ Plans:
 
 Plans:
 
-- [ ] 29-01-PLAN — Reuse lightweight Workbench status, remove repeated full payload polling, and close production performance/correctness proof.
+- [x] 29-01-PLAN — Reuse lightweight Workbench status, remove repeated full payload polling, and close production performance/correctness proof (`6ec4bc48a`, SQL root fix `f06711b7a`).
 
 ---
