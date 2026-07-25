@@ -1830,6 +1830,46 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("event.status = 'done'", latest_done_sql)
         self.assertIn("dirty.status in ('pending', 'processing', 'failed')", latest_done_sql)
 
+    def test_atomic_read_model_enqueue_does_not_reuse_completed_force_refresh_for_new_target(
+        self,
+    ) -> None:
+        transaction = FakeTransaction(
+            rows=[
+                [],
+                [
+                    event_row(
+                        event_type="workbench.read_model.refresh",
+                        scope_type="workbench",
+                        scope_key="2026-04",
+                        status="done",
+                        payload={"metadata": {"force_refresh": True}},
+                    )
+                ],
+                [
+                    event_row(
+                        event_type="workbench.read_model.refresh",
+                        aggregate_type="read_model",
+                        aggregate_id="2026-04",
+                        scope_type="workbench",
+                        scope_key="2026-04",
+                        dedupe_key="workbench.read_model.refresh:workbench:2026-04",
+                        source_version=10,
+                    )
+                ],
+            ]
+        )
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        event = repository.enqueue_read_model_refresh_if_inactive(
+            scope_type="workbench",
+            scope_key="2026-04",
+            reason="api_groups_stale",
+            metadata={"freshness_token": "target-after-force"},
+        )
+
+        self.assertIsNotNone(event)
+        self.assertEqual(event.source_version, 10)
+
     def test_atomic_read_model_enqueue_uses_only_latest_completed_freshness_target(self) -> None:
         transaction = FakeTransaction(
             rows=[

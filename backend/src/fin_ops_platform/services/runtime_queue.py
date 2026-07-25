@@ -419,9 +419,13 @@ class RuntimeQueueRepository:
                     and isinstance(latest_done_payload.get("metadata"), dict)
                     else {}
                 )
-                if scope_key in latest_done_by_scope and _refresh_metadata_covers(
-                    active_metadata=latest_done_metadata,
-                    incoming_metadata=incoming_metadata,
+                if (
+                    scope_key in latest_done_by_scope
+                    and latest_done_metadata.get("force_refresh") is not True
+                    and _refresh_metadata_covers(
+                        active_metadata=latest_done_metadata,
+                        incoming_metadata=incoming_metadata,
+                    )
                 ):
                     continue
                 refreshes.append(
