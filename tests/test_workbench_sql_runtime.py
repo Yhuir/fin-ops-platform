@@ -6407,6 +6407,14 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["read_model_status"], "fresh")
         self.assertTrue(any("from read_model.workbench_rows r" in sql for sql, _params in connection.fetch_one_calls))
 
+    def test_repository_exposes_bounded_relation_preview_selection_read(self) -> None:
+        repository = PostgresReadModelRepository(WorkbenchWriteConnection())
+
+        self.assertTrue(
+            callable(getattr(repository, "get_workbench_relation_preview_selection", None)),
+            "relation previews require one set-based active-generation selection read",
+        )
+
     def test_repository_reads_all_scope_row_detail_from_active_month_rows(self) -> None:
         class RowDetailConnection(WorkbenchWriteConnection):
             def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:

@@ -1096,6 +1096,45 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         self.assertEqual(writer.calls, [])
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-WITHDRAW-UOW"))
 
+    def test_formal_confirm_and_withdraw_never_consume_relation_preview_selection(self) -> None:
+        app = self._build_app()
+        row_ids = self._default_open_row_ids(app)
+        query_facade = app._workbench_query_facade()
+
+        def fail_if_preview_selection_is_read(*_args: object, **_kwargs: object) -> dict[str, object]:
+            raise AssertionError("formal relation commands must re-read canonical facts in their UoW")
+
+        query_facade.relation_preview_selection = fail_if_preview_selection_is_read
+        app._workbench_query_facade = lambda: query_facade
+        self._install_confirm_link_uow(app)
+
+        with self._suppress_background_persistence(app):
+            confirm_response = self._post(
+                app,
+                "/api/workbench/actions/confirm-link",
+                {
+                    "month": "2026-03",
+                    "row_ids": row_ids,
+                    "case_id": "CASE-PREVIEW-PORT-ISOLATION",
+                    "idempotency_key": "confirm:preview-port-isolation",
+                },
+            )
+
+        self._install_withdraw_link_uow(app)
+        with self._suppress_background_persistence(app):
+            withdraw_response = self._post(
+                app,
+                "/api/workbench/actions/withdraw-link",
+                {
+                    "month": "2026-03",
+                    "row_ids": row_ids,
+                    "idempotency_key": "withdraw:preview-port-isolation",
+                },
+            )
+
+        self.assertEqual(confirm_response.status_code, 200, confirm_response.body)
+        self.assertEqual(withdraw_response.status_code, 200, withdraw_response.body)
+
     def test_stale_withdraw_preview_withdraws_current_relation_without_restoring_same_row_set(self) -> None:
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)

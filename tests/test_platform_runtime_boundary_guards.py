@@ -8006,6 +8006,21 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_relation_preview_selection_is_preview_only_and_formal_commands_stay_canonical(self) -> None:
+        from fin_ops_platform.services.workbench_write_facade import WorkbenchWriteFacade
+
+        preview_sources = "\n".join(
+            inspect.getsource(getattr(WorkbenchWriteFacade, method_name))
+            for method_name in ("preview_confirm_link", "preview_withdraw_link")
+        )
+        formal_sources = "\n".join(
+            inspect.getsource(getattr(WorkbenchWriteFacade, method_name))
+            for method_name in ("confirm_link", "withdraw_link")
+        )
+
+        self.assertIn("relation_preview_selection", preview_sources)
+        self.assertNotIn("relation_preview_selection", formal_sources)
+
     def test_workbench_write_facade_exposes_exception_write_entrypoints(self) -> None:
         from fin_ops_platform.services.workbench_write_facade import WorkbenchWriteFacade
 
