@@ -496,6 +496,56 @@ describe("Workbench row selection and detail drawer", () => {
     expect(screen.queryByRole("dialog", { name: "关联预览" })).not.toBeInTheDocument();
   });
 
+  test("preview failure restores the entry without exposing backend English", async () => {
+    const user = userEvent.setup();
+    const defaultFetch = installMockApiFetch();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (fetchPath(input) === "/api/workbench/actions/confirm-link/preview") {
+        return jsonResponse({
+          error: "internal_server_error",
+          message: "INTERNAL ENGLISH SENTINEL: database details",
+          requestId: "req-preview-safe",
+        }, 500);
+      }
+      return defaultFetch(input, init);
+    }));
+    renderWorkbenchPage();
+
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    await user.click(await within(unpairedZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ }));
+    await user.click(await within(unpairedZone).findByRole("row", { name: /2026-03-28.*智能工厂设备商/ }));
+    await user.click(within(unpairedZone).getByRole("button", { name: "确认关联" }));
+
+    const errorDialog = await screen.findByRole("dialog", { name: "操作失败" });
+    expect(
+      within(errorDialog).getByText("关联台服务暂时不可用，请稍后重试。 · requestId req-preview-safe"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/INTERNAL ENGLISH SENTINEL/)).not.toBeInTheDocument();
+    expect(within(unpairedZone).getByRole("button", { name: "确认关联" })).toBeEnabled();
+  });
+
+  test("unknown JavaScript preview errors use the generic Chinese message", async () => {
+    const user = userEvent.setup();
+    const defaultFetch = installMockApiFetch();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (fetchPath(input) === "/api/workbench/actions/confirm-link/preview") {
+        throw new Error("PARSER EXCEPTION SENTINEL");
+      }
+      return defaultFetch(input, init);
+    }));
+    renderWorkbenchPage();
+
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    await user.click(await within(unpairedZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ }));
+    await user.click(await within(unpairedZone).findByRole("row", { name: /2026-03-28.*智能工厂设备商/ }));
+    await user.click(within(unpairedZone).getByRole("button", { name: "确认关联" }));
+
+    const errorDialog = await screen.findByRole("dialog", { name: "操作失败" });
+    expect(within(errorDialog).getByText("操作失败，请稍后重试。")).toBeInTheDocument();
+    expect(screen.queryByText(/PARSER EXCEPTION SENTINEL/)).not.toBeInTheDocument();
+    expect(within(unpairedZone).getByRole("button", { name: "确认关联" })).toBeEnabled();
+  });
+
   test("amount mismatch preview requires note before confirm submit", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();

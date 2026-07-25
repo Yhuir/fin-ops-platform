@@ -17,6 +17,7 @@ test.describe("workbench withdraw browser flow", () => {
       inputInvoiceUsageRelationFanout: true,
       oaPendingPaymentRelationFanout: true,
       sessionMode: "full_access",
+      workbenchWithdrawPreviewDelayMs: 250,
     });
 
     await page.goto("/");
@@ -34,6 +35,8 @@ test.describe("workbench withdraw browser flow", () => {
     await expect(pairedZone.getByText("已选 3")).toBeVisible();
 
     await pairedZone.getByRole("button", { name: "撤回关联" }).click();
+    await expect(pairedZone.getByRole("button", { name: "正在准备撤回预览" })).toBeVisible();
+    await expect(pairedZone.getByRole("button", { name: "正在准备撤回预览" })).toBeDisabled();
     const previewDialog = page.getByRole("dialog", { name: "关联预览" });
     await expect(previewDialog).toBeVisible();
     await expect(previewDialog.getByText("撤回关联预览")).toBeVisible();
@@ -105,5 +108,29 @@ test.describe("workbench withdraw browser flow", () => {
     await page.getByRole("button", { name: "按项目" }).click();
     await expect(page.getByRole("button", { name: /智能工厂项目/ })).toHaveCount(0);
     await expectNoUnexpectedSuccessUiErrors(page);
+  });
+
+  test("restores withdraw preview controls after a safe error", async ({ page }) => {
+    await installDeterministicApiMocks(page, {
+      sessionMode: "full_access",
+      workbenchInitialRelationConfirmed: true,
+      workbenchWithdrawPreviewDelayMs: 250,
+      workbenchWithdrawPreviewError: true,
+    });
+
+    await page.goto("/");
+    const pairedZone = page.getByTestId("zone-paired");
+    const pairedGroup = page.getByTestId("candidate-group-paired-case:CASE-202603-101");
+    await pairedGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
+    await pairedGroup.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }).click();
+    await pairedGroup.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ }).click();
+    await pairedZone.getByRole("button", { name: "撤回关联" }).click();
+
+    await expect(pairedZone.getByRole("button", { name: "正在准备撤回预览" })).toBeDisabled();
+    const errorDialog = page.getByRole("dialog", { name: "操作失败" });
+    await expect(errorDialog).toBeVisible();
+    await expect(errorDialog).toContainText("关联台服务暂时不可用，请稍后重试。 · requestId req-withdraw-preview");
+    await expect(errorDialog).not.toContainText("INTERNAL WITHDRAW PREVIEW SENTINEL");
+    await expect(pairedZone.getByRole("button", { name: "撤回关联" })).toBeEnabled();
   });
 });

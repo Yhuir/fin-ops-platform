@@ -13,6 +13,7 @@ import {
   previewWorkbenchWithdrawLink,
   refreshManualOaImportAttachments,
   removeManualOaImport,
+  WorkbenchApiError,
   WORKBENCH_GROUP_PAGE_SIZE,
 } from "../features/workbench/api";
 import {
@@ -257,21 +258,67 @@ describe("workbench api bank amount mapping", () => {
     );
   });
 
-  test("preserves backend requestId in workbench API errors", async () => {
+  test("preserves machine fields but never exposes an unknown backend message", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
           error: "internal_server_error",
-          message: "接口处理失败，请联系管理员查看后端日志。",
+          message: "INTERNAL ENGLISH SENTINEL: postgres relation details",
           requestId: "req-500-audit",
         }),
         { status: 500, headers: { "Content-Type": "application/json" } },
       ),
     );
 
-    await expect(fetchWorkbenchGroupsPage("all", "unpaired", 1, 50)).rejects.toThrow(
-      "接口处理失败，请联系管理员查看后端日志。 · requestId req-500-audit",
+    const error = await fetchWorkbenchGroupsPage("all", "unpaired", 1, 50).catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(WorkbenchApiError);
+    expect(error).toMatchObject({
+      status: 500,
+      code: "internal_server_error",
+      requestId: "req-500-audit",
+    });
+    expect(error.message).toBe("关联台服务暂时不可用，请稍后重试。 · requestId req-500-audit");
+    expect(error.message).not.toContain("INTERNAL ENGLISH SENTINEL");
+  });
+
+  test.each([
+    ["workbench_read_model_version_conflict", 409, "关联台数据已变化，请刷新后重新预览。"],
+    ["workbench_relation_preview_stale", 409, "关联预览已失效，请重新预览。"],
+    ["workbench_row_not_found", 404, "所选关联台记录已不可用，请刷新后重新选择。"],
+    ["relation_preview_rows_missing", 400, "关联预览无效，请刷新后重新选择。"],
+    ["unknown_auth_error", 401, "登录状态已失效，请重新登录。"],
+    ["unknown_permission_error", 403, "当前账号无权执行此操作。"],
+    ["unknown_conflict", 409, "关联台数据已变化，请刷新后重新预览。"],
+    ["unknown_server_error", 503, "关联台服务暂时不可用，请稍后重试。"],
+  ])("maps %s/%i to an approved Chinese message", async (code, status, expectedMessage) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: code,
+          message: "RAW BACKEND SENTINEL",
+        }),
+        { status, headers: { "Content-Type": "application/json" } },
+      ),
     );
+
+    await expect(fetchWorkbenchGroupsPage("all", "unpaired", 1, 50)).rejects.toThrow(expectedMessage);
+    await expect(fetchWorkbenchGroupsPage("all", "unpaired", 1, 50)).rejects.not.toThrow("RAW BACKEND SENTINEL");
+  });
+
+  test("never exposes a non-JSON response body", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("RAW PARSER SENTINEL", {
+        status: 502,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const error = await fetchWorkbenchGroupsPage("all", "unpaired", 1, 50).catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(WorkbenchApiError);
+    expect(error.message).toBe("关联台服务暂时不可用，请稍后重试。");
+    expect(error.message).not.toContain("RAW PARSER SENTINEL");
   });
 
   test("maps two-pane confirm operation projection as a formal relation", async () => {

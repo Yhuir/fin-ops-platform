@@ -7,7 +7,10 @@ import { confirmWorkbenchRelation } from "./fixtures/workbenchFlow";
 
 test.describe("workbench relation browser flow", () => {
   test("confirms a relation in workbench and reflects it in bank details", async ({ page }, testInfo) => {
-    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const api = await installDeterministicApiMocks(page, {
+      sessionMode: "full_access",
+      workbenchConfirmPreviewDelayMs: 250,
+    });
     const recordLatency = createOperationLatencyRecorder(page, testInfo, {
       route: "/",
       pageKey: "reconciliation-workbench",
@@ -22,7 +25,11 @@ test.describe("workbench relation browser flow", () => {
     await expect(bankRowBefore.getByText("无发票")).toBeVisible();
     const bankTransactionRequestCountBefore = api.count("GET /api/bank-details/transactions");
 
-    await confirmWorkbenchRelation(page, recordLatency);
+    const confirmRelation = confirmWorkbenchRelation(page, recordLatency);
+    await expect(page.getByRole("button", { name: "正在准备确认预览" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "正在准备确认预览" })).toBeDisabled();
+    await expect(page.getByRole("dialog", { name: "关联预览" })).toBeVisible();
+    await confirmRelation;
 
     expect(api.count("POST /api/workbench/actions/confirm-link/preview")).toBe(1);
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(1);
