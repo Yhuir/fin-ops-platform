@@ -9,6 +9,7 @@ from fin_ops_platform.app.auth import OARequestSession
 from fin_ops_platform.app.server import Application, Response
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.workbench_idempotency import WorkbenchIdempotencyInProgress
+from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryResult
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_relation_grouping import (
     WorkbenchRelationPreviewGroupingService,
@@ -384,8 +385,52 @@ def _new_facade(
     bank_transaction_category_codes_for_row_ids: object | None = None,
     bank_flow_rule_tag_rules_payload: object | None = None,
     list_ignored_rows: object | None = None,
+    relation_preview_selection: object | None = None,
 ) -> WorkbenchWriteFacade:
     resolved_pair_relation_service = pair_relation_service or _PairRelationService()
+    resolved_amount_rows = resolve_rows_for_amount_check or (
+        lambda row_ids, **_: [{"id": row_id} for row_id in row_ids]
+    )
+
+    def default_relation_preview_selection(
+        _month: str | None,
+        *,
+        row_ids: list[str],
+        expected_read_model_version: str | None,
+    ) -> WorkbenchQueryResult:
+        fixture_rows_by_id = {
+            str(row.get("id") or row.get("row_id") or ""): dict(row)
+            for row in list(live_rows or [])
+            if isinstance(row, dict) and str(row.get("id") or row.get("row_id") or "").strip()
+        }
+        if not fixture_rows_by_id and withdraw_rows_and_after_relations is not None:
+            preview_rows = withdraw_rows_and_after_relations(
+                active_relation={},
+                after_relations=[],
+                month=_month,
+            )[0]
+            fixture_rows_by_id = {
+                str(row.get("id") or row.get("row_id") or ""): dict(row)
+                for row in list(preview_rows or [])
+                if isinstance(row, dict) and str(row.get("id") or row.get("row_id") or "").strip()
+            }
+        rows = (
+            [fixture_rows_by_id[row_id] for row_id in row_ids if row_id in fixture_rows_by_id]
+            if fixture_rows_by_id
+            else list(resolved_amount_rows(row_ids, month=_month))
+        )
+        return WorkbenchQueryResult(
+            HTTPStatus.OK,
+            {
+                "selected_row_ids": list(row_ids),
+                "selected_rows": rows,
+                "context_rows": [],
+                "rows": rows,
+                "read_model_status": "fresh",
+                "read_model_version": expected_read_model_version,
+            },
+        )
+
     return WorkbenchWriteFacade(
         relation_read_snapshot_port=WorkbenchWriteRelationReadSnapshotPort(resolved_pair_relation_service),
         relation_special_metadata_mutation_port=WorkbenchWriteRelationSpecialMetadataMutationPort(
@@ -396,12 +441,13 @@ def _new_facade(
         override_service=override_service or object(),
         next_case_id=lambda: "CASE-NEW",
         normalize_row_ids=lambda values: [str(value) for value in values],
+        relation_preview_selection=relation_preview_selection or default_relation_preview_selection,
         resolved_row_types_for_row_ids=resolved_row_types_for_row_ids or (
             lambda row_ids, **_: ["oa" if str(row_id).startswith("oa") else "bank" for row_id in row_ids]
         ),
         can_confirm_link_row_types=lambda **_: True,
         expand_confirm_link_row_ids_for_existing_context=lambda row_ids, **_: list(row_ids),
-        resolve_rows_for_amount_check=resolve_rows_for_amount_check or (lambda row_ids, **_: [{"id": row_id} for row_id in row_ids]),
+        resolve_rows_for_amount_check=resolved_amount_rows,
         merge_relation_snapshots=lambda before, synthetic: list(before) + list(synthetic),
         synthetic_existing_case_relations=lambda *_, **__: [],
         month_scope_for_selected_row_ids=lambda **_: "2026-05",
@@ -1148,6 +1194,59 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(relation_command.withdraw_calls[0]["expected_versions"], {"relation:CASE-1": 3})
         self.assertEqual(relation_command.withdraw_calls[0]["idempotency_key"], "withdraw:1")
 
+    def test_withdraw_preview_reads_one_bounded_selection_and_skips_legacy_row_scan(self) -> None:
+        relation_command = _RecordingRelationCommandService()
+        selection_calls: list[dict[str, object]] = []
+
+        def bounded_selection(
+            month: str | None,
+            *,
+            row_ids: list[str],
+            expected_read_model_version: str | None,
+        ) -> WorkbenchQueryResult:
+            selection_calls.append(
+                {
+                    "month": month,
+                    "row_ids": list(row_ids),
+                    "expected_read_model_version": expected_read_model_version,
+                }
+            )
+            rows = [
+                {"id": "oa-1", "type": "oa", "amount": "100.00"},
+                {"id": "bank-1", "type": "bank", "amount": "100.00"},
+            ]
+            return WorkbenchQueryResult(
+                HTTPStatus.OK,
+                {
+                    "selected_row_ids": list(row_ids),
+                    "selected_rows": rows,
+                    "context_rows": [],
+                    "rows": rows,
+                    "read_model_status": "fresh",
+                    "read_model_version": expected_read_model_version,
+                },
+            )
+
+        facade = _new_facade(
+            relation_command_service=relation_command,
+            relation_preview_selection=bounded_selection,
+            withdraw_rows_and_after_relations=lambda **_: (_ for _ in ()).throw(
+                AssertionError("withdraw preview must not use the legacy full-payload row scan")
+            ),
+        )
+
+        preview = facade.preview_withdraw_link(
+            {
+                "month": "2026-05",
+                "row_ids": ["oa-1", "bank-1"],
+                "expected_read_model_version": "generation-1",
+            }
+        )
+
+        self.assertEqual(preview.status_code, HTTPStatus.OK)
+        self.assertEqual(len(selection_calls), 1)
+        self.assertEqual(selection_calls[0]["row_ids"], ["oa-1", "bank-1"])
+
     def test_withdraw_link_canonicalizes_legacy_oa_source_ids_and_drops_same_row_restore(self) -> None:
         relation_command = _RawOaAliasWithdrawRelationCommandService()
         selected_row_ids = [
@@ -1202,8 +1301,11 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
 
         self.assertEqual(preview.status_code, HTTPStatus.OK)
         self.assertEqual(submit.status_code, HTTPStatus.OK)
-        self.assertTrue(resolved_active_row_ids)
-        self.assertTrue(all(row_ids == selected_row_ids for row_ids in resolved_active_row_ids))
+        self.assertEqual(
+            resolved_active_row_ids,
+            [],
+            "preview must not re-enter the legacy withdraw row/full-payload resolver",
+        )
         self.assertEqual(submit.payload["affected_row_ids"], selected_row_ids)
         self.assertEqual(submit.payload["restored_relations"], [])
         self.assertNotIn(relation_command.raw_oa_row_id, submit.payload["affected_row_ids"])

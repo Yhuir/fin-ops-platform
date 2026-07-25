@@ -1987,7 +1987,16 @@ class Application:
             )
             return response
         if method == "POST" and route_path == "/api/workbench/actions/confirm-link/preview":
-            return self._handle_api_workbench_confirm_link_preview(body)
+            response = self._handle_api_workbench_confirm_link_preview(body)
+            response.headers["X-Request-ID"] = request_id or "no-request-id"
+            self._emit_workbench_action_timing(
+                request_id=request_id or "no-request-id",
+                action_name="confirm_link_preview",
+                phase="request_total",
+                duration_ms=self._duration_ms(request_started_at),
+                status=response.status_code,
+            )
+            return response
         if method == "POST" and route_path == "/api/workbench/actions/mark-exception":
             return self._handle_api_workbench_mark_exception(body)
         if method == "POST" and route_path == "/api/workbench/actions/cancel-link":
@@ -2002,7 +2011,16 @@ class Application:
             )
             return response
         if method == "POST" and route_path == "/api/workbench/actions/withdraw-link/preview":
-            return self._handle_api_workbench_withdraw_link_preview(body)
+            response = self._handle_api_workbench_withdraw_link_preview(body)
+            response.headers["X-Request-ID"] = request_id or "no-request-id"
+            self._emit_workbench_action_timing(
+                request_id=request_id or "no-request-id",
+                action_name="withdraw_link_preview",
+                phase="request_total",
+                duration_ms=self._duration_ms(request_started_at),
+                status=response.status_code,
+            )
+            return response
         if method == "POST" and route_path == "/api/workbench/actions/withdraw-link":
             response = self._handle_api_workbench_withdraw_link(body, request_id=request_id, headers=headers)
             response.headers["X-Request-ID"] = request_id or "no-request-id"
@@ -2748,6 +2766,7 @@ class Application:
             override_service=self._workbench_override_service,
             next_case_id=self._next_workbench_relation_case_id,
             normalize_row_ids=self._normalize_row_ids,
+            relation_preview_selection=self._workbench_query_facade().relation_preview_selection,
             resolved_row_types_for_row_ids=self._resolved_row_types_for_row_ids,
             can_confirm_link_row_types=self._can_confirm_link_row_types,
             expand_confirm_link_row_ids_for_existing_context=self._expand_confirm_link_row_ids_for_existing_context,

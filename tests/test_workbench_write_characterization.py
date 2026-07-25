@@ -70,6 +70,35 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
                 "read_model_version": str(expected_read_model_version),
             },
         )
+
+        def relation_preview_selection(
+            month: str | None,
+            *,
+            row_ids: list[str],
+            expected_read_model_version: str | None,
+        ) -> WorkbenchQueryResult:
+            expanded_row_ids = app._expand_confirm_link_row_ids_for_existing_context(
+                row_ids,
+                month=str(month or "all"),
+            )
+            rows = app._resolve_live_rows_direct(
+                expanded_row_ids,
+                month_hint=str(month or "all"),
+            )
+            return WorkbenchQueryResult(
+                HTTPStatus.OK,
+                {
+                    "scope_key": str(month or "all"),
+                    "selected_row_ids": expanded_row_ids,
+                    "selected_rows": rows,
+                    "context_rows": [],
+                    "rows": rows,
+                    "read_model_status": "fresh",
+                    "read_model_version": str(expected_read_model_version),
+                },
+            )
+
+        query_facade.relation_preview_selection = relation_preview_selection
         app._workbench_query_facade = lambda: query_facade
         return app
 
@@ -1134,6 +1163,87 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
 
         self.assertEqual(confirm_response.status_code, 200, confirm_response.body)
         self.assertEqual(withdraw_response.status_code, 200, withdraw_response.body)
+
+    def test_confirm_preview_reads_one_bounded_selection_and_skips_legacy_row_scans(self) -> None:
+        app = self._build_app()
+        rows_by_type = self._default_open_rows(app)
+        row_ids = [str(rows_by_type[row_type]["id"]) for row_type in ("oa", "bank", "invoice")]
+        rows = [dict(rows_by_type[row_type]) for row_type in ("oa", "bank", "invoice")]
+        selection_calls: list[dict[str, object]] = []
+        query_facade = app._workbench_query_facade()
+
+        def bounded_selection(
+            month: str | None,
+            *,
+            row_ids: list[str],
+            expected_read_model_version: str | None,
+        ) -> WorkbenchQueryResult:
+            selection_calls.append(
+                {
+                    "month": month,
+                    "row_ids": list(row_ids),
+                    "expected_read_model_version": expected_read_model_version,
+                }
+            )
+            return WorkbenchQueryResult(
+                HTTPStatus.OK,
+                {
+                    "selected_row_ids": list(row_ids),
+                    "selected_rows": rows,
+                    "context_rows": [],
+                    "rows": rows,
+                    "read_model_status": "fresh",
+                    "read_model_version": expected_read_model_version,
+                },
+            )
+
+        query_facade.relation_preview_selection = bounded_selection
+        app._workbench_query_facade = lambda: query_facade
+        legacy_scan = AssertionError("confirm preview must not use the legacy full-payload row scan")
+
+        with (
+            patch.object(app, "_expand_confirm_link_row_ids_for_existing_context", side_effect=legacy_scan),
+            patch.object(app, "_resolve_rows_for_amount_check", side_effect=legacy_scan),
+            patch.object(app, "_resolved_row_types_for_row_ids", side_effect=legacy_scan),
+        ):
+            response = self._post(
+                app,
+                "/api/workbench/actions/confirm-link/preview",
+                {"month": "2026-03", "row_ids": row_ids},
+            )
+
+        self.assertEqual(response.status_code, HTTPStatus.OK, response.body)
+        self.assertTrue(response.headers.get("X-Request-ID"))
+        self.assertEqual(len(selection_calls), 1)
+        self.assertEqual(selection_calls[0]["row_ids"], row_ids)
+
+    def test_confirm_preview_preserves_stable_selection_error_and_request_id(self) -> None:
+        app = self._build_app()
+        row_ids = self._default_open_row_ids(app)[:2]
+        query_facade = app._workbench_query_facade()
+        query_facade.relation_preview_selection = lambda *_args, **_kwargs: WorkbenchQueryResult(
+            HTTPStatus.CONFLICT,
+            {
+                "error": "relation_preview_rows_missing",
+                "message": "所选工作台记录已变化，请刷新后重试。",
+                "scope_key": "2026-03",
+            },
+        )
+        app._workbench_query_facade = lambda: query_facade
+
+        response = self._post(
+            app,
+            "/api/workbench/actions/confirm-link/preview",
+            {"month": "2026-03", "row_ids": row_ids},
+        )
+
+        self.assertEqual(response.status_code, HTTPStatus.CONFLICT)
+        self.assertEqual(_json_response(response)["error"], "relation_preview_rows_missing")
+        self.assertEqual(
+            _json_response(response)["message"],
+            "所选工作台记录已变化，请刷新后重试。",
+        )
+        self.assertTrue(response.headers.get("X-Request-ID"))
 
     def test_stale_withdraw_preview_withdraws_current_relation_without_restoring_same_row_set(self) -> None:
         app = self._build_app()

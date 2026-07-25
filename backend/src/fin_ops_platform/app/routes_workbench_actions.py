@@ -40,7 +40,7 @@ class WorkbenchActionApiRoutes:
 
     def confirm_link_preview(self, payload: dict[str, Any]) -> tuple[HTTPStatus, dict[str, Any]]:
         try:
-            preview = self._write_facade_provider().preview_confirm_link(payload)
+            result = self._write_facade_provider().preview_confirm_link(payload)
         except KeyError as exc:
             row_id = str(exc.args[0]).strip() if exc.args else ""
             return HTTPStatus.BAD_REQUEST, {
@@ -53,7 +53,7 @@ class WorkbenchActionApiRoutes:
                 "error": "invalid_confirm_link_preview_request",
                 "message": str(exc),
             }
-        return HTTPStatus.OK, preview
+        return HTTPStatus(result.status_code), dict(result.payload)
 
     def confirm_link(
         self,

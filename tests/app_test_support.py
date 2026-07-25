@@ -14,6 +14,7 @@ from fin_ops_platform.services.state_store import ApplicationStateStore
 from fin_ops_platform.services.workbench_object_identity_arbitration import (
     WorkbenchObjectIdentityArbitrationService,
 )
+from fin_ops_platform.services.workbench_read_model_version import WorkbenchReadModelVersionConflictError
 from fin_ops_platform.services.workbench_relation_grouping import WorkbenchRelationGroupingService
 
 
@@ -216,9 +217,11 @@ class FreshWorkbenchWriteGateRepository:
         version: str,
         *,
         source_versions_provider: Callable[[str], dict[str, object]],
+        application: Application,
     ) -> None:
         self.version = str(version)
         self._source_versions_provider = source_versions_provider
+        self._application = application
 
     def get_workbench_groups_freshness_status(
         self,
@@ -232,6 +235,39 @@ class FreshWorkbenchWriteGateRepository:
             "source_versions": self._source_versions_provider(scope_key),
         }
 
+    def get_workbench_relation_preview_selection(
+        self,
+        *,
+        scope_key: str,
+        row_ids: list[str],
+        expected_read_model_version: str,
+    ) -> dict[str, object]:
+        if str(expected_read_model_version) != self.version:
+            raise WorkbenchReadModelVersionConflictError(
+                expected=str(expected_read_model_version),
+                current=self.version,
+            )
+        rows = self._application._resolve_live_rows_direct(  # noqa: SLF001
+            list(row_ids),
+            month_hint=scope_key,
+        )
+        return {
+            "scope_key": scope_key,
+            "selected_row_ids": list(row_ids),
+            "selected_rows": rows,
+            "context_rows": [],
+            "rows": rows,
+            "memberships": [],
+            "context_groups": [],
+            "source_versions": self._source_versions_provider(scope_key),
+            "generation_set": [
+                {"scope_key": scope_key, "generation_id": self.version}
+            ],
+            "active_generation_id": self.version,
+            "read_model_version": self.version,
+            "read_model_status": "fresh",
+        }
+
 
 def install_fresh_workbench_write_gate(application: Application, *, version: str = "test-generation-1") -> str:
     """Install only the generation precondition I/O required by local write-contract tests."""
@@ -239,6 +275,7 @@ def install_fresh_workbench_write_gate(application: Application, *, version: str
     application._workbench_sql_read_repository = FreshWorkbenchWriteGateRepository(  # noqa: SLF001
         version,
         source_versions_provider=application._workbench_sql_read_model_source_versions,  # noqa: SLF001
+        application=application,
     )
     return str(version)
 
