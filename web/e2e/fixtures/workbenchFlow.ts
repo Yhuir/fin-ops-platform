@@ -22,7 +22,11 @@ function isPostTo(pathname: string) {
   };
 }
 
-export async function confirmWorkbenchRelation(page: Page, recordLatency?: OperationLatencyRecorder) {
+export async function confirmWorkbenchRelation(
+  page: Page,
+  recordLatency?: OperationLatencyRecorder,
+  onPreviewPending?: () => Promise<void>,
+) {
   const openZone = page.getByTestId("zone-unpaired");
   const openOaGroup = page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001");
   const openBankGroup = page.getByTestId("candidate-group-unpaired-row:bk-o-202603-001");
@@ -91,6 +95,7 @@ export async function confirmWorkbenchRelation(page: Page, recordLatency?: Opera
   }, async (mark) => {
     const previewResponse = page.waitForResponse(isPostTo("/api/workbench/actions/confirm-link/preview"));
     await openZone.getByRole("button", { name: "确认关联" }).click();
+    await onPreviewPending?.();
     await mark("apiLatencyMs", previewResponse);
     await mark("firstVisibleResponseLatencyMs", expect(previewDialog).toBeVisible());
     await expect(previewDialog.getByTestId("relation-preview-before").getByText("智能工厂设备商").first()).toBeVisible();

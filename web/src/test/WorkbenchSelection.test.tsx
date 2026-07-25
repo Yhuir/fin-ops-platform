@@ -516,7 +516,8 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(await within(unpairedZone).findByRole("row", { name: /2026-03-28.*智能工厂设备商/ }));
     await user.click(within(unpairedZone).getByRole("button", { name: "确认关联" }));
 
-    const errorDialog = await screen.findByRole("dialog", { name: "操作失败" });
+    const errorDialog = await screen.findByRole("dialog", { name: "操作状态弹窗" });
+    expect(within(errorDialog).getByText("操作失败")).toBeInTheDocument();
     expect(
       within(errorDialog).getByText("关联台服务暂时不可用，请稍后重试。 · requestId req-preview-safe"),
     ).toBeInTheDocument();
@@ -540,7 +541,8 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(await within(unpairedZone).findByRole("row", { name: /2026-03-28.*智能工厂设备商/ }));
     await user.click(within(unpairedZone).getByRole("button", { name: "确认关联" }));
 
-    const errorDialog = await screen.findByRole("dialog", { name: "操作失败" });
+    const errorDialog = await screen.findByRole("dialog", { name: "操作状态弹窗" });
+    expect(within(errorDialog).getByText("操作失败")).toBeInTheDocument();
     expect(within(errorDialog).getByText("操作失败，请稍后重试。")).toBeInTheDocument();
     expect(screen.queryByText(/PARSER EXCEPTION SENTINEL/)).not.toBeInTheDocument();
     expect(within(unpairedZone).getByRole("button", { name: "确认关联" })).toBeEnabled();
@@ -2712,8 +2714,8 @@ describe("Workbench row selection and detail drawer", () => {
     installMockApiFetch({ workbenchErrorMonths: ["all"] });
     renderWorkbenchPage();
 
-    expect(await screen.findByText("workbench failed")).toBeInTheDocument();
-    expect(screen.queryByText("工作台数据加载失败，请稍后重试。")).not.toBeInTheDocument();
+    expect(await screen.findByText("关联台服务暂时不可用，请稍后重试。")).toBeInTheDocument();
+    expect(screen.queryByText("workbench failed")).not.toBeInTheDocument();
   });
 
   test("does not render the global empty state for a stale empty workbench payload", async () => {

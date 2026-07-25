@@ -168,6 +168,7 @@ type ApiMockOptions = {
   oaSyncMode?: OaSyncMockMode;
   operationBarrierMode?: OperationBarrierMockMode;
   workbenchConfirmSubmitConflict?: boolean;
+  workbenchConfirmPreviewDelayMs?: number;
   workbenchConfirmSubmitDelayMs?: number;
   workbenchConfirmSubmitError?: boolean;
   workbenchConfirmSubmitFailuresBeforeSuccess?: number;
@@ -178,6 +179,8 @@ type ApiMockOptions = {
   workbenchInitialExceptionApplied?: boolean;
   workbenchInitialRelationConfirmed?: boolean;
   workbenchInitialRowIgnored?: boolean;
+  workbenchWithdrawPreviewDelayMs?: number;
+  workbenchWithdrawPreviewError?: boolean;
   workbenchBankFlowRuleBatchScenario?: boolean;
   workbenchLargeDataset?: boolean;
   workbenchPageEmpty?: boolean;
@@ -852,6 +855,24 @@ function buildUnpairedWorkbenchGroups(rows = workbenchRows()) {
     buildUnpairedWorkbenchGroup("bank", rows.bank),
     buildUnpairedWorkbenchGroup("invoice", rows.invoice),
   ];
+}
+
+function buildPreviewSelectionGroups() {
+  return buildUnpairedWorkbenchGroups().map((group) => ({
+    ...group,
+    group_type: "selection",
+    match_confidence: "none",
+    zone: "unpaired",
+    status: "unpaired",
+  }));
+}
+
+function buildPreviewPairedWorkbenchGroup() {
+  return {
+    ...buildPairedWorkbenchGroup(),
+    zone: "paired",
+    status: "paired",
+  };
 }
 
 function bankFlowRuleSourceRow(
@@ -6452,8 +6473,8 @@ function confirmPreviewPayload() {
     can_submit: true,
     requires_note: false,
     message: "确认后将把 1 条 OA、1 条流水和 1 条发票闭环。",
-    before: { groups: buildUnpairedWorkbenchGroups() },
-    after: { groups: [buildPairedWorkbenchGroup()] },
+    before: { groups: buildPreviewSelectionGroups() },
+    after: { groups: [buildPreviewPairedWorkbenchGroup()] },
     amount_summary: amountSummary(),
   };
 }
@@ -6492,8 +6513,8 @@ function withdrawPreviewPayload() {
       version: 1,
       row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
     },
-    before: { groups: [buildPairedWorkbenchGroup()] },
-    after: { groups: buildUnpairedWorkbenchGroups() },
+    before: { groups: [buildPreviewPairedWorkbenchGroup()] },
+    after: { groups: buildPreviewSelectionGroups() },
     amount_summary: amountSummary(),
   };
 }
@@ -9908,6 +9929,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/workbench/actions/confirm-link/preview") {
+      await delay(Math.max(0, options.workbenchConfirmPreviewDelayMs ?? 0));
       if (options.workbenchBankFlowRuleBatchScenario) {
         return json(route, bankFlowRuleConfirmPreviewPayload());
       }
@@ -9947,6 +9969,14 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/workbench/actions/withdraw-link/preview") {
+      await delay(Math.max(0, options.workbenchWithdrawPreviewDelayMs ?? 0));
+      if (options.workbenchWithdrawPreviewError) {
+        return json(route, {
+          error: "internal_server_error",
+          message: "INTERNAL WITHDRAW PREVIEW SENTINEL",
+          requestId: "req-withdraw-preview",
+        }, 500);
+      }
       if (!relationConfirmed) {
         return json(route, {
           error: "workbench_relation_not_found",

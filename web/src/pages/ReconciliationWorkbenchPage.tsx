@@ -39,6 +39,7 @@ import {
   subscribeWorkbenchRefreshEvents,
   unignoreWorkbenchRow,
   withdrawWorkbenchLink,
+  WorkbenchApiError,
   WORKBENCH_GROUP_PAGE_SIZE,
   type WorkbenchActionResult,
   type WorkbenchOperationProjection,
@@ -165,25 +166,8 @@ function isWorkbenchZoneDisplayState(value: unknown): value is WorkbenchZoneDisp
 }
 
 function actionErrorMessage(error: unknown) {
-  if (error instanceof Error) {
-    if (
-      error.message.includes("Unexpected end of JSON input")
-      || error.message.includes("Failed to execute 'json' on 'Response'")
-      || error.message === "request failed"
-      || error.message === "invalid_json_response"
-    ) {
-      return "操作失败，请稍后重试。";
-    }
-    try {
-      const payload = JSON.parse(error.message) as { message?: string };
-      if (payload.message) {
-        return payload.message;
-      }
-    } catch {
-      if (error.message.trim()) {
-        return error.message;
-      }
-    }
+  if (error instanceof WorkbenchApiError) {
+    return error.message;
   }
   return "操作失败，请稍后重试。";
 }
@@ -1919,13 +1903,6 @@ export default function ReconciliationWorkbenchPage() {
         rowIds,
         caseId: kind === "withdraw" ? resolveSelectedCaseId(rows) : undefined,
       });
-    } catch (error) {
-      if (
-        relationPreviewContextKeyRef.current === requestContextKey
-        && activeWorkbenchReadModelVersionRef.current === expectedReadModelVersion
-      ) {
-        throw error;
-      }
     } finally {
       if (relationPreviewRequestKindRef.current === kind) {
         relationPreviewRequestKindRef.current = null;

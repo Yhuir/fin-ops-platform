@@ -2029,31 +2029,77 @@ const WORKBENCH_API_ERROR_MESSAGES: Record<string, string> = {
   duplicate_pending_invoice_tag_mapping: "同一个银行明细标签不能同时归入多个待找发票筛选。",
   bank_transaction_tag_in_use_by_pending_invoice_filter: "该银行明细标签仍被待找发票筛选使用，请先从待找发票筛选中移除。",
   bank_transaction_tags_version_conflict: "银行明细标签已被其他页面更新，请刷新后重新保存。",
+  workbench_read_model_version_conflict: "关联台数据已变化，请刷新后重新预览。",
+  workbench_relation_preview_stale: "关联预览已失效，请重新预览。",
+  workbench_relation_preview_conflict: "关联预览已失效，请重新预览。",
+  workbench_row_not_found: "所选关联台记录已不可用，请刷新后重新选择。",
+  workbench_relation_not_found: "所选关联关系已不可用，请刷新后重新选择。",
+  relation_preview_rows_missing: "关联预览无效，请刷新后重新选择。",
+  relation_preview_selection_too_large: "本次选择记录过多，请减少选择后重试。",
+  oa_password_verification_failed: "当前 OA 用户密码复核失败，未执行数据重置。",
 };
 
-function resolveWorkbenchApiErrorMessage(payload: unknown, rawText: string) {
-  let resolvedMessage = "";
-  let requestId = "";
-  if (payload && typeof payload === "object") {
-    const errorCode = String((payload as { error?: unknown }).error ?? "").trim();
-    requestId = String(
-      (payload as { requestId?: unknown; request_id?: unknown }).requestId
-      ?? (payload as { requestId?: unknown; request_id?: unknown }).request_id
-      ?? "",
-    ).trim();
-    if (errorCode && WORKBENCH_API_ERROR_MESSAGES[errorCode]) {
-      resolvedMessage = WORKBENCH_API_ERROR_MESSAGES[errorCode];
-    }
-    const message = String((payload as { message?: unknown }).message ?? "").trim();
-    if (!resolvedMessage && message) {
-      resolvedMessage = message;
-    }
-    if (!resolvedMessage && errorCode) {
-      resolvedMessage = errorCode;
-    }
+function requestIdFromPayload(payload: unknown) {
+  if (!payload || typeof payload !== "object") {
+    return "";
   }
-  resolvedMessage = resolvedMessage || rawText.trim() || "request failed";
-  return requestId ? `${resolvedMessage} · requestId ${requestId}` : resolvedMessage;
+  return String(
+    (payload as { requestId?: unknown; request_id?: unknown }).requestId
+    ?? (payload as { requestId?: unknown; request_id?: unknown }).request_id
+    ?? "",
+  ).trim();
+}
+
+function resolveWorkbenchApiErrorMessage(status: number, code: string) {
+  if (WORKBENCH_API_ERROR_MESSAGES[code]) {
+    return WORKBENCH_API_ERROR_MESSAGES[code];
+  }
+  if (status === 401) {
+    return "登录状态已失效，请重新登录。";
+  }
+  if (status === 403) {
+    return "当前账号无权执行此操作。";
+  }
+  if (status === 409) {
+    return "关联台数据已变化，请刷新后重新预览。";
+  }
+  if (status === 404) {
+    return "请求的数据已不可用，请刷新后重试。";
+  }
+  if (status >= 500) {
+    return "关联台服务暂时不可用，请稍后重试。";
+  }
+  if (status === 0) {
+    return "网络连接失败，请检查网络后重试。";
+  }
+  return "操作失败，请稍后重试。";
+}
+
+export class WorkbenchApiError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly requestId: string;
+
+  constructor(message: string, options: { status: number; code: string; requestId: string }) {
+    super(message);
+    this.name = "WorkbenchApiError";
+    this.status = options.status;
+    this.code = options.code;
+    this.requestId = options.requestId;
+  }
+}
+
+function createWorkbenchApiError(error: ApiClientError) {
+  const requestId = requestIdFromPayload(error.payload);
+  const safeMessage = resolveWorkbenchApiErrorMessage(error.status, error.code);
+  return new WorkbenchApiError(
+    requestId ? `${safeMessage} · requestId ${requestId}` : safeMessage,
+    {
+      status: error.status,
+      code: error.code,
+      requestId,
+    },
+  );
 }
 
 function withWorkbenchAuthHeaders(headers?: HeadersInit) {
@@ -2070,10 +2116,7 @@ async function requestJson<T>(url: string, init: RequestInit = {}) {
     return await apiRequestJson<T>(url, init);
   } catch (error) {
     if (error instanceof ApiClientError) {
-      throw Object.assign(
-        new Error(resolveWorkbenchApiErrorMessage(error.payload, error.responseText || error.message)),
-        { status: error.status, code: error.code },
-      );
+      throw createWorkbenchApiError(error);
     }
     throw error;
   }

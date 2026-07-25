@@ -25,11 +25,10 @@ test.describe("workbench relation browser flow", () => {
     await expect(bankRowBefore.getByText("无发票")).toBeVisible();
     const bankTransactionRequestCountBefore = api.count("GET /api/bank-details/transactions");
 
-    const confirmRelation = confirmWorkbenchRelation(page, recordLatency);
-    await expect(page.getByRole("button", { name: "正在准备确认预览" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "正在准备确认预览" })).toBeDisabled();
-    await expect(page.getByRole("dialog", { name: "关联预览" })).toBeVisible();
-    await confirmRelation;
+    await confirmWorkbenchRelation(page, recordLatency, async () => {
+      await expect(page.getByRole("button", { name: "正在准备确认预览" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "正在准备确认预览" })).toBeDisabled();
+    });
 
     expect(api.count("POST /api/workbench/actions/confirm-link/preview")).toBe(1);
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(1);
