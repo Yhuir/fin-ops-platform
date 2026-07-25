@@ -131,13 +131,17 @@ class CostStatisticsSqlProjectionBuilder:
         tenant_id: str,
         source_version: int,
         force_refresh: bool = False,
+        expected_workbench_source_versions: dict[str, object] | None = None,
     ) -> dict[str, object]:
         self._settings_payload_cache = None
         try:
             project_scope, month = _parse_cost_scope_key(scope_key)
             if month == "all":
                 raise ValueError("month scope rebuild requires a concrete YYYY-MM scope.")
-            self._require_fresh_workbench_dependency(month)
+            self._require_fresh_workbench_dependency(
+                month,
+                expected_source_versions=expected_workbench_source_versions,
+            )
             workbench_groups = self._cost_groups_from_workbench(month)
             bank_detail_payload = self._bank_detail_snapshot_payload(
                 month,
@@ -186,8 +190,21 @@ class CostStatisticsSqlProjectionBuilder:
         )
         return expected, actual
 
-    def _require_fresh_workbench_dependency(self, scope_key: str) -> None:
-        expected, actual = self._workbench_dependency_versions_provider(scope_key)
+    def _require_fresh_workbench_dependency(
+        self,
+        scope_key: str,
+        *,
+        expected_source_versions: dict[str, object] | None = None,
+    ) -> None:
+        if expected_source_versions:
+            expected = dict(expected_source_versions)
+            actual = self._read_model_repository.active_workbench_source_versions(
+                scope_key=scope_key
+            )
+        else:
+            expected, actual = self._workbench_dependency_versions_provider(
+                scope_key
+            )
         expected = require_expected_source_versions(
             cost_statistics_workbench_dependency_source_versions(expected),
             context=f"cost_statistics_workbench_dependency:{scope_key}",

@@ -875,6 +875,87 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             {**expected_payload, "source_version": 9},
         )
 
+    def test_enqueue_read_model_refresh_preserves_bounded_source_proofs(self) -> None:
+        metadata = {
+            "freshness_token": "workbench-target",
+            "expected_source_versions": {"builder": "workbench-v6"},
+            "workbench_scope_key": "2026-05",
+            "workbench_freshness_token": "cost-workbench-target",
+            "workbench_expected_source_versions": {
+                "builder": "workbench-v6",
+                "relations": {"count": 2},
+            },
+            "authorization": "Bearer secret",
+        }
+        transaction = FakeTransaction(
+            rows=[
+                {"source_version": 9},
+                event_row(
+                    event_type="cost_statistics.read_model.refresh",
+                    aggregate_type="read_model",
+                    aggregate_id="active:2026-05",
+                    scope_type="cost_statistics",
+                    scope_key="active:2026-05",
+                    dedupe_key=(
+                        "cost_statistics.read_model.refresh:"
+                        "cost_statistics:active:2026-05"
+                    ),
+                    payload={
+                        "scope_type": "cost_statistics",
+                        "scope_key": "active:2026-05",
+                        "reason": "dependency_not_fresh",
+                        "metadata": {
+                            key: value
+                            for key, value in metadata.items()
+                            if key != "authorization"
+                        },
+                        "source_version": 9,
+                    },
+                    source_version=9,
+                ),
+            ]
+        )
+        repository = RuntimeQueueRepository(FailingTransactionConnection())  # type: ignore[arg-type]
+        enqueue_in_transaction = self._enqueue_read_model_refresh_in_transaction(repository)
+
+        enqueue_in_transaction(
+            transaction=transaction,
+            scope_type="cost_statistics",
+            scope_key="active:2026-05",
+            reason="dependency_not_fresh",
+            metadata=metadata,
+        )
+
+        outbox_payload = transaction.calls[1][2][9]
+        self.assertEqual(
+            outbox_payload["metadata"],
+            {
+                key: value
+                for key, value in metadata.items()
+                if key != "authorization"
+            },
+        )
+        self.assertNotIn("authorization", outbox_payload["metadata"])
+
+    def test_enqueue_read_model_refresh_rejects_oversized_source_proof(self) -> None:
+        repository = RuntimeQueueRepository(FailingTransactionConnection())  # type: ignore[arg-type]
+        enqueue_in_transaction = self._enqueue_read_model_refresh_in_transaction(repository)
+
+        with self.assertRaisesRegex(
+            RuntimeQueueDataError,
+            "expected_source_versions exceeds",
+        ):
+            enqueue_in_transaction(
+                transaction=FakeTransaction(),
+                scope_type="workbench",
+                scope_key="2026-05",
+                reason="api_groups_stale",
+                metadata={
+                    "freshness_token": "target",
+                    "expected_source_versions": {"value": "x" * 33_000},
+                },
+            )
+
     def test_enqueue_read_model_refresh_delegates_to_transaction_bound_writer(self) -> None:
         transaction = FakeTransaction(
             rows=[
@@ -1631,6 +1712,42 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             scope_type="workbench",
             scope_key="2026-04",
             reason="api_groups_stale",
+            metadata=metadata,
+        )
+
+        self.assertIsNone(event)
+        self.assertEqual(
+            [method for method, _sql, _params in transaction.calls],
+            ["execute", "fetch_all"],
+        )
+
+    def test_atomic_read_model_enqueue_coalesces_same_active_cost_workbench_target(
+        self,
+    ) -> None:
+        metadata = {
+            "workbench_scope_key": "2026-04",
+            "workbench_freshness_token": "target-a",
+            "workbench_expected_source_versions": {"builder": "workbench-v6"},
+        }
+        transaction = FakeTransaction(
+            rows=[
+                [
+                    event_row(
+                        event_type="cost_statistics.read_model.refresh",
+                        scope_type="cost_statistics",
+                        scope_key="active:2026-04",
+                        status="processing",
+                        payload={"metadata": metadata},
+                    )
+                ]
+            ]
+        )
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        event = repository.enqueue_read_model_refresh_if_inactive(
+            scope_type="cost_statistics",
+            scope_key="active:2026-04",
+            reason="cost_statistics_workbench_dependency_stale",
             metadata=metadata,
         )
 

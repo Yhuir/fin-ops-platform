@@ -1,5 +1,11 @@
 # Read Model 实施记录
 
+## 2026-07-25 - access proof 有界传递与 worker 复用
+
+- 页面 freshness gate 已计算的 canonical expected proof 通过既有 durable event metadata 传给 exact Workbench/Cost worker；metadata 必须 JSON 可序列化且总量不超过 32 KiB，worker 重新计算 token、校验 scope 后才可复用。
+- Workbench 自身的完整 target token 可合并 active/最新成功同 target；Cost child 携带的 Workbench dependency token 只合并 active waiter，不能用历史 done 事件短路 missing/dirty Cost scope。
+- 删除评估中的长期 proof cache/service 与 watermark SQL；没有新增表、migration、queue、worker、cache、API 或协调器，PostgreSQL dirty/outbox 和 active generation 仍是唯一状态事实源。
+
 ## 2026-07-24 - access refresh 原子语义去重
 
 - `enqueue_read_model_refresh_if_inactive(...)` 在 exact tenant/type/scope advisory lock 内比较规范化 metadata，覆盖顺序固定为 `force > full scope > partial delta`；full 覆盖 partial，partial 不得吞掉 full，非 force 不得吞掉 force。processing event 后出现新语义时建立 pending follow-up，pending event 则原子合并。

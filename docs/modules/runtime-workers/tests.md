@@ -6,7 +6,7 @@
 
 - `tests/test_runtime_worker.py`：Cost projection 抛出结构化 `workbench_read_model_not_fresh` 时，只 ensure 同月 Workbench，当前 Cost event 短延迟 defer，不进入普通失败/dead-letter；handler 的 canonical non-fresh proof 高于可能滞后的 readiness，旧 `already_fresh` 不能阻止补投，active/durable dedupe 仍生效。
 - `tests/test_read_model_manifest.py`：Cost manifest 只登记当前实际依赖 `workbench` 与 `bank_detail`。
-- `tests/test_cost_statistics_sql_runtime.py`：页面 gate 已 non-fresh 时跳过 canonical Workbench proof，只 ensure gate 返回的 exact upstream/child scope；gate 可 fresh 但 Workbench stale 时只 ensure exact Workbench，不在同次访问预投 Cost。后续访问确认 Workbench fresh 后才 stage 当前 exact Cost child，不投递 sibling。Cost worker 在真实竞态下继续于依赖匹配前保持零 payload/publish I/O，以 manifest dependency defer/精确补投 child，随后沿既有 child→parent 收敛。
+- `tests/test_cost_statistics_sql_runtime.py`：页面 gate 已 non-fresh 时跳过 canonical Workbench proof，只 ensure gate 返回的 exact upstream/child scope；gate 可 fresh 但 Workbench stale 时，同次只 ensure exact Workbench 并 stage 当前 project/page 的 exact Cost child，不投递 parent 或 sibling。两个 event 复用本次 gate 已计算的 Workbench expected proof；worker 校验 token/scope 后避免重复 canonical SQL，并在真实竞态下继续于依赖匹配前保持零 payload/publish I/O，以 manifest dependency defer 后沿既有 child→parent 收敛。
 
 ## 2026-07-22 Phase 27 当前门禁
 

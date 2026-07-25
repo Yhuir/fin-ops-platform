@@ -3643,15 +3643,21 @@ class Application:
             if callable(active_source_versions):
                 actual = dict(active_source_versions(scope_key=scope_key) or {})
                 if actual:
+                    canonical_expected_source_versions = (
+                        dict(expected_source_versions)
+                        if isinstance(expected_source_versions, dict)
+                        and expected_source_versions
+                        else self._workbench_sql_read_model_source_versions(
+                            scope_key
+                        )
+                    )
                     refresh_metadata["freshness_token"] = read_model_freshness_token(
                         scope_type="workbench",
                         scope_key=scope_key,
-                        expected_source_versions=(
-                            expected_source_versions
-                            or self._workbench_sql_read_model_source_versions(
-                                scope_key
-                            )
-                        ),
+                        expected_source_versions=canonical_expected_source_versions,
+                    )
+                    refresh_metadata["expected_source_versions"] = (
+                        canonical_expected_source_versions
                     )
         return bool(
             refresh_gateway.enqueue_one(

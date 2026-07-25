@@ -71,6 +71,57 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(count, str(len(columns)))
 
+    def test_read_model_refresh_proofs_round_trip_and_coalesce_active_targets(
+        self,
+    ) -> None:
+        workbench_metadata = {
+            "freshness_token": "workbench-target",
+            "expected_source_versions": {"builder": "workbench-v6"},
+        }
+        workbench_event = self.runtime_queue.enqueue_read_model_refresh_if_inactive(
+            scope_type="workbench",
+            scope_key="2026-05",
+            reason="api_groups_stale",
+            metadata=workbench_metadata,
+        )
+        self.assertIsNotNone(workbench_event)
+        self.assertEqual(
+            workbench_event.payload["metadata"],
+            workbench_metadata,
+        )
+        self.assertIsNone(
+            self.runtime_queue.enqueue_read_model_refresh_if_inactive(
+                scope_type="workbench",
+                scope_key="2026-05",
+                reason="api_groups_stale",
+                metadata=workbench_metadata,
+            )
+        )
+
+        cost_metadata = {
+            "workbench_scope_key": "2026-05",
+            "workbench_freshness_token": "cost-workbench-target",
+            "workbench_expected_source_versions": {
+                "builder": "workbench-v6"
+            },
+        }
+        cost_event = self.runtime_queue.enqueue_read_model_refresh_if_inactive(
+            scope_type="cost_statistics",
+            scope_key="active:2026-05",
+            reason="cost_statistics_workbench_dependency_stale",
+            metadata=cost_metadata,
+        )
+        self.assertIsNotNone(cost_event)
+        self.assertEqual(cost_event.payload["metadata"], cost_metadata)
+        self.assertIsNone(
+            self.runtime_queue.enqueue_read_model_refresh_if_inactive(
+                scope_type="cost_statistics",
+                scope_key="active:2026-05",
+                reason="cost_statistics_workbench_dependency_stale",
+                metadata=cost_metadata,
+            )
+        )
+
     def test_outbox_attempt_columns_stay_synchronized(self) -> None:
         trigger_name = fetch_scalar(
             self.database_url,

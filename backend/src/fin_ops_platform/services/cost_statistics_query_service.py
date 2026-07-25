@@ -19,6 +19,7 @@ from fin_ops_platform.services.cost_statistics_source_versions import (
     cost_statistics_workbench_dependency_source_versions,
 )
 from fin_ops_platform.services.read_model_freshness import (
+    read_model_freshness_token,
     require_expected_source_versions,
     resolve_read_model_freshness,
     source_version_mismatch_reasons,
@@ -528,12 +529,12 @@ class CostStatisticsQueryService:
             )
 
         if not bank_flow_profile and scope_month and scope_month != "all":
-            expected_workbench_versions, active_workbench_versions = (
+            raw_expected_workbench_versions, active_workbench_versions = (
                 self._workbench_dependency_versions_provider(scope_month)
             )
             expected_workbench_versions = require_expected_source_versions(
                 cost_statistics_workbench_dependency_source_versions(
-                    expected_workbench_versions
+                    raw_expected_workbench_versions
                 ),
                 context="cost_statistics_workbench_dependency",
             )
@@ -551,6 +552,9 @@ class CostStatisticsQueryService:
                     stale_reasons=tuple(
                         f"workbench_dependency_{reason}" for reason in workbench_stale_reasons
                     ),
+                    expected_source_versions_by_scope={
+                        scope_month: raw_expected_workbench_versions
+                    },
                 )
         elif not bank_flow_profile and scope_month == "all":
             expected_by_scope, active_by_scope = (
@@ -584,6 +588,10 @@ class CostStatisticsQueryService:
                     workbench_scope_keys=tuple(workbench_stale_scope_keys),
                     empty_payload_factory=empty_payload_factory,
                     stale_reasons=tuple(workbench_stale_reasons),
+                    expected_source_versions_by_scope={
+                        scope_key: dict(expected_by_scope[scope_key])
+                        for scope_key in workbench_stale_scope_keys
+                    },
                 )
 
         expected_source_versions = cost_statistics_source_versions(
@@ -665,6 +673,7 @@ class CostStatisticsQueryService:
         workbench_scope_keys: tuple[str, ...],
         empty_payload_factory: Any,
         stale_reasons: tuple[str, ...],
+        expected_source_versions_by_scope: dict[str, dict[str, object]] | None = None,
     ) -> dict[str, Any]:
         refresh_reason = "cost_statistics_workbench_dependency_stale"
         payload = dict(empty_payload_factory())
@@ -674,11 +683,28 @@ class CostStatisticsQueryService:
         payload["refresh_reason"] = refresh_reason
         payload["refresh_dependency"] = "workbench"
         payload["refresh_scope_keys"] = list(workbench_scope_keys)
+        expected_by_scope = {
+            str(expected_scope_key): dict(source_versions)
+            for expected_scope_key, source_versions in dict(
+                expected_source_versions_by_scope or {}
+            ).items()
+            if isinstance(source_versions, dict) and source_versions
+        }
+        for workbench_scope_key in workbench_scope_keys:
+            if workbench_scope_key in expected_by_scope:
+                continue
+            expected, _actual = self._workbench_dependency_versions_provider(
+                workbench_scope_key
+            )
+            expected_by_scope[workbench_scope_key] = dict(expected)
         refresh_results = [
             bool(
                 self._workbench_refresh_enqueuer(
                     workbench_scope_key,
                     reason=refresh_reason,
+                    expected_source_versions=expected_by_scope.get(
+                        workbench_scope_key
+                    ),
                 )
             )
             for workbench_scope_key in workbench_scope_keys
@@ -691,18 +717,37 @@ class CostStatisticsQueryService:
             )
             if month != "all"
         )
-        cost_scope_keys = [
-            self._runtime_service.request_scope_key(month, project_scope)
-            for month in dependency_months
-        ]
-        cost_refresh_scope_keys = (
-            self._runtime_service.enqueue_read_model_refreshes(
-                cost_scope_keys,
-                reason=refresh_reason,
+        for month in dependency_months:
+            if month in expected_by_scope:
+                continue
+            expected, _actual = self._workbench_dependency_versions_provider(
+                month
             )
-            if cost_scope_keys
-            else []
-        )
+            expected_by_scope[month] = dict(expected)
+        cost_refresh_scope_keys: list[str] = []
+        for month in dependency_months:
+            expected = expected_by_scope.get(month)
+            metadata = None
+            if expected:
+                metadata = {
+                    "workbench_scope_key": month,
+                    "workbench_expected_source_versions": expected,
+                    "workbench_freshness_token": read_model_freshness_token(
+                        scope_type="workbench",
+                        scope_key=month,
+                        expected_source_versions=expected,
+                    ),
+                }
+            cost_scope_key = self._runtime_service.request_scope_key(
+                month,
+                project_scope,
+            )
+            if self._runtime_service.enqueue_read_model_refreshes(
+                [cost_scope_key],
+                reason=refresh_reason,
+                metadata=metadata,
+            ):
+                cost_refresh_scope_keys.append(cost_scope_key)
         payload["refresh_enqueued"] = bool(cost_refresh_scope_keys) or any(refresh_results)
         return payload
 

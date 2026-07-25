@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
 import os
+from dataclasses import dataclass
 from typing import Any, Iterable
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresTransaction
@@ -11,6 +12,7 @@ from fin_ops_platform.services.runtime_worker_registry import rabbitmq_dispatch_
 PRIORITY_VALUES = {"low", "normal", "high", "urgent"}
 PUBLISH_STATUS_VALUES = {"unpublished", "publishing", "published", "failed"}
 DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES = rabbitmq_dispatch_event_types()
+READ_MODEL_REFRESH_PROOF_MAX_BYTES = 32_768
 
 
 @dataclass(frozen=True)
@@ -2534,9 +2536,82 @@ def _safe_read_model_refresh_metadata(metadata: dict[str, object] | None) -> dic
     freshness_token = str(metadata.get("freshness_token") or "").strip()
     if freshness_token:
         result["freshness_token"] = freshness_token[:128]
+    expected_source_versions = _safe_read_model_source_proof(
+        metadata.get("expected_source_versions"),
+        field_name="expected_source_versions",
+    )
+    if expected_source_versions:
+        if not freshness_token:
+            raise RuntimeQueueDataError(
+                "expected_source_versions requires freshness_token."
+            )
+        result["expected_source_versions"] = expected_source_versions
+    workbench_scope_key = str(metadata.get("workbench_scope_key") or "").strip()
+    workbench_freshness_token = str(
+        metadata.get("workbench_freshness_token") or ""
+    ).strip()
+    workbench_expected_source_versions = _safe_read_model_source_proof(
+        metadata.get("workbench_expected_source_versions"),
+        field_name="workbench_expected_source_versions",
+    )
+    if (
+        workbench_scope_key
+        or workbench_freshness_token
+        or workbench_expected_source_versions
+    ):
+        if not (
+            workbench_scope_key
+            and workbench_freshness_token
+            and workbench_expected_source_versions
+        ):
+            raise RuntimeQueueDataError(
+                "Cost Workbench proof requires scope, freshness token, and "
+                "expected source versions."
+            )
+        result["workbench_scope_key"] = workbench_scope_key[:128]
+        result["workbench_freshness_token"] = workbench_freshness_token[:128]
+        result["workbench_expected_source_versions"] = (
+            workbench_expected_source_versions
+        )
     if metadata.get("force_refresh") is True:
         result["force_refresh"] = True
     return result
+
+
+def _safe_read_model_source_proof(
+    value: object,
+    *,
+    field_name: str,
+) -> dict[str, object]:
+    if value in (None, {}):
+        return {}
+    if not isinstance(value, dict):
+        raise RuntimeQueueDataError(f"{field_name} must be an object.")
+    try:
+        encoded = json.dumps(
+            value,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    except (TypeError, ValueError) as exc:
+        raise RuntimeQueueDataError(f"{field_name} must be JSON serializable.") from exc
+    if len(encoded.encode("utf-8")) > READ_MODEL_REFRESH_PROOF_MAX_BYTES:
+        raise RuntimeQueueDataError(
+            f"{field_name} exceeds {READ_MODEL_REFRESH_PROOF_MAX_BYTES} bytes."
+        )
+    decoded = json.loads(encoded)
+    if not isinstance(decoded, dict):
+        raise RuntimeQueueDataError(f"{field_name} must be an object.")
+    return decoded
+
+
+def _refresh_target_token(metadata: dict[str, object]) -> str:
+    return str(
+        metadata.get("freshness_token")
+        or metadata.get("workbench_freshness_token")
+        or ""
+    ).strip()
 
 
 def _refresh_metadata_covers(
@@ -2558,8 +2633,8 @@ def _refresh_metadata_covers(
         return active_is_force
     if active_is_force:
         return True
-    incoming_freshness_token = str(incoming_metadata.get("freshness_token") or "").strip()
-    active_freshness_token = str(active_metadata.get("freshness_token") or "").strip()
+    incoming_freshness_token = _refresh_target_token(incoming_metadata)
+    active_freshness_token = _refresh_target_token(active_metadata)
     if incoming_freshness_token and incoming_freshness_token != active_freshness_token:
         return False
     if not incoming_is_partial:

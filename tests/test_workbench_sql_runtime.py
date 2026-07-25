@@ -22,6 +22,9 @@ from fin_ops_platform.services.postgres_repositories.read_models import (
     _workbench_row_payload_for_write,
 )
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
+from fin_ops_platform.services.read_model_freshness import (
+    read_model_freshness_token,
+)
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 from fin_ops_platform.services.workbench_free_matching_engine import RULE_VERSION as WORKBENCH_FORMAL_RELATION_RULE_VERSION
 from fin_ops_platform.services.workbench_groups_page_cache import (
@@ -6721,6 +6724,119 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(queue.completed, [("tenant-a", "workbench", "2026-05", 7)])
         self.assertEqual(result["scope_key"], "2026-05")
         self.assertEqual(result["row_count"], 1)
+
+    def test_workbench_refresh_handler_reuses_validated_access_proof(self) -> None:
+        expected_source_versions = {
+            "builder": "workbench-month-v6",
+            "workbench_pair_relations_updated_at": "2026-07-25T08:00:00+08:00",
+        }
+
+        class FakeBuilder:
+            def __init__(self) -> None:
+                self.rebuilt: list[dict[str, object]] = []
+
+            def rebuild_workbench_read_model_scope(
+                self,
+                scope_key: str,
+                *,
+                source_version: object = None,
+                expected_source_versions: dict[str, object] | None = None,
+            ) -> dict[str, object]:
+                self.rebuilt.append(
+                    {
+                        "scope_key": scope_key,
+                        "source_version": source_version,
+                        "expected_source_versions": expected_source_versions,
+                    }
+                )
+                return {"scope_key": scope_key, "published": True}
+
+        class FakeQueue:
+            @staticmethod
+            def complete_read_model_refresh(**_kwargs: object) -> bool:
+                return True
+
+        builder = FakeBuilder()
+        service = WorkbenchReadModelRefreshService(
+            projection_builder=builder,
+            queue_repository=FakeQueue(),
+        )
+        event = RuntimeQueueEvent(
+            event_id="event-proof",
+            tenant_id="default",
+            event_type="workbench.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="2026-05",
+            scope_type="workbench",
+            scope_key="2026-05",
+            dedupe_key=None,
+            payload={
+                "scope_key": "2026-05",
+                "source_version": 31,
+                "metadata": {
+                    "expected_source_versions": expected_source_versions,
+                    "freshness_token": read_model_freshness_token(
+                        scope_type="workbench",
+                        scope_key="2026-05",
+                        expected_source_versions=expected_source_versions,
+                    ),
+                },
+            },
+            attempts=1,
+            status="processing",
+        )
+
+        service.handle_runtime_event(event)
+
+        self.assertEqual(
+            builder.rebuilt,
+            [
+                {
+                    "scope_key": "2026-05",
+                    "source_version": 31,
+                    "expected_source_versions": expected_source_versions,
+                }
+            ],
+        )
+
+    def test_workbench_refresh_handler_rejects_tampered_access_proof(
+        self,
+    ) -> None:
+        class FakeBuilder:
+            @staticmethod
+            def rebuild_workbench_read_model_scope(
+                _scope_key: str,
+                **_kwargs: object,
+            ) -> dict[str, object]:
+                raise AssertionError("tampered proof must fail before rebuild")
+
+        service = WorkbenchReadModelRefreshService(
+            projection_builder=FakeBuilder(),
+            queue_repository=object(),
+        )
+        event = RuntimeQueueEvent(
+            event_id="event-proof-tampered",
+            tenant_id="default",
+            event_type="workbench.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="2026-05",
+            scope_type="workbench",
+            scope_key="2026-05",
+            dedupe_key=None,
+            payload={
+                "scope_key": "2026-05",
+                "source_version": 32,
+                "metadata": {
+                    "expected_source_versions": {"builder": "expected"},
+                    "freshness_token": "tampered",
+                },
+            },
+            attempts=1,
+            status="processing",
+        )
+
+        with self.assertRaisesRegex(ValueError, "does not match scope"):
+            service.handle_runtime_event(event)
 
     def test_workbench_refresh_handler_requires_projection_builder_boundary(self) -> None:
         with self.assertRaisesRegex(ValueError, "projection_builder is required"):

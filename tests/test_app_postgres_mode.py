@@ -374,7 +374,8 @@ class AppPostgresModeTests(unittest.TestCase):
                     scope_type="workbench",
                     scope_key="2026-05",
                     expected_source_versions=expected,
-                )
+                ),
+                "expected_source_versions": expected,
             },
         )
 

@@ -1,5 +1,11 @@
 # 关联台 实施记录
 
+## 2026-07-25 - 同次 freshness proof 复用
+
+- Workbench 页面 gate 已计算 canonical expected source versions 时，enqueue 同时携带与 exact scope 绑定的 token/proof；queue 只保留有界安全 metadata，worker 校验 token/scope 后直接交给 projection，避免 worker 再跑同一组 canonical SQL。
+- worker 发布仍以 event source version 条件完成并生成 active generation；proof 只省略重复 expected 计算，不绕过 active projection、dirty/outbox 或 source-version 竞态检查。projection missing 时不附 proof/token，保留既有首次访问自愈。
+- 未引入 proof cache、第二事实源、表、migration、queue、worker 或新 API；删除了评估中不能证明收益的 watermark/cache 方案。
+
 ## 2026-07-25 - 完成窗口 target 去重与旧 background persist 删除
 
 - 第一候选生产只读事件时间线显示，同一`2026-02` scope在页面轮询期间连续消费10992→10995等多个执行版本，但canonical业务target没有相应次数变化；写API已零read-model fan-out，放大发生在active event刚done到页面再次poll的完成窗口。

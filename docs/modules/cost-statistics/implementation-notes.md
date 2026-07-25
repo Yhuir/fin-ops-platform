@@ -1,5 +1,11 @@
 # 成本统计 实施记录
 
+## 2026-07-25 - Workbench expected proof 跨 exact child 复用
+
+- `project|bank|expense_type` gate 发现 Workbench stale 时，同次只 stage exact Workbench 与当前 project/page 的 exact Cost child；两个 event 复用该次 gate 已计算的 expected proof，不创建 parent、sibling 或写后 fan-out。
+- Cost worker 校验 `workbench_scope_key + workbench_expected_source_versions + workbench_freshness_token` 后复用 expected，并继续读取 active Workbench actual versions做 fail-closed dependency comparison；旧 event/显式维护没有 proof 时走原 canonical provider。
+- dependency token 只用于 active waiter 原子合并，不用历史 done 短路完整 Cost freshness。没有新增缓存、表、migration、queue、worker、API 或协调器。
+
 ## 2026-07-25 - 页面访问 child pipeline 与完成窗口 target 去重
 
 - 第一候选生产矩阵证明普通confirm/withdraw已在约152–482ms返回且写后零页面fan-out，单个Cost月scope约0.8–1.4秒；但Workbench同scope在刚完成后仍被轮询重新入队，Cost all/project继续串行等待Workbench→child→parent，出现约4.2–13.9秒。System Audit 16/16、15/15 read models、queue/worker与fixture恢复均通过，真实剩余根因是完成窗口任务放大和串行空档，不是事实源错误或SQL单次算法。

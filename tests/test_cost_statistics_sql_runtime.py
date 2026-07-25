@@ -27,6 +27,9 @@ from fin_ops_platform.services.postgres_repositories.read_models import (
     PostgresReadModelRepository,
     _cost_statistics_page_statistics,
 )
+from fin_ops_platform.services.read_model_freshness import (
+    read_model_freshness_token,
+)
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
@@ -142,11 +145,20 @@ class CostStatisticsRuntimeStub:
         scope_keys: list[str],
         *,
         reason: str,
+        metadata: dict[str, object] | None = None,
     ) -> list[str]:
         return [
             scope_key
             for scope_key in scope_keys
-            if self.enqueue_read_model_refresh(scope_key, reason=reason)
+            if (
+                self.enqueue_read_model_refresh(
+                    scope_key,
+                    reason=reason,
+                    metadata=metadata,
+                )
+                if metadata is not None
+                else self.enqueue_read_model_refresh(scope_key, reason=reason)
+            )
         ]
 
     @staticmethod
@@ -723,7 +735,7 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
                 raise AssertionError("stale Cost gate must stop payload I/O")
 
         runtime = Runtime()
-        workbench_refreshes: list[tuple[str, str]] = []
+        workbench_refreshes: list[tuple[str, str, dict[str, object] | None]] = []
         service = CostStatisticsQueryService(
             runtime_service=runtime,
             sql_read_repository=Repository(),
@@ -788,7 +800,7 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
                 raise AssertionError("stale Cost child must stop parent payload I/O")
 
         runtime = Runtime()
-        workbench_refreshes: list[tuple[str, str]] = []
+        workbench_refreshes: list[tuple[str, str, dict[str, object] | None]] = []
         service = CostStatisticsQueryService(
             runtime_service=runtime,
             sql_read_repository=Repository(),
@@ -832,9 +844,17 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
         class Runtime(CostStatisticsRuntimeStub):
             def __init__(self) -> None:
                 self.cost_refreshes: list[tuple[str, str]] = []
+                self.metadata_by_scope: dict[str, dict[str, object] | None] = {}
 
-            def enqueue_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
+            def enqueue_read_model_refresh(
+                self,
+                scope_key: str,
+                *,
+                reason: str,
+                metadata: dict[str, object] | None = None,
+            ) -> bool:
                 self.cost_refreshes.append((scope_key, reason))
+                self.metadata_by_scope[scope_key] = metadata
                 return True
 
         class Repository:
@@ -853,7 +873,7 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
                 raise AssertionError("stale Workbench must stop Cost payload I/O")
 
         runtime = Runtime()
-        workbench_refreshes: list[tuple[str, str]] = []
+        workbench_refreshes: list[tuple[str, str, dict[str, object] | None]] = []
         service = CostStatisticsQueryService(
             runtime_service=runtime,
             sql_read_repository=Repository(),
@@ -865,8 +885,11 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             workbench_dependency_versions_by_scope_provider=(
                 _fresh_workbench_dependency_versions_by_scope
             ),
-            workbench_refresh_enqueuer=lambda scope_key, *, reason: (
-                workbench_refreshes.append((scope_key, reason)) or True
+            workbench_refresh_enqueuer=lambda scope_key, *, reason, expected_source_versions=None: (
+                workbench_refreshes.append(
+                    (scope_key, reason, expected_source_versions)
+                )
+                or True
             ),
         )
 
@@ -882,7 +905,13 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
         self.assertEqual(payload["refresh_dependency"], "workbench")
         self.assertEqual(
             workbench_refreshes,
-            [("2026-05", "cost_statistics_workbench_dependency_stale")],
+            [
+                (
+                    "2026-05",
+                    "cost_statistics_workbench_dependency_stale",
+                    {"builder": "workbench-month-v6", "relation": "v2"},
+                )
+            ],
         )
         self.assertEqual(
             runtime.cost_refreshes,
@@ -893,14 +922,39 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
                 )
             ],
         )
+        self.assertEqual(
+            runtime.metadata_by_scope["active:2026-05"][
+                "workbench_expected_source_versions"
+            ],
+            {"builder": "workbench-month-v6", "relation": "v2"},
+        )
+        self.assertEqual(
+            runtime.metadata_by_scope["active:2026-05"]["workbench_scope_key"],
+            "2026-05",
+        )
+        self.assertTrue(
+            runtime.metadata_by_scope["active:2026-05"][
+                "workbench_freshness_token"
+            ]
+        )
 
-    def test_month_refresh_poll_skips_canonical_proof_and_keeps_one_exact_cost_waiter(self) -> None:
+    def test_month_refresh_poll_reuses_workbench_proof_and_keeps_one_exact_cost_waiter(
+        self,
+    ) -> None:
         class Runtime(CostStatisticsRuntimeStub):
             def __init__(self) -> None:
                 self.cost_refreshes: list[tuple[str, str]] = []
+                self.metadata_by_scope: dict[str, dict[str, object] | None] = {}
 
-            def enqueue_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
+            def enqueue_read_model_refresh(
+                self,
+                scope_key: str,
+                *,
+                reason: str,
+                metadata: dict[str, object] | None = None,
+            ) -> bool:
                 self.cost_refreshes.append((scope_key, reason))
+                self.metadata_by_scope[scope_key] = metadata
                 return True
 
         class Repository:
@@ -924,19 +978,33 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
                 raise AssertionError("refreshing Workbench must stop Cost payload I/O")
 
         runtime = Runtime()
-        workbench_refreshes: list[tuple[str, str]] = []
+        workbench_refreshes: list[tuple[str, str, dict[str, object] | None]] = []
+        dependency_proof_calls: list[str] = []
         service = CostStatisticsQueryService(
             runtime_service=runtime,
             sql_read_repository=Repository(),
             tag_selection_mapper=AppSettingsService.cost_statistics_tag_selection_payload_from_settings,
-            workbench_dependency_versions_provider=lambda _scope_key: (_ for _ in ()).throw(
-                AssertionError("refreshing Cost gate must skip canonical Workbench proof")
+            workbench_dependency_versions_provider=lambda scope_key: (
+                dependency_proof_calls.append(scope_key)
+                or (
+                    {
+                        "builder": "workbench-month-v6",
+                        "relation": "v2",
+                    },
+                    {
+                        "builder": "workbench-month-v6",
+                        "relation": "v1",
+                    },
+                )
             ),
             workbench_dependency_versions_by_scope_provider=(
                 _fresh_workbench_dependency_versions_by_scope
             ),
-            workbench_refresh_enqueuer=lambda scope_key, *, reason: (
-                workbench_refreshes.append((scope_key, reason)) or True
+            workbench_refresh_enqueuer=lambda scope_key, *, reason, expected_source_versions=None: (
+                workbench_refreshes.append(
+                    (scope_key, reason, expected_source_versions)
+                )
+                or True
             ),
         )
 
@@ -952,7 +1020,13 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
         self.assertEqual(payload["refresh_dependency"], "workbench")
         self.assertEqual(
             workbench_refreshes,
-            [("2026-05", "cost_statistics_workbench_dependency_stale")],
+            [
+                (
+                    "2026-05",
+                    "cost_statistics_workbench_dependency_stale",
+                    {"builder": "workbench-month-v6", "relation": "v2"},
+                )
+            ],
         )
         self.assertEqual(
             runtime.cost_refreshes,
@@ -963,14 +1037,29 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
                 )
             ],
         )
+        self.assertEqual(dependency_proof_calls, ["2026-05"])
+        self.assertEqual(
+            runtime.metadata_by_scope["active:2026-05"][
+                "workbench_expected_source_versions"
+            ],
+            {"builder": "workbench-month-v6", "relation": "v2"},
+        )
 
     def test_parent_access_pipelines_only_exact_cost_children_behind_stale_workbench(self) -> None:
         class Runtime(CostStatisticsRuntimeStub):
             def __init__(self) -> None:
                 self.cost_refreshes: list[tuple[str, str]] = []
+                self.metadata_by_scope: dict[str, dict[str, object] | None] = {}
 
-            def enqueue_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
+            def enqueue_read_model_refresh(
+                self,
+                scope_key: str,
+                *,
+                reason: str,
+                metadata: dict[str, object] | None = None,
+            ) -> bool:
                 self.cost_refreshes.append((scope_key, reason))
+                self.metadata_by_scope[scope_key] = metadata
                 return True
 
         class Repository:
@@ -997,7 +1086,7 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             "2026-04": {"builder": "workbench-month-v6", "workbench_pair_relations_updated_at": "v1"},
         }
         runtime = Runtime()
-        workbench_refreshes: list[tuple[str, str]] = []
+        workbench_refreshes: list[tuple[str, str, dict[str, object] | None]] = []
         service = CostStatisticsQueryService(
             runtime_service=runtime,
             sql_read_repository=Repository(),
@@ -1007,8 +1096,11 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
                 expected_by_scope,
                 active_by_scope,
             ),
-            workbench_refresh_enqueuer=lambda scope_key, *, reason: (
-                workbench_refreshes.append((scope_key, reason)) or True
+            workbench_refresh_enqueuer=lambda scope_key, *, reason, expected_source_versions=None: (
+                workbench_refreshes.append(
+                    (scope_key, reason, expected_source_versions)
+                )
+                or True
             ),
         )
 
@@ -1035,8 +1127,16 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
         self.assertEqual(
             workbench_refreshes,
             [
-                ("2026-03", "cost_statistics_workbench_dependency_stale"),
-                ("2026-04", "cost_statistics_workbench_dependency_stale"),
+                (
+                    "2026-03",
+                    "cost_statistics_workbench_dependency_stale",
+                    expected_by_scope["2026-03"],
+                ),
+                (
+                    "2026-04",
+                    "cost_statistics_workbench_dependency_stale",
+                    expected_by_scope["2026-04"],
+                ),
             ],
         )
         self.assertEqual(
@@ -1051,6 +1151,22 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
                     "cost_statistics_workbench_dependency_stale",
                 ),
             ],
+        )
+        self.assertEqual(
+            set(runtime.metadata_by_scope),
+            {"active:2026-03", "active:2026-04"},
+        )
+        self.assertEqual(
+            runtime.metadata_by_scope["active:2026-03"][
+                "workbench_expected_source_versions"
+            ],
+            expected_by_scope["2026-03"],
+        )
+        self.assertEqual(
+            runtime.metadata_by_scope["active:2026-04"][
+                "workbench_expected_source_versions"
+            ],
+            expected_by_scope["2026-04"],
         )
 
     def test_parent_access_refreshes_exact_stale_cost_children_instead_of_parent(self) -> None:
@@ -4138,6 +4254,166 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             ],
         )
         self.assertEqual(result["entry_count"], 1)
+
+    def test_cost_statistics_refresh_handler_reuses_validated_workbench_proof(
+        self,
+    ) -> None:
+        expected_source_versions = {
+            "builder": "workbench-month-v6",
+            "workbench_pair_relations_updated_at": "2026-07-25T08:00:00+08:00",
+        }
+
+        class FakeBuilder:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            @staticmethod
+            def cost_statistics_parent_freshness_token(_scope_key: str) -> None:
+                return None
+
+            def rebuild_cost_statistics_month_scope(
+                self,
+                scope_key: str,
+                *,
+                tenant_id: str,
+                source_version: int,
+                expected_workbench_source_versions: dict[str, object] | None = None,
+            ) -> dict[str, object]:
+                self.calls.append(
+                    {
+                        "scope_key": scope_key,
+                        "tenant_id": tenant_id,
+                        "source_version": source_version,
+                        "expected_workbench_source_versions": (
+                            expected_workbench_source_versions
+                        ),
+                    }
+                )
+                return {"scope_key": scope_key, "published": True}
+
+        builder = FakeBuilder()
+        service = CostStatisticsReadModelRefreshService(
+            projection_builder=builder,
+            queue_repository=QueueRecorder(),
+        )
+        event = RuntimeQueueEvent(
+            event_id="event-cost-proof",
+            tenant_id="default",
+            event_type="cost_statistics.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="active:2026-05",
+            scope_type="cost_statistics",
+            scope_key="active:2026-05",
+            dedupe_key=None,
+            payload={
+                "scope_key": "active:2026-05",
+                "source_version": 41,
+                "metadata": {
+                    "workbench_scope_key": "2026-05",
+                    "workbench_expected_source_versions": (
+                        expected_source_versions
+                    ),
+                    "workbench_freshness_token": read_model_freshness_token(
+                        scope_type="workbench",
+                        scope_key="2026-05",
+                        expected_source_versions=expected_source_versions,
+                    ),
+                },
+            },
+            attempts=1,
+            status="processing",
+        )
+
+        service.handle_runtime_event(event)
+
+        self.assertEqual(
+            builder.calls,
+            [
+                {
+                    "scope_key": "active:2026-05",
+                    "tenant_id": "default",
+                    "source_version": 41,
+                    "expected_workbench_source_versions": (
+                        expected_source_versions
+                    ),
+                }
+            ],
+        )
+
+    def test_cost_statistics_refresh_handler_rejects_tampered_workbench_proof(
+        self,
+    ) -> None:
+        class FakeBuilder:
+            @staticmethod
+            def rebuild_cost_statistics_month_scope(
+                _scope_key: str,
+                **_kwargs: object,
+            ) -> dict[str, object]:
+                raise AssertionError("tampered proof must fail before rebuild")
+
+        service = CostStatisticsReadModelRefreshService(
+            projection_builder=FakeBuilder(),
+            queue_repository=QueueRecorder(),
+        )
+        event = RuntimeQueueEvent(
+            event_id="event-cost-proof-tampered",
+            tenant_id="default",
+            event_type="cost_statistics.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="active:2026-05",
+            scope_type="cost_statistics",
+            scope_key="active:2026-05",
+            dedupe_key=None,
+            payload={
+                "scope_key": "active:2026-05",
+                "source_version": 42,
+                "metadata": {
+                    "workbench_scope_key": "2026-05",
+                    "workbench_expected_source_versions": {
+                        "builder": "expected"
+                    },
+                    "workbench_freshness_token": "tampered",
+                },
+            },
+            attempts=1,
+            status="processing",
+        )
+
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            service.handle_runtime_event(event)
+
+    def test_cost_statistics_projection_uses_supplied_workbench_proof_without_reloading_canonical_facts(
+        self,
+    ) -> None:
+        expected_source_versions = {
+            "builder": "workbench-month-v6",
+            "workbench_pair_relations_updated_at": "v2",
+        }
+
+        class Repository:
+            @staticmethod
+            def active_workbench_source_versions(
+                *,
+                scope_key: str,
+            ) -> dict[str, object]:
+                if scope_key != "2026-05":
+                    raise AssertionError(scope_key)
+                return dict(expected_source_versions)
+
+        builder = CostStatisticsSqlProjectionBuilder(
+            connection=object(),
+            read_model_repository=Repository(),
+            workbench_dependency_versions_provider=lambda _scope_key: (
+                _ for _ in ()
+            ).throw(
+                AssertionError("supplied proof must skip canonical reload")
+            ),
+        )
+
+        builder._require_fresh_workbench_dependency(
+            "2026-05",
+            expected_source_versions=expected_source_versions,
+        )
 
     def test_cost_statistics_force_refresh_rebuilds_full_month(self) -> None:
         class FakeBuilder:

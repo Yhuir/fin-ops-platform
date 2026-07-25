@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from fin_ops_platform.services.read_model_freshness import (
+    read_model_freshness_token,
+    require_expected_source_versions,
+)
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
@@ -46,6 +50,12 @@ class CostStatisticsReadModelRefreshService:
                 tenant_id=event.tenant_id,
                 source_version=source_version,
                 force_refresh=force_refresh,
+                expected_workbench_source_versions=(
+                    self._validated_workbench_source_versions(
+                        event,
+                        scope_key=scope_key,
+                    )
+                ),
             )
         payload = result if isinstance(result, dict) else {"scope_key": scope_key}
         payload.setdefault("scope_key", scope_key)
@@ -89,6 +99,7 @@ class CostStatisticsReadModelRefreshService:
         tenant_id: str,
         source_version: int,
         force_refresh: bool,
+        expected_workbench_source_versions: dict[str, object] | None,
     ) -> dict[str, Any]:
         rebuild_month = getattr(self._projection_builder, "rebuild_cost_statistics_month_scope", None)
         if not callable(rebuild_month):
@@ -99,6 +110,10 @@ class CostStatisticsReadModelRefreshService:
         }
         if force_refresh:
             rebuild_kwargs["force_refresh"] = True
+        if expected_workbench_source_versions is not None:
+            rebuild_kwargs["expected_workbench_source_versions"] = (
+                expected_workbench_source_versions
+            )
         result = rebuild_month(scope_key, **rebuild_kwargs)
         payload = result if isinstance(result, dict) else {"scope_key": scope_key}
         payload.setdefault("refresh_kind", "month")
@@ -106,6 +121,48 @@ class CostStatisticsReadModelRefreshService:
             payload["readiness_status"] = "refreshing"
             return payload
         return payload
+
+    @staticmethod
+    def _validated_workbench_source_versions(
+        event: RuntimeQueueEvent,
+        *,
+        scope_key: str,
+    ) -> dict[str, object] | None:
+        metadata = event.payload.get("metadata")
+        if not isinstance(metadata, dict):
+            return None
+        expected_source_versions = metadata.get(
+            "workbench_expected_source_versions"
+        )
+        freshness_token = str(
+            metadata.get("workbench_freshness_token") or ""
+        ).strip()
+        workbench_scope_key = str(
+            metadata.get("workbench_scope_key") or ""
+        ).strip()
+        if expected_source_versions in (None, {}) and not freshness_token:
+            return None
+        expected_scope_key = str(scope_key or "").rsplit(":", 1)[-1]
+        if workbench_scope_key != expected_scope_key:
+            raise ValueError(
+                "Cost statistics refresh Workbench proof scope does not match "
+                f"{scope_key}."
+            )
+        normalized = require_expected_source_versions(
+            expected_source_versions,
+            context=f"cost_statistics_workbench_dependency:{scope_key}",
+        )
+        expected_token = read_model_freshness_token(
+            scope_type="workbench",
+            scope_key=workbench_scope_key,
+            expected_source_versions=normalized,
+        )
+        if not freshness_token or freshness_token != expected_token:
+            raise ValueError(
+                "Cost statistics refresh Workbench freshness proof does not "
+                f"match {scope_key}."
+            )
+        return dict(normalized)
 
     def _handle_parent_scope(
         self,

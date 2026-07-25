@@ -1,9 +1,15 @@
 # Runtime Worker 实施记录
 
-## 2026-07-24 - Workbench generation-set 原子发布与 Cost 依赖顺序收敛
+## 2026-07-25 - Workbench/Cost access proof 有界复用
+
+- 最新候选保留 gate-first 和 exact-scope 合同，但生产证据证明“下一次访问才登记 Cost child”仍有串行空档。当前 gate 发现 Workbench stale 时，同次只登记 exact Workbench 和当前 project/page 的 exact Cost child waiter，不登记 parent 或 sibling。
+- 两个 event 携带同次 gate 已计算、token/scope 绑定且受 32 KiB 上限约束的 Workbench expected proof；Workbench/Cost worker 各自验证后复用 expected，并继续用 active generation actual 做 fail-closed 比较。Cost dependency token 只合并 active waiter，不用历史 done 短路完整 Cost freshness。
+- 删除评估中的 proof cache/watermark 方案；没有新增表、migration、queue、worker、cache、API 或协调器。
+
+## 2026-07-24 - Workbench generation-set 原子发布与 Cost 依赖顺序收敛（历史时序已由上节取代）
 
 - 生产并发访问证明两个 Workbench 月份可以并行计算，但旧的 per-month publish lock 允许两个事务分别用中间 active-month set 写 all-scope stats；最终 generation-set digest 可能没有对应 stats，System Audit 因此在 confirm checkpoint fail closed，同时保存/统计争用把 handler 拉到约 3.3 秒。
-- 最小修复保留 payload计算与 generation staging/COPY并行，只在重型数据写完后用一个 `workbench_generation_set` advisory transaction lock串行化 active切换与 all-scope stats。round 10 生产证据进一步证明，在已知 Workbench stale 时同时预投 Cost 会制造必然 defer 的任务，并与页面轮询的 canonical proof 争用数据库。当前合同因此改为 gate-first：现有 gate 已 non-fresh 时跳过 canonical proof并只 ensure其 exact scope；gate可 fresh但Workbench stale时只ensure exact Workbench；后续访问确认Workbench fresh后才stage exact Cost child，child完成后沿既有路径收敛parent。worker继续以既有 manifest dependency defer处理真实竞态，不增加协调器、队列、表或 sibling project/page fan-out。
+- 最小修复保留 payload计算与 generation staging/COPY并行，只在重型数据写完后用一个 `workbench_generation_set` advisory transaction lock串行化 active切换与 all-scope stats。round 10 当时收窄为 gate-first 两次访问时序；2026-07-25 生产性能矩阵已证明该串行空档不能满足目标，因此登记时序由上节替代。generation-set 原子发布合同保持不变。
 
 ## 2026-07-24 - exact scope refresh 覆盖关系
 

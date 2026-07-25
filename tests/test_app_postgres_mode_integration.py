@@ -112,12 +112,12 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
         invoice_batch_id = invoice_file.preview_batch_id
 
         worker_api = self._build_app()
-        confirmed_session = worker_api._file_import_service.confirm_session(  # noqa: SLF001
+        confirmed_session = stale_api._file_import_service.confirm_session(  # noqa: SLF001
             session_id=invoice_session.id,
             selected_file_ids=[invoice_file.id],
         )
         worker_api._state_store.save_import_delta(  # noqa: SLF001
-            worker_api._file_import_service.confirmed_session_persistence_payload(  # noqa: SLF001
+            stale_api._file_import_service.confirmed_session_persistence_payload(  # noqa: SLF001
                 session_id=confirmed_session.id,
                 selected_file_ids=[invoice_file.id],
             )
@@ -406,7 +406,9 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
             ["fee"],
         )
 
-    def test_bank_flow_rule_save_is_noop_or_single_scope_refresh_in_postgres(self) -> None:
+    def test_bank_flow_rule_save_creates_zero_write_time_refresh_in_postgres(
+        self,
+    ) -> None:
         app = self._build_app()
         current = app._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload()
 
@@ -444,13 +446,14 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
 
         self.assertEqual(changed_response.status_code, 200, changed_response.body)
         self.assertEqual(changed_payload["version"], current["version"] + 1)
+        self.assertNotIn("refresh_enqueued", changed_payload)
         self.assertEqual(
             fetch_scalar(
                 self.database_url,
                 "select count(*) from job.read_model_dirty_scopes "
                 "where scope_type = 'bank_flow_rule_batch' and scope_key = 'all';",
             ),
-            "1",
+            "0",
         )
         self.assertEqual(
             [event["action"] for event in app._audit_service.as_dicts()],

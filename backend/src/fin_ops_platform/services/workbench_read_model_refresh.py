@@ -3,6 +3,10 @@ from __future__ import annotations
 from inspect import signature
 from typing import Any
 
+from fin_ops_platform.services.read_model_freshness import (
+    read_model_freshness_token,
+    require_expected_source_versions,
+)
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
@@ -48,10 +52,17 @@ class WorkbenchReadModelRefreshService:
         rebuild = getattr(self._projection_builder, "rebuild_workbench_read_model_scope", None)
         if not callable(rebuild):
             raise RuntimeError("Projection builder does not expose rebuild_workbench_read_model_scope.")
-        if "source_version" in signature(rebuild).parameters:
-            result = rebuild(scope_key, source_version=source_version)
-        else:
-            result = rebuild(scope_key)
+        rebuild_parameters = signature(rebuild).parameters
+        rebuild_kwargs: dict[str, object] = {}
+        if "source_version" in rebuild_parameters:
+            rebuild_kwargs["source_version"] = source_version
+        expected_source_versions = self._validated_expected_source_versions(
+            event,
+            scope_key=scope_key,
+        )
+        if expected_source_versions is not None:
+            rebuild_kwargs["expected_source_versions"] = expected_source_versions
+        result = rebuild(scope_key, **rebuild_kwargs)
         payload = result if isinstance(result, dict) else {"scope_key": scope_key}
         if payload.get("published") is not True:
             return payload
@@ -128,3 +139,31 @@ class WorkbenchReadModelRefreshService:
                 source_version=source_version,
             )
         )
+
+    @staticmethod
+    def _validated_expected_source_versions(
+        event: RuntimeQueueEvent,
+        *,
+        scope_key: str,
+    ) -> dict[str, object] | None:
+        metadata = event.payload.get("metadata")
+        if not isinstance(metadata, dict):
+            return None
+        expected_source_versions = metadata.get("expected_source_versions")
+        freshness_token = str(metadata.get("freshness_token") or "").strip()
+        if expected_source_versions in (None, {}) and not freshness_token:
+            return None
+        normalized = require_expected_source_versions(
+            expected_source_versions,
+            context=f"workbench_refresh:{scope_key}",
+        )
+        expected_token = read_model_freshness_token(
+            scope_type="workbench",
+            scope_key=scope_key,
+            expected_source_versions=normalized,
+        )
+        if not freshness_token or freshness_token != expected_token:
+            raise ValueError(
+                f"Workbench refresh freshness proof does not match scope {scope_key}."
+            )
+        return dict(normalized)

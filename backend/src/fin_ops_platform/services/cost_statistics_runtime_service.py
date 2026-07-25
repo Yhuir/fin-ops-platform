@@ -76,12 +76,14 @@ class CostStatisticsRuntimeService:
         *,
         reason: str,
         force_refresh: bool = False,
+        metadata: dict[str, object] | None = None,
     ) -> bool:
         return bool(
             self.enqueue_read_model_refreshes(
                 [scope_key],
                 reason=reason,
                 force_refresh=force_refresh,
+                metadata=metadata,
             )
         )
 
@@ -91,17 +93,21 @@ class CostStatisticsRuntimeService:
         *,
         reason: str,
         force_refresh: bool = False,
+        metadata: dict[str, object] | None = None,
     ) -> list[str]:
         from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
         gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
         if not gateway.can_enqueue():
             return []
+        refresh_metadata = dict(metadata or {})
+        if force_refresh:
+            refresh_metadata["force_refresh"] = True
         return gateway.enqueue_many(
             "cost_statistics",
             scope_keys,
             reason=reason,
-            metadata={"force_refresh": True} if force_refresh else None,
+            metadata=refresh_metadata or None,
         )
 
     @staticmethod

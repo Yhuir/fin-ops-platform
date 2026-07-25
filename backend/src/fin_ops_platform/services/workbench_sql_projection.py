@@ -141,6 +141,7 @@ class WorkbenchSqlProjectionBuilder:
         scope_key: str,
         *,
         source_version: int | str | None = None,
+        expected_source_versions: dict[str, object] | None = None,
     ) -> dict[str, object]:
         normalized_scope = str(scope_key or "").strip()
         if not MONTH_RE.match(normalized_scope):
@@ -161,7 +162,11 @@ class WorkbenchSqlProjectionBuilder:
             rows_by_id,
             relations,
         )
-        source_versions = self.source_versions_for_scope(normalized_scope)
+        source_versions = (
+            dict(expected_source_versions)
+            if isinstance(expected_source_versions, dict) and expected_source_versions
+            else self.source_versions_for_scope(normalized_scope)
+        )
         source_versions["source_version"] = resolved_source_version
         snapshot = {
             "read_models": {
