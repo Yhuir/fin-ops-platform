@@ -2469,6 +2469,125 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertNotEqual(mutation_keys[0], mutation_keys[2])
         self.assertFalse(result["recovery_required"])
 
+    def test_inactive_test_owned_workbench_preimage_does_not_run_recovery(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "scenario.json"
+            path.write_text(
+                json.dumps([_raw_bank_oa_invoice_scenario("bank-oa-invoice", "inactive-preimage")]),
+                encoding="utf-8",
+            )
+            scenario = write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)[0]
+
+        checkpoint_names: list[str] = []
+
+        def request_fn(
+            url: str, method: str, headers, body, timeout_seconds: float
+        ) -> http_slo_probe.HttpProbeResponse:
+            if "page-audit" in url:
+                status_code = 200
+                payload = _system_audit_payload("system-audit:inactive-preimage")
+            elif method == "GET" and "/api/workbench?month=2026-07" in url:
+                status_code = 200
+                payload = {"read_model_version": "workbench-version-1"}
+            elif method == "POST" and url.endswith(write_operation_e2e_smoke.WITHDRAW_PREVIEW_PATH):
+                status_code = 400
+                payload = {"error": "workbench_relation_not_found"}
+            else:
+                raise AssertionError(f"unexpected read-only preimage request: {method} {url}")
+            return http_slo_probe.HttpProbeResponse(
+                status_code=status_code,
+                headers={"content-type": "application/json"},
+                body=json.dumps(payload).encode(),
+            )
+
+        def run_checkpoint(_connection, checkpoint, **_kwargs):
+            checkpoint_names.append(checkpoint.name)
+            return {
+                "name": checkpoint.name,
+                "status": "pass",
+                "mutation_committed": True,
+                "mutation_ambiguous": False,
+            }
+
+        with (
+            patch(
+                "fin_ops_platform.tools.write_operation_e2e_smoke._capture_isolation_baseline",
+                return_value={"status": "pass", "values": {}},
+            ),
+            patch(
+                "fin_ops_platform.tools.write_operation_e2e_smoke._run_checkpoint",
+                side_effect=run_checkpoint,
+            ),
+        ):
+            report = write_operation_e2e_smoke.run_write_operation_e2e_smoke(
+                FakeConnection([]),
+                scenarios=[scenario],
+                apply=True,
+                base_url="https://example.test",
+                api_prefix="/fin-ops-api",
+                tenant_id="default",
+                headers={"Authorization": "Bearer token"},
+                approval_reference="TEST-APPROVAL",
+                request_fn=request_fn,
+            )
+
+        result = report["results"][0]
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(checkpoint_names, ["confirm-link", "withdraw-link"])
+        self.assertEqual(result["preimage_normalization"], {"status": "pass", "action": "not_required"})
+
+    def test_unknown_test_owned_workbench_preimage_fails_closed_before_mutation(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "scenario.json"
+            path.write_text(
+                json.dumps([_raw_bank_oa_invoice_scenario("bank-oa-invoice", "unknown-preimage")]),
+                encoding="utf-8",
+            )
+            scenario = write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)[0]
+
+        def request_fn(
+            url: str, method: str, headers, body, timeout_seconds: float
+        ) -> http_slo_probe.HttpProbeResponse:
+            if "page-audit" in url:
+                status_code = 200
+                payload = _system_audit_payload("system-audit:unknown-preimage")
+            elif method == "GET" and "/api/workbench?month=2026-07" in url:
+                status_code = 200
+                payload = {"read_model_version": "workbench-version-1"}
+            elif method == "POST" and url.endswith(write_operation_e2e_smoke.WITHDRAW_PREVIEW_PATH):
+                status_code = 409
+                payload = {"error": "read_model_version_conflict"}
+            else:
+                raise AssertionError(f"unexpected read-only preimage request: {method} {url}")
+            return http_slo_probe.HttpProbeResponse(
+                status_code=status_code,
+                headers={"content-type": "application/json"},
+                body=json.dumps(payload).encode(),
+            )
+
+        with patch(
+            "fin_ops_platform.tools.write_operation_e2e_smoke._run_checkpoint"
+        ) as run_checkpoint:
+            report = write_operation_e2e_smoke.run_write_operation_e2e_smoke(
+                FakeConnection([]),
+                scenarios=[scenario],
+                apply=True,
+                base_url="https://example.test",
+                api_prefix="/fin-ops-api",
+                tenant_id="default",
+                headers={"Authorization": "Bearer token"},
+                approval_reference="TEST-APPROVAL",
+                request_fn=request_fn,
+            )
+
+        result = report["results"][0]
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(result["checkpoints"], [])
+        self.assertEqual(result["preimage_normalization"]["status"], "fail")
+        self.assertEqual(result["preimage_normalization"]["action"], "blocked")
+        self.assertTrue(result["recovery_required"])
+        run_checkpoint.assert_not_called()
+
     def test_ordered_checkpoints_have_independent_timestamps_exact_events_consumers_and_audits(self) -> None:
         checkpoints = (
             _strict_checkpoint("confirm-link", key="confirm-key", relation_state_after="active"),

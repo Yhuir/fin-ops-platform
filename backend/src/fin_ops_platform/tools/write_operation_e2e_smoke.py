@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 import json
 from math import ceil
@@ -12,6 +12,7 @@ from time import monotonic, sleep
 from typing import Any, Callable, Mapping, Sequence, TextIO
 import os
 import sys
+from uuid import uuid4
 
 from fin_ops_platform.services.postgres_connection import (
     PostgresConfigurationError,
@@ -619,6 +620,7 @@ def _run_one_scenario(
     checkpoint_results: list[dict[str, Any]] = []
     audit_ids: set[str] = set()
     preflight: dict[str, Any] | None = None
+    preimage_normalization: dict[str, Any] | None = None
     if scenario.fixture_ownership == "test_owned":
         preflight = _wait_for_system_audit(
             checkpoints[0],
@@ -639,6 +641,78 @@ def _run_one_scenario(
                 "recovery_required": False,
             }
         audit_ids.add(str(preflight["system_audit_id"]))
+        preimage_checkpoint = _test_owned_workbench_preimage_checkpoint(scenario)
+        if preimage_checkpoint is not None:
+            preimage_probe = _probe_test_owned_workbench_preimage(
+                preimage_checkpoint,
+                base_url=base_url,
+                api_prefix=api_prefix,
+                headers=headers,
+                timeout_seconds=timeout_seconds,
+                request_fn=request_fn,
+            )
+            if preimage_probe["status"] != "pass":
+                preimage_normalization = {
+                    **preimage_probe,
+                    "action": "blocked",
+                }
+                return {
+                    "name": scenario.name,
+                    "status": "fail",
+                    "checkpoints": [],
+                    "preflight": preflight,
+                    "preimage_normalization": preimage_normalization,
+                    "recovery_required": True,
+                }
+            if preimage_probe["state"] == "active":
+                normalized_checkpoint = _runtime_preimage_recovery_checkpoint(
+                    preimage_checkpoint
+                )
+                normalization_result = _run_checkpoint(
+                    connection,
+                    normalized_checkpoint,
+                    base_url=base_url,
+                    api_prefix=api_prefix,
+                    tenant_id=tenant_id,
+                    headers=headers,
+                    write_target_ms=write_target_ms,
+                    refresh_target_ms=refresh_target_ms,
+                    timeout_seconds=timeout_seconds,
+                    poll_interval_seconds=poll_interval_seconds,
+                    relation_preview_samples=relation_preview_samples,
+                    limit=limit,
+                    request_fn=request_fn,
+                    variables=variables,
+                    audit_ids=audit_ids,
+                    strict=True,
+                )
+                normalization_passed = (
+                    normalization_result.get("status") == "pass"
+                    and bool(normalization_result.get("mutation_committed"))
+                    and not bool(normalization_result.get("mutation_ambiguous"))
+                )
+                preimage_normalization = {
+                    "status": "pass" if normalization_passed else "fail",
+                    "action": "normalized",
+                    "checkpoint": normalization_result,
+                }
+                if not normalization_passed:
+                    return {
+                        "name": scenario.name,
+                        "status": "fail",
+                        "checkpoints": [],
+                        "preflight": preflight,
+                        "preimage_normalization": preimage_normalization,
+                        "recovery_required": (
+                            not bool(normalization_result.get("mutation_committed"))
+                            or bool(normalization_result.get("mutation_ambiguous"))
+                        ),
+                    }
+            else:
+                preimage_normalization = {
+                    "status": "pass",
+                    "action": "not_required",
+                }
     relation_active = False
     recovery_required = False
     recovery: dict[str, Any] | None = None
@@ -720,6 +794,11 @@ def _run_one_scenario(
         "checkpoints": checkpoint_results,
         "recovery_required": recovery_required,
         **({"preflight": preflight} if preflight is not None else {}),
+        **(
+            {"preimage_normalization": preimage_normalization}
+            if preimage_normalization is not None
+            else {}
+        ),
         **({"recovery": recovery} if recovery is not None else {}),
     }
     relation_preview_sampling = {
@@ -742,6 +821,108 @@ def _run_one_scenario(
             }
         )
     return payload
+
+
+def _test_owned_workbench_preimage_checkpoint(
+    scenario: WriteScenario,
+) -> WriteCheckpoint | None:
+    shape_contract = REVERSIBLE_RELATION_SHAPE_CONTRACTS.get(
+        str(scenario.shape or "")
+    )
+    recovery_checkpoint = scenario.recovery_checkpoint
+    if (
+        scenario.fixture_ownership != "test_owned"
+        or not shape_contract
+        or shape_contract.get("mutation_contract") != "workbench_relation"
+        or not scenario.checkpoints
+        or scenario.checkpoints[0].relation_state_after != "active"
+        or recovery_checkpoint is None
+        or recovery_checkpoint.relation_state_after != "inactive"
+        or len(recovery_checkpoint.steps) != 3
+        or recovery_checkpoint.steps[1].path != WITHDRAW_PREVIEW_PATH
+    ):
+        return None
+    return recovery_checkpoint
+
+
+def _probe_test_owned_workbench_preimage(
+    checkpoint: WriteCheckpoint,
+    *,
+    base_url: str,
+    api_prefix: str,
+    headers: Mapping[str, str],
+    timeout_seconds: float,
+    request_fn: RequestFn,
+) -> dict[str, Any]:
+    variables: dict[str, Any] = {}
+    step_results: list[WriteStepResult] = []
+    for step in checkpoint.steps[:2]:
+        try:
+            resolved_step = _resolved_step(step, variables)
+        except ValueError as exc:
+            return {
+                "status": "fail",
+                "error": str(exc),
+                "steps": [asdict(result) for result in step_results],
+            }
+        executed = _execute_step(
+            resolved_step,
+            base_url=base_url,
+            api_prefix=api_prefix,
+            headers=headers,
+            target_ms=RELATION_PREVIEW_TARGET_MS,
+            timeout_seconds=timeout_seconds,
+            request_fn=request_fn,
+            enforce_target=False,
+        )
+        step_results.append(executed.result)
+        variables.update(executed.captures)
+        if executed.result.status == "pass":
+            continue
+        if (
+            resolved_step.path == WITHDRAW_PREVIEW_PATH
+            and executed.result.status_code == 400
+            and executed.result.response_error_code == "workbench_relation_not_found"
+        ):
+            return {
+                "status": "pass",
+                "state": "inactive",
+                "steps": [asdict(result) for result in step_results],
+            }
+        return {
+            "status": "fail",
+            "error": "test_owned_workbench_preimage_state_unknown",
+            "steps": [asdict(result) for result in step_results],
+        }
+    return {
+        "status": "pass",
+        "state": "active",
+        "steps": [asdict(result) for result in step_results],
+    }
+
+
+def _runtime_preimage_recovery_checkpoint(
+    checkpoint: WriteCheckpoint,
+) -> WriteCheckpoint:
+    runtime_steps: list[WriteStep] = []
+    for step in checkpoint.steps:
+        if not step.mutation:
+            runtime_steps.append(step)
+            continue
+        runtime_steps.append(
+            replace(
+                step,
+                json_body={
+                    **(step.json_body or {}),
+                    "idempotency_key": f"write-e2e-preimage:{uuid4().hex}",
+                },
+            )
+        )
+    return replace(
+        checkpoint,
+        name=f"{checkpoint.name}-preimage-normalization",
+        steps=tuple(runtime_steps),
+    )
 
 
 def _run_checkpoint(
