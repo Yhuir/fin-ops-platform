@@ -141,8 +141,10 @@ event 或 worker instance 时，必须先更新 registry，再让 deploy/preflig
 - 可逆关系 consumer assertion 只接受 typed `equals`、`contains` 与 `excludes`。`excludes` 递归检查指定
   业务根中不再包含明确的 test-owned row/case identity，用于撤回后目标行按正式页面规则退出列表的场景；
   它仍必须绑定 scenario 的 fixture row 或已捕获 case，不能用空数组或宽泛状态断言绕过 identity gate。
-- `finops-deploy-control write-operation-e2e-smoke ... --apply-stdin` 从 stdin 第一行读取 Admin Token、
-  第二行读取 standing approval ticket；任一为空都在业务 mutation 前失败，避免把 root-owned env 漂移误判为已授权。
+- `finops-deploy-control write-operation-e2e-smoke ... --apply-stdin [preview-samples]` 从 stdin 第一行读取
+  Admin Token、第二行读取 standing approval ticket；任一为空都在业务 mutation 前失败，避免把 root-owned env
+  漂移误判为已授权。可选 preview sample count 只接受 `1..20`，默认 1；它只重复 canonical relation preview，
+  不增加正式 mutation 次数。
 - 明确 test-owned、幂等且 runner 自动执行 inverse/recovery 的 relation smoke 不要求每次创建全库备份；其安全
   边界是独立 idempotency key、exact receipt、失败 recovery、最终 inactive 状态和 System Audit。只有场景无法靠
   业务 inverse 完整恢复、或审批明确要求灾难恢复点时，才使用 `write-operation-restore-point`。已创建恢复点只能

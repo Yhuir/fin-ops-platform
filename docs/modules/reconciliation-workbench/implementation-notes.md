@@ -1364,4 +1364,4 @@
 - report 分别输出 confirm/withdraw 的 count、p50、p95、max、request IDs、correctness 与 performance status。3 秒只作为 preview 性能目标；HTTP、canonical DTO、version、idempotency 或 inverse 错误仍 fail closed。
 - `bank_oa_invoice` 的 affected/isolation roles 继续由当前 shape 合同精确派生，不修改 impact matrix，不合并 bank_invoice 或 bank_turnover 的 affected 集合。
 - Task 30-02 的旧/新 10-run evidence 已满足同 fixture/scope/version/row IDs/连接/warm-up 对比：新路径固定 6 次 counted SQL、完整 generation scan 为 0、formal snapshot dependency 为 0，最大新样本 5.089ms。此次没有修改 preview repository I/O、formal command/UoW、read model、queue、worker、API response shape 或前端生产行为，因此 boundary 文档不变。
-- Candidate 前本地集中门通过：683 项定向 backend unittest、repository lint、123 项 scoped Vitest、3 项 Chromium E2E 和 production build。未运行 pytest、完整 CI 或 183 项 Browser suite；生产 release、inverse、zero fan-out、consumer convergence、queue/worker 与 System Audit 证据必须由下一步 Candidate A 记录，不能由本地结果代替。
+- Candidate 前本地集中门通过：700 项定向 backend/deploy unittest、repository lint、docs gate、123 项 scoped Vitest、3 项 Chromium E2E 和 production build。未运行 pytest、完整 CI 或 183 项 Browser suite；生产 release、inverse、zero fan-out、consumer convergence、queue/worker 与 System Audit 证据必须由下一步 Candidate A 记录，不能由本地结果代替。

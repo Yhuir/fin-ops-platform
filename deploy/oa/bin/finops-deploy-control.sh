@@ -58,7 +58,7 @@ commands:
                                       create and verify a fixed full PostgreSQL backup before write smoke
   write-operation-restore-point-delete <run-id> <expected-sha256>
                                       delete one exact verified write-smoke backup
-  write-operation-e2e-smoke <release-name> <scenario-path> [--dry-run|--apply-stdin]
+  write-operation-e2e-smoke <release-name> <scenario-path> [--dry-run|--apply-stdin] [preview-samples]
   api-request-error <request-id>
   api-request-trace <request-id>
   api-request-timing <request-id>
@@ -734,7 +734,7 @@ PY
 }
 
 write_operation_e2e_smoke() {
-  local release="${1:-}" scenario="${2:-}" mode="${3:---dry-run}"
+  local release="${1:-}" scenario="${2:-}" mode="${3:---dry-run}" preview_samples="${4:-1}"
   [[ -n "$release" ]] || die "write-operation-e2e-smoke requires release name"
   [[ "$scenario" =~ ^/tmp/finops-write-e2e-[A-Za-z0-9._-]+\.json$ ]] \
     || die "scenario path must match /tmp/finops-write-e2e-*.json"
@@ -744,7 +744,9 @@ write_operation_e2e_smoke() {
   find "$scenario" -maxdepth 0 -perm /022 -print -quit | grep -q . \
     && die "scenario must not be group/world writable"
   [[ "$mode" == "--dry-run" || "$mode" == "--apply-stdin" ]] || die "unsupported write-operation mode: $mode"
-  [[ $# -le 3 ]] || die "write-operation-e2e-smoke accepts no additional arguments"
+  [[ "$preview_samples" =~ ^[0-9]+$ && "$preview_samples" -ge 1 && "$preview_samples" -le 20 ]] \
+    || die "preview samples must be an integer between 1 and 20"
+  [[ $# -le 4 ]] || die "write-operation-e2e-smoke accepts at most four arguments"
 
   local src
   src="$(release_src "$release")"
@@ -781,6 +783,7 @@ write_operation_e2e_smoke() {
       --refresh-target-ms 30000 \
       --http-target-ms 1000 \
       --timeout-seconds 120 \
+      --relation-preview-samples "$preview_samples" \
       --output "$report_path" \
       "${apply_args[@]}" >/dev/null; then
       runner_status=0

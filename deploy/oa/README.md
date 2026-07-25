@@ -465,6 +465,8 @@ sudo /usr/local/sbin/finops-deploy-control write-operation-restore-point-delete 
   <expected-sha256>
 sudo /usr/local/sbin/finops-deploy-control write-operation-e2e-smoke <release-name> \
   /tmp/finops-write-e2e-<run-id>.json --dry-run
+sudo /usr/local/sbin/finops-deploy-control write-operation-e2e-smoke <release-name> \
+  /tmp/finops-write-e2e-<run-id>.json --apply-stdin 10
 sudo /usr/local/sbin/finops-deploy-control api-request-error <request-id>
 sudo /usr/local/sbin/finops-deploy-control api-request-timing <request-id>
 sudo /usr/local/sbin/finops-deploy-control read-model-refresh <release-name> \
@@ -508,7 +510,8 @@ after-image drift，并通过 `WorkbenchRelationCommandService` 原地精确恢�
 真实 enqueue-to-fresh 只能在单独批准的 root session 中执行。
 `write-operation-e2e-smoke` 只运行 release 内的固定 relation runner；scenario 仅接受受限 `/tmp` JSON，
 apply 的 Admin Token 与 approval ticket 只从 stdin 的前两行读取，固定走公网 `/fin-ops-api`，
-不提供任意命令或 SQL 能力；第二行为空时在任何业务写请求前失败。standing correctness helper
+不提供任意命令或 SQL 能力；第二行为空时在任何业务写请求前失败。可选第四参数只接受 `1..20`
+的 preview sample count（默认 1），只重复只读 canonical preview，不重复正式 mutation。standing correctness helper
 将同步 relation 写响应门禁固定为 `5000ms`，exact receipt 绑定的异步 refresh 收敛门禁为
 `30000ms`（总等待上限 `120s`），consumer HTTP 仍为 `1000ms`；三者是独立合同，该配置不构成
 “所有页面一秒级真同步”的性能声明。

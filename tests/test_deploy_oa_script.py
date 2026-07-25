@@ -366,7 +366,11 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('[[ "$actual_checksum" == "$expected_checksum" ]]', script)
         self.assertIn('rm -f -- "$dump_path" "$manifest_path"', script)
         self.assertIn('rmdir -- "$output_dir"', script)
-        self.assertIn("write-operation-e2e-smoke <release-name> <scenario-path> [--dry-run|--apply-stdin]", script)
+        self.assertIn(
+            "write-operation-e2e-smoke <release-name> <scenario-path> "
+            "[--dry-run|--apply-stdin] [preview-samples]",
+            script,
+        )
         self.assertIn("write_operation_e2e_smoke()", script)
         self.assertIn("scenario path must match /tmp/finops-write-e2e-*.json", script)
         self.assertIn('IFS= read -r admin_token', script)
@@ -375,6 +379,8 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('export FIN_OPS_WRITE_E2E_APPROVAL_TICKET="$approval_ticket"', script)
         self.assertIn("--write-target-ms 5000", script)
         self.assertIn("--http-target-ms 1000", script)
+        self.assertIn('--relation-preview-samples "$preview_samples"', script)
+        self.assertIn("preview samples must be an integer between 1 and 20", script)
         self.assertIn('report_path="$(mktemp /tmp/finops-write-e2e-report.XXXXXX.json)"', script)
         self.assertIn("trap 'rm -f -- \"$report_path\"' EXIT", script)
         self.assertIn('--output "$report_path"', script)
@@ -382,7 +388,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('cat -- "$report_path"', script)
         self.assertIn('exit "$runner_status"', script)
         self.assertIn('write approval ticket stdin is empty', script)
-        self.assertIn("write-operation-e2e-smoke accepts no additional arguments", script)
+        self.assertIn("write-operation-e2e-smoke accepts at most four arguments", script)
         self.assertIn("api-request-error <request-id>", script)
         self.assertIn("api_request_error()", script)
         self.assertIn("api-request-trace <request-id>", script)

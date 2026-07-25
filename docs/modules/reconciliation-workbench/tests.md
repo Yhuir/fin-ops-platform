@@ -202,4 +202,4 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_w
 - withdraw 的正式提交只消费最后一次成功 preview 返回的 `preview_id` 与 `submit_expected_versions`；任一 sample 的 HTTP/DTO 错误都会在 mutation 前 fail closed。preview p50/p95/max 与 request IDs 独立报告，p95 超过 3 秒只登记 `performance_status=miss`，不伪装成 correctness failure。
 - `bank_oa_invoice` 的 affected consumers 固定为关联台、银行明细、待找发票、进项使用、OA 待付款、成本统计；销项收款与税务抵扣只作 isolation。测试按当前 scenario entry 断言 role，不使用其它 relation shape 的 affected 联集。
 - 同条件旧/新 10 次 characterization 继续采用 Task 30-02 的同一 PostgreSQL fixture、scope/version/row IDs、连接与 warm-up：新路径固定每次 6 条 counted SQL、完整 generation scan 为 0、formal snapshot dependency 为 0，最大新样本 5.089ms。
-- 本地 release gate：683 项定向 backend unittest、123 项 scoped Vitest、3 项 Chromium E2E、repository lint 与 production build 全部通过。没有运行 pytest、完整 CI 或 183 项 Browser suite。
+- 本地 release gate：700 项定向 backend/deploy unittest、123 项 scoped Vitest、3 项 Chromium E2E、repository lint、docs gate 与 production build 全部通过。没有运行 pytest、完整 CI 或 183 项 Browser suite。
