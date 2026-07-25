@@ -566,6 +566,6 @@ Plans:
 
 Plans:
 
-- [ ] 28-01-PLAN — Add the Cost active-recovery fast gate, run targeted regression, and close one candidate production performance proof.
+- [x] 28-01-PLAN — Add the Cost active-recovery fast gate, run targeted regression, and close production performance/correctness proof (`d8e4c5946`, corrective root fix `b6e814b05`).
 
 ---

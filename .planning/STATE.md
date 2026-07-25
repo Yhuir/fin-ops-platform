@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Executing Phase 28 Cost statistics recovery performance Plan 28-01.
-last_updated: "2026-07-25T18:35:00+08:00"
-last_activity: 2026-07-25 - Production profiling isolated repeated Cost statistics proof I/O during active Workbench recovery
+status: complete
+stopped_at: Completed Phase 28 Cost statistics recovery performance Plan 28-01.
+last_updated: "2026-07-25T20:15:06+08:00"
+last_activity: 2026-07-25 - Production Cost recovery, reversible fixture, System Audit, queue and worker convergence all closed
 progress:
   total_phases: 23
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 37
-  completed_plans: 36
-  percent: 97
+  completed_plans: 37
+  percent: 100
 ---
 
 # Project State
@@ -21,36 +21,41 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-16)
 
 **Core value:** Preserve production finance workflow correctness while improving individual pages through isolated, reviewable GSD phases.
-**Current focus:** Phase 28 optimizes the measured Cost statistics 7.432-second recovery sample without changing Phase 27 correctness, isolation or zero-fan-out contracts.
+**Current focus:** Phase 28 is complete; Cost recovery polling is bounded without changing Phase 27 correctness, isolation or zero-fan-out contracts.
 
 ## Current Position
 
 Phase: 28 of 28 (成本统计写后恢复性能)
 Plan: 28-01 of 28-01
-Status: Executing; baseline/root cause complete, implementation and one-candidate production verification pending
-Last activity: 2026-07-25 - Production exact Workbench profiling proved 1.330-second isolated rebuild and identified repeated Cost proof polling as the contention path
+Status: Complete; implementation, corrective shared queue root fix and production verification closed
+Last activity: 2026-07-25 - Release `main-b6e814b0-20260725192427` passed reversible fixture recovery, 16/16 business-page System Audit, durable drain and runtime health
 
-Progress: [██░░░░░░░░] 20% (Phase 28)
+Progress: [██████████] 100% (Phase 28)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 35
+- Total plans completed: 37
 - Baseline planning docs completed: 1
 - Average duration: N/A
-- Total execution time: 0 hours
+- Total execution time: 1 hour 40 minutes
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| 28 | 1/1 | 1h 40m | 1h 40m |
 
 ## Accumulated Context
 
 ### Decisions
 
+- Phase 28 closure: Cost active-recovery polling first performs one lightweight durable-state gate; only the no-active-recovery path executes the complete fail-closed statistics proof. No new cache, table, index, queue, worker, coordinator, frontend poller or write-time fan-out was added.
+- Phase 28 closure: Candidate A `d8e4c5946` reduced the exact `2026-02` Cost recovery sample from 7432.418 ms to 723.151 ms. Its full production chain exposed one shared queue defect: a completed `force_refresh=true` event could cover a later freshness target. The root was fixed once in `RuntimeQueueRepository` by `b6e814b05`; no page-specific fallback was introduced.
+- Phase 28 production release: `main-b6e814b0-20260725192427` is active. The reversible test-owned cross-month fixture returned to inactive state; direct final Workbench and Cost probes were fresh, all 15 read models had zero stale/unavailable scopes, durable outbox was empty, 24 required workers were effective and idle, and System Audit passed all 16 audited business pages.
+- Phase 28 performance evidence: final hot Cost all/active reads were 714/447 ms; the last 15-minute Cost worker window was p50 327 ms, p95 1537 ms and p99 3697 ms across 22 samples. The slowest recorded exact cross-month Cost child recovery was 4397 ms and still converged fresh. The deferred hard 3-second SLO was not reintroduced as a correctness gate.
+- Phase 28 verification: 696 targeted queue/gateway/worker/Cost/API/write/Workbench/boundary tests passed. Twenty-two real-PostgreSQL infrastructure tests remained explicitly environment-skipped locally and were covered by the production reversible fixture. The unrelated 183-browser suite and full CI were intentionally not rerun.
 - Phase 27 closure: Candidate A `bef73c4b6` was deployed and fully diagnosed before any correction. Candidate B `3b44f08ef` was the single consolidated corrective release; its runtime is active as `main-3b44f08e-20260725151318`.
 - Phase 27 closure: Final HTTP matrix is 52/52; scope contract has zero violations; durable outbox and all 15 read-model stale/unavailable counts are zero; 24 required workers are healthy; System Audit is pass for 16/16 audited business pages.
 - Phase 27 closure: The test-owned confirm/withdraw fixture was restored. Ordinary writes produced zero forbidden downstream refresh events. No database backup was created because the fixture was fingerprinted, test-owned and recoverable through its business inverse.
@@ -130,7 +135,7 @@ None yet.
 
 ### Blockers/Concerns
 
-- Phase 27 has no remaining correctness, isolation, recovery, runtime or data-safety blocker. Non-blocking follow-ups are the deferred 3-second performance target, unavailable RabbitMQ management metrics and external bank/OA/invoice/ETC control evidence remaining unknown.
+- Phase 28 has no remaining correctness, isolation, recovery, runtime or data-safety blocker. Non-blocking follow-ups are the deliberately deferred hard 3-second SLO, unavailable RabbitMQ management metrics and external bank/OA/invoice/ETC control evidence remaining unknown; PostgreSQL durable queue evidence is drained and authoritative.
 - Phase 21 Release A full local gate is zero-failure: backend 4182 passed / 33 explicitly environment-gated skipped；frontend 835/835；Chromium 177/177；production build passed. 首次远端分支 CI 揭示一个既有测试模块依赖未声明的 `pytest`，且 4 个顶层测试未被 `unittest discover` 执行；现已改为标准 `unittest.TestCase`。第二次远端 CI 暴露 Vitest 文件并行下的全局 I/O/监听器竞争与 cross-realm Blob 断言；前端测试现固定单 worker，Blob 以 size/MIME 合同断言。第三次远端 CI 证明多个前端测试把页面/抽屉壳出现误当成异步数据 I/O 完成；相关测试现以用户可见数据行、详情字段或当前 DOM 节点作为 readiness anchor。第四次远端 CI 进一步暴露 OA 反提历史时间依赖执行机本地时区；该业务时间现显式按 `Asia/Shanghai` 格式化，并由语义表格 readiness + 精确时间断言保护。与 CI 一致的 Node 20 全量运行最终 71 files / 835 tests 全绿，且不再出现 `MaxListenersExceededWarning`。统一门禁还捕获 import confirm 在持久化前发布 matching 的竞态；已改为 durable delta 成功后才发布所有下游信号，并将 4 项 import-processing 测试纳入 `unittest discover`。
 - 第五次远程 CI 为 176/177；唯一失败是待找发票文本选择 E2E 用元素 bounding-box 中线做像素拖拽，在 CI 字体/换行布局下落到空白区。测试现对同一可见文本节点执行 Playwright 浏览器文本选择，仍精确验证 `window.getSelection()`，不改业务 UI、不加 retry、不放宽结果。
 - 第六次远程 CI 的唯一失败是 ETC 统一批次列表测试等待静态 list 容器后同步读取异步批次行；现以 `etc-batch-unsubmitted-01` 业务行作为 readiness anchor，不改 ETC 业务链路与 I/O。
@@ -176,5 +181,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-07-25
-Stopped at: Phase 27 documentation is being aligned to the clean, already-deployed `719c9a34` baseline before the final current-release production correctness matrix.
-Resume file: .planning/phases/27-read-model-fan-out/27-VERIFICATION.md
+Stopped at: Phase 28 complete; production release `main-b6e814b0-20260725192427` is active and verified.
+Resume file: .planning/phases/28-cost-statistics-recovery-performance/28-01-SUMMARY.md
