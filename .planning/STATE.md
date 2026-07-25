@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 30-02-PLAN.md
-last_updated: "2026-07-25T18:47:50.090Z"
+stopped_at: Completed 30-03-PLAN.md
+last_updated: "2026-07-25T19:15:48.734Z"
 last_activity: 2026-07-25 -- Phase 30 execution started
 progress:
   total_phases: 27
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 ## Current Position
 
 Phase: 30 (workbench-concurrent-recovery-performance) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-07-25 -- Phase 30 execution started
 
@@ -47,6 +47,7 @@ Progress: [██████████] 100% (Phase 29)
 |-------|-------|-------|----------|
 | 28 | 1/1 | 1h 40m | 1h 40m |
 | Phase 30 P02 | 31min | 3 tasks | 17 files |
+| Phase 30 P03 | 24min | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -123,6 +124,9 @@ Progress: [██████████] 100% (Phase 29)
 - [Phase 30]: Reuse existing generation/scope/row and generation/scope/zone/group indexes; EXPLAIN showed no migration or index justified.
 - [Phase 30]: Bound relation preview input to 20 selected rows and 100 context rows, failing closed on missing, duplicate, non-fresh, cross-generation, drift, or overflow state.
 - [Phase 30]: Keep preview DTOs derived-only; formal relation UoW always rereads canonical facts, versions, and idempotency state.
+- [Phase 30]: Keep group_type=selection preview-only; require zone/status=unpaired and leave ordinary Workbench mapping strict.
+- [Phase 30]: Share one synchronous confirm/withdraw pending guard and drop success responses after selection or read-model version drift.
+- [Phase 30]: Derive user-visible Workbench errors only from approved code/status mappings while retaining status/code/requestId.
 
 ### Roadmap Evolution
 
@@ -192,6 +196,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-07-25T18:47:50.083Z
-Stopped at: Completed 30-02-PLAN.md
+Last session: 2026-07-25T19:15:48.726Z
+Stopped at: Completed 30-03-PLAN.md
 Resume file: None
