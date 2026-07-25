@@ -31,7 +31,7 @@
 | Runtime worker manifest | `runtime_worker_manifest.py` | 必须匹配 registry |
 | Verify command | `scripts/verify.sh` | 按 backend/web/docs/ops 分类执行 |
 | Runtime env examples | `deploy/oa/env/*.env.example` | 按 common/secrets/migrator/worker/dispatcher 拆分，禁止恢复单文件 env |
-| Controlled write smoke stdin | operator | `--apply-stdin` 第一行为 Admin Token、第二行为 approval ticket；两者均必填且不落盘。mutation response 显式 `outbox_event_ids: []` 是普通写零 fan-out receipt，runner 不得把它误当 receipt 缺失而强制查询 disabled-by-default durable idempotency；字段缺失时才允许走 durable receipt 查询。每个 checkpoint 必须清除上一 checkpoint 的 receipt。同一受影响页面可声明最多两个明确 scope probe，用于逐一模拟用户访问该页的 active/all 等正式 scope；不得以此投递 sibling scope 或放宽业务 fan-out。isolation 页面仍必须恰好一个 probe。consumer assertion 只接受 typed `equals` / `contains` / `excludes`；`excludes` 只能证明已登记业务根不再含显式 test-owned row/case identity，不能解除 fixture identity gate。consumer `target_ms` 同时约束单次 fresh HTTP 和该 consumer 首次访问到 fresh/业务可见的总耗时；`operation_commit_to_visible_ms` 仅保留为观察值，不得把访问前的 zero-fan-out 审计时间算入访问 SLO。任一强制门超限都必须 fail closed |
+| Controlled write smoke stdin | operator | `--apply-stdin` 第一行为 Admin Token、第二行为 approval ticket；两者均必填且不落盘。scenario 只接受固定 root-owned `0600` 标准文件，或 `finops-deploy` 持有且不可 group/world write 的 `/tmp/finops-write-e2e-*.json`；可选 preview sample count 只接受 `1..20`，默认 1，且只重复只读 preview。mutation response 显式 `outbox_event_ids: []` 是普通写零 fan-out receipt，runner 不得把它误当 receipt 缺失而强制查询 disabled-by-default durable idempotency；字段缺失时才允许走 durable receipt 查询。每个 checkpoint 必须清除上一 checkpoint 的 receipt。同一受影响页面可声明最多两个明确 scope probe，用于逐一模拟用户访问该页的 active/all 等正式 scope；不得以此投递 sibling scope 或放宽业务 fan-out。isolation 页面仍必须恰好一个 probe。consumer assertion 只接受 typed `equals` / `contains` / `excludes`；`excludes` 只能证明已登记业务根不再含显式 test-owned row/case identity，不能解除 fixture identity gate。consumer `target_ms` 同时约束单次 fresh HTTP 和该 consumer 首次访问到 fresh/业务可见的总耗时；`operation_commit_to_visible_ms` 仅保留为观察值，不得把访问前的 zero-fan-out 审计时间算入访问 SLO。任一强制门超限都必须 fail closed |
 | Optional write smoke restore point | operator | 只在风险与成本相称时使用 `write-operation-restore-point <release> <run-id>`；明确 test-owned、幂等且自动执行 inverse/recovery 的 relation smoke 不以全库备份作为固定前置。创建命令使用既有 migrator DSN 跨 schema 只读导出，只通过 `PG*` 子进程环境传递连接字段，并以 `pg_restore --list` + SHA-256 manifest 验证；删除只能用 `write-operation-restore-point-delete <run-id> <expected-sha256>` 精确匹配固定目录、文件集合、manifest identity 和 dump checksum |
 | Request error lookup | API `requestId` | 只接受 12 位小写十六进制 ID，并从最近两小时 API journal 返回精确匹配的单行异常；不开放任意日志查询 |
 | Request traceback lookup | API `requestId` | 同一严格 ID 和两小时时间窗；从异常摘要开始最多返回 64 行，并在 traceback 终止异常行停止；不包含 locals，不开放任意 journal 参数 |
@@ -90,7 +90,8 @@
 - `import-audit-repair` 只允许写 `app.import_batch_rows`、`app.invoices`，以及显式目标的 `app.import_batches` / `app.import_files` 生命周期字段：dry-run 使用 repeatable-read read-only snapshot；execute 使用 serializable transaction、advisory lock、expected fingerprint 和 owner/precondition guard，并输出 rollback manifest。生命周期修复还必须由唯一 succeeded job、注册行计数、canonical invoice owner 与 `manual_invoice_import` source-link 闭环共同证明；被旧 preview 清空的 row link 只允许按 batch + source identity 一对一恢复，并以单条 bulk SQL 更新。helper 不接受 SQL、通配目标或任意 module 名。
 - `runtime-queue-resolve-covered` 只处理已有 exact-scope fresh/done 覆盖证明的 dead letter，不开放通用 SQL 或任意 queue mutation。
 - `write-operation-e2e-smoke --apply-stdin` 只把两行 stdin 注入固定 relation runner：Admin Token 与 approval ticket；
-  缺任一输入都在 mutation 前失败，不依赖 root-owned env 已同步才能保留审批闸门。
+  缺任一输入都在 mutation 前失败，不依赖 root-owned env 已同步才能保留审批闸门。固定标准 scenario
+  保持 root-owned `0600`；临时 scenario 保持 `/tmp` + `finops-deploy` owner 边界。
 - write-operation runner 的 consumer 与隔离/causal 写前 baseline 共用有界 freshness 语义：只对
   `202 refreshing`、`read_model_not_fresh`、dependency `503` 轮询；业务断言、认证、合同和页面 SLO 失败仍立即
   fail closed，避免瞬态 read model 状态阻断已提交关系的 canonical recovery。

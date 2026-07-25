@@ -372,7 +372,12 @@ class DeployOAScriptTest(unittest.TestCase):
             script,
         )
         self.assertIn("write_operation_e2e_smoke()", script)
-        self.assertIn("scenario path must match /tmp/finops-write-e2e-*.json", script)
+        self.assertIn("STANDARD_WRITE_E2E_SCENARIO", script)
+        self.assertIn(
+            "scenario path must be the fixed standard scenario or match /tmp/finops-write-e2e-*.json",
+            script,
+        )
+        self.assertIn("standard scenario must be root-owned with mode 0600", script)
         self.assertIn('IFS= read -r admin_token', script)
         self.assertIn('IFS= read -r approval_ticket', script)
         self.assertIn('export FIN_OPS_HTTP_SLO_ADMIN_TOKEN="$admin_token"', script)
@@ -475,7 +480,10 @@ class DeployOAScriptTest(unittest.TestCase):
         )
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("scenario path must match /tmp/finops-write-e2e-*.json", result.stderr)
+        self.assertIn(
+            "scenario path must be the fixed standard scenario or match /tmp/finops-write-e2e-*.json",
+            result.stderr,
+        )
         self.assertNotIn("release src directory not found", result.stderr)
 
     def test_deploy_control_write_restore_point_refuses_unsafe_run_id_before_release_lookup(self) -> None:

@@ -45,6 +45,13 @@
 - 不打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`，不改变业务 API、canonical facts、read model、worker、queue 或生产 env；verification 继续用同一 test-owned fixture 复跑 confirm -> withdraw/recovery -> System Audit。
 - 测试新增空 receipt 捕获和跨 checkpoint 隔离，覆盖显式零 fan-out跳过 durable lookup、下一 checkpoint receipt 缺失时仍准确查询 durable evidence。
 
+## 2026-07-26 - 固定生产 scenario 与 bounded preview sample 转发
+
+- Phase 30 候选前只读 preflight 发现 root-owned helper 仍只允许 `/tmp` scenario 且不接受第四个 sample 参数，无法按既有固定标准 scenario 执行 10 次只读 preview。
+- 最小修复让 helper 接受固定 root-owned `0600` `/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json`，同时保留临时 scenario 的 `/tmp`、`finops-deploy` owner、非 symlink、1 MiB 与不可 group/world write 门禁；其它路径继续拒绝。
+- 第四参数只接受 `1..20`，默认 1，并原样转发给同一 release runner 的 `--relation-preview-samples`。它不放宽 Admin Token/standing approval stdin、test-owned/inverse、mutation count、业务 API 或 SQL 边界。
+- 本地 deploy/runner 回归与完整候选门通过后才允许推送和部署；生产 dry-run 必须先证明固定文件仍是一个可逆 `bank_oa_invoice` scenario，缺 fixture 或 inverse 时零 mutation。
+
 ## 2026-07-05 - 部署模块边界与 I/O close
 
 - 目标：关闭部署模块旧 I/O 污染，确保发布入口、runtime env、worker/helper 合同只服务 release-based 链路。

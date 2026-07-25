@@ -466,7 +466,7 @@ sudo /usr/local/sbin/finops-deploy-control write-operation-restore-point-delete 
 sudo /usr/local/sbin/finops-deploy-control write-operation-e2e-smoke <release-name> \
   /tmp/finops-write-e2e-<run-id>.json --dry-run
 sudo /usr/local/sbin/finops-deploy-control write-operation-e2e-smoke <release-name> \
-  /tmp/finops-write-e2e-<run-id>.json --apply-stdin 10
+  /opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json --apply-stdin 10
 sudo /usr/local/sbin/finops-deploy-control api-request-error <request-id>
 sudo /usr/local/sbin/finops-deploy-control api-request-timing <request-id>
 sudo /usr/local/sbin/finops-deploy-control read-model-refresh <release-name> \
@@ -508,7 +508,8 @@ after-image drift，并通过 `WorkbenchRelationCommandService` 原地精确恢�
 `read-model-slo-smoke` 只运行 release 内的 `fin_ops_platform.tools.read_model_slo_smoke` dry-run，
 用于在不暴露 PostgreSQL DSN 的情况下发现 critical read model scopes；该 helper 明确拒绝 `--apply`，
 真实 enqueue-to-fresh 只能在单独批准的 root session 中执行。
-`write-operation-e2e-smoke` 只运行 release 内的固定 relation runner；scenario 仅接受受限 `/tmp` JSON，
+`write-operation-e2e-smoke` 只运行 release 内的固定 relation runner；scenario 接受 root-owned `0600`
+标准文件 `/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json`，或受限 `/tmp` JSON，
 apply 的 Admin Token 与 approval ticket 只从 stdin 的前两行读取，固定走公网 `/fin-ops-api`，
 不提供任意命令或 SQL 能力；第二行为空时在任何业务写请求前失败。可选第四参数只接受 `1..20`
 的 preview sample count（默认 1），只重复只读 canonical preview，不重复正式 mutation。standing correctness helper

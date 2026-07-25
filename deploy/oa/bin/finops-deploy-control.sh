@@ -20,6 +20,7 @@ MIGRATOR_ENV="$ENV_DIR/fin-ops.postgres-migrator.env"
 DEPLOY_CONTROL_HELPER="${FINOPS_DEPLOY_CONTROL_HELPER:-/usr/local/sbin/finops-deploy-control}"
 ENSURE_RUNTIME_WORKERS_HELPER="${FINOPS_ENSURE_RUNTIME_WORKERS_HELPER:-/usr/local/sbin/finops-ensure-runtime-workers}"
 WRITE_E2E_BACKUP_ROOT="${FINOPS_WRITE_E2E_BACKUP_ROOT:-/opt/fin-ops/backups/write-operation-e2e}"
+STANDARD_WRITE_E2E_SCENARIO="${FINOPS_STANDARD_WRITE_E2E_SCENARIO:-/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json}"
 PRUNE_WORKBENCH_GENERATIONS_HELPER="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_HELPER:-/usr/local/sbin/finops-prune-workbench-generations}"
 PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT:-/etc/systemd/system/finops-prune-workbench-generations.service}"
 PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT:-/etc/systemd/system/finops-prune-workbench-generations.timer}"
@@ -736,10 +737,16 @@ PY
 write_operation_e2e_smoke() {
   local release="${1:-}" scenario="${2:-}" mode="${3:---dry-run}" preview_samples="${4:-1}"
   [[ -n "$release" ]] || die "write-operation-e2e-smoke requires release name"
-  [[ "$scenario" =~ ^/tmp/finops-write-e2e-[A-Za-z0-9._-]+\.json$ ]] \
-    || die "scenario path must match /tmp/finops-write-e2e-*.json"
   [[ -f "$scenario" && ! -L "$scenario" ]] || die "scenario must be a regular non-symlink file"
-  [[ "$(stat -c '%U' "$scenario")" == "finops-deploy" ]] || die "scenario must be owned by finops-deploy"
+  if [[ "$scenario" =~ ^/tmp/finops-write-e2e-[A-Za-z0-9._-]+\.json$ ]]; then
+    [[ "$(stat -c '%U' "$scenario")" == "finops-deploy" ]] \
+      || die "temporary scenario must be owned by finops-deploy"
+  elif [[ "$scenario" == "$STANDARD_WRITE_E2E_SCENARIO" ]]; then
+    [[ "$(stat -c '%U:%a' "$scenario")" == "root:600" ]] \
+      || die "standard scenario must be root-owned with mode 0600"
+  else
+    die "scenario path must be the fixed standard scenario or match /tmp/finops-write-e2e-*.json"
+  fi
   [[ "$(stat -c '%s' "$scenario")" -le 1048576 ]] || die "scenario exceeds 1 MiB"
   find "$scenario" -maxdepth 0 -perm /022 -print -quit | grep -q . \
     && die "scenario must not be group/world writable"
