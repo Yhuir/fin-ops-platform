@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 30-04-PLAN.md with safe production blocker
-last_updated: "2026-07-25T19:51:00.376Z"
-last_activity: 2026-07-25 -- Phase 30 execution started
+stopped_at: Completed 30-05-PLAN.md with production closure
+last_updated: "2026-07-26T05:45:00+08:00"
+last_activity: 2026-07-26 -- Phase 30 production closure completed
 progress:
   total_phases: 27
   completed_phases: 4
-  total_plans: 72
-  completed_plans: 52
+  total_plans: 73
+  completed_plans: 53
   percent: 15
 ---
 
@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 
 ## Current Position
 
-Phase: 30 (workbench-concurrent-recovery-performance) — EXECUTING
-Plan: 4 of 4
-Status: Ready to execute
-Last activity: 2026-07-25 -- Phase 30 execution started
+Phase: 30 (workbench-concurrent-recovery-performance) — COMPLETE
+Plan: 5 of 5
+Status: Production closure complete
+Last activity: 2026-07-26 -- Candidate D deployed; confirm/withdraw full chain passed
 
 Progress: [██████████] 100% (Phase 29)
 
@@ -131,6 +131,9 @@ Progress: [██████████] 100% (Phase 29)
 - [Phase 30]: Production relation apply requires one fixed root-owned mode-0600 bank_oa_invoice scenario with explicit test-owned ownership, confirm, withdraw and recovery; legacy scenarios are not upgraded by inference.
 - [Phase 30]: Candidate A 3bf46e797 remains active and healthy; Candidate B is not used for fixture provisioning.
 - [Phase 30]: Missing sanctioned production scenario provisioning fails closed before mutation; no direct SQL, arbitrary scenario file or secret access is permitted.
+- [Phase 30]: OA pending-payment freshness and projection share the structured active relation set; membership count/digest invalidates exact scopes and historical raw payload no longer owns activity.
+- [Phase 30]: Final Candidate D `77c580f01` is active as `main-77c580f0-20260726052834`; confirm/withdraw, nine consumers, zero fan-out, inverse recovery, queue drain and System Audit 16/16 passed in production.
+- [Phase 30]: The relaxed correctness gate passed, while 4.58–14.02 second affected-page convergence and 3.69 second withdraw-preview p95 remain an explicit non-blocking performance follow-up.
 
 ### Roadmap Evolution
 
@@ -170,7 +173,7 @@ None yet.
 - Hotfix 发布前基线仍显示云南立孚 520 关系为 unpaired；破坏性 migration 0104 已明确从 Release A 延后，只有 repaired release 激活后才允许运行已登记的 rehydrate、等待 worker drain 并执行生产 System Audit。
 - 17/17 pages expose ready v17 proofs and local System Audit is complete; authorized production read-only execution has not occurred.
 - External bank/OA/invoice/ETC control evidence remains unregistered/unknown, so end-to-end external source completeness is still unproven.
-- Phase 30-04 production full-chain validation is blocked before mutation: live deploy-control lacks read-only relation scenario discovery/root-owned provisioning, while the configured fixed scenario is legacy and not test-owned with confirm/withdraw recovery.
+- Phase 30 has no remaining correctness, isolation, recovery, queue, worker or data-safety blocker. The deliberately deferred hard 3-second SLO and historical external source evidence `unknown` remain explicit non-blocking follow-ups.
 
 ### Quick Tasks Completed
 
