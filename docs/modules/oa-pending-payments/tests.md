@@ -1,6 +1,6 @@
 # OA 待付款核对测试责任
 
-日期：2026-07-24
+日期：2026-07-25
 
 ## 风险模型
 
@@ -80,8 +80,9 @@
 覆盖：
 
 - initial loading、fresh/empty/error/refreshing、`202`立即隐藏旧 rows。
-- 可见 tab 500ms 条件 GET、hidden暂停、恢复可见立即检查、最多一个 in-flight、unmount/query change cancel、晚响应隔离。
-- `304` 保留 fresh rows；新 `200` 更新 ETag/payload；`202` 后只重试当前 rows normal GET，完整重读时不调用 operation barrier。
+- fresh `200` 后零常驻条件 GET；只有本次用户触发的 GET 返回 `202/non-fresh` 才进行 500ms、最多 60 次、单 in-flight 的当前页重试。
+- hidden 停止且恢复可见不自动继续；unmount/query change cancel、晚响应隔离。
+- `304` 不改变当前状态；fresh `200` 更新 ETag/payload并停止重试；`202` 后只重试当前 rows normal GET，完整重读时不调用 operation barrier。
 - mutation成功后隐藏旧 rows并通过当前 rows GET 收敛；失败保留明确反馈。
 - 搜索、筛选、排序、分页、view toggle、drawer、权限控制。
 - OA 专属 Audit 五种中文文案和 issue samples；共享组件默认行为回归。

@@ -18,10 +18,9 @@
 - 页面注册表：`web/src/app/pageRegistry.tsx`，集中声明 route、pageKey、lazy component、preload 和侧边栏元数据。
 - 路由入口：`web/src/app/router.tsx`，通过 `PageRouteHost` 渲染当前匹配页面；路由切换会卸载上一页。
 - 侧边栏：`web/src/components/shell/sidebarItems.ts`，从页面注册表派生。
-- 页面会话与路由运行时：`web/src/contexts/PageSessionStateContext.tsx`、`web/src/contexts/PageRuntimeContext.tsx`、`web/src/hooks/useFinanceTableSession.ts`、`web/src/hooks/useActiveFinanceDomainEvent.ts`。
+- 页面会话与路由运行时：`web/src/contexts/PageSessionStateContext.tsx`、`web/src/contexts/PageRuntimeContext.tsx`、`web/src/hooks/useFinanceTableSession.ts`。
 - 页面入口：`web/src/pages/*`。
 - API client：`web/src/features/*/api.ts`。
-- 跨页刷新提示：`web/src/features/domainEvents.ts`。
 
 页面组件负责用户可见状态、交互和 DTO 展示。业务口径、权限、freshness、read model 状态和跨页事实不能在前端重新推导。
 
@@ -36,7 +35,8 @@
 - 新页面必须从 `pageRegistry` 注册 route/sidebar/pageKey，并保持 route-level code splitting 与侧边栏 preload。
 - 路由切换只保留当前页面挂载；不要新增页面 mounted cache、data snapshot 或滚动 snapshot。
 - 筛选、分页、搜索词等轻量 UI 状态接 `usePageSessionState` 或 `useFinanceTableSession`；不要把 read model rows、API payload 或长列表滚动位置写入页面会话。
-- 页面订阅 finance domain event 时使用 `useActiveFinanceDomainEvent`；只有当前挂载页面响应事件，切回页面后仍通过原 API/read model freshness 边界刷新。
+- 业务页面不订阅跨页 finance/domain/tag 事件，也不因 focus、hidden→visible 或 BFCache 恢复发起业务 I/O。只有 route 进入/重进、页面查询变化、浏览器手动刷新、用户明确重试或本页命令后的 reconcile 才调用该页面自己的 query owner。
+- 跨页面一致性由 canonical fact/version、freshness gate 和页面下次访问保证；不要新增业务 `BroadcastChannel`、window event 或全局刷新 coordinator。
 - 不把 UI session 写入后端 API、facts、audit、dirty scope、outbox 或 read model。
 
 ## 新增或修改功能流程

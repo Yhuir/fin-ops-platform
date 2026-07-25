@@ -38,7 +38,7 @@
 | --- | --- |
 | 新增/删除页面、路由、侧边栏入口 | `pages.md`、`docs/modules/README.md`、目标模块 `README.md`、`docs/dev/api-contracts.md` |
 | 新增 API contract 或 DTO shape | 目标模块 `README.md` 或 `implementation-notes.md`、`docs/dev/api-contracts.md` |
-| 新增前端 domain event | 目标模块 `README.md`、`pages.md` |
+| 新增前端业务刷新事件 | 默认禁止；若确有显式新需求，先更新目标模块边界、`pages.md` 并证明不会形成跨页 I/O 总线 |
 | 新增 derived lifecycle 事件或 domain | 目标模块 `README.md`、`runtime-and-ownership.md`、`pages.md` |
 | 新增 read model 或 worker | 目标模块 `README.md`、`runtime-and-ownership.md`、`docs/operations/runtime-worker-governance.md` |
 | 改 PostgreSQL runtime/queue/Redis/RabbitMQ 边界 | 目标资源模块、`runtime-and-ownership.md`、`docs/operations/postgresql-runtime.md` |

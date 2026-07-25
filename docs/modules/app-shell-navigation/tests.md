@@ -9,21 +9,21 @@
 | Route registry | `web/src/test/PageRouteHost.test.tsx`、`web/src/test/App.test.tsx` | `appPageRoutes` 与 sidebar items 同源；route 只包含 `path/pageKey/component/preload/end`；pageKey 唯一 |
 | Route mount/unmount | `web/src/test/PageRouteHost.test.tsx` | 切换 route 立即卸载旧页面；返回页面重新 mount，不保留旧 local React state |
 | Lazy route fallback | `web/src/test/PageRouteHost.test.tsx` | lazy chunk 未 resolve 时显示轻量 fallback；未知路径 redirect root |
-| Active page event cleanup | `web/src/test/PageRouteHost.test.tsx` | 旧页面卸载后不再响应 window/domain event |
+| Browser lifecycle isolation | `web/src/test/PageRouteHost.test.tsx` | focus、visibility 与 BFCache 不触发当前业务页 reload；route 重进仍重新 mount |
 | Sidebar active/preload | `web/src/test/AppSidebar.test.tsx` | active route、nested path、import shortcut inactive、hover/focus preload 不改 link target |
 | Compact/mobile sidebar | `web/src/test/AppSidebar.test.tsx`、`web/src/test/App.test.tsx`、`web/e2e/app-shell-responsive.spec.ts` | top bar 打开菜单；点击导航关闭 compact drawer；导航入口仍完整；真实 Chromium 移动视口 drawer 打开/导航/关闭 |
 | Session gate | `web/src/test/SessionGate.test.tsx` | loading/forbidden/expired/error/retry；业务 route 在 authenticated 后渲染 |
 | Global operation overlay | `web/src/test/GlobalOperationOverlayContext.test.tsx` | 写操作运行期间全屏阻塞、成功自动关闭、失败保留错误并由用户确认关闭 |
 | Page session state | `web/src/test/PageSessionStateContext.test.tsx`、`web/src/test/useFinanceTableSession.test.tsx` | page/state/user scope 隔离、TTL/version/validation、debounce、storage fallback、表格状态恢复 |
 | Full shell smoke | `web/src/test/App.test.tsx`、`web/e2e/app-shell.spec.ts`、`web/e2e/app-shell-responsive.spec.ts` | workbench、tax offset、cost、settings、import、turnover、embedded OA、global status 与导航组合；真实 Chromium 下保护会话 gate、导航、AppHealth admin-only route、compact drawer 和 embedded OA shell |
-| Domain event contract | `web/src/test/domainEvents.test.ts`、`web/src/test/PageRouteHost.test.tsx` | event 名称、affected months、BroadcastChannel、route unmount listener cleanup |
+| Old refresh-path deletion | `web/src/test/PageRouteHost.test.tsx` | 受影响业务页不再 import domain event hook/module 或 tag BroadcastChannel |
 
 ## 场景覆盖清单
 
 | 场景 | 覆盖状态 | 测试入口 |
 | --- | --- | --- |
 | 业务页切换后旧页面 DOM 和本地 React state 清理 | 已覆盖 | `PageRouteHost.test.tsx` |
-| 业务页切换后旧页面 active event listener 清理 | 已覆盖，2026-06-11 新增 | `PageRouteHost.test.tsx` |
+| focus/visibility/BFCache 不触发业务页 reload | 已覆盖，2026-07-25 更新 | `PageRouteHost.test.tsx` |
 | lazy 页面加载 fallback | 已覆盖 | `PageRouteHost.test.tsx` |
 | 未知 path redirect root | 已覆盖 | `PageRouteHost.test.tsx` |
 | 侧栏从注册表派生 route/preload | 已覆盖 | `PageRouteHost.test.tsx` |
@@ -50,13 +50,13 @@
 | 4. Read model/cache/background job tests | 间接适用 | `App.test.tsx` | shell 不刷新 read model，但必须不把全局 App Status 绑定到当前 route；具体 read model 由页面模块覆盖。 |
 | 5. Frontend component and interaction tests | 适用，已补 | `PageRouteHost.test.tsx`、`AppSidebar.test.tsx`、`App.test.tsx`、`SessionGate.test.tsx`、`GlobalOperationOverlayContext.test.tsx`、`PageSessionStateContext.test.tsx`、`useFinanceTableSession.test.tsx`、`web/e2e/app-shell.spec.ts`、`web/e2e/app-shell-responsive.spec.ts` | 覆盖 route、sidebar、compact drawer、session gate、operation overlay、page session、table session、full shell smoke、真实浏览器 AppHealth route smoke、移动 drawer 和 embedded OA shell。 |
 | 6. End-to-end business-flow integration tests | 间接适用 | `App.test.tsx`、`web/e2e/app-shell.spec.ts`、`web/e2e/app-shell-responsive.spec.ts` | 本模块不承载业务写入链路；保留 workbench -> tax、cost/settings/import/turnover shell smoke，并用真实 Chromium 验证 shell + session + protected route + responsive/embedded shell 的端到端渲染。业务写入端到端链路由页面模块和 read model/worker 模块覆盖。 |
-| 7. Existing feature regression tests | 适用，已补 | 同上 | 本轮新增 route event cleanup、active/import shortcut、compact drawer close 和 Playwright app shell smoke 回归；继续保护旧导航和 session state 行为。 |
+| 7. Existing feature regression tests | 适用，已补 | 同上 | 保护 route mount/unmount、浏览器生命周期零业务 reload、导航、session state 和专属 App Health 状态通道。 |
 
 ## 历史 bug 回归库
 
 | 日期 | 问题 | 回归测试 |
 | --- | --- | --- |
-| 2026-06-11 | 防止页面切换后旧页面仍响应 window/domain event，导致旧页面刷新或误写 UI state | `PageRouteHost.test.tsx` `removes active page event listeners when a route unmounts` |
+| 2026-07-25 | 防止 focus/visibility/BFCache 或旧 domain/tag event 恢复跨页业务 I/O | `PageRouteHost.test.tsx` lifecycle zero-reload 与 source guard |
 | 2026-06-11 | 防止 import shortcut 进入导入页后误显示 active，或移动端点击导航后 drawer 不关闭 | `AppSidebar.test.tsx` active/import shortcut 与 compact drawer tests |
 | 2026-06-14 | 防止各页面重复实现全屏写操作 loading，或失败后自动关闭导致用户继续操作旧事实 | `GlobalOperationOverlayContext.test.tsx` |
 
@@ -66,7 +66,7 @@
 2. 从关联台导航到税金抵扣，旧页面卸载，税金页面使用自己的月份控件和 API。
 3. 从成本统计打开 compact sidebar，点击设置后进入 `/settings` 并关闭移动抽屉。
 4. 从成本统计进入银行流水导入，路径变成 `/imports/bank-transactions`，导入 shortcut 不标记为 active。
-5. route 切换后触发 domain/window event，旧页面 handler 不再被调用。
+5. focus、visibility 与 BFCache 恢复不触发当前业务页面 reload；重新进入 route 仍重新 mount。
 6. 真实 Chromium 打开 `/operations/app-health`，admin 可以看到导航和 dashboard；read_export_only/forbidden/expired 不会触发受保护 dashboard API。
 7. 真实 Chromium 移动视口打开成本统计，打开主导航菜单，点击设置后 drawer 关闭并进入设置页。
 8. 真实 Chromium 打开 `/?embedded=oa`，shell 使用 embedded 样式，桌面侧栏默认折叠并可展开。
@@ -82,8 +82,7 @@ cd web && npm test -- --run \
   src/test/useFinanceTableSession.test.tsx \
   src/test/SessionGate.test.tsx \
   src/test/GlobalOperationOverlayContext.test.tsx \
-  src/test/App.test.tsx \
-  src/test/domainEvents.test.ts
+  src/test/App.test.tsx
 
 bash scripts/verify.sh docs
 
@@ -105,8 +104,8 @@ cd web && npm run e2e:smoke
 - route chunk preload 只验证调用和 fallback，不模拟真实网络分包失败后的浏览器缓存行为；当前契约是失败不阻断导航。
 - full route registry 数量测试会在新增页面时失败，需要同步更新预期和 App Status/domain docs，而不是随意放宽。
 
-## 2026-07-22 Phase 27 页面激活回归
+## 2026-07-25 Phase 27 页面 load 回归
 
-- `web/src/test/PageRouteHost.test.tsx` 锁定全部 17 个 route owner、route mount 单次加载、window focus 与 hidden→visible generation 增量，以及 hidden 时零 I/O/零 domain-event 重放。
-- 每个页面 owner 源码必须消费 `useOptionalPageActivation`；shell helper 不得包含 read-model dependency map、API 分支或业务 DTO。
-- 排序、分页、筛选只属于当前页面查询状态，不改变 activation generation，也不能触发跨页面 rebuild。
+- `web/src/test/PageRouteHost.test.tsx` 锁定全部 17 个 route owner、route mount 单次加载，以及 focus、hidden→visible 与 BFCache 恢复零业务 reload。
+- 静态 source guard 禁止受影响业务页恢复 `domainEvents`、`useActiveFinanceDomainEvent`、银行标签 window event 或业务 `BroadcastChannel`。
+- 排序、分页、筛选只属于当前页面查询状态；它们可以重跑当前页查询，但不能触发跨页面 rebuild。

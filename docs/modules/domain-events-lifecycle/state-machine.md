@@ -1,6 +1,6 @@
 # Domain Events 与 Derived Lifecycle 状态机
 
-日期：2026-07-22
+日期：2026-07-25
 
 本模块不是普通写入分发器。后端 lifecycle 只允许两个显式维护事件：
 
@@ -24,13 +24,13 @@
 - 不得由单个 executor 隐式刷新未声明页面；不得用前端 domain event 伪造 dirty/readiness/fresh。
 - `PROTECTED_TARGETS` 永远不能被 lifecycle plan 删除。
 
-## 前端提示事件
+## 前端边界
 
-`emitFinanceDomainEvent(...)` / `BroadcastChannel` 只提示当前 active/visible 页面重新 GET；未挂载或 hidden 页面不 replay。页面重新 mount、focus 或 hidden→visible 后必须从 API/read freshness boundary 取得事实，不能从事件缓存恢复业务数据。
+前端没有 finance domain event 或业务 tag BroadcastChannel。另一个页面/标签页的写入、focus、hidden→visible 与 BFCache 恢复不触发业务 GET；route 进入/重进、查询变化、浏览器手动刷新或明确重试时，页面从 API/read freshness boundary 取得事实。
 
 ## 失败恢复
 
 1. 核对调用是否属于两个允许的维护入口。
 2. 核对 plan event、scope、reason、permission/audit。
 3. 检查 exact dirty/outbox/readiness/worker，而不是扩大为普通写 fan-out。
-4. worker 修复后重跑显式维护命令；前端事件不能替代后端恢复。
+4. worker 修复后重跑显式维护命令；前端页面手动刷新不能替代后端维护恢复。

@@ -32,8 +32,6 @@ import {
 } from "../features/cost-statistics/api";
 import { ApiClientError } from "../features/apiClient";
 import { formatCostAmount } from "../features/cost-statistics/format";
-import { FINANCE_DOMAIN_EVENTS } from "../features/domainEvents";
-import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
 import { importWorkflowPath } from "../features/imports/importRoutes";
 import type {
   CostBankExplorerRow,
@@ -80,6 +78,9 @@ function waitForCostRefreshRetry(signal: AbortSignal, delayMs = 150) {
     signal.addEventListener("abort", abort, { once: true });
   });
 }
+
+// ponytail: one user load gets a bounded 30-second retry window; a manual reload starts a new attempt.
+const COST_REFRESH_MAX_RETRIES = 200;
 
 type LoadedCostStatisticsExplorer = {
   requestKey: string;
@@ -532,7 +533,6 @@ export default function CostStatisticsPage() {
   const lockStatusRef = useRef<HTMLDivElement | null>(null);
   const lastLockedFocusRef = useRef<HTMLElement | null>(null);
   const shouldRestoreFocusRef = useRef(false);
-  const observedAppStatusRef = useRef<{ scopeKey: string; status: string } | null>(null);
   const explorerRequestRef = useRef<AbortController | null>(null);
   const exportReferenceRequestRef = useRef<AbortController | null>(null);
   const exportRequestRef = useRef<AbortController | null>(null);
@@ -637,50 +637,11 @@ export default function CostStatisticsPage() {
     setDetailLoadingMessage(null);
   }, []);
 
-  const handleDomainMutation = useCallback(() => {
-    setLoadedExplorer(null);
-    invalidateExportReferenceData();
-    setDomainRefreshNonce((current) => current + 1);
-  }, [invalidateExportReferenceData]);
-  const handleWorkbenchRelationMutation = useCallback(() => {
-    explorerRequestRef.current?.abort();
-    explorerRequestRef.current = null;
-    exportRequestRef.current?.abort();
-    exportRequestRef.current = null;
-    exportPreviewRequestRef.current?.abort();
-    exportPreviewRequestRef.current = null;
-    setIsExporting(false);
-    setIsPreviewLoading(false);
-    invalidateExportReferenceData();
-    resetDetailSelection();
-    setLoadError(null);
-    setLoadedExplorer(null);
-    setDomainRefreshNonce((current) => current + 1);
-  }, [
-    invalidateExportReferenceData,
-    resetDetailSelection,
-  ]);
   const handleManualRefresh = useCallback(() => {
     setLoadedExplorer(null);
     invalidateExportReferenceData();
     setDomainRefreshNonce((current) => current + 1);
   }, [invalidateExportReferenceData]);
-
-  useEffect(() => {
-    const observation = appStatusReadModelStatus
-      ? { scopeKey: currentCostStatisticsScopeKey, status: appStatusReadModelStatus }
-      : null;
-    const previous = observedAppStatusRef.current;
-    observedAppStatusRef.current = observation;
-    if (
-      observation
-      && previous
-      && previous.scopeKey === observation.scopeKey
-      && previous.status !== observation.status
-    ) {
-      handleDomainMutation();
-    }
-  }, [appStatusReadModelStatus, currentCostStatisticsScopeKey, handleDomainMutation]);
 
   const openTagRulesDrawer = useCallback(() => {
     setTagRulesError(null);
@@ -713,13 +674,6 @@ export default function CostStatisticsPage() {
       return Array.from(next);
     });
   }, []);
-  useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, () => {
-    handleWorkbenchRelationMutation();
-  });
-  useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, handleDomainMutation);
-  useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.turnoverRelationUpdated, handleDomainMutation);
-  useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.invoiceFactUpdated, handleDomainMutation);
-
   useEffect(() => {
     if (!active || !isTagRulesDrawerOpen) {
       return undefined;
@@ -797,23 +751,35 @@ export default function CostStatisticsPage() {
 
       try {
         const request = JSON.parse(explorerRequestKey) as CostStatisticsExplorerPageRequest;
-        const deadline = Date.now() + 3_000;
         const publishPayload = (payload: CostStatisticsExplorerPage) => {
           if (controller.signal.aborted) {
             return;
           }
-          setPageStatistics(payload.readModelStatus === "fresh" ? payload.statistics : undefined);
+          setPageStatistics(
+            payload.readModelStatus === "fresh"
+              && payload.statisticsStatus === "fresh"
+              ? payload.statistics
+              : undefined,
+          );
           setLoadedExplorer({ requestKey: explorerRequestKey, payload });
           setIsExplorerLoading(false);
         };
         let payload = await fetchCostStatisticsExplorerPage({ ...request, signal: controller.signal });
         publishPayload(payload);
-        while (
-          payload.readModelStatus?.trim().toLowerCase() !== "fresh"
-          && Date.now() < deadline
-          && !controller.signal.aborted
+        for (
+          let retry = 0;
+          retry < COST_REFRESH_MAX_RETRIES
+          && (
+            payload.readModelStatus?.trim().toLowerCase() !== "fresh"
+            || payload.statisticsStatus?.trim().toLowerCase() !== "fresh"
+          )
+          && !controller.signal.aborted;
+          retry += 1
         ) {
           await waitForCostRefreshRetry(controller.signal);
+          if (document.visibilityState !== "visible") {
+            break;
+          }
           payload = await fetchCostStatisticsExplorerPage({ ...request, signal: controller.signal });
           publishPayload(payload);
         }

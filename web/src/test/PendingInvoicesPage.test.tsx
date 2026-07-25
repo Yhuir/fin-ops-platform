@@ -1431,73 +1431,6 @@ describe("Pending invoices page", () => {
     expect(within(requiresInvoiceBlock).getByText("手续费")).toBeInTheDocument();
   });
 
-  test("refreshes open rules drawer when bank detail auto tags update", async () => {
-    const user = userEvent.setup();
-    let rulesOptions: PendingInvoiceRulesMockOptions = {};
-    const fetchMock = installPendingInvoiceFetch({
-      rulesPayload: () => pendingInvoiceRulesPayload(rulesOptions),
-    });
-    renderAppAt("/pending-invoices");
-
-    const page = await findPendingInvoicesPage();
-    await user.click(within(page).getByRole("button", { name: "支出待找发票规则设置" }));
-
-    const bankStatementBlock = await screen.findByRole("group", { name: "流水代替发票" });
-    expect(within(bankStatementBlock).getByText("费用")).toBeInTheDocument();
-    expect(within(bankStatementBlock).getByRole("checkbox", { name: "手续费" })).toBeInTheDocument();
-    const initialRulesGets = pendingInvoiceRulesRequests(fetchMock).length;
-
-    rulesOptions = { version: 8, feePrimaryLabel: "费用改名验证", feeSubLabel: "手续费改名验证" };
-    act(() => {
-      window.dispatchEvent(new CustomEvent("finops:bank-transaction-tags-updated", { detail: { version: 8 } }));
-    });
-
-    await waitFor(() => {
-      expect(pendingInvoiceRulesRequests(fetchMock).length).toBeGreaterThan(initialRulesGets);
-    });
-    expect(await within(bankStatementBlock).findByText("费用改名验证")).toBeInTheDocument();
-    expect(within(bankStatementBlock).getByRole("checkbox", { name: "手续费改名验证" })).toBeInTheDocument();
-    expect(within(bankStatementBlock).queryByText("费用")).not.toBeInTheDocument();
-  });
-
-  test("preserves unsaved rule selections when refreshing renamed bank detail tags", async () => {
-    const user = userEvent.setup();
-    let rulesOptions: PendingInvoiceRulesMockOptions = {};
-    const fetchMock = installPendingInvoiceFetch({
-      rulesPayload: () => pendingInvoiceRulesPayload(rulesOptions),
-    });
-    renderAppAt("/pending-invoices");
-
-    const page = await findPendingInvoicesPage();
-    await user.click(within(page).getByRole("button", { name: "支出待找发票规则设置" }));
-
-    const bankStatementBlock = await screen.findByRole("group", { name: "流水代替发票" });
-    await user.click(within(bankStatementBlock).getByRole("checkbox", { name: "手续费" }));
-    expect(within(bankStatementBlock).getByRole("checkbox", { name: "手续费" })).toBeChecked();
-
-    rulesOptions = { version: 8, feePrimaryLabel: "费用改名验证", feeSubLabel: "手续费改名验证" };
-    act(() => {
-      window.dispatchEvent(new CustomEvent("finops:bank-transaction-tags-updated", { detail: { version: 8 } }));
-    });
-
-    const renamedFee = await within(bankStatementBlock).findByRole("checkbox", { name: "手续费改名验证" });
-    expect(renamedFee).toBeChecked();
-    expect(screen.getByText("银行明细自动标签已更新，已刷新标签名称并保留未保存选择。")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "保存规则" }));
-
-    await waitFor(() => {
-      expect(pendingInvoiceRulesRequests(fetchMock, "PUT").length).toBeGreaterThan(0);
-    });
-    const lastPut = pendingInvoiceRulesRequests(fetchMock, "PUT").at(-1);
-    expect(JSON.parse(String(lastPut?.[1]?.body ?? "{}"))).toMatchObject({
-      groups: {
-        bank_statement_as_invoice: { tag_codes: ["internal_transfer", "fee"] },
-        no_invoice_required: { tag_codes: ["salary"] },
-      },
-    });
-  }, 30_000);
-
   test("refetches rows after saving rules and displays refreshed rule filter buckets", async () => {
     const user = userEvent.setup();
     let rulesSaved = false;
@@ -1808,22 +1741,6 @@ describe("Pending invoices page", () => {
     ]));
   });
 
-  test("refetches rows when bank detail tag settings update", async () => {
-    const fetchMock = installPendingInvoiceFetch();
-    renderAppAt("/pending-invoices");
-
-    expect(await screen.findByText("云南开票供应商")).toBeInTheDocument();
-    const initialRequests = pendingInvoiceRowsRequests(fetchMock).length;
-
-    act(() => {
-      window.dispatchEvent(new CustomEvent("finops:bank-transaction-tags-updated", { detail: { version: 2 } }));
-    });
-
-    await waitFor(() => {
-      expect(pendingInvoiceRowsRequests(fetchMock).length).toBeGreaterThan(initialRequests);
-    });
-  });
-
   test("keeps row status actions available while the list read model is refreshing", async () => {
     const user = userEvent.setup();
     installPendingInvoiceFetch({ readModelStatus: "refreshing" });
@@ -1840,34 +1757,4 @@ describe("Pending invoices page", () => {
     expect(screen.queryByText("补票")).not.toBeInTheDocument();
   });
 
-  test("refetches rows on focus as bank detail tag update fallback", async () => {
-    vi.stubGlobal("BroadcastChannel", undefined);
-    const localStorageStore = new Map<string, string>();
-    vi.stubGlobal("localStorage", {
-      getItem: vi.fn((key: string) => localStorageStore.get(key) ?? null),
-      setItem: vi.fn((key: string, value: string) => {
-        localStorageStore.set(key, value);
-      }),
-      removeItem: vi.fn((key: string) => {
-        localStorageStore.delete(key);
-      }),
-      clear: vi.fn(() => {
-        localStorageStore.clear();
-      }),
-    });
-    const fetchMock = installPendingInvoiceFetch();
-    renderAppAt("/pending-invoices");
-
-    expect(await screen.findByText("云南开票供应商")).toBeInTheDocument();
-    const initialRequests = pendingInvoiceRowsRequests(fetchMock).length;
-
-    window.localStorage.setItem("finops.bankTransactionTags.version", "2");
-    act(() => {
-      window.dispatchEvent(new Event("focus"));
-    });
-
-    await waitFor(() => {
-      expect(pendingInvoiceRowsRequests(fetchMock).length).toBeGreaterThan(initialRequests);
-    });
-  });
 });

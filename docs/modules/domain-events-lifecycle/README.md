@@ -1,4 +1,4 @@
-# Domain Events 与 Derived Lifecycle 模块维护入口
+# Derived Lifecycle 模块维护入口
 
 
 - Module key: `domain-events-lifecycle`
@@ -13,14 +13,13 @@
 
 ## 代码入口
 
-- `web/src/features/domainEvents.ts`
 - `backend/src/fin_ops_platform/services/derived_data_lifecycle_service.py`
 
 ## 当前边界
 
 状态：close。
 
-前端 domain event 只做刷新提示，稳定影响必须由后端生命周期表达。后端导入持久化、关系写入、OA rebuild、pending invoice 写入和运维清理都必须通过 `DerivedDataLifecycleService` 的显式 event/domain/scope contract fan out；禁止在持久化回调或单个 domain executor 中隐藏刷新其它 read model。
+前端 finance domain event/业务 BroadcastChannel 已删除。后端 `DerivedDataLifecycleService` 只服务管理员设置重置与历史 ETC repair 两个显式维护入口；普通导入、关系写入、OA sync、规则/Drawer 保存不通过本模块 fan out。
 
 ## 维护触发器
 

@@ -9,7 +9,6 @@ import { createEmptyWorkbenchZoneDisplayState } from "../features/workbench/grou
 import { getWorkbenchColumns, getWorkbenchPaneGridStyle } from "../features/workbench/tableConfig";
 import type { WorkbenchRelationGroup, WorkbenchRecord } from "../features/workbench/types";
 import { installMockApiFetch } from "./apiMock";
-import { expectCustomEventDetailContaining } from "./eventAssertions";
 import { renderWorkbenchPage } from "./workbenchRenderHelpers";
 
 describe("Workbench candidate grouping layout", () => {
@@ -1526,48 +1525,23 @@ describe("Workbench candidate grouping layout", () => {
 
   test("withdraws bank-flow summaries through the bank flow rule batch API instead of ordinary cancel-link", async () => {
     const fetchMock = mockWorkbenchPageFetch(buildBankFlowRuleWorkbenchPayload());
-    const relationListener = vi.fn();
-    window.addEventListener("workbenchRelationUpdated", relationListener);
-
-    try {
-      renderWorkbenchPage();
-
-      const pairedZone = await screen.findByTestId("zone-paired");
-      const groupRow = await screen.findByTestId("candidate-group-paired-bank-flow-rule-batch:BANKFLOW-202603-FEE");
-      fireEvent.click(within(groupRow).getByRole("row", { name: /流水规则手续费批次.*30/ }));
-      fireEvent.click(within(pairedZone).getByRole("button", { name: "撤回关联" }));
-
-      await waitFor(() => {
-        expect(fetchMock).toHaveBeenCalledWith(
-          "/api/bank-flow-rule-batches/BANKFLOW-202603-FEE/withdraw",
-          expect.objectContaining({ method: "POST" }),
-        );
-      });
-      expect(fetchMock).not.toHaveBeenCalledWith(
-        "/api/workbench/actions/cancel-link",
-        expect.anything(),
-      );
-      expectCustomEventDetailContaining(relationListener, { affectedMonths: ["2026-03"] });
-    } finally {
-      window.removeEventListener("workbenchRelationUpdated", relationListener);
-    }
-  });
-
-  test("refreshes the workbench when bank transaction categories are updated", async () => {
-    const fetchMock = mockWorkbenchPageFetch();
-
     renderWorkbenchPage();
-    await screen.findByTestId("candidate-group-paired-no-oa-bank-batch:NOOA-202603-FEE");
-    const initialWorkbenchRequests = countInitialWorkbenchPageRequests(fetchMock);
 
-    await act(async () => {
-      window.dispatchEvent(new CustomEvent("bankTransactionCategoryUpdated", { detail: { affectedMonths: ["2026-03"] } }));
-    });
+    const pairedZone = await screen.findByTestId("zone-paired");
+    const groupRow = await screen.findByTestId("candidate-group-paired-bank-flow-rule-batch:BANKFLOW-202603-FEE");
+    fireEvent.click(within(groupRow).getByRole("row", { name: /流水规则手续费批次.*30/ }));
+    fireEvent.click(within(pairedZone).getByRole("button", { name: "撤回关联" }));
 
     await waitFor(() => {
-      const workbenchRequests = countInitialWorkbenchPageRequests(fetchMock);
-      expect(workbenchRequests).toBeGreaterThan(initialWorkbenchRequests);
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/bank-flow-rule-batches/BANKFLOW-202603-FEE/withdraw",
+        expect.objectContaining({ method: "POST" }),
+      );
     });
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/workbench/actions/cancel-link",
+      expect.anything(),
+    );
   });
 
   test("renders bank note column from structured bank text fields", () => {

@@ -34,7 +34,7 @@
 - loading：页面初次挂载时并行加载 rows、filter-options 和 status-rules；loading 期间展示标准页面状态，不保留旧 route snapshot。
 - empty：无业务 rows 时展示标准 empty state；refreshing 技术细节不直接暴露给用户。
 - error：rows/filter-options/detail/drawer 请求失败时展示页面或 drawer 级错误；不静默吞掉提交失败。
-- stale/refreshing：后端返回 `readModelStatus=refreshing` 时页面设置 refreshing 状态并在 active route 下自动重试；route unmount 后必须清理 retry timer。
+- stale/refreshing：后端返回 `readModelStatus=refreshing` 时页面设置 refreshing；本次访问只在 visible 状态以 250ms、最多 120 次继续 normal GET。fresh、hidden、route unmount、查询变化或 30 秒上限即停止，hidden→visible/focus 不自动恢复；浏览器手动刷新或明确刷新按钮开始新的有界尝试。
 - combined freshness：rows 与 filter-options 并行读取时，页面级 fresh 必须取两者合并结果；任一响应为 stale/missing/schema_mismatch/refreshing/unavailable 时，禁止进入普通 empty state、禁止启用导出，并沿用刷新诊断与重试语义。
 - permission disabled/hidden：
   - 读详情需要 output collection read session 权限。

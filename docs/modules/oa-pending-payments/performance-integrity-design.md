@@ -1,6 +1,6 @@
 # OA 待付款核对：高性能与完整性闭环设计
 
-> 历史设计说明（2026-07-22）：本文保留 Phase 27 之前的方案与实施依据。其“事实写入后由 writer/outbox 主动刷新 OA read model”“可见页面轮询 operation barrier”等段落已被 Phase 27 的统一合同取代：普通写和 OA snapshot sync 只提交 canonical fact/version，产生零下游页面 refresh job；页面访问、重新激活或自身刷新时由 OA fresh gate 比较 exact scope source versions，只有 mismatch 才经 gateway 去重入队。显式 App Health 修复/全量维护仍是独立运维命令。当前合同以 `boundary-io.md`、`state-machine.md` 和 `docs/architecture/module-boundaries/read-model-contracts.md` 为准。
+> 历史设计说明（2026-07-25 更新）：本文保留 Phase 27 之前的方案与实施依据。其“事实写入后由 writer/outbox 主动刷新 OA read model”“fresh 页面每 500ms 条件探测”“hidden→visible 自动检查”和“页面轮询 operation barrier”等段落均已被 Phase 27 的统一合同取代：普通写和 OA snapshot sync 只提交 canonical fact/version，产生零下游页面 refresh job；只有 route 进入/重进、查询变化、浏览器手动刷新、明确重试或本页写后 normal GET 才检查 freshness，且仅在该次 GET 返回 non-fresh 时进行当前页有界重试。focus、hidden→visible 与其它页面写入不触发 OA 页面 I/O。显式 App Health 修复/全量维护仍是独立运维命令。当前合同以 `boundary-io.md`、`state-machine.md` 和 `docs/architecture/module-boundaries/read-model-contracts.md` 为准。
 
 日期：2026-07-16
 状态：历史设计；Phase 27 本地迁移完成，生产部署和 SLO 证据待验证

@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   ClipboardCheck,
@@ -162,7 +162,7 @@ describe("Finance operations shell", () => {
     expect(screen.getByRole("link", { name: "外部往来款管理" })).toHaveAttribute("aria-current", "page");
   });
 
-  test("refreshes the workbench when turnover relations change", async () => {
+  test("does not refresh the workbench from cross-page relation events", async () => {
     window.history.pushState({}, "", "/");
     const fetchMock = installMockApiFetch();
 
@@ -174,17 +174,13 @@ describe("Finance operations shell", () => {
       return url.pathname === "/api/workbench";
     }).length;
 
-    act(() => {
-      window.dispatchEvent(new CustomEvent("turnoverRelationUpdated", { detail: { relationId: "rel-company-001" } }));
-    });
+    window.dispatchEvent(new CustomEvent("turnoverRelationUpdated", { detail: { relationId: "rel-company-001" } }));
 
-    await waitFor(() => {
-      const after = fetchMock.mock.calls.filter(([input]) => {
-        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-        return url.pathname === "/api/workbench";
-      }).length;
-      expect(after).toBeGreaterThan(before);
-    });
+    const after = fetchMock.mock.calls.filter(([input]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/workbench";
+    }).length;
+    expect(after).toBe(before);
   });
 
   test("hides the global workbench title block while a zone is expanded", async () => {

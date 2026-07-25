@@ -82,7 +82,7 @@ class InvoiceUsageCollectionDependencyGate:
                 scope_keys=scope_keys,
                 tenant_id="default",
             )
-            relation_state = {
+            direct_relation_state = {
                 "status": "fresh",
                 "read_model_scope_source_versions": (
                     relation_versions_by_scope
@@ -92,7 +92,28 @@ class InvoiceUsageCollectionDependencyGate:
                 "refresh_scope_keys": [],
                 "stale_reasons": [],
             }
-        else:
+            dependency_status = invoice_relation_dependency_status(
+                scope_state=scope_state,
+                relation_state=direct_relation_state,
+                base_source_versions=require_expected_source_versions(
+                    self._expected_source_versions(scope_key="all"),
+                    context=self._context,
+                ),
+            )
+            if dependency_status["status"] == "fresh":
+                return dependency_status
+            if not callable(relation_loader):
+                return self._result(
+                    status="unavailable",
+                    blocking_scope_keys=list(
+                        dependency_status.get("blocking_scope_keys") or scope_keys
+                    ),
+                    refresh_scope_keys=[],
+                    stale_reasons=[
+                        *list(dependency_status.get("stale_reasons") or []),
+                        "workbench_relation_dependency_port_unavailable",
+                    ],
+                )
             relation_state = relation_loader(
                 scope_keys,
                 require_fresh=True,
@@ -104,6 +125,37 @@ class InvoiceUsageCollectionDependencyGate:
                     "refresh_scope_keys": scope_keys,
                     "stale_reasons": ["workbench_relation_status_unavailable"],
                 }
+            if str(relation_state.get("status") or "unavailable").strip() != "fresh":
+                return self._result(
+                    status="refreshing",
+                    blocking_scope_keys=list(
+                        dependency_status.get("blocking_scope_keys") or scope_keys
+                    ),
+                    refresh_scope_keys=[],
+                    stale_reasons=[
+                        *list(dependency_status.get("stale_reasons") or []),
+                        *[
+                            f"workbench_relation:{stale_reason}"
+                            for stale_reason in list(
+                                relation_state.get("stale_reasons")
+                                or [relation_state.get("status") or "unavailable"]
+                            )
+                            if str(stale_reason).strip()
+                        ],
+                    ],
+                )
+            return dependency_status
+        relation_state = relation_loader(
+            scope_keys,
+            require_fresh=True,
+            reason=reason,
+        )
+        if not isinstance(relation_state, dict):
+            relation_state = {
+                "status": "unavailable",
+                "refresh_scope_keys": scope_keys,
+                "stale_reasons": ["workbench_relation_status_unavailable"],
+            }
         return invoice_relation_dependency_status(
             scope_state=scope_state,
             relation_state=relation_state,

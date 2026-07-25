@@ -10,7 +10,6 @@ import { PageRuntimeProvider } from "../contexts/PageRuntimeContext";
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
 import type { SessionAccessTier, SessionPayload } from "../features/session/api";
 import BankFlowRuleBatchPage from "../pages/BankFlowRuleBatchPage";
-import { expectCustomEventDetailContaining } from "./eventAssertions";
 import { renderAuthenticatedAppAt } from "./renderHelpers";
 
 const tagSelectionPayload = {
@@ -961,7 +960,7 @@ describe("BankFlowRuleBatchPage", () => {
     });
   });
 
-  test("updates open tag drawer labels after bank auto tag rules change", async () => {
+  test("does not update an open tag drawer from cross-page events", async () => {
     const user = userEvent.setup();
     let currentSelection = tagSelectionPayload;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -997,8 +996,8 @@ describe("BankFlowRuleBatchPage", () => {
       window.dispatchEvent(new CustomEvent("bankAutoTagRulesUpdated", { detail: { version: 8 } }));
     });
 
-    expect(await within(drawer).findByRole("checkbox", { name: "银行费用 / 手续费自动规则 需要OA" })).toBeInTheDocument();
-    expect(within(drawer).queryByRole("checkbox", { name: "费用 / 手续费 需要OA" })).not.toBeInTheDocument();
+    expect(within(drawer).getByRole("checkbox", { name: "费用 / 手续费 需要OA" })).toBeInTheDocument();
+    expect(within(drawer).queryByRole("checkbox", { name: "银行费用 / 手续费自动规则 需要OA" })).not.toBeInTheDocument();
   });
 
   test("drawer shows only bank auto rule main and child labels for external turnover tags", async () => {
@@ -1019,30 +1018,22 @@ describe("BankFlowRuleBatchPage", () => {
     expect(within(drawer).queryByText("业务往来")).not.toBeInTheDocument();
   });
 
-  test("submits only the selected transaction rows and dispatches affected months", async () => {
+  test("submits only the selected transaction rows", async () => {
     const user = userEvent.setup();
     const fetchMock = installFetchMock();
-    const relationListener = vi.fn();
-    window.addEventListener("workbenchRelationUpdated", relationListener);
+    renderPage();
+    await user.click(await screen.findByRole("checkbox", { name: "选择流水 bank-row-001" }));
+    await user.click(screen.getByRole("button", { name: "提交批次" }));
 
-    try {
-      renderPage();
-      await user.click(await screen.findByRole("checkbox", { name: "选择流水 bank-row-001" }));
-      await user.click(screen.getByRole("button", { name: "提交批次" }));
-
-      await waitFor(() => {
-        expect(fetchMock).toHaveBeenCalledWith(
-          "/api/bank-flow-rule-batches/submit-selection",
-          expect.objectContaining({
-            method: "POST",
-            body: JSON.stringify({ transaction_ids: ["bank-row-001"], note: "" }),
-          }),
-        );
-      });
-      expectCustomEventDetailContaining(relationListener, { affectedMonths: ["2026-05"] });
-    } finally {
-      window.removeEventListener("workbenchRelationUpdated", relationListener);
-    }
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/bank-flow-rule-batches/submit-selection",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ transaction_ids: ["bank-row-001"], note: "" }),
+        }),
+      );
+    });
   });
 
   test("submits selected rows and reconciles through the current page GET without operation barrier", async () => {
@@ -1278,72 +1269,56 @@ describe("BankFlowRuleBatchPage", () => {
   test("switches to submitted bucket and withdraws a submitted batch", async () => {
     const user = userEvent.setup();
     const fetchMock = installFetchMock();
-    const relationListener = vi.fn();
-    window.addEventListener("workbenchRelationUpdated", relationListener);
+    renderPage();
+    await user.click(await screen.findByRole("button", { name: "已提交 1" }));
+    await user.click(await screen.findByRole("button", { name: "人工成本 1批 · 8条" }));
+    await user.click(await screen.findByRole("button", { name: "工资 1批 · 8条" }));
+    await user.click(await screen.findByRole("button", { name: "撤回批次" }));
+    await user.type(screen.getByLabelText("撤回原因"), "金额复核");
+    await user.click(screen.getByRole("button", { name: "确认撤回" }));
 
-    try {
-      renderPage();
-      await user.click(await screen.findByRole("button", { name: "已提交 1" }));
-      await user.click(await screen.findByRole("button", { name: "人工成本 1批 · 8条" }));
-      await user.click(await screen.findByRole("button", { name: "工资 1批 · 8条" }));
-      await user.click(await screen.findByRole("button", { name: "撤回批次" }));
-      await user.type(screen.getByLabelText("撤回原因"), "金额复核");
-      await user.click(screen.getByRole("button", { name: "确认撤回" }));
-
-      await waitFor(() => {
-        expect(fetchMock).toHaveBeenCalledWith(
-          "/api/bank-flow-rule-batches/batch-submitted-salary/withdraw",
-          expect.objectContaining({
-            method: "POST",
-            body: JSON.stringify({ expected_version: 2, reason: "金额复核" }),
-          }),
-        );
-      });
-      expectCustomEventDetailContaining(relationListener, { affectedMonths: ["2026-05"] });
-    } finally {
-      window.removeEventListener("workbenchRelationUpdated", relationListener);
-    }
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/bank-flow-rule-batches/batch-submitted-salary/withdraw",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ expected_version: 2, reason: "金额复核" }),
+        }),
+      );
+    });
   });
 
   test("resets all submitted flow rule batches from the page", async () => {
     const user = userEvent.setup();
     const fetchMock = installFetchMock();
-    const relationListener = vi.fn();
-    window.addEventListener("workbenchRelationUpdated", relationListener);
+    renderPage();
+    await user.click(await screen.findByRole("button", { name: "已提交 1" }));
+    await user.click(await screen.findByRole("button", { name: "重置全部已提交" }));
 
-    try {
-      renderPage();
-      await user.click(await screen.findByRole("button", { name: "已提交 1" }));
-      await user.click(await screen.findByRole("button", { name: "重置全部已提交" }));
-
-      await waitFor(() => {
-        expect(fetchMock).toHaveBeenCalledWith(
-          "/api/bank-flow-rule-batches/reset-submitted",
-          expect.objectContaining({
-            method: "POST",
-            body: JSON.stringify({ reason: "流水规则批量处理：全部已提交批次重新过规则" }),
-          }),
-        );
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/bank-flow-rule-batches/reset-submitted",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ reason: "流水规则批量处理：全部已提交批次重新过规则" }),
+        }),
+      );
+    });
+    expect(await screen.findByText("已重置 1 个已提交批次")).toBeInTheDocument();
+    await waitFor(() => {
+      const resetCallIndex = fetchMock.mock.calls.findIndex(([input]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/bank-flow-rule-batches/reset-submitted";
       });
-      expect(await screen.findByText("已重置 1 个已提交批次")).toBeInTheDocument();
-      await waitFor(() => {
-        const resetCallIndex = fetchMock.mock.calls.findIndex(([input]) => {
-          const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-          return url.pathname === "/api/bank-flow-rule-batches/reset-submitted";
-        });
-        expect(resetCallIndex).toBeGreaterThanOrEqual(0);
-        expect(fetchMock.mock.calls.slice(resetCallIndex + 1).some(([input, init]) => {
-          const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-          return url.pathname === "/api/bank-flow-rule-batches"
-            && (!init?.method || init.method === "GET")
-            && url.searchParams.get("bucket") === "unsubmitted"
-            && url.searchParams.get("page") === "1";
-        })).toBe(true);
-      });
-      expectCustomEventDetailContaining(relationListener, { affectedMonths: ["2026-05"] });
-    } finally {
-      window.removeEventListener("workbenchRelationUpdated", relationListener);
-    }
+      expect(resetCallIndex).toBeGreaterThanOrEqual(0);
+      expect(fetchMock.mock.calls.slice(resetCallIndex + 1).some(([input, init]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/bank-flow-rule-batches"
+          && (!init?.method || init.method === "GET")
+          && url.searchParams.get("bucket") === "unsubmitted"
+          && url.searchParams.get("page") === "1";
+      })).toBe(true);
+    });
   });
 
   test("presents relation-backed stale batches as submitted without review prompts", async () => {
@@ -1416,53 +1391,43 @@ describe("BankFlowRuleBatchPage", () => {
       batches: [...listPayload.batches, nextTransferBatch],
     };
     const fetchMock = installFetchMock(payloadWithNextTransfer);
-    const relationListener = vi.fn();
-    window.addEventListener("workbenchRelationUpdated", relationListener);
+    renderPage();
+    await user.click(await screen.findByRole("button", { name: "往来 2批 · 4条" }));
+    await user.click(await screen.findByRole("button", { name: "内部往来款 2批 · 4条" }));
+    await user.click((await screen.findAllByRole("button", { name: "提交内部往来批次" }))[0]);
 
-    try {
-      renderPage();
-      await user.click(await screen.findByRole("button", { name: "往来 2批 · 4条" }));
-      await user.click(await screen.findByRole("button", { name: "内部往来款 2批 · 4条" }));
-      await user.click((await screen.findAllByRole("button", { name: "提交内部往来批次" }))[0]);
-
-      await waitFor(() => {
-        expect(fetchMock).toHaveBeenCalledWith(
-          "/api/bank-flow-rule-batches/batch-draft-transfer/submit",
-          expect.objectContaining({
-            method: "POST",
-            body: JSON.stringify({ expected_version: 1, note: "" }),
-          }),
-        );
-      });
-      await waitFor(() => {
-        expect(screen.queryByText("正在加载流水明细")).not.toBeInTheDocument();
-      });
-      await waitFor(() => {
-        const submitCallIndex = fetchMock.mock.calls.findIndex(([input]) => {
-          const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-          return url.pathname === "/api/bank-flow-rule-batches/batch-draft-transfer/submit";
-        });
-        expect(submitCallIndex).toBeGreaterThanOrEqual(0);
-        expect(fetchMock.mock.calls.slice(submitCallIndex + 1).some(([input, init]) => {
-          const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-          return url.pathname === "/api/bank-flow-rule-batches" && (!init?.method || init.method === "GET");
-        })).toBe(true);
-      });
-      expect(fetchMock.mock.calls.some(([input]) => {
-        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-        return url.pathname === "/api/bank-flow-rule-batches/batch-draft-transfer-next";
-      })).toBe(false);
-      expect(fetchMock).not.toHaveBeenCalledWith(
-        "/api/bank-flow-rule-batches/submit-selection",
-        expect.anything(),
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/bank-flow-rule-batches/batch-draft-transfer/submit",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ expected_version: 1, note: "" }),
+        }),
       );
-      expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
-      expectCustomEventDetailContaining(relationListener, {
-        affectedMonths: ["2026-05"],
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("正在加载流水明细")).not.toBeInTheDocument();
+    });
+    await waitFor(() => {
+      const submitCallIndex = fetchMock.mock.calls.findIndex(([input]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/bank-flow-rule-batches/batch-draft-transfer/submit";
       });
-    } finally {
-      window.removeEventListener("workbenchRelationUpdated", relationListener);
-    }
+      expect(submitCallIndex).toBeGreaterThanOrEqual(0);
+      expect(fetchMock.mock.calls.slice(submitCallIndex + 1).some(([input, init]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/bank-flow-rule-batches" && (!init?.method || init.method === "GET");
+      })).toBe(true);
+    });
+    expect(fetchMock.mock.calls.some(([input]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/bank-flow-rule-batches/batch-draft-transfer-next";
+    })).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/bank-flow-rule-batches/submit-selection",
+      expect.anything(),
+    );
+    expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
   });
 
   test("does not expose internal transfer conflicts in the main list", async () => {
@@ -1478,66 +1443,6 @@ describe("BankFlowRuleBatchPage", () => {
     expect(within(transactionRegion).queryByText("内部往来存在多解，不能自动形成可提交批次。")).not.toBeInTheDocument();
     expect(within(transactionRegion).queryByText("云南溯源科技有限公司")).not.toBeInTheDocument();
     expect(within(transactionRegion).queryByText("关联 case-active-001")).not.toBeInTheDocument();
-  });
-
-  test("refreshes tag selection, list, and detail cache after bank transaction category updates", async () => {
-    const fetchMock = installFetchMock();
-    renderPage();
-
-    await screen.findByText("网银手续费");
-    const initialDetailCalls = fetchMock.mock.calls.filter(([input]) => {
-      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      return url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee";
-    }).length;
-
-    act(() => {
-      window.dispatchEvent(new CustomEvent("bankTransactionCategoryUpdated", { detail: { affectedMonths: ["2026-05"] } }));
-    });
-
-    await waitFor(() => {
-      const tagSelectionCalls = fetchMock.mock.calls.filter(([input]) => {
-        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-        return url.pathname === "/api/bank-flow-rule-batches/tag-rules";
-      });
-      expect(tagSelectionCalls.length).toBeGreaterThan(1);
-    });
-    await waitFor(() => {
-      const detailCalls = fetchMock.mock.calls.filter(([input]) => {
-        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-        return url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee";
-      });
-      expect(detailCalls.length).toBeGreaterThan(initialDetailCalls);
-    });
-  });
-
-  test("refreshes tag selection, list, and detail cache after bank auto tag rules update", async () => {
-    const fetchMock = installFetchMock();
-    renderPage();
-
-    await screen.findByText("网银手续费");
-    const initialDetailCalls = fetchMock.mock.calls.filter(([input]) => {
-      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      return url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee";
-    }).length;
-
-    act(() => {
-      window.dispatchEvent(new CustomEvent("bankAutoTagRulesUpdated", { detail: { version: 8 } }));
-    });
-
-    await waitFor(() => {
-      const tagSelectionCalls = fetchMock.mock.calls.filter(([input]) => {
-        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-        return url.pathname === "/api/bank-flow-rule-batches/tag-rules";
-      });
-      expect(tagSelectionCalls.length).toBeGreaterThan(1);
-    });
-    await waitFor(() => {
-      const detailCalls = fetchMock.mock.calls.filter(([input]) => {
-        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-        return url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee";
-      });
-      expect(detailCalls.length).toBeGreaterThan(initialDetailCalls);
-    });
   });
 
   test("shows read model stale state and reloads until the bank flow rule read model is fresh", async () => {

@@ -32,7 +32,7 @@
 
 - 页面注册表是 route、page key、lazy chunk preload 和侧栏导航项的唯一事实源；侧栏不能维护第二份路由清单。
 - `PageRouteHost` 每次只挂载当前匹配 route。离开页面会卸载旧页面 React tree，不保留隐藏 DOM frame、mounted cache、TTL/LRU snapshot 或旧页面 data payload。
-- `PageRuntimeProvider` 对当前页面提供 `active: true` 和 `pageKey`。inactive 页面不被保留；跨页面事件不 replay 给旧页面，依赖卸载时 listener cleanup。
+- `PageRuntimeProvider` 对当前页面提供稳定的 `active: true`、`pageKey` 与初始 generation。它不监听 focus/visibility/BFCache，不协调业务页面刷新。
 - `AppPageRoute.preload()` 和 sidebar item `preload()` 只预加载 lazy route chunk。预加载失败不能改变当前 route，也不能阻塞点击导航。
 - 页面 session state 只保存当前浏览器标签页内的轻量 UI 状态，例如查询、筛选、分页、排序、tab、选中行、展开行和详情 drawer target；不保存 read model payload、业务事实、权限事实、loading/error/toast 或失败中的提交。
 - `SessionGate` 是 shell 级入口。会话 loading/forbidden/expired/error 会阻止业务 route 渲染，但侧栏和全局 shell 仍按现有布局显示。
@@ -45,12 +45,12 @@
 | 改动点 | 可能影响 |
 | --- | --- |
 | `pageRegistry.tsx` 新增/删除/改 route | 页面入口、侧栏分组、App Status domain registry、测试里 route/sidebar 数量、未知路由 redirect |
-| `PageRouteHost.tsx` route match/mount 策略 | 页面状态清理、domain event listener、旧页面 API 请求和 toast、lazy fallback |
+| `PageRouteHost.tsx` route match/mount 策略 | 页面状态清理、旧页面 API 请求和 toast、lazy fallback、浏览器生命周期零业务 I/O |
 | `AppSidebar.tsx` active/preload/mobile drawer | 侧栏高亮、移动端导航关闭、hover/focus 预加载、导入页 active 行为 |
 | `App.tsx` provider 顺序 | session、page session、import draft、background jobs、App Health、MonthProvider |
 | `GlobalOperationOverlayContext.tsx` 语义 | 所有接入页面的写操作 loading/error 体验；不能污染普通页面 loading、App Status 或业务事实 |
 | `PageSessionStateContext.tsx` key/scope/TTL | 所有页面筛选/分页/排序/选中状态恢复、用户切换隔离 |
-| `PageRuntimeContext.tsx` event activation | 跨页面刷新提示、旧页面卸载后的事件清理 |
+| `PageRuntimeContext.tsx` runtime identity | 当前 route 身份；禁止承载业务刷新协调 |
 
 ## 测试入口
 
@@ -61,7 +61,7 @@
 - `web/src/test/SessionGate.test.tsx`
 - `web/src/test/PageSessionStateContext.test.tsx`
 - `web/src/test/useFinanceTableSession.test.tsx`
-- `web/src/test/domainEvents.test.ts`
+- `tests/test_platform_runtime_boundary_guards.py`
 
 ## 维护触发器
 

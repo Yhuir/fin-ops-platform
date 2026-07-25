@@ -1328,4 +1328,4 @@
 
 - `f8ad8b38` 生产三轮证明普通 relation 写约 `172–345ms` 且零 fan-out，但多个并发 consumer 会各自重复 Workbench canonical proof，Workbench/Cost/Turnover access-to-fresh 仍有超过 3 秒样本。队列和 worker 已并发，新增 worker 不是根因修复。
 - 当前修复继续使用现有 `WorkbenchSqlProjectionBuilder`：proof 补齐 ETC submission/business/invoice/link、实际消费的银行规则和账户映射、所有 relation 状态、soft delete 与跨月成员；Application 只持有一个 builder，时间上重叠的同 scope proof 共享一个 stdlib `Future`。flight 完成即删除，独立访问重新查 canonical facts，失败可重试；没有 TTL cache、版本表、trigger、协调器或第二事实源。
-- month/all schema 升级为 v7；migration `0125` 只增加两个测量后需要的 bank/invoice identity 表达式索引。20 万级本地 replay 中 exact proof 约 `250ms`、30 scope bulk proof 约 `0.77s`，8 个并发 all-scope consumer 只执行一次数据库 proof。最终 `<3s` 必须由 exact SHA 部署、正式 rehydrate 和同一 test-owned fixture 生产矩阵证明。
+- month/all schema 升级为 v7；migration `0125` 只增加两个测量后需要的 bank/invoice identity 表达式索引。20 万级本地 replay 中 exact proof 约 `250ms`、30 scope bulk proof 约 `0.77s`，8 个并发 all-scope consumer 只执行一次数据库 proof。v7、migration 与正式 rehydrate 已在 `main-719c9a34-20260725101310` 完成；当前生产矩阵验证最终 fresh/canonical correctness，超过 3 秒只登记为后续性能项。

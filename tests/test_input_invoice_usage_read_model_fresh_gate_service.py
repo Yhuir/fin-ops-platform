@@ -296,7 +296,7 @@ class InputInvoiceUsageReadModelFreshGateServiceTests(unittest.TestCase):
             requires_sql_read_model_runtime=lambda: True,
             enqueue_refresh=lambda scope_key, reason: enqueued.append((scope_key, reason)) or True,
             expected_source_versions=lambda **_: {"schema": "v1"},
-            workbench_relation_reader=None,
+            workbench_relation_reader=FreshRelationReader(),
             statistics_overlay=lambda: {"oa_reverse_batch_count": 0},
         )
 
@@ -308,6 +308,74 @@ class InputInvoiceUsageReadModelFreshGateServiceTests(unittest.TestCase):
             enqueued,
             [("2026-02", "api_statistics_relation_dependency_stale")],
         )
+
+    def test_stale_consumer_waits_for_exact_shared_relation_refresh_before_page_enqueue(self) -> None:
+        relation_proof = {
+            "source": "workbench_pair_relations",
+            "scope_key": "2026-07",
+            "consumer": "input_invoice",
+            "relation_count": 2,
+            "relation_updated_at": "2026-07-25 12:00:00+08",
+        }
+
+        class Repository(DependencyBlockedRepository):
+            def input_invoice_usage_relation_source_versions(
+                self,
+                *,
+                scope_keys: list[str],
+                tenant_id: str,
+            ) -> dict[str, dict[str, object]]:
+                del tenant_id
+                return {
+                    scope_key: dict(relation_proof)
+                    for scope_key in scope_keys
+                }
+
+        relation_reader = RefreshingRelationReader()
+        enqueued: list[tuple[str, str]] = []
+        repository = Repository(
+            scope_state={
+                "scope_keys": ["2026-07"],
+                "source_versions_by_scope": {
+                    "2026-07": {
+                        "schema": "v1",
+                        "invoice_usage_source_row_count": 1,
+                        "invoice_usage_source_updated_at": "new",
+                        "workbench_relation_source_versions": {
+                            **relation_proof,
+                            "relation_count": 1,
+                            "relation_updated_at": "old",
+                        },
+                    }
+                },
+                "canonical_source_versions_by_scope": {
+                    "2026-07": {
+                        "invoice_usage_source_row_count": 1,
+                        "invoice_usage_source_updated_at": "new",
+                    }
+                },
+                "blocking_scope_keys": [],
+            }
+        )
+        service = InputInvoiceUsageReadModelFreshGateService(
+            repository=repository,
+            requires_sql_read_model_runtime=lambda: True,
+            enqueue_refresh=lambda scope_key, reason: enqueued.append(
+                (scope_key, reason)
+            )
+            or True,
+            expected_source_versions=lambda **_: {"schema": "v1"},
+            workbench_relation_reader=relation_reader,
+            statistics_overlay=lambda: {"oa_reverse_batch_count": 0},
+        )
+
+        payload = service.rows({"month": ["2026-07"]})
+
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(repository.rows_calls, 0)
+        self.assertEqual(enqueued, [])
+        self.assertEqual(relation_reader.calls, [["2026-07"]])
+        self.assertNotIn("read_model_refresh_scope_keys", payload)
 
     def test_all_scope_fails_closed_without_dependency_port_or_all_refresh(self) -> None:
         enqueued: list[tuple[str, str]] = []
@@ -698,6 +766,24 @@ class FreshRelationReader:
             },
             "refresh_scope_keys": [],
             "stale_reasons": [],
+        }
+
+
+class RefreshingRelationReader:
+    def __init__(self) -> None:
+        self.calls: list[list[str]] = []
+
+    def source_versions_for_scopes(
+        self,
+        scope_keys: list[str],
+        **_: object,
+    ) -> dict[str, object]:
+        self.calls.append(list(scope_keys))
+        return {
+            "status": "refreshing",
+            "read_model_scope_source_versions": {},
+            "refresh_scope_keys": list(scope_keys),
+            "stale_reasons": ["canonical_source_versions_mismatch"],
         }
 
 

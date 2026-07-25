@@ -7,12 +7,7 @@ import PageScaffold from "../components/common/PageScaffold";
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import StatePanel from "../components/common/StatePanel";
 import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
-import {
-  FINANCE_DOMAIN_EVENTS,
-  emitFinanceDomainEvent,
-} from "../features/domainEvents";
-import { useActivePageEvent, useOptionalPageActivation } from "../contexts/PageRuntimeContext";
-import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
+import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import {
   fetchBankFlowRuleBatchDetail,
@@ -46,7 +41,6 @@ import {
   formatMoney,
   isAbortLikeError,
   isUnsubmittedEligible,
-  mutationEventDetail,
   relationContextLabels,
   requirementFor,
   requirementsFromSelection,
@@ -106,8 +100,8 @@ const EMPTY_TAG_SELECTION: BankFlowRuleBatchTagSelection = {
 };
 
 const SELF_SUB_LABEL = "主标签本身";
-const TAG_SYNC_EVENT = "finops:bank-transaction-tags-updated";
 const BANK_FLOW_RULE_READ_MODEL_REFRESH_RETRY_MS = 1000;
+const BANK_FLOW_RULE_READ_MODEL_REFRESH_MAX_ATTEMPTS = 30;
 const BANK_FLOW_RULE_ACCESS_FRESH_POLL_MS = 150;
 const BANK_FLOW_RULE_ACCESS_FRESH_TIMEOUT_MS = 3000;
 const BANK_FLOW_RULE_BATCH_PAGE_SIZE = 50;
@@ -144,6 +138,7 @@ export default function BankFlowRuleBatchPage() {
   const batchQueryKeyRef = useRef("");
   const manualLabelSelectionRef = useRef(false);
   const suppressNextAutoSelectRef = useRef(false);
+  const readModelRefreshAttemptRef = useRef(0);
   const readModelStatus = payload.readModelStatus;
   const readModelNeedsRefresh = readModelStatus !== "fresh";
 
@@ -259,15 +254,27 @@ export default function BankFlowRuleBatchPage() {
       setDetailErrors({});
       setSelectedBatchId("");
     }
+    readModelRefreshAttemptRef.current = 0;
     loadBatches(controller.signal);
     return () => controller.abort();
   }, [active, activationGeneration, batchPage, bucket, loadBatches, month, refreshToken]);
 
   useEffect(() => {
-    if (!active || !readModelNeedsRefresh || loading || backgroundRefreshing) {
+    if (
+      !active
+      || document.visibilityState !== "visible"
+      || !readModelNeedsRefresh
+      || loading
+      || backgroundRefreshing
+      || readModelRefreshAttemptRef.current >= BANK_FLOW_RULE_READ_MODEL_REFRESH_MAX_ATTEMPTS
+    ) {
       return undefined;
     }
     const retryId = window.setTimeout(() => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+      readModelRefreshAttemptRef.current += 1;
       loadBatches(undefined, { background: true });
     }, BANK_FLOW_RULE_READ_MODEL_REFRESH_RETRY_MS);
     return () => window.clearTimeout(retryId);
@@ -442,15 +449,6 @@ export default function BankFlowRuleBatchPage() {
     };
   }, [detailErrors, details, selectedBatchId]);
 
-  const handleCategoryUpdated = useCallback(() => {
-    setDetails({});
-    loadTagSelection();
-    loadBatches();
-  }, [loadBatches, loadTagSelection]);
-  useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, handleCategoryUpdated);
-  useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankAutoTagRulesUpdated, handleCategoryUpdated);
-  useActivePageEvent(TAG_SYNC_EVENT, handleCategoryUpdated);
-
   useEffect(() => {
     if (!feedback) {
       return undefined;
@@ -459,26 +457,9 @@ export default function BankFlowRuleBatchPage() {
     return () => window.clearTimeout(timeout);
   }, [feedback]);
 
-  useEffect(() => {
-    let channel: BroadcastChannel | null = null;
-    if (typeof BroadcastChannel !== "undefined") {
-      channel = new BroadcastChannel(TAG_SYNC_EVENT);
-      channel.onmessage = () => {
-        window.dispatchEvent(new CustomEvent(TAG_SYNC_EVENT));
-      };
-    }
-
-    return () => {
-      channel?.close();
-    };
-  }, []);
-
   const handleMutationComplete = useCallback((message: string, result: { affectedMonths?: string[] }) => {
     suppressNextAutoSelectRef.current = true;
     setSelectedBatchId("");
-    emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
-      ...mutationEventDetail(result),
-    });
     clearSelection();
     setDetails({});
     setDetailErrors({});
@@ -540,6 +521,10 @@ export default function BankFlowRuleBatchPage() {
       try {
         const deadline = Date.now() + BANK_FLOW_RULE_ACCESS_FRESH_TIMEOUT_MS;
         while (true) {
+          if (document.visibilityState !== "visible") {
+            setBackgroundRefreshing(false);
+            return;
+          }
           const nextPayload = await reloadBatchesAfterMutation(query);
           if (!nextPayload || nextPayload.readModelStatus === "fresh") {
             setBackgroundRefreshing(false);

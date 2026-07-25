@@ -41,9 +41,9 @@
 | mismatch | 显示金额不一致提示和差额说明输入；说明为空时前端阻止提交，后端再次校验。 |
 | bucket 切换 | `unsubmitted` 与 `submitted` 切换时清空 bank/OA selection、差额说明、撤回状态。 |
 | search/filter | 右侧 OA 搜索只过滤展示，不改变后端事实或已选中金额。 |
-| operation pending | 只覆盖 submit/withdraw HTTP 请求本身；成功后结束全局阻塞并触发当前页面正常 GET。GET 非 fresh 时使用页面内 refreshing 状态有界重试。 |
-| submit success | barrier 与 reload 完成后显示成功 feedback，发送 `workbenchRelationUpdated`。 |
-| withdraw success | barrier 与 reload 完成后关闭撤回 dialog，显示成功 feedback，发送 `workbenchRelationUpdated`。 |
+| operation pending | 只覆盖 submit/withdraw HTTP 请求本身；成功后结束全局阻塞并触发当前页面正常 GET。GET 非 fresh 时使用页面内 refreshing 状态有界重试；页面变 hidden 立即停止，返回 visible 不自动恢复并提示用户手动刷新。 |
+| submit success | command 成功后结束写阻塞，当前页 normal GET 后显示成功 feedback；不发送跨页刷新事件。 |
+| withdraw success | command 成功后结束写阻塞，当前页 normal GET 后关闭撤回 dialog并显示成功 feedback；不发送跨页刷新事件。 |
 | permission disabled/hidden | 当前没有独立权限开关；若后续接入权限，必须同时覆盖 API 403 和前端 hidden/disabled。 |
 
 ## Read Model / Worker 状态

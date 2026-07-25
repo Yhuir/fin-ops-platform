@@ -59,11 +59,12 @@
 | relation member list | 用户点击关系明细入口 | 仅展示点击分区对应的 OA、银行流水或发票成员；请求可带 `kind=oa|bank|invoice`，默认全量详情只作为兼容路径。 |
 | permission disabled/hidden | session permissions | 只读用户隐藏或禁用保存规则、attach、income override 等 mutation。 |
 
-前端事件：
+前端刷新边界：
 
-- `invoiceFactUpdated`、`workbenchRelationUpdated`、`bankTransactionCategoryUpdated`、`bankAutoTagRulesUpdated` 只能触发 refetch 或规则刷新。
-- 前端事件不是事实源；后端 lifecycle/dirty scope/outbox/readiness 才证明待找发票已收敛。
-- 页面卸载后不 replay 事件；返回页面重新通过 API/read boundary 加载。
+- 不订阅 `invoiceFactUpdated`、`workbenchRelationUpdated`、银行分类/规则事件或业务 BroadcastChannel。
+- 当前页写后可重跑自身 normal GET；其它页面/tab 不自动 refetch。
+- 返回 route、查询变化、浏览器手动刷新或明确重试时重新通过 API/read boundary 加载；后端 canonical/source/readiness 才证明待找发票已收敛。
+- 当前访问收到 non-fresh 后只在 visible 状态以 250ms、最多 120 次继续 normal GET；fresh、hidden、route unmount、查询变化或 30 秒上限即停止，hidden→visible/focus 不自动恢复。
 
 ## Read Model / Worker 状态
 

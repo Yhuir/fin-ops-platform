@@ -899,9 +899,8 @@ describe("Tax offset workbench", () => {
     expect(await screen.findByText("当前月份没有可用于计划与试算的发票数据。")).toBeInTheDocument();
   });
 
-  test("refreshes summary, plan locks, and drawer rows when the page regains focus", async () => {
+  test("does not refresh tax data when the page regains focus", async () => {
     window.history.pushState({}, "", "/tax-offset");
-    const user = userEvent.setup();
     const responses = [
       {
         month: "2026-03",
@@ -1147,17 +1146,20 @@ describe("Tax offset workbench", () => {
     expect(within(getStatCard("已认证结果进项税额")).getByText("0.00")).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: /11203490/ })).not.toBeDisabled();
     expect(screen.getAllByText("当前分组暂无记录")).toHaveLength(2);
+    const countTaxOffsetLoads = () => fetchMock.mock.calls.filter(([input]) => (
+      String(input) === "/api/tax-offset?month=2026-03"
+    )).length;
+    const initialRequestCount = countTaxOffsetLoads();
 
-    await user.click(document.body);
     await act(async () => {
       window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
     });
 
-    await waitFor(() =>
-      expect(within(getStatCard("已认证结果进项税额")).getByText("14,080.00")).toBeInTheDocument(),
-    );
-    expect(screen.getByRole("checkbox", { name: /11203490/ })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /11203999/ })).toBeInTheDocument();
+    expect(countTaxOffsetLoads()).toBe(initialRequestCount);
+    expect(within(getStatCard("已认证结果进项税额")).getByText("0.00")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: /11203490/ })).not.toBeDisabled();
+    expect(screen.queryByRole("button", { name: /11203999/ })).not.toBeInTheDocument();
   });
 
   test("hides read model refresh metadata without treating refreshing payload as final empty data", async () => {

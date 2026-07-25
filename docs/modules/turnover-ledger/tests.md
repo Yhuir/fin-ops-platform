@@ -39,7 +39,7 @@
 | Write UoW | `TurnoverLedgerWriteFacade`、`TurnoverLedgerWriteUnitOfWork`、`turnover_ledger_write_adapters.py` | stale precondition、idempotency、relation/extra/settings/bankdetail canonical 写入、零 read-model dirty/outbox、rollback、Workbench relation command service 委托 |
 | Read model / worker | `TurnoverLedgerQueryService`、`TurnoverLedgerSqlProjectionBuilder`、`TurnoverLedgerReadModelRefreshService` | fresh/stale/missing/refreshing、source versions、group breakdown、Workbench relation 状态投影、worker complete dirty scope |
 | 跨页面影响 | Workbench pair relation、Bank Details、Cost Statistics、Search、App Status | 手动闭环进入 Workbench active pair relation；撤回/分类变化后下游不能读旧 relation；App Status 不能误判 green |
-| 前端跨页事件 | `web/src/features/domainEvents.ts` | `turnoverRelationUpdated`、`workbenchRelationUpdated`、`turnoverLedgerExtraUpdated` 只提示已可见页面 normal GET；不替代 canonical source-version/freshness gate |
+| 前端刷新隔离 | `TurnoverLedgerPage.tsx`、`PageRouteHost.test.tsx` | 不发送/订阅 Turnover/Workbench/extra 跨页事件；focus/visibility/BFCache 零业务 reload，当前页写后只 normal GET |
 
 ## 现有测试入口
 
@@ -67,7 +67,7 @@
 
 - `web/src/test/TurnoverLedgerApi.test.ts`
 - `web/src/test/TurnoverLedgerPage.test.tsx`
-- `web/src/test/domainEvents.test.ts`
+- `web/src/test/PageRouteHost.test.tsx`
 - `web/e2e/turnover-ledger-flow.spec.ts`
 - `docs/modules/turnover-ledger/e2e-spec.md`
 - `docs/modules/turnover-ledger/e2e-coverage.md`
@@ -82,7 +82,7 @@
 | 4. Read model/cache/background job tests | 适用 | `tests/test_turnover_ledger_query_service.py`、`tests/test_turnover_ledger_read_model_refresh.py`、`tests/test_turnover_ledger_read_model_refresh_producer.py`、`tests/test_turnover_ledger_source_versions.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py` | 已覆盖 stale SQL read model 不伪装 fresh、missing required SQL read model 返回 refreshing、legacy fallback、source versions、projection 保存、Workbench relation fresh 状态写入 grouped payload、Workbench relation non-fresh 不保存半成品、worker handler、refresh producer 只 enqueue 不 direct clear、registry/App Status 登记。 |
 | 5. Frontend component and interaction tests | 适用 | `web/src/test/TurnoverLedgerPage.test.tsx`、`web/src/test/TurnoverLedgerApi.test.ts`、`web/e2e/turnover-ledger-flow.spec.ts` | 已覆盖 API mapper、首屏失败恢复、防 false-empty、tag/extra drawer、grouped table、manual closure、stale 禁写、提交前 normal GET/rebind、写后零 barrier与 normal GET、Cost 独立访问、toolbar 撤回、导出和零可见错误。 |
 | 6. End-to-end business-flow integration tests | 适用 | `tests/test_turnover_workbench_integration.py`、`tests/test_workbench_turnover_grouping.py`、`web/src/test/TurnoverLedgerPage.test.tsx`、`web/e2e/turnover-ledger-flow.spec.ts` | 已覆盖 deterministic 不进入 Workbench、manual closure canonical relation、失败不半写、legacy relation隔离；Browser 覆盖 tag-selection/confirm/withdraw 零 barrier与当前页 GET、独立进入 Cost 后 exact dependency-ordered fresh 和闭环成本行，且成功后零可见错误。 |
-| 7. Existing feature regression tests | 适用 | 上述全部，加 `tests/test_workbench_turnover_grouping.py`、`web/src/test/domainEvents.test.ts`、`web/e2e/turnover-ledger-flow.spec.ts` | 已保护旧 grouped shape、legacy flat/read model 兼容、标签准入 selected codes、导出字段、Workbench open grouping、Bankdetail tag batch、旧 relation/system relation 拒绝、domain event contract、成本统计下游 fresh read model 展示，以及真实浏览器里 tag selection、closure/recovery 不破坏表格选择、toolbar 状态和“成功但报错提示仍显示”的回归。 |
+| 7. Existing feature regression tests | 适用 | 上述全部，加 `tests/test_workbench_turnover_grouping.py`、`web/src/test/PageRouteHost.test.tsx`、`web/e2e/turnover-ledger-flow.spec.ts` | 已保护旧 grouped shape、legacy flat/read model 兼容、标签准入 selected codes、导出字段、Workbench open grouping、Bankdetail tag batch、旧 relation/system relation 拒绝、跨页/浏览器生命周期零自动 reload、成本统计下游 fresh read model 展示，以及真实浏览器写后当前页恢复回归。 |
 
 当前首轮闭环未发现必须立即新增的 P0 测试。已有 turnover 测试覆盖密度高，本轮不为了覆盖率新增低价值测试。
 
@@ -393,7 +393,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
 | blocking dirty scope 粒度不阻塞 all-scope 台账 | `BankTransactionTagReadFacadeTests.test_get_by_transaction_ids_refreshes_only_blocking_dirty_scopes` |
 | bank detail tag facade 下游版本合同 | `BankTransactionTagReadFacadeTests.test_get_by_transaction_ids_returns_standardized_fresh_tagged_rows`、`BankTransactionTagReadFacadeTests.test_bulk_get_for_rows_preserves_versions_for_downstream_preconditions` |
 | 前端 stale 写禁用 | `shows grouped read model stale warning and blocks manual closure`、`web/e2e/turnover-ledger-flow.spec.ts::shows stale grouped ledger data without allowing manual closure` |
-| 前端 access-to-fresh closure | tag-selection、extra、manual closure confirm/withdraw 成功后不进入全局 operation barrier；manual closure confirm 提交前仍刷新 grouped ledger 并绑定最新 flow-row versions，提交后只重跑当前页面正常 GET。其他页面不由 Turnover 写链投递，访问或重新可见时各自 freshness gate；`web/e2e/turnover-ledger-flow.spec.ts` 覆盖写成功、当前页面 GET 收敛、Cost 独立访问及 withdraw recovery，并检查零 fan-out/零可见错误残留 |
+| 前端 access-to-fresh closure | tag-selection、extra、manual closure confirm/withdraw 成功后不进入全局 operation barrier；manual closure confirm 提交前仍刷新 grouped ledger 并绑定最新 flow-row versions，提交后只重跑当前页面正常 GET。其他页面不由 Turnover 写链投递，只在 route 重进/查询变化/浏览器手动刷新/明确重试时走各自 freshness gate；`web/e2e/turnover-ledger-flow.spec.ts` 覆盖写成功、当前页面 GET 收敛、Cost 独立访问及 withdraw recovery，并检查零 fan-out/零可见错误残留 |
 | 手动闭环后同对方剩余流水保留 | `test_manual_closure_keeps_remaining_same_counterparty_rows_in_auto_relation`、`test_grouped_ledger_keeps_unselected_same_counterparty_flows_after_manual_closure` |
 | 现代闭环 canonical 单事实写入 | `test_preview_zero_difference_closure_does_not_mutate_relation_or_audit_snapshots`、`test_turnover_relation_write_port_previews_closure_without_persisting_relation`、`test_target_zero_difference_closure_facade_writes_only_canonical_workbench_relation`、`test_manual_closure_uses_canonical_relation_when_workbench_relation_read_model_is_stale` |
 | 新旧撤回路由隔离 | `test_legacy_turnover_relation_id_requires_explicit_relation_metadata`、`test_turnover_workbench_pair_port_rejects_cash_closure_with_invoice_members`、`test_turnover_cash_closure_withdraw_rejects_upgraded_case_and_keeps_relation_active`、`test_bank_turnover_scenario_uses_canonical_closure_withdraw_contract` |
@@ -440,7 +440,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
 1. 银行明细已确认外部往来分类 -> tag-selection 生效 -> 空 targets -> 当前 grouped normal GET 重新加载。Browser 覆盖保存请求体、零 barrier、reload 和零可见错误。
 2. grouped table 选择同组多条真实 flow rows -> 提交前 normal GET并重绑最新 row versions -> Turnover domain 无副作用校验 -> 只写 canonical Workbench pair relation -> 当前页 GET 显示闭环；随后独立访问成本统计，由其两阶段 gate 展示闭环成本行。Browser 覆盖该主链、`收支闭环`、`外部往来闭环成本项目` 和零可见错误。
 3. 现代手动闭环统一按 `cash_closure_case_id` 调用 `/api/turnover-ledger/closures/withdraw`，只撤回同一 Workbench case，并恢复确认前的 OA-bank relation；只有元数据显式携带旧 `turnover_relation_id` 的历史闭环才走 `/relations/{id}/withdraw`。已升级为包含发票或其他业务 row type 时必须从关联台撤回；任何失败都不得产生 Turnover 半写入。`web/e2e/turnover-ledger-flow.spec.ts` 已覆盖已闭环 flow row toolbar 撤回和 grouped payload 移除“收支闭环”。
-4. extra 保存 -> relation row 更新 -> `turnoverLedgerExtraUpdated` 只作为局部刷新提示。Browser 已覆盖 flow row 打开补充信息 Drawer、GET detail/extra、PUT 保存、当前 Turnover GET 重载、零 operation barrier，并记录 opener/save latency。
+4. extra 保存 -> relation row 更新 -> 只重跑当前 Turnover GET，不发送跨页事件。Browser 已覆盖 flow row 打开补充信息 Drawer、GET detail/extra、PUT 保存、当前 Turnover GET 重载、零 operation barrier，并记录 opener/save latency。
 5. grouped ledger `read_model_status=stale` -> 页面显示非最新 warning、保留当前 flow rows；即使选中两条真实流水，确认闭环仍禁用，Browser smoke 断言零 confirm mutation。
 6. tag-selection / bank-row-tags / confirm / withdraw / extra 只保存各自 canonical facts/version/audit；任一事务失败必须 rollback，成功时必须零 read-model queue I/O。
 7. tag-selection / extra / confirm / withdraw -> 只阻塞写请求；manual closure 提交前执行 grouped normal GET/rebind，无法解析精确月份 fail closed；写成功后零 operation barrier并 reload 当前页。Browser 断言不会调用 `POST /api/operation-barrier/status`。
@@ -463,7 +463,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_serv
 前端目标验证：
 
 ```bash
-cd web && npm test -- --run src/test/TurnoverLedgerApi.test.ts src/test/TurnoverLedgerPage.test.tsx src/test/GlobalOperationOverlayContext.test.tsx src/test/OperationBarrierApi.test.ts src/test/domainEvents.test.ts
+cd web && npm test -- --run src/test/TurnoverLedgerApi.test.ts src/test/TurnoverLedgerPage.test.tsx src/test/GlobalOperationOverlayContext.test.tsx src/test/OperationBarrierApi.test.ts src/test/PageRouteHost.test.tsx
 cd web && npx playwright test e2e/turnover-ledger-flow.spec.ts
 ```
 

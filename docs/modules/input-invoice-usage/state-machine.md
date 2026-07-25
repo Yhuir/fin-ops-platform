@@ -67,7 +67,7 @@ OA reverse batch 只记录本地流程状态，不是 OA/发票 relation 事实�
 - loading：前端请求 `/api/input-invoice-usage/rows` 与 filter options 时显示页面加载态。
 - empty：API 返回 `read_model_status=fresh` 且 `pagination.total=0` 时展示标准空态。
 - error：API 或解析失败时展示“进项发票使用情况加载失败，请稍后重试。”。
-- stale/refreshing：API 返回 `read_model_status=refreshing` 时，页面不展示旧 rows，保持刷新提示/轮询语义；服务端应入队对应 scope 的 read model refresh。
+- stale/refreshing：API 返回 `read_model_status=refreshing` 时，页面不展示旧 rows；本次访问只在 visible 状态以 250ms、最多 120 次继续 normal GET。fresh、hidden、route unmount、查询变化或 30 秒上限即停止，hidden→visible/focus 不自动恢复；浏览器手动刷新或明确刷新按钮开始新的有界尝试。
 - combined freshness：rows 与 filter-options 并行读取时，页面级 fresh 必须取两者合并结果；任一响应为 stale/missing/schema_mismatch/refreshing/unavailable 时，禁止进入普通 empty state、禁止启用导出，并沿用刷新诊断与重试语义。
 - permission disabled/hidden：列表读取无独立权限状态；OA 反提、支付规则保存等 mutation 能力按对应接口权限和前端按钮状态控制。
 - oa reverse pending tab：`待处理` 页签展示目标 OA 申请人、候选发票和 `创建 OA 草稿` 主动作；不展示 `创建本地批次`。

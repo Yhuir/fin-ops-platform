@@ -209,6 +209,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     connection = PostgresConnection(settings) if settings is not None else None
     queue = RuntimeQueueRepository(connection) if connection is not None else SimpleNamespace()
     read_model_repository = PostgresReadModelRepository(connection) if connection is not None else None
+    workbench_relation_projection_builder = (
+        WorkbenchRelationSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=WorkbenchRelationReadModelRepositoryPort(
+                read_model_repository
+            ),
+        )
+        if read_model_repository is not None
+        else None
+    )
     bank_transaction_tag_read_facade = (
         BankTransactionTagReadFacade(
             read_model_repository=read_model_repository,
@@ -221,6 +231,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         WorkbenchRelationReadFacade(
             read_model_repository=read_model_repository,
             queue_repository=queue,
+            expected_source_versions=(
+                workbench_relation_projection_builder.source_versions_for_scope
+                if workbench_relation_projection_builder is not None
+                else None
+            ),
+            expected_source_versions_by_scope=(
+                workbench_relation_projection_builder.source_versions_for_scopes
+                if workbench_relation_projection_builder is not None
+                else None
+            ),
         )
         if read_model_repository is not None
         else None
@@ -326,9 +346,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         if "workbench.read_model.refresh" not in config.event_types:
             config.event_types.append("workbench.read_model.refresh")
     if args.enable_workbench_relation_read_model_refresh:
-        projection_builder = WorkbenchRelationSqlProjectionBuilder(
-            connection=connection,
-            read_model_repository=WorkbenchRelationReadModelRepositoryPort(read_model_repository),
+        projection_builder = (
+            workbench_relation_projection_builder
+            or WorkbenchRelationSqlProjectionBuilder(
+                connection=connection,
+                read_model_repository=WorkbenchRelationReadModelRepositoryPort(
+                    read_model_repository
+                ),
+            )
         )
         refresh_service = WorkbenchRelationReadModelRefreshService(
             projection_builder=projection_builder,

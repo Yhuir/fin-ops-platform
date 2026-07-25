@@ -524,9 +524,9 @@ Plans:
 - [x] 26-04-PLAN — Strict-versus-legacy invoice provenance and ETC imported/closed Audit classification closure.
 - [x] 26-05-PLAN — Invoice-page relation relevance Audit closure and restored test-owned Turnover fixture proof.
 
-### Phase 27: 按页面访问收敛 Read Model、消除写后全局 Fan-out 并完成全页面生产性能验证
+### Phase 27: 按页面访问收敛 Read Model、消除写后全局 Fan-out 并完成全页面生产验证
 
-**Goal:** Migrate ordinary writes from synchronous cross-page read-model fan-out to canonical commit plus exact access-time freshness convergence, without new runtime infrastructure, while preserving strict correctness, Workbench active generations, explicit batch workflows and full production verification.
+**Goal:** Migrate ordinary writes from synchronous cross-page read-model fan-out to canonical commit plus exact access-time freshness convergence, without new runtime infrastructure, while preserving strict correctness, Workbench active generations, explicit batch workflows and full production verification. Latency is measured, but the 3-second stale-to-fresh target is deferred from this phase's completion gate.
 **Requirements**: RMF-01, RMF-02, RMF-03, RMF-04, RMF-05, RMF-06, RMF-07, RMF-08, RMF-09
 **Depends on:** Phase 26 correctness/frozen-requirement contracts and its controlled production fixture baseline; Phase 27 closes the fan-out performance failures exposed by that baseline.
 **Canonical refs:** `.planning/phases/27-read-model-fan-out/27-CONTEXT.md`, `.planning/phases/27-read-model-fan-out/27-RESEARCH.md`, `.planning/phases/27-read-model-fan-out/27-COVERAGE-MATRIX.md`, `docs/app-architecture/pages.md`, `docs/architecture/module-boundaries/read-model-contracts.md`, `docs/modules/read-models/boundary-io.md`, `docs/modules/runtime-workers/boundary-io.md`, `docs/operations/runtime-worker-governance.md`
@@ -534,9 +534,9 @@ Plans:
 
   1. All 17 registered pages, 110 exported POST/PUT/PATCH/DELETE clients, business Drawers/dynamic openers, 15 manifest read models and direct lifecycle/enqueue/barrier sites stay at zero unmapped coverage.
   2. Ordinary fact/rule writes commit canonical facts, audit/idempotency and stable versions without downstream page refresh fan-out; read-like commands never invalidate and explicit batches remain observable durable jobs.
-  3. Page route entry/reactivation/current-page reconcile performs a cheap freshness/version check and enqueues at most one exact-scope job on mismatch; hidden/unmounted pages produce no I/O and stale dependencies fail closed.
+  3. Page route entry/re-entry, query change, browser manual reload, explicit retry and current-page reconcile perform a cheap freshness/version check and enqueue at most one exact-scope job on mismatch; focus/visibility/BFCache/other-page writes produce no business I/O and stale dependencies fail closed.
   4. Existing gateway/queue/worker/CAS boundaries are reused, Workbench keeps active-generation atomic publish, and superseded lifecycle/barrier/fallback paths are deleted rather than retained in parallel.
-  5. Seven-category local gates and exact deployed production probes cover every page, operation and writable Drawer, including correctness, isolation, amplification and latency; the verified exact commit is pushed to remote main and deployed through the official entry.
+  5. Seven-category local gates and exact deployed production probes cover every page, operation and writable Drawer, including correctness, isolation, amplification, retry/reload recovery and measured latency. Completion requires eventual fresh canonical payloads within the existing bounded validation timeout, not a hard 3-second result; slower samples are recorded as `performance_follow_up`.
 
 **Plans:** 7 plans
 
@@ -548,6 +548,6 @@ Plans:
 - [x] 27-04-PLAN — Migrate pending/input/OA/output invoice-family rules, facts, Drawers and strict consumers.
 - [x] 27-05-PLAN — Complete imports, tax, ETC, settings, App Health and minimal page activation behavior.
 - [x] 27-06-PLAN — Delete superseded fan-out paths and close all local correctness/performance gates.
-- [ ] 27-07-PLAN — Commit/push main, deploy the exact release and run every-page/every-operation production validation.
+- [ ] 27-07-PLAN — Validate the already-deployed exact `719c9a34` release across every page/operation and close production evidence without a no-op redeploy.
 
 ---

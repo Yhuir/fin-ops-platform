@@ -158,7 +158,7 @@ Scoped incremental projection 可以在当前 SQL view 已 fresh 且 `source_ver
 
 fan-out-only `all` refresh 还必须维护子 scope 集合的收敛：worker 发现当前有效 month shards 后，应清理不再属于当前事实源的旧 month rows/scopes，或用等价机制把旧 scope 从页面 `all` freshness proof 中移除。否则旧 scope 的 source versions 会继续参与无界查询聚合，导致缺失/过期版本反复触发 refreshing。
 
-普通写操作后的用户体验闭环由当前页面 normal GET 负责：HTTP command 成功即结束写阻塞；当前可见页面重新执行自己的 freshness/status/enqueue gate，hidden→visible 与另一个可见窗口也只在各自收到既有轻量提示后独立 GET。事件与 command receipt 不证明 read model fresh。GET 返回 refreshing 时页面用本模块有界重试；blocked/failed 必须展示真实原因，不能把 canonical 写成功改写成失败。
+普通写操作后的用户体验闭环由当前页面 normal GET 负责：HTTP command 成功即结束写阻塞；当前页面按命令合同重新执行自己的 freshness/status/enqueue gate，其他页面/tab 不自动 GET。route 进入/重进、页面查询变化、浏览器手动刷新或明确重试才启动新的页面 load；focus/visibility/BFCache/旧业务事件零业务 I/O。command receipt 不证明 read model fresh。GET 返回 refreshing 时页面使用有界、可取消重试；blocked/failed 必须展示真实原因，不能把 canonical 写成功改写成失败。
 
 `/api/operation-barrier/status` 只保留给显式 import/reapply/job 或被业务合同声明的 exact target；它不替代页面 fresh gate，也不得用于普通确认/撤回/规则保存。Workbench 继续以 active generation 原子发布为展示事实；其他 consumer 不在 relation 写后后台全量追赶，而在被访问时比较 canonical expected versions 并精确 enqueue 自身 scope。
 

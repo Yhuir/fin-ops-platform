@@ -5,7 +5,7 @@
 | Spec ID | 状态 | 自动化证据 | 说明 |
 | --- | --- | --- | --- |
 | `APP-SHELL-E2E-001` | `covered` | `web/src/test/App.test.tsx`、`web/e2e/app-shell.spec.ts` | 覆盖已认证 shell、主导航和代表性业务页渲染。 |
-| `APP-SHELL-E2E-002` | `covered` | `web/src/test/PageRouteHost.test.tsx`、`web/src/test/domainEvents.test.ts` | 覆盖 route 切换卸载旧页面、旧 active event listener cleanup 和 domain event 合同。 |
+| `APP-SHELL-E2E-002` | `covered` | `web/src/test/PageRouteHost.test.tsx`、`web/src/test/App.test.tsx` | 覆盖 route 切换卸载旧页面、focus/visibility/BFCache 零业务 reload 和旧业务事件模块删除守卫。 |
 | `APP-SHELL-E2E-003` | `covered` | `web/src/test/PageRouteHost.test.tsx`、`web/src/test/AppSidebar.test.tsx`、`web/src/test/App.test.tsx` | 覆盖 registry 同源、未知 route redirect、lazy fallback、sidebar route/preload。 |
 | `APP-SHELL-E2E-004` | `covered` | `web/src/test/AppSidebar.test.tsx` | 覆盖 active route、nested path、import shortcut inactive、hover/focus preload。 |
 | `APP-SHELL-E2E-005` | `covered` | `web/src/test/AppSidebar.test.tsx`、`web/src/test/App.test.tsx`、`web/e2e/app-shell-responsive.spec.ts` | 覆盖 compact drawer 打开、导航后关闭和真实 Chromium mobile viewport。 |
@@ -26,6 +26,7 @@
 | 真实 OA iframe 像素级视觉、真实 cookie/代理组合 | `external-risk` | staging/production smoke，不写成本地 CI covered。 |
 | 真实触摸惯性和设备浏览器差异 | `external-risk` | 发布前真实设备或 BrowserStack 类 smoke。 |
 | chunk 网络失败后的浏览器缓存行为 | `external-risk` | 若线上出现再补专项 Playwright/network test；当前合同是 preload 失败不阻断导航。 |
+| 浏览器手动刷新后的页面业务 fresh 收敛 | `page-owned` | 由各页面 query/read-model 模块和 Phase 27 生产矩阵验证；shell 只保证不拦截 reload。 |
 
 ## 下一轮建议
 

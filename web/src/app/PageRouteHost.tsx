@@ -1,5 +1,5 @@
 import { Navigate, matchPath, useLocation } from "react-router-dom";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useMemo } from "react";
 
 import { PageRuntimeProvider } from "../contexts/PageRuntimeContext";
 import type { AppPageRoute } from "./pageRegistry";
@@ -23,45 +23,6 @@ function PageRouteFallback({ pageKey }: { pageKey: string }) {
 export default function PageRouteHost({ routes }: { routes: AppPageRoute[] }) {
   const location = useLocation();
   const matchedRoute = useMemo(() => findRoute(routes, location.pathname), [location.pathname, routes]);
-  const [runtime, setRuntime] = useState(() => ({
-    active: document.visibilityState !== "hidden",
-    activationGeneration: 1,
-  }));
-
-  useEffect(() => {
-    const setActive = (active: boolean, reactivate = false) => {
-      setRuntime((current) => {
-        if (current.active === active && !reactivate) {
-          return current;
-        }
-        return {
-          active,
-          activationGeneration: active && (!current.active || reactivate)
-            ? current.activationGeneration + 1
-            : current.activationGeneration,
-        };
-      });
-    };
-    const handleFocus = () => setActive(document.visibilityState !== "hidden", true);
-    const handleBlur = () => setActive(false);
-    const handleVisibilityChange = () => setActive(document.visibilityState !== "hidden");
-    const handlePageShow = (event: PageTransitionEvent) => {
-      if (event.persisted) {
-        setActive(document.visibilityState !== "hidden", true);
-      }
-    };
-
-    window.addEventListener("focus", handleFocus);
-    window.addEventListener("blur", handleBlur);
-    window.addEventListener("pageshow", handlePageShow);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => {
-      window.removeEventListener("focus", handleFocus);
-      window.removeEventListener("blur", handleBlur);
-      window.removeEventListener("pageshow", handlePageShow);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, []);
 
   if (!matchedRoute) {
     return <Navigate replace to="/" />;
@@ -73,8 +34,8 @@ export default function PageRouteHost({ routes }: { routes: AppPageRoute[] }) {
     <PageRuntimeProvider
       value={{
         pageKey: matchedRoute.pageKey,
-        active: runtime.active,
-        activationGeneration: runtime.activationGeneration,
+        active: true,
+        activationGeneration: 1,
       }}
     >
       <Suspense fallback={<PageRouteFallback pageKey={matchedRoute.pageKey} />}>

@@ -14,14 +14,13 @@
 - 页面入口：`web/src/pages/*`
 - API client：`web/src/features/*/api.ts`
 - 操作闭环 API client：`web/src/features/operationBarrier/api.ts`
-- 前端 domain event：`web/src/features/domainEvents.ts`
 - 后端路由：`backend/src/fin_ops_platform/app/routes_*.py` 与仍在 `server.py` 的 legacy handler
 
 ## 页面分组
 
 | 页面域 | 前端入口 | API / 后端 owner | 主要事实来源 | 刷新来源 |
 | --- | --- | --- | --- | --- |
-| 银企核销 / 关联台 | `web/src/pages/ReconciliationPage.tsx`、workbench 页面组件 | reconciliation/workbench routes、workbench service、read model service | 银行流水、OA 单据、发票、确认关系、active generation | 关系确认/撤回、导入确认、read model refresh、domain event |
+| 银企核销 / 关联台 | `web/src/pages/ReconciliationPage.tsx`、workbench 页面组件 | reconciliation/workbench routes、workbench service、read model service | 银行流水、OA 单据、发票、确认关系、active generation | route 进入/重进、页面查询变化、当前页写后 reconcile、手动重试 |
 | 银行明细 | `web/src/pages/BankDetailsPage.tsx` | bank detail routes、bank detail read model/query service | 银行流水、标签、业务对象关系、no-OA 状态 | 导入、标签规则、关系确认、no-OA 批处理 |
 | 往来款管理 | `web/src/pages/TurnoverLedgerPage.tsx` | turnover ledger routes/service、workbench pair relation service | 外部往来候选、人工闭环、利息、项目归因、Workbench pair relation | 银行明细、关联台、人工闭环/撤回 |
 | 待找发票 | `web/src/pages/PendingInvoicesPage.tsx` | pending invoice routes/query service | 支出/收入流水、进项发票、规则建议、选择已有发票关系、收入状态覆盖 | 进项导入、选择已有发票确认/撤回、收入状态覆盖、规则变更 |
@@ -60,7 +59,7 @@ domain registry 是页面域入口；`AppStatusReadModelRegistry` 是 read model
 
 `batch_accounting` 页面依赖 Workbench active payload 和 `workbench_relation` read model 判定已提交/未提交。`GET /api/batch-accounting` 必须透出 relation read model 的 `read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys` 和 `refresh_enqueued`；页面不能在 relation read model 非 fresh 时把空关系结果当作真实“全部未提交”。未提交 bucket 的 relation lookup 输入必须先收窄到批量账务银行候选和日常报销 OA 候选，`summary.submitted_count` 只能走年份级 count I/O；已提交 bucket 才读取完整 submitted relation DTO。
 
-`bank_flow_rule_batches` 列表只通过 bank-flow 专属 paged read port 读取当前页和完整筛选范围聚合，默认 page size 50，不能先加载全部批次再由前端或 application 分页。未提交 rail 和批次只接纳 active 且 OA/发票双 false 的标签；submitted/history rail 使用实际历史聚合，不受当前规则隐藏。详情按成员 ID 一次 bulk 读取 canonical 银行流水。规则保存把 settings CAS 与精确受影响月份 dirty/outbox 原子提交；submit/withdraw/reset 以 command 原子提交为前台完成边界，页面立即更新本地 committed state；`bank_flow_rule_batch` freshness wait 与 reload 只在后台 reconcile，完整跨页 targets 仍通过既有 domain event 传递，不能把关联台或其它页面 freshness 重新变成当前页操作的同步依赖。
+`bank_flow_rule_batches` 列表只通过 bank-flow 专属 paged read port 读取当前页和完整筛选范围聚合，默认 page size 50，不能先加载全部批次再由前端或 application 分页。未提交 rail 和批次只接纳 active 且 OA/发票双 false 的标签；submitted/history rail 使用实际历史聚合，不受当前规则隐藏。详情按成员 ID 一次 bulk 读取 canonical 银行流水。规则保存、submit/withdraw/reset 以 command 原子提交为前台完成边界，当前页面只更新本地 committed state并通过自身 normal GET reconcile；关联台或其它页面只在其 route 进入/重进、查询变化或手动重试时检查 freshness，不能成为当前页操作的同步依赖。
 
 ## 页面职责边界
 
@@ -68,7 +67,7 @@ domain registry 是页面域入口；`AppStatusReadModelRegistry` 是 read model
 - 页面写操作可以接入 `GlobalOperationOverlayProvider`，在 operation 完成前显示全屏阻塞层，防止用户在同一事实链路尚未收敛时继续操作。overlay 只包裹会改变后端事实或跨页面 read model 的操作；普通页面初始读取、筛选、分页、详情打开不使用全屏阻塞。
 - 页面切换时 `PageRouteHost` 只挂载当前匹配 route；离开页面会卸载页面 React tree，不保留隐藏 DOM frame、mounted cache、TTL/LRU 策略或页面数据 snapshot。返回页面时页面重新 mount，并通过现有 API/read boundary 重新加载数据。
 - 页面注册表不声明保活策略；`AppPageRoute` 只维护 `path`、`pageKey`、`component`、`preload()` 和 `end`。侧栏分组继续从页面注册表派生，不能在侧栏里维护第二份路由事实。
-- `PageRuntimeContext` 仍为当前页面提供 active runtime context，供页面 hook 统一读取当前页面身份；因为旧页面会卸载，inactive 页面不再接收或延迟 replay finance domain event。
+- `PageRuntimeContext` 仅为当前挂载页面提供稳定的 `pageKey/active` 上下文；它不监听浏览器生命周期，不携带业务 DTO，也不协调跨页刷新。
 - 页面入口使用 lazy route chunks；`AppPageRoute.preload()` 和 `SidebarItem.preload()` 是 route chunk 预加载入口。侧边栏可以在 hover/focus/touch start 时预加载目标页，但点击导航仍由 React Router `Link` 负责。
 - 页面会话状态只保存当前浏览器标签页内的轻量可恢复 UI，例如查询、筛选、分页、排序、tab、选中行、展开行和详情 drawer target；不保存滚动位置、列表 rows、read model payload、loading、一次性 toast、失败中的提交、权限事实或业务事实。
 - 财务表格继续使用 `FinanceTable` 和 `useFinanceTableSession` 保存分页、排序、过滤、列和选择状态。表格滚动位置不写入页面 session，返回页面后由浏览器和组件默认布局决定。
@@ -83,8 +82,9 @@ domain registry 是页面域入口；`AppStatusReadModelRegistry` 是 read model
 | 场景 | 旧生产事实 | Phase 27 当前合同 |
 | --- | --- | --- |
 | 在页面 A 普通确认/撤回 | 部分链路写后 fan-out 多个 read model，并由页面 barrier 等待跨页 target | canonical commit 后只 reconcile A 当前 exact scope；页面 B 不成为 A 的同步依赖 |
-| 从 A 导航到 B，再返回 A，或浏览器从 back-forward cache 恢复 | 普通路由切换会重新 mount；BFCache 恢复不会重新 mount | mount 或 `pageshow(persisted=true)` 都递增页面 activation generation 并触发正常 query；fresh gate 比较 source/schema/rule versions，只有 mismatch 才 enqueue/rebuild exact scope |
-| 两个独立 browser tab 同时打开 | 前端内存事件不能可靠跨 tab 证明 freshness | B 在 focus/visibility activation 或下一次 query 时走后端 fresh gate；可加提示，但正确性只由后端版本合同保证 |
+| 从 A 导航到 B，再返回 A | 路由切换会卸载旧页，返回时重新 mount | route mount 触发正常 query；fresh gate 比较 source/schema/rule versions，只有 mismatch 才 enqueue/rebuild exact scope |
+| 浏览器 focus、hidden→visible 或 BFCache 恢复 | 旧实现会把浏览器生命周期当成业务刷新信号 | 当前实现不发业务页面 I/O；用户手动刷新浏览器或重新进入 route 后才重新执行页面 load |
+| 两个独立 browser tab 同时打开 | 两页互不共享 freshness 事实 | A 的写入不自动刷新 B；B 的下一次 route 进入/查询变化/手动刷新走后端 fresh gate |
 | Drawer 规则保存 | 当前部分 Drawer 文案和实现仍是“保存并同步/刷新”并等待 projection | 保存 rule version/signature 后立即完成；当前页面按 query-time 规则或 exact scope reconcile，其他消费者访问时判断语义 mismatch |
 | 导入、reapply、reset、repair | 本来就是可能大批量的 durable/background workflow | 继续作为 `explicit-batch`，3 秒约束 accept/commit，不承诺 3 秒全历史重建；进度、失败、恢复必须可见 |
 
@@ -98,18 +98,12 @@ domain registry 是页面域入口；`AppStatusReadModelRegistry` 是 read model
 
 “重新计算页面数据”不等于每次访问无条件重建。高性能合同是每次访问都做廉价 freshness/version check：版本一致直接读取 fresh projection；只有不一致才重建当前 exact scope。无条件 rebuild 会让已 fresh 页面也承担数据库和 worker 成本，反而更慢。
 
-## 前端事件关系
+## 前端刷新合同
 
-前端 domain event 用于同一浏览器会话内的页面刷新提示，不是事实源，也不负责保证最终一致性。
-
-| 写入动作 | 事件影响 | 典型受影响页面 |
-| --- | --- | --- |
-| 银行流水导入确认 | 新流水、标签和统计需要刷新 | 银行明细、关联台、往来款、成本统计、App Health |
-| OA/发票/ETC 导入确认 | 外部单据进入 canonical facts；确定性匹配若唯一安全则直接创建正式关系，并刷新相关 read model | 关联台、待找发票、OA 待付款、税金抵扣、ETC 批次 |
-| 关系确认 / 撤回 | 对象关系、流水状态、发票使用状态变化 | 关联台、银行明细、待找发票、税金抵扣、往来款 |
-| 外部往来手动闭环 | 同一往来组多笔银行流水形成 Turnover 手动闭环和 Workbench active relation；既有正式关系可原子扩展进同一 `turnover_manual_closure` case。active relation 继续驱动跨页面 linked ownership；关联台展示区由 relation 自身的显式完成合同决定 | 往来款、关联台、成本统计、搜索 |
-| 标签/规则配置保存 | 标签判定和候选建议变化 | 银行明细、关联台、待找发票、成本统计 |
-| 数据重置 / backfill | read model 状态和缓存失效 | 所有列表页、App Health |
+- 普通写入不发送 finance domain event、window 自定义刷新事件或业务 `BroadcastChannel`。
+- 当前页面可在命令成功后用自己的 normal GET 更新；其他页面不自动读取。
+- route 进入/重进、页面查询变化、浏览器手动刷新和明确的页面重试是普通业务页面 load 入口。
+- App Health、后台任务、导入/reapply/repair 进度与 Workbench refresh-status 属于运维/任务状态通道，保留各自明确 owner，不得被业务页面当成跨页刷新总线。
 
 ## 后端间接影响关系
 
@@ -118,9 +112,9 @@ domain registry 是页面域入口；`AppStatusReadModelRegistry` 是 read model
 - `DerivedDataLifecycleService` 负责把业务事件转换成 dirty scope、outbox 和 read model refresh 请求。
 - `RuntimeQueueRepository.enqueue_read_model_refresh(...)` 是 read model refresh 的标准入队边界。
 - `ReadModelQueryGateway` 负责 freshness/status/enqueue 判断，页面不能绕过它读取旧 projection 并显示为 fresh。
-- `/api/operation-barrier/status` 只读取 runtime snapshot 判定写操作后的目标 read model/scope 是否 fresh；它不写 queue、不重建 read model、不把状态改成 green。前端只有在 barrier fresh 且页面自身重新读取到 fresh payload 后，才能释放写操作 overlay。
+- `/api/operation-barrier/status` 只保留给显式返回非空 targets 的 maintenance/integration 操作；普通 mutation 不调用它。
 - worker registry 定义哪些 read model 可被后台刷新、如何 drain、如何被 App Health 观测。
 
 ## 维护要求
 
-新增页面或改页面事实来源时，更新本文件的页面分组和影响关系。新增跨页刷新、domain event、derived lifecycle 事件时，同时检查 `runtime-and-ownership.md`、`docs/dev/api-contracts.md` 和相关产品文档是否需要更新。
+新增页面或改页面事实来源时，更新本文件的页面分组和影响关系。新增 derived lifecycle 或任务进度事件时，同时检查 `runtime-and-ownership.md`、`docs/dev/api-contracts.md` 和相关产品文档是否需要更新。

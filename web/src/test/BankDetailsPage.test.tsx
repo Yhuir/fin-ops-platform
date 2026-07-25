@@ -538,49 +538,35 @@ describe("Bank details page", () => {
       bankDetailTransactionReadModelStatuses: ["refreshing", "refreshing", "fresh"],
     });
     const fetchMock = baseFetchMock;
-    const autoTagRulesListener = vi.fn();
-    window.addEventListener("bankAutoTagRulesUpdated", autoTagRulesListener);
     renderBankDetailsPage();
 
-    try {
-      const page = await screen.findByTestId("bank-details-page");
-      await within(page).findByText("云南溯源科技有限公司");
-      const initialTransactionRequests = requestUrls(fetchMock, "/api/bank-details/transactions").length;
+    const page = await screen.findByTestId("bank-details-page");
+    await within(page).findByText("云南溯源科技有限公司");
+    const initialTransactionRequests = requestUrls(fetchMock, "/api/bank-details/transactions").length;
 
-      await user.click(within(page).getByRole("button", { name: /自动标签规则/ }));
-      const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
-      await editRuleLabelInDrawer(user, drawer, "费用 / 工资", "费用", "规则刷新测试");
-      await user.click(within(drawer).getByRole("button", { name: "保存" }));
+    await user.click(within(page).getByRole("button", { name: /自动标签规则/ }));
+    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
+    await editRuleLabelInDrawer(user, drawer, "费用 / 工资", "费用", "规则刷新测试");
+    await user.click(within(drawer).getByRole("button", { name: "保存" }));
 
-      expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
+    expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
 
-      await waitFor(() => {
-        expect(autoTagRulesListener).toHaveBeenCalled();
-        expect(autoTagRulesListener.mock.calls[0][0].detail).toEqual(expect.objectContaining({
-          version: 2,
-          source: "bank_details_auto_tag_rules",
-          action: "saved",
-        }));
-      });
-      await waitFor(() => {
-        expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests);
-      });
-      await waitFor(() => {
-        expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests + 2);
-        expect(screen.getAllByText("规则已保存。").length).toBeGreaterThan(0);
-      }, { timeout: 4000 });
-      const saveCall = fetchMock.mock.calls.find(([input, init]) => (
-        new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost").pathname === "/api/bank-details/auto-tag-rules"
-        && init?.method === "PUT"
-      ));
-      expect(saveCall).toBeTruthy();
-      expect(JSON.parse(String(saveCall?.[1]?.body || "{}")).refresh_scope).toEqual({
-        date_from: "2026-01-01",
-        date_to: "2026-12-31",
-      });
-    } finally {
-      window.removeEventListener("bankAutoTagRulesUpdated", autoTagRulesListener);
-    }
+    await waitFor(() => {
+      expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests);
+    });
+    await waitFor(() => {
+      expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests + 2);
+      expect(screen.getAllByText("规则已保存。").length).toBeGreaterThan(0);
+    }, { timeout: 4000 });
+    const saveCall = fetchMock.mock.calls.find(([input, init]) => (
+      new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost").pathname === "/api/bank-details/auto-tag-rules"
+      && init?.method === "PUT"
+    ));
+    expect(saveCall).toBeTruthy();
+    expect(JSON.parse(String(saveCall?.[1]?.body || "{}")).refresh_scope).toEqual({
+      date_from: "2026-01-01",
+      date_to: "2026-12-31",
+    });
   });
 
   test("does not call an operation barrier after automatic tag rules are saved", async () => {
@@ -1248,138 +1234,6 @@ describe("Bank details page", () => {
     expect(window.URL.createObjectURL).not.toHaveBeenCalled();
 
     Object.defineProperty(window.URL, "createObjectURL", { configurable: true, value: originalCreateObjectUrl });
-  });
-
-  test("refetches bank detail data when workbench relation updates without local tag patching", async () => {
-    const fetchMock = installMockApiFetch();
-    renderBankDetailsPage();
-
-    await screen.findByText("云南溯源科技有限公司");
-    const initialAccountRequests = requestUrls(fetchMock, "/api/bank-details/accounts").length;
-    const initialTransactionRequests = requestUrls(fetchMock, "/api/bank-details/transactions").length;
-
-    act(() => {
-      window.dispatchEvent(new CustomEvent("workbenchRelationUpdated"));
-    });
-
-    await waitFor(() => {
-      expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests);
-    });
-    expect(requestUrls(fetchMock, "/api/bank-details/accounts").length).toBe(initialAccountRequests);
-  });
-
-  test("refetches bank detail data when bank detail tag settings update", async () => {
-    const fetchMock = installMockApiFetch();
-    renderBankDetailsPage();
-
-    await screen.findByText("云南溯源科技有限公司");
-    const initialAccountRequests = requestUrls(fetchMock, "/api/bank-details/accounts").length;
-    const initialTransactionRequests = requestUrls(fetchMock, "/api/bank-details/transactions").length;
-
-    act(() => {
-      window.dispatchEvent(new CustomEvent("finops:bank-transaction-tags-updated", { detail: { version: 2 } }));
-    });
-
-    await waitFor(() => {
-      expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests);
-    });
-    expect(requestUrls(fetchMock, "/api/bank-details/accounts").length).toBe(initialAccountRequests);
-  });
-
-  test("refetches bank detail data on focus when bank tag version fallback detects a missed update", async () => {
-    vi.stubGlobal("BroadcastChannel", undefined);
-    let tagVersion = 1;
-    const localStorageStore = new Map<string, string>();
-    vi.stubGlobal("localStorage", {
-      getItem: vi.fn((key: string) => localStorageStore.get(key) ?? null),
-      setItem: vi.fn((key: string, value: string) => {
-        localStorageStore.set(key, value);
-      }),
-      removeItem: vi.fn((key: string) => {
-        localStorageStore.delete(key);
-      }),
-      clear: vi.fn(() => {
-        localStorageStore.clear();
-      }),
-    });
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const rawUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-      const url = new URL(rawUrl, "http://localhost");
-      if (url.pathname === "/api/bank-details/accounts") {
-        return new Response(JSON.stringify({
-          read_model_status: "fresh",
-          total_balance: "130500.50",
-          balance_account_count: 1,
-          missing_balance_account_count: 0,
-          accounts: [
-            {
-              account_key: "icbc:6386",
-              bank_name: "工商银行",
-              account_last4: "6386",
-              display_name: "工商银行 6386",
-              latest_balance: "130500.50",
-              latest_balance_at: "2026-05-01 16:30:00",
-              has_balance: true,
-              transaction_count: 1,
-            },
-          ],
-        }), { status: 200, headers: { "Content-Type": "application/json" } });
-      }
-      if (url.pathname === "/api/bank-details/transactions") {
-        return new Response(JSON.stringify({
-          read_model_status: "fresh",
-          rows: [
-            {
-              id: `bank-detail-version-${tagVersion}`,
-              trade_time: "2026-05-01 10:30:00",
-              counterparty_name: `版本${tagVersion}供应商`,
-              direction: "income",
-              direction_label: "收",
-              amount: "20000.00",
-              balance: "130500.50",
-              summary: "项目回款",
-              purpose: "货款",
-              bank_name: "工商银行",
-              account_last4: "6386",
-              effective_category_code: "fee",
-              effective_category_label: "手续费",
-              effective_category_path: ["自动识别", "手续费"],
-              effective_category_source: "auto",
-            },
-          ],
-          category_counts: { fee: 1, uncategorized: 0 },
-          pagination: { page: 1, page_size: 100, total: 1 },
-          tag_dictionary: {
-            version: tagVersion,
-            tags: [{ code: "fee", label: "手续费", path: ["自动识别", "手续费"], status: "active", source: "system" }],
-          },
-        }), { status: 200, headers: { "Content-Type": "application/json" } });
-      }
-      if (url.pathname === "/api/bank-details/auto-tag-rules") {
-        return new Response(JSON.stringify({
-          version: tagVersion,
-          active_rules: [],
-          archived_rules: [],
-        }), { status: 200, headers: { "Content-Type": "application/json" } });
-      }
-      throw new Error(`Unhandled fetch mock for ${url.pathname}`);
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderAuthenticatedAppAt("/bank-details");
-    expect(await screen.findByText("版本1供应商")).toBeInTheDocument();
-    const initialTransactionRequests = requestUrls(fetchMock as ReturnType<typeof installMockApiFetch>, "/api/bank-details/transactions").length;
-
-    tagVersion = 2;
-    window.localStorage.setItem("finops.bankTransactionTags.version", "2");
-    act(() => {
-      window.dispatchEvent(new Event("focus"));
-    });
-
-    await waitFor(() => {
-      expect(requestUrls(fetchMock as ReturnType<typeof installMockApiFetch>, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests);
-    });
-    expect(await screen.findByText("版本2供应商")).toBeInTheDocument();
   });
 
   test("saving auto tag rules refreshes transactions without refetching account balances", async () => {

@@ -28,7 +28,6 @@ import {
   savePendingInvoiceRules,
   savePendingInvoiceIncomeStatuses,
 } from "../features/pendingInvoices/api";
-import { FINANCE_DOMAIN_EVENTS, emitFinanceDomainEvent } from "../features/domainEvents";
 import type {
   AttachExistingInvoiceResult,
   AttachExistingInvoicesResult,
@@ -50,7 +49,7 @@ import type {
 
 const DEFAULT_PAGE_SIZE = 50;
 const READ_MODEL_REFRESH_RETRY_MS = 250;
-const TAG_SYNC_EVENT = "finops:bank-transaction-tags-updated";
+const READ_MODEL_REFRESH_MAX_ATTEMPTS = 120;
 const TAG_VERSION_STORAGE_KEY = "finops.bankTransactionTags.version";
 
 type ActiveDrawer = "rules" | "relation" | "invoicePicker" | "detail" | "export" | null;
@@ -150,14 +149,6 @@ function isAbortLikeError(caught: unknown) {
   return caught instanceof Error && (caught.name === "AbortError" || /aborted|abort/i.test(caught.message));
 }
 
-function eventVersion(event: Event) {
-  if (!(event instanceof CustomEvent) || !event.detail || typeof event.detail !== "object") {
-    return null;
-  }
-  const version = Number((event.detail as { version?: unknown }).version);
-  return Number.isFinite(version) ? version : null;
-}
-
 function persistTagVersion(version: number | null | undefined) {
   if (typeof version !== "number" || !Number.isFinite(version)) {
     return;
@@ -220,6 +211,7 @@ export default function PendingInvoicesPage() {
   const [rulesTagRefreshToken, setRulesTagRefreshToken] = useState(0);
   const [pendingIncomeStatusRows, setPendingIncomeStatusRows] = useState<Set<string>>(() => new Set());
   const tagVersionRef = useRef<number | null>(readPersistedTagVersion());
+  const refreshAttemptRef = useRef(0);
 
   const filterOpen = filterMenuOpen;
 
@@ -258,7 +250,10 @@ export default function PendingInvoicesPage() {
     }
   }, []);
 
-  const loadRows = useCallback((signal?: AbortSignal) => {
+  const loadRows = useCallback((signal?: AbortSignal, retry = false) => {
+    if (!retry) {
+      refreshAttemptRef.current = 0;
+    }
     setLoading(true);
     setError(null);
     fetchPendingInvoiceRows({ ...query, signal })
@@ -309,42 +304,24 @@ export default function PendingInvoicesPage() {
   }, [active, activationGeneration, direction, keyword, query.filter, queryFilters, sortDirection, sortField, refreshToken]);
 
   useEffect(() => {
-    if (!active || readModelStatus !== "refreshing" || loading) {
+    if (
+      !active
+      || document.visibilityState !== "visible"
+      || readModelStatus !== "refreshing"
+      || loading
+      || refreshAttemptRef.current >= READ_MODEL_REFRESH_MAX_ATTEMPTS
+    ) {
       return undefined;
     }
-    const retryId = window.setTimeout(() => loadRows(), READ_MODEL_REFRESH_RETRY_MS);
-    return () => window.clearTimeout(retryId);
-  }, [active, loadRows, loading, readModelStatus]);
-
-  useEffect(() => {
-    const handleTagUpdate = (event: Event) => {
-      if (!active || document.visibilityState === "hidden") {
+    const retryId = window.setTimeout(() => {
+      if (document.visibilityState !== "visible") {
         return;
       }
-      const version = eventVersion(event);
-      if (version !== null) {
-        tagVersionRef.current = version;
-        persistTagVersion(version);
-      }
-      setRulesTagRefreshToken((current) => current + 1);
-      setRefreshToken((current) => current + 1);
-    };
-    window.addEventListener(TAG_SYNC_EVENT, handleTagUpdate);
-
-    let channel: BroadcastChannel | null = null;
-    if (typeof BroadcastChannel !== "undefined") {
-      channel = new BroadcastChannel(TAG_SYNC_EVENT);
-      channel.onmessage = (message) => {
-        const version = Number((message.data as { version?: unknown } | undefined)?.version);
-        window.dispatchEvent(new CustomEvent(TAG_SYNC_EVENT, { detail: { version: Number.isFinite(version) ? version : undefined } }));
-      };
-    }
-
-    return () => {
-      window.removeEventListener(TAG_SYNC_EVENT, handleTagUpdate);
-      channel?.close();
-    };
-  }, [active]);
+      refreshAttemptRef.current += 1;
+      loadRows(undefined, true);
+    }, READ_MODEL_REFRESH_RETRY_MS);
+    return () => window.clearTimeout(retryId);
+  }, [active, loadRows, loading, readModelStatus]);
 
   const filterOptions = useMemo(() => statusFilterOptionsForDirection(direction), [direction]);
 
@@ -443,16 +420,6 @@ export default function PendingInvoicesPage() {
   }
 
   async function handleAttachConfirmed(result: AttachExistingInvoiceResult | AttachExistingInvoicesResult) {
-    emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.invoiceFactUpdated, {
-      affectedMonths: result.affectedMonths,
-      affectedRowIds: [...result.affectedTransactionIds, ...result.affectedInvoiceIds],
-      source: "pending_invoice_attach_existing_invoice",
-    });
-    emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
-      affectedMonths: result.affectedMonths,
-      affectedRowIds: result.affectedTransactionIds,
-      source: "pending_invoice_attach_existing_invoice",
-    });
     const operationResult = await runOperation({
       loadingMessage: "正在等待关联关系同步...",
       blockOnError: false,

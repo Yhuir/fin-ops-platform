@@ -151,7 +151,7 @@ manual confirmed relation
 | invalid | 利率类型、负数、日期或过长文本非法 |
 | stale | `expected_versions` 不匹配，拒绝保存 |
 
-extra 保存只改变 Turnover canonical extra/version/audit 和局部 UI；前端可发 `turnoverLedgerExtraUpdated` 作为刷新提示并重跑本页 normal GET，但不能投递页面 refresh，也不能让无关页面依赖该事件作为事实源。
+extra 保存只改变 Turnover canonical extra/version/audit 和局部 UI；前端只重跑本页 normal GET，不发送跨页刷新事件，也不能让无关页面自动读取。
 
 ## UI 状态
 
@@ -169,11 +169,7 @@ extra 保存只改变 Turnover canonical extra/version/audit 和局部 UI；前�
 | operation pending | 只覆盖 tag-selection、extra、confirm、withdraw HTTP 请求；成功后结束全局阻塞并 reload grouped normal GET，non-fresh 使用页面内状态 | page/API tests |
 | workbench relation feedback | grouped payload 中的 flow row 展示后端 projection 给出的正向 relation chip：`linked_oa=true` 显示“已关联 OA”，`linked_invoice=true` 显示“已关联 发票”，`cash_closure_linked=true` 显示“收支闭环”。未发生闭环时不显示负向闭环 chip。toolbar 的确认/撤回只看 `cash_closure_*` 字段，不看 OA/发票 chip；这些字段来自后端 projection，不来自前端本地事件 | API mapper / page tests |
 
-前端跨页事件：
-
-- confirm/withdraw 成功后发 `turnoverRelationUpdated` 和 `workbenchRelationUpdated`。
-- extra 保存成功后发 `turnoverLedgerExtraUpdated`。
-- 这些事件只提示当前可见浏览器重跑正常 GET；事件不携带 freshness 事实。canonical source version 与页面 read-model gate 才是事实源。
+前端跨页刷新已删除：confirm/withdraw/extra 成功后只处理当前 Turnover 页面；其它页面/tab 在 route 重进、查询变化、浏览器手动刷新或明确重试时，从 canonical source version 与自身 read-model gate 取得事实。
 
 ## Read Model / Worker 状态
 
@@ -200,7 +196,7 @@ Refresh event：`turnover_ledger.read_model.refresh`
 
 refresh 触发来源：
 
-- 页面首次访问、筛选/月 scope 变化、可见页面自身 reload 或 hidden→visible 时，GET fresh gate 发现 exact scope missing/stale/source-version mismatch。
+- route 进入/重进、筛选/月 scope 变化、浏览器手动刷新或明确重试时，GET fresh gate 发现 exact scope missing/stale/source-version mismatch；focus/visibility/BFCache 不触发业务 GET。
 - 显式 App Health/初始化/修复命令；`all` 只允许在这些已授权维护入口使用。
 - tag-selection、bank-row-tags、relation extra、manual closure confirm/withdraw 和底层事实变化只推进 canonical version，不在写路径触发 refresh。
 

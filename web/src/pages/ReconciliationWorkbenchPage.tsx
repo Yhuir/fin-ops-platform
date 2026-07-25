@@ -45,12 +45,6 @@ import {
 } from "../features/workbench/api";
 import { fetchBankFlowRuleBatchDetail, withdrawBankFlowRuleBatch } from "../features/bankFlowRuleBatches/api";
 import {
-  FINANCE_DOMAIN_EVENTS,
-  emitFinanceDomainEvent,
-  eventAffectedMonths,
-} from "../features/domainEvents";
-import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
-import {
   buildWorkbenchServerPageQuery,
   buildWorkbenchDisplayGroups,
   buildWorkbenchPaneRows,
@@ -284,31 +278,6 @@ function cleanWorkbenchScopeList(value: unknown) {
   return Array.isArray(value)
     ? value.map((scope) => String(scope).trim()).filter(Boolean)
     : [];
-}
-
-function actionAffectedMonths(result: {
-  affectedMonths?: unknown[];
-  affected_months?: unknown[];
-  changedScopes?: unknown[];
-  changed_scopes?: unknown[];
-}) {
-  const affectedMonths = cleanWorkbenchScopeList(result.affectedMonths);
-  if (affectedMonths.length > 0) {
-    return affectedMonths;
-  }
-  const affectedSnakeMonths = cleanWorkbenchScopeList(result.affected_months);
-  if (affectedSnakeMonths.length > 0) {
-    return affectedSnakeMonths;
-  }
-  const changedScopes = cleanWorkbenchScopeList(result.changedScopes);
-  if (changedScopes.length > 0) {
-    return changedScopes;
-  }
-  const changedSnakeScopes = cleanWorkbenchScopeList(result.changed_scopes);
-  if (changedSnakeScopes.length > 0) {
-    return changedSnakeScopes;
-  }
-  return [WORKBENCH_VIEW_MONTH];
 }
 
 function actionResultMessage(result: string | WorkbenchActionResult) {
@@ -729,19 +698,10 @@ export default function ReconciliationWorkbenchPage() {
       throw new Error("流水规则批次版本缺失，无法撤回。");
     }
 
-    const result = await withdrawBankFlowRuleBatch({
+    await withdrawBankFlowRuleBatch({
       batchId: sourceBatchId,
       expectedVersion,
       reason: "由关联台撤回流水规则批次",
-    });
-    const affectedMonths = result.affectedMonths.length > 0
-      ? result.affectedMonths
-      : readStringMetadata(row.specialMetadata, "scope_month")
-        ? [readStringMetadata(row.specialMetadata, "scope_month") as string]
-        : [];
-    emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
-      affectedMonths,
-      source: "workbench_bank_flow_rule_batch_withdraw",
     });
     clearPairedSelection();
     return "已撤回流水规则批次。";
@@ -1235,25 +1195,6 @@ export default function ReconciliationWorkbenchPage() {
       }
     };
   }, [active, applyOaSyncStatus]);
-
-  const handleRelationUpdated = useCallback(() => {
-    refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
-  }, [refreshWorkbenchDataInBackground]);
-  const handleBankCategoryUpdated = useCallback((event: Event) => {
-    const affectedMonths = eventAffectedMonths(event);
-    if (
-      affectedMonths.length === 0
-      || WORKBENCH_VIEW_MONTH === "all"
-      || affectedMonths.includes("all")
-      || affectedMonths.includes(WORKBENCH_VIEW_MONTH)
-      || affectedMonths.includes(currentMonth)
-    ) {
-      refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
-    }
-  }, [currentMonth, refreshWorkbenchDataInBackground]);
-  useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.turnoverRelationUpdated, handleRelationUpdated);
-  useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, handleRelationUpdated);
-  useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, handleBankCategoryUpdated);
 
   useEffect(() => {
     document.body.classList.toggle("workbench-focus-mode", expandedZoneId !== null);
@@ -1953,10 +1894,6 @@ export default function ReconciliationWorkbenchPage() {
       });
       if (submittedResult) {
         clearOpenSelection();
-        emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
-          affectedMonths: actionAffectedMonths(submittedResult),
-          source: "workbench_confirm_link",
-        });
       }
       setLastActionMessage(message);
       setRelationPreviewDialog(null);
@@ -1993,10 +1930,6 @@ export default function ReconciliationWorkbenchPage() {
     if (submittedResult) {
       clearPairedSelection();
       clearOpenSelection();
-      emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
-        affectedMonths: actionAffectedMonths(submittedResult),
-        source: "workbench_withdraw_link",
-      });
     }
     setLastActionMessage(message);
     if (!deferredWorkbenchFreshApplied) {

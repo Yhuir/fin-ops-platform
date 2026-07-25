@@ -12,7 +12,7 @@
 | 4. Read model, cache, and background job tests | 适用 | 覆盖独立 producer/scope、稳定 eligibility signature、canonical relation rows/source versions 同 snapshot、worker unchanged skip、`force_refresh` 真实重建、cross-case overlap Audit blocking、stale/refreshing/fresh；worker 启动禁止全量 relation snapshot 和 relation read-model facade。 |
 | 5. Frontend component and interaction tests | 适用 | 抽屉继续显示全部 active tags；未提交主/子标签只显示 OA/发票双 false 标签，submitted/history 保留实际历史标签；read-model status/version 或手工刷新变化清除旧 Audit；linked 提示保留 OA/发票计数但不渲染内部 case id；覆盖 loading/error/empty/stale、分页、权限、提交/撤回/reset。 |
 | 6. End-to-end business-flow integration tests | 适用 | 覆盖真实 `BankBatchService` + worker 使用 canonical active relation 时只产出 submitted 历史、零 unsubmitted；生产发布后强制月份重建、列表/Audit/freshness/worker drain 共同验收。 |
-| 7. Existing feature regression tests | 适用 | no-OA legacy paths、Workbench formal relation grouping、bank-details auto tag rules、Turnover category UoW、bank-flow batch operations、零 operation barrier、hidden/visible refresh、permissions/audit。 |
+| 7. Existing feature regression tests | 适用 | no-OA legacy paths、Workbench formal relation grouping、bank-details auto tag rules、Turnover category UoW、bank-flow batch operations、零 operation barrier、浏览器生命周期零业务 reload、permissions/audit。 |
 
 ## 计划后端测试入口
 

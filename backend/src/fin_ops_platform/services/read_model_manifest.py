@@ -268,6 +268,7 @@ READ_MODEL_MANIFEST: dict[str, ReadModelManifestEntry] = {
         repository_owner="InputInvoiceUsageReadModelRepositoryPort",
         permission_owner="input_invoice_usage_api_session",
         test_owner="tests/test_input_invoice_usage_api.py",
+        read_dependencies=("workbench_relation",),
     ),
     "output_invoice_collection": ReadModelManifestEntry(
         key="output_invoice_collection",
@@ -297,6 +298,7 @@ READ_MODEL_MANIFEST: dict[str, ReadModelManifestEntry] = {
         repository_owner="OutputInvoiceCollectionReadModelRepositoryPort",
         permission_owner="output_invoice_collection_api_session",
         test_owner="tests/test_output_invoice_collection_api.py",
+        read_dependencies=("workbench_relation",),
     ),
     "oa_pending_payment": ReadModelManifestEntry(
         key="oa_pending_payment",

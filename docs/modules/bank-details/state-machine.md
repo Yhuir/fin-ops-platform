@@ -42,16 +42,15 @@
 | row loading | 筛选、分页、搜索、账户切换时请求 transactions | 可保留旧 rows 直到新响应；响应 status 决定是否标记 refreshing/stale。 |
 | empty | fresh transactions payload 且 `rows=[]` | 只有 fresh 后才代表当前筛选真实无流水。 |
 | error | API mapper、route、规则保存、导出、确认/人工补分类失败 | 展示业务错误；abort-like request 不显示错误。 |
-| refreshing | accounts 或 transactions 返回 `read_model_status=refreshing` | 可保留旧 rows/余额并自动重试；规则保存/重应用显示刷新反馈。 |
+| refreshing | accounts 或 transactions 返回 `read_model_status=refreshing` | 可保留旧 rows/余额；本次访问只在 visible 状态有界重试，hidden、route unmount、查询变化、fresh 或 30 秒上限即停止，hidden→visible/focus 不自动恢复。规则保存/重应用显示刷新反馈。 |
 | stale / schema mismatch / missing | 后端 freshness gate 返回非 fresh 状态 | 页面展示陈旧/刷新中语义，不暴露底层 SQL 细节；不能把旧 payload 当最终事实。 |
 | permission disabled/hidden | `permissions.can_save`、session mutation 权限 | 规则保存、重应用、确认、人工补分类、导出写审计等动作按权限禁用或拒绝。 |
 
-前端 domain event：
+前端刷新边界：
 
-- 银行明细分类确认、撤销、人工补分类和清除后发出 `bankTransactionCategoryUpdated`，携带 affected months。
-- 自动标签规则保存/重应用后发出 `bankAutoTagRulesUpdated`，用于同会话或其他页面刷新标签事实。
-- 银行明细订阅 `workbenchRelationUpdated`，只有 affected months 命中当前日期筛选时 refetch。
-- 前端事件只用于刷新提示和局部 refetch，不证明后端 dirty scope 已完成或 read model 已 fresh。
+- 分类确认、撤销、人工补分类、清除与自动标签规则保存/重应用后，只允许当前银行明细页按自身命令合同更新或重跑 normal GET。
+- 不发出或订阅 finance/tag/window/BroadcastChannel 业务刷新事件；另一个页面/tab 不自动 refetch。
+- route 进入/重进、筛选/分页/搜索变化、浏览器手动刷新或明确重试时，通过同一 freshness gate 读取。
 
 ## Read Model / Worker 状态
 

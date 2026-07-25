@@ -144,5 +144,5 @@ bash scripts/verify.sh docs
 ## 2026-07-22 Phase 27 ETC 普通写隔离回归
 
 - ETC import、OA manual status、批次状态等普通写只提交 owner facts/version/audit 与精确 affected scope，不发布 Workbench/search/tax/cost 页面 refresh。
-- `web/src/test/EtcTicketManagementPage.test.tsx` 与中央 activation 测试覆盖：当前可见 ETC 页可重新读取；hidden 页忽略事件且不重放，后续重新可见时通过页面访问收敛。
+- `web/src/test/EtcTicketManagementPage.test.tsx` 与 `PageRouteHost.test.tsx` 覆盖：当前 ETC 页可在任务完成后重读；focus/visibility/BFCache 与旧业务事件不触发其它页面 load，route 重进/手动刷新走页面访问收敛。
 - 显式 repair/reset/authoritative integration 仍按各自运维合同执行，不得被普通写零 fan-out 测试误删或降格。

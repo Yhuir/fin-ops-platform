@@ -4,7 +4,6 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
 
 import { installMockApiFetch } from "./apiMock";
-import { expectCustomEventDetailContaining } from "./eventAssertions";
 import { renderAppAt, renderAuthenticatedAppAt } from "./renderHelpers";
 import { renderWorkbenchPage } from "./workbenchRenderHelpers";
 
@@ -97,68 +96,6 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(row);
 
     expect(row).toHaveAttribute("data-row-state", "idle");
-  });
-
-  test("atomically clears selection and detail state when a background reload publishes a new generation", async () => {
-    const user = userEvent.setup();
-    const fetchMock = installMockApiFetch({
-      workbenchReadModelVersions: ["generation-v1", "generation-v2"],
-    });
-    renderWorkbenchPage();
-
-    const selectedRow = await screen.findByRole("row", {
-      name: /2026-03-28.*智能工厂设备商/,
-    });
-    await user.click(selectedRow);
-    expect(selectedRow).toHaveAttribute("data-row-state", "selected");
-
-    const detailRow = screen.getByRole("row", {
-      name: /2026-03-25 14:22.*华东设备供应商/,
-    });
-    await user.click(within(detailRow).getByRole("button", { name: /查看银行流水 .* 详情/ }));
-    expect(await screen.findByRole("dialog", { name: "银行流水详情" })).toBeInTheDocument();
-
-    act(() => {
-      window.dispatchEvent(new CustomEvent("turnoverRelationUpdated"));
-    });
-
-    await waitFor(() => {
-      const initialRequests = fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input as RequestInfo | URL));
-      expect(initialRequests).toHaveLength(2);
-      expect(screen.queryByRole("dialog", { name: "银行流水详情" })).not.toBeInTheDocument();
-      expect(screen.getAllByText("已选 0")).toHaveLength(2);
-    });
-  });
-
-  test("preserves selection and detail state when a background reload keeps the same generation", async () => {
-    const user = userEvent.setup();
-    const fetchMock = installMockApiFetch({
-      workbenchReadModelVersions: ["generation-v1", "generation-v1"],
-    });
-    renderWorkbenchPage();
-
-    const selectedRow = await screen.findByRole("row", {
-      name: /2026-03-28.*智能工厂设备商/,
-    });
-    await user.click(selectedRow);
-    expect(selectedRow).toHaveAttribute("data-row-state", "selected");
-
-    const detailRow = screen.getByRole("row", {
-      name: /2026-03-25 14:22.*华东设备供应商/,
-    });
-    await user.click(within(detailRow).getByRole("button", { name: /查看银行流水 .* 详情/ }));
-    expect(await screen.findByRole("dialog", { name: "银行流水详情" })).toBeInTheDocument();
-
-    act(() => {
-      window.dispatchEvent(new CustomEvent("turnoverRelationUpdated"));
-    });
-
-    await waitFor(() => {
-      const initialRequests = fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input as RequestInfo | URL));
-      expect(initialRequests).toHaveLength(2);
-    });
-    expect(screen.getByRole("dialog", { name: "银行流水详情" })).toBeInTheDocument();
-    expect(screen.getByText("已选 1")).toBeInTheDocument();
   });
 
   test("stops a relation write and reloads when the active generation changes after preview", async () => {
@@ -372,8 +309,6 @@ describe("Workbench row selection and detail drawer", () => {
   test("unpaired zone header confirm link opens preview before submit", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
-    const relationUpdatedListener = vi.fn();
-    window.addEventListener("workbenchRelationUpdated", relationUpdatedListener, { once: true });
     renderWorkbenchPage();
 
     const openOaRow = await screen.findByRole("row", {
@@ -452,10 +387,6 @@ describe("Workbench row selection and detail drawer", () => {
         }),
       );
     });
-    await waitFor(() => {
-      expectCustomEventDetailContaining(relationUpdatedListener, { affectedMonths: ["2026-03"] });
-    });
-    window.removeEventListener("workbenchRelationUpdated", relationUpdatedListener);
   });
 
   test("amount mismatch preview requires note before confirm submit", async () => {
@@ -1162,8 +1093,6 @@ describe("Workbench row selection and detail drawer", () => {
   test("withdraw link finishes only after the fresh refetch restores every row as an unpaired singleton", async () => {
     const user = userEvent.setup();
     installMockApiFetch({ actionDelayMs: 20, workbenchLoadDelayMs: 160 });
-    const relationUpdatedListener = vi.fn();
-    window.addEventListener("workbenchRelationUpdated", relationUpdatedListener, { once: true });
     renderWorkbenchPage();
 
     const pairedZone = await screen.findByTestId("zone-paired");
@@ -1226,10 +1155,6 @@ describe("Workbench row selection and detail drawer", () => {
     expect(within(bankOnlyUnpairedGroup).queryByRole("row", { name: /赵华.*华东设备供应商/ })).not.toBeInTheDocument();
     expect(within(bankOnlyUnpairedGroup).queryByRole("row", { name: /91310000MA1K8A001X.*华东设备供应商/ })).not.toBeInTheDocument();
     expect(within(invoiceOnlyUnpairedGroup).queryByRole("row", { name: /赵华.*华东设备供应商/ })).not.toBeInTheDocument();
-    await waitFor(() => {
-      expectCustomEventDetailContaining(relationUpdatedListener, { affectedMonths: ["2026-03"] });
-    });
-    window.removeEventListener("workbenchRelationUpdated", relationUpdatedListener);
   });
 
   test("unpaired zone never exposes a withdraw action because it has no formal relation", async () => {

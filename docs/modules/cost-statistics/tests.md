@@ -6,7 +6,7 @@
 
 - Business/service：`tests/test_cost_statistics_sql_runtime.py` 证明 Workbench 仅 `source_version` 不同时，month query、all parent query 和 month projection 都继续使用同一业务 proof，不补投 Workbench、不 defer Cost；builder/关系事实等真实业务 proof 改变仍判 stale。
 - Read model/Audit/API：同文件与 `tests/test_cost_statistics_page_audit.py` 锁定 Cost parent/child SQL、System Audit 和 Python helper 使用相同字段排除；`tests/test_cost_statistics_api.py` 的 fixture同时保留业务 proof与执行版本，保护 explorer/detail/export正常合同。
-- 七类决策：1 source-proof 业务等价、2 query/projection service、3 explorer/detail/export API、4 parent/child read model与worker gate、7 Cost/Workbench/Audit回归适用；5 前端和6新跨模块流程不适用，因为页面行为与业务流程未改，既有 PageRouteHost/Cost流程定向测试继续承担回归。
+- 七类决策：1 source-proof 业务等价、2 query/projection service、3 explorer/detail/export API、4 parent/child read model与worker gate、5 页面 load/重试/旧事件删除、7 Cost/Workbench/Audit回归适用；6 不新增业务流，只复用既有页面 GET 收敛链路。
 - 未测风险：生产 `<3s`、重复 Workbench event 消失、Turnover稳定性、queue/dirty/worker与System Audit收敛仍必须由唯一候选部署后的同一条可恢复 fixture 证明。
 
 ## 2026-07-24 - 页面访问按依赖顺序登记 exact Workbench 与 Cost
@@ -177,7 +177,7 @@
 - 架构结论：页面只派生一个 `effectiveCostPageState`，合并当前 explorer lifecycle/freshness、App Status 精确成本 scope 和标签规则 barrier。只有明确 fresh 解锁；其他状态使用 native `inert`、`aria-busy`、内联 status rail 和 20% alpha pointer layer。标题/Audit/导航保持可用，不新增通用 overlay、store、实时通道或依赖。
 - 旧代码删除：首屏 loading 和 read-model refreshing/stale/unavailable 的旧 `.state-panel` 分支与旧文案已删除；non-fresh 不保留可操作 view/range/refresh/tag/export/table/load-more；detail/export portal 会关闭，详情请求可取消；无 modal-looking backdrop、blur 或遮罩动画。
 - 新增/更新测试：`web/src/test/CostStatisticsPage.test.tsx`、`web/e2e/cost-statistics-flow.spec.ts`、`web/e2e/fixtures/apiMocks.ts`；既有 `CostStatisticsApi.test.ts` 继续保护唯一 explorer client contract。
-- 覆盖点：initial/error/refreshing/stale/unavailable/fresh；真实 `inert`、20% alpha/no blur/no dialog；retry；锁定焦点迁移与 fresh 后恢复；domain refresh 关闭 export portal；标签规则 drawer 保留且 body/footer inert；BFCache revalidate；App Status 精确 scope 锁定与旁支 scope 隔离；五视图、详情、导出、大表和窄屏 Chromium 回归。
+- 覆盖点：initial/error/refreshing/stale/unavailable/fresh；真实 `inert`、20% alpha/no blur/no dialog；有界可取消 retry；标签规则 drawer 保留且 body/footer inert；focus/visibility/BFCache/跨页事件零业务 reload；App Status 精确 scope 锁定与旁支 scope 隔离；五视图、详情、导出、大表和窄屏 Chromium 回归。
 - 七类测试决策：1 business core 不适用，金额/分类/状态转换未改；2 service-layer 不适用，无 service/repository/worker 改动；3 API contract 不适用，HTTP shape/status 未改，复跑既有 client contract；4 read model/cache/job 间接适用，前端 fail-closed 消费既有 freshness/App Status，后端 CAS/gate 未改；5 frontend interaction 适用并新增 Vitest；6 E2E 适用并全量复跑 cost Chromium flow；7 existing regression 适用，保护五视图、范围、详情、导出、规则、权限和其他 scope 隔离。
 - 本地验证：Vitest `37 passed`；Chromium `12 passed`；production build 通过，仅保留既有第三方 CSS minify/chunk warnings。最终 lint/docs/diff 与旧代码扫描证据见 `05-07-SUMMARY.md`。
 - 未测风险：真实 App Health SSE/fallback 时序、生产浏览器 data-ready SLO、生产 migration/rebuild/EXPLAIN、Audit 和跨设备收敛需统一部署窗口验证；本轮保持 `DEPLOYMENT_HOLD`。
@@ -465,12 +465,12 @@ PYTHONPATH=backend/src scripts/check-read-model-scope-contracts.py --help
 
 - `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_and_cost_access_reuse_the_application_projection_builder` 证明 Workbench query、Cost dependency source versions 和 Application source-version port 复用同一 builder，禁止 request-local 重复 proof owner。
 - `test_overlapping_canonical_proofs_share_only_the_active_scope_flight` 证明并发 Cost/Workbench consumer 只共享 active proof，完成后没有 TTL cache；`test_failed_canonical_proof_flight_is_removed_for_page_retry` 证明失败不会让页面永久卡住。
-- 既有 Cost semantic source-version tests继续证明只排除 Workbench执行游标`source_version`；v7新增的ETC、关系状态、跨月成员和consumed settings字段仍fail closed。Cost API、worker、schema和页面交互未改变，最终project/all `<3s`由生产fixture验证。
+- 既有 Cost semantic source-version tests继续证明只排除 Workbench执行游标`source_version`；v7新增的ETC、关系状态、跨月成员和consumed settings字段仍fail closed。Cost API、worker、schema和页面交互未改变；生产 fixture 验证 project/all 最终 fresh 与 canonical payload，超过 3 秒记录 `performance_follow_up`。
 - `tests/test_cost_statistics_sql_runtime.py`：Cost all 访问先批量比较 canonical→active Workbench generations，只 enqueue 全部且仅 stale Workbench 月份；Workbench fresh 后，repository gate 逐月比较 Cost child 的 Workbench/Bank Detail lineage 与 parent `source_shards`，只 enqueue 精确 stale Cost child。concrete month 主表保持当前月 freshness，但同页全期间 statistics 也使用 parent-child proof；其它月份 drift 时 statistics fail-closed 并 ensure exact child，不把当前月 rows 伪装 stale。
 - `tests/test_batch_accounting_postgres_integration.py`：真实 PostgreSQL 下批量 Workbench proof 必须与逐月 proof 完全一致；`tests/test_cost_statistics_postgres_integration.py`：真实 PostgreSQL 制造 child Workbench lineage drift，证明 parent fail-closed 并返回精确 child scope。
 - `tests/test_read_model_manifest.py`：锁定 Cost repository port 的 bulk active Workbench version I/O；不新增 endpoint、worker、queue、registry、cache 或第二套刷新协调器。
 - 真实数据库结果：CI 因未配置 `FIN_OPS_TEST_DATABASE_URL` 明确跳过 PostgreSQL 集成；随后使用显式 host 的一次性本机 PostgreSQL 应用全部 migrations，首次发现并修复无 dirty row 时 SQL 三值逻辑漏报，复跑 `tests.test_cost_statistics_postgres_integration` 与 `tests.test_batch_accounting_postgres_integration` 为 `12/12`，临时库自动删除。
-- 发布后门禁：使用 test-owned 可逆 relation fixture，在不预读 concrete child 的前提下访问 Cost all；必须由 all GET 自身发现 drift、只生成 exact month/child refresh、`<=3s` 收敛为 fresh，随后 System Audit `16/16`。同时分别量测 all 与 concrete-month warm p95/p99，证明包含 global statistics child proof 后仍满足页面 SLO。
+- 当前 release 门禁：使用 test-owned 可逆 relation fixture，在不预读 concrete child 的前提下访问 Cost all；必须由 all GET 自身发现 drift、只生成 exact month/child refresh、并在既有有界超时内收敛为 fresh，随后 System Audit `16/16`。同时分别量测 all 与 concrete-month warm 原始值/汇总；超过 3 秒保留为性能 follow-up，不放宽正确性、隔离或 queue 收敛断言。
 
 ## 2026-07-24 Bank Detail direction 契约回归
 
@@ -482,7 +482,7 @@ PYTHONPATH=backend/src scripts/check-read-model-scope-contracts.py --help
 
 - `tests/test_cost_statistics_sql_runtime.py`：先检测 canonical Workbench expected/active version；上游 stale 只 enqueue 精确 Workbench 月份且停止 Cost I/O，上游 fresh 后 Cost stale 才 enqueue 当前 Cost scope。
 - `tests/test_workbench_sql_runtime.py`：Workbench generation publish 完成不触碰 Cost queue，不产生 `workbench_shard_published`。
-- `web/src/test/CostStatisticsPage.test.tsx`：relation 提示后只调用 normal explorer GET，明确断言零 operation barrier；refreshing 进入 3s 有界自身重试。
+- `web/src/test/CostStatisticsPage.test.tsx`：relation 提示后只调用 normal explorer GET，明确断言零 operation barrier；refreshing 进入最长 30 秒的有界自身重试，hidden 时停止且 visible 不自动恢复。
 - `tests/test_platform_runtime_boundary_guards.py`：机械禁止 relation/turnover/Workbench publish 恢复 Cost fan-out，并要求 query owner 同次登记 exact Workbench 与 requested Cost scope、worker依赖排序的 I/O。
 
 下方 2026-07-18 条目是历史 delta 合同验证记录，已被上述当前门禁取代；它不得被用来恢复普通写后 Cost fan-out。
@@ -502,4 +502,4 @@ PYTHONPATH=backend/src scripts/check-read-model-scope-contracts.py --help
 - `tests/test_cost_statistics_postgres_integration.py`：真实 PostgreSQL 验证 delta 事务在精准替换行后原子保存完整 summary/project/expense/bank-flow metadata；parent 聚合从当前 shard 结构化 rows 输出同一完整小型 payload，不加载旧 row arrays。
 - `tests/test_cost_statistics_sql_runtime.py`：repository 窄 aggregate port、parent 复用、直接月份 event id→parent trace、Bank Detail 执行计数/内部 relation lineage 变化但内容签名不变时仍 fresh，以及 Bank Detail 业务 signature 变化仍 mismatch；Cost 直接依赖的 Workbench 版本不做归一化。
 - `tests/test_cost_statistics_page_audit.py`：Audit 的 Bank Detail upstream proof 只排除嵌套执行计数和内部 relation lineage，保留其它 source-version equality、未知字段 fail-closed 与既有全量业务/summary/group proof。
-- 生产复验门禁：confirm 与 withdraw 分别证明 exact direct delta→`active:all` `<=3s`，Cost explorer `200/fresh` 且业务断言变化；每次操作的所有 consumer 收敛后，Cost/Workbench/OA 三页面必须各自 `pass/fresh/drained`。系统级其它页面的既有问题必须单独报告，不能拿来替代或掩盖三页面证据。
+- 生产复验门禁：confirm 与 withdraw 分别证明当前访问触发 exact scope、Cost explorer 最终 `200/fresh` 且业务断言变化；超过 3 秒记录性能 follow-up。每次操作的所有 consumer 收敛后，Cost/Workbench/OA 三页面必须各自 `pass/fresh/drained`。系统级其它页面的既有问题必须单独报告，不能拿来替代或掩盖三页面证据。

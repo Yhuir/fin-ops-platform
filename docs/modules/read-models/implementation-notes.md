@@ -1849,7 +1849,7 @@
 
 - 首轮 Phase 27 生产可逆关系验证最终业务断言均 fresh/pass，但五个 consumer 每轮按顺序 GET，导致前序页面的 freshness SQL 与重建排队时间被累计到后序页面；该数字不能证明“两个页面同时打开”时各页面的独立访问耗时。
 - `write_operation_e2e_smoke` 现在对同一 checkpoint 的 consumer 使用最多 16 个有界线程并发探测，并继续按 scenario 顺序输出；这只修正生产证明 I/O，不改变页面、API、queue、worker 或 read model 运行时架构。
-- 首次 fresh HTTP 超过页面 SLO 仍是不可重试失败。异常结果现在始终保存已解析 `path`，与后续成功结果使用同一 `(page_key, name, path)` identity，避免总状态保留失败但展示结果被后续 pass 覆盖。
+- 首次 fresh HTTP 超过既有有界验证超时仍是不可重试失败；只超过 3 秒目标但最终正确收敛时记录 `performance_follow_up`。异常结果始终保存已解析 `path`，与后续成功结果使用同一 `(page_key, name, path)` identity，避免总状态保留失败但展示结果被后续 pass 覆盖。
 - 定向测试覆盖两个页面确实同时发起请求、输出顺序稳定，以及 SLO exception 保留 resolved path；不需要运行 183 个浏览器测试或完整 CI。
 
 ## 2026-07-25 - relation eligibility 与 active polling 共享根因
@@ -1862,4 +1862,4 @@
 
 - 当前 Workbench expected/published proof 覆盖 projection 的完整直接输入：relation/exception/override/claim、scope 与跨月成员 OA/银行/发票、ETC 四表和实际消费的 settings fingerprint；撤回、soft delete、跨月成员与 ETC ownership 变化都由同一 source vector 驱动 exact scope stale。
 - `server.py` 只注入 Application 已持有的 shared `WorkbenchSqlProjectionBuilder`。并发同 scope 请求只共享 active proof I/O，不缓存已完成结果；PostgreSQL dirty/outbox、gateway 和 active-generation publish 合同不变。
-- v7 部署只需要 migration `0125` 和既有正式 `workbench-rehydrate` 入口，不增加 read model、queue、worker、registry、cache 或 transport。最终生产 SLO/Audit/queue closure 前保持 Phase 27 open。
+- v7 已随 `main-719c9a34-20260725101310` 完成 migration `0125` 和正式 `workbench-rehydrate`，没有增加 read model、queue、worker、registry、cache 或 transport。最终生产 correctness/Audit/queue closure 前保持 Phase 27 open；3 秒指标单列为性能 follow-up。

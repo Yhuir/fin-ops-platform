@@ -32,13 +32,7 @@ import {
   revokeBankDetailCategoryConfirmation,
   saveBankAutoTagRules,
 } from "../features/bankDetails/api";
-import {
-  FINANCE_DOMAIN_EVENTS,
-  emitFinanceDomainEvent,
-  eventAffectedMonths,
-} from "../features/domainEvents";
 import { waitForOperationFreshness } from "../features/operationBarrier/api";
-import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
 import type {
   BankAutoTagRulesResponse,
   BankAutoTagEditableRule,
@@ -60,10 +54,10 @@ const DEFAULT_BANK_YEAR = "2026";
 const DEFAULT_BANK_MONTH = "2026-05";
 const DEFAULT_PAGE_SIZE = 100;
 const BANK_DETAIL_READ_MODEL_REFRESH_RETRY_MS = 300;
+const BANK_DETAIL_READ_MODEL_REFRESH_MAX_DURATION_MS = 30_000;
 const BANK_DETAIL_RULE_REFRESH_RETRY_MS = 300;
 const BANK_DETAIL_RULE_REFRESH_RELOAD_ATTEMPTS = 20;
 const ALL_ACCOUNTS_KEY = "__all_bank_accounts__";
-const TAG_SYNC_EVENT = "finops:bank-transaction-tags-updated";
 const TAG_VERSION_STORAGE_KEY = "finops.bankTransactionTags.version";
 const AUTO_TAG_RULE_REAPPLY_REFRESH_WARNING = "已提交重新应用，后台刷新尚未完成，请稍后刷新。";
 const FEATURED_CATEGORY_CODES: BankTransactionCategoryCode[] = [
@@ -509,30 +503,6 @@ function directionTagColor(direction: BankTransactionDirection): "success" | "da
   return direction === "income" ? "success" : "danger";
 }
 
-function monthIndex(value: string) {
-  if (!/^\d{4}-\d{2}$/.test(value)) {
-    return null;
-  }
-  const [year, month] = value.split("-").map(Number);
-  return year * 12 + month;
-}
-
-function eventTagVersion(event: Event) {
-  if (!(event instanceof CustomEvent) || !event.detail || typeof event.detail !== "object") {
-    return null;
-  }
-  const version = Number((event.detail as { version?: unknown }).version);
-  return Number.isFinite(version) ? version : null;
-}
-
-function eventActiveAutoTagRules(event: Event): BankAutoTagEditableRule[] | null {
-  if (!(event instanceof CustomEvent) || !event.detail || typeof event.detail !== "object") {
-    return null;
-  }
-  const activeRules = (event.detail as { activeRules?: unknown }).activeRules;
-  return Array.isArray(activeRules) ? activeRules as BankAutoTagEditableRule[] : null;
-}
-
 function readPersistedTagVersion() {
   try {
     const version = Number(window.localStorage.getItem(TAG_VERSION_STORAGE_KEY));
@@ -551,24 +521,6 @@ function persistTagVersion(version: number | null | undefined) {
   } catch {
     // localStorage may be unavailable in restrictive embedded shells.
   }
-}
-
-function affectedMonthsHitDateFilter(affectedMonths: string[] | null, dateFilter: BankDateFilter) {
-  if (!affectedMonths || affectedMonths.length === 0 || affectedMonths.includes("all")) {
-    return true;
-  }
-  if (!dateFilter.dateFrom || !dateFilter.dateTo) {
-    return true;
-  }
-  const startMonth = monthIndex(dateFilter.dateFrom.slice(0, 7));
-  const endMonth = monthIndex(dateFilter.dateTo.slice(0, 7));
-  if (startMonth === null || endMonth === null) {
-    return true;
-  }
-  return affectedMonths.some((month) => {
-    const index = monthIndex(month);
-    return index === null || (index >= startMonth && index <= endMonth);
-  });
 }
 
 function isAbortLikeError(caught: unknown) {
@@ -1584,6 +1536,7 @@ export default function BankDetailsPage() {
   });
   const hasAccountPayloadRef = useRef(false);
   const hasTransactionPayloadRef = useRef(false);
+  const readModelRefreshStartedAtRef = useRef<number | null>(null);
   const [accountRefreshToken, setAccountRefreshToken] = useState(0);
   const [refreshToken, setRefreshToken] = useState(0);
   const readModelStatus = combinedReadModelStatus(accountsReadModelStatus, transactionsReadModelStatus);
@@ -1842,6 +1795,19 @@ export default function BankDetailsPage() {
   }, [categoryOptions, categorySnapshotCurrent, selectedCategoryFilter]);
 
   useEffect(() => {
+    readModelRefreshStartedAtRef.current = null;
+  }, [
+    activationGeneration,
+    categoryFilterQueryKey,
+    dateFilter.dateFrom,
+    dateFilter.dateTo,
+    paginationModel.page,
+    paginationModel.pageSize,
+    searchKeyword,
+    selectedAccountKey,
+  ]);
+
+  useEffect(() => {
     if (!rulesRefreshPendingRef.current) {
       return;
     }
@@ -1856,10 +1822,31 @@ export default function BankDetailsPage() {
   }, [transactionRequestPending, transactionsNeedRefresh]);
 
   useEffect(() => {
-    if (!active || !readModelNeedsRefresh || loading || rowLoading || accountRequestPending || transactionRequestPending) {
+    if (!readModelNeedsRefresh) {
+      readModelRefreshStartedAtRef.current = null;
+      return undefined;
+    }
+    const now = Date.now();
+    const startedAt = readModelRefreshStartedAtRef.current ?? now;
+    readModelRefreshStartedAtRef.current = startedAt;
+    if (
+      !active
+      || document.visibilityState !== "visible"
+      || now - startedAt >= BANK_DETAIL_READ_MODEL_REFRESH_MAX_DURATION_MS
+      || loading
+      || rowLoading
+      || accountRequestPending
+      || transactionRequestPending
+    ) {
       return undefined;
     }
     const retryId = window.setTimeout(() => {
+      if (
+        document.visibilityState !== "visible"
+        || Date.now() - startedAt >= BANK_DETAIL_READ_MODEL_REFRESH_MAX_DURATION_MS
+      ) {
+        return;
+      }
       if (accountsNeedRefresh) {
         setAccountRefreshToken((current) => current + 1);
       }
@@ -1878,56 +1865,6 @@ export default function BankDetailsPage() {
     transactionRequestPending,
     transactionsNeedRefresh,
   ]);
-
-  const handleWorkbenchRelationUpdated = useCallback((event: Event) => {
-    const affectedMonths = eventAffectedMonths(event);
-    if (!affectedMonthsHitDateFilter(affectedMonths, dateFilter)) {
-      return;
-    }
-    setRefreshToken((current) => current + 1);
-  }, [dateFilter]);
-  useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, handleWorkbenchRelationUpdated);
-
-  useEffect(() => {
-    const handleTagUpdate = (event: Event) => {
-      if (!active || document.visibilityState === "hidden") {
-        return;
-      }
-      const version = eventTagVersion(event);
-      if (version !== null) {
-        tagVersionRef.current = version;
-        persistTagVersion(version);
-      }
-      const activeRules = eventActiveAutoTagRules(event);
-      if (activeRules) {
-        setActiveAutoTagRules(activeRules);
-      } else {
-        refreshAutoTagRules();
-      }
-      setRefreshToken((current) => current + 1);
-    };
-    window.addEventListener(TAG_SYNC_EVENT, handleTagUpdate);
-
-    let channel: BroadcastChannel | null = null;
-    if (typeof BroadcastChannel !== "undefined") {
-      channel = new BroadcastChannel(TAG_SYNC_EVENT);
-      channel.onmessage = (message) => {
-        const version = Number((message.data as { version?: unknown } | undefined)?.version);
-        const activeRules = (message.data as { activeRules?: unknown } | undefined)?.activeRules;
-        window.dispatchEvent(new CustomEvent(TAG_SYNC_EVENT, {
-          detail: {
-            version: Number.isFinite(version) ? version : undefined,
-            activeRules: Array.isArray(activeRules) ? activeRules : undefined,
-          },
-        }));
-      };
-    }
-
-    return () => {
-      window.removeEventListener(TAG_SYNC_EVENT, handleTagUpdate);
-      channel?.close();
-    };
-  }, [active, refreshAutoTagRules]);
 
   const effectiveCategoryCounts = categoryCounts;
   const visibleCategorySummary = useMemo<CategorySummaryItem[]>(() => {
@@ -2105,13 +2042,8 @@ export default function BankDetailsPage() {
     setCategoryMutationId(row.id);
     setError(null);
     return confirmBankDetailCategory(row.id, choice.categoryCode, choice.thirdLabel)
-      .then((result) => {
+      .then(() => {
         applyOptimisticCategoryChoice(row, choice);
-        emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, {
-          affectedMonths: result.affectedMonths,
-          affectedRowIds: [row.id],
-          action: "bank_detail_category_confirmed",
-        });
         setRefreshToken((current) => current + 1);
       })
       .catch((caught) => {
@@ -2135,13 +2067,8 @@ export default function BankDetailsPage() {
       }
       : {};
     return assignBankDetailCategory(row.id, choice.categoryCode, structuredSelection)
-      .then((result) => {
+      .then(() => {
         applyOptimisticCategoryChoice(row, choice);
-        emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, {
-          affectedMonths: result.affectedMonths,
-          affectedRowIds: [row.id],
-          action: "bank_detail_category_manually_assigned",
-        });
         setRefreshToken((current) => current + 1);
       })
       .catch((caught) => {
@@ -2155,12 +2082,7 @@ export default function BankDetailsPage() {
     setCategoryMutationId(row.id);
     setError(null);
     revokeBankDetailCategoryConfirmation(row.id)
-      .then((result) => {
-        emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, {
-          affectedMonths: result.affectedMonths,
-          affectedRowIds: [row.id],
-          action: "bank_detail_category_confirmation_revoked",
-        });
+      .then(() => {
         setRefreshToken((current) => current + 1);
       })
       .catch((caught) => setError(caught instanceof Error ? caught.message : "银行明细标签撤销失败。"))
@@ -2171,13 +2093,8 @@ export default function BankDetailsPage() {
     setCategoryMutationId(row.id);
     setError(null);
     clearBankDetailCategoryAssignment(row.id)
-      .then((result) => {
+      .then(() => {
         applyOptimisticManualCategoryClear(row);
-        emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, {
-          affectedMonths: result.affectedMonths,
-          affectedRowIds: [row.id],
-          action: "bank_detail_category_manual_assignment_cleared",
-        });
         setRefreshToken((current) => current + 1);
       })
       .catch((caught) => setError(caught instanceof Error ? caught.message : "银行明细标签撤销失败。"))
@@ -2234,6 +2151,9 @@ export default function BankDetailsPage() {
     try {
       let latestPayload: BankDetailTransactionsResponse | null = null;
       for (let attempt = 0; attempt < BANK_DETAIL_RULE_REFRESH_RELOAD_ATTEMPTS; attempt += 1) {
+        if (document.visibilityState !== "visible") {
+          throw new Error("银行明细页面已隐藏，请返回后手动刷新。");
+        }
         if (requestHasCategoryFilter) {
           const snapshotPayload = await fetchBankDetailTransactions({
             accountKey,
@@ -2333,20 +2253,6 @@ export default function BankDetailsPage() {
     persistTagVersion(payload.version);
     tagVersionRef.current = payload.version;
     setActiveAutoTagRules(payload.activeRules);
-    window.dispatchEvent(new CustomEvent(TAG_SYNC_EVENT, {
-      detail: { version: payload.version, activeRules: payload.activeRules },
-    }));
-    emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankAutoTagRulesUpdated, {
-      version: payload.version,
-      activeRules: payload.activeRules,
-      source: "bank_details_auto_tag_rules",
-      action: payload.refreshReason === "reapplied" ? "reapplied" : "saved",
-    });
-    if (typeof BroadcastChannel !== "undefined") {
-      const channel = new BroadcastChannel(TAG_SYNC_EVENT);
-      channel.postMessage({ version: payload.version, activeRules: payload.activeRules });
-      channel.close();
-    }
     const feedback = payload.refreshReason === "reapplied"
       ? {
         refreshing: "已提交重新应用，银行明细正在刷新。",

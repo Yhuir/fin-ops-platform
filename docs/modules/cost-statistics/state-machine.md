@@ -47,13 +47,13 @@
 | export loading | export preview/download 进行中 | 弹窗内反馈进度和错误，保留当前页面上下文。 |
 | permission disabled/hidden | 当前模块主要为只读/导出 | 若未来增加写操作，必须按 session 权限和 App Status mutation gate 禁用。 |
 
-前端事件：
+前端刷新：
 
-- `workbenchRelationUpdated`、`bankTransactionCategoryUpdated`、`turnoverRelationUpdated`、`invoiceFactUpdated`、`etcBusinessBatchUpdated` 等事件只能触发页面 refetch 或刷新提示。
-- domain/manual/tag-rule refresh 必须丢弃本次 mount 内的导出参考数据并重新经过后端 fresh gate；页面不拥有 TTL freshness 事实源。
-- 前端事件不是事实源；后端 dirty scope/outbox/worker/readiness 才证明成本统计已收敛。
+- 不订阅关系、银行分类、发票或 ETC 跨页事件；另一个页面/tab 的写入不会触发成本页 refetch。
+- 当前页查询变化、标签规则保存后的当前页 nonce、route 重进、浏览器手动刷新或明确重试会丢弃本次 mount 内的导出参考数据并重新经过后端 fresh gate；页面不拥有 TTL freshness 事实源。
+- 后端 canonical source version、dirty scope/outbox/worker/readiness 才证明成本统计已收敛。
 - 进入锁定立即关闭并清除 transaction detail、export center 和范围 popover；标签规则 drawer 壳与草稿保留，但 body/footer inert。可取消的 detail/export-reference 请求必须 abort，晚到响应不得恢复旧 portal。
-- 窗口 blur→focus、document hidden→visible、`pageshow.persisted=true` 都先清除当前可操作 payload，再重新通过 API/read boundary；同一次返回事件去重。离开页面后 React tree 卸载，inactive 页面不 replay 事件。
+- 窗口 blur→focus、document hidden→visible 与 `pageshow.persisted=true` 不改变成本页业务状态、不清除 payload、不发 API I/O；本次 non-fresh 有界重试在 hidden 时停止且返回 visible 不自动恢复。离开 route 后 React tree 卸载；重新进入 route、改变当前页查询、浏览器手动刷新或点击明确重试时，重新通过 API/read boundary。
 
 ## Read Model / Worker 状态
 

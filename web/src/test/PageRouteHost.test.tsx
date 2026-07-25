@@ -7,7 +7,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import PageRouteHost from "../app/PageRouteHost";
 import { appPageRoutes, sidebarGroups, type AppPageRoute } from "../app/pageRegistry";
-import { useActivePageEvent, usePageActivation } from "../contexts/PageRuntimeContext";
+import { usePageActivation } from "../contexts/PageRuntimeContext";
 
 function Harness({
   children,
@@ -187,6 +187,9 @@ describe("PageRouteHost", () => {
       "src/pages/TaxOffsetPage.tsx",
       "src/pages/PendingInvoicesPage.tsx",
       "src/pages/InputInvoiceUsagePage.tsx",
+      "src/pages/OaPendingPaymentsPage.tsx",
+      "src/pages/OutputInvoiceCollectionsPage.tsx",
+      "src/pages/InputInvoiceUsagePage.tsx",
       "src/pages/OutputInvoiceCollectionsPage.tsx",
       "src/pages/SettingsPage.tsx",
       "src/pages/AppHealthOperationsPage.tsx",
@@ -222,50 +225,11 @@ describe("PageRouteHost", () => {
     expect(screen.queryByRole("link", { name: "to b" })).not.toBeInTheDocument();
   });
 
-  test("removes active page event listeners when a route unmounts", async () => {
-    const user = userEvent.setup();
-    const pageAHandler = vi.fn();
-    const pageBHandler = vi.fn();
-
-    function PageA() {
-      useActivePageEvent("shellNavigationTestEvent", pageAHandler);
-      return <Link to="/b">to b</Link>;
-    }
-
-    function PageB() {
-      useActivePageEvent("shellNavigationTestEvent", pageBHandler);
-      return <p>page b</p>;
-    }
-
-    render(<PageRouteHost routes={[createRoute("/a", "page-a", PageA), createRoute("/b", "page-b", PageB)]} />, {
-      wrapper: Harness,
-    });
-
-    act(() => {
-      window.dispatchEvent(new CustomEvent("shellNavigationTestEvent", { detail: { source: "page-a" } }));
-    });
-    expect(pageAHandler).toHaveBeenCalledTimes(1);
-    expect(pageBHandler).not.toHaveBeenCalled();
-
-    await user.click(screen.getByRole("link", { name: "to b" }));
-    expect(await screen.findByText("page b")).toBeInTheDocument();
-
-    act(() => {
-      window.dispatchEvent(new CustomEvent("shellNavigationTestEvent", { detail: { source: "page-b" } }));
-    });
-
-    expect(pageAHandler).toHaveBeenCalledTimes(1);
-    expect(pageBHandler).toHaveBeenCalledTimes(1);
-  });
-
-  test("keeps hidden pages idle and reactivates the current page when visible", async () => {
-    const visibilityState = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+  test("does not reload the current business page on focus, visibility, or BFCache events", () => {
     const loadCurrentPage = vi.fn();
-    const pageEventHandler = vi.fn();
 
     function PageA() {
       const activation = usePageActivation("page-a");
-      useActivePageEvent("pageActivationTestEvent", pageEventHandler);
       useEffect(() => {
         if (activation.active) {
           loadCurrentPage(activation.activationGeneration);
@@ -281,51 +245,59 @@ describe("PageRouteHost", () => {
 
     render(<PageRouteHost routes={[createRoute("/a", "page-a", PageA)]} />, { wrapper: Harness });
     expect(loadCurrentPage).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("page-active")).toHaveTextContent("true");
+    expect(screen.getByTestId("page-generation")).toHaveTextContent("1");
 
-    visibilityState.mockReturnValue("hidden");
     act(() => {
+      window.dispatchEvent(new Event("blur"));
       document.dispatchEvent(new Event("visibilitychange"));
-      window.dispatchEvent(new CustomEvent("pageActivationTestEvent"));
-    });
-    expect(screen.getByTestId("page-active")).toHaveTextContent("false");
-    expect(pageEventHandler).not.toHaveBeenCalled();
-    expect(loadCurrentPage).toHaveBeenCalledTimes(1);
-
-    visibilityState.mockReturnValue("visible");
-    act(() => {
-      document.dispatchEvent(new Event("visibilitychange"));
-    });
-
-    await waitFor(() => expect(screen.getByTestId("page-active")).toHaveTextContent("true"));
-    expect(screen.getByTestId("page-generation")).toHaveTextContent("2");
-    expect(loadCurrentPage).toHaveBeenCalledTimes(2);
-    expect(pageEventHandler).not.toHaveBeenCalled();
-  });
-
-  test("reactivates the current page when restored from the back-forward cache", async () => {
-    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
-    const loadCurrentPage = vi.fn();
-
-    function PageA() {
-      const activation = usePageActivation("page-a");
-      useEffect(() => {
-        if (activation.active) {
-          loadCurrentPage(activation.activationGeneration);
-        }
-      }, [activation.active, activation.activationGeneration]);
-      return <span data-testid="page-generation">{activation.activationGeneration}</span>;
-    }
-
-    render(<PageRouteHost routes={[createRoute("/a", "page-a", PageA)]} />, { wrapper: Harness });
-    expect(loadCurrentPage).toHaveBeenCalledTimes(1);
-
-    const pageShowEvent = new Event("pageshow") as PageTransitionEvent;
-    Object.defineProperty(pageShowEvent, "persisted", { value: true });
-    act(() => {
+      window.dispatchEvent(new Event("focus"));
+      const pageShowEvent = new Event("pageshow") as PageTransitionEvent;
+      Object.defineProperty(pageShowEvent, "persisted", { value: true });
       window.dispatchEvent(pageShowEvent);
     });
 
-    await waitFor(() => expect(screen.getByTestId("page-generation")).toHaveTextContent("2"));
-    expect(loadCurrentPage).toHaveBeenCalledTimes(2);
+    expect(loadCurrentPage).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("page-active")).toHaveTextContent("true");
+    expect(screen.getByTestId("page-generation")).toHaveTextContent("1");
+  });
+
+  test("keeps deleted cross-page business refresh channels out of production pages", () => {
+    const sourcePaths = [
+      "src/pages/ReconciliationWorkbenchPage.tsx",
+      "src/pages/CostStatisticsPage.tsx",
+      "src/pages/BankDetailsPage.tsx",
+      "src/pages/BankFlowRuleBatchPage.tsx",
+      "src/pages/BatchAccountingPage.tsx",
+      "src/pages/TurnoverLedgerPage.tsx",
+      "src/pages/EtcTicketManagementPage.tsx",
+      "src/pages/TaxOffsetPage.tsx",
+      "src/pages/PendingInvoicesPage.tsx",
+    ];
+    for (const path of sourcePaths) {
+      const source = readFileSync(path, "utf8");
+      expect(source, path).not.toContain("domainEvents");
+      expect(source, path).not.toContain("useActiveFinanceDomainEvent");
+      expect(source, path).not.toContain("finops:bank-transaction-tags-updated");
+      expect(source, path).not.toMatch(/\bBroadcastChannel\b/);
+    }
+  });
+
+  test("keeps page-owned read-model retries bounded and stops them while hidden", () => {
+    const boundedRetryPaths = [
+      "src/pages/BankDetailsPage.tsx",
+      "src/pages/BankFlowRuleBatchPage.tsx",
+      "src/pages/CostStatisticsPage.tsx",
+      "src/pages/InputInvoiceUsagePage.tsx",
+      "src/pages/OaPendingPaymentsPage.tsx",
+      "src/pages/OutputInvoiceCollectionsPage.tsx",
+      "src/pages/PendingInvoicesPage.tsx",
+    ];
+    for (const path of boundedRetryPaths) {
+      const source = readFileSync(path, "utf8");
+      expect(source, path).toContain("document.visibilityState");
+      expect(source, path).toMatch(/MAX_(?:ATTEMPTS|DURATION|RETRIES)/);
+    }
+    expect(readFileSync("src/pages/BatchAccountingPage.tsx", "utf8")).toContain("document.visibilityState");
   });
 });

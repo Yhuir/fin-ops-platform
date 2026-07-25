@@ -53,6 +53,7 @@ const initialQuery: OaPendingPaymentQuery = {
 
 const BANK_CANDIDATE_PAGE_SIZE = 100;
 const CONDITIONAL_REFRESH_INTERVAL_MS = 500;
+const CONDITIONAL_REFRESH_MAX_ATTEMPTS = 60;
 
 const readModelStatusPriority = ["unavailable", "schema_mismatch", "missing", "failed", "stale", "refreshing", "fresh"];
 
@@ -127,6 +128,7 @@ export default function OaPendingPaymentsPage() {
   const [conditionalPollingEnabled, setConditionalPollingEnabled] = useState(false);
   const requestIdRef = useRef(0);
   const etagRef = useRef<string | null>(null);
+  const conditionalAttemptRef = useRef(0);
   const selectedOaRowIdList = useMemo(() => [...selectedOaRowIds], [selectedOaRowIds]);
 
   const clearVisibleReadModel = useCallback(() => {
@@ -162,6 +164,7 @@ export default function OaPendingPaymentsPage() {
       setRefreshing(true);
     }
     if (mode !== "conditional") {
+      conditionalAttemptRef.current = 0;
       setConditionalPollingEnabled(false);
       setError(null);
     }
@@ -183,7 +186,7 @@ export default function OaPendingPaymentsPage() {
         return;
       }
       applyRowsPayload(result.payload);
-      setConditionalPollingEnabled(Boolean(result.etag));
+      setConditionalPollingEnabled(false);
     } catch (caught: unknown) {
       if (signal?.aborted || requestId !== requestIdRef.current) {
         return;
@@ -220,10 +223,19 @@ export default function OaPendingPaymentsPage() {
     let disposed = false;
 
     const checkForFreshRows = async () => {
-      if (disposed || inFlight || document.visibilityState !== "visible") {
+      if (disposed || inFlight) {
+        return;
+      }
+      if (
+        document.visibilityState !== "visible"
+        || conditionalAttemptRef.current >= CONDITIONAL_REFRESH_MAX_ATTEMPTS
+      ) {
+        setConditionalPollingEnabled(false);
+        controller?.abort();
         return;
       }
       inFlight = true;
+      conditionalAttemptRef.current += 1;
       controller = new AbortController();
       try {
         await loadRows("conditional", controller.signal);
@@ -232,21 +244,12 @@ export default function OaPendingPaymentsPage() {
         controller = null;
       }
     };
-    const handleVisibilityChange = () => {
-      if (document.visibilityState !== "visible") {
-        controller?.abort();
-        return;
-      }
-      void checkForFreshRows();
-    };
     const intervalId = window.setInterval(() => {
       void checkForFreshRows();
     }, CONDITIONAL_REFRESH_INTERVAL_MS);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       disposed = true;
       window.clearInterval(intervalId);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
       controller?.abort();
     };
   }, [active, conditionalPollingEnabled, loadRows]);

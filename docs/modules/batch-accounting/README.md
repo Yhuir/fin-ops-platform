@@ -45,7 +45,7 @@
 - `POST /api/batch-accounting/submit` 必须优先通过 Workbench SQL active read model 的窄读口读取本次选中银行流水、OA 主单和对应 OA 附件发票，并通过 `WorkbenchRelationCommandService.confirm_relation(...)` 写入 relation，`special_metadata.source` 必须是 `batch_accounting`，`special_metadata.affected_scope_keys` 必须记录本次关系涉及的具体月份；缺少 command service 时 fail fast，不回退 direct pair relation mutation。
 - `POST /api/batch-accounting/{relation_id}/withdraw` 只能撤回当前 active 的批量账务关系，并保留提交/撤回历史备注；撤回必须通过 durable relation command repository 取消当前 batch relation，记录 `withdraw_link` history。它不走旧 snapshot restore，也不得把 OA 附件 case_id / `existing_case` 显示归属恢复成 active relation。
 - 旧 `repair_legacy_case_id_collisions(...)` service-level 修复入口已删除；批量账务生产 API/worker 主链路不得再提供 legacy case-id collision repair 写入口。
-- 前端提交/撤回成功后发送 `workbenchRelationUpdated`，只作为同浏览器会话的轻量重读提示；当前页面立即通过正常 GET 比较 canonical relation source version 与 read-model proof，隐藏页面在重新可见时再走同一 gate。
+- 前端提交/撤回成功后只允许当前批量账务页通过正常 GET 比较 canonical relation source version 与 read-model proof；不发送跨页事件。其它页面只在 route 进入/重进、查询变化、浏览器手动刷新或明确重试时走自身 gate。
 
 ## 当前边界
 
@@ -54,7 +54,7 @@
 - `GET /api/batch-accounting` 的 relation 读取必须通过现有 relation read facade/freshness 边界请求 `require_fresh`；缺失或 stale scope 只能经 facade/gateway 入队刷新，不能在页面 GET 路径同步 rebuild 或直接写 durable queue。
 - `POST /api/batch-accounting/submit` 和 `POST /api/batch-accounting/{relation_id}/withdraw` 必须走 command service，并基于 canonical relation、idempotency、owner 状态、权限/session、DB 可写性和本次操作 row ids 的 active relation 冲突校验；PostgreSQL runtime 必须注入 durable `PostgresWorkbenchRelationRepository`，不允许在缺少 command service 或 durable repository 时静默写旧 pair service/in-memory snapshot，也不能把整页普通 relation distribution 追赶中作为默认写阻断条件。
 - submit/withdraw route 不再调用旧 `_schedule_workbench_pair_relation_persist`、`_schedule_workbench_read_model_persist`、snapshot rollback restore、duplicate derived lifecycle 或 repository hidden enqueue；`WorkbenchRelationCommandService` repository 只原子保存 canonical relation/history/idempotency/audit。`affected_scope_keys` 只作访问时重校验提示，普通写的 targets 为空且不得扩散为 `all`。
-- 前端 submit/withdraw 不等待 `GlobalOperationOverlayProvider` / operation barrier。写 API 成功后只重跑当前批量账务 GET；GET 非 fresh 时展示本页 refreshing 并有界重试，不能把已成功 command 改写成失败。隐藏页面不做工作，重新可见时再 GET。
+- 前端 submit/withdraw 不等待 `GlobalOperationOverlayProvider` / operation barrier。写 API 成功后只重跑当前批量账务 GET；GET 非 fresh 时展示本页 refreshing 并有界重试，不能把已成功 command 改写成失败。focus/visibility/BFCache 不触发额外 GET。
 - 批量账务关系变化可能影响关联台、银行明细、成本统计、搜索、进项/销项/OA 待付款等消费者，但普通写不主动投递这些页面；各页面只在访问时按自身 source-version gate 收敛。
 - read model refresh 的事实源是 durable queue / `workbench_relation.read_model.refresh`，不是前端事件。
 - 批量账务 GET 必须保持只读；不能在列表读取路径执行 legacy relation repair。

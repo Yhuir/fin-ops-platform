@@ -9,7 +9,6 @@ import { GlobalOperationOverlayProvider } from "../contexts/GlobalOperationOverl
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
 import type { SessionPayload } from "../features/session/api";
 import BatchAccountingPage from "../pages/BatchAccountingPage";
-import { expectCustomEventDetailContaining } from "./eventAssertions";
 
 const batchAccountingSourceFiles = [
   "src/pages/BatchAccountingPage.tsx",
@@ -589,11 +588,8 @@ describe("BatchAccountingPage", () => {
   test("updates selected totals, requires notes for mismatches, and submits matching OA rows without a note", async () => {
     const user = userEvent.setup();
     const fetchMock = installFetchMock();
-    const relationListener = vi.fn();
-    window.addEventListener("workbenchRelationUpdated", relationListener);
 
-    try {
-      renderPage();
+    renderPage();
 
       await screen.findByRole("heading", { name: "日常报销批量账务管理" });
       expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeDisabled();
@@ -630,11 +626,7 @@ describe("BatchAccountingPage", () => {
           }),
         );
       });
-      expect(await screen.findByText("已关联批量账务流水与 2 项 OA。")).toBeInTheDocument();
-      expectCustomEventDetailContaining(relationListener, { affectedMonths: ["2026-01"] });
-    } finally {
-      window.removeEventListener("workbenchRelationUpdated", relationListener);
-    }
+    expect(await screen.findByText("已关联批量账务流水与 2 项 OA。")).toBeInTheDocument();
   });
 
   test("submits mismatched OA rows only when difference note is non-empty after trimming", async () => {
@@ -881,7 +873,6 @@ describe("BatchAccountingPage", () => {
 
   test("reloads the visible page through its normal GET without calling the operation barrier", async () => {
     const user = userEvent.setup();
-    const relationListener = vi.fn();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       if (url.pathname === "/api/batch-accounting" && (!init?.method || init.method === "GET")) {
@@ -898,31 +889,25 @@ describe("BatchAccountingPage", () => {
       return jsonResponse({ message: `Unhandled ${url.pathname}` }, 404);
     });
     vi.stubGlobal("fetch", fetchMock);
-    window.addEventListener("workbenchRelationUpdated", relationListener);
 
-    try {
-      renderPage();
+    renderPage();
       await screen.findByRole("heading", { name: "日常报销批量账务管理" });
 
       await user.click(await screen.findByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
       await user.click(screen.getByRole("checkbox", { name: "选择 王青 2026-01-07" }));
       await user.click(screen.getByRole("button", { name: "关联OA项与流水" }));
 
-      expect(await screen.findByText("已关联批量账务流水与 2 项 OA。")).toBeInTheDocument();
-      expect(screen.queryByText("操作失败")).not.toBeInTheDocument();
-      expectCustomEventDetailContaining(relationListener, { affectedMonths: ["2026-01"] });
-      const pageReads = fetchMock.mock.calls.filter(([input, init]) => {
-        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-        return url.pathname === "/api/batch-accounting" && (!init?.method || init.method === "GET");
-      });
-      expect(pageReads.length).toBeGreaterThanOrEqual(2);
-      expect(fetchMock.mock.calls.some(([input]) => {
-        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-        return url.pathname === "/api/operation-barrier/status";
-      })).toBe(false);
-    } finally {
-      window.removeEventListener("workbenchRelationUpdated", relationListener);
-    }
+    expect(await screen.findByText("已关联批量账务流水与 2 项 OA。")).toBeInTheDocument();
+    expect(screen.queryByText("操作失败")).not.toBeInTheDocument();
+    const pageReads = fetchMock.mock.calls.filter(([input, init]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/batch-accounting" && (!init?.method || init.method === "GET");
+    });
+    expect(pageReads.length).toBeGreaterThanOrEqual(2);
+    expect(fetchMock.mock.calls.some(([input]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/operation-barrier/status";
+    })).toBe(false);
   });
 
   test("filters right side OA rows across applicant, project, amount, and reason", async () => {
@@ -955,11 +940,8 @@ describe("BatchAccountingPage", () => {
   test("renders submitted bucket as read-only associated OA and withdraws with a reason", async () => {
     const user = userEvent.setup();
     const fetchMock = installFetchMock();
-    const relationListener = vi.fn();
-    window.addEventListener("workbenchRelationUpdated", relationListener);
 
-    try {
-      renderPage();
+    renderPage();
       await user.click(await screen.findByRole("button", { name: "已提交 1" }));
 
       expect(await screen.findByRole("button", { name: /批量账务集中处理.*900.00.*2026-02-10 12:30:00.*支出.*建行 8106/ })).toBeInTheDocument();
@@ -990,11 +972,7 @@ describe("BatchAccountingPage", () => {
           }),
         );
       });
-      expect(await screen.findByText("已撤回批量账务关联。")).toBeInTheDocument();
-      expectCustomEventDetailContaining(relationListener, { affectedMonths: ["2026-02"] });
-    } finally {
-      window.removeEventListener("workbenchRelationUpdated", relationListener);
-    }
+    expect(await screen.findByText("已撤回批量账务关联。")).toBeInTheDocument();
   });
 
   test("sidebar exposes the batch accounting entry near bank flow rule batches", () => {

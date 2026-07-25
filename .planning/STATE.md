@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 27 v7 Workbench canonical-proof candidate implemented and documented; final current-state local gate precedes Plan 27-07 exact release.
-last_updated: "2026-07-25T12:00:00+08:00"
-last_activity: 2026-07-25 - Added complete Workbench proof, active-flight coalescing, v7 schema and migration 0125 after f8ad production diagnostics
+stopped_at: Phase 27 current release 719c9a34 is deployed and locally reverified; final current-release production correctness matrix remains.
+last_updated: "2026-07-25T11:22:34+08:00"
+last_activity: 2026-07-25 - Dropped the uncommitted exact-candidate performance experiment and reverified the clean deployed 719c9a34 baseline
 progress:
   total_phases: 23
   completed_phases: 3
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-16)
 
 **Core value:** Preserve production finance workflow correctness while improving individual pages through isolated, reviewable GSD phases.
-**Current focus:** Phase 27 Plan 27-07 exact-candidate release and one complete production correctness/performance matrix. Phase 26 frozen Turnover correctness is complete and remains a non-regression invariant.
+**Current focus:** Phase 27 Plan 27-07 final current-release production correctness matrix and evidence closure. Phase 26 frozen Turnover correctness is complete and remains a non-regression invariant.
 
 ## Current Position
 
 Phase: 27 of 27 (按页面访问收敛 Read Model)
 Plan: 27-07 of 27-07
-Status: Plans 27-01 through 27-06 complete; f8ad write/zero-fan-out proof retained; v7 Workbench corrective candidate awaits final current-state local gate, exact release, controlled rehydrate and L4 production proof
-Last activity: 2026-07-25 - v7 code, migration, tests and boundary docs updated; final PostgreSQL/docs/runtime/legacy-path gate pending
+Status: Plans 27-01 through 27-06 complete; current HEAD/origin/main `719c9a34` is active as production release `main-719c9a34-20260725101310`; targeted local gates pass; final L4 production correctness coverage remains
+Last activity: 2026-07-25 - exact-candidate performance-only diff deleted; clean current release passed targeted backend/frontend, PostgreSQL, lint, docs and runtime gates
 
 Progress: [█████████░] 95%
 
@@ -51,14 +51,16 @@ Progress: [█████████░] 95%
 
 ### Decisions
 
-- Phase 27 corrective candidate: Cost compares the Workbench business proof but ignores only the active-generation execution cursor `source_version`; query, worker, parent/child SQL and System Audit now use the same semantic contract, while real business-proof drift remains fail closed.
-- Phase 27 corrective candidate: Bank-flow tag-rule save returns exact informational affected months with empty write targets and no dead `refresh_enqueued` DTO; current-page normal GET owns access-time convergence.
-- Phase 27 v7 candidate: Application reuses one Workbench projection builder and coalesces only overlapping same-scope canonical proof; completed proofs are not cached, failed proofs remain retryable, and PostgreSQL queue/dirty state stays authoritative.
-- Phase 27 v7 candidate: Workbench proof covers ETC, all relation/control statuses, cross-month members and consumed bank settings; schema v7 plus migration `0125` requires one official post-deploy Workbench rehydrate before the production matrix.
+- Phase 27 current release: Cost compares the Workbench business proof but ignores only the active-generation execution cursor `source_version`; query, worker, parent/child SQL and System Audit use the same semantic contract, while real business-proof drift remains fail closed.
+- Phase 27 current release: Bank-flow tag-rule save returns exact informational affected months with empty write targets and no dead `refresh_enqueued` DTO; current-page normal GET owns access-time convergence.
+- Phase 27 current release: Application reuses one Workbench projection builder and coalesces only overlapping same-scope canonical proof; completed proofs are not cached, failed proofs remain retryable, and PostgreSQL queue/dirty state stays authoritative.
+- Phase 27 current release: Workbench proof covers ETC, all relation/control statuses, cross-month members and consumed bank settings. Schema v7, migration `0125` and the official production Workbench rehydrate are already active in release `main-719c9a34-20260725101310`.
+- Phase 27 scope decision: the later uncommitted exact-candidate delta-proof experiment was pure 3-second performance work, not a correctness fix. It was deleted completely; current `719c9a34` keeps the simpler full fail-closed canonical proof.
+- Phase 27 acceptance decision: 3-second access-to-fresh remains a measured product target but is not a Phase 27 completion gate. A sample above 3 seconds is `performance_follow_up`; stuck/non-convergent refresh, incorrect/incomplete payload, unrelated I/O or queue/worker failure still blocks.
 - Phase 27 release: Reuse the Phase 27-06 full-repository/183-browser evidence for unchanged behavior and run current-diff targeted gates plus real disposable PostgreSQL; do not rerun the unrelated 183-browser suite or redundant full CI.
 - Phase 26 reconciliation: Plans 26-01 through 26-05 and their production follow-up fixes are complete in current history; no Phase 26 implementation is repeated during Phase 27.
 - Phase 27-03: Ordinary Workbench relation, bank-flow/no-OA, batch-accounting and Turnover writes persist canonical facts/history/idempotency/audit only; freshness and operation-barrier targets are empty.
-- Phase 27-03: Current visible consumers reconcile through normal GET, hidden consumers do no page I/O until visible, and existing lightweight notifications only trigger independent GETs in already visible windows.
+- Phase 27-03: Current-page commands reconcile through normal GET; other open/hidden pages do no business I/O on focus/visibility/BFCache or cross-page writes and only load on route re-entry, query change, browser manual refresh or explicit retry.
 - Phase 27-03: Workbench keeps active-generation atomic publish but no longer publishes Cost refreshes; Cost access first converges exact Workbench months and only then its own exact scope.
 - Phase 27-03: Existing Cost relation-delta capability is unreachable from ordinary writes and cannot act as a fallback; Phase 27-06 owns its final deletion or explicit-operations classification.
 - Phase 27-02: Redis remains payload-only; current canonical/schema/dirty proof must pass before a cached bank/cost/tax/OA payload is accepted.
@@ -124,7 +126,7 @@ None yet.
 
 ### Blockers/Concerns
 
-- Phase 27 remaining sequence: finish the current v7 candidate's final targeted/PostgreSQL/docs/runtime/legacy-path gate; commit/push exact main SHA; deploy migration `0125`; run one official Workbench v7 rehydrate; then pass one complete L4 production matrix covering Cost/Workbench/Turnover SLO, zero write fan-out, exact access-time enqueue, queue/worker convergence, restored test-owned fixture and final System Audit.
+- Phase 27 remaining sequence: validate the already-active exact release `main-719c9a34-20260725101310` with one complete L4 production correctness matrix. Cover all registered page/operation/Drawer owners with read-only or approved reversible evidence; prove eventual fresh canonical payloads, zero ordinary write fan-out, exact access-time enqueue, unrelated-page zero I/O, retry/reload recovery, queue/worker convergence, restored test-owned fixture and final System Audit. Record latency honestly; values above 3 seconds are follow-up evidence, not a correctness failure. Do not create or deploy a no-op application release.
 - Phase 21 Release A full local gate is zero-failure: backend 4182 passed / 33 explicitly environment-gated skipped；frontend 835/835；Chromium 177/177；production build passed. 首次远端分支 CI 揭示一个既有测试模块依赖未声明的 `pytest`，且 4 个顶层测试未被 `unittest discover` 执行；现已改为标准 `unittest.TestCase`。第二次远端 CI 暴露 Vitest 文件并行下的全局 I/O/监听器竞争与 cross-realm Blob 断言；前端测试现固定单 worker，Blob 以 size/MIME 合同断言。第三次远端 CI 证明多个前端测试把页面/抽屉壳出现误当成异步数据 I/O 完成；相关测试现以用户可见数据行、详情字段或当前 DOM 节点作为 readiness anchor。第四次远端 CI 进一步暴露 OA 反提历史时间依赖执行机本地时区；该业务时间现显式按 `Asia/Shanghai` 格式化，并由语义表格 readiness + 精确时间断言保护。与 CI 一致的 Node 20 全量运行最终 71 files / 835 tests 全绿，且不再出现 `MaxListenersExceededWarning`。统一门禁还捕获 import confirm 在持久化前发布 matching 的竞态；已改为 durable delta 成功后才发布所有下游信号，并将 4 项 import-processing 测试纳入 `unittest discover`。
 - 第五次远程 CI 为 176/177；唯一失败是待找发票文本选择 E2E 用元素 bounding-box 中线做像素拖拽，在 CI 字体/换行布局下落到空白区。测试现对同一可见文本节点执行 Playwright 浏览器文本选择，仍精确验证 `window.getSelection()`，不改业务 UI、不加 retry、不放宽结果。
 - 第六次远程 CI 的唯一失败是 ETC 统一批次列表测试等待静态 list 容器后同步读取异步批次行；现以 `etc-batch-unsubmitted-01` 业务行作为 readiness anchor，不改 ETC 业务链路与 I/O。
@@ -134,7 +136,7 @@ None yet.
 - main `1f1ec5324bc7dde9987b51f79d4d2a6ebe502841` 再次生产激活并完成受控 Workbench rehydrate 后，page Audit 捕获 51 个 ETC summary/detail mismatch 与 2 个 override ownership mismatch；生产立即回滚并 rehydrate `etc-import-e5d6e6a4e-20260714-visibility`，恢复 219 active relations、19 scopes、876 relation rows、1296 group rows与零问题，且 migration 仍为 0001–0103。v2 hotfix 已通过 4190 backend / 835 frontend / 177 Chromium 本地全量门禁，远程精确 SHA 与重新 cutover 仍待执行。
 - v2 已合并并通过 branch/main CI；生产 release `main-a127c58c7-workbench-audit-v2-20260715072607` 的 19-month rehydrate 让 51 个 ETC mismatch 归零，但仍有 3 个合法 `pending_input_invoice` mode 被删除、2 个 active null override 被 candidate exception 覆盖。v3 修复未配对 override precedence 并通过 PR #6/双 CI；生产 release `main-427f8efac-workbench-audit-v3-20260715083006` 消除了前三项，最后两项确认是 active formal relation member 与历史 override/exception 的优先级冲突。生产再次立即回滚、rehydrate 并恢复零问题；v4 统一 formal relation > override > exception，本地完整门禁为 backend 4193 passed / 33 explicit environment-gated skipped、frontend 835 passed、production build succeeded、Chromium 177 passed。
 - legacy section hotfix 分支精确 SHA CI 成功后，main 精确 merge SHA CI 暴露两个旧测试边界竞态：OA 待付款测试只等待静态页面容器便同步读取异步业务行；Workbench mock server 对同列多值使用 OR，而正式 repository 与本地 display model 使用 AND。测试现等待 OA 业务按钮，并让 mock 复刻正式 AND 合同；不改生产业务链路。
-- Current v7 candidate has already passed its six disposable PostgreSQL Workbench proof/index cases and 66 migration SQL tests; the final current-state PostgreSQL rerun and cleanup remain part of the pre-push gate.
+- Current `719c9a34` passed the final targeted local gate after deleting the exact-candidate diff: Workbench/Cost 274 tests plus 24 subtests, disposable PostgreSQL Workbench proof 6 tests, Phase 27 backend contract slice 215 tests plus 55 subtests, frontend activation/page slice 116 tests, lint/docs/runtime-check, and verified temporary database cleanup.
 - Release A 已通过 PR #2 合并到 main（merge SHA `85ec4c26195bd7d2320b90c6c92ff3529d920d52`），分支与 main 精确 SHA 远程 CI 均成功；首次生产激活因上述 legacy OA projection payload 问题立即回滚，未把故障版本留作 active release。
 - Hotfix 发布前基线仍显示云南立孚 520 关系为 unpaired；破坏性 migration 0104 已明确从 Release A 延后，只有 repaired release 激活后才允许运行已登记的 rehydrate、等待 worker drain 并执行生产 System Audit。
 - 17/17 pages expose ready v17 proofs and local System Audit is complete; authorized production read-only execution has not occurred.
@@ -170,5 +172,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-07-25
-Stopped at: Phase 27 v7 candidate behavior and docs are implemented; final current-state targeted/PostgreSQL/docs/runtime/legacy-path gate remains before commit/push and Plan 27-07 production release.
+Stopped at: Phase 27 documentation is being aligned to the clean, already-deployed `719c9a34` baseline before the final current-release production correctness matrix.
 Resume file: .planning/phases/27-read-model-fan-out/27-VERIFICATION.md

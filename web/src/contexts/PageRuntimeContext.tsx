@@ -2,9 +2,7 @@ import {
   createContext,
   type ReactNode,
   useContext,
-  useEffect,
   useMemo,
-  useRef,
 } from "react";
 
 export type PageRuntimeContextValue = {
@@ -50,26 +48,4 @@ export function useOptionalPageActivation(expectedPageKey?: string) {
     throw new Error(`useOptionalPageActivation expected pageKey "${expectedPageKey}" but received "${context.pageKey}".`);
   }
   return context;
-}
-
-export function useActivePageEvent<EventType extends Event = Event>(
-  eventName: string,
-  handler: (event: EventType) => void,
-) {
-  const { active } = usePageActivation();
-  const handlerRef = useRef(handler);
-
-  useEffect(() => {
-    handlerRef.current = handler;
-  }, [handler]);
-
-  useEffect(() => {
-    const eventListener = (event: Event) => {
-    if (active && document.visibilityState !== "hidden") {
-      handlerRef.current(event as EventType);
-    }
-    };
-    window.addEventListener(eventName, eventListener);
-    return () => window.removeEventListener(eventName, eventListener);
-  }, [active, eventName]);
 }

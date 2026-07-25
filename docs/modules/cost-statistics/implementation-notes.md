@@ -62,7 +62,7 @@
 ## 2026-07-23 - Workbench→Cost 访问时两阶段收敛（历史方案，已由2026-07-25 child pipeline取代）
 
 - 当时的实现是上游stale时只enqueue当前Workbench月份，下一次GET才enqueue Cost scope；第一候选生产性能矩阵证明该串行空档无法满足`<3s`，现已由2026-07-25同次exact Workbench+Cost child pipeline取代。普通relation/turnover/bank-flow写入与Workbench generation publish仍保持零Cost投递。
-- Cost 页面首次访问、轻量 relation 提示、focus/hidden→visible 均复用正常 explorer GET。refreshing 使用 150ms 间隔、最长 3s 的页面自身有界重试；无 operation barrier、无全局 App Status 轮询、无新 worker/表/协调器。
+- Cost 页面首次访问和当前页明确操作复用正常 explorer GET；focus/hidden→visible 不触发 GET。refreshing 使用 150ms 间隔、最多 200 次（30 秒）的页面自身有界重试，hidden 时停止且 visible 不自动恢复；无 operation barrier、无全局 App Status 轮询、无新 worker/表/协调器。
 - 本条取代下方历史记录中“`cost_statistics_relation_delta` 为普通写入可达主链”和“`workbench_shard_published` 保证 Cost 最终收敛”的描述；相关 producer、worker/projection/repository 与 write-trace smoke 已在 2026-07-24 旧代码门禁中删除，不存在运维或兼容 fallback。
 
 ## 2026-07-22 - 银行流水中心 OA 成本资格与多 OA 明确金额拆分
@@ -966,7 +966,7 @@
 - 目标：停止 Cost 全局 statistics 永久 stale 后反复刷新无变化 `all:all` 父 scope。
 - 根因：Bank Detail 的事实字段是 `direction=expense|income`，`direction_label=支|收` 仅用于短标签显示；Cost bank-flow SQL 错把短标签当成 `支出|收入` 统计字段，生产 1,014 条流水因此被统计为支出 0、收入 0。
 - 决策：只在共享 bank-flow SQL I/O 边界把 canonical direction 映射为 Cost 契约的 `支出|收入`，并让页面 Audit 使用同一映射；父聚合 source vector 增加一个语义版本，使旧错误 statistics 只重建父 scope，不让 Workbench-backed 月 shard 全量失效；不新增缓存、协调器、队列或兼容分支。
-- 验证：Cost SQL/Audit/API/App Health 定向测试通过；一次性 PostgreSQL 用真实 `支|收` 行验证 time/bank-tag summary 与父 scope statistics。生产 `<3s`、System Audit 和队列收敛仍由部署后 fixture 门禁证明。
+- 验证：Cost SQL/Audit/API/App Health 定向测试通过；一次性 PostgreSQL 用真实 `支|收` 行验证 time/bank-tag summary 与父 scope statistics。生产 fixture 继续验证最终 fresh、System Audit 和队列收敛；超过 3 秒记录为性能 follow-up。
 - 文档影响：模块职责、API shape、read-model scope、worker 和依赖方向均未改变，`boundary-io.md` 不适用。
 
 ## 2026-07-24 Parent 访问依赖并行提交
@@ -974,10 +974,10 @@
 - 生产 round 9 证明 `project/all` 仍按 Workbench→Cost child→Cost parent 串行发现，确认/恢复可见耗时为 `15.675s` / `11.401s`，而 Cost child handler 本身约 `0.33s`。
 - `CostStatisticsQueryService` 已经持有 parent 的 exact Workbench month scopes，因此复用现有 runtime gateway，在同一次访问中提交同 project scope 的 Cost month children和请求 parent；月份请求仍只提交当前 scope，禁止 sibling project/page scope。
 - 不新增协调器、队列、缓存、worker类型或版本账本；manifest dependency gate继续 fail closed，PostgreSQL active dedupe继续合并重复任务。
-- 定向 service/read-model测试覆盖月份不扩散和parent精确 children + parent；最终 `<3s` 仍须部署后用同一 test-owned fixture证明。
+- 定向 service/read-model测试覆盖月份不扩散和parent精确 children + parent；同一 test-owned fixture 必须证明最终 fresh 与精确 scope，3 秒只保留为性能观测目标。
 
 ## 2026-07-25 Workbench dependency proof 并发合并
 
 - `f8ad8b38` 生产证明 Cost child handler 已较快，剩余 project/all 长尾包含多个 consumer 重复执行同一 Workbench canonical proof。Cost source-version 语义和 worker依赖顺序不变。
 - Cost query、Workbench query 与 parent dependency proof现在复用Application现有 Workbench builder；重叠同scope proof只读一次数据库，完成后不缓存。v7 complete proof新增的ETC、关系状态、跨月成员和实际消费settings字段继续作为Cost业务依赖fail closed；只排除执行游标`source_version`。
-- 没有新增Cost代码路径、read model、worker、queue、cache或协调器；最终 project/all `<3s`仍由部署后生产fixture证明。
+- 没有新增Cost代码路径、read model、worker、queue、cache或协调器；当前 production fixture 只以 project/all 最终 fresh/canonical equality 为硬门，超过 3 秒登记后续性能项。

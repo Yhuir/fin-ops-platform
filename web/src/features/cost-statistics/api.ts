@@ -115,6 +115,7 @@ type ApiCostStatisticsExplorerPage = {
   row_count: number;
   next_cursor?: string | null;
   read_model_status?: string | null;
+  statistics_status?: string | null;
   read_model_scope_key?: string | null;
   read_model_generated_at?: string | null;
   read_model_stale_reasons?: unknown[] | null;
@@ -376,6 +377,7 @@ export async function fetchCostStatisticsExplorerPage(
     rowCount: payload.row_count,
     nextCursor: optionalString(payload.next_cursor),
     readModelStatus: optionalString(payload.read_model_status) as CostStatisticsExplorerPage["readModelStatus"],
+    statisticsStatus: optionalString(payload.statistics_status) as CostStatisticsExplorerPage["statisticsStatus"],
     readModelScopeKey: optionalString(payload.read_model_scope_key),
     readModelGeneratedAt: optionalString(payload.read_model_generated_at),
     readModelStaleReasons: stringList(payload.read_model_stale_reasons),

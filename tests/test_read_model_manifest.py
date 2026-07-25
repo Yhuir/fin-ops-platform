@@ -95,6 +95,8 @@ class ReadModelManifestTests(unittest.TestCase):
             ),
         )
         self.assertEqual(graph["cost_statistics"], ("workbench", "bank_detail"))
+        self.assertEqual(graph["input_invoice_usage"], ("workbench_relation",))
+        self.assertEqual(graph["output_invoice_collection"], ("workbench_relation",))
 
     def test_phase_27_coverage_matches_manifest_keys_scopes_and_query_owners(self) -> None:
         coverage = _phase_27_read_model_coverage()

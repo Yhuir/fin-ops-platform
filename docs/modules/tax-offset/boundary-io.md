@@ -25,7 +25,7 @@
 - 税金抵扣页面查询、认证导入、抵扣计划、税金 read model。
 - `tax_offset` scoped incremental projection。
 - 税金 projection 由 `tax_offset_sql_projection.py` 独立拥有；兼容 `cost-tax` worker 只组装税金 builder，不共享成本投影代码或 scope。
-- 抵扣计划保存和认证导入只提交 canonical facts、source version 与审计；普通写返回空 read model targets，前端不等待 operation barrier。税金页面进入、focus 或 hidden→visible 时按当前月份执行 freshness/status/enqueue 并轮询收敛。
+- 抵扣计划保存和认证导入只提交 canonical facts、source version 与审计；普通写返回空 read model targets，前端不等待 operation barrier。税金页面在 route 进入/重进、月份变化、浏览器手动刷新或明确重试时按当前月份执行 freshness/status/enqueue 并轮询收敛；focus/visibility 不触发税金数据 load。
 
 ### 不负责
 

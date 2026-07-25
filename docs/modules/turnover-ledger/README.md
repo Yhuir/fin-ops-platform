@@ -50,14 +50,14 @@
 - 撤回：现代外部往来闭环统一用 `/api/turnover-ledger/closures/withdraw`，按 `cash_closure_case_id` 通过 command service `withdraw_relation` 撤回对应 active case，并恢复确认前可恢复的 OA-bank 关系；事务内只允许 `{oa, bank}` 且至少两条 bank rows。显式携带 `special_metadata.turnover_relation_id` 的历史闭环才可走 `/api/turnover-ledger/relations/{relation_id}/withdraw`；页面和 projection 不得从 case id 猜旧 relation id。已包含发票或其他 row type 的 relation 必须转关联台撤回。
 - 前端闭环入口：表格 checkbox 选中未闭环 flow rows 时，toolbar 主按钮为“确认闭环”。所选 flow rows 全部带同一个 `cash_closure_case_id` 且 `cash_closure_linked=true` 时，主按钮切换为“撤回闭环”。同一次选择不得混合已闭环与未闭环流水，也不得跨多个闭环 case 撤回。
 - 下游影响：外部往来关系变更影响 `turnover_ledger`、`workbench`、`workbench_relation`、成本统计、搜索和前端跨页刷新提示。
-- 操作闭环：manual closure 发起和提交不能依赖 stale grouped payload；提交前先重新加载 grouped payload，并按原始 bank row ids 在同一 group 内重绑定最新 flow rows，用最新 `categoryVersion` 生成 `expected_versions`。tag-selection、extra、confirm/withdraw 的写 API 只返回 canonical 业务结果和信息性 affected months，两个 target 数组为空；POST 成功后立即结束写阻塞并重跑当前页面正常 GET。`workbench`、成本统计、搜索等消费者不由写链投递，只有访问或重新可见时才用自己的 freshness gate 收敛。页面 reload 失败只能提示已提交但页面刷新未完成，不能把成功 command 改写成失败。
+- 操作闭环：manual closure 发起和提交不能依赖 stale grouped payload；提交前先重新加载 grouped payload，并按原始 bank row ids 在同一 group 内重绑定最新 flow rows，用最新 `categoryVersion` 生成 `expected_versions`。tag-selection、extra、confirm/withdraw 的写 API 只返回 canonical 业务结果和信息性 affected months，两个 target 数组为空；POST 成功后立即结束写阻塞并重跑当前页面正常 GET。`workbench`、成本统计、搜索等消费者不由写链投递，只在各自 route 进入/重进、查询变化、浏览器手动刷新或明确重试时用 freshness gate 收敛。页面 reload 失败只能提示已提交但页面刷新未完成，不能把成功 command 改写成失败。
 - App Status：`turnover_ledger` domain 绑定单一 `turnover-ledger` worker、`turnover_ledger` read model、`turnover_ledger.read_model.refresh` job type。现代闭环确认/撤回只改变 canonical Workbench relation context，不再用第二 worker 并发全量重建。
 
 不属于本模块事实源：
 
 - 银行明细分类规则的长期业务口径归 `bank-details` 和产品规格维护。
 - Workbench 已配对区事实由 Workbench pair relation/read model 维护，不能由 Turnover query 层临时拼接或直接读取 pair service snapshot；Turnover 页面只能消费 projection 已写入的 Workbench relation 状态字段。外部往来页只展示正向 chip：`linked_oa=true` 显示“已关联 OA”，`linked_invoice=true` 显示“已关联 发票”，`cash_closure_linked=true` 显示醒目的“收支闭环”。不得再显示“已关联业务单据”“未闭环”“部分已闭环”“候选关联”等旧 chip。
-- 前端 domain event 只作为同浏览器刷新提示，不是跨页面一致性的事实源。
+- 前端不发送或订阅 Turnover/Workbench/extra 跨页业务刷新事件；另一个页面/tab 不自动 reload。
 
 ## 维护触发器
 

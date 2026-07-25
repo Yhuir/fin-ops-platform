@@ -181,6 +181,7 @@ describe("Cost statistics export API", () => {
         row_count: 1,
         next_cursor: null,
         read_model_status: "refreshing",
+        statistics_status: "stale",
         read_model_scope_key: "active:2026-03",
         read_model_generated_at: "2026-06-01T00:00:00",
         read_model_stale_reasons: ["workbench_scope_key"],
@@ -194,6 +195,7 @@ describe("Cost statistics export API", () => {
     });
 
     expect(payload.readModelStatus).toBe("refreshing");
+    expect(payload.statisticsStatus).toBe("stale");
     expect(payload.readModelScopeKey).toBe("active:2026-03");
     expect(payload.readModelGeneratedAt).toBe("2026-06-01T00:00:00");
     expect(payload.readModelStaleReasons).toEqual(["workbench_scope_key"]);

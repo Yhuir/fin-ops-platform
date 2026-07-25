@@ -130,7 +130,7 @@ cd web && npm test -- --run \
   src/test/OutputInvoiceCollectionsPage.test.tsx \
   src/test/TaxOffsetPage.test.tsx \
   src/test/AppStatusIndicator.test.tsx \
-  src/test/domainEvents.test.ts
+  src/test/PageRouteHost.test.tsx
 
 cd web && npx playwright test e2e/output-invoice-collections-flow.spec.ts --project=chromium
 cd web && npx playwright test e2e/output-invoice-red-relation-fanout.spec.ts

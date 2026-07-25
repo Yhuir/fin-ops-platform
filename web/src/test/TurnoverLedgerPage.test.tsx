@@ -9,7 +9,6 @@ import { GlobalOperationOverlayProvider } from "../contexts/GlobalOperationOverl
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
 import type { SessionPayload } from "../features/session/api";
 import TurnoverLedgerPage from "../pages/TurnoverLedgerPage";
-import { expectCustomEventDetailContaining } from "./eventAssertions";
 
 const turnoverLedgerSourceFiles = [
   "src/pages/TurnoverLedgerPage.tsx",
@@ -1250,10 +1249,6 @@ describe("Turnover ledger page", () => {
   test("confirms a manual zero-difference turnover closure from two selected same-group flow rows", async () => {
     const user = userEvent.setup();
     const fetchMock = installTurnoverLedgerFetch();
-    const turnoverListener = vi.fn();
-    const workbenchListener = vi.fn();
-    window.addEventListener("turnoverRelationUpdated", turnoverListener);
-    window.addEventListener("workbenchRelationUpdated", workbenchListener);
     renderTurnoverLedgerPage();
 
     const page = await screen.findByTestId("turnover-ledger-page");
@@ -1287,20 +1282,8 @@ describe("Turnover ledger page", () => {
       });
     });
     await waitFor(() => {
-      expectCustomEventDetailContaining(turnoverListener, {
-        relationId: "turnover:turnover_rel_company_closure",
-        action: "manual_closure",
-      });
-      expectCustomEventDetailContaining(workbenchListener, {
-        relationId: "turnover:turnover_rel_company_closure",
-        action: "turnover_manual_closure",
-      });
-    });
-    await waitFor(() => {
       expect(openButton).toBeDisabled();
     });
-    window.removeEventListener("turnoverRelationUpdated", turnoverListener);
-    window.removeEventListener("workbenchRelationUpdated", workbenchListener);
   });
 
   test("reports delayed visibility from normal page GET without calling the operation barrier", async () => {
@@ -1622,10 +1605,6 @@ describe("Turnover ledger page", () => {
         groupedPayload("all"),
       ],
     });
-    const turnoverListener = vi.fn();
-    const workbenchListener = vi.fn();
-    window.addEventListener("turnoverRelationUpdated", turnoverListener);
-    window.addEventListener("workbenchRelationUpdated", workbenchListener);
     renderTurnoverLedgerPage();
 
     const page = await screen.findByTestId("turnover-ledger-page");
@@ -1650,18 +1629,6 @@ describe("Turnover ledger page", () => {
     });
     await waitFor(() => expect(requestUrls(fetchMock, "/api/turnover-ledger").length).toBeGreaterThanOrEqual(2));
     expect(requestUrls(fetchMock, "/api/operation-barrier/status")).toHaveLength(0);
-    await waitFor(() => {
-      expectCustomEventDetailContaining(turnoverListener, {
-        relationId: "case-workbench-cash-1",
-        action: "cash_closure_withdraw",
-      });
-      expectCustomEventDetailContaining(workbenchListener, {
-        relationId: "case-workbench-cash-1",
-        action: "cash_closure_withdraw",
-      });
-    });
-    window.removeEventListener("turnoverRelationUpdated", turnoverListener);
-    window.removeEventListener("workbenchRelationUpdated", workbenchListener);
   });
 
   test("allows manual closure confirmation when selected rows are only linked to OA", async () => {
@@ -1716,8 +1683,6 @@ describe("Turnover ledger page", () => {
   test("opens the extra drawer from a flow row, hides technical relation ids, saves, and keeps relation actions in the drawer", async () => {
     const user = userEvent.setup();
     const fetchMock = installTurnoverLedgerFetch();
-    const extraListener = vi.fn();
-    window.addEventListener("turnoverLedgerExtraUpdated", extraListener);
     renderTurnoverLedgerPage();
 
     const page = await screen.findByTestId("turnover-ledger-page");
@@ -1767,10 +1732,6 @@ describe("Turnover ledger page", () => {
     await waitFor(() => {
       expect(requestUrls(fetchMock, "/api/turnover-ledger").length).toBeGreaterThanOrEqual(2);
     });
-    await waitFor(() => {
-      expectCustomEventDetailContaining(extraListener, { relationId: "rel-jiaxiaohua" });
-    });
-    window.removeEventListener("turnoverLedgerExtraUpdated", extraListener);
   });
 
   test("shows a business error when relation detail disappears after the ledger was rendered", async () => {
@@ -1894,7 +1855,7 @@ describe("Turnover ledger page", () => {
     expect(within(flowRows[0]).queryByText("关联台手工闭环")).not.toBeInTheDocument();
   });
 
-  test("reloads on category updates and downloads a previewed export for the current tab", async () => {
+  test("does not reload on category updates and downloads a previewed export for the current tab", async () => {
     const user = userEvent.setup();
     const fetchMock = installTurnoverLedgerFetch();
     renderTurnoverLedgerPage();
@@ -1906,9 +1867,7 @@ describe("Turnover ledger page", () => {
     act(() => {
       window.dispatchEvent(new CustomEvent("bankTransactionCategoryUpdated", { detail: { affectedMonths: ["2026-05"] } }));
     });
-    await waitFor(() => {
-      expect(requestUrls(fetchMock, "/api/turnover-ledger").length).toBeGreaterThan(before);
-    });
+    expect(requestUrls(fetchMock, "/api/turnover-ledger")).toHaveLength(before);
 
     await user.click(within(page).getByRole("tab", { name: "公司往来" }));
     await within(page).findByText("云南建设有限公司");

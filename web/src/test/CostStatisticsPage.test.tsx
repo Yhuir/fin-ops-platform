@@ -4,7 +4,6 @@ import { readFileSync } from "node:fs";
 import { MemoryRouter } from "react-router-dom";
 import { vi } from "vitest";
 
-import PageRouteHost from "../app/PageRouteHost";
 import { AppChromeProvider } from "../contexts/AppChromeContext";
 import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
@@ -118,25 +117,6 @@ function renderCostStatisticsPage(session: SessionContextValue = staticSession) 
   );
 }
 
-function renderCostStatisticsPageWithRuntime(session: SessionContextValue = staticSession) {
-  return render(
-    <MemoryRouter initialEntries={["/cost-statistics"]}>
-      <AppChromeProvider>
-        <SessionContext.Provider value={session}>
-          <PageSessionStateProvider>
-            <PageRouteHost routes={[{
-              path: "/cost-statistics",
-              pageKey: "cost-statistics",
-              component: CostStatisticsPage,
-              preload: () => Promise.resolve(),
-            }]} />
-          </PageSessionStateProvider>
-        </SessionContext.Provider>
-      </AppChromeProvider>
-    </MemoryRouter>,
-  );
-}
-
 async function chooseScopeOption(user: ReturnType<typeof userEvent.setup>, triggerName: string, optionName: string) {
   await user.click(screen.getByRole("button", { name: triggerName }));
   const picker = await screen.findByRole("dialog", { name: /时间范围选择器/ });
@@ -207,86 +187,6 @@ describe("Cost statistics page", () => {
     await waitFor(() => expect(status).toHaveFocus());
     expect(await screen.findByRole("heading", { name: "按银行统计" })).toBeInTheDocument();
     await waitFor(() => expect(bankViewButton).toHaveFocus());
-  });
-
-  test("closes cost-owned portals and locks an open tag drawer on a domain refresh", async () => {
-    window.history.pushState({}, "", "/cost-statistics");
-    const user = userEvent.setup();
-    installMockApiFetch({ costExplorerDelayMs: 50 });
-
-    renderCostStatisticsPage();
-
-    expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "导出中心" }));
-    expect(await screen.findByRole("dialog", { name: "导出中心" })).toBeInTheDocument();
-
-    fireEvent(window, new CustomEvent("workbenchRelationUpdated", { detail: { affectedMonths: ["2026-03"] } }));
-
-    expect(await screen.findByText("正在加载成本统计")).toBeInTheDocument();
-    expect(screen.queryByRole("dialog", { name: "导出中心" })).not.toBeInTheDocument();
-    expect(screen.getByTestId("cost-statistics-interaction-overlay")).toBeInTheDocument();
-    expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "成本统计标签规则" }));
-    const drawer = await screen.findByRole("dialog", { name: "成本统计标签规则" });
-    fireEvent(window, new CustomEvent("workbenchRelationUpdated", { detail: { affectedMonths: ["2026-03"] } }));
-
-    expect(await screen.findByText("正在加载成本统计")).toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: "成本统计标签规则" })).toBeInTheDocument();
-    expect(drawer.querySelector(".cost-tag-rules-body")).toHaveAttribute("inert");
-    expect(drawer.querySelector(".cost-tag-rules-footer")).toHaveAttribute("inert");
-    expect(within(drawer).getByRole("button", { name: "关闭抽屉" })).toBeEnabled();
-  });
-
-  test("revalidates the active all-scope through the normal explorer GET without an operation barrier", async () => {
-    window.history.pushState({}, "", "/cost-statistics");
-    const user = userEvent.setup();
-    const fetchMock = installMockApiFetch();
-
-    renderCostStatisticsPage();
-
-    expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
-    await chooseScopeOption(user, "时间统计时间范围：2026年3月", "全部时间");
-    await waitForCostStatisticsReady();
-    const explorerCallsBeforeEvent = fetchMock.mock.calls.filter(([request]) => (
-      String(request).startsWith("/api/cost-statistics/explorer?")
-    )).length;
-
-    fireEvent(window, new CustomEvent("workbenchRelationUpdated", { detail: { affectedMonths: ["2026-03"] } }));
-    fireEvent(window, new CustomEvent("workbenchRelationUpdated", { detail: { affectedMonths: ["2026-03"] } }));
-
-    await waitFor(() => {
-      expect(fetchMock.mock.calls.filter(([request]) => (
-        String(request).startsWith("/api/cost-statistics/explorer?")
-      )).length).toBeGreaterThan(explorerCallsBeforeEvent);
-    });
-    expect(fetchMock.mock.calls.filter(([request]) => (
-      String(request) === "/api/operation-barrier/status"
-    ))).toHaveLength(0);
-    await waitForCostStatisticsReady();
-  });
-
-  test("revalidates and locks the page when restored from the back-forward cache", async () => {
-    window.history.pushState({}, "", "/cost-statistics");
-    const fetchMock = installMockApiFetch({ costExplorerDelayMs: 50 });
-
-    renderCostStatisticsPageWithRuntime();
-
-    expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
-    const explorerCallsBeforeRestore = fetchMock.mock.calls.filter(([request]) => (
-      String(request).startsWith("/api/cost-statistics/explorer?")
-    )).length;
-    const pageShowEvent = new Event("pageshow") as PageTransitionEvent;
-    Object.defineProperty(pageShowEvent, "persisted", { value: true });
-    fireEvent(window, pageShowEvent);
-
-    expect(await screen.findByText("正在加载成本统计")).toBeInTheDocument();
-    expect(screen.getByRole("tablist", { name: "成本统计视图切换" }).closest("[inert]")).not.toBeNull();
-    expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
-    const explorerCallsAfterRestore = fetchMock.mock.calls.filter(([request]) => (
-      String(request).startsWith("/api/cost-statistics/explorer?")
-    )).length;
-    expect(explorerCallsAfterRestore).toBeGreaterThan(explorerCallsBeforeRestore);
   });
 
   test("defaults to time view and loads month-aware transaction rows", async () => {
@@ -844,6 +744,32 @@ describe("Cost statistics page", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&page_size=50",
       expect.any(Object),
+    );
+  });
+
+  test("keeps fresh rows visible while polling until title statistics are fresh", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const fetchMock = installMockApiFetch({
+      costStatisticsStatusSequence: ["refreshing", "refreshing", "fresh"],
+    });
+
+    renderCostStatisticsPage();
+
+    expect(
+      await screen.findByRole("grid", { name: "按时间统计表" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("cost-statistics-interaction-overlay"),
+    ).not.toBeInTheDocument();
+    await waitFor(
+      () => {
+        const explorerCalls = fetchMock.mock.calls.filter(([request]) => (
+          String(request)
+            === "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&page_size=50"
+        ));
+        expect(explorerCalls).toHaveLength(3);
+      },
+      { timeout: PAGE_RENDER_TIMEOUT },
     );
   });
 

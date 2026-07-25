@@ -23,7 +23,7 @@
 | `BATCH-E2E-004` | 撤回 relation access closure | P0 | 已提交 bucket 中只能撤回 active batch accounting relation；用户必须填写撤回原因；成功后零 barrier并通过当前页正常 GET 回到未提交状态。 |
 | `BATCH-E2E-005` | read model stale/missing/refreshing 防 false-empty | P0 | `workbench_relation` non-fresh 时 API 和页面必须展示 freshness 诊断，不能把空关系当真实未提交；GET 路径只通过 facade/gateway 入队刷新，不同步 rebuild 或写 durable queue。 |
 | `BATCH-E2E-006` | canonical command boundary | P0 | submit 和 withdraw 必须通过 `WorkbenchRelationCommandService`；缺 command service 时 fail fast，不允许 direct pair relation fallback 或半写。旧 legacy collision repair 入口必须不存在，不能重新接入 batch-accounting 页面/API/worker 主链路。 |
-| `BATCH-E2E-007` | relation access convergence 和旧功能回归 | P0 | batch relation 变化只广播不携带 freshness 事实的 `workbenchRelationUpdated` 提示；当前页与另一个已可见窗口各自 GET，隐藏页面直到再次可见才 GET。写链不得向关联台、银行明细、成本统计、搜索或发票 lifecycle 投递 dirty/outbox。 |
+| `BATCH-E2E-007` | relation access convergence 和旧功能回归 | P0 | batch relation 变化不发送跨页刷新事件；当前页只按命令合同 normal GET，另一个已打开页面不自动 GET。其它 consumer 只在 route 重进/查询变化/浏览器手动刷新或明确重试时读取；写链不得向下游页面投递 dirty/outbox。 |
 | `BATCH-E2E-008` | 权限 gate | P0 | `read_export_only` 用户可读但不能触发提交/撤回 durable mutation；forbidden/expired session 不应调用 protected API。 |
 | `BATCH-E2E-009` | 窄屏/长文本/表格稳定性 | P1 | 窄桌面下银行 rail 标题、说明、年份输入和分页控件不得互相挤压或溢出；高行数、超长 OA 描述和长备注不应破坏可读性。 |
 | `BATCH-E2E-010` | 真实基础设施 access-to-fresh | P1 | submit/withdraw 后证明写事务零新增 read-model fan-out；随后逐一访问受影响页面，真实 PostgreSQL/RabbitMQ/Redis/systemd worker 只收敛被访问的精确 scope，并在门槛内 fresh。 |

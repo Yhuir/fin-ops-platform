@@ -19,7 +19,6 @@
 - 侧边栏导航：`web/src/components/shell/sidebarItems.ts`（从页面注册表派生）
 - 页面入口：`web/src/pages/*`
 - 前端 API client：`web/src/features/*/api.ts`
-- 前端跨页事件：`web/src/features/domainEvents.ts`
 - 后端 HTTP 分发：`backend/src/fin_ops_platform/app/server.py`
 - 后端 route modules：`backend/src/fin_ops_platform/app/routes_*.py`
 - 派生数据生命周期：`backend/src/fin_ops_platform/services/derived_data_lifecycle_service.py`
@@ -29,4 +28,4 @@
 
 ## 使用规则
 
-新增或修改页面、API、read model、worker、domain event、derived lifecycle 事件时，先做文档影响评估；影响当前事实源时更新本目录和对应产品、开发或运维文档。历史 prompt、阶段计划和旧归档不再作为当前事实源。
+新增或修改页面、API、read model、worker 或 derived lifecycle 事件时，先做文档影响评估；影响当前事实源时更新本目录和对应产品、开发或运维文档。历史 prompt、阶段计划和旧归档不再作为当前事实源。

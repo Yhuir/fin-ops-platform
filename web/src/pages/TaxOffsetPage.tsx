@@ -19,9 +19,7 @@ import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import { ApiClientError } from "../features/apiClient";
 import { calculateTaxOffset, fetchTaxOffsetMonth, saveTaxOffsetPlan } from "../features/tax/api";
-import { FINANCE_DOMAIN_EVENTS } from "../features/domainEvents";
 import { importWorkflowPath } from "../features/imports/importRoutes";
-import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
 import type {
   TaxCertifiedImportConfirmedResult,
   TaxMonthData,
@@ -203,14 +201,6 @@ export default function TaxOffsetPage() {
     void loadMonthData("reset", controller.signal);
     return () => controller.abort();
   }, [active, activationGeneration, loadMonthData]);
-
-  const handleRefreshTrigger = useCallback(() => {
-    if (!active) {
-      return;
-    }
-    void loadMonthData("refresh");
-  }, [active, loadMonthData]);
-  useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.invoiceFactUpdated, handleRefreshTrigger);
 
   useEffect(() => {
     if (!monthData) {

@@ -1425,22 +1425,10 @@ describe("OA pending payments page", () => {
     expect(rulesRequests(fetchMock)).toHaveLength(1);
   });
 
-  test("uses the ETag for a 500ms conditional check and applies a changed read model", async () => {
-    const changedPayload = {
-      ...rowsPayload,
-      rows: [
-        {
-          ...rowsPayload.rows[0],
-          oa: { ...rowsPayload.rows[0].oa, applicantName: "新模型申请人" },
-        },
-      ],
-      pagination: { page: 1, pageSize: 20, total: 1 },
-      summary: { rowCount: 1, viewCounts: { completed: 1, in_progress: 0 } },
-    };
+  test("does not poll again after the current page returns a fresh read model", async () => {
     const fetchMock = installOaPendingPaymentsFetch({
       rowsResponses: [
         { status: 200, payload: rowsPayload, etag: '"oa-v1"' },
-        { status: 200, payload: changedPayload, etag: '"oa-v2"' },
       ],
     });
 
@@ -1448,16 +1436,13 @@ describe("OA pending payments page", () => {
 
     const page = await screen.findByTestId("oa-pending-payments-page");
     expect(await within(page).findByText("张三")).toBeInTheDocument();
-    await waitFor(() => expect(within(page).getByText("新模型申请人")).toBeInTheDocument(), { timeout: 1_500 });
-    expect(rowsRequests(fetchMock)).toHaveLength(2);
-    const conditionalCall = fetchMock.mock.calls.filter(([input]) => {
-      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      return url.pathname === "/api/oa-pending-payments/rows";
-    })[1];
-    expect(new Headers(conditionalCall?.[1]?.headers).get("If-None-Match")).toBe('"oa-v1"');
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 550));
+    });
+    expect(rowsRequests(fetchMock)).toHaveLength(1);
   });
 
-  test("pauses conditional checks while hidden and checks immediately when visible", async () => {
+  test("stops a non-fresh retry when hidden and does not resume when visible", async () => {
     let visibilityState: DocumentVisibilityState = "visible";
     Object.defineProperty(document, "visibilityState", {
       configurable: true,
@@ -1465,35 +1450,58 @@ describe("OA pending payments page", () => {
     });
     const fetchMock = installOaPendingPaymentsFetch({
       rowsResponses: [
-        { status: 200, payload: rowsPayload, etag: '"oa-v1"' },
-        { status: 304, etag: '"oa-v1"' },
+        {
+          status: 202,
+          payload: {
+            rows: [],
+            pagination: { page: 1, pageSize: 20, total: 0 },
+            summary: { rowCount: 0 },
+            filterConfig: [],
+            filterOptions: {},
+            readModelStatus: "refreshing",
+          },
+          etag: '"oa-refreshing"',
+        },
       ],
     });
 
     renderAuthenticatedAppAt("/oa-pending-payments");
 
     const page = await screen.findByTestId("oa-pending-payments-page");
-    expect(await within(page).findByText("张三")).toBeInTheDocument();
+    expect(await within(page).findByText("OA 待付款核对数据正在刷新")).toBeInTheDocument();
 
     await act(async () => {
       visibilityState = "hidden";
-      document.dispatchEvent(new Event("visibilitychange"));
     });
-    await new Promise((resolve) => window.setTimeout(resolve, 550));
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 550));
+    });
     expect(rowsRequests(fetchMock)).toHaveLength(1);
 
     await act(async () => {
       visibilityState = "visible";
       document.dispatchEvent(new Event("visibilitychange"));
     });
-    await waitFor(() => expect(rowsRequests(fetchMock)).toHaveLength(2));
+    await new Promise((resolve) => window.setTimeout(resolve, 550));
+    expect(rowsRequests(fetchMock)).toHaveLength(1);
   });
 
   test("keeps at most one conditional request in flight", async () => {
     const slowConditional = deferred();
     const fetchMock = installOaPendingPaymentsFetch({
       rowsResponses: [
-        { status: 200, payload: rowsPayload, etag: '"oa-v1"' },
+        {
+          status: 202,
+          payload: {
+            rows: [],
+            pagination: { page: 1, pageSize: 20, total: 0 },
+            summary: { rowCount: 0 },
+            filterConfig: [],
+            filterOptions: {},
+            readModelStatus: "refreshing",
+          },
+          etag: '"oa-refreshing"',
+        },
         { status: 304, etag: '"oa-v1"', delay: slowConditional.promise },
       ],
     });
@@ -1501,7 +1509,7 @@ describe("OA pending payments page", () => {
     renderAuthenticatedAppAt("/oa-pending-payments");
 
     const page = await screen.findByTestId("oa-pending-payments-page");
-    expect(await within(page).findByText("张三")).toBeInTheDocument();
+    expect(await within(page).findByText("OA 待付款核对数据正在刷新")).toBeInTheDocument();
     await waitFor(() => expect(rowsRequests(fetchMock)).toHaveLength(2), { timeout: 1_500 });
     await new Promise((resolve) => window.setTimeout(resolve, 550));
     expect(rowsRequests(fetchMock)).toHaveLength(2);
@@ -1558,7 +1566,6 @@ describe("OA pending payments page", () => {
     };
     const fetchMock = installOaPendingPaymentsFetch({
       rowsResponses: [
-        { status: 200, payload: rowsPayload, etag: '"oa-v1"' },
         {
           status: 202,
           payload: {
@@ -1581,9 +1588,7 @@ describe("OA pending payments page", () => {
     renderAuthenticatedAppAt("/oa-pending-payments");
 
     const page = await screen.findByTestId("oa-pending-payments-page");
-    expect(await within(page).findByText("张三")).toBeInTheDocument();
     await waitFor(() => {
-      expect(within(page).queryByText("张三")).not.toBeInTheDocument();
       expect(within(page).getByText("OA 待付款核对数据正在刷新")).toBeInTheDocument();
     }, {
       timeout: 1_500,
@@ -1591,7 +1596,7 @@ describe("OA pending payments page", () => {
     expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
 
     expect(await within(page).findByText("屏障后新数据", {}, { timeout: 2_500 })).toBeInTheDocument();
-    expect(rowsRequests(fetchMock)).toHaveLength(3);
+    expect(rowsRequests(fetchMock)).toHaveLength(2);
     expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
   });
 

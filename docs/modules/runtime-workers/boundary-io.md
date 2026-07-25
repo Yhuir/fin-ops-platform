@@ -8,7 +8,7 @@
 - 当前边界可信度：high
 - 目标边界：所有后台 worker 由 registry、durable queue、handler 和部署 manifest 显式声明。
 - 当前闭环：worker 入口使用 registration contract；worker instance、event type、env example、manifest/check command 和 App Health readiness 均由 `runtime_worker_registry.py` 派生。`workbench` primary claim 月份 shard 与 `all` fan-out command，`workbench-secondary` 只竞争 claim 月份 shard；二者共用同一 handler、durable queue 与 active-generation 发布合同。`cost-statistics` / `cost-statistics-secondary` 同样只增加同 event exact scope 的 bounded drain 并发，不新增投影路径。普通写后可见性走月份 shard + query-composed all，不存在全局 aggregate publish。OA 待付款由 `oa-pending-payment` 专属实例 claim `oa_pending_payment.read_model.refresh`，共享 `invoice-usage-collection` 只保留进项使用/销项收款。外部往来仍只保留单一 `turnover-ledger` owner；已证实无收益且引入数据库竞争的 turnover secondary 实验已删除。部署文档不再维护手写 worker 矩阵或 `sudo systemctl enable --now fin-ops-worker@...` 清单。
-- 性能证据风险：`f8ad8b38` 已证明写后零 fan-out，但 Workbench/Cost/Turnover access-to-fresh 仍有超过 3 秒样本。当前 v7 只优化 query-side shared canonical proof并增加两个 identity lookup 索引，没有新增 worker、registration、queue 或 handler；高性能全域闭环仍需 exact SHA 部署后的生产矩阵证明，该风险属于运行证据，不代表 Runtime Worker 边界或 I/O open。
+- 生产证据状态：HEAD/origin/main `719c9a34` 已作为 release `main-719c9a34-20260725101310` 激活，v7、migration `0125` 和正式 Workbench rehydrate 已完成；写后零 fan-out、最终 queue drain 与 worker 收敛已有样本证据。Workbench/Cost/Turnover 仍有超过 3 秒样本，记录为后续性能项；当前 Runtime Worker 硬门是最终全页面/操作矩阵中无 stuck、无重复 current-effective job、无 unrelated I/O 并可恢复收敛。
 - 旧代码删除状态：旧 `worker_legacy_application` / `RuntimeWorkerApplicationBridge` / GridFS migration worker / 手写生产 worker 矩阵已移除；`import.fact.changed` registration、handler、env event type 和 runtime derived-lifecycle bridge 均已删除。import worker 只 claim `import.process.requested`。
 
 ## 职责边界

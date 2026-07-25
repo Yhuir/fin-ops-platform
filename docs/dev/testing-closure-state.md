@@ -319,6 +319,8 @@
 
 ## 模块状态
 
+2026-07-25 Phase 27 校准：下方旧阶段证据列表中出现的 `domainEvents.test.ts` / `useActiveFinanceDomainEvent.test.tsx` 是当时执行记录，不是当前测试入口。两个文件及对应生产模块已删除；当前合同和守卫以 `web/src/test/PageRouteHost.test.tsx`、`tests/test_platform_runtime_boundary_guards.py` 与各模块最新 `tests.md` 为准，禁止恢复旧业务刷新事件。
+
 2026-07-05 校准：流水规则批量处理页面的当前 Browser 入口、selected-row submit、成本统计 fan-out、withdraw/history 证据归 `bank-flow-rule-batches`；测试 fixture 使用 `bank-flow-rule-e2e-*` transaction id、`bank-flow-rule-batch-e2e-*` batch id 和 `流水规则手续费成本项目`。下方历史行中出现的 no-OA submit/免 OA 成本行仅代表旧阶段上下文，不能作为当前 bank-flow 页面 I/O 或 legacy no-OA 页面入口依据。
 
 | Priority | Module | 状态 | 已有测试入口概览 | 当前缺口 | 下一步 |

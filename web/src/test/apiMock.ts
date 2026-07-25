@@ -28,6 +28,7 @@ type MockApiOptions = {
   costExplorerFailuresBeforeSuccess?: number;
   costExplorerDelayMs?: number;
   costRefreshingMonths?: string[];
+  costStatisticsStatusSequence?: string[];
   costExportErrorViews?: string[];
   costDuplicateTransactionRows?: boolean;
   costTagRulesCanSave?: boolean;
@@ -4189,6 +4190,7 @@ function buildCostStatisticsExplorerPagePayload(
   url: URL,
   payload: ReturnType<typeof buildCostStatisticsExplorerPayload>,
   readModelStatus = "fresh",
+  statisticsStatus = readModelStatus,
 ) {
   const scope = url.searchParams.get("scope") ?? "all";
   const view = url.searchParams.get("view") ?? "time";
@@ -4354,6 +4356,7 @@ function buildCostStatisticsExplorerPagePayload(
     row_count: readModelStatus === "fresh" ? matchedRows.length : 0,
     next_cursor: readModelStatus === "fresh" && nextOffset < matchedRows.length ? `mock:${nextOffset}` : null,
     read_model_status: readModelStatus,
+    statistics_status: statisticsStatus,
     read_model_scope_key: `${url.searchParams.get("project_scope") ?? "active"}:${scope.startsWith("year:") ? "all" : scope}`,
   };
 }
@@ -4724,6 +4727,7 @@ function isBinaryLikeResponse(value: MockFetchResult): value is Response {
 
 export function installMockApiFetch(options: MockApiOptions = {}) {
   let costExplorerFailuresRemaining = Math.max(0, options.costExplorerFailuresBeforeSuccess ?? 0);
+  let costStatisticsStatusIndex = 0;
   let latestImportSession = buildImportPreviewPayload(
     options.initialImportPreviewFileNames ?? [],
     options.initialImportPreviewOverrides ?? [],
@@ -5743,12 +5747,25 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           ),
         };
       }
+      const statisticsStatusSequence = options.costStatisticsStatusSequence ?? [];
+      const statisticsStatus = (
+        statisticsStatusSequence[
+          Math.min(
+            costStatisticsStatusIndex,
+            Math.max(0, statisticsStatusSequence.length - 1),
+          )
+        ]
+        ?? "fresh"
+      );
+      costStatisticsStatusIndex += 1;
       return {
         body: buildCostStatisticsExplorerPagePayload(
           url,
           buildCostStatisticsExplorerPayload(month, projectScope, {
             duplicateTransactionRows: options.costDuplicateTransactionRows,
           }),
+          "fresh",
+          statisticsStatus,
         ),
       };
     },

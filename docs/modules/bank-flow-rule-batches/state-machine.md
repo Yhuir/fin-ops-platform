@@ -60,7 +60,7 @@
 | UI 状态 | 语义 |
 | --- | --- |
 | `loading` | 初次加载标签规则或批次列表。 |
-| `refreshing` / `stale` | read model 非 fresh；页面可展示旧数据但必须提示刷新中/陈旧，不能把空态当真实结果。 |
+| `refreshing` / `stale` | read model 非 fresh；页面可展示旧数据但必须提示刷新中/陈旧，不能把空态当真实结果。本次访问只在 visible 状态每秒重试，最多 30 次；hidden、route unmount、查询变化、fresh 或 30 秒上限即停止，hidden→visible/focus 不自动恢复。 |
 | `editing_rules` | 抽屉打开，左侧标签只读，右侧 OA/发票 checkbox 可编辑。 |
 | `saving_rules` | 保存规则中，禁用重复提交。 |
 | `selection_dirty` | 用户已选择银行流水；切换月份、标签、账户、分页或 bucket 必须清空选择。 |

@@ -8252,29 +8252,19 @@ class RuntimeWorkerEtcImportLinkExistingTests(unittest.TestCase):
         self.assertNotIn("_execute_explicit_maintenance_lifecycle", api_source)
         self.assertNotIn("enqueue", api_source)
 
-    def test_cost_and_tax_pages_ignore_etc_batch_only_domain_events(self) -> None:
-        for path in (
-            WEB_SRC_ROOT / "pages" / "CostStatisticsPage.tsx",
-            WEB_SRC_ROOT / "pages" / "TaxOffsetPage.tsx",
-        ):
+    def test_business_pages_do_not_restore_deleted_frontend_domain_events(self) -> None:
+        forbidden_tokens = (
+            "FINANCE_DOMAIN_EVENTS",
+            "useActiveFinanceDomainEvent",
+            "domainEvents",
+            "finops:bank-transaction-tags-updated",
+            "BroadcastChannel",
+        )
+        for path in (WEB_SRC_ROOT / "pages").glob("*.tsx"):
             with self.subTest(path=_relative(path)):
                 source = path.read_text(encoding="utf-8")
-                self.assertNotIn(
-                    "useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.etcBusinessBatchUpdated",
-                    source,
-                )
-        etc_page_source = (WEB_SRC_ROOT / "pages" / "EtcTicketManagementPage.tsx").read_text(encoding="utf-8")
-        self.assertNotIn("emitEtcBusinessDomainUpdated", etc_page_source)
-        self.assertEqual(etc_page_source.count("FINANCE_DOMAIN_EVENTS.invoiceFactUpdated"), 2)
-        create_draft_source = etc_page_source.split("const handleCreateDraft", maxsplit=1)[1].split(
-            "const resolveOaActionBatch", maxsplit=1
-        )[0]
-        manual_status_source = etc_page_source.split("const handleManualBusinessBatchOaStatus", maxsplit=1)[1].split(
-            "const renderOaDecisionActions", maxsplit=1
-        )[0]
-        for source in (create_draft_source, manual_status_source):
-            self.assertIn("FINANCE_DOMAIN_EVENTS.etcBusinessBatchUpdated", source)
-            self.assertNotIn("FINANCE_DOMAIN_EVENTS.invoiceFactUpdated", source)
+                for token in forbidden_tokens:
+                    self.assertNotIn(token, source)
 
     def test_removed_etc_oa_lifecycle_events_have_no_production_code(self) -> None:
         violations = []

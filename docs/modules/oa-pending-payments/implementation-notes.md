@@ -1,9 +1,15 @@
 # OA待付款核对 实施记录
 
+## 2026-07-25 - 删除 fresh/visibility 常驻轮询旧链
+
+- 全量页面触发扫描发现 OA 页面在任意 fresh `200 + ETag` 后仍每 500ms 条件请求，并在 hidden→visible 时立即请求；这会让已打开页面在其它事实变化后自动更新，违反 Phase 27 的访问触发与隐藏页零业务 I/O 合同。
+- 最小闭环是保留现有 rows endpoint、ETag/304、fresh gate 和 `202 -> current rows GET -> fresh`，删除 fresh 后的常驻检查与 visible 恢复入口。只有本次访问/查询/明确重试/本页写后 GET 返回 non-fresh 才按 500ms、单 in-flight、最多 60 次重试；fresh、页面隐藏、卸载、查询变化或 30 秒上限即停止。
+- 不新增 coordinator、hook、endpoint、worker、queue、缓存或 fallback。组件回归锁定 fresh 后零请求、hidden→visible 零请求、202 有界收敛、单 in-flight 和旧 operation-barrier 为零。
+
 ## 2026-07-24 - 普通页面 202 收敛删除旧 operation-barrier I/O
 
 - 生产证据：Phase 27 统一生产路由 smoke 在无用户点击时观察到 `POST /api/operation-barrier/status`。全量 caller 核对确认 `OaPendingPaymentsPage` 的普通 rows `202` 分支仍等待 barrier；覆盖矩阵却把该 caller 误记成显式 Audit/reconcile，属于旧链遗漏。
-- 最小修复：删除普通页面对 `waitForOperationFreshness` 的依赖；`202` 立即隐藏旧 rows 后，复用现有可见页 500ms、单 in-flight、hidden 暂停、恢复可见立即检查的 rows GET，直到同一 query 返回 fresh。后端 `202` 精确 target DTO、显式 OA Audit 和银行规则显式 reapply 合同不变。
+- 当日最小修复：删除普通页面对 `waitForOperationFreshness` 的依赖；`202` 立即隐藏旧 rows 后复用当前页 rows GET。其当时保留的 fresh 常驻轮询与 hidden→visible 自动检查已由 2026-07-25 合同删除。后端 `202` 精确 target DTO、显式 OA Audit 和银行规则显式 reapply 合同不变。
 - 边界与测试：不新增 coordinator、hook、endpoint、worker、queue 或缓存。组件回归证明 `202 -> current rows GET -> fresh` 且 barrier 为 0；定向 Browser 与生产 17-route smoke 负责证明普通页面访问不再产生 barrier POST。
 
 ## 2026-07-23 - Workbench 撤回后的访问时 freshness 漏洞

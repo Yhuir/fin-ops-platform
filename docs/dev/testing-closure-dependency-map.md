@@ -9,7 +9,7 @@
 - 页面注册：`web/src/app/pageRegistry.tsx`
 - 页面影响关系：`docs/app-architecture/pages.md`
 - 运行时调用链：`docs/app-architecture/runtime-and-ownership.md`
-- 前端跨页事件：`web/src/features/domainEvents.ts`
+- 前端业务刷新边界：`web/src/app/PageRouteHost.tsx`、`web/src/contexts/PageRuntimeContext.tsx`
 - 后端 HTTP 分发：`backend/src/fin_ops_platform/app/server.py`、`backend/src/fin_ops_platform/app/routes_*.py`
 - 派生数据生命周期：`backend/src/fin_ops_platform/services/derived_data_lifecycle_service.py`
 - Read model freshness：`backend/src/fin_ops_platform/services/read_model_query_gateway.py`
@@ -512,11 +512,11 @@
 | 动作 | 当前 contract | 受影响旧功能 |
 | --- | --- | --- |
 | 新增页面 route | 在 `pageRegistry.tsx` 定义 `path/pageKey/component/preload/end/sidebar` | 侧栏分组、App Status domain registry、route 数量测试、页面文档 |
-| 切换 route | 旧页面立即 unmount，新页面 mount；返回页面重新加载 | 所有页面 local state、effect cleanup、domain event listener |
+| 切换 route | 旧页面立即 unmount，新页面 mount；返回页面重新加载 | 所有页面 local state、effect cleanup、query owner |
 | hover/focus/touch sidebar item | 调用对应 `preload()`，失败被吞掉，不改当前 route | lazy chunk 性能、导航稳定性 |
 | 点击 compact sidebar link | 关闭移动 drawer 并交给 React Router 导航 | 移动端/OA iframe 导航 |
 | session expired | business route 不渲染，清当前用户 page session | 所有页面筛选/分页/选中状态隔离 |
-| 前端 finance domain event | 只通知当前 mounted 页面；卸载页面不 replay | Workbench、银行明细、成本、税金、待找发票等跨页刷新提示 |
+| focus/visibility/BFCache/另一个 tab 写入 | 不触发业务页面 I/O；App Health、后台任务进度和 Workbench status channel 仍按各自运维合同运行 | 全部业务页面零自动 reload |
 
 关键回归保护：
 
@@ -525,7 +525,7 @@
 - `web/src/test/App.test.tsx` 保护 workbench、tax offset、cost statistics、settings、import、turnover、embedded OA 和 global status 的 shell smoke。
 - `web/src/test/SessionGate.test.tsx` 保护 session bootstrap、forbidden、expired、timeout retry。
 - `web/src/test/PageSessionStateContext.test.tsx`、`web/src/test/useFinanceTableSession.test.tsx` 保护 page/state/user scope 隔离、TTL/version/validation、storage fallback、table session restore。
-- `web/src/test/domainEvents.test.ts` 保护 finance domain event contract 和 BroadcastChannel。
+- `web/src/test/PageRouteHost.test.tsx` 与 `tests/test_platform_runtime_boundary_guards.py` 禁止恢复已删除的 finance domain event、tag window event 和业务 BroadcastChannel。
 
 ## 模块细化：finance-table-system
 
@@ -686,21 +686,11 @@
 | 项目范围变化 | settings/project scope | canonical settings/rule version；零页面 target | Cost、Search 在访问时收敛 | 成本统计、搜索 | active/all scope version、写后零 fan-out、访问收敛 |
 | OA 反提草稿/提交确认 | input invoice usage OA reverse | service/API 状态写入，可能影响 invoice usage/OA 关系 | input invoice usage、invoice lifecycle、OA 关系、审计 | 进项发票使用、设置、App Health | 目标申请人凭据、preview stale、外部 OA 失败、提交历史、不泄露内部 id |
 
-## 前端刷新与跨页事件图
+## 前端业务刷新边界
 
-`web/src/features/domainEvents.ts` 定义的事件只作为同一浏览器会话内刷新提示，不是事实源。跨页面一致性必须以后端 facts、read model freshness、dirty scopes、worker readiness 为准。
+前端 finance domain event、业务 tag BroadcastChannel/window event 已删除。跨页面一致性只以后端 canonical facts、source versions、freshness gate、durable queue 和 worker 为准；另一个已打开页面保持当前 snapshot，直到用户 route 重进、改变该页查询、手动刷新浏览器或明确重试。App Health、后台任务进度和 Workbench refresh-status channel 是运维/显式任务状态，不承担业务页面 reload。
 
-| Event | 主要 emit 来源 | 主要 subscribe/use 来源 | 测试重点 |
-| --- | --- | --- | --- |
-| `workbenchRelationUpdated` | 关联台、批量账务、免 OA、往来款、待找发票 | 关联台、银行明细、成本统计 | affectedMonths 过滤、inactive 页面不 replay、后端 dirty scope 已存在 |
-| `bankTransactionCategoryUpdated` | 银行明细 | 关联台、成本统计、往来款、免 OA | 分类变更触发候选/成本刷新，不替代后端 lifecycle |
-| `bankAutoTagRulesUpdated` | 银行明细规则保存/重应用 | 免 OA、银行明细 | 规则版本 stale、no-OA read model 刷新 |
-| `turnoverRelationUpdated` | 往来款确认/撤回 | 关联台、成本统计 | workbench relation 与 turnover read model 一致 |
-| `turnoverLedgerExtraUpdated` | 往来款 extra 保存 | 当前主要局部消费 | 不应误触发无关 read model |
-| `invoiceFactUpdated` | 待找发票、ETC 真正导入/成功删除、发票相关动作 | 税金抵扣、成本统计 | invoice lifecycle 下游顺序、税金/成本刷新 |
-| `etcBusinessBatchUpdated` | ETC 导入、删除、OA/batch 状态 | ETC 页面局部刷新 | Tax/Cost 明确不订阅；后端精确 status lifecycle 保证关联台不 stale |
-
-相关测试入口：`web/src/test/domainEvents.test.ts`、`web/src/test/useActiveFinanceDomainEvent.test.tsx`。
+相关测试入口：`web/src/test/PageRouteHost.test.tsx`、`tests/test_platform_runtime_boundary_guards.py`。
 
 ## Read Model / Worker 依赖图
 
@@ -755,13 +745,13 @@
 | worker registry/readiness 未同步 | registry boundary tests、App Status overview tests |
 | Redis cache 伪造 fresh | ReadModelQueryGateway tests、cache hit/miss tests |
 | RabbitMQ 被误当事实源 | platform boundary guard tests、runtime docs |
-| 前端 domain event 被误当事实源 | domain event tests、integration tests requiring backend dirty scope |
+| 恢复前端业务刷新事件/隐藏页 I/O | PageRouteHost lifecycle/source guards、platform runtime boundary guards |
 | 权限/审计绕过 | auth guard tests、API 403 tests、frontend hidden/disabled tests、audit tests |
 | 导出字段变化 | export service tests、download/export-preview API tests |
 | migration/历史数据兼容 | migration tests、state store contract tests、production dry-run documented risk |
 | 外部 OA/Mongo 失败 | adapter/service tests with failure shape, staging smoke documented risk |
 | 并发/idempotency/version conflict | service-layer stale/version tests、idempotency tests |
-| 页面卸载/重挂载/session state | PageRouteHost/PageSessionState/useActiveFinanceDomainEvent tests |
+| 页面卸载/重挂载/session state | PageRouteHost/PageSessionState/useFinanceTableSession tests |
 | App Status 全局状态误判 | app status overview/API/frontend indicator tests |
 | 导入预览过期 | import preview audit/API tests |
 | 大数据/SQL 性能退化 | API performance metrics tests、SQL runtime tests、release smoke |

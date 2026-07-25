@@ -22,7 +22,7 @@
 
 - ETC 票据管理页面、ETC 发票/批次、识别、对账、OA 草稿后批次发票 PDF 合并下载、历史批次修复。
 - ETC 与发票附件、关联台候选之间的业务转换。
-- 返回精确 affected scopes；workbench/invoice/search 等页面在进入或重新可见时通过各自 freshness gateway 刷新。
+- 返回精确 affected scopes；workbench/invoice/search 等页面在 route 进入/重进、查询变化、浏览器手动刷新或明确重试时通过各自 freshness gateway 刷新。
 
 ### 不负责
 

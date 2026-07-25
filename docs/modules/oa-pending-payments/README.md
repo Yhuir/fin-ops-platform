@@ -34,14 +34,15 @@ OA Mongo / t_payment_simple
   -> PostgreSQL completed OA + admission + payment-status snapshot + source watermark
 Workbench confirm / withdraw
   -> 同一业务事务只提交 canonical relation/version/audit，零页面 dirty/outbox
-页面访问 / 条件 GET / hidden→visible
+route 进入/重进、查询变化、浏览器手动刷新、明确重试或本页写后 reconcile
   -> OA fresh gate 比较 exact month source vector；mismatch 才经 gateway 去重入队
   -> oa-pending-payment 专属 worker直接读取 canonical relation与关联银行/发票事实（仅 PostgreSQL）
   -> 纯内存行组装 + 单批次月份发布
   -> 月份 read model 原子发布/CAS
   -> fresh gate
   -> 单一 rows 聚合 API（rows + summary + filterOptions + ETag）
-  -> 页面 500ms 条件 GET / 202 后继续本页 normal GET / fresh 重读
+  -> 只有本次 GET 返回 202/non-fresh 时，当前可见页才以 500ms 单请求有界重试
+  -> fresh、30 秒上限、页面隐藏、卸载或查询变化时停止
 ```
 
 页面热路径和 read model worker 都不得访问 Mongo/MySQL。外部系统变化尚未进入 PostgreSQL 时，属于 OA sync lag；一旦 PostgreSQL canonical snapshot 已提交，动态 source version、访问时 dirty/outbox、CAS 和 fresh gate 必须阻止旧 rows 被伪装成 fresh。
@@ -56,7 +57,7 @@ completed OA 投影直接读取 canonical Workbench relation，因此月份 sour
 - `200` 返回 rows、pagination、summary、`filterConfig`、`filterOptions`、freshness proof 和 `ETag`。
 - 同一 normalized query 在版本未变且仍 fresh 时返回 `304`，不得执行 rows/facet 聚合。
 - dirty、source mismatch、scope missing 或 queue 活跃时返回 `202` 和由本次访问 freshness boundary 产生的精确月份 `operationBarrierTargets`，不返回旧 rows。
-- 可见页面每 500ms 最多发起一个 rows 条件 GET；tab 隐藏时停止，恢复可见时立即检查。收到 `202` 后立即隐藏旧 rows，并继续通过同一个页面 rows GET 收敛到 fresh；不得改走 `/api/operation-barrier/status`。普通写命令不投递或等待页面 target。
+- fresh `200` 后不做常驻条件请求。只有 route 进入/重进、查询变化、浏览器手动刷新、明确重试或本页写后 normal GET 返回 `202/non-fresh` 时，当前可见页才按 500ms、单 in-flight、最多 60 次继续检查同一个 rows GET；fresh、30 秒上限、页面隐藏、卸载或查询变化时停止，hidden→visible/focus 不自动恢复。不得改走 `/api/operation-barrier/status`。普通写命令不投递或等待页面 target。
 - `paymentStatus` 只有 `paid` / `unpaid`，由后端 lifecycle/read model 判定；页面不得按金额或候选关系自行推断。
 
 ## Completed 与 in-progress

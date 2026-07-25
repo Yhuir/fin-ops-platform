@@ -8,7 +8,6 @@ import StatePanel from "../components/common/StatePanel";
 import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
-import { FINANCE_DOMAIN_EVENTS, emitFinanceDomainEvent } from "../features/domainEvents";
 import { ApiClientError } from "../features/apiClient";
 import {
   fetchBatchAccounting,
@@ -173,16 +172,6 @@ function oaSearchText(row: BatchAccountingOaRow) {
     row.reason,
     ...row.linkedInvoiceRowIds,
   ].join(" "));
-}
-
-function mutationEventDetail(result: {
-  affectedMonths?: string[];
-  affectedScopeKeys?: string[];
-}) {
-  return {
-    affectedMonths: result.affectedMonths ?? [],
-    affectedScopeKeys: result.affectedScopeKeys ?? [],
-  };
 }
 
 function stringListFromPayload(value: unknown) {
@@ -411,6 +400,9 @@ export default function BatchAccountingPage() {
     }
     const startedAt = Date.now();
     while (true) {
+      if (document.visibilityState !== "visible") {
+        throw new Error("批量账务关联已提交；页面已隐藏，请返回后手动刷新。");
+      }
       const nextPayload = await fetchBatchAccounting({
         bankYear,
         bucket,
@@ -540,10 +532,6 @@ export default function BatchAccountingPage() {
   };
 
   const handleMutationComplete = (fallbackMessage: string, result: { affectedMonths?: string[]; message?: string }) => {
-    emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
-      ...mutationEventDetail(result),
-      source: "batch_accounting_mutation",
-    });
     setFeedback({ severity: "success", message: result.message || fallbackMessage });
   };
 

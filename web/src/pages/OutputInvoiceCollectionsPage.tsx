@@ -69,6 +69,7 @@ const initialQuery: OutputInvoiceCollectionQuery = {
   detailTarget: null,
 };
 const READ_MODEL_REFRESH_RETRY_MS = 250;
+const READ_MODEL_REFRESH_MAX_ATTEMPTS = 120;
 const READ_MODEL_REFRESHING_STATUSES = new Set(["refreshing", "stale", "missing", "schema_mismatch"]);
 const READ_MODEL_NON_FRESH_STATUSES = new Set([...READ_MODEL_REFRESHING_STATUSES, "failed", "unavailable"]);
 
@@ -232,12 +233,16 @@ export default function OutputInvoiceCollectionsPage() {
   const [expandedCells, setExpandedCells] = useState<Set<string>>(() => new Set());
   const [keywordDraft, setKeywordDraft] = useState(query.keyword);
   const requestIdRef = useRef(0);
+  const refreshAttemptRef = useRef(0);
 
   useEffect(() => {
     setKeywordDraft(query.keyword);
   }, [query.keyword]);
 
-  const loadRows = useCallback((mode: "reset" | "refresh", signal?: AbortSignal) => {
+  const loadRows = useCallback((mode: "reset" | "refresh", signal?: AbortSignal, retry = false) => {
+    if (!retry) {
+      refreshAttemptRef.current = 0;
+    }
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     if (mode === "reset") {
@@ -321,10 +326,23 @@ export default function OutputInvoiceCollectionsPage() {
   }, [active, activationGeneration, loadRows]);
 
   useEffect(() => {
-    if (!active || readModelStatus !== "refreshing" || loading || refreshing) {
+    if (
+      !active
+      || document.visibilityState !== "visible"
+      || readModelStatus !== "refreshing"
+      || loading
+      || refreshing
+      || refreshAttemptRef.current >= READ_MODEL_REFRESH_MAX_ATTEMPTS
+    ) {
       return undefined;
     }
-    const retryId = window.setTimeout(() => loadRows("refresh"), READ_MODEL_REFRESH_RETRY_MS);
+    const retryId = window.setTimeout(() => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+      refreshAttemptRef.current += 1;
+      loadRows("refresh", undefined, true);
+    }, READ_MODEL_REFRESH_RETRY_MS);
     return () => window.clearTimeout(retryId);
   }, [active, loadRows, loading, readModelStatus, refreshing]);
 

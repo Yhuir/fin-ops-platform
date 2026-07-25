@@ -12,11 +12,6 @@ import TurnoverLedgerGroupedTable, { formatMoney, formatNullable } from "../comp
 import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
-import {
-  FINANCE_DOMAIN_EVENTS,
-  emitFinanceDomainEvent,
-} from "../features/domainEvents";
-import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
 import { ApiClientError } from "../features/apiClient";
 import {
   confirmTurnoverClosure,
@@ -533,12 +528,6 @@ export default function TurnoverLedgerPage() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  const handleCategoryUpdated = useCallback(() => {
-    loadTagSelection();
-    loadLedger();
-  }, [loadLedger, loadTagSelection]);
-  useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, handleCategoryUpdated);
-
   useEffect(() => {
     if (!active || !exportOpen) {
       return undefined;
@@ -667,20 +656,6 @@ export default function TurnoverLedgerPage() {
       errorMessage: (caught) => caught instanceof Error ? caught.message : "外部往来闭环确认失败",
     });
     if (result.status === "success") {
-      emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.turnoverRelationUpdated, {
-        relationId: result.value.relationId || result.value.workbenchPairRelationId,
-        affectedRowIds: bankRowIds,
-        affectedMonths: result.value.affectedMonths,
-        action: "manual_closure",
-        source: "turnover_manual_closure",
-      });
-      emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
-        relationId: result.value.workbenchPairRelationId,
-        affectedRowIds: bankRowIds,
-        affectedMonths: result.value.affectedMonths,
-        action: "turnover_manual_closure",
-        source: "turnover_manual_closure",
-      });
       setToast({
         severity: postMutationSyncWarning ? "warning" : "success",
         message: postMutationSyncWarning || "外部往来闭环已确认",
@@ -765,10 +740,6 @@ export default function TurnoverLedgerPage() {
       errorMessage: (caught) => caught instanceof Error ? caught.message : "补充信息保存失败",
     });
     if (result.status === "success") {
-      emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.turnoverLedgerExtraUpdated, {
-        relationId: targetRow.relationId,
-        source: "turnover_extra_save",
-      });
       setToast({
         severity: postMutationSyncWarning ? "warning" : "success",
         message: postMutationSyncWarning || "补充信息已保存",
@@ -805,19 +776,6 @@ export default function TurnoverLedgerPage() {
       errorMessage: (caught) => caught instanceof Error ? caught.message : "往来关系操作失败",
     });
     if (result.status === "success") {
-      emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.turnoverRelationUpdated, {
-        relationId: result.value.relationId || targetRow.relationId,
-        action: kind,
-        source: "turnover_relation_mutation",
-      });
-      if (kind === "withdraw") {
-        emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
-          relationId: result.value.relationId || targetRow.relationId,
-          affectedRowIds: targetRow.bankRowIds,
-          action: "turnover_relation_withdraw",
-          source: "turnover_relation_mutation",
-        });
-      }
       setToast({
         severity: postMutationSyncWarning ? "warning" : "success",
         message: postMutationSyncWarning || (kind === "confirm" ? "往来关系已确认归并" : "往来归并已撤销"),
@@ -858,20 +816,6 @@ export default function TurnoverLedgerPage() {
       errorMessage: (caught) => caught instanceof Error ? caught.message : "外部往来闭环撤回失败",
     });
     if (result.status === "success") {
-      emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.turnoverRelationUpdated, {
-        relationId: result.value.relationId || relationId || cashClosureCaseId,
-        affectedRowIds,
-        affectedMonths: result.value.affectedMonths,
-        action: "cash_closure_withdraw",
-        source: "turnover_cash_closure",
-      });
-      emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
-        relationId: result.value.workbenchPairRelationId || cashClosureCaseId,
-        affectedRowIds,
-        affectedMonths: result.value.affectedMonths,
-        action: "cash_closure_withdraw",
-        source: "turnover_cash_closure",
-      });
       setToast({
         severity: postMutationSyncWarning ? "warning" : "success",
         message: postMutationSyncWarning || "外部往来闭环已撤回",

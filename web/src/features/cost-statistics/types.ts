@@ -102,6 +102,7 @@ export type CostStatisticsExplorerPage = {
   rowCount: number;
   nextCursor?: string;
   readModelStatus?: "fresh" | "refreshing" | "stale" | "unavailable" | (string & {});
+  statisticsStatus?: "fresh" | "refreshing" | "stale" | "unavailable" | (string & {});
   readModelScopeKey?: string;
   readModelGeneratedAt?: string;
   readModelStaleReasons?: string[];
