@@ -791,7 +791,7 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
         self.assertEqual(oa_row["oa_bank_relation"]["label"], "待找流水")
         self.assertNotIn("待找发票", oa_row["tags"])
 
-    def test_all_workbench_prefers_bulk_oa_read_when_adapter_supports_it(self) -> None:
+    def test_all_oa_rows_prefers_bulk_read_without_building_grouped_payload(self) -> None:
         adapter = BulkOAAdapter(
             [
                 OAApplicationRecord(
@@ -828,9 +828,9 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
         )
         service = WorkbenchQueryService(oa_adapter=adapter)
 
-        payload = service.get_workbench("all")
+        rows = service.list_oa_rows("all")
 
-        self.assertEqual(payload["summary"]["oa_count"], 2)
+        self.assertEqual([row["id"] for row in rows], ["oa-bulk-202603-001", "oa-bulk-202604-001"])
         self.assertEqual(adapter.bulk_call_count, 1)
         self.assertEqual(adapter.month_call_count, 0)
 

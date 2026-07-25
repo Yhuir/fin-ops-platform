@@ -1,5 +1,5 @@
 {
-  "version": 6,
+  "version": 7,
   "slo": {
     "write_time_page_fan_out_max": 0,
     "access_to_fresh_p95_ms": 1000,
@@ -7,7 +7,7 @@
   },
   "description": "Write-operation impact matrix. Ordinary writes commit canonical facts only: expected_outbox_scope_types is empty. forbidden_write_time_scope_types is the legacy fan-out signature that production audit must reject. target_read_model_keys and target_page_keys declare consumers that converge through their own access-time freshness boundary.",
   "reversible_relation_consumer_probe_paths": {
-    "reconciliation-workbench": "/api/workbench/groups",
+    "reconciliation-workbench": "/api/workbench",
     "bank-details": "/api/bank-details/transactions",
     "pending-invoices": "/api/pending-invoices/rows",
     "input-invoice-usage": "/api/input-invoice-usage/rows",
@@ -19,7 +19,8 @@
   },
   "reversible_relation_consumer_business_roots": {
     "reconciliation-workbench": [
-      "groups"
+      "paired",
+      "unpaired"
     ],
     "bank-details": [
       "rows"

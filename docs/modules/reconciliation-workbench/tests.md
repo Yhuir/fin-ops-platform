@@ -170,3 +170,11 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_w
 - `tests/test_workbench_etc_relation_enrichment_postgres.py` 在 disposable PostgreSQL 证明 ETC 四表、bank/invoice soft delete、跨月 member 更新、relation withdraw 和 consumed bank settings 都会改变正确 scope proof；无关 settings 不污染 proof，migration `0125` 两个 identity 索引已应用。
 - 当前候选没有改 HTTP shape、权限或前端交互；本条不新增重复前端测试。页面双开、写后零 fan-out、access-to-fresh `<3s`、Audit/queue/worker 与 fixture 恢复由最终生产矩阵负责。
 - `tests/test_workbench_relation_sql_projection.py` 证明 `turnover_manual_closure` 保留在 Workbench 主 generation 的 canonical 输入，但不进入共享 `workbench_relation` distribution。
+
+## 2026-07-25 - 并发恢复窄 OA I/O 与真实首屏验证
+
+- `tests/test_workbench_query_service.py` 证明 exact/all scope 只返回 OA rows、all scope 继续使用既有 bulk adapter，且不构造 grouped Workbench payload。
+- `tests/test_workbench_sql_runtime.py` 证明 generation builder 每个 scope 只调用一次 `list_oa_rows(...)`，附件父 OA 按既有 row-id/SQL fallback 补载，最终 projection shape 不变。
+- `tests/test_write_operation_e2e_smoke.py` 与 `tests/test_write_operation_impact_matrix.py` 证明 relation consumer 使用 combined initial 的真实业务 zone：普通完整关系 confirm 在 `paired`，冻结要求未满足的 active Turnover closure 与 withdraw/recovery 均在 `unpaired`；并拒绝把 `/groups` 注册为关联台页面首屏。
+- 本地 10,000 OA-row characterization 的旧路径中位数为 `145.809ms`，窄 I/O 为 `84.885ms`，重复组装/序列化 CPU 减少约 `41.8%`；该合成数据只证明共享 worker CPU 路径改善，不替代部署后真实 worker、首屏和总恢复耗时。
+- 本次未改前端组件、交互或 HTTP response shape，不重复运行无关 183-browser suite；生产用同一类 test-owned 可逆 relation fixture 验证真实 combined initial、zero fan-out、queue/worker drain 与 System Audit。

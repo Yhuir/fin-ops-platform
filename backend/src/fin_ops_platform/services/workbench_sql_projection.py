@@ -759,16 +759,11 @@ class WorkbenchSqlProjectionBuilder:
             rows.setdefault(str(row["id"]), row)
 
     def _oa_projection_rows(self, month: str) -> list[dict[str, Any]]:
-        self._oa_query_service.get_workbench(month)
         result: list[dict[str, Any]] = []
-        for row in self._oa_query_service.list_record_snapshots():
-            row_month = str(row.get("_month") or "").strip()
-            row_type = str(row.get("type") or "").strip()
-            if row_month != month or row_type != "oa":
-                continue
-            payload = self._oa_query_service.serialize_row(row)
+        for row in self._oa_query_service.list_oa_rows(month):
+            payload = dict(row)
             payload["status"] = "unpaired"
-            payload.setdefault("source_kind", payload.get("type") or row_type)
+            payload.setdefault("source_kind", payload.get("type") or "oa")
             result.append(payload)
         return result
 
@@ -807,23 +802,6 @@ class WorkbenchSqlProjectionBuilder:
             (normalized_row_ids,),
         )
         return [payload for row in rows if (payload := self._oa_row_from_sql(row))]
-
-    def _legacy_oa_rows(self, month: str) -> list[dict[str, Any]]:
-        rows = self._connection.fetch_all(
-            """
-            select row_id, applicant, application_date, approved_at, project_name, amount, status, normalized_payload, raw_payload
-            from app.oa_applications
-            where scope_month = %s::date
-              and """ + COMPLETED_WORKFLOW_STATUS_SQL + """
-            order by row_id
-            """,
-            (month_start(month),),
-        )
-        result: list[dict[str, Any]] = []
-        for row in rows:
-            if payload := self._oa_row_from_sql(row):
-                result.append(payload)
-        return result
 
     @staticmethod
     def _oa_row_from_sql(row: dict[str, Any]) -> dict[str, Any] | None:

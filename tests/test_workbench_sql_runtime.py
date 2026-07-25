@@ -2261,8 +2261,14 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
     def test_sql_projection_oa_projection_rows_exclude_attachment_invoice_rows(self) -> None:
         class FakeOAQueryService:
-            def get_workbench(self, month: str) -> dict[str, object]:
-                return {"month": month}
+            def __init__(self) -> None:
+                self.list_oa_rows_calls: list[str] = []
+
+            def list_oa_rows(self, month: str) -> list[dict[str, object]]:
+                self.list_oa_rows_calls.append(month)
+                return [
+                    {"id": "oa-exp-1", "type": "oa"},
+                ] if month == "2026-01" else []
 
             def sync_oa_row_ids(self, row_ids: list[str]) -> None:
                 return None
@@ -2283,14 +2289,16 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             def serialize_row(self, row: dict[str, object]) -> dict[str, object]:
                 return {key: value for key, value in row.items() if not key.startswith("_")}
 
+        fake_oa = FakeOAQueryService()
         builder = WorkbenchSqlProjectionBuilder(
             connection=WorkbenchProjectionSettingsConnection(),
-            oa_query_service=FakeOAQueryService(),
+            oa_query_service=fake_oa,
         )
 
         rows = builder._oa_projection_rows("2026-01")
         missing_rows = builder._oa_projection_rows_by_ids({"oa-att-inv-oa-exp-1-001"})
 
+        self.assertEqual(fake_oa.list_oa_rows_calls, ["2026-01"])
         self.assertEqual([row["id"] for row in rows], ["oa-exp-1"])
         self.assertEqual(missing_rows, [])
 
@@ -2299,8 +2307,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.synced_row_ids: list[list[str]] = []
 
-            def get_workbench(self, month: str) -> dict[str, object]:
-                return {"month": month}
+            def list_oa_rows(self, month: str) -> list[dict[str, object]]:
+                return []
 
             def sync_oa_row_ids(self, row_ids: list[str]) -> None:
                 self.synced_row_ids.append(list(row_ids))
@@ -2342,8 +2350,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
     def test_sql_projection_supplements_in_progress_source_oa_from_sql(self) -> None:
         class EmptyOAQueryService:
-            def get_workbench(self, month: str) -> dict[str, object]:
-                return {"month": month}
+            def list_oa_rows(self, month: str) -> list[dict[str, object]]:
+                return []
 
             def sync_oa_row_ids(self, row_ids: list[str]) -> None:
                 return None

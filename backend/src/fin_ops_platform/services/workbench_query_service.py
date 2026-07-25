@@ -70,6 +70,20 @@ class WorkbenchQueryService:
             "unpaired": self._group_rows(unpaired_rows),
         }
 
+    def list_oa_rows(self, month: str) -> list[dict[str, Any]]:
+        """Return only the serialized OA rows needed by the SQL projection."""
+        normalized_month = str(month or "").strip()
+        if normalized_month == "all":
+            self._sync_all_oa_rows()
+        else:
+            self._sync_oa_rows(normalized_month)
+        return [
+            self.serialize_row(row)
+            for row in self.list_record_snapshots()
+            if row["type"] == "oa"
+            and (normalized_month == "all" or row["_month"] == normalized_month)
+        ]
+
     def oa_status_payload(self) -> dict[str, str]:
         adapter = self._oa_adapter
         get_read_status = getattr(adapter, "get_read_status", None)

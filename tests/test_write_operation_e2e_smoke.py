@@ -146,7 +146,7 @@ _BANK_INVOICE_CONSUMER_PAGES = (
 )
 
 _CONSUMER_PATHS = {
-    "reconciliation-workbench": "/api/workbench/groups?month=2026-07&zone=paired&page=1&page_size=20",
+    "reconciliation-workbench": "/api/workbench?month=all",
     "bank-details": "/api/bank-details/transactions?year=2026&page=1&page_size=20",
     "pending-invoices": "/api/pending-invoices/rows?page=1&page_size=20",
     "input-invoice-usage": "/api/input-invoice-usage/rows?page=1&page_size=20",
@@ -232,7 +232,11 @@ def _raw_relation_checkpoint(
                             if page_key == "tax-offset"
                             else "/rows/0/transaction_id"
                             if page_key == "cost-statistics"
-                            else "/groups/0/bank_rows/0/id"
+                            else (
+                                "/unpaired/groups/0/bank_rows/0/id"
+                                if is_withdraw
+                                else "/paired/groups/0/bank_rows/0/id"
+                            )
                             if page_key == "reconciliation-workbench"
                             else "/rows/0/id"
                         ),
@@ -277,33 +281,34 @@ def _raw_bank_invoice_scenario(name: str, key_prefix: str) -> dict[str, object]:
 
 def _raw_bank_turnover_scenario(name: str, key_prefix: str) -> dict[str, object]:
     fixture_row_ids = ["turnover-bank-test-1", "turnover-bank-test-2"]
-    consumers = [
-        {
-            "name": page_key,
-            "page_key": page_key,
-            "path": _CONSUMER_PATHS[page_key],
-            "assertions": [
-                {
-                    "pointer": (
-                        "/rows"
-                        if page_key == "input-invoice-usage"
-                        else "/rows/0/transaction_id"
-                        if page_key == "cost-statistics"
-                        else "/groups/0/bank_rows/0/id"
-                        if page_key == "reconciliation-workbench"
-                        else "/rows/0/id"
-                    ),
-                    "equals": [] if page_key == "input-invoice-usage" else fixture_row_ids[0],
-                }
-            ],
-        }
-        for page_key in (
-            "reconciliation-workbench",
-            "cost-statistics",
-            "turnover-ledger",
-            "input-invoice-usage",
-        )
-    ]
+    def consumers(workbench_zone: str) -> list[dict[str, object]]:
+        return [
+            {
+                "name": page_key,
+                "page_key": page_key,
+                "path": _CONSUMER_PATHS[page_key],
+                "assertions": [
+                    {
+                        "pointer": (
+                            "/rows"
+                            if page_key == "input-invoice-usage"
+                            else "/rows/0/transaction_id"
+                            if page_key == "cost-statistics"
+                            else f"/{workbench_zone}/groups/0/bank_rows/0/id"
+                            if page_key == "reconciliation-workbench"
+                            else "/rows/0/id"
+                        ),
+                        "equals": [] if page_key == "input-invoice-usage" else fixture_row_ids[0],
+                    }
+                ],
+            }
+            for page_key in (
+                "reconciliation-workbench",
+                "cost-statistics",
+                "turnover-ledger",
+                "input-invoice-usage",
+            )
+        ]
     confirm = {
         "name": "turnover-confirm",
         "operation": "turnover_relation_confirm_cross_page",
@@ -321,7 +326,7 @@ def _raw_bank_turnover_scenario(name: str, key_prefix: str) -> dict[str, object]
                 "captures": {"cash_closure_case_id": "/workbench_pair_relation/case_id"},
             }
         ],
-        "consumers": consumers,
+        "consumers": consumers("unpaired"),
         "system_audit": True,
         "relation_state_after": "active",
     }
@@ -342,7 +347,7 @@ def _raw_bank_turnover_scenario(name: str, key_prefix: str) -> dict[str, object]
                     },
                 }
             ],
-            "consumers": consumers,
+            "consumers": consumers("unpaired"),
             "system_audit": True,
             "relation_state_after": "inactive",
         }
@@ -1170,7 +1175,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
 
         unbound = _raw_bank_invoice_scenario("unbound", "strict-3")
         unbound["checkpoints"][0]["consumers"][0]["assertions"] = [  # type: ignore[index]
-            {"pointer": "/groups/0/status", "equals": "fresh"}
+            {"pointer": "/paired/groups/0/status", "equals": "fresh"}
         ]
         cases.append(("identity", unbound, "test-owned row"))
 
@@ -1244,17 +1249,18 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
 
     def test_reversible_scenario_allows_two_exact_scopes_for_one_affected_page(self) -> None:
         scenario = _raw_bank_turnover_scenario("turnover-scopes", "shape-scopes")
-        shared_consumers = scenario["checkpoints"][0]["consumers"]  # type: ignore[index]
-        cost_consumer = next(
-            consumer for consumer in shared_consumers if consumer["page_key"] == "cost-statistics"
-        )
-        shared_consumers.append(
-            {
-                **cost_consumer,
-                "name": "cost-statistics-all-scope",
-                "path": f"{cost_consumer['path']}&project_scope=all",
-            }
-        )
+        for checkpoint in (*scenario["checkpoints"], scenario["recovery_checkpoint"]):  # type: ignore[index]
+            consumers = checkpoint["consumers"]
+            cost_consumer = next(
+                consumer for consumer in consumers if consumer["page_key"] == "cost-statistics"
+            )
+            consumers.append(
+                {
+                    **cost_consumer,
+                    "name": "cost-statistics-all-scope",
+                    "path": f"{cost_consumer['path']}&project_scope=all",
+                }
+            )
 
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "scenario.json"
@@ -1270,19 +1276,20 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
 
     def test_reversible_scenario_allows_three_exact_scopes_for_one_affected_page(self) -> None:
         scenario = _raw_bank_turnover_scenario("turnover-scopes", "shape-scopes")
-        shared_consumers = scenario["checkpoints"][0]["consumers"]  # type: ignore[index]
-        cost_consumer = next(
-            consumer for consumer in shared_consumers if consumer["page_key"] == "cost-statistics"
-        )
-        for suffix in ("all", "second-all"):
-            shared_consumers.append(
-                {
-                    **cost_consumer,
-                    "name": f"cost-statistics-{suffix}",
-                    "path": f"{cost_consumer['path']}&project_scope=all&probe={suffix}",
-                    "assertions": [{"pointer": "/rows", "equals": []}],
-                }
+        for checkpoint in (*scenario["checkpoints"], scenario["recovery_checkpoint"]):  # type: ignore[index]
+            consumers = checkpoint["consumers"]
+            cost_consumer = next(
+                consumer for consumer in consumers if consumer["page_key"] == "cost-statistics"
             )
+            for suffix in ("all", "second-all"):
+                consumers.append(
+                    {
+                        **cost_consumer,
+                        "name": f"cost-statistics-{suffix}",
+                        "path": f"{cost_consumer['path']}&project_scope=all&probe={suffix}",
+                        "assertions": [{"pointer": "/rows", "equals": []}],
+                    }
+                )
 
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "scenario.json"
@@ -1298,18 +1305,19 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
 
     def test_reversible_scenario_rejects_four_scopes_for_one_affected_page(self) -> None:
         scenario = _raw_bank_turnover_scenario("turnover-scopes", "shape-scopes")
-        shared_consumers = scenario["checkpoints"][0]["consumers"]  # type: ignore[index]
-        cost_consumer = next(
-            consumer for consumer in shared_consumers if consumer["page_key"] == "cost-statistics"
-        )
-        for suffix in ("all", "second-all", "third-all"):
-            shared_consumers.append(
-                {
-                    **cost_consumer,
-                    "name": f"cost-statistics-{suffix}",
-                    "path": f"{cost_consumer['path']}&project_scope=all&probe={suffix}",
-                }
+        for checkpoint in (*scenario["checkpoints"], scenario["recovery_checkpoint"]):  # type: ignore[index]
+            consumers = checkpoint["consumers"]
+            cost_consumer = next(
+                consumer for consumer in consumers if consumer["page_key"] == "cost-statistics"
             )
+            for suffix in ("all", "second-all", "third-all"):
+                consumers.append(
+                    {
+                        **cost_consumer,
+                        "name": f"cost-statistics-{suffix}",
+                        "path": f"{cost_consumer['path']}&project_scope=all&probe={suffix}",
+                    }
+                )
 
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "scenario.json"
@@ -1376,7 +1384,9 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 for consumer in checkpoint["consumers"]
                 if consumer["page_key"] == "reconciliation-workbench"
             )
-            workbench["assertions"] = [{"pointer": "/groups", "excludes": "turnover-bank-test-1"}]
+            workbench["assertions"] = [
+                {"pointer": "/unpaired/groups", "excludes": "turnover-bank-test-1"}
+            ]
 
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "scenario.json"
@@ -2770,11 +2780,16 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             elif route.startswith("/api/input-invoice-usage/rows"):
                 payload = {"read_model_status": "fresh", "refresh_enqueued": False, "rows": []}
                 status = 200
-            elif route.startswith("/api/workbench/groups"):
+            elif route.startswith("/api/workbench?"):
                 payload = {
                     "read_model_status": "fresh",
                     "refresh_enqueued": False,
-                    "groups": [{"bank_rows": [{"id": "turnover-bank-test-1"}]}],
+                    "paired": {
+                        "groups": [{"bank_rows": [{"id": "turnover-bank-test-1"}]}],
+                    },
+                    "unpaired": {
+                        "groups": [{"bank_rows": [{"id": "turnover-bank-test-1"}]}],
+                    },
                 }
                 status = 200
             else:

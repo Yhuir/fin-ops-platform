@@ -1340,3 +1340,11 @@
 - `f8ad8b38` 生产三轮证明普通 relation 写约 `172–345ms` 且零 fan-out，但多个并发 consumer 会各自重复 Workbench canonical proof，Workbench/Cost/Turnover access-to-fresh 仍有超过 3 秒样本。队列和 worker 已并发，新增 worker 不是根因修复。
 - 当前修复继续使用现有 `WorkbenchSqlProjectionBuilder`：proof 补齐 ETC submission/business/invoice/link、实际消费的银行规则和账户映射、所有 relation 状态、soft delete 与跨月成员；Application 只持有一个 builder，时间上重叠的同 scope proof 共享一个 stdlib `Future`。flight 完成即删除，独立访问重新查 canonical facts，失败可重试；没有 TTL cache、版本表、trigger、协调器或第二事实源。
 - month/all schema 升级为 v7；migration `0125` 只增加两个测量后需要的 bank/invoice identity 表达式索引。20 万级本地 replay 中 exact proof 约 `250ms`、30 scope bulk proof 约 `0.77s`，8 个并发 all-scope consumer 只执行一次数据库 proof。v7、migration 与正式 rehydrate 已在 `main-719c9a34-20260725101310` 完成；当前生产矩阵验证最终 fresh/canonical correctness，超过 3 秒只登记为后续性能项。
+
+## 2026-07-25 - Phase 30 关联台并发恢复共享根因优化
+
+- 真实结论：Phase 29 的 `3.106–4.616s` 来自约 `1.8–1.9s` worker、轻量 freshness 轮询和首次 fresh 并发读取叠加，不是单条关联台页面 SQL 持续卡死；同时旧生产 runner 错把滚动分页 `/api/workbench/groups` 当成关联台首屏，性能口径与真实页面不一致。
+- 共享修复：generation builder 通过既有 `WorkbenchQueryService` 的 exact/all `list_oa_rows(...)` 窄 I/O 一次读取已序列化 OA rows，不再先构建并丢弃 legacy `get_workbench(...)` summary/group payload后再次扫描、序列化。删除 whole-repo 零调用的 `_legacy_oa_rows(...)`，不保留 fallback。
+- 验证合同：可逆 relation runner 改测真实 `GET /api/workbench` combined initial，并按 relation shape 选择业务 zone：完整关系 confirm 在 `paired`，冻结要求未满足的 active Turnover closure 及其 withdraw/recovery 在 `unpaired`。每个断言仍绑定 test-owned identity；`/groups` 只保留页面滚动分页职责。
+- 不变项：canonical writes、relation UoW、scope、durable queue、worker registry、freshness gate、active-generation 原子发布、API response shape、前端和其它页面 I/O 均未改变；没有新增缓存、表、索引、migration、worker、协调器或第二 read model。
+- 本地证据：608 项定向 service/read-model/API/runner/boundary 回归通过；10,000 OA-row 合成 characterization 的该段 CPU 中位数从 `145.809ms` 降至 `84.885ms`，约减少 `41.8%`。生产候选只允许一次部署，随后集中验证 worker、真实首屏、总恢复、zero fan-out、queue/worker drain 与 System Audit。

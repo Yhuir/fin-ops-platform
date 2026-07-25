@@ -23,7 +23,7 @@
 | 输入 | Owner | 合同 |
 | --- | --- | --- |
 | canonical rows | OA / bank / invoice repositories | 每行必须有稳定 `id`、`type`、`object_identity_key`；重复 typed identity fail fast |
-| OA projection rows | PostgreSQL OA projection repository | 读取边界把持久化历史值 `section=open` 和缺失值归一化为 `unpaired`；只有 `paired|unpaired` 可进入 Workbench core，未知值 fail fast |
+| OA projection rows | PostgreSQL OA projection repository -> `WorkbenchQueryService.list_oa_rows(...)` | 读取边界把持久化历史值 `section=open` 和缺失值归一化为 `unpaired`；只有 `paired|unpaired` 可进入 Workbench core，未知值 fail fast。Workbench generation builder 只能通过该 exact/all scope 窄 I/O 读取已序列化 OA rows；禁止先调用 legacy grouped `get_workbench(...)` 构建并丢弃 summary/paired/unpaired payload 后再次扫描、序列化同一批 rows。 |
 | active relations | workbench-relations | 只接受 `status=active` 的正式关系；row ids 必须存在且不可跨 case 重叠 |
 | row overrides / exception cases | workbench control repositories | 仅对没有 active formal relation ownership 的 row 生效；优先级为 formal relation > override > exception，projection 与 Page Audit 必须共用该合同 |
 | list query | Workbench API | `month`、zone=`paired|unpaired`、分页、区域级 `search`、排序、generation/source versions；已配对与未配对各自只有一个不超过 200 字符的搜索词，按普通文本、不区分大小写地查询该区所有 OA/流水/发票结构化展示字段；任一行命中即返回完整关联组，包含当前隐藏 pane 与折叠明细，内部 row/group id 和 detail-only 字段不属于搜索面；`%`、`_`、反斜杠不得成为 SQL 通配符。默认无筛选 `month=all` 查询使用现有 canonical active-month group/member SQL 一次计算精确 total 与 row counts，分页继续只取有界 payload；查询开始和返回前复核 active-month generation-set digest，切换时 fail closed。带条件查询只物化 active generation 的窄 group keys；active member CTE 必须允许条件下推，禁止强制物化全部 active members 后再搜索。单条 SQL 一次得到精确 total、row counts 与匹配 group ids，分页按匹配 ids 取 payload，禁止重复扫描历史 generation；普通标量列同列多选按 OR，不同列/不同 pane 按 AND；银行金额表头的方向+付款账号复合筛选继续按 AND |
@@ -46,7 +46,7 @@
 | `paired.groups` | 前端 | 每组恰好对应一条冻结要求已满足的 active formal relation，`group_type=relation` |
 | `unpaired.groups` | 前端 | 无 active owner 的 canonical fact 为 `group_type=unpaired` singleton；冻结要求未满足的 active relation 保持同 case、`group_type=relation`，并返回 `completion.is_complete=false` 与 `missing_row_types` |
 | combined initial | 前端/App Health | `GET /api/workbench` 在同一 active generation-set 快照返回 summary 与 paired/unpaired 各 50 组首页；summary 含 `paired_count`、`unpaired_count`、OA/流水/发票事实数与 exception count；用户滚动接近每区列表底部时，前端才通过既有 `/groups` 自动读取下一页，不显示“已加载 N / total”或手动“加载更多”；搜索仍由服务端查询该区全部 active generation 数据，不受前端当前已加载页限制 |
-| operation recovery read | 前端 | 缺少 backend operation projection、必须等待完整 generation 的操作只允许一次 combined initial 触发 exact recovery；若未 fresh，改用公开轻量 refresh status 等待，canonical proof 返回 fresh 后再读取一次 combined initial 并安装 payload。等待期间不得重复读取 paired/unpaired groups，最终 load 再次 non-fresh 时继续 fail closed。 |
+| operation recovery read | 前端 / 生产可逆写验证 | 缺少 backend operation projection、必须等待完整 generation 的操作只允许一次 combined initial 触发 exact recovery；若未 fresh，改用公开轻量 refresh status 等待，canonical proof 返回 fresh 后再读取一次 combined initial 并安装 payload。等待期间不得重复读取 paired/unpaired groups，最终 load 再次 non-fresh 时继续 fail closed。生产 relation confirm/withdraw 的页面 consumer 必须测量真实 `GET /api/workbench` combined initial，并在 `paired` / `unpaired` 根下绑定 test-owned identity；不得把滚动分页 `/groups` 的耗时登记为关联台首屏恢复耗时。 |
 | formal relation write result | caller | before/after、version、affected months、audit；普通操作的 outbox/barrier targets 为空 |
 | relation source version | Workbench/Cost/其他消费页 | canonical relation 事实提供可比较的版本证明。普通关系事务不直接投递 Cost 或任何其它页面；消费页只在自身访问时检测 mismatch 并投递精确 scope。 |
 | matching summary | worker/App Health | planned/created/extended/preserved/ambiguous/resource-limited/unsafe counts；不输出候选 rows |

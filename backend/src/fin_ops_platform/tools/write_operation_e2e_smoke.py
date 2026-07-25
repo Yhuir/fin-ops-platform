@@ -42,8 +42,8 @@ WITHDRAW_MUTATION_PATH = "/api/workbench/actions/withdraw-link"
 
 REVERSIBLE_RELATION_CONSUMER_CONTRACTS: dict[str, dict[str, object]] = {
     "reconciliation-workbench": {
-        "path": "/api/workbench/groups",
-        "business_roots": ("groups",),
+        "path": "/api/workbench",
+        "business_roots": ("paired", "unpaired"),
     },
     "bank-details": {"path": "/api/bank-details/transactions", "business_roots": ("rows",)},
     "pending-invoices": {"path": "/api/pending-invoices/rows", "business_roots": ("rows",)},
