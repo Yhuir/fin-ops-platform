@@ -23,6 +23,7 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_relation
 )
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
     PostgresOaPendingPaymentSourceSnapshotRepository,
+    oa_pending_payment_workbench_relation_versions_by_scope,
 )
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
@@ -106,6 +107,77 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(second.oa_pending_payment_changed_scopes, ())
         self.assertEqual(second.upserted_completed_count, 0)
         self.assertEqual(after, before)
+
+    def test_older_relation_withdrawal_changes_membership_proof_while_max_timestamp_stays_stable(self) -> None:
+        source_snapshot = PostgresOaPendingPaymentSourceSnapshotRepository(
+            self.connection,
+            pending_relation_repository=self.pending_relations,
+        )
+        source_snapshot.commit_authoritative_snapshot(
+            scope_key="2026-05",
+            tenant_id="default",
+            projection_records=[_record()],
+            admission_records=[_record()],
+            payment_statuses={
+                "flow-integration-1": OAPaymentStatusRecord(
+                    flow_id="flow-integration-1",
+                    pay_status=0,
+                )
+            },
+        )
+        self.connection.execute(
+            """
+            insert into app.workbench_pair_relations(
+                case_id, relation_mode, status, version, month_scope,
+                row_ids, row_types, updated_at, raw_payload
+            )
+            values
+                (
+                    'oa-proof-older', 'manual_confirmed', 'active', 1, '2026-05-01',
+                    array['oa-integration-1', 'bank-proof-older'],
+                    array['oa', 'bank'], '2026-07-20T00:00:00+00:00',
+                    '{"normalized_payload":{"case_id":"oa-proof-older","status":"active","relation_mode":"manual_confirmed","version":1,"row_ids":["oa-integration-1","bank-proof-older"],"row_types":["oa","bank"]}}'::jsonb
+                ),
+                (
+                    'oa-proof-newer', 'manual_confirmed', 'active', 1, '2026-05-01',
+                    array['oa-integration-1', 'bank-proof-newer'],
+                    array['oa', 'bank'], '2026-07-21T00:00:00+00:00',
+                    '{"normalized_payload":{"case_id":"oa-proof-newer","status":"active","relation_mode":"manual_confirmed","version":1,"row_ids":["oa-integration-1","bank-proof-newer"],"row_types":["oa","bank"]}}'::jsonb
+                )
+            """
+        )
+
+        before = oa_pending_payment_workbench_relation_versions_by_scope(
+            self.connection,
+            scope_keys=["2026-05"],
+        )["2026-05"]
+        self.connection.execute(
+            """
+            update app.workbench_pair_relations
+            set status = 'withdrawn'
+            where case_id = 'oa-proof-older'
+            """
+        )
+        after = oa_pending_payment_workbench_relation_versions_by_scope(
+            self.connection,
+            scope_keys=["2026-05"],
+        )["2026-05"]
+
+        self.assertEqual(
+            before["oa_pending_payment_workbench_pair_relations_updated_at"],
+            after["oa_pending_payment_workbench_pair_relations_updated_at"],
+        )
+        self.assertEqual(
+            (
+                before["oa_pending_payment_workbench_pair_relation_count"],
+                after["oa_pending_payment_workbench_pair_relation_count"],
+            ),
+            (2, 1),
+        )
+        self.assertNotEqual(
+            before["oa_pending_payment_workbench_pair_relations_membership_digest"],
+            after["oa_pending_payment_workbench_pair_relations_membership_digest"],
+        )
 
     def test_admission_only_commit_preserves_stable_completed_fact_and_never_enqueues_shared_read_models(self) -> None:
         source_snapshot = PostgresOaPendingPaymentSourceSnapshotRepository(

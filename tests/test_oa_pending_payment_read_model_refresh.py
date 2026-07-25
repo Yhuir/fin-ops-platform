@@ -10,7 +10,6 @@ from fin_ops_platform.services.oa_pending_payment_read_model_refresh import (
 )
 from fin_ops_platform.services.oa_pending_payment_sql_projection import (
     OaPendingPaymentSqlProjectionBuilder,
-    _active_relations,
     _oa_pending_payment_statistics,
 )
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
@@ -121,20 +120,15 @@ class OaPendingPaymentReadModelRefreshTests(unittest.TestCase):
 
 
 class OaPendingPaymentSqlProjectionBuilderTests(unittest.TestCase):
-    def test_turnover_manual_closure_is_not_an_oa_consumer_relation(self) -> None:
-        relations = _active_relations(
-            {
-                "pair_relations": {
-                    "shared": {"status": "active", "relation_mode": "manual"},
-                    "closure": {
-                        "status": "active",
-                        "relation_mode": "turnover_manual_closure",
-                    },
-                }
-            }
-        )
+    def test_projector_uses_structured_active_relation_reader_and_has_no_raw_activity_owner(self) -> None:
+        source = Path(
+            "backend/src/fin_ops_platform/services/oa_pending_payment_sql_projection.py"
+        ).read_text(encoding="utf-8")
 
-        self.assertEqual(relations, [{"status": "active", "relation_mode": "manual"}])
+        self.assertIn("load_active_workbench_pair_relations_for_row_ids", source)
+        self.assertNotIn(".load_workbench_pair_relations_for_row_ids(", source)
+        self.assertNotIn("def _active_relations(", source)
+        self.assertIn("TURNOVER_MANUAL_CLOSURE_RELATION_MODE", source)
 
     def test_all_scope_inventory_unions_oa_bank_and_input_invoice_months(self) -> None:
         connection = ScopeInventoryConnection()
