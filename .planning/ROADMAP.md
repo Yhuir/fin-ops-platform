@@ -548,6 +548,6 @@ Plans:
 - [x] 27-04-PLAN — Migrate pending/input/OA/output invoice-family rules, facts, Drawers and strict consumers.
 - [x] 27-05-PLAN — Complete imports, tax, ETC, settings, App Health and minimal page activation behavior.
 - [x] 27-06-PLAN — Delete superseded fan-out paths and close all local correctness/performance gates.
-- [ ] 27-07-PLAN — Validate the already-deployed exact `719c9a34` release across every page/operation and close production evidence without a no-op redeploy.
+- [x] 27-07-PLAN — Candidate A `bef73c4b6` 完成全矩阵后，Candidate B `3b44f08ef` 集中修复验证 evidence gate；最终 production release、fixture recovery、52/52 probes、System Audit 与 runtime convergence 全部闭合。
 
 ---

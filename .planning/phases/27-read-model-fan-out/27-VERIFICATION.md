@@ -1,8 +1,28 @@
-# Phase 27 Current Release Verification
+# Phase 27 Production Verification
 
-> Active production baseline: `main-719c9a34-20260725101310`. Current local Candidate A contains the Phase 27 final trigger-contract correction and has not yet been deployed. Phase 27 remains incomplete until Candidate A completes the single production matrix, fixture recovery and final audit.
+> Phase 27 已完成。最终运行代码为 commit `3b44f08ef`，production release 为 `main-3b44f08e-20260725151318`。Candidate A 完成一次全量诊断后，Candidate B 集中修复共享 evidence gate 并更新正式 runbook；Turnover probe 同时按既有冻结业务合同改用正确 expectation。没有执行逐问题部署。
 
-## Current conclusion
+## Final production closure
+
+| Gate | Final result |
+| --- | --- |
+| Candidate A | commit `bef73c4b6` 已 push/deploy；先完成全矩阵并保留全部首轮结果，再开始修复 |
+| Candidate B | commit `3b44f08ef` 已 push/deploy；修复 `statistics_status` evidence gate、补测试并更新正式 runbook；Turnover probe 使用正确的 `unpaired` expectation |
+| 全页面/API freshness | 最终 HTTP matrix `52/52`，无 non-fresh；最大 p95 `781.151ms` |
+| 普通 confirm/withdraw 写入 | `200`；confirm `289.539ms`，withdraw `238.532ms` |
+| 写后 fan-out | confirm/withdraw 后 `turnover`、`workbench`、`workbench_relation`、`cost_statistics`、`search` forbidden event sample count 均为 `0` |
+| 按访问收敛 | Workbench、Cost、Turnover 与 exact Cost active scope 均在自身访问后 fresh；未访问的 scope 不被伪装 fresh |
+| 浏览器恢复 | production 手动 reload 后银行明细 `1,014` 条、表格 `101` 行，在 `1,196ms` 内重新出现 |
+| 浏览器路由 | Cost→Bank `3,246ms`，Bank→Cost `3,194ms`；3 秒只记录为 follow-up，不阻塞正确性 |
+| scope contract | `ok=true`，`violation_count=0`，`current_uncovered_outbox_failure_count=0` |
+| durable runtime | outbox pending/publishing/failed/publish_failed 全为 `0`；15 read models stale/unavailable 全为 `0` |
+| workers | 24 个 required workers 全部 healthy |
+| System Audit | `overall_status=pass`；16/16 audited business pages pass；zero issue/error/warning/blocker |
+| fixture recovery | test-owned fixture 已通过 withdraw 恢复；两条 Turnover row 均无 active closure/case/relation identity |
+
+RabbitMQ management metrics 在生产环境不可用，因此 queue depth 显示 unknown；PostgreSQL durable outbox 是正式事实源且已排空，24 个 required workers 健康。external bank/OA/invoice/ETC 独立控制证据仍为 unknown，属于系统外事实证明，不阻塞 app-internal correctness。
+
+## Final architecture conclusion
 
 Candidate A now implements one ordinary runtime contract:
 
@@ -15,7 +35,7 @@ Candidate A now implements one ordinary runtime contract:
 
 The three-second SLO is observational follow-up, not a Phase 27 correctness gate. Incomplete payloads, stale-as-fresh, permanent refreshing, failed manual recovery, unrelated page I/O or non-convergent queue/worker state still block.
 
-## Candidate A implementation inventory
+## Candidate A implementation inventory (historical)
 
 ### Backend
 
@@ -46,7 +66,7 @@ The three-second SLO is observational follow-up, not a Phase 27 correctness gate
 - Current test commands and module entry points no longer point maintainers to the deleted frontend paths; dated implementation/closure records are explicitly historical.
 - No fallback, compatibility event bus, page coordinator, second registry, new endpoint, queue, worker, cache, table, migration or dependency was introduced.
 
-## Local Candidate A evidence
+## Local Candidate A evidence (historical)
 
 | Gate | Result | Evidence |
 | --- | --- | --- |
@@ -73,17 +93,17 @@ All seven categories apply because this is a cross-module read-model/worker/fron
    - Covers exact dependency staging, durable enqueue order, shared dependency dedupe, worker source-version proof and zero premature consumer enqueue.
 3. **API contract — pass**
    - Existing 200/202/fresh/stale/refreshing shapes remain. OA ETag/304 remains server-compatible; only the browser's permanent fresh polling is removed.
-4. **Read model/cache/background job — pass locally**
+4. **Read model/cache/background job — pass**
    - Covers freshness gates, exact dependencies, durable queue/worker registry and no dependency blocking unrelated pages.
-   - Real systemd/RabbitMQ/PostgreSQL convergence remains a Candidate A production gate.
+   - Production PostgreSQL durable queue、systemd worker 与最终 freshness convergence 已通过；RabbitMQ management metrics unavailable 仅保留为运维可观测性风险。
 5. **Frontend component/interaction — pass**
    - Covers route/manual recovery, loading/empty/error/refreshing, current-page command reconcile, fresh zero polling, focus/visibility/BFCache/other-page zero reload and all touched page/Drawer regressions.
-6. **End-to-end business flow — pass at targeted local level**
+6. **End-to-end business flow — pass**
    - Critical command→current-page GET and `202 -> fresh` component/service/API paths pass.
-   - The full real 17-page/15-read-model matrix is intentionally performed once after Candidate A deployment, not simulated by rerunning all 183 browser flows.
-7. **Existing feature regression — pass for affected surface**
+   - Candidate A/Candidate B 完成 test-owned confirm→consumer access→withdraw→consumer recovery；最终 17-page/15-read-model HTTP matrix 52/52。
+7. **Existing feature regression — pass**
    - 509 affected frontend tests, 96 backend freshness/runtime tests, build, lint and architecture guards protect unrelated page behavior.
-   - Production Candidate A must still prove all registered pages and allowed operations with one reversible fixture.
+   - Production Candidate B、representative browser reload/route、System Audit、App Health 与 scope contract 全部通过。
 
 ## Architecture / over-design review
 
@@ -94,9 +114,9 @@ All seven categories apply because this is a cross-module read-model/worker/fron
 - No speculative optimization was added for the deferred three-second SLO.
 - The only new bound is an explicit retry ceiling on existing current-page non-fresh convergence, preventing permanent hidden/background I/O.
 
-## Candidate A production gate
+## Candidate A production gate (executed)
 
-After the official commit/push/deploy, use one test-owned, fingerprinted, reversible fixture and preserve every first-attempt result before changing code.
+Candidate A 已按以下门禁执行，并在完成全矩阵、形成统一问题清单后才开始 Candidate B 修复。
 
 The single matrix must prove:
 
@@ -119,6 +139,10 @@ Performance above three seconds is recorded as `performance_follow_up`, not hidd
 - If there are correctness blockers, fix all shared root causes together, rerun one targeted local batch, and deploy at most one consolidated Candidate B.
 - If Candidate A passes, do not create a no-op Candidate B.
 
-## Remaining blocking risk
+## Remaining non-blocking follow-up
 
-Only production evidence remains: official Candidate A commit/push/deploy, the full production matrix, fixture recovery and final Phase 27 audit. Local evidence cannot prove real worker scheduling, production history/data shape, permissions, Nginx/auth behavior or every page's real access-to-fresh convergence.
+- Phase 27 correctness、隔离、恢复、runtime 与数据安全 blocker 为零。
+- 3 秒 stale-to-fresh SLO 按用户决定延期。大多数最终样本低于 3 秒，但恢复过程中 Workbench `6,974.559ms`、Cost `7,432.418ms`，必须在独立性能阶段优化。
+- RabbitMQ management metrics unavailable，不能从 management endpoint 独立证明 queue depth；PostgreSQL durable outbox、scope contract 与 worker health 已提供当前正式运行证明。
+- 浏览器控制接口无法导出逐请求 network trace；focus/visibility/BFCache/other-tab 零 I/O 由删除生产 listener、架构守卫、确定性前端测试和生产 outbox zero 共同证明。
+- 按约定未运行无关的 183-browser suite 或 full CI；没有隐藏失败或放宽业务断言。

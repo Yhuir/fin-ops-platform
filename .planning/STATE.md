@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 27 current release 719c9a34 is deployed and locally reverified; final current-release production correctness matrix remains.
-last_updated: "2026-07-25T11:22:34+08:00"
-last_activity: 2026-07-25 - Dropped the uncommitted exact-candidate performance experiment and reverified the clean deployed 719c9a34 baseline
+stopped_at: Phase 27 complete on production release main-3b44f08e-20260725151318; 3-second SLO remains a separate performance follow-up.
+last_updated: "2026-07-25T15:34:24+08:00"
+last_activity: 2026-07-25 - Closed Phase 27 after Candidate A full diagnostic and one consolidated Candidate B production verification
 progress:
   total_phases: 23
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 37
-  completed_plans: 35
-  percent: 95
+  completed_plans: 36
+  percent: 97
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-16)
 
 **Core value:** Preserve production finance workflow correctness while improving individual pages through isolated, reviewable GSD phases.
-**Current focus:** Phase 27 Plan 27-07 final current-release production correctness matrix and evidence closure. Phase 26 frozen Turnover correctness is complete and remains a non-regression invariant.
+**Current focus:** Phase 27 is complete. Phase 26 frozen Turnover correctness remains a non-regression invariant; the 3-second stale-to-fresh target is deferred to a separate performance phase.
 
 ## Current Position
 
 Phase: 27 of 27 (按页面访问收敛 Read Model)
 Plan: 27-07 of 27-07
-Status: Plans 27-01 through 27-06 complete; current HEAD/origin/main `719c9a34` is active as production release `main-719c9a34-20260725101310`; targeted local gates pass; final L4 production correctness coverage remains
-Last activity: 2026-07-25 - exact-candidate performance-only diff deleted; clean current release passed targeted backend/frontend, PostgreSQL, lint, docs and runtime gates
+Status: Phase 27 complete; runtime code commit `3b44f08ef` is active as production release `main-3b44f08e-20260725151318`; 52/52 final probes, System Audit, fixture recovery and runtime convergence pass
+Last activity: 2026-07-25 - Candidate A full issue ledger completed before one consolidated Candidate B; no per-bug deploy loop
 
-Progress: [█████████░] 95%
+Progress: [██████████] 100% (Phase 27)
 
 ## Performance Metrics
 
@@ -51,6 +51,10 @@ Progress: [█████████░] 95%
 
 ### Decisions
 
+- Phase 27 closure: Candidate A `bef73c4b6` was deployed and fully diagnosed before any correction. Candidate B `3b44f08ef` was the single consolidated corrective release; its runtime is active as `main-3b44f08e-20260725151318`.
+- Phase 27 closure: Final HTTP matrix is 52/52; scope contract has zero violations; durable outbox and all 15 read-model stale/unavailable counts are zero; 24 required workers are healthy; System Audit is pass for 16/16 audited business pages.
+- Phase 27 closure: The test-owned confirm/withdraw fixture was restored. Ordinary writes produced zero forbidden downstream refresh events. No database backup was created because the fixture was fingerprinted, test-owned and recoverable through its business inverse.
+- Phase 27 closure: 3-second performance is not a correctness gate. Workbench and Cost recovery samples above 3 seconds are retained as explicit performance follow-up, not hidden.
 - Phase 27 current release: Cost compares the Workbench business proof but ignores only the active-generation execution cursor `source_version`; query, worker, parent/child SQL and System Audit use the same semantic contract, while real business-proof drift remains fail closed.
 - Phase 27 current release: Bank-flow tag-rule save returns exact informational affected months with empty write targets and no dead `refresh_enqueued` DTO; current-page normal GET owns access-time convergence.
 - Phase 27 current release: Application reuses one Workbench projection builder and coalesces only overlapping same-scope canonical proof; completed proofs are not cached, failed proofs remain retryable, and PostgreSQL queue/dirty state stays authoritative.
@@ -126,7 +130,7 @@ None yet.
 
 ### Blockers/Concerns
 
-- Phase 27 remaining sequence: validate the already-active exact release `main-719c9a34-20260725101310` with one complete L4 production correctness matrix. Cover all registered page/operation/Drawer owners with read-only or approved reversible evidence; prove eventual fresh canonical payloads, zero ordinary write fan-out, exact access-time enqueue, unrelated-page zero I/O, retry/reload recovery, queue/worker convergence, restored test-owned fixture and final System Audit. Record latency honestly; values above 3 seconds are follow-up evidence, not a correctness failure. Do not create or deploy a no-op application release.
+- Phase 27 has no remaining correctness, isolation, recovery, runtime or data-safety blocker. Non-blocking follow-ups are the deferred 3-second performance target, unavailable RabbitMQ management metrics and external bank/OA/invoice/ETC control evidence remaining unknown.
 - Phase 21 Release A full local gate is zero-failure: backend 4182 passed / 33 explicitly environment-gated skipped；frontend 835/835；Chromium 177/177；production build passed. 首次远端分支 CI 揭示一个既有测试模块依赖未声明的 `pytest`，且 4 个顶层测试未被 `unittest discover` 执行；现已改为标准 `unittest.TestCase`。第二次远端 CI 暴露 Vitest 文件并行下的全局 I/O/监听器竞争与 cross-realm Blob 断言；前端测试现固定单 worker，Blob 以 size/MIME 合同断言。第三次远端 CI 证明多个前端测试把页面/抽屉壳出现误当成异步数据 I/O 完成；相关测试现以用户可见数据行、详情字段或当前 DOM 节点作为 readiness anchor。第四次远端 CI 进一步暴露 OA 反提历史时间依赖执行机本地时区；该业务时间现显式按 `Asia/Shanghai` 格式化，并由语义表格 readiness + 精确时间断言保护。与 CI 一致的 Node 20 全量运行最终 71 files / 835 tests 全绿，且不再出现 `MaxListenersExceededWarning`。统一门禁还捕获 import confirm 在持久化前发布 matching 的竞态；已改为 durable delta 成功后才发布所有下游信号，并将 4 项 import-processing 测试纳入 `unittest discover`。
 - 第五次远程 CI 为 176/177；唯一失败是待找发票文本选择 E2E 用元素 bounding-box 中线做像素拖拽，在 CI 字体/换行布局下落到空白区。测试现对同一可见文本节点执行 Playwright 浏览器文本选择，仍精确验证 `window.getSelection()`，不改业务 UI、不加 retry、不放宽结果。
 - 第六次远程 CI 的唯一失败是 ETC 统一批次列表测试等待静态 list 容器后同步读取异步批次行；现以 `etc-batch-unsubmitted-01` 业务行作为 readiness anchor，不改 ETC 业务链路与 I/O。

@@ -1,7 +1,7 @@
 # Phase 27 页面访问 freshness 与写入口覆盖矩阵
 
-> 状态：`planned` 表示未实施，`deployed-validation-pending` 表示代码、本地门禁和 release 激活已完成但最终生产覆盖行尚未闭合，`migrated` 只用于对应生产 correctness probe 通过的 slice。本文是 Phase 27 覆盖合同，不是生产 runtime registry。
-> 当前 HEAD/origin/main `719c9a34` 已作为 production release `main-719c9a34-20260725101310` 激活；migration `0125` 与正式 Workbench rehydrate 已完成。当前所有 slice 均为 `deployed-validation-pending`，只有 27-07 生产正确性矩阵通过后才改为 `migrated`。3 秒目标只记录为性能 follow-up，不阻塞状态迁移。
+> 状态：`planned` 表示未实施，`deployed-validation-pending` 表示代码、本地门禁和 release 激活已完成但最终生产覆盖行尚未闭合，`migrated` 表示对应 production correctness probe 已通过。本文是 Phase 27 覆盖合同，不是生产 runtime registry。
+> 最终运行代码 commit `3b44f08ef` 已作为 production release `main-3b44f08e-20260725151318` 激活；migration `0125` 与正式 Workbench rehydrate 已完成。最终 17-page/15-read-model HTTP matrix 为 52/52，scope contract violation 为 0，System Audit 16/16 pass，所有 slice 已迁移。3 秒目标只记录为性能 follow-up，不阻塞状态迁移。
 
 ## Operation classes
 
@@ -44,21 +44,21 @@
 
 | Read model key | Scope / all semantics | Query owner | Page or resource consumers | Access-time proof and migration target | Status |
 | --- | --- | --- | --- | --- | --- |
-| `workbench` | `workbench`; month active generation；`all=active_month_shard_aggregate` | `WorkbenchQueryFacade` | `reconciliation-workbench`, `cost_statistics`, `search` | v7 complete canonical source vector + active generation/current-effective queue；Application shared builder合并重叠proof；migration `0125` 与生产受控rehydrate已完成；保留原子发布例外 | `deployed-validation-pending` |
-| `workbench_relation` | `workbench_relation`; month；`all=fan_out_command` | `WorkbenchRelationReadFacade` | `reconciliation-workbench`, `batch-accounting`, invoice family | exact relation scope source versions；消费者不得把旧 relation projection 伪装 fresh | `deployed-validation-pending` |
-| `bank_detail` | `bank_detail`; month；`all=fan_out_command` | `BankDetailsApplicationService` | `bank-details`, `pending-invoices`, `cost-statistics` | exact month signature/source versions + queue state | `deployed-validation-pending` |
-| `bank_account_balance` | `bank_account_balance`; global `all=queryable_all_scope` | `BankDetailsApplicationService` | `bank-details`, App Status | all-only canonical balance source version | `deployed-validation-pending` |
-| `pending_invoice` | `pending_invoice`; `direction:filter_group[:month]`; bare all forbidden | `PendingInvoiceReadModelService` | `pending-invoices`, `invoice_lifecycle` | page-first-screen exact scope + bank/relation dependency versions | `deployed-validation-pending` |
-| `search` | `search`; month；`all=fan_out_command` | `Search read API` | global search, settings manual OA search | requested month index source versions；普通写零 refresh，访问 non-fresh 才 enqueue | `deployed-validation-pending` |
-| `invoice_lifecycle` | `invoice_lifecycle`; month；`all=fan_out_command` | `InvoiceLifecycleReadFacade` | pending/input/output/OA invoice resources | exact lifecycle + upstream source proof；strict stale consumer | `deployed-validation-pending` |
-| `input_invoice_usage` | `input_invoice_usage`; month；`all=fan_out_command` | `InputInvoiceUsageReadModelService` | `input-invoice-usage` | exact month + relation/lifecycle/rule signature | `deployed-validation-pending` |
-| `output_invoice_collection` | `output_invoice_collection`; month；`all=fan_out_command` | `OutputInvoiceCollectionReadApplicationService` | `output-invoice-collections` | exact month + relation/lifecycle/receipt/rule versions | `deployed-validation-pending` |
-| `oa_pending_payment` | `oa_pending_payment`; month；`all=fan_out_command` | `OaPendingPaymentReadModelService` | `oa-pending-payments`, lifecycle resource | exact OA snapshot/relation/schema versions | `deployed-validation-pending` |
-| `cost_statistics` | `cost_statistics`; `active/all` shard + queryable parent | `CostStatisticsQueryService` | `cost-statistics` | `all` 遇 durable active dependency先快速返回 refreshing；排空后复用shared Workbench v7 proof并做Cost/Bank Detail完整fail-closed proof；只忽略Workbench执行游标`source_version`；Workbench/Cost各两个bounded consumer并行sibling month，Workbench primary唯一拥有`all` fan-out | `deployed-validation-pending` |
-| `tax_offset` | `tax_offset`; month；`all=fan_out_command` | `TaxOffsetQueryService` | `tax-offset` | exact invoice/certified source versions；普通写零 refresh，访问 current month 收敛 | `deployed-validation-pending` |
-| `no_oa_bank_batch` | `no_oa_bank_batch`; month；`all=fan_out_command` | `NoOaBankBatchApplicationService` | legacy API/regression only | exact canonical no-OA relation versions；不新增页面依赖 | `deployed-validation-pending` |
-| `bank_flow_rule_batch` | `bank_flow_rule_batch`; month；`all=fan_out_command` | `BankFlowRuleBatchApplicationService` | `bank-flow-rule-batches` | exact bank/tag eligibility/relation versions；普通写零 target | `deployed-validation-pending` |
-| `turnover_ledger` | `turnover_ledger`; month；`all=fan_out_command` | `TurnoverLedgerQueryService` | `turnover-ledger` | exact ledger + canonical relation source bundle；普通写零 target | `deployed-validation-pending` |
+| `workbench` | `workbench`; month active generation；`all=active_month_shard_aggregate` | `WorkbenchQueryFacade` | `reconciliation-workbench`, `cost_statistics`, `search` | v7 complete canonical source vector + active generation/current-effective queue；Application shared builder合并重叠proof；migration `0125` 与生产受控rehydrate已完成；保留原子发布例外 | `migrated` |
+| `workbench_relation` | `workbench_relation`; month；`all=fan_out_command` | `WorkbenchRelationReadFacade` | `reconciliation-workbench`, `batch-accounting`, invoice family | exact relation scope source versions；消费者不得把旧 relation projection 伪装 fresh | `migrated` |
+| `bank_detail` | `bank_detail`; month；`all=fan_out_command` | `BankDetailsApplicationService` | `bank-details`, `pending-invoices`, `cost-statistics` | exact month signature/source versions + queue state | `migrated` |
+| `bank_account_balance` | `bank_account_balance`; global `all=queryable_all_scope` | `BankDetailsApplicationService` | `bank-details`, App Status | all-only canonical balance source version | `migrated` |
+| `pending_invoice` | `pending_invoice`; `direction:filter_group[:month]`; bare all forbidden | `PendingInvoiceReadModelService` | `pending-invoices`, `invoice_lifecycle` | page-first-screen exact scope + bank/relation dependency versions | `migrated` |
+| `search` | `search`; month；`all=fan_out_command` | `Search read API` | global search, settings manual OA search | requested month index source versions；普通写零 refresh，访问 non-fresh 才 enqueue | `migrated` |
+| `invoice_lifecycle` | `invoice_lifecycle`; month；`all=fan_out_command` | `InvoiceLifecycleReadFacade` | pending/input/output/OA invoice resources | exact lifecycle + upstream source proof；strict stale consumer | `migrated` |
+| `input_invoice_usage` | `input_invoice_usage`; month；`all=fan_out_command` | `InputInvoiceUsageReadModelService` | `input-invoice-usage` | exact month + relation/lifecycle/rule signature | `migrated` |
+| `output_invoice_collection` | `output_invoice_collection`; month；`all=fan_out_command` | `OutputInvoiceCollectionReadApplicationService` | `output-invoice-collections` | exact month + relation/lifecycle/receipt/rule versions | `migrated` |
+| `oa_pending_payment` | `oa_pending_payment`; month；`all=fan_out_command` | `OaPendingPaymentReadModelService` | `oa-pending-payments`, lifecycle resource | exact OA snapshot/relation/schema versions | `migrated` |
+| `cost_statistics` | `cost_statistics`; `active/all` shard + queryable parent | `CostStatisticsQueryService` | `cost-statistics` | `all` 遇 durable active dependency先快速返回 refreshing；排空后复用shared Workbench v7 proof并做Cost/Bank Detail完整fail-closed proof；只忽略Workbench执行游标`source_version`；Workbench/Cost各两个bounded consumer并行sibling month，Workbench primary唯一拥有`all` fan-out | `migrated` |
+| `tax_offset` | `tax_offset`; month；`all=fan_out_command` | `TaxOffsetQueryService` | `tax-offset` | exact invoice/certified source versions；普通写零 refresh，访问 current month 收敛 | `migrated` |
+| `no_oa_bank_batch` | `no_oa_bank_batch`; month；`all=fan_out_command` | `NoOaBankBatchApplicationService` | legacy API/regression only | exact canonical no-OA relation versions；不新增页面依赖 | `migrated` |
+| `bank_flow_rule_batch` | `bank_flow_rule_batch`; month；`all=fan_out_command` | `BankFlowRuleBatchApplicationService` | `bank-flow-rule-batches` | exact bank/tag eligibility/relation versions；普通写零 target | `migrated` |
+| `turnover_ledger` | `turnover_ledger`; month；`all=fan_out_command` | `TurnoverLedgerQueryService` | `turnover-ledger` | exact ledger + canonical relation source bundle；普通写零 target | `migrated` |
 
 ## Mutating frontend API function coverage
 
