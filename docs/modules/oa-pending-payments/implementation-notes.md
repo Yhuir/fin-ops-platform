@@ -5,7 +5,7 @@
 - 根因补强：仅记录 relation `updated_at` 上界无法识别“撤回较旧 relation、较新的 active relation 仍保持同一最大时间”这一集合成员变化，旧 OA summaries 因而可能继续被判 fresh。
 - 最小修复：复用 OA source-snapshot owner 和 structured PostgreSQL relation repository。source vector 在一次 set-based SQL 中登记 active eligible relation 的数量、最大更新时间和确定性 membership digest；digest 绑定 case、typed members、mode、version 与 projector 实际消费 payload。projector 删除本地 `_active_relations` 状态推断，直接调用 active-only loader，并继续排除 Turnover 专属 closure mode。
 - 边界不变：不新增 migration、依赖、worker、队列、read-model 串行依赖或写后 fan-out；Cost runtime 与 API response shape 不变。
-- 本地验证：source snapshot、projector refresh 和 PostgreSQL integration 合同共 31 项测试通过，其中 5 项真实 PostgreSQL 用例因本机未配置测试数据库按既有条件跳过。生产部署与样本验证留给后续发布任务。
+- 本地验证：source snapshot、projector refresh 和 PostgreSQL integration 合同共 32 项测试通过，其中 6 项真实 PostgreSQL 用例因本机未配置测试数据库按既有条件跳过。新增真实数据库闭环会在可用环境中验证 active relation 投影后，仅修改 structured status 为 withdrawn（raw payload 仍残留 active）会触发 access-time mismatch/enqueue，并在重建后把银行/发票 `relationCount` 清零。生产部署与样本验证留给后续发布任务。
 
 ## 2026-07-25 - 删除 fresh/visibility 常驻轮询旧链
 
