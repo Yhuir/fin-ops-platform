@@ -181,6 +181,44 @@ describe("WorkbenchZone", () => {
     expect(onAuxiliaryAction).toHaveBeenCalledTimes(1);
   });
 
+  test("renders an accessible busy primary selection action on the next render", () => {
+    render(
+      <WorkbenchZone
+        getRowState={() => "idle"}
+        isExpanded={false}
+        isVisible
+        primarySelectionActionLabel="确认关联"
+        primarySelectionActionPending
+        primarySelectionActionPendingLabel="正在准备确认预览"
+        selectionSummary={{
+          total: 2,
+          oa: 1,
+          bank: 1,
+          invoice: 0,
+          amounts: { oa: "128,000.00", bank: "128,000.00", invoice: "0.00" },
+        }}
+        title="未配对"
+        tone="warning"
+        searchQuery=""
+        onSearchQueryChange={() => {}}
+        onClearSelection={() => {}}
+        onOpenDetail={() => {}}
+        onPrimarySelectionAction={() => {}}
+        onRowAction={() => {}}
+        onSelectRow={() => {}}
+        onToggleExpand={() => {}}
+        panes={panes}
+        zoneId="unpaired"
+      />,
+    );
+
+    const button = screen.getByRole("button", { name: "正在准备确认预览" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    expect(within(button).getByRole("status", { name: "正在准备确认预览" })).toBeInTheDocument();
+  });
+
   test("keeps pane toggles pressed state and expand callback accessible", async () => {
     const user = userEvent.setup();
     const onToggleExpand = vi.fn();

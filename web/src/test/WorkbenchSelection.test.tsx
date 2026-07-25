@@ -389,6 +389,113 @@ describe("Workbench row selection and detail drawer", () => {
     });
   });
 
+  test("confirm preview is busy on the next render and duplicate clicks send one POST", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    const defaultFetch = fetchMock.getMockImplementation();
+    let releasePreview!: () => void;
+    const previewGate = new Promise<void>((resolve) => {
+      releasePreview = resolve;
+    });
+    let previewCalls = 0;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (fetchPath(input) === "/api/workbench/actions/confirm-link/preview") {
+        previewCalls += 1;
+        await previewGate;
+      }
+      if (!defaultFetch) {
+        throw new Error("Mock API fetch is not installed.");
+      }
+      return defaultFetch(input, init);
+    });
+    renderWorkbenchPage();
+
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    await user.click(within(unpairedZone).getByRole("row", { name: /陈涛.*智能工厂设备商/ }));
+    await user.click(within(unpairedZone).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }));
+    const confirmButton = within(unpairedZone).getByRole("button", { name: "确认关联" });
+    await user.click(confirmButton);
+
+    const busyButton = within(unpairedZone).getByRole("button", { name: "正在准备确认预览" });
+    expect(busyButton).toBeDisabled();
+    expect(busyButton).toHaveAttribute("aria-busy", "true");
+    await user.click(busyButton);
+    expect(previewCalls).toBe(1);
+
+    releasePreview();
+    expect(await screen.findByRole("dialog", { name: "关联预览" })).toBeInTheDocument();
+  });
+
+  test("withdraw preview is busy on the next render and duplicate clicks send one POST", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    const defaultFetch = fetchMock.getMockImplementation();
+    let releasePreview!: () => void;
+    const previewGate = new Promise<void>((resolve) => {
+      releasePreview = resolve;
+    });
+    let previewCalls = 0;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (fetchPath(input) === "/api/workbench/actions/withdraw-link/preview") {
+        previewCalls += 1;
+        await previewGate;
+      }
+      if (!defaultFetch) {
+        throw new Error("Mock API fetch is not installed.");
+      }
+      return defaultFetch(input, init);
+    });
+    renderWorkbenchPage();
+
+    const pairedZone = await screen.findByTestId("zone-paired");
+    await user.click(within(pairedZone).getByRole("row", {
+      name: /2026-03-25 14:22.*华东设备供应商/,
+    }));
+    const withdrawButton = within(pairedZone).getByRole("button", { name: "撤回关联" });
+    await user.click(withdrawButton);
+
+    const busyButton = within(pairedZone).getByRole("button", { name: "正在准备撤回预览" });
+    expect(busyButton).toBeDisabled();
+    expect(busyButton).toHaveAttribute("aria-busy", "true");
+    await user.click(busyButton);
+    expect(previewCalls).toBe(1);
+
+    releasePreview();
+    expect(await screen.findByRole("dialog", { name: "关联预览" })).toBeInTheDocument();
+  });
+
+  test("drops a confirm preview response after the selected rows change", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    const defaultFetch = fetchMock.getMockImplementation();
+    let releasePreview!: () => void;
+    const previewGate = new Promise<void>((resolve) => {
+      releasePreview = resolve;
+    });
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (fetchPath(input) === "/api/workbench/actions/confirm-link/preview") {
+        await previewGate;
+      }
+      if (!defaultFetch) {
+        throw new Error("Mock API fetch is not installed.");
+      }
+      return defaultFetch(input, init);
+    });
+    renderWorkbenchPage();
+
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    await user.click(within(unpairedZone).getByRole("row", { name: /陈涛.*智能工厂设备商/ }));
+    await user.click(within(unpairedZone).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }));
+    await user.click(within(unpairedZone).getByRole("button", { name: "确认关联" }));
+    await user.click(within(unpairedZone).getByRole("button", { name: "清空选择" }));
+
+    releasePreview();
+    await waitFor(() => {
+      expect(within(unpairedZone).getByRole("button", { name: "确认关联" })).toBeDisabled();
+    });
+    expect(screen.queryByRole("dialog", { name: "关联预览" })).not.toBeInTheDocument();
+  });
+
   test("amount mismatch preview requires note before confirm submit", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
