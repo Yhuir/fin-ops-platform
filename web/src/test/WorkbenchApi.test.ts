@@ -98,7 +98,19 @@ describe("workbench api bank amount mapping", () => {
           requires_note: false,
           message: "将撤回该关联",
           before: { groups: [] },
-          after: { groups: [] },
+          after: {
+            groups: [{
+              group_id: "selected",
+              group_type: "selection",
+              match_confidence: "none",
+              reason: "selected_rows",
+              zone: "unpaired",
+              status: "unpaired",
+              oa_rows: [],
+              bank_rows: [],
+              invoice_rows: [],
+            }],
+          },
           amount_summary: {
             before: { oa_total: "100.00", bank_total: "100.00", invoice_total: "100.00" },
             after: { oa_total: "100.00", bank_total: "100.00", invoice_total: "100.00" },
@@ -120,6 +132,10 @@ describe("workbench api bank amount mapping", () => {
     expect(preview.operationType).toBe("withdraw_relation");
     expect(preview.previewId).toBe("withdraw_relation:abc123");
     expect(preview.submitExpectedVersions).toEqual({ "relation:relation-1": 3 });
+    expect(preview.after.groups[0]).toMatchObject({
+      groupType: "unpaired",
+      rawGroupType: "selection",
+    });
   });
 
   test("maps preview-only selection groups from their unpaired zone without widening page group types", async () => {

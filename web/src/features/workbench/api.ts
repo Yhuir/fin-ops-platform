@@ -395,6 +395,8 @@ type ApiWorkbenchSettingsOption =
 type ApiWorkbenchGroup = {
   group_id: string;
   group_type: string;
+  zone?: string | null;
+  status?: string | null;
   match_confidence: "high" | "medium" | "low";
   reason: string;
   relation_mode?: string | null;
@@ -1102,17 +1104,11 @@ function groupHasNoOaWithdrawAction(group: ApiWorkbenchGroup) {
 }
 
 function mapGroupType(groupType: ApiWorkbenchGroup["group_type"], zoneHint?: WorkbenchZoneId): WorkbenchGroupType {
-  if (zoneHint) {
-    return zoneHint;
-  }
   const normalizedGroupType = String(groupType || "").trim();
-  if (normalizedGroupType === "relation") {
-    return "paired";
+  if (normalizedGroupType !== "relation" && normalizedGroupType !== "unpaired") {
+    throw new Error(`Unsupported Workbench group type: ${normalizedGroupType || "<empty>"}`);
   }
-  if (normalizedGroupType === "unpaired") {
-    return "unpaired";
-  }
-  throw new Error(`Unsupported Workbench group type: ${normalizedGroupType || "<empty>"}`);
+  return zoneHint ?? (normalizedGroupType === "relation" ? "paired" : "unpaired");
 }
 
 function rowActionVariant(row: ApiWorkbenchRow, availableActions: string[]): WorkbenchActionVariant {
@@ -1494,6 +1490,29 @@ function mapAmountTotals(totals: ApiWorkbenchAmountSummary["before"] | undefined
   };
 }
 
+function mapRelationPreviewGroup(group: ApiWorkbenchGroup): WorkbenchRelationGroup {
+  const rawGroupType = String(group.group_type || "").trim();
+  const zone = String(group.zone || "").trim();
+  const status = String(group.status || "").trim();
+  if (
+    (zone !== "paired" && zone !== "unpaired")
+    || status !== zone
+    || (rawGroupType === "selection" && zone !== "unpaired")
+  ) {
+    throw new Error(`Invalid Workbench relation preview group: ${rawGroupType || "<empty>"}`);
+  }
+  if (rawGroupType === "relation") {
+    return mapGroup(group, zone);
+  }
+  if (rawGroupType === "selection") {
+    return {
+      ...mapGroup({ ...group, group_type: "unpaired" }, "unpaired"),
+      rawGroupType,
+    };
+  }
+  throw new Error(`Invalid Workbench relation preview group: ${rawGroupType || "<empty>"}`);
+}
+
 function mapRelationPreview(payload: ApiWorkbenchRelationPreview): WorkbenchRelationPreview {
   const amountSummary = payload.amount_summary ?? {};
   const hasAmountSummary = Boolean(payload.amount_summary);
@@ -1518,10 +1537,10 @@ function mapRelationPreview(payload: ApiWorkbenchRelationPreview): WorkbenchRela
     requiresNote: Boolean(payload.requires_note),
     message: String(payload.message ?? "").trim(),
     before: {
-      groups: (payload.before?.groups ?? []).map((group) => mapGroup(group)),
+      groups: (payload.before?.groups ?? []).map(mapRelationPreviewGroup),
     },
     after: {
-      groups: (payload.after?.groups ?? []).map((group) => mapGroup(group)),
+      groups: (payload.after?.groups ?? []).map(mapRelationPreviewGroup),
     },
     amountSummary: {
       before: mapAmountTotals(amountSummary.before),
