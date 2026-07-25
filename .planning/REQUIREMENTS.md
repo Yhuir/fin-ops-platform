@@ -61,14 +61,14 @@
 
 ### Workbench Deterministic Relation Visibility Closure
 
-- [ ] **RELVIS-01**: Every eligible canonical Workbench fact appears exactly once: as a member of one active formal relation or as one standalone unpaired row; no fact is hidden or duplicated.
+- [x] **RELVIS-01**: Every eligible canonical Workbench fact appears exactly once: as a member of one active formal relation or as one standalone unpaired row; no fact is hidden or duplicated.
 - [ ] **RELVIS-02**: A deterministic safe automatic match creates or extends the canonical active relation in the same orchestration path; candidate/proposed/open/paired decision records are not persisted or exposed as business relation state.
 - [ ] **RELVIS-03**: Matching supports cross-month OA, bank and invoice facts and arbitrary N:M:K cardinality without a business-size cap, while computation remains bounded and fails closed.
 - [ ] **RELVIS-04**: Amount-only, fuzzy-only, date-only, ambiguous, conflicting, resource-limited and unsafe negative/refund results never create a formal relation; their facts remain visible as standalone unpaired rows.
 - [ ] **RELVIS-05**: Legacy candidate-match and reconciliation-decision runtime paths, projection hooks, repository filters, frontend states, tests and database objects are removed after a whole-repository caller scan; no compatibility fallback remains on the new chain.
 - [ ] **RELVIS-06**: Existing active relations remain unchanged and visible regardless of historical group-id prefix or creation origin; relations persist until an explicit audited withdraw/cancel, and an explicit withdrawal blocks automatic recreation of the same row set.
 - [ ] **RELVIS-07**: `month=all` composes the union of every active month shard by canonical member identity and cannot drop source-linked or otherwise repeated group members; list, detail and Audit use the same generation boundary.
-- [ ] **RELVIS-08**: Relation writes use `WorkbenchRelationCommandService`/UoW, SQL remains in repositories, matching is pure over bulk inputs, and read-model refresh uses the existing gateway/durable queue with no page/route/service/repository/worker I/O pollution.
+- [x] **RELVIS-08**: Relation writes use `WorkbenchRelationCommandService`/UoW, SQL remains in repositories, matching is pure over bulk inputs, and read-model refresh uses the existing gateway/durable queue with no page/route/service/repository/worker I/O pollution.
 - [ ] **RELVIS-09**: The forward migration deletes only retired derived candidate/decision state, never creates or rewrites canonical facts or pre-existing active relations, and is followed by registered read-model rehydration plus before/after hash and count verification.
 - [ ] **RELVIS-10**: Applicable seven-category tests and controlled data verification prove the Yunnan Lifu 520 invoice/OA relation is paired, the known 13 omitted invoices are recovered as unpaired, queues/read models converge, and canonical data is unchanged.
 
@@ -154,14 +154,14 @@
 | RELCL-05 | Phase 20 | Complete |
 | RELCL-06 | Phase 20 | Complete |
 | RELCL-07 | Phase 20 | Complete |
-| RELVIS-01 | Phase 21 | Pending |
+| RELVIS-01 | Phase 21 | Complete |
 | RELVIS-02 | Phase 21 | Pending |
 | RELVIS-03 | Phase 21 | Pending |
 | RELVIS-04 | Phase 21 | Pending |
 | RELVIS-05 | Phase 21 | Pending |
 | RELVIS-06 | Phase 21 | Pending |
 | RELVIS-07 | Phase 21 | Pending |
-| RELVIS-08 | Phase 21 | Pending |
+| RELVIS-08 | Phase 21 | Complete |
 | RELVIS-09 | Phase 21 | Pending |
 | RELVIS-10 | Phase 21 | Pending |
 | TURN-CLOSURE-01 | Phase 26 | Complete |
@@ -181,6 +181,7 @@
 | RMF-09 | Phase 27 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 67 total
 - Mapped to phases: 67
 - Unmapped: 0

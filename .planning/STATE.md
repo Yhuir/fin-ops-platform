@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 29 complete; production release `main-f06711b7-20260725213147` is active and verified.
-last_updated: "2026-07-25T18:12:02.189Z"
+stopped_at: Completed 30-02-PLAN.md
+last_updated: "2026-07-25T18:47:50.090Z"
 last_activity: 2026-07-25 -- Phase 30 execution started
 progress:
   total_phases: 27
@@ -26,8 +26,8 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 ## Current Position
 
 Phase: 30 (workbench-concurrent-recovery-performance) — EXECUTING
-Plan: 1 of 4
-Status: Executing Phase 30
+Plan: 2 of 4
+Status: Ready to execute
 Last activity: 2026-07-25 -- Phase 30 execution started
 
 Progress: [██████████] 100% (Phase 29)
@@ -46,6 +46,7 @@ Progress: [██████████] 100% (Phase 29)
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 28 | 1/1 | 1h 40m | 1h 40m |
+| Phase 30 P02 | 31min | 3 tasks | 17 files |
 
 ## Accumulated Context
 
@@ -119,6 +120,9 @@ Progress: [██████████] 100% (Phase 29)
 - Phase 20: reversible relation runtime contracts ship inside backend code; the impact matrix is a test-constrained documentation mirror, not production file I/O.
 - Phase 20: every checkpoint binds its mutation to exact committed idempotency outbox IDs, affected business-root assertions, non-consumer baseline equality and a new read-only System Audit.
 - Phase 20: nonexpected HTTP/HTML/network outcomes remain ambiguous until durable evidence resolves them; committed responses may drive formal recovery, while missing/reserved evidence never triggers blind cleanup.
+- [Phase 30]: Reuse existing generation/scope/row and generation/scope/zone/group indexes; EXPLAIN showed no migration or index justified.
+- [Phase 30]: Bound relation preview input to 20 selected rows and 100 context rows, failing closed on missing, duplicate, non-fresh, cross-generation, drift, or overflow state.
+- [Phase 30]: Keep preview DTOs derived-only; formal relation UoW always rereads canonical facts, versions, and idempotency state.
 
 ### Roadmap Evolution
 
@@ -188,6 +192,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-07-25
-Stopped at: Phase 29 complete; production release `main-f06711b7-20260725213147` is active and verified.
-Resume file: .planning/phases/29-workbench-access-performance/29-01-SUMMARY.md
+Last session: 2026-07-25T18:47:50.083Z
+Stopped at: Completed 30-02-PLAN.md
+Resume file: None
