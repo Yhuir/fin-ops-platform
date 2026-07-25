@@ -279,6 +279,21 @@ def _raw_bank_invoice_scenario(name: str, key_prefix: str) -> dict[str, object]:
     }
 
 
+def _raw_bank_oa_invoice_scenario(name: str, key_prefix: str) -> dict[str, object]:
+    scenario = _raw_bank_invoice_scenario(name, key_prefix)
+    scenario["shape"] = "bank_oa_invoice"
+    for checkpoint in [
+        *scenario["checkpoints"],
+        scenario["recovery_checkpoint"],
+    ]:
+        checkpoint["operation"] = (
+            "workbench_relation_confirm_cross_page"
+            if checkpoint["relation_state_after"] == "active"
+            else "workbench_relation_withdraw_cross_page"
+        )
+    return scenario
+
+
 def _raw_bank_turnover_scenario(name: str, key_prefix: str) -> dict[str, object]:
     fixture_row_ids = ["turnover-bank-test-1", "turnover-bank-test-2"]
     def consumers(workbench_zone: str) -> list[dict[str, object]]:
@@ -362,6 +377,209 @@ def _raw_bank_turnover_scenario(name: str, key_prefix: str) -> dict[str, object]
 
 
 class WriteOperationE2ESmokeTests(unittest.TestCase):
+    def test_relation_preview_sample_count_defaults_to_one_and_is_bounded(self) -> None:
+        parser = write_operation_e2e_smoke.build_parser()
+
+        defaults = parser.parse_args(["--scenario", "scenario.json"])
+        production = parser.parse_args(
+            ["--scenario", "scenario.json", "--relation-preview-samples", "10"]
+        )
+
+        self.assertEqual(defaults.relation_preview_samples, 1)
+        self.assertEqual(production.relation_preview_samples, 10)
+        with self.assertRaises(SystemExit):
+            parser.parse_args(
+                [
+                    "--scenario",
+                    "scenario.json",
+                    "--relation-preview-samples",
+                    str(write_operation_e2e_smoke.MAX_RELATION_PREVIEW_SAMPLES + 1),
+                ]
+            )
+
+    def test_relation_preview_sampling_repeats_only_preview_and_withdraw_uses_last_identity(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "scenario.json"
+            path.write_text(
+                json.dumps([_raw_bank_oa_invoice_scenario("bank-oa-invoice", "preview-samples")]),
+                encoding="utf-8",
+            )
+            scenario = write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)[0]
+
+        preview_counts = {"confirm": 0, "withdraw": 0}
+        mutation_bodies: list[dict[str, object]] = []
+
+        def request_fn(
+            url: str, method: str, headers, body, timeout_seconds: float
+        ) -> http_slo_probe.HttpProbeResponse:
+            if url.endswith("/api/workbench?month=2026-07"):
+                payload = {"read_model_version": "generation:test"}
+                request_id = "read-version"
+            elif url.endswith(write_operation_e2e_smoke.CONFIRM_PREVIEW_PATH):
+                preview_counts["confirm"] += 1
+                payload = {"operation": "confirm_link", "can_submit": True}
+                request_id = f"confirm-preview-{preview_counts['confirm']}"
+            elif url.endswith(write_operation_e2e_smoke.WITHDRAW_PREVIEW_PATH):
+                preview_counts["withdraw"] += 1
+                sample = preview_counts["withdraw"]
+                payload = {
+                    "operation": "withdraw_link",
+                    "can_submit": True,
+                    "preview_id": f"withdraw-preview-{sample}",
+                    "submit_expected_versions": {"relation:test": sample},
+                }
+                request_id = f"withdraw-preview-{sample}"
+            else:
+                mutation_bodies.append(json.loads((body or b"{}").decode("utf-8")))
+                payload = {"ok": True, "outbox_event_ids": []}
+                request_id = f"mutation-{len(mutation_bodies)}"
+            return http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json", "x-request-id": request_id},
+                body=json.dumps(payload).encode("utf-8"),
+            )
+
+        variables: dict[str, object] = {}
+        with (
+            patch(
+                "fin_ops_platform.tools.write_operation_e2e_smoke._wait_for_checkpoint_consumers",
+                return_value={"status": "pass", "results": []},
+            ),
+            patch(
+                "fin_ops_platform.tools.write_operation_e2e_smoke._wait_for_write_slo",
+                return_value={"status": "pass", "results": []},
+            ),
+            patch(
+                "fin_ops_platform.tools.write_operation_e2e_smoke._wait_for_system_audit",
+                side_effect=[
+                    {"status": "pass", "system_audit_id": "audit:confirm"},
+                    {"status": "pass", "system_audit_id": "audit:withdraw"},
+                ],
+            ),
+        ):
+            confirm = write_operation_e2e_smoke._run_checkpoint(
+                FakeConnection([]),
+                scenario.checkpoints[0],
+                base_url="https://example.test",
+                api_prefix="",
+                tenant_id="default",
+                headers={"Authorization": "Bearer token"},
+                write_target_ms=1000,
+                refresh_target_ms=30000,
+                timeout_seconds=90,
+                poll_interval_seconds=0.05,
+                limit=2000,
+                request_fn=request_fn,
+                variables=variables,
+                audit_ids=set(),
+                strict=True,
+                prepared_isolation_baseline={"status": "pass", "values": {}},
+                relation_preview_samples=10,
+            )
+            withdraw = write_operation_e2e_smoke._run_checkpoint(
+                FakeConnection([]),
+                scenario.checkpoints[1],
+                base_url="https://example.test",
+                api_prefix="",
+                tenant_id="default",
+                headers={"Authorization": "Bearer token"},
+                write_target_ms=1000,
+                refresh_target_ms=30000,
+                timeout_seconds=90,
+                poll_interval_seconds=0.05,
+                limit=2000,
+                request_fn=request_fn,
+                variables=variables,
+                audit_ids={"audit:confirm"},
+                strict=True,
+                prepared_isolation_baseline={"status": "pass", "values": {}},
+                relation_preview_samples=10,
+            )
+
+        self.assertEqual(preview_counts, {"confirm": 10, "withdraw": 10})
+        self.assertEqual(len(mutation_bodies), 2)
+        self.assertEqual(
+            mutation_bodies[-1]["preview_id"],
+            "withdraw-preview-10",
+        )
+        self.assertEqual(
+            mutation_bodies[-1]["expected_versions"],
+            {"relation:test": 10},
+        )
+        for checkpoint, direction in ((confirm, "confirm"), (withdraw, "withdraw")):
+            sampling = checkpoint["relation_preview_sampling"]
+            self.assertEqual(sampling["operation"], direction)
+            self.assertEqual(sampling["count"], 10)
+            self.assertEqual(
+                sampling["request_ids"],
+                [f"{direction}-preview-{index}" for index in range(1, 11)],
+            )
+            self.assertEqual(sampling["correctness_status"], "pass")
+            self.assertIn(sampling["performance_status"], {"pass", "miss"})
+            self.assertIsInstance(sampling["p50_ms"], float)
+            self.assertIsInstance(sampling["p95_ms"], float)
+            self.assertIsInstance(sampling["max_ms"], float)
+
+    def test_relation_preview_performance_miss_does_not_fail_correctness(self) -> None:
+        results = [
+            write_operation_e2e_smoke.WriteStepResult(
+                name=f"sample-{index}",
+                method="POST",
+                path=write_operation_e2e_smoke.CONFIRM_PREVIEW_PATH,
+                status="pass",
+                elapsed_ms=elapsed_ms,
+                status_code=200,
+                response_bytes=2,
+                content_type="application/json",
+                request_id=f"request-{index}",
+            )
+            for index, elapsed_ms in enumerate(
+                [1000.0, 1100.0, 1200.0, 1300.0, 1400.0, 1500.0, 1600.0, 1700.0, 1800.0, 4000.0],
+                start=1,
+            )
+        ]
+
+        report = write_operation_e2e_smoke._relation_preview_sampling_report(
+            write_operation_e2e_smoke.CONFIRM_PREVIEW_PATH,
+            results,
+        )
+
+        self.assertEqual(report["correctness_status"], "pass")
+        self.assertEqual(report["performance_status"], "miss")
+        self.assertEqual(report["p95_ms"], 4000.0)
+        self.assertEqual(report["max_ms"], 4000.0)
+
+    def test_bank_oa_invoice_uses_only_its_scenario_specific_consumer_roles(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "scenario.json"
+            path.write_text(
+                json.dumps([_raw_bank_oa_invoice_scenario("bank-oa-invoice", "impact-matrix")]),
+                encoding="utf-8",
+            )
+            scenario = write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)[0]
+
+        roles = {
+            consumer.page_key: consumer.role
+            for consumer in scenario.checkpoints[0].consumers
+        }
+        self.assertEqual(
+            {page_key for page_key, role in roles.items() if role == "affected"},
+            {
+                "reconciliation-workbench",
+                "bank-details",
+                "pending-invoices",
+                "input-invoice-usage",
+                "oa-pending-payments",
+                "cost-statistics",
+            },
+        )
+        self.assertEqual(
+            {page_key for page_key, role in roles.items() if role == "isolation"},
+            {"output-invoice-collections", "tax-offset"},
+        )
+
     def test_http_request_decodes_gzip_json_before_preflight_parsing(self) -> None:
         payload = json.dumps(_system_audit_payload("system-audit:gzip")).encode("utf-8")
 
