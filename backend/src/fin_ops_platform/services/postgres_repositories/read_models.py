@@ -47,7 +47,10 @@ from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 from fin_ops_platform.services.workbench_read_model_version import (
     WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION,
     WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION,
+    WORKBENCH_RELATION_PREVIEW_MAX_CONTEXT_ROWS,
+    WORKBENCH_RELATION_PREVIEW_MAX_SELECTED_ROWS,
     WorkbenchReadModelVersionConflictError,
+    WorkbenchRelationPreviewSelectionError,
 )
 from fin_ops_platform.services.workbench_relation_modes import TURNOVER_MANUAL_CLOSURE_RELATION_MODE
 MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
@@ -13704,6 +13707,307 @@ class PostgresReadModelRepository:
             "read_model_version": active_generation_id,
             "read_model_status": self._workbench_read_model_status_for_groups_page(scope_key=resolved_scope_key),
         }
+
+    def get_workbench_relation_preview_selection(
+        self,
+        *,
+        scope_key: str,
+        row_ids: list[str],
+        expected_read_model_version: str,
+    ) -> dict[str, Any]:
+        normalized_scope_key = str(scope_key or "").strip() or "all"
+        normalized_row_ids = _dedupe_preserve_order(text(row_id) for row_id in list(row_ids or []))
+        if not normalized_row_ids:
+            raise WorkbenchRelationPreviewSelectionError(
+                code="relation_preview_selection_required",
+                message="请至少选择一条工作台记录。",
+            )
+        if len(normalized_row_ids) > WORKBENCH_RELATION_PREVIEW_MAX_SELECTED_ROWS:
+            raise WorkbenchRelationPreviewSelectionError(
+                code="relation_preview_selection_too_large",
+                message=f"单次预览最多选择 {WORKBENCH_RELATION_PREVIEW_MAX_SELECTED_ROWS} 条记录。",
+            )
+        expected_version = text(expected_read_model_version)
+        if not expected_version:
+            raise WorkbenchRelationPreviewSelectionError(
+                code="expected_read_model_version_required",
+                message="工作台版本缺失，请刷新后重试。",
+            )
+
+        freshness = self.get_workbench_groups_freshness_status(scope_key=normalized_scope_key)
+        read_model_status = text(freshness.get("read_model_status")) or "unavailable"
+        if read_model_status != "fresh":
+            raise WorkbenchRelationPreviewSelectionError(
+                code="relation_preview_read_model_not_fresh",
+                message="工作台数据正在更新，请刷新后重试。",
+            )
+        start_proof = self._workbench_relation_preview_generation_proof(normalized_scope_key)
+        start_version = text(start_proof.get("version"))
+        if expected_version != start_version:
+            raise WorkbenchReadModelVersionConflictError(expected=expected_version, current=start_version)
+        generation_set = [
+            dict(item)
+            for item in list(start_proof.get("generation_set") or [])
+            if isinstance(item, dict)
+            and text(item.get("scope_key"))
+            and text(item.get("generation_id"))
+        ]
+        if not generation_set:
+            raise WorkbenchRelationPreviewSelectionError(
+                code="relation_preview_generation_unavailable",
+                message="工作台当前版本不可用，请刷新后重试。",
+            )
+        active_pairs = {
+            (text(item.get("scope_key")), text(item.get("generation_id")))
+            for item in generation_set
+        }
+        scope_keys = [str(item["scope_key"]) for item in generation_set]
+        generation_ids = [str(item["generation_id"]) for item in generation_set]
+        selected_records = self._connection.fetch_all(
+            """
+            /* relation-preview-selected-rows */
+            with active_generations as (
+                select *
+                from unnest(%s::text[], %s::text[])
+                  as active(scope_key, generation_id)
+            )
+            select
+                r.row_id,
+                r.source_kind,
+                r.status,
+                r.payload,
+                r.raw_payload,
+                r.scope_key,
+                r.generation_id
+            from active_generations active
+            join read_model.workbench_rows r
+              on r.scope_key = active.scope_key
+             and r.generation_id = active.generation_id
+            where r.row_id = any(%s::text[])
+            order by array_position(%s::text[], r.row_id), r.scope_key, r.row_id
+            """,
+            (scope_keys, generation_ids, normalized_row_ids, normalized_row_ids),
+        )
+        selected_rows = self._workbench_relation_preview_rows(
+            selected_records,
+            expected_pairs=active_pairs,
+        )
+        selected_by_id = self._workbench_relation_preview_rows_by_id(selected_rows)
+        missing_row_ids = [row_id for row_id in normalized_row_ids if row_id not in selected_by_id]
+        if missing_row_ids:
+            raise WorkbenchRelationPreviewSelectionError(
+                code="relation_preview_rows_missing",
+                message="所选工作台记录已变化，请刷新后重试。",
+            )
+
+        oa_source_ids = self._workbench_relation_preview_oa_source_ids(
+            [selected_by_id[row_id] for row_id in normalized_row_ids]
+        )
+        context_records: list[dict[str, Any]] = []
+        if oa_source_ids:
+            context_records = self._connection.fetch_all(
+                f"""
+                /* relation-preview-oa-attachment-context */
+                with active_generations as (
+                    select *
+                    from unnest(%s::text[], %s::text[])
+                      as active(scope_key, generation_id)
+                ),
+                oa_candidate_ids as materialized (
+                    select unnest(%s::text[]) as oa_row_id
+                )
+                select
+                    r.row_id,
+                    r.source_kind,
+                    r.status,
+                    r.payload,
+                    r.raw_payload,
+                    r.scope_key,
+                    r.generation_id
+                from active_generations active
+                join read_model.workbench_rows r
+                  on r.scope_key = active.scope_key
+                 and r.generation_id = active.generation_id
+                where r.source_kind = 'oa_attachment_invoice'
+                  and (
+                    {_BATCH_ACCOUNTING_INVOICE_CANDIDATE_MATCH_SQL}
+                    or regexp_replace(
+                        coalesce(nullif(r.payload->>'oa_row_id', ''), ''),
+                        ':item:.*$',
+                        ''
+                    ) = any(
+                        coalesce(
+                            (select array_agg(candidate.oa_row_id) from oa_candidate_ids candidate),
+                            array[]::text[]
+                        )
+                    )
+                  )
+                order by r.scope_key, r.row_id
+                """,
+                (scope_keys, generation_ids, oa_source_ids),
+            )
+        context_rows = self._workbench_relation_preview_rows(
+            context_records,
+            expected_pairs=active_pairs,
+        )
+        context_by_id = self._workbench_relation_preview_rows_by_id(context_rows)
+        for selected_row_id in normalized_row_ids:
+            context_by_id.pop(selected_row_id, None)
+        if len(context_by_id) > WORKBENCH_RELATION_PREVIEW_MAX_CONTEXT_ROWS:
+            raise WorkbenchRelationPreviewSelectionError(
+                code="relation_preview_context_too_large",
+                message="所选记录关联的上下文过多，请缩小选择范围后重试。",
+            )
+
+        end_freshness = self.get_workbench_groups_freshness_status(scope_key=normalized_scope_key)
+        end_proof = self._workbench_relation_preview_generation_proof(normalized_scope_key)
+        end_version = text(end_proof.get("version"))
+        if (
+            text(end_freshness.get("read_model_status")) != "fresh"
+            or end_version != start_version
+        ):
+            raise WorkbenchReadModelVersionConflictError(expected=expected_version, current=end_version)
+
+        ordered_selected_rows = [selected_by_id[row_id] for row_id in normalized_row_ids]
+        ordered_context_rows = [context_by_id[row_id] for row_id in sorted(context_by_id)]
+        rows = [*ordered_selected_rows, *ordered_context_rows]
+        memberships, context_groups = self._workbench_relation_preview_context(rows)
+        return {
+            "scope_key": normalized_scope_key,
+            "selected_row_ids": normalized_row_ids,
+            "selected_rows": ordered_selected_rows,
+            "context_rows": ordered_context_rows,
+            "rows": rows,
+            "memberships": memberships,
+            "context_groups": context_groups,
+            "source_versions": dict(freshness.get("source_versions") or {}),
+            "generation_set": generation_set,
+            "active_generation_id": start_version,
+            "read_model_version": start_version,
+            "read_model_status": "fresh",
+        }
+
+    def _workbench_relation_preview_generation_proof(self, scope_key: str) -> dict[str, Any]:
+        if scope_key == "all":
+            proof = self._workbench_active_month_generation_version(self._connection)
+            return {
+                "version": text(proof.get("version")),
+                "generation_set": list(proof.get("generation_set") or []),
+            }
+        generation_id = self._active_workbench_generation_id(
+            self._connection,
+            scope_key=scope_key,
+        )
+        return {
+            "version": generation_id,
+            "generation_set": (
+                [{"scope_key": scope_key, "generation_id": generation_id}]
+                if generation_id
+                else []
+            ),
+        }
+
+    @staticmethod
+    def _workbench_relation_preview_rows(
+        records: list[dict[str, Any]],
+        *,
+        expected_pairs: set[tuple[str | None, str | None]],
+    ) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for record in records:
+            scope_key = text(record.get("scope_key"))
+            generation_id = text(record.get("generation_id"))
+            if (scope_key, generation_id) not in expected_pairs:
+                raise WorkbenchRelationPreviewSelectionError(
+                    code="relation_preview_cross_generation",
+                    message="工作台版本已变化，请刷新后重试。",
+                )
+            row_id = text(record.get("row_id"))
+            payload = _read_model_payload(record)
+            if not row_id or not isinstance(payload, dict):
+                continue
+            row = dict(payload)
+            row.setdefault("id", row_id)
+            row.setdefault("row_id", row_id)
+            source_kind = text(record.get("source_kind"))
+            if source_kind:
+                row.setdefault("source_kind", source_kind)
+            row.setdefault("type", source_kind or "unknown")
+            status = text(record.get("status"))
+            if status:
+                row.setdefault("status", status)
+            rows.append(row)
+        return rows
+
+    @staticmethod
+    def _workbench_relation_preview_rows_by_id(
+        rows: list[dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        rows_by_id: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            row_id = text(row.get("id") or row.get("row_id"))
+            if not row_id:
+                continue
+            if row_id in rows_by_id:
+                raise WorkbenchRelationPreviewSelectionError(
+                    code="relation_preview_rows_ambiguous",
+                    message="所选工作台记录跨版本重复，请刷新后重试。",
+                )
+            rows_by_id[row_id] = row
+        return rows_by_id
+
+    @staticmethod
+    def _workbench_relation_preview_oa_source_ids(
+        rows: list[dict[str, Any]],
+    ) -> list[str]:
+        source_ids: list[str] = []
+        for row in rows:
+            row_id = text(row.get("id") or row.get("row_id"))
+            row_type = text(row.get("type") or row.get("source_kind"))
+            if row_id and row_type == "oa":
+                source_ids.append(row_id)
+            for key in ("source_oa_id", "source_oa_row_id", "oa_row_id", "derived_from_oa_id"):
+                value = text(row.get(key))
+                if value:
+                    source_ids.append(value.split(":item:", 1)[0])
+        return _dedupe_preserve_order(source_ids)
+
+    @staticmethod
+    def _workbench_relation_preview_context(
+        rows: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, str]], list[dict[str, Any]]]:
+        memberships: list[dict[str, str]] = []
+        grouped_row_ids: dict[str, list[str]] = {}
+        for row in rows:
+            row_id = text(row.get("id") or row.get("row_id"))
+            if not row_id:
+                continue
+            case_id = text(row.get("case_id") or row.get("active_relation_case_id"))
+            source_oa_id = text(
+                row.get("source_oa_id")
+                or row.get("source_oa_row_id")
+                or row.get("oa_row_id")
+                or row.get("derived_from_oa_id")
+            )
+            if case_id:
+                group_id = f"case:{case_id}"
+            elif source_oa_id:
+                group_id = f"oa-context:{source_oa_id.split(':item:', 1)[0]}"
+            else:
+                group_id = f"selected:{row_id}"
+            memberships.append({"row_id": row_id, "group_id": group_id})
+            grouped_row_ids.setdefault(group_id, []).append(row_id)
+        context_groups = [
+            {
+                "group_id": group_id,
+                "group_type": "selection",
+                "zone": "unpaired",
+                "status": "unpaired",
+                "row_ids": row_ids,
+            }
+            for group_id, row_ids in grouped_row_ids.items()
+        ]
+        return memberships, context_groups
 
     def find_workbench_row_scope_key(self, *, row_id: str) -> str | None:
         normalized_row_id = text(row_id)

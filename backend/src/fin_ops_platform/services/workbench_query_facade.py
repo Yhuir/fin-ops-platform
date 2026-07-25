@@ -4,7 +4,11 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from typing import Callable
 
-from fin_ops_platform.services.workbench_read_model_version import WorkbenchReadModelVersionConflictError
+from fin_ops_platform.services.workbench_read_model_version import (
+    WORKBENCH_RELATION_PREVIEW_MAX_SELECTED_ROWS,
+    WorkbenchReadModelVersionConflictError,
+    WorkbenchRelationPreviewSelectionError,
+)
 
 
 @dataclass(frozen=True)
@@ -56,6 +60,120 @@ class WorkbenchQueryFacade:
         self._is_default_initial_query = is_default_initial_query
         self._oa_status_provider = oa_status_provider
         self._serialize_value = serialize_value or (lambda value: value)
+
+    def relation_preview_selection(
+        self,
+        month: str | None,
+        *,
+        row_ids: list[str],
+        expected_read_model_version: str | None,
+    ) -> WorkbenchQueryResult:
+        current_month = month or "all"
+        scope_key = self._scope_key_for_month(current_month)
+        normalized_row_ids = list(
+            dict.fromkeys(
+                str(row_id).strip()
+                for row_id in list(row_ids or [])
+                if str(row_id).strip()
+            )
+        )
+        expected_version = str(expected_read_model_version or "").strip()
+        if not normalized_row_ids:
+            return WorkbenchQueryResult(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "relation_preview_selection_required",
+                    "message": "请至少选择一条工作台记录。",
+                    "scope_key": scope_key,
+                },
+            )
+        if len(normalized_row_ids) > WORKBENCH_RELATION_PREVIEW_MAX_SELECTED_ROWS:
+            return WorkbenchQueryResult(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "relation_preview_selection_too_large",
+                    "message": f"单次预览最多选择 {WORKBENCH_RELATION_PREVIEW_MAX_SELECTED_ROWS} 条记录。",
+                    "scope_key": scope_key,
+                },
+            )
+        if not expected_version:
+            return WorkbenchQueryResult(
+                HTTPStatus.CONFLICT,
+                {
+                    "error": "expected_read_model_version_required",
+                    "message": "工作台版本缺失，请刷新后重试。",
+                    "scope_key": scope_key,
+                },
+            )
+        get_selection = getattr(
+            self._repository,
+            "get_workbench_relation_preview_selection",
+            None,
+        )
+        if not callable(get_selection):
+            return WorkbenchQueryResult(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "relation_preview_read_model_unavailable",
+                    "message": "工作台预览暂时不可用，请稍后重试。",
+                    "scope_key": scope_key,
+                },
+            )
+        try:
+            selection = get_selection(
+                scope_key=scope_key,
+                row_ids=normalized_row_ids,
+                expected_read_model_version=expected_version,
+            )
+        except WorkbenchReadModelVersionConflictError as error:
+            return WorkbenchQueryResult(
+                HTTPStatus.CONFLICT,
+                {
+                    "error": "workbench_read_model_version_conflict",
+                    "message": "工作台数据已变化，请刷新后重试。",
+                    "scope_key": scope_key,
+                    "expected_read_model_version": error.expected,
+                    "read_model_version": error.current,
+                },
+            )
+        except WorkbenchRelationPreviewSelectionError as error:
+            return WorkbenchQueryResult(
+                HTTPStatus.CONFLICT,
+                {
+                    "error": error.code,
+                    "message": str(error),
+                    "scope_key": scope_key,
+                },
+            )
+        except Exception as error:
+            if self._missing_read_model_error(error) or self._transient_read_model_error(error):
+                return WorkbenchQueryResult(
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                    {
+                        "error": "relation_preview_read_model_unavailable",
+                        "message": "工作台预览暂时不可用，请稍后重试。",
+                        "scope_key": scope_key,
+                    },
+                )
+            raise
+        if not isinstance(selection, dict):
+            return WorkbenchQueryResult(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "relation_preview_read_model_unavailable",
+                    "message": "工作台预览暂时不可用，请稍后重试。",
+                    "scope_key": scope_key,
+                },
+            )
+        return WorkbenchQueryResult(
+            HTTPStatus.OK,
+            {
+                **selection,
+                "month": current_month,
+                "scope_key": scope_key,
+                "read_model_status": "fresh",
+            },
+        )
 
     def initial_page(
         self,

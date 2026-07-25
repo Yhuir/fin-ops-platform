@@ -7,6 +7,8 @@ from http import HTTPStatus
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application
+from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryFacade
+from fin_ops_platform.services.workbench_read_model_version import WorkbenchReadModelVersionConflictError
 from tests.app_test_support import (
     build_grouped_workbench_projection,
     build_local_state_application as build_application,
@@ -141,6 +143,61 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
         self.assertEqual(payload["conflict"]["reason"], "stale_relation_version")
         self.assertEqual(payload["conflict"]["expected"], {"relation:CASE-OLD": 2})
         self.assertEqual(payload["conflict"]["actual"], {"relation:CASE-NEW": 5})
+
+    def test_relation_preview_selection_maps_generation_drift_to_stable_conflict(self) -> None:
+        class Repository:
+            @staticmethod
+            def get_workbench_relation_preview_selection(**_kwargs: object) -> dict[str, object]:
+                raise WorkbenchReadModelVersionConflictError(
+                    expected="generation-old",
+                    current="generation-new",
+                )
+
+        facade = WorkbenchQueryFacade(
+            repository=Repository(),
+            redis_helper=None,
+            enqueue_refresh=lambda *_args, **_kwargs: None,
+            scope_key_for_month=lambda month: str(month or "all"),
+            stale_reasons=lambda *_args, **_kwargs: [],
+            emit_status_metric=lambda **_kwargs: None,
+            missing_read_model_error=lambda _error: False,
+        )
+
+        result = facade.relation_preview_selection(
+            "2026-05",
+            row_ids=["oa-1", "bank-1"],
+            expected_read_model_version="generation-old",
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.CONFLICT)
+        self.assertEqual(result.payload["error"], "workbench_read_model_version_conflict")
+        self.assertEqual(result.payload["message"], "工作台数据已变化，请刷新后重试。")
+        self.assertEqual(result.payload["read_model_version"], "generation-new")
+
+    def test_relation_preview_selection_rejects_unbounded_client_input_before_repository(self) -> None:
+        class Repository:
+            @staticmethod
+            def get_workbench_relation_preview_selection(**_kwargs: object) -> dict[str, object]:
+                raise AssertionError("oversized selection must not reach the repository")
+
+        facade = WorkbenchQueryFacade(
+            repository=Repository(),
+            redis_helper=None,
+            enqueue_refresh=lambda *_args, **_kwargs: None,
+            scope_key_for_month=lambda month: str(month or "all"),
+            stale_reasons=lambda *_args, **_kwargs: [],
+            emit_status_metric=lambda **_kwargs: None,
+            missing_read_model_error=lambda _error: False,
+        )
+
+        result = facade.relation_preview_selection(
+            "all",
+            row_ids=[f"row-{index}" for index in range(21)],
+            expected_read_model_version="generation-set-1",
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(result.payload["error"], "relation_preview_selection_too_large")
 
 
 if __name__ == "__main__":

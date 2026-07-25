@@ -6415,6 +6415,123 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             "relation previews require one set-based active-generation selection read",
         )
 
+    def test_repository_reads_relation_preview_selection_with_one_bounded_row_lookup(self) -> None:
+        class RelationPreviewConnection:
+            def __init__(self) -> None:
+                self.fetch_all_calls: list[tuple[str, tuple]] = []
+
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                if "relation-preview-selected-rows" in normalized:
+                    return [
+                        {
+                            "row_id": "oa-1",
+                            "source_kind": "oa",
+                            "status": "unpaired",
+                            "payload": {"id": "oa-1", "type": "oa", "amount": "100.00"},
+                            "scope_key": "2026-05",
+                            "generation_id": "generation-1",
+                        },
+                        {
+                            "row_id": "bank-1",
+                            "source_kind": "bank",
+                            "status": "unpaired",
+                            "payload": {"id": "bank-1", "type": "bank", "debit_amount": "100.00"},
+                            "scope_key": "2026-05",
+                            "generation_id": "generation-1",
+                        },
+                    ]
+                if "relation-preview-oa-attachment-context" in normalized:
+                    return [
+                        {
+                            "row_id": "invoice-attachment-1",
+                            "source_kind": "oa_attachment_invoice",
+                            "status": "unpaired",
+                            "payload": {
+                                "id": "invoice-attachment-1",
+                                "type": "invoice",
+                                "source_kind": "oa_attachment_invoice",
+                                "derived_from_oa_id": "oa-1",
+                                "total_with_tax": "100.00",
+                            },
+                            "scope_key": "2026-05",
+                            "generation_id": "generation-1",
+                        }
+                    ]
+                raise AssertionError(f"unexpected relation preview SQL: {normalized}")
+
+        class Repository(PostgresReadModelRepository):
+            def get_workbench_groups_freshness_status(self, *, scope_key: str | None = None) -> dict[str, object]:
+                return {
+                    "scope_key": scope_key,
+                    "read_model_status": "fresh",
+                    "read_model_version": "generation-1",
+                    "source_versions": {"builder": "v1"},
+                }
+
+            def _workbench_relation_preview_generation_proof(self, scope_key: str) -> dict[str, object]:
+                return {
+                    "version": "generation-1",
+                    "generation_set": [
+                        {"scope_key": scope_key, "generation_id": "generation-1"}
+                    ],
+                }
+
+        connection = RelationPreviewConnection()
+        repository = Repository(connection)
+
+        payload = repository.get_workbench_relation_preview_selection(
+            scope_key="2026-05",
+            row_ids=["oa-1", "bank-1", "oa-1"],
+            expected_read_model_version="generation-1",
+        )
+
+        self.assertEqual(payload["selected_row_ids"], ["oa-1", "bank-1"])
+        self.assertEqual([row["id"] for row in payload["selected_rows"]], ["oa-1", "bank-1"])
+        self.assertEqual([row["id"] for row in payload["context_rows"]], ["invoice-attachment-1"])
+        self.assertEqual(payload["read_model_version"], "generation-1")
+        self.assertEqual(len(connection.fetch_all_calls), 2)
+        selected_sql, selected_params = connection.fetch_all_calls[0]
+        self.assertIn("r.row_id = any(%s::text[])", selected_sql)
+        self.assertIn("r.generation_id = active.generation_id", selected_sql)
+        self.assertEqual(selected_params[2], ["oa-1", "bank-1"])
+        self.assertFalse(
+            any(
+                "workbench_snapshots" in sql or "workbench_group_rows" in sql
+                for sql, _params in connection.fetch_all_calls
+            )
+        )
+
+    def test_repository_relation_preview_selection_fails_closed_for_missing_rows(self) -> None:
+        class MissingRowConnection:
+            @staticmethod
+            def fetch_all(sql: str, params: tuple = ()) -> list[dict[str, object]]:
+                if "relation-preview-selected-rows" in sql:
+                    return []
+                raise AssertionError("missing selected rows must stop before context lookup")
+
+        class Repository(PostgresReadModelRepository):
+            def get_workbench_groups_freshness_status(self, *, scope_key: str | None = None) -> dict[str, object]:
+                return {"read_model_status": "fresh", "read_model_version": "generation-1"}
+
+            def _workbench_relation_preview_generation_proof(self, scope_key: str) -> dict[str, object]:
+                return {
+                    "version": "generation-1",
+                    "generation_set": [
+                        {"scope_key": scope_key, "generation_id": "generation-1"}
+                    ],
+                }
+
+        repository = Repository(MissingRowConnection())
+
+        with self.assertRaisesRegex(RuntimeError, "所选工作台记录已变化"):
+            repository.get_workbench_relation_preview_selection(
+                scope_key="2026-05",
+                row_ids=["oa-missing"],
+                expected_read_model_version="generation-1",
+            )
+
     def test_repository_reads_all_scope_row_detail_from_active_month_rows(self) -> None:
         class RowDetailConnection(WorkbenchWriteConnection):
             def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
