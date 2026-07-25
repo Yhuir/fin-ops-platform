@@ -8,6 +8,7 @@ import {
   fetchWorkbenchInitialPage,
   fetchWorkbenchRowDetail,
   importManualOaRows,
+  previewWorkbenchConfirmLink,
   previewWorkbenchException,
   previewWorkbenchWithdrawLink,
   refreshManualOaImportAttachments,
@@ -119,6 +120,125 @@ describe("workbench api bank amount mapping", () => {
     expect(preview.operationType).toBe("withdraw_relation");
     expect(preview.previewId).toBe("withdraw_relation:abc123");
     expect(preview.submitExpectedVersions).toEqual({ "relation:relation-1": 3 });
+  });
+
+  test("maps preview-only selection groups from their unpaired zone without widening page group types", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          operation: "confirm_link",
+          before: {
+            groups: [{
+              group_id: "selected",
+              group_type: "selection",
+              match_confidence: "none",
+              reason: "selected_rows",
+              zone: "unpaired",
+              status: "unpaired",
+              oa_rows: [],
+              bank_rows: [],
+              invoice_rows: [],
+            }],
+          },
+          after: {
+            groups: [{
+              group_id: "case:CASE-1",
+              group_type: "relation",
+              match_confidence: "high",
+              reason: "active_formal_relation",
+              zone: "paired",
+              status: "paired",
+              oa_rows: [],
+              bank_rows: [],
+              invoice_rows: [],
+            }],
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const preview = await previewWorkbenchConfirmLink({
+      month: "all",
+      rowIds: ["oa-1", "bank-1"],
+      expectedReadModelVersion: "generation-set-1",
+    });
+
+    expect(preview.before.groups[0]).toMatchObject({
+      groupType: "unpaired",
+      rawGroupType: "selection",
+    });
+    expect(preview.after.groups[0]).toMatchObject({
+      groupType: "paired",
+      rawGroupType: "relation",
+    });
+  });
+
+  test.each([
+    { zone: "unpaired", status: undefined, label: "missing status" },
+    { zone: "paired", status: "paired", label: "paired selection" },
+  ])("rejects invalid preview selection groups: $label", async ({ zone, status }) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          operation: "withdraw_link",
+          after: {
+            groups: [{
+              group_id: "selected",
+              group_type: "selection",
+              match_confidence: "none",
+              reason: "selected_rows",
+              zone,
+              ...(status ? { status } : {}),
+              oa_rows: [],
+              bank_rows: [],
+              invoice_rows: [],
+            }],
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(previewWorkbenchWithdrawLink({
+      month: "all",
+      rowIds: ["oa-1"],
+      expectedReadModelVersion: "generation-set-1",
+    })).rejects.toThrow("Invalid Workbench relation preview group");
+  });
+
+  test("ordinary Workbench group pages still reject preview-only selection groups", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          month: "all",
+          zone: "unpaired",
+          page: 1,
+          page_size: 50,
+          total: 1,
+          row_counts: { oa: 0, bank: 0, invoice: 0, rows: 0 },
+          has_more: false,
+          read_model_status: "fresh",
+          read_model_version: "generation-set-1",
+          groups: [{
+            group_id: "selected",
+            group_type: "selection",
+            match_confidence: "none",
+            reason: "selected_rows",
+            zone: "unpaired",
+            status: "unpaired",
+            oa_rows: [],
+            bank_rows: [],
+            invoice_rows: [],
+          }],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(fetchWorkbenchGroupsPage("all", "unpaired", 1, 50)).rejects.toThrow(
+      "Unsupported Workbench group type: selection",
+    );
   });
 
   test("preserves backend requestId in workbench API errors", async () => {

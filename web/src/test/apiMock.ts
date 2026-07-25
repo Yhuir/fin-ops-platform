@@ -2994,24 +2994,37 @@ function buildMockRelationPreview({
     direction: "payment",
     mismatch_fields: isMismatch ? ["invoice_total"] : [],
   };
+  const asSelectionGroups = (groups: ReturnType<typeof buildRelationPreviewGroups>) => groups.map((group) => ({
+    ...group,
+    group_type: "selection",
+    match_confidence: "none",
+    zone: "unpaired",
+    status: "unpaired",
+  }));
+  const asRelationGroups = (
+    groups: ReturnType<typeof buildRelationPreviewGroups>,
+    zone: "paired" | "unpaired",
+  ) => groups.map((group) => ({
+    ...group,
+    group_type: "relation",
+    zone,
+    status: zone,
+  }));
   return {
     operation,
     can_submit: true,
     requires_note: isMismatch && operation === "confirm_link",
     message: isMismatch && operation === "confirm_link" ? "金额不一致，请填写备注。" : "",
     before: {
-      groups: buildRelationPreviewGroups(
-        rows,
-        caseId,
-        operation === "withdraw_link" ? "paired" : "unpaired",
-        operation === "withdraw_link" ? "together" : "separate",
-      ),
+      groups: operation === "withdraw_link"
+        ? asRelationGroups(buildRelationPreviewGroups(rows, caseId, "paired", "together"), "paired")
+        : asSelectionGroups(buildRelationPreviewGroups(rows, caseId, "unpaired", "separate")),
     },
     after: {
       groups:
         operation === "withdraw_link"
-          ? buildWithdrawAfterPreviewGroups(rows)
-          : buildRelationPreviewGroups(rows, caseId, "paired", "together"),
+          ? asSelectionGroups(buildWithdrawAfterPreviewGroups(rows))
+          : asRelationGroups(buildRelationPreviewGroups(rows, caseId, "paired", "together"), "paired"),
     },
     amount_summary: amountSummary,
     restored_relations:
