@@ -88,12 +88,11 @@ class WorkbenchQueryFacade:
             and self._is_default_initial_query(paired_query, unpaired_query)
         )
         refresh_status_payload: dict[str, object] | None = None
-        if cacheable_query:
-            try:
-                refresh_status_payload = self._groups_refresh_status_payload(scope_key)
-            except Exception as error:
-                if not self._transient_read_model_error(error):
-                    raise
+        try:
+            refresh_status_payload = self._groups_refresh_status_payload(scope_key)
+        except Exception as error:
+            if not self._transient_read_model_error(error):
+                raise
         refresh_status = (
             str(refresh_status_payload.get("read_model_status") or "fresh")
             if isinstance(refresh_status_payload, dict)

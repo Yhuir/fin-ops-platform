@@ -173,7 +173,7 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(result.payload["paired"]["groups"], [])
         self.assertEqual(queue.refreshes, [])
 
-    def test_initial_all_page_enqueues_only_exact_workbench_mismatch_scopes(self) -> None:
+    def test_searched_initial_all_page_enqueues_only_exact_workbench_mismatch_scopes(self) -> None:
         class Repository:
             @staticmethod
             def get_workbench_groups_freshness_status(**_kwargs: object) -> dict[str, object]:
@@ -209,7 +209,7 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
             is_default_initial_query=is_default_workbench_initial_query,
         )
 
-        result = facade.initial_page("all")
+        result = facade.initial_page("all", unpaired_query={"search": "梁秭涛"})
 
         self.assertEqual(result.payload["read_model_status"], "stale")
         self.assertEqual(

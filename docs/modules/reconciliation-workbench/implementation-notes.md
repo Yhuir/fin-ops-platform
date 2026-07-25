@@ -6,6 +6,11 @@
 - worker 发布仍以 event source version 条件完成并生成 active generation；proof 只省略重复 expected 计算，不绕过 active projection、dirty/outbox 或 source-version 竞态检查。projection missing 时不附 proof/token，保留既有首次访问自愈。
 - 未引入 proof cache、第二事实源、表、migration、queue、worker 或新 API；删除了评估中不能证明收益的 watermark/cache 方案。
 
+## 2026-07-26 - 搜索首屏复用 freshness gate
+
+- 生产 durable outbox 证明并发恢复后的残余 `workbench:all` 均来自 `api_initial_page_stale`。真实页面携带区域搜索，旧 facade 把 Redis cacheability 与 source freshness gate 绑定，导致不可缓存查询跳过 exact mismatch proof，随后按 `all` scope 补投全量刷新。
+- 修复让默认、搜索、筛选和排序首屏统一先走现有 freshness/status/scope gateway；`cacheable_query` 只控制 Redis read-through。真正 missing/cold-start 的恢复入口保留，relation 写、projection builder、worker、API shape 与其它页面 I/O 不变。
+
 ## 2026-07-25 - 完成窗口 target 去重与旧 background persist 删除
 
 - 第一候选生产只读事件时间线显示，同一`2026-02` scope在页面轮询期间连续消费10992→10995等多个执行版本，但canonical业务target没有相应次数变化；写API已零read-model fan-out，放大发生在active event刚done到页面再次poll的完成窗口。
