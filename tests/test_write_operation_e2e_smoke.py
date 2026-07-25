@@ -294,6 +294,35 @@ def _raw_bank_oa_invoice_scenario(name: str, key_prefix: str) -> dict[str, objec
     return scenario
 
 
+def _set_bank_oa_cost_probe(
+    scenario: dict[str, object],
+    *,
+    view: str,
+    project_scope: str | None,
+    include_semantic_assertion: bool,
+) -> None:
+    query = f"scope=2026-07&view={view}"
+    if project_scope is not None:
+        query = f"{query}&project_scope={project_scope}"
+    for checkpoint in [
+        *scenario["checkpoints"],  # type: ignore[index]
+        scenario["recovery_checkpoint"],
+    ]:
+        cost_consumer = next(
+            consumer
+            for consumer in checkpoint["consumers"]
+            if consumer["page_key"] == "cost-statistics"
+        )
+        cost_consumer["path"] = f"/api/cost-statistics/explorer?{query}"
+        cost_consumer["assertions"] = [
+            {"pointer": "/rows/0/transaction_id", "equals": "bank-test-1"}
+        ]
+        if include_semantic_assertion:
+            cost_consumer["assertions"].append(
+                {"pointer": "/rows/0/project_name", "equals": "test-project"}
+            )
+
+
 def _raw_bank_turnover_scenario(name: str, key_prefix: str) -> dict[str, object]:
     fixture_row_ids = ["turnover-bank-test-1", "turnover-bank-test-2"]
     def consumers(workbench_zone: str) -> list[dict[str, object]]:
@@ -1421,6 +1450,68 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 path.write_text(json.dumps([scenario]), encoding="utf-8")
                 with self.assertRaisesRegex(ValueError, expected_error):
                     write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)
+
+    def test_bank_oa_relation_impact_cost_probe_rejects_time_and_bank_tag_views(self) -> None:
+        for view in ("time", "bank_tag"):
+            scenario = _raw_bank_oa_invoice_scenario(f"cost-{view}", f"cost-{view}")
+            _set_bank_oa_cost_probe(
+                scenario,
+                view=view,
+                project_scope="active",
+                include_semantic_assertion=True,
+            )
+            with self.subTest(view=view), TemporaryDirectory() as temp_dir:
+                path = Path(temp_dir) / "scenario.json"
+                path.write_text(json.dumps([scenario]), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "Workbench-dependent Cost view"):
+                    write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)
+
+    def test_bank_oa_relation_impact_cost_probe_requires_active_project_scope(self) -> None:
+        for project_scope in (None, "all"):
+            scenario = _raw_bank_oa_invoice_scenario(
+                f"cost-scope-{project_scope}",
+                f"cost-scope-{project_scope}",
+            )
+            _set_bank_oa_cost_probe(
+                scenario,
+                view="bank",
+                project_scope=project_scope,
+                include_semantic_assertion=True,
+            )
+            with self.subTest(project_scope=project_scope), TemporaryDirectory() as temp_dir:
+                path = Path(temp_dir) / "scenario.json"
+                path.write_text(json.dumps([scenario]), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "project_scope=active"):
+                    write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)
+
+    def test_bank_oa_relation_impact_cost_probe_rejects_positional_transaction_identity_only(self) -> None:
+        scenario = _raw_bank_oa_invoice_scenario("cost-identity-only", "cost-identity-only")
+        _set_bank_oa_cost_probe(
+            scenario,
+            view="bank",
+            project_scope="active",
+            include_semantic_assertion=False,
+        )
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "scenario.json"
+            path.write_text(json.dumps([scenario]), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "relation-derived semantic"):
+                write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)
+
+    def test_bank_oa_relation_impact_cost_probe_accepts_active_relation_view_with_semantic_assertion(self) -> None:
+        scenario = _raw_bank_oa_invoice_scenario("cost-relation-impact", "cost-relation-impact")
+        _set_bank_oa_cost_probe(
+            scenario,
+            view="bank",
+            project_scope="active",
+            include_semantic_assertion=True,
+        )
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "scenario.json"
+            path.write_text(json.dumps([scenario]), encoding="utf-8")
+            loaded = write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)[0]
+
+        self.assertEqual(loaded.shape, "bank_oa_invoice")
 
     def test_reversible_scenario_matches_registered_shape_consumers_and_bounded_rows(self) -> None:
         with TemporaryDirectory() as temp_dir:
