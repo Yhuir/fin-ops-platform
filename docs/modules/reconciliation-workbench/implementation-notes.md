@@ -95,6 +95,8 @@
 - 实现范围：`WorkbenchQueryFacade.refresh_status` 复用 SSE/groups gate 已使用的 repository port；前端复用既有 `fetchWorkbenchRefreshStatus`。没有新增 cache、表、索引、migration、queue、worker、SSE、协调器或第二 freshness 系统。
 - 旧链清理：删除操作等待循环中的重复 combined initial 读取；完整 diagnostic repository port 只作为缺少轻量 port 的兼容 fallback，不再是生产页面热路径 owner。
 - 测试：backend 锁定轻量 port 与 timeout fallback；frontend 锁定 refreshing 期间 3 次 status poll、完整页面恰好 2 次，并验证撤回后的三类 singleton 数据完整性。
+- 首个候选生产证据：confirm/withdraw 均约 `296–323ms`，写后零 fan-out、最终数据和恢复断言、queue drain、worker、System Audit 全部通过；轻量 refresh-status 为 `241–372ms`，Workbench worker handler 为 `1.278–1.925s`。剩余 Workbench 首次 fresh 读取为 `3.776–5.235s`，请求数据库 p95 约 `3.260s`，证明慢点已从状态轮询/worker 收敛到新 generation 发布后的第一次 groups SQL。
+- SQL 根因与修复：带搜索的 all-scope count 把全部 active members 强制 `MATERIALIZED`，形成优化屏障；搜索和最终成员计数都要重新扫描该临时集合。保留原 SQL owner、事实和返回合同，仅改为 `NOT MATERIALIZED`。20 万 active member 的临时 PostgreSQL 17 对照中，旧计划写/读 3747 个 temp blocks、`258.863ms`；新计划无 temp I/O、`94.614ms`。没有新增 cache、表、索引、migration、worker 或第二 freshness 系统。
 
 ## 当前决策
 

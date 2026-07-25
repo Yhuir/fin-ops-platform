@@ -3600,7 +3600,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             for sql, _params in connection.fetch_one_calls
             if "count(distinct (r.pane" in sql
         )
-        self.assertIn("active_workbench_members as materialized", filtered_count_query)
+        self.assertIn("active_workbench_members as not materialized", filtered_count_query)
         self.assertIn("where r.scope_key <> 'all'", filtered_count_query)
         self.assertNotIn("physical_group", filtered_count_query)
         self.assertIn("select count(distinct g.group_id)", filtered_count_query)

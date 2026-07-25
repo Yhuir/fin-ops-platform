@@ -6,6 +6,7 @@
 
 - `tests/test_workbench_query_facade.py::WorkbenchQueryFacadeTests::test_refresh_status_uses_fast_freshness_status_instead_of_heavy_diagnostic` 证明公开 refresh-status 优先使用既有轻量 groups freshness port，完整 generation/outbox/worker diagnostic 不进入页面轮询热路径；旧 repository fallback 与 timeout 合同保持。
 - `web/src/test/WorkbenchSelection.test.tsx` 的 withdraw 完整恢复用例把 combined initial 保持为一次 recovery trigger 和一次最终 fresh payload，共 2 次；中间 refreshing 只调用轻量 refresh-status，最终仍验证 OA、银行、发票分别恢复为完整 unpaired singleton。
+- `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_filters_workbench_groups_page_from_structured_group_rows` 锁定 active-member CTE 为 `NOT MATERIALIZED`，防止 all-scope 条件查询恢复“先复制全部 active members、再应用搜索/筛选”的优化屏障；同文件搜索、pane/列/时间、total/row counts/matching ids 回归继续保护原业务语义。
 - 现有 Workbench Selection 全文件继续覆盖 confirm operation projection、withdraw blocking UI、generation version conflict、failed/stale 状态、权限、筛选和详情交互；没有增加 retry fallback、第二轮询器或放宽 fresh 判断。
 
 ## 2026-07-25 访问时 exact Workbench proof 与 consumer 隔离

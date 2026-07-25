@@ -379,7 +379,7 @@ def _workbench_active_month_group_keys_sql(*, include_aggregated_searchable_text
 def _workbench_active_month_members_cte_sql() -> str:
     logical_group_id_sql = _workbench_all_logical_group_id_sql("r.group_id", "r.scope_key")
     return f"""
-        active_workbench_members as materialized (
+        active_workbench_members as not materialized (
             select
                 r.scope_key,
                 r.generation_id,
