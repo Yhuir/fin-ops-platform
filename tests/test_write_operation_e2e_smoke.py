@@ -1519,6 +1519,43 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
 
         self.assertEqual(loaded.shape, "bank_oa_invoice")
 
+    def test_bank_oa_relation_impact_cost_probe_allows_additional_all_scope_for_system_audit(self) -> None:
+        scenario = _raw_bank_oa_invoice_scenario("cost-active-and-all", "cost-active-and-all")
+        _set_bank_oa_cost_probe(
+            scenario,
+            view="bank",
+            project_scope="active",
+            include_semantic_assertion=True,
+        )
+        for checkpoint in [
+            *scenario["checkpoints"],  # type: ignore[index]
+            scenario["recovery_checkpoint"],
+        ]:
+            active_consumer = next(
+                consumer
+                for consumer in checkpoint["consumers"]
+                if consumer["page_key"] == "cost-statistics"
+            )
+            all_consumer = json.loads(json.dumps(active_consumer))
+            all_consumer["name"] = f"{all_consumer['name']}-all"
+            all_consumer["path"] = all_consumer["path"].replace(
+                "project_scope=active",
+                "project_scope=all",
+            )
+            checkpoint["consumers"].append(all_consumer)
+
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "scenario.json"
+            path.write_text(json.dumps([scenario]), encoding="utf-8")
+            loaded = write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)[0]
+
+        for checkpoint in (*loaded.checkpoints, loaded.recovery_checkpoint):
+            assert checkpoint is not None
+            self.assertEqual(
+                sum(consumer.page_key == "cost-statistics" for consumer in checkpoint.consumers),
+                2,
+            )
+
     def test_reversible_scenario_matches_registered_shape_consumers_and_bounded_rows(self) -> None:
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "scenario.json"

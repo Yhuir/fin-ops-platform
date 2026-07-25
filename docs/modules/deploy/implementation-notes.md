@@ -14,6 +14,13 @@
 
 ## 历史记录
 
+## 2026-07-26 - Workbench relation Cost active/all 生产验证闭环
+
+- Candidate C 的 test-owned `bank_oa_invoice` 生产链路证明 confirm、自动 recovery、六个受影响页面和两个 isolation 页面均正确，但两个 checkpoint 的 System Audit 因 `all:2026-06` Cost scope 未被访问而停在 15/16。
+- 根因是 runner 新增的 relation-impact Cost gate 把每一个 Cost consumer 都强制为 `project_scope=active`，与本模块既有“同一页面最多三个精确 scope probe”和 System Audit 同时检查 active/all 的合同冲突。
+- 最小修复继续要求至少一个 `project_scope=active` semantic probe，并只允许额外的 `project_scope=all` probe；所有 Cost probes 仍必须使用 project/bank/expense_type Workbench-dependent view 和 relation-derived assertion。未修改 Cost runtime、read model scope、worker、queue、业务 API 或写后 zero-fan-out。
+- 回归覆盖 active-only 可用、all-only fail closed、active+all 可用；Candidate D 发布后复用同一 test-owned fixture 重新执行 confirm -> active/all fresh -> withdraw -> active/all fresh -> System Audit 16/16。
+
 ## 2026-07-25 - Write-operation apply 证据持久化
 
 - 生产 apply runner 已实际完成 6 次 test-owned confirm/withdraw 并返回 0，但 SSH stdout 证据文件为 0 字节；API release metrics、写状态、队列和 fixture recovery 证明业务执行成功，stdout 不能继续作为唯一证据载体。

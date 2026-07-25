@@ -2510,6 +2510,7 @@ def _validate_relation_impact_cost_consumers(
         for consumer in checkpoint.consumers
         if consumer.page_key == "cost-statistics" and consumer.role == "affected"
     ]
+    has_active_scope = False
     for consumer in cost_consumers:
         query = parse_qs(urlsplit(consumer.probe.path).query, keep_blank_values=True)
         views = query.get("view", [])
@@ -2518,11 +2519,13 @@ def _validate_relation_impact_cost_consumers(
                 f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} affected Cost "
                 "consumer must use a Workbench-dependent Cost view: project, bank, or expense_type."
             )
-        if query.get("project_scope") != ["active"]:
+        project_scopes = query.get("project_scope", [])
+        if len(project_scopes) != 1 or project_scopes[0] not in {"active", "all"}:
             raise ValueError(
                 f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} affected Cost "
-                "consumer must declare exactly project_scope=active."
+                "consumer must declare exactly one project_scope=active or project_scope=all."
             )
+        has_active_scope = has_active_scope or project_scopes[0] == "active"
         if not any(
             _is_relation_derived_cost_assertion(assertion)
             for assertion in consumer.assertions
@@ -2532,6 +2535,12 @@ def _validate_relation_impact_cost_consumers(
                 "consumer must assert a relation-derived semantic field; positional "
                 "transaction_id identity alone is insufficient."
             )
+    if cost_consumers and not has_active_scope:
+        raise ValueError(
+            f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} affected Cost "
+            "consumers must include project_scope=active; project_scope=all may only be an additional "
+            "System Audit scope."
+        )
 
 
 def _is_relation_derived_cost_assertion(assertion: JsonPointerAssertion) -> bool:
