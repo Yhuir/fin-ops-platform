@@ -1600,7 +1600,17 @@ def _request_fresh_consumer_payload(
         raise ValueError(f"consumer_slo_miss:{round(elapsed_ms, 3)}>{round(consumer.probe.target_ms, 3)}")
     payload = json.loads((response.body or b"").decode("utf-8"))
     metadata = http_slo_probe._extract_response_metadata(response.body or b"", content_type)
-    if metadata.get("read_model_status") != "fresh" or metadata.get("refresh_enqueued") is True:
+    statistics_status = (
+        str(payload.get("statistics_status") or "").strip().lower()
+        if isinstance(payload, dict)
+        else ""
+    )
+    if (
+        metadata.get("read_model_status") != "fresh"
+        or metadata.get("refresh_enqueued") is True
+        or (statistics_status and statistics_status != "fresh")
+        or (isinstance(payload, dict) and payload.get("statistics_refresh_enqueued") is True)
+    ):
         raise ValueError("consumer_read_model_not_fresh")
     return path, payload, metadata.get("read_model_status")
 

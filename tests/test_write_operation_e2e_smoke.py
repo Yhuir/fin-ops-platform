@@ -1677,6 +1677,41 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
 
         attempts = 0
 
+        def refreshing_statistics_then_fresh(*_args) -> http_slo_probe.HttpProbeResponse:
+            nonlocal attempts
+            attempts += 1
+            return http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=json.dumps(
+                    {
+                        "read_model_status": "fresh",
+                        "refresh_enqueued": False,
+                        "statistics_status": "refreshing" if attempts == 1 else "fresh",
+                        "statistics_refresh_enqueued": attempts == 1,
+                        "rows": [{"linked": True}],
+                    }
+                ).encode(),
+            )
+
+        with patch("fin_ops_platform.tools.write_operation_e2e_smoke.sleep", return_value=None):
+            converged = write_operation_e2e_smoke._wait_for_checkpoint_consumers(
+                checkpoint,
+                base_url="https://example.test",
+                api_prefix="/fin-ops-api",
+                headers={"Authorization": "Bearer token"},
+                timeout_seconds=1,
+                poll_interval_seconds=0.05,
+                request_fn=refreshing_statistics_then_fresh,
+                variables={},
+                strict=True,
+            )
+
+        self.assertEqual(converged["status"], "pass")
+        self.assertEqual(attempts, 2)
+
+        attempts = 0
+
         def stale_business_value_then_visible(*_args) -> http_slo_probe.HttpProbeResponse:
             nonlocal attempts
             attempts += 1
