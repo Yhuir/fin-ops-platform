@@ -1357,3 +1357,11 @@
 - 并发根因：exact 请求先启动月份 refresh 后，all 请求看到 `active_refresh_in_progress=true`，freshness owner 为避免重复 canonical proof 原样返回暂态 stale status；旧 query facade 在没有 `refresh_scope_keys` 时把暂时未知目标回退为 `workbench:all`，进而展开全部月份。生产首次 status proof 证明真正受影响 scope 只有 `2026-03`、`2026-02`，stale reason 均为 `workbench_pair_relations_updated_at_mismatch`。
 - 最终修复：`WorkbenchQueryFacade` 在已有 Workbench refresh 进行中且没有 explicit/failed exact target 时不再调用旧 `all` fallback。现有任务完成后，页面下一次轮询重新 proof 并精确补入剩余月份；stable missing/cold-start 的正式 `all` 恢复入口、failed exact scope、自愈和 fail-closed payload 均保留。没有新增状态、I/O、缓存、worker 或协调层。
 - 第一候选继续暴露第二条同源旧入口：all freshness status 与 combined initial SQL 之间发生正常 generation-set 切换时，facade 已返回 `workbench_initial_page_version_drift` 并拒绝旧 payload，却额外 enqueue `workbench:all`，再次展开全部月份。最终删除该 enqueue；version drift 只由下一次页面请求重读新 generation 收敛，真正 missing/cold-start 的 all 自愈不变。
+
+## 2026-07-26 - Phase 30 候选可逆验证 runner 本地门
+
+- 继续复用 `write_operation_e2e_smoke.py`，只增加 bounded relation preview sample 参数：默认 1、上限 20，本次生产候选使用 10。重复只读 preview 不重复 mutation；withdraw 只消费最后一次成功 preview identity/version。
+- report 分别输出 confirm/withdraw 的 count、p50、p95、max、request IDs、correctness 与 performance status。3 秒只作为 preview 性能目标；HTTP、canonical DTO、version、idempotency 或 inverse 错误仍 fail closed。
+- `bank_oa_invoice` 的 affected/isolation roles 继续由当前 shape 合同精确派生，不修改 impact matrix，不合并 bank_invoice 或 bank_turnover 的 affected 集合。
+- Task 30-02 的旧/新 10-run evidence 已满足同 fixture/scope/version/row IDs/连接/warm-up 对比：新路径固定 6 次 counted SQL、完整 generation scan 为 0、formal snapshot dependency 为 0，最大新样本 5.089ms。此次没有修改 preview repository I/O、formal command/UoW、read model、queue、worker、API response shape 或前端生产行为，因此 boundary 文档不变。
+- Candidate 前本地集中门通过：683 项定向 backend unittest、repository lint、123 项 scoped Vitest、3 项 Chromium E2E 和 production build。未运行 pytest、完整 CI 或 183 项 Browser suite；生产 release、inverse、zero fan-out、consumer convergence、queue/worker 与 System Audit 证据必须由下一步 Candidate A 记录，不能由本地结果代替。
