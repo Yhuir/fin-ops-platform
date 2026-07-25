@@ -56,6 +56,7 @@
 | refreshing query status | Workbench initial/detail query | 返回 refreshing/遮罩状态；读入口不得再次补投 `all` refresh，只有真正 missing 或 freshness gate 已证明的 exact stale scope 才能请求恢复，避免读 I/O 扩成全月份写 fan-out |
 | Search row context | 非 PostgreSQL 本地 Search | `list_workbench_search_rows(YYYY-MM)` 只返回 active generation 的 row/zone/group/project context；禁止复用 Workbench page/full payload |
 | ignored rows | Workbench ignored API / write command | `list_workbench_ignored_rows(scope_key)` 只读取 active generation；repository 缺失时公开 API 返回 unavailable、写命令 fail fast，禁止回退旧 snapshot |
+| relation action preview selection | confirm/withdraw preview | `WorkbenchQueryFacade.relation_preview_selection -> PostgresReadModelRepository.get_workbench_relation_preview_selection` 按 expected generation/generation-set 一次读取最多 20 个 selected rows 及必要 OA attachment context；month/all 都在读取前后复核 fresh/version，missing、重复、跨 generation 和 drift fail closed。该 DTO 只供 preview group/amount/alias 投影，不进入正式 command/UoW，不读取 `workbench:all` 完整 payload、live builder 或 `workbench_relation` projection |
 
 ## 依赖方向
 
@@ -118,6 +119,8 @@ Release A 已删除运行时链路且禁止恢复；旧表物理存储只为短�
 | Tests | `tests/test_workbench_*.py`、`web/src/test/RelationGroupGrid.test.tsx`、`web/src/test/Workbench*.test.*`、`web/e2e/workbench-*.spec.ts` |
 
 `WorkbenchRelationGroupingService` 只接收 canonical rows 与 active formal relations，并按冻结 requirement snapshot 输出页面 `paired/unpaired` 精确分区；`WorkbenchRelationPreviewGroupingService` 复用同一判定，只接收写操作预览所需的 formal relations、selected rows 和显式 ungrouped mode，并输出预览 groups。二者都是无 I/O 的纯投影边界；route/server 只负责组装依赖，不能重新实现 membership、隐藏未分组行、回查当前规则或读取 repository/HTTP 状态。
+
+confirm/withdraw preview 的行输入只能来自上述 relation-preview selection port，且每次请求只允许一次 selection load。preview 可输出 `group_type=selection` 与 `zone/status=unpaired`，但正式页面 active generation 仍只有 `paired/unpaired`；正式 confirm/withdraw 必须重新进入 canonical relation command/UoW，不能缓存、转交或信任 preview selection DTO。
 
 正式关系是关系 ownership 的唯一事实源。projection builder 必须在读取 override/exception 前先从已经加载的 active relations 计算 member row ids，并从 control I/O 集合排除这些成员；不能先把旧 candidate/exception ownership 写入正式成员，再依靠字段覆盖或 Audit 豁免掩盖冲突。未配对 row 仍按 active override > active exception 投影，两个查询继续由既有 repository SQL 边界批量完成。
 
