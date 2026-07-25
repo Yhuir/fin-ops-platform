@@ -1,6 +1,6 @@
 # OA 待付款核对测试责任
 
-日期：2026-07-25
+日期：2026-07-26
 
 ## 风险模型
 
@@ -64,7 +64,7 @@
 
 覆盖：
 
-- dynamic expected/actual source vector、dirty/outbox gate、month/all token；completed Workbench relation confirm/withdraw 必须通过 set-based canonical relation version 让旧 OA summaries 在下次访问变 stale。
+- dynamic expected/actual source vector、dirty/outbox gate、month/all token；completed Workbench relation confirm/withdraw 必须通过 set-based active canonical relation 数量与 membership digest 让旧 OA summaries 在下次访问变 stale。回归覆盖“撤回较旧 relation、较新 active relation 的最大 `updated_at` 不变”仍改变 proof，以及 structured inactive 不能因 raw payload 残留 active 状态进入 projector。
 - `all` freshness gate 对跨 scope 重复 `row_id` fail closed；Page Audit 按全局 `row_id` 返回涉及 scopes；rows SQL 不再包含旧 `deduped_oa_pending_payment_rows` / `DISTINCT ON(row_id)` 隐藏去重。
 - PG-only projector，按 relation member id 批量读取 canonical facts，纯函数组装，单次 values 批量写入，空 scope清理，原子 publish。
 - projector/freshness SQL 不包含 `WorkbenchRelationReadFacade`、`workbench_relation_read_model_not_fresh`、`workbench_relation_source_versions` 或 `read_model.workbench_relation_scopes`；canonical `app.workbench_pair_relations` 版本证明不属于 read-model 串行依赖。

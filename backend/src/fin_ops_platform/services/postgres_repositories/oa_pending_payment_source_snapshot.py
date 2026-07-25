@@ -74,17 +74,53 @@ def oa_pending_payment_workbench_relation_versions_by_scope(
             join app.oa_applications source
               on source.scope_month = to_date(requested.scope_key, 'YYYY-MM')
             where """ + COMPLETED_WORKFLOW_STATUS_SQL + """
+        ),
+        active_relations as (
+            select distinct
+                   source.scope_key,
+                   relation.case_id,
+                   relation.relation_mode,
+                   relation.version,
+                   relation.row_ids,
+                   relation.row_types,
+                   relation.updated_at,
+                   coalesce(
+                       relation.raw_payload->'normalized_payload',
+                       relation.raw_payload,
+                       '{}'::jsonb
+                   ) as consumed_payload
+            from completed_oa source
+            join app.workbench_pair_relations relation
+              on source.row_id = any(relation.row_ids)
+             and relation.status = 'active'
+             and relation.relation_mode <> %s
+        ),
+        relation_versions as (
+            select
+                scope_key,
+                count(*)::integer as relation_count,
+                coalesce(max(updated_at)::text, '') as relation_updated_at,
+                md5(coalesce(string_agg(
+                    jsonb_build_object(
+                        'case_id', case_id,
+                        'relation_mode', relation_mode,
+                        'version', version,
+                        'row_ids', to_jsonb(row_ids),
+                        'row_types', to_jsonb(row_types),
+                        'consumed_payload', consumed_payload
+                    )::text,
+                    E'\n' order by case_id
+                ), '')) as membership_digest
+            from active_relations
+            group by scope_key
         )
         select requested.scope_key,
-               coalesce(max(relation.updated_at)::text, '') as relation_updated_at
+               coalesce(relation_versions.relation_updated_at, '') as relation_updated_at,
+               coalesce(relation_versions.relation_count, 0)::integer as relation_count,
+               coalesce(relation_versions.membership_digest, md5('')) as membership_digest
         from requested
-        left join completed_oa source
-          on source.scope_key = requested.scope_key
-        left join app.workbench_pair_relations relation
-          on source.row_id = any(relation.row_ids)
-         and relation.status = 'active'
-         and relation.relation_mode <> %s
-        group by requested.scope_key
+        left join relation_versions
+          on relation_versions.scope_key = requested.scope_key
         order by requested.scope_key
         """,
         (normalized_scope_keys, TURNOVER_MANUAL_CLOSURE_RELATION_MODE),
@@ -94,7 +130,14 @@ def oa_pending_payment_workbench_relation_versions_by_scope(
             "oa_pending_payment_workbench_pair_relations_updated_at": text(
                 row.get("relation_updated_at")
             )
-            or ""
+            or "",
+            "oa_pending_payment_workbench_pair_relation_count": int(
+                row.get("relation_count") or 0
+            ),
+            "oa_pending_payment_workbench_pair_relations_membership_digest": text(
+                row.get("membership_digest")
+            )
+            or "",
         }
         for row in rows
         if isinstance(row, dict)

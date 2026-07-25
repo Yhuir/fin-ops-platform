@@ -1,5 +1,12 @@
 # OA待付款核对 实施记录
 
+## 2026-07-26 - active relation membership freshness 证明
+
+- 根因补强：仅记录 relation `updated_at` 上界无法识别“撤回较旧 relation、较新的 active relation 仍保持同一最大时间”这一集合成员变化，旧 OA summaries 因而可能继续被判 fresh。
+- 最小修复：复用 OA source-snapshot owner 和 structured PostgreSQL relation repository。source vector 在一次 set-based SQL 中登记 active eligible relation 的数量、最大更新时间和确定性 membership digest；digest 绑定 case、typed members、mode、version 与 projector 实际消费 payload。projector 删除本地 `_active_relations` 状态推断，直接调用 active-only loader，并继续排除 Turnover 专属 closure mode。
+- 边界不变：不新增 migration、依赖、worker、队列、read-model 串行依赖或写后 fan-out；Cost runtime 与 API response shape 不变。
+- 本地验证：source snapshot、projector refresh 和 PostgreSQL integration 合同共 31 项测试通过，其中 5 项真实 PostgreSQL 用例因本机未配置测试数据库按既有条件跳过。生产部署与样本验证留给后续发布任务。
+
 ## 2026-07-25 - 删除 fresh/visibility 常驻轮询旧链
 
 - 全量页面触发扫描发现 OA 页面在任意 fresh `200 + ETag` 后仍每 500ms 条件请求，并在 hidden→visible 时立即请求；这会让已打开页面在其它事实变化后自动更新，违反 Phase 27 的访问触发与隐藏页零业务 I/O 合同。

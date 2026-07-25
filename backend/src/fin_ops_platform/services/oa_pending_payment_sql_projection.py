@@ -30,7 +30,7 @@ from fin_ops_platform.services.postgres_repositories.workbench_relation import P
 from fin_ops_platform.services.workbench_relation_modes import TURNOVER_MANUAL_CLOSURE_RELATION_MODE
 
 
-OA_PENDING_PAYMENT_POSTGRES_PROJECTOR_VERSION = "2026-07-25-shared-relation-v6"
+OA_PENDING_PAYMENT_POSTGRES_PROJECTOR_VERSION = "2026-07-26-active-relation-membership-v7"
 
 
 def oa_pending_payment_base_source_versions() -> dict[str, object]:
@@ -165,10 +165,20 @@ class OaPendingPaymentSqlProjectionBuilder:
         ]
         payment_statuses = payment_status_repository.list_payment_statuses()
 
-        canonical_snapshot = PostgresWorkbenchRelationRepository(connection).load_workbench_pair_relations_for_row_ids(
-            [record.id for record in completed_records],
+        canonical_snapshot = (
+            PostgresWorkbenchRelationRepository(
+                connection
+            ).load_active_workbench_pair_relations_for_row_ids(
+                [record.id for record in completed_records],
+            )
         )
-        canonical_relations = _active_relations(canonical_snapshot)
+        canonical_relations = [
+            dict(relation)
+            for relation in dict(canonical_snapshot.get("pair_relations") or {}).values()
+            if isinstance(relation, dict)
+            and str(relation.get("relation_mode") or "").strip()
+            != TURNOVER_MANUAL_CLOSURE_RELATION_MODE
+        ]
         pending_relations = PostgresOaPendingPaymentRelationRepository(connection).active_relations_for_row_ids(
             [record.id for record in in_progress_records]
         )
@@ -274,18 +284,6 @@ class OaPendingPaymentSqlProjectionBuilder:
             **workbench_relation_versions,
             **pending_relation_versions,
         }
-
-
-def _active_relations(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
-    relations = snapshot.get("pair_relations") if isinstance(snapshot, dict) else None
-    return [
-        dict(relation)
-        for relation in dict(relations or {}).values()
-        if isinstance(relation, dict)
-        and str(relation.get("status") or "active").strip() == "active"
-        and str(relation.get("relation_mode") or "").strip() != TURNOVER_MANUAL_CLOSURE_RELATION_MODE
-    ]
-
 
 def _oa_pending_payment_statistics(
     connection: Any,
