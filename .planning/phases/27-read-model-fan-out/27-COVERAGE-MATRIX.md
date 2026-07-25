@@ -20,7 +20,7 @@
 
 | Page key | Route | Query / read-model owner | Writes and Drawer coverage | Access-time target | Probe id |
 | --- | --- | --- | --- | --- | --- |
-| `reconciliation-workbench` | `/` | `WorkbenchQueryFacade`; `workbench`, `workbench_relation` | relation/exception/cash/settings actions；`DetailDrawer` | active generation + exact month source proof；激活时 query，non-fresh 显示 refreshing | `p27-page-workbench` |
+| `reconciliation-workbench` | `/` | `WorkbenchQueryFacade`; `workbench`, `workbench_relation` | relation/exception/cash/settings actions；`DetailDrawer` | active generation + v7 complete exact-month proof（relation/control/claim、OA/bank/invoice 跨月成员、ETC、consumed settings）；并发同 scope 只合并 active proof，完成后不缓存；激活时 query，non-fresh 显示 refreshing | `p27-page-workbench` |
 | `cost-statistics` | `/cost-statistics` | `CostStatisticsQueryService`; `cost_statistics` | 标签规则 Drawer | parent + requested view/month dependency gate；规则保存只改 rule version | `p27-page-cost` |
 | `bank-details` | `/bank-details` | `BankDetailsApplicationService`; `bank_detail`, `bank_account_balance` | 自动标签规则 Drawer、分类确认/人工分类 | requested month 与 all-only balance 分别 proof；不因任意写重建所有页 | `p27-page-bank` |
 | `oa-pending-payments` | `/oa-pending-payments` | `OaPendingPaymentReadModelService`; `oa_pending_payment` | 确认写回、关联支出、规则区域 | requested month/all shard set proof | `p27-page-oa-pending` |
@@ -44,7 +44,7 @@
 
 | Read model key | Scope / all semantics | Query owner | Page or resource consumers | Access-time proof and migration target | Status |
 | --- | --- | --- | --- | --- | --- |
-| `workbench` | `workbench`; month active generation；`all=active_month_shard_aggregate` | `WorkbenchQueryFacade` | `reconciliation-workbench`, `cost_statistics`, `search` | active generation/source versions/current-effective queue；保留原子发布例外 | `implemented-local` |
+| `workbench` | `workbench`; month active generation；`all=active_month_shard_aggregate` | `WorkbenchQueryFacade` | `reconciliation-workbench`, `cost_statistics`, `search` | v7 complete canonical source vector + active generation/current-effective queue；Application shared builder合并重叠proof；migration `0125` + deploy后受控rehydrate；保留原子发布例外 | `implemented-local-production-pending` |
 | `workbench_relation` | `workbench_relation`; month；`all=fan_out_command` | `WorkbenchRelationReadFacade` | `reconciliation-workbench`, `batch-accounting`, invoice family | exact relation scope source versions；消费者不得把旧 relation projection 伪装 fresh | `implemented-local` |
 | `bank_detail` | `bank_detail`; month；`all=fan_out_command` | `BankDetailsApplicationService` | `bank-details`, `pending-invoices`, `cost-statistics` | exact month signature/source versions + queue state | `implemented-local` |
 | `bank_account_balance` | `bank_account_balance`; global `all=queryable_all_scope` | `BankDetailsApplicationService` | `bank-details`, App Status | all-only canonical balance source version | `implemented-local` |
@@ -54,7 +54,7 @@
 | `input_invoice_usage` | `input_invoice_usage`; month；`all=fan_out_command` | `InputInvoiceUsageReadModelService` | `input-invoice-usage` | exact month + relation/lifecycle/rule signature | `implemented-local` |
 | `output_invoice_collection` | `output_invoice_collection`; month；`all=fan_out_command` | `OutputInvoiceCollectionReadApplicationService` | `output-invoice-collections` | exact month + relation/lifecycle/receipt/rule versions | `implemented-local` |
 | `oa_pending_payment` | `oa_pending_payment`; month；`all=fan_out_command` | `OaPendingPaymentReadModelService` | `oa-pending-payments`, lifecycle resource | exact OA snapshot/relation/schema versions | `implemented-local` |
-| `cost_statistics` | `cost_statistics`; `active/all` shard + queryable parent | `CostStatisticsQueryService` | `cost-statistics` | `all` 遇 durable active dependency先快速返回 refreshing；排空后仍做 Workbench expected/active + Cost/Bank Detail 完整 fail-closed proof；Workbench/Cost 各两个 bounded consumer并行 sibling month，Workbench primary唯一拥有 `all` fan-out | `implemented-local-production-pending` |
+| `cost_statistics` | `cost_statistics`; `active/all` shard + queryable parent | `CostStatisticsQueryService` | `cost-statistics` | `all` 遇 durable active dependency先快速返回 refreshing；排空后复用shared Workbench v7 proof并做Cost/Bank Detail完整fail-closed proof；只忽略Workbench执行游标`source_version`；Workbench/Cost各两个bounded consumer并行sibling month，Workbench primary唯一拥有`all` fan-out | `implemented-local-production-pending` |
 | `tax_offset` | `tax_offset`; month；`all=fan_out_command` | `TaxOffsetQueryService` | `tax-offset` | exact invoice/certified source versions；普通写零 refresh，访问 current month 收敛 | `implemented-local` |
 | `no_oa_bank_batch` | `no_oa_bank_batch`; month；`all=fan_out_command` | `NoOaBankBatchApplicationService` | legacy API/regression only | exact canonical no-OA relation versions；不新增页面依赖 | `implemented-local` |
 | `bank_flow_rule_batch` | `bank_flow_rule_batch`; month；`all=fan_out_command` | `BankFlowRuleBatchApplicationService` | `bank-flow-rule-batches` | exact bank/tag eligibility/relation versions；普通写零 target | `implemented-local` |

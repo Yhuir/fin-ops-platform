@@ -15,11 +15,11 @@ class WorkbenchQueryFreshnessService:
     def __init__(
         self,
         *,
-        connection: object | None,
+        projection_builder: WorkbenchSqlProjectionBuilder | None,
         repository: object | None,
         single_scope_stale_reasons: Callable[..., list[str]],
     ) -> None:
-        self._connection = connection
+        self._projection_builder = projection_builder
         self._repository = repository
         self._single_scope_stale_reasons = single_scope_stale_reasons
         self._expected_source_versions_by_scope: dict[str, dict[str, object]] = {}
@@ -63,8 +63,20 @@ class WorkbenchQueryFreshnessService:
 
     def _supports_bulk_proof(self) -> bool:
         return bool(
-            self._connection is not None
-            and callable(getattr(self._connection, "fetch_all", None))
+            callable(
+                getattr(
+                    self._projection_builder,
+                    "list_workbench_scope_shards",
+                    None,
+                )
+            )
+            and callable(
+                getattr(
+                    self._projection_builder,
+                    "source_versions_for_scopes",
+                    None,
+                )
+            )
             and callable(
                 getattr(
                     self._repository,
@@ -75,7 +87,9 @@ class WorkbenchQueryFreshnessService:
         )
 
     def _all_scope_stale_reasons(self) -> tuple[list[str], list[str]]:
-        builder = WorkbenchSqlProjectionBuilder(connection=self._connection)
+        builder = self._projection_builder
+        if builder is None:
+            raise RuntimeError("Workbench bulk freshness requires the SQL projection builder.")
         scope_keys = builder.list_workbench_scope_shards("all")
         expected_by_scope = builder.source_versions_for_scopes(scope_keys)
         self._expected_source_versions_by_scope.update(

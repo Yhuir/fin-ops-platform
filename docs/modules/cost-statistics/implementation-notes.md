@@ -975,3 +975,9 @@
 - `CostStatisticsQueryService` 已经持有 parent 的 exact Workbench month scopes，因此复用现有 runtime gateway，在同一次访问中提交同 project scope 的 Cost month children和请求 parent；月份请求仍只提交当前 scope，禁止 sibling project/page scope。
 - 不新增协调器、队列、缓存、worker类型或版本账本；manifest dependency gate继续 fail closed，PostgreSQL active dedupe继续合并重复任务。
 - 定向 service/read-model测试覆盖月份不扩散和parent精确 children + parent；最终 `<3s` 仍须部署后用同一 test-owned fixture证明。
+
+## 2026-07-25 Workbench dependency proof 并发合并
+
+- `f8ad8b38` 生产证明 Cost child handler 已较快，剩余 project/all 长尾包含多个 consumer 重复执行同一 Workbench canonical proof。Cost source-version 语义和 worker依赖顺序不变。
+- Cost query、Workbench query 与 parent dependency proof现在复用Application现有 Workbench builder；重叠同scope proof只读一次数据库，完成后不缓存。v7 complete proof新增的ETC、关系状态、跨月成员和实际消费settings字段继续作为Cost业务依赖fail closed；只排除执行游标`source_version`。
+- 没有新增Cost代码路径、read model、worker、queue、cache或协调器；最终 project/all `<3s`仍由部署后生产fixture证明。

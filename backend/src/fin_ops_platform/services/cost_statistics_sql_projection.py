@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
 
-from fin_ops_platform.services.cost_statistics_bank_accounts import (
+from fin_ops_platform.services.bank_settings import (
     bank_accounts_from_settings_payload,
     bank_auto_tag_rules_version_from_settings_payload,
 )

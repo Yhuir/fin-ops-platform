@@ -498,7 +498,6 @@ from fin_ops_platform.services.workbench_idempotency import (
 from fin_ops_platform.services.workbench_uow import WorkbenchWriteUnitOfWork
 from fin_ops_platform.services.workbench_sql_projection import (
     MONTH_RE as WORKBENCH_SQL_MONTH_RE,
-    WorkbenchSqlProjectionBuilder,
     WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
 )
 from fin_ops_platform.services.seeds import build_demo_seed
@@ -1405,19 +1404,17 @@ class Application:
     def _cost_statistics_workbench_dependency_versions_by_scope(
         self,
     ) -> tuple[dict[str, dict[str, object]], dict[str, dict[str, object]]]:
-        state_store = getattr(self, "_state_store", None)
-        connection = getattr(state_store, "_connection", None)
+        builder = getattr(self, "_workbench_sql_projection_builder", None)
         repository = getattr(self, "_cost_statistics_sql_read_repository", None)
         active_source_versions_by_scope = getattr(
             repository,
             "active_workbench_source_versions_by_scope",
             None,
         )
-        if connection is None or not callable(getattr(connection, "fetch_all", None)):
+        if not callable(getattr(builder, "source_versions_for_scopes", None)):
             raise RuntimeError("Cost statistics requires the Workbench canonical source-version boundary.")
         if not callable(active_source_versions_by_scope):
             raise RuntimeError("Cost statistics requires the Workbench bulk source-version read boundary.")
-        builder = WorkbenchSqlProjectionBuilder(connection=connection)
         scope_keys = builder.list_workbench_scope_shards("all")
         return (
             builder.source_versions_for_scopes(scope_keys),
@@ -2716,9 +2713,12 @@ class Application:
         repository: object | None = None,
         single_scope_stale_reasons: Callable[..., list[str]] | None = None,
     ) -> WorkbenchQueryFreshnessService:
-        state_store = getattr(self, "_state_store", None)
         return WorkbenchQueryFreshnessService(
-            connection=getattr(state_store, "_connection", None),
+            projection_builder=getattr(
+                self,
+                "_workbench_sql_projection_builder",
+                None,
+            ),
             repository=(
                 repository
                 if repository is not None
@@ -9689,10 +9689,9 @@ class Application:
 
     def _workbench_sql_read_model_source_versions(self, scope_key: str | None = None) -> dict[str, object]:
         normalized_scope_key = str(scope_key or "").strip()
-        state_store = getattr(self, "_state_store", None)
-        connection = getattr(state_store, "_connection", None)
-        if connection is not None and callable(getattr(connection, "fetch_one", None)):
-            return WorkbenchSqlProjectionBuilder(connection=connection).source_versions_for_scope(
+        builder = getattr(self, "_workbench_sql_projection_builder", None)
+        if callable(getattr(builder, "source_versions_for_scope", None)):
+            return builder.source_versions_for_scope(
                 normalized_scope_key or "all"
             )
         builder_version = (

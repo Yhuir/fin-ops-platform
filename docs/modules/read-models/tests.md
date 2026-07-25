@@ -601,7 +601,7 @@ git diff --check
 
 ## 2026-07-22 - Workbench v6 freshness 边界
 
-- `tests/test_workbench_sql_runtime.py::test_workbench_v6_rejects_v5_month_all_and_cache_versions` 覆盖 month/all v6、groups/initial cache 派生版本，以及旧 v5 source version 的 `builder_mismatch`。
+- `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_v7_rejects_v6_month_all_and_cache_versions` 覆盖 month/all v7、groups/initial cache 派生版本，以及旧 v6 source version 的 `builder_mismatch`。
 - 既有 SQL runtime/query tests 继续覆盖 building/failed 不可读为 fresh、active generation 原子发布和 requirement-aware paired/unpaired 分区；本轮没有新增 worker、registry、manifest、env 或 read model scope。
 - 生产验证必须经 exact release checkpoint 先 repair、再由正式 gateway/worker rehydrate；禁止直接写 projection 或伪造 fresh。
 
@@ -623,3 +623,10 @@ git diff --check
 - `tests/test_workbench_relation_sql_projection.py`、`tests/test_postgres_repositories_boundaries.py`、`tests/test_workbench_relation_read_facade.py` 证明共享 relation rows/groups/source version 排除 `turnover_manual_closure`，旧污染只使 exact scope stale 并通过正式 worker 自愈。
 - `tests/test_bank_details_sql_runtime.py`、`tests/test_search_pending_sql_runtime.py`、`tests/test_audit_page_business_read_model_tool.py` 证明 Bank Details、Pending Invoice 与共享 Audit 使用同一 eligibility，Turnover 专属关系不产生非 consumer I/O。
 - `tests/test_workbench_sql_runtime.py` 证明 exact active outbox refresh 直接返回 `refreshing` 并跳过重复 canonical/schema proof；dirty 没有 active event 时标记 stale、返回 exact re-enqueue scope并继续完整 proof。业务规则、HTTP shape、权限和前端状态机未改变，因此业务核心、API、前端专项测试不新增；跨模块 E2E 与性能由 Phase 27 同一生产 fixture 验证。
+
+## 2026-07-25 - Workbench v7 source-proof owner 与 PostgreSQL 回归
+
+- `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_and_cost_access_reuse_the_application_projection_builder`、`test_overlapping_canonical_proofs_share_only_the_active_scope_flight` 与 `test_failed_canonical_proof_flight_is_removed_for_page_retry` 锁定 shared owner、active-only 合并、后续重查和失败恢复。
+- `tests/test_workbench_etc_relation_enrichment_postgres.py` 的六个真实 PostgreSQL 用例覆盖既有业务事务、active event reschedule、migration `0125`、ETC/soft-delete、跨月撤回和 settings fingerprint。
+- `tests/test_postgres_migrations.py::PostgresMigrationSqlTests::test_workbench_etc_relation_enrichment_indexes_match_exact_contract` 锁定只新增两个已测量 identity expression index；migration inventory 连续到 `0125`。
+- 七类决策：业务 source-version、service wiring、read model/background job、跨模块 PostgreSQL flow 和旧功能回归适用并已覆盖；API shape、前端 interaction 未改变，因此不新增重复 API/组件测试。最终生产 E2E/SLO 仍必须执行。

@@ -1,3 +1,5 @@
+"""Pure normalization and version helpers for canonical bank settings."""
+
 from __future__ import annotations
 
 import json

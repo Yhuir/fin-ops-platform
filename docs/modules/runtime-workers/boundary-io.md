@@ -1,6 +1,6 @@
 # Runtime Worker 模块边界与 I/O
 
-日期：2026-07-22
+日期：2026-07-25
 
 ## 模块化状态
 
@@ -8,7 +8,7 @@
 - 当前边界可信度：high
 - 目标边界：所有后台 worker 由 registry、durable queue、handler 和部署 manifest 显式声明。
 - 当前闭环：worker 入口使用 registration contract；worker instance、event type、env example、manifest/check command 和 App Health readiness 均由 `runtime_worker_registry.py` 派生。`workbench` primary claim 月份 shard 与 `all` fan-out command，`workbench-secondary` 只竞争 claim 月份 shard；二者共用同一 handler、durable queue 与 active-generation 发布合同。`cost-statistics` / `cost-statistics-secondary` 同样只增加同 event exact scope 的 bounded drain 并发，不新增投影路径。普通写后可见性走月份 shard + query-composed all，不存在全局 aggregate publish。OA 待付款由 `oa-pending-payment` 专属实例 claim `oa_pending_payment.read_model.refresh`，共享 `invoice-usage-collection` 只保留进项使用/销项收款。外部往来仍只保留单一 `turnover-ledger` owner；已证实无收益且引入数据库竞争的 turnover secondary 实验已删除。部署文档不再维护手写 worker 矩阵或 `sudo systemctl enable --now fin-ops-worker@...` 清单。
-- 性能证据风险：高性能全域闭环仍需要生产 SLO 复测证明所有页面/读写操作 p95 收敛；该风险属于运行证据，不再代表 Runtime Worker 边界或 I/O open。
+- 性能证据风险：`f8ad8b38` 已证明写后零 fan-out，但 Workbench/Cost/Turnover access-to-fresh 仍有超过 3 秒样本。当前 v7 只优化 query-side shared canonical proof并增加两个 identity lookup 索引，没有新增 worker、registration、queue 或 handler；高性能全域闭环仍需 exact SHA 部署后的生产矩阵证明，该风险属于运行证据，不代表 Runtime Worker 边界或 I/O open。
 - 旧代码删除状态：旧 `worker_legacy_application` / `RuntimeWorkerApplicationBridge` / GridFS migration worker / 手写生产 worker 矩阵已移除；`import.fact.changed` registration、handler、env event type 和 runtime derived-lifecycle bridge 均已删除。import worker 只 claim `import.process.requested`。
 
 ## 职责边界
@@ -107,5 +107,6 @@
 
 - 新增 worker 必须同步 registry、manifest/systemd env、tests、docs。
 - 移除 worker 前必须证明 deploy、queue event、RabbitMQ dispatch 和 app health 不再引用。
+- Workbench v7 发布在 migration `0125` 成功后复用正式 `finops-deploy-control workbench-rehydrate <release> --json` 运维入口完成一次受控全量 rehydrate；该维护动作复用当前 worker/queue/active-generation 合同，不新增 registration，也不得由普通页面隐式触发。
 - 生产 env 示例仍可保留当前 registration 对应的 `--enable-*` flag 作为本地开发参数；生产 systemd 主合同是 `--registration`，且 `_apply_registration_args(...)` 会由 registry 写入 handler flags、event types 和 scope lane。已退出 registration 的兼容 flag 必须由 release helper 精确、幂等迁移，不能依赖只安装新 env 示例。
 - `0086_runtime_queue_claim_hot_path.sql` 已本地保护，仍需生产发布后用 grouped 1s read model smoke 证明 Workbench/invoice lifecycle 总耗时是否真正低于目标。

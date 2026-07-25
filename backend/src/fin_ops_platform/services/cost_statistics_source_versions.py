@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fin_ops_platform.services.cost_statistics_bank_accounts import (
+from fin_ops_platform.services.bank_settings import (
     bank_account_mappings_fingerprint_from_settings_payload,
     bank_auto_tag_rules_version_from_settings_payload,
 )

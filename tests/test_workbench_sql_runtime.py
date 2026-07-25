@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from decimal import Decimal
 from http import HTTPStatus
 from io import StringIO
+from threading import Event, Thread
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -1553,6 +1554,64 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             ),
         )
 
+    def test_workbench_and_cost_access_reuse_the_application_projection_builder(self) -> None:
+        class SharedBuilder:
+            @staticmethod
+            def list_workbench_scope_shards(_scope_key: str) -> list[str]:
+                return ["2026-05"]
+
+            @staticmethod
+            def source_versions_for_scope(scope_key: str) -> dict[str, object]:
+                return {"builder": "shared", "scope_key": scope_key}
+
+            @staticmethod
+            def source_versions_for_scopes(
+                scope_keys: list[str],
+            ) -> dict[str, dict[str, object]]:
+                return {
+                    scope_key: {"builder": "shared", "scope_key": scope_key}
+                    for scope_key in scope_keys
+                }
+
+        class Repository:
+            @staticmethod
+            def active_workbench_source_versions_by_scope(
+                *,
+                scope_keys: list[str],
+            ) -> dict[str, dict[str, object]]:
+                return {
+                    scope_key: {"builder": "shared", "scope_key": scope_key}
+                    for scope_key in scope_keys
+                }
+
+        app = object.__new__(Application)
+        builder = SharedBuilder()
+        repository = Repository()
+        app._workbench_sql_projection_builder = builder
+        app._cost_statistics_sql_read_repository = repository
+
+        service = app._workbench_query_freshness_service(
+            repository=repository,
+            single_scope_stale_reasons=lambda *_args, **_kwargs: [],
+        )
+        status_payload: dict[str, object] = {
+            "scope_key": "all",
+            "read_model_status": "fresh",
+        }
+        self.assertIs(service.apply(status_payload, scope_key="all"), status_payload)
+        expected, active = app._cost_statistics_workbench_dependency_versions_by_scope()
+
+        self.assertEqual(
+            service.expected_source_versions("2026-05"),
+            {"builder": "shared", "scope_key": "2026-05"},
+        )
+        self.assertEqual(
+            app._workbench_sql_read_model_source_versions("2026-05"),
+            {"builder": "shared", "scope_key": "2026-05"},
+        )
+        self.assertEqual(expected, {"2026-05": {"builder": "shared", "scope_key": "2026-05"}})
+        self.assertEqual(active, expected)
+
     def test_page_access_source_versions_include_canonical_workbench_write_tables(self) -> None:
         class SourceVersionConnection:
             def __init__(self) -> None:
@@ -1575,7 +1634,16 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                         "bank_transactions_updated_at": "bank-v6",
                         "invoices_updated_at": "invoices-v7",
                         "oa_projection_updated_at": "oa-v8",
-                        "bank_auto_tag_rules_version": 9,
+                        "etc_submission_batches_updated_at": "etc-submission-v9",
+                        "etc_business_batches_updated_at": "etc-business-v10",
+                        "etc_invoices_updated_at": "etc-invoices-v11",
+                        "etc_batch_invoice_links_updated_at": "etc-links-v12",
+                        "settings_payload": {
+                            "bank_transaction_tags": {"version": 9},
+                            "bank_account_mappings": [
+                                {"bank_name": "测试银行", "last4": "6222"}
+                            ],
+                        },
                     }
                 ]
 
@@ -1589,6 +1657,11 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(versions["bank_transactions_updated_at"], "bank-v6")
         self.assertEqual(versions["invoices_updated_at"], "invoices-v7")
         self.assertEqual(versions["oa_projection_updated_at"], "oa-v8")
+        self.assertEqual(versions["etc_submission_batches_updated_at"], "etc-submission-v9")
+        self.assertEqual(versions["etc_business_batches_updated_at"], "etc-business-v10")
+        self.assertEqual(versions["etc_invoices_updated_at"], "etc-invoices-v11")
+        self.assertEqual(versions["etc_batch_invoice_links_updated_at"], "etc-links-v12")
+        self.assertEqual(len(str(versions["bank_account_mappings_fingerprint"])), 16)
         source_sql, source_params = connection.fetch_all_calls[0]
         self.assertIn("app.workbench_pair_relations", source_sql)
         self.assertIn("app.workbench_exception_cases", source_sql)
@@ -1597,6 +1670,10 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("app.bank_transactions", source_sql)
         self.assertIn("app.invoices", source_sql)
         self.assertIn("app.oa_applications", source_sql)
+        self.assertIn("app.etc_submission_batches", source_sql)
+        self.assertIn("app.etc_business_batches", source_sql)
+        self.assertIn("app.etc_invoices", source_sql)
+        self.assertIn("app.etc_batch_invoice_links", source_sql)
         self.assertIn("active_relation_row_ids", source_sql)
         self.assertEqual(source_params, (["2026-05-01"],))
 
@@ -1623,12 +1700,26 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                         "bank_transactions_updated_at": "bank-v6",
                         "invoices_updated_at": "invoices-v7",
                         "oa_projection_updated_at": "oa-v8",
-                        "bank_auto_tag_rules_version": 9,
+                        "etc_submission_batches_updated_at": "etc-submission-v9",
+                        "etc_business_batches_updated_at": "etc-business-v10",
+                        "etc_invoices_updated_at": "etc-invoices-v11",
+                        "etc_batch_invoice_links_updated_at": "etc-links-v12",
+                        "settings_payload": {
+                            "bank_transaction_tags": {"version": 9},
+                            "bank_account_mappings": [
+                                {"bank_name": "测试银行", "last4": "6222"}
+                            ],
+                        },
                     },
                     {
                         "scope_key": "2026-06",
                         "pair_relations_updated_at": "relations-v9",
-                        "bank_auto_tag_rules_version": 9,
+                        "settings_payload": {
+                            "bank_transaction_tags": {"version": 9},
+                            "bank_account_mappings": [
+                                {"bank_name": "测试银行", "last4": "6222"}
+                            ],
+                        },
                     },
                 ]
 
@@ -1662,9 +1753,101 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("app.bank_transactions", source_sql)
         self.assertIn("app.invoices", source_sql)
         self.assertIn("app.oa_applications", source_sql)
+        self.assertIn("app.etc_submission_batches", source_sql)
+        self.assertIn("app.etc_business_batches", source_sql)
+        self.assertIn("app.etc_invoices", source_sql)
+        self.assertIn("app.etc_batch_invoice_links", source_sql)
         self.assertIn("from app.app_settings", source_sql)
         self.assertEqual(source_params, (["2026-05-01", "2026-06-01"],))
         self.assertEqual(connection.fetch_one_calls, [])
+
+    def test_overlapping_canonical_proofs_share_only_the_active_scope_flight(self) -> None:
+        class BlockingSourceVersionConnection:
+            def __init__(self) -> None:
+                self.started = Event()
+                self.release = Event()
+                self.fetch_all_calls: list[tuple[str, tuple[object, ...]]] = []
+
+            def fetch_all(
+                self,
+                sql: str,
+                params: tuple[object, ...] = (),
+            ) -> list[dict[str, object]]:
+                self.fetch_all_calls.append((" ".join(sql.lower().split()), params))
+                self.started.set()
+                if not self.release.wait(timeout=2):
+                    raise AssertionError("canonical proof test did not release the active query")
+                return [
+                    {
+                        "scope_key": str(scope_month)[:7],
+                        "pair_relations_updated_at": f"relations-{scope_month}",
+                    }
+                    for scope_month in list(params[0])
+                ]
+
+        connection = BlockingSourceVersionConnection()
+        builder = WorkbenchSqlProjectionBuilder(connection=connection)
+        results: dict[str, dict[str, dict[str, object]]] = {}
+        errors: list[BaseException] = []
+
+        def load(name: str, scope_keys: list[str]) -> None:
+            try:
+                results[name] = builder.source_versions_for_scopes(scope_keys)
+            except BaseException as error:
+                errors.append(error)
+
+        leader = Thread(target=load, args=("leader", ["2026-05", "2026-06"]))
+        leader.start()
+        self.assertTrue(connection.started.wait(timeout=1))
+        follower = Thread(target=load, args=("follower", ["2026-06"]))
+        follower.start()
+        follower.join(timeout=0.05)
+        self.assertTrue(follower.is_alive())
+        self.assertEqual(len(connection.fetch_all_calls), 1)
+
+        connection.release.set()
+        leader.join(timeout=1)
+        follower.join(timeout=1)
+
+        self.assertFalse(leader.is_alive())
+        self.assertFalse(follower.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(
+            results["follower"]["2026-06"],
+            results["leader"]["2026-06"],
+        )
+
+        builder.source_versions_for_scopes(["2026-06"])
+        self.assertEqual(len(connection.fetch_all_calls), 2)
+
+    def test_failed_canonical_proof_flight_is_removed_for_page_retry(self) -> None:
+        class FlakySourceVersionConnection:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def fetch_all(
+                self,
+                _sql: str,
+                _params: tuple[object, ...] = (),
+            ) -> list[dict[str, object]]:
+                self.calls += 1
+                if self.calls == 1:
+                    raise RuntimeError("temporary canonical proof failure")
+                return [{"scope_key": "2026-06", "pair_relations_updated_at": "recovered"}]
+
+        connection = FlakySourceVersionConnection()
+        builder = WorkbenchSqlProjectionBuilder(connection=connection)
+
+        with self.assertRaisesRegex(RuntimeError, "temporary canonical proof failure"):
+            builder.source_versions_for_scopes(["2026-06"])
+
+        recovered = builder.source_versions_for_scopes(["2026-06"])
+
+        self.assertEqual(connection.calls, 2)
+        self.assertEqual(
+            recovered["2026-06"]["workbench_pair_relations_updated_at"],
+            "recovered",
+        )
 
     def test_all_scope_source_versions_include_canonical_workbench_objects(self) -> None:
         class SourceVersionConnection:
@@ -1673,10 +1856,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
             def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object]:
                 normalized = " ".join(sql.lower().split())
-                if "from app.app_settings" in normalized:
-                    return {"settings_payload": {}}
                 self.source_sql = normalized
-                return {}
+                return {"settings_payload": {}}
 
         connection = SourceVersionConnection()
         versions = WorkbenchSqlProjectionBuilder(connection=connection).source_versions_for_scope("all")
@@ -1684,11 +1865,21 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(versions["bank_transactions_updated_at"], "")
         self.assertEqual(versions["invoices_updated_at"], "")
         self.assertEqual(versions["oa_projection_updated_at"], "")
+        self.assertEqual(versions["etc_submission_batches_updated_at"], "")
+        self.assertEqual(versions["etc_business_batches_updated_at"], "")
+        self.assertEqual(versions["etc_invoices_updated_at"], "")
+        self.assertEqual(versions["etc_batch_invoice_links_updated_at"], "")
+        self.assertEqual(len(str(versions["bank_account_mappings_fingerprint"])), 16)
         self.assertIn("from app.bank_transaction_relation_claims", connection.source_sql)
         self.assertIn("from app.bank_transactions", connection.source_sql)
         self.assertIn("from app.invoices", connection.source_sql)
         self.assertIn("from app.oa_applications", connection.source_sql)
-        self.assertIn("where relation.status = 'active'", connection.source_sql)
+        self.assertIn("from app.etc_submission_batches", connection.source_sql)
+        self.assertIn("from app.etc_business_batches", connection.source_sql)
+        self.assertIn("from app.etc_invoices", connection.source_sql)
+        self.assertIn("from app.etc_batch_invoice_links", connection.source_sql)
+        self.assertNotIn("where status = 'active'", connection.source_sql)
+        self.assertNotIn("where status <> 'deleted'", connection.source_sql)
 
     def test_composed_all_source_versions_include_latest_canonical_month_proofs(self) -> None:
         versions = _workbench_composed_all_source_versions(
@@ -1700,6 +1891,11 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                         "invoices_updated_at": "2026-07-20 11:00:00+08",
                         "oa_projection_updated_at": "2026-07-20 12:00:00+08",
                         "oa_pending_payment_bank_claims_updated_at": "2026-07-20 13:00:00+08",
+                        "bank_account_mappings_fingerprint": "accounts-v1",
+                        "etc_submission_batches_updated_at": "2026-07-20 14:00:00+08",
+                        "etc_business_batches_updated_at": "2026-07-20 15:00:00+08",
+                        "etc_invoices_updated_at": "2026-07-20 16:00:00+08",
+                        "etc_batch_invoice_links_updated_at": "2026-07-20 17:00:00+08",
                     }
                 },
                 {
@@ -1709,6 +1905,11 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                         "invoices_updated_at": "2026-07-21 11:00:00+08",
                         "oa_projection_updated_at": "2026-07-21 12:00:00+08",
                         "oa_pending_payment_bank_claims_updated_at": "2026-07-21 13:00:00+08",
+                        "bank_account_mappings_fingerprint": "accounts-v1",
+                        "etc_submission_batches_updated_at": "2026-07-21 14:00:00+08",
+                        "etc_business_batches_updated_at": "2026-07-21 15:00:00+08",
+                        "etc_invoices_updated_at": "2026-07-21 16:00:00+08",
+                        "etc_batch_invoice_links_updated_at": "2026-07-21 17:00:00+08",
                     }
                 },
             ]
@@ -1722,6 +1923,23 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             versions["oa_pending_payment_bank_claims_updated_at"],
             "2026-07-21 13:00:00+08",
         )
+        self.assertEqual(versions["bank_account_mappings_fingerprint"], "accounts-v1")
+        self.assertEqual(
+            versions["etc_submission_batches_updated_at"],
+            "2026-07-21 14:00:00+08",
+        )
+        self.assertEqual(
+            versions["etc_business_batches_updated_at"],
+            "2026-07-21 15:00:00+08",
+        )
+        self.assertEqual(
+            versions["etc_invoices_updated_at"],
+            "2026-07-21 16:00:00+08",
+        )
+        self.assertEqual(
+            versions["etc_batch_invoice_links_updated_at"],
+            "2026-07-21 17:00:00+08",
+        )
 
     def test_workbench_sql_all_source_versions_expect_composed_active_month_shards(self) -> None:
         app = object.__new__(Application)
@@ -1732,9 +1950,6 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
     def test_workbench_all_freshness_returns_only_exact_canonical_mismatch_scopes(self) -> None:
         class BulkBuilder:
-            def __init__(self, **_kwargs: object) -> None:
-                pass
-
             @staticmethod
             def list_workbench_scope_shards(_scope_key: str) -> list[str]:
                 return ["2026-02", "2026-03"]
@@ -1758,25 +1973,20 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 }
                 return {scope_key: active_versions[scope_key] for scope_key in scope_keys}
 
-        connection = SimpleNamespace(fetch_all=lambda *_args, **_kwargs: [])
         service = WorkbenchQueryFreshnessService(
-            connection=connection,
+            projection_builder=BulkBuilder(),
             repository=Repository(),
             single_scope_stale_reasons=lambda *_args, **_kwargs: [],
         )
 
-        with patch(
-            "fin_ops_platform.services.workbench_query_freshness_service.WorkbenchSqlProjectionBuilder",
-            BulkBuilder,
-        ):
-            result = service.apply(
-                {
-                    "scope_key": "all",
-                    "read_model_status": "fresh",
-                    "read_model_version": "generation-set-1",
-                },
-                scope_key="all",
-            )
+        result = service.apply(
+            {
+                "scope_key": "all",
+                "read_model_status": "fresh",
+                "read_model_version": "generation-set-1",
+            },
+            scope_key="all",
+        )
 
         self.assertEqual(result["read_model_status"], "stale")
         self.assertEqual(result["refresh_scope_keys"], ["2026-03"])
@@ -1786,12 +1996,13 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         )
 
     def test_workbench_refreshing_freshness_skips_duplicate_canonical_proof(self) -> None:
-        class FailIfConstructedBuilder:
-            def __init__(self, **_kwargs: object) -> None:
+        class FailIfUsedBuilder:
+            @staticmethod
+            def list_workbench_scope_shards(_scope_key: str) -> list[str]:
                 raise AssertionError("refreshing scope must not repeat canonical source proof")
 
         service = WorkbenchQueryFreshnessService(
-            connection=SimpleNamespace(fetch_all=lambda *_args, **_kwargs: []),
+            projection_builder=FailIfUsedBuilder(),
             repository=SimpleNamespace(active_workbench_source_versions_by_scope=lambda **_kwargs: {}),
             single_scope_stale_reasons=lambda *_args, **_kwargs: (_ for _ in ()).throw(
                 AssertionError("refreshing scope must not repeat single-scope source proof")
@@ -1804,11 +2015,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             "dirty_scopes": [{"scope_key": "2026-03", "status": "processing"}],
         }
 
-        with patch(
-            "fin_ops_platform.services.workbench_query_freshness_service.WorkbenchSqlProjectionBuilder",
-            FailIfConstructedBuilder,
-        ):
-            result = service.apply(payload, scope_key="all")
+        result = service.apply(payload, scope_key="all")
 
         self.assertIs(result, payload)
 
@@ -1824,7 +2031,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             return ["builder_mismatch"]
 
         service = WorkbenchQueryFreshnessService(
-            connection=None,
+            projection_builder=None,
             repository=None,
             single_scope_stale_reasons=stale_reasons,
         )
@@ -1854,7 +2061,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             return ["builder_mismatch"]
 
         service = WorkbenchQueryFreshnessService(
-            connection=None,
+            projection_builder=None,
             repository=None,
             single_scope_stale_reasons=stale_reasons,
         )
@@ -1879,13 +2086,13 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(result["read_model_stale_reasons"], ["builder_mismatch"])
         self.assertEqual(result["refresh_scope_keys"], [])
 
-    def test_workbench_v6_rejects_v5_month_all_and_cache_versions(self) -> None:
+    def test_workbench_v7_rejects_v6_month_all_and_cache_versions(self) -> None:
         app = object.__new__(Application)
-        old_month = "2026-07-21-unified-zone-search-v5"
-        old_all = "workbench_sql_projection.composed_active_month_shards.unified_zone_search.v5"
+        old_month = "2026-07-22-turnover-frozen-requirements-v6"
+        old_all = "workbench_sql_projection.composed_active_month_shards.turnover_frozen_requirements.v6"
 
-        self.assertIn("v6", WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION)
-        self.assertIn("v6", WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
+        self.assertIn("v7", WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION)
+        self.assertIn("v7", WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
         self.assertIn(WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION, WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION)
         self.assertIn(WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION, WORKBENCH_INITIAL_PAGE_CACHE_SCHEMA_VERSION)
         self.assertIn(

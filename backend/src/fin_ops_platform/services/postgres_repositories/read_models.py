@@ -13,7 +13,7 @@ from urllib.parse import unquote
 from uuid import uuid4
 
 from fin_ops_platform.services.bank_transaction_category_service import BANK_TRANSACTION_CATEGORY_COUNT_KEYS
-from fin_ops_platform.services.cost_statistics_bank_accounts import (
+from fin_ops_platform.services.bank_settings import (
     bank_accounts_from_settings_payload,
     bank_auto_tag_rules_version_from_settings_payload,
 )
@@ -17998,6 +17998,7 @@ def _workbench_composed_all_source_versions(rows: list[dict[str, Any]]) -> dict[
     for key in (
         "oa_attachment_invoice_parser_version",
         "bank_auto_tag_rules_version",
+        "bank_account_mappings_fingerprint",
         "oa_projection_sync_version",
         "workbench_formal_relation_rule_version",
     ):
@@ -18013,6 +18014,10 @@ def _workbench_composed_all_source_versions(rows: list[dict[str, Any]]) -> dict[
         "bank_transactions_updated_at",
         "invoices_updated_at",
         "oa_projection_updated_at",
+        "etc_submission_batches_updated_at",
+        "etc_business_batches_updated_at",
+        "etc_invoices_updated_at",
+        "etc_batch_invoice_links_updated_at",
     ):
         latest = max((text(versions.get(key)) or "" for versions in source_versions_rows), default="")
         if latest:

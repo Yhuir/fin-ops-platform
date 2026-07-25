@@ -1323,3 +1323,9 @@
 - 边界修复：沿用现有 `WorkbenchSqlProjectionBuilder` source-version I/O，month scope 增加该月和 active relation members 的 OA/银行/发票更新时间及 pending claim 版本；`all` query增加对应全量 proof。写命令仍只提交 canonical fact/version，不恢复写后页面 fan-out。
 - all-scope composed proof 同步从 active month generations 汇总上述 canonical 字段；月分片发布后 all active-generation-set version仍按既有原子组合模型生成，不另建 `all` generation 或全局状态源。
 - 性能约束：proof 仍是一条 bounded PostgreSQL query，不读取 payload、不 live rebuild、不新增网络 I/O；页面 non-fresh 时只 enqueue 当前 scope。生产发布后必须重新验证 Workbench month/all p95、System Audit 与 test-owned confirm/withdraw/recovery。
+
+## 2026-07-25 - Workbench v7 complete proof 与并发读取合并
+
+- `f8ad8b38` 生产三轮证明普通 relation 写约 `172–345ms` 且零 fan-out，但多个并发 consumer 会各自重复 Workbench canonical proof，Workbench/Cost/Turnover access-to-fresh 仍有超过 3 秒样本。队列和 worker 已并发，新增 worker 不是根因修复。
+- 当前修复继续使用现有 `WorkbenchSqlProjectionBuilder`：proof 补齐 ETC submission/business/invoice/link、实际消费的银行规则和账户映射、所有 relation 状态、soft delete 与跨月成员；Application 只持有一个 builder，时间上重叠的同 scope proof 共享一个 stdlib `Future`。flight 完成即删除，独立访问重新查 canonical facts，失败可重试；没有 TTL cache、版本表、trigger、协调器或第二事实源。
+- month/all schema 升级为 v7；migration `0125` 只增加两个测量后需要的 bank/invoice identity 表达式索引。20 万级本地 replay 中 exact proof 约 `250ms`、30 scope bulk proof 约 `0.77s`，8 个并发 all-scope consumer 只执行一次数据库 proof。最终 `<3s` 必须由 exact SHA 部署、正式 rehydrate 和同一 test-owned fixture 生产矩阵证明。

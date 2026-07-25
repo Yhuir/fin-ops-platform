@@ -1,8 +1,40 @@
 # Phase 27 Release Candidate Verification
 
-> Current post-`b483e63df` corrective candidate local status: **pass**. Production L4 status: **pending Plan 27-07**. Local success does not authorize claiming production latency or completion.
+> Current HEAD/origin baseline: `f8ad8b381c0fe2aeb48c0cb5815db5098dc75ae2`. Worktree contains the v7 Workbench canonical-proof corrective candidate. Targeted code/performance evidence passes; final current-state PostgreSQL/docs/legacy-path gate, exact-SHA commit/deploy, controlled rehydrate and production L4 matrix remain pending. Phase 27 is not complete.
 
-## 2026-07-25 corrective candidate
+## 2026-07-25 v7 Workbench canonical-proof corrective candidate
+
+The deployed `f8ad8b38` release proved the ordinary write objective but not the access SLO:
+
+- three reversible relation rounds returned in about `172–345ms`;
+- ordinary writes produced zero unrelated read-model fan-out;
+- Workbench access was roughly `4–7.4s`, Cost project/all roughly `5.2–9.9s`, Turnover roughly `2.7–4.7s`, while warm and exact Cost paths were much shorter;
+- production diagnostics showed concurrent consumers repeating the same canonical Workbench source proof for seconds before the durable queue had one effective event. Existing worker lanes were already concurrent, so another worker/queue was not justified.
+
+The current v7 candidate:
+
+- reuses the Application-owned `WorkbenchSqlProjectionBuilder` for Workbench, Cost dependency and source-version reads instead of constructing request-local builders;
+- coalesces only overlapping active proofs per exact scope with stdlib `Future`; completed proofs are removed immediately, later access rechecks canonical facts and a failed flight can retry;
+- extends the existing proof to every direct Workbench input: all relation/exception/override states, pending claims, scope and cross-month OA/bank/invoice members, ETC submission/business/invoice/link rows, and only the consumed bank settings signatures;
+- carries the same fields into composed all-scope Workbench source versions;
+- bumps month/all Workbench schema to v7 and adds migration `0125` with only the two measured bank/invoice identity expression indexes;
+- adds no dependency, table, queue, worker, cache, coordinator, endpoint or fallback.
+
+Current local evidence before the final release gate:
+
+- `tests.test_workbench_sql_runtime`: `181 passed`;
+- combined Workbench/Cost/gateway/architecture/runtime-worker slice: `334 passed`;
+- disposable PostgreSQL Workbench ETC/cross-month/settings/index slice: `6 passed`;
+- migration SQL suite after registering `0125`: `66 passed`;
+- `bash scripts/verify.sh lint`: pass;
+- `git diff --check`: pass;
+- 20万级 local replay: exact proof about `250ms`; 30-scope bulk proof about `0.77s`; 8 concurrent identical all-scope consumers caused one database proof.
+
+The synthetic proof does not satisfy the prompt's ambiguous standalone `100ms` micro-target. The hard product gate remains ordinary stale access-to-fresh p99 within 3 seconds on the production fixture; no new infrastructure will be added solely to make an undefined microbenchmark green. If production still misses 3 seconds, the full round must be collected and fixed by shared root cause.
+
+Deployment of this candidate requires migration `0125`, exact release activation, one official `workbench-rehydrate` for the v7 schema, queue drain and then one complete production matrix. That maintenance rehydrate is not an ordinary page-load SLO.
+
+## f8ad8b38 semantic-proof candidate (deployed baseline)
 
 The deployed `b483e63df` baseline proved fast zero-fan-out writes but exposed a shared Cost/Workbench proof defect: Workbench active generations with identical business source proof and a newer execution-only `source_version` repeatedly made Cost query, worker and parent/child SQL disagree about freshness. Production evidence showed each repeated event completed once and retained generations had identical business proof, so the root cause was semantic version amplification rather than a missing queue lock or nondeterministic business rebuild.
 
@@ -16,7 +48,7 @@ The corrective candidate:
 - preserves informational `affected_months` and empty write targets, so the current page's normal GET remains the only refresh owner;
 - adds no dependency, migration, table, queue, worker, cache, endpoint, coordinator or fallback.
 
-## Release gates
+## Retained f8ad8b38 release gates
 
 | Gate | Result | Current evidence |
 | --- | --- | --- |
@@ -118,4 +150,4 @@ Static guards enforce all of the above and fail if an ordinary mutation, service
 
 ## Remaining blocking risk
 
-唯一 blocking 工作是 L4 production：exact main SHA 部署、17 页真实 HTTP/browser、15 read model current-effective、生产 p50/p95/p99/max、Cost project/all + Workbench + Turnover access DAG、test-owned relation confirm→withdraw 三轮、零 ordinary downstream jobs、零 unrelated dirty delta、最终 fixture inactive、System Audit 与 rollback release 证据。完成前 Phase 27 不得标记 complete。
+剩余工作按顺序是：完成当前文档/旧路径审计和 final current-state targeted/PostgreSQL/runtime gate；commit/push exact main SHA；部署并确认 migration `0125`；执行一次正式 v7 Workbench rehydrate；随后用同一 test-owned fixture 跑 17 页、15 read model、全部允许操作/可写 Drawer 的单轮生产矩阵，证明普通写快速返回、零 ordinary downstream jobs、零 unrelated dirty/read-model I/O、Workbench/Cost/Turnover p99 `<3s`、两个同时打开页面最终读取新版本、System Audit/queue/dirty/worker 收敛及 fixture 恢复。完成前 Phase 27 不得标记 complete。

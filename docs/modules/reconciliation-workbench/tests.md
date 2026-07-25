@@ -140,7 +140,7 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_w
 
 ## 2026-07-22 Workbench v6 与历史修复回归
 
-- `tests/test_workbench_sql_runtime.py` 证明 month/all v6 同步，groups/initial cache key 随 schema 派生失效，旧 v5 source version 返回 `builder_mismatch`，不能作为 fresh generation 消费。
+- `tests/test_workbench_sql_runtime.py` 证明当前 month/all v7 同步，groups/initial cache key 随 schema 派生失效，旧 v6 source version 返回 `builder_mismatch`，不能作为 fresh generation 消费。
 - requirement repair 测试证明 legacy Turnover active relation 的完整 preimage/intended after fingerprint、partial execute、exact metadata rollback、partial rollback retry 和 drift zero-write；普通 relation、ETC、batch 与 inactive relation 不受影响。
 - 既有 grouping/projection/query 回归继续证明：要求 OA 的 bank-only case 保持同 case unpaired，补齐 OA 后进入 paired，active generation 只经现有原子 publish 边界切换。
 - `tests/test_audit_workbench_relation_display_tool.py` 同步保护审计口径：`turnover_manual_closure` 不再享有旧的 requirement 豁免；缺 OA 的 bank-only closure 在 unpaired 不报警，若出现在 paired 必须报告 `relation_requirement_partition_mismatch`。
@@ -156,4 +156,10 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_w
 ## 2026-07-25 Workbench active-refresh polling 回归
 
 - `tests/test_workbench_sql_runtime.py` 证明 exact scope 有 `pending/processing` outbox event 时直接返回 `refreshing`，不重复执行全月份 canonical proof或 schema scan；dirty 没有 active event 时标记 stale并返回 exact re-enqueue scope。
+
+## 2026-07-25 - v7 complete canonical proof 与 active-flight 合并
+
+- `tests/test_workbench_sql_runtime.py` 覆盖 Application 复用同一个 projection builder、重叠同 scope proof 只执行一次数据库读取、完成后独立访问重新查询、失败 flight 清理可重试、month/all v7 拒绝 v6，以及 composed all proof 保留全部业务字段。
+- `tests/test_workbench_etc_relation_enrichment_postgres.py` 在 disposable PostgreSQL 证明 ETC 四表、bank/invoice soft delete、跨月 member 更新、relation withdraw 和 consumed bank settings 都会改变正确 scope proof；无关 settings 不污染 proof，migration `0125` 两个 identity 索引已应用。
+- 当前候选没有改 HTTP shape、权限或前端交互；本条不新增重复前端测试。页面双开、写后零 fan-out、access-to-fresh `<3s`、Audit/queue/worker 与 fixture 恢复由最终生产矩阵负责。
 - `tests/test_workbench_relation_sql_projection.py` 证明 `turnover_manual_closure` 保留在 Workbench 主 generation 的 canonical 输入，但不进入共享 `workbench_relation` distribution。

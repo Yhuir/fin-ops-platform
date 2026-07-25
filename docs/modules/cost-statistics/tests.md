@@ -460,6 +460,12 @@ PYTHONPATH=backend/src scripts/check-read-model-scope-contracts.py --help
 ## 2026-07-24 all scope 子分片 freshness 门禁
 
 - `tests/test_workbench_sql_runtime.py`：单月与批量 canonical Workbench source-version proof 共用同一 set-based SQL；批量月份去重、非法 scope fail-fast，并覆盖全部 canonical 写表与固定规则版本。
+
+## 2026-07-25 - Cost 复用 Workbench v7 active proof
+
+- `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_and_cost_access_reuse_the_application_projection_builder` 证明 Workbench query、Cost dependency source versions 和 Application source-version port 复用同一 builder，禁止 request-local 重复 proof owner。
+- `test_overlapping_canonical_proofs_share_only_the_active_scope_flight` 证明并发 Cost/Workbench consumer 只共享 active proof，完成后没有 TTL cache；`test_failed_canonical_proof_flight_is_removed_for_page_retry` 证明失败不会让页面永久卡住。
+- 既有 Cost semantic source-version tests继续证明只排除 Workbench执行游标`source_version`；v7新增的ETC、关系状态、跨月成员和consumed settings字段仍fail closed。Cost API、worker、schema和页面交互未改变，最终project/all `<3s`由生产fixture验证。
 - `tests/test_cost_statistics_sql_runtime.py`：Cost all 访问先批量比较 canonical→active Workbench generations，只 enqueue 全部且仅 stale Workbench 月份；Workbench fresh 后，repository gate 逐月比较 Cost child 的 Workbench/Bank Detail lineage 与 parent `source_shards`，只 enqueue 精确 stale Cost child。concrete month 主表保持当前月 freshness，但同页全期间 statistics 也使用 parent-child proof；其它月份 drift 时 statistics fail-closed 并 ensure exact child，不把当前月 rows 伪装 stale。
 - `tests/test_batch_accounting_postgres_integration.py`：真实 PostgreSQL 下批量 Workbench proof 必须与逐月 proof 完全一致；`tests/test_cost_statistics_postgres_integration.py`：真实 PostgreSQL 制造 child Workbench lineage drift，证明 parent fail-closed 并返回精确 child scope。
 - `tests/test_read_model_manifest.py`：锁定 Cost repository port 的 bulk active Workbench version I/O；不新增 endpoint、worker、queue、registry、cache 或第二套刷新协调器。

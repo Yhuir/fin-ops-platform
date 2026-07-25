@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from concurrent.futures import Future
 from copy import deepcopy
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 import re
+from threading import Lock
 from typing import Any
 
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
+from fin_ops_platform.services.bank_settings import (
+    bank_account_mappings_fingerprint_from_settings_payload,
+    bank_auto_tag_rules_version_from_settings_payload,
+)
 from fin_ops_platform.services.no_oa_bank_batch_service import (
     BANK_FLOW_RULE_BATCH_RELATION_MODE,
     NO_OA_BANK_BATCH_RELATION_MODE,
@@ -53,6 +59,18 @@ WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION
 ETC_BATCH_TAG = "ETC批量提交"
 
 
+def _bank_settings_source_versions(settings_payload: object) -> dict[str, object]:
+    settings = settings_payload if isinstance(settings_payload, dict) else {}
+    return {
+        "bank_auto_tag_rules_version": bank_auto_tag_rules_version_from_settings_payload(
+            settings
+        ),
+        "bank_account_mappings_fingerprint": (
+            bank_account_mappings_fingerprint_from_settings_payload(settings)
+        ),
+    }
+
+
 class WorkbenchSqlProjectionBuilder:
     def __init__(
         self,
@@ -65,6 +83,11 @@ class WorkbenchSqlProjectionBuilder:
         self._connection = connection
         self._read_model_repository = read_model_repository or PostgresReadModelRepository(connection)
         self._bank_account_mapping_cache: dict[str, str] | None = None
+        self._source_version_flights_lock = Lock()
+        self._source_version_flights: dict[
+            str,
+            Future[dict[str, object] | None],
+        ] = {}
         self._bank_account_resolver = bank_account_resolver or BankAccountResolver(self._bank_account_mapping_dict)
         if oa_query_service is not None:
             self._oa_query_service = oa_query_service
@@ -215,37 +238,49 @@ class WorkbenchSqlProjectionBuilder:
               coalesce((
                 select max(updated_at)::text
                 from app.bank_transaction_relation_claims
-                where status = 'active'
               ), '') as oa_pending_payment_bank_claims_updated_at,
               coalesce((
                 select max(updated_at)::text
                 from app.bank_transactions
-                where status <> 'deleted'
               ), '') as bank_transactions_updated_at,
               coalesce((
                 select max(updated_at)::text
                 from app.invoices
-                where status <> 'deleted'
               ), '') as invoices_updated_at,
               coalesce((
-                select max(oa.updated_at)::text
-                from app.oa_applications oa
-                where """
-            + COMPLETED_WORKFLOW_STATUS_SQL
-            + """
-                   or oa.row_id in (
-                     select unnest(relation.row_ids)
-                     from app.workbench_pair_relations relation
-                     where relation.status = 'active'
-                   )
-              ), '') as oa_projection_updated_at
+                select max(updated_at)::text
+                from app.oa_applications
+              ), '') as oa_projection_updated_at,
+              coalesce((
+                select max(updated_at)::text
+                from app.etc_submission_batches
+              ), '') as etc_submission_batches_updated_at,
+              coalesce((
+                select max(updated_at)::text
+                from app.etc_business_batches
+              ), '') as etc_business_batches_updated_at,
+              coalesce((
+                select max(updated_at)::text
+                from app.etc_invoices
+              ), '') as etc_invoices_updated_at,
+              coalesce((
+                select max(updated_at)::text
+                from app.etc_batch_invoice_links
+              ), '') as etc_batch_invoice_links_updated_at,
+              coalesce((
+                select settings_payload
+                from app.app_settings
+                where settings_key = 'app_settings'
+                order by updated_at desc
+                limit 1
+              ), '{}'::jsonb) as settings_payload
             """
         )
         payload = row if isinstance(row, dict) else {}
         return {
             "builder": WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION,
             "workbench_formal_relation_rule_version": WORKBENCH_FORMAL_RELATION_RULE_VERSION,
-            "bank_auto_tag_rules_version": self._current_bank_auto_tag_rules_version(),
+            **_bank_settings_source_versions(row_payload(payload, "settings_payload")),
             "oa_attachment_invoice_parser_version": attachment_invoice_cache_parser_version(),
             "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
             "workbench_pair_relations_updated_at": str(payload.get("pair_relations_updated_at") or ""),
@@ -257,6 +292,16 @@ class WorkbenchSqlProjectionBuilder:
             "bank_transactions_updated_at": str(payload.get("bank_transactions_updated_at") or ""),
             "invoices_updated_at": str(payload.get("invoices_updated_at") or ""),
             "oa_projection_updated_at": str(payload.get("oa_projection_updated_at") or ""),
+            "etc_submission_batches_updated_at": str(
+                payload.get("etc_submission_batches_updated_at") or ""
+            ),
+            "etc_business_batches_updated_at": str(
+                payload.get("etc_business_batches_updated_at") or ""
+            ),
+            "etc_invoices_updated_at": str(payload.get("etc_invoices_updated_at") or ""),
+            "etc_batch_invoice_links_updated_at": str(
+                payload.get("etc_batch_invoice_links_updated_at") or ""
+            ),
         }
 
     def source_versions_for_scopes(self, scope_keys: list[str]) -> dict[str, dict[str, object]]:
@@ -273,76 +318,164 @@ class WorkbenchSqlProjectionBuilder:
             raise ValueError("workbench SQL bulk source-version scope_keys must be month shards YYYY-MM.")
         if not normalized_scope_keys:
             return {}
+
+        flights: dict[str, Future[dict[str, object] | None]] = {}
+        owned_scope_keys: list[str] = []
+        with self._source_version_flights_lock:
+            for scope_key in normalized_scope_keys:
+                flight = self._source_version_flights.get(scope_key)
+                if flight is None:
+                    flight = Future()
+                    self._source_version_flights[scope_key] = flight
+                    owned_scope_keys.append(scope_key)
+                flights[scope_key] = flight
+
+        if owned_scope_keys:
+            try:
+                loaded = self._load_source_versions_for_scopes(owned_scope_keys)
+            except BaseException as error:
+                for scope_key in owned_scope_keys:
+                    flights[scope_key].set_exception(error)
+                raise
+            else:
+                for scope_key in owned_scope_keys:
+                    flights[scope_key].set_result(loaded.get(scope_key))
+            finally:
+                with self._source_version_flights_lock:
+                    for scope_key in owned_scope_keys:
+                        if self._source_version_flights.get(scope_key) is flights[scope_key]:
+                            del self._source_version_flights[scope_key]
+
+        result: dict[str, dict[str, object]] = {}
+        for scope_key in normalized_scope_keys:
+            source_versions = flights[scope_key].result()
+            if source_versions is not None:
+                result[scope_key] = dict(source_versions)
+        return result
+
+    def _load_source_versions_for_scopes(
+        self,
+        normalized_scope_keys: list[str],
+    ) -> dict[str, dict[str, object]]:
         scope_months = [month_start(scope_key) for scope_key in normalized_scope_keys]
         rows = self._connection.fetch_all(
             """
             with requested_scopes as (
                 select unnest(%s::date[]) as scope_month
             ),
-            month_objects as (
-                select scopes.scope_month, coalesce(bank.legacy_mongo_id, bank.id::text) as row_id
-                from requested_scopes scopes
-                join app.bank_transactions bank on bank.txn_month = scopes.scope_month
-                where bank.status <> 'deleted'
-                union
-                select scopes.scope_month, oa.row_id
-                from requested_scopes scopes
-                join app.oa_applications oa
-                  on oa.application_date >= scopes.scope_month
-                 and oa.application_date < scopes.scope_month + interval '1 month'
-                where """
-            + COMPLETED_WORKFLOW_STATUS_SQL
-            + """
-                union
-                select scopes.scope_month, coalesce(invoice.legacy_mongo_id, invoice.id::text) as row_id
-                from requested_scopes scopes
-                join app.invoices invoice on invoice.invoice_month = scopes.scope_month
-                where invoice.status <> 'deleted'
+            current_settings as (
+                select settings_payload
+                from app.app_settings
+                where settings_key = 'app_settings'
+                order by updated_at desc
+                limit 1
             ),
-            month_object_arrays as (
+            relation_members as (
+                select
+                  relation.id as relation_id,
+                  relation.status,
+                  relation.updated_at,
+                  relation.month_scope,
+                  relation.row_ids,
+                  member.row_id
+                from app.workbench_pair_relations relation
+                cross join lateral unnest(relation.row_ids) member(row_id)
+            ),
+            exception_members as (
+                select exception.scope_month, exception.updated_at, member.row_id
+                from app.workbench_exception_cases exception
+                cross join lateral unnest(exception.row_ids) member(row_id)
+            ),
+            override_members as (
+                select override.scope_month, override.updated_at, override.row_id
+                from app.workbench_row_overrides override
+            ),
+            proof_member_ids as (
+                select row_id from relation_members
+                union
+                select row_id from exception_members
+                union
+                select row_id from override_members
+            ),
+            resolved_member_objects as (
+                select
+                  ids.row_id,
+                  'bank'::text as object_kind,
+                  bank.txn_month as source_scope_month,
+                  bank.updated_at
+                from proof_member_ids ids
+                join app.bank_transactions bank
+                  on coalesce(bank.legacy_mongo_id, bank.id::text) = ids.row_id
+                union all
+                select
+                  ids.row_id,
+                  'invoice'::text as object_kind,
+                  invoice.invoice_month as source_scope_month,
+                  invoice.updated_at
+                from proof_member_ids ids
+                join app.invoices invoice
+                  on coalesce(invoice.legacy_mongo_id, invoice.id::text) = ids.row_id
+                union all
+                select
+                  ids.row_id,
+                  'oa'::text as object_kind,
+                  date_trunc('month', oa.application_date)::date as source_scope_month,
+                  oa.updated_at
+                from proof_member_ids ids
+                join app.oa_applications oa on oa.row_id = ids.row_id
+                where oa.application_date is not null
+            ),
+            scoped_relation_ids as (
                 select
                   scopes.scope_month,
-                  coalesce(
-                    array_agg(distinct objects.row_id) filter (where objects.row_id is not null),
-                    array[]::text[]
-                  ) as row_ids
+                  relation.relation_id,
+                  relation.status,
+                  relation.updated_at as relation_updated_at
                 from requested_scopes scopes
-                left join month_objects objects on objects.scope_month = scopes.scope_month
-                group by scopes.scope_month
-            ),
-            scoped_relations as (
-                select scopes.scope_month, relation.status, relation.updated_at, relation.row_ids
-                from requested_scopes scopes
-                join app.workbench_pair_relations relation on relation.month_scope = scopes.scope_month
+                join relation_members relation on relation.month_scope = scopes.scope_month
                 union
-                select objects.scope_month, relation.status, relation.updated_at, relation.row_ids
-                from month_object_arrays objects
-                join app.workbench_pair_relations relation on relation.row_ids && objects.row_ids
+                select
+                  scopes.scope_month,
+                  relation.relation_id,
+                  relation.status,
+                  relation.updated_at as relation_updated_at
+                from relation_members relation
+                join resolved_member_objects objects on objects.row_id = relation.row_id
+                join requested_scopes scopes
+                  on scopes.scope_month = objects.source_scope_month
+            ),
+            scoped_relation_members as (
+                select
+                  relation_scope.scope_month,
+                  relation_scope.status,
+                  relation_scope.relation_updated_at,
+                  relation.row_id,
+                  objects.object_kind,
+                  objects.updated_at as object_updated_at
+                from scoped_relation_ids relation_scope
+                join relation_members relation
+                  on relation.relation_id = relation_scope.relation_id
+                left join resolved_member_objects objects on objects.row_id = relation.row_id
             ),
             active_relation_row_ids as (
-                select distinct relations.scope_month, unnest(relations.row_ids) as row_id
-                from scoped_relations relations
+                select distinct relations.scope_month, relations.row_id
+                from scoped_relation_members relations
                 where relations.status = 'active'
             ),
-            scope_row_ids as (
-                select scope_month, row_id from month_objects
-                union
-                select scope_month, row_id from active_relation_row_ids
-            ),
-            scope_row_id_arrays as (
-                select
-                  scopes.scope_month,
-                  coalesce(
-                    array_agg(distinct ids.row_id) filter (where ids.row_id is not null),
-                    array[]::text[]
-                  ) as row_ids
-                from requested_scopes scopes
-                left join scope_row_ids ids on ids.scope_month = scopes.scope_month
-                group by scopes.scope_month
+            active_relation_objects as (
+                select distinct
+                  relations.scope_month,
+                  relations.object_kind,
+                  relations.object_updated_at as updated_at
+                from scoped_relation_members relations
+                where relations.status = 'active'
+                  and relations.object_kind is not null
             ),
             relation_versions as (
-                select scope_month, max(updated_at)::text as pair_relations_updated_at
-                from scoped_relations
+                select
+                  scope_month,
+                  max(relation_updated_at)::text as pair_relations_updated_at
+                from scoped_relation_members
                 group by scope_month
             ),
             exception_updates as (
@@ -351,10 +484,15 @@ class WorkbenchSqlProjectionBuilder:
                 join app.workbench_exception_cases exception
                   on exception.scope_month = scopes.scope_month
                 union all
-                select objects.scope_month, exception.updated_at
-                from scope_row_id_arrays objects
-                join app.workbench_exception_cases exception
-                  on exception.row_ids && objects.row_ids
+                select objects.source_scope_month, exception.updated_at
+                from exception_members exception
+                join resolved_member_objects objects on objects.row_id = exception.row_id
+                join requested_scopes scopes
+                  on scopes.scope_month = objects.source_scope_month
+                union all
+                select ids.scope_month, exception.updated_at
+                from active_relation_row_ids ids
+                join exception_members exception on exception.row_id = ids.row_id
             ),
             exception_versions as (
                 select scope_month, max(updated_at)::text as exception_cases_updated_at
@@ -367,9 +505,15 @@ class WorkbenchSqlProjectionBuilder:
                 join app.workbench_row_overrides override
                   on override.scope_month = scopes.scope_month
                 union all
+                select objects.source_scope_month, override.updated_at
+                from override_members override
+                join resolved_member_objects objects on objects.row_id = override.row_id
+                join requested_scopes scopes
+                  on scopes.scope_month = objects.source_scope_month
+                union all
                 select ids.scope_month, override.updated_at
-                from scope_row_ids ids
-                join app.workbench_row_overrides override on override.row_id = ids.row_id
+                from active_relation_row_ids ids
+                join override_members override on override.row_id = ids.row_id
             ),
             override_versions as (
                 select scope_month, max(updated_at)::text as row_overrides_updated_at
@@ -380,20 +524,16 @@ class WorkbenchSqlProjectionBuilder:
                 select claims.scope_month, max(claims.updated_at)::text as oa_pending_payment_bank_claims_updated_at
                 from app.bank_transaction_relation_claims claims
                 join requested_scopes scopes on scopes.scope_month = claims.scope_month
-                where claims.status = 'active'
                 group by claims.scope_month
             ),
             bank_updates as (
                 select scopes.scope_month, bank.updated_at
                 from requested_scopes scopes
                 join app.bank_transactions bank on bank.txn_month = scopes.scope_month
-                where bank.status <> 'deleted'
                 union all
-                select ids.scope_month, bank.updated_at
-                from scope_row_ids ids
-                join app.bank_transactions bank
-                  on coalesce(bank.legacy_mongo_id, bank.id::text) = ids.row_id
-                where bank.status <> 'deleted'
+                select scope_month, updated_at
+                from active_relation_objects
+                where object_kind = 'bank'
             ),
             bank_versions as (
                 select scope_month, max(updated_at)::text as bank_transactions_updated_at
@@ -404,13 +544,10 @@ class WorkbenchSqlProjectionBuilder:
                 select scopes.scope_month, invoice.updated_at
                 from requested_scopes scopes
                 join app.invoices invoice on invoice.invoice_month = scopes.scope_month
-                where invoice.status <> 'deleted'
                 union all
-                select ids.scope_month, invoice.updated_at
-                from scope_row_ids ids
-                join app.invoices invoice
-                  on coalesce(invoice.legacy_mongo_id, invoice.id::text) = ids.row_id
-                where invoice.status <> 'deleted'
+                select scope_month, updated_at
+                from active_relation_objects
+                where object_kind = 'invoice'
             ),
             invoice_versions as (
                 select scope_month, max(updated_at)::text as invoices_updated_at
@@ -423,17 +560,97 @@ class WorkbenchSqlProjectionBuilder:
                 join app.oa_applications oa
                   on oa.application_date >= scopes.scope_month
                  and oa.application_date < scopes.scope_month + interval '1 month'
-                where """
-            + COMPLETED_WORKFLOW_STATUS_SQL
-            + """
                 union all
-                select ids.scope_month, oa.updated_at
-                from scope_row_ids ids
-                join app.oa_applications oa on oa.row_id = ids.row_id
+                select scope_month, updated_at
+                from active_relation_objects
+                where object_kind = 'oa'
             ),
             oa_versions as (
                 select scope_month, max(updated_at)::text as oa_projection_updated_at
                 from oa_updates
+                group by scope_month
+            ),
+            etc_submission_versions as (
+                select
+                  scopes.scope_month,
+                  max(batch.updated_at)::text as etc_submission_batches_updated_at
+                from requested_scopes scopes
+                left join app.etc_submission_batches batch
+                  on batch.scope_month = scopes.scope_month
+                group by scopes.scope_month
+            ),
+            etc_business_versions as (
+                select
+                  scopes.scope_month,
+                  max(batch.updated_at)::text as etc_business_batches_updated_at
+                from requested_scopes scopes
+                left join app.etc_business_batches batch
+                  on batch.scope_month = scopes.scope_month
+                group by scopes.scope_month
+            ),
+            etc_invoice_updates as (
+                select scopes.scope_month, invoice.updated_at
+                from requested_scopes scopes
+                join app.etc_invoices invoice
+                  on invoice.scope_month = scopes.scope_month
+                union all
+                select scopes.scope_month, invoice.updated_at
+                from requested_scopes scopes
+                join app.etc_business_batches business_batch
+                  on business_batch.scope_month = scopes.scope_month
+                join lateral jsonb_array_elements_text(
+                  case
+                    when jsonb_typeof(
+                      business_batch.raw_payload->'normalized_payload'->'invoice_ids'
+                    ) = 'array'
+                    then business_batch.raw_payload->'normalized_payload'->'invoice_ids'
+                    else '[]'::jsonb
+                  end
+                ) member(invoice_id) on true
+                join app.etc_invoices invoice
+                  on invoice.etc_invoice_id = member.invoice_id
+                union all
+                select scopes.scope_month, invoice.updated_at
+                from requested_scopes scopes
+                join app.etc_business_batches business_batch
+                  on business_batch.scope_month = scopes.scope_month
+                join lateral jsonb_array_elements_text(
+                  case
+                    when jsonb_typeof(
+                      business_batch.raw_payload->'normalized_payload'->'invoice_ids'
+                    ) = 'array'
+                    then business_batch.raw_payload->'normalized_payload'->'invoice_ids'
+                    else '[]'::jsonb
+                  end
+                ) member(invoice_id) on true
+                join app.etc_invoices invoice
+                  on invoice.legacy_mongo_id = member.invoice_id
+            ),
+            etc_invoice_versions as (
+                select scope_month, max(updated_at)::text as etc_invoices_updated_at
+                from etc_invoice_updates
+                group by scope_month
+            ),
+            etc_link_updates as (
+                select scopes.scope_month, link.updated_at
+                from requested_scopes scopes
+                join app.etc_business_batches business_batch
+                  on business_batch.scope_month = scopes.scope_month
+                join app.etc_batch_invoice_links link
+                  on link.business_batch_id = business_batch.business_batch_id
+                union all
+                select scopes.scope_month, link.updated_at
+                from requested_scopes scopes
+                join app.invoices invoice
+                  on invoice.invoice_month = scopes.scope_month
+                join app.etc_batch_invoice_links link
+                  on link.invoice_id = invoice.id
+            ),
+            etc_link_versions as (
+                select
+                  scope_month,
+                  max(updated_at)::text as etc_batch_invoice_links_updated_at
+                from etc_link_updates
                 group by scope_month
             )
             select
@@ -445,25 +662,14 @@ class WorkbenchSqlProjectionBuilder:
               bank.bank_transactions_updated_at,
               invoice.invoices_updated_at,
               oa.oa_projection_updated_at,
+              etc_submission.etc_submission_batches_updated_at,
+              etc_business.etc_business_batches_updated_at,
+              etc_invoice.etc_invoices_updated_at,
+              etc_link.etc_batch_invoice_links_updated_at,
               coalesce(
-                (
-                  select case
-                           when coalesce(
-                             settings_payload->'bank_transaction_tags'->>'version',
-                             ''
-                           ) ~ '^[0-9]+$'
-                           then (
-                             settings_payload->'bank_transaction_tags'->>'version'
-                           )::integer
-                           else 1
-                         end
-                  from app.app_settings
-                  where settings_key = 'app_settings'
-                  order by updated_at desc
-                  limit 1
-                ),
-                1
-              ) as bank_auto_tag_rules_version
+                (select settings_payload from current_settings),
+                '{}'::jsonb
+              ) as settings_payload
             from requested_scopes scopes
             left join relation_versions relations using (scope_month)
             left join exception_versions exceptions using (scope_month)
@@ -472,6 +678,10 @@ class WorkbenchSqlProjectionBuilder:
             left join bank_versions bank using (scope_month)
             left join invoice_versions invoice using (scope_month)
             left join oa_versions oa using (scope_month)
+            left join etc_submission_versions etc_submission using (scope_month)
+            left join etc_business_versions etc_business using (scope_month)
+            left join etc_invoice_versions etc_invoice using (scope_month)
+            left join etc_link_versions etc_link using (scope_month)
             order by scopes.scope_month
             """,
             (scope_months,),
@@ -480,9 +690,7 @@ class WorkbenchSqlProjectionBuilder:
             str(row.get("scope_key") or "").strip(): {
                 "builder": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
                 "workbench_formal_relation_rule_version": WORKBENCH_FORMAL_RELATION_RULE_VERSION,
-                "bank_auto_tag_rules_version": (
-                    _int_or_none(row.get("bank_auto_tag_rules_version")) or 1
-                ),
+                **_bank_settings_source_versions(row_payload(row, "settings_payload")),
                 "oa_attachment_invoice_parser_version": attachment_invoice_cache_parser_version(),
                 "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
                 "workbench_pair_relations_updated_at": str(row.get("pair_relations_updated_at") or ""),
@@ -494,6 +702,18 @@ class WorkbenchSqlProjectionBuilder:
                 "bank_transactions_updated_at": str(row.get("bank_transactions_updated_at") or ""),
                 "invoices_updated_at": str(row.get("invoices_updated_at") or ""),
                 "oa_projection_updated_at": str(row.get("oa_projection_updated_at") or ""),
+                "etc_submission_batches_updated_at": str(
+                    row.get("etc_submission_batches_updated_at") or ""
+                ),
+                "etc_business_batches_updated_at": str(
+                    row.get("etc_business_batches_updated_at") or ""
+                ),
+                "etc_invoices_updated_at": str(
+                    row.get("etc_invoices_updated_at") or ""
+                ),
+                "etc_batch_invoice_links_updated_at": str(
+                    row.get("etc_batch_invoice_links_updated_at") or ""
+                ),
             }
             for row in rows
             if isinstance(row, dict) and str(row.get("scope_key") or "").strip()
@@ -503,23 +723,6 @@ class WorkbenchSqlProjectionBuilder:
             for scope_key in normalized_scope_keys
             if scope_key in payload_by_scope
         }
-
-    def _current_bank_auto_tag_rules_version(self) -> int:
-        row = self._connection.fetch_one(
-            "select settings_payload from app.app_settings where settings_key = %s",
-            ("app_settings",),
-        )
-        payload = row_payload(row, "settings_payload")
-        if not isinstance(payload, dict):
-            return 1
-        bank_transaction_tags = payload.get("bank_transaction_tags")
-        if isinstance(bank_transaction_tags, dict):
-            value = bank_transaction_tags.get("version")
-            try:
-                return int(value)
-            except (TypeError, ValueError):
-                return 1
-        return 1
 
     def _workbench_rows_for_month(
         self,

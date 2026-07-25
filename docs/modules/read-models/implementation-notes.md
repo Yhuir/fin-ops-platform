@@ -1857,3 +1857,9 @@
 - 生产可逆 Turnover closure 证明普通写零 fan-out，但 active relation 期间共享 relation Audit 把专用 `turnover_manual_closure` 当作所有页面依赖，且 Workbench polling 在 worker active 时重复扫描全月份 canonical proof。
 - 修复复用现有 relation repository/gateway：共享 distribution、Bank Details、Pending Invoice 与 Audit 使用同一排除 mode；Workbench/Turnover/Cost 保留各自 canonical proof。旧污染只在 exact scope 访问时重建，不新增 migration、queue、worker、cache、schema 或 fallback。
 - Workbench freshness service 在 current-effective active refresh 时直接返回 `refreshing`，active event 消失后继续完整 proof 与 orphan recovery。
+
+## 2026-07-25 - v7 Workbench canonical proof owner 收敛
+
+- 当前 Workbench expected/published proof 覆盖 projection 的完整直接输入：relation/exception/override/claim、scope 与跨月成员 OA/银行/发票、ETC 四表和实际消费的 settings fingerprint；撤回、soft delete、跨月成员与 ETC ownership 变化都由同一 source vector 驱动 exact scope stale。
+- `server.py` 只注入 Application 已持有的 shared `WorkbenchSqlProjectionBuilder`。并发同 scope 请求只共享 active proof I/O，不缓存已完成结果；PostgreSQL dirty/outbox、gateway 和 active-generation publish 合同不变。
+- v7 部署只需要 migration `0125` 和既有正式 `workbench-rehydrate` 入口，不增加 read model、queue、worker、registry、cache 或 transport。最终生产 SLO/Audit/queue closure 前保持 Phase 27 open。
