@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: complete
-stopped_at: Completed Phase 28 Cost statistics recovery performance Plan 28-01.
-last_updated: "2026-07-25T20:15:06+08:00"
-last_activity: 2026-07-25 - Production Cost recovery, reversible fixture, System Audit, queue and worker convergence all closed
+status: executing
+stopped_at: Executing Phase 29 Workbench access performance Plan 29-01.
+last_updated: "2026-07-25T21:00:00+08:00"
+last_activity: 2026-07-25 - Workbench access hot path baseline and root cause frozen
 progress:
-  total_phases: 23
+  total_phases: 24
   completed_phases: 5
-  total_plans: 37
+  total_plans: 38
   completed_plans: 37
-  percent: 100
+  percent: 97
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-16)
 
 **Core value:** Preserve production finance workflow correctness while improving individual pages through isolated, reviewable GSD phases.
-**Current focus:** Phase 28 is complete; Cost recovery polling is bounded without changing Phase 27 correctness, isolation or zero-fan-out contracts.
+**Current focus:** Phase 29 removes repeated full Workbench payload polling while preserving Phase 27 correctness, isolation and zero-fan-out contracts.
 
 ## Current Position
 
-Phase: 28 of 28 (成本统计写后恢复性能)
-Plan: 28-01 of 28-01
-Status: Complete; implementation, corrective shared queue root fix and production verification closed
-Last activity: 2026-07-25 - Release `main-b6e814b0-20260725192427` passed reversible fixture recovery, 16/16 business-page System Audit, durable drain and runtime health
+Phase: 29 of 29 (关联台写后与访问恢复性能)
+Plan: 29-01 of 29-01
+Status: Executing; baseline/root cause frozen, implementation pending
+Last activity: 2026-07-25 - Current production handler p50/p95/p99 and public status/full payload polling hot paths measured
 
-Progress: [██████████] 100% (Phase 28)
+Progress: [█████████░] 97% (Phase 29)
 
 ## Performance Metrics
 
@@ -51,6 +51,7 @@ Progress: [██████████] 100% (Phase 28)
 
 ### Decisions
 
+- Phase 29 scope: reuse the existing lightweight Workbench groups freshness repository port for public status and replace repeated operation-time combined initial polling with one trigger load, lightweight status waiting and one final fresh load. No projection rewrite, cache, table, index, migration, queue, worker, coordinator or second freshness system is allowed.
 - Phase 28 closure: Cost active-recovery polling first performs one lightweight durable-state gate; only the no-active-recovery path executes the complete fail-closed statistics proof. No new cache, table, index, queue, worker, coordinator, frontend poller or write-time fan-out was added.
 - Phase 28 closure: Candidate A `d8e4c5946` reduced the exact `2026-02` Cost recovery sample from 7432.418 ms to 723.151 ms. Its full production chain exposed one shared queue defect: a completed `force_refresh=true` event could cover a later freshness target. The root was fixed once in `RuntimeQueueRepository` by `b6e814b05`; no page-specific fallback was introduced.
 - Phase 28 production release: `main-b6e814b0-20260725192427` is active. The reversible test-owned cross-month fixture returned to inactive state; direct final Workbench and Cost probes were fresh, all 15 read models had zero stale/unavailable scopes, durable outbox was empty, 24 required workers were effective and idle, and System Audit passed all 16 audited business pages.

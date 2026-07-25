@@ -2,6 +2,12 @@
 
 日期：2026-07-22
 
+## 2026-07-25 关联台写后恢复读放大回归
+
+- `tests/test_workbench_query_facade.py::WorkbenchQueryFacadeTests::test_refresh_status_uses_fast_freshness_status_instead_of_heavy_diagnostic` 证明公开 refresh-status 优先使用既有轻量 groups freshness port，完整 generation/outbox/worker diagnostic 不进入页面轮询热路径；旧 repository fallback 与 timeout 合同保持。
+- `web/src/test/WorkbenchSelection.test.tsx` 的 withdraw 完整恢复用例把 combined initial 保持为一次 recovery trigger 和一次最终 fresh payload，共 2 次；中间 refreshing 只调用轻量 refresh-status，最终仍验证 OA、银行、发票分别恢复为完整 unpaired singleton。
+- 现有 Workbench Selection 全文件继续覆盖 confirm operation projection、withdraw blocking UI、generation version conflict、failed/stale 状态、权限、筛选和详情交互；没有增加 retry fallback、第二轮询器或放宽 fresh 判断。
+
 ## 2026-07-25 访问时 exact Workbench proof 与 consumer 隔离
 
 - `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_all_freshness_returns_only_exact_canonical_mismatch_scopes` 证明 `month=all` 使用 canonical/active-generation bulk proof，只返回真实变化月份。

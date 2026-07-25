@@ -88,6 +88,14 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
+## 2026-07-25 - 写后恢复轻量状态等待
+
+- 真实原因：没有 operation projection 的关联台写操作在 active generation 恢复期间每 150ms 重复调用 combined initial；公开 refresh-status 同时仍走完整 consistency diagnostic，页面读 I/O 会与 worker 重建竞争。
+- 边界决策：保留现有 canonical write、exact access enqueue、active-generation 原子发布和 10 秒操作等待；第一次 combined initial 负责触发 recovery，等待阶段只读既有轻量 groups freshness status，canonical proof 返回 fresh 后再读取一次完整 payload。
+- 实现范围：`WorkbenchQueryFacade.refresh_status` 复用 SSE/groups gate 已使用的 repository port；前端复用既有 `fetchWorkbenchRefreshStatus`。没有新增 cache、表、索引、migration、queue、worker、SSE、协调器或第二 freshness 系统。
+- 旧链清理：删除操作等待循环中的重复 combined initial 读取；完整 diagnostic repository port 只作为缺少轻量 port 的兼容 fallback，不再是生产页面热路径 owner。
+- 测试：backend 锁定轻量 port 与 timeout fallback；frontend 锁定 refreshing 期间 3 次 status poll、完整页面恰好 2 次，并验证撤回后的三类 singleton 数据完整性。
+
 ## 当前决策
 
 - `oa_bank_exact_sum` 属于后端自动匹配规则；符合正式化条件的 paired decision 必须由后端通过 relation command 写成 active relation，不能只在 `server.py` 或前端补展示逻辑。

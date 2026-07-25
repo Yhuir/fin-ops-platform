@@ -909,7 +909,9 @@ class WorkbenchQueryFacade:
 
     def refresh_status(self, month: str | None) -> WorkbenchQueryResult:
         scope_key = self._scope_key_for_month(month or "all")
-        get_refresh_status = getattr(self._repository, "get_workbench_refresh_status", None)
+        get_refresh_status = getattr(self._repository, "get_workbench_groups_freshness_status", None)
+        if not callable(get_refresh_status):
+            get_refresh_status = getattr(self._repository, "get_workbench_refresh_status", None)
         if not callable(get_refresh_status):
             return WorkbenchQueryResult(
                 HTTPStatus.SERVICE_UNAVAILABLE,

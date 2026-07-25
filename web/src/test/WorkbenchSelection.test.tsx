@@ -1092,7 +1092,50 @@ describe("Workbench row selection and detail drawer", () => {
 
   test("withdraw link finishes only after the fresh refetch restores every row as an unpaired singleton", async () => {
     const user = userEvent.setup();
-    installMockApiFetch({ actionDelayMs: 20, workbenchLoadDelayMs: 160 });
+    const fetchMock = installMockApiFetch({ actionDelayMs: 20, workbenchLoadDelayMs: 160 });
+    const defaultFetch = fetchMock.getMockImplementation();
+    let withdrawCommitted = false;
+    let refreshStatusCallsAfterWrite = 0;
+    let initialPageCallsAfterWrite = 0;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (!defaultFetch) {
+        throw new Error("Mock API fetch is not installed.");
+      }
+      const path = fetchPath(input);
+      if (path === "/api/workbench/actions/withdraw-link") {
+        const response = await defaultFetch(input, init);
+        withdrawCommitted = true;
+        return response;
+      }
+      if (withdrawCommitted && path.startsWith("/api/workbench/refresh-status")) {
+        refreshStatusCallsAfterWrite += 1;
+        return jsonResponse({
+          scope_key: "all",
+          read_model_status: refreshStatusCallsAfterWrite >= 3 ? "fresh" : "refreshing",
+          dirty_scopes: [],
+          retryable: false,
+        });
+      }
+      if (withdrawCommitted && isWorkbenchInitialRequest(input)) {
+        initialPageCallsAfterWrite += 1;
+        const response = await defaultFetch(input, init) as Response;
+        const payload = await response.json() as Record<string, unknown>;
+        const readModelStatus = refreshStatusCallsAfterWrite >= 3 ? "fresh" : "refreshing";
+        return jsonResponse({
+          ...payload,
+          read_model_status: readModelStatus,
+          paired: {
+            ...(payload.paired as Record<string, unknown>),
+            read_model_status: readModelStatus,
+          },
+          unpaired: {
+            ...(payload.unpaired as Record<string, unknown>),
+            read_model_status: readModelStatus,
+          },
+        });
+      }
+      return defaultFetch(input, init);
+    });
     renderWorkbenchPage();
 
     const pairedZone = await screen.findByTestId("zone-paired");
@@ -1155,6 +1198,8 @@ describe("Workbench row selection and detail drawer", () => {
     expect(within(bankOnlyUnpairedGroup).queryByRole("row", { name: /赵华.*华东设备供应商/ })).not.toBeInTheDocument();
     expect(within(bankOnlyUnpairedGroup).queryByRole("row", { name: /91310000MA1K8A001X.*华东设备供应商/ })).not.toBeInTheDocument();
     expect(within(invoiceOnlyUnpairedGroup).queryByRole("row", { name: /赵华.*华东设备供应商/ })).not.toBeInTheDocument();
+    expect(refreshStatusCallsAfterWrite).toBe(3);
+    expect(initialPageCallsAfterWrite).toBe(2);
   });
 
   test("unpaired zone never exposes a withdraw action because it has no formal relation", async () => {

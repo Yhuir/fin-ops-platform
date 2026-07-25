@@ -1235,6 +1235,34 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
                 self.assertEqual(result.payload["error"], expected_error)
                 self.assertEqual(result.payload["read_model_status"], status)
 
+    def test_refresh_status_uses_fast_freshness_status_instead_of_heavy_diagnostic(self) -> None:
+        class Repository:
+            def get_workbench_groups_freshness_status(self, *, scope_key: str) -> dict[str, object]:
+                return {
+                    "scope_key": scope_key,
+                    "read_model_status": "fresh",
+                    "active_generation_id": "generation-fast",
+                }
+
+            def get_workbench_refresh_status(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("refresh-status hot path must not run the heavy consistency diagnostic")
+
+        facade = WorkbenchQueryFacade(
+            repository=Repository(),
+            redis_helper=None,
+            enqueue_refresh=QueueRecorder().enqueue,
+            scope_key_for_month=scope_key_for_month,
+            stale_reasons=no_stale_reasons,
+            emit_status_metric=MetricRecorder().emit,
+            missing_read_model_error=lambda _error: False,
+        )
+
+        result = facade.refresh_status("all")
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(result.payload["read_model_status"], "fresh")
+        self.assertEqual(result.payload["active_generation_id"], "generation-fast")
+
     def test_refresh_status_query_timeout_returns_retryable_unavailable(self) -> None:
         class Repository:
             def get_workbench_refresh_status(self, **_kwargs: object) -> dict[str, object]:

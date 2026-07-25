@@ -851,7 +851,36 @@ export default function ReconciliationWorkbenchPage() {
     let lastReadModelStatus = "";
     const deferStateApply = options?.deferStateApply ?? false;
 
+    const initialResult = await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
+      background: true,
+      includeAuxiliary: false,
+      zoneQueries: zoneServerPageQueries,
+      propagateError: true,
+      deferStateApply,
+    });
+    const initialPairedStatus = initialResult?.pages.paired.readModelStatus ?? "unknown";
+    const initialOpenStatus = initialResult?.pages.unpaired.readModelStatus ?? "unknown";
+    lastReadModelStatus = initialPairedStatus === initialOpenStatus
+      ? initialPairedStatus
+      : `${initialPairedStatus}/${initialOpenStatus}`;
+    if (workbenchInitialPageIsFresh(initialResult)) {
+      return initialResult;
+    }
+
     while (Date.now() - startedAt <= WORKBENCH_ACTIVE_GENERATION_OPERATION_TIMEOUT_MS) {
+      const refreshStatus = await fetchWorkbenchRefreshStatus(WORKBENCH_VIEW_MONTH);
+      lastReadModelStatus = refreshStatus.readModelStatus;
+      if (refreshStatus.readModelStatus === "failed" || refreshStatus.readModelStatus === "unavailable") {
+        throw new Error(
+          refreshStatus.lastError
+          || `关联台最新数据加载失败，当前状态：${refreshStatus.readModelStatus}。`,
+        );
+      }
+      if (refreshStatus.readModelStatus !== "fresh") {
+        await delayWorkbenchOperationPoll();
+        continue;
+      }
+
       const result = await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
         background: true,
         includeAuxiliary: false,

@@ -13,6 +13,7 @@ This roadmap is the root page-analysis roadmap. Cross-module modular IO refactor
 - Integer phases (0-17): Cross-page baseline first, then page-specific analysis and planning work for every registered app page.
 - Phase 18: Cross-module repair/evolution work that closes the canonical invoice + ETC batch-link boundary after the page-analysis phases exposed the issue.
 - Phase 19-21: Cross-page Audit, reversible relation runtime proof, and deterministic Workbench relation visibility production closure.
+- Phase 27-29: Access-time read-model convergence, Cost recovery performance, and Workbench recovery performance closure.
 - Phase 26: Turnover closure ownership/completion separation, frozen policy correction, historical repair and Workbench v6 production closure. Its dependencies are logical Phase 1 and Phase 21 contracts, not the immediately preceding numeric phase.
 - Decimal phases (2.1, 2.2): Urgent insertions between existing phases.
 
@@ -567,5 +568,23 @@ Plans:
 Plans:
 
 - [x] 28-01-PLAN — Add the Cost active-recovery fast gate, run targeted regression, and close production performance/correctness proof (`d8e4c5946`, corrective root fix `b6e814b05`).
+
+### Phase 29: 优化关联台写后和页面访问的完整 Fresh 热路径
+
+**Goal:** Remove repeated full Workbench payload polling during active recovery and reuse the existing lightweight freshness port for public status checks, without changing canonical writes, exact scopes, active-generation publication or cross-page isolation.
+**Requirements:** Performance follow-up from Phase 27; no new product requirement IDs.
+**Depends on:** Phase 28 production closure and Phase 27 Workbench correctness/isolation contracts.
+**Canonical refs:** `.planning/phases/29-workbench-access-performance/29-01-PLAN.md`, `docs/modules/reconciliation-workbench/boundary-io.md`, `docs/modules/read-models/boundary-io.md`, `docs/modules/runtime-workers/boundary-io.md`
+**Success Criteria** (what must be TRUE):
+
+  1. Operation recovery performs at most one initial trigger load and one final fresh payload load; active waiting uses the existing lightweight refresh-status boundary.
+  2. Canonical source proof remains fail closed, active generations remain atomic, and write-time zero fan-out/exact-scope contracts do not change.
+  3. Targeted local gates and one production candidate prove correct confirm/withdraw recovery, reduced access I/O, runtime drain and no unrelated page I/O.
+
+**Plans:** 1 plan
+
+Plans:
+
+- [ ] 29-01-PLAN — Reuse lightweight Workbench status, remove repeated full payload polling, and close production performance/correctness proof.
 
 ---
