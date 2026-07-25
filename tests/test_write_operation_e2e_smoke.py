@@ -291,6 +291,12 @@ def _raw_bank_oa_invoice_scenario(name: str, key_prefix: str) -> dict[str, objec
             if checkpoint["relation_state_after"] == "active"
             else "workbench_relation_withdraw_cross_page"
         )
+    _set_bank_oa_cost_probe(
+        scenario,
+        view="bank",
+        project_scope="active",
+        include_semantic_assertion=True,
+    )
     return scenario
 
 

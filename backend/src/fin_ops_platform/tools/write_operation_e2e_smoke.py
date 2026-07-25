@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
-import json
 from math import ceil
 from pathlib import Path
 from statistics import median
 from time import monotonic, sleep
 from typing import Any, Callable, Mapping, Sequence, TextIO
-import os
-import sys
+from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
 from fin_ops_platform.services.postgres_connection import (
@@ -389,6 +390,7 @@ def load_scenarios(path: Path, *, http_target_ms: float) -> list[WriteScenario]:
                 raise ValueError(f"scenario {name!r} recovery_checkpoint must declare relation_state_after='inactive'.")
             _validate_reversible_checkpoint_contract(
                 scenario_name=name,
+                relation_shape=shape,
                 checkpoints=checkpoints,
                 recovery_checkpoint=recovery_checkpoint,
                 relation_contract=relation_contract,
@@ -2274,6 +2276,7 @@ def _reversible_relation_contracts() -> dict[str, dict[str, Any]]:
 def _validate_reversible_checkpoint_contract(
     *,
     scenario_name: str,
+    relation_shape: str,
     checkpoints: tuple[WriteCheckpoint, ...],
     recovery_checkpoint: WriteCheckpoint | None,
     relation_contract: Mapping[str, Any],
@@ -2329,6 +2332,7 @@ def _validate_reversible_checkpoint_contract(
             )
         _validate_checkpoint_consumers_and_rows(
             scenario_name=scenario_name,
+            relation_shape=relation_shape,
             checkpoint=checkpoint,
             expected_roles=expected_roles,
             mutation_contract=mutation_contract,
@@ -2351,6 +2355,7 @@ def _validate_reversible_checkpoint_contract(
         raise ValueError(f"scenario {scenario_name!r} recovery checkpoint must use the registered withdraw profile.")
     _validate_checkpoint_consumers_and_rows(
         scenario_name=scenario_name,
+        relation_shape=relation_shape,
         checkpoint=recovery_checkpoint,
         expected_roles=expected_roles,
         mutation_contract=mutation_contract,
@@ -2393,6 +2398,7 @@ def _validate_reversible_checkpoint_contract(
 def _validate_checkpoint_consumers_and_rows(
     *,
     scenario_name: str,
+    relation_shape: str,
     checkpoint: WriteCheckpoint,
     expected_roles: Mapping[str, str],
     mutation_contract: str,
@@ -2436,6 +2442,11 @@ def _validate_checkpoint_consumers_and_rows(
                 f"{consumer.page_key!r} assertions must target registered business roots; "
                 f"invalid pointers: {invalid_pointers}."
             )
+    if relation_shape == "bank_oa_invoice":
+        _validate_relation_impact_cost_consumers(
+            scenario_name=scenario_name,
+            checkpoint=checkpoint,
+        )
     mutation = next(step for step in checkpoint.steps if step.mutation)
     row_ids = (
         (mutation.json_body or {}).get("row_ids")
@@ -2487,6 +2498,56 @@ def _validate_checkpoint_consumers_and_rows(
                 f"{page_key!r} must have at least one consumer asserting a test-owned row "
                 "or preview-captured identity."
             )
+
+
+def _validate_relation_impact_cost_consumers(
+    *,
+    scenario_name: str,
+    checkpoint: WriteCheckpoint,
+) -> None:
+    cost_consumers = [
+        consumer
+        for consumer in checkpoint.consumers
+        if consumer.page_key == "cost-statistics" and consumer.role == "affected"
+    ]
+    for consumer in cost_consumers:
+        query = parse_qs(urlsplit(consumer.probe.path).query, keep_blank_values=True)
+        views = query.get("view", [])
+        if len(views) != 1 or views[0] not in {"project", "bank", "expense_type"}:
+            raise ValueError(
+                f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} affected Cost "
+                "consumer must use a Workbench-dependent Cost view: project, bank, or expense_type."
+            )
+        if query.get("project_scope") != ["active"]:
+            raise ValueError(
+                f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} affected Cost "
+                "consumer must declare exactly project_scope=active."
+            )
+        if not any(
+            _is_relation_derived_cost_assertion(assertion)
+            for assertion in consumer.assertions
+        ):
+            raise ValueError(
+                f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} affected Cost "
+                "consumer must assert a relation-derived semantic field; positional "
+                "transaction_id identity alone is insufficient."
+            )
+
+
+def _is_relation_derived_cost_assertion(assertion: JsonPointerAssertion) -> bool:
+    tokens = [
+        token.replace("~1", "/").replace("~0", "~")
+        for token in assertion.pointer.split("/")[1:]
+    ]
+    return bool(
+        set(tokens)
+        & {
+            "cost_allocations",
+            "expense_type",
+            "project_id",
+            "project_name",
+        }
+    )
 
 
 def _validate_canonical_relation_steps(
