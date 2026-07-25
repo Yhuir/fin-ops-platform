@@ -50,7 +50,12 @@ class FakeConnection:
             and check_name not in self.rows_by_check
         ):
             return [
-                {"scope_key": scope_key, "relation_updated_at": ""}
+                {
+                    "scope_key": scope_key,
+                    "relation_updated_at": "",
+                    "relation_count": 0,
+                    "membership_digest": "d41d8cd98f00b204e9800998ecf8427e",
+                }
                 for scope_key in params[0]
             ]
         return [dict(row) for row in self.rows_by_check.get(check_name, [])]
@@ -1177,6 +1182,10 @@ def _fresh_oa_pending_payment_query_state_row() -> dict[str, object]:
         "oa_pending_payment_source_signature": "source",
         "oa_pending_payment_relation_version": 1,
         "oa_pending_payment_workbench_pair_relations_updated_at": "",
+        "oa_pending_payment_workbench_pair_relation_count": 0,
+        "oa_pending_payment_workbench_pair_relations_membership_digest": (
+            "d41d8cd98f00b204e9800998ecf8427e"
+        ),
         "oa_pending_payment_bank_coverage_signature": "rows:1|digest:bank",
         "oa_pending_payment_input_invoice_coverage_signature": "rows:1|digest:invoice",
         "oa_pending_payment_event_source_version": 1,
