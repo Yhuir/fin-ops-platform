@@ -122,6 +122,8 @@ Release A 已删除运行时链路且禁止恢复；旧表物理存储只为短�
 
 confirm/withdraw preview 的行输入只能来自上述 relation-preview selection port，且每次请求只允许一次 selection load。preview 可输出 `group_type=selection` 与 `zone/status=unpaired`，但正式页面 active generation 仍只有 `paired/unpaired`；正式 confirm/withdraw 必须重新进入 canonical relation command/UoW，不能缓存、转交或信任 preview selection DTO。
 
+前端只在 relation preview mapper 中接受 `selection`：必须同时满足 `zone=status=unpaired`，映射为页面 `groupType=unpaired` 并保留 `rawGroupType=selection`；`relation` 必须同时满足 `zone=status=paired`。普通 combined initial/groups mapper 继续拒绝 `selection`。confirm/withdraw preview 共用一个同步防重入边界，pending 期间 toolbar 与 inline 入口不得产生第二个 POST；selection、scope 或 active read-model version 变化后返回的旧成功响应不得打开 drawer。API 错误只通过 module-owned 安全类型向页面传递批准的中文文案，`status/code/requestId` 仅作为支持字段保留，后端 message、raw response 与 parser exception 不得直接进入 UI。
+
 正式关系是关系 ownership 的唯一事实源。projection builder 必须在读取 override/exception 前先从已经加载的 active relations 计算 member row ids，并从 control I/O 集合排除这些成员；不能先把旧 candidate/exception ownership 写入正式成员，再依靠字段覆盖或 Audit 豁免掩盖冲突。未配对 row 仍按 active override > active exception 投影，两个查询继续由既有 repository SQL 边界批量完成。
 
 ## 数据恢复与回滚

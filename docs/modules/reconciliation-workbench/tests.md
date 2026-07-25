@@ -2,6 +2,13 @@
 
 日期：2026-07-22
 
+## 2026-07-26 relation preview 真实 DTO、并发反馈与安全错误回归
+
+- `web/src/test/WorkbenchApi.test.ts` 使用真实 confirm-before / withdraw-after `selection + zone/status=unpaired` fixture，证明 preview-only adapter 保留 `rawGroupType=selection`、正式页面仍映射为 unpaired，非法 selection fail closed，普通 groups mapper 继续拒绝 selection。
+- `web/src/test/WorkbenchSelection.test.tsx` 与 `web/src/test/WorkbenchZone.test.tsx` 用受控未 resolve Promise 证明 confirm/withdraw 在下一 render 已显示可访问 busy 状态，pending 期间重复点击只产生一次 POST，selection/version 漂移响应不会打开 drawer，失败后入口恢复且后端英文/parser sentinel 不进入 UI；既有 formal submit drawer 回归保持通过。
+- Workbench API 安全错误矩阵覆盖 stale/version conflict、row unavailable、401/403、409、invalid preview、5xx 与 non-JSON response；只允许批准的中文文案，同时保留 `status/code/requestId` 支持字段。
+- `web/e2e/workbench-relation-fanout.spec.ts` 与 `web/e2e/workbench-withdraw-flow.spec.ts` 的 Chromium fixture 使用真实 selection DTO，覆盖 confirm/withdraw pending、成功 drawer/关闭和失败恢复；本次不运行无关 Browser suite。
+
 ## 2026-07-25 关联台写后恢复读放大回归
 
 - `tests/test_workbench_query_facade.py::WorkbenchQueryFacadeTests::test_refresh_status_uses_fast_freshness_status_instead_of_heavy_diagnostic` 证明公开 refresh-status 优先使用既有轻量 groups freshness port，完整 generation/outbox/worker diagnostic 不进入页面轮询热路径；旧 repository fallback 与 timeout 合同保持。

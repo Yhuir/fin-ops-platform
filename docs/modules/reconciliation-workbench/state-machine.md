@@ -54,6 +54,8 @@ paired group
   -> each no-longer-owned fact becomes an unpaired singleton
 ```
 
+preview 请求本身只有一个页面级临时状态：`idle -> pending(confirm|withdraw) -> idle`。进入 pending 必须在发出请求前同步完成，并在下一次 render 输出 spinner、busy label、disabled、`aria-disabled` 和 `aria-busy`；confirm 与 withdraw 不允许并行或重复请求。成功响应仅在发起时的 selection、scope 和 active read-model version 仍一致时打开正式 preview drawer，否则直接丢弃。请求失败恢复入口并展示安全中文错误；该临时状态不改变 preview drawer 已有 submit/sync/load 状态机，也不会新增第三种正式页面关系状态。
+
 旧 row `case_id` 不能让撤回后的 facts 继续同组。没有 active relation 的行不能执行撤回。
 
 ## Read model 状态
