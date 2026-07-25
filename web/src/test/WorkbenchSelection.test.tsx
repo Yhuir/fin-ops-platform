@@ -550,7 +550,9 @@ describe("Workbench row selection and detail drawer", () => {
           groups: [
             {
               group_id: "preview:mixed-bank-before",
-              group_type: "unpaired",
+              group_type: "selection",
+              zone: "unpaired",
+              status: "unpaired",
               match_confidence: "medium",
               reason: "manual_preview",
               oa_rows: [
@@ -599,6 +601,8 @@ describe("Workbench row selection and detail drawer", () => {
             {
               group_id: "case:preview:mixed-bank-after",
               group_type: "relation",
+              zone: "paired",
+              status: "paired",
               match_confidence: "medium",
               reason: "manual_preview",
               oa_rows: [
@@ -689,6 +693,8 @@ describe("Workbench row selection and detail drawer", () => {
             {
               group_id: "case:CASE-202603-101",
               group_type: "relation",
+              zone: "paired",
+              status: "paired",
               can_withdraw: true,
               oa_rows: [],
               bank_rows: [
@@ -2278,6 +2284,8 @@ describe("Workbench row selection and detail drawer", () => {
             {
               group_id: "case:CASE-OA-ATT-oa-exp-2066-2",
               group_type: "relation",
+              zone: "paired",
+              status: "paired",
               can_withdraw: false,
               oa_rows: [
                 {
@@ -2306,6 +2314,8 @@ describe("Workbench row selection and detail drawer", () => {
             {
               group_id: "case:CASE-OA-ATT-oa-exp-2066-2",
               group_type: "relation",
+              zone: "paired",
+              status: "paired",
               can_withdraw: false,
               oa_rows: [
                 {

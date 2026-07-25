@@ -90,6 +90,8 @@ type RelationPreviewDialogState = {
   caseId?: string;
 };
 
+type RelationPreviewRequestKind = "confirm" | "withdraw";
+
 type WorkbenchActionProgressPhase = "submitting" | "syncing" | "loading";
 
 type WorkbenchActionProgress = {
@@ -436,6 +438,9 @@ export default function ReconciliationWorkbenchPage() {
   const [expandedZoneId, setExpandedZoneId] = useState<"paired" | "unpaired" | null>(null);
   const [actionDialog, setActionDialog] = useState<ActionDialogState | null>(null);
   const [relationPreviewDialog, setRelationPreviewDialog] = useState<RelationPreviewDialogState | null>(null);
+  const [relationPreviewRequestKind, setRelationPreviewRequestKind] = useState<RelationPreviewRequestKind | null>(null);
+  const relationPreviewRequestKindRef = useRef<RelationPreviewRequestKind | null>(null);
+  const relationPreviewContextKeyRef = useRef("");
   const [ignoredData, setIgnoredData] = useState<IgnoredWorkbenchData>({ month: WORKBENCH_VIEW_MONTH, rows: [] });
   const [workbenchSettings, setWorkbenchSettings] = useState<WorkbenchSettings | null>(null);
   const [ignoredModalOpen, setIgnoredModalOpen] = useState(false);
@@ -1384,6 +1389,12 @@ export default function ReconciliationWorkbenchPage() {
   const pairedSelectionSummary = pairedSelectionContext.summary;
   const contextualOpenRowIds = openSelectionContext.relatedRowIdSet;
   const contextualPairedRowIds = pairedSelectionContext.relatedRowIdSet;
+  relationPreviewContextKeyRef.current = [
+    WORKBENCH_VIEW_MONTH,
+    activeWorkbenchReadModelVersion,
+    openSelectionContext.includedRowIds.join(","),
+    pairedSelectionContext.includedRowIds.join(","),
+  ].join("|");
   const getWorkbenchRowState = useCallback((row: WorkbenchRecord, zoneId: "paired" | "unpaired") => {
     const explicitState = getRowState(row, zoneId);
     if (explicitState !== "idle") {
@@ -1876,24 +1887,59 @@ export default function ReconciliationWorkbenchPage() {
     return caseIds.length === 1 ? caseIds[0] : undefined;
   };
 
-  const openConfirmPreview = async (rows: WorkbenchRecord[]) => {
+  const openRelationPreview = async (kind: RelationPreviewRequestKind, rows: WorkbenchRecord[]) => {
+    if (relationPreviewRequestKindRef.current) {
+      return;
+    }
     const rowIds = rows.map((row) => row.id);
-    const preview = await previewWorkbenchConfirmLink({
-      month: WORKBENCH_VIEW_MONTH,
-      rowIds,
-      expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
-    });
-    setRelationPreviewDialog({ preview, rowIds });
+    const expectedReadModelVersion = activeWorkbenchReadModelVersionRef.current;
+    const requestContextKey = relationPreviewContextKeyRef.current;
+    relationPreviewRequestKindRef.current = kind;
+    setRelationPreviewRequestKind(kind);
+    try {
+      const preview = kind === "confirm"
+        ? await previewWorkbenchConfirmLink({
+            month: WORKBENCH_VIEW_MONTH,
+            rowIds,
+            expectedReadModelVersion,
+          })
+        : await previewWorkbenchWithdrawLink({
+            month: WORKBENCH_VIEW_MONTH,
+            rowIds,
+            expectedReadModelVersion,
+          });
+      if (
+        relationPreviewContextKeyRef.current !== requestContextKey
+        || activeWorkbenchReadModelVersionRef.current !== expectedReadModelVersion
+      ) {
+        return;
+      }
+      setRelationPreviewDialog({
+        preview,
+        rowIds,
+        caseId: kind === "withdraw" ? resolveSelectedCaseId(rows) : undefined,
+      });
+    } catch (error) {
+      if (
+        relationPreviewContextKeyRef.current === requestContextKey
+        && activeWorkbenchReadModelVersionRef.current === expectedReadModelVersion
+      ) {
+        throw error;
+      }
+    } finally {
+      if (relationPreviewRequestKindRef.current === kind) {
+        relationPreviewRequestKindRef.current = null;
+        setRelationPreviewRequestKind(null);
+      }
+    }
+  };
+
+  const openConfirmPreview = async (rows: WorkbenchRecord[]) => {
+    await openRelationPreview("confirm", rows);
   };
 
   const openWithdrawPreview = async (rows: WorkbenchRecord[]) => {
-    const rowIds = rows.map((row) => row.id);
-    const preview = await previewWorkbenchWithdrawLink({
-      month: WORKBENCH_VIEW_MONTH,
-      rowIds,
-      expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
-    });
-    setRelationPreviewDialog({ preview, rowIds, caseId: resolveSelectedCaseId(rows) });
+    await openRelationPreview("withdraw", rows);
   };
 
   const handleSubmitRelationPreview = async (note: string, onProgress: WorkbenchActionProgressHandler) => {
@@ -2195,7 +2241,11 @@ export default function ReconciliationWorkbenchPage() {
       onEnsureGroupDetail={handleEnsureGroupDetail}
       onRequestNextPage={handleLoadMoreZone}
       onPrimarySelectionAction={handleCancelPairedSelection}
-      primarySelectionActionDisabled={isPairedCancelSelectionDisabled || !canWriteWorkbench}
+      primarySelectionActionDisabled={
+        isPairedCancelSelectionDisabled || !canWriteWorkbench || relationPreviewRequestKind !== null
+      }
+      primarySelectionActionPending={relationPreviewRequestKind === "withdraw"}
+      primarySelectionActionPendingLabel="正在准备撤回预览"
       selectionActionNotice={pairedSelectionActionNotice}
       onRowAction={handleRowAction}
       onSelectRow={handleSelectRow}
@@ -2239,7 +2289,11 @@ export default function ReconciliationWorkbenchPage() {
       onEnsureGroupDetail={handleEnsureGroupDetail}
       onRequestNextPage={handleLoadMoreZone}
       onPrimarySelectionAction={handleConfirmOpenSelection}
-      primarySelectionActionDisabled={isOpenConfirmSelectionDisabled || !canWriteWorkbench}
+      primarySelectionActionDisabled={
+        isOpenConfirmSelectionDisabled || !canWriteWorkbench || relationPreviewRequestKind !== null
+      }
+      primarySelectionActionPending={relationPreviewRequestKind === "confirm"}
+      primarySelectionActionPendingLabel="正在准备确认预览"
       onRowAction={handleRowAction}
       onSelectRow={handleSelectRow}
       onSecondarySelectionAction={handleOpenSelectionException}
