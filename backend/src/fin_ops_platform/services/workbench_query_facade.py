@@ -235,7 +235,6 @@ class WorkbenchQueryFacade:
         payload["read_model_scope_key"] = scope_key
         payload_version = str(payload.get("read_model_version") or "").strip()
         if cacheable_query and expected_payload_version and payload_version != expected_payload_version:
-            self._enqueue_refresh(scope_key, reason="api_initial_page_version_drift")
             self._emit_status_metric(
                 endpoint="/api/workbench",
                 scope_key=scope_key,

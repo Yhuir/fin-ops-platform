@@ -502,7 +502,7 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(result.payload["read_model_status"], "refreshing")
         self.assertEqual(result.payload["paired"]["groups"], [])
         self.assertEqual(result.payload["unpaired"]["groups"], [])
-        self.assertEqual(queue.refreshes, [("all", "api_initial_page_version_drift")])
+        self.assertEqual(queue.refreshes, [])
         self.assertEqual(redis.set_json_calls, [])
 
     def test_default_initial_page_redis_failure_degrades_to_same_cold_path(self) -> None:

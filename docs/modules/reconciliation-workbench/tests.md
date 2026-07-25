@@ -184,3 +184,4 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_w
 - `tests/test_workbench_query_facade.py::WorkbenchQueryFacadeTests::test_initial_all_page_does_not_fan_out_while_exact_refresh_is_active` 复现生产并发形状：exact scope 已 processing，all freshness 暂时返回 `stale + active_refresh_in_progress` 且没有新的 exact target。
 - 回归断言 all 请求返回 non-fresh 轻量状态但不 enqueue `workbench:all`；已有 exact 任务完成后，下一次页面轮询重新执行 canonical proof 并只 enqueue 剩余 mismatch 月份。
 - 既有 `test_initial_all_page_enqueues_only_exact_workbench_mismatch_scopes` 继续保护稳定态 exact targets；冷启动/missing 且没有 active refresh 时仍保留正式 `all` 恢复入口。
+- `test_default_initial_page_version_drift_fails_closed_without_caching_old_payload` 继续断言 generation-set 切换时不返回、不缓存旧 payload；同时锁定该正常发布竞态不再 enqueue `workbench:all`，下一次请求直接读取新的 active generation-set。
