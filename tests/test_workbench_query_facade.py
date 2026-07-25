@@ -221,6 +221,40 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         )
         self.assertNotIn(("all", "api_groups_source_versions_stale"), queue.refreshes)
 
+    def test_initial_all_page_does_not_fan_out_while_exact_refresh_is_active(self) -> None:
+        class Repository:
+            @staticmethod
+            def get_workbench_groups_freshness_status(**_kwargs: object) -> dict[str, object]:
+                return {
+                    "scope_key": "all",
+                    "read_model_status": "stale",
+                    "active_refresh_in_progress": True,
+                    "dirty_scopes": [{"scope_key": "2026-03", "status": "processing"}],
+                }
+
+            @staticmethod
+            def get_workbench_initial_page(**_kwargs: object) -> dict[str, object]:
+                raise AssertionError("active exact refresh must stop before the cold initial-page query")
+
+        queue = QueueRecorder()
+        facade = WorkbenchQueryFacade(
+            repository=Repository(),
+            redis_helper=None,
+            enqueue_refresh=queue.enqueue,
+            scope_key_for_month=scope_key_for_month,
+            stale_reasons=no_stale_reasons,
+            emit_status_metric=MetricRecorder().emit,
+            missing_read_model_error=lambda _error: False,
+            refresh_status_with_source_freshness=lambda payload, **_kwargs: payload,
+            initial_cache_key_from_version=build_workbench_initial_redis_cache_key,
+            is_default_initial_query=is_default_workbench_initial_query,
+        )
+
+        result = facade.initial_page("all")
+
+        self.assertEqual(result.payload["read_model_status"], "stale")
+        self.assertEqual(queue.refreshes, [])
+
     def test_month_initial_does_not_enqueue_unrelated_all_statistics_scopes(self) -> None:
         class Repository:
             @staticmethod

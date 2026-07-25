@@ -178,3 +178,9 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_w
 - `tests/test_write_operation_e2e_smoke.py` 与 `tests/test_write_operation_impact_matrix.py` 证明 relation consumer 使用 combined initial 的真实业务 zone：普通完整关系 confirm 在 `paired`，冻结要求未满足的 active Turnover closure 与 withdraw/recovery 均在 `unpaired`；并拒绝把 `/groups` 注册为关联台页面首屏。
 - 本地 10,000 OA-row characterization 的旧路径中位数为 `145.809ms`，窄 I/O 为 `84.885ms`，重复组装/序列化 CPU 减少约 `41.8%`；该合成数据只证明共享 worker CPU 路径改善，不替代部署后真实 worker、首屏和总恢复耗时。
 - 本次未改前端组件、交互或 HTTP response shape，不重复运行无关 183-browser suite；生产用同一类 test-owned 可逆 relation fixture 验证真实 combined initial、zero fan-out、queue/worker drain 与 System Audit。
+
+## 2026-07-25 - exact/all 并发恢复禁止暂态 all fan-out
+
+- `tests/test_workbench_query_facade.py::WorkbenchQueryFacadeTests::test_initial_all_page_does_not_fan_out_while_exact_refresh_is_active` 复现生产并发形状：exact scope 已 processing，all freshness 暂时返回 `stale + active_refresh_in_progress` 且没有新的 exact target。
+- 回归断言 all 请求返回 non-fresh 轻量状态但不 enqueue `workbench:all`；已有 exact 任务完成后，下一次页面轮询重新执行 canonical proof 并只 enqueue 剩余 mismatch 月份。
+- 既有 `test_initial_all_page_enqueues_only_exact_workbench_mismatch_scopes` 继续保护稳定态 exact targets；冷启动/missing 且没有 active refresh 时仍保留正式 `all` 恢复入口。

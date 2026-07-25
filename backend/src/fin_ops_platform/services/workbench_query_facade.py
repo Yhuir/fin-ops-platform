@@ -991,7 +991,11 @@ class WorkbenchQueryFacade:
             and str(scope.get("scope_key") or "").strip() not in {"", "all"}
         ]
         exact_scope_keys = list(dict.fromkeys([*explicit_scope_keys, *failed_scope_keys]))
-        return exact_scope_keys or ["all"]
+        if exact_scope_keys:
+            return exact_scope_keys
+        if refresh_status_payload.get("active_refresh_in_progress") is True:
+            return []
+        return ["all"]
 
     def _non_fresh_initial_page_result(
         self,
