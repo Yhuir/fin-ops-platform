@@ -140,39 +140,40 @@ class CostStatisticsQueryService:
         statistics = gate.get("statistics") if statistics_status == "fresh" else None
         statistics_refresh_enqueued = False
         if statistics_status != "fresh":
-            statistics_workbench_scope_keys = self._normalized_refresh_scope_keys(
-                gate.get("statistics_workbench_refresh_scope_keys")
-            )
-            statistics_child_scope_keys = self._normalized_refresh_scope_keys(
-                gate.get("statistics_child_refresh_scope_keys")
-            )
-            if statistics_workbench_scope_keys:
-                statistics_refresh_results = [
-                    bool(
-                        self._workbench_refresh_enqueuer(
-                            workbench_scope_key,
-                            reason="cost_statistics_workbench_dependency_stale",
-                        )
-                    )
-                    for workbench_scope_key in statistics_workbench_scope_keys
-                ]
-                statistics_refresh_enqueued = any(statistics_refresh_results)
-            elif statistics_child_scope_keys:
-                statistics_refresh_results = [
-                    bool(
-                        self._runtime_service.enqueue_read_model_refresh(
-                            child_scope_key,
-                            reason=f"api_statistics_{statistics_status}",
-                        )
-                    )
-                    for child_scope_key in statistics_child_scope_keys
-                ]
-                statistics_refresh_enqueued = any(statistics_refresh_results)
-            else:
-                statistics_refresh_enqueued = self._runtime_service.enqueue_read_model_refresh(
-                    str(gate.get("statistics_scope_key") or f"{normalized_project_scope}:all"),
-                    reason=f"api_statistics_{statistics_status}",
+            if gate.get("statistics_refresh_active") is not True:
+                statistics_workbench_scope_keys = self._normalized_refresh_scope_keys(
+                    gate.get("statistics_workbench_refresh_scope_keys")
                 )
+                statistics_child_scope_keys = self._normalized_refresh_scope_keys(
+                    gate.get("statistics_child_refresh_scope_keys")
+                )
+                if statistics_workbench_scope_keys:
+                    statistics_refresh_results = [
+                        bool(
+                            self._workbench_refresh_enqueuer(
+                                workbench_scope_key,
+                                reason="cost_statistics_workbench_dependency_stale",
+                            )
+                        )
+                        for workbench_scope_key in statistics_workbench_scope_keys
+                    ]
+                    statistics_refresh_enqueued = any(statistics_refresh_results)
+                elif statistics_child_scope_keys:
+                    statistics_refresh_results = [
+                        bool(
+                            self._runtime_service.enqueue_read_model_refresh(
+                                child_scope_key,
+                                reason=f"api_statistics_{statistics_status}",
+                            )
+                        )
+                        for child_scope_key in statistics_child_scope_keys
+                    ]
+                    statistics_refresh_enqueued = any(statistics_refresh_results)
+                else:
+                    statistics_refresh_enqueued = self._runtime_service.enqueue_read_model_refresh(
+                        str(gate.get("statistics_scope_key") or f"{normalized_project_scope}:all"),
+                        reason=f"api_statistics_{statistics_status}",
+                    )
         statistics_published_source_version = gate.get("statistics_published_source_version")
         query_binding = self._page_query_binding(
             scope=normalized_scope,

@@ -310,11 +310,24 @@ class RuntimeWorkerTests(unittest.TestCase):
             config=RuntimeWorkerConfig(
                 worker_id="worker-1",
                 event_types=["cost_statistics.read_model.refresh"],
+                dependency_not_fresh_delay_seconds=0.25,
             ),
             handlers={"cost_statistics.read_model.refresh": fail_not_fresh},
         )
 
         self.assertEqual(worker.run_once(), RuntimeWorkerResult.DEFERRED)
+        self.assertEqual(
+            queue.deferred_events,
+            [
+                (
+                    "event-1",
+                    "worker-1",
+                    "workbench_read_model_not_fresh: "
+                    "operation=cost_statistics_month_projection status=stale scope_keys=2026-05",
+                    1.0,
+                )
+            ],
+        )
         self.assertEqual(
             [
                 (item["scope_type"], item["scope_key"], item["reason"])

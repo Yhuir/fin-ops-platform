@@ -2906,15 +2906,17 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         if "def cost_statistics_parent_freshness_token(" not in cost_projection_source:
             violations.append("Cost parent projection no longer exposes its canonical child-shard freshness target")
 
-        handler_start = page_source.index("  const handleWorkbenchRelationMutation = useCallback")
-        handler_end = page_source.index("  const handleManualRefresh", handler_start)
+        if "handleWorkbenchRelationMutation" in page_source:
+            violations.append("Cost page retains removed cross-page relation refresh I/O")
+        handler_start = page_source.index("  const handleManualRefresh = useCallback")
+        handler_end = page_source.index("  const openTagRulesDrawer", handler_start)
         handler_source = page_source[handler_start:handler_end]
         for required in (
             "setLoadedExplorer(null)",
             "setDomainRefreshNonce((current) => current + 1)",
         ):
             if required not in handler_source:
-                violations.append(f"Cost relation access-driven reload is missing {required}")
+                violations.append(f"Cost manual reload is missing {required}")
         for forbidden in (
             "waitForOperationFreshness(",
             "relationBarrierRequestRef",

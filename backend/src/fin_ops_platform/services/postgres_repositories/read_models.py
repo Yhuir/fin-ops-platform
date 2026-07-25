@@ -7370,6 +7370,73 @@ class PostgresSummaryReadModelRepository:
             raise ValueError("cost statistics dependency_profile must be workbench or bank_flow")
         return self._get_cost_statistics_workbench_freshness_gate(scope_key=scope_key)
 
+    def _get_cost_statistics_active_recovery_gate(
+        self,
+        *,
+        project_scope: str,
+    ) -> dict[str, Any] | None:
+        statistics_scope_key = f"{project_scope}:all"
+        row = self._connection.fetch_one(
+            """
+            /* cost_statistics_active_recovery_gate */
+            select
+                coalesce(
+                    array_agg(distinct scope_key order by scope_key)
+                        filter (where scope_type = 'workbench'),
+                    array[]::text[]
+                ) as workbench_refresh_scope_keys,
+                coalesce(
+                    array_agg(distinct scope_key order by scope_key)
+                        filter (
+                            where scope_type = 'cost_statistics'
+                              and scope_key <> %s
+                        ),
+                    array[]::text[]
+                ) as child_refresh_scope_keys,
+                coalesce(
+                    bool_or(
+                        scope_type = 'cost_statistics'
+                        and scope_key = %s
+                    ),
+                    false
+                ) as parent_refresh_active
+            from job.read_model_dirty_scopes
+            where tenant_id = 'default'
+              and status in ('pending', 'processing')
+              and (
+                    (
+                        scope_type = 'workbench'
+                        and scope_key ~ '^[0-9]{4}-[0-9]{2}$'
+                    )
+                    or (
+                        scope_type = 'cost_statistics'
+                        and scope_key like %s
+                    )
+              )
+            having count(*) > 0
+            """,
+            (
+                statistics_scope_key,
+                statistics_scope_key,
+                f"{project_scope}:%",
+            ),
+        )
+        if not isinstance(row, dict):
+            return None
+        workbench_scope_keys = list(row.get("workbench_refresh_scope_keys") or [])
+        child_scope_keys = list(row.get("child_refresh_scope_keys") or [])
+        if not workbench_scope_keys and not child_scope_keys and row.get("parent_refresh_active") is not True:
+            return None
+        return {
+            "statistics": None,
+            "statistics_status": "refreshing",
+            "statistics_scope_key": statistics_scope_key,
+            "statistics_published_source_version": None,
+            "statistics_workbench_refresh_scope_keys": workbench_scope_keys,
+            "statistics_child_refresh_scope_keys": child_scope_keys,
+            "statistics_refresh_active": True,
+        }
+
     def _get_cost_statistics_bank_flow_freshness_gate(
         self,
         *,
@@ -7384,9 +7451,13 @@ class PostgresSummaryReadModelRepository:
         ):
             return None
 
-        statistics_gate = self._get_cost_statistics_workbench_freshness_gate(
-            scope_key=normalized_scope_key
+        statistics_gate = self._get_cost_statistics_active_recovery_gate(
+            project_scope=project_scope
         )
+        if statistics_gate is None:
+            statistics_gate = self._get_cost_statistics_workbench_freshness_gate(
+                scope_key=normalized_scope_key
+            )
         source_settings = (
             statistics_gate.get("source_settings")
             if isinstance(statistics_gate, dict)
@@ -7554,6 +7625,11 @@ class PostgresSummaryReadModelRepository:
                 list(statistics_gate.get("statistics_child_refresh_scope_keys") or [])
                 if isinstance(statistics_gate, dict)
                 else []
+            ),
+            "statistics_refresh_active": (
+                statistics_gate.get("statistics_refresh_active") is True
+                if isinstance(statistics_gate, dict)
+                else False
             ),
         }
 

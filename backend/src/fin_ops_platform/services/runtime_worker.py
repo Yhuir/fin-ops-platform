@@ -356,6 +356,13 @@ class RuntimeWorker:
         return int(self._config.retry_delay_seconds * (2**exponent))
 
     def _dependency_not_fresh_delay_seconds(self, event: RuntimeQueueEvent, error: str) -> float:
+        if (
+            str(event.scope_type or "") == "cost_statistics"
+            and "workbench_read_model_not_fresh" in str(error or "").lower()
+        ):
+            # ponytail: measured Workbench rebuilds exceed the shared 250ms poll;
+            # one second avoids a hot Cost retry loop without changing other workers.
+            return max(float(self._config.dependency_not_fresh_delay_seconds), 1.0)
         return float(self._config.dependency_not_fresh_delay_seconds)
 
     @staticmethod

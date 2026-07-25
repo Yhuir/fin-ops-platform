@@ -36,6 +36,7 @@ Runtime worker 是全局后台执行面，修改前必须逐项确认影响范�
 | 场景 | 优先级 | 当前覆盖 | 状态 | 说明 |
 | --- | --- | --- | --- | --- |
 | Worker 从 Postgres claim event 并 complete | P0 | `tests/test_runtime_worker.py`、`tests/test_runtime_queue.py`、`tests/test_runtime_infrastructure_postgres_integration.py` | covered | 覆盖内存 fake 与真实 Postgres integration。 |
+| Cost child 等待 Workbench 的有界 defer | P0 | `tests/test_runtime_worker.py::RuntimeWorkerTests::test_cost_statistics_workbench_dependency_refresh_is_exact_and_worker_owned` | covered | exact Workbench dependency仍由manifest/gateway入队；生产0.25秒共享配置下该单一路径至少defer 1秒，避免Workbench重建期间热重试，不改变其它dependency。 |
 | Durable queue claim hot path index | P0 | `tests/test_postgres_migrations.py::PostgresMigrationSqlTests::test_runtime_queue_claim_hot_path_index_is_declared`、`tests/test_postgres_migrations.py::MigrationFileTests::test_expected_migration_files_are_present_and_ordered` | covered | `job.outbox_events` active queue claim 必须保留 `outbox_events_claim_event_type_priority_idx`，以 event type / status / priority rank / available time 支撑 grouped smoke 的 worker lane pickup。 |
 | Handler 失败进入 retry / dead-letter | P0 | `tests/test_runtime_worker.py`、`tests/test_runtime_queue.py` | covered | 覆盖 retry delay、max attempts、processing lock。 |
 | Handler 遇到依赖 read model 未 fresh 时短延迟 defer | P0 | `tests/test_runtime_worker.py`、`tests/test_runtime_queue.py` | covered | `*_read_model_not_fresh` / `read_model_not_fresh` 不走普通失败/dead-letter，而是短延迟回 pending。 |

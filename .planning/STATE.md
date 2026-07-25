@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 27 complete on production release main-3b44f08e-20260725151318; 3-second SLO remains a separate performance follow-up.
-last_updated: "2026-07-25T15:34:24+08:00"
-last_activity: 2026-07-25 - Closed Phase 27 after Candidate A full diagnostic and one consolidated Candidate B production verification
+stopped_at: Executing Phase 28 Cost statistics recovery performance Plan 28-01.
+last_updated: "2026-07-25T18:35:00+08:00"
+last_activity: 2026-07-25 - Production profiling isolated repeated Cost statistics proof I/O during active Workbench recovery
 progress:
   total_phases: 23
   completed_phases: 4
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-16)
 
 **Core value:** Preserve production finance workflow correctness while improving individual pages through isolated, reviewable GSD phases.
-**Current focus:** Phase 27 is complete. Phase 26 frozen Turnover correctness remains a non-regression invariant; the 3-second stale-to-fresh target is deferred to a separate performance phase.
+**Current focus:** Phase 28 optimizes the measured Cost statistics 7.432-second recovery sample without changing Phase 27 correctness, isolation or zero-fan-out contracts.
 
 ## Current Position
 
-Phase: 27 of 27 (按页面访问收敛 Read Model)
-Plan: 27-07 of 27-07
-Status: Phase 27 complete; runtime code commit `3b44f08ef` is active as production release `main-3b44f08e-20260725151318`; 52/52 final probes, System Audit, fixture recovery and runtime convergence pass
-Last activity: 2026-07-25 - Candidate A full issue ledger completed before one consolidated Candidate B; no per-bug deploy loop
+Phase: 28 of 28 (成本统计写后恢复性能)
+Plan: 28-01 of 28-01
+Status: Executing; baseline/root cause complete, implementation and one-candidate production verification pending
+Last activity: 2026-07-25 - Production exact Workbench profiling proved 1.330-second isolated rebuild and identified repeated Cost proof polling as the contention path
 
-Progress: [██████████] 100% (Phase 27)
+Progress: [██░░░░░░░░] 20% (Phase 28)
 
 ## Performance Metrics
 

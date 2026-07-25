@@ -550,4 +550,22 @@ Plans:
 - [x] 27-06-PLAN — Delete superseded fan-out paths and close all local correctness/performance gates.
 - [x] 27-07-PLAN — Candidate A `bef73c4b6` 完成全矩阵后，Candidate B `3b44f08ef` 集中修复验证 evidence gate；最终 production release、fixture recovery、52/52 probes、System Audit 与 runtime convergence 全部闭合。
 
+### Phase 28: 优化成本统计写后完整 Fresh 的访问恢复热路径
+
+**Goal:** Remove repeated full-history Cost statistics proof I/O while a durable exact recovery is already active, so Bank Detail rows remain independently available and global statistics converge with materially lower database contention, without changing writes, fan-out, scope, workers or correctness semantics.
+**Requirements:** Performance follow-up from Phase 27; no new product requirement IDs.
+**Depends on:** Phase 27 production correctness and isolation closure.
+**Canonical refs:** `.planning/phases/28-cost-statistics-recovery-performance/28-01-PLAN.md`, `docs/modules/cost-statistics/boundary-io.md`, `docs/modules/read-models/boundary-io.md`, `docs/modules/runtime-workers/boundary-io.md`
+**Success Criteria** (what must be TRUE):
+
+  1. Cost `time|bank_tag` retries use a lightweight durable active-recovery gate while Workbench/Cost recovery is pending or processing; the full statistics proof only runs when no known recovery is active.
+  2. Bank Detail rows remain independently fresh, statistics remain fail closed, and exact scope/zero write fan-out contracts do not change.
+  3. Targeted local gates and one production candidate prove correctness, isolation, queue/worker drain and a material improvement over the 7.432-second baseline.
+
+**Plans:** 1 plan
+
+Plans:
+
+- [ ] 28-01-PLAN — Add the Cost active-recovery fast gate, run targeted regression, and close one candidate production performance proof.
+
 ---

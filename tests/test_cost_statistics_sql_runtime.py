@@ -457,6 +457,76 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             [("active:2026-03", "api_statistics_stale")],
         )
 
+    def test_month_bank_flow_access_does_not_reenqueue_active_statistics_recovery(
+        self,
+    ) -> None:
+        class Runtime(CostStatisticsRuntimeStub):
+            def __init__(self) -> None:
+                self.cost_refreshes: list[tuple[str, str]] = []
+
+            def enqueue_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
+                self.cost_refreshes.append((scope_key, reason))
+                return True
+
+        class Repository:
+            def get_cost_statistics_freshness_gate(
+                self,
+                *,
+                scope_key: str,
+                dependency_profile: str = "workbench",
+            ) -> dict[str, object]:
+                gate = cost_statistics_fresh_gate(
+                    scope_key=scope_key,
+                    source_versions=_cost_statistics_source_versions_fixture(scope_key),
+                )
+                gate["statistics"] = None
+                gate["statistics_status"] = "refreshing"
+                gate["statistics_workbench_refresh_scope_keys"] = ["2026-02"]
+                gate["statistics_child_refresh_scope_keys"] = ["active:2026-02"]
+                gate["statistics_refresh_active"] = True
+                return gate
+
+            def get_cost_statistics_page(self, **_kwargs: object) -> dict[str, object]:
+                return {
+                    "summary": {"row_count": 1, "transaction_count": 1, "total_amount": "88.00"},
+                    "available_years": [2026],
+                    "primary_facets": [],
+                    "secondary_facets": [],
+                    "rows": [{"transaction_id": "bank-1", "amount": "88.00"}],
+                    "row_count": 1,
+                    "next_cursor_values": None,
+                }
+
+        runtime = Runtime()
+        workbench_refreshes: list[tuple[str, str]] = []
+        service = CostStatisticsQueryService(
+            runtime_service=runtime,
+            sql_read_repository=Repository(),
+            tag_selection_mapper=AppSettingsService.cost_statistics_tag_selection_payload_from_settings,
+            workbench_dependency_versions_provider=_fresh_workbench_dependency_versions,
+            workbench_dependency_versions_by_scope_provider=(
+                _fresh_workbench_dependency_versions_by_scope
+            ),
+            workbench_refresh_enqueuer=lambda scope_key, *, reason: (
+                workbench_refreshes.append((scope_key, reason)) or True
+            ),
+        )
+
+        payload, _cache_hit, _etag, _not_modified = service.get_explorer_page(
+            scope="2026-05",
+            view="time",
+            project_scope="active",
+            filters={},
+            cursor=None,
+            page_size=50,
+        )
+
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(payload["statistics_status"], "refreshing")
+        self.assertNotIn("statistics_refresh_enqueued", payload)
+        self.assertEqual(workbench_refreshes, [])
+        self.assertEqual(runtime.cost_refreshes, [])
+
     def test_time_access_reads_bank_flow_without_workbench_dependency(self) -> None:
         class Runtime(CostStatisticsRuntimeStub):
             def __init__(self) -> None:
@@ -2449,14 +2519,22 @@ class CostStatisticsParentAggregationConnection:
 
 
 class CostStatisticsDirectBankFlowGateConnection:
-    def __init__(self, *, current_rules_version: int = 7) -> None:
+    def __init__(
+        self,
+        *,
+        current_rules_version: int = 7,
+        active_recovery_row: dict[str, object] | None = None,
+    ) -> None:
         self.current_rules_version = current_rules_version
+        self.active_recovery_row = active_recovery_row
         self.fetch_all_calls: list[tuple[str, tuple]] = []
         self.fetch_one_calls: list[tuple[str, tuple]] = []
 
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
         normalized = " ".join(sql.lower().split())
         self.fetch_one_calls.append((normalized, params))
+        if "/* cost_statistics_active_recovery_gate */" in normalized:
+            return self.active_recovery_row
         if "from read_model.cost_statistics_read_models model" in normalized:
             return None
         if "from app.app_settings" in normalized:
@@ -2850,6 +2928,8 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         )
         self.assertNotIn("bank_detail_relation_source_summaries", queried_sql)
         self.assertNotIn("cost_statistics_bank_flow_rows", queried_sql)
+        self.assertIn("cost_statistics_active_recovery_gate", queried_sql)
+        self.assertIn("from read_model.cost_statistics_read_models model", queried_sql)
 
     def test_bank_flow_gate_enqueues_only_exact_scope_after_rule_change(self) -> None:
         connection = CostStatisticsDirectBankFlowGateConnection(
@@ -2865,6 +2945,45 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(
             gate["bank_flow_bank_detail_refresh_scope_keys"],
             ["2026-05"],
+        )
+
+    def test_bank_flow_gate_skips_full_statistics_proof_during_active_recovery(
+        self,
+    ) -> None:
+        connection = CostStatisticsDirectBankFlowGateConnection(
+            active_recovery_row={
+                "workbench_refresh_scope_keys": ["2026-02"],
+                "child_refresh_scope_keys": ["all:2026-02"],
+                "parent_refresh_active": False,
+            }
+        )
+
+        gate = PostgresReadModelRepository(connection).get_cost_statistics_freshness_gate(
+            scope_key="all:2026-05",
+            dependency_profile="bank_flow",
+        )
+
+        self.assertEqual(gate["bank_flow_refresh_status"], "fresh")
+        self.assertEqual(gate["statistics_status"], "refreshing")
+        self.assertEqual(
+            gate["statistics_workbench_refresh_scope_keys"],
+            ["2026-02"],
+        )
+        self.assertEqual(
+            gate["statistics_child_refresh_scope_keys"],
+            ["all:2026-02"],
+        )
+        queried_sql = " ".join(
+            sql
+            for sql, _params in [
+                *connection.fetch_one_calls,
+                *connection.fetch_all_calls,
+            ]
+        )
+        self.assertIn("cost_statistics_active_recovery_gate", queried_sql)
+        self.assertNotIn(
+            "from read_model.cost_statistics_read_models model",
+            queried_sql,
         )
 
     def test_page_statistics_reject_invalid_partition_totals(self) -> None:

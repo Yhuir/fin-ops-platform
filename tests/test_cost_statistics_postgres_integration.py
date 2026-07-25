@@ -129,6 +129,45 @@ class CostStatisticsPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(page["summary"]["income_transaction_count"], 0)
         self.assertEqual(detail["transaction_id"], "txn_imported_1348")
 
+    def test_bank_flow_gate_short_circuits_full_statistics_proof_during_active_recovery(
+        self,
+    ) -> None:
+        self.connection.execute(
+            """
+            insert into app.app_settings(settings_key, settings_payload)
+            values (
+                'app_settings',
+                '{
+                    "bank_transaction_tags": {},
+                    "bank_account_mappings": [],
+                    "cost_statistics_tag_selection": {}
+                }'::jsonb
+            )
+            """
+        )
+        self.connection.execute(
+            """
+            insert into job.read_model_dirty_scopes(
+                tenant_id, scope_type, scope_key, source_version, status
+            )
+            values ('default', 'workbench', '2026-02', 7, 'processing')
+            """
+        )
+
+        gate = self.repository.get_cost_statistics_freshness_gate(
+            scope_key="active:all",
+            dependency_profile="bank_flow",
+        )
+
+        self.assertEqual(gate["bank_flow_refresh_status"], "fresh")
+        self.assertEqual(gate["statistics_status"], "refreshing")
+        self.assertTrue(gate["statistics_refresh_active"])
+        self.assertEqual(
+            gate["statistics_workbench_refresh_scope_keys"],
+            ["2026-02"],
+        )
+        self.assertEqual(gate["statistics_child_refresh_scope_keys"], [])
+
     def test_parent_freshness_gate_ignores_workbench_execution_version_but_keeps_business_drift(
         self,
     ) -> None:
