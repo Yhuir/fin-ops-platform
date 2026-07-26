@@ -11,9 +11,6 @@ from fin_ops_platform.services.api_performance_metrics import ApiPerformanceReco
 from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.bank_detail_read_model_refresh import BankDetailReadModelRefreshService
 from fin_ops_platform.services.bank_detail_sql_projection import BankDetailSqlProjectionBuilder
-from fin_ops_platform.services.bank_transaction_tag_read_facade import BankTransactionTagReadFacade
-from fin_ops_platform.services.cost_statistics_read_model_refresh import CostStatisticsReadModelRefreshService
-from fin_ops_platform.services.cost_statistics_sql_projection import CostStatisticsSqlProjectionBuilder
 from fin_ops_platform.services.external_control_evidence import ExternalControlEvidenceService
 from fin_ops_platform.services.operations_dashboard import OperationsDashboardService
 from fin_ops_platform.services.oa_pending_payment_read_model_refresh import OaPendingPaymentReadModelRefreshService
@@ -474,43 +471,6 @@ class AppHealthSystemAuditPostgresTests(unittest.TestCase):
                 queue_repository=queue,
             ),
         )
-
-        cost_scope_keys = ["active:2026-01", "all:2026-01"]
-        if refresh_gateway.enqueue_many(
-            "cost_statistics",
-            cost_scope_keys,
-            reason="api_freshness_gate_blocked",
-        ) != cost_scope_keys:
-            raise AssertionError("Cost Statistics clean-system seed did not normalize the exact access scopes.")
-        cost_refresh = CostStatisticsReadModelRefreshService(
-            projection_builder=CostStatisticsSqlProjectionBuilder(
-                connection=self.connection,
-                read_model_repository=read_models,
-                bank_transaction_tag_read_facade=BankTransactionTagReadFacade(
-                    read_model_repository=read_models,
-                    queue_repository=queue,
-                ),
-            ),
-            queue_repository=queue,
-        )
-        processed_cost_scopes = [
-            str(
-                run_one_refresh(
-                    event_type="cost_statistics.read_model.refresh",
-                    worker_id="system-audit-cost-statistics-test",
-                    service=cost_refresh,
-                ).get("scope_key")
-                or ""
-            )
-            for _ in range(4)
-        ]
-        if set(processed_cost_scopes) != {
-            "active:2026-01",
-            "all:2026-01",
-            "active:all",
-            "all:all",
-        }:
-            raise AssertionError(f"Cost Statistics clean-system seed scopes were incomplete: {processed_cost_scopes}")
 
         PostgresOaPendingPaymentSourceSnapshotRepository(
             self.connection,

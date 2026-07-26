@@ -101,11 +101,6 @@ export type CostStatisticsExplorerPage = {
   rows: CostTimeRow[];
   rowCount: number;
   nextCursor?: string;
-  readModelStatus?: "fresh" | "refreshing" | "stale" | "unavailable" | (string & {});
-  statisticsStatus?: "fresh" | "refreshing" | "stale" | "unavailable" | (string & {});
-  readModelScopeKey?: string;
-  readModelGeneratedAt?: string;
-  readModelStaleReasons?: string[];
 };
 
 export type CostStatisticsExplorerPageRequest = {

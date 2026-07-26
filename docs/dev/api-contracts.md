@@ -47,28 +47,25 @@
 
 `GET /api/cost-statistics/explorer`
 
-- 页面合同必须携带 `scope=YYYY-MM|year:YYYY|all`、`view=time|project|bank|expense_type|bank_tag` 和 `project_scope=active|all`；`page_size` 默认 50、最大 100，`cursor` 是绑定当前 query 与已发布 read-model version 的 opaque token。
-- 响应只返回当前 scope/view 的 `summary`、`available_years`、必要的 bounded `facets`、当前层级 `rows`、`row_count`、`next_cursor` 与 freshness metadata。不得恢复完整 `time_rows` / `bank_flow_time_rows` explorer DTO，也不得在缺少 `view` 时回退旧 shape。
-- `time|bank_tag` 的 summary/rows 使用全银行收入与支出口径；`project|bank|expense_type` 使用 OA 配对支出口径。summary/facets 由完整筛选集合在 SQL 中计算，cursor 只分页 rows，页面不得用当前页重算总额、笔数、百分比或完整 facets。
-- `summary.row_count` 表示当前事实集的结构化行/allocation 行数，`summary.transaction_count` 表示唯一银行流水数。`statistics.cost_transaction_count` 使用 parent 全期间集合与当前成本统计标签规则筛选后的唯一 OA 成本流水数；不因当前 explorer 时间范围或一笔流水拆成多条 OA allocation 而重复计数。
-- 每次请求先过 PostgreSQL durable freshness gate；non-fresh 返回 `202` 和空 rows/facets，不能读取旧 Redis/rows。fresh 响应使用 `ETag`、`Cache-Control: private, no-cache`、`Vary: Authorization, Cookie`；条件命中可返回 `304` 且跳过 page SQL。
-- non-fresh 响应可 additive 返回 `refresh_dependency=workbench` 与 `refresh_scope_keys[]`，表示本次访问实际 ensure 的精确 Workbench month 或 Cost child scopes；该字段只用于诊断/验证，不允许客户端据此自行 fan-out 或把 `refresh_enqueued=false` 解释为未收敛，因为 durable gateway 可能已合并同 scope active event。
-- `year:YYYY` 复用 `project_scope:all` parent gate 后过滤结构化月份 rows，不新增 year read-model scope。稳定排序为交易日期/时间降序，再按 transaction/row identity；read-model version 变化后旧 cursor 必须拒绝。
-- `GET /api/cost-statistics/transactions/{transaction_id}` 必须携带当前 `view`、`scope` 与 `project_scope`；缺少或非法参数返回 `400 invalid_cost_statistics_transaction_request`。同一个规范 `month|year|all` scope既用于 freshness gate，也下推到 point SQL，禁止用 fresh A月的 gate读取B月行。`time|bank_tag` 点查 Bank Detail row；`project|bank|expense_type` 点查 Cost allocation并返回 `transaction.cost_allocations[]`。任一 profile non-fresh均返回 `409 cost_statistics_read_model_not_fresh`，禁止跨 profile/scope fallback。
+- query 保持 `scope`、`view`、`project_scope`、筛选、cursor 与 `page_size` 合同。
+- 每个请求从一个 PostgreSQL `REPEATABLE READ READ ONLY` snapshot 读取 canonical 银行流水、OA、正式关系、标签和设置，再返回 `summary`、`statistics`、`facets`、`rows`、`row_count` 与 `next_cursor`。
+- 成功固定返回 `200`；不返回 `read_model_status`、`statistics_status`、Cost scope/version，也不返回 `202/409 read model not fresh`。
+- 数据库或业务计算失败必须返回明确错误；浏览器刷新会重新执行完整请求，不读取旧 payload 伪装成功。
+
+`GET /api/cost-statistics/transactions/{transaction_id}`
+
+- 必须携带当前 `view`、`scope` 与 `project_scope`；非法参数返回 `400 invalid_cost_statistics_transaction_request`，未找到返回 `404`。
+- 详情从同一 canonical snapshot 计算，不跨页面 API/read model fallback。
 
 `GET /api/cost-statistics/export-preview` 与 `GET /api/cost-statistics/export`
 
-- `view=time` 和 `view=bank_tag` 均导出全银行收入与支出；`bank_tag` 工作表包含主标签、子标签、资金方向和金额。
-- preview 的 `summary` 返回分方向金额和笔数。`view=project|expense_type|transaction` 继续使用 OA 配对支出口径。
-- `time|bank_tag` preview/download 使用 Bank Detail exact-scope profile并直接读取其结构化 rows；其余 view使用 Cost OA allocation profile。文件生成后的 final gate必须复用同一 profile。
-- read model 非 fresh 时返回 `409 cost_statistics_read_model_not_fresh`，route 不回退 live scan。
-- preview 的业务 shape 不变，但服务端只读取完整筛选 summary 与最多 8 行；download 在 20,000 行门槛通过后按最多 1,000 行批次生成 write-only XLSX，不读取完整 explorer payload。
-- download 绑定初始 fresh gate 的 schema、业务 source versions 与 published source version；生成期间任一证明变化时丢弃文件并返回同一 non-fresh 409，不能返回混合版本 workbook。
+- 复用 explorer 相同事实源和筛选口径；preview 最多 8 行，download 受 `COST_STATISTICS_EXPORT_ROW_LIMIT` 保护。
+- 导出不入队、不等待 worker，也不读取旧 Cost 投影。
 
 `GET|PUT /api/cost-statistics/tag-rules`
 
-- payload 包含 `selection_schema_version=2`；active tags 包含收入、支出及共用/未分类标签。
-- legacy 显式选择归一化到 v2 时保留原支出选择并一次性加入当前有效收入标签；显式空选择仍表示不让任何标签进入成本统计。
+- 写 owner 仍为 `AppSettingsService`，保持 version conflict、权限与 audit 合同。
+- 保存不触发 Cost read-model refresh；前端保存成功后重新 GET，下一次 canonical snapshot 应用最新规则。
 
 ## Workbench 设置 API
 
@@ -177,9 +174,7 @@
 | `read_model_status` | 保存后固定表示相关 read model 正在刷新，通常为 `refreshing`。 |
 | `derived_data_lifecycle` | `pending_invoice_rules_changed` lifecycle 执行摘要，包含 affected domains、skipped domains、invalidated scopes 和 enqueued jobs。 |
 
-规则变更只通过 `pending_invoice_rules_changed` 进入派生数据生命周期。该事件刷新发票生命周期、待找发票、关联台、进项使用、OA 待付款、销项收款、税金抵扣、成本统计和搜索相关 read model；不得刷新 `turnover_ledger`、`bank_flow_rule_batch`、`no_oa_bank_batch`、`bank_account_balance`。
-
-当 lifecycle 入队成本统计刷新时，`derived_data_lifecycle.enqueued_jobs` 必须报告真实 durable queue 事件 `cost_statistics.read_model.refresh`。成本统计不存在第二个 warmup job contract。
+规则变更只通过 `pending_invoice_rules_changed` 进入派生数据生命周期。该事件刷新发票生命周期、待找发票、关联台、进项使用、OA 待付款、销项收款、税金抵扣和搜索相关 read model；不得刷新 `turnover_ledger`、`cost_statistics`、`bank_flow_rule_batch`、`no_oa_bank_batch`、`bank_account_balance`。成本统计在下一次页面/API 请求中直接读取最新 canonical facts 与规则。
 
 ## App Health 全局状态 API
 

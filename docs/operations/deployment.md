@@ -127,7 +127,6 @@ python -m fin_ops_platform.app.worker \
 - `deploy/oa/env/fin-ops.worker.invoice-usage-collection.env.example`
 - `deploy/oa/env/fin-ops.worker.invoice-lifecycle-secondary.env.example`
 - `deploy/oa/env/fin-ops.worker.cost-tax.env.example`
-- `deploy/oa/env/fin-ops.worker.cost-statistics.env.example`
 - `deploy/oa/env/fin-ops.worker.tax-offset.env.example`
 - `deploy/oa/env/fin-ops.worker.import.env.example`
 - `deploy/oa/env/fin-ops.rabbitmq-*.env.example`

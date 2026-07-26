@@ -302,7 +302,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
             ],
         )
 
-    def test_execute_data_reset_enqueues_cost_statistics_rebuild_without_local_snapshot(self) -> None:
+    def test_execute_data_reset_does_not_enqueue_retired_cost_statistics_read_model(self) -> None:
         for action in (
             RESET_BANK_TRANSACTIONS_ACTION,
             RESET_INVOICES_ACTION,
@@ -330,16 +330,13 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 )
                 lifecycle_summary = result["derived_data_lifecycle"]
                 self.assertEqual(lifecycle_summary["event"], "settings_reset_completed")
-                self.assertIn("cost_statistics_read_models", lifecycle_summary["deleted_counts"])
+                self.assertNotIn("cost_statistics_read_models", lifecycle_summary["deleted_counts"])
                 self.assertIn("tax_offset_read_models", lifecycle_summary["deleted_counts"])
                 self.assertIn("file_import_sessions", lifecycle_summary["skipped"])
                 self.assertFalse(hasattr(app, "_cost_statistics_read_model_service"))
                 self.assertEqual(
                     [call for call in queue.calls if call[0] == "cost_statistics"],
-                    [
-                        ("cost_statistics", "active:all", "settings_reset_completed"),
-                        ("cost_statistics", "all:all", "settings_reset_completed"),
-                    ],
+                    [],
                 )
 
     def test_execute_oa_reset_reports_failed_when_workbench_lifecycle_enqueue_fails(self) -> None:

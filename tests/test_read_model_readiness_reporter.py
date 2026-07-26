@@ -120,34 +120,6 @@ class ReadModelReadinessReporterTests(unittest.TestCase):
         self.assertEqual(repository.records[0]["schema_version"], "old")
         self.assertEqual(repository.records[0]["last_error"], "schema version mismatch")
 
-    def test_explicit_refreshing_result_records_parent_waiting_state(self) -> None:
-        repository = RecordingReadinessRepository()
-        reporter = ReadModelReadinessReporter(readiness_repository=repository)
-
-        reporter.record_event_success(
-            _event(
-                event_type="cost_statistics.read_model.refresh",
-                scope_type="cost_statistics",
-                scope_key="active:all",
-            ),
-            {
-                "scope_key": "active:all",
-                "refresh_kind": "parent_waiting_for_shards",
-                "readiness_status": "refreshing",
-                "enqueued_scope_keys": ["active:2026-05", "active:2026-04"],
-                "row_count": 0,
-                "last_error": "waiting for cost statistics shards",
-            },
-        )
-
-        self.assertEqual(len(repository.records), 1)
-        record = repository.records[0]
-        self.assertEqual(record["read_model_key"], "cost_statistics")
-        self.assertEqual(record["scope_type"], "cost_statistics")
-        self.assertEqual(record["scope_key"], "active:all")
-        self.assertEqual(record["status"], "refreshing")
-        self.assertEqual(record["last_error"], "waiting for cost statistics shards")
-
     def test_all_scope_shard_fanout_does_not_record_fake_fresh(self) -> None:
         repository = RecordingReadinessRepository()
         reporter = ReadModelReadinessReporter(readiness_repository=repository)
@@ -192,33 +164,6 @@ class ReadModelReadinessReporterTests(unittest.TestCase):
         self.assertEqual(repository.records[0]["scope_key"], "all")
         self.assertEqual(repository.records[0]["status"], "failed")
 
-    def test_all_scope_parent_rebuild_with_shard_fanout_records_parent_fresh(self) -> None:
-        repository = RecordingReadinessRepository()
-        reporter = ReadModelReadinessReporter(readiness_repository=repository)
-
-        reporter.record_event_success(
-            _event(
-                event_type="cost_statistics.read_model.refresh",
-                scope_type="cost_statistics",
-                scope_key="active:all",
-            ),
-            {
-                "scope_key": "active:all",
-                "entry_count": 2,
-                "enqueued_scope_keys": ["active:2026-05", "active:2026-04"],
-                "readiness_status": "fresh",
-                "source_versions": {"cost_statistics_read_model_schema_version": "v1"},
-            },
-        )
-
-        self.assertEqual(len(repository.records), 1)
-        record = repository.records[0]
-        self.assertEqual(record["read_model_key"], "cost_statistics")
-        self.assertEqual(record["scope_type"], "cost_statistics")
-        self.assertEqual(record["scope_key"], "active:all")
-        self.assertEqual(record["status"], "fresh")
-        self.assertEqual(record["row_count"], 2)
-
     def test_unknown_read_model_key_fails_fast(self) -> None:
         repository = RecordingReadinessRepository()
         reporter = ReadModelReadinessReporter(readiness_repository=repository)
@@ -243,7 +188,6 @@ class ReadModelReadinessReporterTests(unittest.TestCase):
         expected_assignments = (
             'handlers["workbench.read_model.refresh"] = _read_model_handler',
             "handlers[WORKBENCH_RELATION_REFRESH_EVENT_TYPE] = _read_model_handler",
-            'handlers["cost_statistics.read_model.refresh"] = _read_model_handler',
             'handlers["tax_offset.read_model.refresh"] = _read_model_handler',
             'handlers["search.read_model.refresh"] = _read_model_handler',
             'handlers["pending_invoice.read_model.refresh"] = _read_model_handler',

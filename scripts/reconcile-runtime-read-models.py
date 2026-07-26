@@ -50,7 +50,6 @@ def build_report(
     report: dict[str, Any] = {
         "scope_key": scope_key,
         "workbench": workbench_report(connection, scope_key),
-        "cost_statistics": table_count_report(connection, "read_model.cost_statistics_read_models", scope_key),
         "tax_offset": table_count_report(connection, "read_model.tax_offset_read_models", scope_key),
         "queue": queue_report(connection),
         "errors": [],
@@ -230,15 +229,6 @@ def explain_report(connection: PostgresConnection, scope_key: str) -> dict[str, 
             """,
             ("expense", "all"),
         ),
-        "cost_statistics": explain(
-            connection,
-            """
-            select scope_key, entry_count, payload
-            from read_model.cost_statistics_read_models
-            where scope_key = %s
-            """,
-            (scope_key,),
-        ),
         "tax_offset": explain(
             connection,
             """
@@ -267,8 +257,6 @@ def print_human_report(report: dict[str, Any]) -> None:
     print(f"scope_key: {report['scope_key']}")
     print("workbench:")
     print(json.dumps(report["workbench"], ensure_ascii=False, indent=2, sort_keys=True, default=str))
-    print("cost_statistics:")
-    print(json.dumps(report["cost_statistics"], ensure_ascii=False, indent=2, sort_keys=True, default=str))
     print("tax_offset:")
     print(json.dumps(report["tax_offset"], ensure_ascii=False, indent=2, sort_keys=True, default=str))
     print("queue:")

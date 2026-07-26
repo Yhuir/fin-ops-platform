@@ -21,7 +21,6 @@ class ImportProcessingService:
         persist_confirmed_import_delta: Callable[..., Any],
         workbench_matching_scope_months_for_import_file_session: Callable[[Any, list[str]], list[str]],
         tax_offset_scope_keys_for_import_file_session: Callable[[Any, list[str]], list[str]],
-        cost_statistics_scope_keys_for_import_file_session: Callable[[Any, list[str]], list[str]],
         bank_detail_scope_keys_for_import_file_session: Callable[[Any, list[str]], list[str]],
         input_invoice_usage_scope_keys_for_import_file_session: Callable[[Any, list[str]], list[str]],
         output_invoice_collection_scope_keys_for_import_file_session: Callable[[Any, list[str]], list[str]],
@@ -39,7 +38,6 @@ class ImportProcessingService:
         self._persist_confirmed_import_delta = persist_confirmed_import_delta
         self._workbench_matching_scope_months_for_import_file_session = workbench_matching_scope_months_for_import_file_session
         self._tax_offset_scope_keys_for_import_file_session = tax_offset_scope_keys_for_import_file_session
-        self._cost_statistics_scope_keys_for_import_file_session = cost_statistics_scope_keys_for_import_file_session
         self._bank_detail_scope_keys_for_import_file_session = bank_detail_scope_keys_for_import_file_session
         self._input_invoice_usage_scope_keys_for_import_file_session = input_invoice_usage_scope_keys_for_import_file_session
         self._output_invoice_collection_scope_keys_for_import_file_session = output_invoice_collection_scope_keys_for_import_file_session
@@ -140,10 +138,6 @@ class ImportProcessingService:
                 confirmed_session,
                 selected_file_ids,
             )
-            cost_statistics_scope_keys = self._cost_statistics_scope_keys_for_import_file_session(
-                confirmed_session,
-                selected_file_ids,
-            )
             bank_detail_scope_keys = self._bank_detail_scope_keys_for_import_file_session(
                 confirmed_session,
                 selected_file_ids,
@@ -183,7 +177,6 @@ class ImportProcessingService:
                 "affected_months": scope_months,
                 "enqueued_matching_job_id": matching_job_id,
                 **self._write_result_envelope(
-                    cost_statistics_scope_keys=cost_statistics_scope_keys,
                     tax_offset_scope_keys=tax_offset_scope_keys,
                     bank_detail_scope_keys=bank_detail_scope_keys,
                     input_invoice_usage_scope_keys=input_invoice_usage_scope_keys,
@@ -294,7 +287,6 @@ class ImportProcessingService:
             {
                 "affected_months": changed_scope_keys,
                 **self._write_result_envelope(
-                    cost_statistics_scope_keys=changed_scope_keys,
                     tax_offset_scope_keys=changed_scope_keys,
                     bank_detail_scope_keys=[],
                     input_invoice_usage_scope_keys=changed_scope_keys,
@@ -367,7 +359,6 @@ class ImportProcessingService:
     @staticmethod
     def _write_result_envelope(
         *,
-        cost_statistics_scope_keys: list[str],
         tax_offset_scope_keys: list[str],
         bank_detail_scope_keys: list[str],
         input_invoice_usage_scope_keys: list[str],
@@ -375,7 +366,6 @@ class ImportProcessingService:
     ) -> dict[str, object]:
         scope_keys = normalized_scope_keys(
             [
-                *cost_statistics_scope_keys,
                 *tax_offset_scope_keys,
                 *bank_detail_scope_keys,
                 *input_invoice_usage_scope_keys,

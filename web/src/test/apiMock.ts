@@ -27,8 +27,6 @@ type MockApiOptions = {
   costErrorMonths?: string[];
   costExplorerFailuresBeforeSuccess?: number;
   costExplorerDelayMs?: number;
-  costRefreshingMonths?: string[];
-  costStatisticsStatusSequence?: string[];
   costExportErrorViews?: string[];
   costDuplicateTransactionRows?: boolean;
   costTagRulesCanSave?: boolean;
@@ -4202,8 +4200,6 @@ function buildCostStatisticsExplorerPayload(
 function buildCostStatisticsExplorerPagePayload(
   url: URL,
   payload: ReturnType<typeof buildCostStatisticsExplorerPayload>,
-  readModelStatus = "fresh",
-  statisticsStatus = readModelStatus,
 ) {
   const scope = url.searchParams.get("scope") ?? "all";
   const view = url.searchParams.get("view") ?? "time";
@@ -4339,7 +4335,7 @@ function buildCostStatisticsExplorerPagePayload(
   const summaryRows = view === "time" || view === "bank_tag" ? bankFlowRows : costRows;
   const expenseRows = summaryRows.filter((row) => row.direction === "支出");
   const incomeRows = summaryRows.filter((row) => row.direction === "收入");
-  const rows = readModelStatus === "fresh" ? matchedRows.slice(cursorOffset, cursorOffset + pageSize) : [];
+  const rows = matchedRows.slice(cursorOffset, cursorOffset + pageSize);
   const nextOffset = cursorOffset + rows.length;
   return {
     scope,
@@ -4354,7 +4350,7 @@ function buildCostStatisticsExplorerPagePayload(
       income_transaction_count: incomeRows.length,
     },
     available_years: Array.from(new Set([...payload.time_rows, ...payload.bank_flow_time_rows].map((row) => row.trade_time.slice(0, 4)))).sort().reverse(),
-    facets: readModelStatus === "fresh" ? {
+    facets: {
       projects: view === "project" ? projectFacets : view === "bank" && paymentAccountLabel
         ? bankProjectFacets
         : [],
@@ -4364,13 +4360,10 @@ function buildCostStatisticsExplorerPagePayload(
       bank_accounts: view === "bank" ? bankFacets : [],
       bank_tag_primary: view === "bank_tag" ? bankTagPrimary : [],
       bank_tag_sub: view === "bank_tag" ? bankTagSub : [],
-    } : { projects: [], expense_types: [], bank_accounts: [], bank_tag_primary: [], bank_tag_sub: [] },
+    },
     rows,
-    row_count: readModelStatus === "fresh" ? matchedRows.length : 0,
-    next_cursor: readModelStatus === "fresh" && nextOffset < matchedRows.length ? `mock:${nextOffset}` : null,
-    read_model_status: readModelStatus,
-    statistics_status: statisticsStatus,
-    read_model_scope_key: `${url.searchParams.get("project_scope") ?? "active"}:${scope.startsWith("year:") ? "all" : scope}`,
+    row_count: matchedRows.length,
+    next_cursor: nextOffset < matchedRows.length ? `mock:${nextOffset}` : null,
   };
 }
 
@@ -4740,7 +4733,6 @@ function isBinaryLikeResponse(value: MockFetchResult): value is Response {
 
 export function installMockApiFetch(options: MockApiOptions = {}) {
   let costExplorerFailuresRemaining = Math.max(0, options.costExplorerFailuresBeforeSuccess ?? 0);
-  let costStatisticsStatusIndex = 0;
   let latestImportSession = buildImportPreviewPayload(
     options.initialImportPreviewFileNames ?? [],
     options.initialImportPreviewOverrides ?? [],
@@ -5376,6 +5368,9 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           snapshot_consistency: "repeatable_read_read_only",
           proof_availability: "ready",
           contract_revision: "page-audit-contract.v9",
+          ...(pageKey === "cost-statistics"
+            ? { registered_read_model_keys: [] }
+            : {}),
         },
         summary: {
           blocking_issue_sample_count: 0,
@@ -5748,37 +5743,12 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       if (options.costErrorMonths?.includes(month)) {
         return { status: 500, body: { message: "cost statistics failed" } };
       }
-      if (options.costRefreshingMonths?.includes(month)) {
-        return {
-          status: 202,
-          body: buildCostStatisticsExplorerPagePayload(
-            url,
-            buildCostStatisticsExplorerPayload(month, projectScope, {
-              duplicateTransactionRows: options.costDuplicateTransactionRows,
-            }),
-            "refreshing",
-          ),
-        };
-      }
-      const statisticsStatusSequence = options.costStatisticsStatusSequence ?? [];
-      const statisticsStatus = (
-        statisticsStatusSequence[
-          Math.min(
-            costStatisticsStatusIndex,
-            Math.max(0, statisticsStatusSequence.length - 1),
-          )
-        ]
-        ?? "fresh"
-      );
-      costStatisticsStatusIndex += 1;
       return {
         body: buildCostStatisticsExplorerPagePayload(
           url,
           buildCostStatisticsExplorerPayload(month, projectScope, {
             duplicateTransactionRows: options.costDuplicateTransactionRows,
           }),
-          "fresh",
-          statisticsStatus,
         ),
       };
     },

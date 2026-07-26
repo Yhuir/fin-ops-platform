@@ -14,7 +14,6 @@ from uuid import NAMESPACE_URL, uuid5
 from fin_ops_platform.services.bank_account_balance_read_model_repository import BankAccountBalanceReadModelRepositoryPort
 from fin_ops_platform.services.bank_detail_read_model_repository import BankDetailReadModelRepositoryPort
 from fin_ops_platform.services.bank_flow_rule_batch_read_model_repository import BankFlowRuleBatchReadModelRepositoryPort
-from fin_ops_platform.services.cost_statistics_read_model_repository import CostStatisticsReadModelRepositoryPort
 from fin_ops_platform.services.file_object_migration import verified_object_key_from_uri, write_verified_object
 from fin_ops_platform.services.input_invoice_usage_read_model_repository import InputInvoiceUsageReadModelRepositoryPort
 from fin_ops_platform.services.no_oa_bank_batch_read_model_repository import NoOaBankBatchReadModelRepositoryPort
@@ -169,7 +168,6 @@ class PostgresStateStore:
         self._etc_import_session_repository = PostgresEtcImportSessionRepository(connection)
         self._read_model_repository = PostgresReadModelRepository(connection)
         self._sql_read_model_repository = PostgresReadModelRepository(self._sql_read_connection)
-        self._cost_statistics_sql_read_repository = CostStatisticsReadModelRepositoryPort(self._sql_read_model_repository)
         self._tax_offset_read_model_repository = TaxOffsetReadModelRepositoryPort(self._read_model_repository)
         self._bank_account_balance_sql_read_repository = BankAccountBalanceReadModelRepositoryPort(self._sql_read_model_repository)
         self._bank_detail_sql_read_repository = BankDetailReadModelRepositoryPort(self._sql_read_model_repository)
@@ -905,10 +903,6 @@ class PostgresStateStore:
         from fin_ops_platform.services.workbench_sql_projection import WorkbenchSqlProjectionBuilder
 
         return WorkbenchSqlProjectionBuilder(connection=self._connection, read_model_repository=self._read_model_repository)
-
-    @property
-    def cost_statistics_sql_read_repository(self) -> CostStatisticsReadModelRepositoryPort:
-        return self._cost_statistics_sql_read_repository
 
     @property
     def tax_offset_sql_read_repository(self) -> TaxOffsetReadModelRepositoryPort:

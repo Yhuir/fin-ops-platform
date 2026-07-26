@@ -53,14 +53,6 @@ def _generic_scope_policy(scope_type: str) -> ReadModelScopePolicy:
     )
 
 
-def _cost_statistics_scope_policy() -> ReadModelScopePolicy:
-    return ReadModelScopePolicy(
-        scope_type="cost_statistics",
-        normalize_many=_normalize_cost_statistics_scope_keys,
-        validate_one=_validate_cost_statistics_scope_key,
-    )
-
-
 def _month_or_all_scope_policy(scope_type: str) -> ReadModelScopePolicy:
     return ReadModelScopePolicy(
         scope_type=scope_type,
@@ -83,32 +75,6 @@ def _pending_invoice_scope_policy() -> ReadModelScopePolicy:
         normalize_many=_dedupe_text,
         validate_one=_validate_pending_invoice_scope_key,
     )
-
-
-def _normalize_cost_statistics_scope_keys(raw_scope_keys: list[str]) -> list[str]:
-    from fin_ops_platform.services.cost_statistics_runtime_service import CostStatisticsRuntimeService
-
-    cleaned_scope_keys = _dedupe_text(raw_scope_keys)
-    for scope_key in cleaned_scope_keys:
-        if _cost_statistics_raw_scope_is_supported(scope_key):
-            continue
-        raise ReadModelScopeError(f"Invalid cost_statistics read model scope_key: {scope_key}")
-    return CostStatisticsRuntimeService.refresh_scope_keys_from_scope_keys(cleaned_scope_keys)
-
-
-def _cost_statistics_raw_scope_is_supported(scope_key: str) -> bool:
-    from fin_ops_platform.services.cost_statistics_runtime_service import CostStatisticsRuntimeService
-
-    if CostStatisticsRuntimeService.parse_scope_key(scope_key) is not None:
-        return True
-    return scope_key == "all" or bool(MONTH_RE.match(scope_key))
-
-
-def _validate_cost_statistics_scope_key(scope_key: str) -> None:
-    from fin_ops_platform.services.cost_statistics_runtime_service import CostStatisticsRuntimeService
-
-    if CostStatisticsRuntimeService.parse_scope_key(scope_key) is None:
-        raise ReadModelScopeError(f"Invalid cost_statistics read model scope_key: {scope_key}")
 
 
 def _validate_month_or_all_scope_key(scope_type: str, scope_key: str) -> None:
@@ -163,7 +129,6 @@ DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY = ReadModelScopePolicyRegistry(
         "bank_account_balance": _all_only_scope_policy("bank_account_balance"),
         "bank_detail": _month_or_all_scope_policy("bank_detail"),
         "bank_flow_rule_batch": _month_or_all_scope_policy("bank_flow_rule_batch"),
-        "cost_statistics": _cost_statistics_scope_policy(),
         "input_invoice_usage": _month_or_all_scope_policy("input_invoice_usage"),
         "invoice_lifecycle": _month_or_all_scope_policy("invoice_lifecycle"),
         "no_oa_bank_batch": _month_or_all_scope_policy("no_oa_bank_batch"),

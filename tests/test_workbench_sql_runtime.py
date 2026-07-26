@@ -1554,64 +1554,6 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             ),
         )
 
-    def test_workbench_and_cost_access_reuse_the_application_projection_builder(self) -> None:
-        class SharedBuilder:
-            @staticmethod
-            def list_workbench_scope_shards(_scope_key: str) -> list[str]:
-                return ["2026-05"]
-
-            @staticmethod
-            def source_versions_for_scope(scope_key: str) -> dict[str, object]:
-                return {"builder": "shared", "scope_key": scope_key}
-
-            @staticmethod
-            def source_versions_for_scopes(
-                scope_keys: list[str],
-            ) -> dict[str, dict[str, object]]:
-                return {
-                    scope_key: {"builder": "shared", "scope_key": scope_key}
-                    for scope_key in scope_keys
-                }
-
-        class Repository:
-            @staticmethod
-            def active_workbench_source_versions_by_scope(
-                *,
-                scope_keys: list[str],
-            ) -> dict[str, dict[str, object]]:
-                return {
-                    scope_key: {"builder": "shared", "scope_key": scope_key}
-                    for scope_key in scope_keys
-                }
-
-        app = object.__new__(Application)
-        builder = SharedBuilder()
-        repository = Repository()
-        app._workbench_sql_projection_builder = builder
-        app._cost_statistics_sql_read_repository = repository
-
-        service = app._workbench_query_freshness_service(
-            repository=repository,
-            single_scope_stale_reasons=lambda *_args, **_kwargs: [],
-        )
-        status_payload: dict[str, object] = {
-            "scope_key": "all",
-            "read_model_status": "fresh",
-        }
-        self.assertIs(service.apply(status_payload, scope_key="all"), status_payload)
-        expected, active = app._cost_statistics_workbench_dependency_versions_by_scope()
-
-        self.assertEqual(
-            service.expected_source_versions("2026-05"),
-            {"builder": "shared", "scope_key": "2026-05"},
-        )
-        self.assertEqual(
-            app._workbench_sql_read_model_source_versions("2026-05"),
-            {"builder": "shared", "scope_key": "2026-05"},
-        )
-        self.assertEqual(expected, {"2026-05": {"builder": "shared", "scope_key": "2026-05"}})
-        self.assertEqual(active, expected)
-
     def test_page_access_source_versions_include_canonical_workbench_write_tables(self) -> None:
         class SourceVersionConnection:
             def __init__(self) -> None:
@@ -7007,7 +6949,6 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
         app._workbench_read_model_service = FakeWorkbenchReadModelService()
         app._expand_workbench_read_model_scope_keys_for_base_scopes = lambda scope_keys: scope_keys
-        app._invalidate_cost_statistics_read_model_scopes = lambda *_args, **_kwargs: []
         changed = app._refresh_workbench_read_model_scopes_for_maintenance(["2026-05"])
 
         self.assertEqual(changed, ["2026-05"])

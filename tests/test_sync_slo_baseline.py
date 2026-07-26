@@ -21,7 +21,7 @@ class FakeRuntimeMonitoringRepository:
         return {
             "read_model_statuses": {
                 "workbench": {"status": "fresh"},
-                "cost_statistics": {"status": "failed", "last_error": "projection failed"},
+                "bank_detail": {"status": "failed", "last_error": "projection failed"},
             },
             "outbox_statuses": {"workbench.read_model.refresh": {"status": "ready"}},
             "worker_statuses": {"workbench": {"status": "ready"}},
@@ -159,7 +159,8 @@ class SyncSloBaselineTests(unittest.TestCase):
 
         self.assertEqual(payload["mode"], "read_only")
         self.assertEqual(payload["runtime_health"]["data"]["failed_jobs"], 0)
-        self.assertIn("cost_statistics", payload["runtime_snapshot"]["data"]["read_model_attention"])
+        self.assertIn("bank_detail", payload["runtime_snapshot"]["data"]["read_model_attention"])
+        self.assertNotIn("cost_statistics", payload["runtime_snapshot"]["data"]["read_model_attention"])
         self.assertEqual(payload["postgres_connections"]["data"]["max_connections"], 100)
         self.assertEqual(payload["postgres_table_sizes"]["data"][0]["table_name"], "workbench_groups")
         self.assertTrue(payload["pg_stat_statements"]["data"]["installed"])

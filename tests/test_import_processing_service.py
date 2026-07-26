@@ -8,7 +8,6 @@ from fin_ops_platform.services.import_processing_service import ImportProcessing
 
 def _assert_import_write_result_envelope_has_no_page_refresh_targets() -> None:
     result = ImportProcessingService._write_result_envelope(
-        cost_statistics_scope_keys=[],
         tax_offset_scope_keys=[],
         bank_detail_scope_keys=["2026-07"],
         input_invoice_usage_scope_keys=[],
@@ -57,7 +56,6 @@ def _assert_file_import_confirm_job_returns_import_write_targets(*, fail_persist
         persist_confirmed_import_delta=persist_confirmed_import_delta,
         workbench_matching_scope_months_for_import_file_session=lambda _session, _selected_file_ids: ["2026-06"],
         tax_offset_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
-        cost_statistics_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: ["2026-06"],
         bank_detail_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: ["2026-06"],
         input_invoice_usage_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
         output_invoice_collection_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
@@ -124,7 +122,6 @@ def _assert_etc_invoice_import_confirm_job_returns_targets_after_changed_months_
         persist_confirmed_import_delta=lambda **kwargs: None,
         workbench_matching_scope_months_for_import_file_session=lambda _session, _selected_file_ids: [],
         tax_offset_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
-        cost_statistics_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
         bank_detail_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
         input_invoice_usage_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
         output_invoice_collection_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],

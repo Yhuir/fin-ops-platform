@@ -117,22 +117,17 @@ OA、银行流水、进项发票、销项发票之间的两两/三栏关系上�
 - 写入、扩展或撤回 active pair relation 时，事务内 writer只提交 canonical relation事实、version/audit和可定位 scope hints；普通写后不得向待找发票、OA待付款、进项使用、销项收款、银行明细、搜索、成本、税金等页面 fan-out refresh。各消费页在首次访问、focus或 hidden→visible后比较自身 exact-scope source proof，只经统一 gateway入队实际 non-fresh scope。确定性匹配仍只允许经同一 relation UoW写正式关系；不存在 candidate/decision 的 upsert/expire刷新路径。
 - 该机制不是关联台 UI payload 复用。各页面保留自己的 SQL read model、筛选、状态、权限和导出，只消费统一关系上下文作为上游事实。
 
-## 成本统计 SQL read model 边界
+## 成本统计 direct canonical read 边界
 
-`/api/cost-statistics/explorer`、export 和 transaction detail 按 `view` 使用两个显式生产读取边界：
+`/api/cost-statistics/explorer`、export 和 transaction detail 每次请求都由
+`CostStatisticsCanonicalRepository` 在一个 PostgreSQL `REPEATABLE READ READ ONLY` 事务中读取 canonical
+银行流水、OA、active 正式关系、标签和设置，再由 `CostStatisticsPolicy` 生成当前视图。
 
-- `project|bank|expense_type` 使用 Cost workbench profile：`read_model.cost_statistics_read_models` metadata + `read_model.cost_statistics_rows`，并证明 Workbench、Bank Detail与 Cost exact scopes。
-- `time|bank_tag` 使用 Bank Detail profile：证明 Bank Detail exact scopes后直接查询 `read_model.bank_detail_rows`，不入队或等待 Workbench/Cost。
-- API只有在对应 profile fresh后才允许 ETag、versioned cache或窄 SQL query。global statistics状态独立，不能阻塞当前 rows。
-- explorer cache miss 通过 `get_cost_statistics_page(...)` 的单次 set-based SQL 返回完整筛选 summary、小型 facets 与 bounded rows；export 使用 bounded export page，transaction 使用 identity point lookup。不存在 root month summary、project route 或 full-view payload loader。
-- PostgreSQL non-fresh只经 `ReadModelRefreshGateway` enqueue当前 profile实际需要的 exact scope；不会在API请求里同步重算，也不会扩散到其它页面。
-- production PostgreSQL runtime 未配置成本统计 SQL repository 时同样返回 `read_model_unavailable` / `refreshing`，不回落到内存 read model 或同步计算。
-- standalone Cost worker从 Workbench active generation和 Bank Detail snapshot构建 OA allocation month shard，再条件发布 parent metadata与 `cost_statistics_rows`；它不复制全银行 rows。
-- 成本统计从 Workbench 月份 active generation 的 `workbench_group_rows + workbench_rows` materialize 成本关系输入，不能再通过 `jsonb_path_exists(read_model.workbench_groups.payload, ...)` 读取旧 group JSON 成员行。
-- 发票、银行流水、pair relation、row override、exception case 等普通写路径只推进 owner事实/version，不直接标记 Cost dirty scope。Cost访问gate发现真实 drift后才经 gateway精确入队。缓存 key绑定profile source token，不需要写路径删除 key。
-- migration `0123_drop_legacy_cost_statistics_bank_flow_rows.sql` 删除旧 Bank Detail复制表；禁止 dual-read、第二 writer或 JSON fallback。
-
-旧 `reconcile_cost_statistics_read_model` 工具已删除。成本统计 read model 不再通过 `Application._cost_statistics_service.get_explorer(...)` legacy 对照链路验证；验证应走 cost-statistics 模块测试、worker refresh/fresh gate 和生产只读 SLO evidence。
+- 不读取其它页面的 payload 或 read model。
+- 不使用 Cost version、freshness、scope、dirty、outbox、worker 或 Redis cache。
+- 写操作只提交 owner facts；不会 fan-out Cost refresh。下一次 Cost 请求自然读取已提交事实。
+- API 不返回 `refreshing`/`stale` 伪空态。成功返回真实结果；读取失败返回明确错误，浏览器刷新可重试。
+- migration `0126_cost_statistics_direct_canonical_read.sql` 清理遗留 Cost runtime 状态并删除旧 Cost read-model 表，禁止 dual-read、fallback 或第二 writer。
 
 ## 税金抵扣 SQL read model 边界
 

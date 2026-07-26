@@ -132,7 +132,7 @@ PYTHONPATH=backend/src python3 scripts/rehydrate-workbench-read-models.py \
   --json
 ```
 
-如果 relation facts 发生变更，再通过既有 runtime queue/backfill 入口刷新下游 `workbench_relation`、`bank_detail`、`cost_statistics`、`search` 等 scope。不得直接修改 `read_model.*`，也不得为了改变页面归属而手工改正确的 no-OA/internal-transfer relation。修复后必须证明 `paired = active relation members`、`unpaired = canonical facts - paired`、两者无交集且并集不漏事实，并等待相关 dirty/outbox drained、read models fresh、页面 Audit 零 blocking issue。
+如果 relation facts 发生变更，再通过既有 runtime queue/backfill 入口刷新仍使用 read model 的 `workbench_relation`、`bank_detail`、`search` 等 scope；成本统计由下一次 API 请求直接读取 canonical facts。不得直接修改 `read_model.*`，也不得为了改变页面归属而手工改正确的 no-OA/internal-transfer relation。修复后必须证明 `paired = active relation members`、`unpaired = canonical facts - paired`、两者无交集且并集不漏事实，并等待相关 dirty/outbox drained、read models fresh、页面 Audit 零 blocking issue。
 
 告警建议：
 

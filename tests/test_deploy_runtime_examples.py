@@ -184,28 +184,6 @@ class DeployRuntimeExampleTests(unittest.TestCase):
         self.assertNotIn("migrate_workbench_scope_split", helper)
         self.assertNotIn("migrate_workbench_aggregate_drain", helper)
 
-    def test_cost_statistics_secondary_reuses_the_same_bounded_worker_contract(self) -> None:
-        required = {
-            registration.instance_name: registration
-            for registration in RUNTIME_WORKER_REGISTRY
-            if registration.required
-        }
-
-        self.assertIn("cost-statistics-secondary", required)
-        self.assertEqual(
-            required["cost-statistics-secondary"].event_types,
-            ("cost_statistics.read_model.refresh",),
-        )
-        self.assertEqual(
-            required["cost-statistics-secondary"].worker_kind,
-            "cost-statistics-secondary-read-model",
-        )
-        self.assertEqual(
-            required["cost-statistics-secondary"].env_example,
-            "fin-ops.worker.cost-statistics.env.example",
-        )
-        self.assertFalse(required["cost-statistics-secondary"].rabbitmq_eligible)
-
     def test_rabbitmq_dispatcher_env_includes_invoice_usage_collection_events(self) -> None:
         env_example = DISPATCHER_ENV.read_text()
 

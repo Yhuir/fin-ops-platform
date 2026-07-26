@@ -155,7 +155,6 @@ class ImportRuntimeProcessorFactory:
             persist_confirmed_import_delta=import_support.persist_confirmed_import_delta,
             workbench_matching_scope_months_for_import_file_session=_workbench_matching_scope_months_for_import_file_session,
             tax_offset_scope_keys_for_import_file_session=_tax_offset_scope_keys_for_import_file_session,
-            cost_statistics_scope_keys_for_import_file_session=_cost_statistics_scope_keys_for_import_file_session,
             bank_detail_scope_keys_for_import_file_session=_bank_detail_scope_keys_for_import_file_session,
             input_invoice_usage_scope_keys_for_import_file_session=_input_invoice_usage_scope_keys_for_import_file_session,
             output_invoice_collection_scope_keys_for_import_file_session=_output_invoice_collection_scope_keys_for_import_file_session,
@@ -557,15 +556,6 @@ def _tax_offset_scope_keys_for_import_rows(rows: Any) -> list[str]:
     return _workbench_matching_scope_months_for_import_rows(rows)
 
 
-def _cost_statistics_scope_keys_for_import_file_session(session: Any, selected_file_ids: list[str]) -> list[str]:
-    return _workbench_matching_scope_months_for_import_file_session(session, selected_file_ids)
-
-
-def _cost_statistics_scope_keys_for_import_rows(rows: Any) -> list[str]:
-    months = _workbench_matching_scope_months_for_import_rows(rows)
-    return months or ["all"]
-
-
 def _bank_detail_scope_keys_for_import_file_session(session: Any, selected_file_ids: list[str]) -> list[str]:
     selected = {str(file_id) for file_id in list(selected_file_ids or [])}
     rows: list[Any] = []
@@ -611,7 +601,7 @@ def _invoice_relation_scope_keys_for_import_file_session(
         if _normalized_batch_type(getattr(file, "batch_type", None)) != batch_type:
             continue
         rows.extend(list(getattr(file, "normalized_rows", []) or []))
-    return _cost_statistics_scope_keys_for_import_rows(rows) if rows else []
+    return _workbench_matching_scope_months_for_import_rows(rows) if rows else []
 
 
 def _normalized_batch_type(value: Any) -> BatchType | None:

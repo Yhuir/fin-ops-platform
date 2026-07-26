@@ -2550,33 +2550,6 @@ def _safe_read_model_refresh_metadata(metadata: dict[str, object] | None) -> dic
                 "expected_source_versions requires freshness_token."
             )
         result["expected_source_versions"] = expected_source_versions
-    workbench_scope_key = str(metadata.get("workbench_scope_key") or "").strip()
-    workbench_freshness_token = str(
-        metadata.get("workbench_freshness_token") or ""
-    ).strip()
-    workbench_expected_source_versions = _safe_read_model_source_proof(
-        metadata.get("workbench_expected_source_versions"),
-        field_name="workbench_expected_source_versions",
-    )
-    if (
-        workbench_scope_key
-        or workbench_freshness_token
-        or workbench_expected_source_versions
-    ):
-        if not (
-            workbench_scope_key
-            and workbench_freshness_token
-            and workbench_expected_source_versions
-        ):
-            raise RuntimeQueueDataError(
-                "Cost Workbench proof requires scope, freshness token, and "
-                "expected source versions."
-            )
-        result["workbench_scope_key"] = workbench_scope_key[:128]
-        result["workbench_freshness_token"] = workbench_freshness_token[:128]
-        result["workbench_expected_source_versions"] = (
-            workbench_expected_source_versions
-        )
     if metadata.get("force_refresh") is True:
         result["force_refresh"] = True
     return result
@@ -2611,11 +2584,7 @@ def _safe_read_model_source_proof(
 
 
 def _refresh_target_token(metadata: dict[str, object]) -> str:
-    return str(
-        metadata.get("freshness_token")
-        or metadata.get("workbench_freshness_token")
-        or ""
-    ).strip()
+    return str(metadata.get("freshness_token") or "").strip()
 
 
 def _refresh_metadata_covers(

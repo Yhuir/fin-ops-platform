@@ -9,7 +9,6 @@ from fin_ops_platform.app.auth import OARequestSession, actor_id_for_session
 from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
 from fin_ops_platform.services.cost_statistics_query_service import (
     CostStatisticsExportLimitError,
-    CostStatisticsReadModelNotFreshError,
 )
 
 ReadSessionResolver = Callable[[dict[str, str] | None], tuple[OARequestSession | None, Any | None]]
@@ -205,8 +204,7 @@ class CostStatisticsApiRoutes:
             response_headers["ETag"] = etag
         if not_modified:
             return self._json_response(HTTPStatus.NOT_MODIFIED, {}, response_headers)
-        status = HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
-        return self._json_response(status, payload, response_headers)
+        return self._json_response(HTTPStatus.OK, payload, response_headers)
 
     def handle_export(
         self,
@@ -264,8 +262,6 @@ class CostStatisticsApiRoutes:
                 HTTPStatus.NOT_FOUND,
                 {"error": "cost_statistics_transaction_not_found", "transaction_id": transaction_id},
             )
-        except CostStatisticsReadModelNotFreshError as error:
-            return self._json_response(HTTPStatus.CONFLICT, error.payload)
         except CostStatisticsExportLimitError as error:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
@@ -322,8 +318,6 @@ class CostStatisticsApiRoutes:
                 HTTPStatus.BAD_REQUEST,
                 {"error": error.error_code, "message": str(error), "details": dict(error.details)},
             )
-        except CostStatisticsReadModelNotFreshError as error:
-            return self._json_response(HTTPStatus.CONFLICT, error.payload)
         except ValueError as error:
             if str(error) == "project_scope must be active or all":
                 return self._project_scope_error_response(error)
@@ -367,8 +361,6 @@ class CostStatisticsApiRoutes:
                     "message": str(error),
                 },
             )
-        except CostStatisticsReadModelNotFreshError as error:
-            return self._json_response(HTTPStatus.CONFLICT, error.payload)
         except KeyError:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,

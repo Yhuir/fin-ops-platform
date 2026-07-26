@@ -35,8 +35,6 @@ from fin_ops_platform.services.bank_transaction_effective_category_provider impo
     BankTransactionEffectiveCategoryProvider,
 )
 from fin_ops_platform.services.bank_transaction_tag_read_facade import BankTransactionTagReadFacade
-from fin_ops_platform.services.cost_statistics_read_model_refresh import CostStatisticsReadModelRefreshService
-from fin_ops_platform.services.cost_statistics_sql_projection import CostStatisticsSqlProjectionBuilder
 from fin_ops_platform.services.import_job_queue import IMPORT_PROCESS_REQUESTED_EVENT
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_read_model_repository import InputInvoiceUsageReadModelRepositoryPort
@@ -168,7 +166,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-events-per-iteration", type=int, default=1, help="Maximum events to drain before an idle sleep.")
     parser.add_argument("--enable-workbench-read-model-refresh", action="store_true", help="Register workbench SQL read model refresh handler.")
     parser.add_argument("--enable-workbench-relation-read-model-refresh", action="store_true", help="Register workbench relation distribution read model refresh handler.")
-    parser.add_argument("--enable-cost-statistics-read-model-refresh", action="store_true", help="Register cost statistics SQL read model refresh handler.")
     parser.add_argument("--enable-tax-offset-read-model-refresh", action="store_true", help="Register tax offset SQL read model refresh handler.")
     parser.add_argument("--enable-search-read-model-refresh", action="store_true", help="Register search SQL read model refresh handler.")
     parser.add_argument("--enable-pending-invoice-read-model-refresh", action="store_true", help="Register pending invoice SQL read model refresh handler.")
@@ -358,18 +355,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         handlers[WORKBENCH_RELATION_REFRESH_EVENT_TYPE] = _read_model_handler(refresh_service.handle_runtime_event)
         if WORKBENCH_RELATION_REFRESH_EVENT_TYPE not in config.event_types:
             config.event_types.append(WORKBENCH_RELATION_REFRESH_EVENT_TYPE)
-    if args.enable_cost_statistics_read_model_refresh:
-        projection_builder = CostStatisticsSqlProjectionBuilder(
-            connection=connection,
-            bank_transaction_tag_read_facade=bank_transaction_tag_read_facade,
-        )
-        refresh_service = CostStatisticsReadModelRefreshService(
-            projection_builder=projection_builder,
-            queue_repository=queue,
-        )
-        handlers["cost_statistics.read_model.refresh"] = _read_model_handler(refresh_service.handle_runtime_event)
-        if "cost_statistics.read_model.refresh" not in config.event_types:
-            config.event_types.append("cost_statistics.read_model.refresh")
     if args.enable_tax_offset_read_model_refresh:
         projection_builder = TaxOffsetSqlProjectionBuilder(connection=connection, redis_helper=redis_helper)
         refresh_service = TaxOffsetReadModelRefreshService(projection_builder=projection_builder, queue_repository=queue)

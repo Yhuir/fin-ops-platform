@@ -1,16 +1,6 @@
 import unittest
 
-from fin_ops_platform.services.cost_statistics_sql_projection import CostStatisticsSqlProjectionBuilder
-
-
-class _ProjectionConnection:
-    def __init__(self, settings_payload: dict[str, object] | None = None) -> None:
-        self.settings_payload = settings_payload or {}
-
-    def fetch_one(self, sql: str, _params: tuple = ()) -> dict[str, object] | None:
-        if "from app.app_settings" in " ".join(sql.lower().split()):
-            return {"settings_payload": self.settings_payload}
-        return None
+from fin_ops_platform.services.cost_statistics_policy import CostStatisticsPolicy
 
 
 class CostStatisticsSqlProjectionRuleTests(unittest.TestCase):
@@ -21,16 +11,34 @@ class CostStatisticsSqlProjectionRuleTests(unittest.TestCase):
         project_scope: str = "all",
         settings_payload: dict[str, object] | None = None,
     ) -> dict[str, object]:
-        builder = CostStatisticsSqlProjectionBuilder(
-            connection=_ProjectionConnection(settings_payload),
-            read_model_repository=object(),
-        )
-        return builder._build_explorer_payload(
-            "2026-03",
+        policy = CostStatisticsPolicy(
+            {
+                "settings": settings_payload or {},
+                "bank_rows": [],
+                "cost_groups": groups,
+            },
             project_scope=project_scope,
-            workbench_groups=groups,
-            bank_detail_payload={"rows": [], "month_rows": []},
         )
+        page = policy.export_page(
+            month="2026-03",
+            start_month=None,
+            end_month=None,
+            start_date=None,
+            end_date=None,
+            project_names=[],
+            expense_types=[],
+            row_shape="raw_cost",
+            offset=0,
+            page_size=100,
+            include_summary=True,
+        )
+        return {
+            "summary": {
+                key: page["summary"][key]
+                for key in ("row_count", "transaction_count", "total_amount")
+            },
+            "time_rows": list(page["rows"]),
+        }
 
     def test_projection_counts_only_outflow_with_one_complete_oa_context(self) -> None:
         group = self._group(
@@ -241,7 +249,10 @@ class CostStatisticsSqlProjectionRuleTests(unittest.TestCase):
                 ("bank-split:oa:oa-b", "项目B", "劳务费", "40.00"),
             },
         )
-        self.assertEqual({row["transaction_count"] for row in payload["project_rows"]}, {1})
+        self.assertEqual(
+            {row["transaction_id"] for row in payload["time_rows"]},
+            {"bank-split"},
+        )
 
     def test_projection_does_not_infer_split_when_amounts_mismatch(self) -> None:
         group = self._group(
@@ -319,17 +330,8 @@ class CostStatisticsSqlProjectionRuleTests(unittest.TestCase):
         self.assertEqual(all_payload["summary"]["transaction_count"], 4)
 
     def test_public_rebuild_rejects_invalid_project_scope(self) -> None:
-        builder = CostStatisticsSqlProjectionBuilder(
-            connection=_ProjectionConnection(),
-            read_model_repository=object(),
-        )
-
         with self.assertRaisesRegex(ValueError, "project_scope must be active or all"):
-            builder.rebuild_cost_statistics_read_model_scope(
-                "finished:2026-03",
-                tenant_id="default",
-                source_version=1,
-            )
+            CostStatisticsPolicy({}, project_scope="finished")
 
     @staticmethod
     def _oa_row(**overrides: object) -> dict[str, object]:

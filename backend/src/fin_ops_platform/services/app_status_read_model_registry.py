@@ -75,12 +75,6 @@ APP_STATUS_READ_MODEL_REGISTRY: dict[str, AppStatusReadModelDefinition] = {
         worker_instance="oa-pending-payment",
         refresh_event_type="oa_pending_payment.read_model.refresh",
     ),
-    "cost_statistics": AppStatusReadModelDefinition(
-        key="cost_statistics",
-        scope_type="cost_statistics",
-        worker_instance="cost-statistics",
-        refresh_event_type="cost_statistics.read_model.refresh",
-    ),
     "tax_offset": AppStatusReadModelDefinition(
         key="tax_offset",
         scope_type="tax_offset",

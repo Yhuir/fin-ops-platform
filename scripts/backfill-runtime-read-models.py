@@ -101,7 +101,6 @@ def main() -> int:
             "--enable-search-read-model-refresh",
             "--enable-pending-invoice-read-model-refresh",
             "--enable-bank-detail-read-model-refresh",
-            "--enable-cost-statistics-read-model-refresh",
             "--enable-tax-offset-read-model-refresh",
             "--event-type",
             "workbench.read_model.refresh",
@@ -111,8 +110,6 @@ def main() -> int:
             "pending_invoice.read_model.refresh",
             "--event-type",
             "bank_detail.read_model.refresh",
-            "--event-type",
-            "cost_statistics.read_model.refresh",
             "--event-type",
             "tax_offset.read_model.refresh",
             *invoice_usage_collection_worker_args(),
@@ -202,18 +199,6 @@ def enqueue_fact_scopes(
                 enqueued,
                 scope_type=scope_type,
                 scope_key=month,
-                reason=reason,
-                dry_run=dry_run,
-                priority=priority,
-                trace_id=trace_id,
-            )
-        for project_scope in ("active", "all"):
-            scope_key = f"{project_scope}:{month}"
-            _enqueue_read_model_refresh(
-                refresh_gateway,
-                enqueued,
-                scope_type="cost_statistics",
-                scope_key=scope_key,
                 reason=reason,
                 dry_run=dry_run,
                 priority=priority,

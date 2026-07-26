@@ -150,11 +150,9 @@ class RuntimeStatePolicyTests(unittest.TestCase):
         production_worker_files = [
             repository_root / "backend/src/fin_ops_platform/app/worker.py",
             repository_root / "backend/src/fin_ops_platform/services/workbench_read_model_refresh.py",
-            repository_root / "backend/src/fin_ops_platform/services/cost_statistics_read_model_refresh.py",
             repository_root / "backend/src/fin_ops_platform/services/tax_offset_read_model_refresh.py",
             repository_root / "backend/src/fin_ops_platform/services/search_pending_read_model_refresh.py",
             repository_root / "backend/src/fin_ops_platform/services/workbench_sql_projection.py",
-            repository_root / "backend/src/fin_ops_platform/services/cost_statistics_sql_projection.py",
             repository_root / "backend/src/fin_ops_platform/services/tax_offset_sql_projection.py",
             repository_root / "backend/src/fin_ops_platform/services/search_pending_sql_projection.py",
         ]

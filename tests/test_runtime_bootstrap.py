@@ -345,7 +345,13 @@ class RuntimeBootstrapTests(unittest.TestCase):
         source = Path("backend/src/fin_ops_platform/app/server.py").read_text(encoding="utf-8")
 
         self.assertIn("def _bank_transaction_tag_reader", source)
-        self.assertNotIn("category_provider=self._bank_transaction_effective_category_provider", source)
+        self.assertEqual(
+            source.count(
+                "category_provider=self._bank_transaction_effective_category_provider"
+            ),
+            1,
+        )
+        self.assertIn("LocalCostStatisticsCanonicalRepository(", source)
         self.assertNotIn("effective_category_provider=self._bank_transaction_effective_category_provider", source)
         self.assertNotIn("self._bank_transaction_effective_category_provider.bulk_get_for_rows(", source)
         self.assertIn("effective_category_provider=self._bank_transaction_tag_reader()", source)
@@ -361,12 +367,11 @@ class RuntimeBootstrapTests(unittest.TestCase):
         source = Path("backend/src/fin_ops_platform/app/worker.py").read_text(encoding="utf-8")
 
         self.assertIn("BankTransactionTagReadFacade", source)
-        self.assertIn("CostStatisticsSqlProjectionBuilder(", source)
+        self.assertNotIn("CostStatisticsSqlProjectionBuilder(", source)
         self.assertIn("bank_transaction_tag_read_facade=bank_transaction_tag_read_facade", source)
         self.assertIn("SearchPendingSqlProjectionBuilder(", source)
         self.assertIn("bank_transaction_tag_read_facade=bank_transaction_tag_read_facade", source)
         self.assertIn("effective_category_provider=bank_transaction_tag_read_facade", source)
-        self.assertIn("TurnoverLedgerSqlProjectionBuilder(", source)
 
     def test_non_tag_downstream_modules_do_not_depend_on_bank_tag_facade(self) -> None:
         paths = [

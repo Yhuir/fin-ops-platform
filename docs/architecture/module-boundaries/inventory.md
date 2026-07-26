@@ -26,7 +26,7 @@
 | `workbench-relations` | 关联台关系事实源 | 资源模块 | N/A | `../../modules/workbench-relations/README.md` + `../../modules/workbench-relations/boundary-io.md` | 模块 README 代码入口 + boundary-io + relation read model contract |
 | `canonical-facts` | PostgreSQL 业务唯一真相 | 资源治理模块 | N/A | `../../modules/canonical-facts/README.md` + `../../modules/canonical-facts/boundary-io.md` | `canonical-facts.md` + 拥有事实的业务模块 boundary-io |
 | `tax-offset` | 税金抵扣 | 页面模块 | `/tax-offset` | `../../modules/tax-offset/README.md` + `../../modules/tax-offset/boundary-io.md` | 模块 README 代码入口 + boundary-io + tax offset read model contract |
-| `cost-statistics` | 成本统计 | 页面模块 | `/cost-statistics` | `../../modules/cost-statistics/README.md` + `../../modules/cost-statistics/boundary-io.md` | 模块 README 代码入口 + boundary-io + cost statistics read model contract |
+| `cost-statistics` | 成本统计 | 页面模块 | `/cost-statistics` | `../../modules/cost-statistics/README.md` + `../../modules/cost-statistics/boundary-io.md` | 模块 README 代码入口 + boundary-io + direct canonical read contract |
 | `bank-details` | 银行明细 | 页面模块 | `/bank-details` | `../../modules/bank-details/README.md` + `../../modules/bank-details/boundary-io.md` | 模块 README 代码入口 + boundary-io + bank detail read model contract |
 | `bank-account-balance` | 银行账户余额 | 资源/API 模块 | `/api/bank-details/accounts` | `../../modules/bank-account-balance/README.md` + `../../modules/bank-account-balance/boundary-io.md` | 模块 README 代码入口 + boundary-io + bank account balance read model contract |
 | `bank-flow-rule-batches` | 流水规则批量处理 | 页面模块 | `/bank-flow-rule-batches` | `../../modules/bank-flow-rule-batches/README.md` + `../../modules/bank-flow-rule-batches/boundary-io.md` | 模块 README 代码入口 + boundary-io + bank flow rule batch read model contract |

@@ -6,6 +6,7 @@ from typing import Literal
 
 PageAuditExecutor = Literal[
     "workbench",
+    "cost_statistics",
     "page_business",
     "input_invoice_usage",
     "output_invoice_collection",
@@ -108,7 +109,7 @@ PAGE_AUDIT_REGISTRY: dict[str, PageAuditRegistration] = {
         "cost-statistics",
         "成本统计",
         "cost_statistics",
-        ("cost_statistics", "bank_detail", "workbench_relation"),
+        (),
         external_source_boundary="OA, bank, and invoice completeness before App registration",
         external_evidence_keys=("bank", "oa", "invoice", "etc"),
     ),

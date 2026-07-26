@@ -15,7 +15,6 @@ import CostStatisticsTable, {
 } from "../components/cost-statistics/CostStatisticsTable";
 import CostTransactionDetailModal from "../components/cost-statistics/CostTransactionDetailModal";
 import { useAppChrome } from "../contexts/AppChromeContext";
-import { useAppStatusOverview } from "../contexts/AppHealthStatusContext";
 import { DEFAULT_MONTH } from "../contexts/MonthContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
@@ -52,7 +51,7 @@ type CostViewMode = "time" | "project" | "bank" | "expenseType" | "bankTag";
 type RangeScopeMode = "all" | "year" | "month";
 type ExplorerScopeMode = RangeScopeMode;
 type ScopePickerPanel = "scope";
-type EffectiveCostPageState = "fresh" | "loading" | "refreshing" | "stale" | "unavailable" | "error";
+type EffectiveCostPageState = "fresh" | "loading" | "error";
 
 function isAbortLikeError(caught: unknown) {
   if (caught instanceof DOMException && caught.name === "AbortError") {
@@ -60,27 +59,6 @@ function isAbortLikeError(caught: unknown) {
   }
   return caught instanceof Error && (caught.name === "AbortError" || /aborted|abort/i.test(caught.message));
 }
-
-function waitForCostRefreshRetry(signal: AbortSignal, delayMs = 150) {
-  return new Promise<void>((resolve, reject) => {
-    if (signal.aborted) {
-      reject(new DOMException("The operation was aborted.", "AbortError"));
-      return;
-    }
-    const timeout = window.setTimeout(() => {
-      signal.removeEventListener("abort", abort);
-      resolve();
-    }, delayMs);
-    const abort = () => {
-      window.clearTimeout(timeout);
-      reject(new DOMException("The operation was aborted.", "AbortError"));
-    };
-    signal.addEventListener("abort", abort, { once: true });
-  });
-}
-
-// ponytail: one user load gets a bounded 30-second retry window; a manual reload starts a new attempt.
-const COST_REFRESH_MAX_RETRIES = 200;
 
 type LoadedCostStatisticsExplorer = {
   requestKey: string;
@@ -395,7 +373,6 @@ export default function CostStatisticsPage() {
   const { active, activationGeneration } = useOptionalPageActivation("cost-statistics");
   const navigate = useNavigate();
   const { setWorkbenchHeaderActions } = useAppChrome();
-  const appStatusOverview = useAppStatusOverview();
   const { canAdminAccess, canMutateData } = useSessionPermissions();
   const defaultMonthBounds = buildMonthDateBounds(DEFAULT_MONTH);
   const costPageSession = usePageSessionState<CostStatisticsPageSession>({
@@ -604,14 +581,6 @@ export default function CostStatisticsPage() {
     ...(viewMode === "bankTag" && selectedBankTagSubLabel ? { bankTagSubLabel: selectedBankTagSubLabel } : {}),
   };
   const explorerRequestKey = JSON.stringify(explorerRequest);
-  const currentCostStatisticsScopeKey = `${costProjectScope}:${activeScopeMode === "month" ? activeScopeMonth : "all"}`;
-  const appStatusCostScope = appStatusOverview?.domains
-    .flatMap((domain) => domain.readModelScopes)
-    .find((scope) => (
-      scope.readModelKey === "cost_statistics"
-      && scope.scopeKey === currentCostStatisticsScopeKey
-    ));
-  const appStatusReadModelStatus = appStatusCostScope?.status.trim().toLowerCase() ?? "";
   const explorerData = loadedExplorer?.requestKey === explorerRequestKey
     ? loadedExplorer.payload
     : null;
@@ -751,37 +720,10 @@ export default function CostStatisticsPage() {
 
       try {
         const request = JSON.parse(explorerRequestKey) as CostStatisticsExplorerPageRequest;
-        const publishPayload = (payload: CostStatisticsExplorerPage) => {
-          if (controller.signal.aborted) {
-            return;
-          }
-          setPageStatistics(
-            payload.readModelStatus === "fresh"
-              && payload.statisticsStatus === "fresh"
-              ? payload.statistics
-              : undefined,
-          );
+        const payload = await fetchCostStatisticsExplorerPage({ ...request, signal: controller.signal });
+        if (!controller.signal.aborted) {
+          setPageStatistics(payload.statistics);
           setLoadedExplorer({ requestKey: explorerRequestKey, payload });
-          setIsExplorerLoading(false);
-        };
-        let payload = await fetchCostStatisticsExplorerPage({ ...request, signal: controller.signal });
-        publishPayload(payload);
-        for (
-          let retry = 0;
-          retry < COST_REFRESH_MAX_RETRIES
-          && (
-            payload.readModelStatus?.trim().toLowerCase() !== "fresh"
-            || payload.statisticsStatus?.trim().toLowerCase() !== "fresh"
-          )
-          && !controller.signal.aborted;
-          retry += 1
-        ) {
-          await waitForCostRefreshRetry(controller.signal);
-          if (document.visibilityState !== "visible") {
-            break;
-          }
-          payload = await fetchCostStatisticsExplorerPage({ ...request, signal: controller.signal });
-          publishPayload(payload);
         }
       } catch (caught) {
         if (!controller.signal.aborted) {
@@ -986,68 +928,23 @@ export default function CostStatisticsPage() {
 
   const projectExpenseTypeOptions = projectExportNames.length > 0 ? allExpenseTypeOptions : [];
 
-  const readModelStatus = explorerData?.readModelStatus?.trim().toLowerCase() ?? "";
-  const isReadModelRefreshing = readModelStatus === "refreshing"
-    || readModelStatus === "loading"
-    || readModelStatus === "pending"
-    || readModelStatus === "processing";
-  const isReadModelStale = readModelStatus === "stale"
-    || readModelStatus === "schema_mismatch"
-    || readModelStatus === "source_mismatch";
-  const isReadModelUnavailable = readModelStatus === "unavailable"
-    || readModelStatus === "failed"
-    || readModelStatus === "missing";
-  const isReadModelNonFresh = Boolean(explorerData && readModelStatus !== "fresh");
-  const isAppStatusRefreshing = appStatusReadModelStatus === "loading"
-    || appStatusReadModelStatus === "pending"
-    || appStatusReadModelStatus === "processing"
-    || appStatusReadModelStatus === "refreshing";
-  const isAppStatusStale = appStatusReadModelStatus === "stale"
-    || appStatusReadModelStatus === "schema_mismatch"
-    || appStatusReadModelStatus === "source_mismatch";
-  const isAppStatusUnavailable = appStatusReadModelStatus === "failed"
-    || appStatusReadModelStatus === "unavailable"
-    || appStatusReadModelStatus === "missing";
   const hasExplorerLoadError = Boolean(loadError) && !explorerData;
   const effectiveCostPageState: EffectiveCostPageState = hasExplorerLoadError
     ? "error"
-    : isReadModelUnavailable || isAppStatusUnavailable
-      ? "unavailable"
-      : isReadModelStale || isAppStatusStale
-        ? "stale"
-        : isReadModelRefreshing || isAppStatusRefreshing || isTagRulesSaving
-          ? "refreshing"
-          : isExplorerLoading || !explorerData
-            ? "loading"
-            : readModelStatus === "fresh"
-              ? "fresh"
-              : "stale";
+    : isExplorerLoading || !explorerData || isTagRulesSaving
+      ? "loading"
+      : "fresh";
   const interactionLocked = effectiveCostPageState !== "fresh";
   const lockStatusCopy = effectiveCostPageState === "error"
     ? {
         title: "无法确认成本数据状态",
         detail: loadError || "网络恢复前页面保持锁定。",
       }
-    : effectiveCostPageState === "unavailable"
-      ? {
-          title: "成本数据暂未就绪",
-          detail: "页面保持锁定，请重新检查或稍后再试。",
-        }
-      : effectiveCostPageState === "stale"
-        ? {
-            title: "正在更新至最新数据",
-            detail: "检测到事实已变化，旧数据暂不可操作。",
-          }
-        : effectiveCostPageState === "refreshing"
-          ? {
-              title: "成本数据正在同步",
-              detail: "当前页面已暂时锁定，完成后自动恢复。",
-            }
-          : {
-              title: "正在加载成本统计",
-              detail: "数据就绪后将自动开放操作。",
-            };
-  const lockStatusCanRetry = effectiveCostPageState === "error" || effectiveCostPageState === "unavailable";
+    : {
+        title: "正在加载成本统计",
+        detail: "正在从统一事实源读取数据，完成后将自动开放操作。",
+      };
+  const lockStatusCanRetry = effectiveCostPageState === "error";
 
   useEffect(() => {
     if (interactionLocked) {
@@ -1103,7 +1000,7 @@ export default function CostStatisticsPage() {
     });
   }, [interactionLocked, invalidateExportReferenceData, resetDetailSelection]);
 
-  const isRootEmpty = !isExplorerLoading && !loadError && explorerData && !isReadModelNonFresh
+  const isRootEmpty = !isExplorerLoading && !loadError && explorerData
     ? viewMode === "time"
       ? explorerData.rowCount === 0
       : viewMode === "project"
@@ -1258,10 +1155,6 @@ export default function CostStatisticsPage() {
         }),
       ]);
       if (controller.signal.aborted) {
-        return null;
-      }
-      if ([projectPage, expenseTypePage].some((page) => page.readModelStatus?.trim().toLowerCase() !== "fresh")) {
-        setExportFeedback({ tone: "error", message: "导出筛选数据正在刷新，请稍后重试。" });
         return null;
       }
       const referenceData = {
@@ -1623,7 +1516,6 @@ export default function CostStatisticsPage() {
           ariaLabel="Audit 成本统计"
           pageKey="cost-statistics"
           label="成本统计"
-          readModelStatus={readModelStatus}
         />
       ) : null}
     </div>
@@ -1721,7 +1613,7 @@ export default function CostStatisticsPage() {
           <button
             className="cost-export-button"
             type="button"
-            disabled={isExplorerLoading || isExportReferenceLoading || Boolean(detailLoadingMessage) || hasExplorerLoadError || isReadModelNonFresh}
+            disabled={isExplorerLoading || isExportReferenceLoading || Boolean(detailLoadingMessage) || hasExplorerLoadError}
             onClick={() => void openExportCenter()}
           >
 	          {isExportReferenceLoading ? "正在准备导出..." : "导出中心"}
@@ -1788,7 +1680,7 @@ export default function CostStatisticsPage() {
           </div>
         ) : null}
 
-        {!isExplorerLoading && explorerData && !isReadModelNonFresh ? (
+        {!isExplorerLoading && explorerData ? (
           <>
             {viewMode === "time" ? (
               <div className="cost-analysis-layout time-layout single-column">

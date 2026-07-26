@@ -1087,67 +1087,6 @@ def test_pending_invoice_rows_save_updates_scope_inside_transaction() -> None:
     assert any("insert into read_model.pending_invoice_scopes" in sql for sql in executed_sql)
 
 
-def test_cost_statistics_rows_are_saved_in_batch() -> None:
-    connection = CostStatisticsPublishConnection()
-    repository = PostgresReadModelRepository(connection)
-
-    published = repository.publish_cost_statistics_read_models(
-        {
-            "read_models": {
-                "active:2026-04": {
-                    "scope_key": "active:2026-04",
-                    "month": "2026-04",
-                    "project_scope": "active",
-                    "generated_at": "2026-04-02T00:00:00+00:00",
-                    "source_versions": {"cost_statistics_read_model_schema_version": 1},
-                    "payload": {
-                        "month": "2026-04",
-                        "project_scope": "active",
-                        "time_rows": [
-                            {
-                                "row_key": "cost-row-1",
-                                "transaction_id": "bank-1",
-                                "trade_time": "2026-04-01T10:00:00+08:00",
-                                "trade_date": "2026-04-01",
-                                "project_name": "项目一",
-                                "expense_type": "材料费",
-                                "amount": "100.00",
-                            },
-                            {
-                                "row_key": "cost-row-2",
-                                "transaction_id": "bank-2",
-                                "trade_time": "2026-04-02T10:00:00+08:00",
-                                "trade_date": "2026-04-02",
-                                "project_name": "项目二",
-                                "expense_type": "服务费",
-                                "amount": "200.00",
-                            },
-                        ],
-                    },
-                }
-            }
-        },
-        tenant_id="default",
-        scope_key="active:2026-04",
-        source_version=7,
-        changed_scope_keys={"active:2026-04"},
-    )
-
-    assert published is True
-    assert connection.transaction_enters == 1
-    assert connection.transaction_exits == 1
-    executed_sql = [sql for sql, _ in connection.executed]
-    assert any("delete from read_model.cost_statistics_rows" in sql for sql in executed_sql)
-    assert len(connection.executed_many) == 1
-    batch_sql, batch_params = connection.executed_many[0]
-    assert "insert into read_model.cost_statistics_rows" in batch_sql
-    assert len(batch_params) == 2
-    assert batch_params[0][3] == "cost-row-1"
-    assert batch_params[0][4] == "bank-1"
-    assert batch_params[1][3] == "cost-row-2"
-    assert batch_params[1][4] == "bank-2"
-
-
 def test_ops_tax_etc_multi_table_saves_use_transactions() -> None:
     connection = RecordingConnection()
     repository = PostgresOpsTaxEtcRepository(connection)

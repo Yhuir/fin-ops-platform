@@ -139,6 +139,7 @@ EXPECTED_MIGRATIONS = [
     "0123_drop_legacy_cost_statistics_bank_flow_rows.sql",
     "0124_bank_detail_canonical_source_proof.sql",
     "0125_workbench_canonical_proof_identity_indexes.sql",
+    "0126_cost_statistics_direct_canonical_read.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -242,8 +243,6 @@ EXPECTED_TABLES = [
     "read_model.bank_detail_rows",
     "read_model.bank_detail_scopes",
     "read_model.bank_account_balances",
-    "read_model.cost_statistics_read_models",
-    "read_model.cost_statistics_rows",
     "read_model.tax_offset_read_models",
     "read_model.tax_offset_items",
     "read_model.no_oa_bank_batch_rows",
@@ -276,10 +275,6 @@ READ_MODEL_STORAGE_CONTRACTS = {
         "read_model.output_invoice_collection_scopes",
     ),
     "oa_pending_payment": ("read_model.oa_pending_payment_rows", "read_model.oa_pending_payment_scopes"),
-    "cost_statistics": (
-        "read_model.cost_statistics_read_models",
-        "read_model.cost_statistics_rows",
-    ),
     "tax_offset": ("read_model.tax_offset_read_models", "read_model.tax_offset_items"),
     "no_oa_bank_batch": ("read_model.no_oa_bank_batch_rows",),
     "bank_flow_rule_batch": ("read_model.bank_flow_rule_batch_rows",),
@@ -300,7 +295,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 126)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 127)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -829,8 +824,13 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         sql = migration_sql().lower()
         expected_tables = set(EXPECTED_TABLES)
 
-        self.assertEqual(set(READ_MODEL_STORAGE_CONTRACTS), set(APP_STATUS_READ_MODEL_REGISTRY))
-        for read_model_key, tables in READ_MODEL_STORAGE_CONTRACTS.items():
+        app_status_contracts = {
+            key: value
+            for key, value in READ_MODEL_STORAGE_CONTRACTS.items()
+            if key != "turnover_ledger"
+        }
+        self.assertEqual(set(app_status_contracts), set(APP_STATUS_READ_MODEL_REGISTRY))
+        for read_model_key, tables in app_status_contracts.items():
             with self.subTest(read_model_key=read_model_key):
                 self.assertTrue(tables)
                 self.assertLessEqual(set(tables), expected_tables)
@@ -1274,9 +1274,34 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             sql,
             flags=re.S,
         )
-        approved_legacy_drop = "drop table if exists read_model.cost_statistics_bank_flow_rows;"
-        self.assertIn(approved_legacy_drop, sql)
-        checked_sql = sql.replace(approved_legacy_drop, "")
+        approved_retirement_patterns = (
+            r"update\s+job\.outbox_events\s+set\s+status\s*=\s*'done'.*?"
+            r"where\s+event_type\s*=\s*'cost_statistics\.read_model\.refresh'.*?;",
+            r"update\s+job\.read_model_dirty_scopes\s+set\s+status\s*=\s*'done'.*?"
+            r"where\s+scope_type\s*=\s*'cost_statistics'.*?;",
+            r"delete\s+from\s+read_model\.app_status_readiness\s+"
+            r"where\s+read_model_key\s*=\s*'cost_statistics'.*?;",
+        )
+        checked_sql = sql
+        for pattern in approved_retirement_patterns:
+            self.assertIsNotNone(
+                re.search(pattern, checked_sql, flags=re.S),
+                pattern,
+            )
+            checked_sql = re.sub(
+                pattern,
+                "approved_cost_statistics_runtime_retirement;",
+                checked_sql,
+                flags=re.S,
+            )
+        approved_legacy_drops = (
+            "drop table if exists read_model.cost_statistics_bank_flow_rows;",
+            "drop table if exists read_model.cost_statistics_rows;",
+            "drop table if exists read_model.cost_statistics_read_models;",
+        )
+        for approved_drop in approved_legacy_drops:
+            self.assertIn(approved_drop, checked_sql)
+            checked_sql = checked_sql.replace(approved_drop, "")
         forbidden_patterns = [
             r"\bdrop\s+(database|schema|table)\b",
             r"\btruncate\b",
@@ -1507,6 +1532,36 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         self.assertEqual(
             normalized_sql,
             "drop table if exists read_model.cost_statistics_bank_flow_rows;",
+        )
+
+    def test_cost_statistics_direct_read_migration_retires_derived_runtime(self) -> None:
+        sql = strip_sql_comments(
+            (
+                MIGRATIONS_DIR
+                / "0126_cost_statistics_direct_canonical_read.sql"
+            ).read_text(encoding="utf-8")
+        ).lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn(
+            "where event_type = 'cost_statistics.read_model.refresh'",
+            normalized_sql,
+        )
+        self.assertIn(
+            "where scope_type = 'cost_statistics'",
+            normalized_sql,
+        )
+        self.assertIn(
+            "delete from read_model.app_status_readiness",
+            normalized_sql,
+        )
+        self.assertIn(
+            "drop table if exists read_model.cost_statistics_rows;",
+            normalized_sql,
+        )
+        self.assertIn(
+            "drop table if exists read_model.cost_statistics_read_models;",
+            normalized_sql,
         )
 
     def test_bank_detail_canonical_source_proof_backfill_preserves_mismatched_scopes(

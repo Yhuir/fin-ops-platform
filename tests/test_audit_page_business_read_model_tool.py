@@ -625,160 +625,25 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         )
         self.assertEqual(report["issues"][0]["subject_id"], "bank-2")
 
-    def test_cost_statistics_expected_set_does_not_treat_ready_rows_as_missing(self) -> None:
+    def test_cost_statistics_audit_reads_direct_canonical_facts_only(self) -> None:
         connection = FakeConnection()
-
-        audit_cost_statistics_page(
-            connection,
-        )
-
-        canonical_sql = next(sql for sql, _params in connection.fetch_all_calls if "canonical_expected_set" in sql)
-        self.assertIn("where project_scope = 'all'", canonical_sql)
-        self.assertNotIn("project_scope = 'all' and cache_status = 'fresh'", canonical_sql)
-
-    def test_cost_statistics_expected_set_uses_builder_payload_eligibility_contract(self) -> None:
-        connection = FakeConnection()
-
-        audit_cost_statistics_page(
-            connection,
-        )
-
-        canonical_sql = next(sql for sql, _params in connection.fetch_all_calls if "canonical_expected_set" in sql)
-        self.assertIn("group_row.source_kinds && array['oa', 'bank']::text[]", canonical_sql)
-        self.assertIn("group_row.zone in ('paired', 'unpaired')", canonical_sql)
-        self.assertIn("group_row.group_type = 'relation'", canonical_sql)
-        self.assertNotIn("candidate", canonical_sql)
-        self.assertIn("bool_or(pane = 'oa') as has_oa", canonical_sql)
-        self.assertIn("bool_or(pane = 'bank') as has_bank", canonical_sql)
-        self.assertIn("member.member_payload->>'project_id'", canonical_sql)
-        self.assertIn("member.member_payload->>'applicant'", canonical_sql)
-        self.assertIn("member.member_payload->>'debit_amount'", canonical_sql)
-        self.assertIn("left join lateral", canonical_sql)
-        self.assertIn("source.id = case", canonical_sql)
-        self.assertIn("source.legacy_mongo_id = bank_identity.transaction_id", canonical_sql)
-        self.assertNotIn("bank_source.id::text =", canonical_sql)
-        self.assertIn("expected_fields", canonical_sql)
-        self.assertIn("projected_fields", canonical_sql)
-        self.assertNotIn("expected_bank_flow as", canonical_sql)
-        self.assertNotIn("projected_bank_flow as", canonical_sql)
-
-    def test_cost_statistics_reuses_workbench_integrity_proof_in_same_snapshot(self) -> None:
-        report = audit_cost_statistics_page(
-            FakeConnection(
-                rows_by_check={
-                    "workbench_canonical_object_set": [
-                        {
-                            "subject_id": "bank-missing",
-                            "scope_key": "2026-06",
-                            "mismatch_kind": "canonical_missing_projection",
-                        }
-                    ]
-                }
-            ),
-        )
-
-        self.assertEqual(report["audit_status"]["integrity"], "issues_found")
-        self.assertEqual(
-            report["summary"]["issue_sample_counts_by_code"],
-            {"cost_statistics_dependency_workbench_workbench_canonical_object_set_mismatch": 1},
-        )
-        self.assertEqual(report["issues"][0]["details"]["dependency"], "workbench")
-
-    def test_cost_statistics_binds_month_upstream_versions_and_parent_shards(self) -> None:
-        connection = FakeConnection(
-            rows_by_check={
-                "cost_source_version_proofs": [
-                    {
-                        "issue_code": "cost_statistics_upstream_source_versions_mismatch",
-                        "subject_id": "all:2026-06",
-                        "scope_key": "all:2026-06",
-                        "details": {
-                            "embedded_workbench_source_versions": {"generation": "old"},
-                            "current_workbench_source_versions": {"generation": "new"},
-                        },
-                    },
-                    {
-                        "issue_code": "cost_statistics_parent_source_shards_mismatch",
-                        "subject_id": "all:all",
-                        "scope_key": "all:all",
-                        "details": {
-                            "expected_shard_count": 2,
-                            "present_shard_count": 1,
-                        },
-                    },
-                ]
-            }
-        )
 
         report = audit_cost_statistics_page(
-            connection,
-        )
-
-        self.assertEqual(report["audit_status"]["integrity"], "issues_found")
-        self.assertEqual(
-            report["summary"]["issue_sample_counts_by_code"],
-            {
-                "cost_statistics_parent_source_shards_mismatch": 1,
-                "cost_statistics_upstream_source_versions_mismatch": 1,
-            },
-        )
-        queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
-        self.assertIn("source_versions->'workbench_source_versions'", queried_sql)
-        self.assertIn("source_versions->'bank_detail_source_versions'", queried_sql)
-        self.assertIn("expected_source_shards", queried_sql)
-        self.assertIn("expected_shard_count > 0", queried_sql)
-
-    def test_cost_statistics_recalculates_bank_statistics_and_group_summaries(self) -> None:
-        connection = FakeConnection()
-
-        audit_cost_statistics_page(
             connection,
         )
 
         queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
-        self.assertIn("cost_summary_recalculation", queried_sql)
-        self.assertIn("from read_model.bank_detail_rows", queried_sql)
-        self.assertIn("when 'expense' then '支出'", queried_sql)
-        self.assertIn("when 'income' then '收入'", queried_sql)
-        self.assertIn("effective_category_code as bank_tag_code", queried_sql)
-        self.assertIn(
-            "select project_scope || ':all' as scope_key",
-            queried_sql,
-        )
-        self.assertIn("model.payload->'payload'->'statistics'", queried_sql)
-        self.assertNotIn("read_model.cost_statistics_bank_flow_rows", queried_sql)
-        self.assertNotIn("bank_flow_time_rows", queried_sql)
-        self.assertIn("cost_group_summaries", queried_sql)
-        self.assertIn("expected_projects", queried_sql)
-        self.assertIn("expected_expenses", queried_sql)
-        self.assertIn("cost_bank_accounts", queried_sql)
-        self.assertIn("bank_account_mappings", queried_sql)
-
-    def test_cost_statistics_bank_account_mapping_gap_is_blocking(self) -> None:
-        report = audit_cost_statistics_page(
-            FakeConnection(
-                rows_by_check={
-                    "cost_business_value_proofs": [
-                        {
-                            "issue_code": "cost_statistics_bank_accounts_mismatch",
-                            "subject_id": "all:2026-06:建设银行:8106",
-                            "scope_key": "all:2026-06",
-                            "details": {
-                                "bank_name": "建设银行",
-                                "account_last4": "8106",
-                                "expected_source": "settings",
-                                "projected_source": None,
-                            },
-                        }
-                    ]
-                }
-            ),
-        )
-
-        self.assertEqual(report["audit_status"]["integrity"], "issues_found")
+        self.assertIn("app.workbench_pair_relations", queried_sql)
+        self.assertIn("app.bank_transactions", queried_sql)
+        self.assertIn("app.oa_applications", queried_sql)
+        self.assertNotIn("read_model.", queried_sql)
         self.assertEqual(
-            report["summary"]["issue_sample_counts_by_code"],
-            {"cost_statistics_bank_accounts_mismatch": 1},
+            report["audit_contract"]["proof_checks"],
+            [
+                "single_repeatable_read_snapshot",
+                "canonical_relation_shape",
+                "canonical_relation_member_existence",
+            ],
         )
 
     def test_pending_invoice_relation_audit_uses_scope_aware_bidirectional_edge_equality(self) -> None:
@@ -955,23 +820,6 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("edge.value->>'bankTransactionId'", consumer_sql)
         self.assertIn("edge.value->>'relationCaseId'", consumer_sql)
 
-    def test_cost_statistics_bank_statistics_use_bank_detail_scope_owner(self) -> None:
-        connection = FakeConnection()
-
-        audit_cost_statistics_page(
-            connection,
-        )
-
-        bank_statistics_sql = next(
-            sql
-            for sql, _params in connection.fetch_all_calls
-            if "cost_summary_recalculation" in sql
-        )
-        self.assertIn("scope_key as month_key", bank_statistics_sql)
-        self.assertIn("from read_model.bank_detail_rows", bank_statistics_sql)
-        self.assertIn("where tenant_id = %s", bank_statistics_sql)
-        self.assertIn("and schema_version = %s", bank_statistics_sql)
-
     def test_pending_invoice_audit_proves_registered_consumer_edges(self) -> None:
         connection = FakeConnection()
 
@@ -1026,20 +874,6 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
         self.assertNotIn("consumer_relation_edge_equality", queried_sql)
         self.assertNotIn("consumer_relation_edge_equality", report["audit_contract"]["proof_checks"])
-
-    def test_numeric_proofs_use_typed_bank_rows_and_normalize_json_summaries(self) -> None:
-        connection = FakeConnection()
-
-        audit_cost_statistics_page(
-            connection,
-        )
-
-        queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
-        self.assertNotIn("replace(member.value->>'amount', ',', '')", queried_sql)
-        self.assertIn("count(distinct row.transaction_id)", queried_sql)
-        self.assertIn("replace(row.payload->>'amount', ',', '')", queried_sql)
-        self.assertIn("model.payload->'payload'->'summary'->>'total_amount'", queried_sql)
-        self.assertNotIn("bank_flow_summary", queried_sql)
 
     def test_cli_fail_on_issues_returns_nonzero(self) -> None:
         stdout = io.StringIO()

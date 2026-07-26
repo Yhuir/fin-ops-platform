@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Page-level read model freshness and fact-display coverage matrix. Every route in web/src/app/pageRegistry.tsx must have one row. The matrix records the read model keys, production read-only freshness probes, canonical fact sources, pairing relation fact sources when the page displays relation state, and deterministic browser/API evidence anchors.",
+  "description": "Page-level read-boundary and fact-display coverage matrix. Every route in web/src/app/pageRegistry.tsx must have one row. The matrix records read model keys when present, production read-only probes, canonical fact sources, pairing relation fact sources when the page displays relation state, and deterministic evidence anchors.",
   "rows": [
     {
       "module": "reconciliation-workbench",
@@ -26,18 +26,18 @@
       "module": "cost-statistics",
       "page_key": "cost-statistics",
       "route": "/cost-statistics",
-      "read_model_keys": ["cost_statistics", "workbench_relation"],
+      "read_model_keys": [],
       "freshness_probe_names": ["cost_statistics_explorer_all"],
-      "fact_sources": ["app.bank_transactions", "app.invoices", "app.cost_projects", "read_model.cost_statistics"],
-      "pairing_relation_fact_sources": ["app.workbench_pair_relations", "read_model.workbench_relation_rows"],
+      "fact_sources": ["app.bank_transactions", "app.bank_transaction_categories", "app.bank_transaction_category_confirmations", "app.oa_applications", "app.workbench_pair_relations", "app.app_settings"],
+      "pairing_relation_fact_sources": ["app.workbench_pair_relations"],
       "deterministic_evidence": [
         {
-          "path": "web/e2e/cost-statistics-relation-fanout.spec.ts",
-          "required_markers": ["智能工厂项目", "智能工厂设备尾款", "58,000.00"]
+          "path": "tests/test_cost_statistics_canonical_repository.py",
+          "required_markers": ["load_snapshot", "repeatable read", "read only"]
         },
         {
-          "path": "web/e2e/cost-statistics-flow.spec.ts",
-          "required_markers": ["read_model_status", "active:2026-03"]
+          "path": "tests/test_cost_statistics_api.py",
+          "required_markers": ["/api/cost-statistics/explorer", "test_each_api_request_loads_exactly_one_snapshot"]
         }
       ],
       "production_readonly_gates": ["http_slo_probe:cost_statistics_explorer_all"]
@@ -82,7 +82,7 @@
       "module": "bank-flow-rule-batches",
       "page_key": "bank-flow-rule-batches",
       "route": "/bank-flow-rule-batches",
-      "read_model_keys": ["bank_flow_rule_batch", "workbench_relation", "workbench", "cost_statistics"],
+      "read_model_keys": ["bank_flow_rule_batch", "workbench_relation", "workbench"],
       "freshness_probe_names": ["bank_flow_rule_batches", "bank_flow_rule_batches_tag_rules", "workbench_groups_all_paired", "cost_statistics_explorer_all"],
       "fact_sources": ["app.bank_transactions", "app.bank_transaction_tag_rules", "app.bank_flow_rule_batches", "read_model.bank_flow_rule_batch"],
       "pairing_relation_fact_sources": ["app.workbench_pair_relations", "read_model.workbench_relation_rows"],
@@ -114,10 +114,10 @@
       "module": "turnover-ledger",
       "page_key": "turnover-ledger",
       "route": "/turnover-ledger",
-      "read_model_keys": ["turnover_ledger", "workbench_relation", "workbench", "cost_statistics", "search"],
+      "read_model_keys": ["workbench_relation", "workbench", "search"],
       "freshness_probe_names": ["turnover_ledger_grouped", "turnover_ledger_tag_selection", "cost_statistics_explorer_all", "search_all"],
-      "fact_sources": ["app.bank_transactions", "app.turnover_relations", "app.cost_projects", "read_model.turnover_ledger"],
-      "pairing_relation_fact_sources": ["app.workbench_pair_relations", "read_model.workbench_relation_rows"],
+      "fact_sources": ["app.bank_transactions", "app.turnover_relations", "app.cost_projects", "app.workbench_pair_relations"],
+      "pairing_relation_fact_sources": ["app.workbench_pair_relations"],
       "deterministic_evidence": [
         {
           "path": "web/e2e/turnover-ledger-flow.spec.ts",
@@ -191,7 +191,7 @@
       "module": "input-invoice-usage",
       "page_key": "input-invoice-usage",
       "route": "/input-invoice-usage",
-      "read_model_keys": ["input_invoice_usage", "invoice_lifecycle", "workbench_relation", "oa_pending_payment", "tax_offset", "cost_statistics"],
+      "read_model_keys": ["input_invoice_usage", "invoice_lifecycle", "workbench_relation", "oa_pending_payment", "tax_offset"],
       "freshness_probe_names": ["input_invoice_usage_rows", "input_invoice_usage_filter_options", "input_invoice_usage_payment_status_rules"],
       "fact_sources": ["app.invoices", "app.oa_applications", "app.bank_transactions", "read_model.input_invoice_usage"],
       "pairing_relation_fact_sources": ["app.workbench_pair_relations", "read_model.workbench_relation_rows"],
@@ -211,7 +211,7 @@
       "module": "output-invoice-collections",
       "page_key": "output-invoice-collections",
       "route": "/output-invoice-collections",
-      "read_model_keys": ["output_invoice_collection", "workbench_relation", "tax_offset", "cost_statistics"],
+      "read_model_keys": ["output_invoice_collection", "workbench_relation", "tax_offset"],
       "freshness_probe_names": ["output_invoice_collections_rows", "output_invoice_collections_filter_options", "output_invoice_collections_status_rules"],
       "fact_sources": ["app.invoices", "app.output_invoice_receipts", "app.bank_transactions", "read_model.output_invoice_collection"],
       "pairing_relation_fact_sources": ["app.workbench_pair_relations", "read_model.workbench_relation_rows"],

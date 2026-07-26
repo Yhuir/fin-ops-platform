@@ -85,11 +85,13 @@ class WriteOperationImpactMatrixTests(unittest.TestCase):
                 operation,
             )
             direct_scope_types = set(row["forbidden_write_time_scope_types"])
+            retired_direct_scope_types = set(row.get("retired_direct_canonical_scope_types", []))
             derived_read_model_keys = set(row.get("derived_read_model_keys", []))
             self.assertEqual(direct_scope_types & derived_read_model_keys, set(), operation)
+            self.assertEqual(retired_direct_scope_types - direct_scope_types, set(), operation)
             self.assertEqual(
                 set(row["target_read_model_keys"]),
-                direct_scope_types | derived_read_model_keys,
+                (direct_scope_types - retired_direct_scope_types) | derived_read_model_keys,
                 operation,
             )
 
@@ -124,13 +126,7 @@ class WriteOperationImpactMatrixTests(unittest.TestCase):
                 accepted_read_model_keys = target_read_model_keys | set(
                     row.get("legacy_page_proxy_read_model_keys", [])
                 )
-                if not page_read_model_keys:
-                    self.assertIn(
-                        page_key,
-                        direct_canonical_targets,
-                        f"{operation}: {page_key} must be declared as a direct canonical target",
-                    )
-                else:
+                if page_key not in direct_canonical_targets:
                     self.assertTrue(
                         page_read_model_keys & accepted_read_model_keys,
                         f"{operation}: {page_key} has no declared impacted read model",

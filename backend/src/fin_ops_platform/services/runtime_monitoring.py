@@ -30,46 +30,12 @@ READ_MODEL_REFRESH_SLOW_EVENT_LIMIT = 20
 READ_MODEL_REFRESH_CURRENT_WINDOWS = ("recent_15m", "recent_1h", "recent_6h")
 RABBITMQ_PUBLISH_CONFIRM_METRIC_SAMPLE_LIMIT = 512
 
-_CURRENT_EFFECTIVE_OUTBOX_EVENT_PREDICATE_SQL = """
-not (
-  event_type = 'cost_statistics.read_model.refresh'
-  and coalesce(scope_type, raw_payload->>'scope_type', payload->>'scope_type', aggregate_type, '') = 'cost_statistics'
-  and (
-    coalesce(scope_key, raw_payload->>'scope_key', payload->>'scope_key', aggregate_id, '') = 'all'
-    or coalesce(scope_key, raw_payload->>'scope_key', payload->>'scope_key', aggregate_id, '') ~ '^[0-9]{4}-[0-9]{2}$'
-  )
-)
-"""
+_CURRENT_EFFECTIVE_OUTBOX_EVENT_PREDICATE_SQL = "true"
+
+
 def _current_effective_outbox_event_predicate_sql(alias: str) -> str:
-    prefix = f"{alias}."
-    return f"""
-not (
-  {prefix}event_type = 'cost_statistics.read_model.refresh'
-  and coalesce(
-    {prefix}scope_type,
-    {prefix}raw_payload->>'scope_type',
-    {prefix}payload->>'scope_type',
-    {prefix}aggregate_type,
-    ''
-  ) = 'cost_statistics'
-  and (
-    coalesce(
-      {prefix}scope_key,
-      {prefix}raw_payload->>'scope_key',
-      {prefix}payload->>'scope_key',
-      {prefix}aggregate_id,
-      ''
-    ) = 'all'
-    or coalesce(
-      {prefix}scope_key,
-      {prefix}raw_payload->>'scope_key',
-      {prefix}payload->>'scope_key',
-      {prefix}aggregate_id,
-      ''
-    ) ~ '^[0-9]{{4}}-[0-9]{{2}}$'
-  )
-)
-"""
+    _ = alias
+    return "true"
 
 
 def _active_dirty_scope_coverage_sql(alias: str) -> str:
@@ -188,10 +154,6 @@ def _current_effective_dirty_scope_predicate_sql(alias: str | None = None) -> st
     )
     return f"""
 not (
-  {prefix}scope_type = 'cost_statistics'
-  and ({prefix}scope_key = 'all' or {prefix}scope_key ~ '^[0-9]{{4}}-[0-9]{{2}}$')
-)
-and not (
   not {command_only_parent}
   and exists (
     select 1
@@ -403,31 +365,6 @@ class RuntimeMonitoringRepository:
             last_error = str(row.get("last_error") or "").strip()
             updated_at = str(row.get("updated_at") or "").strip()
             scope_status = _app_status_dirty_scope_status(row.get("status"))
-            if _is_legacy_cost_statistics_scope(scope_type, row.get("scope_key")):
-                current = grouped.setdefault(
-                    read_model_key,
-                    {
-                        "status": "missing",
-                        "reason": "readiness record missing",
-                        "count": 0,
-                        "details": [],
-                        "scopes": [],
-                    },
-                )
-                historical_scopes = current.setdefault("historical_scopes", [])
-                if isinstance(historical_scopes, list):
-                    historical_scopes.append(
-                        _app_status_historical_read_model_scope_payload(
-                            read_model_key=read_model_key,
-                            scope_type=scope_type,
-                            scope_key=row.get("scope_key"),
-                            status=scope_status,
-                            last_error=last_error,
-                            updated_at=updated_at,
-                            history_reason="legacy_scope_contract",
-                        )
-                    )
-                continue
             current = grouped.setdefault(read_model_key, {"status": "missing", "count": 0, "details": [], "scopes": []})
             current["count"] = int(current.get("count") or 0) + (_optional_int(row.get("count")) or 0)
             if updated_at:
@@ -517,19 +454,6 @@ class RuntimeMonitoringRepository:
                         last_error=row.get("last_error"),
                         updated_at=row.get("updated_at"),
                         history_reason="fan_out_command_scope",
-                    )
-                )
-                continue
-            if _is_legacy_cost_statistics_scope(row.get("scope_type"), row.get("scope_key")):
-                historical_scopes_by_key.setdefault(key, []).append(
-                    _app_status_historical_read_model_scope_payload(
-                        read_model_key=key,
-                        scope_type=row.get("scope_type"),
-                        scope_key=row.get("scope_key"),
-                        status=status,
-                        last_error=row.get("last_error"),
-                        updated_at=row.get("updated_at"),
-                        history_reason="legacy_scope_contract",
                     )
                 )
                 continue
@@ -2569,19 +2493,7 @@ def _app_status_historical_read_model_scope_payload(
     return payload
 
 
-def _is_legacy_cost_statistics_scope(scope_type: object, scope_key: object) -> bool:
-    if str(scope_type or "").strip() != "cost_statistics":
-        return False
-    key = str(scope_key or "").strip()
-    if key == "all":
-        return True
-    parts = key.split("-")
-    return len(parts) == 2 and len(parts[0]) == 4 and len(parts[1]) == 2 and all(part.isdigit() for part in parts)
-
-
 def _is_historical_outbox_status(row: dict[str, Any]) -> bool:
-    if _is_legacy_cost_statistics_scope(row.get("scope_type"), row.get("scope_key")):
-        return True
     entry = READ_MODEL_MANIFEST_BY_EVENT_TYPE.get(str(row.get("event_type") or "").strip())
     command_only_parent = bool(
         entry is not None
@@ -2842,11 +2754,6 @@ APP_STATUS_READINESS_BACKFILL_ROW_TABLES = {
     "search": {
         "table": "read_model.search_index_rows",
         "status_expr": "coalesce((array_agg(coalesce(nullif(cache_status, ''), 'fresh') order by generated_at desc))[1], 'fresh')",
-        "schema_expr": "''",
-    },
-    "cost_statistics": {
-        "table": "read_model.cost_statistics_read_models",
-        "status_expr": "'fresh'",
         "schema_expr": "''",
     },
     "tax_offset": {

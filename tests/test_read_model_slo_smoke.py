@@ -38,17 +38,17 @@ class FakeConnection:
                 "updated_at": "2026-06-13 10:01:00+08",
             },
             {
-                "read_model_key": "cost_statistics",
-                "scope_type": "cost_statistics",
-                "scope_key": "active:all",
+                "read_model_key": "bank_detail",
+                "scope_type": "bank_detail",
+                "scope_key": "all",
                 "status": "fresh",
                 "row_count": 30,
                 "updated_at": "2026-06-13 10:00:00+08",
             },
             {
-                "read_model_key": "cost_statistics",
-                "scope_type": "cost_statistics",
-                "scope_key": "active:2026-01",
+                "read_model_key": "bank_detail",
+                "scope_type": "bank_detail",
+                "scope_key": "2026-01",
                 "status": "fresh",
                 "row_count": 12,
                 "updated_at": "2026-06-13 10:02:00+08",
@@ -134,13 +134,13 @@ class FakeQueueRepository:
         )
 
 
-class MissingTurnoverReadinessConnection(FakeConnection):
+class MissingBankDetailReadinessConnection(FakeConnection):
     def __init__(self) -> None:
         super().__init__()
         self.readiness_rows = [
             row
             for row in self.readiness_rows
-            if str(row.get("read_model_key") or "") != "turnover_ledger"
+            if str(row.get("read_model_key") or "") != "bank_detail"
         ]
 
 
@@ -159,8 +159,8 @@ class PendingThenFreshConnection(FakeConnection):
                 return {
                     "event_id": params[0],
                     "tenant_id": "default",
-                    "event_type": "cost_statistics.read_model.refresh",
-                    "scope_type": "cost_statistics",
+                    "event_type": "bank_detail.read_model.refresh",
+                    "scope_type": "bank_detail",
                     "scope_key": "all",
                     "status": "pending",
                     "source_version": 8,
@@ -173,8 +173,8 @@ class PendingThenFreshConnection(FakeConnection):
             return {
                 "event_id": params[0],
                 "tenant_id": "default",
-                "event_type": "cost_statistics.read_model.refresh",
-                "scope_type": "cost_statistics",
+                "event_type": "bank_detail.read_model.refresh",
+                "scope_type": "bank_detail",
                 "scope_key": "all",
                 "status": "done",
                 "source_version": 8,
@@ -241,14 +241,14 @@ class ReadModelSloSmokeTests(unittest.TestCase):
         report = read_model_slo_smoke.run_smoke(
             FakeConnection(),
             apply=False,
-            read_model_keys=["workbench", "search", "cost_statistics"],
+            read_model_keys=["workbench", "search"],
         )
 
         self.assertEqual(report["status"], "dry_run")
         scopes = {item["read_model_key"]: item["scope_key"] for item in report["planned_scopes"]}
         self.assertEqual(scopes["workbench"], "2026-01")
         self.assertEqual(scopes["search"], "2026-01")
-        self.assertEqual(scopes["cost_statistics"], "active:2026-01")
+        self.assertNotIn("cost_statistics", scopes)
         self.assertNotIn("turnover_ledger", scopes)
 
     def test_critical_only_includes_bank_account_balance_page_read_model(self) -> None:
@@ -313,7 +313,7 @@ class ReadModelSloSmokeTests(unittest.TestCase):
 
     def test_missing_fresh_readiness_still_plans_default_scope_for_selected_read_model(self) -> None:
         report = read_model_slo_smoke.run_smoke(
-            MissingTurnoverReadinessConnection(),
+            MissingBankDetailReadinessConnection(),
             apply=False,
             read_model_keys=["bank_detail"],
         )

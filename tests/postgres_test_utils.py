@@ -178,8 +178,6 @@ TEST_TABLES = (
     "read_model.output_invoice_collection_scopes",
     "read_model.oa_pending_payment_rows",
     "read_model.oa_pending_payment_scopes",
-    "read_model.cost_statistics_read_models",
-    "read_model.cost_statistics_rows",
     "read_model.tax_offset_read_models",
     "read_model.tax_offset_items",
     "read_model.no_oa_bank_batch_rows",

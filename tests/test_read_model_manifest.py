@@ -94,7 +94,7 @@ class ReadModelManifestTests(unittest.TestCase):
                 "workbench_relation",
             ),
         )
-        self.assertEqual(graph["cost_statistics"], ("workbench", "bank_detail"))
+        self.assertNotIn("cost_statistics", graph)
         self.assertEqual(graph["input_invoice_usage"], ("workbench_relation",))
         self.assertEqual(graph["output_invoice_collection"], ("workbench_relation",))
 
@@ -272,7 +272,6 @@ class ReadModelManifestTests(unittest.TestCase):
             "bank_account_balance": "BankAccountBalanceReadModelRepositoryPort",
             "bank_detail": "BankDetailReadModelRepositoryPort",
             "bank_flow_rule_batch": "BankFlowRuleBatchReadModelRepositoryPort",
-            "cost_statistics": "CostStatisticsReadModelRepositoryPort",
             "input_invoice_usage": "InputInvoiceUsageReadModelRepositoryPort",
             "invoice_lifecycle": "InvoiceLifecycleReadModelRepositoryPort",
             "no_oa_bank_batch": "NoOaBankBatchReadModelRepositoryPort",
@@ -399,13 +398,6 @@ class ReadModelManifestTests(unittest.TestCase):
 
     def test_summary_read_model_physical_sql_owner_is_split_from_shared_repository(self) -> None:
         owned_methods = {
-            "get_cost_statistics_scope_metadata",
-            "get_cost_statistics_freshness_gate",
-            "get_cost_statistics_page",
-            "get_cost_statistics_export_page",
-            "get_cost_statistics_transaction",
-            "acknowledge_unchanged_cost_statistics_scope",
-            "publish_cost_statistics_read_models",
             "load_tax_offset_read_models",
             "get_tax_offset_view",
             "save_tax_offset_read_models",
@@ -594,50 +586,27 @@ class ReadModelManifestTests(unittest.TestCase):
         self.assertFalse(set(lifecycle.repository_port_contract).intersection(output_collection.repository_port_contract))
         self.assertFalse(set(input_usage.repository_port_contract).intersection(output_collection.repository_port_contract))
 
-    def test_cost_and_tax_manifest_preserve_summary_contracts(self) -> None:
-        cost_statistics = READ_MODEL_MANIFEST["cost_statistics"]
+    def test_cost_is_direct_canonical_read_and_tax_manifest_preserves_summary_contract(self) -> None:
+        self.assertNotIn("cost_statistics", READ_MODEL_MANIFEST)
         tax_offset = READ_MODEL_MANIFEST["tax_offset"]
-        required_cost_ports = {
-            "get_cost_statistics_scope_metadata",
-            "get_cost_statistics_freshness_gate",
-            "get_cost_statistics_page",
-            "get_cost_statistics_export_page",
-            "get_cost_statistics_transaction",
-            "active_workbench_source_versions",
-            "active_workbench_source_versions_by_scope",
-            "acknowledge_unchanged_cost_statistics_scope",
-            "publish_cost_statistics_read_models",
-        }
         required_tax_ports = {
             "load_tax_offset_read_models",
             "get_tax_offset_view",
             "save_tax_offset_read_models",
         }
 
-        for entry in (cost_statistics, tax_offset):
-            with self.subTest(read_model_key=entry.key):
-                self.assertEqual(entry.query_status_contract, "read_model_query_gateway")
-                self.assertEqual(entry.force_refresh_contract, "gateway_force_refresh")
-                self.assertEqual(entry.operation_barrier_contract, "app_status_registry_target")
-                self.assertEqual(entry.refresh_event_type, f"{entry.scope_type}.read_model.refresh")
-
-        self.assertEqual(cost_statistics.scope_type, "cost_statistics")
+        self.assertEqual(tax_offset.query_status_contract, "read_model_query_gateway")
+        self.assertEqual(tax_offset.force_refresh_contract, "gateway_force_refresh")
+        self.assertEqual(tax_offset.operation_barrier_contract, "app_status_registry_target")
+        self.assertEqual(tax_offset.refresh_event_type, "tax_offset.read_model.refresh")
         self.assertEqual(tax_offset.scope_type, "tax_offset")
-        self.assertEqual(cost_statistics.projection_strategy, "partitioned_scoped_parent_rollup")
         self.assertEqual(tax_offset.projection_strategy, "partitioned_scoped_incremental")
-        self.assertEqual(cost_statistics.all_scope_semantics, "queryable_parent_aggregate")
         self.assertEqual(tax_offset.all_scope_semantics, "fan_out_command")
-        self.assertEqual(cost_statistics.primary_worker_instance, "cost-statistics")
         self.assertEqual(tax_offset.primary_worker_instance, "tax-offset")
-        self.assertEqual(cost_statistics.auxiliary_refresh_worker_instances, ())
         self.assertEqual(tax_offset.auxiliary_refresh_worker_instances, ("cost-tax",))
-        self.assertEqual(cost_statistics.query_owner, "CostStatisticsQueryService")
         self.assertEqual(tax_offset.query_owner, "TaxOffsetQueryService")
-        self.assertEqual(cost_statistics.permission_owner, "cost_statistics_api_session")
         self.assertEqual(tax_offset.permission_owner, "tax_offset_api_session")
-        self.assertEqual(required_cost_ports, set(cost_statistics.repository_port_contract))
         self.assertEqual(required_tax_ports, set(tax_offset.repository_port_contract))
-        self.assertFalse(set(cost_statistics.repository_port_contract).intersection(tax_offset.repository_port_contract))
 
     def test_search_no_oa_and_bank_flow_rule_batch_manifest_preserve_read_side_contracts(self) -> None:
         search = READ_MODEL_MANIFEST["search"]

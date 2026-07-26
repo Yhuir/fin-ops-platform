@@ -39,7 +39,6 @@ APP_STATUS_BACKGROUND_JOB_REGISTRY: dict[str, AppStatusBackgroundJobDefinition] 
     "tax_offset.read_model.refresh": AppStatusBackgroundJobDefinition("tax_offset.read_model.refresh", "刷新税金抵扣", ("tax_offset",), "/tax-offset"),
     "tax_certified_import": AppStatusBackgroundJobDefinition("tax_certified_import", "税金认证导入", ("tax_offset",), "/tax-offset", legacy=True),
     "tax_offset_cache_warmup": AppStatusBackgroundJobDefinition("tax_offset_cache_warmup", "税金抵扣缓存预热", ("tax_offset",), "/tax-offset"),
-    "cost_statistics.read_model.refresh": AppStatusBackgroundJobDefinition("cost_statistics.read_model.refresh", "刷新成本统计", ("cost_statistics",), "/cost-statistics"),
     "bank_detail.read_model.refresh": AppStatusBackgroundJobDefinition("bank_detail.read_model.refresh", "刷新银行明细", ("bank_details",), "/bank-details"),
     "bank_account_balance.read_model.refresh": AppStatusBackgroundJobDefinition("bank_account_balance.read_model.refresh", "刷新银行余额", ("bank_details",), "/bank-details"),
     "pending_invoice.read_model.refresh": AppStatusBackgroundJobDefinition("pending_invoice.read_model.refresh", "刷新待找发票", ("pending_invoices",), "/pending-invoices"),

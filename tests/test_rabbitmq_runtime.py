@@ -525,7 +525,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
     def test_management_metrics_aggregates_all_supported_queues(self) -> None:
         routes = rabbitmq_event_routes(RuntimeQueueSettings.from_env({"RABBITMQ_URL": "amqp://rabbitmq.internal"}))
 
-        self.assertEqual(routes["cost_statistics.read_model.refresh"].routing_key, "cost_statistics.read_model.refresh")
+        self.assertNotIn("cost_statistics.read_model.refresh", routes)
         self.assertEqual(routes["tax_offset.read_model.refresh"].queue, "finops.tax_offset.read_model.refresh")
 
 

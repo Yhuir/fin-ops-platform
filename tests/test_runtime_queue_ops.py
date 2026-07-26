@@ -347,7 +347,7 @@ class RuntimeQueueOpsTests(unittest.TestCase):
                 [
                     "enqueue-read-model-refresh",
                     "--scope",
-                    "cost_statistics=all",
+                    "bank_detail=all",
                     "--scope",
                     "tax_offset=all",
                     "--dry-run",
@@ -361,8 +361,7 @@ class RuntimeQueueOpsTests(unittest.TestCase):
         self.assertEqual(
             payload["targets"],
             [
-                {"scope_key": "active:all", "scope_type": "cost_statistics"},
-                {"scope_key": "all:all", "scope_type": "cost_statistics"},
+                {"scope_key": "all", "scope_type": "bank_detail"},
                 {"scope_key": "all", "scope_type": "tax_offset"},
             ],
         )
@@ -628,8 +627,8 @@ class RuntimeQueueOpsTests(unittest.TestCase):
                 {
                     "event_id": "00000000-0000-0000-0000-000000000001",
                     "tenant_id": "default",
-                    "event_type": "cost_statistics.read_model.refresh",
-                    "scope_type": "cost_statistics",
+                    "event_type": "bank_detail.read_model.refresh",
+                    "scope_type": "bank_detail",
                     "scope_key": "all",
                     "status": "dead_lettered",
                 },

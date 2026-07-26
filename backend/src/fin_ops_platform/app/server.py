@@ -117,11 +117,11 @@ from fin_ops_platform.services.background_job_service import (
 from fin_ops_platform.services.bank_flow_rule_batch_derived_lifecycle_executor import (
     BankFlowRuleBatchDerivedLifecycleExecutor,
 )
-from fin_ops_platform.services.cost_statistics_derived_lifecycle_executor import (
-    CostStatisticsDerivedLifecycleExecutor,
+from fin_ops_platform.services.cost_statistics_canonical_repository import (
+    LocalCostStatisticsCanonicalRepository,
+    PostgresCostStatisticsCanonicalRepository,
 )
 from fin_ops_platform.services.cost_statistics_query_service import CostStatisticsQueryService
-from fin_ops_platform.services.cost_statistics_runtime_service import CostStatisticsRuntimeService
 from fin_ops_platform.services.derived_data_lifecycle_service import DerivedDataLifecycleService
 from fin_ops_platform.services.health_payload_compaction import compact_ready_payload
 from fin_ops_platform.services.invoice_lifecycle_derived_lifecycle_executor import (
@@ -784,7 +784,6 @@ class Application:
         import_fact_repository = getattr(self._state_store, "import_fact_repository", None)
         self._workbench_sql_read_repository = getattr(self._state_store, "workbench_sql_read_repository", None)
         self._workbench_sql_projection_builder = getattr(self._state_store, "workbench_sql_projection_builder", None)
-        self._cost_statistics_sql_read_repository = getattr(self._state_store, "cost_statistics_sql_read_repository", None)
         self._tax_offset_sql_read_repository = getattr(self._state_store, "tax_offset_sql_read_repository", None)
         self._search_sql_read_repository = getattr(self._state_store, "search_sql_read_repository", None)
         self._pending_invoice_sql_read_repository = getattr(self._state_store, "pending_invoice_sql_read_repository", None)
@@ -1101,7 +1100,6 @@ class Application:
             persist_confirmed_import_delta=self._persist_confirmed_import_delta,
             workbench_matching_scope_months_for_import_file_session=self._workbench_matching_scope_months_for_import_file_session,
             tax_offset_scope_keys_for_import_file_session=self._tax_offset_scope_keys_for_import_file_session,
-            cost_statistics_scope_keys_for_import_file_session=self._cost_statistics_scope_keys_for_import_file_session,
             bank_detail_scope_keys_for_import_file_session=self._bank_detail_scope_keys_for_import_file_session,
             input_invoice_usage_scope_keys_for_import_file_session=self._input_invoice_usage_scope_keys_for_import_file_session,
             output_invoice_collection_scope_keys_for_import_file_session=self._output_invoice_collection_scope_keys_for_import_file_session,
@@ -1351,21 +1349,35 @@ class Application:
         )
 
     def _configure_cost_statistics_application_services(self) -> None:
-        runtime_repositories = getattr(self, "_runtime_repositories", None)
-        self._cost_statistics_runtime_service = CostStatisticsRuntimeService(
-            queue_repository=getattr(runtime_repositories, "queue_repository", None),
+        connection = (
+            getattr(self._state_store, "_sql_read_connection", None)
+            or getattr(self._state_store, "_connection", None)
         )
+        if connection is not None:
+            canonical_repository = PostgresCostStatisticsCanonicalRepository(
+                connection
+            )
+        else:
+            canonical_repository = LocalCostStatisticsCanonicalRepository(
+                bank_rows_provider=lambda: self._import_service.list_transactions(
+                    month="all"
+                ),
+                relations_provider=(
+                    self._workbench_pair_relation_service.list_active_relations
+                ),
+                oa_rows_by_ids_provider=self._cost_statistics_local_oa_rows_by_ids,
+                settings_provider=(
+                    self._state_store.load_app_settings
+                    if callable(
+                        getattr(self._state_store, "load_app_settings", None)
+                    )
+                    else self._app_settings_service.get_settings_payload
+                ),
+                category_provider=self._bank_transaction_effective_category_provider,
+            )
+        self._cost_statistics_canonical_repository = canonical_repository
         self._cost_statistics_query_service = CostStatisticsQueryService(
-            runtime_service=self._cost_statistics_runtime_service,
-            redis_helper=getattr(runtime_repositories, "redis_helper", None),
-            sql_read_repository=getattr(self, "_cost_statistics_sql_read_repository", None),
-            tag_selection_mapper=AppSettingsService.cost_statistics_tag_selection_payload_from_settings,
-            workbench_dependency_versions_provider=self._cost_statistics_workbench_dependency_versions,
-            workbench_dependency_versions_by_scope_provider=(
-                self._cost_statistics_workbench_dependency_versions_by_scope
-            ),
-            workbench_refresh_enqueuer=self._enqueue_workbench_read_model_refresh,
-            bank_detail_refresh_enqueuer=self._bank_detail_read_model_refresh_producer().enqueue,
+            canonical_repository=canonical_repository,
         )
         self._cost_statistics_api_routes = CostStatisticsApiRoutes(
             query_service=self._cost_statistics_query_service,
@@ -1382,53 +1394,33 @@ class Application:
         )
         self._cost_statistics_dependency_key = self._cost_statistics_current_dependency_key()
 
-    def _cost_statistics_workbench_dependency_versions(
+    def _cost_statistics_local_oa_rows_by_ids(
         self,
-        scope_key: str,
-    ) -> tuple[dict[str, object], dict[str, object]]:
-        repository = getattr(self, "_cost_statistics_sql_read_repository", None)
-        active_source_versions = getattr(repository, "active_workbench_source_versions", None)
-        if not callable(active_source_versions):
-            raise RuntimeError("Cost statistics requires the Workbench source-version read boundary.")
-        return (
-            self._workbench_sql_read_model_source_versions(scope_key),
-            dict(active_source_versions(scope_key=scope_key) or {}),
-        )
-
-    def _cost_statistics_workbench_dependency_versions_by_scope(
-        self,
-    ) -> tuple[dict[str, dict[str, object]], dict[str, dict[str, object]]]:
-        builder = getattr(self, "_workbench_sql_projection_builder", None)
-        repository = getattr(self, "_cost_statistics_sql_read_repository", None)
-        active_source_versions_by_scope = getattr(
-            repository,
-            "active_workbench_source_versions_by_scope",
-            None,
-        )
-        if not callable(getattr(builder, "source_versions_for_scopes", None)):
-            raise RuntimeError("Cost statistics requires the Workbench canonical source-version boundary.")
-        if not callable(active_source_versions_by_scope):
-            raise RuntimeError("Cost statistics requires the Workbench bulk source-version read boundary.")
-        scope_keys = builder.list_workbench_scope_shards("all")
-        return (
-            builder.source_versions_for_scopes(scope_keys),
-            {
-                str(scope_key): dict(source_versions)
-                for scope_key, source_versions in dict(
-                    active_source_versions_by_scope(scope_keys=scope_keys) or {}
-                ).items()
-                if isinstance(source_versions, dict)
-            },
-        )
+        row_ids: list[str],
+    ) -> list[object]:
+        rows: list[object] = []
+        for row_id in row_ids:
+            try:
+                rows.append(
+                    self._workbench_query_service.get_row_record(
+                        row_id,
+                        month_hint="all",
+                    )
+                )
+            except KeyError:
+                continue
+        return rows
 
     def _cost_statistics_current_dependency_key(self) -> tuple[int | None, ...]:
         return (
-            id(getattr(self, "_cost_statistics_sql_read_repository", None)) if getattr(self, "_cost_statistics_sql_read_repository", None) is not None else None,
-            id(getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None))
-            if getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None) is not None
+            id(getattr(self._state_store, "_sql_read_connection", None))
+            if getattr(self._state_store, "_sql_read_connection", None)
+            is not None
+            else id(getattr(self._state_store, "_connection", None))
+            if getattr(self._state_store, "_connection", None) is not None
             else None,
-            id(getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None))
-            if getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None) is not None
+            id(getattr(self, "_import_service", None))
+            if getattr(self, "_import_service", None) is not None
             else None,
             id(getattr(self, "_app_settings_service", None)) if getattr(self, "_app_settings_service", None) is not None else None,
         )
@@ -1443,10 +1435,6 @@ class Application:
     def _cost_statistics_routes(self) -> CostStatisticsApiRoutes:
         self._ensure_cost_statistics_application_services()
         return self._cost_statistics_api_routes
-
-    def _cost_statistics_runtime(self) -> CostStatisticsRuntimeService:
-        self._ensure_cost_statistics_application_services()
-        return self._cost_statistics_runtime_service
 
     def _cost_statistics_query(self) -> CostStatisticsQueryService:
         self._ensure_cost_statistics_application_services()
@@ -3690,7 +3678,7 @@ class Application:
         if not refresh_gateway.can_enqueue():
             return False
         refresh_metadata = dict(metadata or {})
-        if str(reason or "").startswith("api_") or reason == "cost_statistics_workbench_dependency_stale":
+        if str(reason or "").startswith("api_"):
             repository = getattr(self, "_workbench_sql_read_repository", None)
             active_source_versions = getattr(repository, "active_workbench_source_versions", None)
             if callable(active_source_versions):
@@ -9301,25 +9289,6 @@ class Application:
             "normalized_rows": self._serialize_value(preview.normalized_rows),
         }
 
-    def _cost_statistics_scope_keys_for_import_preview(self, preview: object) -> list[str]:
-        normalized_rows = getattr(preview, "normalized_rows", [])
-        return self._cost_statistics_scope_keys_for_import_rows(normalized_rows)
-
-    def _cost_statistics_scope_keys_for_import_file_session(
-        self,
-        session: object,
-        selected_file_ids: list[str],
-    ) -> list[str]:
-        selected = {str(file_id) for file_id in list(selected_file_ids or []) if str(file_id)}
-        normalized_rows: list[object] = []
-        for item in list(getattr(session, "files", []) or []):
-            if str(getattr(item, "id", "")) not in selected:
-                continue
-            if str(getattr(item, "status", "")) != "confirmed":
-                continue
-            normalized_rows.extend(list(getattr(item, "normalized_rows", []) or []))
-        return self._cost_statistics_scope_keys_for_import_rows(normalized_rows)
-
     def _bank_detail_scope_keys_for_import_preview(self, preview: object) -> list[str]:
         return self._bank_detail_scope_keys_for_import_rows(getattr(preview, "normalized_rows", []))
 
@@ -9370,7 +9339,7 @@ class Application:
         batch = getattr(preview, "batch", None)
         if self._normalized_batch_type(getattr(batch, "batch_type", None)) != batch_type:
             return []
-        return self._cost_statistics_scope_keys_for_import_rows(getattr(preview, "normalized_rows", []))
+        return self._month_scope_keys_for_import_rows(getattr(preview, "normalized_rows", []))
 
     def _invoice_relation_scope_keys_for_import_file_session(
         self,
@@ -9388,7 +9357,7 @@ class Application:
             if self._normalized_batch_type(getattr(item, "batch_type", None)) != batch_type:
                 continue
             normalized_rows.extend(list(getattr(item, "normalized_rows", []) or []))
-        return self._cost_statistics_scope_keys_for_import_rows(normalized_rows) if normalized_rows else []
+        return self._month_scope_keys_for_import_rows(normalized_rows) if normalized_rows else []
 
     @staticmethod
     def _normalized_batch_type(value: object) -> BatchType | None:
@@ -9498,7 +9467,7 @@ class Application:
         return sorted(months)
 
     @staticmethod
-    def _cost_statistics_scope_keys_for_import_rows(rows: object) -> list[str]:
+    def _month_scope_keys_for_import_rows(rows: object) -> list[str]:
         months: set[str] = set()
         date_fields = (
             "txn_date",
@@ -10061,9 +10030,6 @@ class Application:
         normalized_scope_key = str(scope_key or "").strip() or "all"
         self._runtime_redis_delete_best_effort(self._workbench_groups_redis_version_key(normalized_scope_key))
 
-    def rebuild_cost_statistics_read_model_scope(self, scope_key: str) -> dict[str, object]:
-        raise RuntimeError("cost statistics read model refresh must use CostStatisticsReadModelRefreshService.")
-
     def rebuild_tax_offset_read_model_scope(self, scope_key: str) -> dict[str, object]:
         self._ensure_tax_offset_application_services()
         return self._tax_offset_worker_rebuild_executor.rebuild_scope(scope_key)
@@ -10354,7 +10320,6 @@ class Application:
             "workbench_relation_read_model": self._workbench_relation_derived_lifecycle_executor().execute,
             "workbench_matching_dirty_scopes": self._derived_lifecycle_dirty_scopes_executor,
             "invoice_lifecycle_read_model": self._invoice_lifecycle_derived_lifecycle_executor().execute,
-            "cost_statistics_read_model": self._cost_statistics_derived_lifecycle_executor().execute,
             "tax_offset_read_model": self._tax_offset_derived_lifecycle_executor().execute_read_model,
             "tax_offset_month_cache": self._tax_offset_derived_lifecycle_executor().execute_month_cache,
             "pending_invoice_read_model": self._derived_lifecycle_pending_invoice_executor,
@@ -10515,16 +10480,6 @@ class Application:
         return InvoiceLifecycleDerivedLifecycleExecutor(
             enqueue_refresh=lambda scope_keys, **kwargs: self._enqueue_generic_read_model_refreshes(
                 "invoice_lifecycle",
-                scope_keys,
-                **kwargs,
-            ),
-        )
-
-    def _cost_statistics_derived_lifecycle_executor(self) -> CostStatisticsDerivedLifecycleExecutor:
-        return CostStatisticsDerivedLifecycleExecutor(
-            runtime_service=self._cost_statistics_runtime(),
-            enqueue_refresh=lambda scope_keys, **kwargs: self._enqueue_generic_read_model_refreshes(
-                "cost_statistics",
                 scope_keys,
                 **kwargs,
             ),

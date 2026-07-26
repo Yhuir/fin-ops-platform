@@ -171,7 +171,7 @@ class ReadModelScopeContractServiceTests(unittest.TestCase):
 
         self.assertEqual(rows, [])
         sql, params = connection.fetch_all_calls[-1]
-        self.assertEqual(params, (["cost_statistics", "no_oa_bank_batch", "pending_invoice"],))
+        self.assertEqual(params, (["no_oa_bank_batch", "pending_invoice"],))
         self.assertIn("scope_type = any(%s)", sql)
         self.assertIn("status in ('pending', 'processing', 'failed')", sql)
 
@@ -182,7 +182,7 @@ class ReadModelScopeContractServiceTests(unittest.TestCase):
 
         self.assertEqual(rows, [])
         sql, params = connection.fetch_all_calls[-1]
-        self.assertEqual(params, (["cost_statistics", "no_oa_bank_batch", "pending_invoice"],))
+        self.assertEqual(params, (["no_oa_bank_batch", "pending_invoice"],))
         self.assertIn("coalesce(scope_type, payload->>'scope_type') = any(%s)", sql)
         self.assertIn("event_type like '%%.read_model.refresh'", sql)
 
@@ -196,279 +196,13 @@ class ReadModelScopeContractServiceTests(unittest.TestCase):
         self.assertEqual(
             params,
             (
-                ["cost_statistics", "no_oa_bank_batch", "pending_invoice"],
-                ["cost_statistics", "no_oa_bank_batch", "pending_invoice"],
+                ["no_oa_bank_batch", "pending_invoice"],
+                ["no_oa_bank_batch", "pending_invoice"],
             ),
         )
         self.assertIn("from read_model.app_status_readiness", sql)
         self.assertIn("scope_type = any(%s)", sql)
         self.assertIn("read_model_key = any(%s)", sql)
-
-    def test_check_reports_non_canonical_cost_statistics_scope_rows_without_writes(self) -> None:
-        repository = FakeScopeContractRepository()
-        repository.dirty_scopes = [
-            {"id": "dirty-1", "tenant_id": "default", "scope_type": "cost_statistics", "scope_key": "2026-03", "status": "failed"},
-            {"id": "dirty-2", "tenant_id": "default", "scope_type": "cost_statistics", "scope_key": "active:2026-03", "status": "pending"},
-        ]
-        repository.outbox_events = [
-            {"id": "event-1", "tenant_id": "default", "event_type": "cost_statistics.read_model.refresh", "scope_key": "all", "status": "dead_lettered"},
-        ]
-        repository.readiness = [
-            {
-                "tenant_id": "default",
-                "read_model_key": "cost_statistics",
-                "scope_type": "cost_statistics",
-                "scope_key": "archived:2026-03",
-                "status": "failed",
-            },
-        ]
-
-        report = ReadModelScopeContractService(repository).check_cost_statistics_contract()
-
-        self.assertFalse(report["ok"])
-        self.assertEqual(report["violation_count"], 3)
-        self.assertEqual(
-            report["summary"],
-            {
-                "job.read_model_dirty_scopes": {"legacy": 1, "invalid": 0, "total": 1},
-                "job.outbox_events": {"legacy": 1, "invalid": 0, "total": 1},
-                "read_model.app_status_readiness": {"legacy": 0, "invalid": 1, "total": 1},
-            },
-        )
-        self.assertEqual(
-            report["replacement_scope_keys"],
-            ["active:2026-03", "all:2026-03", "active:all", "all:all"],
-        )
-        self.assertEqual(repository.deleted_dirty_scope_ids, [])
-        self.assertEqual(repository.deleted_outbox_event_ids, [])
-        self.assertEqual(repository.deleted_readiness, [])
-
-    def test_check_reports_repair_manifest_categories_and_outbox_current_state(self) -> None:
-        repository = FakeScopeContractRepository()
-        repository.dirty_scopes = [
-            {
-                "id": "dirty-legacy",
-                "tenant_id": "default",
-                "scope_type": "cost_statistics",
-                "scope_key": "2026-03",
-                "status": "failed",
-                "last_error": "legacy dirty failed",
-                "updated_at": "2026-06-04T09:00:00+00:00",
-            },
-        ]
-        repository.outbox_events = [
-            {
-                "id": "outbox-legacy",
-                "tenant_id": "default",
-                "event_type": "cost_statistics.read_model.refresh",
-                "scope_type": "cost_statistics",
-                "scope_key": "all",
-                "status": "dead_lettered",
-                "last_error": "legacy outbox failed",
-                "updated_at": "2026-06-04T09:01:00+00:00",
-            },
-        ]
-        repository.readiness = [
-            {
-                "tenant_id": "default",
-                "read_model_key": "cost_statistics",
-                "scope_type": "cost_statistics",
-                "scope_key": "all",
-                "status": "failed",
-                "last_error": "legacy readiness failed",
-                "updated_at": "2026-06-04T09:02:00+00:00",
-            },
-        ]
-        repository.read_model_outbox_failures = [
-            {
-                "id": "covered-output",
-                "tenant_id": "default",
-                "event_type": "output_invoice_collection.read_model.refresh",
-                "scope_type": "output_invoice_collection",
-                "scope_key": "2026-05",
-                "status": "dead_lettered",
-                "last_error": "old output projection failed",
-                "updated_at": "2026-06-04T08:00:00+00:00",
-                "covered_by_later_done": False,
-                "covered_by_later_readiness": True,
-            },
-            {
-                "id": "current-bank",
-                "tenant_id": "default",
-                "event_type": "bank_detail.read_model.refresh",
-                "scope_type": "bank_detail",
-                "scope_key": "all",
-                "status": "failed",
-                "last_error": "current bank detail failure",
-                "updated_at": "2026-06-04T10:00:00+00:00",
-                "covered_by_later_done": False,
-                "covered_by_later_readiness": False,
-            },
-        ]
-
-        report = ReadModelScopeContractService(repository).check_cost_statistics_contract()
-
-        manifest = report["repair_manifest"]
-        self.assertEqual(
-            manifest["summary"],
-            {
-                "cost_statistics_legacy_dirty_scopes": 1,
-                "cost_statistics_legacy_outbox_events": 1,
-                "cost_statistics_legacy_readiness_rows": 1,
-                "cost_statistics_invalid_dirty_scopes": 0,
-                "cost_statistics_invalid_outbox_events": 0,
-                "cost_statistics_invalid_readiness_rows": 0,
-                "covered_historical_outbox_failures": 1,
-                "current_uncovered_outbox_failures": 1,
-            },
-        )
-        covered = next(item for item in manifest["items"] if item["category"] == "covered_historical_outbox_failures")
-        self.assertEqual(covered["scope_type"], "output_invoice_collection")
-        self.assertEqual(covered["scope_key"], "2026-05")
-        self.assertEqual(covered["event_type"], "output_invoice_collection.read_model.refresh")
-        self.assertEqual(covered["status"], "dead_lettered")
-        self.assertEqual(covered["last_error"], "old output projection failed")
-        self.assertEqual(covered["updated_at"], "2026-06-04T08:00:00+00:00")
-        self.assertEqual(covered["covered_by"], ["fresh_readiness"])
-        self.assertEqual(covered["proposed_action"], "operator_resolve_historical_outbox_failure")
-        self.assertIn("restore", covered["rollback_hint"])
-
-        current = next(item for item in manifest["items"] if item["category"] == "current_uncovered_outbox_failures")
-        self.assertEqual(current["proposed_action"], "retain_current_blocker_investigate_or_requeue")
-        self.assertEqual(current["covered_by"], [])
-        self.assertEqual(report["current_uncovered_outbox_failure_count"], 1)
-        self.assertEqual(repository.repair_audit_events, [])
-
-    def test_apply_deletes_violations_and_enqueues_deduped_replacement_scopes(self) -> None:
-        repository = FakeScopeContractRepository()
-        repository.dirty_scopes = [
-            {"id": "dirty-1", "tenant_id": "default", "scope_type": "cost_statistics", "scope_key": "2026-03", "status": "failed"},
-        ]
-        repository.outbox_events = [
-            {"id": "event-1", "tenant_id": "default", "event_type": "cost_statistics.read_model.refresh", "scope_key": "2026-03", "status": "failed"},
-        ]
-        repository.readiness = [
-            {
-                "tenant_id": "tenant-a",
-                "read_model_key": "cost_statistics",
-                "scope_type": "cost_statistics",
-                "scope_key": "all",
-                "status": "failed",
-            },
-        ]
-        gateway = FakeRefreshGateway()
-
-        report = ReadModelScopeContractService(repository).repair_cost_statistics_contract(
-            apply=True,
-            refresh_gateway=gateway,
-            reason="manual_scope_repair",
-        )
-
-        self.assertEqual(repository.deleted_dirty_scope_ids, ["dirty-1"])
-        self.assertEqual(repository.deleted_outbox_event_ids, ["event-1"])
-        self.assertEqual(
-            repository.deleted_readiness,
-            [
-                {
-                    "tenant_id": "tenant-a",
-                    "read_model_key": "cost_statistics",
-                    "scope_type": "cost_statistics",
-                    "scope_key": "all",
-                }
-            ],
-        )
-        self.assertEqual(
-            gateway.enqueued,
-            [
-                {
-                    "scope_type": "cost_statistics",
-                    "scope_keys": ["active:2026-03", "all:2026-03", "active:all", "all:all"],
-                    "reason": "manual_scope_repair",
-                }
-            ],
-        )
-        self.assertEqual(report["cleanup"]["deleted"]["job.read_model_dirty_scopes"], 1)
-        self.assertEqual(report["replacement_enqueue"]["enqueued_count"], 4)
-
-    def test_apply_records_audit_with_manifest_cleanup_and_rollback_without_deleting_current_failures(self) -> None:
-        repository = FakeScopeContractRepository()
-        repository.dirty_scopes = [
-            {"id": "dirty-1", "tenant_id": "default", "scope_type": "cost_statistics", "scope_key": "2026-03", "status": "failed"},
-        ]
-        repository.outbox_events = [
-            {"id": "event-legacy", "tenant_id": "default", "event_type": "cost_statistics.read_model.refresh", "scope_key": "all", "status": "dead_lettered"},
-        ]
-        repository.read_model_outbox_failures = [
-            {
-                "id": "current-bank",
-                "tenant_id": "default",
-                "event_type": "bank_detail.read_model.refresh",
-                "scope_type": "bank_detail",
-                "scope_key": "all",
-                "status": "failed",
-                "covered_by_later_done": False,
-                "covered_by_later_readiness": False,
-            },
-        ]
-        gateway = FakeRefreshGateway()
-
-        report = ReadModelScopeContractService(repository).repair_cost_statistics_contract(
-            apply=True,
-            refresh_gateway=gateway,
-            reason="manual_scope_repair",
-        )
-
-        self.assertEqual(repository.deleted_dirty_scope_ids, ["dirty-1"])
-        self.assertEqual(repository.deleted_outbox_event_ids, ["event-legacy"])
-        self.assertNotIn("current-bank", repository.deleted_outbox_event_ids)
-        self.assertEqual(len(repository.repair_audit_events), 1)
-        audit = repository.repair_audit_events[0]
-        self.assertEqual(audit["event_type"], "read_model_scope_contract_repair")
-        self.assertEqual(audit["object_type"], "read_model_runtime_repair")
-        self.assertEqual(audit["reason"], "manual_scope_repair")
-        self.assertEqual(audit["payload"]["repair_manifest"]["summary"]["current_uncovered_outbox_failures"], 1)
-        self.assertEqual(audit["payload"]["cleanup"]["deleted"]["job.outbox_events"], 1)
-        self.assertEqual(report["repair_audit"]["recorded"], True)
-        self.assertEqual(report["repair_audit"]["event_id"], "audit-1")
-        self.assertIn("restore deleted rows", report["rollback"]["strategy"])
-
-    def test_apply_is_idempotent_after_rows_are_deleted(self) -> None:
-        repository = FakeScopeContractRepository()
-        repository.dirty_scopes = [
-            {"id": "dirty-1", "tenant_id": "default", "scope_type": "cost_statistics", "scope_key": "2026-03", "status": "failed"},
-        ]
-        gateway = FakeRefreshGateway()
-        service = ReadModelScopeContractService(repository)
-
-        first = service.repair_cost_statistics_contract(apply=True, refresh_gateway=gateway)
-        second = service.repair_cost_statistics_contract(apply=True, refresh_gateway=gateway)
-
-        self.assertEqual(first["cleanup"]["deleted"]["job.read_model_dirty_scopes"], 1)
-        self.assertEqual(second["violation_count"], 0)
-        self.assertEqual(second["cleanup"]["deleted"]["job.read_model_dirty_scopes"], 0)
-        self.assertEqual(len(gateway.enqueued), 1)
-        self.assertEqual(len(repository.repair_audit_events), 1)
-
-    def test_apply_without_replacement_enqueue_only_deletes_invalid_rows(self) -> None:
-        repository = FakeScopeContractRepository()
-        repository.readiness = [
-            {
-                "tenant_id": "default",
-                "read_model_key": "cost_statistics",
-                "scope_type": "cost_statistics",
-                "scope_key": "archived:2026-03",
-                "status": "failed",
-            },
-        ]
-
-        report = ReadModelScopeContractService(repository).repair_cost_statistics_contract(
-            apply=True,
-            enqueue_replacements=False,
-        )
-
-        self.assertEqual(len(repository.deleted_readiness), 1)
-        self.assertEqual(report["replacement_scope_keys"], [])
-        self.assertEqual(report["replacement_enqueue"]["enabled"], False)
 
     def test_check_reports_orphaned_import_fact_dirty_scopes_without_writes(self) -> None:
         repository = FakeScopeContractRepository()
@@ -528,7 +262,7 @@ class ReadModelScopeContractServiceTests(unittest.TestCase):
         self.assertEqual(audit["event_type"], "orphaned_import_fact_dirty_scope_repair")
         self.assertEqual(audit["object_id"], "import_facts_changed")
         self.assertEqual(audit["reason"], "manual_import_fact_cleanup")
-        self.assertEqual(audit["payload"]["orphaned_dirty_scope_count"], 2)
+        self.assertEqual(len(audit["payload"]["items"]), 2)
         self.assertEqual(report["repair_audit"]["recorded"], True)
         self.assertEqual(report["repair_audit"]["event_id"], "audit-1")
 
@@ -668,7 +402,7 @@ class ReadModelScopeContractServiceTests(unittest.TestCase):
         self.assertEqual(audit["event_type"], "invalid_read_model_refresh_scope_repair")
         self.assertEqual(audit["object_id"], "invalid_read_model_refresh_scopes")
         self.assertEqual(audit["reason"], "manual_invalid_scope_cleanup")
-        self.assertEqual(audit["payload"]["invalid_scope_count"], 3)
+        self.assertEqual(len(audit["payload"]["items"]), 3)
         self.assertEqual(report["repair_audit"]["recorded"], True)
         self.assertEqual(report["repair_audit"]["event_id"], "audit-1")
 

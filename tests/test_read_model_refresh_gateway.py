@@ -60,40 +60,6 @@ class BulkAtomicQueueRecorder(AtomicQueueRecorder):
 
 
 class ReadModelRefreshGatewayTests(unittest.TestCase):
-    def test_cost_statistics_policy_normalizes_validates_and_dedupes_legacy_scopes(self) -> None:
-        from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
-
-        queue = QueueRecorder()
-        gateway = ReadModelRefreshGateway(queue_repository=queue)
-
-        enqueued = gateway.enqueue_many(
-            "cost_statistics",
-            ["2026-03", "2026-03", "all", "active:2026-03", "all:2026-04"],
-            reason="unit_test",
-        )
-
-        self.assertEqual(
-            enqueued,
-            [
-                "active:2026-03",
-                "all:2026-03",
-                "active:2026-04",
-                "all:2026-04",
-                "active:all",
-                "all:all",
-            ],
-        )
-        self.assertEqual(
-            queue.refreshes,
-            [
-                {"scope_type": "cost_statistics", "scope_key": "active:2026-03", "reason": "unit_test"},
-                {"scope_type": "cost_statistics", "scope_key": "all:2026-03", "reason": "unit_test"},
-                {"scope_type": "cost_statistics", "scope_key": "active:2026-04", "reason": "unit_test"},
-                {"scope_type": "cost_statistics", "scope_key": "all:2026-04", "reason": "unit_test"},
-                {"scope_type": "cost_statistics", "scope_key": "active:all", "reason": "unit_test"},
-                {"scope_type": "cost_statistics", "scope_key": "all:all", "reason": "unit_test"},
-            ],
-        )
 
     def test_unknown_or_generic_scope_types_are_preserved_and_deduped(self) -> None:
         from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
@@ -124,7 +90,6 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
             "output_invoice_collection",
             "search",
             "tax_offset",
-            "turnover_ledger",
             "workbench",
             "workbench_relation",
         ]
@@ -317,8 +282,6 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
             ("bank_detail", "2026-02", "pending_invoice_sql_projection"),
             ("bank_detail", "2026-02", "downstream_bank_tag_read"),
             ("bank_detail", "2026-02", "bank_detail_relation_tags_read"),
-            ("bank_detail", "2026-02", "cost_statistics_bank_detail_dependency_stale"),
-            ("workbench", "2026-02", "cost_statistics_workbench_dependency_stale"),
             ("workbench_relation", "2026-02", "bank_details_relation_tag_projection"),
             ("workbench", "2026-02", "fan_out_command_scope"),
             ("input_invoice_usage", "2026-02", "input_invoice_usage_filter_options"),
@@ -400,48 +363,30 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
             ],
         )
 
-    def test_cost_statistics_shard_convergence_reasons_do_not_bump_active_scope(self) -> None:
-        from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
-
-        for reason in ("cost_statistics_all_shard", "cost_statistics_shard_converged"):
-            with self.subTest(reason=reason):
-                queue = QueueRecorder()
-                queue.active_refreshes.add(("default", "cost_statistics", "active:all"))
-                gateway = ReadModelRefreshGateway(queue_repository=queue)
-
-                enqueued = gateway.enqueue_many(
-                    "cost_statistics",
-                    ["active:all"],
-                    reason=reason,
-                )
-
-                self.assertEqual(enqueued, ["active:all"])
-                self.assertEqual(queue.active_checks, [("default", "cost_statistics", "active:all")])
-                self.assertEqual(queue.refreshes, [])
 
     def test_orphan_dirty_scope_without_active_event_is_reenqueued(self) -> None:
         from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
         queue = EventAwareQueueRecorder()
-        queue.active_refreshes.add(("default", "cost_statistics", "active:all"))
+        queue.active_refreshes.add(("default", "bank_detail", "all"))
         gateway = ReadModelRefreshGateway(queue_repository=queue)
 
         enqueued = gateway.enqueue_many(
-            "cost_statistics",
-            ["active:all"],
-            reason="cost_statistics_shard_converged",
+            "bank_detail",
+            ["all"],
+            reason="bank_detail_all_shard",
         )
 
-        self.assertEqual(enqueued, ["active:all"])
-        self.assertEqual(queue.active_event_checks, [("default", "cost_statistics", "active:all")])
+        self.assertEqual(enqueued, ["all"])
+        self.assertEqual(queue.active_event_checks, [("default", "bank_detail", "all")])
         self.assertEqual(queue.active_checks, [])
         self.assertEqual(
             queue.refreshes,
             [
                 {
-                    "scope_type": "cost_statistics",
-                    "scope_key": "active:all",
-                    "reason": "cost_statistics_shard_converged",
+                    "scope_type": "bank_detail",
+                    "scope_key": "all",
+                    "reason": "bank_detail_all_shard",
                 }
             ],
         )
@@ -450,16 +395,16 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
         from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
         queue = EventAwareQueueRecorder()
-        queue.active_events.add(("default", "cost_statistics", "active:all"))
+        queue.active_events.add(("default", "bank_detail", "all"))
         gateway = ReadModelRefreshGateway(queue_repository=queue)
 
         gateway.enqueue_many(
-            "cost_statistics",
-            ["active:all"],
-            reason="cost_statistics_shard_converged",
+            "bank_detail",
+            ["all"],
+            reason="bank_detail_all_shard",
         )
 
-        self.assertEqual(queue.active_event_checks, [("default", "cost_statistics", "active:all")])
+        self.assertEqual(queue.active_event_checks, [("default", "bank_detail", "all")])
         self.assertEqual(queue.refreshes, [])
 
     def test_api_refresh_uses_atomic_enqueue_without_check_then_enqueue_race(self) -> None:
@@ -526,9 +471,9 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
         gateway = ReadModelRefreshGateway(queue_repository=queue)
 
         events = gateway.enqueue_many_events(
-            "cost_statistics",
-            ["active:all"],
-            reason="cost_statistics_shard_converged",
+            "bank_detail",
+            ["all"],
+            reason="bank_detail_all_shard",
         )
 
         self.assertEqual(events, [])
@@ -555,14 +500,6 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
             [{"scope_type": "bank_detail", "scope_key": "2026-02", "reason": "workbench_relation_changed"}],
         )
 
-    def test_rejects_cost_statistics_scope_that_cannot_be_normalized(self) -> None:
-        from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
-        from fin_ops_platform.services.read_model_scope_policy import ReadModelScopeError
-
-        gateway = ReadModelRefreshGateway(queue_repository=SimpleNamespace(enqueue_read_model_refresh=lambda **_kwargs: None))
-
-        with self.assertRaises(ReadModelScopeError):
-            gateway.enqueue_many("cost_statistics", ["archived:2026-03"], reason="unit_test")
 
 
 if __name__ == "__main__":

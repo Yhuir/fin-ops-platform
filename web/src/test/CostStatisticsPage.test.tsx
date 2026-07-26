@@ -747,11 +747,9 @@ describe("Cost statistics page", () => {
     );
   });
 
-  test("keeps fresh rows visible while polling until title statistics are fresh", async () => {
+  test("loads the canonical page once without background polling", async () => {
     window.history.pushState({}, "", "/cost-statistics");
-    const fetchMock = installMockApiFetch({
-      costStatisticsStatusSequence: ["refreshing", "refreshing", "fresh"],
-    });
+    const fetchMock = installMockApiFetch();
 
     renderCostStatisticsPage();
 
@@ -767,7 +765,7 @@ describe("Cost statistics page", () => {
           String(request)
             === "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&page_size=50"
         ));
-        expect(explorerCalls).toHaveLength(3);
+        expect(explorerCalls).toHaveLength(1);
       },
       { timeout: PAGE_RENDER_TIMEOUT },
     );
@@ -789,22 +787,6 @@ describe("Cost statistics page", () => {
 
     expect(await screen.findByText("缺少 OA 登录态，请从 OA 系统进入。")).toBeInTheDocument();
     expect(screen.queryByText("成本统计数据加载失败，请稍后重试。")).not.toBeInTheDocument();
-  });
-
-  test("hides read model refresh details without treating empty accepted payload as final empty data", async () => {
-    window.history.pushState({}, "", "/cost-statistics");
-    installMockApiFetch({ costRefreshingMonths: ["2026-03"] });
-
-    renderCostStatisticsPage();
-
-    expect(await screen.findByRole("heading", { name: "成本统计" }, { timeout: PAGE_RENDER_TIMEOUT })).toBeInTheDocument();
-    expect(await screen.findByText("成本数据正在同步")).toBeInTheDocument();
-    expect(screen.getByText("当前页面已暂时锁定，完成后自动恢复。")).toBeInTheDocument();
-    expect(screen.getByTestId("cost-statistics-interaction-overlay")).toBeInTheDocument();
-    expect(screen.getByRole("tablist", { name: "成本统计视图切换" }).closest("[inert]")).not.toBeNull();
-    expect(document.querySelector(".cost-page .stat-card")).toBeNull();
-    expect(screen.queryByText("当前时间范围没有可用于成本统计的支出流水。")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "导出中心" })).toBeDisabled();
   });
 
   test("opens export center in time view with exact date range and shows export feedback inside the modal", async () => {
@@ -879,21 +861,6 @@ describe("Cost statistics page", () => {
       "/api/cost-statistics/explorer?scope=all&view=project&project_scope=active&page_size=1",
       expect.any(Object),
     );
-  });
-
-  test("keeps export center closed while all-scope export options are refreshing", async () => {
-    window.history.pushState({}, "", "/cost-statistics");
-    const user = userEvent.setup();
-    installMockApiFetch({ costRefreshingMonths: ["all"] });
-
-    renderCostStatisticsPage();
-
-    expect(await findCostStatisticsHeading()).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "按OA费用类型" }));
-    await user.click(screen.getByRole("button", { name: "导出中心" }));
-
-    expect(await screen.findByText("导出筛选数据正在刷新，请稍后重试。")).toBeInTheDocument();
-    expect(screen.queryByRole("dialog", { name: "导出中心" })).not.toBeInTheDocument();
   });
 
   test("shows backend export failure messages inside the export center", async () => {

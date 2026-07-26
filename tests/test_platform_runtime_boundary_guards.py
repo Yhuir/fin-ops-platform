@@ -450,7 +450,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 "load_full_snapshot": 0,
                 "MongoOAAdapter": 0,
                 "WorkbenchPairRelationService": 3,
-                "pair_relation_service": 26,
+                "pair_relation_service": 27,
             },
             "backend/src/fin_ops_platform/app/worker.py": {
                 "GridFSObjectMigrationService": 0,
@@ -951,75 +951,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"state_store.py contains {forbidden}")
 
         self.assertEqual(violations, [])
-
-    def test_cost_statistics_does_not_retain_full_snapshot_load_or_unconditional_save_io(self) -> None:
-        legacy_methods = (
-            "load_" + "cost_statistics_read_models",
-            "save_" + "cost_statistics_read_models",
-        )
-        paths = (
-            SERVICES_ROOT / "cost_statistics_read_model_repository.py",
-            SERVICES_ROOT / "postgres_repositories/read_models.py",
-            SERVICES_ROOT / "postgres_state_store.py",
-            SERVICES_ROOT / "state_store.py",
-            SERVICES_ROOT / "state_store_protocol.py",
-        )
-        violations: list[str] = []
-
-        for path in paths:
-            source = path.read_text(encoding="utf-8")
-            for method_name in legacy_methods:
-                if f"def {method_name}(" in source:
-                    violations.append(f"{path.name} retains {method_name}")
-        postgres_state_store_source = (SERVICES_ROOT / "postgres_state_store.py").read_text(encoding="utf-8")
-        local_state_store_source = (SERVICES_ROOT / "state_store.py").read_text(encoding="utf-8")
-        self.assertNotIn('"cost_statistics_read_models": self.', postgres_state_store_source)
-        self.assertNotIn('current_payload["cost_statistics_read_models"]', local_state_store_source)
-        self.assertEqual(violations, [])
-
-    def test_cost_statistics_bulk_export_does_not_reload_full_explorer_payload(self) -> None:
-        query_source = (SERVICES_ROOT / "cost_statistics_query_service.py").read_text(encoding="utf-8")
-        repository_source = (SERVICES_ROOT / "postgres_repositories/read_models.py").read_text(encoding="utf-8")
-
-        self.assertNotIn("def _filtered_entries_from_read_model(", query_source)
-        self.assertIn("def get_cost_statistics_export_page(", repository_source)
-        self.assertIn("COST_STATISTICS_EXPORT_BATCH_SIZE = 1000", query_source)
-        self.assertIn("Workbook(write_only=True)", query_source)
-        self.assertIn("normalized_page_size > 1000", repository_source)
-
-        export_start = query_source.index("    def _export_view_from_read_model(")
-        export_end = query_source.index("    def _load_export_first_page(", export_start)
-        export_source = query_source[export_start:export_end]
-        self.assertNotIn("_require_fresh_explorer", export_source)
-        self.assertNotIn("_entries_from_explorer_payload", export_source)
-        self.assertNotIn("get_cost_statistics_view", export_source)
-
-    def test_cost_statistics_projection_unchanged_check_reads_scope_metadata_only(self) -> None:
-        projection_source = (SERVICES_ROOT / "cost_statistics_sql_projection.py").read_text(encoding="utf-8")
-        method_start = projection_source.index("    def _unchanged_cost_statistics_scope_result(")
-        method_end = projection_source.index("    def _build_explorer_payload(", method_start)
-        method_source = projection_source[method_start:method_end]
-
-        self.assertIn("get_cost_statistics_scope_metadata", method_source)
-        self.assertNotIn("get_cost_statistics_view", method_source)
-        self.assertNotIn("payload", method_source)
-
-    def test_cost_and_tax_sql_projection_owners_are_split_without_legacy_module(self) -> None:
-        legacy_path = SERVICES_ROOT / "cost_tax_sql_projection.py"
-        cost_source = (SERVICES_ROOT / "cost_statistics_sql_projection.py").read_text(encoding="utf-8")
-        tax_source = (SERVICES_ROOT / "tax_offset_sql_projection.py").read_text(encoding="utf-8")
-        worker_source = (REPO_ROOT / "backend/src/fin_ops_platform/app/worker.py").read_text(encoding="utf-8")
-
-        self.assertFalse(legacy_path.exists())
-        self.assertIn("class CostStatisticsSqlProjectionBuilder", cost_source)
-        self.assertNotIn("TaxOffsetSqlProjectionBuilder", cost_source)
-        self.assertNotIn("tax_offset_", cost_source)
-        self.assertIn("class TaxOffsetSqlProjectionBuilder", tax_source)
-        self.assertNotIn("CostStatisticsSqlProjectionBuilder", tax_source)
-        self.assertNotIn("cost_statistics_", tax_source)
-        self.assertIn("services.cost_statistics_sql_projection import CostStatisticsSqlProjectionBuilder", worker_source)
-        self.assertIn("services.tax_offset_sql_projection import TaxOffsetSqlProjectionBuilder", worker_source)
-        self.assertNotIn("cost_tax_sql_projection", worker_source)
 
     def test_application_state_store_workbench_read_models_do_not_use_app_mongo(self) -> None:
         path = SERVICES_ROOT / "state_store.py"
@@ -2674,38 +2605,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_cost_statistics_derived_lifecycle_uses_explicit_executor_boundary(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        executor_path = SERVICES_ROOT / "cost_statistics_derived_lifecycle_executor.py"
-        executor_source = executor_path.read_text(encoding="utf-8") if executor_path.exists() else ""
-        violations: list[str] = []
-
-        removed_helper = "_derived_lifecycle_cost_statistics_executor"
-        if _function_source(server_tree, server_source, removed_helper):
-            violations.append(f"server.py still owns removed cost statistics lifecycle executor {removed_helper}")
-        if "CostStatisticsDerivedLifecycleExecutor(" not in server_source:
-            violations.append("server.py does not build the explicit cost statistics lifecycle executor")
-        if '"cost_statistics_read_model": self._cost_statistics_derived_lifecycle_executor().execute' not in server_source:
-            violations.append("derived lifecycle registry does not use the explicit cost statistics executor")
-        if "class CostStatisticsDerivedLifecycleExecutor" not in executor_source:
-            violations.append("cost statistics lifecycle executor service is missing")
-        for snippet in (
-            "def execute(",
-            'reason = str(domain_plan.get("reason") or "derived_lifecycle_cost_statistics")',
-            "runtime_service: CostStatisticsRuntimeService",
-            '"deleted_counts": {"cost_statistics_read_models": len(deleted_scope_keys)}',
-            '"enqueued_jobs": ["cost_statistics.read_model.refresh"] if enqueued else []',
-            '"cost_statistics.read_model.refresh"',
-        ):
-            if snippet not in executor_source:
-                violations.append(f"cost statistics lifecycle executor is missing behavior {snippet}")
-        if '"cost_statistics_cache_warmup"' in executor_source:
-            violations.append("cost statistics lifecycle executor still reports legacy cache warmup fallback")
-
-        self.assertEqual(violations, [])
-
     def test_cost_statistics_routes_use_route_owner(self) -> None:
         server_path = APP_ROOT / "server.py"
         route_path = APP_ROOT / "routes_cost_statistics.py"
@@ -2721,7 +2620,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             'route_path == "/api/cost-statistics/export-preview"',
             'route_path == "/api/cost-statistics/export"',
             'route_path.startswith("/api/cost-statistics/transactions/")',
-            "CostStatisticsReadModelNotFreshError",
             "self._optional_bool_parser(",
         ):
             if snippet not in route_source:
@@ -2751,160 +2649,48 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_relation_cost_refresh_uses_access_time_dependency_without_delta_owner(self) -> None:
-        uow_source = (SERVICES_ROOT / "workbench_uow.py").read_text(encoding="utf-8")
-        facade_source = (SERVICES_ROOT / "workbench_write_facade.py").read_text(encoding="utf-8")
-        relation_repository_source = (
-            SERVICES_ROOT / "postgres_repositories" / "workbench_relation.py"
-        ).read_text(encoding="utf-8")
-        matching_orchestrator_source = (SERVICES_ROOT / "workbench_matching_orchestrator.py").read_text(
-            encoding="utf-8"
+    def test_cost_statistics_direct_canonical_boundary_has_no_legacy_read_model_path(self) -> None:
+        repository_path = SERVICES_ROOT / "cost_statistics_canonical_repository.py"
+        query_path = SERVICES_ROOT / "cost_statistics_query_service.py"
+        repository_source = repository_path.read_text(encoding="utf-8")
+        query_source = query_path.read_text(encoding="utf-8")
+        runtime_sources = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in (
+                APP_ROOT / "worker.py",
+                SERVICES_ROOT / "runtime_worker_registry.py",
+                SERVICES_ROOT / "read_model_manifest.py",
+                SERVICES_ROOT / "read_model_scope_policy.py",
+            )
         )
-        lifecycle_source = (SERVICES_ROOT / "derived_data_lifecycle_service.py").read_text(encoding="utf-8")
-        turnover_write_source = (SERVICES_ROOT / "turnover_ledger_write_facade.py").read_text(encoding="utf-8")
-        workbench_refresh_source = (SERVICES_ROOT / "workbench_read_model_refresh.py").read_text(
-            encoding="utf-8"
-        )
-        cost_refresh_source = (SERVICES_ROOT / "cost_statistics_read_model_refresh.py").read_text(
-            encoding="utf-8"
-        )
-        cost_projection_source = (SERVICES_ROOT / "cost_statistics_sql_projection.py").read_text(
-            encoding="utf-8"
-        )
-        cost_repository_port_source = (SERVICES_ROOT / "cost_statistics_read_model_repository.py").read_text(
-            encoding="utf-8"
-        )
-        postgres_read_models_source = (
-            SERVICES_ROOT / "postgres_repositories" / "read_models.py"
-        ).read_text(encoding="utf-8")
-        e2e_smoke_source = (TOOLS_ROOT / "write_operation_e2e_smoke.py").read_text(encoding="utf-8")
-        page_source = (REPO_ROOT / "web/src/pages/CostStatisticsPage.tsx").read_text(encoding="utf-8")
-        cost_query_source = (SERVICES_ROOT / "cost_statistics_query_service.py").read_text(encoding="utf-8")
-        server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
-        violations: list[str] = []
 
-        for owner, source in (
-            ("relation UoW", uow_source),
-            ("relation facade", facade_source),
-            ("relation repository", relation_repository_source),
-            ("turnover relation writer", turnover_write_source),
+        self.assertIn("set transaction isolation level repeatable read read only", repository_source)
+        for table in (
+            "app.bank_transactions",
+            "app.workbench_pair_relations",
+            "app.bank_transaction_categories",
+            "app.bank_transaction_category_confirmations",
+            "app.app_settings",
         ):
-            for forbidden in (
-                'scope_type="cost_statistics"',
-                '"scope_type": "cost_statistics"',
-                "cost_statistics_relation_delta",
-                "_active_cost_statistics_scope_keys",
-                'metadata["relation_deltas"]',
-            ):
-                if forbidden in source:
-                    violations.append(f"{owner} keeps removed write-time Cost fan-out {forbidden}")
-        formal_command_start = matching_orchestrator_source.index("class WorkbenchFormalRelationCommand:")
-        formal_command_end = matching_orchestrator_source.index("class WorkbenchMatchingOrchestrator:")
-        if '"cost_statistics"' in matching_orchestrator_source[formal_command_start:formal_command_end]:
-            violations.append("formal relation command still advertises removed direct cost fan-out")
-        for event_name in (
-            "pair_relation_changed",
-            "pending_invoice_manual_invoice_confirmed",
-            "pending_invoice_attach_existing_invoice_confirmed",
-            "no_oa_bank_batch_changed",
-            "bank_flow_rule_batch_changed",
-            "batch_accounting_relation_changed",
-            "turnover_relation_changed",
-        ):
-            if f'"{event_name}"' in lifecycle_source:
-                violations.append(f"ordinary relation event {event_name} remains in maintenance lifecycle registry")
+            self.assertIn(table, repository_source)
+        self.assertIn("PostgresOAProjectionRepository", repository_source)
+        self.assertIn("self._canonical_repository.load_snapshot()", query_source)
         for forbidden in (
-            "_enqueue_cost_statistics_after_publish",
-            "workbench_shard_published",
-            "cost_statistics_enqueued_scope_keys",
+            "read_model.cost_statistics",
+            "ReadModelRefreshGateway",
+            "cost_statistics.read_model.refresh",
+            "CostStatisticsReadModelNotFreshError",
         ):
-            if forbidden in workbench_refresh_source:
-                violations.append(f"Workbench publish still fans out Cost refresh via {forbidden}")
-        for required in (
-            "workbench_dependency_versions_provider",
-            "source_version_mismatch_reasons(",
-            "_workbench_dependency_non_fresh_payload(",
-            "enqueue_read_model_refreshes(",
-            'payload["refresh_dependency"] = "workbench"',
-            'refresh_reason = "cost_statistics_workbench_dependency_stale"',
+            self.assertNotIn(forbidden, repository_source + query_source + runtime_sources)
+        for removed_name in (
+            "cost_statistics_derived_lifecycle_executor.py",
+            "cost_statistics_read_model_refresh.py",
+            "cost_statistics_read_model_repository.py",
+            "cost_statistics_runtime_service.py",
+            "cost_statistics_source_versions.py",
+            "cost_statistics_sql_projection.py",
         ):
-            if required not in cost_query_source:
-                violations.append(f"Cost access-time Workbench dependency gate is missing {required}")
-        for required in (
-            "self._workbench_sql_read_model_source_versions(scope_key)",
-            'active_source_versions(scope_key=scope_key)',
-            "workbench_refresh_enqueuer=self._enqueue_workbench_read_model_refresh",
-            "read_model_freshness_token(",
-        ):
-            if required not in server_source:
-                violations.append(f"Application composition is missing Cost dependency I/O {required}")
-        for removed_workbench_persist_path in (
-            "_schedule_workbench_read_model_persist",
-            "_rebuild_workbench_read_models_in_background",
-            "_workbench_read_model_persist_version",
-            "_pending_workbench_read_model_scope_keys",
-            "FIN_OPS_WORKBENCH_PERSIST_ASYNC",
-        ):
-            if removed_workbench_persist_path in server_source:
-                violations.append(
-                    f"Application retains removed Workbench background persist path {removed_workbench_persist_path}"
-                )
-        if "workbench_shard_published" in cost_refresh_source:
-            violations.append("Cost refresh worker still recognizes Workbench publish fan-out")
-        if "from app.workbench_pair_relations" in cost_projection_source:
-            violations.append("Cost projection still reads the relation module canonical table directly")
-        for owner, source in (
-            ("Cost refresh worker", cost_refresh_source),
-            ("Cost projection", cost_projection_source),
-            ("Cost repository port", cost_repository_port_source),
-            ("PostgreSQL read-model repository", postgres_read_models_source),
-        ):
-            for forbidden in (
-                "rebuild_cost_statistics_relation_delta",
-                "publish_cost_statistics_relation_delta",
-                "_active_workbench_rows_by_ids",
-                "_normalize_relation_deltas",
-            ):
-                if forbidden in source:
-                    violations.append(f"{owner} retains deleted relation delta path {forbidden}")
-        for forbidden in (
-            "_collect_cost_all_causal_timeline",
-            "cost_active_all_causal_events_missing_or_incomplete",
-        ):
-            if forbidden in e2e_smoke_source:
-                violations.append(f"write-operation E2E retains old Cost write-trace requirement {forbidden}")
-        for required in (
-            "tenant_id=event.tenant_id",
-            "priority=priority",
-            "trace_id=event.trace_id",
-            '"freshness_token": freshness_token',
-        ):
-            if required not in cost_refresh_source:
-                violations.append(f"Cost shard/parent causal metadata propagation is missing {required}")
-        if "def cost_statistics_parent_freshness_token(" not in cost_projection_source:
-            violations.append("Cost parent projection no longer exposes its canonical child-shard freshness target")
-
-        if "handleWorkbenchRelationMutation" in page_source:
-            violations.append("Cost page retains removed cross-page relation refresh I/O")
-        handler_start = page_source.index("  const handleManualRefresh = useCallback")
-        handler_end = page_source.index("  const openTagRulesDrawer", handler_start)
-        handler_source = page_source[handler_start:handler_end]
-        for required in (
-            "setLoadedExplorer(null)",
-            "setDomainRefreshNonce((current) => current + 1)",
-        ):
-            if required not in handler_source:
-                violations.append(f"Cost manual reload is missing {required}")
-        for forbidden in (
-            "waitForOperationFreshness(",
-            "relationBarrierRequestRef",
-            "setIsRelationRefreshWaiting",
-            "/api/operation-barrier/status",
-        ):
-            if forbidden in page_source:
-                violations.append(f"Cost page retains removed operation barrier path {forbidden}")
-
-        self.assertEqual(violations, [])
+            self.assertFalse((SERVICES_ROOT / removed_name).exists(), removed_name)
 
     def test_oa_pending_page_non_fresh_access_retries_its_own_rows_get(self) -> None:
         page_source = (WEB_SRC_ROOT / "pages" / "OaPendingPaymentsPage.tsx").read_text(encoding="utf-8")
@@ -2922,138 +2708,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             'document.visibilityState !== "visible"',
         ):
             self.assertIn(required, page_source)
-
-    def test_cost_statistics_query_runtime_do_not_keep_legacy_live_fallbacks(self) -> None:
-        query_path = SERVICES_ROOT / "cost_statistics_query_service.py"
-        runtime_path = SERVICES_ROOT / "cost_statistics_runtime_service.py"
-        service_path = SERVICES_ROOT / "cost_statistics_service.py"
-        read_model_service_path = SERVICES_ROOT / "cost_statistics_read_model_service.py"
-        service_test_path = REPO_ROOT / "tests" / "test_cost_statistics_service.py"
-        read_model_service_test_path = REPO_ROOT / "tests" / "test_cost_statistics_read_model_service.py"
-        removed_export_service_path = SERVICES_ROOT / "project_detail_export_service.py"
-        server_path = APP_ROOT / "server.py"
-        route_path = APP_ROOT / "routes_cost_statistics.py"
-        repository_port_path = SERVICES_ROOT / "cost_statistics_read_model_repository.py"
-        postgres_repository_path = SERVICES_ROOT / "postgres_repositories/read_models.py"
-        projection_path = SERVICES_ROOT / "cost_statistics_sql_projection.py"
-        worker_path = APP_ROOT / "worker.py"
-        job_registry_path = SERVICES_ROOT / "app_status_job_registry.py"
-        domain_registry_path = SERVICES_ROOT / "app_status_domain_registry.py"
-        runtime_policy_path = SERVICES_ROOT / "runtime_state_policy.py"
-        frontend_job_types_path = REPO_ROOT / "web/src/features/backgroundJobs/types.ts"
-        query_source = query_path.read_text(encoding="utf-8")
-        runtime_source = runtime_path.read_text(encoding="utf-8")
-        server_source = server_path.read_text(encoding="utf-8")
-        route_source = route_path.read_text(encoding="utf-8")
-        repository_port_source = repository_port_path.read_text(encoding="utf-8")
-        postgres_repository_source = postgres_repository_path.read_text(encoding="utf-8")
-        projection_source = projection_path.read_text(encoding="utf-8")
-        worker_source = worker_path.read_text(encoding="utf-8")
-        registry_sources = "\n".join(
-            path.read_text(encoding="utf-8")
-            for path in (job_registry_path, domain_registry_path, runtime_policy_path, frontend_job_types_path)
-        )
-        violations: list[str] = []
-
-        if service_path.exists():
-            violations.append("legacy cost_statistics_service.py still exists")
-        if service_test_path.exists():
-            violations.append("legacy test_cost_statistics_service.py still exists")
-        if read_model_service_path.exists():
-            violations.append("legacy cost_statistics_read_model_service.py still exists")
-        if read_model_service_test_path.exists():
-            violations.append("legacy test_cost_statistics_read_model_service.py still exists")
-
-        for forbidden in (
-            "_cost_statistics_service",
-            "self._read_model_service",
-            "read_model_service:",
-            "_cached_month_entries",
-            "upsert_cost_statistics_explorer_read_model",
-            "schedule_cache_warmup",
-            "requires_sql_read_model_runtime",
-            "def get_month_statistics(",
-            "def get_project_statistics(",
-            "get_cost_statistics_view",
-            "def _refreshing_explorer_payload(",
-            "def _refreshing_month_payload(",
-        ):
-            if forbidden in query_source:
-                violations.append(f"CostStatisticsQueryService still has legacy fallback input {forbidden}")
-        for forbidden in (
-            "explorer_loader",
-            "_explorer_loader",
-            "_upsert_read_model",
-            "_cache_fresh_explorer_payload",
-            "worker_cost_statistics_read_model_refresh",
-            "build_fresh_cache_envelope",
-            "source_versions_provider",
-            "expected_source_versions",
-            "delete_redis_cache",
-            "read_model_service",
-            "persist_read_models",
-            "_persist_read_models",
-            "cost_statistics_cache_warmup",
-            "schedule_warmup",
-        ):
-            if forbidden in runtime_source:
-                violations.append(f"CostStatisticsRuntimeService still has legacy writer path {forbidden}")
-        for forbidden in (
-            'route_path == "/api/cost-statistics"',
-            'route_path.startswith("/api/cost-statistics/projects/")',
-            "def handle_month(",
-            "def handle_project(",
-        ):
-            if forbidden in route_source:
-                violations.append(f"CostStatisticsApiRoutes still has removed HTTP contract {forbidden}")
-        for source_name, source in (
-            ("repository port", repository_port_source),
-            ("PostgreSQL repository", postgres_repository_source),
-        ):
-            if "def get_cost_statistics_view(" in source:
-                violations.append(f"{source_name} still exposes removed full-view loader")
-        if "redis_helper" in projection_source:
-            violations.append("CostStatisticsSqlProjectionBuilder still accepts or uses Redis")
-        cost_worker_start = worker_source.index("    if args.enable_cost_statistics_read_model_refresh:")
-        cost_worker_end = worker_source.index("    if args.enable_tax_offset_read_model_refresh:", cost_worker_start)
-        if "redis_helper" in worker_source[cost_worker_start:cost_worker_end]:
-            violations.append("cost statistics worker assembly still injects Redis into projection")
-        if "cost_statistics_cache_warmup" in registry_sources:
-            violations.append("runtime/App Health/frontend registries still expose removed cost warmup job")
-        if removed_export_service_path.exists():
-            violations.append("project_detail_export_service.py still exists")
-        for forbidden in (
-            "CostStatisticsService(",
-            "self._cost_statistics_service =",
-            "grouped_workbench_loader=self._build_api_workbench_payload",
-            "raw_workbench_loader=self._build_raw_workbench_payload",
-            "_cost_statistics_expected_source_versions",
-            "_cost_statistics_source_versions",
-            "_cost_statistics_workbench_source_versions",
-            "_cost_statistics_bank_detail_source_versions",
-            "_delete_cost_statistics_redis_cache",
-            "_cost_statistics_read_model_service",
-            "_persist_cost_statistics_read_models_best_effort",
-            "tag_selection_provider=getattr(self, \"_app_settings_service\", None)",
-            "cost_statistics_cache_warmup",
-            "_schedule_cost_statistics_cache_warmup",
-        ):
-            if forbidden in server_source:
-                violations.append(f"server.py still wires legacy CostStatisticsService via {forbidden}")
-        for path in _python_files(SOURCE_ROOT):
-            source = path.read_text(encoding="utf-8")
-            for forbidden in (
-                "CostStatisticsService",
-                "cost_statistics_service",
-                "_cost_statistics_service",
-                "CostStatisticsReadModelService",
-                "cost_statistics_read_model_service",
-                "_cost_statistics_read_model_service",
-            ):
-                if forbidden in source:
-                    violations.append(f"{_relative(path)} still references removed {forbidden}")
-
-        self.assertEqual(violations, [])
 
     def test_turnover_ledger_read_export_routes_use_route_owner(self) -> None:
         server_path = APP_ROOT / "server.py"
@@ -3497,7 +3151,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             SERVICES_ROOT / "batch_accounting_service.py",
             SERVICES_ROOT / "no_oa_bank_batch_application_service.py",
             SERVICES_ROOT / "no_oa_bank_batch_service.py",
-            SERVICES_ROOT / "cost_statistics_sql_projection.py",
         }
         forbidden_snippets = {
             "from app.workbench_pair_relations",
@@ -8199,6 +7852,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
     def test_raw_postgres_sql_in_services_is_classified_by_platform_boundary(self) -> None:
         allowed_exact_paths = {
             "backend/src/fin_ops_platform/services/bank_account_balance_projection.py",
+            "backend/src/fin_ops_platform/services/cost_statistics_canonical_repository.py",
             "backend/src/fin_ops_platform/services/file_object_migration.py",
             "backend/src/fin_ops_platform/services/import_job_queue.py",
             "backend/src/fin_ops_platform/services/oa_payment_status_service.py",

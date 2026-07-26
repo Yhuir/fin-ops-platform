@@ -142,7 +142,7 @@ describe("Cost statistics export API", () => {
     expect(page.nextCursor).toBe("cursor-2");
   });
 
-  test("maps freshness metadata and bank-tag fields from page rows", async () => {
+  test("maps canonical statistics and bank-tag fields from page rows", async () => {
     global.fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         scope: "2026-03",
@@ -180,12 +180,7 @@ describe("Cost statistics export API", () => {
         }],
         row_count: 1,
         next_cursor: null,
-        read_model_status: "refreshing",
-        statistics_status: "stale",
-        read_model_scope_key: "active:2026-03",
-        read_model_generated_at: "2026-06-01T00:00:00",
-        read_model_stale_reasons: ["workbench_scope_key"],
-      }), { status: 202 }),
+      }), { status: 200 }),
     ) as typeof fetch;
 
     const payload = await fetchCostStatisticsExplorerPage({
@@ -194,11 +189,6 @@ describe("Cost statistics export API", () => {
       projectScope: "active",
     });
 
-    expect(payload.readModelStatus).toBe("refreshing");
-    expect(payload.statisticsStatus).toBe("stale");
-    expect(payload.readModelScopeKey).toBe("active:2026-03");
-    expect(payload.readModelGeneratedAt).toBe("2026-06-01T00:00:00");
-    expect(payload.readModelStaleReasons).toEqual(["workbench_scope_key"]);
     expect(payload.statistics).toEqual(expect.objectContaining({
       transactionCount: 12000,
       expenseTransactionCount: 7000,
@@ -300,7 +290,6 @@ describe("Cost statistics export API", () => {
         rows: [],
         row_count: 0,
         next_cursor: null,
-        read_model_status: "fresh",
       }), { status: 200 }),
     ) as typeof fetch;
 

@@ -135,7 +135,6 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
             "search-secondary": ("search-secondary-read-model", ("search.read_model.refresh",)),
             "search-tertiary": ("search-tertiary-read-model", ("search.read_model.refresh",)),
             "pending-invoice": ("pending-invoice-read-model", ("pending_invoice.read_model.refresh",)),
-            "cost-statistics": ("cost-statistics-read-model", ("cost_statistics.read_model.refresh",)),
             "tax-offset": ("tax-offset-read-model", ("tax_offset.read_model.refresh",)),
             "bank-flow-rule-batch": (
                 "bank-flow-rule-batch-read-model",
@@ -156,20 +155,11 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
 
         self.assertEqual(APP_STATUS_READ_MODEL_REGISTRY["search"].worker_instance, "search")
         self.assertEqual(APP_STATUS_READ_MODEL_REGISTRY["pending_invoice"].worker_instance, "pending-invoice")
-        self.assertEqual(APP_STATUS_READ_MODEL_REGISTRY["cost_statistics"].worker_instance, "cost-statistics")
         self.assertEqual(APP_STATUS_READ_MODEL_REGISTRY["tax_offset"].worker_instance, "tax-offset")
         self.assertEqual(APP_STATUS_READ_MODEL_REGISTRY["bank_flow_rule_batch"].worker_instance, "bank-flow-rule-batch")
-        cost_secondary = registrations["cost-statistics-secondary"]
-        self.assertTrue(cost_secondary.required)
-        self.assertEqual(
-            cost_secondary.worker_kind,
-            "cost-statistics-secondary-read-model",
-        )
-        self.assertEqual(
-            cost_secondary.event_types,
-            ("cost_statistics.read_model.refresh",),
-        )
-        self.assertFalse(cost_secondary.rabbitmq_eligible)
+        self.assertNotIn("cost-statistics", registrations)
+        self.assertNotIn("cost-statistics-secondary", registrations)
+        self.assertNotIn("cost_statistics", APP_STATUS_READ_MODEL_REGISTRY)
 
     def test_cost_tax_worker_no_longer_consumes_cost_statistics_refreshes(self) -> None:
         registration = registration_by_instance_name()["cost-tax"]

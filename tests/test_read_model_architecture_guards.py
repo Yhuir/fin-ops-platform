@@ -249,18 +249,6 @@ DIRECT_REFRESH_ENQUEUE_ALLOWLIST: dict[tuple[str, str], str] = {
         "Application._enqueue_tax_offset_read_model_refresh",
     ): "legacy HTTP/app wrapper delegates to TaxOffsetRuntimeService, which uses ReadModelRefreshGateway.",
     (
-        "backend/src/fin_ops_platform/services/cost_statistics_query_service.py",
-        "CostStatisticsQueryService.get_explorer_page",
-    ): "stale title statistics delegates to CostStatisticsRuntimeService, which uses ReadModelRefreshGateway.",
-    (
-        "backend/src/fin_ops_platform/services/cost_statistics_query_service.py",
-        "CostStatisticsQueryService._cost_statistics_non_fresh_gate_payload",
-    ): "dependency-bound cost gate mismatch delegates to the same runtime gateway before any payload read.",
-    (
-        "backend/src/fin_ops_platform/services/cost_statistics_runtime_service.py",
-        "CostStatisticsRuntimeService._enqueue_invalidation_scopes",
-    ): "cost invalidation records only gateway-accepted durable dirty scopes and owns no local read-model state.",
-    (
         "backend/src/fin_ops_platform/services/tax_offset_query_service.py",
         "TaxOffsetQueryService.get_month_payload",
     ): "production SQL repository miss delegates to TaxOffsetRuntimeService gateway wrapper.",

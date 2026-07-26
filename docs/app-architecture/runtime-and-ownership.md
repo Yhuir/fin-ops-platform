@@ -101,85 +101,8 @@ OA 付款算法不读取待找发票规则，因此 OA 页面不因该规则保�
 3. 自动匹配只允许在内存中生成可原子提交的 `FormalRelationPlan`；无法满足确定性安全规则的结果不持久化、不合并未配对事实，也不得驱动 pending invoice、input invoice usage、OA pending、cost statistics 等 linked-only 下游状态。
 4. Workbench active generation、all-scope aggregate、groups page 和 `audit_workbench_relation_display` 必须共同保证旧 `case:decision:*`、`automatic_decision` / `automatic_match` payload 不会继续污染页面。Release A 仅为应用回滚暂留旧物理表，但运行时必须保持零访问；Release B 通过独立 migration 删除。
 
-### 成本统计 view-specific read boundary
+### 成本统计 direct canonical read boundary
 
-成本统计按视图使用两个明确 profile，不再把完整银行流水复制为第二份 Cost read model：
+成本统计不再消费任何页面 read model。explorer、详情和导出均由 `CostStatisticsQueryService` 调用 canonical repository，在一个 `REPEATABLE READ READ ONLY` 数据库快照内读取银行流水、OA、正式配对关系、标签与设置，再由无 I/O policy 生成五种视图。
 
-1. `project|bank|expense_type` 使用 OA allocation profile。concrete month访问比较该月 canonical Workbench expected/active versions、Bank Detail proof与 Cost child；all访问使用 set-based month proof并只enqueue真实漂移的 exact scopes。relation transaction与 Workbench publish零 Cost fan-out。
-2. `active:YYYY-MM` / `all:YYYY-MM` Cost shard只承载 OA allocation rows，由 `CostStatisticsSqlProjectionBuilder` 基于 active Workbench generation和 Bank Detail snapshot构建。
-3. `time|bank_tag` 使用 Bank Detail profile，直接查询 fresh `read_model.bank_detail_rows`。它只ensure non-fresh Bank Detail exact months，不等待或enqueue Workbench/Cost。transaction detail与export必须携带当前 view/scope并复用同一 profile。
-4. `active:all` / `all:all` Cost parent只聚合 OA child metadata/rows；普通 parent event不根据 readiness枚举 child。global statistics可独立 non-fresh并ensure自身依赖，但不能阻塞已经 fresh的当前视图 rows。
-5. migration `0123_drop_legacy_cost_statistics_bank_flow_rows.sql` 删除旧 Bank Detail复制表；禁止 dual-read、第二 writer或 JSON fallback。
-6. 页面只在当前 view profile fresh时解锁；refreshing显示本页面 overlay并有界重试，不轮询全局 App Status或 operation barrier。
-
-## Worker 与队列
-
-- durable truth：PostgreSQL 的 `job.outbox_events` 与 `job.read_model_dirty_scopes`。
-- queue API：producer 先通过 `ReadModelRefreshGateway` / scope policy registry 归一化、校验和去重 read model scope，再委托 `RuntimeQueueRepository.enqueue_read_model_refresh(...)` 或事务内 writer 写入 durable queue。
-- worker registry：`runtime_worker_registry.py` 定义 worker 名称、scope、manifest、health 可见性。
-- parent/aggregate read model event 只能在 parent shard fresh 后发布聚合；遇到同一 read model `parent_scope_keys` 未 fresh 时，worker 必须补投 parent shard 并使用 retry 级退避，让 shard work 先 drain，不能用快速 dependency retry 反复重发 `all` 聚合事件。
-- RabbitMQ 只能作为可选 wakeup/transport，不能成为 read model 状态事实源。
-- Redis 只能缓存通过 fresh gate 后的 payload，不能缓存或伪造 freshness。
-
-## App Health / SSE
-
-App Health 读取后台任务、worker、queue 和 read model 状态，给页面提供可见的刷新、stale、失败和重试信号。SSE 或轮询只负责通知 UI 更新状态，不替代 durable queue。
-
-## Global Runtime Status Plane
-
-Global Runtime Status Plane 是 App Health 之上的用户可见全局投影。它由后端 `AppStatusOverviewService` 生成，输入只来自 session、后台任务、read model dirty scopes、outbox、worker heartbeat、runtime registry、依赖和 alert。React 页面不向它上报当前路由 loading，也不负责推导全局状态。
-
-Runtime facts 的 read-side repository 是 `RuntimeMonitoringRepository.app_status_runtime_snapshot()`。PostgreSQL state store 通过公开方法暴露该 snapshot；`server.py` 只做 `/api/app-health` snapshot 组装，不能直接读取 state store 私有连接，也不能把 `job.*` 或 `read_model.*` SQL 写进 app status service。`AppStatusOverviewService` 只接收已归一化的 runtime facts 并执行状态优先级判定，不执行 rebuild、不写 queue、不调用页面 API。
-
-`RuntimeMonitoringRepository.app_status_runtime_snapshot()` 必须保留 read model scope 明细。聚合后的 `read_model_statuses[read_model_key].status` 用于全局优先级，`read_model_statuses[read_model_key].scopes[]` 只包含 current-effective scope，用于解释具体 `scope_key`、`status`、`last_error` 和 `updated_at`。废弃 scope contract、已被 canonical scope 覆盖的历史 readiness/dirty scope 进入 `historical_scopes[]`；App Status domain payload 通过 `read_model_scopes[]` 暴露当前诊断，通过 `historical_read_model_scopes[]` 暴露历史诊断。前端只展示该后端事实，不按当前页面筛选自行推断。
-
-```mermaid
-flowchart LR
-  Pages["React pages"] --> Provider["AppStatusProvider"]
-  Provider --> HealthAPI["/api/app-health.app_status"]
-  HealthAPI --> Plane["AppStatusOverviewService"]
-  Plane --> Registry["Domain Status Registry"]
-  Plane --> Jobs["Background jobs"]
-  Plane --> RuntimeRepo["RuntimeMonitoringRepository"]
-  RuntimeRepo --> Dirty["job.read_model_dirty_scopes"]
-  RuntimeRepo --> Outbox["job.outbox_events"]
-  RuntimeRepo --> Readiness["read_model.app_status_readiness"]
-  RuntimeRepo --> Heartbeat["job.runtime_worker_heartbeats"]
-```
-
-左上角 App Status Icon 和 hover 面板只消费 `app_status`，因此切换页面不改变 icon 或 hover 内容。页面局部 table/drawer/form loading 只在页面内展示；如果页面背后的 read model 或 worker 未 ready，则由后端全局投影把对应 domain 标记为 busy 或 blocked。
-
-`read_model.app_status_readiness` 是全局绿色状态的 read model 证明层。普通 read model refresh worker/service 在成功、失败、schema/source mismatch 时通过 repository 公共方法记录 `read_model_key`、scope、status、schema/source version、row count、生成时间和错误原因。`workbench` 使用 active generation/readiness metadata 作为等价证明，不机械套普通 projection 表。空业务结果允许 green，但必须有 readiness scope 记录；没有 readiness 记录的 registry read model 必须输出 `missing`，不能被空 dirty scope 推断为 ready。
-
-Workbench active generation 在发布前执行对象身份仲裁。`WorkbenchObjectIdentityArbitrationService` 复用统一 identity policy，为 OA、流水、正式发票和 OA 附件发票写入 `object_identity_*` payload；正式发票与 OA 附件发票命中同一强发票 identity 时只能进入一个展示状态。`read_model.workbench_generation_consistency` 会把强发票 identity 或稳定银行 identity 横跨 `paired/open` 视为 inconsistent generation。`all` scope 从 active month shard 聚合时还必须执行展示归属权收敛：同一事实不能在多个 open group 中同时成为 visible/operable row；发票 open/open 使用强发票 identity 和 row id 收敛，银行 open/open 只按 row id 收敛以避免误折叠真实重复交易。
-
-Workbench 首屏读路径必须以 active month generation set 为边界。`GET /api/workbench` 在一个 `REPEATABLE READ READ ONLY` 快照内组合返回已物化的 summary 与 paired/unpaired 各自首页，三者共用同一 generation-set version；repository 内部仍保留 summary 窄 I/O，但不再对外暴露独立 summary HTTP 合同。默认首屏 payload 只能在 fresh/stable gate 后按 generation version 进入 Redis read-through cache；cache miss/down 回到同一 PostgreSQL cold path，不预热、不入队、不伪装 fresh。后续搜索、筛选、分页和详情使用 `/api/workbench/groups` 等窄接口并固定 `expected_read_model_version`。`month=all` 只在查询时组合 active month generations 并仲裁唯一 canonical owner；不物化 `all` aggregate generation，不存在 aggregate-only worker lane 或 cache warmer。可判定月份的变更只 dirty 具体月份，无法判定范围或真正跨期时由现有 Workbench worker 把 `all` command fan-out 为月 shard。
-
-runtime snapshot 读取失败不能被解释成 ready。critical read model failed/unavailable、required worker missing/mismatch/stale、关键依赖 missing/unavailable 或 session 不可用会把全局状态升级到 blocked/red；readiness missing/refreshing/stale/schema_mismatch/source_mismatch、dirty scope、outbox backlog、后台任务 queued/running/attention 和非阻塞 stale 会保持 busy/yellow。状态判定必须只看 current-effective blocker：已被后续同 scope `done` 事件或 fresh readiness 覆盖的 outbox failed/dead-letter、以及成本统计 legacy scope `all` / 裸 `YYYY-MM`，只能作为历史诊断或 repair 对象，不能污染当前页面同步状态。成本统计是特例化的 scope 级聚合：月份 shard failed/unavailable 是局部风险，不能无条件污染已经 fresh 的父 scope。
-
-Registry 强一致由测试保护：domain registry 的 `read_model_keys` 必须存在于 `AppStatusReadModelRegistry`，`worker_instances` 必须存在于 `runtime_worker_registry`，`job_types` 必须存在于 app status background job registry 或 runtime state policy，`dependencies` 必须存在于 app status dependency registry。新增页面、read model、worker、job type 或 dependency 时，如果没有同步 registry 和测试，不能上线。
-
-## 模块归属
-
-| 模块域 | Route owner | Service / policy owner | Read model / worker owner | 文档入口 |
-| --- | --- | --- | --- | --- |
-| 银企核销 / 关联台 | reconciliation/workbench routes、部分 legacy `server.py` handler | reconciliation service、workbench service、relationship policy | workbench active generation、相关 SQL projection | `docs/product-specs/reconciliation-and-workbench.md` |
-| 银行明细 / 标签 | bank detail routes | bank detail service、tagging/classification policy | bank detail read model refresh | `docs/product-specs/bank-turnover-and-no-oa.md` |
-| 待找发票 / 发票生命周期 | pending invoice / invoice routes | pending invoice rules service、invoice lifecycle policy、pending invoice query service | invoice lifecycle、pending invoice、invoice usage / collection read models | `docs/product-specs/invoice-lifecycle.md` |
-| OA 待付款 | OA pending payment routes | OA reconciliation/query service | OA pending payment SQL projection | `docs/product-specs/invoice-lifecycle.md` |
-| ETC / 导入 | import and ETC routes | import service、ETC business batch service | import jobs、ETC batch state | `docs/product-specs/imports-and-etc.md` |
-| 成本 / 税金 | cost/tax routes | cost attribution policy、tax offset service | cost/tax read models | `docs/product-specs/cost-tax.md` |
-| 设置 / 健康 | settings/app health routes | settings service、runtime health service | runtime workers、queue health | `docs/product-specs/platform-settings-health.md` |
-| 对象 identity/dedup | object identity routes/service | identity/dedup policy | repair/backfill worker if needed | `docs/operations/object-identity-dedup.md` |
-
-## 仍需关注的 legacy 边界
-
-- `server.py` 仍有部分 route handler 和 dependency wiring，需要按 `docs/architecture/backend-refactor/` 的 Python-first 方向继续拆分。
-- 已拆出的 `routes_*.py` route owner 需要保持登记、导入、factory/accessor 和 handler 委托关系；`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_server_route_owner_inventory_stays_registered` 作为静态 guard，防止新增 route module 未登记或既有 owner 回退到无归属的 `server.py` 私有链路。
-- service 构造必须接收明确依赖，不把整个 `Application` 注入 service。
-- repository 可以知道 SQL 表结构；业务 service 不应散落 SQL。
-- worker 不依赖 `Application`、HTTP response、cookie/header 或 auth module。
-
-## 维护要求
-
-新增 read model、worker、dirty cascade、queue job、runtime health 指标或跨模块 service owner 时，更新本文。若变更属于长期重构计划进度，只更新 `docs/architecture/backend-refactor/migration-state-log.md`；若改变当前生产事实，还必须更新对应产品、开发或运维文档。
+页面访问或浏览器刷新只发起本页面 API；不读取 Workbench/Bank Detail 页面 payload，不经过 freshness/version/dirty/outbox/worker，不产生跨页面 fan-out。页面打开期间不自动订阅变化；用户再次刷新读取最新已提交事实。旧 Cost projection、parent/shard、Redis、worker 和 scope 状态由 migration `0126` 退出并删除。
