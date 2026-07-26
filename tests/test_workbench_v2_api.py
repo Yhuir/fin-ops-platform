@@ -937,19 +937,18 @@ class WorkbenchV2ApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, int(HTTPStatus.SERVICE_UNAVAILABLE))
         payload = json.loads(response.body)
-        self.assertEqual(payload["error"], "read_model_unavailable")
-        self.assertEqual(payload["read_model_status"], "unavailable")
+        self.assertEqual(payload["error"], "workbench_canonical_query_unavailable")
         self.assertEqual(payload["scope_key"], "all")
 
-    def test_get_api_workbench_ignored_uses_sql_read_model_without_rebuild(self) -> None:
-        class SqlReadRepository:
+    def test_get_api_workbench_ignored_uses_canonical_repository_without_rebuild(self) -> None:
+        class CanonicalReadRepository:
             def list_workbench_ignored_rows(self, *, scope_key: str) -> list[dict[str, object]]:
                 self.scope_key = scope_key
                 return [{"id": "bk-sql-ignored-001", "type": "bank"}]
 
         app = build_application()
-        repository = SqlReadRepository()
-        app._workbench_sql_read_repository = repository
+        repository = CanonicalReadRepository()
+        app._workbench_canonical_query_repository = repository
 
         response = app.handle_request("GET", "/api/workbench/ignored?month=all")
 

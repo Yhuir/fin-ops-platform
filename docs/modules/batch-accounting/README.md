@@ -60,6 +60,7 @@
 - 批量账务 GET 必须保持只读；不能在列表读取路径执行 legacy relation repair。
 - 批量账务显式分页的 `page_size` 上限为 200，超限必须返回 `invalid_paging`，不能为了首屏性能静默全量返回或把 stale relation distribution 伪装成 fresh。
 - 批量账务 SQL 读路径分三类 I/O：未提交列表只用年份候选 loader、OA-ID-scoped 附件读取和专用 bulk relation reader；submit command 只用 `bank_row_id + oa_row_ids` 窄 loader；已提交 bucket 只用年份级 bulk-proof relation DTO 和银行行窄 payload。三者不能相互复用，也不能回退通用逐 scope relation reader 或 Workbench full-page builder；缺少对应 loader/reader 时必须 fail closed。
+- 关联台页面已切换为 canonical PostgreSQL 直读，但本模块仍消费 Workbench active-generation 专属 loaders。该共享 generation 依赖在批量账务完成独立迁移前不得删除，同时不得成为关联台页面 runtime fallback。
 
 ## 影响面清单
 

@@ -54,6 +54,9 @@ Progress: [██░░░░░░░░] boundary review and executable plan c
 
 ### Decisions
 
+- 关联台页面 initial/groups/detail/preview 直接读取 PostgreSQL canonical OA、银行、发票、ETC facts 与 active formal relations；页面不再消费 Workbench generation、Redis、refresh status/SSE 或 `workbench_relation` distribution。
+- 关联台写入不再使用 `expected_read_model_version`；relation UoW 在同一 transaction 内重新验证 canonical identity/type，active ownership、business version、idempotency 和 audit 保持正式 command 边界。
+- Workbench active-generation/worker/readers 暂留给 batch-accounting、Audit 和运维 consumer，最终共享删除由跨页面主控 whole-repo 收口。
 - Phase 29 closure: Workbench operation recovery performs one trigger combined-initial load, lightweight public refresh-status waiting and one final fresh combined-initial load; repeated full payload polling is deleted.
 - Phase 29 SQL root fix: the existing all-scope active-member CTE is `NOT MATERIALIZED`, so search/source/column/time predicates can reach existing tables and indexes. The same SQL owner, generation, exact totals, row counts and matching IDs remain authoritative; no cache, table, index, migration or second query path was added.
 - Phase 29 production release: `main-f06711b7-20260725213147` is active. Rolling Workbench `/groups` p95 improved from `3476.949 ms` to `2882.325 ms` (about 17.1%); hot all-scope searched reads were `340–756 ms`, and the worker p95 was `1799.628 ms`.
@@ -195,6 +198,7 @@ None yet.
 | 260630-r4a | 重新设计销项发票收款情况右侧详情抽屉排版 | 2026-06-30 | — | [260630-r4a-output-invoice-detail-drawer](./quick/260630-r4a-output-invoice-detail-drawer/) |
 | 260630-tyy | 生产级修复 bank_flow_rule_batch App Status storage contract | 2026-06-30 | — | [260630-tyy-bank-flow-rule-batch-app-status-registry](./quick/260630-tyy-bank-flow-rule-batch-app-status-registry/) |
 | 260721-nrf | 流水规则批量处理 canonical relation、Audit fresh 与内部 ID 隐藏生产闭环 | 2026-07-21 | fc5babd5b | [260721-nrf-audit-fresh](./quick/260721-nrf-audit-fresh/) |
+| 260727-16d | 关联台 PostgreSQL canonical facts API 直读迁移 | 2026-07-27 | — | [260727-16d-postgresql-canonical-facts-api-read-mode](./quick/260727-16d-postgresql-canonical-facts-api-read-mode/) |
 
 ## Deferred Items
 

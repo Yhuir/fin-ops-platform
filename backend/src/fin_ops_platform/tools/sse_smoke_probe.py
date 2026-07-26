@@ -41,7 +41,6 @@ RequestFn = Callable[[str, Mapping[str, str], float, int], SseProbeResponse]
 
 DEFAULT_SSE_PROBES: tuple[SseProbe, ...] = (
     SseProbe("app_health_stream", "/api/app-health/stream", ("app_health", "heartbeat")),
-    SseProbe("workbench_events_all", "/api/workbench/events?month=all", ("workbench.read_model", "heartbeat")),
 )
 
 

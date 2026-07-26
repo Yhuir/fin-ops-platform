@@ -40,6 +40,7 @@
 - 导出权限：只读导出用户可以查询和导出，不能写入、重置或运维修复。
 - 审计：高风险动作、设置变化、标签规则、关系确认/撤回、批量提交/撤回、数据重置、导出等必须记录 actor、动作、对象、金额或参数摘要。
 - 敏感数据：不得在 API、日志、audit metadata、前端 state 中泄露 OA token、密码、数据库 DSN、凭据密文、导入文件敏感正文或完整附件正文。
+- 关联台直读迁移不改变权限层级：initial/groups/detail/preview 继续通过 protected read session；confirm/withdraw 等 mutation 继续二次校验 `can_mutate_data`。后端只使用 session actor/tenant，不能信任 request body 身份；页面移除 read-model version/status 不得削弱 canonical relation CAS、幂等和 audit。
 
 ## 权限层级
 

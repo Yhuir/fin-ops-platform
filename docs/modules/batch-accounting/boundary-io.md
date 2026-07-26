@@ -52,13 +52,13 @@
 | 批量账务操作结果 | 前端页面 | 返回成功/失败、受影响对象与信息性 `affected_months` / scope；普通提交/撤回的 `freshness_targets` / `operation_barrier_targets` 为空。当前页面通过正常 GET 收敛，command 成功不被后置读状态改写。`affected_months`/`affected_scope_keys` 必须优先是具体月份集合，不得无条件包含 `all`。撤回语义是通过 relation command repository 取消当前 batch relation，并记录 `withdraw_link` history；不得走旧 restore-style withdraw 或进程内 fallback。 |
 | 页面 Audit 状态 | 标题附件 | integrity/freshness/queue 分栏判断；问题数量只显示 sample |
 | Relation dirty scopes | workbench relation/read model | 不直接写下游 payload |
-| 关联台已配对展示 | `workbench` active generation / `WorkbenchCandidateGroupingService` | active `relation_mode=batch_accounting` 且 `special_metadata.source=batch_accounting` 的 row-set 是已确认批量账务关系；即使行级 relation code 是 `batch_accounting` 而不是旧 `fully_linked`，也必须进入 paired 区，不得被 `existing_case_candidate` open 旧候选链路接管 |
+| 关联台已配对展示 | reconciliation-workbench canonical query repository | active `relation_mode=batch_accounting` 且 `special_metadata.source=batch_accounting` 的 row-set 是已确认批量账务关系；关联台普通 GET 直接读 canonical relation 后进入 paired 区，不等待 Workbench generation，也不得被 `existing_case_candidate` open 旧候选链路接管 |
 | Audit/result | audit/job status | 重要批量操作可追踪 |
 
 ## 持久化与投影
 
 - Own read model：无独立 manifest entry。
-- Downstream read model：访问批量账务时由 `workbench_relation` 精确 freshness gate 收敛；访问关联台时，`workbench` active generation 必须把 batch-accounting active relation 投影为 paired group。写路径不做跨页 fan-out。
+- Downstream read model：访问批量账务时由 `workbench_relation` 精确 freshness gate 收敛；访问关联台时页面专属 repository 直接读取 active canonical relation 并分组。写路径不做跨页 fan-out。
 - Worker：依赖 runtime worker registry 中的 workbench relation/read model workers。
 
 ## 文件范围
@@ -85,6 +85,7 @@
 - submit/withdraw 写操作后的 route 不得再触发 duplicate derived lifecycle、`_schedule_workbench_pair_relation_persist`、`_schedule_workbench_read_model_persist` 或 snapshot rollback restore。`WorkbenchRelationCommandService` 及其 repository 只持久化 canonical relation/history/idempotency/audit，不产生页面 read-model dirty/outbox。PostgreSQL runtime 下 `Application._batch_accounting_service(...)` 必须注入 durable relation command service；缺失 durable repository 会造成 API 基于进程内状态返回成功但 canonical relation 未持久化，必须 fail closed。withdraw route 必须以 `use_sql_read_model=True` 构造 service，保证旧关系 scope backfill 不会触发整页 Workbench loader。
 - 批量账务写 API 不能同步执行默认 `workbench_read_model` rebuild executor，也不能投递异步全局重建。当前批量账务 GET 或关联台 GET 各自检测 canonical source version 并收敛当前 scope。
 - 批量账务 relation 可以跨月，但跨月不等于 `all`。如果 row payload 可解析出 `2026-MM`，派生刷新必须只覆盖这些月份，避免 bank_detail/cost/search/workbench_relation 等下游读模型被 all scope 长耗时刷新拖慢。
+- `PostgresReadModelRepository` 中批量账务专属 Workbench active-generation loaders 仍是本模块共享依赖，关联台页面迁移不得删除；待本模块另行迁移后由跨页面主控 whole-repo 扫描并统一清理。
 
 ## 测试与验证
 
@@ -97,7 +98,7 @@
 
 - 如果新增独立 read model，必须先登记 manifest/scope policy/worker/tests/docs。
 - 已删除旧链路：旧 app-level repair helper、service-level legacy case-id repair、submit/withdraw direct pair fallback、route duplicate lifecycle fan-out、旧 pair persist/snapshot restore、旧 workbench read model persist、已提交 bucket 12 个月 relation scan fallback、批量账务通用逐 scope relation lookup、年度 expected source-version 12 次 SQL N+1、独立年度 submitted-count facade/port/repository 及其重复 freshness proof、未提交 relation rows 后续独立 proof/groups I/O、候选列表未消费的 `raw_payload` 大 JSON I/O、候选/注解两次递归深拷贝、relation bundle 未消费的 row `payload/raw_payload` 与 group `raw_payload`、未提交无 OA-ID 限制的附件扫描、列表候选三个顺序数据库 round-trip、银行候选 payload counterparty fallback、OA 类型双 JSON 前导通配 `OR`、generic grouped Workbench loader 与 full-page builder fallback。
-- 批量账务 submit/withdraw 的生产 smoke 必须验证 durable relation 表、`workbench_relation` read model 和关联台 `workbench` active generation 同时收敛；单看 API `success=true` 不足以证明运行时外部收敛，但不影响本地模块边界 closed。
+- 批量账务 submit/withdraw 的生产 smoke 必须验证 durable relation 表、批量账务所需 `workbench_relation`/共享 generation reader，以及关联台普通 GET 直接读到同一 active relation；单看 API `success=true` 不足以证明运行时外部收敛，但不影响本地模块边界 closed。
 
 ## Phase 19 relation normalization（2026-07-12）
 

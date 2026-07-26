@@ -155,7 +155,6 @@ function WorkbenchZone({
   const canRequestNextPage = Boolean(
     isVisible
     && pageInfo?.hasMore
-    && pageInfo.readModelStatus === "fresh"
     && !loadingMore
     && !loadMoreError
     && !searchPending

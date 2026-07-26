@@ -1451,46 +1451,33 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_workbench_page_freshness_does_not_depend_on_relation_read_model(self) -> None:
+    def test_workbench_page_reads_canonical_facts_without_generation_runtime(self) -> None:
         server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
-        facade_source = (
-            SERVICES_ROOT / "workbench_query_facade.py"
+        facade_source = (SERVICES_ROOT / "workbench_query_facade.py").read_text(
+            encoding="utf-8"
+        )
+        repository_source = (
+            SERVICES_ROOT
+            / "postgres_repositories/workbench_canonical_query.py"
         ).read_text(encoding="utf-8")
-        freshness_source = (
-            SERVICES_ROOT / "workbench_query_freshness_service.py"
-        ).read_text(encoding="utf-8")
-        violations: list[str] = []
 
         for forbidden in (
-            "_workbench_page_relation_status",
-            "page_dependency_status",
-            "api_initial_page_relation_dependency_stale",
-            "read_model_dependency_statuses",
+            "read_model_status",
+            "read_model_version",
+            "active_generation",
+            "refresh_scope_keys",
+            "enqueue",
+            "redis",
         ):
-            if forbidden in server_source or forbidden in facade_source:
-                violations.append(
-                    f"Workbench page freshness still depends on relation projection marker {forbidden}"
-                )
-        if "def _workbench_refresh_status_with_source_freshness" in server_source:
-            violations.append(
-                "server.py still owns Workbench source freshness business logic"
-            )
-        for required in (
-            "list_workbench_scope_shards",
-            "source_versions_for_scopes",
-            "active_workbench_source_versions_by_scope",
-            'result["refresh_scope_keys"]',
-        ):
-            if required not in freshness_source:
-                violations.append(
-                    f"Workbench exact all-scope freshness is missing {required}"
-                )
-        if "WorkbenchQueryFreshnessService" not in server_source:
-            violations.append(
-                "server.py does not assemble the Workbench query freshness service"
-            )
-
-        self.assertEqual(violations, [])
+            self.assertNotIn(forbidden, facade_source.lower())
+        self.assertIn("PostgresWorkbenchCanonicalQueryRepository", repository_source)
+        self.assertIn("from app.workbench_pair_relations relation", repository_source)
+        self.assertIn("where relation.status = 'active'", repository_source)
+        self.assertIn("repeatable read read only", repository_source)
+        self.assertNotIn("read_model.workbench_", repository_source)
+        self.assertNotIn("/api/workbench/refresh-status", server_source)
+        self.assertNotIn("/api/workbench/events", server_source)
+        self.assertFalse((SERVICES_ROOT / "workbench_query_freshness_service.py").exists())
 
     def test_pending_invoice_write_routes_use_route_owner(self) -> None:
         server_path = APP_ROOT / "server.py"
@@ -6058,7 +6045,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_workbench_row_detail_route_owner_uses_generation_query_facade_only(self) -> None:
+    def test_workbench_row_detail_route_owner_uses_canonical_query_facade_only(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
         server_tree = _parse(server_path)
@@ -6074,17 +6061,15 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "class WorkbenchRowDetailApiRoutes",
             "query_facade_provider",
             "def get_result(",
-            "expected_read_model_version",
             ".row_detail(",
         ):
             if marker not in row_detail_route_source:
-                violations.append(f"WorkbenchRowDetailApiRoutes missing generation-query marker: {marker}")
-        for marker in (
-            "_workbench_row_detail_routes().get_result(",
-            "expected_read_model_version=expected_read_model_version",
-        ):
+                violations.append(f"WorkbenchRowDetailApiRoutes missing canonical-query marker: {marker}")
+        for marker in ("_workbench_row_detail_routes().get_result(",):
             if marker not in handler_source:
                 violations.append(f"Application row-detail HTTP handler missing marker: {marker}")
+        if "expected_read_model_version" in row_detail_route_source or "expected_read_model_version" in handler_source:
+            violations.append("Workbench row detail still accepts a page read-model version")
         if "WorkbenchRowDetailApiRoutes(" not in builder_source or "query_facade_provider=self._workbench_query_facade" not in builder_source:
             violations.append("Application row-detail route builder does not inject only the query facade")
         for forbidden in (
@@ -6214,11 +6199,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         routes_tree = _parse(routes_path)
         read_route_source = _class_source(routes_tree, routes_source, "WorkbenchReadApiRoutes")
         groups_handler_source = _function_source(server_tree, server_source, "_handle_api_workbench_groups")
-        refresh_status_handler_source = _function_source(
-            server_tree,
-            server_source,
-            "_handle_api_workbench_refresh_status",
-        )
         analysis_source = (
             REPO_ROOT
             / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-groups-read-route-owner-extraction-2026-06-25.md"
@@ -6227,7 +6207,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         for marker in (
             "def initial(",
-            "def refresh_status(",
             "def groups(",
             "_normalize_search_query",
             "WORKBENCH_SEARCH_QUERY_MAX_LENGTH",
@@ -6256,10 +6235,12 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"server.py groups handler still owns route mapping: {forbidden}")
         if "_workbench_read_routes().groups(" not in groups_handler_source:
             violations.append("server.py groups handler does not delegate to WorkbenchReadApiRoutes")
-        if "_workbench_read_routes().refresh_status(" not in refresh_status_handler_source:
-            violations.append("server.py refresh-status handler does not delegate to WorkbenchReadApiRoutes")
-        if "_workbench_query_facade().refresh_status" in refresh_status_handler_source:
-            violations.append("server.py refresh-status handler still calls WorkbenchQueryFacade directly")
+        for deleted_route in (
+            "/api/workbench/refresh-status",
+            "/api/workbench/events",
+        ):
+            if deleted_route in server_source:
+                violations.append(f"server.py still routes deleted Workbench runtime endpoint {deleted_route}")
         for forbidden in (
             "WorkbenchRelationCommandService",
             "ReadModelRefreshGateway",
@@ -6280,273 +6261,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if marker not in analysis_source:
                 violations.append(f"Workbench groups read extraction analysis missing marker: {marker}")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_events_stream_route_owner_extraction_stays_local(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        routes_path = APP_ROOT / "routes_workbench.py"
-        routes_source = routes_path.read_text(encoding="utf-8")
-        routes_tree = _parse(routes_path)
-        events_route_source = _class_source(routes_tree, routes_source, "WorkbenchEventsApiRoutes")
-        events_handler_source = _function_source(server_tree, server_source, "_handle_api_workbench_events")
-        builder_source = _function_source(server_tree, server_source, "_build_workbench_events_api_routes")
-        analysis_source = (
-            REPO_ROOT
-            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-events-stream-route-owner-extraction-2026-06-25.md"
-        ).read_text(encoding="utf-8")
-        violations: list[str] = []
-
-        for marker in (
-            "def events(",
-            "event_stream",
-            "_mark_stream_started",
-            "_mark_stream_closed",
-            "_serialize_sse_event",
-            '"heartbeat"',
-            '"X-Accel-Buffering"',
-        ):
-            if marker not in events_route_source:
-                violations.append(f"WorkbenchEventsApiRoutes missing marker: {marker}")
-        for forbidden in (
-            "while True",
-            "serialize_sse_event",
-            "_workbench_refresh_status_payload_for_scope",
-            "_workbench_refresh_status_event_name",
-            "_mark_workbench_events_stream_started",
-            "_mark_workbench_events_stream_closed",
-            "text/event-stream",
-            "X-Accel-Buffering",
-        ):
-            if forbidden in events_handler_source:
-                violations.append(f"server.py events handler still owns SSE stream behavior: {forbidden}")
-        if "_workbench_events_routes().events(" not in events_handler_source:
-            violations.append("server.py events handler does not delegate to WorkbenchEventsApiRoutes")
-        for marker in (
-            "scope_key_for_month=self._workbench_read_model_scope_key",
-            "status_payload_provider = self._workbench_refresh_status_payload_provider()",
-            "status_payload_for_scope=status_payload_provider.payload_for_scope",
-            "event_name_for_payload=status_payload_normalizer.event_name",
-            "serialize_sse_event=self._app_health_service.serialize_sse_event",
-            "mark_stream_started=stream_registry.mark_started",
-            "mark_stream_closed=stream_registry.mark_closed",
-        ):
-            if marker not in builder_source:
-                violations.append(f"Workbench events route builder missing explicit port: {marker}")
-        for forbidden in (
-            "WorkbenchRelationCommandService",
-            "ReadModelRefreshGateway",
-            "dirty_scope",
-            "outbox",
-            "readiness",
-            "clear_cache",
-            "set_cached",
-            "save_workbench",
-        ):
-            if forbidden in events_route_source:
-                violations.append(f"WorkbenchEventsApiRoutes gained write/runtime side effect: {forbidden}")
-        for marker in (
-            "server-py:workbench-events-stream-route-owner-extraction",
-            "GET /api/workbench/events",
-            "WorkbenchEventsApiRoutes",
-            "heartbeat",
-            "stream close cleanup",
-        ):
-            if marker not in analysis_source:
-                violations.append(f"Workbench events extraction analysis missing marker: {marker}")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_events_active_stream_registry_extraction_stays_local(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        service_source = (SERVICES_ROOT / "workbench_events_active_stream_registry.py").read_text(encoding="utf-8")
-        builder_source = _function_source(server_tree, server_source, "_build_workbench_events_api_routes")
-        analysis_source = (
-            REPO_ROOT
-            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-events-active-stream-registry-extraction-2026-06-25.md"
-        ).read_text(encoding="utf-8")
-        violations: list[str] = []
-
-        for forbidden in (
-            "def _mark_workbench_events_stream_started",
-            "def _mark_workbench_events_stream_closed",
-            "def _workbench_events_active_streams_registry",
-            "_workbench_events_active_streams_lock",
-            "_workbench_events_active_streams:",
-        ):
-            if forbidden in server_source:
-                violations.append(f"Application still owns Workbench active stream registry surface: {forbidden}")
-        for marker in (
-            "class WorkbenchEventsActiveStreamRegistry",
-            "def mark_started(",
-            "def mark_closed(",
-            "def snapshot(",
-            "Lock()",
-        ):
-            if marker not in service_source:
-                violations.append(f"WorkbenchEventsActiveStreamRegistry missing marker: {marker}")
-        for marker in (
-            "stream_registry = self._workbench_events_stream_registry()",
-            "mark_stream_started=stream_registry.mark_started",
-            "mark_stream_closed=stream_registry.mark_closed",
-        ):
-            if marker not in builder_source:
-                violations.append(f"Workbench events route builder is not wired through registry owner: {marker}")
-        for forbidden in (
-            "ReadModelRefreshGateway",
-            "outbox",
-            "readiness",
-            "clear_cache",
-            "set_cached",
-            "save_workbench",
-            "Response",
-            "HTTPStatus",
-        ):
-            if forbidden in service_source:
-                violations.append(f"WorkbenchEventsActiveStreamRegistry gained forbidden dependency: {forbidden}")
-        for marker in (
-            "server-py:workbench-events-active-stream-registry-extraction",
-            "WorkbenchEventsActiveStreamRegistry",
-            "stream close cleanup",
-            "refresh-status payload normalization",
-        ):
-            if marker not in analysis_source:
-                violations.append(f"Workbench events registry extraction analysis missing marker: {marker}")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_refresh_status_payload_normalizer_extraction_stays_local(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        service_source = (SERVICES_ROOT / "workbench_refresh_status_payload.py").read_text(encoding="utf-8")
-        facade_source = _function_source(server_tree, server_source, "_workbench_query_facade")
-        events_builder_source = _function_source(server_tree, server_source, "_build_workbench_events_api_routes")
-        analysis_source = (
-            REPO_ROOT
-            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-refresh-status-payload-normalizer-extraction-2026-06-25.md"
-        ).read_text(encoding="utf-8")
-        violations: list[str] = []
-
-        for forbidden in (
-            "def _normalize_workbench_refresh_status_payload",
-            "def _workbench_refresh_status_event_name",
-            "normalize_refresh_status_payload=self._normalize_workbench_refresh_status_payload",
-            "event_name_for_payload=self._workbench_refresh_status_event_name",
-        ):
-            if forbidden in server_source:
-                violations.append(f"Application still owns Workbench refresh-status normalizer surface: {forbidden}")
-        for marker in (
-            "class WorkbenchRefreshStatusPayloadNormalizer",
-            "def normalize(",
-            "def event_name(",
-            "read_model_status = \"refreshing\"",
-            "workbench.read_model.completed",
-            "workbench.read_model.failed",
-        ):
-            if marker not in service_source:
-                violations.append(f"WorkbenchRefreshStatusPayloadNormalizer missing marker: {marker}")
-        if "normalize_refresh_status_payload=self._workbench_refresh_status_payload_normalizer().normalize" not in facade_source:
-            violations.append("WorkbenchQueryFacade is not wired through WorkbenchRefreshStatusPayloadNormalizer")
-        if "status_payload_normalizer = self._workbench_refresh_status_payload_normalizer()" not in events_builder_source:
-            violations.append("Workbench events builder does not resolve WorkbenchRefreshStatusPayloadNormalizer")
-        if "event_name_for_payload=status_payload_normalizer.event_name" not in events_builder_source:
-            violations.append("Workbench events builder is not wired through normalizer event_name")
-        for forbidden in (
-            "ReadModelRefreshGateway",
-            "outbox",
-            "readiness",
-            "clear_cache",
-            "set_cached",
-            "save_workbench",
-            "Response",
-            "HTTPStatus",
-            "repository",
-        ):
-            if forbidden in service_source:
-                violations.append(f"WorkbenchRefreshStatusPayloadNormalizer gained forbidden dependency: {forbidden}")
-        for marker in (
-            "server-py:workbench-refresh-status-payload-normalizer-extraction",
-            "WorkbenchRefreshStatusPayloadNormalizer",
-            "refresh-status payload normalization",
-            "legacy `/api/workbench` SQL fallback",
-        ):
-            if marker not in analysis_source:
-                violations.append(f"Workbench refresh status normalizer analysis missing marker: {marker}")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_refresh_status_payload_provider_extraction_stays_local(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        provider_source = (SERVICES_ROOT / "workbench_refresh_status_payload_provider.py").read_text(encoding="utf-8")
-        events_builder_source = _function_source(server_tree, server_source, "_build_workbench_events_api_routes")
-        provider_builder_source = _function_source(server_tree, server_source, "_workbench_refresh_status_payload_provider")
-        analysis_source = (
-            REPO_ROOT
-            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-refresh-status-payload-provider-extraction-2026-06-25.md"
-        ).read_text(encoding="utf-8")
-        violations: list[str] = []
-
-        for forbidden in (
-            "def _workbench_refresh_status_payload_for_scope",
-            "status_payload_for_scope=self._workbench_refresh_status_payload_for_scope",
-        ):
-            if forbidden in server_source:
-                violations.append(f"Application still owns Workbench refresh-status payload provider surface: {forbidden}")
-        for marker in (
-            "class WorkbenchRefreshStatusPayloadProvider",
-            "repository_provider",
-            "source_freshness",
-            "normalizer",
-            "def payload_for_scope",
-            "get_workbench_refresh_status",
-            "fallback_status=\"unavailable\"",
-        ):
-            if marker not in provider_source:
-                violations.append(f"WorkbenchRefreshStatusPayloadProvider missing marker: {marker}")
-        for marker in (
-            "status_payload_provider = self._workbench_refresh_status_payload_provider()",
-            "status_payload_for_scope=status_payload_provider.payload_for_scope",
-        ):
-            if marker not in events_builder_source:
-                violations.append(f"Workbench events builder missing provider marker: {marker}")
-        for marker in (
-            "WorkbenchRefreshStatusPayloadProvider(",
-            "repository_provider=lambda: getattr(self, \"_workbench_sql_read_repository\", None)",
-            "source_freshness = self._workbench_query_freshness_service()",
-            "source_freshness=source_freshness.apply",
-            "normalizer=self._workbench_refresh_status_payload_normalizer()",
-        ):
-            if marker not in provider_builder_source:
-                violations.append(f"Application provider builder missing explicit dependency: {marker}")
-        for forbidden in (
-            "Response",
-            "HTTPStatus",
-            "ReadModelRefreshGateway",
-            "outbox",
-            "readiness",
-            "clear_cache",
-            "set_cached",
-            "save_workbench",
-            "app.auth",
-            "server.py",
-        ):
-            if forbidden in provider_source:
-                violations.append(f"WorkbenchRefreshStatusPayloadProvider gained forbidden dependency: {forbidden}")
-        for marker in (
-            "server-py:workbench-refresh-status-payload-provider-extraction",
-            "WorkbenchRefreshStatusPayloadProvider",
-            "repository status lookup",
-            "legacy `/api/workbench` SQL fallback",
-        ):
-            if marker not in analysis_source:
-                violations.append(f"Workbench refresh status provider analysis missing marker: {marker}")
 
         self.assertEqual(violations, [])
 
@@ -6681,10 +6395,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, parser_source)
 
-    def test_workbench_sync_page_cache_warmer_stays_deleted(self) -> None:
+    def test_workbench_page_generation_cache_runtime_stays_deleted(self) -> None:
+        server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
         worker_source = (APP_ROOT / "worker.py").read_text(encoding="utf-8")
         refresh_source = (SERVICES_ROOT / "workbench_read_model_refresh.py").read_text(encoding="utf-8")
-        cache_source = (SERVICES_ROOT / "workbench_groups_page_cache.py").read_text(encoding="utf-8")
+        self.assertFalse((SERVICES_ROOT / "workbench_groups_page_cache.py").exists())
 
         for forbidden in (
             "WorkbenchGroupsPageCacheWarmer",
@@ -6692,11 +6407,13 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "FIN_OPS_WORKBENCH_GROUPS_SYNC_CACHE_WARMUP_ENABLED",
             "post_refresh_warmer",
             'payload["cache_warmup"]',
+            "_workbench_groups_redis_cache_key",
+            "_invalidate_workbench_groups_redis_scope",
         ):
             with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, server_source)
                 self.assertNotIn(forbidden, worker_source)
                 self.assertNotIn(forbidden, refresh_source)
-                self.assertNotIn(forbidden, cache_source)
 
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
         checks = {

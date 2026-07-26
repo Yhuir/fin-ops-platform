@@ -1055,39 +1055,6 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertEqual(aggregate_sql_versions["bank_auto_tag_rules_version"], 42)
         self.assertEqual(aggregate_sql_versions["builder"], WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
 
-    def test_workbench_refresh_status_marks_old_bank_auto_tag_generation_stale(self) -> None:
-        app = build_application()
-
-        class WorkbenchRepository:
-            def get_workbench_refresh_status(self, *, scope_key: str) -> dict[str, object]:
-                return {
-                    "scope_key": scope_key,
-                    "read_model_status": "fresh",
-                    "active_generation_id": "gen-1",
-                    "generations": [
-                        {
-                            "generation_id": "gen-1",
-                            "status": "active",
-                            "source_versions": {
-                                "builder": "2026-05-25-oa-attachment-source-groups",
-                                "bank_auto_tag_rules_version": 1,
-                                "oa_attachment_invoice_parser_version": app._current_oa_attachment_invoice_parser_version(),
-                                "oa_projection_sync_version": app._current_oa_projection_sync_version(),
-                            },
-                        }
-                    ],
-                }
-
-        app._workbench_sql_read_repository = WorkbenchRepository()
-
-        with patch.object(app, "_current_bank_auto_tag_rules_version", return_value=2):
-            response = app._handle_api_workbench_refresh_status("2026-05")
-
-        payload = json.loads(response.body)
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["read_model_status"], "stale")
-        self.assertIn("bank_auto_tag_rules_version_mismatch", payload["read_model_stale_reasons"])
-
     def test_put_derives_label_from_required_primary_and_optional_sub_label(self) -> None:
         app = build_application()
         current = app._app_settings_service.get_bank_auto_tag_rules_payload()

@@ -14,6 +14,9 @@ from fin_ops_platform.services.workbench_relation_command_service import Workben
 from fin_ops_platform.services.workbench_relation_grouping import (
     WorkbenchRelationPreviewGroupingService,
 )
+from fin_ops_platform.services.workbench_relation_preview_policy import (
+    WorkbenchRelationPreviewSelectionError,
+)
 from fin_ops_platform.services.workbench_write_facade import (
     WorkbenchWriteFacade,
     WorkbenchWriteRelationReadSnapshotPort,
@@ -386,6 +389,7 @@ def _new_facade(
     bank_flow_rule_tag_rules_payload: object | None = None,
     list_ignored_rows: object | None = None,
     relation_preview_selection: object | None = None,
+    validate_canonical_selection_in_transaction: object | None = None,
 ) -> WorkbenchWriteFacade:
     resolved_pair_relation_service = pair_relation_service or _PairRelationService()
     resolved_amount_rows = resolve_rows_for_amount_check or (
@@ -396,7 +400,6 @@ def _new_facade(
         _month: str | None,
         *,
         row_ids: list[str],
-        expected_read_model_version: str | None,
     ) -> WorkbenchQueryResult:
         fixture_rows_by_id = {
             str(row.get("id") or row.get("row_id") or ""): dict(row)
@@ -426,8 +429,6 @@ def _new_facade(
                 "selected_rows": rows,
                 "context_rows": [],
                 "rows": rows,
-                "read_model_status": "fresh",
-                "read_model_version": expected_read_model_version,
             },
         )
 
@@ -475,6 +476,9 @@ def _new_facade(
         bank_transaction_category_codes_for_row_ids=bank_transaction_category_codes_for_row_ids,
         bank_flow_rule_tag_rules_payload=bank_flow_rule_tag_rules_payload,
         relation_command_service=relation_command_service,
+        validate_canonical_selection_in_transaction=(
+            validate_canonical_selection_in_transaction
+        ),
     )
 
 
@@ -498,6 +502,73 @@ def _session() -> OARequestSession:
 
 
 class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
+    def test_confirm_uow_revalidates_canonical_identity_and_type_in_transaction(
+        self,
+    ) -> None:
+        calls: list[dict[str, object]] = []
+        relation_command = _RecordingRelationCommandService()
+
+        def validate(**kwargs: object) -> dict[str, str]:
+            calls.append(dict(kwargs))
+            return {"oa-1": "oa", "bank-1": "invoice"}
+
+        facade = _new_facade(
+            confirm_uow=_HandlerCallingUoW(),
+            relation_command_service=relation_command,
+            validate_canonical_selection_in_transaction=validate,
+        )
+
+        result = facade.confirm_link(
+            {
+                "month": "2026-05",
+                "row_ids": ["oa-1", "bank-1"],
+                "case_id": "CASE-CANONICAL-CONFLICT",
+            }
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.CONFLICT)
+        self.assertEqual(
+            result.payload["error"],
+            "workbench_canonical_selection_conflict",
+        )
+        self.assertEqual(
+            calls[0]["row_ids"],
+            ["oa-1", "bank-1"],
+        )
+        self.assertEqual(relation_command.confirm_calls, [])
+
+    def test_withdraw_uow_rejects_canonical_identity_removed_after_preview(
+        self,
+    ) -> None:
+        relation_command = _RecordingRelationCommandService()
+
+        def validate(**_kwargs: object) -> dict[str, str]:
+            raise WorkbenchRelationPreviewSelectionError(
+                code="relation_preview_rows_missing",
+                message="所选工作台记录已变化，请刷新后重试。",
+            )
+
+        facade = _new_facade(
+            withdraw_uow=_HandlerCallingUoW(),
+            relation_command_service=relation_command,
+            validate_canonical_selection_in_transaction=validate,
+        )
+
+        result = facade.withdraw_link(
+            {
+                "month": "2026-05",
+                "row_ids": ["oa-1", "bank-1"],
+                "idempotency_key": "withdraw:canonical-conflict",
+            }
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.CONFLICT)
+        self.assertEqual(
+            result.payload["error"],
+            "workbench_canonical_selection_conflict",
+        )
+        self.assertEqual(relation_command.withdraw_calls, [])
+
     def test_ignore_row_resolves_one_canonical_row_without_building_page_payload(self) -> None:
         resolver_calls: list[dict[str, object]] = []
 
@@ -1202,13 +1273,11 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
             month: str | None,
             *,
             row_ids: list[str],
-            expected_read_model_version: str | None,
         ) -> WorkbenchQueryResult:
             selection_calls.append(
                 {
                     "month": month,
                     "row_ids": list(row_ids),
-                    "expected_read_model_version": expected_read_model_version,
                 }
             )
             rows = [
@@ -1222,8 +1291,6 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
                     "selected_rows": rows,
                     "context_rows": [],
                     "rows": rows,
-                    "read_model_status": "fresh",
-                    "read_model_version": expected_read_model_version,
                 },
             )
 
@@ -1239,7 +1306,6 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
             {
                 "month": "2026-05",
                 "row_ids": ["oa-1", "bank-1"],
-                "expected_read_model_version": "generation-1",
             }
         )
 

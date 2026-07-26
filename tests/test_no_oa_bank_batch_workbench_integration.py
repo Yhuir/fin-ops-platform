@@ -4,7 +4,7 @@ import unittest
 from tests.app_test_support import (
     build_grouped_workbench_projection as _build_grouped_workbench_projection,
     build_local_state_application as build_application,
-    install_fresh_workbench_write_gate,
+    install_local_workbench_canonical_preview_repository,
 )
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.no_oa_bank_batch_service import NoOaBankBatchService
@@ -209,7 +209,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         return app, row_ids
 
     def _post_confirm_link(self, app: object, row_ids: list[str]):
-        read_model_version = install_fresh_workbench_write_gate(app)
+        install_local_workbench_canonical_preview_repository(app)
         return app.handle_request(
             "POST",
             "/api/workbench/actions/confirm-link",
@@ -219,7 +219,6 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
                     "row_ids": row_ids,
                     "case_id": "CASE-WORKBENCH-INTERNAL-TRANSFER",
                     "note": "关联台确认内部往来",
-                    "expected_read_model_version": read_model_version,
                 }
             ),
         )

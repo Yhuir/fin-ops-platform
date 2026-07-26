@@ -13,7 +13,7 @@ from unittest.mock import patch
 from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
 from tests.app_test_support import (
     build_local_state_application as build_application,
-    install_fresh_workbench_write_gate,
+    install_local_workbench_canonical_preview_repository,
 )
 
 
@@ -513,7 +513,7 @@ class AppHealthApiTests(unittest.TestCase):
 
     def test_dirty_oa_scopes_block_workbench_write_actions(self) -> None:
         app = build_application()
-        read_model_version = install_fresh_workbench_write_gate(app)
+        install_local_workbench_canonical_preview_repository(app)
         inject_oa_sync_runtime_status(app, outbox_status="pending", scope_key="all")
 
         response = app.handle_request(
@@ -523,7 +523,6 @@ class AppHealthApiTests(unittest.TestCase):
                 {
                     "month": "all",
                     "row_ids": ["oa-missing"],
-                    "expected_read_model_version": read_model_version,
                 }
             ),
         )

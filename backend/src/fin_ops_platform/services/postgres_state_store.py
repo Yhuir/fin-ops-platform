@@ -30,6 +30,7 @@ from fin_ops_platform.services.postgres_repositories import (
     PostgresOpsTaxEtcRepository,
     PostgresReadModelRepository,
     PostgresWorkbenchRepository,
+    PostgresWorkbenchCanonicalQueryRepository,
     PostgresWorkbenchRelationRepository,
 )
 from fin_ops_platform.services.postgres_repositories.common import run_in_transaction
@@ -181,6 +182,9 @@ class PostgresStateStore:
         self._tax_offset_sql_read_repository = TaxOffsetReadModelRepositoryPort(self._sql_read_model_repository)
         self._workbench_relation_sql_read_repository = WorkbenchRelationReadModelRepositoryPort(self._sql_read_model_repository)
         self._workbench_repository = PostgresWorkbenchRepository(connection)
+        self._workbench_canonical_query_repository = (
+            PostgresWorkbenchCanonicalQueryRepository(self._sql_read_connection)
+        )
         self._bank_transaction_category_repository = PostgresBankTransactionCategoryRepository(connection)
         self._workbench_relation_repository = PostgresWorkbenchRelationRepository(connection)
         self._oa_pending_payment_relation_repository = PostgresOaPendingPaymentRelationRepository(connection)
@@ -897,6 +901,12 @@ class PostgresStateStore:
     @property
     def workbench_sql_read_repository(self) -> PostgresReadModelRepository:
         return self._sql_read_model_repository
+
+    @property
+    def workbench_canonical_query_repository(
+        self,
+    ) -> PostgresWorkbenchCanonicalQueryRepository:
+        return self._workbench_canonical_query_repository
 
     @property
     def workbench_sql_projection_builder(self) -> Any:

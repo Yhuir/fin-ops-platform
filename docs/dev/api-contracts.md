@@ -789,15 +789,20 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 ## 工作台 DTO
 
-工作台 DTO 必须保留稳定的分页、summary、group、relation、exception、read model status 和 source version 字段。新增字段只能向后兼容添加；删除、重命名或改变含义需要同步更新前端 DTO、测试和本文档。
+工作台浏览器只调用页面专属 API；后端通过 `WorkbenchQueryFacade` 和 `PostgresWorkbenchCanonicalQueryRepository` 读取已经同步到 PostgreSQL 的 canonical OA、银行流水、发票、ETC snapshots，以及 `app.workbench_pair_relations.status='active'`。页面 API 不读取 Workbench active generation、`workbench_relation` distribution、Redis generation cache、refresh queue 或外部 OA/Mongo/MySQL/对象存储。
 
 `GET /api/workbench?month=...`
 
-- 该接口是 Workbench 唯一首屏读入口，在一个 PostgreSQL `REPEATABLE READ READ ONLY` 快照内返回 freshness/version、summary 和 paired/unpaired 各首页。
-- summary 与两区 groups 必须共用同一 generation-set version；缺失或混合 version 必须 fail closed。
-- 默认无筛选首屏固定 `page=1`、`page_size=50`、`detail_level=summary`；仅该 shape 可在 fresh/stable gate 后进入按 version 隔离的 Redis read-through cache。paired/unpaired 的剩余数据继续使用既有 `/api/workbench/groups` 分页接口。
-- 搜索、筛选、后续分页和详情使用已有窄接口，并必须携带 `expected_read_model_version`。
-- 旧独立 summary HTTP 不是公开 API；内部 summary repository I/O 仅用于组合上述同快照响应。
+- 唯一首屏读入口；一个显式 PostgreSQL `REPEATABLE READ READ ONLY` snapshot 返回 summary 与 paired/unpaired 各首页。
+- 默认各区 `page=1`、`page_size=50`、`detail_level=summary`。可通过 JSON `paired_query` / `unpaired_query` 提交各区 `status`、`source_kind`、`search`、`sort`、`column_filters` 和 `time_filters`。
+- summary、精确 counts、facets 和两区 rows 必须来自同一 snapshot；真实空集返回 `200` 和空 groups，数据库/合同错误使用非 2xx error，不返回 `202 refreshing`。
+
+窄读取：
+
+- `GET /api/workbench/groups?month=...&zone=paired|unpaired&page=...&page_size=...`：服务端分页，page size 上限 200；支持 status/source kind、最长 200 字符普通文本 search、sort、column/time filters 和 `detail_level=summary|full`。
+- `GET /api/workbench/groups/detail?month=...&zone=...&group_id=...&detail_key=...`：单组完整详情。
+- `GET /api/workbench/rows/{row_id}?month=...`：单行完整详情。
+- `POST /api/workbench/actions/confirm-link/preview` 与 `POST /api/workbench/actions/withdraw-link/preview`：一次最多选择 20 行，最多返回 100 条必要 OA attachment context；preview 只用于展示和生成 submit identity。
 
 关系分区只允许 `paired` / `unpaired`：
 
@@ -806,6 +811,10 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 - `summary` 使用 `paired_count` / `unpaired_count`；不得返回 `open_count` 或把 candidate/decision 作为第三种关系状态。
 - 历史 row `case_id`、来源 section、display tag 或 candidate/decision metadata 不能合并未配对行，也不能隐藏 canonical fact。
 - 未知 zone/group type 必须返回结构化 contract error，不能静默映射为 unpaired 或 paired。
+
+所有公开 Workbench page payload 都不得出现 `active_generation_id`、`refresh_enqueued`、`source_versions` 或任何 `read_model_*` 字段。`GET /api/workbench/refresh-status` 和 `GET /api/workbench/events` 不再是公开 route；前端不得轮询、订阅 Workbench SSE 或用 generation version 保护写入。
+
+关系写入继续使用 preview -> mutation 两步合同。mutation 提交 `preview_id`、idempotency key/fingerprint 和 `submit_expected_versions` 等 active relation 业务版本，不提交 `expected_read_model_version`。command transaction 必须重新验证 selected canonical identities/types、active relation occupancy 和 expected business versions；对象消失、类型/占用/版本变化返回 `409`。写成功后前端重新 `GET /api/workbench` 或当前窄读端点。
 
 Workbench row payload 可包含可选对象身份字段：`object_identity`、`object_identity_key`、`object_identity_kind`、`object_identity_source`、`object_identity_confidence` 和 `identity_alias_rows`。这些字段用于后端投影审计、跨区重复治理和详情解释；前端不得依赖它们替代 row id 执行动作，旧客户端未读取这些字段时响应仍必须可用。
 
@@ -934,52 +943,17 @@ Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`sou
 
 `GET /api/workbench/rows/{row_id}?month=all`
 
-该接口返回单条 OA、银行流水或发票 row 的详情 payload，用于三栏详情弹窗。`row_id` 必须 URL encode；`month` 可为 `all` 或 `YYYY-MM`，作为 SQL active generation 读取 scope hint。
+该接口返回单条 OA、银行流水、发票或 ETC summary row 的详情 payload，用于三栏详情弹窗。`row_id` 必须 URL encode；`month` 可为 `all` 或 `YYYY-MM`，作为 canonical PostgreSQL 查询 scope。
 
 契约要求：
 
-- 读取优先级是 live service / in-memory cache / SQL active generation；live/cache miss 后不得只依赖从 row id 解析月份，opaque OA id 也必须可通过 query facade/repository 查 active generation。
-- SQL 读取必须走 `WorkbenchQueryFacade` 和 read model repository，不直接在 route 中拼 SQL；该接口只读详情，不写 relation，也不接入 `WorkbenchRelationCommandService`。
-- 找不到 row 返回 `404`；read model stale/refreshing/unavailable 需要返回明确状态或触发既有 refresh gateway，不返回 HTML 或空 body。
+- SQL 读取必须走 `WorkbenchQueryFacade` 和 page-specific canonical repository，不直接在 route 中拼 SQL。
+- 该接口只读详情，不写 relation，也不接入 `WorkbenchRelationCommandService`。
+- 找不到 row 返回 `404`；repository 不可用返回明确 503，不返回 HTML、空 body、refreshing 状态或旧 generation fallback。
 
-### 工作台 read model 刷新状态
+### 已删除的工作台页面 runtime endpoints
 
-`GET /api/workbench/refresh-status?month=all`
-
-该接口是关联工作台页面判断后台加载是否完成的轻量事实源，不返回 group、行、附件正文或 snapshot payload。
-
-响应字段：
-
-| 字段 | 说明 |
-| --- | --- |
-| `scope_key` | 当前 read model scope，例如 `all` 或 `2026-05`。 |
-| `read_model_status` | `fresh`、`refreshing`、`stale`、`failed`、`unavailable`。 |
-| `generated_at` | 最近稳定投影生成时间；未知为 `null`。 |
-| `active_generation_id` | 当前稳定可读 generation。未知为 `null`。 |
-| `building_generation_id` | 正在构建但不可读的 generation。没有后台构建时为 `null`。 |
-| `failed_generation_id` | 最近失败 generation。没有失败时为 `null`。 |
-| `read_model_version` | 可用于前端去重的版本，优先等于 `active_generation_id`；未知为 `null`。 |
-| `generations` | 最近 generation 摘要，仅包含元数据、计数和错误摘要，不包含业务 payload。 |
-| `dirty_scopes` | dirty scope 摘要，包含 `scope_key`、`status`、`updated_at`、`last_error`、`source_version`。 |
-| `running_scopes` | 正在执行的 scope 列表；未知或无执行为 `[]`。 |
-| `processed_count` / `total_count` | 后台进度。无法可靠计算时返回 `null`，不得返回伪造的 `0`。 |
-| `worker_lag_seconds` | 最近 worker heartbeat 延迟；未知为 `null`。 |
-| `last_error` | 最近失败摘要；没有失败为 `null`。 |
-| `retryable` | 当前状态是否可通过后台任务重试或重新排队。 |
-
-`GET /api/workbench/events?month=all`
-
-SSE 事件流。支持事件：
-
-- `workbench.read_model.refresh_started`
-- `workbench.read_model.progress`
-- `workbench.read_model.page_available`
-- `workbench.read_model.summary_updated`
-- `workbench.read_model.completed`
-- `workbench.read_model.failed`
-- `heartbeat`
-
-事件 payload 与 `/api/workbench/refresh-status` 使用同一状态结构。前端收到完成或 `read_model_version`/`active_generation_id` 变化事件后，只重新读取当前查询上下文的 `summary` 与 `groups` 分页；SSE 不可用时轮询 `/api/workbench/refresh-status`。
+`GET /api/workbench/refresh-status` 和 `GET /api/workbench/events` 已删除。关联台页面不公开 read-model/generation 状态，不提供 Workbench SSE，也不在浏览器轮询后台刷新；客户端必须以普通 GET 的 loading/empty/error/result 作为页面状态。
 
 ## ETC 业务批次 API
 
@@ -1001,7 +975,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 - `GET /api/etc/business-batches/{id}/invoice-pdf` 使用 read session，仅在业务批次已有 `oaDraftId` 时可用。成员必须来自该批次 `invoice_ids`，按开票日期、发票号、ID 稳定排序；每张来源 PDF 必须恰好一页且通过已记录 SHA-256 校验。成功返回 `application/pdf`、`Content-Disposition` UTF-8 文件名、`Cache-Control: private, no-store`、`X-ETC-Invoice-Count` 和 `X-PDF-Page-Count`，并记录下载审计；任一来源异常时不返回部分文件。未创建草稿/空批次返回 409，数量或总字节超限返回 413，文件不可读返回 503，损坏或非单页返回 422。
 - ETC 专用 OA 自动检测入口已移除：后端不再提供 `/api/etc/business-batches/{id}/oa-status/refresh`，不再输出 `oaDetection*` 字段，也不再注册 ETC OA 检测 worker 或 detector adapter。
 - ETC invoice list 只保留 `GET /api/etc/invoices` 读侧入口；旧 `/api/etc/invoices/revoke-submitted` 已删除，不得通过 invoice id 直接回退 submitted 状态。提交状态回退必须走 business batch `manual-oa-status`、`oa-draft/revoke` 或 delete/reset 状态机。
-- `submitted` 人工确认成功后，后端必须同时闭环该业务批次绑定的 ETC 对账任务，并把 `source_kind=etc_invoice_summary` 作为 canonical display fact 投影到关联台。该行“ETC发票数量/合计”必须从批次实际 canonical ETC 发票明细重算；散票继续作为折叠明细，每条明细必须写入同一 active generation 的 `workbench_rows`。若 summary 已属于 active relation，则随完整关系进入 paired；否则作为 unpaired singleton 显示。
+- `submitted` 人工确认成功后，后端必须同时闭环该业务批次绑定的 ETC 对账任务。关联台 canonical query 以 active invoice link > 有真实 ETC invoice 的已提交/关闭 business batch > 有隐藏/已提交 invoice 证据的 submission batch 的优先级生成唯一 `source_kind=etc_invoice_summary` display fact；“ETC发票数量/合计”从 canonical ETC 发票明细重算，散票作为折叠明细。若 summary 已属于 active relation，则随完整关系进入 paired；否则作为 unpaired singleton 显示。
 - `etc_invoice_summary` 不存在 pending/open 关系状态。没有 active relation 时是 unpaired；正式关系创建后进入 paired。
 - `DELETE /api/etc/business-batches/{id}` 对任意阶段业务批次执行本地删除/reset，不撤销 OA。请求可带 `expectedVersion` 做并发保护，不要求删除原因；成功响应至少包含 `deleted=true`、`businessBatchId`、`kind`、`releasedInvoiceCount` 和关联删除结果。后端必须删除该批次本地创建/导入的 ETC 对账任务、导入来源、核对结果、提交批次元数据和 ETC 发票；若已提交批次存在 `etc_invoice_summary`，必须释放 ETC 发票合并关系并刷新 Workbench，使原 `etc_invoice_summary` 消失。若该 summary 已参与 active relation，删除时通过 canonical relation command 取消包含该 summary 的 relation，OA 和银行流水不得恢复成二栏 active relation。`workbench_relation` distribution/read model 非 fresh 不得阻断该删除/reset；写安全以权限、expected version、canonical relation 状态、持久化和 outbox/refresh enqueue 为准，失败时返回对应稳定错误码。
 - ETC 对账任务和业务批次源文件上传必须先落对象存储，再追加 source file 元数据。对象存储不可写时返回稳定错误码 `reconciliation_file_storage_unavailable` 和 HTTP 503，上传不得留下半写入的 source file、版本号或审计事件。慢解析/OCR 的结果提交必须与 source file 删除互斥；提交前来源已删除时返回 HTTP 409、`{ "error": "source_file_deleted_during_parse", "message": "源文件在解析完成前已被删除，请重新上传。" }`，不得留下孤儿解析结果或明细。`/api/etc/reconciliation-tasks/{task_id}/credit-card-statement`、`/ticket-root-files`、`/ticket-root-texts`、`/supplement-evidences` 使用直接错误结构 `{ "error": "...", "message": "..." }`；`/api/etc/business-batches/{id}/source-files` 使用 business batch envelope `{ "ok": false, "error": { "code": "...", "message": "..." } }`。

@@ -61,7 +61,6 @@ from fin_ops_platform.app.routes_turnover_ledger import (
     TurnoverLedgerApiRoutes,
 )
 from fin_ops_platform.app.routes_workbench import (
-    WorkbenchEventsApiRoutes,
     WorkbenchGroupDetailApiRoutes,
     WorkbenchReadApiRoutes,
     WorkbenchRowDetailApiRoutes,
@@ -336,6 +335,9 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_s
 )
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
+from fin_ops_platform.services.postgres_repositories.workbench_canonical_query import (
+    PostgresWorkbenchCanonicalQueryRepository,
+)
 from fin_ops_platform.services.postgres_repositories.workbench_idempotency import PostgresWorkbenchIdempotencyRepository
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 from fin_ops_platform.services.project_costing import ProjectCostingService
@@ -405,31 +407,14 @@ from fin_ops_platform.services.turnover_relation_service import (
 from fin_ops_platform.services.workbench_amount_check_service import WorkbenchAmountCheckService
 from fin_ops_platform.services.workbench_free_matching_engine import RULE_VERSION as WORKBENCH_FORMAL_RELATION_RULE_VERSION
 from fin_ops_platform.services.workbench_etc_batch_link import WORKBENCH_ETC_BATCH_LINK_VERSION
-from fin_ops_platform.services.workbench_groups_page_cache import (
-    WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION,
-    build_workbench_initial_redis_cache_key,
-    build_workbench_groups_redis_cache_key_from_version,
-    is_default_workbench_initial_query,
-    workbench_groups_redis_cache_version_from_key,
-    workbench_groups_redis_ttl_seconds_from_env,
-    workbench_groups_redis_version_key,
-)
 from fin_ops_platform.services.workbench_confirm_link_context_relation_read_port import (
     WorkbenchConfirmLinkContextRelationReadPort,
 )
-from fin_ops_platform.services.workbench_events_active_stream_registry import WorkbenchEventsActiveStreamRegistry
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import WorkbenchReconciliationDirtyQueue
 from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryFacade
-from fin_ops_platform.services.workbench_query_freshness_service import (
-    WorkbenchQueryFreshnessService,
-)
 from fin_ops_platform.services.workbench_relation_grouping import (
     WorkbenchRelationGroupingService,
     WorkbenchRelationPreviewGroupingService,
-)
-from fin_ops_platform.services.workbench_refresh_status_payload import WorkbenchRefreshStatusPayloadNormalizer
-from fin_ops_platform.services.workbench_refresh_status_payload_provider import (
-    WorkbenchRefreshStatusPayloadProvider,
 )
 from fin_ops_platform.services.workbench_write_facade import (
     WorkbenchWriteFacade,
@@ -573,7 +558,6 @@ class Application:
         self._workbench_matching_dirty_worker_started = False
         self._workbench_matching_run_lock = Lock()
         self._workbench_matching_running_scope_months: set[str] = set()
-        self._workbench_events_active_stream_registry = WorkbenchEventsActiveStreamRegistry()
         self._seed_payload = build_demo_seed()
         if self._bootstrap_mode == "lightweight":
             return
@@ -784,6 +768,11 @@ class Application:
         import_fact_repository = getattr(self._state_store, "import_fact_repository", None)
         self._workbench_sql_read_repository = getattr(self._state_store, "workbench_sql_read_repository", None)
         self._workbench_sql_projection_builder = getattr(self._state_store, "workbench_sql_projection_builder", None)
+        self._workbench_canonical_query_repository = getattr(
+            self._state_store,
+            "workbench_canonical_query_repository",
+            None,
+        )
         self._tax_offset_sql_read_repository = getattr(self._state_store, "tax_offset_sql_read_repository", None)
         self._search_sql_read_repository = getattr(self._state_store, "search_sql_read_repository", None)
         self._pending_invoice_sql_read_repository = getattr(self._state_store, "pending_invoice_sql_read_repository", None)
@@ -1838,7 +1827,7 @@ class Application:
                 query.get("month", [None])[0],
                 zone=query.get("zone", [None])[0],
                 group_id=query.get("group_id", [None])[0],
-                expected_read_model_version=query.get("expected_read_model_version", [None])[0],
+                detail_key=query.get("detail_key", [None])[0],
             )
         if method == "GET" and route_path == "/api/workbench/groups":
             month = query.get("month", [None])[0]
@@ -1854,7 +1843,6 @@ class Application:
                 detail_level=query.get("detail_level", [None])[0],
                 column_filters=query.get("column_filters", [None])[0],
                 time_filters=query.get("time_filters", [None])[0],
-                expected_read_model_version=query.get("expected_read_model_version", [None])[0],
             )
             self._emit_workbench_api_metric(
                 endpoint="/api/workbench/groups",
@@ -1863,10 +1851,6 @@ class Application:
                 duration_ms=self._duration_ms(request_started_at),
             )
             return response
-        if method == "GET" and route_path == "/api/workbench/refresh-status":
-            return self._handle_api_workbench_refresh_status(query.get("month", [None])[0])
-        if method == "GET" and route_path == "/api/workbench/events":
-            return self._handle_api_workbench_events(query.get("month", [None])[0])
         if route_path.startswith("/api/bank-details/"):
             bank_detail_response = self._bank_details_routes().route(method, route_path, query, body, headers)
             if bank_detail_response is not None:
@@ -1987,7 +1971,6 @@ class Application:
             return self._handle_api_workbench_row_detail(
                 row_id,
                 month=query.get("month", [None])[0],
-                expected_read_model_version=query.get("expected_read_model_version", [None])[0],
             )
         if method == "POST" and route_path == "/api/workbench/exception/preview":
             return self._handle_api_workbench_exception_preview(body)
@@ -2669,101 +2652,13 @@ class Application:
         return self._json_response(status_code, payload)
 
     def _workbench_query_facade(self) -> WorkbenchQueryFacade:
-        repository = getattr(self, "_workbench_sql_read_repository", None)
-        runtime_container = getattr(self, "_runtime_repositories", None)
-        query_service = getattr(self, "_workbench_query_service", None)
-        expected_source_versions_by_scope: dict[str, dict[str, object]] = {}
-
-        def expected_source_versions(scope_key: str | None) -> dict[str, object]:
-            normalized_scope_key = str(scope_key or "").strip() or "all"
-            if normalized_scope_key not in expected_source_versions_by_scope:
-                expected_source_versions_by_scope[normalized_scope_key] = dict(
-                    self._workbench_sql_read_model_source_versions(
-                        normalized_scope_key
-                    )
-                )
-            return dict(expected_source_versions_by_scope[normalized_scope_key])
-
-        def stale_reasons(
-            source_versions: object,
-            *,
-            scope_key: str | None = None,
-        ) -> list[str]:
-            return source_version_mismatch_reasons(
-                expected=require_expected_source_versions(
-                    expected_source_versions(scope_key),
-                    context="workbench_sql_read_model",
-                ),
-                actual=source_versions if isinstance(source_versions, dict) else {},
-            )
-
-        source_freshness = self._workbench_query_freshness_service(
-            repository=repository,
-            single_scope_stale_reasons=stale_reasons,
-        )
-
-        def enqueue_refresh(
-            scope_key: str,
-            *,
-            reason: str,
-            metadata: dict[str, object] | None = None,
-        ) -> bool:
-            target_source_versions = (
-                source_freshness.expected_source_versions(scope_key)
-                or expected_source_versions_by_scope.get(
-                    str(scope_key or "").strip() or "all"
-                )
-            )
-            return self._enqueue_workbench_read_model_refresh(
-                scope_key,
-                reason=reason,
-                metadata=metadata,
-                expected_source_versions=target_source_versions,
-            )
-
         return WorkbenchQueryFacade(
-            repository=repository,
-            redis_helper=getattr(runtime_container, "redis_helper", None),
-            enqueue_refresh=enqueue_refresh,
-            scope_key_for_month=self._workbench_read_model_scope_key,
-            stale_reasons=stale_reasons,
-            emit_status_metric=self._emit_workbench_read_model_status_metric,
-            missing_read_model_error=self._is_missing_workbench_groups_read_model_error,
-            transient_read_model_error=self._is_transient_workbench_read_model_error,
-            refresh_status_with_source_freshness=source_freshness.apply,
-            normalize_refresh_status_payload=self._workbench_refresh_status_payload_normalizer().normalize,
-            groups_redis_version_key=self._workbench_groups_redis_version_key,
-            groups_cache_key_from_version=self._workbench_groups_redis_cache_key_from_version,
-            groups_cache_key=self._workbench_groups_redis_cache_key,
-            groups_cache_version_from_key=self._workbench_groups_redis_cache_version_from_key,
-            groups_redis_ttl_seconds=self._workbench_groups_redis_ttl_seconds,
-            initial_cache_key_from_version=build_workbench_initial_redis_cache_key,
-            is_default_initial_query=is_default_workbench_initial_query,
-            oa_status_provider=getattr(query_service, "oa_status_payload", None),
-            serialize_value=Application._serialize_value,
-        )
-
-    def _workbench_query_freshness_service(
-        self,
-        *,
-        repository: object | None = None,
-        single_scope_stale_reasons: Callable[..., list[str]] | None = None,
-    ) -> WorkbenchQueryFreshnessService:
-        return WorkbenchQueryFreshnessService(
-            projection_builder=getattr(
+            repository=getattr(
                 self,
-                "_workbench_sql_projection_builder",
+                "_workbench_canonical_query_repository",
                 None,
             ),
-            repository=(
-                repository
-                if repository is not None
-                else getattr(self, "_workbench_sql_read_repository", None)
-            ),
-            single_scope_stale_reasons=(
-                single_scope_stale_reasons
-                or self._workbench_sql_read_model_stale_reasons
-            ),
+            scope_key_for_month=self._workbench_read_model_scope_key,
         )
 
     def _workbench_write_facade(self) -> WorkbenchWriteFacade:
@@ -2820,6 +2715,9 @@ class Application:
             ),
             relation_command_service_factory=lambda repository=None: self._workbench_relation_command_service(
                 repository=repository,
+            ),
+            validate_canonical_selection_in_transaction=(
+                self._validate_workbench_canonical_selection_in_transaction
             ),
         )
 
@@ -3379,6 +3277,20 @@ class Application:
             row_overrides=workbench_repository,
         )
 
+    @staticmethod
+    def _validate_workbench_canonical_selection_in_transaction(
+        *,
+        transaction: object,
+        scope_key: str,
+        row_ids: list[str],
+    ) -> dict[str, str]:
+        return PostgresWorkbenchCanonicalQueryRepository(
+            transaction
+        ).validate_workbench_relation_selection_in_current_transaction(
+            scope_key=scope_key,
+            row_ids=row_ids,
+        )
+
     def _workbench_write_response(self, result: WorkbenchWriteResult) -> Response:
         return self._json_response(result.status_code, result.payload)
 
@@ -3472,7 +3384,6 @@ class Application:
         detail_level: str | None = None,
         column_filters: str | None = None,
         time_filters: str | None = None,
-        expected_read_model_version: str | None = None,
     ) -> Response:
         status_code, payload = self._workbench_read_routes().groups(
             month,
@@ -3486,7 +3397,6 @@ class Application:
             detail_level=detail_level,
             column_filters=column_filters,
             time_filters=time_filters,
-            expected_read_model_version=expected_read_model_version,
         )
         return self._json_response(status_code, payload)
 
@@ -3496,35 +3406,15 @@ class Application:
         *,
         zone: str | None,
         group_id: str | None,
-        expected_read_model_version: str | None = None,
+        detail_key: str | None = None,
     ) -> Response:
         status_code, payload = self._workbench_group_detail_routes().get_detail(
             month,
             zone=zone,
             group_id=group_id,
-            expected_read_model_version=expected_read_model_version,
+            detail_key=detail_key,
         )
         return self._json_response(status_code, payload)
-
-    def _handle_api_workbench_refresh_status(self, month: str | None) -> Response:
-        status_code, payload = self._workbench_read_routes().refresh_status(month)
-        return self._json_response(status_code, payload)
-
-    def _handle_api_workbench_events(self, month: str | None) -> Response:
-        status_code, body, headers = self._workbench_events_routes().events(month)
-        return Response(
-            status_code=int(status_code),
-            body=body,
-            stream=True,
-            headers=headers,
-        )
-
-    def _workbench_events_stream_registry(self) -> WorkbenchEventsActiveStreamRegistry:
-        registry = getattr(self, "_workbench_events_active_stream_registry", None)
-        if registry is None:
-            registry = WorkbenchEventsActiveStreamRegistry()
-            self._workbench_events_active_stream_registry = registry
-        return registry
 
     @staticmethod
     def _is_missing_workbench_groups_read_model_error(error: Exception) -> bool:
@@ -3555,88 +3445,6 @@ class Application:
             "read_model.bank_account_balances" in message
             and ("does not exist" in message or "undefinedtable" in error.__class__.__name__.lower())
         )
-
-    def _workbench_groups_redis_cache_key(
-        self,
-        *,
-        repository: object,
-        scope_key: str,
-        zone: str,
-        page: str | None = None,
-        page_size: str | None = None,
-        status: str | None,
-        source_kind: str | None,
-        search: str | None,
-        sort: str | None,
-        detail_level: str | None,
-        column_filters: dict[str, object] | None = None,
-        time_filters: dict[str, object] | None = None,
-    ) -> str | None:
-        cache_version_loader = getattr(repository, "workbench_groups_cache_version", None)
-        if not callable(cache_version_loader):
-            return None
-        cache_version = cache_version_loader(scope_key=scope_key)
-        if not cache_version:
-            return None
-        return build_workbench_groups_redis_cache_key_from_version(
-            cache_version=cache_version,
-            schema_version=WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION,
-            scope_key=scope_key,
-            zone=zone,
-            page=page,
-            page_size=page_size,
-            status=status,
-            source_kind=source_kind,
-            search=search,
-            sort=sort,
-            detail_level=detail_level,
-            column_filters=column_filters,
-            time_filters=time_filters,
-        )
-
-    @staticmethod
-    def _workbench_groups_redis_version_key(scope_key: str) -> str:
-        return workbench_groups_redis_version_key(scope_key)
-
-    @staticmethod
-    def _workbench_groups_redis_cache_version_from_key(cache_key: str) -> str | None:
-        return workbench_groups_redis_cache_version_from_key(cache_key)
-
-    def _workbench_groups_redis_cache_key_from_version(
-        self,
-        *,
-        cache_version: str | None,
-        scope_key: str,
-        zone: str,
-        page: str | None,
-        page_size: str | None,
-        status: str | None,
-        source_kind: str | None,
-        search: str | None,
-        sort: str | None,
-        detail_level: str | None,
-        column_filters: dict[str, object] | None = None,
-        time_filters: dict[str, object] | None = None,
-    ) -> str | None:
-        return build_workbench_groups_redis_cache_key_from_version(
-            cache_version=cache_version,
-            schema_version=WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION,
-            scope_key=scope_key,
-            zone=zone,
-            page=page,
-            page_size=page_size,
-            status=status,
-            source_kind=source_kind,
-            search=search,
-            sort=sort,
-            detail_level=detail_level,
-            column_filters=column_filters,
-            time_filters=time_filters,
-        )
-
-    @staticmethod
-    def _workbench_groups_redis_ttl_seconds() -> int:
-        return workbench_groups_redis_ttl_seconds_from_env()
 
     @staticmethod
     def _app_health_workbench_status_cache_ttl_seconds() -> float:
@@ -4524,12 +4332,6 @@ class Application:
 
 
     def _workbench_write_freshness_guard(self, payload: dict[str, object]) -> Response | None:
-        precondition = self._workbench_query_facade().write_precondition(
-            str(payload.get("month") or "all"),
-            expected_read_model_version=payload.get("expected_read_model_version"),
-        )
-        if precondition.status_code != HTTPStatus.OK:
-            return self._json_response(precondition.status_code, precondition.payload)
         oa_sync_payload = self._oa_sync_status_payload()
         dirty_scopes = [
             str(scope)
@@ -6968,16 +6770,19 @@ class Application:
 
     def _handle_api_workbench_ignored(self, month: str | None) -> Response:
         current_month = month or "all"
-        read_repository = getattr(self, "_workbench_sql_read_repository", None)
+        read_repository = getattr(
+            self,
+            "_workbench_canonical_query_repository",
+            None,
+        )
         list_ignored_rows = getattr(read_repository, "list_workbench_ignored_rows", None)
         if not callable(list_ignored_rows):
             return self._json_response(
                 HTTPStatus.SERVICE_UNAVAILABLE,
                 {
-                    "error": "read_model_unavailable",
-                    "read_model_status": "unavailable",
+                    "error": "workbench_canonical_query_unavailable",
                     "scope_key": self._workbench_read_model_scope_key(current_month),
-                    "message": "Workbench ignored-row repository is not configured.",
+                    "message": "Workbench canonical ignored-row repository is not configured.",
                 },
             )
         scope_key = self._workbench_read_model_scope_key(current_month)
@@ -7202,12 +7007,10 @@ class Application:
         row_id: str,
         *,
         month: str | None = None,
-        expected_read_model_version: str | None = None,
     ) -> Response:
         status_code, payload = self._workbench_row_detail_routes().get_result(
             row_id,
             month=month,
-            expected_read_model_version=expected_read_model_version,
         )
         return self._json_response(status_code, payload)
 
@@ -7329,46 +7132,6 @@ class Application:
 
     def _build_workbench_read_api_routes(self) -> WorkbenchReadApiRoutes:
         return WorkbenchReadApiRoutes(query_facade_provider=self._workbench_query_facade)
-
-    def _workbench_events_routes(self) -> WorkbenchEventsApiRoutes:
-        routes = getattr(self, "_workbench_events_api_routes", None)
-        if routes is None:
-            routes = self._build_workbench_events_api_routes()
-            self._workbench_events_api_routes = routes
-        return routes
-
-    def _build_workbench_events_api_routes(self) -> WorkbenchEventsApiRoutes:
-        stream_registry = self._workbench_events_stream_registry()
-        status_payload_normalizer = self._workbench_refresh_status_payload_normalizer()
-        status_payload_provider = self._workbench_refresh_status_payload_provider()
-        return WorkbenchEventsApiRoutes(
-            scope_key_for_month=self._workbench_read_model_scope_key,
-            status_payload_for_scope=status_payload_provider.payload_for_scope,
-            event_name_for_payload=status_payload_normalizer.event_name,
-            serialize_sse_event=self._app_health_service.serialize_sse_event,
-            mark_stream_started=stream_registry.mark_started,
-            mark_stream_closed=stream_registry.mark_closed,
-            sleep_seconds=sleep,
-        )
-
-    def _workbench_refresh_status_payload_normalizer(self) -> WorkbenchRefreshStatusPayloadNormalizer:
-        normalizer = getattr(self, "_workbench_refresh_status_payload_normalizer_instance", None)
-        if normalizer is None:
-            normalizer = WorkbenchRefreshStatusPayloadNormalizer()
-            self._workbench_refresh_status_payload_normalizer_instance = normalizer
-        return normalizer
-
-    def _workbench_refresh_status_payload_provider(self) -> WorkbenchRefreshStatusPayloadProvider:
-        provider = getattr(self, "_workbench_refresh_status_payload_provider_instance", None)
-        if provider is None:
-            source_freshness = self._workbench_query_freshness_service()
-            provider = WorkbenchRefreshStatusPayloadProvider(
-                repository_provider=lambda: getattr(self, "_workbench_sql_read_repository", None),
-                source_freshness=source_freshness.apply,
-                normalizer=self._workbench_refresh_status_payload_normalizer(),
-            )
-            self._workbench_refresh_status_payload_provider_instance = provider
-        return provider
 
     def _workbench_group_detail_routes(self) -> WorkbenchGroupDetailApiRoutes:
         routes = getattr(self, "_workbench_group_detail_api_routes", None)
@@ -9999,8 +9762,6 @@ class Application:
                 if isinstance(shard_result, dict):
                     row_count += self._workbench_projection_int(shard_result.get("row_count"))
                     ignored_row_count += self._workbench_projection_int(shard_result.get("ignored_row_count"))
-                self._invalidate_workbench_groups_redis_scope(shard_key)
-            self._invalidate_workbench_groups_redis_scope(normalized_scope_key)
             return {
                 "scope_key": normalized_scope_key,
                 "base_scope_key": normalized_scope_key,
@@ -10016,7 +9777,6 @@ class Application:
         payload.setdefault("scope_key", normalized_scope_key)
         payload.setdefault("base_scope_key", normalized_scope_key)
         payload["projection"] = "sql"
-        self._invalidate_workbench_groups_redis_scope(normalized_scope_key)
         return payload
 
     @staticmethod
@@ -10025,10 +9785,6 @@ class Application:
             return int(value)  # type: ignore[arg-type]
         except (TypeError, ValueError):
             return 0
-
-    def _invalidate_workbench_groups_redis_scope(self, scope_key: str) -> None:
-        normalized_scope_key = str(scope_key or "").strip() or "all"
-        self._runtime_redis_delete_best_effort(self._workbench_groups_redis_version_key(normalized_scope_key))
 
     def rebuild_tax_offset_read_model_scope(self, scope_key: str) -> dict[str, object]:
         self._ensure_tax_offset_application_services()
@@ -10174,7 +9930,11 @@ class Application:
         return self._serialize_value(list_search_rows(scope_key=scope_key))
 
     def _list_workbench_ignored_rows_for_write(self, month: str) -> list[dict[str, object]]:
-        read_repository = getattr(self, "_workbench_sql_read_repository", None)
+        read_repository = getattr(
+            self,
+            "_workbench_canonical_query_repository",
+            None,
+        )
         list_ignored_rows = getattr(read_repository, "list_workbench_ignored_rows", None)
         if not callable(list_ignored_rows):
             raise RuntimeError("Workbench ignored-row repository is not configured.")

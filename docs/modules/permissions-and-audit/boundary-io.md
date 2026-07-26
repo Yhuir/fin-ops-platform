@@ -30,6 +30,7 @@
 | Session/auth request | `auth.py`、session API | 解析身份、角色、权限 |
 | Permission check | route/service | 写入口必须显式校验 |
 | Audit event | business service/route | 记录对象、动作、身份、结果 |
+| Workbench read/write access | protected Workbench routes | canonical direct reads 仍要求有效 session；mutation 仍要求 `can_mutate_data`，actor/tenant 来自服务端 session。移除页面 read-model version/status 不改变 relation business CAS、idempotency 或 audit。 |
 | Page Audit request | admin session + registered frontend page key | `PAGE_AUDIT_REGISTRY` 全覆盖校验；17 页只允许有限 executor；未实现 proof fail closed，不动态选择函数。`cost-statistics` 使用唯一 `cost_statistics` executor，直接进入成本专属只读 repository；通用 page-business repository 不保留成本 fallback。 |
 | App Health system Audit request | admin session + `page=app-health-operations` | 只读；由 system owner 在一个 caller-owned PostgreSQL snapshot 内编排其余 16 页 proof。权限边界只授权读取，不授予 refresh、repair、写 read model 或生产修复能力 |
 | External evidence registration/revocation | 运维 CLI + manifest/artifact + `--apply --actor --reason` | 无 HTTP/UI 入口；API/worker/readonly DB role 只有 select，apply 使用受控 migrator/operator role。service 校验完整 manifest 和 artifact，repository 原子 append/revoke 并写 `audit.events`。dry-run 不连接数据库；生产 apply 需要独立发布/运维授权。 |

@@ -26,6 +26,10 @@
 - Durable queue：`backend/src/fin_ops_platform/services/runtime_queue.py`
 - Worker registry：`backend/src/fin_ops_platform/services/runtime_worker_registry.py`
 
+## 页面直读例外
+
+关联台与成本统计是登记的 page-specific canonical direct-read 页面。关联台浏览器只调用 `/api/workbench*`；后端 query facade/repository 在单个 `REPEATABLE READ READ ONLY` PostgreSQL snapshot 内组合 canonical OA、银行、发票、ETC facts 与 active formal relations。关联台页面不消费 Workbench active generation、`workbench_relation` distribution、Redis、refresh status/SSE、queue 或 worker。共享 Workbench generation 仍可能服务 batch-accounting，不能据此重新接回关联台页面，也不能由页面任务提前删除。
+
 ## 使用规则
 
 新增或修改页面、API、read model、worker 或 derived lifecycle 事件时，先做文档影响评估；影响当前事实源时更新本目录和对应产品、开发或运维文档。历史 prompt、阶段计划和旧归档不再作为当前事实源。
