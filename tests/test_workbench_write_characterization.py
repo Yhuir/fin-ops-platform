@@ -63,19 +63,11 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         app = build_application()
         app._emit_workbench_action_timing = lambda **kwargs: None
         query_facade = app._workbench_query_facade()
-        query_facade.write_precondition = lambda _month, expected_read_model_version: WorkbenchQueryResult(
-            HTTPStatus.OK,
-            {
-                "read_model_status": "fresh",
-                "read_model_version": str(expected_read_model_version),
-            },
-        )
 
         def relation_preview_selection(
             month: str | None,
             *,
             row_ids: list[str],
-            expected_read_model_version: str | None,
         ) -> WorkbenchQueryResult:
             expanded_row_ids = app._expand_confirm_link_row_ids_for_existing_context(
                 row_ids,
@@ -93,8 +85,6 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
                     "selected_rows": rows,
                     "context_rows": [],
                     "rows": rows,
-                    "read_model_status": "fresh",
-                    "read_model_version": str(expected_read_model_version),
                 },
             )
 
@@ -114,7 +104,6 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         return str(self._default_open_rows(app)["invoice"]["id"])
 
     def _post(self, app: Application, path: str, payload: dict[str, object]):
-        payload.setdefault("expected_read_model_version", "characterization-generation")
         if path == "/api/workbench/actions/confirm-link":
             self._ensure_documented_mismatch_confirm_note(payload)
         return app.handle_request("POST", path, json.dumps(payload))
@@ -447,7 +436,6 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
             "row_ids": row_ids,
             "case_id": "CASE-UOW-FAILED",
             "idempotency_key": "confirm:uow-idem-failed",
-            "expected_read_model_version": "characterization-generation",
         }
         self._ensure_documented_mismatch_confirm_note(request_payload)
         request_fingerprint = workbench_request_fingerprint(
@@ -672,7 +660,6 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
             "month": "2026-03",
             "row_id": "missing-row",
             "idempotency_key": "cancel:uow-idem-failed",
-            "expected_read_model_version": "characterization-generation",
         }
         request_fingerprint = workbench_request_fingerprint(
             tenant_id="default",
@@ -1176,13 +1163,11 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
             month: str | None,
             *,
             row_ids: list[str],
-            expected_read_model_version: str | None,
         ) -> WorkbenchQueryResult:
             selection_calls.append(
                 {
                     "month": month,
                     "row_ids": list(row_ids),
-                    "expected_read_model_version": expected_read_model_version,
                 }
             )
             return WorkbenchQueryResult(
@@ -1192,8 +1177,6 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
                     "selected_rows": rows,
                     "context_rows": [],
                     "rows": rows,
-                    "read_model_status": "fresh",
-                    "read_model_version": expected_read_model_version,
                 },
             )
 

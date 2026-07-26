@@ -35,10 +35,6 @@ import type {
   WorkbenchGroupsPageQuery,
   WorkbenchGroupsPageResult,
   WorkbenchInitialPageResult,
-  WorkbenchReadModelStatus,
-  WorkbenchRefreshScopeStatus,
-  WorkbenchRefreshStatus,
-  WorkbenchRefreshStatusEvent,
   WorkbenchZoneCounts,
   WorkbenchZoneId,
   WorkbenchZonePageInfo,
@@ -176,9 +172,6 @@ type ApiWorkbenchPayload = {
 type ApiWorkbenchSummaryPayload = {
   month: string;
   scope_key?: string;
-  generated_at?: string | null;
-  read_model_status?: WorkbenchReadModelStatus;
-  read_model_version?: string | null;
   oa_status?: ApiWorkbenchPayload["oa_status"];
   invoice_inventory?: ApiWorkbenchInvoiceInventory;
   summary: ApiWorkbenchPayload["summary"];
@@ -210,13 +203,10 @@ type ApiWorkbenchGroupsPayload = {
   total: number;
   row_counts?: Partial<Pick<WorkbenchZoneCounts, "oa" | "bank" | "invoice" | "rows">>;
   has_more: boolean;
-  read_model_status?: WorkbenchReadModelStatus;
-  read_model_version?: string | null;
   groups: ApiWorkbenchGroup[];
 };
 
 type ApiWorkbenchInitialPayload = ApiWorkbenchSummaryPayload & {
-  active_generation_id?: string | null;
   paired: ApiWorkbenchGroupsPayload;
   unpaired: ApiWorkbenchGroupsPayload;
 };
@@ -247,50 +237,6 @@ type ApiWorkbenchOaSyncStatus = {
   failed_event_count?: number | null;
   failedEventCount?: number | null;
   version?: number | null;
-};
-
-type ApiWorkbenchRefreshScopeStatus = {
-  scope_key?: string | null;
-  scopeKey?: string | null;
-  status?: string | null;
-  updated_at?: string | null;
-  updatedAt?: string | null;
-  last_error?: string | null;
-  lastError?: string | null;
-  source_version?: number | string | null;
-  sourceVersion?: number | string | null;
-};
-
-type ApiWorkbenchRefreshStatus = {
-  scope_key?: string | null;
-  scopeKey?: string | null;
-  read_model_status?: WorkbenchReadModelStatus | null;
-  readModelStatus?: WorkbenchReadModelStatus | null;
-  status?: string | null;
-  generated_at?: string | null;
-  generatedAt?: string | null;
-  active_generation_id?: string | null;
-  activeGenerationId?: string | null;
-  consistency_status?: string | null;
-  consistencyStatus?: string | null;
-  read_model_version?: string | number | null;
-  readModelVersion?: string | number | null;
-  source_version?: string | number | null;
-  sourceVersion?: string | number | null;
-  version?: string | number | null;
-  dirty_scopes?: ApiWorkbenchRefreshScopeStatus[] | null;
-  dirtyScopes?: ApiWorkbenchRefreshScopeStatus[] | null;
-  running_scopes?: unknown[] | null;
-  runningScopes?: unknown[] | null;
-  processed_count?: number | string | null;
-  processedCount?: number | string | null;
-  total_count?: number | string | null;
-  totalCount?: number | string | null;
-  worker_lag_seconds?: number | string | null;
-  workerLagSeconds?: number | string | null;
-  last_error?: string | null;
-  lastError?: string | null;
-  retryable?: boolean | null;
 };
 
 type ApiIgnoredWorkbenchPayload = {
@@ -394,6 +340,7 @@ type ApiWorkbenchSettingsOption =
 
 type ApiWorkbenchGroup = {
   group_id: string;
+  detail_key?: string | null;
   group_type: string;
   zone?: string | null;
   status?: string | null;
@@ -637,49 +584,12 @@ type ApiWorkbenchExceptionApplyResult = {
   updatedRows?: Array<Record<string, unknown>>;
   affected_row_ids?: unknown[];
   affectedRowIds?: unknown[];
-  affected_scope_keys?: unknown[];
-  affectedScopeKeys?: unknown[];
-  freshness_targets?: Array<{
-    readModelKey?: unknown;
-    read_model_key?: unknown;
-    scopeType?: unknown;
-    scope_type?: unknown;
-    scopeKey?: unknown;
-    scope_key?: unknown;
-  }>;
-  freshnessTargets?: Array<{
-    readModelKey?: unknown;
-    read_model_key?: unknown;
-    scopeType?: unknown;
-    scope_type?: unknown;
-    scopeKey?: unknown;
-    scope_key?: unknown;
-  }>;
-  operation_barrier_targets?: Array<{
-    readModelKey?: unknown;
-    read_model_key?: unknown;
-    scopeType?: unknown;
-    scope_type?: unknown;
-    scopeKey?: unknown;
-    scope_key?: unknown;
-  }>;
-  operationBarrierTargets?: Array<{
-    readModelKey?: unknown;
-    read_model_key?: unknown;
-    scopeType?: unknown;
-    scope_type?: unknown;
-    scopeKey?: unknown;
-    scope_key?: unknown;
-  }>;
-  workbench_refresh_required?: boolean;
-  workbenchRefreshRequired?: boolean;
   message?: string;
 };
 
 type ConfirmLinkPayload = {
   month: string;
   rowIds: string[];
-  expectedReadModelVersion: string;
   caseId?: string;
   note?: string;
 };
@@ -687,7 +597,6 @@ type ConfirmLinkPayload = {
 type WithdrawLinkPayload = {
   month: string;
   rowIds: string[];
-  expectedReadModelVersion: string;
   note?: string;
   operationType?: "withdraw_relation";
   previewId?: string;
@@ -697,7 +606,6 @@ type WithdrawLinkPayload = {
 type MarkExceptionPayload = {
   month: string;
   rowId: string;
-  expectedReadModelVersion: string;
   exceptionCode: string;
   comment?: string;
 };
@@ -705,14 +613,12 @@ type MarkExceptionPayload = {
 type CancelLinkPayload = {
   month: string;
   rowId: string;
-  expectedReadModelVersion: string;
   comment?: string;
 };
 
 type UpdateBankExceptionPayload = {
   month: string;
   rowId: string;
-  expectedReadModelVersion: string;
   relationCode: string;
   relationLabel: string;
   comment?: string;
@@ -721,34 +627,29 @@ type UpdateBankExceptionPayload = {
 type ConfirmPersonalAdvanceRepaymentPayload = {
   month: string;
   rowIds: string[];
-  expectedReadModelVersion: string;
   note?: string;
 };
 
 type IgnoreRowPayload = {
   month: string;
   rowId: string;
-  expectedReadModelVersion: string;
   comment?: string;
 };
 
 type UnignoreRowPayload = {
   month: string;
   rowId: string;
-  expectedReadModelVersion: string;
 };
 
 type CancelExceptionPayload = {
   month: string;
   rowIds: string[];
-  expectedReadModelVersion: string;
   comment?: string;
 };
 
 type ConfirmCashPassThroughPayload = {
   month: string;
   rowIds: string[];
-  expectedReadModelVersion: string;
   cashAmount?: string;
   note?: string;
 };
@@ -756,7 +657,6 @@ type ConfirmCashPassThroughPayload = {
 type ConfirmCashTicketPurchasePayload = {
   month: string;
   rowIds: string[];
-  expectedReadModelVersion: string;
   cashAmount: string;
   ticketCostAmount: string;
   projectId?: string;
@@ -769,7 +669,6 @@ type ConfirmCashTicketPurchasePayload = {
 type CancelCashSpecialPayload = {
   month: string;
   rowIds: string[];
-  expectedReadModelVersion: string;
   note?: string;
 };
 
@@ -1428,6 +1327,9 @@ function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): Workben
   const rawGroupType = String(group.group_type || "").trim();
   const mapped: WorkbenchRelationGroup = {
     id: group.group_id,
+    detailKey: typeof group.detail_key === "string" && group.detail_key.trim()
+      ? group.detail_key.trim()
+      : undefined,
     groupType: mapGroupType(group.group_type, zoneHint),
     rawGroupType: rawGroupType || undefined,
     matchConfidence: group.match_confidence,
@@ -1665,19 +1567,12 @@ function mapWorkbenchExceptionPreview(payload: ApiWorkbenchExceptionPreview): Wo
 function mapWorkbenchExceptionApplyResult(
   payload: ApiWorkbenchExceptionApplyResult,
 ): WorkbenchExceptionApplyResult {
-  const freshnessTargets = cleanFreshnessTargets(payload.freshnessTargets ?? payload.freshness_targets);
-  const operationBarrierTargets = cleanFreshnessTargets(payload.operationBarrierTargets ?? payload.operation_barrier_targets);
   return {
     success: payload.success === true,
     case: payload.case ?? null,
     pairRelation: payload.pairRelation ?? payload.pair_relation ?? null,
     updatedRows: payload.updatedRows ?? payload.updated_rows ?? [],
     affectedRowIds: (payload.affectedRowIds ?? payload.affected_row_ids ?? []).map((rowId) => String(rowId)),
-    affectedScopeKeys: cleanScopeList(payload.affectedScopeKeys ?? payload.affected_scope_keys)
-      .filter((scopeKey) => scopeKey !== "all"),
-    freshnessTargets,
-    operationBarrierTargets: operationBarrierTargets.length > 0 ? operationBarrierTargets : freshnessTargets,
-    workbenchRefreshRequired: payload.workbenchRefreshRequired ?? payload.workbench_refresh_required ?? false,
     message: typeof payload.message === "string" && payload.message.trim() ? payload.message.trim() : undefined,
   };
 }
@@ -1725,10 +1620,6 @@ function mapSummaryCounts(summary: ApiWorkbenchPayload["summary"]): WorkbenchSum
   };
 }
 
-function mapReadModelStatus(value: unknown): WorkbenchReadModelStatus {
-  return String(value ?? "refreshing").trim() as WorkbenchReadModelStatus || "refreshing";
-}
-
 function mapWorkbenchZonePage(payload: ApiWorkbenchGroupsPayload): WorkbenchZonePageInfo {
   return {
     zone: payload.zone,
@@ -1743,8 +1634,6 @@ function mapWorkbenchZonePage(payload: ApiWorkbenchGroupsPayload): WorkbenchZone
         || toCount(payload.row_counts?.oa) + toCount(payload.row_counts?.bank) + toCount(payload.row_counts?.invoice),
     },
     hasMore: payload.has_more === true,
-    readModelStatus: mapReadModelStatus(payload.read_model_status),
-    readModelVersion: payload.read_model_version ?? null,
   };
 }
 
@@ -2029,7 +1918,7 @@ const WORKBENCH_API_ERROR_MESSAGES: Record<string, string> = {
   duplicate_pending_invoice_tag_mapping: "同一个银行明细标签不能同时归入多个待找发票筛选。",
   bank_transaction_tag_in_use_by_pending_invoice_filter: "该银行明细标签仍被待找发票筛选使用，请先从待找发票筛选中移除。",
   bank_transaction_tags_version_conflict: "银行明细标签已被其他页面更新，请刷新后重新保存。",
-  workbench_read_model_version_conflict: "关联台数据已变化，请刷新后重新预览。",
+  workbench_canonical_selection_conflict: "所选关联台记录已变化，请重新读取后重新预览。",
   workbench_relation_preview_stale: "关联预览已失效，请重新预览。",
   workbench_relation_preview_conflict: "关联预览已失效，请重新预览。",
   workbench_row_not_found: "所选关联台记录已不可用，请刷新后重新选择。",
@@ -2263,60 +2152,6 @@ function cleanOaSyncScopeList(value: unknown[] | undefined) {
     : [];
 }
 
-function nullableNumber(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value === "string" && value.trim()) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-}
-
-function cleanRefreshScopeList(value: unknown[] | null | undefined): WorkbenchRefreshScopeStatus[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value
-    .filter((item): item is ApiWorkbenchRefreshScopeStatus => Boolean(item) && typeof item === "object")
-    .map((scope) => ({
-      scopeKey: String(scope.scopeKey ?? scope.scope_key ?? "").trim(),
-      status: String(scope.status ?? "").trim(),
-      updatedAt: scope.updatedAt ?? scope.updated_at ?? null,
-      lastError: scope.lastError ?? scope.last_error ?? null,
-      sourceVersion: nullableNumber(scope.sourceVersion ?? scope.source_version),
-    }))
-    .filter((scope) => scope.scopeKey || scope.status);
-}
-
-function mapWorkbenchRefreshStatus(payload: ApiWorkbenchRefreshStatus): WorkbenchRefreshStatus {
-  const rawStatus = String(payload.readModelStatus ?? payload.read_model_status ?? payload.status ?? "refreshing").trim() || "refreshing";
-  return {
-    scopeKey: String(payload.scopeKey ?? payload.scope_key ?? "all").trim() || "all",
-    readModelStatus: rawStatus as WorkbenchReadModelStatus,
-    consistencyStatus: payload.consistencyStatus ?? payload.consistency_status ?? null,
-    generatedAt: payload.generatedAt ?? payload.generated_at ?? null,
-    activeGenerationId: payload.activeGenerationId ?? payload.active_generation_id ?? null,
-    readModelVersion:
-      payload.readModelVersion ??
-      payload.read_model_version ??
-      payload.activeGenerationId ??
-      payload.active_generation_id ??
-      payload.sourceVersion ??
-      payload.source_version ??
-      payload.version ??
-      null,
-    dirtyScopes: cleanRefreshScopeList(payload.dirtyScopes ?? payload.dirty_scopes),
-    runningScopes: cleanOaSyncScopeList((payload.runningScopes ?? payload.running_scopes) as unknown[] | undefined),
-    processedCount: nullableNumber(payload.processedCount ?? payload.processed_count),
-    totalCount: nullableNumber(payload.totalCount ?? payload.total_count),
-    workerLagSeconds: nullableNumber(payload.workerLagSeconds ?? payload.worker_lag_seconds),
-    lastError: payload.lastError ?? payload.last_error ?? null,
-    retryable: payload.retryable === true,
-  };
-}
-
 export async function fetchWorkbenchOaSyncStatus(signal?: AbortSignal): Promise<WorkbenchOaSyncStatus> {
   const payload = await requestJson<ApiWorkbenchOaSyncStatus>("/api/oa-sync/status", { method: "GET", signal });
   const status = String(payload.status ?? "synced").trim() || "synced";
@@ -2341,80 +2176,12 @@ export async function fetchWorkbenchOaSyncStatus(signal?: AbortSignal): Promise<
   };
 }
 
-export async function fetchWorkbenchRefreshStatus(month: string, signal?: AbortSignal): Promise<WorkbenchRefreshStatus> {
-  const params = new URLSearchParams({ month });
-  const payload = await requestJson<ApiWorkbenchRefreshStatus>(`/api/workbench/refresh-status?${params.toString()}`, {
-    method: "GET",
-    signal,
-  });
-  return mapWorkbenchRefreshStatus(payload);
-}
-
-export type WorkbenchRefreshSubscription = {
-  close: () => void;
-};
-
-export function subscribeWorkbenchRefreshEvents(
-  month: string,
-  onEvent: (event: WorkbenchRefreshStatusEvent) => void,
-  onError: (error: unknown) => void,
-): WorkbenchRefreshSubscription | null {
-  if (typeof globalThis.EventSource !== "function") {
-    return null;
-  }
-
-  const params = new URLSearchParams({ month });
-  const eventSource = new EventSource(apiUrl(`/api/workbench/events?${params.toString()}`), {
-    withCredentials: true,
-  });
-  let closed = false;
-
-  const close = () => {
-    if (closed) {
-      return;
-    }
-    closed = true;
-    eventSource.close();
-  };
-
-  const handleStatusEvent = (eventName: string) => (event: MessageEvent) => {
-    try {
-      onEvent({
-        event: eventName,
-        status: mapWorkbenchRefreshStatus(JSON.parse(event.data) as ApiWorkbenchRefreshStatus),
-      });
-    } catch (error) {
-      close();
-      onError(error);
-    }
-  };
-
-  [
-    "workbench.read_model.refresh_started",
-    "workbench.read_model.progress",
-    "workbench.read_model.page_available",
-    "workbench.read_model.summary_updated",
-    "workbench.read_model.completed",
-    "workbench.read_model.failed",
-  ].forEach((eventName) => {
-    eventSource.addEventListener(eventName, handleStatusEvent(eventName));
-  });
-
-  eventSource.onerror = (event) => {
-    close();
-    onError(event);
-  };
-
-  return { close };
-}
-
 function workbenchGroupsUrl(
   month: string,
   zone: WorkbenchZoneId,
   page: number,
   pageSize: number,
   query: WorkbenchGroupsPageQuery = {},
-  expectedReadModelVersion?: string,
 ) {
   const params = new URLSearchParams({
     month,
@@ -2449,9 +2216,6 @@ function workbenchGroupsUrl(
   }
   if (timeFilters) {
     params.set("time_filters", timeFilters);
-  }
-  if (expectedReadModelVersion?.trim()) {
-    params.set("expected_read_model_version", expectedReadModelVersion.trim());
   }
   return `/api/workbench/groups?${params.toString()}`;
 }
@@ -2528,10 +2292,9 @@ export async function fetchWorkbenchGroupsPage(
   pageSize = WORKBENCH_GROUP_PAGE_SIZE,
   signal?: AbortSignal,
   query: WorkbenchGroupsPageQuery = {},
-  expectedReadModelVersion?: string,
 ): Promise<WorkbenchGroupsPageResult> {
   const payload = await requestJson<ApiWorkbenchGroupsPayload>(
-    workbenchGroupsUrl(month, zone, page, pageSize, query, expectedReadModelVersion),
+    workbenchGroupsUrl(month, zone, page, pageSize, query),
     { method: "GET", signal },
   );
   return {
@@ -2545,15 +2308,17 @@ export async function fetchWorkbenchGroupDetail(
   month: string,
   zone: WorkbenchZoneId,
   groupId: string,
-  expectedReadModelVersion: string,
+  detailKey?: string,
   signal?: AbortSignal,
 ): Promise<WorkbenchRelationGroup> {
   const params = new URLSearchParams({
     month,
     zone,
     group_id: groupId,
-    expected_read_model_version: expectedReadModelVersion,
   });
+  if (detailKey?.trim()) {
+    params.set("detail_key", detailKey.trim());
+  }
   const payload = await requestJson<{
     group: ApiWorkbenchGroup;
   }>(`/api/workbench/groups/detail?${params.toString()}`, {
@@ -2608,19 +2373,13 @@ export async function fetchWorkbenchInitialPage(
     method: "GET",
     signal,
   });
-  const readModelVersion = payload.read_model_version ?? payload.active_generation_id ?? null;
-  const readModelStatus = mapReadModelStatus(payload.read_model_status);
   const pairedPayload: ApiWorkbenchGroupsPayload = {
     ...payload.paired,
     zone: "paired",
-    read_model_status: payload.paired.read_model_status ?? readModelStatus,
-    read_model_version: payload.paired.read_model_version ?? readModelVersion,
   };
   const unpairedPayload: ApiWorkbenchGroupsPayload = {
     ...payload.unpaired,
     zone: "unpaired",
-    read_model_status: payload.unpaired.read_model_status ?? readModelStatus,
-    read_model_version: payload.unpaired.read_model_version ?? readModelVersion,
   };
   onProgress?.({
     label: "关联台数据已加载完成",
@@ -3146,16 +2905,13 @@ export async function deleteWorkbenchSettingsProject(projectId: string): Promise
 
 export async function fetchWorkbenchRowDetail(
   rowId: string,
-  options: AbortSignal | { month?: string; signal?: AbortSignal; expectedReadModelVersion?: string } = {},
+  options: AbortSignal | { month?: string; signal?: AbortSignal } = {},
 ): Promise<WorkbenchRecord> {
   const signal = options instanceof AbortSignal ? options : options.signal;
   const month = options instanceof AbortSignal ? "" : options.month?.trim() ?? "";
   const params = new URLSearchParams();
   if (month) {
     params.set("month", month);
-  }
-  if (!(options instanceof AbortSignal) && options.expectedReadModelVersion?.trim()) {
-    params.set("expected_read_model_version", options.expectedReadModelVersion.trim());
   }
   const query = params.toString();
   const payload = await requestJson<{ row: ApiWorkbenchRow }>(
@@ -3172,13 +2928,11 @@ export async function confirmWorkbenchLink(payload: ConfirmLinkPayload): Promise
   const requestBody: {
     month: string;
     row_ids: string[];
-    expected_read_model_version: string;
     case_id?: string;
     note?: string;
   } = {
     month: payload.month,
     row_ids: payload.rowIds,
-    expected_read_model_version: payload.expectedReadModelVersion,
     case_id: payload.caseId,
   };
   if (payload.note?.trim()) {
@@ -3199,7 +2953,6 @@ export async function previewWorkbenchConfirmLink(payload: ConfirmLinkPayload): 
     body: JSON.stringify({
       month: payload.month,
       row_ids: payload.rowIds,
-      expected_read_model_version: payload.expectedReadModelVersion,
       case_id: payload.caseId,
     }),
   });
@@ -3213,7 +2966,6 @@ export async function previewWorkbenchWithdrawLink(payload: WithdrawLinkPayload)
     body: JSON.stringify({
       month: payload.month,
       row_ids: payload.rowIds,
-      expected_read_model_version: payload.expectedReadModelVersion,
     }),
   });
   return mapRelationPreview(result);
@@ -3228,7 +2980,6 @@ export async function previewWorkbenchException(
     body: JSON.stringify({
       month: payload.month,
       row_ids: payload.rowIds,
-      expected_read_model_version: payload.expectedReadModelVersion,
     }),
   });
   return mapWorkbenchExceptionPreview(result);
@@ -3245,7 +2996,6 @@ export async function applyWorkbenchException(
       body: JSON.stringify({
         month: payload.month,
         row_ids: payload.rowIds,
-        expected_read_model_version: payload.expectedReadModelVersion,
         scenario_code: payload.scenarioCode,
         action_code: payload.actionCode,
         payload: payload.payload,
@@ -3260,7 +3010,6 @@ export async function withdrawWorkbenchLink(payload: WithdrawLinkPayload): Promi
   const requestBody: {
     month: string;
     row_ids: string[];
-    expected_read_model_version: string;
     note?: string;
     operation_type?: "withdraw_relation";
     preview_id?: string;
@@ -3268,7 +3017,6 @@ export async function withdrawWorkbenchLink(payload: WithdrawLinkPayload): Promi
   } = {
     month: payload.month,
     row_ids: payload.rowIds,
-    expected_read_model_version: payload.expectedReadModelVersion,
   };
   if (payload.note?.trim()) {
     requestBody.note = payload.note.trim();
@@ -3297,7 +3045,6 @@ export async function markWorkbenchException(payload: MarkExceptionPayload): Pro
     body: JSON.stringify({
       month: payload.month,
       row_id: payload.rowId,
-      expected_read_model_version: payload.expectedReadModelVersion,
       exception_code: payload.exceptionCode,
       comment: payload.comment,
     }),
@@ -3312,7 +3059,6 @@ export async function cancelWorkbenchLink(payload: CancelLinkPayload): Promise<W
     body: JSON.stringify({
       month: payload.month,
       row_id: payload.rowId,
-      expected_read_model_version: payload.expectedReadModelVersion,
       comment: payload.comment,
     }),
   });
@@ -3326,7 +3072,6 @@ export async function updateWorkbenchBankException(payload: UpdateBankExceptionP
     body: JSON.stringify({
       month: payload.month,
       row_id: payload.rowId,
-      expected_read_model_version: payload.expectedReadModelVersion,
       relation_code: payload.relationCode,
       relation_label: payload.relationLabel,
       comment: payload.comment,
@@ -3342,7 +3087,6 @@ export async function confirmWorkbenchPersonalAdvanceRepayment(payload: ConfirmP
     body: JSON.stringify({
       month: payload.month,
       row_ids: payload.rowIds,
-      expected_read_model_version: payload.expectedReadModelVersion,
       note: payload.note,
     }),
   });
@@ -3356,7 +3100,6 @@ export async function ignoreWorkbenchRow(payload: IgnoreRowPayload): Promise<Wor
     body: JSON.stringify({
       month: payload.month,
       row_id: payload.rowId,
-      expected_read_model_version: payload.expectedReadModelVersion,
       comment: payload.comment,
     }),
   });
@@ -3370,7 +3113,6 @@ export async function unignoreWorkbenchRow(payload: UnignoreRowPayload): Promise
     body: JSON.stringify({
       month: payload.month,
       row_id: payload.rowId,
-      expected_read_model_version: payload.expectedReadModelVersion,
     }),
   });
   return mapWorkbenchActionResult(result);
@@ -3383,7 +3125,6 @@ export async function cancelWorkbenchException(payload: CancelExceptionPayload):
     body: JSON.stringify({
       month: payload.month,
       row_ids: payload.rowIds,
-      expected_read_model_version: payload.expectedReadModelVersion,
       comment: payload.comment,
     }),
   });
@@ -3397,7 +3138,6 @@ export async function confirmWorkbenchCashPassThrough(payload: ConfirmCashPassTh
     body: JSON.stringify({
       month: payload.month,
       row_ids: payload.rowIds,
-      expected_read_model_version: payload.expectedReadModelVersion,
       cash_amount: payload.cashAmount,
       note: payload.note,
     }),
@@ -3412,7 +3152,6 @@ export async function confirmWorkbenchCashTicketPurchase(payload: ConfirmCashTic
     body: JSON.stringify({
       month: payload.month,
       row_ids: payload.rowIds,
-      expected_read_model_version: payload.expectedReadModelVersion,
       cash_amount: payload.cashAmount,
       ticket_cost_amount: payload.ticketCostAmount,
       project_id: payload.projectId,
@@ -3432,7 +3171,6 @@ export async function cancelWorkbenchCashSpecial(payload: CancelCashSpecialPaylo
     body: JSON.stringify({
       month: payload.month,
       row_ids: payload.rowIds,
-      expected_read_model_version: payload.expectedReadModelVersion,
       note: payload.note,
     }),
   });

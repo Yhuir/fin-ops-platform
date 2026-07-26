@@ -7,9 +7,9 @@
 | 类别 | 当前是否适用 | 说明 |
 | --- | --- | --- |
 | 1. Business core unit tests | 后续代码变更适用 | owner 模块业务状态机、金额、匹配、幂等、权限或冲突规则变化时必须覆盖。 |
-| 2. Service-layer tests | 后续代码变更适用 | command service、repository、UoW、dirty scope、audit、rollback 或 partial failure 变化时必须覆盖。 |
-| 3. API contract tests | 后续 API 变更适用 | 写 API 或读 API response shape、freshness target、error/status 字段变化时必须覆盖。 |
-| 4. Read model/cache/background job tests | 后续影响 read model 适用 | canonical write 影响 list、summary、search、workbench、ledger、tax 等 read model 时必须覆盖 invalidation、fresh/stale/refreshing。 |
+| 2. Service-layer tests | 当前适用 | `tests/test_workbench_canonical_query_repository.py` 保护已登记的页面专属跨 owner 只读聚合、同 snapshot、固定查询数和事务内 canonical identity 重验；其它 owner 变化继续由各模块覆盖。 |
+| 3. API contract tests | 当前适用 | `tests/test_workbench_routes.py`、`tests/test_workbench_v2_api.py` 保护关联台直读 response shape、非法输入、权限与错误状态；其它 API 变化由 owner 模块覆盖。 |
+| 4. Read model/cache/background job tests | 当前局部适用 | 关联台页面不再经过 Workbench generation/cache/refresh；architecture guards 证明旧页面路径删除，同时保留 batch-accounting 等共享调用方的 generation/worker。 |
 | 5. Frontend component/interaction tests | 后续页面变更适用 | 页面读写 canonical facts 或等待 operation barrier 的 UI 行为变化时必须覆盖。 |
 | 6. E2E business-flow integration tests | 跨模块重构适用 | import -> confirm -> worker -> page、relation confirm -> downstream pages 等跨模块链路变化时必须覆盖至少一条关键路径。 |
 | 7. Existing feature regression tests | 总是评估 | owner 收口可能影响旧页面、旧 API、旧 read model、旧导出、旧权限和旧 worker。 |

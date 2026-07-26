@@ -2,15 +2,32 @@ from __future__ import annotations
 
 from http import HTTPStatus
 import json
-from typing import Any, Callable, Iterable
-
-from fin_ops_platform.services.workbench_groups_page_cache import (
-    normalize_workbench_group_detail_level,
-    stable_json_value,
-)
+from typing import Any, Callable
 
 
 WORKBENCH_SEARCH_QUERY_MAX_LENGTH = 200
+
+
+def normalize_workbench_group_detail_level(value: str | None) -> str:
+    return "summary" if str(value or "").strip().lower() == "summary" else "full"
+
+
+def stable_json_value(value: object) -> object:
+    if isinstance(value, dict):
+        return {
+            str(key): stable_json_value(value[key])
+            for key in sorted(value, key=lambda item: str(item))
+            if value[key] is not None
+        }
+    if isinstance(value, list):
+        normalized_items = [stable_json_value(item) for item in value]
+        if all(not isinstance(item, (dict, list)) for item in normalized_items):
+            return sorted(
+                normalized_items,
+                key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True),
+            )
+        return normalized_items
+    return value
 
 
 class WorkbenchRowDetailApiRoutes:
@@ -30,13 +47,11 @@ class WorkbenchRowDetailApiRoutes:
         row_id: str,
         *,
         month: str | None = None,
-        expected_read_model_version: str | None = None,
     ) -> tuple[HTTPStatus, dict[str, object]]:
-        kwargs: dict[str, object] = {"row_id": row_id}
-        expected_version = str(expected_read_model_version or "").strip()
-        if expected_version:
-            kwargs["expected_read_model_version"] = expected_version
-        result = self._query_facade_provider().row_detail(month or "all", **kwargs)
+        result = self._query_facade_provider().row_detail(
+            month or "all",
+            row_id=row_id,
+        )
         return result.status_code, result.payload
 
 
@@ -52,7 +67,7 @@ class WorkbenchGroupDetailApiRoutes:
         *,
         zone: str | None,
         group_id: str | None,
-        expected_read_model_version: str | None = None,
+        detail_key: str | None = None,
     ) -> tuple[HTTPStatus, dict[str, object]]:
         current_month = month or "all"
         normalized_zone = str(zone or "").strip()
@@ -71,7 +86,7 @@ class WorkbenchGroupDetailApiRoutes:
             current_month,
             zone=normalized_zone,
             group_id=normalized_group_id,
-            expected_read_model_version=str(expected_read_model_version or "").strip() or None,
+            detail_key=str(detail_key or "").strip() or None,
         )
         return result.status_code, result.payload
 
@@ -81,10 +96,6 @@ class WorkbenchReadApiRoutes:
 
     def __init__(self, *, query_facade_provider: Callable[[], Any]) -> None:
         self._query_facade_provider = query_facade_provider
-
-    def refresh_status(self, month: str | None) -> tuple[HTTPStatus, dict[str, object]]:
-        result = self._query_facade_provider().refresh_status(month)
-        return result.status_code, result.payload
 
     def initial(
         self,
@@ -122,7 +133,6 @@ class WorkbenchReadApiRoutes:
         detail_level: str | None = None,
         column_filters: str | None = None,
         time_filters: str | None = None,
-        expected_read_model_version: str | None = None,
     ) -> tuple[HTTPStatus, dict[str, object]]:
         current_month = month or "all"
         normalized_zone = str(zone or "").strip()
@@ -152,9 +162,6 @@ class WorkbenchReadApiRoutes:
             "column_filters": normalized_column_filters,
             "time_filters": normalized_time_filters,
         }
-        expected_version = str(expected_read_model_version or "").strip()
-        if expected_version:
-            kwargs["expected_read_model_version"] = expected_version
         result = self._query_facade_provider().groups(current_month, **kwargs)
         return result.status_code, result.payload
 
@@ -201,63 +208,3 @@ class WorkbenchReadApiRoutes:
             raise ValueError(f"{name} must be a JSON object.")
         normalized = stable_json_value(parsed)
         return normalized if isinstance(normalized, dict) else {}
-
-
-class WorkbenchEventsApiRoutes:
-    """Read-only owner for Workbench refresh status SSE stream construction."""
-
-    def __init__(
-        self,
-        *,
-        scope_key_for_month: Callable[[str], str],
-        status_payload_for_scope: Callable[[str], dict[str, object]],
-        event_name_for_payload: Callable[[dict[str, object]], str],
-        serialize_sse_event: Callable[[str, dict[str, object]], str],
-        mark_stream_started: Callable[[str], None],
-        mark_stream_closed: Callable[[str], None],
-        sleep_seconds: Callable[[float], None],
-    ) -> None:
-        self._scope_key_for_month = scope_key_for_month
-        self._status_payload_for_scope = status_payload_for_scope
-        self._event_name_for_payload = event_name_for_payload
-        self._serialize_sse_event = serialize_sse_event
-        self._mark_stream_started = mark_stream_started
-        self._mark_stream_closed = mark_stream_closed
-        self._sleep_seconds = sleep_seconds
-
-    def events(self, month: str | None) -> tuple[HTTPStatus, Iterable[str], dict[str, str]]:
-        current_month = month or "all"
-        scope_key = self._scope_key_for_month(current_month)
-
-        def event_stream() -> Iterable[str]:
-            self._mark_stream_started(scope_key)
-            try:
-                while True:
-                    status_payload = self._status_payload_for_scope(scope_key)
-                    event_name = self._event_name_for_payload(status_payload)
-                    yield self._serialize_sse_event(event_name, status_payload)
-                    yield self._serialize_sse_event(
-                        "heartbeat",
-                        {
-                            "scope_key": scope_key,
-                            "generated_at": status_payload.get("generated_at"),
-                            "read_model_status": status_payload.get("read_model_status"),
-                        },
-                    )
-                    self._sleep_seconds(5)
-            finally:
-                self._mark_stream_closed(scope_key)
-
-        return (
-            HTTPStatus.OK,
-            event_stream(),
-            {
-                "Content-Type": "text/event-stream; charset=utf-8",
-                "Cache-Control": "no-cache, no-transform",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Headers": "Content-Type",
-                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-            },
-        )

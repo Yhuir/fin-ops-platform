@@ -12,7 +12,6 @@ import unittest
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application
-from fin_ops_platform.services.app_health_service import AppHealthService
 from fin_ops_platform.services.postgres_repositories.read_models import (
     WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION,
     PostgresReadModelRepository,
@@ -28,19 +27,10 @@ from fin_ops_platform.services.read_model_freshness import (
 )
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 from fin_ops_platform.services.workbench_free_matching_engine import RULE_VERSION as WORKBENCH_FORMAL_RELATION_RULE_VERSION
-from fin_ops_platform.services.workbench_groups_page_cache import (
-    WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION,
-    WORKBENCH_INITIAL_PAGE_CACHE_SCHEMA_VERSION,
-    build_workbench_groups_redis_cache_key_from_version,
-    build_workbench_initial_redis_cache_key,
-)
 from fin_ops_platform.services.workbench_read_model_version import (
     WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION,
 )
 from fin_ops_platform.services.workbench_read_model_refresh import WorkbenchReadModelRefreshService
-from fin_ops_platform.services.workbench_query_freshness_service import (
-    WorkbenchQueryFreshnessService,
-)
 from fin_ops_platform.services.workbench_sql_projection import (
     WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
     WorkbenchSqlProjectionBuilder,
@@ -1890,153 +1880,13 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(versions["builder"], WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
 
-    def test_workbench_all_freshness_returns_only_exact_canonical_mismatch_scopes(self) -> None:
-        class BulkBuilder:
-            @staticmethod
-            def list_workbench_scope_shards(_scope_key: str) -> list[str]:
-                return ["2026-02", "2026-03"]
-
-            @staticmethod
-            def source_versions_for_scopes(_scope_keys: list[str]) -> dict[str, dict[str, object]]:
-                return {
-                    "2026-02": {"builder": "current", "relation_version": "same"},
-                    "2026-03": {"builder": "current", "relation_version": "new"},
-                }
-
-        class Repository:
-            @staticmethod
-            def active_workbench_source_versions_by_scope(
-                *,
-                scope_keys: list[str],
-            ) -> dict[str, dict[str, object]]:
-                active_versions = {
-                    "2026-02": {"builder": "current", "relation_version": "same", "source_version": 10},
-                    "2026-03": {"builder": "current", "relation_version": "old", "source_version": 11},
-                }
-                return {scope_key: active_versions[scope_key] for scope_key in scope_keys}
-
-        service = WorkbenchQueryFreshnessService(
-            projection_builder=BulkBuilder(),
-            repository=Repository(),
-            single_scope_stale_reasons=lambda *_args, **_kwargs: [],
-        )
-
-        result = service.apply(
-            {
-                "scope_key": "all",
-                "read_model_status": "fresh",
-                "read_model_version": "generation-set-1",
-            },
-            scope_key="all",
-        )
-
-        self.assertEqual(result["read_model_status"], "stale")
-        self.assertEqual(result["refresh_scope_keys"], ["2026-03"])
-        self.assertEqual(
-            result["read_model_stale_reasons"],
-            ["2026-03:relation_version_mismatch"],
-        )
-
-    def test_workbench_refreshing_freshness_skips_duplicate_canonical_proof(self) -> None:
-        class FailIfUsedBuilder:
-            @staticmethod
-            def list_workbench_scope_shards(_scope_key: str) -> list[str]:
-                raise AssertionError("refreshing scope must not repeat canonical source proof")
-
-        service = WorkbenchQueryFreshnessService(
-            projection_builder=FailIfUsedBuilder(),
-            repository=SimpleNamespace(active_workbench_source_versions_by_scope=lambda **_kwargs: {}),
-            single_scope_stale_reasons=lambda *_args, **_kwargs: (_ for _ in ()).throw(
-                AssertionError("refreshing scope must not repeat single-scope source proof")
-            ),
-        )
-        payload = {
-            "scope_key": "all",
-            "read_model_status": "refreshing",
-            "active_refresh_in_progress": True,
-            "dirty_scopes": [{"scope_key": "2026-03", "status": "processing"}],
-        }
-
-        result = service.apply(payload, scope_key="all")
-
-        self.assertIs(result, payload)
-
-    def test_workbench_refreshing_without_active_event_runs_canonical_proof(self) -> None:
-        calls: list[str | None] = []
-
-        def stale_reasons(
-            _source_versions: object,
-            *,
-            scope_key: str | None = None,
-        ) -> list[str]:
-            calls.append(scope_key)
-            return ["builder_mismatch"]
-
-        service = WorkbenchQueryFreshnessService(
-            projection_builder=None,
-            repository=None,
-            single_scope_stale_reasons=stale_reasons,
-        )
-
-        result = service.apply(
-            {
-                "scope_key": "2026-03",
-                "read_model_status": "refreshing",
-                "active_refresh_in_progress": False,
-            },
-            scope_key="2026-03",
-        )
-
-        self.assertEqual(calls, ["2026-03"])
-        self.assertEqual(result["read_model_status"], "stale")
-        self.assertEqual(result["refresh_scope_keys"], ["2026-03"])
-
-    def test_workbench_all_freshness_keeps_non_sql_fallback_contract(self) -> None:
-        calls: list[tuple[object, str | None]] = []
-
-        def stale_reasons(
-            source_versions: object,
-            *,
-            scope_key: str | None = None,
-        ) -> list[str]:
-            calls.append((source_versions, scope_key))
-            return ["builder_mismatch"]
-
-        service = WorkbenchQueryFreshnessService(
-            projection_builder=None,
-            repository=None,
-            single_scope_stale_reasons=stale_reasons,
-        )
-
-        result = service.apply(
-            {
-                "scope_key": "all",
-                "read_model_status": "fresh",
-                "active_generation_id": "generation-set-1",
-                "generations": [
-                    {
-                        "generation_id": "generation-set-1",
-                        "source_versions": {"builder": "old"},
-                    }
-                ],
-            },
-            scope_key="all",
-        )
-
-        self.assertEqual(calls, [({"builder": "old"}, "all")])
-        self.assertEqual(result["read_model_status"], "stale")
-        self.assertEqual(result["read_model_stale_reasons"], ["builder_mismatch"])
-        self.assertEqual(result["refresh_scope_keys"], [])
-
-    def test_workbench_v7_rejects_v6_month_all_and_cache_versions(self) -> None:
+    def test_workbench_v7_rejects_v6_month_and_all_versions(self) -> None:
         app = object.__new__(Application)
         old_month = "2026-07-22-turnover-frozen-requirements-v6"
         old_all = "workbench_sql_projection.composed_active_month_shards.turnover_frozen_requirements.v6"
 
         self.assertIn("v7", WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION)
         self.assertIn("v7", WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
-        self.assertIn(WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION, WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION)
-        self.assertIn(WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION, WORKBENCH_INITIAL_PAGE_CACHE_SCHEMA_VERSION)
         self.assertIn(
             "builder_mismatch",
             app._workbench_sql_read_model_stale_reasons(
@@ -2051,43 +1901,6 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 scope_key="all",
             ),
         )
-
-        current_groups_key = build_workbench_groups_redis_cache_key_from_version(
-            cache_version="generation-1",
-            scope_key="2026-05",
-            zone="unpaired",
-            page="1",
-            page_size="50",
-            status=None,
-            source_kind=None,
-            search=None,
-            sort=None,
-            detail_level="summary",
-        )
-        old_groups_key = build_workbench_groups_redis_cache_key_from_version(
-            cache_version="generation-1",
-            scope_key="2026-05",
-            zone="unpaired",
-            page="1",
-            page_size="50",
-            status=None,
-            source_kind=None,
-            search=None,
-            sort=None,
-            detail_level="summary",
-            schema_version=f"{old_month}:relation-completion-v1",
-        )
-        current_initial_key = build_workbench_initial_redis_cache_key(
-            cache_version="generation-1",
-            scope_key="2026-05",
-        )
-        old_initial_key = build_workbench_initial_redis_cache_key(
-            cache_version="generation-1",
-            scope_key="2026-05",
-            schema_version=f"{old_month}:relation-completion-v1:initial-v2",
-        )
-        self.assertNotEqual(current_groups_key, old_groups_key)
-        self.assertNotEqual(current_initial_key, old_initial_key)
 
     def test_sql_projection_manual_invoice_rows_include_tax_meta_for_amount_cell(self) -> None:
         connection = InvoiceRowsProjectionConnection()
@@ -3418,28 +3231,6 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("join read_model.workbench_groups grp", sql)
         self.assertIn("grp.payload #>> '{completion,is_complete}'", sql)
 
-
-    def test_workbench_refresh_status_api_maps_statement_timeout_to_retryable_unavailable(self) -> None:
-        app = object.__new__(Application)
-        app._runtime_repositories = SimpleNamespace(queue_repository=QueueRecorder(), redis_helper=None)
-        app._workbench_sql_read_repository = type(
-            "SqlWorkbench",
-            (),
-            {
-                "get_workbench_refresh_status": lambda _self, **_kwargs: (_ for _ in ()).throw(
-                    RuntimeError("canceling statement due to statement timeout")
-                )
-            },
-        )()
-
-        response = app._handle_api_workbench_refresh_status("all")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, int(HTTPStatus.SERVICE_UNAVAILABLE))
-        self.assertEqual(payload["error"], "query_timeout")
-        self.assertEqual(payload["read_model_status"], "unavailable")
-        self.assertEqual(payload["scope_key"], "all")
-        self.assertEqual(payload["retryable"], True)
 
     def test_prune_workbench_generations_cli_defaults_to_dry_run(self) -> None:
         from fin_ops_platform.tools import prune_workbench_generations
@@ -5152,22 +4943,16 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
 
 
-    def test_workbench_api_returns_sql_read_model_without_sync_build(self) -> None:
+    def test_workbench_api_returns_canonical_page_without_generation_runtime(self) -> None:
         app = object.__new__(Application)
-        queue = QueueRecorder()
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue, "redis_helper": None})()
-        app._workbench_sql_read_repository = type(
-            "SqlWorkbench",
+        app._workbench_canonical_query_repository = type(
+            "CanonicalWorkbench",
             (),
             {
                 "get_workbench_initial_page": lambda _self, **_kwargs: {
-                    "month": "2026-05",
                     "summary": {"oa_count": 0},
                     "paired": {"groups": [], "total": 0},
                     "unpaired": {"groups": [], "total": 0},
-                    "read_model_status": "fresh",
-                    "read_model_version": "gen-1",
-                    "source_versions": fresh_workbench_sql_source_versions(app, "2026-05"),
                 }
             },
         )()
@@ -5177,29 +4962,21 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
         self.assertEqual(payload["unpaired"], {"groups": [], "total": 0})
-        self.assertEqual(payload["read_model_status"], "fresh")
-        self.assertEqual(payload["read_model_version"], "gen-1")
-        self.assertEqual(queue.refreshes, [])
+        self.assertNotIn("read_model_status", payload)
+        self.assertNotIn("read_model_version", payload)
+        self.assertNotIn("active_generation_id", payload)
 
-    def test_workbench_api_sql_contract_preserves_backend_only_fields(self) -> None:
+    def test_workbench_api_canonical_contract_preserves_page_fields(self) -> None:
         app = object.__new__(Application)
-        queue = QueueRecorder()
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue, "redis_helper": None})()
-        app._workbench_sql_read_repository = type(
-            "SqlWorkbench",
+        app._workbench_canonical_query_repository = type(
+            "CanonicalWorkbench",
             (),
             {
                 "get_workbench_initial_page": lambda _self, **_kwargs: {
-                    "month": "2026-05",
                     "summary": {"oa_count": 9},
                     "paired": {"groups": [], "total": 0},
                     "unpaired": {"groups": [], "total": 0},
                     "invoice_inventory": {"system_total": 9},
-                    "active_generation_id": "gen-sql-1",
-                    "read_model_version": "gen-sql-1",
-                    "read_model_status": "fresh",
-                    "generated_at": "2026-05-22T09:30:00+00:00",
-                    "source_versions": fresh_workbench_sql_source_versions(app, "2026-05"),
                 }
             },
         )()
@@ -5207,38 +4984,27 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
-        self.assertEqual(payload["read_model_status"], "fresh")
-        self.assertEqual(payload["read_model_scope_key"], "2026-05")
-        self.assertEqual(payload["generated_at"], "2026-05-22T09:30:00+00:00")
+        self.assertEqual(payload["scope_key"], "2026-05")
         self.assertEqual(payload["invoice_inventory"], {"system_total": 9})
-        self.assertEqual(payload["active_generation_id"], "gen-sql-1")
-        self.assertEqual(payload["read_model_version"], "gen-sql-1")
         self.assertNotIn("rows_page", payload)
         self.assertNotIn("diagnostics", payload)
-        self.assertEqual(queue.refreshes, [])
+        self.assertNotIn("read_model_status", payload)
 
-    def test_workbench_api_production_runtime_without_sql_repository_returns_unavailable(self) -> None:
+    def test_workbench_api_without_canonical_repository_returns_unavailable(self) -> None:
         app = object.__new__(Application)
-        queue = QueueRecorder()
-        app._bootstrap_mode = "production"
-        app._state_store = SimpleNamespace(storage_backend="postgres")
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue, "redis_helper": None})()
-        app._workbench_sql_read_repository = None
+        app._workbench_canonical_query_repository = None
         response = app._handle_api_workbench("2026-05")
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.SERVICE_UNAVAILABLE))
-        self.assertEqual(payload["error"], "read_model_unavailable")
-        self.assertEqual(payload["read_model_status"], "unavailable")
+        self.assertEqual(payload["error"], "workbench_canonical_query_unavailable")
         self.assertEqual(payload["scope_key"], "2026-05")
-        self.assertEqual(queue.refreshes, [])
 
-    def test_workbench_groups_api_uses_sql_groups_contract(self) -> None:
+    def test_workbench_groups_api_uses_canonical_groups_contract(self) -> None:
         app = object.__new__(Application)
-        queue = QueueRecorder()
         calls: list[dict[str, object]] = []
 
-        class SqlWorkbench:
+        class CanonicalWorkbench:
             def get_workbench_groups_page(self, **kwargs):
                 calls.append(kwargs)
                 return {
@@ -5249,15 +5015,9 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                     "total": 1,
 	                    "has_more": False,
 	                    "groups": [{"group_id": "case:1", "oa_rows": [], "bank_rows": [], "invoice_rows": []}],
-	                    "read_model_status": "fresh",
-	                    "source_versions": fresh_workbench_sql_source_versions(app, "all"),
 	                }
 
-            def workbench_groups_cache_version(self, **_kwargs):
-                return "v7"
-
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue, "redis_helper": None})()
-        app._workbench_sql_read_repository = SqlWorkbench()
+        app._workbench_canonical_query_repository = CanonicalWorkbench()
         response = app._handle_api_workbench_groups(
             "all",
             zone="unpaired",
@@ -5294,27 +5054,26 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             ],
         )
 
-    def test_workbench_group_detail_api_returns_full_group(self) -> None:
+    def test_workbench_group_detail_api_returns_full_canonical_group(self) -> None:
         app = object.__new__(Application)
 
-        class SqlWorkbench:
+        class CanonicalWorkbench:
             def get_workbench_group_detail(self, **kwargs):
                 self.kwargs = kwargs
                 return {
-                    "group_id": "case:1",
-                    "group_type": "candidate",
-                    "match_confidence": "medium",
-                    "reason": "detail",
-                    "oa_rows": [{"id": "oa-1", "type": "oa", "detail_fields": {"OA单号": "2151"}}],
-                    "bank_rows": [],
-                    "invoice_rows": [],
-                    "source_versions": fresh_workbench_sql_source_versions(app, "all"),
-                    "read_model_status": "fresh",
+                    "group": {
+                        "group_id": "case:1",
+                        "group_type": "candidate",
+                        "match_confidence": "medium",
+                        "reason": "detail",
+                        "oa_rows": [{"id": "oa-1", "type": "oa", "detail_fields": {"OA单号": "2151"}}],
+                        "bank_rows": [],
+                        "invoice_rows": [],
+                    },
                 }
 
-        repository = SqlWorkbench()
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": QueueRecorder(), "redis_helper": None})()
-        app._workbench_sql_read_repository = repository
+        repository = CanonicalWorkbench()
+        app._workbench_canonical_query_repository = repository
 
         response = app._handle_api_workbench_group_detail("all", zone="unpaired", group_id="case:1")
         payload = json.loads(response.body)
@@ -5327,553 +5086,24 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 "scope_key": "all",
                 "zone": "unpaired",
                 "group_id": "case:1",
-                "expected_read_model_version": None,
+                "detail_key": None,
             },
         )
 
-    def test_workbench_groups_api_redis_hit_does_not_query_database_cache_version(self) -> None:
+    def test_workbench_api_passes_whitelisted_pane_queries_to_canonical_repository(self) -> None:
         app = object.__new__(Application)
-        cache_key = app._workbench_groups_redis_cache_key_from_version(
-            cache_version="v7",
-            scope_key="all",
-            zone="unpaired",
-            page="1",
-            page_size="50",
-            status=None,
-            source_kind=None,
-            search=None,
-            sort=None,
-            detail_level="full",
-        )
-        self.assertIsNotNone(cache_key)
-        redis = RedisRecorder(
-            text_values={"workbench:groups:version:all": "v7"},
-            json_values={
-                cache_key: {
-                    "payload": {
-                        "month": "all",
-                        "zone": "unpaired",
-                        "page": 1,
-                        "page_size": 50,
-                        "total": 1,
-                        "has_more": False,
-                        "groups": [{"group_id": "cached"}],
-                    }
-                }
-            },
-        )
-
-        class SqlWorkbench:
-            def get_workbench_groups_page(self, **_kwargs):
-                raise AssertionError("Redis hit must not query SQL page")
-
-            def workbench_groups_cache_version(self, **_kwargs):
-                raise AssertionError("Redis hit must not query SQL cache version")
-
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": QueueRecorder(), "redis_helper": redis})()
-        app._workbench_sql_read_repository = SqlWorkbench()
-
-        response = app._handle_api_workbench_groups("all", zone="unpaired", page="1", page_size="50")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, int(HTTPStatus.OK))
-        self.assertEqual(payload["groups"][0]["group_id"], "cached")
-        self.assertEqual(redis.get_text_calls, ["workbench:groups:version:all"])
-
-    def test_workbench_groups_api_stale_refresh_status_bypasses_redis_payload(self) -> None:
-        app = object.__new__(Application)
-        cache_key = app._workbench_groups_redis_cache_key_from_version(
-            cache_version="v7",
-            scope_key="all",
-            zone="unpaired",
-            page="1",
-            page_size="50",
-            status=None,
-            source_kind=None,
-            search=None,
-            sort=None,
-            detail_level="full",
-        )
-        self.assertIsNotNone(cache_key)
-        redis = RedisRecorder(
-            text_values={"workbench:groups:version:all": "v7"},
-            json_values={
-                cache_key: {
-                    "payload": {
-                        "month": "all",
-                        "zone": "unpaired",
-                        "groups": [{"group_id": "stale-cached"}],
-                    }
-                }
-            },
-        )
-        queue = QueueRecorder()
-        page_calls: list[dict[str, object]] = []
-
-        class SqlWorkbench:
-            def get_workbench_refresh_status(self, **_kwargs):
-                return {
-                    "read_model_status": "refreshing",
-                    "active_refresh_in_progress": True,
-                    "dirty_scopes": [{"scope_key": "all"}],
-                }
-
-            def get_workbench_groups_page(self, **kwargs):
-                page_calls.append(kwargs)
-                return {
-                    "month": "all",
-                    "zone": "unpaired",
-                    "page": 1,
-                    "page_size": 50,
-                    "total": 1,
-                    "has_more": False,
-                    "groups": [{"group_id": "fresh-db", "oa_rows": [], "bank_rows": [], "invoice_rows": []}],
-                    "read_model_status": "fresh",
-                    "source_versions": fresh_workbench_sql_source_versions(app, "all"),
-                }
-
-            def workbench_groups_cache_version(self, **_kwargs):
-                raise AssertionError("version key should be resolved from Redis text value")
-
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue, "redis_helper": redis})()
-        app._workbench_sql_read_repository = SqlWorkbench()
-
-        response = app._handle_api_workbench_groups("all", zone="unpaired", page="1", page_size="50")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, int(HTTPStatus.OK))
-        self.assertEqual(payload["groups"], [])
-        self.assertEqual(redis.get_text_calls, [])
-        self.assertEqual(redis.get_json_calls, [])
-        self.assertEqual(redis.set_json_calls, [])
-        self.assertEqual(page_calls, [])
-        self.assertEqual(payload["read_model_status"], "refreshing")
-        self.assertEqual(queue.refreshes, [])
-
-    def test_workbench_groups_api_redis_cache_is_separated_by_detail_level(self) -> None:
-        app = object.__new__(Application)
-        redis = RedisRecorder(text_values={"workbench:groups:version:all": "v7"})
-
-        class SqlWorkbench:
-            def get_workbench_groups_page(self, **_kwargs):
-                return {
-                    "month": "all",
-                    "zone": "unpaired",
-                    "page": 1,
-                    "page_size": 50,
-                    "total": 1,
-                    "has_more": False,
-	                    "groups": [{"group_id": "fresh", "oa_rows": [], "bank_rows": [], "invoice_rows": []}],
-	                    "read_model_status": "fresh",
-	                    "detail_level": "summary",
-	                    "source_versions": fresh_workbench_sql_source_versions(app, "all"),
-	                }
-
-            def workbench_groups_cache_version(self, **_kwargs):
-                raise AssertionError("Redis version key should avoid SQL cache version lookup")
-
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": QueueRecorder(), "redis_helper": redis})()
-        app._workbench_sql_read_repository = SqlWorkbench()
-
-        app._handle_api_workbench_groups("all", zone="unpaired", page="1", page_size="50", detail_level="summary")
-        app._handle_api_workbench_groups("all", zone="unpaired", page="1", page_size="50", detail_level="full")
-
-        self.assertEqual(len(redis.set_json_calls), 2)
-        self.assertNotEqual(redis.set_json_calls[0][0], redis.set_json_calls[1][0])
-
-    def test_workbench_groups_api_redis_cache_key_includes_canonical_filters(self) -> None:
-        app = object.__new__(Application)
-
-        base_kwargs = {
-            "cache_version": "v7",
-            "scope_key": "all",
-            "zone": "unpaired",
-            "page": "1",
-            "page_size": "200",
-            "status": None,
-            "source_kind": None,
-            "search": None,
-            "sort": None,
-            "detail_level": "summary",
-            "time_filters": {"bank": {"mode": "month", "month": "2026-04"}},
-        }
-        key_a = app._workbench_groups_redis_cache_key_from_version(
-            **base_kwargs,
-            column_filters={"bank": {"amount": ["支出", "建行 8106"]}},
-        )
-        key_b = app._workbench_groups_redis_cache_key_from_version(
-            **base_kwargs,
-            column_filters={"bank": {"amount": ["建行 8106", "支出"]}},
-        )
-        key_c = app._workbench_groups_redis_cache_key_from_version(
-            **base_kwargs,
-            column_filters={"bank": {"amount": ["收入"]}},
-        )
-
-        self.assertEqual(key_a, key_b)
-        self.assertNotEqual(key_a, key_c)
-
-    def test_workbench_groups_api_redis_cache_key_includes_zone_search(self) -> None:
-        app = object.__new__(Application)
-        base_kwargs = {
-            "cache_version": "v7",
-            "scope_key": "all",
-            "zone": "unpaired",
-            "page": "1",
-            "page_size": "200",
-            "status": None,
-            "source_kind": None,
-            "search": "花",
-            "sort": None,
-            "detail_level": "summary",
-            "column_filters": {},
-            "time_filters": {},
-        }
-
-        linked_key = app._workbench_groups_redis_cache_key_from_version(**base_kwargs)
-        pane_key = app._workbench_groups_redis_cache_key_from_version(**{**base_kwargs, "search": "供应商"})
-
-        self.assertNotEqual(linked_key, pane_key)
-
-    def test_workbench_groups_api_redis_cache_key_hashes_colon_version(self) -> None:
-        app = object.__new__(Application)
-
-        key = app._workbench_groups_redis_cache_key_from_version(
-            cache_version=COMPOSED_ALL_VERSION,
-            scope_key="all",
-            zone="unpaired",
-            page="1",
-            page_size="50",
-            status=None,
-            source_kind=None,
-            search=None,
-            sort=None,
-            detail_level="summary",
-        )
-
-        self.assertIsNotNone(key)
-        parsed_version = app._workbench_groups_redis_cache_version_from_key(key or "")
-        self.assertIsNotNone(parsed_version)
-        self.assertNotEqual(parsed_version, "workbench")
-        self.assertNotIn(":", parsed_version or "")
-        self.assertEqual(len(parsed_version or ""), 24)
-
-    def test_workbench_groups_api_redis_cache_key_includes_groups_page_schema_version(self) -> None:
-        app = object.__new__(Application)
-        kwargs = {
-            "cache_version": "v7",
-            "scope_key": "all",
-            "zone": "unpaired",
-            "page": "1",
-            "page_size": "50",
-            "status": None,
-            "source_kind": None,
-            "search": None,
-            "sort": None,
-            "detail_level": "summary",
-        }
-
-        with patch("fin_ops_platform.app.server.WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION", "schema-a"):
-            key_a = app._workbench_groups_redis_cache_key_from_version(**kwargs)
-        with patch("fin_ops_platform.app.server.WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION", "schema-b"):
-            key_b = app._workbench_groups_redis_cache_key_from_version(**kwargs)
-
-        self.assertNotEqual(key_a, key_b)
-
-    def test_workbench_groups_page_cache_version_isolated_from_shared_projection_schema(self) -> None:
-        self.assertNotEqual(WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION, WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION)
-        self.assertTrue(
-            WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION.startswith(
-                f"{WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION}:relation-completion-"
-            )
-        )
-
-    def test_workbench_groups_api_reports_missing_groups_table_as_unavailable(self) -> None:
-        app = object.__new__(Application)
-
-        class SqlWorkbench:
-            def get_workbench_groups_page(self, **_kwargs):
-                raise RuntimeError('relation "read_model.workbench_groups" does not exist')
-
-            def workbench_groups_cache_version(self, **_kwargs):
-                return "v0"
-
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": QueueRecorder(), "redis_helper": None})()
-        app._workbench_sql_read_repository = SqlWorkbench()
-
-        response = app._handle_api_workbench_groups("all", zone="unpaired")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, int(HTTPStatus.SERVICE_UNAVAILABLE))
-        self.assertEqual(payload["error"], "read_model_unavailable")
-        self.assertEqual(payload["read_model_status"], "unavailable")
-
-    def test_workbench_refresh_status_api_exposes_dirty_scopes_and_worker_lag(self) -> None:
-        app = object.__new__(Application)
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": QueueRecorder(), "redis_helper": None})()
-        app._workbench_sql_read_repository = type(
-            "SqlWorkbench",
-            (),
-            {
-                "get_workbench_refresh_status": lambda _self, **_kwargs: {
-                    "read_model_status": "refreshing",
-                    "dirty_scopes": [{"scope_key": "2026-05", "status": "processing"}],
-                    "worker_lag_seconds": 8.0,
-                    "last_error": None,
-                }
-            },
-        )()
-
-        response = app._handle_api_workbench_refresh_status("all")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, int(HTTPStatus.OK))
-        self.assertEqual(payload["read_model_status"], "refreshing")
-        self.assertEqual(payload["dirty_scopes"][0]["scope_key"], "2026-05")
-
-    def test_workbench_refresh_status_api_normalizes_failed_dirty_scope(self) -> None:
-        app = object.__new__(Application)
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": QueueRecorder(), "redis_helper": None})()
-        app._workbench_sql_read_repository = type(
-            "SqlWorkbench",
-            (),
-            {
-                "get_workbench_refresh_status": lambda _self, **_kwargs: {
-                    "read_model_status": "stale",
-                    "dirty_scopes": [
-                        {
-                            "scope_key": "2026-05",
-                            "status": "failed",
-                            "last_error": "projection boom",
-                            "source_version": 12,
-                        }
-                    ],
-                    "worker_lag_seconds": 8.0,
-                }
-            },
-        )()
-
-        response = app._handle_api_workbench_refresh_status("all")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, int(HTTPStatus.OK))
-        self.assertEqual(payload["read_model_status"], "failed")
-        self.assertEqual(payload["last_error"], "projection boom")
-        self.assertEqual(payload["read_model_version"], 12)
-        self.assertTrue(payload["retryable"])
-
-    def test_workbench_refresh_status_api_treats_requeued_failed_scope_as_refreshing(self) -> None:
-        app = object.__new__(Application)
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": QueueRecorder(), "redis_helper": None})()
-        app._workbench_sql_read_repository = type(
-            "SqlWorkbench",
-            (),
-            {
-                "get_workbench_refresh_status": lambda _self, **_kwargs: {
-                    "read_model_status": "refreshing",
-                    "dirty_scopes": [
-                        {
-                            "scope_key": "2026-03",
-                            "status": "failed",
-                            "last_error": "workbench_all_scope_parent_inconsistent: active_relation_open_membership count=4",
-                            "source_version": 12,
-                        },
-                        {
-                            "scope_key": "2026-03",
-                            "status": "processing",
-                            "source_version": 13,
-                        },
-                    ],
-                    "worker_lag_seconds": 1.0,
-                }
-            },
-        )()
-
-        response = app._handle_api_workbench_refresh_status("all")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, int(HTTPStatus.OK))
-        self.assertEqual(payload["read_model_status"], "refreshing")
-        self.assertIsNone(payload["last_error"])
-        self.assertFalse(payload["retryable"])
-
-    def test_workbench_events_stream_emits_refresh_status_event(self) -> None:
-        app = object.__new__(Application)
-        app._app_health_service = AppHealthService()
-        app._workbench_sql_read_repository = type(
-            "SqlWorkbench",
-            (),
-            {
-                "get_workbench_refresh_status": lambda _self, **_kwargs: {
-                    "scope_key": "all",
-	                    "read_model_status": "fresh",
-	                    "generated_at": "2026-05-28T10:00:00+08:00",
-	                    "dirty_scopes": [],
-	                    "worker_lag_seconds": 1.5,
-	                    "source_versions": fresh_workbench_sql_source_versions(app, "all"),
-	                }
-            },
-        )()
-
-        response = app._handle_api_workbench_events("all")
-        stream = iter(response.body)
-        first_event = next(stream)
-
-        self.assertEqual(response.status_code, int(HTTPStatus.OK))
-        self.assertEqual(response.headers["Content-Type"], "text/event-stream; charset=utf-8")
-        self.assertIn("event: workbench.read_model.completed", first_event)
-        self.assertIn('"read_model_status": "fresh"', first_event)
-
-    def test_workbench_events_stream_exposes_no_buffering_headers_and_heartbeat(self) -> None:
-        app = object.__new__(Application)
-        app._app_health_service = AppHealthService()
-        app._workbench_sql_read_repository = type(
-            "SqlWorkbench",
-            (),
-            {
-                "get_workbench_refresh_status": lambda _self, **_kwargs: {
-                    "scope_key": "all",
-                    "read_model_status": "fresh",
-                    "generated_at": "2026-05-28T10:00:00+08:00",
-                    "dirty_scopes": [],
-                    "worker_lag_seconds": 1.5,
-                    "source_versions": fresh_workbench_sql_source_versions(app, "all"),
-                }
-            },
-        )()
-
-        response = app._handle_api_workbench_events("all")
-        stream = iter(response.body)
-        first_event = next(stream)
-        heartbeat = next(stream)
-
-        self.assertEqual(response.status_code, int(HTTPStatus.OK))
-        self.assertTrue(response.stream)
-        self.assertEqual(response.headers["Content-Type"], "text/event-stream; charset=utf-8")
-        self.assertEqual(response.headers["Cache-Control"], "no-cache, no-transform")
-        self.assertEqual(response.headers["X-Accel-Buffering"], "no")
-        self.assertIn("event: workbench.read_model.completed", first_event)
-        self.assertIn("event: heartbeat", heartbeat)
-        self.assertIn('"scope_key": "all"', heartbeat)
-        self.assertIn('"read_model_status": "fresh"', heartbeat)
-
-    def test_workbench_events_stream_maps_statuses_without_redis_pubsub(self) -> None:
-        app = object.__new__(Application)
-        app._app_health_service = AppHealthService()
-
-        class ExplodingRedisHelper:
-            def __getattr__(self, name: str):
-                raise AssertionError(f"SSE polling path must not use Redis PubSub helper: {name}")
-
-        app._runtime_repositories = SimpleNamespace(redis_helper=ExplodingRedisHelper())
-
-        expected_events = {
-            "fresh": "workbench.read_model.completed",
-            "refreshing": "workbench.read_model.progress",
-            "stale": "workbench.read_model.progress",
-            "failed": "workbench.read_model.failed",
-        }
-        calls: list[tuple[str, dict[str, object]]] = []
-
-        class SqlWorkbench:
-            def __init__(self, status: str) -> None:
-                self.status = status
-
-            def get_workbench_refresh_status(self, **kwargs):
-                calls.append((self.status, kwargs))
-                return {
-                    "scope_key": "all",
-                    "read_model_status": self.status,
-                    "generated_at": "2026-05-28T10:00:00+08:00",
-                    "dirty_scopes": [],
-                    "source_versions": fresh_workbench_sql_source_versions(app, "all"),
-                }
-
-        for status, event_name in expected_events.items():
-            app._workbench_sql_read_repository = SqlWorkbench(status)
-
-            response = app._handle_api_workbench_events("all")
-            first_event = next(iter(response.body))
-
-            self.assertEqual(response.status_code, int(HTTPStatus.OK))
-            self.assertEqual(response.headers["X-Accel-Buffering"], "no")
-            self.assertIn(f"event: {event_name}", first_event)
-            self.assertIn(f'"read_model_status": "{status}"', first_event)
-
-        self.assertEqual(
-            calls,
-            [
-                ("fresh", {"scope_key": "all"}),
-                ("refreshing", {"scope_key": "all"}),
-                ("stale", {"scope_key": "all"}),
-                ("failed", {"scope_key": "all"}),
-            ],
-        )
-
-    def test_workbench_events_stream_close_releases_active_stream_slot(self) -> None:
-        app = object.__new__(Application)
-        app._app_health_service = AppHealthService()
-        app._workbench_sql_read_repository = type(
-            "SqlWorkbench",
-            (),
-            {
-                "get_workbench_refresh_status": lambda _self, **_kwargs: {
-                    "scope_key": "all",
-                    "read_model_status": "fresh",
-                    "generated_at": "2026-05-28T10:00:00+08:00",
-                    "dirty_scopes": [],
-                    "worker_lag_seconds": 1.5,
-                    "source_versions": fresh_workbench_sql_source_versions(app, "all"),
-                }
-            },
-        )()
-
-        response = app._handle_api_workbench_events("all")
-        stream = iter(response.body)
-
-        first_event = next(stream)
-        self.assertIn("event: workbench.read_model.completed", first_event)
-        self.assertEqual(app._workbench_events_stream_registry().snapshot(), {"all": 1})
-
-        stream.close()
-
-        self.assertEqual(app._workbench_events_stream_registry().snapshot(), {})
-
-    def test_workbench_api_miss_enqueues_refresh_and_returns_refreshing(self) -> None:
-        app = object.__new__(Application)
-        queue = QueueRecorder()
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue, "redis_helper": None})()
-        app._workbench_sql_read_repository = type(
-            "SqlWorkbench",
-            (),
-            {"get_workbench_initial_page": lambda _self, **_kwargs: None},
-        )()
-        response = app._handle_api_workbench("2026-05")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
-        self.assertEqual(payload["read_model_status"], "refreshing")
-        self.assertEqual(queue.refreshes, [("workbench", "2026-05", "api_initial_page_miss")])
-
-    def test_workbench_api_passes_whitelisted_pane_queries_to_initial_repository(self) -> None:
-        app = object.__new__(Application)
-        queue = QueueRecorder()
         calls: list[dict[str, object]] = []
 
-        class SqlWorkbench:
+        class CanonicalWorkbench:
             def get_workbench_initial_page(self, **kwargs):
                 calls.append(kwargs)
                 return {
                     "summary": {"oa_count": 0},
                     "paired": {"groups": [], "total": 0},
                     "unpaired": {"groups": [], "total": 0},
-                    "read_model_status": "fresh",
-                    "read_model_version": "gen-1",
-                    "source_versions": fresh_workbench_sql_source_versions(app, "2026-05"),
                 }
 
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue, "redis_helper": None})()
-        app._workbench_sql_read_repository = SqlWorkbench()
+        app._workbench_canonical_query_repository = CanonicalWorkbench()
         response = app._handle_api_workbench(
             "2026-05",
             paired_query='{"sort":"bank:desc"}',
@@ -5882,7 +5112,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
-        self.assertEqual(payload["read_model_version"], "gen-1")
+        self.assertNotIn("read_model_version", payload)
         self.assertEqual(
             calls,
             [
@@ -5949,7 +5179,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             {"error": "workbench_row_not_found", "scope_key": "all", "row_id": "bank-row-missing"},
         )
 
-    def test_row_detail_forwards_expected_read_model_version(self) -> None:
+    def test_row_detail_forwards_only_month_and_row_identity(self) -> None:
         app = object.__new__(Application)
         calls: list[dict[str, object]] = []
 
@@ -5958,8 +5188,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             def row_detail(month: str | None, **kwargs: object):
                 calls.append({"month": month, **kwargs})
                 return SimpleNamespace(
-                    status_code=HTTPStatus.CONFLICT,
-                    payload={"error": "workbench_read_model_version_conflict", "read_model_version": "new"},
+                    status_code=HTTPStatus.OK,
+                    payload={"row": {"id": str(kwargs["row_id"]), "type": "bank"}},
                 )
 
         app._workbench_query_facade = lambda: Facade()
@@ -5967,17 +5197,15 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         response = app._handle_api_workbench_row_detail(
             "bank-row-1",
             month="2026-05",
-            expected_read_model_version="old",
         )
 
-        self.assertEqual(response.status_code, int(HTTPStatus.CONFLICT))
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
         self.assertEqual(
             calls,
             [
                 {
                     "month": "2026-05",
                     "row_id": "bank-row-1",
-                    "expected_read_model_version": "old",
                 }
             ],
         )
@@ -6078,16 +5306,15 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "month scope key"):
             repository.list_workbench_search_rows(scope_key="all")
 
-    def test_workbench_ignored_api_fails_closed_without_sql_repository(self) -> None:
+    def test_workbench_ignored_api_fails_closed_without_canonical_repository(self) -> None:
         app = object.__new__(Application)
-        app._workbench_sql_read_repository = None
+        app._workbench_canonical_query_repository = None
 
         response = app._handle_api_workbench_ignored("2026-05")
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.SERVICE_UNAVAILABLE))
-        self.assertEqual(payload["error"], "read_model_unavailable")
-        self.assertEqual(payload["read_model_status"], "unavailable")
+        self.assertEqual(payload["error"], "workbench_canonical_query_unavailable")
         self.assertEqual(payload["scope_key"], "2026-05")
 
     def test_repository_ignored_rows_only_reads_active_generations(self) -> None:
@@ -6109,9 +5336,9 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("join read_model.workbench_generations", connection.calls[0][0])
         self.assertIn("generation.status = 'active'", connection.calls[0][0])
 
-    def test_workbench_write_ignored_row_loader_requires_sql_repository(self) -> None:
+    def test_workbench_write_ignored_row_loader_requires_canonical_repository(self) -> None:
         app = object.__new__(Application)
-        app._workbench_sql_read_repository = None
+        app._workbench_canonical_query_repository = None
 
         with self.assertRaisesRegex(RuntimeError, "ignored-row repository is not configured"):
             app._list_workbench_ignored_rows_for_write("2026-05")
@@ -6126,7 +5353,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 return [{"id": "invoice-1", "type": "invoice"}]
 
         app = object.__new__(Application)
-        app._workbench_sql_read_repository = Repository()
+        app._workbench_canonical_query_repository = Repository()
         app._serialize_value = lambda value: value
 
         rows = app._list_workbench_ignored_rows_for_write("2026-05")

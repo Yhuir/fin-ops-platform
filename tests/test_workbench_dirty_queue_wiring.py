@@ -332,7 +332,6 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
                     {
                         "month": "2026-05",
                         "row_ids": ["oa-exc-api-001", "bank-exc-api-001", "invoice-exc-api-001"],
-                        "expected_read_model_version": "generation-test-1",
                         "scenario_code": "expense_all_equal",
                         "action_code": "confirm_closed",
                         "payload": {},

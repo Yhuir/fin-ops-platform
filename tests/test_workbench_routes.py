@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import json
 from http import HTTPStatus
 import unittest
 
-from fin_ops_platform.app.server import Application
 from fin_ops_platform.app.routes_workbench import (
     WorkbenchGroupDetailApiRoutes,
     WorkbenchReadApiRoutes,
@@ -16,17 +14,16 @@ from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryResul
 class FakeWorkbenchQueryFacade:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
-        self.result = WorkbenchQueryResult(
-            HTTPStatus.OK,
-            {
-                "month": "all",
-                "scope_key": "all",
-                "zone": "unpaired",
-                "group_id": "case:1",
-                "group": {"group_id": "case:1"},
-                "read_model_status": "fresh",
-            },
-        )
+
+    def initial_page(
+        self, month: str | None, **kwargs: object
+    ) -> WorkbenchQueryResult:
+        self.calls.append({"endpoint": "initial", "month": month, **kwargs})
+        return WorkbenchQueryResult(HTTPStatus.OK, {"month": month})
+
+    def groups(self, month: str | None, **kwargs: object) -> WorkbenchQueryResult:
+        self.calls.append({"endpoint": "groups", "month": month, **kwargs})
+        return WorkbenchQueryResult(HTTPStatus.OK, {"groups": [], "total": 0})
 
     def group_detail(
         self,
@@ -34,116 +31,51 @@ class FakeWorkbenchQueryFacade:
         *,
         zone: str,
         group_id: str,
-        expected_read_model_version: str | None = None,
+        detail_key: str | None = None,
     ) -> WorkbenchQueryResult:
         self.calls.append(
             {
+                "endpoint": "group_detail",
                 "month": month,
                 "zone": zone,
                 "group_id": group_id,
-                "expected_read_model_version": expected_read_model_version,
+                "detail_key": detail_key,
             }
         )
-        return self.result
-
-    def initial_page(self, month: str | None, **kwargs: object) -> WorkbenchQueryResult:
-        self.calls.append({"endpoint": "initial", "month": month, **kwargs})
-        return WorkbenchQueryResult(HTTPStatus.OK, {"month": month, "read_model_status": "fresh"})
-
-    def refresh_status(self, month: str | None) -> WorkbenchQueryResult:
-        self.calls.append({"endpoint": "refresh_status", "month": month})
-        return WorkbenchQueryResult(HTTPStatus.ACCEPTED, {"month": month, "read_model_status": "refreshing"})
-
-    def groups(self, month: str | None, **kwargs: object) -> WorkbenchQueryResult:
-        self.calls.append({"endpoint": "groups", "month": month, **kwargs})
-        return WorkbenchQueryResult(HTTPStatus.OK, {"month": month, "groups": [], "read_model_status": "fresh"})
-
-    def row_detail(self, month: str | None, *, row_id: str, **kwargs: object) -> WorkbenchQueryResult:
-        self.calls.append({"endpoint": "row_detail", "month": month, "row_id": row_id, **kwargs})
         return WorkbenchQueryResult(
             HTTPStatus.OK,
-            {
-                "row": {"id": row_id, "type": "bank"},
-                "scope_key": "2026-06",
-                "read_model_status": "fresh",
-            },
+            {"group": {"group_id": group_id}},
+        )
+
+    def row_detail(
+        self, month: str | None, *, row_id: str
+    ) -> WorkbenchQueryResult:
+        self.calls.append(
+            {"endpoint": "row_detail", "month": month, "row_id": row_id}
+        )
+        return WorkbenchQueryResult(
+            HTTPStatus.OK,
+            {"row": {"id": row_id, "type": "bank"}},
         )
 
 
-class WorkbenchRowDetailApiRoutesTests(unittest.TestCase):
-    def test_row_detail_delegates_all_month_to_query_facade_in_sql_runtime(self) -> None:
-        facade = FakeWorkbenchQueryFacade()
-        routes = WorkbenchRowDetailApiRoutes(query_facade_provider=lambda: facade)
+class WorkbenchRoutesTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.facade = FakeWorkbenchQueryFacade()
 
-        payload = routes.get_payload("txn_imported_0396", month="all")
-
-        self.assertEqual(payload["row"], {"id": "txn_imported_0396", "type": "bank"})
-        self.assertEqual(
-            facade.calls,
-            [{"endpoint": "row_detail", "month": "all", "row_id": "txn_imported_0396"}],
-        )
-
-
-class WorkbenchGroupDetailApiRoutesTests(unittest.TestCase):
-    def test_group_detail_delegates_normalized_request_and_preserves_facade_result(self) -> None:
-        facade = FakeWorkbenchQueryFacade()
-        routes = WorkbenchGroupDetailApiRoutes(query_facade_provider=lambda: facade)
-
-        status, payload = routes.get_detail(None, zone=" unpaired ", group_id=" case:1 ")
-
-        self.assertEqual(status, HTTPStatus.OK)
-        self.assertEqual(payload, facade.result.payload)
-        self.assertEqual(
-            facade.calls,
-            [
-                {
-                    "month": "all",
-                    "zone": "unpaired",
-                    "group_id": "case:1",
-                    "expected_read_model_version": None,
-                }
-            ],
-        )
-
-    def test_group_detail_rejects_invalid_zone_without_calling_facade(self) -> None:
-        facade = FakeWorkbenchQueryFacade()
-        routes = WorkbenchGroupDetailApiRoutes(query_facade_provider=lambda: facade)
-
-        status, payload = routes.get_detail("2026-05", zone="processed", group_id="case:1")
-
-        self.assertEqual(status, HTTPStatus.BAD_REQUEST)
-        self.assertEqual(payload, {"error": "invalid_workbench_zone", "message": "zone must be unpaired or paired."})
-        self.assertEqual(facade.calls, [])
-
-    def test_group_detail_requires_group_id_without_calling_facade(self) -> None:
-        facade = FakeWorkbenchQueryFacade()
-        routes = WorkbenchGroupDetailApiRoutes(query_facade_provider=lambda: facade)
-
-        status, payload = routes.get_detail("2026-05", zone="paired", group_id=" ")
-
-        self.assertEqual(status, HTTPStatus.BAD_REQUEST)
-        self.assertEqual(
-            payload,
-            {"error": "invalid_workbench_group_detail_request", "message": "group_id is required."},
-        )
-        self.assertEqual(facade.calls, [])
-
-
-class WorkbenchReadApiRoutesTests(unittest.TestCase):
-    def test_initial_whitelists_pane_queries_and_delegates_to_facade(self) -> None:
-        facade = FakeWorkbenchQueryFacade()
-        routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: facade)
+    def test_initial_normalizes_whitelisted_pane_queries(self) -> None:
+        routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: self.facade)
 
         status, payload = routes.initial(
             "2026-05",
-            paired_query='{"sort":"bank:desc","search":"建行"}',
+            paired_query='{"sort":"bank:desc","search":" 建行 "}',
             unpaired_query='{"search":"供应商"}',
         )
 
         self.assertEqual(status, HTTPStatus.OK)
-        self.assertEqual(payload, {"month": "2026-05", "read_model_status": "fresh"})
+        self.assertEqual(payload, {"month": "2026-05"})
         self.assertEqual(
-            facade.calls,
+            self.facade.calls,
             [
                 {
                     "endpoint": "initial",
@@ -154,162 +86,120 @@ class WorkbenchReadApiRoutesTests(unittest.TestCase):
             ],
         )
 
-    def test_initial_rejects_unknown_or_wrong_typed_fields_without_calling_facade(self) -> None:
-        for query in ('{"page":2}', '{"search":123}', '{"search_mode":"global"}', '{"search_by_pane":{}}'):
+    def test_initial_rejects_unknown_or_wrong_typed_fields(self) -> None:
+        routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: self.facade)
+
+        for query in ('{"page":2}', '{"search":123}', "[]", "{"):
             with self.subTest(query=query):
-                facade = FakeWorkbenchQueryFacade()
-                routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: facade)
-
                 status, payload = routes.initial("all", paired_query=query)
-
                 self.assertEqual(status, HTTPStatus.BAD_REQUEST)
                 self.assertEqual(payload["error"], "invalid_workbench_initial_query")
-                self.assertEqual(facade.calls, [])
+        self.assertEqual(self.facade.calls, [])
 
-    def test_refresh_status_delegates_to_query_facade(self) -> None:
-        facade = FakeWorkbenchQueryFacade()
-        routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: facade)
-
-        status, payload = routes.refresh_status("2026-05")
-
-        self.assertEqual(status, HTTPStatus.ACCEPTED)
-        self.assertEqual(payload, {"month": "2026-05", "read_model_status": "refreshing"})
-        self.assertEqual(facade.calls, [{"endpoint": "refresh_status", "month": "2026-05"}])
-
-    def test_groups_normalizes_query_and_delegates_to_query_facade(self) -> None:
-        facade = FakeWorkbenchQueryFacade()
-        routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: facade)
+    def test_groups_normalizes_filters_sort_and_server_pagination(self) -> None:
+        routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: self.facade)
 
         status, payload = routes.groups(
             None,
             zone=" unpaired ",
             page="2",
-            page_size="50",
+            page_size="20",
             status="unpaired",
             source_kind="bank",
             search=" vendor ",
-            sort="amount_desc",
+            sort="bank:desc",
             detail_level="summary",
-            column_filters='{"amount": {"min": 10}}',
-            time_filters='{"trade_date": {"from": "2026-05-01"}}',
+            column_filters='{"bank":{"direction":["支出"]}}',
+            time_filters='{"bank":{"mode":"month","month":"2026-05"}}',
         )
 
         self.assertEqual(status, HTTPStatus.OK)
-        self.assertEqual(payload, {"month": "all", "groups": [], "read_model_status": "fresh"})
+        self.assertEqual(payload, {"groups": [], "total": 0})
+        self.assertEqual(self.facade.calls[0]["month"], "all")
+        self.assertEqual(self.facade.calls[0]["zone"], "unpaired")
+        self.assertEqual(self.facade.calls[0]["page"], "2")
+        self.assertEqual(self.facade.calls[0]["page_size"], "20")
+        self.assertEqual(self.facade.calls[0]["search"], "vendor")
+
+    def test_groups_rejects_invalid_zone_json_and_oversized_search(self) -> None:
+        routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: self.facade)
+
+        invalid_zone, _ = routes.groups("all", zone="ignored")
+        invalid_json, _ = routes.groups(
+            "all", zone="unpaired", column_filters="[]"
+        )
+        oversized, _ = routes.groups(
+            "all", zone="unpaired", search="x" * 201
+        )
+
+        self.assertEqual(invalid_zone, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(invalid_json, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(oversized, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(self.facade.calls, [])
+
+    def test_group_detail_forwards_stable_detail_key(self) -> None:
+        routes = WorkbenchGroupDetailApiRoutes(
+            query_facade_provider=lambda: self.facade
+        )
+
+        status, payload = routes.get_detail(
+            None,
+            zone=" paired ",
+            group_id=" case:1 ",
+            detail_key=" 1 ",
+        )
+
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(payload["group"]["group_id"], "case:1")
         self.assertEqual(
-            facade.calls,
+            self.facade.calls,
             [
                 {
-                    "endpoint": "groups",
+                    "endpoint": "group_detail",
                     "month": "all",
-                    "zone": "unpaired",
-                    "page": "2",
-                    "page_size": "50",
-                    "status": "unpaired",
-                    "source_kind": "bank",
-                    "search": "vendor",
-                    "sort": "amount_desc",
-                    "detail_level": "summary",
-                    "column_filters": {"amount": {"min": 10}},
-                    "time_filters": {"trade_date": {"from": "2026-05-01"}},
+                    "zone": "paired",
+                    "group_id": "case:1",
+                    "detail_key": "1",
                 }
             ],
         )
 
-    def test_groups_rejects_search_longer_than_contract_limit(self) -> None:
-        facade = FakeWorkbenchQueryFacade()
-        routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: facade)
+    def test_group_detail_rejects_invalid_request(self) -> None:
+        routes = WorkbenchGroupDetailApiRoutes(
+            query_facade_provider=lambda: self.facade
+        )
 
-        status, payload = routes.groups("all", zone="paired", search="x" * 201)
+        invalid_zone, _ = routes.get_detail(
+            "2026-05", zone="processed", group_id="case:1"
+        )
+        missing_group, _ = routes.get_detail(
+            "2026-05", zone="paired", group_id=" "
+        )
 
-        self.assertEqual(status, HTTPStatus.BAD_REQUEST)
-        self.assertEqual(payload["error"], "invalid_workbench_groups_query")
-        self.assertIn("at most 200 characters", payload["message"])
-        self.assertEqual(facade.calls, [])
+        self.assertEqual(invalid_zone, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(missing_group, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(self.facade.calls, [])
 
-    def test_groups_rejects_invalid_zone_without_calling_facade(self) -> None:
-        facade = FakeWorkbenchQueryFacade()
-        routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: facade)
+    def test_row_detail_delegates_to_query_facade(self) -> None:
+        routes = WorkbenchRowDetailApiRoutes(
+            query_facade_provider=lambda: self.facade
+        )
 
-        status, payload = routes.groups("2026-05", zone="ignored")
+        payload = routes.get_payload("bank-1", month="all")
 
-        self.assertEqual(status, HTTPStatus.BAD_REQUEST)
-        self.assertEqual(payload, {"error": "invalid_workbench_zone", "message": "zone must be unpaired or paired."})
-        self.assertEqual(facade.calls, [])
-
-    def test_groups_rejects_invalid_json_query_without_calling_facade(self) -> None:
-        facade = FakeWorkbenchQueryFacade()
-        routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: facade)
-
-        status, payload = routes.groups("2026-05", zone="unpaired", column_filters="[1, 2]")
-
-        self.assertEqual(status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(payload["row"]["id"], "bank-1")
         self.assertEqual(
-            payload,
-            {"error": "invalid_workbench_groups_query", "message": "column_filters must be a JSON object."},
-        )
-        self.assertEqual(facade.calls, [])
-
-    def test_groups_forwards_expected_read_model_version(self) -> None:
-        facade = FakeWorkbenchQueryFacade()
-        routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: facade)
-
-        status, _payload = routes.groups(
-            "all",
-            zone="paired",
-            expected_read_model_version=" generation-set-7 ",
+            self.facade.calls,
+            [{"endpoint": "row_detail", "month": "all", "row_id": "bank-1"}],
         )
 
-        self.assertEqual(status, HTTPStatus.OK)
-        self.assertEqual(facade.calls[0]["expected_read_model_version"], "generation-set-7")
-
-
-class WorkbenchActionGenerationGateTests(unittest.TestCase):
-    def test_every_workbench_preview_and_write_handler_stops_at_generation_gate(self) -> None:
-        handler_cases = {
-            "_handle_api_workbench_exception_preview": {},
-            "_handle_api_workbench_exception_apply": {"request_id": "req-1"},
-            "_handle_api_workbench_confirm_link": {"request_id": "req-1", "headers": {}},
-            "_handle_api_workbench_confirm_link_preview": {},
-            "_handle_api_workbench_mark_exception": {},
-            "_handle_api_workbench_cancel_link": {"request_id": "req-1", "headers": {}},
-            "_handle_api_workbench_withdraw_link_preview": {},
-            "_handle_api_workbench_withdraw_link": {"request_id": "req-1", "headers": {}},
-            "_handle_api_workbench_confirm_cash_pass_through": {"request_id": "req-1"},
-            "_handle_api_workbench_confirm_cash_ticket_purchase": {"request_id": "req-1"},
-            "_handle_api_workbench_cancel_cash_special": {"request_id": "req-1"},
-            "_handle_api_workbench_update_bank_exception": {},
-            "_handle_api_workbench_oa_bank_exception": {},
-            "_handle_api_workbench_confirm_personal_advance_repayment": {"request_id": "req-1"},
-            "_handle_api_workbench_cancel_exception": {},
-            "_handle_api_workbench_ignore_row": {},
-            "_handle_api_workbench_unignore_row": {},
-        }
-        request_payload = {
-            "month": "all",
-            "row_ids": ["bank-1"],
-            "expected_read_model_version": "generation-set-1",
-        }
-
-        for handler_name, kwargs in handler_cases.items():
-            with self.subTest(handler=handler_name):
-                app = object.__new__(Application)
-                guarded_payloads: list[dict[str, object]] = []
-                sentinel = Application._json_response(
-                    HTTPStatus.CONFLICT,
-                    {"error": "workbench_read_model_not_fresh"},
-                )
-
-                def guard(payload: dict[str, object]):
-                    guarded_payloads.append(dict(payload))
-                    return sentinel
-
-                app._workbench_write_freshness_guard = guard
-
-                response = getattr(app, handler_name)(json.dumps(request_payload), **kwargs)
-
-                self.assertIs(response, sentinel)
-                self.assertEqual(guarded_payloads, [request_payload])
+    def test_refresh_and_events_route_owners_are_removed(self) -> None:
+        self.assertFalse(hasattr(WorkbenchReadApiRoutes, "refresh_status"))
+        routes_module = __import__(
+            "fin_ops_platform.app.routes_workbench",
+            fromlist=["WorkbenchEventsApiRoutes"],
+        )
+        self.assertFalse(hasattr(routes_module, "WorkbenchEventsApiRoutes"))
 
 
 if __name__ == "__main__":

@@ -20,7 +20,7 @@
 
 | 页面域 | 前端入口 | API / 后端 owner | 主要事实来源 | 刷新来源 |
 | --- | --- | --- | --- | --- |
-| 银企核销 / 关联台 | `web/src/pages/ReconciliationPage.tsx`、workbench 页面组件 | reconciliation/workbench routes、workbench service、read model service | 银行流水、OA 单据、发票、确认关系、active generation | route 进入/重进、页面查询变化、当前页写后 reconcile、手动重试 |
+| 银企核销 / 关联台 | `web/src/pages/ReconciliationWorkbenchPage.tsx`、workbench 页面组件 | workbench routes、`WorkbenchQueryFacade`、page-specific canonical query repository | PostgreSQL canonical OA、银行、发票、ETC snapshots + active formal relations | route 进入/重进、页面查询变化、当前页写后 GET、手动重试；无 generation/status/SSE/polling |
 | 银行明细 | `web/src/pages/BankDetailsPage.tsx` | bank detail routes、`BankDetailsCanonicalQueryService` | canonical 银行流水、分类/标签、账户映射、active Workbench pair relations | route 进入/重进、查询变化、当前页写后一次 GET、用户重试 |
 | 往来款管理 | `web/src/pages/TurnoverLedgerPage.tsx` | turnover ledger routes/service、workbench pair relation service | 外部往来候选、人工闭环、利息、项目归因、Workbench pair relation | 银行明细、关联台、人工闭环/撤回 |
 | 待找发票 | `web/src/pages/PendingInvoicesPage.tsx` | pending invoice routes/query service | 支出/收入流水、进项发票、规则建议、选择已有发票关系、收入状态覆盖 | 进项导入、选择已有发票确认/撤回、收入状态覆盖、规则变更 |
@@ -40,7 +40,7 @@ domain registry 是页面域入口；`AppStatusReadModelRegistry` 是仍有 read
 
 | domain key | route | read model / worker / task 来源 |
 | --- | --- | --- |
-| `workbench` | `/` | `workbench`、`workbench_relation`、workbench workers、workbench matching/rebuild jobs |
+| `workbench` | `/` | 页面业务数据为 canonical direct read；全局状态平面仍可观测共享 workbench/workbench_relation workers、matching/rebuild jobs，但这些状态不作为页面 GET 的 freshness gate |
 | `imports_bank_transactions` | `/imports/bank-transactions` | import worker、银行流水导入任务 |
 | `imports_invoices` | `/imports/invoices` | import worker、发票导入任务 |
 | `imports_etc_invoices` | `/imports/etc-invoices` | import worker、ETC 发票导入任务 |
@@ -96,16 +96,16 @@ domain registry 是页面域入口；`AppStatusReadModelRegistry` 是仍有 read
 
 - 本地实现态：全部已盘点普通 `fact-write` / `rule-write` 不做跨页 fan-out；目标页面访问时 exact-scope freshness 收敛。
 - 生产态：只有 Phase 27 全量门禁、部署和逐页逐操作 production smoke 通过后才能声明已生效；发布前生产仍按线上版本解释。
-- 例外：`read-like-command` 永不 invalidation；`explicit-batch` 保留 durable job；Workbench 保留 active-generation 原子发布。
+- 例外：`read-like-command` 永不 invalidation；`explicit-batch` 保留 durable job；共享 Workbench active-generation 仍可服务 batch-accounting，但关联台页面不消费它。
 
-“重新计算页面数据”不等于每次访问无条件重建。仍保留 read model 的页面先做廉价 freshness/version check，只有不一致才重建当前 exact scope。外部往来款是明确例外：其业务组合足够有界，直接读取 canonical snapshot，彻底删除页面 projection/version/worker 链，不能把这一个页面的方案机械推广到其它页面。
+“重新计算页面数据”不等于每次访问无条件重建。仍保留 read model 的页面先做廉价 freshness/version check，只有不一致才重建当前 exact scope。外部往来款、成本统计和关联台是已登记的 page-specific canonical direct-read 例外；各自 repository 保持独立业务口径，不能上提成统一大而全的事实 service，也不能机械推广到其它页面。
 
 ## 前端刷新合同
 
 - 普通写入不发送 finance domain event、window 自定义刷新事件或业务 `BroadcastChannel`。
 - 当前页面可在命令成功后用自己的 normal GET 更新；其他页面不自动读取。
 - route 进入/重进、页面查询变化、浏览器手动刷新和明确的页面重试是普通业务页面 load 入口。
-- App Health、后台任务、导入/reapply/repair 进度与 Workbench refresh-status 属于运维/任务状态通道，保留各自明确 owner，不得被业务页面当成跨页刷新总线。
+- App Health、后台任务和导入/reapply/repair 进度属于运维/任务状态通道，保留各自明确 owner，不得被业务页面当成跨页刷新总线。关联台页面没有 refresh-status/SSE 通道。
 
 ## 后端间接影响关系
 

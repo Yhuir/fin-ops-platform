@@ -56,22 +56,14 @@ export type WorkbenchExceptionPreview = {
 export type WorkbenchExceptionPreviewPayload = {
   month: string;
   rowIds: string[];
-  expectedReadModelVersion: string;
 };
 
 export type WorkbenchExceptionApplyPayload = {
   month: string;
   rowIds: string[];
-  expectedReadModelVersion: string;
   scenarioCode: string;
   actionCode: string;
   payload: Record<string, unknown>;
-};
-
-export type WorkbenchExceptionFreshnessTarget = {
-  readModelKey: string;
-  scopeKey: string;
-  scopeType?: string;
 };
 
 export type WorkbenchExceptionApplyResult = {
@@ -80,9 +72,5 @@ export type WorkbenchExceptionApplyResult = {
   pairRelation: Record<string, unknown> | null;
   updatedRows: Array<Record<string, unknown>>;
   affectedRowIds: string[];
-  affectedScopeKeys: string[];
-  freshnessTargets: WorkbenchExceptionFreshnessTarget[];
-  operationBarrierTargets: WorkbenchExceptionFreshnessTarget[];
-  workbenchRefreshRequired: boolean;
   message?: string;
 };

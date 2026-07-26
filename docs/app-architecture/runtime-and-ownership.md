@@ -33,6 +33,8 @@ flowchart LR
 
 页面不能自行假设 read model fresh，也不能为了“有数据”绕过 freshness gate。
 
+不拥有 page read model 的登记页面走独立合同。关联台由 page-specific canonical repository 在单个只读 snapshot 内返回 rows/summary/counts，成本统计和外部往来款由各自 canonical query service 负责；这些页面使用普通 loading/empty/error，不返回 read-model freshness 字段，也不入队或轮询。
+
 ### 批量账务读路径
 
 `/api/batch-accounting` 不拥有或读取 read model。它的读边界是 `BatchAccountingApiRoutes -> BatchAccountingService -> PostgresBatchAccountingQueryRepository`：
@@ -75,7 +77,7 @@ authoritative integration snapshot 默认同样只提交 canonical facts/source 
 
 1. 写 API 成功代表 canonical write、version、audit/idempotency 已提交，并返回 affected scopes/months。
 2. 写操作立即结束，不轮询其它页面的 operation barrier，也不把无关后台工作显示为本次操作阻塞。
-3. 当前可见页若需要立即展示结果，只重新调用自己的正常 GET。GET 的 freshness gate 负责 exact-scope enqueue、refreshing/failed 状态和有界轮询。
+3. 当前可见页若需要立即展示结果，只重新调用自己的正常 GET。仍使用 read model 的页面由 GET freshness gate 负责 exact-scope enqueue、refreshing/failed 状态和有界轮询；关联台等 canonical direct-read 页面直接读取最新已提交 PostgreSQL facts，不入队、不轮询。
 4. 其它已打开、未挂载或 document hidden 的页面不响应业务刷新事件、不缓冲重放、不执行 load。focus、hidden→visible 与 BFCache 恢复不触发业务页面 I/O；route 重新 mount、页面查询变化、浏览器手动刷新或明确重试才重新运行该页 load/freshness contract。
 5. 排序、分页和筛选只改变当前查询参数，不是页面激活，也不能触发其它页面重建。
 
@@ -100,7 +102,13 @@ OA 付款算法不读取待找发票规则，因此 OA 页面不因该规则保�
 1. route / facade 通过 `WorkbenchRelationCommandService` 预览 canonical active relation 撤回；只有存在 active relation 时才返回 `withdraw_relation`。
 2. 若没有 active relation，preview/submit 必须返回 relation not found 或 invalid operation，不能回退到任何 legacy candidate/decision 表、store 或 snapshot。
 3. 自动匹配只允许在内存中生成可原子提交的 `FormalRelationPlan`；无法满足确定性安全规则的结果不持久化、不合并未配对事实，也不得驱动 pending invoice、input invoice usage、OA pending、cost statistics 等 linked-only 下游状态。
-4. Workbench active generation、all-scope aggregate、groups page 和 `audit_workbench_relation_display` 必须共同保证旧 `case:decision:*`、`automatic_decision` / `automatic_match` payload 不会继续污染页面。Release A 仅为应用回滚暂留旧物理表，但运行时必须保持零访问；Release B 通过独立 migration 删除。
+4. 关联台 canonical query repository、groups/detail/preview 与 `audit_workbench_relation_display` 必须共同保证旧 `case:decision:*`、`automatic_decision` / `automatic_match` payload 不会继续污染页面。页面不得回读 active generation 或 relation projection。Release A 仅为其它共享调用方/应用回滚暂留旧物理资源；Release B 由跨页面主控在 whole-repo 零调用后统一删除。
+
+### 关联台 direct canonical read boundary
+
+关联台 initial、groups pagination、group detail、row detail、ignored rows 和 relation preview 均由 `WorkbenchQueryFacade` 调用 `PostgresWorkbenchCanonicalQueryRepository`。repository 在一个 `REPEATABLE READ READ ONLY` snapshot 内读取 PostgreSQL canonical OA、银行、发票、ETC snapshots 与 `app.workbench_pair_relations.status='active'`，并复用既有纯 grouping/zone/requirement policy。
+
+页面响应不包含 `read_model_status`、`read_model_version`、`source_versions`、`refresh_enqueued` 或 active generation；`/api/workbench/refresh-status` 和 `/api/workbench/events` 已删除。写 preview 只供展示，submit 不使用 `expected_read_model_version`，relation UoW 在同一事务内重新验证 canonical identity/type、active ownership、business version 和 idempotency；成功后页面普通 GET 重读。
 
 ### 成本统计 direct canonical read boundary
 

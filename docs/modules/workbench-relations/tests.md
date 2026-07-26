@@ -6,10 +6,10 @@
 
 1. Business core：relation mode/state registry、row overlap、replace/cancel/withdraw、withdrawal fingerprint、任意 typed member set。
 2. Service layer：command repository adapter、UoW 原子性、idempotency、history、dirty/outbox、partial failure rollback。
-3. API contract：confirm/preview/withdraw、expected versions、权限、错误 envelope、barrier targets。
+3. API contract：confirm/preview/withdraw、expected business versions、权限、错误 envelope、barrier targets；页面不再接收 `expected_read_model_version`。
 4. Read model/worker：linked/unlinked projection、source versions、freshness、rebuild 和 fan-out。
 5. Frontend：paired/unpaired、withdraw 与权限交互；provenance 不形成第三状态。
-6. E2E：正式确认/撤回与下游 fan-out。
+6. E2E：正式确认/撤回、写事务 canonical revalidation、页面普通 GET 重读与下游访问时收敛。
 7. Regression：520 case、ETC/no-OA/turnover/batch accounting/pending invoice/OA reverse。
 
 ## 主要测试
@@ -36,6 +36,8 @@
 - changed-case 持久化后只替换或删除目标 case/history；无关关系与审计保持不变，且 adapter 不得调用全局 `snapshot()` 做镜像重建。
 - active case 校验只执行一条 relation query，不查询 history；in-memory fallback 直接按 case 读取，不能复制全局 snapshot。
 - confirm overlap 校验只执行 active relation query，不加载 cancelled relation/history；command delta 只携带本次 history event，数据库不删除或重写旧 history，重复 operation id 保持幂等。
+- preview 后 canonical identity 消失或 row type 变化时，confirm/withdraw 在同一 relation transaction 内返回 409 且不执行 mutation；preview DTO 和页面 read-model version 不能保护正式写入。
+- 关联台 preview/initial/groups/detail 只读 canonical facts + active relations，不读 `workbench_relation` 或 Workbench active generation；其它下游 projection 测试继续保留。
 - 下游只把 active relation 视为 linked。
 - 多 scope freshness 仍逐 scope 比较 canonical expected/source proof；年度批量账务必须用一次 bulk SQL 返回 12 个月精确映射，并由真实 PostgreSQL 测试证明与 12 次单月 proof 完全相等，禁止年度汇总替代或逐月 N+1 回归。
 - old candidate/decision 表、service、state key 和 API 不存在生产调用。

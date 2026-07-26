@@ -187,6 +187,7 @@ export type WorkbenchProcessedExceptionSummary = {
 
 export type WorkbenchRelationGroup = {
   id: string;
+  detailKey?: string;
   groupType: WorkbenchGroupType;
   rawGroupType?: string;
   matchConfidence: WorkbenchMatchConfidence;
@@ -273,37 +274,6 @@ export type WorkbenchStatistics = {
   missingInvoiceGroupCount?: number;
 };
 
-export type WorkbenchReadModelStatus = "fresh" | "refreshing" | "stale" | "failed" | "unavailable" | (string & {});
-
-export type WorkbenchRefreshScopeStatus = {
-  scopeKey: string;
-  status: string;
-  updatedAt: string | null;
-  lastError: string | null;
-  sourceVersion: number | null;
-};
-
-export type WorkbenchRefreshStatus = {
-  scopeKey: string;
-  readModelStatus: WorkbenchReadModelStatus;
-  consistencyStatus: string | null;
-  generatedAt: string | null;
-  activeGenerationId: string | null;
-  readModelVersion: string | number | null;
-  dirtyScopes: WorkbenchRefreshScopeStatus[];
-  runningScopes: string[];
-  processedCount: number | null;
-  totalCount: number | null;
-  workerLagSeconds: number | null;
-  lastError: string | null;
-  retryable: boolean;
-};
-
-export type WorkbenchRefreshStatusEvent = {
-  event: string;
-  status: WorkbenchRefreshStatus;
-};
-
 export type WorkbenchZoneCounts = {
   groups: number;
   oa: number;
@@ -331,8 +301,6 @@ export type WorkbenchZonePageInfo = {
   total: number;
   rowCounts: Pick<WorkbenchZoneCounts, "oa" | "bank" | "invoice" | "rows">;
   hasMore: boolean;
-  readModelStatus: WorkbenchReadModelStatus;
-  readModelVersion: string | null;
 };
 
 export type WorkbenchInvoiceInventory = {
