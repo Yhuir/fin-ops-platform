@@ -16,6 +16,8 @@ class CaptureWorkbenchRelationRepository:
         self.scope_summary_calls: list[dict[str, object]] = []
         self.previous_distribution: dict[str, object] | None = None
         self.previous_distribution_calls: list[dict[str, object]] = []
+        self.row_id_aliases: dict[str, str] = {}
+        self.row_id_alias_calls: list[list[str]] = []
         self.relation_delta_source_version_calls: list[dict[str, object]] = []
         self.relation_delta_source_versions: dict[str, object] = {
             "workbench_relation_schema_version": WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION,
@@ -38,6 +40,18 @@ class CaptureWorkbenchRelationRepository:
             }
         )
         return self.previous_distribution
+
+    def workbench_relation_row_id_aliases(
+        self,
+        row_ids: list[str],
+        *,
+        tenant_id: str = "default",
+    ) -> dict[str, str]:
+        self.row_id_alias_calls.append(list(row_ids))
+        return {
+            row_id: self.row_id_aliases.get(row_id, row_id)
+            for row_id in row_ids
+        }
 
     def workbench_relation_scope_summary(
         self,
@@ -776,6 +790,54 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         self.assertEqual(self._statement_count(connection, "from app.oa_applications"), 1)
         self.assertEqual(self._statement_count(connection, "from app.invoices"), 0)
 
+    def test_relation_delta_expands_uuid_and_legacy_aliases_before_replacing_old_group(self) -> None:
+        repository = CaptureWorkbenchRelationRepository()
+        repository.row_id_aliases = {
+            "781cbe29-c790-4ad4-b6fb-7b4530813fa6": "bank-nanjing",
+            "bank-nanjing": "bank-nanjing",
+        }
+        repository.previous_distribution = {
+            "read_model_status": "refreshing",
+            "rows": [],
+            "groups": [
+                {
+                    "group_id": "turnover:target",
+                    "scope_key": "2026-04",
+                    "oa_row_ids": ["oa-yang"],
+                    "bank_transaction_ids": ["bank-nanjing"],
+                    "input_invoice_ids": [],
+                    "output_invoice_ids": [],
+                }
+            ],
+        }
+        connection = RemovedOaMemberRelationProjectionConnection()
+        builder = WorkbenchRelationSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=repository,
+        )
+
+        builder.rebuild_workbench_relation_read_model_relation_delta(
+            "2026-04",
+            row_ids=["781cbe29-c790-4ad4-b6fb-7b4530813fa6"],
+        )
+
+        self.assertEqual(
+            repository.previous_distribution_calls[0]["row_ids"],
+            ["781cbe29-c790-4ad4-b6fb-7b4530813fa6", "bank-nanjing"],
+        )
+        self.assertEqual(
+            repository.saved_rows[0]["affected_row_ids"],
+            [
+                "781cbe29-c790-4ad4-b6fb-7b4530813fa6",
+                "bank-nanjing",
+                "oa-yang",
+            ],
+        )
+        self.assertEqual(
+            repository.saved_rows[0]["groups"][0]["bank_transaction_ids"],
+            ["bank-nanjing"],
+        )
+
     def test_cross_month_member_index_schema_change_invalidates_old_scope(self) -> None:
         repository = CaptureWorkbenchRelationRepository()
         connection = CrossMonthRelationProjectionConnection()
@@ -834,6 +896,8 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         self.assertIn("scoped_relations as", sql)
         self.assertIn("relation.row_ids && objects.row_ids", sql)
         self.assertIn("active_relation_row_ids as", sql)
+        self.assertIn("workbench_pair_relations_membership_digest", source_versions)
+        self.assertIn("membership_digest", sql)
         self.assertIn("where status = 'active'", sql)
         self.assertIn("application_date >= scope.scope_month", sql)
         self.assertIn("application_date < scope.scope_month + interval '1 month'", sql)

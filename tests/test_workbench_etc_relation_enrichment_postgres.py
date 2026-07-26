@@ -12,6 +12,9 @@ from fin_ops_platform.services.postgres_repositories.workbench_projection_audit 
     workbench_etc_relation_integrity_issues,
 )
 from fin_ops_platform.services.workbench_sql_projection import WorkbenchSqlProjectionBuilder
+from fin_ops_platform.services.workbench_relation_sql_projection import (
+    WorkbenchRelationSqlProjectionBuilder,
+)
 from tests.postgres_test_utils import (
     apply_test_migrations,
     require_postgres_test_database_url,
@@ -440,6 +443,50 @@ class WorkbenchEtcRelationEnrichmentPostgresTests(unittest.TestCase):
                 after_withdrawal[scope_key]["workbench_pair_relations_updated_at"],
                 msg=scope_key,
             )
+
+    def test_shared_relation_membership_proof_changes_when_older_relation_is_withdrawn(self) -> None:
+        self.connection.execute(
+            """
+            insert into app.workbench_pair_relations(
+                case_id, relation_mode, status, version, month_scope, row_ids, row_types, updated_at
+            )
+            values
+                (
+                    'wb-proof-older', 'manual_confirmed', 'active', 1, '2026-06-01',
+                    array['bank-older', 'oa-older'], array['bank', 'oa'],
+                    '2026-06-10 00:00:00+00'
+                ),
+                (
+                    'wb-proof-newer', 'manual_confirmed', 'active', 1, '2026-06-01',
+                    array['bank-newer', 'oa-newer'], array['bank', 'oa'],
+                    '2026-06-20 00:00:00+00'
+                )
+            """
+        )
+        builder = WorkbenchRelationSqlProjectionBuilder(connection=self.connection)
+        before = builder.source_versions_for_scope("2026-06")
+
+        self.connection.execute(
+            """
+            update app.workbench_pair_relations
+            set status = 'withdrawn',
+                version = version + 1,
+                updated_at = '2026-06-15 00:00:00+00'
+            where case_id = 'wb-proof-older'
+            """
+        )
+        after = builder.source_versions_for_scope("2026-06")
+
+        self.assertEqual(
+            before["workbench_pair_relations_updated_at"],
+            after["workbench_pair_relations_updated_at"],
+        )
+        self.assertEqual(before["workbench_pair_relations_active_count"], 2)
+        self.assertEqual(after["workbench_pair_relations_active_count"], 1)
+        self.assertNotEqual(
+            before["workbench_pair_relations_membership_digest"],
+            after["workbench_pair_relations_membership_digest"],
+        )
 
     def test_workbench_canonical_proof_tracks_only_consumed_bank_settings(self) -> None:
         self.connection.execute(
