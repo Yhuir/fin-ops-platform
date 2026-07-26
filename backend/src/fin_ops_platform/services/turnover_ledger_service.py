@@ -280,6 +280,10 @@ class TurnoverLedgerService:
                 raw_value = category.get(field_name) if category.get(field_name) is not None else row.get(field_name)
                 if raw_value is not None:
                     enriched[field_name] = raw_value
+            for field_name in ("bank_transaction_updated_at", "category_rule_version"):
+                raw_value = category.get(field_name) if category.get(field_name) is not None else row.get(field_name)
+                if raw_value is not None:
+                    enriched[field_name] = raw_value
             enriched["debit_amount"] = self._debit_amount(row)
             enriched["credit_amount"] = self._credit_amount(row)
             enriched["counterparty_name"] = str(row.get("counterparty_name_raw") or row.get("counterparty_name") or "")

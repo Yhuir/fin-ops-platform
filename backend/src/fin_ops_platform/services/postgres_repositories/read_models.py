@@ -54,7 +54,7 @@ from fin_ops_platform.services.workbench_read_model_version import (
 )
 from fin_ops_platform.services.workbench_relation_modes import TURNOVER_MANUAL_CLOSURE_RELATION_MODE
 MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
-BANK_DETAIL_READ_MODEL_SCHEMA_VERSION = 11
+BANK_DETAIL_READ_MODEL_SCHEMA_VERSION = 12
 BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE = hashlib.sha256(b"[]").hexdigest()
 BANK_ACCOUNT_BALANCE_READ_MODEL_SCHEMA_VERSION = 2
 BANK_DETAIL_PURPOSE_TEXT_LABELS = ("用途", "交易用途")

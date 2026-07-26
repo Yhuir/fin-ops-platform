@@ -544,6 +544,8 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
                         "category_path": ["外部往来款付款", "借出款", "公司往来"],
                         "category_source": "auto",
                         "category_version": 4,
+                        "bank_transaction_updated_at": "2026-01-16 09:00:00+00",
+                        "category_rule_version": "91",
                         "turnover_action_type": "pending_collection",
                         "turnover_family": "company",
                     }
@@ -565,6 +567,10 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
         self.assertEqual(group["flow_rows"][0]["category_code"], "external_turnover")
         self.assertEqual(group["flow_rows"][0]["category_label"], "借出款")
         self.assertEqual(group["flow_rows"][0]["category_version"], 4)
+        self.assertEqual(
+            group["flow_rows"][0]["selection_version"],
+            "v1|2026-01-16 09:00:00+00|4|91|external_turnover||pending_collection|company",
+        )
 
     def test_provider_backed_grouped_ledger_does_not_per_row_read_legacy_categories(self) -> None:
         transaction = self._transaction(

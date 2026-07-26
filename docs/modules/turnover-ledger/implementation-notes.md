@@ -762,6 +762,7 @@ git diff --check
 
 - 根因：确认闭环旧链在提交前重新加载整个 Turnover 页面，服务端又用 Bank Detail scoped payload 的整体 freshness 作为写前门禁。即使所选流水本身未变化，无关 relation/category source drift 也会把精确 ID 查询判空，最终误报“银行流水状态已变化”。
 - 修复：删除前端确认前整页 reload 和服务端 whole-page status gate；grouped schema 升至 `2026-07-turnover-ledger-v9` 并为每条 bank flow 输出 opaque `selection_version`。UoW 在同一写事务内复用所选 Bank Detail 投影行，锁定 canonical bank row，并比较 bank update、活动分类/确认版本与当前自动规则版本。
+- 候选生产验证补充根因：Bank Detail v11 虽读取了 canonical `updated_at`，但未把逐行值写入持久 payload；Turnover grouped 组装也未传递该字段，导致 fresh 页面仍缺少 selection proof，并在事务内必然 409。最终修复把 Bank Detail schema 升至 v12，持久化逐行 `bank_transaction_updated_at`，并只向 Turnover flow 传递生成 opaque token 所需的更新时间和规则版本。
 - 失败合同：任一所选事实变化返回 `409 turnover_relation_conflict`；精确证明边界不可用返回 `503 turnover_bank_row_selection_unavailable`，两者均发生在 canonical relation command 前。页面级 stale 不再参与所选行写前判断。
 - 保持不变：`turnover_manual_closure` 仍只由 `WorkbenchRelationCommandService` 写入 canonical relation；confirm/withdraw 零跨页 fan-out，各页面访问时各自收敛。未新增表、migration、read model、worker、queue、cache 或 fallback。
 - 交互：提交期间按钮立即显示“确认中…”并 disabled/`aria-busy`；流水行之间增加 1px 细分割线，往来方分组边界不变。

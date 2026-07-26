@@ -183,6 +183,11 @@ DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
     ): (1, "repository shaper mirrors fresh workbench summary payload read from active generation metadata."),
     (
         "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
+        "PostgresReadModelRepository.get_workbench_relation_preview_selection",
+        "dict read_model_status=fresh",
+    ): (1, "exact preview selection verifies fresh status and the active generation before and after its bounded SQL read."),
+    (
+        "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
         "PostgresSummaryReadModelRepository.list_turnover_ledger_view",
         "dict read_model_status=fresh",
     ): (1, "repository returns the turnover ledger view; query service applies source-version freshness gate."),
@@ -201,6 +206,11 @@ DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
         "WorkbenchQueryFacade.group_detail",
         "dict read_model_status=fresh",
     ): (1, "facade returns group detail only after SQL active generation source/status gate passes."),
+    (
+        "backend/src/fin_ops_platform/services/workbench_query_facade.py",
+        "WorkbenchQueryFacade.relation_preview_selection",
+        "dict read_model_status=fresh",
+    ): (1, "facade mirrors the repository result only after the exact preview selection freshness and generation proof passes."),
     (
         "backend/src/fin_ops_platform/services/workbench_query_facade.py",
         "WorkbenchQueryFacade._cached_groups_payload",

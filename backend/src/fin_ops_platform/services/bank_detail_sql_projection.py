@@ -624,6 +624,7 @@ class BankDetailSqlProjectionBuilder:
         )
         payload = {
             "id": row["id"],
+            "bank_transaction_updated_at": row.get("bank_transaction_updated_at") or "",
             "trade_time": row.get("trade_time") or row.get("trade_date") or "",
             "counterparty_name": row.get("counterparty_name") or "",
             "direction": row["direction"],

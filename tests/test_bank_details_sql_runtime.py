@@ -322,6 +322,7 @@ def bank_detail_projected_row(
             "effective_turnover_role": "expense",
             "effective_turnover_action_type": "purchase",
             "effective_turnover_family": "operating",
+            "bank_transaction_updated_at": "2026-05-03 10:00:00+00",
             "category_version": 7,
             "manual_category_version": 7,
             "version": 11,
@@ -1488,6 +1489,10 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertIsNotNone(payload)
         self.assertEqual(payload["read_model_status"], "fresh")
         self.assertEqual([row["transaction_id"] for row in payload["rows"]], ["txn-001", "txn-002"])
+        self.assertEqual(
+            payload["rows"][0]["bank_transaction_updated_at"],
+            "2026-05-03 10:00:00+00",
+        )
         self.assertEqual(payload["missing_transaction_ids"], ["txn-missing"])
         self.assertEqual(payload["read_model_scope_keys"], ["2026-05"])
         self.assertEqual(
@@ -3100,6 +3105,7 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
                                 "imported_bank_last4": "8106",
                             }
                         },
+                        "bank_transaction_updated_at": "2026-02-04 17:07:45+00",
                     }
                 ],
             ],
@@ -3117,6 +3123,10 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
         self.assertEqual(row["effective_category_label_path"], ["外部往来款收款", "借入款"])
         self.assertEqual(row["effective_turnover_role"], "external_turnover")
         self.assertEqual(row["effective_turnover_action_type"], "pending_repayment")
+        self.assertEqual(
+            row["payload"]["bank_transaction_updated_at"],
+            "2026-02-04 17:07:45+00",
+        )
 
     def test_rebuild_projects_legacy_external_turnover_third_label_as_confirmation_candidates(self) -> None:
         repository = CaptureBankDetailReadModelRepository()
