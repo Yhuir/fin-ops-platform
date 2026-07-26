@@ -7,7 +7,7 @@ from urllib.parse import unquote
 
 from fin_ops_platform.app.auth import OARequestSession
 from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
-from fin_ops_platform.services.pending_invoice_read_model_service import PendingInvoiceReadModelService
+from fin_ops_platform.services.pending_invoice_canonical_query import PendingInvoiceCanonicalQueryService
 from fin_ops_platform.services.pending_invoice_rules_application_service import PendingInvoiceRulesApplicationService
 from fin_ops_platform.services.pending_invoice_service import (
     PendingInvoiceApplicationService,
@@ -38,7 +38,7 @@ class PendingInvoiceApiRoutes:
         *,
         query_service: PendingInvoiceQueryService,
         application_service: PendingInvoiceApplicationService,
-        read_model_service: PendingInvoiceReadModelService,
+        page_query_service: PendingInvoiceCanonicalQueryService,
         rules_service: PendingInvoiceRulesApplicationService,
         export_content_type: str,
         resolve_read_session: ReadSessionResolver | None = None,
@@ -51,7 +51,7 @@ class PendingInvoiceApiRoutes:
     ) -> None:
         self._query_service = query_service
         self._application_service = application_service
-        self._read_model_service = read_model_service
+        self._page_query_service = page_query_service
         self._rules_service = rules_service
         self._export_content_type = export_content_type
         self._resolve_read_session = resolve_read_session
@@ -166,70 +166,33 @@ class PendingInvoiceApiRoutes:
         return None
 
     def rows(self, query: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, Any]]:
-        payload = self._read_model_service.rows(query)
-        return _read_model_status_code(payload), payload
+        return HTTPStatus.OK, self._page_query_service.rows(query)
 
     def filter_options(self, query: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, Any]]:
-        options_payload = self._read_model_service.filter_options(query)
-        if options_payload.get("read_model_status") != "fresh":
-            return HTTPStatus.ACCEPTED, options_payload
-        payload = self._query_service.filter_options_for_rows(
-            rows=list(options_payload.get("rows") or []),
-            direction=str(options_payload.get("direction") or query.get("direction", ["expense"])[0]),
-            filter=str(options_payload.get("filter") or query.get("filter", ["all"])[0]),
-        )
-        if isinstance(options_payload.get("options"), dict):
-            payload["options"] = options_payload["options"]
-        payload["read_model_status"] = "fresh"
-        payload["read_model_scope_key"] = options_payload.get("read_model_scope_key")
-        return HTTPStatus.OK, payload
+        return HTTPStatus.OK, self._page_query_service.filter_options(query)
 
     def invoice_candidates(self, query: dict[str, list[str]]) -> dict[str, Any]:
-        return self._query_service.invoice_candidates(
-            transaction_id=query.get("transaction_id", [""])[0],
-            keyword=query.get("keyword", [None])[0],
-            seller_name=query.get("seller_name", [None])[0],
-            issue_date_from=query.get("issue_date_from", [None])[0],
-            issue_date_to=query.get("issue_date_to", [None])[0],
-            amount_min=query.get("amount_min", [None])[0],
-            amount_max=query.get("amount_max", [None])[0],
-            sort_field=query.get("sort_field", [None])[0],
-            sort_direction=query.get("sort_direction", [None])[0],
-            page=query.get("page", [1])[0],
-            page_size=query.get("page_size", [50])[0],
-        )
+        return self._page_query_service.invoice_candidates(query)
 
     def invoice_candidates_batch(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._query_service.invoice_candidates_batch(
-            transaction_ids=list(payload.get("transaction_ids") or []),
-            keyword=payload.get("keyword"),
-            seller_name=payload.get("seller_name"),
-            issue_date_from=payload.get("issue_date_from"),
-            issue_date_to=payload.get("issue_date_to"),
-            amount_min=payload.get("amount_min"),
-            amount_max=payload.get("amount_max"),
-            sort_field=payload.get("sort_field"),
-            sort_direction=payload.get("sort_direction"),
-            page=payload.get("page", 1),
-            page_size=payload.get("page_size", 50),
-        )
+        return self._page_query_service.invoice_candidates_batch(payload)
 
     def relation_detail(self, transaction_id: str, query: dict[str, list[str]] | None = None) -> dict[str, Any]:
         request_query = query or {}
-        return self._query_service.relation_detail(
-            transaction_id=transaction_id,
+        return self._page_query_service.relation_detail(
+            transaction_id,
             direction=request_query.get("direction", ["expense"])[0],
             kind=request_query.get("kind", ["all"])[0],
         )
 
     def bank_transaction_detail(self, bank_transaction_id: str) -> dict[str, Any]:
-        return self._query_service.bank_transaction_detail(bank_transaction_id)
+        return self._page_query_service.bank_transaction_detail(bank_transaction_id)
 
     def invoice_detail(self, invoice_id: str) -> dict[str, Any]:
-        return self._query_service.invoice_detail(invoice_id)
+        return self._page_query_service.invoice_detail(invoice_id)
 
     def oa_detail(self, oa_id: str) -> dict[str, Any]:
-        return self._query_service.oa_detail(oa_id)
+        return self._page_query_service.oa_detail(oa_id)
 
     def attach_existing_preview(self, transaction_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         return self._application_service.preview_attach_existing_invoice(
@@ -322,18 +285,14 @@ class PendingInvoiceApiRoutes:
         )
 
     def export_preview(self, query: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, Any]]:
-        rows_payload = self._read_model_service.all_rows(query)
-        if rows_payload.get("read_model_status") != "fresh":
-            return HTTPStatus.ACCEPTED, rows_payload
+        rows_payload = self._page_query_service.all_rows(query)
         return HTTPStatus.OK, self._query_service.export_preview_for_rows(
             rows=list(rows_payload.get("rows") or []),
             filters=_query_kwargs(query),
         )
 
     def export(self, query: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, Any] | PendingInvoiceExportFile]:
-        rows_payload = self._read_model_service.all_rows(query)
-        if rows_payload.get("read_model_status") != "fresh":
-            return HTTPStatus.ACCEPTED, rows_payload
+        rows_payload = self._page_query_service.all_rows(query)
         filename, content = self._query_service.export_for_rows(rows=list(rows_payload.get("rows") or []))
         return HTTPStatus.OK, PendingInvoiceExportFile(
             filename=filename,
@@ -445,14 +404,6 @@ class PendingInvoiceApiRoutes:
     def _persist(self) -> None:
         if callable(self._persist_state):
             self._persist_state()
-
-
-def _read_model_status_code(payload: dict[str, Any]) -> HTTPStatus:
-    return (
-        HTTPStatus.ACCEPTED
-        if payload.get("read_model_status") == "refreshing" and not payload.get("rows")
-        else HTTPStatus.OK
-    )
 
 
 def _query_kwargs(query: dict[str, list[str]]) -> dict[str, object]:

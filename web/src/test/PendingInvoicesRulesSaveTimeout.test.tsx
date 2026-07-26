@@ -87,7 +87,6 @@ function rulesPayload(direction: "expense" | "income") {
   return {
     version: isIncome ? 12 : 7,
     direction,
-    read_model_status: "fresh",
     permissions: { can_save: true },
     bank_transaction_tags: {
       version: 4,
@@ -137,7 +136,6 @@ function installPendingInvoiceRulesSaveFetch() {
             excluded_direction_rows: 0,
           },
         },
-        read_model_status: "refreshing",
         tag_dictionary: { version: 4, tags: [] },
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
@@ -148,7 +146,7 @@ function installPendingInvoiceRulesSaveFetch() {
       const direction = (url.searchParams.get("direction") === "income" ? "income" : "expense") as "expense" | "income";
       return new Response(JSON.stringify({
         ...rulesPayload(direction),
-        ...(method === "PUT" ? { read_model_status: "refreshing", version: direction === "income" ? 13 : 8 } : {}),
+        ...(method === "PUT" ? { version: direction === "income" ? 13 : 8 } : {}),
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
     return baseFetch(input, init);

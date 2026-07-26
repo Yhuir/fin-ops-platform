@@ -325,9 +325,10 @@ from fin_ops_platform.services.pending_invoice_service import (
     PendingInvoiceQueryService,
 )
 from fin_ops_platform.services.pending_invoice_lifecycle_service import PendingInvoiceLifecycleService
-from fin_ops_platform.services.pending_invoice_read_model_service import (
-    PendingInvoiceReadModelService,
-    PendingInvoiceSourceVersionsProvider,
+from fin_ops_platform.services.pending_invoice_canonical_query import (
+    LocalPendingInvoiceCanonicalRepository,
+    PendingInvoiceCanonicalQueryService,
+    PostgresPendingInvoiceCanonicalRepository,
 )
 from fin_ops_platform.services.pending_invoice_rules_application_service import (
     AppSettingsPendingInvoiceRulesGateway,
@@ -6776,31 +6777,32 @@ class Application:
                 export_response=self._pending_invoice_export_response,
                 persist_state=self._persist_state,
             )
-        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
         query_service = getattr(self, "_pending_invoice_query_service", None)
         settings_service = getattr(self, "_app_settings_service", None)
-        get_settings_payload = getattr(settings_service, "get_settings_payload", None)
-        settings_provider = get_settings_payload if callable(get_settings_payload) else (lambda: {})
-        row_normalizer = getattr(query_service, "normalize_row_payloads", None)
-        read_model_service = PendingInvoiceReadModelService(
-            repository=getattr(self, "_pending_invoice_sql_read_repository", None),
-            queue_repository=queue_repository,
-            row_normalizer=row_normalizer if callable(row_normalizer) else None,
-            settings_provider=settings_provider,
-            source_versions_provider=PendingInvoiceSourceVersionsProvider(
-                settings_provider=settings_provider,
-                attachment_invoice_parser_version_provider=self._current_oa_attachment_invoice_parser_version,
-                oa_projection_sync_version_provider=self._current_oa_projection_sync_version,
-                repository=getattr(self, "_pending_invoice_sql_read_repository", None),
-            ),
-        )
+        page_query_service = getattr(self, "_pending_invoice_page_query_service", None)
+        if not isinstance(page_query_service, PendingInvoiceCanonicalQueryService):
+            connection = getattr(getattr(self, "_state_store", None), "_connection", None)
+            repository = (
+                PostgresPendingInvoiceCanonicalRepository(connection)
+                if self._requires_sql_read_model_runtime()
+                else LocalPendingInvoiceCanonicalRepository(
+                    import_service=getattr(self, "_import_service", None),
+                    query_service=query_service,
+                    settings_provider=settings_service.get_settings_payload,
+                )
+            )
+            page_query_service = PendingInvoiceCanonicalQueryService(
+                repository=repository,
+                row_normalizer=getattr(query_service, "normalize_row_payloads", None),
+            )
+            self._pending_invoice_page_query_service = page_query_service
         rules_service = PendingInvoiceRulesApplicationService(
             settings_gateway=AppSettingsPendingInvoiceRulesGateway(settings_service),
         )
         routes = PendingInvoiceApiRoutes(
             query_service=query_service,
             application_service=getattr(self, "_pending_invoice_application_service", None),
-            read_model_service=read_model_service,
+            page_query_service=page_query_service,
             rules_service=rules_service,
             export_content_type=XLSX_MIME_TYPE,
             resolve_read_session=self._resolve_pending_invoice_read_session,

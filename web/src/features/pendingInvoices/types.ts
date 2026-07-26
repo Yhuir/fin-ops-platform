@@ -7,8 +7,6 @@ export type PendingInvoiceFilter =
   | "no_invoice_required"
   | "cash_income";
 
-export type PendingInvoiceReadModelStatus = "fresh" | "refreshing" | "stale" | (string & {});
-
 export type PendingInvoiceStatusCode =
   | "paid_invoiced"
   | "paid_pending_invoice"
@@ -105,7 +103,6 @@ export type PendingInvoiceRuleGroup = {
 export type PendingInvoiceRulesPayload = {
   version: number;
   direction: PendingInvoiceDirection;
-  readModelStatus?: PendingInvoiceReadModelStatus;
   availableTags: PendingInvoiceRuleTag[];
   groups: {
     requiresInvoice: PendingInvoiceRuleGroup;
@@ -295,7 +292,6 @@ export type PendingInvoiceRowsResponse = {
     sourceSummary?: PendingInvoiceSourceSummary;
   };
   statistics?: PendingInvoiceStatistics;
-  readModelStatus: PendingInvoiceReadModelStatus;
   tagDictionary?: BankTransactionTagDictionary;
 };
 

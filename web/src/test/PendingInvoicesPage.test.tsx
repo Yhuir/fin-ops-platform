@@ -415,7 +415,6 @@ function batchAttachRow() {
 function installPendingInvoiceFetch(options: {
   rulesPayload?: () => ReturnType<typeof pendingInvoiceRulesPayload>;
   rowsPayload?: (url: URL) => Array<Record<string, unknown>>;
-  readModelStatus?: string;
   operationBarrierResponse?: (body: Record<string, unknown>, url: URL) => Response | Promise<Response>;
   attachExistingInvoicesPreviewResponse?: (body: Record<string, unknown>, url: URL) => Response | Promise<Response>;
   exportDownloadResponse?: (url: URL) => Response;
@@ -447,7 +446,6 @@ function installPendingInvoiceFetch(options: {
             excluded_direction_rows: direction === "income" ? 356 : 75,
           },
         },
-        read_model_status: options.readModelStatus ?? "fresh",
         tag_dictionary: { version: 1, tags: [] },
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
@@ -548,7 +546,6 @@ function installPendingInvoiceFetch(options: {
       return new Response(JSON.stringify({
         version: 8,
         direction: url.searchParams.get("direction") ?? "expense",
-        read_model_status: "refreshing",
         permissions: { can_save: true },
         bank_transaction_tags: {
           version: 8,
@@ -1741,20 +1738,22 @@ describe("Pending invoices page", () => {
     ]));
   });
 
-  test("keeps row status actions available while the list read model is refreshing", async () => {
-    const user = userEvent.setup();
-    installPendingInvoiceFetch({ readModelStatus: "refreshing" });
+  test("does not expose read-model status or poll the direct canonical endpoint", async () => {
+    const fetchMock = installPendingInvoiceFetch();
     renderAppAt("/pending-invoices");
 
     const page = await findPendingInvoicesPage();
-    expect(await within(page).findByText("数据刷新中")).toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "筛选内容导出" })).toBeDisabled();
-
-    const pendingRow = await within(page).findByRole("row", { name: /云南开票供应商/ });
-    await user.click(within(pendingRow).getByRole("checkbox", { name: "选择流水 云南开票供应商" }));
-    expect(within(page).getByRole("button", { name: "选择发票" })).toBeEnabled();
-    expect(within(pendingRow).queryByRole("button", { name: "云南开票供应商 发票获取操作" })).not.toBeInTheDocument();
-    expect(screen.queryByText("补票")).not.toBeInTheDocument();
+    await within(page).findByRole("row", { name: /云南开票供应商/ });
+    expect(within(page).queryByText(/读模型|数据刷新中/)).not.toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "筛选内容导出" })).toBeEnabled();
+    await new Promise((resolve) => window.setTimeout(resolve, 400));
+    const rowCalls = fetchMock.mock.calls.filter(([input]) => (
+      new URL(
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url,
+        "http://localhost",
+      ).pathname === "/api/pending-invoices/rows"
+    ));
+    expect(rowCalls).toHaveLength(1);
   });
 
 });
