@@ -8,7 +8,6 @@ import StatePanel from "../components/common/StatePanel";
 import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
-import { ApiClientError } from "../features/apiClient";
 import {
   fetchBatchAccounting,
   submitBatchAccounting,
@@ -31,15 +30,9 @@ const EMPTY_PAYLOAD: BatchAccountingResponse = {
   oaRows: [],
   relationsByBankRowId: {},
   pagination: {},
-  readModelStatus: "refreshing",
-  readModelStaleReasons: [],
-  readModelScopeKeys: [],
-  refreshEnqueued: false,
 };
 
 const BATCH_ACCOUNTING_PAGE_SIZE = 200;
-const BATCH_ACCOUNTING_ACCESS_FRESH_TIMEOUT_MS = 3_000;
-const BATCH_ACCOUNTING_ACCESS_FRESH_POLL_MS = 150;
 
 function currentYear() {
   return String(new Date().getFullYear());
@@ -157,60 +150,12 @@ function PageControls({
   );
 }
 
-function normalizeSearchText(value: string | number | null | undefined) {
-  return String(value ?? "").replace(/\s+/g, "").toLowerCase();
-}
-
-function oaSearchText(row: BatchAccountingOaRow) {
-  return normalizeSearchText([
-    row.id,
-    row.applicant,
-    row.applyTime,
-    row.projectName,
-    row.amount,
-    formatMoney(row.amount),
-    row.reason,
-    ...row.linkedInvoiceRowIds,
-  ].join(" "));
-}
-
-function stringListFromPayload(value: unknown) {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value
-    .map((item) => String(item ?? "").trim())
-    .filter(Boolean);
-}
-
-function scopeMessage(scopeKeys: string[]) {
-  return scopeKeys.length > 0 ? `影响范围：${scopeKeys.join("、")}` : "";
-}
-
 function mutationErrorMessage(caught: unknown, fallback: string) {
-  if (caught instanceof ApiClientError && caught.code === "batch_accounting_read_model_not_fresh") {
-    const payload = caught.payload && typeof caught.payload === "object"
-      ? caught.payload as Record<string, unknown>
-      : {};
-    const staleReasons = stringListFromPayload(payload.read_model_stale_reasons ?? payload.readModelStaleReasons);
-    const scopeKeys = stringListFromPayload(payload.read_model_scope_keys ?? payload.readModelScopeKeys);
-    return [
-      caught.message,
-      staleReasons.join("、"),
-      scopeMessage(scopeKeys),
-    ].filter(Boolean).join(" ");
-  }
   return caught instanceof Error ? caught.message : fallback;
 }
 
-function mutationDeferredSyncMessage(message: string | undefined, fallback: string) {
-  return `${message || fallback} 关联关系仍在后台同步，稍后刷新可查看最新结果。`;
-}
-
-function waitForBatchAccountingAccessPoll() {
-  return new Promise<void>((resolve) => {
-    window.setTimeout(resolve, BATCH_ACCOUNTING_ACCESS_FRESH_POLL_MS);
-  });
+function mutationReloadFailedMessage(message: string | undefined, fallback: string) {
+  return `${message || fallback} 最新列表加载失败，请手动刷新。`;
 }
 
 function cx(...values: Array<string | false | null | undefined>) {
@@ -327,13 +272,7 @@ export default function BatchAccountingPage() {
     return payload.relationsByBankRowId[selectedBankRow.id]?.oaRows ?? payload.oaRows;
   }, [bucket, payload.oaRows, payload.relationsByBankRowId, selectedBankRow]);
 
-  const normalizedOaSearchQuery = normalizeSearchText(oaSearchQuery);
-  const visibleOaRows = useMemo(() => {
-    if (!normalizedOaSearchQuery) {
-      return sourceOaRows;
-    }
-    return sourceOaRows.filter((row) => oaSearchText(row).includes(normalizedOaSearchQuery));
-  }, [normalizedOaSearchQuery, sourceOaRows]);
+  const visibleOaRows = sourceOaRows;
 
   const selectedOaRows = useMemo(() => {
     if (bucket === "submitted") {
@@ -347,12 +286,6 @@ export default function BatchAccountingPage() {
   const bankAmountCents = selectedBankRow ? parseMoneyCents(selectedBankRow.amount) : 0;
   const selectedOaTotalCents = selectedOaRows.reduce((total, row) => total + parseMoneyCents(row.amount), 0);
   const differenceCents = bankAmountCents - selectedOaTotalCents;
-  const readModelStatus = payload.readModelStatus || "refreshing";
-  const readModelNeedsRefresh = readModelStatus !== "fresh";
-  const readModelScopeMessage = scopeMessage(payload.readModelScopeKeys);
-  const readModelStatusMessage = payload.refreshEnqueued
-    ? `关联台关系读模型 ${readModelStatus}，正在刷新。`
-    : `关联台关系读模型 ${readModelStatus}，刷新未入队，请检查系统状态。`;
   const isAmountMismatch = bucket === "unsubmitted"
     && Boolean(selectedBankRow)
     && selectedOaRows.length > 0
@@ -398,29 +331,18 @@ export default function BatchAccountingPage() {
     if (!isValidYear(bankYear)) {
       return null;
     }
-    const startedAt = Date.now();
-    while (true) {
-      if (document.visibilityState !== "visible") {
-        throw new Error("批量账务关联已提交；页面已隐藏，请返回后手动刷新。");
-      }
-      const nextPayload = await fetchBatchAccounting({
-        bankYear,
-        bucket,
-        bankPage,
-        bankPageSize: BATCH_ACCOUNTING_PAGE_SIZE,
-        oaPage: bucket === "unsubmitted" ? oaPage : undefined,
-        oaPageSize: bucket === "unsubmitted" ? BATCH_ACCOUNTING_PAGE_SIZE : undefined,
-      });
-      applyBatchAccountingPayload(nextPayload);
-      if (nextPayload.readModelStatus === "fresh") {
-        return nextPayload;
-      }
-      if (Date.now() - startedAt >= BATCH_ACCOUNTING_ACCESS_FRESH_TIMEOUT_MS) {
-        throw new Error("批量账务关联读模型未在 3 秒内收敛。");
-      }
-      await waitForBatchAccountingAccessPoll();
-    }
-  }, [applyBatchAccountingPayload, bankPage, bankYear, bucket, oaPage]);
+    const nextPayload = await fetchBatchAccounting({
+      bankYear,
+      bucket,
+      bankPage,
+      bankPageSize: BATCH_ACCOUNTING_PAGE_SIZE,
+      oaPage: bucket === "unsubmitted" ? oaPage : undefined,
+      oaPageSize: bucket === "unsubmitted" ? BATCH_ACCOUNTING_PAGE_SIZE : undefined,
+      oaSearch: bucket === "unsubmitted" ? oaSearchQuery : undefined,
+    });
+    applyBatchAccountingPayload(nextPayload);
+    return nextPayload;
+  }, [applyBatchAccountingPayload, bankPage, bankYear, bucket, oaPage, oaSearchQuery]);
 
   const loadData = useCallback((signal?: AbortSignal) => {
     if (!isValidYear(bankYear)) {
@@ -435,6 +357,7 @@ export default function BatchAccountingPage() {
       bankPageSize: BATCH_ACCOUNTING_PAGE_SIZE,
       oaPage: bucket === "unsubmitted" ? oaPage : undefined,
       oaPageSize: bucket === "unsubmitted" ? BATCH_ACCOUNTING_PAGE_SIZE : undefined,
+      oaSearch: bucket === "unsubmitted" ? oaSearchQuery : undefined,
       signal,
     })
       .then(applyBatchAccountingPayload)
@@ -446,7 +369,7 @@ export default function BatchAccountingPage() {
         setError(caught instanceof Error ? caught.message : "批量账务数据加载失败");
       })
       .finally(() => setLoading(false));
-  }, [applyBatchAccountingPayload, bankPage, bankYear, bucket, oaPage]);
+  }, [applyBatchAccountingPayload, bankPage, bankYear, bucket, oaPage, oaSearchQuery]);
 
   useEffect(() => {
     if (!active) {
@@ -557,7 +480,7 @@ export default function BatchAccountingPage() {
           } catch {
             return {
               ...submitResult,
-              message: mutationDeferredSyncMessage(submitResult.message, "已关联批量账务流水与 OA。"),
+              message: mutationReloadFailedMessage(submitResult.message, "已关联批量账务流水与 OA。"),
             };
           }
           return submitResult;
@@ -599,7 +522,7 @@ export default function BatchAccountingPage() {
           } catch {
             return {
               ...withdrawResult,
-              message: mutationDeferredSyncMessage(withdrawResult.message, "已撤回批量账务关联。"),
+              message: mutationReloadFailedMessage(withdrawResult.message, "已撤回批量账务关联。"),
             };
           }
           return withdrawResult;
@@ -621,7 +544,6 @@ export default function BatchAccountingPage() {
       ariaLabel="Audit 日常报销批量账务管理"
       pageKey="batch-accounting"
       label="日常报销批量账务管理"
-      readModelStatus={readModelStatus}
     />
   ) : null;
 
@@ -663,12 +585,6 @@ export default function BatchAccountingPage() {
       </div>
 
       {error ? <StatePanel tone="error" title={error} /> : null}
-      {!error && readModelNeedsRefresh ? (
-        <StatePanel tone="warning" title={readModelStatusMessage}>
-          <span>{payload.readModelStaleReasons.join("、") || "等待关联台关系读模型恢复 fresh 后再提交或撤回。"}</span>
-          {readModelScopeMessage ? <span>{readModelScopeMessage}</span> : null}
-        </StatePanel>
-      ) : null}
       {!canMutateData ? (
         <StatePanel compact tone="warning">
           当前账号仅支持查看和导出，不能提交或撤回批量账务关联。
@@ -782,7 +698,10 @@ export default function BatchAccountingPage() {
                   <Search aria-hidden="true" size={15} strokeWidth={2.2} />
                   <input
                     id="batch-accounting-oa-search"
-                    onChange={(event) => setOaSearchQuery(event.target.value)}
+                    onChange={(event) => {
+                      setOaSearchQuery(event.target.value);
+                      setOaPage(1);
+                    }}
                     placeholder="申请人、项目、金额、事由"
                     type="search"
                     value={oaSearchQuery}
@@ -791,7 +710,10 @@ export default function BatchAccountingPage() {
                     <button
                       aria-label="清空搜索"
                       className="batch-accounting-search__clear"
-                      onClick={() => setOaSearchQuery("")}
+                      onClick={() => {
+                        setOaSearchQuery("");
+                        setOaPage(1);
+                      }}
                       type="button"
                     >
                       <X aria-hidden="true" size={14} strokeWidth={2.4} />

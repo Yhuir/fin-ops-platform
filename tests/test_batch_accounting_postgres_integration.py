@@ -1,17 +1,97 @@
 from __future__ import annotations
 
-import json
+from contextlib import contextmanager
+from time import perf_counter
+from typing import Any, Iterator
 import unittest
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
-from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
-from fin_ops_platform.services.workbench_relation_sql_projection import WorkbenchRelationSqlProjectionBuilder
-from fin_ops_platform.services.workbench_sql_projection import WorkbenchSqlProjectionBuilder
+from fin_ops_platform.services.postgres_repositories.batch_accounting import (
+    PostgresBatchAccountingQueryRepository,
+)
 from tests.postgres_test_utils import (
     apply_test_migrations,
     require_postgres_test_database_url,
     truncate_test_database,
 )
+
+
+class RecordingTransaction:
+    def __init__(self) -> None:
+        self.statements: list[str] = []
+
+    def execute(self, sql: str, _params: tuple[Any, ...] | None = None) -> None:
+        self.statements.append(sql)
+
+    def fetch_one(self, sql: str, _params: tuple[Any, ...] | None = None) -> dict[str, int]:
+        self.statements.append(sql)
+        return {"unsubmitted_count": 0, "submitted_count": 0, "oa_count": 0}
+
+    def fetch_all(self, sql: str, _params: tuple[Any, ...] | None = None) -> list[dict[str, Any]]:
+        self.statements.append(sql)
+        if "from app.oa_applications oa" in sql and "limit %s offset %s" in sql:
+            return [{"id": "oa-batch-1"}]
+        if "from app.workbench_pair_relations relation" in sql and "join lateral" in sql:
+            return [
+                {
+                    "case_id": "CASE-BATCH-1",
+                    "status": "active",
+                    "relation_mode": "batch_accounting",
+                    "row_ids": ["txn-batch-1", "oa-batch-1"],
+                    "row_types": ["bank", "oa"],
+                    "bank_row": {"id": "txn-batch-1"},
+                }
+            ]
+        return []
+
+
+class RecordingConnection:
+    def __init__(self) -> None:
+        self.transaction_instance = RecordingTransaction()
+
+    @contextmanager
+    def transaction(self) -> Iterator[RecordingTransaction]:
+        yield self.transaction_instance
+
+
+class BatchAccountingQueryCountTests(unittest.TestCase):
+    def test_repository_uses_fixed_statement_counts_without_read_models(self) -> None:
+        unsubmitted_connection = RecordingConnection()
+        PostgresBatchAccountingQueryRepository(unsubmitted_connection).list_snapshot(
+            bank_year="2026",
+            bucket="unsubmitted",
+            bank_page=1,
+            bank_page_size=200,
+            oa_page=1,
+            oa_page_size=200,
+        )
+        submitted_connection = RecordingConnection()
+        PostgresBatchAccountingQueryRepository(submitted_connection).list_snapshot(
+            bank_year="2026",
+            bucket="submitted",
+            bank_page=1,
+            bank_page_size=200,
+            oa_page=1,
+            oa_page_size=200,
+        )
+        submission_connection = RecordingConnection()
+        PostgresBatchAccountingQueryRepository(submission_connection).load_submission_context(
+            bank_year="2026",
+            bank_row_id="txn-batch-1",
+            oa_row_ids=["oa-batch-1"],
+        )
+
+        self.assertEqual(len(unsubmitted_connection.transaction_instance.statements), 5)
+        self.assertEqual(len(submitted_connection.transaction_instance.statements), 4)
+        self.assertEqual(len(submission_connection.transaction_instance.statements), 4)
+        for connection in (unsubmitted_connection, submitted_connection, submission_connection):
+            statements = connection.transaction_instance.statements
+            combined_sql = "\n".join(statements)
+            self.assertEqual(statements[0], "set transaction isolation level repeatable read read only")
+            self.assertNotIn("read_model.", combined_sql)
+            self.assertNotIn("workbench_generations", combined_sql)
+            self.assertNotIn("raw_payload", combined_sql)
+            self.assertNotIn("'source_links', invoice.source_links", combined_sql)
 
 
 class BatchAccountingPostgresIntegrationTests(unittest.TestCase):
@@ -25,293 +105,231 @@ class BatchAccountingPostgresIntegrationTests(unittest.TestCase):
         self.connection = PostgresConnection(
             PostgresSettings(database_url=self.database_url, pool_enabled=False)
         )
-        self.repository = PostgresReadModelRepository(self.connection)
+        self.repository = PostgresBatchAccountingQueryRepository(self.connection)
+        self._seed_canonical_facts()
 
-    def test_bulk_relation_proof_executes_with_real_postgres(self) -> None:
+    def _seed_canonical_facts(self) -> None:
         self.connection.execute(
             """
-            insert into read_model.workbench_relation_scopes(
-                tenant_id, scope_key, scope_month, row_count, group_count, source_versions
+            insert into app.bank_transactions(
+                legacy_mongo_id, account_no, account_name, txn_direction,
+                counterparty_name_raw, amount, signed_amount, txn_date, txn_month,
+                trade_time, status, raw_payload
             )
-            select
-                'default',
-                '2026-' || lpad(month_number::text, 2, '0'),
-                make_date(2026, month_number, 1),
-                case when month_number = 1 then 1 else 0 end,
-                case when month_number = 1 then 1 else 0 end,
-                '{"workbench_relation_schema_version":"bulk-v1"}'::jsonb
-            from generate_series(1, 12) month_number
-            """
-        )
-        self.connection.execute(
-            """
-            insert into read_model.workbench_relation_groups(
-                tenant_id, group_id, scope_key, scope_month, relation_source,
-                relation_kind, relation_status, oa_row_ids, bank_transaction_ids,
-                source_versions, payload
-            )
-            values (
-                'default', 'CASE-BATCH-1', '2026-01', '2026-01-01', 'manual',
-                'oa_bank', 'linked', array['oa-batch-1'], array['txn-batch-1'],
-                '{"workbench_relation_schema_version":"bulk-v1"}'::jsonb,
-                '{
-                  "group_id":"CASE-BATCH-1",
-                  "relation_mode":"batch_accounting",
-                  "relation_status":"linked",
-                  "row_ids":["txn-batch-1","oa-batch-1"],
-                  "row_types":["bank","oa"],
-                  "special_metadata":{"source":"batch_accounting","bank_year":"2026"}
-                }'::jsonb
-            )
-            """
-        )
-        self.connection.execute(
-            """
-            insert into read_model.workbench_relation_rows(
-                tenant_id, row_id, row_type, scope_key, scope_month, relation_status,
-                group_ids, linked_oa, linked_bank_transactions, source_versions, payload
-            )
-            values (
-                'default', 'txn-batch-1', 'bank_transaction', '2026-01', '2026-01-01', 'linked',
-                array['CASE-BATCH-1'], '[{"id":"oa-batch-1"}]'::jsonb,
-                '[{"id":"txn-batch-1"}]'::jsonb,
-                '{"workbench_relation_schema_version":"bulk-v1"}'::jsonb,
-                '{"row_id":"txn-batch-1","row_type":"bank_transaction"}'::jsonb
-            )
-            """
-        )
-        self.connection.execute(
-            """
-            insert into read_model.workbench_relation_groups(
-                tenant_id, group_id, scope_key, scope_month, relation_source,
-                relation_kind, relation_status, source_versions, payload
-            )
-            select
-                'default',
-                'CASE-UNRELATED-' || item_number::text,
-                '2026-01',
-                '2026-01-01',
-                'manual',
-                'oa_bank',
-                'linked',
-                '{"workbench_relation_schema_version":"bulk-v1"}'::jsonb,
-                jsonb_build_object(
-                    'group_id', 'CASE-UNRELATED-' || item_number::text,
-                    'relation_mode', 'manual_confirmed',
-                    'relation_status', 'linked',
-                    'special_metadata', jsonb_build_object('source', 'manual_confirmed', 'bank_year', '2026')
+            values
+                (
+                    'txn-batch-unsubmitted', '6227000012348106', '建行基本户', 'outflow',
+                    '批量账务集中处理', 1200, -1200, '2026-01-07', '2026-01-01',
+                    '2026-01-07 15:54:00+08', 'active', '{}'::jsonb
+                ),
+                (
+                    'txn-batch-submitted', '6227000012348106', '建行基本户', 'outflow',
+                    '批量账务集中处理', 800, -800, '2026-02-07', '2026-02-01',
+                    '2026-02-07 15:54:00+08', 'active', '{}'::jsonb
+                ),
+                (
+                    'txn-batch-linked-other', '6227000012348106', '建行基本户', 'outflow',
+                    '批量账务集中处理', 500, -500, '2026-03-07', '2026-03-01',
+                    '2026-03-07 15:54:00+08', 'active', '{}'::jsonb
+                ),
+                (
+                    'txn-batch-income', '6227000012348106', '建行基本户', 'inflow',
+                    '批量账务集中处理', 300, 300, '2026-04-07', '2026-04-01',
+                    '2026-04-07 15:54:00+08', 'active', '{}'::jsonb
+                ),
+                (
+                    'txn-other-counterparty', '6227000012348106', '建行基本户', 'outflow',
+                    '其他对方', 300, -300, '2026-05-07', '2026-05-01',
+                    '2026-05-07 15:54:00+08', 'active', '{}'::jsonb
                 )
-            from generate_series(1, 5000) item_number
             """
         )
-        self.connection.execute("analyze read_model.workbench_relation_groups")
-
-        list_payload = self.repository.list_batch_accounting_relation_groups_by_year(year="2026")
-        row_payload = self.repository.get_batch_accounting_relation_rows_by_ids(
-            ["txn-batch-1"],
-            scope_keys_hint=["2026-01"],
-            submitted_year="2026",
-        )
-
-        self.assertEqual(list_payload["read_model_status"], "fresh")
-        self.assertEqual(list_payload["groups"][0]["group_id"], "CASE-BATCH-1")
-        self.assertEqual(row_payload["read_model_status"], "fresh")
-        self.assertEqual(row_payload["rows"][0]["row_id"], "txn-batch-1")
-        self.assertEqual(row_payload["submitted_count"], 1)
-        count_explain = self.connection.fetch_one(
-            """
-            explain (format json)
-            select count(distinct group_id)::integer
-            from read_model.workbench_relation_groups
-            where tenant_id = 'default'
-              and scope_key = any(array['2026-01']::text[])
-              and relation_status = 'linked'
-              and payload->'special_metadata'->>'source' = 'batch_accounting'
-              and coalesce(
-                    nullif(payload->'special_metadata'->>'bank_year', ''),
-                    nullif(payload->'special_metadata'->>'year', '')
-                  ) = '2026'
-            """
-        )
-        self.assertIn(
-            "workbench_relation_groups_batch_accounting_year_scope_group_idx",
-            json.dumps(count_explain, ensure_ascii=False),
-        )
-
-        self.connection.execute(
-            """
-            insert into job.read_model_dirty_scopes(
-                tenant_id, scope_type, scope_key, source_version, status
-            )
-            values ('default', 'workbench_relation', '2026-01', 2, 'processing')
-            """
-        )
-        refreshing = self.repository.get_batch_accounting_relation_rows_by_ids(
-            ["txn-batch-1"],
-            scope_keys_hint=["2026-01"],
-            submitted_year="2026",
-        )
-        self.assertEqual(refreshing["read_model_status"], "refreshing")
-        self.assertIn("refreshing:2026-01", refreshing["stale_reasons"])
-        self.assertEqual(refreshing["submitted_count"], 0)
-
-    def test_bulk_canonical_source_versions_match_twelve_single_scope_proofs(self) -> None:
-        builder = WorkbenchRelationSqlProjectionBuilder(connection=self.connection)
-        scope_keys = [f"2026-{month:02d}" for month in range(1, 13)]
-
-        source_versions_by_scope = builder.source_versions_for_scopes(scope_keys)
-        single_scope_versions = {
-            scope_key: builder.source_versions_for_scope(scope_key)
-            for scope_key in scope_keys
-        }
-
-        self.assertEqual(source_versions_by_scope, single_scope_versions)
-
-    def test_workbench_page_source_versions_track_canonical_oa_objects(self) -> None:
-        builder = WorkbenchSqlProjectionBuilder(connection=self.connection)
-        before_month = builder.source_versions_for_scope("2026-07")
-
         self.connection.execute(
             """
             insert into app.oa_applications(
-                oa_source_id, form_id, row_id, status, workflow_status,
-                application_date, scope_month, amount, currency, normalized_payload
-            )
-            values (
-                'source-proof-oa', 'source-proof-form', 'oa-source-proof-2026-07',
-                'active', 'completed', '2026-07-22', '2026-07-01', 1, 'CNY', '{}'::jsonb
-            )
-            """
-        )
-
-        after_month = builder.source_versions_for_scope("2026-07")
-        after_all = builder.source_versions_for_scope("all")
-
-        self.assertEqual(before_month["oa_projection_updated_at"], "")
-        self.assertTrue(after_month["oa_projection_updated_at"])
-        self.assertEqual(after_all["oa_projection_updated_at"], after_month["oa_projection_updated_at"])
-
-    def test_bulk_workbench_page_source_versions_match_single_scope_proofs(self) -> None:
-        builder = WorkbenchSqlProjectionBuilder(connection=self.connection)
-        scope_keys = [f"2026-{month:02d}" for month in range(1, 13)]
-
-        source_versions_by_scope = builder.source_versions_for_scopes(scope_keys)
-        single_scope_versions = {
-            scope_key: builder.source_versions_for_scope(scope_key)
-            for scope_key in scope_keys
-        }
-
-        self.assertEqual(source_versions_by_scope, single_scope_versions)
-
-    def test_unsubmitted_candidate_and_attachment_reads_use_hot_paths(self) -> None:
-        self.connection.execute(
-            """
-            insert into read_model.workbench_generations(
-                generation_id, tenant_id, scope_key, status, source_versions,
-                completed_at, activated_at
-            )
-            values (
-                'batch-accounting-pg-2026-01', 'default', '2026-01', 'active',
-                '{"workbench_schema_version":"test"}'::jsonb, now(), now()
-            )
-            """
-        )
-        self.connection.execute(
-            """
-            insert into read_model.workbench_rows(
-                row_id, scope_month, scope_key, source_kind, status, counterparty_name,
-                generated_at, generation_id, payload
+                oa_source_id, form_id, form_type, row_id, status, workflow_status,
+                applicant, application_date, scope_month, project_name, amount, currency,
+                normalized_payload, raw_payload
             )
             values
-              (
-                'txn-batch-structured-1', '2026-01-01', '2026-01', 'bank', 'unpaired',
-                '批量账务集中处理', now(), 'batch-accounting-pg-2026-01',
-                '{"id":"txn-batch-structured-1","type":"bank","counterparty_name":"批量账务集中处理"}'::jsonb
-              ),
-              (
-                'txn-batch-legacy-json-1', '2026-01-01', '2026-01', 'bank', 'unpaired',
-                '其他对方', now(), 'batch-accounting-pg-2026-01',
-                '{"id":"txn-batch-legacy-json-1","type":"bank","counterparty_name":"批量账务集中处理"}'::jsonb
-              ),
-              (
-                'oa-batch-1', '2026-01-01', '2026-01', 'oa', 'unpaired', null,
-                now(), 'batch-accounting-pg-2026-01',
-                '{"id":"oa-batch-1","type":"oa","apply_type":"日常报销","amount":"10.00"}'::jsonb
-              ),
-              (
-                'oa-att-inv-oa-batch-1-01', '2026-01-01', '2026-01',
-                'oa_attachment_invoice', 'unpaired', null, now(),
-                'batch-accounting-pg-2026-01',
-                '{"id":"oa-att-inv-oa-batch-1-01","type":"invoice","derived_from_oa_id":"oa-batch-1"}'::jsonb
-              ),
-              (
-                'oa-att-inv-unrelated-01', '2026-01-01', '2026-01',
-                'oa_attachment_invoice', 'unpaired', null, now(),
-                'batch-accounting-pg-2026-01',
-                '{"id":"oa-att-inv-unrelated-01","type":"invoice","derived_from_oa_id":"oa-unrelated"}'::jsonb
-              )
+                (
+                    'oa-source-eligible', 'expense_claim', '日常报销', 'oa-batch-eligible',
+                    'active', 'completed', '刘晨', '2025-12-31', '2025-12-01',
+                    '品牌广告投放', 1200, 'CNY',
+                    '{"apply_type":"日常报销","reason":"跨年日常报销","apply_time":"2025-12-31"}'::jsonb,
+                    '{}'::jsonb
+                ),
+                (
+                    'oa-source-invoice-only', 'expense_claim', '日常报销', 'oa-batch-invoice-only',
+                    'active', 'completed', '王明', '2026-01-02', '2026-01-01',
+                    '品牌广告投放', 100, 'CNY',
+                    '{"apply_type":"日常报销","reason":"仅有发票关系"}'::jsonb, '{}'::jsonb
+                ),
+                (
+                    'oa-source-bank-linked', 'expense_claim', '日常报销', 'oa-batch-bank-linked',
+                    'active', 'completed', '赵敏', '2026-01-03', '2026-01-01',
+                    '已关联项目', 500, 'CNY',
+                    '{"apply_type":"日常报销","reason":"已关联流水"}'::jsonb, '{}'::jsonb
+                ),
+                (
+                    'oa-source-progress', 'expense_claim', '日常报销', 'oa-batch-progress',
+                    'active', 'in_progress', '未完成', '2026-01-04', '2026-01-01',
+                    '未完成项目', 100, 'CNY',
+                    '{"apply_type":"日常报销"}'::jsonb, '{}'::jsonb
+                ),
+                (
+                    'oa-source-other', 'payment_request', '付款申请', 'oa-batch-other',
+                    'active', 'completed', '其他', '2026-01-05', '2026-01-01',
+                    '其他流程', 100, 'CNY',
+                    '{"apply_type":"付款申请"}'::jsonb, '{}'::jsonb
+                ),
+                (
+                    'oa-source-submitted', 'expense_claim', '日常报销', 'oa-batch-submitted',
+                    'active', 'completed', '提交用户', '2026-02-01', '2026-02-01',
+                    '已提交项目', 800, 'CNY',
+                    '{"apply_type":"日常报销","reason":"已提交"}'::jsonb, '{}'::jsonb
+                )
             """
         )
         self.connection.execute(
             """
-            insert into read_model.workbench_rows(
-                row_id, scope_month, scope_key, source_kind, status, counterparty_name,
-                generated_at, generation_id, payload
+            insert into app.oa_attachments(
+                oa_application_id, oa_source_id, form_id, source_attachment_key,
+                filename, normalized_payload, raw_payload
             )
-            select
-                'oa-batch-non-match-' || item_number::text,
-                '2026-01-01',
-                '2026-01',
-                'oa',
-                'unpaired',
-                null,
-                now(),
-                'batch-accounting-pg-2026-01',
-                jsonb_build_object(
-                    'id', 'oa-batch-non-match-' || item_number::text,
-                    'type', 'oa',
-                    'apply_type', '其他流程'
+            select id, row_id, form_id, 'attachment-batch-eligible', 'invoice.pdf',
+                   '{}'::jsonb, '{}'::jsonb
+            from app.oa_applications
+            where row_id = 'oa-batch-eligible'
+            """
+        )
+        self.connection.execute(
+            """
+            insert into app.invoices(
+                legacy_mongo_id, invoice_type, invoice_no, invoice_date, invoice_month,
+                amount, signed_amount, total_with_tax, status, source_links, raw_payload
+            )
+            values
+                (
+                    'oa-att-inv-eligible', 'input_vat', 'INV-ELIGIBLE', '2025-12-30', '2025-12-01',
+                    1200, 1200, 1200, 'pending',
+                    '[{
+                        "source_type":"oa_attachment_invoice",
+                        "derived_from_oa_id":"oa-batch-eligible",
+                        "source_attachment_key":"attachment-batch-eligible"
+                    }]'::jsonb,
+                    '{}'::jsonb
+                ),
+                (
+                    'oa-att-inv-submitted', 'input_vat', 'INV-SUBMITTED', '2026-02-01', '2026-02-01',
+                    800, 800, 800, 'pending',
+                    '[{
+                        "source_type":"oa_attachment_invoice",
+                        "derived_from_oa_id":"oa-batch-submitted"
+                    }]'::jsonb,
+                    '{}'::jsonb
                 )
-            from generate_series(1, 5000) item_number
             """
         )
-        self.connection.execute("analyze read_model.workbench_rows")
+        self.connection.execute(
+            """
+            insert into app.workbench_pair_relations(
+                case_id, relation_mode, status, version, month_scope,
+                row_ids, row_types, note, amount_check, special_metadata
+            )
+            values
+                (
+                    'CASE-BATCH-SUBMITTED', 'batch_accounting', 'active', 3, '2026-02-01',
+                    array['txn-batch-submitted','oa-batch-submitted','oa-att-inv-submitted'],
+                    array['bank','oa','invoice'],
+                    '已提交',
+                    '{"status":"matched","bank_amount":"800.00","oa_amount":"800.00","amount_delta":"0.00"}'::jsonb,
+                    '{
+                        "source":"batch_accounting",
+                        "bank_row_id":"txn-batch-submitted",
+                        "oa_row_ids":["oa-batch-submitted"],
+                        "invoice_row_ids":["oa-att-inv-submitted"],
+                        "bank_year":"2026",
+                        "affected_scope_keys":["2026-02"]
+                    }'::jsonb
+                ),
+                (
+                    'CASE-OTHER-BANK', 'manual_confirmed', 'active', 1, '2026-03-01',
+                    array['txn-batch-linked-other','oa-batch-bank-linked'],
+                    array['bank','oa'], 'other', '{}'::jsonb, '{}'::jsonb
+                ),
+                (
+                    'CASE-INVOICE-ONLY', 'existing_case', 'active', 1, '2026-01-01',
+                    array['oa-batch-invoice-only','oa-att-inv-eligible'],
+                    array['oa','invoice'], 'invoice only', '{}'::jsonb, '{}'::jsonb
+                ),
+                (
+                    'CASE-BATCH-CANCELLED', 'batch_accounting', 'cancelled', 2, '2026-02-01',
+                    array['txn-batch-unsubmitted','oa-batch-eligible'],
+                    array['bank','oa'], 'cancelled', '{}'::jsonb,
+                    '{"source":"batch_accounting","bank_year":"2026"}'::jsonb
+                )
+            """
+        )
 
-        payload = self.repository.load_batch_accounting_workbench_payload(bank_year="2026")
-        group = payload["unpaired"]["groups"][0]
-        submit_payload = self.repository.load_batch_accounting_submit_workbench_payload(
+    def test_unsubmitted_snapshot_filters_pages_and_links_canonical_attachment_invoice(self) -> None:
+        started_at = perf_counter()
+        payload = self.repository.list_snapshot(
             bank_year="2026",
-            bank_row_id="txn-batch-structured-1",
-            oa_row_ids=["oa-batch-1"],
+            bucket="unsubmitted",
+            bank_page=1,
+            bank_page_size=1,
+            oa_page=1,
+            oa_page_size=20,
+            oa_search="品牌",
         )
-        submit_group = submit_payload["unpaired"]["groups"][0]
-        explain_row = self.connection.fetch_one(
-            """
-            explain (format json)
-            select row_id
-            from read_model.workbench_rows
-            where scope_key <> 'all'
-              and source_kind = 'oa'
-              and (
-                    coalesce(payload->>'apply_type', '')
-                    || ' '
-                    || coalesce(payload->>'expense_type', '')
-                  ) like %s
-            """,
-            ("%日常报销%",),
+        duration_ms = (perf_counter() - started_at) * 1000
+
+        self.assertEqual(payload["summary"]["unsubmitted_count"], 1)
+        self.assertEqual(payload["summary"]["submitted_count"], 1)
+        self.assertEqual([row["id"] for row in payload["bank_rows"]], ["txn-batch-unsubmitted"])
+        self.assertEqual(
+            [row["id"] for row in payload["oa_rows"]],
+            ["oa-batch-invoice-only", "oa-batch-eligible"],
+        )
+        self.assertEqual(
+            [(row["id"], row["source_oa_id"]) for row in payload["invoice_rows"]],
+            [("oa-att-inv-eligible", "oa-batch-eligible")],
+        )
+        self.assertEqual(payload["pagination"]["bank_rows"]["total"], 1)
+        self.assertEqual(payload["pagination"]["oa_rows"]["total"], 2)
+        self.assertLess(duration_ms, 5_000)
+
+    def test_submitted_snapshot_reads_active_batch_relation_and_canonical_members(self) -> None:
+        payload = self.repository.list_snapshot(
+            bank_year="2026",
+            bucket="submitted",
+            bank_page=1,
+            bank_page_size=20,
+            oa_page=1,
+            oa_page_size=20,
         )
 
-        self.assertEqual([row["id"] for row in group["bank_rows"]], ["txn-batch-structured-1"])
-        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-batch-1"])
+        self.assertEqual(payload["summary"]["submitted_count"], 1)
+        self.assertEqual([row["case_id"] for row in payload["relations"]], ["CASE-BATCH-SUBMITTED"])
+        self.assertEqual(payload["relations"][0]["bank_row"]["id"], "txn-batch-submitted")
         self.assertEqual(
-            [row["id"] for row in group["invoice_rows"]],
-            ["oa-att-inv-oa-batch-1-01"],
+            {(row["member_type"], row["id"]) for row in payload["member_rows"]},
+            {("oa", "oa-batch-submitted"), ("invoice", "oa-att-inv-submitted")},
         )
-        self.assertEqual(
-            [row["id"] for row in submit_group["invoice_rows"]],
-            ["oa-att-inv-oa-batch-1-01"],
+        self.assertEqual(payload["pagination"]["bank_rows"]["total"], 1)
+
+    def test_submission_context_is_narrow_and_cross_year_oa_is_allowed(self) -> None:
+        payload = self.repository.load_submission_context(
+            bank_year="2026",
+            bank_row_id="txn-batch-unsubmitted",
+            oa_row_ids=["oa-batch-eligible"],
         )
-        self.assertIn(
-            "workbench_rows_batch_accounting_oa_type_trgm_idx",
-            json.dumps(explain_row, ensure_ascii=False),
-        )
+
+        self.assertEqual([row["id"] for row in payload["bank_rows"]], ["txn-batch-unsubmitted"])
+        self.assertEqual([row["id"] for row in payload["oa_rows"]], ["oa-batch-eligible"])
+        self.assertEqual([row["id"] for row in payload["invoice_rows"]], ["oa-att-inv-eligible"])
+
+
+if __name__ == "__main__":
+    unittest.main()

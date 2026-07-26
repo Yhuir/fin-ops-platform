@@ -1,5 +1,17 @@
 # 批量账务 实施记录
 
+## 2026-07-27 - 页面直读 canonical facts
+
+- 目标：把 `/batch-accounting` 的全部页面读取从 Workbench active generation 和 `workbench_relation` read facade 迁移到页面专属 PostgreSQL query repository，同时保留权限、金额、CAS/冲突、跨月、附件发票、submit/withdraw command 语义。
+- 直接模块：batch-accounting。上游模块：canonical-facts、workbench-relations、permissions-and-audit。下游影响：reconciliation-workbench 及其它 relation 消费页只在各自读取边界收敛，本页面不主动刷新它们。
+- 设计：`BatchAccountingApiRoutes -> BatchAccountingService -> PostgresBatchAccountingQueryRepository`。rows/summary/counts/pagination 使用一个显式 `REPEATABLE READ / READ ONLY` snapshot；正式关系只读 `app.workbench_pair_relations status='active'`，已提交列表进一步限定 `relation_mode='batch_accounting'`。写操作继续使用 `WorkbenchRelationCommandService`。
+- 性能：未提交 GET / 已提交 GET / submit context 的最大 statement count 分别为 5/4/4（含 transaction isolation 设置）；银行和 OA 服务端分页；附件、关系成员都按当前 IDs 批量读取。最大 200 银行 + 200 OA + 200 附件发票的本地 route/service assembly 100 样本为 p50 `3.637ms`、p95 `8.056ms`、max `28.213ms`。未引入缓存、worker、queue、materialized view、索引 migration 或新依赖。
+- 旧页面链路删除：service/server wiring 不再注入三类 Workbench loader 或 `WorkbenchRelationReadFacade`；frontend/API/E2E 删除 read-model status/source-version/refresh enqueue/polling/202/barrier；OA 搜索从客户端全量过滤改为服务端参数；写后只重新 GET 一次。
+- docs impact assessment：API shape、页面运行时、模块边界、测试矩阵和业务流程均变化，已更新本模块 README/boundary/state/tests/E2E 文档、`docs/dev/api-contracts.md`、`docs/app-architecture/pages.md`、`docs/app-architecture/runtime-and-ownership.md`、`docs/business-flows/batch-accounting.md`。全局 `read-model-contracts.md` 和 App Status registry 按并行所有权约束不在本分支修改。
+- 共享 HANDOFF：所有页面合并后由主控 whole-repo scan 并统一删除 `PostgresReadModelRepository.load_batch_accounting_workbench_payload`、`load_batch_accounting_submit_workbench_payload`、`load_batch_accounting_submitted_bank_workbench_payload`；其 `read_models.py` 私有 SQL/mappers（`_load_batch_accounting_workbench_payload`、`_load_batch_accounting_invoice_rows`、`_batch_accounting_payload_from_rows` 及只服务这些入口的 helpers）；`WorkbenchRelationReadFacade.get_batch_accounting_by_row_ids`、`list_batch_accounting_relations_by_year`；对应 port/repository/manifest 方法 `get_batch_accounting_relation_rows_by_ids`、`list_batch_accounting_relation_groups_by_year`；以及确认无其它调用方后的 migration 0112/0113 batch-only 旧 read-model 索引、App Status/page audit 的旧 `workbench_relation` binding。共享 registry、worker、projection、migration 不得在本页面分支抢删。
+- 验证：backend API/query-count/boundary tests、frontend API/page tests、production build、batch browser E2E 和 lint；真实 PostgreSQL integration 在未配置 `FIN_OPS_TEST_DATABASE_URL` 时跳过，生产 EXPLAIN/端点耗时由主控合并后验证。
+- 以下 2026-07-23 及更早记录是迁移前历史，不再定义当前 runtime/API/read boundary。
+
 ## 2026-07-23 - 年度 bulk proof 逐 scope freshness 闭环
 
 - 生产根因：批量账务专用 repository 已在单条 bundle SQL 中读取全年 12 个 `workbench_relation` scope proof，但 DTO 只返回第一个 scope 的汇总 `source_versions`，漏掉 `read_model_scope_source_versions`。facade 对每个月执行 canonical 比较时因此把全部 scope 判为版本缺失，导致页面 20/20 stale 且每次访问重复 enqueue，即使 worker 已完成重建也无法收敛。

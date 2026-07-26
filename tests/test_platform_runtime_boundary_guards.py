@@ -4190,28 +4190,21 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         route_withdraw_source = _function_source(routes_tree, routes_source, "withdraw")
         service_path = SERVICES_ROOT / "batch_accounting_service.py"
         service_source = service_path.read_text(encoding="utf-8")
-        service_tree = _parse(service_path)
-        submitted_relations_source = _function_source(service_tree, service_source, "_submitted_relations")
-        unsubmitted_distribution_source = _function_source(
-            service_tree,
-            service_source,
-            "_relation_distribution_row_id_sets",
-        )
-        submitted_distribution_source = _function_source(
-            service_tree,
-            service_source,
-            "_distribution_rows_by_bank_id",
-        )
-        workbench_context_source = _function_source(service_tree, service_source, "_build_workbench_row_context")
         service_factory_source = _function_source(tree, source, "_batch_accounting_service")
+        repository_path = SERVICES_ROOT / "postgres_repositories" / "batch_accounting.py"
+        repository_source = repository_path.read_text(encoding="utf-8")
 
         violations: list[str] = []
         if "def _repair_batch_accounting_relation_case_ids" in source:
             violations.append("server.py still defines unused batch accounting app-level repair helper")
         if "_batch_accounting_routes().list_payload" not in list_source:
             violations.append("GET /api/batch-accounting no longer delegates reads to BatchAccountingApiRoutes")
-        if "_service_factory(use_sql_read_model=True).build_payload" not in route_list_source:
-            violations.append("BatchAccountingApiRoutes no longer delegates reads to BatchAccountingService with SQL read model")
+        if "_service_factory().build_payload" not in route_list_source:
+            violations.append("BatchAccountingApiRoutes no longer delegates reads to BatchAccountingService")
+        if "list_snapshot(" not in service_source:
+            violations.append("BatchAccountingService no longer reads through its page-owned query repository")
+        if "query_repository=" not in service_factory_source:
+            violations.append("Application no longer injects the page-owned batch accounting query repository")
         for forbidden in (
             "_repair_batch_accounting_relation_case_ids",
             "repair_legacy_case_id_collisions",
@@ -4229,88 +4222,33 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"GET /api/batch-accounting bypasses read-only route boundary via {forbidden}")
             if forbidden in route_list_source:
                 violations.append(f"BatchAccountingApiRoutes list bypasses read-only route boundary via {forbidden}")
-        if "list_batch_accounting_relations_by_year" not in submitted_relations_source:
-            violations.append("submitted batch accounting list no longer uses the year-level relation DTO boundary")
-        if "list_by_month" in submitted_relations_source:
-            violations.append("submitted batch accounting list keeps legacy 12-month relation scan fallback")
-        for distribution_source in (unsubmitted_distribution_source, submitted_distribution_source):
-            if "get_batch_accounting_by_row_ids" not in distribution_source:
-                violations.append("batch accounting relation distribution no longer uses its dedicated row read I/O")
-            if 'getattr(self._relation_facade, "get_by_row_ids"' in distribution_source:
-                violations.append("batch accounting relation distribution keeps the generic row read fallback")
-        for forbidden in ("grouped_workbench_loader", "_build_api_workbench_payload"):
-            if forbidden in service_source:
-                violations.append(f"BatchAccountingService keeps full Workbench payload fallback {forbidden}")
-            if forbidden in service_factory_source:
-                violations.append(f"Application batch accounting wiring keeps full Workbench payload fallback {forbidden}")
-        if "batch_accounting_workbench_read_model_unavailable" not in workbench_context_source:
-            violations.append("BatchAccountingService does not fail closed when its dedicated Workbench loader is unavailable")
-        for required_loader in (
+        for removed_reader in (
             "load_batch_accounting_workbench_payload",
             "load_batch_accounting_submit_workbench_payload",
             "load_batch_accounting_submitted_bank_workbench_payload",
+            "get_batch_accounting_by_row_ids",
+            "list_batch_accounting_relations_by_year",
+            "relation_facade",
+            "read_model_status",
+            "refresh_enqueued",
         ):
-            if required_loader not in service_factory_source:
-                violations.append(f"Application batch accounting wiring is missing dedicated loader {required_loader}")
-
-        read_model_path = SERVICES_ROOT / "postgres_repositories" / "read_models.py"
-        read_model_source = read_model_path.read_text(encoding="utf-8")
-        read_model_tree = _parse(read_model_path)
-        batch_loader_source = _function_source(
-            read_model_tree,
-            read_model_source,
-            "_load_batch_accounting_workbench_payload",
-        )
-        invoice_loader_source = _function_source(
-            read_model_tree,
-            read_model_source,
-            "_load_batch_accounting_invoice_rows",
-        )
-        if batch_loader_source.count("self._connection.fetch_all(") != 1:
-            violations.append("batch accounting list candidate snapshot is no longer one repository I/O")
-        if "_load_batch_accounting_invoice_rows" in batch_loader_source:
-            violations.append("batch accounting list keeps the separate attachment round trip")
-        for required_candidate_bound in (
-            "oa_candidate_ids as materialized",
-            "r.source_kind = 'oa_attachment_invoice'",
-            "r.scope_key <> 'all'",
-            "_BATCH_ACCOUNTING_INVOICE_CANDIDATE_MATCH_SQL",
+            if removed_reader in service_source or removed_reader in routes_source or removed_reader in service_factory_source:
+                violations.append(f"batch accounting runtime keeps removed read-model reader {removed_reader}")
+        for required_table in (
+            "app.bank_transactions",
+            "app.oa_applications",
+            "app.oa_attachments",
+            "app.invoices",
+            "app.workbench_pair_relations",
         ):
-            if required_candidate_bound not in batch_loader_source:
-                violations.append(
-                    f"batch accounting list attachment I/O is missing current OA bound {required_candidate_bound}"
-                )
-        for required_shared_match in (
-            "from oa_candidate_ids candidate",
-            "candidate.oa_row_id",
-            "jsonb_array_elements",
-        ):
-            if required_shared_match not in read_model_source:
-                violations.append(
-                    f"batch accounting shared attachment match is missing candidate bound {required_shared_match}"
-                )
-        if "r.counterparty_name = %s" not in batch_loader_source:
-            violations.append("batch accounting bank candidate read no longer uses the structured indexed counterparty field")
-        for legacy_bank_filter in ("r.payload->>'counterparty_name'", "r.payload->>'counterparty_name_raw'"):
-            if legacy_bank_filter in batch_loader_source:
-                violations.append(f"batch accounting bank candidate read keeps legacy JSON fallback {legacy_bank_filter}")
-        for required_oa_type_filter in (
-            "coalesce(r.payload->>'apply_type', '')",
-            "coalesce(r.payload->>'expense_type', '')",
-            ") like %s",
-        ):
-            if required_oa_type_filter not in batch_loader_source:
-                violations.append(f"batch accounting OA candidate read is missing indexed type expression {required_oa_type_filter}")
-        if "r.payload->>'apply_type' like %s" in batch_loader_source or "r.payload->>'expense_type' like %s" in batch_loader_source:
-            violations.append("batch accounting OA candidate read keeps the unindexed OR filter")
-        for required_filter in (
-            "normalized_oa_row_ids",
-            "oa_candidate_ids as materialized",
-            "select unnest(%s::text[])",
-            "_BATCH_ACCOUNTING_INVOICE_CANDIDATE_MATCH_SQL",
-        ):
-            if required_filter not in invoice_loader_source:
-                violations.append(f"batch accounting attachment loader is missing scoped filter {required_filter}")
+            if required_table not in repository_source:
+                violations.append(f"batch accounting canonical repository is missing {required_table}")
+        if "set transaction isolation level repeatable read read only" not in repository_source:
+            violations.append("batch accounting repository no longer uses one explicit read-only repeatable-read snapshot")
+        if "read_model." in repository_source or "workbench_generations" in repository_source:
+            violations.append("batch accounting page repository reads a removed read-model dependency")
+        if "limit %s offset %s" not in repository_source:
+            violations.append("batch accounting page repository no longer performs server-side pagination")
 
         mutation_handlers = (
             (
@@ -4318,14 +4256,14 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 submit_source,
                 route_submit_source,
                 "_batch_accounting_routes().submit",
-                "_service_factory(use_sql_read_model=True).submit",
+                "_service_factory().submit",
             ),
             (
                 "withdraw",
                 withdraw_source,
                 route_withdraw_source,
                 "_batch_accounting_routes().withdraw",
-                "_service_factory(use_sql_read_model=True).withdraw",
+                "_service_factory().withdraw",
             ),
         )
         for name, handler_source, route_source, route_call, service_call in mutation_handlers:
@@ -4335,12 +4273,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"batch accounting {name} route no longer delegates mutation to BatchAccountingApiRoutes")
             if service_call not in route_source:
                 violations.append(f"BatchAccountingApiRoutes {name} no longer delegates mutation to BatchAccountingService")
-            if name == "submit":
-                submit_unlocked_source = _function_source(service_tree, service_source, "_submit_unlocked")
-                if "_build_submit_context(" not in submit_unlocked_source:
-                    violations.append("BatchAccountingService submit no longer uses the submit context boundary")
-                if "_build_list_context(" in submit_unlocked_source or "_context_with_candidate_relation_distribution(" in submit_unlocked_source:
-                    violations.append("BatchAccountingService submit is polluted by list relation distribution context")
             for forbidden in (
                 "repair_legacy_case_id_collisions",
                 "_after_relation_mutation",

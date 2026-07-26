@@ -9,7 +9,6 @@ import type {
   FetchBatchAccountingRequest,
   SubmitBatchAccountingRequest,
   WithdrawBatchAccountingRequest,
-  ReadModelOperationBarrierTarget,
 } from "./types";
 import { apiRequestJson } from "../apiClient";
 
@@ -81,14 +80,6 @@ type ApiResponse = {
   oaRows?: ApiOaRow[] | null;
   relations_by_bank_row_id?: ApiRelationsByBankRowId | null;
   relationsByBankRowId?: ApiRelationsByBankRowId | null;
-  read_model_status?: string | null;
-  readModelStatus?: string | null;
-  read_model_stale_reasons?: string[] | null;
-  readModelStaleReasons?: string[] | null;
-  read_model_scope_keys?: string[] | null;
-  readModelScopeKeys?: string[] | null;
-  refresh_enqueued?: boolean | null;
-  refreshEnqueued?: boolean | null;
   pagination?: ApiPagination | null;
 };
 
@@ -129,12 +120,6 @@ type ApiMutationResult = {
   affectedMonths?: string[] | null;
   affected_scope_keys?: string[] | null;
   affectedScopeKeys?: string[] | null;
-  read_model_scope_keys?: string[] | null;
-  readModelScopeKeys?: string[] | null;
-  freshness_targets?: unknown;
-  freshnessTargets?: unknown;
-  operation_barrier_targets?: unknown;
-  operationBarrierTargets?: unknown;
   message?: string | null;
 };
 
@@ -161,41 +146,6 @@ function nullableNumberValue(value: number | null | undefined) {
 
 function stringList(value: string[] | null | undefined) {
   return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
-}
-
-function readModelTargets(value: unknown): ReadModelOperationBarrierTarget[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  const targets: ReadModelOperationBarrierTarget[] = [];
-  const seen = new Set<string>();
-  value.forEach((item) => {
-    if (!item || typeof item !== "object") {
-      return;
-    }
-    const record = item as Record<string, unknown>;
-    const readModelKey = textValue(record.read_model_key ?? record.readModelKey);
-    const scopeKey = textValue(record.scope_key ?? record.scopeKey);
-    const scopeType = textValue(record.scope_type ?? record.scopeType);
-    if (!readModelKey || !scopeKey) {
-      return;
-    }
-    const key = `${readModelKey}\u0000${scopeKey}\u0000${scopeType}`;
-    if (seen.has(key)) {
-      return;
-    }
-    seen.add(key);
-    targets.push({
-      readModelKey,
-      scopeKey,
-      ...(scopeType ? { scopeType } : {}),
-    });
-  });
-  return targets;
-}
-
-function textValue(value: unknown) {
-  return typeof value === "string" ? value.trim() : "";
 }
 
 function mapBankRow(row: ApiBankRow = {}): BatchAccountingBankRow {
@@ -297,17 +247,12 @@ function mapPageInfo(value: ApiPageInfo | null | undefined): BatchAccountingPage
 }
 
 function mapMutationResult(payload: ApiMutationResult): BatchAccountingMutationResult {
-  const freshnessTargets = readModelTargets(payload.freshness_targets ?? payload.freshnessTargets);
-  const operationTargets = readModelTargets(payload.operation_barrier_targets ?? payload.operationBarrierTargets);
   return {
     success: Boolean(payload.success),
     relationId: text(payload.relation_id ?? payload.relationId),
     affectedRowIds: stringList(payload.affected_row_ids ?? payload.affectedRowIds),
     affectedMonths: stringList(payload.affected_months ?? payload.affectedMonths),
     affectedScopeKeys: stringList(payload.affected_scope_keys ?? payload.affectedScopeKeys),
-    readModelScopeKeys: stringList(payload.read_model_scope_keys ?? payload.readModelScopeKeys),
-    freshnessTargets,
-    operationBarrierTargets: operationTargets.length > 0 ? operationTargets : freshnessTargets,
     message: text(payload.message),
   };
 }
@@ -319,6 +264,7 @@ export async function fetchBatchAccounting({
   bankPageSize,
   oaPage,
   oaPageSize,
+  oaSearch,
   signal,
 }: FetchBatchAccountingRequest): Promise<BatchAccountingResponse> {
   const params = new URLSearchParams();
@@ -336,6 +282,9 @@ export async function fetchBatchAccounting({
   if (oaPageSize !== undefined) {
     params.set("oa_page_size", String(oaPageSize));
   }
+  if (oaSearch) {
+    params.set("oa_search", oaSearch);
+  }
   const payload = await requestJson<ApiResponse>(`/api/batch-accounting?${params.toString()}`, { method: "GET", signal });
   const pagination = payload.pagination;
   return {
@@ -350,10 +299,6 @@ export async function fetchBatchAccounting({
       bankRows: mapPageInfo(pagination?.bank_rows ?? pagination?.bankRows),
       oaRows: mapPageInfo(pagination?.oa_rows ?? pagination?.oaRows),
     },
-    readModelStatus: text(payload.read_model_status ?? payload.readModelStatus, "refreshing"),
-    readModelStaleReasons: stringList(payload.read_model_stale_reasons ?? payload.readModelStaleReasons),
-    readModelScopeKeys: stringList(payload.read_model_scope_keys ?? payload.readModelScopeKeys),
-    refreshEnqueued: Boolean(payload.refresh_enqueued ?? payload.refreshEnqueued),
   };
 }
 

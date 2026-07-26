@@ -81,7 +81,7 @@ from fin_ops_platform.services.app_settings_service import (
     OA_ATTACHMENT_INVOICE_PROMOTION_DISABLED,
 )
 from fin_ops_platform.services.audit import AuditTrailService
-from fin_ops_platform.services.batch_accounting_service import BatchAccountingError, BatchAccountingService
+from fin_ops_platform.services.batch_accounting_service import BatchAccountingService
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
 from fin_ops_platform.services.bank_account_balance_derived_lifecycle_executor import BankAccountBalanceDerivedLifecycleExecutor
 from fin_ops_platform.services.bank_account_balance_read_model_refresh_producer import BankAccountBalanceReadModelRefreshProducer
@@ -223,6 +223,9 @@ from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecycleP
 from fin_ops_platform.services.postgres_repositories.input_invoice_usage_oa_reverse import (
     PostgresInputInvoiceUsageOaReverseBatchRepository,
     input_invoice_usage_oa_reverse_statistics_snapshot,
+)
+from fin_ops_platform.services.postgres_repositories.batch_accounting import (
+    PostgresBatchAccountingQueryRepository,
 )
 from fin_ops_platform.services.postgres_repositories.oa_applicant_credentials import (
     PostgresOaApplicantCredentialRepository,
@@ -782,6 +785,12 @@ class Application:
 
     def _initialize_runtime_services(self, persisted_state: dict[str, object]) -> None:
         import_fact_repository = getattr(self._state_store, "import_fact_repository", None)
+        postgres_connection = getattr(self._state_store, "_connection", None)
+        self._batch_accounting_query_repository = (
+            PostgresBatchAccountingQueryRepository(postgres_connection)
+            if postgres_connection is not None
+            else None
+        )
         self._workbench_sql_read_repository = getattr(self._state_store, "workbench_sql_read_repository", None)
         self._workbench_sql_projection_builder = getattr(self._state_store, "workbench_sql_projection_builder", None)
         self._tax_offset_sql_read_repository = getattr(self._state_store, "tax_offset_sql_read_repository", None)
@@ -8189,33 +8198,9 @@ class Application:
             fallback_to_import_service=not self._requires_sql_read_model_runtime(),
         )
 
-    def _batch_accounting_service(self, *, use_sql_read_model: bool = False) -> BatchAccountingService:
-        batch_workbench_loader = None
-        batch_submit_workbench_loader = None
-        batch_submitted_workbench_loader = None
-        if use_sql_read_model and self._workbench_sql_read_repository is not None:
-            batch_workbench_loader = getattr(
-                self._workbench_sql_read_repository,
-                "load_batch_accounting_workbench_payload",
-                None,
-            )
-            batch_submit_workbench_loader = getattr(
-                self._workbench_sql_read_repository,
-                "load_batch_accounting_submit_workbench_payload",
-                None,
-            )
-            batch_submitted_workbench_loader = getattr(
-                self._workbench_sql_read_repository,
-                "load_batch_accounting_submitted_bank_workbench_payload",
-                None,
-            )
+    def _batch_accounting_service(self) -> BatchAccountingService:
         return BatchAccountingService(
-            batch_workbench_loader=batch_workbench_loader,
-            batch_submit_workbench_loader=batch_submit_workbench_loader if callable(batch_submit_workbench_loader) else None,
-            batch_submitted_workbench_loader=(
-                batch_submitted_workbench_loader if callable(batch_submitted_workbench_loader) else None
-            ),
-            relation_facade=self._workbench_relation_read_facade(),
+            query_repository=getattr(self, "_batch_accounting_query_repository", None),
             relation_command_service=self._batch_accounting_relation_command_service(),
         )
 
@@ -8234,9 +8219,7 @@ class Application:
         routes = getattr(self, "_batch_accounting_api_routes", None)
         if isinstance(routes, BatchAccountingApiRoutes):
             return routes
-        routes = BatchAccountingApiRoutes(
-            lambda **kwargs: self._batch_accounting_service(**kwargs),
-        )
+        routes = BatchAccountingApiRoutes(self._batch_accounting_service)
         self._batch_accounting_api_routes = routes
         return routes
 
@@ -8298,12 +8281,6 @@ class Application:
                 {"error": "permission_denied", "message": "当前账户没有提交或撤回批量账务关联的权限。"},
             )
         return session
-
-    def _batch_accounting_error_response(self, exc: BatchAccountingError) -> Response:
-        status = HTTPStatus.CONFLICT if exc.code == "batch_accounting_version_conflict" else HTTPStatus.BAD_REQUEST
-        payload: dict[str, object] = {"error": exc.code, "message": str(exc)}
-        payload.update(exc.payload)
-        return self._json_response(status, payload)
 
     def _bank_transaction_tag_definition_current(self, code: str) -> dict[str, object] | None:
         tag_code = str(code or "").strip()

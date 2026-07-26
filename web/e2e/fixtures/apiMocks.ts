@@ -19,7 +19,6 @@ type BankDetailReadModelMockStatus = "fresh" | "refreshing" | "stale" | "schema_
 type CostStatisticsReadModelMockStatus = "fresh" | "refreshing" | "stale" | "failed" | "unavailable";
 type TaxOffsetReadModelMockStatus = "fresh" | "refreshing" | "stale" | "failed" | "missing" | "unavailable";
 type BankFlowRuleBatchReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
-type BatchAccountingReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
 type TurnoverLedgerReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
 type BankDetailClassificationMockMode = "auto_matched" | "needs_confirmation" | "unmatched";
 type BankDetailCategoryOverride = {
@@ -92,8 +91,6 @@ type ApiMockOptions = {
   batchAccountingInitialSubmitted?: boolean;
   batchAccountingFailOnce?: boolean;
   batchAccountingFailuresBeforeSuccess?: number;
-  batchAccountingReadModelStatus?: BatchAccountingReadModelMockStatus;
-  batchAccountingReadModelStatuses?: BatchAccountingReadModelMockStatus[];
   costStatisticsExportDownloadSuccess?: boolean;
   costStatisticsExportReadModelStatus?: CostStatisticsReadModelMockStatus;
   costStatisticsAppStatusReadModelStatus?: CostStatisticsReadModelMockStatus;
@@ -8223,11 +8220,7 @@ function batchAccountingPagination(url: URL, bucket: BatchAccountingBucket, bank
   return pagination;
 }
 
-function batchAccountingPayload(
-  url: URL,
-  relationSubmitted: boolean,
-  readModelStatus: BatchAccountingReadModelMockStatus = "fresh",
-) {
+function batchAccountingPayload(url: URL, relationSubmitted: boolean) {
   const bucket: BatchAccountingBucket = url.searchParams.get("bucket") === "submitted" ? "submitted" : "unsubmitted";
   const oaRows = batchAccountingOaRows();
   const bankRow = batchAccountingBankRow(relationSubmitted);
@@ -8261,10 +8254,6 @@ function batchAccountingPayload(
       },
     } : {},
     pagination: batchAccountingPagination(url, bucket, bankRows.length, visibleOaRows.length),
-    read_model_status: readModelStatus,
-    read_model_stale_reasons: readModelStatus === "fresh" ? [] : [`batch_accounting_${readModelStatus}`],
-    read_model_scope_keys: ["2026-04"],
-    refresh_enqueued: readModelStatus !== "fresh",
   };
 }
 
@@ -8329,7 +8318,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     options.pendingInvoiceRulesSaveFailuresBeforeSuccess
     ?? (options.pendingInvoiceRulesSaveFailOnce ? 1 : 0);
   let batchAccountingSubmitted = Boolean(options.batchAccountingInitialSubmitted);
-  let batchAccountingRequestCount = 0;
   let batchAccountingFailuresRemaining =
     options.batchAccountingFailuresBeforeSuccess ?? (options.batchAccountingFailOnce ? 1 : 0);
   let turnoverClosureConfirmed = false;
@@ -10380,12 +10368,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           message: "批量账务数据加载暂时失败，请刷新后重试。",
         }, 503);
       }
-      const readModelStatuses = options.batchAccountingReadModelStatuses;
-      const readModelStatus = readModelStatuses?.[
-        Math.min(batchAccountingRequestCount, readModelStatuses.length - 1)
-      ] ?? options.batchAccountingReadModelStatus ?? "fresh";
-      batchAccountingRequestCount += 1;
-      return json(route, batchAccountingPayload(url, batchAccountingSubmitted, readModelStatus));
+      return json(route, batchAccountingPayload(url, batchAccountingSubmitted));
     }
 
     if (path === "/api/batch-accounting/submit") {
