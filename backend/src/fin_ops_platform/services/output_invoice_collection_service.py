@@ -35,7 +35,6 @@ from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRe
 
 ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
-READ_MODEL_STATUS = "live_query"
 SOURCE_VERSION = OUTPUT_INVOICE_COLLECTION_SOURCE_VERSION
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 OUTPUT_INVOICE_COLLECTION_EXPORT_ROW_LIMIT = 20000
@@ -421,9 +420,6 @@ class OutputInvoiceCollectionQueryService:
             "appliedFilters": {"filters": parsed_filters},
             "sort": {"field": normalized_sort_field, "direction": normalized_sort_direction},
             "filterConfig": self._filter_config(),
-            "readModelStatus": READ_MODEL_STATUS,
-            "generatedAt": _now_iso(),
-            "sourceVersion": SOURCE_VERSION,
         }
 
     def filter_options(
@@ -470,9 +466,6 @@ class OutputInvoiceCollectionQueryService:
                 "month": month,
                 "filters": parsed_filters,
             },
-            "readModelStatus": READ_MODEL_STATUS,
-            "generatedAt": _now_iso(),
-            "sourceVersion": SOURCE_VERSION,
         }
 
     def filter_options_for_rows(
@@ -512,9 +505,6 @@ class OutputInvoiceCollectionQueryService:
                 "month": month,
                 "filters": parsed_filters,
             },
-            "readModelStatus": READ_MODEL_STATUS,
-            "generatedAt": _now_iso(),
-            "sourceVersion": SOURCE_VERSION,
         }
 
     def export_preview(
@@ -579,8 +569,6 @@ class OutputInvoiceCollectionQueryService:
             "columns": list(OUTPUT_INVOICE_COLLECTION_EXPORT_COLUMNS),
             "sample_rows": sample_rows,
             "sampleRows": sample_rows,
-            "read_model_status": "fresh",
-            "readModelStatus": "fresh",
         }
 
     def export_for_rows(self, rows: list[dict[str, Any]]) -> tuple[str, bytes]:
@@ -1246,10 +1234,10 @@ class OutputInvoiceCollectionQueryService:
         *,
         context: DistributedInvoiceRelationContext,
     ) -> dict[str, Any]:
-        invoice_map = {
-            invoice.id: invoice
-            for invoice in context.list_invoices(month="all", invoice_type=InvoiceType.OUTPUT)
-        }
+        invoice_map = context.invoices_by_id(
+            month="all",
+            invoice_type=InvoiceType.OUTPUT,
+        )
         summaries = []
         seen: set[str] = set()
         for relation in relations:
@@ -2005,10 +1993,6 @@ def _date_parts(value: str) -> dict[str, str]:
 
 def _today() -> str:
     return datetime.now(UTC).date().isoformat()
-
-
-def _now_iso() -> str:
-    return datetime.now(UTC).isoformat()
 
 
 def output_invoice_collection_relation_details_from_row(

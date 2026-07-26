@@ -7,15 +7,12 @@ from threading import RLock
 from typing import Any, Callable
 from uuid import uuid4
 
-from fin_ops_platform.services.output_invoice_collection_models import (
-    OutputInvoiceCollectionRowRef,
-    output_invoice_collection_freshness_metadata,
-)
+from fin_ops_platform.services.output_invoice_collection_models import OutputInvoiceCollectionRowRef
 from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionError
 from fin_ops_platform.services.output_invoice_collection_status_service import OutputInvoiceCollectionStatusOverlayService
 
 
-RowProvider = Callable[[str], dict[str, Any] | None]
+RowProvider = Callable[[str, str], dict[str, Any] | None]
 
 
 class InMemoryOutputInvoiceCollectionLifecycleRepository:
@@ -393,7 +390,7 @@ class OutputInvoiceCollectionLifecycleService:
         tenant_id: str = "default",
         trace_id: str | None = None,
     ) -> dict[str, Any]:
-        row = self._require_row(row_id)
+        row = self._require_row(row_id, tenant_id=tenant_id)
         status_code = str(payload.get("statusCode") or payload.get("status_code") or "").strip() or None
         if status_code and not self._status_service.can_set_status(status_code):
             raise OutputInvoiceCollectionError("invalid_collection_status", "不支持的手动收款状态。")
@@ -414,7 +411,7 @@ class OutputInvoiceCollectionLifecycleService:
             return self._repository.set_status_override(**kwargs)
 
         override = self._run_mutation(row, reason="lifecycle_status_changed", mutate=mutate, trace_id=trace_id)
-        return {**output_invoice_collection_freshness_metadata(row), "override": override}
+        return {"override": override}
 
     def upsert_collection_reminder(
         self,
@@ -425,7 +422,7 @@ class OutputInvoiceCollectionLifecycleService:
         tenant_id: str = "default",
         trace_id: str | None = None,
     ) -> dict[str, Any]:
-        row = self._require_row(row_id)
+        row = self._require_row(row_id, tenant_id=tenant_id)
         remind_at = _datetime_text(payload.get("remindAt") or payload.get("remind_at"))
         channel = str(payload.get("channel") or "oa").strip().lower()
         if channel not in {"oa", "email", "manual"}:
@@ -446,7 +443,7 @@ class OutputInvoiceCollectionLifecycleService:
             return self._repository.upsert_reminder(**kwargs)
 
         reminder = self._run_mutation(row, reason="lifecycle_reminder_changed", mutate=mutate, trace_id=trace_id)
-        return {**output_invoice_collection_freshness_metadata(row), "reminder": reminder}
+        return {"reminder": reminder}
 
     def cancel_collection_reminder(
         self,
@@ -457,7 +454,7 @@ class OutputInvoiceCollectionLifecycleService:
         tenant_id: str = "default",
         trace_id: str | None = None,
     ) -> dict[str, Any]:
-        row = self._require_row(row_id)
+        row = self._require_row(row_id, tenant_id=tenant_id)
         def mutate(transaction: Any | None = None) -> dict[str, Any]:
             kwargs = {"reminder_id": str(reminder_id or "").strip(), "actor_id": actor_id, "tenant_id": tenant_id}
             if transaction is not None:
@@ -465,7 +462,7 @@ class OutputInvoiceCollectionLifecycleService:
             return self._repository.cancel_reminder(**kwargs)
 
         reminder = self._run_mutation(row, reason="lifecycle_reminder_cancelled", mutate=mutate, trace_id=trace_id)
-        return {**output_invoice_collection_freshness_metadata(row), "reminder": reminder}
+        return {"reminder": reminder}
 
     def confirm_red_invoice_relation(
         self,
@@ -476,7 +473,7 @@ class OutputInvoiceCollectionLifecycleService:
         tenant_id: str = "default",
         trace_id: str | None = None,
     ) -> dict[str, Any]:
-        row = self._require_row(row_id)
+        row = self._require_row(row_id, tenant_id=tenant_id)
         related_identity_key = str(payload.get("relatedInvoiceIdentityKey") or payload.get("related_invoice_identity_key") or "").strip()
         related_invoice_id = str(payload.get("relatedInvoiceId") or payload.get("related_invoice_id") or "").strip()
         if not related_identity_key and not related_invoice_id:
@@ -502,7 +499,7 @@ class OutputInvoiceCollectionLifecycleService:
             return self._repository.confirm_red_relation(**kwargs)
 
         relation = self._run_mutation(row, reason="lifecycle_red_relation_changed", mutate=mutate, trace_id=trace_id)
-        return {**output_invoice_collection_freshness_metadata(row), "relation": relation}
+        return {"relation": relation}
 
     def revoke_red_invoice_relation(
         self,
@@ -521,13 +518,13 @@ class OutputInvoiceCollectionLifecycleService:
             return self._repository.revoke_red_relation(**kwargs)
 
         relation = self._run_mutation(row, reason="lifecycle_red_relation_revoked", mutate=mutate, trace_id=trace_id)
-        return {**output_invoice_collection_freshness_metadata(row), "relation": relation}
+        return {"relation": relation}
 
-    def _require_row(self, row_id: str) -> dict[str, Any]:
+    def _require_row(self, row_id: str, *, tenant_id: str) -> dict[str, Any]:
         normalized = str(row_id or "").strip()
         if not normalized:
             raise OutputInvoiceCollectionError("row_id_required", "row_id is required.")
-        row = self._row_provider(normalized)
+        row = self._row_provider(normalized, tenant_id)
         if row is None:
             raise OutputInvoiceCollectionError("row_not_found", "销项发票收款行不存在。", status_code=HTTPStatus.NOT_FOUND)
         return row

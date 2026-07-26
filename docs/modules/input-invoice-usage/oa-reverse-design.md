@@ -161,7 +161,7 @@ FinOps 不负责后续 OA 页面操作，也不自动检测 OA 是否已经提�
 - OA 创建草稿失败。
 - 发票候选已过期，需要重新预览。
 - 发票已存在 active OA 关系，不能重复反提。
-- 发票关系 payload 版本过旧或仍返回历史 candidate 状态时，前端必须归入 `未关联oa`；若后端无法确认 active relation 状态，应返回候选已过期或 read model refreshing，而不是展示第三种 OA 关系状态。
+- 历史 candidate 状态不进入页面 canonical facts，前端归入 `未关联oa`；若后端无法从 active canonical relation 确认当前状态，应返回候选已过期或结构化查询错误，而不是展示第三种 OA 关系状态或 read-model refreshing。
 - 本地 batch 版本冲突或状态不允许当前操作。
 
 错误响应面向用户时使用中文业务提示；日志中可以记录错误码、batch id、目标申请人和调用阶段，但不能记录密码或 token。

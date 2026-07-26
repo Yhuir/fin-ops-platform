@@ -22,90 +22,10 @@ READ_MODEL_PRODUCTION_EVIDENCE_RUNBOOK = (
 
 DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
     (
-        "backend/src/fin_ops_platform/services/output_invoice_collection_read_application_service.py",
-        "OutputInvoiceCollectionReadApplicationService.filter_options",
-        "read_model_status=fresh",
-    ): (1, "filter options are derived only after sql_all_rows_provider returned a fresh rows payload."),
-    (
-        "backend/src/fin_ops_platform/services/output_invoice_collection_read_application_service.py",
-        "OutputInvoiceCollectionReadApplicationService.filter_options",
-        "readModelStatus=fresh",
-    ): (1, "camelCase alias for the same fresh-gated filter-options response."),
-    (
         "backend/src/fin_ops_platform/app/routes_pending_invoices.py",
         "PendingInvoiceApiRoutes.filter_options",
         "read_model_status=fresh",
     ): (1, "filter options are derived only after PendingInvoiceReadModelService.filter_options returned fresh."),
-    (
-        "backend/src/fin_ops_platform/services/input_invoice_usage_read_model_fresh_gate_service.py",
-        "InputInvoiceUsageReadModelFreshGateService.filter_options",
-        "dict read_model_status=fresh",
-    ): (1, "filter options are marked fresh only after repository refresh status and exact source versions pass."),
-    (
-        "backend/src/fin_ops_platform/services/input_invoice_usage_read_model_fresh_gate_service.py",
-        "InputInvoiceUsageReadModelFreshGateService.rows_by_invoice_ids",
-        "read_model_status=fresh",
-    ): (1, "invoice-id lookup is marked fresh only after every returned scope has fresh status and exact source versions."),
-    (
-        "backend/src/fin_ops_platform/services/output_invoice_collection_read_model_fresh_gate_service.py",
-        "OutputInvoiceCollectionReadModelFreshGateService.all_rows",
-        "dict read_model_status=fresh",
-    ): (1, "shared output-collection all-rows helper returns fresh only after every paged SQL read-model payload is fresh."),
-    (
-        "backend/src/fin_ops_platform/services/input_invoice_usage_read_model_fresh_gate_service.py",
-        "InputInvoiceUsageReadModelFreshGateService.rows",
-        "read_model_status=fresh",
-    ): (1, "input usage service performs schema/status/source-version checks before marking the SQL payload fresh."),
-    (
-        "backend/src/fin_ops_platform/services/output_invoice_collection_read_model_fresh_gate_service.py",
-        "OutputInvoiceCollectionReadModelFreshGateService.rows",
-        "read_model_status=fresh",
-    ): (1, "legacy query path performs schema/status/source-version checks before marking the SQL payload fresh."),
-    (
-        "backend/src/fin_ops_platform/services/output_invoice_collection_read_model_fresh_gate_service.py",
-        "OutputInvoiceCollectionReadModelFreshGateService.rows",
-        "readModelStatus=fresh",
-    ): (1, "camelCase alias for the same fresh-gated output invoice collection payload."),
-    (
-        "backend/src/fin_ops_platform/services/input_invoice_usage_export_service.py",
-        "InputInvoiceUsageExportService.export_preview",
-        "dict readModelStatus=fresh",
-    ): (1, "export preview first collects pages and rejects non-fresh read-model payloads."),
-    (
-        "backend/src/fin_ops_platform/services/input_invoice_usage_export_service.py",
-        "InputInvoiceUsageExportService.export_preview",
-        "dict read_model_status=fresh",
-    ): (1, "export preview first collects pages and rejects non-fresh read-model payloads."),
-    (
-        "backend/src/fin_ops_platform/services/output_invoice_collection_service.py",
-        "OutputInvoiceCollectionQueryService.export_preview_for_rows",
-        "dict readModelStatus=fresh",
-    ): (1, "export preview is built from rows supplied by the fresh-gated all-rows read-model path."),
-    (
-        "backend/src/fin_ops_platform/services/output_invoice_collection_service.py",
-        "OutputInvoiceCollectionQueryService.export_preview_for_rows",
-        "dict read_model_status=fresh",
-    ): (1, "export preview is built from rows supplied by the fresh-gated all-rows read-model path."),
-    (
-        "backend/src/fin_ops_platform/services/output_invoice_collection_read_model_detail_service.py",
-        "OutputInvoiceCollectionReadModelDetailService.relation_details",
-        "read_model_status=fresh",
-    ): (1, "relation details are emitted fresh only after repository status and source-version checks pass."),
-    (
-        "backend/src/fin_ops_platform/services/output_invoice_collection_read_model_detail_service.py",
-        "OutputInvoiceCollectionReadModelDetailService.relation_details",
-        "readModelStatus=fresh",
-    ): (1, "camelCase alias for the same fresh-gated output invoice collection detail payload."),
-    (
-        "backend/src/fin_ops_platform/services/input_invoice_usage_read_model_detail_service.py",
-        "InputInvoiceUsageReadModelDetailService.relation_details",
-        "read_model_status=fresh",
-    ): (1, "detail service checks refresh_status and source versions before returning detail payload fresh."),
-    (
-        "backend/src/fin_ops_platform/services/input_invoice_usage_read_model_detail_service.py",
-        "InputInvoiceUsageReadModelDetailService.relation_details",
-        "readModelStatus=fresh",
-    ): (1, "camelCase alias for the same fresh-gated detail payload."),
     (
         "backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py",
         "NoOaBankBatchApplicationService.list_batches_payload",

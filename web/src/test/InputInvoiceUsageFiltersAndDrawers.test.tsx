@@ -284,7 +284,7 @@ describe("InputInvoiceUsageDetailDrawer", () => {
 });
 
 describe("Input invoice usage workflow drawers", () => {
-  test("relation detail mapper surfaces read model refreshing as an unavailable detail state", async () => {
+  test("relation detail mapper renders the direct canonical relation response", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       expect(url.pathname).toBe("/api/input-invoice-usage/rows/row-refreshing/relation-details");
@@ -294,11 +294,10 @@ describe("Input invoice usage workflow drawers", () => {
         row_id: "row-refreshing",
         kind: "oa",
         title: "OA关联明细",
-        read_model_status: "refreshing",
-        refresh_enqueued: true,
-        sections: [],
+        relationCount: 1,
+        summaries: [{ applicantName: "樊祖芳", amount: "100.00" }],
       }), {
-        status: 202,
+        status: 200,
         headers: { "Content-Type": "application/json" },
       });
     }));
@@ -312,9 +311,9 @@ describe("Input invoice usage workflow drawers", () => {
     });
 
     expect(detail.title).toBe("OA关联明细");
-    expect(detail.detailAvailable).toBe(false);
-    expect(detail.unavailableReason).toBe("进项发票使用情况关联明细正在刷新，完成后请重新打开详情。");
-    expect(detail.sections).toEqual([]);
+    expect(detail.detailAvailable).toBe(true);
+    expect(detail.sections).toHaveLength(2);
+    expect(detail.sections[1].title).toBe("关联摘要");
   });
 
   test("OA reverse API mapper uses one-step draft and submitted history contracts", async () => {

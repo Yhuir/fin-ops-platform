@@ -1,22 +1,22 @@
 # 进项发票使用情况 状态机
 
 
-> 修改 `进项发票使用情况` 相关业务状态、UI 状态、read model 状态或 worker 状态前必须读取本文件。当前没有独立状态机时，在对应小节写明“不适用原因”，不要删除文件。
+> 修改 `进项发票使用情况` 相关业务状态、UI 状态或 canonical query/command 状态前必须读取本文件。页面已于 2026-07-27 退出 read model 运行时；历史记录中的 read-model 描述不覆盖当前合同。
 
 ## 业务状态
 
 - 当前状态：页面本身是只读查询页，业务状态主要来自行 payload 中的 `paymentStatus`、OA 关联、银行流水关联和发票生命周期判断。
-- 状态事实源：`read_model.input_invoice_usage_rows.payload` 是页面读取事实；发票、OA、银行流水和 workbench 关系由 read model worker 构建时投影进入 payload。关系证据来自 `WorkbenchRelationReadFacade`，只有 Workbench active relation 进入 linked 已关联口径；未正式化的自动匹配 decision 不作为本页 candidate relation。
-- OA 附件来源发票：当正式发票保留 `source_links[].source_type='oa_attachment_invoice'` 与 `source_workbench_row_id` 时，`source_workbench_row_id` 是查询统一 relation distribution 的等价 row key；页面不能只用正式发票 id 判定“无 OA/流水”。
-- 允许流转：支付状态规则、OA 反提、workbench 关系确认或撤销会通过 read model refresh 影响页面展示。
-- 禁止流转：页面列表查询不直接修改发票、OA 或银行流水事实；缺失或过期 read model 不能回退为 live scan 伪装 fresh。
-- 支付状态规则：只有 `relationStatus='linked'` 的关系可参与已支付、完全关联或已确认关系判断；无 active relation 或历史 `candidate` 兼容值都不得参与支付状态计算。
+- 状态事实源：页面 query repository 在一个 `REPEATABLE READ READ ONLY` snapshot 内读取 `app.invoices`、`app.oa_applications`、`app.bank_transactions`、`app.app_settings` 和 `app.workbench_pair_relations`；关系只接受 `status='active'`。
+- OA 附件来源发票：正式发票的 `source_links[].source_type='oa_attachment_invoice'` / `source_workbench_row_id` 是 relation 等价 row key，canonical repository 必须与正式发票 id 一并解析。
+- 允许流转：支付状态规则、OA 反提、workbench 关系确认或撤销写入 canonical facts 后，当前页面通过正常 GET 读取新状态。
+- 禁止流转：页面列表查询不修改发票、OA 或银行流水事实；不得读取页面 read model、Workbench relation projection 或 invoice lifecycle read model，也不得使用 live fallback/双读。
+- 支付状态规则：只有 active formal relation component 可参与已支付、完全关联或已确认关系判断；未正式化 candidate 不进入页面事实。
 
 ## 以发票反提 OA 本地状态机
 
 `以发票反提 OA` 使用后端内部 batch 记录本地状态。batch 是内部状态对象，不作为前端用户概念暴露；前端只展示 `创建 OA 草稿`、确认弹窗和 `已提交` 历史。
 
-OA reverse batch 只记录本地流程状态，不是 OA/发票 relation 事实源。检测到 OA evidence 后建立关系必须通过 `WorkbenchRelationCommandService.confirm_relation(...)` 写 `input_invoice_oa_reverse`；relation read model 不 fresh 或 command service 不可用时，本地 batch 不得先推进到 detected。
+OA reverse batch 只记录本地流程状态，不是 OA/发票 relation 事实源。检测到 OA evidence 后建立关系必须通过 `WorkbenchRelationCommandService.confirm_relation(...)` 写 `input_invoice_oa_reverse`；command service 前置条件失败时，本地 batch 不得先推进到 detected。
 
 ### 目标申请人凭据状态
 
@@ -64,36 +64,30 @@ OA reverse batch 只记录本地流程状态，不是 OA/发票 relation 事实�
 
 ## UI 状态
 
-- loading：前端请求 `/api/input-invoice-usage/rows` 与 filter options 时显示页面加载态。
-- empty：API 返回 `read_model_status=fresh` 且 `pagination.total=0` 时展示标准空态。
+- loading：前端请求 `/api/input-invoice-usage/rows` 时显示页面加载态；filter options 随 rows 同响应返回。
+- empty：API `200` 且 `pagination.total=0` 时展示标准空态。
 - error：API 或解析失败时展示“进项发票使用情况加载失败，请稍后重试。”。
-- stale/refreshing：API 返回 `read_model_status=refreshing` 时，页面不展示旧 rows；本次访问只在 visible 状态以 250ms、最多 120 次继续 normal GET。fresh、hidden、route unmount、查询变化或 30 秒上限即停止，hidden→visible/focus 不自动恢复；浏览器手动刷新或明确刷新按钮开始新的有界尝试。
-- combined freshness：rows 与 filter-options 并行读取时，页面级 fresh 必须取两者合并结果；任一响应为 stale/missing/schema_mismatch/refreshing/unavailable 时，禁止进入普通 empty state、禁止启用导出，并沿用刷新诊断与重试语义。
+- refreshing/polling：不适用。页面 API 不返回 `read_model_status`、`source_versions` 或 `202 refreshing`，前端不自动轮询；用户刷新只发起一次正常 GET。
 - permission disabled/hidden：列表读取无独立权限状态；OA 反提、支付规则保存等 mutation 能力按对应接口权限和前端按钮状态控制。
 - oa reverse pending tab：`待处理` 页签展示目标 OA 申请人、候选发票和 `创建 OA 草稿` 主动作；不展示 `创建本地批次`。
 - oa reverse staged tab：`暂存` 页签展示状态为 `oa_draft_created` 的批次摘要和两项处理动作：`我已在OA系统提交该草稿 / OA正在进行中`、`OA提交内容需修改 / 删除本次提交内容`。暂存列表不展示 OA 草稿链接。
 - oa reverse relation display：候选发票清单只展示 OA 关联二态。可反提发票展示 `未关联oa` chip 并可勾选；已有 active/linked OA 关系的发票展示 `已关联oa` chip、禁用勾选；历史 `candidate` 兼容值归入 `未关联oa`，不再提供独立“候选 OA”筛选。表头提供 drawer 内局部筛选：`全部`、`已经关联oa`、`未关联oa`，并支持发票清单搜索。
 - oa reverse submitted tab：`已提交` 页签展示用户确认过的已提交历史，只显示申请人、时间、金额和发票摘要等业务字段。
 - oa reverse confirmation：OA 草稿创建成功后显示确认弹窗，用户可以选择 `我已在OA系统提交该草稿 / OA正在进行中`、`OA提交内容需修改 / 删除本次提交内容`，也可以点击右上角取消只关闭弹窗。取消、页面刷新、父组件重渲染或 preview reload 都不能清空当前草稿 batch；未决批次必须可在 `暂存` 页签恢复处理。
-- oa reverse local-state performance：创建草稿、确认 submitted、确认 not_submitted 都是本地 batch 状态动作，drawer 在 API 成功后立即释放按钮；这些动作不等待或刷新 `input_invoice_usage`。evidence detected 后真正写入 relation 也只提交 canonical relation/version/audit，当前页再通过 normal GET/fresh gate 收敛。
+- oa reverse local-state performance：创建草稿、确认 submitted、确认 not_submitted 都是本地 batch 状态动作，drawer 在 API 成功后立即释放按钮。evidence detected 后真正写入 relation 只提交 canonical relation/version/audit，当前页随后通过正常 GET 收敛。
 
 ## Read Model / Worker 状态
 
-- fresh：SQL read model payload 的 `refresh_status=fresh`，且 `source_versions` 覆盖服务端期望版本时，API 返回 rows 并设置 `read_model_status=fresh`。
-- relation details fresh：`/rows/{row_id}/relation-details` 可直接从 `read_model.input_invoice_usage_rows` 按 `row_id` 读取单行 payload 时，展开该行已有 summaries 和 `invoiceRelations`，不触发全量 live rebuild。
-- missing：repository 没有可用 payload 时，API 返回 `202` 和 `read_model_status=refreshing`，并以 `api_miss` 入队。
-- refreshing：dirty scope 处于 `pending`/`processing`，或 API 判定 schema/source version stale 后，会返回空 rows 或详情不可用的 refreshing payload。
-- stale/failed/unavailable：dirty scope 失败或依赖不可用时不得把旧 rows 伪装为 fresh；调用方应触发 refresh 或展示可恢复状态。
-- all scope：默认不传 `month` 的页面查询使用 `scope_key=all`。当没有单独 `all` scope 行时，repository 会从各月份 scope 聚合共同一致的顶层 `source_versions`；月份间 `workbench_relation_source_versions` 等嵌套版本可不同，不应导致基础版本被清空。若任一月份 cache status 非 fresh，all scope 仍判定不可 fresh。
-- cross-month relation fallback：月份 shard 构建时先读当前 `workbench_relation:<month>` scope；如果当前 scope 已返回某发票的 unlinked/empty relation row，仍必须对该发票 row id 做一次定向 fallback 查询，以发现 OA/银行流水在其他月份 scope 中形成的 linked relation group。fallback 只补指定 row id 的 relation，不允许改为全量拉取全部关系；保存当前 shard 时 `workbench_relation_source_versions` 仍以当前 scope 为准，避免跨月 fallback 让当前 read model 持续 stale。
-- orphan month scope cleanup：`input_invoice_usage:all` refresh 是 fan-out 控制 scope；worker 发现当前有效月份 shard 后必须删除不在当前 shard set 内的旧 `read_model.input_invoice_usage_rows` / `read_model.input_invoice_usage_scopes` 月份 shard，避免已不存在月份的旧 source versions 继续污染 all-scope freshness proof。
-- refresh 触发来源：API miss、schema stale、source version stale、业务写入后的 read model invalidation、worker all scope 展开月 shard。
-- 失败恢复：通过 durable queue 重新刷新对应 month 或 all scope；all scope refresh 会展开到月 shard 后完成 queue 状态。
+- 页面运行时：不适用。rows、summary、statistics、facets、详情和导出不读取页面/Workbench/invoice-lifecycle read model，不 enqueue refresh，也不等待 worker。
+- 一致性：rows、summary、facets 和当前页 facts 在同一个只读可重复读事务内完成；active relation 按跨 case 连通 component 解析。
+- 失败：canonical PostgreSQL 查询或 DTO 组装失败时返回结构化错误；不回退旧 projection。
+- 共享遗留：`input_invoice_usage` projection、worker、manifest、scope policy 和 App Status 注册仍可能被全局代码引用，最终删除由主控合并后统一完成，不是页面状态。
 
 ## 变更记录
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-07-27 | 页面迁移为 canonical PostgreSQL 直读 | 删除页面 read-model gate/detail/polling/202 合同；rows/summary/facets 同 snapshot，active relation component 直接读取，写后正常 GET | `tests/test_invoice_usage_collection_canonical_query.py`、`tests/test_input_invoice_usage_api.py`、`web/src/test/InputInvoiceUsagePage.test.tsx`、`web/e2e/input-invoice-usage-flow.spec.ts` |
 | 2026-06-23 | 补 read model manifest 合同守卫 | 不改变进项发票使用情况业务/UI/read model/worker 状态；锁定 `input_invoice_usage` 为 scoped incremental、fan-out `all`、自管 freshness，并保持 query owner、permission owner 和 repository ports 不与 `invoice_lifecycle` / `output_invoice_collection` 混用 | `tests/test_read_model_manifest.py::ReadModelManifestTests::test_invoice_lifecycle_and_usage_manifest_preserve_scoped_contracts` |
 | - | 初始骨架 | 待补充 | - |
 | 2026-06-10 | 明确 all scope source_versions 聚合规则 | 修复默认 all 查询因月份间 workbench 关系嵌套版本不同而被 API 误判 `refreshing` 的风险 | `tests.test_invoice_usage_collection_sql_runtime`、`tests.test_input_invoice_usage_api`、`tests.test_read_model_freshness`、`web/src/test/InputInvoiceUsagePage.test.tsx` |

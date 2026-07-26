@@ -579,6 +579,17 @@ class FakeWorkbenchRelationFacade:
             "stale_reasons": [],
         }
 
+    def list_by_month(self, _month: str, **_kwargs: object) -> dict[str, object]:
+        return {
+            "status": "fresh",
+            "rows": list(self.rows_by_id.values()),
+            "groups": list(self.groups_by_id.values()),
+            "source_versions": {"schema_version": 52},
+            "read_model_scope_keys": [],
+            "refresh_enqueued": False,
+            "stale_reasons": [],
+        }
+
 
 class LiveWorkbenchRelationFacade:
     def __init__(

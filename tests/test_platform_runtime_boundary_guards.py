@@ -2919,8 +2919,14 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         route_tree = _parse(route_path)
         route_class = _class_source(route_tree, route_source, "OutputInvoiceCollectionApiRoutes")
         factory_source = _function_source(server_tree, server_source, "_output_invoice_collection_routes")
-        read_application_source = (SERVICES_ROOT / "output_invoice_collection_read_application_service.py").read_text(encoding="utf-8")
-        fresh_gate_source = (SERVICES_ROOT / "output_invoice_collection_read_model_fresh_gate_service.py").read_text(encoding="utf-8")
+        query_source = (
+            SERVICES_ROOT / "output_invoice_collection_canonical_query_service.py"
+        ).read_text(encoding="utf-8")
+        repository_source = (
+            SERVICES_ROOT
+            / "postgres_repositories"
+            / "invoice_usage_collection_query.py"
+        ).read_text(encoding="utf-8")
         violations: list[str] = []
 
         for required in (
@@ -2948,7 +2954,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "def _relation_details_response(",
             "_idempotency_key(headers)",
             "_trace_id(headers)",
-            "allow_live_fallback=allow_live_fallback",
         ):
             if required not in route_class:
                 violations.append(f"Output collection route owner is missing {required}")
@@ -2960,37 +2965,50 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "_sql_rows_provider",
             "_sql_all_rows_provider",
             "_sql_relation_details_provider",
+            "read_model_status",
+            "readModelStatus",
         ):
             if forbidden in route_class:
-                violations.append(f"Output collection route owner still owns read application orchestration {forbidden}")
+                violations.append(
+                    f"Output collection route owner keeps removed read-model marker {forbidden}"
+                )
         for required in (
-            "class OutputInvoiceCollectionReadApplicationService",
+            "class OutputInvoiceCollectionCanonicalQueryService",
             "def rows(",
             "def filter_options(",
             "def export_preview(",
             "def export(",
             "def relation_details(",
-            "_allow_live_fallback",
         ):
-            if required not in read_application_source:
-                violations.append(f"Output collection read application service is missing {required}")
-        if "allow_live_fallback=not self._requires_sql_read_model_runtime()" not in factory_source:
-            violations.append("Application output collection route factory must disable live fallback in SQL read model runtime")
+            if required not in query_source:
+                violations.append(
+                    f"Output collection canonical query service is missing {required}"
+                )
+        if "query_service=self._output_invoice_collection_page_query_service()" not in factory_source:
+            violations.append(
+                "Application output collection route factory must inject the canonical query service"
+            )
         if "_output_invoice_collection_routes().route(method, route_path, query, body, headers)" not in server_source:
             violations.append("Application does not dispatch output collection read routes through route owner")
         if "def _output_invoice_collection_xlsx_response(" not in server_source:
             violations.append("Application is missing explicit output collection xlsx response port")
         for required in (
-            "class OutputInvoiceCollectionReadModelFreshGateService",
-            "source_version_mismatch_reasons",
-            "require_expected_source_versions",
-            "payload_requires_schema_refresh",
-            "def all_rows(",
-            "def rows(",
-            "def relation_details(",
+            "set transaction isolation level repeatable read read only",
+            "app.workbench_pair_relations",
+            "relation.status = 'active'",
+            "app.invoices",
         ):
-            if required not in fresh_gate_source:
-                violations.append(f"Output collection fresh-gate service is missing {required}")
+            if required not in repository_source:
+                violations.append(
+                    f"Output collection canonical repository is missing {required}"
+                )
+        for retired in (
+            "output_invoice_collection_read_application_service.py",
+            "output_invoice_collection_read_model_fresh_gate_service.py",
+            "output_invoice_collection_read_model_detail_service.py",
+        ):
+            if (SERVICES_ROOT / retired).exists():
+                violations.append(f"Retired output collection service still exists: {retired}")
         for removed_handler in (
             "_handle_api_output_invoice_collections_rows",
             "_handle_api_output_invoice_collections_filter_options",
@@ -3990,7 +4008,14 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         service_class = _class_source(service_tree, service_source, "InputInvoiceUsageQueryService")
         payment_rules_source = (SERVICES_ROOT / "input_invoice_usage_payment_rules.py").read_text(encoding="utf-8")
         lifecycle_policy_source = (SERVICES_ROOT / "invoice_lifecycle_policy.py").read_text(encoding="utf-8")
-        fresh_gate_source = (SERVICES_ROOT / "input_invoice_usage_read_model_fresh_gate_service.py").read_text(encoding="utf-8")
+        canonical_query_source = (
+            SERVICES_ROOT / "input_invoice_usage_canonical_query_service.py"
+        ).read_text(encoding="utf-8")
+        repository_source = (
+            SERVICES_ROOT
+            / "postgres_repositories"
+            / "invoice_usage_collection_query.py"
+        ).read_text(encoding="utf-8")
         factory_source = _function_source(server_tree, server_source, "_input_invoice_usage_routes")
         service_factory_source = _function_source(server_tree, server_source, "_input_invoice_usage_service")
 
@@ -4035,17 +4060,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             if forbidden in route_source:
                 violations.append(f"Input usage route owner leaks legacy/application ownership marker {forbidden}")
         for required in (
-            "invoice_detail_loader=query_service.invoice_detail",
-            "bank_transaction_detail_loader=query_service.bank_transaction_detail",
-            "oa_detail_loader=query_service.oa_detail",
-            "payment_status_rules_loader=query_service.payment_status_rules",
-            "rows_from_sql_read_model=self._get_input_invoice_usage_rows_from_sql_read_model",
-            "filter_options_from_sql_read_model=self._get_input_invoice_usage_filter_options_from_sql_read_model",
-            "relation_details_from_sql_read_model=self._get_input_invoice_usage_relation_details_from_sql_read_model",
-            "export_service=self._input_invoice_usage_export_service()",
+            "query_service=query_service",
             "resolve_read_session=self._resolve_fin_ops_read_session",
-            "export_query_kwargs=self._input_invoice_usage_export_query_kwargs",
-            "export_error_response=self._input_invoice_usage_export_error_response",
             "record_export_download=self._record_input_invoice_usage_export_download",
             "xlsx_response=self._input_invoice_usage_xlsx_response",
             "app_settings_service=self._app_settings_service",
@@ -4076,11 +4092,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for forbidden_fallback in (
             "allow_live_fallback",
             "_allow_live_fallback",
-            "_query_service",
             "query_service: InputInvoiceUsageQueryService",
-            "query_service=",
-            "self._query_service.list_rows",
-            "self._query_service.filter_options",
             "self._query_service.row_relation_details",
         ):
             if forbidden_fallback in route_class or forbidden_fallback in factory_source:
@@ -4095,32 +4107,37 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             if forbidden in server_source:
                 violations.append(f"server.py still owns input usage fresh-gate implementation {forbidden}")
         for required in (
-            "class InputInvoiceUsageReadModelFreshGateService",
-            "source_version_mismatch_reasons",
-            "require_expected_source_versions",
-            "payload_requires_schema_refresh",
-            "def export_page(",
+            "class InputInvoiceUsageCanonicalQueryService",
+            "def rows(",
             "def filter_options(",
             "def relation_details(",
+            "def export_page(",
+            "def export_rows(",
         ):
-            if required not in fresh_gate_source:
-                violations.append(f"Input usage fresh-gate service is missing {required}")
+            if required not in canonical_query_source:
+                violations.append(f"Input usage canonical query service is missing {required}")
+        for required in (
+            "set transaction isolation level repeatable read read only",
+            "app.workbench_pair_relations",
+            "relation.status = 'active'",
+            "app.invoices",
+        ):
+            if required not in repository_source:
+                violations.append(f"Input usage canonical repository is missing {required}")
         for forbidden in (
             "all_rows_from_sql_read_model=",
             "def _get_input_invoice_usage_all_rows_from_sql_read_model(",
             "def all_rows(",
             "self._query_service.list_rows(",
         ):
-            if forbidden in route_source or forbidden in server_source or forbidden in fresh_gate_source:
+            if forbidden in route_source or forbidden in server_source:
                 violations.append(f"Input usage read path keeps removed all-rows filter-options path {forbidden}")
-        for forbidden_fresh_gate_dependency in (
-            "query_service:",
-            "query_service=",
-            "self._query_service",
-            "getattr(self._query_service",
+        for retired in (
+            "input_invoice_usage_read_model_fresh_gate_service.py",
+            "input_invoice_usage_read_model_detail_service.py",
         ):
-            if forbidden_fresh_gate_dependency in fresh_gate_source:
-                violations.append(f"Input usage fresh gate keeps removed query service dependency {forbidden_fresh_gate_dependency}")
+            if (SERVICES_ROOT / retired).exists():
+                violations.append(f"Retired input usage service still exists: {retired}")
         for removed_handler in (
             "def _handle_api_input_invoice_usage_rows(",
             "def _handle_api_input_invoice_usage_filter_options(",

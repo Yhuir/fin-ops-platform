@@ -38,23 +38,58 @@ class DistributedInvoiceRelationContext:
         self._month_hint = str(month_hint or "").strip() or None
         self._require_fresh_relations = require_fresh_relations
         self._invoices_by_scope: dict[tuple[str, str], list[Invoice]] = {}
+        self._invoice_maps_by_scope: dict[tuple[str, str], dict[str, Invoice]] = {}
         self._bank_transactions_by_id: dict[str, BankTransaction] | None = None
         self._distributed_relations_by_row_id: dict[str, list[dict[str, Any]]] = {}
+        self._distributed_component_by_row_id: dict[str, str] = {}
+        self._distributed_relations_by_component: dict[
+            str,
+            list[dict[str, Any]],
+        ] = {}
         self._distributed_loaded_all_for_month = False
         self._distributed_row_lookup_attempted: set[str] = set()
         self._oa_records_by_id: dict[str, OAApplicationRecord] = {}
         self._oa_loaded_all = False
 
     def list_invoices(self, *, month: str | None, invoice_type: InvoiceType) -> list[Invoice]:
-        cache_key = (
-            str(month).strip() if month not in (None, "") else "",
-            str(invoice_type.value if isinstance(invoice_type, InvoiceType) else invoice_type),
-        )
+        cache_key = self._invoice_cache_key(month=month, invoice_type=invoice_type)
         if cache_key not in self._invoices_by_scope:
             self._invoices_by_scope[cache_key] = list(
                 self._import_service.list_invoices(month=month, invoice_type=invoice_type)
             )
         return list(self._invoices_by_scope[cache_key])
+
+    def invoices_by_id(
+        self,
+        *,
+        month: str | None,
+        invoice_type: InvoiceType,
+    ) -> dict[str, Invoice]:
+        cache_key = self._invoice_cache_key(month=month, invoice_type=invoice_type)
+        if cache_key not in self._invoice_maps_by_scope:
+            self._invoice_maps_by_scope[cache_key] = {
+                invoice.id: invoice
+                for invoice in self.list_invoices(
+                    month=month,
+                    invoice_type=invoice_type,
+                )
+            }
+        return self._invoice_maps_by_scope[cache_key]
+
+    @staticmethod
+    def _invoice_cache_key(
+        *,
+        month: str | None,
+        invoice_type: InvoiceType,
+    ) -> tuple[str, str]:
+        return (
+            str(month).strip() if month not in (None, "") else "",
+            str(
+                invoice_type.value
+                if isinstance(invoice_type, InvoiceType)
+                else invoice_type
+            ),
+        )
 
     def bank_transactions_by_id(self) -> dict[str, BankTransaction]:
         if self._bank_transactions_by_id is None:
@@ -117,28 +152,83 @@ class DistributedInvoiceRelationContext:
         self._load_distributed_relations(normalized_ids)
 
     def add_distributed_relations(self, relations: list[dict[str, Any]]) -> None:
+        relations_by_case_id: dict[str, dict[str, Any]] = {}
+        for loaded in self._distributed_relations_by_row_id.values():
+            for relation in loaded:
+                case_id = str(
+                    relation.get("case_id")
+                    or relation.get("relation_id")
+                    or ""
+                ).strip()
+                if case_id:
+                    relations_by_case_id[case_id] = relation
         for relation in list(relations or []):
             if not isinstance(relation, dict):
                 continue
             case_id = str(relation.get("case_id") or relation.get("relation_id") or "").strip()
-            if not case_id:
+            if case_id:
+                relations_by_case_id[case_id] = deepcopy(relation)
+
+        parent: dict[str, str] = {}
+
+        def find(row_id: str) -> str:
+            parent.setdefault(row_id, row_id)
+            while parent[row_id] != row_id:
+                parent[row_id] = parent[parent[row_id]]
+                row_id = parent[row_id]
+            return row_id
+
+        def union(left: str, right: str) -> None:
+            left_root = find(left)
+            right_root = find(right)
+            if left_root != right_root:
+                parent[right_root] = left_root
+
+        typed_rows_by_case: dict[str, list[tuple[str, str]]] = {}
+        for case_id, relation in relations_by_case_id.items():
+            typed_rows = [
+                item
+                for item in self.typed_relation_rows(relation)
+                if item[0]
+            ]
+            typed_rows_by_case[case_id] = typed_rows
+            if not typed_rows:
                 continue
-            for row_id, _row_type in self.typed_relation_rows(relation):
-                if not row_id:
-                    continue
-                self._distributed_relations_by_row_id.setdefault(row_id, [])
-                existing_case_ids = {
-                    str(item.get("case_id") or item.get("relation_id") or "").strip()
-                    for item in self._distributed_relations_by_row_id[row_id]
-                }
-                if case_id not in existing_case_ids:
-                    self._distributed_relations_by_row_id[row_id].append(deepcopy(relation))
+            first_row_id = typed_rows[0][0]
+            for row_id, _row_type in typed_rows[1:]:
+                union(first_row_id, row_id)
+
+        self._distributed_relations_by_row_id = {}
+        self._distributed_component_by_row_id = {}
+        component_relations: dict[str, dict[str, dict[str, Any]]] = {}
+        for case_id, relation in relations_by_case_id.items():
+            typed_rows = typed_rows_by_case[case_id]
+            if not typed_rows:
+                continue
+            component_id = find(typed_rows[0][0])
+            component_relations.setdefault(component_id, {})[case_id] = relation
+            for row_id, _row_type in typed_rows:
+                self._distributed_relations_by_row_id.setdefault(row_id, []).append(
+                    relation
+                )
+                self._distributed_component_by_row_id[row_id] = component_id
+        self._distributed_relations_by_component = {
+            component_id: list(component.values())
+            for component_id, component in component_relations.items()
+        }
 
     def _distributed_active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:
         self._load_distributed_relations(row_ids)
         relations_by_case_id: dict[str, dict[str, Any]] = {}
         for row_id in row_ids:
             for relation in self._distributed_relations_by_row_id.get(row_id, []):
+                case_id = str(relation.get("case_id") or "")
+                relations_by_case_id[case_id] = relation
+            component_id = self._distributed_component_by_row_id.get(row_id)
+            for relation in self._distributed_relations_by_component.get(
+                str(component_id or ""),
+                [],
+            ):
                 case_id = str(relation.get("case_id") or "")
                 relations_by_case_id[case_id] = relation
         return [deepcopy(relation) for relation in relations_by_case_id.values()]

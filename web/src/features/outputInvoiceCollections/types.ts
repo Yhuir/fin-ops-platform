@@ -1,5 +1,3 @@
-import type { OperationBarrierTarget } from "../operationBarrier/api";
-
 export type OutputInvoiceCollectionSortDirection = "asc" | "desc";
 
 export type OutputInvoiceCollectionFilterOperator =
@@ -26,9 +24,6 @@ export type OutputInvoiceCollectionWorkflow =
   | null;
 
 export type OutputInvoiceCollectionMutationResponse = {
-  readModelScopeKeys: string[];
-  freshnessTargets: OperationBarrierTarget[];
-  operationBarrierTargets: OperationBarrierTarget[];
   raw: unknown;
 };
 
@@ -225,10 +220,9 @@ export type OutputInvoiceCollectionRowsResponse = {
     total: number;
   };
   filterConfig: OutputInvoiceCollectionFilterFieldConfig[];
-  readModelStatus?: string;
-  readModelScopeKey?: string;
-  generatedAt?: string;
-  sourceVersion?: string;
+  filterOptions: Array<OutputInvoiceCollectionFilterFieldConfig & {
+    options: OutputInvoiceCollectionFilterOption[];
+  }>;
 };
 
 export type OutputInvoiceCollectionFilterFieldConfig = {
@@ -249,8 +243,6 @@ export type OutputInvoiceCollectionFilterOptionsResponse = {
   fields: Array<OutputInvoiceCollectionFilterFieldConfig & {
     options: OutputInvoiceCollectionFilterOption[];
   }>;
-  readModelStatus?: string;
-  readModelScopeKey?: string;
 };
 
 export type OutputInvoiceCollectionExportPreview = {
@@ -259,7 +251,6 @@ export type OutputInvoiceCollectionExportPreview = {
   scopeLabel: string;
   columns: string[];
   sampleRows: Array<Record<string, string>>;
-  readModelStatus?: string;
   message?: string;
 };
 

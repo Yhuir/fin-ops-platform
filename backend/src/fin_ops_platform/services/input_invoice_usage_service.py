@@ -770,10 +770,10 @@ class InputInvoiceUsageQueryService:
         *,
         context: DistributedInvoiceRelationContext,
     ) -> dict[str, Any]:
-        invoice_map = {
-            invoice.id: invoice
-            for invoice in context.list_invoices(month="all", invoice_type=InvoiceType.INPUT)
-        }
+        invoice_map = context.invoices_by_id(
+            month="all",
+            invoice_type=InvoiceType.INPUT,
+        )
         summaries = []
         seen: set[str] = set()
         for relation in relations:
@@ -948,7 +948,7 @@ class InputInvoiceUsageQueryService:
         *,
         context: DistributedInvoiceRelationContext,
     ) -> dict[str, Decimal]:
-        invoice_lookup_ids = set(self._invoice_relation_lookup_ids(line_items))
+        del line_items
         oa_ids: list[str] = []
         bank_ids: list[str] = []
         seen_oa: set[str] = set()
@@ -960,8 +960,6 @@ class InputInvoiceUsageQueryService:
                 (row_id, self._canonical_relation_row_type(row_type, row_id))
                 for row_id, row_type in self._typed_relation_rows(relation)
             ]
-            if not any(row_type == "invoice" and row_id in invoice_lookup_ids for row_id, row_type in typed_rows):
-                continue
             for row_id, row_type in typed_rows:
                 if row_type == "oa" and row_id not in seen_oa:
                     seen_oa.add(row_id)
