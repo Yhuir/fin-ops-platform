@@ -181,6 +181,9 @@ from fin_ops_platform.services.input_invoice_usage_export_service import (
     InputInvoiceUsageExportError,
     InputInvoiceUsageExportService,
 )
+from fin_ops_platform.services.input_invoice_usage_canonical_query_service import (
+    InputInvoiceUsageCanonicalQueryService,
+)
 from fin_ops_platform.app.routes_input_invoice_usage import InputInvoiceUsageApiRoutes
 from fin_ops_platform.app.routes_input_invoice_usage_oa_reverse import InputInvoiceUsageOaReverseApiRoutes
 from fin_ops_platform.services.input_invoice_usage_oa_reverse_service import (
@@ -201,9 +204,6 @@ from fin_ops_platform.services.input_invoice_usage_payment_rules import AppSetti
 from fin_ops_platform.services.input_invoice_usage_service import (
     InputInvoiceUsageError,
     InputInvoiceUsageQueryService,
-)
-from fin_ops_platform.services.input_invoice_usage_read_model_fresh_gate_service import (
-    InputInvoiceUsageReadModelFreshGateService,
 )
 from fin_ops_platform.services.operations_audit_service import OperationsAuditService, PageAuditUnavailableError
 from fin_ops_platform.services.object_storage import ObjectStorageWriteError
@@ -235,6 +235,9 @@ from fin_ops_platform.services.output_invoice_collection_service import (
     OutputInvoiceCollectionError,
     OutputInvoiceCollectionQueryService,
 )
+from fin_ops_platform.services.output_invoice_collection_canonical_query_service import (
+    OutputInvoiceCollectionCanonicalQueryService,
+)
 from fin_ops_platform.services.oa_pending_payment_query_contract import OaPendingPaymentError
 from fin_ops_platform.services.oa_pending_payment_command_service import OaPendingPaymentCommandService
 from fin_ops_platform.services.oa_pending_payment_read_model_service import OaPendingPaymentReadModelService
@@ -246,12 +249,13 @@ from fin_ops_platform.services.output_invoice_collection_lifecycle_service impor
     InMemoryOutputInvoiceCollectionLifecycleRepository,
     OutputInvoiceCollectionLifecycleService,
 )
-from fin_ops_platform.services.output_invoice_collection_read_model_fresh_gate_service import (
-    OutputInvoiceCollectionReadModelFreshGateService,
-)
 from fin_ops_platform.services.output_invoice_collection_receipt_service import OutputInvoiceCollectionReceiptService
 from fin_ops_platform.services.postgres_repositories.output_invoice_collection import (
     build_output_invoice_collection_lifecycle_repository,
+)
+from fin_ops_platform.services.postgres_repositories.invoice_usage_collection_query import (
+    PostgresInputInvoiceUsageQueryRepository,
+    PostgresOutputInvoiceCollectionQueryRepository,
 )
 from fin_ops_platform.services.integrations import IntegrationHubService
 from fin_ops_platform.services.ledgers import LedgerReminderService
@@ -792,6 +796,17 @@ class Application:
         self._workbench_relation_sql_read_repository = getattr(self._state_store, "workbench_relation_sql_read_repository", None)
         self._input_invoice_usage_sql_read_repository = getattr(self._state_store, "input_invoice_usage_sql_read_repository", None)
         self._output_invoice_collection_sql_read_repository = getattr(self._state_store, "output_invoice_collection_sql_read_repository", None)
+        state_connection = getattr(self._state_store, "_connection", None)
+        has_postgres = (
+            str(getattr(self._state_store, "storage_backend", "") or "").strip() == "postgres"
+            and state_connection is not None
+        )
+        self._input_invoice_usage_canonical_query_repository = (
+            PostgresInputInvoiceUsageQueryRepository(state_connection) if has_postgres else None
+        )
+        self._output_invoice_collection_canonical_query_repository = (
+            PostgresOutputInvoiceCollectionQueryRepository(state_connection) if has_postgres else None
+        )
         self._oa_pending_payment_sql_read_repository = getattr(self._state_store, "oa_pending_payment_sql_read_repository", None)
         self._no_oa_bank_batch_sql_read_repository = getattr(self._state_store, "no_oa_bank_batch_sql_read_repository", None)
         self._bank_flow_rule_batch_sql_read_repository = getattr(
@@ -800,7 +815,7 @@ class Application:
             None,
         )
         self._output_invoice_collection_lifecycle_repository = build_output_invoice_collection_lifecycle_repository(
-            getattr(self._state_store, "_connection", None)
+            state_connection
         )
         self._import_service = ImportNormalizationService.from_snapshot(
             persisted_state.get("imports"),
@@ -1010,11 +1025,17 @@ class Application:
         )
         self._output_invoice_collection_lifecycle_service = OutputInvoiceCollectionLifecycleService(
             repository=self._output_invoice_collection_lifecycle_repository,
-            row_provider=lambda row_id: self._output_invoice_collection_service().row_by_id(row_id),
+            row_provider=lambda row_id, tenant_id: self._output_invoice_collection_page_query_service().row_by_id(
+                row_id,
+                tenant_id=tenant_id,
+            ),
         )
         self._output_invoice_collection_receipt_service = OutputInvoiceCollectionReceiptService(
             repository=self._output_invoice_collection_lifecycle_repository,
-            row_provider=lambda row_id: self._output_invoice_collection_service().row_by_id(row_id),
+            row_provider=lambda row_id, tenant_id: self._output_invoice_collection_page_query_service().row_by_id(
+                row_id,
+                tenant_id=tenant_id,
+            ),
         )
         self._pending_invoice_application_service = PendingInvoiceApplicationService(
             import_service=self._import_service,
@@ -6099,45 +6120,39 @@ class Application:
         service = getattr(self, "_input_invoice_usage_export_service_instance", None)
         if isinstance(service, InputInvoiceUsageExportService):
             return service
-        service = InputInvoiceUsageExportService(row_page_loader=self._input_invoice_usage_read_model_fresh_gate().export_page)
+        query_service = self._input_invoice_usage_page_query_service()
+        service = InputInvoiceUsageExportService(
+            row_page_loader=query_service.export_page,
+            row_export_loader=query_service.export_rows,
+        )
         self._input_invoice_usage_export_service_instance = service
         return service
 
-    def _input_invoice_usage_read_model_fresh_gate(self) -> InputInvoiceUsageReadModelFreshGateService:
-        service = getattr(self, "_input_invoice_usage_read_model_fresh_gate_instance", None)
-        repository = getattr(self, "_input_invoice_usage_sql_read_repository", None)
-        if (
-            isinstance(service, InputInvoiceUsageReadModelFreshGateService)
-            and getattr(service, "_repository", None) is repository
+    def _input_invoice_usage_page_query_service(self) -> InputInvoiceUsageCanonicalQueryService:
+        service = getattr(self, "_input_invoice_usage_page_query_service_instance", None)
+        repository = getattr(self, "_input_invoice_usage_canonical_query_repository", None)
+        if repository is None and self._requires_sql_read_model_runtime():
+            raise RuntimeError("Input invoice usage canonical query repository is required in PostgreSQL runtime.")
+        row_assembler = self._input_invoice_usage_service()
+        if isinstance(service, InputInvoiceUsageCanonicalQueryService) and (
+            getattr(service, "_repository", None) is repository
+            and getattr(service, "_row_assembler", None) is row_assembler
         ):
             return service
-        service = InputInvoiceUsageReadModelFreshGateService(
+        service = InputInvoiceUsageCanonicalQueryService(
             repository=repository,
-            requires_sql_read_model_runtime=self._requires_sql_read_model_runtime,
-            enqueue_refresh=lambda scope_key, reason: self._enqueue_input_invoice_usage_read_model_refresh(
-                scope_key,
-                reason=reason,
-            ),
-            expected_source_versions=self._input_invoice_usage_expected_source_versions,
-            workbench_relation_reader=self._workbench_relation_read_facade(),
-            statistics_overlay=self._input_invoice_usage_statistics_overlay,
+            row_assembler=row_assembler,
         )
-        self._input_invoice_usage_read_model_fresh_gate_instance = service
+        self._input_invoice_usage_page_query_service_instance = service
         return service
 
     def _input_invoice_usage_routes(self) -> InputInvoiceUsageApiRoutes:
         routes = getattr(self, "_input_invoice_usage_api_routes", None)
-        query_service = self._input_invoice_usage_service()
+        query_service = self._input_invoice_usage_page_query_service()
         if isinstance(routes, InputInvoiceUsageApiRoutes) and getattr(routes, "_dependency_identity", None) is query_service:
             return routes
         routes = InputInvoiceUsageApiRoutes(
-            invoice_detail_loader=query_service.invoice_detail,
-            bank_transaction_detail_loader=query_service.bank_transaction_detail,
-            oa_detail_loader=query_service.oa_detail,
-            payment_status_rules_loader=query_service.payment_status_rules,
-            rows_from_sql_read_model=self._get_input_invoice_usage_rows_from_sql_read_model,
-            filter_options_from_sql_read_model=self._get_input_invoice_usage_filter_options_from_sql_read_model,
-            relation_details_from_sql_read_model=self._get_input_invoice_usage_relation_details_from_sql_read_model,
+            query_service=query_service,
             export_service=self._input_invoice_usage_export_service(),
             resolve_read_session=self._resolve_fin_ops_read_session,
             export_query_kwargs=self._input_invoice_usage_export_query_kwargs,
@@ -6247,11 +6262,10 @@ class Application:
             ),
             relation_writer=WorkbenchInputInvoiceUsageOaReverseRelationWriter(self._workbench_relation_command_service()),
             audit_recorder=self._record_input_invoice_usage_oa_reverse_audit,
-            read_model_rows_loader=lambda query: self._input_invoice_usage_read_model_fresh_gate().rows(
-                query,
-                include_statistics=False,
+            rows_loader=lambda query: self._input_invoice_usage_page_query_service().rows(query),
+            rows_by_invoice_ids_loader=lambda invoice_ids: self._input_invoice_usage_page_query_service().rows_by_invoice_ids(
+                invoice_ids
             ),
-            read_model_rows_by_invoice_ids_loader=lambda invoice_ids: self._input_invoice_usage_read_model_fresh_gate().rows_by_invoice_ids(invoice_ids),
         )
         self._input_invoice_usage_oa_reverse_service_instance = service
         return service
@@ -6348,19 +6362,10 @@ class Application:
         }
 
     def _input_invoice_usage_export_error_response(self, exc: InputInvoiceUsageExportError) -> Response:
-        if exc.refresh_payload is not None:
-            return self._json_response(HTTPStatus.ACCEPTED, exc.refresh_payload)
         return self._json_response(
             HTTPStatus.BAD_REQUEST,
             {"error": {"code": exc.error_code, "message": str(exc), "details": {}}},
         )
-
-    def _get_input_invoice_usage_relation_details_from_sql_read_model(
-        self,
-        row_id: str,
-        query: dict[str, list[str]],
-    ) -> dict[str, object] | None:
-        return self._input_invoice_usage_read_model_fresh_gate().relation_details(row_id, query)
 
     def _input_invoice_usage_payment_rules_error_response(self, exc: AppSettingsValidationError) -> Response:
         status = (
@@ -6583,6 +6588,24 @@ class Application:
         self._output_invoice_collection_query_service = service
         return service
 
+    def _output_invoice_collection_page_query_service(self) -> OutputInvoiceCollectionCanonicalQueryService:
+        service = getattr(self, "_output_invoice_collection_page_query_service_instance", None)
+        repository = getattr(self, "_output_invoice_collection_canonical_query_repository", None)
+        if repository is None and self._requires_sql_read_model_runtime():
+            raise RuntimeError("Output invoice collection canonical query repository is required in PostgreSQL runtime.")
+        row_assembler = self._output_invoice_collection_service()
+        if isinstance(service, OutputInvoiceCollectionCanonicalQueryService) and (
+            getattr(service, "_repository", None) is repository
+            and getattr(service, "_row_assembler", None) is row_assembler
+        ):
+            return service
+        service = OutputInvoiceCollectionCanonicalQueryService(
+            repository=repository,
+            row_assembler=row_assembler,
+        )
+        self._output_invoice_collection_page_query_service_instance = service
+        return service
+
     def _output_invoice_collection_routes(self) -> OutputInvoiceCollectionApiRoutes:
         lifecycle_repository = getattr(self, "_output_invoice_collection_lifecycle_repository", None)
         if lifecycle_repository is None:
@@ -6592,56 +6615,32 @@ class Application:
         if not isinstance(lifecycle_service, OutputInvoiceCollectionLifecycleService):
             lifecycle_service = OutputInvoiceCollectionLifecycleService(
                 repository=lifecycle_repository,
-                row_provider=lambda row_id: self._output_invoice_collection_service().row_by_id(row_id),
+                row_provider=lambda row_id, tenant_id: self._output_invoice_collection_page_query_service().row_by_id(
+                    row_id,
+                    tenant_id=tenant_id,
+                ),
             )
             self._output_invoice_collection_lifecycle_service = lifecycle_service
         receipt_service = getattr(self, "_output_invoice_collection_receipt_service", None)
         if not isinstance(receipt_service, OutputInvoiceCollectionReceiptService):
             receipt_service = OutputInvoiceCollectionReceiptService(
                 repository=lifecycle_repository,
-                row_provider=lambda row_id: self._output_invoice_collection_service().row_by_id(row_id),
+                row_provider=lambda row_id, tenant_id: self._output_invoice_collection_page_query_service().row_by_id(
+                    row_id,
+                    tenant_id=tenant_id,
+                ),
             )
             self._output_invoice_collection_receipt_service = receipt_service
         return OutputInvoiceCollectionApiRoutes(
-            query_service=self._output_invoice_collection_service(),
+            query_service=self._output_invoice_collection_page_query_service(),
             lifecycle_service=lifecycle_service,
             receipt_service=receipt_service,
-            sql_rows_provider=self._get_output_invoice_collection_rows_from_sql_read_model,
-            sql_all_rows_provider=self._get_output_invoice_collection_all_rows_from_sql_read_model,
-            sql_relation_details_provider=self._get_output_invoice_collection_relation_details_from_sql_read_model,
-            allow_live_fallback=not self._requires_sql_read_model_runtime(),
             resolve_read_session=self._resolve_output_invoice_collection_read_session,
             json_response=self._json_response,
             xlsx_response=self._output_invoice_collection_xlsx_response,
             error_response=self._output_invoice_collection_error_response,
             load_json_body=self._load_json_body,
         )
-
-    def _output_invoice_collection_read_model_fresh_gate(self) -> OutputInvoiceCollectionReadModelFreshGateService:
-        service = getattr(self, "_output_invoice_collection_read_model_fresh_gate_instance", None)
-        repository = getattr(self, "_output_invoice_collection_sql_read_repository", None)
-        query_service = getattr(self, "_output_invoice_collection_query_service", None)
-        if query_service is None and getattr(self, "_import_service", None) is not None:
-            query_service = self._output_invoice_collection_service()
-        if (
-            isinstance(service, OutputInvoiceCollectionReadModelFreshGateService)
-            and getattr(service, "_repository", None) is repository
-            and getattr(service, "_query_service", None) is query_service
-        ):
-            return service
-        service = OutputInvoiceCollectionReadModelFreshGateService(
-            repository=repository,
-            query_service=query_service,
-            requires_sql_read_model_runtime=self._requires_sql_read_model_runtime,
-            enqueue_refresh=lambda scope_key, reason: self._enqueue_output_invoice_collection_read_model_refresh(
-                scope_key,
-                reason=reason,
-            ),
-            expected_source_versions=self._output_invoice_collection_expected_source_versions,
-            workbench_relation_reader=self._workbench_relation_read_facade(),
-        )
-        self._output_invoice_collection_read_model_fresh_gate_instance = service
-        return service
 
     def _output_invoice_collection_xlsx_response(self, filename: str, content: bytes) -> Response:
         return Response(
@@ -6666,31 +6665,6 @@ class Application:
             }
         }
         return self._json_response(exc.status_code, payload)
-
-    def _get_input_invoice_usage_filter_options_from_sql_read_model(
-        self,
-        query: dict[str, list[str]],
-    ) -> dict[str, object] | None:
-        return self._input_invoice_usage_read_model_fresh_gate().filter_options(query)
-
-    def _get_output_invoice_collection_all_rows_from_sql_read_model(
-        self,
-        query: dict[str, list[str]],
-    ) -> dict[str, object] | None:
-        return self._output_invoice_collection_read_model_fresh_gate().all_rows(query)
-
-    def _get_input_invoice_usage_rows_from_sql_read_model(self, query: dict[str, list[str]]) -> dict[str, object] | None:
-        return self._input_invoice_usage_read_model_fresh_gate().rows(query)
-
-    def _get_output_invoice_collection_rows_from_sql_read_model(self, query: dict[str, list[str]]) -> dict[str, object] | None:
-        return self._output_invoice_collection_read_model_fresh_gate().rows(query)
-
-    def _get_output_invoice_collection_relation_details_from_sql_read_model(
-        self,
-        row_id: str,
-        query: dict[str, list[str]],
-    ) -> dict[str, object] | None:
-        return self._output_invoice_collection_read_model_fresh_gate().relation_details(row_id, query)
 
     def _input_invoice_usage_expected_source_versions(self, scope_key: str | None = None) -> dict[str, object]:
         del scope_key

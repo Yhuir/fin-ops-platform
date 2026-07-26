@@ -23,6 +23,41 @@ const outputInvoiceCollectionsSourceFiles = [
   "src/components/outputInvoiceCollections/ReceiptSettingsDrawer.tsx",
 ] as const;
 
+const outputFilterOptions = [
+  {
+    field: "invoice_no",
+    label: "发票号码",
+    mode: "text",
+    sortable: true,
+    operators: ["contains", "equals"],
+    options: [],
+  },
+  {
+    field: "total_with_tax",
+    label: "价税合计",
+    mode: "money",
+    sortable: true,
+    operators: ["between", "equals"],
+    options: [],
+  },
+  {
+    field: "invoice_date",
+    label: "开票日期",
+    mode: "date",
+    sortable: true,
+    operators: ["between", "equals"],
+    options: [],
+  },
+  {
+    field: "collection_status",
+    label: "收款状态",
+    mode: "enum_multi",
+    sortable: true,
+    operators: ["in"],
+    options: [{ value: "partial_collected", label: "待收款，已收部分款", count: 1 }],
+  },
+] as const;
+
 const rowsPayload = {
   rows: [
     {
@@ -257,12 +292,10 @@ const rowsPayload = {
     issued_receipt_count: 10,
   },
   filterConfig: [],
-  readModelStatus: "fresh",
-  generatedAt: "2026-05-24T00:00:00Z",
-  sourceVersion: "output-invoice-collections:v1",
+  filterOptions: outputFilterOptions,
 };
 
-function installOutputInvoiceCollectionsFetch(options: { operationBarrierDelay?: Promise<void>; rowsPayloadOverride?: unknown | ((url: URL) => unknown) } = {}) {
+function installOutputInvoiceCollectionsFetch(options: { rowsPayloadOverride?: unknown | ((url: URL) => unknown) } = {}) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
     if (url.pathname === "/api/output-invoice-collections/rows") {
@@ -281,6 +314,7 @@ function installOutputInvoiceCollectionsFetch(options: { operationBarrierDelay?:
           snapshot_consistency: "repeatable_read_read_only",
           proof_availability: "ready",
           contract_revision: "page-audit-contract.v9",
+          registered_read_model_keys: [],
         },
         summary: {
           blocking_issue_sample_count: 0,
@@ -291,40 +325,7 @@ function installOutputInvoiceCollectionsFetch(options: { operationBarrierDelay?:
     }
     if (url.pathname === "/api/output-invoice-collections/filter-options") {
       return jsonResponse({
-        fields: [
-          {
-            field: "invoice_no",
-            label: "发票号码",
-            mode: "text",
-            sortable: true,
-            operators: ["contains", "equals"],
-            options: [],
-          },
-          {
-            field: "total_with_tax",
-            label: "价税合计",
-            mode: "money",
-            sortable: true,
-            operators: ["between", "equals"],
-            options: [],
-          },
-          {
-            field: "invoice_date",
-            label: "开票日期",
-            mode: "date",
-            sortable: true,
-            operators: ["between", "equals"],
-            options: [],
-          },
-          {
-            field: "collection_status",
-            label: "收款状态",
-            mode: "enum_multi",
-            sortable: true,
-            operators: ["in"],
-            options: [{ value: "partial_collected", label: "待收款，已收部分款", count: 1 }],
-          },
-        ],
+        fields: outputFilterOptions,
       });
     }
     if (url.pathname === "/api/output-invoice-collections/status-rules") {
@@ -448,26 +449,6 @@ function installOutputInvoiceCollectionsFetch(options: { operationBarrierDelay?:
       }
       return jsonResponse({ settings: { prefix: "SK", resetPeriod: "monthly", version: 1 } });
     }
-    if (url.pathname === "/api/operation-barrier/status") {
-      await options.operationBarrierDelay;
-      return jsonResponse({
-        status: "fresh",
-        fresh: true,
-        targets: [
-          {
-            read_model_key: "output_invoice_collection",
-            scope_type: "output_invoice_collection",
-            scope_key: "all",
-            status: "fresh",
-            fresh: true,
-            blocking: false,
-            raw_status: "fresh",
-          },
-        ],
-        blocked_targets: [],
-        refreshing_targets: [],
-      });
-    }
     if (
       url.pathname === "/api/output-invoice-collections/rows/output-collection-row-001/collection-status"
       || url.pathname === "/api/output-invoice-collections/rows/output-collection-row-001/collection-reminder"
@@ -480,8 +461,6 @@ function installOutputInvoiceCollectionsFetch(options: { operationBarrierDelay?:
     ) {
       return jsonResponse({
         ok: true,
-        read_model_scope_keys: ["2026-05"],
-        freshness_targets: [{ read_model_key: "output_invoice_collection", scope_key: "2026-05" }],
       });
     }
     return jsonResponse({});
@@ -651,7 +630,7 @@ describe("Output invoice collections page", () => {
     expect(outputGroupRules).not.toMatch(/#f6fbf8|#f5f9ff|#f8fafc|#fbfdfc|#f1faff|#f8fbff|#fbfcfd|rgba\(14,\s*165,\s*233,\s*0\.10\)/);
   });
 
-  test("shows a refreshing state instead of a true empty state while read model details stay hidden", async () => {
+  test("renders a direct empty result without filter-options polling", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       if (url.pathname === "/api/output-invoice-collections/rows") {
@@ -659,96 +638,34 @@ describe("Output invoice collections page", () => {
           rows: [],
           pagination: { page: 1, pageSize: 20, total: 0 },
           filterConfig: [],
-          read_model_status: "refreshing",
-          readModelStatus: "refreshing",
-        }, 202);
-      }
-      if (url.pathname === "/api/output-invoice-collections/filter-options") {
-        return jsonResponse({ fields: [], read_model_status: "refreshing", readModelStatus: "refreshing" }, 202);
-      }
-      return jsonResponse({});
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderAuthenticatedAppAt("/output-invoice-collections");
-
-    const page = await screen.findByTestId("output-invoice-collections-page");
-    expect(await within(page).findByText("销项发票收款情况数据正在刷新")).toBeInTheDocument();
-    expect(within(page).getByLabelText("销项发票收款情况数据统计")).toHaveTextContent("销项发票—");
-    expect(within(page).getByText("当前数据仍在刷新或等待后台任务完成，请稍后重试。")).toBeInTheDocument();
-    expect(within(page).queryByText("当前条件下暂无记录。")).not.toBeInTheDocument();
-    expect(within(page).queryByText("销项发票收款情况读模型正在刷新，完成后页面会自动重新加载。")).not.toBeInTheDocument();
-  });
-
-  test("treats stale filter options as non-fresh instead of showing a fresh empty state", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      if (url.pathname === "/api/output-invoice-collections/rows") {
-        return jsonResponse({
-          rows: [],
-          pagination: { page: 1, pageSize: 20, total: 0 },
-          filterConfig: [],
-          read_model_status: "fresh",
-          readModelStatus: "fresh",
+          filterOptions: [],
+          statistics: {},
         });
       }
-      if (url.pathname === "/api/output-invoice-collections/filter-options") {
-        return jsonResponse({ fields: [], read_model_status: "stale", readModelStatus: "stale" }, 202);
-      }
       return jsonResponse({});
     });
     vi.stubGlobal("fetch", fetchMock);
 
     renderAuthenticatedAppAt("/output-invoice-collections");
 
-    const page = await screen.findByTestId("output-invoice-collections-page");
-    expect(await within(page).findByText("销项发票收款情况数据正在刷新")).toBeInTheDocument();
-    expect(within(page).queryByText("当前条件下暂无记录。")).not.toBeInTheDocument();
-    expect(within(page).queryByText("当前条件下没有销项发票收款记录。")).not.toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "筛选内容导出" })).toBeDisabled();
-  });
-
-  test("cleans up read model retry reload after route unmount", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      if (url.pathname === "/api/output-invoice-collections/rows") {
-        return jsonResponse({
-          rows: [],
-          pagination: { page: 1, pageSize: 20, total: 0 },
-          filterConfig: [],
-          read_model_status: "refreshing",
-          readModelStatus: "refreshing",
-        }, 202);
-      }
-      if (url.pathname === "/api/output-invoice-collections/filter-options") {
-        return jsonResponse({ fields: [], read_model_status: "refreshing", readModelStatus: "refreshing" }, 202);
-      }
-      return jsonResponse({});
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderAuthenticatedAppAt("/output-invoice-collections");
-    const page = await screen.findByTestId("output-invoice-collections-page");
-    expect(await within(page).findByText("销项发票收款情况数据正在刷新")).toBeInTheDocument();
-    expect(within(page).queryByText("当前条件下暂无记录。")).not.toBeInTheDocument();
+    const page = await screen.findByTestId(
+      "output-invoice-collections-page",
+      {},
+      { timeout: 5_000 },
+    );
+    expect(await within(page).findByText("当前条件下暂无记录。")).toBeInTheDocument();
     expect(rowsRequests(fetchMock).length).toBeGreaterThan(0);
-
-    fireEvent.click(screen.getByRole("link", { name: "设置" }));
-    expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
-    expect(screen.queryByTestId("output-invoice-collections-page")).not.toBeInTheDocument();
-    const rowsAfterUnmount = rowsRequests(fetchMock).length;
+    expect(
+      fetchMock.mock.calls.some(([input]) =>
+        String(input).includes("/api/output-invoice-collections/filter-options")),
+    ).toBe(false);
+    const initialRows = rowsRequests(fetchMock).length;
     vi.useFakeTimers();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_000);
     });
-
-    expect(rowsRequests(fetchMock)).toHaveLength(rowsAfterUnmount);
-
+    expect(rowsRequests(fetchMock)).toHaveLength(initialRows);
     vi.useRealTimers();
-    fireEvent.click(screen.getByRole("link", { name: "销项发票收款情况" }));
-    expect(await screen.findByTestId("output-invoice-collections-page")).toBeInTheDocument();
-
-    expect(rowsRequests(fetchMock).length).toBeGreaterThan(rowsAfterUnmount);
   });
 
   test("keeps page-owned statistics stable when filters change without a title-total request", async () => {

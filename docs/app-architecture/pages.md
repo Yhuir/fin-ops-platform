@@ -33,9 +33,9 @@
 
 ## Global Runtime Status Plane 页面域
 
-所有页面必须通过后端 domain registry 接入全局状态平面。新增页面、read model、worker 或后台任务类型时，需要同步更新 registry、readiness projection 和测试，不能只在前端页面里显示局部状态。
+所有页面必须通过后端 domain registry 接入全局状态平面。新增页面、read model、worker 或后台任务类型时，需要同步更新 registry、readiness projection 和测试，不能只在前端页面里显示局部状态。canonical 直读页面的 domain readiness 只能依赖 PostgreSQL/runtime 健康，不得虚构页面 read model readiness。
 
-domain registry 是页面域入口；`AppStatusReadModelRegistry` 是 read model readiness 事实入口。表中的 read model 必须能从 `read_model.app_status_readiness` 或等价 active generation readiness 读取到 `fresh/missing/refreshing/stale/failed/unavailable` 等状态。没有 readiness 记录时，该 read model 进入 `missing`，对应 domain 不能显示 ready。
+domain registry 是页面域入口；`AppStatusReadModelRegistry` 是仍有 read model 的页面 readiness 事实入口。表中的 read model 必须能从 `read_model.app_status_readiness` 或等价 active generation readiness 读取到 `fresh/missing/refreshing/stale/failed/unavailable` 等状态。没有 readiness 记录时，该 read model 进入 `missing`，对应 domain 不能显示 ready。
 
 | domain key | route | read model / worker / task 来源 |
 | --- | --- | --- |
@@ -46,8 +46,8 @@ domain registry 是页面域入口；`AppStatusReadModelRegistry` 是 read model
 | `bank_details` | `/bank-details` | `bank_detail`、`bank_account_balance`、bank detail workers |
 | `pending_invoices` | `/pending-invoices` | `pending_invoice`、`search`、`pending-invoice` / `search` workers，旧 `search-pending` 兼容 worker |
 | `oa_pending_payments` | `/oa-pending-payments` | `oa_pending_payment`、`oa-pending-payment`专属worker、OA sync |
-| `input_invoice_usage` | `/input-invoice-usage` | `input_invoice_usage`、invoice usage collection worker |
-| `output_invoice_collections` | `/output-invoice-collections` | `output_invoice_collection`、invoice usage collection worker；rows 展示 `workbench_relation` 统一关系中的 OA、收入流水和销项发票项 |
+| `input_invoice_usage` | `/input-invoice-usage` | PostgreSQL canonical repeatable-read snapshot；active `app.workbench_pair_relations`；无页面 read model/worker |
+| `output_invoice_collections` | `/output-invoice-collections` | PostgreSQL canonical repeatable-read snapshot；active `app.workbench_pair_relations` 与 canonical lifecycle facts；无页面 read model/worker |
 | `tax_offset` | `/tax-offset` | `tax_offset`、`tax-offset` worker，旧 `cost-tax` 兼容 worker |
 | `cost_statistics` | `/cost-statistics` | 单次 PostgreSQL repeatable-read canonical snapshot；无 Cost read model/worker |
 | `bank_flow_rule_batches` | `/bank-flow-rule-batches` | `bank_flow_rule_batch`、bank-flow-rule-batch worker |

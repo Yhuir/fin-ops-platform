@@ -211,7 +211,7 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         }
         service = InputInvoiceUsageOaReverseService(
             repository=InMemoryInputInvoiceUsageOaReverseBatchRepository(),
-            read_model_rows_by_invoice_ids_loader=lambda _invoice_ids: {
+            rows_by_invoice_ids_loader=lambda _invoice_ids: {
                 "rows": [read_model_row],
                 "missing_invoice_ids": [],
                 "read_model_status": "fresh",
@@ -237,7 +237,7 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         calls: list[dict[str, list[object]]] = []
         service = InputInvoiceUsageOaReverseService(
             repository=InMemoryInputInvoiceUsageOaReverseBatchRepository(),
-            read_model_rows_loader=lambda query: (
+            rows_loader=lambda query: (
                 calls.append(dict(query))
                 or {
                     "rows": [self._read_model_row("inv-fast", "9101")],
@@ -265,7 +265,7 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         calls: list[list[str]] = []
         service = InputInvoiceUsageOaReverseService(
             repository=InMemoryInputInvoiceUsageOaReverseBatchRepository(),
-            read_model_rows_by_invoice_ids_loader=lambda invoice_ids: (
+            rows_by_invoice_ids_loader=lambda invoice_ids: (
                 calls.append(list(invoice_ids))
                 or {
                     "rows": [self._read_model_row("inv-fast", "9101")],
@@ -292,20 +292,20 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             [{"invoiceId": "inv-missing", "reasonCode": "invoice_not_found", "reason": "发票不存在"}],
         )
 
-    def test_preview_read_model_refreshing_returns_business_error_without_live_fallback(self) -> None:
+    def test_preview_ignores_removed_read_model_metadata(self) -> None:
         service = InputInvoiceUsageOaReverseService(
             repository=InMemoryInputInvoiceUsageOaReverseBatchRepository(),
-            read_model_rows_loader=lambda _query: {
+            rows_loader=lambda _query: {
                 "rows": [],
                 "read_model_status": "refreshing",
                 "read_model_scope_key": "all",
             },
         )
 
-        with self.assertRaises(InputInvoiceUsageError) as context:
-            service.preview({"source": "currentFilters"}, can_create_draft=True)
+        preview = service.preview({"source": "currentFilters"}, can_create_draft=True)
 
-        self.assertEqual(context.exception.error_code, "input_invoice_usage_oa_reverse_preview_refreshing")
+        self.assertEqual(preview["invoiceRows"], [])
+        self.assertNotIn("read_model_status", preview)
 
     def test_create_batch_is_idempotent_and_persists_audit_metadata(self) -> None:
         service = self._service(
@@ -810,7 +810,7 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             oa_client=oa_client,
             evidence_provider=evidence_provider,
             relation_writer=relation_writer,
-            read_model_rows_loader=lambda query: query_service.list_rows(
+            rows_loader=lambda query: query_service.list_rows(
                 page=query.get("page", [1])[0],
                 page_size=query.get("page_size", [200])[0],
                 keyword=query.get("keyword", [None])[0],
@@ -821,7 +821,7 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
                 sort_field=query.get("sort_field", ["invoice_date"])[0],
                 sort_direction=query.get("sort_direction", ["desc"])[0],
             ),
-            read_model_rows_by_invoice_ids_loader=lambda invoice_ids: InputInvoiceUsageOaReverseServiceTests._rows_by_invoice_ids_payload(
+            rows_by_invoice_ids_loader=lambda invoice_ids: InputInvoiceUsageOaReverseServiceTests._rows_by_invoice_ids_payload(
                 query_service,
                 invoice_ids,
             ),

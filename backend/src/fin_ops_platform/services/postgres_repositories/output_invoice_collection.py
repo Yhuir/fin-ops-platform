@@ -25,12 +25,37 @@ class PostgresOutputInvoiceCollectionLifecycleRepository:
         with self._connection.transaction() as transaction:
             return callback(transaction)
 
-    def overlays_for_identity_keys(self, identity_keys: list[str], *, tenant_id: str = "default") -> dict[str, dict[str, Any]]:
+    def overlays_for_identity_keys(
+        self,
+        identity_keys: list[str],
+        *,
+        tenant_id: str = "default",
+        transaction: Any | None = None,
+    ) -> dict[str, dict[str, Any]]:
         keys = [str(item).strip() for item in identity_keys if str(item).strip()]
         if not keys:
             return {}
-        with self._connection.transaction() as transaction:
-            overrides = transaction.fetch_all(
+        if transaction is not None:
+            return self._overlays_from_transaction(
+                transaction,
+                keys=keys,
+                tenant_id=tenant_id,
+            )
+        with self._connection.transaction() as current:
+            return self._overlays_from_transaction(
+                current,
+                keys=keys,
+                tenant_id=tenant_id,
+            )
+
+    @staticmethod
+    def _overlays_from_transaction(
+        transaction: Any,
+        *,
+        keys: list[str],
+        tenant_id: str,
+    ) -> dict[str, dict[str, Any]]:
+        overrides = transaction.fetch_all(
                 """
                 select *
                 from app.output_invoice_collection_status_overrides
@@ -40,7 +65,7 @@ class PostgresOutputInvoiceCollectionLifecycleRepository:
                 """,
                 (tenant_id, keys),
             )
-            reminders = transaction.fetch_all(
+        reminders = transaction.fetch_all(
                 """
                 select distinct on (invoice_identity_key) *
                 from app.output_invoice_collection_reminders
@@ -51,7 +76,7 @@ class PostgresOutputInvoiceCollectionLifecycleRepository:
                 """,
                 (tenant_id, keys),
             )
-            red_relations = transaction.fetch_all(
+        red_relations = transaction.fetch_all(
                 """
                 select *
                 from app.output_invoice_collection_red_relations
@@ -62,7 +87,7 @@ class PostgresOutputInvoiceCollectionLifecycleRepository:
                 """,
                 (tenant_id, keys),
             )
-            receipts = transaction.fetch_all(
+        receipts = transaction.fetch_all(
                 """
                 select *
                 from app.output_invoice_receipts
@@ -71,7 +96,7 @@ class PostgresOutputInvoiceCollectionLifecycleRepository:
                 order by created_at desc
                 """,
                 (tenant_id, keys),
-            )
+        )
         result = {key: {"override": None, "reminder": None, "redRelations": [], "receipts": []} for key in keys}
         for row in overrides:
             result.setdefault(str(row.get("invoice_identity_key")), {"override": None, "reminder": None, "redRelations": [], "receipts": []})[

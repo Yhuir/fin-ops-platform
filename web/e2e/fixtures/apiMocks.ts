@@ -10,9 +10,7 @@ type WorkbenchHealthMockStatus = "ready" | "stale" | "rebuilding" | "error";
 type WorkbenchRefreshMockStatus = "fresh" | "refreshing" | "stale" | "failed" | "unavailable";
 type WorkbenchPageMockStatus = "fresh" | "refreshing" | "stale";
 type OperationBarrierMockMode = "fresh" | "refreshing" | "blocked";
-type InputInvoiceUsageReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
 type OaPendingPaymentReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
-type OutputInvoiceCollectionReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
 type OutputInvoiceReceiptLifecycleState = "none" | "issued" | "voided" | "reissued";
 type PendingInvoiceReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
 type BankDetailReadModelMockStatus = "fresh" | "refreshing" | "stale" | "schema_mismatch" | "missing";
@@ -104,14 +102,12 @@ type ApiMockOptions = {
   costStatisticsReadModelStatus?: CostStatisticsReadModelMockStatus;
   costStatisticsRelationFanout?: boolean;
   costStatisticsTransactionDetailReadModelStatus?: CostStatisticsReadModelMockStatus;
-  inputInvoiceUsageExportReadModelStatus?: InputInvoiceUsageReadModelMockStatus;
   inputInvoiceUsageExportRowLimitError?: boolean;
   inputInvoiceUsageFilterSortRows?: boolean;
   inputInvoiceUsagePaymentRulesSaveFlow?: boolean;
-  inputInvoiceUsageReadModelStatus?: InputInvoiceUsageReadModelMockStatus;
   inputInvoiceUsageRowsFailOnce?: boolean;
   inputInvoiceUsageRowsFailuresBeforeSuccess?: number;
-  inputInvoiceUsageRelationDetailReadModelStatus?: InputInvoiceUsageReadModelMockStatus;
+  inputInvoiceUsageRelationDetailList?: boolean;
   inputInvoiceUsageRelationFanout?: boolean;
   oaPendingPaymentBankLinkDelayMs?: number;
   oaPendingPaymentBankLinkError?: boolean;
@@ -140,7 +136,6 @@ type ApiMockOptions = {
   outputInvoiceCollectionStatusFailOnce?: boolean;
   outputInvoiceCollectionStatusFailuresBeforeSuccess?: number;
   outputInvoiceDownstreamFanout?: boolean;
-  outputInvoiceCollectionReadModelStatus?: OutputInvoiceCollectionReadModelMockStatus;
   outputInvoiceRedRelationCandidate?: boolean;
   pendingInvoiceAttachExistingBatchRows?: boolean;
   pendingInvoiceAttachExistingConfirmFailOnce?: boolean;
@@ -2885,27 +2880,11 @@ function inputInvoiceUsageWorkbenchRelationRow(relationConfirmed: boolean) {
 function inputInvoiceUsageRowsPayload(
   relationConfirmed = false,
   includeWorkbenchRelationEvidence = false,
-  readModelStatus: InputInvoiceUsageReadModelMockStatus = "fresh",
   includeRelationDetailList = false,
   paymentRulesSaved = false,
   paymentRulesSaveFlow = false,
   includeInvoiceImportRows = false,
 ) {
-  if (readModelStatus !== "fresh") {
-    return {
-      rows: [],
-      pagination: { page: 1, page_size: 20, total: 0 },
-      filter_config: [
-        { field: "seller_name", label: "销方名称", mode: "enum_multi", sortable: true, operators: ["in", "contains"] },
-        { field: "payment_status", label: "支付状态", mode: "enum_multi", sortable: true, operators: ["in"] },
-        { field: "oa_applicant", label: "OA申请人", mode: "enum_multi", sortable: true, operators: ["in"] },
-      ],
-      read_model_status: "refreshing",
-      read_model_scope_key: "all",
-      read_model_stale_reasons: [`input_invoice_usage_${readModelStatus}`],
-      refresh_enqueued: true,
-    };
-  }
   const rows = [
     ...(includeWorkbenchRelationEvidence ? [inputInvoiceUsageWorkbenchRelationRow(relationConfirmed)] : []),
     ...(includeInvoiceImportRows
@@ -3051,8 +3030,7 @@ function inputInvoiceUsageRowsPayload(
       { field: "payment_status", label: "支付状态", mode: "enum_multi", sortable: true, operators: ["in"] },
       { field: "oa_applicant", label: "OA申请人", mode: "enum_multi", sortable: true, operators: ["in"] },
     ],
-    read_model_status: "fresh",
-    read_model_scope_key: "all",
+    filter_options: inputInvoiceUsageFilterOptionsPayload().fields,
   };
 }
 
@@ -3414,8 +3392,6 @@ function inputInvoiceUsageFilterSortOptionsPayload() {
       ...config,
       options: inputInvoiceUsageOptionsForRows(rows, config.field),
     })),
-    read_model_status: "fresh",
-    read_model_scope_key: "all",
   };
 }
 
@@ -3429,21 +3405,11 @@ function inputInvoiceUsageFilterSortRowsPayload(url?: URL) {
     rows: filteredRows.slice(offset, offset + pageSize),
     pagination: { page, page_size: pageSize, total: filteredRows.length },
     filter_config: inputInvoiceUsageFilterConfig(),
-    read_model_status: "fresh",
-    read_model_scope_key: "all",
+    filter_options: inputInvoiceUsageFilterSortOptionsPayload().fields,
   };
 }
 
-function inputInvoiceUsageFilterOptionsPayload(readModelStatus: InputInvoiceUsageReadModelMockStatus = "fresh") {
-  if (readModelStatus !== "fresh") {
-    return {
-      fields: [],
-      read_model_status: "refreshing",
-      read_model_scope_key: "all",
-      read_model_stale_reasons: [`input_invoice_usage_${readModelStatus}`],
-      refresh_enqueued: true,
-    };
-  }
+function inputInvoiceUsageFilterOptionsPayload() {
   return {
     fields: [
       {
@@ -3471,32 +3437,11 @@ function inputInvoiceUsageFilterOptionsPayload(readModelStatus: InputInvoiceUsag
         options: [{ value: "陈秀云", label: "陈秀云", count: 1 }],
       },
     ],
-    read_model_status: "fresh",
-    read_model_scope_key: "all",
   };
 }
 
-function inputInvoiceUsageRelationDetailPayload(
-  kind: string,
-  readModelStatus: InputInvoiceUsageReadModelMockStatus = "fresh",
-) {
+function inputInvoiceUsageRelationDetailPayload(kind: string) {
   const relationLabel = kind === "bank" ? "银行流水" : kind === "invoice" ? "发票" : "OA";
-  if (readModelStatus !== "fresh") {
-    return {
-      row_id: "input-usage-row-e2e-001",
-      invoice_id: "input-invoice-row-e2e-001",
-      kind,
-      title: `${relationLabel}关联明细`,
-      relation_count: 0,
-      has_multiple: false,
-      summaries: [],
-      sections: [],
-      read_model_status: "refreshing",
-      read_model_scope_key: "all",
-      read_model_stale_reasons: [`input_invoice_usage_relation_detail_${readModelStatus}`],
-      refresh_enqueued: true,
-    };
-  }
   return {
     row_id: "input-usage-row-e2e-001",
     invoice_id: "input-invoice-row-e2e-001",
@@ -3505,25 +3450,10 @@ function inputInvoiceUsageRelationDetailPayload(
     relation_count: 2,
     has_multiple: true,
     summaries: ["陈秀云 88.00", "刘际涛 100.00"],
-    read_model_status: "fresh",
-    read_model_scope_key: "all",
   };
 }
 
-function inputInvoiceUsageExportPreviewPayload(readModelStatus: InputInvoiceUsageReadModelMockStatus = "fresh") {
-  if (readModelStatus !== "fresh") {
-    return {
-      file_name: "input-invoice-usage.xlsx",
-      row_count: 0,
-      scope_label: "当前筛选",
-      columns: [],
-      sample_rows: [],
-      read_model_status: "refreshing",
-      readModelStatus: "refreshing",
-      message: "进项发票使用情况数据正在刷新，请稍后重试导出。",
-      refresh_enqueued: true,
-    };
-  }
+function inputInvoiceUsageExportPreviewPayload() {
   return {
     file_name: "input-invoice-usage.xlsx",
     row_count: 1,
@@ -3552,7 +3482,6 @@ function inputInvoiceUsageExportPreviewPayload(readModelStatus: InputInvoiceUsag
         关系状态: "linked",
       },
     ],
-    read_model_status: "fresh",
   };
 }
 
@@ -5914,37 +5843,9 @@ function outputInvoiceCollectionRowsPayload(
   receiptCreated: boolean,
   redRelationConfirmed = false,
   includeRedRelationCandidate = false,
-  readModelStatus: OutputInvoiceCollectionReadModelMockStatus = "fresh",
   url?: URL,
   includeInvoiceImportRows = false,
 ) {
-  if (readModelStatus !== "fresh") {
-    return {
-      rows: [],
-      summary: {
-        invoice_count: 0,
-        total_with_tax: "0.00",
-        collected_amount: "0.00",
-        pending_amount: "0.00",
-        pending_collection_count: 0,
-        partial_collection_count: 0,
-        receipt_pending_count: 0,
-      },
-      pagination: { page: 1, page_size: 20, total: 0 },
-      filter_config: [
-        { field: "invoice_no", label: "发票号码", mode: "text", sortable: true, operators: ["contains", "equals"] },
-        { field: "collection_status", label: "收款状态", mode: "enum_multi", sortable: true, operators: ["in"] },
-        { field: "receipt_status", label: "收据情况", mode: "enum_multi", sortable: true, operators: ["in"] },
-      ],
-      read_model_status: "refreshing",
-      read_model_scope_key: "2026-05",
-      read_model_stale_reasons: [`output_invoice_collection_${readModelStatus}`],
-      refresh_enqueued: true,
-      generated_at: null,
-      source_version: "output-invoice-collections:e2e-nonfresh",
-    };
-  }
-
   const rows: Array<Record<string, unknown>> = [
     {
       id: "output-collection-row-e2e-001",
@@ -6148,10 +6049,7 @@ function outputInvoiceCollectionRowsPayload(
       { field: "collection_status", label: "收款状态", mode: "enum_multi", sortable: true, operators: ["in"] },
       { field: "receipt_status", label: "收据情况", mode: "enum_multi", sortable: true, operators: ["in"] },
     ],
-    read_model_status: "fresh",
-    read_model_scope_key: "2026-05",
-    generated_at: "2026-06-17T01:00:00Z",
-    source_version: "output-invoice-collections:e2e-v1",
+    filter_options: outputInvoiceCollectionFilterOptionsPayload(statusSaved, receiptCreated).fields,
   };
 }
 
@@ -6249,18 +6147,7 @@ function applyOutputInvoiceCollectionListQuery(rows: Array<Record<string, unknow
 function outputInvoiceCollectionFilterOptionsPayload(
   statusSaved: boolean,
   receiptCreated: boolean,
-  readModelStatus: OutputInvoiceCollectionReadModelMockStatus = "fresh",
 ) {
-  if (readModelStatus !== "fresh") {
-    return {
-      fields: [],
-      read_model_status: "refreshing",
-      read_model_scope_key: "2026-05",
-      read_model_stale_reasons: [`output_invoice_collection_${readModelStatus}`],
-      refresh_enqueued: true,
-    };
-  }
-
   return {
     fields: [
       {
@@ -6300,8 +6187,6 @@ function outputInvoiceCollectionFilterOptionsPayload(
         ],
       },
     ],
-    read_model_status: "fresh",
-    read_model_scope_key: "2026-05",
   };
 }
 
@@ -6336,7 +6221,6 @@ function outputInvoiceCollectionExportPreviewPayload(redRelationConfirmed = fals
         收据状态: "待出收据",
       },
     ],
-    read_model_status: "fresh",
   };
 }
 
@@ -8817,37 +8701,18 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       if (options.inputInvoiceUsageFilterSortRows) {
         return json(route, inputInvoiceUsageFilterSortRowsPayload(url));
       }
-      const readModelStatus = options.inputInvoiceUsageReadModelStatus ?? "fresh";
       return json(route, inputInvoiceUsageRowsPayload(
         relationConfirmed,
         Boolean(options.inputInvoiceUsageRelationFanout),
-        readModelStatus,
-        Boolean(options.inputInvoiceUsageRelationDetailReadModelStatus),
+        Boolean(options.inputInvoiceUsageRelationDetailList),
         inputInvoicePaymentRulesSaved,
         Boolean(options.inputInvoiceUsagePaymentRulesSaveFlow),
         invoiceImportDownstreamConfirmed,
-      ), readModelStatus === "fresh" ? 200 : 202);
-    }
-
-    if (path === "/api/input-invoice-usage/filter-options") {
-      if (options.inputInvoiceUsageFilterSortRows) {
-        return json(route, inputInvoiceUsageFilterSortOptionsPayload());
-      }
-      const readModelStatus = options.inputInvoiceUsageReadModelStatus ?? "fresh";
-      return json(
-        route,
-        inputInvoiceUsageFilterOptionsPayload(readModelStatus),
-        readModelStatus === "fresh" ? 200 : 202,
-      );
+      ));
     }
 
     if (path.startsWith("/api/input-invoice-usage/rows/") && path.endsWith("/relation-details")) {
-      const readModelStatus = options.inputInvoiceUsageRelationDetailReadModelStatus ?? "fresh";
-      return json(
-        route,
-        inputInvoiceUsageRelationDetailPayload(url.searchParams.get("kind") ?? "oa", readModelStatus),
-        readModelStatus === "fresh" ? 200 : 202,
-      );
+      return json(route, inputInvoiceUsageRelationDetailPayload(url.searchParams.get("kind") ?? "oa"));
     }
 
     if (path === "/api/input-invoice-usage/export-preview") {
@@ -8860,27 +8725,10 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           },
         }, 400);
       }
-      const readModelStatus = options.inputInvoiceUsageExportReadModelStatus
-        ?? options.inputInvoiceUsageReadModelStatus
-        ?? "fresh";
-      return json(
-        route,
-        inputInvoiceUsageExportPreviewPayload(readModelStatus),
-        readModelStatus === "fresh" ? 200 : 202,
-      );
+      return json(route, inputInvoiceUsageExportPreviewPayload());
     }
 
     if (path === "/api/input-invoice-usage/export") {
-      const readModelStatus = options.inputInvoiceUsageExportReadModelStatus
-        ?? options.inputInvoiceUsageReadModelStatus
-        ?? "fresh";
-      if (readModelStatus !== "fresh") {
-        return json(route, {
-          read_model_status: "refreshing",
-          readModelStatus: "refreshing",
-          message: "进项发票使用情况数据正在刷新，请稍后重试导出。",
-        }, 202);
-      }
       if (options.inputInvoiceUsageExportRowLimitError) {
         return json(route, {
           error: {
@@ -9371,14 +9219,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           },
         }, 400);
       }
-      const readModelStatus = options.outputInvoiceCollectionReadModelStatus ?? "fresh";
-      if (readModelStatus !== "fresh") {
-        return json(route, {
-          read_model_status: "refreshing",
-          readModelStatus: "refreshing",
-          message: "销项发票收款情况数据正在刷新，请稍后重试导出。",
-        }, 202);
-      }
       return json(route, outputInvoiceCollectionExportPreviewPayload(outputInvoiceRedRelationConfirmed));
     }
 
@@ -9391,15 +9231,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
             details: { total: 20001, limit: 20000 },
           },
         }, 400);
-      }
-      const readModelStatus = options.outputInvoiceCollectionReadModelStatus ?? "fresh";
-      if (readModelStatus !== "fresh") {
-        return json(route, {
-          error: {
-            code: "output_invoice_collection_read_model_refreshing",
-            message: "销项发票收款情况数据正在刷新，请稍后重试导出。",
-          },
-        }, 409);
       }
       return route.fulfill({
         status: 200,
@@ -9419,26 +9250,15 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           message: "销项发票收款情况加载暂时失败，请刷新后重试。",
         }, 503);
       }
-      const readModelStatus = options.outputInvoiceCollectionReadModelStatus ?? "fresh";
       return json(route, outputInvoiceCollectionRowsPayload(
         outputInvoiceStatusSaved,
         outputInvoiceReminderSaved,
         outputInvoiceReceiptState !== "none",
         outputInvoiceRedRelationConfirmed,
         Boolean(options.outputInvoiceRedRelationCandidate || options.outputInvoiceCollectionListInteractions),
-        readModelStatus,
         options.outputInvoiceCollectionListInteractions ? url : undefined,
         invoiceImportDownstreamConfirmed,
-      ), readModelStatus === "fresh" ? 200 : 202);
-    }
-
-    if (path === "/api/output-invoice-collections/filter-options") {
-      const readModelStatus = options.outputInvoiceCollectionReadModelStatus ?? "fresh";
-      return json(
-        route,
-        outputInvoiceCollectionFilterOptionsPayload(outputInvoiceStatusSaved, outputInvoiceReceiptState !== "none", readModelStatus),
-        readModelStatus === "fresh" ? 200 : 202,
-      );
+      ));
     }
 
     if (path === "/api/output-invoice-collections/status-rules") {

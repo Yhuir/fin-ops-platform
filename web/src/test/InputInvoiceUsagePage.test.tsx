@@ -23,6 +23,73 @@ const inputInvoiceUsageSourceFiles = [
   "src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx",
 ] as const;
 
+const inputFilterOptions = [
+  {
+    field: "seller_name",
+    label: "销方名称",
+    mode: "enum_multi",
+    sortable: true,
+    operators: ["in", "contains"],
+    options: [{ value: "云南长文本供应商科技发展有限公司第一分公司", label: "云南长文本供应商科技发展有限公司第一分公司", count: 1 }],
+  },
+  {
+    field: "payment_status",
+    label: "支付状态",
+    mode: "enum_multi",
+    sortable: true,
+    operators: ["in"],
+    options: [{ value: "pending", label: "待处理", count: 1 }],
+  },
+  {
+    field: "oa_applicant",
+    label: "OA申请人",
+    mode: "enum_multi",
+    sortable: true,
+    operators: ["in"],
+    options: [{ value: "樊祖芳", label: "樊祖芳", count: 1 }],
+  },
+  {
+    field: "oa_application_type",
+    label: "类型",
+    mode: "enum_multi",
+    sortable: true,
+    operators: ["in", "equals"],
+    options: [{ value: "支付申请", label: "支付申请", count: 1 }],
+  },
+  {
+    field: "oa_project_name",
+    label: "项目名称",
+    mode: "enum_multi",
+    sortable: true,
+    operators: ["in", "contains"],
+    options: [{ value: "云南省内项目名称很长很长需要换行显示并可展开", label: "云南省内项目名称很长很长需要换行显示并可展开", count: 1 }],
+  },
+  {
+    field: "bank_counterparty_name",
+    label: "对方户名",
+    mode: "enum_multi",
+    sortable: true,
+    operators: ["in", "contains"],
+    options: [{ value: "云南银行交易对方户名很长很长需要换行显示", label: "云南银行交易对方户名很长很长需要换行显示", count: 1 }],
+  },
+  {
+    field: "bank_account",
+    label: "银行账户",
+    mode: "enum_multi",
+    sortable: true,
+    operators: ["in"],
+    options: [{ value: "交通银行 3847", label: "交通银行 3847", count: 1 }],
+  },
+  {
+    field: "bank_direction",
+    label: "收支",
+    mode: "enum_multi",
+    sortable: true,
+    operators: ["in"],
+    options: [{ value: "outflow", label: "支出", count: 1 }],
+  },
+] as const;
+
 function readWebSource(path: string) {
   return readFileSync(resolve(path), "utf8");
 }
@@ -116,7 +183,7 @@ const rowsPayload = {
     oa_reverse_batch_count: 12,
   },
   filterConfig: [],
-  readModelStatus: "fresh",
+  filterOptions: inputFilterOptions,
 };
 
 function installInputInvoiceUsageFetch(
@@ -146,6 +213,7 @@ function installInputInvoiceUsageFetch(
           snapshot_consistency: "repeatable_read_read_only",
           proof_availability: "ready",
           contract_revision: "page-audit-contract.v9",
+          registered_read_model_keys: [],
         },
         summary: {
           blocking_issue_sample_count: 0,
@@ -203,72 +271,7 @@ function installInputInvoiceUsageFetch(
     }
     if (url.pathname === "/api/input-invoice-usage/filter-options") {
       return new Response(JSON.stringify({
-        fields: [
-          {
-            field: "seller_name",
-            label: "销方名称",
-            mode: "enum_multi",
-            sortable: true,
-            operators: ["in", "contains"],
-            options: [{ value: "云南长文本供应商科技发展有限公司第一分公司", label: "云南长文本供应商科技发展有限公司第一分公司", count: 1 }],
-          },
-          {
-            field: "payment_status",
-            label: "支付状态",
-            mode: "enum_multi",
-            sortable: true,
-            operators: ["in"],
-            options: [{ value: "pending", label: "待处理", count: 1 }],
-          },
-          {
-            field: "oa_applicant",
-            label: "OA申请人",
-            mode: "enum_multi",
-            sortable: true,
-            operators: ["in"],
-            options: [{ value: "樊祖芳", label: "樊祖芳", count: 1 }],
-          },
-          {
-            field: "oa_application_type",
-            label: "类型",
-            mode: "enum_multi",
-            sortable: true,
-            operators: ["in", "equals"],
-            options: [{ value: "支付申请", label: "支付申请", count: 1 }],
-          },
-          {
-            field: "oa_project_name",
-            label: "项目名称",
-            mode: "enum_multi",
-            sortable: true,
-            operators: ["in", "contains"],
-            options: [{ value: "云南省内项目名称很长很长需要换行显示并可展开", label: "云南省内项目名称很长很长需要换行显示并可展开", count: 1 }],
-          },
-          {
-            field: "bank_counterparty_name",
-            label: "对方户名",
-            mode: "enum_multi",
-            sortable: true,
-            operators: ["in", "contains"],
-            options: [{ value: "云南银行交易对方户名很长很长需要换行显示", label: "云南银行交易对方户名很长很长需要换行显示", count: 1 }],
-          },
-          {
-            field: "bank_account",
-            label: "银行账户",
-            mode: "enum_multi",
-            sortable: true,
-            operators: ["in"],
-            options: [{ value: "交通银行 3847", label: "交通银行 3847", count: 1 }],
-          },
-          {
-            field: "bank_direction",
-            label: "收支",
-            mode: "enum_multi",
-            sortable: true,
-            operators: ["in"],
-            options: [{ value: "outflow", label: "支出", count: 1 }],
-          },
-        ],
+        fields: inputFilterOptions,
       }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -281,7 +284,6 @@ function installInputInvoiceUsageFetch(
         scope_label: "当前筛选",
         columns: ["序号", "发票号码", "销方名称"],
         sample_rows: [{ "序号": 1, "发票号码": "SD-INV-2026-0001", "销方名称": "云南长文本供应商科技发展有限公司第一分公司" }],
-        readModelStatus: "fresh",
       }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -373,26 +375,6 @@ function installInputInvoiceUsageFetch(
             totalWithTax: "88.00",
           }],
         }],
-      }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-    if (url.pathname === "/api/operation-barrier/status") {
-      return new Response(JSON.stringify({
-        status: "fresh",
-        fresh: true,
-        targets: [{
-          read_model_key: "input_invoice_usage",
-          scope_type: "input_invoice_usage",
-          scope_key: "all",
-          status: "fresh",
-          raw_status: "fresh",
-          fresh: true,
-          blocking: false,
-        }],
-        blocked_targets: [],
-        refreshing_targets: [],
       }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -512,7 +494,7 @@ describe("Input invoice usage page", () => {
     expect(compositeFilter).toContain("grid-template-columns: repeat(2, minmax(160px, 1fr))");
   });
 
-  test("shows refreshing diagnostics instead of a true empty state while read model details stay hidden", async () => {
+  test("renders a direct empty result without filter-options polling", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       if (url.pathname === "/api/input-invoice-usage/rows") {
@@ -520,55 +502,13 @@ describe("Input invoice usage page", () => {
           rows: [],
           pagination: { page: 1, pageSize: 20, total: 0 },
           filterConfig: [],
-          read_model_status: "refreshing",
-        }), {
-          status: 202,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-      if (url.pathname === "/api/input-invoice-usage/filter-options") {
-        return new Response(JSON.stringify({ fields: [], read_model_status: "refreshing" }), {
-          status: 202,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify({}), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderAuthenticatedAppAt("/input-invoice-usage");
-
-    const page = await screen.findByTestId("input-invoice-usage-page");
-    expect(await within(page).findByText("进项发票使用情况数据正在刷新")).toBeInTheDocument();
-    expect(within(page).getByLabelText("进项发票使用情况数据统计")).toHaveTextContent("进项发票—");
-    expect(within(page).getByText("进项发票使用情况读模型不是最新，完成后页面会自动重新加载。")).toBeInTheDocument();
-    expect(within(page).queryByText("当前条件下暂无记录。")).not.toBeInTheDocument();
-    expect(within(page).queryByText("当前条件下没有进项发票使用记录。")).not.toBeInTheDocument();
-  });
-
-  test("treats stale filter options as non-fresh instead of showing a fresh empty state", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      if (url.pathname === "/api/input-invoice-usage/rows") {
-        return new Response(JSON.stringify({
-          rows: [],
-          pagination: { page: 1, pageSize: 20, total: 0 },
-          filterConfig: [],
-          read_model_status: "fresh",
+          filterOptions: [],
+          statistics: {},
         }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
       }
-      if (url.pathname === "/api/input-invoice-usage/filter-options") {
-        return new Response(JSON.stringify({ fields: [], read_model_status: "stale" }), {
-          status: 202,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
       return new Response(JSON.stringify({}), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -579,60 +519,18 @@ describe("Input invoice usage page", () => {
     renderAuthenticatedAppAt("/input-invoice-usage");
 
     const page = await screen.findByTestId("input-invoice-usage-page");
-    expect(await within(page).findByText("进项发票使用情况数据正在刷新")).toBeInTheDocument();
-    expect(within(page).queryByText("当前条件下暂无记录。")).not.toBeInTheDocument();
-    expect(within(page).queryByText("当前条件下没有进项发票使用记录。")).not.toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "筛选内容导出" })).toBeDisabled();
-  });
-
-  test("unmounts the page while away and retries after route remount", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      if (url.pathname === "/api/input-invoice-usage/rows") {
-        return new Response(JSON.stringify({
-          rows: [],
-          pagination: { page: 1, pageSize: 20, total: 0 },
-          filterConfig: [],
-          read_model_status: "refreshing",
-        }), {
-          status: 202,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-      if (url.pathname === "/api/input-invoice-usage/filter-options") {
-        return new Response(JSON.stringify({ fields: [], read_model_status: "refreshing" }), {
-          status: 202,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify({}), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderAuthenticatedAppAt("/input-invoice-usage");
-    const page = await screen.findByTestId("input-invoice-usage-page");
-    expect(await within(page).findByText("进项发票使用情况数据正在刷新")).toBeInTheDocument();
-    expect(within(page).queryByText("当前条件下暂无记录。")).not.toBeInTheDocument();
+    expect(await within(page).findByText("当前条件下暂无记录。")).toBeInTheDocument();
     expect(rowsRequests(fetchMock)).toHaveLength(1);
-
-    fireEvent.click(screen.getByRole("link", { name: "设置" }));
-    expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
-    expect(screen.queryByTestId("input-invoice-usage-page")).not.toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(([input]) =>
+        String(input).includes("/api/input-invoice-usage/filter-options")),
+    ).toBe(false);
     vi.useFakeTimers();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_000);
     });
-
     expect(rowsRequests(fetchMock)).toHaveLength(1);
-
     vi.useRealTimers();
-    fireEvent.click(screen.getByRole("link", { name: "进项发票使用情况" }));
-    expect(await screen.findByTestId("input-invoice-usage-page")).toBeInTheDocument();
-
-    expect(rowsRequests(fetchMock).length).toBeGreaterThan(1);
   });
 
   test("keeps page-owned statistics stable when filters change without a title-total request", async () => {

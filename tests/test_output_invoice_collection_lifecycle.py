@@ -37,7 +37,7 @@ class EmptyPostgresConnection:
 
 
 class OutputInvoiceCollectionLifecycleTests(unittest.TestCase):
-    def test_manual_status_and_reminder_overlay_rows_and_enqueue_month_scope(self) -> None:
+    def test_manual_status_and_reminder_overlay_rows_without_refresh_targets(self) -> None:
         repository = InMemoryOutputInvoiceCollectionLifecycleRepository()
         queue = RecordingRefreshQueue()
         invoice = self._invoice("out-override", "1001", "客户A", total_with_tax="100.00")
@@ -45,7 +45,7 @@ class OutputInvoiceCollectionLifecycleTests(unittest.TestCase):
         row = query.list_rows()["rows"][0]
         lifecycle = OutputInvoiceCollectionLifecycleService(
             repository=repository,
-            row_provider=lambda row_id: query.row_by_id(row_id),
+            row_provider=lambda row_id, tenant_id: query.row_by_id(row_id, tenant_id=tenant_id),
         )
 
         status_result = lifecycle.set_collection_status(
@@ -67,22 +67,10 @@ class OutputInvoiceCollectionLifecycleTests(unittest.TestCase):
         )
 
         refreshed_row = query.list_rows()["rows"][0]
-        expected_freshness = {
-            "affected_scope_keys": ["2026-05"],
-            "read_model_scope_keys": ["2026-05"],
-            "freshness_targets": [],
-            "operation_barrier_targets": [],
-        }
         self.assertEqual(status_result["override"]["version"], 1)
-        self.assertEqual(
-            {key: status_result[key] for key in expected_freshness},
-            expected_freshness,
-        )
+        self.assertEqual(set(status_result), {"override"})
         self.assertEqual(reminder_result["reminder"]["status"], "active")
-        self.assertEqual(
-            {key: reminder_result[key] for key in expected_freshness},
-            expected_freshness,
-        )
+        self.assertEqual(set(reminder_result), {"reminder"})
         self.assertEqual(refreshed_row["collectionStatus"]["code"], "pending_red_invoice")
         self.assertEqual(refreshed_row["collectionStatus"]["manualOverride"]["note"], "客户确认需要冲红")
         self.assertEqual(refreshed_row["collectionStatus"]["expectedCollectionDate"], "2026-06-20")
@@ -106,11 +94,11 @@ class OutputInvoiceCollectionLifecycleTests(unittest.TestCase):
         row = query.list_rows()["rows"][0]
         lifecycle = OutputInvoiceCollectionLifecycleService(
             repository=repository,
-            row_provider=lambda row_id: query.row_by_id(row_id, tenant_id="tenant-a"),
+            row_provider=lambda row_id, tenant_id: query.row_by_id(row_id, tenant_id=tenant_id),
         )
         receipts = OutputInvoiceCollectionReceiptService(
             repository=repository,
-            row_provider=lambda row_id: query.row_by_id(row_id, tenant_id="tenant-a"),
+            row_provider=lambda row_id, tenant_id: query.row_by_id(row_id, tenant_id=tenant_id),
         )
 
         lifecycle.set_collection_status(
@@ -146,7 +134,7 @@ class OutputInvoiceCollectionLifecycleTests(unittest.TestCase):
         row = query.list_rows()["rows"][0]
         lifecycle = OutputInvoiceCollectionLifecycleService(
             repository=repository,
-            row_provider=lambda row_id: query.row_by_id(row_id),
+            row_provider=lambda row_id, tenant_id: query.row_by_id(row_id, tenant_id=tenant_id),
         )
 
         result = lifecycle.confirm_red_invoice_relation(
@@ -198,7 +186,7 @@ class OutputInvoiceCollectionLifecycleTests(unittest.TestCase):
         row = query.list_rows()["rows"][0]
         receipts = OutputInvoiceCollectionReceiptService(
             repository=repository,
-            row_provider=lambda row_id: query.row_by_id(row_id),
+            row_provider=lambda row_id, tenant_id: query.row_by_id(row_id, tenant_id=tenant_id),
         )
 
         first = receipts.create_receipt(
@@ -217,20 +205,12 @@ class OutputInvoiceCollectionLifecycleTests(unittest.TestCase):
         reissued = receipts.reissue_receipt(first["receipt"]["id"], {"reason": "重开测试"}, actor_id="tester", tenant_id="default")
 
         history = query.receipt_history(invoice_id="out-receipt")
-        expected_freshness = {
-            "affected_scope_keys": ["2026-05"],
-            "read_model_scope_keys": ["2026-05"],
-            "freshness_targets": [],
-            "operation_barrier_targets": [],
-        }
         self.assertEqual(first["receipt"]["id"], replay["receipt"]["id"])
         self.assertEqual(first["receipt"]["receiptNo"], replay["receipt"]["receiptNo"])
-        self.assertEqual({key: first[key] for key in expected_freshness}, expected_freshness)
-        self.assertEqual({key: replay[key] for key in expected_freshness}, expected_freshness)
+        self.assertEqual(set(first), {"receipt"})
+        self.assertEqual(set(replay), {"receipt"})
         self.assertEqual(voided["receipt"]["status"], "voided")
-        self.assertEqual({key: voided[key] for key in expected_freshness}, expected_freshness)
         self.assertEqual(reissued["receipt"]["status"], "issued")
-        self.assertEqual({key: reissued[key] for key in expected_freshness}, expected_freshness)
         self.assertNotEqual(reissued["receipt"]["id"], first["receipt"]["id"])
         self.assertNotEqual(reissued["receipt"]["receiptNo"], first["receipt"]["receiptNo"])
         self.assertEqual(reissued["receipt"]["reissuedFromReceiptId"], first["receipt"]["id"])
@@ -272,7 +252,7 @@ class OutputInvoiceCollectionLifecycleTests(unittest.TestCase):
         rows_by_invoice_id = {str(row["invoice"]["id"]): row for row in query.list_rows(page_size=100)["rows"]}
         receipts = OutputInvoiceCollectionReceiptService(
             repository=repository,
-            row_provider=lambda row_id: query.row_by_id(row_id),
+            row_provider=lambda row_id, tenant_id: query.row_by_id(row_id, tenant_id=tenant_id),
         )
 
         def create_for(invoice_id: str) -> str:

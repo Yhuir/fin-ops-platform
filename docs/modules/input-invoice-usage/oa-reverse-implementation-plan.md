@@ -1,5 +1,7 @@
 # 进项发票反提 OA 闭环实现计划
 
+> 历史实施计划，已完成；其中分支、read-model 和执行步骤不再是当前操作合同。当前事实以本模块 `README.md`、`boundary-io.md`、`state-machine.md` 和 `tests.md` 为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 完成 `进项发票使用情况` 页面 `以发票反提 OA` 的生产级闭环：管理员维护目标 OA 申请人凭据，操作人直接创建 OA 暂存草稿，用户手动提交 OA 后在 FinOps 确认 `已提交 OA` 或 `未提交 OA`，并提供 `待处理 | 已提交` 视图。

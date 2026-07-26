@@ -6,14 +6,8 @@ from urllib.parse import unquote
 
 from fin_ops_platform.app.auth import OARequestSession, actor_id_for_session, tenant_id_for_session
 from fin_ops_platform.services.output_invoice_collection_lifecycle_service import OutputInvoiceCollectionLifecycleService
-from fin_ops_platform.services.output_invoice_collection_read_application_service import (
-    OutputInvoiceCollectionReadApplicationService,
-    SqlAllRowsProvider,
-    SqlRelationDetailsProvider,
-    SqlRowsProvider,
-)
 from fin_ops_platform.services.output_invoice_collection_receipt_service import OutputInvoiceCollectionReceiptService
-from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionQueryService, OutputInvoiceCollectionError
+from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionError
 
 
 ReadSessionResolver = Callable[[dict[str, str] | None], tuple[OARequestSession | None, Any | None]]
@@ -27,14 +21,9 @@ class OutputInvoiceCollectionApiRoutes:
     def __init__(
         self,
         *,
-        query_service: OutputInvoiceCollectionQueryService,
+        query_service: Any,
         lifecycle_service: OutputInvoiceCollectionLifecycleService,
         receipt_service: OutputInvoiceCollectionReceiptService,
-        read_service: OutputInvoiceCollectionReadApplicationService | None = None,
-        sql_rows_provider: SqlRowsProvider | None = None,
-        sql_all_rows_provider: SqlAllRowsProvider | None = None,
-        sql_relation_details_provider: SqlRelationDetailsProvider | None = None,
-        allow_live_fallback: bool = True,
         resolve_read_session: ReadSessionResolver | None = None,
         json_response: JsonResponse | None = None,
         xlsx_response: XlsxResponse | None = None,
@@ -44,13 +33,6 @@ class OutputInvoiceCollectionApiRoutes:
         self._query_service = query_service
         self._lifecycle_service = lifecycle_service
         self._receipt_service = receipt_service
-        self._read_service = read_service or OutputInvoiceCollectionReadApplicationService(
-            query_service=query_service,
-            sql_rows_provider=sql_rows_provider,
-            sql_all_rows_provider=sql_all_rows_provider,
-            sql_relation_details_provider=sql_relation_details_provider,
-            allow_live_fallback=allow_live_fallback,
-        )
         self._resolve_read_session = resolve_read_session
         self._json_response = json_response
         self._xlsx_response = xlsx_response
@@ -200,21 +182,24 @@ class OutputInvoiceCollectionApiRoutes:
 
     def rows(self, query: dict[str, list[str]], *, session: OARequestSession | None = None) -> tuple[HTTPStatus, dict[str, Any]]:
         tenant_id = _tenant_id(session)
-        payload = self._read_service.rows(query, tenant_id=tenant_id)
-        return _read_status(payload), payload
+        return HTTPStatus.OK, self._query_service.rows(query, tenant_id=tenant_id)
 
     def filter_options(self, query: dict[str, list[str]], *, session: OARequestSession | None = None) -> tuple[HTTPStatus, dict[str, Any]]:
         tenant_id = _tenant_id(session)
-        payload = self._read_service.filter_options(query, tenant_id=tenant_id)
-        return _read_status(payload), payload
+        return HTTPStatus.OK, self._query_service.filter_options(
+            query,
+            tenant_id=tenant_id,
+        )
 
     def export_preview(self, query: dict[str, list[str]], *, session: OARequestSession | None = None) -> tuple[HTTPStatus, dict[str, Any]]:
         tenant_id = _tenant_id(session)
-        payload = self._read_service.export_preview(query, tenant_id=tenant_id)
-        return _read_status(payload), payload
+        return HTTPStatus.OK, self._query_service.export_preview(
+            query,
+            tenant_id=tenant_id,
+        )
 
     def export(self, query: dict[str, list[str]], *, session: OARequestSession | None = None) -> tuple[str, bytes]:
-        return self._read_service.export(query, tenant_id=_tenant_id(session))
+        return self._query_service.export(query, tenant_id=_tenant_id(session))
 
     def status_rules(self, *, session: OARequestSession | None = None) -> dict[str, Any]:
         payload = self._query_service.status_rules()
@@ -225,10 +210,16 @@ class OutputInvoiceCollectionApiRoutes:
         return payload
 
     def invoice_detail(self, invoice_id: str, *, session: OARequestSession | None = None) -> dict[str, Any]:
-        return self._query_service.invoice_detail(invoice_id)
+        return self._query_service.invoice_detail(
+            invoice_id,
+            tenant_id=_tenant_id(session),
+        )
 
     def bank_transaction_detail(self, bank_transaction_id: str, *, session: OARequestSession | None = None) -> dict[str, Any]:
-        return self._query_service.bank_transaction_detail(bank_transaction_id)
+        return self._query_service.bank_transaction_detail(
+            bank_transaction_id,
+            tenant_id=_tenant_id(session),
+        )
 
     def relation_details(
         self,
@@ -237,12 +228,20 @@ class OutputInvoiceCollectionApiRoutes:
         *,
         session: OARequestSession | None = None,
     ) -> dict[str, Any]:
-        return self._read_service.relation_details(row_id, query)
+        return self._query_service.relation_details(
+            row_id,
+            query,
+            tenant_id=_tenant_id(session),
+        )
 
     def receipt_preview(self, payload: dict[str, Any], *, session: OARequestSession | None = None) -> dict[str, Any]:
         row_id = str(payload.get("rowId") or payload.get("row_id") or "").strip()
         if row_id:
-            return self._receipt_service.preview(row_id, payload)
+            return self._receipt_service.preview(
+                row_id,
+                payload,
+                tenant_id=_tenant_id(session),
+            )
         return self._query_service.receipt_preview(payload, tenant_id=_tenant_id(session))
 
     def receipt_history(self, query: dict[str, list[str]], *, session: OARequestSession | None = None) -> dict[str, Any]:
@@ -439,8 +438,7 @@ class OutputInvoiceCollectionApiRoutes:
             payload = self.relation_details(row_id, query, session=session)
         except OutputInvoiceCollectionError as exc:
             return self._error(exc)
-        status_code = HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
-        return self._json(status_code, payload)
+        return self._json(HTTPStatus.OK, payload)
 
     def _json_body_read(
         self,
@@ -532,7 +530,3 @@ def _trace_id(headers: dict[str, str] | None) -> str | None:
 
 def _idempotency_key(headers: dict[str, str] | None) -> str | None:
     return (headers or {}).get("idempotency-key") or (headers or {}).get("Idempotency-Key")
-
-
-def _read_status(payload: dict[str, Any]) -> HTTPStatus:
-    return HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" else HTTPStatus.OK

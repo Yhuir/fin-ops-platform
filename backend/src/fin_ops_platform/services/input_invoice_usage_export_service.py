@@ -44,17 +44,20 @@ class InputInvoiceUsageExportError(ValueError):
         self,
         error_code: str,
         message: str,
-        *,
-        refresh_payload: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(message)
         self.error_code = error_code
-        self.refresh_payload = refresh_payload
 
 
 class InputInvoiceUsageExportService:
-    def __init__(self, *, row_page_loader: Callable[..., dict[str, Any] | None]) -> None:
+    def __init__(
+        self,
+        *,
+        row_page_loader: Callable[..., dict[str, Any] | None],
+        row_export_loader: Callable[..., dict[str, Any]] | None = None,
+    ) -> None:
         self._row_page_loader = row_page_loader
+        self._row_export_loader = row_export_loader
 
     def export_preview(
         self,
@@ -67,6 +70,7 @@ class InputInvoiceUsageExportService:
         sort_field: str | None = None,
         sort_direction: str | None = None,
         today: date | None = None,
+        tenant_id: str = "default",
     ) -> dict[str, Any]:
         collection = self._collect_rows(
             month=month,
@@ -76,10 +80,8 @@ class InputInvoiceUsageExportService:
             filters=filters,
             sort_field=sort_field,
             sort_direction=sort_direction,
-            allow_refreshing=True,
+            tenant_id=tenant_id,
         )
-        if collection.get("refreshing"):
-            return self._refreshing_preview(collection["refresh_payload"])
         rows = [self._formal_row(index, row) for index, row in enumerate(collection["rows"], start=1)]
         return {
             "file_name": self._filename(today=today),
@@ -89,9 +91,6 @@ class InputInvoiceUsageExportService:
             "sample_rows": rows[:20],
             "rows": rows[:20],
             "pagination": {"preview_count": min(len(rows), 20), "total": len(rows), "limit": 20},
-            "readModelStatus": "fresh",
-            "read_model_status": "fresh",
-            "read_model_scope_key": collection.get("read_model_scope_key") or "",
         }
 
     def export(
@@ -105,6 +104,7 @@ class InputInvoiceUsageExportService:
         sort_field: str | None = None,
         sort_direction: str | None = None,
         today: date | None = None,
+        tenant_id: str = "default",
     ) -> tuple[str, bytes]:
         collection = self._collect_rows(
             month=month,
@@ -114,7 +114,7 @@ class InputInvoiceUsageExportService:
             filters=filters,
             sort_field=sort_field,
             sort_direction=sort_direction,
-            allow_refreshing=False,
+            tenant_id=tenant_id,
         )
         rows = [self._formal_row(index, row) for index, row in enumerate(collection["rows"], start=1)]
         workbook = Workbook()
@@ -143,12 +143,41 @@ class InputInvoiceUsageExportService:
         filters: str | list[dict[str, Any]] | None,
         sort_field: str | None,
         sort_direction: str | None,
-        allow_refreshing: bool,
+        tenant_id: str,
     ) -> dict[str, Any]:
+        if self._row_export_loader is not None:
+            payload = self._row_export_loader(
+                month=month,
+                keyword=keyword,
+                invoice_date_from=invoice_date_from,
+                invoice_date_to=invoice_date_to,
+                filters=filters,
+                sort_field=sort_field or "invoice_date",
+                sort_direction=sort_direction or "desc",
+                limit=INPUT_INVOICE_USAGE_EXPORT_ROW_LIMIT + 1,
+                tenant_id=tenant_id,
+            )
+            pagination = (
+                payload.get("pagination")
+                if isinstance(payload.get("pagination"), dict)
+                else {}
+            )
+            total = self._int(pagination.get("total"), len(payload.get("rows") or []))
+            if total > INPUT_INVOICE_USAGE_EXPORT_ROW_LIMIT:
+                raise InputInvoiceUsageExportError(
+                    "input_invoice_usage_export_row_limit_exceeded",
+                    f"当前筛选命中 {total} 行，超过 {INPUT_INVOICE_USAGE_EXPORT_ROW_LIMIT} 行导出上限，请缩小筛选范围。",
+                )
+            return {
+                "rows": [
+                    dict(row)
+                    for row in list(payload.get("rows") or [])
+                    if isinstance(row, dict)
+                ][:total]
+            }
         rows: list[dict[str, Any]] = []
         page = 1
         total: int | None = None
-        read_model_scope_key = ""
         while total is None or len(rows) < total:
             payload = self._row_page_loader(
                 month=month,
@@ -161,23 +190,13 @@ class InputInvoiceUsageExportService:
                 page=page,
                 page_size=INPUT_INVOICE_USAGE_EXPORT_PAGE_SIZE,
                 include_statistics=False,
+                tenant_id=tenant_id,
             )
             if not isinstance(payload, dict):
                 raise InputInvoiceUsageExportError(
-                    "input_invoice_usage_export_read_model_unavailable",
-                    "进项发票使用情况读模型不可用，请先刷新读模型。",
+                    "input_invoice_usage_export_unavailable",
+                    "进项发票使用情况查询不可用。",
                 )
-            status = self._read_model_status(payload)
-            if status != "fresh":
-                refresh_payload = self._normalize_refresh_payload(payload)
-                if allow_refreshing:
-                    return {"refreshing": True, "refresh_payload": refresh_payload}
-                raise InputInvoiceUsageExportError(
-                    "input_invoice_usage_export_read_model_refreshing",
-                    "进项发票使用情况读模型正在刷新，请稍后再导出。",
-                    refresh_payload=refresh_payload,
-                )
-            read_model_scope_key = self._text(payload.get("read_model_scope_key") or payload.get("readModelScopeKey"))
             pagination = payload.get("pagination") if isinstance(payload.get("pagination"), dict) else {}
             total = self._int(pagination.get("total"), len(payload.get("rows") or []))
             if total > INPUT_INVOICE_USAGE_EXPORT_ROW_LIMIT:
@@ -192,8 +211,6 @@ class InputInvoiceUsageExportService:
             page += 1
         return {
             "rows": rows[: total or len(rows)],
-            "read_model_scope_key": read_model_scope_key,
-            "refreshing": False,
         }
 
     @classmethod
@@ -235,29 +252,6 @@ class InputInvoiceUsageExportService:
     @staticmethod
     def _filename(*, today: date | None = None) -> str:
         return f"进项发票使用情况-{(today or date.today()).isoformat()}.xlsx"
-
-    @classmethod
-    def _normalize_refresh_payload(cls, payload: dict[str, Any]) -> dict[str, Any]:
-        normalized = dict(payload)
-        normalized["readModelStatus"] = "refreshing"
-        normalized["read_model_status"] = "refreshing"
-        normalized.setdefault("row_count", 0)
-        normalized.setdefault("columns", list(INPUT_INVOICE_USAGE_EXPORT_COLUMNS))
-        normalized.setdefault("sample_rows", [])
-        normalized.setdefault("message", "进项发票使用情况读模型正在刷新，请稍后再试。")
-        return normalized
-
-    @classmethod
-    def _refreshing_preview(cls, payload: dict[str, Any]) -> dict[str, Any]:
-        normalized = cls._normalize_refresh_payload(payload)
-        normalized.setdefault("file_name", cls._filename())
-        normalized.setdefault("scope_label", "当前筛选")
-        return normalized
-
-    @classmethod
-    def _read_model_status(cls, payload: dict[str, Any]) -> str:
-        status = cls._text(payload.get("read_model_status") or payload.get("readModelStatus") or payload.get("status"))
-        return status or "fresh"
 
     @staticmethod
     def _mapping(value: Any) -> dict[str, Any]:

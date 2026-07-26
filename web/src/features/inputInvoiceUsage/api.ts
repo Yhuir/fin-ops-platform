@@ -320,8 +320,9 @@ function mapRowsResponse(payload: unknown): InputInvoiceUsageRowsResponse {
         operators: arrayValue(config.operators).map(stringValue) as InputInvoiceUsageRowsResponse["filterConfig"][number]["operators"],
       };
     }),
-    readModelStatus: stringValue(camelOrSnake(raw, "readModelStatus", "read_model_status")),
-    readModelScopeKey: stringValue(camelOrSnake(raw, "readModelScopeKey", "read_model_scope_key")),
+    filterOptions: mapFilterOptionsResponse({
+      fields: camelOrSnake(raw, "filterOptions", "filter_options"),
+    }).fields,
   };
 }
 
@@ -494,16 +495,6 @@ function mapRelationDetailResponse(payload: unknown): InputInvoiceUsageDetailRes
   const raw = objectValue(payload);
   const rawKind = stringValue(raw.kind);
   const kind = rawKind === "bank" ? "银行流水" : rawKind === "invoice" ? "发票" : "OA";
-  const readModelStatus = stringValue(camelOrSnake(raw, "readModelStatus", "read_model_status"));
-  if (readModelStatus && readModelStatus !== "fresh") {
-    return {
-      title: stringValue(raw.title) || `${kind}关联明细`,
-      subtitle: stringValue(camelOrSnake(raw, "rowId", "row_id")),
-      detailAvailable: false,
-      unavailableReason: "进项发票使用情况关联明细正在刷新，完成后请重新打开详情。",
-      sections: [],
-    };
-  }
   const detailSections = mapDetailSections(raw.sections);
   const summaries = arrayValue(raw.summaries);
   const sections: InputInvoiceUsageDetailResponse["sections"] = [
@@ -552,8 +543,6 @@ function mapFilterOptionsResponse(payload: unknown): InputInvoiceUsageFilterOpti
         }),
       };
     }),
-    readModelStatus: stringValue(camelOrSnake(raw, "readModelStatus", "read_model_status")),
-    readModelScopeKey: stringValue(camelOrSnake(raw, "readModelScopeKey", "read_model_scope_key")),
   };
 }
 
@@ -818,7 +807,7 @@ function parseContentDispositionFileName(contentDisposition: string | null) {
 async function requestExportBlob(url: string, init: RequestInit = {}): Promise<InputInvoiceUsageExportDownload> {
   const response = await apiFetch(url, init);
   const contentType = response.headers?.get?.("Content-Type") ?? "";
-  if (!response.ok || response.status === 202) {
+  if (!response.ok) {
     const rawText = await response.text();
     let message = rawText || "导出请求失败";
     try {
@@ -834,7 +823,7 @@ async function requestExportBlob(url: string, init: RequestInit = {}): Promise<I
     let message = rawText || "导出接口返回了非 xlsx 响应。";
     try {
       const payload = JSON.parse(rawText) as { message?: string };
-      message = payload.message || "读模型正在刷新，请稍后再导出。";
+      message = payload.message || "导出接口返回了非 xlsx 响应。";
     } catch {
       // Keep raw text.
     }
@@ -863,18 +852,6 @@ export async function fetchInputInvoiceUsageRows(request: FetchRowsRequest): Pro
   return mapRowsResponse(payload);
 }
 
-export async function fetchInputInvoiceUsageFilterOptions(
-  request: Pick<FetchRowsRequest, "keyword" | "invoiceDateFrom" | "invoiceDateTo" | "month" | "filters" | "signal">,
-): Promise<InputInvoiceUsageFilterOptionsResponse> {
-  const params = new URLSearchParams();
-  appendRowsQuery(params, { ...request, page: 1, pageSize: 1, sortField: "", sortDirection: "" });
-  const payload = await apiRequestJson<unknown>(`/api/input-invoice-usage/filter-options?${params.toString()}`, {
-    method: "GET",
-    signal: request.signal,
-  });
-  return mapFilterOptionsResponse(payload);
-}
-
 export async function fetchInputInvoiceUsageExportPreview(request: FetchRowsRequest): Promise<InputInvoiceUsageExportPreview> {
   const payload = await apiRequestJson<unknown>(`/api/input-invoice-usage/export-preview?${buildRowsQuery(request)}`, {
     method: "GET",
@@ -887,7 +864,6 @@ export async function fetchInputInvoiceUsageExportPreview(request: FetchRowsRequ
     scopeLabel: stringValue(camelOrSnake(raw, "scopeLabel", "scope_label")),
     columns: arrayValue(raw.columns).map(stringValue),
     sampleRows: arrayValue(camelOrSnake(raw, "sampleRows", "sample_rows")).map(objectStringMap),
-    readModelStatus: stringValue(camelOrSnake(raw, "readModelStatus", "read_model_status")),
     message: stringValue(raw.message),
   };
 }

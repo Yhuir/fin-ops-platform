@@ -144,12 +144,9 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
 
         payload = service.list_rows()
 
-        self.assertEqual(payload["readModelStatus"], "live_query")
-        self.assertEqual(
-            payload["sourceVersion"],
-            "output-invoice-collections:v6-canonical-invoice-inventory",
-        )
-        self.assertIn("generatedAt", payload)
+        self.assertNotIn("readModelStatus", payload)
+        self.assertNotIn("sourceVersion", payload)
+        self.assertNotIn("generatedAt", payload)
         self.assertEqual(payload["pagination"], {"page": 1, "pageSize": 50, "total": 1})
         row = payload["rows"][0]
         self.assertEqual(row["invoiceId"], "out-line-1")

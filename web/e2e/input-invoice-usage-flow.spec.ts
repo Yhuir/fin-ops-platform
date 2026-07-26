@@ -313,7 +313,7 @@ test.describe("input invoice usage browser flow", () => {
     expect(pageSizeRowsUrl.searchParams.get("sort_direction")).toBe("asc");
 
     expect(api.count("GET /api/input-invoice-usage/rows")).toBeGreaterThanOrEqual(4);
-    expect(api.count("GET /api/input-invoice-usage/filter-options")).toBeGreaterThanOrEqual(1);
+    expect(api.count("GET /api/input-invoice-usage/filter-options")).toBe(0);
     expect(mutationCalls(api.calls)).toEqual([]);
     expect(browserErrors).toEqual([]);
   });
@@ -503,92 +503,10 @@ test.describe("input invoice usage browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("shows read model refreshing diagnostics instead of stale rows or a true empty state", async ({ page }, testInfo) => {
+  test("opens +N canonical relation details without mutations", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
-      inputInvoiceUsageReadModelStatus: "stale",
-      sessionMode: "full_access",
-    });
-    const recordLatency = createInputInvoiceUsageLatencyRecorder(page, testInfo);
-
-    await recordLatency({
-      operationId: "input-invoice-usage.open-page-read-model-stale",
-      visibleLabel: "进项发票使用情况",
-      actionType: "navigate",
-    }, async (mark) => {
-      const rowsResponse = waitForInputInvoiceUsageRows(page);
-      await page.goto("/input-invoice-usage");
-      expect((await mark("apiLatencyMs", rowsResponse)).status()).toBe(202);
-      await mark("firstVisibleResponseLatencyMs", expect(page.getByTestId("input-invoice-usage-page")).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(page.getByText("进项发票使用情况数据正在刷新")).toBeVisible());
-    });
-    await expect(page.getByTestId("input-invoice-usage-page")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "进项发票使用情况" })).toBeVisible();
-    await expect(page.getByText("进项发票使用情况数据正在刷新")).toBeVisible();
-    await expect(page.getByText("进项发票使用情况读模型不是最新，完成后页面会自动重新加载。")).toBeVisible();
-    await expect(page.getByText("当前条件下暂无记录。")).toHaveCount(0);
-    await expect(page.getByText("当前条件下没有进项发票使用记录。")).toHaveCount(0);
-    await expect(page.getByText("SD-INV-E2E-0001")).toHaveCount(0);
-    await expect(page.getByText("input_invoice_usage_stale")).toHaveCount(0);
-    await expect(page.getByRole("table", { name: "进项发票使用情况表" })).toHaveCount(0);
-
-    expect(api.count("GET /api/input-invoice-usage/rows")).toBeGreaterThanOrEqual(1);
-    expect(api.count("GET /api/input-invoice-usage/filter-options")).toBeGreaterThanOrEqual(1);
-    expect(mutationCalls(api.calls)).toEqual([]);
-    expect(browserErrors).toEqual([]);
-  });
-
-  test("shows relation detail refreshing diagnostics instead of loading forever", async ({ page }, testInfo) => {
-    const browserErrors = startStrictBrowserErrorCapture(page);
-    const api = await installDeterministicApiMocks(page, {
-      inputInvoiceUsageRelationDetailReadModelStatus: "stale",
-      sessionMode: "full_access",
-    });
-    const recordLatency = createInputInvoiceUsageLatencyRecorder(page, testInfo);
-
-    await recordLatency({
-      operationId: "input-invoice-usage.open-page-relation-detail-stale",
-      visibleLabel: "进项发票使用情况",
-      actionType: "navigate",
-    }, async (mark) => {
-      const rowsResponse = waitForInputInvoiceUsageRows(page);
-      await page.goto("/input-invoice-usage");
-      expect((await mark("apiLatencyMs", rowsResponse)).status()).toBe(200);
-      await mark("finalSettledLatencyMs", expect(page.getByTestId("input-invoice-usage-page")).toBeVisible());
-    });
-    await expect(page.getByRole("table", { name: "进项发票使用情况表" })).toBeVisible();
-    const row = page.getByRole("row", { name: /SD-INV-E2E-0001/ });
-    await expect(row).toBeVisible();
-    await expect(row.getByText("合计 188.00")).toBeVisible();
-
-    const detailDrawer = page.getByRole("dialog", { name: "OA关联明细" });
-    await recordLatency({
-      operationId: "input-invoice-usage.open-relation-detail-stale",
-      visibleLabel: "查看陈秀云关联OA 2 条",
-      actionType: "click",
-    }, async (mark) => {
-      const detailResponsePromise = waitForInputInvoiceUsageRelationDetails(page);
-      await row.getByRole("button", { name: "查看陈秀云关联OA 2 条" }).click();
-      expect((await mark("apiLatencyMs", detailResponsePromise)).status()).toBe(202);
-      await mark("firstVisibleResponseLatencyMs", expect(detailDrawer).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(detailDrawer.getByText("详情暂不可用")).toBeVisible());
-    });
-    await expect(detailDrawer).toBeVisible();
-    await expect(detailDrawer.getByText("详情暂不可用")).toBeVisible();
-    await expect(detailDrawer.getByText("进项发票使用情况关联明细正在刷新，完成后请重新打开详情。")).toBeVisible();
-    await expect(detailDrawer.getByText("正在加载完整详情")).toHaveCount(0);
-    await expect(detailDrawer.getByText("刘际涛 100.00")).toHaveCount(0);
-    await expect(detailDrawer.getByText("input_invoice_usage_relation_detail_stale")).toHaveCount(0);
-
-    expect(api.count("GET /api/input-invoice-usage/rows/input-usage-row-e2e-001/relation-details")).toBe(1);
-    expect(mutationCalls(api.calls)).toEqual([]);
-    expect(browserErrors).toEqual([]);
-  });
-
-  test("opens fresh +N relation details from the row read model without mutations", async ({ page }, testInfo) => {
-    const browserErrors = startStrictBrowserErrorCapture(page);
-    const api = await installDeterministicApiMocks(page, {
-      inputInvoiceUsageRelationDetailReadModelStatus: "fresh",
+      inputInvoiceUsageRelationDetailList: true,
       sessionMode: "full_access",
     });
     const recordLatency = createInputInvoiceUsageLatencyRecorder(page, testInfo);
@@ -775,56 +693,6 @@ test.describe("input invoice usage browser flow", () => {
     await expect(drawer).toBeVisible();
     await expect(drawer.getByRole("alert")).toContainText("进项发票使用情况导出超过 20000 行，请缩小筛选范围后重试。");
     await expect(drawer.getByRole("button", { name: "下载导出" })).toBeDisabled();
-
-    expect(api.count("GET /api/input-invoice-usage/export-preview")).toBe(1);
-    expect(api.count("GET /api/input-invoice-usage/export")).toBe(0);
-    expect(mutationCalls(api.calls)).toEqual([]);
-    expect(browserErrors).toEqual([]);
-  });
-
-  test("keeps export download disabled while the export read model refreshes", async ({ page }, testInfo) => {
-    const browserErrors = startStrictBrowserErrorCapture(page);
-    const api = await installDeterministicApiMocks(page, {
-      inputInvoiceUsageExportReadModelStatus: "stale",
-      sessionMode: "read_export_only",
-    });
-    const recordLatency = createInputInvoiceUsageLatencyRecorder(page, testInfo);
-
-    await recordLatency({
-      operationId: "input-invoice-usage.open-page-export-stale",
-      visibleLabel: "进项发票使用情况",
-      actionType: "navigate",
-    }, async (mark) => {
-      const rowsResponsePromise = waitForInputInvoiceUsageRows(page);
-      await page.goto("/input-invoice-usage");
-      expect((await mark("apiLatencyMs", rowsResponsePromise)).status()).toBe(200);
-      await mark("finalSettledLatencyMs", expect(page.getByTestId("input-invoice-usage-page")).toBeVisible());
-    });
-    await expect(page.getByTestId("input-invoice-usage-page")).toBeVisible();
-    await expect(page.getByRole("table", { name: "进项发票使用情况表" })).toBeVisible();
-
-    let previewResponse: Awaited<ReturnType<typeof waitForInputInvoiceUsageExportPreview>> | undefined;
-    const drawer = page.getByRole("dialog", { name: "筛选内容导出" });
-    await recordLatency({
-      operationId: "input-invoice-usage.open-export-preview-stale",
-      visibleLabel: "筛选内容导出",
-      actionType: "click",
-    }, async (mark) => {
-      const previewResponsePromise = waitForInputInvoiceUsageExportPreview(page);
-      await page.getByRole("button", { name: "筛选内容导出" }).click();
-      previewResponse = await mark("apiLatencyMs", previewResponsePromise);
-      await mark("firstVisibleResponseLatencyMs", expect(drawer).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(drawer.getByText("导出数据准备中，请稍后再试。")).toBeVisible());
-    });
-    if (!previewResponse) {
-      throw new Error("missing stale input invoice usage export preview response");
-    }
-    expect(previewResponse.status()).toBe(202);
-
-    await expect(drawer).toBeVisible();
-    await expect(drawer.getByText("导出数据准备中，请稍后再试。")).toBeVisible();
-    await expect(drawer.getByRole("button", { name: "下载导出" })).toBeDisabled();
-    await expect(drawer.getByText("进项发票使用情况数据正在刷新，请稍后重试导出。")).toHaveCount(0);
 
     expect(api.count("GET /api/input-invoice-usage/export-preview")).toBe(1);
     expect(api.count("GET /api/input-invoice-usage/export")).toBe(0);

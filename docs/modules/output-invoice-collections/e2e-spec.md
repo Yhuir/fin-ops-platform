@@ -4,7 +4,7 @@
 
 ## 模块目标
 
-销项发票收款情况页面用于查看销项发票、收入流水、收款状态、红蓝票关系和正式收据生命周期。页面必须只展示 fresh read model 结果；手动状态、提醒、红蓝票关系和收据写入后必须重新读取后端 rows，不能只靠前端局部状态伪装成功。
+销项发票收款情况页面用于查看销项发票、收入流水、收款状态、红蓝票关系和正式收据生命周期。页面只展示 canonical PostgreSQL direct-read 结果；手动状态、提醒、红蓝票关系和收据写入后必须重新读取后端 rows，不能只靠前端局部状态伪装成功。
 
 ## 用户角色
 
@@ -17,18 +17,18 @@
 
 | Spec ID | 场景 | 优先级 | 验收标准 |
 | --- | --- | --- | --- |
-| `OUT-COLL-E2E-001` | fresh rows/filter/table baseline | P0 | 页面加载 fresh rows，展示发票、收款状态、收入流水、收据状态；首屏 page size 有界，筛选/排序不从当前页伪造全局选项。 |
-| `OUT-COLL-E2E-002` | 手动收款状态/提醒 -> normal GET -> rows fresh | P0 | 保存状态和提醒后命令立即结束，页面重新请求自身 rows，由 fresh gate 按需收敛 exact scope，行状态更新为后端返回结果，drawer 关闭且失败不静默吞掉；状态保存暂时失败时必须保留 drawer、用户输入和原 rows，不触发提醒半提交，重试成功后才刷新 rows；若状态已保存成功但提醒保存暂时失败，必须保留 drawer、提醒输入和原 rows，重试时不得重复提交未改变的状态 payload，提醒成功后才刷新 rows。 |
+| `OUT-COLL-E2E-001` | canonical rows/filter/table baseline | P0 | 页面一次加载 rows/summary/facets，展示发票、收款状态、收入流水、收据状态；首屏 page size 有界，筛选/排序不从当前页伪造全局选项。 |
+| `OUT-COLL-E2E-002` | 手动收款状态/提醒 -> canonical GET | P0 | 保存状态和提醒后命令立即结束，页面重新请求自身 rows 并展示 canonical lifecycle facts；状态保存暂时失败时保留 drawer、用户输入和原 rows，不触发提醒半提交，重试成功后才刷新 rows；若状态已保存成功但提醒保存暂时失败，重试时不得重复提交未改变的状态 payload。 |
 | `OUT-COLL-E2E-003` | 正式收据 preview/create/void/reissue/history | P0 | 预览展示收据信息，创建必须带 idempotency key；创建、作废和重开后重跑当前 rows/history normal GET，访问边界按需收敛；创建暂时失败时必须保留预览 drawer、错误和重试入口，不能提前进入已出收据或读取伪历史；作废/重开暂时失败时必须保留原因弹窗、用户输入和当前 history，不得提前刷新 rows/history。 |
 | `OUT-COLL-E2E-004` | 红蓝票关系 confirm/revoke -> normal GET -> relation overlay | P0 | 选择关联发票并确认后命令不等待页面重建，页面重新读取自身 rows；红蓝票 drawer 的已有依据展示人工关系、来源和证据，撤销后该人工依据消失。 |
-| `OUT-COLL-E2E-005` | read model refreshing/stale | P0 | missing/stale/source mismatch 不显示 stale rows 为 fresh；页面展示 loading/refreshing/empty/error 的用户可理解状态并自动重试。 |
+| `OUT-COLL-E2E-005` | direct-read error recovery | P0 | rows 暂时失败时显示 error、不伪装 empty、不自动 polling；用户刷新后恢复 canonical rows。 |
 | `OUT-COLL-E2E-006` | 权限和 admin-only 设置 | P1 | `read_export_only` 不触发写 API，`admin` 才显示收据编号设置；API 403 不被 UI 当作成功。 |
 | `OUT-COLL-E2E-007` | 导出/download | P1 | 浏览器 download event 成功，字段、筛选、权限和 row-limit 反馈与后端 contract 一致。 |
-| `OUT-COLL-E2E-008` | 下游 relation consumer 访问收敛 | P1 | 红蓝票关系变化后写请求产生零页面 fan-out；销项页自身、成本和搜索等实际 consumer 分别在访问时通过自己的 read model/fresh gate 展示一致结果；税金抵扣不消费 relation，不得发生造数或刷新。 |
+| `OUT-COLL-E2E-008` | 下游 relation consumer 访问收敛 | P1 | 红蓝票关系变化后销项页重跑 canonical GET；成本和搜索等实际 consumer 按自己的读取边界展示一致结果，税金抵扣不消费 relation。 |
 
 ## 不属于本地 deterministic E2E 的风险
 
 - 真实 PostgreSQL 大数据、历史半迁移、EXPLAIN 和锁等待。
-- 真实 RabbitMQ/Redis/systemd worker drain。
+- 下游仍使用 read model 的 consumer，其真实 RabbitMQ/Redis/systemd worker drain。
 - 真实生产下载保存、浏览器 profile 权限和大文件导出性能。
 - 真实税金/成本/search 全量链路需要 staging 或生产前 smoke。

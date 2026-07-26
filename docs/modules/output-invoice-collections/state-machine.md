@@ -1,6 +1,6 @@
 # 销项发票收款情况 状态机
 
-> 修改 `销项发票收款情况` 相关业务状态、UI 状态、read model 状态或 worker 状态前必须读取本文件。当前没有独立状态机时，在对应小节写明“不适用原因”，不要删除文件。
+> 修改 `销项发票收款情况` 相关业务状态、UI 状态或 canonical query/command 状态前必须读取本文件。页面已于 2026-07-27 退出 read model 运行时；历史记录中的 read-model 描述不覆盖当前合同。
 
 ## 业务状态
 
@@ -11,11 +11,11 @@
   - 红蓝票关系：`confirm_red_invoice_relation(...)` 写入 `red_invoice` 或 `blue_invoice` 人工关系；`delete_red_invoice_relation(...)` 撤销关系。
   - 正式收据：`preview -> issued -> voided -> reissued`。创建必须有 idempotency key；history 读取真实 receipt lifecycle facts。
 - 状态事实源：
-  - 销项发票和银行/关系事实来自 import/workbench/read model 上游。
-  - OA、收入流水和关联销项发票项展示来自 `workbench_relation` 统一分发关系；只有 `relationStatus="linked"` 能计入已收款或 confirmed relation 判断。linked relation 下存在多张销项发票时，`output_invoice_collection` 投影为一条收款行，发票金额按全部成员净额汇总，负数/红字发票必须保留在 `invoiceRelations.summaries`。未正式化自动匹配 decision 或历史 `relationStatus="candidate"` 兼容值按未关联处理，不作为第三种收款关系状态。
+  - 销项发票、OA 和银行事实来自 `app.invoices`、`app.oa_applications`、`app.bank_transactions` canonical PostgreSQL snapshot。
+  - 正式关系只来自 `app.workbench_pair_relations status='active'`；active relation 连通 component 下存在多张销项发票时归并为一条净额收款行，负数/红字成员必须保留在 `invoiceRelations.summaries`。未正式化 candidate 不进入页面事实。
   - 收款状态规则来自 `InvoiceLifecyclePolicy` 和 `OutputInvoiceCollectionStatusRuleService`。
   - 手动状态、提醒、红蓝票关系、收据 facts 来自 output invoice collection lifecycle repository。
-  - 页面列表事实来自 SQL read model `output_invoice_collection`，fresh 时叠加 lifecycle facts。
+  - 页面列表、summary、facets 与 lifecycle overlay 在同一个 `REPEATABLE READ READ ONLY` transaction 中读取。
 - 允许流转：
   - 自动状态可被合法手动状态覆盖；清空手动状态后回到 policy 自动判定。
   - reminder 可 create/update/cancel，渠道只允许 `oa`、`email`、`manual`。
@@ -24,18 +24,17 @@
   - issued receipt 可 void；voided receipt 可 reissue；reissue 后不能重复重开同一 receipt。
 - 禁止流转：
   - 不支持的手动收款状态、非法提醒渠道、缺失 related invoice、非法 relation type 必须失败。
-  - stale read model 不能被当作 fresh rows 返回。
+  - 页面不得读取 output collection、Workbench relation 或 invoice lifecycle read model，也不得使用双读/fallback。
   - 缺少 idempotency key 不能创建正式收据。
   - 非 issued receipt 不能 void；非 voided receipt 不能 reissue；已重开 receipt 不能重复 reissue。
   - service 不得绕过 queue gateway/transaction-bound writer 直接写 dirty/outbox。
 
 ## UI 状态
 
-- loading：页面初次挂载时并行加载 rows、filter-options 和 status-rules；loading 期间展示标准页面状态，不保留旧 route snapshot。
-- empty：无业务 rows 时展示标准 empty state；refreshing 技术细节不直接暴露给用户。
-- error：rows/filter-options/detail/drawer 请求失败时展示页面或 drawer 级错误；不静默吞掉提交失败。
-- stale/refreshing：后端返回 `readModelStatus=refreshing` 时页面设置 refreshing；本次访问只在 visible 状态以 250ms、最多 120 次继续 normal GET。fresh、hidden、route unmount、查询变化或 30 秒上限即停止，hidden→visible/focus 不自动恢复；浏览器手动刷新或明确刷新按钮开始新的有界尝试。
-- combined freshness：rows 与 filter-options 并行读取时，页面级 fresh 必须取两者合并结果；任一响应为 stale/missing/schema_mismatch/refreshing/unavailable 时，禁止进入普通 empty state、禁止启用导出，并沿用刷新诊断与重试语义。
+- loading：页面初次挂载时加载 rows；filter options 随 rows 同响应返回，drawer 所需规则按现有入口加载。
+- empty：rows API `200` 且 `pagination.total=0` 时展示标准 empty state。
+- error：rows/detail/drawer 请求失败时展示页面或 drawer 级错误；不静默吞掉提交失败。
+- stale/refreshing/polling：不适用。页面 API 不返回 `readModelStatus`、source version 或 `202 refreshing`，前端不自动轮询；用户刷新只发起一次正常 GET。
 - permission disabled/hidden：
   - 读详情需要 output collection read session 权限。
   - 收款状态、提醒、红蓝票和 receipt mutation 需要 mutation 权限。
@@ -45,28 +44,19 @@
 
 ## Read Model / Worker 状态
 
-- fresh：`read_model.app_status_readiness` 或等价 repository 状态证明 `output_invoice_collection` scope fresh；rows route 返回 `200` 并可叠加 lifecycle overlay。
-- missing/stale/source version mismatch：rows route 返回 `202`、`read_model_status=refreshing`，enqueue `output_invoice_collection` refresh；不得同步 live rebuild。
-- schema stale：SQL payload 缺少 `oa` 或 `invoiceRelations` 等统一关系字段时，视为 schema stale 并 enqueue refresh；旧 read model 不得作为 fresh rows 返回。
-- relation-group projection：linked relation 下多张销项发票是 row ownership 事实，必须先按 relation 归并为单条收款行，再回退到单发票 identity 行；归并行的 `invoiceRelations.totalWithTax`、`invoiceTotal` 和收款状态基于成员净额与 linked 收入流水计算，不能把同一 relation 拆成重复的 364800 行，也不能漏掉负数发票。
-- relation detail unavailable：页面从当前行携带 `month`；生产 PostgreSQL runtime 下缺少 SQL read repository 或 row detail lookup 时，`/rows/{row_id}/relation-details` 返回 `202`、`read_model_status=refreshing` 并只 enqueue 该具体月份。缺少合法月份时 fail closed、零 enqueue；不得使用 `output_invoice_collection:all` 或 live rebuild detail 伪装 fresh。
-- refreshing：dirty/outbox 或 readiness 显示 scope 正在刷新；页面保持 busy/auto retry。
-- failed/unavailable：App Status domain 进入 blocked 或 unavailable；页面不能伪装数据 ready。
-- refresh 触发来源：
-  - 页面 rows/detail/export 访问先比较 source/schema/rule version；只有当前 exact month scope missing/stale/mismatch 时才经 gateway 去重入队。
-  - 发票导入、关系变化、pending invoice rules、手动状态、提醒、红蓝票关系、收据 create/void/reissue 只提交 canonical fact/version，普通写响应的 `freshness_targets` / `operation_barrier_targets` 为空；当前页写成功后重跑 normal GET，其它页面访问或重新激活时独立收敛。
-  - `all` scope 只允许显式维护/修复使用，并由 `InvoiceUsageCollectionReadModelRefreshService` 扩展为月份 shard；普通写不得 fallback `all`。
-- 失败恢复：
-  - 按 `docs/operations/runtime-worker-governance.md` 先确认 `workbench_relation` 和 `invoice_lifecycle` fresh，再重放 `output_invoice_collection`。
-  - outbox/dirty scope 失败必须保留审计，不允许直接 SQL 抹平。
-  - 重放后以 API fresh 和 App Status readiness 为准。
+- 页面运行时：不适用。rows、summary、statistics、facets、详情、导出和 lifecycle overlay 不读取页面/Workbench/invoice-lifecycle read model，不 enqueue refresh，也不等待 worker。
+- relation component：多销项发票按 active relation 连通 component 归并；金额按成员净额计算，红字/负数发票不得丢失，OA/流水按事实 id 去重。
+- 写后收敛：手动状态、提醒、红蓝票关系和收据命令只写 canonical lifecycle/audit/idempotency facts；成功后当前页面重跑正常 GET。
+- 失败：canonical PostgreSQL 查询或 DTO 组装失败时返回结构化错误；不回退旧 projection。
+- 共享遗留：`output_invoice_collection` projection、worker、manifest、scope policy 与 App Status 注册仍可能被全局代码引用，最终删除由主控合并后统一完成。
 
 ## 变更记录
 
-> 2026-07-22 Phase 27 已用“普通写零页面 fan-out、页面访问 exact-scope 收敛”取代此前的写后 freshness target / operation barrier 方案。下方 2026-06/07 记录只用于历史回归溯源，不是当前 writer 合同。
+> 2026-07-27 页面已改为 canonical PostgreSQL 直读；下方 2026-06/07 read-model 记录只用于历史回归溯源，不是当前读写合同。
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-07-27 | 页面迁移为 canonical PostgreSQL 直读 | 删除页面 read-model read application/gate/detail/polling/202 合同；多发票 relation 直接按 active component 净额归并，写后正常 GET | `tests/test_invoice_usage_collection_canonical_query.py`、`tests/test_output_invoice_collection_api.py`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx`、`web/e2e/output-invoice-collections-flow.spec.ts` |
 | 2026-07-07 | 读侧应用服务边界闭环 | 不改变业务/UI/read model/worker 状态；rows/filter-options/export-preview/export/relation detail 的 SQL read model 编排从 route owner 移入 `OutputInvoiceCollectionReadApplicationService`，route 只做 HTTP/session/权限/响应映射 | `tests.test_output_invoice_collection_read_application_service`、`tests.test_output_invoice_collection_api`、`tests.test_read_model_manifest`、`tests.test_read_model_architecture_guards` |
 | 2026-07-01 | linked 多销项发票 relation 归并为单条净额收款行 | 改变 output collection read model row ownership；负数/红字发票进入 `invoiceRelations.summaries`，source version bump 到 `v4-relation-group-rows` | `tests.test_output_invoice_collection_service`、`tests.test_output_invoice_collection_api`、`tests.test_invoice_usage_collection_sql_runtime`、`tests.test_output_invoice_collection_read_model_fresh_gate_service` |
 | 2026-06-24 | 补齐 relation detail 生产 fail-closed | 不改变 relation detail payload shape；生产 SQL runtime 缺 detail repository 时返回 refreshing/enqueue，fresh SQL detail row 直接构造详情，不回退 live query | `tests.test_output_invoice_collection_api`、`tests.test_invoice_usage_collection_sql_runtime`、`tests.test_read_model_manifest` |
