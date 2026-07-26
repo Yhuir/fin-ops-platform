@@ -1816,285 +1816,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         sql_text = " ".join(" ".join(call[1].lower().split()) for call in connection.calls)
         self.assertNotIn("schema_version = %s", sql_text)
 
-    def test_application_cache_key_includes_bank_detail_schema_version(self) -> None:
-        service = BankDetailsApplicationService(
-            app_settings_service=SimpleNamespace(),
-            bank_transaction_category_service=SimpleNamespace(),
-            bank_transaction_auto_category_service=SimpleNamespace(),
-            audit_service=SimpleNamespace(),
-            bank_transaction_category_store=None,
-            bank_detail_sql_read_repository=None,
-            runtime_repositories=SimpleNamespace(),
-            affected_months_provider=lambda _transaction_ids: [],
-            available_month_scope_keys_provider=lambda: ["2026-05"],
-            enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
-        )
-        scope_summary = {
-            "read_model_scope_signatures": {
-                "2026-05": {
-                    "schema_version": BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
-                    "source_versions": {"bank_detail_schema_version": BANK_DETAIL_READ_MODEL_SCHEMA_VERSION},
-                }
-            }
-        }
-
-        cache_key = service._redis_cache_key("transactions", {"page": 1}, scope_summary=scope_summary)
-
-        expected_signature = {
-            "kind": "transactions",
-            "query": {"page": 1},
-            "scope_signatures": scope_summary["read_model_scope_signatures"],
-            "statistics_signature": "missing",
-            "schema": f"bank_detail:v{BANK_DETAIL_READ_MODEL_SCHEMA_VERSION}",
-        }
-        expected_digest = hashlib.sha256(
-            json.dumps(expected_signature, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
-        ).hexdigest()
-        self.assertEqual(cache_key, f"bank_detail:transactions:{expected_digest}")
-
-    def test_application_statistics_refresh_enqueues_only_reported_stale_scopes(self) -> None:
-        class BankDetailRepository:
-            @staticmethod
-            def bank_detail_scope_keys_for_range(**_kwargs: object) -> list[str]:
-                return ["2026-02"]
-
-            @staticmethod
-            def bank_detail_scope_summary(*, scope_keys: list[str]) -> dict[str, object]:
-                signatures = {
-                    scope_key: {
-                        "source_versions": {"bank_auto_tag_rules_version": 1},
-                    }
-                    for scope_key in ("2026-01", "2026-02", "2026-03")
-                }
-                return {
-                    "read_model_status": "fresh",
-                    "read_model_scope_keys": list(scope_keys),
-                    "read_model_scope_signatures": {
-                        "2026-02": signatures["2026-02"]
-                    },
-                    "statistics": None,
-                    "statistics_status": "stale",
-                    "statistics_scope_keys": [
-                        "2026-01",
-                        "2026-02",
-                        "2026-03",
-                    ],
-                    "statistics_refresh_scope_keys": ["2026-02"],
-                    "statistics_scope_signatures": signatures,
-                }
-
-            @staticmethod
-            def list_bank_detail_transactions(**_kwargs: object) -> dict[str, object]:
-                return {
-                    "read_model_status": "fresh",
-                    "rows": [{"id": "txn-1"}],
-                    "category_counts": {"uncategorized": 1},
-                    "pagination": {"page": 1, "page_size": 20, "total": 1},
-                }
-
-        queue = CaptureRuntimeQueueRepository()
-        service = BankDetailsApplicationService(
-            app_settings_service=SimpleNamespace(
-                get_bank_auto_tag_rules_payload=lambda **_kwargs: {
-                    "version": 1,
-                    "active_rules": [],
-                }
-            ),
-            bank_transaction_category_service=SimpleNamespace(),
-            bank_transaction_auto_category_service=SimpleNamespace(),
-            audit_service=SimpleNamespace(),
-            bank_transaction_category_store=None,
-            bank_detail_sql_read_repository=BankDetailRepository(),
-            runtime_repositories=SimpleNamespace(queue_repository=queue),
-            affected_months_provider=lambda _transaction_ids: [],
-            available_month_scope_keys_provider=lambda: ["2026-02"],
-            enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
-        )
-
-        payload = service.transactions_payload(
-            account_key=None,
-            date_from="2026-02-01",
-            date_to="2026-02-28",
-            keyword=None,
-            page=1,
-            page_size=20,
-        )
-
-        self.assertEqual(payload["read_model_status"], "fresh")
-        self.assertEqual(payload["statistics_status"], "stale")
-        self.assertTrue(payload["statistics_refresh_enqueued"])
-        self.assertEqual(
-            [
-                item["scope_key"]
-                for item in queue.enqueued
-                if item.get("scope_type") == "bank_detail"
-            ],
-            ["2026-02"],
-        )
-
-    def test_application_accounts_uses_account_balance_repository_port(self) -> None:
-        class BankDetailRepository:
-            def list_bank_account_balances(self, **_kwargs: object) -> dict[str, object]:
-                raise AssertionError("accounts query should use the account balance repository port")
-
-        class AccountBalanceRepository:
-            def __init__(self) -> None:
-                self.calls: list[dict[str, object]] = []
-
-            def list_bank_account_balances(self, **kwargs: object) -> dict[str, object]:
-                self.calls.append(dict(kwargs))
-                return {
-                    "accounts": [{"account_key": "acct:one"}],
-                    "balance_read_model_status": "fresh",
-                }
-
-        account_balance_repository = AccountBalanceRepository()
-        service = BankDetailsApplicationService(
-            app_settings_service=SimpleNamespace(),
-            bank_transaction_category_service=SimpleNamespace(),
-            bank_transaction_auto_category_service=SimpleNamespace(),
-            audit_service=SimpleNamespace(),
-            bank_transaction_category_store=None,
-            bank_detail_sql_read_repository=BankDetailRepository(),
-            bank_account_balance_read_model_repository=account_balance_repository,
-            runtime_repositories=SimpleNamespace(),
-            affected_months_provider=lambda _transaction_ids: [],
-            available_month_scope_keys_provider=lambda: ["2026-05"],
-            enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
-        )
-
-        payload = service.accounts_payload(date_from="2026-05-01", date_to="2026-05-31")
-
-        self.assertEqual(payload["read_model_status"], "fresh")
-        self.assertEqual(
-            account_balance_repository.calls,
-            [{"date_from": "2026-05-01", "date_to": "2026-05-31"}],
-        )
-
-    def test_application_transactions_trusts_own_canonical_relation_scope_proof(self) -> None:
-        class SqlReadRepository:
-            @staticmethod
-            def bank_detail_scope_keys_for_range(**_kwargs: object) -> list[str]:
-                return ["2026-02", "2026-03"]
-
-            @staticmethod
-            def bank_detail_scope_summary(*, scope_keys: list[str]) -> dict[str, object]:
-                signatures = {
-                    scope_key: {
-                        "source_versions": {"bank_auto_tag_rules_version": 1},
-                    }
-                    for scope_key in scope_keys
-                }
-                return {
-                    "read_model_status": "fresh",
-                    "read_model_scope_keys": list(scope_keys),
-                    "read_model_scope_signatures": signatures,
-                    "statistics_status": "fresh",
-                    "statistics_scope_signatures": signatures,
-                    "statistics_scope_keys": list(scope_keys),
-                    "statistics": _bank_detail_statistics_from_rows([]),
-                }
-
-            @staticmethod
-            def list_bank_detail_transactions(**_kwargs: object) -> dict[str, object]:
-                return {
-                    "read_model_status": "fresh",
-                    "rows": [],
-                    "category_counts": {"uncategorized": 0},
-                    "pagination": {"page": 1, "page_size": 100, "total": 0},
-                }
-
-        service = BankDetailsApplicationService(
-            app_settings_service=SimpleNamespace(
-                get_bank_auto_tag_rules_payload=lambda **_kwargs: {"version": 1, "active_rules": []}
-            ),
-            bank_transaction_category_service=SimpleNamespace(),
-            bank_transaction_auto_category_service=SimpleNamespace(),
-            audit_service=SimpleNamespace(),
-            bank_transaction_category_store=None,
-            bank_detail_sql_read_repository=SqlReadRepository(),
-            runtime_repositories=SimpleNamespace(),
-            affected_months_provider=lambda _transaction_ids: [],
-            available_month_scope_keys_provider=lambda: ["2026-02", "2026-03"],
-            enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
-        )
-
-        payload = service.transactions_payload(
-            account_key=None,
-            date_from=None,
-            date_to=None,
-            keyword=None,
-            page=1,
-            page_size=100,
-        )
-
-        self.assertEqual(payload["read_model_status"], "fresh")
-        self.assertNotIn("read_model_dependency_statuses", payload)
-        self.assertNotIn("read_model_stale_reasons", payload)
-
-    def test_application_transactions_missing_sql_scope_enqueues_refresh_without_legacy_scan(self) -> None:
-        class SqlReadRepository:
-            def __init__(self) -> None:
-                self.scope_key_calls: list[dict[str, object]] = []
-                self.summary_calls: list[list[str]] = []
-
-            def bank_detail_scope_keys_for_range(self, *, date_from: str | None, date_to: str | None) -> list[str]:
-                self.scope_key_calls.append({"date_from": date_from, "date_to": date_to})
-                return ["2026-05"]
-
-            def bank_detail_scope_summary(self, *, scope_keys: list[str]) -> dict[str, object]:
-                self.summary_calls.append(list(scope_keys))
-                return {
-                    "read_model_status": "missing",
-                    "read_model_scope_keys": list(scope_keys),
-                    "read_model_stale_reasons": ["read_model_scope_missing"],
-                }
-
-            def list_bank_detail_transactions(self, **_kwargs):
-                raise AssertionError("missing bank detail read model must not query rows before refresh")
-
-        class Queue:
-            def __init__(self) -> None:
-                self.enqueued: list[tuple[str, str, str]] = []
-
-            def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
-                self.enqueued.append((scope_type, scope_key, reason))
-
-        repository = SqlReadRepository()
-        queue = Queue()
-        service = BankDetailsApplicationService(
-            app_settings_service=SimpleNamespace(),
-            bank_transaction_category_service=SimpleNamespace(),
-            bank_transaction_auto_category_service=SimpleNamespace(),
-            audit_service=SimpleNamespace(),
-            bank_transaction_category_store=None,
-            bank_detail_sql_read_repository=repository,
-            runtime_repositories=SimpleNamespace(queue_repository=queue),
-            affected_months_provider=lambda _transaction_ids: [],
-            available_month_scope_keys_provider=lambda: ["2026-05"],
-            enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
-            bank_transaction_tags_provider=lambda: {"version": 1, "definitions": []},
-        )
-
-        payload = service.transactions_payload(
-            account_key=None,
-            date_from="2026-05-01",
-            date_to="2026-05-31",
-            keyword=None,
-            page=1,
-            page_size=500,
-        )
-
-        self.assertEqual(payload["read_model_status"], "refreshing")
-        self.assertEqual(payload["read_model_scope_keys"], ["2026-05"])
-        self.assertEqual(payload["read_model_stale_reasons"], ["read_model_scope_missing"])
-        self.assertEqual(payload["pagination"], {"page": 1, "page_size": 100, "total": 0})
-        self.assertTrue(payload["refresh_enqueued"])
-        self.assertEqual(payload["refresh_reason"], "api_missing")
-        self.assertEqual(queue.enqueued, [("bank_detail", "2026-05", "api_missing")])
-        self.assertEqual(repository.scope_key_calls, [{"date_from": "2026-05-01", "date_to": "2026-05-31"}])
-        self.assertEqual(repository.summary_calls, [["2026-05"]])
-
     def test_local_category_mutation_writes_canonical_state_without_read_model_fan_out(self) -> None:
         class CategoryStore:
             def save_bank_transaction_categories(self, _snapshot: dict[str, object]) -> None:
@@ -2114,11 +1835,7 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             bank_transaction_auto_category_service=SimpleNamespace(),
             audit_service=SimpleNamespace(record_action=lambda **_kwargs: None),
             bank_transaction_category_store=CategoryStore(),
-            bank_detail_sql_read_repository=None,
-            runtime_repositories=SimpleNamespace(queue_repository=queue),
             affected_months_provider=lambda _transaction_ids: ["2026-04"],
-            available_month_scope_keys_provider=lambda: ["2026-04"],
-            enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
         )
 
         persisted = service._persist_category_mutation(
@@ -2146,11 +1863,7 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             bank_transaction_auto_category_service=SimpleNamespace(),
             audit_service=SimpleNamespace(record_action=lambda **_kwargs: None),
             bank_transaction_category_store=CategoryStore(),
-            bank_detail_sql_read_repository=None,
-            runtime_repositories=SimpleNamespace(queue_repository=SimpleNamespace(enqueue_read_model_refresh=lambda **_kwargs: None)),
             affected_months_provider=lambda _transaction_ids: ["2026-04"],
-            available_month_scope_keys_provider=lambda: ["2026-04"],
-            enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
         )
 
         persisted = service._persist_category_mutation(
@@ -2192,11 +1905,7 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             bank_transaction_auto_category_service=SimpleNamespace(),
             audit_service=SimpleNamespace(record_action=lambda **_kwargs: None),
             bank_transaction_category_store=CategoryStore(),
-            bank_detail_sql_read_repository=None,
-            runtime_repositories=SimpleNamespace(queue_repository=queue),
             affected_months_provider=lambda _transaction_ids: ["2026-04"],
-            available_month_scope_keys_provider=lambda: ["2026-04", "2026-05"],
-            enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
             suggestion_provider=lambda _transaction_id: {"category_resolution_status": "unmatched"},
         )
 
@@ -2207,8 +1916,7 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         )
 
         self.assertEqual(result["affected_months"], ["2026-04"])
-        self.assertEqual(result["affected_scope_keys"], ["2026-04"])
-        self.assertEqual(result["read_model_scope_keys"], ["2026-04"])
+        self.assertNotIn("read_model_scope_keys", result)
         self.assertNotIn("freshness_targets", result)
         self.assertNotIn("operation_barrier_targets", result)
         self.assertEqual(queue.enqueued, [])
@@ -2224,11 +1932,7 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             bank_transaction_auto_category_service=SimpleNamespace(),
             audit_service=SimpleNamespace(record_action=lambda **_kwargs: self.fail("must not audit")),
             bank_transaction_category_store=None,
-            bank_detail_sql_read_repository=None,
-            runtime_repositories=SimpleNamespace(queue_repository=queue),
             affected_months_provider=lambda _transaction_ids: ["2026-04"],
-            available_month_scope_keys_provider=lambda: ["2026-04"],
-            enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
         )
 
         with self.assertRaisesRegex(RuntimeError, "durable bank transaction category writer is unavailable"):
@@ -2265,11 +1969,7 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             bank_transaction_auto_category_service=SimpleNamespace(),
             audit_service=SimpleNamespace(record_action=lambda **kwargs: audit_records.append(dict(kwargs))),
             bank_transaction_category_store=None,
-            bank_detail_sql_read_repository=None,
-            runtime_repositories=SimpleNamespace(queue_repository=queue),
             affected_months_provider=lambda _transaction_ids: ["2026-04"],
-            available_month_scope_keys_provider=lambda: ["2026-04"],
-            enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
             category_mutation_writer=writer,
         )
 
@@ -2313,11 +2013,7 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             bank_transaction_auto_category_service=SimpleNamespace(),
             audit_service=SimpleNamespace(record_action=lambda **kwargs: audit_records.append(dict(kwargs))),
             bank_transaction_category_store=None,
-            bank_detail_sql_read_repository=None,
-            runtime_repositories=SimpleNamespace(queue_repository=queue),
             affected_months_provider=lambda _transaction_ids: ["2026-04"],
-            available_month_scope_keys_provider=lambda: ["2026-04"],
-            enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
             category_mutation_writer=writer,
         )
 
@@ -2355,11 +2051,7 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             bank_transaction_auto_category_service=SimpleNamespace(),
             audit_service=SimpleNamespace(),
             bank_transaction_category_store=None,
-            bank_detail_sql_read_repository=None,
-            runtime_repositories=SimpleNamespace(queue_repository=queue),
             affected_months_provider=lambda _transaction_ids: [],
-            available_month_scope_keys_provider=lambda: ["2026-04", "2026-05"],
-            enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
         )
 
         result = service.update_auto_tag_rules(
@@ -2372,8 +2064,7 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         )
 
         self.assertEqual(update_calls[0]["actor_id"], "TESTFULL001")
-        self.assertEqual(result["affected_scope_keys"], ["2026-04", "2026-05"])
-        self.assertEqual(result["read_model_scope_keys"], ["2026-04", "2026-05"])
+        self.assertNotIn("read_model_scope_keys", result)
         self.assertNotIn("operation_barrier_targets", result)
         self.assertEqual(queue.enqueued, [])
 

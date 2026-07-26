@@ -34,6 +34,7 @@ RELATION_DISPLAY_PAGE_KEYS = {
 }
 
 DIRECT_CANONICAL_PAGE_KEYS = {
+    "bank-details",
     "cost-statistics",
     "etc-tickets",
     "imports.bank-transactions",
@@ -110,7 +111,7 @@ class PageReadModelFactDisplayMatrixTests(unittest.TestCase):
             self.assertTrue(row.get("production_readonly_gates"), page_key)
 
             relation_sources = set(row.get("pairing_relation_fact_sources", []))
-            if page_key in {"cost-statistics", "turnover-ledger"}:
+            if page_key in {"bank-details", "cost-statistics", "turnover-ledger"}:
                 self.assertEqual(relation_sources, {"app.workbench_pair_relations"}, page_key)
             elif page_key in RELATION_DISPLAY_PAGE_KEYS:
                 self.assertIn("app.workbench_pair_relations", relation_sources, page_key)

@@ -155,10 +155,11 @@
       ],
       "pairing_relation_fact_sources": [],
       "expected_outbox_scope_types": [],
-      "target_read_model_keys": [
-        "bank_detail"
-      ],
+      "target_read_model_keys": [],
       "target_page_keys": [
+        "bank-details"
+      ],
+      "direct_canonical_target_page_keys": [
         "bank-details"
       ],
       "production_gate": {
@@ -170,11 +171,14 @@
           "path": "web/e2e/bank-details-auto-tag-rules-flow.spec.ts",
           "required_markers": [
             "重新应用规则",
-            "read_model_key: \"bank_detail\""
+            "expect(api.count(OPERATION_BARRIER_PATH)).toBe(0)"
           ]
         }
       ],
       "forbidden_write_time_scope_types": [
+        "bank_detail"
+      ],
+      "retired_direct_canonical_scope_types": [
         "bank_detail"
       ]
     },
@@ -193,10 +197,11 @@
       ],
       "pairing_relation_fact_sources": [],
       "expected_outbox_scope_types": [],
-      "target_read_model_keys": [
-        "bank_detail"
-      ],
+      "target_read_model_keys": [],
       "target_page_keys": [
+        "bank-details"
+      ],
+      "direct_canonical_target_page_keys": [
         "bank-details"
       ],
       "production_gate": {
@@ -213,6 +218,9 @@
         }
       ],
       "forbidden_write_time_scope_types": [
+        "bank_detail"
+      ],
+      "retired_direct_canonical_scope_types": [
         "bank_detail"
       ]
     },
@@ -250,6 +258,7 @@
         "cost-statistics"
       ],
       "direct_canonical_target_page_keys": [
+        "bank-details",
         "cost-statistics"
       ],
       "production_gate": {
@@ -317,6 +326,7 @@
       ],
       "direct_canonical_target_page_keys": [
         "imports.bank-transactions",
+        "bank-details",
         "cost-statistics"
       ],
       "production_gate": {
@@ -374,7 +384,8 @@
         "reconciliation-workbench"
       ],
       "direct_canonical_target_page_keys": [
-        "turnover-ledger"
+        "turnover-ledger",
+        "bank-details"
       ],
       "production_gate": {
         "slo_audit_profile": "bank_row_tags_batch",
@@ -658,6 +669,9 @@
         "bank-details",
         "input-invoice-usage"
       ],
+      "direct_canonical_target_page_keys": [
+        "bank-details"
+      ],
       "production_gate": {
         "slo_audit_profile": "pending_invoice_attach_existing_invoice",
         "apply_policy": "audit_profile_only"
@@ -719,6 +733,7 @@
         "cost-statistics"
       ],
       "direct_canonical_target_page_keys": [
+        "bank-details",
         "cost-statistics"
       ],
       "production_gate": {
@@ -1112,6 +1127,7 @@
         "cost-statistics"
       ],
       "direct_canonical_target_page_keys": [
+        "bank-details",
         "cost-statistics"
       ],
       "production_gate": {
@@ -1182,6 +1198,7 @@
         "cost-statistics"
       ],
       "direct_canonical_target_page_keys": [
+        "bank-details",
         "cost-statistics"
       ],
       "production_gate": {
@@ -1250,6 +1267,9 @@
         "pending-invoices",
         "input-invoice-usage"
       ],
+      "direct_canonical_target_page_keys": [
+        "bank-details"
+      ],
       "production_gate": {
         "slo_audit_profile": "workbench_relation_confirm_bank_invoice_cross_page",
         "apply_policy": "audit_profile_only"
@@ -1309,6 +1329,9 @@
         "bank-details",
         "pending-invoices",
         "input-invoice-usage"
+      ],
+      "direct_canonical_target_page_keys": [
+        "bank-details"
       ],
       "production_gate": {
         "slo_audit_profile": "workbench_relation_withdraw_bank_invoice_cross_page",

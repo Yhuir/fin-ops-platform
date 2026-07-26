@@ -46,10 +46,10 @@
       "module": "bank-details",
       "page_key": "bank-details",
       "route": "/bank-details",
-      "read_model_keys": ["bank_detail", "bank_account_balance", "workbench_relation"],
+      "read_model_keys": [],
       "freshness_probe_names": ["bank_details_accounts", "bank_details_transactions", "bank_details_auto_tag_rules"],
-      "fact_sources": ["app.bank_transactions", "app.bank_accounts", "app.bank_transaction_tags", "read_model.bank_detail", "read_model.bank_account_balance"],
-      "pairing_relation_fact_sources": ["app.workbench_pair_relations", "read_model.workbench_relation_rows"],
+      "fact_sources": ["app.bank_transactions", "app.bank_transaction_categories", "app.bank_transaction_category_confirmations", "app.app_settings"],
+      "pairing_relation_fact_sources": ["app.workbench_pair_relations"],
       "deterministic_evidence": [
         {
           "path": "web/e2e/bank-details-initial-state.spec.ts",

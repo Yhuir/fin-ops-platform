@@ -8,7 +8,6 @@ import type {
   BankAutoTagDirection,
   BankAutoTagEditableRule,
   BankAutoTagRuleConditions,
-  BankAutoTagRefreshScope,
   BankAutoTagRulesResponse,
   BankAutoTagSystemRule,
   SaveBankAutoTagRule,
@@ -20,8 +19,6 @@ type AutoTagRulesDrawerProps = {
   onClose: () => void;
   onSaved?: (payload: BankAutoTagRulesResponse) => void;
   canMutateData?: boolean;
-  refreshStatus?: "idle" | "refreshing" | "fresh";
-  refreshScope?: BankAutoTagRefreshScope;
   saveAutoTagRules?: (payload: SaveBankAutoTagRulesRequest) => Promise<BankAutoTagRulesResponse>;
   reapplyAutoTagRules?: () => Promise<BankAutoTagRulesResponse>;
 };
@@ -280,8 +277,6 @@ export default function AutoTagRulesDrawer({
   onClose,
   onSaved,
   canMutateData = true,
-  refreshStatus = "idle",
-  refreshScope,
   saveAutoTagRules = saveBankAutoTagRules,
   reapplyAutoTagRules = reapplyBankAutoTagRules,
 }: AutoTagRulesDrawerProps) {
@@ -291,7 +286,6 @@ export default function AutoTagRulesDrawer({
   const [reapplying, setReapplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
-  const [lastRefreshAction, setLastRefreshAction] = useState<"save" | "reapply">("save");
   const [version, setVersion] = useState(1);
   const [systemRule, setSystemRule] = useState<BankAutoTagSystemRule | null>(null);
   const [fieldOptions, setFieldOptions] = useState<BankAutoTagRulesResponse["fieldOptions"]>([]);
@@ -344,15 +338,6 @@ export default function AutoTagRulesDrawer({
       });
     return () => controller.abort();
   }, [open]);
-
-  useEffect(() => {
-    if (refreshStatus === "refreshing") {
-      setFeedback(lastRefreshAction === "reapply" ? "已提交重新应用，银行明细正在刷新。" : "规则已保存；当前页面正在按需更新。");
-    }
-    if (refreshStatus === "fresh") {
-      setFeedback(lastRefreshAction === "reapply" ? "重新应用已完成，银行明细已刷新。" : "规则已保存。");
-    }
-  }, [lastRefreshAction, refreshStatus]);
 
   const dirty = useMemo(() => normalizedDraft(activeRules, archivedRules) !== baseline, [activeRules, archivedRules, baseline]);
   const readonly = !canMutateData || !canSave || saving || reapplying || loading;
@@ -441,10 +426,8 @@ export default function AutoTagRulesDrawer({
     }
     setSaving(true);
     setError(null);
-    setLastRefreshAction("save");
     saveAutoTagRules({
       expectedVersion: version,
-      refreshScope,
       activeRules: activeRules.map(serializeRule),
       archivedRules: archivedRules.filter((rule) => rule.code).map(serializeRule),
     })
@@ -460,7 +443,7 @@ export default function AutoTagRulesDrawer({
         setActiveRules(nextActive);
         setArchivedRules(nextArchived);
         setBaseline(normalizedDraft(nextActive, nextArchived));
-        setFeedback("规则已保存；当前页面正在按需更新。");
+        setFeedback("规则已保存。");
         onSaved?.(payload);
       })
       .catch((caught) => {
@@ -476,7 +459,6 @@ export default function AutoTagRulesDrawer({
     }
     setReapplying(true);
     setError(null);
-    setLastRefreshAction("reapply");
     reapplyAutoTagRules()
       .then((payload) => {
         const nextActive = payload.activeRules.map(cloneRule);
@@ -490,7 +472,7 @@ export default function AutoTagRulesDrawer({
         setActiveRules(nextActive);
         setArchivedRules(nextArchived);
         setBaseline(normalizedDraft(nextActive, nextArchived));
-        setFeedback(payload.readModelStatus === "fresh" ? "重新应用已完成，银行明细已刷新。" : "已提交重新应用，银行明细正在刷新。");
+        setFeedback("重新应用已完成。");
         onSaved?.(payload);
       })
       .catch((caught) => {

@@ -63,7 +63,6 @@ describe("bank details API", () => {
           classified_transaction_count: -1,
           unclassified_transaction_count: 1.5,
         },
-        read_model_status: "fresh",
       }), { status: 200, headers: { "Content-Type": "application/json" } })),
     );
 
@@ -323,12 +322,7 @@ describe("bank details API", () => {
       archived_rules: [],
       field_options: [],
       permissions: { can_save: true },
-      read_model_status: "refreshing",
-      read_model_scope_keys: ["2026-05"],
-      freshness_targets: [{ read_model_key: "bank_detail", scope_key: "2026-05" }],
-      operation_barrier_targets: [{ read_model_key: "bank_detail", scope_key: "2026-05" }],
-      enqueued_jobs: ["bank_detail.read_model.refresh"],
-    }), { status: 202, headers: { "Content-Type": "application/json" } }));
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
 
     const payload = await reapplyBankAutoTagRules();
@@ -337,10 +331,9 @@ describe("bank details API", () => {
       method: "POST",
     }));
     expect(payload.version).toBe(3);
-    expect(payload.readModelStatus).toBe("refreshing");
-    expect(payload.readModelScopeKeys).toEqual(["2026-05"]);
-    expect(payload.freshnessTargets).toEqual([{ readModelKey: "bank_detail", scopeKey: "2026-05" }]);
-    expect(payload.operationBarrierTargets).toEqual([{ readModelKey: "bank_detail", scopeKey: "2026-05" }]);
+    expect(payload.refreshReason).toBe("reapplied");
+    expect(payload).not.toHaveProperty("readModelStatus");
+    expect(payload).not.toHaveProperty("operationBarrierTargets");
   });
 
   test("does not copy legacy purpose or summary into split bank text columns", async () => {
@@ -410,7 +403,7 @@ describe("bank details API", () => {
     expect(url.searchParams.get("page_size")).toBe("100");
   });
 
-  test("maps refreshing read model responses without throwing", async () => {
+  test("maps direct empty responses without legacy status fields", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(JSON.stringify({
@@ -423,35 +416,14 @@ describe("bank details API", () => {
         category_counts: {
           uncategorized: 0,
         },
-        read_model_status: "refreshing",
-        cache_status: "bypass",
-      }), { status: 202, headers: { "Content-Type": "application/json" } })),
-    );
-
-    const payload = await fetchBankDetailTransactions({ page: 1, pageSize: 100 });
-
-    expect(payload.rows).toEqual([]);
-    expect(payload.readModelStatus).toBe("refreshing");
-    expect(payload.cacheStatus).toBe("bypass");
-  });
-
-  test("fails closed when bank detail read model status is missing or unknown", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => new Response(JSON.stringify({
-        rows: [],
-        pagination: {
-          page: 1,
-          page_size: 100,
-          total: 0,
-        },
-        read_model_status: "unexpected",
       }), { status: 200, headers: { "Content-Type": "application/json" } })),
     );
 
     const payload = await fetchBankDetailTransactions({ page: 1, pageSize: 100 });
 
-    expect(payload.readModelStatus).toBe("refreshing");
+    expect(payload.rows).toEqual([]);
+    expect(payload).not.toHaveProperty("readModelStatus");
+    expect(payload).not.toHaveProperty("cacheStatus");
   });
 
   test("downloads bank detail export with current filters and encoded filename", async () => {
@@ -539,7 +511,6 @@ describe("bank details API", () => {
       active_rules: [],
       archived_rules: [],
       permissions: { can_save: true },
-      read_model_scope_keys: ["2026-04"],
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -568,8 +539,8 @@ describe("bank details API", () => {
     const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
     expect(body.active_rules[0].output_primary_label).toBe("费用");
     expect(body.active_rules[0].output_sub_label).toBe("手续费");
-    expect(payload.readModelScopeKeys).toEqual(["2026-04"]);
-    expect(payload.operationBarrierTargets).toEqual([]);
+    expect(payload.refreshReason).toBe("saved");
+    expect(payload).not.toHaveProperty("readModelScopeKeys");
   });
 
   test("rejects successful HTML responses from bank detail export", async () => {

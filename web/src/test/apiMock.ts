@@ -94,14 +94,9 @@ type MockApiOptions = {
   includeOaAttachmentPaymentReceipt?: boolean;
   initialImportPreviewFileNames?: string[];
   initialImportPreviewOverrides?: Array<Record<string, string | null | undefined>>;
-  bankDetailAccountReadModelStatuses?: Array<"fresh" | "refreshing" | "stale" | "schema_mismatch">;
-  bankDetailTransactionReadModelStatuses?: Array<"fresh" | "refreshing" | "stale" | "schema_mismatch">;
-  bankDetailInitialAccountReadModelStatus?: "fresh" | "refreshing" | "stale" | "schema_mismatch";
-  bankDetailInitialTransactionReadModelStatus?: "fresh" | "refreshing" | "stale" | "schema_mismatch";
   bankDetailPostSaveAccountsTotalBalance?: string;
-  bankDetailRefreshingTransactionsEmpty?: boolean;
+  bankDetailPostSaveTransactionsEmpty?: boolean;
   bankDetailManualAssignmentActive?: boolean;
-  bankDetailManualClearReadModelStatuses?: Array<"fresh" | "refreshing" | "stale" | "schema_mismatch">;
 };
 
 const templateRegistry = [
@@ -4742,11 +4737,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
   const turnoverExtraStore = new Map<string, Record<string, unknown>>();
   let latestEtcImportPreview = etcInvoiceStore.previewZip([]);
   let bankDetailAutoTagRulesSaved = false;
-  let bankDetailPostSaveAccountRequestCount = 0;
-  let bankDetailPostSaveTransactionRequestCount = 0;
   let bankDetailManualAssignmentActive = Boolean(options.bankDetailManualAssignmentActive);
-  let bankDetailManualClearPending = false;
-  let bankDetailManualClearReadModelStatusIndex = 0;
   let workbenchWriteActionCount = 0;
   let workbenchRefreshStatusIndex = 0;
   const workbenchStateStore = createWorkbenchStateStore(options);
@@ -5945,11 +5936,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const dateFrom = url.searchParams.get("date_from");
       const dateTo = url.searchParams.get("date_to");
       const isCurrentYear = dateFrom === "2026-01-01" && dateTo === "2026-12-31";
-      const readModelStatus = bankDetailAutoTagRulesSaved && options.bankDetailAccountReadModelStatuses?.length
-        ? options.bankDetailAccountReadModelStatuses[
-          Math.min(bankDetailPostSaveAccountRequestCount++, options.bankDetailAccountReadModelStatuses.length - 1)
-        ]
-        : options.bankDetailInitialAccountReadModelStatus ?? "fresh";
       const totalBalance = bankDetailAutoTagRulesSaved && options.bankDetailPostSaveAccountsTotalBalance
         ? options.bankDetailPostSaveAccountsTotalBalance
         : "130500.50";
@@ -5980,7 +5966,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
               transaction_count: 0,
             },
           ],
-          read_model_status: readModelStatus,
         },
       };
     },
@@ -5995,10 +5980,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     }),
     "/api/bank-details/auto-tag-rules/reapply": () => {
       bankDetailAutoTagRulesSaved = true;
-      bankDetailPostSaveAccountRequestCount = 0;
-      bankDetailPostSaveTransactionRequestCount = 0;
       return {
-        status: 202,
+        status: 200,
         body: {
           version: 1,
           system_rule: {
@@ -6067,12 +6050,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             { value: "repaid", label: "已还款" },
           ],
           permissions: { can_save: true },
-          read_model_status: "refreshing",
-          read_model_scope_keys: ["2026-01"],
-          operation_barrier_targets: [
-            { read_model_key: "bank_detail", scope_key: "2026-01" },
-          ],
-          enqueued_jobs: ["bank_detail.read_model.refresh"],
         },
       };
     },
@@ -6202,8 +6179,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         return { body: baseRules };
       }
       bankDetailAutoTagRulesSaved = true;
-      bankDetailPostSaveAccountRequestCount = 0;
-      bankDetailPostSaveTransactionRequestCount = 0;
       const activeRules = Array.isArray(jsonBody?.active_rules) ? jsonBody.active_rules as Array<Record<string, unknown>> : [];
       const archivedRules = Array.isArray(jsonBody?.archived_rules) ? jsonBody.archived_rules as Array<Record<string, unknown>> : [];
       return {
@@ -6247,25 +6222,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       };
     },
     "/api/bank-details/transactions": ({ url }) => {
-      const manualClearReadModelStatus = bankDetailManualClearPending
-        && options.bankDetailManualClearReadModelStatuses?.length
-        ? options.bankDetailManualClearReadModelStatuses[
-          Math.min(
-            bankDetailManualClearReadModelStatusIndex++,
-            options.bankDetailManualClearReadModelStatuses.length - 1,
-          )
-        ]
-        : null;
-      if (bankDetailManualClearPending && manualClearReadModelStatus === "fresh") {
-        bankDetailManualAssignmentActive = false;
-        bankDetailManualClearPending = false;
-      }
-      const readModelStatus = manualClearReadModelStatus
-        ?? (bankDetailAutoTagRulesSaved && options.bankDetailTransactionReadModelStatuses?.length
-          ? options.bankDetailTransactionReadModelStatuses[
-            Math.min(bankDetailPostSaveTransactionRequestCount++, options.bankDetailTransactionReadModelStatuses.length - 1)
-          ]
-          : options.bankDetailInitialTransactionReadModelStatus ?? "fresh");
       const accountKey = url.searchParams.get("account_key");
       const dateFrom = url.searchParams.get("date_from");
       const dateTo = url.searchParams.get("date_to");
@@ -6590,7 +6546,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const rows = !accountKey || accountKey === "icbc:6386"
         ? (matchedRows ?? (hasCategoryFilter ? defaultFilterDataset : [visibleRow])).filter(categoryMatches)
         : [];
-      const responseRows = readModelStatus === "refreshing" && options.bankDetailRefreshingTransactionsEmpty ? [] : rows;
+      const responseRows = bankDetailAutoTagRulesSaved && options.bankDetailPostSaveTransactionsEmpty ? [] : rows;
       const baseCategoryCounts = {
         borrow_in_company_pending_repayment: 2,
         business_warranty_pending_collection: 1,
@@ -6643,7 +6599,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
               status: "active",
             })),
           },
-          read_model_status: readModelStatus,
         },
       };
     },
@@ -7961,12 +7916,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         url.pathname === "/api/bank-details/transactions/bank-detail-search-filler/category-assignment"
         && String(init?.method || "GET").toUpperCase() === "DELETE"
       ) {
-        if (options.bankDetailManualClearReadModelStatuses?.length) {
-          bankDetailManualClearPending = true;
-          bankDetailManualClearReadModelStatusIndex = 0;
-        } else {
-          bankDetailManualAssignmentActive = false;
-        }
+        bankDetailManualAssignmentActive = false;
       }
       return jsonResponse({
         body: {

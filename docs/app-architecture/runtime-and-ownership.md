@@ -106,3 +106,9 @@ OA 付款算法不读取待找发票规则，因此 OA 页面不因该规则保�
 成本统计不再消费任何页面 read model。explorer、详情和导出均由 `CostStatisticsQueryService` 调用 canonical repository，在一个 `REPEATABLE READ READ ONLY` 数据库快照内读取银行流水、OA、正式配对关系、标签与设置，再由无 I/O policy 生成五种视图。
 
 页面访问或浏览器刷新只发起本页面 API；不读取 Workbench/Bank Detail 页面 payload，不经过 freshness/version/dirty/outbox/worker，不产生跨页面 fan-out。页面打开期间不自动订阅变化；用户再次刷新读取最新已提交事实。旧 Cost projection、parent/shard、Redis、worker 和 scope 状态由 migration `0126` 退出并删除。
+
+### 银行明细 direct canonical read boundary
+
+银行明细 accounts、transactions 和 export 由 `BankDetailsCanonicalQueryService` 调用 page-specific PostgreSQL repository。transactions 的 rows、statistics、category facets 与当前目标行 active relation overlap 在同一个显式 `REPEATABLE READ READ ONLY` snapshot 中读取；accounts 以账户级 SQL 聚合 canonical 流水的最新余额和日期范围笔数。
+
+正式关系只读取 `app.workbench_pair_relations status=active`，并只对当前可见或导出目标 legacy/canonical bank row IDs 做 bounded overlap；不读取 Workbench 页面 payload、`workbench_relation` projection、`bank_detail` projection 或 `bank_account_balance` projection。页面响应没有 freshness/version/job/barrier，前端不轮询；写成功后只重新 GET 当前 transactions。旧 Bank Detail/Balance read-model runtime 仍有范围外 consumers，作为共享 cleanup HANDOFF 暂留，不能反向成为页面事实源。
