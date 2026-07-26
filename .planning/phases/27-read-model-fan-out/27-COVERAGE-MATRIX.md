@@ -188,7 +188,7 @@
 | `barrier-output-page` | `web/src/pages/OutputInvoiceCollectionsPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | 当前 output normal GET；receipt settings 不 rebuild |
 | `barrier-bank-flow-page` | `web/src/pages/BankFlowRuleBatchPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | 规则/submit/withdraw/reset 成功后只重跑当前 normal GET |
 | `barrier-manual-oa-table` | `web/src/components/settings/OaManualSearchImportTable.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | settings table refetch；search 在访问时收敛 |
-| `barrier-oa-audit-icon` | `web/src/components/oaPendingPayments/OaPendingPaymentAuditIcon.tsx` | `waitForOperationFreshness(` | `1` | `retain` | explicit user audit/reconcile action；只等 exact OA scope |
+| `barrier-oa-audit-icon` | `web/src/components/oaPendingPayments/OaPendingPaymentAuditIcon.tsx` | `waitForOperationFreshness(` | `0` | `delete` | canonical direct-read 页面 Audit 只执行单次只读检查，不再等待 OA read-model freshness |
 | `barrier-import-workflow` | `web/src/components/imports/ImportWorkflowPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | import job completion 只确认事实提交；受影响页面访问时 exact-scope 收敛 |
 
 ## Migration and deletion rule

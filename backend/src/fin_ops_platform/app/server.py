@@ -231,6 +231,9 @@ from fin_ops_platform.services.postgres_repositories.input_invoice_usage_oa_reve
 from fin_ops_platform.services.postgres_repositories.oa_applicant_credentials import (
     PostgresOaApplicantCredentialRepository,
 )
+from fin_ops_platform.services.postgres_repositories.oa_pending_payment_query import (
+    PostgresOaPendingPaymentQueryRepository,
+)
 from fin_ops_platform.services.invoice_usage_collection_source_versions import (
     input_invoice_usage_source_versions,
     output_invoice_collection_source_versions,
@@ -241,7 +244,7 @@ from fin_ops_platform.services.output_invoice_collection_service import (
 )
 from fin_ops_platform.services.oa_pending_payment_query_contract import OaPendingPaymentError
 from fin_ops_platform.services.oa_pending_payment_command_service import OaPendingPaymentCommandService
-from fin_ops_platform.services.oa_pending_payment_read_model_service import OaPendingPaymentReadModelService
+from fin_ops_platform.services.oa_pending_payment_query_service import OaPendingPaymentQueryService
 from fin_ops_platform.services.oa_pending_payment_sql_projection import oa_pending_payment_base_source_versions
 from fin_ops_platform.services.oa_payment_admitted_projection import PaymentAdmittedOAProjectionAdapter
 from fin_ops_platform.services.oa_payment_status_service import MySQLOAPaymentStatusRepository
@@ -6427,7 +6430,7 @@ class Application:
         if isinstance(routes, OaPendingPaymentApiRoutes):
             return self._configure_oa_pending_payment_route_ports(routes)
         routes = OaPendingPaymentApiRoutes(
-            read_model_service=self._oa_pending_payment_read_model_service(),
+            query_service=self._oa_pending_payment_query_service(),
             command_service=self._oa_pending_payment_command_service(),
         )
         self._oa_pending_payment_api_routes = self._configure_oa_pending_payment_route_ports(routes)
@@ -6542,19 +6545,19 @@ class Application:
             raise RuntimeError("OA pending payment projection requires the PostgreSQL OA projection repository.")
         return repository
 
-    def _oa_pending_payment_read_model_service(self) -> OaPendingPaymentReadModelService | None:
-        if not self._requires_sql_read_model_runtime():
-            return None
-        service = getattr(self, "_oa_pending_payment_read_model_service", None)
-        if isinstance(service, OaPendingPaymentReadModelService):
+    def _oa_pending_payment_query_service(self) -> OaPendingPaymentQueryService:
+        service = getattr(self, "_oa_pending_payment_query_service_instance", None)
+        if isinstance(service, OaPendingPaymentQueryService):
             return service
-        service = OaPendingPaymentReadModelService(
-            repository=getattr(self, "_oa_pending_payment_sql_read_repository", None),
-            queue_repository=getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None),
-            redis_helper=getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None),
-            source_versions_provider=self._oa_pending_payment_expected_source_versions,
+        state_store = getattr(self, "_state_store", None)
+        connection = getattr(state_store, "_connection", None)
+        repository = (
+            PostgresOaPendingPaymentQueryRepository(connection)
+            if connection is not None
+            else None
         )
-        self._oa_pending_payment_read_model_service = service
+        service = OaPendingPaymentQueryService(repository=repository)
+        self._oa_pending_payment_query_service_instance = service
         return service
 
     def _oa_pending_payment_error_response(self, exc: OaPendingPaymentError) -> Response:

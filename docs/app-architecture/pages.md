@@ -24,7 +24,7 @@
 | 银行明细 | `web/src/pages/BankDetailsPage.tsx` | bank detail routes、`BankDetailsCanonicalQueryService` | canonical 银行流水、分类/标签、账户映射、active Workbench pair relations | route 进入/重进、查询变化、当前页写后一次 GET、用户重试 |
 | 往来款管理 | `web/src/pages/TurnoverLedgerPage.tsx` | turnover ledger routes/service、workbench pair relation service | 外部往来候选、人工闭环、利息、项目归因、Workbench pair relation | 银行明细、关联台、人工闭环/撤回 |
 | 待找发票 | `web/src/pages/PendingInvoicesPage.tsx` | pending invoice routes/query service | 支出/收入流水、进项发票、规则建议、选择已有发票关系、收入状态覆盖 | 进项导入、选择已有发票确认/撤回、收入状态覆盖、规则变更 |
-| OA 待付款核对 | `web/src/pages/OaPendingPaymentsPage.tsx` | OA pending payments routes/query/command service | PostgreSQL completed OA、in-progress admission、payment-status snapshot、银行/发票事实、Workbench/pending relation、`oa_pending_payment` read model；页面/worker不直读Mongo/MySQL | OA sync原子snapshot、银行/发票关系变化、Workbench/pending relation、逐行写回；精确月份durable refresh |
+| OA 待付款核对 | `web/src/pages/OaPendingPaymentsPage.tsx` | OA pending payments routes/query/command service + page-specific PostgreSQL repository | 单次 repeatable-read/read-only snapshot 中的 completed OA、in-progress admission、payment-status、active Workbench/pending relation、银行/进项发票 canonical facts；不读页面 read model/Mongo/MySQL | route/query变化/手工刷新/本页写后 normal GET；无 freshness enqueue、worker、202/304/ETag/polling |
 | 税金抵扣 / 发票使用 | tax offset / invoice usage pages | invoice usage/read model routes | 已认证发票、使用状态、销项收款、ETC 发票 | 发票导入、认证状态、收款关系、backfill/refresh |
 | ETC 业务批次 | ETC pages/components | ETC business batch routes/service、invoice PDF bundle service | ETC 票据、人工业务批次、导入草稿、OA 提交确认、草稿后批次发票合并下载 | ETC 导入、OA 草稿创建、人工提交确认、对象存储 PDF 读取与只读下载审计 |
 | 成本统计 | cost statistics page | cost routes/query service | 项目、费用、发票、核销关系 | 项目范围变化、发票/流水关系变化 |
@@ -45,7 +45,7 @@ domain registry 是页面域入口；`AppStatusReadModelRegistry` 是 read model
 | `imports_etc_invoices` | `/imports/etc-invoices` | import worker、ETC 发票导入任务 |
 | `bank_details` | `/bank-details` | 页面运行时为单次 PostgreSQL repeatable-read canonical snapshot；旧 `bank_detail` / `bank_account_balance` registry/worker 仅作为共享清理 HANDOFF，不能决定页面 readiness |
 | `pending_invoices` | `/pending-invoices` | `pending_invoice`、`search`、`pending-invoice` / `search` workers，旧 `search-pending` 兼容 worker |
-| `oa_pending_payments` | `/oa-pending-payments` | `oa_pending_payment`、`oa-pending-payment`专属worker、OA sync |
+| `oa_pending_payments` | `/oa-pending-payments` | 页面直接读取 canonical PostgreSQL；全局 `oa_pending_payment` legacy readiness/worker 暂留给共享消费者，待统一 cleanup，不参与页面正确性 |
 | `input_invoice_usage` | `/input-invoice-usage` | `input_invoice_usage`、invoice usage collection worker |
 | `output_invoice_collections` | `/output-invoice-collections` | `output_invoice_collection`、invoice usage collection worker；rows 展示 `workbench_relation` 统一关系中的 OA、收入流水和销项发票项 |
 | `tax_offset` | `/tax-offset` | `tax_offset`、`tax-offset` worker，旧 `cost-tax` 兼容 worker |

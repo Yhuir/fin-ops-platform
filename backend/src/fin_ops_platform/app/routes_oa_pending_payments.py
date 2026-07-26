@@ -4,9 +4,9 @@ from http import HTTPStatus
 from typing import Any, Callable
 from urllib.parse import unquote
 
-from fin_ops_platform.services.oa_pending_payment_read_model_service import OaPendingPaymentReadModelService
 from fin_ops_platform.services.oa_pending_payment_command_service import OaPendingPaymentCommandService
 from fin_ops_platform.services.oa_pending_payment_query_contract import OaPendingPaymentError
+from fin_ops_platform.services.oa_pending_payment_query_service import OaPendingPaymentQueryService
 
 
 ReadSessionResolver = Callable[[dict[str, str] | None], tuple[Any | None, Any | None]]
@@ -21,7 +21,7 @@ class OaPendingPaymentApiRoutes:
     def __init__(
         self,
         *,
-        read_model_service: OaPendingPaymentReadModelService | None = None,
+        query_service: OaPendingPaymentQueryService | None = None,
         command_service: OaPendingPaymentCommandService | None = None,
         resolve_read_session: ReadSessionResolver | None = None,
         resolve_read_tenant: ReadTenantResolver | None = None,
@@ -30,7 +30,7 @@ class OaPendingPaymentApiRoutes:
         load_json_body: JsonBodyLoader | None = None,
         error_response: ErrorResponse | None = None,
     ) -> None:
-        self._read_model_service = read_model_service
+        self._query_service = query_service
         self._command_service = command_service
         self._resolve_read_session = resolve_read_session
         self._resolve_read_tenant = resolve_read_tenant
@@ -68,82 +68,83 @@ class OaPendingPaymentApiRoutes:
         if method == "GET" and route_path == "/api/oa-pending-payments/rows":
             return self._json_read(
                 headers,
-                lambda session: self._conditional_rows(
-                    query,
-                    tenant_id=self._tenant_id(session),
-                    if_none_match=_header(headers, "if-none-match"),
+                lambda session: (
+                    HTTPStatus.OK,
+                    self.rows(query, tenant_id=self._tenant_id(session)),
                 ),
             )
         if method == "GET" and route_path == "/api/oa-pending-payments/bank-transaction-candidates":
-            return self._json_read(headers, lambda _session: (HTTPStatus.OK, self.bank_transaction_candidates(query)))
+            return self._json_read(
+                headers,
+                lambda session: (
+                    HTTPStatus.OK,
+                    self.bank_transaction_candidates(query, tenant_id=self._tenant_id(session)),
+                ),
+            )
         if method == "GET" and route_path.startswith("/api/oa-pending-payments/oa/") and route_path.endswith("/detail"):
             oa_id = unquote(route_path.rsplit("/", 2)[-2])
             return self._json_read(
                 headers,
-                lambda _session: self._detail_response(
-                    self.oa_detail(oa_id, query)
+                lambda session: (
+                    HTTPStatus.OK,
+                    self.oa_detail(oa_id, query, tenant_id=self._tenant_id(session)),
                 ),
             )
         if method == "GET" and route_path.startswith("/api/oa-pending-payments/bank-transactions/") and route_path.endswith("/detail"):
             bank_transaction_id = unquote(route_path.rsplit("/", 2)[-2])
             return self._json_read(
                 headers,
-                lambda _session: self._detail_response(
-                    self.bank_transaction_detail(bank_transaction_id, query)
+                lambda session: (
+                    HTTPStatus.OK,
+                    self.bank_transaction_detail(
+                        bank_transaction_id,
+                        query,
+                        tenant_id=self._tenant_id(session),
+                    ),
                 ),
             )
         if method == "GET" and route_path.startswith("/api/oa-pending-payments/invoices/") and route_path.endswith("/detail"):
             invoice_id = unquote(route_path.rsplit("/", 2)[-2])
             return self._json_read(
                 headers,
-                lambda _session: self._detail_response(
-                    self.invoice_detail(invoice_id, query)
+                lambda session: (
+                    HTTPStatus.OK,
+                    self.invoice_detail(invoice_id, query, tenant_id=self._tenant_id(session)),
                 ),
             )
         if method == "GET" and route_path.startswith("/api/oa-pending-payments/rows/") and route_path.endswith("/relation-details"):
             row_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._json_read(headers, lambda _session: self._detail_response(self.relation_details(row_id, query)))
+            return self._json_read(
+                headers,
+                lambda session: (
+                    HTTPStatus.OK,
+                    self.relation_details(row_id, query, tenant_id=self._tenant_id(session)),
+                ),
+            )
         if method == "POST" and route_path == "/api/oa-pending-payments/writeback-paid":
             return self._json_write(body, headers, lambda payload, actor_id: self.writeback_paid(payload, actor_id=actor_id))
         if method == "POST" and route_path == "/api/oa-pending-payments/link-bank-transactions":
             return self._json_write(body, headers, lambda payload, actor_id: self.link_bank_transactions(payload, actor_id=actor_id))
         return None
 
-    def rows(self, query: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, Any]]:
-        read = self._read_model_service_required().conditional_rows(
-            query,
-            tenant_id="default",
-            if_none_match=None,
-        )
-        return read.status, read.payload
-
-    def _conditional_rows(
+    def rows(
         self,
         query: dict[str, list[str]],
         *,
-        tenant_id: str,
-        if_none_match: str | None,
-    ) -> tuple[HTTPStatus, dict[str, Any], dict[str, str]]:
-        read = self._read_model_service_required().conditional_rows(
-            query,
-            tenant_id=tenant_id,
-            if_none_match=if_none_match,
-        )
-        response_headers = {
-            "Cache-Control": "private, no-cache",
-            "Vary": "Authorization, Cookie",
-        }
-        if read.etag:
-            response_headers["ETag"] = read.etag
-        return read.status, read.payload, response_headers
+        tenant_id: str = "default",
+    ) -> dict[str, Any]:
+        return self._query_service_required().rows(query, tenant_id=tenant_id)
 
     def oa_detail(
         self,
         oa_id: str,
         query: dict[str, list[str]] | None = None,
+        *,
+        tenant_id: str = "default",
     ) -> dict[str, Any]:
-        return self._read_model_service_required().oa_detail(
+        return self._query_service_required().oa_detail(
             oa_id,
+            tenant_id=tenant_id,
             requested_scope_key=_scope_key_from_query(query),
         )
 
@@ -151,9 +152,12 @@ class OaPendingPaymentApiRoutes:
         self,
         bank_transaction_id: str,
         query: dict[str, list[str]] | None = None,
+        *,
+        tenant_id: str = "default",
     ) -> dict[str, Any]:
-        return self._read_model_service_required().bank_transaction_detail(
+        return self._query_service_required().bank_transaction_detail(
             bank_transaction_id,
+            tenant_id=tenant_id,
             requested_scope_key=_scope_key_from_query(query),
         )
 
@@ -161,16 +165,26 @@ class OaPendingPaymentApiRoutes:
         self,
         invoice_id: str,
         query: dict[str, list[str]] | None = None,
+        *,
+        tenant_id: str = "default",
     ) -> dict[str, Any]:
-        return self._read_model_service_required().invoice_detail(
+        return self._query_service_required().invoice_detail(
             invoice_id,
+            tenant_id=tenant_id,
             requested_scope_key=_scope_key_from_query(query),
         )
 
-    def relation_details(self, row_id: str, query: dict[str, list[str]]) -> dict[str, Any]:
-        return self._read_model_service_required().relation_details(
+    def relation_details(
+        self,
+        row_id: str,
+        query: dict[str, list[str]],
+        *,
+        tenant_id: str = "default",
+    ) -> dict[str, Any]:
+        return self._query_service_required().relation_details(
             row_id,
             kind=query.get("kind", [""])[0],
+            tenant_id=tenant_id,
             requested_scope_key=_scope_key_from_query(query),
         )
 
@@ -184,10 +198,16 @@ class OaPendingPaymentApiRoutes:
             raise RuntimeError("OA pending payment command service is not configured.")
         return self._command_service.writeback_paid(payload, actor_id=actor_id)
 
-    def bank_transaction_candidates(self, query: dict[str, list[str]]) -> dict[str, Any]:
-        if self._command_service is None:
-            raise RuntimeError("OA pending payment command service is not configured.")
-        return self._command_service.bank_transaction_candidates(query)
+    def bank_transaction_candidates(
+        self,
+        query: dict[str, list[str]],
+        *,
+        tenant_id: str = "default",
+    ) -> dict[str, Any]:
+        return self._query_service_required().bank_transaction_candidates(
+            query,
+            tenant_id=tenant_id,
+        )
 
     def _json_read(self, headers: dict[str, str] | None, action: Callable[[Any], tuple[Any, ...]]) -> Any:
         session, auth_error = self._read_session(headers)
@@ -200,7 +220,7 @@ class OaPendingPaymentApiRoutes:
         except OaPendingPaymentError as exc:
             return self._error(exc)
         except RuntimeError as exc:
-            return self._command_unavailable(exc)
+            return self._service_unavailable(exc)
         return self._json(status_code, payload, response_headers=response_headers)
 
     def _json_write(
@@ -241,13 +261,10 @@ class OaPendingPaymentApiRoutes:
             raise RuntimeError("OA pending payment write auth is not configured.")
         return self._write_auth_context(headers)
 
-    def _detail_response(self, payload: dict[str, Any]) -> tuple[HTTPStatus, dict[str, Any]]:
-        return _read_model_status_code(payload), payload
-
-    def _read_model_service_required(self) -> OaPendingPaymentReadModelService:
-        if self._read_model_service is None:
-            raise RuntimeError("OA pending payment read model service is not configured.")
-        return self._read_model_service
+    def _query_service_required(self) -> OaPendingPaymentQueryService:
+        if self._query_service is None:
+            raise RuntimeError("OA pending payment canonical query service is not configured.")
+        return self._query_service
 
     def _json(
         self,
@@ -279,18 +296,17 @@ class OaPendingPaymentApiRoutes:
             },
         )
 
-
-def _read_model_status_code(payload: dict[str, Any]) -> HTTPStatus:
-    return HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
-
-
-def _header(headers: dict[str, str] | None, name: str) -> str | None:
-    normalized_name = name.lower()
-    for key, value in dict(headers or {}).items():
-        if str(key).lower() == normalized_name:
-            return str(value)
-    return None
-
+    def _service_unavailable(self, exc: RuntimeError) -> Any:
+        return self._json(
+            HTTPStatus.SERVICE_UNAVAILABLE,
+            {
+                "error": {
+                    "code": "oa_pending_payment_service_unavailable",
+                    "message": str(exc),
+                    "details": {},
+                }
+            },
+        )
 
 def _scope_key_from_query(
     query: dict[str, list[str]] | None,

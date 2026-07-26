@@ -2,66 +2,35 @@ import { useCallback } from "react";
 
 import { fetchPageAudit } from "../../features/appHealth/api";
 import type { PageAuditIssue, PageAuditPayload } from "../../features/appHealth/types";
-import {
-  OperationBarrierBlockedError,
-  operationBarrierTargets,
-  waitForOperationFreshness,
-} from "../../features/operationBarrier/api";
 import PageAuditIcon from "../common/PageAuditIcon";
 
-type OaPendingPaymentAuditIconProps = {
-  readModelStatus: string;
-  scopeKey: string;
-};
-
-export default function OaPendingPaymentAuditIcon({
-  readModelStatus,
-  scopeKey,
-}: OaPendingPaymentAuditIconProps) {
-  const runAudit = useCallback(async (signal?: AbortSignal) => {
-    const first = await fetchPageAudit("oa-pending-payments", signal);
-    if (!auditNeedsFreshnessWait(first)) {
-      return first;
-    }
-    await waitForOperationFreshness(
-      ["oa_pending_payment", "workbench_relation", "invoice_lifecycle"].flatMap((readModelKey) => (
-        operationBarrierTargets(readModelKey, [scopeKey.trim() || "all"])
-      )),
-      { signal },
-    );
-    return fetchPageAudit("oa-pending-payments", signal);
-  }, [scopeKey]);
+export default function OaPendingPaymentAuditIcon() {
+  const runAudit = useCallback(
+    (signal?: AbortSignal) => fetchPageAudit("oa-pending-payments", signal),
+    [],
+  );
 
   return (
     <PageAuditIcon
       ariaLabel="Audit OA 待付款核对"
       label="OA 待付款核对"
-      readModelStatus={readModelStatus}
       runAudit={runAudit}
       formatMessage={formatOaPendingPaymentAuditMessage}
-      formatError={(error) => (
-        error instanceof OperationBarrierBlockedError
-          ? "Audit 未通过 · Read model 未在时限内更新"
-          : "Audit 无法完成 · 请查看诊断"
-      )}
+      formatError={() => "Audit 无法完成 · 请查看诊断"}
     />
   );
 }
 
-export function formatOaPendingPaymentAuditMessage(
-  payload: PageAuditPayload,
-  readModelStatus: string | undefined,
-) {
+export function formatOaPendingPaymentAuditMessage(payload: PageAuditPayload) {
   const integrityPassed = payload.audit_status?.integrity === "pass";
   const auditFresh = payload.audit_status?.freshness === "fresh";
   const queueDrained = payload.audit_status?.queue === "drained";
-  const pageFresh = normalize(readModelStatus) === "fresh";
   const proofReady = payload.audit_contract?.proof_availability === "ready";
   const contractVersioned = Boolean(payload.audit_contract?.contract_revision);
   const snapshotConsistent = payload.audit_contract?.database_snapshot === true
     && payload.audit_contract?.snapshot_consistency === "repeatable_read_read_only";
 
-  if (!auditFresh || !queueDrained || !pageFresh) {
+  if (!auditFresh || !queueDrained) {
     return { tone: "warning" as const, text: "Audit 校验中 · 新数据正在生成" };
   }
   if (!proofReady || !contractVersioned || !snapshotConsistent) {
@@ -78,10 +47,6 @@ export function formatOaPendingPaymentAuditMessage(
     tone: "danger" as const,
     text: `Audit 未通过 · 发现 ${countText} 个一致性问题${samples.length > 0 ? ` · 示例：${samples.join("；")}` : ""}`,
   };
-}
-
-function auditNeedsFreshnessWait(payload: PageAuditPayload) {
-  return payload.audit_status?.freshness !== "fresh" || payload.audit_status?.queue !== "drained";
 }
 
 function auditIssueCount(payload: PageAuditPayload) {

@@ -2692,22 +2692,19 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             self.assertFalse((SERVICES_ROOT / removed_name).exists(), removed_name)
 
-    def test_oa_pending_page_non_fresh_access_retries_its_own_rows_get(self) -> None:
+    def test_oa_pending_page_reads_canonical_rows_without_freshness_polling(self) -> None:
         page_source = (WEB_SRC_ROOT / "pages" / "OaPendingPaymentsPage.tsx").read_text(encoding="utf-8")
 
         for forbidden in (
             "waitForOperationFreshness",
             '../features/operationBarrier/api',
             "/api/operation-barrier/status",
+            "setConditionalPollingEnabled",
+            "CONDITIONAL_REFRESH_INTERVAL_MS",
+            "document.visibilityState",
         ):
             self.assertNotIn(forbidden, page_source)
-        for required in (
-            "fetchOaPendingPaymentRows({",
-            "setConditionalPollingEnabled(true)",
-            "CONDITIONAL_REFRESH_INTERVAL_MS",
-            'document.visibilityState !== "visible"',
-        ):
-            self.assertIn(required, page_source)
+        self.assertIn("fetchOaPendingPaymentRows({", page_source)
 
     def test_turnover_ledger_read_export_routes_use_route_owner(self) -> None:
         server_path = APP_ROOT / "server.py"
@@ -3031,8 +3028,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         server_path = APP_ROOT / "server.py"
         route_path = APP_ROOT / "routes_oa_pending_payments.py"
         retired_query_service_path = SERVICES_ROOT / "oa_pending_payment_service.py"
+        query_service_path = SERVICES_ROOT / "oa_pending_payment_query_service.py"
         command_service_path = SERVICES_ROOT / "oa_pending_payment_command_service.py"
         read_model_service_path = SERVICES_ROOT / "oa_pending_payment_read_model_service.py"
+        query_repository_path = SERVICES_ROOT / "postgres_repositories" / "oa_pending_payment_query.py"
         relation_repository_path = SERVICES_ROOT / "postgres_repositories" / "oa_pending_payment_relation.py"
         server_source = server_path.read_text(encoding="utf-8")
         server_tree = _parse(server_path)
@@ -3040,6 +3039,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         route_tree = _parse(route_path)
         route_class = _class_source(route_tree, route_source, "OaPendingPaymentApiRoutes")
         command_service_source = command_service_path.read_text(encoding="utf-8")
+        query_service_source = query_service_path.read_text(encoding="utf-8")
+        query_repository_source = query_repository_path.read_text(encoding="utf-8")
         read_model_service_source = read_model_service_path.read_text(encoding="utf-8")
         relation_repository_source = relation_repository_path.read_text(encoding="utf-8")
         violations: list[str] = []
@@ -3059,7 +3060,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "def _json_read(",
             "def _json_write(",
             "def _command_unavailable(",
-            "def _read_model_service_required(",
+            "def _query_service_required(",
         ):
             if required not in route_class:
                 violations.append(f"OA pending payment route owner is missing {required}")
@@ -3069,9 +3070,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "/api/oa-pending-payments/filter-options",
             "def filter_options(",
             "def all_rows(",
-            "self._query_service",
-            "return self._query_service.",
-            "payload = self._query_service.",
             "self._query_service.list_rows",
             "self._query_service.filter_options",
             "self._query_service.oa_detail",
@@ -3088,6 +3086,33 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if forbidden_service_symbol in read_model_service_source:
                 violations.append(f"OA pending payment service still exposes retired symbol {forbidden_service_symbol}")
+        for required in (
+            "with repository.snapshot() as snapshot:",
+            "snapshot.select_page(",
+            "snapshot.bank_transaction_candidates(",
+        ):
+            if required not in query_service_source:
+                violations.append(f"OA canonical query service is missing {required}")
+        for required in (
+            "set transaction isolation level repeatable read read only",
+            "app.oa_applications",
+            "app.oa_pending_payment_admissions",
+            "app.oa_pending_payment_bank_relations",
+            "app.workbench_pair_relations",
+            "relation.status = 'active'",
+        ):
+            if required not in query_repository_source:
+                violations.append(f"OA canonical query repository is missing {required}")
+        for forbidden in (
+            "ReadModelRefresh",
+            "read_model_status",
+            "read_model_repository",
+            "source_versions",
+            "enqueue",
+            "Redis",
+        ):
+            if forbidden in query_service_source + query_repository_source:
+                violations.append(f"OA canonical page query still depends on {forbidden}")
         if "SnapshotOaPendingPaymentRelationRepository" in relation_repository_source:
             violations.append("OA pending payment relation repository still exposes the snapshot fallback")
         source_projection = _function_source(server_tree, server_source, "_oa_pending_payment_source_projection")

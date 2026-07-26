@@ -1,145 +1,144 @@
 # OA 待付款核对模块边界与 I/O
 
-日期：2026-07-26
+日期：2026-07-27
 
 ## 模块化状态
 
-- 状态：`READY_FOR_UNIFIED_DEPLOYMENT`；本地代码、测试和文档闭环，生产回填与性能证据待统一部署后完成。
+- 状态：`DIRECT_CANONICAL_READ_IMPLEMENTED_LOCALLY`。
 - 边界可信度：high。
-- 隔离目标：只改变 `oa_pending_payment` 页面、read model、专属 worker 和 integration snapshot；不改变其它页面 API/read model。
-- 旧路径状态：旧 filter endpoint/client、Python 全量 `all_rows`/filter scan、1,340 行 live `OaPendingPaymentQueryService`、共享 invoice worker OA 分支、Mongo/MySQL projector I/O、WorkBench read-model freshness 串行等待、snapshot relation fallback、本地 state-store relation snapshot、server private OA adapter fallback、sync service 多 list 扫描、无调用方 fingerprint polling，以及 OA sync/snapshot repository 的页面 fan-out 均已从运行时链路删除。
+- 页面读模型：页面专属 PostgreSQL query repository；无页面 read-model freshness/version/cache/worker 运行时依赖。
+- 共享遗留：旧 `oa_pending_payment` projection/worker/registry 尚未全局删除，因为 `invoice_lifecycle` 等调用方仍存在；见“共享 HANDOFF”。
 
 ## 职责
 
 ### 本模块负责
 
-- OA 待付款页面查询、筛选、排序、详情和 OA 专属 Audit 展示。
-- `/api/oa-pending-payments` 下所有 read/write endpoint 的单次鉴权执行；route 只经显式 read-session/write-auth ports 调用共享 identity/policy owner，不重复经过全局前置 guard。
-- `oa_pending_payment` read model、freshness gate、ETag 条件读取，以及页面访问 non-fresh 时的本页 normal GET 收敛。
-- OA payment-status/admission integration snapshot 与 source watermark canonical commit；页面访问时的精确月份 refresh 由 query freshness boundary 负责。
-- in-progress pending relation、bank claim、promotion 和付款状态写回编排。
+- OA 待付款 rows、summary、statistics、facets、筛选、排序、分页和惰性详情。
+- `/api/oa-pending-payments` owned endpoints 的单次鉴权、tenant 隔离和结构化 HTTP 错误。
+- 页面 query service 的业务组合，以及 page-specific repository 的 canonical SQL。
+- in-progress admission、pending relation、bank claim/promotion、OA paid writeback 编排。
+- 写后重新 GET 和前端 loading/empty/error 状态。
 
 ### 本模块不负责
 
-- OA identity 解析、access-tier/菜单权限策略和外部系统自身一致性；这些仍由共享 auth owner 提供，本模块只执行端点门禁。
-- Workbench、银行明细、发票、input/output invoice read model 的所有权。
-- 通用 worker framework、queue、operation barrier 或共享 Page Audit 默认文案。
+- OA identity/access-tier 的业务策略；只消费共享 auth port。
+- OA Mongo/MySQL 同步、银行/发票 canonical facts、Workbench relation 的写所有权。
+- Workbench、invoice lifecycle、input/output invoice read model。
+- 全局 read-model manifest、worker registry/handlers、App Status registry、RabbitMQ dispatcher、deploy worker env 或 cleanup migration。
 
-## 输入 I/O
+## 直接输入 I/O
 
-| 输入 | Owner | 合同 |
+| 输入 | Owner | 页面合同 |
 | --- | --- | --- |
-| OA token/session | shared auth owner | `OaPendingPaymentApiRoutes` 对每个 owned read endpoint 调用一次 read-session port、对每个 owned write endpoint 调用一次 write-auth port；缺 token、过期、无页面权限或只读用户写入必须在业务/read-model I/O 前拒绝。全局 dispatcher 不得对同一路径再解析一次相同 session |
-| 页面 rows query / `If-None-Match` | OA 页面/API | 只进入 `OaPendingPaymentReadModelService.conditional_rows`；认证 tenant、query contract、fresh gate 先于 `304` |
-| OA completed / in-progress / payment status | OA integration sync | 外部 adapter 每个启用 form/scope 只读一次；`all` 接收 sync owner 的 retention cutoff，并在字段校验/附件解析前排除保留期外文档，再输出双视图：通用 `projection_records` 遵守配置，OA 私有 `admission_records` 固定包含 completed + in-progress。读取失败或保留期内 status/identity 不可判定时整轮不提交并记录 failed run；合法 in-progress 草稿尚未填写 amount/applicant/reason 时仍进入 admission，空金额为 `NULL`，保留期内 completed 缺既有必填字段仍 fail-closed。成功后一次 PostgreSQL 事务提交 completed projection、admission、payment-status snapshot、watermark；相同 snapshot 不更新时间戳、不 replace admission、不 enqueue refresh。in-progress 只保留附件文件元数据，不解析附件、发票或 OCR |
-| Workbench/pending relation | 对应 relation owner | projector 只读 PostgreSQL canonical relation；不读取或等待 `workbench_relation` read model。owner 写事务只推进 relation version/audit，不输出 OA target；pending relation owner维护自己的月份版本，OA 页面访问时比较该版本 |
-| 银行/进项发票 canonical facts | core/invoice owner | 通过现有 relation/source-version 合同进入月份投影；本模块不直接写其事实或 read model |
-| `writeback-paid` / `link-bank-transactions` | command service | 复核权限、active relation、outflow、金额和 flow id；外部 MySQL 成功后必须幂等 reconcile PostgreSQL payment snapshot。普通命令只提交 owner facts/version/audit，返回月份 hints 和空 freshness/barrier targets，不直接 enqueue OA 或 Workbench refresh |
-| refresh event | durable queue | `scope_type=oa_pending_payment`；普通业务变化只用 `YYYY-MM`，`all` 仅用于初始化、显式修复和统一部署回填 |
-| Page Audit | admin-only operations API | 同一只读 repeatable-read snapshot 内分别判断 integrity、freshness 和 queue；不得写或自动修复。Audit 继续要求已登记的 `invoice_lifecycle` downstream consumer 收敛，但 OA rows/query 不读取该 read model；其 pending-invoice 输入优化不得反向污染 OA 页面运行时 I/O |
+| OA session/token | permissions/auth owner | route 在任何查询/命令 I/O 前解析一次；拒绝未认证、无权限和只读写入 |
+| rows query | frontend/API | `month`、keyword、trade-date range、filters、sort、page/page_size、view mode；非法参数 fail closed |
+| bank candidate query | frontend/API | relation status、keyword、page/page_size、repeated oa_row_ids；全部支出流水池由 PostgreSQL 服务端分页 |
+| completed OA | OA integration | `app.oa_applications` 已提交 snapshot；页面不访问 Mongo |
+| in-progress admission | OA integration | `app.oa_pending_payment_admissions`，按 tenant 读取 |
+| payment status | OA integration/command | `app.oa_pending_payment_status_snapshots`，按 tenant + flow ids 批量读取 |
+| completed relation | Workbench relation owner | 只读 `app.workbench_pair_relations` 中 `status='active'`；不读 Workbench page payload 或 `workbench_relation` projection |
+| in-progress relation/claim | OA pending relation owner | active pending relation、claim、promotion facts |
+| bank facts | core/bank owner | `app.bank_transactions`，只批量读取当前页 relation members |
+| input invoice facts | invoice owner | `app.invoices`，只批量读取当前页 relation members |
+| write command | frontend | 保留 active relation、outflow、金额、flow id、幂等、CAS/冲突和 audit 校验 |
 
-## 输出 I/O
+## 直接输出 I/O
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| rows 聚合响应 | OA 页面 | `200` fresh payload + `ETag`；`304` 空 body；`202` 不含旧 rows且带精确 barrier targets。列表 DTO 只返回前端声明字段，不返回 read-model 内部 `searchText`、逐行 `sourceVersions` 或 cache metadata；版本证明只在顶层返回，详情继续走现有惰性 detail API。每次请求先用 OA 私有单条 PostgreSQL statement 完成 freshness/version gate，`202` 与 `304` 在 Redis/payload I/O 前返回；非条件 fresh `200` 才以包含 tenant、normalized query、contract revision 和 version token 的 ETag 读取共享 gateway 下的 OA 私有 Redis key。cache hit 不启动 read snapshot transaction；cache miss 或 Redis fallback 必须进入 repeatable-read snapshot，重新执行同一 gate并要求 `status=fresh`、`version_token` 与外层完全相同后，才用一个有界 data statement 返回 summary/facets + 当前页并缓存 300 秒。版本变化自然换 key，读中竞态 fail-closed 为 `202`。禁止 cache 先于 gate、显式跨页面 invalidation、第二个 page roundtrip或返回旧版本 payload |
-| `filterConfig` / `filterOptions` | OA 页面 | 随 rows 同响应 set-based 计算；summary/facet CTE 只 materialize 聚合需要的 typed columns，不读取 `payload/raw_payload`；page CTE 只读取 bounded payload 并在 SQL 内移除内部字段；不存在第二个 filter API |
-| read model publish | `read_model.oa_pending_payment_*` | 月份原子 replace、source vector、event source version 和 CAS；月份 rows 只能含同月 OA 主行，relation group row identity 必须含 month scope。`all` freshness gate 与 Page Audit 都把跨 scope 重复 `row_id` 作为阻断错误，列表不得用 `DISTINCT ON` 或 Python 去重隐藏错误；旧 event 不得清新 dirty |
-| latest dirty index | `job.read_model_dirty_scopes` | 只索引 `scope_type='oa_pending_payment'`，键顺序与 gate 的 `(tenant, scope type, scope, source version DESC, updated_at DESC, id DESC)` 完全一致；不得扩大 predicate 让其它页面承担该索引写入或存储成本 |
-| dirty/outbox | runtime queue | 权威 OA sync 的 complete snapshot repository 与 `OAProjectionSyncService` 都不 enqueue 页面 refresh。页面 paid writeback 的 `record_paid_statuses` 同样只更新 PG status/watermark。completed、admission 或 payment-status 的任何真实变化都由各消费页访问时的 canonical source-vector mismatch 触发自身精确 refresh；禁止恢复 OA/Workbench/shared fan-out。 |
-| write result | 前端 | 返回受影响月份/scope hints，`enqueued=false` 且 freshness/barrier targets 为空；重复命令幂等，部分外部成功时明确可重试。当前页随后正常 GET；只有该次 GET non-fresh 时才按 500ms、单 in-flight、最多 60 次继续检查同一个 rows GET；fresh、页面隐藏、卸载、查询变化或 30 秒上限即停止，hidden→visible/focus 不自动恢复，也不调用共享 operation barrier |
-| Audit status | OA 标题附件 | 中文状态与去重样本；内部 code 仅作次级诊断，外部 sync lag 不冒充 integrity pass |
+| rows response | frontend | 固定 `200` canonical JSON：rows/pagination/summary/statistics/filterConfig/filterOptions/appliedFilters/sort/viewMode |
+| detail response | frontend drawer | canonical row hydrate 后复用既有 detail builder；missing=`404`、invalid=`400` |
+| bank candidates | frontend drawer | canonical bank facts + active formal/pending relations；返回 relation status 与服务端 pagination |
+| write result | frontend | 业务结果、affected objects/scopes、冲突/重试信息；不含 read-model refresh/barrier/version metadata |
+| canonical status reconcile | PostgreSQL | 外部写回成功或 already-paid 后幂等记录 payment-status snapshot |
+| pending relation/claim/promotion | PostgreSQL | 继续走现有 command/repository/UoW 与审计边界 |
+| Audit UI | admin frontend | 单次读取 operations Audit；不等待 operation barrier，不参与页面正确性 |
+
+## Snapshot 与查询责任
+
+- `OaPendingPaymentQueryService.rows(...)` 只解析合同和组合结果。
+- `PostgresOaPendingPaymentQueryRepository.snapshot()` 显式执行 `REPEATABLE READ READ ONLY`。
+- 同一 rows 响应的 descriptors、pagination、summary、statistics、status counts 和 filter options 在一个 snapshot 内读取。
+- selector 使用一个 set-based statement 完成过滤、排序、服务端分页与聚合；随后只为当前页批量 hydrate canonical records/relations/bank/invoices/status。
+- 查询次数与 page size 无关；最大 `page_size=200`，禁止逐行/逐组查询和 Python/浏览器全量分页。
+- 详情各自使用一个只读 repeatable-read snapshot，先定位 descriptor，再批量 hydrate 单一 canonical group。
+- 候选抽屉用一个 set-based statement 读取全量月份的 outflow bank facts、active relation status、keyword filter、total 和当前页；不得经 command service 全量加载后 Python 分页。
 
 ## 事实与持久化所有权
 
-- completed OA：`app.oa_applications`，由 OA sync owner 写。
-- in-progress admission：`app.oa_pending_payment_admissions`，由 OA sync owner 权威 replace/delete。
-- payment status：`app.oa_pending_payment_status_snapshots`，由 OA sync 权威 replace/delete；成功的页面写回可通过 `record_paid_statuses` 做幂等增量 reconcile。
-- source watermark：`app.oa_sync_watermarks` 的 `oa_pending_payment_source:<tenant>:<month>`。
-- pending relation / bank claim：`app.oa_pending_payment_bank_relations`、`app.bank_transaction_relation_claims` 及事件表。
-- read model：OA 专属月份 rows/scopes；只由 `OaPendingPaymentSqlProjectionBuilder` 发布。
-- durable refresh truth：`job.outbox_events` 与 `job.read_model_dirty_scopes`；Redis/RabbitMQ 不能替代状态事实源。Redis 只保存通过当前请求 fresh gate 后的 OA 私有版本化 rows payload，不拥有 freshness、版本或失效事实。
-- `all` fan-out inventory 由 worker 一次 SQL 合并当前 tenant 的 canonical OA source watermark、未删除银行流水月份和未删除进项发票月份；不得从既有 read-model scope 反推当前事实库存。只存在银行/进项覆盖事实、且 completed/admission/payment-status 均为空的月份必须发布合法 empty shard。prune 只删除不再属于当前 inventory 的 read-model shard，不删除或伪造 integration watermark。
-- `all` query freshness inventory 继续只组合已发布 OA scope与当前 `pending/processing/failed/dead_lettered` queue scope；已 `done` 的 outbox 历史不属于页面热路径或 version token。页面查询不得为核对标题重新扫描银行/发票 canonical facts。
-- `all` scope 在同一个 freshness statement 中检查跨月份 `row_id` 唯一性；发现重复必须返回 `202/refreshing` 并由 Page Audit 给出跨 scope 样本。fresh 数据直接读取月份 projection，不保留会每次排序并静默吞错的旧 `DISTINCT ON(row_id)` 兼容链。
-
-## 动态 freshness vector
-
-每个月份实际与期望版本至少包含：
-
-- completed OA、in-progress admission、payment-status snapshot 的 source signature/version；
-- 该月 completed OA 涉及的 active canonical Workbench relation `updated_at` 上界、成员数量与确定性 membership digest；digest 绑定 relation case、typed members、mode、version 和 projector 实际消费的 payload。query gate 与 projector 共用 OA source-snapshot owner 的 set-based 版本读取，因此撤回较旧 relation 时，即使仍有更新时间更晚的 active relation 且没有写后 fan-out，也必须在下次访问判定旧 summaries stale；
-- pending relation scope version；
-- canonical relation schema、pending relation scope version，以及本次 `oa_pending_payment` event source version；
-- OA projector/API/read-model contract revision。
-
-覆盖月份没有 OA integration watermark 时，worker只能在 read-model `source_versions` 写入按月份确定性的 coverage-only empty vector（空 completed/admission/payment signatures、snapshot version `0`、relation version 缺失时为 `0`）；不得写 `app.oa_sync_watermarks` 冒充 integration 成功。query freshness 仅在真实 OA source watermark 缺失时接受该 vector；后续真实 watermark 出现必须使 coverage-only shard stale 并触发重建。
-
-输入发票 payment rules 不参与 `InvoiceLifecyclePolicy.evaluate_oa_payment`，因此不虚构 OA dependency/version。若未来业务规则真正进入 OA 付款判定，必须同时增加 owner version、OA access-time source-vector dependency 和测试；不得恢复 writer fan-out。
+- completed OA：`app.oa_applications`，OA sync owner。
+- in-progress admission：`app.oa_pending_payment_admissions`，OA sync owner。
+- payment status：`app.oa_pending_payment_status_snapshots`，OA sync/paid reconcile owner。
+- pending relation / claim：`app.oa_pending_payment_bank_relations`、`app.bank_transaction_relation_claims` 及事件表。
+- formal relation：`app.workbench_pair_relations`，Workbench relation owner。
+- bank/input invoice：`app.bank_transactions`、`app.invoices`，对应 canonical owner。
+- 旧 `read_model.oa_pending_payment_*` 不再是本页面事实源；其暂时保留不代表页面可读取或回退。
 
 ## Writer inventory
 
-| 事实变化 | 支持写入口 | OA 版本/刷新责任 |
+| 事实变化 | 支持入口 | 页面可见性 |
 | --- | --- | --- |
-| external completed OA、admission、payment status | `OAProjectionSyncService` + `PostgresOaPendingPaymentSourceSnapshotRepository.commit_authoritative_snapshot` | 同事务只提交 completed projection + admission/payment-status snapshot + watermark，并返回 change summaries；零 dirty/outbox、零 search/matching/shared fan-out。外部读取失败整轮不提交并记录 failed run；`all` 同步把旧 watermark scopes 纳入 completed 删除比较 |
-| 页面 MySQL paid 写回 | `OaPendingPaymentCommandService` + `record_paid_statuses` | MySQL 幂等写后，同事务更新 PG status 与月份 watermark，但不写 downstream dirty/outbox；PG 失败返回安全重试错误，当前/后续 OA 页面访问通过 source snapshot version mismatch 收敛 |
-| in-progress pending relation create/cancel/promote | `PostgresOaPendingPaymentRelationRepository` / promotion service | 同事务增加 owner relation version与审计；普通页面命令不 enqueue 消费方，OA 页面访问比较 relation source version 后收敛精确月份 |
-| completed Workbench relation confirm/withdraw | `WorkbenchWriteUnitOfWork` | 只写 canonical relation/history/idempotency/audit；OA projector访问时直接读取 canonical relation，不等待 `workbench_relation` read model，也不由 relation 写事务 fan-out OA |
-| 银行导入/更正 | bank canonical owner | 只推进银行事实/source version；OA 页面访问发现 mismatch 后 enqueue 当前精确 scope，projector按 relation member id 批量读取 canonical bank facts |
-| 进项发票导入/更正 | invoice canonical owner | 只推进发票事实/source version；OA 页面访问发现 mismatch 后 enqueue 当前精确 scope，projector按 relation member id 批量读取 canonical invoice facts |
-| 显式初始化/修复 | `runtime_queue_ops enqueue-read-model-refresh --scope oa_pending_payment:all` | 低优先级 all fan-out；月份 inventory 合并当前 tenant 的 `oa_pending_payment_source:<tenant>:<month>` watermarks、未删除银行流水月份和未删除进项发票月份。只有覆盖事实而无 OA source 的月份发布 coverage-only empty vector；不得写 integration watermark，也不用于普通单月写入 |
+| external OA/admission/payment status | OA integration authoritative snapshot | PostgreSQL commit 后下一次页面 GET 可见；请求热路径不访问外部源 |
+| Workbench confirm/withdraw | Workbench UoW | active canonical relation commit 后下一次页面 GET 可见 |
+| pending relation create/cancel/promote | OA pending command/repository | owner transaction commit 后下一次页面 GET 可见 |
+| bank/invoice import or correction | canonical import owners | commit 后下一次页面 GET 可见 |
+| MySQL paid writeback | OA command adapter + PG snapshot reconcile | command 成功后前端重新 GET；PG 失败返回可重试错误 |
 
-禁止直接 SQL 改 canonical facts后不更新 owner version/audit。页面 refresh outbox 只能由访问 freshness boundary 或显式运维 gateway 创建；生产权限、boundary guard 和 Audit 共同防止越界写入。
+任何 writer 都不能要求本页面 freshness enqueue/polling 才能达到正确结果。外部系统未同步到 PostgreSQL 属于 integration lag，不允许通过页面 fallback 绕过。
 
-## Worker 与依赖方向
+## 依赖方向
 
-- 专属 worker：`oa-pending-payment`，只 claim `oa_pending_payment.read_model.refresh`。
-- projector 只依赖 PostgreSQL canonical repositories和 OA read-model port；禁止 Mongo adapter、MySQL payment repository、HTTP/Application或其它页面 read model。
-- `invoice-usage-collection` 只负责 input/output invoice，不注册或 claim OA refresh。
-- query service 只依赖窄 read-model repository、queue、expected source-version provider 与可选 Redis helper；Redis 只经共享 `ReadModelQueryGateway` 进入 gate 后的版本化 OA 私有 payload 路径，禁止完整 live `OaPendingPaymentQueryService`、共享页面 key 或主动跨页面失效。
-- route 只做一次认证、query/header 传递和 HTTP 映射；业务和 SQL 不进入 route。共享 auth policy 不复制到模块，global guard 也不重复包裹本模块路径。
-- OA、银行、发票和多关联详情抽屉必须从当前 OA row 的 `oa.month` 携带 `month` query。detail miss、repository unavailable 或 freshness blocked 只允许 enqueue 该具体月份；缺少合法月份时返回 unavailable/not-found 且零 enqueue，禁止访问 Drawer 触发 `oa_pending_payment:all`。`all` 只允许显式初始化、reapply/repair。
+```text
+route -> query service -> page PostgreSQL repository -> canonical tables
+route -> command service -> existing command/adapters/repositories
+frontend -> page API only
+```
+
+- route 只做 auth、参数转交、HTTP 映射。
+- service 不依赖 `Application`、HTTP header/cookie 或 Flask response。
+- repository 可以知道表结构和 SQL；service 不散落 SQL。
+- 页面不得依赖 Redis、RabbitMQ、runtime worker、readiness、source version 或外部 OA storage。
 
 ## 文件范围
 
 | 层 | 文件 |
 | --- | --- |
 | Frontend | `web/src/pages/OaPendingPaymentsPage.tsx`、`web/src/components/oaPendingPayments/*`、`web/src/features/oaPendingPayments/*` |
-| API/query | `routes_oa_pending_payments.py`、`oa_pending_payment_query_contract.py`、`oa_pending_payment_read_model_service.py`、`oa_pending_payment_read_model_repository.py` |
+| Route/service | `routes_oa_pending_payments.py`、`oa_pending_payment_query_service.py`、`oa_pending_payment_query_contract.py` |
+| Query repository | `postgres_repositories/oa_pending_payment_query.py` |
+| Pure row/detail composition | `oa_pending_payment_projection_rows.py`、`oa_pending_payment_read_model_details.py` |
 | Command | `oa_pending_payment_command_service.py`、`oa_pending_payment_relation_promotion_service.py` |
-| Projection/worker | `oa_pending_payment_projection_rows.py`、`oa_pending_payment_sql_projection.py`、`oa_pending_payment_read_model_refresh.py`、`app/worker.py`、`deploy/oa/bin/finops-ensure-runtime-workers.sh` |
-| Persistence | `postgres_repositories/oa_pending_payment_source_snapshot.py`、`oa_pending_payment_relation.py`、`oa_pending_payment_admission.py`、`read_models.py` |
-| Audit | `postgres_repositories/page_business_audit.py`、`OaPendingPaymentAuditIcon.tsx` |
+| Canonical snapshots | `postgres_repositories/oa_pending_payment_source_snapshot.py`、`oa_pending_payment_relation.py`、`oa_pending_payment_admission.py` |
+| Tests/docs | `tests/test_oa_pending_payment_*`、`web/src/test/OaPendingPayment*`、本目录 |
 
-## 删除条件与禁止回流
+## 已从页面运行时删除
 
-- 旧 `/api/oa-pending-payments/filter-options` 必须保持 404/无 route；负向 contract test 和 boundary guard 可以保留该字符串。
-- 禁止恢复 `all_rows()`、Python 分页全扫、live fallback、state-store/pickle snapshot 或 `_workbench_query_service._oa_adapter` 页面依赖。
-- 禁止恢复已删除的 `oa_pending_payment_service.py`，或让 OA projector重新依赖 `WorkbenchRelationReadFacade` / `workbench_relation_source_versions`。
-- 禁止恢复 `deduped_oa_pending_payment_rows`、`DISTINCT ON(row_id)` 或其它只在 rows 响应中隐藏跨 scope 重复的兼容读取；重复身份必须在 freshness/Audit 边界 fail closed。
-- 禁止普通月份同时 enqueue `oa_pending_payment:all`；all 只能由显式运维/初始化触发。
-- 禁止 `writeback-paid`、`link-bank-transactions`、`record_paid_statuses` 或权威 integration snapshot 恢复 OA/Workbench 写时 enqueue；只有页面访问 freshness boundary 与显式运维路径按各自合同入队。
-- 禁止共享 invoice worker重新注册 OA handler；release helper 必须从既有 shared worker env 精确迁移已退役的 OA flag/event，不能只更新示例文件。
-- 禁止恢复 sync service 的 `list_available_months` / `list_application_records` / `list_all_application_records` 多扫描、adapter fingerprint polling、partial-result fallback 或 snapshot repository 的 Workbench fan-out。
-- 禁止恢复 `/api/oa-pending-payments*` 的 global guard + module route 双重 session 解析；新增本模块端点必须进入 `OaPendingPaymentApiRoutes.route(...)` 的 read/write auth owner，并由全端点权限回归门保护。
-- OA freshness hot-path 索引必须保持 event/scope 私有：dirty latest-version 只覆盖 `scope_type='oa_pending_payment'`，outbox blocking 只覆盖 OA refresh event 的 active/failed 状态；禁止用共享连接池或全 event history 索引改动掩盖页面瓶颈。
-- 数据库 migration、历史实施记录和负向测试不是可执行旧链路，不删除。
+- `OaPendingPaymentReadModelService` rows/detail route dependency。
+- page `read_model_status` / source versions / refresh enqueue / barrier targets。
+- Redis versioned rows payload。
+- `If-None-Match`、ETag、`202 refreshing`、`304`。
+- frontend conditional polling、visibility retry 和 Audit barrier wait。
+- command response 的 `readModelRefresh` envelope。
 
-## 统一部署顺序（本任务不执行）
+旧共享 service/projector/worker 文件本任务不删除；这里只声明它们已退出页面调用链。
 
-1. 一次 release 部署 migrations、API、OA sync、专属 worker 和前端；不保留新旧读路径并行窗口。
-2. 确认 `oa-pending-payment` worker 已启动且 shared invoice worker 不 claim OA event。
-3. enqueue/run `oa.sync:all`，确认 run 成功并核对 `scanned_projection_count`、`scanned_completed_count`、`scanned_in_progress_count`，生成 completed/admission/payment-status canonical snapshot 和 watermarks。
-4. enqueue 低优先级 `oa_pending_payment:all`，等待所有月份 dirty/outbox drain。
-5. 验证 Page Audit pass、writer inventory、queue/worker health，再执行 1000 次 API 与 200 次 mutation 性能验收。
-6. 未达到门槛则回滚 release/worker 配置；新 additive 表可保留，但运行时不得启用旧 live fallback。
+## 共享 HANDOFF
 
-## 页面完整性统计合同
+主控在所有分支合并并确认无调用方后统一处理：
 
-- `GET /api/oa-pending-payments` 的既有主响应增加 `statistics`，统计严格来自 OA 待付款页面自身投影时实际拉取的 OA、银行流水和进项发票全集，不读取统一事实源的汇总结果，也不受搜索、筛选、排序或分页影响。
-- Worker 在同一次月份投影中拉取完整流水/进项库存，按稳定业务身份生成数量和 membership digest；流水 digest 同时绑定 direction，发票 digest 同时绑定 invoice type。统计与 digest 随月份分片原子发布到既有 `raw_payload.statistics` / `source_versions`，不新增表。
-- API freshness 热路径在同一个 set-based query-state SQL 中读取 scope metadata、dirty/outbox，并按请求月份批量重算 `app.bank_transactions` / `app.invoices` 的紧凑 membership digest；不加载页面行、不调用 live query service，也不逐月 N+1。当前 coverage digest 必须与 projection 发布值相等；新增、删除或更新流水/进项发票后即使 writer 零 fan-out，下一次访问也只把真实变化月份判 refreshing。全量查询只有在所有相关分片和覆盖 digest 均存在且 scope fresh 时返回统计，否则 `statistics=null`，禁止用旧统计冒充 fresh。
-- 当前 projector/source contract 为 `2026-07-26-active-relation-membership-v7`；projector 通过 structured repository 的 active-only SQL 读取 canonical relation，source proof 对同一 active eligible relation 集合计算数量与 membership digest，并排除 Turnover 专属 `turnover_manual_closure`。raw payload 中残留的 `status=active` 不能使 structured `status<>active` 的 relation 回流。旧 v6 payload 在访问时按版本判 stale 后重建。
-- `all` rebuild 必须覆盖只有流水或进项发票、没有 OA source watermark 的月份；真实 OA watermark 后到时必须淘汰 coverage-only vector。inventory 缩小时只 prune read-model shard，不能删除 integration 或 canonical facts。
-- 跨 scope 重复 row identity 检查属于独立 Page Audit/发布质量约束，不在正常页面 freshness 请求中执行全表 `GROUP BY`；月度页面的全量标题统计只重复校验紧凑 scope 元数据和版本令牌。
-- Page Audit 在独立只读查询中从 canonical facts、关系事实和投影行重算数量及 membership digest，并与已发布值比较；它只证明页面拉取和投影完整性，不把统一事实源汇总值作为页面统计输入。
+- `read_model_manifest.py` 的 `oa_pending_payment` registration。
+- `runtime_worker_registry.py`、`runtime_worker_handlers.py`、`read_model_scope_policy.py` 中 OA refresh 注册。
+- App Status 全局 registry/Audit 中 OA legacy readiness dependency。
+- deploy/systemd worker env、RabbitMQ event registration。
+- `OaPendingPaymentReadModelService`、read-model repository port、SQL projection/refresh service 和 `read_model.oa_pending_payment_*` tables/indexes/migrations。
+- Redis OA rows cache key/schema。
+- `invoice_lifecycle` 当前对 OA read-model repository 的依赖；必须先迁移 lifecycle，禁止抢删。
+
+## 禁止回流
+
+- 禁止 dual read、shadow/fallback、cache 或页面访问 enqueue。
+- 禁止读取 `workbench_relation` projection 代替 active canonical relation。
+- 禁止从页面请求访问 OA Mongo/MySQL/对象存储。
+- 禁止恢复旧 filter endpoint、全量 `all_rows()`、Python/浏览器分页。
+- 禁止把共享旧 read model 仍存在解释为本页可依赖。
+- 禁止本任务修改全局 cleanup migration 或共享 worker/deploy registry。

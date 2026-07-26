@@ -1,135 +1,144 @@
 # OA 待付款核对状态机
 
-日期：2026-07-25
-
-> 修改业务状态、UI 状态、read model、worker、Audit 或写回流程前必须读取本文件。页面不得自行推断付款状态或 freshness。
+日期：2026-07-27
 
 ## 业务状态
 
-| 状态域 | 状态 | PostgreSQL 页面事实源 | 允许流转 |
-| --- | --- | --- | --- |
-| OA 主行 | `completed` | `app.oa_applications` completed/legacy projection | OA sync 权威更新；不受 in-progress admission 限制 |
-| OA 主行 | `in_progress` | `app.oa_pending_payment_admissions` | 仅由 OA sync 根据有效 `t_payment_simple.flow_id` + OA 当前 workflow replace/delete；完成后离开本状态 |
-| 付款状态 | `unpaid` | fresh OA read model | 无 active linked 付款关系；候选、历史 candidate、金额字段本身不能驱动 paid |
-| 付款状态 | `paid` | fresh OA read model | 存在 active linked relation；金额差异或非支出边仍阻断写回，但不制造第三种付款状态 |
-| OA 外部写回 | `not_written` | payment-status snapshot `pay_status != 1` | 合法 `writeback-paid` 或金额匹配的 bank link 可进入 `written` |
-| OA 外部写回 | `written` | payment-status snapshot `pay_status = 1` | 幂等终态；重复命令不重复写 MySQL，但仍可修复遗漏的 PG snapshot |
-| in-progress relation | `active` | OA pending relation + bank claim | 创建后占用银行流水；OA 完成后 promotion |
-| in-progress relation | `cancelled` | pending relation owner | admission 权威消失或显式撤销后释放 claim |
-| in-progress relation | `promoted` | pending relation history + Workbench active relation | promotion 原子切换 owner；不能同时保留两个 active owner |
+### OA workflow
 
-只有 `paid` / `unpaid` 两种 `paymentStatus`。金额、outflow、flow id 和 relation 完整性是写回前置条件，不是第三种 payment status。
+| 状态 | Canonical 来源 | 页面视图 |
+| --- | --- | --- |
+| `completed` | `app.oa_applications` | 已完成 OA |
+| `in_progress` | `app.oa_pending_payment_admissions` | 进行中 OA |
 
-## OA integration 状态
+页面不读取 Mongo workflow 或 MySQL payment table；外部状态必须先由 OA integration 收敛到 PostgreSQL。
 
-| 状态 | 行为 |
+### Relation
+
+| 状态 | 页面语义 |
 | --- | --- |
-| 外部读取中 | 每个启用 form/scope 只读一次并构造双视图；不改变 PostgreSQL canonical snapshot，不删除旧记录 |
-| 外部读取失败/部分 form 成功/schema 非法 | 整轮失败并记录 failed sync run；不得提交部分集合或把未知集合解释为删除 |
-| 外部读取成功 | `projection_records` 遵守通用导入配置，`admission_records` 固定包含 completed + in-progress；合法 in-progress 草稿未填业务字段仍以稳定 identity 准入，空金额为 `NULL`；同一 PostgreSQL 事务只提交 completed projection、admission、payment-status snapshot 与 source watermark/version，不写任何页面 dirty/outbox |
-| PostgreSQL commit 失败 | 全部回滚；上一次 snapshot 继续是页面可证明事实 |
-| commit 成功且仅 admission/payment-status 变化 | `T0`；不主动刷新页面；OA 待付款页下次条件 GET、访问或重新激活时按 exact month source version 收敛 |
-| commit 成功且 completed canonical 变化 | `T0`；不主动 fan-out；OA 待付款及其它合法 consumers 分别在访问/重新激活时用自己的 fresh gate 收敛 |
+| completed + `app.workbench_pair_relations.status='active'` | 正式 relation evidence |
+| completed + withdrawn/inactive | 未关联；不得由 raw payload 的旧 active 值复活 |
+| in-progress + active pending relation | pending relation evidence |
+| pending relation promoted | 由 promotion owner 写正式 Workbench relation；不得双重展示 |
+| candidate/claim only | 不等于正式支付，不直接驱动 paid 或 writeback |
 
-Mongo/MySQL 变化尚未同步进 PostgreSQL 时属于 integration sync lag。页面和 read model worker 不允许直连外部系统掩盖该延迟。
+`turnover_manual_closure` 不进入本页支付关系。
 
-in-progress 同步当前只保留原始/上下文化附件文件元数据，不解析附件证据、发票或 OCR。completed 保持现有附件处理。未来启用 OCR 必须新增独立版本、队列、回填、失败和 Audit 合同，不能静默改变本状态机。
+### Payment
+
+| 状态 | 业务含义 |
+| --- | --- |
+| `unpaid` | active outflow relation 与 OA 金额未满足既有 lifecycle 判定 |
+| `paid` | active outflow relation 与金额满足既有 lifecycle 判定 |
+| `oaPaymentWriteback.code=written` | PostgreSQL payment-status snapshot 已记录 OA 外部写回结果 |
+
+页面只展示后端给出的结果，不在浏览器重算金额、方向或写回资格。
+
+## 页面读取状态
+
+```text
+idle
+  -> loading
+  -> ready(rows)
+  -> empty
+  -> error
+```
+
+- route mount、query 变化、手工刷新和本页写成功后各发起一次正常 rows GET。
+- `loading`：首屏 skeleton。
+- `ready`：显示 rows、summary、statistics、facets 和分页。
+- `empty`：成功 `200` 且 rows 为空，显示“当前条件下暂无记录”。
+- `error`：网络、HTTP 或 canonical repository 失败，清除旧 rows 并展示可观察错误；用户可手工重试。
+- `refreshing` 仅表示用户已点击手工刷新且该请求正在进行，不是 read-model 状态。
+- 晚到响应不能覆盖更新的 query；unmount/query change 取消旧请求。
+
+不存在页面 `stale/missing/refreshing/fresh` read-model 状态，不存在 `202/304/ETag` 分支，也不存在定时 polling 或 visibility/focus 恢复。
+
+## Rows snapshot
+
+```text
+parse/validate query
+  -> begin REPEATABLE READ READ ONLY
+  -> SQL select descriptors + summary + statistics + facets + total
+  -> batch load current-page canonical facts
+  -> pure row composition
+  -> commit read-only snapshot
+  -> 200 response
+```
+
+任何一步失败都不能返回部分 rows/summary。空 descriptors 不执行 hydrate。
+
+## Detail 状态
+
+```text
+drawer open
+  -> loading
+  -> canonical detail ready
+  -> 404 not found
+  -> error
+```
+
+详情不访问外部 OA，也不等待 read-model worker。relation kind 非法返回 `400`；identifier 不存在返回结构化 `404`。
 
 ## 写回状态机
 
 ### `writeback-paid`
 
-1. 从 PostgreSQL projection 解析 OA 行并读取 active Workbench/pending relation。
-2. 复核 outflow、支出合计等于 OA 金额、可解析 `flow_id`。
-3. 幂等读取/写入 MySQL `t_payment_simple.pay_status=1`。
-4. 无论 MySQL 本次新写还是此前已为 paid，都调用 PostgreSQL `record_paid_statuses(records=...)`。
-5. PG writer 同事务更新 payment-status snapshot、月份 source watermark/version，不写页面 dirty/outbox。
-6. 若步骤 5 失败，返回 `oa_payment_status_snapshot_write_failed`；不声称页面已完成同步。命令可安全重试，下一次 OA sync 也会修复。
-7. 前端收到成功后重跑当前 rows normal GET；若访问 gate 发现 mismatch，页面按 500ms、单 in-flight、最多 60 次检查同一个 rows GET，fresh、页面隐藏、卸载、查询变化或 30 秒上限即停止。写命令本身不等待或返回下游页面重建。
+```text
+validate actor/tenant/payload
+  -> load OA + active relation evidence
+  -> validate workflow/outflow/amount/flow id
+  -> idempotent external MySQL paid write
+  -> idempotent PostgreSQL payment-status snapshot reconcile
+  -> audit/result
+  -> frontend normal rows GET
+```
+
+- already-paid 仍必须确保 PostgreSQL snapshot 已收敛。
+- 外部成功、PG 失败：返回可安全重试错误，不返回成功。
+- 冲突/非法状态保持既有 `409/400` 合同。
+- 成功响应不含 read-model refresh/barrier metadata。
 
 ### `link-bank-transactions`
 
-1. 只允许 in-progress OA 和 outflow bank transaction。
-2. 创建 OA pending relation 与 bank claim，不写 Workbench active relation。
-3. 金额相等且 flow id 合法时执行同一 MySQL + PG paid reconcile。
-4. 关系 owner 和 payment snapshot writer 分别提交 canonical version/audit，不写页面 outbox。
-5. 返回 canonical 结果和信息性 affected scope；前端重跑本页 normal GET，访问 gate 按需精确入队并收敛。
+```text
+validate actor/tenant/payload/idempotency
+  -> validate unclaimed outflow bank rows
+  -> create/update active pending relation + claim + audit
+  -> amount matched ? run paid writeback : keep pending
+  -> optional promotion under existing CAS/conflict rules
+  -> result
+  -> frontend normal rows GET
+```
 
-不做跨 MySQL/PostgreSQL 的分布式事务。外部成功、PG 失败的唯一恢复合同是幂等重试或下一次 OA sync；禁止用 live read/fallback 猜测完成状态。
-
-## UI 状态
-
-| UI 状态 | 触发 | 页面行为 |
-| --- | --- | --- |
-| `loading` | 首次完整 rows 请求 | 显示骨架，不显示历史 snapshot |
-| `ready` | `200` 且 fresh | 展示 rows、summary、filters，并保存当前 query 的 ETag；不启动常驻条件请求 |
-| `checking` | 本次用户触发的 GET 返回 `202/non-fresh` | 旧 rows 已隐藏；当前可见页每 500ms 最多一个请求，最多 60 次 |
-| `unchanged` | `304` | 不更新 rows，不执行完整聚合/渲染 |
-| `refreshing` | `202` / dirty / source mismatch | 立即隐藏旧 rows，展示“新数据正在生成”，进行有界 rows GET；不调用共享 operation barrier |
-| `empty` | fresh `200` 且 total=0 | 真实空态；不得由 `202` 或错误推断 |
-| `error` | rows 请求或合同失败 | 不显示旧 rows；提供明确错误与重试 |
-| `hidden` | document/tab 不可见 | 停止本次重试；恢复可见/focus 不自动请求，用户通过 route 重进、查询变化、浏览器手动刷新或明确重试重新开始 |
-| `mutation_waiting` | 写命令成功 | 命令立即结束后执行本页 normal GET；non-fresh 继续复用同一 rows GET，不等待跨 API barrier |
-
-query、分页、排序、筛选、view mode、认证或 contract revision 变化时，取消旧请求并清除不匹配 ETag；晚到响应不得覆盖新 query。
-
-## Read model / worker 状态
-
-| 状态 | 判定 | API/worker 行为 |
-| --- | --- | --- |
-| `missing` | 月份 scope/source snapshot 不存在 | API `202` + enqueue；不返回 rows |
-| `refreshing` | dirty/outbox pending/processing 或 source mismatch | API `202` + 精确 barrier targets；worker继续处理 |
-| `fresh` | scope 存在、无 blocking dirty/outbox、expected=actual | API `200` 或条件 `304` |
-| `superseded` | event source version 旧于 dirty scope | worker skip；不得读源、发布或清 dirty |
-| `publish_lost_cas` | 构建期间出现更新版本 | 旧发布不清新 dirty；新 event继续处理 |
-| `failed` | projector/publish/outbox处理失败 | retry/failed 可观测；API不得返回旧 rows |
-| `unavailable` | repository/queue/worker依赖缺失 | fail closed，不启用 live fallback |
-
-专属 `oa-pending-payment` worker 只 claim `oa_pending_payment.read_model.refresh`。`all` 是低优先级 fan-out control scope，只用于初始化和显式修复；普通业务 writer 与 OA authoritative sync 都不 enqueue，页面访问 freshness boundary 只 enqueue 当前精确月份。
-
-月份构建顺序：
-
-1. CAS 检查 event source version 仍为当前版本。
-2. 在 PostgreSQL 一致性事务中读取 completed OA、admission、payment status、canonical Workbench relation、pending relation，以及关系成员对应的 bank/invoice canonical facts；不等待其它页面 read model。
-3. 批量构建 rows 与动态 source vector；不得 per-row I/O 或访问 Mongo/MySQL。
-4. 原子发布月份 rows/scope/source vector。
-5. 仅在 dirty 版本未前进时完成 event并清 dirty。
-
-## HTTP 条件读取
-
-- `200`：`ETag` 由 tenant、normalized query fingerprint、contract revision 和 read-model version token组成；响应使用 `Cache-Control: private, no-cache` 与 `Vary: Authorization, Cookie`。
-- `304`：认证、query parsing 和小型 freshness/version gate 已通过，body 为空；禁止 rows count、sort、facet aggregation。
-- `202`：不含旧 rows，返回 `read_model_status=refreshing` 和当前 tenant 的精确月份 `operationBarrierTargets`。
-- 旧 `/api/oa-pending-payments/filter-options` 不存在；`filterConfig` / `filterOptions` 只随 `200 rows` 返回。
+重复提交必须幂等；claim 冲突、版本冲突或正式关系冲突不得半写。
 
 ## Audit 状态
 
-| 证据状态 | 文案 | 行为 |
-| --- | --- | --- |
-| fresh + queue drained + integrity pass | `Audit 通过 · App 内部数据一致` | 可展开证据摘要 |
-| dirty/outbox 活跃 | `Audit 校验中 · 新数据正在生成` | 不判 integrity fail；barrier fresh 后重跑一次 |
-| fresh 后有 issues | `Audit 未通过 · 发现 N 个一致性问题` | 展示前三个去重中文样本；内部 code仅作诊断 |
-| 超时或 refresh failed | `Audit 未通过 · Read model 未在时限内更新` | 展示 scope、queue age/错误摘要 |
-| 请求失败/证据不足 | `Audit 无法完成 · 请查看诊断` | 不显示通过 |
+页面 Audit icon 只在管理员点击时执行一次 operations Audit：
 
-OA wrapper 只覆盖本页面文案和重跑行为；共享 `PageAuditIcon` 与其它页面输出保持不变。Audit 只证明 App 内 PostgreSQL snapshot 一致性，不宣称与此刻外部 Mongo/MySQL 完全相等。
+| Audit 结果 | 页面文案 |
+| --- | --- |
+| pass + proof ready + repeatable-read snapshot | `Audit 通过 · App 内部数据一致` |
+| audit freshness/queue not ready | `Audit 校验中 · 新数据正在生成` |
+| integrity issues | `Audit 未通过 · 发现 N 个一致性问题` |
+| request/proof error | `Audit 无法完成 · 请查看诊断` |
+
+Audit 不调用 operation barrier、不轮询，也不作为 rows 正确性的 gate。全局 Audit 仍登记旧 OA readiness 的清理属于主控 HANDOFF。
 
 ## 禁止状态与回流
 
-- 禁止 stale rows + “后台刷新中”同时展示。
-- 禁止页面/read model worker读取 Mongo/MySQL。
-- 禁止恢复 filter endpoint、`all_rows()`、Python 全量分页 facet、snapshot/pickle fallback或共享 invoice worker OA branch。
-- 禁止普通月份 enqueue `oa_pending_payment:all`。
-- 禁止候选 relation、历史 candidate 或非 outflow edge直接驱动 paid/写回。
-- 禁止把 Flowable instance/request id 或 `t_payment_simple.id` 当 flow id。
+- 禁止 stale rows + “后台刷新中”。
+- 禁止页面请求访问 Mongo/MySQL/对象存储。
+- 禁止 read model、Redis、queue、worker 或 Workbench projection 成为页面事实源。
+- 禁止候选、inflow、inactive relation 直接驱动 paid/写回。
+- 禁止外部写成功、PG reconcile 失败时返回成功。
 
 ## 变更记录
 
 | 日期 | 决策 | 验证责任 |
 | --- | --- | --- |
-| 2026-07-16 | 单一 rows + ETag/304，500ms可见页检查，202立即隐藏旧 rows | API contract、frontend interaction、E2E |
-| 2026-07-16 | OA sync 原子提交 completed/admission/payment snapshot/watermark/outbox | service-layer rollback、migration、integration |
-| 2026-07-16 | OA PG-only projector和专属 worker；shared invoice worker删除 OA branch | worker isolation、dependency guard、regression |
-| 2026-07-16 | 页面写回后幂等 reconcile PG snapshot；解决 MySQL 已变但页面仍旧 | command/service、rollback、retry regression |
-| 2026-07-16 | OA 专属 Audit 中文文案，隔离共享组件 | component、API/Audit、其它页面 regression |
-| 2026-07-17 | 双视图 source batch 隔离通用 status filter；admission-only 只刷新 OA，completed change 才共享 fan-out；in-progress 不解析附件/OCR | adapter/service/repository、fail-closed、真实 PG、架构 guard、三页面生产隔离 |
+| 2026-07-27 | rows/details 迁移为 PostgreSQL canonical direct read；删除页面 freshness/version/cache/polling 合同 | repository/service/API/frontend/integration |
+| 2026-07-27 | 正式关系只读 active `app.workbench_pair_relations`；pending relation 保留独立 owner | canonical relation consistency |
+| 2026-07-27 | 写命令不再返回 `readModelRefresh`，成功后 normal GET | command/API/frontend |
