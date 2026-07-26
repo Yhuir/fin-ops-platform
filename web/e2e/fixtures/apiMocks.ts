@@ -15,7 +15,6 @@ type OaPendingPaymentReadModelMockStatus = "fresh" | "refreshing" | "stale" | "m
 type OutputInvoiceCollectionReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
 type OutputInvoiceReceiptLifecycleState = "none" | "issued" | "voided" | "reissued";
 type PendingInvoiceReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
-type BankDetailReadModelMockStatus = "fresh" | "refreshing" | "stale" | "schema_mismatch" | "missing";
 type CostStatisticsReadModelMockStatus = "fresh" | "refreshing" | "stale" | "failed" | "unavailable";
 type TaxOffsetReadModelMockStatus = "fresh" | "refreshing" | "stale" | "failed" | "missing" | "unavailable";
 type BankFlowRuleBatchReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
@@ -32,7 +31,6 @@ type BankDetailCategoryOverride = {
 };
 type BankAutoTagRulesPayloadOptions = {
   version?: number;
-  readModelStatus?: "fresh" | "refreshing";
   salarySubLabel?: string;
 };
 
@@ -80,13 +78,8 @@ type ApiMockOptions = {
   turnoverLedgerFailuresBeforeSuccess?: number;
   turnoverLedgerReadModelStatus?: TurnoverLedgerReadModelMockStatus;
   turnoverLedgerReadModelStatuses?: TurnoverLedgerReadModelMockStatus[];
-  bankDetailsAccountReadModelStatus?: BankDetailReadModelMockStatus;
-  bankDetailsAccountReadModelStatuses?: BankDetailReadModelMockStatus[];
   bankDetailsClassificationMode?: BankDetailClassificationMockMode;
-  bankDetailsExportReadModelStatus?: BankDetailReadModelMockStatus;
   bankDetailsLargeDataset?: boolean;
-  bankDetailsTransactionReadModelStatus?: BankDetailReadModelMockStatus;
-  bankDetailsTransactionReadModelStatuses?: BankDetailReadModelMockStatus[];
   bankDetailsTransactionsEmpty?: boolean;
   bankDetailsTransactionsTotal?: number;
   batchAccountingInitialSubmitted?: boolean;
@@ -6907,17 +6900,6 @@ function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function sequencedReadModelStatus(
-  sequence: BankDetailReadModelMockStatus[] | undefined,
-  requestIndex: number,
-  fallback: BankDetailReadModelMockStatus | undefined,
-) {
-  if (!sequence?.length) {
-    return fallback ?? "fresh";
-  }
-  return sequence[Math.min(requestIndex, sequence.length - 1)] ?? fallback ?? "fresh";
-}
-
 function turnoverClosureExpectedVersions() {
   return Object.fromEntries(
     Object.entries(turnoverBankRowVersions).map(([rowId, version]) => [
@@ -6960,7 +6942,7 @@ function turnoverClosureMutationPayload() {
   };
 }
 
-function bankAccountsPayload(readModelStatus: BankDetailReadModelMockStatus = "fresh") {
+function bankAccountsPayload() {
   return {
     accounts: [
       {
@@ -6977,8 +6959,6 @@ function bankAccountsPayload(readModelStatus: BankDetailReadModelMockStatus = "f
     total_balance: "130500.50",
     balance_account_count: 1,
     missing_balance_account_count: 0,
-    read_model_status: readModelStatus,
-    balance_read_model_status: readModelStatus,
   };
 }
 
@@ -6991,7 +6971,6 @@ function bankTransactionsPayload(
     largeDataset?: boolean;
     page?: number;
     pageSize?: number;
-    readModelStatus?: BankDetailReadModelMockStatus;
     rowsEmpty?: boolean;
     total?: number;
   } = {},
@@ -7281,7 +7260,6 @@ function bankTransactionsPayload(
         },
       ],
     },
-    read_model_status: options.readModelStatus ?? "fresh",
   };
 }
 
@@ -7388,7 +7366,6 @@ function bankAutoTagRulesPayload(canSave = true, options: BankAutoTagRulesPayloa
     turnover_third_label_options: [],
     turnover_action_type_options: [],
     permissions: { can_save: canSave },
-    read_model_status: options.readModelStatus ?? "fresh",
   };
 }
 
@@ -10050,26 +10027,11 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/bank-details/accounts") {
-      const readModelStatus = sequencedReadModelStatus(
-        options.bankDetailsAccountReadModelStatuses,
-        bankDetailsAccountsRequestCount,
-        options.bankDetailsAccountReadModelStatus,
-      );
       bankDetailsAccountsRequestCount += 1;
-      return json(route, bankAccountsPayload(readModelStatus));
+      return json(route, bankAccountsPayload());
     }
 
     if (path === "/api/bank-details/transactions/export") {
-      const exportReadModelStatus = options.bankDetailsExportReadModelStatus
-        ?? options.bankDetailsTransactionReadModelStatus
-        ?? "fresh";
-      if (exportReadModelStatus !== "fresh") {
-        return json(route, {
-          error: "bank_detail_read_model_not_fresh",
-          message: "银行明细正在刷新，请稍后重试导出。",
-          read_model_status: exportReadModelStatus,
-        }, 409);
-      }
       const filename = `银行明细_${url.searchParams.get("mode") === "account" ? "当前账户" : "全部银行"}_${url.searchParams.get("date_from") ?? "全部"}_${url.searchParams.get("date_to") ?? "全部"}.xlsx`;
       return route.fulfill({
         status: 200,
@@ -10089,11 +10051,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           message: "银行流水暂时无法加载，请稍后重试。",
         }, 503);
       }
-      const readModelStatus = sequencedReadModelStatus(
-        options.bankDetailsTransactionReadModelStatuses,
-        bankDetailsTransactionsRequestCount,
-        options.bankDetailsTransactionReadModelStatus,
-      );
       bankDetailsTransactionsRequestCount += 1;
       const page = Number.parseInt(url.searchParams.get("page") ?? "1", 10);
       const pageSize = Number.parseInt(url.searchParams.get("page_size") ?? "100", 10);
@@ -10106,7 +10063,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           largeDataset: options.bankDetailsLargeDataset,
           page: Number.isFinite(page) ? page : 1,
           pageSize: Number.isFinite(pageSize) ? pageSize : 100,
-          readModelStatus,
           rowsEmpty: options.bankDetailsTransactionsEmpty
             || settingsDataResetCompletedAction === "reset_bank_transactions",
           total: options.bankDetailsTransactionsTotal,
@@ -10141,7 +10097,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         transaction_id: decodeURIComponent(bankCategoryConfirmationMatch[1] ?? ""),
         selected_category_code: bankDetailsCategoryOverride.categoryCode,
         affected_months: ["2026-03"],
-        freshness_targets: [{ read_model_key: "bank_detail", scope_key: "2026-03" }],
       });
     }
 
@@ -10177,26 +10132,18 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         previous_resolution_status: "unmatched",
         assignment_source: "manual",
         affected_months: ["2026-03"],
-        freshness_targets: [{ read_model_key: "bank_detail", scope_key: "2026-03" }],
       });
     }
 
     const canSaveBankAutoTagRules = options.sessionMode !== "read_export_only"
       && options.sessionMode !== "forbidden";
     if (path === "/api/bank-details/auto-tag-rules/reapply") {
-      const targets = [{ read_model_key: "bank_detail", scope_key: "2026-03" }];
       return json(route, {
         ...bankAutoTagRulesPayload(canSaveBankAutoTagRules, {
           version: bankAutoTagRulesVersion,
-          readModelStatus: "refreshing",
           salarySubLabel: bankAutoTagRulesSalarySubLabel,
         }),
-        affected_scope_keys: ["2026-03"],
-        read_model_scope_keys: ["2026-03"],
-        freshness_targets: targets,
-        operation_barrier_targets: targets,
-        refresh_enqueued: true,
-      }, 202);
+      });
     }
 
     if (path === "/api/bank-details/auto-tag-rules") {

@@ -557,7 +557,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 `GET /api/bank-details/accounts`
 
-返回银行明细页左侧账户列表和总余额。余额来自独立账户余额 read model，不从 `read_model.bank_detail_rows` 的自动标签投影聚合。
+返回银行明细页左侧账户列表和总余额。后端在显式 `REPEATABLE READ READ ONLY` snapshot 中，以有界账户级 SQL直接聚合 canonical `app.bank_transactions` 和账户映射；不读取 `read_model.bank_account_balances` 或 `read_model.bank_detail_rows`，不在 Python/浏览器全量聚合。
 
 响应字段：
 
@@ -568,14 +568,13 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 | `total_balances_by_currency` | 按币种汇总的账户最新余额。 |
 | `balance_account_count` | 有最新余额的账户数。 |
 | `missing_balance_account_count` | 没有可用余额的账户数。 |
-| `balance_read_model_status` / `read_model_status` | 账户余额 read model 状态：`fresh`、`refreshing`、`stale`、`schema_mismatch` 或 `missing`。 |
 
 `accounts[*]` 至少包含：
 
 | 字段 | 说明 |
 | --- | --- |
 | `account_identity` | 账户事实身份。优先使用完整账号哈希；缺少完整账号时回退为银行 + 尾号哈希。 |
-| `account_key` | 前端筛选流水使用的稳定 key；与银行明细流水 read model 中的 `account_key` 对齐。 |
+| `account_key` | 前端筛选流水使用的稳定 key；与 transactions direct query 中的 `account_key` 对齐。 |
 | `bank_name` / `account_last4` / `display_name` | 账户展示字段。 |
 | `account_no` / `account_name` | 可选账户原始字段；完整账号只用于身份区分和必要展示，不参与前端自造 key。 |
 | `latest_balance` | 该账户按交易时间排序的最新一笔非空 `balance`。 |
@@ -586,11 +585,13 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 | `transaction_count` | 当前日期范围内该账户流水数量；只影响列表徽标，不参与余额计算。 |
 | `transaction_total_count` | 该账户全部流水数量。 |
 
-日期筛选只影响 `transaction_count`，不改变 `latest_balance`、`total_balance` 或 `total_balances_by_currency`。关键字、分类筛选和自动标签规则变化不调用该接口重新计算账户余额；只有银行流水导入、删除、重导或原始余额字段变化才应触发 `bank_account_balance.read_model.refresh`。
+日期筛选只影响 `transaction_count`，不改变 `latest_balance`、`total_balance` 或 `total_balances_by_currency`。关键字、分类筛选和自动标签规则变化不调用该接口；银行流水导入、删除、重导或原始余额字段变化在事务提交后由下一次 accounts GET 直接可见。响应不携带 read-model status/source/job/barrier。
 
 `GET /api/bank-details/transactions`
 
 返回银行明细流水列表。除基础流水字段、自动标签字段和关系标签外，自动标签候选确认相关字段如下：
+
+rows、`statistics`、`category_counts`、pagination 和当前目标行关系标签来自同一个显式 `REPEATABLE READ READ ONLY` canonical snapshot。筛选、排序和分页在 PostgreSQL 完成；page 从 1 开始，page size 最大 500。正式关系只读取 `app.workbench_pair_relations status=active`，且只按当前页 legacy/canonical bank row IDs 做 bounded overlap；不得读取 Workbench raw payload、`read_model.bank_detail_rows` 或 `read_model.workbench_relation*`。响应不携带 read-model status/source/job/barrier，空 rows 即当前筛选真实空集。
 
 | 字段 | 说明 |
 | --- | --- |
@@ -606,6 +607,10 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 自动候选生成按优先级层级收敛：`内部往来款` priority `1` 先执行并命中即停止；普通规则按 priority 从小到大分桶执行。某个普通 priority 层级一旦存在命中，后端不再检查更低优先级层级；该层级命中一个标签返回 `auto_matched`，命中多个标签返回 `needs_confirmation`，候选列表只包含该层级命中的标签。
 
+`GET /api/bank-details/transactions/export`
+
+复用 transactions 的 canonical filter/category/relation 合同，`mode` 仅接受 `all` 或 `account`。导出不受页面 pagination 限制，但服务端最多读取 `BANK_DETAIL_EXPORT_ROW_LIMIT + 1` 行用于超限判断；超限返回结构化业务错误，不把全量 rows 先发送到浏览器。XLSX 中的 relation 字段只来自目标导出 row IDs 的 active canonical relation overlap。
+
 `POST /api/bank-details/transactions/{transaction_id}/category-confirmation`
 
 从当前自动规则命中的候选标签中确认一个标签。请求体：
@@ -617,11 +622,11 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 }
 ```
 
-后端必须按当前流水和当前自动标签规则重新计算候选集，并校验请求标签存在、启用且属于当前候选集；同一 `category_code` 有多个外部往来第三层候选时，必须同时校验 `category_third_label`。不满足时返回 `400 invalid_category_confirmation_candidate`，不得接受前端伪造的非候选标签。成功后写来源为 `auto_confirmation` 的确认记录、审计记录，并标记银行明细 read model 及相关下游派生数据 dirty/enqueue。
+后端必须按当前流水和当前自动标签规则重新计算候选集，并校验请求标签存在、启用且属于当前候选集；同一 `category_code` 有多个外部往来第三层候选时，必须同时校验 `category_third_label`。不满足时返回 `400 invalid_category_confirmation_candidate`，不得接受前端伪造的非候选标签。成功后写来源为 `auto_confirmation` 的确认记录和审计记录；不创建页面 read-model dirty/outbox，当前页面随后重新 GET。
 
 `DELETE /api/bank-details/transactions/{transaction_id}/category-confirmation`
 
-撤销该流水当前自动候选确认。撤销后写来源为 `auto_confirmation_revoked` 的记录、审计记录，并触发同样的派生数据刷新链路。该接口只撤销候选确认，不恢复旧版“任意人工分类”能力。
+撤销该流水当前自动候选确认。撤销后写来源为 `auto_confirmation_revoked` 的记录和审计记录，当前页面随后重新 GET。该接口只撤销候选确认，不恢复旧版“任意人工分类”能力。
 
 `POST /api/bank-details/transactions/{transaction_id}/category-assignment`
 
@@ -639,11 +644,11 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 }
 ```
 
-后端必须重新计算当前流水的自动标签解析状态；只有当前状态为 `unmatched` 时允许写入来源为 `manual` 的人工分类。请求标签必须存在且处于启用状态；外部往来人工补分类必须携带第三层标签和可由规则解析的动作语义。`needs_confirmation`、`auto_matched`、`internal_transfer` 等状态返回 `400 invalid_manual_category_assignment_target`，不能用该接口绕过候选确认或覆盖确定性自动结果。成功后写审计动作 `bank_detail_category_manually_assigned`，记录 `selected_category_code`、`previous_resolution_status` 和 `assignment_source=manual`，并标记银行明细 read model 及相关下游派生数据 dirty/enqueue。
+后端必须重新计算当前流水的自动标签解析状态；只有当前状态为 `unmatched` 时允许写入来源为 `manual` 的人工分类。请求标签必须存在且处于启用状态；外部往来人工补分类必须携带第三层标签和可由规则解析的动作语义。`needs_confirmation`、`auto_matched`、`internal_transfer` 等状态返回 `400 invalid_manual_category_assignment_target`，不能用该接口绕过候选确认或覆盖确定性自动结果。成功后写审计动作 `bank_detail_category_manually_assigned`，记录 `selected_category_code`、`previous_resolution_status` 和 `assignment_source=manual`；不创建页面 RM fan-out，当前页面随后重新 GET。
 
 `DELETE /api/bank-details/transactions/{transaction_id}/category-assignment`
 
-只清除该流水从 `unmatched` / `待分类` 状态人工补上的 `manual` 分类事实。成功后原 category fact 进入 `cleared`，不得创建 active `unknown` 标签；页面立即回到 `unmatched` / `待分类`，允许重新选标签。成功响应包含 `changed` 和精确 `affected_months`，普通写不返回 operation barrier；银行明细页面通过正常 GET 收敛，并写审计动作 `bank_detail_category_manual_assignment_cleared`。该接口不撤销 `auto_confirmation` 候选确认；候选确认仍必须调用 `/category-confirmation` 的 DELETE，确定性自动分配标签不提供撤销入口。
+只清除该流水从 `unmatched` / `待分类` 状态人工补上的 `manual` 分类事实。成功后原 category fact 进入 `cleared`，不得创建 active `unknown` 标签；页面立即回到 `unmatched` / `待分类`，允许重新选标签。成功响应包含 `changed` 和精确 `affected_months`，不返回 freshness target 或 operation barrier；银行明细页面通过正常 GET 收敛，并写审计动作 `bank_detail_category_manual_assignment_cleared`。该接口不撤销 `auto_confirmation` 候选确认；候选确认仍必须调用 `/category-confirmation` 的 DELETE，确定性自动分配标签不提供撤销入口。
 
 `GET /api/bank-details/auto-tag-rules`
 
@@ -663,7 +668,6 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 | `turnover_third_label_options` | 外部往来流水级可选第三层标签：个人往来、公司往来、银行往来、业务往来。自动标签规则抽屉只读展示这些候选，不保存到规则。 |
 | `turnover_action_type_options` | 外部往来可选台账动作类型。 |
 | `permissions.can_save` | 当前用户是否可以保存。 |
-| `read_model_status` | 可选，说明保存后派生数据是否仍在刷新。 |
 
 `active_rules[*]` 和 `archived_rules[*]` 至少包含：
 
@@ -746,7 +750,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 - `match_fields` 只能使用 `field_options` 中的语义字段，且不能为空。
 - 停用已被待找发票规则、流水规则批量处理或免 OA legacy 批量标签选择引用的标签时，后端同步移除或标记这些引用、写入审计，并在保存成功后触发相关 read model 刷新。
 - 成功后返回与 GET 相同结构，并写审计动作 `bank_auto_tag_rules_updated`。
-- 成功保存只标记派生数据 dirty/enqueue 后台刷新，不在 API 请求热路径同步扫描全量银行流水、流水规则批量处理、免 OA 批次、关联台或待找发票 read model。
+- 成功保存提交 settings CAS/version/audit，不创建银行明细页面 dirty/outbox，也不在 API 请求热路径同步扫描全量银行流水或其它页面；当前页面随后重新 GET。
 
 重新应用当前规则：
 
@@ -754,11 +758,10 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 - 需要银行明细写权限。
 - 不读取请求体，不修改 `bank_transaction_tags`，不递增 `version`。
-- 使用服务器当前已保存的自动标签规则，重新入队 `bank_detail.read_model.refresh`，让后台 worker 重建 `read_model.bank_detail_rows`。
-- 成功返回 `202`，响应主体包含与 GET 相同的规则结构，并附加 `read_model_status="refreshing"`、`read_model_scope_keys` 和 `enqueued_jobs=["bank_detail.read_model.refresh"]`。
-- 成功后写审计动作 `bank_auto_tag_rules_reapply_requested`，metadata 至少包含当前规则 `version`、`scope_keys`、`reason` 和 `enqueued_jobs`。
-- 如果运行时队列不可用或没有任何 scope 入队，返回 `503 bank_auto_tag_rules_reapply_unavailable`，不得返回假成功。
-- 该接口只负责触发银行明细 read model 重新投影；同优先级规则命中多个标签时仍按自动标签规则执行结果进入待确认，不强制选择任一标签。
+- 使用服务器当前已保存的自动标签规则，不修改设置、不入队 read model。
+- 成功返回 `200`，响应主体与 GET 规则结构一致，不包含 read-model status、scope、job、freshness target 或 operation barrier。
+- 成功后写审计动作 `bank_auto_tag_rules_reapply_requested`，metadata 包含当前规则 `version` 和 `reason=canonical_query_reapplied`。
+- 当前页面收到成功后重新 GET transactions；同优先级规则命中多个标签时仍进入待确认，不强制选择任一标签。
 
 文件规则替换：
 
@@ -769,7 +772,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 - 后端用文件内普通规则替换当前普通自动标签规则，保留 `内部往来款` 系统规则；能按主标签+子标签复用的标签沿用原 code，无法复用的生成新 code，不在文件内的旧普通规则归档。
 - 文件内普通规则全部写入 priority `2`，并用 `sort_order` 保留文件顺序；`内部往来款` 仍是固定系统规则 priority `1`。
 - 被归档标签若被待找发票规则、流水规则批量处理或免 OA legacy 批量标签选择引用，后端同步移除或标记引用并审计。
-- 成功后触发 `bank_auto_tag_rules_changed` 生命周期事件和银行明细 read model 刷新。
+- 成功后提交 settings CAS/version/audit；不创建银行明细页面 read-model refresh，当前页面重新 GET。
 
 错误响应保持 JSON envelope：
 

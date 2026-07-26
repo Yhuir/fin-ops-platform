@@ -1,5 +1,4 @@
 import type { BankTransactionTagDictionary } from "../pendingInvoices/types";
-import type { OperationBarrierTarget } from "../operationBarrier/api";
 
 export type BankDetailAccount = {
   accountIdentity?: string | null;
@@ -18,17 +17,12 @@ export type BankDetailAccount = {
   transactionTotalCount?: number;
 };
 
-export type BankDetailReadModelStatus = "fresh" | "refreshing" | "stale" | "schema_mismatch" | "missing";
-
 export type BankDetailAccountsResponse = {
   accounts: BankDetailAccount[];
   totalBalance: string | null;
   balanceAccountCount: number;
   missingBalanceAccountCount: number;
   totalBalancesByCurrency?: Record<string, string>;
-  balanceReadModelStatus?: BankDetailReadModelStatus;
-  readModelStatus?: BankDetailReadModelStatus;
-  cacheStatus?: string | null;
 };
 
 export type BankDetailAccountsRequest = {
@@ -164,8 +158,6 @@ export type BankDetailTransactionsResponse = {
   categoryCounts: BankTransactionCategoryCounts;
   statistics?: BankDetailStatistics;
   tagDictionary?: BankTransactionTagDictionary;
-  readModelStatus?: BankDetailReadModelStatus;
-  cacheStatus?: string | null;
 };
 
 export type BankDetailTransactionsRequest = {
@@ -276,10 +268,6 @@ export type BankAutoTagRulesResponse = {
   permissions: {
     canSave: boolean;
   };
-  readModelStatus?: "fresh" | "refreshing" | string;
-  readModelScopeKeys: string[];
-  freshnessTargets: OperationBarrierTarget[];
-  operationBarrierTargets: OperationBarrierTarget[];
   refreshReason?: "saved" | "reapplied";
 };
 
@@ -297,16 +285,10 @@ export type SaveBankAutoTagRule = {
   rules: BankAutoTagRuleConditions;
 };
 
-export type BankAutoTagRefreshScope = {
-  dateFrom?: string | null;
-  dateTo?: string | null;
-};
-
 export type SaveBankAutoTagRulesRequest = {
   expectedVersion: number;
   activeRules: SaveBankAutoTagRule[];
   archivedRules: SaveBankAutoTagRule[];
-  refreshScope?: BankAutoTagRefreshScope;
 };
 
 export type BankDatePreset =

@@ -111,6 +111,40 @@ class BankTransactionAutoCategoryService:
     def suggestions_by_transaction_id(self, bank_rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         return self.suggest_for_rows(bank_rows)
 
+    def suggestion_for_rule_matches(
+        self,
+        transaction_id: str,
+        definitions: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        """Build the existing public suggestion contract from SQL-matched rules."""
+        matches = [
+            self._suggestion(
+                transaction_id=transaction_id,
+                category_code=str(definition.get("code") or ""),
+                rule_code=str(definition.get("rule_code") or definition.get("code") or ""),
+                reason=f"命中标签 {definition.get('label') or definition.get('code') or ''}",
+                confidence="high",
+                definition=definition,
+            )
+            for definition in definitions
+            if str(definition.get("code") or "").strip()
+        ]
+        if not matches:
+            return None
+        if len(matches) == 1:
+            candidates = self._external_turnover_confirmation_candidates(matches)
+            if candidates:
+                return self._confirmation_suggestion(
+                    transaction_id=transaction_id,
+                    candidates=candidates,
+                    reason="命中外部往来款自动规则，需要确认往来对象类型。",
+                )
+            return matches[0]
+        return self._confirmation_suggestion(
+            transaction_id=transaction_id,
+            candidates=self._expanded_confirmation_candidates(matches),
+        )
+
     def _text_suggestion(self, row: dict[str, Any], *, transaction_id: str) -> dict[str, Any] | None:
         semantic_fields = self._semantic_text_fields(row)
         rules = [

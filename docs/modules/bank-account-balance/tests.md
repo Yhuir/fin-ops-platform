@@ -1,5 +1,16 @@
 # Bank Account Balance 测试矩阵
 
+## 2026-07-27 - Bank Details direct accounts query
+
+- Business core：`tests/test_bank_details_canonical_query.py` 覆盖账户 identity、latest balance、currency、日期范围 count、空账户和无余额语义。
+- Service/repository：覆盖显式 repeatable-read read-only snapshot、固定三次 DB read 与 SQL 聚合；`BANK_ACCOUNT_BALANCE_CANONICAL_ROWS_SQL` 同时被旧 projection builder 和 direct query 复用。
+- API contract：`tests/test_bank_details_routes.py` 覆盖 `/api/bank-details/accounts` 200/空集和旧 status 字段缺失。
+- Read model/worker cleanup：Bank Details 页面不再访问/入队/等待 `bank_account_balance`；旧 manifest/worker/backfill tests 继续保护共享资源，等待主控删除。
+- Frontend/E2E：Bank Details Page/initial/direct-query resilience tests 覆盖 loading、账户显示、真实空集、无 freshness polling。
+- Regression：旧 projection/repository/worker tests 仍需通过，确保本分支复用 SQL 未破坏范围外运维链路。
+
+以下历史条目描述旧页面 read-model 合同，不再是 `/api/bank-details/accounts` 当前运行时事实。
+
 ## 七类测试适用性
 
 | 类别 | 适用性 | 当前入口 / 要求 |

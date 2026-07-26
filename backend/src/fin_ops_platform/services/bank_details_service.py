@@ -149,7 +149,7 @@ class BankDetailsService:
                 [str(payload.get("id") or "") for payload in display_payloads]
             )
             rows = [
-                self._row_payload(
+                self.row_payload(
                     payload,
                     auto_category=auto_categories.get(str(payload.get("id") or "")),
                     relation=relation_tags_by_id.get(str(payload.get("id") or "")),
@@ -184,7 +184,7 @@ class BankDetailsService:
             [str(payload.get("id") or "") for payload in display_payloads]
         )
         rows = [
-            self._row_payload(
+            self.row_payload(
                 payload,
                 auto_category=auto_categories.get(str(payload.get("id") or "")),
                 relation=relation_tags_by_id.get(str(payload.get("id") or "")),
@@ -245,6 +245,9 @@ class BankDetailsService:
         }
 
     def _account_key(self, row: dict[str, Any]) -> str:
+        explicit_key = str(row.get("account_key") or "").strip()
+        if explicit_key:
+            return explicit_key
         bank_name = str(row.get("imported_bank_name") or row.get("bank_name") or "未知银行").strip() or "未知银行"
         account_last4 = str(row.get("imported_bank_last4") or row.get("account_last4") or "")[-4:] or str(row.get("account_no") or "")[-4:] or "unknown"
         normalized_bank = bank_name.lower().replace(" ", "-")
@@ -256,16 +259,21 @@ class BankDetailsService:
             return None
         return max(with_balance, key=lambda row: str(row.get("trade_time") or row.get("txn_date") or ""))
 
-    def _row_payload(
+    def row_payload(
         self,
         row: dict[str, Any],
         *,
+        manual_category: dict[str, Any] | None = None,
         auto_category: dict[str, Any] | None = None,
         relation: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         direction = self._direction(row)
         account = self._account_payload(row)
-        manual_category = self._category_payload(str(row.get("id") or ""))
+        manual_category = (
+            dict(manual_category)
+            if isinstance(manual_category, dict)
+            else self._category_payload(str(row.get("id") or ""))
+        )
         effective_category = resolve_effective_category(manual_category, auto_category)
         effective_code = effective_category["effective_category_code"]
         effective_label = effective_category["effective_category_label"]
@@ -319,6 +327,12 @@ class BankDetailsService:
             "auto_category_evidence": dict(auto_category.get("auto_category_evidence") or {}) if isinstance(auto_category, dict) else {},
             "auto_candidate_category_codes": list(auto_category.get("auto_candidate_category_codes") or []) if isinstance(auto_category, dict) else [],
             "auto_candidate_categories": list(auto_category.get("auto_candidate_categories") or []) if isinstance(auto_category, dict) else [],
+            "internal_transfer_counterpart": (
+                dict(auto_category.get("internal_transfer_counterpart"))
+                if isinstance(auto_category, dict)
+                and isinstance(auto_category.get("internal_transfer_counterpart"), dict)
+                else None
+            ),
             "category_resolution_status": category_resolution_status,
             "category_rule_version": str(auto_category.get("rule_version") or manual_category.get("category_rule_version") or "") if isinstance(auto_category, dict) else str(manual_category.get("category_rule_version") or ""),
             "effective_category_code": effective_code,

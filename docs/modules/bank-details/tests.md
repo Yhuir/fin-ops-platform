@@ -2,6 +2,20 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-07-27 - direct canonical read 迁移
+
+| 类别 | 适用性与本次覆盖 |
+| --- | --- |
+| 1. Business core unit tests | 适用。覆盖自动规则 exact/contains/all/excludes/regex、方向/账户范围、内部转账 `±2 days`、候选确认、人工分类、非法参数、重复/CAS 冲突。 |
+| 2. Service-layer tests | 适用。`tests/test_bank_details_canonical_query.py` 覆盖 snapshot、固定查询次数、SQL 分页/聚合、bounded relation overlap 和 export limit；既有 category writer tests 覆盖持久化/audit/回滚。 |
+| 3. API contract tests | 适用。`tests/test_bank_details_routes.py`、`tests/test_bank_auto_tag_rules_api.py` 覆盖权限、200 direct read、400 参数、空集、写响应和旧 status/job 字段缺失。 |
+| 4. Read model/cache/background job tests | 页面 cleanup 适用。断言 Bank Details 读写零 freshness enqueue/polling/202；共享 worker/RM 测试保留给范围外消费者，未在本分支删除。 |
+| 5. Frontend component and interaction tests | 适用。Bank Details API/Page/Drawer tests 覆盖 loading/empty/error、筛选/排序/分页、导出、权限、写后一次 GET 和无 timer polling。 |
+| 6. End-to-end business-flow integration tests | 适用。Bank Details initial/direct-query resilience/category/auto-rule/export/permission Playwright 场景覆盖页面主链。 |
+| 7. Existing feature regression tests | 适用。保留分类、导出、relation tags、下游旧 source ports 和共享 worker tests，防止本页面迁移破坏 pending/bank-flow/search/turnover/cost。 |
+
+本节取代下方历史记录中的页面 read-model freshness、worker、barrier 和 fan-out 合同；历史条目仅用于追溯当时行为。
+
 ## 2026-07-22 - Phase 27 当前写后零 fan-out 合同
 
 - Business core unit tests：分类确认/撤销、人工补标签/清除、规则 CAS、幂等、非法标签与空变更保持原业务合同。

@@ -465,7 +465,7 @@ describe("AutoTagRulesDrawer", () => {
     await user.click(reapplyButton);
 
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
-    expect(within(drawer).getByText("已提交重新应用，银行明细正在刷新。")).toBeInTheDocument();
+    expect(within(drawer).getByText("重新应用已完成。")).toBeInTheDocument();
     const reapplyCall = fetchMock.mock.calls.find(([input, init]) => (
       new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost").pathname === "/api/bank-details/auto-tag-rules/reapply"
       && String(init?.method || "GET").toUpperCase() === "POST"

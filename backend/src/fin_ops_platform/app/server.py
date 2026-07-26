@@ -94,6 +94,10 @@ from fin_ops_platform.services.bank_details_relation_tag_projection_service impo
 )
 from fin_ops_platform.services.bank_details_service import BankDetailsService
 from fin_ops_platform.services.bank_details_application_service import BankDetailsApplicationService
+from fin_ops_platform.services.bank_details_canonical_query import (
+    BankDetailsCanonicalQueryService,
+    PostgresBankDetailsCanonicalQueryRepository,
+)
 from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
 from fin_ops_platform.services.bank_transaction_category_mutation_writer import (
     BankTransactionCategoryMutationWriter,
@@ -8108,28 +8112,26 @@ class Application:
         storage_backend = str(getattr(state_store, "storage_backend", "") or "").strip()
         category_store = state_store if storage_backend != "postgres" else None
         category_mutation_writer = self._bank_transaction_category_mutation_writer()
+        connection = (
+            getattr(state_store, "_sql_read_connection", None)
+            or getattr(state_store, "_connection", None)
+        )
+        query_service = (
+            BankDetailsCanonicalQueryService(
+                PostgresBankDetailsCanonicalQueryRepository(connection)
+            )
+            if connection is not None
+            else None
+        )
         return BankDetailsApplicationService(
+            query_service=query_service,
             app_settings_service=getattr(self, "_app_settings_service", SimpleNamespace(get_bank_auto_tag_rules_payload=lambda **_kwargs: {"version": 1, "active_rules": []})),
             bank_transaction_category_service=getattr(self, "_bank_transaction_category_service", SimpleNamespace(snapshot=lambda: {})),
             bank_transaction_auto_category_service=getattr(self, "_bank_transaction_auto_category_service", SimpleNamespace(current_rule_version=lambda: 1, suggest_for_rows=lambda _rows: {})),
             audit_service=getattr(self, "_audit_service", SimpleNamespace(record_action=lambda **_kwargs: None)),
             bank_transaction_category_store=category_store,
-            bank_detail_sql_read_repository=getattr(self, "_bank_detail_sql_read_repository", None),
-            bank_account_balance_read_model_repository=getattr(self, "_bank_account_balance_sql_read_repository", None),
-            runtime_repositories=getattr(self, "_runtime_repositories", None),
             affected_months_provider=getattr(self, "_bank_transaction_category_affected_months", lambda _transaction_ids: []),
-            available_month_scope_keys_provider=(
-                self._bank_detail_available_month_scope_provider().scope_keys
-                if hasattr(self, "_import_service")
-                else lambda: []
-            ),
-            enqueue_bank_account_balance_refresh=self._bank_account_balance_read_model_refresh_producer().enqueue_all,
             suggestion_provider=suggestion_provider if callable(suggestion_provider) else None,
-            bank_transaction_tags_provider=getattr(
-                getattr(self, "_bank_details_service", None),
-                "_bank_transaction_tags_payload",
-                lambda: {},
-            ),
             category_mutation_writer=category_mutation_writer,
         )
 
