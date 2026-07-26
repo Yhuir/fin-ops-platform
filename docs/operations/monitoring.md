@@ -628,6 +628,8 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_e2e_smo
 
 说明：`write_operation_scenario_discovery --limit 1` 用来生成每类 operation 最多 1 条最小闭环 scenario；
 `write_operation_e2e_smoke` 的写后 SLO 事件读取会按当前 scenario 的 operation expectation 过滤 outbox，并保持有效采样窗口下限。runner 在 mutation 成功后先并发执行 consumer 的正常页面 GET，再执行 zero-fan-out 审计，避免验证器自身阻塞访问触发。每个 consumer 的 `target_ms` 同时是单次 fresh HTTP 上限和该 consumer 首次访问到 fresh、业务断言通过的总耗时上限；后一计时包含 exact enqueue、worker、依赖和重试，不能只用最后一次快速 GET 冒充收敛通过。`operation_commit_to_visible_ms` 仅保留为端到端观察值。
+
+bank+OA+invoice 的 Cost 证明允许一个 exact scope 用 `/rows == []` 表达受项目范围过滤后的确定空集，但 active checkpoint 仍必须在另一个 exact scope 断言 `project_name`、`project_id`、`expense_type` 或 `cost_allocations`，并绑定 test-owned fixture 身份；空集不能单独替代关系语义证明。
 因此主控 workflow 可以继续使用最小 scenario 输入；审计会拒绝同一写事务产生的任何普通页面 refresh，并由 post API probes 验证页面访问时收敛。
 
 执行前要求：

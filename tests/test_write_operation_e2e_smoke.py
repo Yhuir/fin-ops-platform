@@ -1556,6 +1556,96 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 2,
             )
 
+    def test_bank_oa_relation_impact_cost_probe_allows_empty_active_scope_with_exact_all_scope_proof(self) -> None:
+        scenario = _raw_bank_oa_invoice_scenario(
+            "cost-empty-active-and-all",
+            "cost-empty-active-and-all",
+        )
+        _set_bank_oa_cost_probe(
+            scenario,
+            view="project",
+            project_scope="active",
+            include_semantic_assertion=True,
+        )
+        for checkpoint in [
+            *scenario["checkpoints"],  # type: ignore[index]
+            scenario["recovery_checkpoint"],
+        ]:
+            active_consumer = next(
+                consumer
+                for consumer in checkpoint["consumers"]
+                if consumer["page_key"] == "cost-statistics"
+            )
+            all_consumer = json.loads(json.dumps(active_consumer))
+            all_consumer["name"] = f"{all_consumer['name']}-all"
+            all_consumer["path"] = all_consumer["path"].replace(
+                "project_scope=active",
+                "project_scope=all",
+            )
+            checkpoint["consumers"].append(all_consumer)
+            active_consumer["assertions"] = [{"pointer": "/rows", "equals": []}]
+
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "scenario.json"
+            path.write_text(json.dumps([scenario]), encoding="utf-8")
+            loaded = write_operation_e2e_smoke.load_scenarios(
+                path,
+                http_target_ms=1000,
+            )[0]
+
+        for checkpoint in (*loaded.checkpoints, loaded.recovery_checkpoint):
+            assert checkpoint is not None
+            active_consumer = next(
+                consumer
+                for consumer in checkpoint.consumers
+                if consumer.page_key == "cost-statistics"
+                and "project_scope=active" in consumer.probe.path
+            )
+            self.assertEqual(
+                active_consumer.assertions,
+                (
+                    write_operation_e2e_smoke.JsonPointerAssertion(
+                        "/rows",
+                        "equals",
+                        [],
+                    ),
+                ),
+            )
+
+    def test_bank_oa_relation_impact_cost_probe_rejects_only_empty_active_scopes(self) -> None:
+        scenario = _raw_bank_oa_invoice_scenario(
+            "cost-only-empty-active",
+            "cost-only-empty-active",
+        )
+        _set_bank_oa_cost_probe(
+            scenario,
+            view="project",
+            project_scope="active",
+            include_semantic_assertion=True,
+        )
+        for checkpoint in [
+            *scenario["checkpoints"],  # type: ignore[index]
+            scenario["recovery_checkpoint"],
+        ]:
+            cost_consumer = next(
+                consumer
+                for consumer in checkpoint["consumers"]
+                if consumer["page_key"] == "cost-statistics"
+            )
+            cost_consumer["assertions"] = [{"pointer": "/rows", "equals": []}]
+
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "scenario.json"
+            path.write_text(json.dumps([scenario]), encoding="utf-8")
+            with self.assertRaisesRegex(
+                ValueError,
+                "active Cost proof must include a relation-derived semantic field",
+            ):
+                write_operation_e2e_smoke.load_scenarios(
+                    path,
+                    http_target_ms=1000,
+                )
+
     def test_reversible_scenario_matches_registered_shape_consumers_and_bounded_rows(self) -> None:
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "scenario.json"
