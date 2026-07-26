@@ -52,45 +52,6 @@ const initialQuery: OaPendingPaymentQuery = {
 };
 
 const BANK_CANDIDATE_PAGE_SIZE = 100;
-const CONDITIONAL_REFRESH_INTERVAL_MS = 500;
-const CONDITIONAL_REFRESH_MAX_ATTEMPTS = 60;
-
-const readModelStatusPriority = ["unavailable", "schema_mismatch", "missing", "failed", "stale", "refreshing", "fresh"];
-
-type ReadModelStatusPayload = {
-  readModelStatus?: string | null;
-  read_model_status?: string | null;
-};
-
-function readModelStatusFromPayloads(...payloads: ReadModelStatusPayload[]): string {
-  const statuses = payloads
-    .map((payload) => (payload.readModelStatus ?? payload.read_model_status ?? "").trim().toLowerCase())
-    .filter(Boolean);
-  if (statuses.length === 0) {
-    return "refreshing";
-  }
-  const knownStatuses = statuses.filter((status) => readModelStatusPriority.includes(status));
-  if (knownStatuses.length > 0) {
-    return knownStatuses.sort((left, right) => (
-      readModelStatusPriority.indexOf(left) - readModelStatusPriority.indexOf(right)
-    ))[0];
-  }
-  return statuses.find((status) => status !== "fresh") ?? "refreshing";
-}
-
-function isReadModelFresh(status: string) {
-  return status === "fresh";
-}
-
-function readModelStatusTitle(status: string) {
-  if (status === "stale") {
-    return "OA 待付款核对数据不是最新";
-  }
-  if (status === "failed" || status === "unavailable") {
-    return "OA 待付款核对数据暂不可用";
-  }
-  return "OA 待付款核对数据正在刷新";
-}
 
 function finiteCount(value: unknown, fallback = 0) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
@@ -113,7 +74,6 @@ export default function OaPendingPaymentsPage() {
   const [statistics, setStatistics] = useState<OaPendingPaymentStatistics | null>(null);
   const [filterConfigs, setFilterConfigs] = useState<OaPendingPaymentFieldConfig[]>([]);
   const [filterOptions, setFilterOptions] = useState<Record<string, OaPendingPaymentFilterOption[]>>({});
-  const [readModelStatus, setReadModelStatus] = useState("refreshing");
   const [keywordDraft, setKeywordDraft] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -125,13 +85,10 @@ export default function OaPendingPaymentsPage() {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [bankLinkDrawerOpen, setBankLinkDrawerOpen] = useState(false);
   const [writingBackOaRowIds, setWritingBackOaRowIds] = useState<Set<string>>(() => new Set());
-  const [conditionalPollingEnabled, setConditionalPollingEnabled] = useState(false);
   const requestIdRef = useRef(0);
-  const etagRef = useRef<string | null>(null);
-  const conditionalAttemptRef = useRef(0);
   const selectedOaRowIdList = useMemo(() => [...selectedOaRowIds], [selectedOaRowIds]);
 
-  const clearVisibleReadModel = useCallback(() => {
+  const clearVisibleRows = useCallback(() => {
     setRows([]);
     setTotal(0);
     setSummary({ rowCount: 0 });
@@ -142,18 +99,16 @@ export default function OaPendingPaymentsPage() {
 
   const applyRowsPayload = useCallback((payload: OaPendingPaymentRowsResponse) => {
     const payloadTotal = finiteCount(payload.pagination?.total);
-    const payloadReadModelStatus = readModelStatusFromPayloads(payload);
     setRows(payload.rows ?? []);
     setTotal(payloadTotal);
     setSummary(normalizeSummary(payload.summary, payloadTotal));
-    setStatistics(isReadModelFresh(payloadReadModelStatus) ? payload.statistics ?? null : null);
+    setStatistics(payload.statistics ?? null);
     setFilterConfigs(payload.filterConfig ?? []);
     setFilterOptions(payload.filterOptions ?? {});
-    setReadModelStatus(payloadReadModelStatus);
   }, []);
 
   const loadRows = useCallback(async (
-    mode: "reset" | "refresh" | "conditional",
+    mode: "reset" | "refresh",
     signal?: AbortSignal,
   ) => {
     const requestId = requestIdRef.current + 1;
@@ -163,37 +118,18 @@ export default function OaPendingPaymentsPage() {
     } else if (mode === "refresh") {
       setRefreshing(true);
     }
-    if (mode !== "conditional") {
-      conditionalAttemptRef.current = 0;
-      setConditionalPollingEnabled(false);
-      setError(null);
-    }
+    setError(null);
     try {
-      const result = await fetchOaPendingPaymentRows({
-        ...query,
-        etag: mode === "conditional" ? etagRef.current ?? undefined : undefined,
-        signal,
-      });
-      if (signal?.aborted || requestId !== requestIdRef.current || result.status === "not_modified") {
+      const payload = await fetchOaPendingPaymentRows({ ...query, signal });
+      if (signal?.aborted || requestId !== requestIdRef.current) {
         return;
       }
-      etagRef.current = result.etag;
-      const responseStatus = readModelStatusFromPayloads(result.payload);
-      if (result.status === "refreshing" || !isReadModelFresh(responseStatus)) {
-        clearVisibleReadModel();
-        setReadModelStatus(responseStatus === "fresh" ? "refreshing" : responseStatus);
-        setConditionalPollingEnabled(true);
-        return;
-      }
-      applyRowsPayload(result.payload);
-      setConditionalPollingEnabled(false);
+      applyRowsPayload(payload);
     } catch (caught: unknown) {
       if (signal?.aborted || requestId !== requestIdRef.current) {
         return;
       }
-      clearVisibleReadModel();
-      setReadModelStatus("unavailable");
-      setConditionalPollingEnabled(false);
+      clearVisibleRows();
       setError(caught instanceof Error ? caught.message : "OA 待付款核对加载失败。");
     } finally {
       if (requestId === requestIdRef.current) {
@@ -201,58 +137,16 @@ export default function OaPendingPaymentsPage() {
         setRefreshing(false);
       }
     }
-  }, [applyRowsPayload, clearVisibleReadModel, query]);
+  }, [applyRowsPayload, clearVisibleRows, query]);
 
   useEffect(() => {
     if (!active) {
       return undefined;
     }
     const controller = new AbortController();
-    etagRef.current = null;
-    setConditionalPollingEnabled(false);
     void loadRows("reset", controller.signal);
     return () => controller.abort();
   }, [active, activationGeneration, loadRows]);
-
-  useEffect(() => {
-    if (!active || !conditionalPollingEnabled) {
-      return undefined;
-    }
-    let controller: AbortController | null = null;
-    let inFlight = false;
-    let disposed = false;
-
-    const checkForFreshRows = async () => {
-      if (disposed || inFlight) {
-        return;
-      }
-      if (
-        document.visibilityState !== "visible"
-        || conditionalAttemptRef.current >= CONDITIONAL_REFRESH_MAX_ATTEMPTS
-      ) {
-        setConditionalPollingEnabled(false);
-        controller?.abort();
-        return;
-      }
-      inFlight = true;
-      conditionalAttemptRef.current += 1;
-      controller = new AbortController();
-      try {
-        await loadRows("conditional", controller.signal);
-      } finally {
-        inFlight = false;
-        controller = null;
-      }
-    };
-    const intervalId = window.setInterval(() => {
-      void checkForFreshRows();
-    }, CONDITIONAL_REFRESH_INTERVAL_MS);
-    return () => {
-      disposed = true;
-      window.clearInterval(intervalId);
-      controller?.abort();
-    };
-  }, [active, conditionalPollingEnabled, loadRows]);
 
   const handleKeywordSubmit = useCallback(() => {
     setQuery((current) => ({ ...current, page: 1, keyword: keywordDraft.trim() }));
@@ -391,34 +285,30 @@ export default function OaPendingPaymentsPage() {
   ), [canMutateData, loadRows, loading, query.viewMode, refreshing, selectedOaRowIds.size]);
   const visibleError = error ?? actionError;
   const isEmpty = !loading && !refreshing && !visibleError && rows.length === 0;
-  const showReadModelState = isEmpty && !isReadModelFresh(readModelStatus);
   const completedCountLabel = formatViewCount(summary.viewCounts?.completed);
   const inProgressCountLabel = formatViewCount(summary.viewCounts?.in_progress);
-  const visibleStatistics = isReadModelFresh(readModelStatus) ? statistics : null;
   const titleAccessory = (
     <div className="page-title-accessory-group">
       <PageStatisticsPopover
         ariaLabel="OA 待付款核对数据统计"
         loading={loading && !statistics}
         coreItems={[
-          { label: "OA", value: visibleStatistics?.oa_count, unit: "条" },
-          { label: "流水", value: visibleStatistics?.bank_transaction_count, unit: "笔" },
-          { label: "进项发票", value: visibleStatistics?.input_invoice_count, unit: "张" },
+          { label: "OA", value: statistics?.oa_count, unit: "条" },
+          { label: "流水", value: statistics?.bank_transaction_count, unit: "笔" },
+          { label: "进项发票", value: statistics?.input_invoice_count, unit: "张" },
         ]}
         detailItems={[
-          { label: "已付款 OA", value: visibleStatistics?.paid_oa_count, unit: "条", tone: "success" },
-          { label: "已完成", value: visibleStatistics?.completed_oa_count, unit: "条", tone: "success" },
-          { label: "进行中", value: visibleStatistics?.in_progress_oa_count, unit: "条" },
-          { label: "支出流水", value: visibleStatistics?.expense_transaction_count, unit: "笔", tone: "expense" },
-          { label: "收入流水", value: visibleStatistics?.income_transaction_count, unit: "笔", tone: "income" },
-          { label: "未付款", value: visibleStatistics?.unpaid_oa_count, unit: "条", tone: "warning" },
-          { label: "已关联流水的 OA", value: visibleStatistics?.linked_bank_oa_count, unit: "条" },
-          { label: "已关联进项票的 OA", value: visibleStatistics?.linked_input_invoice_oa_count, unit: "条" },
+          { label: "已付款 OA", value: statistics?.paid_oa_count, unit: "条", tone: "success" },
+          { label: "已完成", value: statistics?.completed_oa_count, unit: "条", tone: "success" },
+          { label: "进行中", value: statistics?.in_progress_oa_count, unit: "条" },
+          { label: "支出流水", value: statistics?.expense_transaction_count, unit: "笔", tone: "expense" },
+          { label: "收入流水", value: statistics?.income_transaction_count, unit: "笔", tone: "income" },
+          { label: "未付款", value: statistics?.unpaid_oa_count, unit: "条", tone: "warning" },
+          { label: "已关联流水的 OA", value: statistics?.linked_bank_oa_count, unit: "条" },
+          { label: "已关联进项票的 OA", value: statistics?.linked_input_invoice_oa_count, unit: "条" },
         ]}
       />
-      {canAdminAccess ? (
-        <OaPendingPaymentAuditIcon readModelStatus={readModelStatus} scopeKey={query.month || "all"} />
-      ) : null}
+      {canAdminAccess ? <OaPendingPaymentAuditIcon /> : null}
     </div>
   );
 
@@ -498,12 +388,7 @@ export default function OaPendingPaymentsPage() {
                     当前账号仅支持查看和导出，不能自动写回 OA 或关联支出流水。
                   </StatePanel>
                 ) : null}
-                {showReadModelState ? (
-                  <StatePanel tone={readModelStatus === "refreshing" ? "loading" : "warning"} title={readModelStatusTitle(readModelStatus)} compact>
-                    当前数据仍在刷新或等待后台任务完成，请稍后重试。
-                  </StatePanel>
-                ) : null}
-                {isEmpty && !showReadModelState ? <StatePanel tone="empty" compact>当前条件下暂无记录。</StatePanel> : null}
+                {isEmpty ? <StatePanel tone="empty" compact>当前条件下暂无记录。</StatePanel> : null}
                 <OaPendingPaymentsTable
                   rows={rows}
                   page={query.page}

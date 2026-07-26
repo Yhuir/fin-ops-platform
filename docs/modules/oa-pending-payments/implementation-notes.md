@@ -1,5 +1,14 @@
 # OA待付款核对 实施记录
 
+## 2026-07-27 - 页面 PostgreSQL canonical facts 直读迁移
+
+- 页面 rows/details 从 `OaPendingPaymentReadModelService` 切换到页面专属 `OaPendingPaymentQueryService` + `PostgresOaPendingPaymentQueryRepository`。同一 rows 响应在一个显式 `REPEATABLE READ READ ONLY` snapshot 内读取 canonical OA/admission/payment status、active pending/formal relations、银行和进项发票事实；SQL 完成过滤、排序、服务端分页、summary、statistics 和 facets，当前页再固定次数批量 hydrate。
+- 正式关系只读 `app.workbench_pair_relations.status='active'`，不读取 Workbench page payload 或 `workbench_relation` projection。页面请求热路径不访问 OA Mongo/MySQL、Redis、queue、worker 或对象存储。
+- 删除页面 `read_model_status`、source versions、refresh enqueue、Redis versioned payload、ETag、202/304、条件 polling、visibility retry 和 Audit barrier wait。保留 loading/empty/error、手工刷新、晚响应隔离和写后 normal GET。
+- 写命令继续保留权限、tenant、claim/promotion、审计、幂等、CAS/冲突和外部适配器；响应删除 `readModelRefresh`，外部写回后仍幂等收敛 PostgreSQL payment-status snapshot。
+- `bank-transaction-candidates` 从 command service 的 `_import_service` 全量 Python 过滤/分页迁到 page query repository；单条 SQL 读取 canonical outflow bank facts 和 active formal/pending relations，并保留四个 relation status、全部月份、keyword、repeated `oa_row_ids` 回显和服务端分页合同。
+- 共享 OA read model/projector/worker/registry 本分支不删除：`invoice_lifecycle` 仍有依赖，且全局 registry/deploy cleanup 由主控统一完成。
+
 ## 2026-07-26 - active relation membership freshness 证明
 
 - 根因补强：仅记录 relation `updated_at` 上界无法识别“撤回较旧 relation、较新的 active relation 仍保持同一最大时间”这一集合成员变化，旧 OA summaries 因而可能继续被判 fresh。

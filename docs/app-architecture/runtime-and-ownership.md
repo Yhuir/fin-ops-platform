@@ -106,3 +106,11 @@ OA 付款算法不读取待找发票规则，因此 OA 页面不因该规则保�
 成本统计不再消费任何页面 read model。explorer、详情和导出均由 `CostStatisticsQueryService` 调用 canonical repository，在一个 `REPEATABLE READ READ ONLY` 数据库快照内读取银行流水、OA、正式配对关系、标签与设置，再由无 I/O policy 生成五种视图。
 
 页面访问或浏览器刷新只发起本页面 API；不读取 Workbench/Bank Detail 页面 payload，不经过 freshness/version/dirty/outbox/worker，不产生跨页面 fan-out。页面打开期间不自动订阅变化；用户再次刷新读取最新已提交事实。旧 Cost projection、parent/shard、Redis、worker 和 scope 状态由 migration `0126` 退出并删除。
+
+### OA 待付款 direct canonical read boundary
+
+OA 待付款 rows、summary、statistics、facets 和当前页 hydrate 由页面专属 query service/repository 在一个 `REPEATABLE READ READ ONLY` PostgreSQL snapshot 中完成。completed OA 读取 `app.oa_applications`，in-progress 读取 tenant-scoped admission，支付状态读取 PostgreSQL snapshot；正式关系只读取 `app.workbench_pair_relations.status='active'`，pending relation读取本模块 canonical owner。
+
+页面访问不经过 OA read-model freshness/version/dirty/outbox/Redis/worker，也不读取 Workbench page payload或 `workbench_relation` projection。前端没有 `202/304/ETag` 或 polling；route进入、query变化、手工刷新和本页写成功后各执行 normal GET。外部 OA MySQL写回继续走 command/adapter，并在 PostgreSQL payment snapshot 中幂等收敛；页面 GET 不访问外部源。
+
+旧 `oa_pending_payment` projection/worker/readiness 暂因 `invoice_lifecycle` 等共享消费者保留，但不是页面事实源；其最终删除必须由统一 cleanup 在所有消费者迁移后执行。

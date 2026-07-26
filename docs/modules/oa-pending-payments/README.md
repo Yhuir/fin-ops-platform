@@ -3,7 +3,7 @@
 - Module key：`oa-pending-payments`
 - Route：`/oa-pending-payments`
 - Page key：`oa-pending-payments`
-- 当前状态：本地实现已闭环，等待统一部署、回填和生产性能验收
+- 当前状态：页面 PostgreSQL canonical facts 直读已在本地实现；待主控合并、统一部署和生产验证。
 
 ## 修改前必读
 
@@ -11,92 +11,83 @@
 - `docs/modules/oa-pending-payments/state-machine.md`
 - `docs/modules/oa-pending-payments/tests.md`
 - `docs/modules/oa-pending-payments/performance-integrity-design.md`
-- `docs/architecture/module-boundaries/read-model-contracts.md`
-- `docs/operations/runtime-worker-governance.md`
+- `docs/modules/oa-integration/boundary-io.md`
+- `docs/modules/workbench-relations/boundary-io.md`
+- `docs/modules/input-invoice-usage/boundary-io.md`
+- `docs/modules/permissions-and-audit/boundary-io.md`
 
 ## 代码入口
 
 - 前端：`web/src/pages/OaPendingPaymentsPage.tsx`、`web/src/components/oaPendingPayments/*`、`web/src/features/oaPendingPayments/*`
-- API：`backend/src/fin_ops_platform/app/routes_oa_pending_payments.py`
-- 查询合同：`oa_pending_payment_query_contract.py`、`oa_pending_payment_read_model_service.py`、`oa_pending_payment_read_model_repository.py`
-- 投影：`oa_pending_payment_sql_projection.py`、`oa_pending_payment_read_model_refresh.py`
-- 纯行组装：`oa_pending_payment_projection_rows.py`
+- API route：`backend/src/fin_ops_platform/app/routes_oa_pending_payments.py`
+- 页面 query service：`backend/src/fin_ops_platform/services/oa_pending_payment_query_service.py`
+- 页面 PostgreSQL repository：`backend/src/fin_ops_platform/services/postgres_repositories/oa_pending_payment_query.py`
+- 查询合同与纯组装：`oa_pending_payment_query_contract.py`、`oa_pending_payment_projection_rows.py`、`oa_pending_payment_read_model_details.py`
 - 命令：`oa_pending_payment_command_service.py`、`oa_pending_payment_relation_promotion_service.py`
-- PostgreSQL owner：`postgres_repositories/oa_pending_payment_source_snapshot.py`、`postgres_repositories/oa_pending_payment_relation.py`、`postgres_repositories/oa_pending_payment_admission.py`
-- OA integration：`oa_projection_sync.py`、`mongo_oa_adapter.py`、`oa_payment_status_service.py`
+- Canonical snapshot owners：`postgres_repositories/oa_pending_payment_source_snapshot.py`、`oa_pending_payment_relation.py`、`oa_pending_payment_admission.py`
 - Audit：`postgres_repositories/page_business_audit.py`、`web/src/components/oaPendingPayments/OaPendingPaymentAuditIcon.tsx`
 
-## 当前有效链路
+## 当前有效读链路
 
 ```text
-OA Mongo / t_payment_simple
-  -> OA integration sync
-  -> PostgreSQL completed OA + admission + payment-status snapshot + source watermark
-Workbench confirm / withdraw
-  -> 同一业务事务只提交 canonical relation/version/audit，零页面 dirty/outbox
-route 进入/重进、查询变化、浏览器手动刷新、明确重试或本页写后 reconcile
-  -> OA fresh gate 比较 exact month source vector；mismatch 才经 gateway 去重入队
-  -> oa-pending-payment 专属 worker直接读取 canonical relation与关联银行/发票事实（仅 PostgreSQL）
-  -> 纯内存行组装 + 单批次月份发布
-  -> 月份 read model 原子发布/CAS
-  -> fresh gate
-  -> 单一 rows 聚合 API（rows + summary + filterOptions + ETag）
-  -> 只有本次 GET 返回 202/non-fresh 时，当前可见页才以 500ms 单请求有界重试
-  -> fresh、30 秒上限、页面隐藏、卸载或查询变化时停止
+browser
+  -> GET /api/oa-pending-payments/rows
+  -> route：单次鉴权、参数转交、HTTP 映射
+  -> OaPendingPaymentQueryService
+  -> PostgresOaPendingPaymentQueryRepository
+  -> REPEATABLE READ / READ ONLY snapshot
+     -> completed OA + in-progress admission + payment-status snapshots
+     -> active pending relations
+     -> app.workbench_pair_relations(status=active)
+     -> canonical bank/input-invoice facts
+     -> SQL filters/sort/paging/summary/facets + 当前页批量 hydrate
+  -> 200 canonical JSON
 ```
 
-页面热路径和 read model worker 都不得访问 Mongo/MySQL。外部系统变化尚未进入 PostgreSQL 时，属于 OA sync lag；一旦 PostgreSQL canonical snapshot 已提交，动态 source version、访问时 dirty/outbox、CAS 和 fresh gate 必须阻止旧 rows 被伪装成 fresh。
+页面请求不访问 OA Mongo/MySQL、对象存储、Redis、RabbitMQ、read-model queue、Workbench 页面 payload 或 `workbench_relation` projection。`rows`、`summary`、`statistics`、`filterOptions` 和当前页 descriptors 在同一个显式数据库快照内读取；详情和银行候选分别使用同一 repository 的只读快照。
 
-completed OA 投影直接读取 canonical Workbench relation，因此月份 source vector 同时记录该月 completed OA 涉及的 `app.workbench_pair_relations.updated_at` 上界。confirm/withdraw 后不写 OA dirty/outbox；下次页面访问以同一个 set-based canonical proof 发现 mismatch，只 enqueue 当前精确月份。这个证明不读取或等待 `workbench_relation` read model。
-
-月份 shard 只能包含该月份的 OA 主行。跨月正式 relation 可以继续为各月提供 relation evidence，但不得把其它月份的 OA 成员复制进当前月份 rows；relation group row identity 同时包含 month scope。`month=all` 不做隐藏去重，freshness gate 与 Page Audit 会把跨 scope 重复 `row_id` 明确判为阻断错误。
+前端只保留 loading、empty、error、手工刷新和写后重新 GET。页面不解释 `read_model_status`、source versions、refresh enqueue、`202`、`304` 或 ETag，也不做 polling。
 
 ## 页面合同
 
-- 页面只有 `GET /api/oa-pending-payments/rows` 一个首屏聚合入口；旧 `filter-options` endpoint 已删除。
-- `200` 返回 rows、pagination、summary、`filterConfig`、`filterOptions`、freshness proof 和 `ETag`。
-- 同一 normalized query 在版本未变且仍 fresh 时返回 `304`，不得执行 rows/facet 聚合。
-- dirty、source mismatch、scope missing 或 queue 活跃时返回 `202` 和由本次访问 freshness boundary 产生的精确月份 `operationBarrierTargets`，不返回旧 rows。
-- fresh `200` 后不做常驻条件请求。只有 route 进入/重进、查询变化、浏览器手动刷新、明确重试或本页写后 normal GET 返回 `202/non-fresh` 时，当前可见页才按 500ms、单 in-flight、最多 60 次继续检查同一个 rows GET；fresh、30 秒上限、页面隐藏、卸载或查询变化时停止，hidden→visible/focus 不自动恢复。不得改走 `/api/operation-barrier/status`。普通写命令不投递或等待页面 target。
-- `paymentStatus` 只有 `paid` / `unpaid`，由后端 lifecycle/read model 判定；页面不得按金额或候选关系自行推断。
+- 首屏和所有列表查询只调用 `GET /api/oa-pending-payments/rows`；旧 `filter-options` endpoint 保持不存在。
+- 成功响应固定为 `200`，公开字段为 `rows`、`pagination`、`summary`、`statistics`、`filterConfig`、`filterOptions`、`appliedFilters`、`sort`、`viewMode`。
+- 不返回 `readModelStatus`、`read_model_status`、source versions、refresh target、job、cache/version metadata。
+- 筛选、排序、分页、summary、facets 均由 SQL set-based 执行；最大 `page_size=200`，禁止浏览器或 Python 全量分页。
+- OA、银行、发票和 relation detail 继续惰性读取；未找到返回结构化 `404`，非法查询返回 `400`。
+- `bank-transaction-candidates` 直接从 PostgreSQL bank facts 与 active formal/pending relations 做状态筛选、排序和分页；不再经 command service 全量加载。
+- `paymentStatus` 仍由既有纯业务组装和 lifecycle policy 计算，前端不得自行推断。
 
 ## Completed 与 in-progress
 
-- `completed` 主行来自 `app.oa_applications` completed/legacy projection。
-- `in_progress` 主行来自 integration sync 已写入 `app.oa_pending_payment_admissions` 的准入快照；准入身份是 `t_payment_simple.flow_id` 对应的 OA Mongo `form_data._id`，不是 `t_payment_simple.id`。
-- completed relation 证据直接来自 canonical Workbench active relation，不等待或读取 `workbench_relation` read model；in-progress relation 证据来自 OA 待付款 active pending relation。pending relation promotion 前不得写入 Workbench active relation。
-- 银行流水和发票是 relation evidence，不替代 OA 主行；付款写回仍须后端复核 active relation、outflow、金额相等和 flow id。
+- `completed` 主行来自 `app.oa_applications`。
+- `in_progress` 主行来自 `app.oa_pending_payment_admissions`。
+- completed 正式关系只读取 `app.workbench_pair_relations` 中 `status='active'` 的事实；`turnover_manual_closure` 不进入本页支付关系。
+- in-progress 关系读取本模块 active pending relation；promotion 前不冒充 Workbench active relation。
+- 银行流水和发票只是 relation evidence，不替代 OA 主行。
 
 ## 写回一致性
 
-`writeback-paid` 和金额匹配后的 `link-bank-transactions` 先完成幂等 MySQL `pay_status=1` 写回，再通过窄 PostgreSQL snapshot writer 更新对应 flow 的支付状态、月份 source watermark/version；普通命令不写页面 outbox。PostgreSQL snapshot 更新同事务；失败时命令返回可安全重试错误，重试即使发现 MySQL 已经是 paid，也必须继续修复 PostgreSQL snapshot。
+`writeback-paid` 和金额匹配后的 `link-bank-transactions` 保留原有单次鉴权、tenant、claim、active relation、outflow、金额、CAS/冲突、审计和幂等语义。外部 MySQL 写回仍走既有 command/adapter；成功或 already-paid 后必须幂等更新 PostgreSQL payment-status canonical snapshot。响应不再返回页面 read-model refresh metadata，前端成功后立即重新调用当前 rows GET。
 
-Mongo/MySQL 与 PostgreSQL 之间不做分布式事务。若外部写成功而 PostgreSQL 提交失败，页面继续基于最后一个可证明的 PostgreSQL snapshot，不把外部状态猜成 fresh；幂等重试或下一次 OA sync 完成修复。
+Mongo/MySQL 与 PostgreSQL 之间没有分布式事务。若外部写成功而 PostgreSQL canonical commit 失败，命令必须返回可安全重试错误；重试或后续 OA sync 收敛，不允许页面请求回退读取外部系统。
 
-## Audit 文案
+## 共享清理边界
 
-OA 页面通过专属 wrapper 隔离共享 `PageAuditIcon`，其它页面文案不变：
-
-- `Audit 通过 · App 内部数据一致`
-- `Audit 校验中 · 新数据正在生成`
-- `Audit 未通过 · 发现 N 个一致性问题`
-- `Audit 未通过 · Read model 未在时限内更新`
-- `Audit 无法完成 · 请查看诊断`
-
-禁止展示 `integrity issues_found`、`blocking samples` 等内部枚举拼接文案。Audit 只证明同一 PostgreSQL repeatable-read snapshot 内部一致性；外部同步 lag 单独表达。
+`oa_pending_payment` 旧 read model、worker、manifest、App Status registry 和 deploy env 仍有共享调用方或属于全局资源，本页面迁移任务不删除。特别是 `invoice_lifecycle` 仍依赖 OA read-model repository。主控只能在所有消费者迁移后统一删除；页面运行时已经不再依赖这些资源。
 
 ## 明确不做
 
-- 不新增 CDC、通用 event bus、SSE/WebSocket、新缓存层或新 worker framework。
-- 不增加 stale-while-revalidate、live fallback、兼容 filter endpoint 或双读路径。
-- 不修改其它页面 read model、共享 Page Audit 默认文案或 input/output invoice worker 责任。
-- 不在没有生产 `EXPLAIN` 和压测证据时增加索引、分区、cursor pagination 或 worker pool。
+- 不新增 cache、worker、queue、materialized view、统一大而全 service、双读或 fallback。
+- 不在 route/server 堆 SQL 或业务组合，不把 `Application` 传入 service。
+- 不读取 Workbench page read model 或 `workbench_relation` projection 作为正式关系事实。
+- 不因缺少生产 `EXPLAIN` 证据新增索引；索引建议和 migration 编号由主控统一处理。
 
 ## 本目录文件
 
-- `performance-integrity-design.md`：性能、一致性、删除和统一部署验收设计。
-- `boundary-io.md`：模块边界、I/O、事实所有权和 writer inventory。
-- `state-machine.md`：业务、UI、read model、worker 和 Audit 状态机。
-- `tests.md`：七类测试责任、命令和剩余生产风险。
+- `boundary-io.md`：模块边界、直接/上下游 I/O、事实所有权和共享 HANDOFF。
+- `state-machine.md`：业务、UI、写回和错误状态。
+- `tests.md`：七类测试责任、命令和剩余风险。
+- `performance-integrity-design.md`：查询次数、快照和生产性能门槛。
 - `e2e-spec.md` / `e2e-coverage.md`：浏览器合同与覆盖映射。
-- `implementation-notes.md`：提炼后的实施记录，不保存原始 prompt。
+- `implementation-notes.md`：历史实施记录；历史 read-model 设计不覆盖本页当前合同。

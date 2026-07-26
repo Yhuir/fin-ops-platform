@@ -11,7 +11,6 @@ type WorkbenchRefreshMockStatus = "fresh" | "refreshing" | "stale" | "failed" | 
 type WorkbenchPageMockStatus = "fresh" | "refreshing" | "stale";
 type OperationBarrierMockMode = "fresh" | "refreshing" | "blocked";
 type InputInvoiceUsageReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
-type OaPendingPaymentReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
 type OutputInvoiceCollectionReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
 type OutputInvoiceReceiptLifecycleState = "none" | "issued" | "voided" | "reissued";
 type PendingInvoiceReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
@@ -119,8 +118,6 @@ type ApiMockOptions = {
   oaPendingPaymentWritebackPaidDelayMs?: number;
   oaPendingPaymentWritebackPaidError?: boolean;
   oaPendingPaymentWritebackPaidFlow?: boolean;
-  oaPendingPaymentDetailReadModelRefreshing?: boolean;
-  oaPendingPaymentReadModelStatus?: OaPendingPaymentReadModelMockStatus;
   oaPendingPaymentRowsFailOnce?: boolean;
   oaPendingPaymentRowsFailuresBeforeSuccess?: number;
   oaPendingPaymentRelationFanout?: boolean;
@@ -3834,7 +3831,7 @@ function oaPendingPaymentRowsPayload(includeInvoiceImportEvidence = false) {
           paymentStatus: {
             code: "paid",
             label: "已支付",
-            reason: "发票导入后 OA 待付款 read model 已刷新。",
+            reason: "发票导入事实已进入 OA 待付款 canonical snapshot。",
             severity: "success",
           },
           bankTransaction: {
@@ -3903,9 +3900,6 @@ function oaPendingPaymentRowsPayload(includeInvoiceImportEvidence = false) {
       { field: "seller_name", label: "发票方", mode: "enum_multi", sortable: true, operators: ["in"] },
       { field: "invoice_date", label: "开票日期", mode: "date", sortable: true, operators: ["between", "equals"] },
     ],
-    readModelStatus: "fresh",
-    read_model_status: "fresh",
-    read_model_scope_key: "all",
   };
 }
 
@@ -4001,11 +3995,6 @@ function oaPendingPaymentWritebackPaidRowsPayload(confirmed: boolean) {
       { field: "seller_name", label: "发票方", mode: "enum_multi", sortable: true, operators: ["in"] },
       { field: "invoice_date", label: "开票日期", mode: "date", sortable: true, operators: ["between", "equals"] },
     ],
-    readModelStatus: "fresh",
-    read_model_status: "fresh",
-    read_model_scope_key: "oa_pending_payment:in_progress",
-    sourceVersions: { oa_pending_payment: confirmed ? 2 : 1, workbench: 1 },
-    source_versions: { oa_pending_payment: confirmed ? 2 : 1, workbench: 1 },
     viewMode: "in_progress",
     view_mode: "in_progress",
   };
@@ -4141,11 +4130,6 @@ function oaPendingPaymentBankLinkRowsPayload(linked: boolean) {
       { field: "seller_name", label: "发票方", mode: "enum_multi", sortable: true, operators: ["in"] },
       { field: "invoice_date", label: "开票日期", mode: "date", sortable: true, operators: ["between", "equals"] },
     ],
-    readModelStatus: "fresh",
-    read_model_status: "fresh",
-    read_model_scope_key: "oa_pending_payment:in_progress",
-    sourceVersions: { oa_pending_payment: linked ? 2 : 1, workbench: linked ? 2 : 1 },
-    source_versions: { oa_pending_payment: linked ? 2 : 1, workbench: linked ? 2 : 1 },
     viewMode: "in_progress",
     view_mode: "in_progress",
   };
@@ -4307,25 +4291,6 @@ function oaPendingPaymentRelationFanoutRowsPayload(relationConfirmed: boolean) {
       { field: "seller_name", label: "发票方", mode: "enum_multi", sortable: true, operators: ["in"] },
       { field: "invoice_date", label: "开票日期", mode: "date", sortable: true, operators: ["between", "equals"] },
     ],
-    readModelStatus: "fresh",
-    read_model_status: "fresh",
-    read_model_scope_key: "all",
-  };
-}
-
-function oaPendingPaymentNonFreshRowsPayload(readModelStatus: OaPendingPaymentReadModelMockStatus) {
-  const payload = oaPendingPaymentRowsPayload(false);
-  return {
-    ...payload,
-    rows: [],
-    pagination: { page: 1, pageSize: 20, total: 0 },
-    summary: { rowCount: 0, viewCounts: { completed: 0, in_progress: 0 } },
-    readModelStatus,
-    read_model_status: readModelStatus,
-    read_model_stale_reasons: readModelStatus === "fresh" ? [] : ["oa_pending_payment_source_version_missing"],
-    read_model_scope_key: "oa_pending_payment:all",
-    sourceVersions: { oa_pending_payment: 1, workbench: 1 },
-    source_versions: { oa_pending_payment: 1, workbench: 1 },
   };
 }
 
@@ -4391,17 +4356,6 @@ function oaPendingPaymentFilterOptions() {
       { field: "invoice_date", label: "开票日期", mode: "date", sortable: true, operators: ["between", "equals"], options: [] },
   ];
   return Object.fromEntries(fields.map((field) => [field.field, field.options]));
-}
-
-function oaPendingPaymentUnavailableDetailPayload() {
-  return {
-    title: "OA详情",
-    subtitle: "oa-payment-e2e-001",
-    detailAvailable: false,
-    unavailableReason: "详情数据正在刷新，请稍后重试。",
-    sections: [],
-    read_model_status: "refreshing",
-  };
 }
 
 function oaPendingPaymentDetailPayload(kind: "oa" | "bank" | "invoice") {
@@ -8988,14 +8942,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           message: "OA 待付款核对加载暂时失败，请刷新后重试。",
         }, 503);
       }
-      const readModelStatus = options.oaPendingPaymentReadModelStatus ?? "fresh";
-      if (readModelStatus !== "fresh") {
-        return json(
-          route,
-          oaPendingPaymentNonFreshRowsPayload(readModelStatus),
-          readModelStatus === "refreshing" ? 202 : 200,
-        );
-      }
       if (options.oaPendingPaymentBankLinkFlow && url.searchParams.get("view_mode") === "in_progress") {
         return json(route, oaPendingPaymentBankLinkRowsPayload(oaPendingPaymentBankLinked));
       }
@@ -9020,7 +8966,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           message: "支出流水关联校验失败，未创建关联关系。",
           affected_oa_row_ids: [],
           affected_bank_transaction_ids: [],
-          readModelRefresh: { scopeKeys: [], enqueued: false, targetSeconds: 0 },
         }, 409);
       }
       oaPendingPaymentBankLinked = true;
@@ -9037,7 +8982,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         oaPaymentWritebacks: [
           { code: "written", label: "已写回", flowIds: ["flow-bank-link-e2e-001"], syncStatus: "ready" },
         ],
-        readModelRefresh: { scopeKeys: ["2026-05"], enqueued: true, targetSeconds: 1 },
       });
     }
 
@@ -9049,7 +8993,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           message: "OA 写回校验失败，未写入支付状态。",
           affected_oa_row_ids: [],
           affected_bank_transaction_ids: [],
-          read_model_refresh: { scopeKeys: [], enqueued: false, targetSeconds: 0 },
         }, 409);
       }
       if (options.oaPendingPaymentWritebackPaidFlow) {
@@ -9067,7 +9010,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
               syncStatus: "ready",
             },
           ],
-          readModelRefresh: { scopeKeys: ["2026-05"], enqueued: true, targetSeconds: 1 },
         });
       }
       return json(route, {
@@ -9076,14 +9018,10 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         oaRowIds: [],
         writebackCount: 0,
         oaPaymentWritebacks: [],
-        readModelRefresh: { scopeKeys: [], enqueued: false, targetSeconds: 0 },
       });
     }
 
     if (path === "/api/oa-pending-payments/oa/oa-payment-e2e-001/detail") {
-      if (options.oaPendingPaymentDetailReadModelRefreshing) {
-        return json(route, oaPendingPaymentUnavailableDetailPayload(), 202);
-      }
       return json(route, oaPendingPaymentDetailPayload("oa"));
     }
 

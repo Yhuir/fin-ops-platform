@@ -21,7 +21,6 @@ from fin_ops_platform.services.oa_pending_payment_query_contract import (
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_relation import (
     OaPendingPaymentRelationRepositoryError,
 )
-from fin_ops_platform.services.read_model_write_targets import write_target_envelope
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 
 
@@ -94,7 +93,6 @@ class OaPendingPaymentCommandService:
         writebacks = self._mark_oa_flow_ids_paid(flow_ids)
         if flow_ids:
             self._record_paid_statuses(records)
-        refresh = _refresh_hints_for_records(records)
         return {
             "success": True,
             "action": "oa_pending_payment_link_bank_transactions",
@@ -110,8 +108,6 @@ class OaPendingPaymentCommandService:
             },
             "oaPaymentWriteback": writebacks[0] if len(writebacks) == 1 else None,
             "oaPaymentWritebacks": writebacks,
-            "readModelRefresh": refresh,
-            **_oa_pending_payment_write_target_envelope(refresh),
         }
 
     def writeback_paid(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
@@ -135,20 +131,7 @@ class OaPendingPaymentCommandService:
                 details={"oa_row_ids": missing},
             )
         writeback_items, eligible_records = self._writeback_paid_relations(records)
-        snapshot_changed = self._record_paid_statuses(eligible_records)
-        changed_records = _dedupe_records(
-            [
-                item["record"]
-                for item in writeback_items
-                if isinstance(item.get("record"), OAApplicationRecord)
-            ]
-            + (eligible_records if snapshot_changed else [])
-        )
-        refresh = (
-            _refresh_hints_for_records(changed_records)
-            if changed_records
-            else _empty_refresh_payload()
-        )
+        self._record_paid_statuses(eligible_records)
         writebacks = [_public_writeback(item) for item in writeback_items]
         return {
             "success": True,
@@ -157,43 +140,6 @@ class OaPendingPaymentCommandService:
             "writebackCount": len(writebacks),
             "oaPaymentWriteback": writebacks[0] if len(writebacks) == 1 else None,
             "oaPaymentWritebacks": writebacks,
-            "readModelRefresh": refresh,
-            **_oa_pending_payment_write_target_envelope(refresh),
-        }
-
-    def bank_transaction_candidates(self, query: dict[str, list[str]] | None = None) -> dict[str, Any]:
-        query = query or {}
-        status_filter = clean_string((query.get("relation_status") or query.get("relationStatus") or ["all"])[0]) or "all"
-        keyword = clean_string((query.get("keyword") or [""])[0])
-        page = _parse_positive_int((query.get("page") or [1])[0], "page")
-        page_size = _parse_positive_int((query.get("page_size") or query.get("pageSize") or [100])[0], "page_size", maximum=200)
-        oa_row_ids = _payload_list(query, "oa_row_ids", "oaRowIds")
-        transactions = [
-            transaction
-            for transaction in self._import_service.list_transactions(month="all")
-            if _bank_direction(transaction) == "outflow"
-        ]
-        transaction_ids = [transaction.id for transaction in transactions]
-        relation_map = self._relation_status_by_bank_id(transaction_ids)
-        rows = [
-            _bank_candidate_payload(transaction, relation_map.get(transaction.id))
-            for transaction in transactions
-        ]
-        if keyword:
-            rows = [row for row in rows if keyword in json_dumps(row)]
-        if status_filter in {"unmatched", "matched", "linked_in_progress"}:
-            rows = [row for row in rows if row.get("relationStatus") == status_filter]
-        rows.sort(key=lambda row: (str(row.get("tradeTime") or ""), str(row.get("id") or "")), reverse=True)
-        total = len(rows)
-        paged = rows[(page - 1) * page_size : page * page_size]
-        return {
-            "rows": paged,
-            "pagination": {"page": page, "pageSize": page_size, "total": total},
-            "filters": {
-                "relationStatus": status_filter,
-                "keyword": keyword,
-                "oaRowIds": oa_row_ids,
-            },
         }
 
     def _oa_record(self, oa_row_id: str) -> OAApplicationRecord:
@@ -458,28 +404,6 @@ class OaPendingPaymentCommandService:
             ) from exc
         return bool(tuple(getattr(result, "oa_pending_payment_changed_scopes", ()) or ()))
 
-    def _relation_status_by_bank_id(self, bank_transaction_ids: list[str]) -> dict[str, dict[str, Any]]:
-        if not bank_transaction_ids:
-            return {}
-        relations = self._active_relations_for_row_ids(bank_transaction_ids)
-        oa_records = {record.id: record for record in self._oa_records(_relation_oa_ids(relations))}
-        result: dict[str, dict[str, Any]] = {}
-        for relation in relations:
-            bank_ids = _relation_bank_ids(relation)
-            oa_ids = _relation_oa_ids([relation])
-            linked_in_progress = _relation_is_oa_pending_in_progress(relation) or any(
-                clean_string(getattr(oa_records.get(oa_id), "workflow_status", "") or "") == VIEW_MODE_IN_PROGRESS
-                for oa_id in oa_ids
-            )
-            status = "linked_in_progress" if linked_in_progress else "matched"
-            for bank_id in bank_ids:
-                result[bank_id] = {
-                    "status": status,
-                    "caseId": clean_string(relation.get("case_id") or ""),
-                    "oaRowIds": oa_ids,
-                }
-        return result
-
     def _writeback_paid_relations(
         self,
         records: list[OAApplicationRecord],
@@ -611,18 +535,6 @@ def _relation_text_list(relation: dict[str, Any], *keys: str) -> list[str]:
     return values
 
 
-def _relation_is_oa_pending_in_progress(relation: dict[str, Any]) -> bool:
-    relation_mode = clean_string(relation.get("relation_mode") or relation.get("relationMode") or "")
-    if relation_mode == "oa_pending_payment_in_progress":
-        return True
-    metadata = relation.get("special_metadata") or relation.get("specialMetadata") or {}
-    if not isinstance(metadata, dict):
-        return False
-    origin = clean_string(metadata.get("origin") or "")
-    source = clean_string(metadata.get("source") or "")
-    return origin == "oa_pending_payment_in_progress" and source == "oa_pending_payment_bank_relations"
-
-
 def _dedupe_relations(relations: Any) -> list[dict[str, Any]]:
     deduped: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -667,34 +579,6 @@ def _public_writeback(item: dict[str, Any]) -> dict[str, Any]:
     return writeback
 
 
-def _empty_refresh_payload() -> dict[str, Any]:
-    return {
-        "scopeKeys": [],
-        "targets": [],
-        "enqueued": False,
-        "targetSeconds": 0,
-    }
-
-
-def _oa_pending_payment_write_target_envelope(refresh: dict[str, Any]) -> dict[str, object]:
-    scope_keys = _payload_list(refresh, "scopeKeys", "scope_keys")
-    return write_target_envelope(scope_keys=scope_keys, targets=[])
-
-
-def _refresh_hints_for_records(records: list[OAApplicationRecord]) -> dict[str, Any]:
-    scope_keys: list[str] = []
-    for record in records:
-        for scope_key in _refresh_scope_keys(record.month):
-            if scope_key not in scope_keys:
-                scope_keys.append(scope_key)
-    return {
-        "scopeKeys": scope_keys,
-        "targets": [],
-        "enqueued": False,
-        "targetSeconds": 0,
-    }
-
-
 def _pending_payment_relation_id(oa_row_ids: list[str], bank_transaction_ids: list[str]) -> str:
     digest = sha1("|".join([*oa_row_ids, *bank_transaction_ids]).encode("utf-8")).hexdigest()[:16]
     return f"OA-PAY-{digest}"
@@ -710,11 +594,6 @@ def _relation_month_scope(records: list[OAApplicationRecord]) -> str:
     return months[0] if len(months) == 1 else "all"
 
 
-def _refresh_scope_keys(month: str | None) -> list[str]:
-    normalized_month = clean_string(month or "")
-    return [normalized_month[:7]] if len(normalized_month) >= 7 and normalized_month[4] == "-" else []
-
-
 def _optional_decimal(value: Any) -> Decimal | None:
     text = clean_string(value or "")
     if not text:
@@ -723,28 +602,6 @@ def _optional_decimal(value: Any) -> Decimal | None:
         return Decimal(text)
     except (InvalidOperation, ValueError):
         return None
-
-
-def _parse_positive_int(value: Any, field_name: str, *, maximum: int | None = None) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError) as exc:
-        raise OaPendingPaymentError(
-            "invalid_paging",
-            f"{field_name} must be a positive integer.",
-            status_code=HTTPStatus.BAD_REQUEST,
-            details={field_name: value},
-        ) from exc
-    if parsed < 1:
-        raise OaPendingPaymentError(
-            "invalid_paging",
-            f"{field_name} must be a positive integer.",
-            status_code=HTTPStatus.BAD_REQUEST,
-            details={field_name: value},
-        )
-    if maximum is not None:
-        return min(parsed, maximum)
-    return parsed
 
 
 def _decimal(value: Any) -> Decimal:
@@ -762,43 +619,3 @@ def _bank_direction(transaction: BankTransaction) -> str:
     if value == TransactionDirection.OUTFLOW.value or "outflow" in value:
         return "outflow"
     return "inflow"
-
-
-def _bank_candidate_payload(transaction: BankTransaction, relation: dict[str, Any] | None) -> dict[str, Any]:
-    status = str((relation or {}).get("status") or "unmatched")
-    return {
-        "id": transaction.id,
-        "counterpartyName": clean_string(transaction.counterparty_name_raw or ""),
-        "tradeTime": clean_string(transaction.trade_time or transaction.txn_date or ""),
-        "amount": _money(abs(_decimal(transaction.amount))),
-        "bankName": clean_string(getattr(transaction, "imported_bank_name", "") or ""),
-        "accountNo": clean_string(transaction.account_no or ""),
-        "accountLast4": clean_string(transaction.account_no or "")[-4:],
-        "bankAccount": _bank_account_label(transaction),
-        "direction": _bank_direction(transaction),
-        "directionLabel": "支出",
-        "summary": clean_string(getattr(transaction, "summary", "") or ""),
-        "remark": clean_string(getattr(transaction, "remark", "") or ""),
-        "relationStatus": status,
-        "relationStatusLabel": {
-            "unmatched": "未配对",
-            "matched": "已配对",
-            "linked_in_progress": "已关联进行中OA",
-        }.get(status, "未配对"),
-        "relationCaseId": clean_string((relation or {}).get("caseId") or ""),
-        "linkedOaRowIds": list((relation or {}).get("oaRowIds") or []),
-    }
-
-
-def _bank_account_label(transaction: BankTransaction) -> str:
-    bank_name = clean_string(getattr(transaction, "imported_bank_name", "") or "")
-    last4 = clean_string(getattr(transaction, "imported_bank_last4", "") or "") or clean_string(transaction.account_no or "")[-4:]
-    if bank_name and last4:
-        return f"{bank_name} {last4}"
-    return bank_name or last4
-
-
-def json_dumps(payload: dict[str, Any]) -> str:
-    import json
-
-    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
