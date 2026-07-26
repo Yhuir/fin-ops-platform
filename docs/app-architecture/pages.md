@@ -25,7 +25,8 @@
 | 往来款管理 | `web/src/pages/TurnoverLedgerPage.tsx` | turnover ledger routes/service、workbench pair relation service | 外部往来候选、人工闭环、利息、项目归因、Workbench pair relation | 银行明细、关联台、人工闭环/撤回 |
 | 待找发票 | `web/src/pages/PendingInvoicesPage.tsx` | pending invoice routes/query service | 支出/收入流水、进项发票、规则建议、选择已有发票关系、收入状态覆盖 | 进项导入、选择已有发票确认/撤回、收入状态覆盖、规则变更 |
 | OA 待付款核对 | `web/src/pages/OaPendingPaymentsPage.tsx` | OA pending payments routes/query/command service + page-specific PostgreSQL repository | 单次 repeatable-read/read-only snapshot 中的 completed OA、in-progress admission、payment-status、active Workbench/pending relation、银行/进项发票 canonical facts；不读页面 read model/Mongo/MySQL | route/query变化/手工刷新/本页写后 normal GET；无 freshness enqueue、worker、202/304/ETag/polling |
-| 税金抵扣 / 发票使用 | tax offset / invoice usage pages | invoice usage/read model routes | 已认证发票、使用状态、销项收款、ETC 发票 | 发票导入、认证状态、收款关系、backfill/refresh |
+| 税金抵扣 | `web/src/pages/TaxOffsetPage.tsx` | tax routes/query service/canonical repository | PostgreSQL canonical 进项/销项发票、认证导入事实、最新 saved 抵扣计划；不消费正式配对关系或其它页面 read model | 页面进入/重进、月份变化、抵扣计划保存或认证导入完成后重新 GET |
+| 发票使用 | invoice usage pages | invoice usage canonical query routes | canonical 发票、使用状态、销项收款、ETC 发票、active pair relations | 页面进入/重进、查询变化、当前页写后重新 GET |
 | ETC 业务批次 | ETC pages/components | ETC business batch routes/service、invoice PDF bundle service | ETC 票据、人工业务批次、导入草稿、OA 提交确认、草稿后批次发票合并下载 | ETC 导入、OA 草稿创建、人工提交确认、对象存储 PDF 读取与只读下载审计 |
 | 成本统计 | cost statistics page | cost routes/query service | 项目、费用、发票、核销关系 | 项目范围变化、发票/流水关系变化 |
 | 设置 / 账户 / 项目 | settings pages | settings/account/project routes | 用户、角色、项目状态、规则配置 | 配置保存、权限变化、数据重置 |
@@ -48,7 +49,7 @@ domain registry 是页面域入口；`AppStatusReadModelRegistry` 是仍有 read
 | `oa_pending_payments` | `/oa-pending-payments` | 页面直接读取 canonical PostgreSQL；全局 `oa_pending_payment` legacy readiness/worker 暂留给共享消费者，待统一 cleanup，不参与页面正确性 |
 | `input_invoice_usage` | `/input-invoice-usage` | PostgreSQL canonical repeatable-read snapshot；active `app.workbench_pair_relations`；无页面 read model/worker |
 | `output_invoice_collections` | `/output-invoice-collections` | PostgreSQL canonical repeatable-read snapshot；active `app.workbench_pair_relations` 与 canonical lifecycle facts；无页面 read model/worker |
-| `tax_offset` | `/tax-offset` | `tax_offset`、`tax-offset` worker，旧 `cost-tax` 兼容 worker |
+| `tax_offset` | `/tax-offset` | 单次 PostgreSQL repeatable-read canonical snapshot；页面无 Tax Offset read model/worker 依赖 |
 | `cost_statistics` | `/cost-statistics` | 单次 PostgreSQL repeatable-read canonical snapshot；无 Cost read model/worker |
 | `bank_flow_rule_batches` | `/bank-flow-rule-batches` | 单次 PostgreSQL repeatable-read canonical snapshot；无页面 read model/worker |
 | `batch_accounting` | `/batch-accounting` | workbench relation read model |

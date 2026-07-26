@@ -43,6 +43,25 @@
 
 各模块的字段名和恒等式以对应 `docs/modules/<module>/boundary-io.md` 为准。前端对缺失、负数、非整数或超出安全整数范围的值按不可用处理；合法零值必须保留。
 
+## 税金抵扣 API
+
+`GET /api/tax-offset?month=YYYY-MM`
+
+- 每个请求在一个 PostgreSQL `REPEATABLE READ READ ONLY` snapshot 内批量读取 `app.invoices`、`app.tax_certified_import_records` 和最新 saved `app.tax_offset_plans`，再返回 rows、认证匹配分组、默认选择、`summary`、`statistics` 与 `canonical_snapshot_version`。
+- 成功固定返回 `200`；空月份返回完整空集，不返回 `read_model_status`、`source_versions`、refresh/polling 字段或 `202`。
+- 页面不消费 `read_model.tax_offset*`、Workbench relation、成本统计或其它页面 read model；浏览器刷新重新执行 canonical 查询。
+
+`POST /api/tax-offset/calculate`
+
+- 使用与月查询相同的 canonical repository 计算所选发票金额；非法月份或选择返回 `400`，不会触发 read-model refresh。
+
+`POST /api/tax-offset/plans`
+
+- 请求必须携带 `expected_canonical_snapshot_version` 和 `idempotency_key`。canonical 发票/认证事实已变化时返回 `409 tax_offset_canonical_version_conflict`；成功保存后前端重新 GET。
+- 计划写入保持原事务、审计与幂等合同；成功响应只返回 `affected_scope_keys` 与 plan，不返回 freshness target 或 operation barrier。
+
+认证导入的文件解析仍由 import job 完成。job 成功并提交 canonical 认证事实后，税金抵扣页面直接重新 GET；页面请求热路径不解析文件，也不等待 Tax Offset read model。
+
 ## 成本统计 API
 
 `GET /api/cost-statistics/explorer`
@@ -1372,7 +1391,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 - `imports.bank-transactions` 是 direct-canonical 页面：`registered_read_model_keys=[]`、`relation_proof_required=false`。Audit 双向证明已登记 file/session/batch/row/canonical bank transaction 与当前 job/outbox；bank detail、account balance、Workbench、cost、search 是写后 impact targets，不是该页 consumer。文件对象 hash/size 不等于银行外部 statement control evidence。
 - `imports.invoices` 是 direct-canonical 页面：`registered_read_model_keys=[]`、`relation_proof_required=false`。Audit 双向证明 input/output file/session/batch/row、canonical invoice、manual source-link 和精确归属 job/outbox；同一 batch/canonical invoice 的不同物理明细按整票金额比较，完全相同的重复行不二次加总。下游 read models 与业务配对关系不由本页通过状态推断。`POST /imports/files/confirm` 只允许 durable enqueue；queue 不可用返回 `503 import_queue_unavailable`，没有 inline 或 batch revert fallback。
 - `imports.etc-invoices` 是 zero-own-read-model 的 direct-canonical workflow，并登记 ETC internal relation proof。`POST /api/etc/import/preview` 持久化 task-bound session、原始 ZIP file objects、counts/matches/fingerprint；`POST /api/etc/import/confirm` 只从 durable session校验并 enqueue。Audit 双向证明 session/file/task/requirement/business-import-batch/ETC-invoice/canonical bridge 与 job/outbox；历史 failed/preview session 仅在精确 task 已正式 `imported/closed` 时作为 covered warning，其它失败继续阻断；不推断下游 Workbench 配对或外部 ETC ZIP 完整性。
-- `tax-offset` 是明确的 relation 非消费者：canonical expected-set 只来自 active `app.invoices` 与 `app.tax_certified_import_records`，Audit 独立重算 output/input/certified/matched/outside 五组 item、认证匹配优先级、锁定与默认选择、税额 summary、结构化展示字段、source versions、dirty scope 与 outbox。其 `relation_proof_required=false`，成功文案必须显示“本页面不消费配对关系”，不得宣称已证明配对关系；`app.tax_offset_plans` 是写入事实但不属于当前页面 read projection expected-set。
+- `tax-offset` 是明确的 direct-canonical relation 非消费者：canonical expected-set 来自 active `app.invoices`、`app.tax_certified_import_records` 与最新 saved `app.tax_offset_plans`。Audit 独立重算 output/input/certified/matched/outside 五组 item、认证匹配优先级、锁定、默认选择、税额 summary 和结构化展示字段；`relation_proof_required=false`，成功文案必须显示“本页面不消费配对关系”，不得宣称已证明配对关系。页面成功不以 Tax Offset read model source versions、dirty scope 或 outbox freshness 为条件。
 - `etc-tickets` 是 `registered_read_model_keys=[]` 的直接 canonical 页面；统一 executor 在一个只读 repeatable-read snapshot 内证明 business batch/task/file/ETC invoice/import/submission/canonical invoice bridge 的集合、字段与内部 typed edge，并以 `job.import_jobs(import_type=etc_invoice_import.confirm)` 判定 queue。只有 `pending/processing` job 属于 backlog；`failed/dead_lettered` 是终态，只有精确关联的 reconciliation task 已 `imported/closed` 才作为已覆盖历史失败并计入 additive `summary.covered_failed_import_job_count`，否则阻断 integrity。成功不能依赖伪造的 page read-model status；也不能把 Workbench、tax、cost 或 invoice-lifecycle 下游影响目标声称为本页 consumer。外部文件字节、ETC 归档和真实 OA 草稿状态不在此合同内。
 - `settings` 是 `registered_read_model_keys=[]`、`relation_proof_required=false` 的 direct-canonical control-plane 页面。Audit 证明唯一 settings singleton、生产归一化合同、非敏感 credential summary 和 settings reset jobs；credential SQL 不解密也不选择密文，报告不得出现密码/token/secret。OA project provider、真实 credential 登录、manual OA search/import 和 reset 后多页面 smoke 属于 external gate。
 

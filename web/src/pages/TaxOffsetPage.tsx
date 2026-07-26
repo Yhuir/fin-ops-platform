@@ -244,28 +244,6 @@ export default function TaxOffsetPage() {
     };
   }, [currentMonth, monthData, selectedInputIds]);
 
-  const readModelStatus = monthData?.readModelStatus?.trim().toLowerCase();
-  const isReadModelRefreshing = readModelStatus === "refreshing" || readModelStatus === "stale" || readModelStatus === "missing";
-  const isReadModelUnavailable = readModelStatus === "failed"
-    || readModelStatus === "unavailable"
-    || readModelStatus === "schema_mismatch";
-  const isReadModelNonFresh = Boolean(readModelStatus && readModelStatus !== "fresh");
-  const readModelStatusMessage = isReadModelRefreshing
-    ? "税金抵扣读模型正在刷新，完成后页面会自动重试。"
-    : isReadModelUnavailable
-      ? "税金抵扣读模型暂不可用，请稍后刷新或检查系统状态。"
-      : null;
-
-  useEffect(() => {
-    if (!isReadModelRefreshing || isLoading || isRefreshing) {
-      return undefined;
-    }
-    const timeoutId = window.setTimeout(() => {
-      void loadMonthData("refresh");
-    }, 1000);
-    return () => window.clearTimeout(timeoutId);
-  }, [isLoading, isReadModelRefreshing, isRefreshing, loadMonthData]);
-
   useEffect(() => {
     const tableWraps = [outputTableWrapRef.current, inputTableWrapRef.current].filter(
       (node): node is HTMLDivElement => Boolean(node),
@@ -332,7 +310,7 @@ export default function TaxOffsetPage() {
     };
   }, [monthData]);
 
-  const isEmpty = !isReadModelNonFresh && !isLoading && !loadError && monthData
+  const isEmpty = !isLoading && !loadError && monthData
     ? monthData.outputInvoices.length === 0
       && monthData.inputPlanInvoices.length === 0
       && monthData.certifiedMatchedInvoices.length === 0
@@ -343,7 +321,7 @@ export default function TaxOffsetPage() {
   const headerStatusMessage = importFeedback
     ?? planFeedback
     ?? null;
-  const visibleStatistics = readModelStatus === "fresh" ? monthData?.statistics : null;
+  const visibleStatistics = monthData?.statistics;
   const titleAccessory = (
     <div className="page-title-accessory-group">
       <PageStatisticsPopover
@@ -368,7 +346,6 @@ export default function TaxOffsetPage() {
           ariaLabel="Audit 税金抵扣"
           pageKey="tax-offset"
           label="税金抵扣"
-          readModelStatus={readModelStatus}
         />
       ) : null}
     </div>
@@ -393,15 +370,13 @@ export default function TaxOffsetPage() {
     setImportFeedback(null);
     setPlanFeedback(null);
     try {
-      const saveResult = await saveTaxOffsetPlan({
+      await saveTaxOffsetPlan({
         month: currentMonth,
         selectedOutputIds: monthData.defaultSelectedOutputIds,
         selectedInputIds,
-        expectedReadModelScopeKey: monthData.readModelScopeKey,
-        expectedSourceVersions: monthData.sourceVersions,
-        idempotencyKey: `tax-offset-plan:${currentMonth}:${monthData.readModelScopeKey ?? "scope"}:${selectedInputIds.join(",")}`,
+        expectedCanonicalSnapshotVersion: monthData.canonicalSnapshotVersion,
+        idempotencyKey: `tax-offset-plan:${currentMonth}:${monthData.canonicalSnapshotVersion}:${selectedInputIds.join(",")}`,
       });
-      void saveResult;
       setPlanFeedback("已保存本月税金抵扣计划。");
       await loadMonthData("refresh");
     } catch (error) {
@@ -421,7 +396,7 @@ export default function TaxOffsetPage() {
     <PageScaffold
       title="税金抵扣计划与试算"
       titleAccessory={titleAccessory}
-      description="围绕进项票认证计划与已认证结果，做本月税金抵扣试算、导入核对与读模型状态展示。"
+      description="围绕进项票认证计划与已认证结果，做本月税金抵扣试算、导入核对与计划保存。"
       actions={(
         <div className="tax-page-actions">
           {headerStatusMessage ? (
@@ -440,9 +415,6 @@ export default function TaxOffsetPage() {
       {!hasVisibleMonthData && isLoading ? (
         <StatePanel tone="loading">正在加载 {currentMonth} 的税金抵扣计划与已认证结果...</StatePanel>
       ) : null}
-      {!isLoading && readModelStatusMessage ? (
-        <StatePanel tone={isReadModelRefreshing ? "loading" : "warning"}>{readModelStatusMessage}</StatePanel>
-      ) : null}
       {isEmpty ? <StatePanel tone="empty">当前月份没有可用于计划与试算的发票数据。</StatePanel> : null}
 
       {summary ? <TaxSummaryCards summary={summary} /> : null}
@@ -456,7 +428,7 @@ export default function TaxOffsetPage() {
           resultLabel={summary.resultLabel}
           canSave={canMutateData}
           isSaving={isSavingPlan}
-          saveDisabled={isReadModelNonFresh || isCalculating || isLoading || isRefreshing}
+          saveDisabled={isCalculating || isLoading || isRefreshing}
           onSave={handleSavePlan}
         />
       ) : null}

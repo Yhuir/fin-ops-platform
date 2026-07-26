@@ -68,6 +68,16 @@ async function expectFreshReadModelResponse(responsePromise: Promise<{ json(): P
   expect(payload).toMatchObject({ read_model_status: "fresh" });
 }
 
+async function expectDirectCanonicalResponse(
+  responsePromise: Promise<{ json(): Promise<unknown> }>,
+) {
+  const payload = await (await responsePromise).json() as Record<string, unknown>;
+  expect(payload).not.toHaveProperty("read_model_status");
+  expect(payload).not.toHaveProperty("source_versions");
+  expect(payload).not.toHaveProperty("refresh_enqueued");
+  return payload;
+}
+
 async function previewInvoiceFiles(
   page: Page,
   options: {
@@ -201,7 +211,7 @@ test.describe("invoice import browser flow", () => {
     expect(unexpectedRuntimeErrors(browserErrors)).toEqual([]);
   });
 
-  test("confirms invoice import and observes downstream invoice read models as fresh", async ({ page }, testInfo) => {
+  test("confirms invoice import and observes downstream read models or canonical pages", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       invoiceImportDownstreamFanout: true,
@@ -288,7 +298,8 @@ test.describe("invoice import browser flow", () => {
       await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible());
     });
     await expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible();
-    await expectFreshReadModelResponse(Promise.resolve(taxOffsetPayload!));
+    const taxPayload = await expectDirectCanonicalResponse(Promise.resolve(taxOffsetPayload!));
+    expect(taxPayload.canonical_snapshot_version).toEqual(expect.any(String));
     await expect(page.getByText("SD-INV-IMPORT-E2E-001")).toBeVisible();
     await expect(page.getByText("发票导入进项供应商")).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);

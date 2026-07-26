@@ -169,14 +169,6 @@ DIRECT_REFRESH_ENQUEUE_ALLOWLIST: dict[tuple[str, str], str] = {
         "Application._enqueue_tax_offset_read_model_refresh",
     ): "legacy HTTP/app wrapper delegates to TaxOffsetRuntimeService, which uses ReadModelRefreshGateway.",
     (
-        "backend/src/fin_ops_platform/services/tax_offset_query_service.py",
-        "TaxOffsetQueryService.get_month_payload",
-    ): "production SQL repository miss delegates to TaxOffsetRuntimeService gateway wrapper.",
-    (
-        "backend/src/fin_ops_platform/services/tax_offset_query_service.py",
-        "TaxOffsetQueryService._gate_statistics",
-    ): "non-fresh all-period statistics delegates to TaxOffsetRuntimeService, which uses ReadModelRefreshGateway.",
-    (
         "backend/src/fin_ops_platform/services/tax_offset_runtime_service.py",
         "TaxOffsetRuntimeService.enqueue_refresh_for_months",
     ): "runtime cache invalidation wrapper calls same-service gateway boundary after deleting fresh-gated cache.",

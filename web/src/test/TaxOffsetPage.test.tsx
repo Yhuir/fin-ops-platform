@@ -254,9 +254,7 @@ describe("Tax offset workbench", () => {
         taxFetchCount += 1;
         const payload = {
           month: "2026-03",
-          read_model_status: "fresh",
-          read_model_scope_key: "2026-03",
-          read_model_generated_at: "2026-06-08T00:00:00+08:00",
+          canonical_snapshot_version: "tax-offset-v1:initial",
           output_items: [
             {
               id: "to-202603-001",
@@ -328,8 +326,7 @@ describe("Tax offset workbench", () => {
 
     resolveSecondTaxFetch?.(new Response(JSON.stringify({
       month: "2026-03",
-      read_model_status: "fresh",
-      read_model_scope_key: "2026-03",
+      canonical_snapshot_version: "tax-offset-v1:empty",
       output_items: [],
       input_plan_items: [],
       certified_items: [],
@@ -512,7 +509,7 @@ describe("Tax offset workbench", () => {
     );
   });
 
-  test("saves the current tax offset plan with read model versions", async () => {
+  test("saves the current tax offset plan with a canonical snapshot version", async () => {
     window.history.pushState({}, "", "/tax-offset");
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
@@ -533,13 +530,8 @@ describe("Tax offset workbench", () => {
       month: "2026-03",
       selected_output_ids: ["to-202603-001"],
       selected_input_ids: ["ti-202603-001"],
-      expected_read_model_scope_key: "2026-03",
-      expected_source_versions: {
-        tax_offset_read_model_schema_version: "mock-tax-offset-v1",
-        invoice_fact_source_version: "mock-invoice-facts:2026-03",
-        tax_certified_import_source_version: "mock-certified:2026-03",
-      },
-      idempotency_key: "tax-offset-plan:2026-03:2026-03:ti-202603-001",
+      expected_canonical_snapshot_version: "mock-tax-offset:2026-03",
+      idempotency_key: "tax-offset-plan:2026-03:mock-tax-offset:2026-03:ti-202603-001",
     });
   });
 
@@ -608,6 +600,7 @@ describe("Tax offset workbench", () => {
 
     const monthPayload = {
       month: "2026-03",
+      canonical_snapshot_version: "tax-offset-v1:table-controls",
       output_items: [
         {
           id: "to-filter-001",
@@ -791,6 +784,7 @@ describe("Tax offset workbench", () => {
         return new Response(
           JSON.stringify({
             month: "2026-03",
+            canonical_snapshot_version: "tax-offset-v1:output-tag",
             output_items: [
               {
                 id: "to-real-001",
@@ -904,6 +898,7 @@ describe("Tax offset workbench", () => {
     const responses = [
       {
         month: "2026-03",
+        canonical_snapshot_version: "tax-offset-v1:focus-initial",
         output_items: [
           {
             id: "to-202603-001",
@@ -957,6 +952,7 @@ describe("Tax offset workbench", () => {
       },
       {
         month: "2026-03",
+        canonical_snapshot_version: "tax-offset-v1:focus-next",
         output_items: [
           {
             id: "to-202603-001",
@@ -1162,7 +1158,7 @@ describe("Tax offset workbench", () => {
     expect(screen.queryByRole("button", { name: /11203999/ })).not.toBeInTheDocument();
   });
 
-  test("hides read model refresh metadata without treating refreshing payload as final empty data", async () => {
+  test("treats a canonical empty response as final and never starts legacy refresh polling", async () => {
     window.history.pushState({}, "", "/tax-offset");
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
@@ -1179,10 +1175,7 @@ describe("Tax offset workbench", () => {
       if (url === "/api/tax-offset?month=2026-03") {
         return new Response(JSON.stringify({
           month: "2026-03",
-          read_model_status: "refreshing",
-          read_model_scope_key: "2026-03",
-          read_model_generated_at: "2026-06-01T09:30:00+08:00",
-          read_model_stale_reasons: ["tax_certified_import_source_version"],
+          canonical_snapshot_version: "tax-offset-v1:empty",
           summary: {
             output_tax: "0.00",
             certified_input_tax: "0.00",
@@ -1200,7 +1193,7 @@ describe("Tax offset workbench", () => {
           locked_certified_input_ids: [],
           default_selected_output_ids: [],
           default_selected_input_ids: [],
-        }), { status: 202, headers: { "Content-Type": "application/json" } });
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
       throw new Error(`Unhandled request: ${url}`);
     });
@@ -1209,10 +1202,14 @@ describe("Tax offset workbench", () => {
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: "税金抵扣计划与试算" })).toBeInTheDocument();
-    expect(await screen.findByText("税金抵扣读模型正在刷新，完成后页面会自动重试。")).toBeInTheDocument();
-    expect(screen.queryByText(/生成时间：2026-06-01T09:30:00\+08:00/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/过期原因：tax_certified_import_source_version/)).not.toBeInTheDocument();
-    expect(screen.queryByText("当前月份没有可用于计划与试算的发票数据。")).not.toBeInTheDocument();
+    expect(await screen.findByText("当前月份没有可用于计划与试算的发票数据。")).toBeInTheDocument();
+    expect(screen.queryByText(/读模型正在刷新/)).not.toBeInTheDocument();
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 1100));
+    });
+    expect(
+      fetchMock.mock.calls.filter(([input]) => String(input) === "/api/tax-offset?month=2026-03"),
+    ).toHaveLength(1);
   });
 
   test("keeps certified import modal processing while queued import job completes", async () => {
@@ -1236,6 +1233,9 @@ describe("Tax offset workbench", () => {
         const certified = taxFetchCount > 1;
         return new Response(JSON.stringify({
           month: "2026-03",
+          canonical_snapshot_version: certified
+            ? "tax-offset-v1:queued-certified"
+            : "tax-offset-v1:queued-initial",
           output_items: [],
           input_plan_items: [],
           certified_items: certified ? [{ id: "tc-queued-1", invoice_no: "11203490", seller_name: "设备供应商", issue_date: "2026-03-22", tax_amount: "12,480.00", total_with_tax: "108,480.00", status: "已认证" }] : [],
@@ -1308,23 +1308,6 @@ describe("Tax offset workbench", () => {
               },
             },
           },
-        }), { status: 200, headers: { "Content-Type": "application/json" } });
-      }
-      if (url === "/api/operation-barrier/status") {
-        return new Response(JSON.stringify({
-          status: "fresh",
-          fresh: true,
-          targets: [{
-            read_model_key: "tax_offset",
-            scope_type: "tax_offset",
-            scope_key: "2026-03",
-            status: "fresh",
-            raw_status: "fresh",
-            fresh: true,
-            blocking: false,
-          }],
-          blocked_targets: [],
-          refreshing_targets: [],
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
       throw new Error(`Unhandled request: ${url}`);

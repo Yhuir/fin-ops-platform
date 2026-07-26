@@ -5594,13 +5594,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         return { status: 500, body: { message: "tax failed" } };
       }
       const payload = taxOffsetStateStore.get(month) as Record<string, unknown>;
-      payload.read_model_status = payload.read_model_status ?? "fresh";
-      payload.read_model_scope_key = payload.read_model_scope_key ?? month;
-      payload.source_versions = payload.source_versions ?? {
-        tax_offset_read_model_schema_version: "mock-tax-offset-v1",
-        invoice_fact_source_version: `mock-invoice-facts:${month}`,
-        tax_certified_import_source_version: `mock-certified:${month}`,
-      };
+      payload.canonical_snapshot_version = payload.canonical_snapshot_version ?? `mock-tax-offset:${month}`;
       return { body: payload };
     },
     "/api/tax-offset/certified-import/preview": ({ formData }) => {
@@ -5830,14 +5824,14 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       return {
         body: {
           status: "saved",
+          affected_scope_keys: [month],
           plan: {
             id: "tax-offset-plan-0001",
             month,
             selected_output_ids: selectedOutputIds,
             selected_input_ids: selectedInputIds,
             summary: calculateTaxPayload(month, selectedOutputIds, selectedInputIds, taxOffsetStateStore.get(month)).summary,
-            read_model_scope_key: String(jsonBody?.expected_read_model_scope_key ?? month),
-            source_versions: jsonBody?.expected_source_versions ?? {},
+            canonical_snapshot_version: String(jsonBody?.expected_canonical_snapshot_version ?? ""),
             updated_at: "2026-06-01T10:00:00+08:00",
           },
         },
