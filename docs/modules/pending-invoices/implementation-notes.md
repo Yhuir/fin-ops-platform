@@ -1,5 +1,17 @@
 # 待找发票 实施记录
 
+## 2026-07-27 - 页面 canonical PostgreSQL 直读
+
+- 目标：把 `/pending-invoices` 从页面 read model 迁移为 page API → canonical query service → page-specific PostgreSQL repository，并删除页面 freshness/polling/fallback 语义。
+- 直接 I/O：读取 canonical bank/category/confirmation/settings/manual override/invoice/OA facts；formal relation 只读 active `app.workbench_pair_relations` 并排除 `turnover_manual_closure`。rows/summary/statistics/facets/counts 使用同一 `REPEATABLE READ / READ ONLY` snapshot。
+- 关键决策：保留已有 status/rules 领域函数作为 SQL 分类校验；保留现有 write application service、权限、audit、idempotency/CAS/conflict 和 XLSX formatter；不新增 cache、queue、worker、materialized view、索引、依赖或双读。
+- 页面变化：移除 `read_model_status/source_versions` DTO、refreshing banner、定时 polling 和 202 分支；loading/empty/error、筛选/排序/分页、候选/详情/导出及写后 refetch 保持。
+- 查询 guard：rows 固定 settings + page query 两次 SELECT；候选固定 selected banks + candidate query 两次 SELECT；全部 SQL set-based、server paginated、bounded。
+- 性能证据：本地 PostgreSQL 50,003 条 canonical bank rows，warm 五次端点计时：expense page_size=50 为 2,700.6/2,440.7/2,046.3/2,665.9/2,255.6 ms，中位 2,440.7 ms；all page_size=200 为 1,577.3/1,557.9/1,657.4/1,666.8/2,038.2 ms，中位 1,657.4 ms。expense SQL `EXPLAIN (ANALYZE, BUFFERS)` planning 13.4 ms、execution 2,118.5 ms、shared hit 1,253 blocks；主要成本是同快照 statistics/facets 的临时聚合，不是逐行 index lookup，因此未提出索引 migration。
+- canonical smoke：跨月 active relation 返回 `paid_invoiced`、正确 invoice/OA/case；`turnover_manual_closure` case 不可见；income override 返回 `cash_income`；候选返回 `already_related/already_selected`；三个 object detail 均来自 canonical tables。
+- 共享 HANDOFF：Search API、invoice-lifecycle、`pending_invoice_read_model_repository.py`、search-pending/pending-invoice workers 和共享 relation worker 仍有其它调用方，本分支不删除；主控在所有页面合并后统一 whole-repo cleanup。
+- 剩余风险：本地 50k probe 不是生产网络/并发/锁等待证据；未运行生产部署或 authenticated production smoke；直读诊断 Playwright 已通过，完整 pending-invoices E2E 套件留给合并后回归。
+
 ## 2026-07-23 - filter-options freshness N+1 删除
 
 - 目标：修复生产 `/api/pending-invoices/filter-options` 一次请求约 59 次 SQL、p95 超过 1 秒的问题。
@@ -14,23 +26,21 @@
 
 ## 当前决策
 
-- 待找发票行状态由 `InvoiceLifecyclePolicy` / `invoice_lifecycle` read boundary 与 pending invoice read model 表达，页面不得在字段缺失时自行推断状态或 primary action。
+- 待找发票页面只读事实由 `PendingInvoiceCanonicalQueryService` / `PostgresPendingInvoiceCanonicalRepository` 直接从 canonical PostgreSQL 组装；页面不读取 pending/search/bank-detail/workbench-relation read model。
+- 待找发票行状态由 canonical facts + 现有 `pending_invoice_status_payload` 领域策略表达；SQL 分类必须通过同一策略校验，页面不得自行推断。
 - 支出规则版本是 `pending_invoice_tag_groups.version`，收入规则版本是 `pending_output_invoice_tag_groups.version`；二者独立，且都不同于 `bank_transaction_tags.version`。
 - `requires_invoice` 是 active tag complement，由后端实时派生；保存规则时即使请求包含该字段也必须忽略。
 - `requires_invoice` 作为列表 filter 是最终状态桶；支出状态桶包含 `paid_pending_invoice`、`paid_invoiced`、`paid_pending_future_invoice`、`invoice_not_fully_paid`，收入状态桶包含 `income_pending_invoice`、`income_invoiced`。`filter_group` / `matched_rule` 只解释规则命中，不能作为 rows/filter-options/export 的父筛选可见性条件。
-- rows、filter-options、export-preview 和 export 必须先经过 `PendingInvoiceReadModelService` 的 freshness gate；非 fresh 时不能把空 rows 当真实结果。
-- filter-options 在 fresh gate 通过后应优先走 SQL 聚合读取选项，不再为生成筛选项拉取全量 rows；这属于页面首屏性能路径，不能回退到伪 fresh。
-- `PendingInvoiceQueryService` 不再暴露同步 `list_rows`、同步 filter-options 或同步 export/export-preview；该 service 只保留 transaction-scoped detail/candidate、row payload normalization 和 read-model rows 的纯格式化能力，防止旧直查链路绕过 freshness gate。
-- rows 首屏默认排序合同是 `trade_date desc nulls last, row_id`；PostgreSQL 热路径索引必须显式匹配 `nulls last`，不能通过取消 `nulls last` 或回退同步扫描来换取性能。
-- rows 新写入的规范 payload 只写 `payload`；`raw_payload` 不再复制同一 JSON。查询端只在 legacy 行 `payload = '{}'::jsonb` 时读取 `raw_payload` fallback，避免首屏按行重复读取和解码无用 JSONB。
-- rows payload normalization 只能按页读取一次 `bank_account_mappings` 并复用于每行银行身份补全；不得在 `_apply_bank_identity` 中按行重复读取 settings。
-- export-preview 和 export 通过 `PendingInvoiceReadModelService.all_rows()` 收集当前筛选结果时，超过 20,000 行必须 fail-closed，不能继续分页并同步生成大 XLSX。
-- OA/流水/发票 relation 不是待找发票私有事实；当前页面只通过 attach existing 写入选择已有发票关系，且必须委托 `WorkbenchRelationCommandService`；读取既有关系必须通过 `WorkbenchRelationReadFacade` / `workbench_relation` distribution。
+- rows、summary、全期间 statistics、facets/counts 必须在一个显式 repeatable-read/read-only snapshot；filter-options 在 SQL 聚合，不加载全量 rows。
+- rows 默认排序是 `trade_date desc nulls last, row_id`；分页、候选和导出均服务端有界，不能回退 Python/browser 全量扫描。
+- export-preview/export 从 canonical repository 收集同筛选 rows；超过 20,000 行必须 fail-closed。
+- OA/流水/发票 relation 不是待找发票私有事实；读只接受 active `app.workbench_pair_relations` 并排除 turnover closure，写仍委托 `WorkbenchRelationCommandService`。
 - 选择已有进项发票候选表的“流水关联”chip 必须使用后端返回的 `bank_relation_status` / `linked_bank_transaction_count`，不能用 `remaining_amount=0` 或候选金额推断；最终补付金额以 preview `payment_impact.remaining_amount_after` 为准。
 - attach existing 可并入兼容的 bank+invoice 或 OA+invoice active relation；confirm 后如果从关联台 withdraw 新 active case，必须恢复 confirm 前上一 active relation 状态。
+- 页面只有 loading/empty/error；禁止恢复 refreshing/stale banner、定时 polling、202、refresh enqueue、双读或 fallback。
 - manual invoice 不再是当前待找发票 HTTP/UI 新写入口；历史 `preview_manual_invoice` / `confirm_manual_invoice` 只保留旧 command 恢复和迁移兼容。
 - 收入状态覆盖必须走批量 service/API 边界，先整批校验再一次写 command/audit/finalizer，不能由前端循环单条接口形成半成功。
-- 2026-06-15 测试闭环审计确认：现有 P0/P1 覆盖支出/收入状态、规则保存、manual 新写入口移除、历史 manual command 兼容、attach existing、income status batch、API 契约、SQL read model、worker fan-out、lifecycle fan-out、App Status 和前端交互。
+- 2026-07-27 直读迁移测试覆盖 canonical query/service/repository、API、页面交互、无旧状态/轮询、真实 PostgreSQL 50k smoke 与共享 Search/lifecycle 回归；完整生产并发/SLO 和共享 worker 最终清理由主控负责。
 
 ## 记录模板
 

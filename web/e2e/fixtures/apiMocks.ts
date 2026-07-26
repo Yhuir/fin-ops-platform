@@ -14,7 +14,6 @@ type InputInvoiceUsageReadModelMockStatus = "fresh" | "refreshing" | "stale" | "
 type OaPendingPaymentReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
 type OutputInvoiceCollectionReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
 type OutputInvoiceReceiptLifecycleState = "none" | "issued" | "voided" | "reissued";
-type PendingInvoiceReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
 type BankDetailReadModelMockStatus = "fresh" | "refreshing" | "stale" | "schema_mismatch" | "missing";
 type CostStatisticsReadModelMockStatus = "fresh" | "refreshing" | "stale" | "failed" | "unavailable";
 type TaxOffsetReadModelMockStatus = "fresh" | "refreshing" | "stale" | "failed" | "missing" | "unavailable";
@@ -157,7 +156,6 @@ type ApiMockOptions = {
   pendingInvoiceRulesSaveFailOnce?: boolean;
   pendingInvoiceRulesSaveFlow?: boolean;
   pendingInvoiceRulesSaveFailuresBeforeSuccess?: number;
-  pendingInvoiceReadModelStatus?: PendingInvoiceReadModelMockStatus;
   pendingInvoiceRowsEmpty?: boolean;
   sessionMode?: SessionMode;
   taxOffsetLargeDataset?: boolean;
@@ -4458,17 +4456,14 @@ function oaPendingPaymentDetailPayload(kind: "oa" | "bank" | "invoice") {
 
 function pendingInvoiceExpenseRulesPayload({
   canSave = false,
-  readModelStatus = "fresh",
   version = 1,
 }: {
   canSave?: boolean;
-  readModelStatus?: "fresh" | "refreshing";
   version?: number;
 } = {}) {
   return {
     version,
     direction: "expense",
-    read_model_status: readModelStatus,
     available_tags: [
       {
         code: "equipment_payment",
@@ -7670,7 +7665,6 @@ function pendingInvoiceImportFanoutRow() {
 
 function pendingInvoiceRowsPayload(
   relationConfirmed: boolean,
-  readModelStatus: PendingInvoiceReadModelMockStatus = "fresh",
   rowsEmpty = false,
   includeAttachExistingBatchRows = false,
   includeIncomeSummaryRows = false,
@@ -7702,8 +7696,6 @@ function pendingInvoiceRowsPayload(
           excluded_direction_rows: includeIncomeSummaryRows ? 2 : 0,
         },
       },
-    read_model_status: readModelStatus,
-    read_model_stale_reasons: readModelStatus === "fresh" ? [] : ["workbench_relation_not_fresh"],
     tag_dictionary: {
       version: 1,
       tags: [
@@ -7747,7 +7739,6 @@ function pendingInvoiceFilterValues(filters: Array<Record<string, unknown>>, fie
 function pendingInvoiceFilterSortRowsPayload(
   url: URL,
   relationConfirmed: boolean,
-  readModelStatus: PendingInvoiceReadModelMockStatus = "fresh",
 ) {
   const filters = pendingInvoiceFiltersFromUrl(url);
   const selectedStatuses = pendingInvoiceFilterValues(filters, "status_code");
@@ -7790,7 +7781,6 @@ function pendingInvoiceFilterSortRowsPayload(
   }
   const payload = pendingInvoiceRowsPayload(
     relationConfirmed,
-    readModelStatus,
     false,
     true,
   );
@@ -7892,7 +7882,7 @@ function pendingInvoiceIncomeRow(id: string, counterpartyName: string, amount: s
   };
 }
 
-function pendingInvoiceIncomeRowsPayload(statusCode: "income_pending_invoice" | "income_no_invoice_required" | "cash_income", readModelStatus: PendingInvoiceReadModelMockStatus = "fresh") {
+function pendingInvoiceIncomeRowsPayload(statusCode: "income_pending_invoice" | "income_no_invoice_required" | "cash_income") {
   const rows = [
     pendingInvoiceIncomeRow("income-batch-a", "收入批量客户A", "300.00", statusCode),
     pendingInvoiceIncomeRow("income-batch-b", "收入批量客户B", "200.00", statusCode),
@@ -7914,8 +7904,6 @@ function pendingInvoiceIncomeRowsPayload(statusCode: "income_pending_invoice" | 
         excluded_direction_rows: 1,
       },
     },
-    read_model_status: readModelStatus,
-    read_model_stale_reasons: readModelStatus === "fresh" ? [] : ["income_status_not_fresh"],
     tag_dictionary: {
       version: 1,
       tags: [
@@ -8324,7 +8312,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
   let costStatisticsExplorerFailuresRemaining =
     options.costStatisticsExplorerFailuresBeforeSuccess ?? (options.costStatisticsExplorerFailOnce ? 1 : 0);
   let pendingInvoiceRulesVersion = 1;
-  let pendingInvoiceRulesSaved = false;
   let pendingInvoiceRulesSaveFailuresRemaining =
     options.pendingInvoiceRulesSaveFailuresBeforeSuccess
     ?? (options.pendingInvoiceRulesSaveFailOnce ? 1 : 0);
@@ -9105,16 +9092,13 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           }, 503);
         }
         pendingInvoiceRulesVersion += 1;
-        pendingInvoiceRulesSaved = true;
         return json(route, pendingInvoiceExpenseRulesPayload({
           canSave: Boolean(options.pendingInvoiceRulesSaveFlow),
-          readModelStatus: "refreshing",
           version: pendingInvoiceRulesVersion,
         }));
       }
       return json(route, pendingInvoiceExpenseRulesPayload({
         canSave: Boolean(options.pendingInvoiceRulesSaveFlow),
-        readModelStatus: pendingInvoiceRulesSaved ? "refreshing" : "fresh",
         version: pendingInvoiceRulesVersion,
       }));
     }
@@ -10231,19 +10215,16 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       if (options.pendingInvoiceIncomeBatchRows && url.searchParams.get("direction") === "income") {
         return json(route, pendingInvoiceIncomeRowsPayload(
           pendingInvoiceIncomeStatus,
-          options.pendingInvoiceReadModelStatus ?? "fresh",
         ));
       }
       if (options.pendingInvoiceFilterSortRows) {
         return json(route, pendingInvoiceFilterSortRowsPayload(
           url,
           relationConfirmed,
-          options.pendingInvoiceReadModelStatus ?? "fresh",
         ));
       }
       return json(route, pendingInvoiceRowsPayload(
         relationConfirmed,
-        options.pendingInvoiceReadModelStatus ?? "fresh",
         Boolean(options.pendingInvoiceRowsEmpty),
         Boolean(options.pendingInvoiceAttachExistingBatchRows),
         Boolean(options.pendingInvoiceIncomeBatchRows),
@@ -10335,26 +10316,10 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/pending-invoices/export-preview") {
-      const readModelStatus = options.pendingInvoiceReadModelStatus ?? "fresh";
-      if (readModelStatus !== "fresh") {
-        return json(route, {
-          error: "pending_invoice_read_model_not_fresh",
-          message: "待找发票正在刷新，请稍后重试导出。",
-          read_model_status: readModelStatus,
-        }, 409);
-      }
       return json(route, pendingInvoiceExportPreviewPayload(relationConfirmed));
     }
 
     if (path === "/api/pending-invoices/export") {
-      const readModelStatus = options.pendingInvoiceReadModelStatus ?? "fresh";
-      if (readModelStatus !== "fresh") {
-        return json(route, {
-          error: "pending_invoice_read_model_not_fresh",
-          message: "待找发票正在刷新，请稍后重试导出。",
-          read_model_status: readModelStatus,
-        }, 409);
-      }
       if (options.pendingInvoiceExportRowLimitError) {
         return json(route, {
           error: "pending_invoice_export_row_limit_exceeded",

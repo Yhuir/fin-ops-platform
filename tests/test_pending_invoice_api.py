@@ -3,127 +3,14 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
-from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
 from tests.app_test_support import build_local_state_application as build_application
-from fin_ops_platform.domain.enums import BatchType, TransactionDirection
-from fin_ops_platform.services.pending_invoice_read_model_service import (
-    PendingInvoiceReadModelService,
-    pending_invoice_source_versions,
-)
+from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.pending_invoice_service import PENDING_INVOICE_EXPORT_ROW_LIMIT
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.pending_invoice_rules import pending_invoice_rules_payload
-from fin_ops_platform.services.pending_invoice_status import pending_invoice_status_matches_filter
-
-
-def _optional_int(value: object, *, default: int) -> int:
-    try:
-        if value in (None, ""):
-            return default
-        return int(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return default
-
-
-def _matches_date_range(transaction: object, *, date_from: object, date_to: object) -> bool:
-    txn_date = str(getattr(transaction, "txn_date", "") or getattr(transaction, "trade_time", "") or "")[:10]
-    if date_from and txn_date < str(date_from):
-        return False
-    if date_to and txn_date > str(date_to):
-        return False
-    return True
-
-
-def _row_matches_filter(row: dict[str, object], *, direction: str, filter_name: str) -> bool:
-    if filter_name == "all":
-        return True
-    status_payload = row.get("invoice_acquisition_status") if isinstance(row, dict) else {}
-    status_code = str(status_payload.get("code") or "").strip() if isinstance(status_payload, dict) else ""
-    return pending_invoice_status_matches_filter(direction=direction, filter_name=filter_name, status_code=status_code)
-
-
-def _source_summary_for_transactions(transactions: list[object], *, direction: str) -> dict[str, int]:
-    expense_rows = sum(1 for transaction in transactions if getattr(transaction, "txn_direction", None) == TransactionDirection.OUTFLOW)
-    income_rows = sum(1 for transaction in transactions if getattr(transaction, "txn_direction", None) == TransactionDirection.INFLOW)
-    total_rows = expense_rows + income_rows
-    current_rows = total_rows if direction == "all" else (expense_rows if direction == "expense" else income_rows)
-    return {
-        "bank_transaction_rows": total_rows,
-        "expense_rows": expense_rows,
-        "income_rows": income_rows,
-        "current_direction_rows": current_rows,
-        "excluded_direction_rows": max(total_rows - current_rows, 0),
-    }
-
-
-def _apply_filters(rows: list[dict[str, object]], filters: object) -> list[dict[str, object]]:
-    if filters in (None, ""):
-        return rows
-    parsed = json.loads(filters) if isinstance(filters, str) else filters
-    if not isinstance(parsed, list):
-        return rows
-    result = rows
-    for item in parsed:
-        if not isinstance(item, dict):
-            continue
-        field = str(item.get("field") or "")
-        operator = str(item.get("operator") or "")
-        if operator == "contains":
-            needle = str(item.get("value") or "").lower()
-            result = [row for row in result if needle in str(_row_field_value(row, field) or "").lower()]
-        elif operator == "in":
-            accepted = {str(value).lower() for value in list(item.get("values") or [])}
-            result = [row for row in result if str(_row_field_value(row, field) or "").lower() in accepted]
-        elif operator == "between":
-            bounds = item.get("value") if isinstance(item.get("value"), dict) else {}
-            if field in {"amount", "invoice_total"}:
-                minimum = _decimal_or_none(bounds.get("min"))
-                maximum = _decimal_or_none(bounds.get("max"))
-                result = [
-                    row
-                    for row in result
-                    if (minimum is None or _decimal_from_text(_row_field_value(row, field)) >= minimum)
-                    and (maximum is None or _decimal_from_text(_row_field_value(row, field)) <= maximum)
-                ]
-    return result
-
-
-def _apply_sort(rows: list[dict[str, object]], *, sort_field: object, sort_direction: object) -> list[dict[str, object]]:
-    field = str(sort_field or "").strip()
-    if not field:
-        return rows
-    direction = str(sort_direction or "asc").strip().lower()
-    return sorted(rows, key=lambda row: _query_sort_key(row, field), reverse=direction == "desc")
-
-
-def _query_sort_key(row: dict[str, object], field: str) -> tuple[int, object]:
-    value = _row_field_value(row, field)
-    if field in {"amount", "invoice_total"}:
-        return (0, _decimal_from_text(value))
-    return (0, str(value or ""))
-
-
-def _row_field_value(row: dict[str, object], field: str) -> object:
-    from fin_ops_platform.services.pending_invoice_service import PendingInvoiceQueryService
-
-    return PendingInvoiceQueryService._row_field_value(row, field)
-
-
-def _decimal_or_none(value: object) -> Decimal | None:
-    try:
-        if value in (None, ""):
-            return None
-        return Decimal(str(value).replace(",", ""))
-    except Exception:
-        return None
-
-
-def _decimal_from_text(value: object) -> Decimal:
-    parsed = _decimal_or_none(value)
-    return parsed if parsed is not None else Decimal("0")
 
 
 class PendingInvoiceApiTests(unittest.TestCase):
@@ -131,7 +18,6 @@ class PendingInvoiceApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_id = self._create_bank_transaction(app, counterparty_name="Vendor API")
-            self._install_pending_invoice_sql_read_model(app)
 
             response = app.handle_request("GET", "/api/pending-invoices/rows?direction=expense&filter=all")
 
@@ -143,55 +29,14 @@ class PendingInvoiceApiTests(unittest.TestCase):
         self.assertTrue(payload["rows"][0]["can_create_invoice"])
         self.assertEqual(payload["rows"][0]["invoice_acquisition_status"]["code"], "paid_pending_invoice")
 
-    def test_rows_endpoint_returns_oa_detail_contract_fields(self) -> None:
+    def test_rows_endpoint_ignores_legacy_pending_invoice_read_model(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            transaction_id = self._create_bank_transaction(app, counterparty_name="Vendor Direct Canonical")
 
             class PendingInvoiceSqlReadRepository:
                 def list_pending_invoice_rows(self, **_kwargs: object) -> dict[str, object]:
-                    return {
-                        "direction": "expense",
-                        "filter": "all",
-                        "rows": [
-                            {
-                                "id": "txn-api-oa",
-                                "bank_transaction": {"id": "txn-api-oa", "counterparty_name": "Vendor API OA", "amount": "118.00"},
-                                "invoice_acquisition_status": {
-                                    "code": "paid_invoiced",
-                                    "label": "已支付已开票",
-                                    "primary_action": "none",
-                                },
-                                "input_invoices": {"primary": None, "relation_count": 0, "has_multiple": False, "summaries": []},
-                                "oa": {
-                                    "primary": {
-                                        "id": "oa-pay-api",
-                                        "applicant": "杨丽萍",
-                                        "application_type": "支付申请",
-                                        "project_name": "大理项目",
-                                        "status": "已完成",
-                                        "form_no": "2048",
-                                        "detail_available": True,
-                                        "relation_case_id": "candidate:api-oa-bank",
-                                    },
-                                    "relation_count": 1,
-                                    "has_multiple": False,
-                                    "detail_available": True,
-                                    "summaries": [],
-                                },
-                                "can_create_invoice": False,
-                                "available_actions": [],
-                                "relation_case_ids": ["candidate:api-oa-bank"],
-                            }
-                        ],
-                        "pagination": {"page": 1, "page_size": 50, "total": 1},
-                        "summary": {"total_rows": 1, "missing_invoice_rows": 0, "create_invoice_available_rows": 0, "source_summary": {}},
-                        "refresh_status": "fresh",
-                        "source_versions": pending_invoice_source_versions(
-                            app._app_settings_service.get_settings_payload(),
-                            attachment_invoice_parser_version=app._current_oa_attachment_invoice_parser_version(),
-                            oa_projection_sync_version=app._current_oa_projection_sync_version(),
-                        ),
-                    }
+                    raise AssertionError("legacy pending invoice read model must not be queried")
 
             app._pending_invoice_sql_read_repository = PendingInvoiceSqlReadRepository()
             if hasattr(app, "_pending_invoice_api_routes"):
@@ -201,9 +46,8 @@ class PendingInvoiceApiTests(unittest.TestCase):
 
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["rows"][0]["oa"]["detail_available"], True)
-        self.assertEqual(payload["rows"][0]["oa"]["primary"]["id"], "oa-pay-api")
-        self.assertEqual(payload["rows"][0]["oa"]["primary"]["relation_case_id"], "candidate:api-oa-bank")
+        self.assertEqual(payload["rows"][0]["id"], transaction_id)
+        self.assertNotIn("read_model_status", payload)
 
     def test_oa_detail_endpoint_rejects_candidate_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -220,7 +64,6 @@ class PendingInvoiceApiTests(unittest.TestCase):
             app = build_application(data_dir=Path(temp_dir))
             transaction_id = self._create_bank_transaction(app, counterparty_name="Vendor Attach")
             invoice_id = self._create_input_invoice(app, seller_name="Vendor Attach", invoice_no="ATTACH-001")
-            self._install_pending_invoice_sql_read_model(app)
 
             candidates_response = app.handle_request(
                 "GET",
@@ -280,41 +123,30 @@ class PendingInvoiceApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
 
-            class PendingInvoiceSqlReadRepository:
+            class PageRepository:
                 def __init__(self) -> None:
                     self.calls: list[dict[str, object]] = []
 
-                def list_pending_invoice_rows(self, **kwargs: object) -> dict[str, object]:
-                    self.calls.append(dict(kwargs))
+                def query(
+                    self,
+                    request: dict[str, object],
+                    *,
+                    page: int,
+                    page_size: int,
+                ) -> dict[str, object]:
+                    self.calls.append({"request": request, "page": page, "page_size": page_size})
                     return {
-                        "direction": "expense",
-                        "filter": "all",
-                        "rows": [
-                            {
-                                "id": "txn-large-export-api",
-                                "invoice_acquisition_status": {"code": "paid_pending_invoice"},
-                                "input_invoices": {"primary": None, "summaries": []},
-                                "oa": {"primary": None, "summaries": []},
-                            }
-                        ],
-                        "pagination": {
-                            "page": 1,
-                            "page_size": 200,
-                            "total": PENDING_INVOICE_EXPORT_ROW_LIMIT + 1,
-                        },
-                        "summary": {"total_rows": PENDING_INVOICE_EXPORT_ROW_LIMIT + 1},
-                        "bank_transaction_tags": {},
-                        "bank_transaction_tags_version": 1,
-                        "refresh_status": "fresh",
-                        "source_versions": pending_invoice_source_versions(
-                            app._app_settings_service.get_settings_payload(),
-                            attachment_invoice_parser_version=app._current_oa_attachment_invoice_parser_version(),
-                            oa_projection_sync_version=app._current_oa_projection_sync_version(),
-                        ),
+                        "rows": [],
+                        "total": PENDING_INVOICE_EXPORT_ROW_LIMIT + 1,
+                        "settings": {},
                     }
 
-            repository = PendingInvoiceSqlReadRepository()
-            app._pending_invoice_sql_read_repository = repository
+            from fin_ops_platform.services.pending_invoice_canonical_query import (
+                PendingInvoiceCanonicalQueryService,
+            )
+
+            repository = PageRepository()
+            app._pending_invoice_page_query_service = PendingInvoiceCanonicalQueryService(repository=repository)
             if hasattr(app, "_pending_invoice_api_routes"):
                 delattr(app, "_pending_invoice_api_routes")
 
@@ -329,8 +161,11 @@ class PendingInvoiceApiTests(unittest.TestCase):
         self.assertEqual(export_payload["error"], "pending_invoice_export_row_limit_exceeded")
         self.assertEqual(preview_payload["details"], {"total": PENDING_INVOICE_EXPORT_ROW_LIMIT + 1, "limit": PENDING_INVOICE_EXPORT_ROW_LIMIT})
         self.assertEqual(export_payload["details"], {"total": PENDING_INVOICE_EXPORT_ROW_LIMIT + 1, "limit": PENDING_INVOICE_EXPORT_ROW_LIMIT})
-        self.assertEqual([call["page"] for call in repository.calls], ["1", "1"])
-        self.assertEqual([call["page_size"] for call in repository.calls], ["200", "200"])
+        self.assertEqual([call["page"] for call in repository.calls], [1, 1])
+        self.assertEqual(
+            [call["page_size"] for call in repository.calls],
+            [PENDING_INVOICE_EXPORT_ROW_LIMIT + 1, PENDING_INVOICE_EXPORT_ROW_LIMIT + 1],
+        )
 
     def test_batch_attach_existing_invoice_endpoints(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -339,7 +174,6 @@ class PendingInvoiceApiTests(unittest.TestCase):
             second_transaction_id = self._create_bank_transaction(app, counterparty_name="Vendor Batch B")
             first_invoice_id = self._create_input_invoice(app, seller_name="Vendor Batch A", invoice_no="BATCH-ATTACH-001")
             second_invoice_id = self._create_input_invoice(app, seller_name="Vendor Batch B", invoice_no="BATCH-ATTACH-002")
-            self._install_pending_invoice_sql_read_model(app)
 
             candidates_response = app.handle_request(
                 "POST",
@@ -393,7 +227,6 @@ class PendingInvoiceApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             self._create_bank_transaction(app, counterparty_name="Customer API Income", credit=True)
-            self._install_pending_invoice_sql_read_model(app)
 
             response = app.handle_request("GET", "/api/pending-invoices/rows?direction=income&filter=requires_invoice")
 
@@ -402,7 +235,7 @@ class PendingInvoiceApiTests(unittest.TestCase):
         self.assertEqual(payload["direction"], "income")
         self.assertEqual(payload["filter"], "requires_invoice")
 
-    def test_read_model_miss_returns_refreshing_without_sync_scan(self) -> None:
+    def test_read_model_miss_does_not_gate_or_enqueue_direct_reads(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             self._create_bank_transaction(app, counterparty_name="Vendor Read Model Miss")
@@ -435,70 +268,25 @@ class PendingInvoiceApiTests(unittest.TestCase):
         rows_payload = json.loads(rows_response.body)
         filter_options_payload = json.loads(filter_options_response.body)
         export_preview_payload = json.loads(export_preview_response.body)
-        export_payload = json.loads(export_response.body)
         income_payload = json.loads(income_response.body)
-        self.assertEqual(rows_response.status_code, 202)
-        self.assertEqual(filter_options_response.status_code, 202)
-        self.assertEqual(export_preview_response.status_code, 202)
-        self.assertEqual(export_response.status_code, 202)
-        self.assertEqual(income_response.status_code, 202)
-        self.assertEqual(rows_payload["read_model_status"], "refreshing")
-        self.assertEqual(filter_options_payload["read_model_status"], "refreshing")
-        self.assertEqual(export_preview_payload["read_model_status"], "refreshing")
-        self.assertEqual(export_payload["read_model_status"], "refreshing")
-        self.assertEqual(income_payload["read_model_status"], "refreshing")
-        self.assertIn(
-            {"scope_type": "pending_invoice", "scope_key": "expense:all", "reason": "api_miss"},
-            queue_repository.enqueued,
-        )
-        self.assertIn(
-            {"scope_type": "pending_invoice", "scope_key": "income:cash_income", "reason": "api_miss"},
-            queue_repository.enqueued,
-        )
+        self.assertEqual(rows_response.status_code, 200)
+        self.assertEqual(filter_options_response.status_code, 200)
+        self.assertEqual(export_preview_response.status_code, 200)
+        self.assertEqual(export_response.status_code, 200)
+        self.assertEqual(income_response.status_code, 200)
+        for payload in (rows_payload, filter_options_payload, export_preview_payload, income_payload):
+            self.assertNotIn("read_model_status", payload)
+        self.assertEqual(queue_repository.enqueued, [])
 
-    def test_filter_options_uses_sql_aggregation_after_fresh_gate(self) -> None:
+    def test_filter_options_ignore_legacy_read_model_status(self) -> None:
         app = build_application()
+        self._create_bank_transaction(app, counterparty_name="Vendor Direct Facet")
 
         class AggregatingPendingInvoiceSqlReadRepository:
-            def __init__(self) -> None:
-                self.option_calls: list[dict[str, object]] = []
-
             def list_pending_invoice_rows(self, **_kwargs: object) -> dict[str, object]:
-                return {
-                    "direction": "expense",
-                    "filter": "all",
-                    "rows": [
-                        {
-                            "id": "txn-filter-options-gate",
-                            "invoice_acquisition_status": {"code": "paid_pending_invoice"},
-                            "input_invoices": {"primary": None, "summaries": []},
-                            "oa": {"primary": None, "summaries": []},
-                        }
-                    ],
-                    "pagination": {"page": 1, "page_size": 1, "total": 128},
-                    "summary": {"total_rows": 128, "missing_invoice_rows": 128, "create_invoice_available_rows": 12},
-                    "bank_transaction_tags": {},
-                    "bank_transaction_tags_version": 1,
-                    "refresh_status": "fresh",
-                    "source_versions": pending_invoice_source_versions(
-                        app._app_settings_service.get_settings_payload(),
-                        attachment_invoice_parser_version=app._current_oa_attachment_invoice_parser_version(),
-                        oa_projection_sync_version=app._current_oa_projection_sync_version(),
-                    ),
-                }
+                raise AssertionError("legacy pending invoice read model must not be queried")
 
-            def list_pending_invoice_filter_options(self, **kwargs: object) -> dict[str, object]:
-                self.option_calls.append(dict(kwargs))
-                return {
-                    "direction": "expense",
-                    "filter": "all",
-                    "options": {
-                        "bank_account": [{"value": "光大 8826", "label": "光大 8826", "count": 9}],
-                    },
-                }
-
-        repository = AggregatingPendingInvoiceSqlReadRepository()
-        app._pending_invoice_sql_read_repository = repository
+        app._pending_invoice_sql_read_repository = AggregatingPendingInvoiceSqlReadRepository()
         if hasattr(app, "_pending_invoice_api_routes"):
             delattr(app, "_pending_invoice_api_routes")
 
@@ -506,44 +294,13 @@ class PendingInvoiceApiTests(unittest.TestCase):
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["read_model_status"], "fresh")
-        self.assertEqual(payload["options"]["bank_account"], [{"value": "光大 8826", "label": "光大 8826", "count": 9}])
-        self.assertEqual(repository.option_calls[0]["direction"], "expense")
+        self.assertNotIn("read_model_status", payload)
+        self.assertIn(
+            "Vendor Direct Facet",
+            [option["value"] for option in payload["options"]["counterparty_name"]],
+        )
 
-    def test_filter_options_fresh_gate_skips_unused_page_statistics(self) -> None:
-        class FilterOptionsRepository:
-            @staticmethod
-            def list_pending_invoice_filter_options(**_kwargs: object) -> dict[str, object]:
-                return {"options": {}}
-
-        class RecordingReadModelService(PendingInvoiceReadModelService):
-            def __init__(self) -> None:
-                super().__init__(repository=FilterOptionsRepository())
-                self.include_statistics_calls: list[bool] = []
-
-            def rows(
-                self,
-                query: dict[str, list[str]],
-                *,
-                include_statistics: bool = True,
-            ) -> dict[str, object]:
-                self.include_statistics_calls.append(include_statistics)
-                return {
-                    "direction": query["direction"][0],
-                    "filter": query["filter"][0],
-                    "summary": {},
-                    "read_model_status": "fresh",
-                    "read_model_scope_key": "expense:all",
-                }
-
-        service = RecordingReadModelService()
-
-        payload = service.filter_options({"direction": ["expense"], "filter": ["all"]})
-
-        self.assertEqual(payload["read_model_status"], "fresh")
-        self.assertEqual(service.include_statistics_calls, [False])
-
-    def test_rows_endpoint_rejects_unconfigured_read_model_without_sync_scan(self) -> None:
+    def test_rows_endpoint_does_not_require_pending_invoice_read_model(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             self._create_bank_transaction(app, counterparty_name="Vendor No Repository")
@@ -552,8 +309,9 @@ class PendingInvoiceApiTests(unittest.TestCase):
             response = app.handle_request("GET", "/api/pending-invoices/rows?direction=expense&filter=all")
 
         payload = json.loads(response.body)
-        self.assertEqual(response.status_code, 503)
-        self.assertEqual(payload["error"], "pending_invoice_read_model_unavailable")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["rows"][0]["bank_transaction"]["counterparty_name"], "Vendor No Repository")
+        self.assertNotIn("read_model_status", payload)
 
     def test_manual_invoice_endpoints_are_not_reachable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -900,7 +658,6 @@ class PendingInvoiceApiTests(unittest.TestCase):
             app = build_application(data_dir=Path(temp_dir))
             transaction_id = self._create_bank_transaction(app, counterparty_name="Income Customer", credit=True)
             body = {"status_code": "cash_income", "request_id": "income-status-001"}
-            self._install_pending_invoice_sql_read_model(app)
 
             response = app.handle_request(
                 "PUT",
@@ -932,7 +689,6 @@ class PendingInvoiceApiTests(unittest.TestCase):
                 "status_code": "cash_income",
                 "request_id": "income-status-batch-001",
             }
-            self._install_pending_invoice_sql_read_model(app)
 
             response = app.handle_request(
                 "PUT",
@@ -1116,99 +872,6 @@ class PendingInvoiceApiTests(unittest.TestCase):
                 },
             }
         )
-
-    @staticmethod
-    def _install_pending_invoice_sql_read_model(app: object) -> None:
-        def query_rows(**kwargs: object) -> dict[str, object]:
-            query_service = app._pending_invoice_query_service
-            direction = str(kwargs.get("direction") or "expense")
-            filter_name = str(kwargs.get("filter") or "all")
-            page = max(_optional_int(kwargs.get("page"), default=1), 1)
-            page_size = min(max(_optional_int(kwargs.get("page_size"), default=50), 1), 200)
-            transactions = [
-                transaction
-                for transaction in query_service._import_service.list_transactions(month="all")
-                if _matches_date_range(
-                    transaction,
-                    date_from=kwargs.get("date_from"),
-                    date_to=kwargs.get("date_to"),
-                )
-                and query_service._transaction_matches_direction(transaction, direction)
-            ]
-            rows = []
-            emitted_relation_groups = set()
-            for transaction in transactions:
-                transaction_direction = query_service.direction_for_transaction(transaction)
-                row = query_service.row_for_transaction(transaction.id, direction=transaction_direction)
-                relation_group_key = query_service._multi_bank_relation_group_key(row)
-                if relation_group_key and relation_group_key in emitted_relation_groups:
-                    continue
-                if _row_matches_filter(row, direction=transaction_direction, filter_name=filter_name):
-                    rows.append(row)
-                    if relation_group_key:
-                        emitted_relation_groups.add(relation_group_key)
-            keyword = str(kwargs.get("keyword") or "").strip().lower()
-            if keyword:
-                rows = [row for row in rows if keyword in str(row).lower()]
-            rows = _apply_filters(rows, kwargs.get("filters"))
-            rows = _apply_sort(
-                rows,
-                sort_field=kwargs.get("sort_field"),
-                sort_direction=kwargs.get("sort_direction"),
-            )
-            total = len(rows)
-            start = (page - 1) * page_size
-            return {
-                "direction": direction,
-                "filter": filter_name,
-                "rows": rows[start : start + page_size],
-                "pagination": {"page": page, "page_size": page_size, "total": total},
-                "summary": {
-                    "total_rows": total,
-                    "missing_invoice_rows": sum(1 for row in rows if not row["invoices"]),
-                    "create_invoice_available_rows": sum(1 for row in rows if row["can_create_invoice"]),
-                    "source_summary": _source_summary_for_transactions(transactions, direction=direction),
-                },
-                "bank_transaction_tags": app._app_settings_service.get_settings_payload().get("bank_transaction_tags") or {},
-                "bank_transaction_tags_version": int(
-                    (app._app_settings_service.get_settings_payload().get("bank_transaction_tags") or {}).get("version") or 1
-                ),
-            }
-
-        class PendingInvoiceSqlReadRepository:
-            def list_pending_invoice_rows(self, **kwargs: object) -> dict[str, object]:
-                payload = query_rows(**kwargs)
-                result = dict(payload)
-                result["refresh_status"] = "fresh"
-                result["source_versions"] = pending_invoice_source_versions(
-                    app._app_settings_service.get_settings_payload(),
-                    attachment_invoice_parser_version=app._current_oa_attachment_invoice_parser_version(),
-                    oa_projection_sync_version=app._current_oa_projection_sync_version(),
-                )
-                return result
-
-            def pending_invoice_source_summary(
-                self,
-                *,
-                direction: str,
-                date_from: str | None = None,
-                date_to: str | None = None,
-            ) -> dict[str, int]:
-                payload = query_rows(
-                    direction=direction,
-                    filter="all",
-                    date_from=date_from,
-                    date_to=date_to,
-                    page=1,
-                    page_size=1,
-                )
-                summary = payload.get("summary") if isinstance(payload, dict) else {}
-                source_summary = summary.get("source_summary") if isinstance(summary, dict) else {}
-                return dict(source_summary) if isinstance(source_summary, dict) else {}
-
-        app._pending_invoice_sql_read_repository = PendingInvoiceSqlReadRepository()
-        if hasattr(app, "_pending_invoice_api_routes"):
-            delattr(app, "_pending_invoice_api_routes")
 
     @staticmethod
     def _active_rule_codes(tag_source: object, *, excluding: set[str]) -> list[str]:
