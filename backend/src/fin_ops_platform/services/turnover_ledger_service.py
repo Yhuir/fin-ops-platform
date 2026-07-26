@@ -25,7 +25,7 @@ MONEY_QUANT = Decimal("0.01")
 RATE_QUANT = Decimal("0.000001")
 ZERO = Decimal("0.00")
 ZERO_RATE = Decimal("0.000000")
-TURNOVER_LEDGER_SCHEMA_VERSION = "2026-07-turnover-ledger-v10"
+TURNOVER_LEDGER_SCHEMA_VERSION = "2026-07-turnover-ledger-v11"
 TURNOVER_FAMILY_LABELS = {
     "personal": "个人往来",
     "company": "公司往来",

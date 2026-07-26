@@ -323,6 +323,7 @@ def bank_detail_projected_row(
             "effective_turnover_action_type": "purchase",
             "effective_turnover_family": "operating",
             "bank_transaction_updated_at": "2026-05-03 10:00:00+00",
+            "category_rule_version": "91",
             "category_version": 7,
             "manual_category_version": 7,
             "version": 11,
@@ -591,6 +592,8 @@ class BankTransactionTagReadFacadeTests(unittest.TestCase):
         self.assertEqual(row["effective_category_code"], "equipment_purchase")
         self.assertEqual(row["effective_category_label_path"], ["货款", "设备采购"])
         self.assertEqual(row["effective_turnover_action_type"], "purchase")
+        self.assertEqual(row["bank_transaction_updated_at"], "2026-05-03 10:00:00+00")
+        self.assertEqual(row["category_rule_version"], "91")
         self.assertEqual(row["category_version"], 7)
         self.assertEqual(row["manual_category_version"], 7)
         self.assertEqual(row["version"], 11)
@@ -614,6 +617,8 @@ class BankTransactionTagReadFacadeTests(unittest.TestCase):
         self.assertEqual(categories["txn-001"]["category_version"], 7)
         self.assertEqual(categories["txn-001"]["manual_category_version"], 7)
         self.assertEqual(categories["txn-001"]["version"], 11)
+        self.assertEqual(categories["txn-001"]["bank_transaction_updated_at"], "2026-05-03 10:00:00+00")
+        self.assertEqual(categories["txn-001"]["category_rule_version"], "91")
         self.assertEqual(categories["txn-001"]["turnover_action_type"], "purchase")
 
     def test_source_versions_for_scope_keys_uses_scope_summary_without_loading_rows(self) -> None:
