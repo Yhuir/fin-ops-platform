@@ -1,6 +1,6 @@
 # 银行明细模块边界与 I/O
 
-日期：2026-07-22
+日期：2026-07-26
 
 ## 模块化状态
 
@@ -37,6 +37,7 @@
 | Worker 关系源端快路径 | `WorkbenchRelationReadModelRepositoryPort` | `bank-detail` SQL projection v10 可通过 `list_active_workbench_relation_source_rows(...)` / `workbench_relation_source_summary_from_source(...)` 读取 active relation source summary，用于关系标签投影和 source-version proof；行读取与 source summary 必须同时携带该月银行流水 legacy row id 与 canonical UUID，summary 以 `month_scope == month OR row_ids overlap` 纳入跨月 relation，保证跨月关系新增、替换和删除都改变 stable source versions；投影边界再归一回页面 row id。该身份/成员语义变化必须提升 read-model schema version，禁止被 unchanged-scope 优化跳过；SQL owner 仍归 workbench-relations repository，下游不得直接读 relation 表，也不得用该快路径做 relation 写前判断 |
 | 可用月份 scope 枚举 | `BankDetailAvailableMonthScopeProvider` | PostgreSQL read-model runtime 下只从 `BankDetailReadModelRepositoryPort.bank_detail_scope_keys_for_range(...)` 读取 scope；只有非 SQL/local runtime 才允许回退导入服务扫描，生产/API 页面读不得使用导入扫描证明 fresh |
 | 下游月度一致性快照 | `BankTransactionTagReadFacade.snapshot_for_month(...)` -> `BankDetailReadModelRepositoryPort.get_bank_detail_tagged_snapshot(...)` | 输入为目标 `YYYY-MM` 和可选关系成员流水 ID；repository 在一个 `REPEATABLE READ READ ONLY` transaction 内读取目标月全部 tagged rows、跨月补充 ID、涉及 scope 的 freshness/signature/source versions。输出必须分别暴露完整 `rows` 与仅目标月 `month_rows`，使下游既能补齐跨月关系标签，又不会把跨月补充行计入目标月全流水。该 port 是纯读，不写 queue/readiness/read model。 |
+| 外部往来款所选行精确校验 | `TurnoverLedgerBankRowSelectionPort` -> `BankDetailReadModelRepositoryPort.get_bank_detail_tagged_rows_by_transaction_ids(...)` | 仅按明确 transaction IDs 读取已发布 effective tag row，并允许复用调用方写事务 connection；随后由银行分类 repository 在同一事务锁定 canonical bank row，比较 `bank_transaction_updated_at`、活动分类/确认版本与当前自动规则版本。该 port 不声明整个 Bank Detail 页面 fresh、不写 queue，也不能把 read-model row 当作 canonical 写事实。 |
 | 自动分类候选推断 | `BankDetailAutoCategorySuggestionProvider` | 作为显式 provider 注入 `BankDetailsApplicationService`；应用服务本身不直接读取 import service 或 `BankDetailsService.auto_category_input_row(...)` |
 | Refresh scope | `bank_detail` manifest | month or `all`；`all` 只允许 fan-out 到 month shards；受控 `force_refresh` 必须由 handler 继续传递给所有 month shard，并由 projection builder 绕过 unchanged-scope fast-path 后重算，不得被当作普通刷新静默忽略 |
 

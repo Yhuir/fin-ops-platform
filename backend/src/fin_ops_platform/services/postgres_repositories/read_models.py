@@ -3554,6 +3554,7 @@ class PostgresBankReadModelRepository:
         transaction_ids: list[str],
         *,
         tenant_id: str = "default",
+        connection: Any | None = None,
     ) -> dict[str, Any] | None:
         normalized_ids = _dedupe_preserve_order(
             text(transaction_id)
@@ -3569,51 +3570,57 @@ class PostgresBankReadModelRepository:
                 "read_model_scope_keys": [],
                 "read_model_scope_signatures": {},
             }
-        with self._connection.transaction() as connection:
-            rows = connection.fetch_all(
-                """
-                select payload, raw_payload, summary, purpose, scope_key, source_versions
-                from read_model.bank_detail_rows
-                where tenant_id = %s
-                  and (
-                    transaction_id = any(%s)
-                    or payload->>'id' = any(%s)
-                    or payload->>'transaction_id' = any(%s)
-                  )
-                """,
-                (tenant_id, normalized_ids, normalized_ids, normalized_ids),
-            )
-            unordered_payload_rows = [_bank_detail_row_payload(row) for row in rows]
-            payload_by_id: dict[str, dict[str, Any]] = {}
-            for row in unordered_payload_rows:
-                for row_identity in (row.get("transaction_id"), row.get("id")):
-                    if transaction_id := text(row_identity):
-                        payload_by_id.setdefault(transaction_id, row)
-            payload_rows = [
-                payload_by_id[transaction_id]
-                for transaction_id in normalized_ids
-                if transaction_id in payload_by_id
-            ]
-            row_ids = {text(row.get("transaction_id") or row.get("id")) for row in payload_rows}
-            missing_ids = [transaction_id for transaction_id in normalized_ids if transaction_id not in row_ids]
-            scope_keys = _dedupe_preserve_order(
-                text(row.get("scope_key")) or _bank_detail_month_text((row.get("trade_date") or row.get("trade_time")))
-                for row in payload_rows
-            )
-            if not scope_keys:
-                return {
-                    "rows": [],
-                    "missing_transaction_ids": missing_ids,
-                    "source_versions": {},
-                    "read_model_status": "missing",
-                    "read_model_scope_keys": [],
-                    "read_model_scope_signatures": {},
-                }
-            scope_summary = self.bank_detail_scope_summary(
-                scope_keys=scope_keys,
-                tenant_id=tenant_id,
-                connection=connection,
-            )
+        if connection is None:
+            with self._connection.transaction() as transaction:
+                return self.get_bank_detail_tagged_rows_by_transaction_ids(
+                    normalized_ids,
+                    tenant_id=tenant_id,
+                    connection=transaction,
+                )
+        rows = connection.fetch_all(
+            """
+            select payload, raw_payload, summary, purpose, scope_key, source_versions
+            from read_model.bank_detail_rows
+            where tenant_id = %s
+              and (
+                transaction_id = any(%s)
+                or payload->>'id' = any(%s)
+                or payload->>'transaction_id' = any(%s)
+              )
+            """,
+            (tenant_id, normalized_ids, normalized_ids, normalized_ids),
+        )
+        unordered_payload_rows = [_bank_detail_row_payload(row) for row in rows]
+        payload_by_id: dict[str, dict[str, Any]] = {}
+        for row in unordered_payload_rows:
+            for row_identity in (row.get("transaction_id"), row.get("id")):
+                if transaction_id := text(row_identity):
+                    payload_by_id.setdefault(transaction_id, row)
+        payload_rows = [
+            payload_by_id[transaction_id]
+            for transaction_id in normalized_ids
+            if transaction_id in payload_by_id
+        ]
+        row_ids = {text(row.get("transaction_id") or row.get("id")) for row in payload_rows}
+        missing_ids = [transaction_id for transaction_id in normalized_ids if transaction_id not in row_ids]
+        scope_keys = _dedupe_preserve_order(
+            text(row.get("scope_key")) or _bank_detail_month_text((row.get("trade_date") or row.get("trade_time")))
+            for row in payload_rows
+        )
+        if not scope_keys:
+            return {
+                "rows": [],
+                "missing_transaction_ids": missing_ids,
+                "source_versions": {},
+                "read_model_status": "missing",
+                "read_model_scope_keys": [],
+                "read_model_scope_signatures": {},
+            }
+        scope_summary = self.bank_detail_scope_summary(
+            scope_keys=scope_keys,
+            tenant_id=tenant_id,
+            connection=connection,
+        )
         return {
             "rows": payload_rows,
             "missing_transaction_ids": missing_ids,

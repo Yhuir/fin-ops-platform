@@ -6199,6 +6199,10 @@ textarea {
   border-top-color: var(--fp-border);
 }
 
+.turnover-flow-row + .turnover-flow-row > td {
+  border-top: 1px solid var(--fp-border);
+}
+
 .turnover-summary-row > td {
   background: color-mix(in srgb, var(--fp-primary-soft) 68%, var(--fp-surface));
 }

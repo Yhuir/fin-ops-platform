@@ -85,6 +85,9 @@ class TurnoverLedgerWriteUnitOfWork:
                         _raise_if_idempotency_in_progress(reserved_record, idempotency)
 
             expected_versions = dict(getattr(command, "expected_versions", {}) or {})
+            bind_transaction = getattr(self._stale_precondition_port, "bind_transaction", None)
+            if callable(bind_transaction):
+                bind_transaction(transaction)
             if expected_versions:
                 self._stale_precondition_port.assert_current(
                     expected_versions=expected_versions,

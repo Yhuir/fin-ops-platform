@@ -172,6 +172,40 @@ def test_batch_writer_can_commit_canonical_facts_without_write_time_fan_out() ->
     assert "operation_barrier_targets" not in result
 
 
+class SelectionProofTransaction:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+    def fetch_all(self, sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
+        self.calls.append((" ".join(sql.lower().split()), params))
+        return [
+            {
+                "canonical_transaction_id": BANK_TRANSACTION_UUID,
+                "transaction_id": "bank-row-1",
+                "bank_transaction_updated_at": "2026-07-26 01:02:03+00",
+                "category_code": "borrow_out_personal_pending_collection",
+                "category_source": "manual",
+                "category_version": 7,
+            }
+        ]
+
+
+def test_turnover_selection_proofs_lock_and_return_both_bank_identities() -> None:
+    transaction = SelectionProofTransaction()
+    repository = PostgresBankTransactionCategoryRepository(SimpleNamespace())
+
+    proofs = repository.turnover_bank_row_selection_proofs(
+        ["bank-row-1"],
+        transaction=transaction,
+        tenant_id="default",
+    )
+
+    assert proofs["bank-row-1"] is proofs[BANK_TRANSACTION_UUID]
+    assert proofs["bank-row-1"]["category_version"] == 7
+    assert "for share of b" in transaction.calls[0][0]
+    assert transaction.calls[0][1] == ("default", ["bank-row-1"], ["bank-row-1"])
+
+
 class InspectionConnection:
     def fetch_all(self, _sql: str, _params: tuple[object, ...] = ()) -> list[dict[str, object]]:
         return [

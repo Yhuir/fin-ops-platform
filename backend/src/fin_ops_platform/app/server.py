@@ -1537,7 +1537,12 @@ class Application:
             rows.append(row)
         return rows
 
-    def _turnover_bank_transaction_rows_by_ids(self, transaction_ids: list[str]) -> list[dict[str, object]]:
+    def _turnover_bank_transaction_rows_by_ids(
+        self,
+        transaction_ids: list[str],
+        *,
+        transaction: object | None = None,
+    ) -> list[dict[str, object]]:
         normalized_ids = [
             str(transaction_id).strip()
             for transaction_id in list(transaction_ids or [])
@@ -1549,22 +1554,30 @@ class Application:
             repository = getattr(self, "_bank_detail_sql_read_repository", None)
             loader = getattr(repository, "get_bank_detail_tagged_rows_by_transaction_ids", None)
             if not callable(loader):
+                if transaction is not None:
+                    raise TurnoverLedgerWritePreconditionError(
+                        error_code="turnover_bank_row_selection_unavailable",
+                        message="银行流水状态校验暂不可用，请稍后重试。",
+                        status_code=503,
+                    )
                 return []
-            payload = loader(
-                normalized_ids,
-                tenant_id=self._workbench_reconciliation_tenant_id(),
-            )
+            loader_kwargs: dict[str, object] = {
+                "tenant_id": self._workbench_reconciliation_tenant_id(),
+            }
+            if transaction is not None:
+                loader_kwargs["connection"] = transaction
+            payload = loader(normalized_ids, **loader_kwargs)
             if not isinstance(payload, dict):
+                if transaction is not None:
+                    raise TurnoverLedgerWritePreconditionError(
+                        error_code="turnover_bank_row_selection_unavailable",
+                        message="银行流水状态校验暂不可用，请稍后重试。",
+                        status_code=503,
+                    )
                 return []
-            read_model_status = str(payload.get("read_model_status") or "fresh").strip()
-            if read_model_status not in {"fresh", "refreshing"}:
-                return []
-            current_rule_version = self._bank_transaction_category_service.auto_tag_rule_version_label()
             rows: list[dict[str, object]] = []
             for row in list(payload.get("rows") or []):
                 if not isinstance(row, dict):
-                    continue
-                if read_model_status == "refreshing" and str(row.get("category_rule_version") or "").strip() != current_rule_version:
                     continue
                 turnover_row = self._turnover_bank_transaction_row_from_bank_detail(row)
                 if turnover_row is not None:
@@ -1582,6 +1595,29 @@ class Application:
                 }
             )
         ]
+
+    def _turnover_bank_transaction_selection_proofs(
+        self,
+        transaction_ids: list[str],
+        *,
+        transaction: object,
+    ) -> dict[str, dict[str, object]]:
+        repository = getattr(getattr(self, "_state_store", None), "bank_transaction_category_repository", None)
+        loader = getattr(repository, "turnover_bank_row_selection_proofs", None)
+        if not callable(loader):
+            raise TurnoverLedgerWritePreconditionError(
+                error_code="turnover_bank_row_selection_unavailable",
+                message="银行流水状态校验暂不可用，请稍后重试。",
+                status_code=503,
+            )
+        return dict(
+            loader(
+                transaction_ids,
+                transaction=transaction,
+                tenant_id=self._workbench_reconciliation_tenant_id(),
+            )
+            or {}
+        )
 
     def _turnover_bank_transaction_rows_from_sql_read_model(self) -> list[dict[str, object]]:
         if not self._requires_sql_read_model_runtime():
@@ -3027,6 +3063,8 @@ class Application:
             postgres_idempotency_store_factory=self._turnover_ledger_confirm_postgres_idempotency_store,
             local_idempotency_store_provider=self._turnover_ledger_confirm_local_idempotency_store,
             rules_payload_provider=self._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload,
+            bank_row_source_proofs_provider=self._turnover_bank_transaction_selection_proofs,
+            current_rule_version_provider=self._bank_transaction_category_service.auto_tag_rule_version_label,
         ).build()
         if facade is not None:
             return facade
@@ -3059,6 +3097,8 @@ class Application:
             postgres_idempotency_store_factory=self._turnover_ledger_confirm_postgres_idempotency_store,
             local_idempotency_store_provider=self._turnover_ledger_confirm_local_idempotency_store,
             rules_payload_provider=self._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload,
+            bank_row_source_proofs_provider=self._turnover_bank_transaction_selection_proofs,
+            current_rule_version_provider=self._bank_transaction_category_service.auto_tag_rule_version_label,
             pair_snapshot_port=TurnoverLedgerLocalPairSnapshotPort(
                 pair_relation_service=self._workbench_pair_relation_service,
                 save_pair_snapshot=lambda snapshot: self._state_store.save_workbench_pair_relations(dict(snapshot)),

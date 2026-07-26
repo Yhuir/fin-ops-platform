@@ -1823,9 +1823,50 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         self.assertIn("TurnoverLedgerBankRowSelectionPort(", source)
         self.assertIn("bank_rows_by_ids_provider=bank_row_selection_port.rows_by_ids", source)
+        self.assertIn("bank_row_source_proofs_provider=", source)
         self.assertIn("stale_precondition_port = bank_row_selection_port", source)
         self.assertIn("bank_rows_provider=self._bank_rows_provider", source)
         self.assertNotIn("stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None)", source)
+
+    def test_turnover_exact_bank_row_lookup_does_not_block_on_unrelated_page_staleness(self) -> None:
+        class _Repository:
+            @staticmethod
+            def get_bank_detail_tagged_rows_by_transaction_ids(
+                transaction_ids: list[str],
+                *,
+                tenant_id: str,
+            ) -> dict[str, object]:
+                self.assertEqual(transaction_ids, ["bank_txn_1"])
+                self.assertEqual(tenant_id, "default")
+                return {
+                    "read_model_status": "stale",
+                    "rows": [
+                        {
+                            "id": "bank_txn_1",
+                            "direction": "expense",
+                            "amount": "100.00",
+                            "trade_time": "2026-07-26 01:02:03+00",
+                            "counterparty_name": "测试往来方",
+                            "effective_category_code": "borrow_out_personal_pending_collection",
+                            "effective_category_label": "借出款",
+                            "effective_category_source": "manual",
+                            "effective_turnover_role": "external_turnover",
+                            "effective_turnover_action_type": "pending_collection",
+                            "effective_turnover_family": "personal",
+                            "category_version": 7,
+                        }
+                    ],
+                }
+
+        app = object.__new__(Application)
+        app._bank_detail_sql_read_repository = _Repository()
+        app._requires_sql_read_model_runtime = lambda: True  # type: ignore[method-assign]
+        app._workbench_reconciliation_tenant_id = lambda: "default"  # type: ignore[method-assign]
+
+        rows = app._turnover_bank_transaction_rows_by_ids(["bank_txn_1"])
+
+        self.assertEqual([row["id"] for row in rows], ["bank_txn_1"])
+        self.assertEqual(rows[0]["category_version"], 7)
 
     def test_turnover_ledger_local_runtime_helpers_delegate_to_support_boundary(self) -> None:
         helper_names = [
@@ -3901,11 +3942,36 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             queue = _PostgresQueueRecorder()
             read_repository = _TurnoverReadModelRecorder()
             app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
-            app._turnover_bank_transaction_rows_by_ids = lambda row_ids: [  # type: ignore[method-assign]
-                dict(row)
+            exact_rows = [
+                {
+                    **dict(row),
+                    "bank_transaction_updated_at": "2026-07-26 01:02:03+00",
+                    "effective_category_code": row.get("category_code"),
+                    "effective_category_source": "manual",
+                    "effective_turnover_role": "external_turnover",
+                    "effective_turnover_action_type": (
+                        "pending_repayment"
+                        if str(row.get("category_code") or "").endswith("pending_repayment")
+                        else "repaid"
+                    ),
+                    "effective_turnover_family": "company",
+                }
                 for row in turnover_rows
+            ]
+            app._turnover_bank_transaction_rows_by_ids = lambda row_ids, **_kwargs: [  # type: ignore[method-assign]
+                dict(row)
+                for row in exact_rows
                 if str(row.get("id") or "") in set(row_ids)
             ]
+            app._turnover_bank_transaction_selection_proofs = lambda row_ids, **_kwargs: {  # type: ignore[method-assign]
+                str(row.get("id")): {
+                    "bank_transaction_updated_at": row["bank_transaction_updated_at"],
+                    "category_code": row.get("effective_category_code"),
+                    "category_version": row.get("category_version"),
+                }
+                for row in exact_rows
+                if str(row.get("id") or "") in set(row_ids)
+            }
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
             app._turnover_ledger_sql_read_repository = read_repository
@@ -3916,7 +3982,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                 body=json.dumps({"bank_row_ids": transaction_ids, "note": "postgres facade readiness"}),
             )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 200, response.body)
         self.assertEqual(read_repository.clear_calls, 0)
         self.assertEqual(queue.transactional, [])
         self.assertEqual(queue.enqueued, [])

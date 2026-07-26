@@ -86,7 +86,6 @@ const EMPTY_TAG_SELECTION: TurnoverLedgerTagSelection = {
 };
 
 const SELF_SUB_LABEL = "主标签本身";
-const CLOSURE_SELECTION_STALE_MESSAGE = "所选流水已刷新，请重新选择后再确认闭环。";
 const POST_MUTATION_SYNC_WARNING_MESSAGE = "操作已提交，后台同步尚未完成，请稍后刷新。";
 const ACCESS_FRESH_TIMEOUT_MS = 3_000;
 const ACCESS_FRESH_POLL_MS = 150;
@@ -202,49 +201,21 @@ function closureExpectedVersions(rows: TurnoverLedgerGroupedRow[]) {
   const expectedVersions: Record<string, unknown> = {};
   rows.forEach((row) => {
     const bankRowId = flowBankRowId(row);
-    const categoryVersion = row.categoryVersion;
-    if (!bankRowId || typeof categoryVersion !== "number" || !Number.isFinite(categoryVersion)) {
+    if (!bankRowId) {
       return;
     }
-    expectedVersions[`turnover_bank_row:${bankRowId}`] = categoryVersion;
+    if (row.selectionVersion) {
+      expectedVersions[`turnover_bank_row_selection:${bankRowId}`] = row.selectionVersion;
+    }
+    if (typeof row.categoryVersion === "number" && Number.isFinite(row.categoryVersion)) {
+      expectedVersions[`turnover_bank_row:${bankRowId}`] = row.categoryVersion;
+    }
   });
   return Object.keys(expectedVersions).length > 0 ? expectedVersions : undefined;
 }
 
 function closureIdempotencyKey(bankRowIds: string[]) {
   return `turnover-manual-closure:${Date.now()}:${bankRowIds.join(",")}`;
-}
-
-function freshClosureRowsFromLedger(
-  ledger: TurnoverLedgerGroupedResponse,
-  selection: ClosureSelection,
-  bankRowIds: string[],
-) {
-  const group = ledger.groups.find((item) => item.groupId === selection.groupId);
-  if (!group) {
-    return null;
-  }
-  const rowsByBankRowId = new Map<string, TurnoverLedgerGroupedRow>();
-  group.flowRows.forEach((row) => {
-    const bankRowId = flowBankRowId(row);
-    if (!bankRowId) {
-      return;
-    }
-    rowsByBankRowId.set(bankRowId, {
-      ...row,
-      counterpartyName: group.counterpartyName,
-      familyLabel: group.familyLabel,
-    });
-  });
-  const rows: TurnoverLedgerGroupedRow[] = [];
-  for (const bankRowId of bankRowIds) {
-    const row = rowsByBankRowId.get(bankRowId);
-    if (!row) {
-      return null;
-    }
-    rows.push(row);
-  }
-  return rows;
 }
 
 function relationDetailErrorMessage(caught: unknown) {
@@ -615,30 +586,12 @@ export default function TurnoverLedgerPage() {
     const result = await runOperation({
       loadingMessage: "正在确认外部往来闭环...",
       action: async ({ setMessage }) => {
-          setClosureSubmitting(true);
+        setClosureSubmitting(true);
         try {
-          setMessage("正在确认所选流水为最新版本...");
-          const freshLedger = await waitForFreshLedgerOnAccess(
-            reloadLedgerAfterMutation,
-            () => setMessage("正在刷新往来款台账..."),
-          );
-          if (!freshLedger) {
-            setClosureSelection(null);
-            setClosureDrawerOpen(false);
-            throw new Error(CLOSURE_SELECTION_STALE_MESSAGE);
-          }
-          const freshRows = freshClosureRowsFromLedger(freshLedger, currentSelection, bankRowIds);
-          const freshPreview = freshRows ? buildClosurePreview(freshRows) : null;
-          if (!freshRows || !freshPreview?.canConfirm) {
-            setClosureSelection(null);
-            setClosureDrawerOpen(false);
-            throw new Error(CLOSURE_SELECTION_STALE_MESSAGE);
-          }
-          setClosureSelection({ ...currentSelection, rows: freshRows });
           setMessage("正在确认外部往来闭环...");
           const closureResult = await confirmTurnoverClosure({
             bankRowIds,
-            expectedVersions: closureExpectedVersions(freshRows),
+            expectedVersions: closureExpectedVersions(currentSelection.rows),
             idempotencyKey: closureIdempotencyKey(bankRowIds),
           });
           setClosureSelection(null);
@@ -1189,12 +1142,13 @@ export default function TurnoverLedgerPage() {
           <div className="turnover-ledger-drawer__footer">
             <button className="turnover-ledger-button" disabled={closureSubmitting} onClick={() => setClosureDrawerOpen(false)} type="button">取消</button>
             <button
+              aria-busy={closureSubmitting}
               className="turnover-ledger-button turnover-ledger-button--primary"
               disabled={!closurePreview.canConfirm || closureSubmitting || readModelNeedsRefresh}
               onClick={() => void handleConfirmClosure()}
               type="button"
             >
-              确定
+              {closureSubmitting ? "确认中…" : "确定"}
             </button>
           </div>
         </div>

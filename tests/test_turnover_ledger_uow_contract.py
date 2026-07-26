@@ -1975,6 +1975,136 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(requested_ids, [["bank_txn_1"]])
         self.assertEqual(port.rows_by_ids(["bank_txn_1"])[0]["category_version"], 5)
 
+    def test_bank_row_selection_accepts_exact_selected_facts_without_page_freshness_gate(self) -> None:
+        module = self._write_adapters_module()
+        transaction = object()
+        provider_calls: list[dict[str, object]] = []
+        row = {
+            "id": "bank_txn_1",
+            "bank_transaction_updated_at": "2026-07-26 01:02:03+00",
+            "category_version": 7,
+            "category_rule_version": "rules-v1",
+            "effective_category_code": "borrow_out_personal_pending_collection",
+            "effective_category_source": "manual",
+            "effective_turnover_role": "external_turnover",
+            "effective_turnover_action_type": "pending_collection",
+            "effective_turnover_family": "personal",
+        }
+
+        def load_rows(row_ids: list[str], *, transaction: object) -> list[dict[str, object]]:
+            provider_calls.append({"source": "projection", "ids": list(row_ids), "transaction": transaction})
+            return [dict(row)]
+
+        def load_proofs(row_ids: list[str], *, transaction: object) -> dict[str, dict[str, object]]:
+            provider_calls.append({"source": "facts", "ids": list(row_ids), "transaction": transaction})
+            return {
+                "bank_txn_1": {
+                    "bank_transaction_updated_at": row["bank_transaction_updated_at"],
+                    "category_code": row["effective_category_code"],
+                    "category_version": row["category_version"],
+                }
+            }
+
+        port = module.TurnoverLedgerBankRowSelectionPort(
+            bank_rows_by_ids_provider=load_rows,
+            bank_row_source_proofs_provider=load_proofs,
+            current_rule_version_provider=lambda: "rules-v1",
+        )
+        selection_version = module.turnover_bank_row_selection_version(row)
+
+        port.assert_current(
+            expected_versions={
+                "turnover_bank_row:bank_txn_1": 7,
+                "turnover_bank_row_selection:bank_txn_1": selection_version,
+            },
+            transaction=transaction,
+        )
+
+        self.assertEqual([call["source"] for call in provider_calls], ["projection", "facts"])
+        self.assertTrue(all(call["transaction"] is transaction for call in provider_calls))
+        self.assertEqual(port.rows_by_ids(["bank_txn_1"])[0]["selection_version"], selection_version)
+
+    def test_bank_row_selection_rejects_a_selected_fact_mismatch(self) -> None:
+        module = self._write_adapters_module()
+        row = {
+            "id": "bank_txn_1",
+            "bank_transaction_updated_at": "2026-07-26 01:02:03+00",
+            "category_version": 7,
+            "category_rule_version": "rules-v1",
+            "effective_category_code": "borrow_out_personal_pending_collection",
+            "effective_category_source": "manual",
+            "effective_turnover_role": "external_turnover",
+            "effective_turnover_action_type": "pending_collection",
+            "effective_turnover_family": "personal",
+        }
+        port = module.TurnoverLedgerBankRowSelectionPort(
+            bank_rows_by_ids_provider=lambda _ids, **_kwargs: [dict(row)],
+            bank_row_source_proofs_provider=lambda _ids, **_kwargs: {
+                "bank_txn_1": {
+                    **row,
+                    "bank_transaction_updated_at": "2026-07-26 01:02:04+00",
+                    "category_code": row["effective_category_code"],
+                }
+            },
+            current_rule_version_provider=lambda: "rules-v1",
+        )
+
+        with self.assertRaises(module.TurnoverLedgerWritePreconditionError) as context:
+            port.assert_current(
+                expected_versions={"turnover_bank_row:bank_txn_1": 7},
+                transaction=object(),
+            )
+
+        self.assertEqual(context.exception.error_code, "turnover_relation_conflict")
+        self.assertEqual(context.exception.status_code, 409)
+
+    def test_bank_row_selection_rejects_an_outdated_auto_rule(self) -> None:
+        module = self._write_adapters_module()
+        row = {
+            "id": "bank_txn_1",
+            "bank_transaction_updated_at": "2026-07-26 01:02:03+00",
+            "category_version": 0,
+            "category_rule_version": "rules-old",
+            "effective_category_code": "borrow_out_personal_pending_collection",
+            "effective_category_source": "auto",
+            "effective_turnover_role": "external_turnover",
+            "effective_turnover_action_type": "pending_collection",
+            "effective_turnover_family": "personal",
+        }
+        port = module.TurnoverLedgerBankRowSelectionPort(
+            bank_rows_by_ids_provider=lambda _ids, **_kwargs: [dict(row)],
+            bank_row_source_proofs_provider=lambda _ids, **_kwargs: {
+                "bank_txn_1": {
+                    "bank_transaction_updated_at": row["bank_transaction_updated_at"],
+                    "category_code": "",
+                    "category_version": 0,
+                }
+            },
+            current_rule_version_provider=lambda: "rules-current",
+        )
+
+        with self.assertRaises(module.TurnoverLedgerWritePreconditionError) as context:
+            port.assert_current(
+                expected_versions={"turnover_bank_row:bank_txn_1": 0},
+                transaction=object(),
+            )
+
+        self.assertEqual(context.exception.error_code, "turnover_relation_conflict")
+
+    def test_bank_row_selection_requires_transactional_exact_proof_boundary(self) -> None:
+        module = self._write_adapters_module()
+        port = module.TurnoverLedgerBankRowSelectionPort(
+            bank_rows_by_ids_provider=lambda _ids, **_kwargs: [],
+            bank_row_source_proofs_provider=lambda _ids, **_kwargs: {},
+            current_rule_version_provider=lambda: "rules-v1",
+        )
+
+        with self.assertRaises(module.TurnoverLedgerWritePreconditionError) as context:
+            port.rows_by_ids(["bank_txn_1"])
+
+        self.assertEqual(context.exception.error_code, "turnover_bank_row_selection_unavailable")
+        self.assertEqual(context.exception.status_code, 503)
+
     def test_target_confirm_relation_facade_passes_idempotency_before_repository(self) -> None:
         # PF-P177 target contract: confirm should reserve/replay/conflict by durable idempotency before repository save.
         class _CommandCapturingUoW:

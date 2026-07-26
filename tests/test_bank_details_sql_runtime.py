@@ -1510,6 +1510,31 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertIn("transaction_id = any", sql_text)
         self.assertNotIn("from app.bank_transactions", sql_text)
 
+    def test_get_tagged_rows_by_transaction_ids_reuses_a_supplied_write_transaction(self) -> None:
+        class NoNestedTransactionConnection:
+            def transaction(self):
+                raise AssertionError("must not open a nested transaction")
+
+        transaction = FakeConnection(
+            rows=[
+                [bank_detail_projected_row("txn-001")],
+                [scope_row("2026-05")],
+            ]
+        )
+        repository = PostgresReadModelRepository(NoNestedTransactionConnection())
+
+        payload = repository.get_bank_detail_tagged_rows_by_transaction_ids(
+            ["txn-001"],
+            connection=transaction,
+        )
+
+        self.assertEqual([row["transaction_id"] for row in payload["rows"]], ["txn-001"])
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertIn(
+            "from read_model.bank_detail_rows",
+            " ".join(call[1].lower() for call in transaction.calls),
+        )
+
     def test_get_tagged_rows_by_transaction_ids_matches_payload_legacy_ids(self) -> None:
         connection = FakeConnection(
             rows=[

@@ -20,6 +20,80 @@ class PostgresBankTransactionCategoryRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
 
+    def turnover_bank_row_selection_proofs(
+        self,
+        transaction_ids: list[str],
+        *,
+        transaction: Any | None = None,
+        tenant_id: str = "default",
+    ) -> dict[str, dict[str, object]]:
+        normalized_ids = list(
+            dict.fromkeys(
+                str(transaction_id or "").strip()
+                for transaction_id in list(transaction_ids or [])
+                if str(transaction_id or "").strip()
+            )
+        )
+        if not normalized_ids:
+            return {}
+        rows = (transaction or self._connection).fetch_all(
+            """
+            select
+                b.id::text as canonical_transaction_id,
+                coalesce(b.legacy_mongo_id, b.id::text) as transaction_id,
+                b.updated_at::text as bank_transaction_updated_at,
+                coalesce(confirmation.category_code, manual.category) as category_code,
+                case
+                    when confirmation.id is not null then 'auto_confirmation'
+                    else coalesce(manual.source, '')
+                end as category_source,
+                coalesce(confirmation.version, manual.version, 0)::integer as category_version
+            from app.bank_transactions b
+            left join lateral (
+                select c.id, c.category, c.source, c.version
+                from app.bank_transaction_categories c
+                where c.status = 'active'
+                  and (
+                    c.bank_transaction_id = b.id
+                    or c.legacy_transaction_id in (coalesce(b.legacy_mongo_id, b.id::text), b.id::text)
+                  )
+                order by c.updated_at desc, c.id desc
+                limit 1
+            ) manual on true
+            left join lateral (
+                select c.id, c.category_code, c.version
+                from app.bank_transaction_category_confirmations c
+                where c.tenant_id = %s
+                  and c.status = 'active'
+                  and (
+                    c.bank_transaction_id = b.id
+                    or c.legacy_transaction_id in (coalesce(b.legacy_mongo_id, b.id::text), b.id::text)
+                  )
+                order by c.confirmed_at desc, c.id desc
+                limit 1
+            ) confirmation on true
+            where b.status <> 'deleted'
+              and (b.id::text = any(%s::text[]) or b.legacy_mongo_id = any(%s::text[]))
+            order by b.created_at, b.id
+            for share of b
+            """,
+            (tenant_id, normalized_ids, normalized_ids),
+        )
+        proofs: dict[str, dict[str, object]] = {}
+        for row in rows:
+            proof = {
+                "transaction_id": text(row.get("transaction_id")) or "",
+                "canonical_transaction_id": text(row.get("canonical_transaction_id")) or "",
+                "bank_transaction_updated_at": text(row.get("bank_transaction_updated_at")) or "",
+                "category_code": text(row.get("category_code")) or "",
+                "category_source": text(row.get("category_source")) or "",
+                "category_version": int_value(row.get("category_version"), 0),
+            }
+            for identity in (proof["transaction_id"], proof["canonical_transaction_id"]):
+                if identity:
+                    proofs[str(identity)] = proof
+        return proofs
+
     def load_snapshot(self) -> dict[str, Any]:
         rows = self._connection.fetch_all(
             """

@@ -11,7 +11,10 @@ from fin_ops_platform.services.bank_transaction_category_service import (
     BankTransactionCategoryService,
 )
 from fin_ops_platform.services.bank_turnover_tag_semantics import EXTERNAL_TURNOVER_ROLE
-from fin_ops_platform.services.turnover_bank_row_version import turnover_bank_row_version
+from fin_ops_platform.services.turnover_bank_row_version import (
+    turnover_bank_row_selection_version,
+    turnover_bank_row_version,
+)
 from fin_ops_platform.services.turnover_relation_service import (
     TURNOVER_CATEGORY_RULES,
     TurnoverRelationService,
@@ -22,7 +25,7 @@ MONEY_QUANT = Decimal("0.01")
 RATE_QUANT = Decimal("0.000001")
 ZERO = Decimal("0.00")
 ZERO_RATE = Decimal("0.000000")
-TURNOVER_LEDGER_SCHEMA_VERSION = "2026-07-turnover-ledger-v8"
+TURNOVER_LEDGER_SCHEMA_VERSION = "2026-07-turnover-ledger-v9"
 TURNOVER_FAMILY_LABELS = {
     "personal": "个人往来",
     "company": "公司往来",
@@ -781,11 +784,15 @@ class TurnoverLedgerService:
 
     @staticmethod
     def _bank_row_version_fields(row: dict[str, Any]) -> dict[str, Any]:
-        return {
+        fields = {
             field_name: row.get(field_name)
             for field_name in ("manual_category_version", "version")
             if row.get(field_name) is not None
         }
+        selection_version = turnover_bank_row_selection_version(row)
+        if selection_version:
+            fields["selection_version"] = selection_version
+        return fields
 
     @staticmethod
     def _allocation_status(allocated_lot_ids: list[str]) -> str:

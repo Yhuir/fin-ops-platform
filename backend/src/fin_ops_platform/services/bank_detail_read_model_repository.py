@@ -67,10 +67,14 @@ class BankDetailReadModelRepositoryPort:
         transaction_ids: list[str],
         *,
         tenant_id: str = "default",
+        connection: Any | None = None,
     ) -> dict[str, object] | None:
+        kwargs: dict[str, object] = {"tenant_id": tenant_id}
+        if connection is not None:
+            kwargs["connection"] = connection
         payload = self._repository.get_bank_detail_tagged_rows_by_transaction_ids(
             transaction_ids,
-            tenant_id=tenant_id,
+            **kwargs,
         )
         return dict(payload) if isinstance(payload, dict) else None
 
