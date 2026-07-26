@@ -18,7 +18,6 @@ type PendingInvoiceReadModelMockStatus = "fresh" | "refreshing" | "stale" | "mis
 type BankDetailReadModelMockStatus = "fresh" | "refreshing" | "stale" | "schema_mismatch" | "missing";
 type CostStatisticsReadModelMockStatus = "fresh" | "refreshing" | "stale" | "failed" | "unavailable";
 type TaxOffsetReadModelMockStatus = "fresh" | "refreshing" | "stale" | "failed" | "missing" | "unavailable";
-type BankFlowRuleBatchReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
 type BatchAccountingReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
 type TurnoverLedgerReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
 type BankDetailClassificationMockMode = "auto_matched" | "needs_confirmation" | "unmatched";
@@ -71,8 +70,6 @@ type ApiMockOptions = {
   bankFlowRuleCostFanout?: boolean;
   bankFlowRuleBatchFailOnce?: boolean;
   bankFlowRuleBatchFailuresBeforeSuccess?: number;
-  bankFlowRuleBatchReadModelStatus?: BankFlowRuleBatchReadModelMockStatus;
-  bankFlowRuleBatchReadModelStatuses?: BankFlowRuleBatchReadModelMockStatus[];
   bankFlowRuleBatchScenario?: BankFlowRuleBatchMockScenario;
   settingsProjectScopeFanout?: boolean;
   turnoverCostFanout?: boolean;
@@ -5590,7 +5587,6 @@ function bankFlowRuleBatchSummary(status: BankFlowRuleBrowserBatchStatus, batche
 function bankFlowRuleBatchesPayload(
   status: BankFlowRuleBrowserBatchStatus,
   bucket: string | null,
-  readModelStatus: BankFlowRuleBatchReadModelMockStatus = "fresh",
   scenario: BankFlowRuleBatchMockScenario = "single",
 ) {
   const batches = bankFlowRuleBatchesForScenario(status, scenario);
@@ -5613,8 +5609,6 @@ function bankFlowRuleBatchesPayload(
       page_size: 200,
       total: visibleBatches.length,
     },
-    read_model_status: readModelStatus,
-    read_model_stale_reasons: readModelStatus === "fresh" ? [] : [`bank_flow_rule_batch_${readModelStatus}`],
   };
 }
 
@@ -5737,10 +5731,6 @@ function bankFlowRuleBatchMutationPayload(
   return {
     batch: bankFlowRuleBatch(status),
     affected_months: [scopeKey],
-    affected_scope_keys: [scopeKey],
-    read_model_scope_keys: [scopeKey],
-    freshness_targets: [],
-    operation_barrier_targets: [],
     results: [],
   };
 }
@@ -8395,7 +8385,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
   let bankFlowRuleBatchStatus: BankFlowRuleBrowserBatchStatus = "draft";
   let bankFlowRuleBatchFailuresRemaining =
     options.bankFlowRuleBatchFailuresBeforeSuccess ?? (options.bankFlowRuleBatchFailOnce ? 1 : 0);
-  let bankFlowRuleBatchesRequestCount = 0;
   const bankFlowRuleMutationScope = options.bankFlowRuleBatchScenario === "internalTransferPairs" ? "2026-01" : "2026-05";
   let bankFlowRuleTagRules = [...defaultBankFlowRuleBatchTagRules];
   let turnoverLedgerFailuresRemaining =
@@ -9284,11 +9273,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         eligibility_changed: true,
         eligibility_changed_tag_codes: ["salary"],
         affected_months: ["2026-05"],
-        affected_scope_keys: ["2026-05"],
-        read_model_scope_keys: ["2026-05"],
-        freshness_targets: [],
-        operation_barrier_targets: [],
-        refresh_enqueued: false,
       });
     }
 
@@ -9308,15 +9292,9 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           message: "流水规则批次加载暂时失败，请刷新后重试。",
         }, 503);
       }
-      const readModelStatuses = options.bankFlowRuleBatchReadModelStatuses;
-      const readModelStatus = readModelStatuses?.[
-        Math.min(bankFlowRuleBatchesRequestCount, readModelStatuses.length - 1)
-      ] ?? options.bankFlowRuleBatchReadModelStatus ?? "fresh";
-      bankFlowRuleBatchesRequestCount += 1;
       return json(route, bankFlowRuleBatchesPayload(
         bankFlowRuleBatchStatus,
         url.searchParams.get("bucket"),
-        readModelStatus,
         options.bankFlowRuleBatchScenario ?? "single",
       ));
     }

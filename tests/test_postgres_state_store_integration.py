@@ -563,6 +563,158 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
         self.assertEqual(mixed_page["source_versions_summary"]["read_model_status"], "schema_mismatch")
         self.assertEqual(mixed_page["source_versions_summary"]["source_versions"], {})
 
+    def test_bank_flow_rule_batch_canonical_query_reads_without_projection_rows(self) -> None:
+        settings_payload = {
+            "bank_transaction_tags": {
+                "version": 3,
+                "definitions": [
+                    {
+                        "code": "fee",
+                        "label": "手续费",
+                        "path": ["费用", "手续费"],
+                        "source": "custom",
+                        "status": "active",
+                        "direction": "expense",
+                        "output_primary_label": "费用",
+                        "output_sub_label": "手续费",
+                        "rules": {"match_fields": ["summary_text"], "contains_any": ["手续费"]},
+                    }
+                ],
+            },
+            "bank_flow_rule_batch_tag_rules": {
+                "version": 7,
+                "requirements_by_tag_code": {
+                    "fee": {"requires_oa": False, "requires_invoice": False}
+                },
+            },
+        }
+        with self.connection.transaction() as transaction:
+            transaction.execute(
+                """
+                insert into app.app_settings(settings_key, settings_payload, raw_payload)
+                values ('app_settings', %s::jsonb, '{}'::jsonb)
+                """,
+                (json.dumps(settings_payload),),
+            )
+            for row_id, amount in (("bank-direct-1", "8.80"), ("bank-direct-2", "12.30")):
+                transaction.execute(
+                    """
+                    insert into app.bank_transactions(
+                        legacy_mongo_id, account_no, txn_direction, counterparty_name_raw,
+                        normalized_counterparty_name, amount, signed_amount, txn_date, txn_month,
+                        trade_time, summary, status, raw_payload
+                    )
+                    values (
+                        %s, '622200008106', 'outflow', '建设银行', '建设银行',
+                        %s::numeric, -(%s::numeric), '2026-05-04', '2026-05-01',
+                        '2026-05-04 08:00:00+00',
+                        '网银手续费', 'confirmed', %s::jsonb
+                    )
+                    """,
+                    (
+                        row_id,
+                        amount,
+                        amount,
+                        json.dumps(
+                            {
+                                "normalized_payload": {
+                                    "bank_name": "建设银行",
+                                    "account_last4": "8106",
+                                }
+                            }
+                        ),
+                    ),
+                )
+                transaction.execute(
+                    """
+                    insert into app.bank_transaction_category_confirmations(
+                        tenant_id, legacy_transaction_id, category_code, status, confirmed_by
+                    )
+                    values ('default', %s, 'fee', 'active', 'test')
+                    """,
+                    (row_id,),
+                )
+            for batch_id, status, row_id, amount in (
+                ("bank-flow-direct-draft", "draft", "bank-direct-1", "8.80"),
+                ("bank-flow-direct-submitted", "submitted", "bank-direct-2", "12.30"),
+            ):
+                payload = {
+                    "batch_id": batch_id,
+                    "batch_type": "fee",
+                    "batch_label": "手续费",
+                    "scope_month": "2026-05",
+                    "account_key": "建设银行:8106",
+                    "bank_name": "建设银行",
+                    "account_last4": "8106",
+                    "status": status,
+                    "status_bucket": "submitted" if status == "submitted" else "unsubmitted",
+                    "row_ids": [row_id],
+                    "row_count": 1,
+                    "total_amount": amount,
+                    "tag_counts": {"fee": 1},
+                    "direction_counts": {"expense": 1},
+                    "relation_case_id": batch_id,
+                    "relation_mode": "bank_flow_rule_batch",
+                }
+                transaction.execute(
+                    """
+                    insert into app.bank_flow_rule_batches(
+                        batch_id, status, status_bucket, version, scope_month, account_key,
+                        total_amount, bank_transaction_ids, raw_payload
+                    )
+                    values (%s, %s, %s, 1, '2026-05-01', '建设银行:8106', %s, %s, %s::jsonb)
+                    """,
+                    (
+                        batch_id,
+                        status,
+                        payload["status_bucket"],
+                        amount,
+                        [row_id],
+                        json.dumps({"normalized_payload": payload}),
+                    ),
+                )
+            transaction.execute(
+                """
+                insert into app.workbench_pair_relations(
+                    case_id, relation_mode, status, month_scope, row_ids, row_types, special_metadata
+                )
+                values (
+                    'bank-flow-direct-submitted', 'bank_flow_rule_batch', 'active',
+                    '2026-05-01', %s, %s, %s::jsonb
+                )
+                """,
+                (
+                    ["bank-direct-2", "oa-direct-1"],
+                    ["bank", "oa"],
+                    json.dumps({"requires_oa": False, "requires_invoice": False}),
+                ),
+            )
+
+        repository = self.store.bank_flow_rule_batch_canonical_query_repository
+        page = repository.read_page(
+            {"month": "2026-05", "bucket": "all"},
+            summary_filters={"month": "2026-05"},
+            page=1,
+            page_size=50,
+        )
+        detail = repository.read_detail("bank-flow-direct-submitted")
+
+        self.assertEqual(page["total"], 2)
+        self.assertEqual({item["status"] for item in page["items"]}, {"draft", "submitted"})
+        self.assertEqual(sum(int(row["batch_count"]) for row in page["aggregates"]), 2)
+        self.assertIsNotNone(detail)
+        assert detail is not None
+        self.assertTrue(detail["batch"]["can_withdraw"])
+        self.assertEqual(detail["rows"][0]["relation_case_ids"], ["bank-flow-direct-submitted"])
+        self.assertEqual(detail["rows"][0]["linked_oa_count"], 1)
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                "select count(*) from read_model.bank_flow_rule_batch_rows;",
+            ),
+            "0",
+        )
+
     def test_formal_table_writes_for_settings_jobs_workbench_and_read_models(self) -> None:
         self.store.save_app_settings({"admin_usernames": ["admin"], "manual_projects": []})
         self.store.save_pending_invoice_commands(

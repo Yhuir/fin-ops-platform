@@ -56,7 +56,6 @@ import type {
   BankFlowRuleBatch,
   BankFlowRuleBatchDetail,
   BankFlowRuleBatchesResponse,
-  BankFlowRuleBatchReadModelStatus,
   BankFlowRuleBatchStatus,
   BankFlowRuleBatchStatusBucket,
   BankFlowRuleBatchDetailRow,
@@ -79,9 +78,6 @@ const EMPTY_BATCHES: BankFlowRuleBatchesResponse = {
     categories: [],
   },
   batches: [],
-  readModelStatus: "refreshing",
-  readModelVersion: "",
-  readModelStaleReasons: [],
 };
 
 const EMPTY_TAG_SELECTION: BankFlowRuleBatchTagSelection = {
@@ -94,16 +90,9 @@ const EMPTY_TAG_SELECTION: BankFlowRuleBatchTagSelection = {
   eligibilityChangedTagCodes: [],
   affectedMonths: [],
   affectedScopeKeys: [],
-  readModelScopeKeys: [],
-  freshnessTargets: [],
-  operationBarrierTargets: [],
 };
 
 const SELF_SUB_LABEL = "主标签本身";
-const BANK_FLOW_RULE_READ_MODEL_REFRESH_RETRY_MS = 1000;
-const BANK_FLOW_RULE_READ_MODEL_REFRESH_MAX_ATTEMPTS = 30;
-const BANK_FLOW_RULE_ACCESS_FRESH_POLL_MS = 150;
-const BANK_FLOW_RULE_ACCESS_FRESH_TIMEOUT_MS = 3000;
 const BANK_FLOW_RULE_BATCH_PAGE_SIZE = 50;
 
 export default function BankFlowRuleBatchPage() {
@@ -125,7 +114,6 @@ export default function BankFlowRuleBatchPage() {
   const [selectedAccountForSubmit, setSelectedAccountForSubmit] = useState<string | null>(null);
   const [batchPage, setBatchPage] = useState(1);
   const [loading, setLoading] = useState(false);
-  const [backgroundRefreshing, setBackgroundRefreshing] = useState(false);
   const [tagLoading, setTagLoading] = useState(false);
   const [mutating, setMutating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -138,9 +126,6 @@ export default function BankFlowRuleBatchPage() {
   const batchQueryKeyRef = useRef("");
   const manualLabelSelectionRef = useRef(false);
   const suppressNextAutoSelectRef = useRef(false);
-  const readModelRefreshAttemptRef = useRef(0);
-  const readModelStatus = payload.readModelStatus;
-  const readModelNeedsRefresh = readModelStatus !== "fresh";
 
   const loadTagSelection = useCallback((signal?: AbortSignal) => {
     setTagLoading(true);
@@ -187,16 +172,11 @@ export default function BankFlowRuleBatchPage() {
     return nextPayload;
   }, [applyBatchesPayload, batchPage, bucket, month]);
 
-  const loadBatches = useCallback((signal?: AbortSignal, options: { background?: boolean } = {}) => {
-    const background = options.background === true;
+  const loadBatches = useCallback((signal?: AbortSignal) => {
     const requestId = batchRequestSeqRef.current + 1;
     batchRequestSeqRef.current = requestId;
-    if (background) {
-      setBackgroundRefreshing(true);
-    } else {
-      setLoading(true);
-      setError(null);
-    }
+    setLoading(true);
+    setError(null);
     fetchBankFlowRuleBatches({
       month,
       bucket,
@@ -214,21 +194,13 @@ export default function BankFlowRuleBatchPage() {
         if (signal?.aborted || requestId !== batchRequestSeqRef.current) {
           return;
         }
-        if (!background && !isAbortLikeError(caught)) {
+        if (!isAbortLikeError(caught)) {
           setError(caught instanceof Error ? caught.message : "流水规则批次加载失败");
         }
       })
       .finally(() => {
-        if (background && requestId !== batchRequestSeqRef.current) {
-          setBackgroundRefreshing(false);
-          return;
-        }
         if (!signal?.aborted && requestId === batchRequestSeqRef.current) {
-          if (background) {
-            setBackgroundRefreshing(false);
-          } else {
-            setLoading(false);
-          }
+          setLoading(false);
         }
       });
   }, [applyBatchesPayload, batchPage, bucket, month]);
@@ -254,31 +226,9 @@ export default function BankFlowRuleBatchPage() {
       setDetailErrors({});
       setSelectedBatchId("");
     }
-    readModelRefreshAttemptRef.current = 0;
     loadBatches(controller.signal);
     return () => controller.abort();
   }, [active, activationGeneration, batchPage, bucket, loadBatches, month, refreshToken]);
-
-  useEffect(() => {
-    if (
-      !active
-      || document.visibilityState !== "visible"
-      || !readModelNeedsRefresh
-      || loading
-      || backgroundRefreshing
-      || readModelRefreshAttemptRef.current >= BANK_FLOW_RULE_READ_MODEL_REFRESH_MAX_ATTEMPTS
-    ) {
-      return undefined;
-    }
-    const retryId = window.setTimeout(() => {
-      if (document.visibilityState !== "visible") {
-        return;
-      }
-      readModelRefreshAttemptRef.current += 1;
-      loadBatches(undefined, { background: true });
-    }, BANK_FLOW_RULE_READ_MODEL_REFRESH_RETRY_MS);
-    return () => window.clearTimeout(retryId);
-  }, [active, backgroundRefreshing, loadBatches, loading, readModelNeedsRefresh]);
 
   const tagNodesByCode = useMemo(() => {
     const nodes = new Map<string, BankFlowRuleTagNode>();
@@ -457,7 +407,7 @@ export default function BankFlowRuleBatchPage() {
     return () => window.clearTimeout(timeout);
   }, [feedback]);
 
-  const handleMutationComplete = useCallback((message: string, result: { affectedMonths?: string[] }) => {
+  const handleMutationComplete = useCallback((message: string) => {
     suppressNextAutoSelectRef.current = true;
     setSelectedBatchId("");
     clearSelection();
@@ -465,138 +415,6 @@ export default function BankFlowRuleBatchPage() {
     setDetailErrors({});
     setFeedback({ severity: "success", message });
   }, [clearSelection]);
-
-  const applySubmittedBatchLocally = useCallback((batch: BankFlowRuleBatch, submittedBatch: BankFlowRuleBatch | null) => {
-    suppressNextAutoSelectRef.current = true;
-    setSelectedBatchId("");
-    setPayload((current) => {
-      const existingBatch = current.batches.find((item) => item.batchId === batch.batchId);
-      if (!existingBatch) {
-        return current;
-      }
-      const nextBatches = current.batches.filter((item) => item.batchId !== batch.batchId);
-      return {
-        ...current,
-        readModelStatus: "refreshing",
-        summary: {
-          ...current.summary,
-          draftCount: Math.max(0, current.summary.draftCount - 1),
-          submittedCount: current.summary.submittedCount + 1,
-          categories: current.summary.categories.map((category) => (
-            category.code === batch.batchType
-              ? {
-                ...category,
-                draft: Math.max(0, category.draft - 1),
-                submitted: category.submitted + 1,
-              }
-              : category
-          )),
-        },
-        batches: submittedBatch && bucket === "submitted"
-          ? [...nextBatches, submittedBatch]
-          : nextBatches,
-        pagination: current.pagination
-          ? { ...current.pagination, total: Math.max(0, current.pagination.total - 1) }
-          : current.pagination,
-      };
-    });
-    setDetails((current) => {
-      const next = { ...current };
-      delete next[batch.batchId];
-      return next;
-    });
-    setDetailErrors((current) => {
-      const next = { ...current };
-      delete next[batch.batchId];
-      return next;
-    });
-  }, [bucket]);
-
-  const reconcileMutationInBackground = useCallback((query?: {
-    bucket?: BankFlowRuleBatchStatusBucket;
-    page?: number;
-  }) => {
-    setBackgroundRefreshing(true);
-    void (async () => {
-      try {
-        const deadline = Date.now() + BANK_FLOW_RULE_ACCESS_FRESH_TIMEOUT_MS;
-        while (true) {
-          if (document.visibilityState !== "visible") {
-            setBackgroundRefreshing(false);
-            return;
-          }
-          const nextPayload = await reloadBatchesAfterMutation(query);
-          if (!nextPayload || nextPayload.readModelStatus === "fresh") {
-            setBackgroundRefreshing(false);
-            return;
-          }
-          if (Date.now() >= deadline) {
-            setBackgroundRefreshing(false);
-            setFeedback({
-              severity: "warning",
-              message: "流水规则批次已提交，当前页面数据仍在刷新，请稍后重试。",
-            });
-            return;
-          }
-          await new Promise<void>((resolve) => {
-            window.setTimeout(resolve, BANK_FLOW_RULE_ACCESS_FRESH_POLL_MS);
-          });
-        }
-      } catch (caught) {
-        setBackgroundRefreshing(false);
-        setFeedback({
-          severity: "warning",
-          message: caught instanceof Error ? caught.message : "流水规则批次已提交，当前页面刷新失败，请稍后重试。",
-        });
-      }
-    })();
-  }, [reloadBatchesAfterMutation]);
-
-  const applyWithdrawnBatchLocally = useCallback((batch: BankFlowRuleBatch, withdrawnBatch: BankFlowRuleBatch | null) => {
-    suppressNextAutoSelectRef.current = true;
-    setSelectedBatchId("");
-    setPayload((current) => {
-      const existingBatch = current.batches.find((item) => item.batchId === batch.batchId);
-      if (!existingBatch) {
-        return current;
-      }
-      const nextBatches = current.batches.filter((item) => item.batchId !== batch.batchId);
-      return {
-        ...current,
-        readModelStatus: "refreshing",
-        summary: {
-          ...current.summary,
-          submittedCount: Math.max(0, current.summary.submittedCount - 1),
-          withdrawnCount: current.summary.withdrawnCount + 1,
-          categories: current.summary.categories.map((category) => (
-            category.code === batch.batchType
-              ? {
-                ...category,
-                submitted: Math.max(0, category.submitted - 1),
-                withdrawn: category.withdrawn + 1,
-              }
-              : category
-          )),
-        },
-        batches: withdrawnBatch && bucket === "withdrawn"
-          ? [...nextBatches, withdrawnBatch]
-          : nextBatches,
-        pagination: current.pagination
-          ? { ...current.pagination, total: Math.max(0, current.pagination.total - 1) }
-          : current.pagination,
-      };
-    });
-    setDetails((current) => {
-      const next = { ...current };
-      delete next[batch.batchId];
-      return next;
-    });
-    setDetailErrors((current) => {
-      const next = { ...current };
-      delete next[batch.batchId];
-      return next;
-    });
-  }, [bucket]);
 
   const toggleTransaction = (row: BankFlowRuleBatchDetailRow, checked: boolean) => {
     setSelectedTransactionIds((current) => {
@@ -656,8 +474,8 @@ export default function BankFlowRuleBatchPage() {
             transactionIds,
             note: "",
           });
-          setMessage("正在更新流水规则批次...");
-          reconcileMutationInBackground();
+          setMessage("正在加载流水规则批次最新数据...");
+          await reloadBatchesAfterMutation();
           return submitResult;
         } finally {
           setMutating(false);
@@ -666,7 +484,7 @@ export default function BankFlowRuleBatchPage() {
       errorMessage: (caught) => caught instanceof Error ? caught.message : "提交选中流水失败",
     });
     if (result.status === "success") {
-      handleMutationComplete("选中流水已提交", result.value);
+      handleMutationComplete("选中流水已提交");
     } else {
       setFeedback({ severity: "error", message: result.error instanceof Error ? result.error.message : "提交选中流水失败" });
     }
@@ -686,9 +504,8 @@ export default function BankFlowRuleBatchPage() {
             expectedVersion: batch.version,
             note: "",
           });
-          applySubmittedBatchLocally(batch, submitResult.batch);
-          setMessage("正在更新流水规则批次...");
-          reconcileMutationInBackground();
+          setMessage("正在加载流水规则批次最新数据...");
+          await reloadBatchesAfterMutation();
           return submitResult;
         } finally {
           setMutating(false);
@@ -697,7 +514,7 @@ export default function BankFlowRuleBatchPage() {
       errorMessage: (caught) => caught instanceof Error ? caught.message : "提交内部往来批次失败",
     });
     if (result.status === "success") {
-      handleMutationComplete("内部往来批次已提交", result.value);
+      handleMutationComplete("内部往来批次已提交");
     } else {
       setFeedback({ severity: "error", message: result.error instanceof Error ? result.error.message : "提交内部往来批次失败" });
     }
@@ -721,9 +538,8 @@ export default function BankFlowRuleBatchPage() {
           });
           setWithdrawTarget(null);
           setWithdrawReason("");
-          applyWithdrawnBatchLocally(target, withdrawResult.batch);
           setMessage("正在加载流水规则批次最新数据...");
-          reconcileMutationInBackground();
+          await reloadBatchesAfterMutation();
           return withdrawResult;
         } finally {
           setMutating(false);
@@ -732,7 +548,7 @@ export default function BankFlowRuleBatchPage() {
       errorMessage: (caught) => caught instanceof Error ? caught.message : "撤回批次失败",
     });
     if (result.status === "success") {
-      handleMutationComplete("批次已撤回", result.value);
+      handleMutationComplete("批次已撤回");
     } else {
       setFeedback({ severity: "error", message: result.error instanceof Error ? result.error.message : "撤回批次失败" });
     }
@@ -752,9 +568,8 @@ export default function BankFlowRuleBatchPage() {
           });
           setBucket("unsubmitted");
           setBatchPage(1);
-          setPayload((current) => ({ ...current, batches: [], readModelStatus: "refreshing" }));
           setMessage("正在加载未提交批次最新数据...");
-          reconcileMutationInBackground({ bucket: "unsubmitted", page: 1 });
+          await reloadBatchesAfterMutation({ bucket: "unsubmitted", page: 1 });
           return resetResult;
         } finally {
           setMutating(false);
@@ -763,7 +578,7 @@ export default function BankFlowRuleBatchPage() {
       errorMessage: (caught) => caught instanceof Error ? caught.message : "重置已提交批次失败",
     });
     if (result.status === "success") {
-      handleMutationComplete(`已重置 ${result.value.results.length} 个已提交批次`, result.value);
+      handleMutationComplete(`已重置 ${result.value.results.length} 个已提交批次`);
     } else {
       setFeedback({ severity: "error", message: result.error instanceof Error ? result.error.message : "重置已提交批次失败" });
     }
@@ -797,13 +612,8 @@ export default function BankFlowRuleBatchPage() {
           setSelectedBatchId("");
           setDetails({});
           setDetailErrors({});
-          if (saved.affectedScopeKeys.includes(month)) {
-            if (bucket === "unsubmitted") {
-              setPayload((current) => ({ ...current, batches: [], readModelStatus: "refreshing" }));
-            }
-            setMessage("流水规则已保存，正在加载当前页面最新数据...");
-            reconcileMutationInBackground();
-          }
+          setMessage("流水规则已保存，正在加载当前页面最新数据...");
+          await reloadBatchesAfterMutation();
           return saved;
         } finally {
           setMutating(false);
@@ -871,11 +681,10 @@ export default function BankFlowRuleBatchPage() {
 
   const titleAccessory = canAdminAccess ? (
     <PageBusinessAuditIcon
-      auditContextKey={`${payload.readModelVersion}:${readModelStatus}:${refreshToken}`}
+      auditContextKey={`${month}:${bucket}:${batchPage}:${refreshToken}`}
       ariaLabel="Audit 流水规则批量处理"
       pageKey="bank-flow-rule-batches"
       label="流水规则批量处理"
-      readModelStatus={readModelStatus}
     />
   ) : null;
 

@@ -3,8 +3,6 @@ import type {
   BankFlowRuleBatchDetail,
   BankFlowRuleBatchDetailRow,
   BankFlowRuleBatchesPageInfo,
-  BankFlowRuleBatchReadModelStatus,
-  ReadModelOperationBarrierTarget,
   BankFlowRuleBatchTagDefinition,
   BankFlowRuleBatchTagRule,
   BankFlowRuleBatchTagSelection,
@@ -164,24 +162,12 @@ type ApiBankFlowRuleBatchTagSelection = {
   affectedMonths?: unknown[] | null;
   affected_scope_keys?: unknown[] | null;
   affectedScopeKeys?: unknown[] | null;
-  read_model_scope_keys?: unknown[] | null;
-  readModelScopeKeys?: unknown[] | null;
-  freshness_targets?: unknown;
-  freshnessTargets?: unknown;
-  operation_barrier_targets?: unknown;
-  operationBarrierTargets?: unknown;
 };
 
 type ApiBankFlowRuleBatchesResponse = {
   summary?: ApiBankFlowRuleBatchSummary;
   batches?: ApiBankFlowRuleBatch[];
   pagination?: ApiBankFlowRuleBatchesPageInfo | null;
-  read_model_status?: string | null;
-  readModelStatus?: string | null;
-  read_model_version?: string | null;
-  readModelVersion?: string | null;
-  read_model_stale_reasons?: unknown[] | null;
-  readModelStaleReasons?: unknown[] | null;
 };
 
 type ApiBankFlowRuleBatchesPageInfo = {
@@ -248,14 +234,6 @@ type ApiBankFlowRuleBatchMutationResult = {
   batch?: ApiBankFlowRuleBatch | null;
   affected_months?: string[];
   affectedMonths?: string[];
-  affected_scope_keys?: string[];
-  affectedScopeKeys?: string[];
-  read_model_scope_keys?: string[];
-  readModelScopeKeys?: string[];
-  freshness_targets?: unknown;
-  freshnessTargets?: unknown;
-  operation_barrier_targets?: unknown;
-  operationBarrierTargets?: unknown;
   results?: Array<Record<string, unknown>>;
 };
 
@@ -290,47 +268,6 @@ function unknownStringList(value: unknown) {
 
 function booleanValue(value: unknown) {
   return value === true || value === 1 || value === "1" || value === "true";
-}
-
-function normalizeReadModelStatus(value: string | null | undefined): BankFlowRuleBatchReadModelStatus {
-  return value === "fresh"
-    || value === "refreshing"
-    || value === "stale"
-    || value === "schema_mismatch"
-    || value === "missing"
-    ? value
-    : "refreshing";
-}
-
-function readModelTargets(value: unknown): ReadModelOperationBarrierTarget[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  const targets: ReadModelOperationBarrierTarget[] = [];
-  const seen = new Set<string>();
-  value.forEach((item) => {
-    if (!item || typeof item !== "object") {
-      return;
-    }
-    const raw = item as Record<string, unknown>;
-    const readModelKey = textValue(raw.read_model_key ?? raw.readModelKey);
-    const scopeKey = textValue(raw.scope_key ?? raw.scopeKey);
-    const scopeType = textValue(raw.scope_type ?? raw.scopeType);
-    if (!readModelKey || !scopeKey) {
-      return;
-    }
-    const key = `${readModelKey}\u0000${scopeKey}\u0000${scopeType}`;
-    if (seen.has(key)) {
-      return;
-    }
-    seen.add(key);
-    targets.push({
-      readModelKey,
-      scopeKey,
-      ...(scopeType ? { scopeType } : {}),
-    });
-  });
-  return targets;
 }
 
 function textValue(value: unknown) {
@@ -507,8 +444,6 @@ function mapTagSelection(payload: ApiBankFlowRuleBatchTagSelection = {}): BankFl
     requiresOa: true,
     requiresInvoice: true,
   });
-  const freshnessTargets = readModelTargets(payload.freshness_targets ?? payload.freshnessTargets);
-  const operationTargets = readModelTargets(payload.operation_barrier_targets ?? payload.operationBarrierTargets);
   return {
     version: numberValue(payload.version),
     bankAutoTagRulesVersion: numberValue(payload.bank_auto_tag_rules_version ?? payload.bankAutoTagRulesVersion),
@@ -524,9 +459,6 @@ function mapTagSelection(payload: ApiBankFlowRuleBatchTagSelection = {}): BankFl
     ),
     affectedMonths: unknownStringList(payload.affected_months ?? payload.affectedMonths),
     affectedScopeKeys: unknownStringList(payload.affected_scope_keys ?? payload.affectedScopeKeys),
-    readModelScopeKeys: unknownStringList(payload.read_model_scope_keys ?? payload.readModelScopeKeys),
-    freshnessTargets,
-    operationBarrierTargets: operationTargets.length > 0 ? operationTargets : freshnessTargets,
   };
 }
 
@@ -561,17 +493,9 @@ function mapDetailRow(row: ApiBankFlowRuleBatchDetailRow = {}): BankFlowRuleBatc
 }
 
 function mapMutationResult(payload: ApiBankFlowRuleBatchMutationResult): BankFlowRuleBatchMutationResult {
-  const affectedScopeKeys = stringList(payload.affected_scope_keys ?? payload.affectedScopeKeys);
-  const readModelScopeKeys = stringList(payload.read_model_scope_keys ?? payload.readModelScopeKeys);
-  const freshnessTargets = readModelTargets(payload.freshness_targets ?? payload.freshnessTargets);
-  const operationTargets = readModelTargets(payload.operation_barrier_targets ?? payload.operationBarrierTargets);
   return {
     batch: payload.batch ? mapBatch(payload.batch) : null,
     affectedMonths: stringList(payload.affected_months ?? payload.affectedMonths),
-    affectedScopeKeys,
-    readModelScopeKeys,
-    freshnessTargets,
-    operationBarrierTargets: operationTargets.length > 0 ? operationTargets : freshnessTargets,
     results: Array.isArray(payload.results) ? payload.results : [],
   };
 }
@@ -617,9 +541,6 @@ export async function fetchBankFlowRuleBatches({
     summary: mapSummary(payload.summary),
     batches: Array.isArray(payload.batches) ? payload.batches.map(mapBatch).filter(isPublicBatch) : [],
     pagination: mapPagination(payload.pagination),
-    readModelStatus: normalizeReadModelStatus(payload.read_model_status ?? payload.readModelStatus),
-    readModelVersion: text(payload.read_model_version ?? payload.readModelVersion),
-    readModelStaleReasons: unknownStringList(payload.read_model_stale_reasons ?? payload.readModelStaleReasons),
   };
 }
 

@@ -1,6 +1,6 @@
 # 流水规则批量处理 E2E 规格
 
-状态：covered-close。关键 P0 场景已映射到 `web/e2e/bank-flow-rule-batches-flow.spec.ts`；真实生产 worker drain 和大数据月份性能仍由 runtime smoke 验证。
+状态：covered-partial。页面直读、单次写后 GET、失败恢复、规则、提交、撤回和 reset 已映射并通过；共享 Workbench confirm-preview fixture 的旧 DTO 仍需主控修复后重跑 BRB-E2E-003。真实生产 canonical SQL/HTTP 大数据性能仍由发布 smoke 验证。
 
 ## BRB-E2E-001 标签规则抽屉跟随银行明细标签
 
@@ -27,7 +27,7 @@
 - 保存后规则持久化，刷新仍保持勾选。
 - API 不递增银行标签版本。
 - 未提交主/子标签只显示 OA、发票都未勾选的 active 标签；需要任一单据的标签在抽屉中仍可见，但完全退出未提交区。
-- 保存 API 成功反馈和抽屉关闭不等待 worker；当前页随后只通过正常列表 GET 收敛精确月份，零 operation barrier。
+- 保存 API 成功反馈和抽屉关闭不等待投影；当前页随后只执行一次正常列表 GET，响应无 read-model/operation-barrier 字段。
 
 ## BRB-E2E-002 提交形成 active relation 后进入已配对
 
@@ -86,7 +86,7 @@
 
 - existing relation metadata、relation mode 和 history 不变。
 - active relation 继续 paired，不因当前规则变化回到 unpaired。
-- 资格变化时只返回信息性受影响月份，不写 bank-flow/Workbench/turnover dirty/outbox；访问当前月份时才由 bank-flow query gate 精确 enqueue。资格未变化时同样零 projection work。
+- 资格变化时只返回信息性受影响月份，不写 bank-flow/Workbench/turnover dirty/outbox；下一次页面 GET 直接读取 canonical facts。资格未变化时同样零 projection work。
 
 ## BRB-E2E-008 已提交批次批量重置回未提交候选
 
@@ -109,24 +109,25 @@
 - 页面提示重置成功，并切回未提交。
 - 银行 rows 只有在当前标签 OA/发票双 false 时才重新进入未提交候选；需要任一单据时退出本页面，且不会自动重新提交。
 
-## BRB-E2E-006 权限、陈旧和失败状态 fail closed
+## BRB-E2E-006 权限、空集和失败状态 fail closed
 
 前置：
 
 - 准备只读用户、规则保存权限用户、批次提交/撤回权限用户。
-- 准备 stale/missing read model 场景。
+- 准备真实空集、非法查询参数和 canonical API 失败场景。
 
 步骤：
 
 1. 只读用户打开页面和抽屉。
 2. 尝试保存规则、提交批次、撤回批次、reset submitted。
-3. 在 read model stale/missing 时查看列表和提交按钮。
+3. 分别打开真实空集、非法参数和后端失败场景。
 
 验收：
 
 - 无权限时按钮隐藏或禁用，API 返回业务错误。
-- 非 fresh 时页面显示刷新/陈旧状态，不把空结果当真实无候选。
-- 写操作返回明确错误 message、read model status 和 scope keys。
+- canonical 查询成功且 rows 为空时显示真实空态。
+- 非法参数或查询失败时显示明确错误和重试入口，不伪装空态。
+- API 和页面不出现 read-model status、refresh enqueue 或后台 polling。
 
 ## BRB-E2E-007 银行标签变更后规则 grid 同步
 

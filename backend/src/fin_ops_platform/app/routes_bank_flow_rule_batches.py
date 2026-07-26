@@ -17,7 +17,6 @@ JsonResponse = Callable[[HTTPStatus, dict[str, Any]], Any]
 BANK_FLOW_RULE_BATCH_CONFLICT_ERROR_CODES = frozenset(
     {
         "bank_flow_rule_batch_version_conflict",
-        "bank_flow_rule_batch_relation_read_model_not_fresh",
         "bank_flow_rule_batch_relation_active_row_conflict",
         "bank_flow_rule_batch_selection_occupied",
     }
@@ -91,14 +90,6 @@ class BankFlowRuleBatchApiRoutes:
                 query,
                 relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
             )
-        except RuntimeError as exc:
-            if str(exc) != "bank_flow_rule_batch read repository requires read_page.":
-                raise
-            return HTTPStatus.SERVICE_UNAVAILABLE, {
-                "error": "bank_flow_rule_batch_read_model_unavailable",
-                "message": "流水规则批次读取模型暂不可用，请稍后重试。",
-                "read_model_status": "unavailable",
-            }
         except ValueError as exc:
             return self._value_error_response(exc)
 
@@ -258,10 +249,6 @@ class BankFlowRuleBatchApiRoutes:
                     for key, value in details.items()
                     if str(key)
                     in {
-                        "read_model_status",
-                        "read_model_stale_reasons",
-                        "read_model_scope_keys",
-                        "refresh_enqueued",
                         "conflicting_case_ids",
                         "row_ids",
                         "case_id",

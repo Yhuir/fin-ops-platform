@@ -17,7 +17,6 @@ export type BankFlowRuleBatchStatus =
 
 export type BankFlowRuleBatchStatusFilter = "all" | BankFlowRuleBatchStatus;
 export type BankFlowRuleBatchStatusBucket = "unsubmitted" | "submitted" | "withdrawn" | "all";
-export type BankFlowRuleBatchReadModelStatus = "fresh" | "refreshing" | "stale" | "schema_mismatch" | "missing";
 
 export type BankFlowRuleBatchCountMap = Record<string, number>;
 
@@ -103,9 +102,6 @@ export type BankFlowRuleBatchesResponse = {
   summary: BankFlowRuleBatchSummary;
   batches: BankFlowRuleBatch[];
   pagination?: BankFlowRuleBatchesPageInfo;
-  readModelStatus: BankFlowRuleBatchReadModelStatus;
-  readModelVersion: string;
-  readModelStaleReasons: string[];
 };
 
 export type BankFlowRuleBatchDirection = "income" | "expense" | string;
@@ -142,12 +138,6 @@ export type BankFlowRuleBatchDetail = {
   directionCounts: BankFlowRuleBatchCountMap;
 };
 
-export type ReadModelOperationBarrierTarget = {
-  readModelKey: string;
-  scopeKey: string;
-  scopeType?: string;
-};
-
 export type SubmitBankFlowRuleBatchRequest = {
   batchId: string;
   expectedVersion: number | null;
@@ -178,10 +168,6 @@ export type SubmitBankFlowRuleBatchesRequest = {
 export type BankFlowRuleBatchMutationResult = {
   batch: BankFlowRuleBatch | null;
   affectedMonths: string[];
-  affectedScopeKeys: string[];
-  readModelScopeKeys: string[];
-  freshnessTargets: ReadModelOperationBarrierTarget[];
-  operationBarrierTargets: ReadModelOperationBarrierTarget[];
   results: Array<Record<string, unknown>>;
 };
 
@@ -212,9 +198,6 @@ export type BankFlowRuleBatchTagSelection = {
   eligibilityChangedTagCodes: string[];
   affectedMonths: string[];
   affectedScopeKeys: string[];
-  readModelScopeKeys: string[];
-  freshnessTargets: ReadModelOperationBarrierTarget[];
-  operationBarrierTargets: ReadModelOperationBarrierTarget[];
 };
 
 export type SaveBankFlowRuleBatchTagSelectionRequest = {

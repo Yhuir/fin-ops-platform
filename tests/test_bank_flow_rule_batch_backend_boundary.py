@@ -26,8 +26,7 @@ class BankFlowRuleBatchBackendBoundaryTests(unittest.TestCase):
         self.assertIn("from fin_ops_platform.app.routes_bank_flow_rule_batches import BankFlowRuleBatchApiRoutes", source)
         self.assertIn("def _bank_flow_rule_batch_routes(self) -> BankFlowRuleBatchApiRoutes:", source)
         self.assertIn("self._bank_flow_rule_batch_routes().route(method, route_path, query, body, headers)", source)
-        self.assertIn("read_model_refresh_producer=self._bank_flow_rule_batch_read_model_refresh_producer()", source)
-        self.assertIn("BankFlowRuleBatchReadModelRepositoryPort", source)
+        self.assertIn('getattr(self, "_bank_flow_rule_batch_canonical_query_repository", None)', source)
 
     def test_bank_flow_runtime_files_do_not_import_no_oa_module_boundaries(self) -> None:
         forbidden = (
@@ -60,7 +59,10 @@ class BankFlowRuleBatchBackendBoundaryTests(unittest.TestCase):
         self.assertIn("pair_relation_snapshot_port = BankBatchPairRelationSnapshotPort", server_body)
         self.assertIn("relation_source_repository = pair_relation_snapshot_port", server_body)
         self.assertIn("relation_source_repository=relation_source_repository", server_body)
-        self.assertIn("bank_batch_read_model_repository=read_repository", server_body)
+        self.assertIn("bank_batch_read_model_repository=query_repository", server_body)
+        self.assertNotIn("read_model_refresh_producer=", server_body)
+        self.assertNotIn("queue_repository=", server_body)
+        self.assertNotIn("relation_facade=", server_body)
         self.assertNotIn("no_oa_bank_batch_service=", server_body)
         self.assertNotIn("no_oa_bank_batch_read_model_repository=", server_body)
 
@@ -76,6 +78,19 @@ class BankFlowRuleBatchBackendBoundaryTests(unittest.TestCase):
         self.assertNotIn("relation_facade=workbench_relation_read_facade", worker_body)
         self.assertNotIn("no_oa_bank_batch_service=", worker_body)
         self.assertNotIn("NoOaBankBatchReadModelPersistencePort", worker_body)
+
+    def test_canonical_page_query_does_not_read_projection_or_no_oa_fallback(self) -> None:
+        source = (
+            SERVICES_ROOT / "postgres_repositories" / "bank_flow_rule_batch_canonical_query.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("set transaction isolation level repeatable read read only", source)
+        self.assertIn("from app.bank_flow_rule_batches batch", source)
+        self.assertIn("from app.workbench_pair_relations relation", source)
+        self.assertIn("relation.status = 'active'", source)
+        self.assertNotIn("read_model.", source)
+        self.assertNotIn("app.no_oa_bank_batches", source)
+        self.assertNotIn("bank_flow_rule_batch_relation_read_model_not_fresh", source)
 
     def test_operation_barrier_has_no_bank_flow_to_no_oa_alias(self) -> None:
         source = (SERVICES_ROOT / "operation_freshness_barrier.py").read_text(encoding="utf-8")

@@ -269,7 +269,6 @@ from fin_ops_platform.services.bank_flow_rule_batch_application_service import B
 from fin_ops_platform.services.bank_flow_rule_batch_read_model_refresh_producer import (
     BankFlowRuleBatchReadModelRefreshProducer,
 )
-from fin_ops_platform.services.bank_flow_rule_batch_read_model_repository import BankFlowRuleBatchReadModelRepositoryPort
 from fin_ops_platform.services.no_oa_bank_batch_service import (
     NO_OA_BANK_BATCH_SCHEMA_VERSION,
     NO_OA_BANK_BATCH_RELATION_MODE,
@@ -797,6 +796,11 @@ class Application:
         self._bank_flow_rule_batch_sql_read_repository = getattr(
             self._state_store,
             "bank_flow_rule_batch_sql_read_repository",
+            None,
+        )
+        self._bank_flow_rule_batch_canonical_query_repository = getattr(
+            self._state_store,
+            "bank_flow_rule_batch_canonical_query_repository",
             None,
         )
         self._output_invoice_collection_lifecycle_repository = build_output_invoice_collection_lifecycle_repository(
@@ -8043,14 +8047,9 @@ class Application:
         )
 
     def _bank_flow_rule_batch_application_service(self) -> BankFlowRuleBatchApplicationService:
-        read_repository = getattr(self, "_bank_flow_rule_batch_sql_read_repository", None)
-        if read_repository is None:
-            raw_repository = getattr(self, "_workbench_sql_read_repository", None)
-            read_repository = (
-                BankFlowRuleBatchReadModelRepositoryPort(raw_repository)
-                if raw_repository is not None
-                else None
-            )
+        query_repository = getattr(self, "_bank_flow_rule_batch_canonical_query_repository", None)
+        if not callable(getattr(query_repository, "read_page", None)):
+            raise RuntimeError("bank_flow_rule_batch canonical PostgreSQL query repository is unavailable.")
         pair_relation_snapshot_port = BankBatchPairRelationSnapshotPort(
             getattr(self, "_workbench_pair_relation" + "_service")
         )
@@ -8066,13 +8065,10 @@ class Application:
             pair_relation_snapshot_port=pair_relation_snapshot_port,
             workbench_read_model_service=self._workbench_read_model_service,
             state_store=self._state_store,
-            bank_batch_read_model_repository=read_repository,
+            bank_batch_read_model_repository=query_repository,
             workbench_matching_source_versions_provider=self._bank_batch_workbench_source_versions,
             bank_transaction_category_affected_months_provider=self._bank_transaction_category_affected_months,
             search_cache_clearer=self._search_service.clear_cache,
-            queue_repository=getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None),
-            read_model_refresh_producer=self._bank_flow_rule_batch_read_model_refresh_producer(),
-            relation_facade=self._workbench_relation_read_facade(),
             relation_command_service=self._workbench_relation_command_service(
                 repository=self._state_store,
                 save_repository=False,
