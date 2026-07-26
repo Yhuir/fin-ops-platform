@@ -595,9 +595,9 @@ git diff --check
 ## 2026-07-20 - workbench_relation relation-only delta
 
 - Worker dispatch：`tests/test_workbench_relation_read_model_refresh.py::WorkbenchRelationReadModelRefreshServiceTests::test_handle_runtime_event_uses_explicit_relation_delta_contract`。
-- Projection bounded I/O：`tests/test_workbench_relation_sql_projection.py::WorkbenchRelationSqlProjectionTests::test_relation_delta_uses_narrow_version_and_active_relation_queries`。
-- Repository contract：`tests/test_postgres_repositories_boundaries.py::test_workbench_relation_delta_source_versions_preserve_unrelated_sources`。
-- 真实 PostgreSQL：`tests/test_turnover_ledger_postgres_integration.py::TurnoverLedgerPostgresIntegrationTests::test_workbench_relation_delta_source_versions_advance_only_relation_proof`。
+- Projection exact proof/alias cleanup：`tests/test_workbench_relation_sql_projection.py::WorkbenchRelationSqlProjectionTests::test_relation_delta_uses_exact_scope_proof_and_narrow_active_relation_query`、`tests/test_workbench_relation_sql_projection.py::WorkbenchRelationSqlProjectionTests::test_relation_delta_expands_uuid_and_legacy_aliases_before_replacing_old_group`。
+- Repository alias boundary：`tests/test_postgres_repositories_boundaries.py::test_workbench_relation_row_id_aliases_resolve_storage_and_legacy_ids`。
+- 真实 PostgreSQL：`tests/test_turnover_ledger_postgres_integration.py::TurnoverLedgerPostgresIntegrationTests::test_workbench_relation_row_id_aliases_resolve_uuid_and_legacy_id`、`tests/test_workbench_etc_relation_enrichment_postgres.py::WorkbenchEtcRelationEnrichmentPostgresTests::test_shared_relation_membership_proof_changes_when_older_relation_is_withdrawn`。
 
 ## 2026-07-22 - Workbench v6 freshness 边界
 

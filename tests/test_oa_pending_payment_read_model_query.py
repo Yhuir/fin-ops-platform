@@ -11,6 +11,12 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_s
     oa_pending_payment_coverage_only_source_versions,
 )
 
+EMPTY_WORKBENCH_RELATION_VERSIONS = {
+    "oa_pending_payment_workbench_pair_relations_updated_at": "",
+    "oa_pending_payment_workbench_pair_relation_count": 0,
+    "oa_pending_payment_workbench_pair_relations_membership_digest": "d41d8cd98f00b204e9800998ecf8427e",
+}
+
 
 class OaPendingPaymentReadModelQueryTests(unittest.TestCase):
     def test_workbench_relation_change_makes_published_oa_scope_stale(self) -> None:
@@ -47,6 +53,7 @@ class OaPendingPaymentReadModelQueryTests(unittest.TestCase):
         coverage_versions = {
             **base_versions,
             **oa_pending_payment_coverage_only_source_versions("2026-05"),
+            **EMPTY_WORKBENCH_RELATION_VERSIONS,
             "oa_pending_payment_relation_version": 0,
             "oa_pending_payment_bank_coverage_signature": "rows:2|digest:bank-coverage",
             "oa_pending_payment_input_invoice_coverage_signature": "rows:1|digest:invoice-coverage",
@@ -88,6 +95,7 @@ class OaPendingPaymentReadModelQueryTests(unittest.TestCase):
         actual_versions = {
             **base_versions,
             **oa_pending_payment_coverage_only_source_versions("2026-05"),
+            **EMPTY_WORKBENCH_RELATION_VERSIONS,
             "oa_pending_payment_relation_version": 0,
             "oa_pending_payment_bank_coverage_signature": "rows:2|digest:bank-coverage",
             "oa_pending_payment_input_invoice_coverage_signature": "rows:1|digest:invoice-coverage",
@@ -116,6 +124,7 @@ class OaPendingPaymentReadModelQueryTests(unittest.TestCase):
         actual_versions = {
             **base_versions,
             **oa_pending_payment_coverage_only_source_versions("2026-05"),
+            **EMPTY_WORKBENCH_RELATION_VERSIONS,
             "oa_pending_payment_relation_version": 0,
             "oa_pending_payment_bank_coverage_signature": "rows:2|digest:bank-coverage",
             "oa_pending_payment_input_invoice_coverage_signature": "rows:1|digest:invoice-coverage",
@@ -155,6 +164,7 @@ class OaPendingPaymentReadModelQueryTests(unittest.TestCase):
         base_versions = {"schema": 1}
         expected_versions = {
             "schema": 1,
+            **EMPTY_WORKBENCH_RELATION_VERSIONS,
             "oa_pending_payment_source_snapshot_version": 3,
             "completed_oa_signature": "completed-3",
             "in_progress_admission_signature": "admission-3",
@@ -300,7 +310,10 @@ class OaPendingPaymentReadModelQueryTests(unittest.TestCase):
 
         self.assertEqual(payload["status"], "fresh")
         self.assertEqual(payload["blocking_scope_keys"], [])
-        self.assertEqual(payload["source_versions"], base_versions)
+        self.assertEqual(
+            payload["source_versions"],
+            {**base_versions, **EMPTY_WORKBENCH_RELATION_VERSIONS},
+        )
         self.assertEqual(set(payload["source_versions_by_scope"]), {"2026-04", "2026-05"})
 
     def test_rows_use_one_statement_for_set_based_aggregate_and_bounded_page(self) -> None:
@@ -408,6 +421,10 @@ class QueryStateConnection:
                 {
                     "scope_key": scope_key,
                     "relation_updated_at": self.workbench_relation_versions.get(scope_key, ""),
+                    "relation_count": 0,
+                    "membership_digest": EMPTY_WORKBENCH_RELATION_VERSIONS[
+                        "oa_pending_payment_workbench_pair_relations_membership_digest"
+                    ],
                 }
                 for scope_key in params[0]
             ]
@@ -459,6 +476,7 @@ def _fresh_state_row(
     }
     actual_versions = {
         **base_versions,
+        **EMPTY_WORKBENCH_RELATION_VERSIONS,
         "oa_pending_payment_source_snapshot_version": snapshot_version,
         "completed_oa_signature": source_payload["completed_oa_signature"],
         "in_progress_admission_signature": source_payload["admission_signature"],

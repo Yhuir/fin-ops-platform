@@ -39,7 +39,7 @@
 - [ ] **AUDIT-01**: Every page registered in `web/src/app/pageRegistry.tsx` has an explicit fail-closed Audit contract or an explicit non-read-model operational proof contract.
 - [ ] **AUDIT-02**: Every page Audit compares an independently owned canonical expected set with the complete page projection in both directions.
 - [ ] **AUDIT-03**: Every page Audit independently recalculates all registered business-critical display fields and summary totals.
-- [x] **AUDIT-04**: Canonical relation edges, shared `workbench_relation` edges, Workbench active-generation edges, and every page consumer projection are equal in both directions.
+- [ ] **AUDIT-04**: Canonical relation edges, shared `workbench_relation` edges, Workbench active-generation edges, and every page consumer projection are equal in both directions.
 - [ ] **AUDIT-05**: Audit results are produced from one system-level repeatable-read read-only snapshot and bind the current audit/source/read-model/relation/config/generation versions.
 - [ ] **AUDIT-06**: Freshness, queue and readiness use one manifest-driven current-effective policy across Audit, App Status, operation barriers and SLO smoke.
 - [ ] **AUDIT-07**: `fan_out_command/all` historical readiness is diagnostic-only while current dirty/outbox failures remain blocking; queryable parent readiness remains blocking.
@@ -138,15 +138,15 @@
 | AUDIT-01 | Phase 19 | Pending |
 | AUDIT-02 | Phase 19 | Pending |
 | AUDIT-03 | Phase 19 | Pending |
-| AUDIT-04 | Phase 19 | Complete |
+| AUDIT-04 | Phase 32 | Pending |
 | AUDIT-05 | Phase 19 | Pending |
 | AUDIT-06 | Phase 19 | Pending |
 | AUDIT-07 | Phase 19 | Pending |
 | AUDIT-08 | Phase 19 | Pending |
 | AUDIT-09 | Phase 19 | Pending |
 | AUDIT-10 | Phase 19 | Pending |
-| AUDIT-11 | Phase 19 | Pending |
-| AUDIT-12 | Phase 19 | Pending |
+| AUDIT-11 | Phase 32 | Pending |
+| AUDIT-12 | Phase 32 | Pending |
 | RELCL-01 | Phase 20 | Complete |
 | RELCL-02 | Phase 20 | Complete |
 | RELCL-03 | Phase 20 | Complete |
@@ -178,7 +178,7 @@
 | RMF-06 | Phase 27 | Complete |
 | RMF-07 | Phase 27 | Complete |
 | RMF-08 | Phase 27 | Complete |
-| RMF-09 | Phase 27 | Pending |
+| RMF-09 | Phase 32 | Pending |
 
 **Coverage:**
 

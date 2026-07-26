@@ -2,9 +2,6 @@ from __future__ import annotations
 
 import unittest
 
-from fin_ops_platform.services.workbench_relation_sql_projection import (
-    WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION,
-)
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from tests.postgres_test_utils import (
@@ -293,52 +290,32 @@ class TurnoverLedgerPostgresIntegrationTests(unittest.TestCase):
         )
         self.assertTrue(bundle["source_versions"]["relation_updated_at"])
 
-    def test_workbench_relation_delta_source_versions_advance_only_relation_proof(self) -> None:
-        self.connection.execute(
+    def test_workbench_relation_row_id_aliases_resolve_uuid_and_legacy_id(self) -> None:
+        row = self.connection.fetch_one(
             """
-            insert into read_model.workbench_relation_scopes(
-                tenant_id, scope_key, scope_month, source_versions
-            ) values (
-                'default', '2026-03', '2026-03-01',
-                jsonb_build_object(
-                    'workbench_relation_schema_version', %s::text,
-                    'workbench_pair_relations_updated_at', '2026-07-19 00:00:00+08',
-                    'bank_transactions_updated_at', '2026-07-18 00:00:00+08'
-                )
+            insert into app.bank_transactions(
+                legacy_mongo_id, account_no, txn_direction, counterparty_name_raw,
+                amount, signed_amount, txn_date, txn_month, status
             )
-            """,
-            (WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION,),
-        )
-        self.connection.execute(
-            """
-            insert into app.workbench_pair_relations(
-                case_id, relation_mode, status, month_scope, row_ids, row_types, raw_payload,
-                created_at, updated_at
-            ) values
-                (
-                    'case-delta-version', 'manual_confirmed', 'withdrawn', '2026-03-01',
-                    array['txn-target', 'txn-peer'], array['bank', 'bank'], '{}'::jsonb,
-                    '2026-07-20 15:00:00+08', '2026-07-20 15:00:00+08'
-                ),
-                (
-                    'case-turnover-closure-version', 'turnover_manual_closure', 'withdrawn', '2026-03-01',
-                    array['txn-target', 'txn-peer'], array['bank', 'bank'], '{}'::jsonb,
-                    '2026-07-20 16:00:00+08', '2026-07-20 16:00:00+08'
-                )
+            values (
+                'txn-target', '6222', 'outflow', 'proof',
+                100, -100, '2026-03-15', '2026-03-01', 'active'
+            )
+            returning id::text as storage_id
             """
         )
 
-        source_versions = self.repository.workbench_relation_delta_source_versions(
-            scope_key="2026-03",
-            row_ids=["txn-target"],
+        aliases = self.repository.workbench_relation_row_id_aliases(
+            [row["storage_id"], "txn-target"],
         )
 
         self.assertEqual(
-            source_versions["workbench_relation_schema_version"],
-            WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION,
+            aliases,
+            {
+                row["storage_id"]: "txn-target",
+                "txn-target": "txn-target",
+            },
         )
-        self.assertEqual(source_versions["bank_transactions_updated_at"], "2026-07-18 00:00:00+08")
-        self.assertIn("2026-07-20 15:00:00", source_versions["workbench_pair_relations_updated_at"])
 
     def test_relation_delta_updates_only_overlapping_payload_and_keeps_scope_versions_uniform(self) -> None:
         original_versions = {"turnover_ledger_schema_version": "v7", "relation_revision": "before"}

@@ -14,7 +14,7 @@ from fin_ops_platform.services.workbench_relation_modes import TURNOVER_MANUAL_C
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
-WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION = "2026-07-14-formal-linked-unlinked-v1"
+WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION = "2026-07-26-exact-membership-proof-v1"
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 HARD_INVOICE_IDENTITY_KINDS = frozenset({"digital_invoice_no", "invoice_code_no"})
 
@@ -77,7 +77,9 @@ class WorkbenchRelationSqlProjectionBuilder:
             excluded_bank_transaction_ids=pending_claimed_bank_ids,
         )
         monthly_row_ids = sorted(monthly_objects)
-        relations = self._active_relations_for_scope(month=normalized_scope, row_ids=monthly_row_ids)
+        relations = self._normalize_relation_row_ids(
+            self._active_relations_for_scope(month=normalized_scope, row_ids=monthly_row_ids)
+        )
         relation_row_ids = _dedupe_preserve_order(row_id for relation in relations for row_id in text_list(relation.get("row_ids")))
         objects = dict(monthly_objects)
         missing_relation_row_ids = [row_id for row_id in relation_row_ids if row_id not in objects]
@@ -153,7 +155,7 @@ class WorkbenchRelationSqlProjectionBuilder:
         normalized_scope = text(scope_key) or ""
         if not MONTH_RE.match(normalized_scope):
             raise ValueError("workbench relation SQL projection scope_key must be a month shard YYYY-MM.")
-        affected_row_ids = _dedupe_preserve_order(text(row_id) for row_id in list(row_ids or []))
+        affected_row_ids = self._expanded_relation_row_ids(row_ids)
         if not affected_row_ids:
             return self.rebuild_workbench_relation_read_model_scope(normalized_scope)
         save_rows = getattr(self._read_model_repository, "save_workbench_relation_distribution_rows", None)
@@ -193,7 +195,7 @@ class WorkbenchRelationSqlProjectionBuilder:
             if relation_delta
             else self._pending_claimed_bank_transaction_ids_for_month(normalized_scope)
         )
-        relations = (
+        relations = self._normalize_relation_row_ids(
             self._active_relations_for_row_ids(affected_row_ids)
             if relation_delta
             else self._active_relations_for_scope(month=normalized_scope, row_ids=affected_row_ids)
@@ -267,18 +269,55 @@ class WorkbenchRelationSqlProjectionBuilder:
         }
 
     def _relation_delta_source_versions(self, scope_key: str, row_ids: list[str]) -> dict[str, Any]:
-        loader = getattr(self._read_model_repository, "workbench_relation_delta_source_versions", None)
-        if not callable(loader):
-            return {}
+        _ = row_ids
+        return self._source_versions(scope_key)
+
+    def _expanded_relation_row_ids(self, row_ids: list[str]) -> list[str]:
+        normalized_row_ids = _dedupe_preserve_order(text(row_id) for row_id in list(row_ids or []))
+        if not normalized_row_ids:
+            return []
+        aliases = self._relation_row_id_aliases(normalized_row_ids)
+        return _dedupe_preserve_order(
+            [*normalized_row_ids, *aliases.keys(), *aliases.values()]
+        )
+
+    def _normalize_relation_row_ids(
+        self,
+        relations: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        normalized_relations = [dict(relation) for relation in relations if isinstance(relation, dict)]
+        row_ids = _dedupe_preserve_order(
+            row_id
+            for relation in normalized_relations
+            for row_id in text_list(relation.get("row_ids"))
+        )
+        aliases = self._relation_row_id_aliases(row_ids)
+        for relation in normalized_relations:
+            relation["row_ids"] = [
+                aliases.get(row_id, row_id)
+                for row_id in text_list(relation.get("row_ids"))
+            ]
+        return normalized_relations
+
+    def _relation_row_id_aliases(self, row_ids: list[str]) -> dict[str, str]:
+        normalized_row_ids = _dedupe_preserve_order(text(row_id) for row_id in list(row_ids or []))
+        aliases = {row_id: row_id for row_id in normalized_row_ids}
+        loader = getattr(self._read_model_repository, "workbench_relation_row_id_aliases", None)
+        if not callable(loader) or not normalized_row_ids:
+            return aliases
         payload = loader(
-            scope_key=scope_key,
-            row_ids=row_ids,
+            normalized_row_ids,
             tenant_id=self._tenant_id,
         )
-        source_versions = dict(payload) if isinstance(payload, dict) else {}
-        if source_versions.get("workbench_relation_schema_version") != WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION:
-            return {}
-        return source_versions
+        if isinstance(payload, dict):
+            aliases.update(
+                {
+                    text(alias): text(canonical)
+                    for alias, canonical in payload.items()
+                    if text(alias) and text(canonical)
+                }
+            )
+        return aliases
 
     def _unchanged_scope_result(self, *, scope_key: str, source_versions: dict[str, Any]) -> dict[str, Any] | None:
         scope_summary_loader = getattr(self._read_model_repository, "workbench_relation_scope_summary", None)
@@ -502,18 +541,67 @@ class WorkbenchRelationSqlProjectionBuilder:
         if scope_month is None:
             row = self._connection.fetch_one(
                 """
+                with active_relations as (
+                  select case_id, relation_mode, row_ids, row_types
+                  from app.workbench_pair_relations
+                  where status = 'active'
+                    and relation_mode <> %s
+                ),
+                active_relation_memberships as (
+                  select
+                    relation.case_id,
+                    relation.relation_mode,
+                    jsonb_agg(
+                      jsonb_build_array(
+                        case
+                          when member.row_type in ('bank', 'bank_transaction') then 'bank'
+                          when member.row_type in ('invoice', 'input_invoice', 'output_invoice') then 'invoice'
+                          else member.row_type
+                        end,
+                        member.row_id
+                      )
+                      order by
+                        case
+                          when member.row_type in ('bank', 'bank_transaction') then 'bank'
+                          when member.row_type in ('invoice', 'input_invoice', 'output_invoice') then 'invoice'
+                          else member.row_type
+                        end,
+                        member.row_id
+                    ) as typed_members
+                  from active_relations relation
+                  cross join lateral unnest(relation.row_ids, relation.row_types) as member(row_id, row_type)
+                  group by relation.case_id, relation.relation_mode
+                ),
+                active_relation_proof as (
+                  select
+                    count(*)::integer as active_relation_count,
+                    md5(coalesce(string_agg(
+                      jsonb_build_object(
+                        'case_id', case_id,
+                        'relation_mode', relation_mode,
+                        'typed_members', typed_members
+                      )::text,
+                      E'\n' order by case_id
+                    ), '')) as membership_digest
+                  from active_relation_memberships
+                )
                 select
                   (
                     select max(updated_at)::text
                     from app.workbench_pair_relations
                     where relation_mode <> %s
                   ) as pair_relations_updated_at,
+                  (select active_relation_count from active_relation_proof) as active_relation_count,
+                  (select membership_digest from active_relation_proof) as membership_digest,
                   (select max(updated_at)::text from app.bank_transaction_relation_claims where status = 'active') as oa_pending_payment_bank_claims_updated_at,
                   (select max(updated_at)::text from app.bank_transactions) as bank_transactions_updated_at,
                   (select max(updated_at)::text from app.invoices) as invoices_updated_at,
                   (select max(updated_at)::text from app.oa_applications) as oa_projection_updated_at
                 """,
-                (TURNOVER_MANUAL_CLOSURE_RELATION_MODE,),
+                (
+                    TURNOVER_MANUAL_CLOSURE_RELATION_MODE,
+                    TURNOVER_MANUAL_CLOSURE_RELATION_MODE,
+                ),
             )
         else:
             row = self._connection.fetch_one(
@@ -544,7 +632,8 @@ class WorkbenchRelationSqlProjectionBuilder:
                     from month_objects
                 ),
                 scoped_relations as (
-                    select relation.status, relation.updated_at, relation.row_ids
+                    select relation.case_id, relation.relation_mode, relation.status,
+                           relation.updated_at, relation.row_ids, relation.row_types
                     from app.workbench_pair_relations relation, scope, month_object_array objects
                     where relation.relation_mode <> %s
                       and (
@@ -565,9 +654,50 @@ class WorkbenchRelationSqlProjectionBuilder:
                 scope_row_id_array as (
                     select coalesce(array_agg(row_id), array[]::text[]) as row_ids
                     from scope_row_ids
+                ),
+                active_relation_memberships as (
+                    select
+                      relation.case_id,
+                      relation.relation_mode,
+                      jsonb_agg(
+                        jsonb_build_array(
+                          case
+                            when member.row_type in ('bank', 'bank_transaction') then 'bank'
+                            when member.row_type in ('invoice', 'input_invoice', 'output_invoice') then 'invoice'
+                            else member.row_type
+                          end,
+                          member.row_id
+                        )
+                        order by
+                          case
+                            when member.row_type in ('bank', 'bank_transaction') then 'bank'
+                            when member.row_type in ('invoice', 'input_invoice', 'output_invoice') then 'invoice'
+                            else member.row_type
+                          end,
+                          member.row_id
+                      ) as typed_members
+                    from scoped_relations relation
+                    cross join lateral unnest(relation.row_ids, relation.row_types) as member(row_id, row_type)
+                    where relation.status = 'active'
+                    group by relation.case_id, relation.relation_mode
+                ),
+                active_relation_proof as (
+                    select
+                      count(*)::integer as active_relation_count,
+                      md5(coalesce(string_agg(
+                        jsonb_build_object(
+                          'case_id', case_id,
+                          'relation_mode', relation_mode,
+                          'typed_members', typed_members
+                        )::text,
+                        E'\n' order by case_id
+                      ), '')) as membership_digest
+                    from active_relation_memberships
                 )
                 select
                   (select max(updated_at)::text from scoped_relations) as pair_relations_updated_at,
+                  (select active_relation_count from active_relation_proof) as active_relation_count,
+                  (select membership_digest from active_relation_proof) as membership_digest,
                   (
                     select max(updated_at)::text
                     from app.bank_transaction_relation_claims claims, scope
@@ -630,7 +760,7 @@ class WorkbenchRelationSqlProjectionBuilder:
                 select unnest(%s::date[]) as scope_month
             ),
             eligible_relations as (
-                select status, updated_at, month_scope, row_ids
+                select case_id, relation_mode, status, updated_at, month_scope, row_ids, row_types
                 from app.workbench_pair_relations
                 where relation_mode <> %s
             ),
@@ -666,11 +796,13 @@ class WorkbenchRelationSqlProjectionBuilder:
                 group by scopes.scope_month
             ),
             scoped_relations as (
-                select scopes.scope_month, relation.status, relation.updated_at, relation.row_ids
+                select scopes.scope_month, relation.case_id, relation.relation_mode, relation.status,
+                       relation.updated_at, relation.row_ids, relation.row_types
                 from requested_scopes scopes
                 join eligible_relations relation on relation.month_scope = scopes.scope_month
                 union
-                select objects.scope_month, relation.status, relation.updated_at, relation.row_ids
+                select objects.scope_month, relation.case_id, relation.relation_mode, relation.status,
+                       relation.updated_at, relation.row_ids, relation.row_types
                 from month_object_arrays objects
                 join eligible_relations relation on relation.row_ids && objects.row_ids
             ),
@@ -687,6 +819,48 @@ class WorkbenchRelationSqlProjectionBuilder:
             relation_versions as (
                 select scope_month, max(updated_at)::text as pair_relations_updated_at
                 from scoped_relations
+                group by scope_month
+            ),
+            active_relation_memberships as (
+                select
+                  relation.scope_month,
+                  relation.case_id,
+                  relation.relation_mode,
+                  jsonb_agg(
+                    jsonb_build_array(
+                      case
+                        when member.row_type in ('bank', 'bank_transaction') then 'bank'
+                        when member.row_type in ('invoice', 'input_invoice', 'output_invoice') then 'invoice'
+                        else member.row_type
+                      end,
+                      member.row_id
+                    )
+                    order by
+                      case
+                        when member.row_type in ('bank', 'bank_transaction') then 'bank'
+                        when member.row_type in ('invoice', 'input_invoice', 'output_invoice') then 'invoice'
+                        else member.row_type
+                      end,
+                      member.row_id
+                  ) as typed_members
+                from scoped_relations relation
+                cross join lateral unnest(relation.row_ids, relation.row_types) as member(row_id, row_type)
+                where relation.status = 'active'
+                group by relation.scope_month, relation.case_id, relation.relation_mode
+            ),
+            active_relation_proofs as (
+                select
+                  scope_month,
+                  count(*)::integer as active_relation_count,
+                  md5(coalesce(string_agg(
+                    jsonb_build_object(
+                      'case_id', case_id,
+                      'relation_mode', relation_mode,
+                      'typed_members', typed_members
+                    )::text,
+                    E'\n' order by case_id
+                  ), '')) as membership_digest
+                from active_relation_memberships
                 group by scope_month
             ),
             claim_versions as (
@@ -755,12 +929,15 @@ class WorkbenchRelationSqlProjectionBuilder:
             select
               to_char(scopes.scope_month, 'YYYY-MM') as scope_key,
               relations.pair_relations_updated_at,
+              coalesce(active_relations.active_relation_count, 0) as active_relation_count,
+              coalesce(active_relations.membership_digest, md5('')) as membership_digest,
               claims.oa_pending_payment_bank_claims_updated_at,
               bank.bank_transactions_updated_at,
               invoice.invoices_updated_at,
               oa.oa_projection_updated_at
             from requested_scopes scopes
             left join relation_versions relations using (scope_month)
+            left join active_relation_proofs active_relations using (scope_month)
             left join claim_versions claims using (scope_month)
             left join bank_versions bank using (scope_month)
             left join invoice_versions invoice using (scope_month)
@@ -786,6 +963,8 @@ def _source_versions_payload(row: dict[str, Any] | None) -> dict[str, Any]:
     return {
         "workbench_relation_schema_version": WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION,
         "workbench_pair_relations_updated_at": text(payload.get("pair_relations_updated_at")),
+        "workbench_pair_relations_active_count": int_value(payload.get("active_relation_count"), 0),
+        "workbench_pair_relations_membership_digest": text(payload.get("membership_digest")) or "",
         "oa_pending_payment_bank_claims_updated_at": text(payload.get("oa_pending_payment_bank_claims_updated_at")),
         "bank_transactions_updated_at": text(payload.get("bank_transactions_updated_at")),
         "invoices_updated_at": text(payload.get("invoices_updated_at")),

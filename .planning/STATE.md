@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 30-05-PLAN.md with production closure
-last_updated: "2026-07-26T05:45:00+08:00"
-last_activity: 2026-07-26 -- Phase 30 production closure completed
+stopped_at: Phase 32 candidate locally verified; production deployment and proof pending
+last_updated: "2026-07-26T17:04:00+08:00"
+last_activity: 2026-07-26 -- Phase 32 targeted local gates passed
 progress:
-  total_phases: 27
-  completed_phases: 4
-  total_plans: 73
-  completed_plans: 53
-  percent: 15
+  total_phases: 30
+  completed_phases: 5
+  total_plans: 79
+  completed_plans: 57
+  percent: 17
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-16)
 
 **Core value:** Preserve production finance workflow correctness while improving individual pages through isolated, reviewable GSD phases.
-**Current focus:** Phase 30 — workbench-concurrent-recovery-performance
+**Current focus:** Phase 32 — read-model-exact-source-proof-closure
 
 ## Current Position
 
-Phase: 30 (workbench-concurrent-recovery-performance) — COMPLETE
-Plan: 5 of 5
-Status: Production closure complete
-Last activity: 2026-07-26 -- Candidate D deployed; confirm/withdraw full chain passed
+Phase: 32 (read-model-exact-source-proof-closure) — EXECUTING
+Plan: 1 of 1
+Status: Candidate locally verified; production deployment and proof pending
+Last activity: 2026-07-26 -- Phase 32 targeted local gates passed
 
-Progress: [██████████] 100% (Phase 29)
+Progress: [████████░░] local implementation and verification complete; production proof pending
 
 ## Performance Metrics
 

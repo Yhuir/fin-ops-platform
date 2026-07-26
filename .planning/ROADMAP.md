@@ -396,6 +396,9 @@ Phase 0 is the shared baseline and must be completed before page implementation 
 | 17. ETC发票导入 | 0/0 | Not started | - |
 | 18. 发票池与 ETC 批次关系闭环 | 1/1 | Implementation complete, apply gated | 2026-06-23 |
 | 26. 外部往来闭环冻结要求分区 | 0/2 | Planned | - |
+| 30. 关联台并发恢复与性能闭环 | 5/5 | Complete | 2026-07-26 |
+| 31. 外部往来款与关联台闭环一致性 | 1/1 | Complete | 2026-07-26 |
+| 32. 全页面精确事实证明闭环 | 0/1 | In progress | - |
 
 ### Phase 19: 全页面 Audit 证明、跨页关系一致性、readiness 语义与旧链路移除的生产闭环
 
@@ -586,5 +589,65 @@ Plans:
 Plans:
 
 - [x] 29-01-PLAN — Reuse lightweight Workbench status, remove repeated full payload polling, and close production performance/correctness proof (`6ec4bc48a`, SQL root fix `f06711b7a`).
+
+### Phase 30: 关联台确认/撤回与并发恢复生产闭环
+
+**Goal:** Close Workbench confirm/withdraw correctness, immediate interaction feedback, zero write-time fan-out, exact access-time consumer recovery and reversible production proof while recording the deferred hard 3-second performance gap honestly.
+**Requirements:** AUDIT-04, RELCL-01, RELCL-02, RELCL-03, RELCL-05, RMF-02, RMF-03, RMF-08
+**Depends on:** Phase 29 and Phase 27 access-time freshness contracts.
+**Canonical refs:** `.planning/phases/30-workbench-concurrent-recovery-performance/30-05-SUMMARY.md`, `docs/modules/reconciliation-workbench/boundary-io.md`, `docs/modules/workbench-relations/boundary-io.md`, `docs/operations/runtime-worker-governance.md`
+**Success Criteria** (what must be TRUE):
+
+  1. Confirm and withdraw use the one canonical relation command/UoW with immediate pending feedback and no write-time page refresh targets.
+  2. The sanctioned reversible production fixture proves all registered relation consumers, isolation pages, queue drain and System Audit after both directions.
+  3. Slower-than-3-second samples are measured and reported without weakening correctness or hiding them as performance pass.
+
+**Plans:** 5 plans
+
+Plans:
+
+- [x] 30-01-PLAN — Bound the selected-row preview and formal mutation contract.
+- [x] 30-02-PLAN — Optimize concurrent exact recovery without changing canonical ownership.
+- [x] 30-03-PLAN — Add synchronous pending feedback and safe error mapping.
+- [x] 30-04-PLAN — Establish the sanctioned reversible production fixture.
+- [x] 30-05-PLAN — Close confirm/withdraw, nine consumers, zero fan-out and System Audit in production.
+
+### Phase 31: 外部往来款与关联台闭环一致性
+
+**Goal:** Remove the unrelated whole-page freshness precondition from turnover closure confirmation, bind the mutation to exact selected bank/category facts, preserve one canonical relation source and add the requested row separator without new runtime architecture.
+**Requirements:** TURNWB-01, TURNWB-02, TURNWB-03, TURNWB-04
+**Depends on:** Phase 30 canonical relation and reversible production fixture contracts.
+**Canonical refs:** `.planning/phases/31-turnover-workbench-closure-consistency/31-01-PLAN.md`, `docs/modules/turnover-ledger/boundary-io.md`, `docs/modules/bank-details/boundary-io.md`, `docs/modules/workbench-relations/boundary-io.md`
+**Success Criteria** (what must be TRUE):
+
+  1. Turnover closure confirm validates exact selected canonical bank/category facts and is not blocked by unrelated Bank Detail page state.
+  2. Turnover and Workbench continue to read/write one canonical formal relation with zero write-time page fan-out.
+  3. Pending feedback, schema invalidation and the requested fine row separator are present without a second projection path.
+
+**Plans:** 1 plan
+
+Plans:
+
+- [x] 31-01-PLAN — Persist and propagate exact bank-row selection proof, invalidate old projections and preserve the proof through the tag facade.
+
+### Phase 32: 修复全页面精确事实证明与历史 Read Model 收敛
+
+**Goal:** Eliminate false-fresh shared relation and Cost scopes by making typed canonical relation membership and current dependency schemas part of exact scope proof, remove the weak legacy paths, rebuild only affected derived scopes through the formal gateway, and close one candidate production deployment with all-page correctness, isolation and measured performance.
+**Requirements:** AUDIT-04, AUDIT-11, AUDIT-12, RMF-09
+**Depends on:** Phase 30 relation write closure and Phase 31 turnover exact-selection implementation.
+**Canonical refs:** `.planning/phases/32-read-model-exact-source-proof-closure/32-01-PLAN.md`, `docs/architecture/module-boundaries/read-model-contracts.md`, `docs/modules/workbench-relations/boundary-io.md`, `docs/modules/cost-statistics/boundary-io.md`, `docs/modules/read-models/boundary-io.md`, `docs/modules/runtime-workers/boundary-io.md`, `docs/operations/runtime-worker-governance.md`
+**Success Criteria** (what must be TRUE):
+
+  1. Shared relation projection freshness requires exact typed canonical active-edge membership; UUID/legacy aliases, withdrawals, member replacement and cross-month relations cannot leave stale groups marked fresh.
+  2. Cost freshness rejects old Workbench business proof and Bank Detail schema while preserving the existing semantic exclusion of the Workbench execution cursor and exact child-scope recovery.
+  3. Ordinary writes remain zero fan-out, page access enqueues at most one exact current-effective scope, unvisited pages produce no unrelated I/O, and stale payload is never labeled fresh.
+  4. Existing correct page implementations are reused; only a page whose own fail-closed gate still fails after the shared repair may change.
+  5. Targeted local gates, one pushed `main` candidate, formal derived-scope recovery, reversible production fixture, measured page performance, queue/worker drain and 16/16 internal System Audit pass.
+
+**Plans:** 1 plan
+
+Plans:
+
+- [ ] 32-01-PLAN — Add RED counterexamples, repair exact relation/Cost proof, delete weak paths, run targeted gates, deploy once and close production evidence.
 
 ---

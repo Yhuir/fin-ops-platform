@@ -18,12 +18,6 @@ class CaptureWorkbenchRelationRepository:
         self.previous_distribution_calls: list[dict[str, object]] = []
         self.row_id_aliases: dict[str, str] = {}
         self.row_id_alias_calls: list[list[str]] = []
-        self.relation_delta_source_version_calls: list[dict[str, object]] = []
-        self.relation_delta_source_versions: dict[str, object] = {
-            "workbench_relation_schema_version": WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION,
-            "workbench_pair_relations_updated_at": "2026-07-20 15:00:00+08",
-            "bank_transactions_updated_at": "2026-07-19 00:00:00+08",
-        }
 
     def get_workbench_relation_rows_by_ids(
         self,
@@ -61,18 +55,6 @@ class CaptureWorkbenchRelationRepository:
     ) -> dict[str, object] | None:
         self.scope_summary_calls.append({"scope_key": scope_key, "tenant_id": tenant_id})
         return self.existing_scope_summary
-
-    def workbench_relation_delta_source_versions(
-        self,
-        *,
-        scope_key: str,
-        row_ids: list[str],
-        tenant_id: str = "default",
-    ) -> dict[str, object]:
-        self.relation_delta_source_version_calls.append(
-            {"scope_key": scope_key, "row_ids": list(row_ids), "tenant_id": tenant_id}
-        )
-        return dict(self.relation_delta_source_versions)
 
     def save_workbench_relation_distribution(
         self,
@@ -471,7 +453,10 @@ class RemovedOaMemberRelationProjectionConnection(CrossMonthRelationProjectionCo
         normalized = " ".join(sql.lower().split())
         if "from app.workbench_pair_relations" in normalized:
             self.sql_statements.append(sql)
-            requested_ids = set(params[1]) if len(params) > 1 and isinstance(params[1], list) else set()
+            requested_ids = next(
+                (set(param) for param in params if isinstance(param, list)),
+                set(),
+            )
             if requested_ids & {"bank-nanjing", "oa-yang"}:
                 return [
                     {
@@ -690,7 +675,7 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
             )
         )
 
-    def test_relation_delta_uses_narrow_version_and_active_relation_queries(self) -> None:
+    def test_relation_delta_uses_exact_scope_proof_and_narrow_active_relation_query(self) -> None:
         repository = CaptureWorkbenchRelationRepository()
         connection = CrossMonthRelationProjectionConnection()
         builder = WorkbenchRelationSqlProjectionBuilder(
@@ -705,10 +690,6 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
 
         self.assertTrue(result["relation_delta"])
         self.assertEqual(repository.saved_rows[0]["groups"][0]["group_id"], "case-nanjing-cross-month")
-        self.assertEqual(
-            repository.relation_delta_source_version_calls,
-            [{"scope_key": "2026-04", "row_ids": ["bank-nanjing"], "tenant_id": "default"}],
-        )
         relation_queries = [
             " ".join(sql.lower().split())
             for sql in connection.sql_statements
@@ -725,9 +706,8 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         self.assertEqual(len(claim_queries), 1)
         self.assertIn("bank_transaction_id = any(%s::text[])", claim_queries[0])
 
-    def test_relation_delta_falls_back_to_full_scope_when_scope_proof_is_missing(self) -> None:
+    def test_relation_delta_does_not_depend_on_cached_scope_proof(self) -> None:
         repository = CaptureWorkbenchRelationRepository()
-        repository.relation_delta_source_versions = {}
         connection = CrossMonthRelationProjectionConnection()
         builder = WorkbenchRelationSqlProjectionBuilder(
             connection=connection,
@@ -739,9 +719,9 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
             row_ids=["bank-nanjing"],
         )
 
-        self.assertNotIn("relation_delta", result)
-        self.assertEqual(len(repository.saved), 1)
-        self.assertEqual(repository.saved_rows, [])
+        self.assertTrue(result["relation_delta"])
+        self.assertEqual(repository.saved, [])
+        self.assertEqual(len(repository.saved_rows), 1)
 
     def test_rebuild_rows_reprojects_members_removed_from_previous_group(self) -> None:
         repository = CaptureWorkbenchRelationRepository()
@@ -848,7 +828,7 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         source_versions = builder._source_versions()
         self.assertEqual(
             source_versions["workbench_relation_schema_version"],
-            "2026-07-14-formal-linked-unlinked-v1",
+            "2026-07-26-exact-membership-proof-v1",
         )
         self.assertNotIn("workbench_reconciliation_decisions_updated_at", source_versions)
         repository.existing_scope_summary = {
@@ -868,7 +848,7 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         saved = repository.saved[0]
         self.assertEqual(
             saved["source_versions"]["workbench_relation_schema_version"],
-            "2026-07-14-formal-linked-unlinked-v1",
+            "2026-07-26-exact-membership-proof-v1",
         )
         rows_by_id = {row["row_id"]: row for row in saved["rows"]}
         self.assertIn("input-invoice-nanjing", rows_by_id)
@@ -884,7 +864,7 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
 
         self.assertEqual(
             source_versions["workbench_relation_schema_version"],
-            "2026-07-14-formal-linked-unlinked-v1",
+            "2026-07-26-exact-membership-proof-v1",
         )
         self.assertNotIn("workbench_reconciliation_decisions_updated_at", source_versions)
         self.assertEqual(
@@ -937,7 +917,7 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         )
         self.assertEqual(
             source_versions_by_scope["2026-05"]["workbench_relation_schema_version"],
-            "2026-07-14-formal-linked-unlinked-v1",
+            "2026-07-26-exact-membership-proof-v1",
         )
 
     def test_bulk_source_versions_reject_non_month_scope(self) -> None:

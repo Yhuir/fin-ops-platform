@@ -7042,6 +7042,53 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
             return None
         return dict(scope_row)
 
+    def workbench_relation_row_id_aliases(
+        self,
+        row_ids: list[str],
+        *,
+        tenant_id: str = "default",
+    ) -> dict[str, str]:
+        _ = tenant_id
+        normalized_row_ids = text_list(row_ids)
+        aliases = {row_id: row_id for row_id in normalized_row_ids}
+        if not normalized_row_ids:
+            return aliases
+        rows = self._connection.fetch_all(
+            """
+            select id::text as storage_id,
+                   legacy_mongo_id,
+                   coalesce(legacy_mongo_id, id::text) as canonical_id
+            from app.bank_transactions
+            where id::text = any(%s::text[])
+               or legacy_mongo_id = any(%s::text[])
+            union all
+            select id::text as storage_id,
+                   legacy_mongo_id,
+                   coalesce(legacy_mongo_id, id::text) as canonical_id
+            from app.invoices
+            where id::text = any(%s::text[])
+               or legacy_mongo_id = any(%s::text[])
+            """,
+            (
+                normalized_row_ids,
+                normalized_row_ids,
+                normalized_row_ids,
+                normalized_row_ids,
+            ),
+        )
+        for row in rows:
+            canonical_id = text(row.get("canonical_id"))
+            if not canonical_id:
+                continue
+            for alias in (
+                text(row.get("storage_id")),
+                text(row.get("legacy_mongo_id")),
+                canonical_id,
+            ):
+                if alias:
+                    aliases[alias] = canonical_id
+        return aliases
+
 
     def _workbench_relation_groups_for_scope_group_ids(
         self,
@@ -7112,50 +7159,6 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
             "read_model_scope_keys": normalized_scope_keys,
             "stale_reasons": stale_reasons,
         }
-
-    def workbench_relation_delta_source_versions(
-        self,
-        *,
-        scope_key: str,
-        row_ids: list[str],
-        tenant_id: str = "default",
-    ) -> dict[str, Any]:
-        normalized_scope_key = text(scope_key) or ""
-        normalized_row_ids = text_list(row_ids)
-        scope_month = month_start(normalized_scope_key)
-        if not scope_month or not normalized_row_ids:
-            return {}
-        row = self._connection.fetch_one(
-            """
-            select
-              scope.source_versions,
-              greatest(
-                nullif(scope.source_versions ->> 'workbench_pair_relations_updated_at', '')::timestamptz,
-                (
-                  select max(relation.updated_at)
-                  from app.workbench_pair_relations relation
-                  where relation.row_ids && %s::text[]
-                    and relation.relation_mode <> %s
-                )
-              )::text as pair_relations_updated_at
-            from read_model.workbench_relation_scopes scope
-            where scope.tenant_id = %s
-              and scope.scope_key = %s
-            """,
-            (
-                normalized_row_ids,
-                TURNOVER_MANUAL_CLOSURE_RELATION_MODE,
-                tenant_id,
-                normalized_scope_key,
-            ),
-        )
-        payload = row if isinstance(row, dict) else {}
-        source_versions = payload.get("source_versions")
-        if not isinstance(source_versions, dict):
-            return {}
-        result = dict(source_versions)
-        result["workbench_pair_relations_updated_at"] = text(payload.get("pair_relations_updated_at"))
-        return result
 
     def _batch_accounting_relation_scope_proof(
         self,
@@ -10977,8 +10980,8 @@ class PostgresReadModelRepository:
     def workbench_relation_scope_summary(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         return self._search_workbench_relation_repository.workbench_relation_scope_summary(*args, **kwargs)
 
-    def workbench_relation_delta_source_versions(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return self._search_workbench_relation_repository.workbench_relation_delta_source_versions(*args, **kwargs)
+    def workbench_relation_row_id_aliases(self, *args: Any, **kwargs: Any) -> dict[str, str]:
+        return self._search_workbench_relation_repository.workbench_relation_row_id_aliases(*args, **kwargs)
 
     def list_batch_accounting_relation_groups_by_year(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         return self._search_workbench_relation_repository.list_batch_accounting_relation_groups_by_year(*args, **kwargs)

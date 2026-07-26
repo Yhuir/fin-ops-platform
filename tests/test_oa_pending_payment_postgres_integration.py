@@ -204,7 +204,7 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
             )
             values (
                 'bank-oa-active-proof', '6222', 'outflow', '集成测试供应商',
-                100, -100, '2026-05-20', '2026-05-01', 'active', '{}'::jsonb
+                100, -100, '2026-05-20', '2026-05-01', 'pending', '{}'::jsonb
             )
             """
         )
@@ -216,7 +216,7 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
             )
             values (
                 'invoice-oa-active-proof', 'input', 'INV-OA-ACTIVE-PROOF',
-                '2026-05-18', '2026-05-01', 100, 100, 100, 'active', '{}'::jsonb
+                '2026-05-18', '2026-05-01', 100, 100, 100, 'pending', '{}'::jsonb
             )
             """
         )
@@ -611,7 +611,7 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
                 -100,
                 '2026-05-20',
                 '2026-05-01',
-                'active'
+                'pending'
             )
             """
         )

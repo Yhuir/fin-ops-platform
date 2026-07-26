@@ -20,6 +20,7 @@ invoice usage/output collection backfill、App Health/workbench performance 和 
 
 - 普通用户写入默认只提交 canonical facts/source version/audit/idempotency 与必要领域任务，返回信息性 affected scopes；不得直接产生页面 read-model dirty/outbox，也不得返回页面 operation-barrier targets。
 - 页面 route mount、focus 或 hidden→visible 后，由该页 query owner 比较 expected/actual versions；只有当前精确 scope non-fresh 才经 `ReadModelRefreshGateway` 入队。hidden/未访问页面保持零 I/O。
+- `workbench_relation` 的 expected proof 必须覆盖 exact scope 的 active relation count 与稳定 typed membership digest；局部 relation delta 必须先批量解析 canonical UUID/legacy aliases。只比较 `max(updated_at)` 或复用旧 scope proof 会漏掉旧关系撤回，禁止作为 fresh 证明。
 - `all` / full-history 只允许显式 authoritative integration、data reset、repair/backfill/reapply 或人工 maintenance 使用；必须在 App Health 标记为 `full_history_batch`，不能伪装成普通 current-scope 工作。
 - SQL-native read model 必须有 source version guard，避免读取旧 projection 并标记为 fresh。
 - rebuild/backfill 应按 scope 批量执行，避免逐行重建。

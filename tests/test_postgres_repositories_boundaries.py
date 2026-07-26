@@ -730,43 +730,39 @@ def test_workbench_relation_distribution_partial_save_deletes_overlap_and_counts
     assert any("insert into read_model.workbench_relation_rows" in sql for sql in bulk_sql)
 
 
-def test_workbench_relation_delta_source_versions_preserve_unrelated_sources() -> None:
-    class DeltaSourceConnection(RecordingConnection):
-        def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
-            self.fetched_one.append((" ".join(sql.split()), params))
-            return {
-                "source_versions": {
-                    "workbench_relation_schema_version": "v1",
-                    "workbench_pair_relations_updated_at": "2026-07-19 00:00:00+08",
-                    "bank_transactions_updated_at": "2026-07-18 00:00:00+08",
-                },
-                "pair_relations_updated_at": "2026-07-20 15:00:00+08",
-            }
+def test_workbench_relation_row_id_aliases_resolve_storage_and_legacy_ids() -> None:
+    class AliasConnection(RecordingConnection):
+        def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+            self.fetched_all.append((" ".join(sql.split()), params))
+            return [
+                {
+                    "storage_id": "781cbe29-c790-4ad4-b6fb-7b4530813fa6",
+                    "legacy_mongo_id": "txn_imported_0412",
+                    "canonical_id": "txn_imported_0412",
+                }
+            ]
 
-    connection = DeltaSourceConnection()
+    connection = AliasConnection()
     repository = PostgresReadModelRepository(connection)
 
-    result = repository.workbench_relation_delta_source_versions(
-        scope_key="2026-05",
-        row_ids=["txn-1", "oa-1"],
+    result = repository.workbench_relation_row_id_aliases(
+        ["781cbe29-c790-4ad4-b6fb-7b4530813fa6", "txn_imported_0412", "oa-1"],
     )
 
     assert result == {
-        "workbench_relation_schema_version": "v1",
-        "workbench_pair_relations_updated_at": "2026-07-20 15:00:00+08",
-        "bank_transactions_updated_at": "2026-07-18 00:00:00+08",
+        "781cbe29-c790-4ad4-b6fb-7b4530813fa6": "txn_imported_0412",
+        "txn_imported_0412": "txn_imported_0412",
+        "oa-1": "oa-1",
     }
-    sql, params = connection.fetched_one[0]
-    assert "from read_model.workbench_relation_scopes scope" in sql
-    assert "where relation.row_ids && %s::text[]" in sql
-    assert "relation.relation_mode <> %s" in sql
-    assert "from app.bank_transactions" not in sql
-    assert params == (
-        ["txn-1", "oa-1"],
-        "turnover_manual_closure",
-        "default",
-        "2026-05",
-    )
+    sql, params = connection.fetched_all[0]
+    assert "from app.bank_transactions" in sql
+    assert "from app.invoices" in sql
+    normalized_ids = [
+        "781cbe29-c790-4ad4-b6fb-7b4530813fa6",
+        "txn_imported_0412",
+        "oa-1",
+    ]
+    assert params == (normalized_ids, normalized_ids, normalized_ids, normalized_ids)
 
 
 def test_workbench_relation_source_reads_can_exclude_turnover_closure_mode() -> None:
