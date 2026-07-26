@@ -106,45 +106,43 @@
 
 `GET /api/batch-accounting?bank_year=YYYY&bucket=unsubmitted|submitted`
 
-可选分页参数：`page/page_size` 同时作用于银行和 OA 列表；`bank_page/bank_page_size`、`oa_page/oa_page_size` 分别作用于银行列表和 OA 列表。显式分页时 `page_size` 上限为 200，超限返回 `400 invalid_paging`。
+可选参数：
+
+- `page/page_size` 同时作用于银行和 OA 列表。
+- `bank_page/bank_page_size`、`oa_page/oa_page_size` 分别作用于银行列表和 OA 列表。
+- `oa_search` 在 canonical OA 查询中匹配申请人、项目、金额和事由。
+- 页码和页大小必须为正数，页大小上限 200；`oa_search` 最长 200 字符。
 
 响应字段：
 
 | 字段 | 说明 |
 | --- | --- |
-| `summary.unsubmitted_count` | 当前筛选下未提交候选银行流水数量。 |
+| `summary.unsubmitted_count` | 当前银行年份下未提交候选银行流水数量。 |
 | `summary.submitted_count` | 当前银行年份下已提交批量账务关系数量。 |
 | `summary.bank_year` | 后端实际使用的银行流水年份；OA 候选不再按年份过滤。 |
-| `bank_rows` | 当前 bucket 的银行流水列表。 |
+| `bank_rows` | 当前 bucket 的服务端分页银行流水列表。 |
 | `oa_rows` | `unsubmitted` bucket 的可选 OA 日常报销单据列表；候选必须没有关联银行流水，只有发票关系或无流水候选关系时仍可进入右侧 OA 栏。 |
-| `relations_by_bank_row_id` | `submitted` bucket 中按银行流水 ID 索引的已提交关系详情。 |
-| `read_model_status` | 关联台 relation read model 读取状态。非 fresh 时页面不能把空 rows 当作“全部未提交”。 |
-| `read_model_stale_reasons` | relation read model 非 fresh 原因，按后端返回顺序去重。 |
-| `read_model_scope_keys` | 发生非 fresh、已入队刷新或带 stale reason 的 relation read model scope。 |
-| `refresh_enqueued` | relation read model refresh 是否已入队。 |
+| `relations_by_bank_row_id` | `submitted` bucket 中按银行流水 ID 索引的 active batch relation 及 canonical OA/发票成员详情。 |
+| `pagination` | 银行分页；`unsubmitted` 同时包含 OA 分页。 |
 
-`read_model_status` 的优先级按后端聚合：`unavailable > schema_mismatch > missing > failed > stale > refreshing > fresh`。接口仍返回当前可用 payload；前端需要展示刷新/陈旧状态并避免在非 fresh 时把缺失关系误解释成真实未提交。
+该响应不返回 `read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys`、`source_versions`、`refresh_enqueued`、refresh targets 或 operation barrier targets。loading、empty 和 error 由一次普通页面请求的真实结果决定。
 
-列表读取 relation distribution 必须通过现有 `workbench_relation` read facade freshness 边界请求 fresh payload；`missing`/`stale` scope 由 facade/gateway 负责 normalize、validate、dedupe 和入队，GET 不同步 rebuild，也不直接写 durable queue。`unsubmitted` bucket 只从专属年份 SQL loader 取得批量账务银行候选和日常报销 OA 候选，再将候选 row ids 用作 batch-only relation bundle lookup；同一个 bundle 一致性快照返回候选 relation、freshness proof、referenced groups 和 `summary.submitted_count`，不得恢复独立年份 count I/O。`submitted` bucket 的银行上下文只读专属年份 SQL loader，关系详情读取年份级 submitted relation DTO。任一专属 loader 缺失或返回无效 payload 时返回 `503 batch_accounting_workbench_read_model_unavailable`，不得跨用其它 loader、返回假空数据或回退 Workbench full-page builder。
+列表由页面专属 query repository 在一个显式 `REPEATABLE READ / READ ONLY` PostgreSQL snapshot 内读取 canonical facts：
 
-成功或结构化错误响应均可带 `Server-Timing` 头，用于拆分本接口的 candidate、relation、payload assembly 和 serialization 阶段。该头只用于性能诊断，不属于业务 JSON，也不改变 freshness、权限或写入语义。
+- `unsubmitted` 读取指定年份、对方户名为“批量账务集中处理”、支出且没有 active relation 的 `app.bank_transactions`；OA 读取已完成日常报销 `app.oa_applications`，不按年份过滤，且没有包含 canonical 银行成员的 active relation。
+- 附件发票只按当前 OA page IDs 查询 `app.invoices.source_links` / `app.oa_attachments`。
+- `submitted` 只读取 `app.workbench_pair_relations` 中 `status='active' and relation_mode='batch_accounting'` 且包含指定年份 canonical 银行成员的关系，再一次批量读取其 canonical OA/发票成员。
+- rows、summary、counts 和 pagination 使用同一 snapshot；固定查询次数、服务端分页，禁止 Workbench payload、12 月循环、逐 row relation lookup 和全量附件扫描。
+
+成功或结构化错误响应可带 `Server-Timing` 头，记录 canonical snapshot、payload assembly 和 serialization；该头不属于业务 JSON。
 
 `POST /api/batch-accounting/submit`
 
 `POST /api/batch-accounting/{relation_id}/withdraw`
 
-写操作在业务校验和持久化前通过 `bank_row_id + oa_row_ids` 专属 SQL loader 取得本次 row context，并由 canonical `WorkbenchRelationCommandService` 按本次 row ids 校验 active relation/version/idempotency/owner 状态；不得因为整页普通 relation distribution 追赶中而阻断无关 rows 的提交。专属 loader 不可用时返回 503；canonical version conflict 返回 409。
+写操作通过同一页面 query repository 的窄 snapshot 读取 `bank_row_id + oa_row_ids` 及所选 OA 附件发票，再由 canonical `WorkbenchRelationCommandService` 校验 active relation/version/idempotency/owner 状态并持久化 relation/history/audit。query repository 或 command service 缺失返回 `503 batch_accounting_canonical_query_unavailable` / `503 batch_accounting_relation_command_unavailable`；canonical conflict/version conflict 返回 409。
 
-成功响应返回业务结果和信息性 `affected_months` / `affected_scope_keys`，但普通提交/撤回的 `freshness_targets` 与 `operation_barrier_targets` 固定为空。写请求只提交 canonical relation/history/idempotency/audit，不在事务内或响应后投递页面 read model；当前可见页面在成功后重新调用本页正常 GET，隐藏页面在再次可见时走同一 freshness gate。
-
-```json
-{
-  "error": "batch_accounting_workbench_read_model_unavailable",
-  "message": "批量账务关联台读模型不可用，请稍后重试。"
-}
-```
-
-前端必须优先展示 `message`，不能把 503 显示成普通空态或继续提交；GET 成功但 relation distribution non-fresh 时，仍按响应中的 `read_model_stale_reasons` 与 `read_model_scope_keys` 展示读侧诊断。
+成功响应返回业务结果和信息性 `affected_months` / `affected_scope_keys`，不返回 freshness 或 operation barrier targets。写成功后当前页面恰好重新调用一次普通 GET；不轮询、不等待 read model、不触发跨页面刷新。后置 GET 失败不能回滚或改写已成功 command。
 
 ## 待找发票规则 API
 

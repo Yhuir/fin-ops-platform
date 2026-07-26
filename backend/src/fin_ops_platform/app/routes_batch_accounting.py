@@ -4,7 +4,6 @@ from http import HTTPStatus
 from typing import Any, Callable
 
 from fin_ops_platform.app.auth import OARequestSession
-from fin_ops_platform.services.read_model_write_targets import write_target_envelope
 from fin_ops_platform.services.batch_accounting_service import BatchAccountingError, BatchAccountingService
 
 
@@ -25,7 +24,7 @@ class BatchAccountingApiRoutes:
         bank_year = (query.get("bank_year") or [year])[0]
         bucket = (query.get("bucket") or ["unsubmitted"])[0] or "unsubmitted"
         try:
-            payload = self._service_factory(use_sql_read_model=True).build_payload(
+            payload = self._service_factory().build_payload(
                 year=year,
                 bank_year=bank_year,
                 bucket=bucket,
@@ -35,6 +34,7 @@ class BatchAccountingApiRoutes:
                 bank_page_size=self._query_value(query, "bank_page_size", "bankPageSize"),
                 oa_page=self._query_value(query, "oa_page", "oaPage"),
                 oa_page_size=self._query_value(query, "oa_page_size", "oaPageSize"),
+                oa_search=self._query_value(query, "oa_search", "oaSearch"),
                 timing_observer=timing_observer,
             )
         except BatchAccountingError as exc:
@@ -45,7 +45,7 @@ class BatchAccountingApiRoutes:
         actor = self._actor(payload, session)
         year = str(payload.get("year") or "")
         try:
-            result = self._service_factory(use_sql_read_model=True).submit(
+            result = self._service_factory().submit(
                 year=year,
                 bank_year=str(payload.get("bank_year") or year),
                 bank_row_id=str(payload.get("bank_row_id") or ""),
@@ -63,7 +63,6 @@ class BatchAccountingApiRoutes:
         return HTTPStatus.OK, {
             **result,
             "affected_months": changed_scope_keys,
-            **write_target_envelope(scope_keys=changed_scope_keys, targets=[]),
         }
 
     def withdraw(
@@ -74,7 +73,7 @@ class BatchAccountingApiRoutes:
         session: OARequestSession,
     ) -> tuple[HTTPStatus, dict[str, Any]]:
         try:
-            result = self._service_factory(use_sql_read_model=True).withdraw(
+            result = self._service_factory().withdraw(
                 relation_id=relation_id,
                 actor=self._actor(payload, session),
                 reason=str(payload.get("reason") or payload.get("note") or ""),
@@ -92,7 +91,6 @@ class BatchAccountingApiRoutes:
         return HTTPStatus.OK, {
             **result,
             "affected_months": changed_scope_keys,
-            **write_target_envelope(scope_keys=changed_scope_keys, targets=[]),
         }
 
     @staticmethod
@@ -112,8 +110,7 @@ class BatchAccountingApiRoutes:
         affected_months = self._normalized_scope_keys(result.get("affected_months"))
         if affected_months:
             return affected_months
-        read_model_scope_keys = self._normalized_scope_keys(result.get("read_model_scope_keys"))
-        return read_model_scope_keys or ["all"]
+        return ["all"]
 
     @staticmethod
     def _normalized_scope_keys(value: Any) -> list[str]:
@@ -144,9 +141,16 @@ class BatchAccountingApiRoutes:
 
     @staticmethod
     def _batch_accounting_error_response(exc: BatchAccountingError) -> tuple[HTTPStatus, dict[str, Any]]:
-        if exc.code == "batch_accounting_version_conflict":
+        if exc.code in {
+            "batch_accounting_version_conflict",
+            "batch_accounting_relation_conflict",
+            "batch_accounting_bank_row_already_linked",
+        }:
             status = HTTPStatus.CONFLICT
-        elif exc.code == "batch_accounting_workbench_read_model_unavailable":
+        elif exc.code in {
+            "batch_accounting_canonical_query_unavailable",
+            "batch_accounting_relation_command_unavailable",
+        }:
             status = HTTPStatus.SERVICE_UNAVAILABLE
         else:
             status = HTTPStatus.BAD_REQUEST
