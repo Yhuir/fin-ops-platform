@@ -364,6 +364,10 @@ from fin_ops_platform.services.tax_certified_import_job_service import TaxCertif
 from fin_ops_platform.services.tax_certified_import_application_service import TaxCertifiedImportApplicationService
 from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedImportService
 from fin_ops_platform.services.tax_offset_cache_warmup_executor import TaxOffsetCacheWarmupExecutor
+from fin_ops_platform.services.postgres_repositories.tax_offset import (
+    LocalTaxOffsetCanonicalRepository,
+    PostgresTaxOffsetCanonicalRepository,
+)
 from fin_ops_platform.services.tax_offset_derived_lifecycle_executor import TaxOffsetDerivedLifecycleExecutor
 from fin_ops_platform.services.tax_offset_plan_service import InMemoryTaxOffsetPlanRepository, TaxOffsetPlanService
 from fin_ops_platform.services.tax_offset_query_service import TaxOffsetQueryService
@@ -1171,6 +1175,15 @@ class Application:
     def _configure_tax_offset_application_services(self) -> None:
         runtime_repositories = getattr(self, "_runtime_repositories", None)
         tax_offset_service = getattr(self, "_tax_offset_service", None)
+        connection = (
+            getattr(self._state_store, "_sql_read_connection", None)
+            or getattr(self._state_store, "_connection", None)
+        )
+        self._tax_offset_canonical_repository = (
+            PostgresTaxOffsetCanonicalRepository(connection)
+            if connection is not None
+            else LocalTaxOffsetCanonicalRepository(tax_offset_service)
+        )
         self._tax_offset_runtime_service = TaxOffsetRuntimeService(
             read_model_service=getattr(self, "_tax_offset_read_model_service", None),
             queue_repository=getattr(runtime_repositories, "queue_repository", None),
@@ -1190,10 +1203,8 @@ class Application:
             cache_error_emitter=self._emit_runtime_cache_error,
         )
         self._tax_offset_query_service = TaxOffsetQueryService(
+            canonical_repository=self._tax_offset_canonical_repository,
             tax_offset_service=tax_offset_service,
-            runtime_service=self._tax_offset_runtime_service,
-            sql_read_repository=getattr(self, "_tax_offset_sql_read_repository", None),
-            requires_sql_read_model_runtime=self._requires_sql_read_model_runtime,
         )
         self._tax_certified_import_job_service = TaxCertifiedImportJobService(
             import_job_repository_provider=self._get_import_job_repository,
@@ -1332,10 +1343,8 @@ class Application:
 
     def _tax_offset_query_for_read_model(self) -> TaxOffsetQueryService:
         return TaxOffsetQueryService(
+            canonical_repository=self._tax_offset_canonical_repository,
             tax_offset_service=getattr(self, "_tax_offset_service", None),
-            runtime_service=self._tax_offset_runtime_for_read_model(),
-            sql_read_repository=getattr(self, "_tax_offset_sql_read_repository", None),
-            requires_sql_read_model_runtime=self._requires_sql_read_model_runtime,
         )
 
     def _tax_offset_routes_for_read_model(self) -> TaxApiRoutes:
@@ -7422,7 +7431,6 @@ class Application:
         self,
         *,
         month: str,
-        cache_hit: bool,
         duration_ms: float,
         payload: dict[str, object],
     ) -> None:
@@ -7432,7 +7440,6 @@ class Application:
                     "kind": "tax_offset_month_metric",
                     "metric": "tax_offset.month.duration_ms",
                     "month": month,
-                    "cache_hit": bool(cache_hit),
                     "duration_ms": round(float(duration_ms), 3),
                     "output_count": self._safe_list_count(payload.get("output_items")),
                     "input_plan_count": self._safe_list_count(payload.get("input_plan_items")),
@@ -7720,13 +7727,10 @@ class Application:
             return freshness_error
         return self._handle_workbench_unignore_row_payload(payload)
 
-    def _get_or_build_tax_offset_month_payload(self, month: str) -> tuple[dict[str, object], bool]:
+    def _get_or_build_tax_offset_month_payload(self, month: str) -> dict[str, object]:
         return self._tax_offset_query().get_month_payload(month)
 
-    def _get_tax_offset_month_from_sql_read_model(self, month: str) -> tuple[dict[str, object], bool] | None:
-        return self._tax_offset_query().get_month_from_sql_read_model(month)
-
-    def _get_tax_offset_month_summary_payload(self, month: str) -> tuple[dict[str, object], bool]:
+    def _get_tax_offset_month_summary_payload(self, month: str) -> dict[str, object]:
         return self._tax_offset_query().get_summary_payload(month)
 
     def _runtime_redis_get_json_best_effort(self, cache_key: str) -> dict[str, object] | None:

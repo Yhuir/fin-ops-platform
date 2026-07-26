@@ -1,5 +1,17 @@
 # 税金抵扣 实施记录
 
+## 2026-07-27 - canonical PostgreSQL 页面直读
+
+- 目标：移除 `/tax-offset` 对 tax read model、Redis、refresh gateway、202/non-fresh polling 和 source-version UI 的运行时依赖。
+- 实现：新增 `PostgresTaxOffsetCanonicalRepository`，在一个 `REPEATABLE READ / READ ONLY` snapshot 内固定三次 query 读取 `app.invoices`、`app.tax_certified_import_records`、`app.tax_offset_plans`；复用 `TaxOffsetService` 生成 rows、认证匹配、summary 和 statistics。
+- 计划写入：以 `canonical_snapshot_version` 替代 read-model source versions 做 CAS；保持权限、审计、幂等、Decimal 金额和 409 冲突，成功后页面直接 GET。
+- 前端：删除 `read_model_status/source_versions/refresh polling`，保留 loading/empty/error、搜索、排序、筛选、drawer、认证 job polling 与写后刷新。
+- 旧链路：删除 `tests/test_tax_offset_sql_runtime.py` 这一页面 SQL-RM/cache 合同；旧 builder 暂时委托同一 canonical loader，registry/deploy/worker/readiness/cleanup migration 交主控统一清理。
+- relation：税金页继续是 Workbench relation 非消费者，repository test 证明 SQL 不含 Workbench/read_model。
+- Audit：Page Audit 删除 Tax RM/source-version/dirty/outbox proof，改为同一只读 snapshot 独立检查 canonical 发票、认证匹配、最新计划与统计；relation proof 明确不适用。
+- 性能：unit guard 锁定一次 snapshot、两次 bulk `fetch_all`、一次最新计划 `fetch_one`，无 N+1；没有新增 cache、索引或依赖。
+- 本地性能证据：Playwright deterministic 大表为 81 张销项 + 92 张进项，`apiLatencyMs=741.23`、`finalSettledLatencyMs=1694.58`，通过；该值包含 mock route 延迟，不替代真实 PostgreSQL SQL timing。当前 worktree 未配置测试/生产数据库 URL，真实最大月 SQL/endpoint 由主控合并后只读验证。
+
 ## 2026-07-16 - 税金 SQL projection 独立 owner
 
 - 目标：关闭旧 `cost_tax_sql_projection.py` 的成本/税金混合所有权，不改变 Tax Offset业务或I/O。

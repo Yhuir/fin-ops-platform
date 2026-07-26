@@ -49,7 +49,8 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 
 - Own read model：无独立 manifest entry。
 - Page Audit：`imports.invoices` 是 `read_model_keys=()`、`relation_proof_required=false` 的 direct-canonical 页面；在同一 repeatable-read read-only snapshot 内证明 file/session/batch/row、canonical invoice、`manual_invoice_import` source-link 与本页 job/outbox。
-- 逻辑影响 read model：`tax_offset`、`invoice_lifecycle`、`pending_invoice`、`input_invoice_usage`、`output_invoice_collection`、`search`、`workbench`、`workbench_relation`、`oa_pending_payment`、`cost_statistics`；页面访问按当前 scope 收敛，不表示写后全量入队。
+- 下游 direct-canonical consumer：税金抵扣与成本统计在 import job 提交 `app.invoices` 后由各自页面 GET 直接读取新事实，不等待页面 read model。
+- 逻辑影响 read model：`invoice_lifecycle`、`pending_invoice`、`input_invoice_usage`、`output_invoice_collection`、`search`、`workbench`、`workbench_relation`、`oa_pending_payment`；页面访问按当前 scope 收敛，不表示写后全量入队。
 - Worker：import job/runtime handlers。
 
 ## 文件范围

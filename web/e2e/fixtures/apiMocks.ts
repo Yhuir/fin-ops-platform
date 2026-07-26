@@ -17,7 +17,6 @@ type OutputInvoiceReceiptLifecycleState = "none" | "issued" | "voided" | "reissu
 type PendingInvoiceReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
 type BankDetailReadModelMockStatus = "fresh" | "refreshing" | "stale" | "schema_mismatch" | "missing";
 type CostStatisticsReadModelMockStatus = "fresh" | "refreshing" | "stale" | "failed" | "unavailable";
-type TaxOffsetReadModelMockStatus = "fresh" | "refreshing" | "stale" | "failed" | "missing" | "unavailable";
 type BankFlowRuleBatchReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
 type BatchAccountingReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
 type TurnoverLedgerReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
@@ -161,8 +160,6 @@ type ApiMockOptions = {
   pendingInvoiceRowsEmpty?: boolean;
   sessionMode?: SessionMode;
   taxOffsetLargeDataset?: boolean;
-  taxOffsetReadModelStatus?: TaxOffsetReadModelMockStatus;
-  taxOffsetReadModelStatuses?: TaxOffsetReadModelMockStatus[];
   taxOffsetPlanSaveConflict?: boolean;
   dashboardError?: boolean;
   oaSyncMode?: OaSyncMockMode;
@@ -2431,14 +2428,6 @@ function etcBusinessBatchListPayload(bucket: string | null, batchStatus: EtcBusi
   };
 }
 
-function taxSourceVersions(month: string) {
-  return {
-    tax_offset_read_model_schema_version: "2026-07-tax-offset-audit-proof-v3",
-    invoice_fact_source_version: `mock-invoice-facts:${month}`,
-    tax_certified_import_source_version: `mock-certified:${month}`,
-  };
-}
-
 function formatTaxAmount(value: number) {
   return value.toLocaleString("en-US", {
     minimumFractionDigits: 2,
@@ -2528,7 +2517,6 @@ function taxOffsetPayload(
   certifiedImported: boolean,
   invoiceImportFanout = false,
   etcImportFanout = false,
-  readModelStatus: TaxOffsetReadModelMockStatus = "fresh",
   largeDataset = false,
 ) {
   const month = "2026-03";
@@ -2598,41 +2586,9 @@ function taxOffsetPayload(
       ...(invoiceImportFanout && !selectedInputIds.includes("ti-202603-import-001") ? ["ti-202603-import-001"] : []),
       ...(etcImportFanout && !selectedInputIds.includes("ti-202603-etc-import-001") ? ["ti-202603-etc-import-001"] : []),
     ];
-  if (readModelStatus !== "fresh") {
-    return {
-      month,
-      read_model_status: readModelStatus,
-      read_model_scope_key: month,
-      read_model_generated_at: "2026-06-17T01:00:00Z",
-      read_model_stale_reasons: [`tax_offset_${readModelStatus}`],
-      source_versions: taxSourceVersions(month),
-      output_items: [],
-      input_plan_items: [],
-      certified_items: [],
-      certified_matched_rows: [],
-      certified_outside_plan_rows: [],
-      locked_certified_input_ids: [],
-      default_selected_output_ids: [],
-      default_selected_input_ids: [],
-      summary: {
-        output_tax: "0.00",
-        certified_input_tax: "0.00",
-        planned_input_tax: "0.00",
-        input_tax: "0.00",
-        deductible_tax: "0.00",
-        result_label: "本月留抵税额",
-        result_amount: "0.00",
-      },
-    };
-  }
-
   return {
     month,
-    read_model_status: "fresh",
-    read_model_scope_key: month,
-    read_model_generated_at: "2026-06-17T01:00:00Z",
-    read_model_stale_reasons: [],
-    source_versions: taxSourceVersions(month),
+    canonical_snapshot_version: "tax-offset-v1:e2e-2026-03",
     output_items: [
       {
         id: "to-202603-001",
@@ -8353,7 +8309,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     options.etcTicketManualStatusFailuresBeforeSuccess ?? (options.etcTicketManualStatusFailOnce ? 1 : 0);
   let taxCertifiedImported = false;
   let taxSelectedInputIds = ["ti-202603-001", "ti-202603-002"];
-  let taxOffsetRequestCount = 0;
   let taxOffsetPlanSaveConflictRemaining = Boolean(options.taxOffsetPlanSaveConflict);
   let outputInvoiceStatusSaved = false;
   let outputInvoiceReminderSaved = false;
@@ -8736,18 +8691,13 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/tax-offset") {
-      taxOffsetRequestCount += 1;
-      const taxOffsetReadModelStatus = options.taxOffsetReadModelStatuses?.[
-        Math.min(taxOffsetRequestCount - 1, options.taxOffsetReadModelStatuses.length - 1)
-      ] ?? options.taxOffsetReadModelStatus ?? "fresh";
       return json(route, taxOffsetPayload(
         taxSelectedInputIds,
         taxCertifiedImported,
         invoiceImportDownstreamConfirmed,
         etcImportDownstreamConfirmed,
-        taxOffsetReadModelStatus,
         Boolean(options.taxOffsetLargeDataset),
-      ), taxOffsetReadModelStatus === "fresh" ? 200 : 202);
+      ));
     }
 
     if (path === "/api/tax-offset/calculate") {
@@ -8768,16 +8718,17 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       if (taxOffsetPlanSaveConflictRemaining) {
         taxOffsetPlanSaveConflictRemaining = false;
         return json(route, {
-          error: "tax_offset_read_model_version_conflict",
+          error: "tax_offset_canonical_version_conflict",
           message: "税金抵扣数据已变化，请刷新后重新保存。",
-          read_model_status: "stale",
-          read_model_scope_key: "2026-03",
+          canonical_snapshot_version: "tax-offset-v1:e2e-current",
+          expected_canonical_snapshot_version: "tax-offset-v1:e2e-stale",
         }, 409);
       }
       const body = JSON.parse(request.postData() || "{}") as { selected_input_ids?: string[] };
       taxSelectedInputIds = Array.isArray(body.selected_input_ids) ? body.selected_input_ids : taxSelectedInputIds;
       return json(route, {
         status: "saved",
+        affected_scope_keys: ["2026-03"],
         plan: {
           id: "tax-offset-plan-e2e-001",
           month: "2026-03",
@@ -8789,8 +8740,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
             invoiceImportDownstreamConfirmed,
             etcImportDownstreamConfirmed,
           ),
-          read_model_scope_key: "2026-03",
-          source_versions: taxSourceVersions("2026-03"),
+          canonical_snapshot_version: "tax-offset-v1:e2e-2026-03",
           updated_at: "2026-06-17T01:00:00Z",
         },
       });

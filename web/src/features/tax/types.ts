@@ -1,5 +1,3 @@
-import type { OperationBarrierTarget } from "../operationBarrier/api";
-
 export type TaxInvoiceRecord = {
   id: string;
   invoiceNo: string;
@@ -51,11 +49,7 @@ export type TaxMonthData = {
   defaultSelectedInputIds: string[];
   summary: TaxSummary;
   statistics?: TaxPageStatistics;
-  readModelStatus?: "fresh" | "refreshing" | "stale" | string;
-  readModelScopeKey?: string;
-  readModelGeneratedAt?: string | null;
-  readModelStaleReasons?: string[];
-  sourceVersions?: Record<string, unknown>;
+  canonicalSnapshotVersion: string;
 };
 
 export type TaxCertifiedImportPreviewRow = {
@@ -130,9 +124,6 @@ export type TaxCertifiedImportConfirmedResult = {
   fileCount: number;
   months: string[];
   persistedRecordCount: number;
-  readModelScopeKeys: string[];
-  freshnessTargets: OperationBarrierTarget[];
-  operationBarrierTargets: OperationBarrierTarget[];
 };
 
 export type TaxCertifiedImportQueuedResult = {
@@ -146,17 +137,14 @@ export type TaxCertifiedImportConfirmResult =
 
 export type TaxOffsetPlanSaveResult = {
   status: "saved";
-  readModelScopeKeys: string[];
-  freshnessTargets: OperationBarrierTarget[];
-  operationBarrierTargets: OperationBarrierTarget[];
+  affectedScopeKeys: string[];
   plan: {
     id: string;
     month: string;
     selectedOutputIds: string[];
     selectedInputIds: string[];
     summary: TaxSummary;
-    readModelScopeKey?: string;
-    sourceVersions?: Record<string, unknown>;
+    canonicalSnapshotVersion: string;
     updatedAt?: string;
   };
 };

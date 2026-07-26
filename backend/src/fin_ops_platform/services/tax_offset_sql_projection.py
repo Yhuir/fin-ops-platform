@@ -2,23 +2,22 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from fin_ops_platform.services.live_workbench_service import format_decimal
 from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
-from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
+from fin_ops_platform.services.postgres_repositories.tax_offset import (
+    load_tax_offset_month,
+    tax_offset_scope_statistics,
+)
 from fin_ops_platform.services.tax_offset_read_model_repository import TaxOffsetReadModelRepositoryPort
 from fin_ops_platform.services.tax_offset_read_model_service import (
     TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
     TaxOffsetReadModelService,
 )
-from fin_ops_platform.services.tax_offset_service import TaxOffsetService
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
-ZERO = Decimal("0.00")
 
 
 class TaxOffsetSqlProjectionBuilder:
@@ -67,8 +66,8 @@ class TaxOffsetSqlProjectionBuilder:
         month = str(scope_key or "").strip()
         if not MONTH_RE.match(month):
             raise ValueError("tax offset SQL projection scope_key must be a month shard YYYY-MM.")
-        payload = self._build_tax_payload(month)
-        payload["statistics"] = _tax_offset_scope_statistics(payload)
+        payload = load_tax_offset_month(self._connection, month)
+        payload["statistics"] = tax_offset_scope_statistics(payload)
         source_versions = self._source_versions()
         service = TaxOffsetReadModelService()
         read_model = service.upsert_read_model(
@@ -114,127 +113,3 @@ class TaxOffsetSqlProjectionBuilder:
         if not isinstance(row, dict):
             return "rows:0|max_updated_at:"
         return f"rows:{row.get('row_count') or 0}|max_updated_at:{row.get('max_updated_at') or ''}"
-
-    def _build_tax_payload(self, month: str) -> dict[str, Any]:
-        month_data = {
-            month: {
-                "output_items": self._invoice_items(month, output=True),
-                "input_plan_items": self._invoice_items(month, output=False),
-            }
-        }
-        service = TaxOffsetService(
-            month_data=month_data,
-            certified_records_loader=lambda requested_month: self._certified_items(requested_month),
-        )
-        return service.get_month_payload(month)
-
-    def _invoice_items(self, month: str, *, output: bool) -> list[dict[str, Any]]:
-        rows = self._connection.fetch_all(
-            """
-            select coalesce(legacy_mongo_id, id::text) as row_id, invoice_type, invoice_no, invoice_code,
-                   digital_invoice_no, invoice_date, seller_name, seller_tax_no, buyer_name, buyer_tax_no,
-                   tax_amount, total_with_tax, amount, tax_rate, raw_payload
-            from app.invoices
-            where invoice_month = %s::date
-              and status <> 'deleted'
-              and (
-                (%s and (invoice_type ilike '%%output%%' or invoice_type like '%%销%%'))
-                or (not %s and not (invoice_type ilike '%%output%%' or invoice_type like '%%销%%'))
-              )
-            order by invoice_date nulls last, row_id
-            """,
-            (month_start(month), output, output),
-        )
-        return [_tax_invoice_item(row, output=output) for row in rows]
-
-    def _certified_items(self, month: str) -> list[dict[str, Any]]:
-        rows = self._connection.fetch_all(
-            """
-            select certified_unique_key, invoice_no, invoice_code, digital_invoice_no, seller_name, seller_tax_no,
-                   invoice_date, amount, tax_amount, status, raw_payload
-            from app.tax_certified_import_records
-            where scope_month = %s::date
-              and status <> 'deleted'
-            order by invoice_date nulls last, certified_unique_key
-            """,
-            (month_start(month),),
-        )
-        return [
-            {
-                **(row_payload(row, "raw_payload") if isinstance(row_payload(row, "raw_payload"), dict) else {}),
-                "id": str(row.get("certified_unique_key") or ""),
-                "unique_key": row.get("certified_unique_key"),
-                "invoice_no": row.get("invoice_no"),
-                "invoice_code": row.get("invoice_code"),
-                "digital_invoice_no": row.get("digital_invoice_no"),
-                "seller_name": row.get("seller_name"),
-                "seller_tax_no": row.get("seller_tax_no"),
-                "issue_date": str(row.get("invoice_date") or ""),
-                "amount": _money(row.get("amount")),
-                "tax_amount": _money(row.get("tax_amount")),
-                "status": row.get("status") or "已认证",
-            }
-            for row in rows
-        ]
-
-
-
-def _tax_invoice_item(row: dict[str, Any], *, output: bool) -> dict[str, Any]:
-    common = {
-        "id": str(row.get("row_id") or ""),
-        "issue_date": str(row.get("invoice_date") or ""),
-        "invoice_no": row.get("invoice_no"),
-        "invoice_code": row.get("invoice_code"),
-        "digital_invoice_no": row.get("digital_invoice_no"),
-        "tax_amount": _money(row.get("tax_amount")),
-        "total_with_tax": _money(row.get("total_with_tax") or ((_decimal(row.get("amount")) or ZERO) + (_decimal(row.get("tax_amount")) or ZERO))),
-        "invoice_type": "销项发票" if output else "进项发票",
-        "tax_rate": row.get("tax_rate") or "—",
-    }
-    if output:
-        return {
-            **common,
-            "buyer_name": row.get("buyer_name") or "",
-            "buyer_tax_no": row.get("buyer_tax_no"),
-        }
-    return {
-        **common,
-        "seller_name": row.get("seller_name") or "",
-        "seller_tax_no": row.get("seller_tax_no"),
-        "risk_level": (row_payload(row, "raw_payload") if isinstance(row_payload(row, "raw_payload"), dict) else {}).get("risk_level") or "待评估",
-    }
-
-
-def _tax_offset_scope_statistics(payload: dict[str, Any]) -> dict[str, int]:
-    input_count = len(list(payload.get("input_plan_items") or []))
-    output_count = len(list(payload.get("output_items") or []))
-    certification_count = len(list(payload.get("certified_items") or []))
-    matched_count = len(list(payload.get("certified_matched_rows") or []))
-    selected_count = len(set(payload.get("default_selected_input_ids") or [])) + len(
-        set(payload.get("default_selected_output_ids") or [])
-    )
-    return {
-        "input_invoice_count": input_count,
-        "output_invoice_count": output_count,
-        "certification_record_count": certification_count,
-        "matched_certification_count": matched_count,
-        "unmatched_certification_count": max(certification_count - matched_count, 0),
-        "out_of_scope_certification_count": len(list(payload.get("certified_outside_plan_rows") or [])),
-        "deductible_invoice_count": input_count,
-        "selected_invoice_count": selected_count,
-        "unselected_invoice_count": max(input_count + output_count - selected_count, 0),
-    }
-
-
-def _decimal(value: Any) -> Decimal | None:
-    if value in (None, "", "—", "--"):
-        return None
-    try:
-        return Decimal(str(value).replace(",", "").strip())
-    except (InvalidOperation, ValueError):
-        return None
-
-
-def _money(value: Any) -> str:
-    amount = _decimal(value)
-    return format_decimal(amount or ZERO)
