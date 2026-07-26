@@ -41,14 +41,14 @@
 - 新未提交批次的唯一资格是标签当前 active，且该标签规则同时满足 `requires_oa=false`、`requires_invoice=false`。任一项为 `true`、规则缺失或标签已归档时，该流水都不进入本页面未提交区，应由关联台、待找发票等需要单据的流程处理。
 - 页面未提交 bucket 的主标签、子标签和批次都只展示上述合格标签，不得把银行明细的全部 active 标签与当前页 rows 合并后铺满。标签管理抽屉仍展示全部 active 标签，供用户维护 OA/发票规则。
 - 已提交和已撤回历史按提交时冻结的批次、标签和 requirement snapshot 展示，不受当前标签是否 active、当前 OA/发票勾选状态或标签改名影响；规则保存不得追溯改写既有 relation。
-- 规则保存发生资格变化时，只重算受影响标签曾出现的未提交月份；同一标签从“需要 OA”改为“需要发票”等资格未变化的语义更新只保存规则，不触发 `bank_flow_rule_batch` 重算。
-- 设置版本更新与受影响月份 dirty scope/outbox 必须在同一 PostgreSQL 事务提交；请求返回后页面清空旧选择并立即反馈，后台按月份批量收敛 read model，不让全量历史刷新阻塞保存响应。
-- 银行流水导入、导入状态变化、手工分类变化和自动标签规则变化都必须经 owner UoW 或 derived lifecycle 输出 `bank_flow_rule_batch` refresh，保证未来流水使用当前资格规则。
-- 性能验收目标：规则保存 API p95 ≤ 300ms、p99 ≤ 1s；当前页面受影响月份 enqueue-to-fresh p95 ≤ 1s、p99 ≤ 3s；全部受影响历史月份 p95 ≤ 5s。月份发现和汇总必须使用固定查询数、集合 SQL 与批量 outbox，禁止逐标签、逐流水或逐月份 I/O。
+- 规则保存发生资格变化时返回受影响标签出现过的月份；同一标签从“需要 OA”改为“需要发票”等资格未变化的语义更新只保存规则。页面不产生 `bank_flow_rule_batch` refresh。
+- 设置版本和审计以 CAS 原子提交；请求返回后页面清空旧选择并执行一次正常 GET。列表、summary、分页和详情直接读取已经同步到 PostgreSQL 的 canonical facts，不等待后台 read model。
+- 银行流水导入、导入状态变化、手工分类和自动标签规则写入各自 canonical facts；下一次页面 GET 必须在同一 repeatable-read snapshot 看到一致的批次、银行/分类规则和 active relation，不读取外部系统或旧投影。
+- 性能验收目标：规则保存 API p95 ≤ 300ms、p99 ≤ 1s；页面列表/summary 使用固定查询数、集合 SQL 和服务端分页，禁止逐标签、逐流水 I/O、浏览器全量过滤或用缓存掩盖慢查询。
 
 ## 免 OA 流水
 
-免 OA 流水是独立 legacy 域，用于没有 OA 单据但仍需业务处理的历史流水批次；它不是当前 `/bank-flow-rule-batches` 页面或 `bank_flow_rule_batch` read model 的运行时 fallback：
+免 OA 流水是独立 legacy 域，用于没有 OA 单据但仍需业务处理的历史流水批次；它不是当前 `/bank-flow-rule-batches` 页面、canonical query repository 或写命令的运行时 fallback：
 
 - 批量处理必须记录范围、原因、操作者、状态和审计。
 - 未提交候选只包含尚未被关联台 active relation 占用的银行流水；已在关联台配对或已由免 OA 批次提交的流水，不应再作为未提交候选重复出现。

@@ -13,6 +13,9 @@ from uuid import NAMESPACE_URL, uuid5
 
 from fin_ops_platform.services.bank_account_balance_read_model_repository import BankAccountBalanceReadModelRepositoryPort
 from fin_ops_platform.services.bank_detail_read_model_repository import BankDetailReadModelRepositoryPort
+from fin_ops_platform.services.postgres_repositories.bank_flow_rule_batch_canonical_query import (
+    BankFlowRuleBatchCanonicalQueryRepository,
+)
 from fin_ops_platform.services.bank_flow_rule_batch_read_model_repository import BankFlowRuleBatchReadModelRepositoryPort
 from fin_ops_platform.services.file_object_migration import verified_object_key_from_uri, write_verified_object
 from fin_ops_platform.services.input_invoice_usage_read_model_repository import InputInvoiceUsageReadModelRepositoryPort
@@ -178,6 +181,9 @@ class PostgresStateStore:
         self._oa_pending_payment_sql_read_repository = OaPendingPaymentReadModelRepositoryPort(self._sql_read_model_repository)
         self._no_oa_bank_batch_sql_read_repository = NoOaBankBatchReadModelRepositoryPort(self._sql_read_model_repository)
         self._bank_flow_rule_batch_sql_read_repository = BankFlowRuleBatchReadModelRepositoryPort(self._sql_read_model_repository)
+        self._bank_flow_rule_batch_canonical_query_repository = BankFlowRuleBatchCanonicalQueryRepository(
+            self._sql_read_connection
+        )
         self._tax_offset_sql_read_repository = TaxOffsetReadModelRepositoryPort(self._sql_read_model_repository)
         self._workbench_relation_sql_read_repository = WorkbenchRelationReadModelRepositoryPort(self._sql_read_model_repository)
         self._workbench_repository = PostgresWorkbenchRepository(connection)
@@ -947,6 +953,12 @@ class PostgresStateStore:
     @property
     def bank_flow_rule_batch_sql_read_repository(self) -> BankFlowRuleBatchReadModelRepositoryPort:
         return self._bank_flow_rule_batch_sql_read_repository
+
+    @property
+    def bank_flow_rule_batch_canonical_query_repository(
+        self,
+    ) -> BankFlowRuleBatchCanonicalQueryRepository:
+        return self._bank_flow_rule_batch_canonical_query_repository
 
     def list_invoices_page(self, **kwargs: Any) -> tuple[list[Any], int]:
         return self._core_repository.list_invoices_page(**kwargs)

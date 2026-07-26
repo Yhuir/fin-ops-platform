@@ -43,7 +43,6 @@ const tagSelectionPayload = {
 };
 
 const listPayload = {
-  read_model_status: "fresh",
   summary: {
     draft_count: 3,
     submitted_count: 1,
@@ -462,7 +461,6 @@ function installFetchMock(
       return jsonResponse({
         batch: payload.batches[4],
         affected_months: ["2026-05"],
-        operation_barrier_targets: [],
         results: [],
       });
     }
@@ -470,7 +468,6 @@ function installFetchMock(
       return jsonResponse({
         batch: payload.batches[0],
         affected_months: ["2026-05"],
-        operation_barrier_targets: [],
         results: [],
       });
     }
@@ -478,14 +475,12 @@ function installFetchMock(
       return jsonResponse({
         batch: payload.batches[2],
         affected_months: ["2026-05"],
-        operation_barrier_targets: [],
         results: [],
       });
     }
     if (url.pathname === "/api/bank-flow-rule-batches/reset-submitted") {
       return jsonResponse({
         affected_months: ["2026-05"],
-        operation_barrier_targets: [],
         results: [{ batch_id: "batch-submitted-salary", status: "withdrawn" }],
       });
     }
@@ -1079,7 +1074,6 @@ describe("BankFlowRuleBatchPage", () => {
         return jsonResponse({
           batch: { ...listPayload.batches[0], status: "submitted", status_bucket: "submitted", version: 2 },
           affected_months: ["2026-05"],
-          operation_barrier_targets: [],
           results: [{ batch_id: "batch-selected-fee", status: "submitted" }],
         });
       }
@@ -1445,7 +1439,7 @@ describe("BankFlowRuleBatchPage", () => {
     expect(within(transactionRegion).queryByText("关联 case-active-001")).not.toBeInTheDocument();
   });
 
-  test("shows read model stale state and reloads until the bank flow rule read model is fresh", async () => {
+  test("loads the canonical list once without background polling", async () => {
     let listCallCount = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
@@ -1457,8 +1451,6 @@ describe("BankFlowRuleBatchPage", () => {
         return jsonResponse({
           ...listPayload,
           batches: batchesForBucket(listPayload, url.searchParams.get("bucket")),
-          read_model_status: listCallCount === 1 ? "stale" : "fresh",
-          read_model_stale_reasons: listCallCount === 1 ? ["bank_auto_tag_rules_version_mismatch"] : [],
         });
       }
       if (url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee") {
@@ -1477,120 +1469,10 @@ describe("BankFlowRuleBatchPage", () => {
     renderPage();
 
     expect(await screen.findByRole("heading", { name: "流水规则批量处理" })).toBeInTheDocument();
-    expect(screen.queryByText("免OA流水读模型待刷新，已显示当前可用数据。")).not.toBeInTheDocument();
-    await waitFor(() => {
-      expect(listCallCount).toBeGreaterThan(1);
-    }, { timeout: 2500 });
-    await waitFor(() => {
-      expect(screen.queryByText("免OA流水读模型待刷新，已显示当前可用数据。")).not.toBeInTheDocument();
-    });
-  });
-
-  test("cleans up stale read model retry reload after route unmount", async () => {
-    let listCallCount = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      if (url.pathname === "/api/bank-flow-rule-batches/tag-rules") {
-        return jsonResponse(tagSelectionPayload);
-      }
-      if (url.pathname === "/api/bank-flow-rule-batches" && (!init?.method || init.method === "GET")) {
-        listCallCount += 1;
-        return jsonResponse({
-          ...listPayload,
-          batches: batchesForBucket(listPayload, url.searchParams.get("bucket")),
-          read_model_status: "stale",
-          read_model_stale_reasons: ["bank_auto_tag_rules_version_mismatch"],
-        });
-      }
-      if (url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee") {
-        return jsonResponse(feeDetailPayload);
-      }
-      return jsonResponse({});
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderAuthenticatedAppAt("/bank-flow-rule-batches");
-
-    expect(await screen.findByRole("heading", { name: "流水规则批量处理" })).toBeInTheDocument();
-    await waitFor(() => {
-      expect(listCallCount).toBeGreaterThan(0);
-    });
-    fireEvent.click(screen.getByRole("link", { name: "设置" }));
-    expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "流水规则批量处理" })).not.toBeInTheDocument();
-    const listCallCountAfterUnmount = listCallCount;
     await act(async () => {
       await new Promise((resolve) => window.setTimeout(resolve, 1_100));
     });
-
-    expect(listCallCount).toBe(listCallCountAfterUnmount);
-
-    fireEvent.click(screen.getByRole("link", { name: "流水规则批量处理" }));
-    expect(await screen.findByRole("heading", { name: "流水规则批量处理" })).toBeInTheDocument();
-
-    expect(listCallCount).toBeGreaterThan(listCallCountAfterUnmount);
-  });
-
-  test("keeps visible transaction rows while stale read model polling runs in the background", async () => {
-    let listCallCount = 0;
-    const secondListStarted = vi.fn();
-    let resolveSecondList: ((response: Response) => void) | null = null;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      if (url.pathname === "/api/bank-flow-rule-batches/tag-rules") {
-        return jsonResponse(tagSelectionPayload);
-      }
-      if (url.pathname === "/api/bank-flow-rule-batches" && (!init?.method || init.method === "GET")) {
-        listCallCount += 1;
-        if (listCallCount === 1) {
-          return jsonResponse({
-            ...listPayload,
-            batches: batchesForBucket(listPayload, url.searchParams.get("bucket")),
-            read_model_status: "stale",
-            read_model_stale_reasons: ["bank_auto_tag_rules_version_mismatch"],
-          });
-        }
-        secondListStarted();
-        return new Promise<Response>((resolve) => {
-          resolveSecondList = resolve;
-        });
-      }
-      if (url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee") {
-        return jsonResponse(feeDetailPayload);
-      }
-      if (url.pathname === "/api/bank-flow-rule-batches/batch-draft-holiday") {
-        return jsonResponse({ batch: listPayload.batches[1], tag_counts: { holiday_bonus: 5 }, direction_counts: { expense: 5 }, rows: [] });
-      }
-      if (url.pathname === "/api/bank-flow-rule-batches/batch-conflict-transfer") {
-        return jsonResponse({ batch: listPayload.batches[3], tag_counts: { internal_transfer: 3 }, direction_counts: { income: 1, expense: 2 }, rows: [] });
-      }
-      return jsonResponse({ message: `Unhandled ${url.pathname}` }, 404);
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderPage();
-
-    const transactionRegion = screen.getByRole("region", { name: "流水" });
-    expect(await within(transactionRegion).findByText("网银手续费")).toBeInTheDocument();
-
-    await waitFor(() => {
-      expect(secondListStarted).toHaveBeenCalled();
-    }, { timeout: 2500 });
-
-    expect(within(transactionRegion).queryByText("流水加载中")).not.toBeInTheDocument();
-    expect(within(transactionRegion).getByText("网银手续费")).toBeInTheDocument();
-
-    act(() => {
-      resolveSecondList?.(jsonResponse({
-        ...listPayload,
-        batches: batchesForBucket(listPayload, "unsubmitted"),
-        read_model_status: "fresh",
-        read_model_stale_reasons: [],
-      }));
-    });
-    await waitFor(() => {
-      expect(screen.queryByText("免OA流水读模型待刷新，已显示当前可用数据。")).not.toBeInTheDocument();
-    });
+    expect(listCallCount).toBe(1);
   });
 
   test("sidebar exposes the bank flow rule batch entry", () => {

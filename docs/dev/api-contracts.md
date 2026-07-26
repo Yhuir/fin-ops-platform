@@ -213,7 +213,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 ## Bank Transaction Paired Policy / 流水规则批量处理 API
 
-状态：close。当前生产前端和公开 API 使用 `bank-flow-rule-batches`；HTTP route、application boundary、read model key、query freshness gate、worker event、repository port、mutation persistence port、refresh persistence port、PostgreSQL 批次表、read model row 表和 `app_settings.bank_flow_rule_batch_tag_rules` 使用 `bank_flow_rule_batch`。普通写的 operation barrier target 为空。迁移 `0082` 回填旧 bank-flow rows，`0083` 一次性复制规则初值，`0111` 将 legacy selected seed 合并为 canonical requirements 并删除旧字段。运行时不再把 no-OA 物理表、no-OA settings family 或旧 `selected_tag_codes` 作为 bank-flow source of truth。
+状态：close。当前生产前端和公开 API 使用 `bank-flow-rule-batches`；HTTP route、application service、页面专属 PostgreSQL canonical query repository、批次/事件表、relation command/delta writer 和 `app_settings.bank_flow_rule_batch_tag_rules` 使用 `bank_flow_rule_batch`。列表、summary、分页和详情不读取页面 read model，不返回 freshness/status/version，不 enqueue 或 polling。迁移 `0082`、`0083`、`0111` 仅保留既有数据迁移语义；运行时不把 no-OA 物理表、settings family 或旧 `selected_tag_codes` 作为 fallback。
 
 `GET /api/bank-flow-rule-batches/tag-rules`
 
@@ -263,8 +263,8 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 - 只能提交当前 `active_tags` 中存在且可用的标签 code；未知、停用、重复 code 返回业务错误。
 - 语义变化后返回与 GET 相同结构，version +1，写一次审计动作 `bank_flow_rule_batch_tag_rules_updated`；不能递增 `bank_transaction_tags.version`。
 - 后端比较保存前后未提交资格集合。只有资格实际变化的 tag code 才通过单条集合查询解析信息性受影响月份，并在同一 PostgreSQL 事务中完成 settings 乐观锁写入与审计；普通保存不写 dirty scope/outbox。禁止 `all` fallback。OA-only 改为 invoice-only 等资格不变的语义更新同样只保存 canonical 规则。
-- 响应额外返回 `eligibility_changed`、`eligibility_changed_tag_codes`、`affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` 和 `refresh_enqueued`。普通保存的两个 target 数组固定为空且 `refresh_enqueued=false`；当前可见页面随后通过正常 GET 收敛精确月份。
-- 提交与当前有效规则相同的 payload 是 no-op：version 不变，不写 settings/audit，不触发 refresh。
+- 响应额外返回 `eligibility_changed`、`eligibility_changed_tag_codes`、`affected_months` 和信息性的 `affected_scope_keys`；不返回 `read_model_scope_keys`、freshness/operation-barrier targets 或 `refresh_enqueued`。当前页面随后执行一次正常 GET。
+- 提交与当前有效规则相同的 payload 是 no-op：version 不变，不写 settings/audit。
 - 保存规则不得读取或改写 existing Workbench/turnover relation；existing metadata 保持历史快照，关联台按各 relation 自己的快照分区。
 - 保存 API 在 durable transaction 提交后立即返回；前端清空旧选择并重跑当前页面的正常列表 GET，不启动 operation barrier。
 - HTTP 输出边界只返回 `bank_flow_rule_batch_*` 错误码。共享 bank-batch core 必须根据显式 bank-flow relation mode 直接产生正式错误码；route 不保留 legacy translation map 或 no-OA fallback。
@@ -276,12 +276,13 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 | 参数 | 说明 |
 | --- | --- |
 | `month` | `YYYY-MM` 月份。 |
-| `bucket` | `candidate`、`submitted`、`withdrawn` 或 `all`。 |
+| `bucket` | `unsubmitted`、`submitted`、`withdrawn` 或 `all`。 |
 | `account_key` | 银行账户筛选。 |
-| `tag_code` | 银行标签筛选。 |
+| `type` | 银行标签/批次类型筛选。 |
+| `status` | `draft`、`submitted`、`withdrawn` 或 `all`。 |
 | `page` / `page_size` | 分页；`page_size` 上限由后端固定。 |
 
-响应必须包含 summary、rows、pagination、`read_model_status`、`read_model_version`、`read_model_stale_reasons`、`read_model_scope_keys` 和 `refresh_enqueued`。`read_model_version` 是由当前 status、source versions 和 row count 派生的稳定页面版本；页面版本/status/手工刷新变化时，前端必须清除旧 Audit 结果。rows 只包含当前页；summary 对完整 summary filter 范围做 SQL 聚合，并为总计和每个 category 返回 draft/submitted/withdrawn 的 batch count 与 `*_row_count`，历史 category 还携带冻结 label/primary/sub label，不能由当前页 rows 推算。默认页面 `page_size=50`。未提交标签只展示当前 OA/发票双 false 的 active tags，已提交/历史只展示对应状态 count > 0 的 summary categories。非 fresh 时前端不能把空 rows 当真实无候选。详情 payload 可保留 `relation_case_ids` 供机器冲突诊断，但页面只显示“已有未撤回关联”和 OA/发票数量，不得渲染内部 case id。
+响应只包含 `summary`、`batches`、`pagination`。标签规则、total、当前页 batches 和 summary aggregates 必须位于同一个显式 `REPEATABLE READ / READ ONLY` snapshot；查询数固定，服务端过滤、固定排序和分页。summary 对完整 summary filter 范围聚合，并为总计和每个 category 返回 draft/submitted/withdrawn 的 batch count 与 `*_row_count`，历史 category 携带冻结 label/primary/sub label，不能由当前页推算。默认页面 `page_size=50`。未提交标签只展示当前 OA/发票双 false 的 active tags，已提交/历史只展示对应状态 count > 0 的 summary categories。空 batches 是 canonical snapshot 的真实空集；查询错误返回错误，不以 read-model stale/missing 伪装。正式关系只读取 `app.workbench_pair_relations.status='active'`，不得读取 Workbench page projection。详情 payload 可保留 `relation_case_ids` 供机器诊断，但页面只显示“已有未撤回关联”和 OA/发票数量。
 
 `POST /api/bank-flow-rule-batches/submit-selection`
 
@@ -302,11 +303,11 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 - `transaction_ids` 必填、不能为空、不能重复。
 - 实现初期要求所有流水来自同一月份、同一银行账户、同一当前有效银行标签；后续放宽必须更新本 API 和模块状态机。
 - 提交前必须重查银行流水、标签、canonical active relation 占用和规则版本。目标行已被任一 active relation 占用时返回 `409 bank_flow_rule_batch_selection_occupied` 和结构化冲突信息；不能把领域冲突映射为 500。
-- active relation rows 与 relation source versions 必须由同一次 canonical PostgreSQL source bundle 查询返回；提交与 worker 不得使用 Workbench relation read model 或启动时全量 relation snapshot 作为占用事实源。
+- active relation rows 必须来自 canonical PostgreSQL source bundle；提交与页面查询不得使用 Workbench relation read model 或启动时全量 relation snapshot 作为占用事实源。
 - 成功后写入 `relation_mode=bank_flow_rule_batch`，并在 relation `special_metadata` 写入 `source_batch_id`、`flow_rule_tag_code`、`flow_rule_version`、`requires_oa`、`requires_invoice`、`source_row_count`、`collapsed_bank_rows`。
 - 关联台按 active 正式关系判断 ownership，再按该批次 relation 冻结的 OA/发票 requirement 判断 paired/unpaired；`source_row_count > 3` 时默认折叠。
 - Workbench 折叠摘要必须输出 `source_kind=bank_flow_rule_batch_summary`、summary id prefix `bank_flow_rule_summary:`、`invoice_relation.code=bank_flow_rule_batch` 和 `流水规则` display tag；不得输出 `no_oa_bank_batch_summary` 或 `免OA` tag 作为 bank-flow 摘要 I/O。
-- 成功响应返回 `batch_id`、`case_id`、`affected_months`、`affected_scope_keys`、`read_model_scope_keys`，并保留空的 `freshness_targets` / `operation_barrier_targets` 作为统一 envelope。当前页面通过正常 GET 收敛，不等待跨页面 target。
+- 成功响应返回 batch/relation receipt、`case_id` 和 `affected_months`；不返回 read-model/freshness/operation-barrier envelope。当前页面随后执行一次正常 GET。
 
 `POST /api/bank-flow-rule-batches/reset-submitted`
 
@@ -324,10 +325,10 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 - 只处理当前 `submitted` 批次；没有 submitted 时返回空结果且保持幂等。
 - 每个批次必须通过既有 withdraw 领域边界校验状态与 version；所有 active relation 通过一次 `WorkbenchRelationCommandService.cancel_relations_by_case_ids(...)` 取消，changed relations 与显式 changed batch IDs 在一次 mutation persistence transaction 中保存。
-- HTTP command 不同步执行逐月 read model rebuild；command 成功后前端立即显示 committed withdrawn/unsubmitted 结果，并重新调用本模块正常 GET 收敛 month scope。
+- HTTP command 不执行 read-model rebuild；command 成功后前端重新调用一次本模块正常 GET。
 - 不直接修改银行流水、银行标签或 `app.workbench_pair_relations` 表。
-- 成功后返回 `summary.reset_count`、`summary.row_count`、`affected_months`、`results`，以及空的 `freshness_targets` / `operation_barrier_targets`；不得恢复 bank-flow、Workbench 或其它页面 barrier。
-- 撤回后的旧批次进入 withdrawn/audit history；后续 read model rebuild 会按当前银行标签和规则重新生成未提交候选，不自动重新提交。
+- 成功后返回 `summary.reset_count`、`summary.row_count`、`affected_months` 和 `results`；不得恢复 bank-flow、Workbench 或其它页面 barrier。
+- 撤回后的旧批次进入 withdrawn/audit history；下一次 canonical GET 按当前标签规则与 active relation 占用读取可见批次，不自动重新提交。
 
 ## 免 OA 流水批量处理 API
 

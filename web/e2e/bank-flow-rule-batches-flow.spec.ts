@@ -146,10 +146,9 @@ test.describe("bank flow rule batches browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("keeps visible rows while a stale flow rule read model refreshes to fresh", async ({ page }) => {
+  test("loads canonical rows without background polling", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
-      bankFlowRuleBatchReadModelStatuses: ["stale", "fresh"],
       sessionMode: "full_access",
     });
 
@@ -165,9 +164,10 @@ test.describe("bank flow rule batches browser flow", () => {
     await expect(draftTable.getByText("浏览器 e2e 月结手续费")).toBeVisible();
     await expect(page.getByText("当前标签下暂无流水")).toHaveCount(0);
 
-    await expect.poll(() => api.count("GET /api/bank-flow-rule-batches"), {
-      timeout: 3_000,
-    }).toBeGreaterThanOrEqual(2);
+    const settledListReads = api.count("GET /api/bank-flow-rule-batches");
+    await page.waitForTimeout(1_500);
+    expect(api.count("GET /api/bank-flow-rule-batches")).toBe(settledListReads);
+    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
 
     await expect(page.getByRole("button", { name: "未提交 1" })).toHaveAttribute("aria-pressed", "true");
     await expect(draftTable).toBeVisible();
@@ -212,7 +212,7 @@ test.describe("bank flow rule batches browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("saves tag rules immediately and reconciles the affected month in the background", async ({ page }, testInfo) => {
+  test("saves tag rules and reloads the canonical list once", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
@@ -254,6 +254,7 @@ test.describe("bank flow rule batches browser flow", () => {
       && request.method() === "PUT",
     );
     const saveResponse = page.waitForResponse(putResponse("/api/bank-flow-rule-batches/tag-rules"));
+    const listReadsBeforeSave = api.count("GET /api/bank-flow-rule-batches");
     const listReload = waitForBankFlowRuleBatches(page);
     await recordLatency({
       operationId: "bank-flow-rule-batches.save-tag-rules",
@@ -282,7 +283,7 @@ test.describe("bank flow rule batches browser flow", () => {
     expect((await saveResponse).status()).toBe(200);
     expect(api.count("PUT /api/bank-flow-rule-batches/tag-rules")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
-    expect(api.count("GET /api/bank-flow-rule-batches")).toBeGreaterThanOrEqual(2);
+    expect(api.count("GET /api/bank-flow-rule-batches")).toBe(listReadsBeforeSave + 1);
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);
   });
@@ -350,6 +351,8 @@ test.describe("bank flow rule batches browser flow", () => {
       && request.method() === "POST",
     );
     const resetResponse = page.waitForResponse(postResponse("/api/bank-flow-rule-batches/reset-submitted"));
+    const listReadsBeforeReset = api.count("GET /api/bank-flow-rule-batches");
+    const resetListReload = waitForBankFlowRuleBatches(page);
     await recordLatency({
       operationId: "bank-flow-rule-batches.reset-submitted",
       visibleLabel: "重置全部已提交",
@@ -360,6 +363,7 @@ test.describe("bank flow rule batches browser flow", () => {
       await mark("firstVisibleResponseLatencyMs", expect(page.getByText("已重置 1 个已提交批次")).toBeVisible());
       await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: "未提交 1" })).toHaveAttribute("aria-pressed", "true"));
     });
+    await resetListReload;
     const resetBody = JSON.parse((await resetRequest).postData() ?? "{}") as { reason?: string };
     expect(resetBody.reason).toBe("流水规则批量处理：全部已提交批次重新过规则");
     expect((await resetResponse).status()).toBe(200);
@@ -368,6 +372,7 @@ test.describe("bank flow rule batches browser flow", () => {
     await expect(page.getByRole("table", { name: "建设银行8106流水" })).toBeVisible();
     expect(api.count("POST /api/bank-flow-rule-batches/reset-submitted")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
+    expect(api.count("GET /api/bank-flow-rule-batches")).toBe(listReadsBeforeReset + 1);
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);
   });
@@ -401,6 +406,7 @@ test.describe("bank flow rule batches browser flow", () => {
       && request.method() === "POST",
     );
     const submitResponse = page.waitForResponse(postResponse("/api/bank-flow-rule-batches/bank-flow-internal-ccb-8106/submit"));
+    const listReadsBeforeSubmit = api.count("GET /api/bank-flow-rule-batches");
     const listReload = waitForBankFlowRuleBatches(page);
     const startedAt = Date.now();
     await recordLatency({
@@ -423,11 +429,12 @@ test.describe("bank flow rule batches browser flow", () => {
     expect(Date.now() - startedAt).toBeLessThan(3_000);
     expect(api.count("POST /api/bank-flow-rule-batches/bank-flow-internal-ccb-8106/submit")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
+    expect(api.count("GET /api/bank-flow-rule-batches")).toBe(listReadsBeforeSubmit + 1);
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);
   });
 
-  test("submits a selected bank row, waits for freshness, and withdraws the submitted flow rule batch", async ({ page }, testInfo) => {
+  test("submits a selected bank row, reloads canonical state, and withdraws the submitted flow rule batch", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       bankFlowRuleCostFanout: true,
@@ -454,6 +461,7 @@ test.describe("bank flow rule batches browser flow", () => {
         && request.method() === "POST",
     );
     const submitResponse = page.waitForResponse(postResponse("/api/bank-flow-rule-batches/submit-selection"));
+    const listReadsBeforeSubmit = api.count("GET /api/bank-flow-rule-batches");
     const submitListReload = waitForBankFlowRuleBatches(page);
     await recordLatency({
       operationId: "bank-flow-rule-batches.submit-selected-bank-row",
@@ -472,6 +480,7 @@ test.describe("bank flow rule batches browser flow", () => {
     expect((await submitResponse).status()).toBe(200);
     expect(api.count("POST /api/bank-flow-rule-batches/submit-selection")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
+    expect(api.count("GET /api/bank-flow-rule-batches")).toBe(listReadsBeforeSubmit + 1);
     await expectNoUnexpectedSuccessUiErrors(page);
 
     const costExplorerResponse = page.waitForResponse((response) =>
@@ -527,6 +536,7 @@ test.describe("bank flow rule batches browser flow", () => {
         && request.method() === "POST",
     );
     const withdrawResponse = page.waitForResponse(postResponse("/api/bank-flow-rule-batches/bank-flow-rule-batch-e2e-001/withdraw"));
+    const listReadsBeforeWithdraw = api.count("GET /api/bank-flow-rule-batches");
     const withdrawListReload = waitForBankFlowRuleBatches(page);
     await recordLatency({
       operationId: "bank-flow-rule-batches.confirm-withdraw",
@@ -546,6 +556,7 @@ test.describe("bank flow rule batches browser flow", () => {
     expect((await withdrawResponse).status()).toBe(200);
     expect(api.count("POST /api/bank-flow-rule-batches/bank-flow-rule-batch-e2e-001/withdraw")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
+    expect(api.count("GET /api/bank-flow-rule-batches")).toBe(listReadsBeforeWithdraw + 1);
     await expectNoUnexpectedSuccessUiErrors(page);
 
     await page.getByRole("button", { name: "历史 1" }).click();
