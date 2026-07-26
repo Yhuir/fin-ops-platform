@@ -1,78 +1,71 @@
-# 外部往来款管理 模块维护入口
+# 外部往来款管理模块维护入口
 
-- Module key: `turnover-ledger`
-- 类型: 页面模块
-- Route: `/turnover-ledger`
-- Page key: `turnover-ledger`
+- Module key：`turnover-ledger`
+- 类型：页面模块
+- Route：`/turnover-ledger`
+- Page key：`turnover-ledger`
 
 ## 修改前必读
 
 - `docs/product-specs/bank-turnover-and-no-oa.md`
-- `docs/app-architecture/runtime-and-ownership.md`
 - `docs/app-architecture/pages.md`
-- `docs/architecture/backend-refactor/turnover-ledger-discovery.md`
-- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+- `docs/modules/turnover-ledger/boundary-io.md`
+- `docs/modules/workbench-relations/boundary-io.md`
+- `docs/modules/bank-details/boundary-io.md`
 - `docs/dev/api-contracts.md`
-- `docs/operations/runtime-worker-governance.md`
 
 ## 代码入口
 
-- `web/src/pages/TurnoverLedgerPage.tsx`
-- `web/src/components/turnoverLedger/*`
-- `web/src/features/turnoverLedger/api.ts`
-- `web/src/features/turnoverLedger/types.ts`
-- `backend/src/fin_ops_platform/app/routes_turnover_ledger.py`
-- `backend/src/fin_ops_platform/services/turnover_ledger_service.py`
-- `backend/src/fin_ops_platform/services/turnover_relation_service.py`
-- `backend/src/fin_ops_platform/services/turnover_ledger_query_service.py`
-- `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
-- `backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`
-- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
-- `backend/src/fin_ops_platform/services/turnover_ledger_extra_service.py`
-- `backend/src/fin_ops_platform/services/turnover_ledger_export_service.py`
-- `backend/src/fin_ops_platform/services/turnover_ledger_source_versions.py`
-- `backend/src/fin_ops_platform/services/turnover_ledger_sql_projection.py`
-- `backend/src/fin_ops_platform/services/turnover_ledger_read_model_refresh.py`
-- `backend/src/fin_ops_platform/services/runtime_worker_registry.py`
-- `backend/src/fin_ops_platform/services/app_status_domain_registry.py`
-- `backend/src/fin_ops_platform/services/app_status_read_model_registry.py`
+- Frontend：`web/src/pages/TurnoverLedgerPage.tsx`、`web/src/features/turnoverLedger/*`
+- Route：`backend/src/fin_ops_platform/app/routes_turnover_ledger.py`
+- Direct query：`backend/src/fin_ops_platform/services/turnover_ledger_query_service.py`
+- Canonical snapshot：`backend/src/fin_ops_platform/services/postgres_repositories/turnover_ledger_snapshot.py`
+- DTO/business composition：`backend/src/fin_ops_platform/services/turnover_ledger_service.py`
+- Canonical relation enrichment：`backend/src/fin_ops_platform/services/turnover_ledger_relation_context.py`
+- Writes：`turnover_ledger_write_facade.py`、`turnover_ledger_write_uow.py`、`turnover_ledger_write_adapters.py`
 
 ## 当前边界
 
-外部往来款管理负责把银行明细中已确认三层外部往来分类的流水汇总成外部往来台账，并提供标签准入、补充信息、导出和人工零差额闭环。
+外部往来款页面不再使用独立 read model。每次访问、重新进入 route、查询变化或浏览器手动刷新都由 `TurnoverLedgerQueryService` 在一个只读 repeatable-read PostgreSQL snapshot 中直接读取：
 
-当前有效边界：
+- 银行流水；
+- 有效分类和 tag selection；
+- `app.workbench_pair_relations` 统一配对关系；
+- Turnover 自有 relation；
+- ledger extras。
 
-- 候选来源：银行明细有效分类和外部往来标签规则；`deterministic` 只表示零差额候选，不表示已闭环。
-- 台账读取：只走 `turnover_ledger` SQL read model；`TurnoverLedgerApiRoutes` 是 HTTP route owner，读请求进入 `TurnoverLedgerQueryService`，repository miss 必须经 `ReadModelQueryGateway` fail-closed/enqueue，不再经过 app read forwarding facade、live page builder 或配置分叉。repository 用固定查询数在 SQL 内完成方向/家庭/状态过滤、总计与 family 汇总，并只读取当前页规范化 payload；`all` query 聚合全部月份 dirty scope，不能在任一月份刷新或失败时伪装 fresh。`TurnoverLedgerSqlProjectionBuilder` 在 projection 阶段通过 `WorkbenchRelationReadModelRepositoryPort.workbench_relation_source_bundle_from_source(...)` 从 canonical `app.workbench_pair_relations` 的同一快照读取 active relation rows 与 source summary，不串行等待 `workbench_relation` read model；随后把 `workbench_relation_status/case_ids/mode/source/row_ids`、`linked_oa`、`linked_invoice`、`cash_closure_linked`、`cash_closure_case_id/source/relation_id` 投影到 grouped payload。relation-only outbox 明确携带 `relation_deltas + row_ids` 时，month worker 只读 `bank_row_ids` 重叠的 grouped rows、重套 relation context 并窄 upsert；旧的整月读出、删除、重写路径不再进入该 hot path。canonical source 不可用时必须 fail fast，不保存半成品 turnover read model。
-- 写入入口：tag-selection、bank-row-tags batch、relation extra、confirm、withdraw 通过 request-boundary facade 进入 `TurnoverLedgerWriteFacade` / UoW；涉及 Workbench relation 的 manual closure/withdraw 必须统一委托 `WorkbenchRelationCommandService`，缺 command service 时 fail fast，不回退 direct pair relation mutation。
-- 手动闭环：用户在页面选择同一往来组多条真实银行流水，至少一收一支且收支合计差额为 `0.00`。Turnover domain 只做无副作用业务校验；写事务仅通过 `WorkbenchRelationCommandService` 写 canonical Workbench active pair relation，不再重复写 Turnover relation/event。同一 request-scoped bank-row selection port 同时服务版本校验、closure preview 与 requirement 冻结；按所选顺序读取 `effective_category_code`（仅在缺失时回退 `category_code`），且每次确认只读取一次 canonical 流水规则 payload。新 relation 复用统一 requirement helper 写入 tag code、`requires_oa`、`requires_invoice`、规则来源和版本。active relation 只表示同组 ownership；Workbench 只按冻结 metadata 判断 required row type，bank-only 且要求 OA 的闭环仍以同一个 case 留在未配对区，全部要求满足后才进入已配对。缺失、空或未知规则 fail closed，规则保存不再追溯回写既有 relation；存量缺快照关系只能走受控 repair。若所选银行流水已处在仅含 `oa` + `bank` 的 active relation 中，闭环确认可合并这些既有关联，但合并后的全部银行成员必须属于本次 selected ids，否则在 command 前冲突；既有 relation 包含发票或其他 row type 时必须转关联台处理完整关系。
-- 撤回：现代外部往来闭环统一用 `/api/turnover-ledger/closures/withdraw`，按 `cash_closure_case_id` 通过 command service `withdraw_relation` 撤回对应 active case，并恢复确认前可恢复的 OA-bank 关系；事务内只允许 `{oa, bank}` 且至少两条 bank rows。显式携带 `special_metadata.turnover_relation_id` 的历史闭环才可走 `/api/turnover-ledger/relations/{relation_id}/withdraw`；页面和 projection 不得从 case id 猜旧 relation id。已包含发票或其他 row type 的 relation 必须转关联台撤回。
-- 前端闭环入口：表格 checkbox 选中未闭环 flow rows 时，toolbar 主按钮为“确认闭环”。所选 flow rows 全部带同一个 `cash_closure_case_id` 且 `cash_closure_linked=true` 时，主按钮切换为“撤回闭环”。同一次选择不得混合已闭环与未闭环流水，也不得跨多个闭环 case 撤回。
-- 下游影响：外部往来关系变更影响 `turnover_ledger`、`workbench`、`workbench_relation`、成本统计、搜索和前端跨页刷新提示。
-- 操作闭环：manual closure 发起和提交不能依赖 stale grouped payload；提交前先重新加载 grouped payload，并按原始 bank row ids 在同一 group 内重绑定最新 flow rows，用最新 `categoryVersion` 生成 `expected_versions`。tag-selection、extra、confirm/withdraw 的写 API 只返回 canonical 业务结果和信息性 affected months，两个 target 数组为空；POST 成功后立即结束写阻塞并重跑当前页面正常 GET。`workbench`、成本统计、搜索等消费者不由写链投递，只在各自 route 进入/重进、查询变化、浏览器手动刷新或明确重试时用 freshness gate 收敛。页面 reload 失败只能提示已提交但页面刷新未完成，不能把成功 command 改写成失败。
-- App Status：`turnover_ledger` domain 绑定单一 `turnover-ledger` worker、`turnover_ledger` read model、`turnover_ledger.read_model.refresh` job type。现代闭环确认/撤回只改变 canonical Workbench relation context，不再用第二 worker 并发全量重建。
+页面和关联台共享 `app.workbench_pair_relations`，因此同一 active case 的成员、状态和撤回结果必须一致。页面只按本次 ledger bank row ids 查询必要 relation，不扫描全量关系，也不依赖关联台 read model。
 
-不属于本模块事实源：
+写入与读取保持模块化独立：
 
-- 银行明细分类规则的长期业务口径归 `bank-details` 和产品规格维护。
-- Workbench 已配对区事实由 Workbench pair relation/read model 维护，不能由 Turnover query 层临时拼接或直接读取 pair service snapshot；Turnover 页面只能消费 projection 已写入的 Workbench relation 状态字段。外部往来页只展示正向 chip：`linked_oa=true` 显示“已关联 OA”，`linked_invoice=true` 显示“已关联 发票”，`cash_closure_linked=true` 显示醒目的“收支闭环”。不得再显示“已关联业务单据”“未闭环”“部分已闭环”“候选关联”等旧 chip。
-- 前端不发送或订阅 Turnover/Workbench/extra 跨页业务刷新事件；另一个页面/tab 不自动 reload。
+- confirm/withdraw 只提交 canonical facts 和 audit；
+- 写后不 enqueue Turnover 页面 refresh，不触发其他页面读取；
+- 当前页面成功后只重跑一次 normal GET；
+- 其他页面或 tab 在自己的下一次访问/手动刷新时读取新事实。
+
+`turnover_ledger` worker、refresh event、manifest、source-version gate、projection SQL、前端 polling 和旧 repository surface 已删除。历史投影表只作为未 drop 的 migration 遗留存在，不是 runtime 数据源。
+
+## 关键业务合同
+
+- “收支闭环”必须来自 active canonical relation，不得来自页面缓存或旧 projection。
+- relation 至少覆盖两条 bank members，且该 group 收入与支出差额为 `0.00`，两侧 flow row 才同时显示闭环 tag。
+- 外部往来款确认后，关联台手动刷新必须看到同一 case；关联台确认后，外部往来款手动刷新必须看到同一闭环。
+- 撤回后两页手动刷新都不得继续显示 active 配对。
+- 页面 load 失败时普通刷新即可重试；不能要求清 queue、修版本或触发后台重建。
 
 ## 维护触发器
 
-发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：
+以下变化必须同步更新 `boundary-io.md` 和相关测试：
 
-- 页面入口、路由、侧栏、筛选、排序、分页、导出、drawer/dialog 或权限显示变化。
-- API contract、DTO shape、错误字段、权限校验、状态值或响应 freshness 字段变化。
-- 业务状态、UI 状态、read model 状态、worker 状态或状态流转变化。
-- 跨页面刷新、domain event、derived lifecycle、dirty scope、outbox 或缓存边界变化。
-- 测试入口、回归范围、验证命令或未测风险变化。
+- canonical 输入表、查询快照或 relation enrichment 变化；
+- API DTO、筛选、分页、导出或 frontend loading/error/retry 变化；
+- confirm/withdraw、标签、extra 的 write boundary 变化；
+- 重新引入缓存、read model、worker、queue 或跨页自动刷新（必须先有当前性能证据，禁止预先设计）。
 
 ## 本目录文件
 
-- `e2e-spec.md`：维护页面 Spec-first Browser E2E 业务验收合同。
-- `e2e-coverage.md`：维护 Spec ID 到 Browser/API/组件/后端/integration 覆盖证据的映射。
-- `state-machine.md`：维护当前有效状态和状态流转；不适用时写明原因。
-- `tests.md`：维护七类测试适用性、现有测试入口、验证命令和回归范围。
-- `implementation-notes.md`：维护提炼后的决策和验收记录；不保存原始 prompt。
+- `boundary-io.md`：当前模块边界和 I/O 事实源。
+- `state-machine.md`：业务/UI/direct-read 状态。
+- `tests.md`：七类测试与验证入口。
+- `e2e-spec.md`、`e2e-coverage.md`：关键业务链覆盖。
+- `implementation-notes.md`：历史决策记录，不替代当前事实源。

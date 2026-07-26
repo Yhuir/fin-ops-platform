@@ -115,9 +115,6 @@ from fin_ops_platform.services.search_pending_read_model_refresh import SearchPe
 from fin_ops_platform.services.search_pending_sql_projection import SearchPendingSqlProjectionBuilder
 from fin_ops_platform.services.tax_offset_read_model_refresh import TaxOffsetReadModelRefreshService
 from fin_ops_platform.services.tax_offset_sql_projection import TaxOffsetSqlProjectionBuilder
-from fin_ops_platform.services.turnover_ledger_read_model_refresh import TurnoverLedgerReadModelRefreshService
-from fin_ops_platform.services.turnover_ledger_read_model_repository import TurnoverLedgerReadModelRepositoryPort
-from fin_ops_platform.services.turnover_ledger_sql_projection import TurnoverLedgerSqlProjectionBuilder
 from fin_ops_platform.services.workbench_exception_projection import EXCEPTION_PROJECTION_VERSION
 from fin_ops_platform.services.workbench_exception_rules import RULE_VERSION as WORKBENCH_EXCEPTION_RULE_VERSION
 from fin_ops_platform.services.workbench_free_matching_engine import (
@@ -180,7 +177,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enable-bank-detail-read-model-refresh", action="store_true", help="Register bank detail SQL read model refresh handler.")
     parser.add_argument("--enable-no-oa-bank-batch-read-model-refresh", action="store_true", help="Register no-OA bank batch SQL read model refresh handler.")
     parser.add_argument("--enable-bank-flow-rule-batch-read-model-refresh", action="store_true", help="Register bank-flow rule batch SQL read model refresh handler.")
-    parser.add_argument("--enable-turnover-ledger-read-model-refresh", action="store_true", help="Register turnover ledger SQL read model refresh handler.")
     parser.add_argument("--enable-input-invoice-usage-read-model-refresh", action="store_true", help="Register input invoice usage SQL read model refresh handler.")
     parser.add_argument("--enable-output-invoice-collection-read-model-refresh", action="store_true", help="Register output invoice collection SQL read model refresh handler.")
     parser.add_argument("--enable-oa-pending-payment-read-model-refresh", action="store_true", help="Register OA pending payment SQL read model refresh handler.")
@@ -517,28 +513,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         handlers[BANK_FLOW_RULE_BATCH_REFRESH_EVENT_TYPE] = _read_model_handler(refresh_service.handle_runtime_event)
         if BANK_FLOW_RULE_BATCH_REFRESH_EVENT_TYPE not in config.event_types:
             config.event_types.append(BANK_FLOW_RULE_BATCH_REFRESH_EVENT_TYPE)
-    if args.enable_turnover_ledger_read_model_refresh:
-        projection_builder = TurnoverLedgerSqlProjectionBuilder(
-            connection=connection,
-            read_repository=(
-                TurnoverLedgerReadModelRepositoryPort(read_model_repository)
-                if read_model_repository is not None
-                else None
-            ),
-            bank_transaction_tag_read_facade=bank_transaction_tag_read_facade,
-            workbench_relation_source_repository=(
-                WorkbenchRelationReadModelRepositoryPort(read_model_repository)
-                if read_model_repository is not None
-                else None
-            ),
-        )
-        refresh_service = TurnoverLedgerReadModelRefreshService(
-            projection_builder=projection_builder,
-            queue_repository=queue,
-        )
-        handlers["turnover_ledger.read_model.refresh"] = _read_model_handler(refresh_service.handle_runtime_event)
-        if "turnover_ledger.read_model.refresh" not in config.event_types:
-            config.event_types.append("turnover_ledger.read_model.refresh")
     if args.enable_bank_account_balance_read_model_refresh:
         projection_builder = BankAccountBalanceProjectionBuilder(connection=connection)
         refresh_service = BankAccountBalanceReadModelRefreshService(

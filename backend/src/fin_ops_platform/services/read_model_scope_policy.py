@@ -172,7 +172,6 @@ DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY = ReadModelScopePolicyRegistry(
         "pending_invoice": _pending_invoice_scope_policy(),
         "search": _month_or_all_scope_policy("search"),
         "tax_offset": _month_or_all_scope_policy("tax_offset"),
-        "turnover_ledger": _month_or_all_scope_policy("turnover_ledger"),
         "workbench": _month_or_all_scope_policy("workbench"),
         "workbench_relation": _month_or_all_scope_policy("workbench_relation"),
     }

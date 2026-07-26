@@ -413,8 +413,8 @@ class RuntimeWorkerTests(unittest.TestCase):
     def test_run_once_does_not_enqueue_bank_detail_all_for_all_scope_dependency(self) -> None:
         claimed = RuntimeQueueEvent(
             **{
-                **event("turnover_ledger.read_model.refresh").__dict__,
-                "scope_type": "turnover_ledger",
+                **event("cost_statistics.read_model.refresh").__dict__,
+                "scope_type": "cost_statistics",
                 "scope_key": "all",
                 "priority": "high",
             }
@@ -426,8 +426,8 @@ class RuntimeWorkerTests(unittest.TestCase):
 
         worker = RuntimeWorker(
             queue_repository=queue,
-            config=RuntimeWorkerConfig(worker_id="worker-1", event_types=["turnover_ledger.read_model.refresh"]),
-            handlers={"turnover_ledger.read_model.refresh": fail_not_fresh},
+            config=RuntimeWorkerConfig(worker_id="worker-1", event_types=["cost_statistics.read_model.refresh"]),
+            handlers={"cost_statistics.read_model.refresh": fail_not_fresh},
         )
 
         self.assertEqual(worker.run_once(), RuntimeWorkerResult.DEFERRED)

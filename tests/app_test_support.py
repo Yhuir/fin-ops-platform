@@ -18,67 +18,6 @@ from fin_ops_platform.services.workbench_read_model_version import WorkbenchRead
 from fin_ops_platform.services.workbench_relation_grouping import WorkbenchRelationGroupingService
 
 
-class _LocalTurnoverReadModelFixtureRepository:
-    """Expose local test facts through the production query service's read-model contract."""
-
-    def __init__(self, application: Application) -> None:
-        self._application = application
-
-    def list_turnover_ledger_view(self, **kwargs: object) -> dict[str, object]:
-        service = self._application._turnover_ledger_service  # noqa: SLF001
-        query = {
-            "family": str(kwargs.get("family") or "all"),
-            "direction": str(kwargs.get("direction") or "all"),
-            "status": str(kwargs["status"]) if kwargs.get("status") not in (None, "") else None,
-            "page": int(kwargs.get("page") or 1),
-            "page_size": int(kwargs.get("page_size") or 50),
-        }
-        payload = service.list_ledger(**query)
-        result = dict(payload)
-        grouped = service.list_grouped_ledger(**query)
-        groups_by_key = {
-            (str(group.get("family") or ""), str(group.get("counterparty_name") or "")): group
-            for group in list(grouped.get("groups") or [])
-            if isinstance(group, dict)
-        }
-        result["rows"] = [
-            {
-                **row,
-                "flow_rows": list(group.get("flow_rows") or []),
-                "allocation_lots": list(group.get("allocation_lots") or []),
-                "lot_rows": list(group.get("lot_rows") or []),
-            }
-            if isinstance(row, dict)
-            and isinstance(
-                group := groups_by_key.get(
-                    (str(row.get("family") or ""), str(row.get("counterparty_name") or ""))
-                ),
-                dict,
-            )
-            else row
-            for row in list(payload.get("rows") or [])
-        ]
-        result["source_versions"] = dict(self._application._turnover_ledger_source_versions())  # noqa: SLF001
-        result["refresh_status"] = "fresh"
-        return result
-
-    def get_turnover_ledger_freshness_view(self) -> dict[str, object]:
-        return {
-            "source_versions": dict(
-                self._application._turnover_ledger_source_versions()  # noqa: SLF001
-            ),
-            "refresh_status": "fresh",
-        }
-
-    def list_turnover_manual_closure_changes(
-        self,
-        *,
-        updated_after: str,
-    ) -> list[dict[str, object]]:
-        del updated_after
-        return []
-
-
 def build_local_state_application(*args, **kwargs):
     data_dir = kwargs.get("data_dir")
     if data_dir is None and args:
@@ -100,9 +39,6 @@ def build_local_state_application(*args, **kwargs):
         patch.object(Application, "_runtime_bootstrap_state", load_local_bootstrap_state),
     ):
         application = _build_application(*args, **kwargs)
-    application._turnover_ledger_query_service._read_repository = _LocalTurnoverReadModelFixtureRepository(  # noqa: SLF001
-        application
-    )
     return application
 
 

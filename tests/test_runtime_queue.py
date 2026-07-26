@@ -1913,8 +1913,8 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             rows=[
                 [
                     event_row(
-                        event_type="turnover_ledger.read_model.refresh",
-                        scope_type="turnover_ledger",
+                        event_type="bank_detail.read_model.refresh",
+                        scope_type="bank_detail",
                         scope_key="2026-04",
                         status="processing",
                         payload={
@@ -1929,12 +1929,12 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 ],
                 [
                     event_row(
-                        event_type="turnover_ledger.read_model.refresh",
+                        event_type="bank_detail.read_model.refresh",
                         aggregate_type="read_model",
                         aggregate_id="2026-04",
-                        scope_type="turnover_ledger",
+                        scope_type="bank_detail",
                         scope_key="2026-04",
-                        dedupe_key="turnover_ledger.read_model.refresh:turnover_ledger:2026-04",
+                        dedupe_key="bank_detail.read_model.refresh:bank_detail:2026-04",
                         source_version=9,
                     )
                 ],
@@ -1943,7 +1943,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         repository = RuntimeQueueRepository(FakeConnection(transaction))
 
         event = repository.enqueue_read_model_refresh_if_inactive(
-            scope_type="turnover_ledger",
+            scope_type="bank_detail",
             scope_key="2026-04",
             reason="api_relation_delta",
             metadata={
@@ -1971,8 +1971,8 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             rows=[
                 [
                     event_row(
-                        event_type="turnover_ledger.read_model.refresh",
-                        scope_type="turnover_ledger",
+                        event_type="bank_detail.read_model.refresh",
+                        scope_type="bank_detail",
                         scope_key="2026-04",
                         status="processing",
                         payload={"metadata": metadata},
@@ -1983,7 +1983,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         repository = RuntimeQueueRepository(FakeConnection(transaction))
 
         event = repository.enqueue_read_model_refresh_if_inactive(
-            scope_type="turnover_ledger",
+            scope_type="bank_detail",
             scope_key="2026-04",
             reason="api_relation_delta",
             metadata=metadata,
@@ -1997,8 +1997,8 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             rows=[
                 [
                     event_row(
-                        event_type="turnover_ledger.read_model.refresh",
-                        scope_type="turnover_ledger",
+                        event_type="bank_detail.read_model.refresh",
+                        scope_type="bank_detail",
                         scope_key="2026-04",
                         status="processing",
                         payload={
@@ -2014,12 +2014,12 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 ],
                 [
                     event_row(
-                        event_type="turnover_ledger.read_model.refresh",
+                        event_type="bank_detail.read_model.refresh",
                         aggregate_type="read_model",
                         aggregate_id="2026-04",
-                        scope_type="turnover_ledger",
+                        scope_type="bank_detail",
                         scope_key="2026-04",
-                        dedupe_key="turnover_ledger.read_model.refresh:turnover_ledger:2026-04",
+                        dedupe_key="bank_detail.read_model.refresh:bank_detail:2026-04",
                         source_version=9,
                     )
                 ],
@@ -2028,7 +2028,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         repository = RuntimeQueueRepository(FakeConnection(transaction))
 
         event = repository.enqueue_read_model_refresh_if_inactive(
-            scope_type="turnover_ledger",
+            scope_type="bank_detail",
             scope_key="2026-04",
             reason="api_stale",
         )
@@ -2041,8 +2041,8 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
 
     def test_atomic_read_model_enqueue_full_covers_partial_but_not_force(self) -> None:
         full_active = event_row(
-            event_type="turnover_ledger.read_model.refresh",
-            scope_type="turnover_ledger",
+            event_type="bank_detail.read_model.refresh",
+            scope_type="bank_detail",
             scope_key="2026-04",
             status="pending",
             payload={},
@@ -2051,7 +2051,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         partial_repository = RuntimeQueueRepository(FakeConnection(partial_transaction))
 
         partial_event = partial_repository.enqueue_read_model_refresh_if_inactive(
-            scope_type="turnover_ledger",
+            scope_type="bank_detail",
             scope_key="2026-04",
             reason="api_relation_delta",
             metadata={
@@ -2074,12 +2074,12 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 [full_active],
                 [
                     event_row(
-                        event_type="turnover_ledger.read_model.refresh",
+                        event_type="bank_detail.read_model.refresh",
                         aggregate_type="read_model",
                         aggregate_id="2026-04",
-                        scope_type="turnover_ledger",
+                        scope_type="bank_detail",
                         scope_key="2026-04",
-                        dedupe_key="turnover_ledger.read_model.refresh:turnover_ledger:2026-04",
+                        dedupe_key="bank_detail.read_model.refresh:bank_detail:2026-04",
                         source_version=10,
                     )
                 ],
@@ -2088,7 +2088,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         force_repository = RuntimeQueueRepository(FakeConnection(force_transaction))
 
         force_event = force_repository.enqueue_read_model_refresh_if_inactive(
-            scope_type="turnover_ledger",
+            scope_type="bank_detail",
             scope_key="2026-04",
             reason="force_refresh",
             metadata={"force_refresh": True},

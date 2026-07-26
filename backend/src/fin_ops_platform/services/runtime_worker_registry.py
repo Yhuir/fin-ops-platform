@@ -102,18 +102,6 @@ RUNTIME_WORKER_REGISTRY: tuple[RuntimeWorkerRegistration, ...] = (
         read_model_scope_type="bank_detail",
     ),
     RuntimeWorkerRegistration(
-        instance_name="turnover-ledger",
-        worker_kind="turnover-ledger-read-model",
-        handler_flags=("--enable-turnover-ledger-read-model-refresh",),
-        event_types=("turnover_ledger.read_model.refresh",),
-        required=True,
-        rabbitmq_eligible=True,
-        env_example="fin-ops.worker.turnover-ledger.env.example",
-        rabbitmq_env_example="fin-ops.worker.turnover-ledger-rabbitmq.env.example",
-        read_model_key="turnover_ledger",
-        read_model_scope_type="turnover_ledger",
-    ),
-    RuntimeWorkerRegistration(
         instance_name="search-pending",
         worker_kind="search-pending-read-model",
         handler_flags=("--enable-search-read-model-refresh", "--enable-pending-invoice-read-model-refresh"),

@@ -372,14 +372,14 @@ class OperationFreshnessBarrierServiceTests(unittest.TestCase):
         service = OperationFreshnessBarrierService(
             runtime_snapshot_provider=lambda: {
                 "read_model_statuses": {
-                    "turnover_ledger": {
+                    "bank_detail": {
                         "status": "fresh",
-                        "scope_type": "turnover_ledger",
+                        "scope_type": "bank_detail",
                         "scope_key": "all",
                     }
                 },
                 "outbox_statuses": {
-                    "turnover_ledger.read_model.refresh": {
+                    "bank_detail.read_model.refresh": {
                         "status": "failed",
                         "last_error": "worker crashed",
                         "updated_at": "2026-06-14T10:00:02+00:00",
@@ -389,7 +389,7 @@ class OperationFreshnessBarrierServiceTests(unittest.TestCase):
             }
         )
 
-        payload = service.status_payload([OperationFreshnessTarget("turnover_ledger", "all")])
+        payload = service.status_payload([OperationFreshnessTarget("bank_detail", "all")])
 
         self.assertEqual(payload["status"], "blocked")
         self.assertEqual(payload["blocked_targets"][0]["reason"], "refresh outbox blocked")

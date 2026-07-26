@@ -375,18 +375,11 @@ from fin_ops_platform.services.tax_offset_runtime_service import TaxOffsetRuntim
 from fin_ops_platform.services.tax_offset_service import TaxOffsetService
 from fin_ops_platform.services.tax_offset_worker_rebuild_executor import TaxOffsetWorkerRebuildExecutor
 from fin_ops_platform.services.turnover_ledger_query_service import TurnoverLedgerQueryService
-from fin_ops_platform.services.turnover_ledger_read_model_refresh_producer import (
-    TurnoverLedgerReadModelRefreshProducer,
-)
 from fin_ops_platform.services.turnover_ledger_service import TURNOVER_LEDGER_SCHEMA_VERSION, TurnoverLedgerService
 from fin_ops_platform.services.turnover_ledger_export_service import (
     XLSX_MIME_TYPE,
 )
 from fin_ops_platform.services.turnover_bank_row_version import turnover_bank_row_version
-from fin_ops_platform.services.turnover_ledger_source_versions import (
-    build_turnover_ledger_source_versions,
-    turnover_manual_closure_source_version,
-)
 from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerBankRowTagsRequestBoundaryFacade,
     TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder,
@@ -793,7 +786,6 @@ class Application:
         self._workbench_sql_projection_builder = getattr(self._state_store, "workbench_sql_projection_builder", None)
         self._cost_statistics_sql_read_repository = getattr(self._state_store, "cost_statistics_sql_read_repository", None)
         self._tax_offset_sql_read_repository = getattr(self._state_store, "tax_offset_sql_read_repository", None)
-        self._turnover_ledger_sql_read_repository = getattr(self._state_store, "turnover_ledger_sql_read_repository", None)
         self._search_sql_read_repository = getattr(self._state_store, "search_sql_read_repository", None)
         self._pending_invoice_sql_read_repository = getattr(self._state_store, "pending_invoice_sql_read_repository", None)
         self._bank_account_balance_sql_read_repository = getattr(self._state_store, "bank_account_balance_sql_read_repository", None)
@@ -1048,9 +1040,11 @@ class Application:
             selected_tag_codes_provider=self._app_settings_service.turnover_ledger_selected_tag_codes,
         )
         self._turnover_ledger_query_service = TurnoverLedgerQueryService(
-            read_repository=getattr(self, "_turnover_ledger_sql_read_repository", None),
-            refresh_queue_repository=getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None),
-            source_versions_provider=self._turnover_ledger_source_versions,
+            connection=(
+                getattr(self._state_store, "_sql_read_connection", None)
+                or getattr(self._state_store, "_connection", None)
+            ),
+            local_ledger_service=self._turnover_ledger_service,
         )
         self._tax_certified_import_service = TaxCertifiedImportService(state_store=self._state_store)
         self._etc_import_session_store = build_etc_import_session_store(self._state_store)
@@ -8195,11 +8189,6 @@ class Application:
     def _no_oa_bank_batch_workbench_display_policy(self) -> NoOaBankBatchWorkbenchDisplayPolicy:
         return NoOaBankBatchWorkbenchDisplayPolicy(label_provider=self._bank_transaction_tag_label_current)
 
-    def _turnover_ledger_read_model_refresh_producer(self) -> TurnoverLedgerReadModelRefreshProducer:
-        return TurnoverLedgerReadModelRefreshProducer(
-            refresh_gateway_provider=self._read_model_refresh_gateway,
-        )
-
     def _bank_detail_available_month_scope_provider(self) -> BankDetailAvailableMonthScopeProvider:
         return BankDetailAvailableMonthScopeProvider(
             import_service=self._import_service,
@@ -9784,50 +9773,6 @@ class Application:
             ),
             actual=source_versions if isinstance(source_versions, dict) else {},
         )
-
-    def _turnover_ledger_source_versions(self) -> dict[str, object]:
-        relation_repository = getattr(self, "_workbench_relation_sql_read_repository", None)
-        relation_source_loader = getattr(
-            relation_repository,
-            "workbench_relation_source_summary_from_source",
-            None,
-        )
-        closure_source_version_provider = (
-            lambda: turnover_manual_closure_source_version(relation_repository)
-            if relation_repository is not None
-            else {}
-        ) if callable(relation_source_loader) else None
-        return build_turnover_ledger_source_versions(
-            relation_service=self._turnover_relation_service,
-            extra_snapshot_provider=self._turnover_ledger_api_routes.extras_snapshot,
-            app_settings_service=self._app_settings_service,
-            bank_transaction_category_service=self._bank_transaction_category_service,
-            bank_auto_tag_rules_version_provider=self._current_bank_auto_tag_rules_version,
-            turnover_manual_closure_source_version_provider=closure_source_version_provider,
-            oa_projection_sync_version=self._current_oa_projection_sync_version(),
-        )
-
-    def _turnover_ledger_stale_reasons(self, source_versions: object) -> list[str]:
-        return source_version_mismatch_reasons(
-            expected=require_expected_source_versions(
-                self._turnover_ledger_source_versions(),
-                context="turnover_ledger_read_model",
-            ),
-            actual=source_versions if isinstance(source_versions, dict) else {},
-        )
-
-    def _with_turnover_ledger_source_versions(self, payload: dict[str, object]) -> dict[str, object]:
-        source_versions = self._turnover_ledger_source_versions()
-        result = dict(payload)
-        result["source_versions"] = source_versions
-        rows: list[object] = []
-        for row in list(result.get("rows") or []):
-            if isinstance(row, dict):
-                rows.append({**row, "source_versions": source_versions})
-            else:
-                rows.append(row)
-        result["rows"] = rows
-        return result
 
     def _workbench_read_model_source_versions(self) -> dict[str, object]:
         relation_source_versions = self._workbench_relation_source_version_provider()

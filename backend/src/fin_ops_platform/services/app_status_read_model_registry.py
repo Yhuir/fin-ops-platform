@@ -100,12 +100,6 @@ APP_STATUS_READ_MODEL_REGISTRY: dict[str, AppStatusReadModelDefinition] = {
         worker_instance="bank-flow-rule-batch",
         refresh_event_type="bank_flow_rule_batch.read_model.refresh",
     ),
-    "turnover_ledger": AppStatusReadModelDefinition(
-        key="turnover_ledger",
-        scope_type="turnover_ledger",
-        worker_instance="turnover-ledger",
-        refresh_event_type="turnover_ledger.read_model.refresh",
-    ),
 }
 
 

@@ -42,7 +42,6 @@ from fin_ops_platform.services.postgres_snapshot_contracts import (
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
 from fin_ops_platform.services.search_read_model_repository import SearchReadModelRepositoryPort
 from fin_ops_platform.services.tax_offset_read_model_repository import TaxOffsetReadModelRepositoryPort
-from fin_ops_platform.services.turnover_ledger_read_model_repository import TurnoverLedgerReadModelRepositoryPort
 from fin_ops_platform.services.workbench_relation_read_model_repository import WorkbenchRelationReadModelRepositoryPort
 
 
@@ -182,7 +181,6 @@ class PostgresStateStore:
         self._no_oa_bank_batch_sql_read_repository = NoOaBankBatchReadModelRepositoryPort(self._sql_read_model_repository)
         self._bank_flow_rule_batch_sql_read_repository = BankFlowRuleBatchReadModelRepositoryPort(self._sql_read_model_repository)
         self._tax_offset_sql_read_repository = TaxOffsetReadModelRepositoryPort(self._sql_read_model_repository)
-        self._turnover_ledger_sql_read_repository = TurnoverLedgerReadModelRepositoryPort(self._sql_read_model_repository)
         self._workbench_relation_sql_read_repository = WorkbenchRelationReadModelRepositoryPort(self._sql_read_model_repository)
         self._workbench_repository = PostgresWorkbenchRepository(connection)
         self._bank_transaction_category_repository = PostgresBankTransactionCategoryRepository(connection)
@@ -915,10 +913,6 @@ class PostgresStateStore:
     @property
     def tax_offset_sql_read_repository(self) -> TaxOffsetReadModelRepositoryPort:
         return self._tax_offset_sql_read_repository
-
-    @property
-    def turnover_ledger_sql_read_repository(self) -> TurnoverLedgerReadModelRepositoryPort:
-        return self._turnover_ledger_sql_read_repository
 
     @property
     def search_sql_read_repository(self) -> SearchReadModelRepositoryPort:

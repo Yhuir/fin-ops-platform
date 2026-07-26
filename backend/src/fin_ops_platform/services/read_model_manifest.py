@@ -438,42 +438,6 @@ READ_MODEL_MANIFEST: dict[str, ReadModelManifestEntry] = {
         permission_owner="bank_flow_rule_batch_api_session",
         test_owner="tests/test_bank_flow_rule_batch_backend_boundary.py",
     ),
-    "turnover_ledger": ReadModelManifestEntry(
-        key="turnover_ledger",
-        scope_type="turnover_ledger",
-        refresh_event_type="turnover_ledger.read_model.refresh",
-        primary_worker_instance="turnover-ledger",
-        auxiliary_refresh_worker_instances=(),
-        query_status_contract="read_model_query_gateway",
-        projection_strategy="partitioned_scoped_incremental",
-        all_scope_semantics="fan_out_command",
-        partition_key_contract="turnover ledger month_scope; all is fan-out only",
-        scoped_incremental_target=(
-            "turnover ledger grouped/list rows plus turnover_ledger_scopes row-count/statistics summary "
-            "for affected month scopes and the all-page aggregate"
-        ),
-        full_rebuild_fallback="gateway force refresh all enumerates turnover ledger month shards and supports explicit clear/rebuild",
-        freshness_proof_contract=(
-            "turnover_ledger_scopes generation/source_versions/statistics with module-global serialized CAS plus "
-            "ReadModelQueryGateway expected versions, workbench_relation versions, and current-effective dirty/outbox state"
-        ),
-        force_refresh_contract="gateway_force_refresh",
-        operation_barrier_contract="app_status_registry_target",
-        repository_port_contract=(
-            "list_turnover_ledger_view",
-            "get_turnover_ledger_freshness_view",
-            "list_turnover_manual_closure_changes",
-            "save_turnover_ledger_rows",
-            "turnover_ledger_generation",
-            "acknowledge_unchanged_turnover_ledger_scope",
-            "load_turnover_ledger_relation_delta",
-            "save_turnover_ledger_relation_delta",
-        ),
-        query_owner="TurnoverLedgerQueryService",
-        repository_owner="TurnoverLedgerReadModelRepositoryPort",
-        permission_owner="turnover_ledger_api_session",
-        test_owner="tests/test_turnover_ledger_query_service.py",
-    ),
 }
 
 

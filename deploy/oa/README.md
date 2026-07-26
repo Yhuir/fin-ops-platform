@@ -470,7 +470,7 @@ sudo /usr/local/sbin/finops-deploy-control write-operation-e2e-smoke <release-na
 sudo /usr/local/sbin/finops-deploy-control api-request-error <request-id>
 sudo /usr/local/sbin/finops-deploy-control api-request-timing <request-id>
 sudo /usr/local/sbin/finops-deploy-control read-model-refresh <release-name> \
-  --scope tax_offset=all --scope turnover_ledger=all --dry-run
+  --scope tax_offset=all --dry-run
 sudo /usr/local/sbin/finops-deploy-control settings-normalize <release-name> --dry-run
 sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> --dry-run
 sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> \

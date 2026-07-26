@@ -19,17 +19,14 @@ from tests.app_test_support import build_local_state_application as build_applic
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
-from fin_ops_platform.services.read_model_freshness import normalize_source_versions
 from fin_ops_platform.services.state_store import ApplicationStateStore
+from fin_ops_platform.services.turnover_ledger_query_service import TurnoverLedgerQueryService
 from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerBankRowTagsRequestBoundaryFacade,
     TurnoverLedgerConfirmRequestBoundaryFacade,
     TurnoverLedgerRelationExtraRequestBoundaryFacade,
     TurnoverLedgerTagSelectionRequestBoundaryFacade,
     TurnoverLedgerWithdrawRequestBoundaryFacade,
-)
-from fin_ops_platform.services.turnover_ledger_read_model_refresh_producer import (
-    TurnoverLedgerReadModelRefreshProducer,
 )
 from fin_ops_platform.services.turnover_ledger_write_facade import TurnoverLedgerWriteFacade
 
@@ -652,7 +649,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(detail_payload["relation"]["relation_id"], relation_id)
         self.assertEqual(len(detail_payload["bank_rows"]), 2)
 
-    def test_get_turnover_ledger_enqueues_refresh_for_stale_sql_read_model_source_versions(self) -> None:
+    def test_get_turnover_ledger_ignores_retired_stale_read_model_repository(self) -> None:
         class StaleTurnoverReadRepository:
             def __init__(self) -> None:
                 self.saved_payload: dict[str, object] | None = None
@@ -691,14 +688,14 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["rows"], [])
-        self.assertEqual(payload["read_model_status"], "refreshing")
-        self.assertTrue(payload["refresh_enqueued"])
-        self.assertEqual(payload["refresh_reason"], "source_version_mismatch")
-        self.assertIn(("turnover_ledger", "all", "api_stale"), queue.enqueued)
+        self.assertNotIn("read_model_status", payload)
+        self.assertNotIn("source_versions", payload)
+        self.assertNotEqual(payload["rows"][0]["relation_id"], "stale_sql_row")
+        self.assertNotIn("refresh_enqueued", payload)
+        self.assertEqual(queue.enqueued, [])
         self.assertIsNone(repository.saved_payload)
 
-    def test_get_turnover_ledger_grouped_preserves_fresh_sql_read_model_metadata(self) -> None:
+    def test_get_turnover_ledger_grouped_does_not_read_retired_projection_payload(self) -> None:
         class FreshTurnoverReadRepository:
             def __init__(self, source_versions: dict[str, object]) -> None:
                 self.source_versions = source_versions
@@ -737,7 +734,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            source_versions = app._turnover_ledger_source_versions()
+            source_versions = {"retired_projection": "must_not_be_read"}
             repository = FreshTurnoverReadRepository(source_versions)
             queue = _QueueRecorder()
             app._turnover_ledger_query_service._read_repository = repository
@@ -747,15 +744,15 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["read_model_status"], "fresh")
-        self.assertFalse(payload["refresh_enqueued"])
-        self.assertEqual(payload["source_versions"], normalize_source_versions(source_versions))
+        self.assertNotIn("read_model_status", payload)
+        self.assertNotIn("refresh_enqueued", payload)
+        self.assertNotIn("source_versions", payload)
         self.assertNotIn("generation", payload)
         self.assertIn("groups", payload)
-        self.assertEqual(payload["groups"][0]["counterparty_name"], "SQL对方")
+        self.assertEqual(payload["groups"], [])
         self.assertEqual(queue.enqueued, [])
 
-    def test_get_turnover_ledger_grouped_preserves_stale_sql_refresh_metadata(self) -> None:
+    def test_get_turnover_ledger_grouped_never_falls_back_to_stale_projection(self) -> None:
         class StaleTurnoverReadRepository:
             def list_turnover_ledger_view(self, **_kwargs: object) -> dict[str, object]:
                 return {
@@ -797,11 +794,11 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["read_model_status"], "refreshing")
-        self.assertTrue(payload["refresh_enqueued"])
-        self.assertEqual(payload["refresh_reason"], "source_version_mismatch")
+        self.assertNotIn("read_model_status", payload)
+        self.assertNotIn("source_versions", payload)
+        self.assertNotIn("refresh_enqueued", payload)
         self.assertEqual(payload["groups"], [])
-        self.assertIn(("turnover_ledger", "all", "api_stale"), queue.enqueued)
+        self.assertEqual(queue.enqueued, [])
 
     def test_get_turnover_ledger_grouped_view_returns_groups(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -2134,7 +2131,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["updated_categories"][0]["category_code"], "borrow_in_company_pending_repayment")
-        self.assertTrue(payload["turnover_ledger_invalidated"])
+        self.assertNotIn("turnover_ledger_invalidated", payload)
         self.assertEqual(saved_category["category_code"], "borrow_in_company_pending_repayment")
         self.assertEqual(saved_category["category_label"], "公司暂借款：待还款")
 
@@ -2391,7 +2388,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(payload["affected_months"], ["2026-02", "2026-03"])
         self.assertEqual(payload["affected_scope_keys"], ["2026-02", "2026-03"])
         self.assertEqual(payload["operation_barrier_targets"], [])
-        self.assertTrue(payload["turnover_ledger_invalidated"])
+        self.assertNotIn("turnover_ledger_invalidated", payload)
         self.assertTrue(payload["workbench_invalidated"])
         self.assertEqual(
             facade.calls,
@@ -2521,7 +2518,8 @@ class TurnoverLedgerApiTests(unittest.TestCase):
     def test_turnover_relation_mutation_legacy_invalidation_path_is_removed(self) -> None:
         self.assertFalse(hasattr(Application, "_after_turnover_relation_mutation"))
         self.assertFalse(hasattr(Application, "_turnover_ledger_relation_mutation_invalidation_adapter"))
-        self.assertFalse(hasattr(TurnoverLedgerReadModelRefreshProducer, "clear_best_effort"))
+        self.assertFalse(hasattr(Application, "_turnover_ledger_read_model_refresh_producer"))
+        self.assertFalse(hasattr(Application, "_turnover_ledger_source_versions"))
 
     def test_turnover_bank_row_tag_batch_postgres_facade_path_skips_legacy_after_mutation_helper(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -2831,9 +2829,14 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                     ],
                 }
 
+        ledger_service = FakeLedgerService()
         routes = TurnoverLedgerApiRoutes(
-            ledger_service=FakeLedgerService(),  # type: ignore[arg-type]
+            ledger_service=ledger_service,  # type: ignore[arg-type]
             relation_service=object(),  # type: ignore[arg-type]
+            query_service=TurnoverLedgerQueryService(
+                connection=None,
+                local_ledger_service=ledger_service,  # type: ignore[arg-type]
+            ),
         )
 
         payload = routes.list_grouped_ledger(family="company")
@@ -2886,9 +2889,14 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                     ],
                 }
 
+        ledger_service = FakeLegacyLedgerService()
         routes = TurnoverLedgerApiRoutes(
-            ledger_service=FakeLegacyLedgerService(),  # type: ignore[arg-type]
+            ledger_service=ledger_service,  # type: ignore[arg-type]
             relation_service=object(),  # type: ignore[arg-type]
+            query_service=TurnoverLedgerQueryService(
+                connection=None,
+                local_ledger_service=ledger_service,  # type: ignore[arg-type]
+            ),
         )
 
         group = routes.list_grouped_ledger(family="company")["groups"][0]
@@ -2901,7 +2909,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(group["row_span"], 1)
         self.assertNotIn("rows", group)
 
-    def test_grouped_view_preserves_flat_read_model_group_breakdowns(self) -> None:
+    def test_grouped_view_does_not_convert_retired_flat_projection_payload(self) -> None:
         class FakeQueryService:
             def list_ledger(self, **_: object) -> dict[str, object]:
                 return {
@@ -2909,7 +2917,6 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                     "family_summaries": [],
                     "filters": {"family": "personal", "status": None},
                     "pagination": {"page": 1, "page_size": 50, "total": 1},
-                    "read_model_status": "fresh",
                     "rows": [
                         {
                             "relation_id": "turnover_rel_fang",
@@ -2937,21 +2944,8 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         )
 
         payload = routes.list_ledger(view="grouped", family="personal")
-        group = payload["groups"][0]
 
-        self.assertEqual(group["pending_direction"], "mixed")
-        self.assertEqual(group["pending_direction_label"], "混合余额")
-        self.assertEqual(group["pending_amount"], "250000.00")
-        self.assertEqual(group["pending_repayment_amount"], "200000.00")
-        self.assertEqual(group["pending_collection_amount"], "50000.00")
-        self.assertEqual(group["repaid_amount"], "100000.00")
-        self.assertEqual(group["collected_amount"], "25000.00")
-        self.assertEqual(group["closed_amount"], "0.00")
-        self.assertEqual(group["summary_row"]["pending_repayment_amount"], "200000.00")
-        self.assertEqual(group["summary_row"]["pending_collection_amount"], "50000.00")
-        # TODO: PF-P048 verify whether these backend-only compatibility fields can be removed safely.
-        self.assertEqual(group["summary_row"]["repaid_amount"], "100000.00")
-        self.assertEqual(group["summary_row"]["collected_amount"], "25000.00")
+        self.assertEqual(payload["groups"], [])
 
     def test_get_turnover_ledger_grouped_view_applies_family_filter(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -3179,7 +3173,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["extra"]["note"], "persistence warning is best effort")
-        self.assertTrue(payload["turnover_ledger_invalidated"])
+        self.assertNotIn("turnover_ledger_invalidated", payload)
         self.assertEqual(restored_response.status_code, 200)
         self.assertEqual(restored_payload["extra"]["note"], "persistence warning is best effort")
         self.assertEqual(read_repository.clear_calls, 0)
@@ -3337,7 +3331,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["extra"]["note"], "facade path")
         self.assertEqual(payload["row"], {"relation_id": "turnover_rel_facade", "note": "facade path"})
-        self.assertTrue(payload["turnover_ledger_invalidated"])
+        self.assertNotIn("turnover_ledger_invalidated", payload)
         self.assertEqual(
             facade.calls,
             [
@@ -3373,7 +3367,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["extra"]["note"], "handler boundary")
-        self.assertTrue(payload["turnover_ledger_invalidated"])
+        self.assertNotIn("turnover_ledger_invalidated", payload)
         self.assertEqual(
             facade.calls,
             [

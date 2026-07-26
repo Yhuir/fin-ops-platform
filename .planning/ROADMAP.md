@@ -650,4 +650,26 @@ Plans:
 
 - [ ] 32-01-PLAN — Add RED counterexamples, repair exact relation/Cost proof, delete weak paths, run targeted gates, deploy once and close production evidence.
 
+### Phase 33: 外部往来款直接读取统一事实源
+
+**Goal:** Replace the Turnover ledger read-model/freshness/worker path with one repeatable-read
+canonical query on page access, while preserving canonical writes, API behavior and other-page isolation.
+**Requirements:** TURNWB-01, TURNWB-02, TURNWB-03, TURNWB-04
+**Depends on:** Phase 32 local exact-source proof and Phase 31 canonical closure selection.
+**Canonical refs:** `.planning/phases/33-turnover-direct-canonical-read/33-01-PLAN.md`,
+`docs/modules/turnover-ledger/boundary-io.md`, `docs/modules/workbench-relations/boundary-io.md`,
+`docs/modules/bank-details/boundary-io.md`
+**Success Criteria** (what must be TRUE):
+
+  1. Every Turnover page GET reads current canonical bank/category/settings/relation/extra facts in one read-only snapshot.
+  2. Turnover GET creates no read-model job or unrelated page I/O, and writes continue through the existing canonical UoW.
+  3. The retired Turnover projection, worker, freshness and polling paths have no production callers.
+  4. Targeted local gates and one production candidate prove Turnover/Workbench equality, rollback-safe fixture recovery and measured latency.
+
+**Plans:** 1 plan
+
+Plans:
+
+- [ ] 33-01-PLAN — Direct canonical read cutover, legacy removal, targeted verification and production closure.
+
 ---

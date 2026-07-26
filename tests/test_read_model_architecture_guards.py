@@ -188,11 +188,6 @@ DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
     ): (1, "exact preview selection verifies fresh status and the active generation before and after its bounded SQL read."),
     (
         "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
-        "PostgresSummaryReadModelRepository.list_turnover_ledger_view",
-        "dict read_model_status=fresh",
-    ): (1, "repository returns the turnover ledger view; query service applies source-version freshness gate."),
-    (
-        "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
         "PostgresSummaryReadModelRepository._bank_batch_source_versions_summary",
         "dict read_model_status=fresh",
     ): (1, "repository summary exposes source_versions metadata only after bank batch readiness is fresh."),

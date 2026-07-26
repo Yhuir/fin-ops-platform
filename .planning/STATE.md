@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 32 candidate locally verified; production deployment and proof pending
-last_updated: "2026-07-26T17:04:00+08:00"
-last_activity: 2026-07-26 -- Phase 32 targeted local gates passed
+stopped_at: Phase 33 direct-canonical Turnover implementation started; Phase 32 production proof joins the same candidate
+last_updated: "2026-07-26T20:20:00+08:00"
+last_activity: 2026-07-26 -- Phase 33 implementation started after full boundary review
 progress:
   total_phases: 30
   completed_phases: 5
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-16)
 
 **Core value:** Preserve production finance workflow correctness while improving individual pages through isolated, reviewable GSD phases.
-**Current focus:** Phase 32 — read-model-exact-source-proof-closure
+**Current focus:** Phase 33 — turnover-direct-canonical-read
 
 ## Current Position
 
-Phase: 32 (read-model-exact-source-proof-closure) — EXECUTING
+Phase: 33 (turnover-direct-canonical-read) — EXECUTING
 Plan: 1 of 1
-Status: Candidate locally verified; production deployment and proof pending
-Last activity: 2026-07-26 -- Phase 32 targeted local gates passed
+Status: Direct-canonical implementation in progress
+Last activity: 2026-07-26 -- Phase 33 implementation started after full boundary review
 
-Progress: [████████░░] local implementation and verification complete; production proof pending
+Progress: [██░░░░░░░░] boundary review and executable plan complete
 
 ## Performance Metrics
 

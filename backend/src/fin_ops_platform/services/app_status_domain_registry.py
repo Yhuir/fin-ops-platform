@@ -123,9 +123,6 @@ APP_STATUS_DOMAIN_REGISTRY: tuple[AppStatusDomainDefinition, ...] = (
         key="turnover_ledger",
         label="往来款管理",
         route="/turnover-ledger",
-        read_model_keys=("turnover_ledger",),
-        worker_instances=("turnover-ledger",),
-        job_types=("turnover_ledger.read_model.refresh",),
     ),
     AppStatusDomainDefinition(
         key="etc_tickets",

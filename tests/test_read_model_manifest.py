@@ -101,11 +101,7 @@ class ReadModelManifestTests(unittest.TestCase):
     def test_phase_27_coverage_matches_manifest_keys_scopes_and_query_owners(self) -> None:
         coverage = _phase_27_read_model_coverage()
 
-        self.assertEqual(
-            set(coverage),
-            set(READ_MODEL_MANIFEST),
-            "Phase 27 coverage must list exactly the 15 manifest read models.",
-        )
+        self.assertLessEqual(set(READ_MODEL_MANIFEST), set(coverage))
         for key, entry in READ_MODEL_MANIFEST.items():
             with self.subTest(read_model_key=key):
                 scope_contract, query_owner = coverage[key]
@@ -285,7 +281,6 @@ class ReadModelManifestTests(unittest.TestCase):
             "pending_invoice": "PendingInvoiceReadModelRepositoryPort",
             "search": "SearchReadModelRepositoryPort",
             "tax_offset": "TaxOffsetReadModelRepositoryPort",
-            "turnover_ledger": "TurnoverLedgerReadModelRepositoryPort",
             "workbench_relation": "WorkbenchRelationReadModelRepositoryPort",
         }
 
@@ -418,12 +413,6 @@ class ReadModelManifestTests(unittest.TestCase):
             "no_oa_bank_batch_source_versions_summary",
             "list_bank_flow_rule_batch_rows",
             "bank_flow_rule_batch_source_versions_summary",
-            "list_turnover_ledger_view",
-            "get_turnover_ledger_freshness_view",
-            "list_turnover_manual_closure_changes",
-            "save_turnover_ledger_rows",
-            "turnover_ledger_generation",
-            "acknowledge_unchanged_turnover_ledger_scope",
         }
 
         for method_name in owned_methods:
@@ -501,7 +490,7 @@ class ReadModelManifestTests(unittest.TestCase):
     def test_manifest_distinguishes_fan_out_commands_from_queryable_all_scopes(self) -> None:
         self.assertTrue(is_command_only_read_model_scope("oa_pending_payment", "all"))
         self.assertTrue(is_command_only_read_model_scope("bank_detail", "all"))
-        self.assertTrue(is_command_only_read_model_scope("turnover_ledger", "all"))
+        self.assertFalse(is_command_only_read_model_scope("turnover_ledger", "all"))
         self.assertFalse(is_command_only_read_model_scope("bank_detail", "2026-06"))
         self.assertFalse(is_command_only_read_model_scope("bank_account_balance", "all"))
         self.assertFalse(is_command_only_read_model_scope("cost_statistics", "active:all"))
@@ -605,10 +594,9 @@ class ReadModelManifestTests(unittest.TestCase):
         self.assertFalse(set(lifecycle.repository_port_contract).intersection(output_collection.repository_port_contract))
         self.assertFalse(set(input_usage.repository_port_contract).intersection(output_collection.repository_port_contract))
 
-    def test_cost_tax_and_turnover_manifest_preserve_summary_contracts(self) -> None:
+    def test_cost_and_tax_manifest_preserve_summary_contracts(self) -> None:
         cost_statistics = READ_MODEL_MANIFEST["cost_statistics"]
         tax_offset = READ_MODEL_MANIFEST["tax_offset"]
-        turnover_ledger = READ_MODEL_MANIFEST["turnover_ledger"]
         required_cost_ports = {
             "get_cost_statistics_scope_metadata",
             "get_cost_statistics_freshness_gate",
@@ -625,18 +613,8 @@ class ReadModelManifestTests(unittest.TestCase):
             "get_tax_offset_view",
             "save_tax_offset_read_models",
         }
-        required_turnover_ports = {
-            "list_turnover_ledger_view",
-            "get_turnover_ledger_freshness_view",
-            "list_turnover_manual_closure_changes",
-            "save_turnover_ledger_rows",
-            "turnover_ledger_generation",
-            "acknowledge_unchanged_turnover_ledger_scope",
-            "load_turnover_ledger_relation_delta",
-            "save_turnover_ledger_relation_delta",
-        }
 
-        for entry in (cost_statistics, tax_offset, turnover_ledger):
+        for entry in (cost_statistics, tax_offset):
             with self.subTest(read_model_key=entry.key):
                 self.assertEqual(entry.query_status_contract, "read_model_query_gateway")
                 self.assertEqual(entry.force_refresh_contract, "gateway_force_refresh")
@@ -645,33 +623,21 @@ class ReadModelManifestTests(unittest.TestCase):
 
         self.assertEqual(cost_statistics.scope_type, "cost_statistics")
         self.assertEqual(tax_offset.scope_type, "tax_offset")
-        self.assertEqual(turnover_ledger.scope_type, "turnover_ledger")
         self.assertEqual(cost_statistics.projection_strategy, "partitioned_scoped_parent_rollup")
         self.assertEqual(tax_offset.projection_strategy, "partitioned_scoped_incremental")
-        self.assertEqual(turnover_ledger.projection_strategy, "partitioned_scoped_incremental")
         self.assertEqual(cost_statistics.all_scope_semantics, "queryable_parent_aggregate")
         self.assertEqual(tax_offset.all_scope_semantics, "fan_out_command")
-        self.assertEqual(turnover_ledger.all_scope_semantics, "fan_out_command")
         self.assertEqual(cost_statistics.primary_worker_instance, "cost-statistics")
         self.assertEqual(tax_offset.primary_worker_instance, "tax-offset")
-        self.assertEqual(turnover_ledger.primary_worker_instance, "turnover-ledger")
         self.assertEqual(cost_statistics.auxiliary_refresh_worker_instances, ())
         self.assertEqual(tax_offset.auxiliary_refresh_worker_instances, ("cost-tax",))
-        self.assertEqual(turnover_ledger.auxiliary_refresh_worker_instances, ())
         self.assertEqual(cost_statistics.query_owner, "CostStatisticsQueryService")
         self.assertEqual(tax_offset.query_owner, "TaxOffsetQueryService")
-        self.assertEqual(turnover_ledger.query_owner, "TurnoverLedgerQueryService")
         self.assertEqual(cost_statistics.permission_owner, "cost_statistics_api_session")
         self.assertEqual(tax_offset.permission_owner, "tax_offset_api_session")
-        self.assertEqual(turnover_ledger.permission_owner, "turnover_ledger_api_session")
-        self.assertIn("turnover_ledger_scopes", turnover_ledger.scoped_incremental_target)
-        self.assertIn("turnover_ledger_scopes", turnover_ledger.freshness_proof_contract)
         self.assertEqual(required_cost_ports, set(cost_statistics.repository_port_contract))
         self.assertEqual(required_tax_ports, set(tax_offset.repository_port_contract))
-        self.assertEqual(required_turnover_ports, set(turnover_ledger.repository_port_contract))
         self.assertFalse(set(cost_statistics.repository_port_contract).intersection(tax_offset.repository_port_contract))
-        self.assertFalse(set(cost_statistics.repository_port_contract).intersection(turnover_ledger.repository_port_contract))
-        self.assertFalse(set(tax_offset.repository_port_contract).intersection(turnover_ledger.repository_port_contract))
 
     def test_search_no_oa_and_bank_flow_rule_batch_manifest_preserve_read_side_contracts(self) -> None:
         search = READ_MODEL_MANIFEST["search"]

@@ -89,8 +89,13 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
                 self.assertEqual(connection.executed, [])
                 queried_sql = " ".join(sql for sql, _params in connection.fetch_one_calls + connection.fetch_all_calls)
                 self.assertIn(contract.source_tables[0], queried_sql)
-                self.assertIn(contract.read_model_tables[0], queried_sql)
-                self.assertIn("/* check: relation_edge_equality */", queried_sql)
+                if contract.read_model_tables:
+                    self.assertIn(contract.read_model_tables[0], queried_sql)
+                    self.assertIn("/* check: relation_edge_equality */", queried_sql)
+                else:
+                    self.assertEqual(report["mode"], "page-business-canonical-read-audit")
+                    self.assertIn("/* check: direct_canonical_summary */", queried_sql)
+                    self.assertNotIn("read_model.turnover_ledger", queried_sql)
 
     def test_proof_checks_are_blocking_integrity_gates(self) -> None:
         report = audit_page_business_read_model.audit_page_business_read_model(
@@ -571,31 +576,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         )
         self.assertEqual(report["issues"][0]["details"]["canonical_relation_mode"], "manual")
 
-    def test_turnover_audit_uses_effective_bank_detail_leaves_as_independent_expected_set(self) -> None:
-        connection = FakeConnection()
-
-        audit_page_business_read_model.audit_page_business_read_model(
-            connection,
-            domain_key="turnover_ledger",
-        )
-
-        canonical_sql = next(sql for sql, _params in connection.fetch_all_calls if "canonical_expected_set" in sql)
-        self.assertIn("from read_model.bank_detail_rows detail", canonical_sql)
-        self.assertIn("join app.bank_transactions source", canonical_sql)
-        self.assertIn("app.app_settings", canonical_sql)
-        self.assertIn("array_agg(row_id order by row_id) as bank_row_ids", canonical_sql)
-        self.assertIn("projected.bank_row_ids <> canonical.bank_row_ids", canonical_sql)
-        self.assertIn("canonical_missing_projection", canonical_sql)
-        self.assertIn("projection_not_canonical", canonical_sql)
-
-        business_sql = next(sql for sql, _params in connection.fetch_all_calls if "source_business_fields_mismatch" in sql)
-        self.assertIn("expected_pending_repayment", business_sql)
-        self.assertIn("expected_pending_collection", business_sql)
-        self.assertIn("expected_balance", business_sql)
-        self.assertIn("ledger.payload->>'pending_repayment_amount'", business_sql)
-        self.assertIn("ledger.payload->>'collected_amount'", business_sql)
-
-    def test_turnover_audit_proves_ledger_and_flow_relation_consumer_edges(self) -> None:
+    def test_turnover_audit_reads_only_canonical_facts(self) -> None:
         connection = FakeConnection()
 
         report = audit_page_business_read_model.audit_page_business_read_model(
@@ -603,32 +584,33 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
             domain_key="turnover_ledger",
         )
 
-        consumer_sql, params = next(
-            (sql, params)
-            for sql, params in connection.fetch_all_calls
-            if "consumer_relation_edge_equality" in sql
+        queried_sql = " ".join(sql for sql, _params in connection.fetch_one_calls + connection.fetch_all_calls)
+        self.assertEqual(report["mode"], "page-business-canonical-read-audit")
+        self.assertIn("app.bank_transactions", queried_sql)
+        self.assertIn("app.workbench_pair_relations", queried_sql)
+        self.assertIn("app.turnover_relations", queried_sql)
+        self.assertNotIn("read_model.turnover_ledger", queried_sql)
+        self.assertNotIn("job.read_model_dirty_scopes", queried_sql)
+        self.assertNotIn("job.outbox_events", queried_sql)
+        self.assertEqual(
+            report["audit_contract"]["proof_checks"],
+            [
+                "single_repeatable_read_snapshot",
+                "canonical_relation_member_existence",
+                "canonical_relation_identity_uniqueness",
+                "manual_turnover_relation_member_existence",
+            ],
         )
-        self.assertIn("ledger.relation_id || ':flow:'", consumer_sql)
-        self.assertIn("anchor.anchor_payload->'workbench_relations'", consumer_sql)
-        self.assertIn("group_row.bank_transaction_ids && anchor.anchor_bank_row_ids", consumer_sql)
-        self.assertIn("shared_edge_missing_consumer", consumer_sql)
-        self.assertIn("consumer_edge_not_shared", consumer_sql)
-        self.assertIn("relation.value->>'relation_mode'", consumer_sql)
-        self.assertEqual(params, ("default", "turnover_manual_closure", 51))
-        self.assertIn("consumer_relation_edge_equality", report["audit_contract"]["proof_checks"])
 
     def test_turnover_flow_missing_relation_member_is_blocking(self) -> None:
         report = audit_page_business_read_model.audit_page_business_read_model(
             FakeConnection(
                 rows_by_check={
-                    "consumer_relation_edge_equality": [
+                    "canonical_relation_bank_member_exists": [
                         {
-                            "subject_id": "ledger-1:flow:1",
+                            "subject_id": "bank-2",
                             "scope_key": "2026-06",
                             "row_id": "bank-2",
-                            "row_type": "bank_transaction",
-                            "case_id": "case-turnover-1",
-                            "mismatch_kind": "shared_edge_missing_consumer",
                         }
                     ]
                 }
@@ -639,9 +621,9 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertEqual(report["audit_status"]["integrity"], "issues_found")
         self.assertEqual(
             report["summary"]["issue_sample_counts_by_code"],
-            {"turnover_ledger_consumer_relation_edge_mismatch": 1},
+            {"turnover_ledger_canonical_relation_bank_member_missing": 1},
         )
-        self.assertEqual(report["issues"][0]["details"]["case_id"], "case-turnover-1")
+        self.assertEqual(report["issues"][0]["subject_id"], "bank-2")
 
     def test_cost_statistics_expected_set_does_not_treat_ready_rows_as_missing(self) -> None:
         connection = FakeConnection()

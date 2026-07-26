@@ -238,10 +238,9 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
 
         self.assertEqual(worker_app._infer_worker_kind(args), "bank-account-balance-read-model")
 
-    def test_worker_kind_inference_uses_registry_for_turnover_ledger_worker(self) -> None:
-        args = worker_app.build_parser().parse_args(["--enable-turnover-ledger-read-model-refresh"])
-
-        self.assertEqual(worker_app._infer_worker_kind(args), "turnover-ledger-read-model")
+    def test_turnover_ledger_worker_registration_is_removed(self) -> None:
+        self.assertNotIn("turnover-ledger", registration_by_instance_name())
+        self.assertNotIn("turnover_ledger.read_model.refresh", read_model_event_types())
 
     def test_worker_kind_inference_uses_registry_for_no_oa_bank_batch_worker(self) -> None:
         args = worker_app.build_parser().parse_args(["--enable-no-oa-bank-batch-read-model-refresh"])

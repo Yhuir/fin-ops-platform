@@ -19,6 +19,10 @@ from fin_ops_platform.services.turnover_relation_service import (
     TURNOVER_CATEGORY_RULES,
     TurnoverRelationService,
 )
+from fin_ops_platform.services.turnover_ledger_relation_context import (
+    apply_workbench_relation_context,
+    bank_row_ids,
+)
 
 
 MONEY_QUANT = Decimal("0.01")
@@ -63,6 +67,7 @@ class TurnoverLedgerService:
         extra_service: Any | None = None,
         category_provider: Any | None = None,
         selected_tag_codes_provider: Callable[[], list[str]] | None = None,
+        workbench_relation_source_provider: Callable[[list[str]], list[dict[str, Any]]] | None = None,
         today_provider: Callable[[], date] | None = None,
     ) -> None:
         self._import_service = import_service
@@ -71,6 +76,7 @@ class TurnoverLedgerService:
         self._relation_service = relation_service
         self._extra_service = extra_service
         self._selected_tag_codes_provider = selected_tag_codes_provider
+        self._workbench_relation_source_provider = workbench_relation_source_provider
         self._today_provider = today_provider or date.today
 
     def list_ledger(
@@ -87,6 +93,9 @@ class TurnoverLedgerService:
         rows_by_id = {str(row.get("id") or ""): row for row in bank_rows}
         ledger_rows = [self._row_payload(relation, rows_by_id) for relation in relations]
         ledger_rows = [row for row in ledger_rows if row is not None]
+        relation_source_rows = self._workbench_relation_source_rows(ledger_rows)
+        if relation_source_rows:
+            ledger_rows = apply_workbench_relation_context(ledger_rows, relation_source_rows)
         filtered_rows = self._apply_filters(ledger_rows, family=family, direction=direction, status=status)
         filtered_rows.sort(
             key=lambda row: (
@@ -170,6 +179,10 @@ class TurnoverLedgerService:
                 continue
             items.append(self._unclassified_item(row))
 
+        all_groups = self._group_items(items)
+        relation_source_rows = self._workbench_relation_source_rows(all_groups)
+        if relation_source_rows:
+            all_groups = apply_workbench_relation_context(all_groups, relation_source_rows)
         filtered_items = self._apply_item_filters(items, family=family, direction=direction, status=status)
         filtered_items.sort(
             key=lambda item: (
@@ -178,7 +191,12 @@ class TurnoverLedgerService:
             ),
             reverse=True,
         )
-        groups = self._group_items(filtered_items)
+        if len(filtered_items) == len(items):
+            groups = all_groups
+        else:
+            groups = self._group_items(filtered_items)
+            if relation_source_rows:
+                groups = apply_workbench_relation_context(groups, relation_source_rows)
         normalized_page = max(int(page or 1), 1)
         normalized_page_size = min(max(int(page_size or 50), 1), 200)
         start = (normalized_page - 1) * normalized_page_size
@@ -205,6 +223,61 @@ class TurnoverLedgerService:
                 "direction": self._normalize_direction_filter(direction),
                 "status": self._normalize_status(status),
             },
+            "statistics": self._page_statistics(all_groups),
+        }
+
+    def _workbench_relation_source_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        provider = self._workbench_relation_source_provider
+        if provider is None:
+            return []
+        payload = provider(bank_row_ids(rows))
+        if not isinstance(payload, list):
+            raise RuntimeError("turnover_workbench_relation_source_unavailable")
+        return [dict(item) for item in payload if isinstance(item, dict)]
+
+    @staticmethod
+    def _page_statistics(groups: list[dict[str, Any]]) -> dict[str, int]:
+        flows_by_id: dict[str, dict[str, Any]] = {}
+        for group in groups:
+            for flow in list(group.get("flow_rows") or []):
+                if not isinstance(flow, dict):
+                    continue
+                row_id = str(flow.get("source_bank_row_id") or "").strip()
+                if row_id:
+                    flows_by_id[row_id] = flow
+        closed_group_count = sum(
+            1
+            for group in groups
+            if bool(group.get("cash_closure_linked"))
+            or bool(
+                (group.get("summary_row") if isinstance(group.get("summary_row"), dict) else {}).get(
+                    "cash_closure_linked"
+                )
+            )
+        )
+        expense_count = sum(
+            1
+            for flow in flows_by_id.values()
+            if str(flow.get("flow_direction") or "").strip() == "expense"
+        )
+        income_count = sum(
+            1
+            for flow in flows_by_id.values()
+            if str(flow.get("flow_direction") or "").strip() == "income"
+        )
+        return {
+            "transaction_count": len(flows_by_id),
+            "expense_transaction_count": expense_count,
+            "income_transaction_count": income_count,
+            "ledger_group_count": len(groups),
+            "closed_group_count": closed_group_count,
+            "unclosed_group_count": max(len(groups) - closed_group_count, 0),
+            "linked_oa_transaction_count": sum(
+                1 for flow in flows_by_id.values() if bool(flow.get("linked_oa"))
+            ),
+            "linked_invoice_transaction_count": sum(
+                1 for flow in flows_by_id.values() if bool(flow.get("linked_invoice"))
+            ),
         }
 
     def get_relation_detail(self, relation_id: str) -> dict[str, Any]:

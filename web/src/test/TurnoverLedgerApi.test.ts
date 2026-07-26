@@ -119,7 +119,6 @@ describe("turnover ledger API", () => {
           },
         ],
         affected_months: ["2026-05"],
-        turnover_ledger_invalidated: true,
         workbench_invalidated: true,
       });
     });
@@ -142,7 +141,7 @@ describe("turnover ledger API", () => {
       version: 1,
     });
     expect(result.affectedMonths).toEqual(["2026-05"]);
-    expect(result.turnoverLedgerInvalidated).toBe(true);
+    expect(result.workbenchInvalidated).toBe(true);
   });
 
   test("maps ledger, detail, confirm, and withdraw responses from snake_case", async () => {

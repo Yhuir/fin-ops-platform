@@ -1261,7 +1261,6 @@ class TurnoverLedgerBankRowTagsRequestBoundaryFacade:
         result = facade.update_bank_row_tags_batch(**update_kwargs)
         payload = dict(result or {})
         payload["affected_months"] = list(affected_months)
-        payload["turnover_ledger_invalidated"] = True
         payload["workbench_invalidated"] = True
         payload.update(_turnover_write_target_envelope(affected_months))
         return payload
@@ -1325,7 +1324,6 @@ class TurnoverLedgerRelationExtraRequestBoundaryFacade:
             idempotency_key=idempotency_key,
         )
         response_payload = dict(result or {})
-        response_payload["turnover_ledger_invalidated"] = True
         response_payload.update(_turnover_write_target_envelope(list(scope_keys or ["all"])))
         return response_payload
 

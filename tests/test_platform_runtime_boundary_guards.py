@@ -2564,30 +2564,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append(f"bank detail refresh producer writes job queue tables directly: {direct_job_writes}")
 
         turnover_producer_path = SERVICES_ROOT / "turnover_ledger_read_model_refresh_producer.py"
-        turnover_producer_source = turnover_producer_path.read_text(encoding="utf-8")
-        turnover_producer_tree = _parse(turnover_producer_path)
-        turnover_producer_class = _class_source(
-            turnover_producer_tree,
-            turnover_producer_source,
-            "TurnoverLedgerReadModelRefreshProducer",
-        )
-        for snippet in (
-            "def enqueue(",
-            "refresh_gateway = self._refresh_gateway_provider()",
-            'refresh_gateway.enqueue_many("turnover_ledger"',
-        ):
-            if snippet not in turnover_producer_class:
-                violations.append(f"turnover ledger refresh producer is missing boundary behavior {snippet}")
-        for forbidden in (
-            "def clear_best_effort(",
-            "clear_turnover_ledger_rows",
-            "read_repository_provider",
-        ):
-            if forbidden in turnover_producer_class:
-                violations.append(f"turnover ledger refresh producer still exposes direct clear I/O {forbidden}")
-        direct_job_writes = _sql_write_table_references(turnover_producer_class)
-        if direct_job_writes:
-            violations.append(f"turnover ledger refresh producer writes job queue tables directly: {direct_job_writes}")
+        if turnover_producer_path.exists():
+            violations.append("retired turnover ledger refresh producer still exists")
 
         factory_source = _function_source(server_tree, server_source, "_bank_details_application_service")
         if _function_source(server_tree, server_source, "_enqueue_turnover_ledger_read_model_refreshes"):
@@ -4748,7 +4726,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "confirm_zero_difference_closure",
         )
         cash_withdraw_source = _function_source(facade_tree, facade_source, "withdraw_cash_closure_case")
-        projection_source = (SERVICES_ROOT / "turnover_ledger_sql_projection.py").read_text(encoding="utf-8")
+        projection_path = SERVICES_ROOT / "turnover_ledger_sql_projection.py"
 
         violations: list[str] = []
         if "TurnoverLedgerRelationMutationInvalidationLegacyAdapter" in source:
@@ -4785,8 +4763,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("modern closure confirm restored duplicate Turnover relation persistence")
         if '"turnover_relation":' in closure_confirm_source or '"relation": relation' in closure_confirm_source:
             violations.append("modern closure confirm response restored a non-canonical Turnover relation")
-        if "_turnover_relation_id_from_case_id" in projection_source:
-            violations.append("turnover projection restored legacy relation-id inference from canonical case ids")
+        if projection_path.exists():
+            violations.append("retired turnover ledger SQL projection still exists")
         for removed_writer in (
             "TurnoverLedgerDirtyOutboxWriter",
             "TurnoverLedgerLocalDirtyOutboxWriter",

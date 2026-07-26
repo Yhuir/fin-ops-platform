@@ -86,9 +86,7 @@ const EMPTY_TAG_SELECTION: TurnoverLedgerTagSelection = {
 };
 
 const SELF_SUB_LABEL = "主标签本身";
-const POST_MUTATION_SYNC_WARNING_MESSAGE = "操作已提交，后台同步尚未完成，请稍后刷新。";
-const ACCESS_FRESH_TIMEOUT_MS = 3_000;
-const ACCESS_FRESH_POLL_MS = 150;
+const POST_MUTATION_RELOAD_WARNING_MESSAGE = "操作已成功，但页面重新加载失败，请刷新页面重试。";
 
 type TurnoverLedgerToastSeverity = "success" | "warning" | "error";
 
@@ -228,36 +226,16 @@ function relationDetailErrorMessage(caught: unknown) {
   return caught instanceof Error ? caught.message : "往来关系详情加载失败";
 }
 
-async function waitForFreshLedgerOnAccess(
+async function reloadLedgerAfterWrite(
   reloadLedger: () => Promise<TurnoverLedgerGroupedResponse>,
   markReloading: () => void,
 ) {
-  const deadline = Date.now() + ACCESS_FRESH_TIMEOUT_MS;
   markReloading();
-  while (true) {
-    const ledger = await reloadLedger();
-    if ((cleanText(ledger.readModelStatus) || "refreshing") === "fresh") {
-      return ledger;
-    }
-    if (Date.now() >= deadline) {
-      return null;
-    }
-    await new Promise<void>((resolve) => {
-      window.setTimeout(resolve, ACCESS_FRESH_POLL_MS);
-    });
-  }
-}
-
-async function waitForPostMutationVisibility(
-  reloadLedger: () => Promise<TurnoverLedgerGroupedResponse>,
-  markReloading: () => void,
-) {
   try {
-    return await waitForFreshLedgerOnAccess(reloadLedger, markReloading)
-      ? ""
-      : POST_MUTATION_SYNC_WARNING_MESSAGE;
+    await reloadLedger();
+    return "";
   } catch {
-    return POST_MUTATION_SYNC_WARNING_MESSAGE;
+    return POST_MUTATION_RELOAD_WARNING_MESSAGE;
   }
 }
 
@@ -379,8 +357,7 @@ export default function TurnoverLedgerPage() {
 
   const summary = ledger?.summary ?? DEFAULT_SUMMARY;
   const groups = ledger?.groups ?? [];
-  const readModelStatus = cleanText(ledger?.readModelStatus) || "refreshing";
-  const readModelNeedsRefresh = readModelStatus !== "fresh";
+  const pageDataStatus = error ? "stale" : ledger ? "fresh" : "refreshing";
   const familySummaryMap = useMemo(() => new Map((ledger?.familySummaries ?? []).map((item) => [item.family, item])), [
     ledger?.familySummaries,
   ]);
@@ -417,14 +394,12 @@ export default function TurnoverLedgerPage() {
   }, [selectedClosureRows, selectedRowsAllCashClosure]);
   const canWithdrawSelectedCashClosure = Boolean(
     canMutateData
-      && !readModelNeedsRefresh
       && selectedRowsAllCashClosure
       && selectedCashClosureCaseId
       && !closureSubmitting
       && !mutatingRelation,
   );
   const canOpenClosureDrawer = canMutateData
-    && !readModelNeedsRefresh
     && selectedClosureRows.length >= 2
     && !selectedRowsContainCashClosure;
   const closureActionLabel = selectedRowsAllCashClosure ? "撤回闭环" : "确认闭环";
@@ -597,7 +572,7 @@ export default function TurnoverLedgerPage() {
           setClosureSelection(null);
           setClosureDrawerOpen(false);
           setMessage("正在刷新往来款台账...");
-          postMutationSyncWarning = await waitForPostMutationVisibility(
+          postMutationSyncWarning = await reloadLedgerAfterWrite(
             reloadLedgerAfterMutation,
             () => setMessage("正在刷新往来款台账..."),
           );
@@ -681,7 +656,7 @@ export default function TurnoverLedgerPage() {
           setExtraForm(saved.extra);
           setExtraDirty(false);
           setMessage("正在刷新往来款台账...");
-          postMutationSyncWarning = await waitForPostMutationVisibility(
+          postMutationSyncWarning = await reloadLedgerAfterWrite(
             reloadLedgerAfterMutation,
             () => setMessage("正在刷新往来款台账..."),
           );
@@ -717,7 +692,7 @@ export default function TurnoverLedgerPage() {
             ? await confirmTurnoverRelation({ bankRowIds: targetRow.bankRowIds })
             : await withdrawTurnoverRelation({ relationId: targetRow.relationId });
           setMessage("正在刷新往来款台账...");
-          postMutationSyncWarning = await waitForPostMutationVisibility(
+          postMutationSyncWarning = await reloadLedgerAfterWrite(
             reloadLedgerAfterMutation,
             () => setMessage("正在刷新往来款台账..."),
           );
@@ -757,7 +732,7 @@ export default function TurnoverLedgerPage() {
           setClosureSelection(null);
           setClosureDrawerOpen(false);
           setMessage("正在刷新往来款台账...");
-          postMutationSyncWarning = await waitForPostMutationVisibility(
+          postMutationSyncWarning = await reloadLedgerAfterWrite(
             reloadLedgerAfterMutation,
             () => setMessage("正在刷新往来款台账..."),
           );
@@ -804,7 +779,7 @@ export default function TurnoverLedgerPage() {
           setDraftSelectedTagCodes(new Set(saved.selectedTagCodes));
           setTagDrawerOpen(false);
           setMessage("正在刷新往来款台账...");
-          postMutationSyncWarning = await waitForPostMutationVisibility(
+          postMutationSyncWarning = await reloadLedgerAfterWrite(
             reloadLedgerAfterMutation,
             () => setMessage("正在刷新往来款台账..."),
           );
@@ -847,7 +822,7 @@ export default function TurnoverLedgerPage() {
     }
   };
 
-  const visibleStatistics = readModelStatus === "fresh" ? ledger?.statistics : null;
+  const visibleStatistics = ledger?.statistics;
   const titleAccessory = (
     <div className="page-title-accessory-group">
       <PageStatisticsPopover
@@ -871,7 +846,7 @@ export default function TurnoverLedgerPage() {
           ariaLabel="Audit 外部往来款管理"
           pageKey="turnover-ledger"
           label="外部往来款管理"
-          readModelStatus={readModelStatus}
+          readModelStatus={pageDataStatus}
         />
       ) : null}
     </div>
@@ -915,12 +890,6 @@ export default function TurnoverLedgerPage() {
             {error}
           </StatePanel>
         ) : null}
-        {readModelNeedsRefresh ? (
-          <div className="turnover-ledger-page-notice turnover-ledger-page-notice--warning" role="alert">
-            往来款台账正在刷新，当前展示的是非最新数据。
-          </div>
-        ) : null}
-
         <div className="turnover-ledger-summary-grid">
           <SummaryCard
             label="当前待还款金额"
@@ -1144,7 +1113,7 @@ export default function TurnoverLedgerPage() {
             <button
               aria-busy={closureSubmitting}
               className="turnover-ledger-button turnover-ledger-button--primary"
-              disabled={!closurePreview.canConfirm || closureSubmitting || readModelNeedsRefresh}
+              disabled={!closurePreview.canConfirm || closureSubmitting}
               onClick={() => void handleConfirmClosure()}
               type="button"
             >

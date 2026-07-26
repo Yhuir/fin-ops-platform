@@ -1,5 +1,7 @@
 # Turnover Ledger Write Path and UoW Boundary Plan
 
+> 历史计划：读路径与 refresh side-effect 描述已被 2026-07-26 direct canonical read cutover 取代；当前运行时边界以 `docs/modules/turnover-ledger/boundary-io.md` 为准。
+
 对应 prompt：`PF-P051 - Turnover Ledger Write Path Discovery and UoW Boundary Planning`
 
 状态：PF-P051 `verified`；PF-P052 `verified`；PF-P053 `verified`；PF-P054 `verified`

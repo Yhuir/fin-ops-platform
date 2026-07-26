@@ -476,7 +476,9 @@ POST /api/turnover-ledger/relations/confirm
 
 结论：
 
-Turnover Ledger 是独立模块。与 Workbench 的协作必须通过 relation facts、source version、dirty scope 和 read model 投影，不允许直接调用 Workbench usecase 做同步更新。
+Turnover Ledger 是独立模块。自 2026-07-26 起，它与 Workbench 的读取协作只通过同一个 canonical
+`app.workbench_pair_relations` 事实表；页面在一个 repeatable-read 只读快照内组合结果，不再经过自己的
+source version、dirty scope、read model 或 worker，也不直接调用 Workbench usecase。
 
 ### PF-P046 Turnover Ledger Discovery Update
 
@@ -484,9 +486,9 @@ PF-P046 已对 PF-P045 main delta 后的 Turnover Ledger 做 Micro-JIT discovery
 
 新增确认：
 
-- Turnover Ledger 读路径已经有 `TurnoverLedgerQueryService`，它优先读取 `read_model.turnover_ledger_rows`，通过 `source_version_mismatch_reasons` 判断 freshness，并在 stale/miss 时通过 runtime queue enqueue `turnover_ledger.read_model.refresh`。
-- `GET /api/turnover-ledger?view=grouped` 需要同时支持原生 grouped payload 和 flat SQL read model payload 转 grouped 的兼容路径；PF-P045 的 grouped breakdown 修正属于必须锁定的接口契约。
-- `TurnoverLedgerReadModelRefreshService` + `TurnoverLedgerSqlProjectionBuilder` 已形成 worker refresh 链路，worker registry 中 `turnover-ledger-read-model` 是 required 且 RabbitMQ eligible。
+- Turnover Ledger 当前读路径由 `TurnoverLedgerQueryService` 在单个 canonical PostgreSQL snapshot 中直接构建；旧 SQL projection、flat compatibility、freshness enqueue 和 worker 链已删除。
+- `GET /api/turnover-ledger?view=grouped` 只接受原生 grouped payload，不再把旧 flat projection 转回 grouped。
+- Turnover 没有 manifest、scope policy、worker registration、RabbitMQ event 或 App Status readiness。
 - `RuntimeQueueRepository.enqueue_read_model_refresh_in_transaction()` 已提供 dirty scope + outbox + monotonic source_version 的平台能力，但 Turnover relation confirm/withdraw、extra update、bank-row-tags batch 仍由 `server.py` handler finalizer 编排多个 side effect，不是显式 Turnover Unit of Work。
 - `/api/turnover-ledger/bank-row-tags/batch` 是 Turnover API，但写入 Bankdetail category facts；后续必须用明确 service port 和 characterization tests 固定 ownership。
 - `turnover_ledger_extras` 仍存在 `legacy_turnover_ledger_extras_fallback_persist` 风险，后续应优先锁定并移除或限制 fallback。

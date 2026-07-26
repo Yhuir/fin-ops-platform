@@ -21,7 +21,6 @@ from fin_ops_platform.services.postgres_repositories.page_consumer_relation_audi
     BATCH_ACCOUNTING_DIRECT_CONSUMER,
     OA_PENDING_PAYMENT_CONSUMER,
     PENDING_INVOICE_CONSUMER,
-    TURNOVER_LEDGER_CONSUMER,
     page_consumer_relation_edge_equality_issues,
 )
 from fin_ops_platform.services.postgres_repositories.read_models import (
@@ -75,19 +74,17 @@ PAGE_AUDIT_CONTRACTS: dict[str, PageAuditContract] = {
         label="外部往来款管理",
         source_tables=(
             "app.bank_transactions",
+            "app.bank_transaction_categories",
+            "app.workbench_pair_relations",
             "app.turnover_relations",
             "app.turnover_ledger_extras",
             "app.app_settings",
         ),
-        read_model_tables=("read_model.turnover_ledger_rows",),
-        relation_tables=("read_model.workbench_relation_rows", "read_model.workbench_relation_groups"),
-        scope_types=("turnover_ledger", "bank_detail", "workbench_relation"),
-        event_types=(
-            "turnover_ledger.read_model.refresh",
-            "bank_detail.read_model.refresh",
-            "workbench_relation.read_model.refresh",
+        read_model_tables=(),
+        canonical_expected_set=(
+            "eligible bank facts, effective categories, active workbench pair relations, "
+            "retained manual turnover relations, settings, and ledger extras read in one database snapshot"
         ),
-        canonical_expected_set="eligible effective bank-detail turnover leaves, retained manual relations, and ledger extras",
         key_display_fields=(
             "family",
             "counterparty_name",
@@ -97,7 +94,6 @@ PAGE_AUDIT_CONTRACTS: dict[str, PageAuditContract] = {
             "interest fields",
         ),
         external_source_boundary="bank statement completeness before App import",
-        consumer_relation_contract=TURNOVER_LEDGER_CONSUMER,
     ),
     "batch_accounting": PageAuditContract(
         domain_key="batch_accounting",
@@ -207,21 +203,26 @@ def _audit_page_business_read_model_snapshot(
 ) -> dict[str, Any]:
     summary = _fetch_summary(connection, contract=contract, tenant_id=tenant_id)
     issues: list[AuditIssue] = []
+    direct_canonical_read = contract.domain_key == "turnover_ledger"
     checks: tuple[Callable[[Any, PageAuditContract, str, int], list[AuditIssue]], ...] = (
-        _dirty_scope_issues,
-        _outbox_backlog_issues,
-        _scope_row_count_mismatch_issues,
-        _page_statistics_issues,
-        _read_model_source_version_mismatch_issues,
-        _oa_pending_payment_fresh_gate_issues,
-        _missing_read_model_scope_issues,
-        _missing_read_model_row_issues,
-        _orphan_read_model_row_issues,
-        _duplicate_read_model_identity_issues,
-        _canonical_expected_set_issues,
-        _key_display_field_issues,
-        _relation_edge_equality_issues,
-        _consumer_relation_edge_equality_issues,
+        (_turnover_ledger_direct_canonical_issues,)
+        if direct_canonical_read
+        else (
+            _dirty_scope_issues,
+            _outbox_backlog_issues,
+            _scope_row_count_mismatch_issues,
+            _page_statistics_issues,
+            _read_model_source_version_mismatch_issues,
+            _oa_pending_payment_fresh_gate_issues,
+            _missing_read_model_scope_issues,
+            _missing_read_model_row_issues,
+            _orphan_read_model_row_issues,
+            _duplicate_read_model_identity_issues,
+            _canonical_expected_set_issues,
+            _key_display_field_issues,
+            _relation_edge_equality_issues,
+            _consumer_relation_edge_equality_issues,
+        )
     )
     for check in checks:
         issues.extend(check(connection, contract, tenant_id, limit + 1))
@@ -229,7 +230,7 @@ def _audit_page_business_read_model_snapshot(
     evaluation = evaluate_audit_issues(issues, sample_limit=limit)
     summary.update(evaluation.summary)
     return {
-        "mode": "page-business-read-model-audit",
+        "mode": "page-business-canonical-read-audit" if direct_canonical_read else "page-business-read-model-audit",
         "tenant_id": tenant_id,
         "domain_key": contract.domain_key,
         "label": contract.label,
@@ -246,32 +247,52 @@ def _audit_page_business_read_model_snapshot(
             "canonical_expected_set": contract.canonical_expected_set,
             "key_display_fields": list(contract.key_display_fields),
             "relation_edge_equality": (
-                "canonical == relation_groups == relation_rows == registered page consumer summaries"
+                "page reads canonical workbench_pair_relations directly in the same database snapshot"
+                if direct_canonical_read
+                else (
+                    "canonical == relation_groups == relation_rows == registered page consumer summaries"
                 if contract.consumer_relation_contract
                 else "canonical == relation_groups == relation_rows, including affected month scopes"
+                )
             ),
             "snapshot_consistency": snapshot_consistency,
             "database_snapshot": database_snapshot,
             "external_source_boundary": contract.external_source_boundary,
             "proof_checks": [
-                "canonical_expected_set_equality",
-                "missing_or_orphan_identity",
-                "key_display_field_recalculation",
-                "scope_count_and_source_version_equality",
-                "page_statistics_recalculation",
-                "bidirectional_relation_edge_equality",
-                *(["consumer_relation_edge_equality"] if contract.consumer_relation_contract else []),
                 *(
+                    [
+                        "single_repeatable_read_snapshot",
+                        "canonical_relation_member_existence",
+                        "canonical_relation_identity_uniqueness",
+                        "manual_turnover_relation_member_existence",
+                    ]
+                    if direct_canonical_read
+                    else [
+                        "canonical_expected_set_equality",
+                        "missing_or_orphan_identity",
+                        "key_display_field_recalculation",
+                        "scope_count_and_source_version_equality",
+                        "page_statistics_recalculation",
+                        "bidirectional_relation_edge_equality",
+                        *(["consumer_relation_edge_equality"] if contract.consumer_relation_contract else []),
+                        "durable_queue_and_freshness_gate",
+                    ]
                 ),
-                "durable_queue_and_freshness_gate",
             ],
             "pass_condition": (
                 "audit_status.integrity == 'pass' and audit_status.freshness == 'fresh' "
                 "and audit_status.queue == 'drained' and audit_contract.database_snapshot == true"
             ),
             "guarantee_boundary": (
-                "App-internal canonical facts, read_model rows/scopes/source_versions, "
-                "durable refresh state, and projected relation distribution agree for this page."
+                (
+                    "The page reads App-internal canonical facts and active relation membership "
+                    "directly from one repeatable-read database snapshot; no read model or refresh queue is in the path."
+                )
+                if direct_canonical_read
+                else (
+                    "App-internal canonical facts, read_model rows/scopes/source_versions, "
+                    "durable refresh state, and projected relation distribution agree for this page."
+                )
             ),
             "write_policy": "read_only",
         },
@@ -295,6 +316,40 @@ def _fetch_summary(connection: Any, *, contract: PageAuditContract, tenant_id: s
 
 def _summary_sql(contract: PageAuditContract, *, tenant_id: str) -> tuple[str, tuple[Any, ...]]:
     domain = contract.domain_key
+    if domain == "turnover_ledger":
+        return (
+            """
+            /* check: direct_canonical_summary */
+            select
+                (
+                    select count(*) from app.bank_transactions
+                    where coalesce(nullif(status, ''), 'active') <> 'deleted'
+                )::integer as source_fact_count,
+                0::integer as read_model_row_count,
+                0::integer as read_model_scope_count,
+                (
+                    select count(*) from app.workbench_pair_relations
+                    where status = 'active'
+                      and exists (
+                          select 1
+                          from unnest(row_types) member(row_type)
+                          where member.row_type in ('bank', 'bank_transaction')
+                      )
+                )::integer as active_relation_count,
+                (
+                    select count(*) from app.workbench_pair_relations
+                    where status = 'active'
+                      and exists (
+                          select 1
+                          from unnest(row_types) member(row_type)
+                          where member.row_type in ('bank', 'bank_transaction')
+                      )
+                )::integer as linked_relation_group_count,
+                0::integer as dirty_scope_count,
+                0::integer as outbox_backlog_count
+            """,
+            (),
+        )
     scope_types = _quoted_list(contract.scope_types)
     event_types = _quoted_list(contract.event_types)
     if domain == "bank_details":
@@ -372,13 +427,6 @@ def _summary_sql(contract: PageAuditContract, *, tenant_id: str) -> tuple[str, t
         source_sql = "select count(*) from app.bank_flow_rule_batches where status <> 'deleted'"
         row_sql = "select count(*) from read_model.bank_flow_rule_batch_rows where cache_status = 'fresh'"
         scope_sql = "select count(distinct to_char(scope_month, 'YYYY-MM')) from read_model.bank_flow_rule_batch_rows where scope_month is not null"
-        relation_sql = "select count(*) from app.workbench_pair_relations where status = 'active'"
-        linked_sql = "select count(*) from read_model.workbench_relation_groups where tenant_id = %s and relation_status = 'linked'"
-        params = (tenant_id,)
-    elif domain == "turnover_ledger":
-        source_sql = "select count(*) from app.turnover_relations where status <> 'deleted'"
-        row_sql = "select count(*) from read_model.turnover_ledger_rows where cache_status = 'fresh'"
-        scope_sql = "select count(distinct to_char(scope_month, 'YYYY-MM')) from read_model.turnover_ledger_rows where scope_month is not null"
         relation_sql = "select count(*) from app.workbench_pair_relations where status = 'active'"
         linked_sql = "select count(*) from read_model.workbench_relation_groups where tenant_id = %s and relation_status = 'linked'"
         params = (tenant_id,)
@@ -465,6 +513,117 @@ def _outbox_backlog_issues(connection: Any, contract: PageAuditContract, tenant_
         )
         for row in rows
     ]
+
+
+def _turnover_ledger_direct_canonical_issues(
+    connection: Any,
+    _contract: PageAuditContract,
+    _tenant_id: str,
+    limit: int,
+) -> list[AuditIssue]:
+    queries = (
+        (
+            """
+            /* check: canonical_relation_member_shape */
+            select case_id as subject_id, to_char(month_scope, 'YYYY-MM') as scope_key,
+                   cardinality(row_ids) as row_id_count, cardinality(row_types) as row_type_count
+            from app.workbench_pair_relations
+            where status = 'active'
+              and cardinality(row_ids) <> cardinality(row_types)
+            order by case_id
+            limit %s
+            """,
+            "turnover_ledger_canonical_relation_member_shape_invalid",
+            "统一配对关系的 row_ids 与 row_types 数量不一致。",
+        ),
+        (
+            """
+            /* check: canonical_relation_bank_member_exists */
+            with members as (
+                select relation.case_id, relation.month_scope,
+                       member.row_id, relation.row_types[member.ordinality] as row_type
+                from app.workbench_pair_relations relation
+                join lateral unnest(relation.row_ids) with ordinality member(row_id, ordinality) on true
+                where relation.status = 'active'
+            )
+            select member.case_id as subject_id, to_char(member.month_scope, 'YYYY-MM') as scope_key,
+                   member.row_id, member.row_type
+            from members member
+            left join app.bank_transactions source
+              on source.id::text = member.row_id
+              or source.legacy_mongo_id = member.row_id
+            where member.row_type in ('bank', 'bank_transaction')
+              and source.id is null
+            order by member.case_id, member.row_id
+            limit %s
+            """,
+            "turnover_ledger_canonical_relation_bank_member_missing",
+            "统一配对关系引用了不存在的银行流水。",
+        ),
+        (
+            """
+            /* check: canonical_relation_bank_member_unique */
+            with members as (
+                select relation.case_id, relation.month_scope, member.row_id
+                from app.workbench_pair_relations relation
+                join lateral unnest(relation.row_ids) with ordinality member(row_id, ordinality) on true
+                where relation.status = 'active'
+                  and relation.row_types[member.ordinality] in ('bank', 'bank_transaction')
+            )
+            select member.row_id as subject_id, min(to_char(member.month_scope, 'YYYY-MM')) as scope_key,
+                   array_agg(distinct member.case_id order by member.case_id) as active_case_ids
+            from members member
+            group by member.row_id
+            having count(distinct member.case_id) > 1
+            order by member.row_id
+            limit %s
+            """,
+            "turnover_ledger_canonical_relation_bank_member_duplicated",
+            "同一银行流水同时存在于多个有效统一配对关系。",
+        ),
+        (
+            """
+            /* check: manual_turnover_relation_bank_member_exists */
+            with relation_members as (
+                select relation.relation_id, relation.scope_month, member.row_id
+                from app.turnover_relations relation
+                join lateral jsonb_array_elements_text(
+                    case
+                        when jsonb_typeof(
+                            relation.raw_payload->'normalized_payload'->'bank_row_ids'
+                        ) = 'array'
+                        then relation.raw_payload->'normalized_payload'->'bank_row_ids'
+                        else '[]'::jsonb
+                    end
+                ) member(row_id) on true
+                where relation.status <> 'deleted'
+            )
+            select member.relation_id as subject_id, to_char(member.scope_month, 'YYYY-MM') as scope_key,
+                   member.row_id
+            from relation_members member
+            left join app.bank_transactions source
+              on source.id::text = member.row_id
+              or source.legacy_mongo_id = member.row_id
+            where source.id is null
+            order by member.relation_id, member.row_id
+            limit %s
+            """,
+            "turnover_ledger_manual_relation_bank_member_missing",
+            "外部往来款手工关系引用了不存在的银行流水。",
+        ),
+    )
+    issues: list[AuditIssue] = []
+    for sql, code, message in queries:
+        issues.extend(
+            _proof_query_issues(
+                connection,
+                sql=sql,
+                params=(limit,),
+                code=code,
+                message=message,
+            )
+        )
+    return issues
 
 
 def _scope_row_count_mismatch_issues(
@@ -889,110 +1048,6 @@ def _read_model_source_version_mismatch_issues(
                 "bank_flow_rule_batches_business_fields_mismatch",
             )
         )
-    elif domain == "turnover_ledger":
-        queries.append(
-            (
-                """
-                /* check: source_business_fields_mismatch */
-                with leaf_totals as (
-                    select ledger.relation_id,
-                           min(to_char(source.txn_month, 'YYYY-MM')) as scope_key,
-                           count(distinct detail.effective_turnover_family)::integer as family_count,
-                           max(detail.effective_turnover_family) as expected_family,
-                           count(distinct coalesce(nullif(btrim(source.counterparty_name_raw), ''), 'UNKNOWN'))::integer
-                               as counterparty_count,
-                           max(coalesce(nullif(btrim(source.counterparty_name_raw), ''), 'UNKNOWN'))
-                               as expected_counterparty_name,
-                           coalesce(sum(abs(source.amount)) filter (
-                               where detail.effective_turnover_action_type = 'pending_repayment'
-                           ), 0)::numeric as borrow_in_principal,
-                           coalesce(sum(abs(source.amount)) filter (
-                               where detail.effective_turnover_action_type = 'repaid'
-                           ), 0)::numeric as borrow_in_settled,
-                           coalesce(sum(abs(source.amount)) filter (
-                               where detail.effective_turnover_action_type = 'pending_collection'
-                           ), 0)::numeric as borrow_out_principal,
-                           coalesce(sum(abs(source.amount)) filter (
-                               where detail.effective_turnover_action_type = 'collected'
-                           ), 0)::numeric as borrow_out_settled
-                    from read_model.turnover_ledger_rows ledger
-                    join lateral unnest(ledger.bank_row_ids) member(row_id) on true
-                    join app.bank_transactions source
-                      on coalesce(source.legacy_mongo_id, source.id::text) = member.row_id
-                     and source.status <> 'deleted'
-                    join read_model.bank_detail_rows detail
-                      on detail.tenant_id = %s
-                     and detail.transaction_id = source.id::text
-                    group by ledger.relation_id
-                ),
-                recomputed as (
-                    select leaf_totals.*,
-                           greatest(borrow_in_principal - borrow_in_settled, 0)::numeric
-                               as expected_pending_repayment,
-                           greatest(borrow_out_principal - borrow_out_settled, 0)::numeric
-                               as expected_pending_collection,
-                           (
-                               case
-                                   when borrow_in_principal > 0
-                                   then greatest(borrow_in_principal - borrow_in_settled, 0)
-                                   else -borrow_in_settled
-                               end
-                               + case
-                                   when borrow_out_principal > 0
-                                   then greatest(borrow_out_principal - borrow_out_settled, 0)
-                                   else -borrow_out_settled
-                               end
-                           )::numeric as expected_balance
-                    from leaf_totals
-                )
-                select ledger.relation_id as subject_id, recomputed.scope_key,
-                       recomputed.expected_balance::text as source_amount,
-                       ledger.amount::text as read_model_amount,
-                       recomputed.expected_family as source_family,
-                       ledger.family as read_model_family,
-                       recomputed.expected_counterparty_name as source_counterparty_name,
-                       ledger.counterparty_name as read_model_counterparty_name,
-                       recomputed.expected_pending_repayment::text as source_pending_repayment_amount,
-                       ledger.payload->>'pending_repayment_amount' as read_model_pending_repayment_amount,
-                       recomputed.borrow_in_settled::text as source_repaid_amount,
-                       ledger.payload->>'repaid_amount' as read_model_repaid_amount,
-                       recomputed.expected_pending_collection::text as source_pending_collection_amount,
-                       ledger.payload->>'pending_collection_amount' as read_model_pending_collection_amount,
-                       recomputed.borrow_out_settled::text as source_collected_amount,
-                       ledger.payload->>'collected_amount' as read_model_collected_amount
-                from read_model.turnover_ledger_rows ledger
-                join recomputed on recomputed.relation_id = ledger.relation_id
-                where abs(
-                        coalesce(ledger.amount, 0)
-                        - recomputed.expected_balance
-                      ) > 0.01
-                   or recomputed.family_count <> 1
-                   or coalesce(ledger.family, '') <> coalesce(recomputed.expected_family, '')
-                   or recomputed.counterparty_count <> 1
-                   or coalesce(ledger.counterparty_name, '') <> coalesce(recomputed.expected_counterparty_name, '')
-                   or abs(
-                        coalesce(nullif(replace(ledger.payload->>'pending_repayment_amount', ',', ''), '')::numeric, 0)
-                        - recomputed.expected_pending_repayment
-                      ) > 0.01
-                   or abs(
-                        coalesce(nullif(replace(ledger.payload->>'repaid_amount', ',', ''), '')::numeric, 0)
-                        - recomputed.borrow_in_settled
-                      ) > 0.01
-                   or abs(
-                        coalesce(nullif(replace(ledger.payload->>'pending_collection_amount', ',', ''), '')::numeric, 0)
-                        - recomputed.expected_pending_collection
-                      ) > 0.01
-                   or abs(
-                        coalesce(nullif(replace(ledger.payload->>'collected_amount', ',', ''), '')::numeric, 0)
-                        - recomputed.borrow_out_settled
-                      ) > 0.01
-                order by ledger.relation_id
-                limit %s
-                """,
-                (tenant_id, limit),
-                "turnover_ledger_business_fields_mismatch",
-            )
-        )
     issues: list[AuditIssue] = []
     for sql, params, code in queries:
         rows = connection.fetch_all(sql, params)
@@ -1182,8 +1237,6 @@ def _missing_read_model_row_issues(
         limit %s
         """
         params = (limit,)
-    elif domain == "turnover_ledger":
-        return []
     elif domain == "batch_accounting":
         sql = """
         /* check: missing_read_model_row */
@@ -1293,8 +1346,6 @@ def _orphan_read_model_row_issues(
         limit %s
         """
         params = (limit,)
-    elif domain == "turnover_ledger":
-        return []
     elif domain == "batch_accounting":
         sql = """
         /* check: orphan_read_model_row */
@@ -1381,17 +1432,6 @@ def _duplicate_read_model_identity_issues(
         group by batch_id
         having count(*) > 1
         order by batch_id
-        limit %s
-        """
-        params = (limit,)
-    elif domain == "turnover_ledger":
-        sql = """
-        /* check: duplicate_read_model_identity */
-        select relation_id as subject_id, count(*)::integer as row_count
-        from read_model.turnover_ledger_rows
-        group by relation_id
-        having count(*) > 1
-        order by relation_id
         limit %s
         """
         params = (limit,)
@@ -1527,113 +1567,6 @@ def _canonical_expected_set_issues(
         select oa_id as subject_id, scope_key, mismatch_kind
         from mismatches
         order by mismatch_kind, scope_key, oa_id
-        limit %s
-        """
-        params = (tenant_id, limit)
-    elif domain == "turnover_ledger":
-        sql = """
-        /* check: canonical_expected_set */
-        with settings as (
-            select coalesce(
-                (
-                    select settings_payload
-                    from app.app_settings
-                    where settings_key = 'app_settings'
-                    limit 1
-                ),
-                '{}'::jsonb
-            ) as payload
-        ),
-        selection as (
-            select payload ? 'turnover_ledger_tag_selection' as explicitly_configured,
-                   coalesce(
-                       array(
-                           select jsonb_array_elements_text(
-                               case
-                                   when jsonb_typeof(
-                                       payload->'turnover_ledger_tag_selection'->'selected_tag_codes'
-                                   ) = 'array'
-                                   then payload->'turnover_ledger_tag_selection'->'selected_tag_codes'
-                                   else '[]'::jsonb
-                               end
-                           )
-                       ),
-                       array[]::text[]
-                   ) as selected_tag_codes
-            from settings
-        ),
-        canonical_leaves as (
-            select coalesce(source.legacy_mongo_id, source.id::text) as row_id,
-                   to_char(source.txn_month, 'YYYY-MM') as scope_key,
-                   source.amount::text as amount,
-                   detail.effective_turnover_family as family,
-                   coalesce(nullif(btrim(source.counterparty_name_raw), ''), 'UNKNOWN') as counterparty_name
-            from read_model.bank_detail_rows detail
-            join app.bank_transactions source
-              on source.id::text = detail.transaction_id
-             and source.status <> 'deleted'
-            cross join selection
-            where detail.tenant_id = %s
-              and (
-                    detail.effective_turnover_role = 'external_turnover'
-                 or coalesce(detail.effective_category_primary_label, '') like '%%外部往来款%%'
-                 or coalesce(detail.effective_category_primary_label, '') like '%%往来款%%'
-              )
-              and detail.effective_turnover_action_type
-                  in ('pending_collection', 'collected', 'pending_repayment', 'repaid')
-              and detail.effective_turnover_family in ('personal', 'company', 'bank', 'business')
-              and nullif(detail.effective_category_third_label, '') is not null
-              and (
-                    not selection.explicitly_configured
-                 or detail.effective_category_code = any(selection.selected_tag_codes)
-              )
-        ),
-        canonical as (
-            select family, counterparty_name, min(scope_key) as scope_key,
-                   array_agg(row_id order by row_id) as bank_row_ids
-            from canonical_leaves
-            group by family, counterparty_name
-        ),
-        projected as (
-            select ledger.relation_id, ledger.family,
-                   coalesce(nullif(btrim(ledger.counterparty_name), ''), 'UNKNOWN') as counterparty_name,
-                   to_char(ledger.scope_month, 'YYYY-MM') as scope_key,
-                   coalesce(
-                       (
-                           select array_agg(distinct member.row_id order by member.row_id)
-                           from unnest(ledger.bank_row_ids) member(row_id)
-                       ),
-                       array[]::text[]
-                   ) as bank_row_ids
-            from read_model.turnover_ledger_rows ledger
-        ),
-        mismatches as (
-            select 'canonical_missing_projection' as mismatch_kind,
-                   concat(canonical.family, ':', canonical.counterparty_name) as subject_id,
-                   canonical.scope_key, canonical.family, canonical.counterparty_name,
-                   canonical.bank_row_ids as canonical_bank_row_ids,
-                   projected.bank_row_ids as projected_bank_row_ids
-            from canonical
-            left join projected
-              on projected.family = canonical.family
-             and projected.counterparty_name = canonical.counterparty_name
-            where projected.relation_id is null
-               or projected.bank_row_ids <> canonical.bank_row_ids
-            union all
-            select 'projection_not_canonical', projected.relation_id,
-                   projected.scope_key, projected.family, projected.counterparty_name,
-                   canonical.bank_row_ids, projected.bank_row_ids
-            from projected
-            left join canonical
-              on canonical.family = projected.family
-             and canonical.counterparty_name = projected.counterparty_name
-            where canonical.family is null
-               or projected.bank_row_ids <> canonical.bank_row_ids
-        )
-        select subject_id, scope_key, mismatch_kind, family, counterparty_name,
-               canonical_bank_row_ids, projected_bank_row_ids
-        from mismatches
-        order by mismatch_kind, scope_key, subject_id
         limit %s
         """
         params = (tenant_id, limit)
@@ -1817,96 +1750,6 @@ def _key_display_field_issues(
                 (tenant_id, limit),
                 "oa_pending_payments_key_display_fields_mismatch",
             )
-        ]
-    elif domain == "turnover_ledger":
-        queries = [
-            (
-                """
-                /* check: key_display_fields */
-                select extra.ledger_key as subject_id,
-                       to_char(extra.scope_month, 'YYYY-MM') as scope_key,
-                       extra.extra_payload as canonical_extra,
-                       jsonb_build_object(
-                           'interest_rate_type', row.payload->'interest_rate_type',
-                           'interest_rate_value', row.payload->'interest_rate_value',
-                           'interest_paid_amount', row.payload->'interest_paid_amount',
-                           'interest_paid_date', row.payload->'interest_paid_date',
-                           'interest_payment_method', row.payload->'interest_payment_method',
-                           'note', row.payload->'note'
-                       ) as projected_extra
-                from app.turnover_ledger_extras extra
-                left join read_model.turnover_ledger_rows row on row.relation_id = extra.ledger_key
-                where row.relation_id is null
-                   or coalesce(row.payload->>'interest_rate_type', 'none')
-                      <> coalesce(extra.extra_payload->>'interest_rate_type', 'none')
-                   or coalesce(row.payload->>'interest_rate_value', '0.000000')
-                      <> coalesce(extra.extra_payload->>'interest_rate_value', '0.000000')
-                   or coalesce(row.payload->>'interest_paid_amount', '0.00')
-                      <> coalesce(extra.extra_payload->>'interest_paid_amount', '0.00')
-                   or coalesce(row.payload->>'interest_paid_date', '')
-                      <> coalesce(extra.extra_payload->>'interest_paid_date', '')
-                   or coalesce(row.payload->>'interest_payment_method', '')
-                      <> coalesce(extra.extra_payload->>'interest_payment_method', '')
-                   or coalesce(row.payload->>'note', '') <> coalesce(extra.extra_payload->>'note', '')
-                order by extra.ledger_key
-                limit %s
-                """,
-                (limit,),
-                "turnover_ledger_extra_fields_mismatch",
-            ),
-            (
-                """
-                /* check: turnover_statistics_projection */
-                with expected as (
-                    select ledger.relation_id,
-                           member.row_id,
-                           case when source.txn_direction = 'inflow' then 'income' else 'expense' end
-                               as expected_direction
-                    from read_model.turnover_ledger_rows ledger
-                    join lateral unnest(ledger.bank_row_ids) member(row_id) on true
-                    left join app.bank_transactions source
-                      on coalesce(source.legacy_mongo_id, source.id::text) = member.row_id
-                     and source.status <> 'deleted'
-                ), projected as (
-                    select ledger.relation_id,
-                           nullif(btrim(flow.value->>'source_bank_row_id'), '') as row_id,
-                           flow.value->>'flow_direction' as flow_direction,
-                           count(*) over (
-                               partition by ledger.relation_id, flow.value->>'source_bank_row_id'
-                           )::integer as identity_count
-                    from read_model.turnover_ledger_rows ledger
-                    join lateral jsonb_array_elements(
-                        case
-                            when jsonb_typeof(ledger.payload->'flow_rows') = 'array'
-                            then ledger.payload->'flow_rows'
-                            else '[]'::jsonb
-                        end
-                    ) flow(value) on true
-                ), mismatches as (
-                    select coalesce(expected.relation_id, projected.relation_id) as relation_id,
-                           coalesce(expected.row_id, projected.row_id) as row_id,
-                           expected.expected_direction,
-                           projected.flow_direction,
-                           projected.identity_count
-                    from expected
-                    full join projected
-                      on projected.relation_id = expected.relation_id
-                     and projected.row_id = expected.row_id
-                    where expected.row_id is null
-                       or projected.row_id is null
-                       or projected.identity_count <> 1
-                       or projected.flow_direction <> expected.expected_direction
-                )
-                select relation_id || ':' || coalesce(row_id, '') as subject_id,
-                       relation_id as scope_key,
-                       row_id, expected_direction, flow_direction, identity_count
-                from mismatches
-                order by relation_id, row_id
-                limit %s
-                """,
-                (limit,),
-                "turnover_ledger_statistics_projection_mismatch",
-            ),
         ]
     elif domain == "batch_accounting":
         queries = [

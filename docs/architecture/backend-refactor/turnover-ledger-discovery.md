@@ -1,5 +1,7 @@
 # Turnover Ledger Discovery and Planning
 
+> 历史 discovery：其中 SQL read model/worker 结论已被 2026-07-26 direct canonical read cutover 取代；当前运行时边界以 `docs/modules/turnover-ledger/boundary-io.md` 为准。
+
 对应 prompt：`PF-P046 - Turnover Ledger Discovery and Planning / Main Delta-Aware Boundary Scan`
 
 ## 结论

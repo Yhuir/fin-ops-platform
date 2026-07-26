@@ -159,8 +159,8 @@ class PendingThenFreshConnection(FakeConnection):
                 return {
                     "event_id": params[0],
                     "tenant_id": "default",
-                    "event_type": "turnover_ledger.read_model.refresh",
-                    "scope_type": "turnover_ledger",
+                    "event_type": "cost_statistics.read_model.refresh",
+                    "scope_type": "cost_statistics",
                     "scope_key": "all",
                     "status": "pending",
                     "source_version": 8,
@@ -173,8 +173,8 @@ class PendingThenFreshConnection(FakeConnection):
             return {
                 "event_id": params[0],
                 "tenant_id": "default",
-                "event_type": "turnover_ledger.read_model.refresh",
-                "scope_type": "turnover_ledger",
+                "event_type": "cost_statistics.read_model.refresh",
+                "scope_type": "cost_statistics",
                 "scope_key": "all",
                 "status": "done",
                 "source_version": 8,
@@ -241,7 +241,7 @@ class ReadModelSloSmokeTests(unittest.TestCase):
         report = read_model_slo_smoke.run_smoke(
             FakeConnection(),
             apply=False,
-            read_model_keys=["workbench", "search", "cost_statistics", "turnover_ledger"],
+            read_model_keys=["workbench", "search", "cost_statistics"],
         )
 
         self.assertEqual(report["status"], "dry_run")
@@ -249,7 +249,7 @@ class ReadModelSloSmokeTests(unittest.TestCase):
         self.assertEqual(scopes["workbench"], "2026-01")
         self.assertEqual(scopes["search"], "2026-01")
         self.assertEqual(scopes["cost_statistics"], "active:2026-01")
-        self.assertEqual(scopes["turnover_ledger"], "all")
+        self.assertNotIn("turnover_ledger", scopes)
 
     def test_critical_only_includes_bank_account_balance_page_read_model(self) -> None:
         report = read_model_slo_smoke.run_smoke(
@@ -262,7 +262,7 @@ class ReadModelSloSmokeTests(unittest.TestCase):
         self.assertEqual(report["critical_only"], True)
         planned_keys = {item["read_model_key"] for item in report["planned_scopes"]}
         self.assertIn("workbench", planned_keys)
-        self.assertIn("turnover_ledger", planned_keys)
+        self.assertNotIn("turnover_ledger", planned_keys)
         self.assertIn("bank_account_balance", planned_keys)
         self.assertIn("bank_flow_rule_batch", planned_keys)
         self.assertNotIn("no_oa_bank_batch", planned_keys)
@@ -315,13 +315,13 @@ class ReadModelSloSmokeTests(unittest.TestCase):
         report = read_model_slo_smoke.run_smoke(
             MissingTurnoverReadinessConnection(),
             apply=False,
-            read_model_keys=["turnover_ledger"],
+            read_model_keys=["bank_detail"],
         )
 
         self.assertEqual(report["status"], "dry_run")
         self.assertEqual(report["missing_read_model_keys"], [])
         self.assertEqual(report["planned_scope_count"], 1)
-        self.assertEqual(report["planned_scopes"][0]["read_model_key"], "turnover_ledger")
+        self.assertEqual(report["planned_scopes"][0]["read_model_key"], "bank_detail")
         self.assertEqual(report["planned_scopes"][0]["scope_key"], "all")
         self.assertEqual(report["planned_scopes"][0]["source"], "default_scope")
 

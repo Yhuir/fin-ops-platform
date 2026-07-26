@@ -220,8 +220,6 @@ export type TurnoverLedgerGroupedResponse = {
   groups: TurnoverLedgerGroup[];
   pagination: TurnoverLedgerPagination;
   statistics?: TurnoverLedgerStatistics;
-  readModelStatus?: string;
-  readModelStaleReasons?: string[];
 };
 
 export type FetchTurnoverLedgerRequest = {
@@ -251,7 +249,6 @@ export type SaveTurnoverBankRowTagsResponse = {
     version: number;
   }>;
   affectedMonths: string[];
-  turnoverLedgerInvalidated: boolean;
   workbenchInvalidated: boolean;
 };
 

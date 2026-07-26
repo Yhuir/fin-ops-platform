@@ -152,7 +152,7 @@ PAGE_AUDIT_REGISTRY: dict[str, PageAuditRegistration] = {
         "turnover-ledger",
         "外部往来款管理",
         "page_business",
-        ("turnover_ledger", "bank_detail", "workbench_relation"),
+        (),
         external_source_boundary="bank statement completeness before App import",
         external_evidence_keys=("bank",),
         executor_domain_key="turnover_ledger",

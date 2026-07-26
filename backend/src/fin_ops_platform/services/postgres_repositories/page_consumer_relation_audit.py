@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from fin_ops_platform.services.postgres_repositories.audit_report import AuditIssue
-from fin_ops_platform.services.workbench_relation_modes import TURNOVER_MANUAL_CLOSURE_RELATION_MODE
 
 
 OA_PENDING_PAYMENT_CONSUMER = "oa_pending_payment_summaries"
@@ -11,7 +10,6 @@ PENDING_INVOICE_CONSUMER = "pending_invoice_summaries"
 BANK_DETAIL_TAG_CONSUMER = "bank_detail_relation_tags"
 BANK_FLOW_RULE_BATCH_CONSUMER = "bank_flow_rule_batch_members"
 BATCH_ACCOUNTING_DIRECT_CONSUMER = "batch_accounting_direct_shared_relation"
-TURNOVER_LEDGER_CONSUMER = "turnover_ledger_relation_summaries"
 
 
 def page_consumer_relation_edge_equality_issues(
@@ -40,8 +38,6 @@ def page_consumer_relation_edge_equality_issues(
         sql, params = _bank_flow_rule_batch_sql(tenant_id=tenant_id, limit=limit)
     elif consumer_contract == BATCH_ACCOUNTING_DIRECT_CONSUMER:
         sql, params = _batch_accounting_direct_sql(tenant_id=tenant_id, limit=limit)
-    elif consumer_contract == TURNOVER_LEDGER_CONSUMER:
-        sql, params = _turnover_ledger_sql(tenant_id=tenant_id, limit=limit)
     else:
         raise ValueError(f"Unsupported page consumer relation contract: {consumer_contract}")
     rows = connection.fetch_all(sql, params)
@@ -642,149 +638,6 @@ def _batch_accounting_direct_sql(*, tenant_id: str, limit: int) -> tuple[str, tu
         limit %s
         """,
         (tenant_id, limit),
-    )
-
-
-def _turnover_ledger_sql(*, tenant_id: str, limit: int) -> tuple[str, tuple[Any, ...]]:
-    return (
-        """
-        /* check: consumer_relation_edge_equality */
-        with consumer_anchors as (
-            select ledger.relation_id as anchor_id,
-                   to_char(ledger.scope_month, 'YYYY-MM') as scope_key,
-                   ledger.bank_row_ids as anchor_bank_row_ids,
-                   ledger.payload as anchor_payload
-            from read_model.turnover_ledger_rows ledger
-            union all
-            select ledger.relation_id || ':flow:' || flow.ordinality::text,
-                   to_char(ledger.scope_month, 'YYYY-MM'),
-                   array(
-                       select distinct item.row_id
-                       from (
-                           select nullif(flow.value->>'source_bank_row_id', '') as row_id
-                           union all
-                           select nullif(flow.value->>'principal_bank_row_id', '')
-                           union all
-                           select value
-                           from jsonb_array_elements_text(
-                               case when jsonb_typeof(flow.value->'bank_row_ids') = 'array'
-                                    then flow.value->'bank_row_ids' else '[]'::jsonb end
-                           ) member(value)
-                           union all
-                           select value
-                           from jsonb_array_elements_text(
-                               case when jsonb_typeof(flow.value->'settlement_bank_row_ids') = 'array'
-                                    then flow.value->'settlement_bank_row_ids' else '[]'::jsonb end
-                           ) member(value)
-                       ) item
-                       where nullif(item.row_id, '') is not null
-                       order by item.row_id
-                   ),
-                   flow.value
-            from read_model.turnover_ledger_rows ledger
-            join lateral jsonb_array_elements(
-                case when jsonb_typeof(ledger.payload->'flow_rows') = 'array'
-                     then ledger.payload->'flow_rows' else '[]'::jsonb end
-            ) with ordinality flow(value, ordinality) on true
-        ),
-        relevant_groups as (
-            select anchor.anchor_id,
-                   anchor.scope_key as anchor_scope_key,
-                   group_row.group_id,
-                   group_row.oa_row_ids,
-                   group_row.bank_transaction_ids,
-                   group_row.input_invoice_ids,
-                   group_row.output_invoice_ids
-            from consumer_anchors anchor
-            join read_model.workbench_relation_groups group_row
-              on group_row.tenant_id = %s
-             and group_row.relation_status = 'linked'
-             and group_row.bank_transaction_ids && anchor.anchor_bank_row_ids
-        ),
-        expected_edge_rows as (
-            select group_row.anchor_id, group_row.anchor_scope_key as scope_key,
-                   group_row.group_id as case_id, member.row_id, 'oa'::text as row_type
-            from relevant_groups group_row
-            join lateral unnest(group_row.oa_row_ids) member(row_id) on true
-            union all
-            select group_row.anchor_id, group_row.anchor_scope_key,
-                   group_row.group_id, member.row_id, 'bank_transaction'::text
-            from relevant_groups group_row
-            join lateral unnest(group_row.bank_transaction_ids) member(row_id) on true
-            union all
-            select group_row.anchor_id, group_row.anchor_scope_key,
-                   group_row.group_id, member.row_id, 'invoice'::text
-            from relevant_groups group_row
-            join lateral unnest(group_row.input_invoice_ids) member(row_id) on true
-            union all
-            select group_row.anchor_id, group_row.anchor_scope_key,
-                   group_row.group_id, member.row_id, 'invoice'::text
-            from relevant_groups group_row
-            join lateral unnest(group_row.output_invoice_ids) member(row_id) on true
-        ),
-        expected_edges as (
-            select anchor_id, case_id, row_id, row_type, min(scope_key) as scope_key
-            from expected_edge_rows
-            where nullif(case_id, '') is not null and nullif(row_id, '') is not null
-            group by anchor_id, case_id, row_id, row_type
-        ),
-        consumer_edge_rows as (
-            select anchor.anchor_id, anchor.scope_key,
-                   relation.value->>'case_id' as case_id,
-                   member.row_id,
-                   case
-                       when lower(coalesce(relation.value->'row_types'->>((member.ordinality - 1)::integer), '')) like '%%oa%%'
-                         or lower(member.row_id) like 'oa%%' then 'oa'
-                       when lower(coalesce(relation.value->'row_types'->>((member.ordinality - 1)::integer), '')) like '%%invoice%%'
-                         or lower(member.row_id) like any(array['invoice%%', 'input_invoice%%', 'output_invoice%%', 'inv%%'])
-                       then 'invoice'
-                       else 'bank_transaction'
-                   end as row_type
-            from consumer_anchors anchor
-            join lateral jsonb_array_elements(
-                case when jsonb_typeof(anchor.anchor_payload->'workbench_relations') = 'array'
-                     then anchor.anchor_payload->'workbench_relations' else '[]'::jsonb end
-            ) relation(value) on true
-            join lateral jsonb_array_elements_text(
-                case when jsonb_typeof(relation.value->'row_ids') = 'array'
-                     then relation.value->'row_ids' else '[]'::jsonb end
-            ) with ordinality member(row_id, ordinality) on true
-            where lower(coalesce(relation.value->>'relation_status', 'linked')) in ('linked', 'active')
-              and coalesce(relation.value->>'relation_mode', '') <> %s
-        ),
-        consumer_edges as (
-            select anchor_id, case_id, row_id, row_type, min(scope_key) as scope_key
-            from consumer_edge_rows
-            where nullif(case_id, '') is not null and nullif(row_id, '') is not null
-            group by anchor_id, case_id, row_id, row_type
-        ),
-        mismatches as (
-            select 'shared_edge_missing_consumer' as mismatch_kind, expected.*
-            from expected_edges expected
-            where not exists (
-                select 1 from consumer_edges consumer
-                where consumer.anchor_id = expected.anchor_id
-                  and consumer.case_id = expected.case_id
-                  and consumer.row_id = expected.row_id
-                  and consumer.row_type = expected.row_type
-            )
-            union all
-            select 'consumer_edge_not_shared', consumer.*
-            from consumer_edges consumer
-            where not exists (
-                select 1 from expected_edges expected
-                where expected.anchor_id = consumer.anchor_id
-                  and expected.case_id = consumer.case_id
-                  and expected.row_id = consumer.row_id
-                  and expected.row_type = consumer.row_type
-            )
-        )
-        select mismatch_kind, anchor_id as subject_id, scope_key, row_id, row_type, case_id
-        from mismatches
-        order by mismatch_kind, subject_id, case_id, row_type, row_id
-        limit %s
-        """,
-        (tenant_id, TURNOVER_MANUAL_CLOSURE_RELATION_MODE, limit),
     )
 
 

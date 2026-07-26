@@ -203,27 +203,21 @@ GET /api/turnover-ledger?view=grouped
 ```
 
 ```text
-POST /api/turnover-ledger/relations/confirm
-  -> Application._handle_api_turnover_ledger_confirm
-  -> _turnover_mutation_session
-  -> TurnoverRelationService.rebuild_from_bank_rows
-  -> TurnoverLedgerApiRoutes.confirm_relation
-  -> TurnoverRelationService.confirm_relation
-  -> _after_turnover_relation_mutation
-  -> _persist_turnover_relations_best_effort
-  -> _invalidate_workbench_after_bank_transaction_categories
-  -> _clear_turnover_ledger_read_model_best_effort
-  -> _enqueue_turnover_ledger_read_model_refreshes
+POST /api/turnover-ledger/relations/confirm|withdraw
+  -> Turnover request boundary facade
+  -> canonical relation command / UoW
+  -> app.workbench_pair_relations + history + idempotency + audit
+  -> HTTP committed response
+
+GET /api/turnover-ledger?view=grouped
+  -> TurnoverLedgerQueryService
+  -> one REPEATABLE READ READ ONLY PostgreSQL transaction
+  -> canonical bank/category/settings/turnover/extras/workbench-pair facts
+  -> TurnoverLedgerService grouped payload
+  -> HTTP response
 ```
 
-```text
-turnover_ledger.read_model.refresh event
-  -> app/worker.py
-  -> TurnoverLedgerReadModelRefreshService.handle_runtime_event
-  -> TurnoverLedgerSqlProjectionBuilder.rebuild_turnover_ledger_read_model_scope
-  -> PostgresReadModelRepository.save_turnover_ledger_rows
-  -> RuntimeQueueRepository.complete_read_model_refresh(source_version)
-```
+没有 Turnover read-model refresh event、worker、dirty scope、projection save 或写后页面 fan-out。
 
 PF-P046 风险判断：
 

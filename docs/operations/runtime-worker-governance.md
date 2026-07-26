@@ -232,12 +232,14 @@ Phase 19 受控生产重建使用：
 
 ```bash
 sudo -n /usr/local/sbin/finops-deploy-control read-model-refresh <release-name> \
-  --scope tax_offset=all --scope turnover_ledger=all --dry-run
+  --scope tax_offset=all --dry-run
 ```
 
 该入口只通过 scope policy、`ReadModelRefreshGateway` 和 durable queue，不直接更新 `read_model.*`、
 `app_status_readiness` 或 dirty scope 状态。已由 exact-scope fresh/done 覆盖的 dead letter 只能通过
 `runtime-queue-resolve-covered` dry-run 后执行归档；未覆盖 failure 继续阻断 Audit。
+外部往来已在 2026-07-26 迁为 direct canonical read，不再接受 `turnover_ledger` refresh scope，也没有对应
+worker、dirty scope 或 outbox event。
 
 当 canonical source versions 未变化、但已证明旧 projection 算法留下错误数据时，受控重建可显式增加
 `--force-refresh`。该标志只把 `force_refresh=true` 写入通过 scope policy 校验后的 durable event metadata，

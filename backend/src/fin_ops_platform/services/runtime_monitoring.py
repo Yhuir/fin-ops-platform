@@ -2859,9 +2859,4 @@ APP_STATUS_READINESS_BACKFILL_ROW_TABLES = {
         "status_expr": "coalesce((array_agg(coalesce(nullif(cache_status, ''), 'fresh') order by generated_at desc))[1], 'fresh')",
         "schema_expr": "''",
     },
-    "turnover_ledger": {
-        "table": "read_model.turnover_ledger_rows",
-        "status_expr": "coalesce((array_agg(coalesce(nullif(cache_status, ''), 'fresh') order by generated_at desc))[1], 'fresh')",
-        "schema_expr": "''",
-    },
 }

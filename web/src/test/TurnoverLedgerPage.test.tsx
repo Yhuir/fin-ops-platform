@@ -1327,7 +1327,7 @@ describe("Turnover ledger page", () => {
     });
   });
 
-  test("reports delayed visibility from normal page GET without calling the operation barrier", async () => {
+  test("reloads exactly once after confirm without calling the operation barrier", async () => {
     const user = userEvent.setup();
     const fetchMock = installTurnoverLedgerFetch({
       groupedPayloads: [
@@ -1358,9 +1358,12 @@ describe("Turnover ledger page", () => {
       });
       expect(request).toBeDefined();
     });
-    expect(await screen.findByText("操作已提交，后台同步尚未完成，请稍后刷新。", {}, { timeout: 4_000 })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "确认外部往来闭环" })).not.toBeInTheDocument();
+    });
+    expect(screen.queryByText("操作已提交，后台同步尚未完成，请稍后刷新。")).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "操作失败" })).not.toBeInTheDocument();
-    expect(requestUrls(fetchMock, "/api/turnover-ledger").length).toBeGreaterThanOrEqual(3);
+    expect(requestUrls(fetchMock, "/api/turnover-ledger")).toHaveLength(2);
     expect(requestUrls(fetchMock, "/api/operation-barrier/status")).toHaveLength(0);
   });
 
@@ -1726,7 +1729,7 @@ describe("Turnover ledger page", () => {
     expect(within(page).queryByText("往来款台账加载暂时失败，请刷新后重试。")).not.toBeInTheDocument();
   });
 
-  test("shows grouped read model stale warning and blocks manual closure", async () => {
+  test("ignores retired read-model metadata and keeps canonical actions enabled", async () => {
     const user = userEvent.setup();
     installTurnoverLedgerFetch({
       groupedOverrides: {
@@ -1737,7 +1740,7 @@ describe("Turnover ledger page", () => {
     renderTurnoverLedgerPage();
 
     const page = await screen.findByTestId("turnover-ledger-page");
-    expect(await within(page).findByText("往来款台账正在刷新，当前展示的是非最新数据。")).toBeInTheDocument();
+    expect(within(page).queryByText("往来款台账正在刷新，当前展示的是非最新数据。")).not.toBeInTheDocument();
 
     const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
     const companyGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:company:yunnan");
@@ -1747,7 +1750,7 @@ describe("Turnover ledger page", () => {
     expect(within(table).getByRole("button", { name: "编辑流水 bank-company-expense-1000" })).toBeEnabled();
     await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-expense-1000" }));
     await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-income-1000" }));
-    expect(within(page).getByRole("button", { name: "确认闭环" })).toBeDisabled();
+    expect(within(page).getByRole("button", { name: "确认闭环" })).toBeEnabled();
   });
 
   test("shows bank-detail tags as read-only in turnover management", async () => {

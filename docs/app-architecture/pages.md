@@ -52,7 +52,7 @@ domain registry 是页面域入口；`AppStatusReadModelRegistry` 是 read model
 | `cost_statistics` | `/cost-statistics` | `cost_statistics`、`cost-statistics` worker、`cost_statistics.read_model.refresh` durable queue |
 | `bank_flow_rule_batches` | `/bank-flow-rule-batches` | `bank_flow_rule_batch`、bank-flow-rule-batch worker |
 | `batch_accounting` | `/batch-accounting` | workbench relation read model |
-| `turnover_ledger` | `/turnover-ledger` | `turnover_ledger`、turnover ledger worker |
+| `turnover_ledger` | `/turnover-ledger` | 单次 PostgreSQL repeatable-read canonical snapshot；无 Turnover read model/worker |
 | `etc_tickets` | `/etc-tickets` | ETC import jobs、ETC business batch manual OA status |
 | `settings` | `/settings` | OA identity/state store/settings refresh runtime dependencies |
 | `app_health_operations` | `/operations/app-health` | runtime health dependencies、workers、queue、state store |
@@ -87,6 +87,7 @@ domain registry 是页面域入口；`AppStatusReadModelRegistry` 是 read model
 | 两个独立 browser tab 同时打开 | 两页互不共享 freshness 事实 | A 的写入不自动刷新 B；B 的下一次 route 进入/查询变化/手动刷新走后端 fresh gate |
 | Drawer 规则保存 | 当前部分 Drawer 文案和实现仍是“保存并同步/刷新”并等待 projection | 保存 rule version/signature 后立即完成；当前页面按 query-time 规则或 exact scope reconcile，其他消费者访问时判断语义 mismatch |
 | 导入、reapply、reset、repair | 本来就是可能大批量的 durable/background workflow | 继续作为 `explicit-batch`，3 秒约束 accept/commit，不承诺 3 秒全历史重建；进度、失败、恢复必须可见 |
+| 外部往来款访问/刷新 | 历史上依赖 `turnover_ledger` projection、source version、worker 和 queue | 当前直接在一个只读 repeatable-read PostgreSQL snapshot 中组合 canonical facts；没有 Turnover read model/status/enqueue。关联台和外部往来款各自在访问时读取同一 canonical pair relation |
 
 并非每个页面都有独立 read model，也并非每个 Drawer 保存都需要 rebuild。设置、ETC workflow、导入 session 等页面可以直接读取 canonical/config/job state；read-only Drawer 和 export/preview 不得制造 dirty scope。完整的 17 页面、110 个 API 函数、22 个业务 Drawer、15 个 read model 和旧调用点清单由 `.planning/phases/27-read-model-fan-out/27-COVERAGE-MATRIX.md` 与静态测试维护。
 
@@ -96,7 +97,7 @@ domain registry 是页面域入口；`AppStatusReadModelRegistry` 是 read model
 - 生产态：只有 Phase 27 全量门禁、部署和逐页逐操作 production smoke 通过后才能声明已生效；发布前生产仍按线上版本解释。
 - 例外：`read-like-command` 永不 invalidation；`explicit-batch` 保留 durable job；Workbench 保留 active-generation 原子发布。
 
-“重新计算页面数据”不等于每次访问无条件重建。高性能合同是每次访问都做廉价 freshness/version check：版本一致直接读取 fresh projection；只有不一致才重建当前 exact scope。无条件 rebuild 会让已 fresh 页面也承担数据库和 worker 成本，反而更慢。
+“重新计算页面数据”不等于每次访问无条件重建。仍保留 read model 的页面先做廉价 freshness/version check，只有不一致才重建当前 exact scope。外部往来款是明确例外：其业务组合足够有界，直接读取 canonical snapshot，彻底删除页面 projection/version/worker 链，不能把这一个页面的方案机械推广到其它页面。
 
 ## 前端刷新合同
 

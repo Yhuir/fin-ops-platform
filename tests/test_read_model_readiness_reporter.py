@@ -249,7 +249,6 @@ class ReadModelReadinessReporterTests(unittest.TestCase):
             'handlers["pending_invoice.read_model.refresh"] = _read_model_handler',
             'handlers["bank_detail.read_model.refresh"] = _read_model_handler',
             "handlers[NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE] = _read_model_handler",
-            'handlers["turnover_ledger.read_model.refresh"] = _read_model_handler',
             'handlers["bank_account_balance.read_model.refresh"] = _read_model_handler',
             "handlers[INVOICE_LIFECYCLE_REFRESH_EVENT_TYPE] = _read_model_handler",
             'handlers["input_invoice_usage.read_model.refresh"] = _read_model_handler',

@@ -212,8 +212,6 @@ type ApiTurnoverLedgerGroupedResponse = {
     linked_oa_transaction_count?: number | null;
     linked_invoice_transaction_count?: number | null;
   } | null;
-  read_model_status?: string | null;
-  read_model_stale_reasons?: string[] | null;
 };
 
 type ApiTurnoverLedgerExtra = {
@@ -345,7 +343,6 @@ type ApiSaveTurnoverBankRowTagsResponse = {
     version?: number | null;
   }>;
   affected_months?: string[];
-  turnover_ledger_invalidated?: boolean | null;
   workbench_invalidated?: boolean | null;
 };
 
@@ -908,8 +905,6 @@ export async function fetchTurnoverLedgerGrouped({
       linkedOaTransactionCount: optionalCount(payload.statistics.linked_oa_transaction_count),
       linkedInvoiceTransactionCount: optionalCount(payload.statistics.linked_invoice_transaction_count),
     } : undefined,
-    readModelStatus: text(payload.read_model_status, "refreshing"),
-    readModelStaleReasons: stringList(payload.read_model_stale_reasons ?? undefined),
   };
 }
 
@@ -968,7 +963,6 @@ export async function saveTurnoverBankRowTags({
       version: numberValue(category.version),
     })),
     affectedMonths: stringList(payload.affected_months),
-    turnoverLedgerInvalidated: Boolean(payload.turnover_ledger_invalidated),
     workbenchInvalidated: Boolean(payload.workbench_invalidated),
   };
 }

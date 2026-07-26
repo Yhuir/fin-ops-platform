@@ -65,7 +65,7 @@ class BankFlowRuleBatchBackendBoundaryTests(unittest.TestCase):
         self.assertNotIn("no_oa_bank_batch_read_model_repository=", server_body)
 
         worker_start = worker_source.index("    if args.enable_bank_flow_rule_batch_read_model_refresh:")
-        worker_end = worker_source.index("\n    if args.enable_turnover_ledger_read_model_refresh:", worker_start)
+        worker_end = worker_source.index("\n    if args.enable_bank_account_balance_read_model_refresh:", worker_start)
         worker_body = worker_source[worker_start:worker_end]
         self.assertIn("bank_batch_service=bank_flow_service", worker_body)
         self.assertIn("BankFlowRuleBatchReadModelPersistencePort", worker_body)

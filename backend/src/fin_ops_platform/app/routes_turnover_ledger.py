@@ -748,43 +748,20 @@ class TurnoverLedgerApiRoutes:
         page: int = 1,
         page_size: int = 50,
     ) -> dict[str, object]:
-        if self._query_service is not None:
-            if str(view or "").strip().lower() == "grouped":
-                payload = self._query_service.list_ledger(
-                    family=family,
-                    direction=direction,
-                    status=status,
-                    page=page,
-                    page_size=page_size,
-                )
-                if isinstance(payload.get("groups"), list):
-                    return self._normalize_grouped_payload(payload)
-                if "read_model_status" not in payload:
-                    return self.list_grouped_ledger(
-                        family=family,
-                        direction=direction,
-                        status=status,
-                        page=page,
-                        page_size=page_size,
-                    )
-                return self._normalize_grouped_payload(self._flat_payload_to_grouped(payload))
-            return self._query_service.list_ledger(
-                view=view,
-                family=family,
-                direction=direction,
-                status=status,
-                page=page,
-                page_size=page_size,
-            )
+        if self._query_service is None:
+            raise RuntimeError("turnover ledger canonical query service is unavailable.")
         if str(view or "").strip().lower() == "grouped":
-            return self.list_grouped_ledger(
+            payload = self._query_service.list_ledger(
+                view="grouped",
                 family=family,
                 direction=direction,
                 status=status,
                 page=page,
                 page_size=page_size,
             )
-        return self._ledger_service.list_ledger(
+            return self._normalize_grouped_payload(payload)
+        return self._query_service.list_ledger(
+            view=view,
             family=family,
             direction=direction,
             status=status,
@@ -801,24 +778,25 @@ class TurnoverLedgerApiRoutes:
         page: int = 1,
         page_size: int = 50,
     ) -> dict[str, object]:
-        list_grouped = getattr(self._ledger_service, "list_grouped_ledger", None)
-        if callable(list_grouped):
-            payload = list_grouped(family=family, direction=direction, status=status, page=page, page_size=page_size)
-            return self._normalize_grouped_payload(payload)
-        flat_payload = self._ledger_service.list_ledger(
+        if self._query_service is None:
+            raise RuntimeError("turnover ledger canonical query service is unavailable.")
+        payload = self._query_service.list_ledger(
+            view="grouped",
             family=family,
             direction=direction,
             status=status,
             page=page,
             page_size=page_size,
         )
-        return self._normalize_grouped_payload(self._flat_payload_to_grouped(flat_payload))
+        return self._normalize_grouped_payload(payload)
 
     def get_relation(self, relation_id: str) -> dict[str, object]:
-        return self._ledger_service.get_relation_detail(relation_id)
+        if self._query_service is None:
+            raise RuntimeError("turnover ledger canonical query service is unavailable.")
+        return self._query_service.get_relation_detail(relation_id)
 
     def get_relation_extra(self, relation_id: str) -> dict[str, object]:
-        self._ledger_service.get_relation_detail(relation_id)
+        self.get_relation(relation_id)
         extra = self._extra_service.get(relation_id)
         if extra is None:
             extra = InMemoryTurnoverLedgerExtraService._default_extra(str(relation_id or "").strip())

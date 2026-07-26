@@ -656,8 +656,8 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
                 if "from read_model.app_status_readiness" in normalized and "select read_model_key" in normalized:
                     return [
                         {
-                            "read_model_key": "turnover_ledger",
-                            "scope_type": "turnover_ledger",
+                            "read_model_key": "bank_detail",
+                            "scope_type": "bank_detail",
                             "scope_key": "2026-02",
                             "status": "fresh",
                             "schema_version": "7",
@@ -674,12 +674,12 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
                 if "from job.runtime_worker_heartbeats" in normalized:
                     return [
                         {
-                            "worker_id": "worker-turnover",
-                            "worker_instance": "turnover-ledger",
-                            "worker_kind": "turnover-ledger-read-model",
+                            "worker_id": "worker-bank-detail",
+                            "worker_instance": "bank-detail",
+                            "worker_kind": "bank-detail-read-model",
                             "status": "running",
                             "heartbeat_lag_seconds": 1.0,
-                            "payload": {"worker_instance": "turnover-ledger"},
+                            "payload": {"worker_instance": "bank-detail"},
                         }
                     ]
                 raise AssertionError(normalized)
@@ -690,21 +690,21 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         snapshot = repository.operation_barrier_runtime_snapshot(
             [
                 {
-                    "read_model_key": "turnover_ledger",
-                    "scope_type": "turnover_ledger",
+                    "read_model_key": "bank_detail",
+                    "scope_type": "bank_detail",
                     "scope_key": "2026-02",
                 },
                 {
-                    "read_model_key": "turnover_ledger",
-                    "scope_type": "turnover_ledger",
+                    "read_model_key": "bank_detail",
+                    "scope_type": "bank_detail",
                     "scope_key": "2026-02",
                 },
             ]
         )
 
-        self.assertEqual(snapshot["read_model_statuses"]["turnover_ledger"]["status"], "fresh")
-        self.assertEqual(snapshot["worker_statuses"]["turnover-ledger"]["status"], "ready")
-        self.assertEqual(set(snapshot["read_model_statuses"]), {"turnover_ledger"})
+        self.assertEqual(snapshot["read_model_statuses"]["bank_detail"]["status"], "fresh")
+        self.assertEqual(snapshot["worker_statuses"]["bank-detail"]["status"], "ready")
+        self.assertEqual(set(snapshot["read_model_statuses"]), {"bank_detail"})
         generic_scoped_calls = [
             call
             for call in connection.calls
@@ -716,19 +716,19 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
                 "as barrier_target(target_key, target_scope_type, target_scope_key)",
                 " ".join(sql.split()),
             )
-            self.assertEqual(params[1], ["turnover_ledger"])
+            self.assertEqual(params[1], ["bank_detail"])
             self.assertEqual(params[2], ["2026-02"])
         outbox_call = next(call for call in connection.calls if "cross join lateral" in call[0])
         self.assertIn("candidate_scope", outbox_call[0])
         self.assertIn("limit 1", outbox_call[0])
         self.assertIn("event.created_at desc, event.id desc", outbox_call[0])
         self.assertNotIn("_current_effective_outbox_attention", outbox_call[0])
-        self.assertEqual(outbox_call[1][0], ["turnover_ledger.read_model.refresh"])
-        self.assertEqual(outbox_call[1][1], ["turnover_ledger"])
+        self.assertEqual(outbox_call[1][0], ["bank_detail.read_model.refresh"])
+        self.assertEqual(outbox_call[1][1], ["bank_detail"])
         self.assertEqual(outbox_call[1][2], ["2026-02"])
         worker_call = next(call for call in connection.calls if "from job.runtime_worker_heartbeats" in call[0])
-        self.assertEqual(worker_call[1][0], ["turnover-ledger"])
-        self.assertEqual(worker_call[1][1], ["turnover-ledger-read-model"])
+        self.assertEqual(worker_call[1][0], ["bank-detail"])
+        self.assertEqual(worker_call[1][1], ["bank-detail-read-model"])
 
     def test_health_summary_counts_worker_mismatches(self) -> None:
         repository = RuntimeMonitoringRepository(FakeWorkerMetricsConnection())

@@ -171,54 +171,35 @@ extra 保存只改变 Turnover canonical extra/version/audit 和局部 UI；前�
 
 前端跨页刷新已删除：confirm/withdraw/extra 成功后只处理当前 Turnover 页面；其它页面/tab 在 route 重进、查询变化、浏览器手动刷新或明确重试时，从 canonical source version 与自身 read-model gate 取得事实。
 
-## Read Model / Worker 状态
+## Direct canonical read 状态
 
-Read model key：`turnover_ledger`
-
-Scope type：`turnover_ledger`
-
-Scope key：普通写只返回信息性 affected month scopes，不 enqueue；页面 GET 发现 stale 时按精确月份入队。普通写无法确定月份时 fail closed，不能退回 `all` fan-out。
-
-Worker instance：`turnover-ledger`
-
-Refresh event：`turnover_ledger.read_model.refresh`
-
-状态：
+外部往来款页面没有独立 read model/worker 状态。一次 GET 的状态只有：
 
 | 状态 | 含义 | 页面/API 行为 |
 | --- | --- | --- |
-| `fresh` | read model source versions 与当前事实源一致 | 可读可写 |
-| `refreshing` | 缺失或 stale 后已入队刷新 | 可展示当前 payload 或空 payload；写动作由后端 stale precondition/canonical write safety 判定 |
-| `stale` | source versions 不一致 | 不得伪装 fresh；应 enqueue `api_stale` refresh |
-| `missing` | required SQL read model 缺失 | 返回 empty refreshing payload 并 enqueue `api_miss` |
-| `failed` | worker 或 readiness 记录失败 | App Status 标记 domain blocked |
-| `unavailable` | runtime repository / queue / readiness 不可用 | App Status 不得显示 green；按 blocked/busy 暴露 |
+| `loading` | 当前 canonical snapshot 正在读取和计算 | 显示现有 loading；不得轮询 App Status |
+| `ready` | 单个 repeatable-read snapshot 已完整返回 | 展示本次 snapshot 的 rows/groups/statistics 和 active relation tags |
+| `empty` | snapshot 有效但没有符合 tag selection 的流水 | 返回完整空 DTO，不创建 refresh job |
+| `error` | snapshot/query 失败 | 显示明确错误；用户普通刷新即可重试 |
+| `submitting` | confirm/withdraw/extra/tag write 正在提交 | 按钮立即 disabled 并显示提交中 |
+| `submitted_reload_failed` | canonical write 已成功，但后续当前页 GET 失败 | 保留成功语义并提示重新刷新，不得改写为写失败 |
 
-refresh 触发来源：
-
-- route 进入/重进、筛选/月 scope 变化、浏览器手动刷新或明确重试时，GET fresh gate 发现 exact scope missing/stale/source-version mismatch；focus/visibility/BFCache 不触发业务 GET。
-- 显式 App Health/初始化/修复命令；`all` 只允许在这些已授权维护入口使用。
-- tag-selection、bank-row-tags、relation extra、manual closure confirm/withdraw 和底层事实变化只推进 canonical version，不在写路径触发 refresh。
-
-worker 流程：
+读取流程：
 
 ```text
-job.outbox_events / job.read_model_dirty_scopes
-  -> turnover-ledger worker consumes turnover_ledger.read_model.refresh
-  -> TurnoverLedgerReadModelRefreshService.handle_runtime_event
-  -> TurnoverLedgerSqlProjectionBuilder.rebuild_turnover_ledger_read_model_scope
-  -> WorkbenchRelationReadModelRepositoryPort.workbench_relation_source_bundle_from_source
-  -> fresh relation distribution enriches grouped payload; non-fresh relation context fails without saving
-  -> save_turnover_ledger_rows
-  -> complete dirty scope and readiness
+GET /api/turnover-ledger
+  -> TurnoverLedgerApiRoutes
+  -> TurnoverLedgerQueryService
+  -> REPEATABLE READ READ ONLY snapshot
+  -> canonical bank/category/settings/turnover/extras facts
+  -> bounded app.workbench_pair_relations lookup for visible bank row ids
+  -> TurnoverLedgerService + relation context
+  -> page DTO
 ```
 
-失败恢复：
+禁止状态：`fresh` / `stale` / `refreshing` / `missing` / `failed` projection、Turnover dirty scope、Turnover refresh outbox、Turnover worker readiness。历史 migration 表不参与状态机。
 
-- worker handler event type 错误必须拒绝。
-- projection 失败不得保存半成品 read model。
-- dirty scope 未 complete 时 App Status 应保持 busy/blocked。
-- 本地测试不能证明真实 RabbitMQ/Redis/systemd drain，发布前按运维 smoke 验证。
+写入成功后当前页只发一次 normal GET。另一个页面/tab 不自动更新；它在自己的下一次访问或手动刷新时读取同一 canonical relation。
 
 ## 变更记录
 
