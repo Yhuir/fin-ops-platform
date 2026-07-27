@@ -139,6 +139,7 @@ EXPECTED_MIGRATION_FILES = [
     "0125_workbench_canonical_proof_identity_indexes.sql",
     "0126_cost_statistics_direct_canonical_read.sql",
     "0127_direct_canonical_page_runtime_retirement.sql",
+    "0128_tax_offset_plan_runtime_grant.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (

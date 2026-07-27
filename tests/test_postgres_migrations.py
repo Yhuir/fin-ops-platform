@@ -141,6 +141,7 @@ EXPECTED_MIGRATIONS = [
     "0125_workbench_canonical_proof_identity_indexes.sql",
     "0126_cost_statistics_direct_canonical_read.sql",
     "0127_direct_canonical_page_runtime_retirement.sql",
+    "0128_tax_offset_plan_runtime_grant.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -296,7 +297,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 128)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 129)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -403,6 +404,19 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
             " ".join(sql.split()),
         )
         self.assertNotIn("delete", sql.lower())
+
+    def test_tax_offset_runtime_can_read_and_save_plans(self) -> None:
+        sql = " ".join(
+            (
+                MIGRATIONS_DIR / "0128_tax_offset_plan_runtime_grant.sql"
+            ).read_text(encoding="utf-8").lower().split()
+        )
+
+        self.assertIn(
+            "grant select, insert, update on app.tax_offset_plans to fin_ops_app_runtime",
+            sql,
+        )
+        self.assertNotIn("delete", sql)
 
     def test_pending_invoice_filter_constraints_allow_cash_income(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()
