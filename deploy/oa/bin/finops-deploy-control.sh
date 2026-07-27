@@ -654,7 +654,7 @@ batch_accounting_audit() {
   src="$(release_src "$release")"
   assert_runtime_env_contract
   run_with_runtime_env "$src" -m fin_ops_platform.tools.audit_page_business_read_model \
-    batch-accounting --json --fail-on-issues --tenant-id default --limit 50
+    batch_accounting --json --fail-on-issues --tenant-id default --limit 50
 }
 
 batch_accounting_read_smoke() {

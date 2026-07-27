@@ -302,6 +302,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("batch-accounting-audit <release-name>", script)
         self.assertIn("batch-accounting-audit accepts only release name", script)
         self.assertIn("audit_page_business_read_model", script)
+        self.assertIn("batch_accounting --json --fail-on-issues", script)
         self.assertIn("batch-accounting-read-smoke <release-name> --bank-year YYYY", script)
         self.assertIn("batch-accounting-read-smoke accepts only --bank-year YYYY [--iterations N]", script)
         self.assertIn("fin_ops_platform.tools.batch_accounting_read_smoke", script)
