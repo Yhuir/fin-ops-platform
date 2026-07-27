@@ -395,7 +395,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             materialization_persistence=BankFlowRuleBatchCanonicalDraftPersistencePort(
                 state_store or SimpleNamespace(save_bank_flow_rule_batches=lambda _snapshot: None)
             ),
-            queue_repository=queue,
             workbench_matching_source_versions_provider=lambda: _bank_batch_workbench_matching_source_versions(
                 app_settings_service
             ),

@@ -240,6 +240,25 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
         self.assertEqual(payload["registration"]["instance_name"], "workbench-relation")
         self.assertEqual(payload["registration"]["exclude_claim_scope_keys"], [])
 
+    def test_bank_flow_rule_batch_registration_check_bootstraps_canonical_draft_owner(self) -> None:
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = worker_app.main(
+                [
+                    "--registration",
+                    "bank-flow-rule-batch",
+                    "--worker-instance",
+                    "bank-flow-rule-batch",
+                    "--check",
+                ]
+            )
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["worker_instance"], "bank-flow-rule-batch")
+        self.assertIn("bank_flow_rule_batch.canonical_draft.refresh", payload["handlers"])
+
     def test_unknown_worker_registration_fails_fast(self) -> None:
         with self.assertRaises(SystemExit):
             worker_app.main(["--registration", "missing-worker", "--check"])
