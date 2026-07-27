@@ -48,6 +48,11 @@ commands:
   workbench-requirement-repair <release-name> --rollback-dry-run --expected-fingerprint <sha256>
   workbench-requirement-repair <release-name> --rollback --expected-fingerprint <sha256>
                                       repair historical frozen OA/invoice requirements through relation commands
+  batch-accounting-metadata-cleanup <release-name> --dry-run
+  batch-accounting-metadata-cleanup <release-name> --execute --expected-fingerprint <sha256>
+  batch-accounting-metadata-cleanup <release-name> --rollback-dry-run --expected-fingerprint <sha256>
+  batch-accounting-metadata-cleanup <release-name> --rollback --expected-fingerprint <sha256>
+                                      remove retired batch membership metadata through relation commands
   workbench-matching-retry <release-name> --scope-month YYYY-MM --dry-run
   workbench-matching-retry <release-name> --scope-month YYYY-MM --execute --expected-fingerprint <sha256>
                                       requeue one failed matching scope through its durable repository boundary
@@ -615,6 +620,29 @@ workbench_requirement_repair() {
   run_with_runtime_env "$src" -m fin_ops_platform.tools.workbench_relation_requirement_repair_ops "$@"
 }
 
+batch_accounting_metadata_cleanup() {
+  local release="${1:-}"
+  [[ -n "$release" ]] || die "batch-accounting-metadata-cleanup requires release name"
+  shift
+  local mode="${1:-}"
+  case "$mode" in
+    --dry-run)
+      [[ "$#" -eq 1 ]] || die "batch-accounting-metadata-cleanup only permits the four fixed modes"
+      ;;
+    --execute|--rollback-dry-run|--rollback)
+      [[ "$#" -eq 3 && "${2:-}" == "--expected-fingerprint" && "${3:-}" =~ ^[0-9a-f]{64}$ ]] || \
+        die "batch-accounting-metadata-cleanup only permits the four fixed modes"
+      ;;
+    *)
+      die "batch-accounting-metadata-cleanup only permits the four fixed modes"
+      ;;
+  esac
+  local src
+  src="$(release_src "$release")"
+  assert_runtime_env_contract
+  run_with_runtime_env "$src" -m fin_ops_platform.tools.batch_accounting_metadata_cleanup_ops "$@"
+}
+
 workbench_matching_retry() {
   local release="${1:-}"
   [[ -n "$release" ]] || die "workbench-matching-retry requires release name"
@@ -1012,6 +1040,10 @@ case "$cmd" in
   workbench-requirement-repair)
     shift
     workbench_requirement_repair "$@"
+    ;;
+  batch-accounting-metadata-cleanup)
+    shift
+    batch_accounting_metadata_cleanup "$@"
     ;;
   workbench-matching-retry)
     shift

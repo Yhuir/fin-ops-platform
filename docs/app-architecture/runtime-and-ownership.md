@@ -39,7 +39,7 @@ flowchart LR
 
 1. `unsubmitted` 直接分页查询指定年份的 canonical 批量账务银行候选和不限年份的已完成日常报销 OA；OA 必须没有包含银行成员的 active relation，已有 invoice-only relation不排除。
 2. 当前 OA page 的附件发票只按 OA IDs 批量读取；禁止全量附件扫描。
-3. `submitted` 只读 `app.workbench_pair_relations` 中 active、`relation_mode=batch_accounting` 且包含指定年份 canonical 银行成员的关系，再按当前页 member IDs 一次批量补齐 OA/发票详情。
+3. `submitted` 只读 `app.workbench_pair_relations` 中 active、`relation_mode=batch_accounting` 且包含指定年份 canonical 银行成员的关系；对齐的 `row_ids + row_types` 是唯一成员事实源，再按当前页 member IDs 一次批量补齐 OA/发票详情。
 4. rows、summary、counts 和 pagination 在同一个显式 `REPEATABLE READ / READ ONLY` snapshot 中得到。银行/OA 服务端分页；禁止 Workbench full payload、12 月循环、逐 scope proof、N+1 或 Python/浏览器全量分页。
 5. submit 的 `bank_row_id + oa_row_ids` 上下文也走页面专属窄 canonical snapshot；正式写入和 withdraw 继续交给 `WorkbenchRelationCommandService`。缺 query repository 或 command service 时 fail closed。
 6. 响应不再包含 read-model status/source-version/refresh enqueue/polling/operation barrier 字段。

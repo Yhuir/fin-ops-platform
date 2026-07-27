@@ -439,6 +439,14 @@ sudo /usr/local/sbin/finops-deploy-control workbench-requirement-repair <release
 sudo /usr/local/sbin/finops-deploy-control workbench-requirement-repair <release-name> \
   --rollback \
   --expected-fingerprint <executed-source-fingerprint>
+sudo /usr/local/sbin/finops-deploy-control batch-accounting-metadata-cleanup <release-name> \
+  --dry-run
+sudo /usr/local/sbin/finops-deploy-control batch-accounting-metadata-cleanup <release-name> \
+  --execute \
+  --expected-fingerprint <dry-run-source-fingerprint>
+sudo /usr/local/sbin/finops-deploy-control batch-accounting-metadata-cleanup <release-name> \
+  --rollback-dry-run \
+  --expected-fingerprint <executed-source-fingerprint>
 sudo /usr/local/sbin/finops-deploy-control workbench-matching-retry <release-name> \
   --scope-month <YYYY-MM> \
   --dry-run
@@ -500,6 +508,10 @@ sudo /usr/local/sbin/finops-deploy-control runtime-queue-resolve-covered <releas
 中断后幂等续跑。`rollback-dry-run` / `rollback` 只选择同 fingerprint 的 execute history，在首写前检查
 after-image drift，并通过 `WorkbenchRelationCommandService` 原地精确恢复完整 `special_metadata` preimage；
 不 cancel/recreate relation。ETC 与批量账务不在修复范围；命令不开放 SQL、任意脚本或常驻回扫。
+`batch-accounting-metadata-cleanup` 只选择 active `relation_mode=batch_accounting` 且仍含
+`bank_row_id`、`oa_row_ids`、`invoice_row_ids` 或旧 `year` alias 的关系。dry-run fingerprint 绑定完整
+relation preimage 与清理后的 metadata；execute/rollback 复用正式 relation command、history 和
+idempotency 边界，禁止 SQL 直写、cancel/recreate 或扫描其它 relation owner。
 `read-model-slo-smoke` 只运行 release 内的 `fin_ops_platform.tools.read_model_slo_smoke` dry-run，
 用于在不暴露 PostgreSQL DSN 的情况下发现 critical read model scopes；该 helper 明确拒绝 `--apply`，
 真实 enqueue-to-fresh 只能在单独批准的 root session 中执行。

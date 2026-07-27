@@ -40,7 +40,7 @@
 | OA 候选 | `app.oa_applications` | 未删除、已完成状态别名、日常报销主单、不限年份、没有包含 canonical 银行成员的 active relation |
 | OA 附件发票 | `app.invoices.source_links` + `app.oa_attachments` | 只按当前可见或本次选中的 OA IDs 批量查询；不得扫描全量附件 |
 | submitted relations | `app.workbench_pair_relations` | 只读 `status='active' and relation_mode='batch_accounting'`，并要求关系包含指定年份的 canonical 银行成员 |
-| submitted members | canonical OA/invoice tables | 对当前页 relation 的全部 member IDs 一次 union bulk query |
+| submitted members | `row_ids + row_types`、canonical OA/invoice tables | 对齐且去重的 typed member set 是唯一成员事实源；对当前页 member IDs 一次 union bulk query |
 | submit context | 页面/API | 指定 `bank_row_id + oa_row_ids`；在一个 read-only repeatable-read snapshot 中读取银行、OA、附件发票 |
 | relation 冲突/CAS | `WorkbenchRelationCommandService` | 基于 canonical active relations、owner、version、idempotency 和 command repository |
 | 权限/session | route/Application | GET 遵循页面读取权限；submit/withdraw 必须有业务写权限 |
@@ -60,6 +60,8 @@
 | 写后 GET | 当前页面 | 每次成功 submit/withdraw 后一次；不 poll、不触发 operation barrier |
 
 响应禁止出现 `read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys`、`source_versions`、`refresh_enqueued`、`freshness_targets` 或 `operation_barrier_targets`。
+
+`special_metadata` 只保存 `source`、`bank_year`、`oa_years`、`affected_scope_keys`、`created_by` 等来源/审计上下文。成员身份不得写入或读取 `special_metadata.bank_row_id`、`oa_row_ids`、`invoice_row_ids` 或旧 `year` alias；submitted DTO 也不透传 raw relation / metadata。
 
 ## 事务与查询合同
 

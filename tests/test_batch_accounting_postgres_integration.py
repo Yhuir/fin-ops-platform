@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import json
 from time import perf_counter
 from typing import Any, Iterator
 import unittest
 
+from fin_ops_platform.services.batch_accounting_service import BatchAccountingService
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.batch_accounting import (
     PostgresBatchAccountingQueryRepository,
@@ -246,9 +248,6 @@ class BatchAccountingPostgresIntegrationTests(unittest.TestCase):
                     '{"status":"matched","bank_amount":"800.00","oa_amount":"800.00","amount_delta":"0.00"}'::jsonb,
                     '{
                         "source":"batch_accounting",
-                        "bank_row_id":"txn-batch-submitted",
-                        "oa_row_ids":["oa-batch-submitted"],
-                        "invoice_row_ids":["oa-att-inv-submitted"],
                         "bank_year":"2026",
                         "affected_scope_keys":["2026-02"]
                     }'::jsonb
@@ -317,6 +316,15 @@ class BatchAccountingPostgresIntegrationTests(unittest.TestCase):
             {(row["member_type"], row["id"]) for row in payload["member_rows"]},
             {("oa", "oa-batch-submitted"), ("invoice", "oa-att-inv-submitted")},
         )
+        page_payload = BatchAccountingService(query_repository=self.repository).build_payload(
+            bank_year="2026",
+            bucket="submitted",
+        )
+        self.assertEqual(
+            page_payload["relations_by_bank_row_id"]["txn-batch-submitted"]["invoice_rows"][0]["issue_date"],
+            "2026-02-01",
+        )
+        json.dumps(page_payload)
         self.assertEqual(payload["pagination"]["bank_rows"]["total"], 1)
 
     def test_submission_context_is_narrow_and_cross_year_oa_is_allowed(self) -> None:

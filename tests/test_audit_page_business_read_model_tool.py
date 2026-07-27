@@ -395,8 +395,9 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
             domain_key="batch_accounting",
         )
         batch_accounting_sql = " ".join(sql for sql, _params in batch_accounting_connection.fetch_all_calls)
-        self.assertIn("relation.relation_mode <> 'batch_accounting'", batch_accounting_sql)
+        self.assertIn("relation.relation_mode = 'batch_accounting'", batch_accounting_sql)
         self.assertIn("cardinality(relation.row_ids) <> cardinality(relation.row_types)", batch_accounting_sql)
+        self.assertIn("count(distinct member.row_id)", batch_accounting_sql)
         self.assertIn("app.bank_transactions", batch_accounting_sql)
         self.assertNotIn("read_model.", batch_accounting_sql)
 
@@ -423,23 +424,27 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
             for sql, params in connection.fetch_all_calls
             if "/* check: key_display_fields */" in sql
         )
-        self.assertIn("relation.special_metadata->>'source' = 'batch_accounting'", audit_sql)
+        self.assertIn("relation.relation_mode = 'batch_accounting'", audit_sql)
         self.assertIn("app.bank_transactions", audit_sql)
         self.assertIn("app.oa_applications", audit_sql)
         self.assertIn("app.invoices", audit_sql)
+        self.assertNotIn("special_metadata->'oa_row_ids'", audit_sql)
+        self.assertNotIn("special_metadata->'invoice_row_ids'", audit_sql)
+        self.assertNotIn("special_metadata->>'bank_row_id'", audit_sql)
         self.assertNotIn("read_model.", audit_sql)
         self.assertEqual(params, (51,))
         self.assertNotIn("consumer_relation_edge_equality", report["audit_contract"]["proof_checks"])
 
-    def test_batch_accounting_wrong_canonical_relation_mode_is_blocking(self) -> None:
+    def test_batch_accounting_relation_owner_mismatch_is_blocking(self) -> None:
         report = audit_page_business_read_model.audit_page_business_read_model(
             FakeConnection(
                 rows_by_check={
-                    "key_display_fields": [
+                    "canonical_expected_set": [
                         {
                             "subject_id": "case-batch-1",
                             "scope_key": "2026-06",
                             "relation_mode": "manual",
+                            "metadata_source": "batch_accounting",
                         }
                     ]
                 }
@@ -450,7 +455,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertEqual(report["audit_status"]["integrity"], "issues_found")
         self.assertEqual(
             report["summary"]["issue_sample_counts_by_code"],
-            {"batch_accounting_key_display_fields_mismatch": 1},
+            {"batch_accounting_relation_owner_mismatch": 1},
         )
         self.assertEqual(report["issues"][0]["details"]["relation_mode"], "manual")
 

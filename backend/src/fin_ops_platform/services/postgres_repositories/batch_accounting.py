@@ -588,7 +588,7 @@ class PostgresBatchAccountingQueryRepository:
                        'invoice_no', invoice.invoice_no,
                        'invoice_code', invoice.invoice_code,
                        'digital_invoice_no', invoice.digital_invoice_no,
-                       'issue_date', invoice.invoice_date,
+                       'issue_date', invoice.invoice_date::text,
                        'seller_name', invoice.seller_name,
                        'buyer_name', invoice.buyer_name,
                        'amount', invoice.amount,

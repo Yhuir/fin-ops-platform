@@ -131,6 +131,7 @@
 - `unsubmitted` 读取指定年份、对方户名为“批量账务集中处理”、支出且没有 active relation 的 `app.bank_transactions`；OA 读取已完成日常报销 `app.oa_applications`，不按年份过滤，且没有包含 canonical 银行成员的 active relation。
 - 附件发票只按当前 OA page IDs 查询 `app.invoices.source_links` / `app.oa_attachments`。
 - `submitted` 只读取 `app.workbench_pair_relations` 中 `status='active' and relation_mode='batch_accounting'` 且包含指定年份 canonical 银行成员的关系，再一次批量读取其 canonical OA/发票成员。
+- submitted relation 的成员唯一事实源是对齐、去重的 `row_ids + row_types`；API 不读取或返回 `special_metadata.bank_row_id`、`oa_row_ids`、`invoice_row_ids`、旧 `year` alias，也不透传 raw relation metadata。
 - rows、summary、counts 和 pagination 使用同一 snapshot；固定查询次数、服务端分页，禁止 Workbench payload、12 月循环、逐 row relation lookup 和全量附件扫描。
 
 成功或结构化错误响应可带 `Server-Timing` 头，记录 canonical snapshot、payload assembly 和 serialization；该头不属于业务 JSON。

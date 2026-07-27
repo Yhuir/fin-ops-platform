@@ -1,5 +1,12 @@
 # 批量账务 实施记录
 
+## 2026-07-27 - typed membership 与 Audit 合同闭环
+
+- 根因：页面已经 canonical API 直读，但 Audit 仍把已废弃的 `special_metadata.bank_row_id/oa_row_ids/invoice_row_ids` 当成员事实；历史关系中这些冗余字段漂移会产生假失败。submitted repository 同时把 PostgreSQL `date` 放入 JSONB DTO，导致接口序列化 500。
+- 修复：成员唯一事实源收敛为对齐的 `row_ids + row_types`；submit 停写、service 停读并停止透传旧成员 metadata。Audit 以 active `relation_mode=batch_accounting` 定义页面集合，分别验证 `source` owner、成员对齐/去重/基数和 canonical member existence。invoice date 在 repository I/O 边界转换成文本。
+- 旧链路删除：删除 `bank_row_id`、`oa_row_ids`、`invoice_row_ids`、旧 `year` alias 的 metadata 写入、submitted/scope fallback 读取和 raw relation metadata 响应。
+- 生产闭环：部署前保留 remote backup tag；部署后通过正式 relation command metadata 更新边界清除 active batch relations 中的四个退休字段，再复跑 Audit、submitted/unsubmitted API、性能与关联台消费链路。
+
 ## 2026-07-27 - 页面直读 canonical facts
 
 - 目标：把 `/batch-accounting` 的全部页面读取从 Workbench active generation 和 `workbench_relation` read facade 迁移到页面专属 PostgreSQL query repository，同时保留权限、金额、CAS/冲突、跨月、附件发票、submit/withdraw command 语义。

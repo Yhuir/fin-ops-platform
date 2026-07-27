@@ -124,10 +124,10 @@ PAGE_AUDIT_CONTRACTS: dict[str, PageAuditContract] = {
         ),
         relation_tables=("app.workbench_pair_relations",),
         canonical_expected_set=(
-            "eligible canonical bank and OA facts plus active batch_accounting relations "
-            "and their canonical OA/invoice members"
+            "active relation_mode=batch_accounting relations with source=batch_accounting "
+            "and aligned unique typed members resolving to canonical bank/OA/invoice facts"
         ),
-        key_display_fields=("case_id", "relation_mode", "row_ids", "row_types", "special_metadata"),
+        key_display_fields=("case_id", "relation_mode", "row_ids", "row_types", "special_metadata.source"),
         external_source_boundary="OA and bank source completeness before App registration",
     ),
     "bank_flow_rule_batches": PageAuditContract(
@@ -405,7 +405,7 @@ def _summary_sql(contract: PageAuditContract, *, tenant_id: str) -> tuple[str, t
             (),
         )
     if domain == "batch_accounting":
-        source_sql = "select count(*) from app.workbench_pair_relations where status = 'active' and special_metadata->>'source' = 'batch_accounting'"
+        source_sql = "select count(*) from app.workbench_pair_relations where status = 'active' and relation_mode = 'batch_accounting'"
         relation_sql = source_sql
     elif domain == "bank_flow_rule_batches":
         source_sql = "select count(*) from app.bank_flow_rule_batches where status <> 'deleted'"
@@ -667,6 +667,32 @@ def _canonical_expected_set_issues(
     tenant_id: str,
     limit: int,
 ) -> list[AuditIssue]:
+    if contract.domain_key == "batch_accounting":
+        return _proof_query_issues(
+            connection,
+            sql="""
+                /* check: canonical_expected_set */
+                select relation.case_id as subject_id,
+                       to_char(relation.month_scope, 'YYYY-MM') as scope_key,
+                       relation.relation_mode,
+                       relation.special_metadata->>'source' as metadata_source
+                from app.workbench_pair_relations relation
+                where relation.status = 'active'
+                  and (
+                      relation.relation_mode = 'batch_accounting'
+                      or relation.special_metadata->>'source' = 'batch_accounting'
+                  )
+                  and (
+                      relation.relation_mode <> 'batch_accounting'
+                      or relation.special_metadata->>'source' is distinct from 'batch_accounting'
+                  )
+                order by relation.case_id
+                limit %s
+            """,
+            params=(limit,),
+            code="batch_accounting_relation_owner_mismatch",
+            message="批量账务 active relation 的 relation_mode 与 source owner 不一致。",
+        )
     return []
 
 
@@ -686,7 +712,7 @@ def _key_display_field_issues(
                     select relation.*
                     from app.workbench_pair_relations relation
                     where relation.status = 'active'
-                      and relation.special_metadata->>'source' = 'batch_accounting'
+                      and relation.relation_mode = 'batch_accounting'
                 ),
                 invalid_members as (
                     select relation.case_id,
@@ -735,27 +761,22 @@ def _key_display_field_issues(
                        invalid.invalid_member_ids
                 from batch_relations relation
                 left join invalid_members invalid on invalid.case_id = relation.case_id
-                where relation.relation_mode <> 'batch_accounting'
-                   or cardinality(relation.row_ids) <> cardinality(relation.row_types)
+                where cardinality(relation.row_ids) <> cardinality(relation.row_types)
+                   or cardinality(relation.row_ids) <> (
+                       select count(distinct member.row_id)
+                       from unnest(relation.row_ids) member(row_id)
+                   )
+                   or (
+                       select count(*)
+                       from unnest(relation.row_types) member(row_type)
+                       where lower(member.row_type) in ('bank', 'bank_transaction')
+                   ) <> 1
+                   or not exists (
+                       select 1
+                       from unnest(relation.row_types) member(row_type)
+                       where lower(member.row_type) = 'oa'
+                   )
                    or invalid.invalid_member_ids is not null
-                   or nullif(relation.special_metadata->>'bank_row_id', '') is null
-                   or not (
-                       relation.special_metadata->>'bank_row_id' = any(relation.row_ids)
-                   )
-                   or exists (
-                       select 1
-                       from jsonb_array_elements_text(
-                           coalesce(relation.special_metadata->'oa_row_ids', '[]'::jsonb)
-                       ) item(row_id)
-                       where not item.row_id = any(relation.row_ids)
-                   )
-                   or exists (
-                       select 1
-                       from jsonb_array_elements_text(
-                           coalesce(relation.special_metadata->'invoice_row_ids', '[]'::jsonb)
-                       ) item(row_id)
-                       where not item.row_id = any(relation.row_ids)
-                   )
                 order by relation.case_id
                 limit %s
                 """,

@@ -301,16 +301,11 @@ class RelationGroupPayloadConnection:
                     "source_versions": {"workbench_relation_schema_version": "stale-group"},
                     "payload": {
                         "group_id": "CASE-BATCH-1",
-                        "relation_mode": "manual_confirmed",
+                        "relation_mode": "batch_accounting",
                         "relation_status": "linked",
                         "row_ids": ["txn-batch-1", "oa-batch-1"],
                         "row_types": ["bank", "oa"],
-                        "special_metadata": {
-                            "source": "batch_accounting",
-                            "bank_row_id": "txn-batch-1",
-                            "oa_row_ids": ["oa-batch-1"],
-                            "year": "2026",
-                        },
+                        "special_metadata": {"source": "batch_accounting", "bank_year": "2026"},
                     },
                     "raw_payload": {},
                 }
@@ -685,7 +680,8 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
         relation = relation_dicts_from_distribution_payload(payload)[0]
         self.assertEqual(relation["case_id"], "CASE-BATCH-1")
         self.assertEqual(relation["status"], "active")
-        self.assertEqual(relation["special_metadata"]["bank_row_id"], "txn-batch-1")
+        self.assertEqual(relation["special_metadata"]["bank_year"], "2026")
+        self.assertEqual(relation["row_ids"], ["txn-batch-1", "oa-batch-1"])
         self.assertEqual(payload["source_versions"], {"workbench_relation_schema_version": "fresh-scope"})
 
     def test_repository_group_lookup_uses_scope_source_versions_over_relation_record(self) -> None:

@@ -106,9 +106,6 @@ def active_relation(
         },
         "special_metadata": {
             "source": "batch_accounting",
-            "bank_row_id": bank_id,
-            "oa_row_ids": [oa_id],
-            "invoice_row_ids": [invoice_id],
             "bank_year": "2026",
             "affected_scope_keys": ["2026-01"],
         },
@@ -315,6 +312,14 @@ class BatchAccountingServiceTests(unittest.TestCase):
     def test_submitted_payload_uses_active_batch_relation_and_canonical_members(self) -> None:
         repository = FakeBatchAccountingQueryRepository()
         relation = active_relation()
+        relation["special_metadata"].update(
+            {
+                "bank_row_id": "txn-stale",
+                "oa_row_ids": ["oa-stale"],
+                "invoice_row_ids": ["invoice-stale"],
+                "year": "1999",
+            }
+        )
         repository.list_payload = {
             "summary": {"unsubmitted_count": 0, "submitted_count": 1, "oa_count": 0},
             "bank_rows": [{**bank_row(), "relation_id": RELATION_ID, "version": 3}],
@@ -335,10 +340,19 @@ class BatchAccountingServiceTests(unittest.TestCase):
         self.assertEqual(payload["bank_rows"][0]["relation_id"], RELATION_ID)
         self.assertEqual(payload["bank_rows"][0]["version"], 1)
         bucket = payload["relations_by_bank_row_id"][BANK_ROW_ID]
-        self.assertEqual(bucket["relation"]["relation_mode"], "batch_accounting")
-        self.assertEqual(bucket["relation"]["relation_id"], RELATION_ID)
+        self.assertEqual(
+            bucket["relation"],
+            {
+                "relation_id": RELATION_ID,
+                "note": "日常报销批量账务管理提交",
+                "amount_check": relation["amount_check"],
+            },
+        )
         self.assertEqual(bucket["oa_rows"][0]["id"], OA_ROW_ID)
         self.assertEqual(bucket["oa_rows"][0]["linked_invoice_row_ids"], [INVOICE_ROW_ID])
+        self.assertEqual(bucket["invoice_rows"][0]["id"], INVOICE_ROW_ID)
+        self.assertNotIn("metadata", bucket)
+        json.dumps(payload)
 
     def test_invalid_year_bucket_paging_and_search_fail_fast(self) -> None:
         cases = (
@@ -380,7 +394,16 @@ class BatchAccountingServiceTests(unittest.TestCase):
         self.assertEqual(call["relation_mode"], "batch_accounting")
         self.assertEqual(call["row_ids"], [BANK_ROW_ID, OA_ROW_ID, INVOICE_ROW_ID])
         self.assertEqual(call["row_types"], ["bank", "oa", "invoice"])
-        self.assertEqual(call["special_metadata"]["affected_scope_keys"], ["2026-01"])
+        self.assertEqual(
+            call["special_metadata"],
+            {
+                "source": "batch_accounting",
+                "bank_year": "2026",
+                "oa_years": ["2026"],
+                "affected_scope_keys": ["2026-01"],
+                "created_by": "finance-user",
+            },
+        )
         self.assertEqual(result["relation_id"], RELATION_ID)
 
     def test_submit_requires_note_for_amount_mismatch_and_rejects_stale_version(self) -> None:

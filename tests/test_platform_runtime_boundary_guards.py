@@ -4111,6 +4111,27 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_batch_accounting_membership_has_no_special_metadata_fallback(self) -> None:
+        path = SERVICES_ROOT / "batch_accounting_service.py"
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        submitted_source = _function_source(tree, source, "_submitted_payload")
+        scope_source = _function_source(tree, source, "_affected_scope_keys_for_relation")
+        submit_source = _function_source(tree, source, "submit")
+        metadata_literal = submit_source.split("special_metadata = {", 1)[1].split("case_id =", 1)[0]
+
+        violations: list[str] = []
+        for retired_key in ("bank_row_id", "oa_row_ids", "invoice_row_ids", "year"):
+            marker = f'metadata.get("{retired_key}")'
+            if marker in submitted_source or marker in scope_source:
+                violations.append(f"BatchAccountingService reads retired membership metadata: {retired_key}")
+            if f'"{retired_key}":' in metadata_literal:
+                violations.append(f"BatchAccountingService writes retired membership metadata: {retired_key}")
+        if "relation_payload = dict(relation)" in submitted_source or '"metadata":' in submitted_source:
+            violations.append("BatchAccountingService exposes raw relation metadata in submitted DTO")
+
+        self.assertEqual(violations, [])
+
     def test_batch_accounting_route_handlers_do_not_bypass_service_boundaries(self) -> None:
         path = APP_ROOT / "server.py"
         source = path.read_text(encoding="utf-8")

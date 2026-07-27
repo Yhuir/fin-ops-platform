@@ -201,10 +201,6 @@ class BatchAccountingService:
         actor_id = str(actor or "").strip() or "web_finance_user"
         special_metadata = {
             "source": BATCH_ACCOUNTING_SOURCE,
-            "bank_row_id": normalized_bank_row_id,
-            "oa_row_ids": normalized_oa_row_ids,
-            "invoice_row_ids": invoice_row_ids,
-            "year": resolved_bank_year,
             "bank_year": resolved_bank_year,
             "oa_years": self._selected_oa_years(selected_oa_rows),
             "affected_scope_keys": affected_scope_keys,
@@ -403,12 +399,10 @@ class BatchAccountingService:
         for relation in list(snapshot.get("relations") or []):
             if not isinstance(relation, dict) or not self._is_batch_accounting_relation(relation):
                 continue
-            metadata = relation.get("special_metadata") if isinstance(relation.get("special_metadata"), dict) else {}
-            bank_row_id = str(metadata.get("bank_row_id") or "").strip()
-            if not bank_row_id:
-                bank_row_id = str((relation.get("bank_row") or {}).get("id") or "").strip()
-            if not bank_row_id:
+            bank_row_ids = self._relation_member_ids(relation, "bank")
+            if len(bank_row_ids) != 1:
                 continue
+            bank_row_id = bank_row_ids[0]
             bank_row = bank_rows_by_id.get(bank_row_id) or dict(relation.get("bank_row") or {})
             bank_rows.append(
                 self._bank_row_payload(
@@ -419,10 +413,6 @@ class BatchAccountingService:
             )
             oa_row_ids = self._relation_member_ids(relation, "oa")
             invoice_row_ids = self._relation_member_ids(relation, "invoice")
-            if not oa_row_ids:
-                oa_row_ids = self._dedupe(list(metadata.get("oa_row_ids") or []))
-            if not invoice_row_ids:
-                invoice_row_ids = self._dedupe(list(metadata.get("invoice_row_ids") or []))
             invoice_ids_by_oa_id = self._invoice_ids_by_oa_id(
                 [member_rows[row_id] for row_id in invoice_row_ids if row_id in member_rows]
             )
@@ -433,17 +423,19 @@ class BatchAccountingService:
                 )
                 for row_id in oa_row_ids
             ]
-            relation_payload = dict(relation)
-            relation_payload["relation_id"] = str(relation.get("case_id") or "")
+            relation_id = str(relation.get("case_id") or "")
             relations_by_bank_row_id[bank_row_id] = {
-                "relation_id": str(relation.get("case_id") or ""),
-                "relation": relation_payload,
+                "relation_id": relation_id,
+                "relation": {
+                    "relation_id": relation_id,
+                    "note": str(relation.get("note") or ""),
+                    "amount_check": deepcopy(relation.get("amount_check") or {}),
+                },
                 "oa_rows": oa_rows,
                 "invoice_rows": [
                     deepcopy(member_rows.get(row_id, {"id": row_id, "type": "invoice"}))
                     for row_id in invoice_row_ids
                 ],
-                "metadata": deepcopy(metadata),
             }
         return bank_rows, relations_by_bank_row_id
 
@@ -451,11 +443,16 @@ class BatchAccountingService:
     def _relation_member_ids(cls, relation: dict[str, Any], expected_type: str) -> list[str]:
         row_ids = list(relation.get("row_ids") or [])
         row_types = list(relation.get("row_types") or [])
+        accepted_types = {
+            "bank": {"bank", "bank_transaction"},
+            "oa": {"oa"},
+            "invoice": {"invoice", "input_invoice", "output_invoice"},
+        }.get(expected_type, {expected_type})
         result: list[str] = []
         for index, raw_row_id in enumerate(row_ids):
             row_id = str(raw_row_id or "").strip()
-            row_type = str(row_types[index] or "").strip() if index < len(row_types) else cls._row_type_for_row_id(row_id)
-            if row_id and row_type in {expected_type, f"{expected_type}_transaction"}:
+            row_type = str(row_types[index] or "").strip().lower() if index < len(row_types) else ""
+            if row_id and row_type in accepted_types:
                 result.append(row_id)
         return cls._dedupe(result)
 
@@ -536,17 +533,10 @@ class BatchAccountingService:
             return metadata_scope_keys
         fallback_month_scope = str(relation.get("month_scope") or "").strip()
         row_ids = self._dedupe(list(relation.get("row_ids") or []))
-        bank_row_id = str(metadata.get("bank_row_id") or "").strip()
-        if not bank_row_id:
-            bank_row_id = next(
-                (row_id for row_id in row_ids if self._row_type_for_row_id(row_id) == "bank"),
-                "",
-            )
-        oa_row_ids = self._dedupe(
-            list(metadata.get("oa_row_ids") or [])
-            or [row_id for row_id in row_ids if self._row_type_for_row_id(row_id) == "oa"]
-        )
-        bank_year = str(metadata.get("bank_year") or metadata.get("year") or "").strip()
+        bank_row_ids = self._relation_member_ids(relation, "bank")
+        bank_row_id = bank_row_ids[0] if len(bank_row_ids) == 1 else ""
+        oa_row_ids = self._relation_member_ids(relation, "oa")
+        bank_year = str(metadata.get("bank_year") or "").strip()
         if not bank_year and re.fullmatch(r"20\d{2}-\d{2}", fallback_month_scope):
             bank_year = fallback_month_scope[:4]
         if bank_row_id and oa_row_ids and re.fullmatch(r"20\d{2}", bank_year):

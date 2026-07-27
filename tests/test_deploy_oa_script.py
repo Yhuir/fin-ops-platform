@@ -289,6 +289,13 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('case "$mode" in', script)
         self.assertIn("fin_ops_platform.tools.workbench_relation_requirement_repair_ops", script)
 
+    def test_batch_accounting_metadata_cleanup_fixed_modes(self) -> None:
+        script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
+
+        self.assertIn("batch-accounting-metadata-cleanup <release-name> --dry-run", script)
+        self.assertIn("batch-accounting-metadata-cleanup only permits the four fixed modes", script)
+        self.assertIn("fin_ops_platform.tools.batch_accounting_metadata_cleanup_ops", script)
+
     def test_workbench_matching_retry_is_scope_and_fingerprint_guarded(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
 
