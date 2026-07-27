@@ -405,3 +405,8 @@
 - 第十次 release `main-09171af7-20260720062427` 的 40 样本阶段证据显示 external/candidate-load/candidate-parse/relation-read p95 分别为 `591.930/219.570/43.591/178.393ms`，其余筛选、relation apply、DTO 与序列化合计不足 `4ms`。第十一轮只删除批量账务私有读路径的重复 JSON 复制与未消费 payload：candidate mapper 不再递归 `without_keys`，service annotation 不再 `deepcopy`，relation row bundle 删除 `payload/raw_payload`，group bundle 删除 `raw_payload`。不改变 API、SQL 查询数、业务筛选、freshness 或其他页面通用 mapper。
 - 第十一轮 release `main-f57baa1c-20260720063635` 的四通道 160/160 生产样本通过：shell/unsubmitted/submitted/Page Audit p95 为 `112.073/462.434/277.958/258.733ms`，API 全 fresh、0 enqueue。unsubmitted service p95 `210.858ms`，candidate parse 与 relation read p95 分别降至 `1.678ms` 和 `44.835ms`。批量账务及关联台、银行明细、成本统计、OA 待付款 Audit 全部 pass/fresh/drained/0 issue。生产写 smoke 在首次 mutation 前被 `tax-offset`、`input-invoice-usage`、`output-invoice-collections`、`settings` 四个范围外页面的既有 System Audit integrity issue 安全阻断，未执行 mutation；该证据保留到最终系统门，不在批量账务阶段跨页修复或绕过。
 - 发布后验收：unsubmitted/submitted 20-sample p95 `<=500ms`（目标 `<=300ms`），unsubmitted query count 目标 `<=5`，Page Audit pass/fresh/drained/ready/0 issue；生产写 smoke 必须先通过全局 `app-health-operations` preflight，失败不得绕过。
+
+## 2026-07-27 - Canonical membership Audit 修复与生产闭环
+
+- 生产历史关系的冗余 membership metadata 已通过指纹保护、history 和 rollback 的正式 relation command 边界清理，禁止手工 SQL。
+- 生产只读闭环使用 `batch-accounting-audit` 和 `batch-accounting-read-smoke`；后者覆盖未提交/已提交 canonical route-service-repository、严格 JSON 序列化和 1 秒 p95 门槛，不依赖浏览器 token。

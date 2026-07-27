@@ -53,6 +53,10 @@ commands:
   batch-accounting-metadata-cleanup <release-name> --rollback-dry-run --expected-fingerprint <sha256>
   batch-accounting-metadata-cleanup <release-name> --rollback --expected-fingerprint <sha256>
                                       remove retired batch membership metadata through relation commands
+  batch-accounting-audit <release-name>
+                                      run the fixed read-only Batch Accounting business audit
+  batch-accounting-read-smoke <release-name> --bank-year YYYY [--iterations N]
+                                      time and validate both canonical read buckets without HTTP auth
   workbench-matching-retry <release-name> --scope-month YYYY-MM --dry-run
   workbench-matching-retry <release-name> --scope-month YYYY-MM --execute --expected-fingerprint <sha256>
                                       requeue one failed matching scope through its durable repository boundary
@@ -643,6 +647,40 @@ batch_accounting_metadata_cleanup() {
   run_with_runtime_env "$src" -m fin_ops_platform.tools.batch_accounting_metadata_cleanup_ops "$@"
 }
 
+batch_accounting_audit() {
+  local release="${1:-}"
+  [[ -n "$release" && "$#" -eq 1 ]] || die "batch-accounting-audit accepts only release name"
+  local src
+  src="$(release_src "$release")"
+  assert_runtime_env_contract
+  run_with_runtime_env "$src" -m fin_ops_platform.tools.audit_page_business_read_model \
+    batch-accounting --json --fail-on-issues --tenant-id default --limit 50
+}
+
+batch_accounting_read_smoke() {
+  local release="${1:-}"
+  [[ -n "$release" ]] || die "batch-accounting-read-smoke requires release name"
+  shift
+  [[ "${1:-}" == "--bank-year" && "${2:-}" =~ ^[0-9]{4}$ ]] || \
+    die "batch-accounting-read-smoke requires --bank-year YYYY"
+  case "$#" in
+    2)
+      ;;
+    4)
+      [[ "${3:-}" == "--iterations" && "${4:-}" =~ ^([1-9]|[1-4][0-9]|50)$ ]] || \
+        die "batch-accounting-read-smoke iterations must be 1..50"
+      ;;
+    *)
+      die "batch-accounting-read-smoke accepts only --bank-year YYYY [--iterations N]"
+      ;;
+  esac
+  local src
+  src="$(release_src "$release")"
+  assert_runtime_env_contract
+  run_with_runtime_env "$src" -m fin_ops_platform.tools.batch_accounting_read_smoke \
+    "$@" --warmup 1 --target-ms 1000 --json
+}
+
 workbench_matching_retry() {
   local release="${1:-}"
   [[ -n "$release" ]] || die "workbench-matching-retry requires release name"
@@ -1044,6 +1082,14 @@ case "$cmd" in
   batch-accounting-metadata-cleanup)
     shift
     batch_accounting_metadata_cleanup "$@"
+    ;;
+  batch-accounting-audit)
+    shift
+    batch_accounting_audit "$@"
+    ;;
+  batch-accounting-read-smoke)
+    shift
+    batch_accounting_read_smoke "$@"
     ;;
   workbench-matching-retry)
     shift

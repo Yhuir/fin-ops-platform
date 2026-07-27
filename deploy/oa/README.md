@@ -426,7 +426,6 @@ sudo /usr/local/sbin/finops-deploy-control status
 ```bash
 sudo /usr/local/sbin/finops-deploy-control workbench-audit-identity <release-name> \
   --json \
-  --workbench-scope all \
   --limit 20
 sudo /usr/local/sbin/finops-deploy-control workbench-requirement-repair <release-name> \
   --dry-run
@@ -447,6 +446,9 @@ sudo /usr/local/sbin/finops-deploy-control batch-accounting-metadata-cleanup <re
 sudo /usr/local/sbin/finops-deploy-control batch-accounting-metadata-cleanup <release-name> \
   --rollback-dry-run \
   --expected-fingerprint <executed-source-fingerprint>
+sudo /usr/local/sbin/finops-deploy-control batch-accounting-audit <release-name>
+sudo /usr/local/sbin/finops-deploy-control batch-accounting-read-smoke <release-name> \
+  --bank-year <YYYY> --iterations 10
 sudo /usr/local/sbin/finops-deploy-control workbench-matching-retry <release-name> \
   --scope-month <YYYY-MM> \
   --dry-run
