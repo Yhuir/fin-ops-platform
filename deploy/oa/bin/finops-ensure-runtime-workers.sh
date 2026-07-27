@@ -83,6 +83,16 @@ migrate_legacy_worker_poll_interval() {
   fi
 }
 
+migrate_bank_flow_rule_batch_canonical_draft() {
+  local target_file="$env_dir/fin-ops.worker.bank-flow-rule-batch.env"
+  [ -f "$target_file" ] || return 0
+  sed -i \
+    -e 's/^FIN_OPS_WORKER_KIND=bank-flow-rule-batch-read-model$/FIN_OPS_WORKER_KIND=bank-flow-rule-batch-canonical-draft/' \
+    -e 's/--enable-bank-flow-rule-batch-read-model-refresh/--enable-bank-flow-rule-batch-canonical-draft-refresh/g' \
+    -e 's/bank_flow_rule_batch\.read_model\.refresh/bank_flow_rule_batch.canonical_draft.refresh/g' \
+    "$target_file"
+}
+
 migrate_rabbitmq_worker_drain_interval() {
   local target_file="$env_dir/fin-ops.rabbitmq-worker.env"
   [ -f "$target_file" ] || return 0
@@ -96,6 +106,7 @@ migrate_rabbitmq_worker_drain_interval() {
 check_worker_registration() {
   local worker="$1"
   local check_args
+  local -a runtime_args=()
   check_args="$(runtime_worker_manifest --worker-check-command "$worker")"
   (
     set -a
@@ -112,6 +123,12 @@ check_worker_registration() {
     export FIN_OPS_DATA_DIR="${FIN_OPS_DATA_DIR:-/opt/fin-ops/data}"
     export FIN_OPS_WORKER_ID="${FIN_OPS_WORKER_ID:-$(hostname)-${worker}}"
     "$worker_python" -m fin_ops_platform.app.worker $check_args >/dev/null
+    read -r -a runtime_args <<< "${FIN_OPS_WORKER_ARGS:-}"
+    "$worker_python" -m fin_ops_platform.app.worker \
+      --registration "$worker" \
+      --worker-instance "$worker" \
+      "${runtime_args[@]}" \
+      --check >/dev/null
   )
 }
 
@@ -143,6 +160,9 @@ fi
 for worker in $required_workers $optional_workers; do
   ensure_worker_env "$worker"
   migrate_legacy_worker_poll_interval "$worker"
+  if [ "$worker" = "bank-flow-rule-batch" ]; then
+    migrate_bank_flow_rule_batch_canonical_draft
+  fi
 done
 
 if [ ! -f "$env_dir/fin-ops.common.env" ]; then
