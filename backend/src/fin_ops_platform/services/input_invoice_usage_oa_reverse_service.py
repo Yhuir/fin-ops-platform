@@ -17,7 +17,6 @@ from fin_ops_platform.services.input_invoice_usage_service import (
     TARGET_APPLICANTS,
 )
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
-from fin_ops_platform.services.read_model_write_targets import write_target_envelope
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 
 
@@ -305,16 +304,16 @@ class InputInvoiceUsageOaReverseService:
         evidence_provider: InputInvoiceUsageOaEvidenceProvider | None = None,
         relation_writer: Callable[[InputInvoiceUsageOaReverseBatch, InputInvoiceUsageOaEvidence], None] | None = None,
         audit_recorder: Callable[[dict[str, object]], None] | None = None,
-        read_model_rows_loader: Callable[[dict[str, list[Any]]], dict[str, object] | None] | None = None,
-        read_model_rows_by_invoice_ids_loader: Callable[[list[str]], dict[str, object] | None] | None = None,
+        rows_loader: Callable[[dict[str, list[Any]]], dict[str, object] | None] | None = None,
+        rows_by_invoice_ids_loader: Callable[[list[str]], dict[str, object] | None] | None = None,
     ) -> None:
         self._repository = repository
         self._oa_client = oa_client or NotConfiguredInputInvoiceUsageOaDraftClient()
         self._evidence_provider = evidence_provider
         self._relation_writer = relation_writer
         self._audit_recorder = audit_recorder
-        self._read_model_rows_loader = read_model_rows_loader
-        self._read_model_rows_by_invoice_ids_loader = read_model_rows_by_invoice_ids_loader
+        self._rows_loader = rows_loader
+        self._rows_by_invoice_ids_loader = rows_by_invoice_ids_loader
 
     def preview(self, request: dict[str, Any] | None, *, can_create_draft: bool = False) -> dict[str, object]:
         payload = dict(request or {})
@@ -738,10 +737,9 @@ class InputInvoiceUsageOaReverseService:
             "canCreateDraft": _can_create_oa_draft(batch),
             "canConfirmSubmission": _can_confirm_submission(batch),
             "canRevoke": _can_revoke_oa_draft(batch),
-            "canRefreshStatus": batch.status in DETECTION_STATUSES,
             "canManualStatus": batch.status in MANUAL_FALLBACK_STATUSES,
         }
-        payload.update(write_target_envelope(scope_keys=scope_keys, targets=[]))
+        payload["affected_scope_keys"] = list(dict.fromkeys(scope_keys))
         return payload
 
     @staticmethod
@@ -779,55 +777,31 @@ class InputInvoiceUsageOaReverseService:
     def _rows_for_preview_payload(self, payload: dict[str, Any]) -> tuple[list[dict[str, object]], list[str]]:
         invoice_ids = _text_list(payload.get("invoiceIds"))
         if invoice_ids:
-            read_model_payload = (
-                self._read_model_rows_by_invoice_ids_loader(invoice_ids)
-                if self._read_model_rows_by_invoice_ids_loader
+            rows_payload = (
+                self._rows_by_invoice_ids_loader(invoice_ids)
+                if self._rows_by_invoice_ids_loader
                 else None
             )
-            read_model_rows = self._required_rows_from_read_model_payload(read_model_payload)
-            known = {str(row.get("invoiceId") or "") for row in read_model_rows}
-            missing_ids = _text_list(read_model_payload.get("missing_invoice_ids")) if isinstance(read_model_payload, dict) else []
+            rows = self._required_rows_from_payload(rows_payload)
+            known = {str(row.get("invoiceId") or "") for row in rows}
+            missing_ids = _text_list(rows_payload.get("missing_invoice_ids")) if isinstance(rows_payload, dict) else []
             if not missing_ids:
                 missing_ids = [invoice_id for invoice_id in invoice_ids if invoice_id not in known]
-            return read_model_rows, missing_ids
-        read_model_payload = (
-            self._read_model_rows_loader(_preview_query_from_payload(payload))
-            if self._read_model_rows_loader
+            return rows, missing_ids
+        rows_payload = (
+            self._rows_loader(_preview_query_from_payload(payload))
+            if self._rows_loader
             else None
         )
-        return self._required_rows_from_read_model_payload(read_model_payload), []
-
-    @classmethod
-    def _required_rows_from_read_model_payload(cls, payload: dict[str, object] | None) -> list[dict[str, object]]:
-        rows = cls._rows_from_read_model_payload(payload)
-        if rows is not None:
-            return rows
-        raise InputInvoiceUsageError(
-            "input_invoice_usage_oa_reverse_preview_refreshing",
-            "进项发票使用情况读模型正在刷新，请稍后重试。",
-            status_code=HTTPStatus.CONFLICT,
-            details={
-                "read_model_status": "missing",
-                "read_model_scope_key": None,
-                "read_model_stale_reasons": ["input_invoice_usage_read_model_unavailable"],
-            },
-        )
+        return self._required_rows_from_payload(rows_payload), []
 
     @staticmethod
-    def _rows_from_read_model_payload(payload: dict[str, object] | None) -> list[dict[str, object]] | None:
+    def _required_rows_from_payload(payload: dict[str, object] | None) -> list[dict[str, object]]:
         if not isinstance(payload, dict):
-            return None
-        status = str(payload.get("read_model_status") or payload.get("refresh_status") or "fresh")
-        if status != "fresh":
             raise InputInvoiceUsageError(
-                "input_invoice_usage_oa_reverse_preview_refreshing",
-                "进项发票使用情况读模型正在刷新，请稍后重试。",
-                status_code=HTTPStatus.CONFLICT,
-                details={
-                    "read_model_status": status,
-                    "read_model_scope_key": payload.get("read_model_scope_key"),
-                    "read_model_stale_reasons": payload.get("read_model_stale_reasons"),
-                },
+                "input_invoice_usage_query_unavailable",
+                "进项发票使用情况查询不可用。",
+                status_code=HTTPStatus.SERVICE_UNAVAILABLE,
             )
         return [row for row in list(payload.get("rows") or []) if isinstance(row, dict)]
 

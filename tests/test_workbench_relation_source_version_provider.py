@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
+from fin_ops_platform.services.bank_batch_application_service import canonical_snapshot_version
 from fin_ops_platform.services.workbench_relation_source_version_provider import WorkbenchRelationSourceVersionProvider
 
 
@@ -23,7 +23,7 @@ class WorkbenchRelationSourceVersionProviderTests(unittest.TestCase):
 
         self.assertEqual(
             provider.pair_relation_snapshot_version(),
-            WorkbenchReadModelService.snapshot_version(snapshot),
+            canonical_snapshot_version(snapshot),
         )
 
 

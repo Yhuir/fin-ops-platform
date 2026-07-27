@@ -48,10 +48,6 @@ async function openAutoTagRulesDrawer(page: Page, recordLatency?: OperationLaten
   return drawer;
 }
 
-function barrierTargets(body: Record<string, unknown>) {
-  return Array.isArray(body.targets) ? body.targets : [];
-}
-
 test.describe("bank details auto tag rules browser flow", () => {
   test("saves edited automatic tag rules and reloads visible rows without an operation barrier", async ({ page }, testInfo) => {
     const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
@@ -89,11 +85,8 @@ test.describe("bank details auto tag rules browser flow", () => {
     const saveBody = api.lastBody(SAVE_RULES_PATH);
     expect(saveBody).toEqual(expect.objectContaining({
       expected_version: 1,
-      refresh_scope: {
-        date_from: "2026-01-01",
-        date_to: "2026-12-31",
-      },
     }));
+    expect(saveBody).not.toHaveProperty("refresh_scope");
     const activeRules = Array.isArray(saveBody.active_rules) ? saveBody.active_rules : [];
     expect(activeRules).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -116,7 +109,7 @@ test.describe("bank details auto tag rules browser flow", () => {
     await expectNoUnexpectedSuccessUiErrors(page);
   });
 
-  test("reapplies existing automatic tag rules without saving a draft and refreshes bank detail rows", async ({ page }, testInfo) => {
+  test("reapplies existing automatic tag rules without saving a draft and rereads bank detail rows", async ({ page }, testInfo) => {
     const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
     const recordLatency = createBankDetailsLatencyRecorder(page, testInfo);
 
@@ -133,23 +126,18 @@ test.describe("bank details auto tag rules browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       const reapplyResponse = page.waitForResponse(responseFor("POST", "/api/bank-details/auto-tag-rules/reapply"));
-      const barrierResponse = page.waitForResponse(responseFor("POST", "/api/operation-barrier/status"));
       await drawer.getByRole("button", { name: "重新应用规则" }).click();
       await mark("apiLatencyMs", reapplyResponse);
-      await mark("operationBarrierLatencyMs", barrierResponse);
-      await mark("firstVisibleResponseLatencyMs", expect(page.getByText("重新应用已完成，银行明细已刷新。").first()).toBeVisible());
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByText("重新应用已完成。").first()).toBeVisible());
       await mark("finalSettledLatencyMs", expect.poll(() => api.count(TRANSACTIONS_PATH)).toBeGreaterThan(initialTransactionRequests));
     });
 
     await expect.poll(() => api.count(REAPPLY_RULES_PATH)).toBe(1);
     expect(api.lastBody(REAPPLY_RULES_PATH)).toEqual({});
     expect(api.count(SAVE_RULES_PATH)).toBe(0);
-    await expect.poll(() => api.count(OPERATION_BARRIER_PATH)).toBeGreaterThanOrEqual(1);
-    expect(barrierTargets(api.lastBody(OPERATION_BARRIER_PATH))).toEqual(expect.arrayContaining([
-      expect.objectContaining({ read_model_key: "bank_detail", scope_key: "2026-03" }),
-    ]));
+    expect(api.count(OPERATION_BARRIER_PATH)).toBe(0);
     await expect.poll(() => api.count(TRANSACTIONS_PATH)).toBeGreaterThan(initialTransactionRequests);
-    await expect(page.getByText("重新应用已完成，银行明细已刷新。").first()).toBeVisible();
+    await expect(page.getByText("重新应用已完成。").first()).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
   });
 

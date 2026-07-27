@@ -14,36 +14,11 @@ class AppStatusReadModelDefinition:
 
 
 APP_STATUS_READ_MODEL_REGISTRY: dict[str, AppStatusReadModelDefinition] = {
-    "workbench": AppStatusReadModelDefinition(
-        key="workbench",
-        scope_type="workbench",
-        worker_instance="workbench",
-        refresh_event_type="workbench.read_model.refresh",
-        readiness_strategy="active_generation",
-    ),
     "workbench_relation": AppStatusReadModelDefinition(
         key="workbench_relation",
         scope_type="workbench_relation",
         worker_instance="workbench-relation",
         refresh_event_type="workbench_relation.read_model.refresh",
-    ),
-    "bank_detail": AppStatusReadModelDefinition(
-        key="bank_detail",
-        scope_type="bank_detail",
-        worker_instance="bank-detail",
-        refresh_event_type="bank_detail.read_model.refresh",
-    ),
-    "bank_account_balance": AppStatusReadModelDefinition(
-        key="bank_account_balance",
-        scope_type="bank_account_balance",
-        worker_instance="bank-account-balance",
-        refresh_event_type="bank_account_balance.read_model.refresh",
-    ),
-    "pending_invoice": AppStatusReadModelDefinition(
-        key="pending_invoice",
-        scope_type="pending_invoice",
-        worker_instance="pending-invoice",
-        refresh_event_type="pending_invoice.read_model.refresh",
     ),
     "search": AppStatusReadModelDefinition(
         key="search",
@@ -51,48 +26,12 @@ APP_STATUS_READ_MODEL_REGISTRY: dict[str, AppStatusReadModelDefinition] = {
         worker_instance="search",
         refresh_event_type="search.read_model.refresh",
     ),
-    "invoice_lifecycle": AppStatusReadModelDefinition(
-        key="invoice_lifecycle",
-        scope_type="invoice_lifecycle",
-        worker_instance="invoice-lifecycle",
-        refresh_event_type="invoice_lifecycle.read_model.refresh",
-    ),
-    "input_invoice_usage": AppStatusReadModelDefinition(
-        key="input_invoice_usage",
-        scope_type="input_invoice_usage",
-        worker_instance="invoice-usage-collection",
-        refresh_event_type="input_invoice_usage.read_model.refresh",
-    ),
-    "output_invoice_collection": AppStatusReadModelDefinition(
-        key="output_invoice_collection",
-        scope_type="output_invoice_collection",
-        worker_instance="invoice-usage-collection",
-        refresh_event_type="output_invoice_collection.read_model.refresh",
-    ),
-    "oa_pending_payment": AppStatusReadModelDefinition(
-        key="oa_pending_payment",
-        scope_type="oa_pending_payment",
-        worker_instance="oa-pending-payment",
-        refresh_event_type="oa_pending_payment.read_model.refresh",
-    ),
-    "tax_offset": AppStatusReadModelDefinition(
-        key="tax_offset",
-        scope_type="tax_offset",
-        worker_instance="tax-offset",
-        refresh_event_type="tax_offset.read_model.refresh",
-    ),
     "no_oa_bank_batch": AppStatusReadModelDefinition(
         key="no_oa_bank_batch",
         scope_type="no_oa_bank_batch",
         worker_instance="no-oa-bank-batch",
         refresh_event_type="no_oa_bank_batch.read_model.refresh",
         critical=False,
-    ),
-    "bank_flow_rule_batch": AppStatusReadModelDefinition(
-        key="bank_flow_rule_batch",
-        scope_type="bank_flow_rule_batch",
-        worker_instance="bank-flow-rule-batch",
-        refresh_event_type="bank_flow_rule_batch.read_model.refresh",
     ),
 }
 

@@ -1,16 +1,18 @@
-# 银行明细 模块维护入口
-
+# 银行明细模块维护入口
 
 - Module key: `bank-details`
-- 类型: 页面模块
-- Route: `/bank-details`
-- Page key: `bank-details`
+- 类型：页面模块
+- Route：`/bank-details`
+- Page key：`bank-details`
 
 ## 修改前必读
 
 - `docs/product-specs/bank-turnover-and-no-oa.md`
 - `docs/app-architecture/pages.md`
+- `docs/app-architecture/runtime-and-ownership.md`
 - `docs/dev/api-contracts.md`
+- `docs/modules/bank-account-balance/boundary-io.md`
+- `docs/modules/workbench-relations/boundary-io.md`
 
 ## 代码入口
 
@@ -18,37 +20,36 @@
 - `web/src/features/bankDetails/*`
 - `backend/src/fin_ops_platform/app/routes_bank_details.py`
 - `backend/src/fin_ops_platform/services/bank_details_application_service.py`
-- `backend/src/fin_ops_platform/services/bank_detail_read_model_repository.py`
-- `backend/src/fin_ops_platform/services/bank_account_balance_read_model_repository.py`
-- `backend/src/fin_ops_platform/services/bank_detail_available_month_scope_provider.py`
-- `backend/src/fin_ops_platform/services/bank_detail_read_model_refresh.py`
-- `backend/src/fin_ops_platform/services/bank_detail_read_model_refresh_producer.py`
-- `backend/src/fin_ops_platform/services/bank_detail_derived_lifecycle_executor.py`
+- `backend/src/fin_ops_platform/services/bank_details_canonical_query.py`
+- `backend/src/fin_ops_platform/services/bank_details_service.py`
+- `backend/src/fin_ops_platform/services/bank_transaction_category_mutation_writer.py`
 
 ## 当前边界
 
-关注银行流水、标签、no-OA 状态、业务对象关系和跨页刷新。
+银行明细页面已经迁移为 PostgreSQL canonical direct read：
 
-银行明细 read model 的 `bank_detail:all` 是 refresh fan-out 控制 scope，用于枚举月份 shard；页面无界查询不能等待 `bank_detail:all` parent proof。无日期筛选的交易列表和账户列表必须解析为当前已存在的月份 scope 集合，并用这些 month shards 的 freshness/source versions 证明页面数据 fresh；只有没有任何月份 shard 时才保留 `all` 作为 empty/missing 判断入口。
+- 浏览器只调用 `/api/bank-details/accounts`、`/api/bank-details/transactions`、导出和本模块写 API。
+- route 只负责鉴权、参数解析与 HTTP 映射；查询组合由 `BankDetailsCanonicalQueryService` 负责，SQL 由 `PostgresBankDetailsCanonicalQueryRepository` 负责。
+- rows、statistics、category counts 与当前页关系标签在同一个 `REPEATABLE READ READ ONLY` snapshot 中读取。
+- 正式关系只读取 `app.workbench_pair_relations` 中 `status=active` 的事实；关系 overlap 查询只接收当前可见或导出目标流水 IDs，不读取 Workbench 页面 payload、`workbench_relation` projection 或其它页面 read model。
+- 账户列表和余额直接以有界 SQL 聚合 canonical `app.bank_transactions`，保留账户 identity、最新余额、最新流水、币种和空余额账户语义，不在 Python 或浏览器全量聚合。
+- 页面响应不再携带 `read_model_status`、`source_versions`、refresh scope/job/barrier；前端不轮询。loading、empty、error 与用户重试仍是可观察状态。
+- 分类、候选确认、人工补分类和自动标签规则写入继续走 canonical fact、CAS、审计和定向写入；成功后当前页面只重新 GET 一次。
 
-`bank_detail:<YYYY-MM>` 投影以月份为 partition。每次 refresh 必须先计算稳定 source signature：银行流水规范化行、自动分类上下文行、人工分类/确认，以及 workbench relation read model source versions。若 row count 与除 `source_version` 外的 source versions 完全一致，projection 只推进 scope source version 并跳过重写 `read_model.bank_detail_rows` 与自动分类重算；若任一输入变化，必须完整重投影该月份并重新发布 fresh scope。该跳过路径只允许在已有 scope signature 可证明一致时使用，不能把 missing/schema mismatch/stale 伪装成 fresh。
-
-2026-07-05 起，本模块页面读链路已 close：`BankDetailsApplicationService.accounts_payload(...)` / `transactions_payload(...)` 只读取 read model/query port，不再回退 `BankDetailsService.list_accounts(...)` / `list_transactions(...)` 或导入服务扫描；缺失 repository、missing、stale、schema mismatch 均通过 freshness/status payload fail-closed。分类候选推断和标签字典只通过显式 provider 注入，应用服务不持有宽 `import_service` / `BankDetailsService`。
+旧 `bank_detail` / `bank_account_balance` read model、worker、下游 tagged-row ports、backfill 和部署单元已在跨页面清理中删除。历史 migration/表暂留作回滚证据，不存在页面或 worker 运行时调用方。
 
 ## 维护触发器
 
-发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：
-
-- 页面入口、路由、侧栏、筛选、排序、分页、导出、drawer/dialog 或权限显示变化。
-- API contract、DTO shape、错误字段、权限校验、状态值或响应 freshness 字段变化。
-- 业务状态、UI 状态、read model 状态、worker 状态或状态流转变化。
-- 跨页面刷新、domain event、derived lifecycle、dirty scope、outbox 或缓存边界变化。
-- 测试入口、回归范围、验证命令或未测风险变化。
+- 页面筛选、排序、分页、导出、drawer/dialog、权限或可观察状态变化。
+- API 参数、响应 shape、错误码、CAS/审计或写后重读变化。
+- canonical 表、账户 identity、分类规则、active relation membership 或 snapshot 一致性变化。
+- 查询次数、最大页大小、导出上限或性能 guard 变化。
+- 共享旧 read model 消费者完成迁移，满足删除条件。
 
 ## 本目录文件
 
-- `e2e-spec.md`：维护银行明细 Browser e2e 业务验收合同。
-- `e2e-coverage.md`：维护 Spec ID 到 Playwright/Vitest/API/integration 的覆盖映射和缺口。
-- `state-machine.md`：维护当前有效状态和状态流转；不适用时写明原因。
-- `tests.md`：维护七类测试适用性、现有测试入口、验证命令和回归范围。
-- `implementation-notes.md`：维护提炼后的决策和验收记录；不保存原始 prompt。
+- `boundary-io.md`：当前 direct-read I/O、文件范围和旧链删除状态。
+- `state-machine.md`：业务写状态与页面 loading/empty/error 状态。
+- `tests.md`：七类测试、验证命令和剩余风险。
+- `e2e-spec.md` / `e2e-coverage.md`：Browser 业务合同与覆盖映射。
+- `implementation-notes.md`：提炼后的实施决策和验收记录。

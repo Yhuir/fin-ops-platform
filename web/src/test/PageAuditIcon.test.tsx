@@ -6,7 +6,7 @@ import PageAuditIcon from "../components/common/PageAuditIcon";
 
 
 describe("PageAuditIcon", () => {
-  test("does not treat an unknown page read-model status as fresh", async () => {
+  test("fails closed when the page runtime proof registration is missing", async () => {
     const user = userEvent.setup();
     render(
       <PageAuditIcon
@@ -94,7 +94,6 @@ describe("PageAuditIcon", () => {
       <PageAuditIcon
         ariaLabel="Audit 测试页面"
         label="测试页面"
-        readModelStatus="fresh"
         runAudit={runAudit}
       />,
     );
@@ -113,7 +112,6 @@ describe("PageAuditIcon", () => {
       <PageAuditIcon
         ariaLabel="Audit 测试页面"
         label="测试页面"
-        readModelStatus="fresh"
         runAudit={vi.fn().mockResolvedValue({
           overall_status: "pass",
           audit_status: { integrity: "pass", freshness: "fresh", queue: "drained" },
@@ -122,6 +120,7 @@ describe("PageAuditIcon", () => {
             snapshot_consistency: "repeatable_read_read_only",
             proof_availability: "ready",
             contract_revision: "page-audit-contract.v9",
+            registered_read_model_keys: [],
           },
           summary: { blocking_issue_sample_count: 0, issue_sample_count: 0 },
           issues: [],
@@ -144,6 +143,7 @@ describe("PageAuditIcon", () => {
         snapshot_consistency: "repeatable_read_read_only",
         proof_availability: "ready",
         contract_revision: "page-audit-contract.v26",
+        registered_read_model_keys: [],
       },
       summary: { blocking_issue_sample_count: 0, issue_sample_count: 0 },
       issues: [],
@@ -152,8 +152,7 @@ describe("PageAuditIcon", () => {
       <PageAuditIcon
         ariaLabel="Audit 测试页面"
         label="测试页面"
-        readModelStatus="fresh"
-        resetKey="read-model-v1"
+        resetKey="page-data-v1"
         runAudit={runAudit}
       />,
     );
@@ -165,8 +164,7 @@ describe("PageAuditIcon", () => {
       <PageAuditIcon
         ariaLabel="Audit 测试页面"
         label="测试页面"
-        readModelStatus="fresh"
-        resetKey="read-model-v2"
+        resetKey="page-data-v2"
         runAudit={runAudit}
       />,
     );
@@ -180,7 +178,6 @@ describe("PageAuditIcon", () => {
       <PageAuditIcon
         ariaLabel="Audit 税金抵扣"
         label="税金抵扣"
-        readModelStatus="fresh"
         runAudit={vi.fn().mockResolvedValue({
           overall_status: "pass",
           audit_status: { integrity: "pass", freshness: "fresh", queue: "drained" },
@@ -189,6 +186,7 @@ describe("PageAuditIcon", () => {
             snapshot_consistency: "repeatable_read_read_only",
             proof_availability: "ready",
             contract_revision: "page-audit-contract.v11",
+            registered_read_model_keys: [],
             relation_proof_required: false,
             relation_edge_equality: "not_applicable: tax-offset does not consume or display Workbench relations",
           },
@@ -210,7 +208,6 @@ describe("PageAuditIcon", () => {
       <PageAuditIcon
         ariaLabel="Audit 测试页面"
         label="测试页面"
-        readModelStatus="fresh"
         runAudit={vi.fn().mockResolvedValue({
           overall_status: "issues_found",
           audit_status: { integrity: "issues_found", freshness: "fresh", queue: "drained" },
@@ -237,7 +234,6 @@ describe("PageAuditIcon", () => {
       <PageAuditIcon
         ariaLabel="Audit 测试页面"
         label="测试页面"
-        readModelStatus="fresh"
         runAudit={vi.fn().mockResolvedValue({
           overall_status: "pass",
           audit_status: { integrity: "pass", freshness: "fresh", queue: "drained" },

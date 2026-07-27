@@ -18,11 +18,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Dry-run audit for financial object identity/dedup rules.")
     parser.add_argument("--json", action="store_true", help="Print JSON report.")
     parser.add_argument("--limit", type=int, default=50, help="Maximum examples per issue type.")
-    parser.add_argument(
-        "--workbench-scope",
-        default="all",
-        help="Workbench active generation scope to audit, for example all or 2026-02.",
-    )
     return parser
 
 
@@ -34,7 +29,6 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO = sys.stdout) -> i
         connection=connection,
         policy=policy,
         example_limit=max(int(args.limit or 50), 1),
-        workbench_scope=str(args.workbench_scope or "all"),
     )
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
     return 1 if report["summary"]["blocking_issue_count"] else 0
@@ -45,7 +39,6 @@ def audit_object_identity(
     connection: Any,
     policy: FinancialObjectIdentityPolicy,
     example_limit: int = 50,
-    workbench_scope: str = "all",
 ) -> dict[str, Any]:
     invoice_rows = connection.fetch_all(
         """
@@ -142,21 +135,12 @@ def audit_object_identity(
     all_missing_canonical_etc_invoices = [item for item in etc_identities if not item.get("policy_canonical_key")]
     all_missing_canonical_attachment_invoices = [item for item in attachment_invoice_identities if not item.get("policy_canonical_key")]
     canonical_etc_invoices = [item for item in invoice_identities if item.get("etc_invoice_id")]
-    workbench_audit = _audit_workbench_object_identity(
-        connection,
-        scope_key=workbench_scope,
-        example_limit=example_limit,
-    )
-    workbench_summary = workbench_audit["summary"] if isinstance(workbench_audit.get("summary"), dict) else {}
     blocking_issue_count = (
         len(blocking_invoice_duplicate_groups)
         + len(all_bank_duplicate_groups)
         + len(all_attachment_invoice_blocking_duplicate_groups)
         + len(blocking_invoice_key_mismatches)
         + len(all_bank_key_mismatches)
-        + int(workbench_summary.get("cross_zone_identity_duplicate_group_count") or 0)
-        + int(workbench_summary.get("unpaired_visible_owner_duplicate_group_count") or 0)
-        + int(workbench_summary.get("orphan_relation_group_count") or 0)
     )
     return {
         "summary": {
@@ -195,16 +179,6 @@ def audit_object_identity(
             "missing_canonical_bank_transaction_examples": min(len(all_missing_canonical_bank_transactions), example_limit),
             "missing_canonical_etc_invoice_examples": min(len(all_missing_canonical_etc_invoices), example_limit),
             "missing_canonical_oa_attachment_invoice_examples": min(len(all_missing_canonical_attachment_invoices), example_limit),
-            "workbench_scope": workbench_scope,
-            "workbench_audit_status": workbench_summary.get("status"),
-            "workbench_cross_zone_identity_duplicate_group_count": workbench_summary.get(
-                "cross_zone_identity_duplicate_group_count", 0
-            ),
-            "workbench_unpaired_visible_owner_duplicate_group_count": workbench_summary.get(
-                "unpaired_visible_owner_duplicate_group_count", 0
-            ),
-            "workbench_oa_alias_group_count": workbench_summary.get("oa_alias_group_count", 0),
-            "workbench_orphan_relation_group_count": workbench_summary.get("orphan_relation_group_count", 0),
             "blocking_issue_count": blocking_issue_count,
         },
         "invoice_duplicate_groups": _limit_examples(all_invoice_duplicate_groups, example_limit),
@@ -224,212 +198,8 @@ def audit_object_identity(
         "missing_canonical_bank_transactions": _limit_examples(all_missing_canonical_bank_transactions, example_limit),
         "missing_canonical_etc_invoices": _limit_examples(all_missing_canonical_etc_invoices, example_limit),
         "missing_canonical_oa_attachment_invoices": _limit_examples(all_missing_canonical_attachment_invoices, example_limit),
-        "workbench_identity_audit": workbench_audit,
     }
 
-
-def _audit_workbench_object_identity(connection: Any, *, scope_key: str, example_limit: int) -> dict[str, Any]:
-    if not _table_exists(connection, "read_model.workbench_group_rows"):
-        return {"summary": {"status": "missing"}}
-    normalized_scope = str(scope_key or "all").strip() or "all"
-    scope_clause = "" if normalized_scope == "all" else "and gen.scope_key = %s"
-    params = () if normalized_scope == "all" else (normalized_scope,)
-    try:
-        cross_zone_duplicates = connection.fetch_all(
-            f"""
-            with active_generations as (
-                select tenant_id, scope_key, generation_id
-                from read_model.workbench_generations gen
-                where gen.tenant_id = 'default'
-                  and gen.status = 'active'
-                  {scope_clause}
-            ),
-            duplicate_rows as (
-                select
-                    gr.scope_key,
-                    case
-                        when gr.pane = 'invoice'
-                         and gr.object_identity_kind in ('digital_invoice_no', 'invoice_code_no')
-                            then 'invoice'
-                        when gr.pane = 'bank'
-                         and gr.object_identity_kind = 'business_fields'
-                            then 'bank'
-                        else null
-                    end as object_kind,
-                    gr.object_identity_key,
-                    gr.object_identity_kind,
-                    array_agg(distinct gr.zone order by gr.zone) as zones,
-                    array_agg(distinct gr.row_id order by gr.row_id) as row_ids,
-                    array_agg(distinct gr.source_kind order by gr.source_kind) as source_kinds
-                from read_model.workbench_group_rows gr
-                join active_generations gen
-                  on gen.generation_id = gr.generation_id
-                 and gen.scope_key = gr.scope_key
-                where gr.row_role <> 'summary'
-                  and gr.object_identity_key is not null
-                  and gr.zone in ('paired', 'unpaired')
-                group by gr.scope_key, gr.pane, gr.object_identity_key, gr.object_identity_kind
-                having bool_or(gr.zone = 'paired') and bool_or(gr.zone = 'unpaired')
-            )
-            select duplicate_rows.*, count(*) over ()::bigint as total_count
-            from duplicate_rows
-            where object_kind is not null
-            order by scope_key, object_kind, object_identity_key
-            limit %s
-            """,
-            (*params, example_limit),
-        )
-    except Exception as exc:  # pragma: no cover - depends on pre-migration production databases
-        return {"summary": {"status": "unavailable", "error": str(exc)}}
-
-    unpaired_visible_owner_duplicates = connection.fetch_all(
-        f"""
-        with active_generations as (
-            select tenant_id, scope_key, generation_id
-            from read_model.workbench_generations gen
-            where gen.tenant_id = 'default'
-              and gen.status = 'active'
-              {scope_clause}
-        ),
-        visible_owner_claims as (
-            select
-                gr.scope_key,
-                gr.pane as object_kind,
-                'row_id' as claim_kind,
-                gr.row_id as claim_key,
-                gr.zone,
-                gr.group_id,
-                gr.row_id,
-                gr.source_kind
-            from read_model.workbench_group_rows gr
-            join active_generations gen
-              on gen.generation_id = gr.generation_id
-             and gen.scope_key = gr.scope_key
-            where gr.row_role <> 'summary'
-              and gr.zone = 'unpaired'
-              and gr.row_id is not null
-            union all
-            select
-                gr.scope_key,
-                'invoice' as object_kind,
-                gr.object_identity_kind as claim_kind,
-                gr.object_identity_key as claim_key,
-                gr.zone,
-                gr.group_id,
-                gr.row_id,
-                gr.source_kind
-            from read_model.workbench_group_rows gr
-            join active_generations gen
-              on gen.generation_id = gr.generation_id
-             and gen.scope_key = gr.scope_key
-            where gr.row_role <> 'summary'
-              and gr.zone = 'unpaired'
-              and gr.pane = 'invoice'
-              and gr.object_identity_kind in ('digital_invoice_no', 'invoice_code_no')
-              and gr.object_identity_key is not null
-        ),
-        duplicate_rows as (
-            select
-                scope_key,
-                object_kind,
-                claim_kind,
-                claim_key,
-                array_agg(distinct zone order by zone) as zones,
-                array_agg(distinct group_id order by group_id) as group_ids,
-                array_agg(distinct row_id order by row_id) as row_ids,
-                array_agg(distinct source_kind order by source_kind) as source_kinds
-            from visible_owner_claims
-            group by scope_key, object_kind, claim_kind, claim_key
-            having count(distinct group_id) > 1
-        )
-        select duplicate_rows.*, count(*) over ()::bigint as total_count
-        from duplicate_rows
-        order by scope_key, object_kind, claim_kind, claim_key
-        limit %s
-        """,
-        (*params, example_limit),
-    )
-
-    oa_alias_groups = []
-    if _table_exists(connection, "app.oa_applications"):
-        oa_scope_clause = "" if normalized_scope == "all" else "and date_trunc('month', application_date)::date = %s::date"
-        oa_params = () if normalized_scope == "all" else (normalized_scope + "-01",)
-        oa_alias_groups = connection.fetch_all(
-            f"""
-            select form_id, array_agg(distinct row_id order by row_id) as row_ids, count(distinct row_id)::bigint as row_count
-            from app.oa_applications
-            where coalesce(form_id, '') <> ''
-              {oa_scope_clause}
-            group by form_id
-            having count(distinct row_id) > 1
-            order by form_id
-            limit %s
-            """,
-            (*oa_params, example_limit),
-        )
-
-    orphan_relation_groups = []
-    if _table_exists(connection, "app.workbench_pair_relations"):
-        relation_scope_clause = "" if normalized_scope == "all" else "and pr.month_scope = %s::date"
-        relation_params = () if normalized_scope == "all" else (normalized_scope + "-01",)
-        orphan_relation_groups = connection.fetch_all(
-            f"""
-            with relation_rows as (
-                select pr.case_id, unnest(pr.row_ids) as row_id
-                from app.workbench_pair_relations pr
-                where pr.status = 'active'
-                  {relation_scope_clause}
-            ),
-            available_objects as (
-                select coalesce(legacy_mongo_id, id::text) as row_id from app.bank_transactions where status <> 'deleted'
-                union
-                select coalesce(legacy_mongo_id, id::text) as row_id from app.invoices where status <> 'deleted'
-                union
-                select row_id from app.oa_applications
-                union
-                select r.row_id
-                from read_model.workbench_rows r
-                join read_model.workbench_generations gen
-                  on gen.generation_id = r.generation_id
-                 and gen.scope_key = r.scope_key
-                 and gen.status = 'active'
-                 and gen.tenant_id = 'default'
-            )
-            select rr.case_id, array_agg(rr.row_id order by rr.row_id) as missing_row_ids
-            from relation_rows rr
-            left join available_objects obj on obj.row_id = rr.row_id
-            where obj.row_id is null
-            group by rr.case_id
-            order by rr.case_id
-            limit %s
-            """,
-            (*relation_params, example_limit),
-        )
-
-    return {
-        "summary": {
-            "status": "available",
-            "scope_key": normalized_scope,
-            "cross_zone_identity_duplicate_group_count": _workbench_audit_total_count(cross_zone_duplicates),
-            "unpaired_visible_owner_duplicate_group_count": _workbench_audit_total_count(unpaired_visible_owner_duplicates),
-            "oa_alias_group_count": len(oa_alias_groups),
-            "orphan_relation_group_count": len(orphan_relation_groups),
-        },
-        "cross_zone_identity_duplicates": cross_zone_duplicates,
-        "unpaired_visible_owner_duplicates": unpaired_visible_owner_duplicates,
-        "oa_alias_groups": oa_alias_groups,
-        "orphan_relation_groups": orphan_relation_groups,
-    }
-
-
-def _workbench_audit_total_count(rows: list[dict[str, Any]]) -> int:
-    if not rows:
-        return 0
-    first = rows[0]
-    try:
-        return int(first.get("total_count") or len(rows))
-    except (TypeError, ValueError):
-        return len(rows)
 
 
 def _invoice_identity_payload(policy: FinancialObjectIdentityPolicy, row: dict[str, Any]) -> dict[str, Any]:

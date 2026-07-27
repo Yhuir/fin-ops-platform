@@ -40,9 +40,6 @@ const staticSession: SessionContextValue = {
 };
 
 const unsubmittedPayload = {
-  read_model_status: "fresh",
-  refresh_enqueued: false,
-  read_model_stale_reasons: [],
   summary: {
     unsubmitted_count: 2,
     submitted_count: 1,
@@ -96,9 +93,6 @@ const unsubmittedPayload = {
 };
 
 const submittedPayload = {
-  read_model_status: "fresh",
-  refresh_enqueued: false,
-  read_model_stale_reasons: [],
   summary: {
     unsubmitted_count: 1,
     submitted_count: 2,
@@ -281,7 +275,19 @@ function installFetchMock() {
           bank_rows: bankYear === "2026" ? unsubmittedPayload.bank_rows : [],
           oa_rows: [...unsubmittedPayload.oa_rows, ...oa2025Rows],
         };
-      return new Response(JSON.stringify(withPagination(payload, url)), { status: 200, headers: { "Content-Type": "application/json" } });
+      const oaSearch = String(url.searchParams.get("oa_search") ?? "").trim().toLowerCase();
+      const filteredPayload = oaSearch
+        ? {
+          ...payload,
+          oa_rows: payload.oa_rows.filter((row) => [
+            row.applicant,
+            row.project_name,
+            row.amount,
+            row.reason,
+          ].some((value) => String(value ?? "").toLowerCase().includes(oaSearch))),
+        }
+        : payload;
+      return new Response(JSON.stringify(withPagination(filteredPayload, url)), { status: 200, headers: { "Content-Type": "application/json" } });
     }
     if (url.pathname === "/api/batch-accounting/submit") {
       return new Response(JSON.stringify({
@@ -712,78 +718,6 @@ describe("BatchAccountingPage", () => {
     expect(screen.getByLabelText("差额说明")).toHaveValue("");
   });
 
-  test("shows relation read model warning without blocking canonical submit", async () => {
-    const user = userEvent.setup();
-    const fetchMock = vi.fn(async () => jsonResponse({
-      ...unsubmittedPayload,
-      read_model_status: "missing",
-      read_model_stale_reasons: ["read_model_missing"],
-      read_model_scope_keys: ["2026-01"],
-      refresh_enqueued: true,
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderPage();
-    await screen.findByRole("heading", { name: "日常报销批量账务管理" });
-
-    expect(await screen.findByText("关联台关系读模型 missing，正在刷新。")).toBeInTheDocument();
-    await user.click(await screen.findByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
-    await user.click(screen.getByRole("checkbox", { name: "选择 王青 2026-01-07" }));
-    expect(screen.getByText("已选 OA 2 项")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeEnabled();
-  });
-
-  test("shows operation guidance when relation read model refresh is not enqueued", async () => {
-    const fetchMock = vi.fn(async () => jsonResponse({
-      ...unsubmittedPayload,
-      read_model_status: "missing",
-      read_model_stale_reasons: ["read_model_missing"],
-      read_model_scope_keys: ["2026-01"],
-      refresh_enqueued: false,
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderPage();
-
-    expect(await screen.findByText("关联台关系读模型 missing，刷新未入队，请检查系统状态。")).toBeInTheDocument();
-    expect(screen.getByText("read_model_missing")).toBeInTheDocument();
-    expect(screen.getByText("影响范围：2026-01")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeDisabled();
-  });
-
-  test("shows backend read model status and scope when mutation is rejected as non-fresh", async () => {
-    const user = userEvent.setup();
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      if (url.pathname === "/api/batch-accounting" && (!init?.method || init.method === "GET")) {
-        return jsonResponse(unsubmittedPayload);
-      }
-      if (url.pathname === "/api/batch-accounting/submit") {
-        return jsonResponse({
-          error: "batch_accounting_read_model_not_fresh",
-          message: "关联台关系读模型 stale，请刷新后再处理。",
-          read_model_status: "stale",
-          read_model_stale_reasons: ["dirty_scope:2026-01"],
-          read_model_scope_keys: ["2026-01"],
-          refresh_enqueued: true,
-        }, 400);
-      }
-      return jsonResponse({ message: `Unhandled ${url.pathname}` }, 404);
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderPage();
-    await screen.findByRole("heading", { name: "日常报销批量账务管理" });
-
-    await user.click(await screen.findByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
-    await user.click(screen.getByRole("checkbox", { name: "选择 王青 2026-01-07" }));
-    await user.click(screen.getByRole("button", { name: "关联OA项与流水" }));
-
-    const overlay = await screen.findByRole("dialog", { name: "全局操作进度" });
-    expect(within(overlay).getByText("关联台关系读模型 stale，请刷新后再处理。 dirty_scope:2026-01 影响范围：2026-01")).toBeInTheDocument();
-    expect(screen.getAllByText("关联台关系读模型 stale，请刷新后再处理。 dirty_scope:2026-01 影响范围：2026-01").length).toBeGreaterThanOrEqual(1);
-  });
-
   test("clears cached bank and OA selection when refreshed bank rows disappear", async () => {
     const user = userEvent.setup();
     let getCount = 0;
@@ -801,7 +735,6 @@ describe("BatchAccountingPage", () => {
           },
           bank_rows: [],
           oa_rows: unsubmittedPayload.oa_rows,
-          read_model_status: "fresh",
         });
       }
       return jsonResponse({
@@ -891,11 +824,15 @@ describe("BatchAccountingPage", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     renderPage();
-      await screen.findByRole("heading", { name: "日常报销批量账务管理" });
+    await screen.findByRole("heading", { name: "日常报销批量账务管理" });
 
-      await user.click(await screen.findByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
-      await user.click(screen.getByRole("checkbox", { name: "选择 王青 2026-01-07" }));
-      await user.click(screen.getByRole("button", { name: "关联OA项与流水" }));
+    await user.click(await screen.findByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+    await user.click(screen.getByRole("checkbox", { name: "选择 王青 2026-01-07" }));
+    const pageReadsBeforeSubmit = fetchMock.mock.calls.filter(([input, init]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/batch-accounting" && (!init?.method || init.method === "GET");
+    }).length;
+    await user.click(screen.getByRole("button", { name: "关联OA项与流水" }));
 
     expect(await screen.findByText("已关联批量账务流水与 2 项 OA。")).toBeInTheDocument();
     expect(screen.queryByText("操作失败")).not.toBeInTheDocument();
@@ -903,16 +840,16 @@ describe("BatchAccountingPage", () => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       return url.pathname === "/api/batch-accounting" && (!init?.method || init.method === "GET");
     });
-    expect(pageReads.length).toBeGreaterThanOrEqual(2);
+    expect(pageReads).toHaveLength(pageReadsBeforeSubmit + 1);
     expect(fetchMock.mock.calls.some(([input]) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       return url.pathname === "/api/operation-barrier/status";
     })).toBe(false);
   });
 
-  test("filters right side OA rows across applicant, project, amount, and reason", async () => {
+  test("sends OA search to the server and resets OA pagination", async () => {
     const user = userEvent.setup();
-    installFetchMock();
+    const fetchMock = installFetchMock();
     renderPage();
 
     const oaTable = await screen.findByRole("table", { name: "可关联OA项" });
@@ -920,21 +857,19 @@ describe("BatchAccountingPage", () => {
     expect(within(oaTable).getByText("王青")).toBeInTheDocument();
 
     await user.type(screen.getByLabelText("搜索OA内容"), "上海客户");
-    expect(within(oaTable).queryByText("刘晨")).not.toBeInTheDocument();
-    expect(within(oaTable).getByText("王青")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(within(oaTable).queryByText("刘晨")).not.toBeInTheDocument();
+      expect(within(oaTable).getByText("王青")).toBeInTheDocument();
+      expect(fetchMock.mock.calls.some(([input]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/batch-accounting"
+          && url.searchParams.get("oa_search") === "上海客户"
+          && url.searchParams.get("oa_page") === "1";
+      })).toBe(true);
+    });
 
     await user.click(screen.getByRole("button", { name: "清空搜索" }));
-    expect(within(oaTable).getByText("刘晨")).toBeInTheDocument();
-    expect(within(oaTable).getByText("王青")).toBeInTheDocument();
-
-    await user.type(screen.getByLabelText("搜索OA内容"), "700.00");
-    expect(within(oaTable).getByText("刘晨")).toBeInTheDocument();
-    expect(within(oaTable).queryByText("王青")).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "清空搜索" }));
-    await user.type(screen.getByLabelText("搜索OA内容"), "品牌广告");
-    expect(within(oaTable).getByText("刘晨")).toBeInTheDocument();
-    expect(within(oaTable).queryByText("王青")).not.toBeInTheDocument();
+    expect(await within(oaTable).findByText("刘晨")).toBeInTheDocument();
   });
 
   test("renders submitted bucket as read-only associated OA and withdraws with a reason", async () => {

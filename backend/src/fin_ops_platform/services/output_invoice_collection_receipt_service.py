@@ -4,14 +4,11 @@ from decimal import Decimal, InvalidOperation
 from http import HTTPStatus
 from typing import Any, Callable
 
-from fin_ops_platform.services.output_invoice_collection_models import (
-    OutputInvoiceCollectionRowRef,
-    output_invoice_collection_freshness_metadata,
-)
+from fin_ops_platform.services.output_invoice_collection_models import OutputInvoiceCollectionRowRef
 from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionError, OutputInvoiceReceiptPreviewService
 
 
-RowProvider = Callable[[str], dict[str, Any] | None]
+RowProvider = Callable[[str, str], dict[str, Any] | None]
 
 
 class OutputInvoiceCollectionReceiptService:
@@ -20,9 +17,15 @@ class OutputInvoiceCollectionReceiptService:
         self._row_provider = row_provider
         self._preview_service = OutputInvoiceReceiptPreviewService()
 
-    def preview(self, row_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    def preview(
+        self,
+        row_id: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        tenant_id: str = "default",
+    ) -> dict[str, Any]:
         body = dict(payload or {})
-        row = self._require_row(row_id)
+        row = self._require_row(row_id, tenant_id=tenant_id)
         preview = self._preview_service.preview(
             row=row,
             selected_bank_transaction_id=str(body.get("bankTransactionId") or body.get("selectedBankTransactionId") or "").strip() or None,
@@ -45,7 +48,7 @@ class OutputInvoiceCollectionReceiptService:
         trace_id: str | None = None,
     ) -> dict[str, Any]:
         body = dict(payload or {})
-        row = self._require_row(row_id)
+        row = self._require_row(row_id, tenant_id=tenant_id)
         selected_bank_id = str(body.get("bankTransactionId") or body.get("selectedBankTransactionId") or "").strip() or None
         preview = self._preview_service.preview(row=row, selected_bank_transaction_id=selected_bank_id)
         if not preview.get("canPreview"):
@@ -77,7 +80,7 @@ class OutputInvoiceCollectionReceiptService:
             return self._repository.create_receipt(**kwargs)
 
         receipt = self._run_mutation(row, reason="receipt_created", mutate=mutate, trace_id=trace_id)
-        return {**output_invoice_collection_freshness_metadata(row), "receipt": receipt}
+        return {"receipt": receipt}
 
     def void_receipt(
         self,
@@ -101,8 +104,7 @@ class OutputInvoiceCollectionReceiptService:
             return self._repository.void_receipt(**kwargs)
 
         receipt = self._run_receipt_mutation(receipt_id, reason="receipt_voided", mutate=mutate, trace_id=trace_id, tenant_id=tenant_id)
-        row = self._row_for_receipt(receipt)
-        return {**output_invoice_collection_freshness_metadata(row), "receipt": receipt}
+        return {"receipt": receipt}
 
     def reissue_receipt(
         self,
@@ -126,8 +128,7 @@ class OutputInvoiceCollectionReceiptService:
             return self._repository.reissue_receipt(**kwargs)
 
         receipt = self._run_receipt_mutation(receipt_id, reason="receipt_reissued", mutate=mutate, trace_id=trace_id, tenant_id=tenant_id)
-        row = self._row_for_receipt(receipt)
-        return {**output_invoice_collection_freshness_metadata(row), "receipt": receipt}
+        return {"receipt": receipt}
 
     def history(self, *, invoice_id: str, tenant_id: str = "default") -> dict[str, Any]:
         receipts = self._repository.list_receipts(invoice_id=str(invoice_id or "").strip(), tenant_id=tenant_id)
@@ -157,11 +158,11 @@ class OutputInvoiceCollectionReceiptService:
         )
         return {"settings": settings}
 
-    def _require_row(self, row_id: str) -> dict[str, Any]:
+    def _require_row(self, row_id: str, *, tenant_id: str) -> dict[str, Any]:
         normalized = str(row_id or "").strip()
         if not normalized:
             raise OutputInvoiceCollectionError("row_id_required", "row_id is required.")
-        row = self._row_provider(normalized)
+        row = self._row_provider(normalized, tenant_id)
         if row is None:
             raise OutputInvoiceCollectionError("row_not_found", "销项发票收款行不存在。", status_code=HTTPStatus.NOT_FOUND)
         return row
@@ -192,12 +193,8 @@ class OutputInvoiceCollectionReceiptService:
         tenant_id: str,
     ) -> dict[str, Any]:
         before = self._repository.get_receipt(receipt_id=str(receipt_id or "").strip(), tenant_id=tenant_id)
-        row = self._row_provider(str((before or {}).get("invoiceId") or "")) if before else None
+        row = self._row_provider(str((before or {}).get("invoiceId") or ""), tenant_id) if before else None
         return self._run_mutation(row or {"invoice": {"invoiceDate": ""}}, reason=reason, mutate=mutate, trace_id=trace_id)
-
-    def _row_for_receipt(self, receipt: dict[str, Any]) -> dict[str, Any]:
-        row = self._row_provider(str(receipt.get("invoiceId") or ""))
-        return row or {"invoice": {"invoiceDate": ""}}
 
 
 def _bank_summary(row: dict[str, Any], bank_transaction_id: str) -> dict[str, Any]:

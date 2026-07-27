@@ -48,8 +48,6 @@ import type {
 } from "../features/pendingInvoices/types";
 
 const DEFAULT_PAGE_SIZE = 50;
-const READ_MODEL_REFRESH_RETRY_MS = 250;
-const READ_MODEL_REFRESH_MAX_ATTEMPTS = 120;
 const TAG_VERSION_STORAGE_KEY = "finops.bankTransactionTags.version";
 
 type ActiveDrawer = "rules" | "relation" | "invoicePicker" | "detail" | "export" | null;
@@ -205,13 +203,11 @@ export default function PendingInvoicesPage() {
   const [selectedTransactionIds, setSelectedTransactionIds] = useState<Set<string>>(() => new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [readModelStatus, setReadModelStatus] = useState("");
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
   const [rulesTagRefreshToken, setRulesTagRefreshToken] = useState(0);
   const [pendingIncomeStatusRows, setPendingIncomeStatusRows] = useState<Set<string>>(() => new Set());
   const tagVersionRef = useRef<number | null>(readPersistedTagVersion());
-  const refreshAttemptRef = useRef(0);
 
   const filterOpen = filterMenuOpen;
 
@@ -237,8 +233,7 @@ export default function PendingInvoicesPage() {
     setRows(payload.rows);
     setTotal(payload.pagination.total);
     setSourceSummary(payload.summary.sourceSummary ?? null);
-    setReadModelStatus(payload.readModelStatus);
-    setStatistics(payload.readModelStatus === "fresh" ? payload.statistics ?? null : null);
+    setStatistics(payload.statistics ?? null);
     const version = payload.tagDictionary?.version;
     if (typeof version === "number" && version > 0) {
       const previousVersion = tagVersionRef.current;
@@ -250,10 +245,7 @@ export default function PendingInvoicesPage() {
     }
   }, []);
 
-  const loadRows = useCallback((signal?: AbortSignal, retry = false) => {
-    if (!retry) {
-      refreshAttemptRef.current = 0;
-    }
+  const loadRows = useCallback((signal?: AbortSignal) => {
     setLoading(true);
     setError(null);
     fetchPendingInvoiceRows({ ...query, signal })
@@ -303,33 +295,13 @@ export default function PendingInvoicesPage() {
     return () => controller.abort();
   }, [active, activationGeneration, direction, keyword, query.filter, queryFilters, sortDirection, sortField, refreshToken]);
 
-  useEffect(() => {
-    if (
-      !active
-      || document.visibilityState !== "visible"
-      || readModelStatus !== "refreshing"
-      || loading
-      || refreshAttemptRef.current >= READ_MODEL_REFRESH_MAX_ATTEMPTS
-    ) {
-      return undefined;
-    }
-    const retryId = window.setTimeout(() => {
-      if (document.visibilityState !== "visible") {
-        return;
-      }
-      refreshAttemptRef.current += 1;
-      loadRows(undefined, true);
-    }, READ_MODEL_REFRESH_RETRY_MS);
-    return () => window.clearTimeout(retryId);
-  }, [active, loadRows, loading, readModelStatus]);
-
   const filterOptions = useMemo(() => statusFilterOptionsForDirection(direction), [direction]);
 
   const tableConfig = useMemo(() => ({
     sortField,
     sortDirection,
   }), [sortDirection, sortField]);
-  const exportDisabled = Boolean(error) || Boolean(readModelStatus && readModelStatus !== "fresh");
+  const exportDisabled = Boolean(error) || loading;
   const isTransactionSelectable = useCallback((row: PendingInvoiceRow) => {
     if (direction === "expense") {
       return row.availableActions.includes("attach_existing_invoice");
@@ -576,11 +548,9 @@ export default function PendingInvoicesPage() {
 
   const compactStatusText = error
     ? error
-    : readModelStatus === "refreshing"
-      ? "数据刷新中"
-      : readModelStatus && !["fresh", "refreshing"].includes(readModelStatus)
-        ? `读模型 ${readModelStatus}，写入和导出已暂停`
-        : "";
+    : loading
+      ? "数据加载中"
+      : "";
 
   const summaryCounts = {
     all: sourceSummary?.bankTransactionRows ?? 0,
@@ -651,25 +621,24 @@ export default function PendingInvoicesPage() {
     </div>
   );
 
-  const visibleStatistics = readModelStatus === "fresh" ? statistics : null;
   const titleAccessory = (
     <div className="page-title-accessory-group">
       <PageStatisticsPopover
         ariaLabel="待找发票数据统计"
-        loading={loading && !readModelStatus}
+        loading={loading && statistics === null}
         coreItems={[
-          { label: "流水", value: visibleStatistics?.bankTransactionCount, unit: "笔" },
-          { label: "已找到发票的流水", value: visibleStatistics?.foundInvoiceTransactionCount, unit: "笔", tone: "success" },
-          { label: "待找发票的流水", value: visibleStatistics?.pendingInvoiceTransactionCount, unit: "笔", tone: "warning" },
+          { label: "流水", value: statistics?.bankTransactionCount, unit: "笔" },
+          { label: "已找到发票的流水", value: statistics?.foundInvoiceTransactionCount, unit: "笔", tone: "success" },
+          { label: "待找发票的流水", value: statistics?.pendingInvoiceTransactionCount, unit: "笔", tone: "warning" },
         ]}
         detailItems={[
-          { label: "支出", value: visibleStatistics?.expenseTransactionCount, unit: "笔", tone: "expense" },
-          { label: "收入", value: visibleStatistics?.incomeTransactionCount, unit: "笔", tone: "income" },
-          { label: "无需开票流水", value: visibleStatistics?.noInvoiceRequiredTransactionCount, unit: "笔" },
-          { label: "现金收入流水", value: visibleStatistics?.cashIncomeTransactionCount, unit: "笔", tone: "income" },
-          { label: "已关联 OA 的流水", value: visibleStatistics?.linkedOaTransactionCount, unit: "笔" },
-          { label: "已关联进项票的流水", value: visibleStatistics?.linkedInputInvoiceTransactionCount, unit: "笔" },
-          { label: "已关联销项票的流水", value: visibleStatistics?.linkedOutputInvoiceTransactionCount, unit: "笔" },
+          { label: "支出", value: statistics?.expenseTransactionCount, unit: "笔", tone: "expense" },
+          { label: "收入", value: statistics?.incomeTransactionCount, unit: "笔", tone: "income" },
+          { label: "无需开票流水", value: statistics?.noInvoiceRequiredTransactionCount, unit: "笔" },
+          { label: "现金收入流水", value: statistics?.cashIncomeTransactionCount, unit: "笔", tone: "income" },
+          { label: "已关联 OA 的流水", value: statistics?.linkedOaTransactionCount, unit: "笔" },
+          { label: "已关联进项票的流水", value: statistics?.linkedInputInvoiceTransactionCount, unit: "笔" },
+          { label: "已关联销项票的流水", value: statistics?.linkedOutputInvoiceTransactionCount, unit: "笔" },
         ]}
       />
       {canAdminAccess ? (
@@ -677,7 +646,6 @@ export default function PendingInvoicesPage() {
           ariaLabel="Audit 待找发票"
           pageKey="pending-invoices"
           label="待找发票"
-          readModelStatus={readModelStatus}
         />
       ) : null}
     </div>
@@ -731,7 +699,7 @@ export default function PendingInvoicesPage() {
           className="pending-invoices-toolbar"
           left={(
             <div
-              className={`pending-invoices-status-text${error ? " pending-invoices-status-text--error" : readModelStatus && !["fresh", "refreshing"].includes(readModelStatus) ? " pending-invoices-status-text--warning" : ""}`}
+              className={`pending-invoices-status-text${error ? " pending-invoices-status-text--error" : ""}`}
               role={error ? "alert" : "status"}
             >
               {compactStatusText}

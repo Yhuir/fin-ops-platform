@@ -3,8 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 import unittest
 
-from fin_ops_platform.services.app_status_read_model_registry import APP_STATUS_READ_MODEL_REGISTRY
-from fin_ops_platform.services.read_model_manifest import READ_MODEL_MANIFEST
 from fin_ops_platform.services.runtime_worker_registry import registration_by_instance_name
 
 
@@ -26,8 +24,7 @@ class BankFlowRuleBatchBackendBoundaryTests(unittest.TestCase):
         self.assertIn("from fin_ops_platform.app.routes_bank_flow_rule_batches import BankFlowRuleBatchApiRoutes", source)
         self.assertIn("def _bank_flow_rule_batch_routes(self) -> BankFlowRuleBatchApiRoutes:", source)
         self.assertIn("self._bank_flow_rule_batch_routes().route(method, route_path, query, body, headers)", source)
-        self.assertIn("read_model_refresh_producer=self._bank_flow_rule_batch_read_model_refresh_producer()", source)
-        self.assertIn("BankFlowRuleBatchReadModelRepositoryPort", source)
+        self.assertIn('getattr(self, "_bank_flow_rule_batch_canonical_query_repository", None)', source)
 
     def test_bank_flow_runtime_files_do_not_import_no_oa_module_boundaries(self) -> None:
         forbidden = (
@@ -43,7 +40,7 @@ class BankFlowRuleBatchBackendBoundaryTests(unittest.TestCase):
         for relative_path in (
             APP_ROOT / "routes_bank_flow_rule_batches.py",
             SERVICES_ROOT / "bank_flow_rule_batch_application_service.py",
-            SERVICES_ROOT / "bank_flow_rule_batch_read_model_refresh.py",
+            SERVICES_ROOT / "bank_flow_rule_batch_canonical_draft_owner.py",
         ):
             source = relative_path.read_text(encoding="utf-8")
             for snippet in forbidden:
@@ -58,24 +55,40 @@ class BankFlowRuleBatchBackendBoundaryTests(unittest.TestCase):
         server_body = server_source[server_start:server_end]
         self.assertIn("bank_batch_service=self._bank_flow_rule_batch_service", server_body)
         self.assertIn("pair_relation_snapshot_port = BankBatchPairRelationSnapshotPort", server_body)
-        self.assertIn("relation_source_repository = pair_relation_snapshot_port", server_body)
+        self.assertIn('"workbench_relation_repository"', server_body)
         self.assertIn("relation_source_repository=relation_source_repository", server_body)
-        self.assertIn("bank_batch_read_model_repository=read_repository", server_body)
+        self.assertIn("bank_batch_query_repository=query_repository", server_body)
+        self.assertIn("background_refresh_producer=", server_body)
+        self.assertNotIn("queue_repository=", server_body)
+        self.assertNotIn("relation_facade=", server_body)
         self.assertNotIn("no_oa_bank_batch_service=", server_body)
         self.assertNotIn("no_oa_bank_batch_read_model_repository=", server_body)
 
-        worker_start = worker_source.index("    if args.enable_bank_flow_rule_batch_read_model_refresh:")
-        worker_end = worker_source.index("\n    if args.enable_bank_account_balance_read_model_refresh:", worker_start)
+        worker_start = worker_source.index("    if args.enable_bank_flow_rule_batch_canonical_draft_refresh:")
+        worker_end = worker_source.index("\n    if args.enable_import_job_processing:", worker_start)
         worker_body = worker_source[worker_start:worker_end]
         self.assertIn("bank_batch_service=bank_flow_service", worker_body)
-        self.assertIn("BankFlowRuleBatchReadModelPersistencePort", worker_body)
+        self.assertIn("BankFlowRuleBatchCanonicalDraftPersistencePort", worker_body)
         self.assertIn("load_bank_flow_rule_batches()", worker_body)
         self.assertIn("relation_source_repository=(", worker_body)
-        self.assertIn("WorkbenchRelationReadModelRepositoryPort(read_model_repository)", worker_body)
+        self.assertIn("PostgresWorkbenchRelationRepository(connection)", worker_body)
         self.assertNotIn("load_workbench_pair_relations()", worker_body)
         self.assertNotIn("relation_facade=workbench_relation_read_facade", worker_body)
         self.assertNotIn("no_oa_bank_batch_service=", worker_body)
         self.assertNotIn("NoOaBankBatchReadModelPersistencePort", worker_body)
+
+    def test_canonical_page_query_does_not_read_projection_or_no_oa_fallback(self) -> None:
+        source = (
+            SERVICES_ROOT / "postgres_repositories" / "bank_flow_rule_batch_canonical_query.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("set transaction isolation level repeatable read read only", source)
+        self.assertIn("from app.bank_flow_rule_batches batch", source)
+        self.assertIn("from app.workbench_pair_relations relation", source)
+        self.assertIn("relation.status = 'active'", source)
+        self.assertNotIn("read_model.", source)
+        self.assertNotIn("app.no_oa_bank_batches", source)
+        self.assertNotIn("bank_flow_rule_batch_relation_read_model_not_fresh", source)
 
     def test_operation_barrier_has_no_bank_flow_to_no_oa_alias(self) -> None:
         source = (SERVICES_ROOT / "operation_freshness_barrier.py").read_text(encoding="utf-8")
@@ -92,24 +105,25 @@ class BankFlowRuleBatchBackendBoundaryTests(unittest.TestCase):
         self.assertNotIn("load_no_oa_bank_batches()", load_body)
 
         start = source.index("    def save_bank_flow_rule_batches")
-        end = source.index("\n    def load_workbench_read_models", start)
+        end = source.index("\n    def save_bank_flow_rule_batch_items", start)
         save_body = source[start:end]
-        self.assertIn("_workbench_repository.save_bank_flow_rule_batches(snapshot)", save_body)
+        self.assertIn("_workbench_repository.save_bank_flow_rule_batches(", save_body)
+        self.assertIn("expected_source_proof=expected_source_proof", save_body)
         self.assertIn("_workbench_repository.save_bank_flow_rule_batches_scope(", save_body)
         self.assertNotIn("save_no_oa_bank_batches", save_body)
 
-    def test_bank_flow_read_model_runtime_contract_is_independent(self) -> None:
-        definition = APP_STATUS_READ_MODEL_REGISTRY["bank_flow_rule_batch"]
-        manifest = READ_MODEL_MANIFEST["bank_flow_rule_batch"]
+    def test_bank_flow_canonical_draft_runtime_contract_is_independent(self) -> None:
         worker = registration_by_instance_name()["bank-flow-rule-batch"]
 
-        self.assertEqual(definition.scope_type, "bank_flow_rule_batch")
-        self.assertEqual(definition.worker_instance, "bank-flow-rule-batch")
-        self.assertEqual(definition.refresh_event_type, "bank_flow_rule_batch.read_model.refresh")
-        self.assertEqual(manifest.repository_owner, "BankFlowRuleBatchReadModelRepositoryPort")
-        self.assertEqual(worker.handler_flags, ("--enable-bank-flow-rule-batch-read-model-refresh",))
-        self.assertEqual(worker.event_types, ("bank_flow_rule_batch.read_model.refresh",))
-        self.assertEqual(worker.read_model_scope_type, "bank_flow_rule_batch")
+        self.assertEqual(
+            worker.handler_flags,
+            ("--enable-bank-flow-rule-batch-canonical-draft-refresh",),
+        )
+        self.assertEqual(
+            worker.event_types,
+            ("bank_flow_rule_batch.canonical_draft.refresh",),
+        )
+        self.assertIsNone(worker.read_model_scope_type)
 
     def test_tag_rule_save_cannot_rewrite_relations_or_run_broad_lifecycle(self) -> None:
         bank_flow_source = (SERVICES_ROOT / "bank_flow_rule_batch_application_service.py").read_text(encoding="utf-8")
@@ -129,9 +143,9 @@ class BankFlowRuleBatchBackendBoundaryTests(unittest.TestCase):
             "bank_flow_rule_batch_changed",
         ):
             self.assertNotIn(forbidden, body)
-        self.assertNotIn("enqueue_background_refresh(", body)
+        self.assertIn("enqueue_background_refresh(", body)
         self.assertNotIn("enqueue_read_model_refreshes_in_transaction", body)
-        self.assertNotIn("_read_model_refresh_producer.enqueue", body)
+        self.assertNotIn("_read_model_refresh_producer", body)
         self.assertIn("affected_scope_keys_for_tag_codes", body)
         self.assertNotIn("_sync_bank_flow_rule_relation_requirements", no_oa_source)
         self.assertNotIn("def _sync_bank_flow_rule_relation_requirements(", base_source)

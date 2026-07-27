@@ -5,12 +5,11 @@
 
 ## 当前决策
 
-- 银行明细模块化状态为 closed：页面读只走 read model/query port，缺失或非 fresh 统一 fail-closed 返回 freshness/status，不再同步扫描导入事实或 `BankDetailsService`。
-- 银行明细测试覆盖 P0 的自动标签规则、候选确认、人工补分类、read model freshness、账户余额独立 read model、relation tag 投影、API contract 和前端交互；真实基础设施/真实历史数据 smoke 仍归入发布验证风险。
-- 账户余额 read model 与银行明细 rows read model 必须保持独立。标签规则保存、重应用、关键字/分类/日期筛选不能用 stale account payload 覆盖已有 fresh balance。
-- 银行明细前端 domain event 只负责刷新提示和 refetch；跨页面一致性的事实源仍是后端 dirty scope、outbox、worker 和 read model freshness。
-- 银行明细对 no-OA、turnover ledger、pending/search、cost/tax、workbench relation 的 fan-out 在本模块记录上游影响；具体下游页面的 UI/业务流回归由各模块轮次继续补齐。
-- 银行分类写入的当前 owner 是 `BankDetailsApplicationService` 与 `BankTransactionCategoryMutationWriter`；PostgreSQL 分类事实、审计、精确月份 read-model outbox 和 Workbench matching dirty 必须在同一事务提交，本地运行时才允许使用 snapshot store。
+- 银行明细页面读只走 `BankDetailsCanonicalQueryService` -> `PostgresBankDetailsCanonicalQueryRepository`，直接读取 PostgreSQL canonical facts。
+- rows/statistics/facets/current-page active relation tags 使用同一 repeatable-read read-only snapshot；账户余额使用同一 direct-query 边界内的 SQL 聚合。
+- 页面不消费 `bank_detail`、`bank_account_balance` 或 `workbench_relation` projection，不输出 freshness/status/job/barrier，不轮询。
+- 银行分类写入 owner 仍为 `BankDetailsApplicationService` 与 `BankTransactionCategoryMutationWriter`；canonical category/event/audit/CAS 保持，普通写后只由当前页面重新 GET。
+- 旧页面 RM 共享资源仍有 pending/bank-flow/search/turnover/cost 等消费者，由跨页面主控统一清理；本分支不修改 global manifest/worker/deploy/App Status。
 
 ## 记录模板
 
@@ -26,6 +25,16 @@
 - 未测风险：
 - 后续事项：
 ```
+
+## 2026-07-27 - 页面 direct canonical read
+
+- 目标：移除 `/bank-details` 对 `bank_detail`、`bank_account_balance` 和 `workbench_relation` 页面投影/freshness/polling 的依赖。
+- 实现：新增 page-specific canonical query service/repository；复用账户余额 canonical aggregate SQL 与既有 row serializer/自动规则业务逻辑；route 只保留 HTTP mapping，server 只做 PostgreSQL connection 注入。
+- 一致性：transactions 的 rows/statistics/category counts/active relation overlap 处于同一显式 repeatable-read read-only snapshot；accounts 在 SQL 聚合账户 latest balance 与范围 count。
+- 关系：只按当前可见或导出目标 legacy/canonical IDs bounded 查询 active `app.workbench_pair_relations`，排除 withdrawn/candidate/turnover manual closure。
+- 删除：页面 API/status/refresh enqueue/202、前端 polling/fallback、页面 read-model mock 与 Browser freshness 场景；写成功后只重读当前 transactions。
+- 保留：分类/规则权限、审计、CAS、候选合法性、导出上限、筛选/分页，以及共享旧 RM/worker/downstream ports。
+- 性能：固定查询次数；50,003 行本地 PostgreSQL synthetic 数据中，全年 transactions snapshot 约 2.15s，五月 4,250 行端点约 152ms，accounts 约 610ms；未新增 cache/index。
 
 ## 历史记录
 

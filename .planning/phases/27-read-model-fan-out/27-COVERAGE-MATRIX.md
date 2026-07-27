@@ -169,16 +169,10 @@
 | Site id | Source file | Sentinel | Calls | Status | Owner / target and deletion condition |
 | --- | --- | --- | --- | --- | --- |
 | `life-server-maintenance` | `backend/src/fin_ops_platform/app/server.py` | `.plan_event(` | `1` | `retain` | 仅显式 settings reset / historical ETC repair；普通写入口已删除 |
-| `enqueue-tax-runtime` | `backend/src/fin_ops_platform/services/tax_offset_runtime_service.py` | `.enqueue_read_model_refresh(` | `1` | `retain` | query/force refresh wrapper，经 gateway；禁止普通 unrelated write 调用 |
-| `enqueue-tax-query` | `backend/src/fin_ops_platform/services/tax_offset_query_service.py` | `.enqueue_read_model_refresh(` | `2` | `retain` | access-time exact scope miss/stale owner |
-| `enqueue-tax-server` | `backend/src/fin_ops_platform/app/server.py` | `.enqueue_read_model_refresh(` | `1` | `retain` | access/explicit force-refresh thin helper，经 gateway；无普通写 fan-out caller |
-| `enqueue-cost-runtime` | `backend/src/fin_ops_platform/services/cost_statistics_runtime_service.py` | `.enqueue_read_model_refresh(` | `1` | `retain` | access/force refresh gateway wrapper |
-| `enqueue-cost-query` | `backend/src/fin_ops_platform/services/cost_statistics_query_service.py` | `.enqueue_read_model_refresh(` | `3` | `retain` | access-time dependency-bound exact Workbench/Cost child/parent miss-stale owner |
 | `enqueue-runtime-queue-batch-delegate` | `backend/src/fin_ops_platform/services/runtime_queue.py` | `.enqueue_read_model_refreshes_in_transaction(` | `1` | `retain` | 原子 inactive-scope 去重入口的事务内批量委托；属于 durable queue 内部边界，不是业务 fan-out producer |
 | `barrier-cost-page` | `web/src/pages/CostStatisticsPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | route/query/manual reload/retry 复用正常 GET；refreshing 使用 150ms、最多 200 次的可取消自身重试；浏览器生命周期/跨页事件零 I/O |
 | `barrier-input-page` | `web/src/pages/InputInvoiceUsagePage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | ordinary writes改为 visible scope normal GET；OA reverse 也不等待跨页 barrier |
 | `barrier-batch-accounting-page` | `web/src/pages/BatchAccountingPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | relation commit 后当前可见页面正常 GET，无跨页 targets |
-| `barrier-bank-page` | `web/src/pages/BankDetailsPage.tsx` | `waitForOperationFreshness(` | `1` | `retain` | ordinary category/rule save 已零 barrier；唯一 caller 属于显式 reapply batch 的 exact month job wait |
 | `barrier-tax-page` | `web/src/pages/TaxOffsetPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | plan/certified import 提交后重跑 current month normal GET；freshness gate 精确收敛 |
 | `barrier-turnover-page` | `web/src/pages/TurnoverLedgerPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | command 后只重跑 current ledger normal GET；删除 Workbench/search/cost cross-page wait |
 | `barrier-workbench-page` | `web/src/pages/ReconciliationWorkbenchPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | command 后只重跑当前 active-generation normal GET；下游页面访问时收敛 |
@@ -188,7 +182,7 @@
 | `barrier-output-page` | `web/src/pages/OutputInvoiceCollectionsPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | 当前 output normal GET；receipt settings 不 rebuild |
 | `barrier-bank-flow-page` | `web/src/pages/BankFlowRuleBatchPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | 规则/submit/withdraw/reset 成功后只重跑当前 normal GET |
 | `barrier-manual-oa-table` | `web/src/components/settings/OaManualSearchImportTable.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | settings table refetch；search 在访问时收敛 |
-| `barrier-oa-audit-icon` | `web/src/components/oaPendingPayments/OaPendingPaymentAuditIcon.tsx` | `waitForOperationFreshness(` | `1` | `retain` | explicit user audit/reconcile action；只等 exact OA scope |
+| `barrier-oa-audit-icon` | `web/src/components/oaPendingPayments/OaPendingPaymentAuditIcon.tsx` | `waitForOperationFreshness(` | `0` | `delete` | canonical direct-read 页面 Audit 只执行单次只读检查，不再等待 OA read-model freshness |
 | `barrier-import-workflow` | `web/src/components/imports/ImportWorkflowPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | import job completion 只确认事实提交；受影响页面访问时 exact-scope 收敛 |
 
 ## Migration and deletion rule

@@ -96,7 +96,6 @@ else:
                       (select count(*) from app.file_objects where migration_status = 'verified'),
                       (select count(*) from app.oa_applications),
                       (select count(*) from app.oa_sync_runs),
-                      (select count(*) from read_model.workbench_rows),
                       (select count(*) from app.workbench_pair_relations where status = 'active')
                     """
                 )
@@ -106,7 +105,7 @@ else:
             "PostgreSQL ready "
             f"(invoices={counts[0]}, bank_transactions={counts[1]}, import_batches={counts[2]}, "
             f"verified_files={counts[3]}, oa_applications={counts[4]}, oa_sync_runs={counts[5]}, "
-            f"workbench_rows={counts[6]}, active_formal_relations={counts[7]}, topology={pg_topology}, "
+            f"active_formal_relations={counts[6]}, topology={pg_topology}, "
             f"connect_select_ms={connect_select_ms:.0f}, count_query_ms={count_query_ms:.0f})"
         )
         if pg_topology == "ssh_tunnel":
@@ -202,7 +201,7 @@ if mode in {"--all", "--require-backend"}:
         )
         visible_groups = len(unpaired_groups) + len(paired_groups)
         if total_count <= 0 and visible_groups <= 0:
-            fail("Workbench initial-page API returned an empty read model for month=all.")
+            fail("Workbench initial-page API returned an empty canonical result for month=all.")
         else:
             ok(
                 "Workbench initial-page API ready "

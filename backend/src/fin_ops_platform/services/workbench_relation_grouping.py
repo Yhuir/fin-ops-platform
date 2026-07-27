@@ -5,10 +5,8 @@ from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 from typing import Any, Callable
 
-from fin_ops_platform.services.no_oa_bank_batch_service import (
-    BANK_FLOW_RULE_BATCH_RELATION_MODE,
-    NO_OA_BANK_BATCH_RELATION_MODE,
-)
+from fin_ops_platform.services.bank_batch_service import BANK_FLOW_RULE_BATCH_RELATION_MODE
+from fin_ops_platform.services.no_oa_bank_batch_service import NO_OA_BANK_BATCH_RELATION_MODE
 from fin_ops_platform.services.workbench_relation_requirements import (
     evaluate_bank_relation_completion,
 )

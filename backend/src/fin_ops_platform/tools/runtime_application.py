@@ -61,11 +61,15 @@ def workbench_relation_reader(app: Any) -> Any | None:
     return getattr(tool_runtime_ports(app), "workbench_relation_reader", None)
 
 
-def bank_transaction_tag_read_facade(app: Any) -> Any:
-    facade = getattr(tool_runtime_ports(app), "bank_transaction_tag_read_facade", None)
-    if facade is None:
-        raise RuntimeError("Bank transaction tag read boundary is unavailable.")
-    return facade
+def bank_transaction_effective_category_provider(app: Any) -> Any:
+    provider = getattr(
+        tool_runtime_ports(app),
+        "bank_transaction_effective_category_provider",
+        None,
+    )
+    if provider is None:
+        raise RuntimeError("Bank transaction effective category boundary is unavailable.")
+    return provider
 
 
 def bank_flow_rule_batch_tag_rules_payload(app: Any) -> dict[str, Any]:
@@ -86,7 +90,3 @@ def object_identity_repository(app: Any) -> Any | None:
 
 def persist_workbench_pair_relations(app: Any, case_ids: list[str]) -> Any:
     return tool_runtime_ports(app).persist_workbench_pair_relations(case_ids)
-
-
-def invalidate_workbench_scopes(app: Any, scope_keys: list[str]) -> Any:
-    return tool_runtime_ports(app).invalidate_workbench_scopes(scope_keys)

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
 from decimal import Decimal, InvalidOperation
+from hashlib import sha256
+import json
 from typing import Any
 
 from fin_ops_platform.domain.enums import TransactionDirection
@@ -13,18 +15,7 @@ from fin_ops_platform.services.bank_transaction_category_service import BankTran
 
 
 class BankTransactionEffectiveCategoryProvider:
-    """Legacy/local on-demand effective category calculator.
-
-    This provider computes effective bank transaction categories from manual
-    category facts and current auto-category suggestions. It is intentionally
-    kept for legacy/local fallback and migration-compatible paths where the
-    PostgreSQL bank detail read model is unavailable.
-
-    It is not the PostgreSQL production downstream read gateway. Production
-    downstream modules that need bank transactions plus effective tags must read
-    through BankTransactionTagReadFacade, which consumes read_model.bank_detail_rows
-    and owns freshness/source_versions behavior.
-    """
+    """Compute effective categories directly from canonical category facts and current rules."""
 
     def __init__(
         self,
@@ -74,6 +65,57 @@ class BankTransactionEffectiveCategoryProvider:
                 manual=manual_by_id.get(transaction_id),
             )
             for transaction_id in transaction_ids
+        }
+
+    def canonical_category_source_proof_for_rows(
+        self,
+        bank_rows: list[Any],
+    ) -> dict[str, Any]:
+        rows = [self._bank_row_payload(row) for row in list(bank_rows or [])]
+        categories = self.bulk_get_for_rows(rows)
+        proof_rows = [
+            {
+                "transaction_id": str(row.get("id") or "").strip(),
+                "updated_at": str(
+                    row.get("updated_at")
+                    or row.get("bank_transaction_updated_at")
+                    or ""
+                ),
+                "category_code": str(
+                    categories.get(str(row.get("id") or "").strip(), {}).get(
+                        "effective_category_code"
+                    )
+                    or ""
+                ),
+                "category_source": str(
+                    categories.get(str(row.get("id") or "").strip(), {}).get(
+                        "effective_category_source"
+                    )
+                    or ""
+                ),
+                "category_version": int(
+                    categories.get(str(row.get("id") or "").strip(), {}).get(
+                        "category_version"
+                    )
+                    or 0
+                ),
+            }
+            for row in rows
+            if str(row.get("id") or "").strip()
+        ]
+        proof_rows.sort(key=lambda row: row["transaction_id"])
+        digest = sha256(
+            json.dumps(
+                proof_rows,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+        return {
+            "source": "app.bank_transactions",
+            "row_count": len(proof_rows),
+            "membership_category_digest": digest,
         }
 
     @classmethod

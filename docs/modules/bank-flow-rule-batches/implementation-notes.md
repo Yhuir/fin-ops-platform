@@ -1,5 +1,14 @@
 # 流水规则批量处理实施记录
 
+## 2026-07-27 页面 canonical direct-read 迁移
+
+- 列表、summary、分页和详情改由 `BankFlowRuleBatchCanonicalQueryRepository` 直接读取 `app.bank_flow_rule_batches/events`、银行/分类/settings facts 和 `app.workbench_pair_relations.status='active'`。
+- 列表的 settings、total、page rows、summary 位于同一显式 `REPEATABLE READ / READ ONLY` snapshot；服务端过滤/分页，settings + 组合结果固定 2 次 SELECT。详情固定 4 次 SELECT，无逐行 relation/category 查询。
+- API 删除 `read_model_status/version/stale_reasons`、source/read-model scope、refresh enqueue 和 operation-barrier envelope；前端删除 stale polling、202/background reconcile 和本地伪造提交/撤回状态，每次写成功只执行一次列表 GET。
+- submit/submit-selection/withdraw/reset 继续使用 relation command、active occupancy、幂等/CAS、审计和 changed-batch delta writer；冻结标签与 requirement metadata 不变。
+- no-OA legacy 和共享全局 worker/manifest/App Status/deploy 注册未在本分支删除；共享删除清单交主控在所有页面迁移分支合并后 whole-repo scan。
+- 本节取代下方历史 read-model/freshness 实施记录作为当前运行时事实；下方内容只保留演进审计。
+
 ## 2026-07-21 未提交资格、精确月份原子刷新与完整汇总
 
 - 新未提交资格收口为 active tag 且 `requires_oa=false`、`requires_invoice=false`；需要 OA 或发票的流水退出本页面未提交区。标签抽屉仍显示全部 active tags，submitted/withdrawn rail 只按实际历史聚合显示。
@@ -547,3 +556,11 @@
 - legacy no-OA rule-save service 不再扫描 active relations，也不再调用 relation metadata update 去追溯改写 `turnover_manual_closure` 的 OA/发票要求；相关 `_sync_turnover_rule_relation_requirements`、tag mapping、比较 helper、常量和测试语义已删除。
 - 当前 bank-flow rule save 继续只维护 canonical 规则和自身受影响月份 refresh；Turnover 新 relation 在创建事务中从一次 canonical rules payload 冻结 requirement，存量缺快照 relation fail closed 并只允许受控 repair。
 - 本次不改变 bank-flow API、settings DTO、read model、worker、queue、页面或性能合同；零扫描回归防止重新引入跨模块 relation 写 I/O。
+
+## 2026-07-27 页面 canonical 直读
+
+- 页面列表、汇总与详情改为页面专属 PostgreSQL query repository；列表在一个显式 `REPEATABLE READ READ ONLY` snapshot 内固定执行 2 次 SELECT（规则设置 + 分页/总数/汇总组合查询），详情固定执行 4 次 SELECT。
+- 页面请求只读取 `app.bank_flow_rule_batches`、`app.bank_flow_rule_batch_events`、canonical 银行/分类/规则事实和 `status='active'` 的 `app.workbench_pair_relations`；不读取 `read_model.bank_flow_rule_batch_rows`、no-OA legacy 表或 Workbench relation projection。
+- 前端删除 freshness/status/version、refresh enqueue、202 与 polling 语义；submit-selection、submit、withdraw、reset 和规则保存成功后均只重新执行一次当前列表 GET。
+- disposable PostgreSQL 在 projection 表保持空集时验证 2 个批次的列表、汇总、详情与 active relation 一致性。10,000 批次、page size 200 的本机热查询 20 次样本：列表 p50 `780.802ms`、p95 `1621.686ms`、max `2007.049ms`；详情 p50 `15.408ms`、p95 `17.266ms`。列表组合 SQL 的 `EXPLAIN (ANALYZE, BUFFERS)` execution 为 `397.194–449.873ms`，shared read blocks 为 0。
+- 查询已复用现有主键、legacy id、分类和 relation GIN 索引；当前证据没有证明需要新增索引或 migration。本机样本不替代主控合并后的生产 HTTP 测量。

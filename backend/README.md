@@ -75,14 +75,14 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.app.worker --check
 常用角色：
 
 - `worker-oa-sync`：`--enable-oa-sync --worker-kind oa-sync --event-type oa.sync`
-- `worker-workbench`：`--enable-workbench-read-model-refresh --worker-kind workbench-read-model --event-type workbench.read_model.refresh`
-- `worker-bank-detail`：`--enable-bank-detail-read-model-refresh --worker-kind bank-detail-read-model --event-type bank_detail.read_model.refresh`
-- `worker-no-oa-bank-batch`：`--enable-no-oa-bank-batch-read-model-refresh --worker-kind no-oa-bank-batch-read-model --event-type no_oa_bank_batch.read_model.refresh`
-- `worker-search-pending`：`--enable-search-read-model-refresh --enable-pending-invoice-read-model-refresh --worker-kind search-pending-read-model --event-type search.read_model.refresh --event-type pending_invoice.read_model.refresh`
-- `worker-invoice-usage-collection`：`--enable-input-invoice-usage-read-model-refresh --enable-output-invoice-collection-read-model-refresh --worker-kind invoice-usage-collection-read-model --event-type input_invoice_usage.read_model.refresh --event-type output_invoice_collection.read_model.refresh`
-- `worker-cost-tax`：`--enable-tax-offset-read-model-refresh --event-type tax_offset.read_model.refresh`（历史实例名保留，成本统计已退出 worker/read-model 链路）
-- `worker-import`：`--enable-import-job-processing --worker-kind import-job --event-type import.process.requested`
 - `worker-workbench-matching`：`--enable-workbench-matching --worker-kind workbench-matching`
+- `worker-workbench-relation`：`--enable-workbench-relation-read-model-refresh --worker-kind workbench-relation-read-model --event-type workbench_relation.read_model.refresh`
+- `worker-no-oa-bank-batch`：`--enable-no-oa-bank-batch-read-model-refresh --worker-kind no-oa-bank-batch-read-model --event-type no_oa_bank_batch.read_model.refresh`
+- `worker-search-*`：`--enable-search-read-model-refresh --worker-kind search-read-model --event-type search.read_model.refresh`
+- `worker-bank-flow-rule-batch`：`--enable-bank-flow-rule-batch-canonical-draft-refresh --worker-kind bank-flow-rule-batch-canonical-draft --event-type bank_flow_rule_batch.canonical_draft.refresh`
+- `worker-import`：`--enable-import-job-processing --worker-kind import-job --event-type import.process.requested`
+
+Workbench、银行明细、待找发票、进项使用、销项收款、OA 待付款、税金抵扣和成本统计页面直接读取 canonical facts，不再配置页面 read-model worker。
 
 最小生产正确性先用 PostgreSQL polling worker，不需要 RabbitMQ。标准 release 发布会自动运行服务器
 root-owned helper `/usr/local/sbin/finops-ensure-runtime-workers`，确保常驻 worker 矩阵安装、开机自启并重启到当前 release。
@@ -95,20 +95,7 @@ sudo install -m 0755 -o root -g root \
 sudo /usr/local/sbin/finops-ensure-runtime-workers "$(pwd)"
 ```
 
-生产或本地补数 worker 必须带明确的卡死释放和 SQL statement timeout，例如：
-
-```bash
-PYTHONPATH=backend/src python3 -m fin_ops_platform.app.worker \
-  --worker-id worker-workbench-1 \
-  --worker-kind workbench-read-model \
-  --enable-workbench-read-model-refresh \
-  --event-type workbench.read_model.refresh \
-  --poll-interval-seconds 2 \
-  --lock-timeout-seconds 300 \
-  --task-timeout-seconds 60 \
-  --statement-timeout-seconds 30 \
-  --max-attempts 5
-```
+生产或本地补数 worker 必须使用 registry registration，并带明确的卡死释放和 SQL statement timeout；不要手写已退休页面的 event type。
 
 队列配置默认：
 
@@ -116,10 +103,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.app.worker \
 FIN_OPS_QUEUE_BACKEND=postgres
 RABBITMQ_URL=
 RABBITMQ_EXCHANGE=finops.events
-RABBITMQ_WORKBENCH_QUEUE=finops.workbench.read_model.refresh
-RABBITMQ_WORKBENCH_ROUTING_KEY=workbench.read_model.refresh
 RABBITMQ_DEAD_LETTER_EXCHANGE=finops.events.dlx
-RABBITMQ_WORKBENCH_DEAD_LETTER_QUEUE=finops.workbench.read_model.refresh.dlq
 RABBITMQ_PREFETCH=10
 RABBITMQ_PUBLISH_CONFIRM=true
 ```
@@ -143,14 +127,7 @@ set +a
 
 /opt/miniconda3/bin/python3 scripts/backfill-runtime-read-models.py \
   --backfill-oa-children \
-  --invoice-expand-all \
   --enqueue-missing \
-  --json
-
-/opt/miniconda3/bin/python3 scripts/backfill-runtime-read-models.py \
-  --enqueue-invoice-usage-collection \
-  --invoice-expand-all \
-  --reason invoice_usage_collection_release_warmup \
   --json
 
 /opt/miniconda3/bin/python3 scripts/backfill-runtime-read-models.py \
@@ -162,8 +139,9 @@ set +a
   --json
 ```
 
-read model refresh worker 不构造完整 `Application`，不调用 `StateStore.load()`；`all` scope 会展开成 month/entity shard 后再处理。
-发票使用/收款页面的生产补数和验证细节见 `../docs/operations/invoice-usage-collection-read-model-backfill.md`。
+read model refresh worker 不构造完整 `Application`，不调用 `StateStore.load()`；维护入口只会为
+`workbench_relation`、`search`、`no_oa_bank_batch` 三个共享 read model 写入 `all` fan-out 命令，
+由各自 producer 枚举精确 month shard。其余页面直接读取 canonical fact，不参与 runtime read-model backfill。
 
 ## 相关文档
 

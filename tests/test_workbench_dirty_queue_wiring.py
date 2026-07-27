@@ -175,7 +175,8 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
 
         self.assertNotIn("workbench_read_model_schema_version", application_versions)
         self.assertNotIn("workbench_read_model_schema_version", worker_versions)
-        self.assertIn("workbench_read_model_schema_version", bank_batch_versions)
+        self.assertNotIn("workbench_read_model_schema_version", bank_batch_versions)
+        self.assertIn("pair_relation_snapshot_version", bank_batch_versions)
 
     def test_matching_worker_applies_configured_statement_timeout_before_polling(self) -> None:
         class Queue:
@@ -332,7 +333,6 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
                     {
                         "month": "2026-05",
                         "row_ids": ["oa-exc-api-001", "bank-exc-api-001", "invoice-exc-api-001"],
-                        "expected_read_model_version": "generation-test-1",
                         "scenario_code": "expense_all_equal",
                         "action_code": "confirm_closed",
                         "payload": {},

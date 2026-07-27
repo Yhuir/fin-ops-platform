@@ -1,5 +1,4 @@
 import { apiFetch, apiRequestJson, looksLikeHtmlResponse } from "../apiClient";
-import type { OperationBarrierTarget } from "../operationBarrier/api";
 import type {
   OutputInvoiceCollectionDetailResponse,
   OutputInvoiceCollectionDetailTarget,
@@ -75,39 +74,8 @@ function objectStringMap(value: unknown): Record<string, string> {
   return Object.fromEntries(Object.entries(raw).map(([key, item]) => [key, stringValue(item)]));
 }
 
-function stringList(value: unknown): string[] {
-  return arrayValue(value).map((item) => stringValue(item).trim()).filter(Boolean);
-}
-
-function mapFreshnessTargets(value: unknown): OperationBarrierTarget[] {
-  const targets: OperationBarrierTarget[] = [];
-  for (const item of arrayValue(value)) {
-    const raw = objectValue(item);
-    const readModelKey = stringValue(camelOrSnake(raw, "readModelKey", "read_model_key")).trim();
-    const scopeKey = stringValue(camelOrSnake(raw, "scopeKey", "scope_key")).trim();
-    const scopeType = stringValue(camelOrSnake(raw, "scopeType", "scope_type")).trim();
-    if (!readModelKey || !scopeKey) {
-      continue;
-    }
-    targets.push({
-      readModelKey,
-      scopeKey,
-      ...(scopeType ? { scopeType } : {}),
-    });
-  }
-  return targets;
-}
-
 function mapMutationResponse(payload: unknown): OutputInvoiceCollectionMutationResponse {
-  const raw = objectValue(payload);
-  const freshnessTargets = mapFreshnessTargets(camelOrSnake(raw, "freshnessTargets", "freshness_targets"));
-  const operationBarrierTargets = mapFreshnessTargets(camelOrSnake(raw, "operationBarrierTargets", "operation_barrier_targets"));
-  return {
-    readModelScopeKeys: stringList(camelOrSnake(raw, "readModelScopeKeys", "read_model_scope_keys")),
-    freshnessTargets,
-    operationBarrierTargets: operationBarrierTargets.length > 0 ? operationBarrierTargets : freshnessTargets,
-    raw: payload,
-  };
+  return { raw: payload };
 }
 
 function appendRowsQuery(params: URLSearchParams, request: FetchRowsRequest, includePagination = true) {
@@ -165,7 +133,7 @@ function parseContentDispositionFileName(contentDisposition: string | null) {
 async function requestExportBlob(url: string, init: RequestInit = {}): Promise<OutputInvoiceCollectionExportDownload> {
   const response = await apiFetch(url, init);
   const contentType = response.headers?.get?.("Content-Type") ?? "";
-  if (!response.ok || response.status === 202) {
+  if (!response.ok) {
     const rawText = await response.text();
     let message = rawText || "导出请求失败";
     try {
@@ -181,7 +149,7 @@ async function requestExportBlob(url: string, init: RequestInit = {}): Promise<O
     let message = rawText || "导出接口返回了非 xlsx 响应。";
     try {
       const payload = JSON.parse(rawText) as { error?: { message?: string }; message?: string };
-      message = payload.error?.message ?? payload.message ?? "读模型正在刷新，请稍后再导出。";
+      message = payload.error?.message ?? payload.message ?? "导出接口返回了非 xlsx 响应。";
     } catch {
       // Keep raw text.
     }
@@ -451,10 +419,9 @@ function mapRowsResponse(payload: unknown): OutputInvoiceCollectionRowsResponse 
         operators: arrayValue(config.operators).map(stringValue) as OutputInvoiceCollectionRowsResponse["filterConfig"][number]["operators"],
       };
     }),
-    readModelStatus: stringValue(camelOrSnake(raw, "readModelStatus", "read_model_status")),
-    readModelScopeKey: stringValue(camelOrSnake(raw, "readModelScopeKey", "read_model_scope_key")),
-    generatedAt: stringValue(camelOrSnake(raw, "generatedAt", "generated_at")),
-    sourceVersion: stringValue(camelOrSnake(raw, "sourceVersion", "source_version")),
+    filterOptions: mapFilterOptionsResponse({
+      fields: camelOrSnake(raw, "filterOptions", "filter_options"),
+    }).fields,
   };
 }
 
@@ -624,8 +591,6 @@ function mapFilterOptionsResponse(payload: unknown): OutputInvoiceCollectionFilt
         }),
       };
     }),
-    readModelStatus: stringValue(camelOrSnake(raw, "readModelStatus", "read_model_status")),
-    readModelScopeKey: stringValue(camelOrSnake(raw, "readModelScopeKey", "read_model_scope_key")),
   };
 }
 
@@ -635,18 +600,6 @@ export async function fetchOutputInvoiceCollectionRows(request: FetchRowsRequest
     signal: request.signal,
   });
   return mapRowsResponse(payload);
-}
-
-export async function fetchOutputInvoiceCollectionFilterOptions(
-  request: Pick<FetchRowsRequest, "keyword" | "invoiceDateFrom" | "invoiceDateTo" | "month" | "filters" | "signal">,
-): Promise<OutputInvoiceCollectionFilterOptionsResponse> {
-  const params = new URLSearchParams();
-  appendRowsQuery(params, { ...request, page: 1, pageSize: 1, sortField: "", sortDirection: "" });
-  const payload = await apiRequestJson<unknown>(`/api/output-invoice-collections/filter-options?${params.toString()}`, {
-    method: "GET",
-    signal: request.signal,
-  });
-  return mapFilterOptionsResponse(payload);
 }
 
 export async function fetchOutputInvoiceCollectionExportPreview(
@@ -663,7 +616,6 @@ export async function fetchOutputInvoiceCollectionExportPreview(
     scopeLabel: stringValue(camelOrSnake(raw, "scopeLabel", "scope_label")),
     columns: arrayValue(raw.columns).map(stringValue),
     sampleRows: arrayValue(camelOrSnake(raw, "sampleRows", "sample_rows")).map(objectStringMap),
-    readModelStatus: stringValue(camelOrSnake(raw, "readModelStatus", "read_model_status")),
     message: stringValue(raw.message),
   };
 }

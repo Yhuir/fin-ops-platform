@@ -12,8 +12,6 @@ from fin_ops_platform.services.bank_batch_application_service import (
     BankBatchRelationMutationError,
 )
 from fin_ops_platform.services.bank_batch_service import BANK_FLOW_RULE_BATCH_RELATION_MODE, BankBatchService
-from fin_ops_platform.services.read_model_write_targets import write_target_envelope
-from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
 
 
 class BankFlowRuleBatchPersistenceError(BankBatchPersistenceError):
@@ -22,6 +20,10 @@ class BankFlowRuleBatchPersistenceError(BankBatchPersistenceError):
 
 class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
     """Application boundary for 流水规则批量处理."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._query_repository = self._bank_batch_query_repository
 
     def list_batches_payload(
         self,
@@ -46,63 +48,23 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             "month": filters["month"],
             "account_key": filters["account_key"],
         }
-        read_page = getattr(self._bank_batch_read_model_repository, "read_page", None)
+        read_page = getattr(self._query_repository, "read_page", None)
         if not callable(read_page):
-            raise RuntimeError("bank_flow_rule_batch read repository requires read_page.")
+            raise RuntimeError("bank_flow_rule_batch canonical query repository requires read_page.")
         page_result = read_page(
             filters,
             summary_filters=summary_filters,
             page=pagination["page"] if pagination is not None else 1,
             page_size=pagination["page_size"] if pagination is not None else None,
         )
-        refresh_scope_keys = self._refresh_scope_keys_for_filters(filters)
-        if page_result is None:
-            refresh_enqueued = self.enqueue_background_refresh(
-                refresh_scope_keys,
-                reason="api_bank_flow_rule_batch_read_model_missing",
-                metadata=self._read_model_refresh_metadata_for_relation_mode(BANK_FLOW_RULE_BATCH_RELATION_MODE),
-            )
-            return {
-                "summary": self._summary_from_aggregates([]),
-                "batches": [],
-                **self._bank_flow_pagination_payload(pagination, total=0),
-                "read_model_status": "missing",
-                "read_model_version": self._read_model_version("missing", {}, 0),
-                "read_model_stale_reasons": [],
-                "refresh_enqueued": refresh_enqueued,
-                "refresh_reason": "api_bank_flow_rule_batch_read_model_missing",
-            }
-
-        source_summary = page_result.get("source_versions_summary")
-        source_summary = source_summary if isinstance(source_summary, dict) else {}
-        repository_status = str(source_summary.get("read_model_status") or "missing").strip()
-        read_model_status = repository_status
-        stale_reasons = (
-            ["bank_flow_rule_batch_source_versions_inconsistent"]
-            if repository_status == "schema_mismatch"
-            else []
-        )
-        refresh_enqueued = False
-        refresh_reason = ""
-        if read_model_status in {"missing", "stale", "schema_mismatch"}:
-            refresh_reason = (
-                "api_bank_flow_rule_batch_source_versions_stale"
-                if read_model_status in {"stale", "schema_mismatch"}
-                else "api_bank_flow_rule_batch_read_model_missing"
-            )
-            refresh_enqueued = self.enqueue_background_refresh(
-                refresh_scope_keys,
-                reason=refresh_reason,
-                metadata=self._read_model_refresh_metadata_for_relation_mode(BANK_FLOW_RULE_BATCH_RELATION_MODE),
-            )
-        tag_dictionary = self._bank_transaction_category_service.tag_dictionary_payload()
+        tag_policy = page_result.get("tag_policy")
+        tag_policy = tag_policy if isinstance(tag_policy, dict) else {}
         definitions_by_code = {
             str(definition.get("code") or "").strip(): dict(definition)
-            for definition in list(tag_dictionary.get("definitions") or [])
+            for definition in list(tag_policy.get("active_tags") or [])
             if isinstance(definition, dict) and str(definition.get("code") or "").strip()
         }
-        tag_rules_payload = self._tag_rules_payload_for_relation_mode(BANK_FLOW_RULE_BATCH_RELATION_MODE)
-        eligible_tag_codes = self._eligible_bank_flow_rule_batch_tag_codes(tag_rules_payload)
+        eligible_tag_codes = self._eligible_bank_flow_rule_batch_tag_codes(tag_policy)
         batches = self.resolve_labels(
             self._public_batches(page_result.get("items")),
             definitions_by_code=definitions_by_code,
@@ -118,29 +80,8 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 pagination,
                 total=int(page_result.get("total") or 0),
             ),
-            "read_model_status": read_model_status,
-            "read_model_version": self._read_model_version(
-                read_model_status,
-                source_summary.get("source_versions"),
-                int(source_summary.get("row_count") or 0),
-            ),
         }
-        if stale_reasons:
-            payload["read_model_stale_reasons"] = stale_reasons
-        if refresh_reason:
-            payload["refresh_enqueued"] = refresh_enqueued
-            payload["refresh_reason"] = refresh_reason
         return payload
-
-    @staticmethod
-    def _read_model_version(status: str, source_versions: object, row_count: int) -> str:
-        return WorkbenchReadModelService.snapshot_version(
-            {
-                "status": str(status or "missing"),
-                "source_versions": dict(source_versions) if isinstance(source_versions, dict) else {},
-                "row_count": max(int(row_count or 0), 0),
-            }
-        )
 
     def active_relation_source_bundle_for_bank_rows(
         self,
@@ -311,44 +252,22 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             "categories": category_payloads,
         }
 
-    def _refresh_bank_flow_rule_batch_runtime_snapshot(self) -> None:
-        self.refresh_batches(
-            apply_relation_repairs=False,
-            scope_key="all",
-            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
-        )
-
     def _refresh_bank_flow_rule_batch_runtime_snapshot_if_missing(self, batch_id: str) -> None:
         try:
             self._bank_batch_service.get_batch(batch_id)
             return
         except KeyError:
-            if self._restore_bank_flow_rule_batch_runtime_item(batch_id):
-                return
-            if self._restore_bank_flow_rule_batch_runtime_snapshot(batch_id):
-                return
-            self._refresh_bank_flow_rule_batch_runtime_snapshot()
+            self._restore_bank_flow_rule_batch_runtime_item(batch_id)
 
     def _restore_bank_flow_rule_batch_runtime_item(self, batch_id: str) -> bool:
         normalized_batch_id = str(batch_id or "").strip()
-        read_repository = getattr(self, "_bank_batch_read_model_repository", None)
-        list_rows = getattr(read_repository, "list_bank_flow_rule_batch_rows", None)
+        read_batch = getattr(self._query_repository, "read_batch", None)
         replace_snapshot = getattr(self._bank_batch_service, "replace_snapshot", None)
         snapshot = getattr(self._bank_batch_service, "snapshot", None)
-        if not normalized_batch_id or not callable(list_rows) or not callable(replace_snapshot):
+        if not normalized_batch_id or not callable(read_batch) or not callable(replace_snapshot):
             return False
-        rows = list_rows({"batch_id": normalized_batch_id})
-        if not rows:
-            return False
-        batch = next(
-            (
-                {**row, "batch_id": normalized_batch_id}
-                for row in rows
-                if isinstance(row, dict) and str(row.get("batch_id") or "").strip() == normalized_batch_id
-            ),
-            None,
-        )
-        if batch is None:
+        batch = read_batch(normalized_batch_id)
+        if not isinstance(batch, dict):
             return False
         current_snapshot = snapshot() if callable(snapshot) else {}
         current_batches = current_snapshot.get("batches") if isinstance(current_snapshot, dict) else None
@@ -363,25 +282,6 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         )
         try:
             self._bank_batch_service.get_batch(normalized_batch_id)
-            return True
-        except KeyError:
-            return False
-
-    def _restore_bank_flow_rule_batch_runtime_snapshot(self, batch_id: str) -> bool:
-        state_store = getattr(self, "_state_store", None)
-        load_snapshot = getattr(state_store, "load_bank_flow_rule_batches", None)
-        replace_snapshot = getattr(self._bank_batch_service, "replace_snapshot", None)
-        if not callable(load_snapshot) or not callable(replace_snapshot):
-            return False
-        snapshot = load_snapshot()
-        if not isinstance(snapshot, dict):
-            return False
-        batches = snapshot.get("batches")
-        if not isinstance(batches, dict) or str(batch_id or "").strip() not in batches:
-            return False
-        replace_snapshot(snapshot)
-        try:
-            self._bank_batch_service.get_batch(batch_id)
             return True
         except KeyError:
             return False
@@ -458,7 +358,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             )
             relation_source_versions = relation_bundle.get("source_versions")
             source_versions = (
-                self.read_model_scope_source_versions(
+                self.canonical_draft_source_versions(
                     scope_key=months[0],
                     relation_mode=relation_mode,
                     relation_source_versions=(
@@ -466,6 +366,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                         if isinstance(relation_source_versions, dict)
                         else {}
                     ),
+                    category_source_rows=bank_rows,
                 )
                 if len(months) == 1
                 else self.bank_batch_source_versions(relation_mode=relation_mode)
@@ -509,8 +410,101 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         }
 
     def detail_payload(self, batch_id: str) -> dict[str, object]:
-        self._refresh_bank_flow_rule_batch_runtime_snapshot_if_missing(batch_id)
-        return super().detail_payload(batch_id)
+        read_detail = getattr(self._query_repository, "read_detail", None)
+        if not callable(read_detail):
+            raise RuntimeError("bank_flow_rule_batch canonical query repository requires read_detail.")
+        detail = read_detail(batch_id)
+        if not isinstance(detail, dict):
+            raise KeyError("bank_flow_rule_batch_not_found")
+        batch = detail.get("batch")
+        if not isinstance(batch, dict):
+            raise KeyError("bank_flow_rule_batch_not_found")
+        public_batch = self._public_batch(batch)
+        if public_batch is None:
+            raise KeyError("bank_flow_rule_batch_not_found")
+        tag_policy = detail.get("tag_policy")
+        tag_policy = tag_policy if isinstance(tag_policy, dict) else {}
+        definitions_by_code = {
+            str(definition.get("code") or "").strip(): dict(definition)
+            for definition in list(tag_policy.get("active_tags") or [])
+            if isinstance(definition, dict) and str(definition.get("code") or "").strip()
+        }
+        source_rows = [
+            dict(row)
+            for row in list(detail.get("rows") or [])
+            if isinstance(row, dict)
+        ]
+        for row in source_rows:
+            category_code = str(row.get("category_code") or "").strip()
+            definition = definitions_by_code.get(category_code, {})
+            if not category_code or not definition:
+                continue
+            row["category_label"] = str(
+                definition.get("label")
+                or definition.get("output_sub_label")
+                or definition.get("output_primary_label")
+                or category_code
+            )
+            row["category_primary_label"] = str(
+                definition.get("output_primary_label") or row["category_label"]
+            )
+            row["category_sub_label"] = str(definition.get("output_sub_label") or "")
+            row["category_label_path"] = [
+                label
+                for label in (
+                    row["category_primary_label"],
+                    row["category_sub_label"],
+                )
+                if label
+            ]
+        rows_by_id = {
+            str(row.get("id") or "").strip(): row
+            for row in source_rows
+            if str(row.get("id") or "").strip()
+        }
+        row_ids = [
+            str(row_id).strip()
+            for row_id in list(batch.get("row_ids") or [])
+            if str(row_id).strip()
+        ]
+        categories_by_transaction_id = {
+            row_id: {
+                "category_code": rows_by_id.get(row_id, {}).get("category_code"),
+                "category_label": rows_by_id.get(row_id, {}).get("category_label"),
+                "category_primary_label": rows_by_id.get(row_id, {}).get("category_primary_label"),
+                "category_sub_label": rows_by_id.get(row_id, {}).get("category_sub_label"),
+                "category_label_path": rows_by_id.get(row_id, {}).get("category_label_path"),
+                "category_source": rows_by_id.get(row_id, {}).get("category_source"),
+            }
+            for row_id in row_ids
+        }
+        detail_rows = self._apply_submitted_row_tag_snapshot(
+            public_batch,
+            self.detail_rows(row_ids, rows_by_id, categories_by_transaction_id),
+        )
+        return {
+            "batch": self.resolve_labels(
+                [public_batch],
+                definitions_by_code=definitions_by_code,
+            )[0],
+            "rows": detail_rows,
+            "tag_counts": batch.get("tag_counts") if isinstance(batch.get("tag_counts"), dict) else {},
+            "direction_counts": (
+                batch.get("direction_counts")
+                if isinstance(batch.get("direction_counts"), dict)
+                else {}
+            ),
+            "categories_by_transaction_id": self._detail_categories_by_transaction_id(
+                row_ids,
+                categories_by_transaction_id,
+                public_batch,
+            ),
+            "events": [
+                dict(event)
+                for event in list(detail.get("events") or [])
+                if isinstance(event, dict)
+            ],
+        }
 
     def withdraw_batch(
         self,
@@ -528,6 +522,25 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             reason=reason,
             relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
         )
+
+    def _submitted_batches_for_relation_mode(self, relation_mode: str) -> list[dict[str, object]]:
+        if relation_mode != BANK_FLOW_RULE_BATCH_RELATION_MODE:
+            return super()._submitted_batches_for_relation_mode(relation_mode)
+        read_submitted = getattr(self._query_repository, "read_submitted_batches", None)
+        if not callable(read_submitted):
+            raise RuntimeError(
+                "bank_flow_rule_batch canonical query repository requires read_submitted_batches."
+            )
+        batches = [
+            dict(batch)
+            for batch in list(read_submitted() or [])
+            if isinstance(batch, dict)
+        ]
+        for batch in batches:
+            batch_id = str(batch.get("batch_id") or "").strip()
+            if batch_id:
+                self._restore_bank_flow_rule_batch_runtime_item(batch_id)
+        return batches
 
     def reset_submitted_bank_flow_rule_batches(
         self,
@@ -547,7 +560,6 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                     "affected_months": [],
                 },
                 "affected_months": [],
-                **write_target_envelope(targets=[], scope_keys=[], fallback_scope_key="all"),
                 "results": [],
             }
 
@@ -613,11 +625,6 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 "affected_months": sorted(affected_months),
             },
             "affected_months": sorted(affected_months),
-            **write_target_envelope(
-                targets=[],
-                scope_keys=sorted(affected_months),
-                fallback_scope_key="all",
-            ),
             "results": [
                 {"batch_id": batch.get("batch_id"), "status": "withdrawn"}
                 for batch in withdrawn_batches
@@ -672,11 +679,23 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                     if isinstance(definitions_by_code, dict)
                     else self.bank_transaction_tag_definition_current(batch_type)
                 )
-                label = self.bank_transaction_tag_label_from_definition(batch_type, definition)
+                label = (
+                    self.bank_transaction_tag_label_from_definition(batch_type, definition)
+                    if definition
+                    else str(next_batch.get("batch_label") or batch_type)
+                )
                 next_batch["batch_label"] = label
                 next_batch["display_tags"] = ["流水规则", label]
-                next_batch["category_primary_label"] = str((definition or {}).get("output_primary_label") or label)
-                next_batch["category_sub_label"] = str((definition or {}).get("output_sub_label") or "")
+                next_batch["category_primary_label"] = str(
+                    (definition or {}).get("output_primary_label")
+                    or next_batch.get("category_primary_label")
+                    or label
+                )
+                next_batch["category_sub_label"] = str(
+                    (definition or {}).get("output_sub_label")
+                    or next_batch.get("category_sub_label")
+                    or ""
+                )
                 next_batch["category_label_path"] = [
                     item
                     for item in [
@@ -707,12 +726,6 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
 
     @staticmethod
     def _relation_command_error(exc: Any) -> BankBatchRelationMutationError:
-        if exc.error_code in {"workbench_relation_read_model_not_fresh", "workbench_relation_read_model_unavailable"}:
-            return BankBatchRelationMutationError(
-                "bank_flow_rule_batch_relation_read_model_not_fresh",
-                "bank_flow_rule_batch_relation_read_model_not_fresh",
-                payload=exc.payload,
-            )
         if exc.error_code == "workbench_relation_active_row_conflict":
             return BankBatchRelationMutationError(
                 "bank_flow_rule_batch_relation_active_row_conflict",
@@ -762,6 +775,15 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             },
         }
         self._commit_tag_rule_update(prepared=prepared)
+        if affected_scope_keys:
+            self.enqueue_background_refresh(
+                affected_scope_keys,
+                reason="bank_flow_rule_batch_tag_rule_change",
+                metadata={
+                    "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                    "changed_tag_codes": changed_tag_codes,
+                },
+            )
         return self._tag_rule_update_response(
             result,
             changed_tag_codes=changed_tag_codes,
@@ -772,7 +794,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         if not changed_tag_codes:
             return []
         resolver = getattr(
-            self._bank_batch_read_model_repository,
+            self._query_repository,
             "affected_scope_keys_for_tag_codes",
             None,
         )
@@ -890,8 +912,4 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             "eligibility_changed": bool(changed_tag_codes),
             "eligibility_changed_tag_codes": list(changed_tag_codes),
             "affected_months": list(affected_scope_keys),
-            **write_target_envelope(
-                scope_keys=affected_scope_keys,
-                targets=[],
-            ),
         }

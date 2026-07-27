@@ -1,9 +1,9 @@
-# 批量账务 模块维护入口
+# 批量账务模块维护入口
 
-- Module key: `batch-accounting`
-- 类型: 页面模块
-- Route: `/batch-accounting`
-- Page key: `batch-accounting`
+- Module key：`batch-accounting`
+- 类型：页面模块
+- Route：`/batch-accounting`
+- Page key：`batch-accounting`
 
 ## 修改前必读
 
@@ -11,81 +11,81 @@
 - `docs/app-architecture/runtime-and-ownership.md`
 - `docs/app-architecture/pages.md`
 - `docs/dev/api-contracts.md`
-- `docs/operations/runtime-worker-governance.md`
-- `docs/refactor-ui/modules/phase_6_batch_accounting.md`
-- `docs/modules/reconciliation-workbench/README.md`
-- `docs/modules/bank-details/README.md`
-- `docs/modules/cost-statistics/README.md`
+- `docs/architecture/module-boundaries/canonical-facts.md`
+- `docs/modules/reconciliation-workbench/boundary-io.md`
+- `docs/modules/workbench-relations/boundary-io.md`
+- `docs/modules/canonical-facts/boundary-io.md`
+- `docs/modules/permissions-and-audit/boundary-io.md`
 
 ## 代码入口
 
 - `web/src/pages/BatchAccountingPage.tsx`
 - `web/src/features/batchAccounting/api.ts`
 - `web/src/features/batchAccounting/types.ts`
-- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/app/routes_batch_accounting.py`
 - `backend/src/fin_ops_platform/services/batch_accounting_service.py`
-- `backend/src/fin_ops_platform/services/workbench_pair_relation_service.py`
-- `backend/src/fin_ops_platform/services/workbench_relation_read_facade.py`
-- `backend/src/fin_ops_platform/services/workbench_relation_sql_projection.py`
-- `backend/src/fin_ops_platform/services/workbench_relation_read_model_refresh.py`
-- `backend/src/fin_ops_platform/services/workbench_relation_distribution_mapper.py`
-- `backend/src/fin_ops_platform/services/app_status_domain_registry.py`
-- `backend/src/fin_ops_platform/services/app_status_job_registry.py`
-- `backend/src/fin_ops_platform/services/runtime_worker_registry.py`
+- `backend/src/fin_ops_platform/services/postgres_repositories/batch_accounting.py`
+- `backend/src/fin_ops_platform/services/workbench_relation_command_service.py`
+- `backend/src/fin_ops_platform/app/server.py`：仅依赖组装和 HTTP 接线
 
 ## 当前职责
 
-批量账务页面用于把符合批量账务条件的银行流水与日常报销 OA 行做人工关系确认，并支持已确认关系撤回。它不是独立事实源：
+批量账务页面把符合条件的银行流水与已完成的日常报销 OA 主单人工建立正式关系，并支持撤回。页面没有独立 read model，也不读取 Workbench active generation 或 `workbench_relation` projection：
 
-- 银行流水、OA 行和已有关联关系来自 Workbench / Workbench relation read model。
-- `GET /api/batch-accounting` 必须返回 `summary`、`bank_rows`、`oa_rows`、`relations_by_bank_row_id`、`read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys`、`refresh_enqueued`。显式传入 `page/page_size`、`bank_page/bank_page_size` 或 `oa_page/oa_page_size` 时，后端只裁剪对应列表并返回 `pagination`；不传分页参数时保持旧响应 shape。
-- `GET /api/batch-accounting` 通过标准 `Server-Timing` 响应头暴露本模块候选加载、候选解析/筛选、relation 读取/应用、payload 组装和序列化耗时；诊断不得进入 JSON DTO，不得写库、入队或改变其他页面请求。
-- 未提交 bucket 的 read path 必须把 Workbench 输入先收窄为批量账务银行候选和日常报销 OA 候选；银行、OA、当前 OA 附件必须在同一个 active-generation repository SQL I/O 内读取。该私有列表映射只删除顶层内部 `rebuildable` 标记并复用嵌套 JSON，不得递归复制整行；service 添加 group 注解时也只复制顶层。银行候选只按结构化 `counterparty_name` 读取并使用既有复合索引，不保留 payload counterparty fallback；OA 类型只通过 `coalesce(apply_type) || ' ' || coalesce(expense_type)` 的稳定表达式筛选，并由 migration 0112 的 batch-only 部分 trigram 索引覆盖；OA 附件只引用当前 OA candidate CTE。候选 relation 必须调用 `get_batch_accounting_by_row_ids(..., submitted_year=...)` 专用 bundle，一次返回候选关系、候选/年度 proof、groups 和 `submitted_count`；年度 canonical expected proof 由一次 bulk SQL 返回 12 个月的独立版本向量，facade 继续逐 scope 比较，不能恢复 12 次单月 SQL。bundle 的 row projection 不携带未消费的 normalized/raw payload，group projection只保留关系 DTO 所需 normalized payload。年度聚合由 migration 0113 的 batch-only partial expression index覆盖，不能恢复独立 count、进入通用逐 scope lookup 或加载完整 submitted relation DTO。
-- 前端未提交 bucket 首屏默认以 200 行页大小分别请求银行流水和可关联 OA 项，并提供独立分页控件；切换 bucket 或流水年份会重置页码、选择和差额说明，避免跨页旧选择误提交。右侧 OA 不按年份过滤，只展示没有关联银行流水的日常报销 OA 主单；仅发票关系或无流水候选关系不应把该 OA 排除。已提交 bucket 只分页银行关系列表，OA 明细来自当前可见 relation bucket。
-- `POST /api/batch-accounting/submit` 必须优先通过 Workbench SQL active read model 的窄读口读取本次选中银行流水、OA 主单和对应 OA 附件发票，并通过 `WorkbenchRelationCommandService.confirm_relation(...)` 写入 relation，`special_metadata.source` 必须是 `batch_accounting`，`special_metadata.affected_scope_keys` 必须记录本次关系涉及的具体月份；缺少 command service 时 fail fast，不回退 direct pair relation mutation。
-- `POST /api/batch-accounting/{relation_id}/withdraw` 只能撤回当前 active 的批量账务关系，并保留提交/撤回历史备注；撤回必须通过 durable relation command repository 取消当前 batch relation，记录 `withdraw_link` history。它不走旧 snapshot restore，也不得把 OA 附件 case_id / `existing_case` 显示归属恢复成 active relation。
-- 旧 `repair_legacy_case_id_collisions(...)` service-level 修复入口已删除；批量账务生产 API/worker 主链路不得再提供 legacy case-id collision repair 写入口。
-- 前端提交/撤回成功后只允许当前批量账务页通过正常 GET 比较 canonical relation source version 与 read-model proof；不发送跨页事件。其它页面只在 route 进入/重进、查询变化、浏览器手动刷新或明确重试时走自身 gate。
+- 浏览器只访问 `/api/batch-accounting` 页面专属 API。
+- `BatchAccountingService` 负责业务组合、金额校验、候选资格、冲突和 CAS 语义。
+- `PostgresBatchAccountingQueryRepository` 在一个显式 `REPEATABLE READ / READ ONLY` 快照中读取 PostgreSQL canonical facts。
+- 正式关系只认 `app.workbench_pair_relations` 中 `status='active'` 的事实；已提交列表还要求 `relation_mode='batch_accounting'`。
+- submit/withdraw 继续委托 `WorkbenchRelationCommandService`，页面 repository 不写关系表。
 
-## 当前边界
+## 列表合同
 
-- 必须透出 `workbench_relation` read model 状态，不能把非 fresh 空关系显示为真实未提交。
-- `read_model_status !== "fresh"` 时，页面可以展示当前可用 payload 和 freshness 诊断，但不能仅因普通 read model non-fresh 全局阻止提交和撤回；写操作必须由权限/session、DB/目标写模型可用性、canonical relation version/idempotency/owner 状态决定。
-- `GET /api/batch-accounting` 的 relation 读取必须通过现有 relation read facade/freshness 边界请求 `require_fresh`；缺失或 stale scope 只能经 facade/gateway 入队刷新，不能在页面 GET 路径同步 rebuild 或直接写 durable queue。
-- `POST /api/batch-accounting/submit` 和 `POST /api/batch-accounting/{relation_id}/withdraw` 必须走 command service，并基于 canonical relation、idempotency、owner 状态、权限/session、DB 可写性和本次操作 row ids 的 active relation 冲突校验；PostgreSQL runtime 必须注入 durable `PostgresWorkbenchRelationRepository`，不允许在缺少 command service 或 durable repository 时静默写旧 pair service/in-memory snapshot，也不能把整页普通 relation distribution 追赶中作为默认写阻断条件。
-- submit/withdraw route 不再调用旧 `_schedule_workbench_pair_relation_persist`、`_schedule_workbench_read_model_persist`、snapshot rollback restore、duplicate derived lifecycle 或 repository hidden enqueue；`WorkbenchRelationCommandService` repository 只原子保存 canonical relation/history/idempotency/audit。`affected_scope_keys` 只作访问时重校验提示，普通写的 targets 为空且不得扩散为 `all`。
-- 前端 submit/withdraw 不等待 `GlobalOperationOverlayProvider` / operation barrier。写 API 成功后只重跑当前批量账务 GET；GET 非 fresh 时展示本页 refreshing 并有界重试，不能把已成功 command 改写成失败。focus/visibility/BFCache 不触发额外 GET。
-- 批量账务关系变化可能影响关联台、银行明细、成本统计、搜索、进项/销项/OA 待付款等消费者，但普通写不主动投递这些页面；各页面只在访问时按自身 source-version gate 收敛。
-- read model refresh 的事实源是 durable queue / `workbench_relation.read_model.refresh`，不是前端事件。
-- 批量账务 GET 必须保持只读；不能在列表读取路径执行 legacy relation repair。
-- 批量账务显式分页的 `page_size` 上限为 200，超限必须返回 `invalid_paging`，不能为了首屏性能静默全量返回或把 stale relation distribution 伪装成 fresh。
-- 批量账务 SQL 读路径分三类 I/O：未提交列表只用年份候选 loader、OA-ID-scoped 附件读取和专用 bulk relation reader；submit command 只用 `bank_row_id + oa_row_ids` 窄 loader；已提交 bucket 只用年份级 bulk-proof relation DTO 和银行行窄 payload。三者不能相互复用，也不能回退通用逐 scope relation reader 或 Workbench full-page builder；缺少对应 loader/reader 时必须 fail closed。
+- `GET /api/batch-accounting` 始终返回 `summary`、`bank_rows`、`oa_rows`、`relations_by_bank_row_id` 和 `pagination`。
+- 响应不返回 `read_model_status`、`source_versions`、`refresh_enqueued`、refresh targets 或 operation barrier targets；页面只保留 loading、empty 和 error 状态。
+- 银行和 OA 使用独立服务端分页，页大小上限 200；不得先读全量再在 Python 或浏览器分页。
+- `oa_search` 在 PostgreSQL 候选查询中执行，并与 OA count、分页使用同一筛选。
+- `unsubmitted` 直接查询指定年份、对方户名为“批量账务集中处理”、支出且尚无 active relation 的 canonical 银行流水；OA 直接查询已完成的日常报销主单，不按年份过滤，且没有包含银行流水的 active relation。
+- OA 已有发票关系或其它不含银行流水的关系时仍可成为候选；附件发票只按当前可见/选中的 OA IDs 查询。
+- `submitted` 直接分页查询带指定年份 canonical 银行成员的 active batch-accounting relations，再用一次批量成员查询补齐 OA/发票详情。
+- `summary.submitted_count` 按 relation 中 canonical 银行成员的年份统计，支持跨月关系。
+
+## 写合同
+
+- submit 只读取指定 `bank_row_id + oa_row_ids` 的 canonical 银行、OA 和附件发票上下文，不读取整页或整年 payload。
+- 写前检查银行资格、OA 日常报销资格、金额差异说明、银行/OA active relation 冲突和 expected version。
+- OA 已有关联发票但未关联银行时允许提交；银行或 OA 已处于包含银行的 active relation 时拒绝。
+- submit 使用 `WorkbenchRelationCommandService.confirm_relation(...)`，并记录 `relation_mode=batch_accounting`、row types、金额校验、跨月 `affected_scope_keys` 和 metadata。
+- withdraw 只允许 active batch-accounting relation，要求撤回原因并检查 expected version，最终调用 command service 的 canonical cancel。
+- 写成功后当前页面恰好重新执行一次普通 GET；不轮询、不等待 read model、不请求 operation barrier。重新 GET 失败时保留写成功事实并提示用户手动刷新。
+
+## 查询与性能边界
+
+- 未提交 GET 最多 5 条数据库语句（包括 transaction isolation 设置）：summary、银行页、OA 页、当前 OA 附件发票。
+- 已提交 GET 最多 4 条数据库语句（包括 isolation 设置）：summary、关系/银行页、关系成员。
+- submit 上下文最多 4 条数据库语句（包括 isolation 设置）：银行、OA、选中 OA 附件发票。
+- 禁止 12 月循环、逐 scope proof、全 Workbench payload、全量附件扫描、逐 row relation lookup、N+1 和递归大 JSON copy。
+- 只有真实 PostgreSQL `EXPLAIN` 或端点测量证明需要时才新增索引；本模块不新增缓存、worker、queue、materialized view 或依赖。
 
 ## 影响面清单
 
 | 改动点 | 必查影响 |
 | --- | --- |
-| 页面筛选、bucket、选择、差额说明、提交/撤回 | `BatchAccountingPage.test.tsx` 的 loading/empty/error/stale/筛选/提交/撤回/事件回归 |
-| API DTO 或错误码 | `tests/test_batch_accounting_api.py`、`web/src/features/batchAccounting/api.ts` mapper |
-| 关系提交/撤回/修复规则 | `BatchAccountingService`、`WorkbenchRelationCommandService`、Workbench relation projection、历史修复回归 |
-| `workbench_relation` freshness | `WorkbenchRelationReadFacade`、`workbench_relation` worker、App Status / App Health |
-| Canonical write / access-time convergence | `WorkbenchRelationCommandService` repository 的零 queue I/O、当前页 GET、下游页面 stale/fresh 与非消费者隔离回归 |
-| Bank/OA identity 字段 | 银行明细、关联台、待找发票、进项/销项/OA 待付款和成本统计关系标签 |
+| 候选口径、筛选、双分页 | canonical bank/OA 查询、summary、空集、跨年 OA、前端交互 |
+| submitted 关系/详情 | active batch relation、canonical member detail、跨月 relation、withdraw |
+| API DTO/错误码 | route contract、frontend mapper、旧 freshness 字段不得恢复 |
+| submit/withdraw | command owner、权限、审计、CAS、冲突、写后一次 GET |
+| canonical 表或 identity | canonical-facts、workbench-relations、reconciliation-workbench 上下游 |
+| 性能 | 固定查询次数、服务端分页、页面最大 200 行 |
 
-## 维护触发器
+## 跨页面清理结果
 
-发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：
-
-- 页面入口、路由、侧栏、筛选、排序、分页、导出、drawer/dialog 或权限显示变化。
-- API contract、DTO shape、错误字段、权限校验、状态值或响应 freshness 字段变化。
-- 业务状态、UI 状态、read model 状态、worker 状态或状态流转变化。
-- 跨页面刷新、domain event、derived lifecycle、dirty scope、outbox 或缓存边界变化。
-- 测试入口、回归范围、验证命令或未测风险变化。
+旧 Workbench generation reader、registry、worker 和 App Status 配置已删除。本页面只读 canonical facts/active relations；仍保留的 `workbench_relation` 是其它明确登记消费者的共享 distribution，不进入本页面读链。历史 migration/表暂留作回滚证据。
 
 ## 本目录文件
 
-- `e2e-spec.md`：维护页面 Spec-first Browser E2E 业务验收合同。
-- `e2e-coverage.md`：维护 Spec ID 到 Browser/API/组件/后端/integration 覆盖证据的映射。
-- `state-machine.md`：维护当前有效状态和状态流转；不适用时写明原因。
-- `tests.md`：维护七类测试适用性、现有测试入口、验证命令和回归范围。
-- `implementation-notes.md`：维护提炼后的决策和验收记录；不保存原始 prompt。
+- `boundary-io.md`：模块职责、I/O、文件范围和依赖方向。
+- `state-machine.md`：业务与页面可观察状态。
+- `tests.md`：七类测试覆盖和验证入口。
+- `e2e-spec.md`：浏览器业务验收合同。
+- `e2e-coverage.md`：Spec ID 到证据映射。
+- `implementation-notes.md`：提炼后的决策、验证和 HANDOFF。

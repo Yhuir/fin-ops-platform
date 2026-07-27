@@ -154,55 +154,6 @@ test.describe("batch accounting browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("shows stale relation read model diagnostics without treating current rows as empty", async ({ page }, testInfo) => {
-    const browserErrors = startStrictBrowserErrorCapture(page);
-    const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
-      batchAccountingReadModelStatus: "stale",
-    });
-    const recordLatency = createBatchAccountingLatencyRecorder(page, testInfo);
-
-    await recordLatency({
-      operationId: "batch-accounting.open-page-stale-read-model",
-      visibleLabel: "批量账务",
-      actionType: "navigate",
-    }, async (mark) => {
-      await page.goto("/batch-accounting");
-      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("heading", { name: "日常报销批量账务管理" })).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(page.getByText("关联台关系读模型 stale，正在刷新。")).toBeVisible());
-    });
-    await expect(page.getByText("关联台关系读模型 stale，正在刷新。")).toBeVisible();
-    await expect(page.getByText("batch_accounting_stale")).toBeVisible();
-    await expect(page.getByText("影响范围：2026-04")).toBeVisible();
-
-    const bankPanel = page.getByRole("region", { name: "批量账务流水" });
-    await expect(bankPanel.getByRole("button", { name: /批量账务集中处理.*1,200.00.*2026-04-03 09:20:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true");
-    await expect(page.getByText("当前年份暂无批量账务流水")).toBeHidden();
-
-    const oaTable = page.getByRole("table", { name: "可关联OA项" });
-    await recordLatency({
-      operationId: "batch-accounting.select-stale-oa-liu",
-      visibleLabel: "选择 刘晨 2026-04-02",
-      actionType: "check",
-    }, async (mark) => {
-      await oaTable.getByRole("checkbox", { name: "选择 刘晨 2026-04-02" }).check();
-      await mark("finalSettledLatencyMs", expect(page.getByText("已选 OA 1 项")).toBeVisible());
-    });
-    await recordLatency({
-      operationId: "batch-accounting.select-stale-oa-wang",
-      visibleLabel: "选择 王青 2026-04-03",
-      actionType: "check",
-    }, async (mark) => {
-      await oaTable.getByRole("checkbox", { name: "选择 王青 2026-04-03" }).check();
-      await mark("finalSettledLatencyMs", expect(page.getByText("已选 OA 2 项")).toBeVisible());
-    });
-    await expect(page.getByText("已选 OA 2 项")).toBeVisible();
-    await expect(page.getByRole("button", { name: "关联OA项与流水" })).toBeEnabled();
-    expect(api.count("POST /api/batch-accounting/submit")).toBe(0);
-    expect(api.count("POST /api/batch-accounting/BA-REL-202604-001/withdraw")).toBe(0);
-    expect(browserErrors).toEqual([]);
-  });
-
   test("submits and withdraws daily reimbursement rows through page-access convergence", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
@@ -261,7 +212,7 @@ test.describe("batch accounting browser flow", () => {
     await expect(page.getByText("已关联批量账务流水与 2 项 OA。")).toBeVisible();
     expect(api.count("POST /api/batch-accounting/submit")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
-    expect(api.count("GET /api/batch-accounting")).toBeGreaterThan(batchAccountingGetsBeforeSubmit);
+    expect(api.count("GET /api/batch-accounting")).toBe(batchAccountingGetsBeforeSubmit + 1);
     await expect(page.getByRole("button", { name: "已提交 1" })).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
 
@@ -319,7 +270,7 @@ test.describe("batch accounting browser flow", () => {
     await expect(page.getByText("已撤回批量账务关联。")).toBeVisible();
     expect(api.count("POST /api/batch-accounting/BA-REL-202604-001/withdraw")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
-    expect(api.count("GET /api/batch-accounting")).toBeGreaterThan(batchAccountingGetsBeforeWithdraw);
+    expect(api.count("GET /api/batch-accounting")).toBe(batchAccountingGetsBeforeWithdraw + 1);
     await expect(page.getByRole("button", { name: "已提交 0" })).toBeVisible();
     await expect(page.getByText("当前年份暂无批量账务流水")).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);

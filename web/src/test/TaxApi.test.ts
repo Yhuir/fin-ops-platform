@@ -39,7 +39,7 @@ describe("tax API mappers", () => {
         matched_certification_count: -1,
         deductible_invoice_count: 2.5,
       },
-      read_model_status: "fresh",
+      canonical_snapshot_version: "tax-offset-v1:test",
     }), { headers: { "Content-Type": "application/json" } })));
 
     const result = await fetchTaxOffsetMonth("2026-05");
@@ -51,6 +51,7 @@ describe("tax API mappers", () => {
       matchedCertificationCount: undefined,
       deductibleInvoiceCount: undefined,
     }));
+    expect(result.canonicalSnapshotVersion).toBe("tax-offset-v1:test");
   });
 
   test("maps a completed certified import job batch result", () => {
@@ -75,10 +76,28 @@ describe("tax API mappers", () => {
       fileCount: 2,
       months: ["2026-03", "2026-04"],
       persistedRecordCount: 18,
-      readModelScopeKeys: [],
-      freshnessTargets: [],
-      operationBarrierTargets: [],
     });
+  });
+
+  test("rejects a month payload without its canonical snapshot token", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      month: "2026-05",
+      output_items: [],
+      input_items: [],
+      default_selected_output_ids: [],
+      default_selected_input_ids: [],
+      summary: {
+        output_tax: "0.00",
+        input_tax: "0.00",
+        deductible_tax: "0.00",
+        result_label: "应纳税额",
+        result_amount: "0.00",
+      },
+    }), { headers: { "Content-Type": "application/json" } })));
+
+    await expect(fetchTaxOffsetMonth("2026-05")).rejects.toThrow(
+      "Tax offset canonical snapshot version is missing.",
+    );
   });
 
   test("rejects malformed certified import job batch contracts instead of sanitizing them", () => {

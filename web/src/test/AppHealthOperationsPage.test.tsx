@@ -143,8 +143,8 @@ describe("AppHealthOperationsPage", () => {
     expect(within(runtime).getByRole("grid", { name: "Read Model 状态" })).toBeInTheDocument();
     expect(within(runtime).getByRole("grid", { name: "Worker 状态" })).toBeInTheDocument();
     expect(runtime).toHaveTextContent("pending");
-    expect(runtime).toHaveTextContent("finops.workbench.read_model.refresh");
-    expect(runtime).toHaveTextContent("workbench");
+    expect(runtime).toHaveTextContent("finops.workbench_relation.read_model.refresh");
+    expect(runtime).toHaveTextContent("workbench_relation");
     expect(runtime).toHaveTextContent("refreshing");
     expect(runtime).toHaveTextContent("runtime-worker");
     expect(runtime).toHaveTextContent("active");
@@ -320,8 +320,8 @@ describe("AppHealthOperationsPage", () => {
           },
           queues: [
             {
-              event_type: "workbench.read_model.refresh",
-              queue: "finops.workbench.read_model.refresh",
+              event_type: "workbench_relation.read_model.refresh",
+              queue: "finops.workbench_relation.read_model.refresh",
               messages: null,
               unacked: null,
               consumers: null,

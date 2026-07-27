@@ -10,7 +10,6 @@ from fin_ops_platform.services.read_model_freshness import (
     source_version_mismatch_reasons,
     source_versions_match,
 )
-from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
 
 
 class ReadModelFreshnessTests(unittest.TestCase):
@@ -117,34 +116,6 @@ class ReadModelFreshnessTests(unittest.TestCase):
 
         self.assertEqual(freshness.status, "stale")
         self.assertEqual(freshness.stale_reasons, ("bank_auto_tag_rules_version_mismatch",))
-
-    def test_workbench_read_model_service_keeps_new_source_version_fields(self) -> None:
-        service = WorkbenchReadModelService()
-
-        service.upsert_read_model(
-            scope_key="2026-05",
-            payload={"month": "2026-05"},
-            source_versions={
-                "bank_auto_tag_rules_version": 7,
-                "oa_attachment_invoice_parser_version": "parser-v1",
-                "oa_projection_sync_version": "projection-v1",
-                "turnover_relation_snapshot_version": "turnover-v1",
-                "unknown": "ignored",
-            },
-        )
-
-        read_model = service.get_read_model("2026-05")
-        assert read_model is not None
-        self.assertEqual(
-            read_model["source_versions"],
-            {
-                "bank_auto_tag_rules_version": "7",
-                "oa_attachment_invoice_parser_version": "parser-v1",
-                "oa_projection_sync_version": "projection-v1",
-                "turnover_relation_snapshot_version": "turnover-v1",
-            },
-        )
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
-from unittest.mock import patch
 
 from fin_ops_platform.postgres import migrate
 from fin_ops_platform.services.etc_reconciliation_models import SourceFileKind
@@ -22,12 +21,10 @@ from fin_ops_platform.services.etc_service import (
 from fin_ops_platform.services.postgres_connection import (
     PostgresConnection,
     PostgresSettings,
-    PostgresTransaction,
 )
 from fin_ops_platform.services.postgres_repositories.bank_transaction_category import (
     PostgresBankTransactionCategoryRepository,
 )
-from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 from fin_ops_platform.domain.enums import BatchType
@@ -130,11 +127,12 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
         self.assertTrue(result["changed"])
         persisted = self.connection.fetch_one(
             """
-            select status, version,
-                   raw_payload #>> '{normalized_payload,category_code}' as category_code,
-                   raw_payload #>> '{normalized_payload,updated_by}' as updated_by
-            from app.bank_transaction_categories
-            where legacy_transaction_id = %s
+            select category.status, category.version,
+                   category.raw_payload #>> '{normalized_payload,category_code}' as category_code,
+                   category.raw_payload #>> '{normalized_payload,updated_by}' as updated_by
+            from app.bank_transaction_categories category
+            join app.bank_transactions bank on bank.id = category.bank_transaction_id
+            where bank.legacy_mongo_id = %s
             """,
             (transaction_id,),
         )
@@ -204,262 +202,6 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
         audit_operations = {row.get("operation_id") for row in loaded["audit_log"]}
         self.assertEqual(audit_operations, {"create-a", "create-b", "withdraw-a"})
 
-    def test_workbench_all_groups_use_exact_generation_stats_and_fail_closed_when_missing(self) -> None:
-        self.store.save_workbench_read_models(
-            {
-                "read_models": {
-                    scope_key: {
-                        "scope_key": scope_key,
-                        "payload": {"paired": {"groups": []}, "unpaired": {"groups": []}},
-                        "source_versions": {"source_version": index},
-                    }
-                    for index, scope_key in enumerate(("2026-04", "2026-05"), start=1)
-                }
-            },
-            changed_scope_keys={"2026-04", "2026-05"},
-        )
-        repository = PostgresReadModelRepository(self.connection)
-
-        page = repository.get_workbench_groups_page(
-            scope_key="all",
-            zone="paired",
-            page=1,
-            page_size=50,
-            detail_level="summary",
-        )
-
-        self.assertIsNotNone(page)
-        assert page is not None
-        self.assertEqual(page["total"], 0)
-        self.assertEqual(page["row_counts"], {"oa": 0, "bank": 0, "invoice": 0, "rows": 0})
-        self.assertEqual(
-            fetch_scalar(
-                self.database_url,
-                "select count(*) from read_model.workbench_generation_stats where scope_key = 'all';",
-            ),
-            "2",
-        )
-
-        with self.connection.transaction() as transaction:
-            transaction.execute("delete from read_model.workbench_generation_stats where scope_key = 'all'")
-
-        self.assertIsNone(
-            repository.get_workbench_groups_page(
-                scope_key="all",
-                zone="paired",
-                page=1,
-                page_size=50,
-                detail_level="summary",
-            )
-        )
-
-    def test_workbench_generation_copy_persists_typed_rows_before_activation(self) -> None:
-        self.store.save_workbench_read_models(
-            {
-                "read_models": {
-                    "2026-05": {
-                        "scope_key": "2026-05",
-                        "generated_at": datetime.now(UTC).isoformat(),
-                        "payload": {
-                            "month": "2026-05",
-                            "paired": {"groups": []},
-                            "unpaired": {
-                                "groups": [
-                                    {
-                                        "group_id": "unpaired:bank-copy-1",
-                                        "bank_rows": [
-                                            {
-                                                "id": "bank-copy-1",
-                                                "type": "bank",
-                                                "source_kind": "bank",
-                                                "trade_time": "2026-05-08",
-                                                "amount": "10.50",
-                                            }
-                                        ],
-                                    }
-                                ]
-                            },
-                        },
-                        "source_versions": {"source_version": 9},
-                    }
-                }
-            },
-            changed_scope_keys={"2026-05"},
-        )
-
-        self.assertEqual(
-            fetch_scalar(
-                self.database_url,
-                """
-                select concat(
-                    count(*) filter (where generation.status = 'active'), ':',
-                    count(distinct rows.row_id), ':',
-                    count(distinct groups.group_id), ':',
-                    count(distinct group_rows.row_id)
-                )
-                from read_model.workbench_generations generation
-                left join read_model.workbench_rows rows
-                  on rows.generation_id = generation.generation_id
-                 and rows.scope_key = generation.scope_key
-                left join read_model.workbench_groups groups
-                  on groups.generation_id = generation.generation_id
-                 and groups.scope_key = generation.scope_key
-                left join read_model.workbench_group_rows group_rows
-                  on group_rows.generation_id = generation.generation_id
-                 and group_rows.scope_key = generation.scope_key
-                where generation.scope_key = '2026-05'
-                """,
-            ),
-            "1:1:1:1",
-        )
-
-    def test_workbench_generation_copy_failure_rolls_back_before_activation(self) -> None:
-        copy_calls = 0
-        original_copy_rows = PostgresTransaction.copy_rows
-
-        def fail_second_copy(
-            transaction: PostgresTransaction,
-            sql: str,
-            params_seq: list[tuple],
-        ) -> int:
-            nonlocal copy_calls
-            copy_calls += 1
-            if copy_calls == 2:
-                raise RuntimeError("injected COPY failure")
-            return original_copy_rows(transaction, sql, params_seq)
-
-        with (
-            patch.object(PostgresTransaction, "copy_rows", fail_second_copy),
-            self.assertRaisesRegex(RuntimeError, "injected COPY failure"),
-        ):
-            self.store.save_workbench_read_models(
-                {
-                    "read_models": {
-                        "2026-05": {
-                            "scope_key": "2026-05",
-                            "generated_at": datetime.now(UTC).isoformat(),
-                            "payload": {
-                                "month": "2026-05",
-                                "paired": {"groups": []},
-                                "unpaired": {
-                                    "groups": [
-                                        {
-                                            "group_id": "unpaired:bank-copy-rollback",
-                                            "bank_rows": [
-                                                {
-                                                    "id": "bank-copy-rollback",
-                                                    "type": "bank",
-                                                    "source_kind": "bank",
-                                                    "trade_time": "2026-05-08",
-                                                    "amount": "10.50",
-                                                }
-                                            ],
-                                        }
-                                    ]
-                                },
-                            },
-                            "source_versions": {"source_version": 9},
-                        }
-                    }
-                },
-                changed_scope_keys={"2026-05"},
-            )
-
-        self.assertEqual(copy_calls, 2)
-        self.assertEqual(
-            fetch_scalar(
-                self.database_url,
-                """
-                select concat(
-                    count(*) filter (where status = 'active'), ':',
-                    count(*) filter (where status = 'failed'), ':',
-                    (select count(*) from read_model.workbench_rows where scope_key = '2026-05'), ':',
-                    (select count(*) from read_model.workbench_groups where scope_key = '2026-05'), ':',
-                    (select count(*) from read_model.workbench_group_rows where scope_key = '2026-05'), ':',
-                    (select count(*) from read_model.workbench_snapshots where scope_key = '2026-05'), ':',
-                    (select count(*) from read_model.workbench_summary where scope_key = '2026-05')
-                )
-                from read_model.workbench_generations
-                where scope_key = '2026-05'
-                """,
-            ),
-            "0:1:0:0:0:0:0",
-        )
-
-    def test_workbench_generation_accepts_explicitly_incomplete_active_relation_only(self) -> None:
-        self.store.save_workbench_pair_relations(
-            {
-                "pair_relations": {
-                    "case-incomplete": {
-                        "case_id": "case-incomplete",
-                        "relation_mode": "manual_confirmed",
-                        "status": "active",
-                        "month_scope": "2026-06",
-                        "row_ids": ["oa-incomplete", "bank-incomplete"],
-                        "row_types": ["oa", "bank"],
-                        "special_metadata": {
-                            "requires_oa": True,
-                            "requires_invoice": True,
-                        },
-                    }
-                },
-                "pair_relation_history": [],
-            },
-            changed_case_ids={"case-incomplete"},
-        )
-
-        def projection(*, is_complete: bool, source_version: int) -> dict[str, object]:
-            return {
-                "read_models": {
-                    "2026-06": {
-                        "scope_key": "2026-06",
-                        "source_versions": {"source_version": source_version},
-                        "payload": {
-                            "month": "2026-06",
-                            "paired": {"groups": []},
-                            "unpaired": {
-                                "groups": [
-                                    {
-                                        "group_id": "relation:case-incomplete",
-                                        "zone": "unpaired",
-                                        "status": "unpaired",
-                                        "completion": {
-                                            "is_complete": is_complete,
-                                            "missing_row_types": [] if is_complete else ["invoice"],
-                                        },
-                                        "oa_rows": [{"id": "oa-incomplete", "type": "oa"}],
-                                        "bank_rows": [{"id": "bank-incomplete", "type": "bank"}],
-                                        "invoice_rows": [],
-                                    }
-                                ]
-                            },
-                        },
-                    }
-                }
-            }
-
-        self.store.save_workbench_read_models(
-            projection(is_complete=False, source_version=1),
-            changed_scope_keys={"2026-06"},
-        )
-
-        with self.connection.transaction() as transaction:
-            transaction.execute(
-                """
-                update read_model.workbench_groups
-                set payload = jsonb_set(payload, '{completion,is_complete}', 'true'::jsonb)
-                where scope_key = %s
-                  and zone = 'unpaired'
-                """,
-                ("2026-06",),
-            )
-        failures = PostgresReadModelRepository._workbench_generation_consistency_failures(
-            self.connection,
-            scope_key="2026-06",
-        )
-        self.assertEqual(len(failures), 1)
-        self.assertIn("active_relation_unpaired_membership count=2", failures[0]["reasons"])
-
     def test_bank_flow_rule_batch_page_uses_sql_pagination_and_aggregate_summary(self) -> None:
         source_versions = {"schema_version": "bank-flow-test-v1", "bank_rows": "3"}
         self.store.save_bank_flow_rule_batches(
@@ -504,19 +246,8 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
                 }
             }
         )
-        with self.connection.transaction() as transaction:
-            for scope_key in ("all", "2026-05"):
-                transaction.execute(
-                    """
-                    insert into read_model.app_status_readiness(
-                        tenant_id, read_model_key, scope_type, scope_key, status, source_versions
-                    ) values ('default', 'bank_flow_rule_batch', 'bank_flow_rule_batch', %s, 'fresh', %s::jsonb)
-                    """,
-                    (scope_key, json.dumps(source_versions)),
-                )
-
-        repository = PostgresReadModelRepository(self.connection)
-        page = repository.read_bank_flow_rule_batch_page(
+        repository = self.store.bank_flow_rule_batch_canonical_query_repository
+        page = repository.read_page(
             {"month": "2026-05", "account_key": "ccb:8106"},
             summary_filters={"month": "2026-05", "account_key": "ccb:8106"},
             page=1,
@@ -525,9 +256,8 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
 
         self.assertIsNotNone(page)
         assert page is not None
-        self.assertEqual(page["total"], 3)
+        self.assertEqual(page["total"], 2)
         self.assertEqual(len(page["items"]), 2)
-        self.assertEqual(page["source_versions_summary"]["read_model_status"], "fresh")
         aggregates = {
             (row["batch_type"], row["presented_status"]): (int(row["batch_count"]), row["total_amount"])
             for row in page["aggregates"]
@@ -535,33 +265,162 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
         self.assertEqual(
             aggregates,
             {
-                ("bank_fee", "draft"): (1, "10.000000"),
                 ("bank_fee", "submitted"): (1, "20.000000"),
                 ("project_payment", "withdrawn"): (1, "30.000000"),
             },
         )
 
+    def test_bank_flow_rule_batch_canonical_query_reads_without_projection_rows(self) -> None:
+        settings_payload = {
+            "bank_transaction_tags": {
+                "version": 3,
+                "definitions": [
+                    {
+                        "code": "fee",
+                        "label": "手续费",
+                        "path": ["费用", "手续费"],
+                        "source": "custom",
+                        "status": "active",
+                        "direction": "expense",
+                        "output_primary_label": "费用",
+                        "output_sub_label": "手续费",
+                        "rules": {"match_fields": ["summary_text"], "contains_any": ["手续费"]},
+                    }
+                ],
+            },
+            "bank_flow_rule_batch_tag_rules": {
+                "version": 7,
+                "requirements_by_tag_code": {
+                    "fee": {"requires_oa": False, "requires_invoice": False}
+                },
+            },
+        }
         with self.connection.transaction() as transaction:
             transaction.execute(
                 """
-                update read_model.bank_flow_rule_batch_rows
-                set source_versions = %s::jsonb
-                where batch_id = 'bank-flow-batch-withdrawn'
+                insert into app.app_settings(settings_key, settings_payload, raw_payload)
+                values ('app_settings', %s::jsonb, '{}'::jsonb)
                 """,
-                (json.dumps({"schema_version": "bank-flow-test-v2", "bank_rows": "3"}),),
+                (json.dumps(settings_payload),),
+            )
+            for row_id, amount in (("bank-direct-1", "8.80"), ("bank-direct-2", "12.30")):
+                transaction.execute(
+                    """
+                    insert into app.bank_transactions(
+                        legacy_mongo_id, account_no, txn_direction, counterparty_name_raw,
+                        normalized_counterparty_name, amount, signed_amount, txn_date, txn_month,
+                        trade_time, summary, status, raw_payload
+                    )
+                    values (
+                        %s, '622200008106', 'outflow', '建设银行', '建设银行',
+                        %s::numeric, -(%s::numeric), '2026-05-04', '2026-05-01',
+                        '2026-05-04 08:00:00+00',
+                        '网银手续费', 'confirmed', %s::jsonb
+                    )
+                    """,
+                    (
+                        row_id,
+                        amount,
+                        amount,
+                        json.dumps(
+                            {
+                                "normalized_payload": {
+                                    "bank_name": "建设银行",
+                                    "account_last4": "8106",
+                                }
+                            }
+                        ),
+                    ),
+                )
+                transaction.execute(
+                    """
+                    insert into app.bank_transaction_category_confirmations(
+                        tenant_id, legacy_transaction_id, category_code, status, confirmed_by
+                    )
+                    values ('default', %s, 'fee', 'active', 'test')
+                    """,
+                    (row_id,),
+                )
+            for batch_id, status, row_id, amount in (
+                ("bank-flow-direct-draft", "draft", "bank-direct-1", "8.80"),
+                ("bank-flow-direct-submitted", "submitted", "bank-direct-2", "12.30"),
+            ):
+                payload = {
+                    "batch_id": batch_id,
+                    "batch_type": "fee",
+                    "batch_label": "手续费",
+                    "scope_month": "2026-05",
+                    "account_key": "建设银行:8106",
+                    "bank_name": "建设银行",
+                    "account_last4": "8106",
+                    "status": status,
+                    "status_bucket": "submitted" if status == "submitted" else "unsubmitted",
+                    "row_ids": [row_id],
+                    "row_count": 1,
+                    "total_amount": amount,
+                    "tag_counts": {"fee": 1},
+                    "direction_counts": {"expense": 1},
+                    "relation_case_id": batch_id,
+                    "relation_mode": "bank_flow_rule_batch",
+                }
+                transaction.execute(
+                    """
+                    insert into app.bank_flow_rule_batches(
+                        batch_id, status, status_bucket, version, scope_month, account_key,
+                        total_amount, bank_transaction_ids, raw_payload
+                    )
+                    values (%s, %s, %s, 1, '2026-05-01', '建设银行:8106', %s, %s, %s::jsonb)
+                    """,
+                    (
+                        batch_id,
+                        status,
+                        payload["status_bucket"],
+                        amount,
+                        [row_id],
+                        json.dumps({"normalized_payload": payload}),
+                    ),
+                )
+            transaction.execute(
+                """
+                insert into app.workbench_pair_relations(
+                    case_id, relation_mode, status, month_scope, row_ids, row_types, special_metadata
+                )
+                values (
+                    'bank-flow-direct-submitted', 'bank_flow_rule_batch', 'active',
+                    '2026-05-01', %s, %s, %s::jsonb
+                )
+                """,
+                (
+                    ["bank-direct-2", "oa-direct-1"],
+                    ["bank", "oa"],
+                    json.dumps({"requires_oa": False, "requires_invoice": False}),
+                ),
             )
 
-        mixed_page = repository.read_bank_flow_rule_batch_page(
-            {"month": "2026-05", "account_key": "ccb:8106"},
-            summary_filters={"month": "2026-05", "account_key": "ccb:8106"},
+        repository = self.store.bank_flow_rule_batch_canonical_query_repository
+        page = repository.read_page(
+            {"month": "2026-05", "bucket": "all"},
+            summary_filters={"month": "2026-05"},
             page=1,
-            page_size=2,
+            page_size=50,
         )
+        detail = repository.read_detail("bank-flow-direct-submitted")
 
-        self.assertIsNotNone(mixed_page)
-        assert mixed_page is not None
-        self.assertEqual(mixed_page["source_versions_summary"]["read_model_status"], "schema_mismatch")
-        self.assertEqual(mixed_page["source_versions_summary"]["source_versions"], {})
+        self.assertEqual(page["total"], 2)
+        self.assertEqual({item["status"] for item in page["items"]}, {"draft", "submitted"})
+        self.assertEqual(sum(int(row["batch_count"]) for row in page["aggregates"]), 2)
+        self.assertIsNotNone(detail)
+        assert detail is not None
+        self.assertTrue(detail["batch"]["can_withdraw"])
+        self.assertEqual(detail["rows"][0]["relation_case_ids"], ["bank-flow-direct-submitted"])
+        self.assertEqual(detail["rows"][0]["linked_oa_count"], 1)
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                "select count(*) from read_model.bank_flow_rule_batch_rows;",
+            ),
+            "0",
+        )
 
     def test_formal_table_writes_for_settings_jobs_workbench_and_read_models(self) -> None:
         self.store.save_app_settings({"admin_usernames": ["admin"], "manual_projects": []})
@@ -628,17 +487,6 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
                 ],
             }
         )
-        self.store.save_workbench_read_models(
-            {
-                "read_models": {
-                    "2026-03": {
-                        "scope_month": "2026-03",
-                        "source_versions": {"pair_relation_snapshot_version": 1},
-                        "rows": [{"id": "row-1"}],
-                    }
-                }
-            }
-        )
         with self.connection.transaction() as transaction:
             transaction.execute(
                 """
@@ -673,9 +521,6 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
             }
         )
         self.store.save_turnover_ledger_extras({"extras": {"ledger-1": {"scope_month": "2026-03", "note": "checked"}}})
-        self.store.save_tax_offset_read_models(
-            {"read_models": {"tax-2026-03": {"scope_month": "2026-03", "entries": [{"id": "entry-1"}]}}}
-        )
 
         expected_counts = {
             "app.app_settings": 1,
@@ -685,13 +530,11 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
             "app.workbench_pair_relation_history": 1,
             "app.no_oa_bank_batches": 1,
             "app.no_oa_bank_batch_events": 1,
-            "read_model.workbench_snapshots": 1,
             "app.bank_transaction_categories": 1,
             "app.bank_transaction_category_events": 1,
             "app.turnover_relations": 1,
             "app.turnover_relation_events": 1,
             "app.turnover_ledger_extras": 1,
-            "read_model.tax_offset_read_models": 1,
             "app.pending_invoice_manual_invoice_commands": 1,
         }
         for table, minimum_count in expected_counts.items():
@@ -702,7 +545,7 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
         self.assertIsInstance(loaded_turnover["relations"], list)
         self.assertEqual(loaded_turnover["relations"][0]["relation_id"], "turnover-1")
 
-        loaded_commands = self.store.load()["pending_invoice_commands"]
+        loaded_commands = self.store.load_pending_invoice_commands()
         self.assertEqual(loaded_commands["cmd-1"]["status"], "failed_recoverable")
         self.assertEqual(loaded_commands["cmd-1"]["last_successful_status"], "invoice_created")
 

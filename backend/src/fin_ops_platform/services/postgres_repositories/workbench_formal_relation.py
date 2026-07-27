@@ -210,6 +210,37 @@ class PostgresWorkbenchFormalRelationFactRepository:
             source_versions=versions,
         )
 
+    def load_bank_rows_by_ids(self, transaction_ids: list[str]) -> list[dict[str, Any]]:
+        normalized_ids = sorted(
+            {
+                str(transaction_id or "").strip()
+                for transaction_id in list(transaction_ids or [])
+                if str(transaction_id or "").strip()
+            }
+        )
+        if not normalized_ids:
+            return []
+        return self._connection.fetch_all(
+            """
+            select
+                coalesce(legacy_mongo_id, id::text) as id,
+                amount,
+                signed_amount,
+                txn_direction,
+                counterparty_name_raw,
+                normalized_counterparty_name,
+                summary,
+                remark,
+                bank_text_fields,
+                raw_payload
+            from app.bank_transactions
+            where status <> 'deleted'
+              and coalesce(legacy_mongo_id, id::text) = any(%s::text[])
+            order by coalesce(legacy_mongo_id, id::text)
+            """,
+            (normalized_ids,),
+        )
+
     def load_etc_batch_link_candidates(self, scope_months: list[str]) -> list[dict[str, Any]]:
         """Load exact OA -> submitted ETC batch references with one bounded query."""
         normalized_scopes = _normalize_scope_months(scope_months)

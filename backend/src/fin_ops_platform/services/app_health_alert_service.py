@@ -120,7 +120,7 @@ class AppHealthAlertService:
         alerts: dict[str, AppHealthAlert] = {}
         metrics = snapshot.get("metrics") if isinstance(snapshot.get("metrics"), dict) else {}
         oa_sync = snapshot.get("oa_sync") if isinstance(snapshot.get("oa_sync"), dict) else {}
-        workbench = snapshot.get("workbench_read_model") if isinstance(snapshot.get("workbench_read_model"), dict) else {}
+        workbench = snapshot.get("workbench_matching") if isinstance(snapshot.get("workbench_matching"), dict) else {}
         background_jobs = snapshot.get("background_jobs") if isinstance(snapshot.get("background_jobs"), dict) else {}
         dependencies = snapshot.get("dependencies") if isinstance(snapshot.get("dependencies"), dict) else {}
         session = snapshot.get("session") if isinstance(snapshot.get("session"), dict) else {}
@@ -153,7 +153,7 @@ class AppHealthAlertService:
                 alerts,
                 kind="workbench_rebuild_long_running",
                 severity="warning",
-                scope="workbench_read_model",
+                scope="workbench_matching",
                 message=f"关联台读模型重建已运行 {int(rebuild_seconds)} 秒。",
                 now=now,
             )

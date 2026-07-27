@@ -18,8 +18,8 @@ class RecordingReadinessRepository:
 
 def _event(
     *,
-    event_type: str = "bank_detail.read_model.refresh",
-    scope_type: str = "bank_detail",
+    event_type: str = "search.read_model.refresh",
+    scope_type: str = "search",
     scope_key: str = "2026-05",
     source_version: int | None = 7,
 ) -> RuntimeQueueEvent:
@@ -46,18 +46,18 @@ class ReadModelReadinessReporterTests(unittest.TestCase):
 
         reporter.record_event_success(
             _event(),
-            {"scope_key": "2026-05", "row_count": 0, "source_versions": {"bank_detail_schema_version": 8}},
+            {"scope_key": "2026-05", "row_count": 0, "source_versions": {"search_schema_version": 8}},
         )
 
         self.assertEqual(len(repository.records), 1)
         record = repository.records[0]
         self.assertEqual(record["tenant_id"], "tenant-a")
-        self.assertEqual(record["read_model_key"], "bank_detail")
-        self.assertEqual(record["scope_type"], "bank_detail")
+        self.assertEqual(record["read_model_key"], "search")
+        self.assertEqual(record["scope_type"], "search")
         self.assertEqual(record["scope_key"], "2026-05")
         self.assertEqual(record["status"], "fresh")
         self.assertEqual(record["row_count"], 0)
-        self.assertEqual(record["source_versions"], {"bank_detail_schema_version": 8})
+        self.assertEqual(record["source_versions"], {"search_schema_version": 8})
         self.assertEqual(record["generated_at"], datetime(2026, 6, 4, tzinfo=UTC))
 
     def test_records_failed_then_reraises_wrapped_handler_exception(self) -> None:
@@ -73,7 +73,7 @@ class ReadModelReadinessReporterTests(unittest.TestCase):
             wrapped(_event())
 
         self.assertEqual(repository.records[0]["status"], "failed")
-        self.assertEqual(repository.records[0]["read_model_key"], "bank_detail")
+        self.assertEqual(repository.records[0]["read_model_key"], "search")
         self.assertEqual(repository.records[0]["last_error"], "projection failed")
 
     def test_dependency_not_fresh_exception_records_refreshing_not_failed(self) -> None:
@@ -120,48 +120,22 @@ class ReadModelReadinessReporterTests(unittest.TestCase):
         self.assertEqual(repository.records[0]["schema_version"], "old")
         self.assertEqual(repository.records[0]["last_error"], "schema version mismatch")
 
-    def test_all_scope_shard_fanout_does_not_record_fake_fresh(self) -> None:
-        repository = RecordingReadinessRepository()
-        reporter = ReadModelReadinessReporter(readiness_repository=repository)
-
-        reporter.record_event_success(
-            _event(scope_key="all"),
-            {"scope_key": "all", "enqueued_scope_keys": ["2026-05"], "row_count": 0},
-        )
-
-        self.assertEqual(repository.records, [])
-
-    def test_all_scope_shard_fanout_failure_does_not_record_parent_failed_readiness(self) -> None:
+    def test_active_shared_month_scope_failure_records_failed_readiness(self) -> None:
         repository = RecordingReadinessRepository()
         reporter = ReadModelReadinessReporter(readiness_repository=repository)
 
         reporter.record_event_failure(
             _event(
-                event_type="oa_pending_payment.read_model.refresh",
-                scope_type="oa_pending_payment",
-                scope_key="all",
-            ),
-            RuntimeError("permission denied for table oa_pending_payment_admissions"),
-        )
-
-        self.assertEqual(repository.records, [])
-
-    def test_queryable_all_scope_failure_still_records_failed_readiness(self) -> None:
-        repository = RecordingReadinessRepository()
-        reporter = ReadModelReadinessReporter(readiness_repository=repository)
-
-        reporter.record_event_failure(
-            _event(
-                event_type="bank_account_balance.read_model.refresh",
-                scope_type="bank_account_balance",
-                scope_key="all",
+                event_type="search.read_model.refresh",
+                scope_type="search",
+                scope_key="2026-05",
             ),
             RuntimeError("projection failed"),
         )
 
         self.assertEqual(len(repository.records), 1)
-        self.assertEqual(repository.records[0]["read_model_key"], "bank_account_balance")
-        self.assertEqual(repository.records[0]["scope_key"], "all")
+        self.assertEqual(repository.records[0]["read_model_key"], "search")
+        self.assertEqual(repository.records[0]["scope_key"], "2026-05")
         self.assertEqual(repository.records[0]["status"], "failed")
 
     def test_unknown_read_model_key_fails_fast(self) -> None:
@@ -186,21 +160,29 @@ class ReadModelReadinessReporterTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         expected_assignments = (
-            'handlers["workbench.read_model.refresh"] = _read_model_handler',
             "handlers[WORKBENCH_RELATION_REFRESH_EVENT_TYPE] = _read_model_handler",
-            'handlers["tax_offset.read_model.refresh"] = _read_model_handler',
-            'handlers["search.read_model.refresh"] = _read_model_handler',
-            'handlers["pending_invoice.read_model.refresh"] = _read_model_handler',
-            'handlers["bank_detail.read_model.refresh"] = _read_model_handler',
+            "handlers[SEARCH_REFRESH_EVENT_TYPE] = _read_model_handler",
             "handlers[NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE] = _read_model_handler",
-            'handlers["bank_account_balance.read_model.refresh"] = _read_model_handler',
-            "handlers[INVOICE_LIFECYCLE_REFRESH_EVENT_TYPE] = _read_model_handler",
-            'handlers["input_invoice_usage.read_model.refresh"] = _read_model_handler',
-            'handlers["output_invoice_collection.read_model.refresh"] = _read_model_handler',
-            "handlers[OA_PENDING_PAYMENT_REFRESH_EVENT_TYPE] = _read_model_handler",
         )
         for assignment in expected_assignments:
             self.assertIn(assignment, worker_source)
+        self.assertEqual(worker_source.count(" = _read_model_handler("), len(expected_assignments))
+        self.assertIn(
+            "handlers[BANK_FLOW_RULE_BATCH_DRAFT_REFRESH_EVENT_TYPE] = refresh_service.handle_runtime_event",
+            worker_source,
+        )
+        for retired_event in (
+            "workbench.read_model.refresh",
+            "bank_detail.read_model.refresh",
+            "bank_account_balance.read_model.refresh",
+            "pending_invoice.read_model.refresh",
+            "invoice_lifecycle.read_model.refresh",
+            "input_invoice_usage.read_model.refresh",
+            "output_invoice_collection.read_model.refresh",
+            "oa_pending_payment.read_model.refresh",
+            "tax_offset.read_model.refresh",
+        ):
+            self.assertNotIn(retired_event, worker_source)
 
 
 if __name__ == "__main__":

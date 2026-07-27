@@ -176,7 +176,6 @@ def apply_batch(app, spec: HistoricalEtcBatchSpec, upload: UploadedEtcZipFile, i
         },
     )
     app._persist_workbench_pair_relations(changed_case_ids=[str(relation["case_id"])])
-    app._invalidate_workbench_read_model_scopes(["all", *changed_months])
     if app._state_store is not None:
         app._state_store.save_etc_state(app._etc_service.snapshot())
 

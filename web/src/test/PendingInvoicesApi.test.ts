@@ -195,7 +195,6 @@ describe("pending invoices and tag settings API mapping", () => {
         expense_transaction_count: -1,
         income_transaction_count: 2.5,
       },
-      read_model_status: "fresh",
       tag_dictionary: {
         version: 9,
         tags: [{ code: "fee", label: "手续费", path: ["自动识别", "手续费"], status: "active", source: "system" }],
@@ -305,7 +304,7 @@ describe("pending invoices and tag settings API mapping", () => {
         excludedDirectionRows: 75,
       },
     });
-    expect(payload.readModelStatus).toBe("fresh");
+    expect(payload).not.toHaveProperty("readModelStatus");
     expect(payload.tagDictionary?.version).toBe(9);
   });
 

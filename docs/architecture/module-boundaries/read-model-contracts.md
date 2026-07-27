@@ -1,171 +1,124 @@
 # Read Model 边界合同
 
-本文件记录当前所有页面和资源 read model 的目标边界。可执行事实源是 `backend/src/fin_ops_platform/services/read_model_manifest.py` 与 `backend/src/fin_ops_platform/services/runtime_worker_registry.py`；本文档用于开发前审阅和变更后的长期维护。
+扫描日期：2026-07-27。
 
-扫描日期：2026-07-25。
+本文件只记录当前运行时合同。历史 projection 设计和迁移过程不再作为架构依据；可执行事实源是：
 
-## 全局目标态
+- `backend/src/fin_ops_platform/services/read_model_manifest.py`
+- `backend/src/fin_ops_platform/services/read_model_scope_policy.py`
+- `backend/src/fin_ops_platform/services/app_status_read_model_registry.py`
+- `backend/src/fin_ops_platform/services/runtime_worker_registry.py`
 
-普通页面 read model 必须符合 Partitioned + Scoped + Incremental Projection：
+## 当前唯一集合
 
-- Partitioned：刷新单位要落到业务分区，不能默认无界重建。常见分区包括月份、方向、来源、账号、页面 scope、父聚合 scope。
-- Scoped：dirty scope、outbox event、worker refresh、query freshness/status 必须共享可验证 scope contract。
-- Incremental Projection：普通写操作只提交 canonical facts/version/audit；页面访问发现 mismatch 后才污染当前精确 scope。worker 投影只重算该范围，除非显式维护命令且 manifest 明确把 all 定义为 fan-out 或可查询父聚合。
+App 当前只保留三个共享 read model：
 
-查询端必须经过 freshness/status/enqueue 边界；页面不能读取旧 read model 却返回 fresh。Redis 只能缓存 fresh gate 之后的 payload；RabbitMQ 只能作为可选 transport/wakeup，不能作为 read model 状态事实源。
+| Key / scope type | Refresh event | Worker | `all` 语义 | Query owner | Repository owner |
+| --- | --- | --- | --- | --- | --- |
+| `workbench_relation` | `workbench_relation.read_model.refresh` | `workbench-relation` | fan-out command | `WorkbenchRelationReadFacade` | `WorkbenchRelationReadModelRepositoryPort` |
+| `search` | `search.read_model.refresh` | `search`、`search-secondary`、`search-tertiary` | fan-out command | Search read API | `SearchReadModelRepositoryPort` |
+| `no_oa_bank_batch` | `no_oa_bank_batch.read_model.refresh` | `no-oa-bank-batch` | fan-out command | `NoOaBankBatchApplicationService` | `NoOaBankBatchReadModelRepositoryPort` |
 
-例外：`cost_statistics` 已退出 read-model registry。其 explorer、详情与导出每次从一个 PostgreSQL `REPEATABLE READ READ ONLY` snapshot 直接读取 canonical 银行流水、OA、正式关系、标签和设置；不使用 freshness gate、scope、outbox、worker、Redis 或页面间 read model。
+Manifest、scope policy、App Status registry 与所有带 `read_model_key` 的 worker registration 必须精确等于这个集合。三个 scope 都只接受 `YYYY-MM` 或 `all`；`all` 只负责枚举并投递月份 shard，不是可查询 projection。
 
-### Phase 27 访问驱动迁移合同（当前生产 release `719c9a34`）
+## 保留原因与边界
 
-Phase 27 把“普通写后同步等待所有受影响页面”迁移为“canonical commit + 页面访问时的精确 freshness 收敛”。全部登记页面、普通操作、可写 Drawer、import confirm 与 OA 权威 integration snapshot 都已从下游页面 fan-out 和写后 operation barrier 中删除；只有管理员 settings reset、历史 ETC repair、用户显式 reapply/backfill 等维护入口按各自合同进入 durable queue。HEAD/origin/main `719c9a34` 已作为 production release `main-719c9a34-20260725101310` 激活，v7、migration `0125` 与正式 Workbench rehydrate 已完成；生产可逆 relation 证据已证明普通写约 `173–343ms` 且零下游 fan-out。最终全页面/操作 correctness matrix 尚未闭合，因此 Phase 27 仍 open。3 秒 stale-to-fresh 是后续性能目标，当前只记录 `performance_follow_up`；最终 fresh canonical payload、可重试恢复、精确 scope、零无关 I/O 和 queue/worker/Audit 收敛仍是硬门。完整当前清单见 `.planning/phases/27-read-model-fan-out/27-COVERAGE-MATRIX.md`。
+### `workbench_relation`
 
-操作只分四类，不引入新的运行时协调器：
+- 只分发仍被独立消费者使用的 eligible active canonical relations。
+- `app.workbench_pair_relations` 是事实源；read model 不是 relation 写模型。
+- 查询必须通过 `WorkbenchRelationReadFacade` 与 freshness proof；调用方不得直接 SQL 读取 `read_model.workbench_relation_*`。
+- `turnover_manual_closure` 等页面专属 relation mode 按各模块合同直接读取 canonical relation，不得无条件进入共享 distribution。
+- 关联台页面本身直接读取 canonical facts 和 active relations，不消费该 read model。
 
-| 操作类 | 事实合同 | 目标刷新合同 |
-| --- | --- | --- |
-| `fact-write` | 原子写 canonical business fact/relation/state，返回业务 identity、受影响月份和 canonical version/receipt | 普通命令不等待其它页面重建；当前可见页面只收敛自身 exact scope，其他页面在访问时验证 source version |
-| `rule-write` | 写规则/设置事实，返回 rule/settings version 和语义影响范围 | 保存不默认 full-history rebuild；消费者访问时比较稳定 rule signature，只刷新真实受影响 scope |
-| `read-like-command` | POST/PUT 只执行 preview、calculate、candidate query 或 barrier status，不写 canonical business fact | 不 dirty、不 enqueue、不发 domain invalidation，不因 HTTP method 被误当成 mutation |
-| `explicit-batch` | 导入、reapply、reset、repair 或用户明确发起的批任务，返回 job/session/receipt | 允许 durable scoped/full-history job，但必须可观测、可重试、可恢复；不得伪装成普通写的同步闭环 |
+### `search`
 
-访问与可见性语义：
+- 只承担搜索索引，不承担页面 rows、summary、详情或筛选事实。
+- 月份 source proof 未变化时允许 no-op；变化时使用 row-level upsert 和 stale-row delete。
+- 页面 read model 退役不得删除 Search，也不得把页面 projection 重新挂到 Search worker。
 
-- “隐藏页面”不是后台保留一份持续运行的页面。当前 `PageRouteHost` 离开 route 会卸载 React tree；目标页面重新被访问时重新 mount，通过已有 query/read boundary 触发 freshness 检查。
-- 同一页面仍处于当前 route 时，命令成功处理器可对当前 exact scope 做一次 normal GET reconcile；其它页面不得发 query、enqueue 或 rebuild，也不得保存旧 payload 当 fresh。
-- query/read facade 必须用 canonical source versions、schema version、稳定 rule signature 和 current-effective dirty/outbox 证明 freshness。mismatch 返回 `refreshing/stale` 并通过现有 `ReadModelRefreshGateway` enqueue exact scope；页面展示明确状态，不能 stale-as-fresh。
-- ensure/wakeup 的 coalescing 必须通过 `RuntimeQueueRepository.enqueue_read_model_refresh_if_inactive(...)` 原子完成：同一事务以 PostgreSQL advisory lock 串行化 exact `tenant/type/key`，检查同 scope active event 与当前 dirty 状态后才按需写 dirty/outbox。覆盖关系固定为 `force > full scope > partial delta`：full 可覆盖 partial，partial 不得吞掉后来的 full，非 force 不得吞掉 force；两个 partial 只有在规范化 `row_ids`、`case_ids` 与 `relation_deltas` 已语义覆盖时才可 no-op。对于访问驱动的完整 scope，producer 可携带由规范 scope 与 canonical expected source versions 计算的稳定 `freshness_token`：同 target 的 active event或最新成功 event可覆盖轮询，target变化必须建立/合并必要 follow-up；只比较最新成功 target，确保 A→B→A 仍会刷新。显式 `force_refresh` 的完成事件只证明当次运维重建完成，不得覆盖后续新的访问 target；存在 `pending/processing/failed` dirty 时也禁止使用历史成功 token 短路，没有 active event 的 orphan dirty 必须允许下一次访问重新 enqueue。Workbench producer还可把同一次 gate 已验证的有界 `expected_source_versions` 与 token 成对写入安全 metadata；queue 限制 JSON proof 大小，worker重新计算 token并校验scope后复用该 proof，避免重跑相同 canonical SQL。Cost 等待 Workbench 的 child event 使用独立的 `workbench_scope_key + workbench_expected_source_versions + workbench_freshness_token` 三元组，只允许与同 target 的 active event 合并；它不是完整 Cost freshness proof，禁止用历史 done event 短路 missing/dirty Cost scope。新语义必须在同一锁内完成，禁止 check-then-enqueue 竞态，也禁止 exact scope 相同就丢失新增 delta。Workbench freshness view 已证明当前 exact scope 有 active event 时，轮询必须直接返回 `refreshing`，不得在每次 poll 重跑全月份 canonical generation proof并与 worker竞争；只有 dirty没有 active event时必须标记 stale、返回 exact scope并重新enqueue。Application 共享的 `WorkbenchSqlProjectionBuilder` 还可把时间上重叠的同 scope canonical proof 合并为一次 SQL；flight 完成即删除，独立的后续访问重新证明 canonical facts，失败也可重试。该进程内合并只减少并发重复读，不缓存 fresh 结论、不替代 PostgreSQL queue/dirty truth。真实 canonical mutation、显式 repair/reapply和`force_refresh=true`仍按各自合同推进新版本。
-- cache 不是 freshness proof。共享 query gateway 必须先读取当前 view/status，或复用 owner 已完成的轻量 PostgreSQL gate，再允许命中 Redis；cache miss 后完整 view 必须再次校验。银行明细另以 active category + confirmation 的 set-based month signature 和当前 settings rule version 证明 ordinary write 后的 mismatch，不能依赖 writer 广播 dirty。
-- 如果两个页面是两个独立浏览器 tab，A 的写入不自动刷新 B。B 只在 route 进入/重进、页面查询变化、浏览器手动刷新或明确重试时走同一 freshness contract；focus/visibility/BFCache 不产生业务 I/O。
-- `workbench` 继续保留 active generation 原子发布；访问驱动迁移不把它改成普通 read model，也不允许消费者绕过 active-generation proof。
+### `no_oa_bank_batch`
 
-性能与 fan-out 约束：
+- 只服务 legacy `/api/no-oa-bank-batches/*` 合同，不是当前流水规则批量处理页面的数据源。
+- 只读写 `relation_mode=no_oa_bank_batch` 的 legacy batch/projection；snapshot restore 必须丢弃外来 bank-flow rows。
+- 流水规则批次由 `app.bank_flow_rule_batches`、`app.bank_flow_rule_batch_events` 与 active canonical relation 负责，不能回退到 no-OA read model。
+- no-OA 不属于默认 critical production SLO，但其 queue、freshness 与 worker 合同仍必须完整。
 
-- 目标是普通 command 的 downstream read-model enqueue 数为零；写 API 只承担 canonical commit、审计和必要的同事务业务不变量，不承担所有页面收敛。
-- 页面只 enqueue/query 自己请求的 exact scope；不得以未知影响为由 fallback `all`。需要父聚合时，父 scope 必须是 manifest 已登记的真实 queryable aggregate。
-- 普通写 HTTP、fresh 页面读取、canonical proof、exact-scope enqueue、queue wait、worker、dependent child/parent 与最终 refetch分段计时。稳定 warm path 小于 1 秒、exact-scope stale convergence p99 小于 3 秒和 canonical proof 100ms 保留为产品观测目标，但都不是当前 Phase 27 DONE 硬门。超过目标时报告真实数据量与分段耗时并标记 `performance_follow_up`；不得为数字新增版本表、trigger、缓存层、worker 或第二协调框架，也不得扩大同步等待来掩盖。
-- `explicit-batch` 的 acceptance/canonical commit 与 full-history convergence 分开计时；full-history 使用独立 bounded job timeout，不承诺 3 秒完成。永久 stuck、阻塞普通写/读或无法恢复仍然失败。
-- strict stale consumer 在 required dependency non-fresh 时必须 fail closed；只能 stage 当前请求的 exact scope，不能 stage sibling、回退 live scan、读取旧 snapshot 或恢复宽泛跨页面 barrier。
-- input/output invoice consumer 的完整 proof 必须同时覆盖两部分：按具体 invoice type/scope 批量计算的 canonical 发票库存数量与 `max(updated_at)`，以及只触达这些 canonical invoice IDs 的 relation source proof。只含 bank/OA、另一 invoice type，或只有静态规则版本都不能证明页面 fresh。页面 rows freshness 与全局标题 statistics 分开表达，但 statistics 只能补投同一页面真正 stale 的 month shards。
-- shared `workbench_relation` 的 canonical source proof 必须证明 exact scope 内 eligible active typed membership，而不是只比较关系 `max(updated_at)`。正式 proof 同时包含 active relation count 与稳定 membership digest；relation-only delta 在 overlap cleanup 前必须 set-based 解析银行流水/发票 canonical UUID 与 legacy ID aliases。alias 不完整、scope/schema 不可证明时只能 full rebuild，禁止沿用已发布 scope proof 后局部推进时间戳。
-- OA 待付款的银行/进项库存统计属于页面 projection 业务内容，query-state 必须按请求 scopes 用一次 set-based canonical membership digest 与已发布 coverage proof 比较；不能把旧 projection 自带 digest 当作当前 expected proof，也不能依赖 writer dirty 广播。
-- downstream semantic dependency comparison 必须排除只代表执行批次或全局发布 generation 的易变 counter。特别是 Cost 不得因 Workbench `source_version` 单独变化而把所有历史月份判 stale；schema、builder、scope 级 canonical 更新时间、业务 signature、row count 和规则版本仍必须 fail closed。
+## 已退役页面 read model
 
-每个 vertical slice 的删除顺序固定为：先建立并测试 read-side canonical drift proof；再迁移写返回与当前页面 exact reconcile；最后删除旧 lifecycle target、事务内 downstream fan-out、前端 cross-page barrier、重复 helper 和旧断言。禁止用 compatibility fallback 同时保留两条生产主链路。
+下列页面/API 直接通过页面专属 query service，在 PostgreSQL `REPEATABLE READ READ ONLY` snapshot 中读取 canonical facts 和 active canonical relations：
 
-## 页面 Audit 证明合同
+| 页面 | 已退役 runtime key/链路 |
+| --- | --- |
+| 关联台 | `workbench` active generation、refresh/status/cache/SSE |
+| 银行明细与账户余额 | `bank_detail`、`bank_account_balance` |
+| OA 待付款核对 | `oa_pending_payment` |
+| 流水规则批量处理 | `bank_flow_rule_batch` 页面 projection |
+| 批量账务 | Workbench generation / relation distribution 页面读链 |
+| ETC 票据管理 | 无独立页面 read model；不得借用 Workbench 页面 projection |
+| 税金抵扣 | `tax_offset` |
+| 待找发票 | `pending_invoice`、`search-pending` 页面辅助 projection |
+| 进项发票使用情况 | `input_invoice_usage`、invoice lifecycle 页面链 |
+| 销项发票收款情况 | `output_invoice_collection`、invoice lifecycle 页面链 |
+| 外部往来款 | `turnover_ledger` |
+| 成本统计 | `cost_statistics` |
 
-- 页面 Audit 的 `pass` 不是“SQL 可运行”或“readiness=fresh”的别名。每个登记页面必须声明 independent canonical expected-set、关键展示字段、共享 relation 依赖和外部来源边界。
-- 一次 Audit 的全部 canonical、read model、relation、dirty scope 和 outbox 查询必须运行在同一 PostgreSQL `REPEATABLE READ READ ONLY` transaction snapshot；报告必须返回 `snapshot_consistency=repeatable_read_read_only` 与 `database_snapshot=true`。
-- expected-set 必须做 canonical → projection 缺失检查和 projection → canonical orphan 检查；collapsed/grouped 页面必须展开全部业务成员，不能只检查 primary row。
-- 关键展示字段至少覆盖 identity、scope、状态、金额及该页面决定性业务字段；金额/summary/账户余额等派生值必须从 canonical facts 或已登记 upstream contract 重算，不能只比较两个由同一 payload 复制出的字段。
-- `workbench_relation` 作为共享依赖时，只分发实际由共享 consumer 使用的 relation mode，并按 relation 自身月份与所有 canonical 成员月份生成受影响 scope，验证 eligible `app.workbench_pair_relations == read_model.workbench_relation_groups == read_model.workbench_relation_rows` 的双向 typed edge equality；只验证 group 存在或单向 missing 不足以通过。`turnover_manual_closure` 由 Workbench active generation 与 Turnover Ledger 直接消费 canonical relation，不属于共享 distribution；它仍进入这两个 owner 及 Cost 下游的专属 proof，但不得让 Bank Details、Pending Invoice 或其它非 consumer stale。
-- 只有 `integrity=pass`、`freshness=fresh`、`queue=drained` 且 database snapshot 启用时，才能证明“已登记的 App 内部合同”完整正确。该结论不替代银行流水、OA、`t_payment_simple` 或发票外部来源的独立对账。
-- Audit 永远只读。发现 drift 后必须按 upstream → downstream 依赖顺序，通过 `ReadModelRefreshGateway` / durable queue 分阶段重建并在每阶段 drain 后复审；禁止 Audit handler 或 repair 脚本直接写 read model 表或伪造 fresh readiness。
-- 页面 Audit 的 identity 是 `web/src/app/pageRegistry.tsx` 的 page key；`PAGE_AUDIT_REGISTRY` 必须机械全覆盖。登记不等于可证明：未完成 canonical/consumer proof 的页面必须是 `proof_availability=unavailable` 并 fail closed。页面只通过统一 `page-audit?page=<page_key>` 入口执行有限 proof owner，registry 不拥有 SQL、HTTP 或 refresh。
-- App Health 是 system proof owner，不拥有第二套页面事实或 relation。System Audit 只允许打开一个 outer `REPEATABLE READ READ ONLY` transaction，并把同一 caller-owned `AuditSnapshot` 显式传给其余 16 个 proof owner；禁止在 orchestration 中各自打开事务后拼接 16 个不同时间点的绿色结果。system version set 必须绑定 17 页合同 revision、read model manifest、App Status registry、runtime worker registry 与 snapshot identity。
-- System Audit 的 evidence plane 必须分离：`database_system_snapshot` 承担 App 内部事实证明；进程 request metrics/RabbitMQ transport 只能进入 `runtime_observation` 且声明非数据库快照；银行/OA/发票/ETC control evidence 只能进入 `external_evidence`。外部证明唯一 owner 是版本化 `complete_snapshot/all` manifest + canonical exact comparer；不得用 App 当前行自生成 manifest 后自证，也不得用 count、总额、单个文件 hash 或说明文字分类器替代 item set、关键字段 fingerprint 与 controls 双向 equality。缺失为 `unknown`，最新版本 revoked/expired/mismatch 为 `fail` 且不得回退旧版本；只有四域均 pass 才能声明 `proven_as_of_external_evidence`，且声明绑定外部 observed/source snapshot 与当前 system snapshot。
-- 当前 frontend registry 的 17 个页面全部为 `proof_availability=ready`。这只表示每个页面已有正式 proof owner；每次具体运行仍必须同时满足 integrity/freshness/queue/snapshot gate。新增页面或新增 consumer 字段若未同步扩展 expected-set、关键字段和 relation contract，必须先 fail closed，不能沿用旧 revision 继续绿色。
-- 进项/销项 Audit 的 queue 证明必须在同一数据库 snapshot 查询 `job.outbox_events` 中对应 invoice page、`workbench_relation` 与 `invoice_lifecycle` 当前未完成/失败事件；缺少 outbox 查询不得推导 `queue=drained`。
-- 进项/销项 consumer relation proof 以 `(relation_case_id, typed_member_id, member_type)` 为逻辑 edge：现有 canonical/shared proof 先保证 `app.workbench_pair_relations == workbench_relation groups/rows`，invoice proof 再要求 linked shared group edges 与页面 `oa` / `bankTransactions` / `invoiceRelations` summaries 双向相等。只比 count、只比 primary summary 或忽略 case id 均不足以通过；OA attachment source row 必须通过 canonical invoice source-link identity 归一。
-- OA 待付款与待找发票同样必须登记独立 consumer contract 后才能声称 relation consumer 已证明：OA 待付款以 completed/admitted App OA 为 anchor，比较 linked shared group 的 OA、bank、input-invoice edges 与 `oa_pending_payment_rows.payload` 的三类 summaries；待找发票以 active bank transaction 为 anchor，比较 OA、bank、input/output-invoice edges 与 `pending_invoice_rows.payload` summaries。两者均按 `(relation_case_id, typed_member_id, member_type)` 做跨 scope 逻辑 union 的双向 equality；无 case id fallback、candidate 和 non-linked summary 不属于正式 relation edge。
-- OA 待付款的运行时投影不消费 `workbench_relation` read model：OA projector 通过 canonical relation repository 批量读取 active relation 与成员事实。Workbench confirm/withdraw 不再直接投递 `oa_pending_payment`；OA query 访问发现其 relation source proof 漂移时精确入队。其 freshness vector 不得包含 `workbench_relation_source_versions`，query state 不得 join `read_model.workbench_relation_scopes`。
-- 银行明细 consumer 不持久化完整 OA/invoice member DTO，不能伪称与 shared typed edges 逐成员相等；其登记的精确展示合同是：每个 active bank transaction 的 linked OA/发票存在性标签、唯一 linked case id 和 linked status 必须由 shared relation 重算一致。一个 bank member 出现在多个 linked cases 必须阻断 Audit；candidate 标签不属于“已配对”证明，也不能作为 linked orphan 处理。
-- 银行流水导入是 `read_model_keys=()`、`relation_proof_required=false` 的 direct-canonical workflow 页面。其 expected-set 是全部已登记 bank file object/session/file/batch/row、confirm 后 canonical bank transaction ownership/identity，以及当前 `file_import.confirm` job/outbox gate；bank detail、account balance、Workbench、cost 和 search 仅为写后 impact targets，不得冒充页面 read model 或 relation consumer。App 文件 hash/size 只证明已登记对象，不能替代银行外部页数、行数和 control total 对账。
-- 发票导入同样是 `read_model_keys=()`、`relation_proof_required=false` 的 direct-canonical workflow 页面。expected-set 是 input/output invoice file/session/batch/row 与 terminal row 引用的 canonical invoice；正式归属边由 `manual_invoice_import(invoice_id,batch_id,source_id)` source links 双向枚举，不能只信会被后续 duplicate/status-update 改写的 `source_batch_id`。Workbench、invoice lifecycle、pending/input/output/OA pending/tax/cost/search 仅为写后 targets，由各自页面 Audit 证明。
-- 流水规则批量处理以 `app.bank_flow_rule_batches` 为 canonical batch owner、`read_model.bank_flow_rule_batch_rows.payload` 为页面 member consumer、`app.workbench_pair_relations(relation_mode=bank_flow_rule_batch)` 为 relation fact。三者必须按 batch/case id 和完整排序去重 bank member set 相等；submitted 必须存在 active relation，非 submitted 不得残留 active relation，active relation 也不得缺 canonical batch；draft 成员与任一其它 active relation 的跨 case overlap 也必须阻断 Audit。只比较 row_count、只检查同 case relation 或只在 relation 已存在时比较 member 均不足以通过。
-- 批量账务页面直接消费 filtered `workbench_relation_groups`，不得为 Audit 新建第二 read model。其 consumer proof 必须比较 canonical active case set 与 `special_metadata.source=batch_accounting` 的 linked group logical case set 双向相等，并强制 canonical `relation_mode=batch_accounting`、group payload mode/source/special metadata 一致；完整 member edges 继续由全局 canonical/shared typed-edge equality 证明。
-- 外部往来款的 ledger/flow consumer 必须持久化 `workbench_relations` 结构化 summaries（case/status/mode/source/row_ids/row_types）；仅保存 case-id union 与 member-id union 不能证明 case↔member 映射。Audit 以每个 ledger/flow row 的 canonical bank ids 选择 relevant linked shared groups，并按 `anchor + case + typed member` 做双向 equality；candidate summary 不属于 linked proof。projection evidence shape 变化必须 bump `TURNOVER_LEDGER_SCHEMA_VERSION` 并经 gateway 重建，禁止旧 payload 冒充 proof-ready。
-- 关联台使用 active-generation 原子发布模型，其页面 Audit 必须在同一只读 snapshot 内组合 canonical/shared typed-edge equality、active `workbench_generations`/`workbench_group_rows` 展示归属、relation 成员同组、唯一 visible owner、case/mode/alignment、满足冻结 requirement 的 active relation 进入 `paired`、未满足 requirement 的 active relation 保持同 case 进入 `unpaired`、无 active owner 的 canonical facts 成为 `unpaired` singleton、all/member generation 时序，以及 `workbench`/`workbench_relation` dirty scope 与 outbox。页面统一 API 与运维 CLI 必须调用同一个 repository proof owner；CLI 只允许负责参数、连接、序列化和退出码，不得保留第二套 SQL 或判断逻辑。
-- 关联台的 expected-set 不能只包含 active relation members。页面通过前还必须从 App canonical facts 独立构造 eligible OA、银行流水、普通/附件发票、ETC summary/detail inventory，与每个 active month generation 的 `workbench_rows` 双向相等，并证明 `all` generation 等于 active month rows 的逻辑 union。normal GET 与 generation publish 使用同一个 complete source vector：所有状态的 relation/exception/override、active pending claim、scope 与跨月 relation members 的 OA/银行/发票 `updated_at`、ETC submission/business/invoice/link 更新时间，以及 Workbench 实际消费的银行规则版本和账户映射 fingerprint；无关 settings 字段不得污染 proof。OA pending claim 排除必须允许 active Workbench relation supplement 重新占有同一 canonical bank；active relation supplement 按 canonical row identity 生效，不依赖历史 row-type 别名。OA 附件发票 source binding 不是 active relation，但 parent OA 必须按 `derived_from_oa_id/source_expense_item_id` 去除 `:item:` 后缀后出现在每个附件发票月份 shard，Audit 必须独立构造这些 expected scopes。提交 ETC 隐藏/折叠必须按正式 source contract计算：同一 external batch 一旦存在 active `etc_batch_invoice_links`，link table 是唯一 summary/detail owner；没有 link 时 business owner 优先于 submission fallback，低优先级 source 不得在其它月份重复投影。display-only summary 不得冒充普通 canonical member。关键字段、generation row/group/summary counts、页面 summary counts 和 builder/parser/rules/source dependency versions必须独立重算，不能因 relation display 正常而放行普通对象遗漏。v7 schema、migration `0125` 与正式生产 rehydrate 已完成；页面访问仍不得承担全历史 schema 迁移。
-- 税金抵扣页面不消费或展示 Workbench relation。其 Audit 必须从 `app.invoices` 与 `app.tax_certified_import_records` 独立重算 output/input/certified/certified_matched/certified_outside 五组 item、数字发票号→代码+号码→销方+日期+税额的认证匹配优先级、锁定/默认选择、summary、结构化字段、entry count 与 source versions，并验证 `tax_offset` dirty/outbox 收敛。`relation_proof_required=false` 只能表达“不适用”，不得显示“配对证明一致”。Workbench relation confirm/withdraw/attach-existing 不得为 `tax_offset` 写 dirty/outbox；只有发票 canonical、税务认证及其他实际 projection source 变化才能刷新该 read model。
-- ETC 票据管理是直接 canonical 页面，没有 manifest read model。Audit 必须从 `app.etc_business_batches`、reconciliation task/file、ETC invoice、import/submission batch、`app.etc_batch_invoice_links`、`app.invoices` 和 `job.import_jobs` 在同一 snapshot 重建完整页面集合及内部关系；结构化列与 normalized payload 的重复表示必须相等，单一正式 card/ticket/supplement 边必须满足引用与唯一归属闭包。Workbench/tax/cost/invoice-lifecycle 是写后影响目标而非本页 consumer，不能登记为本页 read model 或用 shared Workbench relation 代替内部关系证明。对象存储字节、外部 ETC 归档和真实 OA 状态属于独立 external gate。
-- ETC 发票导入同样没有 manifest read model，但它消费 ETC 内部 task/requirement/archive/session/batch/invoice typed edges。Audit 必须独立证明 `app.etc_import_sessions` / session files / file objects、preview filter/count/fingerprint、task binding、terminal session→business/import batch→ETC invoice 和 existing canonical bridge，并在同一 snapshot 复用 ETC tickets collector。confirm 只允许 durable enqueue；task `begin_import` 由 worker 幂等执行。下游 Workbench relation 不属于本页 consumer。
-- Settings 是 direct-canonical control-plane 页面，没有 manifest read model，也不消费 pairing relation。Audit 复用生产 `AppSettingsService` 归一化合同证明唯一 `app_settings` row、formal/raw payload、配置 family、项目/权限/账户/布局/OA/tag settings，并只从 `app.oa_applicant_credentials` 读取非敏感 summary 与“是否配置”布尔值；禁止选择/解密/返回 credential secret。`settings_data_reset` background job 的 active 状态阻断 queue/freshness，未确认 attention 状态阻断 integrity。所有下游 read model 只是设置写入影响目标，不能冒充 Settings page consumers。
-`job.outbox_events.available_at` 是 write-operation / read-model refresh enqueue-to-done SLO 的起点；事务内 refresh writer 必须用 statement-time `clock_timestamp()` 写 `available_at`/当前更新时间，不能让 PostgreSQL transaction-level `now()` 把业务写事务耗时污染到 worker drain 指标里。active pending refresh 被同 scope 新 source_version 合并时，outbox 必须重置当前 active event 的 `created_at`/`updated_at`，但 SLO 工具仍以 `available_at -> processed_at` 为准。
+这些页面的 GET 合同：
 
-## Freshness / Version 合同
+- 一个页面 query owner、一个只读 snapshot、一个页面 DTO。
+- rows、summary、statistics、facets、筛选、排序和分页必须来自同一 snapshot。
+- 正式配对关系只读取 `app.workbench_pair_relations.status='active'`，并按页面规则筛选 relation mode。
+- 不返回页面 `read_model_status`、`source_versions`、`refresh_enqueued`、scope、job 或 operation-barrier target。
+- 不因 GET enqueue，不轮询 freshness，不读取 Redis/RabbitMQ，不回退历史 projection 或进程内 snapshot。
+- PostgreSQL runtime 缺少页面 canonical repository 时 fail fast，不能双读或 fallback。
 
-- 每个 read model scope 的 `source_versions` 必须覆盖自己的 projection schema version，以及构建该 payload 依赖的 canonical facts / upstream read model versions。
-- 任何会改变 rows、groups、索引键、跨 scope 成员分发、状态字段、金额口径或 freshness 语义的 projection 行为变更，都必须 bump 自己的 projection schema version；不能只依赖事实表 `updated_at`。
-- Worker 的 `source_versions_unchanged` 跳过优化只有在 own schema version 和全部依赖版本都匹配时才允许触发；缺失 schema/dependency version 时必须 fail closed 为 stale/refreshing 或执行重建。
-- Manifest 声明支持 `force_refresh` 的 worker 必须识别 gateway payload 顶层或 `metadata.force_refresh=true`，绕过 `source_versions_unchanged` 并真实重建已验证的精确 scope；force 不能扩大成 `all`，也不能绕开既有 source-version、持久化和 readiness 边界。
-- 下游 read model 消费 upstream read model 时，必须把 upstream source_versions 写入自身 scope source_versions。upstream schema/version 变化后，下游 scope 必须能被页面 freshness gate 与 Audit 识别。普通合同由消费页先收敛 upstream、再收敛自身；只有 manifest/业务明确的 import/reapply/repair 可使用 upstream-publish fan-out。
-- `input_invoice_usage`、`output_invoice_collection` 的默认 `month=all` 是查询视图，不是 refresh scope。查询 gate 必须先从轻量 scope port 枚举当前有效月份 shard，再逐月比较自身 base versions 与按该月、本方向 canonical invoice IDs 计算的 consumer-semantic active relation proof，只 enqueue mismatch 的具体月份；不得让无关 bank-bank/另一发票方向关系触发刷新。`turnover_manual_closure` 只服务 Workbench active generation、Turnover Ledger 和 Cost，不属于发票付款/收款关系，因此必须同时从这两个页面的 canonical relation proof 与共享 distribution 排除。页面 miss、schema drift、详情 miss、repository unavailable 或统计 stale 不得降级成 `*:all`。标题统计与 rows 共用 dirty scope、已发布 metadata 和 source-version proof；dirty 已完成后的 outbox worker 收尾窗口不得把已发布统计重新判为 refreshing 或触发下一代相同 scope。详情抽屉必须携带当前行的月份；无法证明月份时 fail closed，不做猜测性重建。
-- 上述两个发票页面的 scope port 必须在同一个 PostgreSQL statement snapshot 中同时返回 projection/dirty 状态与同 scope `pending|processing` outbox event。阻塞 scope 有 active event 时页面继续返回 `refreshing`，但该 scope不能再次成为 enqueue candidate；只有无 active event 的阻塞 scope才允许经现有 gateway 精确入队。禁止恢复“先读 dirty、再单独查询 active event、最后按旧状态入队”的 TOCTOU 链路。
-- `oa_pending_payment` 的 OA、银行、发票及多关联详情抽屉同样携带当前 OA 行月份。missing/stale 只允许刷新该具体月份；缺少可验证月份时返回不可用或 not-found，禁止 `oa_pending_payment:all`。`all` 只保留给显式初始化、reapply 和 repair 运维入口。
-- `turnover_ledger` 不再有 relation-origin delta/read-model 合同。页面 API 在单个只读 repeatable-read PostgreSQL snapshot 中直接读取 `app.workbench_pair_relations` 与其它 canonical facts；确认/撤回只提交 canonical relation，页面访问不创建 dirty scope、outbox 或 worker I/O。`turnover_manual_closure` 仍不进入共享 `workbench_relation` rows/groups/source version。
-- ETC existing-canonical link 只有在 metadata/source link 真变更时才产生其明确 import 合同中的精确 scope；幂等重放或未匹配 canonical invoice 必须零 scope。Cost 不由 `workbench_shard_published` 收敛，而在 Cost 访问时同次登记 exact Workbench dependency 与 requested Cost scope，并由 worker dependency gate 顺序收敛。historical repair 只能由显式运维入口触发。
-- `tax_offset` 当前 schema version 为 `2026-07-tax-offset-audit-proof-v3`。本版本使旧 shard 明确 stale，强制通过正式 gateway/worker 重写 item structured columns，并延续认证记录 source version、parent `entry_count` 与 inner tax payload 的一致性合同；不能直接更新 schema/version 或 readiness。
-- `workbench` 当前月度 schema version 为 `2026-07-12-canonical-source-proof-v5`。折叠摘要只负责组级展示；其银行/ETC 明细必须同时物化为 `workbench_group_rows` membership 和 `workbench_rows` 完整 row detail。月 generation 的 `workbench_rows`、`workbench_groups`、`workbench_group_rows` 使用 PostgreSQL `COPY FROM STDIN` 写入，但仍与 snapshot、summary、generation stats 和 active 切换处于同一事务；任一 COPY/校验失败必须整体回滚，building/failed generation 不得可见。ETC 摘要数量/合计从批次拥有的全部 canonical 发票明细重算，批次 scope 不能按成员发票月份截断；同一 external batch 的 link-table owner 会屏蔽 business/submission fallback，business owner 会屏蔽 submission fallback，避免跨月重复摘要。跨月 active relation 的每个 canonical 成员必须出现在所有关联成员所拥有的月份 shard；builder 直接按 relation month 与每类 canonical member month 选择关系，不能依赖该月预先可见 base row 才补载，Audit 的 expected-set 依同一规则双向比较。
-- `all` scope 不允许用一个伪全局版本掩盖月份 shard 差异；合法方式是 fan-out command、月份 shard convergence 或 manifest 明确登记的 parent aggregate。
-- `all_scope_semantics=fan_out_command` 的 command-only parent 不拥有 current-effective readiness；worker 的当前失败由 durable dirty/outbox 事实暴露，历史 parent readiness 只进入 diagnostics。月份 shard 与 manifest 明确登记的 queryable parent/all projection 仍必须拥有 readiness。`bank_account_balance:all` 是真实可查询的 all-only projection，因此登记为 `queryable_all_scope`，不能套用 command-only parent 规则。
-- 页面和导出只能读取 freshness gate 之后的 payload；不得用 live fallback、旧 snapshot、Redis 或前端拼接把 stale read model 伪装成 fresh。
-- `pending_invoice` 的 source summary 与 `filter=all` expected source versions 必须从 `app.bank_transactions` canonical facts 识别范围；不能只从 `read_model.pending_invoice_rows` 反推，否则新导入事实源没有投影行时会漏判 fresh 或显示旧“全部流水”数。父 scope status 必须聚合子月份 dirty scope。每个 filter shard 的 Bank Detail/Workbench relation proof 都按 direction-wide month 输入构建，因此 filtered API expected proof 也必须读取 `filter=all` 的方向月份；filtered aggregate 必须保留当前 direction 仍有 canonical rows 的零行月份 dependency proof，避免 `cash_income` 等合法空结果永久 mismatch，同时排除已不属于当前 direction 月份集合的历史零行 shard。父 scope metadata 只在没有月份 shard 时作为兜底；一旦存在月份 shard，父行不得参与月份 source-version 聚合或污染规则版本。仅这两个嵌套月份版本不一致时，API 比较并只 enqueue 差异月份的 `direction:filter:YYYY-MM` shard；own schema、规则或其它全局版本变化才允许使用 direction/filter 父命令展开全部现有月份。
-- `invoice_lifecycle` 对 `pending_invoice` 的输入必须通过 `InvoiceLifecycleReadModelRepositoryPort` 读取 exact `expense:all:YYYY-MM` / `income:all:YYYY-MM` fresh shards；对 `oa_pending_payment` 必须通过 lifecycle 专用 source I/O 读取 exact `YYYY-MM` scope，并同时取得该 scope 的 fresh gate 与 source versions，不能复用把 freshness 交给页面 service 的 rows-only I/O。任一 dependency dirty/missing 时在 payload I/O 前 defer；fresh 时只读取已发布 payload。禁止重新调用 canonical projection builder、页面 HTTP 或 live fallback 生成第二份结果。
-- `oa_pending_payment` rows 每次请求必须先执行 OA 私有单条 PostgreSQL freshness/version gate；non-fresh 在 ETag、Redis 和 rows SQL 前返回 `202`，匹配 ETag 在 payload I/O 前返回 `304`。非条件 fresh `200` 可复用共享 `ReadModelQueryGateway` 缓存 OA 私有版本化 payload，但 key 必须绑定 tenant、normalized query、API contract revision 与 read-model version token。cache hit 不能为 gate 额外启动 read transaction；cache miss 或 Redis fallback 必须进入 OA 私有 repeatable-read snapshot，重跑 gate并确认 `status=fresh` 且 version token 未变后才能读取/缓存 rows，竞态变化 fail-closed 为 `202`。该 cache 不拥有 writer invalidation，不得修改共享 gateway 顺序或其它页面 key。
-- `oa_pending_payment:all` worker inventory 必须 union tenant OA source watermarks、未删除银行流水月份和未删除进项发票月份。只有覆盖事实而无 OA source 的月份使用 read-model-only deterministic coverage-empty vector；worker不得写 integration watermark。真实 OA watermark 出现必须使该 vector stale；inventory 缩小时只 prune read-model shard。query 热路径不得为该 inventory 或标题统计扫描 canonical facts。
+页面普通写合同：
 
-## 当前验收状态
+- 只提交 canonical fact/relation/state、audit、idempotency 和业务 CAS。
+- 返回业务 identity、canonical version 与信息性 affected scopes；不返回已退休页面 freshness/barrier target。
+- 当前页面成功后只执行一次 normal GET；不主动读取、刷新或等待其它页面。
+- 两个浏览器页面之间以共同 canonical facts 达成一致，不建立跨页面同步协调器。
 
-- 状态：Read Model 模块化 PSCIP-L4 closed；full external PSCIP-L4 / 高性能全域闭环 open。
-- 适用范围：当前登记 15 个 App Status read model，其中 14 个属于当前页面 critical SLO；`no_oa_bank_batch` 是 legacy API/read-model 回归项，不再代表页面 `/bank-flow-rule-batches`。`bank_flow_rule_batch` 已登记为独立可执行 manifest/worker。流水规则批量处理对外使用 `bank_flow_rule_batch` operation target，freshness/readiness/outbox/worker 直接使用 `bank_flow_rule_batch` scope/event；mutation 和 refresh persistence 走 bank-flow 命名 IO，submit/withdraw mutation 不同步读取或写入 Workbench read model snapshot，PostgreSQL 运行时查询 `read_model.bank_flow_rule_batch_rows`。no-OA legacy 继续使用 `read_model.no_oa_bank_batch_rows`，但默认 production HTTP SLO 与 `read_model_slo_smoke --critical-only` 不再采样它。
-- 例外语义：`workbench` 保留 active generation 原子发布；`bank_account_balance` 为 all-only projection；`pending_invoice` 使用 page-first explicit scopes 并拒绝裸 `all`。成本统计不属于 read model。
-- 最终报告：`.planning/refactors/modular-io-boundaries/analysis/read-model-main-final-closure-report-2026-06-28.md`。
-- 生产证据：`.planning/refactors/modular-io-boundaries/analysis/read-model-main-production-evidence-2026-06-28.md`。
-- 生产结果：scope contract `ok=true`、`violation_count=0`、current uncovered outbox failure count `0`；critical SLO grouped run 14/15 pass，唯一 Search miss targeted rerun pass。
-- 2026-07-03 历史复核：当时的 scope-split worker 在生产 release `pscip-l4-workbench-group-row-min-20260703` 上 `/health/ready` ready，required worker missing/stale/mismatch 为 `0/0/0`。该拆分与全局聚合已于 2026-07-16 删除，当前由单一 Workbench lane 处理月份发布和 `all` fan-out。Workbench generation payload owner 已收口：active `workbench:2026-02` snapshot/group/group_rows payload 中 `oa_rows/bank_rows/detail_fields/summary_fields` 放大计数为 `0`，完整行详情只保留在 `workbench_rows.payload`。Workbench warmed targeted 1s direct SLO `10/10` pass，p95/max `890.808ms`；成本统计 `active:2026-02` targeted `5/5` pass，p95/max `938.124ms`。
-- 2026-07-03 后续复核：release `pscip-l4-search-index-noop-20260703` 将 Search index 保存改为 row-level no-op upsert + stale-row delete 后，`search:2026-03` targeted 1s direct SLO `10/10` pass，最大 enqueue-to-fresh `666.731ms`、最大 handler `231.055ms`。release `pscip-l4-invoice-defer-20260703` 将 `invoice_lifecycle` upstream dependency dirty 状态改为 dependency defer 后，grouped run 中 `invoice_lifecycle:2026-02` handler 从约 `1939.958ms` 降到 `300.036ms`，但总耗时仍 `1067.206ms`。本地新增 `0086_runtime_queue_claim_hot_path.sql`，为 runtime worker lane claim 增加 `(event_type,status,priority_rank,available_at,created_at,id)` active-queue 索引，用于收敛 grouped run 的 pickup/claim 长尾；该索引尚未发布到生产复测。
-- 2026-07-06 Search 复核：生产 grouped 1s smoke 再次暴露 `search:2026-03` handler `4461.641ms`。本地修复将 Search refresh 改为先读 `search_index_scope_summary(month)`，source_versions 一致时返回 `source_versions_unchanged`，跳过 Workbench row scan 和 search index 保存；row-level no-op upsert 仍作为有变化时的持久化边界。
-- 残余风险：full critical grouped 1s smoke 仍未闭环，最新生产复测为 `14/16` pass，失败项为 `workbench:2026-02` 总耗时 `1387.983ms` / handler `886.787ms`，以及 `invoice_lifecycle:2026-02` 总耗时 `1067.206ms` / handler `300.036ms`。Search targeted 已闭合，不再是当前 blocker。真实 write-operation confirm/withdraw/no-OA withdraw 当前 release 样本仍未闭合，因此 full external PSCIP-L4 和“所有页面耗时短”仍 open。
+## 非 read-model 后台任务
 
-## Manifest 合同表
+`bank_flow_rule_batch.canonical_draft.refresh` 是领域后台任务：
 
-| Read model | Scope | Projection | `all` 语义 | Partition / Scope 说明 | Worker | Query owner | Repository owner | 权限边界 | 核心测试 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `workbench` | `workbench` | `active_generation_scoped_publish` | `query_composed_active_month_shards` | active generation + month shard；特殊原子发布模型。每个 generation 只输出 `paired` / `unpaired`，membership 只由 canonical facts、active formal relation 和冻结 requirement 决定。`workbench` primary 处理月份发布与显式 `all` fan-out command，`workbench-secondary` 只竞争月份 shard；两者共用同一 durable queue、handler 与 active-generation 原子发布，不存在第二 read model 或第二事实源。普通写路径不发布任何 shard，正常 GET 检测 canonical expected/active generation mismatch 后才投递当前精确月份。关联台投影直接读取 canonical relation，不消费 `workbench_relation` distribution；combined initial 不得阻塞或刷新该 consumer projection。month 只比较当前 Workbench scope；`all` 以一次月份枚举、canonical bulk proof 和 active-generation bulk proof计算真正 mismatch 的 `refresh_scope_keys`，只 enqueue 这些 Workbench 月份，不读取 relation rows、不持久化 relation `all` scope，也不得因普通 relation 变化退化成 `workbench:all`。只有 active generation 全部缺失或 exact recovery scope 不可得时，既有 `all` fan-out command 才承担冷启动/显式恢复。non-fresh gate 直接返回轻量状态契约，不读取旧 generation 的完整首屏，收敛后只读取一次 fresh 首屏；后续 generation-bound `/groups` 不重复全页 proof。`month=all` 查询组合 active 月度 generation，并使用与 generation-set digest 一致的原子统计；统计/version drift 必须 fail-closed/refreshing，不回退历史 materialized all 或 live builder。Workbench publish 不得 fan-out Cost 或其它页面 | `workbench` | `WorkbenchQueryFacade` | `PostgresReadModelRepository.workbench` | `workbench_api_session` | `tests/test_workbench_sql_runtime.py`、`tests/test_workbench_query_facade.py`、`tests/test_workbench_relation_grouping.py`、`tests/test_runtime_worker_registry.py` |
-| `workbench_relation` | `workbench_relation` | `scoped_incremental_distribution` | `fan_out_command` | 跨月 eligible relation 必须在每个受影响 scope 写入所有成员 row 索引，`rows` 唯一键为 `(tenant_id, scope_key, row_id)`；`turnover_manual_closure` 是 Workbench/Turnover 专属 canonical relation，不进入共享 distribution。confirm/withdraw/cancel/split/exception/ignore/cash 的 UoW 只写 canonical facts/history/idempotency/audit，返回空 freshness/barrier targets。`WorkbenchRelationReadFacade` 在访问时比较 eligible canonical source version 与 scope proof，仅对当前精确 scope 入队；发现旧 scope 含已排除 relation mode 时把该 exact scope 判 stale 并由正式 worker 自愈，不做全局 migration/fan-out。多 scope 页面使用 `workbench_relation_scope_summaries` + bulk expected versions 的固定查询数 proof，`all` 只作访问时 concrete-month 枚举/fan-out command，不创建可查询 `all` projection。已入队的 exact delta 可按 affected rows 局部投影；scope/schema/metadata 不安全时显式 full rebuild。repository hidden fan-out、UoW target planner 和 ordinary write `all` fallback 禁止回归 | `workbench-relation` | `WorkbenchRelationReadFacade` | `WorkbenchRelationReadModelRepositoryPort` | `downstream_page_api_session` | `tests/test_workbench_relation_read_facade.py`、`tests/test_workbench_relation_sql_projection.py`、`tests/test_workbench_relation_read_model_refresh.py`、`tests/test_workbench_uow_contract.py` |
-| `bank_detail` | `bank_detail` | `partitioned_scoped_incremental` | `fan_out_command` | 银行明细按页面月份 scope 刷新；导入、标签规则、关联等普通写不投递 refresh。页面进入/重新可见后 normal GET 用 set-based SQL 比较 canonical bank 本月 row count、`month ± 2 days` 自动分类 context count、`max(updated_at)`、canonical tag signature 与 active eligible relation source summary；`turnover_manual_closure` 不生成银行页面关系标签，因此从该 summary 排除。该 canonical relation summary 已是 `bank_detail` 自身的完整 source proof，页面不得再等待或入队共享 `workbench_relation` distribution。页面 rows 与全期间 statistics 都只对 mismatch exact months 批量入队；statistics repository 必须显式返回精确 refresh scopes，禁止一个月 proof 变化扩大为全部月份。migration `0124` 仅为 row_count 已相等的旧 scope 建立 bank proof baseline，不写 queue；row_count mismatch 继续由访问重建，避免 proof 上线本身造成全历史 fan-out。页面在自身 proof fresh 前不得把旧 payload/cache 标成 fresh；hidden 页面零 I/O，银行 worker 的 canonical relation fast path不改为等待 shared distribution | `bank-detail` | `BankDetailsApplicationService` | `BankDetailReadModelRepositoryPort` | `bank_details_api_session` | `tests/test_bank_details_sql_runtime.py`、`tests/test_bank_detail_freshness_postgres_integration.py`、`web/src/test/BankDetailsPage.test.tsx` |
-| `bank_account_balance` | `bank_account_balance` | `partitioned_scoped_incremental` | `queryable_all_scope` | 当前为 global all scope only；`all` 是银行明细页实际查询投影而非 fan-out command。普通写不 enqueue，页面访问发现 source mismatch 时才刷新该唯一 scope，并保留 current-effective readiness | `bank-account-balance` | `BankDetailsApplicationService` | `BankAccountBalanceReadModelRepositoryPort` | `bank_details_api_session` | `tests/test_bank_account_balance_read_model.py` |
-| `bank_flow_rule_batch` | `bank_flow_rule_batch` | `scoped_incremental` | `fan_out_command` | 按 month scope 刷新；未提交批次只接纳 active 且 OA/发票双 false 的标签，submitted/withdrawn 按冻结历史保留。列表 read port 以固定查询数返回有界分页、完整 summary 和 source/readiness proof；worker 与 API gate 共用 bank-detail + canonical relation bundle + 稳定 eligibility version。tag-rules 保存、submit/withdraw/reset 只写 settings/batch/relation/audit 与可比较 version，不写 dirty/outbox，不返回 barrier targets，不 fallback `all`。当前可见页面在正常 GET 中检测 mismatch 并只 enqueue 当前 scope；隐藏页延迟到 visible。线上 mutation 只能用 batch delta writer 更新显式 changed batch IDs，禁止 scope replace、no-OA fallback、relation repository fan-out 与前端 operation barrier | `bank-flow-rule-batch` | `BankFlowRuleBatchApplicationService` | `BankFlowRuleBatchReadModelRepositoryPort` | `bank_flow_rule_batch_api_session` | `tests/test_bank_flow_rule_batch_backend_boundary.py`、`tests/test_bank_flow_rule_batch_application_service.py`、`web/src/test/BankFlowRuleBatchPage.test.tsx` |
-| `pending_invoice` | `pending_invoice` | `scoped_incremental` | `forbidden_bare_all` | `direction:filter_group[:YYYY-MM]` 页面 scope；父 scope 查询必须聚合子月份 dirty status；source summary 与 `filter=all` source-version 依赖月份来自 `app.bank_transactions` canonical facts。expense/income expected versions 只包含各自规则 owner version。规则、attach-existing 与 income-status 普通命令只写 canonical facts/version/audit并返回 scope hints，零 downstream job；当前页重跑 GET。待找发票 relation rows/source proof 只消费共享 distribution eligible modes，排除 Turnover 专属 `turnover_manual_closure`。访问发现仅 Bank Detail/Workbench relation 的嵌套月份 proof 不一致时只 enqueue 差异月份 shard，不得先投父 scope再展开所有月份；statistics 与 rows stale scopes 在同一请求先求并集、去重，再用一个 exact-scope atomic batch ensure，禁止逐月事务/SQL N+1；statistics 刷新在途时继续携带已发布 child scope proof，禁止轮询把暂缺 proof 放大成 expense/income 父 scope fan-out；own schema/规则全局变化才允许父命令 | `pending-invoice`；辅助 `search-pending` | `PendingInvoiceReadModelService` | `PendingInvoiceReadModelRepositoryPort` | `pending_invoices_api_session` | `tests/test_pending_invoice_service.py`、`tests/test_search_pending_sql_runtime.py`、`tests/test_import_processing_service.py` |
-| `search` | `search` | `partitioned_scoped_index` | `fan_out_command` | search source + month scope；普通 import/settings/relation 写只改变 canonical/source version，不投递 search refresh。Search 访问比较 expected/actual versions，只对 non-fresh 当前月份经 gateway 入队；显式 `all` 仅用于 maintenance。worker 先用 `search_index_scope_summary(month)` 比较 expected source_versions，未变化时返回 `source_versions_unchanged` 并跳过 Workbench row scan/save；有变化时保存仍必须使用 row-level no-op upsert + stale-row delete，禁止恢复整月 delete/rewrite | `search`；辅助 `search-pending`、`search-secondary`、`search-tertiary` | Search read API | `SearchReadModelRepositoryPort` | `search_api_session` | `tests/test_search_pending_sql_runtime.py`、`tests/test_search_api.py` |
-| `invoice_lifecycle` | `invoice_lifecycle` | `scoped_incremental` | `fan_out_command` | 发票生命周期 own schema version 为 `2`，按受影响月份 scope 刷新；manifest 明确登记只读依赖 `pending_invoice`、`input_invoice_usage`、`output_invoice_collection`、`oa_pending_payment`、`workbench_relation`，并由无环测试锁定，不新增第二编排器。被访问的 `InvoiceLifecycleReadFacade` 先跳过已 fresh 依赖、一次性经 gateway 投递其余 exact-month 依赖，再投 lifecycle；pending 只允许同月 expense/income 两个合法方向 scope，未知/`all` 依赖不扩散。upstream 任一 non-fresh 时 worker fail closed/defer，不能 live fallback、伪空或图外递归 fan-out。pending-invoice exact 月方向 scope 不存在时，只有同月 Bank Detail scope 为 fresh 且对应方向结构化行为零，repository 才能输出带 Bank Detail source proof 的 fresh 空集。OA 输入使用 lifecycle 专用 exact-month source I/O；旧 event 的 source version CAS 不能覆盖新版本 | `invoice-lifecycle`；辅助 `invoice-lifecycle-secondary` | `InvoiceLifecycleReadFacade` | `InvoiceLifecycleReadModelRepositoryPort` | `invoice_lifecycle_page_api_session` | `tests/test_invoice_lifecycle_read_facade.py`、`tests/test_invoice_lifecycle_read_model_refresh.py`、`tests/test_invoice_lifecycle_sql_projection.py`、`tests/test_invoice_lifecycle_postgres_integration.py`、`tests/test_read_model_manifest.py` |
-| `input_invoice_usage` | `input_invoice_usage` | `scoped_incremental` | `fan_out_command` | 进项发票使用情况按访问 scope 刷新；payment rules 与 OA reverse batch/evidence/status 普通写只更新 owner facts/version/audit，零 downstream job。当前 active 页保存后正常 GET，batch/relation generation mismatch 由 fresh gate enqueue 当前 scope；隐藏/未访问页不执行 I/O | `invoice-usage-collection` | `InputInvoiceUsageReadModelService` | `InputInvoiceUsageReadModelRepositoryPort` | `input_invoice_usage_api_session` | `tests/test_input_invoice_usage_api.py`、`tests/test_input_invoice_usage_oa_reverse_service.py` |
-| `output_invoice_collection` | `output_invoice_collection` | `scoped_incremental` | `fan_out_command` | 销项发票收款情况按访问 scope 刷新；linked 多销项发票 relation 投影为单条净额收款行，负数/红字成员保留在 relation summaries。status/reminder/red relation/receipt create/void/reissue 与 receipt settings 普通写只提交 owner facts/version/audit，返回 hints + 空 targets，零 downstream job；当前 active 页正常 GET 收敛 | `invoice-usage-collection` | `OutputInvoiceCollectionReadApplicationService` | `OutputInvoiceCollectionReadModelRepositoryPort` | `output_invoice_collection_api_session` | `tests/test_output_invoice_collection_api.py`、`tests/test_output_invoice_collection_lifecycle.py`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx` |
-| `oa_pending_payment` | `oa_pending_payment` | `scoped_incremental_pg_only` | `fan_out_command` | OA integration sync 以每 form/scope 单次读取的 dual-view batch 作为输入：通用 projection 遵守配置，OA admission 固定接纳 completed + in-progress，任一读取失败整轮不提交；in-progress 不解析附件/OCR。权威 snapshot 成功后在同一 PostgreSQL 事务只提交 completed OA、admission、payment-status snapshot 与 source watermark；相同 snapshot 不更新时间戳、不 replace 子事实，任何 snapshot 变化都不产生页面 dirty/outbox。sync service 不持有 search/matching/queue/shared lifecycle fan-out。页面 paid writeback、link-bank 与 relation 命令同样只提交 owner facts/version/audit，响应只带 scope hints；当前 active 页重跑 GET，non-fresh 才按访问边界入队。`all` 仅用于初始化/显式修复。专属 projector/worker 只读 PostgreSQL，按月份批量构建并以 event source version + CAS 原子发布；月份 shard 只包含同月 OA 主行，跨月 relation 不得复制其它月份主行。query service 比较 dirty/outbox、scope 与动态 source vector；non-fresh 返回不含旧 rows 的 `202`。唯一 rows API set-based 返回 rows/summary/filterConfig/filterOptions 和 ETag；freshness gate 后只用一个有界 data statement返回 summary/facets + 当前页，默认 `all` 查询组合月份 shards；跨 scope 重复 `row_id` 由 fresh gate 与 Page Audit fail closed，禁止列表去重隐藏 projection 错误 | `oa-pending-payment` | `OaPendingPaymentReadModelService` | `OaPendingPaymentReadModelRepositoryPort` | `oa_pending_payment_api_session` | `tests/test_oa_pending_payment_api.py`、`tests/test_oa_pending_payment_read_model_query.py`、`tests/test_oa_pending_payment_read_model_refresh.py`、`tests/test_oa_pending_payment_source_snapshot_repository.py`、`tests/test_oa_pending_payment_postgres_integration.py`、`tests/test_platform_runtime_boundary_guards.py` |
-| `cost_statistics` | direct canonical read | none | none | 单次 repeatable-read snapshot 读取 canonical facts；无 scope/version/worker/queue | none | `CostStatisticsQueryService` | `PostgresCostStatisticsCanonicalRepository` | `cost_statistics_api_session` | `tests/test_cost_statistics_canonical_repository.py`、`tests/test_cost_statistics_api.py` |
-| `tax_offset` | `tax_offset` | `partitioned_scoped_incremental` | `fan_out_command` | 税金抵扣按月份 shard 刷新；发票导入、认证和计划保存只提交 facts/version/audit 与 scope hints，普通 targets 为空，不展开历史月份。页面访问比较全局 invoice/certified expected versions，只 enqueue 当前月份。显式 `all` 才按 canonical invoice/certified 月份与现存 projection 月份并集 fan-out，并透传 tenant/priority/trace/`force_refresh`。Projection 只读取 active `app.invoices` / `app.tax_certified_import_records`，不读取 Workbench relation；Workbench relation 写入不得污染本 scope | `tax-offset`；辅助 `cost-tax` | `TaxOffsetQueryService` | `TaxOffsetReadModelRepositoryPort` | `tax_offset_api_session` | `tests/test_tax_offset_sql_runtime.py`、`tests/test_tax_offset_api.py`、`web/src/test/TaxOffsetPage.test.tsx` |
-| `no_oa_bank_batch` | `no_oa_bank_batch` | `scoped_incremental` | `fan_out_command` | legacy 免 OA API/read-model 回归项，非当前页面 critical SLO；按批次/关联影响 scope 刷新；查询缺 SQL read model repository 时 fail-closed，不回退旧 snapshot fresh；共享迁移底座内的 month/all scope save 只能替换 `relation_mode=no_oa_bank_batch` rows，必须保留同 scope bank-flow rows，持久化按 scope 批量 values upsert | `no-oa-bank-batch` | `NoOaBankBatchApplicationService` | `NoOaBankBatchReadModelRepositoryPort` | `no_oa_bank_batch_api_session` | `tests/test_no_oa_bank_batch_application_service.py`、`tests/test_no_oa_bank_batch_service.py`、`tests/test_no_oa_bank_batch_read_model_refresh.py` |
+- owner 为 `BankFlowRuleBatchCanonicalDraftOwner`。
+- 幂等写入 `app.bank_flow_rule_batches` / `app.bank_flow_rule_batch_events` canonical drafts。
+- 不登记 read-model manifest、scope policy、App Status readiness、dirty scope 或 RabbitMQ dispatcher。
+- 不写页面 projection，也不能复用 no-OA refresh service。
 
-## 下游页面特化读 I/O
+OA sync、import processing 与 Workbench matching 也属于 canonical integration/domain jobs；它们不是页面 read model。
 
-- `turnover-ledger` 明确不属于本清单：自 2026-07-26 起，页面在单个只读 repeatable-read PostgreSQL snapshot 中直接组合 canonical bank/category/settings/workbench-relation/turnover/extras facts，不再登记 read model、scope policy、worker、readiness 或 refresh event。完整边界见 `docs/modules/turnover-ledger/boundary-io.md`。
-- `workbench_relation` 的通用查询 owner 仍是 `WorkbenchRelationReadFacade`。下游页面只能通过 facade/repository port 读取 freshness-gated payload，不能直接读 `read_model.workbench_relation_*` 表。
-- `batch-accounting` 的未提交首屏只允许调用 `get_batch_accounting_by_row_ids(..., submitted_year=year)`；同一个 batch-only repository bundle 必须在一致快照中返回候选 relation rows、候选/年度 scopes 的 bulk proof、referenced groups 和年份 `submitted_count`。禁止恢复独立年度 count port、调用通用逐 scope `get_by_row_ids`、扫描完整 relation DTO 或把 non-fresh 伪装为空/fresh。
-- `batch-accounting` 的已提交 bucket 必须调用 `list_batch_accounting_relations_by_year(year)` 一次读取年份内 batch-accounting relation groups，并以同一次 bulk proof 组装结果，不得在读取 groups 后重复 proof。relation detail 继续走 batch 专用 row reader。禁止按 12 个月循环 list，也禁止把该路径复用于未提交首屏 summary。
+## Queue、freshness 与 transport
+
+- `job.outbox_events` 与 `job.read_model_dirty_scopes` 是三个保留 read model 的唯一 refresh 状态事实源。
+- 非事务 refresh 必须经 `ReadModelRefreshGateway` 和 scope policy normalize、validate、dedupe。
+- 业务 service 不直接 SQL 写 dirty scope/outbox。
+- Redis 只能缓存 freshness gate 已证明的 payload。
+- RabbitMQ 只能作为 optional transport/wakeup；consumer 必须回 PostgreSQL claim/ack。
+- 普通 canonical write 不 fan-out 页面 refresh。只有明确登记的 maintenance/reapply/repair 可以按自身事务合同入队。
+
+## 旧链删除与回滚
+
+- 已退役页面的 service/repository/projector/producer/worker handler、manifest/scope/App Status/RabbitMQ/deploy 注册、前端 polling/status DTO 和专属运维工具必须保持删除。
+- migration `0127_direct_canonical_page_runtime_retirement.sql` 是无数据变更的退休标记。历史 outbox、dirty scope、readiness 与 projection 表暂不 drop，保留上一版本回滚能力。
+- deploy preflight 必须先停止并 disable 当前 registry 未登记的旧 worker，再确认退休 event/dirty scope 没有 `processing`。
+- 历史表存在不代表可读；生产代码、测试夹具和文档不得把它们重新当作当前事实源。
+- 物理 drop 必须另立可回滚 migration，并在生产确认无 reader/writer/backlog 后审批执行。
 
 ## 变更规则
 
-- 新增 read model 时，必须先定义 manifest entry：scope、event type、worker、projection strategy、`all` 语义、query owner、repository owner、permission boundary 和测试入口。
-- 修改 projection strategy 或 `all` 语义时，必须同步更新 scope policy、dirty scope 写入路径、worker registry、freshness/status 查询、API contract tests、worker/read model tests 和本文档。
-- 修改 projection 行为或 upstream dependency 合同时，必须 bump 对应 projection schema version，并新增回归测试证明旧 source_versions 不会触发 `source_versions_unchanged` 跳过。
-- 删除旧 read model 代码前，必须证明没有页面、API、worker、测试或生产脚本继续读取旧路径。
-- `workbench` 的 active generation 原子发布模型是明确例外，不允许机械迁移成普通 gateway 模型。
-- `workbench` active generation-set digest 必须按 `(scope_key, generation_id)` 规范排序且与 SQL 返回顺序无关；默认 combined initial 的 Redis/SQL payload version 必须等于同次查询 freshness gate 的 active generation-set version。version drift 必须 fail closed 为 `202 refreshing` 并使用现有 refresh gateway，禁止旧首屏伪装 fresh 或继续写入 cache。
-- Workbench confirm/withdraw preview 使用 preview-only bounded selection：最多 20 个 selected row ids，以既有 `(generation_id, scope_key, row_id)` 索引绑定 expected active generation/generation-set，并只补充最多 100 条必要 OA attachment context；读取前后 status/version 不一致、missing、duplicate 或跨 generation 时 fail closed。preview DTO 只用于 selection group、amount 与 alias 投影，不能进入正式 relation command/UoW；正式 confirm/withdraw 继续在事务内重读 canonical facts、relation version 与 idempotency。
-- 所有非事务 refresh 请求必须通过 `ReadModelRefreshGateway` / scope policy registry normalize、validate、dedupe；access-triggered 单 scope 与多 scope ensure 统一进入 `RuntimeQueueRepository.enqueue_read_model_refreshes_if_inactive(...)`，显式 mutation/repair/reapply/force 继续使用其版本语义对应的正式 repository 入口。
-- 只有已登记的 maintenance/reapply/repair 事务 writer 可以在同一业务事务内写 dirty scope/outbox，且必须承担等价 scope contract 并有测试覆盖。普通 import confirm 与 OA authoritative snapshot 不属于该例外。
-- Workbench confirm/withdraw/cancel/split/exception/ignore/cash 的 `WorkbenchWriteUnitOfWork` 只写 canonical facts/history/idempotency/audit。`PostgresWorkbenchRelationRepository(transaction, enqueue_refreshes=False)` 不得恢复 hidden fan-out；`refresh_metadata.downstream_scope_types`、UoW target planner 与 `RuntimeQueueReadModelRefreshWriter` 不得重新接入普通关系写链。
+- 新增 read model 必须先证明 direct canonical query 无法满足当前需求，并同时更新 manifest、scope policy、App Status、worker registry、env/deploy、API contract、tests 与本文档。
+- 修改保留 read model 的 scope/projection/freshness 必须同步更新 gateway、queue、worker、repository、permission owner 和回归测试。
+- 删除或改名公共符号前必须 whole-repo 扫描 API、service、repository、worker、deploy、tests 和 docs。
+- 禁止通过 compatibility branch、隐藏 fallback、双读、shadow projection 或旧 DTO 延长已退役链路。
 
-## 验收要求
+## 验收
 
-Read model 重构或修复完成前，至少要完成：
-
-- manifest 与 registry 一致。
-- 普通写操作只提供可比较 canonical version/信息性 affected scopes，页面访问发现 mismatch 后才把当前精确 scope 写入 dirty/outbox；显式 import/reapply/repair 按自身合同直接入队。
-- worker 能消费 event 并把目标 scope 投影为 fresh。
-- API 查询能暴露 fresh/stale/refreshing 状态，不伪装 fresh。
-- 页面能在写后读取到 fresh 数据，或明确显示刷新中/不可用状态。
-- 相关旧链路没有继续被调用；旧代码若保留，必须有明确兼容理由和删除条件。
-- 测试覆盖 read model/cache/worker、API contract、service orchestration 和受影响业务回归。
+- 四个 registry 集合精确为 `workbench_relation`、`search`、`no_oa_bank_batch`。
+- 生产代码中不存在其它 `*.read_model.refresh` 页面事件或 retired projection SQL。
+- retired worker instance/env 不在当前部署 manifest；RabbitMQ dispatcher 只发布登记事件。
+- 十个目标页面及成本统计、外部往来页的 direct-read API/frontend/权限/写后 GET 回归通过。
+- 三个保留 read model 的 freshness、queue、worker、App Status 与 scope tests 通过。
+- 全量 backend、frontend、build、Browser E2E、lint、docs 和 `git diff --check` 通过后，才允许合并和部署。

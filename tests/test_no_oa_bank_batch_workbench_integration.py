@@ -1,10 +1,11 @@
 import json
+from types import SimpleNamespace
 import unittest
 
 from tests.app_test_support import (
     build_grouped_workbench_projection as _build_grouped_workbench_projection,
     build_local_state_application as build_application,
-    install_fresh_workbench_write_gate,
+    install_local_workbench_canonical_preview_repository,
 )
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.no_oa_bank_batch_service import NoOaBankBatchService
@@ -204,12 +205,10 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             actor="tester",
         )
         self._enable_no_oa_tags(app, sorted(set(category_codes)))
-        for scope_key in list(app._workbench_read_model_service.snapshot().get("read_models", {})):
-            app._workbench_read_model_service.delete_read_model(str(scope_key))
         return app, row_ids
 
     def _post_confirm_link(self, app: object, row_ids: list[str]):
-        read_model_version = install_fresh_workbench_write_gate(app)
+        install_local_workbench_canonical_preview_repository(app)
         return app.handle_request(
             "POST",
             "/api/workbench/actions/confirm-link",
@@ -219,7 +218,6 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
                     "row_ids": row_ids,
                     "case_id": "CASE-WORKBENCH-INTERNAL-TRANSFER",
                     "note": "关联台确认内部往来",
-                    "expected_read_model_version": read_model_version,
                 }
             ),
         )
@@ -332,6 +330,9 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             requires_oa=False,
             requires_invoice=False,
         )
+        app._bank_flow_rule_batch_canonical_query_repository = SimpleNamespace(
+            read_page=lambda *_args, **_kwargs: {}
+        )
         application_service = app._bank_flow_rule_batch_application_service()
         application_service.refresh_batches(relation_mode="bank_flow_rule_batch")
         draft = next(
@@ -360,10 +361,8 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         self.assertEqual(relation["display_tags"], ["流水规则", "内部往来款"])
         self.assertEqual(relation["special_metadata"]["display_tags"], ["流水规则", "内部往来款"])
         self.assertNotIn("免OA", relation["display_tags"])
-        self.assertEqual(
-            submit_payload["operation_barrier_targets"],
-            [],
-        )
+        self.assertNotIn("operation_barrier_targets", submit_payload)
+        self.assertNotIn("read_model_scope_keys", submit_payload)
 
         workbench_payload = build_grouped_workbench_projection(app, "all")
         paired_group = next(

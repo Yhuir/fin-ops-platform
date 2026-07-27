@@ -1,31 +1,22 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from http import HTTPStatus
 import unittest
 
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord
-from fin_ops_platform.services.oa_pending_payment_read_model_refresh import (
-    OaPendingPaymentReadModelRefreshService,
-)
-from fin_ops_platform.services.oa_pending_payment_read_model_repository import (
-    OaPendingPaymentReadModelRepositoryPort,
-)
-from fin_ops_platform.services.oa_pending_payment_read_model_service import OaPendingPaymentReadModelService
-from fin_ops_platform.services.oa_pending_payment_sql_projection import (
-    OaPendingPaymentSqlProjectionBuilder,
-    oa_pending_payment_base_source_versions,
-)
+from fin_ops_platform.services.oa_pending_payment_query_service import OaPendingPaymentQueryService
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_relation import (
     PostgresOaPendingPaymentRelationRepository,
+)
+from fin_ops_platform.services.postgres_repositories.oa_pending_payment_query import (
+    PostgresOaPendingPaymentQueryRepository,
 )
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
     PostgresOaPendingPaymentSourceSnapshotRepository,
     oa_pending_payment_workbench_relation_versions_by_scope,
 )
-from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 from tests.postgres_test_utils import (
     apply_test_migrations,
@@ -43,8 +34,126 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
             PostgresSettings(database_url=self.database_url, pool_enabled=False)
         )
         self.queue = RuntimeQueueRepository(self.connection)
-        self.read_repository = PostgresReadModelRepository(self.connection)
         self.pending_relations = PostgresOaPendingPaymentRelationRepository(self.connection)
+
+    def test_canonical_page_query_observes_active_relation_changes_without_read_model_refresh(self) -> None:
+        source_snapshot = PostgresOaPendingPaymentSourceSnapshotRepository(
+            self.connection,
+            pending_relation_repository=self.pending_relations,
+        )
+        source_snapshot.commit_authoritative_snapshot(
+            scope_key="2026-05",
+            tenant_id="default",
+            projection_records=[_record()],
+            admission_records=[_record()],
+            payment_statuses={
+                "flow-integration-1": OAPaymentStatusRecord(
+                    flow_id="flow-integration-1",
+                    pay_status=0,
+                )
+            },
+        )
+        self.connection.execute(
+            """
+            insert into app.bank_transactions(
+                legacy_mongo_id, account_no, txn_direction, counterparty_name_raw,
+                amount, signed_amount, txn_date, txn_month, status, raw_payload
+            )
+            values (
+                'bank-direct-query', '622200001234', 'outflow', '集成测试供应商',
+                100, -100, '2026-05-20', '2026-05-01', 'pending',
+                '{"normalized_payload":{"bank_name":"建设银行","account_last4":"1234"}}'::jsonb
+            )
+            """
+        )
+        self.connection.execute(
+            """
+            insert into app.invoices(
+                legacy_mongo_id, invoice_type, invoice_no, invoice_date, invoice_month,
+                seller_name, amount, signed_amount, total_with_tax, status, raw_payload
+            )
+            values (
+                'invoice-direct-query', 'input', 'INV-DIRECT-QUERY',
+                '2026-05-18', '2026-05-01', '集成测试供应商',
+                100, 100, 100, 'pending', '{}'::jsonb
+            )
+            """
+        )
+        self.connection.execute(
+            """
+            insert into app.workbench_pair_relations(
+                case_id, relation_mode, status, version, month_scope,
+                row_ids, row_types, raw_payload
+            )
+            values (
+                'oa-direct-query', 'manual_confirmed', 'active', 1, '2026-05-01',
+                array['oa-integration-1', 'bank-direct-query', 'invoice-direct-query'],
+                array['oa', 'bank', 'invoice'],
+                '{
+                    "normalized_payload": {
+                        "case_id": "oa-direct-query",
+                        "status": "active",
+                        "relation_mode": "manual_confirmed",
+                        "version": 1,
+                        "row_ids": [
+                            "oa-integration-1",
+                            "bank-direct-query",
+                            "invoice-direct-query"
+                        ],
+                        "row_types": ["oa", "bank", "invoice"]
+                    }
+                }'::jsonb
+            )
+            """
+        )
+        service = OaPendingPaymentQueryService(
+            repository=PostgresOaPendingPaymentQueryRepository(self.connection)
+        )
+        query = {"month": ["2026-05"], "page": ["1"], "page_size": ["20"]}
+
+        active = service.rows(query, tenant_id="default")
+        active_candidates = service.bank_transaction_candidates(
+            {
+                "relation_status": ["matched"],
+                "page": ["1"],
+                "page_size": ["20"],
+            },
+            tenant_id="default",
+        )
+
+        self.assertEqual(active["pagination"]["total"], 1)
+        self.assertEqual(active["rows"][0]["bankTransaction"]["relationCount"], 1)
+        self.assertEqual(active["rows"][0]["invoice"]["relationCount"], 1)
+        self.assertEqual([row["id"] for row in active_candidates["rows"]], ["bank-direct-query"])
+        self.assertNotIn("read_model_status", active)
+        self.assertEqual(
+            self.connection.fetch_one(
+                "select count(*)::integer as count from job.outbox_events"
+            )["count"],
+            0,
+        )
+
+        self.connection.execute(
+            """
+            update app.workbench_pair_relations
+            set status = 'withdrawn'
+            where case_id = 'oa-direct-query'
+            """
+        )
+        withdrawn = service.rows(query, tenant_id="default")
+        withdrawn_candidates = service.bank_transaction_candidates(
+            {
+                "relation_status": ["unmatched"],
+                "page": ["1"],
+                "page_size": ["20"],
+            },
+            tenant_id="default",
+        )
+
+        self.assertEqual(withdrawn["pagination"]["total"], 1)
+        self.assertEqual(withdrawn["rows"][0]["bankTransaction"]["relationCount"], 0)
+        self.assertEqual(withdrawn["rows"][0]["invoice"]["relationCount"], 0)
+        self.assertEqual([row["id"] for row in withdrawn_candidates["rows"]], ["bank-direct-query"])
 
     def test_identical_canonical_commit_keeps_projection_and_status_rows_unchanged(self) -> None:
         source_snapshot = PostgresOaPendingPaymentSourceSnapshotRepository(
@@ -179,145 +288,6 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
             after["oa_pending_payment_workbench_pair_relations_membership_digest"],
         )
 
-    def test_structured_withdrawal_with_stale_active_raw_payload_enqueues_and_rebuilds_without_relation(self) -> None:
-        source_snapshot = PostgresOaPendingPaymentSourceSnapshotRepository(
-            self.connection,
-            pending_relation_repository=self.pending_relations,
-        )
-        source_snapshot.commit_authoritative_snapshot(
-            scope_key="2026-05",
-            tenant_id="default",
-            projection_records=[_record()],
-            admission_records=[_record()],
-            payment_statuses={
-                "flow-integration-1": OAPaymentStatusRecord(
-                    flow_id="flow-integration-1",
-                    pay_status=0,
-                )
-            },
-        )
-        self.connection.execute(
-            """
-            insert into app.bank_transactions(
-                legacy_mongo_id, account_no, txn_direction, counterparty_name_raw,
-                amount, signed_amount, txn_date, txn_month, status, raw_payload
-            )
-            values (
-                'bank-oa-active-proof', '6222', 'outflow', '集成测试供应商',
-                100, -100, '2026-05-20', '2026-05-01', 'pending', '{}'::jsonb
-            )
-            """
-        )
-        self.connection.execute(
-            """
-            insert into app.invoices(
-                legacy_mongo_id, invoice_type, invoice_no, invoice_date, invoice_month,
-                amount, signed_amount, total_with_tax, status, raw_payload
-            )
-            values (
-                'invoice-oa-active-proof', 'input', 'INV-OA-ACTIVE-PROOF',
-                '2026-05-18', '2026-05-01', 100, 100, 100, 'pending', '{}'::jsonb
-            )
-            """
-        )
-        self.connection.execute(
-            """
-            insert into app.workbench_pair_relations(
-                case_id, relation_mode, status, version, month_scope,
-                row_ids, row_types, raw_payload
-            )
-            values (
-                'oa-active-only-proof', 'manual_confirmed', 'active', 1, '2026-05-01',
-                array[
-                    'oa-integration-1',
-                    'bank-oa-active-proof',
-                    'invoice-oa-active-proof'
-                ],
-                array['oa', 'bank', 'invoice'],
-                '{
-                    "normalized_payload": {
-                        "case_id": "oa-active-only-proof",
-                        "status": "active",
-                        "relation_mode": "manual_confirmed",
-                        "version": 1,
-                        "row_ids": [
-                            "oa-integration-1",
-                            "bank-oa-active-proof",
-                            "invoice-oa-active-proof"
-                        ],
-                        "row_types": ["oa", "bank", "invoice"]
-                    }
-                }'::jsonb
-            )
-            """
-        )
-        service = OaPendingPaymentReadModelService(
-            repository=OaPendingPaymentReadModelRepositoryPort(self.read_repository),
-            queue_repository=self.queue,
-            source_versions_provider=oa_pending_payment_base_source_versions,
-        )
-        query = {"month": ["2026-05"], "page": ["1"], "page_size": ["20"]}
-        initial = service.conditional_rows(query, tenant_id="default", if_none_match=None)
-        self.assertEqual(initial.status, HTTPStatus.ACCEPTED)
-        event = self.queue.claim_next(
-            "oa-active-only-integration",
-            event_types=["oa_pending_payment.read_model.refresh"],
-        )
-        self.assertIsNotNone(event)
-        assert event is not None
-        refresh_service = OaPendingPaymentReadModelRefreshService(
-            projection_builder=OaPendingPaymentSqlProjectionBuilder(
-                connection=self.connection,
-                read_model_repository=self.read_repository,
-            ),
-            queue_repository=self.queue,
-        )
-        active_result = refresh_service.handle_runtime_event(event)
-        self.assertTrue(active_result["published"])
-        self.assertTrue(
-            self.queue.complete(
-                event.event_id,
-                "oa-active-only-integration",
-                result_payload=active_result,
-            )
-        )
-        active = service.conditional_rows(query, tenant_id="default", if_none_match=None)
-        self.assertEqual(active.status, HTTPStatus.OK)
-        self.assertEqual(active.payload["rows"][0]["bankTransaction"]["relationCount"], 1)
-        self.assertEqual(active.payload["rows"][0]["invoice"]["relationCount"], 1)
-
-        self.connection.execute(
-            """
-            update app.workbench_pair_relations
-            set status = 'withdrawn'
-            where case_id = 'oa-active-only-proof'
-            """
-        )
-        stale = service.conditional_rows(query, tenant_id="default", if_none_match=None)
-        self.assertEqual(stale.status, HTTPStatus.ACCEPTED)
-        self.assertEqual(
-            stale.payload["operationBarrierTargets"],
-            [{"readModelKey": "oa_pending_payment", "scopeKey": "2026-05"}],
-        )
-        withdrawal_event = self.queue.claim_next(
-            "oa-active-only-integration",
-            event_types=["oa_pending_payment.read_model.refresh"],
-        )
-        self.assertIsNotNone(withdrawal_event)
-        assert withdrawal_event is not None
-        withdrawn_result = refresh_service.handle_runtime_event(withdrawal_event)
-        self.assertTrue(withdrawn_result["published"])
-        self.assertTrue(
-            self.queue.complete(
-                withdrawal_event.event_id,
-                "oa-active-only-integration",
-                result_payload=withdrawn_result,
-            )
-        )
-        withdrawn = service.conditional_rows(query, tenant_id="default", if_none_match=None)
-        self.assertEqual(withdrawn.status, HTTPStatus.OK)
-        self.assertEqual(withdrawn.payload["rows"][0]["bankTransaction"]["relationCount"], 0)
-        self.assertEqual(withdrawn.payload["rows"][0]["invoice"]["relationCount"], 0)
 
     def test_admission_only_commit_preserves_stable_completed_fact_and_never_enqueues_shared_read_models(self) -> None:
         source_snapshot = PostgresOaPendingPaymentSourceSnapshotRepository(
@@ -344,11 +314,11 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
             admission_records=[completed_record, record],
             payment_statuses=payment_statuses,
         )
-        self.assertIsNone(
-            self.queue.claim_next(
-                "oa-admission-isolation-integration",
-                event_types=["oa_pending_payment.read_model.refresh"],
-            )
+        self.assertEqual(
+            self.connection.fetch_one(
+                "select count(*)::integer as count from job.outbox_events"
+            )["count"],
+            0,
         )
         before = self.connection.fetch_one(
             """
@@ -500,135 +470,6 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(int(counts["completed_projection_count"]), 1)
         self.assertEqual(int(counts["admission_count"]), 0)
 
-    def test_canonical_commit_reaches_fresh_rows_and_etag_through_durable_worker_chain(self) -> None:
-        source_snapshot = PostgresOaPendingPaymentSourceSnapshotRepository(
-            self.connection,
-            pending_relation_repository=self.pending_relations,
-        )
-        source_snapshot.commit_authoritative_snapshot(
-            scope_key="2026-05",
-            tenant_id="default",
-            projection_records=[_record()],
-            admission_records=[_record()],
-            payment_statuses={
-                "flow-integration-1": OAPaymentStatusRecord(
-                    flow_id="flow-integration-1",
-                    pay_status=0,
-                )
-            },
-        )
-        service = OaPendingPaymentReadModelService(
-            repository=OaPendingPaymentReadModelRepositoryPort(self.read_repository),
-            queue_repository=self.queue,
-            source_versions_provider=oa_pending_payment_base_source_versions,
-        )
-        query = {"month": ["2026-05"], "page": ["1"], "page_size": ["20"]}
-
-        non_fresh = service.conditional_rows(
-            query,
-            tenant_id="default",
-            if_none_match=None,
-        )
-        self.assertEqual(non_fresh.status, HTTPStatus.ACCEPTED)
-        self.assertEqual(non_fresh.payload["rows"], [])
-        self.assertEqual(
-            non_fresh.payload["operationBarrierTargets"],
-            [{"readModelKey": "oa_pending_payment", "scopeKey": "2026-05"}],
-        )
-
-        event = self.queue.claim_next(
-            "oa-pending-payment-integration",
-            event_types=["oa_pending_payment.read_model.refresh"],
-        )
-        self.assertIsNotNone(event)
-        assert event is not None
-        result = OaPendingPaymentReadModelRefreshService(
-            projection_builder=OaPendingPaymentSqlProjectionBuilder(
-                connection=self.connection,
-                read_model_repository=self.read_repository,
-            ),
-            queue_repository=self.queue,
-        ).handle_runtime_event(event)
-        self.assertTrue(result["published"])
-        self.assertEqual(result["row_count"], 1)
-        self.assertTrue(
-            self.queue.complete(
-                event.event_id,
-                "oa-pending-payment-integration",
-                result_payload=result,
-            )
-        )
-
-        state = OaPendingPaymentReadModelRepositoryPort(self.read_repository).query_state(
-            scope_key="2026-05",
-            tenant_id="default",
-            base_source_versions=oa_pending_payment_base_source_versions(),
-        )
-        fresh = service.conditional_rows(
-            query,
-            tenant_id="default",
-            if_none_match=None,
-        )
-        not_modified = service.conditional_rows(
-            query,
-            tenant_id="default",
-            if_none_match=fresh.etag,
-        )
-
-        self.assertEqual(state["status"], "fresh")
-        self.assertEqual(state["blocking_scope_keys"], [])
-        self.assertEqual(state["stale_reasons"], [])
-        self.assertEqual(
-            state["expected_source_versions_by_scope"]["2026-05"],
-            state["source_versions_by_scope"]["2026-05"],
-        )
-        self.assertEqual(fresh.status, HTTPStatus.OK)
-        self.assertEqual(fresh.payload["read_model_status"], "fresh")
-        self.assertEqual(len(fresh.payload["rows"]), 1)
-        self.assertIsNotNone(fresh.etag)
-        self.assertEqual(not_modified.status, HTTPStatus.NOT_MODIFIED)
-        self.assertEqual(not_modified.payload, {})
-
-        self.connection.execute(
-            """
-            insert into app.bank_transactions(
-                legacy_mongo_id,
-                account_no,
-                txn_direction,
-                counterparty_name_raw,
-                amount,
-                signed_amount,
-                txn_date,
-                txn_month,
-                status
-            )
-            values (
-                'oa-pending-new-bank',
-                '6222',
-                'outflow',
-                '测试对手方',
-                100,
-                -100,
-                '2026-05-20',
-                '2026-05-01',
-                'pending'
-            )
-            """
-        )
-        changed_state = OaPendingPaymentReadModelRepositoryPort(
-            self.read_repository
-        ).query_state(
-            scope_key="2026-05",
-            tenant_id="default",
-            base_source_versions=oa_pending_payment_base_source_versions(),
-        )
-
-        self.assertEqual(changed_state["status"], "refreshing")
-        self.assertEqual(changed_state["blocking_scope_keys"], ["2026-05"])
-        self.assertIn(
-            "2026-05:source_versions_mismatch",
-            changed_state["stale_reasons"],
-        )
 
 
 def _record() -> OAApplicationRecord:

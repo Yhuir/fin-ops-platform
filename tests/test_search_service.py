@@ -145,7 +145,7 @@ class SearchServiceTests(unittest.TestCase):
         }
         self.service = SearchService(
             known_months_loader=lambda: ["2026-03", "2026-04"],
-            workbench_rows_loader=lambda month: self.workbench_rows[month],
+            canonical_rows_loader=lambda month: self.workbench_rows[month],
         )
 
     def test_search_finds_oa_rows_by_keyword_and_builds_jump_target(self) -> None:
@@ -201,7 +201,7 @@ class SearchServiceTests(unittest.TestCase):
         }
         service = SearchService(
             known_months_loader=lambda: ["2026-03"],
-            workbench_rows_loader=lambda _month: [
+            canonical_rows_loader=lambda _month: [
                 {
                     "row": original_bank_row,
                     "zone_hint": "paired",
@@ -225,7 +225,7 @@ class SearchServiceTests(unittest.TestCase):
         load_calls: list[str] = []
         service = SearchService(
             known_months_loader=lambda: ["2026-03"],
-            workbench_rows_loader=lambda month: load_calls.append(month)
+            canonical_rows_loader=lambda month: load_calls.append(month)
             or [
                 {
                     "row": self.bank_row,
@@ -311,7 +311,7 @@ class SearchServiceTests(unittest.TestCase):
         }
         service = SearchService(
             known_months_loader=lambda: ["2026-05", "2026-04", "2026-03"],
-            workbench_rows_loader=lambda month: load_calls.append(month) or rows_by_month[month],
+            canonical_rows_loader=lambda month: load_calls.append(month) or rows_by_month[month],
         )
 
         payload = service.search(q="建设科技", month="all", scope="bank", limit=1)
@@ -330,7 +330,7 @@ class SearchServiceTests(unittest.TestCase):
 
         service = SearchService(
             known_months_loader=load_months,
-            workbench_rows_loader=lambda month: month_calls.append(month) or self.workbench_rows[month],
+            canonical_rows_loader=lambda month: month_calls.append(month) or self.workbench_rows[month],
         )
 
         first_payload = service.search(q="建设科技", month="all", scope="bank")
@@ -346,7 +346,7 @@ class SearchServiceTests(unittest.TestCase):
 
         service = SearchService(
             known_months_loader=lambda: ["2026-03"],
-            workbench_rows_loader=lambda month: month_calls.append(month) or self.workbench_rows[month],
+            canonical_rows_loader=lambda month: month_calls.append(month) or self.workbench_rows[month],
         )
 
         service.search(q="建设科技", month="all", scope="bank")

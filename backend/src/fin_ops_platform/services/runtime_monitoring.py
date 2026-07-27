@@ -356,6 +356,8 @@ class RuntimeMonitoringRepository:
             if not scope_type:
                 continue
             read_model_key = definitions_by_scope.get(scope_type).key if scope_type in definitions_by_scope else scope_type
+            if read_model_key not in APP_STATUS_READ_MODEL_REGISTRY:
+                continue
             scope_key = str(row.get("scope_key") or "").strip()
             if _truthy(row.get("covered_by_later_readiness")) and not is_command_only_read_model_scope(
                 read_model_key,
@@ -413,6 +415,7 @@ class RuntimeMonitoringRepository:
         self,
         targets: list[dict[str, str]] | None = None,
     ) -> dict[str, dict[str, Any]]:
+        allowed_read_model_keys = sorted(APP_STATUS_READ_MODEL_REGISTRY)
         target_filter_sql, target_filter_params = _operation_barrier_scope_filter_sql(
             targets,
             read_model_key_sql="read_model_key",
@@ -433,15 +436,16 @@ class RuntimeMonitoringRepository:
                 last_error
             from read_model.app_status_readiness
             where tenant_id = 'default'
+              and read_model_key = any(%s)
               {target_filter_sql}
             """,
-            target_filter_params,
+            (allowed_read_model_keys, *target_filter_params),
         )
         grouped: dict[str, dict[str, Any]] = {}
         historical_scopes_by_key: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
             key = str(row.get("read_model_key") or "").strip()
-            if not key:
+            if key not in APP_STATUS_READ_MODEL_REGISTRY:
                 continue
             status = str(row.get("status") or "missing").strip().lower() or "missing"
             if is_command_only_read_model_scope(key, str(row.get("scope_key") or "")):
@@ -747,6 +751,8 @@ class RuntimeMonitoringRepository:
             event_type = str(row.get("event_type") or "").strip()
             if not event_type:
                 continue
+            if event_type.endswith(".read_model.refresh") and event_type not in READ_MODEL_MANIFEST_BY_EVENT_TYPE:
+                continue
             if _is_historical_outbox_status(row):
                 continue
             row_count = _optional_int(row.get("count")) or 0
@@ -796,11 +802,18 @@ class RuntimeMonitoringRepository:
         worker_instances: set[str] | None = None,
     ) -> dict[str, dict[str, Any]]:
         statuses: dict[str, dict[str, Any]] = {}
+        registered_instances = {
+            registration.instance_name
+            for registration in worker_registrations(required_only=True)
+        }
+        allowed_instances = (
+            registered_instances
+            if worker_instances is None
+            else registered_instances.intersection(worker_instances)
+        )
         for row in self.dashboard_worker_metrics(worker_instances=worker_instances):
-            if row.get("required") is False and row.get("current_effective") is False:
-                continue
             instance = str(row.get("worker_instance") or "").strip()
-            if not instance or (worker_instances is not None and instance not in worker_instances):
+            if not instance or instance not in allowed_instances:
                 continue
             statuses[instance] = {
                 "status": _app_status_worker_status(row.get("status")),
@@ -1277,7 +1290,6 @@ class RuntimeMonitoringRepository:
         )
         pending_outbox_by_scope = self._pending_outbox_events_by_scope()
         dirty_scopes_by_scope = self._dirty_scopes_by_scope()
-        workbench_read_model = self._workbench_read_model_summary()
         queue_backlog = {str(row["status"]): int(row["count"]) for row in queue_rows}
         dirty_scopes = {str(row["status"]): int(row["count"]) for row in dirty_count_rows}
         publish_status = {str(row["publish_status"]): int(row["count"]) for row in publish_rows}
@@ -1351,7 +1363,6 @@ class RuntimeMonitoringRepository:
             "stale_dirty_scopes": stale_dirty_scopes,
             "pending_outbox_events_by_scope": pending_outbox_by_scope,
             "dirty_scopes_by_scope": dirty_scopes_by_scope,
-            "workbench_read_model": workbench_read_model,
         }
 
     def ready_health_summary(self, *, stale_after_seconds: int = 300) -> dict[str, Any]:
@@ -1679,76 +1690,6 @@ class RuntimeMonitoringRepository:
             for row in rows
         ]
 
-    def _workbench_read_model_summary(self) -> dict[str, Any]:
-        generation_rows = self._connection.fetch_all(
-            """
-            with workbench_generation_status_counts as (
-              select status, count(*)::bigint as count
-              from read_model.workbench_generations
-              where tenant_id = 'default'
-                and status in ('active', 'building', 'failed')
-              group by status
-              order by status
-            )
-            select * from workbench_generation_status_counts
-            """
-        )
-        active_rows = self._connection.fetch_all(
-            """
-            with workbench_active_generation_totals as (
-              select
-                count(*)::bigint as active_scope_count,
-                coalesce(sum(row_count), 0)::bigint as active_row_count,
-                coalesce(sum(group_count), 0)::bigint as active_group_count,
-                coalesce(sum(summary_count), 0)::bigint as active_summary_count,
-                max(activated_at)::text as latest_generated_at
-              from read_model.workbench_generations
-              where tenant_id = 'default'
-                and status = 'active'
-            )
-            select * from workbench_active_generation_totals
-            """
-        )
-        all_scope_row = self._connection.fetch_one(
-            """
-            select
-              status,
-              row_count,
-              group_count,
-              summary_count,
-              updated_at::text as updated_at,
-              coalesce(last_error, '') as last_error
-            from read_model.workbench_generations workbench_all_scope_generation
-            where tenant_id = 'default'
-              and scope_key = 'all'
-              and status in ('active', 'building', 'failed')
-            order by
-              case status when 'active' then 0 when 'building' then 1 else 2 end,
-              updated_at desc
-            limit 1
-            """
-        )
-        status_counts = {str(row.get("status") or ""): int(row.get("count") or 0) for row in generation_rows}
-        active_totals = active_rows[0] if active_rows else {}
-        return {
-            "generation_status_counts": status_counts,
-            "active_scope_count": int(active_totals.get("active_scope_count") or 0),
-            "active_row_count": int(active_totals.get("active_row_count") or 0),
-            "active_group_count": int(active_totals.get("active_group_count") or 0),
-            "active_summary_count": int(active_totals.get("active_summary_count") or 0),
-            "building_scope_count": int(status_counts.get("building", 0)),
-            "failed_scope_count": int(status_counts.get("failed", 0)),
-            "latest_generated_at": active_totals.get("latest_generated_at"),
-            "all_scope": {
-                "status": str((all_scope_row or {}).get("status") or ""),
-                "row_count": int((all_scope_row or {}).get("row_count") or 0),
-                "group_count": int((all_scope_row or {}).get("group_count") or 0),
-                "summary_count": int((all_scope_row or {}).get("summary_count") or 0),
-                "updated_at": (all_scope_row or {}).get("updated_at"),
-                "last_error": str((all_scope_row or {}).get("last_error") or ""),
-            },
-        }
-
     def _rabbitmq_metrics(self) -> dict[str, Any]:
         provider = self._rabbitmq_metrics_provider
         if provider is None:
@@ -1917,23 +1858,6 @@ class RuntimeMonitoringRepository:
             """,
             (list({scope_type for _, scope_type in READ_MODEL_EVENT_TYPES.values()}),),
         )
-        workbench_consistency_unavailable_count = 0
-        workbench_consistency_warning: str | None = None
-        try:
-            consistency_row = self._connection.fetch_one(
-                """
-                select count(*)::bigint as inconsistent_count
-                from read_model.workbench_generations
-                where tenant_id = 'default'
-                  and status = 'active'
-                  and consistency_status = 'inconsistent'
-                """
-            )
-            workbench_consistency_unavailable_count = _optional_int(
-                (consistency_row or {}).get("inconsistent_count")
-            ) or 0
-        except Exception:
-            workbench_consistency_warning = "workbench_generation_consistency_unavailable"
         durations_by_event_type: dict[str, dict[str, Any]] = {}
         for row in duration_rows:
             event_type = str(row.get("event_type") or "")
@@ -1978,10 +1902,6 @@ class RuntimeMonitoringRepository:
             all_time = windows.get("all_time") if isinstance(windows.get("all_time"), dict) else {}
             dirty = dirty_by_scope_type.get(scope_type, {})
             unavailable_count = _optional_int(dirty.get("unavailable_count")) or 0
-            warning_code = None
-            if key == "workbench":
-                unavailable_count += workbench_consistency_unavailable_count
-                warning_code = workbench_consistency_warning
             rows.append(
                 {
                     "key": key,
@@ -1998,7 +1918,7 @@ class RuntimeMonitoringRepository:
                     "stale_count": _optional_int(dirty.get("stale_count")) or 0,
                     "unavailable_count": unavailable_count,
                     "status": "available",
-                    **({"warning_code": warning_code or scope_evidence_warning} if warning_code or scope_evidence_warning else {}),
+                    **({"warning_code": scope_evidence_warning} if scope_evidence_warning else {}),
                 }
             )
         return rows
@@ -2570,10 +2490,13 @@ def _worker_metric_row(
         and stale_after_seconds is not None
         and heartbeat_lag_seconds > stale_after_seconds
     )
-    current_effective = required or not (
-        heartbeat_lag_seconds is not None
-        and stale_after_seconds is not None
-        and heartbeat_lag_seconds > stale_after_seconds
+    current_effective = required or (
+        registration is not None
+        and not (
+            heartbeat_lag_seconds is not None
+            and stale_after_seconds is not None
+            and heartbeat_lag_seconds > stale_after_seconds
+        )
     )
     warning_code = None
     if registration is not None and worker_kind != registration.worker_kind:
@@ -2619,25 +2542,6 @@ def _string_list(value: object) -> list[str]:
 
 
 def _app_status_readiness_backfill_fact(connection: Any, read_model_key: str, *, tenant_id: str) -> dict[str, Any] | None:
-    if read_model_key == "workbench":
-        return connection.fetch_one(
-            """
-            select
-                'all' as scope_key,
-                case status when 'active' then 'fresh' when 'failed' then 'failed' else 'missing' end as status,
-                row_count,
-                schema_version,
-                source_versions,
-                activated_at::text as generated_at,
-                last_error
-            from read_model.workbench_generations
-            where tenant_id = %s
-              and scope_key = 'all'
-            order by case status when 'active' then 0 when 'failed' then 1 else 2 end, updated_at desc
-            limit 1
-            """,
-            (tenant_id,),
-        )
     scope_spec = APP_STATUS_READINESS_BACKFILL_SCOPE_TABLES.get(read_model_key)
     if scope_spec:
         tenant_where = "tenant_id = %s" if scope_spec["tenant_scoped"] else "true"
@@ -2661,23 +2565,6 @@ def _app_status_readiness_backfill_fact(connection: Any, read_model_key: str, *,
             """,
             params,
         )
-    if read_model_key == "bank_account_balance":
-        return connection.fetch_one(
-            """
-            select
-                'all' as scope_key,
-                'fresh' as status,
-                count(*)::integer as row_count,
-                max(schema_version)::text as schema_version,
-                coalesce((array_agg(source_versions order by generated_at desc))[1], '{}'::jsonb) as source_versions,
-                max(generated_at)::text as generated_at,
-                '' as last_error
-            from read_model.bank_account_balances
-            where tenant_id = %s
-            having count(*) >= 0 and max(generated_at) is not null
-            """,
-            (tenant_id,),
-        )
     row_spec = APP_STATUS_READINESS_BACKFILL_ROW_TABLES.get(read_model_key)
     if row_spec:
         return connection.fetch_one(
@@ -2698,51 +2585,9 @@ def _app_status_readiness_backfill_fact(connection: Any, read_model_key: str, *,
 
 
 APP_STATUS_READINESS_BACKFILL_SCOPE_TABLES = {
-    "bank_detail": {
-        "table": "read_model.bank_detail_scopes",
-        "tenant_scoped": True,
-        "status_expr": "coalesce(nullif(status, ''), 'fresh')",
-        "schema_expr": "coalesce(schema_version::text, '')",
-        "last_error_expr": "coalesce(last_error, '')",
-    },
     "workbench_relation": {
         "table": "read_model.workbench_relation_scopes",
         "tenant_scoped": True,
-        "status_expr": "coalesce(nullif(cache_status, ''), 'fresh')",
-        "schema_expr": "''",
-        "last_error_expr": "''",
-    },
-    "invoice_lifecycle": {
-        "table": "read_model.invoice_lifecycle_scopes",
-        "tenant_scoped": True,
-        "status_expr": "coalesce(nullif(cache_status, ''), 'fresh')",
-        "schema_expr": "''",
-        "last_error_expr": "''",
-    },
-    "input_invoice_usage": {
-        "table": "read_model.input_invoice_usage_scopes",
-        "tenant_scoped": False,
-        "status_expr": "coalesce(nullif(cache_status, ''), 'fresh')",
-        "schema_expr": "''",
-        "last_error_expr": "''",
-    },
-    "output_invoice_collection": {
-        "table": "read_model.output_invoice_collection_scopes",
-        "tenant_scoped": False,
-        "status_expr": "coalesce(nullif(cache_status, ''), 'fresh')",
-        "schema_expr": "''",
-        "last_error_expr": "''",
-    },
-    "oa_pending_payment": {
-        "table": "read_model.oa_pending_payment_scopes",
-        "tenant_scoped": False,
-        "status_expr": "coalesce(nullif(cache_status, ''), 'fresh')",
-        "schema_expr": "''",
-        "last_error_expr": "''",
-    },
-    "pending_invoice": {
-        "table": "read_model.pending_invoice_scopes",
-        "tenant_scoped": False,
         "status_expr": "coalesce(nullif(cache_status, ''), 'fresh')",
         "schema_expr": "''",
         "last_error_expr": "''",
@@ -2755,11 +2600,6 @@ APP_STATUS_READINESS_BACKFILL_ROW_TABLES = {
         "table": "read_model.search_index_rows",
         "status_expr": "coalesce((array_agg(coalesce(nullif(cache_status, ''), 'fresh') order by generated_at desc))[1], 'fresh')",
         "schema_expr": "''",
-    },
-    "tax_offset": {
-        "table": "read_model.tax_offset_read_models",
-        "status_expr": "coalesce((array_agg(coalesce(nullif(cache_status, ''), 'fresh') order by generated_at desc))[1], 'fresh')",
-        "schema_expr": "coalesce((array_agg(schema_version order by generated_at desc))[1], '')",
     },
     "no_oa_bank_batch": {
         "table": "read_model.no_oa_bank_batch_rows",

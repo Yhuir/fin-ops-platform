@@ -396,23 +396,14 @@ class RuntimeWorker:
     @staticmethod
     def _dependency_scope_type_is_declared(event: RuntimeQueueEvent, dependency_scope_type: str) -> bool:
         source_entry = READ_MODEL_MANIFEST_BY_SCOPE_TYPE.get(str(event.scope_type or "").strip())
-        if source_entry is None or not source_entry.read_dependencies:
-            return True
+        if source_entry is None:
+            return False
         dependency_entry = READ_MODEL_MANIFEST_BY_SCOPE_TYPE.get(str(dependency_scope_type or "").strip())
         return dependency_entry is not None and dependency_entry.key in source_entry.read_dependencies
 
     @classmethod
     def _dependency_scope_keys(cls, dependency_scope_type: str, event: RuntimeQueueEvent) -> list[str]:
-        source_scope_key = str(event.scope_key or event.aggregate_id or "").strip()
-        if dependency_scope_type == "pending_invoice":
-            months = MONTH_SCOPE_RE.findall(source_scope_key)
-            if months:
-                month = months[-1]
-                return [f"expense:all:{month}", f"income:all:{month}"]
-            if source_scope_key == "all":
-                return ["expense:all", "income:all"]
-            return []
-        scope_key = cls._dependency_scope_key(dependency_scope_type, event)
+        scope_key = cls._dependency_scope_key(event)
         return [scope_key] if scope_key else []
 
     @staticmethod
@@ -430,20 +421,10 @@ class RuntimeWorker:
             scope_keys.append(scope_key)
         return scope_keys
 
-    @classmethod
-    def _dependency_scope_key(cls, dependency_scope_type: str, event: RuntimeQueueEvent) -> str:
+    @staticmethod
+    def _dependency_scope_key(event: RuntimeQueueEvent) -> str:
         source_scope_key = str(event.scope_key or event.aggregate_id or "").strip()
         if not source_scope_key:
-            return ""
-        if dependency_scope_type == "bank_detail":
-            if MONTH_SCOPE_RE.fullmatch(source_scope_key):
-                return source_scope_key
-            months = MONTH_SCOPE_RE.findall(source_scope_key)
-            if months:
-                return months[-1]
-            # bank_detail:all is a fan-out command, not a stable freshness dependency.
-            # Downstream all-scope events must not infer it; the source facade is
-            # responsible for enqueueing concrete month shards when it can identify them.
             return ""
         if source_scope_key == "all" or MONTH_SCOPE_RE.fullmatch(source_scope_key):
             return source_scope_key

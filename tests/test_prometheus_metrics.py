@@ -38,9 +38,9 @@ class PrometheusMetricsTests(unittest.TestCase):
                 "read_model_refresh_failure_rate": 0.01,
                 "read_model_refresh_by_key": [
                     {
-                        "key": "workbench",
-                        "event_type": "workbench.read_model.refresh",
-                        "scope_type": "workbench",
+                        "key": "workbench_relation",
+                        "event_type": "workbench_relation.read_model.refresh",
+                        "scope_type": "workbench_relation",
                         "duration_ms": {"p50": 200.0, "p95": 500.0, "p99": 700.0},
                         "enqueue_to_fresh_ms": {"p50": 220.0, "p95": 560.0, "p99": 760.0},
                         "sample_count": 10,
@@ -62,9 +62,9 @@ class PrometheusMetricsTests(unittest.TestCase):
                 "read_model_refresh_by_key_current_windows": [
                     {
                         "window": "recent_15m",
-                        "key": "workbench",
-                        "event_type": "workbench.read_model.refresh",
-                        "scope_type": "workbench",
+                        "key": "workbench_relation",
+                        "event_type": "workbench_relation.read_model.refresh",
+                        "scope_type": "workbench_relation",
                         "duration_ms": {"p50": 95.0, "p95": 150.0, "p99": 190.0},
                         "enqueue_to_fresh_ms": {"p50": 105.0, "p95": 170.0, "p99": 210.0},
                         "sample_count": 2,
@@ -91,14 +91,6 @@ class PrometheusMetricsTests(unittest.TestCase):
                         "current_effective": True,
                     }
                 ],
-                "workbench_read_model": {
-                    "active_scope_count": 9,
-                    "active_row_count": 100,
-                    "active_group_count": 50,
-                    "active_summary_count": 9,
-                    "building_scope_count": 0,
-                    "failed_scope_count": 0,
-                },
             },
             "api_performance": {
                 "endpoints": {
@@ -126,11 +118,11 @@ class PrometheusMetricsTests(unittest.TestCase):
         self.assertIn('finops_read_model_refresh_enqueue_to_fresh_ms{quantile="0.95"} 360', rendered)
         self.assertIn("finops_read_model_refresh_sample_count 128", rendered)
         self.assertIn(
-            'finops_read_model_refresh_by_key_duration_ms{event_type="workbench.read_model.refresh",quantile="0.95",read_model_key="workbench",scope_type="workbench"} 500',
+            'finops_read_model_refresh_by_key_duration_ms{event_type="workbench_relation.read_model.refresh",quantile="0.95",read_model_key="workbench_relation",scope_type="workbench_relation"} 500',
             rendered,
         )
         self.assertIn(
-            'finops_read_model_refresh_by_key_enqueue_to_fresh_ms{event_type="workbench.read_model.refresh",quantile="0.95",read_model_key="workbench",scope_type="workbench"} 560',
+            'finops_read_model_refresh_by_key_enqueue_to_fresh_ms{event_type="workbench_relation.read_model.refresh",quantile="0.95",read_model_key="workbench_relation",scope_type="workbench_relation"} 560',
             rendered,
         )
         self.assertIn(
@@ -142,15 +134,15 @@ class PrometheusMetricsTests(unittest.TestCase):
             rendered,
         )
         self.assertIn(
-            'finops_read_model_refresh_by_key_current_window_enqueue_to_fresh_ms{event_type="workbench.read_model.refresh",quantile="0.95",read_model_key="workbench",scope_type="workbench",window="recent_15m"} 170',
+            'finops_read_model_refresh_by_key_current_window_enqueue_to_fresh_ms{event_type="workbench_relation.read_model.refresh",quantile="0.95",read_model_key="workbench_relation",scope_type="workbench_relation",window="recent_15m"} 170',
             rendered,
         )
         self.assertIn(
-            'finops_read_model_refresh_by_key_current_window_sample_count{event_type="workbench.read_model.refresh",read_model_key="workbench",scope_type="workbench",window="recent_15m"} 2',
+            'finops_read_model_refresh_by_key_current_window_sample_count{event_type="workbench_relation.read_model.refresh",read_model_key="workbench_relation",scope_type="workbench_relation",window="recent_15m"} 2',
             rendered,
         )
         self.assertIn(
-            'finops_read_model_refresh_by_key_failure_rate{event_type="workbench.read_model.refresh",read_model_key="workbench",scope_type="workbench"} 0.1',
+            'finops_read_model_refresh_by_key_failure_rate{event_type="workbench_relation.read_model.refresh",read_model_key="workbench_relation",scope_type="workbench_relation"} 0.1',
             rendered,
         )
         self.assertIn('finops_rabbitmq_publish_confirm_latency_ms{quantile="0.95"} 9', rendered)

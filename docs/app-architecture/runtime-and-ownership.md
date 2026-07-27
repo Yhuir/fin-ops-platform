@@ -33,15 +33,18 @@ flowchart LR
 
 页面不能自行假设 read model fresh，也不能为了“有数据”绕过 freshness gate。
 
+不拥有 page read model 的登记页面走独立合同。关联台由 page-specific canonical repository 在单个只读 snapshot 内返回 rows/summary/counts，成本统计和外部往来款由各自 canonical query service 负责；这些页面使用普通 loading/empty/error，不返回 read-model freshness 字段，也不入队或轮询。
+
 ### 批量账务读路径
 
-`/api/batch-accounting` 不拥有独立 read model。它的读边界由 `BatchAccountingService` 组合 Workbench active payload 与 `WorkbenchRelationReadFacade`：
+`/api/batch-accounting` 不拥有或读取 read model。它的读边界是 `BatchAccountingApiRoutes -> BatchAccountingService -> PostgresBatchAccountingQueryRepository`：
 
-1. `unsubmitted` bucket 只从专属年份 SQL loader 得到批量账务银行候选和日常报销 OA 候选，附件只按这些 OA IDs 读取；候选 row ids 只进入 batch 专用 relation facade I/O，不能调用 Workbench full-page builder、通用逐 scope relation reader 或把全量 open OA 当作输入。
-2. `summary.submitted_count` 由 `get_batch_accounting_by_row_ids(..., submitted_year=year)` 的同一 repository bundle 返回；该快照同时证明候选/年度 scopes、读取候选关系和 referenced groups，并直接聚合年度 count。未提交首屏不能调用独立 count reader，也不能扫描 12 个月完整 relation DTO。
-3. `submitted` bucket 的银行上下文只读专属年份 SQL loader；关系详情用一次 bulk proof + 一次 groups query 读取年度 DTO，并通过 batch 专用 row reader补齐 distribution，继续透出 freshness 诊断。
-4. submit/withdraw 写路径只用 `bank_row_id + oa_row_ids` 专属 SQL loader 取得本次 row context，再交给 `WorkbenchRelationCommandService` 的 canonical write safety；不能因为整页普通 relation distribution 追赶中阻断无关 row 的写操作。
-5. 任一专属 loader 缺失/无效时返回 `503 batch_accounting_workbench_read_model_unavailable`，不能跨用其它 loader、返回假空数据或回退 Workbench full-page builder。
+1. `unsubmitted` 直接分页查询指定年份的 canonical 批量账务银行候选和不限年份的已完成日常报销 OA；OA 必须没有包含银行成员的 active relation，已有 invoice-only relation不排除。
+2. 当前 OA page 的附件发票只按 OA IDs 批量读取；禁止全量附件扫描。
+3. `submitted` 只读 `app.workbench_pair_relations` 中 active、`relation_mode=batch_accounting` 且包含指定年份 canonical 银行成员的关系，再按当前页 member IDs 一次批量补齐 OA/发票详情。
+4. rows、summary、counts 和 pagination 在同一个显式 `REPEATABLE READ / READ ONLY` snapshot 中得到。银行/OA 服务端分页；禁止 Workbench full payload、12 月循环、逐 scope proof、N+1 或 Python/浏览器全量分页。
+5. submit 的 `bank_row_id + oa_row_ids` 上下文也走页面专属窄 canonical snapshot；正式写入和 withdraw 继续交给 `WorkbenchRelationCommandService`。缺 query repository 或 command service 时 fail closed。
+6. 响应不再包含 read-model status/source-version/refresh enqueue/polling/operation barrier 字段。
 
 ## OA 会话启动边界
 
@@ -74,7 +77,7 @@ authoritative integration snapshot 默认同样只提交 canonical facts/source 
 
 1. 写 API 成功代表 canonical write、version、audit/idempotency 已提交，并返回 affected scopes/months。
 2. 写操作立即结束，不轮询其它页面的 operation barrier，也不把无关后台工作显示为本次操作阻塞。
-3. 当前可见页若需要立即展示结果，只重新调用自己的正常 GET。GET 的 freshness gate 负责 exact-scope enqueue、refreshing/failed 状态和有界轮询。
+3. 当前可见页若需要立即展示结果，只重新调用自己的正常 GET。仍使用 read model 的页面由 GET freshness gate 负责 exact-scope enqueue、refreshing/failed 状态和有界轮询；关联台等 canonical direct-read 页面直接读取最新已提交 PostgreSQL facts，不入队、不轮询。
 4. 其它已打开、未挂载或 document hidden 的页面不响应业务刷新事件、不缓冲重放、不执行 load。focus、hidden→visible 与 BFCache 恢复不触发业务页面 I/O；route 重新 mount、页面查询变化、浏览器手动刷新或明确重试才重新运行该页 load/freshness contract。
 5. 排序、分页和筛选只改变当前查询参数，不是页面激活，也不能触发其它页面重建。
 
@@ -99,10 +102,30 @@ OA 付款算法不读取待找发票规则，因此 OA 页面不因该规则保�
 1. route / facade 通过 `WorkbenchRelationCommandService` 预览 canonical active relation 撤回；只有存在 active relation 时才返回 `withdraw_relation`。
 2. 若没有 active relation，preview/submit 必须返回 relation not found 或 invalid operation，不能回退到任何 legacy candidate/decision 表、store 或 snapshot。
 3. 自动匹配只允许在内存中生成可原子提交的 `FormalRelationPlan`；无法满足确定性安全规则的结果不持久化、不合并未配对事实，也不得驱动 pending invoice、input invoice usage、OA pending、cost statistics 等 linked-only 下游状态。
-4. Workbench active generation、all-scope aggregate、groups page 和 `audit_workbench_relation_display` 必须共同保证旧 `case:decision:*`、`automatic_decision` / `automatic_match` payload 不会继续污染页面。Release A 仅为应用回滚暂留旧物理表，但运行时必须保持零访问；Release B 通过独立 migration 删除。
+4. 关联台 canonical query repository、groups/detail/preview 与 `audit_workbench_relation_display` 必须共同保证旧 `case:decision:*`、`automatic_decision` / `automatic_match` payload 不会继续污染页面。页面不得回读 active generation 或 relation projection。Release A 仅为其它共享调用方/应用回滚暂留旧物理资源；Release B 由跨页面主控在 whole-repo 零调用后统一删除。
+
+### 关联台 direct canonical read boundary
+
+关联台 initial、groups pagination、group detail、row detail、ignored rows 和 relation preview 均由 `WorkbenchQueryFacade` 调用 `PostgresWorkbenchCanonicalQueryRepository`。repository 在一个 `REPEATABLE READ READ ONLY` snapshot 内读取 PostgreSQL canonical OA、银行、发票、ETC snapshots 与 `app.workbench_pair_relations.status='active'`，并复用既有纯 grouping/zone/requirement policy。
+
+页面响应不包含 `read_model_status`、`read_model_version`、`source_versions`、`refresh_enqueued` 或 active generation；`/api/workbench/refresh-status` 和 `/api/workbench/events` 已删除。写 preview 只供展示，submit 不使用 `expected_read_model_version`，relation UoW 在同一事务内重新验证 canonical identity/type、active ownership、business version 和 idempotency；成功后页面普通 GET 重读。
 
 ### 成本统计 direct canonical read boundary
 
 成本统计不再消费任何页面 read model。explorer、详情和导出均由 `CostStatisticsQueryService` 调用 canonical repository，在一个 `REPEATABLE READ READ ONLY` 数据库快照内读取银行流水、OA、正式配对关系、标签与设置，再由无 I/O policy 生成五种视图。
 
 页面访问或浏览器刷新只发起本页面 API；不读取 Workbench/Bank Detail 页面 payload，不经过 freshness/version/dirty/outbox/worker，不产生跨页面 fan-out。页面打开期间不自动订阅变化；用户再次刷新读取最新已提交事实。旧 Cost projection、parent/shard、Redis、worker 和 scope 状态由 migration `0126` 退出并删除。
+
+### 银行明细 direct canonical read boundary
+
+银行明细 accounts、transactions 和 export 由 `BankDetailsCanonicalQueryService` 调用 page-specific PostgreSQL repository。transactions 的 rows、statistics、category facets 与当前目标行 active relation overlap 在同一个显式 `REPEATABLE READ READ ONLY` snapshot 中读取；accounts 以账户级 SQL 聚合 canonical 流水的最新余额和日期范围笔数。
+
+正式关系只读取 `app.workbench_pair_relations status=active`，并只对当前可见或导出目标 legacy/canonical bank row IDs 做 bounded overlap；不读取 Workbench 页面 payload、`workbench_relation` projection、`bank_detail` projection 或 `bank_account_balance` projection。页面响应没有 freshness/version/job/barrier，前端不轮询；写成功后只重新 GET 当前 transactions。旧 Bank Detail/Balance read-model runtime 已删除；历史 migration/表只供上一版本回滚。
+
+### OA 待付款 direct canonical read boundary
+
+OA 待付款 rows、summary、statistics、facets 和当前页 hydrate 由页面专属 query service/repository 在一个 `REPEATABLE READ READ ONLY` PostgreSQL snapshot 中完成。completed OA 读取 `app.oa_applications`，in-progress 读取 tenant-scoped admission，支付状态读取 PostgreSQL snapshot；正式关系只读取 `app.workbench_pair_relations.status='active'`，pending relation读取本模块 canonical owner。
+
+页面访问不经过 OA read-model freshness/version/dirty/outbox/Redis/worker，也不读取 Workbench page payload或 `workbench_relation` projection。前端没有 `202/304/ETag` 或 polling；route进入、query变化、手工刷新和本页写成功后各执行 normal GET。外部 OA MySQL写回继续走 command/adapter，并在 PostgreSQL payment snapshot 中幂等收敛；页面 GET 不访问外部源。
+
+旧 `oa_pending_payment` projection/worker/readiness 和 invoice-lifecycle 页面链已删除；历史 migration/表只供上一版本回滚，没有当前 reader/writer。

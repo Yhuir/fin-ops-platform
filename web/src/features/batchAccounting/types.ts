@@ -66,10 +66,6 @@ export type BatchAccountingResponse = {
   oaRows: BatchAccountingOaRow[];
   relationsByBankRowId: Record<string, BatchAccountingRelationBucket>;
   pagination: BatchAccountingPagination;
-  readModelStatus: string;
-  readModelStaleReasons: string[];
-  readModelScopeKeys: string[];
-  refreshEnqueued: boolean;
 };
 
 export type FetchBatchAccountingRequest = {
@@ -79,6 +75,7 @@ export type FetchBatchAccountingRequest = {
   bankPageSize?: number;
   oaPage?: number;
   oaPageSize?: number;
+  oaSearch?: string;
   signal?: AbortSignal;
 };
 
@@ -98,20 +95,11 @@ export type WithdrawBatchAccountingRequest = {
   signal?: AbortSignal;
 };
 
-export type ReadModelOperationBarrierTarget = {
-  readModelKey: string;
-  scopeKey: string;
-  scopeType?: string;
-};
-
 export type BatchAccountingMutationResult = {
   success: boolean;
   relationId: string;
   affectedRowIds: string[];
   affectedMonths: string[];
   affectedScopeKeys: string[];
-  readModelScopeKeys: string[];
-  freshnessTargets: ReadModelOperationBarrierTarget[];
-  operationBarrierTargets: ReadModelOperationBarrierTarget[];
   message: string;
 };

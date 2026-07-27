@@ -396,7 +396,6 @@ const rowsPayload = {
   ],
   pagination: { page: 1, pageSize: 20, total: 51 },
   summary: { rowCount: 51, viewCounts: { completed: 51, in_progress: 23 } },
-  read_model_status: "fresh",
   filterConfig: [
     {
       field: "oa_applicant",
@@ -487,7 +486,6 @@ function installOaPendingPaymentsFetch(overrides?: {
   rowsResponses?: Array<{
     status: number;
     payload?: Record<string, unknown>;
-    etag?: string;
     delay?: Promise<void>;
   }>;
   detailPayloads?: Record<string, { status: number; payload: Record<string, unknown> }>;
@@ -510,22 +508,11 @@ function installOaPendingPaymentsFetch(overrides?: {
     if (url.pathname === "/api/oa-pending-payments/rows") {
       const scriptedResponse = rowsResponses.shift();
       await scriptedResponse?.delay;
-      if (scriptedResponse?.status === 304) {
-        return new Response(null, {
-          status: 304,
-          headers: scriptedResponse.etag ? { ETag: scriptedResponse.etag } : undefined,
-        });
-      }
       const payload: Record<string, unknown> = overrides?.rowsPayload ?? rowsPayload;
       const responsePayload = scriptedResponse?.payload ?? payload;
-      const readModelStatus = responsePayload.readModelStatus ?? responsePayload.read_model_status;
-      const headers = new Headers({ "Content-Type": "application/json" });
-      if (scriptedResponse?.etag) {
-        headers.set("ETag", scriptedResponse.etag);
-      }
       return new Response(JSON.stringify(responsePayload), {
-        status: scriptedResponse?.status ?? (readModelStatus === "refreshing" ? 202 : 200),
-        headers,
+        status: scriptedResponse?.status ?? 200,
+        headers: { "Content-Type": "application/json" },
       });
     }
     if (url.pathname === "/api/oa-pending-payments/writeback-paid") {
@@ -537,7 +524,6 @@ function installOaPendingPaymentsFetch(overrides?: {
         oaRowIds: [],
         writebackCount: 0,
         oaPaymentWritebacks: [],
-        readModelRefresh: { scopeKeys: [], enqueued: false, targetSeconds: 0 },
       }), {
         status,
         headers: { "Content-Type": "application/json" },
@@ -584,7 +570,6 @@ function installOaPendingPaymentsFetch(overrides?: {
         relation: { status: "confirmed" },
         autoWriteback: { code: "written", label: "已写回", matched: true, writebackCount: 1 },
         oaPaymentWritebacks: [{ code: "written", label: "已写回", flowId: "proc-candidate", syncStatus: "ready" }],
-        readModelRefresh: { scopeKeys: ["2026-05"], enqueued: true, targetSeconds: 1 },
       }), {
         status: init?.method === "POST" ? 200 : 405,
         headers: { "Content-Type": "application/json" },
@@ -637,7 +622,6 @@ function installOaPendingPaymentsFetch(overrides?: {
           no_invoice_required: { tag_codes: [], tags: [] },
         },
         permissions: { can_save: canSave },
-        read_model_status: "refreshing",
       }), { status: init?.method === "PUT" ? 200 : 200, headers: { "Content-Type": "application/json" } });
     }
     return new Response(JSON.stringify({}), {
@@ -1191,7 +1175,6 @@ describe("OA pending payments page", () => {
         oaPaymentWritebacks: [
           { code: "written", label: "已写回", flowIds: ["flow-003"], syncStatus: "ready" },
         ],
-        readModelRefresh: { scopeKeys: ["2026-05"], enqueued: true, targetSeconds: 1 },
       },
     });
 
@@ -1232,7 +1215,6 @@ describe("OA pending payments page", () => {
             oaPaymentWritebacks: [
               { code: "written", label: "已写回", flowIds: ["flow-003"], syncStatus: "ready" },
             ],
-            readModelRefresh: { scopeKeys: [], enqueued: false, targetSeconds: 0 },
           },
         },
       ],
@@ -1255,21 +1237,20 @@ describe("OA pending payments page", () => {
     await waitFor(() => expect(within(page).queryByText("写回暂不可用。")).not.toBeInTheDocument());
   });
 
-  test("does not show paid writeback while OA pending payment read model is still refreshing", async () => {
+  test("renders a canonical empty response as a true empty state", async () => {
     const fetchMock = installOaPendingPaymentsFetch({
       rowsPayload: {
         rows: [],
         pagination: { page: 1, pageSize: 20, total: 0 },
         summary: { rowCount: 0, viewCounts: { completed: 0, in_progress: 0 } },
         filterConfig: [],
-        read_model_status: "refreshing",
       },
     });
 
     renderAuthenticatedAppAt("/oa-pending-payments");
 
     const page = await screen.findByTestId("oa-pending-payments-page");
-    expect(await within(page).findByText("OA 待付款核对数据正在刷新")).toBeInTheDocument();
+    expect(await within(page).findByText("当前条件下暂无记录。")).toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: /写回 OA/ })).not.toBeInTheDocument();
     expect(writebackPaidRequests(fetchMock)).toHaveLength(0);
   });
@@ -1425,10 +1406,10 @@ describe("OA pending payments page", () => {
     expect(rulesRequests(fetchMock)).toHaveLength(1);
   });
 
-  test("does not poll again after the current page returns a fresh read model", async () => {
+  test("loads the canonical page once without background polling", async () => {
     const fetchMock = installOaPendingPaymentsFetch({
       rowsResponses: [
-        { status: 200, payload: rowsPayload, etag: '"oa-v1"' },
+        { status: 200, payload: rowsPayload },
       ],
     });
 
@@ -1442,81 +1423,21 @@ describe("OA pending payments page", () => {
     expect(rowsRequests(fetchMock)).toHaveLength(1);
   });
 
-  test("stops a non-fresh retry when hidden and does not resume when visible", async () => {
-    let visibilityState: DocumentVisibilityState = "visible";
-    Object.defineProperty(document, "visibilityState", {
-      configurable: true,
-      get: () => visibilityState,
-    });
-    const fetchMock = installOaPendingPaymentsFetch({
-      rowsResponses: [
-        {
-          status: 202,
-          payload: {
-            rows: [],
-            pagination: { page: 1, pageSize: 20, total: 0 },
-            summary: { rowCount: 0 },
-            filterConfig: [],
-            filterOptions: {},
-            readModelStatus: "refreshing",
-          },
-          etag: '"oa-refreshing"',
-        },
-      ],
-    });
+  test("manual refresh issues one normal GET without conditional headers", async () => {
+    const fetchMock = installOaPendingPaymentsFetch();
+    const user = userEvent.setup();
 
     renderAuthenticatedAppAt("/oa-pending-payments");
 
     const page = await screen.findByTestId("oa-pending-payments-page");
-    expect(await within(page).findByText("OA 待付款核对数据正在刷新")).toBeInTheDocument();
-
-    await act(async () => {
-      visibilityState = "hidden";
+    expect(await within(page).findByText("张三")).toBeInTheDocument();
+    await user.click(within(page).getByRole("button", { name: "刷新 OA 待付款核对" }));
+    await waitFor(() => expect(rowsRequests(fetchMock)).toHaveLength(2));
+    const rowCalls = fetchMock.mock.calls.filter(([input]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/oa-pending-payments/rows";
     });
-    await act(async () => {
-      await new Promise((resolve) => window.setTimeout(resolve, 550));
-    });
-    expect(rowsRequests(fetchMock)).toHaveLength(1);
-
-    await act(async () => {
-      visibilityState = "visible";
-      document.dispatchEvent(new Event("visibilitychange"));
-    });
-    await new Promise((resolve) => window.setTimeout(resolve, 550));
-    expect(rowsRequests(fetchMock)).toHaveLength(1);
-  });
-
-  test("keeps at most one conditional request in flight", async () => {
-    const slowConditional = deferred();
-    const fetchMock = installOaPendingPaymentsFetch({
-      rowsResponses: [
-        {
-          status: 202,
-          payload: {
-            rows: [],
-            pagination: { page: 1, pageSize: 20, total: 0 },
-            summary: { rowCount: 0 },
-            filterConfig: [],
-            filterOptions: {},
-            readModelStatus: "refreshing",
-          },
-          etag: '"oa-refreshing"',
-        },
-        { status: 304, etag: '"oa-v1"', delay: slowConditional.promise },
-      ],
-    });
-
-    renderAuthenticatedAppAt("/oa-pending-payments");
-
-    const page = await screen.findByTestId("oa-pending-payments-page");
-    expect(await within(page).findByText("OA 待付款核对数据正在刷新")).toBeInTheDocument();
-    await waitFor(() => expect(rowsRequests(fetchMock)).toHaveLength(2), { timeout: 1_500 });
-    await new Promise((resolve) => window.setTimeout(resolve, 550));
-    expect(rowsRequests(fetchMock)).toHaveLength(2);
-    await act(async () => {
-      slowConditional.resolve();
-      await slowConditional.promise;
-    });
+    expect(rowCalls.every(([, init]) => !new Headers(init?.headers).has("If-None-Match"))).toBe(true);
   });
 
   test("does not let a late response overwrite a newer query", async () => {
@@ -1552,79 +1473,26 @@ describe("OA pending payments page", () => {
     expect(within(page).getByText("最新查询")).toBeInTheDocument();
   });
 
-  test("clears the old model on 202 and converges through the current page normal GET", async () => {
-    const changedPayload = {
-      ...rowsPayload,
-      rows: [
-        {
-          ...rowsPayload.rows[0],
-          oa: { ...rowsPayload.rows[0].oa, applicantName: "屏障后新数据" },
-        },
-      ],
-      pagination: { page: 1, pageSize: 20, total: 1 },
-      summary: { rowCount: 1, viewCounts: { completed: 1, in_progress: 0 } },
-    };
-    const fetchMock = installOaPendingPaymentsFetch({
-      rowsResponses: [
-        {
-          status: 202,
-          payload: {
-            rows: [],
-            pagination: { page: 1, pageSize: 20, total: 0 },
-            summary: { rowCount: 0 },
-            filterConfig: [],
-            filterOptions: {},
-            readModelStatus: "refreshing",
-            operationBarrierTargets: [
-              { readModelKey: "oa_pending_payment", scopeKey: "2026-06", scopeType: "oa_pending_payment" },
-            ],
-          },
-          etag: '"oa-refreshing"',
-        },
-        { status: 200, payload: changedPayload, etag: '"oa-v2"' },
-      ],
-    });
-
-    renderAuthenticatedAppAt("/oa-pending-payments");
-
-    const page = await screen.findByTestId("oa-pending-payments-page");
-    await waitFor(() => {
-      expect(within(page).getByText("OA 待付款核对数据正在刷新")).toBeInTheDocument();
-    }, {
-      timeout: 1_500,
-    });
-    expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
-
-    expect(await within(page).findByText("屏障后新数据", {}, { timeout: 2_500 })).toBeInTheDocument();
-    expect(rowsRequests(fetchMock)).toHaveLength(2);
-    expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
-  });
-
-  test("shows a neutral refreshing state instead of a true empty state while rows read model refreshes", async () => {
+  test("does not expose removed read-model runtime states in the empty UI", async () => {
     installOaPendingPaymentsFetch({
       rowsPayload: {
         ...rowsPayload,
         rows: [],
         pagination: { page: 1, pageSize: 20, total: 0 },
         summary: {},
-        readModelStatus: "refreshing",
-        read_model_status: "refreshing",
-        read_model_stale_reasons: ["oa_pending_payment_source_version_missing"],
       },
     });
 
     renderAuthenticatedAppAt("/oa-pending-payments");
 
     const page = await screen.findByTestId("oa-pending-payments-page");
-    expect(await within(page).findByText("OA 待付款核对数据正在刷新")).toBeInTheDocument();
-    expect(within(page).getByText("当前数据仍在刷新或等待后台任务完成，请稍后重试。")).toBeInTheDocument();
+    expect(await within(page).findByText("当前条件下暂无记录。")).toBeInTheDocument();
     expect(within(page).getByText("0-0 / 0")).toBeInTheDocument();
     expect(within(page).queryByText(/NaN|undefined/)).not.toBeInTheDocument();
-    expect(within(page).queryByText("当前条件下暂无记录。")).not.toBeInTheDocument();
-    expect(within(page).queryByText(/oa_pending_payment_source_version_missing/)).not.toBeInTheDocument();
+    expect(within(page).queryByText(/刷新或等待后台任务/)).not.toBeInTheDocument();
   });
 
-  test("shows neutral unavailable detail state while detail read model is refreshing", async () => {
+  test("shows a user-visible error when canonical detail loading fails", async () => {
     installOaPendingPaymentsFetch({
       rowsPayload: {
         ...rowsPayload,
@@ -1640,13 +1508,12 @@ describe("OA pending payments page", () => {
       },
       detailPayloads: {
         "/api/oa-pending-payments/oa/oa-refresh/detail": {
-          status: 202,
+          status: 503,
           payload: {
-            title: "OA详情",
-            detailAvailable: false,
-            unavailableReason: "详情数据正在刷新，请稍后重试。",
-            sections: [],
-            read_model_status: "refreshing",
+            error: {
+              code: "oa_pending_payment_service_unavailable",
+              message: "OA 详情暂不可用，请稍后重试。",
+            },
           },
         },
       },
@@ -1659,7 +1526,6 @@ describe("OA pending payments page", () => {
     await user.click(await within(page).findByRole("button", { name: "查看 OA 张三 详情" }));
 
     expect(await screen.findByRole("heading", { name: "OA详情" })).toBeInTheDocument();
-    expect(await screen.findByText("详情暂不可用")).toBeInTheDocument();
-    expect(screen.getByText("详情数据正在刷新，请稍后重试。")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("OA 详情暂不可用，请稍后重试。");
   });
 });

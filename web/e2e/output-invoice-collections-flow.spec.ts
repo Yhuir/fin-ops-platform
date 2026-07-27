@@ -923,41 +923,6 @@ test.describe("output invoice collections browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("shows read model refreshing diagnostics instead of stale rows or a true empty state", async ({ page }, testInfo) => {
-    const browserErrors = startStrictBrowserErrorCapture(page);
-    const api = await installDeterministicApiMocks(page, {
-      outputInvoiceCollectionReadModelStatus: "stale",
-      sessionMode: "full_access",
-    });
-    const recordLatency = createOutputInvoiceCollectionsLatencyRecorder(page, testInfo);
-
-    await recordLatency({
-      operationId: "output-invoice-collections.open-page-read-model-stale",
-      visibleLabel: "销项发票收款情况",
-      actionType: "navigate",
-    }, async (mark) => {
-      const rowsPromise = waitForOutputInvoiceRows(page);
-      await page.goto("/output-invoice-collections");
-      expect((await mark("apiLatencyMs", rowsPromise)).status()).toBe(202);
-      await mark("firstVisibleResponseLatencyMs", expect(page.getByTestId("output-invoice-collections-page")).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(page.getByText("销项发票收款情况数据正在刷新")).toBeVisible());
-    });
-    await expect(page.getByTestId("output-invoice-collections-page")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "销项发票收款情况" })).toBeVisible();
-
-    await expect(page.getByText("销项发票收款情况数据正在刷新")).toBeVisible();
-    await expect(page.getByText("当前数据仍在刷新或等待后台任务完成，请稍后重试。")).toBeVisible();
-    await expect(page.getByText("当前条件下暂无记录。")).toHaveCount(0);
-    await expect(page.getByText("XSFP-E2E-0001")).toHaveCount(0);
-    await expect(page.getByText("output_invoice_collection_stale")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "状态/提醒" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "待出收据" })).toHaveCount(0);
-
-    expect(api.count("GET /api/output-invoice-collections/rows")).toBeGreaterThanOrEqual(1);
-    expect(api.count("GET /api/output-invoice-collections/filter-options")).toBeGreaterThanOrEqual(1);
-    expect(browserErrors).toEqual([]);
-  });
-
   test("downloads the current filtered output collection rows without paginating the export", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, { sessionMode: "read_export_only" });

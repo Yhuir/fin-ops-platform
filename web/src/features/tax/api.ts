@@ -11,7 +11,6 @@ import type {
   TaxOffsetPlanSaveResult,
   TaxSummary,
 } from "./types";
-import type { OperationBarrierTarget } from "../operationBarrier/api";
 import { apiRequestJson } from "../apiClient";
 
 type ApiTaxSummary = {
@@ -84,11 +83,7 @@ type ApiTaxMonthPayload = {
     selected_invoice_count?: number | null;
     unselected_invoice_count?: number | null;
   } | null;
-  read_model_status?: string;
-  read_model_scope_key?: string;
-  read_model_generated_at?: string | null;
-  read_model_stale_reasons?: string[];
-  source_versions?: Record<string, unknown>;
+  canonical_snapshot_version: string;
 };
 
 type ApiTaxCalculatePayload = {
@@ -176,12 +171,6 @@ type ApiTaxCertifiedImportConfirmPayload = {
   success?: boolean;
   batch?: ApiTaxCertifiedImportBatch;
   import_job?: ApiTaxCertifiedImportJob;
-  read_model_scope_keys?: unknown;
-  readModelScopeKeys?: unknown;
-  freshness_targets?: unknown;
-  freshnessTargets?: unknown;
-  operation_barrier_targets?: unknown;
-  operationBarrierTargets?: unknown;
 };
 
 type ApiTaxCertifiedImportJobPayload = {
@@ -190,20 +179,14 @@ type ApiTaxCertifiedImportJobPayload = {
 
 type ApiTaxOffsetPlanSavePayload = {
   status: "saved";
-  read_model_scope_keys?: unknown;
-  readModelScopeKeys?: unknown;
-  freshness_targets?: unknown;
-  freshnessTargets?: unknown;
-  operation_barrier_targets?: unknown;
-  operationBarrierTargets?: unknown;
+  affected_scope_keys?: unknown;
   plan: {
     id: string;
     month: string;
     selected_output_ids: string[];
     selected_input_ids: string[];
     summary: ApiTaxSummary;
-    read_model_scope_key?: string;
-    source_versions?: Record<string, unknown>;
+    canonical_snapshot_version: string;
     updated_at?: string;
   };
 };
@@ -226,34 +209,6 @@ function arrayValue(value: unknown): unknown[] {
 
 function stringList(value: unknown): string[] {
   return arrayValue(value).map((item) => String(item).trim()).filter(Boolean);
-}
-
-function targetList(value: unknown): OperationBarrierTarget[] {
-  const result: OperationBarrierTarget[] = [];
-  const seen = new Set<string>();
-  arrayValue(value).forEach((item) => {
-    if (!item || typeof item !== "object") {
-      return;
-    }
-    const raw = item as Record<string, unknown>;
-    const readModelKey = String(raw.readModelKey ?? raw.read_model_key ?? "").trim();
-    const scopeKey = String(raw.scopeKey ?? raw.scope_key ?? "").trim();
-    const scopeType = String(raw.scopeType ?? raw.scope_type ?? "").trim();
-    if (!readModelKey || !scopeKey) {
-      return;
-    }
-    const key = `${readModelKey}\u0000${scopeKey}\u0000${scopeType}`;
-    if (seen.has(key)) {
-      return;
-    }
-    seen.add(key);
-    result.push({
-      readModelKey,
-      scopeKey,
-      ...(scopeType ? { scopeType } : {}),
-    });
-  });
-  return result;
 }
 
 function formatMoney(value: number) {
@@ -370,12 +325,7 @@ function mapPreviewFile(file: ApiTaxCertifiedImportPreviewFile): TaxCertifiedImp
   };
 }
 
-function mapCertifiedImportBatch(
-  batch: ApiTaxCertifiedImportBatch,
-  payload?: ApiTaxCertifiedImportConfirmPayload,
-): TaxCertifiedImportConfirmedResult {
-  const freshnessTargets = targetList(payload?.freshness_targets ?? payload?.freshnessTargets);
-  const operationBarrierTargets = targetList(payload?.operation_barrier_targets ?? payload?.operationBarrierTargets);
+function mapCertifiedImportBatch(batch: ApiTaxCertifiedImportBatch): TaxCertifiedImportConfirmedResult {
   return {
     status: "confirmed",
     batchId: batch.id,
@@ -384,9 +334,6 @@ function mapCertifiedImportBatch(
     fileCount: batch.file_count,
     months: batch.months,
     persistedRecordCount: batch.persisted_record_count,
-    readModelScopeKeys: stringList(payload?.read_model_scope_keys ?? payload?.readModelScopeKeys),
-    freshnessTargets,
-    operationBarrierTargets: operationBarrierTargets.length > 0 ? operationBarrierTargets : freshnessTargets,
   };
 }
 
@@ -435,6 +382,10 @@ export async function fetchTaxOffsetMonth(month: string, signal?: AbortSignal): 
   const certifiedMatchedRows = payload.certified_matched_rows ?? [];
   const certifiedOutsidePlanRows = payload.certified_outside_plan_rows ?? [];
   const lockedCertifiedInputIds = payload.locked_certified_input_ids ?? [];
+  const canonicalSnapshotVersion = payload.canonical_snapshot_version?.trim();
+  if (!canonicalSnapshotVersion) {
+    throw new Error("Tax offset canonical snapshot version is missing.");
+  }
 
   const monthData: TaxMonthData = {
     outputInvoices: payload.output_items.map(mapOutputItem),
@@ -456,18 +407,8 @@ export async function fetchTaxOffsetMonth(month: string, signal?: AbortSignal): 
       selectedInvoiceCount: optionalCount(payload.statistics.selected_invoice_count),
       unselectedInvoiceCount: optionalCount(payload.statistics.unselected_invoice_count),
     } : undefined,
-    readModelStaleReasons: payload.read_model_stale_reasons ?? [],
-    sourceVersions: payload.source_versions ?? {},
+    canonicalSnapshotVersion,
   };
-  if (payload.read_model_status !== undefined) {
-    monthData.readModelStatus = payload.read_model_status;
-  }
-  if (payload.read_model_scope_key !== undefined) {
-    monthData.readModelScopeKey = payload.read_model_scope_key;
-  }
-  if (payload.read_model_generated_at !== undefined) {
-    monthData.readModelGeneratedAt = payload.read_model_generated_at;
-  }
   return monthData;
 }
 
@@ -493,8 +434,7 @@ export async function saveTaxOffsetPlan(params: {
   month: string;
   selectedOutputIds: string[];
   selectedInputIds: string[];
-  expectedReadModelScopeKey?: string;
-  expectedSourceVersions?: Record<string, unknown>;
+  expectedCanonicalSnapshotVersion: string;
   idempotencyKey: string;
 }): Promise<TaxOffsetPlanSaveResult> {
   const payload = await requestJson<ApiTaxOffsetPlanSavePayload>("/api/tax-offset/plans", {
@@ -504,26 +444,20 @@ export async function saveTaxOffsetPlan(params: {
       month: params.month,
       selected_output_ids: params.selectedOutputIds,
       selected_input_ids: params.selectedInputIds,
-      expected_read_model_scope_key: params.expectedReadModelScopeKey,
-      expected_source_versions: params.expectedSourceVersions ?? {},
+      expected_canonical_snapshot_version: params.expectedCanonicalSnapshotVersion,
       idempotency_key: params.idempotencyKey,
     }),
   });
-  const freshnessTargets = targetList(payload.freshness_targets ?? payload.freshnessTargets);
-  const operationBarrierTargets = targetList(payload.operation_barrier_targets ?? payload.operationBarrierTargets);
   return {
     status: payload.status,
-    readModelScopeKeys: stringList(payload.read_model_scope_keys ?? payload.readModelScopeKeys),
-    freshnessTargets,
-    operationBarrierTargets: operationBarrierTargets.length > 0 ? operationBarrierTargets : freshnessTargets,
+    affectedScopeKeys: stringList(payload.affected_scope_keys),
     plan: {
       id: payload.plan.id,
       month: payload.plan.month,
       selectedOutputIds: payload.plan.selected_output_ids,
       selectedInputIds: payload.plan.selected_input_ids,
       summary: mapSummary(payload.plan.summary),
-      readModelScopeKey: payload.plan.read_model_scope_key,
-      sourceVersions: payload.plan.source_versions,
+      canonicalSnapshotVersion: payload.plan.canonical_snapshot_version,
       updatedAt: payload.plan.updated_at,
     },
   };
@@ -579,7 +513,7 @@ export async function confirmTaxCertifiedImport(sessionId: string): Promise<TaxC
   if (!payload.batch) {
     throw new Error("Confirmed tax certified import response is missing batch.");
   }
-  return mapCertifiedImportBatch(payload.batch, payload);
+  return mapCertifiedImportBatch(payload.batch);
 }
 
 export async function fetchTaxCertifiedImportJob(importJobId: string): Promise<TaxCertifiedImportJob> {

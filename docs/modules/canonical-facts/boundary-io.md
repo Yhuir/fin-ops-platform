@@ -33,6 +33,7 @@
 | --- | --- | --- |
 | Canonical write | 页面 API、worker、业务 service、repair 工具 | 必须进入 fact owner 的 command/application service、UoW、repository port 或明确 adapter。 |
 | Canonical read | 页面 service、read model builder、audit/repair 工具 | 必须走 owner 暴露的 read/query port；直接 SQL 读取必须在模块边界中登记。 |
+| Workbench page canonical read | `PostgresWorkbenchCanonicalQueryRepository` | 已登记的跨 owner 只读聚合：一个 `REPEATABLE READ READ ONLY` snapshot 内读取 OA、银行、发票、ETC snapshots 与 active formal relations；只服务关联台 API，不写 owner 表、不调用外部源、不成为 `UnifiedFactSource`。 |
 | Cross-module mutation | 非 owner 模块 | 只能调用 owner 公开边界，不能直接改表。 |
 | Runtime repair | 运维脚本、受控工具 | 必须 dry-run、审计、记录 rollback manifest，并说明 owner。 |
 
@@ -72,6 +73,7 @@
 - 允许依赖：owner module 的 public command/read port、repository port、derived lifecycle producer、read model refresh gateway。
 - 必须通过：owner boundary 或同事务等价 writer。
 - 禁止绕过：非 owner direct SQL writes、production full snapshot fallback、read model 反向写 canonical fact、Redis/RabbitMQ/frontend event 作为业务事实源。
+- 关联台页面可以通过已登记的 page-specific repository 聚合多个 owner 的只读事实；SQL 不得扩散到 route/service，也不得被其它页面当作统一查询层复用。
 
 ## 测试与验证
 

@@ -19,7 +19,6 @@ from openpyxl import load_workbook
 
 from fin_ops_platform.app.server import (
     Application,
-    WORKBENCH_READ_MODEL_SCHEMA_VERSION,
     _build_handler_factory,
 )
 from tests.app_test_support import build_local_state_application as build_application
@@ -196,7 +195,7 @@ class RelationDistributionFacadeStub:
             "stale_reasons": [],
         }
 
-class BankDetailReadModelFixture:
+class BankDetailCanonicalQueryFixture:
     def __init__(self, app: Application) -> None:
         self._app = app
 
@@ -215,50 +214,44 @@ class BankDetailReadModelFixture:
             months.add(month)
         return sorted(months) or ["all"]
 
-    def bank_detail_scope_summary(self, *, scope_keys: list[str]) -> dict[str, object]:
-        return {
-            "read_model_status": "fresh",
-            "read_model_scope_keys": list(scope_keys),
-            "read_model_generated_at": "2026-07-05T00:00:00+00:00",
-            "read_model_scope_signatures": {},
-        }
-
     def list_bank_detail_transactions(self, **kwargs: object) -> dict[str, object]:
-        payload = self._app._bank_details_service.list_transactions(**kwargs)
-        return {
-            **payload,
-            "read_model_status": "fresh",
-            "read_model_scope_keys": self.bank_detail_scope_keys_for_range(
-                date_from=kwargs.get("date_from") if isinstance(kwargs.get("date_from"), str) else None,
-                date_to=kwargs.get("date_to") if isinstance(kwargs.get("date_to"), str) else None,
-            ),
-            "read_model_generated_at": "2026-07-05T00:00:00+00:00",
-        }
+        return self._app._bank_details_service.list_transactions(**kwargs)
 
     def list_bank_detail_accounts(self, *, date_from: str | None = None, date_to: str | None = None) -> dict[str, object]:
-        payload = self._app._bank_details_service.list_accounts(date_from=date_from, date_to=date_to)
-        return {
-            **payload,
-            "read_model_status": "fresh",
-            "read_model_scope_keys": self.bank_detail_scope_keys_for_range(date_from=date_from, date_to=date_to),
-            "read_model_generated_at": "2026-07-05T00:00:00+00:00",
-        }
+        return self._app._bank_details_service.list_accounts(date_from=date_from, date_to=date_to)
 
-    def list_bank_account_balances(
+    def accounts_payload(
         self,
         *,
         date_from: str | None = None,
         date_to: str | None = None,
-        tenant_id: str = "default",
     ) -> dict[str, object]:
-        del tenant_id
-        payload = self._app._bank_details_service.list_accounts(date_from=date_from, date_to=date_to)
+        return self.list_bank_detail_accounts(date_from=date_from, date_to=date_to)
+
+    def transactions_payload(self, **kwargs: object) -> dict[str, object]:
+        return self.list_bank_detail_transactions(**kwargs)
+
+    def export_payload(
+        self,
+        *,
+        include_accounts: bool,
+        **kwargs: object,
+    ) -> dict[str, object]:
+        transaction_kwargs = {
+            **kwargs,
+            "page": 1,
+            "page_size": BANK_DETAIL_EXPORT_ROW_LIMIT + 1,
+        }
         return {
-            **payload,
-            "read_model_status": "fresh",
-            "balance_read_model_status": "fresh",
-            "read_model_scope_keys": self.bank_detail_scope_keys_for_range(date_from=date_from, date_to=date_to),
-            "read_model_generated_at": "2026-07-05T00:00:00+00:00",
+            "transactions": self.list_bank_detail_transactions(**transaction_kwargs),
+            "accounts": (
+                self.list_bank_detail_accounts(
+                    date_from=kwargs.get("date_from") if isinstance(kwargs.get("date_from"), str) else None,
+                    date_to=kwargs.get("date_to") if isinstance(kwargs.get("date_to"), str) else None,
+                )
+                if include_accounts
+                else None
+            ),
         }
 
 class WorkbenchV2ApiTests(unittest.TestCase):
@@ -309,11 +302,12 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         app._bank_details_relation_tag_projection_service._relation_facade = facade
         return facade
 
-    def _install_bank_detail_read_model_fixture(self, app: Application) -> BankDetailReadModelFixture:
-        repository = BankDetailReadModelFixture(app)
-        app._bank_detail_sql_read_repository = repository
-        app._bank_account_balance_sql_read_repository = repository
-        return repository
+    def _install_bank_detail_canonical_query_fixture(self, app: Application) -> BankDetailCanonicalQueryFixture:
+        query_service = BankDetailCanonicalQueryFixture(app)
+        application_service = app._bank_details_application_service()
+        application_service._query_service = query_service
+        app._bank_details_application_service = lambda: application_service
+        return query_service
 
     def test_http_server_dispatches_patch_bank_transaction_categories(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -362,7 +356,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 summary="网银手续费",
                 remark="转账手续费",
             )
-            self._install_bank_detail_read_model_fixture(app)
+            self._install_bank_detail_canonical_query_fixture(app)
 
             response = app.handle_request(
                 "GET",
@@ -408,7 +402,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 summary="工资发放",
                 remark="员工工资",
             )
-            self._install_bank_detail_read_model_fixture(app)
+            self._install_bank_detail_canonical_query_fixture(app)
 
             response = app.handle_request(
                 "GET",
@@ -437,7 +431,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 summary="网银手续费",
                 remark="转账手续费",
             )
-            self._install_bank_detail_read_model_fixture(app)
+            self._install_bank_detail_canonical_query_fixture(app)
 
             response = app.handle_request(
                 "GET",
@@ -475,7 +469,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 summary="网银手续费",
                 remark="跨页目标用途",
             )
-            self._install_bank_detail_read_model_fixture(app)
+            self._install_bank_detail_canonical_query_fixture(app)
 
             response = app.handle_request(
                 "GET",
@@ -518,7 +512,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                     }
                 ],
             )
-            self._install_bank_detail_read_model_fixture(app)
+            self._install_bank_detail_canonical_query_fixture(app)
 
             response = app.handle_request(
                 "GET",
@@ -554,7 +548,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
     def test_bank_details_export_api_validates_account_mode_and_row_limit(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            repository = self._install_bank_detail_read_model_fixture(app)
+            repository = self._install_bank_detail_canonical_query_fixture(app)
             missing_account_response = app.handle_request(
                 "GET",
                 "/api/bank-details/transactions/export?mode=account",
@@ -579,42 +573,41 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(row_limit_response.status_code, 400)
         self.assertEqual(json.loads(row_limit_response.body)["error"], "bank_detail_export_row_limit_exceeded")
 
-    def test_bank_details_export_api_uses_sql_read_model_refresh_contract_in_sql_runtime(self) -> None:
+    def test_bank_details_export_api_uses_canonical_query_without_retired_read_model_refresh(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            class FakeBankDetailSqlReadRepository:
+
+            class FakeCanonicalQueryService:
                 def __init__(self) -> None:
                     self.called = False
 
-                def bank_detail_scope_keys_for_range(self, *, date_from: str | None, date_to: str | None) -> list[str]:
-                    return ["2026-04", "2026-05"]
-
-                def bank_detail_scope_summary(self, *, scope_keys: list[str]) -> dict[str, object]:
-                    return {
-                        "read_model_status": "refreshing",
-                        "read_model_scope_keys": list(scope_keys),
-                        "read_model_generated_at": None,
-                        "read_model_scope_signatures": {},
-                    }
-
-                def list_bank_detail_transactions(self, **_kwargs: object) -> dict[str, object]:
+                def export_payload(self, **_kwargs: object) -> dict[str, object]:
                     self.called = True
                     return {
-                        "account_key": None,
-                        "date_from": "2026-04-01",
-                        "date_to": "2026-05-18",
-                        "rows": [],
-                        "category_counts": {"uncategorized": 0},
-                        "pagination": {"page": 1, "page_size": 100, "total": 0},
-                        "read_model_status": "refreshing",
-                        "cache_status": "bypass",
+                        "transactions": {
+                            "account_key": None,
+                            "date_from": "2026-04-01",
+                            "date_to": "2026-05-18",
+                            "rows": [],
+                            "category_counts": {"uncategorized": 0},
+                            "pagination": {"page": 1, "page_size": 100, "total": 0},
+                        },
+                        "accounts": None,
                     }
 
-            sql_repository = FakeBankDetailSqlReadRepository()
-            with (
-                patch.object(app, "_requires_sql_read_model_runtime", return_value=True),
-                patch.object(app, "_bank_detail_sql_read_repository", sql_repository),
-                patch.object(app._bank_details_service, "list_transactions", side_effect=AssertionError("export should not bypass SQL read model")),
+            canonical_query = FakeCanonicalQueryService()
+            application_service = app._bank_details_application_service()
+            application_service._query_service = canonical_query
+            app._bank_details_application_service = lambda: application_service
+            app._bank_detail_sql_read_repository = SimpleNamespace(
+                list_bank_detail_transactions=lambda **_kwargs: (_ for _ in ()).throw(
+                    AssertionError("retired bank-detail read model must not be queried")
+                )
+            )
+            with patch.object(
+                app._bank_details_service,
+                "list_transactions",
+                side_effect=AssertionError("canonical export must not use the legacy page service"),
             ):
                 response = app.handle_request(
                     "GET",
@@ -622,10 +615,9 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 )
             audit_entries = app._audit_service.as_dicts()
 
-        self.assertEqual(response.status_code, 202)
-        self.assertEqual(json.loads(response.body)["read_model_status"], "refreshing")
-        self.assertTrue(sql_repository.called)
-        self.assertFalse(any(entry["action"] == "bank_detail_export_downloaded" for entry in audit_entries))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(canonical_query.called)
+        self.assertTrue(any(entry["action"] == "bank_detail_export_downloaded" for entry in audit_entries))
 
     def test_bank_details_api_projects_workbench_relation_tags(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -649,7 +641,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                     }
                 ],
             )
-            self._install_bank_detail_read_model_fixture(app)
+            self._install_bank_detail_canonical_query_fixture(app)
             linked_response = app.handle_request(
                 "GET",
                 "/api/bank-details/transactions?account_key=%E5%B7%A5%E5%95%86%E9%93%B6%E8%A1%8C%3A6386",
@@ -666,7 +658,6 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                     }
                 ]
             )
-            app._bank_details_relation_tag_projection_service.clear_cache()
             unlinked_response = app.handle_request(
                 "GET",
                 "/api/bank-details/transactions?account_key=%E5%B7%A5%E5%95%86%E9%93%B6%E8%A1%8C%3A6386",
@@ -741,7 +732,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             }
 
             self.assertIn(candidate_case_id, json.dumps(raw_payload, ensure_ascii=False))
-            self._install_bank_detail_read_model_fixture(app)
+            self._install_bank_detail_canonical_query_fixture(app)
             response = app.handle_request(
                 "GET",
                 "/api/bank-details/transactions?date_from=2026-03-12&date_to=2026-03-12&page_size=500",
@@ -763,7 +754,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 summary="网银手续费",
                 remark="转账手续费",
             )
-            self._install_bank_detail_read_model_fixture(app)
+            self._install_bank_detail_canonical_query_fixture(app)
 
             save_response = app.handle_request(
                 "PATCH",
@@ -906,50 +897,15 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             MongoOAAdapter._attachment_invoice_cache_parser_version(),
         )
 
-    def test_get_api_workbench_ignored_does_not_fall_back_to_cached_read_model(self) -> None:
-        app = build_application()
-        app._workbench_read_model_service.upsert_read_model(
-            scope_key="all",
-            payload={
-                "month": "all",
-                "summary": {
-                    "oa_count": 0,
-                    "bank_count": 0,
-                    "invoice_count": 0,
-                    "paired_count": 0,
-                    "unpaired_count": 0,
-                    "exception_count": 0,
-                },
-                "paired": {"groups": []},
-                "unpaired": {"groups": []},
-            },
-            ignored_rows=[
-                {
-                    "id": "bk-ignored-001",
-                    "type": "bank",
-                    "counterparty_name": "测试忽略流水",
-                }
-            ],
-            generated_at="2026-04-08T12:00:00+00:00",
-        )
-
-        response = app.handle_request("GET", "/api/workbench/ignored?month=all")
-
-        self.assertEqual(response.status_code, int(HTTPStatus.SERVICE_UNAVAILABLE))
-        payload = json.loads(response.body)
-        self.assertEqual(payload["error"], "read_model_unavailable")
-        self.assertEqual(payload["read_model_status"], "unavailable")
-        self.assertEqual(payload["scope_key"], "all")
-
-    def test_get_api_workbench_ignored_uses_sql_read_model_without_rebuild(self) -> None:
-        class SqlReadRepository:
+    def test_get_api_workbench_ignored_uses_canonical_repository_without_rebuild(self) -> None:
+        class CanonicalReadRepository:
             def list_workbench_ignored_rows(self, *, scope_key: str) -> list[dict[str, object]]:
                 self.scope_key = scope_key
                 return [{"id": "bk-sql-ignored-001", "type": "bank"}]
 
         app = build_application()
-        repository = SqlReadRepository()
-        app._workbench_sql_read_repository = repository
+        repository = CanonicalReadRepository()
+        app._workbench_canonical_query_repository = repository
 
         response = app.handle_request("GET", "/api/workbench/ignored?month=all")
 
@@ -1167,47 +1123,6 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         confirm_payload = json.loads(confirm_response.body)
         self.assertEqual(confirm_payload["action"], "confirm_link")
         self.assertEqual(confirm_payload["affected_row_ids"], ["oa-o-202603-001", "txn-live-202603-001"])
-
-    def test_oa_attachment_invoice_cache_update_marks_related_scopes_dirty_without_evicting(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._workbench_read_model_service.upsert_read_model(scope_key="all", payload={"month": "all"})
-            app._workbench_read_model_service.upsert_read_model(scope_key="2026-03", payload={"month": "2026-03"})
-            enqueued: list[dict[str, object]] = []
-            app._runtime_repositories = SimpleNamespace(
-                queue_repository=SimpleNamespace(enqueue=lambda **kwargs: enqueued.append(kwargs))
-            )
-
-            app._handle_oa_attachment_invoice_cache_updated(["2026-03"])
-            app._app_status_runtime_statuses = lambda: {
-                "read_model_statuses": None,
-                "outbox_statuses": {
-                    "oa.sync": {
-                        "status": "pending",
-                        "count": len(enqueued),
-                        "scopes": [
-                            {
-                                "event_type": event["event_type"],
-                                "scope_type": event["scope_type"],
-                                "scope_key": event["scope_key"],
-                                "status": "pending",
-                                "count": 1,
-                            }
-                            for event in enqueued
-                        ],
-                    }
-                },
-                "worker_statuses": {"oa-sync": {"status": "ready"}},
-            }
-            app._postgres_oa_projection_latest_sync_run = lambda: None
-            status_payload = json.loads(app.handle_request("GET", "/api/oa-sync/status").body)
-
-        self.assertIsNotNone(app._workbench_read_model_service.get_read_model("all"))
-        self.assertIsNotNone(app._workbench_read_model_service.get_read_model("2026-03"))
-        self.assertEqual([event["event_type"] for event in enqueued], ["oa.sync", "oa.sync"])
-        self.assertCountEqual([event["scope_key"] for event in enqueued], ["2026-03", "all"])
-        self.assertEqual(status_payload["status"], "refreshing")
-        self.assertCountEqual(status_payload["dirty_scopes"], ["2026-03", "all"])
 
     def test_oa_attachment_invoice_cache_update_does_not_create_missing_invoice_by_default(self) -> None:
         attachment_invoice = {

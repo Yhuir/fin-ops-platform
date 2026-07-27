@@ -12,7 +12,7 @@ from tests.app_test_support import build_local_state_application as build_applic
 from fin_ops_platform.domain.enums import TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction
 from fin_ops_platform.services.imports import ImportNormalizationService
-from fin_ops_platform.services.no_oa_bank_batch_service import BANK_FLOW_RULE_BATCH_RELATION_MODE
+from fin_ops_platform.services.bank_batch_application_service import canonical_snapshot_version
 from fin_ops_platform.services.no_oa_managed_rule_policy import NO_OA_MANAGED_BATCH_TYPE_ORDER
 
 
@@ -171,9 +171,12 @@ class NoOaBankBatchApiTests(unittest.TestCase):
             list_no_oa_bank_batch_rows=lambda filters: batch_service.list_batches(filters),
             list_bank_flow_rule_batch_rows=lambda filters: batch_service.list_batches(filters),
             read_page=read_bank_flow_rule_batch_page,
+            read_batch=lambda batch_id: batch_service.get_batch(batch_id),
+            read_submitted_batches=lambda: batch_service.list_batches({"bucket": "submitted"}),
         )
         app._no_oa_bank_batch_sql_read_repository = repository
         app._bank_flow_rule_batch_sql_read_repository = repository
+        app._bank_flow_rule_batch_canonical_query_repository = repository
 
     def _app_with_transactions(
         self,
@@ -218,15 +221,6 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.body)
         return json.loads(response.body)
 
-    def _list_bank_flow_batches(self, app, query: str = ""):
-        app._no_oa_bank_batch_application_service().refresh_batches(
-            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
-        )
-        self._install_runtime_read_model_repository(app)
-        response = app.handle_request("GET", f"/api/bank-flow-rule-batches{query}")
-        self.assertEqual(response.status_code, 200, response.body)
-        return json.loads(response.body)
-
     def test_list_returns_summary_and_batches(self) -> None:
         app = self._app_with_transactions(
             [
@@ -255,15 +249,37 @@ class NoOaBankBatchApiTests(unittest.TestCase):
                 return (rows, len(rows)) if page == 1 else ([], len(rows))
 
         class CategoryProvider:
+            @staticmethod
+            def _transaction_id(row):
+                if isinstance(row, dict):
+                    return str(row.get("id") or "")
+                return str(getattr(row, "id", "") or "")
+
             def bulk_get_for_rows(self, rows):
                 return {
-                    str(row.get("id")): {
-                        "transaction_id": str(row.get("id")),
+                    self._transaction_id(row): {
+                        "transaction_id": self._transaction_id(row),
                         "category_code": "fee",
                         "category_label": "手续费",
                         "category_source": "manual",
                     }
                     for row in rows
+                }
+
+            def canonical_category_source_proof_for_rows(self, rows):
+                categories = self.bulk_get_for_rows(rows)
+                proof_rows = [
+                    {
+                        "transaction_id": transaction_id,
+                        "category_code": category["category_code"],
+                        "category_source": category["category_source"],
+                    }
+                    for transaction_id, category in sorted(categories.items())
+                ]
+                return {
+                    "source": "app.bank_transactions",
+                    "row_count": len(proof_rows),
+                    "membership_category_digest": canonical_snapshot_version(proof_rows),
                 }
 
         app = build_application()
@@ -550,50 +566,12 @@ class NoOaBankBatchApiTests(unittest.TestCase):
             self.assertEqual(payload["pair_relation"]["relation_mode"], "no_oa_bank_batch")
             self.assertEqual(payload["affected_months"], ["2026-03"])
             self.assertEqual(payload["affected_scope_keys"], ["2026-03"])
-            self.assertEqual(
-                payload["operation_barrier_targets"],
-                [],
-            )
+            self.assertNotIn("operation_barrier_targets", payload)
             self.assertNotIn("workbench_rebuild_queued", payload)
             self.assertEqual(payload["results"][0]["status"], "submitted")
             self.assertEqual(app._state_store.load_no_oa_bank_batches()["batches"][batch["batch_id"]]["status"], "submitted")
             pair_relations = app._state_store.load().get("workbench_pair_relations", {}).get("pair_relations", {})
             self.assertIn(payload["pair_relation"]["case_id"], pair_relations)
-
-    def test_bank_flow_submit_selection_appears_only_in_bank_flow_submitted_list(self) -> None:
-        app = self._app_with_transactions([bank_transaction("bank-202603-fee-1", amount="3.00")])
-        current_rules = app._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload()
-        app._app_settings_service.update_bank_flow_rule_batch_tag_rules(
-            {
-                "expected_version": current_rules["version"],
-                "rules": [{"tag_code": "fee", "requires_oa": False, "requires_invoice": False}],
-            },
-            actor_id="tester",
-        )
-        batch = self._list_bank_flow_batches(app, "?bucket=unsubmitted")["batches"][0]
-
-        response = app.handle_request(
-            "POST",
-            "/api/bank-flow-rule-batches/submit-selection",
-            body=json.dumps({"transaction_ids": batch["row_ids"], "note": "流水规则批量提交"}),
-        )
-        payload = json.loads(response.body)
-        app._workbench_relation_facade = FakeNoOaRelationFacade(app._workbench_pair_relation_service.list_active_relations())
-
-        submitted_payload = self._list_bank_flow_batches(app, "?bucket=submitted")
-        no_oa_submitted_payload = self._list_batches(app, "?bucket=submitted")
-
-        self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(payload["batch"]["status_bucket"], "submitted")
-        self.assertEqual(payload["batch"]["relation_mode"], BANK_FLOW_RULE_BATCH_RELATION_MODE)
-        self.assertEqual(payload["pair_relation"]["relation_mode"], BANK_FLOW_RULE_BATCH_RELATION_MODE)
-        self.assertEqual(
-            payload["operation_barrier_targets"],
-            [],
-        )
-        self.assertEqual([item["batch_id"] for item in submitted_payload["batches"]], [payload["batch"]["batch_id"]])
-        self.assertEqual(submitted_payload["batches"][0]["relation_mode"], BANK_FLOW_RULE_BATCH_RELATION_MODE)
-        self.assertEqual(no_oa_submitted_payload["batches"], [])
 
     def test_submit_returns_error_and_rolls_back_when_no_oa_batch_persistence_fails(self) -> None:
         class FailingNoOaBatchStore:
@@ -663,7 +641,8 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         self.assertEqual(payload["pair_relation"]["relation_mode"], "no_oa_bank_batch")
         self.assertEqual(payload["pair_relation"]["row_ids"], ["bank-202603-fee-1"])
         self.assertEqual(payload["affected_months"], ["2026-03"])
-        self.assertEqual(payload["freshness_targets"], [])
+        self.assertEqual(payload["affected_scope_keys"], ["2026-03"])
+        self.assertNotIn("freshness_targets", payload)
         self.assertNotIn("workbench_rebuild_queued", payload)
 
     def test_withdraw_cancels_pair_relation_and_persists_snapshot(self) -> None:
@@ -688,11 +667,9 @@ class NoOaBankBatchApiTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200, response.body)
             self.assertEqual(payload["batch"]["status"], "withdrawn")
             self.assertEqual(payload["affected_months"], ["2026-03"])
-            self.assertEqual(payload["read_model_scope_keys"], ["2026-03"])
-            self.assertEqual(
-                payload["operation_barrier_targets"],
-                [],
-            )
+            self.assertEqual(payload["affected_scope_keys"], ["2026-03"])
+            self.assertNotIn("read_model_scope_keys", payload)
+            self.assertNotIn("operation_barrier_targets", payload)
             self.assertEqual(payload["pair_relation"]["status"], "cancelled")
             self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id(submitted["relation_case_id"]))
             self.assertEqual(app._state_store.load_no_oa_bank_batches()["batches"][submitted["batch_id"]]["status"], "withdrawn")
@@ -739,7 +716,7 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["failed"], 1)
         self.assertEqual(payload["affected_months"], ["2026-03"])
         self.assertEqual(payload["affected_scope_keys"], ["2026-03"])
-        self.assertEqual(payload["freshness_targets"], [])
+        self.assertNotIn("freshness_targets", payload)
         self.assertEqual([result["status"] for result in payload["results"]], ["submitted", "failed"])
         self.assertEqual(payload["results"][1]["error"], "no_oa_bank_batch_version_conflict")
 

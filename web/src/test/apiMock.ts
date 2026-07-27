@@ -19,10 +19,6 @@ type MockFetchHandler = (request: {
 type MockApiOptions = {
   workbenchErrorMonths?: string[];
   workbenchEmptyPayload?: boolean;
-  workbenchReadModelStatus?: "fresh" | "refreshing" | "stale" | "failed" | "unavailable";
-  workbenchReadModelVersions?: string[];
-  workbenchRefreshStatus?: Record<string, unknown>;
-  workbenchRefreshStatusSequence?: Array<Record<string, unknown>>;
   taxErrorMonths?: string[];
   costErrorMonths?: string[];
   costExplorerFailuresBeforeSuccess?: number;
@@ -94,14 +90,9 @@ type MockApiOptions = {
   includeOaAttachmentPaymentReceipt?: boolean;
   initialImportPreviewFileNames?: string[];
   initialImportPreviewOverrides?: Array<Record<string, string | null | undefined>>;
-  bankDetailAccountReadModelStatuses?: Array<"fresh" | "refreshing" | "stale" | "schema_mismatch">;
-  bankDetailTransactionReadModelStatuses?: Array<"fresh" | "refreshing" | "stale" | "schema_mismatch">;
-  bankDetailInitialAccountReadModelStatus?: "fresh" | "refreshing" | "stale" | "schema_mismatch";
-  bankDetailInitialTransactionReadModelStatus?: "fresh" | "refreshing" | "stale" | "schema_mismatch";
   bankDetailPostSaveAccountsTotalBalance?: string;
-  bankDetailRefreshingTransactionsEmpty?: boolean;
+  bankDetailPostSaveTransactionsEmpty?: boolean;
   bankDetailManualAssignmentActive?: boolean;
-  bankDetailManualClearReadModelStatuses?: Array<"fresh" | "refreshing" | "stale" | "schema_mismatch">;
 };
 
 const templateRegistry = [
@@ -4155,7 +4146,6 @@ function buildCostStatisticsExplorerPayload(
 
   return {
     month,
-    read_model_status: "fresh",
     summary: {
       row_count: timeRows.length,
       transaction_count: timeRows.length,
@@ -4742,13 +4732,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
   const turnoverExtraStore = new Map<string, Record<string, unknown>>();
   let latestEtcImportPreview = etcInvoiceStore.previewZip([]);
   let bankDetailAutoTagRulesSaved = false;
-  let bankDetailPostSaveAccountRequestCount = 0;
-  let bankDetailPostSaveTransactionRequestCount = 0;
   let bankDetailManualAssignmentActive = Boolean(options.bankDetailManualAssignmentActive);
-  let bankDetailManualClearPending = false;
-  let bankDetailManualClearReadModelStatusIndex = 0;
   let workbenchWriteActionCount = 0;
-  let workbenchRefreshStatusIndex = 0;
   const workbenchStateStore = createWorkbenchStateStore(options);
   const ignoredRowStore = createIgnoredRowStore();
   const taxOffsetStateStore = createTaxOffsetStateStore();
@@ -4864,8 +4849,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
   const dataResetJobs = new Map<string, Record<string, unknown>>();
   let backgroundJobs = cloneJson(options.backgroundJobs ?? []);
   let workbenchOaSyncStatusIndex = 0;
-  let workbenchReadModelVersionIndex = 0;
-  let workbenchReadModelVersion = options.workbenchReadModelVersions?.[0] ?? "mock-workbench-generation-1";
   let appHealthDashboardIndex = 0;
 
   const handlers: Record<string, MockFetchHandler> = {
@@ -4940,11 +4923,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       if (options.workbenchErrorMonths?.includes(month)) {
         return { status: 500, body: { message: "workbench failed" } };
       }
-      const versions = options.workbenchReadModelVersions?.length
-        ? options.workbenchReadModelVersions
-        : ["mock-workbench-generation-1"];
-      workbenchReadModelVersion = versions[Math.min(workbenchReadModelVersionIndex, versions.length - 1)];
-      workbenchReadModelVersionIndex += 1;
       const payload = toGroupedWorkbenchPayload(
         mockWorkbenchPayloadForMonth(workbenchStateStore, month, options),
         options.workbenchOaStatus,
@@ -4969,8 +4947,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           row_counts: countMockWorkbenchRows(groups),
           has_more: groups.length > 200,
           groups: groups.slice(0, 200),
-          read_model_status: options.workbenchReadModelStatus ?? "fresh",
-          read_model_version: workbenchReadModelVersion,
         };
       };
       return {
@@ -4978,10 +4954,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           ...payload,
           paired: pageForZone("paired"),
           unpaired: pageForZone("unpaired"),
-          read_model_status: options.workbenchReadModelStatus ?? "fresh",
-          read_model_version: workbenchReadModelVersion,
-          active_generation_id: workbenchReadModelVersion,
-          generated_at: "2026-05-22T09:30:00+08:00",
         },
       };
     },
@@ -4994,17 +4966,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const page = Math.max(1, Number(url.searchParams.get("page") ?? "1") || 1);
       const pageSize = Math.max(1, Number(url.searchParams.get("page_size") ?? "50") || 50);
       const payload = toGroupedWorkbenchPayload(mockWorkbenchPayloadForMonth(workbenchStateStore, month, options), options.workbenchOaStatus);
-      const expectedReadModelVersion = url.searchParams.get("expected_read_model_version");
-      if (expectedReadModelVersion && expectedReadModelVersion !== workbenchReadModelVersion) {
-        return {
-          status: 409,
-          body: {
-            error: "workbench_read_model_version_conflict",
-            expected_read_model_version: expectedReadModelVersion,
-            read_model_version: workbenchReadModelVersion,
-          },
-        };
-      }
       const search = String(url.searchParams.get("search") ?? "").trim();
       const sort = String(url.searchParams.get("sort") ?? "").trim();
       const columnFilters = parseWorkbenchGroupJsonParam(url.searchParams.get("column_filters"));
@@ -5025,29 +4986,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           row_counts: rowCounts,
           has_more: offset + pageSize < groups.length,
           groups: groups.slice(offset, offset + pageSize),
-          read_model_status: options.workbenchReadModelStatus ?? "fresh",
-          read_model_version: workbenchReadModelVersion,
         },
-      };
-    },
-    "/api/workbench/refresh-status": ({ url }) => {
-      const month = url.searchParams.get("month") ?? "all";
-      const statusSequence = options.workbenchRefreshStatusSequence ?? [];
-      if (statusSequence.length > 0) {
-        const status = statusSequence[Math.min(workbenchRefreshStatusIndex, statusSequence.length - 1)];
-        workbenchRefreshStatusIndex += 1;
-        return { body: cloneJson(status) };
-      }
-      return {
-        body: options.workbenchRefreshStatus
-          ? cloneJson(options.workbenchRefreshStatus)
-          : {
-              scope_key: month,
-              read_model_status: "fresh",
-              generated_at: "2026-05-22T09:30:00+08:00",
-              dirty_scopes: [],
-              retryable: false,
-            },
       };
     },
     "/api/oa-sync/status": () => {
@@ -5090,7 +5029,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             message: "OA 已同步",
             dirty_scopes: [],
           },
-          workbench_read_model: {
+          workbench_matching: {
             status: "ready",
             dirty_scopes: [],
             stale_scopes: [],
@@ -5268,8 +5207,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             },
             queues: [
               {
-                event_type: "workbench.read_model.refresh",
-                queue: "finops.workbench.read_model.refresh",
+                event_type: "workbench_relation.read_model.refresh",
+                queue: "finops.workbench_relation.read_model.refresh",
                 messages: 2,
                 unacked: 1,
                 consumers: 1,
@@ -5564,9 +5503,10 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         body: {
           action: String(jsonBody.action ?? ""),
           status: "completed",
-          cleared_collections: ["workbench_read_models"],
+          cleared_collections: ["workbench_row_overrides", "workbench_pair_relations"],
           deleted_counts: {
-            workbench_read_models: 1,
+            workbench_row_overrides: 0,
+            workbench_pair_relations: 0,
           },
           protected_targets: ["form_data_db.form_data"],
           rebuild_status: jsonBody.action === "reset_oa_and_rebuild" ? "completed" : "not_applicable",
@@ -5603,13 +5543,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         return { status: 500, body: { message: "tax failed" } };
       }
       const payload = taxOffsetStateStore.get(month) as Record<string, unknown>;
-      payload.read_model_status = payload.read_model_status ?? "fresh";
-      payload.read_model_scope_key = payload.read_model_scope_key ?? month;
-      payload.source_versions = payload.source_versions ?? {
-        tax_offset_read_model_schema_version: "mock-tax-offset-v1",
-        invoice_fact_source_version: `mock-invoice-facts:${month}`,
-        tax_certified_import_source_version: `mock-certified:${month}`,
-      };
+      payload.canonical_snapshot_version = payload.canonical_snapshot_version ?? `mock-tax-offset:${month}`;
       return { body: payload };
     },
     "/api/tax-offset/certified-import/preview": ({ formData }) => {
@@ -5839,14 +5773,14 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       return {
         body: {
           status: "saved",
+          affected_scope_keys: [month],
           plan: {
             id: "tax-offset-plan-0001",
             month,
             selected_output_ids: selectedOutputIds,
             selected_input_ids: selectedInputIds,
             summary: calculateTaxPayload(month, selectedOutputIds, selectedInputIds, taxOffsetStateStore.get(month)).summary,
-            read_model_scope_key: String(jsonBody?.expected_read_model_scope_key ?? month),
-            source_versions: jsonBody?.expected_source_versions ?? {},
+            canonical_snapshot_version: String(jsonBody?.expected_canonical_snapshot_version ?? ""),
             updated_at: "2026-06-01T10:00:00+08:00",
           },
         },
@@ -5945,11 +5879,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const dateFrom = url.searchParams.get("date_from");
       const dateTo = url.searchParams.get("date_to");
       const isCurrentYear = dateFrom === "2026-01-01" && dateTo === "2026-12-31";
-      const readModelStatus = bankDetailAutoTagRulesSaved && options.bankDetailAccountReadModelStatuses?.length
-        ? options.bankDetailAccountReadModelStatuses[
-          Math.min(bankDetailPostSaveAccountRequestCount++, options.bankDetailAccountReadModelStatuses.length - 1)
-        ]
-        : options.bankDetailInitialAccountReadModelStatus ?? "fresh";
       const totalBalance = bankDetailAutoTagRulesSaved && options.bankDetailPostSaveAccountsTotalBalance
         ? options.bankDetailPostSaveAccountsTotalBalance
         : "130500.50";
@@ -5980,7 +5909,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
               transaction_count: 0,
             },
           ],
-          read_model_status: readModelStatus,
         },
       };
     },
@@ -5995,10 +5923,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     }),
     "/api/bank-details/auto-tag-rules/reapply": () => {
       bankDetailAutoTagRulesSaved = true;
-      bankDetailPostSaveAccountRequestCount = 0;
-      bankDetailPostSaveTransactionRequestCount = 0;
       return {
-        status: 202,
+        status: 200,
         body: {
           version: 1,
           system_rule: {
@@ -6067,12 +5993,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             { value: "repaid", label: "已还款" },
           ],
           permissions: { can_save: true },
-          read_model_status: "refreshing",
-          read_model_scope_keys: ["2026-01"],
-          operation_barrier_targets: [
-            { read_model_key: "bank_detail", scope_key: "2026-01" },
-          ],
-          enqueued_jobs: ["bank_detail.read_model.refresh"],
         },
       };
     },
@@ -6202,8 +6122,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         return { body: baseRules };
       }
       bankDetailAutoTagRulesSaved = true;
-      bankDetailPostSaveAccountRequestCount = 0;
-      bankDetailPostSaveTransactionRequestCount = 0;
       const activeRules = Array.isArray(jsonBody?.active_rules) ? jsonBody.active_rules as Array<Record<string, unknown>> : [];
       const archivedRules = Array.isArray(jsonBody?.archived_rules) ? jsonBody.archived_rules as Array<Record<string, unknown>> : [];
       return {
@@ -6247,25 +6165,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       };
     },
     "/api/bank-details/transactions": ({ url }) => {
-      const manualClearReadModelStatus = bankDetailManualClearPending
-        && options.bankDetailManualClearReadModelStatuses?.length
-        ? options.bankDetailManualClearReadModelStatuses[
-          Math.min(
-            bankDetailManualClearReadModelStatusIndex++,
-            options.bankDetailManualClearReadModelStatuses.length - 1,
-          )
-        ]
-        : null;
-      if (bankDetailManualClearPending && manualClearReadModelStatus === "fresh") {
-        bankDetailManualAssignmentActive = false;
-        bankDetailManualClearPending = false;
-      }
-      const readModelStatus = manualClearReadModelStatus
-        ?? (bankDetailAutoTagRulesSaved && options.bankDetailTransactionReadModelStatuses?.length
-          ? options.bankDetailTransactionReadModelStatuses[
-            Math.min(bankDetailPostSaveTransactionRequestCount++, options.bankDetailTransactionReadModelStatuses.length - 1)
-          ]
-          : options.bankDetailInitialTransactionReadModelStatus ?? "fresh");
       const accountKey = url.searchParams.get("account_key");
       const dateFrom = url.searchParams.get("date_from");
       const dateTo = url.searchParams.get("date_to");
@@ -6590,7 +6489,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const rows = !accountKey || accountKey === "icbc:6386"
         ? (matchedRows ?? (hasCategoryFilter ? defaultFilterDataset : [visibleRow])).filter(categoryMatches)
         : [];
-      const responseRows = readModelStatus === "refreshing" && options.bankDetailRefreshingTransactionsEmpty ? [] : rows;
+      const responseRows = bankDetailAutoTagRulesSaved && options.bankDetailPostSaveTransactionsEmpty ? [] : rows;
       const baseCategoryCounts = {
         borrow_in_company_pending_repayment: 2,
         business_warranty_pending_collection: 1,
@@ -6643,7 +6542,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
               status: "active",
             })),
           },
-          read_model_status: readModelStatus,
         },
       };
     },
@@ -7158,8 +7056,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         case_id: typeof jsonBody?.case_id === "string" ? jsonBody.case_id : undefined,
         affected_months: Array.from(touchedMonths),
         affected_scope_keys: Array.from(touchedMonths),
-        freshness_targets: [],
-        operation_barrier_targets: [],
         operation_projection: operationProjection,
         message: `已确认 ${rowIds.length} 条记录关联。`,
       };
@@ -7215,8 +7111,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         restored_relations: [],
         changed_scopes: Array.from(touchedMonths),
         affected_scope_keys: Array.from(touchedMonths),
-        freshness_targets: [],
-        operation_barrier_targets: [],
         operation_projection: operationProjection,
         message: "已撤回 1 组关联。",
       };
@@ -7891,9 +7785,10 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         result: {
           action,
           status: "completed",
-          cleared_collections: ["workbench_read_models"],
+          cleared_collections: ["workbench_row_overrides", "workbench_pair_relations"],
           deleted_counts: {
-            workbench_read_models: 1,
+            workbench_row_overrides: 0,
+            workbench_pair_relations: 0,
           },
           protected_targets: ["form_data_db.form_data"],
           rebuild_status: action === "reset_oa_and_rebuild" ? "completed" : "not_applicable",
@@ -7961,12 +7856,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         url.pathname === "/api/bank-details/transactions/bank-detail-search-filler/category-assignment"
         && String(init?.method || "GET").toUpperCase() === "DELETE"
       ) {
-        if (options.bankDetailManualClearReadModelStatuses?.length) {
-          bankDetailManualClearPending = true;
-          bankDetailManualClearReadModelStatusIndex = 0;
-        } else {
-          bankDetailManualAssignmentActive = false;
-        }
+        bankDetailManualAssignmentActive = false;
       }
       return jsonResponse({
         body: {
@@ -7974,48 +7864,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           affected_months: ["2026-04"],
         },
       });
-    }
-
-    const isWorkbenchActionRequest = (init?.method ?? "GET").toUpperCase() === "POST"
-      && (
-        url.pathname.startsWith("/api/workbench/actions/")
-        || url.pathname.startsWith("/api/workbench/exception/")
-      );
-    if (isWorkbenchActionRequest) {
-      const expectedVersion = String(jsonBody?.expected_read_model_version ?? "").trim();
-      if (!expectedVersion) {
-        return jsonResponse({
-          status: 400,
-          body: {
-            error: "expected_read_model_version_required",
-            message: "expected_read_model_version is required.",
-          },
-        });
-      }
-      if (expectedVersion !== workbenchReadModelVersion) {
-        return jsonResponse({
-          status: 409,
-          body: {
-            error: "workbench_read_model_version_conflict",
-            read_model_status: options.workbenchReadModelStatus ?? "fresh",
-            read_model_version: workbenchReadModelVersion,
-            retryable: true,
-          },
-        });
-      }
-      if ((options.workbenchReadModelStatus ?? "fresh") !== "fresh") {
-        return jsonResponse({
-          status: ["failed", "unavailable"].includes(options.workbenchReadModelStatus ?? "") ? 503 : 409,
-          body: {
-            error: (options.workbenchReadModelStatus === "failed" || options.workbenchReadModelStatus === "unavailable")
-              ? "workbench_read_model_unavailable"
-              : "workbench_read_model_not_fresh",
-            read_model_status: options.workbenchReadModelStatus,
-            read_model_version: workbenchReadModelVersion,
-            retryable: true,
-          },
-        });
-      }
     }
 
     const handler = handlers[url.pathname];

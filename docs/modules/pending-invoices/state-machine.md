@@ -1,123 +1,72 @@
 # 待找发票状态机
 
-> 修改 `待找发票` 相关业务状态、UI 状态、read model 状态或 worker 状态前必须读取本文件。待找发票状态必须由后端 policy/read model 给出，页面不得自行推断。
+> 页面状态由 canonical facts 和后端 policy 给出；前端不得自行推断发票获取状态。
 
 ## 业务状态
 
 | 状态域 | 状态 | 事实源 | 允许流转 |
 | --- | --- | --- | --- |
-| 方向 | `expense` | API query / pending invoice read model | 支出流水查找进项发票，规则组包含 `requires_invoice`、`bank_statement_as_invoice`、`no_invoice_required`。 |
-| 方向 | `income` | API query / pending invoice read model | 收入流水查找销项发票，规则组包含 `requires_invoice`、`no_invoice_required`、`cash_income`。 |
-| 规则组 | `requires_invoice` | active bank tag complement | 由 active 标签减去可编辑 no-invoice/cash/statement 分组实时派生，不作为请求事实保存。 |
-| 规则组 | `bank_statement_as_invoice` | expense pending invoice rules | 只适用于支出；最终仍为流水代替发票的行才出现在该筛选。 |
-| 规则组 | `no_invoice_required` | expense/income rules | 支出或收入都可配置；改变发票生命周期和待找发票口径。 |
-| 规则组 | `cash_income` | income rules | 只适用于收入现金场景；不得污染支出规则。 |
-| 行状态 | `pending_invoice` / `paid_invoiced` / `no_invoice_required` 等 | `InvoiceLifecyclePolicy`、pending invoice read model | 列表只展示后端返回的 `invoice_acquisition_status`；页面不补推 primary action。 |
-| 选择已有发票 | `attach_previewed` / `attach_confirmed` | application service | 只允许 expense 行选择 input invoice；支持单条或多条流水选择一张或多张进项发票；confirm 写一条 Workbench active relation、audit、command log 和 finalizer。 |
-| 收入状态覆盖 | `income_no_invoice_required` / `cash_income` | income status override command | 只适用于收入行；支持单条兼容 API 和批量 API；事件只刷新 pending/search。 |
-| command log | `created` / `relation_created` / `finalized` / `failed_terminal` | command repository | confirm 中断后可重试恢复，不得重复创建发票或关系。 |
+| 方向 | `expense` | canonical bank `txn_direction=outflow` | 支出流水查找进项发票。 |
+| 方向 | `income` | canonical bank `txn_direction=inflow` | 收入流水查找销项发票。 |
+| 规则组 | `requires_invoice` | active bank tag complement | 由 active 标签减去可编辑 no-invoice/cash/statement 分组实时派生。 |
+| 规则组 | `bank_statement_as_invoice` | expense pending invoice rules | 只适用于支出。 |
+| 规则组 | `no_invoice_required` | expense/income rules | 支出或收入都可配置。 |
+| 规则组 | `cash_income` | income rules / income status override | 只适用于收入现金场景。 |
+| 行状态 | `paid_pending_invoice` / `paid_invoiced` / `invoice_not_fully_paid` / `no_invoice_required` / income variants | canonical bank/invoice/OA/relation facts + `pending_invoice_status_payload` | 页面只展示 API 返回的 `invoice_acquisition_status`。 |
+| 选择已有发票 | `attach_previewed` / `attach_confirmed` | existing application service + canonical relation command | 只允许 expense 行选择 input invoice；confirm 保留权限、冲突、幂等、audit 和 command log。 |
+| 收入状态覆盖 | `income_no_invoice_required` / `cash_income` | `app.pending_invoice_manual_invoice_commands` | 只适用于未关联销项发票的收入行。 |
+| command log | `created` / `relation_created` / `finalized` / `failed_terminal` | command repository | confirm 中断后可重试，不重复创建关系。 |
 
 关键规则：
 
-- `pending_invoice_tag_groups.version` 只代表支出规则版本；`pending_output_invoice_tag_groups.version` 只代表收入规则版本。
-- 保存规则只递增当前 direction 的规则版本，不递增 `bank_transaction_tags.version`。
-- `requires_invoice` 即使出现在请求中也必须忽略；后端始终按 active tag complement 派生。
-- 列表 `filter=requires_invoice` 是“需要开票”状态桶，不是 `filter_group='requires_invoice'` 条件。支出包含 `paid_pending_invoice`、`paid_invoiced`、`paid_pending_future_invoice`、`invoice_not_fully_paid`；收入包含 `income_pending_invoice`、`income_invoiced`。`filter_group` / `matched_rule` 只解释规则命中，不能把生产中 `filter_group=all` 但最终状态待/已开票的行排除。
-- filter-options、export-preview 和 export 必须先读 fresh read model；非 fresh 时返回 accepted/refreshing。
-- 历史 manual invoice service/command 只作为旧数据恢复和迁移兼容能力保留；待找发票页面和 HTTP API 不再提供新建 manual invoice 写入口。
-- 选择已有发票批量 preview 不写事实；confirm 必须返回 affected transaction/invoice arrays。已存在兼容的 bank+invoice 或 OA+invoice relation 时应把既有 rows 与本次选择的银行流水/发票合并到同一 active case，不创建复用同一 row 的第二条 active case。后续从关联台 withdraw 该 active case 时，应通过 workbench relation history 恢复 confirm 前的上一 active 状态，而不是取消所有历史关系。
-- 待找发票列表中的 OA、银行流水和发票关系成员必须来自 `workbench_relation` distribution。任一分区成员数大于 1 时，该分区进入 `detail_mode=list`；银行流水栏必须展示 `bank_transactions.summaries` 的真实对方户名列表，不用 `+N` 替代户名，也不在户名下显示交易时间；发票和 OA 栏仍用 `+N` 表达全部 N 个成员，`N` 不是 extra count，且分区内不得再展示 primary 成员。
-- 收入批量状态覆盖必须先全量校验：transaction ids 非空且不重复、全部为收入流水、状态码属于 `income_no_invoice_required` / `cash_income`、当前行未关联销项发票；任一失败不得写 command/audit/finalizer。
-- invoice lifecycle 必须先于待找发票、税金、成本、OA/进项/销项下游页面刷新。
+- `filter=requires_invoice` 是最终状态桶，不是 `filter_group='requires_invoice'` 条件。
+- 正式关系只读取 active `app.workbench_pair_relations`；`turnover_manual_closure` 不属于待找发票事实。
+- relation 可跨月；同一 relation 的银行、invoice、OA members 一次批量展开并折叠成页面行。
+- 支出已有关联进项发票时可为 `paid_invoiced` 或 `invoice_not_fully_paid`；收入关联销项发票优先于收入 override。
+- `pending_invoice_tag_groups.version` 与 `pending_output_invoice_tag_groups.version` 独立。
+- candidates 的 `candidate_status`、`bank_relation_status` 和 `linked_bank_transaction_count` 由 canonical active relation 计算，前端不得用金额推断。
+- 写 API 成功后重新 GET canonical facts，不等待 pending/search/invoice-lifecycle read-model barrier。
 
 禁止流转：
 
-- 禁止前端根据缺失字段猜测 `invoice_acquisition_status` 或 primary action。
-- 禁止 read model miss/stale 时把空 rows 当作真实“没有待找发票”。
-- 禁止保存规则时接受未知标签、归档标签或重复映射。
+- 禁止前端根据缺失字段猜测 status 或 primary action。
+- 禁止读取 pending/bank-detail/workbench-relation/search read model 作为页面事实。
+- 禁止恢复 refresh enqueue、polling、202、stale/fallback 或双读。
+- 禁止候选 relation case id 被当作真实 OA id。
 - 禁止收入规则污染支出规则，或支出规则污染收入规则。
-- 禁止候选 relation case id 被当作真实 OA id 请求详情。
-- 禁止把已经包含在关系明细里的 OA、银行流水或发票继续作为同栏 primary 单独呈现；同一多流水 relation 的成员也不得再作为 standalone 待找发票行重复出现。银行流水多成员栏禁止用 `+N` 代替真实对方户名。
-- 禁止 attach existing 或历史 manual command 恢复时重复创建发票或 relation。
-- 禁止待找发票页面或 HTTP route 暴露 manual invoice preview/confirm 新写入口。
-- 禁止 pending invoice 规则变更刷新 `turnover_ledger`、`no_oa_bank_batch` 或 `bank_account_balance`。
+- 禁止 attach existing 重复创建 relation 或绕过 canonical version/occupation conflict。
 
 ## UI 状态
 
 | UI 状态 | 来源 | 语义 |
 | --- | --- | --- |
-| loading | rows/filter-options/detail/rules 请求进行中 | 展示加载态；请求 abort 后清理 loading。 |
-| refreshing | API 返回 `read_model_status=refreshing` 或 202 | 展示刷新语义；若有旧 rows 可继续展示，但不能把空 accepted payload 当最终空结果。 |
-| stale | API 返回 stale/source/schema mismatch 或 App Status 暴露 stale scope | 展示陈旧/同步提示；写操作按后端权限和版本控制。 |
-| empty | fresh payload 且 total 为 0 | 表示当前 direction/filter/query 真实没有行。 |
-| error | rows/detail/rules/attach/income status/export 请求失败 | 展示业务错误，不暴露底层 SQL/worker internals。 |
-| rules drawer | 用户打开规则配置 | 读取当前 direction 规则和 active tags；支持 stale version conflict 反馈。 |
-| attach existing drawer/dialog | 用户从选中流水工具栏选择候选发票 | 单条或多条支出流水共用右侧抽屉；候选列表支持多选进项发票；候选表以 `bank_relation_status` / `linked_bank_transaction_count` 渲染“流水关联”chip，不展示“待支付”候选列；抽屉展示已选流水金额、已选发票金额和本次选择差额，preview 后展示关联后待付；preview 展示 conflicts/warnings 和影响；confirm 成功后刷新行和关系详情。 |
-| expense transaction selection | 用户在支出列表勾选流水 | 仅允许有 `attach_existing_invoice` action 的支出流水进入批量选择；筛选、排序、分页、搜索或确认后清理选择；选择发票入口只在表格上方选中工具栏出现。 |
-| income transaction selection | 用户在收入列表勾选流水 | 仅允许有 `mark_income_status` action 的收入流水进入批量选择；选中后工具栏显示“标记无需开票”“标记现金收入”“清除选择”。 |
-| income status batch action | 收入选中工具栏提交 | 提交时禁用批量状态按钮；成功后以响应 rows 或 refetch 为准，并清理选择。 |
-| relation member list | 用户点击关系明细入口 | 仅展示点击分区对应的 OA、银行流水或发票成员；请求可带 `kind=oa|bank|invoice`，默认全量详情只作为兼容路径。 |
-| permission disabled/hidden | session permissions | 只读用户隐藏或禁用保存规则、attach、income override 等 mutation。 |
+| loading | rows/filter-options/detail/rules 请求进行中 | 展示加载态；abort/unmount 后清理。 |
+| empty | 成功响应且 total 为 0 | 当前 query 的合法真实空集。 |
+| error | rows/detail/rules/attach/income status/export 请求失败 | 展示可重试业务错误；不能伪装 empty。 |
+| rules drawer | 用户打开规则配置 | 读取当前 direction rules；stale version 仍返回 conflict。 |
+| attach existing drawer | 用户选择 eligible expense rows | canonical candidates；preview 展示 conflicts/warnings；confirm 成功后 refetch。 |
+| expense selection | 用户勾选支出流水 | 仅有 `attach_existing_invoice` action 的行可进入批量选择。 |
+| income selection | 用户勾选收入流水 | 仅有 `mark_income_status` action 的行可批量标记。 |
+| relation member list | 用户点击 kind 明细 | 只展示 `bank|invoice|oa` 对应成员。 |
+| permission disabled/hidden | session permissions | 只读用户不能规则保存、attach 或 income override。 |
 
-前端刷新边界：
+页面没有 `refreshing` 或 `stale` UI 状态。返回 route、query 变化、明确刷新、写成功或错误重试时发起一次正常 GET；不启动定时 polling，也不监听 read-model worker 状态。
 
-- 不订阅 `invoiceFactUpdated`、`workbenchRelationUpdated`、银行分类/规则事件或业务 BroadcastChannel。
-- 当前页写后可重跑自身 normal GET；其它页面/tab 不自动 refetch。
-- 返回 route、查询变化、浏览器手动刷新或明确重试时重新通过 API/read boundary 加载；后端 canonical/source/readiness 才证明待找发票已收敛。
-- 当前访问收到 non-fresh 后只在 visible 状态以 250ms、最多 120 次继续 normal GET；fresh、hidden、route unmount、查询变化或 30 秒上限即停止，hidden→visible/focus 不自动恢复。
+## 一致性状态
 
-## Read Model / Worker 状态
-
-| 状态 | 判定 | 后续动作 |
+| 状态 | 判定 | 页面行为 |
 | --- | --- | --- |
-| `fresh` | scope schema/source/readiness 与当前事实一致，且没有 active dirty scope | rows/filter-options/export 可使用当前 payload。 |
-| `missing` | 没有对应 scope read model 或 readiness | 入队 `pending_invoice.read_model.refresh`；API 返回 refreshing。 |
-| `refreshing` | dirty scope pending/processing，或 parent scope 正 fan-out month shards | worker 继续处理；页面展示同步中。统计刷新在途时 repository 仍保留已发布 child scope source proof，API 不得把 proof 暂缺误判成 expense/income 父 scope 缺失并重复 fan-out。 |
-| `stale` / `source_mismatch` / `schema_mismatch` | bank tags、relation、invoice lifecycle、schema source version 落后 | 入队重建；可展示旧 rows 但必须暴露 stale reason。 |
-| `failed` | projection/worker refresh 失败 | App Status busy/blocked，页面显示失败或等待运维重试。 |
-| `unavailable` | repository、queue、worker dependency 不可用 | API 返回 unavailable/refreshing；不得返回 fake fresh。 |
-
-Scope 形态：
-
-- `expense:all`、`expense:requires_invoice`、`expense:bank_statement_as_invoice`、`expense:no_invoice_required`
-- `income:all`、`income:requires_invoice`、`income:no_invoice_required`、`income:cash_income`
-- 月份 shard 形态为 `<direction>:<filter>:YYYY-MM`
-
-Refresh 触发来源：
-
-- 发票导入确认。
-- Workbench 关系确认/撤回、历史 manual command 恢复、attach existing confirm。
-- 待找发票规则保存。
-- 收入状态 override。
-- 银行标签保存、重命名、归档或自动分类版本变化。
-- invoice lifecycle refresh、OA rebuild、App Health/backfill 运维任务。
-- `startup_stale_scan` 默认关闭，且不直接刷新待找发票 read model；只有后续 matching 结果真实变化并触发业务 lifecycle 时才间接影响。
-
-父 scope / filter scope fan-out：
-
-1. 收到 `pending_invoice.read_model.refresh`，scope 可能是 direction/filter 父 scope 或月份 shard。
-2. 父 scope 通过 projection builder 列出需要的月份 shard。
-3. 通过 `ReadModelRefreshGateway` 入队每个 `<direction>:<filter>:YYYY-MM`。
-4. 父 scope 完成 dirty scope；月份 shard worker 发布真实 rows/scope readiness。
-5. API 读父 scope 时由 repository 聚合或读取对应 scope payload，不能同步扫描旧事实。
-
-失败恢复：
-
-1. 先看 `/api/app-health.app_status` 中 `pending_invoice` 和 `search` read model scopes、dirty scopes、outbox，以及 `pending-invoice` / `search` worker；旧 `search-pending` 只是兼容消费者。
-2. 对 rule version conflict，让页面重新读取规则 payload，再基于新 version 保存。
-3. 对 attach command 或历史 manual command 中断，优先用 command log 重试恢复，不手工删除已创建发票或 relation。
-4. 对 bank tag source mismatch，先确认 bank detail read model freshness，再重跑 pending scope。
-5. 对 invoice lifecycle lag，先恢复 `invoice_lifecycle` scope，再重跑 pending/search scope。
+| snapshot success | repository 在 `REPEATABLE READ / READ ONLY` 中完成 settings + bounded query | 返回 rows、summary、statistics、facets/counts。 |
+| canonical empty | snapshot 成功且 total=0 | 返回 200 empty。 |
+| invalid query | service 参数验证失败 | 返回 400，不执行页面 SQL。 |
+| permission denied | read/write session 无权限 | 返回 401/403。 |
+| canonical unavailable | PostgreSQL query/connection 失败 | 返回 error；不读旧 read model fallback。 |
+| policy divergence | SQL status 与 `pending_invoice_status_payload` 不一致 | fail closed；不返回混合口径。 |
 
 ## 变更记录
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
-| 2026-06-23 | 补 `pending_invoice` / `oa_pending_payment` manifest 合同守卫 | 不改变状态机；锁定待找发票拒绝裸 `all`、page-first-screen force refresh、与 OA 待付款 repository port 隔离，防止旧 scope 或旧 read path 污染页面 freshness | `tests.test_read_model_manifest.ReadModelManifestTests.test_pending_invoice_and_oa_payment_manifest_preserve_page_scope_contracts` |
-| 2026-07-07 | 待找发票多流水聚合行改为展示真实对方户名列表，不再用 `+N` 代替银行流水户名，且户名下不显示交易时间；发票/OA 多成员 `+N` 和 `kind` 明细保持不变 | PendingInvoicesTable、API mapper contract docs | `web/src/test/PendingInvoicesPage.test.tsx` |
-| 2026-06-23 | 待找发票 rows 补齐 `bank_transactions` 分区，多 OA/多流水/多发票按 `workbench_relation` 聚合为一行并展开对应类型明细 | PendingInvoiceQueryService、SearchPendingSqlProjectionBuilder、PendingInvoicesTable、PendingInvoiceRelationDrawer、API mapper | `tests/test_pending_invoice_service.py`、`tests/test_search_pending_sql_runtime.py`、`web/src/test/PendingInvoicesApi.test.ts`、`web/src/test/PendingInvoicesPage.test.tsx` |
-| 2026-06-17 | 选择已有进项发票候选表改为后端事实驱动的“流水关联”chip，并允许已有 OA+发票关系并入同一 attach active case；关联台撤回恢复上一状态 | PendingInvoiceQueryService candidates、PendingInvoiceApplicationService attach existing、PendingInvoiceInvoicePickerDrawer、API mapper | `tests/test_pending_invoice_service.py`、`tests/test_pending_invoice_api.py`、`web/src/test/PendingInvoicesApi.test.ts`、`web/src/test/PendingInvoicesPage.test.tsx` |
-| 2026-06-15 | `requires_invoice` 父筛选改为最终状态桶，解除对 `filter_group` 的可见性依赖 | Pending invoice status helper、service fallback、SQL read repository、SQL projection、API/product/module docs | `tests/test_pending_invoice_service.py`、`tests/test_pending_invoice_api.py`、`tests/test_search_pending_sql_runtime.py` |
-| 2026-06-15 | 移除待找发票行内三点菜单和 manual invoice HTTP/UI 新写入口；收入侧增加多选批量标记 | PendingInvoiceApplicationService batch income override、pending invoice routes/API、PendingInvoicesPage/Table、SQL projection、API mapper | `tests/test_pending_invoice_service.py`、`tests/test_pending_invoice_api.py`、`web/src/test/PendingInvoicesApi.test.ts`、`web/src/test/PendingInvoicesPage.test.tsx` |
-| 2026-06-11 | 补齐测试闭环状态机 | 支出/收入规则、manual/attach/income status、UI、read model 和 worker 状态边界 | `tests.test_pending_invoice_service`、`tests.test_pending_invoice_api`、`tests.test_invoice_lifecycle_page_integration`、`tests.test_search_pending_sql_runtime`、`tests.test_pending_invoice_relation_identity`、`tests.test_pending_invoice_oa_identity_backfill`、`tests.test_derived_data_lifecycle_service`、`tests.test_app_status_overview_service`、`tests.test_runtime_worker_registry`、`web/src/test/PendingInvoicesApi.test.ts`、`web/src/test/PendingInvoicesPage.test.tsx` 通过 |
-| 2026-06-11 | 选择已有进项发票支持多流水、多发票批量 preview/confirm，状态菜单新增已支付待开票/已支付已开票快捷筛选 | Pending invoice application service、Workbench active relation、PendingInvoicesPage、候选抽屉、API mapper | `tests/test_pending_invoice_service.py`、`tests/test_pending_invoice_api.py`、`tests/test_workbench_pair_relation_service.py`、`tests/test_workbench_api.py`、`web/src/test/PendingInvoicesApi.test.ts`、`web/src/test/PendingInvoicesPage.test.tsx` |
+| 2026-07-27 | 页面改为 canonical PostgreSQL 直读，删除 read-model/polling/202/fallback UI 状态 | page API/service/repository/frontend/docs | canonical repository/API tests、PendingInvoices Vitest、真实 PostgreSQL smoke |
+| 2026-07-07 | 多流水展示真实对方户名，发票/OA 多成员保持分区明细 | table/API mapper | `PendingInvoicesPage.test.tsx` |
+| 2026-06-17 | 候选关系 chip 和 attach active case restore | candidate/application service | pending invoice service/API/frontend tests |

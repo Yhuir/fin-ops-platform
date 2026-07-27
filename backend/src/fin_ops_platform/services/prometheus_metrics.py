@@ -256,22 +256,6 @@ def _runtime_metrics(writer: "_PrometheusWriter", runtime: Mapping[str, Any]) ->
                 {**labels, "warning_code": warning_code},
             )
 
-    workbench = _mapping(runtime.get("workbench_read_model"))
-    for name in (
-        "active_scope_count",
-        "active_row_count",
-        "active_group_count",
-        "active_summary_count",
-        "building_scope_count",
-        "failed_scope_count",
-    ):
-        writer.gauge(
-            f"finops_workbench_read_model_{name}",
-            _help_text(f"workbench_read_model_{name}"),
-            workbench.get(name),
-        )
-
-
 def _api_performance_metrics(writer: "_PrometheusWriter", api_performance: Mapping[str, Any]) -> None:
     endpoints = _mapping(api_performance.get("endpoints"))
     for endpoint, raw_metric in endpoints.items():

@@ -331,10 +331,7 @@ class NoOaBankBatchRoutesTests(unittest.TestCase):
         self.assertEqual(payload["summary"], {"submitted": 1, "failed": 4})
         self.assertEqual(payload["affected_months"], ["2026-05"])
         self.assertEqual(payload["affected_scope_keys"], ["2026-05"])
-        self.assertEqual(
-            payload["operation_barrier_targets"],
-            [],
-        )
+        self.assertNotIn("operation_barrier_targets", payload)
         self.assertEqual(payload["results"][0]["status"], "submitted")
         self.assertEqual(payload["results"][1]["error"], "unknown_no_oa_bank_batch")
         self.assertEqual(payload["results"][2]["error"], "no_oa_bank_batch_version_conflict")

@@ -53,8 +53,8 @@ class AppTests(unittest.TestCase):
         self.assertIn("cost_statistics_foundation", payload["capabilities"])
         self.assertIn("cost_statistics_export", payload["capabilities"])
         self.assertIn("workbench_global_search_foundation", payload["capabilities"])
-        self.assertIn("input_invoice_usage_read_model", payload["capabilities"])
-        self.assertIn("output_invoice_collection_read_model", payload["capabilities"])
+        self.assertNotIn("input_invoice_usage_read_model", payload["capabilities"])
+        self.assertNotIn("output_invoice_collection_read_model", payload["capabilities"])
         self.assertIn("no_oa_bank_batch_processing", payload["capabilities"])
         runtime_release = payload["runtime_release"]
         self.assertEqual(runtime_release["consistent"], True)
@@ -204,50 +204,6 @@ class AppTests(unittest.TestCase):
         self.assertIn("package_import_path_mismatch", runtime_release["problems"])
         self.assertIn("release_metadata_missing_or_invalid", runtime_release["problems"])
 
-    def test_deep_health_endpoint_reports_workbench_api_self_test_counts(self) -> None:
-        app = build_application()
-
-        class WorkbenchRepository:
-            def get_workbench_summary(self, *, scope_key: str):
-                self.summary_scope_key = scope_key
-                return {
-                    "read_model_status": "fresh",
-                    "summary": {"paired_count": 2, "unpaired_count": 3},
-                }
-
-            def get_workbench_groups_page(self, **kwargs):
-                self.last_page_size = kwargs["page_size"]
-                zone = kwargs["zone"]
-                return {
-                    "read_model_status": "fresh",
-                    "zone": zone,
-                    "total": 10 if zone == "paired" else 20,
-                    "groups": [{"id": f"{zone}-1"}],
-                }
-
-        repository = WorkbenchRepository()
-        app._workbench_sql_read_repository = repository
-
-        response = app.handle_request("GET", "/health/deep")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(repository.last_page_size, 200)
-        self.assertEqual(
-            payload["workbench_api_self_test"],
-            {
-                "scope_key": "all",
-                "status": "ok",
-                "summary_status": "fresh",
-                "summary_counts": {"paired_count": 2, "unpaired_count": 3},
-                "groups": {
-                    "paired": {"status": "fresh", "total": 10, "returned_count": 1},
-                    "unpaired": {"status": "fresh", "total": 20, "returned_count": 1},
-                },
-                "errors": [],
-            },
-        )
-
     def test_http_handler_ignores_stream_client_disconnect_without_traceback(self) -> None:
         class FakeApp:
             def handle_request(self, method, path, body=None, headers=None):  # noqa: ANN001
@@ -276,7 +232,7 @@ class AppTests(unittest.TestCase):
         handler = handler_class.__new__(handler_class)
         handler.headers = {"X-Test": "1"}
         handler.rfile = BytesIO()
-        handler.path = "/api/workbench/events"
+        handler.path = "/api/app-health/stream"
         handler.wfile = ClosedWfile()
         handler.send_response = lambda status_code: None
         handler.send_header = lambda key, value: None

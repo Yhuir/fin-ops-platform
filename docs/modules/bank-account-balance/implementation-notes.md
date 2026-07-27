@@ -1,5 +1,12 @@
 # Bank Account Balance 实施记录
 
+## 2026-07-27 - Bank Details accounts direct canonical read
+
+- 决策：`/api/bank-details/accounts` 改由 page-specific canonical query repository 直接读取 `app.bank_transactions` 与 canonical account mappings，不再读取 `read_model.bank_account_balances`。
+- 复用：把旧 projection 的账户聚合 SQL提取为 `BANK_ACCOUNT_BALANCE_CANONICAL_ROWS_SQL`，避免 direct query 复制余额算法。
+- 性能边界：账户级 SQL 聚合 + 范围 count，固定查询次数；不在 Python/浏览器累计，不新增 cache、worker、materialized view 或依赖。
+- 共享清理：旧 repository/refresh/worker/manifest/backfill/deploy/App Status 资源由主控在所有消费者迁移后统一删除，本分支保持不动。
+
 ## 2026-06-24 - selected as next modular IO read model pilot
 
 - 目标：在 Search local support 进入 `production-evidence-deferred` 后，选择下一个非 Go read model pilot。

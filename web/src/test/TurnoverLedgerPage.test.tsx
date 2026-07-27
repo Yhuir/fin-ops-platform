@@ -597,7 +597,6 @@ function groupedPayload(family: string, overrides: Record<string, unknown> = {})
       page_size: 100,
       total: groups.length,
     },
-    read_model_status: "fresh",
     ...overrides,
   };
 }
@@ -906,8 +905,6 @@ function installTurnoverLedgerFetch(options: {
           relation_mode: "turnover_manual_closure",
         },
         affected_months: ["2026-05"],
-        freshness_targets: [],
-        operation_barrier_targets: [],
       });
     }
     if (url.pathname === "/api/turnover-ledger/closures/withdraw" && method === "POST") {
@@ -918,8 +915,6 @@ function installTurnoverLedgerFetch(options: {
           relation_mode: "manual_confirmed",
         },
         affected_months: ["2026-05"],
-        freshness_targets: [],
-        operation_barrier_targets: [],
       });
     }
     const withdrawMatch = url.pathname.match(/^\/api\/turnover-ledger\/relations\/([^/]+)\/withdraw$/);
@@ -929,8 +924,6 @@ function installTurnoverLedgerFetch(options: {
         relation_id: relationId,
         status: "withdrawn",
         affected_months: ["2026-05"],
-        freshness_targets: [],
-        operation_barrier_targets: [],
       });
     }
     throw new Error(`Unexpected request ${method} ${url.pathname}`);
@@ -1319,8 +1312,6 @@ describe("Turnover ledger page", () => {
         relation_mode: "turnover_manual_closure",
       },
       affected_months: ["2026-05"],
-      freshness_targets: [],
-      operation_barrier_targets: [],
     }));
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "确认外部往来闭环" })).not.toBeInTheDocument();
@@ -1332,10 +1323,7 @@ describe("Turnover ledger page", () => {
     const fetchMock = installTurnoverLedgerFetch({
       groupedPayloads: [
         groupedPayload("all"),
-        groupedPayload("all", {
-          read_model_status: "stale",
-          read_model_stale_reasons: ["source_version_mismatch"],
-        }),
+        groupedPayload("all"),
       ],
     });
     renderTurnoverLedgerPage();
@@ -1727,30 +1715,6 @@ describe("Turnover ledger page", () => {
     const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
     expect(await within(table).findByText("贾小花")).toBeInTheDocument();
     expect(within(page).queryByText("往来款台账加载暂时失败，请刷新后重试。")).not.toBeInTheDocument();
-  });
-
-  test("ignores retired read-model metadata and keeps canonical actions enabled", async () => {
-    const user = userEvent.setup();
-    installTurnoverLedgerFetch({
-      groupedOverrides: {
-        read_model_status: "stale",
-        read_model_stale_reasons: ["source_version_mismatch"],
-      },
-    });
-    renderTurnoverLedgerPage();
-
-    const page = await screen.findByTestId("turnover-ledger-page");
-    expect(within(page).queryByText("往来款台账正在刷新，当前展示的是非最新数据。")).not.toBeInTheDocument();
-
-    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
-    const companyGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:company:yunnan");
-    await user.click(within(companyGroupCell).getByRole("button", { name: "展开 云南建设有限公司 流水明细" }));
-
-    expect(within(table).getByRole("checkbox", { name: "选择流水 bank-company-expense-1000" })).toBeEnabled();
-    expect(within(table).getByRole("button", { name: "编辑流水 bank-company-expense-1000" })).toBeEnabled();
-    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-expense-1000" }));
-    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-income-1000" }));
-    expect(within(page).getByRole("button", { name: "确认闭环" })).toBeEnabled();
   });
 
   test("shows bank-detail tags as read-only in turnover management", async () => {

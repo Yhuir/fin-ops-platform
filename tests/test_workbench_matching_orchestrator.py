@@ -52,6 +52,11 @@ class RecordingFactRepository:
         self.fact_batch = fact_batch
         self.etc_batch_link_candidates = list(etc_batch_link_candidates or [])
         self.calls: list[dict[str, object]] = []
+        self.bank_rows_by_id = {
+            fact.row_id: {"id": fact.row_id}
+            for fact in fact_batch.facts
+            if fact.row_type == "bank"
+        }
 
     def load_batch(self, scope_months: list[str], *, source_versions: dict[str, object]) -> FormalRelationFactBatch:
         self.calls.append({"scope_months": list(scope_months), "source_versions": dict(source_versions)})
@@ -61,39 +66,43 @@ class RecordingFactRepository:
         self.calls.append({"etc_scope_months": list(scope_months)})
         return list(self.etc_batch_link_candidates)
 
+    def load_bank_rows_by_ids(self, transaction_ids: list[str]) -> list[dict[str, object]]:
+        self.calls.append({"bank_transaction_ids": list(transaction_ids)})
+        return [
+            dict(self.bank_rows_by_id[transaction_id])
+            for transaction_id in transaction_ids
+            if transaction_id in self.bank_rows_by_id
+        ]
+
 
 class RecordingEtcBatchLinkRepository:
     def validate_etc_batch_links(self, links: list[dict[str, object]]) -> dict[str, object]:
         return {"valid": bool(links), "issues": []}
 
 
-class RecordingBankTagFacade:
+class RecordingBankCategoryProvider:
     def __init__(
         self,
         category_codes: dict[str, str] | None = None,
         *,
-        status: str = "fresh",
         omitted_ids: set[str] | None = None,
     ) -> None:
         self.category_codes = dict(category_codes or {})
-        self.status = status
         self.omitted_ids = set(omitted_ids or set())
         self.calls: list[list[str]] = []
 
-    def get_by_transaction_ids(self, transaction_ids: list[str], **_kwargs: object) -> dict[str, object]:
+    def bulk_get_for_rows(self, rows: list[dict[str, object]]) -> dict[str, object]:
+        transaction_ids = [str(row.get("id") or "") for row in rows]
         self.calls.append(list(transaction_ids))
         return {
-            "status": self.status,
-            "rows": [
-                {
-                    "transaction_id": transaction_id,
-                    "effective_category_code": self.category_codes.get(
-                        transaction_id, "custom_engineering_services"
-                    ),
-                }
+            transaction_id: {
+                "transaction_id": transaction_id,
+                "effective_category_code": self.category_codes.get(
+                    transaction_id, "custom_engineering_services"
+                ),
+            }
                 for transaction_id in transaction_ids
                 if transaction_id not in self.omitted_ids
-            ],
         }
 
 
@@ -134,7 +143,7 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
         *,
         uow: RecordingUow | None = None,
         etc_batch_link_candidates: list[dict[str, object]] | None = None,
-        bank_tag_facade: RecordingBankTagFacade | None = None,
+        bank_category_provider: RecordingBankCategoryProvider | None = None,
     ) -> tuple[WorkbenchMatchingOrchestrator, RecordingFactRepository, RecordingUow]:
         repository = RecordingFactRepository(
             fact_batch,
@@ -147,7 +156,8 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
                 matcher=WorkbenchFreeMatchingEngine(),
                 relation_uow=resolved_uow,
                 source_versions_provider=lambda: {"matching": "v1"},
-                bank_tag_read_facade=bank_tag_facade or RecordingBankTagFacade(),
+                bank_category_provider=bank_category_provider
+                or RecordingBankCategoryProvider(),
                 bank_flow_rule_tag_rules_payload=lambda: {
                     "version": 11,
                     "requirements_by_tag_code": {
@@ -188,10 +198,10 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
 
     def test_bank_plan_persists_one_bulk_requirement_snapshot(self) -> None:
         fixture = FormalRelationFactBatch(facts=(fact("oa", "oa-520"), fact("bank", "bank-520")))
-        tag_facade = RecordingBankTagFacade()
+        category_provider = RecordingBankCategoryProvider()
         orchestrator, _repository, uow = self._orchestrator(
             fixture,
-            bank_tag_facade=tag_facade,
+            bank_category_provider=category_provider,
         )
 
         orchestrator.run(
@@ -200,7 +210,7 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
             request_id="request-bank-requirements",
         )
 
-        self.assertEqual(tag_facade.calls, [["bank-520"]])
+        self.assertEqual(category_provider.calls, [["bank-520"]])
         relation = next(iter(uow.snapshot["pair_relations"].values()))
         self.assertEqual(
             {
@@ -211,30 +221,16 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
             {"requires_oa": True, "requires_invoice": True, "paired_requirement_version": 11},
         )
 
-    def test_bank_plan_fails_before_uow_when_tag_read_model_is_not_fresh(self) -> None:
-        fixture = FormalRelationFactBatch(facts=(fact("oa", "oa-520"), fact("bank", "bank-520")))
-        orchestrator, _repository, uow = self._orchestrator(
-            fixture,
-            bank_tag_facade=RecordingBankTagFacade(status="refreshing"),
-        )
-
-        with self.assertRaisesRegex(RuntimeError, "bank_detail_read_model_not_fresh"):
-            orchestrator.run(
-                changed_scope_months=["2026-05"],
-                reason="dirty_scope_retry",
-                request_id="request-bank-tags-refreshing",
-            )
-
-        self.assertEqual(uow.calls, [])
-
     def test_bank_plan_fails_before_uow_when_tag_row_is_missing(self) -> None:
         fixture = FormalRelationFactBatch(facts=(fact("oa", "oa-520"), fact("bank", "bank-520")))
         orchestrator, _repository, uow = self._orchestrator(
             fixture,
-            bank_tag_facade=RecordingBankTagFacade(omitted_ids={"bank-520"}),
+            bank_category_provider=RecordingBankCategoryProvider(
+                omitted_ids={"bank-520"}
+            ),
         )
 
-        with self.assertRaisesRegex(RuntimeError, "bank_detail_tag_rows_missing"):
+        with self.assertRaisesRegex(RuntimeError, "canonical_bank_category_rows_missing"):
             orchestrator.run(
                 changed_scope_months=["2026-05"],
                 reason="dirty_scope_retry",

@@ -31,25 +31,23 @@ DISPATCHER_ENV = ENV_DIR / "fin-ops.rabbitmq-dispatcher.env.example"
 
 
 class RuntimeWorkerRegistryTests(unittest.TestCase):
-    def test_oa_pending_payment_has_a_dedicated_worker_and_is_not_claimed_by_invoice_usage(self) -> None:
+    def test_direct_canonical_page_workers_are_retired(self) -> None:
         registrations = registration_by_instance_name()
 
-        self.assertEqual(
-            registrations["oa-pending-payment"].event_types,
-            ("oa_pending_payment.read_model.refresh",),
-        )
-        self.assertEqual(
-            registrations["oa-pending-payment"].handler_flags,
-            ("--enable-oa-pending-payment-read-model-refresh",),
-        )
-        self.assertNotIn(
-            "oa_pending_payment.read_model.refresh",
-            registrations["invoice-usage-collection"].event_types,
-        )
-        self.assertNotIn(
-            "--enable-oa-pending-payment-read-model-refresh",
-            registrations["invoice-usage-collection"].handler_flags,
-        )
+        for instance_name in (
+            "workbench",
+            "workbench-secondary",
+            "bank-detail",
+            "bank-account-balance",
+            "pending-invoice",
+            "invoice-lifecycle",
+            "invoice-lifecycle-secondary",
+            "invoice-usage-collection",
+            "oa-pending-payment",
+            "cost-tax",
+            "tax-offset",
+        ):
+            self.assertNotIn(instance_name, registrations)
 
     def test_required_workers_match_deploy_helper_defaults(self) -> None:
         script = ENSURE_WORKERS_SCRIPT.read_text(encoding="utf-8")
@@ -82,48 +80,41 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
             self.assertIn(event_type, dispatcher_env)
 
     def test_registration_lookup_and_command_args_are_registry_derived(self) -> None:
-        registration = registration_by_instance_name()["workbench"]
+        registration = registration_by_instance_name()["workbench-relation"]
 
         self.assertEqual(
             worker_command_args(registration, transport="postgres"),
             (
-                "--enable-workbench-read-model-refresh",
+                "--enable-workbench-relation-read-model-refresh",
                 "--event-type",
-                "workbench.read_model.refresh",
+                "workbench_relation.read_model.refresh",
             ),
         )
         self.assertEqual(
             worker_check_command_args(registration, transport="postgres"),
             (
                 "--registration",
-                "workbench",
+                "workbench-relation",
                 "--worker-instance",
-                "workbench",
+                "workbench-relation",
                 "--check",
             ),
         )
 
-    def test_workbench_primary_claims_all_and_secondary_only_claims_month_scopes(self) -> None:
-        workbench = registration_by_instance_name()["workbench"]
-        secondary = registration_by_instance_name()["workbench-secondary"]
+    def test_workbench_page_workers_are_retired_but_relation_distribution_is_retained(self) -> None:
+        registrations = registration_by_instance_name()
+        workbench_relation = registrations["workbench-relation"]
 
-        self.assertEqual(workbench.claim_scope_keys, ())
-        self.assertEqual(workbench.exclude_claim_scope_keys, ())
-        self.assertEqual(secondary.claim_scope_keys, ())
-        self.assertEqual(secondary.exclude_claim_scope_keys, ("all",))
+        self.assertNotIn("workbench", registrations)
+        self.assertNotIn("workbench-secondary", registrations)
+        self.assertEqual(workbench_relation.event_types, ("workbench_relation.read_model.refresh",))
+        self.assertEqual(workbench_relation.worker_kind, "workbench-relation-read-model")
         self.assertEqual(
-            secondary.event_types,
-            ("workbench.read_model.refresh",),
-        )
-        self.assertEqual(secondary.worker_kind, "workbench-secondary-read-model")
-        self.assertFalse(secondary.rabbitmq_eligible)
-        self.assertNotIn("workbench-aggregate", registration_by_instance_name())
-        self.assertEqual(
-            worker_command_args(workbench, transport="postgres"),
+            worker_command_args(workbench_relation, transport="postgres"),
             (
-                "--enable-workbench-read-model-refresh",
+                "--enable-workbench-relation-read-model-refresh",
                 "--event-type",
-                "workbench.read_model.refresh",
+                "workbench_relation.read_model.refresh",
             ),
         )
 
@@ -134,16 +125,6 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
             "search": ("search-read-model", ("search.read_model.refresh",)),
             "search-secondary": ("search-secondary-read-model", ("search.read_model.refresh",)),
             "search-tertiary": ("search-tertiary-read-model", ("search.read_model.refresh",)),
-            "pending-invoice": ("pending-invoice-read-model", ("pending_invoice.read_model.refresh",)),
-            "tax-offset": ("tax-offset-read-model", ("tax_offset.read_model.refresh",)),
-            "bank-flow-rule-batch": (
-                "bank-flow-rule-batch-read-model",
-                ("bank_flow_rule_batch.read_model.refresh",),
-            ),
-            "invoice-lifecycle-secondary": (
-                "invoice-lifecycle-secondary-read-model",
-                ("invoice_lifecycle.read_model.refresh",),
-            ),
         }
         for instance_name, (worker_kind, event_types) in expectations.items():
             with self.subTest(instance_name=instance_name):
@@ -154,30 +135,23 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
                 self.assertEqual(registration.event_types, event_types)
 
         self.assertEqual(APP_STATUS_READ_MODEL_REGISTRY["search"].worker_instance, "search")
-        self.assertEqual(APP_STATUS_READ_MODEL_REGISTRY["pending_invoice"].worker_instance, "pending-invoice")
-        self.assertEqual(APP_STATUS_READ_MODEL_REGISTRY["tax_offset"].worker_instance, "tax-offset")
-        self.assertEqual(APP_STATUS_READ_MODEL_REGISTRY["bank_flow_rule_batch"].worker_instance, "bank-flow-rule-batch")
+        self.assertNotIn("pending_invoice", APP_STATUS_READ_MODEL_REGISTRY)
+        self.assertNotIn("tax_offset", APP_STATUS_READ_MODEL_REGISTRY)
+        self.assertNotIn("bank_flow_rule_batch", APP_STATUS_READ_MODEL_REGISTRY)
+        bank_flow = registrations["bank-flow-rule-batch"]
+        self.assertEqual(bank_flow.worker_kind, "bank-flow-rule-batch-canonical-draft")
+        self.assertEqual(bank_flow.event_types, ("bank_flow_rule_batch.canonical_draft.refresh",))
+        self.assertFalse(bank_flow.rabbitmq_eligible)
         self.assertNotIn("cost-statistics", registrations)
         self.assertNotIn("cost-statistics-secondary", registrations)
         self.assertNotIn("cost_statistics", APP_STATUS_READ_MODEL_REGISTRY)
 
-    def test_cost_tax_worker_no_longer_consumes_cost_statistics_refreshes(self) -> None:
-        registration = registration_by_instance_name()["cost-tax"]
-
-        self.assertEqual(registration.worker_kind, "cost-tax-read-model")
-        self.assertEqual(registration.handler_flags, ("--enable-tax-offset-read-model-refresh",))
-        self.assertEqual(registration.event_types, ("tax_offset.read_model.refresh",))
-        self.assertEqual(registration.read_model_key, "tax_offset")
-        self.assertEqual(registration.read_model_scope_type, "tax_offset")
-        self.assertNotIn("cost_statistics.read_model.refresh", registration.event_types)
-        self.assertEqual(
-            worker_command_args(registration, transport="postgres"),
-            (
-                "--enable-tax-offset-read-model-refresh",
-                "--event-type",
-                "tax_offset.read_model.refresh",
-            ),
-        )
+    def test_cost_and_tax_page_workers_are_retired(self) -> None:
+        registrations = registration_by_instance_name()
+        self.assertNotIn("cost-tax", registrations)
+        self.assertNotIn("tax-offset", registrations)
+        self.assertNotIn("cost_statistics.read_model.refresh", rabbitmq_dispatch_event_types())
+        self.assertNotIn("tax_offset.read_model.refresh", rabbitmq_dispatch_event_types())
 
     def test_import_claim_events_exclude_deleted_fact_changed_bridge(self) -> None:
         registration = registration_by_instance_name()["import"]
@@ -223,10 +197,9 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
                 self.assertEqual(definition.scope_type, scope_type)
                 self.assertEqual(definition.refresh_event_type, event_type)
 
-    def test_worker_kind_inference_uses_registry_for_optional_workers(self) -> None:
-        args = worker_app.build_parser().parse_args(["--enable-bank-account-balance-read-model-refresh"])
-
-        self.assertEqual(worker_app._infer_worker_kind(args), "bank-account-balance-read-model")
+    def test_retired_worker_flags_are_not_accepted(self) -> None:
+        with self.assertRaises(SystemExit):
+            worker_app.build_parser().parse_args(["--enable-bank-account-balance-read-model-refresh"])
 
     def test_turnover_ledger_worker_registration_is_removed(self) -> None:
         self.assertNotIn("turnover-ledger", registration_by_instance_name())
@@ -238,23 +211,33 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
         self.assertEqual(worker_app._infer_worker_kind(args), "no-oa-bank-batch-read-model")
 
     def test_worker_kind_inference_uses_registry_for_bank_flow_rule_batch_worker(self) -> None:
-        args = worker_app.build_parser().parse_args(["--enable-bank-flow-rule-batch-read-model-refresh"])
+        args = worker_app.build_parser().parse_args(
+            ["--enable-bank-flow-rule-batch-canonical-draft-refresh"]
+        )
 
-        self.assertEqual(worker_app._infer_worker_kind(args), "bank-flow-rule-batch-read-model")
+        self.assertEqual(worker_app._infer_worker_kind(args), "bank-flow-rule-batch-canonical-draft")
 
     def test_worker_registration_check_outputs_registry_derived_configuration(self) -> None:
         stdout = io.StringIO()
 
         with contextlib.redirect_stdout(stdout):
-            exit_code = worker_app.main(["--registration", "workbench", "--worker-instance", "workbench", "--check"])
+            exit_code = worker_app.main(
+                [
+                    "--registration",
+                    "workbench-relation",
+                    "--worker-instance",
+                    "workbench-relation",
+                    "--check",
+                ]
+            )
 
         payload = json.loads(stdout.getvalue())
         self.assertEqual(exit_code, 0)
-        self.assertEqual(payload["worker_instance"], "workbench")
-        self.assertEqual(payload["worker_kind"], "workbench-read-model")
-        self.assertEqual(payload["event_types"], ["workbench.read_model.refresh"])
-        self.assertEqual(payload["handlers"], ["workbench.read_model.refresh"])
-        self.assertEqual(payload["registration"]["instance_name"], "workbench")
+        self.assertEqual(payload["worker_instance"], "workbench-relation")
+        self.assertEqual(payload["worker_kind"], "workbench-relation-read-model")
+        self.assertEqual(payload["event_types"], ["workbench_relation.read_model.refresh"])
+        self.assertEqual(payload["handlers"], ["workbench_relation.read_model.refresh"])
+        self.assertEqual(payload["registration"]["instance_name"], "workbench-relation")
         self.assertEqual(payload["registration"]["exclude_claim_scope_keys"], [])
 
     def test_unknown_worker_registration_fails_fast(self) -> None:
@@ -280,9 +263,15 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
         self.assertEqual(tuple(stdout.getvalue().split()), required_worker_instance_names())
 
         stdout = io.StringIO()
-        exit_code = runtime_worker_manifest.main(["--env-example", "workbench"], stdout=stdout)
+        exit_code = runtime_worker_manifest.main(
+            ["--env-example", "workbench-relation"],
+            stdout=stdout,
+        )
         self.assertEqual(exit_code, 0)
-        self.assertEqual(stdout.getvalue().strip(), "fin-ops.worker.workbench.env.example")
+        self.assertEqual(
+            stdout.getvalue().strip(),
+            "fin-ops.worker.workbench-relation.env.example",
+        )
 
 
 if __name__ == "__main__":

@@ -209,7 +209,7 @@ class RuntimeBootstrapTests(unittest.TestCase):
         self.assertNotIn("def _load_persisted_state", source)
         self.assertNotIn("_initialize_runtime_services(self._load_persisted_state", source)
 
-    def test_production_postgres_workbench_requires_sql_read_model_without_sync_builder(self) -> None:
+    def test_production_postgres_workbench_requires_canonical_query_repository(self) -> None:
         app = object.__new__(server_module.Application)
         app._bootstrap_mode = "production"
         app._state_store = type("PostgresStore", (), {"storage_backend": "postgres"})()
@@ -218,9 +218,9 @@ class RuntimeBootstrapTests(unittest.TestCase):
         response = app._handle_api_workbench("2026-05")
 
         self.assertEqual(response.status_code, 503)
-        self.assertIn("read_model_unavailable", response.body)
+        self.assertIn("workbench_canonical_query_unavailable", response.body)
 
-    def test_production_postgres_bank_details_transactions_do_not_fallback_to_legacy_service(self) -> None:
+    def test_production_postgres_bank_details_transactions_fail_closed_without_canonical_query(self) -> None:
         app = object.__new__(server_module.Application)
         app._bootstrap_mode = "production"
         app._state_store = type("PostgresStore", (), {"storage_backend": "postgres"})()
@@ -250,10 +250,10 @@ class RuntimeBootstrapTests(unittest.TestCase):
             {},
         )
 
-        self.assertEqual(response.status_code, 202)
-        self.assertIn("refreshing", response.body)
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("bank_details_canonical_query_unavailable", response.body)
 
-    def test_production_postgres_bank_details_accounts_do_not_fallback_to_legacy_service(self) -> None:
+    def test_production_postgres_bank_details_accounts_fail_closed_without_canonical_query(self) -> None:
         app = object.__new__(server_module.Application)
         app._bootstrap_mode = "production"
         app._state_store = type("PostgresStore", (), {"storage_backend": "postgres"})()
@@ -277,10 +277,10 @@ class RuntimeBootstrapTests(unittest.TestCase):
             {},
         )
 
-        self.assertEqual(response.status_code, 202)
-        self.assertIn("refreshing", response.body)
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("bank_details_canonical_query_unavailable", response.body)
 
-    def test_production_postgres_bank_details_accounts_missing_balance_table_returns_refreshing(self) -> None:
+    def test_production_postgres_bank_details_accounts_do_not_enqueue_retired_balance_refresh(self) -> None:
         app = object.__new__(server_module.Application)
         app._bootstrap_mode = "production"
         app._state_store = type("PostgresStore", (), {"storage_backend": "postgres"})()
@@ -306,10 +306,9 @@ class RuntimeBootstrapTests(unittest.TestCase):
             {},
         )
 
-        self.assertEqual(response.status_code, 202)
-        self.assertIn("refreshing", response.body)
-        self.assertIn("bank_account_balance", response.body)
-        self.assertEqual(queue.enqueued, [("bank_account_balance", "all", "api_migration_missing")])
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("bank_details_canonical_query_unavailable", response.body)
+        self.assertEqual(queue.enqueued, [])
 
     def test_production_snapshot_reads_are_confined_to_legacy_allowlist(self) -> None:
         allowed_paths = {
@@ -356,33 +355,28 @@ class RuntimeBootstrapTests(unittest.TestCase):
         self.assertNotIn("self._bank_transaction_effective_category_provider.bulk_get_for_rows(", source)
         self.assertIn("effective_category_provider=self._bank_transaction_tag_reader()", source)
 
-    def test_runtime_worker_handlers_do_not_construct_effective_category_provider(self) -> None:
+    def test_runtime_worker_handlers_use_canonical_effective_category_provider(self) -> None:
         source = Path("backend/src/fin_ops_platform/services/runtime_worker_handlers.py").read_text(encoding="utf-8")
 
-        self.assertNotIn("BankTransactionEffectiveCategoryProvider", source)
+        self.assertIn("BankTransactionEffectiveCategoryProvider", source)
+        self.assertNotIn("BankTransactionTagReadFacade", source)
         self.assertNotIn("SearchService()", source)
         self.assertIn("_runtime_search_service(import_service)", source)
 
-    def test_standalone_worker_wires_bank_tag_facade_to_tag_consuming_read_models(self) -> None:
+    def test_standalone_worker_uses_canonical_category_provider_for_retained_workers(self) -> None:
         source = Path("backend/src/fin_ops_platform/app/worker.py").read_text(encoding="utf-8")
 
-        self.assertIn("BankTransactionTagReadFacade", source)
+        self.assertNotIn("BankTransactionTagReadFacade", source)
+        self.assertNotIn("bank_transaction_tag_read_facade", source)
         self.assertNotIn("CostStatisticsSqlProjectionBuilder(", source)
-        self.assertIn("bank_transaction_tag_read_facade=bank_transaction_tag_read_facade", source)
-        self.assertIn("SearchPendingSqlProjectionBuilder(", source)
-        self.assertIn("bank_transaction_tag_read_facade=bank_transaction_tag_read_facade", source)
-        self.assertIn("effective_category_provider=bank_transaction_tag_read_facade", source)
+        self.assertNotIn("SearchPendingSqlProjectionBuilder(", source)
+        self.assertEqual(
+            source.count("effective_category_provider=BankTransactionEffectiveCategoryProvider("),
+            2,
+        )
 
-    def test_non_tag_downstream_modules_do_not_depend_on_bank_tag_facade(self) -> None:
-        paths = [
-            Path("backend/src/fin_ops_platform/services/workbench_sql_projection.py"),
-            Path("backend/src/fin_ops_platform/services/matching.py"),
-            Path("backend/src/fin_ops_platform/services/reconciliation.py"),
-            Path("backend/src/fin_ops_platform/services/input_invoice_usage_service.py"),
-            Path("backend/src/fin_ops_platform/services/output_invoice_collection_service.py"),
-            Path("backend/src/fin_ops_platform/services/oa_pending_payment_projection_rows.py"),
-            Path("backend/src/fin_ops_platform/services/project_costing.py"),
-        ]
+    def test_production_services_do_not_depend_on_retired_bank_tag_facade(self) -> None:
+        paths = Path("backend/src/fin_ops_platform").rglob("*.py")
         violations = [
             str(path)
             for path in paths
@@ -392,16 +386,14 @@ class RuntimeBootstrapTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_bank_transaction_tag_reader_uses_facade_only_for_postgres_runtime(self) -> None:
+    def test_bank_transaction_tag_reader_always_uses_canonical_provider(self) -> None:
         app = object.__new__(server_module.Application)
         provider = object()
-        facade = object()
         app._bank_transaction_effective_category_provider = provider
-        app._bank_transaction_tag_read_facade = facade
 
         app._bootstrap_mode = "production"
         app._state_store = type("PostgresStore", (), {"storage_backend": "postgres"})()
-        self.assertIs(app._bank_transaction_tag_reader(), facade)
+        self.assertIs(app._bank_transaction_tag_reader(), provider)
 
         app._bootstrap_mode = "legacy"
         self.assertIs(app._bank_transaction_tag_reader(), provider)
@@ -410,13 +402,11 @@ class RuntimeBootstrapTests(unittest.TestCase):
         app._state_store = type("MongoStore", (), {"storage_backend": "mongo"})()
         self.assertIs(app._bank_transaction_tag_reader(), provider)
 
-    def test_postgres_category_rebinding_keeps_downstream_services_on_facade(self) -> None:
+    def test_category_rebinding_keeps_downstream_services_on_canonical_provider(self) -> None:
         app = object.__new__(server_module.Application)
-        facade = object()
         provider = object()
         app._bootstrap_mode = "production"
         app._state_store = type("PostgresStore", (), {"storage_backend": "postgres"})()
-        app._build_bank_transaction_tag_read_facade = lambda: facade
         app._turnover_ledger_service = type("TurnoverService", (), {})()
         app._live_workbench_service = type("LiveWorkbenchService", (), {})()
         app._pending_invoice_query_service = type("PendingInvoiceService", (), {})()
@@ -428,9 +418,9 @@ class RuntimeBootstrapTests(unittest.TestCase):
         )
 
         self.assertIs(app._bank_transaction_effective_category_provider, provider)
-        self.assertIs(app._turnover_ledger_service._category_provider, facade)
-        self.assertIs(app._live_workbench_service._category_provider, facade)
-        self.assertIs(app._pending_invoice_query_service._effective_category_provider, facade)
+        self.assertIs(app._turnover_ledger_service._category_provider, provider)
+        self.assertIs(app._live_workbench_service._category_provider, provider)
+        self.assertIs(app._pending_invoice_query_service._effective_category_provider, provider)
 
 
 if __name__ == "__main__":

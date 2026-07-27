@@ -70,7 +70,7 @@ function healthyPayload(generatedAt: string): ApiAppHealthPayload {
     generated_at: generatedAt,
     session: { status: "authenticated" },
     oa_sync: { status: "synced", dirty_scopes: [] },
-    workbench_read_model: { status: "ready", dirty_scopes: [], stale_scopes: [], rebuilding_scopes: [] },
+    workbench_matching: { status: "ready", dirty_scopes: [] },
     background_jobs: { active: 0, queued: 0, running: 0, attention: 0 },
   };
 }
@@ -81,7 +81,7 @@ function stalePayload(generatedAt: string): ApiAppHealthPayload {
     generated_at: generatedAt,
     session: { status: "authenticated" },
     oa_sync: { status: "synced", dirty_scopes: [] },
-    workbench_read_model: { status: "stale", dirty_scopes: ["oa"], stale_scopes: ["oa"] },
+    workbench_matching: { status: "stale", dirty_scopes: ["oa"] },
     background_jobs: { active: 0, queued: 0, running: 0, attention: 0 },
   };
 }

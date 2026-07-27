@@ -22,11 +22,10 @@ Release A 已移除旧 `read_model.workbench_candidate_matches`、`read_model.wo
 | active case validation | relation repository | 只按 canonical case id 读取一条 active relation，不加载 history；只供进入事务前的 scope/owner 校验，真正 mutation 仍在事务内加锁并加载相关 history |
 | active member overlap validation | relation repository | confirm 按目标 row ids/case ids 一次读取 active relations，不读取 cancelled relation 或 history；不得用通用 current+history snapshot 代替 |
 | withdraw command | owner API | active case identity、preview id、expected versions、reason |
-| confirm/withdraw preview rows | Workbench active generation read owner | preview 只把 untrusted scope/row ids/expected version 交给有界 relation-preview selection port；返回 selected rows、必要 attachment context 与 generation proof。正式 relation command、repository adapter 和 UoW 不接收该 DTO，并在事务内重读 canonical facts、active relation/version 与 idempotency |
+| confirm/withdraw preview rows | reconciliation-workbench canonical query repository | preview 只把 untrusted scope/row ids 交给有界 selection port；返回最多 20 条 selected rows 和最多 100 条必要 attachment context，不返回 generation proof。正式 relation command、repository adapter 和 UoW 不接收该 DTO |
 | read request | downstream facade | scope keys、row ids、`require_fresh`、source version contract |
-| page scope proof request | Workbench / 银行明细页面 query boundary | `source_versions_for_scopes(scope_keys)` 通过 `workbench_relation_scope_summaries(...)` 一次读取全部 concrete month scope 的 published proof/current-effective dirty status，再用一次 bulk canonical expected-version I/O 比较；只 enqueue mismatch/missing 的 exact scopes。`all` 先一次枚举 canonical object、active relation 与已有 projection 月份，再执行相同批量 proof，禁止逐月 N+1 或持久化伪 `all` scope |
-| batch-accounting read request | `BatchAccountingService` via facade/port | 候选 row ids + 明确年份；使用一个批量账务专用 bundle 返回候选 rows、referenced groups、候选/年度 bulk scope proof 和 `submitted_count`，固定查询次数并保留等价 freshness/status；年度聚合只允许命中 batch-accounting partial expression index，不得改变其他页面通用 reader 行为 |
-| OA canonical snapshot changed | OA integration transactional writer | 只提交 OA canonical snapshot/source version，零 `workbench_relation`/`oa_pending_payment` dirty/outbox。关系页或消费页访问时按自己的 source dependency 精确收敛；OA projector 直接读 canonical relation，不等待本 read model。 |
+| shared consumer scope proof | 登记的 `workbench_relation` consumer | `source_versions_for_scopes(scope_keys)` 一次读取 concrete month scope 的 published proof/current-effective dirty status；只 enqueue mismatch/missing 的 exact scopes。`all` 只作 fan-out command，禁止持久化伪 parent projection。 |
+| OA canonical snapshot changed | OA integration transactional writer | 只提交 OA canonical snapshot/source version，零 retired page dirty/outbox；页面 normal GET 直接读取 canonical facts。共享 relation projection 只按自身显式 consumer 合同刷新。 |
 | completed ETC OA marker | `app.oa_applications.normalized_payload.etc_batch_id` + submitted `app.etc_business_batches` | 仅允许精确相等且 OA/batch owner 各自唯一；写入前在关系 UoW 内锁定 external batch identity 并重验 OA 状态、批次状态、数量、金额和 active relation owner。禁止金额、名称、OCR 或模糊匹配。 |
 
 ## 输出 I/O
@@ -54,7 +53,7 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 - repository adapter 持久化 scoped snapshot 后，只能通过 domain service 的 changed-case delta I/O 更新进程内镜像；禁止读取并重建全局 relation/history snapshot，也禁止 adapter 直接写 domain service 私有状态。
 - 单 case active relation 读取必须走显式窄 I/O；禁止 adapter fallback 先复制全局 snapshot 再筛 case，禁止为只读校验加载该 case 全部 history。
 - 在线 command 持久化必须走显式 changed-case delta I/O：relation upsert/delete 与本次新 history event 在同一事务写入，history 只能 append/idempotent upsert，不得先删除再重写该 case 的完整历史。全量 relation/history replacement 只用于 migration、restore 或 repair，不得重新进入 confirm/cancel/withdraw 热链。
-- confirm/withdraw preview 的 derived active-generation selection 不是 relation fact source。preview route 可以用它构造 selection groups、金额与 OA alias；submit 必须丢弃该 DTO，并保留服务端 actor/tenant、preview identity、expected relation versions、canonical repository 与 UoW 原子写合同。
+- confirm/withdraw preview 的 canonical query snapshot 不是 command 事实源。preview route 可以用它构造 selection groups、金额与 OA alias；submit 必须丢弃 rows DTO，只保留服务端 actor/tenant、preview identity、expected relation business versions、idempotency fingerprint，并在同一 UoW transaction 内一次有界查询重验 canonical identities/types，再由 relation repository 锁定并重验 active ownership/version。
 - case id 重用、active member overlap、row type 对齐、expected version 和 idempotency fingerprint 必须在写入边界校验。
 - 任意 `N:M:K` member set 都合法，只要上游业务规则已证明安全并且成员非空、唯一、typed。
 - 自动扩展既有 active case 必须使用 `target_case_id` 并原子 replace；不得创建重叠的第二条 active relation。
@@ -68,8 +67,8 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 - 下游只有 active relation 是 linked 证据。历史关系、显示 tags、候选搜索结果、matching evidence 都不是支付/关联/成本证据。
 - downstream read models 必须记录并比较 relation source versions，relation mutation 后旧 payload 不得继续 fresh。当前访问只能 enqueue 本页面所需的精确 scope；未访问/隐藏页面不得由 relation 写路径提前 fan-out。
 - 共享 relation projection 的 exact-scope canonical proof 必须包含 eligible active relation 数量与稳定 typed membership digest，不能只使用 `max(updated_at)`。relation-only delta 在覆盖旧 group 前必须通过 repository 一次批量解析银行流水/发票 canonical UUID 与 legacy ID aliases；任一 alias overlap 都属于同一 logical member。无法证明完整 alias/affected scope 时 fail closed 为 full rebuild，不得发布局部结果为 fresh。
-- 银行明细、待找发票、进项/销项等实际消费 relation distribution 的页面，继续把共享 relation projection 作为各自访问时依赖并精确收敛。关联台自身不消费 `workbench_relation`：它直接从 canonical relation 构建 Workbench active generation，因此 combined initial 不得为 relation distribution 阻塞、入队或输出 dependency status；关联台自己的 bulk canonical/active-generation proof 只刷新 exact Workbench 月份。该隔离禁止把 consumer projection 重新接回 relation command/UoW 或关联台页面热路径。
-- 批量账务未提交列表专用 `get_batch_accounting_by_row_ids(..., submitted_year=...)` 必须在同一 bundle 中读取所有候选/年度 scopes 的 current-effective dirty status、候选 rows、referenced groups 和年度 `submitted_count`，保留原 status/reason/source-version 合同；12 个月 canonical expected proof 必须由 projection builder 的一次 bulk SQL 返回逐 scope 映射，facade 仍逐 scope 精确比较，不能恢复 12 次单月 source-version N+1、独立 count port 或通用逐 scope查询。`workbench_relation_groups_batch_accounting_year_scope_group_idx` 只覆盖 linked batch-accounting 年度聚合谓词，不改变其他 consumer 的查询或数据。已提交年度 list 继续使用自己的固定 I/O。
+- 银行明细、待找发票、进项/销项、关联台、批量账务等页面不消费 relation distribution；各页面 repository 在一个只读快照内直接组合 canonical facts 与 `app.workbench_pair_relations status='active'`，不阻塞、不入队、不输出 dependency status。共享 `workbench_relation` 只服务仍明确登记的非页面消费者；禁止重新接回上述页面热路径。
+- 批量账务页面不再消费本模块的 read model。其候选、年度计数、已提交关系和成员详情统一由页面专属 canonical query repository 读取 `app.*` 事实；本模块不得恢复 batch 专用 facade/repository 方法、年度 scope proof 或页面 freshness 合同。
 
 ## 文件范围
 
@@ -77,7 +76,7 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 | --- | --- |
 | Domain/command | `workbench_pair_relation_service.py`、`workbench_relation_command_service.py`、`workbench_relation_modes.py` |
 | UoW/repository | `workbench_uow.py`、`workbench_relation_command_repository_adapter.py`、`postgres_repositories/workbench_relation.py` |
-| Read/projection | `workbench_relation_read_facade.py`、`workbench_relation_sql_projection.py`、`workbench_relation_read_model_refresh.py` |
+| Read/projection | `workbench_relation_read_facade.py`、`workbench_relation_sql_projection.py`、`workbench_relation_read_model_refresh.py`；关联台页面专属读取见 `postgres_repositories/workbench_canonical_query.py` |
 | Auto formalization | `workbench_free_matching_engine.py`、`workbench_matching_orchestrator.py`、`workbench_etc_batch_link.py`、`postgres_repositories/workbench_formal_relation.py` |
 | Tests | `tests/test_workbench_relation_*.py`、`test_workbench_formal_relation_repository.py`、`test_workbench_matching_orchestrator.py` |
 

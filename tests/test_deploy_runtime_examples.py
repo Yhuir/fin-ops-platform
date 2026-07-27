@@ -11,8 +11,6 @@ DEPLOY_CONTROL = REPO_ROOT / "deploy/oa/bin/finops-deploy-control.sh"
 ENSURE_RUNTIME_WORKERS = REPO_ROOT / "deploy/oa/bin/finops-ensure-runtime-workers.sh"
 WORKER_SERVICE = REPO_ROOT / "deploy/oa/systemd/fin-ops-worker@.service.example"
 DISPATCHER_SERVICE = REPO_ROOT / "deploy/oa/systemd/fin-ops-rabbitmq-dispatcher.service.example"
-PRUNE_SERVICE = REPO_ROOT / "deploy/oa/systemd/finops-prune-workbench-generations.service.example"
-PRUNE_TIMER = REPO_ROOT / "deploy/oa/systemd/finops-prune-workbench-generations.timer.example"
 RUNTIME_QUEUE_PRUNE_SERVICE = REPO_ROOT / "deploy/oa/systemd/finops-prune-runtime-queue-history.service.example"
 RUNTIME_QUEUE_PRUNE_TIMER = REPO_ROOT / "deploy/oa/systemd/finops-prune-runtime-queue-history.timer.example"
 OA_SYNC_ENQUEUE_SERVICE = REPO_ROOT / "deploy/oa/systemd/finops-enqueue-oa-sync.service.example"
@@ -23,7 +21,6 @@ COMMON_ENV = REPO_ROOT / "deploy/oa/env/fin-ops.common.env.example"
 WORKER_ENV_DIR = REPO_ROOT / "deploy/oa/env"
 DEPLOYMENT_DOC = REPO_ROOT / "docs/operations/deployment.md"
 OA_DEPLOY_README = REPO_ROOT / "deploy/oa/README.md"
-PRUNE_HELPER = REPO_ROOT / "deploy/oa/bin/finops-prune-workbench-generations.sh"
 RUNTIME_QUEUE_PRUNE_HELPER = REPO_ROOT / "deploy/oa/bin/finops-prune-runtime-queue-history.sh"
 OA_SYNC_ENQUEUE_HELPER = REPO_ROOT / "deploy/oa/bin/finops-enqueue-oa-sync.sh"
 
@@ -118,9 +115,8 @@ class DeployRuntimeExampleTests(unittest.TestCase):
 
         self.assertEqual([], slow_examples)
 
-    def test_runtime_worker_env_install_migrates_only_legacy_poll_interval(self) -> None:
+    def test_runtime_worker_env_install_uses_only_registered_worker_examples(self) -> None:
         helper = ENSURE_RUNTIME_WORKERS.read_text(encoding="utf-8")
-        workbench_env = (WORKER_ENV_DIR / "fin-ops.worker.workbench.env.example").read_text(encoding="utf-8")
 
         self.assertIn("install_if_missing", helper)
         self.assertIn("migrate_legacy_worker_poll_interval", helper)
@@ -130,21 +126,21 @@ class DeployRuntimeExampleTests(unittest.TestCase):
         self.assertIn("--poll-interval-seconds ${source_poll}", helper)
         self.assertIn('[ "$worker" = "workbench-matching" ]', helper)
         self.assertIn("--poll-interval-seconds 5([^0-9.]|$)", helper)
-        self.assertIn("--poll-interval-seconds 0.01", workbench_env)
+        self.assertFalse((WORKER_ENV_DIR / "fin-ops.worker.workbench.env.example").exists())
 
-    def test_runtime_worker_env_install_removes_retired_oa_handler_from_shared_invoice_worker(self) -> None:
+    def test_retired_invoice_page_worker_examples_are_absent(self) -> None:
         helper = ENSURE_RUNTIME_WORKERS.read_text(encoding="utf-8")
-        invoice_env = (WORKER_ENV_DIR / "fin-ops.worker.invoice-usage-collection.env.example").read_text(
-            encoding="utf-8"
-        )
-        deploy_builder = (REPO_ROOT / "scripts/deploy_oa.py").read_text(encoding="utf-8")
-
-        self.assertIn("migrate_invoice_usage_collection_oa_split", helper)
-        self.assertIn("--enable-oa-pending-payment-read-model-refresh", helper)
-        self.assertIn("oa_pending_payment\\.read_model\\.refresh", helper)
-        self.assertNotIn("--enable-oa-pending-payment-read-model-refresh", invoice_env)
-        self.assertNotIn("oa_pending_payment.read_model.refresh", invoice_env)
-        self.assertNotIn("migrate_workbench_scope_split", deploy_builder)
+        self.assertFalse((WORKER_ENV_DIR / "fin-ops.worker.invoice-usage-collection.env.example").exists())
+        self.assertFalse((WORKER_ENV_DIR / "fin-ops.worker.oa-pending-payment.env.example").exists())
+        registered_events = {
+            event_type
+            for registration in RUNTIME_WORKER_REGISTRY
+            for event_type in registration.event_types
+        }
+        self.assertNotIn("input_invoice_usage.read_model.refresh", registered_events)
+        self.assertNotIn("output_invoice_collection.read_model.refresh", registered_events)
+        self.assertNotIn("oa_pending_payment.read_model.refresh", registered_events)
+        self.assertNotIn("fin-ops.worker.invoice-usage-collection.env.example", helper)
 
     def test_runtime_worker_docs_use_registry_manifest_instead_of_manual_matrix(self) -> None:
         for doc_path in (DEPLOYMENT_DOC, OA_DEPLOY_README):
@@ -154,43 +150,75 @@ class DeployRuntimeExampleTests(unittest.TestCase):
             self.assertNotIn("| `worker-", content, doc_path.name)
             self.assertNotIn("file migration", content.lower(), doc_path.name)
 
-    def test_deploy_control_retires_unregistered_worker_instances_before_restart(self) -> None:
+    def test_deploy_control_retires_unregistered_workers_and_requires_quiescence_before_migration(self) -> None:
         deploy_control = DEPLOY_CONTROL.read_text(encoding="utf-8")
+        activate_case = deploy_control.split("  activate)", 1)[1].split("    ;;", 1)[0]
 
         self.assertIn("runtime_worker_manifest --instances", deploy_control)
+        self.assertIn("stop_runtime_worker_services_for_activation", deploy_control)
         self.assertIn("retire_unregistered_worker_services", deploy_control)
         self.assertIn('registered_workers=" $(registered_worker_instances "$src") "', deploy_control)
         self.assertIn('systemctl disable "$service"', deploy_control)
         self.assertIn('systemctl stop "$service"', deploy_control)
+        self.assertIn("assert_retired_page_runtime_quiesced", deploy_control)
+        self.assertIn("from fin_ops_platform.services.read_model_manifest import READ_MODEL_MANIFEST", deploy_control)
+        self.assertIn("where status = %s", deploy_control)
+        self.assertIn('"processing", "%.read_model.refresh", active_event_types', deploy_control)
         self.assertLess(
-            deploy_control.rindex('retire_unregistered_worker_services "$src"'),
-            deploy_control.rindex("restart_services\n"),
+            activate_case.index('retire_unregistered_worker_services "$src"'),
+            activate_case.index('assert_retired_page_runtime_quiesced "$src"'),
+        )
+        self.assertLess(
+            activate_case.index('assert_retired_page_runtime_quiesced "$src"'),
+            activate_case.index("stop_runtime_worker_services_for_activation"),
+        )
+        self.assertLess(
+            activate_case.index("stop_runtime_worker_services_for_activation"),
+            activate_case.index('run_schema_migrations "$src"'),
+        )
+        self.assertLess(
+            activate_case.index('assert_retired_page_runtime_quiesced "$src"'),
+            activate_case.index('ensure_runtime_workers "$src"'),
         )
 
-    def test_workbench_primary_owns_all_and_secondary_only_drains_month_scopes(self) -> None:
-        helper = ENSURE_RUNTIME_WORKERS.read_text(encoding="utf-8")
-        workbench_env = (WORKER_ENV_DIR / "fin-ops.worker.workbench.env.example").read_text(encoding="utf-8")
+    def test_deploy_control_gate_failure_does_not_stop_registered_workers(self) -> None:
+        deploy_control = DEPLOY_CONTROL.read_text(encoding="utf-8")
+        activate_case = deploy_control.split("  activate)", 1)[1].split("    ;;", 1)[0]
+
+        self.assertIn("set -Eeuo pipefail", deploy_control)
+        self.assertLess(
+            activate_case.index('assert_retired_page_runtime_quiesced "$src"'),
+            activate_case.index("stop_runtime_worker_services_for_activation"),
+        )
+        self.assertLess(
+            activate_case.index("stop_runtime_worker_services_for_activation"),
+            activate_case.index('run_schema_migrations "$src"'),
+        )
+
+    def test_workbench_page_worker_is_retired_while_matching_and_relation_remain(self) -> None:
         required = {registration.instance_name: registration for registration in RUNTIME_WORKER_REGISTRY if registration.required}
 
+        self.assertNotIn("workbench", required)
+        self.assertNotIn("workbench-secondary", required)
         self.assertNotIn("workbench-aggregate", required)
-        self.assertIn("workbench-secondary", required)
-        self.assertEqual(required["workbench-secondary"].exclude_claim_scope_keys, ("all",))
-        self.assertEqual(
-            required["workbench-secondary"].env_example,
-            "fin-ops.worker.workbench.env.example",
-        )
-        self.assertNotIn("--exclude-claim-scope-key all", workbench_env)
-        self.assertNotIn("--claim-scope-key all", workbench_env)
-        self.assertNotIn("migrate_workbench_scope_split", helper)
-        self.assertNotIn("migrate_workbench_aggregate_drain", helper)
+        self.assertIn("workbench-matching", required)
+        self.assertIn("workbench-relation", required)
+        self.assertFalse((WORKER_ENV_DIR / "fin-ops.worker.workbench.env.example").exists())
 
-    def test_rabbitmq_dispatcher_env_includes_invoice_usage_collection_events(self) -> None:
+    def test_rabbitmq_dispatcher_env_excludes_retired_page_events(self) -> None:
         env_example = DISPATCHER_ENV.read_text()
 
-        self.assertIn("invoice_lifecycle.read_model.refresh", env_example)
-        self.assertIn("input_invoice_usage.read_model.refresh", env_example)
-        self.assertIn("output_invoice_collection.read_model.refresh", env_example)
-        self.assertIn("oa_pending_payment.read_model.refresh", env_example)
+        self.assertIn("workbench_relation.read_model.refresh", env_example)
+        self.assertIn("search.read_model.refresh", env_example)
+        self.assertIn("no_oa_bank_batch.read_model.refresh", env_example)
+        for retired_event in (
+            "workbench.read_model.refresh",
+            "invoice_lifecycle.read_model.refresh",
+            "input_invoice_usage.read_model.refresh",
+            "output_invoice_collection.read_model.refresh",
+            "oa_pending_payment.read_model.refresh",
+        ):
+            self.assertNotIn(retired_event, env_example)
 
     def test_shared_rabbitmq_worker_env_does_not_switch_all_workers_to_rabbitmq(self) -> None:
         env_example = RABBITMQ_WORKER_ENV.read_text(encoding="utf-8")
@@ -205,38 +233,34 @@ class DeployRuntimeExampleTests(unittest.TestCase):
         self.assertIn("migrate_rabbitmq_worker_drain_interval", helper)
         self.assertIn("RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS=0.05", helper)
 
-    def test_search_pending_workers_and_dispatcher_include_pending_invoice_refresh(self) -> None:
-        postgres_worker_env = (REPO_ROOT / "deploy/oa/env/fin-ops.worker.search-pending.env.example").read_text()
-        rabbitmq_worker_env = (REPO_ROOT / "deploy/oa/env/fin-ops.worker.search-pending-rabbitmq.env.example").read_text()
+    def test_search_workers_and_dispatcher_exclude_retired_pending_invoice_refresh(self) -> None:
+        self.assertFalse((REPO_ROOT / "deploy/oa/env/fin-ops.worker.search-pending.env.example").exists())
+        self.assertFalse((REPO_ROOT / "deploy/oa/env/fin-ops.worker.search-pending-rabbitmq.env.example").exists())
+        postgres_worker_env = (REPO_ROOT / "deploy/oa/env/fin-ops.worker.search.env.example").read_text()
+        secondary_worker_env = (REPO_ROOT / "deploy/oa/env/fin-ops.worker.search-secondary.env.example").read_text()
         dispatcher_env = DISPATCHER_ENV.read_text()
 
-        for env_example in (postgres_worker_env, rabbitmq_worker_env):
+        for env_example in (postgres_worker_env, secondary_worker_env):
             self.assertIn("--enable-search-read-model-refresh", env_example)
-            self.assertIn("--enable-pending-invoice-read-model-refresh", env_example)
             self.assertIn("--event-type search.read_model.refresh", env_example)
-            self.assertIn("--event-type pending_invoice.read_model.refresh", env_example)
-        self.assertIn("pending_invoice.read_model.refresh", dispatcher_env)
+            self.assertNotIn("--enable-pending-invoice-read-model-refresh", env_example)
+            self.assertNotIn("--event-type pending_invoice.read_model.refresh", env_example)
+        self.assertNotIn("pending_invoice.read_model.refresh", dispatcher_env)
 
-    def test_workbench_generation_prune_helper_uses_current_retention_defaults(self) -> None:
-        helper = PRUNE_HELPER.read_text(encoding="utf-8")
-        service = PRUNE_SERVICE.read_text(encoding="utf-8")
-        timer = PRUNE_TIMER.read_text(encoding="utf-8")
+    def test_retired_workbench_generation_prune_runtime_is_absent(self) -> None:
         deploy_control = DEPLOY_CONTROL.read_text(encoding="utf-8")
+        deploy_entrypoint = (REPO_ROOT / "scripts/deploy_oa.py").read_text(encoding="utf-8")
 
-        self.assertIn("KEEP_RECENT=\"${FINOPS_WORKBENCH_PRUNE_KEEP_RECENT:-1}\"", helper)
-        self.assertIn("KEEP_DAYS=\"${FINOPS_WORKBENCH_PRUNE_KEEP_DAYS:-0}\"", helper)
-        self.assertIn("LIMIT=\"${FINOPS_WORKBENCH_PRUNE_LIMIT:-500}\"", helper)
-        self.assertNotIn("FINOPS_WORKBENCH_PRUNE_KEEP_RECENT:-3", helper)
-        self.assertNotIn("FINOPS_WORKBENCH_PRUNE_KEEP_DAYS:-1", helper)
-        self.assertIn("--keep-recent-generations-per-scope \"$KEEP_RECENT\"", helper)
-        self.assertIn("--keep-days \"$KEEP_DAYS\"", helper)
-        self.assertIn("status <> 'active'", (REPO_ROOT / "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py").read_text(encoding="utf-8"))
-
-        self.assertIn("ExecStart=/usr/local/sbin/finops-prune-workbench-generations", service)
-        self.assertIn("OnCalendar=*-*-* 03:35:00", timer)
-        self.assertIn("install_workbench_generation_retention", deploy_control)
-        self.assertIn("finops-prune-workbench-generations.sh", deploy_control)
-        self.assertIn("systemctl enable --now \"$timer_unit\"", deploy_control)
+        self.assertFalse((REPO_ROOT / "deploy/oa/bin/finops-prune-workbench-generations.sh").exists())
+        self.assertFalse(
+            (REPO_ROOT / "deploy/oa/systemd/finops-prune-workbench-generations.service.example").exists()
+        )
+        self.assertFalse(
+            (REPO_ROOT / "deploy/oa/systemd/finops-prune-workbench-generations.timer.example").exists()
+        )
+        self.assertNotIn("install_workbench_generation_retention", deploy_control)
+        self.assertNotIn("finops-prune-workbench-generations", deploy_control)
+        self.assertNotIn("install_workbench_generation_retention", deploy_entrypoint)
 
     def test_runtime_queue_history_prune_helper_uses_controlled_retention_defaults(self) -> None:
         helper = RUNTIME_QUEUE_PRUNE_HELPER.read_text(encoding="utf-8")

@@ -1,93 +1,41 @@
-# 批量账务 状态机
+# 批量账务状态机
 
-> 修改 `批量账务` 相关业务状态、UI 状态、read model 状态或 worker 状态前必须读取本文件。当前没有独立状态机时，在对应小节写明“不适用原因”，不要删除文件。
+日期：2026-07-27
 
-## 业务状态
+## 业务关系状态
 
-| 状态 | 含义 | 事实源 |
-| --- | --- | --- |
-| `unsubmitted` | 银行流水符合批量账务条件，且当前没有 active relation 占用；右侧展示没有关联银行流水的日常报销 OA 主单，仅发票关系或无流水候选关系不排除该 OA。 | Workbench payload + `workbench_relation` read model |
-| `submitted` | 银行流水存在 active batch accounting relation；右侧展示该关系下的 OA 行，只允许撤回。 | Workbench pair relation + relation distribution |
-| `stale/conflict` | 前端持有的 bank row 或 relation version 已落后，提交/撤回应失败并要求刷新。 | `expected_version`、active relation version |
-| `mismatch_pending_note` | 银行金额与选中 OA 合计不一致，尚未填写有效差额说明。 | 前端选择状态 + `BatchAccountingService` 金额校验 |
-| `mismatch_closed` | 金额不一致但已填写差额说明，提交后视为人工差额闭环。 | batch relation history / `special_metadata` |
-| `withdrawn` | 批量账务关系撤回，当前 batch relation 被 durable command repository 持久化为 `cancelled`，历史保留；不走调用方旧 snapshot restore，不把 OA 附件 case_id / `existing_case` 显示归属恢复成任意 active relation。若行集包含可证明的父 OA + 自带附件发票，则由 Workbench relation 状态机按不可变 source binding 保留该 active relation。 | Workbench pair relation + relation history |
-
-### 允许流转
-
-- `unsubmitted -> submitted`：选择一个合法银行流水、至少一个合法 OA 行；金额不一致时必须提供 trim 后非空差额说明；`expected_version` 必须匹配。
-- `submitted -> withdrawn`：只能撤回 active batch accounting relation；必须提供 trim 后非空撤回原因；`expected_version` 必须匹配；撤回 command 必须使用 durable cancel relation 语义并记录 `withdraw_link` history。
-- `withdrawn -> unsubmitted`：撤回成功并完成 relation read model 刷新后，该银行/OA 行重新按 Workbench/关系事实归类。
-- `stale/conflict -> unsubmitted/submitted`：用户刷新，API 返回 fresh payload 后按事实源重新归桶。
-
-### 禁止流转
-
-- `read_model_status !== "fresh"` 时不能把空关系显示为真实未提交，但不得仅因普通 relation distribution non-fresh 禁止提交和撤回；submit/withdraw 后端必须执行 canonical relation write safety、owner 状态、权限/session、idempotency 和 DB 可写性校验。
-- 已有关联关系占用的银行流水不能再次作为 `unsubmitted` 提交。
-- 非日常报销 OA 行、已有关联银行流水的 OA 行、空 OA 列表、空银行流水 ID、非法年份或非法 bucket 必须拒绝；仅发票关系或无流水候选关系不能作为批量账务提交拒绝原因。
-- 金额不一致但差额说明为空或仅空白字符时必须拒绝。
-- 非 batch accounting relation 不能通过批量账务撤回接口撤回。
-- GET 列表路径禁止执行 legacy relation repair 或其他写操作。
-
-## UI 状态
-
-| 状态 | 页面行为 |
-| --- | --- |
-| loading | 初次加载和刷新时显示 `StatePanel` loading，不提交当前选择。 |
-| empty | 银行列表或 OA 表无行时分别展示空态；空态不能替代 non-fresh warning。 |
-| error | GET 失败时显示页面错误 fallback；mutation 失败通过 feedback 展示错误信息。 |
-| fresh | 可按 bucket 操作；unsubmitted 可提交，submitted 可打开撤回 dialog。 |
-| stale/refreshing/missing/failed/unavailable | 显示 relation read model warning、后端 stale reason 和 scope；不能把空关系当真实未提交。普通 relation distribution non-fresh 不应作为长期全局禁用理由，提交/撤回仍由后端 canonical write safety 判定。`refresh_enqueued=false` 时提示刷新未入队并转向系统状态排查。 |
-| mismatch | 显示金额不一致提示和差额说明输入；说明为空时前端阻止提交，后端再次校验。 |
-| bucket 切换 | `unsubmitted` 与 `submitted` 切换时清空 bank/OA selection、差额说明、撤回状态。 |
-| search/filter | 右侧 OA 搜索只过滤展示，不改变后端事实或已选中金额。 |
-| operation pending | 只覆盖 submit/withdraw HTTP 请求本身；成功后结束全局阻塞并触发当前页面正常 GET。GET 非 fresh 时使用页面内 refreshing 状态有界重试；页面变 hidden 立即停止，返回 visible 不自动恢复并提示用户手动刷新。 |
-| submit success | command 成功后结束写阻塞，当前页 normal GET 后显示成功 feedback；不发送跨页刷新事件。 |
-| withdraw success | command 成功后结束写阻塞，当前页 normal GET 后关闭撤回 dialog并显示成功 feedback；不发送跨页刷新事件。 |
-| permission disabled/hidden | 当前没有独立权限开关；若后续接入权限，必须同时覆盖 API 403 和前端 hidden/disabled。 |
-
-## Read Model / Worker 状态
-
-| 状态 | 含义 | 批量账务处理 |
-| --- | --- | --- |
-| `fresh` | `workbench_relation` read model 与 source version 一致。 | 读侧可直接展示；提交/撤回仍按 canonical write safety 校验。 |
-| `refreshing` | refresh 已入队或正在运行。 | API 可返回当前 payload 和 freshness 诊断；普通 refreshing 不应全局禁用具备 canonical write safety 的 mutation。 |
-| `stale` | projection source version 落后。 | API 透出 stale reason/scope key；不能把空关系当真实空，mutation 阻断由 canonical write safety 决定。 |
-| `missing` | 目标 scope 尚无 relation read model。 | facade/gateway enqueue refresh；mutation 默认不因普通 distribution missing 被 fresh gate 拒绝。 |
-| `failed` | 最近 refresh 失败。 | App Status 标记读侧失败；只有目标写模型不可用或 write safety 不可确认时才阻断 mutation。 |
-| `schema_mismatch` | read model schema 版本不匹配。 | 读侧必须重建后才能声明 fresh；写侧仍看 canonical write safety。 |
-| `unavailable` | SQL runtime 或 repository 不可用。 | 不能展示为 green/fresh；需要 App Health/App Status 暴露。 |
-
-Refresh 触发来源：
-
-- 批量账务列表读取：通过 `WorkbenchRelationReadFacade` 以 `require_fresh=true` 请求 relation read model；缺失/stale scope 经现有 freshness/gateway 边界去重入队，GET 不同步 rebuild、不直接写 queue。
-- 批量账务提交/撤回：`WorkbenchRelationCommandService` repository 只写 canonical relation/history/idempotency/audit；不投递 `workbench_relation`、`workbench` 或下游 read model dirty/outbox。页面访问时由各 query gate 对比 canonical version。
-- 关联台关系确认/撤回：`pair_relation_changed`。
-- 银行流水或发票导入、OA rebuild、标签规则等影响 Workbench relation 的生命周期事件。
-- backfill / runtime worker retry。
-- `startup_stale_scan` 默认关闭，且不直接刷新 `workbench_relation` read model；它只标记 workbench matching dirty scopes。
-
-失败恢复：
-
-1. 先检查 App Status 中 `workbench_relation` read model readiness、dirty backlog、worker heartbeat。
-2. 确认 `workbench-relation` worker 注册和 `workbench_relation.read_model.refresh` event 存在。
-3. 对缺失或 stale scope 重新入队；不要通过页面 GET 同步 rebuild。
-4. 修复 source/schema 后重新刷新；页面不能把 non-fresh 空关系当真实空，但 ordinary non-fresh 不应全局阻断具备 canonical write safety 的 mutation。
-
-## 变更记录
-
-| 日期 | 变更 | 影响 | 验证 |
+| 当前状态 | 事件 | 校验 | 下一状态 |
 | --- | --- | --- | --- |
-| 2026-07-16 | 删除 generic Workbench full-page fallback | 三类 Batch Accounting SQL loader 成为各自操作的唯一 Workbench 输入；缺失/无效 payload 返回 503，不再高耗时兜底 | Batch API 503 回归、route boundary guard |
-| 2026-07-05 | 删除 service-level legacy repair 入口与 submitted 12 个月 relation scan fallback | 旧 case-id repair 不再是页面模块内置能力；已提交 bucket 缺少年份级 relation reader 时 fail closed 为 unavailable；业务/UI/read model/worker 主状态定义不变 | `test_batch_accounting_legacy_repair_entrypoint_is_removed`、`test_submitted_list_fails_closed_without_year_relation_reader`、route boundary guard |
-| 2026-06-24 | 删除无调用者的 app-level repair helper：`Application._repair_batch_accounting_relation_case_ids(...)` 不再存在；service-level repair 当时临时保留，已于 2026-07-05 删除 | 移除 unused legacy write wrapper；业务/UI/read model/worker 状态定义不变 | 静态 route/repair guard、GET 只读回归 |
-| 2026-06-24 | Submit/withdraw route owner 抽取：mutation session/JSON 仍在 `server.py`，DTO/service/error mapping 与写后 scope/lifecycle/read model persist orchestration 进入 `BatchAccountingApiRoutes` 显式 callback 边界 | route ownership 变化；业务/UI/read model/worker 状态定义不变 | `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_batch_accounting_route_handlers_do_not_bypass_service_boundaries`、批量账务 submit/withdraw API 回归 |
-| 2026-06-23 | Route handler 边界守卫：GET 只能委托 `BatchAccountingService.build_payload(...)`，不得执行 repair/write/read model schedule；submit/withdraw route 必须经 mutation session 并委托 service，不得 direct relation write | `server.py` 批量账务 route ownership；不改变业务/UI/read model/worker 状态定义 | `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_batch_accounting_route_handlers_do_not_bypass_service_boundaries` |
-| 2026-06-11 | 首轮测试闭环状态机补齐 | 明确业务、UI、relation read model、worker 状态和禁止流转 | `tests/test_batch_accounting_api.py`、`web/src/test/BatchAccountingPage.test.tsx`、relation facade/projection tests |
-| 2026-06-11 | relation read model missing/stale 闭环 | 列表读取走 require_fresh 入队；页面展示 reason/scope 和未入队提示。写阻断口径已由 2026-06-13 canonical write safety 更新替代。 | `test_unsubmitted_list_requires_fresh_relation_read_model_to_enqueue_missing_refresh`、`test_submitted_list_requires_fresh_relation_read_model_to_enqueue_stale_refresh` |
-| 2026-06-13 | 写安全改为默认 canonical relation gate | 普通 relation distribution non-fresh 只作为读侧诊断；submit/withdraw 默认由 relation command service、owner 状态、权限/session、DB 可写性、version/idempotency 决定 | `tests/test_workbench_relation_command_service.py`、`tests/test_batch_accounting_api.py` |
-| 2026-06-14 | submit/withdraw 接入 operation overlay 与 freshness barrier | 写 API 成功后等待 `workbench_relation` barrier fresh 并 reload，避免旧 bucket/旧关系暴露给用户 | `web/src/test/BatchAccountingPage.test.tsx`、`web/src/test/OperationBarrierApi.test.ts` |
-| 2026-07-01 | 右侧 OA 候选口径从“没有任何 active relation”收窄为“没有关联银行流水” | 日常报销 OA 即便已有发票关系或无流水候选关系，也应进入未提交右侧 OA 栏；已有 `linked_bank_transactions` 或 canonical 银行关系的 OA 继续排除/拒绝 | `tests.test_batch_accounting_api.BatchAccountingApiTests.test_unsubmitted_list_filters_oa_rows_by_linked_bank_transactions_only`、`test_submit_allows_invoice_only_oa_relation_without_linked_bank_flow` |
-| 2026-07-01 | 未提交读路径模块化瘦身 | 未提交 bucket 只做候选级 relation lookup，并由同一 batch-only bundle 返回年份级 submitted count；已提交 bucket 保留完整 relation DTO 读取；submit/withdraw 仍只按本次 row ids 做 readiness + canonical command safety | `test_unsubmitted_relation_lookup_is_scoped_to_batch_candidates`、`test_unsubmitted_list_uses_relation_count_instead_of_month_relation_scan`、`test_batch_accounting_row_bundle_includes_annual_count_without_separate_reader` |
-| 2026-07-02 | PostgreSQL durable relation command wiring 修复 | submit/withdraw 在生产 runtime 必须注入 durable relation repository；撤回从旧 restore-style withdraw 收敛为取消当前 batch relation，避免 API 成功但 canonical relation/read model 不收敛 | `test_postgres_batch_withdraw_uses_durable_relation_repository`、`tests.test_batch_accounting_api`、route boundary guards、生产 1273.06 smoke |
-| 2026-07-02 | 删除 batch route duplicate lifecycle fan-out | submit/withdraw route 只做 HTTP/session/DTO 与 service 调用；relation command repository 成为 dirty/outbox fan-out owner，避免重复 lifecycle 造成秒级 API 延迟 | `test_submit_does_not_call_legacy_post_command_side_effects`、route boundary guards、生产 1273.06 smoke |
+| `unsubmitted` | submit | 银行/OA 资格、权限、金额说明、active relation 冲突、expected version | `active batch_accounting` |
+| `active batch_accounting` | withdraw | 权限、active mode、撤回原因、expected version | `cancelled` |
+| `cancelled` | 页面重新 GET | canonical 银行/OA 重新满足候选资格 | `unsubmitted` |
+
+正式关系状态只来自 `app.workbench_pair_relations`；页面不从 projection 推断状态。
+
+## 页面可观察状态
+
+| 状态 | UI 行为 |
+| --- | --- |
+| `loading` | 展示银行/OA 加载状态，不展示假空集 |
+| `ready` | 展示 canonical rows、summary 和双分页 |
+| `empty` | 成功响应且当前页 total/rows 为空时展示真实空态 |
+| `error` | 请求失败时展示后端 message 和刷新入口 |
+| `submitting` / `withdrawing` | 全局操作层阻止重复写；等待 command HTTP 完成 |
+| `reloading_after_write` | command 成功后执行一次普通 GET |
+| `write_succeeded_reload_failed` | 保留成功 message，并提示最新列表加载失败、需手动刷新 |
+
+不存在 `refreshing/stale/missing read model`、refresh enqueue、202 polling 或 operation barrier 状态。
+
+## 页面状态重置
+
+- 切换 bucket、银行年份或服务端分页时重置不再可见的选择。
+- 切换银行、OA 选择或 bucket 时清理差额说明，避免将旧说明用于新关系。
+- OA search 变化时 OA 页码重置为 1，并发中的旧 GET 由 AbortController 取消。
+- submit/withdraw 成功后的唯一自动收敛动作是当前页一次 GET。
+
+## 冲突与错误
+
+- 非法参数、候选资格和必填说明返回 400。
+- canonical active relation/version 冲突返回 409。
+- query repository 或 command service 不可用返回 503。
+- command 已成功但后置 GET 失败不回滚、不改写为 command 失败。

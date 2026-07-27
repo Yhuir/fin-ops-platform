@@ -40,11 +40,9 @@ class TurnoverLedgerPostgresIntegrationTests(unittest.TestCase):
         self.connection.execute(
             """
             insert into read_model.turnover_ledger_rows(
-                relation_id, scope_month, family, direction, status, first_transaction_at,
-                source_versions, payload
+                relation_id, scope_month, family, status, source_versions, payload
             ) values (
-                'retired-projection-row', '2026-04-01', 'personal', 'borrow_in', 'suggested',
-                '2026-04-16', '{}'::jsonb,
+                'retired-projection-row', '2026-04-01', 'personal', 'suggested', '{}'::jsonb,
                 '{"relation_id":"retired-projection-row","cash_closure_linked":true}'::jsonb
             )
             """
@@ -63,6 +61,34 @@ class TurnoverLedgerPostgresIntegrationTests(unittest.TestCase):
         self,
     ) -> None:
         row_ids = ["turnover-income-140000", "turnover-expense-140000"]
+        category_records = (
+            {
+                "category_code": "external_rule_personal_borrow",
+                "category_label": "个人往来：待还款",
+                "category_primary_label": "外部往来款收款",
+                "category_sub_label": "借入款",
+                "category_third_label": "个人往来",
+                "category_label_path": ["外部往来款收款", "借入款", "个人往来"],
+                "turnover_role": "external_turnover",
+                "turnover_action_type": "pending_repayment",
+                "turnover_family": "personal",
+                "manual_assignment": True,
+                "category_version": 1,
+            },
+            {
+                "category_code": "external_rule_personal_repaid",
+                "category_label": "个人往来：已还款",
+                "category_primary_label": "外部往来款付款",
+                "category_sub_label": "归还借款",
+                "category_third_label": "个人往来",
+                "category_label_path": ["外部往来款付款", "归还借款", "个人往来"],
+                "turnover_role": "external_turnover",
+                "turnover_action_type": "repaid",
+                "turnover_family": "personal",
+                "manual_assignment": True,
+                "category_version": 1,
+            },
+        )
         with self.connection.transaction() as transaction:
             transaction.execute(
                 """
@@ -71,32 +97,25 @@ class TurnoverLedgerPostgresIntegrationTests(unittest.TestCase):
                     amount, signed_amount, txn_date, txn_month, trade_time, status
                 ) values
                     (%s, '6222000011118106', 'inflow', '直接读取集成测试',
-                     140000, 140000, '2026-04-16', '2026-04-01', '2026-04-16 07:56:25', 'active'),
+                     140000, 140000, '2026-04-16', '2026-04-01', '2026-04-16 07:56:25', 'pending'),
                     (%s, '6222000011118106', 'outflow', '直接读取集成测试',
-                     140000, -140000, '2026-06-23', '2026-06-01', '2026-06-23 09:31:54', 'active')
+                     140000, -140000, '2026-06-23', '2026-06-01', '2026-06-23 09:31:54', 'pending')
                 """,
                 tuple(row_ids),
             )
             category_repository = PostgresBankTransactionCategoryRepository(
                 self.connection
             )
-            for row_id, category_code in zip(
+            for row_id, category_record in zip(
                 row_ids,
-                (
-                    "borrow_in_personal_pending_repayment",
-                    "borrow_in_personal_repaid",
-                ),
+                category_records,
                 strict=True,
             ):
                 category_repository.apply_mutation(
                     transaction=transaction,
                     transaction_id=row_id,
                     mutation_type="manual_assign",
-                    record={
-                        "category_code": category_code,
-                        "manual_assignment": True,
-                        "category_version": 1,
-                    },
+                    record=category_record,
                     actor_id="turnover-direct-read-integration",
                     action="bank_detail_category_manually_assigned",
                     metadata={"test_owned": True},
@@ -108,11 +127,39 @@ class TurnoverLedgerPostgresIntegrationTests(unittest.TestCase):
         )
         state_store.save_app_settings(
             {
+                "bank_transaction_tags": {
+                    "version": 1,
+                    "definitions": [
+                        {
+                            "code": record["category_code"],
+                            "label": record["category_label"],
+                            "path": record["category_label_path"],
+                            "source": "custom",
+                            "status": "active",
+                            "output_primary_label": record["category_primary_label"],
+                            "output_sub_label": record["category_sub_label"],
+                            "turnover_role": record["turnover_role"],
+                            "turnover_action_type": record["turnover_action_type"],
+                            "direction": "any",
+                            "account_scope": {"type": "any", "values": []},
+                            "rules": {
+                                "match_fields": ["all_text"],
+                                "contains_any": [
+                                    f"integration-only-{record['category_code']}"
+                                ],
+                                "contains_all": [],
+                                "exact_any": [],
+                                "regex_any": [],
+                                "none_of": [],
+                            },
+                        }
+                        for record in category_records
+                    ],
+                },
                 "turnover_ledger_tag_selection": {
                     "version": 1,
                     "selected_tag_codes": [
-                        "borrow_in_personal_pending_repayment",
-                        "borrow_in_personal_repaid",
+                        record["category_code"] for record in category_records
                     ],
                 }
             }

@@ -8,7 +8,6 @@ type PageBusinessAuditIconProps = {
   ariaLabel: string;
   label: string;
   pageKey: PageAuditPageKey;
-  readModelStatus?: string;
   auditContextKey?: string;
 };
 
@@ -19,7 +18,6 @@ export default function PageBusinessAuditIcon({
   ariaLabel,
   label,
   pageKey,
-  readModelStatus,
   auditContextKey,
 }: PageBusinessAuditIconProps) {
   const runAudit = useCallback((signal?: AbortSignal) => fetchPageAudit(pageKey, signal), [pageKey]);
@@ -28,7 +26,6 @@ export default function PageBusinessAuditIcon({
     <PageAuditIcon
       ariaLabel={ariaLabel}
       label={label}
-      readModelStatus={readModelStatus}
       resetKey={auditContextKey}
       runAudit={runAudit}
       successText={BUSINESS_AUDIT_SUCCESS_TEXT}

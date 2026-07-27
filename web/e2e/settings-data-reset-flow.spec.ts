@@ -71,10 +71,15 @@ function waitForSettingsSave(page: Page) {
       && response.request().method() === "POST");
 }
 
-type RowsReadModelPayload = {
-  read_model_status?: string;
+type RowsCanonicalPayload = {
   rows?: unknown[];
 };
+
+function expectDirectCanonicalPayload(payload: Record<string, unknown>) {
+  expect(payload).not.toHaveProperty("read_model_status");
+  expect(payload).not.toHaveProperty("source_versions");
+  expect(payload).not.toHaveProperty("refresh_enqueued");
+}
 
 test.describe("settings data reset browser flow", () => {
   test("runs data reset through impact confirmation, OA password review, job polling, and settings reload", async ({ page }, testInfo) => {
@@ -167,7 +172,7 @@ test.describe("settings data reset browser flow", () => {
     await expect(page.getByRole("dialog", { name: "OA 密码复核" })).toBeHidden();
     await expectNoUnexpectedSuccessUiErrors(page);
 
-    let bankRowsAfterReset: RowsReadModelPayload | undefined;
+    let bankRowsAfterReset: RowsCanonicalPayload | undefined;
     await recordLatency({
       route: "/bank-details",
       pageKey: "bank-details",
@@ -179,20 +184,20 @@ test.describe("settings data reset browser flow", () => {
       const bankRowsAfterResetResponse = waitForBankDetailRows(page);
       await page.getByRole("link", { name: "银行明细" }).click();
       const response = await mark("apiLatencyMs", bankRowsAfterResetResponse);
-      bankRowsAfterReset = await response.json() as RowsReadModelPayload;
+      bankRowsAfterReset = await response.json() as RowsCanonicalPayload;
       await mark("finalSettledLatencyMs", expect(page.getByTestId("bank-details-page")).toBeVisible());
     });
     await expect(page.getByTestId("bank-details-page")).toBeVisible();
     if (!bankRowsAfterReset) {
       throw new Error("missing bank rows after settings data reset");
     }
-    expect(bankRowsAfterReset.read_model_status).toBe("fresh");
+    expectDirectCanonicalPayload(bankRowsAfterReset as Record<string, unknown>);
     expect(bankRowsAfterReset.rows).toEqual([]);
     await expect(page.getByText("当前时间范围内没有流水。")).toBeVisible();
     await expect(page.getByText("智能工厂设备商")).toHaveCount(0);
     await expectNoUnexpectedSuccessUiErrors(page);
 
-    let pendingRowsAfterReset: RowsReadModelPayload | undefined;
+    let pendingRowsAfterReset: RowsCanonicalPayload | undefined;
     await recordLatency({
       route: "/pending-invoices",
       pageKey: "pending-invoices",
@@ -204,14 +209,14 @@ test.describe("settings data reset browser flow", () => {
       const pendingRowsAfterResetResponse = waitForPendingInvoiceRows(page);
       await page.getByRole("link", { name: "待找发票" }).click();
       const response = await mark("apiLatencyMs", pendingRowsAfterResetResponse);
-      pendingRowsAfterReset = await response.json() as RowsReadModelPayload;
+      pendingRowsAfterReset = await response.json() as RowsCanonicalPayload;
       await mark("finalSettledLatencyMs", expect(page.getByTestId("pending-invoices-page")).toBeVisible());
     });
     await expect(page.getByTestId("pending-invoices-page")).toBeVisible();
     if (!pendingRowsAfterReset) {
       throw new Error("missing pending invoice rows after settings data reset");
     }
-    expect(pendingRowsAfterReset.read_model_status).toBe("fresh");
+    expectDirectCanonicalPayload(pendingRowsAfterReset as Record<string, unknown>);
     expect(pendingRowsAfterReset.rows?.length).toBeGreaterThan(0);
     await expect(page.getByText("智能工厂设备商").first()).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
@@ -284,7 +289,7 @@ test.describe("settings data reset browser flow", () => {
     await expect(completedProjects.getByText(projectName)).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
 
-    let activePayload: { read_model_status?: string } | undefined;
+    let activePayload: Record<string, unknown> | undefined;
     await recordLatency({
       route: "/cost-statistics",
       pageKey: "cost-statistics",
@@ -302,14 +307,14 @@ test.describe("settings data reset browser flow", () => {
       });
       await page.getByRole("link", { name: "成本统计" }).click();
       const response = await mark("apiLatencyMs", activeCostExplorerResponse);
-      activePayload = await response.json() as { read_model_status?: string };
+      activePayload = await response.json() as Record<string, unknown>;
       await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible());
     });
     await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
     if (!activePayload) {
       throw new Error("missing cost statistics active payload after settings project scope save");
     }
-    expect(activePayload.read_model_status).toBe("fresh");
+    expectDirectCanonicalPayload(activePayload);
     await recordLatency({
       route: "/cost-statistics",
       pageKey: "cost-statistics",

@@ -74,7 +74,6 @@ test.describe("bank details initial browser state", () => {
   test("shows a true empty state only when the fresh transaction result is empty", async ({ page }) => {
     await installDeterministicApiMocks(page, {
       bankDetailsTransactionsEmpty: true,
-      bankDetailsTransactionReadModelStatus: "fresh",
       sessionMode: "full_access",
     });
 

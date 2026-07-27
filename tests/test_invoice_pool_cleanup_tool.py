@@ -50,8 +50,6 @@ class _FakeConnection:
             {"table_name": "app.invoices", "row_count": self.app_invoices},
             {"table_name": "app.etc_invoices", "row_count": self.app_etc_invoices},
             {"table_name": "app.input_invoice_usage_oa_reverse_batches", "row_count": 7},
-            {"table_name": "read_model.input_invoice_usage_rows", "row_count": 616},
-            {"table_name": "read_model.output_invoice_collection_rows", "row_count": 22},
             {"table_name": "read_model.workbench_relation_groups", "row_count": 87},
         ]
 
@@ -76,7 +74,7 @@ class InvoicePoolCleanupToolTests(unittest.TestCase):
                 [blocker["required_decision"] for blocker in plan["soft_reference_blockers"]],
                 [
                     "archive_or_rebuild_oa_reverse_batches_before_canonical_pool_reset",
-                    "rebuild_workbench_active_generation_after_reimport",
+                    "refresh_workbench_relation_after_reimport",
                 ],
             )
 

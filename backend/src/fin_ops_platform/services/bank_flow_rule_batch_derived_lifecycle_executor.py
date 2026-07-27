@@ -18,12 +18,12 @@ class BankFlowRuleBatchDerivedLifecycleExecutor:
         enqueued = self._enqueue_refresh(
             target_scope_keys,
             reason=str(domain_plan.get("reason") or "derived_lifecycle_bank_flow_rule_batch"),
-            metadata=self._read_model_refresh_metadata(domain_plan),
+            metadata=self._event_metadata(domain_plan),
         )
         return {
-            "deleted_counts": {"bank_flow_rule_batch_read_models": 0},
+            "deleted_counts": {"bank_flow_rule_batch_canonical_drafts": 0},
             "invalidated_scopes": target_scope_keys,
-            "enqueued_jobs": ["bank_flow_rule_batch.read_model.refresh"] if enqueued else [],
+            "enqueued_jobs": ["bank_flow_rule_batch.canonical_draft.refresh"] if enqueued else [],
         }
 
     @staticmethod
@@ -46,7 +46,7 @@ class BankFlowRuleBatchDerivedLifecycleExecutor:
         )
 
     @staticmethod
-    def _read_model_refresh_metadata(domain_plan: dict[str, object]) -> dict[str, object] | None:
+    def _event_metadata(domain_plan: dict[str, object]) -> dict[str, object] | None:
         metadata = domain_plan.get("metadata")
         if not isinstance(metadata, dict):
             return None

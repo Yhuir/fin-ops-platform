@@ -96,7 +96,16 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
     def test_settings_default_to_postgres_and_parse_reserved_rabbitmq_boundary(self) -> None:
         self.assertEqual(RuntimeQueueSettings.from_env({}).backend, "postgres")
         self.assertEqual(RuntimeQueueSettings.from_env({}).rabbitmq_dispatch_event_types, DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES)
-        self.assertIn("bank_detail.read_model.refresh", DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES)
+        self.assertEqual(
+            set(DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES),
+            {
+                "oa.sync",
+                "workbench_relation.read_model.refresh",
+                "search.read_model.refresh",
+                "import.process.requested",
+                "no_oa_bank_batch.read_model.refresh",
+            },
+        )
 
         settings = RuntimeQueueSettings.from_env(
             {
@@ -105,10 +114,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 "RABBITMQ_VHOST": "/finops",
                 "RABBITMQ_EXCHANGE": "finops.events",
                 "RABBITMQ_QUEUE_PREFIX": "finops.runtime",
-                "RABBITMQ_WORKBENCH_QUEUE": "finops.workbench.refresh",
-                "RABBITMQ_WORKBENCH_ROUTING_KEY": "workbench.refresh",
                 "RABBITMQ_DEAD_LETTER_EXCHANGE": "finops.events.dlx",
-                "RABBITMQ_WORKBENCH_DEAD_LETTER_QUEUE": "finops.workbench.refresh.dlq",
                 "RABBITMQ_PREFETCH": "25",
                 "RABBITMQ_PUBLISH_CONFIRM": "false",
                 "RABBITMQ_HEARTBEAT_SECONDS": "30",
@@ -118,7 +124,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 "RABBITMQ_MANAGEMENT_PASSWORD": "secret",
                 "RABBITMQ_MANAGEMENT_TIMEOUT_SECONDS": "3",
                 "RABBITMQ_SHADOW_PUBLISH": "true",
-                "RABBITMQ_DISPATCH_EVENT_TYPES": "workbench.read_model.refresh,search.read_model.refresh",
+                "RABBITMQ_DISPATCH_EVENT_TYPES": "workbench_relation.read_model.refresh,search.read_model.refresh",
             }
         )
 
@@ -127,10 +133,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertEqual(settings.rabbitmq_vhost, "/finops")
         self.assertEqual(settings.rabbitmq_exchange, "finops.events")
         self.assertEqual(settings.rabbitmq_queue_prefix, "finops.runtime")
-        self.assertEqual(settings.rabbitmq_workbench_queue, "finops.workbench.refresh")
-        self.assertEqual(settings.rabbitmq_workbench_routing_key, "workbench.refresh")
         self.assertEqual(settings.rabbitmq_dead_letter_exchange, "finops.events.dlx")
-        self.assertEqual(settings.rabbitmq_workbench_dead_letter_queue, "finops.workbench.refresh.dlq")
         self.assertEqual(settings.rabbitmq_prefetch, 25)
         self.assertFalse(settings.rabbitmq_publish_confirm)
         self.assertEqual(settings.rabbitmq_heartbeat_seconds, 30)
@@ -142,19 +145,19 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertTrue(settings.rabbitmq_shadow_publish)
         self.assertEqual(
             settings.rabbitmq_dispatch_event_types,
-            ("workbench.read_model.refresh", "search.read_model.refresh"),
+            ("workbench_relation.read_model.refresh", "search.read_model.refresh"),
         )
 
     def test_event_envelope_contains_only_routing_identity_and_version(self) -> None:
         event = RuntimeQueueEvent(
             event_id="event-1",
             tenant_id="tenant-a",
-            event_type="workbench.read_model.refresh",
+            event_type="workbench_relation.read_model.refresh",
             aggregate_type="read_model",
             aggregate_id="all",
-            scope_type="workbench",
+            scope_type="workbench_relation",
             scope_key="all",
-            dedupe_key="workbench.read_model.refresh:workbench:all",
+            dedupe_key="workbench_relation.read_model.refresh:workbench:all",
             payload={"reason": "api_miss", "large_snapshot": {"must": "not be published"}},
             attempts=2,
             status="processing",
@@ -169,8 +172,8 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             {
                 "schema_version": 1,
                 "event_id": "event-1",
-                "event_type": "workbench.read_model.refresh",
-                "scope_type": "workbench",
+                "event_type": "workbench_relation.read_model.refresh",
+                "scope_type": "workbench_relation",
                 "scope_key": "all",
                 "source_version": 123,
                 "priority": "normal",
@@ -260,7 +263,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
 
         event = repository.claim_next(
             worker_id="worker-1",
-            event_types=["workbench.read_model.refresh"],
+            event_types=["workbench_relation.read_model.refresh"],
             lock_timeout_seconds=120,
             scope_keys=["all"],
             exclude_scope_keys=["2026-02"],
@@ -271,7 +274,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         normalized_sql = " ".join(sql.lower().split())
         self.assertIn("scope_key = any(%s)", normalized_sql)
         self.assertIn("not (scope_key = any(%s))", normalized_sql)
-        self.assertEqual(params, ("worker-1", 120, ["workbench.read_model.refresh"], ["all"], ["2026-02"]))
+        self.assertEqual(params, ("worker-1", 120, ["workbench_relation.read_model.refresh"], ["all"], ["2026-02"]))
 
     def test_claim_events_is_batch_interface_over_postgres_claims(self) -> None:
         transaction = FakeTransaction(
@@ -320,7 +323,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         event = repository.claim_event_by_id(
             event_id="event-1",
             worker_id="worker-1",
-            event_types=["workbench.read_model.refresh"],
+            event_types=["workbench_relation.read_model.refresh"],
             scope_keys=["all"],
         )
 
@@ -328,7 +331,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         _, sql, params = transaction.calls[0]
         normalized_sql = " ".join(sql.lower().split())
         self.assertIn("scope_key = any(%s)", normalized_sql)
-        self.assertEqual(params, ("worker-1", "event-1", 300, ["workbench.read_model.refresh"], ["all"]))
+        self.assertEqual(params, ("worker-1", "event-1", 300, ["workbench_relation.read_model.refresh"], ["all"]))
 
     def test_claim_event_by_id_can_reclaim_stale_processing_event(self) -> None:
         transaction = FakeTransaction(rows=[event_row(status="processing", attempts=2)])
@@ -358,7 +361,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
 
         events = repository.claim_publishable_events(
             publisher_id="publisher-1",
-            event_types=["workbench.read_model.refresh"],
+            event_types=["workbench_relation.read_model.refresh"],
             lock_timeout_seconds=120,
             limit=10,
         )
@@ -372,7 +375,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("publish_attempt_count = publish_attempt_count + 1", normalized_sql)
         self.assertIn("publish_status in ('unpublished', 'failed')", normalized_sql)
         self.assertIn("for update skip locked", normalized_sql)
-        self.assertEqual(params, ("publisher-1", 120, ["workbench.read_model.refresh"], 10))
+        self.assertEqual(params, ("publisher-1", 120, ["workbench_relation.read_model.refresh"], 10))
 
     def test_mark_published_requires_publish_lock_and_records_confirm(self) -> None:
         transaction = FakeTransaction(rows=[{"id": "event-1"}])
@@ -383,7 +386,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 "event-1",
                 publisher_id="publisher-1",
                 exchange="finops.events",
-                routing_key="workbench.read_model.refresh",
+                routing_key="workbench_relation.read_model.refresh",
                 message_id="event-1",
                 confirm_latency_ms=12.3456,
             )
@@ -395,7 +398,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("publish_confirmed_at = now()", normalized_sql)
         self.assertIn("publish_status = 'publishing'", normalized_sql)
         self.assertIn("publish_locked_by = %s", normalized_sql)
-        self.assertEqual(params[0:3], ("finops.events", "workbench.read_model.refresh", "event-1"))
+        self.assertEqual(params[0:3], ("finops.events", "workbench_relation.read_model.refresh", "event-1"))
         self.assertEqual(params[-2:], ("event-1", "publisher-1"))
 
     def test_mark_publish_failed_schedules_publish_retry(self) -> None:
@@ -502,13 +505,13 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             rows=[
                 {"source_version": 3},
                 event_row(
-                    event_type="workbench.read_model.refresh",
+                    event_type="workbench_relation.read_model.refresh",
                     aggregate_type="read_model",
                     aggregate_id="2026-05",
-                    scope_type="workbench",
+                    scope_type="workbench_relation",
                     scope_key="2026-05",
-                    dedupe_key="workbench.read_model.refresh:workbench:2026-05",
-                    payload={"scope_type": "workbench", "scope_key": "2026-05", "reason": "test", "source_version": 3},
+                    dedupe_key="workbench_relation.read_model.refresh:workbench:2026-05",
+                    payload={"scope_type": "workbench_relation", "scope_key": "2026-05", "reason": "test", "source_version": 3},
                     source_version=3,
                     priority="high",
                     trace_id="trace-read-model",
@@ -518,7 +521,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         repository = RuntimeQueueRepository(FakeConnection(transaction))
 
         event = repository.enqueue_read_model_refresh(
-            scope_type="workbench",
+            scope_type="workbench_relation",
             scope_key="2026-05",
             reason="test",
             priority="high",
@@ -550,7 +553,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("created_at = clock_timestamp()", normalized_outbox_sql)
         self.assertEqual(
             outbox_params[6:10],
-            (3, "high", "trace-read-model", {"scope_type": "workbench", "scope_key": "2026-05", "reason": "test", "source_version": 3}),
+            (3, "high", "trace-read-model", {"scope_type": "workbench_relation", "scope_key": "2026-05", "reason": "test", "source_version": 3}),
         )
 
     def test_enqueue_read_model_refresh_in_transaction_uses_supplied_transaction_without_opening_connection_context(self) -> None:
@@ -558,13 +561,13 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             rows=[
                 {"source_version": 5},
                 event_row(
-                    event_type="workbench.read_model.refresh",
+                    event_type="workbench_relation.read_model.refresh",
                     aggregate_type="read_model",
                     aggregate_id="2026-05",
-                    scope_type="workbench",
+                    scope_type="workbench_relation",
                     scope_key="2026-05",
-                    dedupe_key="workbench.read_model.refresh:workbench:2026-05",
-                    payload={"scope_type": "workbench", "scope_key": "2026-05", "reason": "confirm_link", "source_version": 5},
+                    dedupe_key="workbench_relation.read_model.refresh:workbench:2026-05",
+                    payload={"scope_type": "workbench_relation", "scope_key": "2026-05", "reason": "confirm_link", "source_version": 5},
                     source_version=5,
                 ),
             ]
@@ -574,7 +577,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
 
         event = enqueue_in_transaction(
             transaction=transaction,
-            scope_type="workbench",
+            scope_type="workbench_relation",
             scope_key="2026-05",
             reason="confirm_link",
         )
@@ -588,14 +591,14 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 [
                     event_row(
                         event_id="event-1",
-                        event_type="workbench.read_model.refresh",
+                        event_type="workbench_relation.read_model.refresh",
                         aggregate_type="read_model",
                         aggregate_id="2026-05",
-                        scope_type="workbench",
+                        scope_type="workbench_relation",
                         scope_key="2026-05",
-                        dedupe_key="workbench.read_model.refresh:workbench:2026-05",
+                        dedupe_key="workbench_relation.read_model.refresh:workbench:2026-05",
                         payload={
-                            "scope_type": "workbench",
+                            "scope_type": "workbench_relation",
                             "scope_key": "2026-05",
                             "reason": "workbench_relation_changed",
                             "source_version": 11,
@@ -629,7 +632,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             transaction=transaction,
             refreshes=[
                 {
-                    "scope_type": "workbench",
+                    "scope_type": "workbench_relation",
                     "scope_key": "2026-05",
                     "reason": "workbench_relation_changed",
                     "metadata": {
@@ -671,7 +674,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("clock_timestamp()", normalized_sql)
         self.assertIn("available_at = least(job.outbox_events.available_at, excluded.available_at)", normalized_sql)
         self.assertIn("created_at = clock_timestamp()", normalized_sql)
-        self.assertEqual(params[0:7], (0, "default", "workbench", "2026-05", "workbench_relation_changed", "high", "trace-batch"))
+        self.assertEqual(params[0:7], (0, "default", "workbench_relation", "2026-05", "workbench_relation_changed", "high", "trace-batch"))
         first_payload = getattr(params[7], "obj", params[7])
         self.assertEqual(first_payload["action_name"], "withdraw_link")
         self.assertEqual(
@@ -685,20 +688,26 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             },
         )
         self.assertNotIn("ignored", first_payload["metadata"])
-        self.assertEqual(params[8:10], ("workbench.read_model.refresh", "workbench.read_model.refresh:workbench:2026-05"))
+        self.assertEqual(
+            params[8:10],
+            (
+                "workbench_relation.read_model.refresh",
+                "workbench_relation.read_model.refresh:workbench_relation:2026-05",
+            ),
+        )
 
     def test_enqueue_read_model_refresh_in_transaction_preserves_source_version_payload_and_outbox_contract(self) -> None:
         transaction = FakeTransaction(
             rows=[
                 {"source_version": 8},
                 event_row(
-                    event_type="workbench.read_model.refresh",
+                    event_type="workbench_relation.read_model.refresh",
                     aggregate_type="read_model",
                     aggregate_id="2026-05",
-                    scope_type="workbench",
+                    scope_type="workbench_relation",
                     scope_key="2026-05",
-                    dedupe_key="workbench.read_model.refresh:workbench:2026-05",
-                    payload={"scope_type": "workbench", "scope_key": "2026-05", "reason": "exception_apply", "source_version": 8},
+                    dedupe_key="workbench_relation.read_model.refresh:workbench_relation:2026-05",
+                    payload={"scope_type": "workbench_relation", "scope_key": "2026-05", "reason": "exception_apply", "source_version": 8},
                     source_version=8,
                     priority="high",
                     trace_id="trace-read-model",
@@ -710,7 +719,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
 
         event = enqueue_in_transaction(
             transaction=transaction,
-            scope_type="workbench",
+            scope_type="workbench_relation",
             scope_key="2026-05",
             reason="exception_apply",
             priority="high",
@@ -737,13 +746,13 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             dirty_params,
             (
                 "default",
-                "workbench",
+                "workbench_relation",
                 "2026-05",
                 "exception_apply",
-                {"scope_type": "workbench", "scope_key": "2026-05", "reason": "exception_apply"},
-                {"scope_type": "workbench", "scope_key": "2026-05", "reason": "exception_apply"},
+                {"scope_type": "workbench_relation", "scope_key": "2026-05", "reason": "exception_apply"},
+                {"scope_type": "workbench_relation", "scope_key": "2026-05", "reason": "exception_apply"},
                 "default",
-                "workbench",
+                "workbench_relation",
                 "2026-05",
                 "high",
                 "trace-read-model",
@@ -753,16 +762,16 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             outbox_params,
             (
                 "default",
-                "workbench.read_model.refresh",
+                "workbench_relation.read_model.refresh",
                 "2026-05",
-                "workbench",
+                "workbench_relation",
                 "2026-05",
-                "workbench.read_model.refresh:workbench:2026-05",
+                "workbench_relation.read_model.refresh:workbench_relation:2026-05",
                 8,
                 "high",
                 "trace-read-model",
-                {"scope_type": "workbench", "scope_key": "2026-05", "reason": "exception_apply", "source_version": 8},
-                {"scope_type": "workbench", "scope_key": "2026-05", "reason": "exception_apply", "source_version": 8},
+                {"scope_type": "workbench_relation", "scope_key": "2026-05", "reason": "exception_apply", "source_version": 8},
+                {"scope_type": "workbench_relation", "scope_key": "2026-05", "reason": "exception_apply", "source_version": 8},
             ),
         )
 
@@ -771,13 +780,13 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             rows=[
                 {"source_version": 8},
                 event_row(
-                    event_type="workbench.read_model.refresh",
+                    event_type="workbench_relation.read_model.refresh",
                     aggregate_type="read_model",
                     aggregate_id="2026-05",
-                    scope_type="workbench",
+                    scope_type="workbench_relation",
                     scope_key="2026-05",
-                    dedupe_key="workbench.read_model.refresh:workbench:2026-05",
-                    payload={"scope_type": "workbench", "scope_key": "2026-05", "reason": "exception_apply", "source_version": 8},
+                    dedupe_key="workbench_relation.read_model.refresh:workbench:2026-05",
+                    payload={"scope_type": "workbench_relation", "scope_key": "2026-05", "reason": "exception_apply", "source_version": 8},
                     source_version=8,
                 ),
             ]
@@ -787,7 +796,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
 
         enqueue_in_transaction(
             transaction=transaction,
-            scope_type="workbench",
+            scope_type="workbench_relation",
             scope_key="2026-05",
             reason="exception_apply",
         )
@@ -796,12 +805,12 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         _, _outbox_sql, outbox_params = transaction.calls[1]
         self.assertIsInstance(dirty_params[4], Jsonb)
         self.assertIsInstance(dirty_params[5], Jsonb)
-        self.assertEqual(dirty_params[4].obj, {"scope_type": "workbench", "scope_key": "2026-05", "reason": "exception_apply"})
+        self.assertEqual(dirty_params[4].obj, {"scope_type": "workbench_relation", "scope_key": "2026-05", "reason": "exception_apply"})
         self.assertIsInstance(outbox_params[9], Jsonb)
         self.assertIsInstance(outbox_params[10], Jsonb)
         self.assertEqual(
             outbox_params[9].obj,
-            {"scope_type": "workbench", "scope_key": "2026-05", "reason": "exception_apply", "source_version": 8},
+            {"scope_type": "workbench_relation", "scope_key": "2026-05", "reason": "exception_apply", "source_version": 8},
         )
 
     def test_enqueue_read_model_refresh_metadata_records_safe_operation_fields_only(self) -> None:
@@ -809,14 +818,14 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             rows=[
                 {"source_version": 9},
                 event_row(
-                    event_type="workbench.read_model.refresh",
+                    event_type="workbench_relation.read_model.refresh",
                     aggregate_type="read_model",
                     aggregate_id="2026-05",
-                    scope_type="workbench",
+                    scope_type="workbench_relation",
                     scope_key="2026-05",
-                    dedupe_key="workbench.read_model.refresh:workbench:2026-05",
+                    dedupe_key="workbench_relation.read_model.refresh:workbench:2026-05",
                     payload={
-                        "scope_type": "workbench",
+                        "scope_type": "workbench_relation",
                         "scope_key": "2026-05",
                         "reason": "confirm_link",
                         "metadata": {"action_name": "confirm_relation", "row_ids": ["txn-1"], "case_ids": ["CASE-1"]},
@@ -832,7 +841,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
 
         enqueue_in_transaction(
             transaction=transaction,
-            scope_type="workbench",
+            scope_type="workbench_relation",
             scope_key="2026-05",
             reason="confirm_link",
             metadata={
@@ -852,7 +861,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         _, _dirty_sql, dirty_params = transaction.calls[0]
         _, _outbox_sql, outbox_params = transaction.calls[1]
         expected_payload = {
-            "scope_type": "workbench",
+            "scope_type": "workbench_relation",
             "scope_key": "2026-05",
             "reason": "confirm_link",
             "metadata": {
@@ -885,7 +894,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         ):
             enqueue_in_transaction(
                 transaction=FakeTransaction(),
-                scope_type="workbench",
+                scope_type="workbench_relation",
                 scope_key="2026-05",
                 reason="api_groups_stale",
                 metadata={
@@ -899,13 +908,13 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             rows=[
                 {"source_version": 6},
                 event_row(
-                    event_type="workbench.read_model.refresh",
+                    event_type="workbench_relation.read_model.refresh",
                     aggregate_type="read_model",
                     aggregate_id="2026-05",
-                    scope_type="workbench",
+                    scope_type="workbench_relation",
                     scope_key="2026-05",
-                    dedupe_key="workbench.read_model.refresh:workbench:2026-05",
-                    payload={"scope_type": "workbench", "scope_key": "2026-05", "reason": "test", "source_version": 6},
+                    dedupe_key="workbench_relation.read_model.refresh:workbench:2026-05",
+                    payload={"scope_type": "workbench_relation", "scope_key": "2026-05", "reason": "test", "source_version": 6},
                     source_version=6,
                 ),
             ]
@@ -921,7 +930,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
 
         repository.enqueue_read_model_refresh_in_transaction = recording_delegate  # type: ignore[method-assign]
 
-        event = repository.enqueue_read_model_refresh(scope_type="workbench", scope_key="2026-05", reason="test")
+        event = repository.enqueue_read_model_refresh(scope_type="workbench_relation", scope_key="2026-05", reason="test")
 
         self.assertEqual(event.source_version, 6)
         self.assertEqual(connection.transaction_open_count, 1)
@@ -933,19 +942,19 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             rows=[
                 {"source_version": 4},
                 event_row(
-                    event_type="workbench.read_model.refresh",
+                    event_type="workbench_relation.read_model.refresh",
                     aggregate_type="read_model",
                     aggregate_id="2026-05",
-                    scope_type="workbench",
+                    scope_type="workbench_relation",
                     scope_key="2026-05",
-                    dedupe_key="workbench.read_model.refresh:workbench:2026-05",
-                    payload={"scope_type": "workbench", "scope_key": "2026-05", "reason": "test", "source_version": 4},
+                    dedupe_key="workbench_relation.read_model.refresh:workbench:2026-05",
+                    payload={"scope_type": "workbench_relation", "scope_key": "2026-05", "reason": "test", "source_version": 4},
                 ),
             ]
         )
         repository = RuntimeQueueRepository(FakeConnection(transaction))
 
-        event = repository.enqueue_read_model_refresh(scope_type="workbench", scope_key="2026-05", reason="test")
+        event = repository.enqueue_read_model_refresh(scope_type="workbench_relation", scope_key="2026-05", reason="test")
 
         self.assertEqual(event.payload["source_version"], 4)
         _, dirty_sql, dirty_params = transaction.calls[0]
@@ -955,13 +964,13 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             dirty_params,
             (
                 "default",
-                "workbench",
+                "workbench_relation",
                 "2026-05",
                 "test",
-                {"scope_type": "workbench", "scope_key": "2026-05", "reason": "test"},
-                {"scope_type": "workbench", "scope_key": "2026-05", "reason": "test"},
+                {"scope_type": "workbench_relation", "scope_key": "2026-05", "reason": "test"},
+                {"scope_type": "workbench_relation", "scope_key": "2026-05", "reason": "test"},
                 "default",
-                "workbench",
+                "workbench_relation",
                 "2026-05",
                 "normal",
                 None,
@@ -1008,7 +1017,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertTrue(
             repository.complete_read_model_refresh(
                 tenant_id="default",
-                scope_type="workbench",
+                scope_type="workbench_relation",
                 scope_key="2026-05",
                 source_version=7,
             )
@@ -1017,7 +1026,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         _, sql, params = transaction.calls[0]
         normalized_sql = " ".join(sql.lower().split())
         self.assertIn("source_version <= %s", normalized_sql)
-        self.assertEqual(params, ("default", "workbench", "2026-05", 7))
+        self.assertEqual(params, ("default", "workbench_relation", "2026-05", 7))
 
     def test_fail_retry_and_permanent_require_processing_worker_lock_and_return_bool(self) -> None:
         retry_transaction = FakeTransaction(rows=[event_row(status="pending")])
@@ -1113,7 +1122,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             stale_after_seconds=300,
             limit=25,
             reason="rabbitmq_stale_processing_repair",
-            event_types=["bank_detail.read_model.refresh"],
+            event_types=["search.read_model.refresh"],
         )
 
         self.assertEqual(len(rows), 1)
@@ -1137,7 +1146,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             params,
             (
                 300,
-                ["bank_detail.read_model.refresh"],
+                ["search.read_model.refresh"],
                 25,
                 "rabbitmq_stale_processing_repair",
                 300,
@@ -1152,7 +1161,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             stale_after_seconds=300,
             limit=25,
             reason="rabbitmq_stale_processing_superseded",
-            event_types=["bank_detail.read_model.refresh"],
+            event_types=["search.read_model.refresh"],
         )
 
         self.assertEqual(len(rows), 1)
@@ -1169,7 +1178,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             params,
             (
                 300,
-                ["bank_detail.read_model.refresh"],
+                ["search.read_model.refresh"],
                 25,
                 "rabbitmq_stale_processing_superseded",
                 300,
@@ -1184,7 +1193,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 {
                     "event_id": "event-1",
                     "tenant_id": "tenant-a",
-                    "dedupe_key": "pending_invoice.read_model.refresh:pending_invoice:expense:requires_invoice:2026-02",
+                    "dedupe_key": "search.read_model.refresh:search:2026-02",
                     "source_version": 197,
                     "locked_by": "worker-1",
                     "locked_at": locked_at,
@@ -1235,7 +1244,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             cover_params,
             (
                 "tenant-a",
-                "pending_invoice.read_model.refresh:pending_invoice:expense:requires_invoice:2026-02",
+                "search.read_model.refresh:search:2026-02",
                 "event-1",
                 197,
                 created_at,
@@ -1263,7 +1272,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 {
                     "event_id": "event-1",
                     "tenant_id": "tenant-a",
-                    "dedupe_key": "bank_detail.read_model.refresh:bank_detail:2026-03",
+                    "dedupe_key": "search.read_model.refresh:search:2026-03",
                     "source_version": 2,
                     "locked_by": "worker-1",
                     "locked_at": locked_at,
@@ -1299,7 +1308,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             cover_params,
             (
                 "tenant-a",
-                "bank_detail.read_model.refresh:bank_detail:2026-03",
+                "search.read_model.refresh:search:2026-03",
                 "event-1",
                 2,
                 created_at,
@@ -1316,7 +1325,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 {
                     "event_id": "event-1",
                     "tenant_id": "tenant-a",
-                    "dedupe_key": "pending_invoice.read_model.refresh:pending_invoice:expense:requires_invoice:2026-02",
+                    "dedupe_key": "search.read_model.refresh:search:2026-02",
                     "source_version": 197,
                     "locked_by": "worker-1",
                     "locked_at": locked_at,
@@ -1363,7 +1372,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             cover_params,
             (
                 "tenant-a",
-                "pending_invoice.read_model.refresh:pending_invoice:expense:requires_invoice:2026-02",
+                "search.read_model.refresh:search:2026-02",
                 "event-1",
                 197,
                 created_at,
@@ -1395,7 +1404,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         target = {
             "event_id": "event-1",
             "tenant_id": "tenant-a",
-            "dedupe_key": "bank_detail.read_model.refresh:bank_detail:2026-02",
+            "dedupe_key": "search.read_model.refresh:bank_detail:2026-02",
             "source_version": 13357,
             "locked_by": "worker-1",
             "locked_at": locked_at,
@@ -1450,7 +1459,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             first_cover_params,
             (
                 "tenant-a",
-                "bank_detail.read_model.refresh:bank_detail:2026-02",
+                "search.read_model.refresh:bank_detail:2026-02",
                 "event-1",
                 13357,
                 created_at,
@@ -1462,7 +1471,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             second_cover_params,
             (
                 "tenant-a",
-                "bank_detail.read_model.refresh:bank_detail:2026-02",
+                "search.read_model.refresh:bank_detail:2026-02",
                 "event-1",
                 13357,
                 created_at,
@@ -1500,7 +1509,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertTrue(
             repository.read_model_refresh_is_active(
                 tenant_id="tenant-a",
-                scope_type="bank_detail",
+                scope_type="search",
                 scope_key="2026-04",
             )
         )
@@ -1510,7 +1519,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("from job.read_model_dirty_scopes", normalized_sql)
         self.assertNotIn("from job.outbox_events", normalized_sql)
         self.assertIn("status in ('pending', 'processing')", normalized_sql)
-        self.assertEqual(params, ("tenant-a", "bank_detail", "2026-04"))
+        self.assertEqual(params, ("tenant-a", "search", "2026-04"))
 
     def test_read_model_refresh_event_is_active_requires_live_outbox_event(self) -> None:
         class DirectFetchConnection:
@@ -1527,7 +1536,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertTrue(
             repository.read_model_refresh_event_is_active(
                 tenant_id="tenant-a",
-                scope_type="bank_detail",
+                scope_type="search",
                 scope_key="all",
             )
         )
@@ -1541,8 +1550,8 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             params,
             (
                 "tenant-a",
-                "bank_detail.read_model.refresh",
-                "bank_detail",
+                "search.read_model.refresh",
+                "search",
                 "all",
             ),
         )
@@ -1552,8 +1561,8 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             rows=[
                 [
                     event_row(
-                        event_type="bank_detail.read_model.refresh",
-                        scope_type="bank_detail",
+                        event_type="search.read_model.refresh",
+                        scope_type="search",
                         scope_key="2026-04",
                         status="processing",
                     )
@@ -1564,7 +1573,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
 
         event = repository.enqueue_read_model_refresh_if_inactive(
             tenant_id="tenant-a",
-            scope_type="bank_detail",
+            scope_type="search",
             scope_key="2026-04",
             reason="api_page_stale",
         )
@@ -1583,9 +1592,9 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             rows=[
                 [
                     event_row(
-                        event_type="pending_invoice.read_model.refresh",
-                        scope_type="pending_invoice",
-                        scope_key="expense:all:2026-02",
+                        event_type="search.read_model.refresh",
+                        scope_type="search",
+                        scope_key="2026-02",
                         status="processing",
                         payload={},
                     )
@@ -1593,14 +1602,14 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 [
                     event_row(
                         event_id="event-2",
-                        event_type="pending_invoice.read_model.refresh",
+                        event_type="search.read_model.refresh",
                         aggregate_type="read_model",
-                        aggregate_id="expense:all:2026-03",
-                        scope_type="pending_invoice",
-                        scope_key="expense:all:2026-03",
+                        aggregate_id="2026-03",
+                        scope_type="search",
+                        scope_key="2026-03",
                         dedupe_key=(
-                            "pending_invoice.read_model.refresh:"
-                            "pending_invoice:expense:all:2026-03"
+                            "search.read_model.refresh:"
+                            "search:2026-03"
                         ),
                         source_version=8,
                     )
@@ -1611,8 +1620,8 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         repository = RuntimeQueueRepository(connection)
 
         events = repository.enqueue_read_model_refreshes_if_inactive(
-            scope_type="pending_invoice",
-            scope_keys=["expense:all:2026-02", "expense:all:2026-03"],
+            scope_type="search",
+            scope_keys=["2026-02", "2026-03"],
             reason="api_source_versions_stale",
         )
 
@@ -1625,8 +1634,8 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("pg_advisory_xact_lock", transaction.calls[0][1])
         self.assertIn("scope_key = any", " ".join(transaction.calls[1][1].lower().split()))
         batch_params = transaction.calls[2][2]
-        self.assertNotIn("expense:all:2026-02", batch_params)
-        self.assertIn("expense:all:2026-03", batch_params)
+        self.assertNotIn("search.read_model.refresh:search:2026-02", batch_params)
+        self.assertIn("search.read_model.refresh:search:2026-03", batch_params)
         self.assertEqual(transaction.outcomes, ["commit"])
 
     def test_atomic_read_model_enqueue_coalesces_same_active_freshness_target(self) -> None:
@@ -1635,8 +1644,8 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             rows=[
                 [
                     event_row(
-                        event_type="workbench.read_model.refresh",
-                        scope_type="workbench",
+                        event_type="workbench_relation.read_model.refresh",
+                        scope_type="workbench_relation",
                         scope_key="2026-04",
                         status="processing",
                         payload={"metadata": metadata},
@@ -1647,7 +1656,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         repository = RuntimeQueueRepository(FakeConnection(transaction))
 
         event = repository.enqueue_read_model_refresh_if_inactive(
-            scope_type="workbench",
+            scope_type="workbench_relation",
             scope_key="2026-04",
             reason="api_groups_stale",
             metadata=metadata,
@@ -1664,8 +1673,8 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             rows=[
                 [
                     event_row(
-                        event_type="workbench.read_model.refresh",
-                        scope_type="workbench",
+                        event_type="workbench_relation.read_model.refresh",
+                        scope_type="workbench_relation",
                         scope_key="2026-04",
                         status="processing",
                         payload={"metadata": {"freshness_token": "target-a"}},
@@ -1673,12 +1682,12 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 ],
                 [
                     event_row(
-                        event_type="workbench.read_model.refresh",
+                        event_type="workbench_relation.read_model.refresh",
                         aggregate_type="read_model",
                         aggregate_id="2026-04",
-                        scope_type="workbench",
+                        scope_type="workbench_relation",
                         scope_key="2026-04",
-                        dedupe_key="workbench.read_model.refresh:workbench:2026-04",
+                        dedupe_key="workbench_relation.read_model.refresh:workbench:2026-04",
                         source_version=9,
                     )
                 ],
@@ -1687,7 +1696,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         repository = RuntimeQueueRepository(FakeConnection(transaction))
 
         event = repository.enqueue_read_model_refresh_if_inactive(
-            scope_type="workbench",
+            scope_type="workbench_relation",
             scope_key="2026-04",
             reason="api_groups_stale",
             metadata={"freshness_token": "target-b"},
@@ -1705,8 +1714,8 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 [],
                 [
                     event_row(
-                        event_type="workbench.read_model.refresh",
-                        scope_type="workbench",
+                        event_type="workbench_relation.read_model.refresh",
+                        scope_type="workbench_relation",
                         scope_key="2026-04",
                         status="done",
                         payload={"metadata": {"freshness_token": "target-a"}},
@@ -1717,7 +1726,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         repository = RuntimeQueueRepository(FakeConnection(transaction))
 
         event = repository.enqueue_read_model_refresh_if_inactive(
-            scope_type="workbench",
+            scope_type="workbench_relation",
             scope_key="2026-04",
             reason="api_groups_stale",
             metadata={"freshness_token": "target-a"},
@@ -1740,8 +1749,8 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 [],
                 [
                     event_row(
-                        event_type="workbench.read_model.refresh",
-                        scope_type="workbench",
+                        event_type="workbench_relation.read_model.refresh",
+                        scope_type="workbench_relation",
                         scope_key="2026-04",
                         status="done",
                         payload={"metadata": {"force_refresh": True}},
@@ -1749,12 +1758,12 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 ],
                 [
                     event_row(
-                        event_type="workbench.read_model.refresh",
+                        event_type="workbench_relation.read_model.refresh",
                         aggregate_type="read_model",
                         aggregate_id="2026-04",
-                        scope_type="workbench",
+                        scope_type="workbench_relation",
                         scope_key="2026-04",
-                        dedupe_key="workbench.read_model.refresh:workbench:2026-04",
+                        dedupe_key="workbench_relation.read_model.refresh:workbench:2026-04",
                         source_version=10,
                     )
                 ],
@@ -1763,7 +1772,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         repository = RuntimeQueueRepository(FakeConnection(transaction))
 
         event = repository.enqueue_read_model_refresh_if_inactive(
-            scope_type="workbench",
+            scope_type="workbench_relation",
             scope_key="2026-04",
             reason="api_groups_stale",
             metadata={"freshness_token": "target-after-force"},
@@ -1778,8 +1787,8 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 [],
                 [
                     event_row(
-                        event_type="workbench.read_model.refresh",
-                        scope_type="workbench",
+                        event_type="workbench_relation.read_model.refresh",
+                        scope_type="workbench_relation",
                         scope_key="2026-04",
                         status="done",
                         payload={"metadata": {"freshness_token": "target-b"}},
@@ -1787,12 +1796,12 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 ],
                 [
                     event_row(
-                        event_type="workbench.read_model.refresh",
+                        event_type="workbench_relation.read_model.refresh",
                         aggregate_type="read_model",
                         aggregate_id="2026-04",
-                        scope_type="workbench",
+                        scope_type="workbench_relation",
                         scope_key="2026-04",
-                        dedupe_key="workbench.read_model.refresh:workbench:2026-04",
+                        dedupe_key="workbench_relation.read_model.refresh:workbench:2026-04",
                         source_version=10,
                     )
                 ],
@@ -1801,7 +1810,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         repository = RuntimeQueueRepository(FakeConnection(transaction))
 
         event = repository.enqueue_read_model_refresh_if_inactive(
-            scope_type="workbench",
+            scope_type="workbench_relation",
             scope_key="2026-04",
             reason="api_groups_stale",
             metadata={"freshness_token": "target-a"},
@@ -1815,8 +1824,8 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             rows=[
                 [
                     event_row(
-                        event_type="bank_detail.read_model.refresh",
-                        scope_type="bank_detail",
+                        event_type="search.read_model.refresh",
+                        scope_type="search",
                         scope_key="2026-04",
                         status="processing",
                         payload={
@@ -1831,12 +1840,12 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 ],
                 [
                     event_row(
-                        event_type="bank_detail.read_model.refresh",
+                        event_type="search.read_model.refresh",
                         aggregate_type="read_model",
                         aggregate_id="2026-04",
-                        scope_type="bank_detail",
+                        scope_type="search",
                         scope_key="2026-04",
-                        dedupe_key="bank_detail.read_model.refresh:bank_detail:2026-04",
+                        dedupe_key="search.read_model.refresh:bank_detail:2026-04",
                         source_version=9,
                     )
                 ],
@@ -1845,7 +1854,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         repository = RuntimeQueueRepository(FakeConnection(transaction))
 
         event = repository.enqueue_read_model_refresh_if_inactive(
-            scope_type="bank_detail",
+            scope_type="search",
             scope_key="2026-04",
             reason="api_relation_delta",
             metadata={
@@ -1873,8 +1882,8 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             rows=[
                 [
                     event_row(
-                        event_type="bank_detail.read_model.refresh",
-                        scope_type="bank_detail",
+                        event_type="search.read_model.refresh",
+                        scope_type="search",
                         scope_key="2026-04",
                         status="processing",
                         payload={"metadata": metadata},
@@ -1885,7 +1894,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         repository = RuntimeQueueRepository(FakeConnection(transaction))
 
         event = repository.enqueue_read_model_refresh_if_inactive(
-            scope_type="bank_detail",
+            scope_type="search",
             scope_key="2026-04",
             reason="api_relation_delta",
             metadata=metadata,
@@ -1899,8 +1908,8 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             rows=[
                 [
                     event_row(
-                        event_type="bank_detail.read_model.refresh",
-                        scope_type="bank_detail",
+                        event_type="search.read_model.refresh",
+                        scope_type="search",
                         scope_key="2026-04",
                         status="processing",
                         payload={
@@ -1916,12 +1925,12 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 ],
                 [
                     event_row(
-                        event_type="bank_detail.read_model.refresh",
+                        event_type="search.read_model.refresh",
                         aggregate_type="read_model",
                         aggregate_id="2026-04",
-                        scope_type="bank_detail",
+                        scope_type="search",
                         scope_key="2026-04",
-                        dedupe_key="bank_detail.read_model.refresh:bank_detail:2026-04",
+                        dedupe_key="search.read_model.refresh:bank_detail:2026-04",
                         source_version=9,
                     )
                 ],
@@ -1930,7 +1939,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         repository = RuntimeQueueRepository(FakeConnection(transaction))
 
         event = repository.enqueue_read_model_refresh_if_inactive(
-            scope_type="bank_detail",
+            scope_type="search",
             scope_key="2026-04",
             reason="api_stale",
         )
@@ -1943,8 +1952,8 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
 
     def test_atomic_read_model_enqueue_full_covers_partial_but_not_force(self) -> None:
         full_active = event_row(
-            event_type="bank_detail.read_model.refresh",
-            scope_type="bank_detail",
+            event_type="search.read_model.refresh",
+            scope_type="search",
             scope_key="2026-04",
             status="pending",
             payload={},
@@ -1953,7 +1962,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         partial_repository = RuntimeQueueRepository(FakeConnection(partial_transaction))
 
         partial_event = partial_repository.enqueue_read_model_refresh_if_inactive(
-            scope_type="bank_detail",
+            scope_type="search",
             scope_key="2026-04",
             reason="api_relation_delta",
             metadata={
@@ -1976,12 +1985,12 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 [full_active],
                 [
                     event_row(
-                        event_type="bank_detail.read_model.refresh",
+                        event_type="search.read_model.refresh",
                         aggregate_type="read_model",
                         aggregate_id="2026-04",
-                        scope_type="bank_detail",
+                        scope_type="search",
                         scope_key="2026-04",
-                        dedupe_key="bank_detail.read_model.refresh:bank_detail:2026-04",
+                        dedupe_key="search.read_model.refresh:bank_detail:2026-04",
                         source_version=10,
                     )
                 ],
@@ -1990,7 +1999,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         force_repository = RuntimeQueueRepository(FakeConnection(force_transaction))
 
         force_event = force_repository.enqueue_read_model_refresh_if_inactive(
-            scope_type="bank_detail",
+            scope_type="search",
             scope_key="2026-04",
             reason="force_refresh",
             metadata={"force_refresh": True},
@@ -2008,12 +2017,12 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 [],
                 [
                     event_row(
-                        event_type="bank_detail.read_model.refresh",
+                        event_type="search.read_model.refresh",
                         aggregate_type="read_model",
                         aggregate_id="2026-04",
-                        scope_type="bank_detail",
+                        scope_type="search",
                         scope_key="2026-04",
-                        dedupe_key="bank_detail.read_model.refresh:bank_detail:2026-04",
+                        dedupe_key="search.read_model.refresh:bank_detail:2026-04",
                         source_version=8,
                     )
                 ],
@@ -2023,7 +2032,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
 
         event = repository.enqueue_read_model_refresh_if_inactive(
             tenant_id="tenant-a",
-            scope_type="bank_detail",
+            scope_type="search",
             scope_key="2026-04",
             reason="api_page_stale",
         )
@@ -2052,7 +2061,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertFalse(
             stale_repository.read_model_refresh_is_fresh(
                 tenant_id="tenant-a",
-                scope_type="workbench",
+                scope_type="workbench_relation",
                 scope_key="2026-04",
             )
         )
@@ -2061,13 +2070,13 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         normalized_sql = " ".join(sql.lower().split())
         self.assertIn("from job.read_model_dirty_scopes", normalized_sql)
         self.assertIn("status in ('pending', 'processing', 'failed')", normalized_sql)
-        self.assertEqual(params, ("tenant-a", "workbench", "2026-04"))
+        self.assertEqual(params, ("tenant-a", "workbench_relation", "2026-04"))
 
         fresh_repository = RuntimeQueueRepository(DirectFetchConnection(None))
         self.assertTrue(
             fresh_repository.read_model_refresh_is_fresh(
                 tenant_id="tenant-a",
-                scope_type="workbench",
+                scope_type="workbench_relation",
                 scope_key="2026-04",
             )
         )
@@ -2123,8 +2132,8 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
     def test_runtime_queue_history_retention_preview_counts_done_history_without_delete(self) -> None:
         transaction = FakeTransaction(
             rows=[
-                [{"event_type": "bank_detail.read_model.refresh", "count": 3}],
-                [{"scope_type": "bank_detail", "count": 2}],
+                [{"event_type": "search.read_model.refresh", "count": 3}],
+                [{"scope_type": "search", "count": 2}],
             ]
         )
         repository = RuntimeQueueRepository(FakeConnection(transaction))
@@ -2138,7 +2147,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertEqual(result["mode"], "dry-run")
         self.assertEqual(result["outbox_events"]["candidate_count"], 3)
         self.assertEqual(result["read_model_dirty_scopes"]["candidate_count"], 2)
-        self.assertEqual(result["outbox_events"]["counts_by_event_type"], {"bank_detail.read_model.refresh": 3})
+        self.assertEqual(result["outbox_events"]["counts_by_event_type"], {"search.read_model.refresh": 3})
         self.assertEqual([call[0] for call in transaction.calls], ["fetch_all", "fetch_all"])
         outbox_sql, outbox_params = transaction.calls[0][1], transaction.calls[0][2]
         dirty_sql, dirty_params = transaction.calls[1][1], transaction.calls[1][2]
@@ -2161,8 +2170,8 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
     def test_runtime_queue_history_retention_execute_deletes_only_candidates(self) -> None:
         transaction = FakeTransaction(
             rows=[
-                [{"event_type": "workbench.read_model.refresh", "count": 7}],
-                [{"scope_type": "workbench", "count": 5}],
+                [{"event_type": "workbench_relation.read_model.refresh", "count": 7}],
+                [{"scope_type": "workbench_relation", "count": 5}],
             ]
         )
         repository = RuntimeQueueRepository(FakeConnection(transaction))

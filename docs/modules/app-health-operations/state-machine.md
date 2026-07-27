@@ -60,7 +60,8 @@
 
 ## Read Model / Worker 状态
 
-- `fresh`：有 `read_model.app_status_readiness` 或 Workbench active generation 等价证明。
+- `fresh`：三个共享 read model 具有 `read_model.app_status_readiness` 与
+  current-effective queue 证明；canonical 页面只依赖 PostgreSQL/runtime 健康证明。
 - `missing`：registry 要求但没有 readiness 记录；busy/yellow。
 - `refreshing`：dirty/outbox/worker 正在处理；busy/yellow。
 - `stale`：source/schema/version 不匹配或 dirty 未完成；busy/yellow。
@@ -78,7 +79,7 @@
 | 2026-07-11 | App Health 成为 17 页 system Audit owner | 一个 outer snapshot 执行其余 16 页 proof；database/runtime/external 三个 evidence plane 分离，旧进项专项面板删除 | `tests/test_audit_app_health_system.py`、`tests/test_app_health_api.py`、`web/src/test/AppHealthOperationsPage.test.tsx`、`web/e2e/app-shell.spec.ts` |
 | 2026-07-11 | 外部 evidence exact proof owner | 四域 immutable manifest 与 canonical facts 做 exact set/field/control equality；显式 page coverage，删除 free-text classifier | `tests/test_external_control_evidence_*.py`、`tests/test_audit_external_control_evidence.py`、`tests/test_audit_app_health_system.py` |
 | - | 初始骨架 | 待补充 | - |
-| 2026-06-21 | current-effective outbox 增加同 scope active dirty scope 覆盖，Workbench generation consistency failure 在 active repair 期间展示 refreshing 而不是 blocked | `RuntimeMonitoringRepository.app_status_runtime_snapshot()`、health summary/outbox attention SQL、Workbench refresh status 到 App Status 的状态口径 | `tests/test_app_status_overview_service.py::AppStatusRuntimeRepositoryTests::test_runtime_repository_ignores_failed_outbox_row_covered_by_active_dirty_scope`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_reports_inconsistent_workbench_generation_as_refreshing_during_active_repair` |
+| 2026-07-27 | 删除 Workbench generation App Status 合同；read-model readiness 精确收敛为三个共享模型，canonical 页面按 PostgreSQL/runtime 健康判断 | App Status registry、runtime summary、前端状态类型 | `tests/test_app_health_service.py`、`tests/test_runtime_state_policy.py`、`tests/test_platform_runtime_boundary_guards.py` |
 | 2026-06-20 | App Status 增加 runtime summary，并在 hover 与系统状态页展示 read model / worker / queue 整体状态 | 用户不用进入具体表格即可判断 read model 是否 fresh、worker 是否 active/working、queue 是否有 backlog | `PYTHONPATH=backend/src python3 -m unittest tests.test_app_status_overview_service -v`；`cd web && npm test -- --run src/test/AppStatusApi.test.ts src/test/AppStatusIndicator.test.tsx src/test/AppHealthOperationsPage.test.tsx` |
 | 2026-06-18 | 同一 read model scope 旧 failed 被新 pending/processing 覆盖时展示 refreshing，旧 last_error 只做历史诊断 | `RuntimeMonitoringRepository.app_status_runtime_snapshot()`、App Health / App Status current-effective read model 状态 | `PYTHONPATH=backend/src python3 -m unittest tests.test_app_status_overview_service -v` |
 | 2026-06-11 | 补齐 App Health / App Status 测试闭环状态机 | 将 overall/domain/job/runtime/dashboard/readiness 状态纳入统一维护边界 | `tests.test_app_health_api`、`tests.test_app_status_overview_service`、`tests.test_runtime_monitoring`、`web/src/test/AppHealthOperationsPage.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx` |

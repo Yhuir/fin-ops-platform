@@ -19,10 +19,7 @@ class CapturingConnection:
 
 class FakeScopeContractRepository:
     def __init__(self) -> None:
-        self.dirty_scopes: list[dict[str, object]] = []
-        self.outbox_events: list[dict[str, object]] = []
         self.read_model_outbox_failures: list[dict[str, object]] = []
-        self.readiness: list[dict[str, object]] = []
         self.policy_managed_dirty_scopes: list[dict[str, object]] = []
         self.policy_managed_outbox_events: list[dict[str, object]] = []
         self.policy_managed_readiness: list[dict[str, object]] = []
@@ -32,31 +29,8 @@ class FakeScopeContractRepository:
         self.repair_audit_events: list[dict[str, object]] = []
         self.orphaned_import_fact_dirty_scopes: list[dict[str, object]] = []
 
-    def list_cost_statistics_dirty_scopes(self) -> list[dict[str, object]]:
-        return [row for row in self.dirty_scopes if str(row.get("id") or "") not in self.deleted_dirty_scope_ids]
-
-    def list_cost_statistics_outbox_events(self) -> list[dict[str, object]]:
-        return [row for row in self.outbox_events if str(row.get("id") or "") not in self.deleted_outbox_event_ids]
-
     def list_read_model_outbox_failures(self) -> list[dict[str, object]]:
         return [row for row in self.read_model_outbox_failures if str(row.get("id") or "") not in self.deleted_outbox_event_ids]
-
-    def list_cost_statistics_readiness(self) -> list[dict[str, object]]:
-        deleted_keys = {
-            (item["tenant_id"], item["read_model_key"], item["scope_type"], item["scope_key"])
-            for item in self.deleted_readiness
-        }
-        return [
-            row
-            for row in self.readiness
-            if (
-                str(row.get("tenant_id") or "default"),
-                str(row.get("read_model_key") or "cost_statistics"),
-                str(row.get("scope_type") or "cost_statistics"),
-                str(row.get("scope_key") or ""),
-            )
-            not in deleted_keys
-        ]
 
     def list_orphaned_import_fact_dirty_scopes(self) -> list[dict[str, object]]:
         return [
@@ -171,7 +145,7 @@ class ReadModelScopeContractServiceTests(unittest.TestCase):
 
         self.assertEqual(rows, [])
         sql, params = connection.fetch_all_calls[-1]
-        self.assertEqual(params, (["no_oa_bank_batch", "pending_invoice"],))
+        self.assertEqual(params, (["workbench_relation", "search", "no_oa_bank_batch"],))
         self.assertIn("scope_type = any(%s)", sql)
         self.assertIn("status in ('pending', 'processing', 'failed')", sql)
 
@@ -182,7 +156,7 @@ class ReadModelScopeContractServiceTests(unittest.TestCase):
 
         self.assertEqual(rows, [])
         sql, params = connection.fetch_all_calls[-1]
-        self.assertEqual(params, (["no_oa_bank_batch", "pending_invoice"],))
+        self.assertEqual(params, (["workbench_relation", "search", "no_oa_bank_batch"],))
         self.assertIn("coalesce(scope_type, payload->>'scope_type') = any(%s)", sql)
         self.assertIn("event_type like '%%.read_model.refresh'", sql)
 
@@ -196,8 +170,8 @@ class ReadModelScopeContractServiceTests(unittest.TestCase):
         self.assertEqual(
             params,
             (
-                ["no_oa_bank_batch", "pending_invoice"],
-                ["no_oa_bank_batch", "pending_invoice"],
+                ["workbench_relation", "search", "no_oa_bank_batch"],
+                ["workbench_relation", "search", "no_oa_bank_batch"],
             ),
         )
         self.assertIn("from read_model.app_status_readiness", sql)
@@ -294,16 +268,16 @@ class ReadModelScopeContractServiceTests(unittest.TestCase):
             {
                 "id": "dirty-invalid",
                 "tenant_id": "default",
-                "scope_type": "pending_invoice",
-                "scope_key": "all",
+                "scope_type": "search",
+                "scope_key": "active:2026-05",
                 "status": "pending",
                 "reason": "read_model_slo_smoke",
             },
             {
                 "id": "dirty-valid",
                 "tenant_id": "default",
-                "scope_type": "pending_invoice",
-                "scope_key": "expense:all",
+                "scope_type": "search",
+                "scope_key": "2026-05",
                 "status": "pending",
             },
         ]
@@ -311,18 +285,18 @@ class ReadModelScopeContractServiceTests(unittest.TestCase):
             {
                 "id": "outbox-invalid",
                 "tenant_id": "default",
-                "event_type": "pending_invoice.read_model.refresh",
-                "scope_type": "pending_invoice",
-                "scope_key": "all",
+                "event_type": "search.read_model.refresh",
+                "scope_type": "search",
+                "scope_key": "active:2026-05",
                 "status": "pending",
             }
         ]
         repository.policy_managed_readiness = [
             {
                 "tenant_id": "default",
-                "read_model_key": "pending_invoice",
-                "scope_type": "pending_invoice",
-                "scope_key": "all",
+                "read_model_key": "search",
+                "scope_type": "search",
+                "scope_key": "active:2026-05",
                 "status": "failed",
             }
         ]
@@ -350,8 +324,8 @@ class ReadModelScopeContractServiceTests(unittest.TestCase):
             {
                 "id": "dirty-invalid",
                 "tenant_id": "default",
-                "scope_type": "pending_invoice",
-                "scope_key": "all",
+                "scope_type": "search",
+                "scope_key": "active:2026-05",
                 "status": "pending",
                 "reason": "read_model_slo_smoke",
             }
@@ -360,18 +334,18 @@ class ReadModelScopeContractServiceTests(unittest.TestCase):
             {
                 "id": "outbox-invalid",
                 "tenant_id": "default",
-                "event_type": "pending_invoice.read_model.refresh",
-                "scope_type": "pending_invoice",
-                "scope_key": "all",
+                "event_type": "search.read_model.refresh",
+                "scope_type": "search",
+                "scope_key": "active:2026-05",
                 "status": "pending",
             }
         ]
         repository.policy_managed_readiness = [
             {
                 "tenant_id": "default",
-                "read_model_key": "pending_invoice",
-                "scope_type": "pending_invoice",
-                "scope_key": "all",
+                "read_model_key": "search",
+                "scope_type": "search",
+                "scope_key": "active:2026-05",
                 "status": "failed",
             }
         ]
@@ -388,9 +362,9 @@ class ReadModelScopeContractServiceTests(unittest.TestCase):
             [
                 {
                     "tenant_id": "default",
-                    "read_model_key": "pending_invoice",
-                    "scope_type": "pending_invoice",
-                    "scope_key": "all",
+                    "read_model_key": "search",
+                    "scope_type": "search",
+                    "scope_key": "active:2026-05",
                 }
             ],
         )
@@ -412,8 +386,8 @@ class ReadModelScopeContractServiceTests(unittest.TestCase):
             {
                 "id": "dirty-invalid",
                 "tenant_id": "default",
-                "scope_type": "pending_invoice",
-                "scope_key": "all",
+                "scope_type": "search",
+                "scope_key": "active:2026-05",
                 "status": "pending",
             }
         ]

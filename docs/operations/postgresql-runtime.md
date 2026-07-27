@@ -40,10 +40,7 @@ FIN_OPS_POSTGRES_CUTOVER_PHASE=postgres_primary
 - Worker 从 durable queue claim event，重建 SQL projection 后 complete dirty scope。
 - Redis 只缓存 freshness gate 后的 payload。
 - RabbitMQ 只能作为可选 transport/wakeup，不能替代 PostgreSQL dirty scope 状态。
-- Workbench read model generation 有保留策略：发布新 active generation 后自动 bounded prune 旧的
-  非 active generation；生产同时使用版本化部署的 `finops-prune-workbench-generations.timer`
-  兜底，默认 `keep_recent=1`、`keep_days=0`、`limit=500`，避免
-  `read_model.workbench_*` 历史 generation 长期堆积或生产 wrapper 与代码策略漂移。
+- 关联台等目标页面直接读取 canonical facts；历史 `read_model.workbench_*` generation 表不再有 runtime reader、writer、worker 或 retention timer。
 - Runtime queue 历史有受控保留策略：`job.outbox_events` 与
   `job.read_model_dirty_scopes` 只删除 `status='done'` 的完成态历史，默认保留 30 天且每个
   event/scope type 至少保留最近 512 条，dirty scope 还会按
@@ -53,24 +50,6 @@ FIN_OPS_POSTGRES_CUTOVER_PHASE=postgres_primary
   生产通过版本化部署的 `finops-prune-runtime-queue-history.timer` 执行，helper 读取 root-only
   `fin-ops.postgres-migrator.env`，只把 delete 权限授予 migrator 角色，不扩大 API/worker
   数据库权限。
-
-Workbench read model 表空间排障边界：
-
-```sql
-select status, count(*)
-from read_model.workbench_generations
-group by status
-order by status;
-
-select
-  relname,
-  pg_size_pretty(pg_total_relation_size(c.oid)) as total_size
-from pg_class c
-join pg_namespace n on n.oid = c.relnamespace
-where n.nspname = 'read_model'
-  and c.relname like 'workbench_%'
-order by pg_total_relation_size(c.oid) desc;
-```
 
 Runtime queue 历史排障边界：
 

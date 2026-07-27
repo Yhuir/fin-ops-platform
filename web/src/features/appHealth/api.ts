@@ -64,7 +64,7 @@ export function mapAppHealthBackgroundJobsSource(payload: ApiAppHealthPayload | 
 }
 
 export function mapAppHealthWorkbenchSource(payload: ApiAppHealthPayload | null | undefined): AppHealthWorkbenchSource {
-  const status = String(payload?.workbench_read_model?.status ?? "").trim();
+  const status = String(payload?.workbench_matching?.status ?? "").trim();
   if (status === "error") {
     return "error";
   }

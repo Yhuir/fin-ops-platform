@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, Callable
 
-from fin_ops_platform.services.read_model_write_targets import write_target_envelope
 from fin_ops_platform.services.turnover_bank_row_version import (
     turnover_bank_row_selection_version,
     turnover_bank_row_version,
@@ -756,14 +755,10 @@ class TurnoverLedgerLocalRelationExtraAdapterSet:
             )
 
 
-def _turnover_write_target_envelope(
+def _turnover_affected_scope_envelope(
     affected_months: list[str],
 ) -> dict[str, object]:
-    return write_target_envelope(
-        scope_keys=list(affected_months or []),
-        targets=[],
-        fallback_scope_key="all",
-    )
+    return {"affected_scope_keys": list(dict.fromkeys(affected_months or []))}
 
 
 class TurnoverLedgerConfirmRequestBoundaryFacade:
@@ -809,7 +804,7 @@ class TurnoverLedgerConfirmRequestBoundaryFacade:
         result = self._facade.confirm_relation(**confirm_kwargs)
         payload = dict(result or {})
         payload["affected_months"] = list(affected_months)
-        payload.update(_turnover_write_target_envelope(affected_months))
+        payload.update(_turnover_affected_scope_envelope(affected_months))
         return payload
 
     def confirm_zero_difference_closure_from_request(
@@ -845,7 +840,7 @@ class TurnoverLedgerConfirmRequestBoundaryFacade:
             raise RuntimeError("turnover ledger closure facade is not configured.")
         payload = dict(confirm(**closure_kwargs) or {})
         payload["affected_months"] = list(affected_months)
-        payload.update(_turnover_write_target_envelope(affected_months))
+        payload.update(_turnover_affected_scope_envelope(affected_months))
         return payload
 
     def withdraw_cash_closure_case_from_request(
@@ -917,7 +912,7 @@ class TurnoverLedgerConfirmRequestBoundaryFacade:
             withdraw_kwargs["idempotency_key"] = idempotency_key
         payload = dict(withdraw(**withdraw_kwargs) or {})
         payload["affected_months"] = affected_months
-        payload.update(_turnover_write_target_envelope(affected_months))
+        payload.update(_turnover_affected_scope_envelope(affected_months))
         return payload
 
 
@@ -1215,7 +1210,7 @@ class TurnoverLedgerWithdrawRequestBoundaryFacade:
         result = self._facade.withdraw_relation(**withdraw_kwargs)
         payload = dict(result or {})
         payload["affected_months"] = list(affected_months)
-        payload.update(_turnover_write_target_envelope(affected_months))
+        payload.update(_turnover_affected_scope_envelope(affected_months))
         return payload
 
 
@@ -1262,7 +1257,7 @@ class TurnoverLedgerBankRowTagsRequestBoundaryFacade:
         payload = dict(result or {})
         payload["affected_months"] = list(affected_months)
         payload["workbench_invalidated"] = True
-        payload.update(_turnover_write_target_envelope(affected_months))
+        payload.update(_turnover_affected_scope_envelope(affected_months))
         return payload
 
 
@@ -1324,7 +1319,7 @@ class TurnoverLedgerRelationExtraRequestBoundaryFacade:
             idempotency_key=idempotency_key,
         )
         response_payload = dict(result or {})
-        response_payload.update(_turnover_write_target_envelope(list(scope_keys or ["all"])))
+        response_payload.update(_turnover_affected_scope_envelope(list(scope_keys or ["all"])))
         return response_payload
 
 
@@ -1353,7 +1348,7 @@ class TurnoverLedgerTagSelectionRequestBoundaryFacade:
             )
             or {}
         )
-        payload.update(_turnover_write_target_envelope(["all"]))
+        payload.update(_turnover_affected_scope_envelope(["all"]))
         return payload
 
 

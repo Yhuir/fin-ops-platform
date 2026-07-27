@@ -14,7 +14,7 @@ class AppHealthAlertServiceTests(unittest.TestCase):
             {
                 "oa_sync": {"dirty_scopes": ["all"], "lag_seconds": 301},
                 "metrics": {"dirty_scope_age_seconds": {"all": 301}},
-                "workbench_read_model": {"status": "stale"},
+                "workbench_matching": {"status": "stale"},
                 "background_jobs": {"jobs": []},
                 "dependencies": {},
                 "session": {"status": "authenticated"},
@@ -24,7 +24,7 @@ class AppHealthAlertServiceTests(unittest.TestCase):
             {
                 "oa_sync": {"dirty_scopes": ["all"], "lag_seconds": 901},
                 "metrics": {"dirty_scope_age_seconds": {"all": 901}},
-                "workbench_read_model": {"status": "stale"},
+                "workbench_matching": {"status": "stale"},
                 "background_jobs": {"jobs": []},
                 "dependencies": {},
                 "session": {"status": "authenticated"},
@@ -41,7 +41,7 @@ class AppHealthAlertServiceTests(unittest.TestCase):
             {
                 "oa_sync": {"dirty_scopes": []},
                 "metrics": {},
-                "workbench_read_model": {"status": "error"},
+                "workbench_matching": {"status": "error"},
                 "background_jobs": {"jobs": []},
                 "dependencies": {"oa_sync": {"status": "unavailable", "message": "OA 同步失败"}},
                 "session": {"status": "authenticated"},
@@ -58,7 +58,7 @@ class AppHealthAlertServiceTests(unittest.TestCase):
             {
                 "oa_sync": {"dirty_scopes": ["all"], "lag_seconds": 901},
                 "metrics": {"dirty_scope_age_seconds": {"all": 901}},
-                "workbench_read_model": {"status": "stale"},
+                "workbench_matching": {"status": "stale"},
                 "background_jobs": {"jobs": []},
                 "dependencies": {},
                 "session": {"status": "authenticated"},
@@ -69,7 +69,7 @@ class AppHealthAlertServiceTests(unittest.TestCase):
             {
                 "oa_sync": {"dirty_scopes": []},
                 "metrics": {},
-                "workbench_read_model": {"status": "ready"},
+                "workbench_matching": {"status": "ready"},
                 "background_jobs": {"jobs": []},
                 "dependencies": {},
                 "session": {"status": "authenticated"},
@@ -88,7 +88,7 @@ class AppHealthAlertServiceTests(unittest.TestCase):
             {
                 "oa_sync": {"dirty_scopes": []},
                 "metrics": {},
-                "workbench_read_model": {"status": "ready"},
+                "workbench_matching": {"status": "ready"},
                 "background_jobs": {
                     "jobs": [
                         {

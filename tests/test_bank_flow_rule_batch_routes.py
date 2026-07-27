@@ -19,7 +19,7 @@ class FakeBankFlowRuleBatchApplicationService:
     def list_batches_payload(self, query, *, relation_mode="no_oa_bank_batch"):  # type: ignore[no-untyped-def]
         self.list_relation_modes.append(relation_mode)
         self.calls.append(("list", query))
-        return {"summary": {}, "batches": [], "read_model_status": "fresh"}
+        return {"summary": {}, "batches": []}
 
     def tag_selection_payload(self):  # type: ignore[no-untyped-def]
         self.calls.append(("tag_rules", None))
@@ -37,10 +37,6 @@ class FakeBankFlowRuleBatchApplicationService:
             "eligibility_changed": True,
             "eligibility_changed_tag_codes": ["fee"],
             "affected_months": ["2026-05"],
-            "affected_scope_keys": ["2026-05"],
-            "read_model_scope_keys": ["2026-05"],
-            "freshness_targets": [],
-            "operation_barrier_targets": [],
         }
 
     def submit_batch(self, batch_id, *, actor, expected_version, note, relation_mode):  # type: ignore[no-untyped-def]
@@ -73,10 +69,6 @@ class FakeBankFlowRuleBatchApplicationService:
         return {
             "batch": {"batch_id": batch_id},
             "affected_months": ["2026-05"],
-            "affected_scope_keys": ["2026-05"],
-            "read_model_scope_keys": ["2026-05"],
-            "freshness_targets": [],
-            "operation_barrier_targets": [],
         }
 
     def submit_selected_rows(self, *, row_ids, actor, note, relation_mode):  # type: ignore[no-untyped-def]
@@ -104,23 +96,19 @@ class BankFlowRuleBatchRoutesTests(unittest.TestCase):
         response = routes.route("GET", "/api/bank-flow-rule-batches", {"bucket": ["submitted"]}, None, {})
 
         self.assertEqual(response["status"], HTTPStatus.OK)
-        self.assertEqual(response["payload"]["read_model_status"], "fresh")
+        self.assertNotIn("read_model_status", response["payload"])
         self.assertEqual(service.calls, [("list", {"bucket": ["submitted"]})])
         self.assertEqual(service.list_relation_modes, [BANK_FLOW_RULE_BATCH_RELATION_MODE])
 
-    def test_list_route_maps_missing_read_page_boundary_to_sanitized_503(self) -> None:
+    def test_list_route_does_not_translate_query_failure_into_refresh_status(self) -> None:
         service = FakeBankFlowRuleBatchApplicationService()
         service.list_batches_payload = lambda *_args, **_kwargs: (_ for _ in ()).throw(  # type: ignore[method-assign]
-            RuntimeError("bank_flow_rule_batch read repository requires read_page.")
+            RuntimeError("bank_flow_rule_batch canonical query failed.")
         )
         routes = BankFlowRuleBatchApiRoutes(application_service=service)  # type: ignore[arg-type]
 
-        status, payload = routes.list_batches({})
-
-        self.assertEqual(status, HTTPStatus.SERVICE_UNAVAILABLE)
-        self.assertEqual(payload["error"], "bank_flow_rule_batch_read_model_unavailable")
-        self.assertEqual(payload["read_model_status"], "unavailable")
-        self.assertIn("message", payload)
+        with self.assertRaisesRegex(RuntimeError, "canonical query failed"):
+            routes.list_batches({})
 
     def test_tag_rules_return_policy_rules_and_map_conflict(self) -> None:
         service = FakeBankFlowRuleBatchApplicationService()
@@ -140,9 +128,10 @@ class BankFlowRuleBatchRoutesTests(unittest.TestCase):
         self.assertEqual(payload["rules"], [{"tag_code": "fee", "requires_oa": False, "requires_invoice": False}])
         self.assertEqual(update_status, HTTPStatus.OK)
         self.assertEqual(update_payload["affected_months"], ["2026-05"])
-        self.assertEqual(update_payload["read_model_scope_keys"], ["2026-05"])
-        self.assertEqual(update_payload["freshness_targets"], [])
-        self.assertEqual(update_payload["operation_barrier_targets"], [])
+        self.assertNotIn("affected_scope_keys", update_payload)
+        self.assertNotIn("read_model_scope_keys", update_payload)
+        self.assertNotIn("freshness_targets", update_payload)
+        self.assertNotIn("operation_barrier_targets", update_payload)
         self.assertNotIn("refresh_enqueued", update_payload)
         self.assertEqual(conflict_status, HTTPStatus.CONFLICT)
         self.assertEqual(conflict_payload["error"], "bank_flow_rule_batch_tag_rules_version_conflict")
@@ -166,6 +155,25 @@ class BankFlowRuleBatchRoutesTests(unittest.TestCase):
         self.assertEqual(duplicate_status, HTTPStatus.BAD_REQUEST)
         self.assertEqual(duplicate_payload["error"], "duplicate_bank_flow_rule_batch_tag_rule")
 
+    def test_mutation_permission_denial_stops_before_application_service(self) -> None:
+        service = FakeBankFlowRuleBatchApplicationService()
+        forbidden = {"status": HTTPStatus.FORBIDDEN, "payload": {"error": "permission_denied"}}
+        routes = BankFlowRuleBatchApiRoutes(
+            application_service=service,  # type: ignore[arg-type]
+            resolve_mutation_session=lambda _headers: forbidden,
+        )
+
+        response = routes.route(
+            "POST",
+            "/api/bank-flow-rule-batches/batch-001/submit",
+            {},
+            "{}",
+            {},
+        )
+
+        self.assertIs(response, forbidden)
+        self.assertEqual(service.calls, [])
+
     def test_submit_and_withdraw_use_bank_flow_write_targets(self) -> None:
         service = FakeBankFlowRuleBatchApplicationService()
         routes = BankFlowRuleBatchApiRoutes(application_service=service)  # type: ignore[arg-type]
@@ -184,9 +192,9 @@ class BankFlowRuleBatchRoutesTests(unittest.TestCase):
 
         self.assertEqual(submit_status, HTTPStatus.OK)
         self.assertEqual(withdraw_status, HTTPStatus.OK)
-        self.assertEqual(withdraw_payload["operation_barrier_targets"], [])
-        self.assertEqual(withdraw_payload["freshness_targets"], [])
-        self.assertEqual(withdraw_payload["read_model_scope_keys"], ["2026-05"])
+        self.assertNotIn("operation_barrier_targets", withdraw_payload)
+        self.assertNotIn("freshness_targets", withdraw_payload)
+        self.assertNotIn("read_model_scope_keys", withdraw_payload)
         self.assertEqual(
             service.calls,
             [

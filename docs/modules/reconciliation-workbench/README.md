@@ -10,59 +10,81 @@
 - `docs/product-specs/reconciliation-and-workbench.md`
 - `docs/modules/reconciliation-workbench/boundary-io.md`
 - `docs/modules/workbench-relations/boundary-io.md`
-- `docs/architecture/module-boundaries/read-model-contracts.md`
-- `docs/operations/runtime-worker-governance.md`
+- `docs/modules/canonical-facts/boundary-io.md`
+- `docs/modules/batch-accounting/boundary-io.md`
+- `docs/modules/permissions-and-audit/boundary-io.md`
 
 ## 当前业务边界
 
-关联台是 canonical OA、银行流水和发票事实与 active 正式关系的读写工作台。页面只有 `paired` 和 `unpaired` 两个关系区：满足冻结 OA/发票要求的 active relation 进入 `paired`；未满足要求的 active relation 保持同 case 分组进入 `unpaired` 并显示缺失类型；无 active owner 的 canonical facts 各自作为单行进入 `unpaired`。
+关联台是 canonical OA、银行流水、发票、ETC 汇总事实与 active 正式关系的读写工作台。页面只有 `paired` 和 `unpaired` 两个关系区：
 
-页面不拥有自动候选、matching decision 或第三种关系状态。确定性引擎满足安全规则时直接通过正式关系命令边界创建 active relation；不满足时不写关系，事实仍保持可见的未配对单行。
+- 满足冻结 OA/发票要求的 active relation 进入 `paired`。
+- 未满足冻结要求的 active relation 保持同 case 分组进入 `unpaired`，并显示缺失类型。
+- 没有 active relation owner 的 canonical fact 作为 singleton 进入 `unpaired`。
 
-关系来源（人工、历史或系统）只进入审计 provenance，不参与页面分区。历史 case id 的字符串前缀不能覆盖当前 active relation 状态。
+页面不拥有自动候选、matching decision 或第三种关系状态。关系来源只进入 provenance/audit，不参与分区；历史 `case_id`、旧 candidate metadata 或 display tag 不能覆盖当前 active relation 状态。
 
-## 运行链
+## 当前读取链
 
 ```text
-canonical fact repositories
-  -> PostgresWorkbenchFormalRelationFactRepository
-  -> WorkbenchFreeMatchingEngine (pure, no I/O)
-  -> WorkbenchMatchingOrchestrator
-  -> WorkbenchRelationCommandService + relation UoW
-  -> app.workbench_pair_relations/history + durable outbox
-  -> workbench/workbench_relation workers
-  -> active generation
-  -> WorkbenchRelationGroupingService
-  -> paired / unpaired API
-  -> ReconciliationWorkbenchPage
+ReconciliationWorkbenchPage
+  -> /api/workbench、/groups、/groups/detail、/rows/{id}、relation preview
+  -> Workbench read routes（鉴权、参数、HTTP 映射）
+  -> WorkbenchQueryFacade
+  -> PostgresWorkbenchCanonicalQueryRepository
+  -> app.oa_applications
+     + app.bank_transactions
+     + app.invoices
+     + app.etc_* canonical snapshots
+     + app.workbench_pair_relations(status=active)
+  -> 纯 grouping / zone / requirement policy
 ```
 
-`workbench` 保留 active-generation 原子发布模型。页面、route 和 cache 不得绕过 freshness/status/enqueue 边界，也不得从旧 snapshot、旧 candidate/decision 表或 row metadata 恢复关系。
+所有页面读端点直接查询 PostgreSQL canonical facts。一个端点内的 rows、summary、facets/counts 使用同一显式 `REPEATABLE READ READ ONLY` snapshot；repository 设置 2 秒 statement timeout，并使用有界分页和批量 hydration。
+
+页面不读取 `read_model.workbench_*`、active generation、Redis generation cache、`read_model_status`、`read_model_version`、`source_versions` 或 refresh queue。`/api/workbench/refresh-status` 与 `/api/workbench/events` 已从页面合同删除；loading、empty 和 error 由普通请求状态表达，不存在 `202 refreshing`、轮询或旧 payload fallback。
+
+## 写入链
+
+```text
+preview（canonical snapshot，最多 20 行）
+  -> confirm / withdraw mutation
+  -> WorkbenchWriteFacade
+  -> relation command service + relation UoW
+  -> transaction 内重验 canonical identities / row types
+  -> transaction 内锁定并重验 active relation ownership / business versions
+  -> app.workbench_pair_relations + history + idempotency + audit
+  -> mutation 成功后前端重新 GET 当前页面
+```
+
+preview 只用于展示和生成 `preview_id`；正式 command 不信任 preview 派生行。写入不接收 `expected_read_model_version`，继续使用 `submit_expected_versions` 等 canonical relation 业务版本、幂等 fingerprint 和 CAS。选择对象消失、类型变化、占用变化或版本冲突返回 `409`。
 
 ## 代码入口
 
-- 前端：`web/src/pages/ReconciliationWorkbenchPage.tsx`、`web/src/components/workbench/RelationGroupGrid.tsx`、`RelationGroupCell.tsx`
-- API：`web/src/features/workbench/api.ts`、`backend/src/fin_ops_platform/app/routes_workbench.py`
-- 分组：`backend/src/fin_ops_platform/services/workbench_relation_grouping.py`
-- 匹配：`backend/src/fin_ops_platform/services/workbench_free_matching_engine.py`、`workbench_matching_orchestrator.py`
-- Matching I/O：`backend/src/fin_ops_platform/services/postgres_repositories/workbench_formal_relation.py`
-- 正式关系写入：`backend/src/fin_ops_platform/services/workbench_relation_command_service.py`、`workbench_uow.py`
-- SQL projection/read model：`backend/src/fin_ops_platform/services/workbench_sql_projection.py`、`postgres_repositories/read_models.py`
-- Worker：`backend/src/fin_ops_platform/services/workbench_matching_dirty_scope_worker.py`、`workbench_read_model_refresh.py`
-- 固定契约版本：`backend/src/fin_ops_platform/services/workbench_read_model_version.py`
+- 前端：`web/src/pages/ReconciliationWorkbenchPage.tsx`、`web/src/components/workbench/`
+- API client/types：`web/src/features/workbench/`
+- Route：`backend/src/fin_ops_platform/app/routes_workbench.py`
+- Query service：`backend/src/fin_ops_platform/services/workbench_query_facade.py`
+- Query repository：`backend/src/fin_ops_platform/services/postgres_repositories/workbench_canonical_query.py`
+- 纯分组/规则：`workbench_relation_grouping.py`、`workbench_canonical_rows.py`
+- 写入：`workbench_write_facade.py`、`workbench_relation_command_service.py`、`workbench_uow.py`
+
+## 旧 generation 退休状态
+
+旧 Workbench active-generation builder、worker、manifest、runtime reader/writer 和运维工具已在跨页面清理中删除。历史 migration/表暂留作回滚证据，但没有运行时调用方。`workbench_relation` 是仍有独立消费者的共享 relation distribution，不是关联台页面 read model，也不得重新接入本页面请求热路径。
 
 ## 不变量
 
 - `paired = complete active relation members`。
 - `unpaired = incomplete active relation members + unowned canonical facts`。
-- 两区不相交且完整覆盖 canonical facts。
-- 无 active owner 的未配对事实永远是 singleton；未闭环 active relation 只能按其 canonical case 分组，旧 `case_id` 和候选 metadata 不能合并无 owner 事实。
+- 两区不相交且完整覆盖当前 scope 内可见 canonical facts。
 - 一个 canonical member 最多属于一个 active relation。
-- 未知 zone、group type、relation mode、重复 identity、缺失 active member 或跨 case 占用冲突均 fail fast。
+- ETC collapsed group 只使用已提交/关闭且有 canonical invoice/link 证据的 owner，优先级为 active link > business batch > submission fallback。
+- 未知 zone、非法分页/筛选、重复 identity、缺失 active member、类型漂移或跨 case 占用冲突均 fail closed。
 
 ## 维护文档
 
-- `boundary-io.md`：模块边界、I/O、依赖方向、迁移与删除条件。
-- `state-machine.md`：页面、正式关系与 read model 状态。
-- `tests.md`：七类测试、命令和生产核验。
-- `implementation-notes.md`：历史实施记录，不是当前业务事实源。
+- `boundary-io.md`：直接/上下游 I/O、事务、性能和旧链删除状态。
+- `state-machine.md`：页面、preview 和正式关系状态。
+- `tests.md`：七类测试、查询次数 guard 和验证命令。
+- `implementation-notes.md`：历史实施记录，不是当前运行时合同。

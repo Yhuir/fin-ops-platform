@@ -27,8 +27,10 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         self.assertEqual(plan["affected_scopes"], ["2026-03", "2026-04"])
         domains = [domain["domain"] for domain in plan["domains"]]
         self.assertIn("historical_etc_repair_state", domains)
-        self.assertIn("workbench_read_model", domains)
-        self.assertIn("tax_offset_read_model", domains)
+        self.assertIn("workbench_relation_read_model", domains)
+        self.assertIn("workbench_matching_dirty_scopes", domains)
+        self.assertNotIn("workbench_read_model", domains)
+        self.assertNotIn("tax_offset_read_model", domains)
         self.assertNotIn("all", plan["affected_scopes"])
 
     def test_settings_reset_is_explicit_full_history_maintenance(self) -> None:
@@ -39,9 +41,10 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         self.assertEqual(plan["affected_scopes"], ["all"])
         domains = [domain["domain"] for domain in plan["domains"]]
         self.assertIn("oa_adapter_records_cache", domains)
-        self.assertIn("bank_account_balance_read_model", domains)
+        self.assertIn("bank_flow_rule_batch_canonical_draft", domains)
         self.assertIn("file_import_sessions", domains)
         self.assertIn("historical_etc_repair_state", domains)
+        self.assertNotIn("bank_account_balance_read_model", domains)
 
     def test_ordinary_write_events_fail_fast(self) -> None:
         service = DerivedDataLifecycleService()
@@ -69,8 +72,8 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         summary = service.execute_plan(
             plan,
             executors={
-                "workbench_read_model": lambda domain_plan: {
-                    "deleted_counts": {"workbench_read_models": 1},
+                "workbench_relation_read_model": lambda domain_plan: {
+                    "deleted_counts": {"workbench_relation_read_models": 1},
                     "invalidated_scopes": domain_plan["scope_keys"],
                 },
                 "search_cache": lambda domain_plan: {
@@ -80,7 +83,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(summary["deleted_counts"]["workbench_read_models"], 1)
+        self.assertEqual(summary["deleted_counts"]["workbench_relation_read_models"], 1)
         self.assertEqual(summary["deleted_counts"]["search_cache"], 1)
         self.assertEqual(summary["invalidated_scopes"], ["2026-03", "search:2026-03"])
         self.assertEqual(summary["errors"], [])

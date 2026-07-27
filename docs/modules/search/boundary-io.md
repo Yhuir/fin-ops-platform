@@ -1,85 +1,72 @@
 # Search 模块边界与 I/O
 
-日期：2026-07-22
+日期：2026-07-27
 
 ## 模块化状态
 
-- 状态：partial
-- 当前边界可信度：high
-- 目标边界：搜索索引由 `search` read model 投影，页面/API 查询只读 fresh-gated index。
-- 当前缺口：search 与 pending invoice 共用 worker/投影链路，scope 变更必须同步两个模块。
-- 旧代码删除条件：Search 不得再通过 Workbench page/full payload 或旧 read-model snapshot 构建索引输入；非 PostgreSQL 本地即时查询只能读取单月 active generation 的窄 row context。
+- 状态：retained shared read model
+- Scope：`search`
+- Event：`search.read_model.refresh`
+- Workers：`search`、`search-secondary`、`search-tertiary`
+- Query owner：Search read API
+- Repository owner：`SearchReadModelRepositoryPort`
 
-## 职责边界
+## 职责
 
 ### 负责
 
-- `/api/search` 搜索 API。
-- `search` read model index 投影。
-- 为 pending invoice/search 页面提供索引 freshness。
+- `/api/search` 查询和权限合同。
+- 月份分区 search index 的 freshness proof、refresh enqueue、projection 与持久化。
+- `all` maintenance command 的月份枚举。
 
 ### 不负责
 
-- 不拥有搜索结果对应业务对象的源事实。
-- 不直接修改 pending invoice 业务状态。
-- 不接受无界 all 查询绕过 fan-out。
+- 不拥有搜索结果对应的 canonical 业务事实。
+- 不提供待找发票或其它页面 projection。
+- 不读取 Workbench page generation/payload。
+- 不接受普通业务 writer 的跨页面 fan-out。
 
 ## 输入 I/O
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| 搜索请求 | 前端/API | 查询 read model index |
-| Refresh scope | `search` manifest | month or `all`；`all` 是 fan-out command |
-| 业务对象变化 | canonical writer/source version | 普通写只更新事实/version 或返回 affected scope，不直接发布 search refresh |
-| 页面访问 | `/api/search` freshness boundary | 进入/重新激活搜索消费者时比较 expected/actual versions；仅在 stale/missing 时通过 gateway 精确入队当前月份 |
-| 本地即时查询输入 | Workbench repository | 仅允许 `list_workbench_search_rows(scope_key=YYYY-MM)`；返回 active generation 的 row/zone/group/project context，不得构建 Workbench 页面 payload；生产查询不走该路径 |
+| Search query | API | 规范化 query 与月份 scope；读取 payload 前验证 current-effective dirty/outbox 与 source proof |
+| Refresh scope | `ReadModelRefreshGateway` | 只接受 `YYYY-MM` 或 `all`；normalize、validate、dedupe 后写 durable queue |
+| Projection source | canonical query owner | 只读取构建索引需要的 canonical row/context；不读取页面 DTO |
+| Maintenance `all` | 显式运维入口 | 枚举月份 shard；不得发布可查询 `all` payload |
 
 ## 输出 I/O
 
-| 输出 | 目标 | 合同 |
+| 输出 | Consumer | 合同 |
 | --- | --- | --- |
-| 搜索结果 | 调用页面 | 必须来自 fresh index 或暴露 nonfresh |
-| Search index rows | repository | partitioned scoped index；保存时按 `row_id` 做 no-op aware bulk upsert，只删除同 scope 不再存在的 stale rows；空结果 scope 才允许整月删除 |
-| Search scope summary | repository / worker | `search_index_scope_summary(month)` 只返回 scope row count、freshness 和 source_versions；worker 在 source_versions 未变化时必须跳过 Workbench row scan 和保存。 |
-| Dirty scope | runtime queue | 仅由搜索访问 freshness gateway 或显式 maintenance 通过 `ReadModelRefreshGateway` 发布 `search.read_model.refresh`；普通业务写不 fan-out |
+| Search results | `/api/search` | 只来自 fresh index；non-fresh 明确返回状态，不 live fallback |
+| Index rows | PostgreSQL | 按 `row_id` no-op-aware bulk upsert，删除同 scope stale rows |
+| Scope summary | freshness/worker | row count、source versions 与 readiness，不加载完整结果 |
+| Dirty/outbox | runtime worker | 只允许 `search.read_model.refresh` |
 
-## 持久化与投影
+## 性能与一致性
 
-- Read model：`search`
-- Projection：`partitioned_scoped_index`
-- Worker：`search`，辅助 `search-pending`、`search-secondary`、`search-tertiary`
-- Query owner：Search read API
-- Repository owner：`SearchReadModelRepositoryPort`
-- Persistence contract：`save_search_index_rows(...)` 不允许恢复整月 delete + 全量 rewrite 的旧逻辑；更新必须通过 `row_id` upsert 和 `is distinct from` 跳过 no-op 行，避免 grouped SLO 写放大。
-- Refresh contract：`SearchPendingSqlProjectionBuilder.rebuild_search_index_scope(...)` 必须先用当前 expected source_versions 与 `search_index_scope_summary(month)` 比较；一致时返回 `source_versions_unchanged`，不得扫描 `read_model.workbench_rows` 或写 `read_model.search_index_rows`。
+- source versions 与 scope summary一致时，worker 返回 `source_versions_unchanged`，不扫描/写索引。
+- source 变化时只重建当前月份；空结果允许清空当前 scope。
+- Redis 只缓存 freshness gate 后的结果；RabbitMQ 只作 transport/wakeup。
+- repository unavailable、非法 scope 或 proof 缺失必须 fail closed。
 
 ## 文件范围
 
-| 层 | 文件或目录 |
+| 层 | 文件 |
 | --- | --- |
-| Backend route | `/api/search` in `backend/src/fin_ops_platform/app/server.py` |
-| Backend service | `search_service.py`、`search_query_freshness_service.py`、`search_read_model_refresh_producer.py`、`search_pending_read_model_refresh.py` |
-| Repository / SQL | `search_read_model_repository.py`、`search_pending_sql_projection.py`、`postgres_repositories/read_models.py` |
-| Manifest/worker | `read_model_manifest.py`、`runtime_worker_registry.py` |
-| Tests | `tests/test_search*.py`、`tests/test_search_pending_sql_runtime.py` |
+| Route | `/api/search` in `app/server.py` |
+| Query | `search_service.py`、`search_query_freshness_service.py` |
+| Refresh | `search_read_model_refresh_producer.py`、`search_read_model_refresh.py` |
+| Projection | `search_sql_projection.py` |
+| Repository | `search_read_model_repository.py`、`postgres_repositories/read_models.py` |
+| Runtime | `read_model_manifest.py`、`read_model_scope_policy.py`、`runtime_worker_registry.py` |
+| Tests | `tests/test_search_api.py`、`tests/test_search_service.py`、`tests/test_search_sql_runtime.py`、manifest/worker/gateway tests |
 
 ## 依赖方向
 
-- 允许依赖：read model repository, pending invoice projection, runtime queue。
-- 必须通过：search read model freshness service/API。
-- 禁止绕过：页面直查源业务表作为搜索结果；business service 直接写 index 表。
-- 非 PostgreSQL 本地兼容路径只允许复用 Workbench repository 的单月 active-generation 窄查询；repository 缺失必须 fail fast，不得回退 `_build_api_workbench_payload`、raw payload 或 snapshot。
+`Search API -> freshness service/repository -> ReadModelRefreshGateway -> durable queue -> Search worker -> Search repository`
 
-## 测试与验证
-
-- `tests/test_search_api.py`
-- `tests/test_search_service.py`
-- `tests/test_search_pending_sql_runtime.py`
-- `tests/test_read_model_manifest.py`
-- `tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_search_index_rows_are_saved_with_bulk_values`
-- `tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_search_index_bulk_save_deletes_scope_when_result_is_empty`
-
-## 当前缺口和删除条件
-
-- 如拆出 route owner，必须同步本文件和 module README。
-- Search 的生产 SQL read model、pending invoice/search fan-out、结果 DTO、排序/过滤和缓存失效合同保持不变；后续删除整个本地即时查询前仍须单独验证这些合同。
+- service 不读取 HTTP cookie/header，不依赖 `Application`。
+- business service 不直接写 index、dirty scope 或 outbox。
+- 禁止恢复 `search-pending`、pending-invoice compatibility projector、Workbench generation input 或 synchronous live scan fallback。

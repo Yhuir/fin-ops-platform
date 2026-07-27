@@ -64,7 +64,7 @@ class SettingsApiRoutes:
         enqueue_import_process_job: Callable[..., tuple[Any, Any]],
         serialize_import_job: Callable[[Any], dict[str, object]],
         manual_import_affected_scope_keys: Callable[[dict[str, object], list[str]], list[str]],
-        manual_import_write_target_envelope: Callable[[list[str]], dict[str, object]],
+        manual_import_affected_scope_payload: Callable[[list[str]], dict[str, object]],
     ) -> None:
         self._app_settings_service_provider = app_settings_service_provider
         self._project_costing_service_provider = project_costing_service_provider
@@ -87,7 +87,7 @@ class SettingsApiRoutes:
         self._enqueue_import_process_job = enqueue_import_process_job
         self._serialize_import_job = serialize_import_job
         self._manual_import_affected_scope_keys = manual_import_affected_scope_keys
-        self._manual_import_write_target_envelope = manual_import_write_target_envelope
+        self._manual_import_affected_scope_payload = manual_import_affected_scope_payload
 
     def route(
         self,
@@ -335,7 +335,7 @@ class SettingsApiRoutes:
         if row_ids_error is not None:
             return row_ids_error
         result = service.refresh_attachments(row_ids)
-        self._add_manual_import_targets(result, row_ids=row_ids)
+        self._add_manual_import_affected_scopes(result, row_ids=row_ids)
         return self._json_response(HTTPStatus.OK, result)
 
     def oa_manual_imports(self) -> Any:
@@ -387,7 +387,7 @@ class SettingsApiRoutes:
                 },
             )
         result = service.import_row_ids(row_ids, actor_id=normalized_actor_id)
-        self._add_manual_import_targets(result, row_ids=row_ids)
+        self._add_manual_import_affected_scopes(result, row_ids=row_ids)
         return self._json_response(HTTPStatus.OK, result)
 
     def delete_oa_manual_import(
@@ -419,7 +419,7 @@ class SettingsApiRoutes:
             else str(payload.get("actor_id") or payload.get("actor") or "workbench_settings").strip()
         )
         result = service.remove_manual_import(normalized_row_id, actor_id=actor_id or "workbench_settings")
-        self._add_manual_import_targets(result, row_ids=[normalized_row_id])
+        self._add_manual_import_affected_scopes(result, row_ids=[normalized_row_id])
         return self._json_response(HTTPStatus.OK, result)
 
     def sync_projects(self, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
@@ -763,9 +763,9 @@ class SettingsApiRoutes:
             values.extend(str(part).strip() for part in str(raw_value or "").split(","))
         return [value for value in values if value]
 
-    def _add_manual_import_targets(self, result: dict[str, object], *, row_ids: list[str]) -> None:
+    def _add_manual_import_affected_scopes(self, result: dict[str, object], *, row_ids: list[str]) -> None:
         scope_keys = self._manual_import_affected_scope_keys(result, row_ids)
-        result.update(self._manual_import_write_target_envelope(scope_keys))
+        result.update(self._manual_import_affected_scope_payload(scope_keys))
 
     def _app_settings_service(self) -> AppSettingsService:
         return self._app_settings_service_provider()

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from fin_ops_platform.services.postgres_repositories.bank_flow_rule_batch_canonical_query import (
+    BankFlowRuleBatchCanonicalQueryRepository,
+)
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.postgres_repositories.common import max_numeric_suffix
 from fin_ops_platform.services.postgres_repositories.read_models import (
@@ -71,6 +74,19 @@ class RecordingConnection:
 
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
         self.fetched_one.append((" ".join(sql.split()), params))
+        return None
+
+
+class CanonicalProofConnection(RecordingConnection):
+    def __init__(self, proof: dict[str, object]) -> None:
+        super().__init__()
+        self.proof = dict(proof)
+
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        normalized_sql = " ".join(sql.split())
+        self.fetched_one.append((normalized_sql, params))
+        if "with scoped_bank as materialized" in normalized_sql:
+            return dict(self.proof)
         return None
 
 
@@ -390,9 +406,6 @@ def test_read_model_bulk_insert_prefers_multi_values_path_for_allowlisted_tables
     connection = ValuesBulkConnection()
 
     allowlisted_sql = [
-        "insert into read_model.workbench_rows(row_id, payload) values (%s, %s)",
-        "insert into read_model.workbench_groups(group_id, payload) values (%s, %s)",
-        "insert into read_model.workbench_group_rows(group_id, payload) values (%s, %s)",
         "insert into read_model.workbench_relation_rows(row_id, payload) values (%s, %s)",
         "insert into read_model.workbench_relation_groups(group_id, payload) values (%s, %s)",
         "insert into read_model.search_index_rows(row_id, payload) values (%s, %s)",
@@ -732,16 +745,12 @@ def test_bank_flow_rule_batch_save_uses_dedicated_physical_tables() -> None:
     )
 
     executed_sql = write_sql(connection)
-    assert any("delete from read_model.bank_flow_rule_batch_rows" in sql for sql in executed_sql)
+    assert not any("read_model.bank_flow_rule_batch_rows" in sql for sql in executed_sql)
     assert any("delete from app.bank_flow_rule_batch_events" in sql for sql in executed_sql)
     assert any("delete from app.bank_flow_rule_batches" in sql for sql in executed_sql)
     assert any("insert into app.bank_flow_rule_batches(" in sql for sql in executed_sql)
-    assert any("insert into read_model.bank_flow_rule_batch_rows(" in sql for sql in executed_sql)
     assert any("insert into app.bank_flow_rule_batch_events(" in sql for sql in executed_sql)
     assert not any(sql.startswith("insert into app.bank_flow_rule_batches(") for sql, _params in connection.executed)
-    assert not any(
-        sql.startswith("insert into read_model.bank_flow_rule_batch_rows(") for sql, _params in connection.executed
-    )
     forbidden_tables = (
         "app.no_oa_bank_batches",
         "app.no_oa_bank_batch_events",
@@ -799,14 +808,11 @@ def test_bank_flow_rule_batch_delta_save_only_upserts_changed_batch_items() -> N
         if sql.startswith("insert into app.bank_flow_rule_batches(")
         for params in params_seq
     ]
-    upsert_read_model_params = [
-        params
-        for sql, params_seq in connection.executed_many_values
-        if sql.startswith("insert into read_model.bank_flow_rule_batch_rows(")
-        for params in params_seq
-    ]
     assert [params[0] for params in upsert_batch_params] == ["changed-batch"]
-    assert [params[0] for params in upsert_read_model_params] == ["changed-batch"]
+    assert not any(
+        "read_model.bank_flow_rule_batch_rows" in sql
+        for sql in executed_sql
+    )
     assert [
         params
         for sql, params in connection.executed
@@ -850,22 +856,11 @@ def test_no_oa_bank_batch_save_does_not_touch_bank_flow_physical_tables() -> Non
     assert not any(forbidden in sql for sql in executed_sql for forbidden in forbidden_tables)
 
 
-def test_bank_flow_rule_batch_read_model_queries_dedicated_table_without_relation_mode_predicate() -> None:
+def test_bank_flow_rule_batch_query_reads_canonical_tables_without_page_projection() -> None:
     connection = RecordingConnection()
-    repository = PostgresReadModelRepository(connection)
+    repository = BankFlowRuleBatchCanonicalQueryRepository(connection)
 
-    repository.list_bank_flow_rule_batch_rows(
-        {
-            "month": "2026-03",
-            "bucket": "submitted",
-            "batch_id": "bank-flow-batch",
-            "relation_mode": "bank_flow_rule_batch",
-        }
-    )
-    repository.bank_flow_rule_batch_source_versions_summary(
-        {"month": "2026-03", "relation_mode": "bank_flow_rule_batch"}
-    )
-    repository.read_bank_flow_rule_batch_page(
+    repository.read_page(
         {"month": "2026-03", "bucket": "submitted"},
         summary_filters={"month": "2026-03"},
         page=2,
@@ -873,16 +868,16 @@ def test_bank_flow_rule_batch_read_model_queries_dedicated_table_without_relatio
     )
 
     read_sql = [*(sql for sql, _ in connection.fetched_all), *(sql for sql, _ in connection.fetched_one)]
-    assert any("from read_model.bank_flow_rule_batch_rows" in sql for sql in read_sql)
-    assert any("batch_id = %s" in sql for sql in read_sql)
-    assert any("count(distinct source_versions)" in sql for sql in read_sql)
+    assert any("from app.bank_flow_rule_batches batch" in sql for sql in read_sql)
+    assert any("from app.workbench_pair_relations relation" in sql for sql in read_sql)
     assert any("limit %s offset %s" in sql for sql in read_sql)
-    assert any("group by batch_type, presented_status" in sql for sql in read_sql)
-    assert any("coalesce(sum(row_count), 0)::bigint as row_count" in sql for sql in read_sql)
-    assert any("payload->>'category_primary_label'" in sql for sql in read_sql)
-    assert any(params[-2:] == (50, 50) for sql, params in connection.fetched_all if "limit %s offset %s" in sql)
+    assert any(
+        any(left == 50 and right == 50 for left, right in zip(params, params[1:]))
+        for sql, params in connection.fetched_one
+        if "limit %s offset %s" in sql
+    )
+    assert not any("read_model.bank_flow_rule_batch_rows" in sql for sql in read_sql)
     assert not any("from read_model.no_oa_bank_batch_rows" in sql for sql in read_sql)
-    assert not any("payload->>'relation_mode'" in sql for sql in read_sql)
 
 
 def test_bank_flow_rule_batch_affected_scope_lookup_is_one_set_based_query() -> None:
@@ -891,16 +886,16 @@ def test_bank_flow_rule_batch_affected_scope_lookup_is_one_set_based_query() -> 
         connection.fetched_all.append((" ".join(sql.split()), params))
         or [{"scope_key": "2026-05"}, {"scope_key": "2026-07"}]
     )
-    repository = PostgresReadModelRepository(connection)
+    repository = BankFlowRuleBatchCanonicalQueryRepository(connection)
 
-    scopes = repository.bank_flow_rule_batch_affected_scope_keys_for_tag_codes(["fee", "fee", "salary"])
+    scopes = repository.affected_scope_keys_for_tag_codes(["fee", "fee", "salary"])
 
     assert scopes == ["2026-05", "2026-07"]
     assert len(connection.fetched_all) == 1
     sql, params = connection.fetched_all[0]
-    assert "from read_model.bank_detail_rows" in sql
-    assert "from read_model.bank_flow_rule_batch_rows" in sql
-    assert "= 'draft'" in sql
+    assert "from app.bank_transactions bank" in sql
+    assert "from app.bank_flow_rule_batches batch" in sql
+    assert "in ('draft', 'unsubmitted')" in sql
     assert params == (["fee", "salary"], ["fee", "salary"])
 
 
@@ -941,150 +936,14 @@ def test_bank_flow_rule_settings_version_check_locks_and_saves_in_caller_transac
     assert persisted_payload["allowed_usernames"] == ["concurrent-user"]
 
 
-def test_read_model_tax_save_uses_entry_count_column_and_transaction() -> None:
-    connection = RecordingConnection()
-    repository = PostgresReadModelRepository(connection)
-
-    repository.save_tax_offset_read_models(
-        {"read_models": {"2026-03": {"entries": [{"id": "row-1"}], "generated_at": "2026-03-02T00:00:00+00:00"}}}
-    )
-
-    assert connection.transaction_enters == 1
-    assert connection.transaction_exits == 1
-    assert len(connection.executed) == 1
-    sql = connection.executed[0][0]
-    assert "insert into read_model.tax_offset_read_models" in sql
-    assert "entry_count" in sql
-    assert "row_count" not in sql
 
 
-def test_read_model_tax_save_counts_inner_tax_items_for_entry_count() -> None:
-    connection = RecordingConnection()
-    repository = PostgresReadModelRepository(connection)
-
-    repository.save_tax_offset_read_models(
-        {
-            "read_models": {
-                "2026-03": {
-                    "payload": {
-                        "output_items": [{"id": "output-1"}],
-                        "input_plan_items": [{"id": "input-1"}],
-                        "certified_items": [{"id": "certified-1"}],
-                        "certified_matched_rows": [{"id": "certified-1", "matched_input_id": "input-1"}],
-                        "certified_outside_plan_rows": [],
-                    },
-                    "generated_at": "2026-03-02T00:00:00+00:00",
-                }
-            }
-        }
-    )
-
-    model_insert = next(
-        params for sql, params in connection.executed if "insert into read_model.tax_offset_read_models" in sql
-    )
-    assert model_insert[3] == 3
 
 
-def test_read_model_tax_save_rewrites_structured_amounts_from_item_payload() -> None:
-    connection = RecordingConnection()
-    repository = PostgresReadModelRepository(connection)
-
-    repository.save_tax_offset_read_models(
-        {
-            "read_models": {
-                "2026-03": {
-                    "payload": {
-                        "input_plan_items": [
-                            {
-                                "id": "input-1",
-                                "issue_date": "2026-03-02",
-                                "tax_amount": "159.66",
-                                "total_with_tax": "2,820.72",
-                            }
-                        ]
-                    },
-                    "generated_at": "2026-03-02T00:00:00+00:00",
-                }
-            }
-        }
-    )
-
-    item_insert = next(
-        params for sql, params in connection.executed if "insert into read_model.tax_offset_items" in sql
-    )
-    assert item_insert[15] == "159.66"
-    assert item_insert[16] == "2820.72"
 
 
-def test_invoice_lifecycle_rows_are_saved_in_batch_and_scope_is_updated() -> None:
-    connection = RecordingConnection()
-    repository = PostgresReadModelRepository(connection)
-
-    repository.save_invoice_lifecycle_rows(
-        scope_key="2026-04",
-        rows=[
-            {
-                "subject_id": "invoice-1",
-                "subject_type": "input_invoice",
-                "scope_month": "2026-04",
-                "invoice_identity_key": "input:invoice-1",
-                "lifecycle_status": "paid",
-                "payment_status": {"code": "paid"},
-            },
-            {
-                "subject_id": "bank-1",
-                "subject_type": "bank_transaction",
-                "scope_month": "2026-04",
-                "lifecycle_status": "missing_invoice",
-                "acquisition_status": {"code": "missing_invoice"},
-            },
-        ],
-        source_versions={"invoice_lifecycle_read_model_schema_version": 1},
-    )
-
-    assert connection.transaction_enters == 1
-    assert connection.transaction_exits == 1
-    executed_sql = [sql for sql, _ in connection.executed]
-    assert any("delete from read_model.invoice_lifecycle_rows" in sql for sql in executed_sql)
-    assert len(connection.executed_many) == 1
-    batch_sql, batch_params = connection.executed_many[0]
-    assert "insert into read_model.invoice_lifecycle_rows" in batch_sql
-    assert len(batch_params) == 2
-    assert batch_params[0][1] == "invoice-1"
-    assert batch_params[0][2] == "input_invoice"
-    assert batch_params[1][1] == "bank-1"
-    assert batch_params[1][2] == "bank_transaction"
-    assert any("insert into read_model.invoice_lifecycle_scopes" in sql for sql in executed_sql)
 
 
-def test_pending_invoice_rows_save_updates_scope_inside_transaction() -> None:
-    connection = RecordingConnection()
-    repository = PostgresReadModelRepository(connection)
-
-    repository.save_pending_invoice_rows(
-        scope_key="expense:all:2026-04",
-        rows=[
-            {
-                "id": "pending-1",
-                "bank_transaction": {
-                    "trade_time": "2026-04-03",
-                    "counterparty_name": "counterparty",
-                    "amount": "12.34",
-                },
-                "status": {"code": "missing_invoice"},
-                "invoices": [],
-                "can_create_invoice": True,
-            }
-        ],
-        source_versions={"pending_invoice_read_model_schema_version": 1},
-    )
-
-    assert connection.transaction_enters == 1
-    assert connection.transaction_exits == 1
-    executed_sql = [sql for sql, _ in connection.executed]
-    assert any("delete from read_model.pending_invoice_rows" in sql for sql in executed_sql)
-    assert any("insert into read_model.pending_invoice_rows" in sql for sql in executed_sql)
-    assert any("insert into read_model.pending_invoice_scopes" in sql for sql in executed_sql)
 
 
 def test_ops_tax_etc_multi_table_saves_use_transactions() -> None:
@@ -1465,12 +1324,11 @@ def test_workbench_repository_delegates_pair_relation_load_to_relation_repositor
     assert [item["operation"] for item in snapshot["pair_relation_history"]] == ["earlier", "later"]
 
 
-def test_workbench_repository_no_longer_owns_pair_relation_sql() -> None:
+def test_workbench_repository_uses_pair_relations_only_for_canonical_bank_flow_proof() -> None:
     repository_source = (
         Path(__file__).resolve().parents[1] / "backend/src/fin_ops_platform/services/postgres_repositories/workbench.py"
     ).read_text(encoding="utf-8")
     forbidden_snippets = {
-        "from app.workbench_pair_relations",
         "insert into app.workbench_pair_relations",
         "app.workbench_pair_relation_history",
         "_workbench_relation_dirty_scope_keys",
@@ -1478,13 +1336,57 @@ def test_workbench_repository_no_longer_owns_pair_relation_sql() -> None:
     }
 
     assert {snippet for snippet in forbidden_snippets if snippet in repository_source} == set()
+    assert repository_source.count("from app.workbench_pair_relations relation") == 1
 
 
-def test_read_model_loaders_strip_export_only_rebuildable_marker() -> None:
-    repository = PostgresReadModelRepository(ReadModelReadConnection())
+def test_bank_flow_canonical_publish_rejects_stale_membership_proof_under_scope_lock() -> None:
+    current_proof = {
+        "bank_count": 2,
+        "bank_membership_version": "bank-new",
+        "category_count": 2,
+        "category_membership_version": "category-new",
+        "relation_count": 1,
+        "relation_membership_version": "relation-new",
+        "settings_version": 4,
+        "settings_updated_at": "2026-07-27 10:00:00+00",
+    }
+    stale_proof = {
+        **current_proof,
+        "bank_membership_version": "bank-old-non-max-member",
+        "relation_membership_version": "relation-before-null-month-member",
+    }
+    connection = CanonicalProofConnection(current_proof)
+    repository = PostgresWorkbenchRepository(connection)
 
-    assert "rebuildable" not in repository.load_workbench_read_models()["read_models"]["2026-05"]
-    assert "rebuildable" not in repository.load_tax_offset_read_models()["read_models"]["2026-05"]
+    stale_published = repository.save_bank_flow_rule_batches_scope(
+        {"batches": {}, "audit_log": []},
+        scope_key="2026-07",
+        expected_source_proof=stale_proof,
+    )
+
+    assert stale_published is False
+    assert connection.transaction_enters == 1
+    assert connection.transaction_exits == 1
+    assert "pg_advisory_xact_lock" in connection.executed[0][0]
+    assert not any("delete from app.bank_flow_rule_batches" in sql for sql, _params in connection.executed)
+
+    current_published = repository.save_bank_flow_rule_batches_scope(
+        {"batches": {}, "audit_log": []},
+        scope_key="2026-07",
+        expected_source_proof=current_proof,
+    )
+
+    assert current_published is True
+    assert connection.transaction_enters == 2
+    proof_sql = connection.fetched_one[-1][0]
+    assert "string_agg" in proof_sql
+    assert "bank.data_fingerprint" in proof_sql
+    assert "relation.row_ids && array" in proof_sql
+    assert "relation.month_scope = %s::date or relation.row_ids &&" in proof_sql
+    assert "max(" not in proof_sql
+    assert any("delete from app.bank_flow_rule_batches" in sql for sql, _params in connection.executed)
+
+
 
 
 

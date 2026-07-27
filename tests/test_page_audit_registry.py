@@ -63,6 +63,23 @@ class PageAuditRegistryTests(unittest.TestCase):
         self.assertEqual(PAGE_AUDIT_REGISTRY["app-health-operations"].read_model_keys, ())
         self.assertFalse(PAGE_AUDIT_REGISTRY["app-health-operations"].relation_proof_required)
         self.assertEqual(PAGE_AUDIT_REGISTRY["app-health-operations"].external_evidence_keys, ())
+        direct_page_keys = {
+            "reconciliation-workbench",
+            "cost-statistics",
+            "bank-details",
+            "oa-pending-payments",
+            "bank-flow-rule-batches",
+            "batch-accounting",
+            "turnover-ledger",
+            "etc-tickets",
+            "tax-offset",
+            "pending-invoices",
+            "input-invoice-usage",
+            "output-invoice-collections",
+        }
+        self.assertTrue(
+            all(PAGE_AUDIT_REGISTRY[page_key].read_model_keys == () for page_key in direct_page_keys)
+        )
         self.assertEqual(PAGE_AUDIT_REGISTRY["imports.bank-transactions"].external_evidence_keys, ("bank",))
         self.assertEqual(PAGE_AUDIT_REGISTRY["imports.invoices"].external_evidence_keys, ("invoice",))
         self.assertEqual(PAGE_AUDIT_REGISTRY["imports.etc-invoices"].external_evidence_keys, ("etc",))

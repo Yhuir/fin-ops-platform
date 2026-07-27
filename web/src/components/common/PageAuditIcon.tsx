@@ -7,15 +7,14 @@ import type { PageAuditPayload } from "../../features/appHealth/types";
 type PageAuditIconProps = {
   ariaLabel: string;
   label: string;
-  readModelStatus?: string;
   resetKey?: string;
   runAudit: (signal?: AbortSignal) => Promise<PageAuditPayload>;
   successText?: string;
   notFreshText?: string;
-  formatMessage?: (
-    payload: PageAuditPayload,
-    readModelStatus: string | undefined,
-  ) => { tone: "success" | "warning" | "danger"; text: string };
+  formatMessage?: (payload: PageAuditPayload) => {
+    tone: "success" | "warning" | "danger";
+    text: string;
+  };
   formatError?: (error: unknown) => string;
 };
 
@@ -23,13 +22,8 @@ function normalizeStatus(status: string | undefined) {
   return (status ?? "").trim().toLowerCase();
 }
 
-function isFreshStatus(status: string | undefined) {
-  return normalizeStatus(status) === "fresh";
-}
-
 function auditMessage(
   payload: PageAuditPayload | null,
-  readModelStatus: string | undefined,
   successText: string,
   notFreshText: string,
 ) {
@@ -49,7 +43,7 @@ function auditMessage(
     payload.audit_contract?.snapshot_consistency === "repeatable_read_read_only";
   const registeredReadModelKeys = payload.audit_contract?.registered_read_model_keys;
   const directCanonicalPage = Array.isArray(registeredReadModelKeys) && registeredReadModelKeys.length === 0;
-  const pageFresh = directCanonicalPage || isFreshStatus(readModelStatus);
+  const pageRuntimeProofReady = Array.isArray(registeredReadModelKeys);
   if (
     payload.overall_status === "pass" &&
     integrityPassed &&
@@ -58,7 +52,7 @@ function auditMessage(
     proofReady &&
     contractVersioned &&
     snapshotConsistent &&
-    pageFresh &&
+    pageRuntimeProofReady &&
     blockingSamples === 0
   ) {
     const relationProofNotApplicable =
@@ -81,7 +75,7 @@ function auditMessage(
     if (!queueDrained) {
       return { tone: "warning", text: `${notFreshText} · queue backlog` };
     }
-    const freshness = auditFresh && pageFresh ? "fresh" : "not_fresh";
+    const freshness = auditFresh && pageRuntimeProofReady ? "fresh" : "not_fresh";
     return { tone: "warning", text: `${notFreshText} · freshness ${freshness}` };
   }
   const truncated = summary?.issue_samples_truncated ? "+" : "";
@@ -94,7 +88,6 @@ function auditMessage(
 export default function PageAuditIcon({
   ariaLabel,
   label,
-  readModelStatus,
   resetKey,
   runAudit,
   successText = "Audit 通过 · 此数据库快照内已登记 App 内部合同一致 · 已登记配对证明一致 · 外部来源未证明 · Fresh",
@@ -144,8 +137,8 @@ export default function PageAuditIcon({
   }, [formatError, isLoading, runAudit]);
 
   const message = payload && formatMessage
-    ? formatMessage(payload, readModelStatus)
-    : auditMessage(payload, readModelStatus, successText, notFreshText);
+    ? formatMessage(payload)
+    : auditMessage(payload, successText, notFreshText);
 
   return (
     <span className="page-audit-control">

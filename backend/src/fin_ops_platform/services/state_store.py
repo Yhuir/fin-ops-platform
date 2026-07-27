@@ -829,22 +829,6 @@ class ApplicationStateStore:
         _ = scope_key
         self.save_bank_flow_rule_batches(snapshot)
 
-    def load_workbench_read_models(self) -> dict[str, Any]:
-        current_payload = self._load_local_pickle()
-        snapshot = current_payload.get("workbench_read_models")
-        return snapshot if isinstance(snapshot, dict) else {}
-
-    def save_workbench_read_models(
-        self,
-        snapshot: dict[str, Any],
-        *,
-        changed_scope_keys: list[str] | None = None,
-    ) -> None:
-        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        current_payload = self._load_local_pickle()
-        current_payload["workbench_read_models"] = normalized_snapshot
-        self._save_local_pickle(current_payload)
-
     def save_no_oa_bank_batch_mutation(
         self,
         *,
@@ -930,22 +914,6 @@ class ApplicationStateStore:
         normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
         current_payload = self._load_local_pickle()
         current_payload["turnover_ledger_extras"] = normalized_snapshot
-        self._save_local_pickle(current_payload)
-
-    def load_tax_offset_read_models(self) -> dict[str, Any]:
-        current_payload = self._load_local_pickle()
-        snapshot = current_payload.get("tax_offset_read_models")
-        return snapshot if isinstance(snapshot, dict) else {}
-
-    def save_tax_offset_read_models(
-        self,
-        snapshot: dict[str, Any],
-        *,
-        changed_scope_keys: list[str] | None = None,
-    ) -> None:
-        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        current_payload = self._load_local_pickle()
-        current_payload["tax_offset_read_models"] = normalized_snapshot
         self._save_local_pickle(current_payload)
 
     def load(self) -> dict[str, Any]:
@@ -1226,11 +1194,9 @@ class ApplicationStateStore:
                 "workbench_overrides",
                 "workbench_exception_cases",
                 "workbench_pair_relations",
-                "workbench_read_models",
                 "no_oa_bank_batches",
                 "turnover_relations",
                 "turnover_ledger_extras",
-                "tax_offset_read_models",
                 "app_health_alerts",
             )
         )

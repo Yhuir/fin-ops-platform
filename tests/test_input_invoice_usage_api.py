@@ -15,11 +15,7 @@ from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoic
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_oa_reverse_service import InputInvoiceUsageOaReverseStatus
 from fin_ops_platform.services.input_invoice_usage_payment_rules import AppSettingsInputInvoiceUsagePaymentRulesProvider
-from fin_ops_platform.services.input_invoice_usage_read_model_detail_service import (
-    InputInvoiceUsageReadModelDetailService,
-)
 from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageQueryService
-from fin_ops_platform.services.invoice_usage_collection_source_versions import input_invoice_usage_source_versions
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.target_oa_applicant_token_provider import TargetOaApplicantTokenProvider
@@ -100,121 +96,6 @@ class FailingRelationCommandService:
                 "refresh_enqueued": True,
             },
         )
-
-
-class StaticInputInvoiceUsageReadRepository:
-    def __init__(self, row: dict[str, object], *, refresh_status: str = "fresh") -> None:
-        self.row = dict(row)
-        self.refresh_status = refresh_status
-        self.row_id_calls: list[str] = []
-
-    def get_input_invoice_usage_row_by_row_id(self, row_id: str) -> dict[str, object] | None:
-        self.row_id_calls.append(str(row_id))
-        if str(self.row.get("id")) != str(row_id):
-            return None
-        return {
-            "row": dict(self.row),
-            "refresh_status": self.refresh_status,
-            "source_versions": input_invoice_usage_source_versions(),
-            "read_model_scope_key": "2026-05",
-        }
-
-
-class QueryBackedInputInvoiceUsageReadRepository:
-    def __init__(self, query_service: InputInvoiceUsageQueryService) -> None:
-        self._query_service = query_service
-
-    def list_input_invoice_usage_rows(self, **kwargs: object) -> dict[str, object]:
-        payload = self._query_service.list_rows(
-            page=kwargs.get("page") or 1,
-            page_size=kwargs.get("page_size") or 50,
-            keyword=kwargs.get("keyword"),
-            invoice_date_from=kwargs.get("invoice_date_from"),
-            invoice_date_to=kwargs.get("invoice_date_to"),
-            month=kwargs.get("month"),
-            filters=kwargs.get("filters"),
-            sort_field=kwargs.get("sort_field") or "invoice_date",
-            sort_direction=kwargs.get("sort_direction") or "desc",
-        )
-        return {
-            **payload,
-            "refresh_status": "fresh",
-            "source_versions": input_invoice_usage_source_versions(),
-        }
-
-    def list_input_invoice_usage_filter_options(self, **kwargs: object) -> dict[str, object]:
-        payload = self._query_service.filter_options(
-            keyword=kwargs.get("keyword"),
-            invoice_date_from=kwargs.get("invoice_date_from"),
-            invoice_date_to=kwargs.get("invoice_date_to"),
-            month=kwargs.get("month"),
-            filters=kwargs.get("filters"),
-        )
-        fields = [field for field in list(payload.get("fields") or []) if isinstance(field, dict)]
-        return {
-            "options": {str(field.get("field") or ""): list(field.get("options") or []) for field in fields},
-            "refresh_status": "fresh",
-            "source_versions": input_invoice_usage_source_versions(),
-        }
-
-    def get_input_invoice_usage_row_by_row_id(self, row_id: str) -> dict[str, object] | None:
-        payload = self._query_service.list_rows(page=1, page_size=200)
-        for row in list(payload.get("rows") or []):
-            if isinstance(row, dict) and str(row.get("id") or "") == str(row_id):
-                return {
-                    "row": dict(row),
-                    "refresh_status": "fresh",
-                    "source_versions": input_invoice_usage_source_versions(),
-                    "read_model_scope_key": "all",
-                }
-        return None
-
-    def list_input_invoice_usage_rows_by_invoice_ids(self, invoice_ids: list[str]) -> dict[str, object]:
-        payload = self._query_service.list_rows(page=1, page_size=200)
-        wanted = {str(invoice_id) for invoice_id in invoice_ids}
-        rows = [
-            dict(row)
-            for row in list(payload.get("rows") or [])
-            if isinstance(row, dict) and str(row.get("invoiceId") or "") in wanted
-        ]
-        known = {str(row.get("invoiceId") or "") for row in rows}
-        return {
-            "rows": rows,
-            "missing_invoice_ids": [str(invoice_id) for invoice_id in invoice_ids if str(invoice_id) not in known],
-            "refresh_status": "fresh",
-            "source_versions_by_scope": {"all": input_invoice_usage_source_versions()},
-            "read_model_scope_keys": ["all"],
-        }
-
-
-class FailingInputInvoiceUsageQueryService(InputInvoiceUsageQueryService):
-    def row_relation_details(self, *_args: object, **_kwargs: object) -> dict[str, object]:
-        raise AssertionError("relation detail must be served from input_invoice_usage read model")
-
-
-class RecordingReadModelRefreshQueue:
-    def __init__(self) -> None:
-        self.refreshes: list[tuple[str, str, str]] = []
-
-    def enqueue_read_model_refresh(self, **kwargs: object) -> None:
-        self.refreshes.append(
-            (
-                str(kwargs.get("scope_type") or ""),
-                str(kwargs.get("scope_key") or ""),
-                str(kwargs.get("reason") or ""),
-            )
-        )
-
-
-def _input_invoice_usage_relation_details_response(
-    app: Application,
-    row_id: str,
-    query: dict[str, list[str]],
-):
-    payload = app._get_input_invoice_usage_relation_details_from_sql_read_model(row_id, query)
-    assert payload is not None
-    status = HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
-    return Application._json_response(status, payload)
 
 
 class InputInvoiceUsageApiTests(unittest.TestCase):
@@ -354,136 +235,52 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         self.assertEqual(len(json.loads(bank_detail_response.body)["summaries"]), 2)
         self.assertEqual(len(json.loads(invoice_detail_response.body)["summaries"]), 2)
 
-    def test_relation_details_use_input_invoice_usage_read_model_row_without_live_rebuild(self) -> None:
-        row = {
-            "id": "usage-row-read-model",
-            "invoiceId": "inv-read-model",
-            "oa": {
-                "relationCount": 2,
-                "hasMultiple": True,
-                "detailMode": "list",
-                "summaries": [
-                    {"oaId": "oa-a", "applicantName": "刘际涛", "amount": "40.00", "relationStatus": "linked"},
-                    {"oaId": "oa-b", "applicantName": "张三", "amount": "60.00", "relationStatus": "linked"},
-                ],
-            },
-            "bankTransactions": {"relationCount": 0, "summaries": []},
-            "invoiceRelations": {"relationCount": 1, "summaries": [{"invoiceId": "inv-read-model"}]},
-        }
+    def test_relation_details_do_not_read_legacy_page_repository(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            repository = StaticInputInvoiceUsageReadRepository(row)
-            app._input_invoice_usage_sql_read_repository = repository
-            app._input_invoice_usage_query_service = FailingInputInvoiceUsageQueryService(
-                payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
-                import_service=ImportNormalizationService(),
+            invoice = self._invoice("inv-direct-detail", "2110", "直读供应商")
+            pair_service = WorkbenchPairRelationService()
+            pair_service.create_active_relation(
+                case_id="case-direct-detail",
+                row_ids=[invoice.id, "oa-direct-detail"],
+                row_types=["invoice", "oa"],
+                relation_mode="manual_confirmed",
+                created_by="tester",
+                amount_check={"matched": True},
             )
+            self._install_service(
+                app,
+                invoices=[invoice],
+                pair_service=pair_service,
+                oa_projection=StaticOAProjection(
+                    [self._oa("oa-direct-detail", "刘际涛", "100.00")]
+                ),
+            )
+            app._input_invoice_usage_sql_read_repository = object()
+            row = json.loads(
+                app.handle_request("GET", "/api/input-invoice-usage/rows").body
+            )["rows"][0]
 
             response = app.handle_request(
                 "GET",
-                "/api/input-invoice-usage/rows/usage-row-read-model/relation-details?kind=oa",
+                f"/api/input-invoice-usage/rows/{row['id']}/relation-details?kind=oa",
             )
 
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(repository.row_id_calls, ["usage-row-read-model"])
-        self.assertEqual(payload["read_model_status"], "fresh")
-        self.assertEqual(payload["rowId"], "usage-row-read-model")
-        self.assertEqual(payload["relationCount"], 2)
-        self.assertEqual([summary["oaId"] for summary in payload["summaries"]], ["oa-a", "oa-b"])
+        self.assertNotIn("read_model_status", payload)
+        self.assertEqual(payload["relationCount"], 1)
+        self.assertEqual(payload["summaries"][0]["oaId"], "oa-direct-detail")
 
-    def test_relation_details_require_sql_repository_in_production_without_live_rebuild(self) -> None:
-        queue = RecordingReadModelRefreshQueue()
+    def test_production_requires_canonical_query_repository(self) -> None:
         app = object.__new__(Application)
         app._bootstrap_mode = "production"
         app._state_store = type("StateStore", (), {"storage_backend": "postgres"})()
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
-        app._input_invoice_usage_sql_read_repository = None
-        app._input_invoice_usage_query_service = FailingInputInvoiceUsageQueryService(
-            payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
-            import_service=ImportNormalizationService(),
-        )
+        app._input_invoice_usage_canonical_query_repository = None
+        app._input_invoice_usage_query_service = object()
 
-        response = _input_invoice_usage_relation_details_response(
-            app,
-            "usage-row-missing-repository",
-            {"kind": ["oa"], "month": ["2026-05"]},
-        )
-
-        payload = json.loads(response.body)
-        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
-        self.assertEqual(payload["read_model_status"], "refreshing")
-        self.assertEqual(payload["readModelStatus"], "refreshing")
-        self.assertEqual(payload["detailAvailable"], False)
-        self.assertEqual(payload["read_model_scope_key"], "2026-05")
-        self.assertEqual(
-            queue.refreshes,
-            [
-                (
-                    "input_invoice_usage",
-                    "2026-05",
-                    "api_detail_sql_repository_unavailable",
-                )
-            ],
-        )
-
-    def test_relation_details_compare_source_versions_with_row_scope(self) -> None:
-        current_versions = {
-            **input_invoice_usage_source_versions(),
-            "workbench_relation_source_versions": {"source_version": "2026-05-current"},
-        }
-        stale_all_versions = {
-            **input_invoice_usage_source_versions(),
-            "workbench_relation_source_versions": {"source_version": "all-stale"},
-        }
-        row = {
-            "id": "usage-row-scoped",
-            "invoiceId": "inv-scoped",
-            "oa": {
-                "relationCount": 2,
-                "hasMultiple": True,
-                "detailMode": "list",
-                "summaries": [
-                    {"oaId": "oa-a", "applicantName": "刘际涛", "amount": "40.00", "relationStatus": "linked"},
-                    {"oaId": "oa-b", "applicantName": "张三", "amount": "60.00", "relationStatus": "linked"},
-                ],
-            },
-            "bankTransactions": {"relationCount": 0, "summaries": []},
-            "invoiceRelations": {"relationCount": 1, "summaries": [{"invoiceId": "inv-scoped"}]},
-        }
-        repository = type(
-            "ScopedInputInvoiceUsageReadRepository",
-            (),
-            {
-                "get_input_invoice_usage_row_by_row_id": lambda _self, _row_id: {
-                    "row": row,
-                    "refresh_status": "fresh",
-                    "source_versions": current_versions,
-                    "read_model_scope_key": "2026-05",
-                }
-            },
-        )()
-        provider_calls: list[str | None] = []
-
-        def source_versions_provider(*, scope_key: str | None = None) -> dict[str, object]:
-            provider_calls.append(scope_key)
-            return current_versions if scope_key == "2026-05" else stale_all_versions
-
-        refreshes: list[tuple[str, str]] = []
-        service = InputInvoiceUsageReadModelDetailService(
-            repository=repository,
-            enqueue_refresh=lambda scope_key, reason: refreshes.append((scope_key, reason)) is None,
-            source_versions_provider=source_versions_provider,
-        )
-
-        payload = service.relation_details("usage-row-scoped", kind="oa")
-
-        self.assertEqual(provider_calls, ["2026-05"])
-        self.assertEqual(refreshes, [])
-        assert payload is not None
-        self.assertEqual(payload["read_model_status"], "fresh")
-        self.assertEqual(payload["rowId"], "usage-row-scoped")
-        self.assertEqual(payload["relationCount"], 2)
+        with self.assertRaisesRegex(RuntimeError, "canonical query repository"):
+            app._input_invoice_usage_page_query_service()
 
     def test_bank_filter_options_and_invoice_date_sort_are_http_contract_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -755,14 +552,12 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         self.assertEqual(draft_payload["status"], "oa_draft_created")
         self.assertEqual(draft_payload["oaDetectionStatus"], "draft_created")
         self.assertTrue(draft_payload["canConfirmSubmission"])
-        self.assertFalse(draft_payload["canRefreshStatus"])
         self.assertEqual(provider.requested_codes, ["zhou_jieying"])
         self.assertEqual(client.requests[0]["payload"]["data"]["userName"], "周洁莹")
         self.assertEqual(confirm_response.status_code, 200)
         confirmed_payload = json.loads(confirm_response.body)
         self.assertEqual(confirmed_payload["status"], "submitted_confirmed")
         self.assertEqual(confirmed_payload["oaDetectionStatus"], "user_confirmed_submitted")
-        self.assertFalse(confirmed_payload["canRefreshStatus"])
         history_payload = json.loads(history_response.body)
         self.assertEqual(history_response.status_code, 200)
         self.assertEqual(history_payload["items"][0]["targetApplicantName"], "周洁莹")
@@ -1160,19 +955,18 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         self.assertEqual(sheet["D2"].value, "4001")
         self.assertEqual(sheet["F2"].value, "导出供应商甲")
 
-    def test_export_returns_refreshing_when_sql_read_model_is_not_fresh(self) -> None:
+    def test_export_ignores_legacy_read_model_repository(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             self._install_service(app, invoices=[])
-            app._input_invoice_usage_sql_read_repository = RefreshingInputInvoiceUsageReadRepository()
+            app._input_invoice_usage_sql_read_repository = object()
 
             preview_response = app.handle_request("GET", "/api/input-invoice-usage/export-preview?month=2026-05")
             export_response = app.handle_request("GET", "/api/input-invoice-usage/export?month=2026-05")
 
-        self.assertEqual(preview_response.status_code, 202)
-        self.assertEqual(json.loads(preview_response.body)["readModelStatus"], "refreshing")
-        self.assertEqual(export_response.status_code, 202)
-        self.assertEqual(json.loads(export_response.body)["readModelStatus"], "refreshing")
+        self.assertEqual(preview_response.status_code, 200)
+        self.assertNotIn("readModelStatus", json.loads(preview_response.body))
+        self.assertEqual(export_response.status_code, 200)
 
     def test_routes_return_structured_validation_and_not_found_errors(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1186,6 +980,14 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
                 "GET",
                 f"/api/input-invoice-usage/rows?filters={invalid_filters}",
             )
+            invalid_month = app.handle_request(
+                "GET",
+                "/api/input-invoice-usage/rows?month=2026-13",
+            )
+            reversed_dates = app.handle_request(
+                "GET",
+                "/api/input-invoice-usage/rows?invoice_date_from=2026-06-01&invoice_date_to=2026-05-01",
+            )
             missing_detail = app.handle_request("GET", "/api/input-invoice-usage/invoices/missing/detail")
 
         self.assertEqual(invalid_page.status_code, 400)
@@ -1194,6 +996,10 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         self.assertEqual(json.loads(invalid_sort.body)["error"]["code"], "invalid_sort_field")
         self.assertEqual(invalid_filter.status_code, 400)
         self.assertEqual(json.loads(invalid_filter.body)["error"]["code"], "invalid_filter_field")
+        self.assertEqual(invalid_month.status_code, 400)
+        self.assertEqual(json.loads(invalid_month.body)["error"]["code"], "invalid_date_filter")
+        self.assertEqual(reversed_dates.status_code, 400)
+        self.assertEqual(json.loads(reversed_dates.body)["error"]["code"], "invalid_date_filter")
         self.assertEqual(missing_detail.status_code, 404)
         self.assertEqual(json.loads(missing_detail.body)["error"]["code"], "invoice_not_found")
 
@@ -1227,9 +1033,10 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
             oa_projection=oa_projection,
         )
         app._input_invoice_usage_query_service = query_service
-        app._input_invoice_usage_sql_read_repository = QueryBackedInputInvoiceUsageReadRepository(query_service)
+        app._input_invoice_usage_sql_read_repository = object()
         for attr in (
             "_input_invoice_usage_read_model_fresh_gate_instance",
+            "_input_invoice_usage_page_query_service_instance",
             "_input_invoice_usage_api_routes",
             "_input_invoice_usage_export_service_instance",
             "_input_invoice_usage_oa_reverse_service_instance",
@@ -1346,12 +1153,3 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
     @staticmethod
     def _full_access_headers() -> dict[str, str]:
         return {"Authorization": "Bearer full-token"}
-
-
-class RefreshingInputInvoiceUsageReadRepository:
-    def list_input_invoice_usage_rows(self, **_kwargs: object) -> dict[str, object]:
-        return {
-            "rows": [],
-            "pagination": {"page": 1, "pageSize": 50, "total": 0},
-            "refresh_status": "stale",
-        }

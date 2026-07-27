@@ -579,6 +579,17 @@ class FakeWorkbenchRelationFacade:
             "stale_reasons": [],
         }
 
+    def list_by_month(self, _month: str, **_kwargs: object) -> dict[str, object]:
+        return {
+            "status": "fresh",
+            "rows": list(self.rows_by_id.values()),
+            "groups": list(self.groups_by_id.values()),
+            "source_versions": {"schema_version": 52},
+            "read_model_scope_keys": [],
+            "refresh_enqueued": False,
+            "stale_reasons": [],
+        }
+
 
 class LiveWorkbenchRelationFacade:
     def __init__(
@@ -2094,7 +2105,7 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
                 actor_id="finance-user",
             )
 
-        self.assertEqual(context.exception.error_code, "pending_invoice_relation_read_model_not_fresh")
+        self.assertEqual(context.exception.error_code, "workbench_relation_read_model_not_fresh")
         self.assertEqual(context.exception.details["read_model_status"], "stale")
         self.assertEqual(context.exception.details["read_model_stale_reasons"], ["dirty_scope"])
         self.assertEqual(self.import_service.list_invoices(), [])
@@ -2281,10 +2292,7 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["relation_mode"], "pending_invoice_attach_existing_invoice")
         self.assertEqual(result["affected_scope_keys"], ["2026-05"])
-        self.assertEqual(
-            result["operation_barrier_targets"],
-            [],
-        )
+        self.assertNotIn("operation_barrier_targets", result)
         self.assertEqual(len(self.pair_service.list_active_relations()), 1)
         self.assertEqual(self.audit_events[0]["action"], "pending_invoice_attach_existing_invoice_confirmed")
 
@@ -2740,11 +2748,9 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         self.assertEqual(result["affected_transaction_ids"], [first_txn.id, second_txn.id])
         self.assertEqual(result["status_code"], "cash_income")
         self.assertEqual(result["affected_months"], ["2026-05", "2026-06"])
-        self.assertEqual(result["read_model_scope_keys"], ["2026-05", "2026-06"])
-        self.assertEqual(
-            result["freshness_targets"],
-            [],
-        )
+        self.assertEqual(result["affected_scope_keys"], ["2026-05", "2026-06"])
+        self.assertNotIn("read_model_scope_keys", result)
+        self.assertNotIn("freshness_targets", result)
         self.assertEqual(len(self.audit_events), 1)
         self.assertEqual(self.audit_events[0]["action"], "pending_invoice_income_status_override_batch_confirmed")
         self.assertEqual(self.audit_events[0]["transaction_ids"], [first_txn.id, second_txn.id])

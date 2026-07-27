@@ -73,7 +73,6 @@ class SettingsDataResetService:
         matching_service: Any,
         workbench_override_service: Any,
         workbench_pair_snapshot_port: SettingsDataResetPairSnapshotPort,
-        workbench_read_model_service: Any,
         tax_certified_import_service: Any,
     ) -> None:
         self._state_store = state_store
@@ -82,7 +81,6 @@ class SettingsDataResetService:
         self._matching_service = matching_service
         self._workbench_override_service = workbench_override_service
         self._workbench_pair_snapshot_port = workbench_pair_snapshot_port
-        self._workbench_read_model_service = workbench_read_model_service
         self._tax_certified_import_service = tax_certified_import_service
 
     @staticmethod
@@ -140,7 +138,6 @@ class SettingsDataResetService:
             "matching_results": len(self._matching_service.list_results()),
             "workbench_row_overrides": len(self._row_overrides()),
             "workbench_pair_relations": len(self._pair_relations()),
-            "workbench_read_models": len(self._read_models()),
             "stored_import_files": deleted_blob_count,
         }
         return SettingsDataResetResult(
@@ -152,7 +149,6 @@ class SettingsDataResetService:
                 "matching_results",
                 "workbench_row_overrides",
                 "workbench_pair_relations",
-                "workbench_read_models",
                 "import_batches(bank_transaction)",
                 "file_import_sessions(bank_transaction)",
                 "file_import_files(bank_transaction)",
@@ -195,7 +191,6 @@ class SettingsDataResetService:
             "matching_results": len(self._matching_service.list_results()),
             "workbench_row_overrides": len(self._row_overrides()),
             "workbench_pair_relations": len(self._pair_relations()),
-            "workbench_read_models": len(self._read_models()),
             "tax_certified_import_sessions": tax_deleted_counts["sessions"],
             "tax_certified_import_batches": tax_deleted_counts["batches"],
             "tax_certified_import_records": tax_deleted_counts["records"],
@@ -210,7 +205,6 @@ class SettingsDataResetService:
                 "matching_results",
                 "workbench_row_overrides",
                 "workbench_pair_relations",
-                "workbench_read_models",
                 "tax_certified_import_sessions",
                 "tax_certified_import_batches",
                 "tax_certified_import_records",
@@ -233,7 +227,6 @@ class SettingsDataResetService:
         self._emit_progress(progress_callback, "clear_oa_state", "正在清空 OA 工作台人工状态。", 0, 2)
         row_overrides = self._row_overrides()
         pair_relations = self._pair_relations()
-        read_models = self._read_models()
         kept_row_overrides = {
             row_id: override
             for row_id, override in row_overrides.items()
@@ -253,7 +246,6 @@ class SettingsDataResetService:
             "workbench_pair_relations": removed_oa_pair_relation_count,
             "workbench_oa_pair_relations": removed_oa_pair_relation_count,
             "workbench_preserved_non_oa_pair_relations": preserved_non_oa_pair_relation_count,
-            "workbench_read_models": len(read_models),
         }
         self._emit_progress(progress_callback, "persist_state", "正在写入 OA 重置结果。", 1, 2)
         self._state_store.save_workbench_overrides(
@@ -263,19 +255,17 @@ class SettingsDataResetService:
             }
         )
         self._workbench_pair_snapshot_port.save_pair_relations(kept_pair_relations)
-        self._state_store.save_workbench_read_models({})
         return SettingsDataResetResult(
             action=RESET_OA_AND_REBUILD_ACTION,
             status="completed",
             cleared_collections=[
                 "workbench_row_overrides",
                 "workbench_pair_relations",
-                "workbench_read_models",
             ],
             deleted_counts=deleted_counts,
             protected_targets=self.protected_targets(),
             rebuild_status="pending",
-            message="已清空 OA 相关工作台人工状态与读模型，后续需要重新拉取 OA 并重建关联台。",
+            message="已清空 OA 相关工作台人工状态，后续需要重新拉取 OA 并重建关联台。",
         )
 
     @staticmethod
@@ -299,7 +289,6 @@ class SettingsDataResetService:
         )
         self._state_store.save_workbench_overrides({})
         self._state_store.save_workbench_pair_relations({})
-        self._state_store.save_workbench_read_models({})
 
     def _build_filtered_imports_snapshot(
         self,
@@ -400,11 +389,6 @@ class SettingsDataResetService:
 
     def _pair_relations(self) -> dict[str, Any]:
         return self._workbench_pair_snapshot_port.pair_relations()
-
-    def _read_models(self) -> dict[str, Any]:
-        snapshot = self._workbench_read_model_service.snapshot()
-        read_models = snapshot.get("read_models")
-        return read_models if isinstance(read_models, dict) else {}
 
     @classmethod
     def _is_oa_workbench_row_override(cls, row_id: str, override: Any) -> bool:

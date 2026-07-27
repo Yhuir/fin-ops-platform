@@ -5,13 +5,24 @@ import tempfile
 import unittest
 from types import SimpleNamespace
 
-from tests.app_test_support import build_local_state_application as build_application
+from tests.app_test_support import build_local_state_application
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 
 def _json(response):
     return json.loads(response.body)
+
+
+def build_application(**kwargs):
+    app = build_local_state_application(**kwargs)
+    service = app._bank_flow_rule_batch_service
+    app._bank_flow_rule_batch_canonical_query_repository = SimpleNamespace(
+        read_page=lambda *_args, **_kwargs: {},
+        read_batch=lambda batch_id: service.get_batch(batch_id),
+        read_submitted_batches=lambda: service.list_batches({"bucket": "submitted"}),
+    )
+    return app
 
 
 class _ReadModelQueue:
@@ -444,10 +455,8 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         self.assertFalse(metadata["requires_invoice"])
         self.assertEqual(metadata["source_row_count"], 1)
         self.assertFalse(metadata["collapsed_bank_rows"])
-        self.assertEqual(
-            payload["operation_barrier_targets"],
-            [],
-        )
+        self.assertNotIn("operation_barrier_targets", payload)
+        self.assertNotIn("read_model_scope_keys", payload)
 
     def test_bank_flow_rule_tag_rule_update_preserves_submitted_relation_history(self) -> None:
         app = build_application()
@@ -548,8 +557,8 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
             [{"transaction_id": row_id, "category_code": "fee"}],
             actor="tester",
         )
-        app._bank_flow_rule_batch_read_model_refresh_producer = lambda: SimpleNamespace(
-            enqueue_scope_keys=lambda scope_keys, **_kwargs: list(scope_keys)
+        app._bank_flow_rule_batch_canonical_draft_producer = lambda: SimpleNamespace(
+            enqueue=lambda scope_keys, **_kwargs: bool(scope_keys)
         )
         self._set_bank_flow_rule_requirements(
             app,
@@ -787,10 +796,8 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         self.assertEqual(reset["summary"]["reset_count"], 1)
         self.assertEqual(reset["summary"]["row_count"], 1)
         self.assertEqual(reset["results"], [{"batch_id": batch_id, "status": "withdrawn"}])
-        self.assertEqual(
-            reset["operation_barrier_targets"],
-            [],
-        )
+        self.assertNotIn("operation_barrier_targets", reset)
+        self.assertNotIn("read_model_scope_keys", reset)
         self.assertEqual(app._bank_flow_rule_batch_service.get_batch(batch_id)["status"], "withdrawn")
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id(row_id))
 

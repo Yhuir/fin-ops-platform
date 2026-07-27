@@ -9,7 +9,7 @@
 - 最终审阅版执行包位于 `.runtime/backups/invoice-pool-audit/20260621031938/cleanup_dry_run/final_cleanup_runbook.md` 和 `.runtime/backups/invoice-pool-audit/20260621031938/cleanup_dry_run/final_cleanup_execution_review.sql`；当前均为只读审阅材料，不是可直接执行脚本。
 - dry-run 口径：正式发票 identity 优先使用 `digital_invoice_no`、20 位 `invoice_no`、`invoice_code + invoice_no`，最后才是税号/日期/金额 fallback。
 - 当前 dry-run 结论：两份正式 Excel 共 391 个 identity；`app.invoices` 当前 638 行、614 个正式 identity；非 Excel 污染 225 行，Excel 内重复 22 行，targeted cleanup 后可到 391 行。
-- 推荐清理方式是先完整 reset canonical invoice pool，再从两份正式 Excel 重导，随后 dry-run/回填 `app.etc_batch_invoice_links`，最后重建 read model 和 Workbench active generation。
+- 推荐清理方式是先完整 reset canonical invoice pool，再从两份正式 Excel 重导，随后 dry-run/回填 `app.etc_batch_invoice_links`，最后刷新仍保留的共享 `workbench_relation` read model。
 
 ## 工具
 
@@ -104,20 +104,20 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.invoice_pool_cleanup \
 策略含义：
 
 - `--oa-reverse-batch-strategy archive_legacy_polluted_history`：`app.input_invoice_usage_oa_reverse_batches` 保存的是当时选择的发票 ID、展示行、OA 草稿/提交状态等历史业务记录。若其中引用了清理前污染发票 ID，不能把这些旧 ID 迁移进新发票池；必须依赖本次备份保留审计证据，并把旧污染批次作为历史归档处理。
-- `--workbench-relation-strategy rebuild_after_reimport`：`read_model.workbench_relation_groups` 是 Workbench active generation read model。发票池重导后必须通过 read model 刷新/重建流程恢复，不手工迁移旧 generation 内的发票 ID。
+- `--workbench-relation-strategy rebuild_after_reimport`：`read_model.workbench_relation_groups` 是共享 relation distribution。发票池重导后必须通过 `workbench_relation` refresh gateway 恢复，不手工迁移旧 projection 内的发票 ID。
 
 ## 阻塞 Gate
 
 破坏性清理前必须先解决两个数据策略：
 
 - `app.input_invoice_usage_oa_reverse_batches.invoice_ids` 当前引用旧 `oa-att-inv-*` 发票 id。清理时必须选择归档这些历史污染批次；不能留下失效 invoice id，也不能把污染 id 继续带入统一发票池。
-- `read_model.workbench_relation_groups` 当前保存旧 invoice id 数组。Workbench 使用 active generation 发布模型，清理后必须通过正式重建/刷新流程恢复，不能只删除普通 read model 行。
+- `read_model.workbench_relation_groups` 当前保存旧 invoice id 数组。清理后必须通过共享 `workbench_relation` 的正式重建/刷新流程恢复，不能手工改 projection 行。
 
 `app.etc_invoices` 不在第一阶段删除范围。它应作为 ETC ZIP/PDF/XML metadata/附件关系迁移或退役对象处理，不得再写入 `app.invoices` 创建 canonical invoice。ETC 批次和 canonical invoice 的归属事实源是 `app.etc_batch_invoice_links`；清空或重建 `app.invoices` 后，不能留下指向已删除 invoice id 的 active link，也不能只依赖 `app.etc_invoices` 让关联台判断批次 membership。
 
 清空发票池后的 ETC 闭环必须按以下顺序执行：
 
-1. 备份 `app.invoices`、`app.etc_invoices`、`app.etc_business_batches`、`app.etc_batch_invoice_links`、Workbench relation/read model 相关表。
+1. 备份 `app.invoices`、`app.etc_invoices`、`app.etc_business_batches`、`app.etc_batch_invoice_links`、canonical relation 与共享 `workbench_relation` 相关表。
 2. 删除或标记失效指向旧 invoice id 的 active `app.etc_batch_invoice_links`，保留备份作为回滚证据。
 3. 通过正式导入链路重导 Excel，不用临时 SQL 写 `app.invoices`。
 4. 运行 `fin_ops_platform.tools.backfill_etc_batch_invoice_links --json --limit 0` 做计数级 dry-run，再用 `--limit <auto_backfill_count>` 输出完整 strict auto-backfill row set；只有完整 row set 经用户确认后，才允许带 `--apply --reason --operator` 写回 link table。CLI 会拒绝在候选示例不完整时执行 `--apply`。
@@ -152,10 +152,8 @@ pg_dump "${FIN_OPS_POSTGRES_DATABASE_URL:-${DATABASE_URL}}" \
   --table=app.oa_attachments \
   --table=app.oa_attachment_invoice_cache \
   --table=app.input_invoice_usage_oa_reverse_batches \
-  --table=read_model.workbench_generations \
-  --table=read_model.workbench_snapshots \
-  --table=read_model.workbench_summary \
   --table=read_model.workbench_relation_groups \
+  --table=read_model.workbench_relation_rows \
   --table=job.import_jobs
 
 pg_dump "${FIN_OPS_POSTGRES_DATABASE_URL:-${DATABASE_URL}}" \
@@ -166,14 +164,6 @@ pg_dump "${FIN_OPS_POSTGRES_DATABASE_URL:-${DATABASE_URL}}" \
   --table=app.etc_business_batches \
   --table=app.etc_batch_invoice_links \
   --table=app.input_invoice_usage_oa_reverse_batches \
-  --table=read_model.invoice_lifecycle_rows \
-  --table=read_model.input_invoice_usage_rows \
-  --table=read_model.output_invoice_collection_rows \
-  --table=read_model.pending_invoice_rows \
-  --table=read_model.workbench_generations \
-  --table=read_model.workbench_rows \
-  --table=read_model.workbench_groups \
-  --table=read_model.workbench_group_rows \
   --table=read_model.workbench_relation_scopes \
   --table=read_model.workbench_relation_groups \
   --table=read_model.workbench_relation_rows
@@ -252,7 +242,7 @@ ImportNormalizationService.confirm_import(...)
 - active `app.etc_batch_invoice_links` 不引用已删除或缺失的 `app.invoices.id`。
 - 已提交 ETC 批次对应发票在关联台只通过 `etc_invoice_summary` 出现，不同时作为普通 open invoice row 出现。
 - 同一两份 Excel 再次导入不会新增重复发票。
-- 相关 read model 和 Workbench active generation fresh，且不再引用清理前旧 invoice id。
+- 共享 `workbench_relation` read model fresh，且不再引用清理前旧 invoice id；所有目标页面 canonical GET 不再返回旧 invoice id。
 
 统一发票池最终状态先用只读 final invariant gate 验证。该 gate 同时检查数量不变量和 `candidate_keep_excel_identities.csv` 中的 391 个 Excel identity 集合，避免“数量是 391 但不是那 391 张发票”的误判：
 

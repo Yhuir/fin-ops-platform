@@ -8,11 +8,13 @@ from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application
 from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryFacade
-from fin_ops_platform.services.workbench_read_model_version import WorkbenchReadModelVersionConflictError
+from fin_ops_platform.services.workbench_relation_preview_policy import (
+    WorkbenchRelationPreviewSelectionError,
+)
 from tests.app_test_support import (
     build_grouped_workbench_projection,
     build_local_state_application as build_application,
-    install_fresh_workbench_write_gate,
+    install_local_workbench_canonical_preview_repository,
 )
 
 
@@ -28,12 +30,10 @@ def _json_response(response) -> dict[str, object]:
 
 
 class WorkbenchStaleWriteContractTests(unittest.TestCase):
-    READ_MODEL_VERSION = "stale-write-test-generation-1"
-
     def _build_app(self) -> Application:
         app = build_application()
         app._emit_workbench_action_timing = lambda **kwargs: None
-        install_fresh_workbench_write_gate(app, version=self.READ_MODEL_VERSION)
+        install_local_workbench_canonical_preview_repository(app)
         return app
 
     def _default_open_row_ids(self, app: Application) -> list[str]:
@@ -47,7 +47,7 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
     def _post(self, app: Application, path: str, payload: dict[str, object]):
         return app.handle_request("POST", path, json.dumps(payload))
 
-    def test_withdraw_submit_accepts_expected_versions_payload_without_breaking_existing_success_shape(self) -> None:
+    def test_withdraw_submit_uses_relation_versions_without_page_read_model_version(self) -> None:
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)
 
@@ -60,7 +60,6 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
                     "row_ids": row_ids,
                     "case_id": "CASE-WITHDRAW-COMPAT",
                     "note": "withdraw compatibility covers documented mismatch path",
-                    "expected_read_model_version": self.READ_MODEL_VERSION,
                 },
             )
             withdraw_response = self._post(
@@ -70,7 +69,6 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
                     "month": "2026-03",
                     "row_ids": row_ids,
                     "expected_versions": {"relation:CASE-WITHDRAW-COMPAT": 1},
-                    "expected_read_model_version": self.READ_MODEL_VERSION,
                 },
             )
 
@@ -96,7 +94,6 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
                     "row_ids": row_ids,
                     "case_id": "CASE-WITHDRAW-PREVIEW-VERSION",
                     "note": "withdraw preview covers documented mismatch path",
-                    "expected_read_model_version": self.READ_MODEL_VERSION,
                 },
             )
             preview_response = self._post(
@@ -105,7 +102,6 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
                 {
                     "month": "2026-03",
                     "row_ids": row_ids,
-                    "expected_read_model_version": self.READ_MODEL_VERSION,
                 },
             )
 
@@ -144,35 +140,28 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
         self.assertEqual(payload["conflict"]["expected"], {"relation:CASE-OLD": 2})
         self.assertEqual(payload["conflict"]["actual"], {"relation:CASE-NEW": 5})
 
-    def test_relation_preview_selection_maps_generation_drift_to_stable_conflict(self) -> None:
+    def test_relation_preview_selection_maps_canonical_identity_drift_to_stable_conflict(self) -> None:
         class Repository:
             @staticmethod
             def get_workbench_relation_preview_selection(**_kwargs: object) -> dict[str, object]:
-                raise WorkbenchReadModelVersionConflictError(
-                    expected="generation-old",
-                    current="generation-new",
+                raise WorkbenchRelationPreviewSelectionError(
+                    code="workbench_canonical_selection_conflict",
+                    message="所选记录已变化，请重新读取后重试。",
                 )
 
         facade = WorkbenchQueryFacade(
             repository=Repository(),
-            redis_helper=None,
-            enqueue_refresh=lambda *_args, **_kwargs: None,
             scope_key_for_month=lambda month: str(month or "all"),
-            stale_reasons=lambda *_args, **_kwargs: [],
-            emit_status_metric=lambda **_kwargs: None,
-            missing_read_model_error=lambda _error: False,
         )
 
         result = facade.relation_preview_selection(
             "2026-05",
             row_ids=["oa-1", "bank-1"],
-            expected_read_model_version="generation-old",
         )
 
         self.assertEqual(result.status_code, HTTPStatus.CONFLICT)
-        self.assertEqual(result.payload["error"], "workbench_read_model_version_conflict")
-        self.assertEqual(result.payload["message"], "工作台数据已变化，请刷新后重试。")
-        self.assertEqual(result.payload["read_model_version"], "generation-new")
+        self.assertEqual(result.payload["error"], "workbench_canonical_selection_conflict")
+        self.assertEqual(result.payload["message"], "所选记录已变化，请重新读取后重试。")
 
     def test_relation_preview_selection_rejects_unbounded_client_input_before_repository(self) -> None:
         class Repository:
@@ -182,18 +171,12 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
 
         facade = WorkbenchQueryFacade(
             repository=Repository(),
-            redis_helper=None,
-            enqueue_refresh=lambda *_args, **_kwargs: None,
             scope_key_for_month=lambda month: str(month or "all"),
-            stale_reasons=lambda *_args, **_kwargs: [],
-            emit_status_metric=lambda **_kwargs: None,
-            missing_read_model_error=lambda _error: False,
         )
 
         result = facade.relation_preview_selection(
             "all",
             row_ids=[f"row-{index}" for index in range(21)],
-            expected_read_model_version="generation-set-1",
         )
 
         self.assertEqual(result.status_code, HTTPStatus.BAD_REQUEST)

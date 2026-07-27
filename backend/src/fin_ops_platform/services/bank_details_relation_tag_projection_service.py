@@ -12,12 +12,6 @@ class BankDetailsRelationTagProjectionService:
         relation_facade: WorkbenchRelationReadFacade | None = None,
     ) -> None:
         self._relation_facade = relation_facade
-        self._index_cache_key = ""
-        self._index_cache: dict[str, dict[str, Any]] = {}
-
-    def clear_cache(self) -> None:
-        self._index_cache_key = ""
-        self._index_cache = {}
 
     def relation_tag_for_transaction(self, transaction_id: str) -> dict[str, Any] | None:
         resolved_transaction_id = str(transaction_id or "").strip()

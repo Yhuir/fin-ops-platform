@@ -74,10 +74,7 @@ class RuntimeQueueSettings:
     rabbitmq_vhost: str | None = None
     rabbitmq_exchange: str = "finops.events"
     rabbitmq_queue_prefix: str = "finops"
-    rabbitmq_workbench_queue: str = "finops.workbench.read_model.refresh"
-    rabbitmq_workbench_routing_key: str = "workbench.read_model.refresh"
     rabbitmq_dead_letter_exchange: str = "finops.events.dlx"
-    rabbitmq_workbench_dead_letter_queue: str = "finops.workbench.read_model.refresh.dlq"
     rabbitmq_prefetch: int = 10
     rabbitmq_publish_confirm: bool = True
     rabbitmq_heartbeat_seconds: int = 60
@@ -102,16 +99,8 @@ class RuntimeQueueSettings:
             rabbitmq_vhost=str(source.get("RABBITMQ_VHOST") or "").strip() or None,
             rabbitmq_exchange=str(source.get("RABBITMQ_EXCHANGE") or "finops.events").strip() or "finops.events",
             rabbitmq_queue_prefix=str(source.get("RABBITMQ_QUEUE_PREFIX") or "finops").strip().rstrip(".") or "finops",
-            rabbitmq_workbench_queue=str(source.get("RABBITMQ_WORKBENCH_QUEUE") or "finops.workbench.read_model.refresh").strip()
-            or "finops.workbench.read_model.refresh",
-            rabbitmq_workbench_routing_key=str(source.get("RABBITMQ_WORKBENCH_ROUTING_KEY") or "workbench.read_model.refresh").strip()
-            or "workbench.read_model.refresh",
             rabbitmq_dead_letter_exchange=str(source.get("RABBITMQ_DEAD_LETTER_EXCHANGE") or "finops.events.dlx").strip()
             or "finops.events.dlx",
-            rabbitmq_workbench_dead_letter_queue=str(
-                source.get("RABBITMQ_WORKBENCH_DEAD_LETTER_QUEUE") or "finops.workbench.read_model.refresh.dlq"
-            ).strip()
-            or "finops.workbench.read_model.refresh.dlq",
             rabbitmq_prefetch=_positive_int(source.get("RABBITMQ_PREFETCH"), default=10, name="RABBITMQ_PREFETCH"),
             rabbitmq_publish_confirm=_bool(source.get("RABBITMQ_PUBLISH_CONFIRM"), default=True),
             rabbitmq_heartbeat_seconds=_positive_int(source.get("RABBITMQ_HEARTBEAT_SECONDS"), default=60, name="RABBITMQ_HEARTBEAT_SECONDS"),
@@ -148,10 +137,7 @@ class RuntimeQueueSettings:
             "rabbitmq_vhost": self.rabbitmq_vhost,
             "rabbitmq_exchange": self.rabbitmq_exchange,
             "rabbitmq_queue_prefix": self.rabbitmq_queue_prefix,
-            "rabbitmq_workbench_queue": self.rabbitmq_workbench_queue,
-            "rabbitmq_workbench_routing_key": self.rabbitmq_workbench_routing_key,
             "rabbitmq_dead_letter_exchange": self.rabbitmq_dead_letter_exchange,
-            "rabbitmq_workbench_dead_letter_queue": self.rabbitmq_workbench_dead_letter_queue,
             "rabbitmq_prefetch": self.rabbitmq_prefetch,
             "rabbitmq_publish_confirm": self.rabbitmq_publish_confirm,
             "rabbitmq_heartbeat_seconds": self.rabbitmq_heartbeat_seconds,

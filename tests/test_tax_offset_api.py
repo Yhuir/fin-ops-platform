@@ -56,9 +56,9 @@ def tax_offset_payload(month: str = "2026-05", *, output_count: int = 1, input_c
             "result_label": "本月留抵税额",
             "result_amount": "0.00",
         },
-        "output_items": [{"id": f"output-{index}"} for index in range(output_count)],
-        "input_plan_items": [{"id": f"input-{index}"} for index in range(input_count)],
-        "certified_items": [{"id": f"certified-{index}"} for index in range(certified_count)],
+        "output_items": [{"id": f"output-{index}", "tax_amount": "0.00"} for index in range(output_count)],
+        "input_plan_items": [{"id": f"input-{index}", "tax_amount": "0.00"} for index in range(input_count)],
+        "certified_items": [{"id": f"certified-{index}", "tax_amount": "0.00"} for index in range(certified_count)],
         "certified_matched_rows": [],
         "certified_outside_plan_rows": [],
         "locked_certified_input_ids": [],
@@ -187,13 +187,17 @@ class TaxOffsetApiTests(unittest.TestCase):
         self.assertEqual(first_payload["batch"]["id"], second_payload["batch"]["id"])
         self.assertEqual(second_payload["batch"]["persisted_record_count"], 2)
 
-    def test_tax_offset_summary_payload_helper_uses_runtime_service(self) -> None:
+    def test_tax_offset_summary_endpoint_reads_canonical_payload_without_runtime_fields(self) -> None:
         app = build_application()
 
-        payload = app._tax_offset_summary_payload(tax_offset_payload("2026-05"), scope_key="2026-05")
+        response = app.handle_request("GET", "/api/tax-offset/summary?month=2026-05")
+        payload = json.loads(response.body)
 
+        self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["month"], "2026-05")
-        self.assertEqual(payload["read_model_scope_key"], "2026-05")
+        self.assertIn("canonical_snapshot_version", payload)
+        self.assertNotIn("read_model_status", payload)
+        self.assertNotIn("source_versions", payload)
 
     def test_tax_offset_plan_save_requires_write_permission(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -219,21 +223,13 @@ class TaxOffsetApiTests(unittest.TestCase):
 
     def test_tax_offset_plan_save_persists_calculated_result_idempotently(self) -> None:
         app = build_application()
-        month_payload = tax_offset_payload("2026-05")
-        month_payload["read_model_status"] = "fresh"
-        month_payload["read_model_scope_key"] = "2026-05"
-        month_payload["source_versions"] = {
-            "tax_offset_read_model_schema_version": 1,
-            "invoice_fact_source_version": "rows:1|max_updated_at:2026-05-01T00:00:00+00:00",
-        }
-        app._tax_offset_read_model_service.upsert_read_model("2026-05", month_payload, source_versions=month_payload["source_versions"])
+        month_payload = json.loads(app.handle_request("GET", "/api/tax-offset?month=2026-05").body)
 
         request_payload = {
             "month": "2026-05",
-            "selected_output_ids": ["output-0"],
-            "selected_input_ids": ["input-0"],
-            "expected_read_model_scope_key": "2026-05",
-            "expected_source_versions": month_payload["source_versions"],
+            "selected_output_ids": [],
+            "selected_input_ids": [],
+            "expected_canonical_snapshot_version": month_payload["canonical_snapshot_version"],
             "idempotency_key": "tax-plan-save-2026-05",
         }
         first_response = app.handle_request("POST", "/api/tax-offset/plans", json.dumps(request_payload))
@@ -245,22 +241,18 @@ class TaxOffsetApiTests(unittest.TestCase):
         self.assertEqual(second_response.status_code, 200)
         self.assertEqual(first_payload["plan"]["id"], second_payload["plan"]["id"])
         self.assertEqual(first_payload["plan"]["month"], "2026-05")
-        self.assertEqual(first_payload["plan"]["selected_input_ids"], ["input-0"])
+        self.assertEqual(first_payload["plan"]["selected_input_ids"], [])
         self.assertEqual(first_payload["plan"]["summary"]["result_amount"], "0.00")
-        self.assertEqual(first_payload["plan"]["read_model_scope_key"], "2026-05")
+        self.assertEqual(
+            first_payload["plan"]["canonical_snapshot_version"],
+            month_payload["canonical_snapshot_version"],
+        )
         self.assertEqual(first_payload["affected_scope_keys"], ["2026-05"])
-        self.assertEqual(first_payload["read_model_scope_keys"], ["2026-05"])
-        self.assertEqual(first_payload["freshness_targets"], [])
-        self.assertEqual(first_payload["operation_barrier_targets"], [])
-        self.assertEqual(second_payload["operation_barrier_targets"], first_payload["operation_barrier_targets"])
+        self.assertNotIn("read_model_scope_keys", first_payload)
+        self.assertNotIn("source_versions", first_payload["plan"])
 
-    def test_tax_offset_plan_save_rejects_stale_source_versions(self) -> None:
+    def test_tax_offset_plan_save_rejects_stale_canonical_snapshot(self) -> None:
         app = build_application()
-        month_payload = tax_offset_payload("2026-05")
-        month_payload["read_model_status"] = "fresh"
-        month_payload["read_model_scope_key"] = "2026-05"
-        month_payload["source_versions"] = {"invoice_fact_source_version": "current"}
-        app._tax_offset_read_model_service.upsert_read_model("2026-05", month_payload, source_versions=month_payload["source_versions"])
 
         response = app.handle_request(
             "POST",
@@ -268,10 +260,9 @@ class TaxOffsetApiTests(unittest.TestCase):
             json.dumps(
                 {
                     "month": "2026-05",
-                    "selected_output_ids": ["output-0"],
-                    "selected_input_ids": ["input-0"],
-                    "expected_read_model_scope_key": "2026-05",
-                    "expected_source_versions": {"invoice_fact_source_version": "old"},
+                    "selected_output_ids": [],
+                    "selected_input_ids": [],
+                    "expected_canonical_snapshot_version": "tax-offset-v1:stale",
                     "idempotency_key": "tax-plan-stale-2026-05",
                 }
             ),
@@ -279,38 +270,9 @@ class TaxOffsetApiTests(unittest.TestCase):
 
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 409)
-        self.assertEqual(payload["error"], "tax_offset_read_model_version_conflict")
+        self.assertEqual(payload["error"], "tax_offset_canonical_version_conflict")
 
-    def test_tax_offset_cache_hit_does_not_rebuild_month_payload(self) -> None:
-        app = build_application()
-        cached_payload = tax_offset_payload("2026-05", output_count=2, input_count=3, certified_count=1)
-        app._tax_offset_read_model_service.upsert_read_model("2026-05", cached_payload)
-
-        with (
-            patch.object(
-                app._tax_api_routes,
-                "get_tax_offset",
-                side_effect=AssertionError("should not rebuild cached tax offset payload"),
-            ),
-            patch("builtins.print") as print_mock,
-        ):
-            response = app.handle_request("GET", "/api/tax-offset?month=2026-05")
-
-        self.assertEqual(response.status_code, 200)
-        payload = json.loads(response.body)
-        self.assertEqual(payload["output_items"], cached_payload["output_items"])
-        metric_payloads = [
-            json.loads(call.args[0])
-            for call in print_mock.call_args_list
-            if call.args and json.loads(call.args[0]).get("kind") == "tax_offset_month_metric"
-        ]
-        self.assertEqual(len(metric_payloads), 1)
-        self.assertTrue(metric_payloads[0]["cache_hit"])
-        self.assertEqual(metric_payloads[0]["output_count"], 2)
-        self.assertEqual(metric_payloads[0]["input_plan_count"], 3)
-        self.assertEqual(metric_payloads[0]["certified_count"], 1)
-
-    def test_tax_offset_cache_miss_writes_read_model_and_logs_hit_metrics(self) -> None:
+    def test_tax_offset_reads_canonical_repository_on_every_request_without_runtime_fields(self) -> None:
         app = build_application()
         calls: list[str] = []
 
@@ -320,6 +282,7 @@ class TaxOffsetApiTests(unittest.TestCase):
 
         app._tax_offset_service = SimpleNamespace(
             get_month_payload=build_tax_offset,
+            calculate_from_month_payload=lambda **_kwargs: {"summary": tax_offset_payload()["summary"]},
             clear_month_cache=lambda *_args, **_kwargs: None,
         )
         app._tax_offset_dependency_key = None
@@ -330,14 +293,20 @@ class TaxOffsetApiTests(unittest.TestCase):
 
         self.assertEqual(first_response.status_code, 200)
         self.assertEqual(second_response.status_code, 200)
-        self.assertEqual(calls, ["2026-05"])
-        self.assertEqual(json.loads(second_response.body)["input_plan_items"], [{"id": "input-0"}, {"id": "input-1"}])
+        self.assertEqual(calls, ["2026-05", "2026-05"])
+        self.assertEqual(
+            [row["id"] for row in json.loads(second_response.body)["input_plan_items"]],
+            ["input-0", "input-1"],
+        )
+        self.assertNotIn("read_model_status", json.loads(second_response.body))
+        self.assertNotIn("source_versions", json.loads(second_response.body))
         metric_payloads = [
             json.loads(call.args[0])
             for call in print_mock.call_args_list
             if call.args and json.loads(call.args[0]).get("kind") == "tax_offset_month_metric"
         ]
-        self.assertEqual([payload["cache_hit"] for payload in metric_payloads], [False, True])
+        self.assertEqual(len(metric_payloads), 2)
+        self.assertTrue(all("cache_hit" not in payload for payload in metric_payloads))
 
     def test_tax_offset_calculate_logs_structured_metric(self) -> None:
         app = build_application()
@@ -367,39 +336,6 @@ class TaxOffsetApiTests(unittest.TestCase):
         self.assertEqual(metric_payloads[0]["month"], "2026-05")
         self.assertEqual(metric_payloads[0]["selected_output_count"], 1)
         self.assertEqual(metric_payloads[0]["selected_input_count"], 2)
-
-    def test_tax_offset_cache_warmup_is_optional_and_environment_gated(self) -> None:
-        app = build_application()
-        job = SimpleNamespace(job_id="tax-offset-warmup-job-1", owner_user_id="system")
-
-        with (
-            patch.object(
-                app._background_job_service,
-                "create_or_get_idempotent_job_with_created",
-                return_value=(job, True),
-            ) as create_job,
-            patch.object(app._background_job_service, "run_job") as run_job,
-        ):
-            app._schedule_tax_offset_cache_warmup(["2026-05"], reason="test_disabled")
-
-        create_job.assert_not_called()
-        run_job.assert_not_called()
-
-        with (
-            patch.dict("os.environ", {"FIN_OPS_TAX_OFFSET_CACHE_WARMUP_ENABLED": "1"}),
-            patch.object(
-                app._background_job_service,
-                "create_or_get_idempotent_job_with_created",
-                return_value=(job, True),
-            ) as create_job,
-            patch.object(app._background_job_service, "run_job") as run_job,
-        ):
-            app._schedule_tax_offset_cache_warmup(["2026-05"], reason="test_enabled")
-
-        create_job.assert_called_once()
-        self.assertEqual(create_job.call_args.kwargs["job_type"], "tax_offset_cache_warmup")
-        self.assertIn("2026-05", create_job.call_args.kwargs["idempotency_key"])
-        run_job.assert_called_once()
 
     def test_tax_certified_confirm_does_not_trigger_write_side_read_model_refresh(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -535,20 +471,19 @@ class TaxOffsetApiTests(unittest.TestCase):
             self.assertEqual(preview_payload["summary"]["matched_plan_count"], 0)
             self.assertEqual(preview_payload["summary"]["outside_plan_count"], 2)
 
-            with patch.object(app, "_schedule_tax_offset_cache_warmup"):
-                confirm_response = app.handle_request(
-                    "POST",
-                    "/api/tax-offset/certified-import/confirm",
-                    json.dumps({"session_id": preview_payload["session"]["id"]}),
-                )
+            confirm_response = app.handle_request(
+                "POST",
+                "/api/tax-offset/certified-import/confirm",
+                json.dumps({"session_id": preview_payload["session"]["id"]}),
+            )
             self.assertEqual(confirm_response.status_code, 200)
             confirm_payload = json.loads(confirm_response.body)
             self.assertEqual(confirm_payload["batch"]["months"], ["2026-01"])
             self.assertEqual(confirm_payload["batch"]["persisted_record_count"], 2)
             self.assertEqual(confirm_payload["affected_scope_keys"], ["2026-01"])
-            self.assertEqual(confirm_payload["read_model_scope_keys"], ["2026-01"])
-            self.assertEqual(confirm_payload["freshness_targets"], [])
-            self.assertEqual(confirm_payload["operation_barrier_targets"], [])
+            self.assertNotIn("read_model_scope_keys", confirm_payload)
+            self.assertNotIn("freshness_targets", confirm_payload)
+            self.assertNotIn("operation_barrier_targets", confirm_payload)
 
             list_response = app.handle_request("GET", "/api/tax-offset/certified-imports?month=2026-01")
             self.assertEqual(list_response.status_code, 200)

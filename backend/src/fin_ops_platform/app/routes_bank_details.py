@@ -10,7 +10,7 @@ from fin_ops_platform.services.app_settings_service import (
 )
 from fin_ops_platform.services.bank_details_application_service import (
     BankDetailsApplicationService,
-    BankDetailsReadModelRefreshingError,
+    BankDetailsCanonicalQueryUnavailableError,
 )
 from fin_ops_platform.services.bank_details_export_service import BankDetailsExportError
 from fin_ops_platform.services.bank_transaction_category_service import (
@@ -136,8 +136,11 @@ class BankDetailsApiRoutes:
         return None
 
     def accounts(self, *, date_from: str | None, date_to: str | None) -> tuple[HTTPStatus, dict[str, Any]]:
-        payload = self._application_service.accounts_payload(date_from=date_from, date_to=date_to)
-        return self._status_for_payload(payload, item_key="accounts"), payload
+        try:
+            payload = self._application_service.accounts_payload(date_from=date_from, date_to=date_to)
+        except BankDetailsCanonicalQueryUnavailableError as exc:
+            return self._canonical_query_unavailable(exc)
+        return HTTPStatus.OK, payload
 
     def transactions(
         self,
@@ -168,7 +171,9 @@ class BankDetailsApiRoutes:
             )
         except ValueError as exc:
             return HTTPStatus.BAD_REQUEST, {"error": "invalid_bank_details_request", "message": str(exc)}
-        return self._status_for_payload(payload, item_key="rows"), payload
+        except BankDetailsCanonicalQueryUnavailableError as exc:
+            return self._canonical_query_unavailable(exc)
+        return HTTPStatus.OK, payload
 
     def export_transactions(
         self,
@@ -197,13 +202,22 @@ class BankDetailsApiRoutes:
                 category_third_label=category_third_label,
                 actor_id=self._actor(session, "bank_detail_export"),
             )
-        except BankDetailsReadModelRefreshingError as exc:
-            return HTTPStatus.ACCEPTED, exc.payload
         except BankDetailsExportError as exc:
             return HTTPStatus.BAD_REQUEST, {"error": exc.error_code, "message": str(exc)}
         except ValueError as exc:
             return HTTPStatus.BAD_REQUEST, {"error": "invalid_bank_details_request", "message": str(exc)}
+        except BankDetailsCanonicalQueryUnavailableError as exc:
+            return self._canonical_query_unavailable(exc)
         return HTTPStatus.OK, result
+
+    @staticmethod
+    def _canonical_query_unavailable(
+        exc: BankDetailsCanonicalQueryUnavailableError,
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        return HTTPStatus.SERVICE_UNAVAILABLE, {
+            "error": "bank_details_canonical_query_unavailable",
+            "message": str(exc),
+        }
 
     def auto_tag_rules(self, *, session: OARequestSession | None) -> tuple[HTTPStatus, dict[str, Any]]:
         can_save = True if session is None else bool(session.can_mutate_data)
@@ -261,19 +275,11 @@ class BankDetailsApiRoutes:
     def reapply_auto_tag_rules(self, *, session: OARequestSession | None) -> tuple[HTTPStatus, dict[str, Any]]:
         if session is not None and not session.can_mutate_data:
             return self._permission_denied("当前账户没有重新应用自动标签规则权限。")
-        try:
-            payload = self._application_service.reapply_auto_tag_rules(
-                actor_id=self._actor(session, "bank_auto_tag_rules_reapply"),
-                can_save=True if session is None else bool(session.can_mutate_data),
-            )
-        except RuntimeError as exc:
-            if str(exc) == "bank_auto_tag_rules_reapply_unavailable":
-                return HTTPStatus.SERVICE_UNAVAILABLE, {
-                    "error": "bank_auto_tag_rules_reapply_unavailable",
-                    "message": "自动标签规则已保存，但银行明细刷新队列暂时不可用，请稍后重试。",
-                }
-            raise
-        return HTTPStatus.ACCEPTED, payload
+        payload = self._application_service.reapply_auto_tag_rules(
+            actor_id=self._actor(session, "bank_auto_tag_rules_reapply"),
+            can_save=True if session is None else bool(session.can_mutate_data),
+        )
+        return HTTPStatus.OK, payload
 
     def confirm_category(
         self,
@@ -346,12 +352,6 @@ class BankDetailsApiRoutes:
         except BankTransactionCategoryValidationError as exc:
             return self._category_error(exc)
         return HTTPStatus.OK, result
-
-    @staticmethod
-    def _status_for_payload(payload: dict[str, Any], *, item_key: str) -> HTTPStatus:
-        if str(payload.get("read_model_status") or "") == "refreshing" and not list(payload.get(item_key) or []):
-            return HTTPStatus.ACCEPTED
-        return HTTPStatus.OK
 
     @staticmethod
     def _actor(session: OARequestSession | None, fallback: str) -> str:

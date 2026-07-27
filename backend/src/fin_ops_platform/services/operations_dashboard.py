@@ -180,29 +180,21 @@ class OperationsDashboardService:
         completed_statuses = sorted(COMPLETED_WORKFLOW_STATUS_ALIASES)
         row = self._connection.fetch_one(
             """
-            with oa_pending_payment_all_rows as (
-              select distinct on (row_id) row_id, oa_id, oa_workflow_status, payload, generated_at
-              from read_model.oa_pending_payment_rows
-              order by row_id, generated_at desc, scope_key desc
-            ),
-            oa_pending_payment_view_count_ids as (
-              select
-                case when oa_workflow_status = 'in_progress' then 'in_progress' else 'completed' end as view_mode,
-                nullif(btrim(coalesce(
-                  oa_summary.value->>'oaId',
-                  oa_summary.value->>'id',
-                  payload->'oa'->>'id',
-                  oa_id
-                )), '') as oa_id
-              from oa_pending_payment_all_rows
-              left join lateral jsonb_array_elements(
-                case
-                  when jsonb_typeof(payload->'oa'->'summaries') = 'array'
-                    and jsonb_array_length(payload->'oa'->'summaries') > 0
-                  then payload->'oa'->'summaries'
-                  else jsonb_build_array(jsonb_build_object('oaId', coalesce(payload->'oa'->>'id', oa_id)))
-                end
-              ) as oa_summary(value) on true
+            with oa_pending_payment_view_count_ids as (
+              select row_id as oa_id,
+                     case when coalesce(nullif(workflow_status, ''), 'completed') = any(%s::text[])
+                          then 'completed' else 'in_progress' end as view_mode,
+                     synced_at as generated_at
+              from app.oa_applications
+              where status <> 'deleted'
+              union all
+              select admission.oa_id, 'in_progress', admission.updated_at
+              from app.oa_pending_payment_admissions admission
+              where not exists (
+                select 1 from app.oa_applications source
+                where source.row_id = admission.oa_id
+                  and source.status <> 'deleted'
+              )
             )
             select
               (select count(*)::bigint from app.oa_applications) as oa_records_count,
@@ -213,8 +205,8 @@ class OperationsDashboardService:
                  from oa_pending_payment_view_count_ids
                 where view_mode = 'in_progress') as oa_records_in_progress_count,
               (select max(generated_at)
-                 from oa_pending_payment_all_rows
-                where oa_workflow_status = 'in_progress') as oa_pending_payment_in_progress_latest_synced_at,
+                 from oa_pending_payment_view_count_ids
+                where view_mode = 'in_progress') as oa_pending_payment_in_progress_latest_synced_at,
               (select count(*)::bigint from app.oa_application_items) as oa_items_count,
               (select max(synced_at) from app.oa_applications) as oa_records_latest_synced_at,
               (select max(coalesce(finished_at, started_at))
@@ -230,7 +222,7 @@ class OperationsDashboardService:
                 (select max(synced_at) from app.oa_applications)
               ) as oa_latest_synced_at
             """,
-            (completed_statuses,),
+            (completed_statuses, completed_statuses),
         ) or {}
         latest_synced_at = _isoformat(row.get("oa_latest_synced_at"))
         in_progress_latest_synced_at = _isoformat(row.get("oa_pending_payment_in_progress_latest_synced_at")) or latest_synced_at

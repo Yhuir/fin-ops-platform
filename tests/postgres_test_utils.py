@@ -137,6 +137,8 @@ EXPECTED_MIGRATION_FILES = [
     "0123_drop_legacy_cost_statistics_bank_flow_rows.sql",
     "0124_bank_detail_canonical_source_proof.sql",
     "0125_workbench_canonical_proof_identity_indexes.sql",
+    "0126_cost_statistics_direct_canonical_read.sql",
+    "0127_direct_canonical_page_runtime_retirement.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (

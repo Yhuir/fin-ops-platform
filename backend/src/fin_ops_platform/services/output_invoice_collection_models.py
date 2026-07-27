@@ -3,9 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from fin_ops_platform.services.read_model_write_targets import write_target_envelope
-
-
 OUTPUT_INVOICE_COLLECTION_SOURCE_VERSION = "output-invoice-collections:v6-canonical-invoice-inventory"
 
 MANUAL_COLLECTION_STATUS_OPTIONS: tuple[dict[str, Any], ...] = (
@@ -58,19 +55,3 @@ class OutputInvoiceCollectionRowRef:
             taxable_item_name=str(invoice.get("taxableItemName") or "").strip() or None,
             total_with_tax=str(invoice.get("totalWithTax") or "0.00"),
         )
-
-
-def output_invoice_collection_scope_key(row: dict[str, Any]) -> str:
-    invoice = row.get("invoice") if isinstance(row.get("invoice"), dict) else {}
-    invoice_date = str(invoice.get("invoiceDate") or invoice.get("issueDate") or "").strip()
-    if len(invoice_date) >= 7 and invoice_date[4] == "-":
-        return invoice_date[:7]
-    return "all"
-
-
-def output_invoice_collection_freshness_metadata(row: dict[str, Any]) -> dict[str, object]:
-    scope_key = output_invoice_collection_scope_key(row)
-    return write_target_envelope(
-        scope_keys=[] if scope_key == "all" else [scope_key],
-        targets=[],
-    )

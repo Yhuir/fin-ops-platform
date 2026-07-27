@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Callable
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application
@@ -14,7 +13,6 @@ from fin_ops_platform.services.state_store import ApplicationStateStore
 from fin_ops_platform.services.workbench_object_identity_arbitration import (
     WorkbenchObjectIdentityArbitrationService,
 )
-from fin_ops_platform.services.workbench_read_model_version import WorkbenchReadModelVersionConflictError
 from fin_ops_platform.services.workbench_relation_grouping import WorkbenchRelationGroupingService
 
 
@@ -147,42 +145,20 @@ def build_grouped_workbench_projection(
     )
 
 
-class FreshWorkbenchWriteGateRepository:
+class LocalWorkbenchCanonicalPreviewRepository:
     def __init__(
         self,
-        version: str,
         *,
-        source_versions_provider: Callable[[str], dict[str, object]],
         application: Application,
     ) -> None:
-        self.version = str(version)
-        self._source_versions_provider = source_versions_provider
         self._application = application
-
-    def get_workbench_groups_freshness_status(
-        self,
-        *,
-        scope_key: str,
-        **_kwargs: object,
-    ) -> dict[str, object]:
-        return {
-            "read_model_status": "fresh",
-            "read_model_version": self.version,
-            "source_versions": self._source_versions_provider(scope_key),
-        }
 
     def get_workbench_relation_preview_selection(
         self,
         *,
         scope_key: str,
         row_ids: list[str],
-        expected_read_model_version: str,
     ) -> dict[str, object]:
-        if str(expected_read_model_version) != self.version:
-            raise WorkbenchReadModelVersionConflictError(
-                expected=str(expected_read_model_version),
-                current=self.version,
-            )
         rows = self._application._resolve_live_rows_direct(  # noqa: SLF001
             list(row_ids),
             month_hint=scope_key,
@@ -195,25 +171,15 @@ class FreshWorkbenchWriteGateRepository:
             "rows": rows,
             "memberships": [],
             "context_groups": [],
-            "source_versions": self._source_versions_provider(scope_key),
-            "generation_set": [
-                {"scope_key": scope_key, "generation_id": self.version}
-            ],
-            "active_generation_id": self.version,
-            "read_model_version": self.version,
-            "read_model_status": "fresh",
         }
 
 
-def install_fresh_workbench_write_gate(application: Application, *, version: str = "test-generation-1") -> str:
-    """Install only the generation precondition I/O required by local write-contract tests."""
+def install_local_workbench_canonical_preview_repository(application: Application) -> None:
+    """Install the canonical preview I/O required by local write-contract tests."""
 
-    application._workbench_sql_read_repository = FreshWorkbenchWriteGateRepository(  # noqa: SLF001
-        version,
-        source_versions_provider=application._workbench_sql_read_model_source_versions,  # noqa: SLF001
+    application._workbench_canonical_query_repository = LocalWorkbenchCanonicalPreviewRepository(  # noqa: SLF001
         application=application,
     )
-    return str(version)
 
 
 class DurableImportQueueHarness:

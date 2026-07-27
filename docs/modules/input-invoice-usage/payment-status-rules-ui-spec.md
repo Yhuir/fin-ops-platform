@@ -7,7 +7,7 @@
 - Goal：让财务用户理解并维护“已有 OA/流水/发票关系如何映射为支付状态”。
 - Scope：`PaymentStatusRulesDrawer`、对应规则读取/保存 API、保存后的当前页刷新反馈。
 - Design tone：浅色企业后台、信息密度高、低装饰、可扫读、可追溯。
-- Non-goal：本抽屉不负责发现、补全或修正 OA/流水关联；关系事实仍来自 `workbench_relation` distribution 和 `input_invoice_usage` read model。
+- Non-goal：本抽屉不负责发现、补全或修正 OA/流水关联；关系事实只来自 `app.workbench_pair_relations status='active'` 和同一 canonical PostgreSQL snapshot。
 
 ## 业务定位
 
@@ -162,7 +162,7 @@
 
 - 请求继续携带 `expectedVersion` 和 `idempotencyKey`。
 - 保存成功后触发 `input_invoice_usage` 当前查询刷新。
-- 后端继续负责审计、版本冲突、幂等冲突和 read model refresh 入队。
+- 后端继续负责审计、版本冲突和幂等冲突；保存成功后页面重跑当前 rows GET，不 enqueue 页面 read model refresh。
 
 ## 验收标准
 
@@ -179,9 +179,9 @@
 按七类测试中适用部分覆盖：
 
 - Business core：规则优先级、启用状态、fallback、candidate 不参与自动闭环。
-- Service-layer：保存规则后的 app settings、审计、read model refresh 入队。
+- Service-layer：保存规则后的 app settings、审计、版本冲突和幂等行为。
 - API contract：GET/PUT shape、权限、版本冲突、幂等冲突、校验错误。
-- Read model/background job：规则版本变化后 `input_invoice_usage` 与 `invoice_lifecycle` freshness。
+- Read model/background job：页面直读不适用；共享历史 worker 清理由全局任务验证。
 - Frontend interaction：只读、可编辑、dirty、保存成功、冲突、无版本号展示。
 - E2E business flow：保存规则 -> 当前页刷新 -> 支付状态更新。
 - Regression：既有 OA/流水 relation 展示、`+N` 明细、OA reverse drawer 不受本抽屉误影响。

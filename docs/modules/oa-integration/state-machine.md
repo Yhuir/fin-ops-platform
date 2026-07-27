@@ -35,7 +35,7 @@
 | --- | --- | --- |
 | `queued` | `/api/integrations/oa/sync` 或 runtime event 入队 | `queued -> running` |
 | `running` | worker 消费 `oa.sync` | `running -> succeeded`、`running -> failed` |
-| `succeeded` | 投影 upsert 完成并写 sync run | 下游 dirty scope enqueue：Workbench、Search、Pending Invoice、Invoice Lifecycle、OA Pending Payment 等 |
+| `succeeded` | canonical OA 投影原子 upsert 完成并写 sync run | 页面下次 normal GET 读取新事实；不 fan-out 已退役页面 refresh |
 | `failed` | 源 adapter、repository 或 queue 失败 | 记录失败 run，保留旧投影，等待 retry/backoff |
 | `retention_pruned` | all scope sync 根据 cutoff 清理旧投影 | 旧月份下游 scope dirty，不能删除 manual import marker |
 
@@ -103,28 +103,22 @@
 
 - loading：session bootstrap、OA 待付款 rows/filter/detail、进项 OA reverse preview/draft、ETC business batch detail/action、settings credentials/manual search 加载中。
 - empty：无 OA rows、无凭据、无手动导入记录、无可导入 OA 搜索结果。
-- error：OA session/OA login/Mongo/read model/API structured error 必须可见，不吞掉。
-- stale/refreshing：OA sync 或下游 read model 非 fresh 时，页面必须禁用高风险写入或提示后台刷新。
+- error：OA session/OA login/Mongo/API structured error 必须可见，不吞掉。
+- syncing：显式 OA sync job 运行时展示任务进度；业务页面不伪造 read-model refreshing。
 - permission disabled/hidden：只读用户隐藏写入，full access 隐藏 admin-only，admin 才能维护 OA applicant credentials。
 
-## Read Model / Worker 状态
+## Canonical Projection / Worker 状态
 
 | 状态 | 含义 | 页面/API 要求 |
 | --- | --- | --- |
-| `fresh` | 投影和页面 read model 与 source version 对齐 | 正常展示与允许满足前置条件的写入 |
-| `missing` | SQL read model 不存在 | 返回 refreshing/missing，并 enqueue refresh |
-| `refreshing` | refresh 已入队或 worker 正在处理 | 页面展示 refreshing，写入按模块前置条件禁用 |
-| `stale` | source version 变化或 dirty scope 未完成 | 不得返回看似 fresh 的空数据 |
-| `failed` | worker refresh 失败 | App Status blocked/degraded，页面显示错误或 stale |
-| `unavailable` | repository/queue/外部系统不可用 | structured error，不能同步扫描替代 production read model |
+| `queued` | 显式 `oa.sync` job 已入 durable queue | 返回 job 状态，不返回页面 read-model target |
+| `running` | OA worker 正在读取外部源并构造 canonical batch | App Status 显示任务运行；业务页面继续读取上次已提交事实 |
+| `succeeded` | completed/admission/payment-status/watermark 同批原子提交 | 页面下次 normal GET 直接读取 canonical PostgreSQL |
+| `failed` | 任一启用 form、repository 或 queue 失败 | 整轮不提交部分 snapshot；记录 error/run，允许明确 retry |
+| `unavailable` | OA/Mongo/PostgreSQL 依赖不可用 | structured error；不得伪造成功或回退历史页面 projection |
 
-refresh 触发来源：
-
-- `oa.sync` worker 成功后下游 dirty scope。
-- OA 手动导入/删除 marker。
-- 进项 OA reverse draft/revoke/manual status。
-- ETC OA draft/manual status/delete。
-- settings OA retention / role / credentials 变更按具体模块影响刷新。
+OA 手工导入/删除、进项 OA reverse、ETC OA 草稿和 settings 变更只提交各自 canonical
+facts、audit 和必要领域任务。它们不触发已退役页面 read-model fan-out。
 
 ## 变更记录
 

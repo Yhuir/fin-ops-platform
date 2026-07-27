@@ -20,30 +20,23 @@
 - `web/src/components/pendingInvoices/*`
 - `web/src/features/pendingInvoices/api.ts`
 - `backend/src/fin_ops_platform/app/routes_pending_invoices.py`
+- `backend/src/fin_ops_platform/services/pending_invoice_canonical_query.py`
 - `backend/src/fin_ops_platform/services/pending_invoice_service.py`
-- `backend/src/fin_ops_platform/services/pending_invoice_read_model_service.py`
 - `backend/src/fin_ops_platform/services/pending_invoice_rules_application_service.py`
-- `backend/src/fin_ops_platform/services/pending_invoice_lifecycle_service.py`
-- `backend/src/fin_ops_platform/services/search_pending_sql_projection.py`
-- `backend/src/fin_ops_platform/services/invoice_lifecycle_sql_projection.py`
 
 ## 当前边界
 
-关注支出/收入流水、进项/销项发票、规则建议、选择已有发票、收入状态批量标记、搜索/read model 状态和 invoice lifecycle 分发。发票获取状态由 `InvoiceLifecyclePolicy` / `invoice_lifecycle` read boundary 与 pending invoice read model 共同表达，页面不私有定义状态。
+页面只调用 `/api/pending-invoices/*`。生产只读请求由 `PendingInvoiceCanonicalQueryService` 和 `PostgresPendingInvoiceCanonicalRepository` 直接读取 PostgreSQL canonical facts；route 只负责鉴权、参数转交与 HTTP 映射。页面不读取 `pending_invoice`、`bank_detail`、`workbench_relation` 或 `search` read model，不再展示或轮询 `read_model_status`、`source_versions`、refresh job，也没有 202/fallback 分支。
 
-列表父筛选以最终 `invoice_acquisition_status.code` 为事实源；`requires_invoice` 是“需要开票”状态桶，不等同于 `filter_group='requires_invoice'`。`filter_group` / `matched_rule` 只解释规则命中，不能把生产中 `filter_group=all` 但状态为待/已开票的行排除。
+rows、summary、全期间 statistics、filter options、筛选、排序、服务端分页和导出使用 bounded set-based SQL。一次 rows 响应在同一个显式 `REPEATABLE READ / READ ONLY` snapshot 内读取 app settings 与页面查询；固定两次 SELECT，不逐行/逐组访问数据库，不先把全量 payload 加载到 Python 或浏览器。
 
-页面首屏默认展示支出“需要开票”闭环中的 `paid_pending_invoice` 和 `paid_invoiced` 两类状态。已在关联台确认并进入 `paid_invoiced` 的流水仍属于待找发票闭环的核对结果，不能因为只默认筛 `paid_pending_invoice` 而从首屏消失；用户可以通过状态筛选手动收窄到仅待开票。
+页面事实来自 `app.bank_transactions`、`app.bank_transaction_categories`、`app.bank_transaction_category_confirmations`、`app.pending_invoice_manual_invoice_commands`、`app.invoices`、`app.oa_applications`、`app.app_settings`。正式配对关系只来自 `app.workbench_pair_relations` 中 `status='active'` 的事实，并排除 `relation_mode='turnover_manual_closure'`；跨月 relation 不按当前月截断。
 
-生产刷新由专用 `pending-invoice` 与 `search` RabbitMQ consumers 承担独立性能 lane；旧 `search-pending` combined worker 保留为兼容消费者，不再是唯一性能 lane。当前 P2/P3 closure 按首屏 API 或 direct refresh p95 <= 1000ms 验收，写操作链路还要求 operation-to-fresh p99 <= 3000ms。`invoice_lifecycle` 另有 `invoice-lifecycle-secondary` 并发消费者用于多月份 scope 收敛；所有 read model freshness 仍以 durable queue/readiness 为事实源。
+状态仍由已有 `pending_invoice_status_payload` 业务策略校验：支出/收入/现金收入、`paid_invoiced`、无需开票、OA/进销项覆盖、规则优先级和收入 override 口径不变。SQL 分类结果若与领域策略不一致会失败，而不是静默返回另一套口径。
 
-OA/流水/发票配对关系不属于待找发票页面私有状态。读关系必须通过 `WorkbenchRelationReadFacade` / `workbench_relation` distribution；attach existing 单条和批量写关系必须委托 `WorkbenchRelationCommandService`。普通 relation read model 非 fresh 只影响读侧 freshness 和候选展示；写 API 的阻断条件必须来自权限/session、DB/目标写模型不可用、canonical relation version/idempotency/row occupation 冲突，不能因为 distribution 追赶中先写本模块半事实。历史 manual invoice command/service 只保留为旧数据恢复和迁移兼容事实，不再通过待找发票 HTTP API 或页面 UI 暴露新写入口。
+候选发票、流水/发票/OA 详情和 relation detail 同样走页面 canonical repository。选择已有发票、收入状态、规则保存的权限、审计、幂等、CAS/占用冲突和 command/relation 写模型保持不变；写成功后页面重新 GET canonical facts，不等待 read-model barrier。
 
-列表 rows 必须按统一 relation distribution 展示多项关系。`bank_transactions`、`input_invoices` 和 `oa` 三个分区都以 `relation_count` / `has_multiple` / `detail_mode` / `summaries` 表达 relation 成员。多笔银行流水属于同一 relation 时，pending invoice read model 和 query service 只能输出一条聚合行，不能再把其它流水成员作为 standalone 行重复展示；前端银行流水栏必须展示 `bank_transactions.summaries` 中真实对方户名列表，不用 `+N` 替代户名，也不在户名下显示交易时间。多张发票或多张 OA 仍只显示代表全部成员的 `+N`，不再同时展示任一 primary 成员。点击明细入口时按 `kind=bank|invoice|oa` 打开对应类型明细，不能把其它分区混在同一次展开视图里。
-
-选择已有进项发票只从表格上方的选中流水工具栏进入。页面可以选择一条或多条 eligible 支出流水，右侧抽屉通过批量 candidates/preview/confirm API 选择多张进项发票。候选表的“流水关联”chip 必须来自后端 `bank_relation_status` / `linked_bank_transaction_count`，不得用 `remaining_amount=0` 推断是否已关联流水；候选表不再展示“待支付”金额列。抽屉汇总展示已选流水金额、已选发票金额和“本次选择差额”，preview 后展示“关联后待付”；最终补付金额以 preview `payment_impact.remaining_amount_after` 为准。preview `can_confirm=false` 时必须展示后端 conflicts/warnings 原因，不能只禁用确认按钮。行内三点菜单和“补票”入口不是当前 UI/HTTP 契约。
-
-收入侧支持与支出侧一致的多选，但只在 `direction=income` scope 内启用；选中后表格上方工具栏显示“标记无需开票”“标记现金收入”“清除选择”。收入批量状态写入走 `PUT /api/pending-invoices/income-statuses`，后端必须先全量校验 transaction ids、方向、重复选择、已关联销项发票和 status code，再一次性写入 command/audit/finalizer，不能逐行循环造成半成功。
+`pending_invoice`、`search-pending` 和 `invoice_lifecycle` 页面 projection/worker 已在跨页面清理中删除。Search 独立索引与 `workbench_relation` 共享 distribution 因仍有明确消费者而保留，但本页面直接读取 canonical facts，不消费二者。
 
 ## 维护触发器
 

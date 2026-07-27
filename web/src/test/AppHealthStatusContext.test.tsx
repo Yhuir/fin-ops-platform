@@ -54,7 +54,7 @@ vi.mock("../features/appHealth/api", async (importOriginal) => {
       status: "ok",
       session: { status: "authenticated" },
       oa_sync: { status: "synced", dirty_scopes: [] },
-      workbench_read_model: { status: "ready", dirty_scopes: [], stale_scopes: [], rebuilding_scopes: [] },
+      workbench_matching: { status: "ready", dirty_scopes: [] },
       background_jobs: { active: 0, queued: 0, running: 0, attention: 0 },
       dependencies: {},
     }),
@@ -207,7 +207,7 @@ describe("AppHealthStatusProvider", () => {
       status: "busy",
       session: { status: "authenticated" },
       oa_sync: { status: "synced", message: "OA 已同步", dirty_scopes: [] },
-      workbench_read_model: { status: "ready", dirty_scopes: [], stale_scopes: [], rebuilding_scopes: [] },
+      workbench_matching: { status: "ready", dirty_scopes: [] },
       background_jobs: {
         active: 1,
         queued: 0,
@@ -236,7 +236,7 @@ describe("AppHealthStatusProvider", () => {
       status: "blocked",
       session: { status: "authenticated" },
       oa_sync: { status: "synced", message: "OA 已同步", dirty_scopes: [] },
-      workbench_read_model: { status: "ready", dirty_scopes: [], stale_scopes: [], rebuilding_scopes: [] },
+      workbench_matching: { status: "ready", dirty_scopes: [] },
       background_jobs: { active: 0, queued: 0, running: 0, attention: 0 },
       app_status: {
         version: 1,
@@ -244,7 +244,7 @@ describe("AppHealthStatusProvider", () => {
         overall: {
           level: "blocked",
           color: "red",
-          reason: "银行明细不可用",
+          reason: "关联关系不可用",
           blocks_mutations: false,
           write_safety: {
             status: "ready",
@@ -255,16 +255,16 @@ describe("AppHealthStatusProvider", () => {
         },
         domains: [
           {
-            key: "bank_details",
-            label: "银行明细",
-            route: "/bank-details",
+            key: "workbench",
+            label: "关联台",
+            route: "/",
             level: "blocked",
             status: "failed",
-            reason: "银行明细不可用",
+            reason: "关联关系不可用",
             details: ["projection failed"],
-            read_models: ["bank_detail"],
+            read_models: ["workbench_relation"],
             read_model_scopes: [],
-            workers: ["bank-detail"],
+            workers: ["workbench-relation"],
             job_ids: [],
             updated_at: "2026-06-13T17:30:00+08:00",
           },
@@ -289,7 +289,7 @@ describe("AppHealthStatusProvider", () => {
       status: "busy",
       session: { status: "authenticated" },
       oa_sync: { status: "idle", message: "OA 有待处理变更", dirty_scopes: ["2026-03"] },
-      workbench_read_model: { status: "ready", dirty_scopes: [], stale_scopes: [], rebuilding_scopes: [] },
+      workbench_matching: { status: "ready", dirty_scopes: [] },
       background_jobs: { active: 0, queued: 0, running: 0, attention: 0 },
       app_status: {
         version: 1,
@@ -315,9 +315,9 @@ describe("AppHealthStatusProvider", () => {
             status: "ready",
             reason: "关联台已同步",
             details: [],
-            read_models: ["workbench"],
+            read_models: ["workbench_relation"],
             read_model_scopes: [],
-            workers: ["workbench-read-model"],
+            workers: ["workbench-relation"],
             job_ids: [],
             updated_at: "2026-06-13T17:30:00+08:00",
           },
@@ -344,11 +344,9 @@ describe("AppHealthStatusProvider", () => {
       status: "busy",
       session: { status: "authenticated" },
       oa_sync: { status: "synced", message: "OA 已同步", dirty_scopes: [] },
-      workbench_read_model: {
+      workbench_matching: {
         status: "rebuilding",
         dirty_scopes: [],
-        stale_scopes: [],
-        rebuilding_scopes: [],
         matching_running_scopes: ["2026-03"],
       },
       background_jobs: { active: 0, queued: 0, running: 0, attention: 0 },
@@ -375,11 +373,11 @@ describe("AppHealthStatusProvider", () => {
     });
   });
 
-  it("reports yellow when the backend says the workbench read model is stale", async () => {
+  it("reports yellow when workbench matching is stale", async () => {
     mocked.appHealth = {
       session: { status: "authenticated" },
       oa_sync: { status: "synced", dirty_scopes: [] },
-      workbench_read_model: { status: "stale", dirty_scopes: ["oa"], stale_scopes: ["oa"] },
+      workbench_matching: { status: "stale", dirty_scopes: ["oa"] },
       background_jobs: { active: 0, queued: 0, running: 0, attention: 0 },
     };
     renderProbe();
@@ -404,7 +402,7 @@ describe("AppHealthStatusProvider", () => {
       generated_at: "2026-05-06T09:00:00+08:00",
       session: { status: "authenticated" },
       oa_sync: { status: "synced", dirty_scopes: [] },
-      workbench_read_model: { status: "stale", dirty_scopes: ["oa"], stale_scopes: ["oa"] },
+      workbench_matching: { status: "stale", dirty_scopes: ["oa"] },
       background_jobs: { active: 0, queued: 0, running: 0, attention: 0 },
     });
 
@@ -422,7 +420,7 @@ describe("AppHealthStatusProvider", () => {
       generated_at: "2026-05-06T09:01:00+08:00",
       session: { status: "authenticated" },
       oa_sync: { status: "synced", dirty_scopes: [] },
-      workbench_read_model: { status: "ready", dirty_scopes: [], stale_scopes: [], rebuilding_scopes: [] },
+      workbench_matching: { status: "ready", dirty_scopes: [] },
       background_jobs: { active: 0, queued: 0, running: 0, attention: 0 },
     };
     renderProbe();

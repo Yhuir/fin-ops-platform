@@ -3,7 +3,6 @@ from __future__ import annotations
 import unittest
 
 from fin_ops_platform.services.no_oa_bank_batch_service import (
-    BANK_FLOW_RULE_BATCH_RELATION_MODE,
     NO_OA_BANK_BATCH_SCHEMA_VERSION,
     NoOaBankBatchService,
 )
@@ -272,129 +271,6 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
         self.assertEqual(submitted[0]["total_amount"], "0.90")
         self.assertTrue(submitted[0]["can_withdraw"])
         self.assertEqual(service.snapshot()["batches"]["batch-relation-only"]["status"], "submitted")
-
-    def test_missing_batch_with_active_bank_flow_relation_is_projected_only_for_bank_flow_mode(self) -> None:
-        pair_service = WorkbenchPairRelationService()
-        pair_service.create_active_relation(
-            case_id="bank-flow-batch-relation-only",
-            row_ids=["fee-submitted"],
-            row_types=["bank"],
-            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
-            created_by="finance-user",
-            month_scope="2026-03",
-            created_at="2026-05-15T10:00:00+00:00",
-            special_metadata={
-                "source": BANK_FLOW_RULE_BATCH_RELATION_MODE,
-                "source_batch_id": "bank-flow-batch-relation-only",
-                "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
-                "batch_type": "fee",
-                "batch_label": "手续费",
-                "total_amount": "0.90",
-            },
-        )
-        rows = [bank_row("fee-submitted", category_code="fee", debit_amount="0.90")]
-        categories = categories_for(rows)
-        service = NoOaBankBatchService(
-            pair_relation_service=pair_service,
-            relation_command_service=relation_command_service_for(pair_service),
-        )
-
-        no_oa_batches = service.build_batches(
-            rows,
-            categories,
-            pair_service.list_active_relations(),
-            {"bank_transactions": 1},
-        )
-        bank_flow_batches = service.build_batches(
-            rows,
-            categories,
-            pair_service.list_active_relations(),
-            {"bank_transactions": 1},
-            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
-        )
-
-        self.assertEqual([batch for batch in no_oa_batches if batch["status_bucket"] == "submitted"], [])
-        submitted = [batch for batch in bank_flow_batches if batch["status_bucket"] == "submitted"]
-        self.assertEqual([batch["batch_id"] for batch in submitted], ["bank-flow-batch-relation-only"])
-        self.assertEqual(submitted[0]["relation_mode"], BANK_FLOW_RULE_BATCH_RELATION_MODE)
-        self.assertEqual(submitted[0]["row_ids"], ["fee-submitted"])
-        self.assertEqual(service.list_batches({"bucket": "submitted", "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE})[0]["batch_id"], "bank-flow-batch-relation-only")
-        self.assertEqual(service.list_batches({"bucket": "submitted", "relation_mode": "no_oa_bank_batch"}), [])
-
-    def test_month_scope_rebuild_preserves_same_month_other_relation_mode_batches(self) -> None:
-        service = NoOaBankBatchService.from_snapshot(
-            {
-                "batches": {
-                    "bank-flow-submitted": {
-                        "batch_id": "bank-flow-submitted",
-                        "batch_type": "fee",
-                        "batch_label": "手续费",
-                        "scope_month": "2026-03",
-                        "account_key": "CCB:8106",
-                        "status": "submitted",
-                        "status_bucket": "submitted",
-                        "row_ids": ["fee-bank-flow"],
-                        "row_count": 1,
-                        "total_amount": "0.90",
-                        "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
-                        "relation_case_id": "bank-flow-submitted",
-                        "version": 1,
-                    }
-                }
-            }
-        )
-        rows = [bank_row("fee-no-oa", category_code="fee", debit_amount="1.25")]
-
-        service.build_batches(
-            rows,
-            categories_for(rows),
-            [],
-            {"bank_transactions": 1},
-            refresh_scope_key="2026-03",
-        )
-
-        batches = service.snapshot()["batches"]
-        self.assertEqual(batches["bank-flow-submitted"]["relation_mode"], BANK_FLOW_RULE_BATCH_RELATION_MODE)
-        no_oa_drafts = [
-            batch
-            for batch in batches.values()
-            if batch["status"] == "draft" and batch["relation_mode"] == "no_oa_bank_batch"
-        ]
-        self.assertEqual(len(no_oa_drafts), 1)
-        self.assertEqual(no_oa_drafts[0]["row_ids"], ["fee-no-oa"])
-
-    def test_all_scope_rebuild_preserves_other_relation_mode_batches(self) -> None:
-        service = NoOaBankBatchService.from_snapshot(
-            {
-                "batches": {
-                    "bank-flow-submitted": {
-                        "batch_id": "bank-flow-submitted",
-                        "batch_type": "fee",
-                        "batch_label": "手续费",
-                        "scope_month": "2026-03",
-                        "account_key": "CCB:8106",
-                        "status": "submitted",
-                        "status_bucket": "submitted",
-                        "row_ids": ["fee-bank-flow"],
-                        "row_count": 1,
-                        "total_amount": "0.90",
-                        "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
-                        "relation_case_id": "bank-flow-submitted",
-                        "version": 1,
-                    }
-                }
-            }
-        )
-        rows = [bank_row("fee-no-oa", category_code="fee", debit_amount="1.25")]
-
-        service.build_batches(rows, categories_for(rows), [], {"bank_transactions": 1})
-
-        batches = service.snapshot()["batches"]
-        self.assertEqual(batches["bank-flow-submitted"]["relation_mode"], BANK_FLOW_RULE_BATCH_RELATION_MODE)
-        self.assertEqual(
-            [batch["row_ids"] for batch in batches.values() if batch["relation_mode"] == "no_oa_bank_batch"],
-            [["fee-no-oa"]],
-        )
 
     def test_superseded_batch_with_active_no_oa_relation_is_restored_to_submitted_projection(self) -> None:
         pair_service = WorkbenchPairRelationService()
@@ -1291,6 +1167,20 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
         self.assertEqual(reloaded.snapshot(), service.snapshot())
         self.assertEqual(reloaded.snapshot()["schema_version"], NO_OA_BANK_BATCH_SCHEMA_VERSION)
         self.assertEqual(reloaded.audit_log()[-1]["operation"], "submit")
+
+    def test_snapshot_restore_drops_foreign_bank_flow_batches(self) -> None:
+        service = NoOaBankBatchService.from_snapshot(
+            {
+                "batches": {
+                    "foreign": {
+                        "batch_id": "foreign",
+                        "relation_mode": "bank_flow_rule_batch",
+                    }
+                }
+            }
+        )
+
+        self.assertEqual(service.snapshot()["batches"], {})
 
     def assert_single_batch(self, batches: list[dict[str, object]], status: str) -> dict[str, object]:
         matching = [batch for batch in batches if batch["status"] == status]

@@ -68,7 +68,7 @@ async function openInProgressView(page: Page, recordLatency?: OperationLatencyRe
 }
 
 test.describe("OA pending payments in-progress paid writeback browser flow", () => {
-  test("writes back a paid in-progress OA payment once and refreshes the writeback read model", async ({ page }, testInfo) => {
+  test("writes back a paid in-progress OA payment once and reloads canonical rows", async ({ page }, testInfo) => {
     const runtimeErrors = collectRuntimeErrors(page);
     const api = await installDeterministicApiMocks(page, {
       oaPendingPaymentWritebackPaidDelayMs: 300,

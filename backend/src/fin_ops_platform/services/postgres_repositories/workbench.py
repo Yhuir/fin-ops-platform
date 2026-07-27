@@ -89,6 +89,116 @@ class PostgresWorkbenchRepository:
             [payload for row in event_rows if isinstance((payload := row_payload(row, "raw_payload")), dict)],
         )
 
+    def bank_flow_rule_batch_canonical_source_proof(
+        self,
+        scope_key: str,
+        *,
+        connection: Any | None = None,
+    ) -> dict[str, object]:
+        normalized_scope_key = text(scope_key) or "all"
+        scope_month = month_start(normalized_scope_key)
+        target = connection or self._connection
+        row = target.fetch_one(
+            """
+            with scoped_bank as materialized (
+                select
+                    bank.id,
+                    coalesce(nullif(bank.legacy_mongo_id, ''), bank.id::text) as row_id,
+                    bank.status,
+                    bank.data_fingerprint,
+                    bank.updated_at
+                from app.bank_transactions bank
+                where (%s is null or bank.txn_month = %s::date)
+            ),
+            scoped_relations as materialized (
+                select
+                    relation.case_id,
+                    relation.status,
+                    relation.version,
+                    relation.month_scope,
+                    relation.row_ids,
+                    relation.row_types,
+                    relation.updated_at
+                from app.workbench_pair_relations relation
+                where relation.status = 'active'
+                  and relation.relation_mode = 'bank_flow_rule_batch'
+                  and (
+                      %s is null
+                      or relation.month_scope = %s::date
+                      or relation.row_ids && array(
+                          select bank.row_id
+                          from scoped_bank bank
+                      )
+                  )
+            )
+            select
+                (select count(*) from scoped_bank) as bank_count,
+                (select md5(coalesce(string_agg(
+                    concat_ws(
+                        ':',
+                        bank.id::text,
+                        bank.row_id,
+                        bank.status,
+                        bank.data_fingerprint,
+                        bank.updated_at::text
+                    ),
+                    '|' order by bank.id
+                ), '')) from scoped_bank bank) as bank_membership_version,
+                (select count(*)
+                 from app.bank_transaction_categories category
+                 join scoped_bank bank on bank.id = category.bank_transaction_id
+                 where category.status = 'active') as category_count,
+                (select md5(coalesce(string_agg(
+                    concat_ws(
+                        ':',
+                        category.id::text,
+                        category.bank_transaction_id::text,
+                        category.category,
+                        category.source,
+                        category.status,
+                        category.version::text,
+                        category.updated_at::text
+                    ),
+                    '|' order by category.id
+                ), ''))
+                 from app.bank_transaction_categories category
+                 join scoped_bank bank on bank.id = category.bank_transaction_id
+                 where category.status = 'active') as category_membership_version,
+                (select count(*) from scoped_relations) as relation_count,
+                (select md5(coalesce(string_agg(
+                    concat_ws(
+                        ':',
+                        relation.case_id,
+                        relation.status,
+                        relation.version::text,
+                        relation.month_scope::text,
+                        array_to_string(relation.row_ids, ','),
+                        array_to_string(relation.row_types, ','),
+                        relation.updated_at::text
+                    ),
+                    '|' order by relation.case_id
+                ), '')) from scoped_relations relation) as relation_membership_version,
+                (select settings.version from app.app_settings settings
+                 where settings.settings_key = 'app_settings') as settings_version,
+                (select settings.updated_at::text from app.app_settings settings
+                 where settings.settings_key = 'app_settings') as settings_updated_at
+            """,
+            (scope_month, scope_month, scope_month, scope_month),
+        )
+        return {
+            key: (row or {}).get(key)
+            for key in (
+                "bank_count",
+                "bank_membership_version",
+                "category_count",
+                "category_membership_version",
+                "relation_count",
+                "relation_membership_version",
+                "settings_version",
+                "settings_updated_at",
+            )
+        }
+
     def save_no_oa_bank_batches(
         self,
         snapshot: dict[str, Any],
@@ -276,8 +386,26 @@ class PostgresWorkbenchRepository:
 
         run_in_transaction(self._connection, write)
 
-    def save_bank_flow_rule_batches(self, snapshot: dict[str, Any]) -> None:
-        def write(connection: Any) -> None:
+    def save_bank_flow_rule_batches(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        expected_source_proof: dict[str, object] | None = None,
+    ) -> bool:
+        def write(connection: Any) -> bool:
+            connection.execute(
+                "select pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                ("bank_flow_rule_batch.canonical_draft.refresh:all",),
+            )
+            if (
+                expected_source_proof is not None
+                and self.bank_flow_rule_batch_canonical_source_proof(
+                    "all",
+                    connection=connection,
+                )
+                != expected_source_proof
+            ):
+                return False
             batches = snapshot.get("batches") if isinstance(snapshot, dict) else None
             batch_items = [
                 (batch_id, payload)
@@ -290,13 +418,6 @@ class PostgresWorkbenchRepository:
                 if str(batch_id).strip()
             ]
             if batch_ids:
-                connection.execute(
-                    """
-                    delete from read_model.bank_flow_rule_batch_rows
-                    where not (batch_id = any(%s))
-                    """,
-                    (batch_ids,),
-                )
                 connection.execute(
                     """
                     delete from app.bank_flow_rule_batch_events
@@ -316,7 +437,6 @@ class PostgresWorkbenchRepository:
                     (batch_ids,),
                 )
             else:
-                connection.execute("delete from read_model.bank_flow_rule_batch_rows")
                 connection.execute("delete from app.bank_flow_rule_batch_events")
                 connection.execute("delete from app.bank_flow_rule_batches")
             self._upsert_bank_flow_rule_batch_items(connection, batch_items)
@@ -324,19 +444,23 @@ class PostgresWorkbenchRepository:
                 connection,
                 snapshot.get("audit_log") if isinstance(snapshot, dict) else None,
             )
+            return True
 
-        run_in_transaction(self._connection, write)
+        return run_in_transaction(self._connection, write)
 
     def save_bank_flow_rule_batches_scope(
         self,
         snapshot: dict[str, Any],
         *,
         scope_key: str,
-    ) -> None:
+        expected_source_proof: dict[str, object] | None = None,
+    ) -> bool:
         normalized_scope_key = text(scope_key)
         if not normalized_scope_key or normalized_scope_key == "all":
-            self.save_bank_flow_rule_batches(snapshot)
-            return
+            return self.save_bank_flow_rule_batches(
+                snapshot,
+                expected_source_proof=expected_source_proof,
+            )
         scope_month = month_start(normalized_scope_key)
         if not scope_month:
             raise ValueError(f"bank-flow rule batch scope must be 'all' or a YYYY-MM shard: {scope_key}")
@@ -354,16 +478,24 @@ class PostgresWorkbenchRepository:
             if str(batch_id).strip()
         ]
 
-        def write(connection: Any) -> None:
-            if batch_ids:
-                connection.execute(
-                    """
-                    delete from read_model.bank_flow_rule_batch_rows
-                    where scope_month = %s::date
-                      and not (batch_id = any(%s))
-                    """,
-                    (scope_month, batch_ids),
+        def write(connection: Any) -> bool:
+            connection.execute(
+                "select pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (
+                    "bank_flow_rule_batch.canonical_draft.refresh:"
+                    f"{normalized_scope_key}",
+                ),
+            )
+            if (
+                expected_source_proof is not None
+                and self.bank_flow_rule_batch_canonical_source_proof(
+                    normalized_scope_key,
+                    connection=connection,
                 )
+                != expected_source_proof
+            ):
+                return False
+            if batch_ids:
                 connection.execute(
                     """
                     delete from app.bank_flow_rule_batch_events
@@ -385,10 +517,6 @@ class PostgresWorkbenchRepository:
                     (scope_month, batch_ids),
                 )
             else:
-                connection.execute(
-                    "delete from read_model.bank_flow_rule_batch_rows where scope_month = %s::date",
-                    (scope_month,),
-                )
                 connection.execute(
                     """
                     delete from app.bank_flow_rule_batch_events
@@ -414,8 +542,9 @@ class PostgresWorkbenchRepository:
                 if isinstance(item, dict) and text(item.get("batch_id")) in scoped_batch_ids
             ]
             self._replace_bank_flow_rule_batch_events(connection, scoped_audit_log)
+            return True
 
-        run_in_transaction(self._connection, write)
+        return run_in_transaction(self._connection, write)
 
     def save_bank_flow_rule_batch_items(
         self,
@@ -552,37 +681,6 @@ class PostgresWorkbenchRepository:
                 updated_at = now()
             """,
             [self._bank_batch_app_row_params(batch_id, payload) for batch_id, payload in normalized_items],
-        )
-        _execute_batch_insert_values(
-            connection,
-            """
-            insert into read_model.bank_flow_rule_batch_rows(
-                batch_id, scope_month, batch_type, status, status_bucket, account_key,
-                total_amount, row_count, submitted_at, withdrawn_at, source_versions,
-                generated_at, cache_status, payload, raw_payload
-            )
-            values (
-                %s, %s::date, %s, %s, %s, %s, %s, %s, %s::timestamptz, %s::timestamptz,
-                %s, coalesce(%s::timestamptz, now()), %s, %s, %s
-            )
-            on conflict (batch_id) do update set
-                scope_month = excluded.scope_month,
-                batch_type = excluded.batch_type,
-                status = excluded.status,
-                status_bucket = excluded.status_bucket,
-                account_key = excluded.account_key,
-                total_amount = excluded.total_amount,
-                row_count = excluded.row_count,
-                submitted_at = excluded.submitted_at,
-                withdrawn_at = excluded.withdrawn_at,
-                source_versions = excluded.source_versions,
-                generated_at = excluded.generated_at,
-                cache_status = excluded.cache_status,
-                payload = excluded.payload,
-                raw_payload = excluded.raw_payload,
-                updated_at = now()
-            """,
-            [self._bank_batch_read_model_row_params(batch_id, payload) for batch_id, payload in normalized_items],
         )
 
     @staticmethod

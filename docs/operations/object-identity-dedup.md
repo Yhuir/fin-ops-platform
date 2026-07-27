@@ -1,6 +1,6 @@
 # 对象身份与去重规则审计
 
-本文档描述业务对象 identity/dedup 的生产审计方式。当前闭环统一规则入口，并在 workbench active generation 中投影对象身份字段；仍不启用独立的 `object_identity` 分发 read model。
+本文档描述业务对象 identity/dedup 的生产审计方式。当前闭环统一规则入口，直接审计 canonical facts；不启用独立的 `object_identity` 分发 read model，也不读取已退役 Workbench page projection。
 
 ## 规则边界
 
@@ -13,7 +13,7 @@
 - 银行流水只有在稳定 business-fields identity 完整且其中一条已被 paired/异常/忽略占用时，才压制同 identity 的 unpaired 别名；全 unpaired 重复只审计。
 - OA 单据以 `row_id` 为主身份，`form_id`/`workflow_no` 只作为 alias 审计线索，不按金额、申请人或项目推断合并。
 - OA source alias 只能来自 `app.oa_source_aliases.status='active'` 的显式审计事实；用于把同一 OA 生命周期中的旧 source row 归一到 canonical row，不删除 OA 原始投影、附件或 cache。
-- 历史冲突不做破坏性合并。审计输出报告，人工 repair 或 read model rebuild 后再重新审计。
+- 历史冲突不做破坏性合并。审计输出报告，人工 repair canonical facts 后再重新审计。
 
 ## 生产审计命令
 
@@ -22,15 +22,6 @@
 ```bash
 cd /path/to/fin-ops-platform
 PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.audit_object_identity --json --limit 50
-```
-
-可限定 workbench active generation scope：
-
-```bash
-PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.audit_object_identity \
-  --json \
-  --limit 50 \
-  --workbench-scope 2026-02
 ```
 
 报告覆盖：
@@ -42,30 +33,23 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.audit_object_identity \
 - `app.oa_attachment_invoice_cache`：OA 附件票缓存中的正式发票 evidence/invoices canonical、suspected duplicate、missing canonical。
 - `app.oa_attachment_invoice_cache_sources` / `app.oa_attachments`：将 OA 附件票缓存 key 映射回真实附件和 OA，用于区分“缓存内部重复”和“跨 OA 重复发票”。
 - `app.oa_source_aliases`：只读取 `active` alias，将已确认的 OA lifecycle/migration alias 归一到 canonical OA row；缺表或无 active alias 时保持原判定。
-- `read_model.workbench_group_rows` active generation：同一强发票 identity 或稳定银行 identity 是否同时存在于 `paired` 和 `unpaired` zone。
-- `read_model.workbench_group_rows` active generation：同一 row id 或同一强发票 identity 是否在多个 unpaired group 中同时成为 visible/operable owner；银行流水 unpaired/unpaired 只按 row id 审计，不按稳定 business-fields identity 阻断。
-- `app.oa_applications`：同一 `form_id` 是否映射多个 `row_id`，用于排查 OA alias 风险。
-- `app.workbench_pair_relations`：active relation 中是否存在指向已不存在对象的 row_id。
 
 ## Workbench relation 展示归属审计
 
-对象 identity 审计负责发现同一业务对象是否有多个 visible owner；active relation 写入后是否已经在当前 Workbench active generation 中同组展示，由统一 `reconciliation-workbench` 页面 Audit 覆盖。管理员页面按钮和下列 CLI 调用同一个只读 proof core；CLI 只是运维适配器，不是第二套审计实现。发布前或生产修复后执行：
+对象 identity 审计负责 canonical identity/dedup；active relation 成员是否仍存在且类型正确，由统一 `reconciliation-workbench` 页面 Audit 覆盖。管理员页面按钮和下列 CLI 调用同一个只读 proof core；CLI 只是运维适配器，不是第二套审计实现。发布前或生产修复后执行：
 
 ```bash
 cd /path/to/fin-ops-platform
 PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.audit_workbench_relation_display --json --limit 50
 ```
 
-该工具只执行 `select`，不写 `app.*`、`read_model.*` 或 `job.*`。同一报告还检查 canonical/shared typed-edge equality、`workbench`/`workbench_relation` dirty scope 和 outbox；Workbench display 检查包括：
+该工具只执行 `select`，不写 `app.*`、`read_model.*` 或 `job.*`，也不读取任何页面 read model。报告检查：
 
-- `app.workbench_pair_relations` 中 active relation 的成员 row 是否存在于 active Workbench `all` generation。
-- 同一 relation 的成员 row 在 `all` 或成员月份 scope 中是否被拆到多个 group。
-- 同一 relation row 在同一个 active scope 中是否有多个 visible owner。
-- row payload 中的 `case_id` / `relation_mode` 是否与 canonical relation 不一致。
-- `all` generation 是否旧于 relation 成员所在月份 generation。
-- active relation members 是否精确等于 paired members，以及其余 canonical facts 是否各自成为唯一 unpaired owner；历史 metadata 不得改变归属。
+- `app.workbench_pair_relations.status='active'` 的 `row_ids` / `row_types` cardinality 是否一致。
+- relation 成员 ID 是否重复、为空或指向已删除的 canonical OA、银行流水或发票。
+- `turnover_manual_closure` 等不属于关联台页面的 relation mode 是否被正确排除。
 
-出现 blocking issue 时，不要直接修改 `read_model.workbench_group_rows` 或 `read_model.workbench_generations`。修复必须走现有刷新边界：按 relation 成员月份通过 `ReadModelRefreshGateway` / 事务内 repository scope contract 入队 Workbench month refresh，再用 aggregate-only `all` refresh 收敛全局 active generation。修复后重跑统一页面 Audit 和对象 identity 审计，确认页面报告 `integrity=pass`、`freshness=fresh`、`queue=drained` 且 `blocking_issue_count=0`。
+出现 blocking issue 时必须修复 canonical fact 或通过 `WorkbenchRelationCommandService` 修复 relation，禁止修改历史 page projection。修复后重跑统一页面 Audit 和对象 identity 审计，确认页面报告 `integrity=pass`、`freshness=fresh`、`queue=drained` 且 `blocking_issue_count=0`。
 
 `--limit` 只限制明细 examples 数量，不影响 summary count。生产判断以 summary 中的全量 count 和 `blocking_issue_count` 为准。
 
@@ -89,10 +73,6 @@ Blocking issue 包含：
 - 同一 canonical key 下出现多条银行流水。
 - 同一 OA 附件票强 canonical key 出现在多个不同 OA 报销中。强 key 包含数电票号、发票代码+号码、附件稳定 hash；`seller_tax_no + buyer_tax_no + invoice_date + total_with_tax` 这类弱税额指纹不作为 OA 附件票 blocking key。
 - 历史 `source_unique_key` 与当前强发票或银行 policy canonical key 不一致。正式发票弱税额指纹 mismatch 不阻断发布。
-- Workbench active generation 中同一强发票 identity 或稳定银行 identity 同时出现在 `paired` 与 `unpaired`。
-- Workbench active generation 中同一 row id 或同一强发票 identity 同时出现在多个 unpaired group，导致同一事实有多个 visible/operable owner。
-- Active workbench relation 指向已不存在的 row_id。
-- Active workbench relation 的成员 row 在 active Workbench generation 中缺失、拆组、重复 visible owner、payload relation 不一致，或 `all` generation 旧于成员月份 generation。
 
 非 blocking warning：
 

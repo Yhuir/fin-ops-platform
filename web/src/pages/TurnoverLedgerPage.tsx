@@ -357,7 +357,6 @@ export default function TurnoverLedgerPage() {
 
   const summary = ledger?.summary ?? DEFAULT_SUMMARY;
   const groups = ledger?.groups ?? [];
-  const pageDataStatus = error ? "stale" : ledger ? "fresh" : "refreshing";
   const familySummaryMap = useMemo(() => new Map((ledger?.familySummaries ?? []).map((item) => [item.family, item])), [
     ledger?.familySummaries,
   ]);
@@ -846,7 +845,6 @@ export default function TurnoverLedgerPage() {
           ariaLabel="Audit 外部往来款管理"
           pageKey="turnover-ledger"
           label="外部往来款管理"
-          readModelStatus={pageDataStatus}
         />
       ) : null}
     </div>

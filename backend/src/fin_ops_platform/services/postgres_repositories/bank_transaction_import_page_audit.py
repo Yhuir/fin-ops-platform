@@ -193,8 +193,6 @@ def _audit_snapshot(
                 "page/row completeness before upload, and object bytes readability require separate external evidence."
             ),
             "downstream_impact_targets": [
-                "bank_detail",
-                "bank_account_balance",
                 "workbench",
                 "workbench_relation",
                 "pending_invoice",

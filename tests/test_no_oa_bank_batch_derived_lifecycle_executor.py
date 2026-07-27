@@ -106,9 +106,9 @@ class BankFlowRuleBatchDerivedLifecycleExecutorTests(unittest.TestCase):
         self.assertEqual(
             result,
             {
-                "deleted_counts": {"bank_flow_rule_batch_read_models": 0},
+                "deleted_counts": {"bank_flow_rule_batch_canonical_drafts": 0},
                 "invalidated_scopes": ["2026-04"],
-                "enqueued_jobs": ["bank_flow_rule_batch.read_model.refresh"],
+                "enqueued_jobs": ["bank_flow_rule_batch.canonical_draft.refresh"],
             },
         )
 

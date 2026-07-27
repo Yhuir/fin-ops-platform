@@ -8,6 +8,9 @@ from types import SimpleNamespace
 from typing import Any, Callable
 
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
+from fin_ops_platform.services.workbench_row_identity import (
+    row_type_for_workbench_row_id,
+)
 
 
 """
@@ -54,12 +57,12 @@ class _RecordingTransaction:
             return {
                 "event_id": "event-1",
                 "tenant_id": "default",
-                "event_type": "workbench.read_model.refresh",
+                "event_type": "workbench_relation.read_model.refresh",
                 "aggregate_type": "read_model",
                 "aggregate_id": "2026-05",
-                "scope_type": "workbench",
+                "scope_type": "workbench_relation",
                 "scope_key": "2026-05",
-                "dedupe_key": "workbench.read_model.refresh:workbench:2026-05",
+                "dedupe_key": "workbench_relation.read_model.refresh:workbench_relation:2026-05",
                 "payload": payload if isinstance(payload, dict) else {},
                 "attempts": 0,
                 "status": "pending",
@@ -69,6 +72,27 @@ class _RecordingTransaction:
                 "trace_id": "trace-1",
             }
         return None
+
+    def fetch_all(
+        self,
+        sql: str,
+        params: tuple[Any, ...] = (),
+    ) -> list[dict[str, Any]]:
+        normalized = " ".join(sql.lower().split())
+        self.calls.append(("fetch_all", normalized, params))
+        if (
+            "select distinct member.row_id, member.pane" in normalized
+            and "from canonical_groups groups" in normalized
+        ):
+            row_ids = list(params[-1]) if params else []
+            return [
+                {
+                    "row_id": str(row_id),
+                    "pane": row_type_for_workbench_row_id(str(row_id)),
+                }
+                for row_id in row_ids
+            ]
+        return []
 
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> int:
         normalized = " ".join(sql.lower().split())

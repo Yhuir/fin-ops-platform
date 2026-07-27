@@ -1,2061 +1,662 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import json
-import unittest
+from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+import tempfile
+from time import perf_counter
+import unittest
 
-from fin_ops_platform.app.server import Application
-from tests.app_test_support import build_local_state_application as build_application
-from fin_ops_platform.services.batch_accounting_service import BatchAccountingError, BatchAccountingService
-from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
-from fin_ops_platform.services.workbench_relation_command_service import (
-    CallbackWorkbenchRelationRepository,
-    WorkbenchRelationCommandService,
+from fin_ops_platform.app.auth import OAUserIdentity
+from fin_ops_platform.app.routes_batch_accounting import BatchAccountingApiRoutes
+from fin_ops_platform.services.batch_accounting_service import (
+    BatchAccountingError,
+    BatchAccountingService,
 )
+from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
+from tests.app_test_support import build_local_state_application as build_application
 
 
-class FakeBatchRelationFacade:
-    def __init__(self, relation: dict[str, object] | None = None) -> None:
-        self.calls: list[dict[str, object]] = []
-        self._relation = relation
-
-    def list_by_month(self, month: str, **kwargs: object) -> dict[str, object]:
-        self.calls.append({"month": month, **kwargs})
-        if month != "2026-01":
-            return {"status": "fresh", "rows": [], "groups": [], "source_versions": {}, "read_model_scope_keys": [month]}
-        return self._payload()
-
-    def _submitted_count(self, year: str) -> int:
-        payload = self._payload()
-        submitted_count = 0
-        for group in list(payload.get("groups") or []):
-            if not isinstance(group, dict):
-                continue
-            group_payload = group.get("payload") if isinstance(group.get("payload"), dict) else {}
-            metadata = group_payload.get("special_metadata") if isinstance(group_payload.get("special_metadata"), dict) else {}
-            relation_year = str(metadata.get("bank_year") or metadata.get("year") or "")
-            if metadata.get("source") == "batch_accounting" and relation_year == year:
-                submitted_count += 1
-        return submitted_count
-
-    def list_batch_accounting_relations_by_year(self, year: str, **kwargs: object) -> dict[str, object]:
-        self.calls.append({"list_year": year, **kwargs})
-        payload = self._payload()
-        payload["read_model_scope_keys"] = [f"{year}-{month:02d}" for month in range(1, 13)]
-        return payload
-
-    def get_batch_accounting_by_row_ids(self, row_ids: list[str], **kwargs: object) -> dict[str, object]:
-        self.calls.append({"row_ids": list(row_ids), **kwargs})
-        payload = self._payload()
-        payload["rows"] = [
-            row
-            for row in list(payload["rows"])
-            if str(row.get("row_id") or "") in {str(row_id) for row_id in row_ids}
-        ]
-        submitted_year = str(kwargs.get("submitted_year") or "")
-        payload["submitted_count"] = self._submitted_count(submitted_year) if submitted_year else 0
-        return payload
-
-    def _payload(self) -> dict[str, object]:
-        if isinstance(self._relation, dict):
-            metadata = self._relation.get("special_metadata") if isinstance(self._relation.get("special_metadata"), dict) else {}
-            row_ids = [str(row_id) for row_id in list(self._relation.get("row_ids") or [])]
-            row_types = [str(row_type) for row_type in list(self._relation.get("row_types") or [])]
-            group_id = str(self._relation.get("case_id") or "")
-            bank_row_id = str(metadata.get("bank_row_id") or row_ids[0] if row_ids else "")
-            linked_oa = [{"id": row_id} for index, row_id in enumerate(row_ids) if index < len(row_types) and row_types[index] == "oa"]
-            linked_invoices = [{"id": row_id} for index, row_id in enumerate(row_ids) if index < len(row_types) and row_types[index] == "invoice"]
-            return {
-                "status": "fresh",
-                "rows": [
-                    {
-                        "row_id": bank_row_id,
-                        "row_type": "bank_transaction",
-                        "group_ids": [group_id],
-                        "linked_oa": linked_oa,
-                        "linked_bank_transactions": [{"id": bank_row_id}],
-                        "linked_input_invoices": linked_invoices,
-                        "linked_output_invoices": [],
-                    }
-                ],
-                "groups": [
-                    {
-                        "group_id": group_id,
-                        "payload": {
-                            "group_id": group_id,
-                            "relation_mode": str(self._relation.get("relation_mode") or "manual_confirmed"),
-                            "special_metadata": dict(metadata),
-                            "row_ids": row_ids,
-                            "row_types": row_types,
-                            "note": str(self._relation.get("note") or ""),
-                            "amount_check": dict(self._relation.get("amount_check") or {}) if isinstance(self._relation.get("amount_check"), dict) else {},
-                        },
-                    }
-                ],
-                "source_versions": {"schema_version": 52},
-                "read_model_scope_keys": ["2026-01"],
-                "refresh_enqueued": False,
-                "stale_reasons": [],
-            }
-        return {
-            "status": "fresh",
-            "rows": [
-                {
-                    "row_id": "txn_imported_202601_batch_001",
-                    "row_type": "bank_transaction",
-                    "group_ids": ["CASE-BATCH-txn_imported_202601_batch_001"],
-                    "linked_oa": [
-                        {"id": "oa-exp-ba-001", "applicant": "刘晨", "project_name": "品牌广告投放"},
-                        {"id": "oa-exp-ba-002", "applicant": "王明", "project_name": "品牌广告投放"},
-                    ],
-                    "linked_bank_transactions": [
-                        {"id": "txn_imported_202601_batch_001", "amount": "1200.00", "direction": "outflow"}
-                    ],
-                    "linked_input_invoices": [
-                        {"id": "oa-att-inv-oa-exp-ba-001-01", "total_with_tax": "700.00"},
-                        {"id": "oa-att-inv-oa-exp-ba-002-01", "total_with_tax": "500.00"},
-                    ],
-                    "linked_output_invoices": [],
-                }
-            ],
-            "groups": [
-                {
-                    "group_id": "CASE-BATCH-txn_imported_202601_batch_001",
-                    "payload": {
-                        "group_id": "CASE-BATCH-txn_imported_202601_batch_001",
-                        "relation_mode": "manual_confirmed",
-                        "special_metadata": {
-                            "source": "batch_accounting",
-                            "bank_row_id": "txn_imported_202601_batch_001",
-                            "oa_row_ids": ["oa-exp-ba-001", "oa-exp-ba-002"],
-                            "invoice_row_ids": ["oa-att-inv-oa-exp-ba-001-01", "oa-att-inv-oa-exp-ba-002-01"],
-                            "year": "2026",
-                        },
-                        "row_ids": [
-                            "txn_imported_202601_batch_001",
-                            "oa-exp-ba-001",
-                            "oa-exp-ba-002",
-                            "oa-att-inv-oa-exp-ba-001-01",
-                            "oa-att-inv-oa-exp-ba-002-01",
-                        ],
-                        "row_types": ["bank", "oa", "oa", "invoice", "invoice"],
-                    },
-                }
-            ],
-            "source_versions": {"schema_version": 52},
-            "read_model_scope_keys": ["2026-01"],
-            "refresh_enqueued": False,
-            "stale_reasons": [],
-        }
+BANK_ROW_ID = "txn_imported_202601_batch_001"
+OA_ROW_ID = "oa-exp-ba-001"
+INVOICE_ROW_ID = "oa-att-inv-oa-exp-ba-001-01"
+RELATION_ID = f"CASE-BATCH-{BANK_ROW_ID}"
 
 
-class NonFreshBatchRelationFacade(FakeBatchRelationFacade):
-    def __init__(
-        self,
-        *,
-        status: str,
-        stale_reasons: list[str],
-        read_model_scope_keys: list[str] | None = None,
-        refresh_enqueued: bool | None = True,
-    ) -> None:
-        super().__init__(None)
-        self._status = status
-        self._stale_reasons = stale_reasons
-        self._read_model_scope_keys = read_model_scope_keys or ["2026-01"]
-        self._refresh_enqueued = refresh_enqueued
-
-    def list_by_month(self, month: str, **kwargs: object) -> dict[str, object]:
-        payload = super().list_by_month(month, **kwargs)
-        if self._refresh_enqueued is None:
-            payload["refresh_enqueued"] = bool(kwargs.get("require_fresh"))
-        return payload
-
-    def list_batch_accounting_relations_by_year(self, year: str, **kwargs: object) -> dict[str, object]:
-        payload = super().list_batch_accounting_relations_by_year(year, **kwargs)
-        if self._refresh_enqueued is None:
-            payload["refresh_enqueued"] = bool(kwargs.get("require_fresh"))
-        return payload
-
-    def get_batch_accounting_by_row_ids(self, row_ids: list[str], **kwargs: object) -> dict[str, object]:
-        payload = super().get_batch_accounting_by_row_ids(row_ids, **kwargs)
-        if self._refresh_enqueued is None:
-            payload["refresh_enqueued"] = bool(kwargs.get("require_fresh"))
-        return payload
-
-    def _payload(self) -> dict[str, object]:
-        return {
-            "status": self._status,
-            "rows": [],
-            "groups": [],
-            "source_versions": {},
-            "read_model_scope_keys": list(self._read_model_scope_keys),
-            "refresh_enqueued": bool(self._refresh_enqueued),
-            "stale_reasons": list(self._stale_reasons),
-        }
+def bank_row(
+    *,
+    row_id: str = BANK_ROW_ID,
+    amount: str = "1200.00",
+    trade_time: str = "2026-01-07T15:54:00+08:00",
+) -> dict[str, object]:
+    return {
+        "id": row_id,
+        "type": "bank",
+        "trade_time": trade_time,
+        "counterparty_name": "批量账务集中处理",
+        "debit_amount": amount,
+        "signed_amount": f"-{amount}",
+        "direction": "outflow",
+        "account_name": "建行基本户",
+        "account_no": "6227000012348106",
+        "version": 1,
+    }
 
 
-class SubmittedMonthOnlyBatchRelationFacade:
+def oa_row(
+    *,
+    row_id: str = OA_ROW_ID,
+    amount: str = "1200.00",
+    apply_time: str = "2026-01-06",
+) -> dict[str, object]:
+    return {
+        "id": row_id,
+        "type": "oa",
+        "applicant": "刘晨",
+        "apply_time": apply_time,
+        "project_name": "品牌广告投放",
+        "amount": amount,
+        "reason": "日常报销",
+        "apply_type": "日常报销",
+        "expense_type": "",
+    }
+
+
+def invoice_row(
+    *,
+    row_id: str = INVOICE_ROW_ID,
+    source_oa_id: str = OA_ROW_ID,
+) -> dict[str, object]:
+    return {
+        "id": row_id,
+        "type": "invoice",
+        "source_kind": "oa_attachment_invoice",
+        "source_oa_id": source_oa_id,
+        "derived_from_oa_id": source_oa_id,
+        "issue_date": "2026-01-05",
+        "total_with_tax": "1200.00",
+    }
+
+
+def active_relation(
+    *,
+    relation_id: str = RELATION_ID,
+    bank_id: str = BANK_ROW_ID,
+    oa_id: str = OA_ROW_ID,
+    invoice_id: str = INVOICE_ROW_ID,
+    version: int = 1,
+) -> dict[str, object]:
+    return {
+        "case_id": relation_id,
+        "relation_mode": "batch_accounting",
+        "status": "active",
+        "version": version,
+        "month_scope": "2026-01",
+        "row_ids": [bank_id, oa_id, invoice_id],
+        "row_types": ["bank", "oa", "invoice"],
+        "note": "日常报销批量账务管理提交",
+        "amount_check": {
+            "status": "matched",
+            "direction": "expense",
+            "bank_amount": "1200.00",
+            "oa_amount": "1200.00",
+            "amount_delta": "0.00",
+            "requires_note": False,
+        },
+        "special_metadata": {
+            "source": "batch_accounting",
+            "bank_row_id": bank_id,
+            "oa_row_ids": [oa_id],
+            "invoice_row_ids": [invoice_id],
+            "bank_year": "2026",
+            "affected_scope_keys": ["2026-01"],
+        },
+    }
+
+
+class FakeBatchAccountingQueryRepository:
     def __init__(self) -> None:
-        self.calls: list[dict[str, object]] = []
-
-    def list_by_month(self, month: str, **kwargs: object) -> dict[str, object]:
-        self.calls.append({"month": month, **kwargs})
-        raise AssertionError("submitted bucket must not fallback to month relation scan")
-
-
-class RowsBatchRelationFacade:
-    def __init__(self, rows: list[dict[str, object]], groups: list[dict[str, object]] | None = None) -> None:
-        self.calls: list[dict[str, object]] = []
-        self._rows = rows
-        self._groups = groups or []
-
-    def list_by_month(self, month: str, **kwargs: object) -> dict[str, object]:
-        self.calls.append({"month": month, **kwargs})
-        if month != "2026-01":
-            return {"status": "fresh", "rows": [], "groups": [], "source_versions": {}, "read_model_scope_keys": [month]}
-        return self._payload()
-
-    def _submitted_count(self, year: str) -> int:
-        submitted_count = 0
-        for group in self._groups:
-            group_payload = group.get("payload") if isinstance(group.get("payload"), dict) else {}
-            metadata = group_payload.get("special_metadata") if isinstance(group_payload.get("special_metadata"), dict) else {}
-            relation_year = str(metadata.get("bank_year") or metadata.get("year") or "")
-            if metadata.get("source") == "batch_accounting" and relation_year == year:
-                submitted_count += 1
-        return submitted_count
-
-    def list_batch_accounting_relations_by_year(self, year: str, **kwargs: object) -> dict[str, object]:
-        self.calls.append({"list_year": year, **kwargs})
-        return {
-            "status": "fresh",
-            "rows": [],
-            "groups": [dict(group) for group in self._groups],
-            "source_versions": {"schema_version": 52},
-            "read_model_scope_keys": [f"{year}-{month:02d}" for month in range(1, 13)],
-            "refresh_enqueued": False,
-            "stale_reasons": [],
+        self.list_calls: list[dict[str, object]] = []
+        self.submission_calls: list[dict[str, object]] = []
+        self.list_payload: dict[str, object] = {
+            "summary": {
+                "unsubmitted_count": 1,
+                "submitted_count": 0,
+                "oa_count": 1,
+            },
+            "bank_rows": [bank_row()],
+            "oa_rows": [oa_row()],
+            "invoice_rows": [invoice_row()],
+            "relations": [],
+            "member_rows": [],
+            "pagination": {
+                "bank_rows": {"page": 1, "page_size": 200, "pageSize": 200, "total": 1},
+                "oa_rows": {"page": 1, "page_size": 200, "pageSize": 200, "total": 1},
+            },
+        }
+        self.submission_payload: dict[str, object] = {
+            "bank_rows": [bank_row()],
+            "oa_rows": [oa_row()],
+            "invoice_rows": [invoice_row()],
         }
 
-    def get_batch_accounting_by_row_ids(self, row_ids: list[str], **kwargs: object) -> dict[str, object]:
-        self.calls.append({"row_ids": list(row_ids), **kwargs})
-        row_id_set = {str(row_id) for row_id in row_ids}
-        payload = self._payload()
-        payload["rows"] = [
-            row
-            for row in list(payload["rows"])
-            if str(row.get("row_id") or "") in row_id_set
-        ]
-        submitted_year = str(kwargs.get("submitted_year") or "")
-        payload["submitted_count"] = self._submitted_count(submitted_year) if submitted_year else 0
-        return payload
+    def list_snapshot(self, **kwargs: object) -> dict[str, object]:
+        self.list_calls.append(dict(kwargs))
+        return deepcopy(self.list_payload)
 
-    def _payload(self) -> dict[str, object]:
-        return {
-            "status": "fresh",
-            "rows": [dict(row) for row in self._rows],
-            "groups": [dict(group) for group in self._groups],
-            "source_versions": {"schema_version": 52},
-            "read_model_scope_keys": ["2026-01"],
-            "refresh_enqueued": False,
-            "stale_reasons": [],
-        }
+    def load_submission_context(self, **kwargs: object) -> dict[str, object]:
+        self.submission_calls.append(dict(kwargs))
+        return deepcopy(self.submission_payload)
 
 
-class WriteBlockingPairRelationService(WorkbenchPairRelationService):
-    def replace_with_confirmed_relation(self, **kwargs):  # type: ignore[no-untyped-def]
-        raise AssertionError("BatchAccountingService must delegate submit relation writes to WorkbenchRelationCommandService.")
-
-    def withdraw_latest_for_row_ids(self, *args, **kwargs):  # type: ignore[no-untyped-def]
-        raise AssertionError("BatchAccountingService must delegate withdraw relation writes to WorkbenchRelationCommandService.")
-
-
-class RecordingBatchRelationCommandService:
-    def __init__(self, pair_relation_service: WorkbenchPairRelationService | None = None) -> None:
-        self._pair_relation_service = pair_relation_service
+class RecordingRelationCommandService:
+    def __init__(self) -> None:
         self.confirm_calls: list[dict[str, object]] = []
         self.cancel_calls: list[dict[str, object]] = []
         self.active_relation_calls: list[list[str]] = []
+        self.active_relations: list[dict[str, object]] = []
+        self.relation_by_case_id: dict[str, object] | None = None
+        self.confirm_error: WorkbenchRelationCommandError | None = None
 
     def active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, object]]:
-        self.active_relation_calls.append([str(row_id) for row_id in list(row_ids or [])])
-        if self._pair_relation_service is None:
-            return []
-        return self._pair_relation_service.active_relations_for_row_ids(row_ids)
+        self.active_relation_calls.append(list(row_ids))
+        row_id_set = set(row_ids)
+        return [
+            deepcopy(relation)
+            for relation in self.active_relations
+            if row_id_set.intersection(set(relation.get("row_ids") or []))
+        ]
 
     def get_active_relation_by_case_id(self, case_id: str) -> dict[str, object] | None:
-        if self._pair_relation_service is None:
-            return None
-        return self._pair_relation_service.get_active_relation_by_case_id(case_id)
+        relation = self.relation_by_case_id
+        if isinstance(relation, dict) and relation.get("case_id") == case_id:
+            return deepcopy(relation)
+        return None
 
     def confirm_relation(self, **kwargs: object) -> dict[str, object]:
-        self.confirm_calls.append(dict(kwargs))
+        self.confirm_calls.append(deepcopy(kwargs))
+        if self.confirm_error is not None:
+            raise self.confirm_error
         relation = {
-            "case_id": str(kwargs["case_id"]),
+            "case_id": kwargs["case_id"],
+            "relation_mode": kwargs["relation_mode"],
+            "status": "active",
+            "version": 1,
+            "month_scope": kwargs["month_scope"],
             "row_ids": list(kwargs["row_ids"]),
             "row_types": list(kwargs["row_types"]),
-            "status": "active",
-            "relation_mode": str(kwargs["relation_mode"]),
-            "month_scope": str(kwargs["month_scope"]),
-            "created_by": str(kwargs["actor_id"]),
-            "note": str(kwargs.get("note") or ""),
-            "amount_check": dict(kwargs.get("amount_check") or {}),
-            "special_metadata": dict(kwargs.get("special_metadata") or {}),
-            "version": 1,
+            "note": kwargs["note"],
+            "amount_check": dict(kwargs["amount_check"]),
+            "special_metadata": dict(kwargs["special_metadata"]),
         }
-        return {
-            "status": "confirmed",
-            "relation": relation,
-            "history": {"operation_type": str(kwargs.get("history_operation_type") or "confirm_link")},
-            "changed_case_ids": [relation["case_id"]],
-            "affected_months": ["2026-01"],
-            "version": 1,
-            "read_model_status": "fresh",
-            "read_model_stale_reasons": [],
-            "read_model_scope_keys": ["2026-01"],
-            "refresh_enqueued": False,
-            "idempotent_replay": False,
-        }
+        self.relation_by_case_id = relation
+        self.active_relations = [relation]
+        return {"relation": relation, "changed_case_ids": [str(kwargs["case_id"])]}
 
     def cancel_relation(self, **kwargs: object) -> dict[str, object]:
         self.cancel_calls.append(dict(kwargs))
+        relation = self.relation_by_case_id or {}
+        self.relation_by_case_id = None
+        self.active_relations = []
         return {
-            "status": "cancelled",
-            "relation": {
-                "case_id": str(kwargs["case_id"]),
-                "row_ids": ["txn_imported_202601_batch_001", "oa-exp-ba-001"],
-                "status": "cancelled",
-                "month_scope": "2026-01",
-                "version": 2,
-            },
-            "history": {"operation_type": "withdraw_link"},
+            "affected_row_ids": list(relation.get("row_ids") or []),
             "restored_relations": [],
             "changed_case_ids": [str(kwargs["case_id"])],
-            "affected_row_ids": ["txn_imported_202601_batch_001", "oa-exp-ba-001"],
-            "affected_months": ["2026-01"],
-            "version": 2,
-            "read_model_status": "fresh",
-            "read_model_stale_reasons": [],
-            "read_model_scope_keys": ["2026-01"],
-            "refresh_enqueued": False,
-            "idempotent_replay": False,
         }
 
 
-def relation_command_service_for(pair_relation_service: WorkbenchPairRelationService) -> WorkbenchRelationCommandService:
-    def save_snapshot(snapshot: dict[str, object], *, changed_case_ids: list[str]) -> None:
-        changed_ids = {str(case_id).strip() for case_id in list(changed_case_ids or []) if str(case_id).strip()}
-        current = pair_relation_service.snapshot()
-        current_relations = dict(current.get("pair_relations") if isinstance(current.get("pair_relations"), dict) else {})
-        incoming_relations = dict(snapshot.get("pair_relations") if isinstance(snapshot.get("pair_relations"), dict) else {})
-        for case_id in changed_ids:
-            if case_id in incoming_relations:
-                current_relations[case_id] = incoming_relations[case_id]
-            else:
-                current_relations.pop(case_id, None)
-        restored = WorkbenchPairRelationService.from_snapshot(
-            {
-                "pair_relations": current_relations,
-                "pair_relation_history": list(snapshot.get("pair_relation_history") or []),
-            }
-        )
-        pair_relation_service._pair_relations = restored._pair_relations
-        pair_relation_service._pair_relation_history = restored._pair_relation_history
-
-    return WorkbenchRelationCommandService(
-        relation_repository=CallbackWorkbenchRelationRepository(
-            load_snapshot=pair_relation_service.snapshot,
-            save_snapshot=save_snapshot,
-        ),
-        relation_facade=FakeBatchRelationFacade(),
+def service(
+    repository: FakeBatchAccountingQueryRepository | None = None,
+    command_service: RecordingRelationCommandService | None = None,
+) -> BatchAccountingService:
+    return BatchAccountingService(
+        query_repository=repository or FakeBatchAccountingQueryRepository(),
+        relation_command_service=command_service or RecordingRelationCommandService(),
     )
 
 
-class BatchAccountingApiTests(unittest.TestCase):
-    def _grouped_payload(self) -> dict[str, object]:
-        eligible_bank = {
-            "id": "txn_imported_202601_batch_001",
-            "type": "bank",
-            "trade_time": "2026-01-07 15:54:00",
-            "pay_receive_time": "2026-01-07 15:54:00",
-            "counterparty_name": " 批量账务集中处理 ",
-            "debit_amount": "1200.00",
-            "credit_amount": "",
-            "payment_account_label": "建行基本户 8106",
-            "bank_name": "建行",
-            "account_last4": "8106",
-            "version": 1,
-        }
-        return {
-            "month": "all",
-            "summary": {},
-            "paired": {"groups": []},
-            "unpaired": {
-                "groups": [
-                    {
-                        "group_id": "eligible-bank",
-                        "bank_rows": [eligible_bank],
-                        "oa_rows": [],
-                        "invoice_rows": [],
-                    },
-                    {
-                        "group_id": "wrong-counterparty-bank",
-                        "bank_rows": [
-                            {
-                                **eligible_bank,
-                                "id": "txn_imported_202601_other_counterparty",
-                                "counterparty_name": "批量账务集中处理-代付",
-                            }
-                        ],
-                        "oa_rows": [],
-                        "invoice_rows": [],
-                    },
-                    {
-                        "group_id": "income-bank",
-                        "bank_rows": [
-                            {
-                                **eligible_bank,
-                                "id": "txn_imported_202601_income",
-                                "debit_amount": "",
-                                "credit_amount": "1200.00",
-                            }
-                        ],
-                        "oa_rows": [],
-                        "invoice_rows": [],
-                    },
-                    {
-                        "group_id": "wrong-year-bank",
-                        "bank_rows": [
-                            {
-                                **eligible_bank,
-                                "id": "txn_imported_202501_batch_001",
-                                "trade_time": "2025-12-31 10:00:00",
-                                "pay_receive_time": "2025-12-31 10:00:00",
-                            }
-                        ],
-                        "oa_rows": [],
-                        "invoice_rows": [],
-                    },
-                    {
-                        "group_id": "case:CASE-OA-INVOICE",
-                        "group_type": "candidate",
-                        "oa_rows": [
-                            {
-                                "id": "oa-exp-ba-001",
-                                "type": "oa",
-                                "case_id": "CASE-OA-INVOICE",
-                                "applicant": "刘晨",
-                                "apply_time": "2026-01-06",
-                                "project_name": "品牌广告投放",
-                                "amount": "700.00",
-                                "reason": "1月日常报销",
-                                "apply_type": "日常报销",
-                                "expense_type": "交通费",
-                                "summary_fields": {"申请日期": "2026-01-06"},
-                            }
-                        ],
-                        "bank_rows": [],
-                        "invoice_rows": [
-                            {
-                                "id": "oa-att-inv-oa-exp-ba-001-01",
-                                "type": "invoice",
-                                "case_id": "CASE-OA-INVOICE",
-                                "source_kind": "oa_attachment_invoice",
-                                "derived_from_oa_id": "oa-exp-ba-001",
-                                "total_with_tax": "700.00",
-                            }
-                        ],
-                    },
-                    {
-                        "group_id": "case:CASE-OA-ONLY",
-                        "oa_rows": [
-                            {
-                                "id": "oa-exp-ba-002",
-                                "type": "oa",
-                                "case_id": "CASE-OA-ONLY",
-                                "applicant": "王明",
-                                "apply_time": "2026-01-07",
-                                "project_name": "市场活动项目",
-                                "amount": "500.00",
-                                "reason": "1月活动报销",
-                                "apply_type": "差旅日常报销",
-                                "expense_type": "差旅费",
-                                "summary_fields": {"申请日期": "2026-01-07"},
-                            },
-                            {
-                                "id": "oa-exp-ba-003",
-                                "type": "oa",
-                                "case_id": "CASE-OA-ONLY",
-                                "applicant": "赵敏",
-                                "project_name": "办公用品",
-                                "amount": "300.00",
-                                "reason": "日常办公用品报销",
-                                "apply_type": "日常报销",
-                                "expense_type": "办公费",
-                                "detail_fields": {"申请日期": "2026-01-08"},
-                            },
-                            {
-                                "id": "oa-pay-001",
-                                "type": "oa",
-                                "applicant": "供应商",
-                                "apply_time": "2026-01-07",
-                                "amount": "500.00",
-                                "apply_type": "付款申请",
-                                "expense_type": "服务费",
-                                "summary_fields": {"申请日期": "2026-01-07"},
-                            },
-                            {
-                                "id": "oa-exp-ba-2025",
-                                "type": "oa",
-                                "applicant": "旧年",
-                                "apply_time": "2025-12-31",
-                                "amount": "500.00",
-                                "apply_type": "日常报销",
-                                "expense_type": "差旅费",
-                                "summary_fields": {"申请日期": "2025-12-31"},
-                            },
-                            {
-                                "id": "oa-exp-ba-2025b",
-                                "type": "oa",
-                                "applicant": "旧年补充",
-                                "apply_time": "2025-12-30",
-                                "amount": "700.00",
-                                "apply_type": "日常报销",
-                                "expense_type": "交通费",
-                                "summary_fields": {"申请日期": "2025-12-30"},
-                            },
-                        ],
-                        "bank_rows": [],
-                        "invoice_rows": [],
-                    },
-                ]
-            },
-        }
+class BatchAccountingServiceTests(unittest.TestCase):
+    def test_unsubmitted_payload_uses_page_repository_and_has_no_read_model_contract(self) -> None:
+        repository = FakeBatchAccountingQueryRepository()
+        timings: list[tuple[str, float]] = []
 
-    def _large_batch_accounting_payload(self, total: int = 250) -> dict[str, object]:
-        bank_rows = [
-            {
-                "id": f"txn_imported_202601_batch_{index:03d}",
-                "type": "bank",
-                "trade_time": f"2026-01-{(index % 28) + 1:02d} 09:00:00",
-                "pay_receive_time": f"2026-01-{(index % 28) + 1:02d} 09:00:00",
-                "counterparty_name": " 批量账务集中处理 ",
-                "debit_amount": "10.00",
-                "credit_amount": "",
-                "payment_account_label": f"建行基本户 {index:04d}",
-                "bank_name": "建行",
-                "account_last4": f"{index % 10000:04d}",
-                "version": 1,
-            }
-            for index in range(total)
-        ]
-        oa_rows = [
-            {
-                "id": f"oa-exp-ba-{index:03d}",
-                "type": "oa",
-                "case_id": f"CASE-OA-{index:03d}",
-                "applicant": f"申请人{index:03d}",
-                "apply_time": f"2026-01-{(index % 28) + 1:02d}",
-                "project_name": "批量账务首屏保护",
-                "amount": "10.00",
-                "reason": "日常报销",
-                "apply_type": "日常报销",
-                "expense_type": "交通费",
-                "summary_fields": {"申请日期": f"2026-01-{(index % 28) + 1:02d}"},
-            }
-            for index in range(total)
-        ]
-        return {
-            "month": "all",
-            "summary": {},
-            "paired": {"groups": []},
-            "unpaired": {
-                "groups": [
-                    {
-                        "group_id": "large-batch-bank",
-                        "bank_rows": bank_rows,
-                        "oa_rows": [],
-                        "invoice_rows": [],
-                    },
-                    {
-                        "group_id": "large-batch-oa",
-                        "bank_rows": [],
-                        "oa_rows": oa_rows,
-                        "invoice_rows": [],
-                    },
-                ]
-            },
-        }
-
-    def _app_with_grouped_payload(self, payload: dict[str, object] | None = None) -> tuple[Application, object]:
-        payload = payload or self._grouped_payload()
-
-        class StaticBatchAccountingReadModel:
-            def load_batch_accounting_workbench_payload(self, *, bank_year: str) -> dict[str, object]:
-                return payload
-
-            def load_batch_accounting_submit_workbench_payload(
-                self,
-                *,
-                bank_year: str,
-                bank_row_id: str,
-                oa_row_ids: list[str],
-            ) -> dict[str, object]:
-                return payload
-
-            def load_batch_accounting_submitted_bank_workbench_payload(
-                self,
-                *,
-                bank_year: str,
-            ) -> dict[str, object]:
-                return payload
-
-        app = build_application()
-        read_model = StaticBatchAccountingReadModel()
-        app._workbench_sql_read_repository = read_model
-        return app, read_model
-
-    def test_unsubmitted_list_uses_sql_read_model_loader_when_available(self) -> None:
-        class SqlReadModel:
-            def __init__(self, payload: dict[str, object]) -> None:
-                self.payload = payload
-                self.calls: list[str] = []
-
-            def load_batch_accounting_workbench_payload(self, *, bank_year: str) -> dict[str, object]:
-                self.calls.append(bank_year)
-                return self.payload
-
-        app = build_application()
-        sql_read_model = SqlReadModel(self._grouped_payload())
-        app._workbench_sql_read_repository = sql_read_model
-
-        response = app.handle_request("GET", "/api/batch-accounting?bank_year=2026&bucket=unsubmitted")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(sql_read_model.calls, ["2026"])
-        server_timing = response.headers.get("Server-Timing", "")
-        for phase in (
-            "batch_candidate_load",
-            "batch_candidate_parse",
-            "batch_candidate_select",
-            "batch_relation_apply",
-            "batch_payload_assembly",
-            "batch_service_total",
-            "batch_serialization",
-        ):
-            self.assertIn(f"{phase};dur=", server_timing)
-        self.assertNotIn("server_timing", payload)
-        self.assertNotIn("timings", payload)
-        self.assertEqual([row["id"] for row in payload["bank_rows"]], ["txn_imported_202601_batch_001"])
-        self.assertEqual(
-            [row["id"] for row in payload["oa_rows"]],
-            ["oa-exp-ba-001", "oa-exp-ba-002", "oa-exp-ba-003", "oa-exp-ba-2025", "oa-exp-ba-2025b"],
-        )
-
-    def test_unsubmitted_list_fails_closed_without_sql_workbench_loader(self) -> None:
-        app = build_application()
-
-        response = app.handle_request("GET", "/api/batch-accounting?bank_year=2026&bucket=unsubmitted")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 503, response.body)
-        self.assertEqual(payload["error"], "batch_accounting_workbench_read_model_unavailable")
-
-    def test_unsubmitted_list_fails_closed_for_invalid_sql_workbench_payload(self) -> None:
-        class InvalidReadModel:
-            def load_batch_accounting_workbench_payload(self, *, bank_year: str) -> None:
-                return None
-
-        app = build_application()
-        app._workbench_sql_read_repository = InvalidReadModel()
-
-        response = app.handle_request("GET", "/api/batch-accounting?bank_year=2026&bucket=unsubmitted")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 503, response.body)
-        self.assertEqual(payload["error"], "batch_accounting_workbench_read_model_unavailable")
-
-    def test_submitted_list_does_not_fallback_to_unsubmitted_loader(self) -> None:
-        class ListOnlyReadModel:
-            def load_batch_accounting_workbench_payload(self, *, bank_year: str) -> dict[str, object]:
-                raise AssertionError("submitted bucket must not call the unsubmitted list loader")
-
-        app = build_application()
-        app._workbench_sql_read_repository = ListOnlyReadModel()
-
-        response = app.handle_request("GET", "/api/batch-accounting?bank_year=2026&bucket=submitted")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 503, response.body)
-        self.assertEqual(payload["error"], "batch_accounting_workbench_read_model_unavailable")
-
-    def test_submit_uses_sql_read_model_loader_when_available(self) -> None:
-        class SqlReadModel:
-            def __init__(self, payload: dict[str, object]) -> None:
-                self.payload = payload
-                self.full_calls: list[str] = []
-                self.submit_calls: list[dict[str, object]] = []
-
-            def load_batch_accounting_workbench_payload(self, *, bank_year: str) -> dict[str, object]:
-                self.full_calls.append(bank_year)
-                raise AssertionError("submit must use the narrow command read port")
-
-            def load_batch_accounting_submit_workbench_payload(
-                self,
-                *,
-                bank_year: str,
-                bank_row_id: str,
-                oa_row_ids: list[str],
-            ) -> dict[str, object]:
-                self.submit_calls.append(
-                    {"bank_year": bank_year, "bank_row_id": bank_row_id, "oa_row_ids": list(oa_row_ids)}
-                )
-                return self.payload
-
-        app = build_application()
-        sql_read_model = SqlReadModel(self._grouped_payload())
-        app._workbench_sql_read_repository = sql_read_model
-
-        response = app.handle_request(
-            "POST",
-            "/api/batch-accounting/submit",
-            json.dumps(
-                {
-                    "year": "2026",
-                    "bank_row_id": "txn_imported_202601_batch_001",
-                    "oa_row_ids": ["oa-exp-ba-001", "oa-exp-ba-002"],
-                    "actor": "finance-user",
-                }
-            ),
-        )
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(sql_read_model.full_calls, [])
-        self.assertEqual(
-            sql_read_model.submit_calls,
-            [
-                {
-                    "bank_year": "2026",
-                    "bank_row_id": "txn_imported_202601_batch_001",
-                    "oa_row_ids": ["oa-exp-ba-001", "oa-exp-ba-002"],
-                }
-            ],
-        )
-        self.assertEqual(payload["relation_id"], "CASE-BATCH-txn_imported_202601_batch_001")
-
-    def test_submit_fails_closed_without_sql_narrow_loader(self) -> None:
-        app = build_application()
-
-        response = app.handle_request(
-            "POST",
-            "/api/batch-accounting/submit",
-            json.dumps(
-                {
-                    "year": "2026",
-                    "bank_row_id": "txn_imported_202601_batch_001",
-                    "oa_row_ids": ["oa-exp-ba-001"],
-                }
-            ),
-        )
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 503, response.body)
-        self.assertEqual(payload["error"], "batch_accounting_workbench_read_model_unavailable")
-
-    def test_submit_checks_active_relations_only_for_selected_rows_without_relation_read_model_gate(self) -> None:
-        facade = RowsBatchRelationFacade([])
-        relation_command = RecordingBatchRelationCommandService()
-        service = BatchAccountingService(
-            batch_submit_workbench_loader=lambda **_kwargs: self._large_batch_accounting_payload(),
-            relation_facade=facade,
-            relation_command_service=relation_command,
-        )
-
-        result = service.submit(
-            year="2026",
-            bank_row_id="txn_imported_202601_batch_007",
-            oa_row_ids=["oa-exp-ba-007"],
-            actor="finance-user",
-        )
-
-        selected_row_ids = ["txn_imported_202601_batch_007", "oa-exp-ba-007"]
-        self.assertEqual(result["affected_row_ids"], selected_row_ids)
-        self.assertEqual([call for call in facade.calls if "row_ids" in call], [])
-        self.assertEqual(relation_command.active_relation_calls, [selected_row_ids])
-
-    def test_unsubmitted_list_explicit_pagination_protects_first_screen_slo(self) -> None:
-        app, _read_model = self._app_with_grouped_payload(self._large_batch_accounting_payload())
-
-        first_response = app.handle_request(
-            "GET",
-            "/api/batch-accounting?year=2026&bucket=unsubmitted&page=1&page_size=200",
-        )
-        second_response = app.handle_request(
-            "GET",
-            "/api/batch-accounting?year=2026&bucket=unsubmitted&page=2&page_size=200",
-        )
-        invalid_response = app.handle_request(
-            "GET",
-            "/api/batch-accounting?year=2026&bucket=unsubmitted&page=1&page_size=201",
-        )
-        first_payload = json.loads(first_response.body)
-        second_payload = json.loads(second_response.body)
-        invalid_payload = json.loads(invalid_response.body)
-
-        self.assertEqual(first_response.status_code, 200, first_response.body)
-        self.assertEqual(len(first_payload["bank_rows"]), 200)
-        self.assertEqual(len(first_payload["oa_rows"]), 200)
-        self.assertEqual(first_payload["summary"]["unsubmitted_count"], 250)
-        self.assertEqual(
-            first_payload["pagination"],
-            {
-                "bank_rows": {"page": 1, "page_size": 200, "pageSize": 200, "total": 250},
-                "oa_rows": {"page": 1, "page_size": 200, "pageSize": 200, "total": 250},
-            },
-        )
-        self.assertEqual(second_response.status_code, 200, second_response.body)
-        self.assertEqual(len(second_payload["bank_rows"]), 50)
-        self.assertEqual(len(second_payload["oa_rows"]), 50)
-        self.assertEqual(second_payload["summary"]["unsubmitted_count"], 250)
-        self.assertEqual(
-            second_payload["pagination"],
-            {
-                "bank_rows": {"page": 2, "page_size": 200, "pageSize": 200, "total": 250},
-                "oa_rows": {"page": 2, "page_size": 200, "pageSize": 200, "total": 250},
-            },
-        )
-        self.assertEqual(invalid_response.status_code, 400, invalid_response.body)
-        self.assertEqual(invalid_payload["error"], "invalid_paging")
-        self.assertEqual(invalid_payload["message"], "page_size must be <= 200.")
-
-    def test_unsubmitted_list_uses_relation_count_instead_of_month_relation_scan(self) -> None:
-        facade = RowsBatchRelationFacade(
-            [],
-            groups=[
-                {
-                    "group_id": "CASE-BATCH-txn_imported_202601_batch_001",
-                    "payload": {
-                        "special_metadata": {
-                            "source": "batch_accounting",
-                            "year": "2026",
-                            "bank_row_id": "txn_imported_202601_batch_001",
-                        }
-                    },
-                }
-            ],
-        )
-        service = BatchAccountingService(
-            batch_workbench_loader=lambda **_kwargs: self._grouped_payload(),
-            relation_facade=facade,
-        )
-        timings: dict[str, float] = {}
-
-        payload = service.build_payload(
-            year="2026",
+        payload = service(repository).build_payload(
+            bank_year="2026",
             bucket="unsubmitted",
-            timing_observer=lambda phase, duration_ms: timings.__setitem__(phase, duration_ms),
+            bank_page=2,
+            bank_page_size=50,
+            oa_page=3,
+            oa_page_size=40,
+            oa_search="刘晨",
+            timing_observer=lambda phase, duration: timings.append((phase, duration)),
         )
 
-        self.assertEqual(payload["summary"]["submitted_count"], 1)
-        self.assertGreaterEqual(timings["relation_read"], 0.0)
-        relation_calls = [call for call in facade.calls if "row_ids" in call]
-        self.assertEqual(len(relation_calls), 1)
-        self.assertEqual(relation_calls[0]["submitted_year"], "2026")
-        self.assertEqual(relation_calls[0]["reason"], "batch_accounting_unsubmitted_relations")
-        self.assertFalse([call for call in facade.calls if "month" in call], facade.calls)
-
-    def test_candidate_annotation_only_copies_the_top_level_row(self) -> None:
-        nested = {"detail_fields": {"申请事由": "批量账务"}}
-        source = {"id": "oa-exp-ba-001", "nested": nested}
-
-        annotated = BatchAccountingService._annotated_row(
-            source,
-            {"group_id": "batch-accounting:2026:unpaired-oa"},
-            "unpaired",
-        )
-
-        self.assertIs(annotated["nested"], nested)
-        self.assertNotIn("_section", source)
-        self.assertEqual(annotated["_section"], "unpaired")
-
-    def test_unsubmitted_relation_lookup_is_scoped_to_batch_candidates(self) -> None:
-        payload = {
-            "month": "all",
-            "summary": {},
-            "paired": {"groups": []},
-            "unpaired": {
-                "groups": [
-                    {
-                        "group_id": "mixed-candidates",
-                        "bank_rows": [
-                            {
-                                "id": "txn_imported_202601_batch_001",
-                                "type": "bank",
-                                "trade_time": "2026-01-02 09:00:00",
-                                "counterparty_name": "批量账务集中处理",
-                                "debit_amount": "100.00",
-                            },
-                            {
-                                "id": "txn_imported_202601_other_001",
-                                "type": "bank",
-                                "trade_time": "2026-01-03 09:00:00",
-                                "counterparty_name": "其他供应商",
-                                "debit_amount": "100.00",
-                            },
-                        ],
-                        "oa_rows": [
-                            {
-                                "id": "oa-exp-ba-001",
-                                "type": "oa",
-                                "applicant": "刘晨",
-                                "apply_time": "2026-01-06",
-                                "amount": "100.00",
-                                "apply_type": "日常报销",
-                            },
-                            {
-                                "id": "oa-exp-other-001",
-                                "type": "oa",
-                                "applicant": "非报销",
-                                "apply_time": "2026-01-07",
-                                "amount": "100.00",
-                                "apply_type": "采购申请",
-                            },
-                        ],
-                        "invoice_rows": [],
-                    }
-                ]
-            },
-        }
-        facade = RowsBatchRelationFacade([])
-        service = BatchAccountingService(
-            batch_workbench_loader=lambda **_kwargs: payload,
-            relation_facade=facade,
-        )
-
-        result = service.build_payload(year="2026", bucket="unsubmitted")
-
-        self.assertEqual([row["id"] for row in result["bank_rows"]], ["txn_imported_202601_batch_001"])
-        self.assertEqual([row["id"] for row in result["oa_rows"]], ["oa-exp-ba-001"])
-        row_id_calls = [call for call in facade.calls if "row_ids" in call]
         self.assertEqual(
-            row_id_calls,
+            repository.list_calls,
             [
                 {
-                    "row_ids": ["txn_imported_202601_batch_001", "oa-exp-ba-001"],
-                    "require_fresh": True,
-                    "reason": "batch_accounting_unsubmitted_relations",
-                    "scope_keys_hint": ["2026-01"],
-                    "submitted_year": "2026",
+                    "bank_year": "2026",
+                    "bucket": "unsubmitted",
+                    "bank_page": 2,
+                    "bank_page_size": 50,
+                    "oa_page": 3,
+                    "oa_page_size": 40,
+                    "oa_search": "刘晨",
                 }
             ],
         )
-
-    def test_unsubmitted_list_deduplicates_sql_read_model_rows_by_row_id(self) -> None:
-        duplicate_payload = self._grouped_payload()
-        group = duplicate_payload["unpaired"]["groups"][0]
-        group["bank_rows"] = [group["bank_rows"][0], {**group["bank_rows"][0], "version": 2}]
-        group["oa_rows"] = [
-            {
-                "id": "oa-exp-ba-001",
-                "type": "oa",
-                "applicant": "刘晨",
-                "apply_time": "2026-01-06",
-                "amount": "700.00",
-                "apply_type": "日常报销",
-            },
-            {
-                "id": "oa-exp-ba-001",
-                "type": "oa",
-                "applicant": "刘晨",
-                "apply_time": "2026-01-06",
-                "amount": "700.00",
-                "apply_type": "日常报销",
-            },
-        ]
-
-        class SqlReadModel:
-            def __init__(self) -> None:
-                self.calls: list[str] = []
-
-            def load_batch_accounting_workbench_payload(self, *, bank_year: str) -> dict[str, object]:
-                self.calls.append(bank_year)
-                return duplicate_payload
-
-        app = build_application()
-        sql_read_model = SqlReadModel()
-        app._workbench_sql_read_repository = sql_read_model
-
-        response = app.handle_request("GET", "/api/batch-accounting?year=2026&bucket=unsubmitted")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(sql_read_model.calls, ["2026"])
-        self.assertEqual([row["id"] for row in payload["bank_rows"]], ["txn_imported_202601_batch_001"])
-        self.assertEqual(
-            [row["id"] for row in payload["oa_rows"]],
-            ["oa-exp-ba-001", "oa-exp-ba-002", "oa-exp-ba-003", "oa-exp-ba-2025", "oa-exp-ba-2025b"],
-        )
-
-    def test_unsubmitted_list_does_not_run_legacy_relation_repair(self) -> None:
-        app, _payload_patcher = self._app_with_grouped_payload()
-        self.assertFalse(hasattr(app, "_repair_batch_accounting_relation_case_ids"))
-
-        response = app.handle_request("GET", "/api/batch-accounting?year=2026&bucket=unsubmitted")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual([row["id"] for row in payload["bank_rows"]], ["txn_imported_202601_batch_001"])
-
-    def _submit_batch_mismatch_with_note(self, app: Application, *, note: str) -> dict[str, object]:
-        response = app.handle_request(
-            "POST",
-            "/api/batch-accounting/submit",
-            json.dumps(
-                {
-                    "year": "2026",
-                    "bank_row_id": "txn_imported_202601_batch_001",
-                    "oa_row_ids": ["oa-exp-ba-001"],
-                    "note": note,
-                    "actor": "finance-user",
-                }
-            ),
-        )
-        self.assertEqual(response.status_code, 200, response.body)
-        return json.loads(response.body)
-
-    def test_unsubmitted_list_filters_bank_rows_and_daily_reimbursement_oa_rows(self) -> None:
-        app, _payload_patcher = self._app_with_grouped_payload()
-
-        response = app.handle_request("GET", "/api/batch-accounting?year=2026&bucket=unsubmitted")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual([row["id"] for row in payload["bank_rows"]], ["txn_imported_202601_batch_001"])
-        self.assertEqual(payload["bank_rows"][0]["counterparty_name"], "批量账务集中处理")
-        self.assertEqual(payload["bank_rows"][0]["direction"], "expense")
-        self.assertEqual(payload["bank_rows"][0]["amount"], "1200.00")
-        self.assertEqual(
-            [row["id"] for row in payload["oa_rows"]],
-            ["oa-exp-ba-001", "oa-exp-ba-002", "oa-exp-ba-003", "oa-exp-ba-2025", "oa-exp-ba-2025b"],
-        )
-        self.assertEqual(payload["oa_rows"][0]["linked_invoice_row_ids"], ["oa-att-inv-oa-exp-ba-001-01"])
-        self.assertEqual(payload["oa_rows"][2]["apply_time"], "2026-01-08")
         self.assertEqual(payload["summary"]["unsubmitted_count"], 1)
-        self.assertEqual(payload["summary"]["submitted_count"], 0)
+        self.assertEqual(payload["bank_rows"][0]["bank_name"], "建行基本户")
+        self.assertEqual(payload["bank_rows"][0]["account_last4"], "8106")
+        self.assertEqual(payload["oa_rows"][0]["linked_invoice_row_ids"], [INVOICE_ROW_ID])
+        self.assertEqual(payload["pagination"]["bank_rows"]["total"], 1)
+        self.assertNotIn("read_model_status", payload)
+        self.assertNotIn("read_model_scope_keys", payload)
+        self.assertNotIn("refresh_enqueued", payload)
+        self.assertEqual([phase for phase, _duration in timings], ["canonical_snapshot", "payload_assembly"])
 
-    def test_unsubmitted_list_ignores_legacy_oa_year_filter(self) -> None:
-        app, _payload_patcher = self._app_with_grouped_payload()
-
-        response = app.handle_request(
-            "GET",
-            "/api/batch-accounting?bank_year=2026&oa_year=2025&bucket=unsubmitted",
-        )
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual([row["id"] for row in payload["bank_rows"]], ["txn_imported_202601_batch_001"])
-        self.assertEqual(
-            [row["id"] for row in payload["oa_rows"]],
-            ["oa-exp-ba-001", "oa-exp-ba-002", "oa-exp-ba-003", "oa-exp-ba-2025", "oa-exp-ba-2025b"],
-        )
-        self.assertEqual(payload["summary"]["bank_year"], "2026")
-        self.assertNotIn("oa_year", payload["summary"])
-
-    def test_unsubmitted_list_excludes_bank_rows_already_linked_elsewhere(self) -> None:
-        app, _payload_patcher = self._app_with_grouped_payload()
-        relation = {
-            "case_id": "CASE-OTHER-LINK",
-            "row_ids": ["txn_imported_202601_batch_001", "oa-exp-ba-001"],
-            "row_types": ["bank", "oa"],
-            "relation_mode": "manual_confirmed",
-            "special_metadata": {"bank_row_id": "txn_imported_202601_batch_001"},
-        }
-        app._workbench_relation_facade = FakeBatchRelationFacade(relation)
-
-        response = app.handle_request("GET", "/api/batch-accounting?year=2026&bucket=unsubmitted")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(payload["bank_rows"], [])
-        self.assertEqual(payload["summary"]["unsubmitted_count"], 0)
-
-    def test_unsubmitted_list_filters_oa_rows_by_linked_bank_transactions_only(self) -> None:
-        app, _payload_patcher = self._app_with_grouped_payload()
-        app._workbench_relation_facade = RowsBatchRelationFacade(
-            [
-                {
-                    "row_id": "oa-exp-ba-001",
-                    "row_type": "oa",
-                    "relation_status": "linked",
-                    "group_ids": ["CASE-INVOICE-ONLY"],
-                    "linked_bank_transactions": [],
-                    "linked_input_invoices": [{"id": "oa-att-inv-oa-exp-ba-001-01"}],
-                    "linked_output_invoices": [],
-                },
-                {
-                    "row_id": "oa-exp-ba-002",
-                    "row_type": "oa",
-                    "relation_status": "candidate",
-                    "group_ids": ["CASE-CANDIDATE-NO-BANK"],
-                    "linked_bank_transactions": [],
-                    "linked_input_invoices": [],
-                    "linked_output_invoices": [],
-                },
-                {
-                    "row_id": "oa-exp-ba-003",
-                    "row_type": "oa",
-                    "relation_status": "candidate",
-                    "group_ids": ["CASE-CANDIDATE-WITH-BANK"],
-                    "linked_bank_transactions": [{"id": "txn_imported_202601_other"}],
-                    "linked_input_invoices": [],
-                    "linked_output_invoices": [],
-                },
-            ]
-        )
-
-        response = app.handle_request("GET", "/api/batch-accounting?year=2026&bucket=unsubmitted")
-        payload = json.loads(response.body)
-        oa_row_ids = [row["id"] for row in payload["oa_rows"]]
-
-        self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual([row["id"] for row in payload["bank_rows"]], ["txn_imported_202601_batch_001"])
-        self.assertIn("oa-exp-ba-001", oa_row_ids)
-        self.assertIn("oa-exp-ba-002", oa_row_ids)
-        self.assertNotIn("oa-exp-ba-003", oa_row_ids)
-
-    def test_unsubmitted_list_exposes_relation_read_model_missing_status(self) -> None:
-        app, _payload_patcher = self._app_with_grouped_payload()
-        app._workbench_relation_facade = NonFreshBatchRelationFacade(
-            status="missing",
-            stale_reasons=["read_model_missing"],
-            read_model_scope_keys=["2026-01"],
-            refresh_enqueued=True,
-        )
-
-        response = app.handle_request("GET", "/api/batch-accounting?year=2026&bucket=unsubmitted")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(payload["read_model_status"], "missing")
-        self.assertEqual(payload["read_model_stale_reasons"], ["read_model_missing"])
-        self.assertEqual(payload["read_model_scope_keys"], ["2026-01"])
-        self.assertIs(payload["refresh_enqueued"], True)
-
-    def test_unsubmitted_list_requires_fresh_relation_read_model_to_enqueue_missing_refresh(self) -> None:
-        app, _payload_patcher = self._app_with_grouped_payload()
-        facade = NonFreshBatchRelationFacade(
-            status="missing",
-            stale_reasons=["read_model_missing"],
-            read_model_scope_keys=["2026-01"],
-            refresh_enqueued=None,
-        )
-        app._workbench_relation_facade = facade
-
-        response = app.handle_request("GET", "/api/batch-accounting?year=2026&bucket=unsubmitted")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(payload["read_model_status"], "missing")
-        self.assertIs(payload["refresh_enqueued"], True)
-        self.assertTrue(
-            any(call.get("row_ids") and call.get("require_fresh") is True for call in facade.calls),
-            facade.calls,
-        )
-
-    def test_submitted_list_requires_fresh_relation_read_model_to_enqueue_stale_refresh(self) -> None:
-        app, _payload_patcher = self._app_with_grouped_payload()
-        facade = NonFreshBatchRelationFacade(
-            status="stale",
-            stale_reasons=["dirty_scope:2026-01"],
-            read_model_scope_keys=["2026-01"],
-            refresh_enqueued=None,
-        )
-        app._workbench_relation_facade = facade
-
-        response = app.handle_request("GET", "/api/batch-accounting?year=2026&bucket=submitted")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(payload["read_model_status"], "stale")
-        self.assertIs(payload["refresh_enqueued"], True)
-        self.assertTrue(
-            any(call.get("list_year") == "2026" and call.get("require_fresh") is True for call in facade.calls),
-            facade.calls,
-        )
-
-    def test_submitted_list_fails_closed_without_year_relation_reader(self) -> None:
-        facade = SubmittedMonthOnlyBatchRelationFacade()
-        service = BatchAccountingService(
-            batch_submitted_workbench_loader=lambda **_kwargs: self._grouped_payload(),
-            relation_facade=facade,
-        )
-
-        payload = service.build_payload(year="2026", bucket="submitted")
-
-        self.assertEqual(payload["summary"]["submitted_count"], 0)
-        self.assertEqual(payload["bank_rows"], [])
-        self.assertEqual(payload["relations_by_bank_row_id"], {})
-        self.assertEqual(payload["read_model_status"], "unavailable")
-        self.assertEqual(payload["read_model_stale_reasons"], ["batch_accounting_relation_list_unavailable"])
-        self.assertEqual(payload["read_model_scope_keys"], [f"2026-{month:02d}" for month in range(1, 13)])
-        self.assertEqual(facade.calls, [])
-
-    def test_submit_amount_mismatch_requires_difference_note(self) -> None:
-        app, _payload_patcher = self._app_with_grouped_payload()
-
-        response = app.handle_request(
-            "POST",
-            "/api/batch-accounting/submit",
-            json.dumps(
-                {
-                    "year": "2026",
-                    "bank_row_id": "txn_imported_202601_batch_001",
-                    "oa_row_ids": ["oa-exp-ba-001"],
-                    "amount": "1200.00",
-                    "invoice_row_ids": [],
-                }
-            ),
-        )
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 400, response.body)
-        self.assertEqual(payload["error"], "batch_accounting_note_required")
-        self.assertEqual(payload["amount_check"]["status"], "mismatch")
-        self.assertEqual(payload["amount_check"]["direction"], "expense")
-        self.assertEqual(payload["amount_check"]["bank_amount"], "1200.00")
-        self.assertEqual(payload["amount_check"]["oa_amount"], "700.00")
-        self.assertEqual(payload["amount_check"]["amount_delta"], "500.00")
-        self.assertTrue(payload["amount_check"]["requires_note"])
-        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id("txn_imported_202601_batch_001"))
-
-    def test_submit_amount_mismatch_rejects_whitespace_note(self) -> None:
-        app, _payload_patcher = self._app_with_grouped_payload()
-
-        response = app.handle_request(
-            "POST",
-            "/api/batch-accounting/submit",
-            json.dumps(
-                {
-                    "year": "2026",
-                    "bank_row_id": "txn_imported_202601_batch_001",
-                    "oa_row_ids": ["oa-exp-ba-001"],
-                    "note": "   ",
-                }
-            ),
-        )
-
-        self.assertEqual(response.status_code, 400, response.body)
-        self.assertEqual(json.loads(response.body)["error"], "batch_accounting_note_required")
-
-    def test_submit_amount_mismatch_with_note_persists_relation_and_history(self) -> None:
-        app, _payload_patcher = self._app_with_grouped_payload()
-
-        payload = self._submit_batch_mismatch_with_note(app, note="OA合计不含员工餐补扣款，财务确认闭环")
-
-        relation = payload["pair_relation"]
-        self.assertEqual(relation["note"], "OA合计不含员工餐补扣款，财务确认闭环")
-        self.assertEqual(relation["amount_check"]["status"], "mismatch")
-        self.assertEqual(relation["amount_check"]["direction"], "expense")
-        self.assertEqual(relation["amount_check"]["bank_amount"], "1200.00")
-        self.assertEqual(relation["amount_check"]["oa_amount"], "700.00")
-        self.assertEqual(relation["amount_check"]["amount_delta"], "500.00")
-        self.assertTrue(relation["amount_check"]["requires_note"])
-        self.assertEqual(relation["special_metadata"]["source"], "batch_accounting")
-        history = app._workbench_pair_relation_service.list_history()[-1]
-        self.assertEqual(history["note"], "OA合计不含员工餐补扣款，财务确认闭环")
-        self.assertEqual(history["amount_check"]["status"], "mismatch")
-
-    def test_submit_delegates_relation_write_to_command_service(self) -> None:
-        pair_service = WriteBlockingPairRelationService()
-        relation_command = RecordingBatchRelationCommandService(pair_service)
-        service = BatchAccountingService(
-            batch_submit_workbench_loader=lambda **_kwargs: self._grouped_payload(),
-            relation_facade=RowsBatchRelationFacade([]),
-            relation_command_service=relation_command,
-        )
-
-        result = service.submit(
-            year="2026",
-            bank_row_id="txn_imported_202601_batch_001",
-            oa_row_ids=["oa-exp-ba-001", "oa-exp-ba-002"],
-            actor="finance-user",
-        )
-
-        self.assertEqual(result["relation_id"], "CASE-BATCH-txn_imported_202601_batch_001")
-        self.assertEqual(len(relation_command.confirm_calls), 1)
-        call = relation_command.confirm_calls[0]
-        self.assertEqual(call["relation_mode"], "batch_accounting")
-        self.assertEqual(call["actor_id"], "finance-user")
-        self.assertEqual(call["history_operation_type"], "confirm_link")
-        self.assertIs(call["replace_existing"], True)
-        self.assertEqual(result["pair_relation"]["relation_mode"], "batch_accounting")
-
-    def test_submit_records_concrete_affected_scope_keys_for_cross_month_relation(self) -> None:
-        payload = self._grouped_payload()
-        payload["unpaired"]["groups"][0]["bank_rows"][0]["trade_time"] = "2026-03-19 10:32:00"  # type: ignore[index]
-        payload["unpaired"]["groups"][5]["oa_rows"][0]["apply_time"] = "2026-02-10"  # type: ignore[index]
-        pair_service = WorkbenchPairRelationService()
-        relation_command = RecordingBatchRelationCommandService(pair_service)
-        service = BatchAccountingService(
-            batch_submit_workbench_loader=lambda **_kwargs: payload,
-            relation_facade=RowsBatchRelationFacade([]),
-            relation_command_service=relation_command,
-        )
-
-        result = service.submit(
-            year="2026",
-            bank_row_id="txn_imported_202601_batch_001",
-            oa_row_ids=["oa-exp-ba-001", "oa-exp-ba-002"],
-            actor="finance-user",
-        )
-
-        self.assertEqual(result["month_scope"], "all")
-        self.assertEqual(result["affected_scope_keys"], ["2026-01", "2026-02", "2026-03"])
-        self.assertEqual(
-            result["pair_relation"]["special_metadata"]["affected_scope_keys"],
-            ["2026-01", "2026-02", "2026-03"],
-        )
-
-    def test_submit_requires_relation_command_service_without_direct_pair_fallback(self) -> None:
-        pair_service = WriteBlockingPairRelationService()
-        service = BatchAccountingService(
-            batch_submit_workbench_loader=lambda **_kwargs: self._grouped_payload(),
-            relation_facade=FakeBatchRelationFacade(),
-        )
-
-        with self.assertRaises(BatchAccountingError) as context:
-            service.submit(
-                year="2026",
-                bank_row_id="txn_imported_202601_batch_001",
-                oa_row_ids=["oa-exp-ba-001", "oa-exp-ba-002"],
-                actor="finance-user",
-            )
-
-        self.assertEqual(context.exception.code, "batch_accounting_relation_command_unavailable")
-
-    def test_submit_does_not_call_legacy_post_command_side_effects(self) -> None:
-        app, _payload_patcher = self._app_with_grouped_payload()
-
-        def fail_persist(*_args, **_kwargs):
-            raise AssertionError("batch accounting route must not call legacy pair relation persist")
-
-        app._schedule_workbench_pair_relation_persist = fail_persist
-        response = app.handle_request(
-            "POST",
-            "/api/batch-accounting/submit",
-            json.dumps(
-                {
-                    "year": "2026",
-                    "bank_row_id": "txn_imported_202601_batch_001",
-                    "oa_row_ids": ["oa-exp-ba-001"],
-                    "note": "财务确认差额闭环",
-                }
-            ),
-        )
-
-        self.assertEqual(response.status_code, 200, response.body)
-        payload = json.loads(response.body)
-        self.assertEqual(payload["affected_scope_keys"], ["2026-01"])
-        self.assertEqual(payload["affected_months"], ["2026-01"])
-        self.assertFalse(hasattr(app, "_execute_derived_data_lifecycle_event"))
-        self.assertFalse(hasattr(app, "_schedule_workbench_read_model_persist"))
-
-    def test_submit_creates_batch_accounting_relation_with_current_invoice_rows(self) -> None:
-        app, _payload_patcher = self._app_with_grouped_payload()
-
-        response = app.handle_request(
-            "POST",
-            "/api/batch-accounting/submit",
-            json.dumps(
-                {
-                    "year": "2026",
-                    "bank_row_id": "txn_imported_202601_batch_001",
-                    "oa_row_ids": ["oa-exp-ba-001", "oa-exp-ba-002"],
-                    "invoice_row_ids": [],
-                    "actor": "finance-user",
-                }
-            ),
-        )
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(payload["relation_id"], "CASE-BATCH-txn_imported_202601_batch_001")
-        relation = app._workbench_pair_relation_service.get_active_relation_by_case_id(payload["relation_id"])
-        assert relation is not None
-        self.assertEqual(relation["relation_mode"], "batch_accounting")
-        self.assertCountEqual(
-            relation["row_ids"],
-            [
-                "txn_imported_202601_batch_001",
-                "oa-exp-ba-001",
-                "oa-exp-ba-002",
-                "oa-att-inv-oa-exp-ba-001-01",
-            ],
-        )
-        self.assertEqual(
-            relation["special_metadata"],
-            {
-                "source": "batch_accounting",
-                "bank_row_id": "txn_imported_202601_batch_001",
-                "oa_row_ids": ["oa-exp-ba-001", "oa-exp-ba-002"],
-                "invoice_row_ids": ["oa-att-inv-oa-exp-ba-001-01"],
-                "year": "2026",
-                "bank_year": "2026",
-                "oa_years": ["2026"],
-                "affected_scope_keys": ["2026-01"],
-                "created_by": "finance-user",
+    def test_empty_snapshot_returns_observable_empty_lists_and_totals(self) -> None:
+        repository = FakeBatchAccountingQueryRepository()
+        repository.list_payload = {
+            "summary": {"unsubmitted_count": 0, "submitted_count": 0, "oa_count": 0},
+            "bank_rows": [],
+            "oa_rows": [],
+            "invoice_rows": [],
+            "relations": [],
+            "member_rows": [],
+            "pagination": {
+                "bank_rows": {"page": 1, "page_size": 100, "pageSize": 100, "total": 0},
+                "oa_rows": {"page": 1, "page_size": 100, "pageSize": 100, "total": 0},
             },
-        )
-        self.assertEqual(payload["affected_months"], ["2026-01"])
-        self.assertEqual(payload["affected_scope_keys"], ["2026-01"])
-        self.assertEqual(payload["operation_barrier_targets"], [])
+        }
 
-    def test_submit_allows_invoice_only_oa_relation_without_linked_bank_flow(self) -> None:
-        app, _payload_patcher = self._app_with_grouped_payload()
-        app._workbench_relation_facade = RowsBatchRelationFacade(
-            [
-                {
-                    "row_id": "oa-exp-ba-001",
-                    "row_type": "oa",
-                    "relation_status": "linked",
-                    "group_ids": ["CASE-INVOICE-ONLY"],
-                    "linked_bank_transactions": [],
-                    "linked_input_invoices": [{"id": "oa-att-inv-oa-exp-ba-001-01"}],
-                    "linked_output_invoices": [],
-                }
-            ]
-        )
-        app._workbench_pair_relation_service.create_active_relation(
-            case_id="CASE-INVOICE-ONLY",
-            row_ids=["oa-exp-ba-001", "oa-att-inv-oa-exp-ba-001-01"],
-            row_types=["oa", "invoice"],
-            relation_mode="oa_invoice_offset_auto_match",
-            created_by="system",
-            month_scope="2026-01",
-            special_metadata={"source": "oa_invoice_offset_auto_match"},
-        )
+        payload = service(repository).build_payload(bank_year="2026", bucket="unsubmitted")
 
-        response = app.handle_request(
-            "POST",
-            "/api/batch-accounting/submit",
-            json.dumps(
-                {
-                    "year": "2026",
-                    "bank_row_id": "txn_imported_202601_batch_001",
-                    "oa_row_ids": ["oa-exp-ba-001"],
-                    "note": "OA 已有关联发票，本次补关联流水。",
-                    "actor": "finance-user",
-                }
-            ),
-        )
-        payload = json.loads(response.body)
+        self.assertEqual(payload["bank_rows"], [])
+        self.assertEqual(payload["oa_rows"], [])
+        self.assertEqual(payload["summary"]["submitted_count"], 0)
+        self.assertEqual(payload["pagination"]["oa_rows"]["total"], 0)
 
-        self.assertEqual(response.status_code, 200, response.body)
-        relation = app._workbench_pair_relation_service.get_active_relation_by_row_id("oa-exp-ba-001")
-        assert relation is not None
-        self.assertEqual(relation["case_id"], payload["relation_id"])
-        self.assertCountEqual(
-            relation["row_ids"],
-            ["txn_imported_202601_batch_001", "oa-exp-ba-001", "oa-att-inv-oa-exp-ba-001-01"],
-        )
-
-    def test_submit_uses_canonical_write_safety_when_relation_read_model_is_not_fresh(self) -> None:
-        app, _payload_patcher = self._app_with_grouped_payload()
-        app._workbench_relation_facade = NonFreshBatchRelationFacade(
-            status="missing",
-            stale_reasons=["read_model_missing"],
-            read_model_scope_keys=["2026-01"],
-            refresh_enqueued=True,
-        )
-
-        response = app.handle_request(
-            "POST",
-            "/api/batch-accounting/submit",
-            json.dumps(
-                {
-                    "year": "2026",
-                    "bank_row_id": "txn_imported_202601_batch_001",
-                    "oa_row_ids": ["oa-exp-ba-001", "oa-exp-ba-002"],
-                    "actor": "finance-user",
-                }
-            ),
-        )
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(payload["relation_id"], "CASE-BATCH-txn_imported_202601_batch_001")
-        relation = app._workbench_pair_relation_service.get_active_relation_by_row_id("txn_imported_202601_batch_001")
-        self.assertIsNotNone(relation)
-        assert relation is not None
-        self.assertEqual(relation["relation_mode"], "batch_accounting")
-
-    def test_submit_matched_amount_ignores_supplied_difference_note(self) -> None:
-        app, _payload_patcher = self._app_with_grouped_payload()
-
-        response = app.handle_request(
-            "POST",
-            "/api/batch-accounting/submit",
-            json.dumps(
-                {
-                    "year": "2026",
-                    "bank_row_id": "txn_imported_202601_batch_001",
-                    "oa_row_ids": ["oa-exp-ba-001", "oa-exp-ba-002"],
-                    "note": "上一次选择留下的差额说明",
-                    "actor": "finance-user",
-                }
-            ),
-        )
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200, response.body)
-        relation = app._workbench_pair_relation_service.get_active_relation_by_case_id(payload["relation_id"])
-        assert relation is not None
-        self.assertEqual(relation["amount_check"]["status"], "matched")
-        self.assertEqual(relation["note"], "日常报销批量账务管理提交")
-        self.assertEqual(app._workbench_pair_relation_service.list_history()[-1]["note"], "日常报销批量账务管理提交")
-
-    def test_submit_uses_bank_row_scoped_relation_id_without_consuming_auto_override_ids(self) -> None:
-        app, _payload_patcher = self._app_with_grouped_payload()
-
-        response = app.handle_request(
-            "POST",
-            "/api/batch-accounting/submit",
-            json.dumps(
-                {
-                    "year": "2026",
-                    "bank_row_id": "txn_imported_202601_batch_001",
-                    "oa_row_ids": ["oa-exp-ba-001", "oa-exp-ba-002"],
-                    "actor": "finance-user",
-                }
-            ),
-        )
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(payload["relation_id"], "CASE-BATCH-txn_imported_202601_batch_001")
-        self.assertEqual(app._workbench_override_service._next_case_id(), "CASE-AUTO-0001")
-
-    def test_submit_allows_cross_year_bank_and_oa_selection(self) -> None:
-        app, _payload_patcher = self._app_with_grouped_payload()
-        response = app.handle_request(
-            "POST",
-            "/api/batch-accounting/submit",
-            json.dumps(
-                {
-                    "bank_year": "2026",
-                    "bank_row_id": "txn_imported_202601_batch_001",
-                    "oa_row_ids": ["oa-exp-ba-2025", "oa-exp-ba-001"],
-                    "actor": "finance-user",
-                }
-            ),
-        )
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200, response.body)
-        relation = app._workbench_pair_relation_service.get_active_relation_by_case_id(payload["relation_id"])
-        assert relation is not None
-        self.assertEqual(relation["special_metadata"]["bank_year"], "2026")
-        self.assertNotIn("oa_year", relation["special_metadata"])
-        self.assertEqual(relation["special_metadata"]["oa_years"], ["2025", "2026"])
-        self.assertEqual(relation["special_metadata"]["year"], "2026")
-        self.assertCountEqual(
-            relation["row_ids"],
-            [
-                "txn_imported_202601_batch_001",
-                "oa-exp-ba-2025",
-                "oa-exp-ba-001",
-                "oa-att-inv-oa-exp-ba-001-01",
+    def test_maximum_page_payload_assembly_is_bounded(self) -> None:
+        repository = FakeBatchAccountingQueryRepository()
+        repository.list_payload = {
+            "summary": {"unsubmitted_count": 200, "submitted_count": 0, "oa_count": 200},
+            "bank_rows": [bank_row(row_id=f"bank-{index}") for index in range(200)],
+            "oa_rows": [oa_row(row_id=f"oa-{index}") for index in range(200)],
+            "invoice_rows": [
+                invoice_row(row_id=f"invoice-{index}", source_oa_id=f"oa-{index}")
+                for index in range(200)
             ],
+            "relations": [],
+            "member_rows": [],
+            "pagination": {
+                "bank_rows": {"page": 1, "page_size": 200, "pageSize": 200, "total": 200},
+                "oa_rows": {"page": 1, "page_size": 200, "pageSize": 200, "total": 200},
+            },
+        }
+
+        started_at = perf_counter()
+        status, payload = BatchAccountingApiRoutes(lambda: service(repository)).list_payload(
+            {
+                "bank_year": ["2026"],
+                "bucket": ["unsubmitted"],
+                "bank_page_size": ["200"],
+                "oa_page_size": ["200"],
+            }
         )
+        duration_ms = (perf_counter() - started_at) * 1000
 
-    def test_submitted_list_is_derived_from_active_batch_accounting_relations(self) -> None:
-        app, _payload_patcher = self._app_with_grouped_payload()
-        submit_response = app.handle_request(
-            "POST",
-            "/api/batch-accounting/submit",
-            json.dumps(
-                {
-                    "year": "2026",
-                    "bank_row_id": "txn_imported_202601_batch_001",
-                    "oa_row_ids": ["oa-exp-ba-001", "oa-exp-ba-002"],
-                    "actor": "finance-user",
-                }
-            ),
-        )
-        self.assertEqual(submit_response.status_code, 200, submit_response.body)
-        relation = app._workbench_pair_relation_service.get_active_relation_by_row_id("txn_imported_202601_batch_001")
-        self.assertIsNotNone(relation)
-        app._workbench_relation_facade = FakeBatchRelationFacade(relation)
+        self.assertEqual(status, 200)
+        self.assertEqual(len(payload["bank_rows"]), 200)
+        self.assertEqual(len(payload["oa_rows"]), 200)
+        self.assertLess(duration_ms, 500)
 
-        response = app.handle_request("GET", "/api/batch-accounting?year=2026&bucket=submitted")
-        payload = json.loads(response.body)
+    def test_submitted_payload_uses_active_batch_relation_and_canonical_members(self) -> None:
+        repository = FakeBatchAccountingQueryRepository()
+        relation = active_relation()
+        repository.list_payload = {
+            "summary": {"unsubmitted_count": 0, "submitted_count": 1, "oa_count": 0},
+            "bank_rows": [{**bank_row(), "relation_id": RELATION_ID, "version": 3}],
+            "oa_rows": [],
+            "relations": [{**relation, "bank_row": {**bank_row(), "relation_id": RELATION_ID, "version": 3}}],
+            "member_rows": [
+                {"member_type": "oa", "id": OA_ROW_ID, "payload": oa_row()},
+                {"member_type": "invoice", "id": INVOICE_ROW_ID, "payload": invoice_row()},
+            ],
+            "pagination": {
+                "bank_rows": {"page": 1, "page_size": 200, "pageSize": 200, "total": 1}
+            },
+        }
 
-        self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual([row["id"] for row in payload["bank_rows"]], ["txn_imported_202601_batch_001"])
-        relation_id = payload["bank_rows"][0]["relation_id"]
-        self.assertTrue(relation_id)
-        relation_payload = payload["relations_by_bank_row_id"]["txn_imported_202601_batch_001"]
-        self.assertEqual(relation_payload["relation_id"], relation_id)
-        self.assertEqual([row["id"] for row in relation_payload["oa_rows"]], ["oa-exp-ba-001", "oa-exp-ba-002"])
-        self.assertEqual([row["id"] for row in relation_payload["invoice_rows"]], ["oa-att-inv-oa-exp-ba-001-01"])
+        payload = service(repository).build_payload(bank_year="2026", bucket="submitted")
+
         self.assertEqual(payload["summary"]["submitted_count"], 1)
+        self.assertEqual(payload["bank_rows"][0]["relation_id"], RELATION_ID)
+        self.assertEqual(payload["bank_rows"][0]["version"], 1)
+        bucket = payload["relations_by_bank_row_id"][BANK_ROW_ID]
+        self.assertEqual(bucket["relation"]["relation_mode"], "batch_accounting")
+        self.assertEqual(bucket["relation"]["relation_id"], RELATION_ID)
+        self.assertEqual(bucket["oa_rows"][0]["id"], OA_ROW_ID)
+        self.assertEqual(bucket["oa_rows"][0]["linked_invoice_row_ids"], [INVOICE_ROW_ID])
 
-    def test_submitted_list_relation_bucket_uses_workbench_relation_distribution(self) -> None:
-        relation = {
-            "case_id": "CASE-BATCH-txn_imported_202601_batch_001",
-            "row_ids": [
-                "txn_imported_202601_batch_001",
-                "oa-exp-ba-001",
-                "oa-exp-ba-002",
-                "oa-att-inv-oa-exp-ba-001-01",
-                "oa-att-inv-oa-exp-ba-002-01",
-            ],
-            "row_types": ["bank", "oa", "oa", "invoice", "invoice"],
-            "status": "active",
-            "relation_mode": "batch_accounting",
-            "month_scope": "2026-01",
-            "special_metadata": {
-                "source": "batch_accounting",
-                "bank_row_id": "txn_imported_202601_batch_001",
-                "oa_row_ids": ["oa-exp-ba-001", "oa-exp-ba-002"],
-                "invoice_row_ids": ["oa-att-inv-oa-exp-ba-001-01", "oa-att-inv-oa-exp-ba-002-01"],
-                "year": "2026",
-            },
-        }
-        facade = FakeBatchRelationFacade(relation)
-        service = BatchAccountingService(
-            batch_submitted_workbench_loader=lambda **_kwargs: self._grouped_payload(),
-            relation_facade=facade,
-        )
-
-        payload = service.build_payload(year="2026", bucket="submitted")
-
-        relation_payload = payload["relations_by_bank_row_id"]["txn_imported_202601_batch_001"]
-        self.assertEqual([row["id"] for row in relation_payload["oa_rows"]], ["oa-exp-ba-001", "oa-exp-ba-002"])
-        self.assertEqual(
-            [row["id"] for row in relation_payload["invoice_rows"]],
-            ["oa-att-inv-oa-exp-ba-001-01", "oa-att-inv-oa-exp-ba-002-01"],
-        )
-        self.assertIn(
-            {
-                "list_year": "2026",
-                "require_fresh": True,
-                "reason": "batch_accounting_submitted_relations",
-            },
-            facade.calls,
-        )
-        self.assertFalse([call for call in facade.calls if "month" in call], facade.calls)
-        self.assertIn({"row_ids": ["txn_imported_202601_batch_001"], "require_fresh": True, "reason": "batch_accounting_submitted_relations"}, facade.calls)
-
-    def test_submitted_list_exposes_relation_read_model_stale_status(self) -> None:
-        app, _payload_patcher = self._app_with_grouped_payload()
-        app._workbench_relation_facade = NonFreshBatchRelationFacade(
-            status="stale",
-            stale_reasons=["dirty_scope:2026-01"],
-            read_model_scope_keys=["2026-01"],
-            refresh_enqueued=True,
-        )
-
-        response = app.handle_request("GET", "/api/batch-accounting?year=2026&bucket=submitted")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(payload["read_model_status"], "stale")
-        self.assertEqual(payload["read_model_stale_reasons"], ["dirty_scope:2026-01"])
-        self.assertEqual(payload["read_model_scope_keys"], [f"2026-{month:02d}" for month in range(1, 13)])
-        self.assertIs(payload["refresh_enqueued"], True)
-
-    def test_submitted_list_exposes_mismatch_note_and_amount_check(self) -> None:
-        app, _payload_patcher = self._app_with_grouped_payload()
-        self._submit_batch_mismatch_with_note(app, note="财务确认差额闭环")
-        relation = app._workbench_pair_relation_service.get_active_relation_by_row_id("txn_imported_202601_batch_001")
-        self.assertIsNotNone(relation)
-        app._workbench_relation_facade = FakeBatchRelationFacade(relation)
-
-        response = app.handle_request("GET", "/api/batch-accounting?year=2026&bucket=submitted")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200, response.body)
-        relation_payload = payload["relations_by_bank_row_id"]["txn_imported_202601_batch_001"]
-        self.assertEqual(relation_payload["relation"]["note"], "财务确认差额闭环")
-        self.assertEqual(relation_payload["relation"]["amount_check"]["status"], "mismatch")
-        self.assertTrue(relation_payload["relation"]["amount_check"]["requires_note"])
-
-    def test_withdraw_does_not_restore_display_only_oa_invoice_snapshot_as_active_relation(self) -> None:
-        app, _payload_patcher = self._app_with_grouped_payload()
-        submit_response = app.handle_request(
-            "POST",
-            "/api/batch-accounting/submit",
-            json.dumps(
-                {
-                    "year": "2026",
-                    "bank_row_id": "txn_imported_202601_batch_001",
-                    "oa_row_ids": ["oa-exp-ba-001", "oa-exp-ba-002"],
-                    "actor": "finance-user",
-                }
+    def test_invalid_year_bucket_paging_and_search_fail_fast(self) -> None:
+        cases = (
+            ({"bank_year": "26", "bucket": "unsubmitted"}, "invalid_batch_accounting_year"),
+            ({"bank_year": "2026", "bucket": "unknown"}, "invalid_batch_accounting_bucket"),
+            ({"bank_year": "2026", "bucket": "unsubmitted", "bank_page": 0}, "invalid_paging"),
+            ({"bank_year": "2026", "bucket": "unsubmitted", "oa_page_size": 201}, "invalid_paging"),
+            (
+                {"bank_year": "2026", "bucket": "unsubmitted", "oa_search": "x" * 201},
+                "invalid_batch_accounting_search",
             ),
         )
-        self.assertEqual(submit_response.status_code, 200, submit_response.body)
-        relation_id = json.loads(submit_response.body)["relation_id"]
+        for kwargs, code in cases:
+            with self.subTest(code=code), self.assertRaises(BatchAccountingError) as context:
+                service().build_payload(**kwargs)
+            self.assertEqual(context.exception.code, code)
 
-        response = app.handle_request(
-            "POST",
-            f"/api/batch-accounting/{relation_id}/withdraw",
-            json.dumps({"reason": "选择错误", "actor": "finance-user"}),
-        )
-        payload = json.loads(response.body)
+    def test_submit_deduplicates_rows_and_delegates_canonical_command(self) -> None:
+        repository = FakeBatchAccountingQueryRepository()
+        command = RecordingRelationCommandService()
 
-        self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(payload["action"], "withdraw_batch_accounting")
-        self.assertEqual(payload["affected_scope_keys"], ["2026-01"])
-        self.assertEqual(payload["operation_barrier_targets"], [])
-        self.assertEqual(payload["restored_relations"], [])
-        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id("txn_imported_202601_batch_001"))
-        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id("oa-exp-ba-001"))
-        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id("oa-att-inv-oa-exp-ba-001-01"))
-        self.assertEqual(app._workbench_pair_relation_service.list_history()[-1]["operation_type"], "withdraw_link")
-        self.assertEqual(app._workbench_pair_relation_service.list_history()[-1]["after_relations"], [])
-
-    def test_withdraw_delegates_relation_write_to_command_service(self) -> None:
-        pair_service = WriteBlockingPairRelationService()
-        pair_service.create_active_relation(
-            case_id="CASE-BATCH-txn_imported_202601_batch_001",
-            row_ids=["txn_imported_202601_batch_001", "oa-exp-ba-001"],
-            row_types=["bank", "oa"],
-            relation_mode="batch_accounting",
-            created_by="finance-user",
-            month_scope="2026-01",
-            special_metadata={
-                "source": "batch_accounting",
-                "bank_row_id": "txn_imported_202601_batch_001",
-                "oa_row_ids": ["oa-exp-ba-001"],
-                "year": "2026",
-            },
-        )
-        relation_command = RecordingBatchRelationCommandService(pair_service)
-        service = BatchAccountingService(
-            relation_facade=FakeBatchRelationFacade(),
-            relation_command_service=relation_command,
-        )
-
-        result = service.withdraw(
-            relation_id="CASE-BATCH-txn_imported_202601_batch_001",
+        result = service(repository, command).submit(
+            bank_year="2026",
+            bank_row_id=BANK_ROW_ID,
+            oa_row_ids=[OA_ROW_ID, OA_ROW_ID],
             actor="finance-user",
-            reason="选择错误",
+            expected_version=1,
         )
 
-        self.assertEqual(result["action"], "withdraw_batch_accounting")
-        self.assertEqual(len(relation_command.cancel_calls), 1)
-        call = relation_command.cancel_calls[0]
-        self.assertEqual(call["case_id"], "CASE-BATCH-txn_imported_202601_batch_001")
-        self.assertEqual(call["actor_id"], "finance-user")
-        self.assertEqual(call["reason"], "选择错误")
-        self.assertEqual(call["history_operation_type"], "withdraw_link")
-
-    def test_postgres_batch_withdraw_uses_durable_relation_repository(self) -> None:
-        active_relation = {
-            "case_id": "CASE-BATCH-txn_imported_202601_batch_001",
-            "row_ids": ["txn_imported_202601_batch_001", "oa-exp-ba-001"],
-            "row_types": ["bank", "oa"],
-            "status": "active",
-            "relation_mode": "batch_accounting",
-            "month_scope": "2026-01",
-            "created_by": "finance-user",
-            "special_metadata": {
-                "source": "batch_accounting",
-                "bank_row_id": "txn_imported_202601_batch_001",
-                "oa_row_ids": ["oa-exp-ba-001"],
-                "year": "2026",
-                "bank_year": "2026",
-                "affected_scope_keys": ["2026-01"],
-            },
-            "version": 1,
-        }
-
-        class DurableRelationRepository:
-            instances: list["DurableRelationRepository"] = []
-
-            def __init__(self, connection: object) -> None:
-                self.connection = connection
-                self.saved: list[dict[str, object]] = []
-                self.instances.append(self)
-
-            def load_workbench_pair_relations(self) -> dict[str, object]:
-                return {
-                    "pair_relations": {
-                        "CASE-BATCH-txn_imported_202601_batch_001": dict(active_relation),
-                    },
-                    "pair_relation_history": [],
-                }
-
-            def load_active_workbench_pair_relation_by_case_id(
-                self,
-                case_id: str,
-            ) -> dict[str, object] | None:
-                if case_id != active_relation["case_id"]:
-                    return None
-                return dict(active_relation)
-
-            def save_workbench_pair_relations(
-                self,
-                snapshot: dict[str, object],
-                *,
-                changed_case_ids: list[str] | set[str] | None = None,
-            ) -> None:
-                self.saved.append(
-                    {
-                        "snapshot": snapshot,
-                        "changed_case_ids": set(changed_case_ids or []),
-                    }
-                )
-
-            def save_workbench_pair_relation_delta(
-                self,
-                snapshot: dict[str, object],
-                *,
-                changed_case_ids: list[str] | set[str] | None = None,
-            ) -> None:
-                self.save_workbench_pair_relations(
-                    snapshot,
-                    changed_case_ids=changed_case_ids,
-                )
-
-        app = build_application()
-        connection = object()
-        app._state_store = SimpleNamespace(storage_backend="postgres", _connection=connection)
-
-        with patch("fin_ops_platform.app.server.PostgresWorkbenchRelationRepository", DurableRelationRepository):
-            result = app._batch_accounting_service(use_sql_read_model=True).withdraw(
-                relation_id="CASE-BATCH-txn_imported_202601_batch_001",
-                actor="finance-user",
-                reason="选择错误",
-            )
-
-        self.assertEqual(result["action"], "withdraw_batch_accounting")
-        self.assertEqual(result["affected_scope_keys"], ["2026-01"])
-        self.assertEqual(len(DurableRelationRepository.instances), 1)
-        repository = DurableRelationRepository.instances[0]
-        self.assertIs(repository.connection, connection)
-        self.assertEqual(repository.saved[-1]["changed_case_ids"], {"CASE-BATCH-txn_imported_202601_batch_001"})
-        saved_relations = repository.saved[-1]["snapshot"]["pair_relations"]
-        self.assertEqual(saved_relations["CASE-BATCH-txn_imported_202601_batch_001"]["status"], "cancelled")
-        self.assertIsNone(
-            app._workbench_pair_relation_service.get_active_relation_by_case_id(
-                "CASE-BATCH-txn_imported_202601_batch_001"
-            )
-        )
-
-    def test_withdraw_legacy_relation_derives_scope_keys_from_narrow_context(self) -> None:
-        payload = self._grouped_payload()
-        payload["unpaired"]["groups"][0]["bank_rows"][0]["trade_time"] = "2026-03-19 10:32:00"  # type: ignore[index]
-        payload["unpaired"]["groups"][5]["oa_rows"][0]["apply_time"] = "2026-02-10"  # type: ignore[index]
-        pair_service = WorkbenchPairRelationService()
-        pair_service.create_active_relation(
-            case_id="CASE-BATCH-txn_imported_202601_batch_001",
-            row_ids=["txn_imported_202601_batch_001", "oa-exp-ba-001", "oa-exp-ba-002"],
-            row_types=["bank", "oa", "oa"],
-            relation_mode="batch_accounting",
-            created_by="finance-user",
-            month_scope="all",
-            special_metadata={
-                "source": "batch_accounting",
-                "bank_row_id": "txn_imported_202601_batch_001",
-                "oa_row_ids": ["oa-exp-ba-001", "oa-exp-ba-002"],
-                "year": "2026",
-                "bank_year": "2026",
-            },
-        )
-        relation_command = RecordingBatchRelationCommandService(pair_service)
-        service = BatchAccountingService(
-            batch_submit_workbench_loader=lambda **_kwargs: payload,
-            relation_facade=FakeBatchRelationFacade(),
-            relation_command_service=relation_command,
-        )
-
-        result = service.withdraw(
-            relation_id="CASE-BATCH-txn_imported_202601_batch_001",
-            actor="finance-user",
-            reason="选择错误",
-        )
-
-        self.assertEqual(result["affected_scope_keys"], ["2026-01", "2026-02", "2026-03"])
-
-    def test_withdraw_legacy_relation_uses_sql_narrow_loader_for_scope_backfill(self) -> None:
-        payload = self._grouped_payload()
-        payload["unpaired"]["groups"][0]["bank_rows"][0]["trade_time"] = "2026-03-19 10:32:00"  # type: ignore[index]
-        payload["unpaired"]["groups"][5]["oa_rows"][0]["apply_time"] = "2026-02-10"  # type: ignore[index]
-
-        class SqlReadModel:
-            def __init__(self, scoped_payload: dict[str, object]) -> None:
-                self.scoped_payload = scoped_payload
-                self.submit_calls: list[dict[str, object]] = []
-
-            def load_batch_accounting_workbench_payload(self, *, bank_year: str) -> dict[str, object]:
-                raise AssertionError("withdraw scope backfill must not use the list read port")
-
-            def load_batch_accounting_submit_workbench_payload(
-                self,
-                *,
-                bank_year: str,
-                bank_row_id: str,
-                oa_row_ids: list[str],
-            ) -> dict[str, object]:
-                self.submit_calls.append(
-                    {"bank_year": bank_year, "bank_row_id": bank_row_id, "oa_row_ids": list(oa_row_ids)}
-                )
-                return self.scoped_payload
-
-        app = build_application()
-        sql_read_model = SqlReadModel(payload)
-        app._workbench_sql_read_repository = sql_read_model
-        app._workbench_pair_relation_service.create_active_relation(
-            case_id="CASE-BATCH-txn_imported_202601_batch_001",
-            row_ids=["txn_imported_202601_batch_001", "oa-exp-ba-001", "oa-exp-ba-002"],
-            row_types=["bank", "oa", "oa"],
-            relation_mode="batch_accounting",
-            created_by="finance-user",
-            month_scope="all",
-            special_metadata={
-                "source": "batch_accounting",
-                "bank_row_id": "txn_imported_202601_batch_001",
-                "oa_row_ids": ["oa-exp-ba-001", "oa-exp-ba-002"],
-                "year": "2026",
-                "bank_year": "2026",
-            },
-        )
-        response = app.handle_request(
-            "POST",
-            "/api/batch-accounting/CASE-BATCH-txn_imported_202601_batch_001/withdraw",
-            json.dumps({"reason": "选择错误", "actor": "finance-user"}),
-        )
-        response_payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(response_payload["affected_scope_keys"], ["2026-01", "2026-02", "2026-03"])
         self.assertEqual(
-            sql_read_model.submit_calls,
-            [
-                {
-                    "bank_year": "2026",
-                    "bank_row_id": "txn_imported_202601_batch_001",
-                    "oa_row_ids": ["oa-exp-ba-001", "oa-exp-ba-002"],
-                }
-            ],
+            repository.submission_calls,
+            [{"bank_year": "2026", "bank_row_id": BANK_ROW_ID, "oa_row_ids": [OA_ROW_ID]}],
         )
+        self.assertEqual(
+            command.active_relation_calls,
+            [[BANK_ROW_ID, OA_ROW_ID, INVOICE_ROW_ID]],
+        )
+        call = command.confirm_calls[0]
+        self.assertEqual(call["relation_mode"], "batch_accounting")
+        self.assertEqual(call["row_ids"], [BANK_ROW_ID, OA_ROW_ID, INVOICE_ROW_ID])
+        self.assertEqual(call["row_types"], ["bank", "oa", "invoice"])
+        self.assertEqual(call["special_metadata"]["affected_scope_keys"], ["2026-01"])
+        self.assertEqual(result["relation_id"], RELATION_ID)
 
-    def test_withdraw_requires_relation_command_service_without_direct_pair_fallback(self) -> None:
-        pair_service = WriteBlockingPairRelationService()
-        pair_service.create_active_relation(
-            case_id="CASE-BATCH-txn_imported_202601_batch_001",
-            row_ids=["txn_imported_202601_batch_001", "oa-exp-ba-001"],
-            row_types=["bank", "oa"],
-            relation_mode="batch_accounting",
-            created_by="finance-user",
-            month_scope="2026-01",
-            special_metadata={
-                "source": "batch_accounting",
-                "bank_row_id": "txn_imported_202601_batch_001",
-                "oa_row_ids": ["oa-exp-ba-001"],
-                "year": "2026",
-            },
-        )
-        service = BatchAccountingService(
-            relation_facade=FakeBatchRelationFacade(),
-        )
-
-        with self.assertRaises(BatchAccountingError) as context:
-            service.withdraw(
-                relation_id="CASE-BATCH-txn_imported_202601_batch_001",
+    def test_submit_requires_note_for_amount_mismatch_and_rejects_stale_version(self) -> None:
+        repository = FakeBatchAccountingQueryRepository()
+        repository.submission_payload["oa_rows"] = [oa_row(amount="1000.00")]
+        with self.assertRaises(BatchAccountingError) as missing_note:
+            service(repository).submit(
+                bank_year="2026",
+                bank_row_id=BANK_ROW_ID,
+                oa_row_ids=[OA_ROW_ID],
                 actor="finance-user",
-                reason="选择错误",
+                note=" ",
+            )
+        self.assertEqual(missing_note.exception.code, "batch_accounting_note_required")
+        self.assertEqual(missing_note.exception.payload["amount_check"]["amount_delta"], "200.00")
+
+        with self.assertRaises(BatchAccountingError) as stale:
+            service().submit(
+                bank_year="2026",
+                bank_row_id=BANK_ROW_ID,
+                oa_row_ids=[OA_ROW_ID],
+                actor="finance-user",
+                expected_version=2,
+            )
+        self.assertEqual(stale.exception.code, "batch_accounting_version_conflict")
+
+    def test_submit_preserves_cross_month_relation_scope_and_oa_years(self) -> None:
+        repository = FakeBatchAccountingQueryRepository()
+        repository.submission_payload["oa_rows"] = [oa_row(apply_time="2025-12-31")]
+        command = RecordingRelationCommandService()
+
+        result = service(repository, command).submit(
+            bank_year="2026",
+            bank_row_id=BANK_ROW_ID,
+            oa_row_ids=[OA_ROW_ID],
+            actor="finance-user",
+        )
+
+        metadata = command.confirm_calls[0]["special_metadata"]
+        self.assertEqual(command.confirm_calls[0]["month_scope"], "all")
+        self.assertEqual(metadata["affected_scope_keys"], ["2025-12", "2026-01"])
+        self.assertEqual(metadata["oa_years"], ["2025"])
+        self.assertEqual(result["affected_scope_keys"], ["2025-12", "2026-01"])
+
+    def test_submit_rejects_bank_or_oa_linked_to_another_bank_but_allows_invoice_only_oa_relation(self) -> None:
+        command = RecordingRelationCommandService()
+        command.active_relations = [
+            {
+                "case_id": "CASE-OTHER-BANK",
+                "status": "active",
+                "relation_mode": "manual_confirmed",
+                "row_ids": [BANK_ROW_ID, "oa-other"],
+                "row_types": ["bank", "oa"],
+            }
+        ]
+        with self.assertRaises(BatchAccountingError) as bank_conflict:
+            service(command_service=command).submit(
+                bank_year="2026",
+                bank_row_id=BANK_ROW_ID,
+                oa_row_ids=[OA_ROW_ID],
+                actor="finance-user",
+            )
+        self.assertEqual(bank_conflict.exception.code, "batch_accounting_bank_row_already_linked")
+
+        command.active_relations = [
+            {
+                "case_id": "CASE-INVOICE-ONLY",
+                "status": "active",
+                "relation_mode": "existing_case",
+                "row_ids": [OA_ROW_ID, INVOICE_ROW_ID],
+                "row_types": ["oa", "invoice"],
+            }
+        ]
+        result = service(command_service=command).submit(
+            bank_year="2026",
+            bank_row_id=BANK_ROW_ID,
+            oa_row_ids=[OA_ROW_ID],
+            actor="finance-user",
+        )
+        self.assertTrue(result["success"])
+        self.assertEqual(command.confirm_calls[-1]["before_relations"][0]["case_id"], "CASE-INVOICE-ONLY")
+
+        command.active_relations = [
+            {
+                "case_id": "CASE-OA-BANK",
+                "status": "active",
+                "relation_mode": "manual_confirmed",
+                "row_ids": ["bank-other", OA_ROW_ID],
+                "row_types": ["bank", "oa"],
+            }
+        ]
+        with self.assertRaises(BatchAccountingError) as oa_conflict:
+            service(command_service=command).submit(
+                bank_year="2026",
+                bank_row_id=BANK_ROW_ID,
+                oa_row_ids=[OA_ROW_ID],
+                actor="finance-user",
+            )
+        self.assertEqual(oa_conflict.exception.code, "invalid_batch_accounting_oa_row")
+
+    def test_command_conflict_is_exposed_as_batch_conflict(self) -> None:
+        command = RecordingRelationCommandService()
+        command.confirm_error = WorkbenchRelationCommandError(
+            "workbench_relation_active_row_conflict",
+            "conflict",
+            payload={"conflicting_row_ids": [OA_ROW_ID]},
+        )
+        with self.assertRaises(BatchAccountingError) as context:
+            service(command_service=command).submit(
+                bank_year="2026",
+                bank_row_id=BANK_ROW_ID,
+                oa_row_ids=[OA_ROW_ID],
+                actor="finance-user",
+            )
+        self.assertEqual(context.exception.code, "batch_accounting_relation_conflict")
+        self.assertEqual(context.exception.payload["conflicting_row_ids"], [OA_ROW_ID])
+
+    def test_withdraw_requires_reason_active_batch_relation_and_matching_version(self) -> None:
+        command = RecordingRelationCommandService()
+        command.relation_by_case_id = active_relation(version=3)
+        target = service(command_service=command)
+
+        with self.assertRaises(BatchAccountingError) as no_reason:
+            target.withdraw(relation_id=RELATION_ID, actor="finance-user", reason=" ")
+        self.assertEqual(no_reason.exception.code, "batch_accounting_withdraw_reason_required")
+
+        with self.assertRaises(BatchAccountingError) as conflict:
+            target.withdraw(
+                relation_id=RELATION_ID,
+                actor="finance-user",
+                reason="更正",
+                expected_version=2,
+            )
+        self.assertEqual(conflict.exception.code, "batch_accounting_version_conflict")
+
+        result = target.withdraw(
+            relation_id=RELATION_ID,
+            actor="finance-user",
+            reason="更正",
+            expected_version=3,
+        )
+        self.assertTrue(result["success"])
+        self.assertEqual(command.cancel_calls[0]["history_operation_type"], "withdraw_link")
+        self.assertEqual(result["affected_scope_keys"], ["2026-01"])
+
+    def test_missing_query_or_command_dependency_fails_closed(self) -> None:
+        with self.assertRaises(BatchAccountingError) as query:
+            BatchAccountingService().build_payload(bank_year="2026", bucket="unsubmitted")
+        self.assertEqual(query.exception.code, "batch_accounting_canonical_query_unavailable")
+
+        with self.assertRaises(BatchAccountingError) as command:
+            BatchAccountingService(query_repository=FakeBatchAccountingQueryRepository()).submit(
+                bank_year="2026",
+                bank_row_id=BANK_ROW_ID,
+                oa_row_ids=[OA_ROW_ID],
+                actor="finance-user",
+            )
+        self.assertEqual(command.exception.code, "batch_accounting_relation_command_unavailable")
+
+
+class BatchAccountingApiRouteTests(unittest.TestCase):
+    @staticmethod
+    def _session() -> SimpleNamespace:
+        return SimpleNamespace(identity=SimpleNamespace(username="finance-user", user_id="42"))
+
+    def test_list_parses_dual_paging_and_search_and_returns_canonical_shape(self) -> None:
+        repository = FakeBatchAccountingQueryRepository()
+        routes = BatchAccountingApiRoutes(lambda: service(repository))
+
+        status, payload = routes.list_payload(
+            {
+                "bank_year": ["2026"],
+                "bucket": ["unsubmitted"],
+                "bank_page": ["2"],
+                "bank_page_size": ["50"],
+                "oa_page": ["3"],
+                "oa_page_size": ["40"],
+                "oa_search": ["项目"],
+            }
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(repository.list_calls[0]["bank_page"], 2)
+        self.assertEqual(repository.list_calls[0]["oa_search"], "项目")
+        self.assertEqual(
+            set(payload),
+            {"summary", "bank_rows", "oa_rows", "relations_by_bank_row_id", "pagination"},
+        )
+
+    def test_route_maps_invalid_query_conflict_and_unavailable_dependencies(self) -> None:
+        routes = BatchAccountingApiRoutes(lambda: BatchAccountingService())
+        invalid_status, invalid_payload = routes.list_payload(
+            {"bank_year": ["2026"], "bucket": ["unsubmitted"], "bank_page": ["0"]}
+        )
+        unavailable_status, unavailable_payload = routes.list_payload(
+            {"bank_year": ["2026"], "bucket": ["unsubmitted"]}
+        )
+        command = RecordingRelationCommandService()
+        command.confirm_error = WorkbenchRelationCommandError(
+            "workbench_relation_active_row_conflict",
+            "conflict",
+        )
+        conflict_routes = BatchAccountingApiRoutes(lambda: service(command_service=command))
+        conflict_status, conflict_payload = conflict_routes.submit(
+            {
+                "bank_year": "2026",
+                "bank_row_id": BANK_ROW_ID,
+                "oa_row_ids": [OA_ROW_ID],
+            },
+            session=self._session(),
+        )
+
+        self.assertEqual(invalid_status, 400)
+        self.assertEqual(invalid_payload["error"], "invalid_paging")
+        self.assertEqual(unavailable_status, 503)
+        self.assertEqual(unavailable_payload["error"], "batch_accounting_canonical_query_unavailable")
+        self.assertEqual(conflict_status, 409)
+        self.assertEqual(conflict_payload["error"], "batch_accounting_relation_conflict")
+
+    def test_mutation_response_has_scopes_without_read_model_targets(self) -> None:
+        command = RecordingRelationCommandService()
+        routes = BatchAccountingApiRoutes(lambda: service(command_service=command))
+
+        status, payload = routes.submit(
+            {
+                "bank_year": "2026",
+                "bank_row_id": BANK_ROW_ID,
+                "oa_row_ids": [OA_ROW_ID],
+            },
+            session=self._session(),
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["affected_months"], ["2026-01"])
+        for old_field in (
+            "read_model_status",
+            "read_model_scope_keys",
+            "refresh_enqueued",
+            "freshness_targets",
+            "operation_barrier_targets",
+        ):
+            self.assertNotIn(old_field, payload)
+
+    def test_read_export_only_session_cannot_submit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._app_settings_service.update_settings(
+                completed_project_ids=[],
+                bank_account_mappings=[],
+                allowed_usernames=["READONLY001"],
+                readonly_export_usernames=["READONLY001"],
+                admin_usernames=[],
+            )
+            app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
+                user_id="202",
+                username="READONLY001",
+                nickname="只读用户",
+                display_name="只读用户",
+                roles=["finance"],
+                permissions=[],
+            )
+            response = app.handle_request(
+                "POST",
+                "/api/batch-accounting/submit",
+                body=json.dumps(
+                    {
+                        "bank_year": "2026",
+                        "bank_row_id": BANK_ROW_ID,
+                        "oa_row_ids": [OA_ROW_ID],
+                    }
+                ),
+                headers={"Authorization": "Bearer readonly-user"},
             )
 
-        self.assertEqual(context.exception.code, "batch_accounting_relation_command_unavailable")
-
-    def test_withdraw_mismatch_batch_preserves_submit_and_withdraw_notes(self) -> None:
-        app, _payload_patcher = self._app_with_grouped_payload()
-        submit_payload = self._submit_batch_mismatch_with_note(app, note="财务确认差额闭环")
-        relation_id = str(submit_payload["relation_id"])
-
-        response = app.handle_request(
-            "POST",
-            f"/api/batch-accounting/{relation_id}/withdraw",
-            json.dumps({"reason": "选错 OA", "actor": "finance-user"}),
-        )
-
-        self.assertEqual(response.status_code, 200, response.body)
-        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id(relation_id))
-        histories = app._workbench_pair_relation_service.list_history()
-        self.assertEqual(histories[-1]["operation_type"], "withdraw_link")
-        self.assertEqual(histories[-1]["note"], "选错 OA")
-        submit_history = next(history for history in histories if history["operation_type"] == "confirm_link")
-        self.assertEqual(submit_history["note"], "财务确认差额闭环")
-        self.assertEqual(submit_history["amount_check"]["status"], "mismatch")
-
-    def test_withdraw_requires_reason_and_batch_accounting_relation(self) -> None:
-        app, _payload_patcher = self._app_with_grouped_payload()
-        app._workbench_pair_relation_service.create_active_relation(
-            case_id="CASE-MANUAL",
-            row_ids=["txn_imported_202601_batch_001", "oa-exp-ba-001"],
-            row_types=["bank", "oa"],
-            relation_mode="manual_confirmed",
-            created_by="tester",
-        )
-
-        no_reason = app.handle_request(
-            "POST",
-            "/api/batch-accounting/CASE-MANUAL/withdraw",
-            json.dumps({"reason": ""}),
-        )
-        self.assertEqual(no_reason.status_code, 400, no_reason.body)
-        self.assertEqual(json.loads(no_reason.body)["error"], "batch_accounting_withdraw_reason_required")
-
-        response = app.handle_request(
-            "POST",
-            "/api/batch-accounting/CASE-MANUAL/withdraw",
-            json.dumps({"reason": "误提交"}),
-        )
-        self.assertEqual(response.status_code, 400, response.body)
-        self.assertEqual(json.loads(response.body)["error"], "batch_accounting_relation_not_found")
-
-    def test_withdraw_uses_canonical_write_safety_when_relation_read_model_is_not_fresh(self) -> None:
-        app, _payload_patcher = self._app_with_grouped_payload()
-        app._workbench_pair_relation_service.create_active_relation(
-            case_id="CASE-BATCH-txn_imported_202601_batch_001",
-            row_ids=["txn_imported_202601_batch_001", "oa-exp-ba-001"],
-            row_types=["bank", "oa"],
-            relation_mode="manual_confirmed",
-            created_by="tester",
-            month_scope="2026-01",
-            special_metadata={
-                "source": "batch_accounting",
-                "bank_row_id": "txn_imported_202601_batch_001",
-                "oa_row_ids": ["oa-exp-ba-001"],
-                "year": "2026",
-            },
-        )
-        app._workbench_relation_facade = NonFreshBatchRelationFacade(
-            status="stale",
-            stale_reasons=["dirty_scope:2026-01"],
-            read_model_scope_keys=["2026-01"],
-            refresh_enqueued=True,
-        )
-
-        response = app.handle_request(
-            "POST",
-            "/api/batch-accounting/CASE-BATCH-txn_imported_202601_batch_001/withdraw",
-            json.dumps({"reason": "选择错误", "actor": "finance-user"}),
-        )
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(payload["relation_id"], "CASE-BATCH-txn_imported_202601_batch_001")
-        self.assertIsNone(
-            app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-BATCH-txn_imported_202601_batch_001")
-        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(json.loads(response.body)["error"], "permission_denied")
 
 
 if __name__ == "__main__":

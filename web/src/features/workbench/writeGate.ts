@@ -1,9 +1,7 @@
 export type WorkbenchWriteGateReason =
   | "read_only"
   | "system_unavailable"
-  | "oa_syncing"
-  | "read_model_not_fresh"
-  | "read_model_version_missing";
+  | "oa_syncing";
 
 export type WorkbenchWriteGate = {
   allowed: boolean;
@@ -15,16 +13,12 @@ type WorkbenchWriteGateInput = {
   canMutateData: boolean;
   mutationsBlocked: boolean;
   oaSyncWriteBlocked: boolean;
-  readModelStatus: string;
-  readModelVersion: string | null;
 };
 
 export function resolveWorkbenchWriteGate({
   canMutateData,
   mutationsBlocked,
   oaSyncWriteBlocked,
-  readModelStatus,
-  readModelVersion,
 }: WorkbenchWriteGateInput): WorkbenchWriteGate {
   if (!canMutateData) {
     return {
@@ -45,26 +39,6 @@ export function resolveWorkbenchWriteGate({
       allowed: false,
       reason: "oa_syncing",
       message: "OA 正在同步，完成后将自动恢复关联操作。",
-    };
-  }
-  if (readModelStatus !== "fresh") {
-    return {
-      allowed: false,
-      reason: "read_model_not_fresh",
-      message: readModelStatus === "failed"
-        ? "关联台刷新失败，当前写操作已禁用。"
-        : readModelStatus === "unavailable"
-          ? "关联台读模型不可用，当前写操作已禁用。"
-          : readModelStatus === "stale"
-            ? "关联台数据已过期，刷新完成后将自动恢复写操作。"
-            : "关联台正在刷新，完成后将自动恢复写操作。",
-    };
-  }
-  if (!readModelVersion) {
-    return {
-      allowed: false,
-      reason: "read_model_version_missing",
-      message: "关联台数据版本尚未就绪，刷新完成后将自动恢复写操作。",
     };
   }
   return { allowed: true, reason: null, message: null };

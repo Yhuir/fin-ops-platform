@@ -56,7 +56,7 @@ afterEach(() => {
 });
 
 describe("global background job page header", () => {
-  test("maps completed job result targets from result summary", () => {
+  test("maps completed job affected scopes from result summary", () => {
     const job = mapBackgroundJob({
       job_id: "job_file_import_001",
       type: "file_import",
@@ -64,22 +64,11 @@ describe("global background job page header", () => {
       result_summary: {
         affected_months: ["2026-04"],
         affected_scope_keys: ["all", "2026-04", "active:2026-04"],
-        read_model_scope_keys: ["all", "2026-04", "active:2026-04"],
-        operation_barrier_targets: [
-          { read_model_key: "workbench", scope_key: "all" },
-          { read_model_key: "workbench_relation", scope_key: "2026-04" },
-          { read_model_key: "cost_statistics", scope_key: "active:2026-04" },
-        ],
       },
     });
 
     expect(job.affectedMonths).toEqual(["2026-04"]);
     expect(job.affectedScopeKeys).toEqual(["2026-04", "active:2026-04"]);
-    expect(job.readModelScopeKeys).toEqual(["2026-04", "active:2026-04"]);
-    expect(job.operationBarrierTargets).toEqual([
-      { readModelKey: "workbench_relation", scopeKey: "2026-04" },
-      { readModelKey: "cost_statistics", scopeKey: "active:2026-04" },
-    ]);
   });
 
   test("does not render a page header when there are no active jobs", async () => {

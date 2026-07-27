@@ -23,22 +23,6 @@ class WorkbenchRelationReadModelRepositoryPort:
         )
         return dict(payload) if isinstance(payload, dict) else None
 
-    def get_batch_accounting_relation_rows_by_ids(
-        self,
-        row_ids: list[str],
-        *,
-        tenant_id: str = "default",
-        scope_keys_hint: list[str] | None = None,
-        submitted_year: str | None = None,
-    ) -> dict[str, object] | None:
-        payload = self._repository.get_batch_accounting_relation_rows_by_ids(
-            row_ids,
-            tenant_id=tenant_id,
-            scope_keys_hint=scope_keys_hint,
-            submitted_year=submitted_year,
-        )
-        return dict(payload) if isinstance(payload, dict) else None
-
     def list_workbench_relation_rows(
         self,
         *,
@@ -177,18 +161,6 @@ class WorkbenchRelationReadModelRepositoryPort:
             for alias, canonical in dict(payload or {}).items()
             if str(alias).strip() and str(canonical).strip()
         }
-
-    def list_batch_accounting_relation_groups_by_year(
-        self,
-        *,
-        year: str,
-        tenant_id: str = "default",
-    ) -> dict[str, object] | None:
-        payload = self._repository.list_batch_accounting_relation_groups_by_year(
-            year=year,
-            tenant_id=tenant_id,
-        )
-        return dict(payload) if isinstance(payload, dict) else None
 
     def save_workbench_relation_distribution(
         self,

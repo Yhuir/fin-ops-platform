@@ -1,25 +1,19 @@
-# 销项发票收款情况 模块维护入口
+# 销项发票收款情况模块维护入口
 
-- Module key: `output-invoice-collections`
-- 类型: 页面模块
-- Route: `/output-invoice-collections`
-- Page key: `output-invoice-collections`
+- Module key：`output-invoice-collections`
+- Route：`/output-invoice-collections`
+- Page key：`output-invoice-collections`
+- 当前读架构：页面专属 canonical PostgreSQL 直读
 
 ## 修改前必读
 
 - `docs/product-specs/invoice-lifecycle.md`
-- `docs/product-specs/cost-tax.md`
 - `docs/app-architecture/pages.md`
-- `docs/app-architecture/runtime-and-ownership.md`
 - `docs/dev/api-contracts.md`
-- `docs/dev/testing-closure-dependency-map.md`
-- `docs/operations/runtime-worker-governance.md`
-- `docs/modules/input-invoice-usage/README.md`
-- `docs/modules/oa-pending-payments/README.md`
-- `docs/modules/tax-offset/README.md`
-- `docs/modules/cost-statistics/README.md`
-- `docs/modules/domain-events-lifecycle/README.md`
-- `docs/modules/runtime-workers/README.md`
+- `docs/modules/output-invoice-collections/boundary-io.md`
+- `docs/modules/workbench-relations/boundary-io.md`
+- `docs/modules/domain-events-lifecycle/boundary-io.md`
+- `docs/modules/permissions-and-audit/boundary-io.md`
 
 ## 代码入口
 
@@ -27,65 +21,44 @@
 - `web/src/components/outputInvoiceCollections/*`
 - `web/src/features/outputInvoiceCollections/api.ts`
 - `backend/src/fin_ops_platform/app/routes_output_invoice_collections.py`
-- `backend/src/fin_ops_platform/services/output_invoice_collection_read_application_service.py`
+- `backend/src/fin_ops_platform/services/output_invoice_collection_canonical_query_service.py`
 - `backend/src/fin_ops_platform/services/output_invoice_collection_service.py`
 - `backend/src/fin_ops_platform/services/output_invoice_collection_lifecycle_service.py`
 - `backend/src/fin_ops_platform/services/output_invoice_collection_receipt_service.py`
-- `backend/src/fin_ops_platform/services/output_invoice_collection_models.py`
-- `backend/src/fin_ops_platform/services/output_invoice_collection_status_service.py`
-- `backend/src/fin_ops_platform/services/invoice_lifecycle_policy.py`
-- `backend/src/fin_ops_platform/services/invoice_usage_collection_read_model_refresh.py`
-- `backend/src/fin_ops_platform/services/invoice_usage_collection_source_versions.py`
+- `backend/src/fin_ops_platform/services/postgres_repositories/invoice_usage_collection_query.py`
 - `backend/src/fin_ops_platform/services/postgres_repositories/output_invoice_collection.py`
-- `backend/src/fin_ops_platform/services/app_status_domain_registry.py`
-- `backend/src/fin_ops_platform/services/app_status_read_model_registry.py`
-- `backend/src/fin_ops_platform/services/runtime_worker_registry.py`
 
-## 当前边界
+## 当前事实边界
 
-本模块维护销项发票收款情况页面的列表、筛选、排序、分页、详情 drawer、收款状态、提醒、红蓝票关系和正式收据生命周期。
+- 浏览器只调用 `/api/output-invoice-collections/*` 页面专属 API。首屏、筛选、排序、分页、summary、statistics 和 filter options 由一次 `/rows` 请求返回。
+- 生产查询由 `OutputInvoiceCollectionCanonicalQueryService` 调用 `PostgresOutputInvoiceCollectionQueryRepository`。repository 在同一显式 `REPEATABLE READ READ ONLY` 事务内读取 rows、summary、statistics、facets、关系和 lifecycle overlay。
+- 发票、银行流水、OA snapshot、收款/红字/收据 lifecycle facts 来自 PostgreSQL canonical tables。页面请求热路径不得访问 OA、MongoDB、MySQL 或对象存储。
+- 正式关系只读取 `app.workbench_pair_relations` 中 `status='active'` 的关系。不得读取 `read_model.workbench_relation_*`、`read_model.output_invoice_collection_*` 或 `read_model.invoice_lifecycle_*` 作为页面事实。
+- 同一 active relation component 中的多张销项发票归并为一行，金额按成员净额合计；负数和红字发票必须保留在 `invoiceRelations.summaries`。
+- 收款状态由 canonical relation、银行流水和 lifecycle overlay 组合；正式收据 create/void/reissue、手动状态、提醒和红蓝票关系继续写 canonical facts。
+- `/rows/{row_id}/relation-details`、详情、导出和写后查询使用同一 canonical query 边界，不允许 live fallback、双读或全量 Python 过滤。
+- rows 响应不含 `read_model_status`、`source_versions`、refresh target 或 polling 合同；前端只维护 loading、empty、error 和用户主动刷新状态。
+- 写命令保持权限、审计、CAS/idempotency 和冲突合同；成功后当前页面重跑正常 GET，不等待 operation barrier。
 
-当前事实边界：
+## 权限与审计
 
-- 列表读接口优先读取 SQL read model `output_invoice_collection`；miss/stale/schema/source version mismatch 时返回 `202` 与 `read_model_status=refreshing`，不得在请求线程同步 live rebuild。
-- `OutputInvoiceCollectionApiRoutes` 只负责 HTTP/session/权限/响应映射；rows、filter-options、export-preview、export 和 relation detail 的 SQL read model 编排由 `OutputInvoiceCollectionReadApplicationService` 负责。
-- 生产 PostgreSQL runtime 下，SQL read repository 缺失也属于 read model unavailable：API 必须 enqueue `output_invoice_collection` 对应 month/all scope 并返回 `read_model_status=refreshing`，不能回退 `OutputInvoiceCollectionQueryService.list_rows(...)` 或返回 `live_query`。legacy/local 模式保留 query service 作为开发兼容路径。
-- 页面首屏和筛选态由 rows 与 filter-options 两个读接口共同证明 fresh。前端必须合并两者的 `readModelStatus` / `read_model_status`：任一接口返回 `stale`、`missing`、`schema_mismatch`、`refreshing` 或等价非 fresh 状态时，页面整体进入刷新诊断，不展示普通空态，不启用导出，也不把另一接口的 fresh 空 rows 当成最终事实。
-- 生产 PostgreSQL runtime 下，`/rows/{row_id}/relation-details` 必须优先读取 SQL read model detail row，并由页面携带当前行 `month`。SQL read repository 或 row detail lookup 缺失时只对该具体月份返回 `202`/refreshing 并 enqueue；没有合法月份时 fail closed 且零 enqueue，禁止回退 `output_invoice_collection:all` 或 live detail rebuild。legacy/local 模式保留 query service detail 作为开发兼容路径。
-- fresh SQL rows 在返回前叠加 lifecycle facts：`collectionStatus`、手动状态、提醒、红蓝票关系和正式收据摘要。
-- 页面展示统一关系事实源中的 OA、收入流水和销项发票项：rows 中 `oa`、`bankTransactions`、`invoiceRelations` 都携带 `relationCount`、`hasMultiple`、`detailMode` 和 `summaries`；同一 linked relation 下多张销项发票由 `output_invoice_collection` 投影为一条收款行，发票金额按成员净额汇总，负数/红字发票必须进入 `invoiceRelations.summaries`。多项对象在对应栏显示 `+N`，其中 `N=relationCount-1` 表示除主展示对象外的额外项数，点击 `/rows/{row_id}/relation-details?kind=oa|bank|invoice` 展开全部明细。销项发票栏多项时仍显示当前行的发票主信息和多张发票合计，避免只剩 `+N` 无合计。
-- 页面表头显示的 `销项票 N` 是 rows summary 的唯一销项发票数，用于核对销项发票数据拉取完整性；linked 多销项发票 relation 归并为一条 row 时，必须计入所有 `invoiceRelations.summaries` 成员。`pagination.total` 只代表表格行数/配对组行数，不能作为发票数量。
-- 收款状态规则由 `InvoiceLifecyclePolicy` 与 `OutputInvoiceCollectionStatusRuleService` 统一判定；页面不能自定义销项收款状态规则。
-- 写接口只通过 `OutputInvoiceCollectionLifecycleService` 与 `OutputInvoiceCollectionReceiptService` 写 lifecycle facts；service 不读取 HTTP header/cookie。
-- 手动收款状态、提醒、红蓝票关系、收据 create/void/reissue 只在业务事务内提交 lifecycle/canonical fact、版本、审计与信息性 affected scope，不写 `output_invoice_collection` 或其它页面 dirty/outbox。
-- 上述写接口成功后立即结束命令阻塞；当前可见页重跑自身 normal GET，由 output fresh gate 比较 exact month/source versions，只有 mismatch 才经 gateway 去重入队并返回访问产生的 freshness target。其它页面只在访问或重新激活时独立收敛；普通写无法定位月份时 fail closed，不回退 `all` fan-out。
-- 正式收据创建必须有 `Idempotency-Key` 或 body `idempotencyKey`；历史接口返回真实 receipt lifecycle facts，不伪造空历史。
-- `output_invoice_collection_source_versions()` 包含销项收款 read model、invoice lifecycle policy、lifecycle facts、status rules、receipt schema 和 OA projection sync 版本；统一关系展示字段缺失属于 SQL payload schema stale，必须 enqueue refresh。
-- `output_invoice_collection:all` 在 refresh 链路中是 fan-out 到月份 shard 的控制 scope；页面默认 all 查询的 freshness 证明来自实际 rows/month scopes 和 active dirty/outbox 状态。month scope 必须比对按该月销项发票 IDs 计算的 consumer-semantic active relation proof；纯银行、进项或同月其它关系不得污染本页 freshness。all 查询不能直接使用全局 `workbench_relation:all` source versions 作为 expected contract，否则会把已 fresh 的月份 shard 误判为 stale 并反复显示“正在刷新”。
-- 默认 all 页面查询不得 enqueue 上述控制 scope；query gate 必须枚举有效月份并只刷新 mismatch shard。`all` 控制 scope 仅供显式 maintenance/reapply/repair。
-- `Application` 不再保留 output collection app-level projection helpers；`list_output_invoice_collection_scope_shards(...)`、`mark_output_invoice_collection_scope_empty(...)` 和 `rebuild_output_invoice_collection_read_model_scope(...)` 的 owner 是 `InvoiceUsageCollectionSqlProjectionBuilder` / `InvoiceUsageCollectionReadModelRefreshService` worker projection boundary。
-- App Status domain `output_invoice_collections` 依赖 `output_invoice_collection`、`invoice_lifecycle` readiness，以及 `invoice-usage-collection`、`invoice-lifecycle` worker。
-
-跨模块影响：
-
-- 上游：发票导入、关联台关系、invoice lifecycle、pending invoice rules、OA projection、银行流水关系和 tax/cost 相关 lifecycle。
-- 下游：税金抵扣、成本统计、搜索和 App Health 通过各自 canonical source/version/freshness boundary 观察销项发票事实变化；本模块写入 lifecycle facts 后不主动刷新任一页面。
-- 真实运行回填顺序必须遵守 `workbench_relation -> invoice_lifecycle -> output_invoice_collection`，不能用旧 SQL 或页面私有规则伪装 fresh。
+- 页面读取和导出沿用现有 view/export 权限。
+- 收款状态、提醒、红蓝票、收据生命周期和编号设置沿用原 full-access/admin 权限。
+- route 只做 session、权限、参数和 HTTP 映射；service 不读取 header/cookie，repository 不做权限判断。
+- App Health 中历史 read-model 审计入口仍是共享运维能力，不是本页面读路径；其最终清理由全局任务处理。
 
 ## 维护触发器
 
-发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：
+发生以下变化时更新本目录，并按影响同步长期事实源：
 
-- 页面入口、路由、侧栏、筛选、排序、分页、导出、drawer/dialog 或权限显示变化。
-- API contract、DTO shape、错误字段、权限校验、状态值或响应 freshness 字段变化。
-- 业务状态、UI 状态、read model 状态、worker 状态或状态流转变化。
-- 跨页面刷新、domain event、derived lifecycle、dirty scope、outbox 或缓存边界变化。
-- 测试入口、回归范围、验证命令或未测风险变化。
+- 页面筛选、排序、分页、详情、导出、drawer/dialog 或权限变化。
+- canonical 表、active relation 口径、净额归并、lifecycle 或 rows/summary/facets DTO 变化。
+- snapshot 一致性、查询次数、SQL 性能、收据幂等或写后 GET 行为变化。
+- 页面专属旧 read-model 代码或共享 worker/manifest 的最终清理。
 
 ## 本目录文件
 
-- `state-machine.md`：维护当前有效状态和状态流转；不适用时写明原因。
-- `tests.md`：维护七类测试适用性、现有测试入口、验证命令和回归范围。
-- `e2e-spec.md`：维护 Spec-first Browser e2e 业务验收合同。
-- `e2e-coverage.md`：维护 Spec ID 到 Playwright/Vitest/API/integration 的覆盖映射。
-- `implementation-notes.md`：维护提炼后的决策和验收记录；不保存原始 prompt。
+- `boundary-io.md`：当前输入、输出、文件和依赖边界。
+- `tests.md`：七类测试适用性、命令和剩余风险。
+- `state-machine.md`：收款、提醒、红蓝票和收据生命周期。
+- `implementation-notes.md`：历史决策记录；历史 read-model 描述不覆盖本 README 的当前事实。
