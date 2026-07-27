@@ -200,10 +200,10 @@ class CostStatisticsApiTests(unittest.TestCase):
         original = repository.load_snapshot
         calls = 0
 
-        def counted_snapshot():
+        def counted_snapshot(*args, **kwargs):
             nonlocal calls
             calls += 1
-            return original()
+            return original(*args, **kwargs)
 
         repository.load_snapshot = counted_snapshot
         status, _payload = self._json(
@@ -213,6 +213,17 @@ class CostStatisticsApiTests(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         self.assertEqual(calls, 1)
+
+    def test_follow_up_request_can_skip_rebuilding_global_statistics(self) -> None:
+        status, payload = self._json(
+            "/api/cost-statistics/explorer?scope=2026-03&view=project"
+            "&project_scope=all&project_name=云南溯源科技"
+            "&expense_type=设备货款及材料费&include_statistics=false"
+        )
+
+        self.assertEqual(status, 200)
+        self.assertIsNone(payload["statistics"])
+        self.assertEqual(payload["row_count"], 1)
 
     def test_invalid_query_contracts_fail_closed(self) -> None:
         cases = (
@@ -228,6 +239,11 @@ class CostStatisticsApiTests(unittest.TestCase):
                 "/api/cost-statistics/explorer"
                 "?scope=2026-03&view=time&project_scope=bad",
                 "invalid_cost_statistics_project_scope",
+            ),
+            (
+                "/api/cost-statistics/explorer"
+                "?scope=2026-03&view=time&include_statistics=maybe",
+                "invalid_cost_statistics_query",
             ),
         )
         for path, error_code in cases:

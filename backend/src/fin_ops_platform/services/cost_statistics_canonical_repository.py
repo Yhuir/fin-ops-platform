@@ -31,16 +31,71 @@ class PostgresCostStatisticsCanonicalRepository:
             raise ValueError("Cost statistics canonical repository requires a PostgreSQL connection.")
         self._connection = connection
 
-    def load_snapshot(self) -> dict[str, Any]:
+    def load_snapshot(
+        self,
+        *,
+        scope_kind: str = "all",
+        scope_value: str | None = None,
+        view: str = "project",
+        include_statistics: bool = True,
+    ) -> dict[str, Any]:
         with self._snapshot_transaction() as transaction:
             settings = _settings_payload(transaction)
-            bank_rows = _postgres_bank_rows(transaction, settings=settings)
+            scoped = not include_statistics and scope_kind != "all"
+            bank_rows = _postgres_bank_rows(
+                transaction,
+                settings=settings,
+                scope_kind=scope_kind if scoped else "all",
+                scope_value=scope_value if scoped else None,
+            )
+            available_years = (
+                _postgres_available_years(transaction)
+                if scoped
+                else _available_years(bank_rows)
+            )
+            if scoped and not bank_rows:
+                return _build_snapshot(
+                    settings=settings,
+                    bank_rows=[],
+                    oa_rows=[],
+                    relations=[],
+                    available_years=available_years,
+                )
+            if not include_statistics and view in {"time", "bank_tag"}:
+                category_provider = _postgres_category_provider(
+                    transaction,
+                    settings=settings,
+                    transaction_ids=_bank_row_ids(bank_rows),
+                )
+                _apply_bank_tags(bank_rows, category_provider=category_provider)
+                return _build_snapshot(
+                    settings=settings,
+                    bank_rows=bank_rows,
+                    oa_rows=[],
+                    relations=[],
+                    available_years=available_years,
+                )
+            if scoped:
+                relations = _postgres_relations(
+                    transaction,
+                    bank_row_ids=_bank_row_ids(bank_rows),
+                )
+                bank_rows = _postgres_bank_rows(
+                    transaction,
+                    settings=settings,
+                    transaction_ids=_relation_member_ids(
+                        relations,
+                        {"bank", "bank_transaction"},
+                    ),
+                )
+            else:
+                relations = _postgres_relations(transaction)
             category_provider = _postgres_category_provider(
                 transaction,
                 settings=settings,
+                transaction_ids=_bank_row_ids(bank_rows) if scoped else None,
             )
             _apply_bank_tags(bank_rows, category_provider=category_provider)
-            relations = _postgres_relations(transaction)
             oa_ids = _relation_member_ids(relations, {"oa"})
             oa_rows = [
                 _object_payload(record)
@@ -53,6 +108,7 @@ class PostgresCostStatisticsCanonicalRepository:
                 bank_rows=bank_rows,
                 oa_rows=oa_rows,
                 relations=relations,
+                available_years=available_years,
             )
 
     @contextmanager
@@ -80,20 +136,71 @@ class LocalCostStatisticsCanonicalRepository:
         self._settings_provider = settings_provider
         self._category_provider = category_provider
 
-    def load_snapshot(self) -> dict[str, Any]:
+    def load_snapshot(
+        self,
+        *,
+        scope_kind: str = "all",
+        scope_value: str | None = None,
+        view: str = "project",
+        include_statistics: bool = True,
+    ) -> dict[str, Any]:
         settings = dict(self._settings_provider() or {})
-        bank_rows = [
+        all_bank_rows = [
             _bank_row_from_object(row, settings=settings)
             for row in self._bank_rows_provider()
         ]
-        bank_rows = [row for row in bank_rows if row]
-        _apply_bank_tags(bank_rows, category_provider=self._category_provider)
-        relations = [
+        all_bank_rows = [row for row in all_bank_rows if row]
+        available_years = _available_years(all_bank_rows)
+        scoped_bank_rows = [
+            row
+            for row in all_bank_rows
+            if _bank_row_in_scope(
+                row,
+                scope_kind=scope_kind if not include_statistics else "all",
+                scope_value=scope_value if not include_statistics else None,
+            )
+        ]
+        all_relations = [
             dict(relation)
             for relation in self._relations_provider()
             if isinstance(relation, dict)
             and str(relation.get("status") or "active").strip().lower() == "active"
         ]
+        if not include_statistics and view in {"time", "bank_tag"}:
+            _apply_bank_tags(scoped_bank_rows, category_provider=self._category_provider)
+            return _build_snapshot(
+                settings=settings,
+                bank_rows=scoped_bank_rows,
+                oa_rows=[],
+                relations=[],
+                available_years=available_years,
+            )
+        relations = all_relations
+        bank_rows = all_bank_rows
+        if not include_statistics and scope_kind != "all":
+            scoped_ids = set(_bank_row_ids(scoped_bank_rows))
+            relations = [
+                relation
+                for relation in all_relations
+                if scoped_ids.intersection(
+                    _relation_member_ids(
+                        [relation],
+                        {"bank", "bank_transaction"},
+                    )
+                )
+            ]
+            member_ids = set(
+                _relation_member_ids(relations, {"bank", "bank_transaction"})
+            )
+            bank_rows = [
+                row
+                for row in all_bank_rows
+                if _text(
+                    row.get("id") or row.get("transaction_id") or row.get("row_id")
+                )
+                in member_ids
+            ]
+        _apply_bank_tags(bank_rows, category_provider=self._category_provider)
         oa_ids = _relation_member_ids(relations, {"oa"})
         oa_rows = [
             _object_payload(row)
@@ -104,6 +211,7 @@ class LocalCostStatisticsCanonicalRepository:
             bank_rows=bank_rows,
             oa_rows=oa_rows,
             relations=relations,
+            available_years=available_years,
         )
 
 
@@ -120,13 +228,66 @@ def _settings_payload(connection: Any) -> dict[str, Any]:
     return dict(payload) if isinstance(payload, dict) else {}
 
 
+def _postgres_available_years(connection: Any) -> list[str]:
+    return [
+        str(int(row["year"]))
+        for row in connection.fetch_all(
+            """
+            select distinct
+                extract(year from txn_month)::int as year
+            from app.bank_transactions
+            where status <> 'deleted'
+              and txn_month is not null
+            order by year desc
+            """
+        )
+        if row.get("year") is not None
+    ]
+
+
+def _bank_row_filter(
+    *,
+    scope_kind: str,
+    scope_value: str | None,
+    transaction_ids: list[str] | None,
+) -> tuple[str, tuple[Any, ...]]:
+    if transaction_ids is not None:
+        return (
+            "and (legacy_mongo_id = any(%s::text[]) or id::text = any(%s::text[]))",
+            (transaction_ids, transaction_ids),
+        )
+    if scope_kind == "all":
+        return "", ()
+    if scope_kind == "year" and scope_value and len(scope_value) == 4:
+        start = date(int(scope_value), 1, 1)
+        end = date(int(scope_value) + 1, 1, 1)
+    elif scope_kind == "month" and scope_value:
+        year, month = (int(value) for value in scope_value.split("-", 1))
+        start = date(year, month, 1)
+        end = date(year + (month == 12), 1 if month == 12 else month + 1, 1)
+    else:
+        raise ValueError("scope must be all, year, or month")
+    return (
+        "and txn_month >= %s and txn_month < %s",
+        (start, end),
+    )
+
+
 def _postgres_bank_rows(
     connection: Any,
     *,
     settings: dict[str, Any],
+    scope_kind: str = "all",
+    scope_value: str | None = None,
+    transaction_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
+    where_sql, params = _bank_row_filter(
+        scope_kind=scope_kind,
+        scope_value=scope_value,
+        transaction_ids=transaction_ids,
+    )
     rows = connection.fetch_all(
-        """
+        f"""
         select
             coalesce(legacy_mongo_id, id::text) as row_id,
             account_no,
@@ -145,8 +306,10 @@ def _postgres_bank_rows(
             raw_payload
         from app.bank_transactions
         where status <> 'deleted'
+          {where_sql}
         order by coalesce(trade_time, txn_date::timestamptz) desc, row_id
-        """
+        """,
+        params,
     )
     return [
         bank_payload
@@ -164,10 +327,19 @@ def _postgres_category_provider(
     connection: Any,
     *,
     settings: dict[str, Any],
+    transaction_ids: list[str] | None = None,
 ) -> BankTransactionEffectiveCategoryProvider:
     categories: dict[str, dict[str, Any]] = {}
+    filter_sql = ""
+    params: tuple[Any, ...] = ()
+    if transaction_ids is not None:
+        filter_sql = (
+            "and (legacy_transaction_id = any(%s::text[]) "
+            "or bank_transaction_id::text = any(%s::text[]))"
+        )
+        params = (transaction_ids, transaction_ids)
     for row in connection.fetch_all(
-        """
+        f"""
         select
             coalesce(legacy_transaction_id, bank_transaction_id::text) as transaction_id,
             category,
@@ -178,8 +350,10 @@ def _postgres_category_provider(
             raw_payload
         from app.bank_transaction_categories
         where status = 'active'
+          {filter_sql}
         order by updated_at, id
-        """
+        """,
+        params,
     ):
         transaction_id = _text(row.get("transaction_id"))
         if not transaction_id:
@@ -206,7 +380,7 @@ def _postgres_category_provider(
         )
         categories[transaction_id] = normalized
     for row in connection.fetch_all(
-        """
+        f"""
         select
             coalesce(legacy_transaction_id, bank_transaction_id::text) as transaction_id,
             category_code,
@@ -218,8 +392,10 @@ def _postgres_category_provider(
             raw_payload
         from app.bank_transaction_category_confirmations
         where status = 'active'
+          {filter_sql}
         order by confirmed_at, id
-        """
+        """,
+        params,
     ):
         transaction_id = _text(row.get("transaction_id"))
         category_code = _text(row.get("category_code"))
@@ -272,9 +448,18 @@ def _postgres_category_provider(
     )
 
 
-def _postgres_relations(connection: Any) -> list[dict[str, Any]]:
+def _postgres_relations(
+    connection: Any,
+    *,
+    bank_row_ids: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    filter_sql = ""
+    params: tuple[Any, ...] = ()
+    if bank_row_ids is not None:
+        filter_sql = "and row_ids && %s::text[]"
+        params = (bank_row_ids,)
     rows = connection.fetch_all(
-        """
+        f"""
         select
             case_id,
             relation_mode,
@@ -287,8 +472,10 @@ def _postgres_relations(connection: Any) -> list[dict[str, Any]]:
         where status = 'active'
           and row_types && array['oa']::text[]
           and row_types && array['bank', 'bank_transaction']::text[]
+          {filter_sql}
         order by case_id
-        """
+        """,
+        params,
     )
     relations: list[dict[str, Any]] = []
     for row in rows:
@@ -333,6 +520,7 @@ def _build_snapshot(
     bank_rows: list[dict[str, Any]],
     oa_rows: list[dict[str, Any]],
     relations: list[dict[str, Any]],
+    available_years: list[str] | None = None,
 ) -> dict[str, Any]:
     banks_by_id = {
         _text(row.get("id") or row.get("transaction_id") or row.get("row_id")): row
@@ -381,6 +569,7 @@ def _build_snapshot(
         "bank_rows": list(banks_by_id.values()),
         "cost_groups": groups,
         "active_relation_count": len(relations),
+        "available_years": list(available_years or _available_years(bank_rows)),
     }
 
 
@@ -491,6 +680,55 @@ def _relation_member_ids(
                 seen.add(row_id)
                 member_ids.append(row_id)
     return member_ids
+
+
+def _bank_row_ids(bank_rows: list[dict[str, Any]]) -> list[str]:
+    return [
+        row_id
+        for row in bank_rows
+        if (
+            row_id := _text(
+                row.get("id") or row.get("transaction_id") or row.get("row_id")
+            )
+        )
+    ]
+
+
+def _bank_row_in_scope(
+    row: dict[str, Any],
+    *,
+    scope_kind: str,
+    scope_value: str | None,
+) -> bool:
+    if scope_kind == "all":
+        return True
+    trade_time = _date_text(
+        row.get("trade_time") or row.get("pay_receive_time") or row.get("txn_date")
+    )
+    if scope_kind == "year":
+        return bool(scope_value and trade_time[:4] == scope_value)
+    if scope_kind == "month":
+        return bool(scope_value and trade_time[:7] == scope_value)
+    raise ValueError("scope must be all, year, or month")
+
+
+def _available_years(bank_rows: list[dict[str, Any]]) -> list[str]:
+    return sorted(
+        {
+            trade_time[:4]
+            for row in bank_rows
+            if (
+                trade_time := _date_text(
+                    row.get("trade_time")
+                    or row.get("pay_receive_time")
+                    or row.get("txn_date")
+                )
+            )
+            and len(trade_time) >= 4
+            and trade_time[:4].isdigit()
+        },
+        reverse=True,
+    )
 
 
 def _object_payload(value: Any) -> dict[str, Any]:

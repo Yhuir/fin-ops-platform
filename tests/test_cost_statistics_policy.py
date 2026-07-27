@@ -1,9 +1,38 @@
 import unittest
+from unittest.mock import patch
 
 from fin_ops_platform.services.cost_statistics_policy import CostStatisticsPolicy
 
 
 class CostStatisticsPolicyTests(unittest.TestCase):
+    def test_bank_flow_follow_up_does_not_build_oa_cost_entries(self) -> None:
+        policy = CostStatisticsPolicy(
+            {
+                "settings": {},
+                "bank_rows": [self._bank_row("bank-flow-only")],
+                "cost_groups": [self._group()],
+                "available_years": ["2026"],
+            },
+            project_scope="all",
+        )
+
+        with patch(
+            "fin_ops_platform.services.cost_statistics_policy._cost_entries",
+            side_effect=AssertionError("OA cost entries must remain lazy"),
+        ):
+            page = policy.explorer_page(
+                scope_kind="month",
+                scope_value="2026-03",
+                view="bank_tag",
+                filters={},
+                cursor_values=None,
+                page_size=50,
+                include_statistics=False,
+            )
+
+        self.assertIsNone(page["statistics"])
+        self.assertEqual(page["available_years"], ["2026"])
+
     def _payload(
         self,
         groups: list[dict[str, object]],

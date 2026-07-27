@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
+from functools import cached_property
 import re
 from typing import Any
 
@@ -47,24 +48,32 @@ class CostStatisticsPolicy:
             if isinstance(group, dict)
         ]
         self._active_relation_count = int(snapshot.get("active_relation_count") or 0)
+        self._available_years = [
+            str(value)
+            for value in list(snapshot.get("available_years") or [])
+            if re.fullmatch(r"\d{4}", str(value))
+        ]
         self._project_scope = project_scope
         self._selected_tag_codes = _selected_tag_codes(self._settings)
-        self._bank_flow_rows = [
+
+    @cached_property
+    def bank_flow_rows(self) -> list[dict[str, Any]]:
+        return [
             row
             for row in (_serialize_bank_row(row) for row in self._bank_rows)
             if _tag_selected(row, self._selected_tag_codes)
         ]
-        self._cost_entries = [
-            entry
+
+    @cached_property
+    def serialized_cost_rows(self) -> list[dict[str, Any]]:
+        return [
+            _serialize_cost_entry(entry)
             for entry in _cost_entries(
                 self._groups,
-                project_scope=project_scope,
+                project_scope=self._project_scope,
                 settings=self._settings,
             )
             if _tag_selected(entry, self._selected_tag_codes)
-        ]
-        self._serialized_cost_rows = [
-            _serialize_cost_entry(entry) for entry in self._cost_entries
         ]
 
     def explorer_page(
@@ -76,12 +85,13 @@ class CostStatisticsPolicy:
         filters: dict[str, str],
         cursor_values: tuple[str, str, str, str] | None,
         page_size: int,
+        include_statistics: bool = True,
     ) -> dict[str, Any]:
         bank_flow_view = view in {"time", "bank_tag"}
         base_rows = [
             row
             for row in (
-                self._bank_flow_rows if bank_flow_view else self.serialized_cost_rows
+                self.bank_flow_rows if bank_flow_view else self.serialized_cost_rows
             )
             if _row_in_scope(
                 row,
@@ -169,14 +179,11 @@ class CostStatisticsPolicy:
         page_rows = page_rows[:page_size]
         return {
             "summary": _summary(base_rows),
-            "cost_transaction_count": len(
-                {str(row["transaction_id"]) for row in self.serialized_cost_rows}
-            ),
-            "statistics": self.statistics,
-            "available_years": sorted(
+            "statistics": self.statistics if include_statistics else None,
+            "available_years": self._available_years or sorted(
                 {
                     str(row.get("month") or "")[:4]
-                    for row in self._bank_flow_rows
+                    for row in self.bank_flow_rows
                     if re.fullmatch(r"\d{4}", str(row.get("month") or "")[:4])
                 },
                 reverse=True,
@@ -221,7 +228,7 @@ class CostStatisticsPolicy:
         }:
             raise ValueError("invalid cost statistics export row shape")
         source = (
-            self._bank_flow_rows
+            self.bank_flow_rows
             if row_shape == "raw_bank"
             else self.serialized_cost_rows
         )
@@ -288,7 +295,7 @@ class CostStatisticsPolicy:
         scope_value: str | None,
     ) -> dict[str, Any] | None:
         source = (
-            self._bank_flow_rows
+            self.bank_flow_rows
             if bank_flow_view
             else self.serialized_cost_rows
         )
@@ -324,32 +331,28 @@ class CostStatisticsPolicy:
         return row
 
     @property
-    def serialized_cost_rows(self) -> list[dict[str, Any]]:
-        return self._serialized_cost_rows
-
-    @property
     def statistics(self) -> dict[str, int]:
         cost_rows = self.serialized_cost_rows
         tagged = [
             row
-            for row in self._bank_flow_rows
+            for row in self.bank_flow_rows
             if _clean_text(row.get("bank_tag_code"))
         ]
         return {
             "transaction_count": len(
-                {row["transaction_id"] for row in self._bank_flow_rows}
+                {row["transaction_id"] for row in self.bank_flow_rows}
             ),
             "expense_transaction_count": len(
                 {
                     row["transaction_id"]
-                    for row in self._bank_flow_rows
+                    for row in self.bank_flow_rows
                     if row["direction"] == "支出"
                 }
             ),
             "income_transaction_count": len(
                 {
                     row["transaction_id"]
-                    for row in self._bank_flow_rows
+                    for row in self.bank_flow_rows
                     if row["direction"] == "收入"
                 }
             ),
@@ -360,7 +363,7 @@ class CostStatisticsPolicy:
                 {row["transaction_id"] for row in tagged}
             ),
             "untagged_transaction_count": len(
-                {row["transaction_id"] for row in self._bank_flow_rows}
+                {row["transaction_id"] for row in self.bank_flow_rows}
                 - {row["transaction_id"] for row in tagged}
             ),
             "project_count": len(
@@ -372,7 +375,7 @@ class CostStatisticsPolicy:
             "bank_tag_count": len(
                 {
                     _tag_sub(row)
-                    for row in self._bank_flow_rows
+                    for row in self.bank_flow_rows
                     if _clean_text(row.get("bank_tag_code"))
                 }
             ),

@@ -52,6 +52,7 @@ type RangeScopeMode = "all" | "year" | "month";
 type ExplorerScopeMode = RangeScopeMode;
 type ScopePickerPanel = "scope";
 type EffectiveCostPageState = "fresh" | "loading" | "error";
+type ExplorerTransitionScope = "surface" | "children" | "rows" | null;
 
 function isAbortLikeError(caught: unknown) {
   if (caught instanceof DOMException && caught.name === "AbortError") {
@@ -64,6 +65,33 @@ type LoadedCostStatisticsExplorer = {
   requestKey: string;
   payload: CostStatisticsExplorerPage;
 };
+
+function getExplorerTransitionScope(
+  previousRequestKey: string | undefined,
+  nextRequestKey: string,
+  loading: boolean,
+): ExplorerTransitionScope {
+  if (!previousRequestKey) {
+    return "surface";
+  }
+  if (previousRequestKey === nextRequestKey) {
+    return loading ? "surface" : null;
+  }
+
+  const previous = JSON.parse(previousRequestKey) as CostStatisticsExplorerPageRequest;
+  const next = JSON.parse(nextRequestKey) as CostStatisticsExplorerPageRequest;
+  if (previous.scope !== next.scope || previous.view !== next.view || previous.projectScope !== next.projectScope) {
+    return "surface";
+  }
+  if (
+    (next.view === "project" && previous.projectName !== next.projectName)
+    || (next.view === "bank" && previous.paymentAccountLabel !== next.paymentAccountLabel)
+    || (next.view === "bank_tag" && previous.bankTagPrimaryLabel !== next.bankTagPrimaryLabel)
+  ) {
+    return "children";
+  }
+  return "rows";
+}
 
 type CostStatisticsExportReferenceData = {
   projects: CostProjectExplorerRow[];
@@ -142,22 +170,39 @@ function formatCostTradeTime(value: string) {
 
 function DirectionAmount({
   amount,
+  hideZeroValue = false,
   label,
   tone,
 }: {
   amount: string;
+  hideZeroValue?: boolean;
   label: string;
   tone: "expense" | "income";
 }) {
   const formattedAmount = formatCostAmount(amount);
+  const hideValue = hideZeroValue && Number(amount) === 0;
   return (
     <span
-      aria-label={`${label} ${formattedAmount}`}
+      aria-label={hideValue ? label : `${label} ${formattedAmount}`}
       className={`cost-direction-amount cost-direction-amount--aligned cost-direction-amount--${tone}`}
     >
       <span className="cost-direction-amount-label">{label}</span>
-      <span className="cost-direction-amount-value">{formattedAmount}</span>
+      {hideValue ? null : <span className="cost-direction-amount-value">{formattedAmount}</span>}
     </span>
+  );
+}
+
+function CostSurfaceSkeleton({ loading }: { loading: boolean }) {
+  return (
+    <div
+      aria-busy={loading}
+      aria-label="正在加载成本统计内容"
+      className="cost-surface-skeleton"
+    >
+      <span />
+      <span />
+      <span />
+    </div>
   );
 }
 
@@ -516,6 +561,7 @@ export default function CostStatisticsPage() {
   const exportPreviewRequestRef = useRef<AbortController | null>(null);
   const loadMoreRequestRef = useRef<AbortController | null>(null);
   const detailRequestRef = useRef<AbortController | null>(null);
+  const loadedStatisticsRefreshKeyRef = useRef<string | undefined>(undefined);
 
   useLayoutEffect(() => {
     setWorkbenchHeaderActions({
@@ -581,9 +627,13 @@ export default function CostStatisticsPage() {
     ...(viewMode === "bankTag" && selectedBankTagSubLabel ? { bankTagSubLabel: selectedBankTagSubLabel } : {}),
   };
   const explorerRequestKey = JSON.stringify(explorerRequest);
-  const explorerData = loadedExplorer?.requestKey === explorerRequestKey
-    ? loadedExplorer.payload
-    : null;
+  const statisticsRefreshKey = `${activationGeneration}:${domainRefreshNonce}`;
+  const explorerData = loadedExplorer?.payload ?? null;
+  const explorerTransitionScope = getExplorerTransitionScope(
+    loadedExplorer?.requestKey,
+    explorerRequestKey,
+    isExplorerLoading,
+  );
 
   const invalidateExportReferenceData = useCallback(() => {
     exportReferenceRequestRef.current?.abort();
@@ -607,7 +657,6 @@ export default function CostStatisticsPage() {
   }, []);
 
   const handleManualRefresh = useCallback(() => {
-    setLoadedExplorer(null);
     invalidateExportReferenceData();
     setDomainRefreshNonce((current) => current + 1);
   }, [invalidateExportReferenceData]);
@@ -685,7 +734,6 @@ export default function CostStatisticsPage() {
       });
       setTagRules(result);
       setTagRuleDraftCodes(result.effectiveSelectedTagCodes);
-      setLoadedExplorer(null);
       setDomainRefreshNonce((current) => current + 1);
       setIsTagRulesDrawerOpen(false);
     } catch (caught) {
@@ -715,19 +763,24 @@ export default function CostStatisticsPage() {
       setLoadError(null);
       setExportFeedback(null);
       resetDetailSelection();
-      setLoadedExplorer(null);
       setIsExplorerLoading(true);
 
       try {
         const request = JSON.parse(explorerRequestKey) as CostStatisticsExplorerPageRequest;
-        const payload = await fetchCostStatisticsExplorerPage({ ...request, signal: controller.signal });
+        const payload = await fetchCostStatisticsExplorerPage({
+          ...request,
+          includeStatistics: loadedStatisticsRefreshKeyRef.current !== statisticsRefreshKey,
+          signal: controller.signal,
+        });
         if (!controller.signal.aborted) {
-          setPageStatistics(payload.statistics);
+          if (payload.statistics) {
+            loadedStatisticsRefreshKeyRef.current = statisticsRefreshKey;
+            setPageStatistics(payload.statistics);
+          }
           setLoadedExplorer({ requestKey: explorerRequestKey, payload });
         }
       } catch (caught) {
         if (!controller.signal.aborted) {
-          setPageStatistics(undefined);
           setLoadError(getCostStatisticsLoadErrorMessage(caught));
         }
       } finally {
@@ -744,10 +797,21 @@ export default function CostStatisticsPage() {
         explorerRequestRef.current = null;
       }
     };
-  }, [active, activationGeneration, domainRefreshNonce, explorerRequestKey, resetDetailSelection]);
+  }, [
+    active,
+    activationGeneration,
+    domainRefreshNonce,
+    explorerRequestKey,
+    resetDetailSelection,
+    statisticsRefreshKey,
+  ]);
 
   async function loadMoreExplorerRows() {
-    if (!explorerData?.nextCursor || isLoadingMore) {
+    if (
+      !explorerData?.nextCursor
+      || loadedExplorer?.requestKey !== explorerRequestKey
+      || isLoadingMore
+    ) {
       return;
     }
     loadMoreRequestRef.current?.abort();
@@ -760,6 +824,7 @@ export default function CostStatisticsPage() {
       const nextPage = await fetchCostStatisticsExplorerPage({
         ...request,
         cursor: explorerData.nextCursor,
+        includeStatistics: false,
         signal: controller.signal,
       });
       if (controller.signal.aborted) {
@@ -849,16 +914,18 @@ export default function CostStatisticsPage() {
 	    setTransactionDetail(null);
 	  }, [viewMode, bankTagScopeMode, bankTagScopeYear, bankTagScopeMonth]);
 
-  const pageRows = explorerData?.rows ?? [];
+  const isChildrenTransition = explorerTransitionScope === "children";
+  const isRowsTransition = isChildrenTransition || explorerTransitionScope === "rows";
+  const pageRows = isRowsTransition ? [] : explorerData?.rows ?? [];
   const availableScopeYears = explorerData?.availableYears ?? [];
   const filteredTimeRows = pageRows;
   const projectRows = explorerData?.facets.projects ?? [];
-  const projectExpenseTypeRows = explorerData?.facets.expenseTypes ?? [];
+  const projectExpenseTypeRows = isChildrenTransition ? [] : explorerData?.facets.expenseTypes ?? [];
   const bankRows = explorerData?.facets.bankAccounts ?? [];
-  const bankProjectRows = explorerData?.facets.projects ?? [];
+  const bankProjectRows = isChildrenTransition ? [] : explorerData?.facets.projects ?? [];
   const expenseTypeRows = explorerData?.facets.expenseTypes ?? [];
   const bankTagPrimaryRows = explorerData?.facets.bankTagPrimary ?? [];
-  const bankTagSubRows = explorerData?.facets.bankTagSub ?? [];
+  const bankTagSubRows = isChildrenTransition ? [] : explorerData?.facets.bankTagSub ?? [];
   const selectedProjectTransactionRows = selectedProjectName && selectedProjectExpenseType ? pageRows : [];
   const selectedBankProjectRows = selectedBankAccountLabel && selectedBankProjectName ? pageRows : [];
   const selectedExpenseTypeRows = selectedExpenseType ? pageRows : [];
@@ -928,10 +995,10 @@ export default function CostStatisticsPage() {
 
   const projectExpenseTypeOptions = projectExportNames.length > 0 ? allExpenseTypeOptions : [];
 
-  const hasExplorerLoadError = Boolean(loadError) && !explorerData;
+  const hasExplorerLoadError = Boolean(loadError) && !loadedExplorer;
   const effectiveCostPageState: EffectiveCostPageState = hasExplorerLoadError
     ? "error"
-    : isExplorerLoading || !explorerData || isTagRulesSaving
+    : !loadedExplorer
       ? "loading"
       : "fresh";
   const interactionLocked = effectiveCostPageState !== "fresh";
@@ -1000,7 +1067,10 @@ export default function CostStatisticsPage() {
     });
   }, [interactionLocked, invalidateExportReferenceData, resetDetailSelection]);
 
-  const isRootEmpty = !isExplorerLoading && !loadError && explorerData
+  const isRootEmpty = !isExplorerLoading
+    && !loadError
+    && loadedExplorer?.requestKey === explorerRequestKey
+    && explorerData
     ? viewMode === "time"
       ? explorerData.rowCount === 0
       : viewMode === "project"
@@ -1144,6 +1214,7 @@ export default function CostStatisticsPage() {
           view: "project",
           projectScope: costProjectScope,
           pageSize: 1,
+          includeStatistics: false,
           signal: controller.signal,
         }),
         fetchCostStatisticsExplorerPage({
@@ -1151,6 +1222,7 @@ export default function CostStatisticsPage() {
           view: "expense_type",
           projectScope: costProjectScope,
           pageSize: 1,
+          includeStatistics: false,
           signal: controller.signal,
         }),
       ]);
@@ -1680,7 +1752,7 @@ export default function CostStatisticsPage() {
           </div>
         ) : null}
 
-        {!isExplorerLoading && explorerData ? (
+        {explorerData ? (
           <>
             {viewMode === "time" ? (
               <div className="cost-analysis-layout time-layout single-column">
@@ -1712,15 +1784,19 @@ export default function CostStatisticsPage() {
 	                      </div>
 	                    </div>
                   </div>
-                  <CostStatisticsTable
-                    ariaLabel="按时间统计表"
-                    columns={timeColumns}
-                    rows={filteredTimeRows}
-                    getRowKey={getCostTimeRowRenderKey}
-                    emptyLabel="当前时间范围没有收入或支出流水。"
-                    onRowClick={(row) => void openTransactionDetail(row, "time")}
-                    getRowActionLabel={(row) => `查看流水 ${row.transactionId}`}
-                  />
+                  {explorerTransitionScope === "surface" ? (
+                    <CostSurfaceSkeleton loading={isExplorerLoading} />
+                  ) : (
+                    <CostStatisticsTable
+                      ariaLabel="按时间统计表"
+                      columns={timeColumns}
+                      rows={filteredTimeRows}
+                      getRowKey={getCostTimeRowRenderKey}
+                      emptyLabel="当前时间范围没有收入或支出流水。"
+                      onRowClick={(row) => void openTransactionDetail(row, "time")}
+                      getRowActionLabel={(row) => `查看流水 ${row.transactionId}`}
+                    />
+                  )}
                 </section>
               </div>
             ) : null}
@@ -1751,6 +1827,9 @@ export default function CostStatisticsPage() {
 	                    </div>
 	                  </div>
                 </div>
+                {explorerTransitionScope === "surface" ? (
+                  <CostSurfaceSkeleton loading={isExplorerLoading} />
+                ) : (
                 <div className="cost-explorer-grid project">
                   <CostExplorerList<CostProjectExplorerRow>
                     title="项目名"
@@ -1780,6 +1859,7 @@ export default function CostStatisticsPage() {
                     title="费用类型"
                     count={projectExpenseTypeRows.length}
                     items={projectExpenseTypeRows}
+                    loading={isChildrenTransition}
                     emptyLabel={selectedProjectName ? "该项目下暂无费用类型。" : "请先在左侧选择项目。"}
                     getKey={(row) => row.expenseType}
                     isActive={(row) => row.expenseType === selectedProjectExpenseType}
@@ -1797,12 +1877,17 @@ export default function CostStatisticsPage() {
                       </div>
                     )}
                   />
-                  <section className="cost-explorer-lane cost-explorer-lane-table">
+                  <section
+                    aria-busy={isExplorerLoading && isRowsTransition}
+                    className="cost-explorer-lane cost-explorer-lane-table"
+                  >
                     <header className="cost-explorer-lane-header">
                       <h2>对应流水</h2>
-                      <span>{explorerData?.rowCount ?? selectedProjectTransactionRows.length}</span>
+                      <span>{isRowsTransition ? 0 : explorerData?.rowCount ?? selectedProjectTransactionRows.length}</span>
                     </header>
-                    {selectedProjectName && selectedProjectExpenseType ? (
+                    {isRowsTransition ? (
+                      <div className="cost-explorer-empty" />
+                    ) : selectedProjectName && selectedProjectExpenseType ? (
                       <CostStatisticsTable
                         ariaLabel="项目对应流水表"
                         columns={transactionColumns}
@@ -1812,11 +1897,10 @@ export default function CostStatisticsPage() {
                         getRowActionLabel={(row) => `查看流水 ${row.transactionId}`}
                         emptyLabel="该费用类型下暂无流水。"
                       />
-                    ) : (
-                      <div className="cost-explorer-empty">请先依次选择项目和费用类型。</div>
-                    )}
+                    ) : <div className="cost-explorer-empty" />}
                   </section>
                 </div>
+                )}
               </div>
             ) : null}
 
@@ -1846,6 +1930,9 @@ export default function CostStatisticsPage() {
 	                    </div>
 	                  </div>
                 </div>
+                {explorerTransitionScope === "surface" ? (
+                  <CostSurfaceSkeleton loading={isExplorerLoading} />
+                ) : (
                 <div className="cost-explorer-grid project">
                   <CostExplorerList<CostBankExplorerRow>
                     title="银行账户"
@@ -1873,6 +1960,7 @@ export default function CostStatisticsPage() {
                     title="项目名"
                     count={bankProjectRows.length}
                     items={bankProjectRows}
+                    loading={isChildrenTransition}
                     emptyLabel={selectedBankAccountLabel ? "该账户下暂无项目流水。" : "请先在左侧选择银行账户。"}
                     getKey={(row) => row.projectName}
                     isActive={(row) => row.projectName === selectedBankProjectName}
@@ -1890,12 +1978,17 @@ export default function CostStatisticsPage() {
                       </div>
                     )}
                   />
-                  <section className="cost-explorer-lane cost-explorer-lane-table">
+                  <section
+                    aria-busy={isExplorerLoading && isRowsTransition}
+                    className="cost-explorer-lane cost-explorer-lane-table"
+                  >
                     <header className="cost-explorer-lane-header">
                       <h2>对应流水</h2>
-                      <span>{explorerData?.rowCount ?? selectedBankProjectRows.length}</span>
+                      <span>{isRowsTransition ? 0 : explorerData?.rowCount ?? selectedBankProjectRows.length}</span>
                     </header>
-                    {selectedBankAccountLabel && selectedBankProjectName ? (
+                    {isRowsTransition ? (
+                      <div className="cost-explorer-empty" />
+                    ) : selectedBankAccountLabel && selectedBankProjectName ? (
                       <CostStatisticsTable
                         ariaLabel="银行对应流水表"
                         columns={transactionColumns}
@@ -1905,11 +1998,10 @@ export default function CostStatisticsPage() {
                         getRowActionLabel={(row) => `查看流水 ${row.transactionId}`}
                         emptyLabel="该项目下暂无流水。"
                       />
-                    ) : (
-                      <div className="cost-explorer-empty">请先依次选择银行账户和项目。</div>
-                    )}
+                    ) : <div className="cost-explorer-empty" />}
                   </section>
                 </div>
+                )}
               </div>
             ) : null}
 
@@ -1939,6 +2031,9 @@ export default function CostStatisticsPage() {
 	                    </div>
 	                  </div>
                 </div>
+                {explorerTransitionScope === "surface" ? (
+                  <CostSurfaceSkeleton loading={isExplorerLoading} />
+                ) : (
                 <div className="cost-explorer-grid expense">
                   <CostExplorerList<CostExpenseTypeExplorerRow>
                     title="费用类型"
@@ -1961,12 +2056,17 @@ export default function CostStatisticsPage() {
                       </div>
                     )}
                   />
-                  <section className="cost-explorer-lane cost-explorer-lane-table">
+                  <section
+                    aria-busy={isExplorerLoading && isRowsTransition}
+                    className="cost-explorer-lane cost-explorer-lane-table"
+                  >
                     <header className="cost-explorer-lane-header">
                       <h2>对应流水</h2>
-                      <span>{explorerData?.rowCount ?? selectedExpenseTypeRows.length}</span>
+                      <span>{isRowsTransition ? 0 : explorerData?.rowCount ?? selectedExpenseTypeRows.length}</span>
                     </header>
-                    {selectedExpenseType ? (
+                    {isRowsTransition ? (
+                      <div className="cost-explorer-empty" />
+                    ) : selectedExpenseType ? (
                       <CostStatisticsTable
                         ariaLabel="按费用类型流水表"
                         columns={transactionColumns}
@@ -1976,11 +2076,10 @@ export default function CostStatisticsPage() {
                         getRowActionLabel={(row) => `查看流水 ${row.transactionId}`}
                         emptyLabel="该费用类型下暂无流水。"
                       />
-                    ) : (
-                      <div className="cost-explorer-empty">请先在左侧选择费用类型。</div>
-                    )}
+                    ) : <div className="cost-explorer-empty" />}
                   </section>
                 </div>
+                )}
               </div>
             ) : null}
 
@@ -2013,6 +2112,9 @@ export default function CostStatisticsPage() {
                     </div>
                   </div>
                 </div>
+                {explorerTransitionScope === "surface" ? (
+                  <CostSurfaceSkeleton loading={isExplorerLoading} />
+                ) : (
                 <div className="cost-explorer-grid bank-tag">
                   <CostExplorerList<CostBankTagPrimaryExplorerRow>
                     title="主标签"
@@ -2033,8 +2135,8 @@ export default function CostStatisticsPage() {
                     )}
                     renderMeta={(row) => (
                       <div className="cost-direction-meta">
-                        <DirectionAmount amount={row.expenseAmount} label="支出" tone="expense" />
-                        <DirectionAmount amount={row.incomeAmount} label="收入" tone="income" />
+                        <DirectionAmount amount={row.expenseAmount} hideZeroValue label="支出" tone="expense" />
+                        <DirectionAmount amount={row.incomeAmount} hideZeroValue label="收入" tone="income" />
                       </div>
                     )}
                   />
@@ -2042,6 +2144,7 @@ export default function CostStatisticsPage() {
                     title="子标签"
                     count={bankTagSubRows.length}
                     items={bankTagSubRows}
+                    loading={isChildrenTransition}
                     emptyLabel={selectedBankTagPrimaryLabel ? "该主标签下暂无子标签。" : "请先在左侧选择主标签。"}
                     getKey={(row) => `${row.primaryLabel}:${row.subLabel}`}
                     isActive={(row) => row.subLabel === selectedBankTagSubLabel}
@@ -2054,17 +2157,22 @@ export default function CostStatisticsPage() {
                     renderSecondary={(row) => `支出 ${row.expenseTransactionCount} 笔 / 收入 ${row.incomeTransactionCount} 笔`}
                     renderMeta={(row) => (
                       <div className="cost-direction-meta">
-                        <DirectionAmount amount={row.expenseAmount} label="支出" tone="expense" />
-                        <DirectionAmount amount={row.incomeAmount} label="收入" tone="income" />
+                        <DirectionAmount amount={row.expenseAmount} hideZeroValue label="支出" tone="expense" />
+                        <DirectionAmount amount={row.incomeAmount} hideZeroValue label="收入" tone="income" />
                       </div>
                     )}
                   />
-                  <section className="cost-explorer-lane cost-explorer-lane-table">
+                  <section
+                    aria-busy={isExplorerLoading && isRowsTransition}
+                    className="cost-explorer-lane cost-explorer-lane-table"
+                  >
                     <header className="cost-explorer-lane-header">
                       <h2>对应流水</h2>
-                      <span>{explorerData?.rowCount ?? selectedBankTagSubRows.length}</span>
+                      <span>{isRowsTransition ? 0 : explorerData?.rowCount ?? selectedBankTagSubRows.length}</span>
                     </header>
-                    {selectedBankTagPrimaryLabel && selectedBankTagSubLabel ? (
+                    {isRowsTransition ? (
+                      <div className="cost-explorer-empty" />
+                    ) : selectedBankTagPrimaryLabel && selectedBankTagSubLabel ? (
                       <CostStatisticsTable
                         ariaLabel="流水标签对应流水表"
                         columns={transactionColumns}
@@ -2074,11 +2182,10 @@ export default function CostStatisticsPage() {
                         getRowActionLabel={(row) => `查看流水 ${row.transactionId}`}
                         emptyLabel="该流水标签下暂无流水。"
                       />
-                    ) : (
-                      <div className="cost-explorer-empty">请先依次选择主标签和子标签。</div>
-                    )}
+                    ) : <div className="cost-explorer-empty" />}
                   </section>
                 </div>
+                )}
               </div>
             ) : null}
             {explorerData.nextCursor ? (

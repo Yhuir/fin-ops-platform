@@ -114,6 +114,7 @@ export type CostStatisticsExplorerPageRequest = {
   bankTagSubLabel?: string;
   cursor?: string;
   pageSize?: number;
+  includeStatistics?: boolean;
   signal?: AbortSignal;
 };
 

@@ -5,6 +5,7 @@ type CostExplorerListProps<Row> = {
   count: number;
   items: Row[];
   emptyLabel: string;
+  loading?: boolean;
   getKey: (row: Row) => string;
   isActive: (row: Row) => boolean;
   onSelect: (row: Row) => void;
@@ -18,6 +19,7 @@ export default function CostExplorerList<Row>({
   count,
   items,
   emptyLabel,
+  loading = false,
   getKey,
   isActive,
   onSelect,
@@ -26,12 +28,18 @@ export default function CostExplorerList<Row>({
   renderMeta,
 }: CostExplorerListProps<Row>) {
   return (
-    <section className="cost-explorer-lane">
+    <section aria-busy={loading} className="cost-explorer-lane">
       <header className="cost-explorer-lane-header">
         <h2>{title}</h2>
         <span>{count}</span>
       </header>
-      {items.length === 0 ? (
+      {loading ? (
+        <div aria-hidden="true" className="cost-explorer-lane-skeleton">
+          <span />
+          <span />
+          <span />
+        </div>
+      ) : items.length === 0 ? (
         <div className="cost-explorer-empty">{emptyLabel}</div>
       ) : (
         <div className="cost-explorer-list">

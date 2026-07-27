@@ -70,6 +70,7 @@ class CostStatisticsApiRoutes:
                 bank_tag_sub_label=query.get("bank_tag_sub_label", [None])[0],
                 cursor=query.get("cursor", [None])[0],
                 page_size=query.get("page_size", [None])[0],
+                include_statistics=query.get("include_statistics", [None])[0],
                 if_none_match=_header(headers, "if-none-match"),
             )
         if method == "GET" and route_path == "/api/cost-statistics/export-preview":
@@ -164,6 +165,7 @@ class CostStatisticsApiRoutes:
         bank_tag_sub_label: str | None,
         cursor: str | None,
         page_size: str | None,
+        include_statistics: str | None,
         if_none_match: str | None,
     ) -> Any:
         current_scope = scope or self._now_provider().strftime("%Y-%m")
@@ -171,6 +173,12 @@ class CostStatisticsApiRoutes:
         cache_hit = False
         try:
             normalized_project_scope = self._normalize_project_scope(project_scope)
+            if (
+                include_statistics is not None
+                and str(include_statistics).strip().lower()
+                not in {"0", "false", "no", "off", "1", "true", "yes", "on"}
+            ):
+                raise ValueError("include_statistics must be true or false")
             payload, cache_hit, etag, not_modified = self._query_service.get_explorer_page(
                 scope=current_scope,
                 view=str(view or ""),
@@ -184,6 +192,7 @@ class CostStatisticsApiRoutes:
                 },
                 cursor=cursor,
                 page_size=int(page_size or 50),
+                include_statistics=self._optional_bool_parser(include_statistics),
                 if_none_match=if_none_match,
             )
         except ValueError as error:

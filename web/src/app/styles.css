@@ -19353,7 +19353,7 @@ body.column-layout-dragging {
 }
 
 .cost-explorer-grid.bank-tag {
-  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(420px, 2fr);
+  grid-template-columns: minmax(144px, 0.8fr) minmax(144px, 0.8fr) minmax(420px, 2.4fr);
 }
 
 @media (min-width: 1025px) {
@@ -20231,6 +20231,25 @@ body.column-layout-dragging {
   font-size: 11px;
 }
 
+.cost-explorer-lane-skeleton,
+.cost-surface-skeleton {
+  display: grid;
+  gap: var(--fp-space-3);
+  padding: var(--fp-space-3);
+}
+
+.cost-explorer-lane-skeleton span,
+.cost-surface-skeleton span {
+  min-height: 52px;
+  border-radius: var(--fp-radius-md);
+  background: var(--fp-surface-muted);
+}
+
+.cost-surface-skeleton {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  min-height: max(560px, calc(100dvh - 240px));
+}
+
 .cost-explorer-percentage-badge {
   display: inline-flex;
   align-items: center;
@@ -20493,7 +20512,8 @@ body.column-layout-dragging {
   .cost-analysis-layout.explorer-layout,
   .cost-explorer-grid.project,
   .cost-explorer-grid.expense,
-  .cost-explorer-grid.bank-tag {
+  .cost-explorer-grid.bank-tag,
+  .cost-surface-skeleton {
     grid-template-columns: 1fr;
   }
 

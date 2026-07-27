@@ -134,7 +134,7 @@ describe("Cost statistics page", () => {
     expect(css).toMatch(/\.cost-scope-trigger\s*{[^}]*min-height:\s*42px[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).toMatch(/\.cost-scope-popover\s*{[^}]*width:\s*min\(360px,\s*calc\(100vw - 32px\)\)/s);
     expect(css).toMatch(/\.cost-explorer-item\s*{[^}]*padding:\s*10px var\(--fp-space-3\)[^}]*transition:[^}]*var\(--motion-fast\)/s);
-    expect(css).toMatch(/\.cost-explorer-grid\.bank-tag\s*{[^}]*grid-template-columns:\s*minmax\(180px,\s*1fr\) minmax\(180px,\s*1fr\) minmax\(420px,\s*2fr\)/s);
+    expect(css).toMatch(/\.cost-explorer-grid\.bank-tag\s*{[^}]*grid-template-columns:\s*minmax\(144px,\s*0\.8fr\) minmax\(144px,\s*0\.8fr\) minmax\(420px,\s*2\.4fr\)/s);
     expect(css).toMatch(/\.cost-explorer-grid\.project,[\s\S]*height:\s*max\(560px,\s*calc\(100dvh - 240px\)\)/s);
     expect(css).toMatch(/\.cost-view-scope-heading \.cost-section-heading-actions\s*{[^}]*order:\s*-1/s);
     expect(css).toMatch(/\.cost-lock-target\.is-locked\s*{[^}]*opacity:\s*0\.62/s);
@@ -171,7 +171,7 @@ describe("Cost statistics page", () => {
     expect(tablist.closest("[inert]")).toBeNull();
   });
 
-  test("moves focus to the inline status while locked and restores the triggering control when fresh", async () => {
+  test("keeps page controls interactive while switching an already loaded view", async () => {
     window.history.pushState({}, "", "/cost-statistics");
     const user = userEvent.setup();
     installMockApiFetch({ costExplorerDelayMs: 50 });
@@ -180,13 +180,13 @@ describe("Cost statistics page", () => {
 
     expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
     const bankViewButton = screen.getByRole("button", { name: "按银行" });
-    bankViewButton.focus();
     await user.click(bankViewButton);
 
-    const status = screen.getByText("正在加载成本统计").closest('[role="status"]');
-    await waitFor(() => expect(status).toHaveFocus());
+    expect(screen.queryByText("正在加载成本统计")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("cost-statistics-interaction-overlay")).not.toBeInTheDocument();
+    expect(screen.getByRole("tablist", { name: "成本统计视图切换" }).closest("[inert]")).toBeNull();
+    expect(screen.getByLabelText("正在加载成本统计内容")).toHaveAttribute("aria-busy", "true");
     expect(await screen.findByRole("heading", { name: "按银行统计" })).toBeInTheDocument();
-    await waitFor(() => expect(bankViewButton).toHaveFocus());
   });
 
   test("defaults to time view and loads month-aware transaction rows", async () => {
@@ -376,6 +376,39 @@ describe("Cost statistics page", () => {
     expect(screen.queryByRole("dialog", { name: "流水详情" })).not.toBeInTheDocument();
   });
 
+  test("keeps upstream lanes and clears only dependent lanes during project drilldown", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const user = userEvent.setup();
+    installMockApiFetch({ costExplorerDelayMs: 50 });
+
+    renderCostStatisticsPage();
+    expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "按项目" }));
+
+    const projectLane = (await screen.findByRole("heading", { name: "项目名" })).closest(".cost-explorer-lane");
+    expect(projectLane).not.toBeNull();
+    await user.click(within(projectLane as HTMLElement).getByRole("button", { name: /云南溯源科技/ }));
+
+    const expenseLane = screen.getByRole("heading", { name: "费用类型" }).closest(".cost-explorer-lane");
+    const transactionLane = screen.getByRole("heading", { name: "对应流水" }).closest(".cost-explorer-lane");
+    expect(within(projectLane as HTMLElement).getByText("云南溯源科技")).toBeInTheDocument();
+    expect(expenseLane).toHaveAttribute("aria-busy", "true");
+    expect(transactionLane).toHaveAttribute("aria-busy", "true");
+    expect(within(transactionLane as HTMLElement).queryByText(/请先/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("cost-statistics-interaction-overlay")).not.toBeInTheDocument();
+
+    await waitFor(() => expect(expenseLane).toHaveAttribute("aria-busy", "false"));
+    await user.click(within(expenseLane as HTMLElement).getByRole("button", { name: /设备货款及材料费/ }));
+
+    expect(within(projectLane as HTMLElement).getByText("云南溯源科技")).toBeInTheDocument();
+    expect(within(expenseLane as HTMLElement).getByText("设备货款及材料费")).toBeInTheDocument();
+    expect(transactionLane).toHaveAttribute("aria-busy", "true");
+    expect(within(transactionLane as HTMLElement).queryByText(/请先/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("cost-statistics-interaction-overlay")).not.toBeInTheDocument();
+
+    expect(await screen.findByRole("grid", { name: "项目对应流水表" })).toBeInTheDocument();
+  });
+
   test("project view keeps split cost rows with the same transaction id renderable", async () => {
     window.history.pushState({}, "", "/cost-statistics");
     const user = userEvent.setup();
@@ -498,6 +531,12 @@ describe("Cost statistics page", () => {
     expect(screen.getByLabelText("收入金额 2,000.00")).toHaveClass("cost-direction-amount--income");
     expect(within(primaryLane as HTMLElement).queryByText(/%$/)).not.toBeInTheDocument();
     expect(within(primaryLane as HTMLElement).getByText("支出 0 笔 / 收入 1 笔 / 1 个子标签")).toBeInTheDocument();
+    const incomeOnlyRow = within(primaryLane as HTMLElement).getByRole("button", { name: /经营收入/ });
+    expect(
+      Array.from(incomeOnlyRow.querySelectorAll(".cost-direction-amount-label")).map((node) => node.textContent),
+    ).toEqual(["支出", "收入"]);
+    expect(within(incomeOnlyRow).getByLabelText("支出")).toBeInTheDocument();
+    expect(within(incomeOnlyRow).queryByText("0.00")).not.toBeInTheDocument();
 
     await user.click(within(primaryLane as HTMLElement).getByRole("button", { name: /项目开销/ }));
 
@@ -691,7 +730,7 @@ describe("Cost statistics page", () => {
     expect(screen.queryByRole("button", { name: "三月" })).not.toBeInTheDocument();
   });
 
-  test("removes the prior scope from interaction while the next scope is loading", async () => {
+  test("only replaces the content surface while a new view is loading", async () => {
     window.history.pushState({}, "", "/cost-statistics");
     const user = userEvent.setup();
     installMockApiFetch({ costExplorerDelayMs: 50 });
@@ -703,12 +742,28 @@ describe("Cost statistics page", () => {
 
     await user.click(screen.getByRole("button", { name: "按银行" }));
 
-    expect(screen.getByText("正在加载成本统计")).toBeInTheDocument();
-    expect(screen.getByRole("tablist", { name: "成本统计视图切换" }).closest("[inert]")).not.toBeNull();
+    expect(screen.queryByText("正在加载成本统计")).not.toBeInTheDocument();
+    expect(screen.getByRole("tablist", { name: "成本统计视图切换" }).closest("[inert]")).toBeNull();
     expect(screen.queryByRole("grid", { name: "按时间统计表" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("正在加载成本统计内容")).toHaveAttribute("aria-busy", "true");
     expect(await screen.findByRole("heading", { name: "按银行统计" })).toBeInTheDocument();
     expect(screen.getByRole("tablist", { name: "成本统计视图切换" }).closest("[inert]")).toBeNull();
     expect(screen.getByRole("button", { name: "银行统计时间范围：全部时间" })).toBeInTheDocument();
+  });
+
+  test("only replaces the content surface while the time range is loading", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const user = userEvent.setup();
+    installMockApiFetch({ costExplorerDelayMs: 50 });
+
+    renderCostStatisticsPage();
+    expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
+    await chooseScopeOption(user, "时间统计时间范围：2026年3月", "四月");
+
+    expect(screen.getByRole("button", { name: "时间统计时间范围：2026年4月" })).toBeEnabled();
+    expect(screen.queryByTestId("cost-statistics-interaction-overlay")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("正在加载成本统计内容")).toHaveAttribute("aria-busy", "true");
+    expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
   });
 
   test("shows error state when explorer loading fails", async () => {
@@ -769,6 +824,22 @@ describe("Cost statistics page", () => {
       },
       { timeout: PAGE_RENDER_TIMEOUT },
     );
+  });
+
+  test("manual refresh reloads global statistics instead of using the drilldown-only contract", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    const initialUrl = "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&page_size=50";
+
+    renderCostStatisticsPage();
+
+    expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "刷新成本统计" }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([request]) => String(request) === initialUrl)).toHaveLength(2);
+    });
   });
 
   test("surfaces OA session errors from explorer loading", async () => {
@@ -858,7 +929,7 @@ describe("Cost statistics page", () => {
 
     await waitFor(() => expect(within(dialog).getByLabelText("云南溯源科技")).toBeChecked());
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/explorer?scope=all&view=project&project_scope=active&page_size=1",
+      "/api/cost-statistics/explorer?scope=all&view=project&project_scope=active&page_size=1&include_statistics=false",
       expect.any(Object),
     );
   });
@@ -931,7 +1002,7 @@ describe("Cost statistics page", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "导出中心" });
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/explorer?scope=all&view=expense_type&project_scope=active&page_size=1",
+      "/api/cost-statistics/explorer?scope=all&view=expense_type&project_scope=active&page_size=1&include_statistics=false",
       expect.any(Object),
     );
     expectProjectCostDialog("导出中心");

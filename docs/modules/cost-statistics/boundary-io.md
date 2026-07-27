@@ -35,6 +35,9 @@ HTTP GET
 ```
 
 - 页面首次访问和浏览器刷新走同一条链。
+- 首次 explorer 请求读取完整 canonical snapshot 并返回全局 `statistics`；同一页面后续视图、范围和下钻请求发送 `include_statistics=false`，避免重复计算不变的页头统计。
+- `include_statistics=false` 且范围不是 `all` 时，repository 用 `bank_transactions.txn_month` 下推范围。`time|bank_tag` 不读取 OA 配对关系；`project|bank|expense_type` 只读取命中银行流水的 active relation，并扩展该 relation 的全部银行/OA 成员，保证跨月份配对分配语义不变。
+- 前端将后续请求限制在内容区：范围/视图只替换统计 surface，左栏选择只加载中/右栏，中栏选择只加载右栏；只有首次数据尚未验证时才使用页面内交互锁。
 - API 失败时明确返回错误；用户再次刷新会重新打开数据库快照并完整重试。
 - 标签规则保存只修改 App Settings；保存成功后的页面 reload 重新应用最新规则。
 - 不产生 `cost_statistics.read_model.refresh`、dirty scope、readiness 或 Cost worker I/O。
@@ -43,7 +46,7 @@ HTTP GET
 
 | 层 | 文件 |
 | --- | --- |
-| Frontend | `web/src/pages/CostStatisticsPage.tsx`、`web/src/features/cost-statistics/*` |
+| Frontend | `web/src/pages/CostStatisticsPage.tsx`、`web/src/components/cost-statistics/*`、`web/src/features/cost-statistics/*` |
 | Route | `backend/src/fin_ops_platform/app/routes_cost_statistics.py` |
 | Query / policy | `cost_statistics_query_service.py`、`cost_statistics_policy.py`、`cost_statistics_bank_tags.py` |
 | Canonical repository | `cost_statistics_canonical_repository.py` |
@@ -70,4 +73,4 @@ migration `0126` 负责停止遗留运行时事件并删除旧表。除该迁移
 - 一次 API 请求只建立一个数据库快照，不轮询、不等待后台任务。
 - 分页、详情和导出保持现有上限；导出仍受 `COST_STATISTICS_EXPORT_ROW_LIMIT` 保护。
 - 本次不承诺 3 秒硬 SLO，但候选发布必须记录各视图多次请求的 p50/p95，并确认无 Cost queue/worker I/O。
-- 若生产数据量使全量 canonical snapshot 成为已测瓶颈，下一步只允许在 repository 内下推等价筛选/聚合；不得恢复 Cost read model 或页面间依赖。
+- 已测的后续请求热点只在 repository 内做等价 scope/identity 下推；不得恢复 Cost read model、添加页面 cache 或建立页面间依赖。

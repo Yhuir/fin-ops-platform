@@ -50,6 +50,7 @@ class CostStatisticsQueryService:
         filters: dict[str, str | None],
         cursor: str | None,
         page_size: int,
+        include_statistics: bool = True,
         if_none_match: str | None = None,
     ) -> tuple[dict[str, Any], bool, str, bool]:
         del if_none_match
@@ -72,7 +73,15 @@ class CostStatisticsQueryService:
             cursor,
             query_binding=query_binding,
         )
-        policy = self._policy(project_scope=normalized_project_scope)
+        policy = CostStatisticsPolicy(
+            self._canonical_repository.load_snapshot(
+                scope_kind=scope_kind,
+                scope_value=scope_value,
+                view=normalized_view,
+                include_statistics=include_statistics,
+            ),
+            project_scope=normalized_project_scope,
+        )
         raw_page = policy.explorer_page(
             scope_kind=scope_kind,
             scope_value=scope_value,
@@ -80,6 +89,7 @@ class CostStatisticsQueryService:
             filters=normalized_filters,
             cursor_values=cursor_values,
             page_size=normalized_page_size,
+            include_statistics=include_statistics,
         )
         facets = {
             "projects": [],
@@ -109,7 +119,11 @@ class CostStatisticsQueryService:
             "scope": normalized_scope,
             "view": normalized_view,
             "summary": dict(raw_page.get("summary") or {}),
-            "statistics": dict(raw_page.get("statistics") or {}),
+            "statistics": (
+                dict(raw_page["statistics"])
+                if isinstance(raw_page.get("statistics"), dict)
+                else None
+            ),
             "available_years": list(raw_page.get("available_years") or []),
             "facets": facets,
             "rows": [
