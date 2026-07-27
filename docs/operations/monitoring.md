@@ -17,7 +17,7 @@
 - `GET /api/operations/app-health/page-audit?page=output-invoice-collections` 管理员只读销项收款 canonical/relation 对账审计。
 - `GET /api/operations/app-health/page-audit?page=<page_key>` 管理员只读页面业务 canonical/relation 对账审计；registry 全覆盖 17 页，未实现 proof 的页面 fail closed。
 - OA 同步状态。
-- 三个保留 read model 的 dirty scopes。
+- 四个保留 read model 的 dirty scopes。
 - 后台任务状态。
 - Runtime durable queue backlog、failed outbox event、stale read model dirty scopes。
 - Mongo 连接错误。
@@ -39,21 +39,40 @@
 - `read_model_refresh_duration_ms.p95/p99` 持续升高。
 - `read_model_refresh_enqueue_to_fresh_ms.p95/p99` 持续升高。该指标从 durable outbox `created_at -> processed_at` 计算，表示真实 enqueue-to-fresh latency，不等同于单次 worker handler duration。
 - `/api/workbench` 或 `/api/workbench/groups` 的 `workbench_api_metric.duration_ms` p95 超过页面 SLO。
-- `/api/workbench*` 返回 `workbench_canonical_query_unavailable`、statement timeout 或 5xx；页面没有 refresh-status/fallback，需直接检查 PostgreSQL canonical tables、连接池和慢 SQL。
+- `/api/workbench/refresh-status` 长时间返回 `refreshing`、`stale`、`failed` 或 `unavailable`。
+- `/api/workbench/refresh-status.consistency_status=failed`，或 `read_model.workbench_generation_consistency` 中存在 active inconsistent generation。该状态表示 read model 发布契约被阻断，不能靠浏览器刷新恢复。
 - `/health.api_performance.endpoints[*].duration_ms.p95` 持续超过页面 SLO。
 - `/health.api_performance.endpoints[*].connection_acquire_ms.p95` 持续升高，表示 PostgreSQL 连接池等待、连接建立或数据库连接资源压力。
 - `/health.api_performance.endpoints[*].sql_execute_fetch_ms.p95` 持续升高，表示 SQL 执行/取数本身变慢。
-- Redis `redis_miss_count` 快速增长且仍使用 Redis read cache 的页面 PostgreSQL 热读压力同步升高；该指标不适用于关联台页面。
+- Redis `redis_miss_count` 快速增长且 PostgreSQL 热读压力同步升高。
 - 数据重置任务异常结束。
-- Search、`workbench_relation` 或 no-OA API 返回 `read_model_unavailable`，表示对应共享 SQL repository 未配置或初始化失败；这不是允许回落旧 snapshot 的场景。直接读取页面的 repository 失败使用页面 canonical query 错误，不得伪装成 read-model 状态。
+- Workbench、Search、`workbench_relation` 或 no-OA API 返回 `read_model_unavailable`，表示对应 SQL read repository 未配置或初始化失败；这不是允许回落旧 snapshot 的场景。直接读取页面的 repository 失败使用页面 canonical query 错误，不得伪装成 read-model 状态。
 - `state:full_state` 不应再由 PostgreSQL `PostgresStateStore.save()` 写入。生产 API/worker 不应设置 `FIN_OPS_ENABLE_POSTGRES_FULL_STATE_SNAPSHOT=1`；若出现该 key 写入，应排查旧工具或未迁移路径。
+
+## Workbench 索引卫生
+
+Workbench read model 写入会同时维护多张投影表和索引。生产基线中以下索引体积大、`idx_scan=0`，且现有查询不依赖它们的索引类型；`0070_workbench_unused_write_indexes.sql` 会删除它们以降低 active generation 发布写放大：
+
+- `read_model.workbench_rows_payload_gin`
+- `read_model.workbench_groups_searchable_text_trgm`
+- `read_model.workbench_group_rows_column_values_gin`
+
+保留 `workbench_group_rows_searchable_text_trgm`，因为 pane search 仍有扫描记录。若生产搜索/筛选出现可复现退化，先用 `/health.api_performance`、`EXPLAIN (ANALYZE, BUFFERS)` 和 `pg_stat_user_indexes` 证明相关查询需要恢复索引，再执行回滚 SQL：
+
+```sql
+create index if not exists workbench_rows_payload_gin on read_model.workbench_rows using gin (payload);
+create index if not exists workbench_groups_searchable_text_trgm on read_model.workbench_groups using gin (searchable_text gin_trgm_ops);
+create index if not exists workbench_group_rows_column_values_gin on read_model.workbench_group_rows using gin (column_values);
+```
 
 ## 日志要求
 
 - 日志应包含请求路径、用户、动作、耗时和错误摘要。
 - worker 日志应包含 `queue_event_id`、`event_type`、`attempts`、`trace_id` 和 `source_version`。
-- Workbench page API 指标日志使用 `workbench_api_metric`，生产指标系统按 `endpoint` 聚合 p95、数据库耗时和查询数。
-- 关联台页面没有 SSE 或 refresh-status polling；用户重试会重新执行同一 canonical GET。App Health SSE 仍按自己的 owner 监控。
+- read model API 指标日志使用 `workbench_api_metric`，生产指标系统按 `endpoint` 聚合 p95。
+- read model stale/unavailable 计数日志使用 `workbench_read_model_status_metric`，按 `endpoint`、`scope_key`、`read_model_status` 和 `reason` 聚合。
+- workbench generation consistency failure 会把 `/api/app-health.workbench_read_model.status` 提升为 `error`，并在 `last_error` 中保留 `generation_metadata_actual_mismatch`、all-scope parent inconsistency、`duplicate_invoice_identity_cross_zone` 或 `duplicate_bank_identity_cross_zone` 原因。
+- 工作台实时刷新事件由 `/api/workbench/events` 暴露。SSE 连接失败时前端应回退 `/api/workbench/refresh-status`，运维排障需要同时查看代理是否缓冲 `text/event-stream`、worker lag 和 dirty scope 状态。
 - `/health` / `/health/ready` 输出 bounded `api_performance` 进程内 rolling window 摘要，按 `METHOD path` 聚合 `duration_ms`、`connection_acquire_ms`、`sql_execute_fetch_ms`、`database_duration_ms` 和 `database_query_count` 的 p50/p95/p99，但只保留 p95 最慢的有限 endpoint，并通过 `endpoint_count` / `omitted_endpoint_count` 标明是否被截断。完整 endpoint 明细由 `/metrics` 或 admin-only `/api/operations/app-health-dashboard` 提供。
 - P2/P3 readiness payload gate 使用 `health_ready_payload_probe` 验证 `/fin-ops-api/health/ready` 本身不成为慢探针：默认要求 1000ms 内、JSON、response 不超过 50KB、`api_performance.endpoints<=20` 且带 `endpoint_count` / `omitted_endpoint_count`；ready payload 只保留 runtime blocker 需要的 counts、status summary 和 bounded problem samples，不输出完整 `entrypoints`、`worker_metrics` 或重复的 `storage.runtime_infrastructure`；慢、大、未截断、缺 metadata 或 HTML fallback 均视为失败。
 - `/health/ready` 只计算当前 blocker：current-effective outbox、dirty scope、required worker heartbeat 和发布状态；历史完成 refresh 的 duration/failure 样本不属于 readiness blocker，不在该热路径读取。完整历史/窗口性能指标保留在 `/health`、`/metrics` 和 admin-only Operations dashboard。
@@ -100,11 +119,11 @@ RabbitMQ 接入后仍以 PostgreSQL 指标为准；RabbitMQ queue depth 和 DLQ 
 关联台不再保存或展示自动候选/decision。确定性匹配只有两种结果：满足安全规则时通过正式 relation command/UoW 写 active relation；否则不写关系，相关 canonical facts 各自保持 unpaired。出现错误配对、事实缺失或历史 metadata 影响分组时，先运行对象身份审计与统一 Workbench 页面审计，区分 canonical/relation 问题和 read-model freshness 问题；禁止恢复已删除的 candidate/decision 工具或表。
 
 如果 active relation 本身错误，只能使用正式、带审计的 withdraw/cancel 命令处理；如果 active relation
-正确而页面分组错误，应修复 canonical query/builder 后重新部署，关联台下一次 GET 会直接重算，不再运行
-Workbench page rehydrate。
+正确而页面分组错误，应修复 projection builder 后重新部署，并通过精确 `workbench` refresh 或受控
+Workbench rehydrate 发布新 active generation；页面 GET 不允许同步重算。
 
 如果 relation facts 发生变更，只通过既有 runtime queue/backfill 入口刷新仍登记的
-`workbench_relation` 与 `search` scope；银行明细、成本统计及其它 direct-canonical 页面由下一次 API
+`workbench`、`workbench_relation` 与 `search` scope；银行明细、成本统计及其它 direct-canonical 页面由下一次 API
 请求直接读取 canonical facts。不得直接修改 `read_model.*`，也不得为了改变页面归属而手工改正确的
 no-OA/internal-transfer relation。修复后必须证明 `paired = active relation members`、
 `unpaired = canonical facts - paired`、两者无交集且并集不漏事实，并等待保留 read model 的相关
@@ -301,7 +320,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.sync_slo_baseline --jso
 PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.read_model_slo_smoke --json
 ```
 
-该工具默认 dry-run，只选择三个共享 read model 中已有 fresh readiness 的 direct scope；显式加
+该工具默认 dry-run，只选择四个保留 read model 中已有 fresh readiness 的 direct scope；显式加
 `--apply` 后才会通过 `ReadModelRefreshGateway` 入队，并等待 outbox event `done` 与
 `read_model.app_status_readiness.status='fresh'`，用真实 `created_at -> processed_at` 判断
 enqueue-to-fresh 是否满足目标。`summary.enqueue_to_fresh_ms` 会输出 p50/p95/p99/max，最终 P2/P3 gate
@@ -404,7 +423,8 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.http_slo_probe \
 
 ## SSE 首事件 Smoke
 
-App Health 依赖 SSE 做运行状态提示。关联台页面已删除 Workbench SSE/refresh-status；P2/P3 中 Nginx/OA iframe/SSE buffering 只需使用 `sse_smoke_probe` 验证 App Health event-stream 首事件：
+App Health 和 Workbench 依赖 SSE 做运行状态/刷新状态提示。P2/P3 中 Nginx/OA iframe/SSE buffering 不能只靠页面 shell 或普通
+HTTP probe 证明，使用只读 `sse_smoke_probe` 验证 event-stream 首事件：
 
 ```bash
 export FIN_OPS_HTTP_SLO_ADMIN_TOKEN='真实管理员 Admin-Token'
@@ -415,7 +435,10 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.sse_smoke_probe \
   --output /tmp/finops-sse-smoke-$(date +%Y%m%d%H%M%S).json
 ```
 
-默认 probe 只覆盖 `/api/app-health/stream`，期望 `event: app_health` 或 `event: heartbeat`。
+默认 probe 覆盖：
+
+- `/api/app-health/stream`：期望 `event: app_health` 或 `event: heartbeat`。
+- `/api/workbench/events?month=all`：期望 `event: workbench.read_model.*` 或 `event: heartbeat`。
 
 App Health stream 建连后允许先返回轻量 `heartbeat` 作为首事件，完整 `app_health` snapshot 随后发送；首事件 SLO 用来证明代理未缓冲/连接已可读，不替代 `/api/app-health` HTTP payload 和 App Status freshness 验证。
 
@@ -714,42 +737,75 @@ checkpoint 的 receipt 独立，confirm/withdraw/recovery 之间不得复用。
 
 ## Phase 1.5 读 API 验证
 
-生产和 staging 的关联台页面直接读取 PostgreSQL canonical facts：
+生产和 staging 的工作台列表页使用分层契约，不再把完整 group payload 当作首屏数据：
 
-- `/api/workbench?month=...`：唯一首屏入口；summary 与 paired/unpaired 各首页处于同一个 `REPEATABLE READ READ ONLY` snapshot。
-- `/api/workbench/groups?...&detail_level=summary`：服务端分页，page size 上限 200；精确 total/counts 与 rows 来自同一 snapshot。
-- `/api/workbench/groups/detail?...&group_id=...`、`/api/workbench/rows/{row_id}`：按用户动作有界读取完整详情。
-- relation preview 一次最多 20 行，必要 OA attachment context 最多 100 行。
-- 页面不读取 `read_model.workbench_*`、active generation、Redis、refresh queue 或外部数据源；不返回 `read_model_*`、`source_versions`、`refresh_enqueued`，也没有 `/refresh-status`、`/events` 或 `202 refreshing`。
-- command 成功后页面重新 GET。canonical identity/type、active relation ownership、expected business version 和 idempotency 在同一写事务内重验；页面 generation version 不参与写安全。
+- `/api/workbench?month=...`：唯一首屏入口，在同一 active generation-set 快照内返回 summary 与 paired/unpaired 各首页；不应扫描 canonical facts 或全量 group rows 来现算诊断数据。
+- `/api/workbench/groups?...&detail_level=summary`：列表和分页使用，响应不得包含行级 `detail_fields`、`raw_payload`、OCR 正文或附件全文。
+- `/api/workbench/groups/detail?...&group_id=...`：单个 group 的完整详情，按用户动作懒加载。
+- Redis 只缓存 fresh/stable gate 后的默认首屏 payload，cache key 必须包含 active generation-set version；搜索、筛选、后续分页和详情不进入该缓存。
+- `worker-workbench` 不查询或预热 Redis page cache；generation 发布、下游 fan-out 与 dirty completion 热路径不承担页面 SQL/Redis I/O。页面仍从 fresh SQL read model 读取，只有 API query owner 在 fresh gate 后执行默认首屏 read-through cache。若首个用户承担冷启动，按顺序检查 Redis write 错误、首屏 TTL、`redis_miss_count` 和 cache key 的 generation version。
+- 普通 read model 的 Redis fresh-cache 必须使用 `ReadModelQueryGateway` 的 fresh-gate envelope：`payload` 之外必须有 `fresh_gate.scope_key`、`fresh_gate.read_model_status=fresh`、`fresh_gate.schema_version` 和 `fresh_gate.source_versions`。命中时 gateway 会按当前 expected source versions 校验；旧格式或 source version 不匹配的 payload 只能 fail closed 回 SQL read model，不能被当作 fresh 返回。
+- `/api/workbench` 不应在热路径查询 `app.bank_transactions` 或全量扫描 `read_model.workbench_group_rows` 来修复 counts/diagnostics；首屏 p95 变慢时先查 active month generation 与内部 `read_model.workbench_summary` 是否缺失，再查 refresh worker 发布失败原因。
+- `read_model.workbench_generations` 中同一 `scope_key` 只能有一个 `status='active'`。如果存在 `building_generation_id` 但页面仍显示旧数据，这是正常刷新中；如果存在 `failed_generation_id`，页面仍读取 active generation，同时运维需要处理 `last_error`。
+- `read_model.workbench_generations` 的非 active generation 应受 retention 控制。建议告警阈值：总 generation 数超过 300、`read_model.workbench_*` 总大小超过 10GB、根分区可用空间低于 20GB 或 `pg_wal` 异常增长。先检查 `finops-prune-workbench-generations.timer`、自动 retention 日志和 worker 是否持续重复发布同一 scope。
+- `/api/workbench/groups` 不带 `detail_level` 时保持 `full`，只作为兼容契约，不作为前端首屏路径。
 
-加载判读：
+实时加载判读：
 
-- loading 后返回空 groups：当前 canonical scope 的真实空集。
-- `workbench_canonical_query_unavailable`：检查 PostgreSQL repository wiring、连接池、migration 和 canonical tables；禁止回落旧 generation/snapshot。
-- statement timeout 或 5xx：从 `/health.api_performance` 区分 connection acquire、SQL execute/fetch 和 Python/serialization；不要通过新增 cache 隐藏慢查询。
-- OA 附件或 ETC collapsed group 缺失：先验证 canonical promotion/link/batch facts，再检查 query SQL 的 owner precedence；页面请求不得现场调用外部源或运行 generation rebuild。
+- 页面显示“关联台正在刷新”但已有数据可见：正常，说明前端正在使用最近稳定 read model。
+- 页面显示“关联台刷新失败”：查看 `/api/workbench/refresh-status.last_error`、`job.read_model_dirty_scopes.status=failed` 和 worker 日志。
+- 页面显示“关联台读模型不可用”：优先检查 PostgreSQL migration、read repository 初始化和生产配置，不要回落旧全量 snapshot。
+- 用户只能刷新浏览器才看到新数据：检查 `/api/workbench/events` 是否被代理缓冲或断开，以及前端是否回退轮询 `/api/workbench/refresh-status`。
+- OA 附件正式发票在 Workbench/税金中缺失时，先检查是否已 promotion 到 `app.invoices` 且 `raw_payload.source_links[].source_type='oa_attachment_invoice'`；再检查 `app.oa_attachment_invoice_cache_sources` 的 `attachment_identity_*` bridge 是否能把 parser cache 映射回真实附件。生产 repair 必须先 dry-run：
+
+```bash
+sudo -n /usr/local/sbin/finops-deploy-control workbench-rehydrate <release-name> \
+  --repair-attachment-identity-bridge --dry-run --json
+
+sudo -n /usr/local/sbin/finops-deploy-control workbench-rehydrate <release-name> \
+  --repair-attachment-identity-bridge --apply-repair --json
+```
+
+rollback 只删除可再生的 `source_kind like 'attachment_identity_%'` bridge 行，不删除 OA 附件 cache 本体；仍需先 dry-run：
+
+```bash
+sudo -n /usr/local/sbin/finops-deploy-control workbench-rehydrate <release-name> \
+  --rollback-attachment-identity-bridge --dry-run --json
+
+sudo -n /usr/local/sbin/finops-deploy-control workbench-rehydrate <release-name> \
+  --rollback-attachment-identity-bridge --apply-repair --json
+```
 
 压测和判定顺序：
 
 ```bash
-# 1. 在真实 PostgreSQL 配置下启动 API。
+# 1. 在真实 PostgreSQL/Redis 配置下启动 API，并确认 psycopg_pool 已加载。
 PYTHONPATH=backend/src python3 -m fin_ops_platform.app.server
 
-# 2. 采样默认首屏、最大月份、all、groups page_size=200、
-#    group/row detail 和 20-row preview。
+# 2. 分别压测 combined initial、groups summary、group detail、search/cost/tax。
+# 记录每个 endpoint 的 p50/p95、平均响应体大小和错误率。
 
-# 3. 从 /health.api_performance 记录：
-# duration_ms、connection_acquire_ms、sql_execute_fetch_ms、
-# database_query_count、响应体大小和错误率。
+# 3. 读取 /health.api_performance，按 endpoint 对比：
+# duration_ms、connection_acquire_ms、sql_execute_fetch_ms、database_query_count。
 
-# 4. 只对可复现慢 SQL 执行 EXPLAIN (ANALYZE, BUFFERS)，
-#    再结合 pg_stat_statements 决定是否需要索引。
+# 4. 对慢 SQL 单独跑 EXPLAIN (ANALYZE, BUFFERS)，再用 pg_stat_statements 看生产 top SQL。
+
+# 5. 验证 combined initial 与 groups 固定同一 generation version，计数不随刷新漂移。
+PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.validate_workbench_generation_convergence \
+  --base-url http://localhost:8000 \
+  --month all \
+  --zone paired \
+  --iterations 10 \
+  --delay-seconds 1
 ```
 
-本地结构测试锁定 fixed query count 和 2 秒 statement timeout，但不代表生产 SLO 已通过。历史
-`read_model.workbench_*` generation 不再是任何目标页面的运行时依赖；生产验证只测 canonical API 结果、
-延迟和退休 worker/queue 零活动。
+是否进入 Go read API sidecar 只按结果判断。第一阶段和 Phase 1.5 后同时满足以下任意 2 到 3 条，才进入 sidecar 设计：
+
+- `/api/workbench`、`/api/workbench/groups?detail_level=summary`、search/cost/tax 的核心只读 p95 仍高于 300 到 500ms。
+- `connection_acquire_ms + sql_execute_fetch_ms` 低于总耗时 30% 到 40%，但整体 p95 仍高。
+- Python worker/进程 CPU 持续 70% 到 90% 以上，且 Redis/read model 命中后仍不下降。
+- summary 物化和 groups summary 命中后仍慢，瓶颈落在对象构造、JSON 序列化、请求调度或连接并发。
+- 水平扩 Python 的机器成本、内存占用或部署复杂度明显高于拆只读 sidecar。
 
 ## 收口验证
 

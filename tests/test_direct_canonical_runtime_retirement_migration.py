@@ -21,7 +21,6 @@ MIGRATION_PATH = Path(
 )
 
 RETIRED_EVENT_TYPES = (
-    "workbench.read_model.refresh",
     "bank_detail.read_model.refresh",
     "bank_account_balance.read_model.refresh",
     "pending_invoice.read_model.refresh",

@@ -283,9 +283,9 @@ class AppPostgresModeTests(unittest.TestCase):
         self.assertEqual(active_relations[0]["relation_mode"], "manual_confirmed")
         self.assertEqual(active_relations[0]["month_scope"], "2026-05")
 
-    def test_postgres_runtime_has_no_workbench_page_projection_entrypoints(self) -> None:
-        self.assertFalse(hasattr(Application, "rebuild_workbench_read_model_scope"))
-        self.assertFalse(hasattr(Application, "_enqueue_workbench_read_model_refresh"))
+    def test_postgres_runtime_uses_sql_workbench_projection_without_legacy_maintenance_entrypoint(self) -> None:
+        self.assertTrue(hasattr(Application, "rebuild_workbench_read_model_scope"))
+        self.assertTrue(hasattr(Application, "_enqueue_workbench_read_model_refresh"))
         self.assertFalse(hasattr(Application, "_refresh_workbench_read_model_scopes_for_maintenance"))
 
 

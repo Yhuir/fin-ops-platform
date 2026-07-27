@@ -160,6 +160,7 @@ class ReadModelReadinessReporterTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         expected_assignments = (
+            'handlers["workbench.read_model.refresh"] = _read_model_handler',
             "handlers[WORKBENCH_RELATION_REFRESH_EVENT_TYPE] = _read_model_handler",
             "handlers[SEARCH_REFRESH_EVENT_TYPE] = _read_model_handler",
             "handlers[NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE] = _read_model_handler",
@@ -172,7 +173,6 @@ class ReadModelReadinessReporterTests(unittest.TestCase):
             worker_source,
         )
         for retired_event in (
-            "workbench.read_model.refresh",
             "bank_detail.read_model.refresh",
             "bank_account_balance.read_model.refresh",
             "pending_invoice.read_model.refresh",

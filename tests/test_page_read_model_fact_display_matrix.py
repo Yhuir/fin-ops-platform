@@ -20,7 +20,6 @@ from fin_ops_platform.tools.http_slo_probe import DEFAULT_API_PROBES  # noqa: E4
 MATRIX_PATH = REPO_ROOT / "docs" / "dev" / "page-read-model-fact-display-matrix.json"
 PAGE_REGISTRY_PATH = REPO_ROOT / "web" / "src" / "app" / "pageRegistry.tsx"
 DIRECT_CANONICAL_FRONTEND_PATHS = (
-    "web/src/features/workbench",
     "web/src/features/bankDetails",
     "web/src/features/oaPendingPayments",
     "web/src/features/bankFlowRuleBatches",
@@ -30,7 +29,6 @@ DIRECT_CANONICAL_FRONTEND_PATHS = (
     "web/src/features/inputInvoiceUsage",
     "web/src/features/outputInvoiceCollections",
     "web/src/features/turnoverLedger",
-    "web/src/pages/ReconciliationWorkbenchPage.tsx",
     "web/src/pages/BankDetailsPage.tsx",
     "web/src/pages/OaPendingPaymentsPage.tsx",
     "web/src/pages/BankFlowRuleBatchPage.tsx",
@@ -58,7 +56,6 @@ RELATION_DISPLAY_PAGE_KEYS = {
 }
 
 DIRECT_CANONICAL_PAGE_KEYS = {
-    "reconciliation-workbench",
     "bank-details",
     "oa-pending-payments",
     "bank-flow-rule-batches",
@@ -174,7 +171,9 @@ class PageReadModelFactDisplayMatrixTests(unittest.TestCase):
             self.assertTrue(row.get("production_readonly_gates"), page_key)
 
             relation_sources = set(row.get("pairing_relation_fact_sources", []))
-            if page_key in DIRECT_CANONICAL_PAGE_KEYS & RELATION_DISPLAY_PAGE_KEYS:
+            if page_key == "reconciliation-workbench" or page_key in (
+                DIRECT_CANONICAL_PAGE_KEYS & RELATION_DISPLAY_PAGE_KEYS
+            ):
                 self.assertEqual(relation_sources, {"app.workbench_pair_relations"}, page_key)
             elif page_key in RELATION_DISPLAY_PAGE_KEYS:
                 self.assertIn("app.workbench_pair_relations", relation_sources, page_key)

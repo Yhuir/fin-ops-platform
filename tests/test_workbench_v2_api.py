@@ -257,8 +257,6 @@ class BankDetailCanonicalQueryFixture:
 class WorkbenchV2ApiTests(unittest.TestCase):
     def _install_workbench_query_service(self, app: Application, query_service: WorkbenchQueryService) -> None:
         app._workbench_query_service = query_service
-        for scope_key in list(app._workbench_read_model_service.snapshot().get("read_models", {})):
-            app._workbench_read_model_service.delete_read_model(str(scope_key))
 
     def _create_imported_bank_transaction(
         self,
@@ -897,15 +895,15 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             MongoOAAdapter._attachment_invoice_cache_parser_version(),
         )
 
-    def test_get_api_workbench_ignored_uses_canonical_repository_without_rebuild(self) -> None:
-        class CanonicalReadRepository:
+    def test_get_api_workbench_ignored_uses_sql_read_model_without_rebuild(self) -> None:
+        class SqlReadRepository:
             def list_workbench_ignored_rows(self, *, scope_key: str) -> list[dict[str, object]]:
                 self.scope_key = scope_key
                 return [{"id": "bk-sql-ignored-001", "type": "bank"}]
 
         app = build_application()
-        repository = CanonicalReadRepository()
-        app._workbench_canonical_query_repository = repository
+        repository = SqlReadRepository()
+        app._workbench_sql_read_repository = repository
 
         response = app.handle_request("GET", "/api/workbench/ignored?month=all")
 

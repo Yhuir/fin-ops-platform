@@ -18,9 +18,6 @@ from fin_ops_platform.services.oa_attachment_invoice_linking import oa_row_sourc
 from fin_ops_platform.services.workbench_exception_application_service import WorkbenchExceptionApplicationConflict
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_relation_modes import workbench_relations_have_same_row_set
-from fin_ops_platform.services.workbench_relation_preview_policy import (
-    WorkbenchRelationPreviewSelectionError,
-)
 from fin_ops_platform.services.workbench_relation_requirements import (
     build_bank_relation_requirement_metadata,
 )
@@ -212,8 +209,6 @@ class WorkbenchWriteFacade:
         submit_internal_transfer_rows_from_workbench: Callable[..., dict[str, object]] | None = None,
         relation_command_service: Any | None = None,
         relation_command_service_factory: Callable[..., Any] | None = None,
-        validate_canonical_selection_in_transaction: Callable[..., dict[str, str]]
-        | None = None,
     ) -> None:
         self._relation_read_snapshot_port = relation_read_snapshot_port
         self._relation_special_metadata_mutation_port = relation_special_metadata_mutation_port
@@ -256,9 +251,6 @@ class WorkbenchWriteFacade:
         self._submit_internal_transfer_rows_from_workbench = submit_internal_transfer_rows_from_workbench
         self._relation_command_service = relation_command_service
         self._relation_command_service_factory = relation_command_service_factory
-        self._validate_canonical_selection_in_transaction = (
-            validate_canonical_selection_in_transaction
-        )
 
     def preview_confirm_link(self, payload: dict[str, object]) -> WorkbenchWriteResult:
         try:
@@ -289,6 +281,7 @@ class WorkbenchWriteFacade:
         selection_result = self._relation_preview_selection(
             month,
             row_ids=selection_row_ids,
+            expected_read_model_version=payload.get("expected_read_model_version"),
         )
         if selection_result.status_code != HTTPStatus.OK:
             return WorkbenchWriteResult(
@@ -752,12 +745,6 @@ class WorkbenchWriteFacade:
                 raise _WorkbenchWritePersistenceError("Workbench UoW context is missing transaction.")
             if self._persist_pair_relations_in_transaction is None:
                 raise _WorkbenchWritePersistenceError("confirm-link UoW requires transaction-bound pair relation persistence.")
-            self._assert_canonical_selection_in_transaction(
-                transaction=transaction,
-                month=month,
-                row_ids=row_ids,
-                row_types=row_types,
-            )
             pair_relation_started_at = monotonic()
             relation_command = self._relation_command_service_for(repository=getattr(ctx, "pair_relations", None))
             if relation_command is None:
@@ -1193,40 +1180,6 @@ class WorkbenchWriteFacade:
                 return self._relation_command_service_factory(repository)
         return self._relation_command_service
 
-    def _assert_canonical_selection_in_transaction(
-        self,
-        *,
-        transaction: Any,
-        month: str,
-        row_ids: list[str],
-        row_types: list[str] | None = None,
-    ) -> None:
-        validator = self._validate_canonical_selection_in_transaction
-        if validator is None:
-            return
-        try:
-            current_types = validator(
-                transaction=transaction,
-                scope_key=month,
-                row_ids=list(row_ids),
-            )
-        except WorkbenchRelationPreviewSelectionError as exc:
-            raise WorkbenchRelationCommandError(
-                "workbench_canonical_selection_conflict",
-                str(exc),
-                payload={"reason": exc.code},
-            ) from exc
-        expected_types = {
-            row_id: str(row_types[index] if index < len(row_types) else "")
-            for index, row_id in enumerate(row_ids)
-        } if row_types is not None else {}
-        if expected_types and expected_types != current_types:
-            raise WorkbenchRelationCommandError(
-                "workbench_canonical_selection_conflict",
-                "所选工作台记录已变化，请刷新后重试。",
-                payload={"reason": "relation_preview_row_types_changed"},
-            )
-
     @staticmethod
     def _relation_command_unavailable_result() -> WorkbenchWriteResult:
         return WorkbenchWriteResult(
@@ -1242,7 +1195,6 @@ class WorkbenchWriteFacade:
         if exc.error_code == "workbench_relation_preview_conflict":
             return WorkbenchWriteFacade._relation_preview_conflict_result(exc)
         conflict_errors = {
-            "workbench_canonical_selection_conflict",
             "workbench_relation_active_row_conflict",
             "workbench_relation_idempotency_conflict",
             "workbench_relation_multiple_groups_selected",
@@ -1490,11 +1442,6 @@ class WorkbenchWriteFacade:
             transaction = getattr(ctx, "transaction", None)
             if transaction is None:
                 raise _WorkbenchWritePersistenceError("Workbench UoW context is missing transaction.")
-            self._assert_canonical_selection_in_transaction(
-                transaction=transaction,
-                month=month,
-                row_ids=[row_id],
-            )
             relation_command = self._relation_command_service_for(repository=getattr(ctx, "pair_relations", None))
             if relation_command is None:
                 raise _WorkbenchWritePersistenceError("workbench_relation_command_unavailable")
@@ -1691,6 +1638,7 @@ class WorkbenchWriteFacade:
         selection_result = self._relation_preview_selection(
             month,
             row_ids=self._withdraw_preview_row_ids(preview_relation),
+            expected_read_model_version=payload.get("expected_read_model_version"),
         )
         if selection_result.status_code != HTTPStatus.OK:
             return WorkbenchWriteResult(
@@ -1958,11 +1906,6 @@ class WorkbenchWriteFacade:
             transaction = getattr(ctx, "transaction", None)
             if transaction is None:
                 raise _WorkbenchWritePersistenceError("Workbench UoW context is missing transaction.")
-            self._assert_canonical_selection_in_transaction(
-                transaction=transaction,
-                month=month,
-                row_ids=row_ids,
-            )
             relation_command = self._relation_command_service_for(repository=getattr(ctx, "pair_relations", None))
             if relation_command is None:
                 raise _WorkbenchWritePersistenceError("workbench_relation_command_unavailable")
@@ -2077,11 +2020,6 @@ class WorkbenchWriteFacade:
             transaction = getattr(ctx, "transaction", None)
             if transaction is None:
                 raise _WorkbenchWritePersistenceError("Workbench UoW context is missing transaction.")
-            self._assert_canonical_selection_in_transaction(
-                transaction=transaction,
-                month=month,
-                row_ids=row_ids,
-            )
             relation_command = self._relation_command_service_for(repository=getattr(ctx, "pair_relations", None))
             if relation_command is None:
                 raise _WorkbenchWritePersistenceError("workbench_relation_command_unavailable")

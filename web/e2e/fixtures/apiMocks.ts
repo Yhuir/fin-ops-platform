@@ -7,6 +7,8 @@ export type AccessTier = "denied" | "read_export_only" | "full_access" | "admin"
 type SessionMode = "admin" | "full_access" | "read_export_only" | "forbidden" | "expired" | "error";
 type OaSyncMockMode = "idle" | "dirty" | "refreshing" | "error";
 type WorkbenchHealthMockStatus = "ready" | "stale" | "rebuilding" | "error";
+type WorkbenchRefreshMockStatus = "fresh" | "refreshing" | "stale" | "failed" | "unavailable";
+type WorkbenchPageMockStatus = "fresh" | "refreshing" | "stale";
 type OperationBarrierMockMode = "fresh" | "refreshing" | "blocked";
 type OutputInvoiceReceiptLifecycleState = "none" | "issued" | "voided" | "reissued";
 type BankDetailClassificationMockMode = "auto_matched" | "needs_confirmation" | "unmatched";
@@ -147,6 +149,8 @@ type ApiMockOptions = {
   workbenchBankFlowRuleBatchScenario?: boolean;
   workbenchLargeDataset?: boolean;
   workbenchPageEmpty?: boolean;
+  workbenchPageStatus?: WorkbenchPageMockStatus;
+  workbenchRefreshStatus?: WorkbenchRefreshMockStatus;
   workbenchWithdrawSubmitDelayMs?: number;
 };
 
@@ -347,6 +351,31 @@ function workbenchReadModelHealthPayload(status: WorkbenchHealthMockStatus = "re
     stale_scopes: status === "ready" ? [] : ["2026-03"],
     rebuilding_scopes: status === "rebuilding" ? ["2026-03"] : [],
     last_matching_error: status === "error" ? "browser workbench refresh failed" : null,
+  };
+}
+
+function workbenchRefreshStatusPayload(status: WorkbenchRefreshMockStatus = "fresh") {
+  const scopeStatus = status === "fresh"
+    ? "completed"
+    : status === "failed" || status === "unavailable"
+      ? "failed"
+      : "processing";
+  return {
+    scope_key: "all",
+    read_model_status: status,
+    read_model_version: "workbench-refresh-e2e-001",
+    active_generation_id: "workbench-generation-e2e-001",
+    dirty_scopes: status === "fresh"
+      ? []
+      : [
+        {
+          scope_key: "2026-03",
+          status: scopeStatus,
+          last_error: status === "failed" ? "browser refresh failed" : null,
+        },
+      ],
+    last_error: status === "failed" ? "browser refresh failed" : null,
+    retryable: status === "failed",
   };
 }
 
@@ -1333,6 +1362,7 @@ function workbenchGroupsPayload(
   relationConfirmed: boolean,
   exceptionApplied = false,
   rowIgnored = false,
+  pageStatus: WorkbenchPageMockStatus = "fresh",
   pageEmpty = false,
   largeDataset = false,
   includeCashSpecialActions = false,
@@ -1340,6 +1370,9 @@ function workbenchGroupsPayload(
   pageSize = 50,
   search = "",
 ) {
+  const readModelVersion = relationConfirmed || exceptionApplied || rowIgnored
+    ? "workbench-generation-e2e-002"
+    : "workbench-generation-e2e-001";
   const allGroups = pageEmpty
     ? []
     : workbenchGroups(
@@ -1367,6 +1400,9 @@ function workbenchGroupsPayload(
     row_counts: countWorkbenchRows(groups),
     has_more: start + pageGroups.length < groups.length,
     groups: pageGroups,
+    read_model_status: pageStatus,
+    read_model_version: readModelVersion,
+    active_generation_id: readModelVersion,
   };
 }
 
@@ -1386,6 +1422,9 @@ function bankFlowRuleWorkbenchGroupsPayload(
   const boundedPageSize = Math.max(1, pageSize);
   const start = (boundedPage - 1) * boundedPageSize;
   const pageGroups = groups.slice(start, start + boundedPageSize);
+  const readModelVersion = relationConfirmed
+    ? "workbench-generation-e2e-002"
+    : "workbench-generation-e2e-001";
   return {
     month: "all",
     zone,
@@ -1395,6 +1434,9 @@ function bankFlowRuleWorkbenchGroupsPayload(
     row_counts: countWorkbenchRows(groups),
     has_more: start + pageGroups.length < groups.length,
     groups: pageGroups,
+    read_model_status: "fresh",
+    read_model_version: readModelVersion,
+    active_generation_id: readModelVersion,
   };
 }
 
@@ -1491,11 +1533,15 @@ function workbenchInitialPayload(
   relationConfirmed: boolean,
   exceptionApplied = false,
   rowIgnored = false,
+  pageStatus: WorkbenchPageMockStatus = "fresh",
   pageEmpty = false,
   largeDataset = false,
   includeCashSpecialActions = false,
   zoneSearch: Partial<Record<WorkbenchZone, string>> = {},
 ) {
+  const readModelVersion = relationConfirmed || exceptionApplied || rowIgnored
+    ? "workbench-generation-e2e-002"
+    : "workbench-generation-e2e-001";
   return {
     month: "all",
     summary: workbenchSummary(relationConfirmed, exceptionApplied, rowIgnored, pageEmpty, largeDataset),
@@ -1514,6 +1560,7 @@ function workbenchInitialPayload(
       relationConfirmed,
       exceptionApplied,
       rowIgnored,
+      pageStatus,
       pageEmpty,
       largeDataset,
       includeCashSpecialActions,
@@ -1526,6 +1573,7 @@ function workbenchInitialPayload(
       relationConfirmed,
       exceptionApplied,
       rowIgnored,
+      pageStatus,
       pageEmpty,
       largeDataset,
       includeCashSpecialActions,
@@ -1533,6 +1581,10 @@ function workbenchInitialPayload(
       50,
       zoneSearch.unpaired ?? "",
     ),
+    read_model_status: pageStatus,
+    read_model_version: readModelVersion,
+    active_generation_id: readModelVersion,
+    generated_at: "2026-06-17T01:00:00Z",
   };
 }
 
@@ -7922,6 +7974,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
   let workbenchRowIgnored = options.workbenchInitialRowIgnored === true;
   let workbenchConfirmSubmitAttempts = 0;
   let workbenchGroupsFailuresRemaining = options.workbenchGroupsFailuresBeforeSuccess ?? 0;
+  const workbenchPageStatus = options.workbenchPageStatus ?? "fresh";
   let bankDetailsCategoryOverride: BankDetailCategoryOverride | null = null;
   let bankAutoTagRulesVersion = 1;
   let bankAutoTagRulesSalarySubLabel = "工资";
@@ -8068,6 +8121,10 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
 
     if (path === "/api/oa-sync/status") {
       return json(route, oaSyncPayload(options.oaSyncMode));
+    }
+
+    if (path === "/api/workbench/refresh-status") {
+      return json(route, workbenchRefreshStatusPayload(options.workbenchRefreshStatus));
     }
 
     if (path === "/api/operation-barrier/status") {
@@ -9098,6 +9155,9 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         }
       };
       if (options.workbenchBankFlowRuleBatchScenario) {
+        const readModelVersion = relationConfirmed
+          ? "workbench-generation-e2e-002"
+          : "workbench-generation-e2e-001";
         return json(route, {
           month: "all",
           summary: {
@@ -9133,12 +9193,17 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
             200,
             initialZoneSearch("unpaired"),
           ),
+          read_model_status: "fresh",
+          read_model_version: readModelVersion,
+          active_generation_id: readModelVersion,
+          generated_at: "2026-06-17T01:00:00Z",
         });
       }
       return json(route, workbenchInitialPayload(
         relationConfirmed,
         workbenchExceptionApplied,
         workbenchRowIgnored,
+        workbenchPageStatus,
         options.workbenchPageEmpty === true,
         options.workbenchLargeDataset === true,
         options.workbenchCashSpecialActions === true,
@@ -9333,6 +9398,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         relationConfirmed,
         workbenchExceptionApplied,
         workbenchRowIgnored,
+        workbenchPageStatus,
         options.workbenchPageEmpty === true,
         options.workbenchLargeDataset === true,
         options.workbenchCashSpecialActions === true,
@@ -9352,6 +9418,10 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       }
       return json(route, {
         group,
+        read_model_status: "fresh",
+        read_model_version: relationConfirmed
+          ? "workbench-generation-e2e-002"
+          : "workbench-generation-e2e-001",
       });
     }
 

@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 
-ACTIVE_SCOPE_TYPES = ("workbench_relation", "search", "no_oa_bank_batch")
+ACTIVE_SCOPE_TYPES = ("workbench", "workbench_relation", "search", "no_oa_bank_batch")
 
 
 class FakeQueue:
@@ -70,7 +70,7 @@ class RuntimeReadModelBackfillTests(unittest.TestCase):
         report = module.enqueue_fact_scopes(FakeConnection(), dry_run=True, reason="dry_run")
 
         self.assertTrue(report["dry_run"])
-        self.assertEqual(report["planned_count"], 3)
+        self.assertEqual(report["planned_count"], len(ACTIVE_SCOPE_TYPES))
         self.assertEqual(report["enqueued_count"], 0)
         self.assertEqual(tuple(report["scope_types"]), ACTIVE_SCOPE_TYPES)
 
@@ -86,7 +86,7 @@ class RuntimeReadModelBackfillTests(unittest.TestCase):
             trace_id="trace-123",
         )
 
-        self.assertEqual(report["enqueued_count"], 3)
+        self.assertEqual(report["enqueued_count"], len(ACTIVE_SCOPE_TYPES))
         self.assertEqual(
             queue.refreshes,
             [

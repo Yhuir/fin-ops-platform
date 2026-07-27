@@ -11,17 +11,25 @@
 
 ## 当前唯一集合
 
-App 当前只保留三个共享 read model：
+App 当前登记四个 runtime read model：一个关联台页面 active-generation read model，以及三个共享 read model。
 
 | Key / scope type | Refresh event | Worker | `all` 语义 | Query owner | Repository owner |
 | --- | --- | --- | --- | --- | --- |
+| `workbench` | `workbench.read_model.refresh` | `workbench`、`workbench-secondary` | 冷启动/显式恢复 fan-out；页面查询 `all` 由 active month shards 组合 | `WorkbenchQueryFacade` | `PostgresReadModelRepository`（active generation） |
 | `workbench_relation` | `workbench_relation.read_model.refresh` | `workbench-relation` | fan-out command | `WorkbenchRelationReadFacade` | `WorkbenchRelationReadModelRepositoryPort` |
 | `search` | `search.read_model.refresh` | `search`、`search-secondary`、`search-tertiary` | fan-out command | Search read API | `SearchReadModelRepositoryPort` |
 | `no_oa_bank_batch` | `no_oa_bank_batch.read_model.refresh` | `no-oa-bank-batch` | fan-out command | `NoOaBankBatchApplicationService` | `NoOaBankBatchReadModelRepositoryPort` |
 
-Manifest、scope policy、App Status registry 与所有带 `read_model_key` 的 worker registration 必须精确等于这个集合。三个 scope 都只接受 `YYYY-MM` 或 `all`；`all` 只负责枚举并投递月份 shard，不是可查询 projection。
+Manifest、scope policy、App Status registry 与所有带 `read_model_key` 的 worker registration 必须精确等于这个集合。四种 scope 都只接受 `YYYY-MM` 或 `all`。三个共享 read model 的 `all` 只负责枚举并投递月份 shard；关联台查询层可将 active month generations 组合为 `all` 视图，但 worker 仍只发布月份 shard。
 
 ## 保留原因与边界
+
+### `workbench`
+
+- 关联台页面继续读取 PostgreSQL `read_model.workbench_*` active generations；canonical facts 与 `app.workbench_pair_relations` 只由 projection builder 在 refresh 时读取。
+- 每次查询必须先通过 `WorkbenchQueryFreshnessService` 比较 canonical source proof、durable queue 状态与 active generation source versions；旧 generation 不得伪装 fresh。
+- Redis 只缓存已通过 freshness gate 的 groups payload；缺失、stale、refreshing 或 failed 时 fail closed 并经 gateway enqueue 精确月份 scope。
+- Workbench matching 是独立 canonical domain job；`workbench_relation` 是独立共享 distribution，二者都不能替代页面 active generation。
 
 ### `workbench_relation`
 
@@ -29,7 +37,7 @@ Manifest、scope policy、App Status registry 与所有带 `read_model_key` 的 
 - `app.workbench_pair_relations` 是事实源；read model 不是 relation 写模型。
 - 查询必须通过 `WorkbenchRelationReadFacade` 与 freshness proof；调用方不得直接 SQL 读取 `read_model.workbench_relation_*`。
 - `turnover_manual_closure` 等页面专属 relation mode 按各模块合同直接读取 canonical relation，不得无条件进入共享 distribution。
-- 关联台页面本身直接读取 canonical facts 和 active relations，不消费该 read model。
+- 关联台页面不消费该共享 distribution；其 active relations 在 `workbench` projection refresh 时直接取自 canonical relation 表。
 
 ### `search`
 
@@ -46,11 +54,10 @@ Manifest、scope policy、App Status registry 与所有带 `read_model_key` 的 
 
 ## 已退役页面 read model
 
-下列页面/API 直接通过页面专属 query service，在 PostgreSQL `REPEATABLE READ READ ONLY` snapshot 中读取 canonical facts 和 active canonical relations：
+除关联台外，下列页面/API 直接通过页面专属 query service，在 PostgreSQL `REPEATABLE READ READ ONLY` snapshot 中读取 canonical facts 和 active canonical relations：
 
 | 页面 | 已退役 runtime key/链路 |
 | --- | --- |
-| 关联台 | `workbench` active generation、refresh/status/cache/SSE |
 | 银行明细与账户余额 | `bank_detail`、`bank_account_balance` |
 | OA 待付款核对 | `oa_pending_payment` |
 | 流水规则批量处理 | `bank_flow_rule_batch` 页面 projection |
@@ -92,7 +99,7 @@ OA sync、import processing 与 Workbench matching 也属于 canonical integrati
 
 ## Queue、freshness 与 transport
 
-- `job.outbox_events` 与 `job.read_model_dirty_scopes` 是三个保留 read model 的唯一 refresh 状态事实源。
+- `job.outbox_events` 与 `job.read_model_dirty_scopes` 是四个保留 read model 的唯一 refresh 状态事实源。
 - 非事务 refresh 必须经 `ReadModelRefreshGateway` 和 scope policy normalize、validate、dedupe。
 - 业务 service 不直接 SQL 写 dirty scope/outbox。
 - Redis 只能缓存 freshness gate 已证明的 payload。
@@ -101,7 +108,7 @@ OA sync、import processing 与 Workbench matching 也属于 canonical integrati
 
 ## 旧链删除与回滚
 
-- 已退役页面的 service/repository/projector/producer/worker handler、manifest/scope/App Status/RabbitMQ/deploy 注册、前端 polling/status DTO 和专属运维工具必须保持删除。
+- 已退役页面的 service/repository/projector/producer/worker handler、manifest/scope/App Status/RabbitMQ/deploy 注册、前端 polling/status DTO 和专属运维工具必须保持删除；关联台 active-generation runtime 是明确例外，必须完整保留。
 - migration `0127_direct_canonical_page_runtime_retirement.sql` 是无数据变更的退休标记。历史 outbox、dirty scope、readiness 与 projection 表暂不 drop，保留上一版本回滚能力。
 - deploy preflight 必须先停止并 disable 当前 registry 未登记的旧 worker，再确认退休 event/dirty scope 没有 `processing`。
 - 历史表存在不代表可读；生产代码、测试夹具和文档不得把它们重新当作当前事实源。
@@ -116,9 +123,9 @@ OA sync、import processing 与 Workbench matching 也属于 canonical integrati
 
 ## 验收
 
-- 四个 registry 集合精确为 `workbench_relation`、`search`、`no_oa_bank_batch`。
+- 四个 registry 集合精确为 `workbench`、`workbench_relation`、`search`、`no_oa_bank_batch`。
 - 生产代码中不存在其它 `*.read_model.refresh` 页面事件或 retired projection SQL。
 - retired worker instance/env 不在当前部署 manifest；RabbitMQ dispatcher 只发布登记事件。
-- 十个目标页面及成本统计、外部往来页的 direct-read API/frontend/权限/写后 GET 回归通过。
-- 三个保留 read model 的 freshness、queue、worker、App Status 与 scope tests 通过。
+- 除关联台外的目标页面及成本统计、外部往来页的 direct-read API/frontend/权限/写后 GET 回归通过；关联台 active-generation API/frontend 回归通过。
+- 四个保留 read model 的 freshness、queue、worker、App Status 与 scope tests 通过。
 - 全量 backend、frontend、build、Browser E2E、lint、docs 和 `git diff --check` 通过后，才允许合并和部署。

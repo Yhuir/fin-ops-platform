@@ -49,7 +49,7 @@
   保留必要事实、记录 job progress，并确保 canonical 页面下一次 GET 读取重置后的事实。
 
 设置模块本身多数事实写入 `ApplicationStateStore`。变更会影响多个页面的下一次
-canonical query，也可能影响三个共享 read model 中某个 owner 的显式 maintenance 合同；
+canonical query，也可能影响关联台 `workbench` 或三个共享 read model 中某个 owner 的显式 maintenance 合同；
 任何改动都必须先做影响面评估，但普通保存不广播 page refresh。
 
 当前 HTTP I/O 边界已关闭：`SettingsApiRoutes` 负责 settings path matching、body/query parsing、权限 gate、错误码和 response shape；`server.py` 不再定义 `_handle_api_workbench_settings*` 旧 handler。`AppSettingsService` 只从持久化 settings store 刷新事实，缺失字段由 normalizer/default contract 处理，不再用旧内存 `_snapshot` 补齐持久化结果。
@@ -60,7 +60,7 @@ canonical query，也可能影响三个共享 read model 中某个 owner 的显�
 | --- | --- | --- |
 | 待找发票规则保存 | income/expense rule version 原子递增 | 待找发票下一次 GET 直接应用；不 fan-out retired page scope |
 | 银行标签/自动标签保存 | 只允许银行明细规则 API 写入并记录 audit | canonical 页面下次 GET 读取；共享 no-OA/Search 只按各自 owner 合同处理 |
-| 项目范围变化 | project settings/version | 成本统计、关联台等页面下次 GET 读取；Search 是否刷新由 Search owner 决定 |
+| 项目范围变化 | project settings/version | 成本统计等 direct 页面下次 GET 读取；关联台按 `workbench` freshness 合同刷新，Search 是否刷新由 Search owner 决定 |
 | 访问控制变化 | state store + OA role sync | 下一次 session/API 权限校验生效 |
 | OA 导入过滤/留存/promotion | state store，供后续 OA sync/reset 使用 | 页面下次 GET 读取已提交 OA canonical facts |
 | OA 申请人凭据维护 | 独立 credential repository | 进项 OA 反提 token provider 使用；普通 settings payload 不含 secret |

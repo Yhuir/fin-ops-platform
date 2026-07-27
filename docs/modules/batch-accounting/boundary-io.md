@@ -126,7 +126,7 @@ BatchAccountingPage
 - operation barrier 和跨页面 refresh targets。
 - 客户端全量 OA 搜索分页。
 
-旧 Workbench generation loader、reader、worker 和注册项已由跨页面清理删除；历史 migration/表暂留作回滚证据。本模块不得保留双读或 fallback，也不得改用仍保留的 `workbench_relation` distribution。
+批量账务专用的 Workbench generation loader/reader 已删除；关联台自己的 Workbench worker 和注册项继续保留。本模块不得恢复对关联台 projection 的依赖、双读或 fallback，也不得改用 `workbench_relation` distribution。
 
 ## 边界变化触发文档更新
 

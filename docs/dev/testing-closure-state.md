@@ -4,10 +4,10 @@
 
 ## 2026-07-27 - 页面 read model 退休集成
 
-- 当前运行时只保留 `workbench_relation`、`search`、`no_oa_bank_batch` 三个共享 read model；完整合同见 `docs/architecture/module-boundaries/read-model-contracts.md`。
-- 关联台、银行明细/余额、OA 待付款、流水规则批量处理、批量账务、ETC、税金抵扣、待找发票、进项使用和销项收款均由页面专属 API 直接读取 canonical PostgreSQL snapshot；成本统计和外部往来继续 direct read。
+- 当前运行时保留关联台 active-generation `workbench`，以及 `workbench_relation`、`search`、`no_oa_bank_batch` 三个共享 read model；完整合同见 `docs/architecture/module-boundaries/read-model-contracts.md`。
+- 银行明细/余额、OA 待付款、流水规则批量处理、批量账务、ETC、税金抵扣、待找发票、进项使用和销项收款均由页面专属 API 直接读取 canonical PostgreSQL snapshot；成本统计和外部往来继续 direct read。关联台读取 fresh active generation。
 - 下方旧记录中关于这些页面的 freshness、202、barrier、fan-out、worker drain、旧测试文件或 projection 的内容只作为历史演进证据，不是当前测试或部署合同。
-- 当前门禁以 direct canonical API/service/repository/frontend/E2E、三个共享 read model 的 manifest/worker/scope 回归，以及 retired runtime architecture guards 为准。
+- 当前门禁以 direct canonical API/service/repository/frontend/E2E、关联台 SQL active-generation 回归、四个保留 read model 的 manifest/worker/scope 回归，以及 retired runtime architecture guards 为准。
 
 ## 2026-07-22 - Phase 27 写后零 fan-out / 访问时收敛 release candidate
 

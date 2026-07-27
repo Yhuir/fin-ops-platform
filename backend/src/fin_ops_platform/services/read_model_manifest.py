@@ -28,6 +28,41 @@ class ReadModelManifestEntry:
 
 
 READ_MODEL_MANIFEST: dict[str, ReadModelManifestEntry] = {
+    "workbench": ReadModelManifestEntry(
+        key="workbench",
+        scope_type="workbench",
+        refresh_event_type="workbench.read_model.refresh",
+        primary_worker_instance="workbench",
+        auxiliary_refresh_worker_instances=(),
+        query_status_contract="equivalent_active_generation",
+        projection_strategy="active_generation_scoped_publish",
+        all_scope_semantics="active_month_shard_aggregate",
+        partition_key_contract="month_scope active generation; all aggregates active month shards",
+        scoped_incremental_target="workbench active generation rows, groups, summaries and details for affected month scopes",
+        full_rebuild_fallback="gateway force refresh rebuilds requested active month generation or all aggregate from canonical facts",
+        freshness_proof_contract=(
+            "active generation metadata, expected relation/rule and scoped canonical object source_versions, "
+            "active pending claim version, and current-effective dirty/outbox state"
+        ),
+        force_refresh_contract="gateway_force_refresh_active_generation_scope",
+        operation_barrier_contract="app_status_registry_target",
+        repository_port_contract=(
+            "get_workbench_initial_page",
+            "get_workbench_summary",
+            "get_workbench_groups_page",
+            "get_workbench_group_detail",
+            "get_workbench_row_detail",
+            "find_workbench_row_scope_key",
+            "get_workbench_refresh_status",
+            "get_workbench_groups_freshness_status",
+            "save_workbench_read_models",
+            "load_workbench_read_models",
+        ),
+        query_owner="WorkbenchQueryFacade",
+        repository_owner="PostgresReadModelRepository.workbench",
+        permission_owner="workbench_api_session",
+        test_owner="tests/test_workbench_sql_runtime.py",
+    ),
     "workbench_relation": ReadModelManifestEntry(
         key="workbench_relation",
         scope_type="workbench_relation",

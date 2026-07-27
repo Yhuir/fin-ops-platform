@@ -19,6 +19,10 @@ type MockFetchHandler = (request: {
 type MockApiOptions = {
   workbenchErrorMonths?: string[];
   workbenchEmptyPayload?: boolean;
+  workbenchReadModelStatus?: "fresh" | "refreshing" | "stale" | "failed" | "unavailable";
+  workbenchReadModelVersions?: string[];
+  workbenchRefreshStatus?: Record<string, unknown>;
+  workbenchRefreshStatusSequence?: Array<Record<string, unknown>>;
   taxErrorMonths?: string[];
   costErrorMonths?: string[];
   costExplorerFailuresBeforeSuccess?: number;
@@ -4734,6 +4738,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
   let bankDetailAutoTagRulesSaved = false;
   let bankDetailManualAssignmentActive = Boolean(options.bankDetailManualAssignmentActive);
   let workbenchWriteActionCount = 0;
+  let workbenchRefreshStatusIndex = 0;
   const workbenchStateStore = createWorkbenchStateStore(options);
   const ignoredRowStore = createIgnoredRowStore();
   const taxOffsetStateStore = createTaxOffsetStateStore();
@@ -4849,6 +4854,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
   const dataResetJobs = new Map<string, Record<string, unknown>>();
   let backgroundJobs = cloneJson(options.backgroundJobs ?? []);
   let workbenchOaSyncStatusIndex = 0;
+  let workbenchReadModelVersionIndex = 0;
+  let workbenchReadModelVersion = options.workbenchReadModelVersions?.[0] ?? "mock-workbench-generation-1";
   let appHealthDashboardIndex = 0;
 
   const handlers: Record<string, MockFetchHandler> = {
@@ -4923,6 +4930,11 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       if (options.workbenchErrorMonths?.includes(month)) {
         return { status: 500, body: { message: "workbench failed" } };
       }
+      const versions = options.workbenchReadModelVersions?.length
+        ? options.workbenchReadModelVersions
+        : ["mock-workbench-generation-1"];
+      workbenchReadModelVersion = versions[Math.min(workbenchReadModelVersionIndex, versions.length - 1)];
+      workbenchReadModelVersionIndex += 1;
       const payload = toGroupedWorkbenchPayload(
         mockWorkbenchPayloadForMonth(workbenchStateStore, month, options),
         options.workbenchOaStatus,
@@ -4947,6 +4959,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           row_counts: countMockWorkbenchRows(groups),
           has_more: groups.length > 200,
           groups: groups.slice(0, 200),
+          read_model_status: options.workbenchReadModelStatus ?? "fresh",
+          read_model_version: workbenchReadModelVersion,
         };
       };
       return {
@@ -4954,6 +4968,10 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           ...payload,
           paired: pageForZone("paired"),
           unpaired: pageForZone("unpaired"),
+          read_model_status: options.workbenchReadModelStatus ?? "fresh",
+          read_model_version: workbenchReadModelVersion,
+          active_generation_id: workbenchReadModelVersion,
+          generated_at: "2026-05-22T09:30:00+08:00",
         },
       };
     },
@@ -4966,6 +4984,17 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const page = Math.max(1, Number(url.searchParams.get("page") ?? "1") || 1);
       const pageSize = Math.max(1, Number(url.searchParams.get("page_size") ?? "50") || 50);
       const payload = toGroupedWorkbenchPayload(mockWorkbenchPayloadForMonth(workbenchStateStore, month, options), options.workbenchOaStatus);
+      const expectedReadModelVersion = url.searchParams.get("expected_read_model_version");
+      if (expectedReadModelVersion && expectedReadModelVersion !== workbenchReadModelVersion) {
+        return {
+          status: 409,
+          body: {
+            error: "workbench_read_model_version_conflict",
+            expected_read_model_version: expectedReadModelVersion,
+            read_model_version: workbenchReadModelVersion,
+          },
+        };
+      }
       const search = String(url.searchParams.get("search") ?? "").trim();
       const sort = String(url.searchParams.get("sort") ?? "").trim();
       const columnFilters = parseWorkbenchGroupJsonParam(url.searchParams.get("column_filters"));
@@ -4986,7 +5015,29 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           row_counts: rowCounts,
           has_more: offset + pageSize < groups.length,
           groups: groups.slice(offset, offset + pageSize),
+          read_model_status: options.workbenchReadModelStatus ?? "fresh",
+          read_model_version: workbenchReadModelVersion,
         },
+      };
+    },
+    "/api/workbench/refresh-status": ({ url }) => {
+      const month = url.searchParams.get("month") ?? "all";
+      const statusSequence = options.workbenchRefreshStatusSequence ?? [];
+      if (statusSequence.length > 0) {
+        const status = statusSequence[Math.min(workbenchRefreshStatusIndex, statusSequence.length - 1)];
+        workbenchRefreshStatusIndex += 1;
+        return { body: cloneJson(status) };
+      }
+      return {
+        body: options.workbenchRefreshStatus
+          ? cloneJson(options.workbenchRefreshStatus)
+          : {
+              scope_key: month,
+              read_model_status: "fresh",
+              generated_at: "2026-05-22T09:30:00+08:00",
+              dirty_scopes: [],
+              retryable: false,
+            },
       };
     },
     "/api/oa-sync/status": () => {
@@ -7864,6 +7915,48 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           affected_months: ["2026-04"],
         },
       });
+    }
+
+    const isWorkbenchActionRequest = (init?.method ?? "GET").toUpperCase() === "POST"
+      && (
+        url.pathname.startsWith("/api/workbench/actions/")
+        || url.pathname.startsWith("/api/workbench/exception/")
+      );
+    if (isWorkbenchActionRequest) {
+      const expectedVersion = String(jsonBody?.expected_read_model_version ?? "").trim();
+      if (!expectedVersion) {
+        return jsonResponse({
+          status: 400,
+          body: {
+            error: "expected_read_model_version_required",
+            message: "expected_read_model_version is required.",
+          },
+        });
+      }
+      if (expectedVersion !== workbenchReadModelVersion) {
+        return jsonResponse({
+          status: 409,
+          body: {
+            error: "workbench_read_model_version_conflict",
+            read_model_status: options.workbenchReadModelStatus ?? "fresh",
+            read_model_version: workbenchReadModelVersion,
+            retryable: true,
+          },
+        });
+      }
+      if ((options.workbenchReadModelStatus ?? "fresh") !== "fresh") {
+        return jsonResponse({
+          status: ["failed", "unavailable"].includes(options.workbenchReadModelStatus ?? "") ? 503 : 409,
+          body: {
+            error: (options.workbenchReadModelStatus === "failed" || options.workbenchReadModelStatus === "unavailable")
+              ? "workbench_read_model_unavailable"
+              : "workbench_read_model_not_fresh",
+            read_model_status: options.workbenchReadModelStatus,
+            read_model_version: workbenchReadModelVersion,
+            retryable: true,
+          },
+        });
+      }
     }
 
     const handler = handlers[url.pathname];

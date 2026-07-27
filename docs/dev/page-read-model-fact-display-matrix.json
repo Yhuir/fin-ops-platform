@@ -6,7 +6,7 @@
       "module": "reconciliation-workbench",
       "page_key": "reconciliation-workbench",
       "route": "/",
-      "read_model_keys": [],
+      "read_model_keys": ["workbench"],
       "freshness_probe_names": ["workbench_initial_all", "workbench_groups_all_paired"],
       "fact_sources": ["app.bank_transactions", "app.oa_applications", "app.invoices"],
       "pairing_relation_fact_sources": ["app.workbench_pair_relations"],

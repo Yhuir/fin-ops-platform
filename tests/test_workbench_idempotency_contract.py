@@ -12,7 +12,7 @@ from fin_ops_platform.app.server import Application
 from tests.app_test_support import (
     build_grouped_workbench_projection,
     build_local_state_application as build_application,
-    install_local_workbench_canonical_preview_repository,
+    install_fresh_workbench_write_gate,
 )
 
 from tests.test_workbench_uow_contract import (
@@ -623,10 +623,12 @@ def _json_response(response: object) -> dict[str, object]:
 
 
 class WorkbenchIdempotencyApiCompatibilityTests(unittest.TestCase):
+    READ_MODEL_VERSION = "idempotency-test-generation-1"
+
     def _build_app(self) -> Application:
         app = build_application()
         app._emit_workbench_action_timing = lambda **kwargs: None
-        install_local_workbench_canonical_preview_repository(app)
+        install_fresh_workbench_write_gate(app, version=self.READ_MODEL_VERSION)
         return app
 
     def _workbench_payload(self, app: Application, month: str = "2026-03") -> dict[str, object]:
@@ -663,6 +665,7 @@ class WorkbenchIdempotencyApiCompatibilityTests(unittest.TestCase):
                     "idempotency_key": "confirm:compat-1",
                     "request_idempotency_key": "confirm:compat-1",
                     "note": "idempotency compatibility covers documented mismatch path",
+                    "expected_read_model_version": self.READ_MODEL_VERSION,
                 },
             )
 

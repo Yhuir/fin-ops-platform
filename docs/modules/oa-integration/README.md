@@ -51,7 +51,7 @@
 | --- | --- | --- |
 | `/api/session/me` / session bootstrap | 所有页面、所有 API 权限、page session scope | OA 超时、无权限、token 过期、只读/全操作/admin 分层错误 |
 | OA Mongo adapter | Workbench、OA 待付款、进项使用、ETC、税金、成本、搜索 | 外部字段变体、Mongo 断连、缓存 backoff、附件发票 identity、附件 promotion 模式误配置 |
-| OA sync worker / canonical snapshot | 关联台、待找发票、OA 待付款、进/销项等 direct 页面 | worker 未入队、canonical snapshot 半写入、retention cutoff、旧 relation row id 迁移 |
+| OA sync worker / canonical snapshot | 关联台 projection、待找发票、OA 待付款、进/销项等 direct 页面 | worker 未入队、canonical snapshot 半写入、retention cutoff、旧 relation row id 迁移 |
 | OA 手动搜索/导入 | 设置页、Workbench、Search、历史 OA 补录 | 未完成单据误导入、附件刷新失败、手动 marker 删除后 stale scope |
 | OA applicant credentials | 设置页、进项发票 OA 反提 | 非 admin 修改、password 泄漏、pgcrypto key/配置缺失 |
 | Target OA applicant login | 进项 OA 草稿、ETC 草稿 | HTTP/网络/无效 JSON/无 token 不能伪装成功，错误不能泄露密码 |

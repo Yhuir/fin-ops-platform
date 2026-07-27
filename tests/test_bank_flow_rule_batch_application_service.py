@@ -83,11 +83,6 @@ class RecordingPairSnapshotPort:
         return {"all": True}
 
 
-class RecordingWorkbenchReadModelService:
-    def snapshot(self) -> dict[str, object]:
-        return {"workbench": True}
-
-
 class RefreshAwareBatchService:
     def __init__(
         self,
@@ -920,9 +915,6 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         service._state_store = state_store
         service._search_cache_clearer = lambda: None
         service._pair_relation_snapshot_port = RecordingPairSnapshotPort()
-        service._workbench_read_model_service = SimpleNamespace(
-            snapshot=lambda: (_ for _ in ()).throw(AssertionError("bank-flow persist must not snapshot workbench read model"))
-        )
         service._bank_batch_public_snapshot = lambda: {"batches": {"batch-1": {"batch_id": "batch-1"}}}
 
         service.persist_mutation(
@@ -947,7 +939,6 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         service._state_store = object()
         service._search_cache_clearer = lambda: None
         service._pair_relation_snapshot_port = RecordingPairSnapshotPort()
-        service._workbench_read_model_service = RecordingWorkbenchReadModelService()
         service._bank_batch_public_snapshot = lambda: {"batches": {}}
 
         with self.assertRaises(BankBatchPersistenceError):

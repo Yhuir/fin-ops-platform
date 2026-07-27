@@ -40,14 +40,7 @@
 - active relation member：`linked`。
 - 无 active relation：`unlinked`。
 - 不输出 `candidate`，也不读取已删除的 candidate/decision 表。
-- 关联台页面专属 canonical repository 直接读取 `app.workbench_pair_relations.status='active'`：冻结要求已满足时显示为 `paired`，未满足时保持同 case 显示为 `unpaired`，无 active owner 的 canonical facts 显示为 singleton `unpaired`。
-- 关联台页面不消费 `workbench_relation` distribution 或 Workbench active generation；其他下游仍按各自合同消费 linked/unlinked projection。
-
-## 页面写入安全
-
-- confirm/withdraw preview 从关联台 canonical query repository 有界读取所选 rows，只用于展示与 `preview_id`。
-- submit 不接收 `expected_read_model_version`；relation UoW 在同一事务内重新验证 canonical identities/types、active relation member ownership、expected business versions 和幂等 fingerprint。
-- preview 后对象消失、类型改变、成员被其它 active case 占用或版本冲突均返回 `409`，不得信任旧 preview DTO 继续写入。
+- 关联台页面把冻结完成要求已满足的 linked active relation 显示为 `paired`；未满足的 linked relation 保持同 case 显示为 `unpaired`，无 active owner 的 canonical facts 显示为 singleton `unpaired`。其他下游仍只消费 linked/unlinked ownership，不消费关联台 zone。
 
 ## 文档
 

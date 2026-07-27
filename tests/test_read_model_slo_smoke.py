@@ -20,7 +20,7 @@ class FakeConnection:
                 "row_count": 10,
                 "updated_at": "2026-07-27 10:00:00+08",
             }
-            for key in ("workbench_relation", "search", "no_oa_bank_batch")
+            for key in ("workbench", "workbench_relation", "search", "no_oa_bank_batch")
         ]
         self.started_at = datetime(2026, 7, 27, 2, 0, tzinfo=timezone.utc)
         self.finished_at = self.started_at + timedelta(milliseconds=350)
@@ -99,7 +99,7 @@ class ReadModelSloSmokeTests(unittest.TestCase):
         self.assertEqual(report["status"], "dry_run")
         self.assertEqual(
             {row["read_model_key"] for row in report["planned_scopes"]},
-            {"workbench_relation", "search", "no_oa_bank_batch"},
+            {"workbench", "workbench_relation", "search", "no_oa_bank_batch"},
         )
         self.assertFalse(any("workbench_generations" in sql for sql, _params in connection.fetch_all_calls))
 
@@ -115,7 +115,7 @@ class ReadModelSloSmokeTests(unittest.TestCase):
         self.assertEqual(report["missing_read_model_keys"], [])
         self.assertEqual(
             {row["read_model_key"] for row in report["planned_scopes"]},
-            {"workbench_relation", "search"},
+            {"workbench", "workbench_relation", "search"},
         )
 
     def test_explicit_key_limits_scope_selection(self) -> None:

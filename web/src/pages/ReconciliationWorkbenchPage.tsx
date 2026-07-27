@@ -29,12 +29,14 @@ import {
   fetchWorkbenchGroupsPage,
   fetchWorkbenchInitialPage,
   fetchWorkbenchOaSyncStatus,
+  fetchWorkbenchRefreshStatus,
   fetchWorkbenchRowDetail,
   fetchWorkbenchSettings,
   ignoreWorkbenchRow,
   previewWorkbenchConfirmLink,
   previewWorkbenchWithdrawLink,
   saveWorkbenchSettings,
+  subscribeWorkbenchRefreshEvents,
   unignoreWorkbenchRow,
   withdrawWorkbenchLink,
   WorkbenchApiError,
@@ -66,6 +68,7 @@ import type {
   WorkbenchInitialPageResult,
   WorkbenchOaSyncStatus,
   WorkbenchRecord,
+  WorkbenchRefreshStatus,
   WorkbenchRelationPreview,
   WorkbenchSettings,
   WorkbenchStatistics,
@@ -90,7 +93,7 @@ type RelationPreviewDialogState = {
 
 type RelationPreviewRequestKind = "confirm" | "withdraw";
 
-type WorkbenchActionProgressPhase = "submitting" | "rereading" | "loading";
+type WorkbenchActionProgressPhase = "submitting" | "syncing" | "loading";
 
 type WorkbenchActionProgress = {
   phase: WorkbenchActionProgressPhase;
@@ -129,6 +132,8 @@ function createInitialZonePageInfo(zone: "paired" | "unpaired"): WorkbenchZonePa
     total: 0,
     rowCounts: { oa: 0, bank: 0, invoice: 0, rows: 0 },
     hasMore: false,
+    readModelStatus: "refreshing",
+    readModelVersion: null,
   };
 }
 
@@ -201,6 +206,10 @@ function normalizedAmountForInput(value: string) {
 const WORKBENCH_VIEW_MONTH = "all";
 const OA_SYNC_POLL_INTERVAL_MS = 3_000;
 const OA_SYNC_REFRESH_DEBOUNCE_MS = 120;
+const WORKBENCH_REFRESH_POLL_INTERVAL_MS = 5_000;
+const WORKBENCH_REFRESH_RELOAD_DEBOUNCE_MS = 300;
+const WORKBENCH_OPERATION_FRESH_POLL_MS = 150;
+const WORKBENCH_ACTIVE_GENERATION_OPERATION_TIMEOUT_MS = 10_000;
 
 function createWorkbenchServerPageQueryKey(query: WorkbenchGroupsPageQuery) {
   return JSON.stringify(query);
@@ -261,6 +270,80 @@ function actionResultMessage(result: string | WorkbenchActionResult) {
   return typeof result === "string" ? result : result.message;
 }
 
+function workbenchInitialPageIsFresh(result: WorkbenchInitialPageResult | null) {
+  return result?.pages.paired.readModelStatus === "fresh" && result.pages.unpaired.readModelStatus === "fresh";
+}
+
+function workbenchZonePagesReadModelStatus(pages: Record<"paired" | "unpaired", WorkbenchZonePageInfo>) {
+  const statuses = [pages.paired.readModelStatus, pages.unpaired.readModelStatus]
+    .map((status) => String(status || "refreshing").trim() || "refreshing");
+  if (statuses.some((status) => status === "failed")) {
+    return "failed";
+  }
+  if (statuses.some((status) => status === "unavailable")) {
+    return "unavailable";
+  }
+  if (statuses.some((status) => status === "refreshing")) {
+    return "refreshing";
+  }
+  if (statuses.some((status) => status === "stale")) {
+    return "stale";
+  }
+  return statuses.every((status) => status === "fresh") ? "fresh" : statuses.find((status) => status !== "fresh") ?? "refreshing";
+}
+
+function workbenchReadModelStatusMessage(status: string | null, lastError?: string | null) {
+  if (status === "failed") {
+    return `关联台刷新失败${lastError ? `：${lastError}` : ""}`;
+  }
+  if (status === "unavailable") {
+    return "关联台读模型不可用";
+  }
+  if (status === "refreshing") {
+    return "关联台正在刷新，当前显示上一版稳定数据；刷新完成前写操作已禁用。";
+  }
+  if (status === "stale") {
+    return "关联台数据已过期，当前结果仅供查看；刷新完成前写操作已禁用。";
+  }
+  return null;
+}
+
+function workbenchActiveReadModelVersion(pages: Record<"paired" | "unpaired", WorkbenchZonePageInfo>) {
+  const pairedVersion = String(pages.paired.readModelVersion ?? "").trim();
+  const unpairedVersion = String(pages.unpaired.readModelVersion ?? "").trim();
+  return pairedVersion && pairedVersion === unpairedVersion ? pairedVersion : "";
+}
+
+function isWorkbenchReadModelRejected(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const code = String((error as { code?: unknown }).code ?? "").trim();
+  return (
+    code === "workbench_read_model_version_conflict"
+    || code === "workbench_read_model_not_fresh"
+    || code === "workbench_stale"
+  );
+}
+
+function delayWorkbenchOperationPoll() {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, WORKBENCH_OPERATION_FRESH_POLL_MS);
+  });
+}
+
+function workbenchRefreshStatusVersionKey(status: WorkbenchRefreshStatus) {
+  const version = status.readModelVersion ?? status.generatedAt;
+  return version === null || version === undefined ? "" : String(version);
+}
+
+function workbenchRefreshStatusMessage(status: WorkbenchRefreshStatus | null) {
+  if (!status) {
+    return null;
+  }
+  return workbenchReadModelStatusMessage(status.readModelStatus, status.lastError);
+}
+
 export default function ReconciliationWorkbenchPage() {
   const { currentMonth } = useMonth();
   const { setWorkbenchStatus } = useAppChrome();
@@ -295,6 +378,8 @@ export default function ReconciliationWorkbenchPage() {
   });
   const [zonePages, setZonePages] = useState<Record<"paired" | "unpaired", WorkbenchZonePageInfo>>(() => createInitialZonePages());
   const [oaSyncStatus, setOaSyncStatus] = useState<WorkbenchOaSyncStatus | null>(null);
+  const workbenchPageReadModelStatus = workbenchZonePagesReadModelStatus(zonePages);
+  const activeWorkbenchReadModelVersion = workbenchActiveReadModelVersion(zonePages);
   const oaSyncWriteBlocked = oaSyncStatus
     ? oaSyncStatus.status === "refreshing" || oaSyncStatus.dirtyScopes.length > 0
     : healthStatus.sources.oaSync === "dirty" || healthStatus.sources.oaSync === "refreshing";
@@ -302,6 +387,8 @@ export default function ReconciliationWorkbenchPage() {
     canMutateData,
     mutationsBlocked: healthStatus.blocksMutations,
     oaSyncWriteBlocked,
+    readModelStatus: workbenchPageReadModelStatus,
+    readModelVersion: activeWorkbenchReadModelVersion || null,
   });
   const canWriteWorkbench = workbenchWriteGate.allowed;
   const [loadingMoreByZone, setLoadingMoreByZone] = useState<Record<"paired" | "unpaired", boolean>>({
@@ -321,6 +408,7 @@ export default function ReconciliationWorkbenchPage() {
     percent: null,
     indeterminate: true,
   });
+  const [workbenchRefreshStatus, setWorkbenchRefreshStatus] = useState<WorkbenchRefreshStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [backgroundLoadError, setBackgroundLoadError] = useState<string | null>(null);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
@@ -329,6 +417,7 @@ export default function ReconciliationWorkbenchPage() {
   const loadRequestSeqRef = useRef(0);
   const loadMoreRequestSeqRef = useRef<Record<"paired" | "unpaired", number>>({ paired: 0, unpaired: 0 });
   const loadMoreInFlightRef = useRef<Record<"paired" | "unpaired", boolean>>({ paired: false, unpaired: false });
+  const activeWorkbenchReadModelVersionRef = useRef("");
   const [lastActionMessage, setLastActionMessage] = useState<string | null>(null);
   const [expandedZoneId, setExpandedZoneId] = useState<"paired" | "unpaired" | null>(null);
   const [actionDialog, setActionDialog] = useState<ActionDialogState | null>(null);
@@ -369,6 +458,8 @@ export default function ReconciliationWorkbenchPage() {
   const setOpenDisplayState = openDisplaySession.setValue;
   const columnLayoutSaveRequestIdRef = useRef(0);
   const oaSyncRefreshTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const workbenchRefreshReloadTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const lastWorkbenchRefreshVersionRef = useRef<string>("");
   const previousOaSyncStatusRef = useRef<WorkbenchOaSyncStatus | null>(null);
   const deferredPairedDisplayState = useDeferredValue(pairedDisplayState);
   const deferredOpenDisplayState = useDeferredValue(openDisplayState);
@@ -632,8 +723,25 @@ export default function ReconciliationWorkbenchPage() {
     loadMoreInFlightRef.current = { paired: false, unpaired: false };
     setLoadingMoreByZone({ paired: false, unpaired: false });
     setLoadMoreErrorByZone({ paired: null, unpaired: null });
+    const nextVersion = workbenchActiveReadModelVersion(workbenchPayload.pages);
+    const previousVersion = activeWorkbenchReadModelVersionRef.current;
+    if (previousVersion && nextVersion && previousVersion !== nextVersion) {
+      detailRequestSeqRef.current += 1;
+      clearSelection();
+      closeDetail();
+      setDetailError(null);
+      setIsDetailLoading(false);
+      setSelectionSourceGroups({ paired: [], unpaired: [] });
+      setExpandedZoneId(null);
+      setActionDialog(null);
+      setRelationPreviewDialog(null);
+      setWorkbenchExceptionDialog(null);
+      setCashTicketPurchaseDialog(null);
+      setCancelProcessedExceptionDialog(null);
+    }
+    activeWorkbenchReadModelVersionRef.current = nextVersion;
     setWorkbenchData(workbenchPayload.data);
-    setStatistics(workbenchPayload.statistics ?? null);
+    setStatistics(workbenchZonePagesReadModelStatus(workbenchPayload.pages) === "fresh" ? workbenchPayload.statistics ?? null : null);
     setLoadedZoneServerPageQueryKeys(createWorkbenchZoneServerPageQueryKeys(resolvedZoneQueries));
     setZonePages(workbenchPayload.pages);
   }
@@ -707,6 +815,7 @@ export default function ReconciliationWorkbenchPage() {
       if (!background) {
         setWorkbenchData(null);
         setStatistics(null);
+        activeWorkbenchReadModelVersionRef.current = "";
         setLoadedZoneServerPageQueryKeys(null);
         setZonePages(createInitialZonePages());
         setIgnoredData({ month, rows: [] });
@@ -724,18 +833,92 @@ export default function ReconciliationWorkbenchPage() {
     }
   }
 
-  const reloadWorkbenchAfterOperation = useCallback(async (options?: {
+  const waitForWorkbenchFreshAfterOperation = useCallback(async (options?: {
     deferStateApply?: boolean;
   }) => {
+    const startedAt = Date.now();
+    let lastReadModelStatus = "";
     const deferStateApply = options?.deferStateApply ?? false;
-    return loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
+
+    const initialResult = await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
       background: true,
       includeAuxiliary: false,
       zoneQueries: zoneServerPageQueries,
       propagateError: true,
       deferStateApply,
     });
+    const initialPairedStatus = initialResult?.pages.paired.readModelStatus ?? "unknown";
+    const initialOpenStatus = initialResult?.pages.unpaired.readModelStatus ?? "unknown";
+    lastReadModelStatus = initialPairedStatus === initialOpenStatus
+      ? initialPairedStatus
+      : `${initialPairedStatus}/${initialOpenStatus}`;
+    if (workbenchInitialPageIsFresh(initialResult)) {
+      return initialResult;
+    }
+
+    while (Date.now() - startedAt <= WORKBENCH_ACTIVE_GENERATION_OPERATION_TIMEOUT_MS) {
+      const refreshStatus = await fetchWorkbenchRefreshStatus(WORKBENCH_VIEW_MONTH);
+      lastReadModelStatus = refreshStatus.readModelStatus;
+      if (refreshStatus.readModelStatus === "failed" || refreshStatus.readModelStatus === "unavailable") {
+        throw new Error(
+          refreshStatus.lastError
+          || `关联台最新数据加载失败，当前状态：${refreshStatus.readModelStatus}。`,
+        );
+      }
+      if (refreshStatus.readModelStatus !== "fresh") {
+        await delayWorkbenchOperationPoll();
+        continue;
+      }
+
+      const result = await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
+        background: true,
+        includeAuxiliary: false,
+        zoneQueries: zoneServerPageQueries,
+        propagateError: true,
+        deferStateApply,
+      });
+      const pairedStatus = result?.pages.paired.readModelStatus ?? "unknown";
+      const openStatus = result?.pages.unpaired.readModelStatus ?? "unknown";
+      lastReadModelStatus = pairedStatus === openStatus ? pairedStatus : `${pairedStatus}/${openStatus}`;
+      if (workbenchInitialPageIsFresh(result)) {
+        return result;
+      }
+      await delayWorkbenchOperationPoll();
+    }
+
+    throw new Error(`关联台最新数据同步超过 ${Math.round(WORKBENCH_ACTIVE_GENERATION_OPERATION_TIMEOUT_MS / 1000)} 秒，当前状态：${lastReadModelStatus || "unknown"}。`);
   }, [zoneServerPageQueries]);
+
+  const scheduleWorkbenchReadModelReload = useCallback(() => {
+    if (workbenchRefreshReloadTimeoutRef.current !== null) {
+      window.clearTimeout(workbenchRefreshReloadTimeoutRef.current);
+    }
+    workbenchRefreshReloadTimeoutRef.current = window.setTimeout(() => {
+      workbenchRefreshReloadTimeoutRef.current = null;
+      void loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
+        background: true,
+        includeAuxiliary: false,
+        zoneQueries: zoneServerPageQueries,
+      });
+    }, WORKBENCH_REFRESH_RELOAD_DEBOUNCE_MS);
+  }, [zoneServerPageQueries]);
+
+  const applyWorkbenchRefreshStatus = useCallback((status: WorkbenchRefreshStatus) => {
+    setWorkbenchRefreshStatus(status);
+    const nextVersionKey = workbenchRefreshStatusVersionKey(status);
+    const previousVersionKey = lastWorkbenchRefreshVersionRef.current;
+    if (nextVersionKey) {
+      lastWorkbenchRefreshVersionRef.current = nextVersionKey;
+    }
+    if (
+      status.readModelStatus === "fresh"
+      && nextVersionKey
+      && previousVersionKey
+      && previousVersionKey !== nextVersionKey
+    ) {
+      scheduleWorkbenchReadModelReload();
+    }
+  }, [scheduleWorkbenchReadModelReload]);
 
   const handleLoadMoreZone = useCallback(async (zone: "paired" | "unpaired") => {
     const pageInfo = zonePages[zone];
@@ -745,10 +928,16 @@ export default function ReconciliationWorkbenchPage() {
     if (
       !workbenchData
       || !pageInfo.hasMore
+      || pageInfo.readModelStatus !== "fresh"
       || displayStatePending
       || loadedZoneServerPageQueryKeys?.[zone] !== zoneServerPageQueryKeys[zone]
       || loadMoreInFlightRef.current[zone]
     ) {
+      return;
+    }
+    const expectedReadModelVersion = activeWorkbenchReadModelVersionRef.current;
+    if (!expectedReadModelVersion) {
+      setLastActionMessage("数据版本尚未就绪，请刷新后重试。");
       return;
     }
     const requestSeq = loadMoreRequestSeqRef.current[zone] + 1;
@@ -764,8 +953,20 @@ export default function ReconciliationWorkbenchPage() {
         pageInfo.pageSize,
         undefined,
         { ...zoneServerPageQueries[zone], detailLevel: "summary" },
+        expectedReadModelVersion,
       );
       if (loadMoreRequestSeqRef.current[zone] !== requestSeq) {
+        return;
+      }
+      if (
+        activeWorkbenchReadModelVersionRef.current !== expectedReadModelVersion
+        || result.page.readModelVersion !== expectedReadModelVersion
+      ) {
+        await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
+          background: true,
+          includeAuxiliary: false,
+          zoneQueries: zoneServerPageQueries,
+        });
         return;
       }
       setWorkbenchData((current) => {
@@ -783,14 +984,23 @@ export default function ReconciliationWorkbenchPage() {
         ...current,
         [zone]: result.page,
       }));
-    } catch {
+    } catch (error) {
       if (loadMoreRequestSeqRef.current[zone] !== requestSeq) {
         return;
       }
-      setLoadMoreErrorByZone((current) => ({
-        ...current,
-        [zone]: "自动加载下一页失败，请重试。",
-      }));
+      if (isWorkbenchReadModelRejected(error)) {
+        await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
+          background: true,
+          includeAuxiliary: false,
+          zoneQueries: zoneServerPageQueries,
+        });
+        setLastActionMessage("关联台数据版本已更新，页面已重新加载。");
+      } else {
+        setLoadMoreErrorByZone((current) => ({
+          ...current,
+          [zone]: "自动加载下一页失败，请重试。",
+        }));
+      }
     } finally {
       if (loadMoreRequestSeqRef.current[zone] === requestSeq) {
         loadMoreInFlightRef.current[zone] = false;
@@ -814,20 +1024,35 @@ export default function ReconciliationWorkbenchPage() {
     if (!normalizedGroupId) {
       throw new Error("invalid_workbench_group_detail_request");
     }
-    const detailKey = workbenchData?.[zone].groups.find(
-      (candidate) => candidate.id === normalizedGroupId,
-    )?.detailKey;
+    const expectedReadModelVersion = activeWorkbenchReadModelVersionRef.current;
+    if (!expectedReadModelVersion) {
+      setLastActionMessage("数据版本尚未就绪，请刷新后重试。");
+      throw new Error("workbench_group_detail_version_unavailable");
+    }
     let group: WorkbenchRelationGroup;
     try {
       group = await fetchWorkbenchGroupDetail(
         WORKBENCH_VIEW_MONTH,
         zone,
         normalizedGroupId,
-        detailKey,
+        expectedReadModelVersion,
       );
-    } catch {
+    } catch (error) {
+      if (isWorkbenchReadModelRejected(error)) {
+        await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
+          background: true,
+          includeAuxiliary: false,
+          zoneQueries: zoneServerPageQueries,
+        });
+        setLastActionMessage("关联台数据版本已更新，页面已重新加载。");
+        throw new Error("workbench_group_detail_version_changed");
+      }
       setLastActionMessage("加载完整明细失败，请稍后重试。");
       throw new Error("workbench_group_detail_load_failed");
+    }
+    if (activeWorkbenchReadModelVersionRef.current !== expectedReadModelVersion) {
+      setLastActionMessage("关联台数据版本已更新，请重新展开明细。");
+      throw new Error("workbench_group_detail_version_changed");
     }
     setWorkbenchData((current) => {
       if (!current) {
@@ -842,7 +1067,7 @@ export default function ReconciliationWorkbenchPage() {
         },
       };
     });
-  }, [workbenchData]);
+  }, [zonePages]);
 
   useEffect(() => {
     if (!active) {
@@ -884,6 +1109,75 @@ export default function ReconciliationWorkbenchPage() {
     void loadWorkbenchData(WORKBENCH_VIEW_MONTH, controller.signal, { includeAuxiliary: true });
     return () => controller.abort();
   }, [active, activationGeneration]);
+
+  useEffect(() => {
+    if (!active) {
+      return undefined;
+    }
+    let isActive = true;
+    let pollIntervalId: number | null = null;
+    let pollController: AbortController | null = null;
+    let subscription: { close: () => void } | null = null;
+
+    const pollRefreshStatus = () => {
+      pollController?.abort();
+      const controller = new AbortController();
+      pollController = controller;
+      void fetchWorkbenchRefreshStatus(WORKBENCH_VIEW_MONTH, controller.signal)
+        .then((status) => {
+          if (!isActive || controller.signal.aborted) {
+            return;
+          }
+          applyWorkbenchRefreshStatus(status);
+        })
+        .catch(() => undefined);
+    };
+
+    const startPolling = () => {
+      if (pollIntervalId !== null) {
+        return;
+      }
+      pollRefreshStatus();
+      pollIntervalId = window.setInterval(pollRefreshStatus, WORKBENCH_REFRESH_POLL_INTERVAL_MS);
+    };
+
+    subscription = subscribeWorkbenchRefreshEvents(
+      WORKBENCH_VIEW_MONTH,
+      ({ status }) => {
+        if (isActive) {
+          applyWorkbenchRefreshStatus(status);
+        }
+      },
+      () => {
+        subscription?.close();
+        subscription = null;
+        startPolling();
+      },
+    );
+
+    if (!subscription) {
+      startPolling();
+    }
+
+    const handleFocus = () => {
+      pollRefreshStatus();
+    };
+    window.addEventListener("focus", handleFocus);
+
+    return () => {
+      isActive = false;
+      subscription?.close();
+      if (pollIntervalId !== null) {
+        window.clearInterval(pollIntervalId);
+      }
+      pollController?.abort();
+      if (workbenchRefreshReloadTimeoutRef.current !== null) {
+        window.clearTimeout(workbenchRefreshReloadTimeoutRef.current);
+        workbenchRefreshReloadTimeoutRef.current = null;
+      }
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, [active, applyWorkbenchRefreshStatus]);
 
   useEffect(() => {
     if (!active) {
@@ -942,6 +1236,13 @@ export default function ReconciliationWorkbenchPage() {
       setWorkbenchStatus({ level: "error", reason: workbenchData.oaStatus.message });
       return;
     }
+    if (workbenchRefreshStatus?.readModelStatus === "failed" || workbenchRefreshStatus?.readModelStatus === "unavailable") {
+      setWorkbenchStatus({
+        level: "error",
+        reason: workbenchRefreshStatusMessage(workbenchRefreshStatus) ?? "关联台刷新失败",
+      });
+      return;
+    }
     if (oaSyncShellStatus) {
       setWorkbenchStatus(oaSyncShellStatus);
       return;
@@ -970,6 +1271,7 @@ export default function ReconciliationWorkbenchPage() {
     loadProgress.percent,
     oaSyncShellStatus,
     setWorkbenchStatus,
+    workbenchRefreshStatus,
     workbenchData?.oaStatus?.code,
     workbenchData?.oaStatus?.message,
   ]);
@@ -1073,6 +1375,7 @@ export default function ReconciliationWorkbenchPage() {
   const contextualPairedRowIds = pairedSelectionContext.relatedRowIdSet;
   relationPreviewContextKeyRef.current = [
     WORKBENCH_VIEW_MONTH,
+    activeWorkbenchReadModelVersion,
     openSelectionContext.includedRowIds.join(","),
     pairedSelectionContext.includedRowIds.join(","),
   ].join("|");
@@ -1126,18 +1429,37 @@ export default function ReconciliationWorkbenchPage() {
     setDetailError(null);
     setIsDetailLoading(true);
     openDetail(row);
+    const expectedReadModelVersion = activeWorkbenchReadModelVersionRef.current;
+    if (!expectedReadModelVersion) {
+      setDetailError("数据版本尚未就绪，请刷新后重试。");
+      setIsDetailLoading(false);
+      return;
+    }
 
     void fetchWorkbenchRowDetail(row.id, {
       month: WORKBENCH_VIEW_MONTH,
+      expectedReadModelVersion,
     })
       .then((detailedRow) => {
-        if (detailRequestSeqRef.current === requestSeq) {
+        if (
+          detailRequestSeqRef.current === requestSeq
+          && activeWorkbenchReadModelVersionRef.current === expectedReadModelVersion
+        ) {
           replaceDetailRow(detailedRow);
         }
       })
-      .catch(() => {
+      .catch((error) => {
         if (detailRequestSeqRef.current === requestSeq) {
-          setDetailError("详情加载失败，请稍后重试。");
+          if (isWorkbenchReadModelRejected(error)) {
+            void loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
+              background: true,
+              includeAuxiliary: false,
+              zoneQueries: zoneServerPageQueries,
+            });
+            setDetailError("关联台数据版本已更新，页面正在重新加载。");
+          } else {
+            setDetailError("详情加载失败，请稍后重试。");
+          }
         }
       })
       .finally(() => {
@@ -1145,7 +1467,7 @@ export default function ReconciliationWorkbenchPage() {
           setIsDetailLoading(false);
         }
       });
-  }, [openDetail, replaceDetailRow]);
+  }, [openDetail, replaceDetailRow, zoneServerPageQueries]);
 
   const handleCloseDetail = useCallback(() => {
     detailRequestSeqRef.current += 1;
@@ -1267,35 +1589,42 @@ export default function ReconciliationWorkbenchPage() {
     return true;
   }, []);
 
-  const executeWorkbenchAction = useCallback(async ({
+  const executeWorkbenchActionWithFreshness = useCallback(async ({
     loadingMessage,
     action,
     onProgress,
-    deferWorkbenchApply = false,
-    onWorkbenchPayload,
+    waitForFreshWorkbenchLoad = false,
+    deferFreshWorkbenchApply = false,
+    onFreshWorkbenchPayload,
   }: {
     loadingMessage: string;
     action: () => Promise<string | WorkbenchActionResult>;
     onProgress?: WorkbenchActionProgressHandler;
-    deferWorkbenchApply?: boolean;
-    onWorkbenchPayload?: (payload: WorkbenchInitialPageResult) => void;
+    waitForFreshWorkbenchLoad?: boolean;
+    deferFreshWorkbenchApply?: boolean;
+    onFreshWorkbenchPayload?: (payload: WorkbenchInitialPageResult) => void;
   }) => {
     onProgress?.({ phase: "submitting", message: loadingMessage, committed: false });
     const result = await action();
     const actionResult = typeof result === "string" ? null : result;
     const committed = Boolean(actionResult);
-    if (actionResult) {
-      applyWorkbenchOperationProjection(actionResult);
-    }
-    onProgress?.({ phase: "loading", message: "正在加载关联台最新数据...", committed });
-    const workbenchPayload = await reloadWorkbenchAfterOperation({
-      deferStateApply: deferWorkbenchApply,
-    });
-    if (deferWorkbenchApply && workbenchPayload) {
-      onWorkbenchPayload?.(workbenchPayload);
+    const projectionApplied = !waitForFreshWorkbenchLoad && actionResult
+      ? applyWorkbenchOperationProjection(actionResult)
+      : false;
+    if (waitForFreshWorkbenchLoad || !projectionApplied) {
+      onProgress?.({ phase: "loading", message: "正在加载关联台最新数据...", committed });
+      const freshWorkbenchPayload = await waitForWorkbenchFreshAfterOperation({
+        deferStateApply: deferFreshWorkbenchApply,
+      });
+      if (deferFreshWorkbenchApply && freshWorkbenchPayload) {
+        onFreshWorkbenchPayload?.(freshWorkbenchPayload);
+      }
+    } else {
+      onProgress?.({ phase: "loading", message: "正在更新关联台页面...", committed });
+      refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
     }
     return actionResultMessage(result);
-  }, [applyWorkbenchOperationProjection, reloadWorkbenchAfterOperation]);
+  }, [applyWorkbenchOperationProjection, refreshWorkbenchDataInBackground, waitForWorkbenchFreshAfterOperation]);
 
   const runBlockingAction = useCallback(async ({
     loadingMessage,
@@ -1308,7 +1637,7 @@ export default function ReconciliationWorkbenchPage() {
     const outcome = await runOperation({
       loadingMessage,
       action: async ({ setMessage }) => {
-        return executeWorkbenchAction({
+        return executeWorkbenchActionWithFreshness({
           loadingMessage,
           action,
           onProgress: (progress) => setMessage(progress.message),
@@ -1318,26 +1647,48 @@ export default function ReconciliationWorkbenchPage() {
     });
     if (outcome.status === "success") {
       setLastActionMessage(outcome.value);
+    } else if (isWorkbenchReadModelRejected(outcome.error)) {
+      await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
+        background: true,
+        includeAuxiliary: false,
+        zoneQueries: zoneServerPageQueries,
+      });
+      setLastActionMessage("关联台数据版本已更新，页面已重新加载。");
     }
-  }, [executeWorkbenchAction, handleCloseDetail, runOperation]);
+  }, [executeWorkbenchActionWithFreshness, handleCloseDetail, loadWorkbenchData, runOperation, zoneServerPageQueries]);
+
+  const refreshAfterReadModelRejection = useCallback((error: unknown) => {
+    if (!isWorkbenchReadModelRejected(error)) {
+      return;
+    }
+    void loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
+      background: true,
+      includeAuxiliary: false,
+      zoneQueries: zoneServerPageQueries,
+    });
+    setLastActionMessage("关联台数据版本已更新，页面正在重新加载。");
+  }, [loadWorkbenchData, zoneServerPageQueries]);
 
   const openRelationPreviewErrorDialog = useCallback((error: unknown) => {
+    refreshAfterReadModelRejection(error);
     openActionResultDialog(actionErrorMessage(error), "操作失败");
-  }, [openActionResultDialog]);
+  }, [openActionResultDialog, refreshAfterReadModelRejection]);
 
   const handleWorkbenchExceptionApplied = useCallback(async (
     result: WorkbenchExceptionApplyResult,
     onProgress: WorkbenchActionProgressHandler,
   ) => {
-    onProgress({
-      phase: "loading",
-      message: "正在加载关联台最新数据...",
-      committed: true,
-    });
-    await reloadWorkbenchAfterOperation();
+    if (result.workbenchRefreshRequired || result.affectedScopeKeys.length > 0) {
+      onProgress({
+        phase: "loading",
+        message: "正在加载关联台最新数据...",
+        committed: true,
+      });
+      await waitForWorkbenchFreshAfterOperation();
+    }
     clearOpenSelection();
     setLastActionMessage(result.message ?? "已提交统一异常处理。");
-  }, [clearOpenSelection, reloadWorkbenchAfterOperation]);
+  }, [clearOpenSelection, waitForWorkbenchFreshAfterOperation]);
 
   const handleRowAction = useCallback(async (row: WorkbenchRecord, action: WorkbenchInlineAction) => {
     if (action === "relation-status") {
@@ -1372,6 +1723,7 @@ export default function ReconciliationWorkbenchPage() {
           const result = await ignoreWorkbenchRow({
             month: WORKBENCH_VIEW_MONTH,
             rowId: row.id,
+            expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
             comment: `由关联台忽略发票：${row.id}`,
           });
           return result;
@@ -1389,6 +1741,7 @@ export default function ReconciliationWorkbenchPage() {
           const result = await confirmWorkbenchCashPassThrough({
             month: WORKBENCH_VIEW_MONTH,
             rowIds,
+            expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
             note: "由关联台确认现金往来过账",
           });
           return result;
@@ -1413,6 +1766,7 @@ export default function ReconciliationWorkbenchPage() {
           const result = await cancelWorkbenchCashSpecial({
             month: WORKBENCH_VIEW_MONTH,
             rowIds,
+            expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
             note: "由关联台取消现金往来特殊处理",
           });
           return result;
@@ -1491,6 +1845,7 @@ export default function ReconciliationWorkbenchPage() {
         const result = await confirmWorkbenchCashTicketPurchase({
           month: WORKBENCH_VIEW_MONTH,
           rowIds,
+          expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
           cashAmount,
           ticketCostAmount,
           projectName,
@@ -1521,20 +1876,26 @@ export default function ReconciliationWorkbenchPage() {
       return;
     }
     const rowIds = rows.map((row) => row.id);
+    const expectedReadModelVersion = activeWorkbenchReadModelVersionRef.current;
     const requestContextKey = relationPreviewContextKeyRef.current;
     relationPreviewRequestKindRef.current = kind;
     setRelationPreviewRequestKind(kind);
     try {
       const preview = kind === "confirm"
-          ? await previewWorkbenchConfirmLink({
+        ? await previewWorkbenchConfirmLink({
             month: WORKBENCH_VIEW_MONTH,
             rowIds,
+            expectedReadModelVersion,
           })
         : await previewWorkbenchWithdrawLink({
             month: WORKBENCH_VIEW_MONTH,
             rowIds,
+            expectedReadModelVersion,
           });
-      if (relationPreviewContextKeyRef.current !== requestContextKey) {
+      if (
+        relationPreviewContextKeyRef.current !== requestContextKey
+        || activeWorkbenchReadModelVersionRef.current !== expectedReadModelVersion
+      ) {
         return;
       }
       setRelationPreviewDialog({
@@ -1568,13 +1929,14 @@ export default function ReconciliationWorkbenchPage() {
     const { preview, rowIds, caseId } = relationPreviewDialog;
     if (preview.operation === "confirm_link") {
       let submittedResult: WorkbenchActionResult | null = null;
-      const message = await executeWorkbenchAction({
+      const message = await executeWorkbenchActionWithFreshness({
         loadingMessage: "正在确认关联...",
         onProgress,
         action: async () => {
           const result = await confirmWorkbenchLink({
             month: WORKBENCH_VIEW_MONTH,
             rowIds,
+            expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
             caseId,
             note,
           });
@@ -1592,20 +1954,22 @@ export default function ReconciliationWorkbenchPage() {
 
     const operationCopy = relationPreviewOperationCopy(preview);
     let submittedResult: WorkbenchActionResult | null = null;
-    let deferredWorkbenchApplied = false;
-    const message = await executeWorkbenchAction({
+    let deferredWorkbenchFreshApplied = false;
+    const message = await executeWorkbenchActionWithFreshness({
       loadingMessage: operationCopy.submittingMessage,
       onProgress,
-      deferWorkbenchApply: true,
-      onWorkbenchPayload: (workbenchPayload) => {
-        deferredWorkbenchApplied = true;
+      waitForFreshWorkbenchLoad: true,
+      deferFreshWorkbenchApply: true,
+      onFreshWorkbenchPayload: (freshWorkbenchPayload) => {
+        deferredWorkbenchFreshApplied = true;
         setRelationPreviewDialog(null);
-        applyWorkbenchInitialPageResult(workbenchPayload, zoneServerPageQueries);
+        applyWorkbenchInitialPageResult(freshWorkbenchPayload, zoneServerPageQueries);
       },
       action: async () => {
         const result = await withdrawWorkbenchLink({
           month: WORKBENCH_VIEW_MONTH,
           rowIds,
+          expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
           note,
           operationType: "withdraw_relation",
           previewId: preview.previewId,
@@ -1620,7 +1984,7 @@ export default function ReconciliationWorkbenchPage() {
       clearOpenSelection();
     }
     setLastActionMessage(message);
-    if (!deferredWorkbenchApplied) {
+    if (!deferredWorkbenchFreshApplied) {
       setRelationPreviewDialog(null);
     }
   };
@@ -1729,6 +2093,7 @@ export default function ReconciliationWorkbenchPage() {
         const result = await unignoreWorkbenchRow({
           month: WORKBENCH_VIEW_MONTH,
           rowId: row.id,
+          expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
         });
         return result;
       },
@@ -1755,6 +2120,7 @@ export default function ReconciliationWorkbenchPage() {
         const result = await cancelWorkbenchException({
           month: WORKBENCH_VIEW_MONTH,
           rowIds: rows.map((row) => row.id),
+          expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
           comment: "由已处理异常弹窗撤回异常处理",
         });
         return result;
@@ -1816,6 +2182,7 @@ export default function ReconciliationWorkbenchPage() {
     [handleOpenIgnoredModal, handleOpenProcessedExceptionsModal, ignoredData.rows.length, processedExceptionRows.length],
   );
 
+  const isWorkbenchPageFresh = workbenchPageReadModelStatus === "fresh";
   const isEmpty = (workbenchData?.summary.totalCount ?? 0) === 0;
   const oaStatus = workbenchData?.oaStatus ?? null;
   const isOaReady = oaStatus?.code === "ready";
@@ -1950,23 +2317,23 @@ export default function ReconciliationWorkbenchPage() {
                   ariaLabel="关联台数据统计"
                   loading={isLoading && !workbenchData}
                   coreItems={[
-                    { label: "OA", value: statistics?.oaCount, unit: "条" },
-                    { label: "流水", value: statistics?.bankTransactionCount, unit: "笔" },
-                    { label: "进项", value: statistics?.inputInvoiceCount, unit: "张" },
-                    { label: "销项", value: statistics?.outputInvoiceCount, unit: "张" },
+                    { label: "OA", value: workbenchPageReadModelStatus === "fresh" ? statistics?.oaCount : null, unit: "条" },
+                    { label: "流水", value: workbenchPageReadModelStatus === "fresh" ? statistics?.bankTransactionCount : null, unit: "笔" },
+                    { label: "进项", value: workbenchPageReadModelStatus === "fresh" ? statistics?.inputInvoiceCount : null, unit: "张" },
+                    { label: "销项", value: workbenchPageReadModelStatus === "fresh" ? statistics?.outputInvoiceCount : null, unit: "张" },
                   ]}
                   detailItems={[
-                    { label: "已配对组", value: statistics?.pairedGroupCount, unit: "组", tone: "success" },
-                    { label: "未配对对象", value: statistics?.unpairedObjectCount, unit: "个", tone: "warning" },
-                    { label: "支出流水", value: statistics?.expenseTransactionCount, unit: "笔", tone: "expense" },
-                    { label: "收入流水", value: statistics?.incomeTransactionCount, unit: "笔", tone: "income" },
-                    { label: "已配对 OA", value: statistics?.pairedOaCount, unit: "条" },
-                    { label: "已配对流水", value: statistics?.pairedBankTransactionCount, unit: "笔" },
-                    { label: "已配对发票", value: statistics?.pairedInvoiceCount, unit: "张" },
-                    { label: "不完整关系组", value: statistics?.incompleteGroupCount, unit: "组", tone: "warning" },
-                    { label: "缺 OA 关系组", value: statistics?.missingOaGroupCount, unit: "组", tone: "warning" },
-                    { label: "缺流水关系组", value: statistics?.missingBankGroupCount, unit: "组", tone: "warning" },
-                    { label: "缺发票关系组", value: statistics?.missingInvoiceGroupCount, unit: "组", tone: "warning" },
+                    { label: "已配对组", value: workbenchPageReadModelStatus === "fresh" ? statistics?.pairedGroupCount : null, unit: "组", tone: "success" },
+                    { label: "未配对对象", value: workbenchPageReadModelStatus === "fresh" ? statistics?.unpairedObjectCount : null, unit: "个", tone: "warning" },
+                    { label: "支出流水", value: workbenchPageReadModelStatus === "fresh" ? statistics?.expenseTransactionCount : null, unit: "笔", tone: "expense" },
+                    { label: "收入流水", value: workbenchPageReadModelStatus === "fresh" ? statistics?.incomeTransactionCount : null, unit: "笔", tone: "income" },
+                    { label: "已配对 OA", value: workbenchPageReadModelStatus === "fresh" ? statistics?.pairedOaCount : null, unit: "条" },
+                    { label: "已配对流水", value: workbenchPageReadModelStatus === "fresh" ? statistics?.pairedBankTransactionCount : null, unit: "笔" },
+                    { label: "已配对发票", value: workbenchPageReadModelStatus === "fresh" ? statistics?.pairedInvoiceCount : null, unit: "张" },
+                    { label: "不完整关系组", value: workbenchPageReadModelStatus === "fresh" ? statistics?.incompleteGroupCount : null, unit: "组", tone: "warning" },
+                    { label: "缺 OA 关系组", value: workbenchPageReadModelStatus === "fresh" ? statistics?.missingOaGroupCount : null, unit: "组", tone: "warning" },
+                    { label: "缺流水关系组", value: workbenchPageReadModelStatus === "fresh" ? statistics?.missingBankGroupCount : null, unit: "组", tone: "warning" },
+                    { label: "缺发票关系组", value: workbenchPageReadModelStatus === "fresh" ? statistics?.missingInvoiceGroupCount : null, unit: "组", tone: "warning" },
                   ]}
                 />
                 {canAdminAccess ? (
@@ -1974,7 +2341,7 @@ export default function ReconciliationWorkbenchPage() {
                   ariaLabel="Audit 关联台"
                   pageKey="reconciliation-workbench"
                   label="关联台"
-                  auditContextKey={`canonical:${statistics?.pairedGroupCount ?? 0}:${statistics?.unpairedObjectCount ?? 0}`}
+                  auditContextKey={`${activeWorkbenchReadModelVersion ?? "none"}:${workbenchPageReadModelStatus}`}
                 />
                 ) : null}
               </div>
@@ -1982,10 +2349,15 @@ export default function ReconciliationWorkbenchPage() {
           </div>
         </header>
         {loadError ? <div className="state-panel error">{loadError}</div> : null}
+        {!loadError && !isLoading && !isWorkbenchPageFresh ? (
+          <div className={`state-panel${["failed", "unavailable"].includes(workbenchPageReadModelStatus) ? " error" : ""}`}>
+            {workbenchReadModelStatusMessage(workbenchPageReadModelStatus) ?? "关联台数据当前不可写，请等待刷新完成。"}
+          </div>
+        ) : null}
         {!loadError && oaStatusPanelMessage ? (
           <div className={`state-panel${oaStatus?.code === "error" ? " error" : ""}`}>{oaStatusPanelMessage}</div>
         ) : null}
-        {!isLoading && !loadError && isEmpty && isOaReady ? (
+        {!isLoading && !loadError && isEmpty && isOaReady && isWorkbenchPageFresh ? (
           <div className="state-panel">当前没有可展示的 OA / 银行流水 / 发票记录。</div>
         ) : null}
 
@@ -2011,6 +2383,7 @@ export default function ReconciliationWorkbenchPage() {
           preview={relationPreviewDialog.preview}
           columnLayouts={workbenchSettings?.workbenchColumnLayouts}
           onClose={() => setRelationPreviewDialog(null)}
+          onReadModelRejected={refreshAfterReadModelRejection}
           onSubmit={handleSubmitRelationPreview}
         />
       ) : null}
@@ -2060,8 +2433,10 @@ export default function ReconciliationWorkbenchPage() {
         <WorkbenchExceptionModal
           month={WORKBENCH_VIEW_MONTH}
           rows={workbenchExceptionDialog.rows}
+          expectedReadModelVersion={activeWorkbenchReadModelVersionRef.current}
           onApplied={handleWorkbenchExceptionApplied}
           onClose={handleCloseWorkbenchExceptionDialog}
+          onReadModelRejected={refreshAfterReadModelRejection}
         />
       ) : null}
       {cashTicketPurchaseDialog ? (
@@ -2202,8 +2577,8 @@ function relationPreviewPhaseLabel(phase: RelationPreviewSubmitState["phase"]) {
   if (phase === "submitting") {
     return "提交中";
   }
-  if (phase === "rereading") {
-    return "重新读取中";
+  if (phase === "syncing") {
+    return "同步中";
   }
   if (phase === "loading") {
     return "加载中";
@@ -2218,11 +2593,13 @@ function RelationPreviewDialog({
   preview,
   columnLayouts,
   onClose,
+  onReadModelRejected,
   onSubmit,
 }: {
   preview: WorkbenchRelationPreview;
   columnLayouts?: WorkbenchSettings["workbenchColumnLayouts"];
   onClose: () => void;
+  onReadModelRejected: (error: unknown) => void;
   onSubmit: (note: string, onProgress: WorkbenchActionProgressHandler) => Promise<void>;
 }) {
   const [note, setNote] = useState("");
@@ -2233,7 +2610,7 @@ function RelationPreviewDialog({
   });
   const operationCopy = relationPreviewOperationCopy(preview);
   const noteRequired = preview.requiresNote;
-  const isBusy = submitState.phase === "submitting" || submitState.phase === "rereading" || submitState.phase === "loading";
+  const isBusy = submitState.phase === "submitting" || submitState.phase === "syncing" || submitState.phase === "loading";
   const isCommittedError = submitState.phase === "error" && submitState.committed;
   const isNonRetryableError = submitState.phase === "error" && !submitState.retryable;
   const canSubmit = preview.canSubmit && (!noteRequired || note.trim().length > 0);
@@ -2257,6 +2634,9 @@ function RelationPreviewDialog({
     try {
       await onSubmit(note.trim(), setProgress);
     } catch (error) {
+      if (isWorkbenchReadModelRejected(error)) {
+        onReadModelRejected(error);
+      }
       const message = actionErrorMessage(error);
       const retryable = !committed && isRelationPreviewRetryableSubmitError(message);
       setSubmitState({
@@ -2264,7 +2644,7 @@ function RelationPreviewDialog({
         committed,
         retryable,
         message: committed
-          ? `关系已写入，页面重新读取失败：${message}`
+          ? `关系已写入，关联台刷新未完成：${message}`
           : retryable
             ? message
             : relationPreviewNonRetryableMessage(message),

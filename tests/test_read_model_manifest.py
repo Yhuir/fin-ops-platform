@@ -84,6 +84,7 @@ class ReadModelManifestTests(unittest.TestCase):
         self.assertEqual(
             graph,
             {
+                "workbench": (),
                 "workbench_relation": (),
                 "search": (),
                 "no_oa_bank_batch": (),
@@ -263,6 +264,7 @@ class ReadModelManifestTests(unittest.TestCase):
         expected_port_owners = {
             "no_oa_bank_batch": "NoOaBankBatchReadModelRepositoryPort",
             "search": "SearchReadModelRepositoryPort",
+            "workbench": "PostgresReadModelRepository.workbench",
             "workbench_relation": "WorkbenchRelationReadModelRepositoryPort",
         }
 
@@ -372,11 +374,13 @@ class ReadModelManifestTests(unittest.TestCase):
                 self.assertNotIn("read_model.no_oa_bank_batch_rows", shared_source)
                 self.assertNotIn("read_model.turnover_ledger_rows", shared_source)
 
-    def test_workbench_page_manifest_is_retired_but_relation_manifest_remains(self) -> None:
-        self.assertNotIn("workbench", READ_MODEL_MANIFEST)
-        entry = READ_MODEL_MANIFEST["workbench_relation"]
-        self.assertEqual(entry.projection_strategy, "scoped_incremental_distribution")
-        self.assertEqual(entry.primary_worker_instance, "workbench-relation")
+    def test_workbench_page_and_relation_manifests_remain(self) -> None:
+        workbench = READ_MODEL_MANIFEST["workbench"]
+        relation = READ_MODEL_MANIFEST["workbench_relation"]
+        self.assertEqual(workbench.projection_strategy, "active_generation_scoped_publish")
+        self.assertEqual(workbench.primary_worker_instance, "workbench")
+        self.assertEqual(relation.projection_strategy, "scoped_incremental_distribution")
+        self.assertEqual(relation.primary_worker_instance, "workbench-relation")
 
     def test_bank_detail_and_balance_page_manifests_are_retired(self) -> None:
         self.assertNotIn("bank_detail", READ_MODEL_MANIFEST)
@@ -386,6 +390,7 @@ class ReadModelManifestTests(unittest.TestCase):
         self.assertTrue(is_command_only_read_model_scope("search", "all"))
         self.assertTrue(is_command_only_read_model_scope("no_oa_bank_batch", "all"))
         self.assertTrue(is_command_only_read_model_scope("workbench_relation", "all"))
+        self.assertFalse(is_command_only_read_model_scope("workbench", "all"))
         self.assertFalse(is_command_only_read_model_scope("search", "2026-06"))
         self.assertFalse(is_command_only_read_model_scope("pending_invoice", "all"))
 

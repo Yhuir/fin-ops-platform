@@ -145,7 +145,7 @@ class ReadModelScopeContractServiceTests(unittest.TestCase):
 
         self.assertEqual(rows, [])
         sql, params = connection.fetch_all_calls[-1]
-        self.assertEqual(params, (["workbench_relation", "search", "no_oa_bank_batch"],))
+        self.assertEqual(params, (["workbench", "workbench_relation", "search", "no_oa_bank_batch"],))
         self.assertIn("scope_type = any(%s)", sql)
         self.assertIn("status in ('pending', 'processing', 'failed')", sql)
 
@@ -156,7 +156,7 @@ class ReadModelScopeContractServiceTests(unittest.TestCase):
 
         self.assertEqual(rows, [])
         sql, params = connection.fetch_all_calls[-1]
-        self.assertEqual(params, (["workbench_relation", "search", "no_oa_bank_batch"],))
+        self.assertEqual(params, (["workbench", "workbench_relation", "search", "no_oa_bank_batch"],))
         self.assertIn("coalesce(scope_type, payload->>'scope_type') = any(%s)", sql)
         self.assertIn("event_type like '%%.read_model.refresh'", sql)
 
@@ -170,8 +170,8 @@ class ReadModelScopeContractServiceTests(unittest.TestCase):
         self.assertEqual(
             params,
             (
-                ["workbench_relation", "search", "no_oa_bank_batch"],
-                ["workbench_relation", "search", "no_oa_bank_batch"],
+                ["workbench", "workbench_relation", "search", "no_oa_bank_batch"],
+                ["workbench", "workbench_relation", "search", "no_oa_bank_batch"],
             ),
         )
         self.assertIn("from read_model.app_status_readiness", sql)

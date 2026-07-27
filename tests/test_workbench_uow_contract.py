@@ -8,9 +8,6 @@ from types import SimpleNamespace
 from typing import Any, Callable
 
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
-from fin_ops_platform.services.workbench_row_identity import (
-    row_type_for_workbench_row_id,
-)
 
 
 """
@@ -72,27 +69,6 @@ class _RecordingTransaction:
                 "trace_id": "trace-1",
             }
         return None
-
-    def fetch_all(
-        self,
-        sql: str,
-        params: tuple[Any, ...] = (),
-    ) -> list[dict[str, Any]]:
-        normalized = " ".join(sql.lower().split())
-        self.calls.append(("fetch_all", normalized, params))
-        if (
-            "select distinct member.row_id, member.pane" in normalized
-            and "from canonical_groups groups" in normalized
-        ):
-            row_ids = list(params[-1]) if params else []
-            return [
-                {
-                    "row_id": str(row_id),
-                    "pane": row_type_for_workbench_row_id(str(row_id)),
-                }
-                for row_id in row_ids
-            ]
-        return []
 
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> int:
         normalized = " ".join(sql.lower().split())

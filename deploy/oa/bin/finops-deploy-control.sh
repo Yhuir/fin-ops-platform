@@ -21,6 +21,9 @@ DEPLOY_CONTROL_HELPER="${FINOPS_DEPLOY_CONTROL_HELPER:-/usr/local/sbin/finops-de
 ENSURE_RUNTIME_WORKERS_HELPER="${FINOPS_ENSURE_RUNTIME_WORKERS_HELPER:-/usr/local/sbin/finops-ensure-runtime-workers}"
 WRITE_E2E_BACKUP_ROOT="${FINOPS_WRITE_E2E_BACKUP_ROOT:-/opt/fin-ops/backups/write-operation-e2e}"
 STANDARD_WRITE_E2E_SCENARIO="${FINOPS_STANDARD_WRITE_E2E_SCENARIO:-/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json}"
+PRUNE_WORKBENCH_GENERATIONS_HELPER="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_HELPER:-/usr/local/sbin/finops-prune-workbench-generations}"
+PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT:-/etc/systemd/system/finops-prune-workbench-generations.service}"
+PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT:-/etc/systemd/system/finops-prune-workbench-generations.timer}"
 PRUNE_RUNTIME_QUEUE_HISTORY_HELPER="${FINOPS_PRUNE_RUNTIME_QUEUE_HISTORY_HELPER:-/usr/local/sbin/finops-prune-runtime-queue-history}"
 PRUNE_RUNTIME_QUEUE_HISTORY_SERVICE_UNIT="${FINOPS_PRUNE_RUNTIME_QUEUE_HISTORY_SERVICE_UNIT:-/etc/systemd/system/finops-prune-runtime-queue-history.service}"
 PRUNE_RUNTIME_QUEUE_HISTORY_TIMER_UNIT="${FINOPS_PRUNE_RUNTIME_QUEUE_HISTORY_TIMER_UNIT:-/etc/systemd/system/finops-prune-runtime-queue-history.timer}"
@@ -36,6 +39,8 @@ commands:
   check-release <release-name>         validate a release under /opt/fin-ops/releases
   self-update <release-name>           install deploy-control helper from a validated release
   activate <release-name>              point API/workers/dispatcher at release and restart active services
+  workbench-rehydrate <release-name> [args]
+                                      rebuild Workbench SQL read models using runtime env
   workbench-audit-identity <release-name> [args]
                                       run Workbench object identity audit using runtime env
   workbench-requirement-repair <release-name> --dry-run
@@ -343,6 +348,25 @@ install_runtime_worker_helper() {
   install -m 0755 -o root -g root "$helper_src" "$ENSURE_RUNTIME_WORKERS_HELPER"
 }
 
+install_workbench_generation_retention() {
+  local src="$1"
+  local helper_src service_src timer_src timer_unit
+  helper_src="$src/deploy/oa/bin/finops-prune-workbench-generations.sh"
+  service_src="$src/deploy/oa/systemd/finops-prune-workbench-generations.service.example"
+  timer_src="$src/deploy/oa/systemd/finops-prune-workbench-generations.timer.example"
+  timer_unit="$(basename "$PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT")"
+
+  [[ -f "$helper_src" ]] || die "missing Workbench generation prune helper in release: $helper_src"
+  [[ -f "$service_src" ]] || die "missing Workbench generation prune service unit in release: $service_src"
+  [[ -f "$timer_src" ]] || die "missing Workbench generation prune timer unit in release: $timer_src"
+
+  install -m 0755 -o root -g root "$helper_src" "$PRUNE_WORKBENCH_GENERATIONS_HELPER"
+  install -m 0644 -o root -g root "$service_src" "$PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT"
+  install -m 0644 -o root -g root "$timer_src" "$PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT"
+  systemctl daemon-reload
+  systemctl enable --now "$timer_unit"
+}
+
 install_runtime_queue_history_retention() {
   local src="$1"
   local helper_src service_src timer_src timer_unit
@@ -546,6 +570,16 @@ cleanup_releases() {
           printf 'deleted %s\n' "$name"
         fi
       done
+}
+
+workbench_rehydrate() {
+  local release="${1:-}"
+  [[ -n "$release" ]] || die "workbench-rehydrate requires release name"
+  shift
+  local src
+  src="$(release_src "$release")"
+  assert_runtime_env_contract
+  run_with_runtime_env "$src" "$src/scripts/rehydrate-workbench-read-models.py" "$@"
 }
 
 workbench_audit_identity() {
@@ -959,12 +993,17 @@ case "$cmd" in
     write_worker_dropin "$src"
     write_dispatcher_dropin "$src"
     ensure_runtime_workers "$src"
+    install_workbench_generation_retention "$src"
     install_runtime_queue_history_retention "$src"
     install_oa_sync_enqueue_timer "$src"
     publish_frontend "$src"
     restart_services
     wait_required_workers_ready
     status
+    ;;
+  workbench-rehydrate)
+    shift
+    workbench_rehydrate "$@"
     ;;
   workbench-audit-identity)
     shift

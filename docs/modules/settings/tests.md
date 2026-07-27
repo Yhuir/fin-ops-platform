@@ -6,8 +6,8 @@
   `AppSettingsService`/专属 service 负责。
 - 普通设置保存只提交 canonical settings/version/audit，不 fan-out 已退役页面 dirty scope，
   不返回 freshness 或 operation-barrier target。
-- canonical 页面在下一次 normal GET 读取新设置；三个共享 read model 只按各自 owner 的
-  显式 maintenance/reset 合同刷新。
+- canonical 页面在下一次 normal GET 读取新设置；关联台 `workbench` 与三个共享 read model
+  只按各自 owner 的显式 maintenance/reset 合同刷新。
 - OA applicant credential 使用独立 repository；password/cipher/token 不进入普通 settings
   payload、日志或错误。
 - data reset 是独立 durable job，必须保护权限、密码复核、protected targets、进度、

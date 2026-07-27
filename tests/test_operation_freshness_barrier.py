@@ -149,7 +149,6 @@ class OperationFreshnessBarrierServiceTests(unittest.TestCase):
         service = _service(read_model_statuses={})
 
         for retired_key in (
-            "workbench",
             "bank_detail",
             "bank_account_balance",
             "pending_invoice",

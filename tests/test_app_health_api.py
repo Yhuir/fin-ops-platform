@@ -13,7 +13,7 @@ from unittest.mock import patch
 from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
 from tests.app_test_support import (
     build_local_state_application as build_application,
-    install_local_workbench_canonical_preview_repository,
+    install_fresh_workbench_write_gate,
 )
 
 
@@ -415,7 +415,7 @@ class AppHealthApiTests(unittest.TestCase):
 
     def test_dirty_oa_scopes_block_workbench_write_actions(self) -> None:
         app = build_application()
-        install_local_workbench_canonical_preview_repository(app)
+        read_model_version = install_fresh_workbench_write_gate(app)
         inject_oa_sync_runtime_status(app, outbox_status="pending", scope_key="all")
 
         response = app.handle_request(
@@ -425,6 +425,7 @@ class AppHealthApiTests(unittest.TestCase):
                 {
                     "month": "all",
                     "row_ids": ["oa-missing"],
+                    "expected_read_model_version": read_model_version,
                 }
             ),
         )
@@ -1040,7 +1041,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["mode"], "workbench-canonical-page-audit")
         self.assertIn("app.workbench_pair_relations", payload["audit_contract"]["source_tables"])
         self.assertEqual(payload["audit_contract"]["read_model_tables"], [])
-        self.assertEqual(payload["audit_contract"]["registered_read_model_keys"], [])
+        self.assertEqual(payload["audit_contract"]["registered_read_model_keys"], ["workbench"])
         queried_sql = " ".join(sql for sql, _params in connection.fetch_one_calls + connection.fetch_all_calls)
         self.assertNotIn("read_model.", queried_sql)
         self.assertEqual(connection.executed, [])

@@ -17,8 +17,6 @@ from tests.app_test_support import build_local_state_application as build_applic
 
 DIRECT_CANONICAL_PROBES = frozenset(
     {
-        "workbench_initial_all",
-        "workbench_groups_all_paired",
         "workbench_settings",
         "bank_details_accounts",
         "bank_details_transactions",

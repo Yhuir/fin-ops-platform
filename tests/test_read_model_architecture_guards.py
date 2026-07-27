@@ -42,10 +42,35 @@ DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
         "dict read_model_status=fresh",
     ): (1, "repository summary exposes source_versions metadata only after bank batch readiness is fresh."),
     (
+        "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
+        "PostgresReadModelRepository._workbench_summary_from_payload",
+        "dict read_model_status=fresh",
+    ): (1, "workbench summary payload is emitted only from the active generation selected by the SQL repository."),
+    (
+        "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
+        "PostgresReadModelRepository.get_workbench_relation_preview_selection",
+        "dict read_model_status=fresh",
+    ): (1, "workbench preview selection is pinned to the active generation and validated by the facade freshness gate."),
+    (
         "backend/src/fin_ops_platform/services/read_model_query_gateway.py",
         "build_fresh_cache_envelope",
         "dict read_model_status=fresh",
     ): (1, "shared helper is the only generic fresh cache envelope writer."),
+    (
+        "backend/src/fin_ops_platform/services/workbench_query_facade.py",
+        "WorkbenchQueryFacade.group_detail",
+        "dict read_model_status=fresh",
+    ): (1, "facade returns group detail only after SQL active generation source/status gate passes."),
+    (
+        "backend/src/fin_ops_platform/services/workbench_query_facade.py",
+        "WorkbenchQueryFacade.relation_preview_selection",
+        "dict read_model_status=fresh",
+    ): (1, "facade mirrors the repository result only after the exact preview selection freshness and generation proof passes."),
+    (
+        "backend/src/fin_ops_platform/services/workbench_query_facade.py",
+        "WorkbenchQueryFacade._cached_groups_payload",
+        "read_model_status=fresh",
+    ): (1, "workbench groups page cache is separately gated by active generation cache version before use."),
 }
 
 SAFE_EXPECTED_SOURCE_VERSION_METHOD_CALLS: set[tuple[str, str]] = set()

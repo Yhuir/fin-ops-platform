@@ -1,7 +1,7 @@
 # Read Model 状态机
 
-> 本文件只描述当前三个共享 read model。已退役页面的历史 projection、active generation、
-> 页面 freshness 和 worker 状态不再是当前合同。
+> 本文件描述关联台 active-generation `workbench` 和三个共享 read model。其它已退役页面的
+> 历史 projection、active generation、页面 freshness 和 worker 状态不再是当前合同。
 
 ## 当前集合
 
@@ -11,8 +11,9 @@
 - `workbench_relation`
 - `search`
 - `no_oa_bank_batch`
+- `workbench`
 
-其它页面直接在 PostgreSQL `REPEATABLE READ READ ONLY` snapshot 中读取 canonical facts
+除关联台外，其它页面直接在 PostgreSQL `REPEATABLE READ READ ONLY` snapshot 中读取 canonical facts
 和 active canonical relations。页面 GET 只有 loading、empty、error、result，不返回
 read-model status/scope/version，不 enqueue，不轮询，也不回退历史 projection。
 
@@ -42,13 +43,14 @@ refresh，不表示 fresh。
 | `published` | projection、schema/source proof 与 readiness 已原子收敛 |
 | `failed` | worker 记录 current-effective failure，等待明确 retry/repair |
 
-三个共享模型都接受 `YYYY-MM` 或 `all`。`all` 是 fan-out command，只枚举并投递月份
-shard，不发布可查询的 parent projection，也不得写假 fresh readiness。
+四个模型都接受 `YYYY-MM` 或 `all`。三个共享模型的 `all` 是 fan-out command，只枚举并投递
+月份 shard。关联台查询可将 fresh active month generations 组合为 `all` 视图，但 worker 不发布
+materialized parent projection，也不得写假 fresh readiness。
 
 ## 允许的流转
 
 ```text
-shared consumer query
+registered read-model query
   -> expected/actual proof mismatch
   -> ReadModelRefreshGateway
   -> durable dirty scope + outbox
@@ -57,14 +59,16 @@ shared consumer query
   -> fresh query
 ```
 
-显式 maintenance/reapply/repair 可以按已登记合同产生精确 refresh；普通 canonical 页面
-GET、确认、撤回、规则保存和 import confirm 不得重新制造已退役页面 fan-out。
+显式 maintenance/reapply/repair 可以按已登记合同产生精确 refresh；关联台 canonical source
+发生变化时可按其 UoW 合同 enqueue 精确月份。其它 canonical 页面 GET、确认、撤回、规则保存
+和 import confirm 不得重新制造已退役页面 fan-out。
 
 ## 非法状态
 
 - manifest、scope policy、App Status registry、worker registry 的 read-model key 集合不一致。
 - 已退役页面 key/event/scope/worker/deploy env 重新出现。
-- 页面读取历史 projection、readiness、Redis payload或 active generation。
+- 已退役页面读取历史 projection、readiness、Redis payload 或 active generation；关联台读取未通过
+  freshness gate 的旧 generation。
 - 业务 service 绕过 gateway 直接 SQL 写 dirty scope/outbox。
 - Redis 或 RabbitMQ 被当作 freshness 状态事实源。
 - `fresh` 缺少 schema/source/payload proof，或同 scope 仍有 current-effective active blocker。

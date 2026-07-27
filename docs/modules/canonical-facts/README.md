@@ -35,8 +35,6 @@ Canonical facts 分散在现有模块和 PostgreSQL repository 中。定位时�
 
 长期事实源是 `docs/architecture/module-boundaries/canonical-facts.md`。本模块目录只作为日常维护入口；具体业务状态机、API、权限、测试和实现细节仍由对应业务模块维护。
 
-关联台是当前登记的页面直读 consumer：`PostgresWorkbenchCanonicalQueryRepository` 只读 OA、银行、发票、ETC canonical snapshots 与 active `app.workbench_pair_relations`，不创建新的事实表或统一事实 service。该 repository 是页面专属 SQL owner；外部 OA/Mongo/MySQL/对象存储不得进入请求热路径。
-
 ## 维护触发器
 
 发生以下变化时，必须同步更新 canonical facts 边界：

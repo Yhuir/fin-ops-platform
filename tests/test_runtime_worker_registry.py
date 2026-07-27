@@ -31,12 +31,10 @@ DISPATCHER_ENV = ENV_DIR / "fin-ops.rabbitmq-dispatcher.env.example"
 
 
 class RuntimeWorkerRegistryTests(unittest.TestCase):
-    def test_direct_canonical_page_workers_are_retired(self) -> None:
+    def test_direct_canonical_page_workers_are_retired_but_workbench_remains(self) -> None:
         registrations = registration_by_instance_name()
 
         for instance_name in (
-            "workbench",
-            "workbench-secondary",
             "bank-detail",
             "bank-account-balance",
             "pending-invoice",
@@ -48,6 +46,9 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
             "tax-offset",
         ):
             self.assertNotIn(instance_name, registrations)
+
+        self.assertEqual(registrations["workbench"].event_types, ("workbench.read_model.refresh",))
+        self.assertEqual(registrations["workbench-secondary"].exclude_claim_scope_keys, ("all",))
 
     def test_required_workers_match_deploy_helper_defaults(self) -> None:
         script = ENSURE_WORKERS_SCRIPT.read_text(encoding="utf-8")
@@ -101,12 +102,15 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
             ),
         )
 
-    def test_workbench_page_workers_are_retired_but_relation_distribution_is_retained(self) -> None:
+    def test_workbench_page_and_relation_distribution_workers_are_retained(self) -> None:
         registrations = registration_by_instance_name()
+        workbench = registrations["workbench"]
+        workbench_secondary = registrations["workbench-secondary"]
         workbench_relation = registrations["workbench-relation"]
 
-        self.assertNotIn("workbench", registrations)
-        self.assertNotIn("workbench-secondary", registrations)
+        self.assertEqual(workbench.event_types, ("workbench.read_model.refresh",))
+        self.assertEqual(workbench.worker_kind, "workbench-read-model")
+        self.assertEqual(workbench_secondary.exclude_claim_scope_keys, ("all",))
         self.assertEqual(workbench_relation.event_types, ("workbench_relation.read_model.refresh",))
         self.assertEqual(workbench_relation.worker_kind, "workbench-relation-read-model")
         self.assertEqual(

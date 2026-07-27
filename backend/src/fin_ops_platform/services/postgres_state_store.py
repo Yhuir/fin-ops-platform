@@ -24,7 +24,6 @@ from fin_ops_platform.services.postgres_repositories import (
     PostgresOAProjectionRepository,
     PostgresOpsTaxEtcRepository,
     PostgresReadModelRepository,
-    PostgresWorkbenchCanonicalQueryRepository,
     PostgresWorkbenchRelationRepository,
     PostgresWorkbenchRepository,
 )
@@ -174,9 +173,6 @@ class PostgresStateStore:
         )
         self._workbench_relation_sql_read_repository = WorkbenchRelationReadModelRepositoryPort(self._sql_read_model_repository)
         self._workbench_repository = PostgresWorkbenchRepository(connection)
-        self._workbench_canonical_query_repository = (
-            PostgresWorkbenchCanonicalQueryRepository(self._sql_read_connection)
-        )
         self._bank_transaction_category_repository = PostgresBankTransactionCategoryRepository(connection)
         self._workbench_relation_repository = PostgresWorkbenchRelationRepository(connection)
         self._oa_pending_payment_relation_repository = PostgresOaPendingPaymentRelationRepository(connection)
@@ -888,10 +884,14 @@ class PostgresStateStore:
         return self._oa_pending_payment_relation_repository
 
     @property
-    def workbench_canonical_query_repository(
-        self,
-    ) -> PostgresWorkbenchCanonicalQueryRepository:
-        return self._workbench_canonical_query_repository
+    def workbench_sql_read_repository(self) -> PostgresReadModelRepository:
+        return self._sql_read_model_repository
+
+    @property
+    def workbench_sql_projection_builder(self) -> Any:
+        from fin_ops_platform.services.workbench_sql_projection import WorkbenchSqlProjectionBuilder
+
+        return WorkbenchSqlProjectionBuilder(connection=self._connection, read_model_repository=self._read_model_repository)
 
     @property
     def workbench_relation_repository(self) -> PostgresWorkbenchRelationRepository:

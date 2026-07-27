@@ -1,6 +1,6 @@
 # 关联台状态机
 
-日期：2026-07-27
+日期：2026-07-21
 
 ## 页面关系状态
 
@@ -10,28 +10,18 @@ canonical fact + incomplete active formal relation  -> unpaired relation group�
 canonical fact - active formal relation              -> unpaired singleton
 ```
 
-页面关系状态只有 `paired` 和 `unpaired`。`open`、`proposed`、candidate、decision、refreshing 或 generation 状态都不是页面关系状态。
-
-## 页面请求状态
-
-```text
-idle -> loading -> data
-                -> empty
-                -> error -> retry -> loading
-```
-
-页面只用普通 HTTP 请求状态表达 loading/empty/error。它不读取 `read_model_status`，不轮询 refresh status，不订阅 Workbench SSE，也不展示旧 generation 后等待刷新。
+页面关系状态只有 `paired` 和 `unpaired`。`open`、`proposed`、candidate、decision 不是页面关系状态，也不是隐藏状态。
 
 ## 自动正式化
 
 ```text
-durable matching scope
+durable dirty scope
   -> load canonical facts + active relations + withdrawal fingerprints
   -> pure deterministic plan
   -> ambiguous / unsafe / resource limited: no write, facts remain unpaired
-  -> safe unique plan: relation command/UoW
-  -> active formal relation + history
-  -> next Workbench GET directly reads the committed facts
+  -> safe unique plan: one relation UoW
+  -> active formal relation + history + outbox
+  -> paired after fresh generation publish
 ```
 
 匹配过程中没有持久候选状态。安全计划在事务提交前也不能成为页面事实。
@@ -40,27 +30,42 @@ durable matching scope
 
 | 状态 | 含义 | 页面效果 |
 | --- | --- | --- |
-| `active` | 当前唯一有效正式关系，成员被该 case 独占 | 冻结要求满足时 paired；否则同 case unpaired |
-| `cancelled` | 被上层业务取消或替换 | 不再拥有成员，成员按当前 canonical facts 重新分区 |
+| `active` | 当前唯一有效正式关系，成员被该 case 独占 | 冻结要求满足时进入 paired；未满足时同 case 进入 unpaired，并保留下游 linked ownership |
+| `cancelled` | 被上层业务取消或替换 | 不再拥有成员，成员按当前事实重新分区 |
 | `withdrawn` | 用户/业务 owner 撤回 | 不再拥有成员；精确 typed member fingerprint 阻止自动重建 |
-| `superseded` | 被新正式关系显式替代 | 旧关系只保留审计，新 active relation 决定分组 |
+| `superseded` | 被新正式关系显式替代 | 旧关系仅保留审计，新 active relation 决定分组 |
 
-人工、历史或系统创建只记录 provenance，不形成页面状态。
+人工、历史、系统自动创建不是状态。它们只记录在 actor、rule/evidence、source metadata 和 history 中。
 
-## Preview 与提交
+## 人工确认与撤回
 
 ```text
-selection
-  -> preview pending
-  -> canonical preview loaded
-  -> drawer submit
-  -> command transaction revalidates identities/types/ownership/versions
-  -> committed -> page GET
-  -> conflict 409 -> refresh selection
+unpaired singleton selection
+  -> preview locks canonical row set + expected versions
+  -> command/UoW creates active relation only
+  -> current page normal GET compares relation/rule versions and scoped OA/bank/invoice/pending-claim canonical versions
+  -> exact Workbench scope converges on access
+  -> paired group
+
+paired group
+  -> withdraw preview locks active case + expected versions
+  -> command/UoW withdraws/cancels relation only
+  -> current page normal GET compares the same canonical vector and converges on access
+  -> each no-longer-owned fact becomes an unpaired singleton
 ```
 
-- preview 最多选择 20 行，只产生展示数据和 `preview_id`。
-- confirm 与 withdraw preview 不并行、不重复请求。
-- submit 不携带 `expected_read_model_version`。
-- canonical row 消失/类型变化、active owner 变化、业务版本冲突或幂等 fingerprint 冲突均 fail closed。
-- 成功响应后重新 GET；GET 失败显示读取错误，但不得把已经提交的 command 改写为失败。
+preview 请求本身只有一个页面级临时状态：`idle -> pending(confirm|withdraw) -> idle`。进入 pending 必须在发出请求前同步完成，并在下一次 render 输出 spinner、busy label、disabled、`aria-disabled` 和 `aria-busy`；confirm 与 withdraw 不允许并行或重复请求。成功响应仅在发起时的 selection、scope 和 active read-model version 仍一致时打开正式 preview drawer，否则直接丢弃。请求失败恢复入口并展示安全中文错误；该临时状态不改变 preview drawer 已有 submit/sync/load 状态机，也不会新增第三种正式页面关系状态。
+
+旧 row `case_id` 不能让撤回后的 facts 继续同组。没有 active relation 的行不能执行撤回。
+
+## Read model 状态
+
+| 状态 | 页面行为 |
+| --- | --- |
+| `fresh` | 可展示，满足权限和 write-safety 时可写 |
+| `refreshing` | 展示刷新诊断，不把旧结果当新事实 |
+| `stale` | 明确陈旧；禁止依赖该版本提交关系写入 |
+| `failed` | 展示错误和重试入口，不显示 false-empty |
+| `missing` | 触发受控 enqueue；不得回退旧 candidate/snapshot 链路 |
+
+只有完成、校验通过并原子激活的 generation 可成为页面事实。

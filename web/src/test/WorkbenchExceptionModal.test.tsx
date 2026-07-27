@@ -50,6 +50,7 @@ describe("WorkbenchExceptionModal", () => {
         expect(init?.body).toBe(JSON.stringify({
           month: "all",
           row_ids: ["oa-1", "bank-1", "invoice-1"],
+          expected_read_model_version: "generation-set-1",
         }));
         return previewPromise;
       }
@@ -115,6 +116,7 @@ describe("WorkbenchExceptionModal", () => {
           pair_relation: { id: "REL-1" },
           updated_rows: [{ id: "bank-1" }, { id: "invoice-1" }],
           affected_row_ids: ["bank-1", "invoice-1"],
+          workbench_refresh_required: true,
         });
       }
       throw new Error(`Unexpected request: ${url.pathname}`);
@@ -147,6 +149,7 @@ describe("WorkbenchExceptionModal", () => {
           body: JSON.stringify({
             month: "all",
             row_ids: ["bank-1", "invoice-1"],
+            expected_read_model_version: "generation-set-1",
             scenario_code: "expense_bank_invoice_missing_oa",
             action_code: "manual_oa_exempt",
             payload: {
@@ -161,6 +164,7 @@ describe("WorkbenchExceptionModal", () => {
     expect(onApplied).toHaveBeenCalledWith(
       expect.objectContaining({
         success: true,
+        workbenchRefreshRequired: true,
         affectedRowIds: ["bank-1", "invoice-1"],
       }),
       expect.any(Function),
@@ -185,6 +189,7 @@ describe("WorkbenchExceptionModal", () => {
           pair_relation: { id: "REL-AUTO-1" },
           updated_rows: defaultRows,
           affected_row_ids: ["oa-1", "bank-1", "invoice-1"],
+          workbench_refresh_required: true,
         });
       }
       throw new Error(`Unexpected request: ${url.pathname}`);
@@ -206,6 +211,7 @@ describe("WorkbenchExceptionModal", () => {
           body: JSON.stringify({
             month: "all",
             row_ids: ["oa-1", "bank-1", "invoice-1"],
+            expected_read_model_version: "generation-set-1",
             scenario_code: "expense_all_equal_closed",
             action_code: "confirm_closed",
             payload: {},
@@ -299,6 +305,7 @@ function renderModal({
         <WorkbenchExceptionModal
           month="all"
           rows={rows}
+          expectedReadModelVersion="generation-set-1"
           onApplied={onApplied}
           onClose={onClose}
         />

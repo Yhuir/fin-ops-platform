@@ -40,7 +40,7 @@ FIN_OPS_POSTGRES_CUTOVER_PHASE=postgres_primary
 - Worker 从 durable queue claim event，重建 SQL projection 后 complete dirty scope。
 - Redis 只缓存 freshness gate 后的 payload。
 - RabbitMQ 只能作为可选 transport/wakeup，不能替代 PostgreSQL dirty scope 状态。
-- 关联台等目标页面直接读取 canonical facts；历史 `read_model.workbench_*` generation 表不再有 runtime reader、writer、worker 或 retention timer。
+- 关联台继续读取 `read_model.workbench_*` active generations，并保留 reader、writer、worker 与 retention timer；其它目标页面直接读取 canonical facts，不得借用该 projection。
 - Runtime queue 历史有受控保留策略：`job.outbox_events` 与
   `job.read_model_dirty_scopes` 只删除 `status='done'` 的完成态历史，默认保留 30 天且每个
   event/scope type 至少保留最近 512 条，dirty scope 还会按

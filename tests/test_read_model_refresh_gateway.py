@@ -130,7 +130,7 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
 
         self.assertEqual(
             set(DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY.registered_scope_types()),
-            {"no_oa_bank_batch", "search", "workbench_relation"},
+            {"no_oa_bank_batch", "search", "workbench", "workbench_relation"},
         )
 
     def test_metadata_is_passed_to_queue_repository(self) -> None:

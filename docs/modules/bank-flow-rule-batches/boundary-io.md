@@ -136,7 +136,7 @@ Canonical facts：
 
 - Owned facts：`app.bank_flow_rule_batches`、`app.bank_flow_rule_batch_events`、`app_settings.bank_flow_rule_batch_tag_rules`。
 - Shared facts：银行流水/标签/分类归 `bank-details`；正式 relation 归
-  `workbench-relations`；关联台 canonical query 归 `reconciliation-workbench`。
+  `workbench-relations`；关联台 projection/active-generation query 归 `reconciliation-workbench`。
 - Allowed writes：`BankFlowRuleBatchApplicationService`、relation command、明确 UoW/delta writer。
 - Allowed reads：`BankFlowRuleBatchCanonicalQueryRepository`、规则 read service。
 - Forbidden：shared broad snapshot、read-model projection、no-OA fallback、调用方直接改 batch/relation 状态。

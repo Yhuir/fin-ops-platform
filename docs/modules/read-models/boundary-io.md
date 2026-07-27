@@ -4,10 +4,10 @@
 
 ## 模块化状态
 
-- 状态：运行时 read model 已收敛为三个共享投影：`workbench_relation`、`search`、`no_oa_bank_batch`。
+- 状态：运行时 read model 已收敛为关联台 active-generation `workbench`，以及三个共享投影 `workbench_relation`、`search`、`no_oa_bank_batch`。
 - 当前边界可信度：high。
 - `RUNTIME_WORKER_REGISTRY`、`READ_MODEL_MANIFEST`、App Status registry 和 scope policy registry 必须保持同一集合。
-- 其它页面 read model runtime 已退休。migration `0127` 是纯 no-op 标记，不改写旧 queue/readiness，也不删除回滚表；新版本仅从 registry、dispatcher、App Status 和 worker claim 合同中退出旧 runtime。
+- 除关联台外的页面 read model runtime 已退休。migration `0127` 是纯 no-op 标记，不改写旧 queue/readiness，也不删除回滚表；新版本仅从 registry、dispatcher、App Status 和 worker claim 合同中退出已退休 runtime。
 - Workbench matching 仍是独立 canonical matching owner，不属于 read model registry。
 - BankFlow 规则批次的异步 owner 是 canonical draft worker，事件为
   `bank_flow_rule_batch.canonical_draft.refresh`；它不是 read model refresh。
@@ -16,7 +16,7 @@
 
 ### 负责
 
-- 三个共享 read model 的 manifest、scope、refresh enqueue、worker、freshness/status 与维护 backfill。
+- `workbench` 与三个共享 read model 的 manifest、scope、refresh enqueue、worker、freshness/status 与维护 backfill。
 - `job.outbox_events`、`job.read_model_dirty_scopes` 的 durable queue/status 合同。
 - 防止共享投影缺失、stale 或 refreshing 时被伪装为 fresh。
 
@@ -31,18 +31,19 @@
 
 | Read model | Scope | Worker | Query owner | Repository owner |
 | --- | --- | --- | --- | --- |
+| `workbench` | month shard；`all` 仅冷启动/显式恢复 fan-out | `workbench`、`workbench-secondary` | `WorkbenchQueryFacade` | `PostgresReadModelRepository` active-generation methods |
 | `workbench_relation` | `workbench_relation` month / `all` fan-out command | `workbench-relation` | `WorkbenchRelationReadFacade` | `WorkbenchRelationReadModelRepositoryPort` |
 | `search` | `search` month / `all` fan-out command | `search` 及并行 search 实例 | Search read API | `SearchReadModelRepositoryPort` |
 | `no_oa_bank_batch` | `no_oa_bank_batch` month / `all` fan-out command | `no-oa-bank-batch` | `NoOaBankBatchApplicationService` | `NoOaBankBatchReadModelRepositoryPort` |
 
-`all` 只是 maintenance fan-out 命令，不是可查询的 fresh parent payload；各 producer 必须枚举真实
-month shards。普通业务写不得用 `all` 代替精确影响范围。
+三个共享模型的 `all` 只是 maintenance fan-out 命令。关联台页面的 `all` 查询由 active month
+generations 组合，不发布 materialized `all` parent；各 producer 必须枚举真实 month shards。
+普通业务写不得用 `all` 代替精确影响范围。
 
 ## 直接 Canonical 页面
 
 以下页面在请求内读取 canonical PostgreSQL facts，不依赖 read model registry、worker、queue 或 readiness：
 
-- Reconciliation Workbench 页面；matching worker 仍保留，但页面没有 `workbench.read_model.refresh`。
 - OA 待付款。
 - BankFlow 规则批次；异步 canonical draft 只负责 canonical draft facts。
 - ETC 管理。
@@ -59,11 +60,11 @@ affected months；不得为隐藏页面 enqueue refresh、返回 operation barri
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| Refresh request | 三个共享 read owner 或显式 maintenance | 非事务入口经 `ReadModelRefreshGateway` normalize、validate、dedupe；事务内 writer 使用等价 scope contract |
-| Scope key | `ReadModelScopePolicyRegistry` | 三种 scope 均只接受 `YYYY-MM` 或 `all`；空值和其它形状 fail fast |
+| Refresh request | Workbench 页面 query owner、三个共享 read owner 或显式 maintenance | 非事务入口经 `ReadModelRefreshGateway` normalize、validate、dedupe；事务内 writer 使用等价 scope contract |
+| Scope key | `ReadModelScopePolicyRegistry` | 四种 scope 均只接受 `YYYY-MM` 或 `all`；空值和其它形状 fail fast |
 | Canonical source proof | 各 projection producer | 必须包含 own schema version 与实际依赖版本；dirty `source_version` 只作发布 CAS 令牌 |
 | Query request | facade/API | payload I/O 前检查 durable dirty/outbox 与 canonical source proof；cache 不能替代 proof |
-| Maintenance command | `scripts/backfill-runtime-read-models.py` | `--enqueue-missing` 只向三个 active scope type 写入 `all` fan-out command；显式 BankFlow replay 是独立 canonical domain event，非 read-model refresh，非 dry-run 必须提供操作人 |
+| Maintenance command | `scripts/backfill-runtime-read-models.py` | `--enqueue-missing` 只向四个 active scope type 写入 `all` fan-out command；显式 BankFlow replay 是独立 canonical domain event，非 read-model refresh，非 dry-run 必须提供操作人 |
 
 ## 输出 I/O
 
@@ -71,7 +72,7 @@ affected months；不得为隐藏页面 enqueue refresh、返回 operation barri
 | --- | --- | --- |
 | Dirty scope/outbox | PostgreSQL durable queue | `job.outbox_events` 与 `job.read_model_dirty_scopes` 是唯一状态事实源 |
 | Fresh payload | 页面 API/Redis | Redis 只能保存 fresh gate 后 payload；旧版本必须能被当前 proof 拒绝 |
-| Readiness/status | App Status / Operations | 只包含当前 manifest 三项；retired event/readiness 只可作为历史清理对象，不能进入当前状态 |
+| Readiness/status | App Status / Operations | 只包含当前 manifest 四项；retired event/readiness 只可作为历史清理对象，不能进入当前状态 |
 | RabbitMQ envelope | optional transport | 只发布 registry 登记且 `rabbitmq_eligible` 的事件；consumer 仍回 PostgreSQL claim/ack |
 | Canonical draft event | BankFlow worker | 不进入 read model manifest、scope policy、readiness 或 RabbitMQ dispatcher |
 
@@ -79,6 +80,8 @@ affected months；不得为隐藏页面 enqueue refresh、返回 operation barri
 
 - `workbench_relation` 只分发 eligible shared relation；`turnover_manual_closure` 由 Workbench/Turnover
   直接消费 canonical relation，不进入共享 distribution。
+- `workbench` 页面读取 active generation，查询前先做 canonical source proof 与 durable queue freshness gate；
+  `all` 组合视图只能使用 fresh active month generations。
 - Search 从 canonical Workbench query owner 构建索引；source version 未变化时允许 no-op，变化时使用
   row-level upsert + stale-row delete。
 - `no_oa_bank_batch` 保留 legacy 免 OA 消费页投影，查询缺失时 fail closed，不回退本地 snapshot fresh。
@@ -91,8 +94,8 @@ affected months；不得为隐藏页面 enqueue refresh、返回 operation barri
 | Manifest / registry | `read_model_manifest.py`、`runtime_worker_registry.py`、`app_status_read_model_registry.py` |
 | Scope / gateway | `read_model_scope_policy.py`、`read_model_refresh_gateway.py`、`read_model_scope_contract.py` |
 | Freshness / query | `read_model_freshness.py`、`read_model_query_gateway.py` |
-| Repository | `postgres_repositories/read_models.py` 及三个 narrow repository ports |
-| Worker | `runtime_worker.py`、`runtime_worker_handlers.py`、三个 active read-model handlers |
+| Repository | `postgres_repositories/read_models.py` 及三个共享 narrow repository ports |
+| Worker | `runtime_worker.py`、`runtime_worker_handlers.py`、四个 active read-model handlers |
 | Maintenance | `scripts/backfill-runtime-read-models.py`、`tools/read_model_slo_smoke.py` |
 | Migration | `postgres/migrations/0127_direct_canonical_page_runtime_retirement.sql` |
 

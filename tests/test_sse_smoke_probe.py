@@ -23,6 +23,7 @@ class SseSmokeProbeTests(unittest.TestCase):
 
         def request_fn(url: str, headers, timeout_seconds: float, max_bytes: int) -> sse_smoke_probe.SseProbeResponse:
             observed.append(url)
+            event_name = "app_health" if "app-health" in url else "workbench.read_model.completed"
             return sse_smoke_probe.SseProbeResponse(
                 status_code=200,
                 headers={
@@ -30,7 +31,7 @@ class SseSmokeProbeTests(unittest.TestCase):
                     "cache-control": "no-cache, no-transform",
                     "x-accel-buffering": "no",
                 },
-                body=b"event: app_health\ndata: {}\n\n",
+                body=f"event: {event_name}\ndata: {{}}\n\n".encode("utf-8"),
             )
 
         report = sse_smoke_probe.collect_sse_smoke(
@@ -41,9 +42,11 @@ class SseSmokeProbeTests(unittest.TestCase):
         )
 
         self.assertEqual(report["status"], "pass")
-        self.assertEqual(report["summary"]["probe_count"], 1)
+        self.assertEqual(report["summary"]["probe_count"], 2)
         self.assertEqual(observed[0], "https://example.test/fin-ops-api/api/app-health/stream")
+        self.assertEqual(observed[1], "https://example.test/fin-ops-api/api/workbench/events?month=all")
         self.assertEqual(report["probes"][0]["event_names"], ["app_health"])
+        self.assertEqual(report["probes"][1]["event_names"], ["workbench.read_model.completed"])
         self.assertNotIn("token", json.dumps(report))
 
     def test_rejects_html_shell_even_when_status_matches(self) -> None:

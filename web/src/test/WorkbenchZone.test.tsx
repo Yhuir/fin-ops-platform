@@ -323,6 +323,8 @@ describe("WorkbenchZone", () => {
       total: 205,
       rowCounts: { oa: 69, bank: 68, invoice: 68, rows: 205 },
       hasMore: true,
+      readModelStatus: "fresh" as const,
+      readModelVersion: "generation-set-1",
     };
     const zone = (
       <WorkbenchZone
@@ -360,6 +362,12 @@ describe("WorkbenchZone", () => {
     expect(disconnect).toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "重试自动加载" }));
     expect(onRequestNextPage).toHaveBeenCalledTimes(2);
+
+    rerender(<WorkbenchZone
+      {...zone.props}
+      pageInfo={{ ...pageInfo, readModelStatus: "stale" }}
+    />);
+    expect(observe).toHaveBeenCalledTimes(1);
   });
 
   test("uses the native HeroUI zone search and removes the workbench pane-search chain", () => {

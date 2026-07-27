@@ -244,6 +244,7 @@
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
         "search",
+        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -257,8 +258,7 @@
         "bank-details",
         "bank-flow-rule-batches",
         "cost-statistics",
-        "pending-invoices",
-        "reconciliation-workbench"
+        "pending-invoices"
       ],
       "production_gate": {
         "slo_audit_profile": "bank_flow_rule_batch_submit",
@@ -303,6 +303,7 @@
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
         "search",
+        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -322,8 +323,7 @@
         "input-invoice-usage",
         "oa-pending-payments",
         "output-invoice-collections",
-        "pending-invoices",
-        "reconciliation-workbench"
+        "pending-invoices"
       ],
       "production_gate": {
         "slo_audit_profile": "bank_import_confirmed",
@@ -368,7 +368,9 @@
       ],
       "pairing_relation_fact_sources": [],
       "expected_outbox_scope_types": [],
-      "target_read_model_keys": [],
+      "target_read_model_keys": [
+        "workbench"
+      ],
       "target_page_keys": [
         "turnover-ledger",
         "bank-details",
@@ -376,7 +378,6 @@
       ],
       "direct_canonical_target_page_keys": [
         "bank-details",
-        "reconciliation-workbench",
         "turnover-ledger"
       ],
       "production_gate": {
@@ -428,6 +429,7 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
+        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -441,7 +443,6 @@
         "cost-statistics",
         "etc-tickets",
         "imports.etc-invoices",
-        "reconciliation-workbench",
         "tax-offset"
       ],
       "production_gate": {
@@ -487,6 +488,7 @@
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
         "search",
+        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -506,7 +508,6 @@
         "oa-pending-payments",
         "output-invoice-collections",
         "pending-invoices",
-        "reconciliation-workbench",
         "tax-offset"
       ],
       "production_gate": {
@@ -558,6 +559,7 @@
       "target_read_model_keys": [
         "no_oa_bank_batch",
         "search",
+        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -567,8 +569,7 @@
       ],
       "direct_canonical_target_page_keys": [
         "bank-flow-rule-batches",
-        "cost-statistics",
-        "reconciliation-workbench"
+        "cost-statistics"
       ],
       "production_gate": {
         "slo_audit_profile": "no_oa_bank_batch_withdraw",
@@ -650,6 +651,7 @@
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
         "search",
+        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -661,8 +663,7 @@
       "direct_canonical_target_page_keys": [
         "bank-details",
         "input-invoice-usage",
-        "pending-invoices",
-        "reconciliation-workbench"
+        "pending-invoices"
       ],
       "production_gate": {
         "slo_audit_profile": "pending_invoice_attach_existing_invoice",
@@ -708,6 +709,7 @@
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
         "search",
+        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -723,8 +725,7 @@
         "cost-statistics",
         "input-invoice-usage",
         "oa-pending-payments",
-        "pending-invoices",
-        "reconciliation-workbench"
+        "pending-invoices"
       ],
       "production_gate": {
         "slo_audit_profile": "pending_invoice_attach_existing_invoice_with_oa",
@@ -771,6 +772,7 @@
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
         "search",
+        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -780,7 +782,6 @@
       ],
       "direct_canonical_target_page_keys": [
         "cost-statistics",
-        "reconciliation-workbench",
         "turnover-ledger"
       ],
       "production_gate": {
@@ -908,6 +909,7 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
+        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -915,8 +917,7 @@
         "cost-statistics"
       ],
       "direct_canonical_target_page_keys": [
-        "cost-statistics",
-        "reconciliation-workbench"
+        "cost-statistics"
       ],
       "production_gate": {
         "slo_audit_profile": "workbench_relation_confirm",
@@ -959,6 +960,7 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
+        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -966,8 +968,7 @@
         "cost-statistics"
       ],
       "direct_canonical_target_page_keys": [
-        "cost-statistics",
-        "reconciliation-workbench"
+        "cost-statistics"
       ],
       "production_gate": {
         "slo_audit_profile": "workbench_relation_withdraw",
@@ -1011,6 +1012,7 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
+        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -1033,9 +1035,7 @@
         "workbench",
         "workbench_relation"
       ],
-      "direct_canonical_target_page_keys": [
-        "reconciliation-workbench"
-      ]
+      "direct_canonical_target_page_keys": []
     },
     {
       "operation": "workbench_relation_withdraw_bank_invoice",
@@ -1056,6 +1056,7 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
+        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -1078,9 +1079,7 @@
         "workbench",
         "workbench_relation"
       ],
-      "direct_canonical_target_page_keys": [
-        "reconciliation-workbench"
-      ]
+      "direct_canonical_target_page_keys": []
     },
     {
       "operation": "workbench_relation_confirm_cross_page",
@@ -1103,6 +1102,7 @@
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
         "search",
+        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -1118,8 +1118,7 @@
         "cost-statistics",
         "input-invoice-usage",
         "oa-pending-payments",
-        "pending-invoices",
-        "reconciliation-workbench"
+        "pending-invoices"
       ],
       "production_gate": {
         "slo_audit_profile": "workbench_relation_confirm_cross_page",
@@ -1171,6 +1170,7 @@
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
         "search",
+        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -1186,8 +1186,7 @@
         "cost-statistics",
         "input-invoice-usage",
         "oa-pending-payments",
-        "pending-invoices",
-        "reconciliation-workbench"
+        "pending-invoices"
       ],
       "production_gate": {
         "slo_audit_profile": "workbench_relation_withdraw_cross_page",
@@ -1240,6 +1239,7 @@
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
         "search",
+        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -1251,8 +1251,7 @@
       "direct_canonical_target_page_keys": [
         "bank-details",
         "input-invoice-usage",
-        "pending-invoices",
-        "reconciliation-workbench"
+        "pending-invoices"
       ],
       "production_gate": {
         "slo_audit_profile": "workbench_relation_confirm_bank_invoice_cross_page",
@@ -1299,6 +1298,7 @@
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
         "search",
+        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -1310,8 +1310,7 @@
       "direct_canonical_target_page_keys": [
         "bank-details",
         "input-invoice-usage",
-        "pending-invoices",
-        "reconciliation-workbench"
+        "pending-invoices"
       ],
       "production_gate": {
         "slo_audit_profile": "workbench_relation_withdraw_bank_invoice_cross_page",
@@ -1358,6 +1357,7 @@
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
         "search",
+        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -1367,7 +1367,6 @@
       ],
       "direct_canonical_target_page_keys": [
         "cost-statistics",
-        "reconciliation-workbench",
         "turnover-ledger"
       ],
       "production_gate": {
@@ -1415,6 +1414,7 @@
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
         "search",
+        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -1424,7 +1424,6 @@
       ],
       "direct_canonical_target_page_keys": [
         "cost-statistics",
-        "reconciliation-workbench",
         "turnover-ledger"
       ],
       "production_gate": {

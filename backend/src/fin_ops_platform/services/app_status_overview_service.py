@@ -588,6 +588,12 @@ class AppStatusOverviewService:
     @staticmethod
     def _read_model_statuses_from_snapshot(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
         statuses: dict[str, dict[str, Any]] = {}
+        workbench = snapshot.get("workbench_read_model")
+        if isinstance(workbench, dict):
+            statuses["workbench"] = {
+                "status": AppStatusOverviewService._workbench_status(str(workbench.get("status") or "")),
+                "last_error": workbench.get("last_error") or workbench.get("last_matching_error"),
+            }
         relation = snapshot.get("workbench_relation_read_model")
         if isinstance(relation, dict):
             statuses["workbench_relation"] = {

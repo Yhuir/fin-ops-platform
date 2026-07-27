@@ -299,6 +299,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
         topology = RabbitMqTopologyManager(settings).plan()
 
         retained_read_model_events = {
+            "workbench.read_model.refresh",
             "workbench_relation.read_model.refresh",
             "search.read_model.refresh",
             "no_oa_bank_batch.read_model.refresh",
@@ -573,7 +574,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
 
         self.assertEqual(set(routes), set(SUPPORTED_EVENT_TYPES))
         self.assertEqual(len(SUPPORTED_EVENT_TYPES), len(set(SUPPORTED_EVENT_TYPES)))
-        self.assertNotIn("workbench.read_model.refresh", routes)
+        self.assertIn("workbench.read_model.refresh", routes)
         self.assertNotIn("bank_detail.read_model.refresh", routes)
         self.assertNotIn("pending_invoice.read_model.refresh", routes)
         self.assertNotIn("tax_offset.read_model.refresh", routes)

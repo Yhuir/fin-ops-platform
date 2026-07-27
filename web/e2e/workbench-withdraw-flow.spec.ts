@@ -18,6 +18,7 @@ test.describe("workbench withdraw browser flow", () => {
       oaPendingPaymentRelationFanout: true,
       sessionMode: "full_access",
       workbenchWithdrawPreviewDelayMs: 250,
+      workbenchWithdrawSubmitDelayMs: 1_000,
     });
 
     await page.goto("/");

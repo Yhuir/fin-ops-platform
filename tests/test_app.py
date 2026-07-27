@@ -232,7 +232,7 @@ class AppTests(unittest.TestCase):
         handler = handler_class.__new__(handler_class)
         handler.headers = {"X-Test": "1"}
         handler.rfile = BytesIO()
-        handler.path = "/api/app-health/stream"
+        handler.path = "/api/workbench/events"
         handler.wfile = ClosedWfile()
         handler.send_response = lambda status_code: None
         handler.send_header = lambda key, value: None

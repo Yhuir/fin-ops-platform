@@ -7,7 +7,7 @@
 - 状态：closed
 - 当前边界可信度：high
 - 目标边界：所有后台 worker 由 registry、durable queue、handler 和部署 manifest 显式声明。
-- 当前 worker 入口使用 registration contract；instance、event type、env、manifest/check 与 App Health 由 `runtime_worker_registry.py` 派生。Workbench、银行明细、待找发票、进/销项、OA 待付款、税金抵扣、成本和外部往来页面均已改为 direct canonical read，没有页面 worker registration/event/env/readiness。
+- 当前 worker 入口使用 registration contract；instance、event type、env、manifest/check 与 App Health 由 `runtime_worker_registry.py` 派生。关联台保留 `workbench` 页面 worker registration/event/env/readiness；银行明细、待找发票、进/销项、OA 待付款、税金抵扣、成本和外部往来页面已改为 direct canonical read。
 - 生产证据状态：既有 worker 治理已上线；本次 direct-canonical 收敛的生产发布后仍需验证退休页面 event 不再新增、页面读性能及 confirm/withdraw 跨页一致性。
 - 旧代码删除状态：旧 `worker_legacy_application` / `RuntimeWorkerApplicationBridge` / GridFS migration worker / 手写生产 worker 矩阵已移除；`import.fact.changed` 与 `turnover_ledger.read_model.refresh` 的 registration、handler、env event type 和 runtime derived-lifecycle bridge 均已删除。import worker 只 claim `import.process.requested`。
 
@@ -39,7 +39,7 @@
 | OA sync canonical commit | `OAProjectionSyncService` | runtime `oa.sync` 只调用 dual-view source batch；任一启用 form 失败整轮失败并记录 run，不提交部分 snapshot。成功时只提交 completed/admission/payment-status/watermark facts，不持有 queue、search producer、matching invalidator 或 shared page fan-out。in-progress source 不解析附件/OCR；禁止恢复多 list 扫描、fingerprint polling、snapshot repository enqueue 或 sync service downstream fan-out |
 | Bank-flow canonical draft | `BankFlowRuleBatchCanonicalDraftOwner` | 非 read-model 领域任务；按月读取 canonical 银行流水、有效分类和 active relation source，幂等写 `app.bank_flow_rule_batches/events`。只接受银行事实、有效标签规则精确月份、设置重置和 repair/replay 四类触发；不写 page projection、dirty scope 或 readiness。该约束不改变 no-OA legacy worker 的独立 I/O。 |
 | Cost statistics exclusion | registry / worker runtime | 不得注册 Cost worker、event、scope、manifest dependency 或 env；页面直接读 canonical snapshot |
-| Cross-read-model dependency | manifest / worker runtime | 只有 source manifest entry 显式声明的 `read_dependencies` 才允许 worker 补投 dependency refresh；当前三个共享 read model 均未声明跨模型依赖。已退休页面 scope 或 manifest 外 event 即使抛出旧 `*_read_model_not_fresh` 文本，也只能 defer 当前 event，不能重新创建旧页面 refresh。 |
+| Cross-read-model dependency | manifest / worker runtime | 只有 source manifest entry 显式声明的 `read_dependencies` 才允许 worker 补投 dependency refresh；当前四个保留 read model 均未声明跨模型依赖。已退休页面 scope 或 manifest 外 event 即使抛出旧 `*_read_model_not_fresh` 文本，也只能 defer 当前 event，不能重新创建旧页面 refresh。 |
 | Shared relation proof | `workbench_relation` worker / canonical relation repository | `workbench_relation` 作为独立共享 read model 保留；页面自身不再等待或投递已退休的页面 projection。confirm/withdraw/cancel 继续推进 canonical relation version，关系分发状态由共享 relation worker 单独维护。 |
 | Claim hot path index | PostgreSQL migration | `job.outbox_events` active queue claim 必须保留 event-type-first 索引 `outbox_events_claim_event_type_priority_idx`，覆盖 `event_type/status/priority rank/available_at/created_at/id`；该索引只优化 worker lane claim I/O，不改变 durable queue 状态机、priority 语义或 freshness/readiness 事实源 |
 | Handler call | runtime worker | handler 只处理登记 event type |
@@ -104,4 +104,4 @@
 - 移除 worker 前必须证明 deploy、queue event、RabbitMQ dispatch 和 app health 不再引用。
 - migration `0127` 是无数据变更、无 DROP 的退休标记：历史 outbox、dirty scope、readiness 和 projection 表全部保留为上一版本回滚证据。发布 helper 先停止并 disable 新 registry 未登记的退休页面 instance，再确认退休 read-model event/dirty scope 没有 `processing`；门禁通过后才停止其余上一版本 worker、运行 migration 并激活新版本。门禁失败时已登记的 import/matching/保留 read-model worker 继续运行，不把生产 runtime 留在全停状态。新 registry、dispatcher 与 App Status 不 claim/展示退休历史行。回滚时恢复上一版本 registry/env 后可继续消费保留 backlog，普通新页面访问不得隐式触发。
 - 生产 env 示例仍可保留当前 registration 对应的 `--enable-*` flag 作为本地开发参数；生产 systemd 主合同是 `--registration`，且 `_apply_registration_args(...)` 会由 registry 写入 handler flags、event types 和 scope lane。已退出 registration 的兼容 flag 必须由 release helper 精确、幂等迁移，不能依赖只安装新 env 示例。
-- `0086_runtime_queue_claim_hot_path.sql` 继续保护保留 worker 的队列 claim；生产发布后需要验证三个共享 read model 与 canonical draft owner 的 backlog、耗时和失败率。
+- `0086_runtime_queue_claim_hot_path.sql` 继续保护保留 worker 的队列 claim；生产发布后需要验证四个保留 read model 与 canonical draft owner 的 backlog、耗时和失败率。

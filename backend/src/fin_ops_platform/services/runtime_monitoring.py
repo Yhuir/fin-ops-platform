@@ -2542,6 +2542,25 @@ def _string_list(value: object) -> list[str]:
 
 
 def _app_status_readiness_backfill_fact(connection: Any, read_model_key: str, *, tenant_id: str) -> dict[str, Any] | None:
+    if read_model_key == "workbench":
+        return connection.fetch_one(
+            """
+            select
+                'all' as scope_key,
+                case status when 'active' then 'fresh' when 'failed' then 'failed' else 'missing' end as status,
+                row_count,
+                schema_version,
+                source_versions,
+                activated_at::text as generated_at,
+                last_error
+            from read_model.workbench_generations
+            where tenant_id = %s
+              and scope_key = 'all'
+            order by case status when 'active' then 0 when 'failed' then 1 else 2 end, updated_at desc
+            limit 1
+            """,
+            (tenant_id,),
+        )
     scope_spec = APP_STATUS_READINESS_BACKFILL_SCOPE_TABLES.get(read_model_key)
     if scope_spec:
         tenant_where = "tenant_id = %s" if scope_spec["tenant_scoped"] else "true"

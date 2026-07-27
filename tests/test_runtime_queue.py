@@ -100,6 +100,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             set(DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES),
             {
                 "oa.sync",
+                "workbench.read_model.refresh",
                 "workbench_relation.read_model.refresh",
                 "search.read_model.refresh",
                 "import.process.requested",
