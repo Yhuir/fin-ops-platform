@@ -140,6 +140,7 @@ EXPECTED_MIGRATIONS = [
     "0124_bank_detail_canonical_source_proof.sql",
     "0125_workbench_canonical_proof_identity_indexes.sql",
     "0126_cost_statistics_direct_canonical_read.sql",
+    "0127_direct_canonical_page_runtime_retirement.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -295,7 +296,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 127)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 128)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -825,11 +826,9 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         expected_tables = set(EXPECTED_TABLES)
 
         app_status_contracts = {
-            key: value
-            for key, value in READ_MODEL_STORAGE_CONTRACTS.items()
-            if key != "turnover_ledger"
+            key: READ_MODEL_STORAGE_CONTRACTS[key]
+            for key in APP_STATUS_READ_MODEL_REGISTRY
         }
-        self.assertEqual(set(app_status_contracts), set(APP_STATUS_READ_MODEL_REGISTRY))
         for read_model_key, tables in app_status_contracts.items():
             with self.subTest(read_model_key=read_model_key):
                 self.assertTrue(tables)
@@ -1294,6 +1293,17 @@ class PostgresMigrationSqlTests(unittest.TestCase):
                 checked_sql,
                 flags=re.S,
             )
+        direct_canonical_retirement_sql = strip_sql_comments(
+            (
+                MIGRATIONS_DIR
+                / "0127_direct_canonical_page_runtime_retirement.sql"
+            ).read_text(encoding="utf-8")
+        ).lower()
+        self.assertIn(direct_canonical_retirement_sql, checked_sql)
+        checked_sql = checked_sql.replace(
+            direct_canonical_retirement_sql,
+            "approved_direct_canonical_page_runtime_retirement;",
+        )
         approved_legacy_drops = (
             "drop table if exists read_model.cost_statistics_bank_flow_rows;",
             "drop table if exists read_model.cost_statistics_rows;",
@@ -1563,6 +1573,22 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "drop table if exists read_model.cost_statistics_read_models;",
             normalized_sql,
         )
+
+    def test_direct_canonical_page_runtime_retirement_preserves_rollback_tables(self) -> None:
+        sql = strip_sql_comments(
+            (
+                MIGRATIONS_DIR
+                / "0127_direct_canonical_page_runtime_retirement.sql"
+            ).read_text(encoding="utf-8")
+        ).lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertEqual(
+            normalized_sql,
+            "select 'direct_canonical_page_runtime_retirement_noop'::text;",
+        )
+        for mutation in ("update ", "delete ", "insert ", "alter ", "drop ", "truncate "):
+            self.assertNotIn(mutation, normalized_sql)
 
     def test_bank_detail_canonical_source_proof_backfill_preserves_mismatched_scopes(
         self,

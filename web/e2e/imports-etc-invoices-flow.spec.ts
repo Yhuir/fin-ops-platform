@@ -58,9 +58,12 @@ function waitForEtcConfirm(page: Page) {
       && responsePathMatches(response.url(), "/api/etc/import/confirm"));
 }
 
-async function expectFreshReadModelResponse(responsePromise: Promise<{ json(): Promise<unknown> }>) {
-  const payload = await (await responsePromise).json();
-  expect(payload).toMatchObject({ read_model_status: "fresh" });
+async function expectDirectCanonicalResponse(responsePromise: Promise<{ json(): Promise<unknown> }>) {
+  const payload = await (await responsePromise).json() as Record<string, unknown>;
+  expect(payload).not.toHaveProperty("read_model_status");
+  expect(payload).not.toHaveProperty("source_versions");
+  expect(payload).not.toHaveProperty("refresh_enqueued");
+  return payload;
 }
 
 async function previewEtcZipFiles(page: Page, recordLatency?: OperationLatencyRecorder) {
@@ -181,7 +184,7 @@ test.describe("ETC invoice import browser flow", () => {
     expect(unexpectedRuntimeErrors(browserErrors)).toEqual([]);
   });
 
-  test("confirms ETC import and observes downstream read models as fresh", async ({ page }, testInfo) => {
+  test("confirms ETC import and observes downstream canonical pages", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       etcImportDownstreamFanout: true,
@@ -249,7 +252,7 @@ test.describe("ETC invoice import browser flow", () => {
       await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible());
     });
     await expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible();
-    await expectFreshReadModelResponse(Promise.resolve(taxOffsetPayload!));
+    await expectDirectCanonicalResponse(Promise.resolve(taxOffsetPayload!));
     await expect(page.getByText("ETC导入通行服务商")).toBeVisible();
     await expect(page.getByText("ETC-2026-005")).toBeVisible();
     await expect(page.getByText(/读模型.*刷新|读模型.*失败|read model/i)).toHaveCount(0);
@@ -273,7 +276,7 @@ test.describe("ETC invoice import browser flow", () => {
       await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible());
     });
     await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
-    await expectFreshReadModelResponse(Promise.resolve(costRowsPayload!));
+    await expectDirectCanonicalResponse(Promise.resolve(costRowsPayload!));
     await recordLatency({
       route: "/cost-statistics",
       pageKey: "cost-statistics",

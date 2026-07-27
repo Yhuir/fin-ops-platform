@@ -20,8 +20,8 @@ class FakeConnection:
             return [
                 {
                     "event_id": "event-current-workbench-1",
-                    "event_type": "workbench.read_model.refresh",
-                    "scope_type": "workbench",
+                    "event_type": "workbench_relation.read_model.refresh",
+                    "scope_type": "workbench_relation",
                     "scope_key": "all",
                     "status": "done",
                     "source_version": 43,
@@ -55,8 +55,8 @@ class FakeConnection:
                 },
                 {
                     "event_id": "event-workbench-1",
-                    "event_type": "workbench.read_model.refresh",
-                    "scope_type": "workbench",
+                    "event_type": "workbench_relation.read_model.refresh",
+                    "scope_type": "workbench_relation",
                     "scope_key": "all",
                     "status": "done",
                     "source_version": 40,
@@ -89,7 +89,7 @@ class FakeConnection:
                 },
                 {
                     "window_name": "all_time",
-                    "event_type": "workbench.read_model.refresh",
+                    "event_type": "workbench_relation.read_model.refresh",
                     "p50_ms": 200.0,
                     "p95_ms": 500.0,
                     "p99_ms": 650.0,
@@ -104,7 +104,7 @@ class FakeConnection:
                 },
                 {
                     "window_name": "all_time",
-                    "event_type": "tax_offset.read_model.refresh",
+                    "event_type": "no_oa_bank_batch.read_model.refresh",
                     "p50_ms": 50.0,
                     "p95_ms": 80.0,
                     "p99_ms": 90.0,
@@ -134,7 +134,7 @@ class FakeConnection:
                 },
                 {
                     "window_name": "recent_15m",
-                    "event_type": "workbench.read_model.refresh",
+                    "event_type": "workbench_relation.read_model.refresh",
                     "p50_ms": 95.0,
                     "p95_ms": 150.0,
                     "p99_ms": 190.0,
@@ -151,9 +151,9 @@ class FakeConnection:
         if "pending_outbox_by_scope" in normalized:
             return [
                 {
-                    "event_type": "workbench.read_model.refresh",
+                    "event_type": "workbench_relation.read_model.refresh",
                     "status": "pending",
-                    "scope_type": "workbench",
+                    "scope_type": "workbench_relation",
                     "scope_key": "all",
                     "count": 2,
                     "oldest_age_seconds": 610.0,
@@ -164,7 +164,7 @@ class FakeConnection:
         if "dirty_scope_backlog_by_scope" in normalized:
             return [
                 {
-                    "scope_type": "workbench",
+                    "scope_type": "workbench_relation",
                     "scope_key": "all",
                     "status": "pending",
                     "count": 1,
@@ -195,7 +195,7 @@ class FakeConnection:
             return [
                 {
                     "tenant_id": "default",
-                    "scope_type": "workbench",
+                    "scope_type": "workbench_relation",
                     "scope_key": "workbench:month:2026-05",
                     "status": "pending",
                     "age_seconds": 600.0,
@@ -218,9 +218,9 @@ class FakeConnection:
                 "max_unpublished_age_seconds": 11.0,
                 "pending_outbox_events_by_scope": [
                     {
-                        "event_type": "workbench.read_model.refresh",
+                        "event_type": "workbench_relation.read_model.refresh",
                         "status": "pending",
-                        "scope_type": "workbench",
+                        "scope_type": "workbench_relation",
                         "scope_key": "all",
                         "count": 2,
                         "oldest_age_seconds": 610.0,
@@ -235,7 +235,7 @@ class FakeConnection:
                 "stale_dirty_scopes": [
                     {
                         "tenant_id": "default",
-                        "scope_type": "workbench",
+                        "scope_type": "workbench_relation",
                         "scope_key": "workbench:month:2026-05",
                         "status": "pending",
                         "age_seconds": 600.0,
@@ -246,7 +246,7 @@ class FakeConnection:
                 ],
                 "dirty_scopes_by_scope": [
                     {
-                        "scope_type": "workbench",
+                        "scope_type": "workbench_relation",
                         "scope_key": "all",
                         "status": "pending",
                         "count": 1,
@@ -296,13 +296,13 @@ class FakeWorkerMetricsConnection:
         return [
             {
                 "worker_id": "host-workbench",
-                "worker_instance": "workbench",
+                "worker_instance": "workbench_relation",
                 "worker_kind": "unexpected-kind",
                 "status": "idle",
                 "heartbeat_lag_seconds": 1.0,
                 "payload": {
-                    "worker_instance": "workbench",
-                    "configured_event_types": ["workbench.read_model.refresh"],
+                    "worker_instance": "workbench_relation",
+                    "configured_event_types": ["workbench_relation.read_model.refresh"],
                 },
             },
             {
@@ -313,7 +313,7 @@ class FakeWorkerMetricsConnection:
                 "heartbeat_lag_seconds": 999.0,
                 "payload": {
                     "worker_instance": "bank-detail",
-                    "configured_event_types": ["bank_detail.read_model.refresh"],
+                    "configured_event_types": ["search.read_model.refresh"],
                 },
             },
             {
@@ -324,7 +324,7 @@ class FakeWorkerMetricsConnection:
                 "heartbeat_lag_seconds": 2.0,
                 "payload": {
                     "worker_instance": "bank-account-balance",
-                    "configured_event_types": ["bank_account_balance.read_model.refresh"],
+                    "configured_event_types": ["no_oa_bank_batch.read_model.refresh"],
                 },
             },
             {
@@ -346,7 +346,7 @@ class FakeWorkerMetricsConnection:
                 "heartbeat_lag_seconds": 4.0,
                 "payload": {
                     "worker_instance": "cost-tax",
-                    "configured_event_types": ["tax_offset.read_model.refresh"],
+                    "configured_event_types": ["no_oa_bank_batch.read_model.refresh"],
                 },
             },
             {
@@ -357,7 +357,7 @@ class FakeWorkerMetricsConnection:
                 "heartbeat_lag_seconds": 999999.0,
                 "payload": {
                     "worker_instance": "cost-tax-read-model",
-                    "configured_event_types": ["cost_statistics.read_model.refresh"],
+                    "configured_event_types": ["search.read_model.refresh"],
                 },
             },
         ]
@@ -387,21 +387,21 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertEqual(summary["read_model_refresh_enqueue_to_fresh_ms"], {"p50": 180.0, "p95": 350.0, "p99": 500.0})
         self.assertEqual(summary["read_model_refresh_sample_count"], 10)
         self.assertEqual(summary["read_model_refresh_failure_rate"], 0.1)
-        self.assertEqual(summary["read_model_refresh_by_key"][0]["key"], "workbench")
-        self.assertEqual(summary["read_model_refresh_by_key"][0]["event_type"], "workbench.read_model.refresh")
+        self.assertEqual(summary["read_model_refresh_by_key"][0]["key"], "workbench_relation")
+        self.assertEqual(summary["read_model_refresh_by_key"][0]["event_type"], "workbench_relation.read_model.refresh")
         self.assertEqual(summary["read_model_refresh_by_key"][0]["duration_ms"]["p95"], 500.0)
         self.assertEqual(summary["read_model_refresh_by_key"][0]["enqueue_to_fresh_ms"]["p95"], 550.0)
         self.assertEqual(summary["read_model_refresh_by_key"][0]["sample_count"], 5)
         self.assertEqual(summary["read_model_refresh_by_key"][0]["failure_rate"], 0.2)
         self.assertEqual(summary["read_model_refresh_by_key"][0]["last_fresh_at"], "2026-06-13 03:00:01+08")
-        self.assertEqual(summary["read_model_refresh_by_key"][1]["key"], "tax_offset")
+        self.assertEqual(summary["read_model_refresh_by_key"][1]["key"], "no_oa_bank_batch")
         self.assertEqual(summary["read_model_refresh_slow_events"][0]["event_id"], "event-search-1")
         self.assertEqual(summary["read_model_refresh_slow_events"][0]["key"], "search")
         self.assertEqual(summary["read_model_refresh_slow_events"][0]["scope_key"], "2026-03")
         self.assertEqual(summary["read_model_refresh_slow_events"][0]["enqueue_to_fresh_ms"], 35150.0)
         self.assertFalse(summary["read_model_refresh_slow_events"][0]["skipped"])
         self.assertEqual(summary["read_model_refresh_current_slow_events"][0]["event_id"], "event-current-workbench-1")
-        self.assertEqual(summary["read_model_refresh_current_slow_events"][0]["key"], "workbench")
+        self.assertEqual(summary["read_model_refresh_current_slow_events"][0]["key"], "workbench_relation")
         self.assertEqual(summary["read_model_refresh_current_slow_events"][0]["scope_key"], "all")
         self.assertEqual(summary["read_model_refresh_current_slow_events"][0]["duration_ms"], 28000.0)
         self.assertEqual(summary["read_model_refresh_current_windows"]["recent_15m"]["sample_count"], 3)
@@ -411,7 +411,7 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         )
         self.assertEqual(summary["read_model_refresh_current_windows"]["recent_1h"]["sample_count"], 0)
         self.assertEqual(summary["read_model_refresh_by_key_current_windows"][0]["window"], "recent_15m")
-        self.assertEqual(summary["read_model_refresh_by_key_current_windows"][0]["key"], "workbench")
+        self.assertEqual(summary["read_model_refresh_by_key_current_windows"][0]["key"], "workbench_relation")
         self.assertEqual(
             summary["read_model_refresh_by_key_current_windows"][0]["enqueue_to_fresh_ms"]["p95"],
             170.0,
@@ -433,9 +433,9 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
             summary["pending_outbox_events_by_scope"],
             [
                 {
-                    "event_type": "workbench.read_model.refresh",
+                    "event_type": "workbench_relation.read_model.refresh",
                     "status": "pending",
-                    "scope_type": "workbench",
+                    "scope_type": "workbench_relation",
                     "scope_key": "all",
                     "count": 2,
                     "oldest_age_seconds": 610.0,
@@ -448,7 +448,7 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
             summary["dirty_scopes_by_scope"],
             [
                 {
-                    "scope_type": "workbench",
+                    "scope_type": "workbench_relation",
                     "scope_key": "all",
                     "status": "pending",
                     "count": 1,
@@ -458,27 +458,7 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
                 }
             ],
         )
-        self.assertEqual(
-            summary["workbench_read_model"],
-            {
-                "generation_status_counts": {"active": 3, "building": 1},
-                "active_scope_count": 3,
-                "active_row_count": 150,
-                "active_group_count": 45,
-                "active_summary_count": 3,
-                "building_scope_count": 1,
-                "failed_scope_count": 0,
-                "latest_generated_at": "2026-05-29 21:00:00+08",
-                "all_scope": {
-                    "status": "building",
-                    "row_count": 0,
-                    "group_count": 0,
-                    "summary_count": 0,
-                    "updated_at": "2026-05-29 21:02:00+08",
-                    "last_error": "",
-                },
-            },
-        )
+        self.assertNotIn("workbench_read_model", summary)
         normalized_calls = [" ".join(sql.lower().split()) for sql, _ in connection.calls]
         refresh_metric_sql = next(sql for sql in normalized_calls if "recent_refresh_events" in sql)
         self.assertIn("cross join lateral", refresh_metric_sql)
@@ -488,6 +468,7 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertIn("metric_windows(window_name, started_at)", refresh_metric_sql)
         self.assertIn("recent_15m", refresh_metric_sql)
         self.assertNotIn("from job.outbox_events where event_type like", refresh_metric_sql)
+        self.assertFalse(any("workbench_generation_status_counts" in sql for sql in normalized_calls))
         slow_event_sql = next(sql for sql in normalized_calls if "slow_refresh_event_samples" in sql)
         self.assertIn("cross join lateral", slow_event_sql)
         self.assertIn("limit %s", slow_event_sql)
@@ -533,7 +514,7 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertEqual(summary["rabbitmq_publish_status"], {"unpublished": 4, "failed": 2})
         self.assertEqual(summary["rabbitmq_queue_depth"], 5)
         self.assertEqual(summary["stale_dirty_scope_count"], 1)
-        self.assertEqual(summary["pending_outbox_events_by_scope"][0]["event_type"], "workbench.read_model.refresh")
+        self.assertEqual(summary["pending_outbox_events_by_scope"][0]["event_type"], "workbench_relation.read_model.refresh")
         self.assertEqual(summary["dirty_scopes_by_scope"][0]["scope_key"], "all")
         self.assertNotIn("read_model_refresh_duration_ms", summary)
         self.assertNotIn("read_model_refresh_by_key", summary)
@@ -592,16 +573,12 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         metrics = repository.dashboard_worker_metrics()
         by_instance = {row["worker_instance"]: row for row in metrics}
 
-        self.assertEqual(by_instance["workbench"]["warning_code"], "worker_kind_mismatch")
-        self.assertEqual(by_instance["workbench"]["expected_worker_kind"], "workbench-read-model")
-        self.assertEqual(by_instance["workbench"]["worker_kind"], "unexpected-kind")
-        self.assertEqual(by_instance["bank-detail"]["warning_code"], "worker_heartbeat_stale")
-        self.assertEqual(by_instance["bank-detail"]["status"], "stale")
-        self.assertTrue(by_instance["bank-account-balance"]["required"])
-        self.assertEqual(by_instance["bank-account-balance"]["status"], "available")
+        self.assertEqual(by_instance["workbench_relation"]["status"], "available")
+        self.assertFalse(by_instance["workbench_relation"]["required"])
+        self.assertEqual(by_instance["bank-detail"]["status"], "available")
+        self.assertFalse(by_instance["bank-account-balance"]["required"])
         self.assertFalse(by_instance["cost-tax-read-model"]["required"])
         self.assertFalse(by_instance["cost-tax-read-model"]["current_effective"])
-        self.assertEqual(by_instance["cost-tax-read-model"]["warning_code"], "worker_event_type_mismatch")
         self.assertNotIn("warning_code", by_instance["import"])
         self.assertEqual(by_instance["oa-sync"]["warning_code"], "required_worker_missing")
 
@@ -610,7 +587,11 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
 
         snapshot = repository.app_status_runtime_snapshot()
 
-        self.assertIn("cost-tax", snapshot["worker_statuses"])
+        self.assertIn("import", snapshot["worker_statuses"])
+        self.assertNotIn("workbench_relation", snapshot["worker_statuses"])
+        self.assertNotIn("bank-detail", snapshot["worker_statuses"])
+        self.assertNotIn("bank-account-balance", snapshot["worker_statuses"])
+        self.assertNotIn("cost-tax", snapshot["worker_statuses"])
         self.assertNotIn("cost-tax-read-model", snapshot["worker_statuses"])
 
     def test_app_status_readiness_summary_does_not_load_unconsumed_source_versions(self) -> None:
@@ -622,8 +603,8 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
                 self.sql = " ".join(sql.lower().split())
                 return [
                     {
-                        "read_model_key": "turnover_ledger",
-                        "scope_type": "turnover_ledger",
+                        "read_model_key": "search",
+                        "scope_type": "search",
                         "scope_key": "2026-02",
                         "status": "fresh",
                         "schema_version": "7",
@@ -639,10 +620,10 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
 
         statuses = repository._app_status_readiness_statuses()
 
-        self.assertEqual(statuses["turnover_ledger"]["status"], "fresh")
-        self.assertEqual(statuses["turnover_ledger"]["generated_at"], "2026-07-20T01:00:00+00:00")
+        self.assertEqual(statuses["search"]["status"], "fresh")
+        self.assertEqual(statuses["search"]["generated_at"], "2026-07-20T01:00:00+00:00")
         self.assertNotIn("source_versions", connection.sql)
-        self.assertNotIn("source_versions", statuses["turnover_ledger"])
+        self.assertNotIn("source_versions", statuses["search"])
 
     def test_operation_barrier_runtime_snapshot_queries_only_requested_scopes(self) -> None:
         class TargetScopedConnection:
@@ -655,8 +636,8 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
                 if "from read_model.app_status_readiness" in normalized and "select read_model_key" in normalized:
                     return [
                         {
-                            "read_model_key": "bank_detail",
-                            "scope_type": "bank_detail",
+                            "read_model_key": "search",
+                            "scope_type": "search",
                             "scope_key": "2026-02",
                             "status": "fresh",
                             "schema_version": "7",
@@ -673,12 +654,12 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
                 if "from job.runtime_worker_heartbeats" in normalized:
                     return [
                         {
-                            "worker_id": "worker-bank-detail",
-                            "worker_instance": "bank-detail",
-                            "worker_kind": "bank-detail-read-model",
+                            "worker_id": "worker-search",
+                            "worker_instance": "search",
+                            "worker_kind": "search-read-model",
                             "status": "running",
                             "heartbeat_lag_seconds": 1.0,
-                            "payload": {"worker_instance": "bank-detail"},
+                            "payload": {"worker_instance": "search"},
                         }
                     ]
                 raise AssertionError(normalized)
@@ -689,21 +670,21 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         snapshot = repository.operation_barrier_runtime_snapshot(
             [
                 {
-                    "read_model_key": "bank_detail",
-                    "scope_type": "bank_detail",
+                    "read_model_key": "search",
+                    "scope_type": "search",
                     "scope_key": "2026-02",
                 },
                 {
-                    "read_model_key": "bank_detail",
-                    "scope_type": "bank_detail",
+                    "read_model_key": "search",
+                    "scope_type": "search",
                     "scope_key": "2026-02",
                 },
             ]
         )
 
-        self.assertEqual(snapshot["read_model_statuses"]["bank_detail"]["status"], "fresh")
-        self.assertEqual(snapshot["worker_statuses"]["bank-detail"]["status"], "ready")
-        self.assertEqual(set(snapshot["read_model_statuses"]), {"bank_detail"})
+        self.assertEqual(snapshot["read_model_statuses"]["search"]["status"], "fresh")
+        self.assertEqual(snapshot["worker_statuses"]["search"]["status"], "ready")
+        self.assertEqual(set(snapshot["read_model_statuses"]), {"search"})
         generic_scoped_calls = [
             call
             for call in connection.calls
@@ -715,19 +696,21 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
                 "as barrier_target(target_key, target_scope_type, target_scope_key)",
                 " ".join(sql.split()),
             )
-            self.assertEqual(params[1], ["bank_detail"])
-            self.assertEqual(params[2], ["2026-02"])
+            self.assertEqual(
+                params[-3:],
+                (["search"], ["search"], ["2026-02"]),
+            )
         outbox_call = next(call for call in connection.calls if "cross join lateral" in call[0])
         self.assertIn("candidate_scope", outbox_call[0])
         self.assertIn("limit 1", outbox_call[0])
         self.assertIn("event.created_at desc, event.id desc", outbox_call[0])
         self.assertNotIn("_current_effective_outbox_attention", outbox_call[0])
-        self.assertEqual(outbox_call[1][0], ["bank_detail.read_model.refresh"])
-        self.assertEqual(outbox_call[1][1], ["bank_detail"])
+        self.assertEqual(outbox_call[1][0], ["search.read_model.refresh"])
+        self.assertEqual(outbox_call[1][1], ["search"])
         self.assertEqual(outbox_call[1][2], ["2026-02"])
         worker_call = next(call for call in connection.calls if "from job.runtime_worker_heartbeats" in call[0])
-        self.assertEqual(worker_call[1][0], ["bank-detail"])
-        self.assertEqual(worker_call[1][1], ["bank-detail-read-model"])
+        self.assertEqual(worker_call[1][0], ["search"])
+        self.assertEqual(worker_call[1][1], ["search-read-model"])
 
     def test_health_summary_counts_worker_mismatches(self) -> None:
         repository = RuntimeMonitoringRepository(FakeWorkerMetricsConnection())
@@ -735,8 +718,8 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         summary = repository.health_summary(stale_after_seconds=300)
 
         self.assertGreaterEqual(summary["missing_required_worker_count"], 1)
-        self.assertEqual(summary["stale_required_worker_count"], 1)
-        self.assertEqual(summary["mismatched_required_worker_count"], 1)
+        self.assertEqual(summary["stale_required_worker_count"], 0)
+        self.assertEqual(summary["mismatched_required_worker_count"], 0)
 
 
 if __name__ == "__main__":

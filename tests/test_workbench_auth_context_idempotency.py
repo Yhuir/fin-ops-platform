@@ -669,7 +669,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(getattr(command, "actor_id"), "oa-user-1")
         self.assertEqual(getattr(command, "tenant_id"), "default")
 
-    def test_confirm_link_response_returns_zero_downstream_freshness_targets(self) -> None:
+    def test_confirm_link_response_omits_retired_downstream_freshness_targets(self) -> None:
         facade = _new_facade(confirm_uow=_RecordingUoW())
 
         result = facade.confirm_link(
@@ -685,7 +685,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
 
         self.assertEqual(result.status_code, HTTPStatus.OK)
         self.assertEqual(result.payload["affected_scope_keys"], ["2026-05"])
-        self.assertEqual(result.payload["freshness_targets"], [])
+        self.assertNotIn("freshness_targets", result.payload)
 
     def test_confirm_link_two_pane_operation_projection_uses_group_zone(self) -> None:
         def relation_groups(relations: list[dict[str, object]], **_: object) -> list[dict[str, object]]:
@@ -806,7 +806,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(result.status_code, HTTPStatus.OK)
         self.assertEqual(getattr(uow.run_commands[0], "scope_keys"), ["2026-03", "2026-02"])
         self.assertEqual(result.payload["affected_scope_keys"], ["2026-03", "2026-02"])
-        self.assertEqual(result.payload["freshness_targets"], [])
+        self.assertNotIn("freshness_targets", result.payload)
 
     def test_cancel_link_replay_and_run_commands_use_explicit_actor_and_tenant_context(self) -> None:
         uow = _RecordingUoW()
@@ -942,7 +942,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(metadata["paired_requirement_version"], 3)
         self.assertFalse(metadata["requires_invoice"])
 
-    def test_withdraw_link_response_returns_zero_downstream_freshness_targets(self) -> None:
+    def test_withdraw_link_response_omits_retired_downstream_freshness_targets(self) -> None:
         facade = _new_facade(
             withdraw_uow=_RecordingUoW(),
             relation_command_service=_RecordingRelationCommandService(),
@@ -961,7 +961,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
 
         self.assertEqual(result.status_code, HTTPStatus.OK)
         self.assertEqual(result.payload["affected_scope_keys"], ["2026-05"])
-        self.assertEqual(result.payload["freshness_targets"], [])
+        self.assertNotIn("freshness_targets", result.payload)
 
     def test_withdraw_link_submit_skips_optional_operation_projection_rebuild(self) -> None:
         def forbidden_projection_rebuild(**_kwargs: object) -> tuple[list[dict[str, object]], list[dict[str, object]], list[str]]:
@@ -986,7 +986,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
 
         self.assertEqual(result.status_code, HTTPStatus.OK)
         self.assertEqual(result.payload["operation_projection"], {})
-        self.assertEqual(result.payload["freshness_targets"], [])
+        self.assertNotIn("freshness_targets", result.payload)
 
     def test_withdraw_link_uow_submit_reuses_alias_map_in_postprocess(self) -> None:
         resolve_calls: list[dict[str, object]] = []
@@ -1138,7 +1138,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(len(relation_command.preview_withdraw_calls), 0)
         self.assertEqual(relation_command.withdraw_calls[0]["row_ids"], row_ids)
         self.assertEqual(result.payload["affected_scope_keys"], ["2026-03", "2026-02"])
-        self.assertEqual(result.payload["freshness_targets"], [])
+        self.assertNotIn("freshness_targets", result.payload)
 
     def test_confirm_and_cancel_link_map_in_progress_idempotency_to_stable_conflict_payload(self) -> None:
         facade = _new_facade(confirm_uow=_InProgressUoW(), cancel_uow=_InProgressUoW())

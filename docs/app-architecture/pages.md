@@ -36,17 +36,21 @@
 
 所有页面必须通过后端 domain registry 接入全局状态平面。新增页面、read model、worker 或后台任务类型时，需要同步更新 registry、readiness projection 和测试，不能只在前端页面里显示局部状态。canonical 直读页面的 domain readiness 只能依赖 PostgreSQL/runtime 健康，不得虚构页面 read model readiness。
 
-domain registry 是页面域入口；`AppStatusReadModelRegistry` 是仍有 read model 的页面 readiness 事实入口。表中的 read model 必须能从 `read_model.app_status_readiness` 或等价 active generation readiness 读取到 `fresh/missing/refreshing/stale/failed/unavailable` 等状态。没有 readiness 记录时，该 read model 进入 `missing`，对应 domain 不能显示 ready。
+domain registry 是页面域入口；`AppStatusReadModelRegistry` 只登记 `workbench_relation`、
+`search`、`no_oa_bank_batch` 三个共享 read model。它们从
+`read_model.app_status_readiness` 和 current-effective queue 状态得到
+`fresh/missing/refreshing/stale/failed/unavailable`，但不作为 canonical 页面 GET 的
+freshness gate。
 
-| domain key | route | read model / worker / task 来源 |
+| domain key | route | 当前数据/任务来源 |
 | --- | --- | --- |
-| `workbench` | `/` | 页面业务数据为 canonical direct read；全局状态平面仍可观测共享 workbench/workbench_relation workers、matching/rebuild jobs，但这些状态不作为页面 GET 的 freshness gate |
+| `workbench` | `/` | canonical PostgreSQL snapshot；Workbench matching 是 canonical relation 领域任务 |
 | `imports_bank_transactions` | `/imports/bank-transactions` | import worker、银行流水导入任务 |
 | `imports_invoices` | `/imports/invoices` | import worker、发票导入任务 |
 | `imports_etc_invoices` | `/imports/etc-invoices` | import worker、ETC 发票导入任务 |
-| `bank_details` | `/bank-details` | 页面运行时为单次 PostgreSQL repeatable-read canonical snapshot；旧 `bank_detail` / `bank_account_balance` registry/worker 仅作为共享清理 HANDOFF，不能决定页面 readiness |
-| `pending_invoices` | `/pending-invoices` | `pending_invoice`、`search`、`pending-invoice` / `search` workers，旧 `search-pending` 兼容 worker |
-| `oa_pending_payments` | `/oa-pending-payments` | 页面直接读取 canonical PostgreSQL；全局 `oa_pending_payment` legacy readiness/worker 暂留给共享消费者，待统一 cleanup，不参与页面正确性 |
+| `bank_details` | `/bank-details` | canonical PostgreSQL snapshot；无页面 read model/worker |
+| `pending_invoices` | `/pending-invoices` | canonical PostgreSQL snapshot；无页面 read model/worker |
+| `oa_pending_payments` | `/oa-pending-payments` | canonical PostgreSQL snapshot；无页面 read model/worker |
 | `input_invoice_usage` | `/input-invoice-usage` | PostgreSQL canonical repeatable-read snapshot；active `app.workbench_pair_relations`；无页面 read model/worker |
 | `output_invoice_collections` | `/output-invoice-collections` | PostgreSQL canonical repeatable-read snapshot；active `app.workbench_pair_relations` 与 canonical lifecycle facts；无页面 read model/worker |
 | `tax_offset` | `/tax-offset` | 单次 PostgreSQL repeatable-read canonical snapshot；页面无 Tax Offset read model/worker 依赖 |
@@ -58,14 +62,10 @@ domain registry 是页面域入口；`AppStatusReadModelRegistry` 是仍有 read
 | `settings` | `/settings` | OA identity/state store/settings refresh runtime dependencies |
 | `app_health_operations` | `/operations/app-health` | runtime health dependencies、workers、queue、state store |
 
-`batch_accounting` 页面通过页面专属 API 和 PostgreSQL query repository 直读 canonical 银行、已完成日常报销 OA、OA 附件发票和 active batch relations。未提交/已提交 rows、summary、counts 和 pagination 在同一 `REPEATABLE READ / READ ONLY` snapshot 中得到；银行/OA 独立服务端分页，OA 搜索在数据库执行。页面不读取 Workbench active generation 或 `workbench_relation` projection，不暴露 freshness/status/enqueue/polling 语义。submit/withdraw 仍走 `WorkbenchRelationCommandService`；成功后当前页只执行一次普通 GET。
-
-`bank_flow_rule_batches` 列表只通过 bank-flow 专属 canonical query repository 读取当前页和完整筛选范围聚合，默认 page size 50，不能先加载全部批次再由前端或 application 分页。标签规则、total、page rows 和 summary 位于同一显式 `REPEATABLE READ / READ ONLY` snapshot；正式关系只读取 `app.workbench_pair_relations.status='active'`。未提交 rail 和批次只接纳 active 且 OA/发票双 false 的标签；submitted/history rail 使用冻结历史。详情按成员 ID 一次集合读取 canonical 银行流水、当前分类、active relation aggregates 和 batch events。规则保存、submit/withdraw/reset 以 command 原子提交为前台完成边界，每次成功后当前页面执行一次 normal GET；没有 read-model status、refresh enqueue、202 reconcile 或后台 polling。
-
 ## 页面职责边界
 
 - 页面可以决定筛选、排序、分页、空状态、导出列、drawer/dialog 状态。
-- 页面写操作可以接入 `GlobalOperationOverlayProvider`，在 operation 完成前显示全屏阻塞层，防止用户在同一事实链路尚未收敛时继续操作。overlay 只包裹会改变后端事实或跨页面 read model 的操作；普通页面初始读取、筛选、分页、详情打开不使用全屏阻塞。
+- 页面写操作只等待当前 canonical command 完成；成功后当前页执行一次 normal GET。
 - 页面切换时 `PageRouteHost` 只挂载当前匹配 route；离开页面会卸载页面 React tree，不保留隐藏 DOM frame、mounted cache、TTL/LRU 策略或页面数据 snapshot。返回页面时页面重新 mount，并通过现有 API/read boundary 重新加载数据。
 - 页面注册表不声明保活策略；`AppPageRoute` 只维护 `path`、`pageKey`、`component`、`preload()` 和 `end`。侧栏分组继续从页面注册表派生，不能在侧栏里维护第二份路由事实。
 - `PageRuntimeContext` 仅为当前挂载页面提供稳定的 `pageKey/active` 上下文；它不监听浏览器生命周期，不携带业务 DTO，也不协调跨页刷新。
@@ -73,32 +73,21 @@ domain registry 是页面域入口；`AppStatusReadModelRegistry` 是仍有 read
 - 页面会话状态只保存当前浏览器标签页内的轻量可恢复 UI，例如查询、筛选、分页、排序、tab、选中行、展开行和详情 drawer target；不保存滚动位置、列表 rows、read model payload、loading、一次性 toast、失败中的提交、权限事实或业务事实。
 - 财务表格继续使用 `FinanceTable` 和 `useFinanceTableSession` 保存分页、排序、过滤、列和选择状态。表格滚动位置不写入页面 session，返回页面后由浏览器和组件默认布局决定。
 - 页面不能重新定义发票生命周期、银行标签、对象 identity/dedup、项目成本归因、往来状态分类等业务口径。
-- 多页面共享且需要 freshness/backfill 的结果，必须通过 policy/service + read boundary 暴露。
+- 页面 query service 只组合本页所需 canonical facts；正式关系只读
+  `app.workbench_pair_relations.status='active'`，不能读取历史 page projection。
 - 只有一个页面使用且规则简单的派生结果，可以留在页面 service；后续被复用时再上提。
 
-### Phase 27 页面访问 freshness 迁移（本地已实施，待生产验证）
+## Canonical 页面读取合同
 
-当前 route 生命周期已经提供目标方案需要的最小机制：离开页面会卸载页面 React tree，返回时重新 mount；`PageRuntimeContext` 提供当前页面 `active` 状态。Phase 27 不增加 keep-alive frame、全局页面 coordinator、第二套依赖 registry 或后台隐藏页面轮询。
-
-| 场景 | 旧生产事实 | Phase 27 当前合同 |
-| --- | --- | --- |
-| 在页面 A 普通确认/撤回 | 部分链路写后 fan-out 多个 read model，并由页面 barrier 等待跨页 target | canonical commit 后只 reconcile A 当前 exact scope；页面 B 不成为 A 的同步依赖 |
-| 从 A 导航到 B，再返回 A | 路由切换会卸载旧页，返回时重新 mount | route mount 触发正常 query；fresh gate 比较 source/schema/rule versions，只有 mismatch 才 enqueue/rebuild exact scope |
-| 浏览器 focus、hidden→visible 或 BFCache 恢复 | 旧实现会把浏览器生命周期当成业务刷新信号 | 当前实现不发业务页面 I/O；用户手动刷新浏览器或重新进入 route 后才重新执行页面 load |
-| 两个独立 browser tab 同时打开 | 两页互不共享 freshness 事实 | A 的写入不自动刷新 B；B 的下一次 route 进入/查询变化/手动刷新走后端 fresh gate |
-| Drawer 规则保存 | 当前部分 Drawer 文案和实现仍是“保存并同步/刷新”并等待 projection | 保存 rule version/signature 后立即完成；当前页面按 query-time 规则或 exact scope reconcile，其他消费者访问时判断语义 mismatch |
-| 导入、reapply、reset、repair | 本来就是可能大批量的 durable/background workflow | 继续作为 `explicit-batch`，3 秒约束 accept/commit，不承诺 3 秒全历史重建；进度、失败、恢复必须可见 |
-| 外部往来款访问/刷新 | 历史上依赖 `turnover_ledger` projection、source version、worker 和 queue | 当前直接在一个只读 repeatable-read PostgreSQL snapshot 中组合 canonical facts；没有 Turnover read model/status/enqueue。关联台和外部往来款各自在访问时读取同一 canonical pair relation |
-
-并非每个页面都有独立 read model，也并非每个 Drawer 保存都需要 rebuild。设置、ETC workflow、导入 session 等页面可以直接读取 canonical/config/job state；read-only Drawer 和 export/preview 不得制造 dirty scope。完整的 17 页面、110 个 API 函数、22 个业务 Drawer、15 个 read model 和旧调用点清单由 `.planning/phases/27-read-model-fan-out/27-COVERAGE-MATRIX.md` 与静态测试维护。
-
-发布验收时要同时区分：
-
-- 本地实现态：全部已盘点普通 `fact-write` / `rule-write` 不做跨页 fan-out；目标页面访问时 exact-scope freshness 收敛。
-- 生产态：只有 Phase 27 全量门禁、部署和逐页逐操作 production smoke 通过后才能声明已生效；发布前生产仍按线上版本解释。
-- 例外：`read-like-command` 永不 invalidation；`explicit-batch` 保留 durable job；共享 Workbench active-generation 仍可服务 batch-accounting，但关联台页面不消费它。
-
-“重新计算页面数据”不等于每次访问无条件重建。仍保留 read model 的页面先做廉价 freshness/version check，只有不一致才重建当前 exact scope。外部往来款、成本统计和关联台是已登记的 page-specific canonical direct-read 例外；各自 repository 保持独立业务口径，不能上提成统一大而全的事实 service，也不能机械推广到其它页面。
+- 页面专属 query repository 在一个 `REPEATABLE READ / READ ONLY` snapshot 中返回 rows、
+  summary、counts、facets、筛选、排序和分页。
+- 页面响应不包含 `read_model_status`、`source_versions`、`refresh_enqueued`、scope、job、
+  freshness target 或 operation-barrier target。
+- GET 不 enqueue、不轮询、不读取 Redis/RabbitMQ；PostgreSQL repository 缺失时 fail fast，
+  不回退历史 projection 或进程内 snapshot。
+- 普通确认、撤回、规则保存和 import confirm 只提交 canonical facts、audit、idempotency
+  和业务 CAS；其它页面在下次正常进入/查询/手动刷新时读取同一事实源。
+- 大批量 import/reapply/repair 可以保留独立 durable job，但 job 不是页面 read model。
 
 ## 前端刷新合同
 
@@ -107,15 +96,15 @@ domain registry 是页面域入口；`AppStatusReadModelRegistry` 是仍有 read
 - route 进入/重进、页面查询变化、浏览器手动刷新和明确的页面重试是普通业务页面 load 入口。
 - App Health、后台任务和导入/reapply/repair 进度属于运维/任务状态通道，保留各自明确 owner，不得被业务页面当成跨页刷新总线。关联台页面没有 refresh-status/SSE 通道。
 
-## 后端间接影响关系
+## 共享 Read Model 与后台任务
 
-跨页面的稳定影响必须通过后端生命周期表达：
-
-- `DerivedDataLifecycleService` 负责把业务事件转换成 dirty scope、outbox 和 read model refresh 请求。
-- `RuntimeQueueRepository.enqueue_read_model_refresh(...)` 是 read model refresh 的标准入队边界。
-- `ReadModelQueryGateway` 负责 freshness/status/enqueue 判断，页面不能绕过它读取旧 projection 并显示为 fresh。
-- `/api/operation-barrier/status` 只保留给显式返回非空 targets 的 maintenance/integration 操作；普通 mutation 不调用它。
-- worker registry 定义哪些 read model 可被后台刷新、如何 drain、如何被 App Health 观测。
+- `workbench_relation`、`search`、`no_oa_bank_batch` 仍通过 gateway、durable queue、
+  worker 和 App Status 闭环，只服务各自登记消费者。
+- Workbench matching、OA sync、import processing 和
+  `bank_flow_rule_batch.canonical_draft.refresh` 是 canonical integration/domain jobs，
+  不是页面 projection。
+- `/api/operation-barrier/status` 只保留给合同明确返回非空 target 的 maintenance/job；
+  普通页面 mutation 不调用。
 
 ## 维护要求
 

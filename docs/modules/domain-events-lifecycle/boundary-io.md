@@ -64,7 +64,7 @@
 
 - `tests/test_derived_data_lifecycle_service.py`
 - `tests/test_runtime_worker_read_model_refresh_scopes.py`
-- `tests/test_workbench_sql_runtime.py`
+- `tests/test_workbench_canonical_query_repository.py`
 - `tests/test_workbench_dirty_queue_wiring.py`
 - `web/src/test/PageRouteHost.test.tsx`（旧前端刷新模块/业务 BroadcastChannel 删除守卫）
 

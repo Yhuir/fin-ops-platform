@@ -1,7 +1,7 @@
 # Bank Account Balance 模块维护入口
 
 - Module key：`bank-account-balance`
-- 类型：页面专属查询资源；旧 read model 待共享清理
+- 类型：页面专属 canonical query 资源
 - Route：`GET /api/bank-details/accounts`
 - Page key：`bank-details`
 
@@ -15,7 +15,7 @@
 ## 当前代码入口
 
 - `backend/src/fin_ops_platform/services/bank_details_canonical_query.py`：账户列表、最新余额和流水计数的 direct canonical query。
-- `backend/src/fin_ops_platform/services/bank_account_balance_projection.py`：复用的 canonical 账户聚合 SQL；旧 read-model builder 暂由共享消费者/主控清理。
+- `backend/src/fin_ops_platform/services/bank_account_balance_canonical_rows.py`：canonical 账户聚合 SQL。
 - `backend/src/fin_ops_platform/services/bank_details_application_service.py`：accounts API application boundary。
 - `backend/src/fin_ops_platform/app/routes_bank_details.py`：HTTP 参数和响应映射。
 - `web/src/pages/BankDetailsPage.tsx`：账户 loading/empty/error 展示和筛选。
@@ -29,11 +29,11 @@
 - 保留有余额/无余额账户、总余额和按币种汇总语义。
 - 不把全量流水搬回 Python 或浏览器聚合。
 
-旧 `bank_account_balance` manifest、worker、readiness、projection table、repository port 和 backfill 仍是共享资源；本分支不修改或删除。主控必须在 whole-repo 消费者清零后统一移除。
+旧 `bank_account_balance` manifest、worker、readiness、repository/projection、derived lifecycle 和 backfill 已删除。历史 projection migration/表暂留作回滚证据，没有运行时 reader/writer。
 
 ## 本目录文件
 
-- `boundary-io.md`：当前 direct accounts I/O 和共享清理边界。
-- `state-machine.md`：历史 read-model 状态记录；共享清理前仍供旧 worker 维护者参考，不再描述 Bank Details 页面状态。
-- `tests.md`：direct query 与旧共享资源的测试责任。
+- `boundary-io.md`：当前 direct accounts I/O 和旧链删除状态。
+- `state-machine.md`：历史 read-model 状态记录，不再描述 Bank Details 页面状态。
+- `tests.md`：direct query 与删除守卫的测试责任。
 - `implementation-notes.md`：历史记录和本次迁移决策。

@@ -12,15 +12,9 @@ from fin_ops_platform.services.postgres_repositories.app_health_system_audit imp
 )
 from fin_ops_platform.services.postgres_repositories.audit_report import AuditSnapshot, read_only_audit_snapshot
 from fin_ops_platform.services.postgres_repositories.cost_statistics_page_audit import audit_cost_statistics_page
-from fin_ops_platform.services.postgres_repositories.input_invoice_usage_audit import (
-    audit_input_invoice_usage_read_model,
-)
 from fin_ops_platform.services.postgres_repositories.invoice_import_page_audit import audit_invoice_import_page
 from fin_ops_platform.services.postgres_repositories.etc_tickets_page_audit import audit_etc_tickets_page
 from fin_ops_platform.services.postgres_repositories.etc_import_page_audit import audit_etc_import_page
-from fin_ops_platform.services.postgres_repositories.output_invoice_collection_audit import (
-    audit_output_invoice_collection_read_model,
-)
 from fin_ops_platform.services.postgres_repositories.page_business_audit import audit_page_business_read_model
 from fin_ops_platform.services.postgres_repositories.settings_page_audit import audit_settings_page
 from fin_ops_platform.services.postgres_repositories.tax_offset_page_audit import audit_tax_offset_page
@@ -125,20 +119,6 @@ class PostgresOperationsAuditRepository:
             payload = audit_page_business_read_model(
                 self._connection,
                 domain_key=str(registration.executor_domain_key),
-                tenant_id=tenant_id,
-                example_limit=sample_limit,
-                audit_snapshot=audit_snapshot,
-            )
-        elif registration.executor == "input_invoice_usage":
-            payload = audit_input_invoice_usage_read_model(
-                self._connection,
-                tenant_id=tenant_id,
-                example_limit=sample_limit,
-                audit_snapshot=audit_snapshot,
-            )
-        elif registration.executor == "output_invoice_collection":
-            payload = audit_output_invoice_collection_read_model(
-                self._connection,
                 tenant_id=tenant_id,
                 example_limit=sample_limit,
                 audit_snapshot=audit_snapshot,

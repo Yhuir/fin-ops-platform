@@ -489,8 +489,9 @@ test.describe("bank flow rule batches browser flow", () => {
       && response.status() === 200);
     await page.getByRole("link", { name: "成本统计" }).click();
     await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
-    const costPayload = await (await costExplorerResponse).json() as { read_model_status?: string };
-    expect(costPayload.read_model_status).toBe("fresh");
+    const costPayload = await (await costExplorerResponse).json() as Record<string, unknown>;
+    expect(costPayload).not.toHaveProperty("read_model_status");
+    expect(costPayload).not.toHaveProperty("refresh_enqueued");
     await page.getByRole("button", { name: "按项目" }).click();
     const bankFlowRuleCostProject = page.getByRole("button", { name: /流水规则手续费成本项目/ });
     await expect(bankFlowRuleCostProject).toBeVisible();

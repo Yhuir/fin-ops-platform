@@ -26,8 +26,7 @@
 - `/api/operations/app-health/page-audit?page=input-invoice-usage`：管理员只读进项 canonical/shared/consumer 对账审计。
 - `/api/operations/app-health/page-audit?page=output-invoice-collections`：管理员只读销项 canonical/shared/consumer 对账审计。
 - `/api/operations/app-health/page-audit`：管理员只读页面业务 read model / relation 全量对账审计。
-- `/api/operations/app-health/input-invoice-usage-refresh`：管理员受控入队刷新进项使用 read model scope。
-- `/api/operations/app-health/output-invoice-collection-refresh`：管理员受控入队刷新销项收款 read model scope。
+- 进项使用、销项收款和待找发票的旧 AppHealth refresh routes 已删除并返回 `404`；统一 page audit 保持只读。
 
 ## 页面标题完整性统计契约
 
@@ -184,14 +183,7 @@
 - 保存成功只递增对应规则集版本，不递增 `bank_transaction_tags.version`。支出和收入规则版本互不影响。
 - 银行标签归档如果自动剥离待找发票规则引用，必须同时递增银行标签版本和被影响的待找发票规则版本。
 
-成功响应返回新的规则 payload，并额外携带：
-
-| 字段 | 说明 |
-| --- | --- |
-| `read_model_status` | 保存后固定表示相关 read model 正在刷新，通常为 `refreshing`。 |
-| `derived_data_lifecycle` | `pending_invoice_rules_changed` lifecycle 执行摘要，包含 affected domains、skipped domains、invalidated scopes 和 enqueued jobs。 |
-
-规则变更只通过 `pending_invoice_rules_changed` 进入派生数据生命周期。该事件刷新发票生命周期、待找发票、关联台、进项使用、OA 待付款、销项收款、税金抵扣和搜索相关 read model；不得刷新 `turnover_ledger`、`cost_statistics`、`bank_flow_rule_batch`、`no_oa_bank_batch`、`bank_account_balance`。成本统计在下一次页面/API 请求中直接读取最新 canonical facts 与规则。
+成功响应只返回新的规则 payload 和权限。普通规则保存不投递页面 read-model refresh，不返回 `read_model_status`、lifecycle、scope、job 或 barrier target；待找发票及其它 direct-canonical 页面在下一次普通 GET 中读取最新规则和 canonical facts。
 
 ## App Health 全局状态 API
 
@@ -569,7 +561,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 `POST /api/turnover-ledger/relations/{relation_id}/withdraw` 仅保留给显式存在 `app.turnover_relations` 事实的通用 relation 和历史手动闭环；现代 `/closures/confirm` 不创建这类 relation，因此不得调用该接口撤回新闭环。历史闭环对应 Workbench active relation 仍是 `turnover:{relation_id}` 的 `relation_mode=turnover_manual_closure` 且 row types 只包含 `oa` 与 `bank` 时，后端在同一写事务中撤回旧 Turnover relation，并通过 Workbench relation command service 撤回对应 active case。若 relation 已补齐发票或其他业务 row type，接口必须返回 `409 turnover_closure_withdraw_requires_workbench`，提示用户到关联台撤回完整关系。
 
-`POST /api/turnover-ledger/closures/withdraw` 是现代外部往来闭环和关联台来源同组银行收支闭环的统一撤回入口。请求体使用 `cash_closure_case_id`（或 camelCase `cashClosureCaseId`），后端必须通过 `TurnoverLedgerWriteFacade` -> `TurnoverLedgerWorkbenchPairPort` -> `WorkbenchRelationCommandService.withdraw_relation(case_id=...)` 撤回同一个 Workbench active case，不得由外部往来页直接改 pair snapshot，也不得回退到 legacy pair service cancel。事务内必须重新读取 active relation，只允许 row types 子集为 `{oa, bank}` 且至少包含两条 bank rows；若已补齐发票或其他业务 row type，返回 `409 turnover_closure_withdraw_requires_workbench`。成功响应返回 `status=withdrawn`、`workbench_pair_relation`、信息性 `affected_months`，以及空的 `freshness_targets` / `operation_barrier_targets`；当前外部往来页面通过正常 GET 收敛，不等待 Workbench、Cost 或 Search。缺少 case id 返回 `400 invalid_cash_closure_case_id`；case 已变化或不存在返回结构化 precondition error。
+`POST /api/turnover-ledger/closures/withdraw` 是现代外部往来闭环和关联台来源同组银行收支闭环的统一撤回入口。请求体使用 `cash_closure_case_id`（或 camelCase `cashClosureCaseId`），后端必须通过 `TurnoverLedgerWriteFacade` -> `TurnoverLedgerWorkbenchPairPort` -> `WorkbenchRelationCommandService.withdraw_relation(case_id=...)` 撤回同一个 Workbench active case，不得由外部往来页直接改 pair snapshot，也不得回退到 legacy pair service cancel。事务内必须重新读取 active relation，只允许 row types 子集为 `{oa, bank}` 且至少包含两条 bank rows；若已补齐发票或其他业务 row type，返回 `409 turnover_closure_withdraw_requires_workbench`。成功响应返回 `status=withdrawn`、`workbench_pair_relation` 和信息性 `affected_months`；不返回 freshness/barrier target，当前外部往来页面通过正常 GET 收敛。缺少 case id 返回 `400 invalid_cash_closure_case_id`；case 已变化或不存在返回结构化 precondition error。
 
 ## 银行明细自动标签规则 API
 
@@ -907,20 +899,17 @@ Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`sou
 
 契约要求：
 
-- 首屏唯一聚合入口是 `GET /api/oa-pending-payments/rows`；旧 `GET /api/oa-pending-payments/filter-options` 不存在。`filterConfig` 和全局 `filterOptions` 随 fresh rows 响应返回，前端不得根据当前页 rows 推导。
-- rows 和详情只读取 PostgreSQL `oa_pending_payment` read model。`view_mode=completed|in_progress`，默认 `completed`；completed 主行来自 `app.oa_applications`，in-progress 主行来自 OA integration sync 已写入的 `app.oa_pending_payment_admissions`。页面/API/read model worker 不得直接读取 Mongo/MySQL。
-- `200` rows 返回 rows、pagination、summary、`filterConfig`、`filterOptions`、`read_model_status=fresh` 和 `ETag`；响应使用 `Cache-Control: private, no-cache` 与 `Vary: Authorization, Cookie`。
-- 客户端可发送 `If-None-Match`。认证、query parsing 和 metadata-only fresh gate 通过且版本未变时返回 `304` 空 body，不执行 rows/count/sort/facet aggregation。
-- dirty/outbox活跃、scope missing或expected/actual source mismatch时返回 `202`，不得返回旧 rows；payload含 `read_model_status=refreshing` 和当前tenant的精确月份 `operationBarrierTargets`。
+- 首屏唯一聚合入口是 `GET /api/oa-pending-payments/rows`；旧 `GET /api/oa-pending-payments/filter-options` 不存在。`filterConfig` 和全局 `filterOptions` 随 rows 响应返回，前端不得根据当前页 rows 推导。
+- rows、summary、facets、pagination 和详情由 `OaPendingPaymentQueryService` / `PostgresOaPendingPaymentQueryRepository` 在同一 `REPEATABLE READ READ ONLY` snapshot 中读取 `app.oa_applications`、`app.oa_pending_payment_admissions`、canonical 银行/发票和 active relations。页面/API 不读取 `oa_pending_payment` read model，也不直接访问外部 Mongo/MySQL。
+- 成功固定返回 `200`；响应不含 `read_model_status`、source version、ETag、refresh enqueue、scope 或 operation-barrier target。页面只处理 loading、empty、error、手工刷新和写后一次普通 GET。
 - `t_payment_simple.id` 不是 OA ID，不能作为 OA 匹配 key；OA 匹配和写回 key 必须使用 `flow_id` 对应的 OA Mongo 文档 ID。
-- 响应必须表达 `read_model_status`、refreshing详情和必要的refresh/barrier targets；禁止 stale payload 与 refreshing 提示同时返回。
 - rows `summary` 必须包含 `viewCounts.completed/in_progress`，用于页面展示切换按钮数量；该统计使用同一搜索、月份、交易日期和 column filters，但不受当前 `view_mode` 限制。
 - rows 中 `oa` 必须携带 `workflowStatus`；`oa`、`bankTransaction`、`invoice` 都可以携带 `relationCount`、`detailMode` 和 `summaries`；同一 Workbench active relation 下多条 OA、支出流水或进项发票必须聚合为一条核对行，金额字段展示各自合计。
 - `paymentStatus` 只返回 `paid` 或 `unpaid`。active linked付款关系驱动 `paid`；金额差异、缺失银行事实或非支出边保留在reason/amount/writeback校验中，不产生 `pending_review`、`partially_paid`、`overpaid` 或 `merged_paid`。
 - rows 可返回 `oaPaymentWriteback`，用于表达 OA MySQL `t_payment_simple` 写回状态。`oaPaymentWriteback.code` 至少支持 `written` / `not_written`，`syncStatus` 表达 `ready`、`unavailable`、`flow_id_missing` 或 `not_required` 等同步语义。
 - 详情接口返回 OA、付款流水、发票、正式关系和异常原因；`/rows/{row_id}/relation-details` 支持 `kind=oa|bank|invoice`。
 - `filterConfig`/`filterOptions` 至少包含 OA 申请人、项目名称、支付状态、对方户名、银行账户、收支、发票方和开票日期等表头筛选/排序字段；银行账户字段使用“银行名称 + 账号后四位”，收支字段使用 `outflow`/`inflow` 值并显示“支出”/“收入”。
-- 外部依赖或 read model 不可用时返回明确业务错误或 stale 状态，不返回 HTML 或空 body。
+- canonical repository 不可用时返回明确业务错误，不返回旧 projection、HTML 或空 body。
 
 ### OA 已支付行写回
 
@@ -1164,132 +1153,6 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 - `runtime_performance.read_models[*].historical_refresh_duration_ms` 是 bounded history，当前同时限制为最近 7 天、且每个 event type 最多 512 条完成事件，不代表永久全历史。
 - unknown 指标用 `null` 和 `status="unknown"` 表示。前端显示 `--`，不得把 unknown 当成 `0`。
 
-## AppHealth 进项使用审计 API
-
-`GET /api/operations/app-health/page-audit?page=input-invoice-usage`
-
-权限：
-
-- 复用 OA session。
-- 仅 `can_admin_access=true` 的管理员可访问。
-- 未登录或登录态失效返回现有 `401 invalid_oa_session`。
-- 非管理员返回 `403 admin_only`。
-
-该接口是只读审计入口，复用 App 后端已有 PostgreSQL 连接，不要求调用方提供 DB URL。无 PostgreSQL runtime connection 时返回 `503 postgres_required`；审计 SQL 失败时返回 `500 input_invoice_usage_audit_failed`。该接口不得刷新 read model、不得自动修复 relation、不得写入业务表。
-
-成功响应始终为 `200`，审计是否通过由 payload 判断：
-
-```json
-{
-  "mode": "dry-run",
-  "tenant_id": "default",
-  "overall_status": "pass",
-  "audit_status": { "integrity": "pass", "freshness": "fresh", "queue": "drained" },
-  "summary": {
-    "active_input_invoice_count": 807,
-    "read_model_invoice_member_count": 807,
-    "read_model_row_count": 764,
-    "input_invoice_usage_scope_count": 6,
-    "workbench_relation_scope_count": 6,
-    "active_workbench_pair_relation_count": 196,
-    "linked_workbench_relation_group_count": 196,
-    "issue_sample_count": 0,
-    "error_sample_count": 0,
-    "warning_sample_count": 0,
-    "blocking_issue_sample_count": 0,
-    "issue_sample_counts_by_code": {},
-    "issue_sample_limit_per_code": 50,
-    "issue_samples_truncated": false,
-    "detected_issue_code_count": 0
-  },
-  "issues": [],
-  "audit_contract": {
-    "source_tables": [
-      "app.invoices",
-      "app.workbench_pair_relations",
-      "read_model.input_invoice_usage_rows",
-      "read_model.input_invoice_usage_scopes",
-      "read_model.workbench_relation_rows",
-      "read_model.workbench_relation_groups",
-      "read_model.workbench_relation_scopes",
-      "job.read_model_dirty_scopes"
-    ],
-    "pass_condition": "audit_status.integrity == 'pass' and audit_status.freshness == 'fresh' and audit_status.queue == 'drained' and audit_contract.database_snapshot == true",
-    "write_policy": "read_only"
-  },
-  "generated_at": "2026-07-10T00:00:00+00:00"
-}
-```
-
-契约要求：
-
-- `overall_status="pass"`、`audit_status.integrity="pass"` 且 `audit_status.freshness="fresh"` 才能声明当前真实库“进项发票使用情况”页面在已登记 invariant 内数据和配对关系一致。
-- `overall_status="issues_found"` 表示发现阻断性数据/投影不一致，仍返回 `200` 和 `issues` 样本。所有 `*_sample_count` 都是最多每个 issue code 50 条的样本数，不是全量问题总数；`issue_samples_truncated=true` 时 UI/运维记录必须显示为截断样本，不能把 50/100/150 当成精确总数。
-- 审计覆盖 canonical 进项发票、`input_invoice_usage` rows/scopes、`workbench_relation` rows/groups/scopes、active Workbench relation、dirty scopes、source_versions、重复/孤儿/缺失 member、金额合计、跨 scope relation 分发和 candidate 误入。
-
-## AppHealth 销项收款审计 API
-
-`GET /api/operations/app-health/page-audit?page=output-invoice-collections`
-
-权限：
-
-- 复用 OA session。
-- 仅 `can_admin_access=true` 的管理员可访问。
-- 未登录或登录态失效返回现有 `401 invalid_oa_session`。
-- 非管理员返回 `403 admin_only`。
-
-该接口是只读审计入口，复用 App 后端已有 PostgreSQL 连接，不要求调用方提供 DB URL。无 PostgreSQL runtime connection 时返回 `503 postgres_required`；审计 SQL 失败时返回 `500 output_invoice_collection_audit_failed`。该接口不得刷新 read model、不得自动修复 relation、不得写入业务表。
-
-成功响应始终为 `200`，审计是否通过由 payload 判断：
-
-```json
-{
-  "mode": "dry-run",
-  "tenant_id": "default",
-  "overall_status": "pass",
-  "audit_status": { "integrity": "pass", "freshness": "fresh", "queue": "drained" },
-  "summary": {
-    "active_output_invoice_count": 807,
-    "read_model_invoice_member_count": 807,
-    "read_model_row_count": 764,
-    "output_invoice_collection_scope_count": 6,
-    "workbench_relation_scope_count": 6,
-    "active_workbench_pair_relation_count": 196,
-    "linked_workbench_relation_group_count": 196,
-    "issue_sample_count": 0,
-    "error_sample_count": 0,
-    "warning_sample_count": 0,
-    "blocking_issue_sample_count": 0,
-    "issue_sample_counts_by_code": {},
-    "issue_sample_limit_per_code": 50,
-    "issue_samples_truncated": false,
-    "detected_issue_code_count": 0
-  },
-  "issues": [],
-  "audit_contract": {
-    "source_tables": [
-      "app.invoices",
-      "app.workbench_pair_relations",
-      "read_model.output_invoice_collection_rows",
-      "read_model.output_invoice_collection_scopes",
-      "read_model.workbench_relation_rows",
-      "read_model.workbench_relation_groups",
-      "read_model.workbench_relation_scopes",
-      "job.read_model_dirty_scopes"
-    ],
-    "pass_condition": "audit_status.integrity == 'pass' and audit_status.freshness == 'fresh' and audit_status.queue == 'drained' and audit_contract.database_snapshot == true",
-    "write_policy": "read_only"
-  },
-  "generated_at": "2026-07-10T00:00:00+00:00"
-}
-```
-
-契约要求：
-
-- `overall_status="pass"`、`audit_status.integrity="pass"` 且 `audit_status.freshness="fresh"` 才能声明当前真实库“销项发票收款情况”页面在已登记 invariant 内数据和配对关系一致。
-- `overall_status="issues_found"` 表示发现阻断性数据/投影不一致，仍返回 `200` 和有上限的 `issues` 样本；`*_sample_count` 不得作为全量问题总数。
-- 审计覆盖 canonical 销项发票、`output_invoice_collection` rows/scopes、`workbench_relation` rows/groups/scopes、active Workbench relation、dirty scopes、source_versions、重复/孤儿/缺失 member、金额合计、跨 scope relation 分发和 candidate 误入。
-
 ## AppHealth 页面业务审计 API
 
 `GET /api/operations/app-health/page-audit?page=<page_key>`
@@ -1309,7 +1172,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 
 ```json
 {
-  "mode": "page-business-read-model-audit",
+  "mode": "page-business-canonical-read-audit",
   "tenant_id": "default",
   "page_key": "bank-details",
   "domain_key": "bank_details",
@@ -1318,12 +1181,8 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
   "audit_status": { "integrity": "pass", "freshness": "fresh", "queue": "drained" },
   "summary": {
     "source_fact_count": 910,
-    "read_model_row_count": 910,
-    "read_model_scope_count": 6,
     "active_relation_count": 196,
     "linked_relation_group_count": 196,
-    "dirty_scope_count": 0,
-    "outbox_backlog_count": 0,
     "issue_sample_count": 0,
     "error_sample_count": 0,
     "warning_sample_count": 0,
@@ -1336,30 +1195,31 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
   "issues": [],
   "audit_contract": {
     "source_tables": ["app.bank_transactions", "app.bank_transaction_categories"],
-    "read_model_tables": ["read_model.bank_detail_rows", "read_model.bank_detail_scopes", "read_model.bank_account_balances"],
-    "relation_tables": ["read_model.workbench_relation_rows", "read_model.workbench_relation_groups"],
-    "scope_types": ["bank_detail", "bank_account_balance", "workbench_relation"],
-    "event_types": ["bank_detail.read_model.refresh", "bank_account_balance.read_model.refresh", "workbench_relation.read_model.refresh"],
-    "contract_revision": "page-audit-contract.v26",
+    "read_model_tables": [],
+    "relation_tables": ["app.workbench_pair_relations"],
+    "scope_types": [],
+    "event_types": [],
+    "contract_revision": "page-audit-contract.v27",
     "proof_availability": "ready",
-    "registered_read_model_keys": ["bank_detail", "bank_account_balance", "workbench_relation"],
+    "registered_read_model_keys": [],
     "relation_proof_required": true,
     "pass_condition": "audit_status.integrity == 'pass' and audit_status.freshness == 'fresh' and audit_status.queue == 'drained' and audit_contract.database_snapshot == true",
-    "guarantee_boundary": "App-internal canonical facts, read_model rows/scopes/source_versions, durable refresh state, and projected relation distribution agree for this page.",
+    "guarantee_boundary": "页面在一个 repeatable-read snapshot 中直接读取 App canonical facts 和 active relations；页面链路没有 read model 或 refresh queue。",
     "write_policy": "read_only"
   },
   "generated_at": "2026-07-10T00:00:00+00:00"
 }
 ```
 
-页面 success gate 还要求 `audit_contract.database_snapshot=true` 和 `snapshot_consistency=repeatable_read_read_only`。当前文案只能声明“已登记证明一致”，不能把 shared relation 三边一致扩张为所有 consumer projection 已完整证明。
+页面 success gate 还要求 `audit_contract.database_snapshot=true` 和 `snapshot_consistency=repeatable_read_read_only`。当前文案只能声明该数据库快照内已登记的 canonical 事实与关系一致，不能扩张为外部来源系统实时完整。
 
 契约要求：
 
-- `overall_status="pass"`、`audit_status.integrity="pass"`、`audit_status.freshness="fresh"` 且 `audit_status.queue="drained"` 才能声明该页面在已登记的 App 内部 canonical facts、页面 read model、refresh queue，以及该页面实际消费的 Workbench relation 投影上全量一致。
-- `audit_status` 分开表达完整性、freshness 和 durable outbox queue；`overall_status="issues_found"` 时返回有上限的 `issues` 样本，样本字段不可解释为精确总数。
-- 审计覆盖页面 source facts、read model rows/scopes/source_versions、dirty scopes/outbox backlog、缺失/孤儿/重复 row、scope row_count、active relation 分发和非 active relation 误投影为 linked。
-- 该接口只能证明 App 内部事实、read model 和 relation 投影一致；不能证明外部银行/OA 系统本身没有漏同步。外部源完整性仍必须由对应导入/OA sync runbook 和来源系统对账证明。
+- 关联台、成本统计、银行明细、OA 待付款、流水规则批量处理、批量账务、外部往来款、ETC 票据、税金抵扣、待找发票、进项发票使用情况和销项发票收款情况都登记为 `registered_read_model_keys=[]`；其页面通过状态不得依赖 page read model、dirty scope、refresh outbox 或 shared relation projection。
+- `overall_status="pass"`、`audit_status.integrity="pass"` 且 `audit_contract.database_snapshot=true` 才能声明该页面在已登记的 App 内部 canonical facts 和 active relation 合同内一致。`freshness="fresh"` 与 `queue="drained"` 对 direct-canonical 页面表示本页没有待收敛的异步读链路，不是伪造 page read-model freshness。
+- `overall_status="issues_found"` 时返回有上限的 `issues` 样本；样本字段不可解释为精确总数。
+- 三个共享 read model（`workbench_relation`、`search`、`no_oa_bank_batch`）由系统级运行时审计独立验证，不进入上述页面 GET 或页面成功合同。
+- 该接口不能证明外部银行/OA/发票/ETC 来源系统没有漏同步。外部源完整性仍必须由对应 manifest、同步 runbook 和来源系统对账证明。
 - `imports.bank-transactions` 是 direct-canonical 页面：`registered_read_model_keys=[]`、`relation_proof_required=false`。Audit 双向证明已登记 file/session/batch/row/canonical bank transaction 与当前 job/outbox；bank detail、account balance、Workbench、cost、search 是写后 impact targets，不是该页 consumer。文件对象 hash/size 不等于银行外部 statement control evidence。
 - `imports.invoices` 是 direct-canonical 页面：`registered_read_model_keys=[]`、`relation_proof_required=false`。Audit 双向证明 input/output file/session/batch/row、canonical invoice、manual source-link 和精确归属 job/outbox；同一 batch/canonical invoice 的不同物理明细按整票金额比较，完全相同的重复行不二次加总。下游 read models 与业务配对关系不由本页通过状态推断。`POST /imports/files/confirm` 只允许 durable enqueue；queue 不可用返回 `503 import_queue_unavailable`，没有 inline 或 batch revert fallback。
 - `imports.etc-invoices` 是 zero-own-read-model 的 direct-canonical workflow，并登记 ETC internal relation proof。`POST /api/etc/import/preview` 持久化 task-bound session、原始 ZIP file objects、counts/matches/fingerprint；`POST /api/etc/import/confirm` 只从 durable session校验并 enqueue。Audit 双向证明 session/file/task/requirement/business-import-batch/ETC-invoice/canonical bridge 与 job/outbox；历史 failed/preview session 仅在精确 task 已正式 `imported/closed` 时作为 covered warning，其它失败继续阻断；不推断下游 Workbench 配对或外部 ETC ZIP 完整性。
@@ -1378,93 +1238,17 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 
 System Audit 的 `overall_status=pass` 只证明该 immutable snapshot 内 17 页已登记的 App 内部合同完整一致。只有四个外部 domain 同时 `pass` 时，`external_evidence.status=pass` 与 `end_to_end_source_truth=proven_as_of_external_evidence` 才成立；该声明严格绑定 manifest 的 `observed_at/source_snapshot_id` 与当前 App immutable snapshot。缺 manifest 为 `unknown/unproven`，最新 manifest 被撤销、过期、覆盖不全或精确集合/字段/control 不一致为 `fail/unproven`，不得回退旧版本。它仍不证明 Audit 后发生的写入或外部实时状态。页面下一次普通 dashboard refresh 必须清除历史 Audit 绿色状态，避免把旧 snapshot 继续展示为当前结论。
 
-## AppHealth 进项使用刷新 API
+## 已退休页面 Read Model 刷新 API
 
-`POST /api/operations/app-health/input-invoice-usage-refresh`
+以下运维写入口已删除：
 
-权限：
+- `POST /api/operations/app-health/input-invoice-usage-refresh`
+- `POST /api/operations/app-health/output-invoice-collection-refresh`
+- `POST /api/operations/app-health/pending-invoice-refresh`
 
-- 复用 OA session。
-- 仅 `can_admin_access=true` 的管理员可访问。
-- 未登录或登录态失效返回现有 `401 invalid_oa_session`。
-- 非管理员返回 `403 admin_only`。
-
-请求体：
-
-```json
-{
-  "scope_keys": ["2025-09", "2026-06"],
-  "reason": "production_audit_repair",
-  "metadata": {
-    "audit": "input_invoice_usage"
-  }
-}
-```
-
-契约要求：
-
-- 只允许 `scope_keys` 为 `all` 或 `YYYY-MM`，同一请求最多 36 个 scope；非法 scope 返回 `400 invalid_input_invoice_usage_refresh_scope`。
-- 接口只通过 `ReadModelRefreshGateway` 写入 durable runtime queue，入队 `input_invoice_usage.read_model.refresh`；不得直接写 `read_model.input_invoice_usage_*`、不得直接修复 relation、不得绕过 scope policy。
-- runtime queue 不可用时返回 `503 runtime_queue_required`。
-- 成功返回 `202 Accepted`，表示 refresh job 已入队，实际完成状态必须继续用 App Health、operation barrier 或统一 `page-audit?page=input-invoice-usage` 复核。
-
-成功响应：
-
-```json
-{
-  "read_model_key": "input_invoice_usage",
-  "scope_type": "input_invoice_usage",
-  "scope_keys": ["2025-09", "2026-06"],
-  "enqueued_scope_keys": ["2025-09", "2026-06"],
-  "enqueued_count": 2,
-  "tenant_id": "default",
-  "reason": "production_audit_repair"
-}
-```
-
-## AppHealth 销项收款刷新 API
-
-`POST /api/operations/app-health/output-invoice-collection-refresh`
-
-权限：
-
-- 复用 OA session。
-- 仅 `can_admin_access=true` 的管理员可访问。
-- 未登录或登录态失效返回现有 `401 invalid_oa_session`。
-- 非管理员返回 `403 admin_only`。
-
-请求体：
-
-```json
-{
-  "scope_keys": ["2026-01", "2026-06"],
-  "reason": "production_audit_repair",
-  "metadata": {
-    "audit": "output_invoice_collection"
-  }
-}
-```
-
-契约要求：
-
-- 只允许 `scope_keys` 为 `all` 或 `YYYY-MM`，同一请求最多 36 个 scope；非法 scope 返回 `400 invalid_output_invoice_collection_refresh_scope`。
-- 接口只通过 `ReadModelRefreshGateway` 写入 durable runtime queue，入队 `output_invoice_collection.read_model.refresh`；不得直接写 `read_model.output_invoice_collection_*`、不得直接修复 relation、不得绕过 scope policy。
-- runtime queue 不可用时返回 `503 runtime_queue_required`。
-- 成功返回 `202 Accepted`，表示 refresh job 已入队，实际完成状态必须继续用 App Health、operation barrier 或统一 `page-audit?page=output-invoice-collections` 复核。
-
-成功响应：
-
-```json
-{
-  "read_model_key": "output_invoice_collection",
-  "scope_type": "output_invoice_collection",
-  "scope_keys": ["2026-01", "2026-06"],
-  "enqueued_scope_keys": ["2026-01", "2026-06"],
-  "enqueued_count": 2,
-  "tenant_id": "default",
-  "reason": "production_audit_repair"
-}
-```
+三个 route 统一返回 `404 not_found`，且不得写入 durable runtime queue。进项使用、销项收款和待找发票页面
+按各自 API 合同直接读取 canonical facts；App Health 只保留
+`GET /api/operations/app-health/page-audit?page=<page_key>` 只读证明入口，不承担页面刷新或修复。
 
 ## 版本和兼容
 
@@ -1479,7 +1263,7 @@ System Audit 的 `overall_status=pass` 只证明该 immutable snapshot 内 17 �
 - `GET /api/output-invoice-collections/rows`：在一个显式 `REPEATABLE READ READ ONLY` snapshot 中读取 canonical output invoices、PostgreSQL OA/bank snapshot、`app.workbench_pair_relations status='active'` 和 canonical lifecycle facts。响应包含 `rows`、`summary`、`statistics`、`pagination`、`filterConfig`、全局 `filterOptions`、统一关系 `oa`、`bankTransactions`、`invoiceRelations`、手动状态/提醒、人工红蓝票关系和正式收据摘要。旧 `/filter-options` 不是前端运行时合同。
 - `GET /api/output-invoice-collections/status-rules`：返回 Sheet6 静态规则、手动状态选项和权限。
 - `GET /api/output-invoice-collections/receipts/history?invoice_id=...`：返回正式收据 lifecycle facts，不再伪造空历史。
-- `GET /api/output-invoice-collections/rows/{row_id}/relation-details?kind=oa|bank|invoice|red_invoice|receipt`：返回当前 row 对应关系摘要。`kind=oa|bank|invoice` 必须来自 `workbench_relation` 统一分发事实源；`summaries` 展示该 relation 下全部 OA、收入流水或销项发票项，`relationCount` 为该类对象总数。前端在 `detailMode=list` 且 `relationCount>1` 时以 `+(relationCount-1)` 展开全部明细；销项发票栏必须同时展示当前行发票主信息和 `invoiceRelations.totalWithTax` 多张发票合计，不能只显示展开入口。
+- `GET /api/output-invoice-collections/rows/{row_id}/relation-details?kind=oa|bank|invoice|red_invoice|receipt`：返回当前 row 对应关系摘要。`kind=oa|bank|invoice` 必须在同一 canonical snapshot 中读取 `app.workbench_pair_relations status='active'` 及 OA/银行/发票事实；`summaries` 展示该 relation 下全部 OA、收入流水或销项发票项，`relationCount` 为该类对象总数。前端在 `detailMode=list` 且 `relationCount>1` 时以 `+(relationCount-1)` 展开全部明细；销项发票栏必须同时展示当前行发票主信息和 `invoiceRelations.totalWithTax` 多张发票合计，不能只显示展开入口。
 
 rows 中统一关系字段要求：
 

@@ -26,7 +26,7 @@
 - `web/src/components/workbench/WorkbenchSettingsModal.tsx`
 - `web/src/features/workbench/api.ts`
 - `backend/src/fin_ops_platform/app/routes_settings.py` 中 `/api/workbench/settings*`、数据重置和 OA 申请人凭据 routes
-- `backend/src/fin_ops_platform/app/server.py` 中 settings route owner 组装、runtime reset executor 和 read model/lifecycle side-effect ports
+- `backend/src/fin_ops_platform/app/server.py` 中 settings route owner 组装和 runtime reset executor
 - `backend/src/fin_ops_platform/services/app_settings_service.py`
 - `backend/src/fin_ops_platform/services/settings_data_reset_service.py`
 - `backend/src/fin_ops_platform/services/oa_applicant_credentials.py`
@@ -45,24 +45,27 @@
 - 关联台设置：列布局、银行账户映射、OA 留存时间、OA 导入表单类型/状态过滤、OA 附件发票 promotion 模式、OA 发票抵扣申请人。
 - 业务规则：待找发票标签组、免 OA 和往来款标签选择；银行明细自动标签规则只读返回给 settings 页面作为候选事实，`AppSettingsService.update_settings(...)` 不暴露 `bank_transaction_tags` 写参数，写入只能走银行明细 `自动标签规则` 抽屉/API。
 - OA 申请人凭据：独立凭据事实源，只允许 admin 维护，普通 settings payload 不能包含密码、密文或 token。
-- 数据重置：银行流水域、发票域、OA 源重置与重建；必须保护禁止删除目标、保留必要事实、记录 job progress，并避免旧 read model/cache 被误判为 fresh。
+- 数据重置：银行流水域、发票域、OA 源重置与重建；必须保护禁止删除目标、
+  保留必要事实、记录 job progress，并确保 canonical 页面下一次 GET 读取重置后的事实。
 
-设置模块本身多数事实写入 `ApplicationStateStore`，但它的变更会扇出到 read model、dirty scope、worker、App Status 和多个页面。任何改动都必须先做影响面评估。
+设置模块本身多数事实写入 `ApplicationStateStore`。变更会影响多个页面的下一次
+canonical query，也可能影响三个共享 read model 中某个 owner 的显式 maintenance 合同；
+任何改动都必须先做影响面评估，但普通保存不广播 page refresh。
 
 当前 HTTP I/O 边界已关闭：`SettingsApiRoutes` 负责 settings path matching、body/query parsing、权限 gate、错误码和 response shape；`server.py` 不再定义 `_handle_api_workbench_settings*` 旧 handler。`AppSettingsService` 只从持久化 settings store 刷新事实，缺失字段由 normalizer/default contract 处理，不再用旧内存 `_snapshot` 补齐持久化结果。
 
-## 关键 fan-out
+## 关键影响
 
-| 设置动作 | 后端事实 / event | 受影响模块 |
+| 设置动作 | 后端事实 | 可见性合同 |
 | --- | --- | --- |
-| 待找发票规则保存 | `pending_invoice_rules_changed`，规则 version 递增 | 待找发票、关联台、发票 lifecycle、进项/销项、税金、成本、搜索；OA 待付款不消费该规则 |
-| 银行标签/自动标签保存 | 仅由银行明细 `自动标签规则` API 触发 `bank_auto_tag_rules_changed` / bank auto tag rules audit；`/api/workbench/settings` 携带 `bank_transaction_tags` 必须拒绝；settings service 不提供该写参数 | 银行明细、免 OA、关联台候选、往来款、成本、搜索 |
-| 项目范围变化 | `project_scope_changed` 或等价 dirty scope | 成本统计、搜索、关联台项目展示 |
-| 访问控制变化 | state store + OA role sync | 页面可见性、写入权限、导出权限、数据重置权限 |
-| OA 导入过滤/留存/promotion 设置变化 | state store，后续 OA reset/rebuild 或 sync 使用；OA 附件发票 promotion 默认 `link_existing_only`，`disabled` 完全跳过，只有 `create_missing` 才允许创建缺失正式发票 | OA 待付款、进项/销项、税金、成本、关联台、统一发票池 |
-| OA 申请人凭据维护 | 独立 credential repository；不进入普通 settings payload | 进项发票使用 OA 反提草稿、真实 OA 登录/token provider |
-| 数据重置 | `settings_reset_completed`、read model/dirty scope/cache cleanup | 所有列表页、导入、关联台、App Status/App Health |
-| 启动补扫 | `startup_stale_scan` 默认关闭；启用时只标记 stale workbench matching dirty scopes | 关联台 matching 候选补扫；不直接刷新用户可见 read model |
+| 待找发票规则保存 | income/expense rule version 原子递增 | 待找发票下一次 GET 直接应用；不 fan-out retired page scope |
+| 银行标签/自动标签保存 | 只允许银行明细规则 API 写入并记录 audit | canonical 页面下次 GET 读取；共享 no-OA/Search 只按各自 owner 合同处理 |
+| 项目范围变化 | project settings/version | 成本统计、关联台等页面下次 GET 读取；Search 是否刷新由 Search owner 决定 |
+| 访问控制变化 | state store + OA role sync | 下一次 session/API 权限校验生效 |
+| OA 导入过滤/留存/promotion | state store，供后续 OA sync/reset 使用 | 页面下次 GET 读取已提交 OA canonical facts |
+| OA 申请人凭据维护 | 独立 credential repository | 进项 OA 反提 token provider 使用；普通 settings payload 不含 secret |
+| 数据重置 | durable reset job + canonical cleanup | job 显示进度；页面下次 GET 读取重置结果；共享模型只按明确 reset 合同处理 |
+| 启动补扫 | `startup_stale_scan` 默认关闭 | 只标记 Workbench matching 领域 scope，不刷新页面 projection |
 
 ## 维护触发器
 

@@ -24,9 +24,8 @@ Release A 已移除旧 `read_model.workbench_candidate_matches`、`read_model.wo
 | withdraw command | owner API | active case identity、preview id、expected versions、reason |
 | confirm/withdraw preview rows | reconciliation-workbench canonical query repository | preview 只把 untrusted scope/row ids 交给有界 selection port；返回最多 20 条 selected rows 和最多 100 条必要 attachment context，不返回 generation proof。正式 relation command、repository adapter 和 UoW 不接收该 DTO |
 | read request | downstream facade | scope keys、row ids、`require_fresh`、source version contract |
-| page scope proof request | Workbench / 银行明细页面 query boundary | `source_versions_for_scopes(scope_keys)` 通过 `workbench_relation_scope_summaries(...)` 一次读取全部 concrete month scope 的 published proof/current-effective dirty status，再用一次 bulk canonical expected-version I/O 比较；只 enqueue mismatch/missing 的 exact scopes。`all` 先一次枚举 canonical object、active relation 与已有 projection 月份，再执行相同批量 proof，禁止逐月 N+1 或持久化伪 `all` scope |
-| batch-accounting read request | `BatchAccountingService` via facade/port | 候选 row ids + 明确年份；使用一个批量账务专用 bundle 返回候选 rows、referenced groups、候选/年度 bulk scope proof 和 `submitted_count`，固定查询次数并保留等价 freshness/status；年度聚合只允许命中 batch-accounting partial expression index，不得改变其他页面通用 reader 行为 |
-| OA canonical snapshot changed | OA integration transactional writer | 只提交 OA canonical snapshot/source version，零 `workbench_relation`/`oa_pending_payment` dirty/outbox。关系页或消费页访问时按自己的 source dependency 精确收敛；OA projector 直接读 canonical relation，不等待本 read model。 |
+| shared consumer scope proof | 登记的 `workbench_relation` consumer | `source_versions_for_scopes(scope_keys)` 一次读取 concrete month scope 的 published proof/current-effective dirty status；只 enqueue mismatch/missing 的 exact scopes。`all` 只作 fan-out command，禁止持久化伪 parent projection。 |
+| OA canonical snapshot changed | OA integration transactional writer | 只提交 OA canonical snapshot/source version，零 retired page dirty/outbox；页面 normal GET 直接读取 canonical facts。共享 relation projection 只按自身显式 consumer 合同刷新。 |
 | completed ETC OA marker | `app.oa_applications.normalized_payload.etc_batch_id` + submitted `app.etc_business_batches` | 仅允许精确相等且 OA/batch owner 各自唯一；写入前在关系 UoW 内锁定 external batch identity 并重验 OA 状态、批次状态、数量、金额和 active relation owner。禁止金额、名称、OCR 或模糊匹配。 |
 
 ## 输出 I/O
@@ -68,8 +67,8 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 - 下游只有 active relation 是 linked 证据。历史关系、显示 tags、候选搜索结果、matching evidence 都不是支付/关联/成本证据。
 - downstream read models 必须记录并比较 relation source versions，relation mutation 后旧 payload 不得继续 fresh。当前访问只能 enqueue 本页面所需的精确 scope；未访问/隐藏页面不得由 relation 写路径提前 fan-out。
 - 共享 relation projection 的 exact-scope canonical proof 必须包含 eligible active relation 数量与稳定 typed membership digest，不能只使用 `max(updated_at)`。relation-only delta 在覆盖旧 group 前必须通过 repository 一次批量解析银行流水/发票 canonical UUID 与 legacy ID aliases；任一 alias overlap 都属于同一 logical member。无法证明完整 alias/affected scope 时 fail closed 为 full rebuild，不得发布局部结果为 fresh。
-- 银行明细、待找发票、进项/销项等实际消费 relation distribution 的页面，继续把共享 relation projection 作为各自访问时依赖并精确收敛。关联台自身不消费 `workbench_relation` 或 Workbench active generation：页面专属 repository 在一个只读快照内直接组合 canonical facts 与 active relations，不阻塞、不入队、不输出 dependency status。该隔离禁止把 consumer projection 重新接回 relation command/UoW 或关联台页面热路径。
-- 批量账务未提交列表专用 `get_batch_accounting_by_row_ids(..., submitted_year=...)` 必须在同一 bundle 中读取所有候选/年度 scopes 的 current-effective dirty status、候选 rows、referenced groups 和年度 `submitted_count`，保留原 status/reason/source-version 合同；12 个月 canonical expected proof 必须由 projection builder 的一次 bulk SQL 返回逐 scope 映射，facade 仍逐 scope 精确比较，不能恢复 12 次单月 source-version N+1、独立 count port 或通用逐 scope查询。`workbench_relation_groups_batch_accounting_year_scope_group_idx` 只覆盖 linked batch-accounting 年度聚合谓词，不改变其他 consumer 的查询或数据。已提交年度 list 继续使用自己的固定 I/O。
+- 银行明细、待找发票、进项/销项、关联台、批量账务等页面不消费 relation distribution；各页面 repository 在一个只读快照内直接组合 canonical facts 与 `app.workbench_pair_relations status='active'`，不阻塞、不入队、不输出 dependency status。共享 `workbench_relation` 只服务仍明确登记的非页面消费者；禁止重新接回上述页面热路径。
+- 批量账务页面不再消费本模块的 read model。其候选、年度计数、已提交关系和成员详情统一由页面专属 canonical query repository 读取 `app.*` 事实；本模块不得恢复 batch 专用 facade/repository 方法、年度 scope proof 或页面 freshness 合同。
 
 ## 文件范围
 

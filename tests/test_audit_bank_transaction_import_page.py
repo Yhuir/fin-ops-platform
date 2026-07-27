@@ -250,7 +250,7 @@ class BankTransactionImportPageAuditTests(unittest.TestCase):
         )
 
         self.assertEqual(report["page_key"], "imports.bank-transactions")
-        self.assertEqual(report["audit_contract"]["contract_revision"], "page-audit-contract.v26")
+        self.assertEqual(report["audit_contract"]["contract_revision"], "page-audit-contract.v27")
         self.assertEqual(report["audit_contract"]["registered_read_model_keys"], [])
         self.assertFalse(report["audit_contract"]["relation_proof_required"])
 

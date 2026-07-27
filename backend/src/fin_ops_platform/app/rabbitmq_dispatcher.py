@@ -22,7 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--event-type",
         action="append",
         default=[],
-        help="Outbox event type to publish. Repeatable. Defaults to workbench.read_model.refresh.",
+        help="Outbox event type to publish. Repeatable. Defaults to the active runtime dispatch registry.",
     )
     parser.add_argument("--batch-size", type=int, default=100)
     parser.add_argument("--lock-timeout-seconds", type=int, default=300)
@@ -65,8 +65,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "shadow_publish": shadow_publish,
                     "rabbitmq_configured": bool(settings.rabbitmq_url),
                     "rabbitmq_exchange": settings.rabbitmq_exchange,
-                    "rabbitmq_workbench_queue": settings.rabbitmq_workbench_queue,
-                    "rabbitmq_workbench_routing_key": settings.rabbitmq_workbench_routing_key,
                     "publisher_id": config.publisher_id,
                     "batch_size": config.batch_size,
                     "event_types": list(config.event_types),

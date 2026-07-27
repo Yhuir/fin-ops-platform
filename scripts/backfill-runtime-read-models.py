@@ -14,13 +14,8 @@ if str(BACKEND_SRC) not in sys.path:
     sys.path.insert(0, str(BACKEND_SRC))
 
 from fin_ops_platform.app.worker import main as worker_main  # noqa: E402
-from fin_ops_platform.services.invoice_usage_collection_backfill import (  # noqa: E402
-    build_invoice_usage_collection_backfill_plan,
-    execute_invoice_usage_collection_backfill_plan,
-    invoice_usage_collection_worker_args,
-)
-from fin_ops_platform.services.invoice_usage_collection_sql_projection import (  # noqa: E402
-    InvoiceUsageCollectionSqlProjectionBuilder,
+from fin_ops_platform.services.bank_flow_rule_batch_canonical_draft_producer import (  # noqa: E402
+    BankFlowRuleBatchCanonicalDraftProducer,
 )
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings  # noqa: E402
 from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository  # noqa: E402
@@ -28,29 +23,26 @@ from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefres
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository  # noqa: E402
 
 
-PENDING_INVOICE_SCOPES = [
-    "expense:all",
-    "expense:requires_invoice",
-    "expense:bank_statement_as_invoice",
-    "expense:no_invoice_required",
-    "income:all",
-]
+ACTIVE_READ_MODEL_SCOPE_TYPES = ("workbench_relation", "search", "no_oa_bank_batch")
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Backfill runtime SQL read models from PostgreSQL facts.")
+    parser = argparse.ArgumentParser(
+        description="Maintain active shared read models and replay canonical background materializations."
+    )
     parser.add_argument("--backfill-oa-children", action="store_true", help="Populate app.oa_application_items and app.oa_attachments from existing OA application payloads.")
-    parser.add_argument("--enqueue-missing", action="store_true", help="Enqueue read model refreshes for all fact-backed scopes.")
-    parser.add_argument("--enqueue-invoice-usage-collection", action="store_true", help="Enqueue only input invoice usage and output invoice collection read model refreshes.")
+    parser.add_argument("--enqueue-missing", action="store_true", help="Enqueue fan-out refresh commands for the three active shared read models.")
     parser.add_argument(
-        "--invoice-target",
+        "--enqueue-bank-flow-canonical-draft",
+        action="store_true",
+        help="Explicitly repair/replay BankFlow canonical drafts without creating read-model dirty scopes.",
+    )
+    parser.add_argument(
+        "--bank-flow-scope",
         action="append",
         default=[],
-        choices=["both", "all", "input", "output", "input_invoice_usage", "output_invoice_collection"],
-        help="Invoice read model target. Repeatable. Defaults to both.",
+        help="BankFlow repair scope (YYYY-MM or all); repeat for multiple scopes.",
     )
-    parser.add_argument("--invoice-scope", action="append", default=[], help="Invoice read model scope: all or YYYY-MM. Repeatable. Defaults to all.")
-    parser.add_argument("--invoice-expand-all", action="store_true", help="Expand invoice all scope into current invoice month shards before enqueue.")
     parser.add_argument("--run-worker", action="store_true", help="Drain runtime read model worker events in this process.")
     parser.add_argument("--max-iterations", type=int, default=200)
     parser.add_argument("--lock-timeout-seconds", type=int, default=30, help="Reclaim stale processing events older than this many seconds while draining.")
@@ -60,6 +52,11 @@ def main() -> int:
     parser.add_argument("--reason", default="runtime_backfill", help="Reason written to dirty scopes and outbox payloads.")
     parser.add_argument("--priority", default="normal", help="Runtime queue priority: low, normal, high or urgent.")
     parser.add_argument("--trace-id", default=None, help="Optional trace id attached to enqueued refresh events.")
+    parser.add_argument(
+        "--actor-id",
+        default=None,
+        help="Operator identity; required for non-dry-run BankFlow canonical replay.",
+    )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
@@ -75,21 +72,24 @@ def main() -> int:
                 reason=args.reason,
                 priority=args.priority,
                 trace_id=args.trace_id,
-                invoice_targets=args.invoice_target or ["both"],
-                invoice_scope_keys=args.invoice_scope or ["all"],
-                invoice_expand_all=args.invoice_expand_all,
             )
         )
-    elif args.enqueue_invoice_usage_collection:
+    if args.enqueue_bank_flow_canonical_draft:
+        if not args.dry_run and not str(args.actor_id or "").strip():
+            parser.error(
+                "--actor-id is required for non-dry-run BankFlow canonical replay."
+            )
         report["actions"].append(
-            enqueue_invoice_usage_collection_scopes(
+            enqueue_bank_flow_canonical_draft_replay(
                 connection,
-                targets=args.invoice_target or ["both"],
-                scope_keys=args.invoice_scope or ["all"],
-                expand_all=args.invoice_expand_all,
+                scope_keys=args.bank_flow_scope or ["all"],
                 dry_run=args.dry_run,
-                reason=args.reason,
-                priority=args.priority,
+                reason=(
+                    args.reason
+                    if "repair" in args.reason.lower() or "replay" in args.reason.lower()
+                        else f"repair_replay:{args.reason}"
+                ),
+                actor_id=args.actor_id,
                 trace_id=args.trace_id,
             )
         )
@@ -97,22 +97,18 @@ def main() -> int:
         worker_args = [
             "--worker-id",
             "runtime-read-model-backfill",
-            "--enable-workbench-read-model-refresh",
+            "--enable-workbench-relation-read-model-refresh",
             "--enable-search-read-model-refresh",
-            "--enable-pending-invoice-read-model-refresh",
-            "--enable-bank-detail-read-model-refresh",
-            "--enable-tax-offset-read-model-refresh",
+            "--enable-no-oa-bank-batch-read-model-refresh",
+            "--enable-bank-flow-rule-batch-canonical-draft-refresh",
             "--event-type",
-            "workbench.read_model.refresh",
+            "workbench_relation.read_model.refresh",
             "--event-type",
             "search.read_model.refresh",
             "--event-type",
-            "pending_invoice.read_model.refresh",
+            "no_oa_bank_batch.read_model.refresh",
             "--event-type",
-            "bank_detail.read_model.refresh",
-            "--event-type",
-            "tax_offset.read_model.refresh",
-            *invoice_usage_collection_worker_args(),
+            "bank_flow_rule_batch.canonical_draft.refresh",
             "--max-iterations",
             str(max(1, args.max_iterations)),
             "--max-events-per-iteration",
@@ -184,91 +180,69 @@ def enqueue_fact_scopes(
     reason: str = "runtime_backfill",
     priority: str = "normal",
     trace_id: str | None = None,
-    invoice_targets: list[str] | None = None,
-    invoice_scope_keys: list[str] | None = None,
-    invoice_expand_all: bool = False,
 ) -> dict[str, Any]:
     queue = RuntimeQueueRepository(connection)
     refresh_gateway = ReadModelRefreshGateway(queue_repository=queue)
-    months = fact_months(connection)
     enqueued: list[dict[str, str]] = []
-    for month in months:
-        for scope_type in ("workbench", "search", "bank_detail", "tax_offset"):
-            _enqueue_read_model_refresh(
-                refresh_gateway,
-                enqueued,
-                scope_type=scope_type,
-                scope_key=month,
-                reason=reason,
-                dry_run=dry_run,
-                priority=priority,
-                trace_id=trace_id,
-            )
-    for scope_key in PENDING_INVOICE_SCOPES:
+    for scope_type in ACTIVE_READ_MODEL_SCOPE_TYPES:
         _enqueue_read_model_refresh(
             refresh_gateway,
             enqueued,
-            scope_type="pending_invoice",
-            scope_key=scope_key,
+            scope_type=scope_type,
+            scope_key="all",
             reason=reason,
             dry_run=dry_run,
             priority=priority,
             trace_id=trace_id,
         )
-    _enqueue_read_model_refresh(
-        refresh_gateway,
-        enqueued,
-        scope_type="workbench",
-        scope_key="all",
-        reason=reason,
-        dry_run=dry_run,
-        priority=priority,
-        trace_id=trace_id,
-    )
-    invoice_report = enqueue_invoice_usage_collection_scopes(
-        connection,
-        targets=invoice_targets or ["both"],
-        scope_keys=invoice_scope_keys or ["all"],
-        expand_all=invoice_expand_all,
-        dry_run=dry_run,
-        reason=reason,
-        priority=priority,
-        trace_id=trace_id,
-    )
     return {
         "action": "enqueue_missing",
         "dry_run": bool(dry_run),
-        "month_count": len(months),
-        "months": months,
-        "enqueued_count": 0 if dry_run else len(enqueued) + int(invoice_report["enqueued_count"]),
-        "planned_count": len(enqueued) + int(invoice_report["planned_count"]),
-        "invoice_usage_collection": invoice_report,
+        "enqueued_count": 0 if dry_run else len(enqueued),
+        "planned_count": len(enqueued),
+        "scope_types": list(ACTIVE_READ_MODEL_SCOPE_TYPES),
     }
 
 
-def enqueue_invoice_usage_collection_scopes(
+def enqueue_bank_flow_canonical_draft_replay(
     connection: PostgresConnection,
     *,
-    targets: list[str] | None = None,
-    scope_keys: list[str] | None = None,
-    expand_all: bool = False,
-    dry_run: bool = False,
-    reason: str = "runtime_backfill",
-    priority: str = "normal",
-    trace_id: str | None = None,
-) -> dict[str, object]:
-    shard_provider = InvoiceUsageCollectionSqlProjectionBuilder(connection=connection) if expand_all else None
-    plan = build_invoice_usage_collection_backfill_plan(
-        targets=targets or ["both"],
-        scope_keys=scope_keys or ["all"],
-        expand_all=expand_all,
-        shard_provider=shard_provider,
-        reason=reason,
-        priority=priority,
-        trace_id=trace_id,
+    scope_keys: list[str],
+    dry_run: bool,
+    reason: str,
+    actor_id: str | None,
+    trace_id: str | None,
+) -> dict[str, Any]:
+    normalized_actor_id = str(actor_id or "").strip()
+    if not dry_run and not normalized_actor_id:
+        raise ValueError(
+            "actor_id is required for non-dry-run BankFlow canonical replay."
+        )
+    normalized_scope_keys = BankFlowRuleBatchCanonicalDraftProducer.normalize_scope_keys(
+        scope_keys
     )
-    queue = RuntimeQueueRepository(connection)
-    return execute_invoice_usage_collection_backfill_plan(queue, plan, dry_run=dry_run)
+    event_ids: list[str] = []
+    if not dry_run:
+        producer = BankFlowRuleBatchCanonicalDraftProducer(
+            queue_repository_provider=lambda: RuntimeQueueRepository(connection)
+        )
+        event_ids = producer.enqueue_scope_keys(
+            normalized_scope_keys,
+            reason=reason,
+            metadata={
+                "actor_id": normalized_actor_id,
+                "source": "operator_replay",
+                "trace_id": str(trace_id or "").strip() or None,
+            },
+        )
+    return {
+        "action": "enqueue_bank_flow_canonical_draft_replay",
+        "dry_run": bool(dry_run),
+        "scope_keys": normalized_scope_keys,
+        "planned_count": len(normalized_scope_keys),
+        "enqueued_count": len(event_ids),
+        "event_ids": event_ids,
+    }
 
 
 def _enqueue_read_model_refresh(
@@ -294,88 +268,7 @@ def _enqueue_read_model_refresh(
         enqueued.append({"scope_type": scope_type, "scope_key": normalized_scope_key})
 
 
-def fact_months(connection: PostgresConnection) -> list[str]:
-    rows = connection.fetch_all(
-        """
-        select scope_key
-        from (
-            select distinct to_char(invoice_month, 'YYYY-MM') as scope_key
-            from app.invoices
-            where invoice_month is not null and status <> 'deleted'
-            union
-            select distinct to_char(txn_month, 'YYYY-MM') as scope_key
-            from app.bank_transactions
-            where txn_month is not null and status <> 'deleted'
-            union
-            select distinct to_char(scope_month, 'YYYY-MM') as scope_key
-            from app.oa_applications
-            where scope_month is not null
-        ) scopes
-        where scope_key is not null
-        order by scope_key
-        """
-    )
-    return [str(row.get("scope_key")) for row in rows if str(row.get("scope_key") or "").strip()]
-
-
-def invoice_fact_months(connection: PostgresConnection, invoice_type: str) -> list[str]:
-    rows = connection.fetch_all(
-        """
-        select distinct to_char(coalesce(invoice_month, date_trunc('month', invoice_date)), 'YYYY-MM') as scope_key
-        from app.invoices
-        where invoice_type = %s
-          and coalesce(invoice_month, invoice_date) is not null
-          and status <> 'deleted'
-        order by scope_key
-        """,
-        (invoice_type,),
-    )
-    return [str(row.get("scope_key")) for row in rows if str(row.get("scope_key") or "").strip()]
-
-
-def read_model_scope_counts(connection: PostgresConnection, table_name: str) -> list[dict[str, Any]]:
-    if table_name not in {"read_model.input_invoice_usage_rows", "read_model.output_invoice_collection_rows"}:
-        raise ValueError(f"unsupported read model count table: {table_name}")
-    rows = connection.fetch_all(
-        f"""
-        select scope_key, count(*)::int as row_count
-        from {table_name}
-        where scope_key <> 'all'
-        group by scope_key
-        order by scope_key
-        """
-    )
-    return [dict(row) for row in rows]
-
-
 def coverage_report(connection: PostgresConnection) -> dict[str, Any]:
-    fact_scope_keys = set(fact_months(connection))
-    input_invoice_months = set(invoice_fact_months(connection, "input"))
-    output_invoice_months = set(invoice_fact_months(connection, "output"))
-    workbench_rows = connection.fetch_all(
-        """
-        select scope_key, count(*)::int as row_count
-        from read_model.workbench_rows
-        where scope_key <> 'all'
-        group by scope_key
-        order by scope_key
-        """
-    )
-    workbench_scope_keys = {str(row.get("scope_key")) for row in workbench_rows}
-    bank_detail_rows = connection.fetch_all(
-        """
-        select scope_key, count(*)::int as row_count
-        from read_model.bank_detail_rows
-        where scope_key <> 'all'
-        group by scope_key
-        order by scope_key
-        """
-    )
-    bank_detail_scope_keys = {str(row.get("scope_key")) for row in bank_detail_rows}
-    input_invoice_usage_rows = read_model_scope_counts(connection, "read_model.input_invoice_usage_rows")
-    input_invoice_usage_scope_keys = {str(row.get("scope_key")) for row in input_invoice_usage_rows}
-    output_invoice_collection_rows = read_model_scope_counts(connection, "read_model.output_invoice_collection_rows")
-    output_invoice_collection_scope_keys = {str(row.get("scope_key")) for row in output_invoice_collection_rows}
     dirty = connection.fetch_all(
         """
         select scope_type, status, count(*)::int as count
@@ -395,19 +288,7 @@ def coverage_report(connection: PostgresConnection) -> dict[str, Any]:
         """
     )
     return {
-        "fact_months": sorted(fact_scope_keys),
-        "workbench_months": sorted(workbench_scope_keys),
-        "missing_workbench_months": sorted(fact_scope_keys - workbench_scope_keys),
-        "workbench_rows": [dict(row) for row in workbench_rows],
-        "bank_detail_months": sorted(bank_detail_scope_keys),
-        "missing_bank_detail_months": sorted(fact_scope_keys - bank_detail_scope_keys),
-        "bank_detail_rows": [dict(row) for row in bank_detail_rows],
-        "input_invoice_usage_months": sorted(input_invoice_usage_scope_keys),
-        "missing_input_invoice_usage_months": sorted(input_invoice_months - input_invoice_usage_scope_keys),
-        "input_invoice_usage_rows": input_invoice_usage_rows,
-        "output_invoice_collection_months": sorted(output_invoice_collection_scope_keys),
-        "missing_output_invoice_collection_months": sorted(output_invoice_months - output_invoice_collection_scope_keys),
-        "output_invoice_collection_rows": output_invoice_collection_rows,
+        "active_scope_types": list(ACTIVE_READ_MODEL_SCOPE_TYPES),
         "dirty": [dict(row) for row in dirty],
         "outbox": [dict(row) for row in outbox],
     }

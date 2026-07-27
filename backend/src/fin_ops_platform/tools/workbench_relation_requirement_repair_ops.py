@@ -14,8 +14,9 @@ from fin_ops_platform.services.workbench_relation_requirements import (
 )
 from fin_ops_platform.tools.runtime_application import (
     bank_flow_rule_batch_tag_rules_payload,
-    bank_transaction_tag_read_facade,
+    bank_transaction_effective_category_provider,
     build_tool_runtime_application,
+    import_service,
     persist_workbench_pair_relations,
     workbench_relation_command_service,
 )
@@ -70,10 +71,15 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         return 0
 
     targets = [relation for relation in relations if _snapshot_missing(relation)]
-    tag_facade = bank_transaction_tag_read_facade(app)
+    category_provider = bank_transaction_effective_category_provider(app)
     raw_rules_payload = bank_flow_rule_batch_tag_rules_payload(app)
     rules_payload = raw_rules_payload if isinstance(raw_rules_payload, dict) else {}
-    fresh_plan = _build_plan(targets, tag_facade=tag_facade, rules_payload=rules_payload)
+    fresh_plan = _build_plan(
+        targets,
+        category_provider=category_provider,
+        bank_rows=import_service(app).list_transactions(month="all"),
+        rules_payload=rules_payload,
+    )
 
     if mode == "execute":
         fingerprint = str(args.expected_fingerprint)
@@ -135,28 +141,18 @@ def _mode(args: argparse.Namespace) -> str:
 def _build_plan(
     relations: list[dict[str, Any]],
     *,
-    tag_facade: Any,
+    category_provider: Any,
+    bank_rows: list[Any],
     rules_payload: dict[str, Any],
 ) -> list[dict[str, Any]]:
     bank_row_ids = list(
         dict.fromkeys(row_id for relation in relations for row_id in _bank_row_ids(relation))
     )
-    scope_keys = list(
-        dict.fromkeys(
-            scope_key
-            for relation in relations
-            if (scope_key := str(relation.get("month_scope") or "").strip())
-            and scope_key != "all"
-        )
-    )
-    category_records = tag_facade.category_records_by_transaction_ids(
-        bank_row_ids,
-        require_fresh=True,
-        reason="workbench_requirement_backfill",
-        scope_keys_hint=scope_keys,
-    )
+    wanted_ids = set(bank_row_ids)
+    target_rows = [row for row in list(bank_rows or []) if _bank_row_id(row) in wanted_ids]
+    category_records = category_provider.bulk_get_for_rows(target_rows)
     if not isinstance(category_records, dict):
-        raise RuntimeError("Bank transaction tag read returned an invalid result.")
+        raise RuntimeError("Bank transaction category provider returned an invalid result.")
 
     plan: list[dict[str, Any]] = []
     for relation in sorted(relations, key=lambda item: str(item.get("case_id") or "")):
@@ -469,6 +465,14 @@ def _bank_row_ids(relation: dict[str, Any]) -> list[str]:
         if str(row_id or "").strip()
         and str(row_types[index] if index < len(row_types) else "").strip().lower() == "bank"
     ]
+
+
+def _bank_row_id(row: Any) -> str:
+    if isinstance(row, dict):
+        return str(
+            row.get("id") or row.get("transaction_id") or row.get("row_id") or ""
+        ).strip()
+    return str(getattr(row, "id", "") or "").strip()
 
 
 def _category_code(record: dict[str, Any]) -> str:

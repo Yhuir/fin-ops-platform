@@ -10,8 +10,6 @@ class ReadModelScopeError(ValueError):
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
-PENDING_INVOICE_EXPENSE_FILTERS = frozenset({"all", "requires_invoice", "bank_statement_as_invoice", "no_invoice_required"})
-PENDING_INVOICE_INCOME_FILTERS = frozenset({"all", "requires_invoice", "no_invoice_required", "cash_income"})
 
 
 @dataclass(frozen=True)
@@ -69,14 +67,6 @@ def _all_only_scope_policy(scope_type: str) -> ReadModelScopePolicy:
     )
 
 
-def _pending_invoice_scope_policy() -> ReadModelScopePolicy:
-    return ReadModelScopePolicy(
-        scope_type="pending_invoice",
-        normalize_many=_dedupe_text,
-        validate_one=_validate_pending_invoice_scope_key,
-    )
-
-
 def _validate_month_or_all_scope_key(scope_type: str, scope_key: str) -> None:
     normalized_scope_key = str(scope_key or "").strip()
     if normalized_scope_key == "all" or bool(MONTH_RE.match(normalized_scope_key)):
@@ -89,25 +79,6 @@ def _validate_all_only_scope_key(scope_type: str, scope_key: str) -> None:
     if normalized_scope_key == "all":
         return
     raise ReadModelScopeError(f"Invalid {scope_type} read model scope_key: {scope_key}; only 'all' is supported.")
-
-
-def _validate_pending_invoice_scope_key(scope_key: str) -> None:
-    normalized_scope_key = str(scope_key or "").strip()
-    parts = [part.strip() for part in normalized_scope_key.split(":")]
-    if len(parts) not in {2, 3}:
-        raise ReadModelScopeError(f"Invalid pending_invoice read model scope_key: {scope_key}")
-    direction, filter_group = parts[0], parts[1]
-    if direction not in {"expense", "income"}:
-        raise ReadModelScopeError("pending_invoice read model scope direction must be expense or income.")
-    if not filter_group:
-        raise ReadModelScopeError(f"Invalid pending_invoice read model scope_key: {scope_key}")
-    valid_filters = PENDING_INVOICE_EXPENSE_FILTERS if direction == "expense" else PENDING_INVOICE_INCOME_FILTERS
-    if filter_group not in valid_filters:
-        raise ReadModelScopeError(
-            f"pending_invoice read model scope filter is not supported for {direction}: {filter_group}"
-        )
-    if len(parts) == 3 and not MONTH_RE.match(parts[2]):
-        raise ReadModelScopeError(f"Invalid pending_invoice read model month scope_key: {scope_key}")
 
 
 def _validate_non_empty(scope_type: str, scope_key: str) -> None:
@@ -126,18 +97,8 @@ def _dedupe_text(values: list[str]) -> list[str]:
 
 DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY = ReadModelScopePolicyRegistry(
     {
-        "bank_account_balance": _all_only_scope_policy("bank_account_balance"),
-        "bank_detail": _month_or_all_scope_policy("bank_detail"),
-        "bank_flow_rule_batch": _month_or_all_scope_policy("bank_flow_rule_batch"),
-        "input_invoice_usage": _month_or_all_scope_policy("input_invoice_usage"),
-        "invoice_lifecycle": _month_or_all_scope_policy("invoice_lifecycle"),
         "no_oa_bank_batch": _month_or_all_scope_policy("no_oa_bank_batch"),
-        "oa_pending_payment": _month_or_all_scope_policy("oa_pending_payment"),
-        "output_invoice_collection": _month_or_all_scope_policy("output_invoice_collection"),
-        "pending_invoice": _pending_invoice_scope_policy(),
         "search": _month_or_all_scope_policy("search"),
-        "tax_offset": _month_or_all_scope_policy("tax_offset"),
-        "workbench": _month_or_all_scope_policy("workbench"),
         "workbench_relation": _month_or_all_scope_policy("workbench_relation"),
     }
 )

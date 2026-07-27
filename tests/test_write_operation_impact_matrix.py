@@ -91,7 +91,11 @@ class WriteOperationImpactMatrixTests(unittest.TestCase):
             self.assertEqual(retired_direct_scope_types - direct_scope_types, set(), operation)
             self.assertEqual(
                 set(row["target_read_model_keys"]),
-                (direct_scope_types - retired_direct_scope_types) | derived_read_model_keys,
+                (
+                    (direct_scope_types - retired_direct_scope_types)
+                    | derived_read_model_keys
+                )
+                & set(APP_STATUS_READ_MODEL_REGISTRY),
                 operation,
             )
 
@@ -235,8 +239,9 @@ class WriteOperationImpactMatrixTests(unittest.TestCase):
         for operation in REVERSIBLE_RELATION_PROFILE_PAIRS["bank_oa_invoice"]:
             row = self.rows_by_operation[operation]
             self.assertEqual(row["expected_outbox_scope_types"], [], operation)
-            self.assertIn("oa_pending_payment", row["target_read_model_keys"], operation)
+            self.assertNotIn("oa_pending_payment", row["target_read_model_keys"], operation)
             self.assertIn("oa-pending-payments", row["target_page_keys"], operation)
+            self.assertIn("oa-pending-payments", row["direct_canonical_target_page_keys"], operation)
 
     def test_relation_profiles_keep_consumer_coverage_without_legacy_facade_fan_out_helpers(self) -> None:
         for pair in self.matrix["reversible_relation_profile_pairs"]:

@@ -49,11 +49,11 @@ describe("OA pending payment Audit", () => {
       audit_status: { integrity: "issues_found", freshness: "fresh", queue: "drained" },
       summary: { blocking_issue_sample_count: 3, issue_sample_count: 3 },
       issues: [
-        { code: "oa_pending_payments_source_versions_mismatch", scope_key: "2026-06", subject_id: "oa-1" },
-        { code: "oa_pending_payments_source_versions_mismatch", scope_key: "2026-06", subject_id: "oa-1" },
+        { code: "oa_pending_payments_canonical_source_version_mismatch", scope_key: "2026-06", subject_id: "oa-1" },
+        { code: "oa_pending_payments_canonical_source_version_mismatch", scope_key: "2026-06", subject_id: "oa-1" },
         { code: "oa_pending_payments_relation_edge_mismatch", scope_key: "2026-06", subject_id: "case-1" },
-        { code: "oa_pending_payments_missing_read_model_scope", scope_key: "2026-07" },
-        { code: "oa_pending_payments_duplicate_read_model_identity", scope_key: "2026-07", subject_id: "oa-2" },
+        { code: "oa_pending_payments_missing_canonical_fact", scope_key: "2026-07" },
+        { code: "oa_pending_payments_duplicate_canonical_identity", scope_key: "2026-07", subject_id: "oa-2" },
       ],
     }))));
     const user = userEvent.setup();

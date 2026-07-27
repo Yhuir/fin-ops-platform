@@ -10,27 +10,7 @@ vi.mock("../features/operationBarrier/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../features/operationBarrier/api")>();
   return {
     ...actual,
-    waitForOperationFreshness: vi.fn(async (targets: Array<{ readModelKey: string; scopeKey: string }>) => {
-      const target = targets[0] ?? { readModelKey: "pending_invoice", scopeKey: "all" };
-      throw new actual.OperationBarrierTimeoutError(
-        `操作同步等待超时，待处理发票（${target.scopeKey}）仍在同步，请稍后刷新后重试。`,
-        {
-          status: "refreshing",
-          fresh: false,
-          targets: [],
-          blockedTargets: [],
-          refreshingTargets: [{
-            readModelKey: target.readModelKey,
-            scopeType: target.readModelKey,
-            scopeKey: target.scopeKey,
-            status: "refreshing",
-            fresh: false,
-            blocking: false,
-            rawStatus: "dirty",
-          }],
-        },
-      );
-    }),
+    waitForOperationFreshness: vi.fn(),
   };
 });
 

@@ -10,7 +10,6 @@ from fin_ops_platform.services.no_oa_bank_batch_application_service import (
     NoOaBankBatchApplicationService,
     NoOaBankBatchPersistenceError,
 )
-from fin_ops_platform.services.read_model_write_targets import write_target_envelope
 
 MutationSessionResolver = Callable[[dict[str, str] | None], OARequestSession | Any]
 JsonBodyLoader = Callable[[str | bytes | None], tuple[dict[str, Any], Any | None]]
@@ -89,14 +88,9 @@ class NoOaBankBatchApiRoutes:
     def list_batches(
         self,
         query: dict[str, list[str]],
-        *,
-        relation_mode: str = "no_oa_bank_batch",
     ) -> tuple[HTTPStatus, dict[str, Any]]:
         try:
-            return HTTPStatus.OK, self._application_service.list_batches_payload(
-                query,
-                relation_mode=relation_mode,
-            )
+            return HTTPStatus.OK, self._application_service.list_batches_payload(query)
         except ValueError as exc:
             return self._value_error_response(exc)
 
@@ -135,7 +129,6 @@ class NoOaBankBatchApiRoutes:
         payload: dict[str, Any],
         *,
         session: OARequestSession,
-        relation_mode: str = "no_oa_bank_batch",
     ) -> tuple[HTTPStatus, dict[str, Any]]:
         try:
             result = self._application_service.submit_batch(
@@ -143,7 +136,6 @@ class NoOaBankBatchApiRoutes:
                 actor=self._actor(payload, session),
                 expected_version=self._optional_int(payload.get("expected_version")),
                 note=str(payload.get("note") or "").strip() or None,
-                relation_mode=relation_mode,
             )
         except KeyError:
             return self._unknown_batch_response()
@@ -173,11 +165,6 @@ class NoOaBankBatchApiRoutes:
             return self._persistence_error_response(exc)
         except ValueError as exc:
             return self._value_error_response(exc)
-        result.update(write_target_envelope(
-            scope_keys=result.get("affected_months"),
-            targets=[],
-            fallback_scope_key="all",
-        ))
         return HTTPStatus.OK, result
 
     def submit_selection(
@@ -185,7 +172,6 @@ class NoOaBankBatchApiRoutes:
         payload: dict[str, Any],
         *,
         session: OARequestSession,
-        relation_mode: str = "no_oa_bank_batch",
     ) -> tuple[HTTPStatus, dict[str, Any]]:
         raw_transaction_ids = payload.get("transaction_ids")
         if not isinstance(raw_transaction_ids, list):
@@ -198,7 +184,6 @@ class NoOaBankBatchApiRoutes:
                 row_ids=[str(row_id) for row_id in raw_transaction_ids],
                 actor=self._actor(payload, session),
                 note=str(payload.get("note") or "").strip() or None,
-                relation_mode=relation_mode,
             )
         except NoOaBankBatchPersistenceError as exc:
             return self._persistence_error_response(exc)
@@ -264,11 +249,7 @@ class NoOaBankBatchApiRoutes:
             "summary": {"submitted": submitted_count, "failed": failed_count},
             "results": results,
             "affected_months": sorted(affected_months),
-            **write_target_envelope(
-                scope_keys=sorted(affected_months),
-                targets=[],
-                fallback_scope_key="all",
-            ),
+            "affected_scope_keys": sorted(affected_months),
         }
 
     @staticmethod

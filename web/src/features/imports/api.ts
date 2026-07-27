@@ -9,7 +9,6 @@ import type {
 } from "./types";
 import { mapBackgroundJob, type ApiBackgroundJob } from "../backgroundJobs/api";
 import { ApiClientError, apiRequestJson } from "../apiClient";
-import type { OperationBarrierTarget } from "../operationBarrier/api";
 
 type ApiImportFile = {
   id: string;
@@ -106,12 +105,6 @@ type ApiImportSessionPayload = {
   job?: ApiBackgroundJob;
   affected_scope_keys?: unknown;
   affectedScopeKeys?: unknown;
-  read_model_scope_keys?: unknown;
-  readModelScopeKeys?: unknown;
-  freshness_targets?: unknown;
-  freshnessTargets?: unknown;
-  operation_barrier_targets?: unknown;
-  operationBarrierTargets?: unknown;
   session: {
     id: string;
     imported_by: string;
@@ -273,8 +266,6 @@ function mapMatchingRun(payload?: ApiImportSessionPayload["matching_run"]): Matc
 
 function mapImportPayload(payload: ApiImportSessionPayload): ImportSessionPayload {
   const sessionAudit = mapAuditCounts(payload.session.audit);
-  const freshnessTargets = targetList(payload.freshness_targets ?? payload.freshnessTargets);
-  const operationBarrierTargets = targetList(payload.operation_barrier_targets ?? payload.operationBarrierTargets);
   return {
     session: {
       id: payload.session.id,
@@ -327,9 +318,6 @@ function mapImportPayload(payload: ApiImportSessionPayload): ImportSessionPayloa
     matchingRun: mapMatchingRun(payload.matching_run),
     ...(payload.job ? { job: mapBackgroundJob(payload.job) } : {}),
     affectedScopeKeys: stringList(payload.affected_scope_keys ?? payload.affectedScopeKeys),
-    readModelScopeKeys: stringList(payload.read_model_scope_keys ?? payload.readModelScopeKeys),
-    freshnessTargets,
-    operationBarrierTargets: operationBarrierTargets.length > 0 ? operationBarrierTargets : freshnessTargets,
   };
 }
 
@@ -337,37 +325,6 @@ function stringList(value: unknown): string[] {
   return Array.isArray(value)
     ? value.map((item) => String(item ?? "").trim()).filter(Boolean)
     : [];
-}
-
-function targetList(value: unknown): OperationBarrierTarget[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  const targets: OperationBarrierTarget[] = [];
-  const seen = new Set<string>();
-  value.forEach((item) => {
-    if (!item || typeof item !== "object") {
-      return;
-    }
-    const payload = item as Record<string, unknown>;
-    const readModelKey = String(payload.read_model_key ?? payload.readModelKey ?? "").trim();
-    const scopeKey = String(payload.scope_key ?? payload.scopeKey ?? "").trim();
-    const scopeType = String(payload.scope_type ?? payload.scopeType ?? "").trim();
-    if (!readModelKey || !scopeKey) {
-      return;
-    }
-    const key = `${readModelKey}:${scopeKey}:${scopeType}`;
-    if (seen.has(key)) {
-      return;
-    }
-    seen.add(key);
-    targets.push({
-      readModelKey,
-      scopeKey,
-      ...(scopeType ? { scopeType } : {}),
-    });
-  });
-  return targets;
 }
 
 function mapImportTemplates(payload: ApiImportTemplatesPayload): ImportTemplate[] {

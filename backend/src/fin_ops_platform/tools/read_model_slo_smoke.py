@@ -26,9 +26,7 @@ DEFAULT_TARGET_MS = 1_000.0
 DEFAULT_TIMEOUT_SECONDS = 90.0
 DEFAULT_POLL_INTERVAL_SECONDS = 0.5
 MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
-PAGE_FIRST_SCREEN_SCOPE_KEYS: dict[str, tuple[str, ...]] = {
-    "pending_invoice": ("expense:all",),
-}
+PAGE_FIRST_SCREEN_SCOPE_KEYS: dict[str, tuple[str, ...]] = {}
 
 
 @dataclass(frozen=True)
@@ -273,7 +271,6 @@ def discover_smoke_scopes(
     overrides = scope_overrides or {}
     explicit_scope_keys = set(overrides)
     readiness = _fresh_readiness_by_key(connection, tenant_id=tenant_id)
-    workbench_generations = _active_workbench_generations(connection, tenant_id=tenant_id)
     scopes: list[SmokeScope] = []
     for key in selected_keys:
         definition = APP_STATUS_READ_MODEL_REGISTRY[key]
@@ -287,10 +284,7 @@ def discover_smoke_scopes(
                 )
             )
             continue
-        if key == "workbench":
-            chosen = _choose_direct_scope(workbench_generations) or _choose_direct_scope(readiness.get(key, []))
-        else:
-            chosen = _choose_direct_scope(readiness.get(key, []))
+        chosen = _choose_direct_scope(readiness.get(key, []))
         planned_for_key: list[dict[str, Any]] = []
         if chosen is None:
             chosen = _default_smoke_scope()
@@ -487,25 +481,6 @@ def _percentile(ordered_values: Sequence[float], percentile: float) -> float | N
         return None
     index = max(0, min(len(ordered_values) - 1, ceil(percentile * len(ordered_values)) - 1))
     return round(float(ordered_values[index]), 3)
-
-
-def _active_workbench_generations(connection: Any, *, tenant_id: str) -> list[dict[str, Any]]:
-    rows = connection.fetch_all(
-        """
-        select scope_key, row_count, updated_at::text as updated_at
-        from read_model.workbench_generations
-        where tenant_id = %s
-          and status = 'active'
-        order by updated_at desc
-        """,
-        (tenant_id,),
-    )
-    result: list[dict[str, Any]] = []
-    for row in rows:
-        payload = dict(row)
-        payload["_source"] = "active_generation"
-        result.append(payload)
-    return result
 
 
 def _choose_direct_scope(rows: list[dict[str, Any]]) -> dict[str, Any] | None:

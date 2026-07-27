@@ -10,20 +10,10 @@ DERIVED_DATA_EVENTS = (
 )
 
 DERIVED_DATA_DOMAINS = (
-    "workbench_read_model",
     "workbench_relation_read_model",
     "workbench_matching_dirty_scopes",
-    "invoice_lifecycle_read_model",
-    "tax_offset_read_model",
-    "tax_offset_month_cache",
-    "pending_invoice_read_model",
-    "input_invoice_usage_read_model",
-    "output_invoice_collection_read_model",
-    "oa_pending_payment_read_model",
-    "bank_account_balance_read_model",
-    "bank_detail_read_model",
     "no_oa_bank_batch_read_model",
-    "bank_flow_rule_batch_read_model",
+    "bank_flow_rule_batch_canonical_draft",
     "search_cache",
     "oa_adapter_records_cache",
     "file_import_sessions",
@@ -57,20 +47,10 @@ class DerivedDataLifecycleService:
     """
 
     _DOMAIN_ACTIONS: dict[str, str] = {
-        "workbench_read_model": "invalidate",
         "workbench_relation_read_model": "invalidate",
         "workbench_matching_dirty_scopes": "mark_dirty",
-        "invoice_lifecycle_read_model": "invalidate",
-        "tax_offset_read_model": "invalidate",
-        "tax_offset_month_cache": "clear",
-        "pending_invoice_read_model": "invalidate",
-        "input_invoice_usage_read_model": "invalidate",
-        "output_invoice_collection_read_model": "invalidate",
-        "oa_pending_payment_read_model": "invalidate",
-        "bank_account_balance_read_model": "invalidate",
-        "bank_detail_read_model": "invalidate",
         "no_oa_bank_batch_read_model": "invalidate",
-        "bank_flow_rule_batch_read_model": "invalidate",
+        "bank_flow_rule_batch_canonical_draft": "rebuild",
         "search_cache": "clear",
         "oa_adapter_records_cache": "clear",
         "file_import_sessions": "ttl_cleanup",
@@ -81,28 +61,16 @@ class DerivedDataLifecycleService:
 
     _EVENT_DOMAINS: dict[str, tuple[str, ...]] = {
         "etc_business_batch_changed": (
-            "workbench_read_model",
             "workbench_relation_read_model",
             "workbench_matching_dirty_scopes",
-            "invoice_lifecycle_read_model",
-            "tax_offset_read_model",
-            "tax_offset_month_cache",
             "historical_etc_repair_state",
             "search_cache",
         ),
         "settings_reset_completed": (
             "oa_adapter_records_cache",
-            "bank_account_balance_read_model",
-            "bank_detail_read_model",
-            "workbench_read_model",
             "workbench_relation_read_model",
             "workbench_matching_dirty_scopes",
-            "invoice_lifecycle_read_model",
-            "input_invoice_usage_read_model",
-            "output_invoice_collection_read_model",
-            "oa_pending_payment_read_model",
-            "tax_offset_read_model",
-            "tax_offset_month_cache",
+            "bank_flow_rule_batch_canonical_draft",
             "search_cache",
             "file_import_sessions",
             "tax_certified_import_sessions",
@@ -113,12 +81,10 @@ class DerivedDataLifecycleService:
     _EVENT_JOBS: dict[str, tuple[str, ...]] = {
         "etc_business_batch_changed": (
             "workbench_matching",
-            "tax_offset_cache_warmup",
             "historical_etc_reconcile",
         ),
         "settings_reset_completed": (
             "workbench_matching",
-            "tax_offset_cache_warmup",
             "historical_etc_reconcile",
         ),
     }

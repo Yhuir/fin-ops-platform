@@ -438,21 +438,12 @@ export type OaManualImportEntry = {
   audit?: Record<string, unknown>;
 };
 
-export type OaManualReadModelTarget = {
-  readModelKey: string;
-  scopeKey: string;
-  scopeType?: string;
-};
-
 export type OaManualImportResult = {
   imported: string[];
   alreadyImported: string[];
   failed: Array<Record<string, unknown>>;
   rows: OaManualSearchRow[];
   affectedScopeKeys: string[];
-  readModelScopeKeys: string[];
-  freshnessTargets: OaManualReadModelTarget[];
-  operationBarrierTargets: OaManualReadModelTarget[];
 };
 
 export type OaManualImportList = {
@@ -464,9 +455,6 @@ export type OaManualImportRemovalResult = {
   removed: boolean;
   rowId: string;
   affectedScopeKeys: string[];
-  readModelScopeKeys: string[];
-  freshnessTargets: OaManualReadModelTarget[];
-  operationBarrierTargets: OaManualReadModelTarget[];
 };
 
 export type OaManualAttachmentRefreshResult = {
@@ -478,9 +466,6 @@ export type OaManualAttachmentRefreshResult = {
   }>;
   errors: Array<Record<string, unknown>>;
   affectedScopeKeys: string[];
-  readModelScopeKeys: string[];
-  freshnessTargets: OaManualReadModelTarget[];
-  operationBarrierTargets: OaManualReadModelTarget[];
 };
 
 export type OaManualSearchFilters = {

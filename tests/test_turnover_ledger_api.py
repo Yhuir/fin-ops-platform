@@ -348,99 +348,6 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             else:
                 os.environ["FIN_OPS_TEST_DEFAULT_AUTH"] = previous
 
-    def test_sql_bank_detail_turnover_row_uses_manual_category_version_when_category_version_missing(self) -> None:
-        row = {
-            "id": "bank-row-manual-version",
-            "effective_category_code": "external_personal",
-            "effective_turnover_action_type": "personal_advance",
-            "effective_turnover_family": "personal",
-            "direction": "income",
-            "amount": "100.00",
-            "trade_time": "2026-02-03T10:11:12",
-            "counterparty_name": "张三",
-            "manual_category_version": 9,
-        }
-
-        turnover_row = Application._turnover_bank_transaction_row_from_bank_detail(row)
-
-        self.assertIsNotNone(turnover_row)
-        self.assertEqual(turnover_row["category_version"], 9)
-
-    def test_sql_bank_detail_turnover_row_uses_manual_category_version_when_category_version_is_zero(self) -> None:
-        row = {
-            "id": "bank-row-zero-category-version",
-            "effective_category_code": "external_personal",
-            "effective_turnover_action_type": "personal_advance",
-            "effective_turnover_family": "personal",
-            "direction": "income",
-            "amount": "100.00",
-            "trade_time": "2026-02-03T10:11:12",
-            "counterparty_name": "张三",
-            "category_version": 0,
-            "manual_category_version": 9,
-        }
-
-        turnover_row = Application._turnover_bank_transaction_row_from_bank_detail(row)
-
-        self.assertIsNotNone(turnover_row)
-        self.assertEqual(turnover_row["category_version"], 9)
-
-    def test_sql_bank_detail_turnover_row_falls_back_to_bank_row_version_when_category_versions_missing(self) -> None:
-        row = {
-            "id": "bank-row-base-version",
-            "effective_category_code": "external_personal",
-            "effective_turnover_action_type": "personal_advance",
-            "effective_turnover_family": "personal",
-            "direction": "expense",
-            "amount": "100.00",
-            "trade_time": "2026-02-03T10:11:12",
-            "counterparty_name": "张三",
-            "version": 5,
-        }
-
-        turnover_row = Application._turnover_bank_transaction_row_from_bank_detail(row)
-
-        self.assertIsNotNone(turnover_row)
-        self.assertEqual(turnover_row["category_version"], 5)
-
-    def test_sql_bank_detail_turnover_row_falls_back_to_bank_row_version_when_category_version_is_zero(self) -> None:
-        row = {
-            "id": "bank-row-zero-category-base-version",
-            "effective_category_code": "external_personal",
-            "effective_turnover_action_type": "personal_advance",
-            "effective_turnover_family": "personal",
-            "direction": "expense",
-            "amount": "100.00",
-            "trade_time": "2026-02-03T10:11:12",
-            "counterparty_name": "张三",
-            "category_version": 0,
-            "version": 5,
-        }
-
-        turnover_row = Application._turnover_bank_transaction_row_from_bank_detail(row)
-
-        self.assertIsNotNone(turnover_row)
-        self.assertEqual(turnover_row["category_version"], 5)
-
-    def test_sql_bank_detail_turnover_row_prefers_category_version_over_manual_version(self) -> None:
-        row = {
-            "id": "bank-row-category-version",
-            "effective_category_code": "external_personal",
-            "effective_turnover_action_type": "personal_advance",
-            "effective_turnover_family": "personal",
-            "direction": "income",
-            "amount": "100.00",
-            "trade_time": "2026-02-03T10:11:12",
-            "counterparty_name": "张三",
-            "category_version": 3,
-            "manual_category_version": 9,
-        }
-
-        turnover_row = Application._turnover_bank_transaction_row_from_bank_detail(row)
-
-        self.assertIsNotNone(turnover_row)
-        self.assertEqual(turnover_row["category_version"], 3)
-
     def _import_bank_rows(self, app: Application) -> list[str]:
         preview = app._import_service.preview_import(
             batch_type=BatchType.BANK_TRANSACTION,
@@ -842,10 +749,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                         "relation_mode": "manual_confirmed",
                     },
                     "affected_months": ["2026-05"],
-                    "freshness_targets": [
-                        {"read_model_key": "turnover_ledger", "scope_key": "2026-05"},
-                        {"read_model_key": "workbench_relation", "scope_key": "2026-05"},
-                    ],
+                    "affected_scope_keys": ["2026-05"],
                 }
 
         with TemporaryDirectory() as temp_dir:
@@ -867,7 +771,8 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.body)
         self.assertEqual(payload["status"], "withdrawn")
         self.assertEqual(payload["workbench_pair_relation"]["case_id"], "case-workbench-cash-1")
-        self.assertEqual(payload["freshness_targets"][1], {"read_model_key": "workbench_relation", "scope_key": "2026-05"})
+        self.assertEqual(payload["affected_scope_keys"], ["2026-05"])
+        self.assertNotIn("freshness_targets", payload)
         self.assertEqual(boundary.calls[0]["cash_closure_case_id"], "case-workbench-cash-1")
         self.assertEqual(boundary.calls[0]["note"], "撤回关联台闭环")
         self.assertEqual(boundary.calls[0]["idempotency_key"], "withdraw-cash-1")
@@ -1825,40 +1730,43 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertIn("bank_rows_provider=self._bank_rows_provider", source)
         self.assertNotIn("stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None)", source)
 
-    def test_turnover_exact_bank_row_lookup_does_not_block_on_unrelated_page_staleness(self) -> None:
-        class _Repository:
+    def test_turnover_exact_bank_row_lookup_reads_canonical_facts_without_page_freshness(self) -> None:
+        class _ImportService:
             @staticmethod
-            def get_bank_detail_tagged_rows_by_transaction_ids(
-                transaction_ids: list[str],
-                *,
-                tenant_id: str,
-            ) -> dict[str, object]:
-                self.assertEqual(transaction_ids, ["bank_txn_1"])
-                self.assertEqual(tenant_id, "default")
+            def list_transactions(*, month: str) -> list[dict[str, object]]:
+                self.assertEqual(month, "all")
+                return [
+                    {
+                        "id": "bank_txn_1",
+                        "txn_direction": "outflow",
+                        "amount": "100.00",
+                        "trade_time": "2026-07-26 01:02:03+00",
+                        "counterparty_name_raw": "测试往来方",
+                    }
+                ]
+
+        class _CategoryProvider:
+            @staticmethod
+            def bulk_get_for_rows(rows: list[dict[str, object]]) -> dict[str, dict[str, object]]:
+                self.assertEqual([row["id"] for row in rows], ["bank_txn_1"])
                 return {
-                    "read_model_status": "stale",
-                    "rows": [
-                        {
-                            "id": "bank_txn_1",
-                            "direction": "expense",
-                            "amount": "100.00",
-                            "trade_time": "2026-07-26 01:02:03+00",
-                            "counterparty_name": "测试往来方",
-                            "effective_category_code": "borrow_out_personal_pending_collection",
-                            "effective_category_label": "借出款",
-                            "effective_category_source": "manual",
-                            "effective_turnover_role": "external_turnover",
-                            "effective_turnover_action_type": "pending_collection",
-                            "effective_turnover_family": "personal",
-                            "category_version": 7,
-                        }
-                    ],
+                    "bank_txn_1": {
+                        "category_code": "borrow_out_personal_pending_collection",
+                        "category_label": "借出款",
+                        "category_version": 7,
+                    }
                 }
 
+        class _CategoryService:
+            @staticmethod
+            def get(_transaction_id: str) -> dict[str, object]:
+                return {}
+
         app = object.__new__(Application)
-        app._bank_detail_sql_read_repository = _Repository()
-        app._requires_sql_read_model_runtime = lambda: True  # type: ignore[method-assign]
-        app._workbench_reconciliation_tenant_id = lambda: "default"  # type: ignore[method-assign]
+        app._import_service = _ImportService()
+        app._serialize_value = lambda value: dict(value)
+        app._bank_transaction_tag_reader = lambda: _CategoryProvider()
+        app._bank_transaction_category_service = _CategoryService()
 
         rows = app._turnover_bank_transaction_rows_by_ids(["bank_txn_1"])
 
@@ -2387,7 +2295,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(payload["updated"], 2)
         self.assertEqual(payload["affected_months"], ["2026-02", "2026-03"])
         self.assertEqual(payload["affected_scope_keys"], ["2026-02", "2026-03"])
-        self.assertEqual(payload["operation_barrier_targets"], [])
+        self.assertNotIn("operation_barrier_targets", payload)
         self.assertNotIn("turnover_ledger_invalidated", payload)
         self.assertTrue(payload["workbench_invalidated"])
         self.assertEqual(
@@ -3900,7 +3808,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(payload["relation"]["status"], "confirmed")
         self.assertEqual(payload["affected_months"], ["2026-02", "2026-03"])
         self.assertEqual(payload["affected_scope_keys"], ["2026-02", "2026-03"])
-        self.assertEqual(payload["operation_barrier_targets"], [])
+        self.assertNotIn("operation_barrier_targets", payload)
         self.assertEqual(call_order, ["rebuild"])
         self.assertEqual([entry["action"] for entry in audit_log], ["confirm_relation"])
         self.assertEqual(read_repository.clear_calls, 0)
@@ -4244,7 +4152,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(payload["relation"]["relation_id"], relation_id)
         self.assertEqual(payload["affected_months"], ["2026-02", "2026-03"])
         self.assertEqual(payload["affected_scope_keys"], ["2026-02", "2026-03"])
-        self.assertEqual(payload["freshness_targets"], [])
+        self.assertNotIn("freshness_targets", payload)
         self.assertEqual(len(facade.withdraw_calls), 1)
         self.assertEqual(facade.withdraw_calls[0]["relation_id"], relation_id)
         self.assertEqual(facade.withdraw_calls[0]["note"], "facade withdraw")
@@ -4368,7 +4276,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(payload["relation"]["relation_id"], relation_id)
         self.assertEqual(payload["relation"]["status"], "withdrawn")
         self.assertEqual(payload["affected_months"], ["2026-02", "2026-03"])
-        self.assertEqual(payload["operation_barrier_targets"], [])
+        self.assertNotIn("operation_barrier_targets", payload)
         self.assertEqual([entry["action"] for entry in audit_log], ["confirm_relation", "withdraw_relation"])
         self.assertEqual(read_repository.clear_calls, 0)
         self.assertEqual(queue.enqueued, [])

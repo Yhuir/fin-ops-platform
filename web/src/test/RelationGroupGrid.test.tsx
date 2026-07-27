@@ -711,16 +711,12 @@ describe("Workbench candidate grouping layout", () => {
               : { oa: 0, bank: 0, invoice: 0, rows: 0 },
             has_more: false,
             groups,
-            read_model_status: "fresh",
-            read_model_version: "mock-workbench-generation-1",
           };
         };
         return new Response(JSON.stringify({
           ...payload,
           paired: zonePage("paired"),
           unpaired: zonePage("unpaired"),
-          read_model_status: "fresh",
-          read_model_version: "mock-workbench-generation-1",
         }), { status: 200 });
       }
       if (url.pathname === "/api/workbench/groups") {
@@ -738,7 +734,6 @@ describe("Workbench candidate grouping layout", () => {
               : { oa: 0, bank: 0, invoice: 0, rows: 0 },
             has_more: false,
             groups,
-            read_model_status: "fresh",
           }),
           { status: 200 },
         );

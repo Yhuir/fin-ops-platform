@@ -25,7 +25,8 @@
   - 手工项目新增后默认为 active。
   - active 与 completed 之间由 settings 保存切换。
   - OA 项目本地删除只记录 override，不删除 OA 事实。
-- 影响：项目范围变化会影响成本统计、搜索和项目筛选；必须通过 dirty/read model 或等价 lifecycle 保护。
+- 影响：项目范围变化会影响成本统计、搜索和项目筛选；canonical 页面下一次 GET
+  直接读取新 version，Search 共享模型由自身 owner 处理。
 
 ### 访问控制
 
@@ -37,7 +38,8 @@
 
 - 银行标签状态：`active`、`archived`、`in_use_blocked`、`version_conflict`。
 - 待找发票规则状态：income/expense 方向独立 version；非法映射可从历史 payload 加载并展示修复。
-- 影响：规则保存后不能同步重建所有下游页面，但必须产生对应 dirty scope/lifecycle event。
+- 影响：规则保存只提交规则/version/audit；canonical 页面下一次 GET 直接应用，
+  不产生已退役页面 dirty scope。
 
 ### OA 申请人凭据
 
@@ -67,21 +69,21 @@
 - loading：settings payload、credential list、active data reset job 并行加载时展示加载态，不能误显示可保存状态。
 - empty：无手工项目、无凭据、无 pending invoice 规则时显示空状态，但保留创建入口。
 - error：settings save、凭据保存、data reset job、active job 恢复失败必须展示可理解错误。
-- stale/refreshing：设置页自身不是 read model 页面；但 data reset 和规则保存引起的下游 stale/refreshing 必须通过 App Status 或下游页面体现。
+- job progress：设置页自身不是 read model 页面；只有显式 data reset job 展示
+  queued/running/failed/succeeded。普通规则保存没有下游 refreshing。
 - permission disabled/hidden：readonly/full access 非 admin 不显示高风险 credential/reset 入口；API 仍必须二次校验。
 - credential form：密码只存在于当前表单；保存成功后清空；列表只展示目标 OA 申请人、OA 登录账号和配置状态。
 - reset dialog：必须有动作说明、影响范围、确认密码、运行中 job progress、失败状态和重进恢复。
 
 ## Read Model / Worker 状态
 
-- 设置事实本身不作为 read model，但它会触发或清理多个 read model。
-- refresh 触发来源：
-  - `pending_invoice_rules_changed`：待找发票、发票 lifecycle、关联台、进项/销项、税金、成本、搜索；OA 待付款不消费该规则。
-  - `bank_auto_tag_rules_changed` / bank tag settings：银行明细、免 OA、关联台候选、往来款、成本、搜索。
-  - `project_scope_changed`：成本统计、搜索。
-  - `settings_reset_completed`：多数 read model、cache、dirty scope、App Status readiness。
-  - `startup_stale_scan`：默认关闭；启用时只标记 stale workbench matching dirty scopes，用于启动补扫；不应直接刷新用户可见 read model。
-- worker 状态：settings save 通常不直接阻塞等待 worker；必须通过 dirty scope、queue、App Status 展示 refreshing/stale/failed。
+- 设置事实本身不是 read model，普通 save 不产生页面 dirty scope/outbox。
+- `workbench_relation`、`search`、`no_oa_bank_batch` 只有在各自 owner 明确登记的
+  reset/maintenance 合同中接收精确 refresh；Settings 不维护第二份 fan-out matrix。
+- `startup_stale_scan` 默认关闭；启用时只标记 Workbench matching 领域 scope，不刷新
+  用户可见页面 projection。
+- settings save 只等待 canonical settings transaction；data reset 单独展示 durable job
+  状态，不用 read-model barrier 伪装 job 完成。
 - 失败恢复：
   - settings 保存失败不得产生半写入 audit 或半更新规则。
   - data reset 失败必须保留可诊断 job 状态，不泄露密码。

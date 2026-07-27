@@ -1,5 +1,7 @@
 # 测试闭环依赖地图
 
+> 2026-07-27 当前合同：页面 read model 已退休，只保留 `workbench_relation`、`search`、`no_oa_bank_batch` 三个共享项。本文后续仍出现的页面 freshness/worker/projection 文件名属于历史覆盖地图，不得作为当前运行时依赖；当前事实源见 `docs/architecture/module-boundaries/read-model-contracts.md` 和各页面 `boundary-io.md`。
+
 本文是测试闭环的全局依赖地图。它先描述页面、API、read model、worker、domain event 和状态平面之间的关系，再指导各模块在 `docs/modules/<module>/tests.md` 中补齐影响面和测试缺口。
 
 本文件不是产品事实源。业务口径仍以 `docs/product-specs/` 为准；页面和运行时事实仍以 `docs/app-architecture/` 为准；本文件只把这些事实组织成测试闭环视角。

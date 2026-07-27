@@ -77,9 +77,9 @@
 | canonical 表或 identity | canonical-facts、workbench-relations、reconciliation-workbench 上下游 |
 | 性能 | 固定查询次数、服务端分页、页面最大 200 行 |
 
-## 共享资源 HANDOFF
+## 跨页面清理结果
 
-本模块已经切断旧 Workbench/workbench-relation reader，但不在页面分支删除共享全局实现、registry、worker、migration 或 App Status 配置。所有调用页面完成迁移后，由主控按 whole-repo scan 统一删除，精确清单记录在 `implementation-notes.md`。
+旧 Workbench generation reader、registry、worker 和 App Status 配置已删除。本页面只读 canonical facts/active relations；仍保留的 `workbench_relation` 是其它明确登记消费者的共享 distribution，不进入本页面读链。历史 migration/表暂留作回滚证据。
 
 ## 本目录文件
 

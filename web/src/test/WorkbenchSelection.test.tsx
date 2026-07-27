@@ -1364,7 +1364,7 @@ describe("Workbench row selection and detail drawer", () => {
           message: "OA 已同步",
           dirty_scopes: [],
         },
-        workbench_read_model: {
+        workbench_matching: {
           status: "stale",
           dirty_scopes: ["2026-04"],
           stale_scopes: ["2026-04"],
@@ -1414,7 +1414,7 @@ describe("Workbench row selection and detail drawer", () => {
           message: "OA 有待处理变更",
           dirty_scopes: ["2026-04"],
         },
-        workbench_read_model: {
+        workbench_matching: {
           status: "ready",
           dirty_scopes: [],
           stale_scopes: [],
@@ -1455,7 +1455,7 @@ describe("Workbench row selection and detail drawer", () => {
           message: "OA 有待处理变更",
           dirty_scopes: ["2026-03"],
         },
-        workbench_read_model: {
+        workbench_matching: {
           status: "ready",
           dirty_scopes: [],
           stale_scopes: [],

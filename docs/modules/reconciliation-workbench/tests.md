@@ -9,10 +9,10 @@
 | 1. Business core | 适用 | `tests/test_workbench_relation_grouping.py`、`tests/test_workbench_write_characterization.py` | paired/unpaired、completion requirement、重复/冲突、ETC collapsed group、ignored/exception、筛选/排序业务等价 |
 | 2. Service/repository | 适用 | `tests/test_workbench_canonical_query_repository.py`、`tests/test_workbench_query_facade.py`、`tests/test_workbench_uow_contract.py`、`tests/test_workbench_auth_context_idempotency.py` | canonical SQL owner、同 snapshot、固定查询数、事务内 identity/type 重验、CAS/幂等/rollback |
 | 3. API contract | 适用 | `tests/test_workbench_routes.py`、`tests/test_workbench_v2_api.py`、`tests/test_workbench_stale_write_contract.py` | 权限拒绝、非法参数、空集、分页、summary/detail/preview、409、旧 runtime 字段和旧 endpoints 删除 |
-| 4. Read model/worker cleanup | 适用 | `tests/test_platform_runtime_boundary_guards.py`、`tests/test_read_model_architecture_guards.py`、`tests/test_workbench_dirty_queue_wiring.py`、`tests/test_sse_smoke_probe.py` | 页面不读 generation/cache/status/queue/SSE；共享 generation/worker 继续保留给其它调用方 |
+| 4. Read model/worker cleanup | 适用 | `tests/test_platform_runtime_boundary_guards.py`、`tests/test_read_model_architecture_guards.py`、`tests/test_workbench_dirty_queue_wiring.py`、`tests/test_sse_smoke_probe.py` | 页面不读 generation/cache/status/queue/SSE；旧 generation/worker/manifest 保持删除，只有登记的共享 relation/search/no-OA read model 保留 |
 | 5. Frontend interaction | 适用 | `web/src/test/Workbench*.test.*` | loading/empty/error、权限、搜索/筛选/排序/分页、drawer、写后 GET、无 polling/SSE/version gate |
 | 6. E2E flow | 适用 | `web/e2e/workbench-stale-error-flow.spec.ts`、`tests/test_write_operation_e2e_smoke.py` | preview -> confirm/withdraw -> reread；旧刷新等待步骤删除 |
-| 7. Existing regression | 适用 | `tests/test_no_oa_bank_batch_workbench_integration.py`、`tests/test_bank_auto_tag_rules_api.py`、`tests/test_app_health_api.py`、`tests/test_workbench_sql_runtime.py` | no-OA、银行标签、App Health、batch-accounting 共享 generation loader 不被误删 |
+| 7. Existing regression | 适用 | `tests/test_no_oa_bank_batch_workbench_integration.py`、`tests/test_bank_auto_tag_rules_api.py`、`tests/test_app_health_api.py`、`tests/test_workbench_canonical_query_repository.py` | no-OA、银行标签、App Health 与 batch-accounting canonical 查询不被误伤 |
 
 ## 必须断言
 
@@ -25,7 +25,7 @@
 - preview/confirm/withdraw 不出现 `expected_read_model_version`；transaction 内重验 canonical identities/types 和 active relation business versions。
 - canonical row 消失或类型漂移返回 409，mutation 不执行；幂等重复和 relation version/occupancy conflict 保持既有合同。
 - frontend/API 不再出现 `read_model_status`、`read_model_version`、`source_versions`、`refresh_enqueued`、active generation、`/refresh-status` 或 `/events`。
-- 共享 batch-accounting generation loader、`workbench_relation` distribution 和 worker 仍可运行。
+- batch-accounting 不再依赖 generation；`workbench_relation` distribution 与 worker 只服务登记的独立消费者。
 
 ## 性能 guards
 
@@ -86,5 +86,5 @@ bash scripts/verify.sh docs
 ## 未测风险
 
 - 当前本地测试没有真实生产基数、并发、连接池等待或 PostgreSQL planner 证据。
-- 共享 active-generation worker/表仍由 batch-accounting 等调用方消费；其最终删除必须由主控在所有迁移合并后执行。
+- 历史 active-generation 表仍存在但无运行时 reader/writer；物理 drop 留给单独可回滚 migration。
 - 真实 OA/银行/发票/ETC 同步延迟仍由各 canonical owner 的 ingestion/health 合同负责；页面请求不会调用外部系统补数。

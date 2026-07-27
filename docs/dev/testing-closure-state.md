@@ -2,6 +2,13 @@
 
 本文是测试闭环 master goal 的控制状态。每轮只处理一个模块或共享边界；结束时必须更新本文件，再根据状态选择下一轮。
 
+## 2026-07-27 - 页面 read model 退休集成
+
+- 当前运行时只保留 `workbench_relation`、`search`、`no_oa_bank_batch` 三个共享 read model；完整合同见 `docs/architecture/module-boundaries/read-model-contracts.md`。
+- 关联台、银行明细/余额、OA 待付款、流水规则批量处理、批量账务、ETC、税金抵扣、待找发票、进项使用和销项收款均由页面专属 API 直接读取 canonical PostgreSQL snapshot；成本统计和外部往来继续 direct read。
+- 下方旧记录中关于这些页面的 freshness、202、barrier、fan-out、worker drain、旧测试文件或 projection 的内容只作为历史演进证据，不是当前测试或部署合同。
+- 当前门禁以 direct canonical API/service/repository/frontend/E2E、三个共享 read model 的 manifest/worker/scope 回归，以及 retired runtime architecture guards 为准。
+
 ## 2026-07-22 - Phase 27 写后零 fan-out / 访问时收敛 release candidate
 
 - 当前合同：普通写、import confirm 与 OA authoritative sync 只提交 canonical facts/version/audit，页面 refresh targets、outbox IDs 和 unrelated dirty delta 必须为零；消费页在被访问时由 normal GET 精确收敛。

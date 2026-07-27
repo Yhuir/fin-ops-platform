@@ -253,6 +253,41 @@ describe("workbench api bank amount mapping", () => {
     );
   });
 
+  test("maps processed exception groups into the unpaired page", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          month: "all",
+          zone: "unpaired",
+          page: 1,
+          page_size: 50,
+          total: 1,
+          row_counts: { oa: 1, bank: 0, invoice: 0, rows: 1 },
+          has_more: false,
+          groups: [{
+            group_id: "processed-exception",
+            group_type: "processed_exception",
+            match_confidence: "medium",
+            reason: "processed_exception",
+            oa_rows: [{
+              id: "oa-processed",
+              type: "oa",
+              available_actions: ["detail", "cancel_exception"],
+            }],
+            bank_rows: [],
+            invoice_rows: [],
+          }],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const page = await fetchWorkbenchGroupsPage("all", "unpaired", 1, 50);
+
+    expect(page.groups[0]?.groupType).toBe("unpaired");
+    expect(page.groups[0]?.rawGroupType).toBe("processed_exception");
+  });
+
   test("preserves machine fields but never exposes an unknown backend message", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
@@ -326,8 +361,6 @@ describe("workbench api bank amount mapping", () => {
           affected_row_ids: ["oa-partial", "bank-partial"],
           affected_months: ["2026-05"],
           affected_scope_keys: ["2026-05"],
-          freshness_targets: [],
-          operation_barrier_targets: [],
           operation_projection: {
             after: {
               paired_groups: [
@@ -386,7 +419,7 @@ describe("workbench api bank amount mapping", () => {
     expect(result.operationProjection?.after.pairedGroups[0].rows.bank.map((row) => row.id)).toEqual(["bank-partial"]);
     expect(result.operationProjection?.after.pairedGroups[0].rows.invoice).toEqual([]);
     expect(result.operationProjection?.after.unpairedGroups).toEqual([]);
-    expect(result.operationBarrierTargets).toEqual([]);
+    expect(result).not.toHaveProperty("operationBarrierTargets");
   });
 
   test("loads initial workbench page with one versioned request", async () => {
@@ -1315,31 +1348,16 @@ describe("workbench exception api", () => {
   });
 });
 
-describe("workbench OA manual import API targets", () => {
+describe("workbench OA manual import affected scopes", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
   const targetEnvelope = {
     affected_scope_keys: ["all", "2025-12", "active:2025-12", "all:2025-12"],
-    read_model_scope_keys: ["all", "2025-12", "active:2025-12", "all:2025-12"],
-    freshness_targets: [
-      { read_model_key: "workbench", scope_key: "all" },
-      { read_model_key: "workbench", scope_key: "2025-12" },
-      { read_model_key: "workbench_relation", scope_key: "2025-12" },
-      { read_model_key: "cost_statistics", scope_key: "active:2025-12" },
-      { read_model_key: "cost_statistics", scope_key: "all:2025-12" },
-    ],
-    operation_barrier_targets: [
-      { read_model_key: "workbench", scope_key: "all" },
-      { read_model_key: "workbench", scope_key: "2025-12" },
-      { read_model_key: "workbench_relation", scope_key: "2025-12" },
-      { read_model_key: "cost_statistics", scope_key: "active:2025-12" },
-      { read_model_key: "cost_statistics", scope_key: "all:2025-12" },
-    ],
   };
 
-  test("maps attachment refresh target envelope", async () => {
+  test("maps attachment refresh affected scopes", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -1367,15 +1385,9 @@ describe("workbench OA manual import API targets", () => {
       unrecognizedAttachmentCount: 1,
     });
     expect(result.affectedScopeKeys).toEqual(["2025-12", "active:2025-12", "all:2025-12"]);
-    expect(result.operationBarrierTargets).toEqual([
-      { readModelKey: "workbench", scopeKey: "2025-12" },
-      { readModelKey: "workbench_relation", scopeKey: "2025-12" },
-      { readModelKey: "cost_statistics", scopeKey: "active:2025-12" },
-      { readModelKey: "cost_statistics", scopeKey: "all:2025-12" },
-    ]);
   });
 
-  test("maps import and delete target envelopes", async () => {
+  test("maps import and delete affected scopes", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
         new Response(
@@ -1412,18 +1424,11 @@ describe("workbench OA manual import API targets", () => {
       }),
     );
     expect(importResult.imported).toEqual(["oa-exp-1981"]);
-    expect(importResult.operationBarrierTargets).toContainEqual({
-      readModelKey: "workbench_relation",
-      scopeKey: "2025-12",
-    });
+    expect(importResult.affectedScopeKeys).toEqual(["2025-12", "active:2025-12", "all:2025-12"]);
     expect(deleteResult).toMatchObject({
       removed: true,
       rowId: "oa-exp-1981",
-      readModelScopeKeys: ["2025-12", "active:2025-12", "all:2025-12"],
-    });
-    expect(deleteResult.operationBarrierTargets).toContainEqual({
-      readModelKey: "cost_statistics",
-      scopeKey: "active:2025-12",
+      affectedScopeKeys: ["2025-12", "active:2025-12", "all:2025-12"],
     });
   });
 });

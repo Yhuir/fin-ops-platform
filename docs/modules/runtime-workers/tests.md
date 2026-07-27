@@ -1,203 +1,47 @@
 # Runtime Worker 测试矩阵
 
-> 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
+## 当前不变量
 
-## 2026-07-26 Cost direct canonical 边界门禁
+- `RUNTIME_WORKER_REGISTRY` 是 registration/event/handler/scope lane 的唯一清单。
+- 带 `read_model_key` 的 registration 精确覆盖 `workbench_relation`、`search`、
+  `no_oa_bank_batch`；retired page worker/event/env 不存在。
+- PostgreSQL durable queue 是 job/read-model 状态事实源；RabbitMQ 只负责 wakeup。
+- Worker 不依赖 `Application`、Flask/session/header/HTTP response。
+- import、OA sync、Workbench matching、BankFlow canonical draft 是领域/integration job，
+  不能登记为页面 read model。
+- deploy 必须 stop/disable 未登记 instance，并在 retired processing work 存在时拒绝激活。
 
-- `tests/test_runtime_worker_registry.py`、`tests/test_read_model_manifest.py`、`tests/test_deploy_runtime_examples.py`：Cost 不得重新出现在 worker registry、manifest、env 或 event contract。
-- `tests/test_platform_runtime_boundary_guards.py`、`tests/test_cost_statistics_canonical_repository.py`：Cost 每次请求只走单个 repeatable-read canonical snapshot，旧 projection/runtime/repository 文件必须保持删除。
-- `tests/test_write_operation_impact_matrix.py`、`tests/test_write_operation_e2e_smoke.py`：历史 Cost refresh event 仅作为禁止出现的 fan-out 签名；正常写后 Cost queue I/O 必须为零。
+## 七类测试
 
-## 2026-07-22 Phase 27 当前门禁
-
-- import registration 只含 `import.process.requested`；`import.fact.changed` 仅可出现在历史 orphan cleanup 诊断，不得出现在 worker registry/handler/env。
-- 普通写、import confirm 与 OA sync 不生成页面 refresh event；页面 query gateway 是精确 scope enqueue owner。
-- registry/manifest/env、zero-fan-out、worker exact-scope drain 与 access-to-fresh 必须分别验证。
-
-## 修改前影响面清单
-
-Runtime worker 是全局后台执行面，修改前必须逐项确认影响范围：
-
-| 影响面 | 当前事实源 | 需要关注的旧功能 |
+| 类别 | 适用性 | 当前入口 |
 | --- | --- | --- |
-| Worker 注册与启动 | `runtime_worker_registry.py`、`app/worker.py`、manifest CLI、deploy env examples | required worker 是否完整、`--registration --worker-instance --check` 是否继续输出 registry 派生配置、systemd env 是否覆盖所有 event type |
-| Durable queue | `RuntimeQueueRepository`、`job.outbox_events` | enqueue/dedupe、claim、stale reclaim、complete、retry、dead-letter、publish 状态、operator resolution；active claim hot path 必须保留 event-type-first priority index |
-| Read model dirty scope | `job.read_model_dirty_scopes`、`ReadModelRefreshGateway`、scope policy registry | dirty scope source version、source guard、非法 scope 清理、replacement enqueue、不可伪造 fresh |
-| Worker loop | `RuntimeWorker.run_once()`、handler registry | heartbeat、statement timeout、task timeout、retry delay、max attempts、无 handler 失败路径 |
-| Worker idle poll | `RuntimeWorkerConfig`、`app/worker.py`、deploy env examples | PostgreSQL durable queue worker 默认 idle poll 必须保持 `0.05s`；`workbench` 月分片热 lane 为 `0.01s`；required read model worker env 不得重新固定历史 `2s/0.25s/0.1s/5s` 慢轮询 |
-| Worker claim lane | `RuntimeWorkerConfig`、`RuntimeQueueRepository.claim_next/claim_event_by_id`、worker registry | 同一 event type 下仍允许用 `scope_key` include/exclude 拆分确有需要的 lane；Workbench 当前不拆分，单一 registration claim 月份与 `all` fan-out command |
-| Readiness / App Health | `RuntimeMonitoringRepository`、`ReadModelReadinessReporter` | missing/stale/mismatch/failed/unavailable 聚合、scope 级诊断、worker kind/event type mismatch |
-| RabbitMQ transport | `rabbitmq_runtime.py`、dispatcher/consumer/preflight | RabbitMQ 只传 envelope/wakeup，不携带业务 payload；Postgres 仍是事实源；ack 必须在 Postgres claim 成功后 |
-| 运维命令 | `runtime_queue_ops`、scope contract check、readiness backfill | inspect/requeue/resolve-dead-letter 必须保留审计和 freshness 前置条件 |
-| 跨模块访问收敛 | import、OA、ETC、workbench、bank detail、invoice lifecycle、tax read model、Cost direct canonical read | 普通 writer 不 fan-out；read-model 页面不能绕过 gateway/registry/readiness，Cost 不能恢复旧 projection |
+| 1. 业务核心 | 间接适用 | 各 handler owner 测试保护 import/OA/matching/canonical draft 业务规则 |
+| 2. Service/repository | 适用 | `tests/test_runtime_worker.py`、`tests/test_runtime_queue.py`：claim、retry、defer、ack、heartbeat、timeout |
+| 3. API contract | 间接适用 | job/App Status API tests 保护状态和错误 shape；worker 自身无 HTTP API |
+| 4. Read model/cache/background job | 核心适用 | `tests/test_runtime_worker_registry.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_read_model_manifest.py` |
+| 5. 前端交互 | 间接适用 | App Status、job progress 和导入页面 tests；worker 不拥有 UI |
+| 6. 端到端 | 适用 | import/OA/settings/BankFlow E2E 与 backend integration flows |
+| 7. 既有功能回归 | 核心适用 | 全量 backend/frontend/E2E，加 deploy/RabbitMQ/queue/migration tests |
 
-## 场景覆盖清单
+## 必须保留的负向断言
 
-| 场景 | 优先级 | 当前覆盖 | 状态 | 说明 |
-| --- | --- | --- | --- | --- |
-| Worker 从 Postgres claim event 并 complete | P0 | `tests/test_runtime_worker.py`、`tests/test_runtime_queue.py`、`tests/test_runtime_infrastructure_postgres_integration.py` | covered | 覆盖内存 fake 与真实 Postgres integration。 |
-| Durable queue claim hot path index | P0 | `tests/test_postgres_migrations.py::PostgresMigrationSqlTests::test_runtime_queue_claim_hot_path_index_is_declared`、`tests/test_postgres_migrations.py::MigrationFileTests::test_expected_migration_files_are_present_and_ordered` | covered | `job.outbox_events` active queue claim 必须保留 `outbox_events_claim_event_type_priority_idx`，以 event type / status / priority rank / available time 支撑 grouped smoke 的 worker lane pickup。 |
-| Handler 失败进入 retry / dead-letter | P0 | `tests/test_runtime_worker.py`、`tests/test_runtime_queue.py` | covered | 覆盖 retry delay、max attempts、processing lock。 |
-| Handler 遇到依赖 read model 未 fresh 时短延迟 defer | P0 | `tests/test_runtime_worker.py`、`tests/test_runtime_queue.py` | covered | `*_read_model_not_fresh` / `read_model_not_fresh` 不走普通失败/dead-letter，而是短延迟回 pending。 |
-| Same-scope parent shard 未 fresh / inconsistent 时补投 parent scope | P0 | `tests/test_runtime_worker.py::RuntimeWorkerTests::test_run_once_requeues_same_scope_parent_when_generation_is_inconsistent` | covered | `workbench_read_model_not_fresh: parent_generation_inconsistent parent_scope_keys=...` 不被同 scope skip；会补投 parent month scope，且不被旧 fresh readiness 短路；当前 all/parent event 使用 retry 级退避，避免快速重发抢占 parent month shard。 |
-| defer 遇到同 dedupe pending 覆盖事件 | P0 | `tests/test_runtime_queue.py` | covered | 当前 processing 事件标记 done + `runtime_defer_superseded`，避免唯一冲突导致 worker 崩溃并等待 300s lock timeout。 |
-| defer 遇到旧 done 事件 source_version 更高 | P0 | `tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_defer_event_does_not_let_older_done_event_cover_newer_processing_event` | covered | 覆盖事件必须比当前 processing event 更新；旧 done 事件不能把新导入产生的 dirty scope 对应事件错误标记 superseded。 |
-| 完成态 force refresh 不覆盖后续访问 target | P0 | `tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_atomic_read_model_enqueue_does_not_reuse_completed_force_refresh_for_new_target` | covered | 显式运维重建完成后，新的 canonical target 访问必须创建必要 refresh；不得因历史 `force_refresh=true` 永久 no-op。 |
-| 无 handler / 无 event type 不误 claim | P0 | `tests/test_runtime_worker.py` | covered | 防止 worker 注册错误时吞事件。 |
-| PostgreSQL durable queue pickup latency 默认值 | P0 | `tests/test_runtime_worker.py::RuntimeWorkerTests::test_default_poll_interval_is_fast_enough_for_read_model_slo`、`tests/test_deploy_runtime_examples.py::DeployRuntimeExampleTests::test_required_worker_env_examples_do_not_pin_legacy_slow_poll_interval`、`tests/test_deploy_runtime_examples.py::DeployRuntimeExampleTests::test_runtime_worker_env_install_migrates_only_legacy_poll_interval` | covered | 默认 idle poll 为 `0.05s`，`workbench` 月分片热 lane 为 `0.01s`；生产已有 env 只迁移精确旧 `--poll-interval-seconds 2/0.25/0.1/0.05` 到当前 release 示例值，不覆盖 RabbitMQ 灰度或 per-worker throughput。 |
-| Heartbeat 写入与 required worker mismatch | P0 | `tests/test_runtime_worker.py`、`tests/test_runtime_monitoring.py`、`tests/test_runtime_worker_registry.py` | covered | 覆盖 instance、kind、event type mismatch。 |
-| 高频 read model 专用 consumer | P0 | `tests/test_runtime_worker_registry.py` | covered | `search`、`search-secondary`、`search-tertiary`、`pending-invoice`、`tax-offset`、`invoice-lifecycle-secondary` 必须保留 required worker；成本统计已退出 worker registry，回归必须证明旧 Cost worker 未被重新登记。 |
-| Workbench bounded month consumers + primary-only all fan-out | P0 | `tests/test_runtime_worker_registry.py::RuntimeWorkerRegistryTests::test_workbench_registration_claims_month_and_all_scopes`、`tests/test_deploy_runtime_examples.py::DeployRuntimeExampleTests::test_main_workbench_worker_owns_month_and_all_fan_out_scopes`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_expands_all_into_month_shards` | covered | `workbench` primary claim month + `all`；`workbench-secondary` 只 claim month并明确排除 `all`。`all` 仍只投递月份 refresh、传播 force/tenant/priority/trace并完成 command，不发布全局 generation；两个 instance 使用独立 worker kind。 |
-| Registry / manifest / deploy env 同步 | P0 | `tests/test_runtime_worker_registry.py`、`tests/test_read_model_manifest.py`、`tests/test_deploy_runtime_examples.py`、`tests/test_read_model_slo_smoke.py`、`tests/test_postgres_migrations.py`、`tests/test_runtime_redis.py` | covered | 防止新增 worker/read model 只改一处：App Status read model 必须匹配 required worker、RabbitMQ dispatch event、SLO smoke scope、migration storage contract 和 Redis/env 模板；worker read-model registration 也必须反向出现在 App Status/manifest/policy。 |
-| Read model refresh scope 归一化、校验、去重 | P0 | `tests/test_read_model_refresh_gateway.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_read_model_scope_contract.py` | covered | 成本统计旧裸月份/裸 `all` 已有回归覆盖。 |
-| Readiness reporter 记录 fresh/failed/mismatch/refreshing | P0 | `tests/test_read_model_readiness_reporter.py`、`tests/test_app_status_readiness_backfill.py` | covered | 覆盖 handler wrapper 和禁止 fan-out 父 scope 伪 fresh。 |
-| App Health runtime snapshot | P0 | `tests/test_runtime_monitoring.py`、`tests/test_app_health_api.py`、`tests/test_app_status_overview_service.py` | covered | 覆盖 backlog、failed job、stale dirty scope、worker metrics，以及 Workbench active repair 不被旧 consistency failure 提升为 blocked dependency。 |
-| RabbitMQ envelope 不包含业务 payload | P0 | `tests/test_runtime_queue.py`、`tests/test_rabbitmq_runtime.py`、`tests/test_runtime_infrastructure_postgres_integration.py` | covered | RabbitMQ 只可承载 routing identity/version。 |
-| RabbitMQ dispatcher publish confirm 后才 mark published | P0 | `tests/test_rabbitmq_runtime.py` | covered | 防止未确认 publish 被标记成功。 |
-| RabbitMQ consumer 先 claim Postgres 再 ack | P0 | `tests/test_rabbitmq_runtime.py` | covered | 防止 RabbitMQ 消息成功但 Postgres 事实未锁定。 |
-| Transactional dirty/outbox writer scope contract | P1 | `tests/test_runtime_queue.py`、`tests/test_postgres_repositories_boundaries.py`、`tests/test_turnover_ledger_uow_contract.py`、`tests/test_workbench_uow_contract.py` | covered | 事务内 writer 必须在同一 transaction 写 dirty/outbox，保持 source_version/dedupe/payload contract，并且 custom transactional writer 产出的 scope 必须通过共享 scope policy registry。read model refresh 写入必须用 `clock_timestamp()` 固定实际 `available_at`，write-operation SLO 用 `available_at -> processed_at`，避免长事务内 `now()` 污染 worker drain 指标。 |
-| Runtime queue ops inspect/requeue/resolve dead-letter | P1 | `tests/test_runtime_queue_ops.py` | covered | resolve 要求 fresh readiness 且无 active dirty scope。 |
-| Runtime queue history retention | P1 | `tests/test_runtime_queue.py`、`tests/test_runtime_queue_ops.py`、`tests/test_deploy_runtime_examples.py`、`tests/test_postgres_migrations.py` | covered | 只删除完成态 `done` 历史；保留 pending/processing/failed/dead-lettered、same-scope 失败诊断证明和每个 exact dirty scope 最新 done source_version；deploy timer 使用 migrator env，不扩大 API/worker delete 权限。 |
-| 固定 write-operation scenario / approval ticket | P0 | `tests/test_write_operation_scenario_discovery.py`、`tests/test_write_operation_e2e_smoke.py`、`tests/test_write_operation_slo_audit.py`、`tests/test_deploy_runtime_examples.py::DeployRuntimeExampleTests::test_runtime_env_examples_pin_standard_write_operation_smoke_inputs` | covered | 21 个页面的生产写入 smoke 输入由 discovery 标准策略定义；`FINOPS-WRITE-SMOKE-STANDING-20260702` 是受控可逆写场景常驻 ticket；导入、设置、数据重置页面禁止使用常驻生产 apply。每个 operation 每轮最多输出 1 个 scenario，避免同月多次撤回导致 Workbench/read model 串行长尾。E2E smoke 的写后 SLO 读取按 operation expectation 过滤 outbox，并对事件采样保留有效下限，防止最小 scenario `--limit 1` 漏掉同一写事务的必需 refresh。 |
-| Workbench withdraw submit duplicate I/O removal | P0 | `tests/test_workbench_relation_command_service.py::WorkbenchRelationCommandServiceTests::test_withdraw_relation_submit_reuses_loaded_snapshot_for_preview_lock`、`tests/test_workbench_auth_context_idempotency.py::WorkbenchAuthContextIdempotencyTests::test_withdraw_link_preview_and_submit_delegate_to_relation_command_service`、`tests/test_workbench_write_characterization.py::WorkbenchWriteCharacterizationTests::test_withdraw_link_uses_uow_transaction_when_available` | covered | 固定 Workbench withdraw write-operation 的 outbox 在事务内产生；如果 submit 事务二次加载 snapshot / 二次 fresh check，会放大 HTTP 写事务耗时。worker drain 以 `available_at` 为起点，submit 路径必须复用 canonical snapshot 并只做一次 freshness precondition。 |
-| Workbench relation changed rebuild source-object 补读 | P0 | `tests/test_workbench_relation_sql_projection.py::WorkbenchRelationSqlProjectionTests::test_rebuild_writes_linked_and_unlinked_relation_rows`、`tests/test_workbench_relation_sql_projection.py::WorkbenchRelationSqlProjectionTests::test_rebuild_indexes_cross_month_relation_members_in_current_scope` | covered | 固定 Workbench withdraw smoke 的 `workbench_relation.read_model.refresh` 不能在 changed rebuild 中重复全月读取 bank/OA/invoice 源对象；跨月 relation 只按缺失 row_id 和 row type 补读必要源表，禁止用 worker retry/sleep 掩盖旧查询计划。 |
-| Workbench relation-only delta exact proof | P0 | `tests/test_workbench_relation_read_model_refresh.py::WorkbenchRelationReadModelRefreshServiceTests::test_handle_runtime_event_uses_explicit_relation_delta_contract`、`tests/test_workbench_relation_sql_projection.py::WorkbenchRelationSqlProjectionTests::test_relation_delta_uses_exact_scope_proof_and_narrow_active_relation_query`、`tests/test_workbench_relation_sql_projection.py::WorkbenchRelationSqlProjectionTests::test_relation_delta_expands_uuid_and_legacy_aliases_before_replacing_old_group`、`tests/test_postgres_repositories_boundaries.py::test_workbench_relation_row_id_aliases_resolve_storage_and_legacy_ids`、`tests/test_turnover_ledger_postgres_integration.py::TurnoverLedgerPostgresIntegrationTests::test_workbench_relation_row_id_aliases_resolve_uuid_and_legacy_id`、`tests/test_workbench_etc_relation_enrichment_postgres.py::WorkbenchEtcRelationEnrichmentPostgresTests::test_shared_relation_membership_proof_changes_when_older_relation_is_withdrawn` | covered | 完整 relation delta 可跳过整月 payload 重建，但必须批量归一化 UUID/legacy aliases，并重新读取 exact-scope active relation count + typed membership digest；禁止以缓存 proof 加 `max(updated_at)` 证明 fresh，scope/schema/delta 不可证明时 full rebuild。 |
-| Bank batch unchanged source-version probe | P0 | `tests/test_bank_details_sql_runtime.py::BankTransactionTagReadFacadeTests::test_source_versions_for_scope_keys_uses_scope_summary_without_loading_rows`、`tests/test_bank_flow_rule_batch_application_service.py::BankFlowRuleBatchApplicationServiceTests::test_bank_flow_scope_source_versions_use_probe_ports_before_row_loading`、`tests/test_no_oa_bank_batch_read_model_refresh.py::NoOaBankBatchReadModelRefreshTests::test_unchanged_scope_skips_rebuild_and_snapshot_save` | covered | `bank_flow_rule_batch` / `no_oa_bank_batch` 月份 scope 的 unchanged worker path 先读 source-version-only probes 并跳过，不再先读取完整银行分类/关系行；`all` scope 不走月级 precheck。 |
-| RabbitMQ transport 下 stale/superseded processing 处理 | P1 | `tests/test_runtime_queue.py`、`tests/test_runtime_queue_ops.py` | covered | 可重新处理的 stale `processing` 释放回 pending；已被更新同 dedupe event 覆盖的旧 `processing` 走 superseded resolution；两者都写 operator audit，不伪造 fresh。 |
-| Legacy GridFS file-migration worker 删除 | P0 | `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests.test_canonical_gridfs_legacy_worker_path_is_removed`、`tests/test_rabbitmq_staging_preflight.py`、`tests/test_runtime_worker_registry.py` | covered | registry、worker CLI、deploy env、RabbitMQ dispatch 和 staging preflight 不再暴露 `file_object.gridfs_migration` / `--enable-file-object-migration`。 |
-| Runtime state policy / legacy snapshot boundary | P1 | `tests/test_runtime_state_policy.py`、`tests/test_runtime_bootstrap.py`、`tests/test_platform_runtime_boundary_guards.py` | covered | 防止 worker 或生产 bootstrap 回退到 Application/full snapshot。 |
-| 真实 RabbitMQ topology publish/consume | P1 | `tests/test_rabbitmq_integration.py`、`tests/test_rabbitmq_staging_preflight.py` | documented-risk | 需要 `RABBITMQ_TEST_URL`；本地/nightly 默认可 skip；staging preflight 缺 `FIN_OPS_TEST_DATABASE_URL` / `RABBITMQ_TEST_URL` 时返回 `configuration_missing`，不当作实现失败。 |
-| 真实 Postgres migration + queue integration | P1 | `tests/test_runtime_infrastructure_postgres_integration.py` | documented-risk | 需要 `FIN_OPS_TEST_DATABASE_URL`；无环境时 skip。 |
-| 真实 systemd worker drain / 长时间运行 | P2 | `docs/operations/runtime-worker-governance.md` runbook | documented-risk | 需要 staging/生产环境，不作为本地单元测试前置。 |
+- retired page `*.read_model.refresh`、scope、handler、registration、env/systemd unit 不存在。
+- registry/manifest/scope/App Status 集合精确三项。
+- `bank_flow_rule_batch.canonical_draft.refresh` 不进入 read-model manifest/readiness。
+- RabbitMQ consumer 必须回 PostgreSQL claim；publish success 不代表 done/fresh。
+- import/OA sync 不写 full-state snapshot 或 retired page fan-out。
+- deploy preflight 不删除历史表/backlog，不在门禁失败时停止所有保留 worker。
 
-## 七类测试适用性
-
-| 类别 | 是否适用 | 当前测试入口 | 说明 |
-| --- | --- | --- | --- |
-| 1. Business core unit tests | 适用 | `tests/test_runtime_queue.py`、`tests/test_read_model_refresh_gateway.py`、`tests/test_runtime_state_policy.py` | Queue 状态流转、scope contract、runtime state cleanup policy 都属于后台业务规则。 |
-| 2. Service-layer tests | 适用 | `tests/test_runtime_worker.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_runtime_monitoring.py`、`tests/test_runtime_queue_ops.py`、`tests/test_rabbitmq_staging_preflight.py` | 覆盖 worker orchestration、repository 写入、monitoring、ops 命令前置条件和 staging preflight 环境门禁。 |
-| 3. API contract tests | 间接适用 | `tests/test_app_health_*`、`tests/test_runtime_monitoring.py` | 本模块自身不暴露普通业务 API；通过 App Health/runtime snapshot 保护响应事实。若改 `/health` 或 `/api/app-health` shape，必须补 API contract test。 |
-| 4. Read model/cache/background job tests | 适用 | `tests/test_read_model_readiness_reporter.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_app_status_readiness_backfill.py` | 覆盖 read model refresh handler wrapper、dirty scope、readiness convergence。 |
-| 5. Frontend component and interaction tests | 间接适用 | `web/src/test/AppHealth*.test.tsx` | 修改 App Health 展示、loading/stale/error 语义时必须补前端交互测试；纯 worker 内部改动不适用。 |
-| 6. End-to-end business-flow integration tests | 按需适用 | `tests/test_runtime_infrastructure_postgres_integration.py`、`tests/test_rabbitmq_integration.py`、`tests/test_rabbitmq_staging_preflight.py`、各业务模块 smoke | 修改跨模块事件或 worker fan-out 时，至少补一个关键业务流 integration/regression test；缺真实 staging env 只能证明 preflight contract，不能证明 broker drain。 |
-| 7. Existing feature regression tests | 适用 | `tests/test_platform_runtime_boundary_guards.py`、`tests/test_runtime_worker_registry.py`、`tests/test_deploy_runtime_examples.py` | 防止新增 worker/read model/event type 破坏旧 registry、deploy、auth/Application 边界。 |
-
-## 历史 bug 回归库
-
-| 日期 | Bug / 风险 | 回归测试 | 状态 |
-| --- | --- | --- | --- |
-| 2026-06-25 | `WorkbenchMatchingWorkerFactory` 仍按旧合同向 `WorkbenchMatchingOrchestrator` 传 `pair_relation_service=`，而 orchestrator 已迁移到 `relation_read_port`，导致生产 `fin-ops-worker@workbench-matching.service` 启动即 `TypeError` 并进入 systemd restart loop。 | `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests.test_workbench_matching_uses_relation_read_port_not_pair_service` | covered |
-| 2026-07-02 | `job.outbox_events` / `job.read_model_dirty_scopes` 完成态历史无 retention，生产磁盘治理后发现 job schema 大于 read model schema；如果用手工 SQL 清理，容易误删 active/failed queue 状态或把 delete 权限扩给 API/worker。 | `tests/test_runtime_queue.py::RuntimeQueueRepositoryTests.test_runtime_queue_history_retention_preview_counts_done_history_without_delete`、`test_runtime_queue_history_retention_execute_deletes_only_candidates`、`tests/test_runtime_queue_ops.py::RuntimeQueueOpsTests.test_prune_history_cli_defaults_to_dry_run_repository_boundary`、`tests/test_deploy_runtime_examples.py::DeployRuntimeExampleTests.test_runtime_queue_history_prune_helper_uses_controlled_retention_defaults`、`tests/test_postgres_migrations.py::PostgresMigrationSqlTests.test_runtime_queue_history_retention_indexes_and_migrator_delete_grants_are_declared` | covered |
-| 2026-07-03 | 历史全局聚合会与 urgent 月份 shard 竞争同 event type，导致页面首屏 direct refresh 超 1s；2026-07-16 已删除该聚合与独立 lane。 | `tests/test_runtime_worker_registry.py::RuntimeWorkerRegistryTests::test_workbench_registration_claims_month_and_all_scopes`、`tests/test_deploy_runtime_examples.py::DeployRuntimeExampleTests::test_main_workbench_worker_owns_month_and_all_fan_out_scopes`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_expands_all_into_month_shards` | covered |
-| 2026-07-03 | grouped 1s read model smoke 中多个 handler 已很短但 enqueue-to-fresh 超 1s，worker lane claim 可能扫描无关 event type 的 active queue，放大 pickup 尾延迟。 | `tests/test_postgres_migrations.py::PostgresMigrationSqlTests::test_runtime_queue_claim_hot_path_index_is_declared`、`tests/test_runtime_queue.py`、`tests/test_runtime_worker.py` | local-covered / production-risk |
-| 2026-07-03 | 生产写场景如果每次临时选择候选和 ticket，会重复询问、候选漂移，且同一 operation 可能一次输出多条同月撤回场景，把 SLO 失败误变成测试数据放大。 | `tests/test_write_operation_scenario_discovery.py::WriteOperationScenarioDiscoveryTests::test_report_defines_page_write_scenario_policy_and_standing_ticket`、`test_standard_apply_scenarios_are_capped_per_operation`、`test_no_oa_discovery_requires_active_relation_contract`、`tests/test_deploy_runtime_examples.py::DeployRuntimeExampleTests::test_runtime_env_examples_pin_standard_write_operation_smoke_inputs` | covered |
-| 2026-07-03 | Workbench withdraw outbox 事件在 HTTP 事务内创建，事件提交前对 dispatcher 不可见；旧 submit 路径二次加载 relation snapshot 并重复 fresh check，会把写事务耗时误表现为 RabbitMQ publish 延迟，导致 fixed write-operation gate missing/timeout。 | `tests/test_workbench_relation_command_service.py::WorkbenchRelationCommandServiceTests::test_withdraw_relation_submit_reuses_loaded_snapshot_for_preview_lock`、`tests/test_workbench_auth_context_idempotency.py::WorkbenchAuthContextIdempotencyTests::test_withdraw_link_preview_and_submit_delegate_to_relation_command_service`、`tests/test_workbench_write_characterization.py::WorkbenchWriteCharacterizationTests::test_withdraw_link_uses_uow_transaction_when_available` | covered |
-| 2026-07-03 | PostgreSQL `now()` 在事务内固定为 transaction start，事务内 read model refresh outbox 如果依赖默认 `created_at/available_at`，会把业务写入耗时算进 enqueue-to-done，导致 worker SLO 假性超时。 | `tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_enqueue_read_model_refresh_in_transaction_preserves_source_version_payload_and_outbox_contract`、`test_enqueue_read_model_refreshes_in_transaction_batches_dirty_scope_and_outbox_writes`、`tests/test_write_operation_slo_audit.py::WriteOperationSloAuditTests::test_enqueue_duration_uses_available_at_instead_of_transaction_created_at` | covered |
-| 2026-07-03 | 固定 Workbench withdraw 场景撤回写入成功后，旧 `workbench_relation` projection 在 changed rebuild 中为了 relation 成员补齐再次全月扫描 bank/OA/invoice 源对象，导致 handler 接近 1s、enqueue-to-done 容易超标。 | `tests/test_workbench_relation_sql_projection.py::WorkbenchRelationSqlProjectionTests::test_rebuild_writes_linked_and_unlinked_relation_rows`、`tests/test_workbench_relation_sql_projection.py::WorkbenchRelationSqlProjectionTests::test_rebuild_indexes_cross_month_relation_members_in_current_scope` | covered |
-| 2026-07-03 | `bank_flow_rule_batch` full critical smoke 中 runtime result 已是 `skipped=true`，但旧 handler 在 skip 前仍执行银行交易行、分类行和 relation source version 加载，导致 unchanged scope 仍可能超过 1s。 | `tests/test_bank_details_sql_runtime.py::BankTransactionTagReadFacadeTests::test_source_versions_for_scope_keys_uses_scope_summary_without_loading_rows`、`tests/test_bank_flow_rule_batch_application_service.py::BankFlowRuleBatchApplicationServiceTests::test_bank_flow_scope_source_versions_use_probe_ports_before_row_loading`、`tests/test_no_oa_bank_batch_read_model_refresh.py::NoOaBankBatchReadModelRefreshTests::test_unchanged_scope_skips_rebuild_and_snapshot_save` | covered |
-| 2026-06-22 | Workbench active repair 已在运行，但 App Health 聚合旧 generation consistency failure 时仍写入 `workbench_read_model` unavailable dependency，导致运行摘要 yellow/refreshing 和顶部 red/blocked 同时出现。 | `tests/test_app_health_api.py::AppHealthApiTests::test_app_health_keeps_workbench_consistency_failure_busy_during_active_repair`、`tests/test_app_status_overview_service.py` | covered |
-| 2026-06-22 | 生产 schema/worker/RabbitMQ/Redis 已有单独测试，但没有跨 registry 门禁；新增 read model 可能只更新 App Status 或 worker registry，漏掉 migration storage contract、critical SLO smoke 或 deploy env，导致本地测试通过、生产运行面缺 worker/schema/transport/cache 配置。 | `tests/test_runtime_worker_registry.py::RuntimeWorkerRegistryTests::test_app_status_read_model_registry_matches_worker_and_rabbitmq_contracts`、`tests/test_read_model_slo_smoke.py::ReadModelSloSmokeTests::test_critical_only_plans_every_critical_app_status_read_model`、`tests/test_postgres_migrations.py::PostgresMigrationSqlTests::test_app_status_read_model_storage_contracts_are_declared`、`tests/test_deploy_runtime_examples.py::DeployRuntimeExampleTests::test_shared_rabbitmq_worker_env_does_not_switch_all_workers_to_rabbitmq`、`tests/test_runtime_redis.py::RuntimeRedisTests::test_production_env_examples_match_runtime_redis_settings_contract` | covered |
-| 2026-06-10 | 非事务 producer 可能绕过 `ReadModelRefreshGateway` 直接调用 `RuntimeQueueRepository.enqueue_read_model_refresh(...)`。 | `tests/test_platform_runtime_boundary_guards.py::test_read_model_refresh_producers_use_scope_gateway_boundary` | covered |
-| 2026-06-11 | 静态 boundary guard 误把 OA 登录 JSON 响应字段 `Admin-Token` 判定为 service 解析 HTTP cookie/header。 | `tests/test_platform_runtime_boundary_guards.py::test_services_do_not_import_http_auth_boundary_or_parse_cookie_token_headers`、`tests/test_target_oa_applicant_token_provider.py` | covered |
-| 2026-06-13 | downstream read model 依赖 source read model 尚未 fresh 时，被普通 retry 放大成 60s+ 等待甚至 dead-letter。 | `tests/test_runtime_worker.py::RuntimeWorkerTests::test_run_once_defers_dependency_not_fresh_without_marking_failed`、`tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_defer_event_delays_dependency_retry_without_failure_or_dead_letter` | covered |
-| 2026-06-13 | `defer_event` 把 processing 事件改回 pending 时，如果同 dedupe 已有 pending 新事件，会触发唯一索引冲突并使 worker 崩溃，事件卡到 lock timeout。旧多写 CTE 仍可能执行 pending 分支；当前回归要求覆盖事件存在时只执行 superseded resolve 分支，并且并发 pending 在预查后提交时用 `23505` fallback 二次 resolve。 | `tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_defer_event_resolves_current_processing_when_pending_same_dedupe_exists`、`tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_defer_event_resolves_unique_collision_from_concurrent_pending_cover` | covered |
-| 2026-06-13 | RabbitMQ worker 只消费 envelope，PostgreSQL 旧 `processing` 行没有对应消息时不会被普通消费自动 reclaim，导致 source read model 长时间 not fresh。 | `tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_release_stale_processing_events_requeues_with_operator_audit`、`tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_resolve_superseded_processing_events_marks_obsolete_processing_done`、`tests/test_runtime_queue_ops.py::RuntimeQueueOpsTests::test_release_stale_processing_dry_run_lists_candidates_without_update` | covered |
-| 2026-06-14 | `search-pending`、`cost-tax` 和单 `invoice-lifecycle` worker 串行 drain 多个下游事件，真实 confirm/withdraw 后部分 read model enqueue-to-done 仍超过 5s。 | `tests/test_runtime_worker_registry.py::RuntimeWorkerRegistryTests::test_hot_read_model_workers_have_dedicated_parallel_consumers` | covered |
-| 2026-06-14 | 生产 systemd 模板未显式传 `--dependency-not-fresh-delay-seconds`，只能使用代码默认 2s，关系 fan-out 依赖链固定等待偏长。 | `tests/test_deploy_oa_script.py::DeployOaScriptTests::test_systemd_worker_template_uses_registry_registration_contract` | covered |
-| 2026-06-14 | 真实 confirm/withdraw 在 1s dependency defer 与两条 search lane 下，`pending_invoice` dependency retry 和快速 withdraw 的第二个 search scope 仍可能超过 5s。 | `tests/test_runtime_worker_registry.py::RuntimeWorkerRegistryTests::test_hot_read_model_workers_have_dedicated_parallel_consumers`、`tests/test_runtime_worker.py::RuntimeWorkerTests::test_run_once_defers_dependency_not_fresh_without_marking_failed`、`tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_defer_event_delays_dependency_retry_without_failure_or_dead_letter` | covered |
-| 2026-06-14 | dependency-not-fresh 补投依赖时，如果依赖 refresh outbox 已经 pending/processing，会 bump 新 source_version 并把等待者继续推迟。 | `tests/test_runtime_worker.py::RuntimeWorkerTests::test_run_once_does_not_bump_dependency_refresh_when_scope_already_active`、`tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_read_model_refresh_is_active_checks_pending_or_processing_outbox_event` | covered |
-| 2026-06-21 | dependency dirty scope orphan 但 outbox 已 done/缺失时，worker 误判依赖 active，不再补投上游 refresh，导致 downstream read model 长期 refreshing。 | `tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_read_model_refresh_is_active_checks_pending_or_processing_outbox_event`、`tests/test_read_model_scope_contract.py::ReadModelScopeContractServiceTests::test_check_reports_invalid_policy_managed_read_model_scopes_without_writes` | covered |
-| 2026-06-14 | projection/facade 的 ensure refresh reason 在依赖 read model 已 active 时仍通过 gateway 入队，覆盖真实写入 reason 并持续 bump source_version，导致 `pending_invoice` 写后收敛 40s+。 | `tests/test_read_model_refresh_gateway.py::ReadModelRefreshGatewayTests::test_ensure_refresh_reason_does_not_bump_active_scope`、`tests/test_read_model_refresh_gateway.py::ReadModelRefreshGatewayTests::test_mutating_refresh_reason_still_bumps_active_scope` | covered |
-| 2026-06-16 | `turnover_ledger:all` / `no_oa_bank_batch:all` 因 `bank_detail_read_model_not_fresh` defer 时自动补投 `bank_detail:all`，而 `bank_detail:all` 又 fan-out 月份 shard，导致 dirty scope source_version 持续被 bump，页面长期 refreshing。 | `tests/test_runtime_worker.py::RuntimeWorkerTests::test_run_once_does_not_enqueue_bank_detail_all_for_all_scope_dependency`、`tests/test_read_model_refresh_gateway.py::ReadModelRefreshGatewayTests::test_bank_detail_all_shard_reason_does_not_bump_active_scope` | covered |
-| 2026-06-16 | downstream projection 读取 fresh `bank_detail` read model 时，部分 transaction id 未投影也被当成 `missing`/not fresh，`downstream_bank_tag_read` 因此每轮都补投月份 shard，刷新后仍缺同一批 id，形成永久循环。 | `tests/test_bank_details_sql_runtime.py::BankTransactionTagReadFacadeTests::test_get_by_transaction_ids_keeps_fresh_status_when_some_rows_are_not_projected`、`tests/test_bank_details_sql_runtime.py::BankTransactionTagReadFacadeTests::test_category_records_do_not_refresh_or_raise_when_fresh_model_has_missing_rows` | covered |
-| 2026-06-16 | downstream projection 读取多个月份时，一个月份 active 会让 facade 重刷所有月份，导致已 fresh 月份被父 worker 的快速重试反复打 pending。 | `tests/test_bank_details_sql_runtime.py::BankTransactionTagReadFacadeTests::test_get_by_transaction_ids_refreshes_only_blocking_dirty_scopes` | covered |
-| 2026-06-14 | `invoice_lifecycle` 缺少 source_version current guard，快速 confirm/withdraw 时旧版本事件可能继续重建并污染写操作审计；Workbench 同步 Redis warmup 曾进入 refresh ack 前热路径，导致连续写入第二个 event 超过 5s。2026-07-16 已删除该 warmer 与 env 开关，worker 不再执行页面 SQL/Redis I/O。 | `tests/test_invoice_lifecycle_read_model_refresh.py`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_returns_publish_without_sync_cache_warmup`、`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_workbench_sync_page_cache_warmer_stays_deleted` | covered |
-| 2026-06-14 | `bank_detail` 缺少 source_version current guard，快速 confirm/withdraw 时旧版本 bank detail 事件会完整 rebuild 并让新版本事件排队，放大 `pending_invoice` 依赖等待。 | `tests/test_bank_details_sql_runtime.py::BankDetailReadModelRefreshServiceTests::test_stale_source_version_does_not_rebuild_or_complete`、`tests/test_bank_details_sql_runtime.py::BankDetailReadModelRefreshServiceTests::test_source_version_that_becomes_stale_after_rebuild_does_not_complete` | covered |
-| 2026-06-15 | Workbench month shard 发布后投递的 `all` aggregate-only 事件使用 shard source_version；如果继续按 all dirty scope source_version 做 stale guard，事件会被跳过，或者 aggregate 未发布仍被标记 done，导致 all generation 长期停留在旧污染版本。 | `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_runs_all_aggregate_after_shard_publish_even_if_all_scope_source_is_newer`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_does_not_complete_dirty_scope_when_all_aggregate_did_not_publish` | covered |
-| 2026-06-20 | 发票导入后新 `processing` refresh event 被同 dedupe 的历史 `done` event 覆盖，`runtime_defer_superseded` 把事件置 done，但当前 dirty scope 仍 pending/refreshing，App Status 长时间不收敛。 | `tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_defer_event_does_not_let_older_done_event_cover_newer_processing_event` | covered |
-| 2026-06-20 | `import.fact.changed` 只 ack 不投递真实 bank detail refresh，或完整 imports snapshot 保存阶段直接生成 import fact dirty/outbox，导致历史月份被重刷或兼容事件 ack 后业务 read model 未更新。 | `tests/test_import_job_queue.py::ImportJobRepositoryTests::test_import_fact_changed_handler_completes_matching_dirty_scope`、`tests/test_postgres_repositories_core.py::test_save_imports_does_not_emit_import_fact_refresh_from_full_snapshot`、`tests/test_import_processing_service.py::test_file_import_confirm_job_returns_import_write_targets` | covered |
-| 2026-06-20 | 发票导入后台 worker 对进项/销项方向页固定双刷，input-only/output-only 文件会刷新无关 read model，放大导入后同步尾延迟。 | `tests/test_import_job_queue.py::ImportJobRepositoryTests::test_invoice_relation_scope_helpers_split_input_and_output_file_months`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_skips_unaffected_invoice_relation_read_models`、`tests/test_write_operation_slo_audit.py::WriteOperationSloAuditTests::test_invoice_import_confirmed_profile_allows_direction_specific_relation_refresh` | covered |
-| 2026-06-20 | 后台 import worker 的 `tax_offset` scope helper 未过滤 batch type，银行流水 `trade_time` 会被误算成税金抵扣月份并投递无关刷新。 | `tests/test_import_job_queue.py::ImportJobRepositoryTests::test_tax_offset_scope_helpers_ignore_bank_transaction_files` | covered |
-| 2026-06-20 | 银行导入持久化路径只投递 `bank_detail`，未主动投递 `bank_account_balance`，账户余额页面只能依赖 API miss 被动补刷，`bank_import_confirmed` SLO 缺少真实事件来源。 | `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_enqueues_bank_detail_for_transaction_month_scopes`、`tests/test_write_operation_slo_audit.py::WriteOperationSloAuditTests::test_bank_import_confirmed_profile_fails_when_account_balance_scope_is_missing` | covered |
-| 2026-07-13 | import worker 在启动时一次性缓存 file/import snapshot；启动后创建的新 session 到达异步 confirm 时触发 `KeyError(session_id)`，文件停在 preview_ready。 | `tests/test_import_job_queue.py::ImportJobRepositoryTests::test_runtime_import_processor_reloads_durable_state_after_worker_bootstrap` | covered |
-| 2026-06-20 | 历史 `import.fact.changed` 事件已 done，但 `import_facts_changed` dirty scope 仍 pending 且无 active outbox 可 claim，导致 App Status 卡同步中。 | `tests/test_read_model_scope_contract.py::ReadModelScopeContractServiceTests::test_check_reports_orphaned_import_fact_dirty_scopes_without_writes`、`test_apply_deletes_orphaned_import_fact_dirty_scopes_and_records_audit` | covered |
-| 2026-06-21 | runtime ETC import link helper 若绕过 `upsert_etc_invoice` 的 link-existing 边界，重新调用 canonical invoice 创建 API，会让 ETC ZIP/OA 附件路径再次污染统一发票池。 | `tests/test_platform_runtime_boundary_guards.py::RuntimeWorkerEtcImportLinkExistingTests::test_runtime_etc_import_link_never_calls_canonical_invoice_create_api` | covered |
-| 2026-06-21 | `workbench:all` aggregate-only 报 `parent_generation_inconsistent parent_scope_keys=...` 时，runtime worker 因同 scope type 跳过 dependency refresh，导致 all 事件 failed/dead-letter，parent month scope 不会被重建。 | `tests/test_runtime_worker.py::RuntimeWorkerTests::test_run_once_requeues_same_scope_parent_when_generation_is_inconsistent` | covered |
-| 2026-06-21 | Workbench `all` aggregate-only 在 parent month 未 fresh 时按 0.25s 快速 defer/republish，RabbitMQ 队列被 all 聚合事件重发淹没，真正的 parent month scope 长期 pending。 | `tests/test_runtime_worker.py::RuntimeWorkerTests::test_run_once_requeues_same_scope_parent_when_generation_is_inconsistent` | covered |
-| 2026-06-21 | 同一 read model scope 已有 active dirty scope 修复时，历史 failed outbox 仍进入 App Status current queue failed，导致“同步中”和“阻断”同时出现。 | `tests/test_app_status_overview_service.py::AppStatusRuntimeRepositoryTests::test_runtime_repository_ignores_failed_outbox_row_covered_by_active_dirty_scope` | covered |
-
-## 关键 smoke flows
-
-保留少量高价值 smoke，不做全量巨型 E2E：
-
-1. `producer -> ReadModelRefreshGateway -> job.read_model_dirty_scopes/job.outbox_events -> RuntimeWorker -> ReadModelReadinessReporter -> App Health`
-2. `RabbitMQ dispatcher -> persistent envelope publish -> consumer receives wakeup -> Postgres claim -> handler complete -> RabbitMQ ack`
-3. `dead-letter event -> runtime_queue_ops inspect -> repair/requeue or guarded resolve -> readiness/App Health 收敛`
-4. `新增 worker registration -> manifest CLI -> deploy env examples -> runtime monitoring required worker metrics`
-5. `导入/ETC/关系变更 -> derived lifecycle -> affected read model scopes -> 页面 read model refreshing/fresh 状态`
-
-## 本模块验证命令
-
-本模块最小闭环：
+## 验证
 
 ```bash
-PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker tests.test_runtime_worker_registry tests.test_runtime_queue tests.test_runtime_monitoring -v
-PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker_read_model_refresh_scopes tests.test_read_model_scope_contract tests.test_read_model_readiness_reporter -v
-PYTHONPATH=backend/src python3 -m unittest tests.test_rabbitmq_runtime tests.test_runtime_queue_ops tests.test_runtime_state_policy tests.test_deploy_runtime_examples tests.test_runtime_redis -v
-PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards tests.test_app_status_readiness_backfill -v
-bash scripts/verify.sh docs
+PYTHONPATH=backend/src python3 -m unittest \
+  tests.test_runtime_worker_registry \
+  tests.test_runtime_worker \
+  tests.test_runtime_queue \
+  tests.test_runtime_worker_read_model_refresh_scopes \
+  tests.test_deploy_runtime_examples -v
 ```
 
-部署合同回归还必须证明：manifest `--instances` 返回 registry 全集，且 release 激活会在重启前停用/禁用不在该集合中的历史或 WIP systemd worker；不得只检查 required readiness 而让未知实例继续 crash-loop。
-
-统一真实基础设施 gate：
-
-```bash
-bash scripts/verify.sh infra-smoke
-```
-
-本地没有 `FIN_OPS_TEST_DATABASE_URL` / `RABBITMQ_TEST_URL` 时，该命令验证 read model SLO、runtime sync closure gate、write-operation SLO、RabbitMQ staging preflight 工具合同，并跳过真实连接；配置真实 staging PostgreSQL 后会追加 `read_model_slo_smoke --critical-only` dry-run scope discovery。只有同时设置 `FIN_OPS_INFRA_SMOKE_APPLY=1` 时，才会追加 `--apply` 并真正 enqueue refresh events、等待 worker drain；配置 `FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed` 等 profile 后，会运行只读 `write_operation_slo_audit` 审计最近真实业务写入产生的 durable refresh events；配置真实 staging PostgreSQL/RabbitMQ 后还会运行 RabbitMQ staging preflight。
-
-有真实基础设施时追加：
-
-```bash
-FIN_OPS_TEST_DATABASE_URL=postgresql://... PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_infrastructure_postgres_integration -v
-RABBITMQ_TEST_URL=amqp://... PYTHONPATH=backend/src python3 -m unittest tests.test_rabbitmq_integration -v
-FIN_OPS_TEST_DATABASE_URL=postgresql://... RABBITMQ_TEST_URL=amqp://... PYTHONPATH=backend/src python3 -m unittest tests.test_rabbitmq_staging_preflight -v
-PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.run_rabbitmq_staging_preflight --json --skip-real-tests
-FIN_OPS_TEST_DATABASE_URL=postgresql://... FIN_OPS_INFRA_SMOKE_APPLY=1 bash scripts/verify.sh infra-smoke
-FIN_OPS_TEST_DATABASE_URL=postgresql://... FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed bash scripts/verify.sh infra-smoke
-```
-
-## Nightly CI 覆盖
-
-`bash scripts/verify.sh all` 会跑 backend unittest discover、frontend vitest/build 和 docs guard。默认夜间 CI 不依赖真实 Postgres/RabbitMQ URL；因此真实基础设施 smoke 属于 staging/手动 gate。
-
-## 未测风险
-
-- 当前默认 CI 不证明真实 RabbitMQ broker、真实 Postgres migration、systemd unit 和 worker 长时间 drain；`infra-smoke` 未设置 `FIN_OPS_INFRA_SMOKE_APPLY=1` 时也不证明直接 enqueue worker drain，未设置 `FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS` 时也不证明真实业务写入后的 durable refresh events。
-- `0086_runtime_queue_claim_hot_path.sql` 的 SQL 合同已本地覆盖，但生产是否把 grouped 1s pickup 尾延迟压到目标内，必须等 migration 发布后复跑 critical grouped read model smoke。
-- RabbitMQ 作为可选 transport 的端到端 broker 测试需要 `RABBITMQ_TEST_URL`，没有该环境变量时只能依赖 fake channel/consumer 测试。
-- `resolve-dead-letter` 等运维命令的真实生产执行仍需 operator review 和 readiness 事实核对；测试只保护命令前置条件和 SQL 行为。
-- 业务页面层面的 loading/stale/error 展示不在本模块完全覆盖，必须由具体页面模块补前端交互和关键业务流回归。
-
-## 2026-07-03 - Workbench UoW 批量 refresh 入队测试
-
-- 新增测试：`tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_enqueue_read_model_refreshes_in_transaction_batches_dirty_scope_and_outbox_writes`，覆盖批量 CTE 同事务写入 `job.read_model_dirty_scopes` 与 `job.outbox_events`，并保留 source_version、pending dedupe、priority、trace_id 和 action metadata 合同。
-- 新增测试：`tests/test_workbench_uow_contract.py::WorkbenchUoWContractTests::test_read_model_refresh_writer_uses_batch_repository_interface_when_available`，覆盖生产组合中的 `RuntimeQueueReadModelRefreshWriter.enqueue_refreshes(...)` 会优先调用 repository 批量接口，且不会回落到单条入队。
-- 新增测试：`tests/test_workbench_uow_contract.py::WorkbenchUoWContractTests::test_relation_write_uow_uses_batch_read_model_refresh_writer_when_available`，覆盖 Workbench relation UoW 对 confirm/withdraw 类 target 一次性提交 refresh targets，并保持 response 中 `source_versions` / `outbox_event_ids` 的旧 shape。
-- 覆盖类别：service-layer tests、read model/cache/background job tests、existing feature regression。API contract 和 frontend interaction 未新增，因为 HTTP response shape 与页面行为不变；E2E 真实业务流需要生产固定 scenario/ticket 复跑验证。
-
-## 2026-07-05 - Runtime Worker 边界 close
-
-- 删除旧代码：`backend/src/fin_ops_platform/app/worker.py` 中无调用 `_handle_import_fact_changed_event(...)` wrapper；`backend/src/fin_ops_platform/services/runtime_worker_handlers.py` 中无调用 `required_worker_dependency(...)` helper。
-- 新增测试：`tests/test_deploy_runtime_examples.py::DeployRuntimeExampleTests::test_runtime_worker_docs_use_registry_manifest_instead_of_manual_matrix`，防止 `docs/operations/deployment.md` 或 `deploy/oa/README.md` 重新维护手写 worker 矩阵、`sudo systemctl enable --now fin-ops-worker@...` 清单或已删除 file migration worker 文案。
-- 更新测试：`tests/test_runtime_monitoring.py::RuntimeMonitoringRepositoryTests::test_dashboard_outbox_metric_only_scans_current_attention_statuses` 不再绑定旧 SQL 括号格式，改为断言 current-effective attention statuses 与 publish statuses 的实际查询合同。
-- 覆盖类别：service-layer tests、read model/cache/background job tests、existing feature regression。API contract 和 frontend interaction 未新增，因为本轮未改变 HTTP response shape 或前端页面；真实 RabbitMQ/PostgreSQL/systemd drain 仍由 `infra-smoke` / staging gate 覆盖。
-
-## 2026-07-22 - matching 专用 worker 回归
-
-- `tests/test_workbench_dirty_queue_wiring.py`：matching source versions 排除纯展示 schema；bank-flow read-model provider 仍保留该依赖；worker entry 把配置的 statement timeout 传给 PostgreSQL queue boundary。
-- `tests/test_workbench_matching_scope_retry_ops.py`：dry-run 零写、exact failed scope execute、fingerprint drift 零写、non-failed 拒绝。
-- `tests/test_deploy_oa_script.py`：root-owned helper 只接受合法 `YYYY-MM` 和 dry-run / fingerprint-guarded execute 固定模式。
-- 七类测试：业务核心不适用（不改匹配规则）；service、read-model/worker、跨模块集成和现有回归适用；HTTP API contract 与 frontend interaction 不适用（未改 HTTP/UI）；真实 PostgreSQL/systemd drain 由发布后 Page Audit、App Health 和 worker scope 状态验证。
+生产 systemd instance、真实 RabbitMQ wakeup、旧 processing backlog 和 worker drain 必须在
+发布窗口验证；本地 fake 不能证明生产进程已收敛。

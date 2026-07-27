@@ -7,17 +7,14 @@ from types import SimpleNamespace
 from typing import Any, Callable
 
 from fin_ops_platform.domain.enums import BatchType
-from fin_ops_platform.services.app_settings_service import (
-    DEFAULT_OA_IMPORT_FORM_TYPES,
-    DEFAULT_OA_IMPORT_STATUSES,
-    DEFAULT_OA_RETENTION_CUTOFF_DATE,
-    AppSettingsService,
-)
+from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.background_job_service import BackgroundJobService
 from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
-from fin_ops_platform.services.bank_transaction_tag_read_facade import BankTransactionTagReadFacade
+from fin_ops_platform.services.bank_transaction_effective_category_provider import (
+    BankTransactionEffectiveCategoryProvider,
+)
 from fin_ops_platform.services.etc_existing_invoice_link_service import EtcExistingInvoiceLinkService
 from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
 from fin_ops_platform.services.etc_service import EtcService
@@ -32,7 +29,6 @@ from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.integrations import IntegrationHubService
 from fin_ops_platform.services.ledgers import LedgerReminderService
 from fin_ops_platform.services.matching import MatchingEngineService
-from fin_ops_platform.services.no_oa_bank_batch_service import NoOaBankBatchService
 from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncService
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
@@ -46,7 +42,6 @@ from fin_ops_platform.services.postgres_repositories.workbench_idempotency impor
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.reconciliation import ManualReconciliationService
-from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 from fin_ops_platform.services.search_service import SearchService
 from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedImportService
 from fin_ops_platform.services.workbench_exception_projection import EXCEPTION_PROJECTION_VERSION
@@ -64,7 +59,7 @@ from fin_ops_platform.services.workbench_matching_dirty_scope_worker import (
 )
 from fin_ops_platform.services.workbench_matching_orchestrator import WorkbenchMatchingOrchestrator
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import WorkbenchReconciliationDirtyQueue
-from fin_ops_platform.services.workbench_sql_projection import WorkbenchSqlProjectionBuilder
+from fin_ops_platform.services.workbench_canonical_rows import WorkbenchCanonicalRowsBuilder
 from fin_ops_platform.services.workbench_uow import WorkbenchWriteUnitOfWork
 
 IMPORT_JOB_PROCESSOR_TYPES = (
@@ -155,7 +150,7 @@ class ImportRuntimeProcessorFactory:
             persist_confirmed_import_delta=import_support.persist_confirmed_import_delta,
             workbench_matching_scope_months_for_import_file_session=_workbench_matching_scope_months_for_import_file_session,
             tax_offset_scope_keys_for_import_file_session=_tax_offset_scope_keys_for_import_file_session,
-            bank_detail_scope_keys_for_import_file_session=_bank_detail_scope_keys_for_import_file_session,
+            bank_scope_keys_for_import_file_session=_bank_scope_keys_for_import_file_session,
             input_invoice_usage_scope_keys_for_import_file_session=_input_invoice_usage_scope_keys_for_import_file_session,
             output_invoice_collection_scope_keys_for_import_file_session=_output_invoice_collection_scope_keys_for_import_file_session,
             link_etc_import_result_to_existing_invoices=_link_etc_import_result_to_existing_invoices(
@@ -204,7 +199,15 @@ class WorkbenchMatchingWorkerFactory:
         state_store = self._state_store()
         read_model_repository = getattr(state_store, "read_model_repository", None)
         app_settings_service = _app_settings_service(state_store)
-        queue_repository = RuntimeQueueRepository(self._connection)
+        category_service = BankTransactionCategoryService.from_snapshot(
+            state_store.load_bank_transaction_categories()
+        )
+        category_provider = BankTransactionEffectiveCategoryProvider(
+            category_service=category_service,
+            auto_category_service=BankTransactionAutoCategoryService(
+                category_service=category_service
+            ),
+        )
         relation_uow = WorkbenchWriteUnitOfWork(
             connection=self._connection,
             repository_factory=self._workbench_uow_repository_factory,
@@ -217,10 +220,7 @@ class WorkbenchMatchingWorkerFactory:
                 matcher=WorkbenchFreeMatchingEngine(),
                 relation_uow=relation_uow,
                 source_versions_provider=lambda: _workbench_matching_source_versions(app_settings_service),
-                bank_tag_read_facade=BankTransactionTagReadFacade(
-                    read_model_repository=read_model_repository,
-                    queue_repository=queue_repository,
-                ),
+                bank_category_provider=category_provider,
                 bank_flow_rule_tag_rules_payload=(
                     app_settings_service.get_bank_flow_rule_batch_tag_rules_payload
                 ),
@@ -556,16 +556,19 @@ def _tax_offset_scope_keys_for_import_rows(rows: Any) -> list[str]:
     return _workbench_matching_scope_months_for_import_rows(rows)
 
 
-def _bank_detail_scope_keys_for_import_file_session(session: Any, selected_file_ids: list[str]) -> list[str]:
+def _bank_scope_keys_for_import_file_session(
+    session: Any,
+    selected_file_ids: list[str],
+) -> list[str]:
     selected = {str(file_id) for file_id in list(selected_file_ids or [])}
     rows: list[Any] = []
     for file in list(getattr(session, "files", []) or []):
         if str(getattr(file, "id", "") or "") in selected:
             rows.extend(list(getattr(file, "normalized_rows", []) or []))
-    return _bank_detail_scope_keys_for_import_rows(rows)
+    return _bank_scope_keys_for_import_rows(rows)
 
 
-def _bank_detail_scope_keys_for_import_rows(rows: Any) -> list[str]:
+def _bank_scope_keys_for_import_rows(rows: Any) -> list[str]:
     months: set[str] = set()
     for row in list(rows or []):
         payload = row if isinstance(row, dict) else getattr(row, "__dict__", {})
@@ -615,7 +618,7 @@ def _normalized_batch_type(value: Any) -> BatchType | None:
 
 class _WorkbenchSqlMatchingRowProvider:
     def __init__(self, *, connection: Any) -> None:
-        self._builder = WorkbenchSqlProjectionBuilder(connection=connection)
+        self._builder = WorkbenchCanonicalRowsBuilder(connection=connection)
 
     def rows_for_scope(self, scope_month: str) -> dict[str, list[dict[str, object]]]:
         month = str(scope_month or "").strip()

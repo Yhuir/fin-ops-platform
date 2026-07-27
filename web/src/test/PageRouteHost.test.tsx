@@ -283,21 +283,4 @@ describe("PageRouteHost", () => {
     }
   });
 
-  test("keeps page-owned read-model retries bounded and stops them while hidden", () => {
-    const boundedRetryPaths = [
-      "src/pages/BankDetailsPage.tsx",
-      "src/pages/BankFlowRuleBatchPage.tsx",
-      "src/pages/CostStatisticsPage.tsx",
-      "src/pages/InputInvoiceUsagePage.tsx",
-      "src/pages/OaPendingPaymentsPage.tsx",
-      "src/pages/OutputInvoiceCollectionsPage.tsx",
-      "src/pages/PendingInvoicesPage.tsx",
-    ];
-    for (const path of boundedRetryPaths) {
-      const source = readFileSync(path, "utf8");
-      expect(source, path).toContain("document.visibilityState");
-      expect(source, path).toMatch(/MAX_(?:ATTEMPTS|DURATION|RETRIES)/);
-    }
-    expect(readFileSync("src/pages/BatchAccountingPage.tsx", "utf8")).toContain("document.visibilityState");
-  });
 });

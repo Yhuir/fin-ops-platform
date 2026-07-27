@@ -9,7 +9,7 @@
 | 1. 业务核心单元 | 适用 | 支付规则、active relation 聚合、多 OA/流水金额、OA reverse 状态与非法输入 |
 | 2. Service/repository | 适用 | canonical query service、RR/RO snapshot、固定查询次数、OA reverse/export、同事务组装 |
 | 3. API contract | 适用 | 权限拒绝、非法日期/月/filters、空集、筛选/排序/分页、summary、详情、导出、旧状态字段缺失 |
-| 4. Read model/worker cleanup | 适用 | route/frontend 不再依赖 gate、202、polling、filter-options；共享 worker 只做 HANDOFF，不在本分支删除 |
+| 4. Read model/worker cleanup | 适用 | route/frontend 不再依赖 gate、202、polling、filter-options；旧 invoice-usage/lifecycle projection、worker、registry、deploy 保持删除 |
 | 5. Frontend interaction | 适用 | loading/empty/error、筛选/排序/分页、详情、导出、OA reverse、写后 GET、权限 |
 | 6. E2E 业务流 | 适用 | 读/导出、支付规则保存后 GET、OA reverse、关系详情、失败恢复 |
 | 7. 既有功能回归 | 适用 | OA reverse、支付规则、Workbench relation fanout、permissions/audit |
@@ -66,4 +66,4 @@ cd web && npm run build
 
 - fake transaction 测试保护查询上界、snapshot 命令和 SQL 边界；一次性本地 PostgreSQL 17 测试库另以 20,002 张进项发票验证 20,001 个聚合行：200 行页面请求稳定约 1.0–1.3 秒，精确 20,000 行 DTO 导出约 6.9 秒。
 - 本地数据不等价于生产分布；生产 `EXPLAIN (ANALYZE, BUFFERS)`、锁等待、真实 XLSX 下载耗时和 OA 外部草稿联调仍需主控在 staging/生产只读验证。
-- 共享 `invoice-usage-collection` worker/manifest 清理必须等所有页面直读分支合并后由主控验证。
+- 历史 invoice-usage/lifecycle 表仍存在但无运行时 reader/writer；物理 drop 留给单独可回滚 migration。

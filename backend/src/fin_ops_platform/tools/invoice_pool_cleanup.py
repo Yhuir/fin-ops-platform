@@ -997,7 +997,7 @@ def planned_actions(summary: dict[str, Any]) -> list[dict[str, Any]]:
             "legacy_match_rule": "invoice_source='ETC导入' and invoice_kind='ETC发票' without non-ETC source links",
         },
         {
-            "action": "rebuild_invoice_read_models_and_workbench_generation",
+            "action": "refresh_workbench_relation_read_model",
             "requires_worker_or_explicit_rebuild": True,
         },
         {
@@ -1015,10 +1015,6 @@ def live_counts(connection: Any) -> dict[str, int]:
         select 'app.etc_invoices', count(*)::bigint from app.etc_invoices
         union all
         select 'app.input_invoice_usage_oa_reverse_batches', count(*)::bigint from app.input_invoice_usage_oa_reverse_batches
-        union all
-        select 'read_model.input_invoice_usage_rows', count(*)::bigint from read_model.input_invoice_usage_rows
-        union all
-        select 'read_model.output_invoice_collection_rows', count(*)::bigint from read_model.output_invoice_collection_rows
         union all
         select 'read_model.workbench_relation_groups', count(*)::bigint from read_model.workbench_relation_groups
     """
@@ -1038,7 +1034,7 @@ def _soft_reference_required_decision(key: tuple[str, str, str]) -> str:
     if key == ("app", "input_invoice_usage_oa_reverse_batches", "invoice_ids"):
         return "archive_or_rebuild_oa_reverse_batches_before_canonical_pool_reset"
     if key[0] == "read_model" and key[1] == "workbench_relation_groups":
-        return "rebuild_workbench_active_generation_after_reimport"
+        return "refresh_workbench_relation_after_reimport"
     return "explicit_cleanup_strategy_required"
 
 

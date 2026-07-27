@@ -77,8 +77,16 @@ class TurnoverLedgerQueryService:
             yield self._local_ledger_service
             return
         with turnover_ledger_canonical_snapshot(self._connection) as state_store:
+            category_snapshot = state_store.load_bank_transaction_categories()
+            settings_snapshot = state_store.load_app_settings()
+            tag_dictionary = settings_snapshot.get("bank_transaction_tags")
+            if isinstance(tag_dictionary, dict):
+                category_snapshot = {
+                    **category_snapshot,
+                    "tag_dictionary": tag_dictionary,
+                }
             category_service = BankTransactionCategoryService.from_snapshot(
-                state_store.load_bank_transaction_categories(),
+                category_snapshot,
                 transaction_exists=state_store.transaction_exists,
             )
             auto_category_service = BankTransactionAutoCategoryService(

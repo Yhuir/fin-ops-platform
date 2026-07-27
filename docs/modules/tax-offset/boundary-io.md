@@ -58,6 +58,6 @@
 | Import | `tax_certified_import_*`、既有 import processing owner |
 | Tests | `test_tax_offset_canonical_repository.py`、`test_tax_offset_api.py`、`test_tax_offset_service.py`、Tax Vitest/Playwright |
 
-## 旧代码删除与共享 HANDOFF
+## 旧代码删除结果
 
-本分支已删除页面 SQL-RM/cache gateway 测试和前端 polling 合同，并把税金 Page Audit 改为 direct-canonical proof。以下共享资源不得在本分支删除：tax read-model manifest/scope policy、runtime worker registry/handlers、App Status registry、deploy worker env、RabbitMQ dispatcher、全局 cleanup migration。主控确认无其它调用方后统一删除旧 runtime/read model/rebuild/warmup artifacts。
+页面 SQL read model、cache gateway、polling、projection/repository、refresh/rebuild/warmup、manifest/scope policy、runtime worker、App Status、deploy env 和 RabbitMQ 条目已删除；税金 Page Audit 使用 direct-canonical proof。历史 migration/表暂留作回滚证据，没有运行时 reader/writer。

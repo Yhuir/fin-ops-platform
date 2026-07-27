@@ -111,64 +111,6 @@ test.describe("turnover ledger browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("shows stale grouped ledger data without allowing manual closure", async ({ page }, testInfo) => {
-    const browserErrors = startStrictBrowserErrorCapture(page);
-    const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
-      turnoverLedgerReadModelStatus: "stale",
-    });
-    const recordLatency = createTurnoverLatencyRecorder(page, testInfo);
-
-    await recordLatency({
-      operationId: "turnover-ledger.open-page-stale-read-model",
-      visibleLabel: "外部往来款管理",
-      actionType: "navigate",
-    }, async (mark) => {
-      await page.goto("/turnover-ledger");
-      await mark("firstVisibleResponseLatencyMs", expect(page.getByTestId("turnover-ledger-page")).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(page.getByText("往来款台账正在刷新，当前展示的是非最新数据。")).toBeVisible());
-    });
-    await expect(page.getByRole("heading", { name: "外部往来款管理" })).toBeVisible();
-    await expect(page.getByText("往来款台账正在刷新，当前展示的是非最新数据。")).toBeVisible();
-
-    const table = page.getByRole("table", { name: "往来款左右双栏台账" });
-    await expect(table).toBeVisible();
-    await expect(table.getByText("云南建设有限公司")).toBeVisible();
-    await recordLatency({
-      operationId: "turnover-ledger.expand-stale-group",
-      visibleLabel: "展开 云南建设有限公司 流水明细",
-      actionType: "click",
-    }, async (mark) => {
-      await page.getByRole("button", { name: "展开 云南建设有限公司 流水明细" }).click();
-      await mark("finalSettledLatencyMs", expect(table.getByRole("row", { name: /turnover-bank-expense-1000.*外部往来款付款.*归还借款/ })).toBeVisible());
-    });
-    await expect(table.getByRole("row", { name: /turnover-bank-expense-1000.*外部往来款付款.*归还借款/ })).toBeVisible();
-    await expect(table.getByRole("row", { name: /turnover-bank-income-1000.*外部往来款收款.*收回借款/ })).toBeVisible();
-
-    await recordLatency({
-      operationId: "turnover-ledger.select-stale-expense-row",
-      visibleLabel: "选择流水 turnover-bank-expense-1000",
-      actionType: "check",
-    }, async (mark) => {
-      await table.getByRole("checkbox", { name: "选择流水 turnover-bank-expense-1000" }).check();
-      await mark("finalSettledLatencyMs", expect(page.getByText("已选 1 笔")).toBeVisible());
-    });
-    await recordLatency({
-      operationId: "turnover-ledger.select-stale-income-row",
-      visibleLabel: "选择流水 turnover-bank-income-1000",
-      actionType: "check",
-    }, async (mark) => {
-      await table.getByRole("checkbox", { name: "选择流水 turnover-bank-income-1000" }).check();
-      await mark("finalSettledLatencyMs", expect(page.getByText("已选 2 笔")).toBeVisible());
-    });
-    await expect(page.getByText("已选 2 笔")).toBeVisible();
-    await expect(page.getByRole("button", { name: "确认闭环" })).toBeDisabled();
-    await expect(page.getByRole("dialog", { name: "确认外部往来闭环" })).toHaveCount(0);
-    expect(api.count("POST /api/turnover-ledger/closures/confirm")).toBe(0);
-    await expectNoUnexpectedSuccessUiErrors(page);
-    expect(browserErrors).toEqual([]);
-  });
-
   test("saves turnover tag selection and reloads the ledger through page access", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
@@ -394,8 +336,9 @@ test.describe("turnover ledger browser flow", () => {
       await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible());
       await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: "按项目" })).toBeVisible());
     });
-    const costPayload = await (await costExplorerResponse).json() as { read_model_status?: string };
-    expect(costPayload.read_model_status).toBe("fresh");
+    const costPayload = await (await costExplorerResponse).json() as Record<string, unknown>;
+    expect(costPayload).not.toHaveProperty("read_model_status");
+    expect(costPayload).not.toHaveProperty("refresh_enqueued");
     await recordLatency({
       route: "/cost-statistics",
       pageKey: "cost-statistics",

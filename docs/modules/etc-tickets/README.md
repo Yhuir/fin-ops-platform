@@ -33,7 +33,7 @@
 - `backend/src/fin_ops_platform/services/etc_reconciliation_service.py`
 - `backend/src/fin_ops_platform/services/etc_reconciliation_source_upload_service.py`
 - `backend/src/fin_ops_platform/services/import_processing_service.py`
-- `backend/src/fin_ops_platform/services/workbench_sql_projection.py`
+- `backend/src/fin_ops_platform/services/workbench_canonical_rows.py`
 - `backend/src/fin_ops_platform/services/workbench_pair_relation_service.py`
 - `backend/src/fin_ops_platform/services/workbench_relation_command_service.py`
 - `backend/src/fin_ops_platform/services/workbench_relation_read_facade.py`

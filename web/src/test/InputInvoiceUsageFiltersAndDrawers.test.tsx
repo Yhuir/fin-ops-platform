@@ -628,7 +628,6 @@ describe("Input invoice usage workflow drawers", () => {
       oaDraftUrl: "https://oa.example.test/draft/oa-draft-001",
       oaDetectionStatus: "draft_created",
       canConfirmSubmission: true,
-      canRefreshStatus: false,
     }));
     const manualStatus = vi.fn(() => Promise.resolve({
       batchId: "oa_reverse_batch_001",

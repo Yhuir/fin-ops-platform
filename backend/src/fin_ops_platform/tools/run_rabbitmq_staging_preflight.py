@@ -278,10 +278,7 @@ def _runtime_env(env: Mapping[str, str]) -> dict[str, str]:
     runtime_env["RABBITMQ_URL"] = str(env.get("RABBITMQ_URL") or env["RABBITMQ_TEST_URL"])
     runtime_env.setdefault("RABBITMQ_VHOST", "/finops")
     runtime_env.setdefault("RABBITMQ_EXCHANGE", "finops.events")
-    runtime_env.setdefault("RABBITMQ_WORKBENCH_QUEUE", "finops.workbench.read_model.refresh")
-    runtime_env.setdefault("RABBITMQ_WORKBENCH_ROUTING_KEY", "workbench.read_model.refresh")
     runtime_env.setdefault("RABBITMQ_DEAD_LETTER_EXCHANGE", "finops.events.dlx")
-    runtime_env.setdefault("RABBITMQ_WORKBENCH_DEAD_LETTER_QUEUE", "finops.workbench.read_model.refresh.dlq")
     runtime_env.setdefault("RABBITMQ_PREFETCH", "10")
     runtime_env.setdefault("RABBITMQ_PUBLISH_CONFIRM", "true")
     return runtime_env

@@ -12,7 +12,6 @@ from unittest.mock import patch
 from fin_ops_platform.services.import_file_service import FileImportPreviewItem
 from fin_ops_platform.services.runtime_paths import default_data_dir
 from fin_ops_platform.services.state_store import ApplicationStateStore
-from fin_ops_platform.services.tax_offset_read_model_service import TAX_OFFSET_READ_MODEL_SCHEMA_VERSION
 
 
 class StateStoreTests(unittest.TestCase):
@@ -512,26 +511,6 @@ class StateStoreTests(unittest.TestCase):
 
             self.assertEqual(loaded, snapshot)
 
-    def test_save_workbench_read_models_persists_and_loads_snapshot(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            data_dir = Path(temp_dir)
-            snapshot = {
-                "read_models": {
-                    "all": {
-                        "scope_key": "all",
-                        "scope_type": "all_time",
-                        "generated_at": "2026-04-08T12:00:00+00:00",
-                        "payload": {"summary": {"paired_count": 3}},
-                    }
-                }
-            }
-
-            store = ApplicationStateStore(data_dir)
-            store.save_workbench_read_models(snapshot)
-            loaded = ApplicationStateStore(data_dir).load_workbench_read_models()
-
-            self.assertEqual(loaded, snapshot)
-
     def test_save_no_oa_bank_batch_mutation_uses_explicit_local_boundary(self) -> None:
         with TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)
@@ -555,11 +534,9 @@ class StateStoreTests(unittest.TestCase):
             reloaded = ApplicationStateStore(data_dir)
             pair_snapshot = reloaded.load_workbench_pair_relations()
             no_oa_snapshot = reloaded.load_no_oa_bank_batches()
-            workbench_snapshot = reloaded.load_workbench_read_models()
 
         self.assertEqual(pair_snapshot["pair_relations"]["CASE-1"]["row_ids"], ["bank-1"])
         self.assertEqual(no_oa_snapshot["batches"]["batch-1"]["status"], "submitted")
-        self.assertEqual(workbench_snapshot.get("read_models", {}), {})
 
     def test_save_bank_flow_rule_batch_mutation_uses_local_bank_flow_boundary_only(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -584,11 +561,9 @@ class StateStoreTests(unittest.TestCase):
             reloaded = ApplicationStateStore(data_dir)
             pair_snapshot = reloaded.load_workbench_pair_relations()
             bank_flow_snapshot = reloaded.load_bank_flow_rule_batches()
-            workbench_snapshot = reloaded.load_workbench_read_models()
 
         self.assertEqual(pair_snapshot["pair_relations"]["CASE-1"]["row_ids"], ["bank-1"])
         self.assertEqual(bank_flow_snapshot["batches"]["batch-1"]["status"], "submitted")
-        self.assertEqual(workbench_snapshot, {})
 
 
 
@@ -651,90 +626,6 @@ class StateStoreTests(unittest.TestCase):
 
         self.assertEqual(loaded, snapshot)
 
-
-    def test_save_workbench_read_models_accepts_changed_scopes_for_local_snapshot(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            data_dir = Path(temp_dir)
-            store = ApplicationStateStore(data_dir)
-            snapshot = {
-                "read_models": {
-                    "all": {"scope_key": "all", "payload": {"summary": {"paired_count": 9}}},
-                    "2026-03": {"scope_key": "2026-03", "payload": {"summary": {"paired_count": 2}}},
-                }
-            }
-
-            store.save_workbench_read_models(snapshot, changed_scope_keys=["all"])
-            loaded = ApplicationStateStore(data_dir).load_workbench_read_models()
-
-        self.assertEqual(loaded, snapshot)
-
-    def test_save_tax_offset_read_models_persists_locally_across_store_instances(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            data_dir = Path(temp_dir)
-            snapshot = {
-                "read_models": {
-                    "2026-05": {
-                        "scope_key": "2026-05",
-                        "scope_type": "month",
-                        "schema_version": TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
-                        "month": "2026-05",
-                        "generated_at": "2026-05-04T12:00:00+00:00",
-                        "cache_status": "ready",
-                        "output_count": 2,
-                        "input_plan_count": 1,
-                        "certified_count": 3,
-                        "payload": {
-                            "output_items": [{"id": "output-1"}, {"id": "output-2"}],
-                            "input_plan_items": [{"id": "input-1"}],
-                            "certified_items": [{"id": "cert-1"}, {"id": "cert-2"}, {"id": "cert-3"}],
-                        },
-                        "source_scope_keys": ["tax-offset:source:2026-05"],
-                    }
-                }
-            }
-            store = ApplicationStateStore(data_dir)
-            store.save_tax_offset_read_models(snapshot)
-
-            reloaded = ApplicationStateStore(data_dir)
-            loaded = reloaded.load_tax_offset_read_models()
-
-        self.assertEqual(loaded, snapshot)
-
-    def test_save_tax_offset_read_models_accepts_changed_scopes_for_local_snapshot(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            data_dir = Path(temp_dir)
-            store = ApplicationStateStore(data_dir)
-            snapshot = {
-                "read_models": {
-                    "2026-05": {
-                        "scope_key": "2026-05",
-                        "scope_type": "month",
-                        "schema_version": TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
-                        "month": "2026-05",
-                        "generated_at": "2026-05-04T12:00:00+00:00",
-                        "cache_status": "ready",
-                        "output_count": 2,
-                        "input_plan_count": 1,
-                        "certified_count": 3,
-                        "payload": {
-                            "output_items": [{"id": "output-1"}, {"id": "output-2"}],
-                            "input_plan_items": [{"id": "input-1"}],
-                            "certified_items": [
-                                {"id": "cert-1"},
-                                {"id": "cert-2"},
-                                {"id": "cert-3"},
-                            ],
-                        },
-                        "source_scope_keys": ["tax-offset:source:2026-05"],
-                    }
-                }
-            }
-
-            store.save_tax_offset_read_models(snapshot, changed_scope_keys=["2026-05", "2026-04"])
-            loaded = ApplicationStateStore(data_dir).load_tax_offset_read_models()
-
-            self.assertEqual(loaded, snapshot)
-            self.assertEqual(loaded["read_models"]["2026-05"]["certified_count"], 3)
 
     def test_store_import_file_round_trips_locally(self) -> None:
         with TemporaryDirectory() as temp_dir:

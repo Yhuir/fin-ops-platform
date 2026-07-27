@@ -329,7 +329,6 @@ export type InputInvoiceUsageOaReverseBatch = {
   canCreateDraft?: boolean;
   canConfirmSubmission?: boolean;
   canRevoke?: boolean;
-  canRefreshStatus?: boolean;
   canManualStatus?: boolean;
 };
 

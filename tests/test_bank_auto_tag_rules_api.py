@@ -8,9 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from tests.app_test_support import build_local_state_application as build_application
-from fin_ops_platform.services.postgres_repositories.read_models import WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION
 from fin_ops_platform.services.state_store import ApplicationStateStore
-from fin_ops_platform.services.workbench_sql_projection import WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
 
 
 def _session(*, can_mutate_data: bool = True) -> SimpleNamespace:
@@ -1023,23 +1021,6 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             fee["rules"],
         )
         self.assertEqual(app._audit_service.as_dicts(), [])
-
-    def test_workbench_source_versions_include_bank_auto_tag_rules_version(self) -> None:
-        app = build_application()
-
-        with patch.object(app, "_current_bank_auto_tag_rules_version", return_value=42):
-            matching_versions = app._workbench_matching_source_versions()
-            read_model_versions = app._workbench_read_model_source_versions()
-            sql_versions = app._workbench_sql_read_model_source_versions()
-            aggregate_sql_versions = app._workbench_sql_read_model_source_versions("all")
-
-        self.assertEqual(matching_versions["bank_auto_tag_rules_version"], 42)
-        self.assertNotIn("workbench_read_model_schema_version", matching_versions)
-        self.assertEqual(read_model_versions["bank_auto_tag_rules_version"], 42)
-        self.assertEqual(sql_versions["bank_auto_tag_rules_version"], 42)
-        self.assertEqual(sql_versions["builder"], WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION)
-        self.assertEqual(aggregate_sql_versions["bank_auto_tag_rules_version"], 42)
-        self.assertEqual(aggregate_sql_versions["builder"], WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
 
     def test_put_derives_label_from_required_primary_and_optional_sub_label(self) -> None:
         app = build_application()

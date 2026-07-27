@@ -69,19 +69,15 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
             *,
             row_ids: list[str],
         ) -> WorkbenchQueryResult:
-            expanded_row_ids = app._expand_confirm_link_row_ids_for_existing_context(
-                row_ids,
-                month=str(month or "all"),
-            )
             rows = app._resolve_live_rows_direct(
-                expanded_row_ids,
+                row_ids,
                 month_hint=str(month or "all"),
             )
             return WorkbenchQueryResult(
                 HTTPStatus.OK,
                 {
                     "scope_key": str(month or "all"),
-                    "selected_row_ids": expanded_row_ids,
+                    "selected_row_ids": list(row_ids),
                     "selected_rows": rows,
                     "context_rows": [],
                     "rows": rows,
@@ -1112,15 +1108,22 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         self.assertEqual(writer.calls, [])
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-WITHDRAW-UOW"))
 
-    def test_formal_confirm_and_withdraw_never_consume_relation_preview_selection(self) -> None:
+    def test_formal_confirm_and_withdraw_use_bounded_canonical_selection(self) -> None:
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)
         query_facade = app._workbench_query_facade()
+        canonical_selection = query_facade.relation_preview_selection
+        selection_calls: list[list[str]] = []
 
-        def fail_if_preview_selection_is_read(*_args: object, **_kwargs: object) -> dict[str, object]:
-            raise AssertionError("formal relation commands must re-read canonical facts in their UoW")
+        def record_canonical_selection(
+            month: str | None,
+            *,
+            row_ids: list[str],
+        ) -> WorkbenchQueryResult:
+            selection_calls.append(list(row_ids))
+            return canonical_selection(month, row_ids=row_ids)
 
-        query_facade.relation_preview_selection = fail_if_preview_selection_is_read
+        query_facade.relation_preview_selection = record_canonical_selection
         app._workbench_query_facade = lambda: query_facade
         self._install_confirm_link_uow(app)
 
@@ -1150,6 +1153,8 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
 
         self.assertEqual(confirm_response.status_code, 200, confirm_response.body)
         self.assertEqual(withdraw_response.status_code, 200, withdraw_response.body)
+        self.assertTrue(selection_calls)
+        self.assertTrue(all(set(call).issuperset(row_ids) for call in selection_calls))
 
     def test_confirm_preview_reads_one_bounded_selection_and_skips_legacy_row_scans(self) -> None:
         app = self._build_app()

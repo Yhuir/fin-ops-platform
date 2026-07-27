@@ -225,7 +225,6 @@ type ApiPendingInvoiceRowsResponse = {
 type ApiPendingInvoiceRulesPayload = {
   version?: number | string | null;
   direction?: string | null;
-  derived_data_lifecycle?: Record<string, unknown> | null;
   permissions?: { can_save?: boolean | null } | null;
   available_tags?: ApiTagDefinition[] | null;
   bank_transaction_tags?: ApiTagDictionary | null;

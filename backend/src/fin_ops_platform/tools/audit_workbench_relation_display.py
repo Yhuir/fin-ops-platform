@@ -14,7 +14,7 @@ from fin_ops_platform.services.postgres_repositories.workbench_page_audit import
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Read-only unified page Audit for active Workbench relation display generations."
+        description="Read-only unified page Audit for canonical Workbench facts and active relations."
     )
     parser.add_argument("--json", action="store_true", help="Print JSON report. The audit is always read-only.")
     parser.add_argument("--fail-on-issues", action="store_true", help="Return exit code 1 for blocking issues.")

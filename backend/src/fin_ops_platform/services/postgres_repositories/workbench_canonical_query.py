@@ -21,29 +21,9 @@ from fin_ops_platform.services.workbench_relation_preview_policy import (
     WORKBENCH_RELATION_PREVIEW_MAX_CONTEXT_ROWS,
     WorkbenchRelationPreviewSelectionError,
 )
-from fin_ops_platform.services.workbench_sql_projection import (
-    WorkbenchSqlProjectionBuilder,
+from fin_ops_platform.services.workbench_canonical_rows import (
+    WorkbenchCanonicalRowsBuilder,
 )
-
-
-_LEGACY_PAGE_RUNTIME_FIELDS = {
-    "active_generation_id",
-    "refresh_enqueued",
-    "source_versions",
-}
-
-
-def _without_legacy_page_runtime_fields(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {
-            key: _without_legacy_page_runtime_fields(item)
-            for key, item in value.items()
-            if key not in _LEGACY_PAGE_RUNTIME_FIELDS
-            and not str(key).startswith("read_model_")
-        }
-    if isinstance(value, list):
-        return [_without_legacy_page_runtime_fields(item) for item in value]
-    return value
 
 
 _COMPLETED_OA_SQL = """
@@ -53,6 +33,21 @@ _COMPLETED_OA_SQL = """
     or oa.workflow_status in ('completed', '已完成', 'approved', 'APPROVED', 'Approved', '2')
 )
 """
+
+_RETIRED_PAGE_RUNTIME_FIELDS = frozenset(
+    {
+        "active_generation_id",
+        "freshness_targets",
+        "operation_barrier_targets",
+        "read_model_scope_keys",
+        "read_model_scope_source_versions",
+        "read_model_stale_reasons",
+        "read_model_status",
+        "read_model_version",
+        "refresh_enqueued",
+        "source_versions",
+    }
+)
 
 _VISIBLE_INVOICE_SQL = """
 invoice.status <> 'deleted'
@@ -665,6 +660,176 @@ class PostgresWorkbenchCanonicalQueryRepository:
             lambda repository: repository._ignored_rows(scope_key=scope_key)
         )
 
+    def list_canonical_search_rows(self, *, scope_key: str) -> list[dict[str, Any]]:
+        return self._in_snapshot(
+            lambda repository: repository._search_rows(scope_key=scope_key)
+        )
+
+    def list_workbench_search_scope_keys(self) -> list[str]:
+        rows = self._connection.fetch_all(
+            f"""
+            select distinct to_char(scope_month, 'YYYY-MM') as scope_key
+            from (
+                select coalesce(
+                    oa.scope_month,
+                    date_trunc('month', oa.application_date)::date
+                ) as scope_month
+                from app.oa_applications oa
+                where oa.status <> 'deleted'
+                  and {_COMPLETED_OA_SQL}
+                union
+                select bank.txn_month
+                from app.bank_transactions bank
+                where bank.status <> 'deleted'
+                union
+                select invoice.invoice_month
+                from app.invoices invoice
+                where {_VISIBLE_INVOICE_SQL}
+                union
+                select relation.month_scope
+                from app.workbench_pair_relations relation
+                where relation.status = 'active'
+            ) canonical_scopes
+            where scope_month is not null
+            order by scope_key desc
+            """
+        )
+        return [
+            str(row.get("scope_key") or "")
+            for row in rows
+            if str(row.get("scope_key") or "")
+        ]
+
+    def workbench_search_source_versions(self, *, scope_key: str) -> dict[str, Any]:
+        normalized_scope = self._scope_key(scope_key)
+        if normalized_scope == "all":
+            raise ValueError("Workbench search source versions require a month scope key YYYY-MM.")
+        scope_month = month_start(normalized_scope)
+        row = self._connection.fetch_one(
+            f"""
+            select
+                (
+                    select md5(coalesce(string_agg(
+                        concat_ws(
+                            ':',
+                            oa.row_id,
+                            oa.updated_at::text
+                        ),
+                        '|' order by oa.row_id
+                    ), ''))
+                    from app.oa_applications oa
+                    where oa.status <> 'deleted'
+                      and {_COMPLETED_OA_SQL}
+                      and coalesce(
+                          oa.scope_month,
+                          date_trunc('month', oa.application_date)::date
+                      ) = %s::date
+                ) as oa_membership_version,
+                (
+                    select md5(coalesce(string_agg(
+                        concat_ws(
+                            ':',
+                            coalesce(bank.legacy_mongo_id, bank.id::text),
+                            bank.updated_at::text
+                        ),
+                        '|' order by coalesce(bank.legacy_mongo_id, bank.id::text)
+                    ), ''))
+                    from app.bank_transactions bank
+                    where bank.status <> 'deleted'
+                      and bank.txn_month = %s::date
+                ) as bank_membership_version,
+                (
+                    select md5(coalesce(string_agg(
+                        concat_ws(
+                            ':',
+                            coalesce(invoice.legacy_mongo_id, invoice.id::text),
+                            invoice.updated_at::text
+                        ),
+                        '|' order by coalesce(invoice.legacy_mongo_id, invoice.id::text)
+                    ), ''))
+                    from app.invoices invoice
+                    where {_VISIBLE_INVOICE_SQL}
+                      and invoice.invoice_month = %s::date
+                ) as invoice_membership_version,
+                (
+                    select md5(coalesce(string_agg(
+                        concat_ws(
+                            ':',
+                            relation.case_id,
+                            relation.relation_mode,
+                            relation.month_scope::text,
+                            array_to_string(relation.row_ids, ','),
+                            array_to_string(relation.row_types, ','),
+                            relation.updated_at::text
+                        ),
+                        '|' order by relation.case_id
+                    ), ''))
+                    from app.workbench_pair_relations relation
+                    where relation.status = 'active'
+                      and (
+                          relation.month_scope = %s::date
+                          or exists (
+                              select 1
+                              from app.oa_applications oa
+                              where oa.status <> 'deleted'
+                                and coalesce(
+                                    oa.scope_month,
+                                    date_trunc('month', oa.application_date)::date
+                                ) = %s::date
+                                and oa.row_id = any(relation.row_ids)
+                          )
+                          or exists (
+                              select 1
+                              from app.bank_transactions bank
+                              where bank.status <> 'deleted'
+                                and bank.txn_month = %s::date
+                                and coalesce(bank.legacy_mongo_id, bank.id::text) = any(relation.row_ids)
+                          )
+                          or exists (
+                              select 1
+                              from app.invoices invoice
+                              where {_VISIBLE_INVOICE_SQL}
+                                and invoice.invoice_month = %s::date
+                                and coalesce(invoice.legacy_mongo_id, invoice.id::text) = any(relation.row_ids)
+                          )
+                      )
+                ) as relation_membership_version,
+                (
+                    select md5(coalesce(string_agg(
+                        concat_ws(
+                            ':',
+                            override.row_id,
+                            override.scope_month::text,
+                            override.updated_at::text
+                        ),
+                        '|' order by override.row_id
+                    ), ''))
+                    from app.workbench_row_overrides override
+                    where override.status = 'active'
+                      and override.scope_month = %s::date
+                ) as override_membership_version
+            """,
+            (
+                scope_month,
+                scope_month,
+                scope_month,
+                scope_month,
+                scope_month,
+                scope_month,
+                scope_month,
+                scope_month,
+            ),
+        )
+        payload = row if isinstance(row, dict) else {}
+        return {
+            "search_index_schema_version": "2026-07-search-canonical-v1",
+            "oa_membership_version": str(payload.get("oa_membership_version") or ""),
+            "bank_membership_version": str(payload.get("bank_membership_version") or ""),
+            "invoice_membership_version": str(payload.get("invoice_membership_version") or ""),
+            "relation_membership_version": str(payload.get("relation_membership_version") or ""),
+            "override_membership_version": str(payload.get("override_membership_version") or ""),
+        }
+
     def _in_snapshot(self, operation: Callable[[PostgresWorkbenchCanonicalQueryRepository], Any]) -> Any:
         transaction_factory = getattr(self._connection, "transaction", None)
         if not callable(transaction_factory):
@@ -672,7 +837,7 @@ class PostgresWorkbenchCanonicalQueryRepository:
         with transaction_factory() as transaction:
             transaction.execute("set transaction isolation level repeatable read read only")
             transaction.execute("set local statement_timeout = '2s'")
-            return _without_legacy_page_runtime_fields(
+            return _without_retired_page_runtime_fields(
                 operation(PostgresWorkbenchCanonicalQueryRepository(transaction))
             )
 
@@ -904,6 +1069,60 @@ class PostgresWorkbenchCanonicalQueryRepository:
                     return {"row": row, "scope_key": normalized_scope}
         return None
 
+    def _search_rows(self, *, scope_key: str) -> list[dict[str, Any]]:
+        normalized_scope = self._scope_key(scope_key)
+        if normalized_scope == "all":
+            raise ValueError("Workbench search rows require a month scope key YYYY-MM.")
+
+        contexts_by_row_id: dict[str, dict[str, Any]] = {}
+        for zone in ("paired", "unpaired"):
+            page = 1
+            while True:
+                payload = self._groups_page(
+                    scope_key=normalized_scope,
+                    zone=zone,
+                    page=page,
+                    page_size=200,
+                    detail_level="full",
+                )
+                for group in list(payload.get("groups") or []):
+                    if not isinstance(group, dict):
+                        continue
+                    rows = self._group_rows(group)
+                    project_names = sorted(
+                        {
+                            str(row.get("project_name") or "").strip()
+                            for row in rows
+                            if str(row.get("type") or "") == "oa"
+                            and str(row.get("project_name") or "").strip()
+                        }
+                    )
+                    for row in rows:
+                        row_id = str(row.get("id") or "").strip()
+                        if not row_id or row_id in contexts_by_row_id:
+                            continue
+                        contexts_by_row_id[row_id] = {
+                            "row": row,
+                            "zone_hint": zone,
+                            "group_id": str(group.get("group_id") or "") or None,
+                            "project_names": project_names,
+                        }
+                if not payload.get("has_more"):
+                    break
+                page += 1
+
+        for row in self._ignored_rows(scope_key=normalized_scope):
+            row_id = str(row.get("id") or "").strip()
+            if not row_id or row_id in contexts_by_row_id:
+                continue
+            contexts_by_row_id[row_id] = {
+                "row": row,
+                "zone_hint": "ignored",
+                "group_id": None,
+                "project_names": [],
+            }
+        return list(contexts_by_row_id.values())
+
     def _relation_preview_selection(
         self,
         *,
@@ -1018,7 +1237,7 @@ class PostgresWorkbenchCanonicalQueryRepository:
             if str(row.get("row_id") or "").strip()
         ]
         hydrated = self._load_rows(set(row_ids))
-        builder = WorkbenchSqlProjectionBuilder(connection=self._connection)
+        builder = WorkbenchCanonicalRowsBuilder(connection=self._connection)
         builder._apply_workbench_overrides_and_exceptions(hydrated)
         return [hydrated[row_id] for row_id in row_ids if row_id in hydrated]
 
@@ -1258,7 +1477,7 @@ class PostgresWorkbenchCanonicalQueryRepository:
             if str(descriptor.get("external_batch_id") or "")
         }
         rows_by_id = self._load_rows(row_ids, external_batch_ids=external_batch_ids)
-        builder = WorkbenchSqlProjectionBuilder(connection=self._connection)
+        builder = WorkbenchCanonicalRowsBuilder(connection=self._connection)
         grouped = builder._group_payload(month, rows_by_id, relations)
         grouped_groups = [
             group
@@ -1305,7 +1524,7 @@ class PostgresWorkbenchCanonicalQueryRepository:
         *,
         external_batch_ids: set[str] | None = None,
     ) -> dict[str, dict[str, Any]]:
-        builder = WorkbenchSqlProjectionBuilder(connection=self._connection)
+        builder = WorkbenchCanonicalRowsBuilder(connection=self._connection)
         rows = [
             *builder._oa_projection_rows_by_sql_ids(row_ids),
             *builder._bank_rows_by_ids(row_ids),
@@ -1543,3 +1762,15 @@ class PostgresWorkbenchCanonicalQueryRepository:
             )
             if key in payload
         }
+
+
+def _without_retired_page_runtime_fields(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _without_retired_page_runtime_fields(item)
+            for key, item in value.items()
+            if key not in _RETIRED_PAGE_RUNTIME_FIELDS
+        }
+    if isinstance(value, list):
+        return [_without_retired_page_runtime_fields(item) for item in value]
+    return value

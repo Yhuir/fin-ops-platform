@@ -6,10 +6,10 @@
       "module": "reconciliation-workbench",
       "page_key": "reconciliation-workbench",
       "route": "/",
-      "read_model_keys": ["workbench", "workbench_relation"],
+      "read_model_keys": [],
       "freshness_probe_names": ["workbench_initial_all", "workbench_groups_all_paired"],
-      "fact_sources": ["app.bank_transactions", "app.oa_applications", "app.invoices", "read_model.workbench_generations"],
-      "pairing_relation_fact_sources": ["app.workbench_pair_relations", "read_model.workbench_relation_rows"],
+      "fact_sources": ["app.bank_transactions", "app.oa_applications", "app.invoices"],
+      "pairing_relation_fact_sources": ["app.workbench_pair_relations"],
       "deterministic_evidence": [
         {
           "path": "web/e2e/fixtures/workbenchFlow.ts",
@@ -66,10 +66,10 @@
       "module": "oa-pending-payments",
       "page_key": "oa-pending-payments",
       "route": "/oa-pending-payments",
-      "read_model_keys": ["oa_pending_payment", "workbench_relation"],
+      "read_model_keys": [],
       "freshness_probe_names": ["oa_pending_payments_rows"],
-      "fact_sources": ["app.oa_applications", "app.bank_transactions", "read_model.oa_pending_payment"],
-      "pairing_relation_fact_sources": ["app.workbench_pair_relations", "read_model.workbench_relation_rows"],
+      "fact_sources": ["app.oa_applications", "app.bank_transactions"],
+      "pairing_relation_fact_sources": ["app.workbench_pair_relations"],
       "deterministic_evidence": [
         {
           "path": "web/e2e/workbench-relations-oa-pending-fanout.spec.ts",
@@ -82,10 +82,10 @@
       "module": "bank-flow-rule-batches",
       "page_key": "bank-flow-rule-batches",
       "route": "/bank-flow-rule-batches",
-      "read_model_keys": ["bank_flow_rule_batch", "workbench_relation", "workbench"],
+      "read_model_keys": [],
       "freshness_probe_names": ["bank_flow_rule_batches", "bank_flow_rule_batches_tag_rules", "workbench_groups_all_paired", "cost_statistics_explorer_all"],
-      "fact_sources": ["app.bank_transactions", "app.bank_transaction_tag_rules", "app.bank_flow_rule_batches", "read_model.bank_flow_rule_batch"],
-      "pairing_relation_fact_sources": ["app.workbench_pair_relations", "read_model.workbench_relation_rows"],
+      "fact_sources": ["app.bank_transactions", "app.bank_transaction_tag_rules", "app.bank_flow_rule_batches"],
+      "pairing_relation_fact_sources": ["app.workbench_pair_relations"],
       "deterministic_evidence": [
         {
           "path": "web/e2e/bank-flow-rule-batches-flow.spec.ts",
@@ -98,23 +98,23 @@
       "module": "batch-accounting",
       "page_key": "batch-accounting",
       "route": "/batch-accounting",
-      "read_model_keys": ["workbench_relation", "workbench"],
-      "freshness_probe_names": ["batch_accounting", "workbench_groups_all_paired"],
-      "fact_sources": ["app.bank_transactions", "app.oa_applications", "app.batch_accounting_records"],
-      "pairing_relation_fact_sources": ["app.workbench_pair_relations", "read_model.workbench_relation_rows"],
+      "read_model_keys": [],
+      "freshness_probe_names": ["batch_accounting"],
+      "fact_sources": ["app.bank_transactions", "app.oa_applications", "app.invoices", "app.workbench_pair_relations"],
+      "pairing_relation_fact_sources": ["app.workbench_pair_relations"],
       "deterministic_evidence": [
         {
           "path": "web/e2e/batch-accounting-flow.spec.ts",
           "required_markers": ["关联OA项与流水", "已关联批量账务流水与 2 项 OA。", "已撤回批量账务关联。"]
         }
       ],
-      "production_readonly_gates": ["http_slo_probe:batch_accounting", "http_slo_probe:workbench_groups_all_paired"]
+      "production_readonly_gates": ["http_slo_probe:batch_accounting"]
     },
     {
       "module": "turnover-ledger",
       "page_key": "turnover-ledger",
       "route": "/turnover-ledger",
-      "read_model_keys": ["workbench_relation", "workbench", "search"],
+      "read_model_keys": [],
       "freshness_probe_names": ["turnover_ledger_grouped", "turnover_ledger_tag_selection", "cost_statistics_explorer_all", "search_all"],
       "fact_sources": ["app.bank_transactions", "app.turnover_relations", "app.cost_projects", "app.workbench_pair_relations"],
       "pairing_relation_fact_sources": ["app.workbench_pair_relations"],
@@ -142,7 +142,7 @@
         },
         {
           "path": "web/e2e/imports-etc-invoices-flow.spec.ts",
-          "required_markers": ["ETC-E2E-2026-03", "expectFreshReadModelResponse"]
+          "required_markers": ["ETC-E2E-2026-03", "expectDirectCanonicalResponse"]
         }
       ],
       "production_readonly_gates": ["http_slo_probe:etc_invoices", "http_slo_probe:etc_business_batches", "http_slo_probe:etc_reconciliation_tasks"]
@@ -151,9 +151,9 @@
       "module": "tax-offset",
       "page_key": "tax-offset",
       "route": "/tax-offset",
-      "read_model_keys": ["tax_offset"],
+      "read_model_keys": [],
       "freshness_probe_names": ["tax_offset_summary", "tax_offset_rows"],
-      "fact_sources": ["app.invoices", "app.tax_certified_import_records", "read_model.tax_offset_read_models", "read_model.tax_offset_items"],
+      "fact_sources": ["app.invoices", "app.tax_certified_import_records"],
       "pairing_relation_fact_sources": [],
       "deterministic_evidence": [
         {
@@ -162,7 +162,7 @@
         },
         {
           "path": "web/e2e/tax-offset-flow.spec.ts",
-          "required_markers": ["waitForTaxOffset", "read model"]
+          "required_markers": ["waitForTaxOffset", "tax-offset"]
         }
       ],
       "production_readonly_gates": ["http_slo_probe:tax_offset_summary", "http_slo_probe:tax_offset_rows"]
@@ -171,10 +171,10 @@
       "module": "pending-invoices",
       "page_key": "pending-invoices",
       "route": "/pending-invoices",
-      "read_model_keys": ["pending_invoice", "workbench_relation", "search"],
+      "read_model_keys": [],
       "freshness_probe_names": ["pending_invoices_rows", "pending_invoices_filter_options", "pending_invoices_rules"],
-      "fact_sources": ["app.bank_transactions", "app.invoices", "app.pending_invoice_rules", "read_model.pending_invoice"],
-      "pairing_relation_fact_sources": ["app.workbench_pair_relations", "read_model.workbench_relation_rows"],
+      "fact_sources": ["app.bank_transactions", "app.invoices", "app.pending_invoice_rules", "app.workbench_pair_relations"],
+      "pairing_relation_fact_sources": ["app.workbench_pair_relations"],
       "deterministic_evidence": [
         {
           "path": "web/e2e/pending-invoices-fanout.spec.ts",
@@ -191,10 +191,10 @@
       "module": "input-invoice-usage",
       "page_key": "input-invoice-usage",
       "route": "/input-invoice-usage",
-      "read_model_keys": ["input_invoice_usage", "invoice_lifecycle", "workbench_relation", "oa_pending_payment", "tax_offset"],
+      "read_model_keys": [],
       "freshness_probe_names": ["input_invoice_usage_rows", "input_invoice_usage_filter_options", "input_invoice_usage_payment_status_rules"],
-      "fact_sources": ["app.invoices", "app.oa_applications", "app.bank_transactions", "read_model.input_invoice_usage"],
-      "pairing_relation_fact_sources": ["app.workbench_pair_relations", "read_model.workbench_relation_rows"],
+      "fact_sources": ["app.invoices", "app.oa_applications", "app.bank_transactions"],
+      "pairing_relation_fact_sources": ["app.workbench_pair_relations"],
       "deterministic_evidence": [
         {
           "path": "web/e2e/input-invoice-relation-fanout.spec.ts",
@@ -202,7 +202,7 @@
         },
         {
           "path": "web/e2e/input-invoice-usage-flow.spec.ts",
-          "required_markers": ["read model refreshing diagnostics", "反提 OA 候选发票清单"]
+          "required_markers": ["recovers rows after a transient load failure", "反提 OA 候选发票清单"]
         }
       ],
       "production_readonly_gates": ["http_slo_probe:input_invoice_usage_rows", "http_slo_probe:input_invoice_usage_filter_options", "http_slo_probe:input_invoice_usage_payment_status_rules"]
@@ -211,14 +211,14 @@
       "module": "output-invoice-collections",
       "page_key": "output-invoice-collections",
       "route": "/output-invoice-collections",
-      "read_model_keys": ["output_invoice_collection", "workbench_relation", "tax_offset"],
+      "read_model_keys": [],
       "freshness_probe_names": ["output_invoice_collections_rows", "output_invoice_collections_filter_options", "output_invoice_collections_status_rules"],
-      "fact_sources": ["app.invoices", "app.output_invoice_receipts", "app.bank_transactions", "read_model.output_invoice_collection"],
-      "pairing_relation_fact_sources": ["app.workbench_pair_relations", "read_model.workbench_relation_rows"],
+      "fact_sources": ["app.invoices", "app.output_invoice_receipts", "app.bank_transactions"],
+      "pairing_relation_fact_sources": ["app.workbench_pair_relations"],
       "deterministic_evidence": [
         {
           "path": "web/e2e/output-invoice-collections-flow.spec.ts",
-          "required_markers": ["XSFP-E2E-0001", "待收款，已收部分款", "read model refreshing diagnostics"]
+          "required_markers": ["XSFP-E2E-0001", "待收款，已收部分款", "recovers rows after a transient load failure"]
         },
         {
           "path": "web/e2e/output-invoice-red-relation-fanout.spec.ts",
@@ -270,7 +270,7 @@
       "deterministic_evidence": [
         {
           "path": "web/e2e/imports-bank-transactions-flow.spec.ts",
-          "required_markers": ["expectFreshReadModelResponse", "expectFreshBankAccountBalanceResponse", "银行流水导入", "导入预览结果"]
+          "required_markers": ["expectDirectCanonicalResponse", "银行流水导入", "导入预览结果"]
         }
       ],
       "production_readonly_gates": ["http_slo_probe:import_facts_batches", "http_slo_probe:import_facts_files"]
@@ -286,7 +286,7 @@
       "deterministic_evidence": [
         {
           "path": "web/e2e/imports-invoices-flow.spec.ts",
-          "required_markers": ["expectFreshReadModelResponse", "发票导入进项供应商", "发票导入成本项目", "已支付已开票"]
+          "required_markers": ["expectDirectCanonicalResponse", "发票导入进项供应商", "发票导入成本项目", "已支付已开票"]
         }
       ],
       "production_readonly_gates": ["http_slo_probe:import_facts_invoices", "http_slo_probe:import_facts_files"]
@@ -303,7 +303,7 @@
       "deterministic_evidence": [
         {
           "path": "web/e2e/imports-etc-invoices-flow.spec.ts",
-          "required_markers": ["ETC-E2E-2026-03", "ETC导入通行服务商", "ETC导入通行成本项目", "expectFreshReadModelResponse"]
+          "required_markers": ["ETC-E2E-2026-03", "ETC导入通行服务商", "ETC导入通行成本项目", "expectDirectCanonicalResponse"]
         }
       ],
       "production_readonly_gates": ["http_slo_probe:etc_reconciliation_tasks", "http_slo_probe:etc_business_batches"]

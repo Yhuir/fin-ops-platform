@@ -237,7 +237,6 @@ describe("ETC ticket management page", () => {
             failed: 1,
             total: 4,
             affected_months: ["2026-04"],
-            operation_barrier_targets: [],
           },
           error: null,
           created_at: "2026-05-03T10:00:00+00:00",

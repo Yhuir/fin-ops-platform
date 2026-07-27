@@ -15,7 +15,6 @@ from fin_ops_platform.services.workbench_idempotency import (
 )
 from fin_ops_platform.services.no_oa_bank_batch_application_service import NoOaBankBatchPersistenceError
 from fin_ops_platform.services.oa_attachment_invoice_linking import oa_row_source_ids
-from fin_ops_platform.services.read_model_write_targets import write_target_envelope
 from fin_ops_platform.services.workbench_exception_application_service import WorkbenchExceptionApplicationConflict
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_relation_modes import workbench_relations_have_same_row_set
@@ -689,9 +688,7 @@ class WorkbenchWriteFacade:
                         "affected_row_ids": list(row_ids),
                         "affected_months": list(command_result.get("affected_months") or changed_scope_keys),
                         "affected_scope_keys": list(
-                            command_result.get("read_model_scope_keys")
-                            or command_result.get("affected_months")
-                            or changed_scope_keys
+                            command_result.get("affected_months") or changed_scope_keys
                         ),
                         "amount_check": amount_check,
                         "operation_projection": operation_projection,
@@ -973,7 +970,7 @@ class WorkbenchWriteFacade:
             "affected_row_ids": list(result.get("affected_row_ids") or []),
             "affected_months": list(result.get("affected_months") or []),
             "affected_scope_keys": affected_scope_keys,
-            **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
+            **WorkbenchWriteFacade._affected_scope_envelope(affected_scope_keys),
             "amount_check": dict(result.get("amount_check") or {}),
             "operation_projection": dict(result.get("operation_projection") or {}),
             "outbox_event_ids": list(result.get("outbox_event_ids") or []),
@@ -1101,7 +1098,6 @@ class WorkbenchWriteFacade:
     def _operation_affected_scope_keys(result: dict[str, object]) -> list[str]:
         raw_scope_keys = (
             result.get("affected_scope_keys")
-            or result.get("read_model_scope_keys")
             or result.get("affected_months")
             or result.get("changed_scopes")
             or []
@@ -1140,7 +1136,7 @@ class WorkbenchWriteFacade:
         affected_row_ids: list[str],
     ) -> list[str]:
         changed_scope_keys = self._normalize_operation_scope_keys(
-            list(preview.get("affected_months") or preview.get("read_model_scope_keys") or [])
+            list(preview.get("affected_months") or [])
         )
         if changed_scope_keys:
             return changed_scope_keys
@@ -1186,11 +1182,8 @@ class WorkbenchWriteFacade:
         )
 
     @staticmethod
-    def _operation_write_target_envelope(scope_keys: list[str]) -> dict[str, object]:
-        return write_target_envelope(
-            scope_keys=scope_keys,
-            targets=[],
-        )
+    def _affected_scope_envelope(scope_keys: list[str]) -> dict[str, object]:
+        return {"affected_scope_keys": list(dict.fromkeys(scope_keys))}
 
     def _relation_command_service_for(self, *, repository: Any | None = None) -> Any | None:
         if self._relation_command_service_factory is not None:
@@ -1587,7 +1580,7 @@ class WorkbenchWriteFacade:
             "affected_row_ids": list(result.get("affected_row_ids") or []),
             "affected_months": list(result.get("affected_months") or []),
             "affected_scope_keys": affected_scope_keys,
-            **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
+            **WorkbenchWriteFacade._affected_scope_envelope(affected_scope_keys),
             "outbox_event_ids": list(result.get("outbox_event_ids") or []),
             "message": str(result.get("message") or ""),
         }
@@ -1848,7 +1841,7 @@ class WorkbenchWriteFacade:
             active_relation=active_relation,
             preview={
                 **preview,
-                "affected_months": result.get("affected_months") or result.get("read_model_scope_keys") or [],
+                "affected_months": result.get("affected_months") or [],
             },
             affected_row_ids=affected_row_ids,
         )
@@ -2134,16 +2127,13 @@ class WorkbenchWriteFacade:
                     ),
                 )
             changed_scope_keys = self._normalize_operation_scope_keys(
-                list(result.get("affected_months") or result.get("read_model_scope_keys") or [])
+                list(result.get("affected_months") or [])
             )
             if not changed_scope_keys:
                 changed_scope_keys = self._withdraw_changed_scope_keys(
                     month=month,
                     active_relation=before_relation,
-                    preview={
-                        "affected_months": result.get("affected_months") or [],
-                        "read_model_scope_keys": result.get("read_model_scope_keys") or [],
-                    },
+                    preview={"affected_months": result.get("affected_months") or []},
                     affected_row_ids=affected_row_ids,
                 )
             self._emit_timing_if_requested(
@@ -2197,7 +2187,7 @@ class WorkbenchWriteFacade:
             "changed_scopes": list(result.get("changed_scopes") or result.get("affected_months") or []),
             "affected_months": list(result.get("affected_months") or result.get("changed_scopes") or []),
             "affected_scope_keys": affected_scope_keys,
-            **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
+            **WorkbenchWriteFacade._affected_scope_envelope(affected_scope_keys),
             "affected_row_ids": list(result.get("affected_row_ids") or []),
             "restored_relations": list(result.get("restored_relations") or []),
             "operation_projection": dict(result.get("operation_projection") or {}),
@@ -2601,7 +2591,7 @@ class WorkbenchWriteFacade:
                 "case_id": str(updated_relation.get("case_id") or ""),
                 "affected_row_ids": list(updated_relation.get("row_ids") or []),
                 "affected_months": affected_scope_keys,
-                **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
+                **WorkbenchWriteFacade._affected_scope_envelope(affected_scope_keys),
                 "special_metadata": dict(updated_relation.get("special_metadata") or {}),
                 "message": "已确认现金往来过账。",
             },
@@ -2670,7 +2660,7 @@ class WorkbenchWriteFacade:
                 "case_id": str(updated_relation.get("case_id") or ""),
                 "affected_row_ids": list(updated_relation.get("row_ids") or []),
                 "affected_months": affected_scope_keys,
-                **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
+                **WorkbenchWriteFacade._affected_scope_envelope(affected_scope_keys),
                 "special_metadata": dict(updated_relation.get("special_metadata") or {}),
                 "message": "已确认现金往来买票情况。",
             },
@@ -2720,7 +2710,7 @@ class WorkbenchWriteFacade:
                 "case_id": str(updated_relation.get("case_id") or ""),
                 "affected_row_ids": list(updated_relation.get("row_ids") or []),
                 "affected_months": affected_scope_keys,
-                **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
+                **WorkbenchWriteFacade._affected_scope_envelope(affected_scope_keys),
                 "special_metadata": dict(updated_relation.get("special_metadata") or {}),
                 "message": "已取消现金往来特殊处理。",
             },
@@ -2942,7 +2932,7 @@ class WorkbenchWriteFacade:
                 "exception_case_id": str(exception_case["id"]),
                 "affected_row_ids": row_ids,
                 "affected_months": affected_scope_keys,
-                **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
+                **WorkbenchWriteFacade._affected_scope_envelope(affected_scope_keys),
                 "amount_summary": amount_summary,
                 "message": "已确认还清个人暂借款。",
             },
@@ -3065,7 +3055,7 @@ class WorkbenchWriteFacade:
                 "month": month,
                 "affected_row_ids": [row["id"] for row in updated_rows],
                 "affected_scope_keys": affected_scope_keys,
-                **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
+                **WorkbenchWriteFacade._affected_scope_envelope(affected_scope_keys),
                 "updated_rows": updated_rows,
                 "exception_case_ids": exception_case_ids,
                 "message": f"已取消 {len(updated_rows)} 条记录的异常处理。",
@@ -3121,7 +3111,7 @@ class WorkbenchWriteFacade:
                 "month": month,
                 "affected_row_ids": list(result.get("affected_row_ids") or row_ids),
                 "affected_scope_keys": affected_scope_keys,
-                **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
+                **WorkbenchWriteFacade._affected_scope_envelope(affected_scope_keys),
                 "updated_rows": list(result.get("updated_rows") or []),
                 "exception_case_id": str(case_payload.get("id") or ""),
                 "exception_case_ids": [str(case_payload.get("id") or "")],
@@ -3190,7 +3180,7 @@ class WorkbenchWriteFacade:
                 "month": month,
                 "affected_row_ids": [updated_row["id"]],
                 "affected_scope_keys": affected_scope_keys,
-                **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
+                **WorkbenchWriteFacade._affected_scope_envelope(affected_scope_keys),
                 "updated_rows": [updated_row],
                 "exception_case_id": exception_case_id,
                 "exception_case_ids": [exception_case_id],
@@ -3245,7 +3235,7 @@ class WorkbenchWriteFacade:
                 "month": month,
                 "affected_row_ids": [updated_row["id"]],
                 "affected_scope_keys": affected_scope_keys,
-                **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
+                **WorkbenchWriteFacade._affected_scope_envelope(affected_scope_keys),
                 "updated_rows": [updated_row],
                 "exception_case_ids": exception_case_ids,
                 "message": "已撤回忽略 1 条记录。",
@@ -3537,7 +3527,7 @@ class WorkbenchWriteFacade:
                 "month": month,
                 "affected_row_ids": affected_row_ids,
                 "affected_scope_keys": affected_scope_keys,
-                **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
+                **WorkbenchWriteFacade._affected_scope_envelope(affected_scope_keys),
                 "updated_rows": updated_rows,
                 "exception_case_id": case_id,
                 "exception_case_ids": [case_id] if case_id else [],
@@ -3646,7 +3636,7 @@ class WorkbenchWriteFacade:
             )
         ))
         result["affected_scope_keys"] = list(changed_scope_keys)
-        result.update(self._operation_write_target_envelope(changed_scope_keys))
+        result.update(self._affected_scope_envelope(changed_scope_keys))
         if isinstance(relation, dict):
             self._schedule_pair_relation_persist(
                 changed_case_ids=[str(relation.get("case_id") or "")],

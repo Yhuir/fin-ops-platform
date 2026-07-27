@@ -17,7 +17,6 @@ from fin_ops_platform.services.input_invoice_usage_service import (
     TARGET_APPLICANTS,
 )
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
-from fin_ops_platform.services.read_model_write_targets import write_target_envelope
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 
 
@@ -738,10 +737,9 @@ class InputInvoiceUsageOaReverseService:
             "canCreateDraft": _can_create_oa_draft(batch),
             "canConfirmSubmission": _can_confirm_submission(batch),
             "canRevoke": _can_revoke_oa_draft(batch),
-            "canRefreshStatus": batch.status in DETECTION_STATUSES,
             "canManualStatus": batch.status in MANUAL_FALLBACK_STATUSES,
         }
-        payload.update(write_target_envelope(scope_keys=scope_keys, targets=[]))
+        payload["affected_scope_keys"] = list(dict.fromkeys(scope_keys))
         return payload
 
     @staticmethod

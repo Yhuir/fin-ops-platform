@@ -137,7 +137,6 @@ def audit_app_health_system_snapshot(
                 "app.oa_applications",
                 "app.oa_application_items",
                 "app.oa_sync_runs",
-                "read_model.oa_pending_payment_rows",
                 "job.outbox_events",
                 "job.read_model_dirty_scopes",
                 "read_model.app_status_readiness",
@@ -232,7 +231,8 @@ def _page_report_issues(
 def _expected_inventory(connection: Any) -> dict[str, Any]:
     bank = connection.fetch_one(_EXPECTED_BANK_SQL) or {}
     invoice = connection.fetch_one(_EXPECTED_INVOICE_SQL) or {}
-    oa = connection.fetch_one(_EXPECTED_OA_SQL, (sorted(COMPLETED_WORKFLOW_STATUS_ALIASES),)) or {}
+    completed_statuses = sorted(COMPLETED_WORKFLOW_STATUS_ALIASES)
+    oa = connection.fetch_one(_EXPECTED_OA_SQL, (completed_statuses, completed_statuses)) or {}
     import_events = connection.fetch_all(_EXPECTED_IMPORT_EVENTS_SQL) or []
     bank_latest = _iso(bank.get("latest_synced_at"))
     invoice_latest = _iso(invoice.get("latest_synced_at"))
@@ -597,29 +597,27 @@ from canonical
 
 
 _EXPECTED_OA_SQL = """
-with current_pending_rows as (
-  select distinct on (row_id) row_id, oa_id, oa_workflow_status, payload, generated_at
-  from read_model.oa_pending_payment_rows
-  order by row_id, generated_at desc, scope_key desc
-), pending_ids as (
-  select
-    case when row.oa_workflow_status = 'in_progress' then 'in_progress' else 'completed' end as view_mode,
-    nullif(btrim(coalesce(summary.value->>'oaId', summary.value->>'id', row.payload->'oa'->>'id', row.oa_id)), '') as oa_id
-  from current_pending_rows row
-  left join lateral jsonb_array_elements(
-    case
-      when jsonb_typeof(row.payload->'oa'->'summaries') = 'array'
-        and jsonb_array_length(row.payload->'oa'->'summaries') > 0
-      then row.payload->'oa'->'summaries'
-      else jsonb_build_array(jsonb_build_object('oaId', coalesce(row.payload->'oa'->>'id', row.oa_id)))
-    end
-  ) summary(value) on true
+with pending_ids as (
+  select row_id as oa_id,
+         case when coalesce(nullif(workflow_status, ''), 'completed') = any(%s::text[])
+              then 'completed' else 'in_progress' end as view_mode,
+         synced_at as generated_at
+  from app.oa_applications
+  where status <> 'deleted'
+  union all
+  select admission.oa_id, 'in_progress', admission.updated_at
+  from app.oa_pending_payment_admissions admission
+  where not exists (
+    select 1 from app.oa_applications source
+    where source.row_id = admission.oa_id
+      and source.status <> 'deleted'
+  )
 )
 select
   (select count(*)::bigint from app.oa_applications) as oa_records_count,
   (select count(*)::bigint from app.oa_applications where coalesce(nullif(workflow_status, ''), 'completed') = any(%s::text[])) as oa_records_completed_count,
   (select count(distinct oa_id)::bigint from pending_ids where view_mode = 'in_progress') as oa_records_in_progress_count,
-  (select max(generated_at) from current_pending_rows where oa_workflow_status = 'in_progress') as oa_pending_payment_in_progress_latest_synced_at,
+  (select max(generated_at) from pending_ids where view_mode = 'in_progress') as oa_pending_payment_in_progress_latest_synced_at,
   (select count(*)::bigint from app.oa_application_items) as oa_items_count,
   coalesce(
     (select max(coalesce(finished_at, started_at)) from app.oa_sync_runs where sync_type = 'oa_projection' and status in ('success', 'succeeded', 'done')),

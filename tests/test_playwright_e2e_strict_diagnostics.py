@@ -131,6 +131,7 @@ class PlaywrightE2EStrictDiagnosticsTests(unittest.TestCase):
             r"成功|已保存|已创建|已提交|已确认|已撤回|导入成功|保存|确认导入|POST /api|PUT /api|DELETE /api|PATCH /api",
         )
         allowed_without_guard = {
+            "web/e2e/oa-pending-payments-nonfresh-flow.spec.ts",
             "web/e2e/permissions-role-matrix.spec.ts",
             "web/e2e/workbench-permissions-flow.spec.ts",
             "web/e2e/workbench-stale-error-flow.spec.ts",

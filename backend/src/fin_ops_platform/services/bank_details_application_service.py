@@ -33,6 +33,10 @@ class BankTransactionCategoryStorePort(Protocol):
         ...
 
 
+class BankDetailsCanonicalQueryUnavailableError(RuntimeError):
+    """Raised when the canonical PostgreSQL page query boundary is unavailable."""
+
+
 class BankDetailsApplicationService:
     def __init__(
         self,
@@ -46,6 +50,7 @@ class BankDetailsApplicationService:
         affected_months_provider: Callable[[list[str]], list[str]],
         suggestion_provider: Callable[[str], dict[str, object] | None] | None = None,
         category_mutation_writer: Any | None = None,
+        after_category_mutation: Callable[[list[str]], Any] | None = None,
     ) -> None:
         if bank_transaction_category_store is not None and not callable(
             getattr(
@@ -73,6 +78,7 @@ class BankDetailsApplicationService:
         self._affected_months_provider = affected_months_provider
         self._suggestion_provider = suggestion_provider
         self._category_mutation_writer = category_mutation_writer
+        self._after_category_mutation = after_category_mutation
         self._category_mutation_lock = RLock()
 
     def accounts_payload(
@@ -170,7 +176,7 @@ class BankDetailsApplicationService:
 
     def _canonical_query_service(self) -> BankDetailsCanonicalQueryService:
         if self._query_service is None:
-            raise RuntimeError(
+            raise BankDetailsCanonicalQueryUnavailableError(
                 "bank_details_canonical_postgres_query_repository_unavailable"
             )
         return self._query_service
@@ -510,6 +516,8 @@ class BankDetailsApplicationService:
                     **dict(metadata),
                 },
             )
+            if affected_months and self._after_category_mutation is not None:
+                self._after_category_mutation(affected_months)
             return {**persisted, "affected_months": affected_months}
         if self._bank_transaction_category_store is None:
             raise RuntimeError(
@@ -529,6 +537,8 @@ class BankDetailsApplicationService:
                 **dict(metadata),
             },
         )
+        if affected_months and self._after_category_mutation is not None:
+            self._after_category_mutation(affected_months)
         return {"changed": True, "affected_months": affected_months}
 
     def _latest_auto_category_suggestion(

@@ -13,7 +13,6 @@ FRESHNESS_ISSUE_CODES = frozenset(
         "read_model_outbox_not_drained",
         "page_runtime_queue_not_drained",
         "workbench_matching_scope_not_converged",
-        "workbench_generation_source_versions_mismatch",
     }
 )
 QUEUE_ISSUE_CODES = frozenset(

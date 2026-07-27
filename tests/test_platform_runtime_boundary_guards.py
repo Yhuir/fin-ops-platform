@@ -456,7 +456,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 "GridFSObjectMigrationService": 0,
                 "LegacyGridFSFileReader": 0,
                 "MongoOAAdapter": 0,
-                "WorkbenchPairRelationService": 2,
+                "WorkbenchPairRelationService": 1,
                 "pair_relation_service": 6,
             },
             "backend/src/fin_ops_platform/services/runtime_worker_handlers.py": {
@@ -917,14 +917,12 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_application_state_store_tax_read_models_do_not_use_app_mongo(self) -> None:
+    def test_application_state_store_has_no_tax_read_model_runtime(self) -> None:
         path = SERVICES_ROOT / "state_store.py"
         source = path.read_text(encoding="utf-8")
         class_source = _class_source(_parse(path), source, "ApplicationStateStore")
         class_tree = ast.parse(class_source)
         method_names = (
-            "load_tax_offset_read_models",
-            "save_tax_offset_read_models",
             "load_background_jobs",
             "save_background_jobs",
             "load_app_health_alerts",
@@ -946,6 +944,9 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "_load_tax_offset_read_models_detailed_payload",
             "_save_" + "cost_statistics_read_models_detailed",
             "_save_tax_offset_read_models_detailed",
+            "load_tax_offset_read_models",
+            "save_tax_offset_read_models",
+            '"tax_offset_read_models"',
         ):
             if forbidden in source:
                 violations.append(f"state_store.py contains {forbidden}")
@@ -1085,8 +1086,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "save_workbench_overrides",
             "load_workbench_exception_cases",
             "save_workbench_exception_cases",
-            "load_tax_offset_read_models",
-            "save_tax_offset_read_models",
             "load_etc_state",
             "save_etc_state",
             "load_etc_reconciliation_state",
@@ -1131,12 +1130,9 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         pending_invoice_paths = {
             SERVICES_ROOT / "pending_invoice_service.py",
             SERVICES_ROOT / "pending_invoice_rules.py",
-            SERVICES_ROOT / "pending_invoice_lifecycle_service.py",
-            SERVICES_ROOT / "pending_invoice_read_model_service.py",
             SERVICES_ROOT / "pending_invoice_rules_application_service.py",
-            SERVICES_ROOT / "search_pending_sql_projection.py",
-            SERVICES_ROOT / "search_pending_read_model_refresh.py",
         }
+        self.assertFalse((SERVICES_ROOT / "pending_invoice_lifecycle_service.py").exists())
         forbidden_modules = {
             "redis",
             "pika",
@@ -1170,18 +1166,24 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_invoice_lifecycle_reuses_pending_invoice_read_model_without_live_rebuild(self) -> None:
-        source = (SERVICES_ROOT / "invoice_lifecycle_sql_projection.py").read_text(encoding="utf-8")
+    def test_pending_invoice_page_reads_canonical_facts_without_read_model_runtime(self) -> None:
+        canonical_query_path = SERVICES_ROOT / "pending_invoice_canonical_query.py"
+        source = canonical_query_path.read_text(encoding="utf-8")
 
-        self.assertNotIn("SearchPendingSqlProjectionBuilder", source)
-        self.assertNotIn("._pending_invoice_rows(", source)
-        self.assertNotIn("InputInvoiceUsageQueryService", source)
-        self.assertNotIn("OutputInvoiceCollectionQueryService", source)
-        self.assertNotIn("ImportNormalizationService", source)
-        self.assertIn("list_pending_invoice_lifecycle_source_rows", source)
-        self.assertIn("pending_invoice_read_model_not_fresh", source)
-        self.assertIn("input_invoice_usage_read_model_not_fresh", source)
-        self.assertIn("output_invoice_collection_read_model_not_fresh", source)
+        for retired_path in (
+            SERVICES_ROOT / "invoice_lifecycle_sql_projection.py",
+            SERVICES_ROOT / "invoice_lifecycle_read_facade.py",
+            SERVICES_ROOT / "invoice_lifecycle_read_model_repository.py",
+            SERVICES_ROOT / "invoice_lifecycle_read_model_refresh.py",
+            SERVICES_ROOT / "pending_invoice_read_model_repository.py",
+            SERVICES_ROOT / "pending_invoice_read_model_service.py",
+        ):
+            self.assertFalse(retired_path.exists(), retired_path.name)
+        self.assertIn("class PostgresPendingInvoiceCanonicalRepository", source)
+        self.assertIn("class PendingInvoiceCanonicalQueryService", source)
+        self.assertIn("set transaction isolation level repeatable read read only", source)
+        self.assertIn("app.bank_transactions", source)
+        self.assertIn("app.workbench_pair_relations", source)
 
     def test_server_no_longer_owns_import_confirm_processors(self) -> None:
         server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
@@ -2337,7 +2339,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         required_service_snippets = {
             "self._app_settings_service.update_bank_auto_tag_rules(",
             "self._app_settings_service.replace_bank_auto_tag_rules_from_file_source(",
-            "def _bank_detail_access_scope_payload(",
             "self._bank_transaction_category_service.confirm_auto_category(",
             "self._bank_transaction_category_service.assign_manual_category(",
             "self._persist_category_mutation(",
@@ -2408,8 +2409,9 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         server_source = server_path.read_text(encoding="utf-8")
         server_tree = _parse(server_path)
         service_source = (SERVICES_ROOT / "bank_details_application_service.py").read_text(encoding="utf-8")
-        service_tree = _parse(SERVICES_ROOT / "bank_details_application_service.py")
-        service_class = _class_source(service_tree, service_source, "BankDetailsApplicationService")
+        canonical_source = (SERVICES_ROOT / "bank_details_canonical_query.py").read_text(
+            encoding="utf-8"
+        )
         violations: list[str] = []
 
         removed_application_helpers = {
@@ -2432,107 +2434,27 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             if _function_source(server_tree, server_source, helper_name):
                 violations.append(f"server.py still owns removed bank detail read/cache helper {helper_name}")
 
-        required_service_helpers = {
-            "_scope_keys_for_range",
-            "_scope_summary",
-            "_with_auto_tag_rule_freshness",
-            "_accounts_refreshing_payload",
-            "_transactions_refreshing_payload",
-            "_with_tag_dictionary",
-            "_enqueue_read_model_refreshes_unless_refreshing",
-            "_redis_cache_key",
-            "_get_cached_payload",
-            "_set_cached_payload",
-        }
-        for helper_name in sorted(required_service_helpers):
-            if not _function_source(service_tree, service_source, helper_name):
-                violations.append(f"BankDetailsApplicationService is missing bank detail read/cache owner {helper_name}")
-        for forbidden_snippet in (
-            "import_service:",
-            "_import_service",
-            "bank_details_service:",
-            "_bank_details_service",
-            "BankDetailsService",
-            "workbench_relation_reader",
-            "_workbench_relation_reader",
-            "_with_page_relation_freshness",
-            "bank_details_page_access",
-            "read_model_dependency_statuses",
-            "requires_sql_read_model_runtime",
-            ".list_accounts(",
-            ".list_transactions(",
-            ".auto_category_input_row(",
-        ):
-            if forbidden_snippet in service_class:
-                violations.append(f"BankDetailsApplicationService still owns legacy bank detail I/O fallback {forbidden_snippet}")
-
-        producer_source = (SERVICES_ROOT / "bank_detail_read_model_refresh_producer.py").read_text(encoding="utf-8")
-        producer_tree = _parse(SERVICES_ROOT / "bank_detail_read_model_refresh_producer.py")
-        producer_class = _class_source(producer_tree, producer_source, "BankDetailReadModelRefreshProducer")
-        for snippet in (
-            "def enqueue(",
-            "refresh_gateway = self._refresh_gateway_provider()",
-            'refresh_gateway.enqueue_many("bank_detail"',
-            'publish_wakeup("bank_detail_read_model_refresh"',
-        ):
-            if snippet not in producer_class:
-                violations.append(f"bank detail refresh producer is missing gateway/wakeup behavior {snippet}")
-        direct_job_writes = _sql_write_table_references(producer_class)
-        if direct_job_writes:
-            violations.append(f"bank detail refresh producer writes job queue tables directly: {direct_job_writes}")
-
-        turnover_producer_path = SERVICES_ROOT / "turnover_ledger_read_model_refresh_producer.py"
-        if turnover_producer_path.exists():
-            violations.append("retired turnover ledger refresh producer still exists")
-
         factory_source = _function_source(server_tree, server_source, "_bank_details_application_service")
-        if _function_source(server_tree, server_source, "_enqueue_turnover_ledger_read_model_refreshes"):
-            violations.append("server.py still owns removed turnover ledger refresh enqueue helper")
-        if _function_source(server_tree, server_source, "_clear_turnover_ledger_read_model_best_effort"):
-            violations.append("server.py still owns removed turnover ledger read model clear helper")
-        if _function_source(server_tree, server_source, "_after_turnover_relation_mutation"):
-            violations.append("server.py still owns removed turnover relation mutation invalidation helper")
-        if _function_source(server_tree, server_source, "_turnover_ledger_relation_mutation_invalidation_adapter"):
-            violations.append("server.py still owns removed turnover relation mutation invalidation adapter factory")
-        if _function_source(server_tree, server_source, "_latest_bank_detail_auto_category_suggestion"):
-            violations.append("server.py still owns removed bank detail suggestion provider callback")
-        if _function_source(server_tree, server_source, "_bank_detail_available_month_scope_keys"):
-            violations.append("server.py still owns removed bank detail available-month scope helper")
-        if _function_source(server_tree, server_source, "_derived_lifecycle_bank_detail_executor"):
-            violations.append("server.py still owns removed bank detail derived lifecycle executor")
         for removed_helper_name in sorted(removed_application_helpers):
             if removed_helper_name in factory_source:
                 violations.append(f"BankDetailsApplicationService factory still injects removed helper {removed_helper_name}")
-        if "workbench_relation_reader=" in factory_source:
-            violations.append("BankDetailsApplicationService factory still injects the redundant relation projection gate")
-        for retained_callback in (
-            "_bank_detail_auto_category_suggestion_provider",
-            "_bank_detail_available_month_scope_provider",
-            "_bank_account_balance_read_model_refresh_producer",
+        for required in (
+            "query_service=query_service",
+            "BankDetailsCanonicalQueryService(",
+            "PostgresBankDetailsCanonicalQueryRepository(connection)",
         ):
-            if retained_callback not in factory_source:
-                violations.append(f"BankDetailsApplicationService factory no longer classifies retained callback {retained_callback}")
-        if "BankDetailAutoCategorySuggestionProvider(" not in factory_source:
-            violations.append("BankDetailsApplicationService factory does not build the explicit bank detail suggestion provider")
-        if "BankDetailAvailableMonthScopeProvider(" not in server_source:
-            violations.append("server.py does not build the explicit bank detail available-month scope provider")
-        if 'getattr(self, "_bank_detail_available_month_scope_keys"' in server_source:
-            violations.append("server.py still allows the removed bank detail available-month scope helper")
-        if "BankDetailDerivedLifecycleExecutor(" not in server_source:
-            violations.append("server.py does not build the explicit bank detail derived lifecycle executor")
-        if '"bank_detail_read_model": self._bank_detail_derived_lifecycle_executor().execute' not in server_source:
-            violations.append("derived lifecycle registry does not use the explicit bank detail executor")
-        removed_side_effect_callback = "_after_bank_category_confirmation_mutation"
-        if _function_source(server_tree, server_source, removed_side_effect_callback):
-            violations.append(f"server.py still owns removed bank detail category side-effect callback {removed_side_effect_callback}")
-        if removed_side_effect_callback in factory_source:
-            violations.append("BankDetailsApplicationService factory still injects removed category side-effect callback")
-        if "category_mutation_writer = self._bank_transaction_category_mutation_writer()" not in factory_source:
-            violations.append("BankDetailsApplicationService factory does not inject the transactional category writer")
-        if "BankTransactionCategoryMutationWriter(" not in server_source:
-            violations.append("server.py does not build the transactional category writer")
-        if (SERVICES_ROOT / "bank_detail_category_side_effects.py").exists():
-            violations.append("removed post-commit category side-effect port still exists")
+            if required not in factory_source:
+                violations.append(f"BankDetailsApplicationService factory is missing canonical query wiring {required}")
+        for forbidden in (
+            "read_model_status",
+            "enqueue_read_model",
+            "_get_cached_payload",
+            "_set_cached_payload",
+        ):
+            if forbidden in service_source:
+                violations.append(f"BankDetailsApplicationService still owns retired page read-model behavior {forbidden}")
+        if "set transaction isolation level repeatable read read only" not in canonical_source:
+            violations.append("bank details canonical query does not open a repeatable-read/read-only snapshot")
 
         self.assertEqual(violations, [])
 
@@ -2564,31 +2486,25 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_invoice_lifecycle_derived_lifecycle_uses_explicit_executor_boundary(self) -> None:
+    def test_invoice_lifecycle_derived_lifecycle_runtime_is_retired(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
         server_tree = _parse(server_path)
-        executor_path = SERVICES_ROOT / "invoice_lifecycle_derived_lifecycle_executor.py"
-        executor_source = executor_path.read_text(encoding="utf-8") if executor_path.exists() else ""
         violations: list[str] = []
 
-        removed_helper = "_derived_lifecycle_invoice_lifecycle_executor"
-        if _function_source(server_tree, server_source, removed_helper):
-            violations.append(f"server.py still owns removed invoice lifecycle executor {removed_helper}")
-        if "InvoiceLifecycleDerivedLifecycleExecutor(" not in server_source:
-            violations.append("server.py does not build the explicit invoice lifecycle executor")
-        if '"invoice_lifecycle_read_model": self._invoice_lifecycle_derived_lifecycle_executor().execute' not in server_source:
-            violations.append("derived lifecycle registry does not use the explicit invoice lifecycle executor")
-        if "class InvoiceLifecycleDerivedLifecycleExecutor" not in executor_source:
-            violations.append("invoice lifecycle executor service is missing")
-        for snippet in (
-            "def execute(",
-            'reason=str(domain_plan.get("reason") or "derived_lifecycle_invoice_lifecycle")',
-            '"deleted_counts": {"invoice_lifecycle_read_models": 0}',
-            '"enqueued_jobs": ["invoice_lifecycle.read_model.refresh"] if enqueued else []',
+        for removed_helper in (
+            "_derived_lifecycle_invoice_lifecycle_executor",
+            "_invoice_lifecycle_derived_lifecycle_executor",
         ):
-            if snippet not in executor_source:
-                violations.append(f"invoice lifecycle executor is missing behavior {snippet}")
+            if _function_source(server_tree, server_source, removed_helper):
+                violations.append(f"server.py still owns retired invoice lifecycle executor {removed_helper}")
+        for retired_snippet in (
+            "InvoiceLifecycleDerivedLifecycleExecutor(",
+            '"invoice_lifecycle_read_model":',
+            "invoice_lifecycle.read_model.refresh",
+        ):
+            if retired_snippet in server_source:
+                violations.append(f"server.py still assembles retired invoice lifecycle runtime {retired_snippet}")
 
         self.assertEqual(violations, [])
 
@@ -2774,39 +2690,27 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_tax_offset_derived_lifecycle_uses_explicit_executor_boundary(self) -> None:
+    def test_tax_offset_derived_lifecycle_runtime_is_retired(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
         server_tree = _parse(server_path)
-        executor_path = SERVICES_ROOT / "tax_offset_derived_lifecycle_executor.py"
-        executor_source = executor_path.read_text(encoding="utf-8") if executor_path.exists() else ""
         violations: list[str] = []
 
         removed_helpers = {
             "_derived_lifecycle_tax_offset_executor",
             "_derived_lifecycle_tax_offset_month_cache_executor",
+            "_tax_offset_derived_lifecycle_executor",
         }
         for helper_name in sorted(removed_helpers):
             if _function_source(server_tree, server_source, helper_name):
-                violations.append(f"server.py still owns removed tax offset lifecycle executor {helper_name}")
-        if "TaxOffsetDerivedLifecycleExecutor(" not in server_source:
-            violations.append("server.py does not build the explicit tax offset lifecycle executor")
-        if '"tax_offset_read_model": self._tax_offset_derived_lifecycle_executor().execute_read_model' not in server_source:
-            violations.append("derived lifecycle registry does not use the explicit tax offset read model executor")
-        if '"tax_offset_month_cache": self._tax_offset_derived_lifecycle_executor().execute_month_cache' not in server_source:
-            violations.append("derived lifecycle registry does not use the explicit tax offset month cache executor")
-        if "class TaxOffsetDerivedLifecycleExecutor" not in executor_source:
-            violations.append("tax offset lifecycle executor service is missing")
-        for snippet in (
-            "def execute_read_model(",
-            "def execute_month_cache(",
-            'reason=str(domain_plan.get("reason") or "derived_lifecycle_tax_offset")',
-            '"deleted_counts": {"tax_offset_read_models": len(deleted_scope_keys)}',
-            '"deleted_counts": {"tax_offset_month_cache": len(months) if months else int("all" in scope_keys)}',
-            '"enqueued_jobs": ["tax_offset_cache_warmup"] if deleted_scope_keys else []',
+                violations.append(f"server.py still owns retired tax offset lifecycle executor {helper_name}")
+        for retired_snippet in (
+            "TaxOffsetDerivedLifecycleExecutor(",
+            '"tax_offset_read_model":',
+            '"tax_offset_month_cache":',
         ):
-            if snippet not in executor_source:
-                violations.append(f"tax offset lifecycle executor is missing behavior {snippet}")
+            if retired_snippet in server_source:
+                violations.append(f"server.py still assembles retired tax offset runtime {retired_snippet}")
 
         self.assertEqual(violations, [])
 
@@ -2858,8 +2762,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "class BankFlowRuleBatchDerivedLifecycleExecutor",
             "def execute(",
             'reason=str(domain_plan.get("reason") or "derived_lifecycle_bank_flow_rule_batch")',
-            '"deleted_counts": {"bank_flow_rule_batch_read_models": 0}',
-            '"enqueued_jobs": ["bank_flow_rule_batch.read_model.refresh"] if enqueued else []',
+            '"deleted_counts": {"bank_flow_rule_batch_canonical_drafts": 0}',
+            '"enqueued_jobs": ["bank_flow_rule_batch.canonical_draft.refresh"] if enqueued else []',
         ):
             if snippet not in executor_source:
                 violations.append(f"bank-flow lifecycle executor is missing behavior {snippet}")
@@ -2874,8 +2778,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             SERVICES_ROOT / "output_invoice_collection_receipt_service.py",
             SERVICES_ROOT / "output_invoice_collection_service.py",
             SERVICES_ROOT / "output_invoice_collection_status_service.py",
-            SERVICES_ROOT / "invoice_usage_collection_read_model_refresh.py",
-            SERVICES_ROOT / "invoice_usage_collection_sql_projection.py",
             SERVICES_ROOT / "postgres_repositories" / "output_invoice_collection.py",
         }
         forbidden_modules = {
@@ -3046,11 +2948,12 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         command_service_source = command_service_path.read_text(encoding="utf-8")
         query_service_source = query_service_path.read_text(encoding="utf-8")
         query_repository_source = query_repository_path.read_text(encoding="utf-8")
-        read_model_service_source = read_model_service_path.read_text(encoding="utf-8")
         relation_repository_source = relation_repository_path.read_text(encoding="utf-8")
         violations: list[str] = []
         if retired_query_service_path.exists():
             violations.append("retired OA live query service still exists")
+        if read_model_service_path.exists():
+            violations.append("retired OA pending-payment read model service still exists")
 
         for required in (
             "def route(",
@@ -3084,13 +2987,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if forbidden_fallback in route_class:
                 violations.append(f"OA pending payment route owner still has live read fallback {forbidden_fallback}")
-        for forbidden_service_symbol in (
-            "def all_rows(",
-            "def filter_options(",
-            "def filter_options_for_rows(",
-        ):
-            if forbidden_service_symbol in read_model_service_source:
-                violations.append(f"OA pending payment service still exposes retired symbol {forbidden_service_symbol}")
         for required in (
             "with repository.snapshot() as snapshot:",
             "snapshot.select_page(",
@@ -3170,12 +3066,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
     def test_downstream_relation_read_models_use_workbench_relation_distribution(self) -> None:
         downstream_paths = {
-            SERVICES_ROOT / "search_pending_sql_projection.py",
-            SERVICES_ROOT / "invoice_usage_collection_sql_projection.py",
+            SERVICES_ROOT / "search_sql_projection.py",
             SERVICES_ROOT / "invoice_relation_query_context.py",
             SERVICES_ROOT / "input_invoice_usage_service.py",
             SERVICES_ROOT / "output_invoice_collection_service.py",
-            SERVICES_ROOT / "bank_detail_sql_projection.py",
             SERVICES_ROOT / "bank_details_relation_tag_projection_service.py",
             SERVICES_ROOT / "pending_invoice_service.py",
             SERVICES_ROOT / "batch_accounting_service.py",
@@ -4165,7 +4059,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if forbidden in submit_source:
                 violations.append(f"BatchAccountingService.submit keeps direct pair write fallback {forbidden}")
-        if "batch_accounting_relation_command_unavailable" not in submit_source:
+        if "batch_accounting_relation_command_unavailable" not in source:
             violations.append("BatchAccountingService.submit does not fail fast when relation command service is unavailable")
 
         self.assertEqual(violations, [])
@@ -4184,7 +4078,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if forbidden in withdraw_source:
                 violations.append(f"BatchAccountingService.withdraw keeps direct pair write fallback {forbidden}")
-        if "batch_accounting_relation_command_unavailable" not in withdraw_source:
+        if "batch_accounting_relation_command_unavailable" not in source:
             violations.append("BatchAccountingService.withdraw does not fail fast when relation command service is unavailable")
 
         self.assertEqual(violations, [])
@@ -4519,10 +4413,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         provider_source = (SERVICES_ROOT / "workbench_relation_source_version_provider.py").read_text(encoding="utf-8")
         checked_sources = {
             method_name: _function_source(tree, source, method_name)
-            for method_name in (
-                "_bank_batch_workbench_source_versions",
-                "_workbench_read_model_source_versions",
-            )
+            for method_name in ("_bank_batch_workbench_source_versions",)
         }
 
         violations: list[str] = []
@@ -4697,7 +4588,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_workbench_oa_attachment_context_row_index_extraction_stays_local(self) -> None:
+    def test_workbench_oa_attachment_context_row_index_extraction_stays_canonical(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
         server_tree = _parse(server_path)
@@ -4705,14 +4596,14 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         context_source = _function_source(
             server_tree,
             server_source,
-            "_cached_oa_attachment_context_row_ids",
+            "_canonical_oa_attachment_context_row_ids",
         )
         factory_source = _function_source(server_tree, server_source, "_workbench_oa_attachment_context_row_index")
         violations: list[str] = []
 
         for marker in (
             "_workbench_oa_attachment_context_row_index()",
-            "grouped_payload_rows_by_id(payload)",
+            "selection.payload",
             "attachment_row_ids_by_oa_id(rows_by_id)",
             "invoice_row_is_attachment_context",
         ):
@@ -4786,8 +4677,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("_expand_confirm_link_row_ids_for_existing_context does not use confirm-link context relation read port")
         if "_normalize_row_ids(row_ids)" not in method_source:
             violations.append("_expand_confirm_link_row_ids_for_existing_context no longer normalizes selected row ids")
-        if "_cached_existing_context_groups_for_row_ids" not in method_source:
-            violations.append("_expand_confirm_link_row_ids_for_existing_context no longer preserves cached existing context expansion")
+        if "_canonical_existing_context_groups_for_row_ids" not in method_source:
+            violations.append("_expand_confirm_link_row_ids_for_existing_context no longer preserves canonical existing context expansion")
         if "_confirm_link_context_row_ids_to_preserve" not in method_source:
             violations.append("_expand_confirm_link_row_ids_for_existing_context no longer preserves context row-id filter")
 
@@ -5170,42 +5061,47 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_bank_account_balance_derived_lifecycle_uses_explicit_executor_boundary(self) -> None:
+    def test_bank_account_balance_derived_lifecycle_runtime_is_retired(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
         server_tree = _parse(server_path)
-        executor_path = SERVICES_ROOT / "bank_account_balance_derived_lifecycle_executor.py"
-        executor_source = executor_path.read_text(encoding="utf-8")
 
         violations: list[str] = []
-        removed_helper = "_derived_lifecycle_bank_account_balance_executor"
-        if _function_source(server_tree, server_source, removed_helper):
-            violations.append(f"server.py still owns removed bank account balance derived lifecycle helper {removed_helper}")
-        if "BankAccountBalanceDerivedLifecycleExecutor(" not in server_source:
-            violations.append("server.py does not assemble BankAccountBalanceDerivedLifecycleExecutor")
-        if '"bank_account_balance_read_model": self._bank_account_balance_derived_lifecycle_executor().execute' not in server_source:
-            violations.append("derived lifecycle registry does not use the explicit bank account balance executor")
-        if "class BankAccountBalanceDerivedLifecycleExecutor" not in executor_source:
-            violations.append("BankAccountBalanceDerivedLifecycleExecutor is missing")
-        if "bank_account_balance.read_model.refresh" not in executor_source or '"invalidated_scopes": ["all"]' not in executor_source:
-            violations.append("BankAccountBalanceDerivedLifecycleExecutor does not preserve all-only payload shape")
+        for removed_helper in (
+            "_derived_lifecycle_bank_account_balance_executor",
+            "_bank_account_balance_derived_lifecycle_executor",
+        ):
+            if _function_source(server_tree, server_source, removed_helper):
+                violations.append(f"server.py still owns retired bank account balance executor {removed_helper}")
+        for retired_snippet in (
+            "BankAccountBalanceDerivedLifecycleExecutor(",
+            '"bank_account_balance_read_model":',
+            "bank_account_balance.read_model.refresh",
+        ):
+            if retired_snippet in server_source:
+                violations.append(f"server.py still assembles retired bank account balance runtime {retired_snippet}")
 
         self.assertEqual(violations, [])
 
     def test_bank_account_balance_accounts_path_does_not_fallback_to_bank_detail_port(self) -> None:
-        bank_detail_port_source = (SERVICES_ROOT / "bank_detail_read_model_repository.py").read_text(encoding="utf-8")
+        retired_bank_detail_port = SERVICES_ROOT / "bank_detail_read_model_repository.py"
         service_path = SERVICES_ROOT / "bank_details_application_service.py"
         service_source = service_path.read_text(encoding="utf-8")
         service_tree = _parse(service_path)
-        accounts_source = _function_source(service_tree, service_source, "_accounts_from_sql_read_model")
+        accounts_source = _function_source(service_tree, service_source, "accounts_payload")
 
         violations: list[str] = []
-        if "def list_bank_account_balances" in bank_detail_port_source:
-            violations.append("BankDetailReadModelRepositoryPort still exposes bank account balance read model access")
-        if "self._bank_account_balance_read_model_repository or self._bank_detail_sql_read_repository" in accounts_source:
-            violations.append("Bank Details accounts SQL read path still falls back to Bank Detail repository port")
-        if "_bank_detail_sql_read_repository" in accounts_source and "api_sql_repository_unavailable" not in accounts_source:
-            violations.append("Bank Details accounts path has an unclassified Bank Detail repository reference")
+        if retired_bank_detail_port.exists():
+            violations.append("retired Bank Detail read model repository still exists")
+        if "self._canonical_query_service().accounts_payload(" not in accounts_source:
+            violations.append("Bank Details accounts path does not use the canonical query service")
+        for retired_reference in (
+            "_accounts_from_sql_read_model",
+            "_bank_account_balance_read_model_repository",
+            "_bank_detail_sql_read_repository",
+        ):
+            if retired_reference in accounts_source:
+                violations.append(f"Bank Details accounts path still references {retired_reference}")
 
         self.assertEqual(violations, [])
 
@@ -5476,7 +5372,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         paths = (
             APP_ROOT / "routes_bank_flow_rule_batches.py",
             SERVICES_ROOT / "bank_flow_rule_batch_application_service.py",
-            SERVICES_ROOT / "bank_flow_rule_batch_read_model_refresh.py",
+            SERVICES_ROOT / "bank_flow_rule_batch_canonical_draft_owner.py",
         )
         violations: list[str] = []
         for path in paths:
@@ -5500,9 +5396,9 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             if _function_source(tree, source, removed_helper):
                 violations.append(f"server.py still owns removed search rebuild helper {removed_helper}")
 
-        projection_source = (SERVICES_ROOT / "search_pending_sql_projection.py").read_text(encoding="utf-8")
+        projection_source = (SERVICES_ROOT / "search_sql_projection.py").read_text(encoding="utf-8")
         if "def rebuild_search_index_scope(" not in projection_source:
-            violations.append("SearchPendingSqlProjectionBuilder no longer owns search index rebuild")
+            violations.append("SearchSqlProjectionBuilder no longer owns search index rebuild")
         if "SearchReadModelRepositoryPort" not in projection_source:
             violations.append("Search projection no longer saves through SearchReadModelRepositoryPort")
 
@@ -5528,8 +5424,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         service_source = (SERVICES_ROOT / "search_query_freshness_service.py").read_text(encoding="utf-8")
         if "class SearchQueryFreshnessService" not in service_source:
             violations.append("SearchQueryFreshnessService is missing")
-        if "require_expected_source_versions" not in service_source or "source_version_mismatch_reasons" not in service_source:
-            violations.append("SearchQueryFreshnessService no longer owns source-version freshness proof")
+        if 'payload.get("refresh_status")' not in service_source:
+            violations.append("SearchQueryFreshnessService no longer honors repository freshness status")
+        if 'reason="api_stale"' not in service_source:
+            violations.append("SearchQueryFreshnessService no longer requests stale scope convergence")
 
         self.assertEqual(violations, [])
 
@@ -5571,15 +5469,13 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append("Runtime worker handlers still bypass SearchReadModelRefreshProducer for search refresh")
                 break
 
-        search_pending_refresh_source = (SERVICES_ROOT / "search_pending_read_model_refresh.py").read_text(encoding="utf-8")
-        if 'enqueue_many("search"' in search_pending_refresh_source or "enqueue_many('search'" in search_pending_refresh_source:
-            violations.append("SearchPendingReadModelRefreshService still bypasses SearchReadModelRefreshProducer for search fan-out")
-        if "SearchReadModelRefreshProducer" not in search_pending_refresh_source:
-            violations.append("SearchPendingReadModelRefreshService no longer uses SearchReadModelRefreshProducer")
+        search_refresh_source = (SERVICES_ROOT / "search_read_model_refresh.py").read_text(encoding="utf-8")
+        if "SearchReadModelRefreshProducer" not in search_refresh_source:
+            violations.append("SearchReadModelRefreshService no longer uses SearchReadModelRefreshProducer")
 
         self.assertEqual(violations, [])
 
-    def test_bank_account_balance_refresh_producer_helpers_stay_out_of_application(self) -> None:
+    def test_bank_account_balance_refresh_producer_runtime_is_retired(self) -> None:
         path = APP_ROOT / "server.py"
         source = path.read_text(encoding="utf-8")
         tree = _parse(path)
@@ -5588,35 +5484,14 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         if _function_source(tree, source, "_enqueue_bank_account_balance_read_model_refresh"):
             violations.append("server.py still owns bank account balance refresh enqueue helper")
 
-        app_factory_source = _function_source(tree, source, "_bank_account_balance_read_model_refresh_producer")
-        if "BankAccountBalanceReadModelRefreshProducer" not in app_factory_source:
-            violations.append("Application no longer assembles BankAccountBalanceReadModelRefreshProducer")
-
-        service_source = (SERVICES_ROOT / "bank_account_balance_read_model_refresh_producer.py").read_text(encoding="utf-8")
-        if "class BankAccountBalanceReadModelRefreshProducer" not in service_source:
-            violations.append("BankAccountBalanceReadModelRefreshProducer is missing")
-        if 'enqueue_many(\n                "bank_account_balance"' not in service_source:
-            violations.append("BankAccountBalanceReadModelRefreshProducer no longer enqueues through the gateway")
-        if 'return ["all"]' not in service_source:
-            violations.append("BankAccountBalanceReadModelRefreshProducer no longer preserves the all-only contract")
-
-        for rel_path in (
-            "backend/src/fin_ops_platform/app/server.py",
-            "backend/src/fin_ops_platform/app/bank_account_balance_backfill.py",
-            "backend/src/fin_ops_platform/services/runtime_worker_handlers.py",
+        if _function_source(tree, source, "_bank_account_balance_read_model_refresh_producer"):
+            violations.append("server.py still assembles retired bank account balance refresh producer")
+        for retired_snippet in (
+            "BankAccountBalanceReadModelRefreshProducer",
+            "bank_account_balance.read_model.refresh",
         ):
-            checked_source = (REPO_ROOT / rel_path).read_text(encoding="utf-8")
-            for bypass in (
-                '_enqueue_scopes("bank_account_balance"',
-                "_enqueue_scopes('bank_account_balance'",
-                'enqueue_one("bank_account_balance"',
-                "enqueue_one('bank_account_balance'",
-                'enqueue_many("bank_account_balance"',
-                "enqueue_many('bank_account_balance'",
-            ):
-                if bypass in checked_source:
-                    violations.append(f"{rel_path} still bypasses BankAccountBalanceReadModelRefreshProducer")
-                    break
+            if retired_snippet in source:
+                violations.append(f"server.py still references retired bank account balance runtime {retired_snippet}")
 
         self.assertEqual(violations, [])
 
@@ -6372,8 +6247,14 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
     def test_workbench_page_generation_cache_runtime_stays_deleted(self) -> None:
         server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
         worker_source = (APP_ROOT / "worker.py").read_text(encoding="utf-8")
-        refresh_source = (SERVICES_ROOT / "workbench_read_model_refresh.py").read_text(encoding="utf-8")
+        app_health_source = (SERVICES_ROOT / "app_health_service.py").read_text(encoding="utf-8")
+        runtime_state_policy_source = (SERVICES_ROOT / "runtime_state_policy.py").read_text(encoding="utf-8")
+        repository_source = (SERVICES_ROOT / "postgres_repositories" / "read_models.py").read_text(encoding="utf-8")
+        frontend_mock_source = (WEB_SRC_ROOT / "test" / "apiMock.ts").read_text(encoding="utf-8")
+        self.assertFalse((SERVICES_ROOT / "workbench_read_model_refresh.py").exists())
         self.assertFalse((SERVICES_ROOT / "workbench_groups_page_cache.py").exists())
+        self.assertFalse((TOOLS_ROOT / "prune_workbench_generations.py").exists())
+        self.assertFalse((TOOLS_ROOT / "validate_workbench_generation_convergence.py").exists())
 
         for forbidden in (
             "WorkbenchGroupsPageCacheWarmer",
@@ -6387,7 +6268,21 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, server_source)
                 self.assertNotIn(forbidden, worker_source)
-                self.assertNotIn(forbidden, refresh_source)
+        self.assertNotIn("workbench_read_model_rebuild", app_health_source)
+        self.assertNotIn("is_workbench_read_model_rebuild_job", app_health_source)
+        self.assertNotIn("workbench_read_model_rebuild", runtime_state_policy_source)
+        for forbidden in (
+            "_workbench_group_row_minimal_payload",
+            "_workbench_group_row_payload_for_write",
+            "_workbench_snapshot_payload_for_write",
+            "_workbench_group_payload_for_write",
+            "_materialize_workbench_group_payload",
+            "_workbench_group_row_records",
+            "_source_versions_from_scope_summary",
+            "_workbench_source_versions_allow_stale_write_skip",
+        ):
+            self.assertNotIn(forbidden, repository_source)
+        self.assertNotIn("workbench_read_models", frontend_mock_source)
 
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
         checks = {
@@ -6647,7 +6542,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for snippet in (
             "self._state_store.save_workbench_overrides({})",
             "self._state_store.save_workbench_pair_relations({})",
-            "self._state_store.save_workbench_read_models({})",
         ):
             if snippet not in service_class_source:
                 violations.append(f"SettingsDataResetService reset persistence no longer uses explicit port {snippet}")
@@ -7271,10 +7165,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         }
         sanitation_allowlist = {
             (
-                "backend/src/fin_ops_platform/services/workbench_read_model_service.py",
-                "candidate_snapshot_version",
-            ): 2,
-            (
                 "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
                 "workbench_reconciliation_decision",
             ): 1,
@@ -7507,7 +7397,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
         audit_handler_source = server_source[
             server_source.index("    def _operations_audit_service"):
-            server_source.index("    def _handle_api_operations_input_invoice_usage_refresh")
+            server_source.index("    def _handle_api_operations_page_audit")
         ]
         repository_source = (
             SERVICES_ROOT / "postgres_repositories" / "operations_audit.py"
@@ -7520,8 +7410,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
     def test_operations_audit_cli_files_do_not_own_sql_or_database_reads(self) -> None:
         for file_name in (
-            "audit_input_invoice_usage_read_model.py",
-            "audit_output_invoice_collection_read_model.py",
             "audit_page_business_read_model.py",
         ):
             path = TOOLS_ROOT / file_name
@@ -7531,14 +7419,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 self.assertNotIn("_PREDICATE", source)
                 self.assertEqual(_attribute_calls(_parse(path), {"fetch_one", "fetch_all", "execute"}), [])
 
-        repository_root = SERVICES_ROOT / "postgres_repositories"
-        common_source = (repository_root / "invoice_read_model_audit.py").read_text(encoding="utf-8")
-        self.assertIn("class InvoiceReadModelAuditContract", common_source)
-        for file_name in ("input_invoice_usage_audit.py", "output_invoice_collection_audit.py"):
-            wrapper_source = (repository_root / file_name).read_text(encoding="utf-8")
-            with self.subTest(repository_file=file_name):
-                self.assertNotIn("/* check:", wrapper_source)
-                self.assertIn("audit_invoice_read_model", wrapper_source)
+        repository_source = (
+            SERVICES_ROOT / "postgres_repositories" / "page_business_audit.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('"input_invoice_usage": PageAuditContract(', repository_source)
+        self.assertIn('"output_invoice_collection": PageAuditContract(', repository_source)
 
     def test_raw_postgres_sql_in_services_is_classified_by_platform_boundary(self) -> None:
         allowed_exact_paths = {
@@ -7553,7 +7438,9 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "backend/src/fin_ops_platform/services/postgres_state_store.py",
             "backend/src/fin_ops_platform/services/runtime_monitoring.py",
             "backend/src/fin_ops_platform/services/runtime_queue.py",
-            "backend/src/fin_ops_platform/services/search_pending_sql_projection.py",
+            "backend/src/fin_ops_platform/services/workbench_canonical_rows.py",
+            "backend/src/fin_ops_platform/services/bank_details_canonical_query.py",
+            "backend/src/fin_ops_platform/services/pending_invoice_canonical_query.py",
         }
         allowed_prefixes = (
             "backend/src/fin_ops_platform/services/postgres_repositories/",

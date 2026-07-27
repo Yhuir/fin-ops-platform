@@ -10,7 +10,7 @@ from fin_ops_platform.services.bank_transaction_category_service import (
     BANK_TRANSACTION_CATEGORY_LABELS,
     BankTransactionCategoryService,
 )
-from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
+from fin_ops_platform.services.bank_batch_application_service import canonical_snapshot_version
 
 
 class BankTransactionCategoryServiceTests(unittest.TestCase):
@@ -839,6 +839,7 @@ class BankTransactionCategoryServiceTests(unittest.TestCase):
         stored = service.get("txn-manual")
         self.assertEqual(stored["category_code"], "salary")
         self.assertEqual(stored["source"], "manual")
+        self.assertTrue(stored["manual_assignment"])
         self.assertEqual(stored["category_version"], 1)
 
     def test_clear_manual_category_reuses_manual_clear_contract(self) -> None:
@@ -1034,7 +1035,7 @@ class BankTransactionCategoryServiceTests(unittest.TestCase):
         )
 
         initial_version = service.snapshot_version()
-        self.assertEqual(initial_version, WorkbenchReadModelService.snapshot_version(service.snapshot()))
+        self.assertEqual(initial_version, canonical_snapshot_version(service.snapshot()))
         self.assertEqual(service.snapshot_version(), initial_version)
 
         service.apply_updates(
@@ -1044,7 +1045,7 @@ class BankTransactionCategoryServiceTests(unittest.TestCase):
 
         updated_version = service.snapshot_version()
         self.assertNotEqual(updated_version, initial_version)
-        self.assertEqual(updated_version, WorkbenchReadModelService.snapshot_version(service.snapshot()))
+        self.assertEqual(updated_version, canonical_snapshot_version(service.snapshot()))
 
         next_dictionary = service.tag_dictionary_payload()
         next_dictionary["version"] = int(next_dictionary.get("version") or 0) + 1
@@ -1052,7 +1053,7 @@ class BankTransactionCategoryServiceTests(unittest.TestCase):
         self.assertNotEqual(service.snapshot_version(), updated_version)
         self.assertEqual(
             service.snapshot_version(),
-            WorkbenchReadModelService.snapshot_version(service.snapshot()),
+            canonical_snapshot_version(service.snapshot()),
         )
 
     def test_apply_turnover_updates_allows_only_turnover_leaf_tags_atomically(self) -> None:

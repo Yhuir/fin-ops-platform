@@ -743,7 +743,6 @@ function mapOaReverseBatch(payload: unknown): InputInvoiceUsageOaReverseBatch {
     canCreateDraft: camelOrSnake(raw, "canCreateDraft", "can_create_draft") === undefined ? undefined : booleanValue(camelOrSnake(raw, "canCreateDraft", "can_create_draft")),
     canConfirmSubmission: camelOrSnake(raw, "canConfirmSubmission", "can_confirm_submission") === undefined ? undefined : booleanValue(camelOrSnake(raw, "canConfirmSubmission", "can_confirm_submission")),
     canRevoke: camelOrSnake(raw, "canRevoke", "can_revoke") === undefined ? undefined : booleanValue(camelOrSnake(raw, "canRevoke", "can_revoke")),
-    canRefreshStatus: camelOrSnake(raw, "canRefreshStatus", "can_refresh_status") === undefined ? undefined : booleanValue(camelOrSnake(raw, "canRefreshStatus", "can_refresh_status")),
     canManualStatus: camelOrSnake(raw, "canManualStatus", "can_manual_status") === undefined ? undefined : booleanValue(camelOrSnake(raw, "canManualStatus", "can_manual_status")),
   };
 }

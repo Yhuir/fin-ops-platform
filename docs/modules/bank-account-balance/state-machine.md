@@ -19,9 +19,11 @@
 - `balance_read_model_status`、refresh job、operation barrier
 - 用 `bank_detail` rows、旧 balance projection、Python 或浏览器全量聚合替代 canonical SQL
 
-## 共享旧 Read Model 状态
+## 已退役 Runtime
 
-旧 `bank_account_balance:all` manifest/worker/repository/backfill 暂时保留给范围外 consumer 与主控清理。其 `fresh/refreshing/stale/failed/unavailable` 状态只描述旧共享 projection，不再决定 Bank Details 页面响应。主控删除前必须完成 whole-repo consumer scan，并同步全局 read-model/worker/deploy/App Status 合同。
+旧 `bank_account_balance:all` manifest/worker/repository/backfill 和部署注册已删除。历史
+migration/表只供上一版本回滚，没有当前 reader/writer；任何恢复都必须先重新完成全仓
+consumer scan 和独立架构审批。
 
 ## 变更记录
 

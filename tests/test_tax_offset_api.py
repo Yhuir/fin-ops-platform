@@ -337,39 +337,6 @@ class TaxOffsetApiTests(unittest.TestCase):
         self.assertEqual(metric_payloads[0]["selected_output_count"], 1)
         self.assertEqual(metric_payloads[0]["selected_input_count"], 2)
 
-    def test_tax_offset_cache_warmup_is_optional_and_environment_gated(self) -> None:
-        app = build_application()
-        job = SimpleNamespace(job_id="tax-offset-warmup-job-1", owner_user_id="system")
-
-        with (
-            patch.object(
-                app._background_job_service,
-                "create_or_get_idempotent_job_with_created",
-                return_value=(job, True),
-            ) as create_job,
-            patch.object(app._background_job_service, "run_job") as run_job,
-        ):
-            app._schedule_tax_offset_cache_warmup(["2026-05"], reason="test_disabled")
-
-        create_job.assert_not_called()
-        run_job.assert_not_called()
-
-        with (
-            patch.dict("os.environ", {"FIN_OPS_TAX_OFFSET_CACHE_WARMUP_ENABLED": "1"}),
-            patch.object(
-                app._background_job_service,
-                "create_or_get_idempotent_job_with_created",
-                return_value=(job, True),
-            ) as create_job,
-            patch.object(app._background_job_service, "run_job") as run_job,
-        ):
-            app._schedule_tax_offset_cache_warmup(["2026-05"], reason="test_enabled")
-
-        create_job.assert_called_once()
-        self.assertEqual(create_job.call_args.kwargs["job_type"], "tax_offset_cache_warmup")
-        self.assertIn("2026-05", create_job.call_args.kwargs["idempotency_key"])
-        run_job.assert_called_once()
-
     def test_tax_certified_confirm_does_not_trigger_write_side_read_model_refresh(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -504,12 +471,11 @@ class TaxOffsetApiTests(unittest.TestCase):
             self.assertEqual(preview_payload["summary"]["matched_plan_count"], 0)
             self.assertEqual(preview_payload["summary"]["outside_plan_count"], 2)
 
-            with patch.object(app, "_schedule_tax_offset_cache_warmup"):
-                confirm_response = app.handle_request(
-                    "POST",
-                    "/api/tax-offset/certified-import/confirm",
-                    json.dumps({"session_id": preview_payload["session"]["id"]}),
-                )
+            confirm_response = app.handle_request(
+                "POST",
+                "/api/tax-offset/certified-import/confirm",
+                json.dumps({"session_id": preview_payload["session"]["id"]}),
+            )
             self.assertEqual(confirm_response.status_code, 200)
             confirm_payload = json.loads(confirm_response.body)
             self.assertEqual(confirm_payload["batch"]["months"], ["2026-01"])

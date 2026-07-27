@@ -76,7 +76,7 @@
 - repository SQL 不引用 `read_model.oa_pending_payment_*`、`workbench_relation` projection、dirty/outbox。
 - page frontend/API/types 不含 freshness/source version/refresh target/polling。
 - 页面 query service 不注入 queue/Redis/worker。
-- 旧共享 OA read-model service/projector/worker 暂保留给 `invoice_lifecycle` 等调用方；共享删除测试由主控在统一 cleanup 后更新。
+- 旧 OA read-model service/projector/worker 与 invoice-lifecycle 间接依赖已删除；架构守卫锁定不得恢复。
 
 入口：
 
@@ -141,7 +141,7 @@
 - `tests/test_platform_runtime_boundary_guards.py`
 - `tests/test_app_status_overview_service.py`
 
-本任务不修改共享 registry/deploy/worker，避免为通过本页测试破坏其它消费者。
+跨页面 cleanup 已删除 OA 专属 registry/deploy/worker；保留的共享 relation/search/no-OA 运行时由各自回归保护。
 
 ## 性能验收
 
@@ -187,4 +187,4 @@ cd web && npm run build
 - 当前环境若没有 disposable `FIN_OPS_TEST_DATABASE_URL`，真实 PostgreSQL SQL parse/plan 与 active-withdraw 集成用例只能在统一验证环境执行。
 - 未运行生产等量级 EXPLAIN/endpoint benchmark，无法声明当前 direct-query p95/p99。
 - MySQL 与 PostgreSQL 无分布式事务；依赖既有幂等重试与 OA sync，仍需生产故障演练。
-- 旧全局 OA read model/worker/App Status cleanup 取决于 `invoice_lifecycle` 等消费者迁移，不属于本分支删除权限。
+- 历史 OA read-model 表仍存在但无运行时 reader/writer；物理 drop 留给单独可回滚 migration。

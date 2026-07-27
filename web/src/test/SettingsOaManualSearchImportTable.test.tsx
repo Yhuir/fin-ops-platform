@@ -77,12 +77,6 @@ const healthyStatus: AppHealthStatus = {
   },
 };
 
-const oaManualBarrierTargets = [
-  { read_model_key: "workbench", scope_key: "2025-12" },
-  { read_model_key: "workbench_relation", scope_key: "2025-12" },
-  { read_model_key: "invoice_lifecycle", scope_key: "2025-12" },
-];
-
 function SidebarStatusHarness() {
   const { workbenchStatus } = useAppChrome();
   return (
@@ -134,7 +128,6 @@ function successfulImportResponse() {
         unrecognized_attachment_count: 0,
       },
     ],
-    operation_barrier_targets: oaManualBarrierTargets,
   }));
 }
 
@@ -161,29 +154,11 @@ function installFetchMock({ manualImportResponse }: { manualImportResponse?: Pro
           },
         ],
         errors: [],
-        operation_barrier_targets: oaManualBarrierTargets,
       }));
     }
     if (url.pathname === "/api/workbench/settings/oa/manual-imports") {
       expect(init?.method).toBe("POST");
       return manualImportResponse ?? successfulImportResponse();
-    }
-    if (url.pathname === "/api/operation-barrier/status") {
-      expect(init?.method).toBe("POST");
-      return new Response(JSON.stringify({
-        status: "fresh",
-        fresh: true,
-        targets: oaManualBarrierTargets.map((target) => ({
-          ...target,
-          scope_type: target.read_model_key,
-          status: "fresh",
-          fresh: true,
-          blocking: false,
-          raw_status: "fresh",
-        })),
-        blocked_targets: [],
-        refreshing_targets: [],
-      }));
     }
     throw new Error(`Unhandled fetch ${url.pathname}`);
   });

@@ -10,6 +10,7 @@ from fin_ops_platform.services.app_settings_service import (
 )
 from fin_ops_platform.services.bank_details_application_service import (
     BankDetailsApplicationService,
+    BankDetailsCanonicalQueryUnavailableError,
 )
 from fin_ops_platform.services.bank_details_export_service import BankDetailsExportError
 from fin_ops_platform.services.bank_transaction_category_service import (
@@ -135,7 +136,10 @@ class BankDetailsApiRoutes:
         return None
 
     def accounts(self, *, date_from: str | None, date_to: str | None) -> tuple[HTTPStatus, dict[str, Any]]:
-        payload = self._application_service.accounts_payload(date_from=date_from, date_to=date_to)
+        try:
+            payload = self._application_service.accounts_payload(date_from=date_from, date_to=date_to)
+        except BankDetailsCanonicalQueryUnavailableError as exc:
+            return self._canonical_query_unavailable(exc)
         return HTTPStatus.OK, payload
 
     def transactions(
@@ -167,6 +171,8 @@ class BankDetailsApiRoutes:
             )
         except ValueError as exc:
             return HTTPStatus.BAD_REQUEST, {"error": "invalid_bank_details_request", "message": str(exc)}
+        except BankDetailsCanonicalQueryUnavailableError as exc:
+            return self._canonical_query_unavailable(exc)
         return HTTPStatus.OK, payload
 
     def export_transactions(
@@ -200,7 +206,18 @@ class BankDetailsApiRoutes:
             return HTTPStatus.BAD_REQUEST, {"error": exc.error_code, "message": str(exc)}
         except ValueError as exc:
             return HTTPStatus.BAD_REQUEST, {"error": "invalid_bank_details_request", "message": str(exc)}
+        except BankDetailsCanonicalQueryUnavailableError as exc:
+            return self._canonical_query_unavailable(exc)
         return HTTPStatus.OK, result
+
+    @staticmethod
+    def _canonical_query_unavailable(
+        exc: BankDetailsCanonicalQueryUnavailableError,
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        return HTTPStatus.SERVICE_UNAVAILABLE, {
+            "error": "bank_details_canonical_query_unavailable",
+            "message": str(exc),
+        }
 
     def auto_tag_rules(self, *, session: OARequestSession | None) -> tuple[HTTPStatus, dict[str, Any]]:
         can_save = True if session is None else bool(session.can_mutate_data)

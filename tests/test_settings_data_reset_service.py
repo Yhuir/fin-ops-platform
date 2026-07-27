@@ -215,7 +215,6 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 relation_mode="manual_confirmed",
                 created_by="tester",
             )
-            app._workbench_read_model_service.upsert_read_model(scope_key="2026-03", payload={"month": "2026-03"})
             app._workbench_override_service.mark_exception(
                 row={"id": "bk-reset-001", "type": "bank"},
                 exception_code="manual_review",
@@ -232,7 +231,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
         self.assertEqual(len(imports_payload["invoices"]), 1)
         self.assertEqual(persisted["matching"], {})
         self.assertEqual(persisted["workbench_pair_relations"], {})
-        self.assertEqual(persisted["workbench_read_models"], {})
+        self.assertEqual(persisted["workbench_overrides"], {})
 
     def test_reset_invoices_clears_tax_certified_records(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -331,7 +330,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 lifecycle_summary = result["derived_data_lifecycle"]
                 self.assertEqual(lifecycle_summary["event"], "settings_reset_completed")
                 self.assertNotIn("cost_statistics_read_models", lifecycle_summary["deleted_counts"])
-                self.assertIn("tax_offset_read_models", lifecycle_summary["deleted_counts"])
+                self.assertNotIn("tax_offset_read_models", lifecycle_summary["deleted_counts"])
                 self.assertIn("file_import_sessions", lifecycle_summary["skipped"])
                 self.assertFalse(hasattr(app, "_cost_statistics_read_model_service"))
                 self.assertEqual(
@@ -339,7 +338,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                     [],
                 )
 
-    def test_execute_oa_reset_reports_failed_when_workbench_lifecycle_enqueue_fails(self) -> None:
+    def test_execute_oa_reset_reports_failed_when_matching_lifecycle_enqueue_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             with patch.object(
@@ -349,7 +348,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                     "event": "settings_reset_completed",
                     "errors": [
                         {
-                            "domain": "workbench_read_model",
+                            "domain": "workbench_matching_dirty_scopes",
                             "error": "durable queue unavailable",
                         }
                     ],
@@ -817,15 +816,6 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 token == "admin-token" and password == "correct-password"
             )
             app._state_store.save_oa_attachment_invoice_cache_entry("cache-oa-old", {"invoice_no": "INV-OLD"})
-            app._workbench_read_model_service.upsert_read_model(
-                scope_key="all",
-                payload={
-                    "month": "all",
-                    "summary": {"oa_count": 1, "bank_count": 0, "invoice_count": 0, "paired_count": 0, "unpaired_count": 1, "exception_count": 0},
-                    "paired": {"groups": []},
-                    "unpaired": {"groups": [{"group_id": "old", "oa_rows": [{"id": "oa-stale"}], "bank_rows": [], "invoice_rows": []}]},
-                },
-            )
             app._workbench_pair_relation_service.create_active_relation(
                 case_id="CASE-STALE",
                 row_ids=["oa-stale"],
@@ -859,11 +849,10 @@ class SettingsDataResetServiceTests(unittest.TestCase):
             [
                 "workbench_row_overrides",
                 "workbench_pair_relations",
-                "workbench_read_models",
             ],
         )
         self.assertNotIn("oa_attachment_invoice_cache", payload["deleted_counts"])
-        self.assertEqual(payload["deleted_counts"]["workbench_read_models"], 1)
+        self.assertNotIn("workbench_read_models", payload["deleted_counts"])
         self.assertEqual(payload["deleted_counts"]["workbench_pair_relations"], 1)
         self.assertEqual(payload["deleted_counts"]["workbench_row_overrides"], 1)
         self.assertIsNotNone(retained_attachment_cache_entry)
@@ -883,18 +872,15 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 relation_mode="manual_confirmed",
                 created_by="tester",
             )
-            app._workbench_read_model_service.upsert_read_model(scope_key="all", payload={"month": "all"})
             app._state_store.save_workbench_pair_relations(app._workbench_pair_relation_service.snapshot())
-            app._state_store.save_workbench_read_models(app._workbench_read_model_service.snapshot())
 
             result = app._settings_data_reset_service.execute(RESET_OA_AND_REBUILD_ACTION)
             persisted = app._state_store.load()
 
         self.assertEqual(result.deleted_counts["workbench_oa_pair_relations"], 0)
         self.assertEqual(result.deleted_counts["workbench_preserved_non_oa_pair_relations"], 1)
-        self.assertEqual(result.deleted_counts["workbench_read_models"], 1)
+        self.assertNotIn("workbench_read_models", result.deleted_counts)
         self.assertIn("CASE-MANUAL-BANK-INVOICE", persisted["workbench_pair_relations"]["pair_relations"])
-        self.assertEqual(persisted["workbench_read_models"], {})
 
     def test_reset_oa_and_rebuild_removes_pair_relation_containing_expense_row(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1419,14 +1405,12 @@ class SettingsDataResetServiceTests(unittest.TestCase):
             )
             app._oa_identity_service.verify_current_user_password = lambda token, password: False
             app._state_store.save_oa_attachment_invoice_cache_entry("cache-keep", {"invoice_no": "INV-KEEP"})
-            app._workbench_read_model_service.upsert_read_model(
-                scope_key="all",
-                payload={
-                    "month": "all",
-                    "summary": {"oa_count": 1, "bank_count": 0, "invoice_count": 0, "paired_count": 0, "unpaired_count": 1, "exception_count": 0},
-                    "paired": {"groups": []},
-                    "unpaired": {"groups": [{"group_id": "keep", "oa_rows": [{"id": "oa-keep"}], "bank_rows": [], "invoice_rows": []}]},
-                },
+            app._workbench_pair_relation_service.create_active_relation(
+                case_id="CASE-KEEP",
+                row_ids=["oa-keep"],
+                row_types=["oa"],
+                relation_mode="manual_confirmed",
+                created_by="tester",
             )
 
             with patch.object(app._settings_data_reset_service, "execute") as execute_reset:
@@ -1443,13 +1427,13 @@ class SettingsDataResetServiceTests(unittest.TestCase):
             )
             payload = json.loads(response.body)
             retained_cache_entry = app._state_store.load_oa_attachment_invoice_cache_entry("cache-keep")
-            retained_read_model = app._workbench_read_model_service.get_read_model("all")
+            retained_pair_relation = app._workbench_pair_relation_service.snapshot()["pair_relations"].get("CASE-KEEP")
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(payload["error"], "oa_password_verification_failed")
         execute_reset.assert_not_called()
         self.assertIsNotNone(retained_cache_entry)
-        self.assertIsNotNone(retained_read_model)
+        self.assertIsNotNone(retained_pair_relation)
 
 
 def _build_retention_raw_payload(

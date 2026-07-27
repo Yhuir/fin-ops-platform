@@ -8,7 +8,7 @@
 - 页面 `/bank-flow-rule-batches` 只调用 `/api/bank-flow-rule-batches/*`。
 - route 只做鉴权、参数解析和 HTTP 映射；`BankFlowRuleBatchApplicationService` 组合业务 payload；`BankFlowRuleBatchCanonicalQueryRepository` 持有 SQL。
 - 页面列表、summary、分页、详情和写后回读不读取 `read_model.bank_flow_rule_batch_rows`，不读取 Workbench page projection，也不从 no-OA table/service/read model fallback。
-- 旧 bank-flow read-model producer/refresh/persistence、worker/manifest/App Status/deploy registration 仍有全局调用方；当前分支不跨所有权删除，由主控合并所有页面迁移后统一清理。
+- 页面 read model 已退役；未提交 canonical draft 由独立后台 owner 写入 `app.bank_flow_rule_batches/events`，不登记 read-model scope/readiness/manifest。
 
 ## 职责边界
 
@@ -66,7 +66,7 @@
 - 未提交 batch 必须同时满足：标签当前双 false、所有成员仍存在且分类一致、成员未与任一 active relation overlap。
 - submitted 的可撤回性只由同一 canonical batch 的 active relation 决定。
 - 内部转账维持一收一支、不同账户、48 小时窗口；金额只计单边。
-- 当前实现不新增 cache、materialized view、worker、queue、fallback、双读或依赖。只有 EXPLAIN 证明确有需要时才由主控统一新增索引 migration。
+- 页面查询不新增 cache、materialized view、queue、fallback 或双读。canonical draft owner 是写侧领域任务，不参与 GET；只有 EXPLAIN 证明确有需要时才统一新增索引 migration。
 
 ## 持久化和写边界
 
@@ -98,6 +98,7 @@ Canonical facts：
 | Backend route | `backend/src/fin_ops_platform/app/routes_bank_flow_rule_batches.py` |
 | Backend service | `backend/src/fin_ops_platform/services/bank_flow_rule_batch_application_service.py` |
 | Canonical query repository | `backend/src/fin_ops_platform/services/postgres_repositories/bank_flow_rule_batch_canonical_query.py` |
+| Canonical draft owner | `backend/src/fin_ops_platform/services/bank_flow_rule_batch_canonical_draft_owner.py`、`bank_flow_rule_batch_canonical_draft_producer.py` |
 | PostgreSQL assembly | `backend/src/fin_ops_platform/services/postgres_state_store.py`、`backend/src/fin_ops_platform/app/server.py` 的最小依赖接线 |
 | Mutation persistence | `backend/src/fin_ops_platform/services/postgres_repositories/workbench.py` 的既有 bank-flow delta writer |
 | Tests | `tests/test_bank_flow_rule_batch*.py`、`web/src/test/BankFlowRuleBatch*.test.*`、相关 relation/no-OA regressions |
@@ -111,21 +112,13 @@ Canonical facts：
 - 禁止：bank-flow -> no-OA service/read model/table fallback。
 - 禁止：service 直接读 HTTP cookie/header 或 repository SQL 外溢到 service。
 
-## 共享清理 HANDOFF
+## Canonical draft 后台合同
 
-以下资源仍被全局 registry、derived lifecycle、App Status、deploy 或 shared audit 引用，本分支不得删除：
-
-- `bank_flow_rule_batch_read_model_repository.py`
-- `bank_flow_rule_batch_read_model_refresh.py`
-- `bank_flow_rule_batch_read_model_refresh_producer.py`
-- `bank_flow_rule_batch_derived_lifecycle_executor.py`
-- `read_model.bank_flow_rule_batch_rows` 的 persistence/migration/audit references
-- `read_model_manifest.py`、`runtime_worker_registry.py`、`read_model_scope_policy.py`、`runtime_worker_handlers.py`
-- App Status registry、deploy worker env、RabbitMQ dispatcher 和相关全局测试
-
-主控必须在所有页面分支合并后 whole-repo scan，确认没有页面或运维调用方，再统一删除/迁移这些共享资源。旧 no-OA read model/worker 仍属于独立 legacy 域，不能随本模块清理。
-
-当前旧 bank-flow refresh persistence 会在同一写路径同时 upsert `app.bank_flow_rule_batches/events` 和 `read_model.bank_flow_rule_batch_rows`。主控不能直接删除 worker/persistence 而让 canonical draft 停止更新；删除 projection 链前必须先确认新未提交候选的 canonical write owner，或把候选完整收敛为页面 canonical query。该跨共享 worker/registry 的最终迁移不属于本页面分支所有权。
+- 事件：`bank_flow_rule_batch.canonical_draft.refresh`；scope type 为 `bank_flow_rule_batch_draft`，不是 read-model scope。
+- 四类触发：银行事实变化、有效标签规则变化、设置重置、显式 repair/replay。标签规则变化必须使用 canonical repository 算出的精确月份，不得 fallback `all`。
+- handler 对同一 scope 重放必须幂等；只 replace/upsert `app.bank_flow_rule_batches` 与 `app.bank_flow_rule_batch_events`，不得写 `read_model.bank_flow_rule_batch_rows`、readiness 或 dirty scope。
+- 页面 GET 只读 canonical repository，绝不触发该事件。
+- 旧 no-OA read model/worker 仍属于独立 legacy 域，不随本模块退役。
 
 ## 测试与验证
 
@@ -142,7 +135,8 @@ Canonical facts：
 ## Canonical facts ownership
 
 - Owned facts：`app.bank_flow_rule_batches`、`app.bank_flow_rule_batch_events`、`app_settings.bank_flow_rule_batch_tag_rules`。
-- Shared facts：银行流水/标签/分类归 `bank-details`；正式 relation 归 `workbench-relations`；关联台 active generation 归 `reconciliation-workbench`。
+- Shared facts：银行流水/标签/分类归 `bank-details`；正式 relation 归
+  `workbench-relations`；关联台 canonical query 归 `reconciliation-workbench`。
 - Allowed writes：`BankFlowRuleBatchApplicationService`、relation command、明确 UoW/delta writer。
 - Allowed reads：`BankFlowRuleBatchCanonicalQueryRepository`、规则 read service。
 - Forbidden：shared broad snapshot、read-model projection、no-OA fallback、调用方直接改 batch/relation 状态。

@@ -4,7 +4,7 @@ from datetime import date
 from http import HTTPStatus
 from typing import Any, Callable
 
-from fin_ops_platform.services.oa_pending_payment_projection_rows import build_oa_pending_payment_rows
+from fin_ops_platform.services.oa_pending_payment_canonical_rows import build_oa_pending_payment_rows
 from fin_ops_platform.services.oa_pending_payment_query_contract import (
     OaPendingPaymentError,
     filter_config,
@@ -13,7 +13,7 @@ from fin_ops_platform.services.oa_pending_payment_query_contract import (
     parse_sort,
     parse_view_mode,
 )
-from fin_ops_platform.services.oa_pending_payment_read_model_details import (
+from fin_ops_platform.services.oa_pending_payment_details import (
     oa_pending_payment_bank_detail_from_row,
     oa_pending_payment_invoice_detail_from_row,
     oa_pending_payment_oa_detail_from_row,

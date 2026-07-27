@@ -47,7 +47,9 @@ repository 固定执行发票、认证记录和最新计划三次查询，复用
 
 ## 共享清理边界
 
-旧 tax read model、refresh/cache warmup/worker、App Status registry、deploy env、RabbitMQ route 和全局 cleanup migration 仍由主控在所有页面分支合并后统一处理。本模块直读链不得重新依赖这些共享兼容资源。
+旧 tax read model、refresh/cache warmup/worker、App Status registry、deploy env 和
+RabbitMQ route 已删除。历史 migration/表只供上一版本回滚；本模块不得恢复 reader、
+writer、双读或 fallback。
 
 ## 本目录文件
 

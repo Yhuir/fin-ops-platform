@@ -271,8 +271,6 @@ systemd 模板位于：
 - `deploy/oa/systemd/fin-ops-worker@.service.example`
 - `deploy/oa/systemd/fin-ops-rabbitmq-topology.service.example`
 - `deploy/oa/systemd/fin-ops-rabbitmq-dispatcher.service.example`
-- `deploy/oa/systemd/finops-prune-workbench-generations.service.example`
-- `deploy/oa/systemd/finops-prune-workbench-generations.timer.example`
 - `deploy/oa/systemd/finops-prune-runtime-queue-history.service.example`
 - `deploy/oa/systemd/finops-prune-runtime-queue-history.timer.example`
 - `deploy/oa/systemd/finops-enqueue-oa-sync.service.example`
@@ -296,9 +294,8 @@ systemd 模板位于：
 
 生产部署时，API、worker、RabbitMQ dispatcher 和 RabbitMQ topology bootstrap 应使用不同的 `EnvironmentFile`。`FIN_OPS_POSTGRES_DATABASE_URL`、`FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL`、`RABBITMQ_URL`、Redis、MinIO/S3 和 OA role sync 密码只能放在服务器 root-only secret 文件中，不要写入仓库模板或 systemd inline `Environment=`。migrator DSN 只能用于手动/受控 migration，不要加载到 API 或 worker unit。
 
-发布激活会安装两个版本化 retention timer 和一个 OA sync enqueue timer：
+发布激活会安装一个版本化 retention timer 和一个 OA sync enqueue timer：
 
-- `finops-prune-workbench-generations.timer`：清理非 active Workbench generation。
 - `finops-prune-runtime-queue-history.timer`：清理 `job.outbox_events` /
   `job.read_model_dirty_scopes` 的完成态历史。默认 `keep_days=30`、
   `keep_recent_per_type=512`、`limit=20000`，只删除 `status='done'`，并为每个 exact
@@ -417,7 +414,7 @@ python -m fin_ops_platform.app.worker \
 ./scripts/deploy-oa.sh --remote-min-free-mb 1024
 ```
 
-Workbench read model 生产修复需要读取 `/etc/fin-ops` runtime env 时，不要把 DB secret 暴露给
+生产修复需要读取 `/etc/fin-ops` runtime env 时，不要把 DB secret 暴露给
 `finops-deploy`，也不要手写 SQL 改 `job.read_model_dirty_scopes`。先确认 active release 名称：
 
 ```bash
@@ -427,7 +424,6 @@ sudo /usr/local/sbin/finops-deploy-control status
 然后通过 root-owned helper 运行受控命令：
 
 ```bash
-sudo /usr/local/sbin/finops-deploy-control workbench-rehydrate <release-name> --json
 sudo /usr/local/sbin/finops-deploy-control workbench-audit-identity <release-name> \
   --json \
   --workbench-scope all \
@@ -470,7 +466,7 @@ sudo /usr/local/sbin/finops-deploy-control write-operation-e2e-smoke <release-na
 sudo /usr/local/sbin/finops-deploy-control api-request-error <request-id>
 sudo /usr/local/sbin/finops-deploy-control api-request-timing <request-id>
 sudo /usr/local/sbin/finops-deploy-control read-model-refresh <release-name> \
-  --scope tax_offset=all --dry-run
+  --scope search=all --dry-run
 sudo /usr/local/sbin/finops-deploy-control settings-normalize <release-name> --dry-run
 sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> --dry-run
 sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> \
@@ -493,9 +489,8 @@ sudo /usr/local/sbin/finops-deploy-control runtime-queue-resolve-covered <releas
 `completed/confirmed`，并按 batch + source identity 一对一恢复被旧 preview 清空的 import row link。
 它不修改 canonical invoice/source-link，不扫描或修改其它生命周期记录，也不重新发布 read model 事件。
 
-`workbench-rehydrate` 会调用 release 内的 `scripts/rehydrate-workbench-read-models.py`，
-按月份 shard 重建 Workbench SQL read model，再发布 `all` 聚合；`workbench-audit-identity`
-只运行 `fin_ops_platform.tools.audit_object_identity`，用于查看强身份跨区重复、OA alias 和孤儿关系样本。
+`workbench-audit-identity` 只运行 `fin_ops_platform.tools.audit_object_identity`，
+用于查看强身份跨区重复、OA alias 和孤儿关系样本。
 `read-model-scope-contract` 只运行 release 内的 `scripts/check-read-model-scope-contracts.py`，
 用于只读检查或受控清理 legacy/invalid read model scope。以上命令都只接受固定脚本/模块参数，
 由 helper 加载 runtime env，不提供任意 shell 执行能力。
@@ -570,7 +565,7 @@ sudo /usr/local/sbin/finops-deploy-control check-release <已上传的-release-n
 
 `scripts/deploy-oa.sh` 会在 release 解包后先调用 deploy-control 自更新，再检查 helper 是否仍引用历史 root env；
 如果自更新或检查失败，会在 `activate` 之前中止，避免前端已发布但后端无法监听 `127.0.0.1:18001`。helper 的 `activate`
-还必须先执行 schema migration、reset 旧 `EnvironmentFile` 并归档 legacy `/opt/fin-ops/current`；不要手工创建业务表、
+还必须先停止/disable 新 registry 未登记的退休页面 instance，并确认退休 read-model outbox/dirty scope 均无 `processing`；门禁通过后才停止其余上一版本 worker，执行 schema migration、reset 旧 `EnvironmentFile` 并归档 legacy `/opt/fin-ops/current`。`0127_direct_canonical_page_runtime_retirement.sql` 只是 no-op 标记，不会改写 pending backlog、readiness 或回滚 projection 证据；门禁失败时 release 不得继续激活，已登记的 import/matching/保留 read-model worker 继续运行。不要手工创建业务表、
 不要用运行时账号代替 migrator 账号，也不要让旧 `/opt/fin-ops/fin-ops.env` 或 `/opt/fin-ops/current`
 参与 release 运行时。
 覆盖式 `legacy-current` 部署入口已经移除；`scripts/deploy-oa.sh` 只生成 versioned release payload，
@@ -581,8 +576,7 @@ release 会占用服务器磁盘。生产策略不是无限保留，而是默认
 磁盘空间治理规则：
 
 - release 自动清理只管理 `/opt/fin-ops/releases`，不能替代服务器根分区治理。
-- read model / runtime queue 历史由 `finops-prune-workbench-generations.timer` 和
-  `finops-prune-runtime-queue-history.timer` 治理；如果 job/read_model schema 异常增长，先跑
+- runtime queue 历史由 `finops-prune-runtime-queue-history.timer` 治理；如果 job/read_model schema 异常增长，先跑
   dry-run/状态统计，不要手工删除 pending/processing/failed/dead-lettered queue 行。
 - 如果部署在 `storage preflight` 失败，应先用服务器 root 检查 `/var/log`、systemd journal、面板日志、对象存储、缓存和已删除但仍被进程占用的文件；不要用 `finops-deploy` 手工删除不可确认来源的系统文件。
 - 建议在生产机配置持久的 journald/logrotate 上限，避免 `/var/log/messages` 或 `/var/log/journal` 持续增长后把 `/` 填满。

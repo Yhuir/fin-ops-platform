@@ -6,7 +6,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any, Iterator
 
-from fin_ops_platform.services.bank_account_balance_projection import (
+from fin_ops_platform.services.bank_account_balance_canonical_rows import (
     BANK_ACCOUNT_BALANCE_CANONICAL_ROWS_SQL,
 )
 from fin_ops_platform.services.bank_details_service import BankDetailsService

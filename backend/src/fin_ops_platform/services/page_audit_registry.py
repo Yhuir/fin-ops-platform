@@ -8,8 +8,6 @@ PageAuditExecutor = Literal[
     "workbench",
     "cost_statistics",
     "page_business",
-    "input_invoice_usage",
-    "output_invoice_collection",
     "tax_offset",
     "etc_tickets",
     "settings",
@@ -22,7 +20,7 @@ PageAuditExecutor = Literal[
 PageAuditAvailability = Literal["ready", "unavailable"]
 ExternalEvidenceDomain = Literal["bank", "oa", "invoice", "etc"]
 
-PAGE_AUDIT_CONTRACT_REVISION = "page-audit-contract.v26"
+PAGE_AUDIT_CONTRACT_REVISION = "page-audit-contract.v27"
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,7 +99,7 @@ PAGE_AUDIT_REGISTRY: dict[str, PageAuditRegistration] = {
         "reconciliation-workbench",
         "关联台",
         "workbench",
-        ("workbench", "workbench_relation"),
+        (),
         external_source_boundary="bank, OA, invoice, and ETC source evidence before App registration",
         external_evidence_keys=("bank", "oa", "invoice", "etc"),
     ),
@@ -117,7 +115,7 @@ PAGE_AUDIT_REGISTRY: dict[str, PageAuditRegistration] = {
         "bank-details",
         "银行明细",
         "page_business",
-        ("bank_detail", "bank_account_balance", "workbench_relation"),
+        (),
         external_source_boundary="bank statement completeness before App import",
         external_evidence_keys=("bank",),
         executor_domain_key="bank_details",
@@ -126,7 +124,7 @@ PAGE_AUDIT_REGISTRY: dict[str, PageAuditRegistration] = {
         "oa-pending-payments",
         "OA待付款核对",
         "page_business",
-        ("oa_pending_payment", "invoice_lifecycle", "workbench_relation"),
+        (),
         external_source_boundary="OA source and admission completeness before App registration",
         external_evidence_keys=("oa", "bank", "invoice"),
         executor_domain_key="oa_pending_payments",
@@ -135,7 +133,7 @@ PAGE_AUDIT_REGISTRY: dict[str, PageAuditRegistration] = {
         "bank-flow-rule-batches",
         "流水规则批量处理",
         "page_business",
-        ("bank_flow_rule_batch", "workbench_relation"),
+        (),
         external_source_boundary="bank statement completeness before App import",
         external_evidence_keys=("bank",),
         executor_domain_key="bank_flow_rule_batches",
@@ -144,7 +142,7 @@ PAGE_AUDIT_REGISTRY: dict[str, PageAuditRegistration] = {
         "batch-accounting",
         "批量账务",
         "page_business",
-        ("workbench_relation",),
+        (),
         external_source_boundary="OA and bank completeness before App registration",
         external_evidence_keys=("oa", "bank"),
         executor_domain_key="batch_accounting",
@@ -171,7 +169,7 @@ PAGE_AUDIT_REGISTRY: dict[str, PageAuditRegistration] = {
         "tax-offset",
         "税金抵扣",
         "tax_offset",
-        ("tax_offset",),
+        (),
         relation_proof_required=False,
         external_source_boundary="certified tax source plus invoice and ETC evidence",
         external_evidence_keys=("invoice", "etc"),
@@ -180,7 +178,7 @@ PAGE_AUDIT_REGISTRY: dict[str, PageAuditRegistration] = {
         "pending-invoices",
         "待找发票",
         "page_business",
-        ("pending_invoice", "bank_detail", "workbench_relation", "invoice_lifecycle"),
+        (),
         external_source_boundary="bank, invoice, and OA completeness before App registration",
         external_evidence_keys=("bank", "invoice", "oa"),
         executor_domain_key="pending_invoices",
@@ -188,18 +186,20 @@ PAGE_AUDIT_REGISTRY: dict[str, PageAuditRegistration] = {
     "input-invoice-usage": _ready(
         "input-invoice-usage",
         "进项发票使用情况",
-        "input_invoice_usage",
-        ("input_invoice_usage", "workbench_relation", "invoice_lifecycle"),
+        "page_business",
+        (),
         external_source_boundary="invoice, OA, and bank completeness before App registration",
         external_evidence_keys=("invoice", "oa", "bank"),
+        executor_domain_key="input_invoice_usage",
     ),
     "output-invoice-collections": _ready(
         "output-invoice-collections",
         "销项发票收款情况",
-        "output_invoice_collection",
-        ("output_invoice_collection", "workbench_relation", "invoice_lifecycle"),
+        "page_business",
+        (),
         external_source_boundary="invoice and bank completeness before App registration",
         external_evidence_keys=("invoice", "bank"),
+        executor_domain_key="output_invoice_collection",
     ),
     "settings": _ready(
         "settings",

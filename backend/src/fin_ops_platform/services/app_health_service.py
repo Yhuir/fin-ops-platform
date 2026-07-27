@@ -10,7 +10,6 @@ from fin_ops_platform.services.app_status_dependency_registry import APP_STATUS_
 APP_HEALTH_SCHEMA_VERSION = 1
 REBUILD_JOB_TYPES = {
     "workbench_rebuild",
-    "workbench_read_model_rebuild",
     "oa_sync_workbench_rebuild",
 }
 
@@ -47,7 +46,7 @@ class AppHealthService:
             job
             for job in active_jobs
             if getattr(job, "status", None) in {"queued", "running"}
-            and self.is_workbench_read_model_rebuild_job(job)
+            and self.is_workbench_rebuild_job(job)
         ]
         matching_dirty_scope_entries = self.matching_dirty_scope_entries(oa_sync_payload)
         matching_dirty_scopes = [
@@ -61,13 +60,13 @@ class AppHealthService:
         oa_sync_unavailable = oa_sync_status == "error"
         rebuilding = bool(rebuild_jobs) or rebuild_scheduled or bool(matching_running_scopes)
         if oa_sync_unavailable:
-            workbench_read_model_status = "error"
+            workbench_matching_status = "error"
         elif rebuilding:
-            workbench_read_model_status = "rebuilding"
+            workbench_matching_status = "rebuilding"
         elif dirty_scopes:
-            workbench_read_model_status = "stale"
+            workbench_matching_status = "stale"
         else:
-            workbench_read_model_status = "ready"
+            workbench_matching_status = "ready"
 
         session_blocked = not bool(getattr(session, "allowed", False)) or not bool(getattr(session, "can_access_app", False))
         dependencies = {
@@ -145,8 +144,8 @@ class AppHealthService:
             "generated_at": now.isoformat(),
             "session": self._session_payload(session, blocked=session_blocked),
             "oa_sync": oa_sync_payload,
-            "workbench_read_model": {
-                "status": workbench_read_model_status,
+            "workbench_matching": {
+                "status": workbench_matching_status,
                 "dirty_scopes": dirty_scopes,
                 "matching_dirty_scopes": matching_dirty_scope_entries,
                 "matching_running_scopes": matching_running_scopes,
@@ -236,7 +235,7 @@ class AppHealthService:
         }
 
     @staticmethod
-    def is_workbench_read_model_rebuild_job(job: object) -> bool:
+    def is_workbench_rebuild_job(job: object) -> bool:
         job_type = str(getattr(job, "type", "") or "").strip().lower()
         return job_type in REBUILD_JOB_TYPES or ("workbench" in job_type and "rebuild" in job_type)
 

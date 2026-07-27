@@ -77,7 +77,7 @@ test.describe("workbench network recovery and duplicate submit browser flow", ()
     const { openGroup, previewDialog } = await openConfirmRelationPreview(page);
 
     await previewDialog.getByRole("button", { name: "确认关联" }).click();
-    await expect(previewDialog.getByRole("alert")).toContainText("网络暂时失败，请重试。");
+    await expect(previewDialog.getByRole("alert")).toContainText("关联台服务暂时不可用，请稍后重试。");
     await expect(previewDialog.getByRole("button", { name: "重试" })).toBeEnabled();
     await expect(openGroup).toBeVisible();
     await expect(page.getByTestId("candidate-group-paired-case:CASE-202603-101")).toHaveCount(0);

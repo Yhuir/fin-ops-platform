@@ -2486,6 +2486,7 @@ class BankTransactionCategoryService:
                 "turnover_action_type": turnover_action_type,
                 "turnover_family": turnover_family or None,
                 "source": str(record.get("source") or "manual").strip() or "manual",
+                "manual_assignment": bool(record.get("manual_assignment")),
                 "updated_by": str(record.get("updated_by") or "").strip(),
                 "updated_at": str(record.get("updated_at") or "").strip(),
                 "version": self._normalize_version(record.get("version")),

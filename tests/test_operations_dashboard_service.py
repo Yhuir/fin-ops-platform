@@ -43,12 +43,12 @@ class FakeDashboardConnection:
                 "oa_attachment_latest_synced_at": datetime(2026, 5, 22, 9, 0, tzinfo=UTC),
             }
         if "from app.oa_applications" in normalized and "oa_records_count" in normalized:
-            if "read_model.oa_pending_payment_rows" not in normalized:
-                raise AssertionError("OA in-progress inventory must use the OA pending payment read model")
-            if "count(distinct oa_id)" not in normalized or "jsonb_array_elements" not in normalized:
-                raise AssertionError("OA in-progress inventory must match OA pending payment viewCounts.in_progress")
-            if "where coalesce(nullif(workflow_status, ''), 'completed') <> all" in normalized:
-                raise AssertionError("OA in-progress inventory must not use app.oa_applications workflow status")
+            if "read_model.oa_pending_payment_rows" in normalized:
+                raise AssertionError("OA inventory must not use the retired OA pending payment read model")
+            if "from app.oa_pending_payment_admissions" not in normalized:
+                raise AssertionError("OA in-progress inventory must include canonical admissions")
+            if "count(distinct oa_id)" not in normalized:
+                raise AssertionError("OA in-progress inventory must deduplicate canonical rows")
             return {
                 "oa_records_count": 7,
                 "oa_records_completed_count": 5,
@@ -112,8 +112,8 @@ class FakeRuntimeRepository:
     def dashboard_queue_metrics(self) -> list[dict[str, object]]:
         return [
             {
-                "event_type": "workbench.read_model.refresh",
-                "queue": "finops.workbench.read_model.refresh",
+                "event_type": "workbench_relation.read_model.refresh",
+                "queue": "finops.workbench_relation.read_model.refresh",
                 "messages": None,
                 "unacked": None,
                 "consumers": None,
@@ -290,8 +290,6 @@ class OperationsDashboardServiceTests(unittest.TestCase):
                         "publish_failed_count": 0,
                         "oldest_pending_age_seconds": None,
                     }
-                if "from read_model.workbench_generations" in normalized and "consistency_status" in normalized:
-                    return {"inconsistent_count": 0}
                 return super().fetch_one(sql, params)
 
             def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
@@ -360,7 +358,7 @@ class OperationsDashboardServiceTests(unittest.TestCase):
                     return [
                         {
                             "worker_id": "worker-search-1",
-                            "worker_kind": "search-pending-read-model",
+                            "worker_kind": "search-read-model",
                             "status": "idle",
                             "heartbeat_lag_seconds": 900.0,
                         }
@@ -371,29 +369,22 @@ class OperationsDashboardServiceTests(unittest.TestCase):
 
         worker_rows = {row["worker_kind"]: row for row in repository.dashboard_worker_metrics()}
 
-        self.assertEqual(worker_rows["search-pending-read-model"]["status"], "stale")
-        self.assertEqual(worker_rows["search-pending-read-model"]["warning_code"], "worker_heartbeat_stale")
-        self.assertEqual(worker_rows["workbench-read-model"]["status"], "missing")
-        self.assertEqual(worker_rows["workbench-read-model"]["warning_code"], "required_worker_missing")
+        self.assertEqual(worker_rows["search-read-model"]["status"], "stale")
+        self.assertEqual(worker_rows["search-read-model"]["warning_code"], "worker_heartbeat_stale")
+        self.assertEqual(worker_rows["workbench-relation-read-model"]["status"], "missing")
+        self.assertEqual(worker_rows["workbench-relation-read-model"]["warning_code"], "required_worker_missing")
 
     def test_runtime_repository_uses_recent_window_for_read_model_health_duration(self) -> None:
         class WindowedConnection:
             def __init__(self) -> None:
                 self.fetch_one_sql: list[str] = []
 
-            def fetch_one(self, sql: str, params: tuple[object, ...] = ()):
-                normalized = " ".join(sql.lower().split())
-                self.fetch_one_sql.append(normalized)
-                if "from read_model.workbench_generations" in normalized and "consistency_status" in normalized:
-                    return {"inconsistent_count": 0}
-                raise AssertionError(sql)
-
             def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
                 normalized = " ".join(sql.lower().split())
                 if "metric_windows(window_name" in normalized:
                     return [
                         {
-                            "event_type": "workbench.read_model.refresh",
+                            "event_type": "workbench_relation.read_model.refresh",
                             "window_name": "recent_15m",
                             "refresh_kind": "incremental",
                             "sample_count": 2,
@@ -403,7 +394,7 @@ class OperationsDashboardServiceTests(unittest.TestCase):
                             "p99_ms": 125.0,
                         },
                         {
-                            "event_type": "workbench.read_model.refresh",
+                            "event_type": "workbench_relation.read_model.refresh",
                             "window_name": "all_time",
                             "refresh_kind": "full",
                             "sample_count": 100,
@@ -418,8 +409,8 @@ class OperationsDashboardServiceTests(unittest.TestCase):
                 if "projection_source_versions" in normalized and "from job.outbox_events" in normalized:
                     return [
                         {
-                            "event_type": "workbench.read_model.refresh",
-                            "scope_type": "workbench",
+                            "event_type": "workbench_relation.read_model.refresh",
+                            "scope_type": "workbench_relation",
                             "scope_key": "2026-05",
                             "status": "done",
                             "source_version": 7,
@@ -445,23 +436,16 @@ class OperationsDashboardServiceTests(unittest.TestCase):
 
         rows = repository.dashboard_read_model_metrics()
 
-        workbench = next(row for row in rows if row["key"] == "workbench")
-        self.assertEqual(workbench["refresh_duration_ms"]["p95"], 120.0)
-        self.assertEqual(workbench["historical_refresh_duration_ms"]["p95"], 24000.0)
-        self.assertEqual(workbench["refresh_duration_windows"]["recent_15m"]["sample_count"], 2)
-        self.assertIn("full", workbench["refresh_duration_by_kind"])
-        self.assertEqual(workbench["scope_evidence"][0]["operation_class"], "current_scope")
-        self.assertEqual(workbench["scope_evidence"][0]["queue_wait_ms"], 1000.0)
-        self.assertEqual(workbench["scope_evidence"][0]["handler_duration_ms"], 120.0)
-        self.assertEqual(workbench["scope_evidence"][0]["retry_count"], 1)
-        self.assertEqual(workbench["scope_evidence"][0]["projection_source_versions"], {"source_version": 7})
-        self.assertTrue(
-            any(
-                "from read_model.workbench_generations" in sql and "consistency_status = 'inconsistent'" in sql
-                for sql in connection.fetch_one_sql
-            )
-        )
-        self.assertFalse(any("workbench_generation_consistency" in sql for sql in connection.fetch_one_sql))
+        relation = next(row for row in rows if row["key"] == "workbench_relation")
+        self.assertEqual(relation["refresh_duration_ms"]["p95"], 120.0)
+        self.assertEqual(relation["historical_refresh_duration_ms"]["p95"], 24000.0)
+        self.assertEqual(relation["refresh_duration_windows"]["recent_15m"]["sample_count"], 2)
+        self.assertIn("full", relation["refresh_duration_by_kind"])
+        self.assertEqual(relation["scope_evidence"][0]["operation_class"], "current_scope")
+        self.assertEqual(relation["scope_evidence"][0]["queue_wait_ms"], 1000.0)
+        self.assertEqual(relation["scope_evidence"][0]["handler_duration_ms"], 120.0)
+        self.assertEqual(relation["scope_evidence"][0]["retry_count"], 1)
+        self.assertEqual(relation["scope_evidence"][0]["projection_source_versions"], {"source_version": 7})
 
     def test_runtime_repository_splits_outbox_dashboard_attention_candidates(self) -> None:
         class CapturingConnection:
@@ -498,12 +482,6 @@ class OperationsDashboardServiceTests(unittest.TestCase):
                 self.duration_sql = ""
                 self.duration_params: tuple[object, ...] = ()
                 self.dirty_sql = ""
-
-            def fetch_one(self, sql: str, params: tuple[object, ...] = ()):
-                normalized = " ".join(sql.lower().split())
-                if "from read_model.workbench_generations" in normalized and "consistency_status" in normalized:
-                    return {"inconsistent_count": 0}
-                raise AssertionError(sql)
 
             def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
                 normalized = " ".join(sql.lower().split())

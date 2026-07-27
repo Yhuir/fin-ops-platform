@@ -8,7 +8,7 @@
 - 当前边界可信度：high
 - Query owner：`InputInvoiceUsageCanonicalQueryService`
 - PostgreSQL owner：`PostgresInputInvoiceUsageQueryRepository`
-- 旧页面 read model：已退出 API/frontend 运行时；共享 projection/worker 注册项待主控统一清理。
+- 旧页面 read model：API/frontend、projection/repository、worker/registry/deploy 和 lifecycle 间接链均已删除。
 
 ## 职责边界
 
@@ -85,12 +85,6 @@
 - page query repository -> read-model tables
 - frontend -> filter-options/read-model refresh/status endpoint
 
-## 共享清理 HANDOFF
+## 跨页面清理结果
 
-本分支不删除仍由其它调用方或全局注册引用的以下共享资源：
-
-- `InvoiceUsageCollectionSqlProjectionBuilder` 的 input projection 代码。
-- `invoice-usage-collection` worker/handler/registry/manifest/deploy 配置。
-- `input_invoice_usage` read-model scope policy、App Status/audit/repair 注册项和全局表清理 migration。
-
-所有页面分支合并后，由主控做 whole-repo scan 再统一删除。
+`InvoiceUsageCollectionSqlProjectionBuilder` 的 input projection、invoice-usage-collection worker/handler/registry/manifest/deploy、input read-model scope/App Status/audit/repair 注册项已删除。历史 migration/表暂留作回滚证据，没有运行时 reader/writer。

@@ -4146,7 +4146,6 @@ function buildCostStatisticsExplorerPayload(
 
   return {
     month,
-    read_model_status: "fresh",
     summary: {
       row_count: timeRows.length,
       transaction_count: timeRows.length,
@@ -5030,7 +5029,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             message: "OA 已同步",
             dirty_scopes: [],
           },
-          workbench_read_model: {
+          workbench_matching: {
             status: "ready",
             dirty_scopes: [],
             stale_scopes: [],
@@ -5208,8 +5207,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             },
             queues: [
               {
-                event_type: "workbench.read_model.refresh",
-                queue: "finops.workbench.read_model.refresh",
+                event_type: "workbench_relation.read_model.refresh",
+                queue: "finops.workbench_relation.read_model.refresh",
                 messages: 2,
                 unacked: 1,
                 consumers: 1,
@@ -5504,9 +5503,10 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         body: {
           action: String(jsonBody.action ?? ""),
           status: "completed",
-          cleared_collections: ["workbench_read_models"],
+          cleared_collections: ["workbench_row_overrides", "workbench_pair_relations"],
           deleted_counts: {
-            workbench_read_models: 1,
+            workbench_row_overrides: 0,
+            workbench_pair_relations: 0,
           },
           protected_targets: ["form_data_db.form_data"],
           rebuild_status: jsonBody.action === "reset_oa_and_rebuild" ? "completed" : "not_applicable",
@@ -7056,8 +7056,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         case_id: typeof jsonBody?.case_id === "string" ? jsonBody.case_id : undefined,
         affected_months: Array.from(touchedMonths),
         affected_scope_keys: Array.from(touchedMonths),
-        freshness_targets: [],
-        operation_barrier_targets: [],
         operation_projection: operationProjection,
         message: `已确认 ${rowIds.length} 条记录关联。`,
       };
@@ -7113,8 +7111,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         restored_relations: [],
         changed_scopes: Array.from(touchedMonths),
         affected_scope_keys: Array.from(touchedMonths),
-        freshness_targets: [],
-        operation_barrier_targets: [],
         operation_projection: operationProjection,
         message: "已撤回 1 组关联。",
       };
@@ -7789,9 +7785,10 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         result: {
           action,
           status: "completed",
-          cleared_collections: ["workbench_read_models"],
+          cleared_collections: ["workbench_row_overrides", "workbench_pair_relations"],
           deleted_counts: {
-            workbench_read_models: 1,
+            workbench_row_overrides: 0,
+            workbench_pair_relations: 0,
           },
           protected_targets: ["form_data_db.form_data"],
           rebuild_status: action === "reset_oa_and_rebuild" ? "completed" : "not_applicable",

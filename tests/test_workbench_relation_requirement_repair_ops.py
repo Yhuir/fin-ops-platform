@@ -59,12 +59,13 @@ class _CommandService:
         raise AssertionError(f"missing relation {case_id}")
 
 
-class _TagFacade:
+class _CategoryProvider:
     def __init__(self, category_code: str = "expense:engineering_service:personnel_insurance") -> None:
         self.category_code = category_code
         self.calls: list[list[str]] = []
 
-    def category_records_by_transaction_ids(self, row_ids: list[str], **_kwargs: object) -> dict[str, object]:
+    def bulk_get_for_rows(self, rows: list[dict[str, object]]) -> dict[str, object]:
+        row_ids = [str(row.get("id") or "") for row in rows]
         self.calls.append(list(row_ids))
         return {
             row_id: {"effective_category_code": self.category_code}
@@ -73,9 +74,26 @@ class _TagFacade:
         }
 
 
-class _InvalidTagFacade:
-    def category_records_by_transaction_ids(self, _row_ids: list[str], **_kwargs: object) -> object:
+class _InvalidCategoryProvider:
+    def bulk_get_for_rows(self, _rows: list[dict[str, object]]) -> object:
         return None
+
+
+class _ImportService:
+    def __init__(self, command: _CommandService) -> None:
+        self._command = command
+
+    def list_transactions(self, **_kwargs: object) -> list[dict[str, object]]:
+        return [
+            {"id": row_id}
+            for relation in self._command.relations
+            for row_id, row_type in zip(
+                list(relation.get("row_ids") or []),
+                list(relation.get("row_types") or []),
+                strict=True,
+            )
+            if str(row_type).strip().lower() == "bank"
+        ]
 
 
 def _relation(
@@ -115,7 +133,7 @@ def _run(
     command: _CommandService,
     argv: list[str],
     *,
-    tag_facade: object | None = None,
+    category_provider: object | None = None,
     rules: object | None = None,
     persisted: list[str] | None = None,
 ) -> dict[str, object]:
@@ -126,8 +144,13 @@ def _run(
         patch.object(repair_ops, "workbench_relation_command_service", return_value=command),
         patch.object(
             repair_ops,
-            "bank_transaction_tag_read_facade",
-            return_value=tag_facade or _TagFacade(),
+            "bank_transaction_effective_category_provider",
+            return_value=category_provider or _CategoryProvider(),
+        ),
+        patch.object(
+            repair_ops,
+            "import_service",
+            return_value=_ImportService(command),
         ),
         patch.object(
             repair_ops,
@@ -187,7 +210,8 @@ class WorkbenchRelationRequirementRepairOpsTests(unittest.TestCase):
 
         plan = repair_ops._build_plan(
             [turnover, ordinary],
-            tag_facade=_TagFacade(),
+            category_provider=_CategoryProvider(),
+            bank_rows=[{"id": "bank-turnover"}, {"id": "bank-ordinary"}],
             rules_payload=_rules(),
         )
         by_case = {str(item["case_id"]): item for item in plan}
@@ -201,7 +225,8 @@ class WorkbenchRelationRequirementRepairOpsTests(unittest.TestCase):
         relation = _relation(metadata={"legacy_key": "before"})
         plan = repair_ops._build_plan(
             [relation],
-            tag_facade=_TagFacade(),
+            category_provider=_CategoryProvider(),
+            bank_rows=[{"id": "bank-case-1"}],
             rules_payload=_rules(),
         )
         fingerprint = repair_ops._fingerprint(plan)
@@ -280,12 +305,21 @@ class WorkbenchRelationRequirementRepairOpsTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "sources changed"):
             _run(command, ["--execute", "--expected-fingerprint", "stale"])
         with self.assertRaisesRegex(RuntimeError, "invalid result"):
-            _run(command, ["--dry-run"], tag_facade=_InvalidTagFacade())
+            _run(
+                command,
+                ["--dry-run"],
+                category_provider=_InvalidCategoryProvider(),
+            )
         self.assertEqual(command.updates, [])
 
     def test_missing_tags_and_rules_fail_closed(self) -> None:
         command = _CommandService([_relation(metadata={"requires_oa": False, "requires_invoice": False})])
-        report = _run(command, ["--dry-run"], tag_facade=_TagFacade(""), rules={})
+        report = _run(
+            command,
+            ["--dry-run"],
+            category_provider=_CategoryProvider(""),
+            rules={},
+        )
         self.assertEqual(report["requirement_counts"], {"oa=1,invoice=1": 1})
 
     def test_partial_missing_bank_tag_fails_closed_with_one_bulk_read(self) -> None:
@@ -293,15 +327,15 @@ class WorkbenchRelationRequirementRepairOpsTests(unittest.TestCase):
         relation["row_ids"] = ["bank-known", "bank-missing"]
         relation["row_types"] = ["bank", "bank"]
 
-        class PartialMissingTagFacade:
+        class PartialMissingCategoryProvider:
             def __init__(self) -> None:
                 self.calls: list[list[str]] = []
 
-            def category_records_by_transaction_ids(
+            def bulk_get_for_rows(
                 self,
-                row_ids: list[str],
-                **_kwargs: object,
+                rows: list[dict[str, object]],
             ) -> dict[str, object]:
+                row_ids = [str(row.get("id") or "") for row in rows]
                 self.calls.append(list(row_ids))
                 return {
                     "bank-known": {
@@ -310,10 +344,11 @@ class WorkbenchRelationRequirementRepairOpsTests(unittest.TestCase):
                     "bank-missing": {"effective_category_code": ""},
                 }
 
-        tag_facade = PartialMissingTagFacade()
+        category_provider = PartialMissingCategoryProvider()
         plan = repair_ops._build_plan(
             [relation],
-            tag_facade=tag_facade,
+            category_provider=category_provider,
+            bank_rows=[{"id": "bank-known"}, {"id": "bank-missing"}],
             rules_payload=_rules(requires_oa=False, requires_invoice=False),
         )
 
@@ -324,7 +359,7 @@ class WorkbenchRelationRequirementRepairOpsTests(unittest.TestCase):
         )
         self.assertTrue(plan[0]["special_metadata"]["requires_oa"])
         self.assertTrue(plan[0]["special_metadata"]["requires_invoice"])
-        self.assertEqual(tag_facade.calls, [["bank-known", "bank-missing"]])
+        self.assertEqual(category_provider.calls, [["bank-known", "bank-missing"]])
 
     def test_rollback_restores_exact_metadata_without_recreating_relation(self) -> None:
         preimage = {"legacy_key": "keep", "requires_oa": False, "requires_invoice": False}

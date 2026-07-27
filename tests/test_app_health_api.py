@@ -110,14 +110,9 @@ class FakeInputInvoiceUsageAuditConnection:
             raise RuntimeError("audit database timeout")
         self.fetch_one_calls.append((sql, params))
         return {
-            "active_input_invoice_count": 2,
-            "active_input_invoice_total_with_tax": "300.00",
-            "read_model_invoice_member_count": 2,
-            "read_model_row_count": 1,
-            "input_invoice_usage_scope_count": 1,
-            "workbench_relation_scope_count": 1,
-            "active_workbench_pair_relation_count": 1,
-            "linked_workbench_relation_group_count": 1,
+            "source_fact_count": 2,
+            "active_relation_count": 1,
+            "linked_relation_group_count": 1,
         }
 
     def fetch_all(self, sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
@@ -137,14 +132,9 @@ class FakeOutputInvoiceCollectionAuditConnection(FakeInputInvoiceUsageAuditConne
             raise RuntimeError("audit database timeout")
         self.fetch_one_calls.append((sql, params))
         return {
-            "active_output_invoice_count": 2,
-            "active_output_invoice_total_with_tax": "300.00",
-            "read_model_invoice_member_count": 2,
-            "read_model_row_count": 1,
-            "output_invoice_collection_scope_count": 1,
-            "workbench_relation_scope_count": 1,
-            "active_workbench_pair_relation_count": 1,
-            "linked_workbench_relation_group_count": 1,
+            "source_fact_count": 2,
+            "active_relation_count": 1,
+            "linked_relation_group_count": 1,
         }
 
 
@@ -155,12 +145,8 @@ class FakePageBusinessAuditConnection(FakeInputInvoiceUsageAuditConnection):
         self.fetch_one_calls.append((sql, params))
         return {
             "source_fact_count": 2,
-            "read_model_row_count": 2,
-            "read_model_scope_count": 1,
             "active_relation_count": 1,
             "linked_relation_group_count": 1,
-            "dirty_scope_count": 0,
-            "outbox_backlog_count": 0,
         }
 
 
@@ -244,7 +230,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertIn("generated_at", payload)
         self.assertEqual(payload["session"]["status"], "authenticated")
         self.assertIn("oa_sync", payload)
-        self.assertEqual(payload["workbench_read_model"]["status"], "ready")
+        self.assertEqual(payload["workbench_matching"]["status"], "ready")
         self.assertEqual(payload["background_jobs"]["active"], 0)
         self.assertIn("dependencies", payload)
         self.assertEqual(payload["version"], 1)
@@ -372,92 +358,8 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["status"], "busy")
         self.assertEqual(payload["oa_sync"]["status"], "refreshing")
         self.assertEqual(payload["oa_sync"]["dirty_scopes"], ["all"])
-        self.assertEqual(payload["workbench_read_model"]["status"], "stale")
-        self.assertEqual(payload["workbench_read_model"]["dirty_scopes"], ["all"])
-
-    def test_app_health_reports_workbench_generation_consistency_failure(self) -> None:
-        app = build_application()
-
-        class FailedWorkbenchRepository:
-            def get_workbench_refresh_status(self, *, scope_key: str):
-                return {
-                    "scope_key": scope_key,
-                    "read_model_status": "failed",
-                    "consistency_status": "failed",
-                    "active_generation_id": "gen-all",
-                    "last_error": "generation_metadata_actual_mismatch: all/gen-all",
-                    "consistency_failures": [
-                        {
-                            "scope_key": "all",
-                            "generation_id": "gen-all",
-                            "group_count": 6,
-                            "actual_group_count": 0,
-                        }
-                    ],
-                }
-
-        app._workbench_sql_read_repository = FailedWorkbenchRepository()
-
-        response = app.handle_request("GET", "/api/app-health")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["status"], "blocked")
-        self.assertEqual(payload["workbench_read_model"]["status"], "error")
-        self.assertEqual(payload["workbench_read_model"]["consistency_status"], "failed")
-        self.assertEqual(payload["workbench_read_model"]["active_generation_id"], "gen-all")
-        self.assertIn("generation_metadata_actual_mismatch", payload["workbench_read_model"]["last_error"])
-
-    def test_app_health_keeps_workbench_consistency_failure_busy_during_active_repair(self) -> None:
-        app = build_application()
-
-        class RepairingWorkbenchRepository:
-            def get_workbench_refresh_status(self, *, scope_key: str):
-                return {
-                    "scope_key": scope_key,
-                    "read_model_status": "refreshing",
-                    "consistency_status": "failed",
-                    "active_generation_id": "gen-all",
-                    "last_error": "Workbench read model generation consistency failed.",
-                    "consistency_failures": [
-                        {
-                            "scope_key": "all",
-                            "generation_id": "gen-all",
-                            "group_count": 6,
-                            "actual_group_count": 0,
-                        }
-                    ],
-                }
-
-        app._workbench_sql_read_repository = RepairingWorkbenchRepository()
-
-        response = app.handle_request("GET", "/api/app-health")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["status"], "busy")
-        self.assertEqual(payload["workbench_read_model"]["status"], "rebuilding")
-        self.assertNotEqual(payload["dependencies"].get("workbench_read_model", {}).get("status"), "unavailable")
-        self.assertNotEqual(payload["app_status"]["overall"]["level"], "blocked")
-
-    def test_app_health_caches_workbench_refresh_status_briefly(self) -> None:
-        app = build_application()
-
-        class CountingWorkbenchRepository:
-            def __init__(self) -> None:
-                self.calls = 0
-
-            def get_workbench_refresh_status(self, *, scope_key: str):
-                self.calls += 1
-                return {"scope_key": scope_key, "read_model_status": "fresh", "consistency_status": "fresh"}
-
-        repository = CountingWorkbenchRepository()
-        app._workbench_sql_read_repository = repository
-
-        app.handle_request("GET", "/api/app-health")
-        app.handle_request("GET", "/api/app-health")
-
-        self.assertEqual(repository.calls, 1)
+        self.assertEqual(payload["workbench_matching"]["status"], "stale")
+        self.assertEqual(payload["workbench_matching"]["dirty_scopes"], ["all"])
 
     def test_app_health_caches_runtime_snapshot_briefly(self) -> None:
         app = build_application()
@@ -567,8 +469,8 @@ class AppHealthApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["status"], "busy")
-        self.assertEqual(payload["workbench_read_model"]["status"], "rebuilding")
-        self.assertEqual(payload["workbench_read_model"]["rebuild_job_ids"], [job.job_id])
+        self.assertEqual(payload["workbench_matching"]["status"], "rebuilding")
+        self.assertEqual(payload["workbench_matching"]["rebuild_job_ids"], [job.job_id])
 
     def test_app_health_reports_unacknowledged_failed_and_partial_success_jobs_as_attention(self) -> None:
         app = build_application()
@@ -704,7 +606,7 @@ class AppHealthApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["status"], "blocked")
-        self.assertEqual(payload["workbench_read_model"]["status"], "error")
+        self.assertEqual(payload["workbench_matching"]["status"], "error")
         self.assertEqual(payload["dependencies"]["oa_sync"]["status"], "unavailable")
         self.assertEqual(payload["alerts"]["active"][0]["kind"], "dependency_unavailable")
 
@@ -853,14 +755,14 @@ class AppHealthApiTests(unittest.TestCase):
             payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["mode"], "dry-run")
+        self.assertEqual(payload["mode"], "page-business-canonical-read-audit")
         self.assertEqual(payload["overall_status"], "pass")
         self.assertEqual(payload["tenant_id"], "default")
         self.assertEqual(payload["summary"]["blocking_issue_sample_count"], 0)
         self.assertEqual(payload["audit_contract"]["write_policy"], "read_only")
         self.assertIn("app.invoices", payload["audit_contract"]["source_tables"])
-        self.assertIn("read_model.input_invoice_usage_rows", payload["audit_contract"]["source_tables"])
-        self.assertIn("read_model.workbench_relation_rows", payload["audit_contract"]["source_tables"])
+        self.assertEqual(payload["audit_contract"]["read_model_tables"], [])
+        self.assertIn("app.workbench_pair_relations", payload["audit_contract"]["relation_tables"])
         self.assertEqual(connection.executed, [])
         queried_sql = " ".join(sql for sql, _params in connection.fetch_one_calls + connection.fetch_all_calls)
         self.assertIn("app.invoices", queried_sql)
@@ -879,29 +781,28 @@ class AppHealthApiTests(unittest.TestCase):
             payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["mode"], "dry-run")
+        self.assertEqual(payload["mode"], "page-business-canonical-read-audit")
         self.assertEqual(payload["overall_status"], "pass")
         self.assertEqual(payload["summary"]["blocking_issue_sample_count"], 0)
         self.assertEqual(payload["audit_contract"]["write_policy"], "read_only")
-        self.assertIn("read_model.output_invoice_collection_rows", payload["audit_contract"]["source_tables"])
-        self.assertIn("read_model.workbench_relation_rows", payload["audit_contract"]["source_tables"])
+        self.assertIn("app.invoices", payload["audit_contract"]["source_tables"])
+        self.assertEqual(payload["audit_contract"]["read_model_tables"], [])
+        self.assertIn("app.workbench_pair_relations", payload["audit_contract"]["relation_tables"])
         self.assertEqual(connection.executed, [])
         queried_sql = " ".join(sql for sql, _params in connection.fetch_one_calls + connection.fetch_all_calls)
-        self.assertIn("read_model.output_invoice_collection_rows", queried_sql)
-        self.assertIn("output_invoice_ids", queried_sql)
+        self.assertIn("app.invoices", queried_sql)
+        self.assertIn("app.workbench_pair_relations", queried_sql)
 
     def test_operations_input_invoice_usage_audit_reports_relation_issues_without_writes(self) -> None:
         with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             connection = FakeInputInvoiceUsageAuditConnection(
                 rows_by_check={
-                    "relation_edge_equality": [
+                    "canonical_relation_invoice_member_exists": [
                         {
                             "subject_id": "case-1",
                             "scope_key": "2026-05",
                             "row_id": "inv-1",
-                            "row_type": "input_invoice",
-                            "mismatch_kind": "canonical_missing_group_edge",
                         }
                     ]
                 }
@@ -919,7 +820,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["blocking_issue_sample_count"], 1)
         self.assertEqual(
             payload["summary"]["issue_sample_counts_by_code"],
-            {"input_invoice_usage_relation_edge_mismatch": 1},
+            {"input_invoice_usage_canonical_relation_invoice_member_missing": 1},
         )
         self.assertEqual(connection.executed, [])
 
@@ -943,34 +844,35 @@ class AppHealthApiTests(unittest.TestCase):
             payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["mode"], "page-business-read-model-audit")
+        self.assertEqual(payload["mode"], "page-business-canonical-read-audit")
         self.assertEqual(payload["page_key"], "bank-details")
         self.assertEqual(payload["domain_key"], "bank_details")
         self.assertEqual(payload["overall_status"], "pass")
         self.assertEqual(payload["summary"]["blocking_issue_sample_count"], 0)
         self.assertEqual(payload["audit_contract"]["write_policy"], "read_only")
         self.assertEqual(payload["audit_contract"]["proof_availability"], "ready")
-        self.assertEqual(payload["audit_contract"]["contract_revision"], "page-audit-contract.v26")
+        self.assertEqual(payload["audit_contract"]["contract_revision"], "page-audit-contract.v27")
         self.assertIn("app.bank_transactions", payload["audit_contract"]["source_tables"])
-        self.assertIn("read_model.bank_detail_rows", payload["audit_contract"]["read_model_tables"])
+        self.assertEqual(payload["audit_contract"]["read_model_tables"], [])
+        self.assertEqual(payload["audit_contract"]["registered_read_model_keys"], [])
         self.assertEqual(connection.executed, [])
         queried_sql = " ".join(sql for sql, _params in connection.fetch_one_calls + connection.fetch_all_calls)
         self.assertIn("app.bank_transactions", queried_sql)
-        self.assertIn("read_model.bank_detail_rows", queried_sql)
-        self.assertIn("read_model.workbench_relation_groups", queried_sql)
+        self.assertIn("app.workbench_pair_relations", queried_sql)
+        self.assertNotIn("read_model.", queried_sql)
 
     def test_operations_page_audit_reports_page_invariants_without_writes(self) -> None:
         with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             connection = FakePageBusinessAuditConnection(
                 rows_by_check={
-                    "missing_read_model_row": [
+                    "key_display_fields": [
                         {
                             "subject_id": "batch-1",
                             "scope_key": "2026-05",
                         }
                     ],
-                    "relation_edge_equality": [
+                    "consumer_relation_edge_equality": [
                         {
                             "subject_id": "case-1",
                             "scope_key": "2026-05",
@@ -992,8 +894,8 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(
             payload["summary"]["issue_sample_counts_by_code"],
             {
-                "bank_flow_rule_batches_relation_edge_mismatch": 1,
-                "bank_flow_rule_batches_missing_read_model_row": 1,
+                "bank_flow_rule_batches_consumer_relation_edge_mismatch": 1,
+                "bank_flow_rule_batches_key_display_fields_mismatch": 1,
             },
         )
         self.assertEqual(connection.executed, [])
@@ -1003,7 +905,7 @@ class AppHealthApiTests(unittest.TestCase):
             ("input-invoice-usage", FakeInputInvoiceUsageAuditConnection, "input_invoice_usage"),
             ("output-invoice-collections", FakeOutputInvoiceCollectionAuditConnection, "output_invoice_collection"),
         )
-        for page_key, connection_factory, read_model_key in cases:
+        for page_key, connection_factory, domain_key in cases:
             with self.subTest(page_key=page_key), self._temporary_env(
                 FIN_OPS_ADMIN_USERNAMES="test_finops_user"
             ), tempfile.TemporaryDirectory() as temp_dir:
@@ -1019,10 +921,13 @@ class AppHealthApiTests(unittest.TestCase):
 
             self.assertEqual(response.status_code, 200)
             self.assertEqual(payload["page_key"], page_key)
+            self.assertEqual(payload["domain_key"], domain_key)
             self.assertEqual(payload["audit_contract"]["proof_availability"], "ready")
-            self.assertIn(read_model_key, payload["audit_contract"]["registered_read_model_keys"])
+            self.assertEqual(payload["audit_contract"]["registered_read_model_keys"], [])
             queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
-            self.assertIn("job.outbox_events", queried_sql)
+            self.assertIn("app.invoices", queried_sql)
+            self.assertNotIn("job.outbox_events", queried_sql)
+            self.assertNotIn("read_model.", queried_sql)
 
     def test_operations_page_audit_dispatches_etc_direct_canonical_proof(self) -> None:
         with self._temporary_env(
@@ -1115,7 +1020,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["page_key"], "app-health-operations")
         self.assertEqual(payload["mode"], "app-health-system-audit")
         self.assertEqual(payload["audit_contract"]["proof_availability"], "ready")
-        self.assertEqual(payload["audit_contract"]["contract_revision"], "page-audit-contract.v26")
+        self.assertEqual(payload["audit_contract"]["contract_revision"], "page-audit-contract.v27")
         self.assertEqual(payload["external_evidence"]["end_to_end_source_truth"], "unproven")
 
     def test_operations_page_audit_returns_unified_workbench_proof(self) -> None:
@@ -1132,9 +1037,12 @@ class AppHealthApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["page_key"], "reconciliation-workbench")
-        self.assertEqual(payload["mode"], "workbench-page-audit")
-        self.assertEqual(payload["audit_contract"]["proof_availability"], "ready")
-        self.assertIn("query_composed_relation_case_ownership", payload["audit_contract"]["proof_checks"])
+        self.assertEqual(payload["mode"], "workbench-canonical-page-audit")
+        self.assertIn("app.workbench_pair_relations", payload["audit_contract"]["source_tables"])
+        self.assertEqual(payload["audit_contract"]["read_model_tables"], [])
+        self.assertEqual(payload["audit_contract"]["registered_read_model_keys"], [])
+        queried_sql = " ".join(sql for sql, _params in connection.fetch_one_calls + connection.fetch_all_calls)
+        self.assertNotIn("read_model.", queried_sql)
         self.assertEqual(connection.executed, [])
 
     def test_operations_page_audit_requires_postgres_connection(self) -> None:
@@ -1147,219 +1055,30 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(payload["error"], "postgres_required")
 
-    def test_operations_input_invoice_usage_refresh_is_admin_only(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-
-            response = app.handle_request(
-                "POST",
-                "/api/operations/app-health/input-invoice-usage-refresh",
-                json.dumps({"scope_keys": ["2026-06"]}),
-            )
-            payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(payload["error"], "admin_only")
-
-    def test_operations_pending_invoice_refresh_is_admin_only(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-
-            response = app.handle_request(
-                "POST",
-                "/api/operations/app-health/pending-invoice-refresh",
-                json.dumps({"scope_keys": ["expense:all"]}),
-            )
-            payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(payload["error"], "admin_only")
-
-    def test_operations_input_invoice_usage_refresh_enqueues_valid_scopes_for_admin(self) -> None:
+    def test_retired_page_read_model_refresh_routes_are_not_found(self) -> None:
+        routes = (
+            "/api/operations/app-health/input-invoice-usage-refresh",
+            "/api/operations/app-health/output-invoice-collection-refresh",
+            "/api/operations/app-health/pending-invoice-refresh",
+        )
         with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             queue = FakeRuntimeQueueRepository()
             app._runtime_repositories = SimpleNamespace(queue_repository=queue)
 
-            response = app.handle_request(
-                "POST",
-                "/api/operations/app-health/input-invoice-usage-refresh",
-                json.dumps(
-                    {
-                        "scope_keys": ["2025-09", "2025-09", "2026-06"],
-                        "reason": "production_audit_repair",
-                        "metadata": {"audit": "input_invoice_usage"},
-                    }
-                ),
-            )
-            payload = json.loads(response.body)
+            for route in routes:
+                with self.subTest(route=route):
+                    response = app.handle_request(
+                        "POST",
+                        route,
+                        json.dumps({"scope_keys": ["2026-06"]}),
+                    )
+                    payload = json.loads(response.body)
 
-        self.assertEqual(response.status_code, 202)
-        self.assertEqual(payload["read_model_key"], "input_invoice_usage")
-        self.assertEqual(payload["enqueued_scope_keys"], ["2025-09", "2026-06"])
-        self.assertEqual(payload["enqueued_count"], 2)
-        self.assertEqual([item["scope_type"] for item in queue.enqueued], ["input_invoice_usage", "input_invoice_usage"])
-        self.assertEqual([item["scope_key"] for item in queue.enqueued], ["2025-09", "2026-06"])
-        self.assertTrue(all(item["priority"] == "high" for item in queue.enqueued))
-        self.assertTrue(all(item["reason"] == "production_audit_repair" for item in queue.enqueued))
-        self.assertEqual(queue.enqueued[0]["metadata"]["source"], "operations_app_health")
-        self.assertEqual(queue.enqueued[0]["metadata"]["audit"], "input_invoice_usage")
+                    self.assertEqual(response.status_code, 404)
+                    self.assertEqual(payload["error"], "not_found")
 
-    def test_operations_output_invoice_collection_refresh_enqueues_valid_scopes_for_admin(self) -> None:
-        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            queue = FakeRuntimeQueueRepository()
-            app._runtime_repositories = SimpleNamespace(queue_repository=queue)
-
-            response = app.handle_request(
-                "POST",
-                "/api/operations/app-health/output-invoice-collection-refresh",
-                json.dumps(
-                    {
-                        "scope_keys": ["2026-01", "2026-01", "2026-06"],
-                        "reason": "production_audit_repair",
-                        "metadata": {"audit": "output_invoice_collection"},
-                    }
-                ),
-            )
-            payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 202)
-        self.assertEqual(payload["read_model_key"], "output_invoice_collection")
-        self.assertEqual(payload["enqueued_scope_keys"], ["2026-01", "2026-06"])
-        self.assertEqual(payload["enqueued_count"], 2)
-        self.assertEqual([item["scope_type"] for item in queue.enqueued], ["output_invoice_collection", "output_invoice_collection"])
-        self.assertEqual([item["scope_key"] for item in queue.enqueued], ["2026-01", "2026-06"])
-        self.assertTrue(all(item["priority"] == "high" for item in queue.enqueued))
-        self.assertTrue(all(item["reason"] == "production_audit_repair" for item in queue.enqueued))
-        self.assertEqual(queue.enqueued[0]["metadata"]["source"], "operations_app_health")
-        self.assertEqual(queue.enqueued[0]["metadata"]["audit"], "output_invoice_collection")
-
-    def test_operations_pending_invoice_refresh_enqueues_valid_scopes_for_admin(self) -> None:
-        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            queue = FakeRuntimeQueueRepository()
-            app._runtime_repositories = SimpleNamespace(queue_repository=queue)
-
-            response = app.handle_request(
-                "POST",
-                "/api/operations/app-health/pending-invoice-refresh",
-                json.dumps(
-                    {
-                        "scope_keys": ["expense:all", "expense:all", "income:all"],
-                        "reason": "production_audit_repair",
-                        "metadata": {"audit": "pending_invoice"},
-                    }
-                ),
-            )
-            payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 202)
-        self.assertEqual(payload["read_model_key"], "pending_invoice")
-        self.assertEqual(payload["enqueued_scope_keys"], ["expense:all", "income:all"])
-        self.assertEqual(payload["enqueued_count"], 2)
-        self.assertEqual([item["scope_type"] for item in queue.enqueued], ["pending_invoice", "pending_invoice"])
-        self.assertEqual([item["scope_key"] for item in queue.enqueued], ["expense:all", "income:all"])
-        self.assertTrue(all(item["priority"] == "high" for item in queue.enqueued))
-        self.assertTrue(all(item["reason"] == "production_audit_repair" for item in queue.enqueued))
-        self.assertEqual(queue.enqueued[0]["metadata"]["source"], "operations_app_health")
-        self.assertEqual(queue.enqueued[0]["metadata"]["audit"], "pending_invoice")
-
-    def test_operations_input_invoice_usage_refresh_rejects_invalid_scope(self) -> None:
-        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            queue = FakeRuntimeQueueRepository()
-            app._runtime_repositories = SimpleNamespace(queue_repository=queue)
-
-            response = app.handle_request(
-                "POST",
-                "/api/operations/app-health/input-invoice-usage-refresh",
-                json.dumps({"scope_keys": ["not-a-month"]}),
-            )
-            payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(payload["error"], "invalid_input_invoice_usage_refresh_scope")
         self.assertEqual(queue.enqueued, [])
-
-    def test_operations_output_invoice_collection_refresh_rejects_invalid_scope(self) -> None:
-        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            queue = FakeRuntimeQueueRepository()
-            app._runtime_repositories = SimpleNamespace(queue_repository=queue)
-
-            response = app.handle_request(
-                "POST",
-                "/api/operations/app-health/output-invoice-collection-refresh",
-                json.dumps({"scope_keys": ["not-a-month"]}),
-            )
-            payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(payload["error"], "invalid_output_invoice_collection_refresh_scope")
-        self.assertEqual(queue.enqueued, [])
-
-    def test_operations_pending_invoice_refresh_rejects_invalid_scope(self) -> None:
-        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            queue = FakeRuntimeQueueRepository()
-            app._runtime_repositories = SimpleNamespace(queue_repository=queue)
-
-            response = app.handle_request(
-                "POST",
-                "/api/operations/app-health/pending-invoice-refresh",
-                json.dumps({"scope_keys": ["2026-06"]}),
-            )
-            payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(payload["error"], "invalid_pending_invoice_refresh_scope")
-        self.assertEqual(queue.enqueued, [])
-
-    def test_operations_input_invoice_usage_refresh_requires_runtime_queue(self) -> None:
-        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._runtime_repositories = SimpleNamespace(queue_repository=object())
-
-            response = app.handle_request(
-                "POST",
-                "/api/operations/app-health/input-invoice-usage-refresh",
-                json.dumps({"scope_keys": ["2026-06"]}),
-            )
-            payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 503)
-        self.assertEqual(payload["error"], "runtime_queue_required")
-
-    def test_operations_output_invoice_collection_refresh_requires_runtime_queue(self) -> None:
-        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._runtime_repositories = SimpleNamespace(queue_repository=object())
-
-            response = app.handle_request(
-                "POST",
-                "/api/operations/app-health/output-invoice-collection-refresh",
-                json.dumps({"scope_keys": ["2026-06"]}),
-            )
-            payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 503)
-        self.assertEqual(payload["error"], "runtime_queue_required")
-
-    def test_operations_pending_invoice_refresh_requires_runtime_queue(self) -> None:
-        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._runtime_repositories = SimpleNamespace(queue_repository=object())
-
-            response = app.handle_request(
-                "POST",
-                "/api/operations/app-health/pending-invoice-refresh",
-                json.dumps({"scope_keys": ["expense:all"]}),
-            )
-            payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 503)
-        self.assertEqual(payload["error"], "runtime_queue_required")
 
 
 def _audit_check_name(sql: str) -> str:

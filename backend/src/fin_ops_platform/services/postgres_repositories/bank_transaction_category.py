@@ -659,13 +659,14 @@ class PostgresBankTransactionCategoryRepository:
         inserted = transaction.fetch_one(
             """
             insert into app.bank_transaction_categories(
-                bank_transaction_id, category, source, confidence, status, version,
-                updated_by, raw_payload
-            ) values (%s::uuid, %s, %s, %s, 'active', %s, %s, %s)
+                bank_transaction_id, legacy_transaction_id, category, source, confidence,
+                status, version, updated_by, raw_payload
+            ) values (%s::uuid, %s, %s, %s, %s, 'active', %s, %s, %s)
             returning id::text as id
             """,
             (
                 bank_transaction_id,
+                public_transaction_id,
                 category_code,
                 text(payload.get("source")) or "manual",
                 payload.get("confidence"),

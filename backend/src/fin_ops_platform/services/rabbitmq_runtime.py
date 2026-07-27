@@ -8,7 +8,7 @@ from typing import Any, Iterable
 from urllib.parse import quote, urljoin
 from urllib.request import Request, urlopen
 
-from fin_ops_platform.services.runtime_queue import RuntimeQueueDataError, RuntimeQueueEvent, RuntimeQueueSettings
+from fin_ops_platform.services.runtime_queue import RuntimeQueueSettings
 from fin_ops_platform.services.runtime_worker_registry import rabbitmq_dispatch_event_types
 from fin_ops_platform.services.runtime_worker import RuntimeWorker, RuntimeWorkerResult
 
@@ -542,12 +542,8 @@ def _basic_properties(**kwargs: Any) -> Any:
 
 
 def _queue_name_for_event(settings: RuntimeQueueSettings, event_type: str) -> str:
-    if event_type == "workbench.read_model.refresh":
-        return settings.rabbitmq_workbench_queue
     return f"{settings.rabbitmq_queue_prefix}.{event_type}"
 
 
 def _routing_key_for_event(settings: RuntimeQueueSettings, event_type: str) -> str:
-    if event_type == "workbench.read_model.refresh":
-        return settings.rabbitmq_workbench_routing_key
     return event_type

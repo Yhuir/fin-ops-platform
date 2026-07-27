@@ -10,9 +10,9 @@
 | `IMPORT-BANK-E2E-004` | `covered` | `web/e2e/imports-bank-transactions-flow.spec.ts`、`web/src/test/ImportCenterPage.test.tsx` | Browser 覆盖银行账户冲突确认弹窗、冲突文案、取消后零 confirm/零 operation barrier/零 Workbench 页面请求/保留 preview，以及再次确认后不阻塞导航。 |
 | `IMPORT-BANK-E2E-005` | `covered` | `web/e2e/imports-bank-transactions-flow.spec.ts`、`web/src/test/ImportsApi.test.ts`、`tests/test_import_file_api.py`、`tests/test_workbench_v2_api.py` | Browser 覆盖 `preview_stale` 错误可见、无 success、零 operation barrier、零 Workbench 页面请求；API/mapper 覆盖固定“重新预览”文案。 |
 | `IMPORT-BANK-E2E-006` | `covered` | `web/e2e/imports-bank-transactions-flow.spec.ts` | Browser 覆盖 confirm 失败错误可见、无 success、零 operation barrier、零 Workbench 页面请求。 |
-| `IMPORT-BANK-E2E-007` | `covered` | `web/e2e/imports-bank-transactions-flow.spec.ts`、`web/src/test/ImportCenterPage.test.tsx`、`tests/test_bank_details_sql_runtime.py`、write-operation impact tests | Browser 覆盖 confirm 返回空 targets、零 operation barrier/零 Workbench 页面请求；随后实际进入银行明细与成本统计，由各页 normal GET 完成精确 access-time convergence 并看到导入证据。后端证明写后零页面 job；真实 worker drain 仍归入 `IMPORT-BANK-E2E-009`。 |
+| `IMPORT-BANK-E2E-007` | `covered` | `web/e2e/imports-bank-transactions-flow.spec.ts`、`web/src/test/ImportCenterPage.test.tsx`、`tests/test_bank_details_canonical_query.py`、write-operation impact tests | Browser 覆盖 confirm 返回空 targets、零 operation barrier/零 Workbench 页面请求；随后实际进入银行明细与成本统计，由各页 normal canonical GET 看到导入证据。后端证明写后零页面 job。 |
 | `IMPORT-BANK-E2E-008` | `covered` | `web/e2e/permissions-role-matrix.spec.ts`、`web/src/test/ImportCenterPage.test.tsx` | Browser role matrix 覆盖 read-export 用户不能上传/预览/确认。 |
-| `IMPORT-BANK-E2E-009` | `external-risk` | `tests/test_write_operation_slo_audit.py`、`fin_ops_platform.tools.write_operation_slo_audit --operation bank_import_confirmed` staging gate | 本地契约测试要求银行确认产生零下游页面 job、零 unrelated dirty delta；随后逐页访问银行明细、账户余额、Workbench、成本统计等消费页并测 access-to-fresh。真实 PostgreSQL/RabbitMQ/Redis/systemd worker、真实大文件与生产性能仍需 Phase 27 生产验证。 |
+| `IMPORT-BANK-E2E-009` | `external-risk` | `tests/test_write_operation_slo_audit.py`、`fin_ops_platform.tools.write_operation_slo_audit --operation bank_import_confirmed` staging gate | 本地契约测试要求银行确认产生零下游页面 job、零 unrelated dirty delta；随后逐页访问银行明细、账户余额、Workbench、成本统计等页面并测 canonical GET latency。真实 PostgreSQL、真实大文件与生产性能仍需生产验证。 |
 
 ## Operation latency baseline
 
@@ -20,6 +20,6 @@
 
 ## 下一轮补测建议
 
-1. 在 staging 跑真实基础设施 smoke：真实 worker drain、`FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed bash scripts/verify.sh infra-smoke`、银行明细 `bank_detail.read_model.refresh` drain、银行账户余额 `bank_account_balance.read_model.refresh` drain、账户余额 API fresh gate、job retry/crash、Workbench matching、银行明细/账户余额 fresh，以及成本统计真实 worker 完成后的 fresh 结果。
+1. 在 staging 跑真实基础设施 smoke：`FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed bash scripts/verify.sh infra-smoke`，确认导入 worker 与 Workbench matching 正常、退休页面 refresh 事件为零，并分别测银行明细、账户余额、关联台和成本统计 normal canonical GET 的结果与延迟。
 2. 补更多文件边界：浏览器上传中断、超大文件真实耗时和内存。
 3. 新增导入进度 UI、search 浏览器 route 或银行模板时，按新用户流程追加对应 Browser E2E。

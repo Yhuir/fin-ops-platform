@@ -9,11 +9,9 @@ from fin_ops_platform.services.no_oa_bank_batch_application_service import (
     NoOaBankBatchPersistenceError,
     NoOaPairRelationSnapshotPort,
 )
+from fin_ops_platform.services.bank_batch_application_service import canonical_snapshot_version
 from fin_ops_platform.services.no_oa_bank_batch_read_model_repository import NoOaBankBatchReadModelRepositoryPort
-from fin_ops_platform.services.no_oa_bank_batch_service import (
-    BANK_FLOW_RULE_BATCH_RELATION_MODE,
-    NoOaBankBatchService,
-)
+from fin_ops_platform.services.no_oa_bank_batch_service import NoOaBankBatchService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 
@@ -175,6 +173,26 @@ def no_oa_categories(rows: list[dict[str, object]]) -> dict[str, dict[str, objec
     }
 
 
+def canonical_category_source_proof(
+    rows: list[dict[str, object]],
+    categories: dict[str, dict[str, object]],
+) -> dict[str, object]:
+    proof_rows = [
+        {
+            "transaction_id": str(row.get("id") or ""),
+            "category_code": str(categories.get(str(row.get("id") or ""), {}).get("category_code") or ""),
+            "category_source": str(categories.get(str(row.get("id") or ""), {}).get("category_source") or ""),
+        }
+        for row in rows
+        if str(row.get("id") or "")
+    ]
+    return {
+        "source": "app.bank_transactions",
+        "row_count": len(proof_rows),
+        "membership_category_digest": canonical_snapshot_version(proof_rows),
+    }
+
+
 class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
     def _application_service(
         self,
@@ -185,7 +203,6 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
         relation_command_service: object | None = None,
         no_oa_snapshot: dict[str, object] | None = None,
         no_oa_bank_batch_read_model_repository: object | None = None,
-        workbench_sql_read_repository: object | None = None,
         read_model_refresh_producer: object | None = None,
         relation_facade: object | None = None,
     ) -> tuple[NoOaBankBatchApplicationService, NoOaBankBatchService, RecordingNoOaRelationCommandService]:
@@ -208,7 +225,11 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
                     str(row.get("id")): deepcopy(categories[str(row.get("id"))])
                     for row in bank_rows
                     if str(row.get("id")) in categories
-                }
+                },
+                canonical_category_source_proof_for_rows=lambda bank_rows: canonical_category_source_proof(
+                    list(bank_rows),
+                    categories,
+                ),
             ),
             no_oa_bank_batch_service=no_oa_service,
             app_settings_service=SimpleNamespace(
@@ -228,12 +249,10 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
                 tag_dictionary_payload=lambda: {"definitions": []},
             ),
             pair_relation_snapshot_port=NoOaPairRelationSnapshotPort(pair_service),
-            workbench_read_model_service=SimpleNamespace(snapshot=lambda: {}),
             state_store=None,
             relation_facade=relation_facade or EmptyWorkbenchRelationFacade(),
             relation_command_service=command_service,
             no_oa_bank_batch_read_model_repository=no_oa_bank_batch_read_model_repository,
-            workbench_sql_read_repository=workbench_sql_read_repository,
             read_model_refresh_producer=read_model_refresh_producer,
         )
         return service, no_oa_service, command_service
@@ -430,61 +449,6 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
         self.assertEqual(batch["blocked_reason"], "")
         self.assertEqual(batch["can_submit"], False)
         self.assertEqual(batch["can_withdraw"], True)
-
-    def test_bank_flow_list_uses_relation_mode_read_model_boundary(self) -> None:
-        class ReadRepository:
-            def __init__(self, service: NoOaBankBatchApplicationService) -> None:
-                self.service = service
-                self.calls: list[dict[str, object]] = []
-                self.rows = [
-                    {
-                        "batch_id": "legacy-no-oa-submitted",
-                        "relation_mode": "no_oa_bank_batch",
-                        "batch_type": "fee",
-                        "scope_month": "2026-03",
-                        "status": "submitted",
-                        "status_bucket": "submitted",
-                        "row_count": 1,
-                        "total_amount": "3.00",
-                        "source_versions": self.service.no_oa_bank_batch_source_versions(),
-                    },
-                    {
-                        "batch_id": "bank-flow-submitted",
-                        "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
-                        "batch_type": "fee",
-                        "scope_month": "2026-03",
-                        "status": "submitted",
-                        "status_bucket": "submitted",
-                        "row_count": 1,
-                        "total_amount": "5.00",
-                        "source_versions": self.service.no_oa_bank_batch_source_versions(),
-                    },
-                ]
-
-            def list_bank_flow_rule_batch_rows(self, filters: dict[str, object]) -> list[dict[str, object]]:
-                self.calls.append(dict(filters))
-                relation_mode = str(filters.get("relation_mode") or "")
-                bucket = str(filters.get("bucket") or "")
-                rows = [deepcopy(row) for row in self.rows if str(row.get("relation_mode") or "") == relation_mode]
-                if bucket:
-                    rows = [row for row in rows if str(row.get("status_bucket") or "") == bucket]
-                return rows
-
-        service, _no_oa_service, _relation_command = self._application_service(
-            rows=[],
-            selected_tag_codes=["fee"],
-        )
-        repository = ReadRepository(service)
-        service._no_oa_bank_batch_read_model_repository = repository
-
-        payload = service.list_batches_payload(
-            {"bucket": ["submitted"]},
-            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
-        )
-
-        self.assertEqual([batch["batch_id"] for batch in payload["batches"]], ["bank-flow-submitted"])
-        self.assertEqual(repository.calls[0]["relation_mode"], BANK_FLOW_RULE_BATCH_RELATION_MODE)
-        self.assertEqual(repository.calls[1]["relation_mode"], BANK_FLOW_RULE_BATCH_RELATION_MODE)
 
     def test_month_missing_read_model_refreshes_month_scope(self) -> None:
         class ReadRepository:
@@ -883,7 +847,6 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
                 snapshot=lambda: {"relations": "all"},
                 snapshot_case_ids=lambda case_ids: {"relations": list(case_ids)},
             )),
-            workbench_read_model_service=SimpleNamespace(snapshot=lambda: {"workbench": "snapshot"}),
             state_store=state_store,
             search_cache_clearer=lambda: cache_clears.append("search"),
         )
@@ -923,7 +886,6 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
                 snapshot=lambda: {"relations": "all"},
                 snapshot_case_ids=lambda case_ids: {"relations": list(case_ids)},
             )),
-            workbench_read_model_service=SimpleNamespace(snapshot=lambda: {"workbench": "snapshot"}),
             state_store=BroadOnlyStateStore(),
         )
 
@@ -949,7 +911,6 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
             app_settings_service=SimpleNamespace(),
             bank_transaction_category_service=SimpleNamespace(),
             pair_relation_snapshot_port=NoOaPairRelationSnapshotPort(SimpleNamespace()),
-            workbench_read_model_service=SimpleNamespace(),
             state_store=None,
             queue_repository=queue,
         )
@@ -962,52 +923,6 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
             [
                 {"scope_type": "no_oa_bank_batch", "scope_key": "all", "reason": "unit_test"},
                 {"scope_type": "no_oa_bank_batch", "scope_key": "2026-05", "reason": "unit_test"},
-            ],
-        )
-
-    def test_enqueue_background_refresh_forwards_metadata_to_durable_queue_boundary(self) -> None:
-        class QueueRepository:
-            def __init__(self) -> None:
-                self.enqueued: list[dict[str, object]] = []
-
-            def enqueue_read_model_refresh(self, **kwargs: object) -> None:
-                self.enqueued.append(dict(kwargs))
-
-        queue = QueueRepository()
-        service = NoOaBankBatchApplicationService(
-            import_service=SimpleNamespace(),
-            effective_category_provider=SimpleNamespace(),
-            no_oa_bank_batch_service=SimpleNamespace(),
-            app_settings_service=SimpleNamespace(),
-            bank_transaction_category_service=SimpleNamespace(),
-            pair_relation_snapshot_port=NoOaPairRelationSnapshotPort(SimpleNamespace()),
-            workbench_read_model_service=SimpleNamespace(),
-            state_store=None,
-            queue_repository=queue,
-        )
-
-        enqueued = service.enqueue_background_refresh(
-            ["2026-05"],
-            reason="unit_test",
-            metadata={
-                "action_name": "bank_flow_rule_batch_read_model_refresh",
-                "relation_mode": "bank_flow_rule_batch",
-            },
-        )
-
-        self.assertTrue(enqueued)
-        self.assertEqual(
-            queue.enqueued,
-            [
-                {
-                    "scope_type": "bank_flow_rule_batch",
-                    "scope_key": "2026-05",
-                    "reason": "unit_test",
-                    "metadata": {
-                        "action_name": "bank_flow_rule_batch_read_model_refresh",
-                        "relation_mode": "bank_flow_rule_batch",
-                    },
-                }
             ],
         )
 
@@ -1028,7 +943,6 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
             app_settings_service=SimpleNamespace(),
             bank_transaction_category_service=SimpleNamespace(),
             pair_relation_snapshot_port=NoOaPairRelationSnapshotPort(SimpleNamespace()),
-            workbench_read_model_service=SimpleNamespace(),
             state_store=None,
             read_model_refresh_producer=producer,
         )

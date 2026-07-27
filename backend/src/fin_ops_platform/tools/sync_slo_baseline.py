@@ -42,22 +42,6 @@ EXPLAIN_PROBES: tuple[tuple[str, str], ...] = (
           and status <> 'fresh'
         """,
     ),
-    (
-        "workbench_groups_all_scope_count",
-        """
-        select count(*)::bigint
-        from read_model.workbench_groups
-        where scope_key = 'all'
-        """,
-    ),
-    (
-        "workbench_group_rows_all_scope_count",
-        """
-        select count(*)::bigint
-        from read_model.workbench_group_rows
-        where scope_key = 'all'
-        """,
-    ),
 )
 
 

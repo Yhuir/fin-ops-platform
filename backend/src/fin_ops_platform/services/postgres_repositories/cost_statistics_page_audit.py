@@ -124,10 +124,6 @@ def _summary(connection: Any) -> dict[str, int]:
     return {
         "source_fact_count": _int(row.get("source_fact_count")),
         "active_relation_count": _int(row.get("active_relation_count")),
-        "read_model_row_count": 0,
-        "read_model_scope_count": 0,
-        "dirty_scope_count": 0,
-        "outbox_backlog_count": 0,
     }
 
 

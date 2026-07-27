@@ -10,7 +10,7 @@ class SearchWorkbenchRowsRepository:
         self.rows = rows
         self.scope_keys: list[str] = []
 
-    def list_workbench_search_rows(self, *, scope_key: str) -> list[dict[str, object]]:
+    def list_canonical_search_rows(self, *, scope_key: str) -> list[dict[str, object]]:
         self.scope_keys.append(scope_key)
         return list(self.rows)
 
@@ -60,7 +60,7 @@ class SearchApiTests(unittest.TestCase):
                 },
             ]
         )
-        app._workbench_sql_read_repository = repository
+        app._workbench_canonical_query_repository = repository
 
         response = app.handle_request("GET", "/api/search?q=%E5%8D%8E%E4%B8%9C%E8%AE%BE%E5%A4%87%E4%BE%9B%E5%BA%94%E5%95%86&month=2026-03")
         payload = json.loads(response.body)
@@ -80,7 +80,7 @@ class SearchApiTests(unittest.TestCase):
 
     def test_search_api_supports_status_filter_for_ignored_rows(self) -> None:
         app = build_application()
-        app._workbench_sql_read_repository = SearchWorkbenchRowsRepository(
+        app._workbench_canonical_query_repository = SearchWorkbenchRowsRepository(
             [
                 {
                     "row": {
@@ -135,7 +135,7 @@ class SearchApiTests(unittest.TestCase):
                 },
             ]
         )
-        app._workbench_sql_read_repository = repository
+        app._workbench_canonical_query_repository = repository
 
         response = app.handle_request("GET", "/api/search?q=12561048&month=2026-03&status=ignored")
 

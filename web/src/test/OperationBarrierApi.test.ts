@@ -58,8 +58,8 @@ describe("operation barrier API", () => {
       targets: [],
       blocked_targets: [
         {
-          read_model_key: "turnover_ledger",
-          scope_type: "turnover_ledger",
+          read_model_key: "workbench_relation",
+          scope_type: "workbench_relation",
           scope_key: "all",
           status: "blocked",
           fresh: false,
@@ -73,11 +73,11 @@ describe("operation barrier API", () => {
     })));
 
     try {
-      await waitForOperationFreshness([{ readModelKey: "turnover_ledger", scopeKey: "all" }]);
+      await waitForOperationFreshness([{ readModelKey: "workbench_relation", scopeKey: "all" }]);
       throw new Error("expected operation barrier to reject");
     } catch (caught) {
       expect(caught).toBeInstanceOf(OperationBarrierBlockedError);
-      expect((caught as Error).message).toBe("操作同步被阻断，往来款台账仍在同步，请稍后刷新后重试。");
+      expect((caught as Error).message).toBe("操作同步被阻断，关联关系仍在同步，请稍后刷新后重试。");
       expect((caught as Error).message).not.toMatch(/refresh outbox blocked|worker failed/);
     }
   });
@@ -91,9 +91,9 @@ describe("operation barrier API", () => {
       blocked_targets: [],
       refreshing_targets: [
         {
-          read_model_key: "pending_invoice",
-          scope_type: "pending_invoice",
-          scope_key: "expense:all",
+          read_model_key: "no_oa_bank_batch",
+          scope_type: "no_oa_bank_batch",
+          scope_key: "2026-06",
           status: "refreshing",
           fresh: false,
           blocking: false,
@@ -103,7 +103,7 @@ describe("operation barrier API", () => {
     })));
 
     const result = waitForOperationFreshness(
-      [{ readModelKey: "pending_invoice", scopeKey: "expense:all" }],
+      [{ readModelKey: "no_oa_bank_batch", scopeKey: "2026-06" }],
       { timeoutMs: 600, intervalMs: 300 },
     ).catch((caught: unknown) => caught);
     await vi.advanceTimersByTimeAsync(1_000);
@@ -111,7 +111,7 @@ describe("operation barrier API", () => {
     const caught = await result;
     expect(caught).toBeInstanceOf(OperationBarrierTimeoutError);
     expect(caught).toBeInstanceOf(OperationBarrierBlockedError);
-    expect((caught as Error).message).toBe("操作同步等待超时，待处理发票（expense:all）仍在同步，请稍后刷新后重试。");
+    expect((caught as Error).message).toBe("操作同步等待超时，无 OA 银行批次（2026-06）仍在同步，请稍后刷新后重试。");
   });
 
   test("aborts an in-flight freshness wait without issuing another poll", async () => {
@@ -127,7 +127,7 @@ describe("operation barrier API", () => {
     const controller = new AbortController();
 
     const result = waitForOperationFreshness(
-      [{ readModelKey: "oa_pending_payment", scopeKey: "2026-06" }],
+      [{ readModelKey: "search", scopeKey: "2026-06" }],
       { intervalMs: 300, signal: controller.signal },
     ).catch((caught: unknown) => caught);
     await vi.advanceTimersByTimeAsync(1);

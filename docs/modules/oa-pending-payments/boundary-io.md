@@ -7,7 +7,7 @@
 - 状态：`DIRECT_CANONICAL_READ_IMPLEMENTED_LOCALLY`。
 - 边界可信度：high。
 - 页面读模型：页面专属 PostgreSQL query repository；无页面 read-model freshness/version/cache/worker 运行时依赖。
-- 共享遗留：旧 `oa_pending_payment` projection/worker/registry 尚未全局删除，因为 `invoice_lifecycle` 等调用方仍存在；见“共享 HANDOFF”。
+- 旧链状态：`oa_pending_payment` projection/worker/registry、invoice-lifecycle 间接依赖和部署单元已删除。
 
 ## 职责
 
@@ -72,7 +72,7 @@
 - pending relation / claim：`app.oa_pending_payment_bank_relations`、`app.bank_transaction_relation_claims` 及事件表。
 - formal relation：`app.workbench_pair_relations`，Workbench relation owner。
 - bank/input invoice：`app.bank_transactions`、`app.invoices`，对应 canonical owner。
-- 旧 `read_model.oa_pending_payment_*` 不再是本页面事实源；其暂时保留不代表页面可读取或回退。
+- 旧 `read_model.oa_pending_payment_*` runtime 已删除；历史 migration/表只供上一版本回滚。
 
 ## Writer inventory
 
@@ -106,7 +106,7 @@ frontend -> page API only
 | Frontend | `web/src/pages/OaPendingPaymentsPage.tsx`、`web/src/components/oaPendingPayments/*`、`web/src/features/oaPendingPayments/*` |
 | Route/service | `routes_oa_pending_payments.py`、`oa_pending_payment_query_service.py`、`oa_pending_payment_query_contract.py` |
 | Query repository | `postgres_repositories/oa_pending_payment_query.py` |
-| Pure row/detail composition | `oa_pending_payment_projection_rows.py`、`oa_pending_payment_read_model_details.py` |
+| Pure row/detail composition | `oa_pending_payment_canonical_rows.py`、`oa_pending_payment_details.py` |
 | Command | `oa_pending_payment_command_service.py`、`oa_pending_payment_relation_promotion_service.py` |
 | Canonical snapshots | `postgres_repositories/oa_pending_payment_source_snapshot.py`、`oa_pending_payment_relation.py`、`oa_pending_payment_admission.py` |
 | Tests/docs | `tests/test_oa_pending_payment_*`、`web/src/test/OaPendingPayment*`、本目录 |
@@ -120,19 +120,7 @@ frontend -> page API only
 - frontend conditional polling、visibility retry 和 Audit barrier wait。
 - command response 的 `readModelRefresh` envelope。
 
-旧共享 service/projector/worker 文件本任务不删除；这里只声明它们已退出页面调用链。
-
-## 共享 HANDOFF
-
-主控在所有分支合并并确认无调用方后统一处理：
-
-- `read_model_manifest.py` 的 `oa_pending_payment` registration。
-- `runtime_worker_registry.py`、`runtime_worker_handlers.py`、`read_model_scope_policy.py` 中 OA refresh 注册。
-- App Status 全局 registry/Audit 中 OA legacy readiness dependency。
-- deploy/systemd worker env、RabbitMQ event registration。
-- `OaPendingPaymentReadModelService`、read-model repository port、SQL projection/refresh service 和 `read_model.oa_pending_payment_*` tables/indexes/migrations。
-- Redis OA rows cache key/schema。
-- `invoice_lifecycle` 当前对 OA read-model repository 的依赖；必须先迁移 lifecycle，禁止抢删。
+旧 service/projector/worker、manifest/scope/registry、App Status、deploy/RabbitMQ registration、Redis cache schema 和 invoice-lifecycle 间接依赖已在跨页面清理中删除。`read_model.oa_pending_payment_*` 历史 migration/表暂留作回滚证据，没有运行时 reader/writer。
 
 ## 禁止回流
 
@@ -140,5 +128,4 @@ frontend -> page API only
 - 禁止读取 `workbench_relation` projection 代替 active canonical relation。
 - 禁止从页面请求访问 OA Mongo/MySQL/对象存储。
 - 禁止恢复旧 filter endpoint、全量 `all_rows()`、Python/浏览器分页。
-- 禁止把共享旧 read model 仍存在解释为本页可依赖。
-- 禁止本任务修改全局 cleanup migration 或共享 worker/deploy registry。
+- 禁止因历史表仍存在而恢复本页 read model 依赖。

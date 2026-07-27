@@ -36,7 +36,7 @@
 - 页面响应不再携带 `read_model_status`、`source_versions`、refresh scope/job/barrier；前端不轮询。loading、empty、error 与用户重试仍是可观察状态。
 - 分类、候选确认、人工补分类和自动标签规则写入继续走 canonical fact、CAS、审计和定向写入；成功后当前页面只重新 GET 一次。
 
-旧 `bank_detail` / `bank_account_balance` read model、worker 和下游 tagged-row ports 仍有范围外消费者，不能由本模块单独删除。共享删除条件与消费者清单记录在 `boundary-io.md`，由跨页面主控在全部迁移合并后处理。
+旧 `bank_detail` / `bank_account_balance` read model、worker、下游 tagged-row ports、backfill 和部署单元已在跨页面清理中删除。历史 migration/表暂留作回滚证据，不存在页面或 worker 运行时调用方。
 
 ## 维护触发器
 
@@ -48,7 +48,7 @@
 
 ## 本目录文件
 
-- `boundary-io.md`：当前 direct-read I/O、文件范围和共享 HANDOFF。
+- `boundary-io.md`：当前 direct-read I/O、文件范围和旧链删除状态。
 - `state-machine.md`：业务写状态与页面 loading/empty/error 状态。
 - `tests.md`：七类测试、验证命令和剩余风险。
 - `e2e-spec.md` / `e2e-coverage.md`：Browser 业务合同与覆盖映射。

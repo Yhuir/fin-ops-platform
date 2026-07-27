@@ -5,7 +5,7 @@ from typing import Any, Iterator
 
 from fin_ops_platform.domain.enums import InvoiceType
 from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord, oa_flow_id_candidates
-from fin_ops_platform.services.oa_pending_payment_projection_rows import relation_member_ids
+from fin_ops_platform.services.oa_pending_payment_canonical_rows import relation_member_ids
 from fin_ops_platform.services.postgres_repositories.common import decimal_text, int_value, text
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_admission import (

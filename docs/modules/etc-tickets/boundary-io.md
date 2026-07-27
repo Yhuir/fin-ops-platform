@@ -56,7 +56,7 @@
 | linked reconciliation task title | ETC 发票导入 ready task 下拉 | business batch title 更新后同步 task title，导入页下拉展示最新批次标题 |
 | 关联候选/关系影响 | workbench relation/lifecycle | 不直接写下游 read model |
 | 修复/迁移结果 | 运维工具 | 可审计、可回滚或可重复 |
-| Completed import job consumption | background job progress / current page load | ETC 发票导入 job 完成后普通 `operation_barrier_targets` 为空，当前可见页重新读取；其它页面不被写后强制重建，访问时由 freshness gate 收敛 |
+| Completed import job consumption | background job progress / current page load | ETC 发票导入 job 完成后当前可见页执行一次普通 canonical GET；其它页面不被写后强制重建。 |
 | 前端刷新提示 | `etcBusinessBatchUpdated` / `invoiceFactUpdated` | 事件仅允许刷新当前可见且订阅该领域的页面；hidden 页面忽略且不重放。事件不是 freshness 事实源，也不得触发其它页面重建 |
 | Audit proof report | 统一页面 Audit UI | 输出 canonical expected-set、结构化展示字段、批次/任务/文件/发票/导入/提交内部 typed edge、统一发票桥和 durable import queue 证明；不宣称 shared Workbench relation 或外部 ETC/OA 完整性 |
 
@@ -66,7 +66,8 @@
 - 页面 Audit：`etc-tickets` 是直接 canonical 页面，registry 的 `read_model_keys=()`；UI 只有在统一 Audit 返回 `integrity=pass / freshness=fresh / queue=drained`、正式数据库快照和 versioned ready contract 时才显示通过。Audit 额外证明三 bucket 互斥/计数同口径、creating attempt 完整且不超过 15 分钟、pending draft/submission 完整、submitted/not-submitted 占用闭合。not-submitted 批次保留的是历史成员；发票已由另一个可见批次合法接管时，旧批次不再要求它保持 `unsubmitted`，当前 owner 自己的 submitted/owner/submission 规则负责闭合。只有 import job 的 `pending/processing` 属于 backlog；`failed/dead_lettered` 是终态，若其精确关联的 reconciliation task 已 `imported/closed`，页面审计把它计入 `covered_failed_import_job_count` 而不阻断，否则报告 terminal integrity failure。下游影响 read model 不得冒充页面消费模型。
 - 影响 read model：`workbench`、`workbench_relation`、`invoice_lifecycle`、`search` 等。
 - ETC 导入逻辑上影响 `tax_offset`、`input_invoice_usage`、`pending_invoice`、`oa_pending_payment`、`cost_statistics` 等页面，但普通完成结果不携带这些 barrier targets；页面访问时自行收敛。
-- Worker：import/runtime handler 负责 durable 领域任务；页面 read model worker 只接受页面 freshness gateway 或显式 maintenance 的 refresh request。
+- Worker：import/runtime handler 只负责 durable 领域任务；ETC 页面没有 read model
+  worker、freshness gateway 或页面 refresh request。
 - PostgreSQL formal file rows：active task 每次保存时把不再存在于 task `source_files` 的 `app.etc_reconciliation_files` 行标记为 `deleted`；仍存在的文件继续 upsert 为 `stored`。formal rows 不得让已删除来源在重启后复活。
 - PostgreSQL query consistency：ETC 页面 list/detail 必须使用 state store/repository 的窄读合同直接读取 worker 最新正式行；不得在热路径调用 `load_etc_state/load_etc_reconciliation_state` 全量 hydrate，也不得在 list/detail 探测对象存储。file/memory backend 使用同一合同的现有 snapshot 实现。
 - OA attempt write consistency：OA prepare/finalize/fail/unknown/recover 只允许通过 state store 的 target-scoped CAS I/O 写目标 attempt；禁止用进程内全量 snapshot 覆盖其它批次或独立 worker 的更新。对账任务 OA 元数据是第二个明确 owner write；若它在 business batch 已提交后失败，相同 idempotency key/recovery evidence 必须可安全重放并收敛。local state store 保存失败时，`record_oa_draft_created` 必须在抛错前回滚 task version、OA metadata、audit event 和 audit counter，重试成功后跨实例只能观察到一次 durable 审计。
@@ -80,7 +81,7 @@
 | Backend route | `routes_etc.py`、`routes_etc_import.py`、`routes_etc_invoices.py`、`routes_etc_reconciliation.py` |
 | Backend service | `etc_service.py`、`etc_business_batch_application_service.py`、`etc_invoice_pdf_bundle_service.py`、`etc_document_parsers.py`、`etc_reconciliation_*`、`invoice_attachment_recognition_service.py` |
 | Audit proof owner | `services/postgres_repositories/etc_tickets_page_audit.py`、`services/page_audit_registry.py`、`services/postgres_repositories/operations_audit.py` |
-| Workbench integration | `workbench_sql_projection.py`、`workbench_pair_relation_service.py`、`workbench_relation_command_service.py` |
+| Workbench integration | `workbench_canonical_rows.py`、`workbench_pair_relation_service.py`、`workbench_relation_command_service.py` |
 | Tools | `cleanup_orphan_etc_reconciliation_tasks.py`；历史修复只保留 `HistoricalEtcRepairService` 的受控入口 |
 | Tests | `tests/test_etc_*.py`、`web/src/test/Etc*.test.*`、`web/e2e/etc-tickets-flow.spec.ts` |
 

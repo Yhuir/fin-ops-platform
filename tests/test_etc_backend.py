@@ -5535,7 +5535,6 @@ class EtcApiTests(unittest.TestCase):
                 persist_pair_relations=lambda case_ids: app._persist_workbench_pair_relations(
                     changed_case_ids=case_ids,
                 ),
-                invalidate_workbench_scopes=app._refresh_workbench_read_model_scopes_for_maintenance,
                 persist_etc_state=lambda: app._state_store.save_etc_state(app._etc_service.snapshot()),
             )
             service.seed_bundle_from_upload(
@@ -5608,7 +5607,6 @@ class EtcApiTests(unittest.TestCase):
                 persist_pair_relations=lambda case_ids: app._persist_workbench_pair_relations(
                     changed_case_ids=case_ids,
                 ),
-                invalidate_workbench_scopes=app._refresh_workbench_read_model_scopes_for_maintenance,
                 persist_etc_state=lambda: app._state_store.save_etc_state(app._etc_service.snapshot()),
             )
             service.seed_bundle_from_upload(

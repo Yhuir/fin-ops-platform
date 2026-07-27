@@ -4,9 +4,10 @@ import json
 from typing import Any
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection
+from fin_ops_platform.services.read_model_manifest import READ_MODEL_MANIFEST
 
 
-POLICY_MANAGED_SCOPE_TYPES = ("no_oa_bank_batch", "pending_invoice")
+POLICY_MANAGED_SCOPE_TYPES = tuple(entry.scope_type for entry in READ_MODEL_MANIFEST.values())
 
 
 class PostgresReadModelScopeContractRepository:

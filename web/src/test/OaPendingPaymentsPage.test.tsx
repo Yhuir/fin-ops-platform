@@ -622,7 +622,6 @@ function installOaPendingPaymentsFetch(overrides?: {
           no_invoice_required: { tag_codes: [], tags: [] },
         },
         permissions: { can_save: canSave },
-        read_model_status: "refreshing",
       }), { status: init?.method === "PUT" ? 200 : 200, headers: { "Content-Type": "application/json" } });
     }
     return new Response(JSON.stringify({}), {

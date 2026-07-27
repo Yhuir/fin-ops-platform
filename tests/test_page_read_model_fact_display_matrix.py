@@ -19,6 +19,30 @@ from fin_ops_platform.tools.http_slo_probe import DEFAULT_API_PROBES  # noqa: E4
 
 MATRIX_PATH = REPO_ROOT / "docs" / "dev" / "page-read-model-fact-display-matrix.json"
 PAGE_REGISTRY_PATH = REPO_ROOT / "web" / "src" / "app" / "pageRegistry.tsx"
+DIRECT_CANONICAL_FRONTEND_PATHS = (
+    "web/src/features/workbench",
+    "web/src/features/bankDetails",
+    "web/src/features/oaPendingPayments",
+    "web/src/features/bankFlowRuleBatches",
+    "web/src/features/batchAccounting",
+    "web/src/features/etc",
+    "web/src/features/pendingInvoices",
+    "web/src/features/inputInvoiceUsage",
+    "web/src/features/outputInvoiceCollections",
+    "web/src/features/turnoverLedger",
+    "web/src/pages/ReconciliationWorkbenchPage.tsx",
+    "web/src/pages/BankDetailsPage.tsx",
+    "web/src/pages/OaPendingPaymentsPage.tsx",
+    "web/src/pages/BankFlowRuleBatchPage.tsx",
+    "web/src/pages/BatchAccountingPage.tsx",
+    "web/src/pages/EtcTicketManagementPage.tsx",
+    "web/src/pages/TaxOffsetPage.tsx",
+    "web/src/pages/PendingInvoicesPage.tsx",
+    "web/src/pages/InputInvoiceUsagePage.tsx",
+    "web/src/pages/OutputInvoiceCollectionsPage.tsx",
+    "web/src/pages/CostStatisticsPage.tsx",
+    "web/src/pages/TurnoverLedgerPage.tsx",
+)
 
 RELATION_DISPLAY_PAGE_KEYS = {
     "reconciliation-workbench",
@@ -34,9 +58,18 @@ RELATION_DISPLAY_PAGE_KEYS = {
 }
 
 DIRECT_CANONICAL_PAGE_KEYS = {
+    "reconciliation-workbench",
     "bank-details",
+    "oa-pending-payments",
+    "bank-flow-rule-batches",
+    "batch-accounting",
     "cost-statistics",
+    "turnover-ledger",
     "etc-tickets",
+    "tax-offset",
+    "pending-invoices",
+    "input-invoice-usage",
+    "output-invoice-collections",
     "imports.bank-transactions",
     "imports.invoices",
     "imports.etc-invoices",
@@ -101,8 +134,38 @@ class PageReadModelFactDisplayMatrixTests(unittest.TestCase):
         self.assertNotIn("No OA", matrix_text)
 
         bank_flow_row = self.rows_by_page_key["bank-flow-rule-batches"]
-        self.assertIn("bank_flow_rule_batch", bank_flow_row["read_model_keys"])
+        self.assertEqual(bank_flow_row["read_model_keys"], [])
         self.assertEqual(bank_flow_row["route"], "/bank-flow-rule-batches")
+
+    def test_direct_canonical_frontends_do_not_reintroduce_page_read_model_runtime(self) -> None:
+        forbidden = (
+            "readModelStatus",
+            "read_model_status",
+            "readModelVersion",
+            "read_model_version",
+            "sourceVersions",
+            "source_versions",
+            "refreshEnqueued",
+            "refresh_enqueued",
+            "/refresh-status",
+            "operationBarrier",
+            "operation_barrier",
+        )
+        for relative_path in DIRECT_CANONICAL_FRONTEND_PATHS:
+            path = REPO_ROOT / relative_path
+            files = sorted(path.rglob("*.ts*")) if path.is_dir() else [path]
+            self.assertTrue(files, relative_path)
+            for source_path in files:
+                source = source_path.read_text(encoding="utf-8")
+                for marker in forbidden:
+                    with self.subTest(path=relative_path, marker=marker):
+                        self.assertNotIn(marker, source)
+
+        for relative_path in (
+            "web/src/components/common/PageAuditIcon.tsx",
+            "web/src/components/common/PageBusinessAuditIcon.tsx",
+        ):
+            self.assertNotIn("readModelStatus", (REPO_ROOT / relative_path).read_text(encoding="utf-8"))
 
     def test_fact_sources_and_relation_sources_are_declared_for_each_page(self) -> None:
         for row in self.rows:
@@ -111,7 +174,7 @@ class PageReadModelFactDisplayMatrixTests(unittest.TestCase):
             self.assertTrue(row.get("production_readonly_gates"), page_key)
 
             relation_sources = set(row.get("pairing_relation_fact_sources", []))
-            if page_key in {"bank-details", "cost-statistics", "turnover-ledger"}:
+            if page_key in DIRECT_CANONICAL_PAGE_KEYS & RELATION_DISPLAY_PAGE_KEYS:
                 self.assertEqual(relation_sources, {"app.workbench_pair_relations"}, page_key)
             elif page_key in RELATION_DISPLAY_PAGE_KEYS:
                 self.assertIn("app.workbench_pair_relations", relation_sources, page_key)

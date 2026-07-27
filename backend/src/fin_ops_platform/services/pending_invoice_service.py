@@ -30,7 +30,6 @@ from fin_ops_platform.services.pending_invoice_relation_identity import (
     is_valid_pending_invoice_oa_row_id,
     pending_invoice_relation_identity,
 )
-from fin_ops_platform.services.read_model_write_targets import write_target_envelope
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
@@ -43,6 +42,26 @@ MANUAL_INVOICE_SOURCE_TYPE = "manual_invoice_import"
 EXPENSE_FILTERS = {"requires_invoice", "bank_statement_as_invoice", "no_invoice_required"}
 INCOME_FILTERS = {"requires_invoice", "no_invoice_required", "cash_income"}
 VALID_FILTERS = {"all", *EXPENSE_FILTERS, *INCOME_FILTERS}
+
+
+def record_pending_invoice_audit(audit_service: Any, event: dict[str, Any]) -> None:
+    action = str(event.get("action") or "pending_invoice_manual_invoice_confirmed")
+    entity_type = str(event.get("entity_type") or event.get("source") or "")
+    if not entity_type:
+        entity_type = (
+            "pending_invoice_attach_existing_invoice"
+            if action == "pending_invoice_attach_existing_invoice_confirmed"
+            else "pending_invoice_manual_invoice"
+        )
+    audit_service.record_action(
+        actor_id=str(event.get("actor_id") or "pending_invoice"),
+        action=action,
+        entity_type=entity_type,
+        entity_id=str(event.get("request_id") or event.get("invoice_id") or ""),
+        metadata=dict(event),
+    )
+
+
 PENDING_INVOICE_FILTER_FIELDS: dict[str, set[str]] = {
     "trade_date": {"between"},
     "bank_name": {"in", "contains"},
@@ -61,14 +80,8 @@ PENDING_INVOICE_FILTER_FIELDS: dict[str, set[str]] = {
     "oa_application_type": {"contains", "in"},
     "project_name": {"contains", "in"},
 }
-def _with_pending_invoice_write_targets(result: dict[str, Any]) -> dict[str, Any]:
-    affected_months = result.get("affected_months")
-    result.update(
-        write_target_envelope(
-            scope_keys=affected_months,
-            targets=[],
-        )
-    )
+def _with_pending_invoice_affected_scopes(result: dict[str, Any]) -> dict[str, Any]:
+    result["affected_scope_keys"] = list(dict.fromkeys(result.get("affected_months") or []))
     return result
 
 
@@ -1812,7 +1825,7 @@ class PendingInvoiceApplicationService:
         request_key = str(preview["request_key"])
         command = self._get_command(request_id)
         if isinstance(command, dict) and command.get("status") == "completed":
-            return _with_pending_invoice_write_targets(deepcopy(command["result"]))
+            return _with_pending_invoice_affected_scopes(deepcopy(command["result"]))
         if not isinstance(command, dict):
             command = {
                 "request_id": request_id,
@@ -1871,7 +1884,7 @@ class PendingInvoiceApplicationService:
                 request_key=request_key,
                 affected_months=affected_months,
             )
-            result = _with_pending_invoice_write_targets(result)
+            result = _with_pending_invoice_affected_scopes(result)
             command["result"] = deepcopy(result)
             self._mark_command(command, "completed")
             return result
@@ -1983,7 +1996,7 @@ class PendingInvoiceApplicationService:
         request_key = str(preview["request_key"])
         command = self._get_command(request_id)
         if isinstance(command, dict) and command.get("status") == "completed":
-            return _with_pending_invoice_write_targets(deepcopy(command["result"]))
+            return _with_pending_invoice_affected_scopes(deepcopy(command["result"]))
         if not isinstance(command, dict):
             command = {
                 "request_id": request_id,
@@ -2041,7 +2054,7 @@ class PendingInvoiceApplicationService:
                 request_key=request_key,
                 affected_months=affected_months,
             )
-            result = _with_pending_invoice_write_targets(result)
+            result = _with_pending_invoice_affected_scopes(result)
             command["result"] = deepcopy(result)
             self._mark_command(command, "completed")
             return result
@@ -2068,7 +2081,7 @@ class PendingInvoiceApplicationService:
         affected_months = list(preview["relation_impact"]["affected_months"])
         command = self._get_command(request_id)
         if isinstance(command, dict) and command.get("status") == "completed":
-            return _with_pending_invoice_write_targets(deepcopy(command["result"]))
+            return _with_pending_invoice_affected_scopes(deepcopy(command["result"]))
         if not isinstance(command, dict):
             command = {
                 "request_id": request_id,
@@ -2135,7 +2148,7 @@ class PendingInvoiceApplicationService:
                 affected_months=affected_months,
                 direction=direction,
             )
-            result = _with_pending_invoice_write_targets(result)
+            result = _with_pending_invoice_affected_scopes(result)
             self._record_audit(
                 actor_id=actor_id,
                 transaction_id=transaction_id,
@@ -2184,7 +2197,7 @@ class PendingInvoiceApplicationService:
                     "request_id was already used for another income status payload.",
                 )
             if command.get("status") == "completed":
-                return _with_pending_invoice_write_targets(deepcopy(command["result"]))
+                return _with_pending_invoice_affected_scopes(deepcopy(command["result"]))
         current_row = self._row_provider(transaction.id, "income") if self._row_provider is not None else None
         if isinstance(current_row, dict):
             if not _row_can_mark_income_status(current_row):
@@ -2230,7 +2243,7 @@ class PendingInvoiceApplicationService:
         }
         if self._row_provider is not None:
             result["row"] = self._row_provider(transaction.id, "income")
-        result = _with_pending_invoice_write_targets(result)
+        result = _with_pending_invoice_affected_scopes(result)
         command["result"] = deepcopy(result)
         self._mark_command(command, "completed")
         self._record_income_status_override_audit(
@@ -2275,7 +2288,7 @@ class PendingInvoiceApplicationService:
                     "request_id was already used for another income status payload.",
                 )
             if command.get("status") == "completed":
-                return _with_pending_invoice_write_targets(deepcopy(command["result"]))
+                return _with_pending_invoice_affected_scopes(deepcopy(command["result"]))
 
         transactions = [self._get_transaction(transaction_id) for transaction_id in transaction_ids]
         for transaction in transactions:
@@ -2339,7 +2352,7 @@ class PendingInvoiceApplicationService:
         }
         if self._row_provider is not None:
             result["rows"] = [self._row_provider(transaction.id, "income") for transaction in transactions]
-        result = _with_pending_invoice_write_targets(result)
+        result = _with_pending_invoice_affected_scopes(result)
         command["result"] = deepcopy(result)
         self._mark_command(command, "completed")
         self._record_income_status_override_batch_audit(
@@ -2548,7 +2561,7 @@ class PendingInvoiceApplicationService:
     def _command_error(exc: WorkbenchRelationCommandError) -> PendingInvoiceError:
         if exc.error_code == "workbench_relation_read_model_not_fresh":
             return PendingInvoiceError(
-                "pending_invoice_relation_read_model_not_fresh",
+                exc.error_code,
                 "关联台关系读模型不是 fresh，请刷新后再处理。",
                 status_code=HTTPStatus.CONFLICT,
                 details=dict(exc.payload),
@@ -3143,7 +3156,7 @@ class PendingInvoiceApplicationService:
             self._fault_injector(phase, command)
 
     def _mark_relation_precondition_error(self, command: dict[str, Any], exc: PendingInvoiceError) -> None:
-        if exc.error_code != "pending_invoice_relation_read_model_not_fresh":
+        if exc.error_code != "workbench_relation_read_model_not_fresh":
             return
         command["error"] = str(exc)
         command["error_code"] = exc.error_code

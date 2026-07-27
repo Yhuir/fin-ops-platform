@@ -138,7 +138,7 @@ bash scripts/verify.sh docs
 - 图像型信用卡 PDF 的 OCR 准确率依赖源文件分辨率、旋转和表格密度；自动测试已证明 fallback 与行结构，但真实扫描件仍必须根据 warning 核对行数、日期和金额。
 - 真实 OA 草稿页面、附件上传和人工确认后的 OA 系统状态不能由本地 mock 完全证明。
 - 历史生产数据迁移和 orphan task 清理必须先 dry-run，再由运维窗口执行；本地测试只能证明工具边界。
-- deterministic Playwright 已覆盖 ETC 页面内三 bucket、business-batches 首屏暂时失败刷新恢复、未提交/已提交 business batch delete/reset 暂时失败重试恢复、source file delete 暂时失败重试恢复、ticket-root source upload 暂时失败重试恢复、OA draft 暂时失败重试恢复、草稿成功后暂存确认 target 保留、manual OA status 暂时失败重试恢复、未提交业务批次 -> OA 草稿暂存 -> 人工已提交 bucket 和成功后无可见错误残留；真实 OA 草稿页面、对象存储、Nginx 上传、大 ZIP、import confirm 等其它 mutation 级网络恢复，以及 Workbench、税金、成本和 search read model 全量重建后的最终页面展示仍需跨模块 staging smoke。
+- deterministic Playwright 已覆盖 ETC 页面内三 bucket、business-batches 首屏暂时失败刷新恢复、未提交/已提交 business batch delete/reset 暂时失败重试恢复、source file delete 暂时失败重试恢复、ticket-root source upload 暂时失败重试恢复、OA draft 暂时失败重试恢复、草稿成功后暂存确认 target 保留、manual OA status 暂时失败重试恢复、未提交业务批次 -> OA 草稿暂存 -> 人工已提交 bucket 和成功后无可见错误残留；真实 OA 草稿页面、对象存储、Nginx 上传、大 ZIP、import confirm 等其它 mutation 级网络恢复，以及关联台、税金、成本 canonical 页面和 Search 共享 read model 的最终展示仍需跨模块 staging smoke。
 - `tests/test_etc_backend.py` 已清零历史 `TemporaryDirectory(ignore_cleanup_errors=True)`；真实大 ZIP、对象存储/Nginx 上传、OA 和 worker drain 仍需要 staging/生产 smoke。
 
 ## 2026-07-22 Phase 27 ETC 普通写隔离回归

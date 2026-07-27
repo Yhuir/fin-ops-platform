@@ -197,7 +197,9 @@ RabbitMQ 是 outbox envelope transport，不是业务事实源。生产切换必
 
 ## 全量 Backfill / Drain
 
-发布 PostgreSQL read model 或 OA projection 变更后，先补结构化 OA 子表并 enqueue 缺失 scope，再由独立 worker drain：
+发布 PostgreSQL read model 或 OA projection 变更后，先补结构化 OA 子表，并只为
+`workbench_relation`、`search`、`no_oa_bank_batch` 三个共享 read model enqueue `all`
+fan-out 命令，再由独立 worker drain：
 
 ```bash
 set -a

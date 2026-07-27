@@ -13,7 +13,6 @@
 ## Worker 状态
 
 - `search`、`search-secondary`、`search-tertiary` 是 search primary/parallel worker lanes。
-- `search-pending` 是兼容组合 worker，仍可处理 `search.read_model.refresh` 与 `pending_invoice.read_model.refresh`，但不能成为新的 search owner。
 - `search:all` 只能作为 fan-out command；不得直接发布假 fresh parent proof。
 
 ## 非法状态

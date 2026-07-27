@@ -317,21 +317,6 @@ type ApiTurnoverRelationMutationResponse = {
   affected_months?: string[];
   affected_scope_keys?: string[];
   affectedScopeKeys?: string[];
-  read_model_scope_keys?: string[];
-  readModelScopeKeys?: string[];
-  freshnessTargets?: ApiTurnoverFreshnessTarget[];
-  freshness_targets?: ApiTurnoverFreshnessTarget[];
-  operationBarrierTargets?: ApiTurnoverFreshnessTarget[];
-  operation_barrier_targets?: ApiTurnoverFreshnessTarget[];
-};
-
-type ApiTurnoverFreshnessTarget = {
-  readModelKey?: unknown;
-  read_model_key?: unknown;
-  scopeType?: unknown;
-  scope_type?: unknown;
-  scopeKey?: unknown;
-  scope_key?: unknown;
 };
 
 type ApiSaveTurnoverBankRowTagsResponse = {
@@ -786,51 +771,14 @@ function mapMutation(payload: ApiTurnoverRelationMutationResponse): TurnoverRela
   const relation = payload.relation;
   const turnoverRelation = payload.turnover_relation;
   const pairRelation = payload.workbench_pair_relation;
-  const freshnessTargets = cleanFreshnessTargets(payload.freshnessTargets ?? payload.freshness_targets);
-  const operationTargets = cleanFreshnessTargets(payload.operationBarrierTargets ?? payload.operation_barrier_targets);
   return {
     relationId: text(payload.relation_id ?? relation?.relation_id ?? turnoverRelation?.relation_id),
     status: text(payload.status ?? relation?.status ?? turnoverRelation?.status),
     affectedMonths: stringList(payload.affected_months),
     affectedScopeKeys: stringList(payload.affected_scope_keys ?? payload.affectedScopeKeys),
-    readModelScopeKeys: stringList(payload.read_model_scope_keys ?? payload.readModelScopeKeys),
     workbenchPairRelationId: text(pairRelation?.case_id),
     workbenchRelationMode: text(pairRelation?.relation_mode),
-    freshnessTargets,
-    operationBarrierTargets: operationTargets.length > 0 ? operationTargets : freshnessTargets,
   };
-}
-
-function cleanFreshnessTargets(value: unknown) {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  const normalized: TurnoverRelationMutationResponse["freshnessTargets"] = [];
-  for (const item of value) {
-    if (!item || typeof item !== "object") {
-      continue;
-    }
-    const record = item as ApiTurnoverFreshnessTarget;
-    const readModelKey = String(record.readModelKey ?? record.read_model_key ?? "").trim();
-    const scopeKey = String(record.scopeKey ?? record.scope_key ?? "").trim();
-    const scopeType = String(record.scopeType ?? record.scope_type ?? "").trim();
-    if (!readModelKey || !scopeKey) {
-      continue;
-    }
-    const target = {
-      readModelKey,
-      scopeKey,
-      ...(scopeType ? { scopeType } : {}),
-    };
-    if (!normalized.some((candidate) =>
-      candidate.readModelKey === target.readModelKey
-      && candidate.scopeKey === target.scopeKey
-      && candidate.scopeType === target.scopeType
-    )) {
-      normalized.push(target);
-    }
-  }
-  return normalized;
 }
 
 export async function fetchTurnoverLedger({

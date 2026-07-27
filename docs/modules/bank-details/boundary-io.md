@@ -9,7 +9,7 @@
 - 页面查询 owner：`BankDetailsCanonicalQueryService`
 - 页面 SQL owner：`PostgresBankDetailsCanonicalQueryRepository`
 - 写 owner：`BankDetailsApplicationService` + canonical category/settings writers
-- 旧代码删除状态：页面 read-model reader、freshness/enqueue/status/polling/fallback 已退出；共享投影、worker、repository port 和下游 tagged-row consumer 暂保留，等待跨页面主控统一删除。
+- 旧代码删除状态：页面 read-model reader、freshness/enqueue/status/polling/fallback、共享投影、worker、repository port、backfill 和下游 tagged-row consumer 已删除。
 
 ## 职责边界
 
@@ -76,19 +76,15 @@
 - 必须：active relation 通过 page-specific bounded canonical SQL；category/settings 写通过既有 owner service/repository。
 - 禁止：route/server 业务 SQL、Application 注入 service、页面 read model、跨页面 payload、逐行 relation lookup、全量 Python/浏览器过滤分页、缓存或 worker 补偿。
 
-## 共享 HANDOFF 与删除条件
+## 跨页面清理结果
 
-以下资源不属于本分支独占，主控必须在所有消费者迁移后做 whole-repo scan 再删除：
-
-- `bank_detail_read_model_repository.py`、`bank_detail_sql_projection.py`、`bank_detail_read_model_refresh*.py`、`bank_detail_available_month_scope_provider.py`、相关 backfill/derived lifecycle。
-- `bank_account_balance_read_model_repository.py`、`bank_account_balance_read_model_refresh*.py`、旧 balance projection publish path 和 backfill。
-- `read_model_manifest.py`、`runtime_worker_registry.py`、`read_model_scope_policy.py`、`runtime_worker_handlers.py`、App Status registry、deploy worker env 与 dispatcher 条目。
-- `read_model.bank_detail_*`、`read_model.bank_account_balances` 的最终 cleanup migration。
-
-已知共享消费者包括 pending invoice、bank-flow rule batches、search、turnover/cost 等通过 `BankTransactionTagReadFacade`、`BankDetailReadModelRepositoryPort` 或旧 source port 读取 tagged rows 的链路。删除前必须证明这些消费者已迁移到各自 canonical query boundary；不得用双读、shadow fallback 或兼容分支延长旧链路。
+- `bank_detail_*`、`bank_account_balance_*` projection/repository/refresh/backfill/derived lifecycle 已删除。
+- manifest、scope policy、worker handlers/registry、App Status、RabbitMQ dispatcher 和 deploy env 中的两个页面 key 已删除。
+- 原 tagged-row 消费者已迁移到各自 canonical query boundary；`BankTransactionTagReadFacade` 和旧 repository port 已删除。
+- `read_model.bank_detail_*`、`read_model.bank_account_balances` 历史表暂留作可回滚迁移证据，没有运行时 reader/writer。
 
 ## 文档影响
 
 - 产品口径未变，不更新 `docs/product-specs/`。
 - 页面/API/运行时边界已变，更新本模块文档、`docs/app-architecture/` 与 `docs/dev/api-contracts.md`。
-- 全局 `read-model-contracts.md` 与 worker/deploy 文档由主控在共享清理时统一更新，本分支不修改。
+- 全局 `read-model-contracts.md` 与 worker/deploy 文档已同步为清理后的合同。

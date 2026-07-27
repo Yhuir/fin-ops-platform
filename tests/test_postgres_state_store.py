@@ -219,18 +219,6 @@ class EtcFormalAndFallbackConnection(FakePostgresConnection):
         return []
 
 
-class WorkbenchReadModelFormalAndFallbackConnection(FakePostgresConnection):
-    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
-        if "from read_model.workbench_snapshots" in sql:
-            return [
-                {
-                    "key": "2026-05",
-                    "payload": {"scope_key": "2026-05", "payload": {"unpaired": {"groups": []}}},
-                }
-            ]
-        return []
-
-
 class MatchingFormalAndFallbackConnection(FakePostgresConnection):
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         if "from app.matching_runs" in sql:
@@ -327,11 +315,13 @@ class PostgresStateStoreTests(unittest.TestCase):
                 sql_read_connection=read_connection,
             )
 
-        self.assertIs(store.workbench_sql_read_repository._connection, read_connection)
+        self.assertIs(store.workbench_relation_sql_read_repository._repository._connection, read_connection)
         self.assertIs(store.search_sql_read_repository._connection, read_connection)
         self.assertFalse(hasattr(store, "cost_statistics_sql_read_repository"))
-        self.assertIs(store.tax_offset_sql_read_repository._repository._connection, read_connection)
-        self.assertIs(store.output_invoice_collection_sql_read_repository._repository._connection, read_connection)
+        self.assertFalse(hasattr(store, "tax_offset_sql_read_repository"))
+        self.assertFalse(hasattr(store, "input_invoice_usage_sql_read_repository"))
+        self.assertFalse(hasattr(store, "output_invoice_collection_sql_read_repository"))
+        self.assertIs(store.no_oa_bank_batch_sql_read_repository._repository._connection, read_connection)
         self.assertIs(store._read_model_repository._connection, write_connection)
 
     def test_ready_health_summary_uses_lightweight_runtime_summary(self) -> None:
@@ -735,51 +725,6 @@ class PostgresStateStoreTests(unittest.TestCase):
 
 
 
-    def test_postgres_workbench_read_models_ignore_runtime_snapshot_fallback(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            connection = WorkbenchReadModelFormalAndFallbackConnection()
-            connection.settings["state:workbench_read_models"] = {
-                "read_models": {"all": {"scope_key": "all", "payload": {"legacy": True}}},
-            }
-            store = PostgresStateStore(data_dir=Path(temp_dir), connection=connection)
-
-            snapshot = store.load_workbench_read_models()
-
-        self.assertEqual(list(snapshot["read_models"]), ["2026-05"])
-        self.assertNotIn("all", snapshot["read_models"])
-
-    def test_postgres_save_workbench_read_models_does_not_write_runtime_snapshot(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            connection = FakePostgresConnection()
-            store = PostgresStateStore(data_dir=Path(temp_dir), connection=connection)
-
-            store.save_workbench_read_models(
-                {
-                    "read_models": {
-                        "2026-05": {
-                            "scope_key": "2026-05",
-                            "scope_type": "month",
-                            "payload": {"rows": []},
-                            "ignored_rows": [],
-                        },
-                    },
-                }
-            )
-
-        self.assertNotIn("state:workbench_read_models", connection.settings)
-
-    def test_postgres_workbench_read_models_do_not_fallback_to_runtime_snapshot_when_sql_empty(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            connection = FakePostgresConnection()
-            connection.settings["state:workbench_read_models"] = {
-                "read_models": {"all": {"scope_key": "all", "payload": {"legacy": True}}},
-            }
-            store = PostgresStateStore(data_dir=Path(temp_dir), connection=connection)
-
-            snapshot = store.load_workbench_read_models()
-
-        self.assertEqual(snapshot, {})
-
     def test_postgres_full_state_snapshot_omits_cost_statistics_read_model(self) -> None:
         with TemporaryDirectory() as temp_dir:
             connection = FakePostgresConnection()
@@ -806,29 +751,7 @@ class PostgresStateStoreTests(unittest.TestCase):
             "\n".join(sql for sql, _params in connection.executed).lower(),
         )
 
-    def test_postgres_tax_offset_read_models_do_not_fallback_to_runtime_snapshot_when_sql_empty(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            connection = FakePostgresConnection()
-            connection.settings["state:tax_offset_read_models"] = {
-                "read_models": {"2026-05": {"scope_key": "2026-05", "payload": {"legacy": True}}},
-            }
-            store = PostgresStateStore(data_dir=Path(temp_dir), connection=connection)
 
-            snapshot = store.load_tax_offset_read_models()
-
-        self.assertEqual(snapshot, {})
-
-    def test_postgres_save_tax_offset_read_models_does_not_write_runtime_snapshot(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            connection = FakePostgresConnection()
-            store = PostgresStateStore(data_dir=Path(temp_dir), connection=connection)
-
-            store.save_tax_offset_read_models(
-                {"read_models": {"2026-05": {"scope_key": "2026-05", "payload": {"rows": []}}}},
-                changed_scope_keys={"2026-05"},
-            )
-
-        self.assertNotIn("state:tax_offset_read_models", connection.settings)
 
     def test_postgres_runtime_jobs_and_health_do_not_fallback_to_runtime_snapshot(self) -> None:
         with TemporaryDirectory() as temp_dir:

@@ -7,7 +7,7 @@
 - Bank Details 页面状态：direct canonical read completed
 - 页面 query owner：`BankDetailsCanonicalQueryService`
 - 页面 repository owner：`PostgresBankDetailsCanonicalQueryRepository`
-- 旧 `bank_account_balance` read model：共享清理待办，不再是 `/api/bank-details/accounts` 的事实源
+- 旧 `bank_account_balance` read model：运行时已删除，不再是 `/api/bank-details/accounts` 的事实源
 
 ## 职责边界
 
@@ -44,7 +44,7 @@
 
 - 显式 `REPEATABLE READ READ ONLY` snapshot。
 - 一次账户 latest-balance SQL，一次日期范围账户 count SQL，加一次 canonical settings 读取；查询次数固定。
-- canonical aggregate SQL 由 `BANK_ACCOUNT_BALANCE_CANONICAL_ROWS_SQL` 复用；旧 projection builder 与 direct query 不应维护两份余额算法。
+- canonical aggregate SQL 由 `BANK_ACCOUNT_BALANCE_CANONICAL_ROWS_SQL` 提供；只保留这一份余额算法。
 - 不增加 cache、materialized view 或页面 worker；索引只在 EXPLAIN/性能证据显示需要时由主控统一 migration 编号。
 
 ## 文件范围
@@ -52,20 +52,14 @@
 | 层 | 文件或目录 |
 | --- | --- |
 | Query | `backend/src/fin_ops_platform/services/bank_details_canonical_query.py` |
-| Shared SQL | `backend/src/fin_ops_platform/services/bank_account_balance_projection.py` |
+| Canonical SQL | `backend/src/fin_ops_platform/services/bank_account_balance_canonical_rows.py` |
 | Application/route | `bank_details_application_service.py`、`routes_bank_details.py` |
 | Frontend | `web/src/pages/BankDetailsPage.tsx`、`web/src/features/bankDetails/*` |
 | Tests | `tests/test_bank_details_canonical_query.py`、`tests/test_bank_details_routes.py`、Bank Details frontend/E2E tests |
 
-## 共享 HANDOFF
+## 旧链删除结果
 
-本分支不修改或删除：
-
-- `bank_account_balance_read_model_repository.py`
-- `bank_account_balance_read_model_refresh.py`
-- `bank_account_balance_read_model_refresh_producer.py`
-- `bank_account_balance_derived_lifecycle_executor.py`
-- `bank_account_balance_backfill.py`
-- manifest、scope policy、worker registry/handler、App Status、deploy env、projection tables 和 cleanup migration
-
-主控删除前必须 whole-repo 证明没有范围外 consumer、backfill 或 operations 合同依赖，并同步全局 read-model、worker、deploy 和 App Status 文档。`BANK_ACCOUNT_BALANCE_CANONICAL_ROWS_SQL` 在旧 projection 删除后仍应作为 direct query 的唯一余额算法保留，除非被等价地内联到 page-specific repository。
+- `bank_account_balance_read_model_repository.py`、refresh/producer、derived lifecycle、backfill 和旧 projection 已删除。
+- manifest、scope policy、worker registry/handler、App Status、deploy env 和 RabbitMQ 条目已删除。
+- `BANK_ACCOUNT_BALANCE_CANONICAL_ROWS_SQL` 位于 `bank_account_balance_canonical_rows.py`，是 direct query 的唯一余额算法。
+- 历史 projection migration/表暂留作回滚证据，没有运行时 reader/writer。

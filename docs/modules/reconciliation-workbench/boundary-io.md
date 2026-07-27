@@ -109,13 +109,9 @@ mutation route -> write facade -> relation command/UoW -> canonical relation rep
 - 前端 `/refresh-status` 轮询、`/events` SSE、refreshing/failed read-model UI 分支。
 - 页面 `expected_read_model_version` / generation-bound preview 和 write gate。
 
-## 共享 HANDOFF
+## 跨页面清理结果
 
-以下资源仍可能被 batch-accounting 或其它消费方使用，本模块不删除：
-
-- Workbench active-generation tables、builder、refresh worker、manifest/registry/env。
-- `PostgresReadModelRepository` 的 generation readers 与 batch-accounting 专属 Workbench loaders。
-- `workbench_relation` distribution、worker、queue 和 downstream freshness facade。
-- active-generation consistency/Audit/repair/diagnostic 工具。
-
-主控必须在 whole-repo 调用方全部迁移后再统一删除或改名，不能把这些共享资源重新接回关联台页面。
+- Workbench active-generation builder、runtime reader/writer、refresh worker、manifest/registry/env 和 generation 运维工具已删除。
+- batch-accounting 已改为页面专属 canonical query，不再消费 Workbench generation。
+- 历史 generation migration/表暂留作回滚证据，没有运行时 reader/writer。
+- `workbench_relation` distribution、worker、queue 和 freshness facade仍保留给明确登记的独立消费者；它不是关联台页面事实源。

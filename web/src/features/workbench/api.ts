@@ -434,38 +434,6 @@ type ApiWorkbenchActionResult = {
   affected_scope_keys?: unknown[];
   changedScopes?: unknown[];
   changed_scopes?: unknown[];
-  freshnessTargets?: Array<{
-    readModelKey?: unknown;
-    read_model_key?: unknown;
-    scopeType?: unknown;
-    scope_type?: unknown;
-    scopeKey?: unknown;
-    scope_key?: unknown;
-  }>;
-  freshness_targets?: Array<{
-    readModelKey?: unknown;
-    read_model_key?: unknown;
-    scopeType?: unknown;
-    scope_type?: unknown;
-    scopeKey?: unknown;
-    scope_key?: unknown;
-  }>;
-  operationBarrierTargets?: Array<{
-    readModelKey?: unknown;
-    read_model_key?: unknown;
-    scopeType?: unknown;
-    scope_type?: unknown;
-    scopeKey?: unknown;
-    scope_key?: unknown;
-  }>;
-  operation_barrier_targets?: Array<{
-    readModelKey?: unknown;
-    read_model_key?: unknown;
-    scopeType?: unknown;
-    scope_type?: unknown;
-    scopeKey?: unknown;
-    scope_key?: unknown;
-  }>;
   operationProjection?: ApiWorkbenchOperationProjection;
   operation_projection?: ApiWorkbenchOperationProjection;
   message: string;
@@ -479,12 +447,6 @@ type ApiWorkbenchOperationProjection = {
   };
 };
 
-export type WorkbenchActionFreshnessTarget = {
-  readModelKey: string;
-  scopeKey: string;
-  scopeType?: string;
-};
-
 export type WorkbenchOperationProjection = {
   after: {
     pairedGroups: WorkbenchRelationGroup[];
@@ -492,10 +454,8 @@ export type WorkbenchOperationProjection = {
   };
 };
 
-export type WorkbenchActionResult = Omit<ApiWorkbenchActionResult, "operationProjection" | "freshnessTargets" | "operationBarrierTargets" | "affectedScopeKeys"> & {
+export type WorkbenchActionResult = Omit<ApiWorkbenchActionResult, "operationProjection" | "affectedScopeKeys"> & {
   affectedScopeKeys: string[];
-  freshnessTargets: WorkbenchActionFreshnessTarget[];
-  operationBarrierTargets: WorkbenchActionFreshnessTarget[];
   operationProjection?: WorkbenchOperationProjection;
 };
 
@@ -776,27 +736,12 @@ type ApiOaManualSearchResult = {
   page_size?: number | null;
 };
 
-type ApiReadModelTarget = {
-  readModelKey?: unknown;
-  read_model_key?: unknown;
-  scopeType?: unknown;
-  scope_type?: unknown;
-  scopeKey?: unknown;
-  scope_key?: unknown;
-};
-
-type ApiReadModelTargetEnvelope = {
+type ApiAffectedScopeEnvelope = {
   affectedScopeKeys?: unknown[] | null;
   affected_scope_keys?: unknown[] | null;
-  readModelScopeKeys?: unknown[] | null;
-  read_model_scope_keys?: unknown[] | null;
-  freshnessTargets?: ApiReadModelTarget[] | null;
-  freshness_targets?: ApiReadModelTarget[] | null;
-  operationBarrierTargets?: ApiReadModelTarget[] | null;
-  operation_barrier_targets?: ApiReadModelTarget[] | null;
 };
 
-type ApiOaManualAttachmentRefreshResult = ApiReadModelTargetEnvelope & {
+type ApiOaManualAttachmentRefreshResult = ApiAffectedScopeEnvelope & {
   rows?: Array<{
     row_id?: string | null;
     attachment_file_count?: number | null;
@@ -806,14 +751,14 @@ type ApiOaManualAttachmentRefreshResult = ApiReadModelTargetEnvelope & {
   errors?: Array<Record<string, unknown>> | null;
 };
 
-type ApiOaManualImportResult = ApiReadModelTargetEnvelope & {
+type ApiOaManualImportResult = ApiAffectedScopeEnvelope & {
   imported?: string[] | null;
   already_imported?: string[] | null;
   failed?: Array<Record<string, unknown>> | null;
   rows?: ApiOaManualSearchRow[] | null;
 };
 
-type ApiOaManualImportRemovalResult = ApiReadModelTargetEnvelope & {
+type ApiOaManualImportRemovalResult = ApiAffectedScopeEnvelope & {
   removed?: boolean | null;
   row_id?: string | null;
 };
@@ -1004,7 +949,11 @@ function groupHasNoOaWithdrawAction(group: ApiWorkbenchGroup) {
 
 function mapGroupType(groupType: ApiWorkbenchGroup["group_type"], zoneHint?: WorkbenchZoneId): WorkbenchGroupType {
   const normalizedGroupType = String(groupType || "").trim();
-  if (normalizedGroupType !== "relation" && normalizedGroupType !== "unpaired") {
+  if (
+    normalizedGroupType !== "relation"
+    && normalizedGroupType !== "unpaired"
+    && normalizedGroupType !== "processed_exception"
+  ) {
     throw new Error(`Unsupported Workbench group type: ${normalizedGroupType || "<empty>"}`);
   }
   return zoneHint ?? (normalizedGroupType === "relation" ? "paired" : "unpaired");
@@ -2599,7 +2548,7 @@ export async function refreshManualOaImportAttachments(
       unrecognizedAttachmentCount: toCount(row.unrecognized_attachment_count),
     })).filter((row) => row.rowId.length > 0),
     errors: payload.errors ?? [],
-    ...mapReadModelTargetEnvelope(payload),
+    ...mapAffectedScopeEnvelope(payload),
   };
 }
 
@@ -2622,7 +2571,7 @@ export async function importManualOaRows(rowIds: string[]): Promise<OaManualImpo
     alreadyImported: (payload.already_imported ?? []).map((rowId) => String(rowId)),
     failed: payload.failed ?? [],
     rows: (payload.rows ?? []).map(mapOaManualSearchRow).filter((row) => row.rowId.length > 0),
-    ...mapReadModelTargetEnvelope(payload),
+    ...mapAffectedScopeEnvelope(payload),
   };
 }
 
@@ -2651,7 +2600,7 @@ export async function removeManualOaImport(rowId: string): Promise<OaManualImpor
   return {
     removed: payload.removed === true,
     rowId: toDisplayValue(payload.row_id, rowId),
-    ...mapReadModelTargetEnvelope(payload),
+    ...mapAffectedScopeEnvelope(payload),
   };
 }
 
@@ -2776,16 +2725,10 @@ export async function syncWorkbenchSettingsProjects(actorId: string): Promise<Wo
 function mapWorkbenchActionResult(payload: ApiWorkbenchActionResult): WorkbenchActionResult {
   const affectedScopeKeys = cleanScopeList(payload.affectedScopeKeys ?? payload.affected_scope_keys)
     .filter((scopeKey) => scopeKey !== "all");
-  const freshnessTargets = cleanFreshnessTargets(payload.freshnessTargets ?? payload.freshness_targets);
-  const operationBarrierTargets = cleanFreshnessTargets(payload.operationBarrierTargets ?? payload.operation_barrier_targets);
   const operationProjection = mapWorkbenchOperationProjection(payload.operationProjection ?? payload.operation_projection);
   const {
     operationProjection: _rawOperationProjection,
     operation_projection: _rawOperationProjectionSnake,
-    freshnessTargets: _rawFreshnessTargets,
-    freshness_targets: _rawFreshnessTargetsSnake,
-    operationBarrierTargets: _rawOperationBarrierTargets,
-    operation_barrier_targets: _rawOperationBarrierTargetsSnake,
     affectedScopeKeys: _rawAffectedScopeKeys,
     affected_scope_keys: _rawAffectedScopeKeysSnake,
     ...rest
@@ -2793,59 +2736,14 @@ function mapWorkbenchActionResult(payload: ApiWorkbenchActionResult): WorkbenchA
   return {
     ...rest,
     affectedScopeKeys,
-    freshnessTargets,
-    operationBarrierTargets: operationBarrierTargets.length > 0 ? operationBarrierTargets : freshnessTargets,
     ...(operationProjection ? { operationProjection } : {}),
   };
 }
 
-function mapReadModelTargetEnvelope(payload: ApiReadModelTargetEnvelope) {
+function mapAffectedScopeEnvelope(payload: ApiAffectedScopeEnvelope) {
   const affectedScopeKeys = cleanScopeList(payload.affectedScopeKeys ?? payload.affected_scope_keys)
     .filter((scopeKey) => scopeKey !== "all");
-  const readModelScopeKeys = cleanScopeList(payload.readModelScopeKeys ?? payload.read_model_scope_keys)
-    .filter((scopeKey) => scopeKey !== "all");
-  const freshnessTargets = cleanFreshnessTargets(payload.freshnessTargets ?? payload.freshness_targets);
-  const operationBarrierTargets = cleanFreshnessTargets(
-    payload.operationBarrierTargets ?? payload.operation_barrier_targets,
-  );
-  return {
-    affectedScopeKeys,
-    readModelScopeKeys,
-    freshnessTargets,
-    operationBarrierTargets: operationBarrierTargets.length > 0 ? operationBarrierTargets : freshnessTargets,
-  };
-}
-
-function cleanFreshnessTargets(value: unknown): WorkbenchActionFreshnessTarget[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  const normalized: WorkbenchActionFreshnessTarget[] = [];
-  for (const item of value) {
-    if (!item || typeof item !== "object") {
-      continue;
-    }
-    const record = item as Record<string, unknown>;
-    const readModelKey = String(record.readModelKey ?? record.read_model_key ?? "").trim();
-    const scopeKey = String(record.scopeKey ?? record.scope_key ?? "").trim();
-    const scopeType = String(record.scopeType ?? record.scope_type ?? "").trim();
-    if (!readModelKey || !scopeKey || scopeKey === "all") {
-      continue;
-    }
-    const target = {
-      readModelKey,
-      scopeKey,
-      ...(scopeType ? { scopeType } : {}),
-    };
-    if (!normalized.some((candidate) =>
-      candidate.readModelKey === target.readModelKey
-      && candidate.scopeKey === target.scopeKey
-      && candidate.scopeType === target.scopeType
-    )) {
-      normalized.push(target);
-    }
-  }
-  return normalized;
+  return { affectedScopeKeys };
 }
 
 function mapWorkbenchOperationProjection(value: unknown): WorkbenchOperationProjection | undefined {

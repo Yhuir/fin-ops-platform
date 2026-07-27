@@ -2345,9 +2345,9 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         )
 
         self.assertEqual(result["affected_months"], ["2026-02", "2026-02", "2026-03"])
-        self.assertEqual(result["freshness_targets"], [])
         self.assertEqual(result["affected_scope_keys"], ["2026-02", "2026-03"])
-        self.assertEqual(result["operation_barrier_targets"], result["freshness_targets"])
+        self.assertNotIn("freshness_targets", result)
+        self.assertNotIn("operation_barrier_targets", result)
 
         withdrawn = boundary.withdraw_cash_closure_case_from_request(
             cash_closure_case_id="turnover:turnover_rel_closure",
@@ -2357,7 +2357,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         )
 
         self.assertEqual(withdrawn["affected_months"], ["2026-02", "2026-03"])
-        self.assertEqual(withdrawn["operation_barrier_targets"], result["operation_barrier_targets"])
+        self.assertNotIn("operation_barrier_targets", withdrawn)
         self.assertEqual(facade.withdraw_calls[0]["affected_months"], ["2026-02", "2026-03"])
 
     def test_withdraw_relation_rejects_stale_or_duplicate_submit_before_handler_runs(self) -> None:

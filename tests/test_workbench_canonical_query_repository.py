@@ -11,8 +11,8 @@ from fin_ops_platform.services.postgres_repositories import (
 from fin_ops_platform.services.postgres_repositories.workbench_canonical_query import (
     PostgresWorkbenchCanonicalQueryRepository,
 )
-from fin_ops_platform.services.workbench_sql_projection import (
-    WorkbenchSqlProjectionBuilder,
+from fin_ops_platform.services.workbench_canonical_rows import (
+    WorkbenchCanonicalRowsBuilder,
 )
 from fin_ops_platform.services.workbench_relation_preview_policy import (
     WorkbenchRelationPreviewSelectionError,
@@ -217,22 +217,22 @@ class WorkbenchCanonicalQueryRepositoryTests(unittest.TestCase):
 
         with (
             patch.object(
-                WorkbenchSqlProjectionBuilder,
+                WorkbenchCanonicalRowsBuilder,
                 "_oa_projection_rows_by_sql_ids",
                 return_value=oa_rows,
             ) as oa_loader,
             patch.object(
-                WorkbenchSqlProjectionBuilder,
+                WorkbenchCanonicalRowsBuilder,
                 "_bank_rows_by_ids",
                 return_value=[],
             ) as bank_loader,
             patch.object(
-                WorkbenchSqlProjectionBuilder,
+                WorkbenchCanonicalRowsBuilder,
                 "_invoice_rows_by_ids",
                 return_value=[],
             ) as invoice_loader,
             patch.object(
-                WorkbenchSqlProjectionBuilder,
+                WorkbenchCanonicalRowsBuilder,
                 "_group_payload",
                 return_value=grouped,
             ) as group_payload,

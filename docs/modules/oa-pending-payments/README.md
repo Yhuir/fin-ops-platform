@@ -22,7 +22,7 @@
 - API route：`backend/src/fin_ops_platform/app/routes_oa_pending_payments.py`
 - 页面 query service：`backend/src/fin_ops_platform/services/oa_pending_payment_query_service.py`
 - 页面 PostgreSQL repository：`backend/src/fin_ops_platform/services/postgres_repositories/oa_pending_payment_query.py`
-- 查询合同与纯组装：`oa_pending_payment_query_contract.py`、`oa_pending_payment_projection_rows.py`、`oa_pending_payment_read_model_details.py`
+- 查询合同与纯组装：`oa_pending_payment_query_contract.py`、`oa_pending_payment_canonical_rows.py`、`oa_pending_payment_details.py`
 - 命令：`oa_pending_payment_command_service.py`、`oa_pending_payment_relation_promotion_service.py`
 - Canonical snapshot owners：`postgres_repositories/oa_pending_payment_source_snapshot.py`、`oa_pending_payment_relation.py`、`oa_pending_payment_admission.py`
 - Audit：`postgres_repositories/page_business_audit.py`、`web/src/components/oaPendingPayments/OaPendingPaymentAuditIcon.tsx`
@@ -72,9 +72,9 @@ browser
 
 Mongo/MySQL 与 PostgreSQL 之间没有分布式事务。若外部写成功而 PostgreSQL canonical commit 失败，命令必须返回可安全重试错误；重试或后续 OA sync 收敛，不允许页面请求回退读取外部系统。
 
-## 共享清理边界
+## 旧链清理结果
 
-`oa_pending_payment` 旧 read model、worker、manifest、App Status registry 和 deploy env 仍有共享调用方或属于全局资源，本页面迁移任务不删除。特别是 `invoice_lifecycle` 仍依赖 OA read-model repository。主控只能在所有消费者迁移后统一删除；页面运行时已经不再依赖这些资源。
+`oa_pending_payment` 旧 read model、projector、worker、manifest、App Status registry、deploy env 和 invoice-lifecycle 间接依赖已删除。invoice lifecycle 页面也已切换为 canonical direct read。历史 migration/表暂留作回滚证据，没有运行时 reader/writer。
 
 ## 明确不做
 
@@ -85,7 +85,7 @@ Mongo/MySQL 与 PostgreSQL 之间没有分布式事务。若外部写成功而 P
 
 ## 本目录文件
 
-- `boundary-io.md`：模块边界、直接/上下游 I/O、事实所有权和共享 HANDOFF。
+- `boundary-io.md`：模块边界、直接/上下游 I/O、事实所有权和旧链删除状态。
 - `state-machine.md`：业务、UI、写回和错误状态。
 - `tests.md`：七类测试责任、命令和剩余风险。
 - `performance-integrity-design.md`：查询次数、快照和生产性能门槛。

@@ -244,7 +244,7 @@ function detailFromPayload(
     ?? ""
   );
   const backgroundJobs = apiPayload?.background_jobs;
-  const workbench = apiPayload?.workbench_read_model;
+  const workbench = apiPayload?.workbench_matching;
   const matchingDirtyEntries = Array.isArray(workbench?.matching_dirty_scopes)
     ? workbench?.matching_dirty_scopes ?? []
     : [];

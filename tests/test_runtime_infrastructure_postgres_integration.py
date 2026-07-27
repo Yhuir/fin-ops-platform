@@ -209,7 +209,7 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
 
     def test_outbox_envelope_view_exposes_rabbitmq_safe_fields(self) -> None:
         event = self.runtime_queue.enqueue_read_model_refresh(
-            scope_type="workbench",
+            scope_type="workbench_relation",
             scope_key="all",
             reason="integration-test",
             priority="high",
@@ -236,8 +236,8 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         )
 
         self.assertEqual(row["event_id"], event.event_id)
-        self.assertEqual(row["event_type"], "workbench.read_model.refresh")
-        self.assertEqual(row["scope_type"], "workbench")
+        self.assertEqual(row["event_type"], "workbench_relation.read_model.refresh")
+        self.assertEqual(row["scope_type"], "workbench_relation")
         self.assertEqual(row["scope_key"], "all")
         self.assertEqual(row["source_version"], event.source_version)
         self.assertEqual(row["priority"], "high")
@@ -463,31 +463,31 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
 
     def test_atomic_batch_read_model_enqueue_only_creates_uncovered_exact_scopes(self) -> None:
         initial = self.runtime_queue.enqueue_read_model_refreshes_if_inactive(
-            scope_type="pending_invoice",
-            scope_keys=["expense:all:2026-02", "expense:all:2026-03"],
+            scope_type="search",
+            scope_keys=["2026-02", "2026-03"],
             reason="api_source_versions_stale",
         )
 
         self.assertEqual(
             [event.scope_key for event in initial],
-            ["expense:all:2026-02", "expense:all:2026-03"],
+            ["2026-02", "2026-03"],
         )
         self.assertEqual(
             self.runtime_queue.enqueue_read_model_refreshes_if_inactive(
-                scope_type="pending_invoice",
-                scope_keys=["expense:all:2026-02", "expense:all:2026-03"],
+                scope_type="search",
+                scope_keys=["2026-02", "2026-03"],
                 reason="api_source_versions_stale",
             ),
             [],
         )
 
         mixed = self.runtime_queue.enqueue_read_model_refreshes_if_inactive(
-            scope_type="pending_invoice",
-            scope_keys=["expense:all:2026-02", "expense:all:2026-04"],
+            scope_type="search",
+            scope_keys=["2026-02", "2026-04"],
             reason="api_source_versions_stale",
         )
 
-        self.assertEqual([event.scope_key for event in mixed], ["expense:all:2026-04"])
+        self.assertEqual([event.scope_key for event in mixed], ["2026-04"])
         counts = self.connection.fetch_one(
             """
             select
@@ -496,11 +496,11 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
                 (
                     select count(*)::integer
                     from job.read_model_dirty_scopes
-                    where scope_type = 'pending_invoice'
+                    where scope_type = 'search'
                       and status in ('pending', 'processing')
                 ) as active_dirty_count
             from job.outbox_events
-            where event_type = 'pending_invoice.read_model.refresh'
+            where event_type = 'search.read_model.refresh'
             """
         )
         self.assertEqual(counts["active_event_count"], 3)
@@ -508,7 +508,7 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
 
     def test_completed_freshness_target_coalesces_concurrent_stale_callers(self) -> None:
         first = self.runtime_queue.enqueue_read_model_refresh_if_inactive(
-            scope_type="workbench",
+            scope_type="workbench_relation",
             scope_key="2026-04",
             reason="api_groups_stale",
             metadata={"freshness_token": "target-a"},
@@ -517,7 +517,7 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         self.assertTrue(
             self.runtime_queue.complete_read_model_refresh(
                 tenant_id="default",
-                scope_type="workbench",
+                scope_type="workbench_relation",
                 scope_key="2026-04",
                 source_version=first.source_version,
             )
@@ -540,7 +540,7 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
                 )
             )
             event = RuntimeQueueRepository(connection).enqueue_read_model_refresh_if_inactive(
-                scope_type="workbench",
+                scope_type="workbench_relation",
                 scope_key="2026-04",
                 reason="api_groups_stale",
                 metadata={"freshness_token": "target-a"},
@@ -555,14 +555,14 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
             """
             select count(*)::integer as count
             from job.outbox_events
-            where event_type = 'workbench.read_model.refresh'
+            where event_type = 'workbench_relation.read_model.refresh'
               and scope_key = '2026-04'
             """
         )
         self.assertEqual(event_count["count"], 1)
 
         second = self.runtime_queue.enqueue_read_model_refresh_if_inactive(
-            scope_type="workbench",
+            scope_type="workbench_relation",
             scope_key="2026-04",
             reason="api_groups_stale",
             metadata={"freshness_token": "target-b"},
@@ -571,7 +571,7 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         self.assertTrue(
             self.runtime_queue.complete_read_model_refresh(
                 tenant_id="default",
-                scope_type="workbench",
+                scope_type="workbench_relation",
                 scope_key="2026-04",
                 source_version=second.source_version,
             )
@@ -587,7 +587,7 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         )
 
         third = self.runtime_queue.enqueue_read_model_refresh_if_inactive(
-            scope_type="workbench",
+            scope_type="workbench_relation",
             scope_key="2026-04",
             reason="api_groups_stale",
             metadata={"freshness_token": "target-a"},
@@ -606,14 +606,14 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
             """
             update job.read_model_dirty_scopes
             set status = 'failed', last_error = 'fixture failed dirty scope'
-            where scope_type = 'workbench'
+            where scope_type = 'workbench_relation'
               and scope_key = '2026-04'
             returning id
             """,
         )
 
         recovered = self.runtime_queue.enqueue_read_model_refresh_if_inactive(
-            scope_type="workbench",
+            scope_type="workbench_relation",
             scope_key="2026-04",
             reason="api_groups_stale",
             metadata={"freshness_token": "target-a"},

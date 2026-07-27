@@ -8,9 +8,6 @@ import unittest
 from fin_ops_platform.services.app_status_read_model_registry import APP_STATUS_READ_MODEL_REGISTRY
 from fin_ops_platform.services.operation_freshness_barrier import OperationFreshnessTarget
 from fin_ops_platform.services.postgres_repositories.read_models import (
-    PostgresBankReadModelRepository,
-    PostgresInvoiceUsageCollectionReadModelRepository,
-    PostgresPendingInvoiceLifecycleReadModelRepository,
     PostgresReadModelRepository,
     PostgresSearchWorkbenchRelationReadModelRepository,
     PostgresSummaryReadModelRepository,
@@ -85,18 +82,13 @@ class ReadModelManifestTests(unittest.TestCase):
             visit(key)
 
         self.assertEqual(
-            graph["invoice_lifecycle"],
-            (
-                "pending_invoice",
-                "input_invoice_usage",
-                "output_invoice_collection",
-                "oa_pending_payment",
-                "workbench_relation",
-            ),
+            graph,
+            {
+                "workbench_relation": (),
+                "search": (),
+                "no_oa_bank_batch": (),
+            },
         )
-        self.assertNotIn("cost_statistics", graph)
-        self.assertEqual(graph["input_invoice_usage"], ("workbench_relation",))
-        self.assertEqual(graph["output_invoice_collection"], ("workbench_relation",))
 
     def test_phase_27_coverage_matches_manifest_keys_scopes_and_query_owners(self) -> None:
         coverage = _phase_27_read_model_coverage()
@@ -267,69 +259,27 @@ class ReadModelManifestTests(unittest.TestCase):
                     f"{method_name} is declared by both {previous_owner} and {entry.key}",
                 )
 
-    def test_manifest_repository_owner_uses_read_model_port_except_workbench(self) -> None:
+    def test_manifest_repository_owner_uses_retained_read_model_ports(self) -> None:
         expected_port_owners = {
-            "bank_account_balance": "BankAccountBalanceReadModelRepositoryPort",
-            "bank_detail": "BankDetailReadModelRepositoryPort",
-            "bank_flow_rule_batch": "BankFlowRuleBatchReadModelRepositoryPort",
-            "input_invoice_usage": "InputInvoiceUsageReadModelRepositoryPort",
-            "invoice_lifecycle": "InvoiceLifecycleReadModelRepositoryPort",
             "no_oa_bank_batch": "NoOaBankBatchReadModelRepositoryPort",
-            "oa_pending_payment": "OaPendingPaymentReadModelRepositoryPort",
-            "output_invoice_collection": "OutputInvoiceCollectionReadModelRepositoryPort",
-            "pending_invoice": "PendingInvoiceReadModelRepositoryPort",
             "search": "SearchReadModelRepositoryPort",
-            "tax_offset": "TaxOffsetReadModelRepositoryPort",
             "workbench_relation": "WorkbenchRelationReadModelRepositoryPort",
         }
 
-        self.assertEqual(
-            READ_MODEL_MANIFEST["workbench"].repository_owner,
-            "PostgresReadModelRepository.workbench",
-        )
+        self.assertEqual(set(READ_MODEL_MANIFEST), set(expected_port_owners))
         for key, repository_owner in expected_port_owners.items():
             with self.subTest(read_model_key=key):
                 self.assertEqual(READ_MODEL_MANIFEST[key].repository_owner, repository_owner)
 
-    def test_invoice_usage_collection_physical_sql_owner_is_split_from_shared_repository(self) -> None:
-        owned_methods = {
-            "list_input_invoice_usage_rows",
-            "save_input_invoice_usage_rows",
-            "mark_input_invoice_usage_scope",
-            "prune_input_invoice_usage_scope_shards",
-            "get_input_invoice_usage_row_by_row_id",
-            "list_output_invoice_collection_rows",
-            "get_output_invoice_collection_row_by_row_id",
-            "save_output_invoice_collection_rows",
-            "mark_output_invoice_collection_scope",
-            "prune_output_invoice_collection_scope_shards",
-            "list_oa_pending_payment_rows",
-            "save_oa_pending_payment_rows",
-            "mark_oa_pending_payment_scope",
-            "prune_oa_pending_payment_scope_shards",
-            "get_oa_pending_payment_row_by_row_id",
-            "get_oa_pending_payment_row_by_oa_id",
-            "get_oa_pending_payment_row_by_bank_transaction_id",
-            "get_oa_pending_payment_row_by_invoice_id",
-        }
-
-        for method_name in owned_methods:
-            with self.subTest(method_name=method_name):
-                self.assertTrue(callable(getattr(PostgresInvoiceUsageCollectionReadModelRepository, method_name, None)))
-                shared_source = inspect.getsource(getattr(PostgresReadModelRepository, method_name))
-                self.assertIn("_invoice_usage_collection_repository", shared_source)
-                self.assertNotIn("read_model.input_invoice_usage_rows", shared_source)
-                self.assertNotIn("read_model.output_invoice_collection_rows", shared_source)
-                self.assertNotIn("read_model.oa_pending_payment_rows", shared_source)
-
-    def test_pending_invoice_lifecycle_physical_sql_owner_is_split_from_shared_repository(self) -> None:
-        owned_methods = {
+    def test_retired_invoice_page_repository_methods_are_absent(self) -> None:
+        retired_methods = {
             "list_pending_invoice_rows",
+            "list_pending_invoice_lifecycle_source_rows",
             "list_pending_invoice_filter_options",
             "save_pending_invoice_rows",
             "mark_pending_invoice_scope",
             "pending_invoice_source_summary",
-            "pending_invoice_bank_detail_source_versions",
+            "pending_invoice_bank_source_versions",
             "pending_invoice_workbench_relation_source_versions",
             "save_invoice_lifecycle_rows",
             "mark_invoice_lifecycle_scope",
@@ -337,18 +287,32 @@ class ReadModelManifestTests(unittest.TestCase):
             "get_invoice_lifecycle_rows_by_identity_keys",
             "list_invoice_lifecycle_rows",
             "invoice_lifecycle_scope_summary",
+            "list_input_invoice_usage_rows",
+            "list_input_invoice_usage_filter_options",
+            "input_invoice_usage_scope_source_versions",
+            "input_invoice_usage_relation_source_versions",
+            "save_input_invoice_usage_rows",
+            "mark_input_invoice_usage_scope",
+            "prune_input_invoice_usage_scope_shards",
+            "get_input_invoice_usage_row_by_row_id",
+            "list_input_invoice_usage_rows_by_invoice_ids",
+            "list_output_invoice_collection_rows",
+            "output_invoice_collection_scope_source_versions",
+            "output_invoice_collection_relation_source_versions",
+            "get_output_invoice_collection_row_by_row_id",
+            "save_output_invoice_collection_rows",
+            "mark_output_invoice_collection_scope",
+            "prune_output_invoice_collection_scope_shards",
+            "get_batch_accounting_relation_rows_by_ids",
+            "list_batch_accounting_relation_groups_by_year",
         }
 
-        for method_name in owned_methods:
+        for method_name in retired_methods:
             with self.subTest(method_name=method_name):
-                self.assertTrue(callable(getattr(PostgresPendingInvoiceLifecycleReadModelRepository, method_name, None)))
-                shared_source = inspect.getsource(getattr(PostgresReadModelRepository, method_name))
-                self.assertIn("_pending_invoice_lifecycle_repository", shared_source)
-                self.assertNotIn("read_model.pending_invoice_rows", shared_source)
-                self.assertNotIn("read_model.invoice_lifecycle_rows", shared_source)
+                self.assertFalse(hasattr(PostgresReadModelRepository, method_name))
 
-    def test_bank_read_model_physical_sql_owner_is_split_from_shared_repository(self) -> None:
-        owned_methods = {
+    def test_retired_bank_read_model_repository_methods_are_absent(self) -> None:
+        retired_methods = {
             "bank_detail_scope_keys_for_range",
             "bank_detail_scope_summary",
             "bank_detail_category_source_signatures",
@@ -363,14 +327,9 @@ class ReadModelManifestTests(unittest.TestCase):
             "mark_bank_detail_scope",
         }
 
-        for method_name in owned_methods:
+        for method_name in retired_methods:
             with self.subTest(method_name=method_name):
-                self.assertTrue(callable(getattr(PostgresBankReadModelRepository, method_name, None)))
-                shared_source = inspect.getsource(getattr(PostgresReadModelRepository, method_name))
-                self.assertIn("_bank_read_model_repository", shared_source)
-                self.assertNotIn("read_model.bank_detail_rows", shared_source)
-                self.assertNotIn("read_model.bank_detail_scopes", shared_source)
-                self.assertNotIn("read_model.bank_account_balances", shared_source)
+                self.assertFalse(hasattr(PostgresReadModelRepository, method_name))
 
     def test_search_workbench_relation_physical_sql_owner_is_split_from_shared_repository(self) -> None:
         owned_methods = {
@@ -380,7 +339,6 @@ class ReadModelManifestTests(unittest.TestCase):
             "save_workbench_relation_distribution_rows",
             "mark_workbench_relation_scope_empty",
             "get_workbench_relation_rows_by_ids",
-            "get_batch_accounting_relation_rows_by_ids",
             "list_workbench_relation_rows",
             "get_workbench_relation_groups_by_ids",
             "workbench_relation_source_versions",
@@ -398,13 +356,8 @@ class ReadModelManifestTests(unittest.TestCase):
 
     def test_summary_read_model_physical_sql_owner_is_split_from_shared_repository(self) -> None:
         owned_methods = {
-            "load_tax_offset_read_models",
-            "get_tax_offset_view",
-            "save_tax_offset_read_models",
             "list_no_oa_bank_batch_rows",
             "no_oa_bank_batch_source_versions_summary",
-            "list_bank_flow_rule_batch_rows",
-            "bank_flow_rule_batch_source_versions_summary",
         }
 
         for method_name in owned_methods:
@@ -419,199 +372,42 @@ class ReadModelManifestTests(unittest.TestCase):
                 self.assertNotIn("read_model.no_oa_bank_batch_rows", shared_source)
                 self.assertNotIn("read_model.turnover_ledger_rows", shared_source)
 
-    def test_workbench_manifest_preserves_active_generation_exception(self) -> None:
-        entry = READ_MODEL_MANIFEST["workbench"]
-        required_active_generation_ports = {
-            "get_workbench_initial_page",
-            "get_workbench_summary",
-            "get_workbench_groups_page",
-            "get_workbench_group_detail",
-            "get_workbench_row_detail",
-            "get_workbench_refresh_status",
-            "get_workbench_groups_freshness_status",
-            "save_workbench_read_models",
-            "load_workbench_read_models",
-        }
+    def test_workbench_page_manifest_is_retired_but_relation_manifest_remains(self) -> None:
+        self.assertNotIn("workbench", READ_MODEL_MANIFEST)
+        entry = READ_MODEL_MANIFEST["workbench_relation"]
+        self.assertEqual(entry.projection_strategy, "scoped_incremental_distribution")
+        self.assertEqual(entry.primary_worker_instance, "workbench-relation")
 
-        self.assertEqual(entry.query_status_contract, "equivalent_active_generation")
-        self.assertEqual(entry.projection_strategy, "active_generation_scoped_publish")
-        self.assertEqual(entry.all_scope_semantics, "active_month_shard_aggregate")
-        self.assertEqual(entry.force_refresh_contract, "gateway_force_refresh_active_generation_scope")
-        self.assertLessEqual(required_active_generation_ports, set(entry.repository_port_contract))
-
-    def test_bank_detail_and_balance_manifest_keep_separate_contracts(self) -> None:
-        bank_detail = READ_MODEL_MANIFEST["bank_detail"]
-        balance = READ_MODEL_MANIFEST["bank_account_balance"]
-        required_bank_detail_ports = {
-            "bank_detail_scope_keys_for_range",
-            "bank_detail_scope_summary",
-            "bank_detail_category_source_signatures",
-            "list_bank_detail_transactions",
-            "list_bank_detail_accounts",
-            "get_bank_detail_tagged_rows_by_transaction_ids",
-            "list_bank_detail_tagged_rows_by_month",
-            "save_bank_detail_rows",
-            "mark_bank_detail_scope",
-        }
-        required_balance_ports = {
-            "bank_account_balance_scope_summary",
-            "list_bank_account_balances",
-            "save_bank_account_balances",
-        }
-
-        self.assertEqual(bank_detail.scope_type, "bank_detail")
-        self.assertEqual(balance.scope_type, "bank_account_balance")
-        self.assertEqual(bank_detail.query_status_contract, "self_managed_freshness")
-        self.assertEqual(balance.query_status_contract, "self_managed_freshness")
-        self.assertEqual(bank_detail.projection_strategy, "partitioned_scoped_incremental")
-        self.assertEqual(balance.projection_strategy, "partitioned_scoped_incremental")
-        self.assertEqual(bank_detail.all_scope_semantics, "fan_out_command")
-        self.assertEqual(balance.all_scope_semantics, "queryable_all_scope")
-        self.assertEqual(bank_detail.force_refresh_contract, "gateway_force_refresh")
-        self.assertEqual(balance.force_refresh_contract, "gateway_force_refresh")
-        self.assertEqual(bank_detail.query_owner, "BankDetailsApplicationService")
-        self.assertEqual(balance.query_owner, "BankDetailsApplicationService")
-        self.assertEqual(bank_detail.permission_owner, "bank_details_api_session")
-        self.assertEqual(balance.permission_owner, "bank_details_api_session")
-        self.assertEqual(bank_detail.test_owner, "tests/test_bank_details_sql_runtime.py")
-        self.assertEqual(balance.test_owner, "tests/test_bank_account_balance_read_model.py")
-        self.assertLessEqual(required_bank_detail_ports, set(bank_detail.repository_port_contract))
-        self.assertEqual(required_balance_ports, set(balance.repository_port_contract))
-        self.assertFalse(set(bank_detail.repository_port_contract).intersection(balance.repository_port_contract))
+    def test_bank_detail_and_balance_page_manifests_are_retired(self) -> None:
+        self.assertNotIn("bank_detail", READ_MODEL_MANIFEST)
+        self.assertNotIn("bank_account_balance", READ_MODEL_MANIFEST)
 
     def test_manifest_distinguishes_fan_out_commands_from_queryable_all_scopes(self) -> None:
-        self.assertTrue(is_command_only_read_model_scope("oa_pending_payment", "all"))
-        self.assertTrue(is_command_only_read_model_scope("bank_detail", "all"))
-        self.assertFalse(is_command_only_read_model_scope("turnover_ledger", "all"))
-        self.assertFalse(is_command_only_read_model_scope("bank_detail", "2026-06"))
-        self.assertFalse(is_command_only_read_model_scope("bank_account_balance", "all"))
-        self.assertFalse(is_command_only_read_model_scope("cost_statistics", "active:all"))
-        self.assertFalse(is_command_only_read_model_scope("workbench", "all"))
+        self.assertTrue(is_command_only_read_model_scope("search", "all"))
+        self.assertTrue(is_command_only_read_model_scope("no_oa_bank_batch", "all"))
+        self.assertTrue(is_command_only_read_model_scope("workbench_relation", "all"))
+        self.assertFalse(is_command_only_read_model_scope("search", "2026-06"))
+        self.assertFalse(is_command_only_read_model_scope("pending_invoice", "all"))
 
-    def test_pending_invoice_and_oa_payment_manifest_preserve_page_scope_contracts(self) -> None:
-        pending_invoice = READ_MODEL_MANIFEST["pending_invoice"]
-        oa_payment = READ_MODEL_MANIFEST["oa_pending_payment"]
-        required_pending_ports = {
-            "list_pending_invoice_rows",
-            "list_pending_invoice_filter_options",
-            "save_pending_invoice_rows",
-            "mark_pending_invoice_scope",
-            "pending_invoice_source_summary",
-            "pending_invoice_bank_detail_source_versions",
-            "pending_invoice_workbench_relation_source_versions",
-        }
-        required_oa_ports = {
-            "list_oa_pending_payment_rows",
-            "save_oa_pending_payment_rows",
-            "mark_oa_pending_payment_scope",
-            "prune_oa_pending_payment_scope_shards",
-            "get_oa_pending_payment_row_by_row_id",
-            "get_oa_pending_payment_row_by_oa_id",
-            "get_oa_pending_payment_row_by_bank_transaction_id",
-            "get_oa_pending_payment_row_by_invoice_id",
-        }
+    def test_pending_invoice_and_oa_payment_page_manifests_are_retired(self) -> None:
+        self.assertNotIn("pending_invoice", READ_MODEL_MANIFEST)
+        self.assertNotIn("oa_pending_payment", READ_MODEL_MANIFEST)
 
-        self.assertEqual(pending_invoice.scope_type, "pending_invoice")
-        self.assertEqual(oa_payment.scope_type, "oa_pending_payment")
-        self.assertEqual(pending_invoice.query_status_contract, "self_managed_freshness")
-        self.assertEqual(oa_payment.query_status_contract, "self_managed_freshness")
-        self.assertEqual(pending_invoice.all_scope_semantics, "forbidden_bare_all")
-        self.assertEqual(oa_payment.all_scope_semantics, "fan_out_command")
-        self.assertEqual(pending_invoice.force_refresh_contract, "gateway_force_refresh_with_page_first_screen_scope")
-        self.assertEqual(oa_payment.force_refresh_contract, "gateway_force_refresh")
-        self.assertEqual(pending_invoice.query_owner, "PendingInvoiceReadModelService")
-        self.assertEqual(oa_payment.query_owner, "OaPendingPaymentReadModelService")
-        self.assertEqual(pending_invoice.permission_owner, "pending_invoices_api_session")
-        self.assertEqual(oa_payment.permission_owner, "oa_pending_payment_api_session")
-        self.assertLessEqual(required_pending_ports, set(pending_invoice.repository_port_contract))
-        self.assertLessEqual(required_oa_ports, set(oa_payment.repository_port_contract))
-        self.assertFalse(set(pending_invoice.repository_port_contract).intersection(oa_payment.repository_port_contract))
+    def test_invoice_lifecycle_and_usage_page_manifests_are_retired(self) -> None:
+        for key in (
+            "invoice_lifecycle",
+            "input_invoice_usage",
+            "output_invoice_collection",
+        ):
+            self.assertNotIn(key, READ_MODEL_MANIFEST)
 
-    def test_invoice_lifecycle_and_usage_manifest_preserve_scoped_contracts(self) -> None:
-        lifecycle = READ_MODEL_MANIFEST["invoice_lifecycle"]
-        input_usage = READ_MODEL_MANIFEST["input_invoice_usage"]
-        output_collection = READ_MODEL_MANIFEST["output_invoice_collection"]
-        required_lifecycle_ports = {
-            "save_invoice_lifecycle_rows",
-            "mark_invoice_lifecycle_scope",
-            "get_invoice_lifecycle_rows_by_subject_ids",
-            "get_invoice_lifecycle_rows_by_identity_keys",
-            "list_invoice_lifecycle_rows",
-        }
-        required_input_ports = {
-            "list_input_invoice_usage_rows",
-            "input_invoice_usage_relation_source_versions",
-            "save_input_invoice_usage_rows",
-            "mark_input_invoice_usage_scope",
-            "prune_input_invoice_usage_scope_shards",
-            "get_input_invoice_usage_row_by_row_id",
-        }
-        required_output_ports = {
-            "list_output_invoice_collection_rows",
-            "output_invoice_collection_relation_source_versions",
-            "get_output_invoice_collection_row_by_row_id",
-            "save_output_invoice_collection_rows",
-            "mark_output_invoice_collection_scope",
-            "prune_output_invoice_collection_scope_shards",
-        }
-
-        for entry in (lifecycle, input_usage, output_collection):
-            with self.subTest(read_model_key=entry.key):
-                self.assertEqual(entry.query_status_contract, "self_managed_freshness")
-                self.assertEqual(entry.projection_strategy, "scoped_incremental")
-                self.assertEqual(entry.all_scope_semantics, "fan_out_command")
-                self.assertEqual(entry.force_refresh_contract, "gateway_force_refresh")
-                self.assertEqual(entry.operation_barrier_contract, "app_status_registry_target")
-                self.assertEqual(entry.refresh_event_type, f"{entry.scope_type}.read_model.refresh")
-
-        self.assertEqual(lifecycle.scope_type, "invoice_lifecycle")
-        self.assertEqual(input_usage.scope_type, "input_invoice_usage")
-        self.assertEqual(output_collection.scope_type, "output_invoice_collection")
-        self.assertEqual(lifecycle.primary_worker_instance, "invoice-lifecycle")
-        self.assertEqual(input_usage.primary_worker_instance, "invoice-usage-collection")
-        self.assertEqual(output_collection.primary_worker_instance, "invoice-usage-collection")
-        self.assertEqual(lifecycle.auxiliary_refresh_worker_instances, ("invoice-lifecycle-secondary",))
-        self.assertEqual(input_usage.auxiliary_refresh_worker_instances, ())
-        self.assertEqual(output_collection.auxiliary_refresh_worker_instances, ())
-        self.assertEqual(lifecycle.query_owner, "InvoiceLifecycleReadFacade")
-        self.assertEqual(input_usage.query_owner, "InputInvoiceUsageReadModelService")
-        self.assertEqual(output_collection.query_owner, "OutputInvoiceCollectionReadApplicationService")
-        self.assertEqual(lifecycle.permission_owner, "invoice_lifecycle_page_api_session")
-        self.assertEqual(input_usage.permission_owner, "input_invoice_usage_api_session")
-        self.assertEqual(output_collection.permission_owner, "output_invoice_collection_api_session")
-        self.assertLessEqual(required_lifecycle_ports, set(lifecycle.repository_port_contract))
-        self.assertLessEqual(required_input_ports, set(input_usage.repository_port_contract))
-        self.assertLessEqual(required_output_ports, set(output_collection.repository_port_contract))
-        self.assertFalse(set(lifecycle.repository_port_contract).intersection(input_usage.repository_port_contract))
-        self.assertFalse(set(lifecycle.repository_port_contract).intersection(output_collection.repository_port_contract))
-        self.assertFalse(set(input_usage.repository_port_contract).intersection(output_collection.repository_port_contract))
-
-    def test_cost_is_direct_canonical_read_and_tax_manifest_preserves_summary_contract(self) -> None:
+    def test_cost_and_tax_are_direct_canonical_reads(self) -> None:
         self.assertNotIn("cost_statistics", READ_MODEL_MANIFEST)
-        tax_offset = READ_MODEL_MANIFEST["tax_offset"]
-        required_tax_ports = {
-            "load_tax_offset_read_models",
-            "get_tax_offset_view",
-            "save_tax_offset_read_models",
-        }
+        self.assertNotIn("tax_offset", READ_MODEL_MANIFEST)
 
-        self.assertEqual(tax_offset.query_status_contract, "read_model_query_gateway")
-        self.assertEqual(tax_offset.force_refresh_contract, "gateway_force_refresh")
-        self.assertEqual(tax_offset.operation_barrier_contract, "app_status_registry_target")
-        self.assertEqual(tax_offset.refresh_event_type, "tax_offset.read_model.refresh")
-        self.assertEqual(tax_offset.scope_type, "tax_offset")
-        self.assertEqual(tax_offset.projection_strategy, "partitioned_scoped_incremental")
-        self.assertEqual(tax_offset.all_scope_semantics, "fan_out_command")
-        self.assertEqual(tax_offset.primary_worker_instance, "tax-offset")
-        self.assertEqual(tax_offset.auxiliary_refresh_worker_instances, ("cost-tax",))
-        self.assertEqual(tax_offset.query_owner, "TaxOffsetQueryService")
-        self.assertEqual(tax_offset.permission_owner, "tax_offset_api_session")
-        self.assertEqual(required_tax_ports, set(tax_offset.repository_port_contract))
-
-    def test_search_no_oa_and_bank_flow_rule_batch_manifest_preserve_read_side_contracts(self) -> None:
+    def test_search_and_no_oa_manifest_preserve_read_side_contracts(self) -> None:
         search = READ_MODEL_MANIFEST["search"]
         no_oa_bank_batch = READ_MODEL_MANIFEST["no_oa_bank_batch"]
-        bank_flow_rule_batch = READ_MODEL_MANIFEST["bank_flow_rule_batch"]
         required_search_ports = {
             "search_index",
             "save_search_index_rows",
@@ -620,12 +416,8 @@ class ReadModelManifestTests(unittest.TestCase):
             "list_no_oa_bank_batch_rows",
             "no_oa_bank_batch_source_versions_summary",
         }
-        required_bank_flow_ports = {
-            "list_bank_flow_rule_batch_rows",
-            "bank_flow_rule_batch_source_versions_summary",
-        }
 
-        for entry in (search, no_oa_bank_batch, bank_flow_rule_batch):
+        for entry in (search, no_oa_bank_batch):
             with self.subTest(read_model_key=entry.key):
                 self.assertEqual(entry.query_status_contract, "self_managed_freshness")
                 self.assertEqual(entry.all_scope_semantics, "fan_out_command")
@@ -635,38 +427,24 @@ class ReadModelManifestTests(unittest.TestCase):
 
         self.assertEqual(search.scope_type, "search")
         self.assertEqual(no_oa_bank_batch.scope_type, "no_oa_bank_batch")
-        self.assertEqual(bank_flow_rule_batch.scope_type, "bank_flow_rule_batch")
         self.assertEqual(search.projection_strategy, "partitioned_scoped_index")
         self.assertEqual(no_oa_bank_batch.projection_strategy, "scoped_incremental")
-        self.assertEqual(bank_flow_rule_batch.projection_strategy, "scoped_incremental")
         self.assertEqual(search.primary_worker_instance, "search")
         self.assertEqual(no_oa_bank_batch.primary_worker_instance, "no-oa-bank-batch")
-        self.assertEqual(bank_flow_rule_batch.primary_worker_instance, "bank-flow-rule-batch")
-        self.assertEqual(search.auxiliary_refresh_worker_instances, ("search-pending", "search-secondary", "search-tertiary"))
+        self.assertEqual(search.auxiliary_refresh_worker_instances, ("search-secondary", "search-tertiary"))
         self.assertEqual(no_oa_bank_batch.auxiliary_refresh_worker_instances, ())
-        self.assertEqual(bank_flow_rule_batch.auxiliary_refresh_worker_instances, ())
         self.assertEqual(search.query_owner, "Search read API")
         self.assertEqual(no_oa_bank_batch.query_owner, "NoOaBankBatchApplicationService")
-        self.assertEqual(bank_flow_rule_batch.query_owner, "BankFlowRuleBatchApplicationService")
         self.assertEqual(search.permission_owner, "search_api_session")
         self.assertEqual(no_oa_bank_batch.permission_owner, "no_oa_bank_batch_api_session")
-        self.assertEqual(bank_flow_rule_batch.permission_owner, "bank_flow_rule_batch_api_session")
-        self.assertEqual(search.test_owner, "tests/test_search_pending_sql_runtime.py")
+        self.assertEqual(search.test_owner, "tests/test_search_sql_runtime.py")
         self.assertEqual(no_oa_bank_batch.test_owner, "tests/test_no_oa_bank_batch_application_service.py")
-        self.assertEqual(bank_flow_rule_batch.test_owner, "tests/test_bank_flow_rule_batch_backend_boundary.py")
         self.assertEqual(search.repository_owner, "SearchReadModelRepositoryPort")
         self.assertEqual(no_oa_bank_batch.repository_owner, "NoOaBankBatchReadModelRepositoryPort")
-        self.assertEqual(bank_flow_rule_batch.repository_owner, "BankFlowRuleBatchReadModelRepositoryPort")
         self.assertEqual(required_search_ports, set(search.repository_port_contract))
         self.assertEqual(required_no_oa_ports, set(no_oa_bank_batch.repository_port_contract))
-        self.assertEqual(required_bank_flow_ports, set(bank_flow_rule_batch.repository_port_contract))
+        self.assertNotIn("bank_flow_rule_batch", READ_MODEL_MANIFEST)
         self.assertFalse(set(search.repository_port_contract).intersection(no_oa_bank_batch.repository_port_contract))
-        self.assertFalse(set(search.repository_port_contract).intersection(bank_flow_rule_batch.repository_port_contract))
-        self.assertFalse(
-            set(no_oa_bank_batch.repository_port_contract).intersection(
-                bank_flow_rule_batch.repository_port_contract
-            )
-        )
 
 
 if __name__ == "__main__":

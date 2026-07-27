@@ -388,7 +388,7 @@ class ReadModelQueryGatewayTests(unittest.TestCase):
         )
         self.assertEqual(redis.sets, [])
 
-    def test_cost_statistics_refresh_uses_registered_scope_policy_before_enqueue(self) -> None:
+    def test_retired_cost_statistics_refresh_has_no_registered_fan_out_policy(self) -> None:
         queue = QueueRecorder()
         gateway = ReadModelQueryGateway(queue_repository=queue)
 
@@ -405,8 +405,7 @@ class ReadModelQueryGatewayTests(unittest.TestCase):
         self.assertEqual(
             queue.refreshes,
             [
-                {"scope_type": "cost_statistics", "scope_key": "active:2026-05", "reason": "api_miss"},
-                {"scope_type": "cost_statistics", "scope_key": "all:2026-05", "reason": "api_miss"},
+                {"scope_type": "cost_statistics", "scope_key": "2026-05", "reason": "api_miss"},
             ],
         )
 

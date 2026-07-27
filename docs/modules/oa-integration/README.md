@@ -26,7 +26,7 @@
 - OA session / 权限：`backend/src/fin_ops_platform/app/auth.py`、`backend/src/fin_ops_platform/services/oa_identity_service.py`、`backend/src/fin_ops_platform/services/access_control_service.py`、`web/src/features/session/api.ts`
 - OA Mongo 只读 adapter：`backend/src/fin_ops_platform/services/mongo_oa_adapter.py`
 - OA 投影与同步：`backend/src/fin_ops_platform/services/oa_projection_sync.py`、`backend/src/fin_ops_platform/services/postgres_repositories/oa_projection.py`、`backend/src/fin_ops_platform/app/worker.py`
-- OA 待付款：`backend/src/fin_ops_platform/app/routes_oa_pending_payments.py`、`backend/src/fin_ops_platform/services/oa_pending_payment_projection_rows.py`、`backend/src/fin_ops_platform/services/oa_pending_payment_sql_projection.py`
+- OA 待付款：`backend/src/fin_ops_platform/app/routes_oa_pending_payments.py`、`backend/src/fin_ops_platform/services/oa_pending_payment_query_service.py`、`backend/src/fin_ops_platform/services/oa_pending_payment_canonical_rows.py`、`backend/src/fin_ops_platform/services/postgres_repositories/oa_pending_payment_query.py`
 - OA 手动搜索/导入：`backend/src/fin_ops_platform/services/oa_manual_import_service.py`、`backend/src/fin_ops_platform/app/server.py`
 - OA 附件发票识别：`backend/src/fin_ops_platform/services/oa_attachment_invoice_service.py`、`backend/src/fin_ops_platform/services/invoice_attachment_recognition_service.py`
 - 目标申请人凭据：`backend/src/fin_ops_platform/services/oa_applicant_credentials.py`、`backend/src/fin_ops_platform/services/target_oa_applicant_token_provider.py`
@@ -39,7 +39,7 @@
 - OA 主系统负责登录态、菜单 iframe、用户信息、权限和原始付款申请/报销/项目数据。
 - 本系统不修改 OA 原始业务库；对 OA Mongo 只读读取、映射、缓存和投影。
 - `Admin-Token` 只作为会话来源；后端必须二次校验 `finops:app:view` 和 app 内访问等级。
-- OA 同步通过 worker / durable queue 写入本系统投影，再触发 Workbench、Search、Invoice Lifecycle、OA 待付款、进项使用、税金、成本等下游 read model。
+- OA 同步通过 worker / durable queue 原子写入本系统 PostgreSQL canonical OA、admission、payment-status 与 watermark facts。它不 fan-out 页面 refresh；各 direct 页面下一次 GET 读取已提交 facts，保留的 Search/共享 relation/no-OA read model 由各自 owner 按明确合同维护。
 - OA 附件解析结果不直接等同于正式发票事实。附件发票识别只有三种结果：命中统一发票池则建立/补充关系，判定为正式发票且池内不存在时可受控创建并关联，非正式票据、残缺号码、多义匹配或未知证据直接忽略。受控创建由设置页 `OA附件发票晋级` 控制：默认 `link_existing_only` 只关联已有发票，`disabled` 完全跳过 promotion，只有 `create_missing` 才允许创建缺失的统一发票池记录。
 - 目标 OA 申请人凭据只允许 admin 维护，API / settings response 不得回显 password；创建草稿时用目标申请人账号登录 OA 并只使用返回 token。
 - ETC 与进项发票 OA 草稿只创建或本地撤销绑定，不自动删除或撤销真实 OA 草稿/流程。
@@ -51,7 +51,7 @@
 | --- | --- | --- |
 | `/api/session/me` / session bootstrap | 所有页面、所有 API 权限、page session scope | OA 超时、无权限、token 过期、只读/全操作/admin 分层错误 |
 | OA Mongo adapter | Workbench、OA 待付款、进项使用、ETC、税金、成本、搜索 | 外部字段变体、Mongo 断连、缓存 backoff、附件发票 identity、附件 promotion 模式误配置 |
-| OA sync worker / projection | Workbench、Search、待找发票、发票生命周期、OA 待付款 | worker 未入队、投影半写入、retention cutoff、旧 relation row id 迁移 |
+| OA sync worker / canonical snapshot | 关联台、待找发票、OA 待付款、进/销项等 direct 页面 | worker 未入队、canonical snapshot 半写入、retention cutoff、旧 relation row id 迁移 |
 | OA 手动搜索/导入 | 设置页、Workbench、Search、历史 OA 补录 | 未完成单据误导入、附件刷新失败、手动 marker 删除后 stale scope |
 | OA applicant credentials | 设置页、进项发票 OA 反提 | 非 admin 修改、password 泄漏、pgcrypto key/配置缺失 |
 | Target OA applicant login | 进项 OA 草稿、ETC 草稿 | HTTP/网络/无效 JSON/无 token 不能伪装成功，错误不能泄露密码 |

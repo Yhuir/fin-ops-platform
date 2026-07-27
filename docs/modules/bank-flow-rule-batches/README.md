@@ -26,7 +26,7 @@
 - Backend route: `backend/src/fin_ops_platform/app/routes_bank_flow_rule_batches.py`，只承载 `/api/bank-flow-rule-batches/*`。
 - Backend service: `backend/src/fin_ops_platform/services/bank_flow_rule_batch_application_service.py`，新提交写 `relation_mode=bank_flow_rule_batch`；共享批次计算内核在中性 `bank_batch_application_service.py` / `bank_batch_service.py`，由显式 relation mode/schema/ID prefix 直接生成正式 bank-flow 领域错误和身份，bank-flow 不继承 no-OA application service，route 不保留 legacy 错误翻译或 fallback。
 - Backend query: `backend/src/fin_ops_platform/services/postgres_repositories/bank_flow_rule_batch_canonical_query.py`；SQL 只读 PostgreSQL canonical facts 和 `app.workbench_pair_relations.status='active'`，不读 Workbench projection 或 no-OA fallback。
-- 共享旧 read-model producer/worker/manifest/deploy 注册仍待主控在所有迁移分支合并后 whole-repo scan 并统一删除；它们不是当前页面读路径。
+- 旧 read-model producer/worker/manifest/deploy 注册已在跨页面清理中删除；`canonical_draft.refresh` 是批次领域后台任务，不是页面 read model。
 - Rule persistence: `app_settings.bank_flow_rule_batch_tag_rules.requirements_by_tag_code`；新 API 和服务边界只读写 `rules`，拒绝 `selected_tag_codes`，重复 `tag_code` fail fast。`0111_bank_flow_rule_batch_tag_rules_canonical_shape.sql` 已将一次性复制的 legacy selected seed 合并并删除。
 - Browser E2E: `web/e2e/bank-flow-rule-batches-flow.spec.ts`。
 
@@ -52,7 +52,10 @@
 
 - 银行明细标签定义、自动匹配规则和分类确认归 `bank-details`。
 - Workbench relation canonical fact 归 `workbench-relations`。
-- 关联台 paired/unpaired 展示归 `reconciliation-workbench` active generation；bank-flow 折叠摘要必须输出 `source_kind=bank_flow_rule_batch_summary`、`invoice_relation.code=bank_flow_rule_batch` 和 `流水规则` display tag，不得复用 `no_oa_bank_batch_summary` 或 `免OA` 标签。
+- 关联台 paired/unpaired 展示归 `reconciliation-workbench` canonical query；
+  bank-flow 折叠摘要必须输出 `source_kind=bank_flow_rule_batch_summary`、
+  `invoice_relation.code=bank_flow_rule_batch` 和 `流水规则` display tag，不得复用
+  `no_oa_bank_batch_summary` 或 `免OA` 标签。
 - 旧 no-OA 批次历史事实仅作为 backend legacy API/read-model 兼容风险处理；本模块不再提供旧 no-OA 历史重算页面入口或 API。
 
 ## 维护触发器

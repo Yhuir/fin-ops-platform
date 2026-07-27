@@ -23,7 +23,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self._query_repository = self._bank_batch_read_model_repository
+        self._query_repository = self._bank_batch_query_repository
 
     def list_batches_payload(
         self,
@@ -358,7 +358,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             )
             relation_source_versions = relation_bundle.get("source_versions")
             source_versions = (
-                self.read_model_scope_source_versions(
+                self.canonical_draft_source_versions(
                     scope_key=months[0],
                     relation_mode=relation_mode,
                     relation_source_versions=(
@@ -366,6 +366,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                         if isinstance(relation_source_versions, dict)
                         else {}
                     ),
+                    category_source_rows=bank_rows,
                 )
                 if len(months) == 1
                 else self.bank_batch_source_versions(relation_mode=relation_mode)
@@ -660,23 +661,6 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         except Exception as exc:
             raise BankFlowRuleBatchPersistenceError(str(exc)) from exc
 
-    def _mutation_result(
-        self,
-        batch: dict[str, object],
-        *,
-        status: str,
-        persist: bool,
-    ) -> dict[str, object]:
-        result = super()._mutation_result(batch, status=status, persist=persist)
-        for key in (
-            "affected_scope_keys",
-            "read_model_scope_keys",
-            "freshness_targets",
-            "operation_barrier_targets",
-        ):
-            result.pop(key, None)
-        return result
-
     def resolve_labels(
         self,
         batches: list[dict[str, object]],
@@ -791,6 +775,15 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             },
         }
         self._commit_tag_rule_update(prepared=prepared)
+        if affected_scope_keys:
+            self.enqueue_background_refresh(
+                affected_scope_keys,
+                reason="bank_flow_rule_batch_tag_rule_change",
+                metadata={
+                    "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                    "changed_tag_codes": changed_tag_codes,
+                },
+            )
         return self._tag_rule_update_response(
             result,
             changed_tag_codes=changed_tag_codes,

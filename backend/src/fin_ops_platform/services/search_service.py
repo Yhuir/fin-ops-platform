@@ -30,11 +30,11 @@ class SearchService:
         self,
         *,
         known_months_loader: Callable[[], list[str]],
-        workbench_rows_loader: Callable[[str], list[dict[str, Any]]] | None = None,
+        canonical_rows_loader: Callable[[str], list[dict[str, Any]]] | None = None,
         cache_ttl_seconds: float = 30.0,
     ) -> None:
         self._known_months_loader = known_months_loader
-        self._workbench_rows_loader = workbench_rows_loader
+        self._canonical_rows_loader = canonical_rows_loader
         self._cache_ttl_seconds = max(float(cache_ttl_seconds), 0.0)
         self._now = monotonic
         self._known_months_cache: tuple[float, list[str]] | None = None
@@ -174,10 +174,10 @@ class SearchService:
             if now - cached_at < self._cache_ttl_seconds:
                 return index
 
-        if self._workbench_rows_loader is None:
-            raise RuntimeError("SearchService requires workbench_rows_loader.")
+        if self._canonical_rows_loader is None:
+            raise RuntimeError("SearchService requires canonical_rows_loader.")
         index = {"oa": [], "bank": [], "invoice": []}
-        for context in self._safe_load_rows(self._workbench_rows_loader, month):
+        for context in self._safe_load_rows(self._canonical_rows_loader, month):
             row = context.get("row")
             if not isinstance(row, dict):
                 continue

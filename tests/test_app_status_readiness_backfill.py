@@ -13,13 +13,13 @@ class FakeConnection:
 
     def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object] | None:
         normalized = " ".join(sql.lower().split())
-        if "from read_model.bank_detail_scopes" in normalized:
+        if "from read_model.search_index_rows" in normalized:
             return {
                 "scope_key": "2026-05",
                 "status": "fresh",
                 "row_count": 0,
-                "schema_version": "8",
-                "source_versions": {"bank_detail_schema_version": 8},
+                "schema_version": "",
+                "source_versions": {"search_source_version": 8},
                 "generated_at": "2026-06-04T10:00:00+00:00",
                 "last_error": None,
             }
@@ -44,7 +44,7 @@ class AppStatusReadinessBackfillTests(unittest.TestCase):
         stdout = io.StringIO()
 
         exit_code = app_status_readiness_backfill.main(
-            ["--dry-run", "--read-model-key", "bank_detail"],
+            ["--dry-run", "--read-model-key", "search"],
             connection=connection,
             stdout=stdout,
         )
@@ -52,7 +52,7 @@ class AppStatusReadinessBackfillTests(unittest.TestCase):
         payload = json.loads(stdout.getvalue())
         self.assertEqual(exit_code, 0)
         self.assertEqual(payload["mode"], "dry-run")
-        self.assertEqual(payload["results"][0]["read_model_key"], "bank_detail")
+        self.assertEqual(payload["results"][0]["read_model_key"], "search")
         self.assertEqual(payload["results"][0]["status"], "fresh")
         self.assertEqual(payload["results"][0]["row_count"], 0)
         self.assertEqual(connection.executed, [])
@@ -62,7 +62,7 @@ class AppStatusReadinessBackfillTests(unittest.TestCase):
         stdout = io.StringIO()
 
         exit_code = app_status_readiness_backfill.main(
-            ["--apply", "--read-model-key", "bank_detail"],
+            ["--apply", "--read-model-key", "search"],
             connection=connection,
             stdout=stdout,
         )
@@ -78,7 +78,7 @@ class AppStatusReadinessBackfillTests(unittest.TestCase):
         stdout = io.StringIO()
 
         exit_code = app_status_readiness_backfill.main(
-            ["--dry-run", "--read-model-key", "tax_offset"],
+            ["--dry-run", "--read-model-key", "no_oa_bank_batch"],
             connection=FakeConnection(),
             stdout=stdout,
         )

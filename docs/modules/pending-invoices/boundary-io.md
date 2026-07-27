@@ -8,7 +8,8 @@
 - 当前边界可信度：high
 - 页面读边界：页面专属 API → `PendingInvoiceCanonicalQueryService` → `PostgresPendingInvoiceCanonicalRepository` → PostgreSQL canonical facts。
 - 运行时语义：页面没有 read-model freshness gate、refresh enqueue、polling、202、stale/fallback 或 `read_model_status/source_versions`。
-- 共享资源：旧 `pending_invoice`、search、invoice-lifecycle、workbench-relation read model/worker 不属于本页面直接读链路，但仍可能有其它调用方，本模块不得提前删除。
+- 共享资源：`search` 与 `workbench_relation` 只服务各自登记消费者；旧
+  `pending_invoice`、search-pending、invoice-lifecycle 页面 worker 已删除。
 
 ## 职责边界
 
@@ -75,12 +76,8 @@
 - 禁止：route/server 堆业务 SQL；service 接收 `Application`；repository 依赖 HTTP/auth。
 - 禁止：页面直接访问共享 read model、worker、queue、cache 或外部同步源。
 
-## 共享 HANDOFF
+## 跨页面清理结果
 
-主控仅在所有调用方迁移、whole-repo scan 和回归完成后统一评估：
-
-- `PendingInvoiceReadModelService`、`PendingInvoiceSourceVersionsProvider` 及 `pending_invoice` manifest/query-owner 注册。
-- `pending_invoice_read_model_repository.py` 和 `read_model.pending_invoice_*` 表/投影。
-- `search-pending`、invoice-lifecycle pending projection、共享 relation worker 中仅为旧 pending page 服务的 producer/handler。
-
-这些符号当前仍被 Search、invoice-lifecycle、worker 或测试引用，本页面分支不删除。
+- `PendingInvoiceReadModelService`、source-version provider、repository/projection、manifest/query-owner 和 `search-pending`/invoice-lifecycle 页面链已删除。
+- Search 独立索引与 `workbench_relation` 共享 distribution 保留给明确登记的消费者，但本页面不消费它们。
+- `read_model.pending_invoice_*` 历史 migration/表暂留作回滚证据，没有运行时 reader/writer。

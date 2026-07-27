@@ -66,12 +66,12 @@ preview 只用于展示和生成 `preview_id`；正式 command 不信任 preview
 - Route：`backend/src/fin_ops_platform/app/routes_workbench.py`
 - Query service：`backend/src/fin_ops_platform/services/workbench_query_facade.py`
 - Query repository：`backend/src/fin_ops_platform/services/postgres_repositories/workbench_canonical_query.py`
-- 纯分组/规则：`workbench_relation_grouping.py`、`workbench_sql_projection.py` 中复用的纯 payload policy
+- 纯分组/规则：`workbench_relation_grouping.py`、`workbench_canonical_rows.py`
 - 写入：`workbench_write_facade.py`、`workbench_relation_command_service.py`、`workbench_uow.py`
 
-## 共享 generation 隔离
+## 旧 generation 退休状态
 
-旧 Workbench active-generation builder、worker、manifest 和表仍可能被 batch-accounting 等其它调用方消费，本模块不删除这些共享资源。它们不得重新接入关联台页面请求热路径；最终共享清理由跨页面主控在所有调用方迁移后统一完成。
+旧 Workbench active-generation builder、worker、manifest、runtime reader/writer 和运维工具已在跨页面清理中删除。历史 migration/表暂留作回滚证据，但没有运行时调用方。`workbench_relation` 是仍有独立消费者的共享 relation distribution，不是关联台页面 read model，也不得重新接入本页面请求热路径。
 
 ## 不变量
 
@@ -84,7 +84,7 @@ preview 只用于展示和生成 `preview_id`；正式 command 不信任 preview
 
 ## 维护文档
 
-- `boundary-io.md`：直接/上下游 I/O、事务、性能和共享 HANDOFF。
+- `boundary-io.md`：直接/上下游 I/O、事务、性能和旧链删除状态。
 - `state-machine.md`：页面、preview 和正式关系状态。
 - `tests.md`：七类测试、查询次数 guard 和验证命令。
 - `implementation-notes.md`：历史实施记录，不是当前运行时合同。

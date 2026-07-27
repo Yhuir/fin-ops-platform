@@ -28,7 +28,7 @@
 
 ## 页面直读例外
 
-关联台与成本统计是登记的 page-specific canonical direct-read 页面。关联台浏览器只调用 `/api/workbench*`；后端 query facade/repository 在单个 `REPEATABLE READ READ ONLY` PostgreSQL snapshot 内组合 canonical OA、银行、发票、ETC facts 与 active formal relations。关联台页面不消费 Workbench active generation、`workbench_relation` distribution、Redis、refresh status/SSE、queue 或 worker。共享 Workbench generation 仍可能服务 batch-accounting，不能据此重新接回关联台页面，也不能由页面任务提前删除。
+关联台、成本统计、银行明细、OA 待付款、流水规则批量处理、批量账务、ETC、税金抵扣、待找发票、进项使用、销项收款与外部往来款都是登记的 page-specific canonical direct-read 页面。页面 query facade/repository 在单个 `REPEATABLE READ READ ONLY` PostgreSQL snapshot 内组合 canonical facts 与 active formal relations，不消费页面 read model、Redis、refresh status/SSE、queue 或 worker。运行时只保留 `workbench_relation`、`search`、`no_oa_bank_batch` 三个共享 read model，且它们不能重新接回上述页面 GET。
 
 ## 使用规则
 

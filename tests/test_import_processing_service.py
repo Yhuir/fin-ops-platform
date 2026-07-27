@@ -6,17 +6,15 @@ from types import SimpleNamespace
 from fin_ops_platform.services.import_processing_service import ImportProcessingService
 
 
-def _assert_import_write_result_envelope_has_no_page_refresh_targets() -> None:
+def _assert_import_write_result_has_only_affected_scopes() -> None:
     result = ImportProcessingService._write_result_envelope(
         tax_offset_scope_keys=[],
-        bank_detail_scope_keys=["2026-07"],
+        bank_scope_keys=["2026-07"],
         input_invoice_usage_scope_keys=[],
         output_invoice_collection_scope_keys=[],
     )
 
     assert result["affected_scope_keys"] == ["2026-07"]
-    assert result["freshness_targets"] == []
-    assert result["operation_barrier_targets"] == []
 
 
 def _assert_file_import_confirm_job_returns_import_write_targets(*, fail_persist: bool = False) -> None:
@@ -56,9 +54,10 @@ def _assert_file_import_confirm_job_returns_import_write_targets(*, fail_persist
         persist_confirmed_import_delta=persist_confirmed_import_delta,
         workbench_matching_scope_months_for_import_file_session=lambda _session, _selected_file_ids: ["2026-06"],
         tax_offset_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
-        bank_detail_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: ["2026-06"],
+        bank_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: ["2026-06"],
         input_invoice_usage_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
         output_invoice_collection_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
+        enqueue_bank_flow_canonical_drafts=lambda *_args, **_kwargs: events.append("bankflow"),
         link_etc_import_result_to_existing_invoices=lambda _result: [],
         etc_import_preview_service=SimpleNamespace(),
     )
@@ -85,12 +84,10 @@ def _assert_file_import_confirm_job_returns_import_write_targets(*, fail_persist
         background_job_id="",
     )
 
-    assert events == ["persist", "matching"]
+    assert events == ["persist", "bankflow", "matching"]
     assert result["affected_months"] == ["2026-06"]
     assert persisted[0]["import_state_payload"] is import_state_payload
     assert result["affected_scope_keys"] == ["2026-06"]
-    assert result["freshness_targets"] == []
-    assert result["operation_barrier_targets"] == []
 
 
 def _assert_etc_invoice_import_confirm_job_returns_targets_after_changed_months_are_known() -> None:
@@ -122,7 +119,7 @@ def _assert_etc_invoice_import_confirm_job_returns_targets_after_changed_months_
         persist_confirmed_import_delta=lambda **kwargs: None,
         workbench_matching_scope_months_for_import_file_session=lambda _session, _selected_file_ids: [],
         tax_offset_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
-        bank_detail_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
+        bank_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
         input_invoice_usage_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
         output_invoice_collection_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
         link_etc_import_result_to_existing_invoices=lambda _result: ["2026-04"],
@@ -144,14 +141,12 @@ def _assert_etc_invoice_import_confirm_job_returns_targets_after_changed_months_
 
     assert imported_marks[0]["import_batch_id"] == "batch-etc-1"
     assert result["affected_months"] == ["2026-04"]
-    assert result["affected_scope_keys"] == result["read_model_scope_keys"]
-    assert result["freshness_targets"] == []
-    assert result["operation_barrier_targets"] == []
+    assert result["affected_scope_keys"] == ["2026-04"]
 
 
 class ImportProcessingServiceTests(unittest.TestCase):
-    def test_import_write_result_envelope_has_no_page_refresh_targets(self) -> None:
-        _assert_import_write_result_envelope_has_no_page_refresh_targets()
+    def test_import_write_result_has_only_affected_scopes(self) -> None:
+        _assert_import_write_result_has_only_affected_scopes()
 
     def test_file_import_confirm_persists_before_publishing_downstream_work(self) -> None:
         _assert_file_import_confirm_job_returns_import_write_targets()
