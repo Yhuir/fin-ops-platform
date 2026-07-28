@@ -116,7 +116,11 @@ export function buildWorkbenchPaneRows(groups: WorkbenchRelationGroup[]): Workbe
 export function buildWorkbenchGroupDisplaySegments(
   group: WorkbenchRelationGroup,
 ): WorkbenchGroupDisplaySegment[] | null {
-  if (group.displayMode === "collapsed_summary" || group.rows.oa.length < 2) {
+  if (group.displayMode === "collapsed_summary" || group.rows.oa.length === 0) {
+    return null;
+  }
+  const hasExpenseClaimItems = group.rows.oa.some(hasMultiProjectExpenseItems);
+  if (group.rows.oa.length < 2 && !hasExpenseClaimItems) {
     return null;
   }
 
@@ -153,11 +157,11 @@ export function buildWorkbenchGroupDisplaySegments(
 
   const hasSegmentedBankRows = Array.from(bankRowsBySourceOaId.values()).some((rows) => rows.length > 0);
   const hasSegmentedInvoiceRows = Array.from(invoicesBySourceOaId.values()).some((rows) => rows.length > 0);
-  if (!hasSegmentedBankRows && !hasSegmentedInvoiceRows) {
+  if (!hasSegmentedBankRows && !hasSegmentedInvoiceRows && !hasExpenseClaimItems) {
     return null;
   }
 
-  const segments = group.rows.oa.map((oaRow) => ({
+  const parentSegments = group.rows.oa.map((oaRow) => ({
     id: oaRow.id,
     rows: {
       oa: [oaRow],
@@ -169,7 +173,7 @@ export function buildWorkbenchGroupDisplaySegments(
   const groupLevelBankRows = hasSegmentedBankRows ? remainingUnlinkedBankRows : [];
   const groupLevelInvoiceRows = hasSegmentedInvoiceRows ? remainingUnlinkedInvoiceRows : [];
   if (groupLevelBankRows.length > 0 || groupLevelInvoiceRows.length > 0) {
-    segments.push({
+    parentSegments.push({
       id: "unlinked-source-rows",
       rows: {
         oa: [],
@@ -179,7 +183,74 @@ export function buildWorkbenchGroupDisplaySegments(
     });
   }
 
+  const segments = parentSegments.flatMap(expandExpenseClaimSegment);
   return segments.length > 1 ? segments : null;
+}
+
+function expandExpenseClaimSegment(segment: WorkbenchGroupDisplaySegment): WorkbenchGroupDisplaySegment[] {
+  const parent = segment.rows.oa[0];
+  const items = parent?.expenseItems ?? [];
+  if (!parent || !hasMultiProjectExpenseItems(parent)) {
+    return [segment];
+  }
+
+  const itemIds = new Set(items.map((item) => item.id));
+  const summaryInvoices = segment.rows.invoice.filter(
+    (row) => !row.sourceExpenseItemId || !itemIds.has(row.sourceExpenseItemId),
+  );
+  const summaryRow: WorkbenchRecord = {
+    ...parent,
+    displayRole: "expense-claim-summary",
+    tableValues: {
+      ...parent.tableValues,
+      projectName: `多个项目 · ${new Set(items.map((item) => item.projectName)).size}`,
+      amount: "—",
+    },
+  };
+  const itemSegments = items.map((item) => ({
+    id: item.id,
+    rows: {
+      oa: [{
+        ...parent,
+        displayRole: "expense-claim-item" as const,
+        tableValues: {
+          ...parent.tableValues,
+          applicant: "—",
+          applicationTime: "—",
+          applicationType: "—",
+          projectName: item.projectName,
+          amount: item.amount,
+          counterparty: "—",
+          reason: "—",
+          reconciliationStatus: "—",
+        },
+        availableActions: [],
+      }],
+      bank: [],
+      invoice: segment.rows.invoice.filter((row) => row.sourceExpenseItemId === item.id),
+    },
+  }));
+
+  return [
+    {
+      id: `${parent.id}:summary`,
+      rows: {
+        oa: [summaryRow],
+        bank: segment.rows.bank,
+        invoice: summaryInvoices,
+      },
+    },
+    ...itemSegments,
+  ];
+}
+
+function hasMultiProjectExpenseItems(row: WorkbenchRecord) {
+  const projectNames = new Set(
+    (row.expenseItems ?? [])
+      .map((item) => item.projectName.trim())
+      .filter((projectName) => projectName && projectName !== "--" && projectName !== "—"),
+  );
+  return projectNames.size > 1;
 }
 
 function assignRowsByAmountFallback(

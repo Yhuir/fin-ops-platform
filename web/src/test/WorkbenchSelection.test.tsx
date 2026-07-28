@@ -1070,17 +1070,17 @@ describe("Workbench row selection and detail drawer", () => {
     renderWorkbenchPage();
 
     const unpairedZone = await screen.findByTestId("zone-unpaired");
-    const oa2035Row = await within(unpairedZone).findByRole("row", {
-      name: /胡瑢.*248(?:\.00)?/,
-    });
+    const oa2035Summary = await within(unpairedZone).findByText("多个项目 · 2");
+    const oa2035Row = oa2035Summary.closest('[role="row"]');
+    expect(oa2035Row).not.toBeNull();
     const paymentReceiptRow = await within(unpairedZone).findByRole("row", {
       name: /微信支付.*胡瑢.*200(?:\.00)?/,
     });
 
-    await user.click(oa2035Row);
+    await user.click(oa2035Row!);
     await user.click(paymentReceiptRow);
 
-    expect(oa2035Row).toHaveAttribute("data-row-state", "selected");
+    expect(oa2035Row!).toHaveAttribute("data-row-state", "selected");
     expect(paymentReceiptRow).toHaveAttribute("data-row-state", "selected");
 
     const exceptionButton = within(unpairedZone)

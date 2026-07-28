@@ -513,6 +513,7 @@ class WorkbenchQueryService:
             "project_name": project_name,
             "project_name_display": project_name_display,
             "project_names": list(project_names),
+            "expense_items": self._workbench_expense_items(record),
             "expense_type": record.expense_type,
             "expense_content": record.expense_content,
             "apply_type": record.apply_type,
@@ -545,6 +546,26 @@ class WorkbenchQueryService:
             },
             "_detail_fields": detail_fields,
         }
+
+    @classmethod
+    def _workbench_expense_items(
+        cls,
+        record: OAApplicationRecord | object,
+    ) -> list[dict[str, str]]:
+        result: list[dict[str, str]] = []
+        for item in cls._expense_items(record):
+            item_id = str(item.get("expense_item_id") or "").strip()
+            if not item_id:
+                continue
+            result.append(
+                {
+                    "id": item_id,
+                    "row_index": str(item.get("row_index") or "").strip(),
+                    "project_name": str(item.get("project_name") or "—").strip() or "—",
+                    "amount": str(item.get("amount") or "").strip(),
+                }
+            )
+        return result
 
     @staticmethod
     def _normalize_workbench_section(section: object) -> str:

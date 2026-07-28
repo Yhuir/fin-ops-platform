@@ -5,7 +5,10 @@ import { useState } from "react";
 import RelationGroupGrid from "../components/workbench/RelationGroupGrid";
 import RelationGroupCell from "../components/workbench/RelationGroupCell";
 import WorkbenchRecordCard from "../components/workbench/WorkbenchRecordCard";
-import { createEmptyWorkbenchZoneDisplayState } from "../features/workbench/groupDisplayModel";
+import {
+  buildWorkbenchGroupDisplaySegments,
+  createEmptyWorkbenchZoneDisplayState,
+} from "../features/workbench/groupDisplayModel";
 import { getWorkbenchColumns, getWorkbenchPaneGridStyle } from "../features/workbench/tableConfig";
 import type { WorkbenchRelationGroup, WorkbenchRecord } from "../features/workbench/types";
 import { installMockApiFetch } from "./apiMock";
@@ -126,13 +129,20 @@ describe("Workbench candidate grouping layout", () => {
     };
   }
 
-  function createAttachmentInvoiceRecord(id: string, sellerName: string, amount: string, sourceOaId: string): WorkbenchRecord {
+  function createAttachmentInvoiceRecord(
+    id: string,
+    sellerName: string,
+    amount: string,
+    sourceOaId: string,
+    sourceExpenseItemId?: string,
+  ): WorkbenchRecord {
     return {
       id,
       caseId: "CASE-MULTI-OA-ATTACHMENT",
       recordType: "invoice",
       sourceKind: "oa_attachment_invoice",
       sourceOaId,
+      sourceExpenseItemId,
       label: "进项发票",
       status: "OA附件",
       statusCode: "oa_attachment_invoice",
@@ -1006,6 +1016,99 @@ describe("Workbench candidate grouping layout", () => {
     expect(within(secondOaSegment).queryByText("56.22")).not.toBeInTheDocument();
   });
 
+  test("renders a multi-item reimbursement as one selectable OA with item-aligned attachment invoices", () => {
+    const selectRow = vi.fn();
+    const parentOa: WorkbenchRecord = {
+      ...createOaRecord("oa-exp-413", "吴云江", "413.00"),
+      tableValues: {
+        ...createOaRecord("oa-exp-413", "吴云江", "413.00").tableValues,
+        applicationType: "日常报销",
+      },
+      expenseItems: [
+        { id: "oa-exp-413:item:0", rowIndex: "0", projectName: "曲靖项目", amount: "33.00" },
+        { id: "oa-exp-413:item:1", rowIndex: "1", projectName: "曲靖项目", amount: "33.00" },
+        { id: "oa-exp-413:item:2", rowIndex: "2", projectName: "曲靖项目", amount: "60.00" },
+        { id: "oa-exp-413:item:3", rowIndex: "3", projectName: "大理项目", amount: "145.00" },
+        { id: "oa-exp-413:item:4", rowIndex: "4", projectName: "大理项目", amount: "142.00" },
+      ],
+    };
+    const group: WorkbenchRelationGroup = {
+      id: "row:oa-exp-413",
+      groupType: "unpaired",
+      matchConfidence: "high",
+      reason: "canonical_unpaired",
+      rows: {
+        oa: [parentOa],
+        bank: [],
+        invoice: [
+          createAttachmentInvoiceRecord(
+            "iv-60",
+            "曲靖市麒麟区捌陆捌商务酒店",
+            "60.00",
+            parentOa.id,
+            "oa-exp-413:item:2",
+          ),
+        ],
+      },
+    };
+
+    render(
+      <RelationGroupGrid
+        canMutateData
+        displayState={createEmptyWorkbenchZoneDisplayState()}
+        getRowState={() => "idle"}
+        groups={[group]}
+        onOpenDetail={() => undefined}
+        onRowAction={() => undefined}
+        onSelectRow={selectRow}
+        panes={[
+          { id: "oa", title: "OA", rows: group.rows.oa },
+          { id: "bank", title: "银行流水", rows: group.rows.bank },
+          { id: "invoice", title: "进销项发票", rows: group.rows.invoice },
+        ]}
+        rowTemplateColumns="1fr 8px 1fr 8px 1fr"
+        zoneId="unpaired"
+      />,
+    );
+
+    const summary = screen.getByTestId(
+      "candidate-group-segment-unpaired-row:oa-exp-413-oa-exp-413:summary",
+    );
+    expect(within(summary).getByText("多个项目 · 2")).toBeInTheDocument();
+    expect(within(summary).getByText("¥413.00")).toHaveClass("oa-expense-summary-total");
+    expect(within(summary).getByText("日常报销")).toBeInTheDocument();
+
+    const invoiceItem = screen.getByTestId(
+      "candidate-group-segment-unpaired-row:oa-exp-413-oa-exp-413:item:2",
+    );
+    expect(within(invoiceItem).getByText("曲靖项目")).toBeInTheDocument();
+    expect(within(invoiceItem).getAllByText("60.00").length).toBeGreaterThanOrEqual(2);
+    expect(within(invoiceItem).getByText("曲靖市麒麟区捌陆捌商务酒店")).toBeInTheDocument();
+
+    fireEvent.click(within(invoiceItem).getByText("曲靖项目"));
+    expect(selectRow).toHaveBeenCalledTimes(1);
+    expect(selectRow.mock.calls[0][0].id).toBe(parentOa.id);
+  });
+
+  test("keeps a same-project reimbursement on the ordinary single-row path", () => {
+    const parentOa = {
+      ...createOaRecord("oa-exp-same-project", "吴云江", "66.00"),
+      expenseItems: [
+        { id: "oa-exp-same-project:item:0", rowIndex: "0", projectName: "曲靖项目", amount: "33.00" },
+        { id: "oa-exp-same-project:item:1", rowIndex: "1", projectName: "曲靖项目", amount: "33.00" },
+      ],
+    };
+    const group: WorkbenchRelationGroup = {
+      id: "row:oa-exp-same-project",
+      groupType: "unpaired",
+      matchConfidence: "high",
+      reason: "canonical_unpaired",
+      rows: { oa: [parentOa], bank: [], invoice: [] },
+    };
+
+    expect(buildWorkbenchGroupDisplaySegments(group)).toBeNull();
+  });
+
   test("aligns attachment invoice item ids with their parent OA row inside a multi-OA group", () => {
     const parentOa = createOaRecord("oa-exp-1968", "吴云江", "405");
     const siblingOa = createOaRecord("oa-exp-2001", "吴云江", "282");
@@ -1633,7 +1736,7 @@ describe("Workbench candidate grouping layout", () => {
     expect(screen.getByText("12:15:00")).toHaveClass("search-hit");
   });
 
-  test("renders OA 2035 and every unpaired attachment invoice as separate visible rows", async () => {
+  test("renders OA 2035 as a composite row and keeps every unpaired attachment invoice visible", async () => {
     installMockApiFetch();
     renderWorkbenchPage();
 
@@ -1642,14 +1745,16 @@ describe("Workbench candidate grouping layout", () => {
     const machine23Group = await screen.findByTestId("candidate-group-unpaired-row:iv-oa-2035-machine-23");
     const fuelGroup = await screen.findByTestId("candidate-group-unpaired-row:iv-oa-2035-fuel-200");
 
-    expect(within(oaGroup).getByRole("row", { name: /胡瑢.*248/ })).toBeInTheDocument();
+    expect(within(oaGroup).getByText("多个项目 · 2")).toBeInTheDocument();
+    expect(within(oaGroup).getByText("¥248.00")).toBeInTheDocument();
+    expect(within(oaGroup).getByText("曲靖维护项目")).toBeInTheDocument();
+    expect(within(oaGroup).getByText("云南溯源科技")).toBeInTheDocument();
     expect(within(machine25Group).getByRole("row", { name: /OA2035-MACHINE-25.*25/ })).toBeInTheDocument();
     expect(within(machine23Group).getByRole("row", { name: /OA2035-MACHINE-23.*23/ })).toBeInTheDocument();
     expect(within(fuelGroup).getByRole("row", { name: /OA2035-FUEL-200.*200/ })).toBeInTheDocument();
     expect(screen.queryByRole("row", { name: /微信支付/ })).not.toBeInTheDocument();
 
     expect(screen.queryByRole("row", { name: /胡瑢付款项/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("row", { name: /付款项\s*[123].*248/ })).not.toBeInTheDocument();
   });
 
   test("renders OA 292 and its unpaired attachment invoice as separate visible rows", async () => {

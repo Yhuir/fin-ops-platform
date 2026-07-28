@@ -7,13 +7,15 @@ import {
   workbenchInvoiceFlowLabel,
   workbenchInvoiceSourceLabel,
 } from "../../features/workbench/groupDisplayModel";
+import {
+  formatWorkbenchAmountCents,
+  parseWorkbenchAmountCents,
+} from "../../features/workbench/selectionModel";
 import type { WorkbenchRecord, WorkbenchRecordType, WorkbenchSourceKind } from "../../features/workbench/types";
 import type { WorkbenchColumn } from "../../features/workbench/tableConfig";
 import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
 import { splitBankAccountLabel } from "../BankAccountValue";
 import RowActions, { type WorkbenchInlineAction } from "./RowActions";
-
-const HIDDEN_OA_PROJECT_TAGS = new Set(["多明细"]);
 
 type WorkbenchRecordCardProps = {
   zoneId: "paired" | "unpaired";
@@ -73,7 +75,7 @@ function WorkbenchRecordCard({
   return (
     <div
       aria-label={buildRowAriaLabel(row, paneId, columns)}
-      className={`record-card record-card-sheet-row record-card-sheet-row-${sheetRowMode}${sheetStateClass}${sheetHighlightClass} workbench-row row-state-${rowState} record-card-${paneId} ${hasActionColumn ? "record-card-has-action" : "record-card-no-action"}${highlighted ? " search-target-highlighted" : ""}`}
+      className={`record-card record-card-sheet-row record-card-sheet-row-${sheetRowMode}${sheetStateClass}${sheetHighlightClass} workbench-row row-state-${rowState} record-card-${paneId} ${hasActionColumn ? "record-card-has-action" : "record-card-no-action"}${highlighted ? " search-target-highlighted" : ""}${row.displayRole ? ` record-card-${row.displayRole}` : ""}`}
       data-row-id={row.id}
       data-row-state={rowState}
       data-search-highlighted={highlighted ? "true" : "false"}
@@ -210,21 +212,32 @@ function renderCellValue(
   }
 
   if (paneId === "oa" && column.key === "applicant") {
-    return renderOaApplicantValue(value, row.tableValues.applicationTime ?? "", showInlineDetail, onOpenDetail, searchQuery);
-  }
-
-  if (paneId === "oa" && column.key === "projectName") {
-    return renderOaProjectValue(
+    if (row.displayRole === "expense-claim-item") {
+      return null;
+    }
+    return renderOaApplicantValue(
       value,
+      row.tableValues.applicationTime ?? "",
       row.tableValues.applicationType ?? "",
-      row.tableValues.reconciliationStatus ?? "",
-      row.tags ?? [],
+      showInlineDetail,
+      onOpenDetail,
       searchQuery,
     );
   }
 
+  if (paneId === "oa" && column.key === "projectName") {
+    return renderOaProjectValue(value, row, searchQuery);
+  }
+
   if (paneId === "oa" && column.kind === "money") {
+    if (row.displayRole === "expense-claim-summary") {
+      return null;
+    }
     return renderOaMoneyValue(value, searchQuery);
+  }
+
+  if (paneId === "oa" && row.displayRole === "expense-claim-item") {
+    return null;
   }
 
   if (paneId === "bank" && column.kind === "money") {
@@ -290,11 +303,13 @@ function renderCellValue(
 function renderOaApplicantValue(
   value: string,
   applicationTime: string,
+  applicationType: string,
   showInlineDetail: boolean,
   onOpenDetail: () => void,
   searchQuery: string,
 ) {
   const hasApplicationTime = applicationTime !== "--" && applicationTime !== "—" && applicationTime !== "";
+  const hasApplicationType = applicationType !== "--" && applicationType !== "—" && applicationType !== "";
 
   return (
     <span className="compound-cell-value">
@@ -315,9 +330,10 @@ function renderOaApplicantValue(
           </button>
         ) : null}
       </span>
-      {hasApplicationTime ? (
+      {hasApplicationTime || hasApplicationType ? (
         <span className="compound-cell-secondary">
-          {renderInlineDateTimeTag(applicationTime, searchQuery)}
+          {hasApplicationType ? <span className="inline-meta-tag">{highlightSearchText(applicationType, searchQuery)}</span> : null}
+          {hasApplicationTime ? renderInlineDateTimeTag(applicationTime, searchQuery) : null}
         </span>
       ) : null}
     </span>
@@ -604,61 +620,27 @@ function resolveDirectionForMoneyCell(columnKey: string, direction: string, hasV
 
 function renderOaProjectValue(
   projectName: string,
-  applicationType: string,
-  reconciliationStatus: string,
-  tags: string[] = [],
+  row: WorkbenchRecord,
   searchQuery = "",
 ) {
-  const hasApplicationType = applicationType !== "--" && applicationType !== "—" && applicationType !== "";
-  const hasReconciliationStatus =
-    reconciliationStatus !== "--" && reconciliationStatus !== "—" && reconciliationStatus !== "";
-  const visibleTags = normalizeOaProjectTags(tags);
+  if (row.displayRole === "expense-claim-summary") {
+    return (
+      <span className="oa-expense-summary">
+        <span className="oa-expense-summary-chip">{highlightSearchText(projectName, searchQuery)}</span>
+        <span className="oa-expense-summary-total">
+          {`¥${formatWorkbenchAmountCents(parseWorkbenchAmountCents(row.amount))}`}
+        </span>
+      </span>
+    );
+  }
 
   return (
     <span className="compound-cell-value">
-      <span className="compound-cell-primary cell-text-value cell-text-value-full">{highlightSearchText(projectName, searchQuery)}</span>
-      {hasApplicationType || hasReconciliationStatus || visibleTags.length > 0 ? (
-        <span className="compound-cell-secondary compound-cell-secondary-nowrap">
-          {hasApplicationType ? <span className="inline-meta-tag">{highlightSearchText(applicationType, searchQuery)}</span> : null}
-          {hasReconciliationStatus ? <span className="status-tag">{highlightSearchText(reconciliationStatus, searchQuery)}</span> : null}
-          {visibleTags.map((tag) => (
-            <span key={tag} className="inline-meta-tag">
-              {highlightSearchText(tag, searchQuery)}
-            </span>
-          ))}
-        </span>
-      ) : null}
+      <span className="compound-cell-primary cell-text-value cell-text-value-full">
+        {highlightSearchText(projectName, searchQuery)}
+      </span>
     </span>
   );
-}
-
-function normalizeOaProjectTags(tags: string[]) {
-  const visibleTags: string[] = [];
-  const seenTags = new Set<string>();
-  let hasEtcTag = false;
-
-  tags.forEach((tag) => {
-    const normalizedTag = tag.trim();
-    const compactTag = normalizedTag.replace(/\s+/g, "");
-    if (!normalizedTag || HIDDEN_OA_PROJECT_TAGS.has(compactTag)) {
-      return;
-    }
-    if (compactTag.toUpperCase().startsWith("ETC")) {
-      if (!hasEtcTag) {
-        visibleTags.push("ETC");
-        seenTags.add("ETC");
-        hasEtcTag = true;
-      }
-      return;
-    }
-    if (seenTags.has(normalizedTag)) {
-      return;
-    }
-    visibleTags.push(normalizedTag);
-    seenTags.add(normalizedTag);
-  });
-
-  return visibleTags;
 }
 
 function highlightSearchText(value: string, query: string) {

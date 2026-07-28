@@ -13610,6 +13610,38 @@ body.column-layout-dragging {
   border-top: 1px solid var(--candidate-group-divider);
 }
 
+.record-card-expense-claim-item .record-card-cell {
+  min-height: 56px;
+}
+
+.oa-expense-summary {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.oa-expense-summary-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 8px;
+  border: 1px solid #e4b266;
+  border-radius: 999px;
+  color: #9a5800;
+  background: #fff5df;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.oa-expense-summary-total {
+  color: #344054;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
 .candidate-group-collapse-control {
   max-width: 100%;
   min-height: 24px;

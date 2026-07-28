@@ -6,6 +6,28 @@ import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions"
 import { confirmWorkbenchRelation } from "./fixtures/workbenchFlow";
 
 test.describe("workbench relation browser flow", () => {
+  test("shows a daily reimbursement as one selectable composite row with item-aligned invoices", async ({ page }) => {
+    await installDeterministicApiMocks(page, {
+      sessionMode: "full_access",
+      workbenchOaExpenseItemsScenario: true,
+    });
+
+    await page.goto("/");
+
+    await expect(page.getByText("多个项目 · 2")).toBeVisible();
+    await expect(page.getByText("¥248.00")).toBeVisible();
+    const itemBand = page.getByTestId(
+      "candidate-group-segment-unpaired-row:oa-exp-2035-oa-exp-2035:item:1",
+    );
+    const projectItem = itemBand.getByText("云南溯源科技", { exact: true });
+    const attachmentInvoice = itemBand.getByText("中国石油云南销售公司", { exact: true });
+    await expect(projectItem).toBeVisible();
+    await expect(attachmentInvoice).toBeVisible();
+
+    await projectItem.click();
+    await expect(page.getByText("OA 1 / 248.00")).toBeVisible();
+  });
+
   test("confirms a relation in workbench and reflects it in bank details", async ({ page }, testInfo) => {
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",

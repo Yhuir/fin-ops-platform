@@ -251,7 +251,7 @@ describe("Workbench columns and inline actions", () => {
     expect(screen.getByText("14:04:00").closest(".inline-meta-tag")).toBe(dateChip);
   });
 
-  test("renders OA project metadata row with both application type and OA-bank relation status", async () => {
+  test("moves the OA type to the applicant cell and keeps the project cell free of workflow chips", async () => {
     installMockApiFetch();
     renderWorkbenchPage();
     await screen.findByText("赵华");
@@ -266,18 +266,17 @@ describe("Workbench columns and inline actions", () => {
     const projectName = within(oaRow as HTMLElement).getByText("华东改造项目");
     const applicant = within(oaRow as HTMLElement).getByText("赵华");
     const applicationType = within(oaRow as HTMLElement).getByText("供应商付款申请");
-    const relationStatus = within(oaRow as HTMLElement).getByText("完全关联");
     const metadataRow = applicationType.closest(".compound-cell-secondary");
 
     expect(projectName).toHaveClass("cell-text-value-full");
     expect(applicant).toHaveClass("cell-text-value-full");
     expect(projectName).not.toHaveClass("cell-text-value-project");
     expect(applicationType).toHaveClass("inline-meta-tag");
-    expect(relationStatus.closest(".compound-cell-secondary")).not.toBeNull();
-    expect(metadataRow).toBe(relationStatus.closest(".compound-cell-secondary"));
+    expect(metadataRow?.closest(".record-card-cell")).toContainElement(applicant);
+    expect(within(oaRow as HTMLElement).queryByText("完全关联")).not.toBeInTheDocument();
   });
 
-  test("collapses ETC OA project tags to one ETC chip and hides multi-detail noise", () => {
+  test("does not render process or evidence tags in the OA project cell", () => {
     render(
       <WorkbenchRecordCard
         actionMode="default"
@@ -313,16 +312,15 @@ describe("Workbench columns and inline actions", () => {
       />,
     );
 
-    const etcTags = screen.getAllByText("ETC");
-    expect(etcTags).toHaveLength(1);
-    expect(etcTags[0]).toHaveClass("inline-meta-tag");
+    expect(screen.getByText("云南溯源科技")).toHaveClass("cell-text-value-full");
+    expect(screen.queryByText("ETC")).not.toBeInTheDocument();
     expect(screen.queryByText("ETC 发票已关联")).not.toBeInTheDocument();
     expect(screen.queryByText("ETC 批次")).not.toBeInTheDocument();
     expect(screen.queryByText("ETC 批次批量提交")).not.toBeInTheDocument();
     expect(screen.queryByText("多明细")).not.toBeInTheDocument();
   });
 
-  test("renders OA invoice offset tag next to application type and pending status", () => {
+  test("keeps OA evidence and relation tags out of the project cell", () => {
     render(
       <WorkbenchRecordCard
         actionMode="default"
@@ -363,13 +361,11 @@ describe("Workbench columns and inline actions", () => {
       />,
     );
 
-    const offsetTag = screen.getByText("冲");
     const applicationType = screen.getByText("日常报销");
-    const pendingStatus = screen.getByText("待找流水与发票");
 
-    expect(offsetTag).toHaveClass("inline-meta-tag");
-    expect(offsetTag.closest(".compound-cell-secondary")).toBe(applicationType.closest(".compound-cell-secondary"));
-    expect(offsetTag.closest(".compound-cell-secondary")).toBe(pendingStatus.closest(".compound-cell-secondary"));
+    expect(applicationType).toHaveClass("inline-meta-tag");
+    expect(screen.queryByText("冲")).not.toBeInTheDocument();
+    expect(screen.queryByText("待找流水与发票")).not.toBeInTheDocument();
   });
 
   test("renders inline detail actions while keeping default row actions in the action column", async () => {

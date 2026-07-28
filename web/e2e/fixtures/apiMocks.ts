@@ -148,6 +148,7 @@ type ApiMockOptions = {
   workbenchWithdrawPreviewError?: boolean;
   workbenchBankFlowRuleBatchScenario?: boolean;
   workbenchLargeDataset?: boolean;
+  workbenchOaExpenseItemsScenario?: boolean;
   workbenchPageEmpty?: boolean;
   workbenchPageStatus?: WorkbenchPageMockStatus;
   workbenchRefreshStatus?: WorkbenchRefreshMockStatus;
@@ -780,6 +781,58 @@ function buildUnpairedWorkbenchGroups(rows = workbenchRows()) {
     buildUnpairedWorkbenchGroup("bank", rows.bank),
     buildUnpairedWorkbenchGroup("invoice", rows.invoice),
   ];
+}
+
+function buildOaExpenseItemsWorkbenchGroup() {
+  const rows = workbenchRows();
+  return {
+    group_id: "row:oa-exp-2035",
+    group_type: "unpaired",
+    reason: "browser_e2e_oa_expense_items",
+    oa_rows: [{
+      ...rows.oa,
+      id: "oa-exp-2035",
+      case_id: "CASE-202603-OA-ATTACHMENT-2035",
+      applicant: "胡瑢",
+      project_name: "曲靖维护项目；云南溯源科技",
+      project_name_display: "多个项目",
+      project_names: ["曲靖维护项目", "云南溯源科技"],
+      expense_items: [
+        {
+          id: "oa-exp-2035:item:0",
+          row_index: "0",
+          project_name: "曲靖维护项目",
+          amount: "48.00",
+        },
+        {
+          id: "oa-exp-2035:item:1",
+          row_index: "1",
+          project_name: "云南溯源科技",
+          amount: "200.00",
+        },
+      ],
+      apply_type: "日常报销",
+      amount: "248.00",
+      counterparty_name: "胡瑢",
+      reason: "OA 2035 附件凭证来源归属待核销",
+    }],
+    bank_rows: [],
+    invoice_rows: [{
+      ...rows.invoice,
+      id: "iv-oa-2035-fuel-200",
+      case_id: "CASE-202603-OA-ATTACHMENT-2035",
+      seller_name: "中国石油云南销售公司",
+      amount: "200.00",
+      total_with_tax: "200.00",
+      source_expense_item_id: "oa-exp-2035:item:1",
+      detail_fields: {
+        ...rows.invoice.detail_fields,
+        derived_from_oa_id: "oa-exp-2035",
+        source_expense_item_id: "oa-exp-2035:item:1",
+      },
+    }],
+    can_withdraw: false,
+  };
 }
 
 function buildPreviewSelectionGroups() {
@@ -9154,6 +9207,31 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           return "";
         }
       };
+      if (options.workbenchOaExpenseItemsScenario) {
+        const payload = workbenchInitialPayload(
+          relationConfirmed,
+          workbenchExceptionApplied,
+          workbenchRowIgnored,
+          workbenchPageStatus,
+        );
+        const groups = relationConfirmed ? [] : [buildOaExpenseItemsWorkbenchGroup()];
+        return json(route, {
+          ...payload,
+          summary: {
+            ...payload.summary,
+            oa_count: groups.length,
+            bank_count: 0,
+            invoice_count: groups.length,
+            unpaired_count: groups.length,
+          },
+          unpaired: {
+            ...payload.unpaired,
+            total: groups.length,
+            row_counts: countWorkbenchRows(groups),
+            groups,
+          },
+        });
+      }
       if (options.workbenchBankFlowRuleBatchScenario) {
         const readModelVersion = relationConfirmed
           ? "workbench-generation-e2e-002"
@@ -9392,6 +9470,23 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           Number.isFinite(requestedPageSize) ? requestedPageSize : 50,
           url.searchParams.get("search") ?? "",
         ));
+      }
+      if (options.workbenchOaExpenseItemsScenario) {
+        const zone = url.searchParams.get("zone") === "paired" ? "paired" : "unpaired";
+        const groups = zone === "unpaired" ? [buildOaExpenseItemsWorkbenchGroup()] : [];
+        return json(route, {
+          ...workbenchGroupsPayload(
+            zone,
+            relationConfirmed,
+            workbenchExceptionApplied,
+            workbenchRowIgnored,
+            workbenchPageStatus,
+          ),
+          total: groups.length,
+          row_counts: countWorkbenchRows(groups),
+          has_more: false,
+          groups,
+        });
       }
       return json(route, workbenchGroupsPayload(
         zone,

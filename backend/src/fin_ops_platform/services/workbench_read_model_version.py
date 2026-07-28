@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 
-WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION = "2026-07-25-canonical-etc-proof-v7"
+WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION = "2026-07-28-oa-expense-items-v8"
 WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION = (
-    "workbench_sql_projection.composed_active_month_shards.canonical_etc_proof.v7"
+    "workbench_sql_projection.composed_active_month_shards.oa_expense_items.v8"
 )
 WORKBENCH_RELATION_PREVIEW_MAX_SELECTED_ROWS = 20
 WORKBENCH_RELATION_PREVIEW_MAX_CONTEXT_ROWS = 100

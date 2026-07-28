@@ -101,6 +101,12 @@ type ApiWorkbenchRow = {
   project_name?: string | null;
   project_name_display?: string | null;
   project_names?: string[] | null;
+  expense_items?: Array<{
+    id?: string | null;
+    row_index?: string | number | null;
+    project_name?: string | null;
+    amount?: string | number | null;
+  }> | null;
   apply_type?: string | null;
   amount?: string | null;
   counterparty_name?: string | null;
@@ -147,6 +153,7 @@ type ApiWorkbenchRow = {
   relation_amount_check?: ApiWorkbenchRelationAmountCheck | null;
   cost_excluded?: boolean | null;
   special_metadata?: Record<string, unknown> | null;
+  source_expense_item_id?: string | null;
 };
 
 type ApiWorkbenchPayload = {
@@ -1310,6 +1317,12 @@ function mapRow(row: ApiWorkbenchRow): WorkbenchRecord {
     recordType: row.type,
     sourceKind: row.source_kind ?? undefined,
     sourceOaId: resolveWorkbenchRowSourceOaId(row),
+    sourceExpenseItemId: firstNonPlaceholderDisplayValue(
+      row.source_expense_item_id,
+      row.detail_fields?.source_expense_item_id,
+      row.detail_fields?.["来源付款项ID"],
+    ),
+    expenseItems: mapExpenseItems(row.expense_items),
     label: rowLabel(row),
     status: rowRelation(row)?.label ?? "待处理",
     statusCode: rowRelation(row)?.code ?? "pending",
@@ -1334,6 +1347,25 @@ function mapRow(row: ApiWorkbenchRow): WorkbenchRecord {
     relationAmountCheck: mapRelationAmountCheck(row.relation_amount_check),
     specialMetadata: row.special_metadata && typeof row.special_metadata === "object" ? row.special_metadata : undefined,
   };
+}
+
+function mapExpenseItems(items: ApiWorkbenchRow["expense_items"]) {
+  if (!Array.isArray(items)) {
+    return undefined;
+  }
+  const mapped = items.flatMap((item) => {
+    const id = String(item?.id ?? "").trim();
+    if (!id) {
+      return [];
+    }
+    return [{
+      id,
+      rowIndex: String(item.row_index ?? "").trim(),
+      projectName: toDisplayValue(item.project_name),
+      amount: toWorkbenchAmountDisplayValue(item.amount),
+    }];
+  });
+  return mapped.length > 0 ? mapped : undefined;
 }
 
 function resolveWorkbenchRowSourceOaId(row: ApiWorkbenchRow) {

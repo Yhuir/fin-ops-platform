@@ -629,6 +629,20 @@ describe("workbench api bank amount mapping", () => {
                   type: "oa",
                   applicant: "张三",
                   amount: "100.00",
+                  expense_items: [
+                    {
+                      id: "oa-paired:item:0",
+                      row_index: "0",
+                      project_name: "曲靖项目",
+                      amount: "40.00",
+                    },
+                    {
+                      id: "oa-paired:item:1",
+                      row_index: 1,
+                      project_name: "大理项目",
+                      amount: 60,
+                    },
+                  ],
                   available_actions: ["detail"],
                 },
               ],
@@ -647,6 +661,7 @@ describe("workbench api bank amount mapping", () => {
                   type: "invoice",
                   seller_name: "供应商A",
                   total_with_tax: "99.00",
+                  source_expense_item_id: "oa-paired:item:1",
                   invoice_bank_relation: { code: "fully_linked", label: "完全关联", tone: "success" },
                   available_actions: ["detail"],
                 },
@@ -669,6 +684,11 @@ describe("workbench api bank amount mapping", () => {
       missingRecordTypes: ["oa", "invoice"],
     });
     expect(group.rows.oa.map((row) => row.id)).toEqual(["oa-paired"]);
+    expect(group.rows.oa[0].expenseItems).toEqual([
+      { id: "oa-paired:item:0", rowIndex: "0", projectName: "曲靖项目", amount: "40" },
+      { id: "oa-paired:item:1", rowIndex: "1", projectName: "大理项目", amount: "60" },
+    ]);
+    expect(group.rows.invoice[0].sourceExpenseItemId).toBe("oa-paired:item:1");
   });
 
   test("serializes workbench group page SQL query controls", async () => {

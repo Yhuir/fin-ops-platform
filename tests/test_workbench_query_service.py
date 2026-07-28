@@ -94,6 +94,7 @@ class AggregatedAttachmentRecord:
         self.expense_items = [
             {
                 "row_index": "0",
+                "expense_item_id": "oa-exp-exp-agg-001:item:0:equipment",
                 "project_name": "玉烟维护项目",
                 "amount": "1000.00",
                 "expense_type": "材料费",
@@ -102,6 +103,7 @@ class AggregatedAttachmentRecord:
             },
             {
                 "row_index": "1",
+                "expense_item_id": "oa-exp-exp-agg-001:item:1:postage",
                 "project_name": "云南溯源科技",
                 "amount": "500.00",
                 "expense_type": "运费/邮费/杂费",
@@ -647,6 +649,23 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
         self.assertEqual(oa_row["amount"], "1549.00")
         self.assertEqual(oa_row["reconciliation_amount"], "1500.00")
         self.assertEqual(oa_row["amount_source"], "header")
+        self.assertEqual(
+            oa_row["expense_items"],
+            [
+                {
+                    "id": "oa-exp-exp-agg-001:item:0:equipment",
+                    "row_index": "0",
+                    "project_name": "玉烟维护项目",
+                    "amount": "1000.00",
+                },
+                {
+                    "id": "oa-exp-exp-agg-001:item:1:postage",
+                    "row_index": "1",
+                    "project_name": "云南溯源科技",
+                    "amount": "500.00",
+                },
+            ],
+        )
         self.assertEqual(
             oa_row["amount_mismatch"],
             {"header_amount": "1549.00", "detail_sum": "1500.00", "difference": "49.00"},

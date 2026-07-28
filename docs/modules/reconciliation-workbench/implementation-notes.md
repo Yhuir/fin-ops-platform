@@ -1365,3 +1365,10 @@
 - `bank_oa_invoice` 的 affected/isolation roles 继续由当前 shape 合同精确派生，不修改 impact matrix，不合并 bank_invoice 或 bank_turnover 的 affected 集合。
 - Task 30-02 的旧/新 10-run evidence 已满足同 fixture/scope/version/row IDs/连接/warm-up 对比：新路径固定 6 次 counted SQL、完整 generation scan 为 0、formal snapshot dependency 为 0，最大新样本 5.089ms。此次没有修改 preview repository I/O、formal command/UoW、read model、queue、worker、API response shape 或前端生产行为，因此 boundary 文档不变。
 - Candidate 前本地集中门通过：700 项定向 backend/deploy unittest、repository lint、docs gate、123 项 scoped Vitest、3 项 Chromium E2E 和 production build。未运行 pytest、完整 CI 或 183 项 Browser suite；生产 release、inverse、zero fan-out、consumer convergence、queue/worker 与 System Audit 证据必须由下一步 Candidate A 记录，不能由本地结果代替。
+## 2026-07-28 - 日常报销付款明细复合行
+
+- 目标：让关联台直接显示日常报销内部付款项及其 OA 附件发票，同时保持外层 OA 为唯一 canonical/selection/relation 对象。
+- 关键决策：复用现有 deterministic `expense_item_id` 与附件 `source_expense_item_id`，Workbench API 只发布 `id/row_index/project_name/amount`；前端按显式 ID 对齐展示，不按项目名、金额或顺序猜测，不新增表、列、relation member、worker 或 read model。
+- UI：申请类型移到申请人栏；项目栏只显示“多个项目 · N”、紧邻但不同样式的父 OA 金额以及逐项项目名；金额栏只显示逐项金额；关系和附件解析 chip 不再污染项目栏。子项点击仍传父 OA ID，只有父摘要行保留 action。
+- 存量：Workbench month/all schema 升级为 v8；旧 active generation 与 Redis page cache 不能冒充 fresh，经既有 freshness gateway 重建。
+- 验证：backend service/API、frontend API/component/selection 回归、production build；生产发布后还需等待 OA sync 和 Workbench scopes fresh，并对真实 413 元样例做只读 UI/API/性能核验。

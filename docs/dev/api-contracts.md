@@ -825,6 +825,21 @@ Workbench row payload 可包含可选对象身份字段：`object_identity`、`o
 
 Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`source_oa_row_id`、`derived_from_oa_id` 和 `oa_row_id`。这些字段是多 OA active relation 内做横向子分段的后端事实证据；银行流水或发票行有确定归属时应由 Workbench SQL active generation 写入，前端只消费这些字段做同源同排展示。无法确定归属时后端不得臆造 source OA，应通过 `special_metadata.row_alignment.unresolved_row_ids` 和审计工具暴露。
 
+日常报销 OA row 可以额外返回 `expense_items`：
+
+```json
+[
+  {
+    "id": "oa-exp-2035:item:0:...",
+    "row_index": "0",
+    "project_name": "曲靖项目",
+    "amount": "33"
+  }
+]
+```
+
+该数组只包含复合行展示所需字段，不返回附件正文或把 item 变成独立 relation member。OA 附件发票 row 可返回 `source_expense_item_id`；只有该值与 `expense_items[*].id` 精确相等时前端才可同带对齐。父 OA 仍是唯一 action/selection ID，付款项不得独立确认、撤回或参与金额配对。
+
 ## 发票生命周期状态
 
 待找发票、进项发票使用情况、OA 待付款核对、销项发票收款情况和税金抵扣的 lifecycle 字段保持原响应 shape：

@@ -160,3 +160,8 @@
   - `bash scripts/verify.sh docs`
 - 未测风险：真实 OA 登录/RSA/openssl、目标申请人账号状态、OA 草稿页面、真实 OA Mongo 历史字段/附件/性能、同域 cookie/iframe/Nginx 下载、真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain。
 - 后续事项：发布前按 `tests.md` 的关键 smoke flows 做 staging/生产前验证；继续主控闭环到 `data-safety-reset`。
+## 2026-07-28 - 日常报销付款明细存量重投合同
+
+- 目标：确保历史日常报销与新数据都保留稳定付款明细 identity，并让 OA 附件证据可显式回指对应付款项。
+- 关键决策：继续使用既有 `oa-exp-{external_id}:item:{row_index}:{fingerprint}`，不生成随机 UUID、不改变父 OA ID；item 不是独立可配对事实。`OA_PROJECTION_SYNC_VERSION` 升级为 `2026-07-28-expense-item-source-identity-v2`，由 durable `oa.sync` worker 幂等重投存量，不在 HTTP 或页面链路 inline 拉取。
+- 不变项：原 OA Mongo 只读、父 OA relation identity、统一发票池和附件 promotion 规则不变；禁止 fuzzy item/invoice mapping。

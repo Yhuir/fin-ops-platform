@@ -1,6 +1,12 @@
 # 关联台测试与验证
 
-日期：2026-07-22
+日期：2026-07-28
+
+## 2026-07-28 日常报销付款明细复合行
+
+- Backend/API：`tests/test_workbench_query_service.py` 保护父 OA 行只发布精简稳定付款明细字段，附件发票继续携带显式 `source_expense_item_id`；不新增 relation member 或独立配对对象。
+- Frontend：`web/src/test/WorkbenchApi.test.ts` 保护 item/source ID DTO；`WorkbenchColumns.test.tsx` 保护申请类型移入申请人栏并清理项目栏 process/evidence chip；`RelationGroupGrid.test.tsx` 保护“多个项目 · N + 父 OA 金额”、逐项项目/金额、附件发票同带对齐，以及点击子项仍只选择父 OA。
+- Read model：Workbench schema 升级为 v8，使旧 generation/page cache 失效并经现有 exact/all freshness gateway 重建；没有新增表、worker、cache 或第二 read model。
 
 ## 2026-07-26 relation preview 真实 DTO、并发反馈与安全错误回归
 

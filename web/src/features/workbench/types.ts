@@ -40,6 +40,13 @@ export type WorkbenchBankTextField = {
   value: string;
 };
 
+export type WorkbenchExpenseItem = {
+  id: string;
+  rowIndex: string;
+  projectName: string;
+  amount: string;
+};
+
 export type WorkbenchAmountCheck = {
   status: "matched" | "mismatch" | "unknown" | (string & {});
   direction: "expense" | "payment" | "receipt" | "unknown" | (string & {});
@@ -58,6 +65,9 @@ export type WorkbenchRecord = {
   recordType: WorkbenchRecordType;
   sourceKind?: WorkbenchSourceKind;
   sourceOaId?: string;
+  sourceExpenseItemId?: string;
+  expenseItems?: WorkbenchExpenseItem[];
+  displayRole?: "expense-claim-summary" | "expense-claim-item";
   label: string;
   status: string;
   statusCode: string;

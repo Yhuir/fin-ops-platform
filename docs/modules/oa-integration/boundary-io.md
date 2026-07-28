@@ -1,6 +1,6 @@
 # OA 集成模块边界与 I/O
 
-日期：2026-07-22
+日期：2026-07-28
 
 ## 模块化状态
 
@@ -37,7 +37,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| OA projection rows | canonical repositories | 带 source version；完成态 workflow status 由 OA projection 边界统一归一/识别，必须兼容 canonical `completed` 和历史完成态别名（如 `已完成`、`approved`、`2`），下游 read model 不得各自实现完成态判断。repository 以业务列与规范 JSON 的 `IS DISTINCT FROM` 判定真实变化；相同 snapshot 不更新 `app.oa_applications.updated_at`，不重写 item/attachment。snapshot output 保留 change summaries 供审计/诊断，但 repository 和 sync service 均不据此 enqueue 任何页面 refresh。 |
+| OA projection rows | canonical repositories | 带 source version；完成态 workflow status 由 OA projection边界统一归一/识别，必须兼容 canonical `completed` 和历史完成态别名（如 `已完成`、`approved`、`2`），下游 read model 不得各自实现完成态判断。日常报销每个 schedule item 必须生成稳定 `expense_item_id=父OA: item:row_index:fingerprint`，保留原 OA source/row index，并把附件证据的 `source_expense_item_id` 显式绑定到该项；不得用金额或项目名推断。repository 以业务列与规范 JSON 的 `IS DISTINCT FROM` 判定真实变化；相同 snapshot 不更新 `app.oa_applications.updated_at`，不重写 item/attachment。snapshot output 保留 change summaries 供审计/诊断，但 repository 和 sync service 均不据此 enqueue 任何页面 refresh。 |
 | OA sync status/run facts | AppHealth/AppStatus/operations dashboard | `app.oa_sync_runs(sync_type='oa_projection')` 是每次 Mongo/projection run 的事实源；成功、失败都必须落 run，失败不得提交部分 projection/snapshot。`job.outbox_events` 和 worker heartbeat 表示 refreshing/error，不得使用进程内内存状态或行级 `app.oa_applications.synced_at` 覆盖运行事实 |
 | in-progress attachment metadata | OA pending admission | 当前只传递原始/上下文化文件元数据，不执行附件证据解析、发票识别或 OCR，不产生 artifact/evidence/invoice。未来 OCR 必须作为独立版本化链路设计，不得在本同步热路径内隐式启用 |
 | OA session/permission payload | frontend session | 不泄露 secret |
@@ -50,6 +50,7 @@
 - Own read model：无单一页面 read model；影响 `oa_pending_payment`、`input_invoice_usage`、`invoice_lifecycle` 等。
 - OA manual import/create/refresh/remove 逻辑上影响 `workbench`、`workbench_relation`、`invoice_lifecycle`、`tax_offset`、`search` 和 `cost_statistics`，但写路径不 enqueue、不等待 operation barrier；消费页面访问时按 source version 收敛。
 - OA projection sync 由 runtime worker 一次读取 dual-view source batch、条件写 `app.oa_*` projection并记录 `app.oa_sync_runs` / `app.oa_sync_watermarks`；无论 change cause 如何都不标记页面 dirty scope。周期性相同输入必须是零 projection rewrite；变化输入也只提交 canonical facts。`all` 替换必须把旧 watermark scopes 纳入删除比较，不能漏掉最后一条 completed 被删除的月份。
+- `OA_PROJECTION_SYNC_VERSION=2026-07-28-expense-item-source-identity-v2` 触发一次存量重投，确保历史日常报销的 item/source binding 与当前合同一致；重投仍由 durable `oa.sync` worker 执行且必须幂等。
 - External system：OA Mongo / OA app。
 - Repository：`postgres_repositories/oa_projection.py`、`oa_applicant_credentials.py`。
 
