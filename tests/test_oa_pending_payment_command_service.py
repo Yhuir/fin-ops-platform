@@ -246,6 +246,52 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
         self.assertEqual(relation_command.confirm_calls, [])
         self.assertEqual(refresh_calls, [])
 
+    def test_writeback_paid_ignores_turnover_inflows_when_outflow_matches_oa(self) -> None:
+        payment_repository = FakePaymentStatusRepository(
+            flow_id="507f1f77bcf86cd799439027",
+            pay_status=PAY_STATUS_PENDING,
+        )
+        relation_command = FakeRelationCommandService(
+            [
+                {
+                    "case_id": "case-turnover",
+                    "row_ids": [
+                        "oa-turnover-paid",
+                        "bank-turnover-inflow-60",
+                        "bank-turnover-inflow-40",
+                        "bank-turnover-outflow",
+                    ],
+                    "row_types": ["oa", "bank", "bank", "bank"],
+                    "relation_mode": "turnover_manual_closure",
+                    "month_scope": "2026-06",
+                }
+            ]
+        )
+        service = _service(
+            oa_records=[],
+            completed_oa_records=[_oa("oa-turnover-paid", "100.00", workflow_status="completed")],
+            transactions=[
+                _bank(
+                    "bank-turnover-inflow-60",
+                    "60.00",
+                    direction=TransactionDirection.INFLOW,
+                ),
+                _bank(
+                    "bank-turnover-inflow-40",
+                    "40.00",
+                    direction=TransactionDirection.INFLOW,
+                ),
+                _bank("bank-turnover-outflow", "100.00"),
+            ],
+            relation_command=relation_command,
+            payment_repository=payment_repository,
+        )
+
+        payload = service.writeback_paid({"oa_row_ids": ["oa-turnover-paid"]}, actor_id="tester")
+
+        self.assertEqual(payload["writebackCount"], 1)
+        self.assertEqual(payment_repository.marked_flow_ids, ["507f1f77bcf86cd799439027"])
+
     def test_writeback_paid_uses_full_relation_for_amount_check_but_only_writes_requested_oa(self) -> None:
         payment_repository = FakePaymentStatusRepository(
             flow_id=None,

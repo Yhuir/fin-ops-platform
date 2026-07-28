@@ -1,6 +1,6 @@
 # OA 待付款核对状态机
 
-日期：2026-07-27
+日期：2026-07-28
 
 ## 业务状态
 
@@ -23,14 +23,14 @@
 | pending relation promoted | 由 promotion owner 写正式 Workbench relation；不得双重展示 |
 | candidate/claim only | 不等于正式支付，不直接驱动 paid 或 writeback |
 
-`turnover_manual_closure` 不进入本页支付关系。
+所有 active 正式关系都进入本页关系消费。`turnover_manual_closure` 等混合收支关系中，只有可解析的 outflow bank member 是支付证据；inflow 不进入流水展示、已付金额或写回金额。只有 inflow、没有 outflow 时仍为未支付。
 
 ### Payment
 
 | 状态 | 业务含义 |
 | --- | --- |
-| `unpaid` | active outflow relation 与 OA 金额未满足既有 lifecycle 判定 |
-| `paid` | active outflow relation 与金额满足既有 lifecycle 判定 |
+| `unpaid` | 没有可解析的 active outflow relation |
+| `paid` | 至少存在一条可解析的 active outflow relation；金额差额不改变关系事实，但会阻断自动写回 |
 | `oaPaymentWriteback.code=written` | PostgreSQL payment-status snapshot 已记录 OA 外部写回结果 |
 
 页面只展示后端给出的结果，不在浏览器重算金额、方向或写回资格。
@@ -88,7 +88,7 @@ drawer open
 ```text
 validate actor/tenant/payload
   -> load OA + active relation evidence
-  -> validate workflow/outflow/amount/flow id
+  -> validate workflow/outflow/amount/flow id（混合关系只合计 outflow）
   -> idempotent external MySQL paid write
   -> idempotent PostgreSQL payment-status snapshot reconcile
   -> audit/result
@@ -118,6 +118,10 @@ validate actor/tenant/payload/idempotency
 
 页面 Audit icon 只在管理员点击时执行一次 operations Audit：
 
+- 校验 canonical relation member 存在性和 active identity 唯一性。
+- 独立计算 active OA+outflow 期望关系集，并与页面 canonical consumer 对照。
+- 关系存在但页面遗漏、没有 outflow、支付状态错误或 relation member 缺失时，Audit 必须返回 blocking integrity issue。
+
 | Audit 结果 | 页面文案 |
 | --- | --- |
 | pass + proof ready + repeatable-read snapshot | `Audit 通过 · App 内部数据一致` |
@@ -142,3 +146,4 @@ Audit 不调用 operation barrier、不轮询，也不作为 rows 正确性的 g
 | 2026-07-27 | rows/details 迁移为 PostgreSQL canonical direct read；删除页面 freshness/version/cache/polling 合同 | repository/service/API/frontend/integration |
 | 2026-07-27 | 正式关系只读 active `app.workbench_pair_relations`；pending relation 保留独立 owner | canonical relation consistency |
 | 2026-07-27 | 写命令不再返回 `readModelRefresh`，成功后 normal GET | command/API/frontend |
+| 2026-07-28 | 所有 active relation mode 均进入页面；混合收支关系只把 outflow 作为展示、已付金额和写回证据；Audit 对照期望关系集与 consumer | query/canonical rows/command/Audit/integration |

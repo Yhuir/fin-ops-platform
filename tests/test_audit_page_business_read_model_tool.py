@@ -563,6 +563,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("/* check: canonical_relation_oa_member_exists */", queried_sql)
         self.assertIn("/* check: canonical_relation_bank_member_exists */", queried_sql)
         self.assertIn("/* check: canonical_relation_invoice_member_exists */", queried_sql)
+        self.assertIn("/* check: oa_pending_payment_relation_visibility */", queried_sql)
         self.assertNotIn("read_model.oa_pending", queried_sql)
         self.assertNotIn("job.read_model_dirty_scopes", queried_sql)
         self.assertNotIn("job.outbox_events", queried_sql)
@@ -575,7 +576,31 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
                 "single_repeatable_read_snapshot",
                 "canonical_relation_member_existence",
                 "canonical_relation_identity_uniqueness",
+                "oa_pending_payment_relation_visibility",
             ],
+        )
+
+    def test_oa_pending_payment_hidden_active_outflow_relation_is_blocking(self) -> None:
+        report = audit_page_business_read_model.audit_page_business_read_model(
+            FakeConnection(
+                rows_by_check={
+                    "oa_pending_payment_relation_visibility": [
+                        {
+                            "subject_id": "case-turnover-hidden",
+                            "scope_key": "2026-05",
+                            "existing_outflow_count": None,
+                            "payment_status": None,
+                        }
+                    ]
+                }
+            ),
+            domain_key="oa_pending_payments",
+        )
+
+        self.assertEqual(report["overall_status"], "issues_found")
+        self.assertEqual(
+            report["summary"]["issue_sample_counts_by_code"],
+            {"oa_pending_payments_active_outflow_relation_not_visible": 1},
         )
 
     def test_oa_pending_payment_missing_canonical_oa_member_is_blocking(self) -> None:

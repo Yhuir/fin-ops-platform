@@ -84,8 +84,39 @@ class OaPendingPaymentProjectionRowsTests(unittest.TestCase):
 
         self.assertEqual(missing_rows[0]["bankTransaction"]["missingBankRelationCount"], 1)
         self.assertEqual(inflow_rows[0]["bankTransaction"]["nonOutflowBankRelationCount"], 1)
+        self.assertEqual(missing_rows[0]["paymentStatus"]["code"], "unpaid")
+        self.assertEqual(inflow_rows[0]["paymentStatus"]["code"], "unpaid")
         self.assertEqual(missing_rows[0]["oaPaymentWriteback"]["code"], "not_written")
         self.assertEqual(inflow_rows[0]["oaPaymentWriteback"]["code"], "not_written")
+
+    def test_turnover_relation_uses_only_outflow_as_payment_evidence(self) -> None:
+        record = self._oa("oa-1", "100.00")
+        inflow_60 = self._bank("bank-inflow-60", "60.00", direction=TransactionDirection.INFLOW)
+        inflow_40 = self._bank("bank-inflow-40", "40.00", direction=TransactionDirection.INFLOW)
+        outflow = self._bank("bank-outflow", "100.00")
+        relation = {
+            **self._relation(
+                "case-turnover",
+                [record.id, inflow_60.id, inflow_40.id, outflow.id],
+            ),
+            "relation_mode": "turnover_manual_closure",
+        }
+
+        rows = self._build(
+            records=[record],
+            relations=[relation],
+            banks=[inflow_60, inflow_40, outflow],
+        )
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["paymentStatus"]["code"], "paid")
+        self.assertEqual(rows[0]["bankTransaction"]["paidTotal"], "100.00")
+        self.assertEqual(rows[0]["bankTransaction"]["relationCount"], 1)
+        self.assertEqual(rows[0]["bankTransaction"]["nonOutflowBankRelationCount"], 2)
+        self.assertEqual(
+            [item["bankTransactionId"] for item in rows[0]["bankTransaction"]["summaries"]],
+            ["bank-outflow"],
+        )
 
     def test_paid_writeback_requires_every_resolved_flow_to_be_paid(self) -> None:
         records = [self._oa("oa-1", "40.00"), self._oa("oa-2", "60.00")]

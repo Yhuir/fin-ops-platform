@@ -16,7 +16,6 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_relation
 )
 from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
-from fin_ops_platform.services.workbench_relation_modes import TURNOVER_MANUAL_CLOSURE_RELATION_MODE
 
 
 FILTER_FIELDS = {
@@ -593,7 +592,6 @@ class PostgresOaPendingPaymentQueryRepository:
             dict(relation)
             for relation in dict(canonical_snapshot.get("pair_relations") or {}).values()
             if isinstance(relation, dict)
-            and text(relation.get("relation_mode")) != TURNOVER_MANUAL_CLOSURE_RELATION_MODE
         ]
         pending_relations = PostgresOaPendingPaymentRelationRepository(
             self._connection
@@ -774,7 +772,6 @@ completed_relation_groups as materialized (
       on oa.source_kind = 'completed'
      and oa.oa_id = member.row_id
     where relation.status = 'active'
-      and relation.relation_mode <> 'turnover_manual_closure'
     group by oa.scope_key, relation.case_id, relation.row_ids, relation.row_types
 ),
 pending_relation_groups as materialized (
@@ -928,10 +925,6 @@ bank_edges as materialized (
 bank_aggregates as materialized (
     select
         group_oa.row_id,
-        count(*) filter (
-            where members.member_type in ('bank', 'bank_transaction')
-               or (members.member_type = '' and (members.member_id like 'bank%%' or members.member_id like 'txn_%%'))
-        )::integer as bank_edge_count,
         count(bank_edges.member_id) filter (where bank_edges.txn_direction = 'outflow')::integer
             as existing_outflow_count,
         coalesce(
@@ -1022,6 +1015,7 @@ canonical_rows as materialized (
         group_oa.row_id,
         group_oa.scope_key,
         group_oa.source_kind,
+        group_oa.relation_id,
         group_oa.oa_ids,
         bank_aggregates.bank_ids,
         invoice_aggregates.invoice_ids,
@@ -1029,8 +1023,9 @@ canonical_rows as materialized (
         group_oa.oa_application_type,
         group_oa.oa_project_name,
         group_oa.oa_amount,
-        case when bank_aggregates.bank_edge_count > 0 then 'paid' else 'unpaid' end as payment_status,
-        case when bank_aggregates.bank_edge_count > 0 then '已支付' else '未支付' end as payment_status_label,
+        case when bank_aggregates.existing_outflow_count > 0 then 'paid' else 'unpaid' end as payment_status,
+        case when bank_aggregates.existing_outflow_count > 0 then '已支付' else '未支付' end
+            as payment_status_label,
         bank_aggregates.bank_trade_time,
         bank_aggregates.bank_amount,
         bank_aggregates.bank_paid_total,
@@ -1058,3 +1053,59 @@ canonical_rows as materialized (
     join invoice_aggregates on invoice_aggregates.row_id = group_oa.row_id
 )
 """
+
+
+def list_oa_pending_payment_relation_visibility_gaps(
+    connection: Any,
+    *,
+    tenant_id: str,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Compare active OA/outflow facts with the exact canonical page consumer."""
+
+    rows = connection.fetch_all(
+        f"""
+        {_CANONICAL_ROWS_CTE},
+        expected_relations as materialized (
+            select distinct
+                relation.case_id as relation_id,
+                oa.scope_key
+            from app.workbench_pair_relations relation
+            cross join lateral unnest(relation.row_ids) with ordinality
+                as oa_member(row_id, ordinality)
+            join canonical_oa oa
+              on oa.source_kind = 'completed'
+             and oa.oa_id = oa_member.row_id
+            where relation.status = 'active'
+              and relation.row_types[oa_member.ordinality] = 'oa'
+              and exists (
+                  select 1
+                  from unnest(relation.row_ids) with ordinality
+                      as bank_member(row_id, ordinality)
+                  join app.bank_transactions bank
+                    on coalesce(bank.legacy_mongo_id, bank.id::text) = bank_member.row_id
+                  where relation.row_types[bank_member.ordinality]
+                            in ('bank', 'bank_transaction')
+                    and bank.txn_direction = 'outflow'
+              )
+        )
+        /* check: oa_pending_payment_relation_visibility */
+        select
+            expected.relation_id as subject_id,
+            expected.scope_key,
+            consumer.existing_outflow_count,
+            consumer.payment_status
+        from expected_relations expected
+        left join canonical_rows consumer
+          on consumer.source_kind = 'completed'
+         and consumer.relation_id = expected.relation_id
+         and consumer.scope_key = expected.scope_key
+        where consumer.relation_id is null
+           or consumer.existing_outflow_count = 0
+           or consumer.payment_status <> 'paid'
+        order by expected.scope_key, expected.relation_id
+        limit %s
+        """,
+        (text(tenant_id) or "default", max(int(limit), 1)),
+    )
+    return [dict(row) for row in list(rows or []) if isinstance(row, dict)]

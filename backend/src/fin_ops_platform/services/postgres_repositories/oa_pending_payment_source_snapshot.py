@@ -13,11 +13,9 @@ from fin_ops_platform.services.oa_payment_status_service import (
 )
 from fin_ops_platform.services.postgres_repositories.common import jsonb, run_in_transaction, serialize_value, text
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
-    COMPLETED_WORKFLOW_STATUS_SQL,
     PostgresOAProjectionRepository,
     is_completed_workflow_status,
 )
-from fin_ops_platform.services.workbench_relation_modes import TURNOVER_MANUAL_CLOSURE_RELATION_MODE
 
 
 OA_PENDING_PAYMENT_COVERAGE_ONLY_SCHEMA_VERSION = 1
@@ -46,110 +44,6 @@ def oa_pending_payment_coverage_only_source_versions(scope_key: str) -> dict[str
         "payment_status_signature": empty_signature,
         "oa_pending_payment_source_signature": source_signature,
     }
-
-
-def oa_pending_payment_workbench_relation_versions_by_scope(
-    connection: Any,
-    *,
-    scope_keys: list[str],
-) -> dict[str, dict[str, object]]:
-    normalized_scope_keys = list(
-        dict.fromkeys(
-            scope_key
-            for value in scope_keys
-            if (scope_key := _month(value))
-        )
-    )
-    if not normalized_scope_keys:
-        return {}
-    rows = connection.fetch_all(
-        """
-        /* check: oa_pending_payment_workbench_relation_versions */
-        with requested(scope_key) as (
-            select unnest(%s::text[])
-        ),
-        completed_oa as (
-            select requested.scope_key, source.row_id
-            from requested
-            join app.oa_applications source
-              on source.scope_month = to_date(requested.scope_key, 'YYYY-MM')
-            where """ + COMPLETED_WORKFLOW_STATUS_SQL + """
-        ),
-        active_relations as (
-            select distinct
-                   source.scope_key,
-                   relation.case_id,
-                   relation.relation_mode,
-                   relation.version,
-                   relation.row_ids,
-                   relation.row_types,
-                   relation.updated_at,
-                   coalesce(
-                       relation.raw_payload->'normalized_payload',
-                       relation.raw_payload,
-                       '{}'::jsonb
-                   ) as consumed_payload
-            from completed_oa source
-            join app.workbench_pair_relations relation
-              on source.row_id = any(relation.row_ids)
-             and relation.status = 'active'
-             and relation.relation_mode <> %s
-        ),
-        relation_versions as (
-            select
-                scope_key,
-                count(*)::integer as relation_count,
-                coalesce(max(updated_at)::text, '') as relation_updated_at,
-                md5(coalesce(string_agg(
-                    jsonb_build_object(
-                        'case_id', case_id,
-                        'relation_mode', relation_mode,
-                        'version', version,
-                        'row_ids', to_jsonb(row_ids),
-                        'row_types', to_jsonb(row_types),
-                        'consumed_payload', consumed_payload
-                    )::text,
-                    E'\n' order by case_id
-                ), '')) as membership_digest
-            from active_relations
-            group by scope_key
-        )
-        select requested.scope_key,
-               coalesce(relation_versions.relation_updated_at, '') as relation_updated_at,
-               coalesce(relation_versions.relation_count, 0)::integer as relation_count,
-               coalesce(relation_versions.membership_digest, md5('')) as membership_digest
-        from requested
-        left join relation_versions
-          on relation_versions.scope_key = requested.scope_key
-        order by requested.scope_key
-        """,
-        (normalized_scope_keys, TURNOVER_MANUAL_CLOSURE_RELATION_MODE),
-    )
-    versions = {
-        scope_key: {
-            "oa_pending_payment_workbench_pair_relations_updated_at": text(
-                row.get("relation_updated_at")
-            )
-            or "",
-            "oa_pending_payment_workbench_pair_relation_count": int(
-                row.get("relation_count") or 0
-            ),
-            "oa_pending_payment_workbench_pair_relations_membership_digest": text(
-                row.get("membership_digest")
-            )
-            or "",
-        }
-        for row in rows
-        if isinstance(row, dict)
-        and (scope_key := _month(row.get("scope_key")))
-    }
-    missing_scope_keys = set(normalized_scope_keys) - set(versions)
-    if missing_scope_keys:
-        raise RuntimeError(
-            "OA pending payment Workbench relation versions missing for scopes: "
-            + ", ".join(sorted(missing_scope_keys))
-        )
-    return versions
 
 
 @dataclass(slots=True, frozen=True)

@@ -15,7 +15,6 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_query im
 )
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
     PostgresOaPendingPaymentSourceSnapshotRepository,
-    oa_pending_payment_workbench_relation_versions_by_scope,
 )
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 from tests.postgres_test_utils import (
@@ -59,11 +58,20 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
                 legacy_mongo_id, account_no, txn_direction, counterparty_name_raw,
                 amount, signed_amount, txn_date, txn_month, status, raw_payload
             )
-            values (
-                'bank-direct-query', '622200001234', 'outflow', '集成测试供应商',
-                100, -100, '2026-05-20', '2026-05-01', 'pending',
-                '{"normalized_payload":{"bank_name":"建设银行","account_last4":"1234"}}'::jsonb
-            )
+            values
+                (
+                    'bank-direct-query', '622200001234', 'outflow', '集成测试供应商',
+                    100, -100, '2026-05-20', '2026-05-01', 'pending',
+                    '{"normalized_payload":{"bank_name":"建设银行","account_last4":"1234"}}'::jsonb
+                ),
+                (
+                    'bank-turnover-inflow-60', '622200001234', 'inflow', '集成测试供应商',
+                    60, 60, '2026-05-19', '2026-05-01', 'pending', '{}'::jsonb
+                ),
+                (
+                    'bank-turnover-inflow-40', '622200001234', 'inflow', '集成测试供应商',
+                    40, 40, '2026-05-18', '2026-05-01', 'pending', '{}'::jsonb
+                )
             """
         )
         self.connection.execute(
@@ -86,21 +94,29 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
                 row_ids, row_types, raw_payload
             )
             values (
-                'oa-direct-query', 'manual_confirmed', 'active', 1, '2026-05-01',
-                array['oa-integration-1', 'bank-direct-query', 'invoice-direct-query'],
-                array['oa', 'bank', 'invoice'],
+                'oa-direct-query', 'turnover_manual_closure', 'active', 1, '2026-05-01',
+                array[
+                    'oa-integration-1',
+                    'bank-turnover-inflow-60',
+                    'bank-turnover-inflow-40',
+                    'bank-direct-query',
+                    'invoice-direct-query'
+                ],
+                array['oa', 'bank', 'bank', 'bank', 'invoice'],
                 '{
                     "normalized_payload": {
                         "case_id": "oa-direct-query",
                         "status": "active",
-                        "relation_mode": "manual_confirmed",
+                        "relation_mode": "turnover_manual_closure",
                         "version": 1,
                         "row_ids": [
                             "oa-integration-1",
+                            "bank-turnover-inflow-60",
+                            "bank-turnover-inflow-40",
                             "bank-direct-query",
                             "invoice-direct-query"
                         ],
-                        "row_types": ["oa", "bank", "invoice"]
+                        "row_types": ["oa", "bank", "bank", "bank", "invoice"]
                     }
                 }'::jsonb
             )
@@ -123,6 +139,16 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
 
         self.assertEqual(active["pagination"]["total"], 1)
         self.assertEqual(active["rows"][0]["bankTransaction"]["relationCount"], 1)
+        self.assertEqual(active["rows"][0]["bankTransaction"]["paidTotal"], "100.00")
+        self.assertEqual(active["rows"][0]["bankTransaction"]["nonOutflowBankRelationCount"], 2)
+        self.assertEqual(active["rows"][0]["paymentStatus"]["code"], "paid")
+        self.assertEqual(
+            [
+                summary["bankTransactionId"]
+                for summary in active["rows"][0]["bankTransaction"]["summaries"]
+            ],
+            ["bank-direct-query"],
+        )
         self.assertEqual(active["rows"][0]["invoice"]["relationCount"], 1)
         self.assertEqual([row["id"] for row in active_candidates["rows"]], ["bank-direct-query"])
         self.assertNotIn("read_model_status", active)
@@ -216,78 +242,6 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(second.oa_pending_payment_changed_scopes, ())
         self.assertEqual(second.upserted_completed_count, 0)
         self.assertEqual(after, before)
-
-    def test_older_relation_withdrawal_changes_membership_proof_while_max_timestamp_stays_stable(self) -> None:
-        source_snapshot = PostgresOaPendingPaymentSourceSnapshotRepository(
-            self.connection,
-            pending_relation_repository=self.pending_relations,
-        )
-        source_snapshot.commit_authoritative_snapshot(
-            scope_key="2026-05",
-            tenant_id="default",
-            projection_records=[_record()],
-            admission_records=[_record()],
-            payment_statuses={
-                "flow-integration-1": OAPaymentStatusRecord(
-                    flow_id="flow-integration-1",
-                    pay_status=0,
-                )
-            },
-        )
-        self.connection.execute(
-            """
-            insert into app.workbench_pair_relations(
-                case_id, relation_mode, status, version, month_scope,
-                row_ids, row_types, updated_at, raw_payload
-            )
-            values
-                (
-                    'oa-proof-older', 'manual_confirmed', 'active', 1, '2026-05-01',
-                    array['oa-integration-1', 'bank-proof-older'],
-                    array['oa', 'bank'], '2026-07-20T00:00:00+00:00',
-                    '{"normalized_payload":{"case_id":"oa-proof-older","status":"active","relation_mode":"manual_confirmed","version":1,"row_ids":["oa-integration-1","bank-proof-older"],"row_types":["oa","bank"]}}'::jsonb
-                ),
-                (
-                    'oa-proof-newer', 'manual_confirmed', 'active', 1, '2026-05-01',
-                    array['oa-integration-1', 'bank-proof-newer'],
-                    array['oa', 'bank'], '2026-07-21T00:00:00+00:00',
-                    '{"normalized_payload":{"case_id":"oa-proof-newer","status":"active","relation_mode":"manual_confirmed","version":1,"row_ids":["oa-integration-1","bank-proof-newer"],"row_types":["oa","bank"]}}'::jsonb
-                )
-            """
-        )
-
-        before = oa_pending_payment_workbench_relation_versions_by_scope(
-            self.connection,
-            scope_keys=["2026-05"],
-        )["2026-05"]
-        self.connection.execute(
-            """
-            update app.workbench_pair_relations
-            set status = 'withdrawn'
-            where case_id = 'oa-proof-older'
-            """
-        )
-        after = oa_pending_payment_workbench_relation_versions_by_scope(
-            self.connection,
-            scope_keys=["2026-05"],
-        )["2026-05"]
-
-        self.assertEqual(
-            before["oa_pending_payment_workbench_pair_relations_updated_at"],
-            after["oa_pending_payment_workbench_pair_relations_updated_at"],
-        )
-        self.assertEqual(
-            (
-                before["oa_pending_payment_workbench_pair_relation_count"],
-                after["oa_pending_payment_workbench_pair_relation_count"],
-            ),
-            (2, 1),
-        )
-        self.assertNotEqual(
-            before["oa_pending_payment_workbench_pair_relations_membership_digest"],
-            after["oa_pending_payment_workbench_pair_relations_membership_digest"],
-        )
-
 
     def test_admission_only_commit_preserves_stable_completed_fact_and_never_enqueues_shared_read_models(self) -> None:
         source_snapshot = PostgresOaPendingPaymentSourceSnapshotRepository(

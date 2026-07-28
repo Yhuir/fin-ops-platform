@@ -3,7 +3,7 @@
 - Module key：`oa-pending-payments`
 - Route：`/oa-pending-payments`
 - Page key：`oa-pending-payments`
-- 当前状态：页面 PostgreSQL canonical facts 直读已在本地实现；待主控合并、统一部署和生产验证。
+- 当前状态：页面通过 PostgreSQL canonical facts 直读；无页面 read model。
 
 ## 修改前必读
 
@@ -62,13 +62,14 @@ browser
 
 - `completed` 主行来自 `app.oa_applications`。
 - `in_progress` 主行来自 `app.oa_pending_payment_admissions`。
-- completed 正式关系只读取 `app.workbench_pair_relations` 中 `status='active'` 的事实；`turnover_manual_closure` 不进入本页支付关系。
+- completed 正式关系读取 `app.workbench_pair_relations` 中全部 `status='active'` 的事实。
+- `turnover_manual_closure` 等混合收支关系中，只有成功解析的 outflow bank member 是本页支付证据；inflow 只保留为周转上下文，不进入页面流水、已付金额或写回金额。
 - in-progress 关系读取本模块 active pending relation；promotion 前不冒充 Workbench active relation。
 - 银行流水和发票只是 relation evidence，不替代 OA 主行。
 
 ## 写回一致性
 
-`writeback-paid` 和金额匹配后的 `link-bank-transactions` 保留原有单次鉴权、tenant、claim、active relation、outflow、金额、CAS/冲突、审计和幂等语义。外部 MySQL 写回仍走既有 command/adapter；成功或 already-paid 后必须幂等更新 PostgreSQL payment-status canonical snapshot。响应不再返回页面 read-model refresh metadata，前端成功后立即重新调用当前 rows GET。
+`writeback-paid` 和金额匹配后的 `link-bank-transactions` 保留原有单次鉴权、tenant、claim、active relation、outflow、金额、CAS/冲突、审计和幂等语义。已有混合收支关系的写回只合计 outflow；inflow 不参与金额校验。外部 MySQL 写回仍走既有 command/adapter；成功或 already-paid 后必须幂等更新 PostgreSQL payment-status canonical snapshot。响应不再返回页面 read-model refresh metadata，前端成功后立即重新调用当前 rows GET。
 
 Mongo/MySQL 与 PostgreSQL 之间没有分布式事务。若外部写成功而 PostgreSQL canonical commit 失败，命令必须返回可安全重试错误；重试或后续 OA sync 收敛，不允许页面请求回退读取外部系统。
 

@@ -1,6 +1,6 @@
 # OA 待付款核对：Direct Canonical Query 性能与完整性设计
 
-日期：2026-07-27
+日期：2026-07-28
 
 ## 结论
 
@@ -32,7 +32,7 @@ selector 和 hydrate 共享同一 snapshot；不得先查 total/summary，再在
 
 - canonical completed OA：`app.oa_applications`。
 - canonical in-progress OA：tenant-scoped `app.oa_pending_payment_admissions`。
-- formal relation：`app.workbench_pair_relations where status='active'`，排除 `turnover_manual_closure`。
+- formal relation：`app.workbench_pair_relations where status='active'`，不按 relation mode 排除；只把可解析 outflow bank member 计入支付展示和金额。
 - pending relation：active `app.oa_pending_payment_bank_relations`。
 - bank/input invoice：只按 relation member IDs 批量 hydrate。
 - selector 用 CTE 形成 typed columns，SQL 内完成 keyword/filter/sort/page/summary/facets。
@@ -61,6 +61,8 @@ selector 和 hydrate 共享同一 snapshot；不得先查 total/summary，再在
 - rows、total、summary、status counts、view counts、statistics 和 facets 必须来自同一 snapshot。
 - selector descriptor 必须可由同 snapshot 的 canonical facts hydrate；缺失时 fail fast，禁止静默丢行。
 - active relation withdraw 在下一次 snapshot 立即生效；旧 raw payload 或 projection 不得复活。
+- active OA+outflow relation 无论 relation mode 都必须在同一 snapshot 的 canonical consumer 中可见。
+- 混合收支关系的 inflow 不进入 bank paid total、页面流水或支付写回金额；只有 inflow 时保持 unpaid。
 - payment status 只按同 tenant + selected flow IDs 批量读取。
 - command 的外部写回和 PostgreSQL snapshot reconcile 失败时不返回成功。
 
@@ -71,6 +73,7 @@ selector 和 hydrate 共享同一 snapshot；不得先查 total/summary，再在
 - explicit `REPEATABLE READ READ ONLY`。
 - selector 仅 1 次 `fetch_one`，包含 server `limit/offset`。
 - SQL 引用 canonical tables 和 active relation predicate。
+- Page Audit 用统一事实源 active OA+outflow 期望集对照同一 canonical consumer，防止 selector/hydrate 过滤造成假通过。
 - SQL 不引用 OA/workbench read model、dirty/outbox。
 - 1 与 200 descriptors 的 hydrate query count 相同且有上限。
 - bank candidate list 为 1 次服务端分页查询，不调用 import snapshot 全量扫描。

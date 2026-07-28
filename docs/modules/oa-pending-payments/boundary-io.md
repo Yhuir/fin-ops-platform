@@ -1,10 +1,10 @@
 # OA 待付款核对模块边界与 I/O
 
-日期：2026-07-27
+日期：2026-07-28
 
 ## 模块化状态
 
-- 状态：`DIRECT_CANONICAL_READ_IMPLEMENTED_LOCALLY`。
+- 状态：`DIRECT_CANONICAL_READ_ACTIVE`。
 - 边界可信度：high。
 - 页面读模型：页面专属 PostgreSQL query repository；无页面 read-model freshness/version/cache/worker 运行时依赖。
 - 旧链状态：`oa_pending_payment` projection/worker/registry、invoice-lifecycle 间接依赖和部署单元已删除。
@@ -36,7 +36,7 @@
 | completed OA | OA integration | `app.oa_applications` 已提交 snapshot；页面不访问 Mongo |
 | in-progress admission | OA integration | `app.oa_pending_payment_admissions`，按 tenant 读取 |
 | payment status | OA integration/command | `app.oa_pending_payment_status_snapshots`，按 tenant + flow ids 批量读取 |
-| completed relation | Workbench relation owner | 只读 `app.workbench_pair_relations` 中 `status='active'`；不读 Workbench page payload 或 `workbench_relation` projection |
+| completed relation | Workbench relation owner | 只读 `app.workbench_pair_relations` 中全部 `status='active'`；混合收支关系只把可解析 outflow 作为支付证据，不读 Workbench page payload 或 `workbench_relation` projection |
 | in-progress relation/claim | OA pending relation owner | active pending relation、claim、promotion facts |
 | bank facts | core/bank owner | `app.bank_transactions`，只批量读取当前页 relation members |
 | input invoice facts | invoice owner | `app.invoices`，只批量读取当前页 relation members |
@@ -50,7 +50,7 @@
 | detail response | frontend drawer | canonical row hydrate 后复用既有 detail builder；missing=`404`、invalid=`400` |
 | bank candidates | frontend drawer | canonical bank facts + active formal/pending relations；返回 relation status 与服务端 pagination |
 | write result | frontend | 业务结果、affected objects/scopes、冲突/重试信息；不含 read-model refresh/barrier/version metadata |
-| canonical status reconcile | PostgreSQL | 外部写回成功或 already-paid 后幂等记录 payment-status snapshot |
+| canonical status reconcile | PostgreSQL | 外部写回成功或 already-paid 后幂等记录 payment-status snapshot；混合关系写回金额只合计 outflow |
 | pending relation/claim/promotion | PostgreSQL | 继续走现有 command/repository/UoW 与审计边界 |
 | Audit UI | admin frontend | 单次读取 operations Audit；不等待 operation barrier，不参与页面正确性 |
 
@@ -60,6 +60,7 @@
 - `PostgresOaPendingPaymentQueryRepository.snapshot()` 显式执行 `REPEATABLE READ READ ONLY`。
 - 同一 rows 响应的 descriptors、pagination、summary、statistics、status counts 和 filter options 在一个 snapshot 内读取。
 - selector 使用一个 set-based statement 完成过滤、排序、服务端分页与聚合；随后只为当前页批量 hydrate canonical records/relations/bank/invoices/status。
+- selector 与 hydrate 都不得按 relation mode 丢弃 active relation；支付状态、展示和写回只消费成功解析的 outflow bank facts。
 - 查询次数与 page size 无关；最大 `page_size=200`，禁止逐行/逐组查询和 Python/浏览器全量分页。
 - 详情各自使用一个只读 repeatable-read snapshot，先定位 descriptor，再批量 hydrate 单一 canonical group。
 - 候选抽屉用一个 set-based statement 读取全量月份的 outflow bank facts、active relation status、keyword filter、total 和当前页；不得经 command service 全量加载后 Python 分页。
@@ -98,6 +99,7 @@ frontend -> page API only
 - service 不依赖 `Application`、HTTP header/cookie 或 Flask response。
 - repository 可以知道表结构和 SQL；service 不散落 SQL。
 - 页面不得依赖 Redis、RabbitMQ、runtime worker、readiness、source version 或外部 OA storage。
+- 页面 Audit 必须把 active OA+outflow 关系事实集与 canonical page consumer 结果对照，不能只证明 relation member 存在。
 
 ## 文件范围
 

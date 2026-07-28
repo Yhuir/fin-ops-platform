@@ -1,6 +1,6 @@
 # OA 待付款核对测试责任
 
-日期：2026-07-27
+日期：2026-07-28
 
 ## 风险模型
 
@@ -8,6 +8,8 @@
 
 - rows、summary、statistics、facets 和当前页 hydrate 来自同一显式只读 repeatable-read snapshot。
 - 正式关系只读取 active canonical Workbench facts；withdrawn/inactive 不可由旧 projection/raw payload 复活。
+- `turnover_manual_closure` 等混合收支关系必须可见；只有 outflow 进入支付展示、金额和写回，inflow-only 保持 unpaid。
+- Audit 必须发现 active OA+outflow 关系存在但 canonical page consumer 遗漏的情况。
 - 页面请求不访问 OA Mongo/MySQL、Redis、queue、worker 或 read-model projection。
 - SQL 服务端过滤/排序/分页，查询次数不随 page size 增长。
 - 写回/claim/promotion 的权限、审计、幂等、冲突和写后重新 GET 不回归。
@@ -20,6 +22,7 @@
 覆盖：
 
 - `paymentStatus` 的 paid/unpaid、金额边界、outflow、candidate/inactive relation。
+- 混合收支关系只展示/合计 outflow；inflow-only、missing bank fact fail closed。
 - completed/in-progress identity、flow id、duplicate/empty/invalid input。
 - grouped OA/bank/invoice row 组装、跨月隔离和 relation row identity。
 - writeback already-paid、重复提交、claim/CAS/冲突和部分失败。
@@ -27,7 +30,7 @@
 
 入口：
 
-- `tests/test_oa_pending_payment_projection_rows.py`
+- `tests/test_oa_pending_payment_canonical_rows.py`
 - `tests/test_oa_pending_payment_command_service.py`
 - `tests/test_invoice_lifecycle_policy.py`
 - `tests/test_oa_pending_payment_query_service.py`
@@ -40,6 +43,7 @@
 - 空页不 hydrate；missing detail 为 `404`。
 - repository 显式执行 `REPEATABLE READ READ ONLY`。
 - selector SQL 使用 canonical OA/admission/payment status、pending relation、active Workbench relation、bank/invoice tables。
+- active OA+outflow relation 与 canonical consumer visibility 的 Audit 对照。
 - 当前页 1 与 200 descriptors 的 hydrate 查询次数相同，无 N+1。
 - OA authoritative snapshot 幂等 commit、writeback 后 PG reconcile、失败回滚。
 
@@ -109,6 +113,7 @@
 需要保护的关键路径：
 
 - canonical OA + active Workbench relation + bank/invoice facts -> rows/details。
+- canonical OA + mixed turnover relation + inflow/outflow facts -> 只显示和合计 outflow。
 - active relation withdraw -> 下一次 GET 直接不再展示 relation，无 refresh worker。
 - in-progress link-bank -> optional paid writeback -> PG snapshot -> current rows GET。
 - writeback-paid -> external adapter -> PG snapshot -> current rows GET。

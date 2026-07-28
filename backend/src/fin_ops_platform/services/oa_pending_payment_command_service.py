@@ -259,7 +259,19 @@ class OaPendingPaymentCommandService:
                 status_code=HTTPStatus.CONFLICT,
                 details={"case_id": clean_string(relation.get("case_id") or "")},
             )
-        return [self._bank_transaction(bank_id) for bank_id in bank_ids]
+        outflows: list[BankTransaction] = []
+        for bank_id in bank_ids:
+            transaction = self._bank_transaction(bank_id)
+            if _bank_direction(transaction) == "outflow":
+                outflows.append(transaction)
+        if not outflows:
+            raise OaPendingPaymentError(
+                "active_relation_has_no_bank_transaction",
+                "Active relation does not contain an outflow bank transaction.",
+                status_code=HTTPStatus.CONFLICT,
+                details={"case_id": clean_string(relation.get("case_id") or "")},
+            )
+        return outflows
 
     def _relation_amount_check(
         self,

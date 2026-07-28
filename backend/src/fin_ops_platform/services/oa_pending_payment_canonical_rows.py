@@ -424,13 +424,8 @@ def _payment_status_for_amount(
     return lifecycle_policy.evaluate_oa_payment(
         oa_amount=_parse_decimal(oa_amount_value),
         paid_total=_decimal(bank_payload.get("paidTotal")),
-        has_bank=(
-            int(bank_payload.get("linkedRelationCount") or 0) > 0
-            or int(bank_payload.get("missingBankRelationCount") or 0) > 0
-            or int(bank_payload.get("nonOutflowBankRelationCount") or 0) > 0
-        ),
+        has_bank=int(bank_payload.get("linkedRelationCount") or 0) > 0,
         has_missing_bank_relation=int(bank_payload.get("missingBankRelationCount") or 0) > 0,
-        has_non_outflow_bank_relation=int(bank_payload.get("nonOutflowBankRelationCount") or 0) > 0,
     )
 
 
@@ -440,7 +435,6 @@ def _payment_writeback_eligible(oa_amount_value: Any, bank_payload: dict[str, An
         oa_amount is not None
         and int(bank_payload.get("linkedRelationCount") or 0) > 0
         and int(bank_payload.get("missingBankRelationCount") or 0) == 0
-        and int(bank_payload.get("nonOutflowBankRelationCount") or 0) == 0
         and abs(_decimal(bank_payload.get("paidTotal")) - oa_amount) <= CENT
     )
 

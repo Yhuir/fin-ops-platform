@@ -7,77 +7,10 @@ from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusR
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
     PostgresOaPendingPaymentSourceSnapshotRepository,
     _signature,
-    oa_pending_payment_workbench_relation_versions_by_scope,
 )
 
 
 class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
-    def test_workbench_relation_versions_are_set_based_and_scope_exact(self) -> None:
-        connection = RelationVersionConnection()
-
-        versions = oa_pending_payment_workbench_relation_versions_by_scope(
-            connection,
-            scope_keys=["2026-06", "invalid", "2026-05", "2026-06"],
-        )
-
-        self.assertEqual(
-            versions,
-            {
-                "2026-05": {
-                    "oa_pending_payment_workbench_pair_relations_updated_at": "",
-                    "oa_pending_payment_workbench_pair_relation_count": 0,
-                    "oa_pending_payment_workbench_pair_relations_membership_digest": "empty-digest",
-                },
-                "2026-06": {
-                    "oa_pending_payment_workbench_pair_relations_updated_at": (
-                        "2026-07-23 22:55:53.931405+08"
-                    ),
-                    "oa_pending_payment_workbench_pair_relation_count": 2,
-                    "oa_pending_payment_workbench_pair_relations_membership_digest": "membership-v1",
-                },
-            },
-        )
-        self.assertEqual(
-            connection.params,
-            (["2026-06", "2026-05"], "turnover_manual_closure"),
-        )
-        self.assertIn("source.row_id = any(relation.row_ids)", connection.sql)
-        self.assertIn("source.scope_month = to_date(requested.scope_key, 'YYYY-MM')", connection.sql)
-        self.assertIn("relation.status = 'active'", connection.sql)
-        self.assertIn("relation.relation_mode <> %s", connection.sql)
-        self.assertIn("relation.case_id", connection.sql)
-        self.assertIn("relation.row_ids", connection.sql)
-        self.assertIn("relation.row_types", connection.sql)
-        self.assertIn("relation.version", connection.sql)
-        self.assertIn("relation.raw_payload", connection.sql)
-        self.assertIn("relation_count", connection.sql)
-        self.assertIn("membership_digest", connection.sql)
-
-    def test_workbench_relation_membership_proof_changes_when_older_relation_is_withdrawn(self) -> None:
-        connection = RelationMembershipChangeConnection()
-
-        before = oa_pending_payment_workbench_relation_versions_by_scope(
-            connection,
-            scope_keys=["2026-06"],
-        )
-        after = oa_pending_payment_workbench_relation_versions_by_scope(
-            connection,
-            scope_keys=["2026-06"],
-        )
-
-        self.assertEqual(
-            before["2026-06"]["oa_pending_payment_workbench_pair_relations_updated_at"],
-            after["2026-06"]["oa_pending_payment_workbench_pair_relations_updated_at"],
-        )
-        self.assertNotEqual(
-            before["2026-06"]["oa_pending_payment_workbench_pair_relation_count"],
-            after["2026-06"]["oa_pending_payment_workbench_pair_relation_count"],
-        )
-        self.assertNotEqual(
-            before["2026-06"]["oa_pending_payment_workbench_pair_relations_membership_digest"],
-            after["2026-06"]["oa_pending_payment_workbench_pair_relations_membership_digest"],
-        )
-
     def test_complete_snapshot_replaces_status_and_admission_in_one_canonical_transaction(self) -> None:
         connection = FakeConnection()
         pending_relations = FakePendingRelationRepository()
@@ -405,46 +338,6 @@ class FakeConnection:
     def transaction(self) -> FakeTransactionContext:
         self.transaction_count += 1
         return FakeTransactionContext(self)
-
-
-class RelationVersionConnection:
-    def __init__(self) -> None:
-        self.sql = ""
-        self.params: tuple[object, ...] = ()
-
-    def fetch_all(self, sql: str, params: tuple[object, ...]) -> list[dict[str, object]]:
-        self.sql = sql
-        self.params = params
-        return [
-            {
-                "scope_key": "2026-05",
-                "relation_updated_at": "",
-                "relation_count": 0,
-                "membership_digest": "empty-digest",
-            },
-            {
-                "scope_key": "2026-06",
-                "relation_updated_at": "2026-07-23 22:55:53.931405+08",
-                "relation_count": 2,
-                "membership_digest": "membership-v1",
-            },
-        ]
-
-
-class RelationMembershipChangeConnection:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def fetch_all(self, _sql: str, _params: tuple[object, ...]) -> list[dict[str, object]]:
-        self.calls += 1
-        return [
-            {
-                "scope_key": "2026-06",
-                "relation_updated_at": "2026-07-23 22:55:53.931405+08",
-                "relation_count": 2 if self.calls == 1 else 1,
-                "membership_digest": "two-active-relations" if self.calls == 1 else "newer-relation-only",
-            }
-        ]
 
 
 class FakePendingRelationRepository:

@@ -15,6 +15,9 @@ from fin_ops_platform.services.postgres_repositories.page_consumer_relation_audi
     BANK_FLOW_RULE_BATCH_CONSUMER,
     page_consumer_relation_edge_equality_issues,
 )
+from fin_ops_platform.services.postgres_repositories.oa_pending_payment_query import (
+    list_oa_pending_payment_relation_visibility_gaps,
+)
 
 
 @dataclass(frozen=True)
@@ -226,11 +229,12 @@ def _audit_page_business_read_model_snapshot(
     checks: tuple[Callable[[Any, PageAuditContract, str, int], list[AuditIssue]], ...] = (
         (_turnover_ledger_direct_canonical_issues,)
         if contract.domain_key == "turnover_ledger"
+        else (_oa_pending_payment_direct_canonical_issues,)
+        if contract.domain_key == "oa_pending_payments"
         else (_bank_details_direct_canonical_issues,)
         if contract.domain_key in {
             "bank_details",
             "pending_invoices",
-            "oa_pending_payments",
             "input_invoice_usage",
             "output_invoice_collection",
         }
@@ -274,6 +278,11 @@ def _audit_page_business_read_model_snapshot(
                         "single_repeatable_read_snapshot",
                         "canonical_relation_member_existence",
                         "canonical_relation_identity_uniqueness",
+                        *(
+                            ["oa_pending_payment_relation_visibility"]
+                            if contract.domain_key == "oa_pending_payments"
+                            else []
+                        ),
                         *(
                             ["manual_turnover_relation_member_existence"]
                             if contract.domain_key == "turnover_ledger"
@@ -658,6 +667,35 @@ def _bank_details_direct_canonical_issues(
                 message=message,
             )
         )
+    return issues
+
+
+def _oa_pending_payment_direct_canonical_issues(
+    connection: Any,
+    contract: PageAuditContract,
+    tenant_id: str,
+    limit: int,
+) -> list[AuditIssue]:
+    issues = _bank_details_direct_canonical_issues(connection, contract, tenant_id, limit)
+    issues.extend(
+        AuditIssue(
+            severity="error",
+            code="oa_pending_payments_active_outflow_relation_not_visible",
+            message="有效 OA—支出流水关系没有被 OA 待付款 canonical consumer 正确读取。",
+            subject_id=_text(row.get("subject_id")),
+            scope_key=_text(row.get("scope_key")),
+            details={
+                key: _jsonable(value)
+                for key, value in row.items()
+                if key not in {"subject_id", "scope_key"}
+            },
+        )
+        for row in list_oa_pending_payment_relation_visibility_gaps(
+            connection,
+            tenant_id=tenant_id,
+            limit=limit,
+        )
+    )
     return issues
 
 
