@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from dataclasses import asdict, is_dataclass
+from dataclasses import fields, is_dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Callable, Iterator
@@ -733,7 +733,7 @@ def _available_years(bank_rows: list[dict[str, Any]]) -> list[str]:
 
 def _object_payload(value: Any) -> dict[str, Any]:
     if is_dataclass(value):
-        return asdict(value)
+        return {field.name: getattr(value, field.name) for field in fields(value)}
     return dict(value) if isinstance(value, dict) else {}
 
 

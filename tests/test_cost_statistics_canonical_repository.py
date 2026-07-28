@@ -7,6 +7,7 @@ from fin_ops_platform.services.cost_statistics_canonical_repository import (
     LocalCostStatisticsCanonicalRepository,
     PostgresCostStatisticsCanonicalRepository,
 )
+from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 
 
 class _SnapshotTransaction:
@@ -133,6 +134,63 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         )
         self.assertEqual(len(snapshot["cost_groups"]), 1)
         self.assertEqual(snapshot["available_years"], ["2026"])
+
+    def test_snapshot_preserves_canonical_oa_expense_item_fields(self) -> None:
+        expense_items = [
+            {
+                "expense_item_id": "item-1",
+                "project_id": "P-001",
+                "project_name": "项目A",
+                "expense_type": "交通费",
+                "expense_content": "市内交通",
+                "amount": "100.00",
+            }
+        ]
+        oa = OAApplicationRecord(
+            id="oa-exp-1",
+            month="2026-03",
+            section="unpaired",
+            case_id=None,
+            applicant="申请人",
+            project_name="项目A",
+            apply_type="日常报销",
+            amount="100.00",
+            counterparty_name="",
+            reason="市内交通",
+            relation_code="pending_match",
+            relation_label="待关联",
+            relation_tone="warn",
+            workflow_status="completed",
+            expense_items=expense_items,
+        )
+        repository = LocalCostStatisticsCanonicalRepository(
+            bank_rows_provider=lambda: [
+                {
+                    "id": "bank-1",
+                    "amount": "100.00",
+                    "txn_direction": "outflow",
+                    "trade_time": "2026-03-01 12:00:00",
+                }
+            ],
+            relations_provider=lambda: [
+                {
+                    "case_id": "case-1",
+                    "status": "active",
+                    "row_ids": ["oa-exp-1", "bank-1"],
+                    "row_types": ["oa", "bank"],
+                }
+            ],
+            oa_rows_by_ids_provider=lambda _ids: [oa],
+            settings_provider=lambda: {},
+            category_provider=_CategoryProvider(),
+        )
+
+        snapshot = repository.load_snapshot()
+
+        self.assertEqual(
+            snapshot["cost_groups"][0]["oa_rows"][0]["expense_items"],
+            expense_items,
+        )
 
 
 if __name__ == "__main__":
