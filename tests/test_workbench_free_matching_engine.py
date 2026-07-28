@@ -334,6 +334,39 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
         self.assertEqual(blocked.plans, ())
         self.assertEqual(len(allowed.plans), 1)
 
+    def test_legacy_withdrawal_cannot_suppress_immutable_oa_attachment_ownership(self) -> None:
+        oa = fact("oa", "oa-exp-2206", 41_300, evidence=())
+        invoice_amounts = (3_300, 3_300, 6_000, 14_500, 14_200)
+        invoices = tuple(
+            fact(
+                "invoice",
+                f"invoice-attachment-{index}",
+                amount,
+                evidence=(),
+                references=(
+                    FormalRelationReference(
+                        kind="attachment_source",
+                        value=f"derived_from_oa_id:oa-exp-2206:item:{index}",
+                        target_row_type="oa",
+                        target_identity="oa-exp-2206",
+                    ),
+                ),
+            )
+            for index, amount in enumerate(invoice_amounts)
+        )
+        exact = relation_fingerprint((oa.member_key, *(invoice.member_key for invoice in invoices)))
+
+        result = self.engine.plan_relations(
+            batch(oa, *invoices, withdrawals=frozenset({exact}))
+        )
+
+        self.assertEqual(len(result.plans), 1)
+        self.assertEqual(result.plans[0].rule_code, "explicit_unique_reference")
+        self.assertEqual(
+            result.plans[0].oa_attachment_bindings,
+            tuple(("oa-exp-2206", invoice.row_id) for invoice in invoices),
+        )
+
     def test_explicit_reference_can_extend_one_active_relation_without_renaming_it(self) -> None:
         oa = fact("oa", "oa-active", 10_000)
         invoice = fact("invoice", "invoice-active", 10_000)

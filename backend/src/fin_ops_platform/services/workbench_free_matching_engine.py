@@ -7,7 +7,7 @@ import json
 from typing import Iterable, Literal
 
 
-RULE_VERSION = "2026-07-28-deterministic-formal-relation-v3"
+RULE_VERSION = "2026-07-28-deterministic-formal-relation-v4"
 MATCHABLE_ROW_TYPES = frozenset({"oa", "bank", "invoice"})
 ROW_TYPE_ORDER = {"oa": 0, "bank": 1, "invoice": 2}
 STRONG_COMPOSITE_EVIDENCE_KINDS = frozenset(
@@ -499,7 +499,11 @@ class WorkbenchFreeMatchingEngine:
         explicit_only = bool(edges) and all(edge.explicit for edge in edges)
         if explicit_only and self._is_connected(set(ordered), edges):
             fingerprint = relation_fingerprint(ordered)
-            if fingerprint in batch.withdrawal_fingerprints:
+            evidence_kinds = {edge.evidence_kind for edge in edges}
+            if fingerprint in batch.withdrawal_fingerprints and not _is_immutable_oa_attachment_relation(
+                ordered,
+                evidence_kinds,
+            ):
                 return [], "unsafe"
             return [
                 self._plan(
@@ -507,7 +511,7 @@ class WorkbenchFreeMatchingEngine:
                     member_keys=ordered,
                     facts_by_key=facts_by_key,
                     rule_code="explicit_unique_reference",
-                    evidence_kinds={edge.evidence_kind for edge in edges},
+                    evidence_kinds=evidence_kinds,
                 )
             ], "ok"
 
@@ -558,7 +562,11 @@ class WorkbenchFreeMatchingEngine:
         plans: list[FormalRelationPlan] = []
         for candidate in accepted:
             fingerprint = relation_fingerprint(candidate)
-            if fingerprint in batch.withdrawal_fingerprints:
+            evidence_kinds = candidate_evidence[candidate]
+            if fingerprint in batch.withdrawal_fingerprints and not _is_immutable_oa_attachment_relation(
+                candidate,
+                evidence_kinds,
+            ):
                 continue
             plans.append(
                 self._plan(
@@ -566,7 +574,7 @@ class WorkbenchFreeMatchingEngine:
                     member_keys=tuple(sorted(candidate, key=_member_sort_key)),
                     facts_by_key=facts_by_key,
                     rule_code="strong_evidence_exact_closure",
-                    evidence_kinds=candidate_evidence[candidate],
+                    evidence_kinds=evidence_kinds,
                 )
             )
         return plans, "ok" if plans else "unsafe"
@@ -698,6 +706,14 @@ def _within_composite_window(left: date | None, right: date | None) -> bool:
     if left is None or right is None:
         return False
     return abs((left - right).days) <= 365
+
+
+def _is_immutable_oa_attachment_relation(
+    member_keys: Iterable[MemberKey],
+    evidence_kinds: set[str],
+) -> bool:
+    row_types = {row_type for row_type, _identity in member_keys}
+    return row_types == {"oa", "invoice"} and evidence_kinds == {"attachment_source"}
 
 
 def _member_sort_key(member_key: MemberKey) -> tuple[int, str]:
