@@ -1613,6 +1613,7 @@ class EtcService:
                     expected_oa_row_id=expected_oa_row_id,
                 )
             )
+            stored_oa_row_id = str(batch.oa_row_id or submission_batch.linked_oa_row_id or "").strip()
             return {
                 "business_batch_id": batch.business_batch_id,
                 "task_id": batch.task_id,
@@ -1621,8 +1622,8 @@ class EtcService:
                 "version": batch.version,
                 "submission_batch_id": submission_batch.id,
                 "external_etc_batch_id": batch.external_etc_batch_id,
-                "stored_oa_row_id": batch.oa_row_id,
-                "oa_row_id": str(canonical_oa_row_id or "").strip() or batch.oa_row_id,
+                "stored_oa_row_id": stored_oa_row_id,
+                "oa_row_id": str(canonical_oa_row_id or "").strip() or stored_oa_row_id,
                 "invoice_count": len(invoices),
                 "invoice_total": _amount_text(
                     sum((invoice.total_amount for invoice in invoices), Decimal("0.00")).quantize(Decimal("0.01"))
@@ -1753,7 +1754,14 @@ class EtcService:
                 code="business_batch_restore_invoice_total_mismatch",
             )
         normalized_oa_row_id = str(expected_oa_row_id or "").strip()
-        stored_oa_row_id = str(batch.oa_row_id or "").strip()
+        business_oa_row_id = str(batch.oa_row_id or "").strip()
+        submission_oa_row_id = str(submission_batch.linked_oa_row_id or "").strip()
+        if business_oa_row_id and submission_oa_row_id and business_oa_row_id != submission_oa_row_id:
+            raise EtcBusinessBatchInvalidTransitionError(
+                "Deleted ETC business batch and submission batch disagree on the OA row.",
+                code="business_batch_restore_oa_evidence_conflict",
+            )
+        stored_oa_row_id = business_oa_row_id or submission_oa_row_id
         if not stored_oa_row_id or (normalized_oa_row_id and stored_oa_row_id != normalized_oa_row_id):
             raise EtcBusinessBatchInvalidTransitionError(
                 "Deleted ETC business batch OA row does not match the approved restore.",

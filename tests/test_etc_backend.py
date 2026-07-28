@@ -1106,6 +1106,7 @@ class EtcServiceTests(unittest.TestCase):
 
             tombstone = service._business_batches[business_batch.business_batch_id]
             service._reset_submitted_business_batch_for_delete(tombstone, reason="legacy reset before guard")
+            tombstone.oa_row_id = None
             preview = service.preview_deleted_submitted_business_batch_restore(
                 business_batch.business_batch_id,
                 expected_invoice_count=2,
@@ -1113,6 +1114,7 @@ class EtcServiceTests(unittest.TestCase):
                 expected_oa_row_id="oa-source-0004",
                 canonical_oa_row_id="oa-pay-2200",
             )
+            self.assertEqual(preview["stored_oa_row_id"], "oa-source-0004")
             restored = service.restore_deleted_submitted_business_batch(
                 business_batch.business_batch_id,
                 expected_version=int(preview["version"]),
