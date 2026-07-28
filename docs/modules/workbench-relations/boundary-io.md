@@ -17,7 +17,7 @@ Release A 已移除旧 `read_model.workbench_candidate_matches`、`read_model.wo
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | manual command | Workbench/业务 owner API | canonical typed row ids、actor、tenant、idempotency、expected versions、note |
-| formal auto plan | matching orchestrator | immutable `FormalRelationPlan`：case/member set/fingerprint/rule/evidence/amount/scope/batch hash |
+| formal auto plan | matching orchestrator | immutable `FormalRelationPlan`：case/member set/fingerprint/rule/evidence/amount/scope/batch hash；OA 显式 source reference 必须先经父 OA 自身 alias map 归一为 canonical typed identity，计划携带由 `attachment_source` 直接证明的 exact `(parent OA row id, invoice row id)` binding |
 | current snapshot | relation repository | active + relevant historical facts，必须在 UoW transaction 中加载 |
 | active case validation | relation repository | 只按 canonical case id 读取一条 active relation，不加载 history；只供进入事务前的 scope/owner 校验，真正 mutation 仍在事务内加锁并加载相关 history |
 | active member overlap validation | relation repository | confirm 按目标 row ids/case ids 一次读取 active relations，不读取 cancelled relation 或 history；不得用通用 current+history snapshot 代替 |
@@ -58,6 +58,7 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 - 任意 `N:M:K` member set 都合法，只要上游业务规则已证明安全并且成员非空、唯一、typed。
 - 自动扩展既有 active case 必须使用 `target_case_id` 并原子 replace；不得创建重叠的第二条 active relation。
 - 精确 typed member set 的人工撤回历史阻止 deterministic engine 自动重建同一关系。
+- OA 附件 binding 写入 `special_metadata.oa_attachment_bindings`；纯 OA+附件关系不可撤回，混合关系撤回或扩展时必须恢复 exact binding。canonical invoice row id 不要求 `oa-att-inv-*` 前缀，旧前缀识别只作为历史兼容，不得替代显式 binding metadata。
 - 同轮 deterministic relation 创建/扩展必须在首次保存前合并 ETC metadata；已有 active relation 的补全必须是一次 changed-case save。canonical revalidation 冲突时整批回滚，不允许部分写。
 - manual confirm 与 deterministic matching 必须在 relation UoW 写入前，通过 bank-tag read facade 的一次批量 fresh I/O 冻结 requirement metadata；non-fresh 或任一 bank row 缺失时整批不写。读投影不得回查 settings、不得按 row 逐条读取标签。
 

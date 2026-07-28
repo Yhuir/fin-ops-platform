@@ -7,6 +7,9 @@ from typing import Any, Callable
 
 from fin_ops_platform.services.bank_batch_service import BANK_FLOW_RULE_BATCH_RELATION_MODE
 from fin_ops_platform.services.no_oa_bank_batch_service import NO_OA_BANK_BATCH_RELATION_MODE
+from fin_ops_platform.services.oa_attachment_invoice_linking import (
+    canonical_oa_expense_item_id,
+)
 from fin_ops_platform.services.workbench_relation_requirements import (
     evaluate_bank_relation_completion,
 )
@@ -171,6 +174,7 @@ class WorkbenchRelationGroupingService:
         )
         zone = "paired" if completion["is_complete"] else "unpaired"
         rows = [self._relation_row(rows_by_id[row_id], relation, zone=zone) for row_id in relation["row_ids"]]
+        self._normalize_oa_attachment_expense_item_ids(rows)
         group = self._base_group(
             group_id=f"case:{case_id}",
             group_type="relation",
@@ -194,6 +198,32 @@ class WorkbenchRelationGroupingService:
         if relation_mode in {NO_OA_BANK_BATCH_RELATION_MODE, BANK_FLOW_RULE_BATCH_RELATION_MODE}:
             self._apply_bank_batch_summary(group, relation_mode=relation_mode, zone=zone)
         return group
+
+    @staticmethod
+    def _normalize_oa_attachment_expense_item_ids(rows: list[dict[str, Any]]) -> None:
+        oa_rows = [row for row in rows if str(row.get("type") or "").strip() == "oa"]
+        for invoice_row in (
+            row
+            for row in rows
+            if str(row.get("type") or "").strip() == "invoice"
+            and str(row.get("source_kind") or "").strip() == "oa_attachment_invoice"
+        ):
+            matches = {
+                (str(oa_row.get("id") or "").strip(), canonical_item_id)
+                for oa_row in oa_rows
+                if (
+                    canonical_item_id := canonical_oa_expense_item_id(
+                        oa_row=oa_row,
+                        invoice_row=invoice_row,
+                    )
+                )
+            }
+            if len(matches) != 1:
+                continue
+            oa_row_id, canonical_item_id = next(iter(matches))
+            invoice_row["source_oa_id"] = oa_row_id
+            invoice_row["source_oa_row_id"] = oa_row_id
+            invoice_row["source_expense_item_id"] = canonical_item_id
 
     @staticmethod
     def _relation_row(row: dict[str, Any], relation: dict[str, Any], *, zone: str) -> dict[str, Any]:

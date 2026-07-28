@@ -7,7 +7,7 @@ import json
 from typing import Iterable, Literal
 
 
-RULE_VERSION = "2026-07-14-deterministic-formal-relation-v1"
+RULE_VERSION = "2026-07-28-deterministic-formal-relation-v2"
 MATCHABLE_ROW_TYPES = frozenset({"oa", "bank", "invoice"})
 ROW_TYPE_ORDER = {"oa": 0, "bank": 1, "invoice": 2}
 STRONG_COMPOSITE_EVIDENCE_KINDS = frozenset(
@@ -218,6 +218,7 @@ class FormalRelationPlan:
     evidence_summary: tuple[tuple[str, str], ...]
     batch_hash: str
     target_case_id: str | None = None
+    oa_attachment_bindings: tuple[tuple[str, str], ...] = ()
 
     @property
     def idempotency_key(self) -> str:
@@ -665,6 +666,15 @@ class WorkbenchFreeMatchingEngine:
             ("member_count", str(len(members))),
             ("pane_count", str(len({row_type for row_type, _identity in members}))),
         )
+        attachment_bindings = {
+            (row_ids_by_key[target], fact.row_id)
+            for fact in member_facts
+            if fact.row_type == "invoice"
+            for reference in fact.references
+            if reference.kind == "attachment_source"
+            and (target := reference.target_member_key) in members
+            and target in row_ids_by_key
+        }
         return FormalRelationPlan(
             case_id=target_case_id or f"CASE-AUTO-{fingerprint[:20].upper()}",
             member_keys=members,
@@ -680,6 +690,7 @@ class WorkbenchFreeMatchingEngine:
             evidence_summary=evidence_summary,
             batch_hash=batch.batch_hash,
             target_case_id=target_case_id,
+            oa_attachment_bindings=tuple(sorted(attachment_bindings)),
         )
 
 

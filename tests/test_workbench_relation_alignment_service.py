@@ -73,6 +73,37 @@ class WorkbenchRelationAlignmentServiceTests(unittest.TestCase):
         )
         self.assertEqual(alignment["unresolved_row_ids"], [])
 
+    def test_resolves_attachment_source_alias_to_canonical_oa_row(self) -> None:
+        service = WorkbenchRelationAlignmentService()
+        rows_by_id = {
+            "oa-exp-2206": {
+                **oa_row("oa-exp-2206", "413.00"),
+                "detail_fields": {"Mongo文档ID": "6a0ee8613bb8164165d8c61a"},
+            },
+            "inv_imported_0058": invoice_row(
+                "inv_imported_0058",
+                "60.00",
+                derived_from_oa_id="oa-exp-6a0ee8613bb8164165d8c61a:item:2:9ca59ea6e4ab",
+            ),
+        }
+
+        alignment = service.align_relation(
+            rows_by_id=rows_by_id,
+            relation={"case_id": "CASE-OA-ALIAS", "row_ids": list(rows_by_id)},
+        )
+
+        self.assertEqual(
+            alignment["links"],
+            [
+                {
+                    "oa_row_id": "oa-exp-2206",
+                    "bank_row_ids": [],
+                    "invoice_row_ids": ["inv_imported_0058"],
+                    "evidence": ["invoice_source_oa", "same_active_relation"],
+                }
+            ],
+        )
+
     def test_leaves_ambiguous_duplicate_amounts_unresolved_instead_of_guessing(self) -> None:
         service = WorkbenchRelationAlignmentService()
         rows_by_id = {

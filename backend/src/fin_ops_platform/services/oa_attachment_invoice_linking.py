@@ -3,6 +3,25 @@ from __future__ import annotations
 from typing import Any
 
 
+OA_SOURCE_ALIAS_FIELD_NAMES = (
+    "id",
+    "row_id",
+    "oa_row_id",
+    "oa_id",
+    "source_oa_row_id",
+    "object_identity_key",
+    "Mongo文档ID",
+    "mongo_document_id",
+    "document_id",
+    "_id",
+    "OA单号",
+    "流程请求ID",
+    "oa_number",
+    "request_id",
+    "external_id",
+)
+
+
 def oa_attachment_parent_oa_id(source_id: object) -> str:
     value = str(source_id or "").strip()
     if not value:
@@ -46,27 +65,123 @@ def oa_attachment_source_ids(row: dict[str, Any]) -> list[str]:
 
 def oa_row_source_ids(row: dict[str, Any]) -> list[str]:
     source_ids: list[str] = []
-    for field_name in ("id", "row_id", "oa_row_id", "oa_id", "source_oa_row_id", "object_identity_key"):
+    identity_values: list[str] = []
+    for field_name in (
+        "canonical_object_identity",
+        "id",
+        "row_id",
+        "oa_row_id",
+        "oa_id",
+        "source_oa_row_id",
+        "object_identity_key",
+    ):
         value = str(row.get(field_name) or "").strip()
         if value:
             source_ids.append(value)
+            identity_values.append(value)
 
-    for container_name in ("detail_fields", "summary_fields", "metadata"):
-        container = row.get(container_name)
-        if not isinstance(container, dict):
-            continue
-        for field_name in ("Mongo文档ID", "mongo_document_id", "document_id", "_id"):
-            value = str(container.get(field_name) or "").strip()
+    payload = row.get("normalized_payload")
+    containers = [row, payload] if isinstance(payload, dict) else [row]
+    prefixes = {
+        prefix
+        for value in identity_values
+        for prefix in ("oa-exp", "oa-pay")
+        if value.startswith(f"{prefix}-")
+    } or {"oa-exp"}
+    for parent in containers:
+        for field_name in ("oa_row_id", "oa_id", "source_oa_row_id", "object_identity_key"):
+            value = str(parent.get(field_name) or "").strip()
             if value:
                 source_ids.append(value)
-                source_ids.append(f"oa-exp-{value}")
-        for field_name in ("OA单号", "流程请求ID", "oa_number", "request_id", "external_id"):
-            value = str(container.get(field_name) or "").strip()
-            if value:
-                source_ids.append(value)
-                source_ids.append(f"oa-exp-{value}")
+        for container_name in ("detail_fields", "summary_fields", "metadata"):
+            container = parent.get(container_name)
+            if not isinstance(container, dict):
+                continue
+            _append_external_oa_ids(source_ids, container, prefixes=prefixes)
+        _append_external_oa_ids(source_ids, parent, prefixes=prefixes)
 
     return _dedupe(source_ids)
+
+
+def oa_row_source_alias_map(rows: list[dict[str, Any]]) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for row in rows:
+        canonical = str(
+            row.get("canonical_object_identity")
+            or row.get("id")
+            or row.get("row_id")
+            or ""
+        ).strip()
+        if not canonical:
+            raise ValueError("Canonical OA row identity is required for source alias mapping.")
+        for alias in oa_row_source_ids(row):
+            prior = aliases.setdefault(alias, canonical)
+            if prior != canonical:
+                raise ValueError(
+                    f"OA source alias {alias} resolves to multiple canonical rows: {prior},{canonical}."
+                )
+    return aliases
+
+
+def canonical_oa_expense_item_id(
+    *,
+    oa_row: dict[str, Any],
+    invoice_row: dict[str, Any],
+) -> str:
+    source_item_id = _first_field_value(invoice_row, "source_expense_item_id")
+    if not source_item_id:
+        return ""
+    if oa_attachment_parent_oa_id(source_item_id) not in set(oa_row_source_ids(oa_row)):
+        return ""
+
+    source_row_index = _first_field_value(invoice_row, "source_expense_row_index")
+    if not source_row_index:
+        parts = source_item_id.split(":item:", 1)
+        source_row_index = parts[1].split(":", 1)[0] if len(parts) == 2 else ""
+    if not source_row_index:
+        return ""
+
+    matches = {
+        str(item.get("id") or item.get("expense_item_id") or "").strip()
+        for item in list(oa_row.get("expense_items") or [])
+        if isinstance(item, dict)
+        and str(item.get("row_index") if item.get("row_index") is not None else "").strip()
+        == source_row_index
+        and str(item.get("id") or item.get("expense_item_id") or "").strip()
+    }
+    return next(iter(matches)) if len(matches) == 1 else ""
+
+
+def _append_external_oa_ids(
+    source_ids: list[str],
+    container: dict[str, Any],
+    *,
+    prefixes: set[str],
+) -> None:
+    for field_name in ("Mongo文档ID", "mongo_document_id", "document_id", "_id"):
+        value = str(container.get(field_name) or "").strip()
+        if value:
+            source_ids.append(value)
+            source_ids.extend(f"{prefix}-{value}" for prefix in prefixes)
+    for field_name in ("OA单号", "流程请求ID", "oa_number", "request_id", "external_id"):
+        value = str(container.get(field_name) or "").strip()
+        if value:
+            source_ids.append(value)
+            source_ids.extend(f"{prefix}-{value}" for prefix in prefixes)
+
+
+def _first_field_value(row: dict[str, Any], field_name: str) -> str:
+    for container in (
+        row,
+        row.get("detail_fields"),
+        row.get("metadata"),
+    ):
+        if not isinstance(container, dict):
+            continue
+        value = str(container.get(field_name) or "").strip()
+        if value:
+            return value
+    return ""
 
 
 def oa_attachment_matches_oa(row: dict[str, Any], oa_row_id: object) -> bool:

@@ -3,7 +3,10 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
-from fin_ops_platform.services.oa_attachment_invoice_linking import oa_attachment_parent_oa_id
+from fin_ops_platform.services.oa_attachment_invoice_linking import (
+    oa_attachment_parent_oa_id,
+    oa_row_source_alias_map,
+)
 
 
 MAX_BANK_SUM_ROWS = 6
@@ -28,7 +31,7 @@ class WorkbenchRelationAlignmentService:
         bank_rows = [row for row in scoped_rows if self._row_type(row) == "bank"]
         invoice_rows = [row for row in scoped_rows if self._row_type(row) == "invoice"]
         oa_ids = [self._row_id(row) for row in oa_rows if self._row_id(row)]
-        oa_id_set = set(oa_ids)
+        oa_aliases = oa_row_source_alias_map(oa_rows)
         links_by_oa: dict[str, dict[str, Any]] = {}
         diagnostics: list[dict[str, Any]] = []
         unresolved_row_ids: list[str] = []
@@ -37,7 +40,7 @@ class WorkbenchRelationAlignmentService:
 
         for invoice_row in invoice_rows:
             invoice_id = self._row_id(invoice_row)
-            source_oa_id = self._source_oa_id(invoice_row, oa_id_set)
+            source_oa_id = self._source_oa_id(invoice_row, oa_aliases)
             if not invoice_id or not source_oa_id:
                 continue
             link = self._link_for_oa(links_by_oa, source_oa_id)
@@ -126,17 +129,17 @@ class WorkbenchRelationAlignmentService:
         return str(row.get("id") or row.get("row_id") or "").strip()
 
     @classmethod
-    def _source_oa_id(cls, row: dict[str, Any], oa_ids: set[str]) -> str:
+    def _source_oa_id(cls, row: dict[str, Any], oa_aliases: dict[str, str]) -> str:
         for key in ("derived_from_oa_id", "source_oa_id", "source_oa_row_id", "oa_row_id", "oa_id"):
             value = oa_attachment_parent_oa_id(row.get(key))
-            if value in oa_ids:
-                return value
+            if value in oa_aliases:
+                return oa_aliases[value]
         detail_fields = row.get("detail_fields")
         if isinstance(detail_fields, dict):
             for key in ("derived_from_oa_id", "source_oa_id", "source_oa_row_id", "oa_row_id", "oa_id"):
                 value = oa_attachment_parent_oa_id(detail_fields.get(key))
-                if value in oa_ids:
-                    return value
+                if value in oa_aliases:
+                    return oa_aliases[value]
         return ""
 
     @classmethod

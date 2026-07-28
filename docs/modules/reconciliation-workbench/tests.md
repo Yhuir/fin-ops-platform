@@ -78,6 +78,7 @@
 - `tests/test_workbench_formal_relation_repository.py`
 - `tests/test_workbench_matching_orchestrator.py`
 - `tests/test_workbench_relation_grouping.py`
+- `tests/test_workbench_relation_alignment_service.py`
 - `tests/test_workbench_sql_runtime.py`
 - `tests/test_workbench_v2_api.py`
 - `tests/test_workbench_query_service.py`
@@ -94,6 +95,7 @@
 - 13 张合计 1709.49 元发票保持 13 个 unpaired singleton。
 - `paired ∩ unpaired = ∅`，`paired ∪ unpaired = canonical identities`。
 - 装饰字段、输入顺序和旧 candidate/decision metadata 不改变 membership/group id。
+- OA 附件来源 alias 与 canonical OA row id 不同的情况下，正式关系 alignment 仍指向 canonical OA；复合行只按显式 source item + 唯一 row index 映射 canonical expense item id，且不修改 canonical 发票来源字段。
 - 同金额竞争、exact single 与 exact sum 竞争、duplicate reference、currency/direction mismatch、fuzzy/date-only evidence 均不写关系。
 - 显式引用跨全部历史；组合证据 365 天接受、366 天拒绝。
 - 超过六个成员和 2:2:2 均能在有界唯一闭合时形成一条正式关系。

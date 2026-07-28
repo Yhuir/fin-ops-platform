@@ -417,6 +417,60 @@ class WorkbenchPairRelationServiceTests(unittest.TestCase):
             preview["after_relations"][0]["special_metadata"]["contains_immutable_oa_attachment_binding"]
         )
 
+    def test_withdraw_preserves_declared_attachment_binding_for_canonical_invoice_id(self) -> None:
+        service = WorkbenchPairRelationService()
+        attachment = service.create_active_relation(
+            case_id="CASE-OA-ATT-2206",
+            row_ids=["oa-exp-2206", "inv_imported_0058"],
+            row_types=["oa", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="system:workbench-matching",
+            month_scope="2026-05",
+            special_metadata={
+                "source": "oa_attachment_invoice",
+                "immutable_oa_attachment_binding": True,
+                "contains_immutable_oa_attachment_binding": True,
+                "parent_oa_row_id": "oa-exp-2206",
+                "oa_attachment_bindings": [
+                    {
+                        "parent_oa_row_id": "oa-exp-2206",
+                        "invoice_row_ids": ["inv_imported_0058"],
+                    }
+                ],
+            },
+        )
+        service.replace_with_confirmed_relation(
+            case_id="CASE-OA-BANK-2206",
+            row_ids=["oa-exp-2206", "txn-2206", "inv_imported_0058"],
+            row_types=["oa", "bank", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="system:workbench-matching",
+            month_scope="2026-05",
+            before_relations=[attachment],
+            special_metadata={
+                "contains_immutable_oa_attachment_binding": True,
+                "oa_attachment_bindings": [
+                    {
+                        "parent_oa_row_id": "oa-exp-2206",
+                        "invoice_row_ids": ["inv_imported_0058"],
+                    }
+                ],
+            },
+        )
+
+        preview = service.preview_withdraw_for_row_ids(["txn-2206"])
+
+        self.assertEqual(len(preview["after_relations"]), 1)
+        self.assertEqual(
+            preview["after_relations"][0]["row_ids"],
+            ["oa-exp-2206", "inv_imported_0058"],
+        )
+        self.assertTrue(
+            preview["after_relations"][0]["special_metadata"][
+                "immutable_oa_attachment_binding"
+            ]
+        )
+
     def test_withdraw_rejects_plain_oa_attachment_binding_relation(self) -> None:
         service = WorkbenchPairRelationService()
         service.create_active_relation(

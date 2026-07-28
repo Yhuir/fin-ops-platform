@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from types import SimpleNamespace
 import unittest
 
 from fin_ops_platform.services.workbench_relation_command_service import (
@@ -894,6 +895,49 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         saved_relation = repository.save_calls[0]["snapshot"]["pair_relations"]["case-no-oa"]
         self.assertEqual(saved_relation["evidence"]["row_count"], 1)
         self.assertEqual(saved_relation["display_tags"], ["免OA", "手续费"])
+
+    def test_formal_attachment_plan_persists_exact_immutable_binding_for_canonical_invoice_id(self) -> None:
+        repository = FakeRelationRepository()
+        service = WorkbenchRelationCommandService(relation_repository=repository)
+        plan = SimpleNamespace(
+            case_id="CASE-OA-ATT-2206",
+            row_ids=("oa-exp-2206", "inv_imported_0058"),
+            row_types=("oa", "invoice"),
+            relation_fingerprint="fingerprint-2206",
+            batch_hash="batch-2206",
+            rule_code="explicit_unique_reference",
+            rule_version="2026-07-28-deterministic-formal-relation-v2",
+            amount_minor=0,
+            currency="CNY",
+            scope_keys=("2026-05",),
+            evidence_summary=(("evidence_kinds", "attachment_source"),),
+            target_case_id=None,
+            oa_attachment_bindings=(("oa-exp-2206", "inv_imported_0058"),),
+        )
+
+        result = service.confirm_formal_relation_plans(
+            [plan],
+            actor_id="system:workbench-matching",
+        )
+
+        relation = result["relations"][0]
+        self.assertEqual(
+            relation["special_metadata"]["oa_attachment_bindings"],
+            [
+                {
+                    "parent_oa_row_id": "oa-exp-2206",
+                    "invoice_row_ids": ["inv_imported_0058"],
+                }
+            ],
+        )
+        self.assertTrue(
+            relation["special_metadata"]["immutable_oa_attachment_binding"]
+        )
+        preview = service.preview_withdraw_relation(
+            row_ids=["oa-exp-2206", "inv_imported_0058"],
+            month_scope="2026-05",
+        )
+        self.assertFalse(preview["can_submit"])
 
     def test_confirm_relation_preserves_explicit_row_alignment_metadata(self) -> None:
         repository = FakeRelationRepository()

@@ -292,8 +292,110 @@ class PostgresWorkbenchFormalRelationFactRepositoryTests(unittest.TestCase):
 
         self.assertEqual({fact.member_key for fact in result.facts}, {("invoice", "inv-1"), ("oa", "oa-history")})
         self.assertEqual(len(connection.queries), 6)
-        history_query = [query for query, params in connection.queries if "app.oa_applications" in query and params == (["oa-history"],)]
+        history_query = [
+            query
+            for query, params in connection.queries
+            if "app.oa_applications" in query and params[0] == ["oa-history"]
+        ]
         self.assertEqual(len(history_query), 1)
+
+    def test_oa_source_alias_is_canonicalized_before_formal_matching(self) -> None:
+        source_alias = "6a0ee8613bb8164165d8c61a"
+        connection = FakeConnection(
+            oa_rows=[
+                oa_row(
+                    "oa-exp-2206",
+                    amount=Decimal("413.00"),
+                    payload={
+                        "apply_type": "日常报销",
+                        "detail_fields": {
+                            "Mongo文档ID": source_alias,
+                            "OA单号": "2206",
+                        },
+                    },
+                )
+            ],
+            invoice_rows=[
+                invoice_row(
+                    "inv_imported_0058",
+                    total_with_tax=Decimal("60.00"),
+                    source_links=[
+                        {
+                            "source_kind": "oa_attachment_invoice",
+                            "metadata": {
+                                "derived_from_oa_id": f"oa-exp-{source_alias}:item:2:9ca59ea6e4ab",
+                            },
+                        }
+                    ],
+                )
+            ],
+        )
+
+        result = PostgresWorkbenchFormalRelationFactRepository(connection).load_batch(["2026-05"])
+        invoice = next(fact for fact in result.facts if fact.row_type == "invoice")
+
+        self.assertEqual(
+            {
+                reference.target_member_key
+                for reference in invoice.references
+                if reference.kind == "attachment_source"
+            },
+            {("oa", "oa-exp-2206")},
+        )
+
+    def test_historical_oa_source_alias_lookup_is_exact_and_canonicalized(self) -> None:
+        source_alias = "6a0ee8613bb8164165d8c61a"
+        connection = FakeConnection(
+            invoice_rows=[
+                invoice_row(
+                    source_links=[
+                        {
+                            "source_kind": "oa_attachment_invoice",
+                            "metadata": {
+                                "derived_from_oa_id": f"oa-exp-{source_alias}:item:2:9ca59ea6e4ab",
+                            },
+                        }
+                    ]
+                )
+            ],
+            historical_oa_rows=[
+                oa_row(
+                    "oa-exp-2206",
+                    payload={
+                        "apply_type": "日常报销",
+                        "detail_fields": {"Mongo文档ID": source_alias},
+                    },
+                )
+            ],
+        )
+
+        result = PostgresWorkbenchFormalRelationFactRepository(connection).load_batch(["2026-05"])
+
+        self.assertEqual(
+            {fact.member_key for fact in result.facts},
+            {("invoice", "inv-1"), ("oa", "oa-exp-2206")},
+        )
+        historical_params = next(
+            params
+            for query, params in connection.queries
+            if "jsonb_each_text" in query
+        )
+        self.assertIn(source_alias, historical_params[2])
+
+    def test_conflicting_oa_source_aliases_fail_closed(self) -> None:
+        payload = {
+            "apply_type": "日常报销",
+            "detail_fields": {"Mongo文档ID": "duplicate-source-id"},
+        }
+        connection = FakeConnection(
+            oa_rows=[
+                oa_row("oa-exp-2206", payload=payload),
+                oa_row("oa-exp-2207", payload=payload),
+            ]
+        )
+
+        with self.assertRaisesRegex(ValueError, "resolves to multiple canonical rows"):
+            PostgresWorkbenchFormalRelationFactRepository(connection).load_batch(["2026-05"])
 
     def test_active_relation_and_historical_case_prefix_are_stable_typed_anchors(self) -> None:
         connection = FakeConnection(

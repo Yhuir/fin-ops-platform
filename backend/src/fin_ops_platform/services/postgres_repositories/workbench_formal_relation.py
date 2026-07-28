@@ -7,6 +7,10 @@ from typing import Any, Iterable
 
 from fin_ops_platform.services.postgres_repositories.common import row_payload, text
 from fin_ops_platform.services.postgres_repositories.oa_projection import COMPLETED_WORKFLOW_STATUS_SQL
+from fin_ops_platform.services.oa_attachment_invoice_linking import (
+    OA_SOURCE_ALIAS_FIELD_NAMES,
+    oa_row_source_alias_map,
+)
 from fin_ops_platform.services.workbench_free_matching_engine import (
     ActiveFormalRelationAnchor,
     FormalRelationFact,
@@ -147,15 +151,28 @@ class PostgresWorkbenchFormalRelationFactRepository:
             (start_date, end_date),
         )
 
-        initial_facts = _facts_from_rows(oa_rows=oa_rows, bank_rows=bank_rows, invoice_rows=invoice_rows)
+        current_oa_aliases = oa_row_source_alias_map(oa_rows)
+        initial_facts = _facts_from_rows(
+            oa_rows=oa_rows,
+            bank_rows=bank_rows,
+            invoice_rows=invoice_rows,
+            oa_aliases=current_oa_aliases,
+        )
         target_ids = _explicit_target_ids(initial_facts)
         historical_rows = self._load_historical_targets(target_ids)
+        all_oa_aliases = oa_row_source_alias_map([*oa_rows, *historical_rows["oa"]])
         facts = _merge_facts(
-            initial_facts,
+            _facts_from_rows(
+                oa_rows=oa_rows,
+                bank_rows=bank_rows,
+                invoice_rows=invoice_rows,
+                oa_aliases=all_oa_aliases,
+            ),
             _facts_from_rows(
                 oa_rows=historical_rows["oa"],
                 bank_rows=historical_rows["bank"],
                 invoice_rows=historical_rows["invoice"],
+                oa_aliases=all_oa_aliases,
             ),
         )
 
@@ -453,6 +470,7 @@ class PostgresWorkbenchFormalRelationFactRepository:
 
     def _load_historical_targets(self, target_ids: dict[str, set[str]]) -> dict[str, list[dict[str, Any]]]:
         oa_ids = sorted(target_ids["oa"])
+        oa_alias_values = _oa_alias_lookup_values(oa_ids)
         bank_ids = sorted(target_ids["bank"])
         invoice_ids = sorted(target_ids["invoice"])
         oa_rows = self._connection.fetch_all(
@@ -472,14 +490,33 @@ class PostgresWorkbenchFormalRelationFactRepository:
                 normalized_payload,
                 greatest(updated_at, synced_at) as source_version
             from app.oa_applications
-            where row_id = any(%s::text[])
+            where (
+                    row_id = any(%s::text[])
+                    or exists (
+                        select 1
+                        from (
+                            values
+                                (case when jsonb_typeof(normalized_payload) = 'object'
+                                      then normalized_payload else '{}'::jsonb end),
+                                (case when jsonb_typeof(normalized_payload->'detail_fields') = 'object'
+                                      then normalized_payload->'detail_fields' else '{}'::jsonb end),
+                                (case when jsonb_typeof(normalized_payload->'summary_fields') = 'object'
+                                      then normalized_payload->'summary_fields' else '{}'::jsonb end),
+                                (case when jsonb_typeof(normalized_payload->'metadata') = 'object'
+                                      then normalized_payload->'metadata' else '{}'::jsonb end)
+                        ) as source_containers(payload)
+                        cross join lateral jsonb_each_text(source_containers.payload) as source_alias(field_name, field_value)
+                        where source_alias.field_name = any(%s::text[])
+                          and source_alias.field_value = any(%s::text[])
+                    )
+              )
               and status <> 'deleted'
               and """
             + COMPLETED_WORKFLOW_STATUS_SQL
             + """
             order by row_id
             """,
-            (oa_ids,),
+            (oa_ids, list(OA_SOURCE_ALIAS_FIELD_NAMES), oa_alias_values),
         ) if oa_ids else []
         bank_rows = self._connection.fetch_all(
             """
@@ -548,18 +585,23 @@ def _facts_from_rows(
     oa_rows: Iterable[dict[str, Any]],
     bank_rows: Iterable[dict[str, Any]],
     invoice_rows: Iterable[dict[str, Any]],
+    oa_aliases: dict[str, str] | None = None,
 ) -> tuple[FormalRelationFact, ...]:
     facts: list[FormalRelationFact] = []
     for row in oa_rows:
-        facts.append(_oa_fact(row))
+        facts.append(_oa_fact(row, oa_aliases=oa_aliases))
     for row in bank_rows:
-        facts.append(_bank_fact(row))
+        facts.append(_bank_fact(row, oa_aliases=oa_aliases))
     for row in invoice_rows:
-        facts.append(_invoice_fact(row))
+        facts.append(_invoice_fact(row, oa_aliases=oa_aliases))
     return tuple(facts)
 
 
-def _oa_fact(row: dict[str, Any]) -> FormalRelationFact:
+def _oa_fact(
+    row: dict[str, Any],
+    *,
+    oa_aliases: dict[str, str] | None = None,
+) -> FormalRelationFact:
     payload = row_payload(row, "normalized_payload")
     payload = payload if isinstance(payload, dict) else {}
     detail = payload.get("detail_fields") if isinstance(payload.get("detail_fields"), dict) else {}
@@ -584,12 +626,16 @@ def _oa_fact(row: dict[str, Any]) -> FormalRelationFact:
         direction=direction,
         fact_date=_date_value(row.get("fact_date")),
         evidence_keys=evidence,
-        references=_references_from_payload(payload),
+        references=_references_from_payload(payload, oa_aliases=oa_aliases),
         source_version=_source_version(row),
     )
 
 
-def _bank_fact(row: dict[str, Any]) -> FormalRelationFact:
+def _bank_fact(
+    row: dict[str, Any],
+    *,
+    oa_aliases: dict[str, str] | None = None,
+) -> FormalRelationFact:
     direction = _bank_direction(row.get("txn_direction"), row.get("signed_amount"))
     if direction not in _MATCHABLE_DIRECTIONS:
         raise ValueError(f"Unsupported bank transaction direction for {_required_row_id(row)}.")
@@ -611,12 +657,16 @@ def _bank_fact(row: dict[str, Any]) -> FormalRelationFact:
         direction=direction,
         fact_date=_date_value(row.get("fact_date")),
         evidence_keys=evidence,
-        references=_references_from_payload(payload),
+        references=_references_from_payload(payload, oa_aliases=oa_aliases),
         source_version=_source_version(row),
     )
 
 
-def _invoice_fact(row: dict[str, Any]) -> FormalRelationFact:
+def _invoice_fact(
+    row: dict[str, Any],
+    *,
+    oa_aliases: dict[str, str] | None = None,
+) -> FormalRelationFact:
     direction = invoice_workbench_direction_from_row(row)
     if direction not in _MATCHABLE_DIRECTIONS:
         raise ValueError(f"Unsupported invoice direction for {_required_row_id(row)}.")
@@ -640,7 +690,10 @@ def _invoice_fact(row: dict[str, Any]) -> FormalRelationFact:
         project_references=(normalized.get("project_no"), normalized.get("project_id")),
         invoice_numbers=(row.get("invoice_no"), row.get("digital_invoice_no")),
     )
-    references = [*_references_from_payload(normalized), *_references_from_source_links(row.get("source_links"))]
+    references = [
+        *_references_from_payload(normalized, oa_aliases=oa_aliases),
+        *_references_from_source_links(row.get("source_links"), oa_aliases=oa_aliases),
+    ]
     return FormalRelationFact(
         row_type="invoice",
         canonical_object_identity=_required_identity(row),
@@ -655,7 +708,11 @@ def _invoice_fact(row: dict[str, Any]) -> FormalRelationFact:
     )
 
 
-def _references_from_payload(payload: dict[str, Any]) -> tuple[FormalRelationReference, ...]:
+def _references_from_payload(
+    payload: dict[str, Any],
+    *,
+    oa_aliases: dict[str, str] | None = None,
+) -> tuple[FormalRelationReference, ...]:
     references: list[FormalRelationReference] = []
     for field, kind, target_type in (
         ("source_oa_row_id", "oa_source", "oa"),
@@ -665,7 +722,11 @@ def _references_from_payload(payload: dict[str, Any]) -> tuple[FormalRelationRef
         ("original_invoice_row_id", "original_reference", "invoice"),
         ("original_bank_row_id", "original_reference", "bank"),
     ):
-        target = _canonical_target_identity(target_type, payload.get(field))
+        target = _canonical_target_identity(
+            target_type,
+            payload.get(field),
+            oa_aliases=oa_aliases,
+        )
         if target:
             references.append(
                 FormalRelationReference(
@@ -679,7 +740,11 @@ def _references_from_payload(payload: dict[str, Any]) -> tuple[FormalRelationRef
     return tuple(sorted(set(references)))
 
 
-def _references_from_source_links(value: Any) -> tuple[FormalRelationReference, ...]:
+def _references_from_source_links(
+    value: Any,
+    *,
+    oa_aliases: dict[str, str] | None = None,
+) -> tuple[FormalRelationReference, ...]:
     if not isinstance(value, list):
         return ()
     references: list[FormalRelationReference] = []
@@ -688,7 +753,7 @@ def _references_from_source_links(value: Any) -> tuple[FormalRelationReference, 
             continue
         metadata = link.get("metadata") if isinstance(link.get("metadata"), dict) else {}
         combined = {**link, **metadata}
-        references.extend(_references_from_payload(combined))
+        references.extend(_references_from_payload(combined, oa_aliases=oa_aliases))
     return tuple(sorted(set(references)))
 
 
@@ -884,13 +949,33 @@ def _bank_direction(value: Any, signed_amount: Any) -> str:
     return ""
 
 
-def _canonical_target_identity(row_type: str, value: Any) -> str:
+def _canonical_target_identity(
+    row_type: str,
+    value: Any,
+    *,
+    oa_aliases: dict[str, str] | None = None,
+) -> str:
     target = str(value or "").strip()
     if not target:
         return ""
     if row_type == "oa" and ":item:" in target:
         target = target.split(":item:", 1)[0]
+    if row_type == "oa" and oa_aliases:
+        target = str(oa_aliases.get(target) or target).strip()
     return target
+
+
+def _oa_alias_lookup_values(target_ids: Iterable[str]) -> list[str]:
+    values: set[str] = set()
+    for target_id in target_ids:
+        value = str(target_id or "").strip()
+        if not value:
+            continue
+        values.add(value)
+        for prefix in ("oa-exp-", "oa-pay-"):
+            if value.startswith(prefix) and len(value) > len(prefix):
+                values.add(value[len(prefix):])
+    return sorted(values)
 
 
 def _required_identity(row: dict[str, Any]) -> str:

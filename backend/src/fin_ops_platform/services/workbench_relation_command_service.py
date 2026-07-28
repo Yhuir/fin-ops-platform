@@ -31,6 +31,74 @@ class WorkbenchRelationCommandError(Exception):
         self.payload = dict(payload or {})
 
 
+def _oa_attachment_binding_pairs(metadata: dict[str, Any] | None) -> set[tuple[str, str]]:
+    pairs: set[tuple[str, str]] = set()
+    if not isinstance(metadata, dict):
+        return pairs
+    for binding in list(metadata.get("oa_attachment_bindings") or []):
+        if not isinstance(binding, dict):
+            continue
+        parent_oa_row_id = str(binding.get("parent_oa_row_id") or "").strip()
+        for invoice_row_id in list(binding.get("invoice_row_ids") or []):
+            normalized_invoice_row_id = str(invoice_row_id or "").strip()
+            if parent_oa_row_id and normalized_invoice_row_id:
+                pairs.add((parent_oa_row_id, normalized_invoice_row_id))
+    return pairs
+
+
+def _formal_oa_attachment_metadata(
+    *,
+    row_ids: list[str],
+    row_types: list[str],
+    bindings: set[tuple[str, str]],
+) -> dict[str, Any]:
+    if not bindings:
+        return {}
+    typed_members = dict(zip(row_ids, row_types, strict=False))
+    invalid = [
+        (parent_oa_row_id, invoice_row_id)
+        for parent_oa_row_id, invoice_row_id in sorted(bindings)
+        if typed_members.get(parent_oa_row_id) != "oa"
+        or typed_members.get(invoice_row_id) != "invoice"
+    ]
+    if invalid:
+        raise WorkbenchRelationCommandError(
+            "invalid_formal_relation_plan",
+            "Formal OA attachment bindings must reference typed members of the same plan.",
+            payload={"invalid_oa_attachment_bindings": invalid},
+        )
+
+    invoice_ids_by_parent: dict[str, list[str]] = {}
+    for parent_oa_row_id, invoice_row_id in sorted(bindings):
+        invoice_ids_by_parent.setdefault(parent_oa_row_id, []).append(invoice_row_id)
+    normalized_bindings = [
+        {
+            "parent_oa_row_id": parent_oa_row_id,
+            "invoice_row_ids": invoice_ids_by_parent[parent_oa_row_id],
+        }
+        for parent_oa_row_id in sorted(invoice_ids_by_parent)
+    ]
+    metadata: dict[str, Any] = {
+        "contains_immutable_oa_attachment_binding": True,
+        "oa_attachment_bindings": normalized_bindings,
+    }
+    if len(normalized_bindings) == 1:
+        binding = normalized_bindings[0]
+        binding_row_ids = {
+            str(binding["parent_oa_row_id"]),
+            *[str(item) for item in binding["invoice_row_ids"]],
+        }
+        if set(row_ids) == binding_row_ids:
+            metadata.update(
+                {
+                    "source": "oa_attachment_invoice",
+                    "immutable_oa_attachment_binding": True,
+                    "parent_oa_row_id": binding["parent_oa_row_id"],
+                }
+            )
+    return metadata
+
+
 @dataclass(frozen=True, slots=True)
 class WorkbenchRelationConfirmPreparation:
     owner_token: object
@@ -546,6 +614,13 @@ class WorkbenchRelationCommandService:
                 "currency": str(getattr(plan, "currency", "CNY") or "CNY"),
             }
             evidence = dict(tuple(getattr(plan, "evidence_summary", ()) or ()))
+            attachment_bindings = {
+                (str(parent_oa_row_id), str(invoice_row_id))
+                for parent_oa_row_id, invoice_row_id in tuple(
+                    getattr(plan, "oa_attachment_bindings", ()) or ()
+                )
+                if str(parent_oa_row_id).strip() and str(invoice_row_id).strip()
+            }
             special_metadata = {
                 "formal_relation": {
                     "origin": "system_deterministic",
@@ -555,6 +630,13 @@ class WorkbenchRelationCommandService:
                     "rule_version": str(getattr(plan, "rule_version", "") or ""),
                 }
             }
+            special_metadata.update(
+                _formal_oa_attachment_metadata(
+                    row_ids=plan_row_ids,
+                    row_types=plan_row_types,
+                    bindings=attachment_bindings,
+                )
+            )
             special_metadata.update(requirements_by_case.get(case_id, {}))
             etc_batch_link = links_by_case.get(case_id)
             if etc_batch_link is not None:
@@ -581,6 +663,21 @@ class WorkbenchRelationCommandService:
                         "The active relation targeted by an explicit reference extension changed members.",
                         payload={"case_id": target_case_id},
                     )
+                before_metadata = (
+                    before_relation.get("special_metadata")
+                    if isinstance(before_relation.get("special_metadata"), dict)
+                    else {}
+                )
+                attachment_bindings.update(
+                    _oa_attachment_binding_pairs(before_metadata)
+                )
+                special_metadata.update(
+                    _formal_oa_attachment_metadata(
+                        row_ids=plan_row_ids,
+                        row_types=plan_row_types,
+                        bindings=attachment_bindings,
+                    )
+                )
                 relation, history = pair_service.replace_with_confirmed_relation(
                     case_id=target_case_id,
                     row_ids=plan_row_ids,

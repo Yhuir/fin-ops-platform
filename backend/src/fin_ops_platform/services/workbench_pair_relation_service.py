@@ -881,17 +881,40 @@ class WorkbenchPairRelationService:
             for row_id in row_ids
             if cls._relation_row_type(relation, row_id) == "invoice"
         ]
+        metadata = relation.get("special_metadata")
+        metadata = metadata if isinstance(metadata, dict) else {}
+        declared_bindings: dict[str, list[str]] = {}
+        for binding in list(metadata.get("oa_attachment_bindings") or []):
+            if not isinstance(binding, dict):
+                continue
+            parent_oa_row_id = str(binding.get("parent_oa_row_id") or "").strip()
+            declared_invoice_row_ids = [
+                str(row_id).strip()
+                for row_id in list(binding.get("invoice_row_ids") or [])
+                if str(row_id).strip()
+            ]
+            if parent_oa_row_id in oa_row_ids and set(declared_invoice_row_ids) <= set(invoice_row_ids):
+                declared_bindings[parent_oa_row_id] = declared_invoice_row_ids
+        has_declared_bindings = bool(declared_bindings)
+        if not declared_bindings and metadata.get("immutable_oa_attachment_binding") is True:
+            if len(oa_row_ids) == 1 and invoice_row_ids:
+                declared_bindings[oa_row_ids[0]] = invoice_row_ids
+                has_declared_bindings = True
+
         bindings: list[dict[str, Any]] = []
         for oa_row_id in oa_row_ids:
-            attachment_invoice_row_ids = [
-                row_id
-                for row_id in invoice_row_ids
-                if cls._invoice_row_is_oa_attachment_for_oa(
-                    row_id,
-                    oa_row_id,
-                    row_id_aliases=row_id_aliases,
-                )
-            ]
+            attachment_invoice_row_ids = declared_bindings.get(oa_row_id)
+            if attachment_invoice_row_ids is None and not has_declared_bindings:
+                attachment_invoice_row_ids = [
+                    row_id
+                    for row_id in invoice_row_ids
+                    if cls._invoice_row_is_oa_attachment_for_oa(
+                        row_id,
+                        oa_row_id,
+                        row_id_aliases=row_id_aliases,
+                    )
+                ]
+            attachment_invoice_row_ids = attachment_invoice_row_ids or []
             if not attachment_invoice_row_ids:
                 continue
             row_ids_for_binding = [oa_row_id, *attachment_invoice_row_ids]

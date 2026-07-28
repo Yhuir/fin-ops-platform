@@ -412,6 +412,56 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["paired_count"], 1)
         self.assertEqual(payload["paired"]["groups"][0]["completion"]["missing_row_types"], [])
 
+    def test_attachment_invoice_display_item_id_uses_canonical_oa_alias_and_exact_row_index(self) -> None:
+        original_source_item_id = (
+            "oa-exp-6a0ee8613bb8164165d8c61a:item:2:9ca59ea6e4ab"
+        )
+        rows = {
+            "oa-exp-2206": {
+                "id": "oa-exp-2206",
+                "type": "oa",
+                "object_identity_key": "oa-exp-2206",
+                "detail_fields": {"Mongo文档ID": "6a0ee8613bb8164165d8c61a"},
+                "expense_items": [
+                    {
+                        "id": "oa-exp-2206:item:2:5f9f908c6e6d",
+                        "row_index": "2",
+                        "project_name": "曲靖卷烟厂项目",
+                        "amount": "60.00",
+                    }
+                ],
+            },
+            "inv_imported_0058": {
+                "id": "inv_imported_0058",
+                "type": "invoice",
+                "object_identity_key": "inv_imported_0058",
+                "source_kind": "oa_attachment_invoice",
+                "source_expense_item_id": original_source_item_id,
+                "source_expense_row_index": "2",
+            },
+        }
+        relation = {
+            "case_id": "CASE-OA-ATT-2206",
+            "row_ids": list(rows),
+            "row_types": ["oa", "invoice"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+        }
+
+        payload = self.service.group_payload(
+            "2026-05",
+            rows_by_id=rows,
+            active_relations=[relation],
+        )
+
+        invoice = payload["paired"]["groups"][0]["invoice_rows"][0]
+        self.assertEqual(
+            invoice["source_expense_item_id"],
+            "oa-exp-2206:item:2:5f9f908c6e6d",
+        )
+        self.assertEqual(invoice["source_oa_id"], "oa-exp-2206")
+        self.assertEqual(rows["inv_imported_0058"]["source_expense_item_id"], original_source_item_id)
+
     def test_input_order_and_decorations_do_not_change_membership_or_group_ids(self) -> None:
         batch = yunnan_lifu_520_fixture()
         base_rows = [row_for_fact(fact) for fact in batch.facts]

@@ -109,6 +109,31 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
         self.assertEqual(result.plans[0].amount_minor, 0)
         self.assertEqual(result.plans[0].scope_keys, ("2020-01", "2026-05"))
 
+    def test_attachment_source_plan_preserves_exact_typed_binding(self) -> None:
+        oa = fact("oa", "oa-exp-2206", 41_300, evidence=())
+        invoice = fact(
+            "invoice",
+            "inv_imported_0058",
+            6_000,
+            evidence=(),
+            references=(
+                FormalRelationReference(
+                    kind="attachment_source",
+                    value="derived_from_oa_id:oa-exp-2206",
+                    target_row_type="oa",
+                    target_identity="oa-exp-2206",
+                ),
+            ),
+        )
+
+        result = self.engine.plan_relations(batch(oa, invoice))
+
+        self.assertEqual(len(result.plans), 1)
+        self.assertEqual(
+            result.plans[0].oa_attachment_bindings,
+            (("oa-exp-2206", "inv_imported_0058"),),
+        )
+
     def test_plan_uses_all_only_when_member_months_are_unknown(self) -> None:
         invoice = fact(
             "invoice",
