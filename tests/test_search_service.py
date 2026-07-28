@@ -172,26 +172,27 @@ class SearchServiceTests(unittest.TestCase):
         self.assertEqual(serial_payload["bank_results"][0]["matched_field"], "企业流水号")
         self.assertEqual(last4_payload["bank_results"][0]["matched_field"], "支付账户")
 
-    def test_grouped_search_indexes_collapsed_bank_rows_and_returns_group_context(self) -> None:
+    def test_grouped_search_indexes_bank_flow_collapsed_rows_and_returns_group_context(self) -> None:
         original_bank_row = {
             **self.bank_row,
             "id": "bk-collapsed-001",
-            "case_id": "no_oa_batch_fee_search",
+            "case_id": "bank_flow_batch_fee_search",
             "remark": "折叠明细唯一备注",
             "detail_fields": {"企业流水号": "NO-OA-COLLAPSED-SERIAL"},
-            "invoice_relation": {"code": "no_oa_bank_batch", "label": "已匹配：手续费", "tone": "success"},
+            "invoice_relation": {"code": "bank_flow_rule_batch", "label": "流水规则批次", "tone": "success"},
         }
         summary_row = {
-            "id": "no_oa_summary:no_oa_batch_fee_search",
+            "id": "bank_flow_rule_summary:bank_flow_batch_fee_search",
             "type": "bank",
-            "source_kind": "no_oa_bank_batch_summary",
-            "label": "免OA · 手续费",
+            "source_kind": "bank_flow_rule_batch_summary",
+            "label": "流水规则 · 手续费",
             "amount": "58,000.00",
             "counterparty_name": "建设银行 8106",
             "trade_time": "2026-03",
-            "invoice_relation": {"code": "no_oa_bank_batch", "label": "已匹配：手续费", "tone": "success"},
+            "invoice_relation": {"code": "bank_flow_rule_batch", "label": "流水规则批次", "tone": "success"},
             "special_metadata": {
-                "source_batch_id": "no_oa_batch_fee_search",
+                "source_batch_id": "bank_flow_batch_fee_search",
+                "relation_mode": "bank_flow_rule_batch",
                 "batch_type": "fee",
                 "batch_label": "手续费",
                 "row_count": 1,
@@ -205,7 +206,7 @@ class SearchServiceTests(unittest.TestCase):
                 {
                     "row": original_bank_row,
                     "zone_hint": "paired",
-                    "group_id": "case:no_oa_batch_fee_search",
+                    "group_id": "case:bank_flow_batch_fee_search",
                     "project_names": [],
                 }
             ],
@@ -218,8 +219,8 @@ class SearchServiceTests(unittest.TestCase):
         result = payload["bank_results"][0]
         self.assertNotEqual(result["row_id"], summary_row["id"])
         self.assertEqual(result["zone_hint"], "paired")
-        self.assertEqual(result["group_id"], "case:no_oa_batch_fee_search")
-        self.assertEqual(result["jump_target"]["group_id"], "case:no_oa_batch_fee_search")
+        self.assertEqual(result["group_id"], "case:bank_flow_batch_fee_search")
+        self.assertEqual(result["jump_target"]["group_id"], "case:bank_flow_batch_fee_search")
 
     def test_narrow_workbench_rows_preserve_project_status_group_and_cache_semantics(self) -> None:
         load_calls: list[str] = []

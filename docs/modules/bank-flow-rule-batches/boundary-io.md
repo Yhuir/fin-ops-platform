@@ -55,7 +55,7 @@
 | 规则保存 | 返回规则版本、资格变化和信息性的 `affected_months` / `affected_scope_keys`；不返回页面 refresh target。 |
 | 写命令 receipt | 保留 batch、relation command 结果、affected months、幂等/CAS/冲突合同；删除 read-model/freshness/operation-barrier envelope。 |
 | 写后页面状态 | submit-selection、submit、withdraw、reset 和规则保存成功后，各执行一次当前列表 GET；不先本地伪造最终批次，不 polling。 |
-| 关联台 | relation metadata 保持 `source=bank_flow_rule_batch`、`relation_mode=bank_flow_rule_batch`、`source_batch_id`、`flow_rule_tag_code/version`、冻结 `requires_oa/requires_invoice`、`source_row_count` 和 `collapsed_bank_rows`。银行行数 `>3` 使用 bank-flow summary。 |
+| 关联台 | relation metadata 保持 `source=bank_flow_rule_batch`、`relation_mode=bank_flow_rule_batch`、`source_batch_id`、`flow_rule_tag_code/version`、冻结 `requires_oa/requires_invoice`、`source_row_count` 和 `collapsed_bank_rows`。银行行数 `>3` 只在银行栏使用 bank-flow summary；1 到 3 行直接完整展示。 |
 
 ## 一致性与查询预算
 

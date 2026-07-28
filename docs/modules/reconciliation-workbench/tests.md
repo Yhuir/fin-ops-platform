@@ -2,6 +2,13 @@
 
 日期：2026-07-28
 
+## 2026-07-28 逐栏折叠、普通行直显与搜索真实预览
+
+- Business core：`no_oa_bank_batch` 与普通关系保留全部真实行；`bank_flow_rule_batch` 只有银行成员数 `>3` 才生成银行栏 summary/collapsed rows，1 到 3 行直接显示；ETC 仍只折叠发票栏。
+- Repository/read model：summary page 不再把普通银行/发票行截成 3 行；无搜索的折叠栏只传 summary + count，搜索时最多传 3 条真实命中 collapsed rows。schema v10 淘汰旧 generation/page cache，不新增表、worker、cache 或 API。
+- API/Frontend：group detail 按 `collapsed_row_counts.<pane>` 逐栏验证；ETC 的 OA/银行栏验证正常 rows，发票栏验证 collapsed rows。闭合态搜索直接渲染真实命中行并高亮，不显示“隐藏内容命中”、不自动展开或预取详情。
+- Regression：普通多行与 legacy no-OA 不出现通用“还有 N 条，展开”；bank-flow 与 ETC 保留 click-only detail、失败可重试和同 generation fail-closed。
+
 ## 2026-07-28 日常报销付款明细复合行
 
 - Backend/API：`tests/test_workbench_query_service.py` 保护父 OA 行只发布精简稳定付款明细字段，附件发票继续携带显式 `source_expense_item_id`；不新增 relation member 或独立配对对象。
@@ -51,7 +58,7 @@
 ## 2026-07-20 折叠流水详情惰性加载回归
 
 - Repository：production-shape materialized group 只有银行成员时，group detail 仍必须返回 `oa_rows=[]`、完整 `bank_rows`、`invoice_rows=[]`，且折叠计数与明细成员一致。
-- API client：HTTP 200 若缺少任一 pane 数组、group identity 不一致，或声明成员数与实际详情不一致，必须 fail-closed，不能把不完整 payload 安装为可展开数据。
+- API client：HTTP 200 若缺少任一 pane 数组、group identity 不一致，或逐栏声明成员数与实际详情不一致，必须 fail-closed，不能把不完整 payload 安装为可展开数据；有 `collapsed_row_counts.<pane>` 的栏校验 collapsed rows，其它栏校验正常 rows。
 - 前端交互：页面加载和 group 更新不得自动预取折叠明细；用户点击后只发一次详情请求，成功后展开，失败后保持折叠并显示可重试状态。
 - E2E：首屏只显示 3 条流水摘要时不请求详情；用户点击“展开 4 条明细”后恰好请求一次 group detail，并渲染 4 条完整流水。
 
@@ -108,7 +115,7 @@
 - combined initial 两区首屏必须各为 50 groups、`has_more` 保留真实 total，默认 batch SQL 每区读取最多 51 条用于判定后续页；前端不得显示“已加载 N / total”或手动“加载更多”，仅在 fresh、查询稳定且用户滚动接近区域底部时自动请求下一页；同区请求必须去重，搜索/筛选/version 变化时旧响应不得并入新结果，失败后停止自动重试并提供显式重试。后续 `/groups` 必须绑定同一 `expected_read_model_version`，不得为性能退回 200-group 首屏或全量 payload。
 - 默认无筛选 all-scope `/groups` 的 total/row_counts 必须来自当前 active-month generation-set digest 对应的两条 `workbench_generation_stats`；统计缺失或查询前后 digest 改变时返回 refreshing，不得执行旧的全量 distinct row count。月 generation 发布与该统计必须处于同一事务，多个 scope 同批发布只生成一次最终 digest 统计。
 - all-scope 区域搜索、来源、pane/列/时间筛选必须只 materialize active generation key，条件之间按既有 AND/OR 语义相交；total、row counts、matching group ids 在一条计数 SQL 中得到，分页只按 matching ids 读取 payload。搜索必须覆盖展示字段、排除内部 identity/detail-only 值、转义 ILIKE 通配符并限制 200 字符。测试必须断言 SQL 不读取 `g.*`/payload/raw payload，不 join 历史 physical all group，且不为 count/page 重复执行 member 条件。
-- 前端必须断言每区只有一个 HeroUI `SearchField` 且位于区域 header 同行；输入时使用既有 deferred combined initial 单请求，等待期间保留当前稳定结果并显示 pending，失败可重试。所有可见命中片段都高亮；只命中隐藏 pane/折叠明细时显示“隐藏内容命中”，用户展开完整详情后显示实际高亮。
+- 前端必须断言每区只有一个 HeroUI `SearchField` 且位于区域 header 同行；输入时使用既有 deferred combined initial 单请求，等待期间保留当前稳定结果并显示 pending，失败可重试。所有可见命中片段都高亮；只命中折叠明细时在闭合态直接显示最多 3 条真实匹配内容，保持未展开且不发详情请求。
 - 搜索框在首个 combined initial 完成前已可输入时，不得提前消费新的 zone query key；初始稳定数据安装后必须补发包含该 query 的 combined initial 请求，不能只对首屏 50 组做本地高亮并漏掉其它组或折叠明细。
 - 关联台 Audit 绿色结果必须绑定 active Workbench read-model version + 页面 freshness status；generation/status 改变立即清除旧绿色结果。`workbench_matching_scope_not_converged` 属于 freshness+queue 阻断，`workbench_generation_source_versions_mismatch` 属于 freshness 阻断。
 - matching source-version 回归必须证明纯 Workbench projection schema 不进入 matching provider；bank-flow/no-OA read-model provider 仍保留自身所需的 Workbench projection dependency。失败 scope 运维重试必须覆盖 dry-run 零写、fingerprint drift 零写、非 failed 拒绝和 exact month 单次 durable requeue。

@@ -208,7 +208,7 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         )
         self.assertEqual(group["collapsed_row_counts"], {"invoice": 2})
 
-    def test_single_pane_active_relation_is_still_paired(self) -> None:
+    def test_no_oa_single_pane_relation_is_paired_without_collapsing_rows(self) -> None:
         rows = {
             "bank-a": {"id": "bank-a", "type": "bank", "object_identity_key": "bank-a"},
             "bank-b": {"id": "bank-b", "type": "bank", "object_identity_key": "bank-b"},
@@ -230,7 +230,46 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["paired_count"], 1)
         self.assertEqual(payload["summary"]["unpaired_count"], 0)
         self.assertEqual(identities(payload["paired"]["groups"]), {("bank", "bank-a"), ("bank", "bank-b")})
-        self.assertEqual(payload["paired"]["groups"][0]["display_mode"], "collapsed_summary")
+        group = payload["paired"]["groups"][0]
+        self.assertNotIn("display_mode", group)
+        self.assertEqual([row["id"] for row in group["bank_rows"]], ["bank-a", "bank-b"])
+        self.assertNotIn("collapsed_rows", group)
+
+    def test_bank_flow_rule_batch_only_collapses_when_more_than_three_rows(self) -> None:
+        for row_count, should_collapse in ((3, False), (4, True)):
+            with self.subTest(row_count=row_count):
+                rows = {
+                    f"bank-{index}": {
+                        "id": f"bank-{index}",
+                        "type": "bank",
+                        "object_identity_key": f"bank-{index}",
+                        "amount": "10.00",
+                    }
+                    for index in range(row_count)
+                }
+                relation = {
+                    "case_id": f"CASE-BANK-FLOW-{row_count}",
+                    "row_ids": list(rows),
+                    "status": "active",
+                    "relation_mode": "bank_flow_rule_batch",
+                    "special_metadata": {
+                        "paired_requires_oa": False,
+                        "paired_requires_invoice": False,
+                    },
+                }
+
+                payload = self.service.group_payload("2026-05", rows_by_id=rows, active_relations=[relation])
+
+                group = payload["paired"]["groups"][0]
+                if should_collapse:
+                    self.assertEqual(group["display_mode"], "collapsed_summary")
+                    self.assertEqual(group["collapsed_row_counts"], {"bank": 4})
+                    self.assertEqual(len(group["collapsed_rows"]["bank"]), 4)
+                    self.assertEqual(group["bank_rows"][0]["source_kind"], "bank_flow_rule_batch_summary")
+                else:
+                    self.assertNotIn("display_mode", group)
+                    self.assertEqual(len(group["bank_rows"]), 3)
+                    self.assertNotIn("collapsed_rows", group)
 
     def test_bank_relation_required_invoice_stays_grouped_in_unpaired(self) -> None:
         rows = {

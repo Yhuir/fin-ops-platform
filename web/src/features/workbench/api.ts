@@ -1016,18 +1016,15 @@ function rowRelation(row: ApiWorkbenchRow) {
   return row.invoice_bank_relation;
 }
 
-function isNoOaSummaryRow(row: ApiWorkbenchRow) {
-  return row.source_kind === "no_oa_bank_batch_summary";
-}
-
 function isBankFlowRuleBatchSummaryRow(row: ApiWorkbenchRow) {
   return row.source_kind === "bank_flow_rule_batch_summary"
     || row.special_metadata?.relation_mode === "bank_flow_rule_batch";
 }
 
 function isNoOaBatchRow(row: ApiWorkbenchRow) {
-  return isNoOaSummaryRow(row)
-    || (row.type === "bank" && rowRelation(row)?.code === "no_oa_bank_batch" && hasNoOaSourceBatchId(row));
+  return row.type === "bank"
+    && rowRelation(row)?.code === "no_oa_bank_batch"
+    && hasNoOaSourceBatchId(row);
 }
 
 function isBankFlowRuleBatchRow(row: ApiWorkbenchRow) {
@@ -1085,9 +1082,6 @@ function rowActionVariant(row: ApiWorkbenchRow, availableActions: string[]): Wor
 function rowLabel(row: ApiWorkbenchRow) {
   if (row.type === "oa") {
     return toDisplayValue(row.apply_type, "OA");
-  }
-  if (row.source_kind === "no_oa_bank_batch_summary") {
-    return "免OA批次";
   }
   if (row.source_kind === "bank_flow_rule_batch_summary") {
     return "流水规则批次";
@@ -2592,15 +2586,14 @@ export async function fetchWorkbenchGroupDetail(
   }
   const group = mapGroup(rawGroup, zone);
   for (const paneId of ["oa", "bank", "invoice"] as WorkbenchRecordType[]) {
-    const expectedCount = group.displayMode === "collapsed_summary"
-      ? group.collapsedRowCounts?.[paneId] ?? group.rowCounts?.[paneId]
-      : group.rowCounts?.[paneId];
+    const collapsedExpectedCount = group.collapsedRowCounts?.[paneId];
+    const expectedCount = collapsedExpectedCount ?? group.rowCounts?.[paneId];
     if (expectedCount === undefined) {
       continue;
     }
-    const actualCount = group.displayMode === "collapsed_summary"
-      ? group.collapsedRows?.[paneId]?.length ?? 0
-      : group.rows[paneId].length;
+    const actualCount = collapsedExpectedCount === undefined
+      ? group.rows[paneId].length
+      : group.collapsedRows?.[paneId]?.length ?? 0;
     if (actualCount !== expectedCount) {
       throw new Error("incomplete_workbench_group_detail");
     }

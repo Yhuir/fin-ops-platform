@@ -855,54 +855,52 @@ describe("workbench api bank amount mapping", () => {
     expect(buildWorkbenchDisplayGroups(groups, state, { serverFiltered: true })).toBe(groups);
   });
 
-  test("fetches full workbench group detail for collapsed summary expansion", async () => {
+  test("validates full collapsed group detail per pane", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
           month: "all",
           scope_key: "all",
           zone: "paired",
-          group_id: "case:no-oa",
+          group_id: "case:etc",
           read_model_status: "fresh",
           group: {
-            group_id: "case:no-oa",
+            group_id: "case:etc",
             group_type: "relation",
             match_confidence: "high",
-            reason: "免OA批次",
-            relation_mode: "no_oa_bank_batch",
+            reason: "ETC批次",
             display_mode: "collapsed_summary",
-            oa_rows: [],
-            bank_rows: [{ id: "summary", type: "bank", source_kind: "no_oa_bank_batch_summary" }],
-            invoice_rows: [],
-            row_counts: { bank: 4, rows: 4 },
-            display_row_counts: { bank: 1, rows: 1 },
+            oa_rows: [{ id: "oa-1", type: "oa" }],
+            bank_rows: [{ id: "bank-1", type: "bank" }],
+            invoice_rows: [{ id: "etc-summary", type: "invoice", source_kind: "etc_invoice_summary" }],
+            row_counts: { oa: 1, bank: 1, invoice: 35, rows: 37 },
+            display_row_counts: { oa: 1, bank: 1, invoice: 1, rows: 3 },
             collapsed_rows: {
-              bank: [
-                { id: "bank-1", type: "bank", source_kind: "bank_transaction" },
-                { id: "bank-2", type: "bank", source_kind: "bank_transaction" },
-                { id: "bank-3", type: "bank", source_kind: "bank_transaction" },
-                { id: "bank-4", type: "bank", source_kind: "bank_transaction" },
-              ],
+              invoice: Array.from({ length: 34 }, (_item, index) => ({
+                id: `etc-invoice-${index + 1}`,
+                type: "invoice",
+                source_kind: "etc_invoice",
+              })),
             },
-            collapsed_row_counts: { bank: 4 },
+            collapsed_row_counts: { invoice: 34 },
           },
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       ),
     );
 
-    const group = await fetchWorkbenchGroupDetail("all", "paired", "case:no-oa", "generation-set-1");
+    const group = await fetchWorkbenchGroupDetail("all", "paired", "case:etc", "generation-set-1");
 
     const url = new URL(String(fetchSpy.mock.calls[0][0]), "http://localhost");
     expect(url.pathname).toBe("/api/workbench/groups/detail");
     expect(url.searchParams.get("month")).toBe("all");
     expect(url.searchParams.get("zone")).toBe("paired");
-    expect(url.searchParams.get("group_id")).toBe("case:no-oa");
+    expect(url.searchParams.get("group_id")).toBe("case:etc");
     expect(url.searchParams.get("expected_read_model_version")).toBe("generation-set-1");
-    expect(group.id).toBe("case:no-oa");
-    expect(group.rowCounts?.bank).toBe(4);
-    expect(group.displayRowCounts?.bank).toBe(1);
-    expect(group.collapsedRows?.bank).toHaveLength(4);
+    expect(group.id).toBe("case:etc");
+    expect(group.rows.oa).toHaveLength(1);
+    expect(group.rows.bank).toHaveLength(1);
+    expect(group.collapsedRows?.invoice).toHaveLength(34);
   });
 
   test("rejects sparse workbench group detail responses before the shared group mapper", async () => {

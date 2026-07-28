@@ -259,11 +259,12 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             group for group in payload["paired"]["groups"]
             if group.get("relation_mode") == "no_oa_bank_batch"
         )
-        self.assertEqual(paired_group["display_mode"], "collapsed_summary")
+        self.assertNotIn("display_mode", paired_group)
         self.assertCountEqual(
-            [row["id"] for row in paired_group["collapsed_rows"]["bank"]],
+            [row["id"] for row in paired_group["bank_rows"]],
             row_ids,
         )
+        self.assertNotIn("collapsed_rows", paired_group)
 
     def test_workbench_confirm_non_internal_bank_only_rows_keeps_manual_relation(self) -> None:
         app, row_ids = self._app_with_balanced_bank_rows(
@@ -371,13 +372,11 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             if group.get("relation_mode") == "bank_flow_rule_batch"
         )
         self.assertEqual(workbench_payload["summary"]["paired_count"], 1)
-        self.assertEqual(
-            [row["id"] for row in paired_group["bank_rows"]],
-            [f"relation_summary:{relation['case_id']}"],
+        self.assertCountEqual([row["id"] for row in paired_group["bank_rows"]], row_ids)
+        self.assertNotIn("collapsed_rows", paired_group)
+        self.assertTrue(
+            all(row["invoice_relation"]["code"] == "bank_flow_rule_batch" for row in paired_group["bank_rows"])
         )
-        self.assertCountEqual([row["id"] for row in paired_group["collapsed_rows"]["bank"]], row_ids)
-        self.assertEqual(paired_group["bank_rows"][0]["special_metadata"]["source"], "bank_flow_rule_batch")
-        self.assertEqual(paired_group["bank_rows"][0]["invoice_relation"]["code"], "bank_flow_rule_batch")
 
     def test_workbench_confirm_after_no_oa_submit_reuses_existing_internal_transfer_fact(self) -> None:
         app, row_ids = self._app_with_balanced_bank_rows(
@@ -794,22 +793,17 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         submitted = submit_result["batch"]
         workbench_payload = build_grouped_workbench_projection(app, "all")
         paired_group = workbench_payload["paired"]["groups"][0]
-        summary_row = paired_group["summary_row"]
+        bank_rows = paired_group["bank_rows"]
 
         self.assertEqual(workbench_payload["summary"]["paired_count"], 1)
         self.assertEqual(paired_group["relation_mode"], "no_oa_bank_batch")
-        self.assertEqual(paired_group["display_mode"], "collapsed_summary")
-        self.assertTrue(paired_group["default_collapsed"])
-        self.assertEqual([row["id"] for row in paired_group["bank_rows"]], [f"relation_summary:{submitted['batch_id']}"])
-        self.assertCountEqual([row["id"] for row in paired_group["collapsed_rows"]["bank"]], row_ids)
-        self.assertEqual(summary_row["source_kind"], "no_oa_bank_batch_summary")
-        self.assertEqual(summary_row["invoice_relation"]["code"], "no_oa_bank_batch")
-        self.assertEqual(summary_row["invoice_relation"]["label"], "已匹配：手续费")
-        self.assertEqual(summary_row["special_metadata"]["source_batch_id"], submitted["batch_id"])
-        self.assertEqual(summary_row["special_metadata"]["batch_type"], "fee")
-        self.assertEqual(summary_row["special_metadata"]["row_count"], 2)
-        self.assertEqual(summary_row["special_metadata"]["total_amount"], "5.50")
-        self.assertIn("withdraw_no_oa_batch", summary_row["available_actions"])
+        self.assertNotIn("display_mode", paired_group)
+        self.assertNotIn("collapsed_rows", paired_group)
+        self.assertCountEqual([row["id"] for row in bank_rows], row_ids)
+        self.assertTrue(all(row["invoice_relation"]["code"] == "no_oa_bank_batch" for row in bank_rows))
+        self.assertTrue(all(row["invoice_relation"]["label"] == "已匹配：手续费" for row in bank_rows))
+        self.assertTrue(all(row["special_metadata"]["source_batch_id"] == submitted["batch_id"] for row in bank_rows))
+        self.assertTrue(all("withdraw_no_oa_batch" in row["available_actions"] for row in bank_rows))
 
     def test_no_oa_internal_transfer_relation_groups_bank_rows_until_cancelled(self) -> None:
         app, row_ids = self._app_with_balanced_bank_rows(
@@ -836,16 +830,9 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
 
         self.assertEqual(paired_payload["summary"]["paired_count"], 1)
         self.assertEqual(paired_group["relation_mode"], "no_oa_bank_batch")
-        self.assertEqual(paired_group["display_mode"], "collapsed_summary")
-        self.assertEqual([row["id"] for row in paired_group["bank_rows"]], [f"relation_summary:{submitted['batch_id']}"])
-        self.assertCountEqual([row["id"] for row in paired_group["collapsed_rows"]["bank"]], row_ids)
-        summary_row = paired_group["summary_row"]
-        self.assertEqual(summary_row["invoice_relation"]["label"], "已匹配：内部往来款")
-        self.assertEqual(summary_row["special_metadata"]["source_batch_id"], submitted["batch_id"])
-        self.assertEqual(summary_row["special_metadata"]["batch_version"], submitted["version"])
-        self.assertEqual(summary_row["special_metadata"]["row_count"], 2)
-        self.assertEqual(summary_row["amount"], "50000.00")
-        self.assertEqual(summary_row["special_metadata"]["total_amount"], "50000.00")
+        self.assertNotIn("display_mode", paired_group)
+        self.assertCountEqual([row["id"] for row in paired_group["bank_rows"]], row_ids)
+        self.assertNotIn("collapsed_rows", paired_group)
 
         application_service.withdraw_batch(
             submitted["batch_id"],
@@ -928,11 +915,9 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             )
         )
         self.assertEqual(workbench_payload["summary"]["paired_count"], 1)
-        self.assertEqual(paired_group["display_mode"], "collapsed_summary")
-        self.assertEqual([row["id"] for row in paired_group["bank_rows"]], [f"relation_summary:{salary_batch['batch_id']}"])
-        self.assertCountEqual([row["id"] for row in paired_group["collapsed_rows"]["bank"]], salary_row_ids)
-        self.assertEqual(paired_group["summary_row"]["special_metadata"]["row_count"], 4)
-        self.assertEqual(paired_group["summary_row"]["special_metadata"]["total_amount"], "50.00")
+        self.assertNotIn("display_mode", paired_group)
+        self.assertCountEqual([row["id"] for row in paired_group["bank_rows"]], salary_row_ids)
+        self.assertNotIn("collapsed_rows", paired_group)
 
     def test_existing_single_row_salary_no_oa_batches_consolidate_before_workbench_grouping(self) -> None:
         app = build_application()
@@ -1036,13 +1021,17 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         self.assertEqual(active_relations[0]["relation_mode"], "no_oa_bank_batch")
         self.assertCountEqual(active_relations[0]["row_ids"], salary_row_ids)
         self.assertEqual(workbench_payload["summary"]["paired_count"], 1)
-        self.assertEqual(paired_group["display_mode"], "collapsed_summary")
-        self.assertEqual([row["id"] for row in paired_group["bank_rows"]], [f"relation_summary:{salary_batch['batch_id']}"])
-        self.assertCountEqual([row["id"] for row in paired_group["collapsed_rows"]["bank"]], salary_row_ids)
-        self.assertEqual(paired_group["summary_row"]["special_metadata"]["row_count"], 3)
-        self.assertEqual(paired_group["summary_row"]["special_metadata"]["total_amount"], "33.00")
+        self.assertNotIn("display_mode", paired_group)
+        self.assertNotIn("collapsed_rows", paired_group)
+        self.assertCountEqual([row["id"] for row in paired_group["bank_rows"]], salary_row_ids)
+        self.assertTrue(
+            all(
+                row["special_metadata"]["source_batch_id"] == salary_batch["batch_id"]
+                for row in paired_group["bank_rows"]
+            )
+        )
 
-    def test_historical_salary_and_internal_transfer_relations_migrate_to_no_oa_collapsed_summaries(self) -> None:
+    def test_historical_salary_and_internal_transfer_relations_migrate_to_direct_no_oa_rows(self) -> None:
         app = build_application()
         preview = app._import_service.preview_import(
             batch_type=BatchType.BANK_TRANSACTION,
@@ -1140,22 +1129,16 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         )
         transfer_group = next(group for group in paired_groups if group is not salary_group)
         salary_row = salary_group["bank_rows"][0]
-        transfer_summary_row = transfer_group["bank_rows"][0]
+        transfer_rows = transfer_group["bank_rows"]
 
         self.assertNotEqual(salary_group.get("display_mode"), "collapsed_summary")
         self.assertNotIn("collapsed_rows", salary_group)
         self.assertEqual(salary_row["id"], salary_row_id)
         self.assertEqual(salary_row["special_metadata"]["source_batch_id"], submitted_by_type["salary"]["batch_id"])
         self.assertIn("withdraw_no_oa_batch", salary_row["available_actions"])
-        self.assertEqual(transfer_group["display_mode"], "collapsed_summary")
-        self.assertEqual(
-            transfer_summary_row["id"],
-            f"relation_summary:{submitted_by_type['internal_transfer']['batch_id']}",
-        )
-        self.assertCountEqual(
-            [row["id"] for row in transfer_group["collapsed_rows"]["bank"]],
-            transfer_row_ids,
-        )
+        self.assertNotIn("display_mode", transfer_group)
+        self.assertNotIn("collapsed_rows", transfer_group)
+        self.assertCountEqual([row["id"] for row in transfer_rows], transfer_row_ids)
         summary_rows = flatten_groups(paired_groups, "bank")
         self.assertTrue(
             all(row["invoice_relation"]["code"] == "no_oa_bank_batch" for row in summary_rows)

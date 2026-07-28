@@ -500,7 +500,12 @@ class WorkbenchSummaryGroupsConnection(WorkbenchSqlReadConnection):
                         ],
                         "collapsed_rows": {
                             "oa": [
-                                {"id": f"collapsed-oa-{index}", "type": "oa", "detail_fields": {"OA单号": f"C{index}"}}
+                                {
+                                    "id": f"collapsed-oa-{index}",
+                                    "type": "oa",
+                                    "applicant": f"申请人C{index}",
+                                    "detail_fields": {"OA单号": f"C{index}"},
+                                }
                                 for index in range(1, 5)
                             ]
                         },
@@ -1974,13 +1979,13 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(result["read_model_stale_reasons"], ["builder_mismatch"])
         self.assertEqual(result["refresh_scope_keys"], [])
 
-    def test_workbench_v9_rejects_v8_month_all_and_cache_versions(self) -> None:
+    def test_workbench_v10_rejects_v9_month_all_and_cache_versions(self) -> None:
         app = object.__new__(Application)
-        old_month = "2026-07-28-oa-expense-items-v8"
-        old_all = "workbench_sql_projection.composed_active_month_shards.oa_expense_items.v8"
+        old_month = "2026-07-28-oa-item-alignment-v9"
+        old_all = "workbench_sql_projection.composed_active_month_shards.oa_item_alignment.v9"
 
-        self.assertIn("v9", WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION)
-        self.assertIn("v9", WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
+        self.assertIn("v10", WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION)
+        self.assertIn("v10", WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
         self.assertIn(WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION, WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION)
         self.assertIn(WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION, WORKBENCH_INITIAL_PAGE_CACHE_SCHEMA_VERSION)
         self.assertIn(
@@ -3888,7 +3893,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(group["invoice_rows"][0]["tax_rate"], "6%")
         self.assertEqual(group["invoice_rows"][0]["tax_amount"], "22.64")
         self.assertNotIn("detail_fields", group["invoice_rows"][0])
-        self.assertEqual([row["id"] for row in group["collapsed_rows"]["oa"]], ["collapsed-oa-1", "collapsed-oa-2", "collapsed-oa-3"])
+        self.assertEqual(group["collapsed_rows"]["oa"], [])
         self.assertEqual(group["oa_rows"][0]["id"], "oa-1")
         self.assertEqual(page["row_counts"], {"oa": 3, "bank": 4, "invoice": 5, "rows": 12})
         self.assertNotIn("searchable_text", group)
@@ -3899,6 +3904,23 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertNotIn("object_identity", group["oa_rows"][0])
         self.assertNotIn("object_identity_key", group["oa_rows"][0])
         self.assertNotIn("raw_payload", group)
+
+    def test_repository_summary_page_returns_real_collapsed_search_matches_only(self) -> None:
+        connection = WorkbenchSummaryGroupsConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        page = repository.get_workbench_groups_page(
+            scope_key="all",
+            zone="unpaired",
+            page=1,
+            page_size=1,
+            detail_level="summary",
+            search="申请人C4",
+        )
+
+        group = page["groups"][0]
+        self.assertEqual(group["collapsed_row_counts"], {"oa": 4})
+        self.assertEqual([row["id"] for row in group["collapsed_rows"]["oa"]], ["collapsed-oa-4"])
 
     def test_repository_groups_page_row_counts_use_fact_rows_before_pagination(self) -> None:
         class FactRowCountsConnection(WorkbenchSummaryGroupsConnection):
@@ -3930,19 +3952,10 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                                 "reason": "first page",
                                 "oa_rows": [{"id": "oa-1", "type": "oa"}],
                                 "bank_rows": [
-                                    {
-                                        "id": "no_oa_summary:batch-1",
-                                        "type": "bank",
-                                        "source_kind": "no_oa_bank_batch_summary",
-                                    }
+                                    {"id": "bank-1", "type": "bank", "source_kind": "bank"},
+                                    {"id": "bank-2", "type": "bank"},
                                 ],
                                 "invoice_rows": [],
-                                "collapsed_rows": {
-                                    "bank": [
-                                        {"id": "bank-1", "type": "bank", "source_kind": "bank"},
-                                        {"id": "bank-2", "type": "bank"},
-                                    ]
-                                },
                             },
                         }
                     ]
@@ -3970,7 +3983,6 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 "coalesce(r.row_role, '') <> 'summary'" in sql
                 and
                 "coalesce(r.source_kind, '') not in" in sql
-                and "no_oa_bank_batch_summary" in sql
                 and "bank_flow_rule_batch_summary" in sql
                 for sql, _params in connection.fetch_one_calls
             )
@@ -4062,12 +4074,12 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 self.fetch_one_calls.append((normalized, params))
                 if "from read_model.workbench_groups" in normalized and "group_id = %s" in normalized:
                     return {
-                        "group_id": "case:no-oa",
+                        "group_id": "case:bank-flow",
                         "zone": "paired",
                         "scope_key": "2026-03",
                         "generation_id": "gen-active",
                         "payload": {
-                            "group_id": "case:no-oa",
+                            "group_id": "case:bank-flow",
                             "group_type": "auto_closed",
                             "match_confidence": "high",
                             "reason": "detail",
@@ -4085,22 +4097,22 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                             "scope_key": "2026-03",
                             "generation_id": "gen-active",
                             "zone": "paired",
-                            "group_id": "case:no-oa",
+                            "group_id": "case:bank-flow",
                             "pane": "bank",
-                            "row_id": "no_oa_summary:batch-1",
+                            "row_id": "bank_flow_rule_summary:batch-1",
                             "row_role": "summary",
-                            "source_kind": "no_oa_bank_batch_summary",
+                            "source_kind": "bank_flow_rule_batch_summary",
                             "row_payload": {
-                                "id": "no_oa_summary:batch-1",
+                                "id": "bank_flow_rule_summary:batch-1",
                                 "type": "bank",
-                                "source_kind": "no_oa_bank_batch_summary",
+                                "source_kind": "bank_flow_rule_batch_summary",
                             },
                         },
                         {
                             "scope_key": "2026-03",
                             "generation_id": "gen-active",
                             "zone": "paired",
-                            "group_id": "case:no-oa",
+                            "group_id": "case:bank-flow",
                             "pane": "bank",
                             "row_id": "bank-1",
                             "row_role": "collapsed",
@@ -4111,7 +4123,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                             "scope_key": "2026-03",
                             "generation_id": "gen-active",
                             "zone": "paired",
-                            "group_id": "case:no-oa",
+                            "group_id": "case:bank-flow",
                             "pane": "bank",
                             "row_id": "bank-2",
                             "row_role": "collapsed",
@@ -4124,11 +4136,15 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         connection = CollapsedGroupDetailConnection()
         repository = PostgresReadModelRepository(connection)
 
-        group = repository.get_workbench_group_detail(scope_key="2026-03", zone="paired", group_id="case:no-oa")
+        group = repository.get_workbench_group_detail(
+            scope_key="2026-03",
+            zone="paired",
+            group_id="case:bank-flow",
+        )
 
         assert group is not None
         self.assertEqual(group["oa_rows"], [])
-        self.assertEqual([row["id"] for row in group["bank_rows"]], ["no_oa_summary:batch-1"])
+        self.assertEqual([row["id"] for row in group["bank_rows"]], ["bank_flow_rule_summary:batch-1"])
         self.assertEqual(group["invoice_rows"], [])
         self.assertEqual(group["row_counts"], {"oa": 0, "bank": 2, "invoice": 0, "rows": 2})
         self.assertEqual(group["display_row_counts"], {"oa": 0, "bank": 1, "invoice": 0, "rows": 1})
@@ -4863,7 +4879,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             any("delete from read_model.workbench_generations" in sql for sql, _params in connection.executed)
         )
 
-    def test_repository_persists_no_oa_collapsed_group_fact_and_display_counts(self) -> None:
+    def test_repository_persists_no_oa_direct_group_fact_and_display_counts(self) -> None:
         connection = WorkbenchWriteConnection()
         repository = PostgresReadModelRepository(connection)
 
@@ -4882,21 +4898,11 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                                         "reason": "免OA批次",
                                         "oa_rows": [],
                                         "bank_rows": [
-                                            {
-                                                "id": "no_oa_summary:batch-1",
-                                                "type": "bank",
-                                                "source_kind": "no_oa_bank_batch_summary",
-                                                "summary": "免OA批次摘要",
-                                            }
+                                            {"id": "bank-1", "type": "bank", "source_kind": "bank"},
+                                            {"id": "bank-2", "type": "bank"},
+                                            {"id": "bank-3", "type": "bank", "source_kind": ""},
                                         ],
                                         "invoice_rows": [],
-                                        "collapsed_rows": {
-                                            "bank": [
-                                                {"id": "bank-1", "type": "bank", "source_kind": "bank"},
-                                                {"id": "bank-2", "type": "bank"},
-                                                {"id": "bank-3", "type": "bank", "source_kind": ""},
-                                            ]
-                                        },
                                     }
                                 ]
                             },
@@ -4917,15 +4923,15 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         group_payload = group_insert[19].obj
         self.assertEqual(group_insert[8], 3)
         self.assertEqual(group_payload["row_counts"], {"oa": 0, "bank": 3, "invoice": 0, "rows": 3})
-        self.assertEqual(group_payload["display_row_counts"], {"oa": 0, "bank": 1, "invoice": 0, "rows": 1})
+        self.assertEqual(group_payload["display_row_counts"], {"oa": 0, "bank": 3, "invoice": 0, "rows": 3})
 
         group_row_roles = [
             (params[5], params[6], params[7], params[9])
             for sql, params in connection.executed
             if "insert into read_model.workbench_group_rows" in sql and params[4] == "case:NO-OA-BATCH"
         ]
-        self.assertIn(("bank", "no_oa_summary:batch-1", "summary", "no_oa_bank_batch_summary"), group_row_roles)
-        self.assertIn(("bank", "bank-1", "collapsed", "bank"), group_row_roles)
+        self.assertIn(("bank", "bank-1", "normal", "bank"), group_row_roles)
+        self.assertIn(("bank", "bank-2", "normal", "bank"), group_row_roles)
 
     def test_repository_treats_bank_flow_rule_batch_summary_source_kind_as_display_only(self) -> None:
         connection = WorkbenchWriteConnection()
@@ -7633,11 +7639,11 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         paired = payload["paired"]["groups"]
         self.assertEqual(len(paired), 1)
         self.assertEqual(paired[0]["relation_mode"], "no_oa_bank_batch")
-        self.assertEqual(paired[0]["display_mode"], "collapsed_summary")
-        self.assertEqual([row["id"] for row in paired[0]["bank_rows"]], ["relation_summary:CASE-NO-OA-1"])
-        self.assertCountEqual([row["id"] for row in paired[0]["collapsed_rows"]["bank"]], ["bank-a", "bank-b"])
+        self.assertNotIn("display_mode", paired[0])
+        self.assertCountEqual([row["id"] for row in paired[0]["bank_rows"]], ["bank-a", "bank-b"])
+        self.assertNotIn("collapsed_rows", paired[0])
         self.assertEqual(paired[0]["special_metadata"]["source_batch_id"], "batch-no-oa-fee-001")
-        self.assertEqual(paired[0]["bank_rows"][0]["relation_mode"], "no_oa_bank_batch")
+        self.assertTrue(all(row["relation_mode"] == "no_oa_bank_batch" for row in paired[0]["bank_rows"]))
 
     def test_sql_projection_pairs_bank_flow_rule_batch_ten_fee_rows_without_oa_or_invoice(self) -> None:
         recorder = ReadModelSnapshotRecorder()

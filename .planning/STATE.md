@@ -196,6 +196,7 @@ None yet.
 | 260630-tyy | 生产级修复 bank_flow_rule_batch App Status storage contract | 2026-06-30 | — | [260630-tyy-bank-flow-rule-batch-app-status-registry](./quick/260630-tyy-bank-flow-rule-batch-app-status-registry/) |
 | 260721-nrf | 流水规则批量处理 canonical relation、Audit fresh 与内部 ID 隐藏生产闭环 | 2026-07-21 | fc5babd5b | [260721-nrf-audit-fresh](./quick/260721-nrf-audit-fresh/) |
 | 260728-g9q | OA 来源别名确定性归一到 canonical OA ID | 2026-07-28 | 454b0a5f2 | [260728-g9q-oa-oa-id-validate](./quick/260728-g9q-oa-oa-id-validate/) |
+| 260728-ngb | 关联台逐栏折叠、ETC 明细和搜索真实命中修复 | 2026-07-28 | — | [260728-ngb-etc](./quick/260728-ngb-etc/) |
 
 ## Deferred Items
 

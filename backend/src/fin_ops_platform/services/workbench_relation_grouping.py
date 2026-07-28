@@ -6,7 +6,6 @@ from hashlib import sha256
 from typing import Any, Callable
 
 from fin_ops_platform.services.bank_batch_service import BANK_FLOW_RULE_BATCH_RELATION_MODE
-from fin_ops_platform.services.no_oa_bank_batch_service import NO_OA_BANK_BATCH_RELATION_MODE
 from fin_ops_platform.services.oa_attachment_invoice_linking import (
     canonical_oa_expense_item_id,
 )
@@ -16,6 +15,7 @@ from fin_ops_platform.services.workbench_relation_requirements import (
 ROW_TYPES = ("oa", "bank", "invoice")
 DISPLAY_ROLES = frozenset({"summary", "collapsed_summary"})
 LEGACY_CANDIDATE_CASE_PREFIXES = ("candidate:", "decision:", "temp:")
+BANK_FLOW_RULE_BATCH_COLLAPSE_THRESHOLD = 3
 
 
 class WorkbenchRelationGroupingService:
@@ -195,7 +195,7 @@ class WorkbenchRelationGroupingService:
         if display_tags:
             group["display_tags"] = display_tags
         self._apply_display_summary(group, display_rows_by_case.get(case_id, []), zone=zone)
-        if relation_mode in {NO_OA_BANK_BATCH_RELATION_MODE, BANK_FLOW_RULE_BATCH_RELATION_MODE}:
+        if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
             self._apply_bank_batch_summary(group, relation_mode=relation_mode, zone=zone)
         return group
 
@@ -319,7 +319,12 @@ class WorkbenchRelationGroupingService:
     @staticmethod
     def _apply_bank_batch_summary(group: dict[str, Any], *, relation_mode: str, zone: str) -> None:
         bank_rows = [deepcopy(row) for row in list(group.get("bank_rows") or [])]
-        if len(bank_rows) < 2 or group.get("oa_rows") or group.get("invoice_rows"):
+        if (
+            relation_mode != BANK_FLOW_RULE_BATCH_RELATION_MODE
+            or len(bank_rows) <= BANK_FLOW_RULE_BATCH_COLLAPSE_THRESHOLD
+            or group.get("oa_rows")
+            or group.get("invoice_rows")
+        ):
             return
         representative = deepcopy(bank_rows[0])
         metadata = representative.get("special_metadata")
@@ -329,7 +334,7 @@ class WorkbenchRelationGroupingService:
         except (InvalidOperation, TypeError, ValueError):
             total = sum((WorkbenchRelationGroupingService._row_amount(row) for row in bank_rows), Decimal("0.00"))
         case_id = str(group.get("case_id") or "")
-        label = "流水规则批次" if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE else "免OA流水"
+        label = "流水规则批次"
         actions = [
             str(action)
             for action in list(representative.get("available_actions") or [])
@@ -343,11 +348,7 @@ class WorkbenchRelationGroupingService:
             {
                 "id": f"relation_summary:{case_id}",
                 "type": "bank",
-                "source_kind": (
-                    "bank_flow_rule_batch_summary"
-                    if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE
-                    else "no_oa_bank_batch_summary"
-                ),
+                "source_kind": "bank_flow_rule_batch_summary",
                 "label": label,
                 "amount": f"{total:.2f}",
                 "debit_amount": f"{total:.2f}",

@@ -15,7 +15,6 @@ import {
   collectWorkbenchFilterOptions,
   collectWorkbenchTimeFilterYears,
   createEmptyWorkbenchZoneDisplayState,
-  workbenchRowMatchesUnifiedSearch,
   type WorkbenchPaneTimeFilter as WorkbenchPaneTimeFilterState,
   type WorkbenchZoneDisplayState,
 } from "../../features/workbench/groupDisplayModel";
@@ -109,26 +108,7 @@ function resolveCollapsedSummaryCopy(
   }
 
   return {
-    detailLabel: "免OA批次明细",
-    countUnit: "条",
-  };
-}
-
-function resolvePreviewExpansionCopy(paneId: WorkbenchRecordType): CollapsedSummaryCopy {
-  if (paneId === "oa") {
-    return {
-      detailLabel: "OA",
-      countUnit: "项",
-    };
-  }
-  if (paneId === "invoice") {
-    return {
-      detailLabel: "发票",
-      countUnit: "张",
-    };
-  }
-  return {
-    detailLabel: "银行流水",
+    detailLabel: "折叠明细",
     countUnit: "条",
   };
 }
@@ -460,30 +440,35 @@ function RelationGroupGrid({
     <div ref={gridBodyRef} className="candidate-grid-body">
       {groups.length === 0 ? <div className="state-panel">当前区域暂无记录。</div> : null}
       {groups.map((group, index) => {
+        const paneIsCollapsed = (paneId: WorkbenchRecordType) => (
+          (group.collapsedRowCounts?.[paneId] ?? 0) > 0
+          || (group.collapsedRows?.[paneId]?.length ?? 0) > 0
+        );
+        const paneRecords = (paneId: WorkbenchRecordType) => {
+          const collapsedRows = group.collapsedRows?.[paneId] ?? [];
+          if (!paneIsCollapsed(paneId)) {
+            return group.rows[paneId];
+          }
+          const collapseKey = `${group.id}:${paneId}`;
+          if (expandedPaneGroups.has(collapseKey)) {
+            return collapsedRows;
+          }
+          return displayState.searchQuery.trim() && collapsedRows.length > 0
+            ? [...group.rows[paneId], ...collapsedRows]
+            : group.rows[paneId];
+        };
         const renderCollapseControls = (paneId: WorkbenchRecordType): ReactNode => {
           const collapsedRows = group.collapsedRows?.[paneId] ?? [];
-          const isCollapsedSummary = group.displayMode === "collapsed_summary" && collapsedRows.length > 0;
-          const visibleRows = group.rows[paneId] ?? [];
-          const rowCount = group.rowCounts?.[paneId];
-          const totalRowCount = typeof rowCount === "number" && Number.isFinite(rowCount) ? rowCount : visibleRows.length;
-          const isPreviewTruncated = !isCollapsedSummary && totalRowCount > visibleRows.length;
-          if (!isCollapsedSummary && !isPreviewTruncated) {
+          if (!paneIsCollapsed(paneId)) {
             return null;
           }
           const collapseKey = `${group.id}:${paneId}`;
           const isExpanded = expandedPaneGroups.has(collapseKey);
           const isLoading = loadingPaneGroups.has(collapseKey);
           const isFailed = failedPaneGroups.has(collapseKey);
-          const collapsedRowCount = group.collapsedRowCounts?.[paneId] ?? group.rowCounts?.[paneId] ?? collapsedRows.length;
-          const rowTotal = isCollapsedSummary ? collapsedRowCount : totalRowCount;
-          const visibleRowCount = isCollapsedSummary ? collapsedRows.length : visibleRows.length;
-          const hiddenRowCount = Math.max(0, rowTotal - visibleRowCount);
-          const collapseCopy = isCollapsedSummary
-            ? resolveCollapsedSummaryCopy(group, paneId, collapsedRows)
-            : resolvePreviewExpansionCopy(paneId);
-          const expandText = isCollapsedSummary
-            ? `展开 ${rowTotal} ${collapseCopy.countUnit}明细`
-            : `还有 ${hiddenRowCount} ${collapseCopy.countUnit}，展开`;
+          const rowTotal = group.collapsedRowCounts?.[paneId] ?? collapsedRows.length;
+          const visibleRowCount = collapsedRows.length;
+          const collapseCopy = resolveCollapsedSummaryCopy(group, paneId, collapsedRows);
           return (
             <Fragment>
               <button
@@ -493,9 +478,7 @@ function RelationGroupGrid({
                     ? `收起${collapseCopy.detailLabel}`
                     : isFailed
                       ? `加载${collapseCopy.detailLabel}失败，点击重试`
-                    : isCollapsedSummary
-                      ? `展开${collapseCopy.detailLabel}，${rowTotal} ${collapseCopy.countUnit}`
-                      : `展开全部${collapseCopy.detailLabel}，当前显示 ${visibleRowCount} ${collapseCopy.countUnit}，共 ${rowTotal} ${collapseCopy.countUnit}`
+                      : `展开${collapseCopy.detailLabel}，${rowTotal} ${collapseCopy.countUnit}`
                 }
                 className="row-action-btn candidate-group-collapse-control"
                 disabled={isLoading}
@@ -511,27 +494,13 @@ function RelationGroupGrid({
                     ? "收起明细"
                     : isFailed
                       ? "加载失败，点击重试"
-                      : expandText}
+                      : `展开 ${rowTotal} ${collapseCopy.countUnit}明细`}
               </button>
             </Fragment>
           );
         };
         const displaySegments = buildWorkbenchGroupDisplaySegments(group);
         const segmentCount = displaySegments?.length ?? 0;
-        const hiddenSearchMatch = Boolean(displayState.searchQuery.trim()) && !panes.some((pane) => {
-          const paneId = pane.id as WorkbenchRecordType;
-          let visibleRows = group.rows[paneId];
-          if (displaySegments && isSourceSegmentedPane(paneId, displaySegments)) {
-            visibleRows = displaySegments.flatMap((segment) => segment.rows[paneId]);
-          } else if (!displaySegments) {
-            const collapsedRows = group.collapsedRows?.[paneId] ?? [];
-            const collapseKey = `${group.id}:${paneId}`;
-            if (group.displayMode === "collapsed_summary" && expandedPaneGroups.has(collapseKey)) {
-              visibleRows = collapsedRows;
-            }
-          }
-          return visibleRows.some((row) => workbenchRowMatchesUnifiedSearch(row, displayState.searchQuery));
-        });
 
         if (displaySegments) {
           return (
@@ -561,9 +530,6 @@ function RelationGroupGrid({
                           gridRow: segmentIndex + 1,
                         }}
                       >
-                        {hiddenSearchMatch && paneIndex === 0 && segmentIndex === 0 ? (
-                          <span className="candidate-group-hidden-search-match" role="status">隐藏内容命中</span>
-                        ) : null}
                         <RelationGroupCell
                           actionMode={actionMode}
                           columnGridStyle={paneGridStyleByPane[paneId]}
@@ -603,9 +569,6 @@ function RelationGroupGrid({
                       gridRow: `1 / span ${segmentCount}`,
                     }}
                   >
-                    {hiddenSearchMatch && paneIndex === 0 ? (
-                      <span className="candidate-group-hidden-search-match" role="status">隐藏内容命中</span>
-                    ) : null}
                     <RelationGroupCell
                       actionMode={actionMode}
                       columnGridStyle={paneGridStyleByPane[paneId]}
@@ -618,7 +581,7 @@ function RelationGroupGrid({
                       onRowAction={onRowAction}
                       onSelectRow={onSelectRow}
                       paneId={paneId}
-                      records={group.rows[paneId]}
+                      records={paneRecords(paneId)}
                       scrollPaneId={paneId}
                       scrollTestId={`candidate-scroll-${zoneId}-${group.id}-${pane.id}`}
                       showActionColumn={paneHasActionColumn(paneId)}
@@ -676,18 +639,10 @@ function RelationGroupGrid({
           >
             {panes.map((pane, paneIndex) => {
               const paneId = pane.id as WorkbenchRecordType;
-              const collapsedRows = group.collapsedRows?.[paneId] ?? [];
-              const isCollapsedSummary = group.displayMode === "collapsed_summary" && collapsedRows.length > 0;
-              const collapseKey = `${group.id}:${paneId}`;
-              const isExpanded = isCollapsedSummary && expandedPaneGroups.has(collapseKey);
-              const visibleRecords = isExpanded ? collapsedRows : group.rows[paneId];
               const requirementLabel = missingRequirementLabel(group, paneId);
               return (
                 <Fragment key={`${group.id}-${pane.id}`}>
                   <div className="candidate-group-pane-slot candidate-group-pane-slot-sheet">
-                    {hiddenSearchMatch && paneIndex === 0 ? (
-                      <span className="candidate-group-hidden-search-match" role="status">隐藏内容命中</span>
-                    ) : null}
                     {requirementLabel ? (
                       <span
                         aria-label={requirementLabel}
@@ -709,7 +664,7 @@ function RelationGroupGrid({
                       onRowAction={onRowAction}
                       onSelectRow={onSelectRow}
                       paneId={paneId}
-                      records={visibleRecords}
+                      records={paneRecords(paneId)}
                       scrollPaneId={paneId}
                       scrollTestId={`candidate-scroll-${zoneId}-${group.id}-${pane.id}`}
                       showActionColumn={paneHasActionColumn(paneId)}

@@ -78,10 +78,9 @@ OA_ATTACHMENT_NON_INVOICE_EVIDENCE_SOURCE_KINDS = {
     "oa_attachment_payment_receipt",
     "oa_attachment_unknown",
 }
-NO_OA_BANK_BATCH_SUMMARY_SOURCE_KIND = "no_oa_bank_batch_summary"
 BANK_FLOW_RULE_BATCH_SUMMARY_SOURCE_KIND = "bank_flow_rule_batch_summary"
 WORKBENCH_BANK_BATCH_SUMMARY_SOURCE_KINDS = frozenset(
-    {NO_OA_BANK_BATCH_SUMMARY_SOURCE_KIND, BANK_FLOW_RULE_BATCH_SUMMARY_SOURCE_KIND}
+    {BANK_FLOW_RULE_BATCH_SUMMARY_SOURCE_KIND}
 )
 _BATCH_ACCOUNTING_INVOICE_CANDIDATE_MATCH_SQL = """
     regexp_replace(
@@ -4925,7 +4924,6 @@ class PostgresReadModelRepository:
                             where r.pane = 'bank'
                               and coalesce(r.row_role, '') <> 'summary'
                               and coalesce(r.source_kind, '') not in (
-                                  'no_oa_bank_batch_summary',
                                   'bank_flow_rule_batch_summary'
                               )
                               {bank_row_filter_sql}
@@ -4970,7 +4968,6 @@ class PostgresReadModelRepository:
                             where r.pane = 'bank'
                               and coalesce(r.row_role, '') <> 'summary'
                               and coalesce(r.source_kind, '') not in (
-                                  'no_oa_bank_batch_summary',
                                   'bank_flow_rule_batch_summary'
                               )
                               {bank_row_filter_sql}
@@ -5037,7 +5034,10 @@ class PostgresReadModelRepository:
                     column_filters=normalized_column_filters,
                     time_filters=normalized_time_filters,
                 )
-                group = _compact_workbench_group_for_summary_page(group)
+                group = _compact_workbench_group_for_summary_page(
+                    group,
+                    search=normalized_search,
+                )
             groups.append(group)
         if composed_all_scope:
             current_generation_id = text(
@@ -6744,37 +6744,24 @@ def _normalize_workbench_group_detail_level(detail_level: str | None) -> str:
     return "full"
 
 
-WORKBENCH_GROUP_SUMMARY_PREVIEW_ROW_LIMIT = 3
+WORKBENCH_COLLAPSED_SEARCH_PREVIEW_ROW_LIMIT = 3
 
 
-def _is_oa_attachment_invoice_summary_row(row: dict[str, Any]) -> bool:
-    return (text(row.get("source_kind") or row.get("sourceKind")) or "") == "oa_attachment_invoice"
-
-
-def _workbench_group_summary_preview_rows(row_key: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    if row_key == "oa_rows":
-        return list(rows)
-
-    preview_rows = list(rows[:WORKBENCH_GROUP_SUMMARY_PREVIEW_ROW_LIMIT])
-    if row_key != "invoice_rows":
-        return preview_rows
-
-    preview_ids = {
-        row_id
-        for row in preview_rows
+def _workbench_collapsed_search_preview_rows(
+    pane: str,
+    rows: list[dict[str, Any]],
+    *,
+    search: str | None,
+) -> list[dict[str, Any]]:
+    normalized_search = (text(search) or "").casefold()
+    if not normalized_search:
+        return []
+    return [
+        row
+        for row in rows
         if isinstance(row, dict)
-        if (row_id := text(row.get("id") or row.get("row_id") or row.get("rowId")))
-    }
-    for row in rows[WORKBENCH_GROUP_SUMMARY_PREVIEW_ROW_LIMIT:]:
-        if not isinstance(row, dict) or not _is_oa_attachment_invoice_summary_row(row):
-            continue
-        row_id = text(row.get("id") or row.get("row_id") or row.get("rowId"))
-        if row_id and row_id in preview_ids:
-            continue
-        preview_rows.append(row)
-        if row_id:
-            preview_ids.add(row_id)
-    return preview_rows
+        and normalized_search in _searchable_row_text(row, pane).casefold()
+    ][:WORKBENCH_COLLAPSED_SEARCH_PREVIEW_ROW_LIMIT]
 
 
 def _filter_workbench_group_preview_rows_for_criteria(
@@ -6882,7 +6869,11 @@ def _workbench_payload_row_matches_preview_criteria(
     return True
 
 
-def _compact_workbench_group_for_summary_page(group: dict[str, Any]) -> dict[str, Any]:
+def _compact_workbench_group_for_summary_page(
+    group: dict[str, Any],
+    *,
+    search: str | None = None,
+) -> dict[str, Any]:
     compact = without_keys(
         dict(group),
         {
@@ -6909,7 +6900,7 @@ def _compact_workbench_group_for_summary_page(group: dict[str, Any]) -> dict[str
         rows = group.get(row_key)
         compact[row_key] = [
             _compact_workbench_row_for_summary_page(row)
-            for row in _workbench_group_summary_preview_rows(row_key, rows)
+            for row in rows
             if isinstance(row, dict)
         ] if isinstance(rows, list) else []
     collapsed_rows = group.get("collapsed_rows")
@@ -6927,7 +6918,11 @@ def _compact_workbench_group_for_summary_page(group: dict[str, Any]) -> dict[str
         compact["collapsed_rows"] = {
             str(row_type): [
                 _compact_workbench_row_for_summary_page(row)
-                for row in rows[:WORKBENCH_GROUP_SUMMARY_PREVIEW_ROW_LIMIT]
+                for row in _workbench_collapsed_search_preview_rows(
+                    str(row_type),
+                    rows,
+                    search=search,
+                )
                 if isinstance(row, dict)
             ]
             for row_type, rows in collapsed_rows.items()

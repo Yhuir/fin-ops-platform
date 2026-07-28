@@ -1,5 +1,12 @@
 # 关联台 实施记录
 
+## 2026-07-28 - 逐栏折叠合同与真实搜索预览
+
+- 根因：summary repository 无条件把普通银行/发票栏截成 3 行，前端再用组级 `display_mode=collapsed_summary` 校验三个栏的 collapsed rows。ETC 实际只折叠发票栏，因此 OA/银行正常行被错误按空 collapsed rows 校验，详情 API 虽完整仍显示“加载失败，点击重试”；普通关系则被旧通用 preview 强制增加详情加载入口。
+- 修复：`collapsed_row_counts.<pane>` 成为唯一逐栏折叠合同。ETC 只折叠发票栏；`bank_flow_rule_batch` 仅在银行成员 `>3` 时折叠银行栏；普通关系、legacy `no_oa_bank_batch` 和 bank-flow 1 到 3 行直接输出全部真实行。详情 API 逐栏 fail closed，不再把组级显示模式传播到其它栏。
+- 搜索：无搜索时 summary payload 不携带折叠明细；折叠成员命中搜索时最多返回 3 条真实匹配行，前端在闭合态直接高亮显示，不展示“隐藏内容命中”、不自动展开或预取详情。删除旧普通行 preview、无 OA summary 和隐藏命中样式/文案。
+- 版本与边界：Workbench display schema 升级到 v10，使旧 generation/page cache 失效；统一事实源、active relation、freshness/queue/worker、API route 和其它页面 I/O 不变。OA 待付款核对继续 API 直读，不消费本 projection。
+
 ## 2026-07-25 - 同次 freshness proof 复用
 
 - Workbench 页面 gate 已计算 canonical expected source versions 时，enqueue 同时携带与 exact scope 绑定的 token/proof；queue 只保留有界安全 metadata，worker 校验 token/scope 后直接交给 projection，避免 worker 再跑同一组 canonical SQL。
@@ -1289,7 +1296,7 @@
 ## 2026-07-21 - 已配对/未配对区域统一搜索
 
 - UI：删除每个 pane 的三套搜索按钮、popover 与 draft/open 状态；已配对和未配对区域各使用一个 HeroUI `SearchField`，与区域标题同一 header 行。两区状态独立，输入继续复用现有 `useDeferredValue` 与 combined initial 请求，不新增 API、请求 fan-out 或搜索服务。
-- 搜索合同：唯一 HTTP 字段为 `search`，最长 200 字符，trim 后按不区分大小写的普通文本匹配 active generation 的 OA/流水/发票结构化 `searchable_text`；SQL 显式转义 `%`、`_` 与反斜杠。任一成员命中即返回完整关联组；内部 row/group id 与 detail-only 字段不进入索引。隐藏 pane 或折叠明细仍可命中，摘要未展示命中值时显示“隐藏内容命中”，用户按既有 click-only group detail 链路展开后展示实际高亮。
+- 搜索合同：唯一 HTTP 字段为 `search`，最长 200 字符，trim 后按不区分大小写的普通文本匹配 active generation 的 OA/流水/发票结构化 `searchable_text`；SQL 显式转义 `%`、`_` 与反斜杠。任一成员命中即返回完整关联组；内部 row/group id 与 detail-only 字段不进入索引。折叠明细仍可命中；2026-07-28 起闭合态直接展示最多 3 条真实命中行并高亮，不再显示占位提示，也不自动请求完整详情。
 - 性能与边界：复用 2026-07-17 的 active-member key join 和单次精确 count/matching ids 分页，不扫描 payload/raw payload、不新增表/索引/worker/queue/cache/read model。projection schema 升级为 `2026-07-21-unified-zone-search-v5`，all-scope composed schema 同步 v5，使新增展示字段索引和旧 Redis payload 自动重建/失效。
 - Fresh Audit：关联台 Audit icon 的 reset key 绑定 active generation + 页面 read-model status；generation 或 status 改变立即清除旧绿色结果。`workbench_matching_scope_not_converged` 归类为 freshness+queue 阻断，`workbench_generation_source_versions_mismatch` 归类为 freshness 阻断；Audit 仍是 admin on-demand，只读 repeatable-read snapshot，不进入输入热路径。
 - 旧链路清理：删除 `WorkbenchPaneSearch.tsx`、`search_mode`、`search_by_pane`、pane-local search state、旧 URL/cache/facade/repository 分支和 session v1；不保留 fallback 或兼容并行链。共享 TaxTable 的同名 CSS hooks仍由 TaxTable 使用，不属于已删除 Workbench 搜索路径。

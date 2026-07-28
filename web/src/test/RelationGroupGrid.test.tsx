@@ -170,11 +170,13 @@ describe("Workbench candidate grouping layout", () => {
     };
   }
 
-  function createTruncatedManualInvoiceGroup(): WorkbenchRelationGroup {
+  function createManualInvoiceManyGroup(): WorkbenchRelationGroup {
     const invoiceRows = [
       createInvoiceRecord("manual-inv-many-1", "MANUAL-MANY-001"),
       createInvoiceRecord("manual-inv-many-2", "MANUAL-MANY-002"),
       createInvoiceRecord("manual-inv-many-3", "MANUAL-MANY-003"),
+      createInvoiceRecord("manual-inv-many-4", "MANUAL-MANY-004"),
+      createInvoiceRecord("manual-inv-many-5", "MANUAL-MANY-005"),
     ];
     return {
       id: "case:CASE-MANUAL-INVOICE-MANY",
@@ -197,11 +199,12 @@ describe("Workbench candidate grouping layout", () => {
   }
 
   function createNoOaBankRecord(id: string, counterparty: string, amount: string, note: string): WorkbenchRecord {
+    const isBankFlowSummary = id.startsWith("bank-flow-summary-");
     return {
       id,
       recordType: "bank",
-      sourceKind: id.includes("summary") ? "no_oa_bank_batch_summary" : undefined,
-      label: id.includes("summary") ? "免OA批次" : "支取",
+      sourceKind: isBankFlowSummary ? "bank_flow_rule_batch_summary" : undefined,
+      label: isBankFlowSummary ? "流水规则批次" : "支取",
       status: "免OA批次",
       statusCode: "no_oa_bank_batch",
       statusTone: "success",
@@ -222,28 +225,28 @@ describe("Workbench candidate grouping layout", () => {
         loanRepaymentDate: "--",
       },
       detailFields: [],
-      actionVariant: id.includes("summary") ? "bank-review" : "detail-only",
-      availableActions: id.includes("summary") ? ["detail", "withdraw_no_oa_batch"] : ["detail"],
-      specialMetadata: id.includes("summary")
-        ? { source_batch_id: "NOOA-202603-FEE", batch_version: 7 }
+      actionVariant: isBankFlowSummary ? "bank-review" : "detail-only",
+      availableActions: isBankFlowSummary ? ["detail", "withdraw_no_oa_batch"] : ["detail"],
+      specialMetadata: isBankFlowSummary
+        ? { source_batch_id: "BANKFLOW-202603-FEE", batch_version: 7, relation_mode: "bank_flow_rule_batch" }
         : undefined,
     };
   }
 
   function createNoOaCollapsedGroup(): WorkbenchRelationGroup {
-    const summary = createNoOaBankRecord("nooa-summary-NOOA-202603-FEE", "免OA手续费批次", "30.00", "2 条手续费");
+    const bankRows = [
+      createNoOaBankRecord("bk-nooa-fee-001", "建设银行手续费", "10.00", "摘要：账户管理费"),
+      createNoOaBankRecord("bk-nooa-fee-002", "网银服务费", "20.00", "摘要：企业网银年费"),
+    ];
     return {
       id: "no-oa-bank-batch:NOOA-202603-FEE",
       groupType: "paired",
       matchConfidence: "high",
       reason: "免OA手续费批次",
       relationMode: "no_oa_bank_batch",
-      displayMode: "collapsed_summary",
-      defaultCollapsed: true,
-      summaryRow: summary,
       rows: {
         oa: [],
-        bank: [summary],
+        bank: bankRows,
         invoice: [],
       },
       rowCounts: {
@@ -254,15 +257,9 @@ describe("Workbench candidate grouping layout", () => {
       },
       displayRowCounts: {
         oa: 0,
-        bank: 1,
+        bank: 2,
         invoice: 0,
-        rows: 1,
-      },
-      collapsedRows: {
-        bank: [
-          createNoOaBankRecord("bk-nooa-fee-001", "建设银行手续费", "10.00", "摘要：账户管理费"),
-          createNoOaBankRecord("bk-nooa-fee-002", "网银服务费", "20.00", "摘要：企业网银年费"),
-        ],
+        rows: 2,
       },
     };
   }
@@ -274,6 +271,8 @@ describe("Workbench candidate grouping layout", () => {
       id: "bank-flow-rule-batch:BATCH-202603-FEE",
       relationMode: "bank_flow_rule_batch",
       reason: "流水规则手续费批次",
+      displayMode: "collapsed_summary",
+      defaultCollapsed: true,
       summaryRow: summary,
       rows: {
         oa: [],
@@ -392,7 +391,7 @@ describe("Workbench candidate grouping layout", () => {
     } as WorkbenchRecord;
   }
 
-  function createTruncatedTurnoverGroup(): WorkbenchRelationGroup {
+  function createOrdinaryTurnoverGroup(): WorkbenchRelationGroup {
     return {
       id: "case:turnover:turnover_rel_36266274e9235566",
       groupType: "unpaired",
@@ -406,6 +405,7 @@ describe("Workbench candidate grouping layout", () => {
           createTurnoverBankRecord("txn_imported_0105", "杨丽萍", "150000", "支出", "2026-05-22 14:40:07", "还5月9-11日借入款"),
           createTurnoverBankRecord("txn_imported_0077", "杨丽萍", "50000", "收入", "2026-05-11 09:06:40", "暂借款"),
           createTurnoverBankRecord("txn_imported_0076", "杨丽萍", "50000", "收入", "2026-05-10 09:45:04", "暂借款"),
+          createTurnoverBankRecord("txn_imported_0058", "杨丽萍 5月9流水", "50000", "收入", "2026-05-09 10:14:06", "暂借款"),
         ],
         invoice: [],
       },
@@ -414,20 +414,6 @@ describe("Workbench candidate grouping layout", () => {
         bank: 4,
         invoice: 0,
         rows: 5,
-      },
-    };
-  }
-
-  function createFullTurnoverGroup(): WorkbenchRelationGroup {
-    const group = createTruncatedTurnoverGroup();
-    return {
-      ...group,
-      rows: {
-        ...group.rows,
-        bank: [
-          ...group.rows.bank,
-          createTurnoverBankRecord("txn_imported_0058", "杨丽萍 5月9隐藏流水", "50000", "收入", "2026-05-09 10:14:06", "暂借款"),
-        ],
       },
     };
   }
@@ -640,21 +626,45 @@ describe("Workbench candidate grouping layout", () => {
             match_confidence: "high",
             reason: "免OA手续费批次",
             relation_mode: "no_oa_bank_batch",
-            display_mode: "collapsed_summary",
-            default_collapsed: true,
             oa_rows: [],
             bank_rows: [
               {
-                id: "nooa-summary-NOOA-202603-FEE",
+                id: "bk-nooa-fee-001",
                 type: "bank",
-                source_kind: "no_oa_bank_batch_summary",
-                trade_time: "2026-03",
+                trade_time: "2026-03-08 09:00:00",
+                direction: "支出",
+                debit_amount: "10.00",
+                credit_amount: "",
+                counterparty_name: "建设银行手续费",
+                payment_account_label: "建设银行 8106",
+                invoice_relation: { code: "no_oa_bank_batch", label: "免OA批次", tone: "success" },
+                bank_text_fields: [{ label: "摘要", value: "账户管理费" }],
+                available_actions: ["detail"],
+              },
+              {
+                id: "bk-nooa-fee-002",
+                type: "bank",
+                trade_time: "2026-03-09 09:00:00",
+                direction: "支出",
+                debit_amount: "20.00",
+                credit_amount: "",
+                counterparty_name: "网银服务费",
+                payment_account_label: "建设银行 8106",
+                invoice_relation: { code: "no_oa_bank_batch", label: "免OA批次", tone: "success" },
+                bank_text_fields: [{ label: "摘要", value: "企业网银年费" }],
+                available_actions: ["detail"],
+              },
+              {
+                id: "bk-nooa-fee-003",
+                type: "bank",
+                trade_time: "2026-03-10 09:00:00",
                 direction: "支出",
                 debit_amount: "30.00",
                 credit_amount: "",
-                counterparty_name: "免OA手续费批次",
+                counterparty_name: "短信服务费",
                 payment_account_label: "建设银行 8106",
                 invoice_relation: { code: "no_oa_bank_batch", label: "免OA批次", tone: "success" },
+                bank_text_fields: [{ label: "摘要", value: "短信服务费" }],
                 available_actions: ["detail", "withdraw_no_oa_batch"],
                 special_metadata: {
                   source_batch_id: "NOOA-202603-FEE",
@@ -663,23 +673,6 @@ describe("Workbench candidate grouping layout", () => {
               },
             ],
             invoice_rows: [],
-            collapsed_rows: {
-              bank: [
-                {
-                  id: "bk-nooa-fee-001",
-                  type: "bank",
-                  trade_time: "2026-03-08 09:00:00",
-                  direction: "支出",
-                  debit_amount: "10.00",
-                  credit_amount: "",
-                  counterparty_name: "建设银行手续费",
-                  payment_account_label: "建设银行 8106",
-                  invoice_relation: { code: "no_oa_bank_batch", label: "免OA批次", tone: "success" },
-                  bank_text_fields: [{ label: "摘要", value: "账户管理费" }],
-                  available_actions: ["detail"],
-                },
-              ],
-            },
           },
         ],
       },
@@ -690,19 +683,43 @@ describe("Workbench candidate grouping layout", () => {
   function buildBankFlowRuleWorkbenchPayload() {
     const payload = buildNoOaWorkbenchPayload();
     const group = payload.paired.groups[0];
-    group.group_id = "bank-flow-rule-batch:BANKFLOW-202603-FEE";
-    group.reason = "流水规则手续费批次";
-    group.relation_mode = "bank_flow_rule_batch";
-    const summaryRow = group.bank_rows[0];
-    summaryRow.id = "bank-flow-summary-BANKFLOW-202603-FEE";
-    summaryRow.source_kind = "bank_flow_rule_batch_summary";
-    summaryRow.counterparty_name = "流水规则手续费批次";
-    summaryRow.invoice_relation = { code: "bank_flow_rule_batch", label: "流水规则批次", tone: "success" };
-    summaryRow.special_metadata = {
-      source_batch_id: "BANKFLOW-202603-FEE",
-      batch_version: 7,
-      relation_mode: "bank_flow_rule_batch",
+    const collapsedBankRows = [
+      ...group.bank_rows.map((row) => ({ ...row })),
+      {
+        ...group.bank_rows[2],
+        id: "bk-bank-flow-fee-004",
+        trade_time: "2026-03-11 09:00:00",
+        debit_amount: "40.00",
+        counterparty_name: "回单服务费",
+      },
+    ];
+    const summaryRow = {
+      ...group.bank_rows[0],
+      id: "bank-flow-summary-BANKFLOW-202603-FEE",
+      source_kind: "bank_flow_rule_batch_summary",
+      debit_amount: "100.00",
+      counterparty_name: "流水规则手续费批次",
+      invoice_relation: { code: "bank_flow_rule_batch", label: "流水规则批次", tone: "success" },
+      special_metadata: {
+        source_batch_id: "BANKFLOW-202603-FEE",
+        batch_version: 7,
+        relation_mode: "bank_flow_rule_batch",
+        row_count: 4,
+        total_amount: "100.00",
+      },
     };
+    Object.assign(group, {
+      group_id: "bank-flow-rule-batch:BANKFLOW-202603-FEE",
+      reason: "流水规则手续费批次",
+      relation_mode: "bank_flow_rule_batch",
+      display_mode: "collapsed_summary",
+      default_collapsed: true,
+      bank_rows: [summaryRow],
+      collapsed_rows: { bank: collapsedBankRows },
+      collapsed_row_counts: { bank: 4 },
+      row_counts: { oa: 0, bank: 4, invoice: 0, rows: 4 },
+      display_row_counts: { oa: 0, bank: 1, invoice: 0, rows: 1 },
+    });
     return payload;
   }
 
@@ -883,8 +900,8 @@ describe("Workbench candidate grouping layout", () => {
     expect(screen.queryByText("已配对 1 组")).not.toBeInTheDocument();
   });
 
-  test("renders an explicit expand control when summary response truncates ordinary visible rows", async () => {
-    const group = createTruncatedManualInvoiceGroup();
+  test("renders every ordinary invoice row without an expand control", () => {
+    const group = createManualInvoiceManyGroup();
     const ensureGroupDetail = vi.fn().mockResolvedValue(undefined);
 
     render(
@@ -907,16 +924,10 @@ describe("Workbench candidate grouping layout", () => {
       />,
     );
 
-    const expandButton = screen.getByRole("button", {
-      name: "展开全部发票，当前显示 3 张，共 5 张",
-    });
-
-    expect(expandButton).toHaveTextContent("还有 2 张，展开");
+    expect(screen.getByText("MANUAL-MANY-004")).toBeInTheDocument();
+    expect(screen.getByText("MANUAL-MANY-005")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /展开全部发票/ })).not.toBeInTheDocument();
     expect(ensureGroupDetail).not.toHaveBeenCalled();
-
-    fireEvent.click(expandButton);
-
-    await waitFor(() => expect(ensureGroupDetail).toHaveBeenCalledWith("unpaired", "case:CASE-MANUAL-INVOICE-MANY"));
   });
 
   test("keeps truncated collapsed summary detail lazy until the user expands it", () => {
@@ -1307,41 +1318,28 @@ describe("Workbench candidate grouping layout", () => {
     expect(within(sumAmountSegment).queryByText("INV-29350")).not.toBeInTheDocument();
   });
 
-  test("renders no-OA summary rows collapsed by default and expands to original bank detail rows", () => {
+  test("renders no-OA bank rows directly without collapse controls", () => {
     renderNoOaGrid();
     const bankCell = screen.getByTestId("candidate-scroll-paired-no-oa-bank-batch:NOOA-202603-FEE-bank");
-
-    expect(screen.getByText("免OA手续费批次")).toBeInTheDocument();
-    expect(screen.queryByText("建设银行手续费")).not.toBeInTheDocument();
-    expect(screen.queryByText("网银服务费")).not.toBeInTheDocument();
-    const expandButton = screen.getByRole("button", { name: "展开免OA批次明细，2 条" });
-    expect(expandButton).toHaveTextContent("展开 2 条明细");
-    expect(expandButton).toHaveClass("candidate-group-collapse-control");
-    expect(screen.queryByText("当前显示 1 条摘要")).not.toBeInTheDocument();
-    expect(screen.queryByText("实际 2 条流水")).not.toBeInTheDocument();
-    expect(bankCell).toContainElement(expandButton);
-    expect(expandButton.closest(".record-card")).not.toBeNull();
-    expect(within(bankCell).getAllByRole("row")).toHaveLength(1);
-
-    fireEvent.click(expandButton);
 
     expect(screen.getByText("建设银行手续费")).toBeInTheDocument();
     expect(screen.getByText("网银服务费")).toBeInTheDocument();
     expect(screen.queryByText("免OA手续费批次")).not.toBeInTheDocument();
     expect(within(bankCell).getAllByRole("row")).toHaveLength(2);
-    expect(screen.getByRole("button", { name: "收起免OA批次明细" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /免OA批次明细/ })).not.toBeInTheDocument();
   });
 
-  test("marks a hidden search hit until collapsed detail is expanded, then highlights the value", () => {
+  test("shows a real collapsed search match without opening the bank-flow batch", () => {
     const state = createEmptyWorkbenchZoneDisplayState();
     state.searchQuery = "建设银行手续费";
-    renderNoOaGrid(createNoOaCollapsedGroup(), state);
+    renderNoOaGrid(createBankFlowCollapsedGroup(), state);
 
-    expect(screen.getByText("隐藏内容命中")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "展开免OA批次明细，2 条" }));
-
-    expect(screen.queryByText("隐藏内容命中")).not.toBeInTheDocument();
     expect(screen.getByText("建设银行手续费")).toHaveClass("search-hit");
+    expect(screen.queryByText("隐藏内容命中")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "展开流水规则批次明细，15 条" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
   });
 
   test("renders bank-flow summary rows without overlapping collapsed count copy", () => {
@@ -1353,48 +1351,30 @@ describe("Workbench candidate grouping layout", () => {
     expect(screen.queryByText("实际 15 条流水")).not.toBeInTheDocument();
   });
 
-  test("renders a non-overlapping expand control for ordinary truncated bank previews and loads hidden rows", async () => {
-    const summaryGroup = createTruncatedTurnoverGroup();
-    const fullDetailGroup = createFullTurnoverGroup();
+  test("renders every ordinary bank row directly without detail loading", () => {
+    const group = createOrdinaryTurnoverGroup();
     const ensureGroupDetail = vi.fn();
-    let resolveDetail!: () => void;
-    const detailLoaded = new Promise<void>((resolve) => {
-      resolveDetail = resolve;
-    });
-
-    function GridHarness() {
-      const [group, setGroup] = useState(summaryGroup);
-      return (
-        <RelationGroupGrid
-          canMutateData
-          displayState={createEmptyWorkbenchZoneDisplayState()}
-          getRowState={() => "idle"}
-          groups={[group]}
-          onEnsureGroupDetail={async (zoneId, groupId) => {
-            ensureGroupDetail(zoneId, groupId);
-            await detailLoaded;
-            setGroup(fullDetailGroup);
-          }}
-          onOpenDetail={() => undefined}
-          onRowAction={() => undefined}
-          onSelectRow={() => undefined}
-          panes={[
-            { id: "oa", title: "OA", rows: group.rows.oa },
-            { id: "bank", title: "银行流水", rows: group.rows.bank },
-            { id: "invoice", title: "进销项发票", rows: group.rows.invoice },
-          ]}
-          rowTemplateColumns="1fr 8px 1fr 8px 1fr"
-          zoneId="unpaired"
-        />
-      );
-    }
-
-    render(<GridHarness />);
+    render(
+      <RelationGroupGrid
+        canMutateData
+        displayState={createEmptyWorkbenchZoneDisplayState()}
+        getRowState={() => "idle"}
+        groups={[group]}
+        onEnsureGroupDetail={ensureGroupDetail}
+        onOpenDetail={() => undefined}
+        onRowAction={() => undefined}
+        onSelectRow={() => undefined}
+        panes={[
+          { id: "oa", title: "OA", rows: group.rows.oa },
+          { id: "bank", title: "银行流水", rows: group.rows.bank },
+          { id: "invoice", title: "进销项发票", rows: group.rows.invoice },
+        ]}
+        rowTemplateColumns="1fr 8px 1fr 8px 1fr"
+        zoneId="unpaired"
+      />,
+    );
 
     const bankCell = screen.getByTestId("candidate-scroll-unpaired-case:turnover:turnover_rel_36266274e9235566-bank");
-    const expandButton = screen.getByRole("button", {
-      name: "展开全部银行流水，当前显示 3 条，共 4 条",
-    });
 
     expect(screen.getByText("2026-05-22")).toBeInTheDocument();
     expect(screen.getByText("14:40:07")).toBeInTheDocument();
@@ -1402,29 +1382,10 @@ describe("Workbench candidate grouping layout", () => {
     expect(screen.getByText("09:06:40")).toBeInTheDocument();
     expect(screen.getByText("2026-05-10")).toBeInTheDocument();
     expect(screen.getByText("09:45:04")).toBeInTheDocument();
-    expect(screen.queryByText("杨丽萍 5月9隐藏流水")).not.toBeInTheDocument();
-    expect(expandButton).toHaveTextContent("还有 1 条，展开");
-    expect(expandButton).toHaveClass("candidate-group-collapse-control");
-    expect(bankCell).toContainElement(expandButton);
-    expect(expandButton.closest(".record-card")).not.toBeNull();
-    expect(ensureGroupDetail).not.toHaveBeenCalled();
-
-    fireEvent.click(expandButton);
-
-    expect(screen.getByText("加载中")).toBeInTheDocument();
-    await waitFor(() => {
-      expect(ensureGroupDetail).toHaveBeenCalledWith("unpaired", "case:turnover:turnover_rel_36266274e9235566");
-    });
-
-    await act(async () => {
-      resolveDetail();
-      await detailLoaded;
-    });
-
-    expect(await screen.findByText("杨丽萍 5月9隐藏流水")).toBeInTheDocument();
-    expect(screen.getByText("2026-05-09")).toBeInTheDocument();
-    expect(screen.getByText("10:14:06")).toBeInTheDocument();
+    expect(screen.getByText("杨丽萍 5月9流水")).toBeInTheDocument();
+    expect(within(bankCell).getAllByRole("row")).toHaveLength(4);
     expect(screen.queryByRole("button", { name: /展开全部银行流水/ })).not.toBeInTheDocument();
+    expect(ensureGroupDetail).not.toHaveBeenCalled();
   });
 
   test("waits for full collapsed detail before expanding truncated summary rows", async () => {
@@ -1590,13 +1551,13 @@ describe("Workbench candidate grouping layout", () => {
     expect(expandButton).toHaveTextContent("展开 34 张明细");
   });
 
-  test("renders submitted salary and internal-transfer batches as collapsed no-OA summaries", () => {
-    const salarySummary = createNoOaBankRecord("nooa-summary-NOOA-202603-SALARY", "免OA工资批次", "80,000.00", "4 条工资");
-    const internalSummary = createNoOaBankRecord(
-      "nooa-summary-NOOA-202603-INTERNAL",
-      "免OA内部往来款批次",
+  test("renders submitted salary and internal-transfer no-OA rows directly", () => {
+    const salaryRow = createNoOaBankRecord("bk-nooa-salary-001", "员工工资", "80,000.00", "摘要：工资");
+    const internalRow = createNoOaBankRecord(
+      "bk-nooa-internal-001",
+      "内部往来款",
       "125,000.00",
-      "1 条内部往来款",
+      "摘要：内部往来款",
     );
 
     render(
@@ -1611,12 +1572,7 @@ describe("Workbench candidate grouping layout", () => {
             matchConfidence: "high",
             reason: "免OA工资批次",
             relationMode: "no_oa_bank_batch",
-            displayMode: "collapsed_summary",
-            defaultCollapsed: true,
-            rows: { oa: [], bank: [salarySummary], invoice: [] },
-            collapsedRows: {
-              bank: [createNoOaBankRecord("bk-nooa-salary-001", "员工工资", "80,000.00", "摘要：工资")],
-            },
+            rows: { oa: [], bank: [salaryRow], invoice: [] },
           },
           {
             id: "no-oa-bank-batch:NOOA-202603-INTERNAL",
@@ -1624,12 +1580,7 @@ describe("Workbench candidate grouping layout", () => {
             matchConfidence: "high",
             reason: "免OA内部往来款批次",
             relationMode: "no_oa_bank_batch",
-            displayMode: "collapsed_summary",
-            defaultCollapsed: true,
-            rows: { oa: [], bank: [internalSummary], invoice: [] },
-            collapsedRows: {
-              bank: [createNoOaBankRecord("bk-nooa-internal-001", "内部往来款", "125,000.00", "摘要：内部往来款")],
-            },
+            rows: { oa: [], bank: [internalRow], invoice: [] },
           },
         ]}
         onColumnFilterChange={() => undefined}
@@ -1641,7 +1592,7 @@ describe("Workbench candidate grouping layout", () => {
         onTogglePaneSort={() => undefined}
         panes={[
           { id: "oa", title: "OA", rows: [] },
-          { id: "bank", title: "银行流水", rows: [salarySummary, internalSummary] },
+          { id: "bank", title: "银行流水", rows: [salaryRow, internalRow] },
           { id: "invoice", title: "进销项发票", rows: [] },
         ]}
         rowTemplateColumns="1fr 1fr 1fr"
@@ -1649,13 +1600,11 @@ describe("Workbench candidate grouping layout", () => {
       />,
     );
 
-    expect(screen.getByText("免OA工资批次")).toBeInTheDocument();
-    expect(screen.getByText("免OA内部往来款批次")).toBeInTheDocument();
     expect(screen.queryByText("已匹配：工资")).not.toBeInTheDocument();
     expect(screen.queryByText("已匹配：内部往来款")).not.toBeInTheDocument();
-    expect(screen.queryByText("员工工资")).not.toBeInTheDocument();
-    expect(screen.queryByText("内部往来款")).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "展开免OA批次明细，1 条" })).toHaveLength(2);
+    expect(screen.getByText("员工工资")).toBeInTheDocument();
+    expect(screen.getByText("内部往来款")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /折叠明细/ })).not.toBeInTheDocument();
   });
 
   test("withdraws bank-flow summaries through the bank flow rule batch API instead of ordinary cancel-link", async () => {
@@ -1664,7 +1613,7 @@ describe("Workbench candidate grouping layout", () => {
 
     const pairedZone = await screen.findByTestId("zone-paired");
     const groupRow = await screen.findByTestId("candidate-group-paired-bank-flow-rule-batch:BANKFLOW-202603-FEE");
-    fireEvent.click(within(groupRow).getByRole("row", { name: /流水规则手续费批次.*30/ }));
+    fireEvent.click(within(groupRow).getByRole("row", { name: /流水规则手续费批次.*100/ }));
     fireEvent.click(within(pairedZone).getByRole("button", { name: "撤回关联" }));
 
     await waitFor(() => {

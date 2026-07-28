@@ -45,7 +45,7 @@
 - 旧 `selected_tag_codes` 不迁移为新事实源；实现时应移除或只作为只读 legacy 输入清理，所有流水重新按新规则计算。
 - 页面提交的是银行流水批量关系事实。由于未提交资格已经排除需单据标签，新 relation 的冻结 requirement 必须为双 false；active relation 决定 ownership。规则保存不追溯改写既有 relation metadata。
 - 规则资格变化只返回信息性的受影响未提交月份；资格未变化的语义更新不重算。保存 API 不写 dirty/outbox，也不返回 `refresh_enqueued` 或 write targets；页面清空旧选择后执行一次正常 GET。
-- 从本页面提交且银行流水超过 3 条时，关联台以折叠形式展示；1 到 3 条可展开展示。
+- 从本页面提交且银行流水超过 3 条时，关联台只折叠银行栏；1 到 3 条直接完整展示，不生成通用 preview 或详情加载入口。
 - 本页 linked 提示只显示“已有未撤回关联”和 OA/发票数量，不向用户渲染内部 relation case id；case id 仍保留在 API 数据与 Audit 证据中。
 
 ## 不属于本模块事实源

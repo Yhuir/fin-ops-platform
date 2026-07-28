@@ -437,7 +437,6 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
               and projected.source_kind not in (
                   'etc_invoice_summary',
                   'etc_invoice',
-                  'no_oa_bank_batch_summary',
                   'bank_flow_rule_batch_summary'
               )
               and canonical.row_id is null

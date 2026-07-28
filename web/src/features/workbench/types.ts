@@ -6,7 +6,6 @@ import type {
 export type WorkbenchRecordType = "oa" | "bank" | "invoice";
 
 export type WorkbenchSourceKind =
-  | "no_oa_bank_batch_summary"
   | "etc_invoice_summary"
   | "etc_invoice"
   | "oa_attachment_invoice"
