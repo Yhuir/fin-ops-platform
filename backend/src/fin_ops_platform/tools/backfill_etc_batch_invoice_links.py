@@ -64,7 +64,7 @@ left join app.etc_batch_invoice_links links
 where invoices.invoice_type = 'input'
   and invoices.status <> 'deleted'
   and nullif(etc_invoices.business_batch_id, '') is not null
-  and (%s is null or etc_invoices.business_batch_id = %s)
+  and (%s::text is null or etc_invoices.business_batch_id = %s::text)
   and (
         etc_business_batches.status in ('oa_submitted', 'manually_marked_submitted', 'closed')
      or (

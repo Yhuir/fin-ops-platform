@@ -168,6 +168,7 @@ class BackfillEtcBatchInvoiceLinksToolTests(unittest.TestCase):
             connection.fetch_all_calls[0][1],
             ("etc_business_batch_0014", "etc_business_batch_0014"),
         )
+        self.assertIn("%s::text is null", connection.fetch_all_calls[0][0])
 
     def test_schema_preflight_reports_missing_link_table(self) -> None:
         self.assertFalse(_etc_batch_invoice_links_table_exists(_SchemaProbeConnection(None)))
