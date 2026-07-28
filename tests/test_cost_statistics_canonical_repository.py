@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import unittest
+from unittest.mock import patch
 
+from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
 from fin_ops_platform.services.cost_statistics_canonical_repository import (
     LocalCostStatisticsCanonicalRepository,
     PostgresCostStatisticsCanonicalRepository,
@@ -51,9 +53,14 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
     def test_load_uses_one_repeatable_read_snapshot_and_only_canonical_tables(self) -> None:
         connection = _Connection()
 
-        snapshot = PostgresCostStatisticsCanonicalRepository(connection).load_snapshot()
+        with patch(
+            "fin_ops_platform.services.cost_statistics_canonical_repository.BankAccountResolver",
+            wraps=BankAccountResolver,
+        ) as resolver_class:
+            snapshot = PostgresCostStatisticsCanonicalRepository(connection).load_snapshot()
 
         self.assertEqual(connection.transaction_count, 1)
+        self.assertEqual(resolver_class.call_count, 1)
         self.assertEqual(
             connection.snapshot_transaction.executed,
             ["set transaction isolation level repeatable read read only"],
@@ -66,6 +73,12 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         self.assertIn("from app.workbench_pair_relations", sql)
         self.assertNotIn("read_model.", sql)
         self.assertNotIn("job.", sql)
+        bank_sql = next(
+            query
+            for query in connection.snapshot_transaction.fetched
+            if "from app.bank_transactions" in query
+        )
+        self.assertNotIn("raw_payload", bank_sql)
         self.assertEqual(snapshot["bank_rows"], [])
         self.assertEqual(snapshot["cost_groups"], [])
 

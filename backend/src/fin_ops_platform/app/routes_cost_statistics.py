@@ -71,7 +71,6 @@ class CostStatisticsApiRoutes:
                 cursor=query.get("cursor", [None])[0],
                 page_size=query.get("page_size", [None])[0],
                 include_statistics=query.get("include_statistics", [None])[0],
-                if_none_match=_header(headers, "if-none-match"),
             )
         if method == "GET" and route_path == "/api/cost-statistics/export-preview":
             return self.handle_export_preview(
@@ -166,11 +165,9 @@ class CostStatisticsApiRoutes:
         cursor: str | None,
         page_size: str | None,
         include_statistics: str | None,
-        if_none_match: str | None,
     ) -> Any:
         current_scope = scope or self._now_provider().strftime("%Y-%m")
         started_at = monotonic()
-        cache_hit = False
         try:
             normalized_project_scope = self._normalize_project_scope(project_scope)
             if (
@@ -179,7 +176,7 @@ class CostStatisticsApiRoutes:
                 not in {"0", "false", "no", "off", "1", "true", "yes", "on"}
             ):
                 raise ValueError("include_statistics must be true or false")
-            payload, cache_hit, etag, not_modified = self._query_service.get_explorer_page(
+            payload = self._query_service.get_explorer_page(
                 scope=current_scope,
                 view=str(view or ""),
                 project_scope=normalized_project_scope,
@@ -193,7 +190,6 @@ class CostStatisticsApiRoutes:
                 cursor=cursor,
                 page_size=int(page_size or 50),
                 include_statistics=self._optional_bool_parser(include_statistics),
-                if_none_match=if_none_match,
             )
         except ValueError as error:
             return self._page_query_error_response(error)
@@ -201,7 +197,6 @@ class CostStatisticsApiRoutes:
             self._metric_emitter(
                 month=current_scope,
                 project_scope=normalized_project_scope,
-                cache_hit=cache_hit,
                 duration_ms=self._duration_ms(started_at),
                 entry_count=self._entry_count(payload),
             )
@@ -209,10 +204,6 @@ class CostStatisticsApiRoutes:
             "Cache-Control": "private, no-cache",
             "Vary": "Authorization, Cookie",
         }
-        if etag:
-            response_headers["ETag"] = etag
-        if not_modified:
-            return self._json_response(HTTPStatus.NOT_MODIFIED, {}, response_headers)
         return self._json_response(HTTPStatus.OK, payload, response_headers)
 
     def handle_export(

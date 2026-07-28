@@ -409,6 +409,45 @@ describe("Cost statistics page", () => {
     expect(await screen.findByRole("grid", { name: "项目对应流水表" })).toBeInTheDocument();
   });
 
+  test("sends one canonical request per project or scope selection", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({ costExplorerDelayMs: 50 });
+
+    renderCostStatisticsPage();
+    expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "按项目" }));
+
+    const projectLane = (await screen.findByRole("heading", { name: "项目名" })).closest(".cost-explorer-lane");
+    expect(projectLane).not.toBeNull();
+    const projectCallStart = fetchMock.mock.calls.length;
+    await user.click(within(projectLane as HTMLElement).getByRole("button", { name: /云南溯源科技/ }));
+
+    const expenseLane = screen.getByRole("heading", { name: "费用类型" }).closest(".cost-explorer-lane");
+    await waitFor(() => expect(expenseLane).toHaveAttribute("aria-busy", "false"));
+    const projectCalls = fetchMock.mock.calls
+      .slice(projectCallStart)
+      .map(([url]) => String(url))
+      .filter((url) => url.includes("/api/cost-statistics/explorer"));
+    expect(projectCalls).toHaveLength(1);
+    expect(projectCalls[0]).toContain("scope=all&view=project");
+    expect(projectCalls[0]).toContain("project_name=%E4%BA%91%E5%8D%97%E6%BA%AF%E6%BA%90%E7%A7%91%E6%8A%80");
+
+    const scopeCallStart = fetchMock.mock.calls.length;
+    await chooseScopeOption(user, "项目统计时间范围：全部时间", "四月");
+    expect(await screen.findByRole("button", { name: "项目统计时间范围：2026年4月" })).toBeInTheDocument();
+    await waitFor(() => expect(projectLane).toHaveAttribute("aria-busy", "false"));
+
+    const scopeCalls = fetchMock.mock.calls
+      .slice(scopeCallStart)
+      .map(([url]) => String(url))
+      .filter((url) => url.includes("/api/cost-statistics/explorer"));
+    expect(scopeCalls).toHaveLength(1);
+    expect(scopeCalls[0]).toContain("scope=2026-04&view=project");
+    expect(scopeCalls[0]).not.toContain("project_name=");
+    expect(scopeCalls[0]).not.toContain("expense_type=");
+  });
+
   test("project view keeps split cost rows with the same transaction id renderable", async () => {
     window.history.pushState({}, "", "/cost-statistics");
     const user = userEvent.setup();

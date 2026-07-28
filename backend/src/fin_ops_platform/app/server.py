@@ -6567,7 +6567,6 @@ class Application:
         *,
         month: str,
         project_scope: str,
-        cache_hit: bool,
         duration_ms: float,
         entry_count: int,
     ) -> None:
@@ -6578,7 +6577,6 @@ class Application:
                     "metric": "cost_statistics.explorer.duration_ms",
                     "month": month,
                     "project_scope": project_scope,
-                    "cache_hit": bool(cache_hit),
                     "duration_ms": round(float(duration_ms), 3),
                     "entry_count": int(entry_count),
                     "timestamp": datetime.now().isoformat(),

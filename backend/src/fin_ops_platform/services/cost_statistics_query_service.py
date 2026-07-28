@@ -51,9 +51,7 @@ class CostStatisticsQueryService:
         cursor: str | None,
         page_size: int,
         include_statistics: bool = True,
-        if_none_match: str | None = None,
-    ) -> tuple[dict[str, Any], bool, str, bool]:
-        del if_none_match
+    ) -> dict[str, Any]:
         normalized_project_scope = self._normalize_project_scope(project_scope)
         scope_kind, scope_value, normalized_scope = self._normalize_page_scope(
             scope
@@ -145,7 +143,7 @@ class CostStatisticsQueryService:
                 raw_page.get("tag_selection_version") or 1
             ),
         }
-        return payload, False, "", False
+        return payload
 
     def get_transaction_detail(
         self,

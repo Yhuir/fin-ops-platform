@@ -50,6 +50,11 @@ import type {
 type CostViewMode = "time" | "project" | "bank" | "expenseType" | "bankTag";
 type RangeScopeMode = "all" | "year" | "month";
 type ExplorerScopeMode = RangeScopeMode;
+type ExplorerScopeSelection = {
+  mode: ExplorerScopeMode;
+  year: string;
+  month: string;
+};
 type ScopePickerPanel = "scope";
 type EffectiveCostPageState = "fresh" | "loading" | "error";
 type ExplorerTransitionScope = "surface" | "children" | "rows" | null;
@@ -126,9 +131,7 @@ type ScopeRangePickerProps = {
   month: string;
   open: boolean;
   onToggle: () => void;
-  onModeChange: (mode: ExplorerScopeMode) => void;
-  onYearChange: (year: string) => void;
-  onMonthChange: (month: string) => void;
+  onChange: (selection: ExplorerScopeSelection) => void;
   onClose: () => void;
 };
 
@@ -291,9 +294,7 @@ function ScopeRangePicker({
   month,
   open,
   onToggle,
-  onModeChange,
-  onYearChange,
-  onMonthChange,
+  onChange,
   onClose,
 }: ScopeRangePickerProps) {
   const pickerYears = years.length > 0 ? years : [DEFAULT_MONTH.slice(0, 4)];
@@ -302,21 +303,18 @@ function ScopeRangePicker({
   const selectedLabel = mode === "all" ? "全部时间" : mode === "year" ? `${year}年` : formatMonthLabel(month);
 
   function selectAll() {
-    onModeChange("all");
+    onChange({ mode: "all", year, month });
     onClose();
   }
 
   function selectYear(nextYear: string) {
-    onYearChange(nextYear);
-    onModeChange("year");
+    onChange({ mode: "year", year: nextYear, month });
     onClose();
   }
 
   function selectMonth(monthNumber: number) {
     const nextMonth = `${activeYear}-${String(monthNumber).padStart(2, "0")}`;
-    onYearChange(activeYear);
-    onMonthChange(nextMonth);
-    onModeChange("month");
+    onChange({ mode: "month", year: activeYear, month: nextMonth });
     onClose();
   }
 
@@ -462,12 +460,9 @@ export default function CostStatisticsPage() {
   const setViewMode = (value: SetStateAction<CostViewMode>) => setCostSessionField("viewMode", value);
   const costProjectScope: CostProjectScope = "active";
   const timeScopeMode = costSession.timeScopeMode;
-  const setTimeScopeMode = (value: SetStateAction<ExplorerScopeMode>) => setCostSessionField("timeScopeMode", value);
   const [timeScopePanel, setTimeScopePanel] = useState<ScopePickerPanel | null>(null);
   const timeScopeYear = costSession.timeScopeYear;
-  const setTimeScopeYear = (value: SetStateAction<string>) => setCostSessionField("timeScopeYear", value);
   const timeScopeMonth = costSession.timeScopeMonth;
-  const setTimeScopeMonth = (value: SetStateAction<string>) => setCostSessionField("timeScopeMonth", value);
 
   const [loadedExplorer, setLoadedExplorer] = useState<LoadedCostStatisticsExplorer | null>(null);
   const [pageStatistics, setPageStatistics] = useState<CostStatisticsExplorerPage["statistics"]>(undefined);
@@ -501,39 +496,27 @@ export default function CostStatisticsPage() {
   const [projectAggregateBy, setProjectAggregateBy] = useState<"month" | "year">("month");
   const [projectExpenseTypes, setProjectExpenseTypes] = useState<string[]>([]);
   const projectScopeMode = costSession.projectScopeMode;
-  const setProjectScopeMode = (value: SetStateAction<ExplorerScopeMode>) => setCostSessionField("projectScopeMode", value);
   const [projectScopePanel, setProjectScopePanel] = useState<ScopePickerPanel | null>(null);
   const projectScopeYear = costSession.projectScopeYear;
-  const setProjectScopeYear = (value: SetStateAction<string>) => setCostSessionField("projectScopeYear", value);
   const projectScopeMonth = costSession.projectScopeMonth;
-  const setProjectScopeMonth = (value: SetStateAction<string>) => setCostSessionField("projectScopeMonth", value);
   const bankScopeMode = costSession.bankScopeMode;
-  const setBankScopeMode = (value: SetStateAction<ExplorerScopeMode>) => setCostSessionField("bankScopeMode", value);
   const [bankScopePanel, setBankScopePanel] = useState<ScopePickerPanel | null>(null);
   const bankScopeYear = costSession.bankScopeYear;
-  const setBankScopeYear = (value: SetStateAction<string>) => setCostSessionField("bankScopeYear", value);
   const bankScopeMonth = costSession.bankScopeMonth;
-  const setBankScopeMonth = (value: SetStateAction<string>) => setCostSessionField("bankScopeMonth", value);
 
   const expenseTypeScopeMode = costSession.expenseTypeScopeMode;
-  const setExpenseTypeScopeMode = (value: SetStateAction<ExplorerScopeMode>) => setCostSessionField("expenseTypeScopeMode", value);
   const [expenseTypeScopePanel, setExpenseTypeScopePanel] = useState<ScopePickerPanel | null>(null);
   const expenseTypeScopeYear = costSession.expenseTypeScopeYear;
-  const setExpenseTypeScopeYear = (value: SetStateAction<string>) => setCostSessionField("expenseTypeScopeYear", value);
   const expenseTypeScopeMonth = costSession.expenseTypeScopeMonth;
-  const setExpenseTypeScopeMonth = (value: SetStateAction<string>) => setCostSessionField("expenseTypeScopeMonth", value);
   const [expenseTypeRangeMode, setExpenseTypeRangeMode] = useState<ExportRangeMode>("month");
   const [expenseTypeMonth, setExpenseTypeMonth] = useState(DEFAULT_MONTH);
   const [expenseTypeStartDate, setExpenseTypeStartDate] = useState(defaultMonthBounds.startDate);
   const [expenseTypeEndDate, setExpenseTypeEndDate] = useState(defaultMonthBounds.endDate);
   const [expenseTypeSelections, setExpenseTypeSelections] = useState<string[]>([]);
   const bankTagScopeMode = costSession.bankTagScopeMode;
-  const setBankTagScopeMode = (value: SetStateAction<ExplorerScopeMode>) => setCostSessionField("bankTagScopeMode", value);
   const [bankTagScopePanel, setBankTagScopePanel] = useState<ScopePickerPanel | null>(null);
   const bankTagScopeYear = costSession.bankTagScopeYear;
-  const setBankTagScopeYear = (value: SetStateAction<string>) => setCostSessionField("bankTagScopeYear", value);
   const bankTagScopeMonth = costSession.bankTagScopeMonth;
-  const setBankTagScopeMonth = (value: SetStateAction<string>) => setCostSessionField("bankTagScopeMonth", value);
 
   const [selectedTimeTransactionId, setSelectedTimeTransactionId] = useState<string | null>(null);
   const [selectedProjectName, setSelectedProjectName] = useState<string | null>(null);
@@ -655,6 +638,69 @@ export default function CostStatisticsPage() {
     setSelectedBankTagTransactionId(null);
     setDetailLoadingMessage(null);
   }, []);
+
+  const resetExplorerSelection = useCallback((targetView: CostViewMode) => {
+    resetDetailSelection();
+    if (targetView === "project") {
+      setSelectedProjectName(null);
+      setSelectedProjectExpenseType(null);
+    } else if (targetView === "bank") {
+      setSelectedBankAccountLabel(null);
+      setSelectedBankProjectName(null);
+    } else if (targetView === "expenseType") {
+      setSelectedExpenseType(null);
+    } else if (targetView === "bankTag") {
+      setSelectedBankTagPrimaryLabel(null);
+      setSelectedBankTagSubLabel(null);
+    }
+  }, [resetDetailSelection]);
+
+  const updateScopeSelection = useCallback((
+    targetView: CostViewMode,
+    selection: ExplorerScopeSelection,
+  ) => {
+    resetExplorerSelection(targetView);
+    costPageSession.setValue((current) => {
+      if (targetView === "time") {
+        return {
+          ...current,
+          timeScopeMode: selection.mode,
+          timeScopeYear: selection.year,
+          timeScopeMonth: selection.month,
+        };
+      }
+      if (targetView === "project") {
+        return {
+          ...current,
+          projectScopeMode: selection.mode,
+          projectScopeYear: selection.year,
+          projectScopeMonth: selection.month,
+        };
+      }
+      if (targetView === "bank") {
+        return {
+          ...current,
+          bankScopeMode: selection.mode,
+          bankScopeYear: selection.year,
+          bankScopeMonth: selection.month,
+        };
+      }
+      if (targetView === "expenseType") {
+        return {
+          ...current,
+          expenseTypeScopeMode: selection.mode,
+          expenseTypeScopeYear: selection.year,
+          expenseTypeScopeMonth: selection.month,
+        };
+      }
+      return {
+        ...current,
+        bankTagScopeMode: selection.mode,
+        bankTagScopeYear: selection.year,
+        bankTagScopeMonth: selection.month,
+      };
+    });
+  }, [costPageSession, resetExplorerSelection]);
 
   const handleManualRefresh = useCallback(() => {
     invalidateExportReferenceData();
@@ -862,58 +908,6 @@ export default function CostStatisticsPage() {
     detailRequestRef.current?.abort();
   }, []);
 
-	  useEffect(() => {
-	    if (viewMode !== "time") {
-	      return;
-	    }
-	    setSelectedTimeTransactionId(null);
-	    setTransactionDetail(null);
-	  }, [viewMode, timeScopeMode, timeScopeYear, timeScopeMonth]);
-
-  useEffect(() => {
-    if (viewMode !== "project") {
-      return;
-    }
-    setSelectedProjectName(null);
-	    setSelectedProjectExpenseType(null);
-	    setSelectedProjectTransactionId(null);
-	    setTransactionDetail(null);
-	  }, [viewMode, projectScopeMode, projectScopeYear, projectScopeMonth]);
-
-  useEffect(() => {
-    if (viewMode !== "bank") {
-      return;
-    }
-    setSelectedBankAccountLabel(null);
-	    setSelectedBankProjectName(null);
-	    setSelectedBankTransactionId(null);
-	    setTransactionDetail(null);
-	  }, [viewMode, bankScopeMode, bankScopeYear, bankScopeMonth]);
-
-  useEffect(() => {
-    if (viewMode !== "expenseType") {
-      return;
-    }
-    setSelectedExpenseType(null);
-    setSelectedExpenseTransactionId(null);
-    setTransactionDetail(null);
-	  }, [
-	    viewMode,
-	    expenseTypeScopeMode,
-	    expenseTypeScopeYear,
-	    expenseTypeScopeMonth,
-	  ]);
-
-  useEffect(() => {
-    if (viewMode !== "bankTag") {
-      return;
-    }
-    setSelectedBankTagPrimaryLabel(null);
-	    setSelectedBankTagSubLabel(null);
-	    setSelectedBankTagTransactionId(null);
-	    setTransactionDetail(null);
-	  }, [viewMode, bankTagScopeMode, bankTagScopeYear, bankTagScopeMonth]);
-
   const isChildrenTransition = explorerTransitionScope === "children";
   const isRowsTransition = isChildrenTransition || explorerTransitionScope === "rows";
   const pageRows = isRowsTransition ? [] : explorerData?.rows ?? [];
@@ -944,45 +938,71 @@ export default function CostStatisticsPage() {
       return;
     }
     if (!availableScopeYears.includes(timeScopeYear)) {
-      setTimeScopeYear(availableScopeYears[0]);
+      updateScopeSelection("time", {
+        mode: timeScopeMode,
+        year: availableScopeYears[0],
+        month: timeScopeMonth,
+      });
     }
-  }, [availableScopeYears, timeScopeYear]);
+  }, [availableScopeYears, timeScopeMode, timeScopeMonth, timeScopeYear, updateScopeSelection]);
 
   useEffect(() => {
     if (availableScopeYears.length === 0) {
       return;
     }
     if (!availableScopeYears.includes(projectScopeYear)) {
-      setProjectScopeYear(availableScopeYears[0]);
+      updateScopeSelection("project", {
+        mode: projectScopeMode,
+        year: availableScopeYears[0],
+        month: projectScopeMonth,
+      });
     }
-  }, [availableScopeYears, projectScopeYear]);
+  }, [availableScopeYears, projectScopeMode, projectScopeMonth, projectScopeYear, updateScopeSelection]);
 
   useEffect(() => {
     if (availableScopeYears.length === 0) {
       return;
     }
     if (!availableScopeYears.includes(bankScopeYear)) {
-      setBankScopeYear(availableScopeYears[0]);
+      updateScopeSelection("bank", {
+        mode: bankScopeMode,
+        year: availableScopeYears[0],
+        month: bankScopeMonth,
+      });
     }
-  }, [availableScopeYears, bankScopeYear]);
+  }, [availableScopeYears, bankScopeMode, bankScopeMonth, bankScopeYear, updateScopeSelection]);
 
   useEffect(() => {
     if (availableScopeYears.length === 0) {
       return;
     }
     if (!availableScopeYears.includes(expenseTypeScopeYear)) {
-      setExpenseTypeScopeYear(availableScopeYears[0]);
+      updateScopeSelection("expenseType", {
+        mode: expenseTypeScopeMode,
+        year: availableScopeYears[0],
+        month: expenseTypeScopeMonth,
+      });
     }
-  }, [availableScopeYears, expenseTypeScopeYear]);
+  }, [
+    availableScopeYears,
+    expenseTypeScopeMode,
+    expenseTypeScopeMonth,
+    expenseTypeScopeYear,
+    updateScopeSelection,
+  ]);
 
   useEffect(() => {
     if (availableScopeYears.length === 0) {
       return;
     }
     if (!availableScopeYears.includes(bankTagScopeYear)) {
-      setBankTagScopeYear(availableScopeYears[0]);
+      updateScopeSelection("bankTag", {
+        mode: bankTagScopeMode,
+        year: availableScopeYears[0],
+        month: bankTagScopeMonth,
+      });
     }
-  }, [availableScopeYears, bankTagScopeYear]);
+  }, [availableScopeYears, bankTagScopeMode, bankTagScopeMonth, bankTagScopeYear, updateScopeSelection]);
 
   const exportProjectOptions = useMemo(
     () => (exportReferenceData?.projects ?? []).map((row) => row.projectName),
@@ -1134,12 +1154,15 @@ export default function CostStatisticsPage() {
   }
 
   function handleViewModeChange(nextViewMode: CostViewMode) {
+    if (nextViewMode === viewMode) {
+      return;
+    }
     exportReferenceRequestRef.current?.abort();
     exportReferenceRequestRef.current = null;
     setIsExportReferenceLoading(false);
     setLoadError(null);
     setExportFeedback(null);
-    resetDetailSelection();
+    resetExplorerSelection(nextViewMode);
     setTimeScopePanel(null);
     setProjectScopePanel(null);
     setBankScopePanel(null);
@@ -1776,9 +1799,7 @@ export default function CostStatisticsPage() {
 	                          month={timeScopeMonth}
 	                          open={timeScopePanel === "scope"}
 	                          onToggle={() => toggleScopeSelection(timeScopePanel, setTimeScopePanel)}
-	                          onModeChange={setTimeScopeMode}
-	                          onYearChange={setTimeScopeYear}
-	                          onMonthChange={setTimeScopeMonth}
+	                          onChange={(selection) => updateScopeSelection("time", selection)}
 	                          onClose={() => setTimeScopePanel(null)}
 	                        />
 	                      </div>
@@ -1819,9 +1840,7 @@ export default function CostStatisticsPage() {
 	                        month={projectScopeMonth}
 	                        open={projectScopePanel === "scope"}
 	                        onToggle={() => toggleScopeSelection(projectScopePanel, setProjectScopePanel)}
-	                        onModeChange={setProjectScopeMode}
-	                        onYearChange={setProjectScopeYear}
-	                        onMonthChange={setProjectScopeMonth}
+	                        onChange={(selection) => updateScopeSelection("project", selection)}
 	                        onClose={() => setProjectScopePanel(null)}
 	                      />
 	                    </div>
@@ -1922,9 +1941,7 @@ export default function CostStatisticsPage() {
 	                        month={bankScopeMonth}
 	                        open={bankScopePanel === "scope"}
 	                        onToggle={() => toggleScopeSelection(bankScopePanel, setBankScopePanel)}
-	                        onModeChange={setBankScopeMode}
-	                        onYearChange={setBankScopeYear}
-	                        onMonthChange={setBankScopeMonth}
+	                        onChange={(selection) => updateScopeSelection("bank", selection)}
 	                        onClose={() => setBankScopePanel(null)}
 	                      />
 	                    </div>
@@ -2023,9 +2040,7 @@ export default function CostStatisticsPage() {
 	                        month={expenseTypeScopeMonth}
 	                        open={expenseTypeScopePanel === "scope"}
 	                        onToggle={() => toggleScopeSelection(expenseTypeScopePanel, setExpenseTypeScopePanel)}
-	                        onModeChange={setExpenseTypeScopeMode}
-	                        onYearChange={setExpenseTypeScopeYear}
-	                        onMonthChange={setExpenseTypeScopeMonth}
+	                        onChange={(selection) => updateScopeSelection("expenseType", selection)}
 	                        onClose={() => setExpenseTypeScopePanel(null)}
 	                      />
 	                    </div>
@@ -2104,9 +2119,7 @@ export default function CostStatisticsPage() {
                         month={bankTagScopeMonth}
                         open={bankTagScopePanel === "scope"}
                         onToggle={() => toggleScopeSelection(bankTagScopePanel, setBankTagScopePanel)}
-                        onModeChange={setBankTagScopeMode}
-                        onYearChange={setBankTagScopeYear}
-                        onMonthChange={setBankTagScopeMonth}
+                        onChange={(selection) => updateScopeSelection("bankTag", selection)}
                         onClose={() => setBankTagScopePanel(null)}
                       />
                     </div>

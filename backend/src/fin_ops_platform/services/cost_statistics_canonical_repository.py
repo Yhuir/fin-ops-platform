@@ -140,8 +140,9 @@ class LocalCostStatisticsCanonicalRepository:
         include_statistics: bool = True,
     ) -> dict[str, Any]:
         settings = dict(self._settings_provider() or {})
+        account_resolver = _bank_account_resolver(settings)
         all_bank_rows = [
-            _bank_row_from_object(row, settings=settings)
+            _bank_row_from_object(row, account_resolver=account_resolver)
             for row in self._bank_rows_provider()
         ]
         all_bank_rows = [row for row in all_bank_rows if row]
@@ -281,6 +282,7 @@ def _postgres_bank_rows(
         scope_value=scope_value,
         transaction_ids=transaction_ids,
     )
+    account_resolver = _bank_account_resolver(settings)
     rows = connection.fetch_all(
         f"""
         select
@@ -297,8 +299,7 @@ def _postgres_bank_rows(
             summary,
             remark,
             project_id,
-            bank_text_fields,
-            raw_payload
+            bank_text_fields
         from app.bank_transactions
         where status <> 'deleted'
           {where_sql}
@@ -312,7 +313,7 @@ def _postgres_bank_rows(
         if (
             bank_payload := _bank_row_from_mapping(
                 row,
-                settings=settings,
+                account_resolver=account_resolver,
             )
         )
     ]
@@ -684,15 +685,29 @@ def _apply_bank_tags(
 def _bank_row_from_object(
     row: Any,
     *,
-    settings: dict[str, Any],
+    account_resolver: BankAccountResolver,
 ) -> dict[str, Any] | None:
-    return _bank_row_from_mapping(_object_payload(row), settings=settings)
+    return _bank_row_from_mapping(
+        _object_payload(row),
+        account_resolver=account_resolver,
+    )
+
+
+def _bank_account_resolver(settings: dict[str, Any]) -> BankAccountResolver:
+    bank_mapping = {
+        _text(item.get("last4")): _text(item.get("bank_name"))
+        for item in list(settings.get("bank_account_mappings") or [])
+        if isinstance(item, dict)
+        and _text(item.get("last4"))
+        and _text(item.get("bank_name"))
+    }
+    return BankAccountResolver(mapping_provider=lambda: bank_mapping)
 
 
 def _bank_row_from_mapping(
     row: dict[str, Any],
     *,
-    settings: dict[str, Any],
+    account_resolver: BankAccountResolver,
 ) -> dict[str, Any] | None:
     row_id = _text(
         row.get("row_id")
@@ -708,14 +723,6 @@ def _bank_row_from_mapping(
         return None
     account_no = _text(row.get("account_no"))
     account_name = _text(row.get("account_name"))
-    bank_mapping = {
-        _text(item.get("last4")): _text(item.get("bank_name"))
-        for item in list(settings.get("bank_account_mappings") or [])
-        if isinstance(item, dict)
-        and _text(item.get("last4"))
-        and _text(item.get("bank_name"))
-    }
-    resolver = BankAccountResolver(mapping_provider=lambda: bank_mapping)
     trade_time = _date_text(
         row.get("trade_time")
         or row.get("pay_receive_time")
@@ -746,7 +753,7 @@ def _bank_row_from_mapping(
             row.get("counterparty_name_raw")
             or row.get("counterparty_name")
         ),
-        "payment_account_label": resolver.resolve_label(
+        "payment_account_label": account_resolver.resolve_label(
             account_no,
             account_name,
         ),
