@@ -625,12 +625,27 @@ function groupedPayloadWithFlowCategoryVersions(
 
 function groupedPayloadWithWorkbenchRelation(family: string, bankRowId: string, relation: Record<string, unknown>) {
   const payload = cloneJson(groupedPayload(family));
+  const relationRowIds = new Set(
+    (Array.isArray(relation.workbench_relation_row_ids)
+      ? relation.workbench_relation_row_ids
+      : [bankRowId]).map(String),
+  );
   for (const group of payload.groups) {
     group.flow_rows = (group.flow_rows ?? []).map((row: Record<string, unknown>) => (
-      String(row.source_bank_row_id ?? "") === bankRowId
+      relationRowIds.has(String(row.source_bank_row_id ?? ""))
         ? { ...row, ...relation }
         : row
     ));
+    const groupFlowIds = (group.flow_rows ?? []).map((row: Record<string, unknown>) => String(row.source_bank_row_id ?? ""));
+    if (groupFlowIds.length > 0 && groupFlowIds.every((rowId: string) => relationRowIds.has(rowId))) {
+      group.cash_pair_linked = Boolean(relation.cash_pair_linked ?? relation.cash_closure_linked);
+      group.paired_unsettled = Boolean(relation.cash_pair_linked) && !Boolean(relation.cash_closure_linked);
+      group.cash_closure_linked = Boolean(relation.cash_closure_linked);
+      group.pending_direction = relation.cash_closure_linked ? "none" : group.pending_direction;
+      group.pending_direction_label = relation.cash_closure_linked ? "" : group.pending_direction_label;
+      group.pending_amount = relation.cash_closure_linked ? "0.00" : group.pending_amount;
+      group.closed_amount = "0.00";
+    }
   }
   return payload;
 }
@@ -1755,7 +1770,13 @@ describe("Turnover ledger page", () => {
           workbench_relation_case_ids: ["turnover:rel-jiaxiaohua"],
           workbench_relation_mode: "turnover_manual_closure",
           workbench_relation_source: "manual",
-          workbench_relation_row_ids: ["bank-jia-income-200000", "bank-jia-expense-300000"],
+          workbench_relation_row_ids: [
+            "bank-jia-income-200000",
+            "bank-jia-income-100000",
+            "bank-jia-expense-300000",
+          ],
+          cash_pair_linked: true,
+          cash_pair_case_id: "turnover:rel-jiaxiaohua",
           cash_closure_linked: true,
           cash_closure_case_id: "turnover:rel-jiaxiaohua",
           cash_closure_source: "turnover_ledger",
@@ -1779,6 +1800,38 @@ describe("Turnover ledger page", () => {
     expect(within(flowRows[1]).queryByText("未闭环")).not.toBeInTheDocument();
     expect(within(flowRows[2]).queryByText("未闭环")).not.toBeInTheDocument();
     expect(within(flowRows[0]).queryByText("关联台手工闭环")).not.toBeInTheDocument();
+  });
+
+  test("shows an active non-zero cash case as paired but unsettled", async () => {
+    const user = userEvent.setup();
+    installTurnoverLedgerFetch({
+      groupedPayloads: [
+        groupedPayloadWithWorkbenchRelation("all", "bank-jia-income-200000", {
+          workbench_relation_status: "linked",
+          workbench_relation_case_ids: ["case-open-cash"],
+          workbench_relation_mode: "manual_confirmed",
+          workbench_relation_source: "manual",
+          workbench_relation_row_ids: [
+            "bank-jia-income-200000",
+            "bank-jia-income-100000",
+            "bank-jia-expense-300000",
+          ],
+          cash_pair_linked: true,
+          cash_pair_case_id: "case-open-cash",
+          cash_closure_linked: false,
+        }),
+      ],
+    });
+    renderTurnoverLedgerPage();
+
+    const table = await screen.findByRole("table", { name: "往来款左右双栏台账" });
+    const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
+    expect(within(groupCell).getByText("已配对未结清")).toBeInTheDocument();
+
+    await user.click(within(groupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
+    const flowRows = within(table).getAllByTestId(/^turnover-flow-row-rel-jiaxiaohua-/);
+    expect(within(flowRows[0]).getByText("已配对未结清")).toBeInTheDocument();
+    expect(within(flowRows[0]).queryByText("收支闭环")).not.toBeInTheDocument();
   });
 
   test("does not reload on category updates and downloads a previewed export for the current tab", async () => {

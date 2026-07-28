@@ -103,7 +103,7 @@ export type TurnoverLedgerRow = {
 
 export type TurnoverLedgerDirection = "income" | "expense" | string;
 
-export type TurnoverLedgerPendingDirection = "repayment" | "collection" | "closed" | "mixed" | string;
+export type TurnoverLedgerPendingDirection = "repayment" | "collection" | "mixed" | "none" | string;
 
 export type TurnoverLedgerInterestRateType = "annual" | "monthly" | "none" | string;
 
@@ -161,6 +161,8 @@ export type TurnoverLedgerGroupedRow = {
   workbenchRelationRowIds: string[];
   linkedOa: boolean;
   linkedInvoice: boolean;
+  cashPairLinked: boolean;
+  cashPairCaseId: string;
   cashClosureLinked: boolean;
   cashClosureCaseId: string;
   cashClosureSource: string;
@@ -190,6 +192,9 @@ export type TurnoverLedgerGroup = {
   pendingCollectionAmount: string;
   collectedAmount: string;
   closedAmount: string;
+  cashPairLinked: boolean;
+  pairedUnsettled: boolean;
+  cashClosureLinked: boolean;
   rowSpan: number;
   groupTone: TurnoverRowTone;
   rows: TurnoverLedgerGroupedRow[];

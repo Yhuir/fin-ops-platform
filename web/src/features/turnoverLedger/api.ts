@@ -150,6 +150,8 @@ type ApiTurnoverLedgerGroupedRow = {
   workbench_relation_row_ids?: string[];
   linked_oa?: boolean | null;
   linked_invoice?: boolean | null;
+  cash_pair_linked?: boolean | null;
+  cash_pair_case_id?: string | null;
   cash_closure_linked?: boolean | null;
   cash_closure_case_id?: string | null;
   cash_closure_source?: string | null;
@@ -188,6 +190,9 @@ type ApiTurnoverLedgerGroup = {
   pending_collection_amount?: string | null;
   collected_amount?: string | null;
   closed_amount?: string | null;
+  cash_pair_linked?: boolean | null;
+  paired_unsettled?: boolean | null;
+  cash_closure_linked?: boolean | null;
   row_span?: number | null;
   group_tone?: string | null;
   summary_row?: ApiTurnoverLedgerGroupedRow | null;
@@ -488,7 +493,7 @@ function mapSummary(summary: ApiTurnoverLedgerSummary | undefined): TurnoverLedg
     repaidAmount: text(summary?.repaid_amount, "0.00"),
     pendingCollectionAmount: text(summary?.pending_collection_amount, "0.00"),
     collectedAmount: text(summary?.collected_amount, "0.00"),
-    closedAmount: text(summary?.closed_amount, "0.00"),
+    closedAmount: "0.00",
     suggestedCount: numberValue(summary?.suggested_count),
     conflictCount: numberValue(summary?.conflict_count),
     rowCount: numberValue(summary?.row_count),
@@ -511,7 +516,7 @@ function mapFamilySummary(summary: ApiTurnoverLedgerFamilySummary): TurnoverLedg
     pendingCollectionAmount,
     collectedAmount: text(summary.collected_amount, "0.00"),
     pendingAmount: text(summary.pending_amount, fallbackPendingAmount),
-    closedAmount: text(summary.closed_amount, "0.00"),
+    closedAmount: "0.00",
     rowCount: numberValue(summary.row_count),
   };
 }
@@ -536,7 +541,7 @@ function mapFamilySummaries(
       pendingCollectionAmount: text(summary.pending_collection_amount, "0.00"),
       collectedAmount: text(summary.collected_amount, "0.00"),
       pendingAmount: Number.isFinite(pendingAmount) ? pendingAmount.toFixed(2) : "0.00",
-      closedAmount: text(summary.closed_amount, "0.00"),
+      closedAmount: "0.00",
       rowCount: numberValue(summary.row_count),
     };
   });
@@ -648,6 +653,8 @@ function mapGroupedRow(row: ApiTurnoverLedgerGroupedRow, fallbackRowKind = ""): 
     workbenchRelationRowIds: stringList(row.workbench_relation_row_ids),
     linkedOa: Boolean(row.linked_oa),
     linkedInvoice: Boolean(row.linked_invoice),
+    cashPairLinked: Boolean(row.cash_pair_linked),
+    cashPairCaseId: text(row.cash_pair_case_id),
     cashClosureLinked: Boolean(row.cash_closure_linked),
     cashClosureCaseId: text(row.cash_closure_case_id),
     cashClosureSource: text(row.cash_closure_source),
@@ -667,7 +674,7 @@ function mapGroup(group: ApiTurnoverLedgerGroup): TurnoverLedgerGroup {
     mapGroupedRow(row, "allocation_lot") as TurnoverLedgerAllocationLot
   ));
   const lotRows = (group.lot_rows ?? []).map((row) => mapGroupedRow(row, "lot"));
-  const pendingDirection = text(group.pending_direction, "closed");
+  const pendingDirection = text(group.pending_direction, "none");
   const pendingAmount = text(group.pending_amount, "0.00");
   return {
     groupId: text(group.group_id),
@@ -675,13 +682,16 @@ function mapGroup(group: ApiTurnoverLedgerGroup): TurnoverLedgerGroup {
     family: text(group.family),
     familyLabel: text(group.family_label),
     pendingDirection,
-    pendingDirectionLabel: text(group.pending_direction_label, "已闭合"),
+    pendingDirectionLabel: text(group.pending_direction_label),
     pendingAmount,
     pendingRepaymentAmount: text(group.pending_repayment_amount, pendingDirection === "repayment" ? pendingAmount : "0.00"),
     repaidAmount: text(group.repaid_amount, "0.00"),
     pendingCollectionAmount: text(group.pending_collection_amount, pendingDirection === "collection" ? pendingAmount : "0.00"),
     collectedAmount: text(group.collected_amount, "0.00"),
-    closedAmount: text(group.closed_amount, pendingDirection === "closed" ? pendingAmount : "0.00"),
+    closedAmount: "0.00",
+    cashPairLinked: Boolean(group.cash_pair_linked),
+    pairedUnsettled: Boolean(group.paired_unsettled),
+    cashClosureLinked: Boolean(group.cash_closure_linked),
     rowSpan: numberValue(group.row_span) || rows.length,
     groupTone: normalizeTone(group.group_tone),
     rows,

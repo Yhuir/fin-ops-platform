@@ -1,6 +1,6 @@
 # 外部往来款管理模块边界与 I/O
 
-日期：2026-07-26
+日期：2026-07-29
 
 ## 模块化状态
 
@@ -43,7 +43,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | 页面 rows/groups/summary/statistics | 前端页面 | 直接由当前 canonical snapshot 计算；API 不返回 `read_model_status`、`source_versions`、`refresh_enqueued` 或 refresh scope |
-| 统一配对标签 | 外部往来款页面 | active canonical relation 覆盖本组至少两条 bank members 且收支差额为零时，两侧 flow row 和 group 同时输出 `cash_closure_linked=true` 及同一 case id |
+| 统一配对与结算状态 | 外部往来款页面 | 每个 active canonical case 必须独立校验完整且唯一的 bank members、同一业务语义、现金差额和 `principal-settlement` 余额。非零 active case 输出 `cash_pair_linked=true` / `paired_unsettled=true` 及待还/待收余额；只有现金差额和业务余额都为零才输出 `cash_closure_linked=true`。relation mode/source 不得替代计算证明 |
 | 写操作结果 | 当前页面 | 按钮立即进入提交中/disabled；成功后当前页只发一次正常 GET。GET 失败提示“写入已成功、页面重载失败”，不得把成功写入改写为失败 |
 | 关联台可见性 | 关联台 | 关联台在自己下一次访问/手动刷新时读取同一 `app.workbench_pair_relations`；外部往来款写路径不触发关联台读取 |
 | 导出 | 用户下载 | 复用同一 query owner、权限和筛选；不得另建投影读链 |
@@ -113,6 +113,7 @@
 
 - 每次页面访问/手动刷新返回当前 snapshot 的完整数据和配对关系。
 - 外部往来款和关联台对同一 active case、成员和撤回状态一致。
+- 不同 active case 的余额不跨 case 抵消；无 active relation 的零余额流水不显示闭环；`closed_amount` 固定为兼容值 `0.00`。
 - 旧 Turnover read model 中即使有残留错误行，也不能改变页面响应。
 - 任一写操作后没有 `turnover_ledger.read_model.refresh`、Turnover dirty scope 或无关页面 I/O。
 - 页面 GET 失败可由普通刷新重试，不依赖人工清队列或版本修复。

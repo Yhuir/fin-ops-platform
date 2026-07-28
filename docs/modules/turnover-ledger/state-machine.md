@@ -167,7 +167,7 @@ extra 保存只改变 Turnover canonical extra/version/audit 和局部 UI；前�
 | extra drawer | 从真实 flow row 打开，隐藏技术 relation id，可保存 extra | extra drawer tests |
 | export dialog | preview 后下载 XLSX，不按 JSON 解析 blob | export API/page tests |
 | operation pending | 只覆盖 tag-selection、extra、confirm、withdraw HTTP 请求；成功后结束全局阻塞并 reload grouped normal GET，non-fresh 使用页面内状态 | page/API tests |
-| workbench relation feedback | grouped payload 中的 flow row 展示后端 projection 给出的正向 relation chip：`linked_oa=true` 显示“已关联 OA”，`linked_invoice=true` 显示“已关联 发票”，`cash_closure_linked=true` 显示“收支闭环”。未发生闭环时不显示负向闭环 chip。toolbar 的确认/撤回只看 `cash_closure_*` 字段，不看 OA/发票 chip；这些字段来自后端 projection，不来自前端本地事件 | API mapper / page tests |
+| workbench relation feedback | grouped payload 中的 flow row 展示后端 direct canonical query 给出的正向 relation chip：`linked_oa=true` 显示“已关联 OA”，`linked_invoice=true` 显示“已关联 发票”，`cash_pair_linked=true && cash_closure_linked=false` 显示“已配对未结清”，`cash_closure_linked=true` 显示“收支闭环”。group 只有全部 flow 都闭环才显示“收支闭环”。toolbar 的确认/撤回只看 `cash_closure_*` 字段，不看 OA/发票 chip；前端不得按 mode/source 或组级金额自行推断 | API mapper / page tests |
 
 前端跨页刷新已删除：confirm/withdraw/extra 成功后只处理当前 Turnover 页面；其它页面/tab 在 route 重进、查询变化、浏览器手动刷新或明确重试时，从 canonical source version 与自身 read-model gate 取得事实。
 

@@ -204,11 +204,12 @@ class TurnoverLedgerService:
         legacy_rows = [item["legacy"] for item in filtered_items]
         all_legacy_rows = [item["legacy"] for item in items]
         return {
-            "summary": self._summary(legacy_rows),
+            "summary": self._summary(legacy_rows, groups=groups),
             "family_summaries": [
                 self._family_summary(
                     family_key,
                     [row for row in all_legacy_rows if row.get("family") == family_key],
+                    groups=[group for group in all_groups if group.get("family") == family_key],
                 )
                 for family_key in TURNOVER_FAMILY_LABELS
             ],
@@ -730,7 +731,7 @@ class TurnoverLedgerService:
             flow_amount = self._row_amount(bank_row)
             transaction_at = self._transaction_at(bank_row)
             transaction_date = self._date_from_value(transaction_at)
-            flow_side = self._flow_side(bank_row)
+            flow_side = self._flow_side(bank_row, business_type=business_type)
             borrow_amount = flow_amount if flow_side == "principal" else ZERO
             repayment_amount = flow_amount if flow_side == "settlement" else ZERO
             allocated_lot_ids = lot_ids_by_bank_row_id.get(bank_row_id, [])
@@ -766,6 +767,12 @@ class TurnoverLedgerService:
                     "allocation_status": self._allocation_status(allocated_lot_ids),
                     "allocated_lot_ids": allocated_lot_ids,
                     "bank_row_ids": [bank_row_id],
+                    "cash_pair_linked": False,
+                    "cash_pair_case_id": "",
+                    "cash_closure_linked": False,
+                    "cash_closure_case_id": "",
+                    "cash_closure_source": "",
+                    "cash_closure_relation_id": "",
                 }
             )
         return flow_rows
@@ -808,6 +815,12 @@ class TurnoverLedgerService:
             "allocation_status": "unclassified",
             "allocated_lot_ids": [],
             "bank_row_ids": [row_id],
+            "cash_pair_linked": False,
+            "cash_pair_case_id": "",
+            "cash_closure_linked": False,
+            "cash_closure_case_id": "",
+            "cash_closure_source": "",
+            "cash_closure_relation_id": "",
         }
         grouped_row = {
             **flow_row,
@@ -908,7 +921,10 @@ class TurnoverLedgerService:
                     "_pending_collection": ZERO,
                     "_repaid": ZERO,
                     "_collected": ZERO,
-                    "_closed": ZERO,
+                    "cash_pair_linked": False,
+                    "cash_pair_case_id": "",
+                    "paired_unsettled": False,
+                    "cash_closure_linked": False,
                 },
             )
             group["_items"].append(item)
@@ -920,13 +936,17 @@ class TurnoverLedgerService:
             business_type = str(item.get("business_type") or "")
             legacy = item.get("legacy") if isinstance(item.get("legacy"), dict) else {}
             if business_type == "borrow_in":
-                group["_pending_repayment"] += max(balance_amount, ZERO)
+                if balance_amount >= ZERO:
+                    group["_pending_repayment"] += balance_amount
+                else:
+                    group["_pending_collection"] += -balance_amount
                 group["_repaid"] += self._money(legacy.get("settled_amount"))
             elif business_type in {"borrow_out", "business_receivable"}:
-                group["_pending_collection"] += max(balance_amount, ZERO)
+                if balance_amount >= ZERO:
+                    group["_pending_collection"] += balance_amount
+                else:
+                    group["_pending_repayment"] += -balance_amount
                 group["_collected"] += self._money(legacy.get("settled_amount"))
-            if balance_amount <= ZERO and legacy.get("status") in {"deterministic", "confirmed"}:
-                group["_closed"] += self._money(legacy.get("principal_amount"))
 
         groups: list[dict[str, Any]] = []
         for group in groups_by_key.values():
@@ -934,7 +954,6 @@ class TurnoverLedgerService:
             pending_collection = group.pop("_pending_collection")
             repaid = group.pop("_repaid")
             collected = group.pop("_collected")
-            closed = group.pop("_closed")
             group_items = group.pop("_items")
             flow_rows = sorted(
                 self._dedupe_flow_rows(list(group.get("flow_rows") or [])),
@@ -961,7 +980,6 @@ class TurnoverLedgerService:
                 repaid=repaid,
                 pending_collection=pending_collection,
                 collected=collected,
-                closed=closed,
             )
             group.update(self._group_pending_payload(pending_repayment, pending_collection))
             group.update(breakdown)
@@ -1040,6 +1058,12 @@ class TurnoverLedgerService:
             ),
             "note": " / ".join(self._unique_texts(row.get("note") for row in relation_rows)),
             "bank_row_ids": bank_row_ids,
+            "cash_pair_linked": False,
+            "cash_pair_case_id": "",
+            "cash_closure_linked": False,
+            "cash_closure_case_id": "",
+            "cash_closure_source": "",
+            "cash_closure_relation_id": "",
         }
 
     @classmethod
@@ -1057,13 +1081,18 @@ class TurnoverLedgerService:
         return amount
 
     @staticmethod
-    def _flow_side(row: dict[str, Any]) -> str:
+    def _flow_side(row: dict[str, Any], *, business_type: str = "") -> str:
         action_type = str(row.get("turnover_action_type") or "").strip()
         if action_type in {"pending_repayment", "pending_collection"}:
             return "principal"
         if action_type in {"repaid", "collected"}:
             return "settlement"
-        return "principal" if TurnoverLedgerService._direction(row) == "inflow" else "settlement"
+        direction = TurnoverLedgerService._direction(row)
+        if business_type == "borrow_in":
+            return "principal" if direction == "inflow" else "settlement"
+        if business_type in {"borrow_out", "business_receivable"}:
+            return "principal" if direction == "outflow" else "settlement"
+        return "principal" if direction == "inflow" else "settlement"
 
     @staticmethod
     def _row_id(row: dict[str, Any]) -> str:
@@ -1113,8 +1142,8 @@ class TurnoverLedgerService:
                 "group_tone": "success",
             }
         return {
-            "pending_direction": "closed",
-            "pending_direction_label": "已闭合",
+            "pending_direction": "none",
+            "pending_direction_label": "",
             "pending_amount": cls._format_money(ZERO),
             "group_tone": "muted",
         }
@@ -1127,14 +1156,13 @@ class TurnoverLedgerService:
         repaid: Decimal,
         pending_collection: Decimal,
         collected: Decimal,
-        closed: Decimal,
     ) -> dict[str, str]:
         return {
             "pending_repayment_amount": cls._format_money(pending_repayment),
             "repaid_amount": cls._format_money(repaid),
             "pending_collection_amount": cls._format_money(pending_collection),
             "collected_amount": cls._format_money(collected),
-            "closed_amount": cls._format_money(closed),
+            "closed_amount": cls._format_money(ZERO),
         }
 
     @staticmethod
@@ -1307,45 +1335,67 @@ class TurnoverLedgerService:
         return text or None
 
     @classmethod
-    def _summary(cls, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    def _summary(
+        cls,
+        rows: list[dict[str, Any]],
+        *,
+        groups: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         pending_repayment = ZERO
         repaid = ZERO
         pending_collection = ZERO
         collected = ZERO
-        closed = ZERO
         suggested_count = 0
         conflict_count = 0
         for row in rows:
-            principal = cls._money(row.get("principal_amount"))
             settled = cls._money(row.get("settled_amount"))
             balance = cls._money(row.get("balance_amount"))
             business_type = str(row.get("business_type") or "")
             if business_type == "borrow_in":
-                pending_repayment += max(balance, ZERO)
+                if balance >= ZERO:
+                    pending_repayment += balance
+                else:
+                    pending_collection += -balance
                 repaid += settled
             elif business_type in {"borrow_out", "business_receivable"}:
-                pending_collection += max(balance, ZERO)
+                if balance >= ZERO:
+                    pending_collection += balance
+                else:
+                    pending_repayment += -balance
                 collected += settled
-            if balance == ZERO and row.get("status") in {"deterministic", "confirmed"}:
-                closed += principal
             if row.get("status") == "suggested":
                 suggested_count += 1
             if row.get("status") == "conflict":
                 conflict_count += 1
+        if groups is not None:
+            pending_repayment = sum(
+                (cls._money(group.get("pending_repayment_amount")) for group in groups),
+                ZERO,
+            )
+            pending_collection = sum(
+                (cls._money(group.get("pending_collection_amount")) for group in groups),
+                ZERO,
+            )
         return {
             "pending_repayment_amount": cls._format_money(pending_repayment),
             "repaid_amount": cls._format_money(repaid),
             "pending_collection_amount": cls._format_money(pending_collection),
             "collected_amount": cls._format_money(collected),
-            "closed_amount": cls._format_money(closed),
+            "closed_amount": cls._format_money(ZERO),
             "suggested_count": suggested_count,
             "conflict_count": conflict_count,
             "row_count": len(rows),
         }
 
     @classmethod
-    def _family_summary(cls, family: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
-        summary = cls._summary(rows)
+    def _family_summary(
+        cls,
+        family: str,
+        rows: list[dict[str, Any]],
+        *,
+        groups: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        summary = cls._summary(rows, groups=groups)
         pending_amount = cls._money(summary.get("pending_repayment_amount")) + cls._money(
             summary.get("pending_collection_amount")
         )

@@ -508,7 +508,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 | `repaid_amount` | 累计已还款发生额，来自借入类 `repaid` settlement 历史发生额。 |
 | `pending_collection_amount` | 当前待收款余额总额，来自借出/业务应收类 principal 未结余额。 |
 | `collected_amount` | 累计已收款发生额，来自借出/业务应收类 `collected` settlement 历史发生额。 |
-| `closed_amount` | 已闭合兼容金额；主页面不作为页头 block 展示。 |
+| `closed_amount` | 已闭合兼容字段，固定为字符串 `0.00`；不得再累计历史 principal 或 settlement。主页面不作为页头 block 展示。 |
 | `suggested_count` / `conflict_count` / `row_count` | 兼容计数字段。 |
 
 `family_summaries[*]` 每个类别都应稳定返回：
@@ -520,13 +520,13 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 | `repaid_amount` | 该类别累计已还款发生额。 |
 | `pending_collection_amount` | 该类别当前待收款余额。 |
 | `collected_amount` | 该类别累计已收款发生额。 |
-| `pending_amount` / `closed_amount` / `row_count` | 兼容字段；`pending_amount` 等于待还款与待收款余额合计。 |
+| `pending_amount` / `closed_amount` / `row_count` | 兼容字段；`pending_amount` 等于待还款与待收款余额合计，`closed_amount` 固定为 `0.00`。 |
 
-`view=grouped` 响应中的 `groups[*]` 还应稳定输出 `pending_repayment_amount`、`repaid_amount`、`pending_collection_amount`、`collected_amount`、`closed_amount`。`summary_row` 和 `flow_rows[*]` 应携带 `bank_account_labels`、`category_primary_label`、`category_sub_label`、`category_third_label`、`category_label_path` 和 `repayment_remark`。金额列归属以 `turnover_action_type` 归一后的 `borrow_amount` / `repayment_amount` 为准，不得仅按现金流入/流出判断。前端表头应将 `borrow_amount` 展示为“往来发生”、`repayment_amount` 展示为“结清发生”；金额 chip 使用 `borrow_direction` / `repayment_direction` 展示“收”或“支”，并按实际现金方向着色。
+`view=grouped` 响应中的 `groups[*]` 还应稳定输出 `pending_repayment_amount`、`repaid_amount`、`pending_collection_amount`、`collected_amount`、`closed_amount`、`cash_pair_linked`、`cash_pair_case_id`、`paired_unsettled` 和 `cash_closure_linked`。`summary_row` 和 `flow_rows[*]` 应携带 `bank_account_labels`、`category_primary_label`、`category_sub_label`、`category_third_label`、`category_label_path` 和 `repayment_remark`；flow row 还应输出 `cash_pair_linked` / `cash_pair_case_id`。金额列归属以 `turnover_action_type` 归一后的 `borrow_amount` / `repayment_amount` 为准，不得仅按现金流入/流出判断。前端表头应将 `borrow_amount` 展示为“往来发生”、`repayment_amount` 展示为“结清发生”；金额 chip 使用 `borrow_direction` / `repayment_direction` 展示“收”或“支”，并按实际现金方向着色。余额为零但没有 active case 时，`pending_direction=none`，且不得输出闭环状态。
 
 当响应携带 `read_model_status` 且不为 `fresh` 时，前端可以展示当前可用数据，但必须把闭环确认、流水选择、补充信息编辑等写操作置为不可用，直到后续查询恢复 fresh。未返回 `read_model_status` 时按 `fresh` 处理。
 
-外部往来款 `deterministic` 只表示系统识别到零差额计算结果，不表示已闭环，也不形成关联台关系组。外部往来闭环的共同事实源是 Workbench active pair relation；来源可以是外部往来页人工确认闭环，也可以是关联台已经把同一往来组内的银行收入/支出配成同一个零差额 case。`view=grouped` 的 `summary_row` 和 `flow_rows[*]` 必须输出 `linked_oa`、`linked_invoice`、`cash_closure_linked`、`cash_closure_case_id`、`cash_closure_source`、`cash_closure_relation_id`；前端只能据此显示“已关联 OA”“已关联 发票”“收支闭环”三个正向 chip。`cash_closure_relation_id` 只用于兼容历史上显式携带 `special_metadata.turnover_relation_id` 的旧闭环，不得从 `cash_closure_case_id` 猜测；现代闭环该字段为空，撤回按 canonical case id 执行。若所选银行流水已存在 OA + 银行 active relation，确认闭环应把新增流水原子扩展进同一个 `turnover_manual_closure` case。active relation 继续决定外部往来闭环 ownership；关联台展示区由该 relation 的显式 completion contract 判定。
+外部往来款 `deterministic` 只表示系统识别到零差额计算结果，不表示已闭环，也不形成关联台关系组。外部往来闭环的共同事实源是 Workbench active pair relation；来源可以是外部往来页人工确认闭环，也可以是关联台已经把同一往来组内的银行收入/支出配成同一个零差额 case。单个 active case 只有在银行成员完整且唯一、至少一收一支、业务语义一致、现金差额和业务余额都为 `0.00` 时才输出 `cash_closure_linked=true`；active case 余额非零时输出 `cash_pair_linked=true`、`paired_unsettled=true`，并保留真实待还/待收余额。不同 active case 必须分别结算，禁止组级净额抵消。relation mode/source/provenance 只作诊断，不参与闭环资格判断。`view=grouped` 的 `summary_row` 和 `flow_rows[*]` 必须输出 `linked_oa`、`linked_invoice`、`cash_closure_linked`、`cash_closure_case_id`、`cash_closure_source`、`cash_closure_relation_id`；前端只能据此显示“已关联 OA”“已关联 发票”“收支闭环”三个正向 chip，并可据 `cash_pair_linked && !cash_closure_linked` 显示“已配对未结清”。`cash_closure_relation_id` 只用于兼容历史上显式携带 `special_metadata.turnover_relation_id` 的旧闭环，不得从 `cash_closure_case_id` 猜测；现代闭环该字段为空，撤回按 canonical case id 执行。若所选银行流水已存在 OA + 银行 active relation，确认闭环应把新增流水原子扩展进同一个 `turnover_manual_closure` case。active relation 继续决定外部往来闭环 ownership；关联台展示区由该 relation 的显式 completion contract 判定。
 
 `POST /api/turnover-ledger/closures/confirm`
 

@@ -382,7 +382,7 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["summary"]["repaid_amount"], "200000.00")
         self.assertEqual(payload["summary"]["pending_collection_amount"], "5000.00")
-        self.assertEqual(payload["summary"]["closed_amount"], "200000.00")
+        self.assertEqual(payload["summary"]["closed_amount"], "0.00")
         self.assertEqual(payload["summary"]["suggested_count"], 1)
         self.assertEqual(payload["summary"]["row_count"], 2)
         self.assertEqual(payload["pagination"], {"page": 1, "page_size": 50, "total": 2})
@@ -393,7 +393,7 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
             summary for summary in payload["family_summaries"] if summary["family"] == "business"
         )
         self.assertEqual(company_summary["label"], "公司往来")
-        self.assertEqual(company_summary["closed_amount"], "200000.00")
+        self.assertEqual(company_summary["closed_amount"], "0.00")
         self.assertEqual(business_summary["pending_amount"], "5000.00")
         closed_row = next(
             row for row in payload["rows"] if row["counterparty_name"] == "梁希涛"
@@ -1168,6 +1168,8 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
         self.assertEqual(group["pending_direction"], "collection")
         self.assertEqual(group["pending_direction_label"], "待收款")
         self.assertEqual(group["pending_amount"], "7000.00")
+        self.assertEqual(group["flow_rows"][0]["borrow_amount"], "7000.00")
+        self.assertEqual(group["flow_rows"][0]["repayment_amount"], "0.00")
 
     def test_grouped_ledger_returns_stable_defaults_when_rate_is_missing(self) -> None:
         ledger_service = self._grouped_service()
@@ -1208,7 +1210,8 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
         self.assertEqual(group["counterparty_name"], "贾小花")
         self.assertEqual(group["row_span"], 4)
         self.assertEqual(group["rows"][0], group["summary_row"])
-        self.assertEqual(group["closed_amount"], "300000.00")
+        self.assertEqual(group["closed_amount"], "0.00")
+        self.assertEqual(group["pending_direction"], "none")
         summary = group["summary_row"]
         self.assertEqual(summary["row_kind"], "summary")
         self.assertEqual(summary["display_level"], "group_summary")

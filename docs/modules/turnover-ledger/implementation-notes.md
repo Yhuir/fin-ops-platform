@@ -766,3 +766,11 @@ git diff --check
 - 失败合同：任一所选事实变化返回 `409 turnover_relation_conflict`；精确证明边界不可用返回 `503 turnover_bank_row_selection_unavailable`，两者均发生在 canonical relation command 前。页面级 stale 不再参与所选行写前判断。
 - 保持不变：`turnover_manual_closure` 仍只由 `WorkbenchRelationCommandService` 写入 canonical relation；confirm/withdraw 零跨页 fan-out，各页面访问时各自收敛。未新增表、migration、read model、worker、queue、cache 或 fallback。
 - 交互：提交期间按钮立即显示“确认中…”并 disabled/`aria-busy`；流水行之间增加 1px 细分割线，往来方分组边界不变。
+
+## 2026-07-29 - 闭环金额收敛为 active case 结算合同
+
+- 根因：旧链一部分按 Turnover status/组级余额累计 `closed_amount`，另一部分把 `turnover_manual_closure` mode 直接当作闭环；这会让未进入 active relation 的零余额组、非零 active case 或跨 case 抵消被误标为已闭合。
+- 修复：direct canonical query 以单个 active case 为结算单元，要求完整且唯一的银行成员、同一业务语义、现金差额与 `principal-settlement` 余额同时为零才标记闭环；非零 case 标记“已配对未结清”，不同 case 不净额抵消。`closed_amount` 仅作兼容并固定为 `0.00`。
+- 同步修复无 `turnover_action_type` 时借出/业务应收 flow 的主款方向：按 `business_type + cash direction` 判定 principal/settlement，避免支出本金被误算成结清发生额。
+- 旧链删除：删除 route 中不可达的 flat-to-grouped 旧聚合和 service 中基于 status/历史 principal 的 closed 累计；前端不再从旧金额 fallback 推断闭环。
+- 边界保持：不新增表、read model、worker、cache、queue、API endpoint 或跨页 I/O；统一事实源仍是银行 canonical facts 与 active `app.workbench_pair_relations`。

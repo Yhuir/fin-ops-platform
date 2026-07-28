@@ -80,6 +80,9 @@ function workbenchRelationChips(row: TurnoverLedgerGroupedRow, isFlow: boolean) 
   if (row.linkedInvoice) {
     chips.push({ label: "已关联 发票", tone: "outline" });
   }
+  if (isFlow && row.cashPairLinked && !row.cashClosureLinked) {
+    chips.push({ label: "已配对未结清", tone: "outline" });
+  }
   if (isFlow && row.cashClosureLinked) {
     chips.push({ label: "收支闭环", tone: "closure" });
   }
@@ -87,12 +90,10 @@ function workbenchRelationChips(row: TurnoverLedgerGroupedRow, isFlow: boolean) 
 }
 
 function workbenchRelationGroupLabel(group: TurnoverLedgerGroup) {
-  const rows = runtimeGroup(group).flowRows ?? [];
-  if (rows.length === 0) {
-    const summaryRow = runtimeGroup(group).summaryRow;
-    return summaryRow?.cashClosureLinked ? "收支闭环" : "";
+  if (group.cashClosureLinked) {
+    return "收支闭环";
   }
-  return rows.some((row) => row.cashClosureLinked) ? "收支闭环" : "";
+  return group.pairedUnsettled ? "已配对未结清" : "";
 }
 
 function directionKey(direction: TurnoverLedgerDirection | null | undefined): "income" | "expense" | "neutral" {
@@ -198,7 +199,6 @@ function BalanceLines({ group }: { group: TurnoverLedgerGroup }) {
   const compatibleGroup = runtimeGroup(group);
   const repaymentAmount = compatibleGroup.pendingRepaymentAmount;
   const collectionAmount = compatibleGroup.pendingCollectionAmount;
-  const closedAmount = compatibleGroup.closedAmount;
   const lines: Array<{ label: string; amount: string; tone: "repayment" | "collection" | "closed" }> = [];
 
   if (group.pendingDirection === "mixed") {
@@ -220,7 +220,9 @@ function BalanceLines({ group }: { group: TurnoverLedgerGroup }) {
   if (group.pendingDirection === "repayment") {
     return <BalanceLine label="待还款合计" amount={repaymentAmount ?? group.pendingAmount} tone="repayment" />;
   }
-  return <BalanceLine label="已闭合合计" amount={closedAmount ?? group.pendingAmount} tone="closed" />;
+  return group.cashClosureLinked
+    ? <BalanceLine label="已闭合合计" amount="0.00" tone="closed" />
+    : null;
 }
 
 function BalanceLineStack({ lines }: { lines: Array<{ label: string; amount: string; tone: "repayment" | "collection" | "closed" }> }) {

@@ -30,7 +30,10 @@
 
 - 旧 `read_model.turnover_ledger_rows` 中的错误行不能改变 direct query。
 - direct GET 不读 dirty/outbox，不 enqueue，不返回 freshness/version 字段。
-- canonical active pair relation 使同组收支 flow rows 同时显示 `cash_closure_linked=true`。
+- 完整、同业务语义且现金差额和业务余额都为零的 canonical active case，使该 case 的 flow rows 显示 `cash_closure_linked=true`。
+- active case 余额非零时显示 `cash_pair_linked=true` / `paired_unsettled=true`，待还/待收按业务类型和余额正负翻转。
+- 不同 active case 的正负余额不互相抵消；无 active relation 的零余额组不显示闭环；mode/source 不单独构成闭环证据。
+- summary、family summary 和 group 的 `closed_amount` 固定为 `0.00`。
 - confirm/withdraw 的 canonical write 语义不因 read 链切换而改变。
 - 当前页写成功只 GET 一次；另一个页面/tab 不自动 I/O。
 - GET 失败可由普通刷新恢复；写成功后的 reload 失败不伪装写失败。
