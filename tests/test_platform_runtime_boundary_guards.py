@@ -2583,13 +2583,15 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         self.assertIn("set transaction isolation level repeatable read read only", repository_source)
         for table in (
             "app.bank_transactions",
+            "app.oa_applications",
             "app.workbench_pair_relations",
             "app.bank_transaction_categories",
             "app.bank_transaction_category_confirmations",
             "app.app_settings",
         ):
             self.assertIn(table, repository_source)
-        self.assertIn("PostgresOAProjectionRepository", repository_source)
+        self.assertIn("normalized_payload", repository_source)
+        self.assertIn("COMPLETED_WORKFLOW_STATUS_SQL", repository_source)
         self.assertIn("self._canonical_repository.load_snapshot()", query_source)
         for forbidden in (
             "read_model.cost_statistics",

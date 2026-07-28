@@ -15,7 +15,7 @@
 一次请求在同一个 `REPEATABLE READ READ ONLY` 快照内读取：
 
 - `app.bank_transactions`
-- `app.oa_applications` 及其 canonical `expense_items`（经 `PostgresOAProjectionRepository`）
+- `app.oa_applications.normalized_payload` 中成本归因需要的 OA 字段及 canonical `expense_items`
 - `app.workbench_pair_relations`
 - `app.bank_transaction_categories`
 - `app.bank_transaction_category_confirmations`
@@ -74,6 +74,7 @@ migration `0126` 负责停止遗留运行时事件并删除旧表。除该迁移
 
 - 一次 API 请求只建立一个数据库快照，不轮询、不等待后台任务。
 - 分配计算按 relation 成员和 OA 付款明细线性遍历，不新增数据库查询或逐明细 I/O。
+- OA 查询只映射成本 policy 消费的父单字段、明细字段和明细金额，不递归复制附件/发票树；附件仍由其 owner 页面读取，不进入 Cost 请求内存。
 - 分页、详情和导出保持现有上限；导出仍受 `COST_STATISTICS_EXPORT_ROW_LIMIT` 保护。
 - 本次不承诺 3 秒硬 SLO，但候选发布必须记录各视图多次请求的 p50/p95，并确认无 Cost queue/worker I/O。
 - 已测的后续请求热点只在 repository 内做等价 scope/identity 下推；不得恢复 Cost read model、添加页面 cache 或建立页面间依赖。

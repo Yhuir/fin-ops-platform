@@ -19,7 +19,7 @@ from fin_ops_platform.services.bank_transaction_effective_category_provider impo
 from fin_ops_platform.services.cost_statistics_bank_tags import bank_tag_context_from_row
 from fin_ops_platform.services.postgres_repositories.common import row_payload
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
-    PostgresOAProjectionRepository,
+    COMPLETED_WORKFLOW_STATUS_SQL,
 )
 
 
@@ -97,12 +97,7 @@ class PostgresCostStatisticsCanonicalRepository:
             )
             _apply_bank_tags(bank_rows, category_provider=category_provider)
             oa_ids = _relation_member_ids(relations, {"oa"})
-            oa_rows = [
-                _object_payload(record)
-                for record in PostgresOAProjectionRepository(
-                    transaction
-                ).list_application_records_by_row_ids(oa_ids)
-            ]
+            oa_rows = _postgres_oa_rows(transaction, oa_ids=oa_ids)
             return _build_snapshot(
                 settings=settings,
                 bank_rows=bank_rows,
@@ -512,6 +507,106 @@ def _postgres_relations(
         )
         relations.append(relation)
     return relations
+
+
+def _postgres_oa_rows(
+    connection: Any,
+    *,
+    oa_ids: list[str],
+) -> list[dict[str, Any]]:
+    if not oa_ids:
+        return []
+    rows = connection.fetch_all(
+        """
+        select row_id, workflow_status, normalized_payload
+        from app.oa_applications
+        where row_id = any(%s)
+          and """
+        + COMPLETED_WORKFLOW_STATUS_SQL
+        + """
+        order by row_id
+        """,
+        (oa_ids,),
+    )
+    return [
+        payload
+        for row in rows
+        if (
+            payload := _cost_oa_payload(
+                row_payload(row, "normalized_payload"),
+                row_id=_text(row.get("row_id")),
+                workflow_status=_text(row.get("workflow_status")),
+            )
+        )
+    ]
+
+
+def _cost_oa_payload(
+    raw: Any,
+    *,
+    row_id: str,
+    workflow_status: str,
+) -> dict[str, Any]:
+    if not isinstance(raw, dict) or not row_id:
+        return {}
+    detail_fields = (
+        raw.get("detail_fields")
+        if isinstance(raw.get("detail_fields"), dict)
+        else {}
+    )
+    expense_items = [
+        {
+            key: item.get(key)
+            for key in (
+                "expense_item_id",
+                "row_id",
+                "item_id",
+                "project_id",
+                "project_name",
+                "expense_type",
+                "expense_content",
+                "reason",
+                "settlement_amount",
+                "amount",
+                "total_with_tax",
+            )
+            if item.get(key) is not None
+        }
+        for item in list(raw.get("expense_items") or [])
+        if isinstance(item, dict)
+    ]
+    return {
+        "id": row_id,
+        "row_id": row_id,
+        "workflow_status": workflow_status or raw.get("workflow_status"),
+        **{
+            key: raw.get(key)
+            for key in (
+                "apply_type",
+                "project_id",
+                "project_name",
+                "expense_type",
+                "expense_content",
+                "applicant",
+                "amount",
+                "reconciliation_amount",
+                "reason",
+            )
+            if raw.get(key) is not None
+        },
+        "detail_fields": {
+            key: detail_fields.get(key)
+            for key in (
+                "项目名称",
+                "项目编号",
+                "费用类型",
+                "费用内容",
+                "申请人",
+            )
+            if detail_fields.get(key) is not None
+        },
+        "expense_items": expense_items,
+    }
 
 
 def _build_snapshot(

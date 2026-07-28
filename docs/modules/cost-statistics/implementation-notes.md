@@ -26,4 +26,4 @@
 - 单流水仅在全部单元 ID 有效唯一、金额为正且合计按分等于流水金额时拆分。其它情况不做比例、顺序或子集推断，流水金额只计一次。
 - 歧义场景仅保留所有单元完全一致的共同项目/费用维度，否则使用 `未归集项目` / `未分类`；删除成本统计运行时的 `多项目` / `多费用类型` 合成口径。
 - project、bank、expense_type、详情与导出共享同一组分配行；`transaction_count` 继续按银行流水去重，详情 `linked_oa_count` 按 OA 去重而不是按付款明细计数。
-- canonical repository 将 OA/银行 dataclass 映射为只读浅字段字典，避免 `asdict()` 递归复制成本页面不消费的附件与发票嵌套载荷；不减少 canonical 字段，也不新增查询或缓存。
+- canonical repository 直接从同一 snapshot 的 `app.oa_applications.normalized_payload` 映射成本 policy 所需父单/付款明细字段，避免 OA repository 构造完整 record 并递归复制成本页面不消费的附件与发票树；不减少成本归因字段，也不新增查询或缓存。

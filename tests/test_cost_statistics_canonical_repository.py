@@ -6,6 +6,7 @@ import unittest
 from fin_ops_platform.services.cost_statistics_canonical_repository import (
     LocalCostStatisticsCanonicalRepository,
     PostgresCostStatisticsCanonicalRepository,
+    _cost_oa_payload,
 )
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 
@@ -191,6 +192,49 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
             snapshot["cost_groups"][0]["oa_rows"][0]["expense_items"],
             expense_items,
         )
+
+    def test_postgres_cost_oa_payload_excludes_unconsumed_attachment_trees(self) -> None:
+        payload = _cost_oa_payload(
+            {
+                "apply_type": "日常报销",
+                "project_name": "项目A；项目B",
+                "amount": "100.00",
+                "attachment_invoices": [{"invoice_no": "unused-root"}],
+                "detail_fields": {
+                    "项目编号": "P-001",
+                    "费用类型": "交通费",
+                    "附件详情": {"unused": True},
+                },
+                "expense_items": [
+                    {
+                        "expense_item_id": "item-1",
+                        "project_name": "项目A",
+                        "expense_type": "交通费",
+                        "expense_content": "市内交通",
+                        "amount": "100.00",
+                        "attachment_invoices": [{"invoice_no": "unused-item"}],
+                    }
+                ],
+            },
+            row_id="oa-exp-1",
+            workflow_status="completed",
+        )
+
+        self.assertEqual(payload["id"], "oa-exp-1")
+        self.assertEqual(payload["detail_fields"], {"项目编号": "P-001", "费用类型": "交通费"})
+        self.assertEqual(
+            payload["expense_items"],
+            [
+                {
+                    "expense_item_id": "item-1",
+                    "project_name": "项目A",
+                    "expense_type": "交通费",
+                    "expense_content": "市内交通",
+                    "amount": "100.00",
+                }
+            ],
+        )
+        self.assertNotIn("attachment_invoices", payload)
 
 
 if __name__ == "__main__":
