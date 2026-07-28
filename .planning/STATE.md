@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Phase 33 direct-canonical Turnover implementation started; Phase 32 production proof joins the same candidate
-last_updated: "2026-07-26T20:20:00+08:00"
-last_activity: 2026-07-26 -- Phase 33 implementation started after full boundary review
+last_updated: "2026-07-29T00:32:00+08:00"
+last_activity: 2026-07-29 -- Quick 260729-037 Workbench collapse/search fix deployed and production-verified
 progress:
   total_phases: 30
   completed_phases: 5
@@ -197,6 +197,7 @@ None yet.
 | 260721-nrf | 流水规则批量处理 canonical relation、Audit fresh 与内部 ID 隐藏生产闭环 | 2026-07-21 | fc5babd5b | [260721-nrf-audit-fresh](./quick/260721-nrf-audit-fresh/) |
 | 260728-g9q | OA 来源别名确定性归一到 canonical OA ID | 2026-07-28 | 454b0a5f2 | [260728-g9q-oa-oa-id-validate](./quick/260728-g9q-oa-oa-id-validate/) |
 | 260728-ngb | 关联台逐栏折叠、ETC 明细和搜索真实命中修复 | 2026-07-28 | — | [260728-ngb-etc](./quick/260728-ngb-etc/) |
+| 260729-037 | 关联台搜索与 ETC/流水规则批次折叠状态解耦 | 2026-07-29 | a21cb8e36 | [260729-037-etc](./quick/260729-037-etc/) |
 
 ## Deferred Items
 
