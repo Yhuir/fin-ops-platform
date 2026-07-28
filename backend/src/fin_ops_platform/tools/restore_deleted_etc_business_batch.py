@@ -39,8 +39,17 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO = sys.stdout) -> i
 
     app = build_tool_runtime_application(None)
     service = etc_service(app)
-    batch_record = service.get_business_batch_record(str(args.business_batch_id))
-    stored_oa_row_id = str(batch_record.oa_row_id or "").strip()
+    try:
+        inspection = service.preview_deleted_submitted_business_batch_restore(
+            str(args.business_batch_id),
+            expected_invoice_count=int(args.expected_invoice_count),
+            expected_total_amount=Decimal(str(args.expected_total_amount)),
+            expected_oa_row_id=None,
+        )
+    except EtcBusinessBatchInvalidTransitionError as exc:
+        print(json.dumps({"status": "blocked", "code": exc.code, "message": str(exc)}, ensure_ascii=False), file=stdout)
+        return 2
+    stored_oa_row_id = str(inspection.get("stored_oa_row_id") or "").strip()
     expected_oa_row_id = str(args.expected_oa_row_id).strip()
     alias_resolution = _resolve_oa_alias(
         connection=PostgresConnection(PostgresSettings.from_env()),

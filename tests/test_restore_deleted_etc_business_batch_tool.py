@@ -27,14 +27,12 @@ class _EtcService:
         "invoice_ids": ["invoice-1", "invoice-2"],
         "invoice_total": "26.14",
         "oa_row_id": "oa-pay-2200",
+        "stored_oa_row_id": "oa-pay-2200",
         "version": 8,
     }
 
     def __init__(self) -> None:
         self.restore_calls: list[dict] = []
-
-    def get_business_batch_record(self, _batch_id: str):
-        return SimpleNamespace(oa_row_id="oa-pay-2200")
 
     def preview_deleted_submitted_business_batch_restore(self, *_args, **_kwargs):
         return dict(self.preview)

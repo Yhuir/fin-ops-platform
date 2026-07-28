@@ -1600,7 +1600,7 @@ class EtcService:
         *,
         expected_invoice_count: int,
         expected_total_amount: Decimal | str | int | float,
-        expected_oa_row_id: str,
+        expected_oa_row_id: str | None,
         canonical_oa_row_id: str | None = None,
     ) -> dict[str, object]:
         self._reload_from_state_store()
@@ -1695,7 +1695,7 @@ class EtcService:
         *,
         expected_invoice_count: int,
         expected_total_amount: Decimal | str | int | float,
-        expected_oa_row_id: str,
+        expected_oa_row_id: str | None,
     ) -> tuple[EtcBusinessBatch, EtcBatch, list[EtcInvoice], str, bool]:
         batch = self._get_business_batch_mutable(business_batch_id)
         already_restored = (
@@ -1753,7 +1753,8 @@ class EtcService:
                 code="business_batch_restore_invoice_total_mismatch",
             )
         normalized_oa_row_id = str(expected_oa_row_id or "").strip()
-        if not normalized_oa_row_id or str(batch.oa_row_id or "").strip() != normalized_oa_row_id:
+        stored_oa_row_id = str(batch.oa_row_id or "").strip()
+        if not stored_oa_row_id or (normalized_oa_row_id and stored_oa_row_id != normalized_oa_row_id):
             raise EtcBusinessBatchInvalidTransitionError(
                 "Deleted ETC business batch OA row does not match the approved restore.",
                 code="business_batch_restore_oa_row_mismatch",
