@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService, resolve_effective_category
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
@@ -9,6 +10,29 @@ from fin_ops_platform.services.bank_transaction_category_service import BankTran
 class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.service = BankTransactionAutoCategoryService()
+
+    def test_bulk_suggestions_copy_rules_once_without_deepcopying_rows(self) -> None:
+        class NoDeepcopy:
+            def __deepcopy__(self, _memo):
+                raise AssertionError("bank rows must not be recursively copied")
+
+        category_service = BankTransactionCategoryService()
+        service = BankTransactionAutoCategoryService(category_service=category_service)
+        with patch.object(
+            category_service,
+            "tag_dictionary_payload",
+            wraps=category_service.tag_dictionary_payload,
+        ) as payload:
+            suggestions = service.suggest_for_rows(
+                [
+                    {"id": "txn-1", "summary": "网银手续费", "raw_payload": NoDeepcopy()},
+                    {"id": "txn-2", "summary": "4月工资", "raw_payload": NoDeepcopy()},
+                ]
+            )
+
+        self.assertEqual(payload.call_count, 1)
+        self.assertEqual(suggestions["txn-1"]["category_code"], "fee")
+        self.assertEqual(suggestions["txn-2"]["category_code"], "salary")
 
     def test_detects_fee_from_counterparty_summary_or_remark_only(self) -> None:
         suggestions = self.service.suggest_for_rows(

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 import re
 from typing import Any
 import unicodedata
@@ -95,7 +94,15 @@ class BankTransactionAutoCategoryService:
         return self._category_service.auto_tag_rule_version_label()
 
     def suggest_for_rows(self, bank_rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-        rows = [deepcopy(row) for row in list(bank_rows or []) if isinstance(row, dict)]
+        rows = [dict(row) for row in list(bank_rows or []) if isinstance(row, dict)]
+        rules = [
+            dict(definition)
+            for definition in list(self._category_service.tag_dictionary_payload().get("definitions") or [])
+            if isinstance(definition, dict)
+            and str(definition.get("status") or "active") == "active"
+            and isinstance(definition.get("rules"), dict)
+        ]
+        rules.sort(key=self._rule_sort_key)
         suggestions = self._internal_transfer_detector.detect(rows)
         for suggestion in suggestions.values():
             self._enrich_auto_match_status(suggestion, status="internal_transfer")
@@ -103,7 +110,11 @@ class BankTransactionAutoCategoryService:
             transaction_id = self._transaction_id(row)
             if not transaction_id or transaction_id in suggestions:
                 continue
-            suggestion = self._text_suggestion(row, transaction_id=transaction_id)
+            suggestion = self._text_suggestion(
+                row,
+                transaction_id=transaction_id,
+                rules=rules,
+            )
             if suggestion is not None:
                 suggestions[transaction_id] = suggestion
         return suggestions
@@ -145,16 +156,14 @@ class BankTransactionAutoCategoryService:
             candidates=self._expanded_confirmation_candidates(matches),
         )
 
-    def _text_suggestion(self, row: dict[str, Any], *, transaction_id: str) -> dict[str, Any] | None:
+    def _text_suggestion(
+        self,
+        row: dict[str, Any],
+        *,
+        transaction_id: str,
+        rules: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
         semantic_fields = self._semantic_text_fields(row)
-        rules = [
-            dict(definition)
-            for definition in list(self._category_service.tag_dictionary_payload().get("definitions") or [])
-            if isinstance(definition, dict)
-            and str(definition.get("status") or "active") == "active"
-            and isinstance(definition.get("rules"), dict)
-        ]
-        rules.sort(key=self._rule_sort_key)
         priority_buckets: dict[int, list[dict[str, Any]]] = {}
         for rule in rules:
             priority_buckets.setdefault(self._rule_priority(rule), []).append(rule)
