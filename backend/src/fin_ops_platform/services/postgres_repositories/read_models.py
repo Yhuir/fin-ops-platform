@@ -5034,10 +5034,7 @@ class PostgresReadModelRepository:
                     column_filters=normalized_column_filters,
                     time_filters=normalized_time_filters,
                 )
-                group = _compact_workbench_group_for_summary_page(
-                    group,
-                    search=normalized_search,
-                )
+                group = _compact_workbench_group_for_summary_page(group)
             groups.append(group)
         if composed_all_scope:
             current_generation_id = text(
@@ -6744,26 +6741,6 @@ def _normalize_workbench_group_detail_level(detail_level: str | None) -> str:
     return "full"
 
 
-WORKBENCH_COLLAPSED_SEARCH_PREVIEW_ROW_LIMIT = 3
-
-
-def _workbench_collapsed_search_preview_rows(
-    pane: str,
-    rows: list[dict[str, Any]],
-    *,
-    search: str | None,
-) -> list[dict[str, Any]]:
-    normalized_search = (text(search) or "").casefold()
-    if not normalized_search:
-        return []
-    return [
-        row
-        for row in rows
-        if isinstance(row, dict)
-        and normalized_search in _searchable_row_text(row, pane).casefold()
-    ][:WORKBENCH_COLLAPSED_SEARCH_PREVIEW_ROW_LIMIT]
-
-
 def _filter_workbench_group_preview_rows_for_criteria(
     group: dict[str, Any],
     *,
@@ -6869,11 +6846,7 @@ def _workbench_payload_row_matches_preview_criteria(
     return True
 
 
-def _compact_workbench_group_for_summary_page(
-    group: dict[str, Any],
-    *,
-    search: str | None = None,
-) -> dict[str, Any]:
+def _compact_workbench_group_for_summary_page(group: dict[str, Any]) -> dict[str, Any]:
     compact = without_keys(
         dict(group),
         {
@@ -6888,6 +6861,7 @@ def _compact_workbench_group_for_summary_page(
             "bank_sort_max",
             "invoice_sort_min",
             "invoice_sort_max",
+            "collapsed_rows",
         },
     )
     normalized_counts = _with_workbench_group_counts(group)
@@ -6912,19 +6886,6 @@ def _compact_workbench_group_for_summary_page(
         )
         compact["collapsed_row_counts"] = {
             str(row_type): int_value(existing_collapsed_row_counts.get(str(row_type)), len(rows))
-            for row_type, rows in collapsed_rows.items()
-            if isinstance(rows, list)
-        }
-        compact["collapsed_rows"] = {
-            str(row_type): [
-                _compact_workbench_row_for_summary_page(row)
-                for row in _workbench_collapsed_search_preview_rows(
-                    str(row_type),
-                    rows,
-                    search=search,
-                )
-                if isinstance(row, dict)
-            ]
             for row_type, rows in collapsed_rows.items()
             if isinstance(rows, list)
         }

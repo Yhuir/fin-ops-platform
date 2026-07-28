@@ -3893,7 +3893,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(group["invoice_rows"][0]["tax_rate"], "6%")
         self.assertEqual(group["invoice_rows"][0]["tax_amount"], "22.64")
         self.assertNotIn("detail_fields", group["invoice_rows"][0])
-        self.assertEqual(group["collapsed_rows"]["oa"], [])
+        self.assertNotIn("collapsed_rows", group)
         self.assertEqual(group["oa_rows"][0]["id"], "oa-1")
         self.assertEqual(page["row_counts"], {"oa": 3, "bank": 4, "invoice": 5, "rows": 12})
         self.assertNotIn("searchable_text", group)
@@ -3905,7 +3905,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertNotIn("object_identity_key", group["oa_rows"][0])
         self.assertNotIn("raw_payload", group)
 
-    def test_repository_summary_page_returns_real_collapsed_search_matches_only(self) -> None:
+    def test_repository_summary_page_keeps_collapsed_counts_without_search_preview_rows(self) -> None:
         connection = WorkbenchSummaryGroupsConnection()
         repository = PostgresReadModelRepository(connection)
 
@@ -3920,7 +3920,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         group = page["groups"][0]
         self.assertEqual(group["collapsed_row_counts"], {"oa": 4})
-        self.assertEqual([row["id"] for row in group["collapsed_rows"]["oa"]], ["collapsed-oa-4"])
+        self.assertNotIn("collapsed_rows", group)
 
     def test_repository_groups_page_row_counts_use_fact_rows_before_pagination(self) -> None:
         class FactRowCountsConnection(WorkbenchSummaryGroupsConnection):

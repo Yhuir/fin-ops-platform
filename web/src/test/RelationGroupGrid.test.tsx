@@ -1329,17 +1329,121 @@ describe("Workbench candidate grouping layout", () => {
     expect(screen.queryByRole("button", { name: /免OA批次明细/ })).not.toBeInTheDocument();
   });
 
-  test("shows a real collapsed search match without opening the bank-flow batch", () => {
+  test("keeps a bank-flow batch closed when search matches collapsed detail", () => {
     const state = createEmptyWorkbenchZoneDisplayState();
     state.searchQuery = "建设银行手续费";
     renderNoOaGrid(createBankFlowCollapsedGroup(), state);
 
-    expect(screen.getByText("建设银行手续费")).toHaveClass("search-hit");
+    expect(screen.queryByText("建设银行手续费")).not.toBeInTheDocument();
+    expect(screen.getByText("流水规则手续费批次")).toBeInTheDocument();
     expect(screen.queryByText("隐藏内容命中")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "展开流水规则批次明细，15 条" })).toHaveAttribute(
       "aria-expanded",
       "false",
     );
+  });
+
+  test("expands and collapses ETC detail normally while search is active", () => {
+    const group = createEtcCollapsedGroup();
+    const state = createEmptyWorkbenchZoneDisplayState();
+    state.searchQuery = "ETC";
+    render(
+      <RelationGroupGrid
+        canMutateData
+        displayState={state}
+        getRowState={() => "idle"}
+        groups={[group]}
+        onOpenDetail={() => undefined}
+        onRowAction={() => undefined}
+        onSelectRow={() => undefined}
+        panes={[
+          { id: "oa", title: "OA", rows: group.rows.oa },
+          { id: "bank", title: "银行流水", rows: group.rows.bank },
+          { id: "invoice", title: "进销项发票", rows: group.rows.invoice },
+        ]}
+        rowTemplateColumns="1fr 8px 1fr 8px 1fr"
+        zoneId="paired"
+      />,
+    );
+
+    const invoiceCell = screen.getByTestId("candidate-scroll-paired-case:ETC-OA-20260215-154900-invoice");
+    const expandButton = screen.getByRole("button", { name: "展开ETC发票明细，2 张" });
+    expect(expandButton).toHaveAttribute("aria-expanded", "false");
+    expect(invoiceCell).not.toHaveTextContent("ETC-001");
+    expect(invoiceCell).not.toHaveTextContent("ETC-002");
+
+    fireEvent.click(expandButton);
+
+    const collapseButton = screen.getByRole("button", { name: "收起ETC发票明细" });
+    expect(collapseButton).toHaveAttribute("aria-expanded", "true");
+    expect(invoiceCell).toHaveTextContent("ETC-001");
+    expect(invoiceCell).toHaveTextContent("ETC-002");
+
+    fireEvent.click(collapseButton);
+
+    expect(screen.getByRole("button", { name: "展开ETC发票明细，2 张" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(invoiceCell).not.toHaveTextContent("ETC-001");
+    expect(invoiceCell).not.toHaveTextContent("ETC-002");
+  });
+
+  test("does not expand a new search result after an earlier detail request finishes", async () => {
+    const group = createBankFlowPlaceholderGroup();
+    let resolveDetail!: () => void;
+    const detailLoaded = new Promise<void>((resolve) => {
+      resolveDetail = resolve;
+    });
+    const ensureGroupDetail = vi.fn(() => detailLoaded);
+    const renderGrid = (searchQuery: string) => {
+      const state = createEmptyWorkbenchZoneDisplayState();
+      state.searchQuery = searchQuery;
+      return (
+        <RelationGroupGrid
+          canMutateData
+          displayState={state}
+          getRowState={() => "idle"}
+          groups={[group]}
+          onEnsureGroupDetail={ensureGroupDetail}
+          onOpenDetail={() => undefined}
+          onRowAction={() => undefined}
+          onSelectRow={() => undefined}
+          panes={[
+            { id: "oa", title: "OA", rows: [] },
+            { id: "bank", title: "银行流水", rows: group.rows.bank },
+            { id: "invoice", title: "进销项发票", rows: [] },
+          ]}
+          rowTemplateColumns="1fr 8px 1fr 8px 1fr"
+          zoneId="paired"
+        />
+      );
+    };
+    const { rerender } = render(renderGrid("手续费"));
+
+    fireEvent.click(screen.getByRole("button", { name: "展开流水规则批次明细，15 条" }));
+    expect(screen.getByText("加载中")).toBeInTheDocument();
+
+    rerender(renderGrid("ETC"));
+
+    expect(screen.getByRole("button", { name: "展开流水规则批次明细，15 条" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(screen.queryByText("加载中")).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveDetail();
+      await detailLoaded;
+    });
+
+    expect(ensureGroupDetail).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "展开流水规则批次明细，15 条" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(screen.getByText("流水规则手续费批次")).toBeInTheDocument();
+    expect(screen.queryByText("占位明细")).not.toBeInTheDocument();
   });
 
   test("renders bank-flow summary rows without overlapping collapsed count copy", () => {

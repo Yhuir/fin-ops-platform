@@ -1,6 +1,6 @@
 # 关联台模块边界与 I/O
 
-日期：2026-07-28
+日期：2026-07-29
 
 ## 职责
 
@@ -26,7 +26,7 @@
 | OA projection rows | PostgreSQL OA projection repository -> `WorkbenchQueryService.list_oa_rows(...)` | 读取边界把持久化历史值 `section=open` 和缺失值归一化为 `unpaired`；只有 `paired|unpaired` 可进入 Workbench core，未知值 fail fast。日常报销父 OA 可携带精简 `expense_items[{id,row_index,project_name,amount,fee_content,fee_description}]`；这些 item 只用于展示，不能进入 relation member ids。Workbench generation builder 只能通过该 exact/all scope 窄 I/O 读取已序列化 OA rows；禁止先调用 legacy grouped `get_workbench(...)` 构建并丢弃 summary/paired/unpaired payload 后再次扫描、序列化同一批 rows。 |
 | active relations | workbench-relations | 只接受 `status=active` 的正式关系；row ids 必须存在且不可跨 case 重叠 |
 | row overrides / exception cases | workbench control repositories | 仅对没有 active formal relation ownership 的 row 生效；优先级为 formal relation > override > exception，projection 与 Page Audit 必须共用该合同 |
-| list query | Workbench API | `month`、zone=`paired|unpaired`、分页、区域级 `search`、排序、generation/source versions；已配对与未配对各自只有一个不超过 200 字符的搜索词，按普通文本、不区分大小写地查询该区所有 OA/流水/发票结构化展示字段；任一行命中即返回完整关联组，包含当前隐藏 pane 与折叠明细，内部 row/group id 和 detail-only 字段不属于搜索面；`%`、`_`、反斜杠不得成为 SQL 通配符。普通关系和 `no_oa_bank_batch` 的 summary page 必须返回全部可见行，不得截成三行 preview；只有 ETC 发票栏和银行流水规则批量处理的银行栏（成员数 `>3`）允许逐栏折叠。无搜索时折叠栏只返回 summary 与权威 `collapsed_row_counts`；搜索命中折叠成员时最多附带 3 条真实匹配行用于闭合态预览，不返回“隐藏内容命中”占位，也不自动加载 group detail 或展开。默认无筛选 `month=all` 查询使用现有 canonical active-month group/member SQL 一次计算精确 total 与 row counts，分页继续只取有界 payload；查询开始和返回前复核 active-month generation-set digest，切换时 fail closed。带条件查询只物化 active generation 的窄 group keys；active member CTE 必须允许条件下推，禁止强制物化全部 active members 后再搜索。单条 SQL 一次得到精确 total、row counts 与匹配 group ids，分页按匹配 ids 取 payload，禁止重复扫描历史 generation；普通标量列同列多选按 OR，不同列/不同 pane 按 AND；银行金额表头的方向+付款账号复合筛选继续按 AND |
+| list query | Workbench API | `month`、zone=`paired|unpaired`、分页、区域级 `search`、排序、generation/source versions；已配对与未配对各自只有一个不超过 200 字符的搜索词，按普通文本、不区分大小写地查询该区所有 OA/流水/发票结构化展示字段；任一行命中即返回完整关联组，包含当前隐藏 pane 与折叠明细，内部 row/group id 和 detail-only 字段不属于搜索面；`%`、`_`、反斜杠不得成为 SQL 通配符。普通关系和 `no_oa_bank_batch` 的 summary page 必须返回全部可见行，不得截成三行 preview；只有 ETC 发票栏和银行流水规则批量处理的银行栏（成员数 `>3`）允许逐栏折叠。折叠栏的 summary 只返回摘要与权威 `collapsed_row_counts`，不得附带 `collapsed_rows` 搜索预览；搜索只决定完整关联组是否命中，不能自动加载、展开或显示折叠成员。完整 `collapsed_rows` 只由用户点击后调用 group detail 获得。默认无筛选 `month=all` 查询使用现有 canonical active-month group/member SQL 一次计算精确 total 与 row counts，分页继续只取有界 payload；查询开始和返回前复核 active-month generation-set digest，切换时 fail closed。带条件查询只物化 active generation 的窄 group keys；active member CTE 必须允许条件下推，禁止强制物化全部 active members 后再搜索。单条 SQL 一次得到精确 total、row counts 与匹配 group ids，分页按匹配 ids 取 payload，禁止重复扫描历史 generation；普通标量列同列多选按 OR，不同列/不同 pane 按 AND；银行金额表头的方向+付款账号复合筛选继续按 AND |
 | row/group detail | Workbench read repository | 必须固定到同一 active generation；miss 不得合成占位行或回退旧 snapshot |
 | confirm/withdraw command | Workbench action route / Turnover adapter | canonical row ids、actor、tenant、idempotency、expected versions、preview identity。通用页面调用保持原合同；Turnover cash-closure 撤回可在同一事务先调用 `prepare_withdraw_relation(case_id)`，以一次 case lock/scoped snapshot/freshness 得到 owner-bound preparation，再交给 `withdraw_relation(..., preparation=...)`，case、rows 或 aliases 不一致必须 fail closed，禁止重复加载关系 |
 | matching scope | durable matching dirty queue | 合法 `YYYY-MM`；repository 读取 ±365 日组合窗口，显式引用可补载全部保留历史 |

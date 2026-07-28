@@ -2,6 +2,7 @@ import {
   Fragment,
   memo,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
   useCallback,
@@ -158,6 +159,7 @@ function RelationGroupGrid({
   const [expandedPaneGroups, setExpandedPaneGroups] = useState<Set<string>>(() => new Set());
   const [loadingPaneGroups, setLoadingPaneGroups] = useState<Set<string>>(() => new Set());
   const [failedPaneGroups, setFailedPaneGroups] = useState<Set<string>>(() => new Set());
+  const searchGenerationRef = useRef(0);
   const syncInFlightRef = useRef<Record<WorkbenchRecordType, boolean>>({
     oa: false,
     bank: false,
@@ -176,6 +178,14 @@ function RelationGroupGrid({
     bank: { left: 0, ratio: null },
     invoice: { left: 0, ratio: null },
   });
+  const normalizedSearchQuery = displayState.searchQuery.trim();
+
+  useLayoutEffect(() => {
+    searchGenerationRef.current += 1;
+    setExpandedPaneGroups(new Set());
+    setLoadingPaneGroups(new Set());
+    setFailedPaneGroups(new Set());
+  }, [normalizedSearchQuery]);
 
   useEffect(() => {
     const root = gridRef.current;
@@ -326,6 +336,7 @@ function RelationGroupGrid({
     visibleRowCount: number,
   ) => {
     const key = `${group.id}:${paneId}`;
+    const searchGeneration = searchGenerationRef.current;
     if (isExpanded) {
       setPaneGroupExpanded(group.id, paneId, false);
       return;
@@ -343,15 +354,22 @@ function RelationGroupGrid({
       try {
         await onEnsureGroupDetail(zoneId, group.id);
       } catch {
-        setFailedPaneGroups((current) => new Set(current).add(key));
+        if (searchGenerationRef.current === searchGeneration) {
+          setFailedPaneGroups((current) => new Set(current).add(key));
+        }
         return;
       } finally {
-        setLoadingPaneGroups((current) => {
-          const next = new Set(current);
-          next.delete(key);
-          return next;
-        });
+        if (searchGenerationRef.current === searchGeneration) {
+          setLoadingPaneGroups((current) => {
+            const next = new Set(current);
+            next.delete(key);
+            return next;
+          });
+        }
       }
+    }
+    if (searchGenerationRef.current !== searchGeneration) {
+      return;
     }
     setPaneGroupExpanded(group.id, paneId, true);
   }, [onEnsureGroupDetail, setPaneGroupExpanded, zoneId]);
@@ -453,9 +471,7 @@ function RelationGroupGrid({
           if (expandedPaneGroups.has(collapseKey)) {
             return collapsedRows;
           }
-          return displayState.searchQuery.trim() && collapsedRows.length > 0
-            ? [...group.rows[paneId], ...collapsedRows]
-            : group.rows[paneId];
+          return group.rows[paneId];
         };
         const renderCollapseControls = (paneId: WorkbenchRecordType): ReactNode => {
           const collapsedRows = group.collapsedRows?.[paneId] ?? [];

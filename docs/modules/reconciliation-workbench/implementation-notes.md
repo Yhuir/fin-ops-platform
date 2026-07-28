@@ -1,10 +1,16 @@
 # 关联台 实施记录
 
-## 2026-07-28 - 逐栏折叠合同与真实搜索预览
+## 2026-07-29 - 搜索与折叠状态解耦
+
+- 根因：前端在搜索词存在时绕过 `expandedPaneGroups`，直接把 summary response 中的 `collapsedRows` 拼入可见行；因此按钮仍是“展开”但明细已经出现。用户点击展开加载完整详情后，点击收起虽然删除了展开 key，旧搜索分支仍再次显示完整 `collapsedRows`，造成无法收起。
+- 修复：`expandedPaneGroups` 成为 ETC 发票和流水规则批次明细可见性的唯一状态源。搜索只决定关联组命中；闭合态只显示摘要，用户显式展开后才显示完整明细。搜索变化清除展开、加载和失败状态，并用查询 generation 忽略旧 detail Promise 的迟到结果。
+- 旧链清理：summary repository 删除最多 3 条折叠搜索预览的常量、helper 和 payload 组装；保留隐藏成员参与服务端搜索、权威 `collapsed_row_counts` 和 click-only group detail。仅提升既有 groups response cache schema 以淘汰最长 600 秒的旧 summary payload；没有新增 API、缓存、read model、worker、表、依赖或第二状态机。
+
+## 2026-07-28 - 逐栏折叠合同
 
 - 根因：summary repository 无条件把普通银行/发票栏截成 3 行，前端再用组级 `display_mode=collapsed_summary` 校验三个栏的 collapsed rows。ETC 实际只折叠发票栏，因此 OA/银行正常行被错误按空 collapsed rows 校验，详情 API 虽完整仍显示“加载失败，点击重试”；普通关系则被旧通用 preview 强制增加详情加载入口。
 - 修复：`collapsed_row_counts.<pane>` 成为唯一逐栏折叠合同。ETC 只折叠发票栏；`bank_flow_rule_batch` 仅在银行成员 `>3` 时折叠银行栏；普通关系、legacy `no_oa_bank_batch` 和 bank-flow 1 到 3 行直接输出全部真实行。详情 API 逐栏 fail closed，不再把组级显示模式传播到其它栏。
-- 搜索：无搜索时 summary payload 不携带折叠明细；折叠成员命中搜索时最多返回 3 条真实匹配行，前端在闭合态直接高亮显示，不展示“隐藏内容命中”、不自动展开或预取详情。删除旧普通行 preview、无 OA summary 和隐藏命中样式/文案。
+- 搜索：折叠成员仍参与服务端关联组搜索；2026-07-29 起 summary payload 不再携带折叠明细，前端闭合态只显示摘要，不展示“隐藏内容命中”、不自动展开或预取详情。
 - 版本与边界：Workbench display schema 升级到 v10，使旧 generation/page cache 失效；统一事实源、active relation、freshness/queue/worker、API route 和其它页面 I/O 不变。OA 待付款核对继续 API 直读，不消费本 projection。
 
 ## 2026-07-25 - 同次 freshness proof 复用
@@ -1296,7 +1302,7 @@
 ## 2026-07-21 - 已配对/未配对区域统一搜索
 
 - UI：删除每个 pane 的三套搜索按钮、popover 与 draft/open 状态；已配对和未配对区域各使用一个 HeroUI `SearchField`，与区域标题同一 header 行。两区状态独立，输入继续复用现有 `useDeferredValue` 与 combined initial 请求，不新增 API、请求 fan-out 或搜索服务。
-- 搜索合同：唯一 HTTP 字段为 `search`，最长 200 字符，trim 后按不区分大小写的普通文本匹配 active generation 的 OA/流水/发票结构化 `searchable_text`；SQL 显式转义 `%`、`_` 与反斜杠。任一成员命中即返回完整关联组；内部 row/group id 与 detail-only 字段不进入索引。折叠明细仍可命中；2026-07-28 起闭合态直接展示最多 3 条真实命中行并高亮，不再显示占位提示，也不自动请求完整详情。
+- 搜索合同：唯一 HTTP 字段为 `search`，最长 200 字符，trim 后按不区分大小写的普通文本匹配 active generation 的 OA/流水/发票结构化 `searchable_text`；SQL 显式转义 `%`、`_` 与反斜杠。任一成员命中即返回完整关联组；内部 row/group id 与 detail-only 字段不进入索引。折叠明细仍可命中；2026-07-29 起闭合态只显示摘要，不再附带或显示真实命中明细，也不自动请求完整详情。
 - 性能与边界：复用 2026-07-17 的 active-member key join 和单次精确 count/matching ids 分页，不扫描 payload/raw payload、不新增表/索引/worker/queue/cache/read model。projection schema 升级为 `2026-07-21-unified-zone-search-v5`，all-scope composed schema 同步 v5，使新增展示字段索引和旧 Redis payload 自动重建/失效。
 - Fresh Audit：关联台 Audit icon 的 reset key 绑定 active generation + 页面 read-model status；generation 或 status 改变立即清除旧绿色结果。`workbench_matching_scope_not_converged` 归类为 freshness+queue 阻断，`workbench_generation_source_versions_mismatch` 归类为 freshness 阻断；Audit 仍是 admin on-demand，只读 repeatable-read snapshot，不进入输入热路径。
 - 旧链路清理：删除 `WorkbenchPaneSearch.tsx`、`search_mode`、`search_by_pane`、pane-local search state、旧 URL/cache/facade/repository 分支和 session v1；不保留 fallback 或兼容并行链。共享 TaxTable 的同名 CSS hooks仍由 TaxTable 使用，不属于已删除 Workbench 搜索路径。

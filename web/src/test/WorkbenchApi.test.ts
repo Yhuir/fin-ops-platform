@@ -1133,7 +1133,7 @@ describe("workbench groups summary contract", () => {
     vi.restoreAllMocks();
   });
 
-  test("uses server row counts when summary pages only include preview rows", async () => {
+  test("uses server row counts when summary pages omit collapsed detail rows", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -1159,9 +1159,6 @@ describe("workbench groups summary contract", () => {
               })),
               bank_rows: [],
               invoice_rows: [{ id: "invoice-preview", type: "invoice", available_actions: ["detail"] }],
-              collapsed_rows: {
-                bank: [{ id: "bank-preview", type: "bank", available_actions: ["detail"] }],
-              },
             },
           ],
         }),
@@ -1200,9 +1197,6 @@ describe("workbench groups summary contract", () => {
               oa_rows: [],
               bank_rows: [{ id: "visible-bank-1", type: "bank" }, { id: "visible-bank-2", type: "bank" }],
               invoice_rows: [],
-              collapsed_rows: {
-                bank: [{ id: "collapsed-bank-1", type: "bank" }],
-              },
             },
           ],
         }),
