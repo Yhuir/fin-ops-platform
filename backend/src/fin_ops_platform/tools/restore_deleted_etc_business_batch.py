@@ -9,6 +9,7 @@ from typing import Any, Sequence, TextIO
 
 from fin_ops_platform.services.etc_service import EtcBusinessBatchInvalidTransitionError
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.postgres_repositories.oa_projection import COMPLETED_WORKFLOW_STATUS_SQL
 from fin_ops_platform.tools.runtime_application import build_tool_runtime_application, etc_service
 
 
@@ -51,19 +52,21 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO = sys.stdout) -> i
         return 2
     stored_oa_row_id = str(inspection.get("stored_oa_row_id") or "").strip()
     expected_oa_row_id = str(args.expected_oa_row_id).strip()
-    alias_resolution = _resolve_oa_alias(
+    oa_resolution = _resolve_oa_identity(
         connection=PostgresConnection(PostgresSettings.from_env()),
         stored_oa_row_id=stored_oa_row_id,
         expected_oa_row_id=expected_oa_row_id,
+        external_etc_batch_id=str(inspection.get("external_etc_batch_id") or "").strip(),
     )
-    if alias_resolution is None:
+    if oa_resolution is None:
         print(
             json.dumps(
                 {
                     "status": "blocked",
-                    "code": "business_batch_restore_oa_alias_unproven",
+                    "code": "business_batch_restore_oa_identity_unproven",
                     "stored_oa_row_id": stored_oa_row_id,
                     "expected_oa_row_id": expected_oa_row_id,
+                    "external_etc_batch_id": inspection.get("external_etc_batch_id"),
                 },
                 ensure_ascii=False,
             ),
@@ -75,14 +78,14 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO = sys.stdout) -> i
             str(args.business_batch_id),
             expected_invoice_count=int(args.expected_invoice_count),
             expected_total_amount=Decimal(str(args.expected_total_amount)),
-            expected_oa_row_id=stored_oa_row_id,
+            expected_oa_row_id=stored_oa_row_id or None,
             canonical_oa_row_id=expected_oa_row_id,
         )
     except EtcBusinessBatchInvalidTransitionError as exc:
         print(json.dumps({"status": "blocked", "code": exc.code, "message": str(exc)}, ensure_ascii=False), file=stdout)
         return 2
 
-    preview["oa_alias_resolution"] = alias_resolution
+    preview["oa_identity_resolution"] = oa_resolution
     fingerprint = _fingerprint(preview)
     payload: dict[str, object] = {
         "mode": "dry-run",
@@ -113,7 +116,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO = sys.stdout) -> i
             expected_version=int(preview["version"]),
             expected_invoice_count=int(args.expected_invoice_count),
             expected_total_amount=Decimal(str(args.expected_total_amount)),
-            expected_oa_row_id=stored_oa_row_id,
+            expected_oa_row_id=stored_oa_row_id or None,
             canonical_oa_row_id=expected_oa_row_id,
             reason=f"{str(args.reason).strip()} (operator={str(args.operator).strip()})",
         )
@@ -162,6 +165,44 @@ def _resolve_oa_alias(
         "stored_oa_row_id": stored_oa_row_id,
         "canonical_oa_row_id": expected_oa_row_id,
         "evidence_hash": str(row.get("evidence_hash") or ""),
+    }
+
+
+def _resolve_oa_identity(
+    *,
+    connection: Any,
+    stored_oa_row_id: str,
+    expected_oa_row_id: str,
+    external_etc_batch_id: str,
+) -> dict[str, str] | None:
+    if stored_oa_row_id:
+        return _resolve_oa_alias(
+            connection=connection,
+            stored_oa_row_id=stored_oa_row_id,
+            expected_oa_row_id=expected_oa_row_id,
+        )
+    if not expected_oa_row_id or not external_etc_batch_id:
+        return None
+    rows = connection.fetch_all(
+        """
+        select row_id
+        from app.oa_applications
+        where normalized_payload->>'etc_batch_id' = %s
+          and status <> 'deleted'
+          and """
+        + COMPLETED_WORKFLOW_STATUS_SQL
+        + """
+        order by row_id
+        """,
+        (external_etc_batch_id,),
+    )
+    row_ids = [str(row.get("row_id") or "").strip() for row in rows if str(row.get("row_id") or "").strip()]
+    if row_ids != [expected_oa_row_id]:
+        return None
+    return {
+        "mode": "external_etc_batch_id",
+        "external_etc_batch_id": external_etc_batch_id,
+        "canonical_oa_row_id": expected_oa_row_id,
     }
 
 

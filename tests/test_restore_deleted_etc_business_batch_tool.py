@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from fin_ops_platform.tools.restore_deleted_etc_business_batch import _resolve_oa_alias, main
+from fin_ops_platform.tools.restore_deleted_etc_business_batch import _resolve_oa_alias, _resolve_oa_identity, main
 
 
 @dataclass
@@ -60,6 +60,25 @@ class RestoreDeletedEtcBusinessBatchToolTests(unittest.TestCase):
 
         self.assertEqual(resolution["mode"], "active_alias")
         self.assertEqual(resolution["evidence_hash"], "proof")
+
+    def test_missing_stored_oa_requires_one_exact_external_batch_owner(self) -> None:
+        connection = SimpleNamespace(
+            fetch_all=lambda _sql, params: (
+                [{"row_id": "oa-pay-2200"}]
+                if params == ("etc_20260520_001",)
+                else []
+            )
+        )
+
+        resolution = _resolve_oa_identity(
+            connection=connection,
+            stored_oa_row_id="",
+            expected_oa_row_id="oa-pay-2200",
+            external_etc_batch_id="etc_20260520_001",
+        )
+
+        self.assertEqual(resolution["mode"], "external_etc_batch_id")
+        self.assertEqual(resolution["canonical_oa_row_id"], "oa-pay-2200")
 
     def test_dry_run_and_fingerprint_guarded_execute_use_exact_preview(self) -> None:
         service = _EtcService()

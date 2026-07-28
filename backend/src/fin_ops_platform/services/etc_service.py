@@ -1639,13 +1639,19 @@ class EtcService:
         expected_version: int,
         expected_invoice_count: int,
         expected_total_amount: Decimal | str | int | float,
-        expected_oa_row_id: str,
+        expected_oa_row_id: str | None,
         canonical_oa_row_id: str | None = None,
         reason: str,
     ) -> EtcBusinessBatch:
         normalized_reason = str(reason or "").strip()
         if not normalized_reason:
             raise EtcBusinessBatchInvalidTransitionError("reason is required.", code="reason_required")
+        normalized_canonical_oa_row_id = str(canonical_oa_row_id or "").strip()
+        if expected_oa_row_id is None and not normalized_canonical_oa_row_id:
+            raise EtcBusinessBatchInvalidTransitionError(
+                "canonical_oa_row_id is required when the deleted batch has no stored OA row.",
+                code="business_batch_restore_canonical_oa_required",
+            )
         self._reload_from_state_store()
         with self._business_batch_lock:
             batch, submission_batch, invoices, restored_status, already_restored = (
@@ -1659,8 +1665,14 @@ class EtcService:
             if already_restored:
                 return self._copy_business_batch(batch)
             self._assert_business_batch_version(batch, expected_version)
+            stored_oa_row_id = str(batch.oa_row_id or submission_batch.linked_oa_row_id or "").strip()
+            if expected_oa_row_id is None and stored_oa_row_id:
+                raise EtcBusinessBatchInvalidTransitionError(
+                    "Deleted ETC business batch gained OA evidence after preview.",
+                    code="business_batch_restore_oa_evidence_changed",
+                )
             now = datetime.now(UTC)
-            batch.oa_row_id = str(canonical_oa_row_id or "").strip() or batch.oa_row_id
+            batch.oa_row_id = normalized_canonical_oa_row_id or batch.oa_row_id
             submission_batch.status = EtcBatchStatus.SUBMITTED_CONFIRMED.value
             submission_batch.confirmed_at = submission_batch.confirmed_at or now
             submission_batch.linked_oa_row_id = batch.oa_row_id
@@ -1762,7 +1774,9 @@ class EtcService:
                 code="business_batch_restore_oa_evidence_conflict",
             )
         stored_oa_row_id = business_oa_row_id or submission_oa_row_id
-        if not stored_oa_row_id or (normalized_oa_row_id and stored_oa_row_id != normalized_oa_row_id):
+        if expected_oa_row_id is not None and (
+            not stored_oa_row_id or stored_oa_row_id != normalized_oa_row_id
+        ):
             raise EtcBusinessBatchInvalidTransitionError(
                 "Deleted ETC business batch OA row does not match the approved restore.",
                 code="business_batch_restore_oa_row_mismatch",
