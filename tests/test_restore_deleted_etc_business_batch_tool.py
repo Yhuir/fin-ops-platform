@@ -7,7 +7,12 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from fin_ops_platform.tools.restore_deleted_etc_business_batch import _resolve_oa_alias, _resolve_oa_identity, main
+from fin_ops_platform.tools.restore_deleted_etc_business_batch import (
+    _resolve_business_batch_scope_month,
+    _resolve_oa_alias,
+    _resolve_oa_identity,
+    main,
+)
 
 
 @dataclass
@@ -82,6 +87,23 @@ class RestoreDeletedEtcBusinessBatchToolTests(unittest.TestCase):
         self.assertEqual(resolution["mode"], "external_etc_batch_id")
         self.assertEqual(resolution["canonical_oa_row_id"], "oa-pay-2200")
 
+    def test_scope_month_comes_from_canonical_business_batch(self) -> None:
+        connection = SimpleNamespace(
+            fetch_one=lambda _sql, params: (
+                {"scope_month": "2026-05"}
+                if params == ("etc_business_batch_0004",)
+                else None
+            )
+        )
+
+        self.assertEqual(
+            _resolve_business_batch_scope_month(
+                connection=connection,
+                business_batch_id="etc_business_batch_0004",
+            ),
+            "2026-05",
+        )
+
     def test_dry_run_and_fingerprint_guarded_execute_use_exact_preview(self) -> None:
         service = _EtcService()
         app = object()
@@ -115,7 +137,13 @@ class RestoreDeletedEtcBusinessBatchToolTests(unittest.TestCase):
             patch("fin_ops_platform.tools.restore_deleted_etc_business_batch.PostgresSettings.from_env"),
             patch(
                 "fin_ops_platform.tools.restore_deleted_etc_business_batch.PostgresConnection",
-                return_value=SimpleNamespace(fetch_one=lambda *_args: None),
+                return_value=SimpleNamespace(
+                    fetch_one=lambda _sql, params: (
+                        {"scope_month": "2026-05"}
+                        if params == ("etc_business_batch_0004",)
+                        else None
+                    )
+                ),
             ),
         ):
             dry_run_output = StringIO()

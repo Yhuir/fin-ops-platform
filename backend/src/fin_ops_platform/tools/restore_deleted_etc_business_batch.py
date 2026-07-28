@@ -96,6 +96,23 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO = sys.stdout) -> i
             file=stdout,
         )
         return 2
+    scope_month = _resolve_business_batch_scope_month(
+        connection=PostgresConnection(PostgresSettings.from_env()),
+        business_batch_id=str(args.business_batch_id),
+    )
+    if not scope_month:
+        print(
+            json.dumps(
+                {
+                    "status": "blocked",
+                    "code": "business_batch_restore_scope_month_unproven",
+                    "business_batch_id": str(args.business_batch_id),
+                },
+                ensure_ascii=False,
+            ),
+            file=stdout,
+        )
+        return 2
     try:
         preview = service.preview_deleted_submitted_business_batch_restore(
             str(args.business_batch_id),
@@ -110,6 +127,8 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO = sys.stdout) -> i
         return 2
 
     preview["oa_identity_resolution"] = oa_resolution
+    preview["scope_month"] = scope_month
+    preview["scope_month_resolution"] = "app.etc_business_batches.scope_month"
     fingerprint = _fingerprint(preview)
     payload: dict[str, object] = {
         "mode": "dry-run",
@@ -142,9 +161,6 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO = sys.stdout) -> i
             canonical_title=canonical_title,
             reason=f"{str(args.reason).strip()} (operator={str(args.operator).strip()})",
         )
-        scope_month = str(preview.get("scope_month") or "").strip()
-        if not scope_month:
-            raise RuntimeError("Restored ETC business batch scope month is unavailable.")
         refresh_after_historical_etc_repair_link(
             app,
             [scope_month],
@@ -235,6 +251,19 @@ def _resolve_oa_identity(
         "external_etc_batch_id": external_etc_batch_id,
         "canonical_oa_row_id": expected_oa_row_id,
     }
+
+
+def _resolve_business_batch_scope_month(*, connection: Any, business_batch_id: str) -> str | None:
+    row = connection.fetch_one(
+        """
+        select to_char(scope_month, 'YYYY-MM') as scope_month
+        from app.etc_business_batches
+        where business_batch_id = %s and status <> 'deleted'
+        """,
+        (business_batch_id,),
+    )
+    scope_month = str((row or {}).get("scope_month") or "").strip()
+    return scope_month or None
 
 
 if __name__ == "__main__":
