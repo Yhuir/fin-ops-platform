@@ -917,3 +917,10 @@
 - 性能与隔离：金额对比为浏览器内按分计算，状态决定复用既有单次 `manual-oa-status`；没有新增网络请求、缓存、read model、队列、后台任务或跨页面写入。
 - 测试覆盖：组件覆盖 3740.82 / 3686.36 / 54.46 口径、两按钮、失败重试和状态迁移；后端覆盖 OA 101.07 与实际发票 13.07 分离；Audit 覆盖两项金额不同仍通过；Playwright 更新完整可见链路。
 - 未测风险：真实 OA 系统收到的金额与真实生产页面性能仍需在后续部署窗口做只读/受控生产验证；本次未部署。
+
+## 2026-07-29 - 已删除 submitted ETC 批次精确恢复与防复发
+
+- 目标：恢复 `etc_business_batch_0004` 原 tombstone 保存的 36 张发票成员，并防止已绑定正式 OA 行的 submitted 批次再次被普通删除。
+- 关键决策：恢复原 business/submission batch，不生成第二个内部 ID，不重新提交 OA；dry-run 同时核对版本、OA row、发票数量和含税总额，execute 使用 fingerprint。canonical invoice link 只通过目标批次限定的严格 backfill，关联台 `etc_batch_link` 只由 matching worker 的正式 relation UoW 生成。
+- 旧逻辑删除：移除 `scripts/repair_historical_etc_batches.py --apply` 及其直接 `create_active_relation` 写入旁路。
+- 测试覆盖：service 覆盖删除 guard、历史 tombstone 恢复、成员/金额/OA 边界和幂等重试；tool 覆盖 fingerprint 执行；backfill 覆盖 exact business batch filter；静态边界 guard 防止旧 relation 旁路回流。

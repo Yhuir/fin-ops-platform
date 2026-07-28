@@ -60,9 +60,9 @@
 - OA 草稿创建成功后，页面提供当前业务批次 ETC 发票 PDF 合并下载。批次 `invoice_ids` 是成员事实源，application service 负责范围校验与审计，PDF bundle service 只通过文件读取端口读取对象存储/本地字节并按开票日期、发票号、ID 稳定排序；每张来源必须恰好一页，任一缺失、损坏、hash 不一致或多页时整包失败，不允许静默漏票。
 - `submitted` 只表示 ETC 批次已人工确认提交，不等于关联台三项已配对；Workbench open 区必须生成折叠 `etc_invoice_summary`，等待 OA 和银行流水进入后通过普通配对闭环。
 - ETC 发票本质上是进项发票；统一发票池只保留 `app.invoices` 内的正式进/销项发票。ETC 专用导入保存 ZIP 内命中本批次的 PDF/XML 和 ETC metadata，用于 OA 附件和 summary 展示；不得因为 ETC ZIP 中出现一张票就在统一发票池创建新发票。
-- 业务批次任意阶段允许本地删除/reset；删除不得撤销真实 OA 草稿或 OA 流程，已提交批次删除必须释放 ETC 发票合并关系，并取消包含 summary row 的 active relation。
+- 未提交批次允许本地删除；已提交但尚无正式 `oa_row_id` 的本地批次仍可 reset。已绑定正式 OA 行的 submitted 批次禁止普通删除，避免真实 OA、ETC 发票成员和关联台关系被拆散。历史错误 reset 只能通过指纹守卫的精确 tombstone 恢复工具处理。
 - 已提交业务批次删除/reset 在修改本地批次前必须先通过 Workbench relation command boundary 的 canonical write safety；权限/session、DB/目标写模型不可用、owner 状态或 relation version/idempotency/row occupation 冲突时 fail fast，不得乐观删除本地批次或 relation。普通 `workbench_relation` distribution non-fresh 只作为读侧诊断，不能作为默认写阻断条件。
-- ETC 历史 repair 只保留 `HistoricalEtcRepairService` 的显式运维入口。旧 historical business batch migration 与 existing batch link service/tool 已删除；常规链路由 Workbench matching worker 根据 completed OA 的精确 `etc_batch_id` 在正式关系 UoW 内补全 `etc_batch_link`，不得恢复 operator-only 平行写链。前端不发送跨页业务刷新事件；relation 事实只来自 canonical/投影边界。
+- ETC 历史 repair 只保留 `HistoricalEtcRepairService` 的显式运维入口；单个已删除 submitted tombstone 的恢复使用 `restore_deleted_etc_business_batch`，并通过目标批次限定的严格 invoice-link backfill 后交给 Workbench matching worker 收敛。旧 historical business batch migration、脚本 `--apply` 直写 relation 与 existing batch link service/tool 已删除；不得恢复 operator-only 平行写链。前端不发送跨页业务刷新事件；relation 事实只来自 canonical/投影边界。
 - source file 上传必须先落对象存储，再追加 source file 元数据；对象存储失败不得留下半写入 source file、版本号或审计事件。
 - source file 元数据、解析结果和派生明细必须共享同一个 `file_id` 生命周期；慢 OCR 的解析提交与删除必须互斥，源文件已删除时不得再提交解析结果。历史孤儿解析结果必须通过既有 source file 删除边界清理，不得由前端过滤掩盖。
 - 信用卡 PDF 上传先解析可选文字；只有未识别到交易行时才回退到按页渲染的布局 OCR。OCR 成功结果必须保留人工核对警告，不得把图像识别结果冒充为无风险的文本解析。

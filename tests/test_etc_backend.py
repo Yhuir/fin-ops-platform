@@ -1074,6 +1074,73 @@ class EtcServiceTests(unittest.TestCase):
                 1,
             )
 
+    def test_linked_submitted_business_batch_cannot_be_deleted_and_deleted_tombstone_can_be_restored(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            service = EtcService(data_dir=Path(temp_dir), oa_client=FakeEtcOAClient())
+            service.import_zips([UploadedEtcZipFile("historical.zip", etc_zip(["ETC001", "ETC002"]))])
+            submitted_batch = service.create_historical_submitted_batch(
+                case_id="CASE-BATCH-txn_imported_0090",
+                external_batch_id="etc_20260520_001",
+                invoice_numbers=["ETC001", "ETC002"],
+                linked_oa_row_id="oa-pay-2200",
+                oa_amount=Decimal("26.14"),
+            )
+            business_batch = service.create_historical_submitted_business_batch(
+                business_batch_id="etc_business_batch_0004",
+                task_id="ETC-RECON-0004",
+                submission_batch_id=submitted_batch.id,
+                external_etc_batch_id="etc_20260520_001",
+                reported_amount=Decimal("26.14"),
+                relation_case_id="CASE-BATCH-txn_imported_0090",
+                linked_oa_row_id="oa-pay-2200",
+                scope_month="2026-05",
+            )
+
+            with self.assertRaises(EtcBusinessBatchInvalidTransitionError) as blocked:
+                service.delete_business_batch(
+                    business_batch.business_batch_id,
+                    expected_version=business_batch.version,
+                    reason="must not orphan an existing OA",
+                )
+            self.assertEqual(blocked.exception.code, "submitted_batch_linked_oa_delete_forbidden")
+
+            tombstone = service._business_batches[business_batch.business_batch_id]
+            service._reset_submitted_business_batch_for_delete(tombstone, reason="legacy reset before guard")
+            preview = service.preview_deleted_submitted_business_batch_restore(
+                business_batch.business_batch_id,
+                expected_invoice_count=2,
+                expected_total_amount=Decimal("26.14"),
+                expected_oa_row_id="oa-pay-2200",
+            )
+            restored = service.restore_deleted_submitted_business_batch(
+                business_batch.business_batch_id,
+                expected_version=int(preview["version"]),
+                expected_invoice_count=2,
+                expected_total_amount=Decimal("26.14"),
+                expected_oa_row_id="oa-pay-2200",
+                reason="restore proven production tombstone",
+            )
+            replayed = service.restore_deleted_submitted_business_batch(
+                business_batch.business_batch_id,
+                expected_version=int(preview["version"]),
+                expected_invoice_count=2,
+                expected_total_amount=Decimal("26.14"),
+                expected_oa_row_id="oa-pay-2200",
+                reason="idempotent retry",
+            )
+            invoices = service.list_invoices_by_ids(["etc_invoice_0001", "etc_invoice_0002"])
+
+            self.assertEqual(restored.status, EtcBusinessBatchStatus.MANUALLY_MARKED_SUBMITTED.value)
+            self.assertEqual(replayed.version, restored.version)
+            self.assertEqual(restored.submission_batch_id, submitted_batch.id)
+            self.assertEqual({invoice.status for invoice in invoices}, {EtcInvoiceStatus.SUBMITTED})
+            self.assertEqual({invoice.current_batch_id for invoice in invoices}, {submitted_batch.id})
+            self.assertEqual({invoice.business_batch_id for invoice in invoices}, {business_batch.business_batch_id})
+            self.assertEqual(
+                [event["event_type"] for event in restored.audit_events][-1],
+                "deleted_submitted_business_batch_restored",
+            )
+
     def test_business_batch_delete_is_idempotent_and_hides_deleted_batch(self) -> None:
         with TemporaryDirectory() as temp_dir:
             service = EtcService(data_dir=Path(temp_dir), oa_client=FakeEtcOAClient())

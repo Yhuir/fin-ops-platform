@@ -64,6 +64,7 @@ left join app.etc_batch_invoice_links links
 where invoices.invoice_type = 'input'
   and invoices.status <> 'deleted'
   and nullif(etc_invoices.business_batch_id, '') is not null
+  and (%s is null or etc_invoices.business_batch_id = %s)
   and (
         etc_business_batches.status in ('oa_submitted', 'manually_marked_submitted', 'closed')
      or (
@@ -82,6 +83,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--apply", action="store_true", help="Persist strict auto-backfill candidates.")
     parser.add_argument("--reason", default="", help="Required with --apply. Stored in backfill raw payload.")
     parser.add_argument("--operator", default="", help="Required with --apply. Stored in backfill raw payload.")
+    parser.add_argument("--business-batch-id", default="", help="Limit audit/apply to one exact ETC business batch.")
+    parser.add_argument(
+        "--expected-auto-backfill-count",
+        type=int,
+        help="Required with --apply. Fails closed unless the strict candidate count matches.",
+    )
     return parser
 
 
@@ -92,6 +99,8 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO = sys.stdout) -> i
         parser.error("--reason is required with --apply")
     if args.apply and not str(args.operator or "").strip():
         parser.error("--operator is required with --apply")
+    if args.apply and args.expected_auto_backfill_count is None:
+        parser.error("--expected-auto-backfill-count is required with --apply")
 
     connection = PostgresConnection(PostgresSettings.from_env())
     if not _etc_batch_invoice_links_table_exists(connection):
@@ -115,8 +124,17 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO = sys.stdout) -> i
         }
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
         return 2
-    report = audit_etc_batch_invoice_link_backfill(connection=connection, example_limit=max(int(args.limit), 0))
+    report = audit_etc_batch_invoice_link_backfill(
+        connection=connection,
+        example_limit=max(int(args.limit), 0),
+        business_batch_id=str(args.business_batch_id or "").strip() or None,
+    )
     if args.apply:
+        if int(report["summary"]["auto_backfill_count"]) != int(args.expected_auto_backfill_count):
+            parser.error(
+                "--expected-auto-backfill-count does not match the current strict candidate count "
+                f"({report['summary']['auto_backfill_count']})"
+            )
         try:
             _ensure_apply_candidate_examples_complete(
                 report,
@@ -137,8 +155,25 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO = sys.stdout) -> i
     return 0 if report["summary"]["manual_review_count"] == 0 else 1
 
 
-def audit_etc_batch_invoice_link_backfill(*, connection: Any, example_limit: int = 50) -> dict[str, Any]:
-    rows = list(connection.fetch_all(ETC_BATCH_INVOICE_LINK_BACKFILL_SQL))
+def audit_etc_batch_invoice_link_backfill(
+    *,
+    connection: Any,
+    example_limit: int = 50,
+    business_batch_id: str | None = None,
+) -> dict[str, Any]:
+    normalized_business_batch_id = str(business_batch_id or "").strip() or None
+    rows = list(
+        connection.fetch_all(
+            ETC_BATCH_INVOICE_LINK_BACKFILL_SQL,
+            (normalized_business_batch_id, normalized_business_batch_id),
+        )
+    )
+    if normalized_business_batch_id:
+        rows = [
+            row
+            for row in rows
+            if str(row.get("business_batch_id") or "").strip() == normalized_business_batch_id
+        ]
     auto_backfill_candidates: list[dict[str, Any]] = []
     manual_review_candidates: list[dict[str, Any]] = []
     already_linked: list[dict[str, Any]] = []

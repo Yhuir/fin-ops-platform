@@ -103,7 +103,7 @@ ETC 批次删除是本地清理操作，不是 OA 撤销。删除入口包括：
 运行规则：
 
 - 请求必须携带当前 `expectedVersion`；前端必须显示二次确认框。`expectedVersion` 只用于并发保护，不用于流程状态阻塞。
-- 不因已确认对账、已创建 OA 草稿、已人工确认提交、`submitted_confirmed` 或 `closed` 状态阻塞删除。
+- 已绑定正式 `oa_row_id` 的 `oa_submitted/manually_marked_submitted/closed` 批次禁止普通删除；这是防止真实 OA、ETC 发票成员和关联台关系断裂的强约束。尚无正式 OA 行的本地 submitted 状态仍可按既有 reset 合同清理。
 - 未提交批次删除会清理本地导入批次、ETC metadata/PDF/XML 附件关系；不会创建或删除统一发票池中的正式发票。
 - 已提交批次删除会将业务批次标记为 `deleted` 并写入 `submitted_business_batch_reset` 审计事件；绑定的 ETC metadata 恢复为 `unsubmitted`，`current_batch_id` 清空，已存在 canonical invoice 的 ETC 提交标记会被释放，关联台 open 区不再生成该批次的 `etc_invoice_summary`。
 - 如果 `etc_invoice_summary` 已经参与 active relation，删除批次时取消包含该 summary row 的 active relation，记录 `etc_summary_unmerged` 历史；取消后不得恢复旧 OA+银行流水二栏 active relation，OA 和银行流水各自回到未配对。
@@ -111,6 +111,8 @@ ETC 批次删除是本地清理操作，不是 OA 撤销。删除入口包括：
 - 删除后 submitted bucket 不再显示该业务批次；只有原本已存在于统一发票池的发票才会回到普通发票视图，等待未来 OA 和银行流水按普通三栏配对规则闭环。
 
 排查时如果用户反馈“删除已提交批次后 1673 汇总仍存在”，优先检查 active relation 是否仍包含 summary row、ETC metadata 是否仍为 `submitted/current_batch_id` 绑定状态、已存在 canonical invoice 是否仍为 `hidden_after_etc_submission` 或 `etc_submission_status=submitted`，再重跑对应 Workbench read model refresh。
+
+若历史版本已把带正式 OA 行的 submitted 批次错误 reset，禁止重新提交 OA 或手工改表。先通过 `etc-deleted-batch-restore` dry-run 核对原 tombstone 的批次 ID、OA row、发票数量、总额和 fingerprint，再 execute；随后仅对同一 business batch 运行严格 `etc-batch-invoice-link-backfill`，最后通过 `workbench-matching-retry` 让正式 relation UoW 补齐 `etc_batch_link`。
 
 ## Orphan task 排查与清理
 

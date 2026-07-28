@@ -43,7 +43,7 @@
 | ETC 发票导入/识别 | imports/services/parsers | 输出批次、任务、附件识别结果 |
 | ETC invoice list | `GET /api/etc/invoices` | 只读查询入口；route owner 只接收 `etc_service`、`json_response`、`serialize_invoice` 三个读侧端口，不接收 JSON body、link refresh 或状态回退端口 |
 | OA 草稿后发票 PDF 下载 | `GET /api/etc/business-batches/{id}/invoice-pdf` | 使用 read session；application service 校验 actor scope、OA 草稿和 `business_batch.invoice_ids`，再把发票元数据与 `EtcService.read_invoice_pdf_bytes` 读取端口交给 PDF bundle service；不直接读取 HTTP cookie/header，不写业务状态 |
-| 历史修复/迁移 | tools | 只作为显式运维入口 |
+| 历史修复/迁移 | tools | 只作为显式运维入口。单批次 tombstone 恢复必须同时核对业务批次 ID、版本、OA row、发票数量与含税总额，并通过 dry-run fingerprint 执行；canonical invoice link backfill 必须限定同一 business batch 且核对严格候选数 |
 | 页面 Audit | `GET /api/operations/app-health/page-audit?page=etc-tickets` | 管理员只读；同一 `REPEATABLE READ READ ONLY` snapshot 直接读取 canonical tables，不创建或刷新 read model |
 
 ## 输出 I/O
@@ -55,7 +55,7 @@
 | ETC 发票合并 PDF | 浏览器下载 | `application/pdf`、RFC 5987 UTF-8 文件名、`private, no-store`；按开票日期/发票号/ID 稳定排序，每张发票恰好贡献一页；任一来源不可读、损坏、hash 不一致或不是单页时整包失败；成功记录 `etc_invoice_pdf_bundle_downloaded` 审计，不新增批次状态或 read model |
 | linked reconciliation task title | ETC 发票导入 ready task 下拉 | business batch title 更新后同步 task title，导入页下拉展示最新批次标题 |
 | 关联候选/关系影响 | workbench relation/lifecycle | 不直接写下游 read model |
-| 修复/迁移结果 | 运维工具 | 可审计、可回滚或可重复 |
+| 修复/迁移结果 | 运维工具 | 可审计、可回滚或可重复；恢复只写回原 tombstone 成员，不创建第二个业务批次，不直接写 Workbench relation |
 | Completed import job consumption | background job progress / current page load | ETC 发票导入 job 完成后当前可见页执行一次普通 canonical GET；其它页面不被写后强制重建。 |
 | 前端刷新提示 | `etcBusinessBatchUpdated` / `invoiceFactUpdated` | 事件仅允许刷新当前可见且订阅该领域的页面；hidden 页面忽略且不重放。事件不是 freshness 事实源，也不得触发其它页面重建 |
 | Audit proof report | 统一页面 Audit UI | 输出 canonical expected-set、结构化展示字段、批次/任务/文件/发票/导入/提交内部 typed edge、统一发票桥和 durable import queue 证明；不宣称 shared Workbench relation 或外部 ETC/OA 完整性 |
@@ -82,7 +82,7 @@
 | Backend service | `etc_service.py`、`etc_business_batch_application_service.py`、`etc_invoice_pdf_bundle_service.py`、`etc_document_parsers.py`、`etc_reconciliation_*`、`invoice_attachment_recognition_service.py` |
 | Audit proof owner | `services/postgres_repositories/etc_tickets_page_audit.py`、`services/page_audit_registry.py`、`services/postgres_repositories/operations_audit.py` |
 | Workbench integration | `workbench_canonical_rows.py`、`workbench_pair_relation_service.py`、`workbench_relation_command_service.py` |
-| Tools | `cleanup_orphan_etc_reconciliation_tasks.py`；历史修复只保留 `HistoricalEtcRepairService` 的受控入口 |
+| Tools | `cleanup_orphan_etc_reconciliation_tasks.py`、`restore_deleted_etc_business_batch.py`、`backfill_etc_batch_invoice_links.py`；历史 repair 只保留 `HistoricalEtcRepairService` 的受控入口 |
 | Tests | `tests/test_etc_*.py`、`web/src/test/Etc*.test.*`、`web/e2e/etc-tickets-flow.spec.ts` |
 
 ## 依赖方向

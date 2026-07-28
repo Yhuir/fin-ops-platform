@@ -11,7 +11,7 @@
   - `oa_confirmation_pending`：OA 草稿 ID/URL 已持久化，唯一“暂存”状态，等待用户人工确认。
   - `oa_submitted/manually_marked_submitted/closed`：用户确认 OA 已提交，业务批次进入“已提交”，绑定的 ETC 对账任务同步闭环。
   - `not_submitted`：用户确认 OA 未提交，释放本地 ETC 发票占用并回到未提交链路。
-  - `deleted`：用户可见业务批次被删除。页面只从业务批次行发起删除；后端绑定 task 删除 API 仍作为正式 workflow/运维合同。删除只清理本地批次/导入事实，真实 OA 草稿和 OA 流程不删除。
+  - `deleted`：用户可见业务批次被删除。页面只从业务批次行发起删除；后端绑定 task 删除 API 仍作为正式 workflow/运维合同。已绑定正式 `oa_row_id` 的 submitted 批次禁止进入该状态；历史错误 reset 只能按原 tombstone 成员恢复。
 - 状态事实源：`etc_business_batches` 业务批次、绑定的 ETC 对账任务状态、ETC 提交批次及审计事件。
 - 允许流转：
   - 导入确认后创建或更新同一个业务批次，不在前端拆成“导入任务”和“对账任务”两个用户可见任务。
@@ -47,7 +47,7 @@
 - title editing：未提交 business batch 行的标题可点击内联编辑，Enter 或失焦保存，Esc 取消；保存失败保留错误提示，不伪装为已保存。已提交 bucket 不展示标题编辑入口。
 - error：导入、创建草稿、人工确认、删除失败时显示本地化业务错误；内部对象 id、文件 id、旧检测码不作为主要用户文案。
 - upload/delete conflict：上传仍在解析时若来源被并发删除，页面接收 HTTP 409 和“源文件在解析完成前已被删除，请重新上传”，不得显示上传成功；刷新后“已上传文件”和解析明细必须由同一组 source `file_id` 派生。
-- submitted delete confirm：已提交批次删除确认框必须说明“取消发票合并，OA 系统中的草稿和已提交记录不会删除”，不得展示为撤销 OA。
+  - submitted delete confirm：仅尚无正式 OA 行的本地 submitted 批次允许 reset；已绑定 `oa_row_id` 时后端 fail fast。历史错误 tombstone 恢复为原 submitted 状态，重复执行不追加第二次恢复审计。
 - stale/refreshing：ETC 页面本身不触发 OA 自动检测；关联台 read model 刷新状态由关联台页面展示。
 - permission disabled/hidden：权限不足时隐藏或禁用创建、导入、草稿、人工确认入口；read-export 用户在 actor scope 内仍可下载 OA 草稿批次的发票合并 PDF；删除入口不做流程状态阻塞，后端只保留版本并发校验和本地清理一致性校验。
 

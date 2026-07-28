@@ -131,59 +131,9 @@ def print_batch_preview(app, spec: HistoricalEtcBatchSpec, parsed_invoices: list
         print(f"  plate {plate}: {item['count']} 张 / {item['total']}")
 
 
-def apply_batch(app, spec: HistoricalEtcBatchSpec, upload: UploadedEtcZipFile, invoice_numbers: list[str]) -> None:
-    existing_numbers = {
-        invoice.invoice_number
-        for invoice in app._etc_service.list_invoices_by_numbers(invoice_numbers)
-    }
-    missing_numbers = [invoice_number for invoice_number in invoice_numbers if invoice_number not in existing_numbers]
-    if missing_numbers:
-        result = app._etc_service.import_missing_invoices_from_zips(
-            invoice_numbers=missing_numbers,
-            uploads=[upload],
-        )
-        changed_months = app._link_etc_import_result_to_existing_invoices(result)
-        app._refresh_after_etc_invoice_link(changed_months, reason="historical_etc_missing_invoice_import")
-
-    batch = app._etc_service.create_historical_submitted_batch(
-        case_id=spec.case_id,
-        external_batch_id=spec.external_batch_id,
-        invoice_numbers=invoice_numbers,
-        linked_oa_row_id=spec.oa_row_id,
-        oa_amount=spec.oa_amount,
-        note=f"{spec.label} ETC 历史 OA 已提交补关联；用户确认金额差异可接受。",
-    )
-    invoices = app._etc_service.list_invoices_by_ids(list(batch.invoice_ids))
-    changed_months = app._link_etc_invoices_to_existing_invoices(invoices)
-    app._refresh_after_etc_invoice_link(changed_months, reason="historical_etc_batch_link")
-
-    relation = app._workbench_pair_relation_service.create_active_relation(
-        case_id=spec.case_id,
-        row_ids=[spec.oa_row_id],
-        row_types=["oa"],
-        relation_mode="etc_batch_invoice_link",
-        created_by="system_historical_repair",
-        month_scope="all",
-        note=f"{spec.label} ETC 历史补关联",
-        amount_check={
-            "status": "matched" if batch.amount_delta == Decimal("0.00") else "mismatch",
-            "oa_amount": f"{spec.oa_amount:.2f}",
-            "invoice_total": f"{batch.total_amount:.2f}",
-            "delta": f"{batch.amount_delta:.2f}",
-            "etc_batch_id": batch.id,
-            "external_etc_batch_id": batch.etc_batch_id,
-            "source": "historical_repair",
-        },
-    )
-    app._persist_workbench_pair_relations(changed_case_ids=[str(relation["case_id"])])
-    if app._state_store is not None:
-        app._state_store.save_etc_state(app._etc_service.snapshot())
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description="Repair 2026 Jan-Mar historical ETC batches.")
     parser.add_argument("--dry-run", action="store_true", help="Preview only. This is the default.")
-    parser.add_argument("--apply", action="store_true", help="Write repaired batches into the app state.")
     parser.add_argument("--seed-mongo", action="store_true", help="Store the three historical ETC zip bundles in the configured app Mongo/GridFS store.")
     parser.add_argument("--reconcile", action="store_true", help="Run the production historical ETC repair reconcile service.")
     args = parser.parse_args()
@@ -193,7 +143,7 @@ def main() -> int:
 
     app = build_application(data_dir=DATA_DIR)
     plan: list[tuple[HistoricalEtcBatchSpec, UploadedEtcZipFile, list[str]]] = []
-    needs_local_zip_plan = args.seed_mongo or args.apply or args.dry_run or not args.reconcile
+    needs_local_zip_plan = args.seed_mongo or args.dry_run or not args.reconcile
     if needs_local_zip_plan:
         for spec in SPECS:
             upload = load_upload(spec)
@@ -222,18 +172,11 @@ def main() -> int:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
 
-    if seeded_any and not args.apply:
+    if seeded_any:
         print("\nSeed completed. Re-run with --reconcile to execute the production repair service.")
         return 0
 
-    if not args.apply:
-        print("\nDry-run only. Re-run with --apply to write app state.")
-        return 0
-
-    for spec, upload, invoice_numbers in plan:
-        apply_batch(app, spec, upload, invoice_numbers)
-        print(f"Applied {spec.label}: {spec.external_batch_id} -> {spec.oa_row_id}")
-    print("\nHistorical ETC repair completed.")
+    print("\nDry-run only. Use --seed-mongo and then --reconcile for writes through HistoricalEtcRepairService.")
     return 0
 
 

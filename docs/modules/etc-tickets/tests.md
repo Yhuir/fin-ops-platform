@@ -103,6 +103,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_background_job_service -v
 PYTHONPATH=backend/src python3 -m pytest tests/test_etc_batch_invoice_link_service.py tests/test_postgres_repositories_core.py::test_upsert_etc_batch_invoice_link_is_idempotent_by_batch_identity tests/test_postgres_migrations.py -q
 PYTHONPATH=backend/src python3 -m pytest tests/test_repair_submitted_etc_invoice_overlaps_tool.py -q
 PYTHONPATH=backend/src python3 -m pytest tests/test_backfill_etc_batch_invoice_links_tool.py tests/test_workbench_sql_runtime.py::WorkbenchSqlProjectionRelationPayloadTests::test_etc_invoice_summary_rows_prefer_link_table_source -q
+PYTHONPATH=backend/src python3 -m pytest tests/test_restore_deleted_etc_business_batch_tool.py tests/test_backfill_etc_batch_invoice_links_tool.py tests/test_etc_backend.py -k 'linked_submitted_business_batch or deleted_submitted_business_batch or backfill' -q
 PYTHONPATH=backend/src python3 -m unittest tests.test_etc_backend.EtcApiTests.test_etc_business_manual_submitted_closes_the_linked_reconciliation_task -v
 PYTHONPATH=backend/src python3 -m unittest tests.test_etc_backend.EtcServiceTests.test_business_batch_title_update_persists_and_locks_submitted tests.test_etc_backend.EtcApiTests.test_business_batch_title_patch_updates_linked_task_title -v
 PYTHONPATH=backend/src python3 -m unittest tests.test_etc_backend.EtcApiTests.test_ticket_root_upload_route_imports_gb18030_txt_file_with_clipboard_parser -v

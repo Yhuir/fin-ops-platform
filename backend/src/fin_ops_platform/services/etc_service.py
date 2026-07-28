@@ -1489,6 +1489,17 @@ class EtcService:
                 return {"deleted": True, "businessBatchId": normalized_id, "kind": "business_batch"}
             self._assert_business_batch_version(batch, expected_version)
             if batch.status in ETC_BUSINESS_BATCH_SUBMITTED_STATUSES:
+                linked_oa_row_id = str(batch.oa_row_id or "").strip()
+                submission_batch_id = str(batch.submission_batch_id or "").strip()
+                submission_batch = self._batches.get(submission_batch_id)
+                linked_oa_row_id = linked_oa_row_id or str(
+                    getattr(submission_batch, "linked_oa_row_id", "") or ""
+                ).strip()
+                if linked_oa_row_id:
+                    raise EtcBusinessBatchInvalidTransitionError(
+                        "Submitted ETC business batch linked to an OA row cannot be deleted.",
+                        code="submitted_batch_linked_oa_delete_forbidden",
+                    )
                 return self._reset_submitted_business_batch_for_delete(
                     batch,
                     reason=str(reason or "").strip() or None,
@@ -1582,6 +1593,186 @@ class EtcService:
             "releasedInvoiceCount": released_count,
             "submissionBatchId": submission_batch_id,
         }
+
+    def preview_deleted_submitted_business_batch_restore(
+        self,
+        business_batch_id: str,
+        *,
+        expected_invoice_count: int,
+        expected_total_amount: Decimal | str | int | float,
+        expected_oa_row_id: str,
+    ) -> dict[str, object]:
+        self._reload_from_state_store()
+        with self._business_batch_lock:
+            batch, submission_batch, invoices, restored_status, already_restored = (
+                self._validate_deleted_submitted_business_batch_restore(
+                    business_batch_id,
+                    expected_invoice_count=expected_invoice_count,
+                    expected_total_amount=expected_total_amount,
+                    expected_oa_row_id=expected_oa_row_id,
+                )
+            )
+            return {
+                "business_batch_id": batch.business_batch_id,
+                "task_id": batch.task_id,
+                "current_status": batch.status,
+                "restored_status": restored_status,
+                "version": batch.version,
+                "submission_batch_id": submission_batch.id,
+                "external_etc_batch_id": batch.external_etc_batch_id,
+                "oa_row_id": batch.oa_row_id,
+                "invoice_count": len(invoices),
+                "invoice_total": _amount_text(
+                    sum((invoice.total_amount for invoice in invoices), Decimal("0.00")).quantize(Decimal("0.01"))
+                ),
+                "invoice_ids": sorted(invoice.id for invoice in invoices),
+                "already_restored": already_restored,
+            }
+
+    def restore_deleted_submitted_business_batch(
+        self,
+        business_batch_id: str,
+        *,
+        expected_version: int,
+        expected_invoice_count: int,
+        expected_total_amount: Decimal | str | int | float,
+        expected_oa_row_id: str,
+        reason: str,
+    ) -> EtcBusinessBatch:
+        normalized_reason = str(reason or "").strip()
+        if not normalized_reason:
+            raise EtcBusinessBatchInvalidTransitionError("reason is required.", code="reason_required")
+        self._reload_from_state_store()
+        with self._business_batch_lock:
+            batch, submission_batch, invoices, restored_status, already_restored = (
+                self._validate_deleted_submitted_business_batch_restore(
+                    business_batch_id,
+                    expected_invoice_count=expected_invoice_count,
+                    expected_total_amount=expected_total_amount,
+                    expected_oa_row_id=expected_oa_row_id,
+                )
+            )
+            if already_restored:
+                return self._copy_business_batch(batch)
+            self._assert_business_batch_version(batch, expected_version)
+            now = datetime.now(UTC)
+            submission_batch.status = EtcBatchStatus.SUBMITTED_CONFIRMED.value
+            submission_batch.confirmed_at = submission_batch.confirmed_at or now
+            submission_batch.linked_oa_row_id = batch.oa_row_id
+            for invoice in invoices:
+                invoice.status = EtcInvoiceStatus.SUBMITTED
+                invoice.current_batch_id = submission_batch.id
+                invoice.business_batch_id = batch.business_batch_id
+                invoice.last_batch_id = submission_batch.id
+                invoice.updated_at = now
+            for import_batch_id in list(batch.import_batch_ids):
+                import_batch = self._import_batches.get(import_batch_id)
+                if import_batch is None:
+                    continue
+                import_batch.submission_batch_id = submission_batch.id
+                import_batch.updated_at = now
+            before_status = batch.status
+            batch.status = restored_status
+            self._bump_business_batch_version(
+                batch,
+                event_type="deleted_submitted_business_batch_restored",
+                before_status=before_status,
+                after_status=restored_status,
+                reason=normalized_reason,
+                submission_batch_id=submission_batch.id,
+                oa_row_id=batch.oa_row_id,
+            )
+            self._persist()
+            return self._copy_business_batch(batch)
+
+    def _validate_deleted_submitted_business_batch_restore(
+        self,
+        business_batch_id: str,
+        *,
+        expected_invoice_count: int,
+        expected_total_amount: Decimal | str | int | float,
+        expected_oa_row_id: str,
+    ) -> tuple[EtcBusinessBatch, EtcBatch, list[EtcInvoice], str, bool]:
+        batch = self._get_business_batch_mutable(business_batch_id)
+        already_restored = (
+            batch.status in ETC_BUSINESS_BATCH_SUBMITTED_STATUSES
+            and any(
+                event.get("event_type") == "deleted_submitted_business_batch_restored"
+                for event in batch.audit_events
+            )
+        )
+        if batch.status != EtcBusinessBatchStatus.DELETED.value and not already_restored:
+            raise EtcBusinessBatchInvalidTransitionError(
+                "Only a deleted submitted ETC business batch can be restored.",
+                code="business_batch_restore_not_deleted",
+            )
+        reset_event = next(
+            (
+                event
+                for event in reversed(batch.audit_events)
+                if event.get("event_type") == "submitted_business_batch_reset"
+                and str(event.get("before_status") or "") in ETC_BUSINESS_BATCH_SUBMITTED_STATUSES
+            ),
+            None,
+        )
+        if reset_event is None:
+            raise EtcBusinessBatchInvalidTransitionError(
+                "Deleted ETC business batch has no submitted reset evidence.",
+                code="business_batch_restore_missing_reset_evidence",
+            )
+        submission_batch_id = str(
+            batch.submission_batch_id or reset_event.get("submission_batch_id") or ""
+        ).strip()
+        submission_batch = self._batches.get(submission_batch_id)
+        if submission_batch is None:
+            raise EtcBusinessBatchInvalidTransitionError(
+                "Deleted ETC business batch submission batch is missing.",
+                code="business_batch_restore_missing_submission_batch",
+            )
+        invoice_ids = [str(invoice_id) for invoice_id in list(batch.invoice_ids or [])]
+        if set(invoice_ids) != set(str(invoice_id) for invoice_id in list(submission_batch.invoice_ids or [])):
+            raise EtcBusinessBatchInvalidTransitionError(
+                "Deleted ETC business batch invoice membership no longer matches its submission batch.",
+                code="business_batch_restore_invoice_membership_mismatch",
+            )
+        invoices = [self._invoices[invoice_id] for invoice_id in invoice_ids if invoice_id in self._invoices]
+        expected_count = int(expected_invoice_count)
+        if len(invoices) != expected_count or len(invoice_ids) != expected_count:
+            raise EtcBusinessBatchInvalidTransitionError(
+                "Deleted ETC business batch invoice count does not match the approved restore.",
+                code="business_batch_restore_invoice_count_mismatch",
+            )
+        invoice_total = sum((invoice.total_amount for invoice in invoices), Decimal("0.00")).quantize(Decimal("0.01"))
+        if invoice_total != _decimal_from_amount(expected_total_amount).quantize(Decimal("0.01")):
+            raise EtcBusinessBatchInvalidTransitionError(
+                "Deleted ETC business batch invoice total does not match the approved restore.",
+                code="business_batch_restore_invoice_total_mismatch",
+            )
+        normalized_oa_row_id = str(expected_oa_row_id or "").strip()
+        if not normalized_oa_row_id or str(batch.oa_row_id or "").strip() != normalized_oa_row_id:
+            raise EtcBusinessBatchInvalidTransitionError(
+                "Deleted ETC business batch OA row does not match the approved restore.",
+                code="business_batch_restore_oa_row_mismatch",
+            )
+        linked_batch_ids = {
+            batch.business_batch_id,
+            submission_batch.id,
+            str(batch.external_etc_batch_id or "").strip(),
+        }
+        for invoice in invoices:
+            owner = str(invoice.business_batch_id or "").strip()
+            current = str(invoice.current_batch_id or "").strip()
+            if owner and owner != batch.business_batch_id:
+                raise EtcBusinessBatchInvalidTransitionError(
+                    f"ETC invoice {invoice.invoice_number} is already assigned to another business batch.",
+                    code="invoice_business_batch_conflict",
+                )
+            if current and current not in linked_batch_ids:
+                raise EtcBusinessBatchInvalidTransitionError(
+                    f"ETC invoice {invoice.invoice_number} is assigned to another submitted batch.",
+                    code="invoice_batch_conflict",
+                )
+        return batch, submission_batch, invoices, str(reset_event["before_status"]), already_restored
 
     def business_batch_payload(self, batch_or_id: EtcBusinessBatch | str) -> dict[str, object]:
         batch = self._get_business_batch_mutable(batch_or_id) if isinstance(batch_or_id, str) else batch_or_id

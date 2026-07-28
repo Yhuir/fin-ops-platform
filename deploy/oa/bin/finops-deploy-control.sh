@@ -60,6 +60,12 @@ commands:
   workbench-matching-retry <release-name> --scope-month YYYY-MM --dry-run
   workbench-matching-retry <release-name> --scope-month YYYY-MM --execute --expected-fingerprint <sha256>
                                       requeue one failed matching scope through its durable repository boundary
+  etc-deleted-batch-restore <release-name> --business-batch-id ID --expected-invoice-count N --expected-total-amount AMOUNT --expected-oa-row-id ID --dry-run
+  etc-deleted-batch-restore <release-name> --business-batch-id ID --expected-invoice-count N --expected-total-amount AMOUNT --expected-oa-row-id ID --execute --expected-fingerprint <sha256> --operator ACTOR --reason TEXT
+                                      restore one exact deleted submitted ETC tombstone
+  etc-batch-invoice-link-backfill <release-name> --business-batch-id ID --limit N --dry-run
+  etc-batch-invoice-link-backfill <release-name> --business-batch-id ID --limit N --apply --expected-auto-backfill-count N --operator ACTOR --reason TEXT
+                                      backfill strict canonical invoice links for one ETC business batch
   read-model-scope-contract <release-name> [args]
                                       check or repair read model scope contracts using runtime env
   read-model-slo-smoke <release-name> [args]
@@ -705,6 +711,62 @@ workbench_matching_retry() {
   run_with_runtime_env "$src" -m fin_ops_platform.tools.workbench_matching_scope_retry_ops "$@"
 }
 
+etc_deleted_batch_restore() {
+  local release="${1:-}"
+  [[ -n "$release" ]] || die "etc-deleted-batch-restore requires release name"
+  shift
+  [[ "$#" -ge 9 ]] || die "etc-deleted-batch-restore requires exact batch, count, total, OA row and mode"
+  [[ "${1:-}" == "--business-batch-id" && "${2:-}" =~ ^[A-Za-z0-9._:-]+$ ]] || die "invalid ETC business batch id"
+  [[ "${3:-}" == "--expected-invoice-count" && "${4:-}" =~ ^[1-9][0-9]*$ ]] || die "invalid expected invoice count"
+  [[ "${5:-}" == "--expected-total-amount" && "${6:-}" =~ ^[0-9]+([.][0-9]{1,2})?$ ]] || die "invalid expected total amount"
+  [[ "${7:-}" == "--expected-oa-row-id" && "${8:-}" =~ ^[A-Za-z0-9._:-]+$ ]] || die "invalid expected OA row id"
+  case "${9:-}" in
+    --dry-run)
+      [[ "$#" -eq 9 ]] || die "ETC restore dry-run accepts no additional arguments"
+      ;;
+    --execute)
+      [[ "$#" -eq 15 && "${10:-}" == "--expected-fingerprint" && "${11:-}" =~ ^[0-9a-f]{64}$ ]] || \
+        die "ETC restore execute requires the dry-run fingerprint"
+      [[ "${12:-}" == "--operator" && -n "${13:-}" && "${14:-}" == "--reason" && -n "${15:-}" ]] || \
+        die "ETC restore execute requires operator and reason"
+      ;;
+    *)
+      die "ETC restore only permits dry-run or fingerprint-guarded execute"
+      ;;
+  esac
+  local src
+  src="$(release_src "$release")"
+  assert_runtime_env_contract
+  run_with_runtime_env "$src" -m fin_ops_platform.tools.restore_deleted_etc_business_batch "$@"
+}
+
+etc_batch_invoice_link_backfill() {
+  local release="${1:-}"
+  [[ -n "$release" ]] || die "etc-batch-invoice-link-backfill requires release name"
+  shift
+  [[ "${1:-}" == "--business-batch-id" && "${2:-}" =~ ^[A-Za-z0-9._:-]+$ ]] || die "invalid ETC business batch id"
+  [[ "${3:-}" == "--limit" && "${4:-}" =~ ^[1-9][0-9]*$ ]] || die "invalid ETC backfill limit"
+  case "${5:-}" in
+    --dry-run)
+      [[ "$#" -eq 5 ]] || die "ETC backfill dry-run accepts no additional arguments"
+      set -- "${@:1:4}"
+      ;;
+    --apply)
+      [[ "$#" -eq 11 && "${6:-}" == "--expected-auto-backfill-count" && "${7:-}" =~ ^[0-9]+$ ]] || \
+        die "ETC backfill apply requires an expected strict candidate count"
+      [[ "${8:-}" == "--operator" && -n "${9:-}" && "${10:-}" == "--reason" && -n "${11:-}" ]] || \
+        die "ETC backfill apply requires operator and reason"
+      ;;
+    *)
+      die "ETC backfill only permits dry-run or guarded apply"
+      ;;
+  esac
+  local src
+  src="$(release_src "$release")"
+  assert_runtime_env_contract
+  run_with_runtime_env "$src" -m fin_ops_platform.tools.backfill_etc_batch_invoice_links "$@"
+}
+
 read_model_scope_contract() {
   local release="${1:-}"
   [[ -n "$release" ]] || die "read-model-scope-contract requires release name"
@@ -1094,6 +1156,14 @@ case "$cmd" in
   workbench-matching-retry)
     shift
     workbench_matching_retry "$@"
+    ;;
+  etc-deleted-batch-restore)
+    shift
+    etc_deleted_batch_restore "$@"
+    ;;
+  etc-batch-invoice-link-backfill)
+    shift
+    etc_batch_invoice_link_backfill "$@"
     ;;
   read-model-scope-contract)
     shift

@@ -207,6 +207,16 @@ class DeployRuntimeExampleTests(unittest.TestCase):
             activate_case.index('run_schema_migrations "$src"'),
         )
 
+    def test_deploy_control_exposes_guarded_exact_etc_recovery_commands(self) -> None:
+        deploy_control = DEPLOY_CONTROL.read_text(encoding="utf-8")
+
+        self.assertIn("etc-deleted-batch-restore", deploy_control)
+        self.assertIn("restore_deleted_etc_business_batch", deploy_control)
+        self.assertIn("--expected-fingerprint", deploy_control)
+        self.assertIn("etc-batch-invoice-link-backfill", deploy_control)
+        self.assertIn("backfill_etc_batch_invoice_links", deploy_control)
+        self.assertIn("--expected-auto-backfill-count", deploy_control)
+
     def test_workbench_page_worker_matching_and_relation_remain(self) -> None:
         required = {registration.instance_name: registration for registration in RUNTIME_WORKER_REGISTRY if registration.required}
 

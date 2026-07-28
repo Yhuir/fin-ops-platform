@@ -120,7 +120,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.invoice_pool_cleanup \
 1. 备份 `app.invoices`、`app.etc_invoices`、`app.etc_business_batches`、`app.etc_batch_invoice_links`、canonical relation 与共享 `workbench_relation` 相关表。
 2. 删除或标记失效指向旧 invoice id 的 active `app.etc_batch_invoice_links`，保留备份作为回滚证据。
 3. 通过正式导入链路重导 Excel，不用临时 SQL 写 `app.invoices`。
-4. 运行 `fin_ops_platform.tools.backfill_etc_batch_invoice_links --json --limit 0` 做计数级 dry-run，再用 `--limit <auto_backfill_count>` 输出完整 strict auto-backfill row set；只有完整 row set 经用户确认后，才允许带 `--apply --reason --operator` 写回 link table。CLI 会拒绝在候选示例不完整时执行 `--apply`。
+4. 运行 `fin_ops_platform.tools.backfill_etc_batch_invoice_links --json --limit 0` 做计数级 dry-run，再用 `--limit <auto_backfill_count>` 输出完整 strict auto-backfill row set；只有完整 row set 经用户确认后，才允许带 `--apply --expected-auto-backfill-count <count> --reason --operator` 写回 link table。CLI 会拒绝候选示例不完整或严格候选数变化的 `--apply`。
 5. 重建/刷新受影响 Workbench scope，确认 submitted ETC 批次只以 `etc_invoice_summary` 展示，不再泄漏普通 open invoice row。
 
 历史版本可能已经在 `app.invoices` 中留下 ETC-created canonical 污染。执行清理时只能把 `invoice_source='ETC导入'`、`invoice_kind='ETC发票'` 且没有非 ETC source link 的行视为 legacy 污染候选；通过正式 Excel 导入或 OA 附件受控创建的 canonical invoice 必须保留，最多移除旧 ETC source link / batch id。

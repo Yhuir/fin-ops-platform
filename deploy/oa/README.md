@@ -456,6 +456,11 @@ sudo /usr/local/sbin/finops-deploy-control workbench-matching-retry <release-nam
   --scope-month <YYYY-MM> \
   --execute \
   --expected-fingerprint <dry-run-fingerprint>
+sudo /usr/local/sbin/finops-deploy-control etc-deleted-batch-restore <release-name> \
+  --business-batch-id <id> --expected-invoice-count <n> --expected-total-amount <amount> \
+  --expected-oa-row-id <oa-id> --dry-run
+sudo /usr/local/sbin/finops-deploy-control etc-batch-invoice-link-backfill <release-name> \
+  --business-batch-id <id> --limit <n> --dry-run
 sudo /usr/local/sbin/finops-deploy-control read-model-scope-contract <release-name> --json
 sudo /usr/local/sbin/finops-deploy-control read-model-scope-contract <release-name> \
   --apply \

@@ -6018,6 +6018,9 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if retired_path.exists():
                 violations.append(f"retired ETC relation path resurfaced: {_relative(retired_path)}")
+        historical_script = (REPO_ROOT / "scripts/repair_historical_etc_batches.py").read_text(encoding="utf-8")
+        if "create_active_relation(" in historical_script or "--apply" in historical_script:
+            violations.append("historical ETC script bypasses HistoricalEtcRepairService")
 
         self.assertEqual(violations, [])
 

@@ -153,6 +153,22 @@ class BackfillEtcBatchInvoiceLinksToolTests(unittest.TestCase):
                 count_key="auto_backfill_count",
             )
 
+    def test_dry_run_can_be_limited_to_one_exact_business_batch(self) -> None:
+        connection = _BackfillConnection()
+
+        report = audit_etc_batch_invoice_link_backfill(
+            connection=connection,
+            example_limit=10,
+            business_batch_id="etc_business_batch_0014",
+        )
+
+        self.assertEqual(report["summary"]["candidate_count"], 1)
+        self.assertEqual(report["summary"]["already_linked_count"], 1)
+        self.assertEqual(
+            connection.fetch_all_calls[0][1],
+            ("etc_business_batch_0014", "etc_business_batch_0014"),
+        )
+
     def test_schema_preflight_reports_missing_link_table(self) -> None:
         self.assertFalse(_etc_batch_invoice_links_table_exists(_SchemaProbeConnection(None)))
         self.assertTrue(_etc_batch_invoice_links_table_exists(_SchemaProbeConnection("app.etc_batch_invoice_links")))
