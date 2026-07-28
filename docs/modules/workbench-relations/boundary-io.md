@@ -60,6 +60,7 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 - 精确 typed member set 的人工撤回历史阻止 deterministic engine 自动重建同一关系。
 - OA 附件 binding 写入 `special_metadata.oa_attachment_bindings`；纯 OA+附件关系不可撤回，混合关系撤回或扩展时必须恢复 exact binding。canonical invoice row id 不要求 `oa-att-inv-*` 前缀，旧前缀识别只作为历史兼容，不得替代显式 binding metadata。
 - 历史普通关系的人工撤回 fingerprint 继续阻止同一成员集合被自动重建；仅成员类型严格为 OA+invoice 且全部连边均为显式 `attachment_source` 的不可拆分归属关系不受旧撤回 fingerprint 污染。
+- matching 先按 currency、direction 与强 evidence 建索引，只在相同强证据且 365 天窗口内比较跨类型事实；禁止恢复对全部 canonical facts 的 O(n²) 两两扫描，否则大数据量会在显式 OA 来源关系进入规划前耗尽状态预算。
 - 同轮 deterministic relation 创建/扩展必须在首次保存前合并 ETC metadata；已有 active relation 的补全必须是一次 changed-case save。canonical revalidation 冲突时整批回滚，不允许部分写。
 - manual confirm 与 deterministic matching 必须在 relation UoW 写入前，通过 bank-tag read facade 的一次批量 fresh I/O 冻结 requirement metadata；non-fresh 或任一 bank row 缺失时整批不写。读投影不得回查 settings、不得按 row 逐条读取标签。
 

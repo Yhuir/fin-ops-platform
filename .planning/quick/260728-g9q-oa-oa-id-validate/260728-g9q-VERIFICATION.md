@@ -16,6 +16,7 @@ verified_at: 2026-07-28
 - canonical 发票事实保留原始 `source_expense_item_id`。
 - relation 扩展与撤回保持 OA/附件不可拆散。
 - 旧撤回 fingerprint 只对普通/混合关系生效，不得压制纯 OA+附件不可撤回归属。
+- 大量无关 canonical facts 不得在显式 OA 附件关系规划前耗尽 matcher 状态预算。
 
 ## Test Coverage
 

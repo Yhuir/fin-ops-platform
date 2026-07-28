@@ -309,6 +309,41 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
                 self.assertEqual(result.plans, ())
                 self.assertEqual(result.resource_limited_component_count, 1)
 
+    def test_large_unrelated_fact_pool_does_not_exhaust_budget_before_explicit_relation(self) -> None:
+        oa = fact("oa", "oa-exp-2206", 41_300, evidence=())
+        invoice = fact(
+            "invoice",
+            "inv_imported_0058",
+            6_000,
+            evidence=(),
+            references=(
+                FormalRelationReference(
+                    kind="attachment_source",
+                    value="derived_from_oa_id:oa-exp-2206",
+                    target_row_type="oa",
+                    target_identity="oa-exp-2206",
+                ),
+            ),
+        )
+        unrelated = tuple(
+            fact(
+                "bank",
+                f"bank-unrelated-{index:04d}",
+                10_000 + index,
+                evidence=(("business_reference", f"UNIQUE-{index:04d}"),),
+            )
+            for index in range(700)
+        )
+
+        result = self.engine.plan_relations(batch(oa, invoice, *unrelated))
+
+        self.assertEqual(result.resource_limited_component_count, 0)
+        self.assertEqual(len(result.plans), 1)
+        self.assertEqual(
+            result.plans[0].oa_attachment_bindings,
+            (("oa-exp-2206", "inv_imported_0058"),),
+        )
+
     def test_input_order_does_not_change_plan_or_fingerprint(self) -> None:
         facts = [
             fact("oa", "oa-order", 10_000),

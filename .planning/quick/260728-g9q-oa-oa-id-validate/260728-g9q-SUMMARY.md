@@ -15,6 +15,7 @@ commit: 454b0a5f2
 - 页面只在显示边界把来源付款项 ID 映射为 canonical expense item ID；canonical 发票事实继续保留原始来源证据。
 - matching 规则版本已升级，发布后由正式 `workbench-matching` worker 按 source-version 合同重算旧 scope。
 - 旧 relation withdrawal fingerprint 不再压制仅由 `attachment_source` 证明的纯 OA+附件不可拆分归属；普通和混合关系仍保持撤回保护。
+- matching 的强证据候选构建由全量 O(n²) 两两扫描改为 evidence-indexed + 365 天窗口比较，避免生产事实量超过状态预算后零计划完成。
 
 ## 复用与删除
 
@@ -24,7 +25,7 @@ commit: 454b0a5f2
 
 ## 验证
 
-- 相关业务核心、repository、matching/orchestrator、relation command、withdraw/alignment/grouping：130 tests passed。
+- 相关业务核心、repository、matching/orchestrator、relation command、withdraw/alignment/grouping：131 tests passed。
 - 相邻 matching orchestrator、OA attachment context、Workbench query/SQL projection：32 tests passed。
 - `bash scripts/verify.sh lint`：passed。
 - `bash scripts/verify.sh docs`：passed。

@@ -7,7 +7,7 @@ import json
 from typing import Iterable, Literal
 
 
-RULE_VERSION = "2026-07-28-deterministic-formal-relation-v4"
+RULE_VERSION = "2026-07-28-deterministic-formal-relation-v5"
 MATCHABLE_ROW_TYPES = frozenset({"oa", "bank", "invoice"})
 ROW_TYPE_ORDER = {"oa": 0, "bank": 1, "invoice": 2}
 STRONG_COMPOSITE_EVIDENCE_KINDS = frozenset(
@@ -393,29 +393,50 @@ class WorkbenchFreeMatchingEngine:
                         original=any(ref.original or ref.kind == "original_reference" for ref in (*left.references, *right.references)),
                     )
 
-        for index, left in enumerate(facts):
-            for right in facts[index + 1 :]:
+        evidence_buckets: dict[
+            tuple[str, str, str, str],
+            list[FormalRelationFact],
+        ] = {}
+        for fact in facts:
+            for evidence_kind, evidence_value in fact.evidence_keys:
                 budget.consume()
-                if left.row_type == right.row_type:
-                    continue
-                if left.currency != right.currency or left.direction != right.direction:
-                    continue
-                if left.amount_minor <= 0 or right.amount_minor <= 0:
-                    continue
-                if not _within_composite_window(left.fact_date, right.fact_date):
-                    continue
-                shared_evidence = sorted(set(left.evidence_keys).intersection(right.evidence_keys))
-                if not shared_evidence:
-                    continue
-                evidence_kind, _value = shared_evidence[0]
-                self._add_edge(
-                    edges,
-                    left.member_key,
-                    right.member_key,
-                    evidence_kind=evidence_kind,
-                    explicit=False,
-                    original=False,
-                )
+                evidence_buckets.setdefault(
+                    (fact.currency, fact.direction, evidence_kind, evidence_value),
+                    [],
+                ).append(fact)
+
+        composite_pairs: dict[tuple[MemberKey, MemberKey], tuple[str, str]] = {}
+        for (_currency, _direction, evidence_kind, evidence_value), bucket in evidence_buckets.items():
+            dated = sorted(
+                (fact for fact in bucket if fact.fact_date is not None and fact.amount_minor > 0),
+                key=lambda fact: (fact.fact_date, _member_sort_key(fact.member_key)),
+            )
+            for index, left in enumerate(dated):
+                for right in dated[index + 1 :]:
+                    if (right.fact_date - left.fact_date).days > 365:
+                        break
+                    budget.consume()
+                    if left.row_type == right.row_type:
+                        continue
+                    pair = tuple(sorted((left.member_key, right.member_key), key=_member_sort_key))
+                    evidence = (evidence_kind, evidence_value)
+                    prior = composite_pairs.get(pair)
+                    if prior is None or evidence < prior:
+                        composite_pairs[pair] = evidence
+
+        budget.consume(working_bytes=len(composite_pairs) * 96)
+        for (left, right), (evidence_kind, _value) in sorted(
+            composite_pairs.items(),
+            key=lambda item: (_member_sort_key(item[0][0]), _member_sort_key(item[0][1]), item[1]),
+        ):
+            self._add_edge(
+                edges,
+                left,
+                right,
+                evidence_kind=evidence_kind,
+                explicit=False,
+                original=False,
+            )
         budget.consume(working_bytes=len(edges) * 192)
         return sorted(edges.values(), key=lambda edge: (_member_sort_key(edge.left), _member_sort_key(edge.right), edge.evidence_kind))
 
