@@ -80,6 +80,17 @@ def oa_row_source_ids(row: dict[str, Any]) -> list[str]:
             source_ids.append(value)
             identity_values.append(value)
 
+    raw_source_aliases = row.get("source_aliases")
+    source_aliases = raw_source_aliases if isinstance(raw_source_aliases, (list, tuple, set)) else ()
+    for source_alias in source_aliases:
+        parent_alias = oa_attachment_parent_oa_id(source_alias)
+        if not parent_alias:
+            continue
+        source_ids.append(parent_alias)
+        for prefix in ("oa-exp-", "oa-pay-"):
+            if parent_alias.startswith(prefix) and len(parent_alias) > len(prefix):
+                source_ids.append(parent_alias[len(prefix):])
+
     payload = row.get("normalized_payload")
     containers = [row, payload] if isinstance(payload, dict) else [row]
     prefixes = {

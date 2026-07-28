@@ -9,7 +9,7 @@ commit: 454b0a5f2
 
 ## 结果
 
-- OA canonical row 自身明确携带的 Mongo 文档 ID、流程 ID、request ID 等来源别名统一通过共享 alias map 归一到 canonical OA ID。
+- OA canonical row 自身字段及其通过 FK 拥有的付款明细/附件明确携带的 Mongo 文档 ID、流程 ID、request ID、来源付款项 parent ID 等别名，统一通过共享 alias map 归一到 canonical OA ID。
 - 当前窗口和历史窗口的正式匹配均使用同一确定性映射；别名冲突 fail closed，不使用金额、申请人、项目名或顺序猜测。
 - OA 附件发票的父 OA 与付款项 `row_index` 作为精确绑定写入正式关系 metadata，扩展和撤回时保持不可拆散。
 - 页面只在显示边界把来源付款项 ID 映射为 canonical expense item ID；canonical 发票事实继续保留原始来源证据。
@@ -23,7 +23,7 @@ commit: 454b0a5f2
 
 ## 验证
 
-- 相关业务核心、repository、matching、relation command、withdraw/alignment/grouping：117 tests passed。
+- 相关业务核心、repository、matching、relation command、withdraw/alignment/grouping：118 tests passed。
 - 相邻 matching orchestrator、OA attachment context、Workbench query/SQL projection：32 tests passed。
 - `bash scripts/verify.sh lint`：passed。
 - `bash scripts/verify.sh docs`：passed。

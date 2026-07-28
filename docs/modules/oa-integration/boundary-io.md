@@ -31,7 +31,7 @@
 | OA Mongo/query | `mongo_oa_adapter.py` | projection sync 只调用 `load_sync_application_batch(scope_key, retention_cutoff_month=...)`：每个启用 form/scope 单次读取；`all` 在字段校验和附件解析前排除 retention cutoff 以前的文档，然后输出 `projection_records` 与 `admission_records` 两个不可变视图。前者遵守通用 OA form/status 配置；后者固定接纳 completed + in-progress，不受通用 status filter 污染。任一 form 读取失败或保留期内 status/identity 无法稳定判定时整批 fail-closed，不得提交部分集合。合法 in-progress 草稿允许未填写 amount/applicant/reason，仍按稳定 identity 进入 admission，空金额持久化为 `NULL`；保留期内 completed 缺既有必填业务字段仍 fail-closed |
 | OA sync event | `job.outbox_events(event_type='oa.sync')` / runtime worker | 手动同步、附件解析版本变化和 projection 版本变化都必须入 durable queue；HTTP 进程不得 inline sync 或自行轮询 Mongo |
 | OA attachment/import | OA attachment services | 识别结果必须审计和可追踪 |
-| OA source alias | canonical OA row 的 `row_id`、`normalized_payload` 显式身份字段；`app.oa_source_aliases` | Mongo 文档 ID、OA/流程请求 ID 与 canonical row id 必须由同一纯函数生成确定性 alias map；同一 alias 指向多个 canonical row 时 fail closed。`app.oa_source_aliases` 仍只允许 `active` alias 参与 duplicate canonicalization；任何链路不得按金额、申请人、项目或顺序自动合并 |
+| OA source alias | canonical OA row 的 `row_id`、`normalized_payload` 显式身份字段，以及该 OA 通过 FK 拥有的 `app.oa_application_items` / `app.oa_attachments` 来源付款项身份；`app.oa_source_aliases` | Mongo 文档 ID、OA/流程请求 ID、来源付款项 parent ID 与 canonical row id 必须由同一纯函数生成确定性 alias map；同一 alias 指向多个 canonical row 时 fail closed。`app.oa_source_aliases` 仍只允许 `active` alias 参与 duplicate canonicalization；任何链路不得按金额、申请人、项目或顺序自动合并 |
 
 ## 输出 I/O
 

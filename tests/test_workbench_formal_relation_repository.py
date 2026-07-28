@@ -343,6 +343,41 @@ class PostgresWorkbenchFormalRelationFactRepositoryTests(unittest.TestCase):
             {("oa", "oa-exp-2206")},
         )
 
+    def test_owned_attachment_item_alias_is_canonicalized_when_oa_payload_lacks_source_id(self) -> None:
+        source_alias = "6a0ee8613bb8164165d8c61a"
+        oa = oa_row("oa-exp-2206", amount=Decimal("413.00"), payload={"apply_type": "日常报销"})
+        oa["source_aliases"] = [f"oa-exp-{source_alias}:item:2:9ca59ea6e4ab"]
+        connection = FakeConnection(
+            oa_rows=[oa],
+            invoice_rows=[
+                invoice_row(
+                    "inv_imported_0058",
+                    total_with_tax=Decimal("60.00"),
+                    source_links=[
+                        {
+                            "source_kind": "oa_attachment_invoice",
+                            "metadata": {
+                                "derived_from_oa_id": f"oa-exp-{source_alias}:item:2:9ca59ea6e4ab",
+                            },
+                        }
+                    ],
+                )
+            ],
+        )
+
+        result = PostgresWorkbenchFormalRelationFactRepository(connection).load_batch(["2026-05"])
+        invoice = next(fact for fact in result.facts if fact.row_type == "invoice")
+
+        self.assertEqual(
+            {
+                reference.target_member_key
+                for reference in invoice.references
+                if reference.kind == "attachment_source"
+            },
+            {("oa", "oa-exp-2206")},
+        )
+        self.assertIn("from app.oa_attachments attachment", connection.queries[0][0])
+
     def test_historical_oa_source_alias_lookup_is_exact_and_canonicalized(self) -> None:
         source_alias = "6a0ee8613bb8164165d8c61a"
         connection = FakeConnection(
@@ -381,6 +416,7 @@ class PostgresWorkbenchFormalRelationFactRepositoryTests(unittest.TestCase):
             if "jsonb_each_text" in query
         )
         self.assertIn(source_alias, historical_params[2])
+        self.assertEqual(historical_params[3], [source_alias, f"oa-exp-{source_alias}"])
 
     def test_conflicting_oa_source_aliases_fail_closed(self) -> None:
         payload = {

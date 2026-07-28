@@ -7,7 +7,7 @@ import json
 from typing import Iterable, Literal
 
 
-RULE_VERSION = "2026-07-28-deterministic-formal-relation-v2"
+RULE_VERSION = "2026-07-28-deterministic-formal-relation-v3"
 MATCHABLE_ROW_TYPES = frozenset({"oa", "bank", "invoice"})
 ROW_TYPE_ORDER = {"oa": 0, "bank": 1, "invoice": 2}
 STRONG_COMPOSITE_EVIDENCE_KINDS = frozenset(

@@ -46,6 +46,30 @@ _WITHDRAW_EVENTS = frozenset(
     }
 )
 _SINGLE_MEMBER_CLAIM_RELATION_MODES = frozenset({"bank_flow_rule_batch", "no_oa_bank_batch"})
+_OA_OWNED_SOURCE_ALIASES_SQL = """
+array(
+    select distinct source_alias.parent_oa_id
+    from (
+        select split_part(nullif(item.normalized_payload->>'source_expense_item_id', ''), ':item:', 1)
+                   as parent_oa_id
+        from app.oa_application_items item
+        where item.oa_application_id = oa.id
+        union all
+        select split_part(nullif(attachment.normalized_payload->>'source_expense_item_id', ''), ':item:', 1)
+        from app.oa_attachments attachment
+        where attachment.oa_application_id = oa.id
+        union all
+        select split_part(nullif(attachment.normalized_payload->>'derived_from_oa_id', ''), ':item:', 1)
+        from app.oa_attachments attachment
+        where attachment.oa_application_id = oa.id
+        union all
+        select split_part(nullif(attachment.normalized_payload->>'source_oa_id', ''), ':item:', 1)
+        from app.oa_attachments attachment
+        where attachment.oa_application_id = oa.id
+    ) source_alias
+    where nullif(source_alias.parent_oa_id, '') is not null
+)
+"""
 
 
 class PostgresWorkbenchFormalRelationFactRepository:
@@ -63,28 +87,29 @@ class PostgresWorkbenchFormalRelationFactRepository:
         normalized_scopes = _normalize_scope_months(scope_months)
         start_date, end_date = _composite_window(normalized_scopes)
         oa_rows = self._connection.fetch_all(
-            """
+            f"""
             select
-                row_id as canonical_object_identity,
-                row_id,
-                amount,
-                currency,
-                application_date as fact_date,
-                workflow_no,
-                project_id,
-                project_name,
-                applicant,
-                status,
-                workflow_status,
-                normalized_payload,
-                greatest(updated_at, synced_at) as source_version
-            from app.oa_applications
-            where coalesce(application_date, scope_month) between %s::date and %s::date
-              and status <> 'deleted'
+                oa.row_id as canonical_object_identity,
+                oa.row_id,
+                oa.amount,
+                oa.currency,
+                oa.application_date as fact_date,
+                oa.workflow_no,
+                oa.project_id,
+                oa.project_name,
+                oa.applicant,
+                oa.status,
+                oa.workflow_status,
+                oa.normalized_payload,
+                {_OA_OWNED_SOURCE_ALIASES_SQL} as source_aliases,
+                greatest(oa.updated_at, oa.synced_at) as source_version
+            from app.oa_applications oa
+            where coalesce(oa.application_date, oa.scope_month) between %s::date and %s::date
+              and oa.status <> 'deleted'
               and """
             + COMPLETED_WORKFLOW_STATUS_SQL
             + """
-            order by row_id
+            order by oa.row_id
             """,
             (start_date, end_date),
         )
@@ -474,49 +499,51 @@ class PostgresWorkbenchFormalRelationFactRepository:
         bank_ids = sorted(target_ids["bank"])
         invoice_ids = sorted(target_ids["invoice"])
         oa_rows = self._connection.fetch_all(
-            """
+            f"""
             select
-                row_id as canonical_object_identity,
-                row_id,
-                amount,
-                currency,
-                application_date as fact_date,
-                workflow_no,
-                project_id,
-                project_name,
-                applicant,
-                status,
-                workflow_status,
-                normalized_payload,
-                greatest(updated_at, synced_at) as source_version
-            from app.oa_applications
+                oa.row_id as canonical_object_identity,
+                oa.row_id,
+                oa.amount,
+                oa.currency,
+                oa.application_date as fact_date,
+                oa.workflow_no,
+                oa.project_id,
+                oa.project_name,
+                oa.applicant,
+                oa.status,
+                oa.workflow_status,
+                oa.normalized_payload,
+                {_OA_OWNED_SOURCE_ALIASES_SQL} as source_aliases,
+                greatest(oa.updated_at, oa.synced_at) as source_version
+            from app.oa_applications oa
             where (
-                    row_id = any(%s::text[])
+                    oa.row_id = any(%s::text[])
                     or exists (
                         select 1
                         from (
                             values
-                                (case when jsonb_typeof(normalized_payload) = 'object'
-                                      then normalized_payload else '{}'::jsonb end),
-                                (case when jsonb_typeof(normalized_payload->'detail_fields') = 'object'
-                                      then normalized_payload->'detail_fields' else '{}'::jsonb end),
-                                (case when jsonb_typeof(normalized_payload->'summary_fields') = 'object'
-                                      then normalized_payload->'summary_fields' else '{}'::jsonb end),
-                                (case when jsonb_typeof(normalized_payload->'metadata') = 'object'
-                                      then normalized_payload->'metadata' else '{}'::jsonb end)
+                                (case when jsonb_typeof(oa.normalized_payload) = 'object'
+                                      then oa.normalized_payload else '{{}}'::jsonb end),
+                                (case when jsonb_typeof(oa.normalized_payload->'detail_fields') = 'object'
+                                      then oa.normalized_payload->'detail_fields' else '{{}}'::jsonb end),
+                                (case when jsonb_typeof(oa.normalized_payload->'summary_fields') = 'object'
+                                      then oa.normalized_payload->'summary_fields' else '{{}}'::jsonb end),
+                                (case when jsonb_typeof(oa.normalized_payload->'metadata') = 'object'
+                                      then oa.normalized_payload->'metadata' else '{{}}'::jsonb end)
                         ) as source_containers(payload)
                         cross join lateral jsonb_each_text(source_containers.payload) as source_alias(field_name, field_value)
                         where source_alias.field_name = any(%s::text[])
                           and source_alias.field_value = any(%s::text[])
                     )
+                    or {_OA_OWNED_SOURCE_ALIASES_SQL} && %s::text[]
               )
-              and status <> 'deleted'
+              and oa.status <> 'deleted'
               and """
             + COMPLETED_WORKFLOW_STATUS_SQL
             + """
-            order by row_id
+            order by oa.row_id
             """,
-            (oa_ids, list(OA_SOURCE_ALIAS_FIELD_NAMES), oa_alias_values),
+            (oa_ids, list(OA_SOURCE_ALIAS_FIELD_NAMES), oa_alias_values, oa_alias_values),
         ) if oa_ids else []
         bank_rows = self._connection.fetch_all(
             """

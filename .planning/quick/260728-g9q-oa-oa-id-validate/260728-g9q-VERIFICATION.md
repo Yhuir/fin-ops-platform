@@ -8,7 +8,7 @@ verified_at: 2026-07-28
 
 ## Must Haves
 
-- OA row 的所有显式来源身份确定性归一到唯一 canonical OA ID。
+- OA row 自身及其 FK-owned 付款明细/附件的所有显式来源身份确定性归一到唯一 canonical OA ID。
 - 同一 alias 指向多个 OA 时 fail closed。
 - 历史显式来源引用与当前窗口使用同一 alias 合同。
 - 附件发票通过 exact source binding 进入父 OA 正式关系。
