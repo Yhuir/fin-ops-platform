@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from dataclasses import replace
 from time import monotonic
 
 from openpyxl import load_workbook
@@ -44,6 +45,7 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.app._workbench_query_service = WorkbenchQueryService(  # noqa: SLF001
             oa_adapter=InMemoryOAAdapter({"2026-03": [oa]})
         )
+        self.oa = oa
         preview = self.app._import_service.preview_import(  # noqa: SLF001
             batch_type=BatchType.BANK_TRANSACTION,
             source_name="cost-statistics-direct-canonical.json",
@@ -142,6 +144,75 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(transaction["relation_status"], "canonical")
         self.assertEqual(transaction["relation_case_ids"], ["CASE-COST-DIRECT-001"])
         self.assertEqual(transaction["cost_allocations"][0]["project_name"], "云南溯源科技")
+
+    def test_daily_reimbursement_items_drive_views_detail_and_export(self) -> None:
+        daily_oa = replace(
+            self.oa,
+            apply_type="日常报销",
+            project_name="项目A；项目B",
+            expense_type="交通费；住宿费",
+            expense_content="市内交通；出差住宿",
+            expense_items=[
+                {
+                    "expense_item_id": "api-item-1",
+                    "project_id": "P-A",
+                    "project_name": "项目A",
+                    "expense_type": "交通费",
+                    "expense_content": "市内交通",
+                    "amount": "500.00",
+                },
+                {
+                    "expense_item_id": "api-item-2",
+                    "project_id": "P-B",
+                    "project_name": "项目B",
+                    "expense_type": "住宿费",
+                    "expense_content": "出差住宿",
+                    "amount": "750.00",
+                },
+            ],
+        )
+        self.app._cost_statistics_canonical_repository._oa_rows_by_ids_provider = (  # noqa: SLF001
+            lambda _row_ids: [daily_oa]
+        )
+
+        status, project_page = self._json(
+            "/api/cost-statistics/explorer?scope=2026-03&view=project"
+            "&project_scope=all&project_name=项目A&expense_type=交通费"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(project_page["row_count"], 1)
+        self.assertEqual(project_page["rows"][0]["amount"], "500.00")
+        self.assertNotIn(
+            "多项目",
+            {
+                facet["project_name"]
+                for facet in project_page["facets"]["projects"]
+            },
+        )
+
+        status, detail = self._json(
+            f"/api/cost-statistics/transactions/{self.bank_id}"
+            "?scope=2026-03&view=project&project_scope=all"
+        )
+        self.assertEqual(status, 200)
+        transaction = detail["transaction"]
+        self.assertEqual(transaction["project_name"], "项目A、项目B")
+        self.assertEqual(transaction["linked_oa_count"], 1)
+        self.assertEqual(
+            {
+                (allocation["project_name"], allocation["amount"])
+                for allocation in transaction["cost_allocations"]
+            },
+            {("项目A", "500.00"), ("项目B", "750.00")},
+        )
+
+        status, preview = self._json(
+            "/api/cost-statistics/export-preview"
+            "?month=2026-03&view=project&project_scope=all"
+            "&project_name=项目B"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(preview["summary"]["total_amount"], "750.00")
 
     def test_next_request_observes_relation_withdrawal_without_refresh_job(self) -> None:
         before_status, before = self._json(

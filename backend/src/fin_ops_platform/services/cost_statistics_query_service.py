@@ -187,8 +187,12 @@ class CostStatisticsQueryService:
             for item in list(row.get("cost_allocations") or [])
             if isinstance(item, dict)
         ]
-        project_names = {item["project_name"] for item in cost_allocations}
-        expense_types = {item["expense_type"] for item in cost_allocations}
+        project_names = sorted(
+            {item["project_name"] for item in cost_allocations}
+        )
+        expense_types = sorted(
+            {item["expense_type"] for item in cost_allocations}
+        )
         allocation_amount = sum(
             (
                 _decimal_from_value(item["amount"]) or Decimal("0.00")
@@ -203,16 +207,12 @@ class CostStatisticsQueryService:
             "transaction": {
                 "id": normalized_transaction_id,
                 "project_name": (
-                    next(iter(project_names))
-                    if len(project_names) == 1
-                    else "多项目"
+                    "、".join(project_names)
                     if project_names
                     else str(row.get("project_name") or "")
                 ),
                 "expense_type": (
-                    next(iter(expense_types))
-                    if len(expense_types) == 1
-                    else "多费用类型"
+                    "、".join(expense_types)
                     if expense_types
                     else str(row.get("expense_type") or "")
                 ),
@@ -264,7 +264,7 @@ class CostStatisticsQueryService:
                 ]
                 if str(row.get("group_id") or "")
                 else [],
-                "linked_oa_count": len(cost_allocations),
+                "linked_oa_count": int(row.get("linked_oa_count") or 0),
                 "linked_invoice_count": 0,
                 "bank_tag_code": str(row.get("bank_tag_code") or ""),
                 "bank_tag_label": str(row.get("bank_tag_label") or ""),

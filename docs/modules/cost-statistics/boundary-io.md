@@ -15,7 +15,7 @@
 一次请求在同一个 `REPEATABLE READ READ ONLY` 快照内读取：
 
 - `app.bank_transactions`
-- `app.oa_applications`（经 `PostgresOAProjectionRepository`）
+- `app.oa_applications` 及其 canonical `expense_items`（经 `PostgresOAProjectionRepository`）
 - `app.workbench_pair_relations`
 - `app.bank_transaction_categories`
 - `app.bank_transaction_category_confirmations`
@@ -39,6 +39,8 @@ HTTP GET
 - `include_statistics=false` 且范围不是 `all` 时，repository 用 `bank_transactions.txn_month` 下推范围。`time|bank_tag` 不读取 OA 配对关系；`project|bank|expense_type` 只读取命中银行流水的 active relation，并扩展该 relation 的全部银行/OA 成员，保证跨月份配对分配语义不变。
 - 前端将后续请求限制在内容区：范围/视图只替换统计 surface，左栏选择只加载中/右栏，中栏选择只加载右栏；只有首次数据尚未验证时才使用页面内交互锁。
 - API 失败时明确返回错误；用户再次刷新会重新打开数据库快照并完整重试。
+- `CostStatisticsPolicy` 将支付申请作为一个分配单元，将日常报销的 canonical `expense_items` 作为付款明细分配单元；仅在单流水与全部分配金额按分精确相等时拆分。任何歧义都不猜测，流水金额只计一次并归入共同维度或 `未归集项目` / `未分类`。
+- `project / bank / expense_type`、transaction detail 和导出共享同一分配结果；成本统计链路不生成 `多项目` / `多费用类型`。
 - 标签规则保存只修改 App Settings；保存成功后的页面 reload 重新应用最新规则。
 - 不产生 `cost_statistics.read_model.refresh`、dirty scope、readiness 或 Cost worker I/O。
 
@@ -71,6 +73,7 @@ migration `0126` 负责停止遗留运行时事件并删除旧表。除该迁移
 ## 性能边界
 
 - 一次 API 请求只建立一个数据库快照，不轮询、不等待后台任务。
+- 分配计算按 relation 成员和 OA 付款明细线性遍历，不新增数据库查询或逐明细 I/O。
 - 分页、详情和导出保持现有上限；导出仍受 `COST_STATISTICS_EXPORT_ROW_LIMIT` 保护。
 - 本次不承诺 3 秒硬 SLO，但候选发布必须记录各视图多次请求的 p50/p95，并确认无 Cost queue/worker I/O。
 - 已测的后续请求热点只在 repository 内做等价 scope/identity 下推；不得恢复 Cost read model、添加页面 cache 或建立页面间依赖。

@@ -18,3 +18,11 @@
 - repository 只在后续非 `all` 请求下推 `txn_month` 范围；成本视图以命中银行流水筛 active relation 后扩展全部 relation 成员，避免破坏跨月份配对。
 - `time / bank_tag` 后续请求不读取 OA 与配对关系。所有路径仍在单个 `REPEATABLE READ READ ONLY` 快照内直接读取 canonical tables，没有 read model、cache、worker 或 fallback。
 - 按标签桌面列宽为 `20% / 20% / 60%`；支出在上、收入在下，零金额只隐藏金额数值。
+
+## 2026-07-28：日常报销付款明细级成本分配
+
+- repository 和 API 保持不变；现有 canonical OA payload 已包含稳定 `expense_item_id`、项目、费用类型、内容和金额，不新增表、read model、worker 或查询。
+- 支付申请继续作为一个 OA 分配单元；日常报销在 `CostStatisticsPolicy` 内展开为 `expense_items` 分配单元。
+- 单流水仅在全部单元 ID 有效唯一、金额为正且合计按分等于流水金额时拆分。其它情况不做比例、顺序或子集推断，流水金额只计一次。
+- 歧义场景仅保留所有单元完全一致的共同项目/费用维度，否则使用 `未归集项目` / `未分类`；删除成本统计运行时的 `多项目` / `多费用类型` 合成口径。
+- project、bank、expense_type、详情与导出共享同一组分配行；`transaction_count` 继续按银行流水去重，详情 `linked_oa_count` 按 OA 去重而不是按付款明细计数。

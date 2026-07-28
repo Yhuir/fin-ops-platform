@@ -9,7 +9,7 @@
 - 项目范围、金额归因和下钻口径必须来自统一 cost attribution policy。
 - 页面负责筛选、排序、分页、导出 shape，不重新定义项目归因。
 - OA 配对成本以银行流水为起点：银行流水原生月份内的非零支出，只要属于一个至少包含一条已完成 OA 的 active 正式 Workbench relation，就进入 OA 配对成本；该 relation 位于 `paired` 或因冻结条件未满足而位于 `unpaired` 都不影响资格，是否存在发票也不影响资格。无 OA 的流水、candidate/singleton 和仅 bank+invoice 的关系不进入 OA 配对成本。
-- 一笔流水只归属其银行原生月份，跨月 relation 副本不得重复计入。一个流水关联多个 OA 时，只有“一笔银行流水 + 每张 OA 都有正数明确金额 + OA 金额按分精确合计等于流水金额”才按 OA 金额拆分；项目和费用类型分别使用各 OA 维度。其它多 OA / 多流水组合不按比例推断，流水金额只计一次：一致维度正常归属，不一致项目显示 `多项目`，不一致费用类型显示 `多费用类型`；缺失维度使用 `未归集项目` / `未分类`。
+- 一笔流水只归属其银行原生月份，跨月 relation 副本不得重复计入。支付申请作为一个付款单元；日常报销使用 canonical `expense_items`，每个付款明细作为一个分配单元。只有“一笔银行流水 + 所有分配单元都有唯一 ID 和正数明确金额 + 分配金额按分精确合计等于流水金额”才按单元金额拆分，项目、费用类型和内容使用对应付款明细；多个日常报销关联同一流水时也遵循同一规则。金额不符、明细 ID 缺失/重复、金额无效或多流水无法确定映射时，不按比例、顺序或子集猜测，流水金额只计一次：所有单元的项目与费用类型分别完全一致时可保留该共同维度，否则使用 `未归集项目` / `未分类`。成本统计链路不得生成 `多项目` / `多费用类型`。
 - OA 上的 `cost_excluded`、`冲`、`oa_invoice_offset_auto_match`、借款/还款费用类型和 relation `cost_policy=exclude_all` 不再否决已经成立的 OA+流水成本资格。`include_ticket_cost_only` 只保留为明确票据成本金额覆盖规则，不改变 OA+流水资格。
 - 成本统计 API 每次请求都在一个 PostgreSQL `REPEATABLE READ READ ONLY` snapshot 中读取 canonical 银行流水、OA、active 正式关系、标签和设置；同一响应内不会混用不同提交时点。
 - 成本统计不依赖其它页面 payload/read model，不使用 Cost version、freshness、scope、dirty、outbox、worker 或 Redis cache。
@@ -25,7 +25,7 @@
 项目归因至少需要考虑：
 
 - OA 单据项目、发票项目、银行流水摘要/对手方、人工修正关系。
-- 多项目拆分、缺失项目、冲突项目和撤回关系。
+- 日常报销明细拆分、缺失项目、冲突项目和撤回关系。
 - source version、归因来源和审计记录。
 
 ## 税金抵扣

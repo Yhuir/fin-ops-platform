@@ -163,7 +163,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         conflicting = self._payload([self._group(oa_rows=cases[2])])["time_rows"][0]
         self.assertEqual(loan["expense_type"], "借款")
         self.assertEqual(incomplete["expense_content"], "交通费")
-        self.assertEqual(conflicting["project_name"], "多项目")
+        self.assertEqual(conflicting["project_name"], "未归集项目")
 
     def test_projection_ignores_legacy_special_exclusion_policy(self) -> None:
         hint = self._group(
@@ -283,6 +283,23 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             {"bank-split"},
         )
 
+    def test_payment_applications_keep_one_row_when_dimensions_are_equal(self) -> None:
+        group = self._group(
+            oa_rows=[
+                self._oa_row(id="oa-a", amount="60.00"),
+                self._oa_row(id="oa-b", amount="40.00"),
+            ],
+            bank_rows=[self._bank_row("bank-payment", debit_amount="100.00")],
+        )
+
+        payload = self._payload([group])
+
+        self.assertEqual(
+            payload["summary"],
+            {"row_count": 1, "transaction_count": 1, "total_amount": "100.00"},
+        )
+        self.assertEqual(payload["time_rows"][0]["row_key"], "bank-payment:full")
+
     def test_projection_does_not_infer_split_when_amounts_mismatch(self) -> None:
         group = self._group(
             oa_rows=[
@@ -296,8 +313,8 @@ class CostStatisticsPolicyTests(unittest.TestCase):
 
         self.assertEqual(payload["summary"], {"row_count": 1, "transaction_count": 1, "total_amount": "100.00"})
         self.assertEqual(payload["time_rows"][0]["row_key"], "bank-full:full")
-        self.assertEqual(payload["time_rows"][0]["project_name"], "多项目")
-        self.assertEqual(payload["time_rows"][0]["expense_type"], "多费用类型")
+        self.assertEqual(payload["time_rows"][0]["project_name"], "未归集项目")
+        self.assertEqual(payload["time_rows"][0]["expense_type"], "未分类")
 
     def test_projection_does_not_split_multiple_bank_rows(self) -> None:
         group = self._group(
@@ -314,8 +331,298 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         payload = self._payload([group])
 
         self.assertEqual(payload["summary"], {"row_count": 2, "transaction_count": 2, "total_amount": "100.00"})
-        self.assertEqual({row["project_name"] for row in payload["time_rows"]}, {"多项目"})
+        self.assertEqual({row["project_name"] for row in payload["time_rows"]}, {"未归集项目"})
         self.assertEqual({row["row_key"] for row in payload["time_rows"]}, {"bank-a:full", "bank-b:full"})
+
+    def test_daily_reimbursement_splits_by_canonical_expense_items(self) -> None:
+        group = self._group(
+            oa_row=self._oa_row(
+                id="oa-daily",
+                apply_type="日常报销",
+                project_name="项目A；项目B",
+                expense_type="交通费；住宿费",
+                amount="100.00",
+                expense_items=[
+                    {
+                        "expense_item_id": "item-1",
+                        "project_id": "P-A",
+                        "project_name": "项目A",
+                        "expense_type": "交通费",
+                        "expense_content": "市内交通",
+                        "amount": "40.00",
+                    },
+                    {
+                        "expense_item_id": "item-2",
+                        "project_id": "P-B",
+                        "project_name": "项目B",
+                        "expense_type": "住宿费",
+                        "expense_content": "出差住宿",
+                        "amount": "60.00",
+                    },
+                ],
+            ),
+            bank_rows=[self._bank_row("bank-daily", debit_amount="100.00")],
+        )
+
+        payload = self._payload([group])
+
+        self.assertEqual(
+            payload["summary"],
+            {"row_count": 2, "transaction_count": 1, "total_amount": "100.00"},
+        )
+        self.assertEqual(
+            {
+                (
+                    row["row_key"],
+                    row["project_name"],
+                    row["expense_type"],
+                    row["amount"],
+                )
+                for row in payload["time_rows"]
+            },
+            {
+                (
+                    "bank-daily:oa:oa-daily:item:item-1",
+                    "项目A",
+                    "交通费",
+                    "40.00",
+                ),
+                (
+                    "bank-daily:oa:oa-daily:item:item-2",
+                    "项目B",
+                    "住宿费",
+                    "60.00",
+                ),
+            },
+        )
+
+    def test_daily_reimbursements_and_payment_application_share_exact_split(self) -> None:
+        group = self._group(
+            oa_rows=[
+                self._oa_row(
+                    id="oa-daily",
+                    apply_type="日常报销",
+                    amount="30.00",
+                    expense_items=[
+                        {
+                            "expense_item_id": "item-1",
+                            "project_name": "项目A",
+                            "expense_type": "交通费",
+                            "amount": "30.00",
+                        }
+                    ],
+                ),
+                self._oa_row(
+                    id="oa-payment",
+                    apply_type="支付申请",
+                    project_name="项目B",
+                    expense_type="材料费",
+                    amount="70.00",
+                ),
+            ],
+            bank_rows=[self._bank_row("bank-mixed", debit_amount="100.00")],
+        )
+
+        payload = self._payload([group])
+
+        self.assertEqual(
+            {
+                (row["project_name"], row["amount"])
+                for row in payload["time_rows"]
+            },
+            {("项目A", "30.00"), ("项目B", "70.00")},
+        )
+        self.assertEqual(payload["summary"]["transaction_count"], 1)
+        self.assertEqual(payload["summary"]["total_amount"], "100.00")
+
+    def test_multiple_daily_reimbursements_split_one_bank_by_each_item(self) -> None:
+        group = self._group(
+            oa_rows=[
+                self._oa_row(
+                    id="oa-daily-a",
+                    apply_type="日常报销",
+                    amount="30.00",
+                    expense_items=[
+                        {
+                            "expense_item_id": "item-a",
+                            "project_name": "项目A",
+                            "expense_type": "交通费",
+                            "amount": "30.00",
+                        }
+                    ],
+                ),
+                self._oa_row(
+                    id="oa-daily-b",
+                    apply_type="日常报销",
+                    amount="70.00",
+                    expense_items=[
+                        {
+                            "expense_item_id": "item-b",
+                            "project_name": "项目B",
+                            "expense_type": "材料费",
+                            "amount": "70.00",
+                        }
+                    ],
+                ),
+            ],
+            bank_rows=[self._bank_row("bank-two-daily", debit_amount="100.00")],
+        )
+        policy = CostStatisticsPolicy(
+            {
+                "settings": {},
+                "bank_rows": [],
+                "cost_groups": [group],
+            },
+            project_scope="all",
+        )
+
+        detail = policy.transaction(
+            transaction_id="bank-two-daily",
+            bank_flow_view=False,
+            scope_kind="month",
+            scope_value="2026-03",
+        )
+
+        self.assertIsNotNone(detail)
+        self.assertEqual(detail["linked_oa_count"], 2)
+        self.assertEqual(len(detail["cost_allocations"]), 2)
+        self.assertEqual(
+            {
+                (row["project_name"], row["amount"])
+                for row in detail["cost_allocations"]
+            },
+            {("项目A", "30.00"), ("项目B", "70.00")},
+        )
+
+    def test_daily_reimbursement_invalid_items_fail_closed(self) -> None:
+        cases = {
+            "duplicate_id": ("duplicate", "duplicate", "40.00", "60.00"),
+            "missing_id": ("", "item-2", "40.00", "60.00"),
+            "zero_amount": ("item-1", "item-2", "0.00", "100.00"),
+            "negative_amount": ("item-1", "item-2", "-1.00", "101.00"),
+            "amount_mismatch": ("item-1", "item-2", "40.00", "50.00"),
+        }
+        for name, (first_id, second_id, first_amount, second_amount) in cases.items():
+            with self.subTest(name=name):
+                group = self._group(
+                    oa_row=self._oa_row(
+                        id=f"oa-invalid-{name}",
+                        apply_type="日常报销",
+                        amount="100.00",
+                        expense_items=[
+                            {
+                                "expense_item_id": first_id,
+                                "project_name": "项目A",
+                                "expense_type": "交通费",
+                                "amount": first_amount,
+                            },
+                            {
+                                "expense_item_id": second_id,
+                                "project_name": "项目B",
+                                "expense_type": "住宿费",
+                                "amount": second_amount,
+                            },
+                        ],
+                    ),
+                    bank_rows=[
+                        self._bank_row(
+                            f"bank-invalid-{name}",
+                            debit_amount="100.00",
+                        )
+                    ],
+                )
+
+                payload = self._payload([group])
+
+                self.assertEqual(
+                    payload["summary"],
+                    {
+                        "row_count": 1,
+                        "transaction_count": 1,
+                        "total_amount": "100.00",
+                    },
+                )
+                self.assertEqual(
+                    payload["time_rows"][0]["project_name"],
+                    "未归集项目",
+                )
+                self.assertEqual(
+                    payload["time_rows"][0]["expense_type"],
+                    "未分类",
+                )
+
+    def test_legacy_ambiguous_dimension_labels_never_escape_cost_policy(self) -> None:
+        payload = self._payload(
+            [
+                self._group(
+                    oa_row=self._oa_row(
+                        project_name="多项目",
+                        expense_type="多费用类型",
+                    )
+                )
+            ]
+        )
+
+        self.assertEqual(
+            payload["time_rows"][0]["project_name"],
+            "未归集项目",
+        )
+        self.assertEqual(
+            payload["time_rows"][0]["expense_type"],
+            "未分类",
+        )
+
+    def test_active_scope_filters_daily_reimbursement_items_individually(self) -> None:
+        group = self._group(
+            oa_row=self._oa_row(
+                id="oa-scope",
+                apply_type="日常报销",
+                amount="100.00",
+                expense_items=[
+                    {
+                        "expense_item_id": "item-active",
+                        "project_id": "P-ACTIVE",
+                        "project_name": "进行中项目",
+                        "expense_type": "交通费",
+                        "amount": "40.00",
+                    },
+                    {
+                        "expense_item_id": "item-done",
+                        "project_id": "P-DONE",
+                        "project_name": "已完成项目",
+                        "expense_type": "住宿费",
+                        "amount": "60.00",
+                    },
+                ],
+            ),
+            bank_rows=[self._bank_row("bank-scope", debit_amount="100.00")],
+        )
+        settings = {
+            "projects": {
+                "completed": [
+                    {"id": "P-DONE", "project_name": "已完成项目"}
+                ],
+                "completed_project_ids": ["P-DONE"],
+            }
+        }
+
+        active_payload = self._payload(
+            [group],
+            project_scope="active",
+            settings_payload=settings,
+        )
+        all_payload = self._payload(
+            [group],
+            project_scope="all",
+            settings_payload=settings,
+        )
+
+        self.assertEqual(active_payload["summary"]["total_amount"], "40.00")
+        self.assertEqual(
+            {row["project_name"] for row in active_payload["time_rows"]},
+            {"进行中项目"},
+        )
+        self.assertEqual(all_payload["summary"]["total_amount"], "100.00")
 
     def test_projection_owns_cross_month_relation_by_native_bank_month(self) -> None:
         payload = self._payload(

@@ -21,8 +21,7 @@ MONEY_QUANTUM = Decimal("0.01")
 CASH_TICKET_PURCHASE_MODE = "cash_ticket_purchase"
 UNATTRIBUTED_PROJECT_NAME = "未归集项目"
 UNCATEGORIZED_EXPENSE_TYPE = "未分类"
-MULTI_PROJECT_NAME = "多项目"
-MULTI_EXPENSE_TYPE = "多费用类型"
+DAILY_REIMBURSEMENT_TYPE = "日常报销"
 
 
 class CostStatisticsPolicy:
@@ -68,13 +67,17 @@ class CostStatisticsPolicy:
     def serialized_cost_rows(self) -> list[dict[str, Any]]:
         return [
             _serialize_cost_entry(entry)
-            for entry in _cost_entries(
-                self._groups,
-                project_scope=self._project_scope,
-                settings=self._settings,
-            )
+            for entry in self._raw_cost_entries
             if _tag_selected(entry, self._selected_tag_codes)
         ]
+
+    @cached_property
+    def _raw_cost_entries(self) -> list[dict[str, Any]]:
+        return _cost_entries(
+            self._groups,
+            project_scope=self._project_scope,
+            settings=self._settings,
+        )
 
     def explorer_page(
         self,
@@ -328,6 +331,24 @@ class CostStatisticsPolicy:
                 for allocation in matches
             ]
         )
+        row["linked_oa_count"] = (
+            0
+            if bank_flow_view
+            else len(
+                {
+                    oa_id
+                    for entry in self._raw_cost_entries
+                    if entry["transaction_id"] == transaction_id
+                    and _row_in_scope(
+                        entry,
+                        scope_kind=scope_kind,
+                        scope_value=scope_value,
+                    )
+                    for oa_id in entry.get("source_oa_ids", [])
+                    if oa_id
+                }
+            )
+        )
         return row
 
     @property
@@ -509,10 +530,15 @@ def _oa_cost_entries_for_group(
     eligible_oa_rows = [
         row for row in oa_rows if _is_completed_oa_cost_row(row)
     ]
-    contexts = [
-        _oa_cost_context(row, fallback_index=index)
-        for index, row in enumerate(eligible_oa_rows)
-    ]
+    contexts: list[dict[str, Any]] = []
+    contexts_valid = True
+    for index, row in enumerate(eligible_oa_rows):
+        row_contexts, row_contexts_valid = _oa_allocation_contexts(
+            row,
+            fallback_index=index,
+        )
+        contexts.extend(row_contexts)
+        contexts_valid = contexts_valid and row_contexts_valid
     outflows = [
         (bank_row, amount)
         for bank_row in bank_rows
@@ -522,10 +548,12 @@ def _oa_cost_entries_for_group(
         return []
     project_names = {str(context["project_name"]) for context in contexts}
     expense_types = {str(context["expense_type"]) for context in contexts}
+    has_expense_items = any(
+        context["source_kind"] == "expense_item" for context in contexts
+    )
     exact_split = (
         len(outflows) == 1
-        and len(contexts) > 1
-        and (len(project_names) > 1 or len(expense_types) > 1)
+        and contexts_valid
         and all(context["allocation_amount"] is not None for context in contexts)
         and sum(
             (context["allocation_amount"] for context in contexts),
@@ -533,7 +561,13 @@ def _oa_cost_entries_for_group(
         ).quantize(MONEY_QUANTUM)
         == outflows[0][1].quantize(MONEY_QUANTUM)
     )
-    if exact_split:
+    if exact_split and (
+        has_expense_items
+        or (
+            len(contexts) > 1
+            and (len(project_names) > 1 or len(expense_types) > 1)
+        )
+    ):
         bank_row, _bank_amount = outflows[0]
         return [
             _cost_entry(
@@ -541,7 +575,7 @@ def _oa_cost_entries_for_group(
                 bank_row=bank_row,
                 context=context,
                 amount=context["allocation_amount"],
-                row_key_suffix=f"oa:{context['oa_id']}",
+                row_key_suffix=_allocation_row_key_suffix(context),
                 bank_tag_contexts=bank_tag_contexts,
             )
             for context in contexts
@@ -560,6 +594,43 @@ def _oa_cost_entries_for_group(
     ]
 
 
+def _oa_allocation_contexts(
+    row: dict[str, Any],
+    *,
+    fallback_index: int,
+) -> tuple[list[dict[str, Any]], bool]:
+    parent = _oa_cost_context(row, fallback_index=fallback_index)
+    if _clean_text(row.get("apply_type")) != DAILY_REIMBURSEMENT_TYPE:
+        return [parent], True
+
+    raw_items = row.get("expense_items")
+    if not isinstance(raw_items, list) or not raw_items:
+        return [parent], False
+
+    contexts: list[dict[str, Any]] = []
+    seen_item_ids: set[str] = set()
+    valid = True
+    for raw_item in raw_items:
+        if not isinstance(raw_item, dict):
+            valid = False
+            continue
+        context = _oa_expense_item_cost_context(
+            parent,
+            raw_item,
+        )
+        item_id = str(context["expense_item_id"])
+        if (
+            not item_id
+            or item_id in seen_item_ids
+            or context["allocation_amount"] is None
+        ):
+            valid = False
+        if item_id:
+            seen_item_ids.add(item_id)
+        contexts.append(context)
+    return (contexts or [parent]), valid and bool(contexts)
+
+
 def _oa_cost_context(
     row: dict[str, Any],
     *,
@@ -575,6 +646,8 @@ def _oa_cost_context(
         or _clean_text(detail_fields.get("项目名称"))
         or UNATTRIBUTED_PROJECT_NAME
     )
+    if project_name == "多项目":
+        project_name = UNATTRIBUTED_PROJECT_NAME
     project_id = _clean_text(
         row.get("project_id") or detail_fields.get("项目编号")
     )
@@ -583,6 +656,8 @@ def _oa_cost_context(
         or _clean_text(detail_fields.get("费用类型"))
         or UNCATEGORIZED_EXPENSE_TYPE
     )
+    if expense_type == "多费用类型":
+        expense_type = UNCATEGORIZED_EXPENSE_TYPE
     expense_content = (
         _clean_text(row.get("expense_content"))
         or _clean_text(row.get("reason"))
@@ -594,9 +669,15 @@ def _oa_cost_context(
         allocation_amount = _decimal(row.get("amount"))
     if allocation_amount is not None and allocation_amount <= ZERO:
         allocation_amount = None
+    oa_id = (
+        _clean_text(row.get("id") or row.get("row_id"))
+        or f"index-{fallback_index}"
+    )
     return {
-        "oa_id": _clean_text(row.get("id") or row.get("row_id"))
-        or f"index-{fallback_index}",
+        "oa_id": oa_id,
+        "source_oa_ids": [oa_id],
+        "source_kind": "oa",
+        "expense_item_id": "",
         "project_name": project_name,
         "project_id": project_id,
         "expense_type": expense_type,
@@ -613,6 +694,63 @@ def _oa_cost_context(
     }
 
 
+def _oa_expense_item_cost_context(
+    parent: dict[str, Any],
+    item: dict[str, Any],
+) -> dict[str, Any]:
+    amount = _decimal(item.get("settlement_amount"))
+    if amount is None:
+        amount = _decimal(item.get("amount"))
+    if amount is None:
+        amount = _decimal(item.get("total_with_tax"))
+    if amount is not None and amount <= ZERO:
+        amount = None
+    expense_type = (
+        _clean_text(item.get("expense_type"))
+        or UNCATEGORIZED_EXPENSE_TYPE
+    )
+    if expense_type == "多费用类型":
+        expense_type = UNCATEGORIZED_EXPENSE_TYPE
+    project_name = (
+        _clean_text(item.get("project_name"))
+        or UNATTRIBUTED_PROJECT_NAME
+    )
+    if project_name == "多项目":
+        project_name = UNATTRIBUTED_PROJECT_NAME
+    return {
+        "oa_id": parent["oa_id"],
+        "source_oa_ids": list(parent["source_oa_ids"]),
+        "source_kind": "expense_item",
+        "expense_item_id": _clean_text(
+            item.get("expense_item_id")
+            or item.get("row_id")
+            or item.get("item_id")
+        ),
+        "project_name": project_name,
+        "project_id": _clean_text(item.get("project_id")),
+        "expense_type": expense_type,
+        "expense_content": (
+            _clean_text(item.get("expense_content"))
+            or _clean_text(item.get("reason"))
+            or expense_type
+        ),
+        "oa_applicant": parent["oa_applicant"],
+        "allocation_amount": (
+            amount.quantize(MONEY_QUANTUM)
+            if amount is not None
+            else None
+        ),
+    }
+
+
+def _allocation_row_key_suffix(context: dict[str, Any]) -> str:
+    if context["source_kind"] == "expense_item":
+        return (
+            f"oa:{context['oa_id']}:item:{context['expense_item_id']}"
+        )
+    return f"oa:{context['oa_id']}"
+
+
 def _fallback_cost_context(
     contexts: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -627,14 +765,14 @@ def _fallback_cost_context(
         project_name = next(iter(project_names))
         project_id = next(iter(project_ids)) if len(project_ids) == 1 else ""
     else:
-        project_id, project_name = "", MULTI_PROJECT_NAME
+        project_id, project_name = "", UNATTRIBUTED_PROJECT_NAME
     return {
         "project_name": project_name,
         "project_id": project_id,
         "expense_type": (
             next(iter(expense_types))
             if len(expense_types) == 1
-            else MULTI_EXPENSE_TYPE
+            else UNCATEGORIZED_EXPENSE_TYPE
         ),
         "expense_content": _join_unique_text(
             context["expense_content"] for context in contexts
@@ -644,6 +782,15 @@ def _fallback_cost_context(
             context["oa_applicant"] for context in contexts
         )
         or "—",
+        "source_oa_ids": sorted(
+            {
+                oa_id
+                for context in contexts
+                for oa_id in context.get("source_oa_ids", [])
+                if oa_id
+            }
+        ),
+        "allocation_status": "allocation_unresolved",
         "source_project_contexts": [
             {
                 "project_id": context["project_id"],
@@ -691,6 +838,10 @@ def _cost_entry(
         "expense_content": str(context["expense_content"]),
         "oa_applicant": str(context["oa_applicant"]),
         "amount_decimal": amount.quantize(MONEY_QUANTUM),
+        "source_oa_ids": list(context.get("source_oa_ids") or []),
+        "allocation_status": str(
+            context.get("allocation_status") or "allocated"
+        ),
         **(
             {"source_project_contexts": list(context["source_project_contexts"])}
             if isinstance(context.get("source_project_contexts"), list)
@@ -764,6 +915,7 @@ def _cash_ticket_cost_entry(
         or "买票成本",
         "oa_applicant": str(context.get("oa_applicant") or "—"),
         "amount_decimal": amount.quantize(MONEY_QUANTUM),
+        "source_oa_ids": list(context.get("source_oa_ids") or []),
         **(
             {"source_project_contexts": list(context["source_project_contexts"])}
             if isinstance(context.get("source_project_contexts"), list)
