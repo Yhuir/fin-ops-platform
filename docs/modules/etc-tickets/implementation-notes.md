@@ -921,6 +921,6 @@
 ## 2026-07-29 - 已删除 submitted ETC 批次精确恢复与防复发
 
 - 目标：恢复 `etc_business_batch_0004` 原 tombstone 保存的 36 张发票成员，并防止已绑定正式 OA 行的 submitted 批次再次被普通删除。
-- 关键决策：恢复原 business/submission batch，不生成第二个内部 ID，不重新提交 OA；dry-run 同时核对版本、OA row、发票数量和含税总额，execute 使用 fingerprint。canonical invoice link 只通过目标批次限定的严格 backfill，关联台 `etc_batch_link` 只由 matching worker 的正式 relation UoW 生成。
+- 关键决策：恢复原 business/submission batch，不生成第二个内部 ID，不重新提交 OA；dry-run 同时核对版本、OA row、发票数量和含税总额，旧 OA 来源 ID 只有经 `app.oa_source_aliases.status=active` 证明后才能归一到当前 canonical OA ID，execute 使用 fingerprint。canonical invoice link 只通过目标批次限定的严格 backfill，关联台 `etc_batch_link` 只由 matching worker 的正式 relation UoW 生成。
 - 旧逻辑删除：移除 `scripts/repair_historical_etc_batches.py --apply` 及其直接 `create_active_relation` 写入旁路。
 - 测试覆盖：service 覆盖删除 guard、历史 tombstone 恢复、成员/金额/OA 边界和幂等重试；tool 覆盖 fingerprint 执行；backfill 覆盖 exact business batch filter；静态边界 guard 防止旧 relation 旁路回流。

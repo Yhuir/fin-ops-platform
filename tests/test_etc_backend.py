@@ -1082,7 +1082,7 @@ class EtcServiceTests(unittest.TestCase):
                 case_id="CASE-BATCH-txn_imported_0090",
                 external_batch_id="etc_20260520_001",
                 invoice_numbers=["ETC001", "ETC002"],
-                linked_oa_row_id="oa-pay-2200",
+                linked_oa_row_id="oa-source-0004",
                 oa_amount=Decimal("26.14"),
             )
             business_batch = service.create_historical_submitted_business_batch(
@@ -1092,7 +1092,7 @@ class EtcServiceTests(unittest.TestCase):
                 external_etc_batch_id="etc_20260520_001",
                 reported_amount=Decimal("26.14"),
                 relation_case_id="CASE-BATCH-txn_imported_0090",
-                linked_oa_row_id="oa-pay-2200",
+                linked_oa_row_id="oa-source-0004",
                 scope_month="2026-05",
             )
 
@@ -1110,14 +1110,16 @@ class EtcServiceTests(unittest.TestCase):
                 business_batch.business_batch_id,
                 expected_invoice_count=2,
                 expected_total_amount=Decimal("26.14"),
-                expected_oa_row_id="oa-pay-2200",
+                expected_oa_row_id="oa-source-0004",
+                canonical_oa_row_id="oa-pay-2200",
             )
             restored = service.restore_deleted_submitted_business_batch(
                 business_batch.business_batch_id,
                 expected_version=int(preview["version"]),
                 expected_invoice_count=2,
                 expected_total_amount=Decimal("26.14"),
-                expected_oa_row_id="oa-pay-2200",
+                expected_oa_row_id="oa-source-0004",
+                canonical_oa_row_id="oa-pay-2200",
                 reason="restore proven production tombstone",
             )
             replayed = service.restore_deleted_submitted_business_batch(
@@ -1126,11 +1128,13 @@ class EtcServiceTests(unittest.TestCase):
                 expected_invoice_count=2,
                 expected_total_amount=Decimal("26.14"),
                 expected_oa_row_id="oa-pay-2200",
+                canonical_oa_row_id="oa-pay-2200",
                 reason="idempotent retry",
             )
             invoices = service.list_invoices_by_ids(["etc_invoice_0001", "etc_invoice_0002"])
 
             self.assertEqual(restored.status, EtcBusinessBatchStatus.MANUALLY_MARKED_SUBMITTED.value)
+            self.assertEqual(restored.oa_row_id, "oa-pay-2200")
             self.assertEqual(replayed.version, restored.version)
             self.assertEqual(restored.submission_batch_id, submitted_batch.id)
             self.assertEqual({invoice.status for invoice in invoices}, {EtcInvoiceStatus.SUBMITTED})

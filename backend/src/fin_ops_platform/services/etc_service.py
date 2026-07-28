@@ -1601,6 +1601,7 @@ class EtcService:
         expected_invoice_count: int,
         expected_total_amount: Decimal | str | int | float,
         expected_oa_row_id: str,
+        canonical_oa_row_id: str | None = None,
     ) -> dict[str, object]:
         self._reload_from_state_store()
         with self._business_batch_lock:
@@ -1620,7 +1621,8 @@ class EtcService:
                 "version": batch.version,
                 "submission_batch_id": submission_batch.id,
                 "external_etc_batch_id": batch.external_etc_batch_id,
-                "oa_row_id": batch.oa_row_id,
+                "stored_oa_row_id": batch.oa_row_id,
+                "oa_row_id": str(canonical_oa_row_id or "").strip() or batch.oa_row_id,
                 "invoice_count": len(invoices),
                 "invoice_total": _amount_text(
                     sum((invoice.total_amount for invoice in invoices), Decimal("0.00")).quantize(Decimal("0.01"))
@@ -1637,6 +1639,7 @@ class EtcService:
         expected_invoice_count: int,
         expected_total_amount: Decimal | str | int | float,
         expected_oa_row_id: str,
+        canonical_oa_row_id: str | None = None,
         reason: str,
     ) -> EtcBusinessBatch:
         normalized_reason = str(reason or "").strip()
@@ -1656,6 +1659,7 @@ class EtcService:
                 return self._copy_business_batch(batch)
             self._assert_business_batch_version(batch, expected_version)
             now = datetime.now(UTC)
+            batch.oa_row_id = str(canonical_oa_row_id or "").strip() or batch.oa_row_id
             submission_batch.status = EtcBatchStatus.SUBMITTED_CONFIRMED.value
             submission_batch.confirmed_at = submission_batch.confirmed_at or now
             submission_batch.linked_oa_row_id = batch.oa_row_id

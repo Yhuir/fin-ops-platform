@@ -5,9 +5,10 @@ from decimal import Decimal
 import hashlib
 import json
 import sys
-from typing import Sequence, TextIO
+from typing import Any, Sequence, TextIO
 
 from fin_ops_platform.services.etc_service import EtcBusinessBatchInvalidTransitionError
+from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.tools.runtime_application import build_tool_runtime_application, etc_service
 
 
@@ -38,17 +39,41 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO = sys.stdout) -> i
 
     app = build_tool_runtime_application(None)
     service = etc_service(app)
+    batch_record = service.get_business_batch_record(str(args.business_batch_id))
+    stored_oa_row_id = str(batch_record.oa_row_id or "").strip()
+    expected_oa_row_id = str(args.expected_oa_row_id).strip()
+    alias_resolution = _resolve_oa_alias(
+        connection=PostgresConnection(PostgresSettings.from_env()),
+        stored_oa_row_id=stored_oa_row_id,
+        expected_oa_row_id=expected_oa_row_id,
+    )
+    if alias_resolution is None:
+        print(
+            json.dumps(
+                {
+                    "status": "blocked",
+                    "code": "business_batch_restore_oa_alias_unproven",
+                    "stored_oa_row_id": stored_oa_row_id,
+                    "expected_oa_row_id": expected_oa_row_id,
+                },
+                ensure_ascii=False,
+            ),
+            file=stdout,
+        )
+        return 2
     try:
         preview = service.preview_deleted_submitted_business_batch_restore(
             str(args.business_batch_id),
             expected_invoice_count=int(args.expected_invoice_count),
             expected_total_amount=Decimal(str(args.expected_total_amount)),
-            expected_oa_row_id=str(args.expected_oa_row_id),
+            expected_oa_row_id=stored_oa_row_id,
+            canonical_oa_row_id=expected_oa_row_id,
         )
     except EtcBusinessBatchInvalidTransitionError as exc:
         print(json.dumps({"status": "blocked", "code": exc.code, "message": str(exc)}, ensure_ascii=False), file=stdout)
         return 2
 
+    preview["oa_alias_resolution"] = alias_resolution
     fingerprint = _fingerprint(preview)
     payload: dict[str, object] = {
         "mode": "dry-run",
@@ -79,7 +104,8 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO = sys.stdout) -> i
             expected_version=int(preview["version"]),
             expected_invoice_count=int(args.expected_invoice_count),
             expected_total_amount=Decimal(str(args.expected_total_amount)),
-            expected_oa_row_id=str(args.expected_oa_row_id),
+            expected_oa_row_id=stored_oa_row_id,
+            canonical_oa_row_id=expected_oa_row_id,
             reason=f"{str(args.reason).strip()} (operator={str(args.operator).strip()})",
         )
         payload = {
@@ -100,6 +126,34 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO = sys.stdout) -> i
 def _fingerprint(preview: dict[str, object]) -> str:
     canonical = json.dumps(preview, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _resolve_oa_alias(
+    *,
+    connection: Any,
+    stored_oa_row_id: str,
+    expected_oa_row_id: str,
+) -> dict[str, str] | None:
+    if not stored_oa_row_id or not expected_oa_row_id:
+        return None
+    if stored_oa_row_id == expected_oa_row_id:
+        return {"mode": "exact", "stored_oa_row_id": stored_oa_row_id, "canonical_oa_row_id": expected_oa_row_id}
+    row = connection.fetch_one(
+        """
+        select alias_row_id, canonical_row_id, status, evidence_hash
+        from app.oa_source_aliases
+        where alias_row_id = %s and canonical_row_id = %s and status = 'active'
+        """,
+        (stored_oa_row_id, expected_oa_row_id),
+    )
+    if not row:
+        return None
+    return {
+        "mode": "active_alias",
+        "stored_oa_row_id": stored_oa_row_id,
+        "canonical_oa_row_id": expected_oa_row_id,
+        "evidence_hash": str(row.get("evidence_hash") or ""),
+    }
 
 
 if __name__ == "__main__":
