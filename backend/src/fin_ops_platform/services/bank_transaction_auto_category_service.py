@@ -96,7 +96,7 @@ class BankTransactionAutoCategoryService:
     def suggest_for_rows(self, bank_rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         rows = [dict(row) for row in list(bank_rows or []) if isinstance(row, dict)]
         rules = [
-            dict(definition)
+            self._prepare_rule_for_matching(definition)
             for definition in list(self._category_service.tag_dictionary_payload().get("definitions") or [])
             if isinstance(definition, dict)
             and str(definition.get("status") or "active") == "active"
@@ -218,6 +218,52 @@ class BankTransactionAutoCategoryService:
         return (cls._rule_priority(rule), max(sort_order, 0), str(rule.get("code") or ""))
 
     @classmethod
+    def _prepare_rule_for_matching(cls, definition: dict[str, Any]) -> dict[str, Any]:
+        rule = dict(definition)
+        conditions = rule.get("rules") if isinstance(rule.get("rules"), dict) else {}
+        rule["_match_none_of"] = [
+            cls._normalize_match_text(item)
+            for item in list(conditions.get("none_of") or conditions.get("excludes") or [])
+            if str(item)
+        ]
+        rule["_match_contains_all_tokens"] = [
+            str(item)
+            for item in list(conditions.get("contains_all") or [])
+            if str(item)
+        ]
+        rule["_match_contains_all"] = [
+            cls._normalize_match_text(item)
+            for item in rule["_match_contains_all_tokens"]
+        ]
+        rule["_match_exact_any"] = [
+            (str(item), cls._normalize_match_text(item))
+            for item in list(conditions.get("exact_any") or conditions.get("exact") or [])
+            if str(item)
+        ]
+        rule["_match_contains_any"] = [
+            (str(item), cls._normalize_match_text(item))
+            for item in list(conditions.get("contains_any") or conditions.get("contains") or [])
+            if str(item)
+        ]
+        compiled_regex: list[tuple[str, re.Pattern[str]]] = []
+        for item in list(conditions.get("regex_any") or []):
+            pattern = str(item)
+            if not pattern:
+                continue
+            try:
+                compiled_regex.append((pattern, re.compile(pattern, re.IGNORECASE)))
+            except re.error:
+                continue
+        rule["_match_regex_any"] = compiled_regex
+        scope = rule.get("account_scope") if isinstance(rule.get("account_scope"), dict) else {}
+        rule["_match_account_scope_values"] = [
+            cls._normalize_match_text(item)
+            for item in list(scope.get("values") or [])
+            if str(item)
+        ]
+        return rule
+
+    @classmethod
     def _expanded_confirmation_candidates(cls, candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
         expanded: list[dict[str, Any]] = []
         for candidate in candidates:
@@ -313,6 +359,8 @@ class BankTransactionAutoCategoryService:
                     "semantic_field": semantic_field,
                     "raw_field_key": key,
                     "raw_field_label": None,
+                    "normalized_text": BankTransactionAutoCategoryService._normalize_match_text(text),
+                    "normalized_regex_text": BankTransactionAutoCategoryService._normalize_regex_text(text),
                 }
             )
         return values
@@ -336,6 +384,8 @@ class BankTransactionAutoCategoryService:
                         "semantic_field": "detail_text",
                         "raw_field_key": str(key),
                         "raw_field_label": str(key),
+                        "normalized_text": cls._normalize_match_text(text),
+                        "normalized_regex_text": cls._normalize_regex_text(text),
                     }
                 )
         return values
@@ -362,57 +412,33 @@ class BankTransactionAutoCategoryService:
         ]
         if not candidates:
             return None
-        normalized_entries = [
-            {
-                **entry,
-                "normalized_text": BankTransactionAutoCategoryService._normalize_match_text(entry.get("text")),
-            }
-            for entry in candidates
-        ]
-        none_of = [
-            BankTransactionAutoCategoryService._normalize_match_text(item)
-            for item in list(conditions.get("none_of") or conditions.get("excludes") or [])
-            if str(item)
-        ]
-        for entry in normalized_entries:
+        none_of = list(rule["_match_none_of"])
+        for entry in candidates:
             text = str(entry.get("normalized_text") or "")
             if any(exclude and exclude in text for exclude in none_of):
                 return None
-        contains_all_tokens = [
-            str(item)
-            for item in list(conditions.get("contains_all") or [])
-            if str(item)
-        ]
-        contains_all = [
-            BankTransactionAutoCategoryService._normalize_match_text(item)
-            for item in contains_all_tokens
-        ]
+        contains_all_tokens = list(rule["_match_contains_all_tokens"])
+        contains_all = list(rule["_match_contains_all"])
         if contains_all:
-            joined_text = " ".join(str(entry.get("normalized_text") or "") for entry in normalized_entries)
+            joined_text = " ".join(str(entry.get("normalized_text") or "") for entry in candidates)
             if any(token not in joined_text for token in contains_all):
                 return None
-        for token in [str(item) for item in list(conditions.get("exact_any") or conditions.get("exact") or []) if str(item)]:
-            normalized_token = BankTransactionAutoCategoryService._normalize_match_text(token)
+        for token, normalized_token in list(rule["_match_exact_any"]):
             for entry in candidates:
-                if BankTransactionAutoCategoryService._normalize_match_text(entry.get("text")) == normalized_token:
+                if str(entry.get("normalized_text") or "") == normalized_token:
                     return BankTransactionAutoCategoryService._evidence("exact_any", token, entry, rule=rule)
-        for token in [str(item) for item in list(conditions.get("contains_any") or conditions.get("contains") or []) if str(item)]:
-            normalized_token = BankTransactionAutoCategoryService._normalize_match_text(token)
+        for token, normalized_token in list(rule["_match_contains_any"]):
             for entry in candidates:
-                if normalized_token in BankTransactionAutoCategoryService._normalize_match_text(entry.get("text")):
+                if normalized_token in str(entry.get("normalized_text") or ""):
                     return BankTransactionAutoCategoryService._evidence("contains_any", token, entry, rule=rule)
-        for pattern in [str(item) for item in list(conditions.get("regex_any") or []) if str(item)]:
-            try:
-                compiled = re.compile(pattern, re.IGNORECASE)
-            except re.error:
-                continue
+        for pattern, compiled in list(rule["_match_regex_any"]):
             for entry in candidates:
-                text = BankTransactionAutoCategoryService._normalize_regex_text(entry.get("text"))
+                text = str(entry.get("normalized_regex_text") or "")
                 if compiled.search(text):
                     return BankTransactionAutoCategoryService._evidence("regex_any", pattern, entry, rule=rule)
         if contains_all_tokens:
             matched_entry = BankTransactionAutoCategoryService._contains_all_evidence_entry(
-                normalized_entries,
+                candidates,
                 contains_all,
             )
             return BankTransactionAutoCategoryService._evidence(
@@ -486,11 +512,7 @@ class BankTransactionAutoCategoryService:
         scope_type = str(scope.get("type") or "any")
         if scope_type == "any":
             return True
-        values = [
-            BankTransactionAutoCategoryService._normalize_match_text(item)
-            for item in list(scope.get("values") or [])
-            if str(item)
-        ]
+        values = list(rule["_match_account_scope_values"])
         if not values:
             return True
         field_by_scope = {
@@ -501,7 +523,7 @@ class BankTransactionAutoCategoryService:
         if not field_by_scope:
             return True
         row_values = [
-            BankTransactionAutoCategoryService._normalize_match_text(entry.get("text"))
+            str(entry.get("normalized_text") or "")
             for entry in list(semantic_fields.get(field_by_scope) or [])
         ]
         return any(value in row_values for value in values)

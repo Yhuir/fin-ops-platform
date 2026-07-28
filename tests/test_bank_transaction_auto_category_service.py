@@ -34,6 +34,26 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
         self.assertEqual(suggestions["txn-1"]["category_code"], "fee")
         self.assertEqual(suggestions["txn-2"]["category_code"], "salary")
 
+    def test_bulk_suggestions_normalize_each_row_value_once_across_rules(self) -> None:
+        rows = [
+            {
+                "id": f"txn-{index}",
+                "counterparty_name": f"供应商 {index}",
+                "summary": "普通转账",
+                "remark": "项目费用",
+            }
+            for index in range(100)
+        ]
+
+        with patch.object(
+            BankTransactionAutoCategoryService,
+            "_normalize_match_text",
+            wraps=BankTransactionAutoCategoryService._normalize_match_text,
+        ) as normalizer:
+            self.service.suggest_for_rows(rows)
+
+        self.assertLess(normalizer.call_count, 500)
+
     def test_detects_fee_from_counterparty_summary_or_remark_only(self) -> None:
         suggestions = self.service.suggest_for_rows(
             [

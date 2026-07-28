@@ -774,3 +774,4 @@ git diff --check
 - 同步修复无 `turnover_action_type` 时借出/业务应收 flow 的主款方向：按 `business_type + cash direction` 判定 principal/settlement，避免支出本金被误算成结清发生额。
 - 旧链删除：删除 route 中不可达的 flat-to-grouped 旧聚合和 service 中基于 status/历史 principal 的 closed 累计；前端不再从旧金额 fallback 推断闭环。
 - 边界保持：不新增表、read model、worker、cache、queue、API endpoint 或跨页 I/O；统一事实源仍是银行 canonical facts 与 active `app.workbench_pair_relations`。
+- 首次生产发布后 grouped direct query 的服务端 p95 为 `1376.777ms`，其中数据库 p95 仅 `225.422ms`；函数级证据定位到共享有效标签计算对同一行文本按每条规则重复规范化。修复在既有 `BankTransactionAutoCategoryService` 内把行文本和规则条件各规范化一次后复用，不改变标签优先级、匹配证据或 API 结构，也不引入缓存/read model。1014 行同构基准由约 `531.6ms` 降至 `169.3ms`；最终生产 p95 以再次部署后的稳定窗口为准。
