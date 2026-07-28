@@ -55,8 +55,6 @@ def evaluate_bank_relation_completion(
     amount_check: dict[str, Any] | None = None,
 ) -> dict[str, object]:
     normalized_types = tuple(str(value or "").strip().lower() for value in row_types)
-    if "bank" not in normalized_types:
-        return {"is_complete": True, "missing_row_types": []}
     metadata = special_metadata if isinstance(special_metadata, dict) else {}
     check = amount_check if isinstance(amount_check, dict) else {}
     is_etc_batch_relation = bool(
@@ -65,9 +63,13 @@ def evaluate_bank_relation_completion(
     )
     if str(metadata.get("source") or "").strip() == "batch_accounting" or is_etc_batch_relation:
         return {"is_complete": True, "missing_row_types": []}
+    present = set(normalized_types)
+    if "oa" in present and "bank" not in present:
+        return {"is_complete": False, "missing_row_types": ["bank"]}
+    if "bank" not in present:
+        return {"is_complete": True, "missing_row_types": []}
     requires_oa = _requirement(metadata, "requires_oa", "paired_requires_oa")
     requires_invoice = _requirement(metadata, "requires_invoice", "paired_requires_invoice")
-    present = set(normalized_types)
     missing: list[str] = []
     if requires_oa and "oa" not in present:
         missing.append("oa")

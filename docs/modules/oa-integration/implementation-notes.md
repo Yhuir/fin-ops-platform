@@ -164,4 +164,10 @@
 
 - 目标：确保历史日常报销与新数据都保留稳定付款明细 identity，并让 OA 附件证据可显式回指对应付款项。
 - 关键决策：继续使用既有 `oa-exp-{external_id}:item:{row_index}:{fingerprint}`，不生成随机 UUID、不改变父 OA ID；item 不是独立可配对事实。`OA_PROJECTION_SYNC_VERSION` 升级为 `2026-07-28-expense-item-source-identity-v2`，由 durable `oa.sync` worker 幂等重投存量，不在 HTTP 或页面链路 inline 拉取。
+
+## 2026-07-28 日常报销费用字段保真
+
+- 目标：关联台子付款项的“申请事由”同时展示 OA 来源“费用内容”和“费用说明”，且不改变成本统计既有 `expense_content` 口径。
+- 决策：schedule item 分别保存 `fee_content` 与 `fee_description`；`expense_content` 继续使用首个非空字段作为兼容输出，不新增表、worker、read model 或第二同步链路。
+- 存量：`OA_PROJECTION_SYNC_VERSION` 升级为 `2026-07-28-expense-item-display-fields-v3`，只通过既有 durable `oa.sync` worker 幂等重投。
 - 不变项：原 OA Mongo 只读、父 OA relation identity、统一发票池和附件 promotion 规则不变；禁止 fuzzy item/invoice mapping。

@@ -195,6 +195,15 @@ function expandExpenseClaimSegment(segment: WorkbenchGroupDisplaySegment): Workb
   }
 
   const itemIds = new Set(items.map((item) => item.id));
+  const invoicesByItemId = new Map<string, WorkbenchRecord[]>();
+  segment.rows.invoice.forEach((row) => {
+    if (!row.sourceExpenseItemId || !itemIds.has(row.sourceExpenseItemId)) {
+      return;
+    }
+    const rows = invoicesByItemId.get(row.sourceExpenseItemId) ?? [];
+    rows.push(row);
+    invoicesByItemId.set(row.sourceExpenseItemId, rows);
+  });
   const summaryInvoices = segment.rows.invoice.filter(
     (row) => !row.sourceExpenseItemId || !itemIds.has(row.sourceExpenseItemId),
   );
@@ -221,13 +230,16 @@ function expandExpenseClaimSegment(segment: WorkbenchGroupDisplaySegment): Workb
           projectName: item.projectName,
           amount: item.amount,
           counterparty: "—",
-          reason: "—",
+          reason: [
+            item.feeContent ? `费用内容：${item.feeContent}` : "",
+            item.feeDescription ? `费用说明：${item.feeDescription}` : "",
+          ].filter(Boolean).join("；") || "—",
           reconciliationStatus: "—",
         },
         availableActions: [],
       }],
       bank: [],
-      invoice: segment.rows.invoice.filter((row) => row.sourceExpenseItemId === item.id),
+      invoice: invoicesByItemId.get(item.id) ?? [],
     },
   }));
 

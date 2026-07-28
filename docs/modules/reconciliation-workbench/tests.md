@@ -163,6 +163,13 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_w
 - Audit 必须证明满足冻结 requirement 的 active relation typed members 与 paired display 双向相等；未满足 requirement 的 active relation 必须保持同 case、显式 incomplete 并进入 unpaired；无 active owner 的其余 canonical facts 全部 singleton unpaired。
 - 520 case、发票号和 OA row id 必须在 fresh generation 中同组；13 张样例必须完整可见。
 
+## 2026-07-28 OA 子项对齐与完整性回归
+
+- `tests/test_mongo_oa_adapter.py`、`tests/test_workbench_query_service.py` 保护来源费用内容/费用说明分别保真并进入 Workbench DTO，既有 `expense_content` 口径不变。
+- `tests/test_workbench_relation_grouping.py` 保护普通 OA+发票 active relation 缺银行时保持同 case、进入 `unpaired` 并报告 `missing_row_types=["bank"]`；batch-accounting/ETC 豁免不回归。
+- `web/src/test/WorkbenchApi.test.ts`、`web/src/test/RelationGroupGrid.test.tsx` 保护发票只按 exact `source_expense_item_id` 对齐，输入乱序不影响付款项顺序，费用内容/说明在申请事由列显示，点击子项仍选择父 OA。
+- Workbench month/all schema 升至 v9，旧 v8 generation 与 page cache 必须返回 builder mismatch 并经既有 freshness gateway 重建。
+
 ## 2026-07-22 Workbench v6 与历史修复回归
 
 - `tests/test_workbench_sql_runtime.py` 证明当前 month/all v7 同步，groups/initial cache key 随 schema 派生失效，旧 v6 source version 返回 `builder_mismatch`，不能作为 fresh generation 消费。

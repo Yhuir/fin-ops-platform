@@ -970,7 +970,9 @@ class MongoOAAdapter(OAAdapter):
             if not isinstance(item, dict):
                 continue
             item_amount = self._first_text(item, "detailReimbursementAmount", "amount")
-            reason = self._first_text(item, "feeContent", "detailCostStatement") or self._first_text(data, "notes")
+            fee_content = self._first_text(item, "feeContent")
+            fee_description = self._first_text(item, "detailCostStatement")
+            reason = fee_content or fee_description or self._first_text(data, "notes")
             expense_type = self._resolve_expense_type(item, reason)
             expense_content = reason
             project_id = self._first_text(item, "detailProjectName") or self._first_text(data, "projectName")
@@ -1044,6 +1046,8 @@ class MongoOAAdapter(OAAdapter):
                     "amount": item_amount,
                     "expense_type": expense_type or "—",
                     "expense_content": expense_content or "—",
+                    "fee_content": fee_content,
+                    "fee_description": fee_description,
                     "reimbursement_date": reimbursement_date,
                     "attachment_file_count": str(len(item_attachment_files)),
                     "attachment_files": [

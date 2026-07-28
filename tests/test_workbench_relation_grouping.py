@@ -59,7 +59,7 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.service = WorkbenchRelationGroupingService()
 
-    def test_520_historical_case_prefix_is_paired_without_reclassification(self) -> None:
+    def test_520_historical_oa_invoice_relation_stays_grouped_while_waiting_for_bank(self) -> None:
         batch = yunnan_lifu_520_fixture()
         rows = {fact.row_id: row_for_fact(fact) for fact in batch.facts}
 
@@ -69,11 +69,12 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
             active_relations=[active_relation(batch)],
         )
 
-        self.assertEqual(payload["summary"]["paired_count"], 1)
-        self.assertEqual(payload["summary"]["unpaired_count"], 0)
-        group = payload["paired"]["groups"][0]
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        self.assertEqual(payload["summary"]["unpaired_count"], 1)
+        group = payload["unpaired"]["groups"][0]
         self.assertEqual(group["group_id"], f"case:{YUNNAN_LIFU_CASE_ID}")
         self.assertEqual(group["group_type"], "relation")
+        self.assertEqual(group["completion"], {"is_complete": False, "missing_row_types": ["bank"]})
         self.assertEqual(identities([group]), {fact.member_key for fact in batch.facts})
 
     def test_thirteen_invoices_are_thirteen_unpaired_singletons_totaling_170949_minor_units(self) -> None:
@@ -368,13 +369,22 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
             with self.subTest(metadata=metadata, amount_check=amount_check):
                 self.assertEqual(
                     evaluate_bank_relation_completion(
-                        row_types=["bank"],
+                        row_types=["oa", "invoice"],
                         special_metadata=metadata,
                         relation_mode=relation_mode,
                         amount_check=amount_check,
                     ),
                     {"is_complete": True, "missing_row_types": []},
                 )
+
+    def test_ordinary_oa_relation_without_bank_is_incomplete(self) -> None:
+        self.assertEqual(
+            evaluate_bank_relation_completion(
+                row_types=["oa", "invoice"],
+                special_metadata={"source": "oa_attachment_invoice"},
+            ),
+            {"is_complete": False, "missing_row_types": ["bank"]},
+        )
 
     def test_bank_relation_missing_requirement_metadata_fails_closed(self) -> None:
         rows = {
@@ -454,7 +464,10 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
             active_relations=[relation],
         )
 
-        invoice = payload["paired"]["groups"][0]["invoice_rows"][0]
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        group = payload["unpaired"]["groups"][0]
+        self.assertEqual(group["completion"], {"is_complete": False, "missing_row_types": ["bank"]})
+        invoice = group["invoice_rows"][0]
         self.assertEqual(
             invoice["source_expense_item_id"],
             "oa-exp-2206:item:2:5f9f908c6e6d",
@@ -536,18 +549,19 @@ class WorkbenchRelationPreviewGroupingServiceTests(unittest.TestCase):
             )
 
             self.assertEqual(len(groups), 2)
-            paired, unpaired = groups
-            self.assertEqual(paired["group_id"], "case:decision:historical-1")
-            self.assertEqual(paired["group_type"], "relation")
-            self.assertEqual(paired["zone"], "paired")
-            self.assertEqual(paired["status"], "paired")
-            self.assertEqual([row["status"] for row in paired["oa_rows"]], ["paired"])
-            self.assertEqual([row["status"] for row in paired["invoice_rows"]], ["paired"])
-            self.assertEqual(unpaired["group_type"], "selection")
-            self.assertEqual(unpaired["zone"], "unpaired")
-            self.assertEqual(unpaired["status"], "unpaired")
-            self.assertEqual([row["id"] for row in unpaired["bank_rows"]], ["bank-1"])
-            self.assertEqual([row["status"] for row in unpaired["bank_rows"]], ["unpaired"])
+            relation_group, bank_group = groups
+            self.assertEqual(relation_group["group_id"], "case:decision:historical-1")
+            self.assertEqual(relation_group["group_type"], "relation")
+            self.assertEqual(relation_group["zone"], "unpaired")
+            self.assertEqual(relation_group["status"], "unpaired")
+            self.assertEqual(relation_group["completion"]["missing_row_types"], ["bank"])
+            self.assertEqual([row["status"] for row in relation_group["oa_rows"]], ["unpaired"])
+            self.assertEqual([row["status"] for row in relation_group["invoice_rows"]], ["unpaired"])
+            self.assertEqual(bank_group["group_type"], "selection")
+            self.assertEqual(bank_group["zone"], "unpaired")
+            self.assertEqual(bank_group["status"], "unpaired")
+            self.assertEqual([row["id"] for row in bank_group["bank_rows"]], ["bank-1"])
+            self.assertEqual([row["status"] for row in bank_group["bank_rows"]], ["unpaired"])
 
     def test_invalid_preview_contract_fails_fast(self) -> None:
         with self.assertRaisesRegex(ValueError, "ungrouped_selected_rows"):

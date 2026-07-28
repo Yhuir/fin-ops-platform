@@ -99,6 +99,8 @@ class AggregatedAttachmentRecord:
                 "amount": "1000.00",
                 "expense_type": "材料费",
                 "expense_content": "设备材料",
+                "fee_content": "设备材料",
+                "fee_description": "设备采购说明",
                 "reimbursement_date": "2026-03-27",
             },
             {
@@ -108,6 +110,8 @@ class AggregatedAttachmentRecord:
                 "amount": "500.00",
                 "expense_type": "运费/邮费/杂费",
                 "expense_content": "邮寄费用",
+                "fee_content": "邮寄费用",
+                "fee_description": "",
                 "reimbursement_date": "2026-03-28",
             },
         ]
@@ -657,12 +661,16 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
                     "row_index": "0",
                     "project_name": "玉烟维护项目",
                     "amount": "1000.00",
+                    "fee_content": "设备材料",
+                    "fee_description": "设备采购说明",
                 },
                 {
                     "id": "oa-exp-exp-agg-001:item:1:postage",
                     "row_index": "1",
                     "project_name": "云南溯源科技",
                     "amount": "500.00",
+                    "fee_content": "邮寄费用",
+                    "fee_description": "",
                 },
             ],
         )

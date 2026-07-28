@@ -106,6 +106,8 @@ type ApiWorkbenchRow = {
     row_index?: string | number | null;
     project_name?: string | null;
     amount?: string | number | null;
+    fee_content?: string | null;
+    fee_description?: string | null;
   }> | null;
   apply_type?: string | null;
   amount?: string | null;
@@ -1363,6 +1365,8 @@ function mapExpenseItems(items: ApiWorkbenchRow["expense_items"]) {
       rowIndex: String(item.row_index ?? "").trim(),
       projectName: toDisplayValue(item.project_name),
       amount: toWorkbenchAmountDisplayValue(item.amount),
+      feeContent: toDisplayValue(item.fee_content, ""),
+      feeDescription: toDisplayValue(item.fee_description, ""),
     }];
   });
   return mapped.length > 0 ? mapped : undefined;

@@ -563,6 +563,8 @@ class WorkbenchQueryService:
                     "row_index": str(item.get("row_index") or "").strip(),
                     "project_name": str(item.get("project_name") or "—").strip() or "—",
                     "amount": str(item.get("amount") or "").strip(),
+                    "fee_content": str(item.get("fee_content") or "").strip(),
+                    "fee_description": str(item.get("fee_description") or "").strip(),
                 }
             )
         return result

@@ -17,7 +17,7 @@ from fin_ops_platform.services.postgres_repositories.common import (
 )
 
 
-OA_PROJECTION_SYNC_VERSION = "2026-07-28-expense-item-source-identity-v2"
+OA_PROJECTION_SYNC_VERSION = "2026-07-28-expense-item-display-fields-v3"
 COMPLETED_WORKFLOW_STATUS_ALIASES = frozenset(
     {
         "completed",

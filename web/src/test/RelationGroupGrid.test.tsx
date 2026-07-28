@@ -1027,7 +1027,14 @@ describe("Workbench candidate grouping layout", () => {
       expenseItems: [
         { id: "oa-exp-413:item:0", rowIndex: "0", projectName: "曲靖项目", amount: "33.00" },
         { id: "oa-exp-413:item:1", rowIndex: "1", projectName: "曲靖项目", amount: "33.00" },
-        { id: "oa-exp-413:item:2", rowIndex: "2", projectName: "曲靖项目", amount: "60.00" },
+        {
+          id: "oa-exp-413:item:2",
+          rowIndex: "2",
+          projectName: "曲靖项目",
+          amount: "60.00",
+          feeContent: "住宿费",
+          feeDescription: "曲靖住宿",
+        },
         { id: "oa-exp-413:item:3", rowIndex: "3", projectName: "大理项目", amount: "145.00" },
         { id: "oa-exp-413:item:4", rowIndex: "4", projectName: "大理项目", amount: "142.00" },
       ],
@@ -1041,6 +1048,13 @@ describe("Workbench candidate grouping layout", () => {
         oa: [parentOa],
         bank: [],
         invoice: [
+          createAttachmentInvoiceRecord(
+            "iv-142",
+            "云南云聚物流科技有限公司",
+            "142.00",
+            parentOa.id,
+            "oa-exp-413:item:4",
+          ),
           createAttachmentInvoiceRecord(
             "iv-60",
             "曲靖市麒麟区捌陆捌商务酒店",
@@ -1084,6 +1098,14 @@ describe("Workbench candidate grouping layout", () => {
     expect(within(invoiceItem).getByText("曲靖项目")).toBeInTheDocument();
     expect(within(invoiceItem).getAllByText("60.00").length).toBeGreaterThanOrEqual(2);
     expect(within(invoiceItem).getByText("曲靖市麒麟区捌陆捌商务酒店")).toBeInTheDocument();
+    expect(within(invoiceItem).getByText("费用内容：住宿费；费用说明：曲靖住宿")).toBeInTheDocument();
+    expect(within(invoiceItem).queryByText("云南云聚物流科技有限公司")).not.toBeInTheDocument();
+
+    const logisticsItem = screen.getByTestId(
+      "candidate-group-segment-unpaired-row:oa-exp-413-oa-exp-413:item:4",
+    );
+    expect(within(logisticsItem).getByText("云南云聚物流科技有限公司")).toBeInTheDocument();
+    expect(within(logisticsItem).queryByText("曲靖市麒麟区捌陆捌商务酒店")).not.toBeInTheDocument();
 
     fireEvent.click(within(invoiceItem).getByText("曲靖项目"));
     expect(selectRow).toHaveBeenCalledTimes(1);

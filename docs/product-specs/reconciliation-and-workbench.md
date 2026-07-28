@@ -7,7 +7,7 @@
 关联台只存在两种关系状态：
 
 1. `paired`：对象属于一条 `app.workbench_pair_relations.status='active'` 的正式关系，且该关系在创建时冻结的 OA/发票要求已经满足；同一关系的全部成员显示在同一组。
-2. `unpaired`：不属于 active relation 的 canonical fact 独立显示；尚未满足冻结要求的 active relation 仍保持同一 case 分组，并明确显示“待补 OA/发票”。
+2. `unpaired`：不属于 active relation 的 canonical fact 独立显示；尚未满足完整性要求的 active relation 仍保持同一 case 分组，并明确显示缺少的 OA、银行流水或发票。
 
 不存在第三种“自动候选”“待确认配对”“假配对”或“隐藏但仍存在”的用户关系状态。系统未能安全正式化的计算结果不持久化、不合并行、不隐藏事实，也不进入下游已关联口径。
 
@@ -16,6 +16,7 @@
 - 设统一事实源中可见 canonical facts 为 `C`，要求已满足的 active relation members 为 `R_complete`，要求未满足的 active relation members 为 `R_incomplete`，则 `paired = R_complete`、`unpaired = R_incomplete ∪ (C - active relation members)`。
 - `paired` 与 `unpaired` 不相交，二者并集必须精确等于 `C`；任何事实不得遗漏、重复显示或同时属于两个 active case。
 - 历史 `case_id`、row 上残留的 `case_id`、来源标签和旧 case 前缀都不能决定分组。含银行流水的普通关系只读取关系创建时冻结的 `requires_oa` / `requires_invoice`；缺失快照 fail closed，不得在读路径回查当前规则或按旧 case 前缀放行。
+- 普通 OA 付款关系必须包含银行流水才算完整；OA 与附件发票的 immutable binding 只表达不可拆分 ownership，缺银行时整组保留 active case 但位于 `unpaired`。显式 batch-accounting 与 ETC batch relation 继续按登记豁免处理。
 - 一条 active relation 可以是任意非空的 OA/银行流水/发票成员组合，包括一对一、一对多、多对一以及 `N:M:K`。关系来源不形成用户可见的业务状态区分。
 
 ## 确定性自动正式化
@@ -40,7 +41,7 @@
 - 前端只消费 active generation 发布的 `paired.groups` 与 `unpaired.groups`，不得本地拼关系或按旧 `case_id` 合并未配对事实。
 - 日常报销仍以外层 OA 作为唯一 canonical relation member。其付款明细只作为该 OA 的嵌套展示事实，不得独立选择、配对或撤回；点击任一付款明细等价于选择父 OA。
 - 多付款明细日常报销在 OA 栏显示为一个复合行：申请人栏显示申请人、申请类型和日期；项目名称栏先显示“多个项目 · N”及父 OA 金额，再逐项显示真实项目名称；金额栏只显示逐项金额。不得显示按项目聚合金额，不得增加“付款明细”列，也不得在项目名称栏显示关系或附件解析状态 chip。
-- OA 附件发票只能通过显式 `source_expense_item_id` 与付款明细对齐到同一展示带；缺失或无效来源 ID 时保留为父 OA 级附件证据，不得按项目名、金额或顺序猜测归属。
+- OA 附件发票只能通过显式 `source_expense_item_id` 与付款明细对齐到同一展示带；每个付款项的“申请事由”显示来源“费用内容”和“费用说明”。缺失或无效来源 ID 时保留为父 OA 级附件证据，不得按项目名、金额或顺序猜测归属。
 - 已配对区可以撤回正式关系；未配对区可以选择多行发起人工正式配对，但没有“撤回候选”动作。
 - 关系 provenance、规则版本、证据摘要、actor 和时间只用于审计，不拆分用户可见关系状态。
 - `workbench_relation` 下游只输出 `linked` / `unlinked`。只有 active 正式关系能驱动已支付、已关联、成本、待找发票、OA 待付款或银行关系标签。
@@ -48,5 +49,5 @@
 
 ## 固定验收样例
 
-- 云南立孚科技 520 元：发票 `inv_imported_0369`（发票号 `26532000000716859331`）与 OA `oa-pay-2169` 必须存在于 canonical facts；历史 case `case:decision:2026-05:oa_invoice_exact_amount:oa-pay-2169:inv_imported_0369` 只作为 identity 保留，active 正式关系必须在 `paired` 显示。
+- 云南立孚科技 520 元：发票 `inv_imported_0369`（发票号 `26532000000716859331`）与 OA `oa-pay-2169` 必须存在于 canonical facts；历史 case `case:decision:2026-05:oa_invoice_exact_amount:oa-pay-2169:inv_imported_0369` 只作为 identity 保留。缺银行流水时 active case 必须完整保留但显示在 `unpaired`；补齐银行并满足冻结要求后才进入 `paired`。
 - 13 张合计 1709.49 元的省略发票样例在没有唯一强证据闭合时必须是 13 个 `unpaired` 单行，不能因合计金额形成伪关系，也不能被隐藏。

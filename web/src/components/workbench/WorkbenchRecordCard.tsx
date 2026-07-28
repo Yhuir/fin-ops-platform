@@ -236,7 +236,7 @@ function renderCellValue(
     return renderOaMoneyValue(value, searchQuery);
   }
 
-  if (paneId === "oa" && row.displayRole === "expense-claim-item") {
+  if (paneId === "oa" && row.displayRole === "expense-claim-item" && column.key !== "reason") {
     return null;
   }
 

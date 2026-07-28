@@ -45,6 +45,8 @@ export type WorkbenchExpenseItem = {
   rowIndex: string;
   projectName: string;
   amount: string;
+  feeContent?: string;
+  feeDescription?: string;
 };
 
 export type WorkbenchAmountCheck = {

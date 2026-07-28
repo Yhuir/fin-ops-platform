@@ -817,6 +817,7 @@ rows、`statistics`、`category_counts`、pagination 和当前目标行关系标
 
 - `paired.groups[*]` 必须一一对应冻结要求已满足的 active 正式关系，完整包含该 relation 在当前查询范围内的 OA、银行流水和发票成员，`group_type=relation`。
 - `unpaired.groups[*]` 可以是一个未被 active relation 占用的 canonical singleton，也可以是冻结要求未满足的 active relation group；后一种必须返回 `completion.is_complete=false` 和精确 `missing_row_types`，不能拆散 relation ownership。
+- 普通 relation 含 OA 但缺银行流水时必须位于 `unpaired`，并返回 `missing_row_types=["bank"]`；OA 附件发票 immutable binding 只表达 ownership，不等于付款链路完整。显式 batch-accounting/ETC batch relation 继续使用各自登记的完整性豁免。
 - `summary` 使用 `paired_count` / `unpaired_count`；不得返回 `open_count` 或把 candidate/decision 作为第三种关系状态。
 - 历史 row `case_id`、来源 section、display tag 或 candidate/decision metadata 不能合并未配对行，也不能隐藏 canonical fact。
 - 未知 zone/group type 必须返回结构化 contract error，不能静默映射为 unpaired 或 paired。
@@ -833,12 +834,14 @@ Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`sou
     "id": "oa-exp-2035:item:0:...",
     "row_index": "0",
     "project_name": "曲靖项目",
-    "amount": "33"
+    "amount": "33",
+    "fee_content": "住宿费",
+    "fee_description": "曲靖住宿"
   }
 ]
 ```
 
-该数组只包含复合行展示所需字段，不返回附件正文或把 item 变成独立 relation member。OA 附件发票 row 可返回 `source_expense_item_id`；只有该值与 `expense_items[*].id` 精确相等时前端才可同带对齐。父 OA 仍是唯一 action/selection ID，付款项不得独立确认、撤回或参与金额配对。
+该数组只包含复合行展示所需字段，不返回附件正文或把 item 变成独立 relation member。`fee_content` 与 `fee_description` 分别对应 OA 来源的“费用内容”与“费用说明”，不得互相覆盖。OA 附件发票 row 可返回 `source_expense_item_id`；只有该值与 `expense_items[*].id` 精确相等时前端才可同带对齐。父 OA 仍是唯一 action/selection ID，付款项不得独立确认、撤回或参与金额配对。
 
 ## 发票生命周期状态
 

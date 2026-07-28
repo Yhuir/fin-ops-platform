@@ -635,12 +635,16 @@ describe("workbench api bank amount mapping", () => {
                       row_index: "0",
                       project_name: "曲靖项目",
                       amount: "40.00",
+                      fee_content: "差旅费",
+                      fee_description: "曲靖出差",
                     },
                     {
                       id: "oa-paired:item:1",
                       row_index: 1,
                       project_name: "大理项目",
                       amount: 60,
+                      fee_content: "住宿费",
+                      fee_description: null,
                     },
                   ],
                   available_actions: ["detail"],
@@ -685,8 +689,22 @@ describe("workbench api bank amount mapping", () => {
     });
     expect(group.rows.oa.map((row) => row.id)).toEqual(["oa-paired"]);
     expect(group.rows.oa[0].expenseItems).toEqual([
-      { id: "oa-paired:item:0", rowIndex: "0", projectName: "曲靖项目", amount: "40" },
-      { id: "oa-paired:item:1", rowIndex: "1", projectName: "大理项目", amount: "60" },
+      {
+        id: "oa-paired:item:0",
+        rowIndex: "0",
+        projectName: "曲靖项目",
+        amount: "40",
+        feeContent: "差旅费",
+        feeDescription: "曲靖出差",
+      },
+      {
+        id: "oa-paired:item:1",
+        rowIndex: "1",
+        projectName: "大理项目",
+        amount: "60",
+        feeContent: "住宿费",
+        feeDescription: "",
+      },
     ]);
     expect(group.rows.invoice[0].sourceExpenseItemId).toBe("oa-paired:item:1");
   });
