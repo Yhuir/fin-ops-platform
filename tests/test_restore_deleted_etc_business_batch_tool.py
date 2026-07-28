@@ -28,6 +28,8 @@ class _EtcService:
         "invoice_total": "26.14",
         "oa_row_id": "oa-pay-2200",
         "stored_oa_row_id": "oa-pay-2200",
+        "task_id": "ETC-RECON-000004",
+        "scope_month": "2026-05",
         "version": 8,
     }
 
@@ -82,6 +84,8 @@ class RestoreDeletedEtcBusinessBatchToolTests(unittest.TestCase):
 
     def test_dry_run_and_fingerprint_guarded_execute_use_exact_preview(self) -> None:
         service = _EtcService()
+        app = object()
+        refresh_calls: list[tuple[object, list[str], str]] = []
         base_args = [
             "--business-batch-id",
             "etc_business_batch_0004",
@@ -95,9 +99,19 @@ class RestoreDeletedEtcBusinessBatchToolTests(unittest.TestCase):
         with (
             patch(
                 "fin_ops_platform.tools.restore_deleted_etc_business_batch.build_tool_runtime_application",
-                return_value=object(),
+                return_value=app,
             ),
             patch("fin_ops_platform.tools.restore_deleted_etc_business_batch.etc_service", return_value=service),
+            patch(
+                "fin_ops_platform.tools.restore_deleted_etc_business_batch.etc_reconciliation_task_service",
+                return_value=SimpleNamespace(
+                    get_task_record=lambda _task_id: SimpleNamespace(title="Recovered ETC batch")
+                ),
+            ),
+            patch(
+                "fin_ops_platform.tools.restore_deleted_etc_business_batch.refresh_after_historical_etc_repair_link",
+                side_effect=lambda runtime, months, *, reason: refresh_calls.append((runtime, months, reason)),
+            ),
             patch("fin_ops_platform.tools.restore_deleted_etc_business_batch.PostgresSettings.from_env"),
             patch(
                 "fin_ops_platform.tools.restore_deleted_etc_business_batch.PostgresConnection",
@@ -131,6 +145,11 @@ class RestoreDeletedEtcBusinessBatchToolTests(unittest.TestCase):
         self.assertEqual(executed["status"], "restored")
         self.assertEqual(executed["invoice_count"], 2)
         self.assertEqual(service.restore_calls[0]["expected_version"], 8)
+        self.assertEqual(service.restore_calls[0]["canonical_title"], "Recovered ETC batch")
+        self.assertEqual(
+            refresh_calls,
+            [(app, ["2026-05"], "deleted_submitted_etc_business_batch_restored")],
+        )
 
 
 if __name__ == "__main__":

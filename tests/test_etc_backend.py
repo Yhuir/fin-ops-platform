@@ -1114,6 +1114,7 @@ class EtcServiceTests(unittest.TestCase):
                 expected_total_amount=Decimal("26.14"),
                 expected_oa_row_id=None,
                 canonical_oa_row_id="oa-pay-2200",
+                canonical_title="Recovered ETC batch",
             )
             self.assertEqual(preview["stored_oa_row_id"], "")
             restored = service.restore_deleted_submitted_business_batch(
@@ -1123,29 +1124,67 @@ class EtcServiceTests(unittest.TestCase):
                 expected_total_amount=Decimal("26.14"),
                 expected_oa_row_id=None,
                 canonical_oa_row_id="oa-pay-2200",
+                canonical_title="Recovered ETC batch",
                 reason="restore proven production tombstone",
             )
-            replayed = service.restore_deleted_submitted_business_batch(
+            tombstone = service._business_batches[business_batch.business_batch_id]
+            submission = service._batches[submitted_batch.id]
+            tombstone.title = None
+            tombstone.oa_process_status = "manual_without_oa_row"
+            submission.invoice_count = 3
+            submission.etc_invoice_count = 3
+            service._persist()
+            normalization_preview = service.preview_deleted_submitted_business_batch_restore(
                 business_batch.business_batch_id,
-                expected_version=int(preview["version"]),
                 expected_invoice_count=2,
                 expected_total_amount=Decimal("26.14"),
                 expected_oa_row_id="oa-pay-2200",
                 canonical_oa_row_id="oa-pay-2200",
+                canonical_title="Recovered ETC batch",
+            )
+            replayed = service.restore_deleted_submitted_business_batch(
+                business_batch.business_batch_id,
+                expected_version=int(normalization_preview["version"]),
+                expected_invoice_count=2,
+                expected_total_amount=Decimal("26.14"),
+                expected_oa_row_id="oa-pay-2200",
+                canonical_oa_row_id="oa-pay-2200",
+                canonical_title="Recovered ETC batch",
                 reason="idempotent retry",
             )
+            unchanged = service.restore_deleted_submitted_business_batch(
+                business_batch.business_batch_id,
+                expected_version=replayed.version,
+                expected_invoice_count=2,
+                expected_total_amount=Decimal("26.14"),
+                expected_oa_row_id="oa-pay-2200",
+                canonical_oa_row_id="oa-pay-2200",
+                canonical_title="Recovered ETC batch",
+                reason="idempotent retry after normalization",
+            )
             invoices = service.list_invoices_by_ids(["etc_invoice_0001", "etc_invoice_0002"])
+            normalized_submission = service.get_batch(submitted_batch.id)
 
             self.assertEqual(restored.status, EtcBusinessBatchStatus.MANUALLY_MARKED_SUBMITTED.value)
             self.assertEqual(restored.oa_row_id, "oa-pay-2200")
-            self.assertEqual(replayed.version, restored.version)
+            self.assertEqual(restored.oa_process_status, "in_progress")
+            self.assertEqual(replayed.version, restored.version + 1)
+            self.assertEqual(unchanged.version, replayed.version)
+            self.assertEqual(replayed.title, "Recovered ETC batch")
+            self.assertEqual(replayed.oa_process_status, "in_progress")
+            self.assertEqual(normalized_submission.invoice_count, 2)
+            self.assertEqual(normalized_submission.etc_invoice_count, 2)
+            self.assertEqual(normalized_submission.total_amount, Decimal("26.14"))
+            self.assertEqual(normalized_submission.oa_total_amount, Decimal("26.14"))
+            self.assertEqual(normalized_submission.etc_invoice_amount, Decimal("26.14"))
+            self.assertEqual(normalized_submission.amount_delta, Decimal("0.00"))
             self.assertEqual(restored.submission_batch_id, submitted_batch.id)
             self.assertEqual({invoice.status for invoice in invoices}, {EtcInvoiceStatus.SUBMITTED})
             self.assertEqual({invoice.current_batch_id for invoice in invoices}, {submitted_batch.id})
             self.assertEqual({invoice.business_batch_id for invoice in invoices}, {business_batch.business_batch_id})
             self.assertEqual(
-                [event["event_type"] for event in restored.audit_events][-1],
-                "deleted_submitted_business_batch_restored",
+                [event["event_type"] for event in replayed.audit_events][-1],
+                "deleted_submitted_business_batch_restore_normalized",
             )
 
     def test_business_batch_delete_is_idempotent_and_hides_deleted_batch(self) -> None:

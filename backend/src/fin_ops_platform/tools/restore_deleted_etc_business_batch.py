@@ -10,7 +10,12 @@ from typing import Any, Sequence, TextIO
 from fin_ops_platform.services.etc_service import EtcBusinessBatchInvalidTransitionError
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.oa_projection import COMPLETED_WORKFLOW_STATUS_SQL
-from fin_ops_platform.tools.runtime_application import build_tool_runtime_application, etc_service
+from fin_ops_platform.tools.runtime_application import (
+    build_tool_runtime_application,
+    etc_reconciliation_task_service,
+    etc_service,
+    refresh_after_historical_etc_repair_link,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -40,6 +45,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO = sys.stdout) -> i
 
     app = build_tool_runtime_application(None)
     service = etc_service(app)
+    task_service = etc_reconciliation_task_service(app)
     try:
         inspection = service.preview_deleted_submitted_business_batch_restore(
             str(args.business_batch_id),
@@ -52,6 +58,23 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO = sys.stdout) -> i
         return 2
     stored_oa_row_id = str(inspection.get("stored_oa_row_id") or "").strip()
     expected_oa_row_id = str(args.expected_oa_row_id).strip()
+    try:
+        canonical_title = str(task_service.get_task_record(str(inspection.get("task_id") or "")).title or "").strip()
+    except (KeyError, TypeError, ValueError):
+        canonical_title = ""
+    if not canonical_title:
+        print(
+            json.dumps(
+                {
+                    "status": "blocked",
+                    "code": "business_batch_restore_task_title_unproven",
+                    "task_id": inspection.get("task_id"),
+                },
+                ensure_ascii=False,
+            ),
+            file=stdout,
+        )
+        return 2
     oa_resolution = _resolve_oa_identity(
         connection=PostgresConnection(PostgresSettings.from_env()),
         stored_oa_row_id=stored_oa_row_id,
@@ -80,6 +103,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO = sys.stdout) -> i
             expected_total_amount=Decimal(str(args.expected_total_amount)),
             expected_oa_row_id=stored_oa_row_id or None,
             canonical_oa_row_id=expected_oa_row_id,
+            canonical_title=canonical_title,
         )
     except EtcBusinessBatchInvalidTransitionError as exc:
         print(json.dumps({"status": "blocked", "code": exc.code, "message": str(exc)}, ensure_ascii=False), file=stdout)
@@ -94,9 +118,6 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO = sys.stdout) -> i
         "preview": preview,
     }
     if args.execute:
-        if preview.get("already_restored"):
-            print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
-            return 0
         if str(args.expected_fingerprint).strip() != fingerprint:
             print(
                 json.dumps(
@@ -118,11 +139,20 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO = sys.stdout) -> i
             expected_total_amount=Decimal(str(args.expected_total_amount)),
             expected_oa_row_id=stored_oa_row_id or None,
             canonical_oa_row_id=expected_oa_row_id,
+            canonical_title=canonical_title,
             reason=f"{str(args.reason).strip()} (operator={str(args.operator).strip()})",
+        )
+        scope_month = str(preview.get("scope_month") or "").strip()
+        if not scope_month:
+            raise RuntimeError("Restored ETC business batch scope month is unavailable.")
+        refresh_after_historical_etc_repair_link(
+            app,
+            [scope_month],
+            reason="deleted_submitted_etc_business_batch_restored",
         )
         payload = {
             "mode": "execute",
-            "status": "restored",
+            "status": "normalized" if preview.get("already_restored") else "restored",
             "fingerprint": fingerprint,
             "business_batch_id": restored.business_batch_id,
             "status_after": restored.status,
@@ -130,6 +160,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO = sys.stdout) -> i
             "submission_batch_id": restored.submission_batch_id,
             "invoice_count": len(restored.invoice_ids),
             "oa_row_id": restored.oa_row_id,
+            "refreshed_scope_months": [scope_month],
         }
     print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
     return 0

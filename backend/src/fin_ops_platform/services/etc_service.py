@@ -1602,6 +1602,7 @@ class EtcService:
         expected_total_amount: Decimal | str | int | float,
         expected_oa_row_id: str | None,
         canonical_oa_row_id: str | None = None,
+        canonical_title: str | None = None,
     ) -> dict[str, object]:
         self._reload_from_state_store()
         with self._business_batch_lock:
@@ -1624,6 +1625,9 @@ class EtcService:
                 "external_etc_batch_id": batch.external_etc_batch_id,
                 "stored_oa_row_id": stored_oa_row_id,
                 "oa_row_id": str(canonical_oa_row_id or "").strip() or stored_oa_row_id,
+                "stored_title": str(batch.title or "").strip(),
+                "title": str(canonical_title or "").strip() or str(batch.title or "").strip(),
+                "scope_month": str(batch.amount_breakdown.get("scope_month") or "").strip(),
                 "invoice_count": len(invoices),
                 "invoice_total": _amount_text(
                     sum((invoice.total_amount for invoice in invoices), Decimal("0.00")).quantize(Decimal("0.01"))
@@ -1641,12 +1645,19 @@ class EtcService:
         expected_total_amount: Decimal | str | int | float,
         expected_oa_row_id: str | None,
         canonical_oa_row_id: str | None = None,
+        canonical_title: str | None = None,
         reason: str,
     ) -> EtcBusinessBatch:
         normalized_reason = str(reason or "").strip()
         if not normalized_reason:
             raise EtcBusinessBatchInvalidTransitionError("reason is required.", code="reason_required")
         normalized_canonical_oa_row_id = str(canonical_oa_row_id or "").strip()
+        normalized_title = str(canonical_title or "").strip()
+        if not normalized_title:
+            raise EtcBusinessBatchInvalidTransitionError(
+                "canonical_title is required.",
+                code="business_batch_restore_canonical_title_required",
+            )
         if expected_oa_row_id is None and not normalized_canonical_oa_row_id:
             raise EtcBusinessBatchInvalidTransitionError(
                 "canonical_oa_row_id is required when the deleted batch has no stored OA row.",
@@ -1662,20 +1673,57 @@ class EtcService:
                     expected_oa_row_id=expected_oa_row_id,
                 )
             )
-            if already_restored:
-                return self._copy_business_batch(batch)
             self._assert_business_batch_version(batch, expected_version)
             stored_oa_row_id = str(batch.oa_row_id or submission_batch.linked_oa_row_id or "").strip()
-            if expected_oa_row_id is None and stored_oa_row_id:
+            if not already_restored and expected_oa_row_id is None and stored_oa_row_id:
                 raise EtcBusinessBatchInvalidTransitionError(
                     "Deleted ETC business batch gained OA evidence after preview.",
                     code="business_batch_restore_oa_evidence_changed",
                 )
             now = datetime.now(UTC)
+            invoice_total = sum((invoice.total_amount for invoice in invoices), Decimal("0.00")).quantize(
+                Decimal("0.01")
+            )
+            reported_total = _decimal_from_amount(expected_total_amount).quantize(Decimal("0.01"))
+            gap_amount = (reported_total - invoice_total).quantize(Decimal("0.01"))
+            before_normalization = (
+                batch.title,
+                batch.oa_row_id,
+                batch.oa_process_status,
+                submission_batch.status,
+                submission_batch.confirmed_at,
+                submission_batch.linked_oa_row_id,
+                tuple(submission_batch.invoice_ids),
+                submission_batch.invoice_count,
+                submission_batch.total_amount,
+                submission_batch.oa_total_amount,
+                submission_batch.etc_invoice_amount,
+                submission_batch.etc_invoice_count,
+                submission_batch.amount_delta,
+            )
+            batch.title = normalized_title
             batch.oa_row_id = normalized_canonical_oa_row_id or batch.oa_row_id
+            batch.oa_process_status = "in_progress"
             submission_batch.status = EtcBatchStatus.SUBMITTED_CONFIRMED.value
             submission_batch.confirmed_at = submission_batch.confirmed_at or now
             submission_batch.linked_oa_row_id = batch.oa_row_id
+            submission_batch.invoice_ids = [invoice.id for invoice in invoices]
+            submission_batch.invoice_count = len(invoices)
+            submission_batch.total_amount = invoice_total
+            submission_batch.oa_total_amount = reported_total
+            submission_batch.etc_invoice_amount = invoice_total
+            submission_batch.etc_invoice_count = len(invoices)
+            submission_batch.amount_delta = gap_amount
+            batch.invoice_ids = [invoice.id for invoice in invoices]
+            batch.amount_breakdown.update(
+                {
+                    "reported_amount": _amount_text(reported_total),
+                    "oa_amount": _amount_text(reported_total),
+                    "etc_invoice_amount": _amount_text(invoice_total),
+                    "gap_amount": _amount_text(gap_amount),
+                    "coverage_status": "matched" if gap_amount == Decimal("0.00") else "partial",
+                }
+            )
             for invoice in invoices:
                 invoice.status = EtcInvoiceStatus.SUBMITTED
                 invoice.current_batch_id = submission_batch.id
@@ -1688,11 +1736,32 @@ class EtcService:
                     continue
                 import_batch.submission_batch_id = submission_batch.id
                 import_batch.updated_at = now
+            after_normalization = (
+                batch.title,
+                batch.oa_row_id,
+                batch.oa_process_status,
+                submission_batch.status,
+                submission_batch.confirmed_at,
+                submission_batch.linked_oa_row_id,
+                tuple(submission_batch.invoice_ids),
+                submission_batch.invoice_count,
+                submission_batch.total_amount,
+                submission_batch.oa_total_amount,
+                submission_batch.etc_invoice_amount,
+                submission_batch.etc_invoice_count,
+                submission_batch.amount_delta,
+            )
+            if already_restored and before_normalization == after_normalization:
+                return self._copy_business_batch(batch)
             before_status = batch.status
             batch.status = restored_status
             self._bump_business_batch_version(
                 batch,
-                event_type="deleted_submitted_business_batch_restored",
+                event_type=(
+                    "deleted_submitted_business_batch_restore_normalized"
+                    if already_restored
+                    else "deleted_submitted_business_batch_restored"
+                ),
                 before_status=before_status,
                 after_status=restored_status,
                 reason=normalized_reason,

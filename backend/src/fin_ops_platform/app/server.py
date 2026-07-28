@@ -714,6 +714,7 @@ class Application:
                 else self._import_service
             ),
             persist_workbench_pair_relations=lambda case_ids: self._persist_workbench_pair_relations(changed_case_ids=case_ids),
+            refresh_after_historical_etc_repair_link=self._refresh_after_historical_etc_repair_link,
             save_invoice_etc_metadata=(
                 state_store.save_invoice_etc_metadata
                 if callable(getattr(state_store, "save_invoice_etc_metadata", None))

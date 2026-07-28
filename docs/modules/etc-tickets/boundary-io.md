@@ -82,7 +82,7 @@
 | Backend service | `etc_service.py`、`etc_business_batch_application_service.py`、`etc_invoice_pdf_bundle_service.py`、`etc_document_parsers.py`、`etc_reconciliation_*`、`invoice_attachment_recognition_service.py` |
 | Audit proof owner | `services/postgres_repositories/etc_tickets_page_audit.py`、`services/page_audit_registry.py`、`services/postgres_repositories/operations_audit.py` |
 | Workbench integration | `workbench_canonical_rows.py`、`workbench_pair_relation_service.py`、`workbench_relation_command_service.py` |
-| Tools | `cleanup_orphan_etc_reconciliation_tasks.py`、`restore_deleted_etc_business_batch.py`、`backfill_etc_batch_invoice_links.py`；历史 repair 只保留 `HistoricalEtcRepairService` 的受控入口 |
+| Tools | `cleanup_orphan_etc_reconciliation_tasks.py`、`restore_deleted_etc_business_batch.py`、`backfill_etc_batch_invoice_links.py`；历史 repair 只保留 `HistoricalEtcRepairService` 的受控入口。删除批次恢复必须同时校验 canonical task title/OA/发票成员与金额，归一化 submission 统计，并通过 tool runtime port 触发既有 historical ETC lifecycle，使 Workbench matching dirty scope 与页面 read model 一起收敛 |
 | Tests | `tests/test_etc_*.py`、`web/src/test/Etc*.test.*`、`web/e2e/etc-tickets-flow.spec.ts` |
 
 ## 依赖方向

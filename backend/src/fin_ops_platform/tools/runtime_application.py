@@ -53,6 +53,13 @@ def etc_reconciliation_task_service(app: Any) -> Any:
     return tool_runtime_ports(app).etc_reconciliation_task_service
 
 
+def refresh_after_historical_etc_repair_link(app: Any, months: list[str], *, reason: str) -> None:
+    refresh = getattr(tool_runtime_ports(app), "refresh_after_historical_etc_repair_link", None)
+    if not callable(refresh):
+        raise RuntimeError("Historical ETC repair refresh boundary is unavailable.")
+    refresh(months, reason=reason)
+
+
 def workbench_relation_command_service(app: Any) -> Any:
     return tool_runtime_ports(app).workbench_relation_command_service
 
