@@ -57,7 +57,7 @@
 | refreshing query status | Workbench initial/detail query | 返回 refreshing/遮罩状态；读入口不得再次补投 `all` refresh，只有真正 missing 或 freshness gate 已证明的 exact stale scope 才能请求恢复，避免读 I/O 扩成全月份写 fan-out |
 | Search row context | 非 PostgreSQL 本地 Search | `list_workbench_search_rows(YYYY-MM)` 只返回 active generation 的 row/zone/group/project context；禁止复用 Workbench page/full payload |
 | ignored rows | Workbench ignored API / write command | `list_workbench_ignored_rows(scope_key)` 只读取 active generation；repository 缺失时公开 API 返回 unavailable、写命令 fail fast，禁止回退旧 snapshot |
-| relation action preview selection | confirm/withdraw preview | `WorkbenchQueryFacade.relation_preview_selection -> PostgresReadModelRepository.get_workbench_relation_preview_selection` 按 expected generation/generation-set 一次读取最多 20 个 selected rows 及必要 OA attachment context；month/all 都在读取前后复核 fresh/version，missing、重复、跨 generation 和 drift fail closed。该 DTO 只供 preview group/amount/alias 投影，不进入正式 command/UoW，不读取 `workbench:all` 完整 payload、live builder 或 `workbench_relation` projection |
+| relation action preview selection | confirm/withdraw preview | `WorkbenchQueryFacade.relation_preview_selection -> PostgresReadModelRepository.get_workbench_relation_preview_selection` 按 expected generation/generation-set 一次读取最多 20 个 selected rows 及必要 OA attachment context；month/all 都在读取前后复核 fresh/version。`month=all` 中同一 canonical row 被跨月 relation 投影到多个 active shard 时，规范化内容完全相同才合并为一个逻辑 row；同 row id 内容不一致、missing、跨 generation 或 drift 一律 fail closed。该 DTO 只供 preview group/amount/alias 投影，不进入正式 command/UoW，不读取 `workbench:all` 完整 payload、live builder 或 `workbench_relation` projection |
 
 ## 依赖方向
 

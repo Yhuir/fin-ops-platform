@@ -322,6 +322,7 @@ describe("workbench api bank amount mapping", () => {
     ["workbench_relation_preview_stale", 409, "关联预览已失效，请重新预览。"],
     ["workbench_row_not_found", 404, "所选关联台记录已不可用，请刷新后重新选择。"],
     ["relation_preview_rows_missing", 400, "关联预览无效，请刷新后重新选择。"],
+    ["relation_preview_rows_ambiguous", 409, "所选关联台记录存在跨版本内容冲突，请刷新后重试。"],
     ["unknown_auth_error", 401, "登录状态已失效，请重新登录。"],
     ["unknown_permission_error", 403, "当前账号无权执行此操作。"],
     ["unknown_conflict", 409, "关联台数据已变化，请刷新后重新预览。"],

@@ -5521,9 +5521,11 @@ class PostgresReadModelRepository:
             if not row_id:
                 continue
             if row_id in rows_by_id:
+                if rows_by_id[row_id] == row:
+                    continue
                 raise WorkbenchRelationPreviewSelectionError(
                     code="relation_preview_rows_ambiguous",
-                    message="所选工作台记录跨版本重复，请刷新后重试。",
+                    message="所选工作台记录跨版本内容不一致，请刷新后重试。",
                 )
             rows_by_id[row_id] = row
         return rows_by_id

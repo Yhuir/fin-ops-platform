@@ -2048,6 +2048,7 @@ const WORKBENCH_API_ERROR_MESSAGES: Record<string, string> = {
   workbench_row_not_found: "所选关联台记录已不可用，请刷新后重新选择。",
   workbench_relation_not_found: "所选关联关系已不可用，请刷新后重新选择。",
   relation_preview_rows_missing: "关联预览无效，请刷新后重新选择。",
+  relation_preview_rows_ambiguous: "所选关联台记录存在跨版本内容冲突，请刷新后重试。",
   relation_preview_selection_too_large: "本次选择记录过多，请减少选择后重试。",
   oa_password_verification_failed: "当前 OA 用户密码复核失败，未执行数据重置。",
 };

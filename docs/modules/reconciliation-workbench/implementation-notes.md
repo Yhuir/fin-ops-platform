@@ -1416,3 +1416,9 @@
 - 浏览器等价 gzip 请求预热 2 次后各采样 20 次：combined initial p50/p95 `221.362/312.664ms`，paired groups 首屏 `629.546/712.718ms`，confirm preview `190.279/718.591ms`，withdraw preview `135.048/557.145ms`，refresh status `116.143/138.925ms`。所有交互链路满足 p95 `<=1000ms`。
 - 同一 withdraw preview 样例在修复前 p50/p95 为 `936.006/1216.494ms`；删除全量 snapshot 重建后分别下降约 `85.6%/54.2%`。App Health 服务端滚动窗口同样记录 withdraw preview p50/p95 `50.852/467.079ms`。
 - 生产只执行 fresh 读取和无副作用 preview；当前 scenario 缺少 `fixture_ownership=test_owned` 与完整恢复检查点，因此未对真实财务关系执行 mutation。CAS、幂等、审计、UoW、历史恢复和 zero fan-out 继续由定向回归保护。
+
+## 2026-07-29 - 跨月 canonical row 预览去重
+
+- 真实根因：`month=all` 的 bounded relation preview 会按 active generation-set 读取全部月份；跨月 `turnover_manual_closure` 依法在每个成员月完整投影同一 canonical bank row，旧 row-id 索引把任何重复都误判为冲突，导致合法确认预览返回 `relation_preview_rows_ambiguous`。
+- 修复只在 confirm/withdraw 共用的 repository 行索引边界合并规范化内容完全相同的 row；同 row id 的金额、状态、来源或其它规范化字段不一致仍 fail closed。selected 顺序、OA attachment context、两次 freshness/version 门禁、20/100 行上限和正式 command/UoW canonical reread 均不变。
+- 不改 projection、relation fact、generation、SQL、schema、worker、queue、Redis 或正式写入；不使用 `DISTINCT` 隐藏真实冲突。前端只新增该稳定错误码的批准中文文案。

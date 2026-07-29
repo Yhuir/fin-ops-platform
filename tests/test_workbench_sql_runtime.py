@@ -36,6 +36,7 @@ from fin_ops_platform.services.workbench_groups_page_cache import (
 )
 from fin_ops_platform.services.workbench_read_model_version import (
     WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION,
+    WorkbenchRelationPreviewSelectionError,
 )
 from fin_ops_platform.services.workbench_read_model_refresh import WorkbenchReadModelRefreshService
 from fin_ops_platform.services.workbench_query_freshness_service import (
@@ -6203,7 +6204,15 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                             "status": "unpaired",
                             "payload": {"id": "oa-1", "type": "oa", "amount": "100.00"},
                             "scope_key": "2026-05",
-                            "generation_id": "generation-1",
+                            "generation_id": "generation-may",
+                        },
+                        {
+                            "row_id": "bank-1",
+                            "source_kind": "bank",
+                            "status": "unpaired",
+                            "payload": {"id": "bank-1", "type": "bank", "debit_amount": "100.00"},
+                            "scope_key": "2026-04",
+                            "generation_id": "generation-apr",
                         },
                         {
                             "row_id": "bank-1",
@@ -6211,7 +6220,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                             "status": "unpaired",
                             "payload": {"id": "bank-1", "type": "bank", "debit_amount": "100.00"},
                             "scope_key": "2026-05",
-                            "generation_id": "generation-1",
+                            "generation_id": "generation-may",
                         },
                     ]
                 if "relation-preview-oa-attachment-context" in normalized:
@@ -6227,8 +6236,22 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                                 "derived_from_oa_id": "oa-1",
                                 "total_with_tax": "100.00",
                             },
+                            "scope_key": "2026-04",
+                            "generation_id": "generation-apr",
+                        },
+                        {
+                            "row_id": "invoice-attachment-1",
+                            "source_kind": "oa_attachment_invoice",
+                            "status": "unpaired",
+                            "payload": {
+                                "id": "invoice-attachment-1",
+                                "type": "invoice",
+                                "source_kind": "oa_attachment_invoice",
+                                "derived_from_oa_id": "oa-1",
+                                "total_with_tax": "100.00",
+                            },
                             "scope_key": "2026-05",
-                            "generation_id": "generation-1",
+                            "generation_id": "generation-may",
                         }
                     ]
                 raise AssertionError(f"unexpected relation preview SQL: {normalized}")
@@ -6244,16 +6267,17 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 return {
                     "scope_key": scope_key,
                     "read_model_status": "fresh",
-                    "read_model_version": "generation-1",
+                    "read_model_version": "generation-set-1",
                     "source_versions": {"builder": "v1"},
                 }
 
             def _workbench_relation_preview_generation_proof(self, scope_key: str) -> dict[str, object]:
                 self.proof_calls += 1
                 return {
-                    "version": "generation-1",
+                    "version": "generation-set-1",
                     "generation_set": [
-                        {"scope_key": scope_key, "generation_id": "generation-1"}
+                        {"scope_key": "2026-04", "generation_id": "generation-apr"},
+                        {"scope_key": "2026-05", "generation_id": "generation-may"},
                     ],
                 }
 
@@ -6261,21 +6285,23 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         repository = Repository(connection)
 
         payload = repository.get_workbench_relation_preview_selection(
-            scope_key="2026-05",
+            scope_key="all",
             row_ids=["oa-1", "bank-1", "oa-1"],
-            expected_read_model_version="generation-1",
+            expected_read_model_version="generation-set-1",
         )
 
         self.assertEqual(payload["selected_row_ids"], ["oa-1", "bank-1"])
         self.assertEqual([row["id"] for row in payload["selected_rows"]], ["oa-1", "bank-1"])
         self.assertEqual([row["id"] for row in payload["context_rows"]], ["invoice-attachment-1"])
-        self.assertEqual(payload["read_model_version"], "generation-1")
+        self.assertEqual(payload["read_model_version"], "generation-set-1")
+        self.assertEqual(len(payload["generation_set"]), 2)
         self.assertEqual(len(connection.fetch_all_calls), 2)
         self.assertEqual(repository.freshness_calls, 2)
         self.assertEqual(repository.proof_calls, 1)
         selected_sql, selected_params = connection.fetch_all_calls[0]
         self.assertIn("r.row_id = any(%s::text[])", selected_sql)
         self.assertIn("r.generation_id = active.generation_id", selected_sql)
+        self.assertEqual(selected_params[:2], (["2026-04", "2026-05"], ["generation-apr", "generation-may"]))
         self.assertEqual(selected_params[2], ["oa-1", "bank-1"])
         self.assertFalse(
             any(
@@ -6283,6 +6309,29 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 for sql, _params in connection.fetch_all_calls
             )
         )
+
+    def test_repository_relation_preview_selection_fails_closed_for_divergent_cross_month_rows(self) -> None:
+        row = {
+            "id": "bank-1",
+            "row_id": "bank-1",
+            "type": "bank",
+            "source_kind": "bank",
+            "status": "unpaired",
+            "amount": "100.00",
+        }
+
+        for field, value in (
+            ("amount", "101.00"),
+            ("status", "paired"),
+            ("source_kind", "bank_transaction"),
+        ):
+            with self.subTest(field=field):
+                with self.assertRaises(WorkbenchRelationPreviewSelectionError) as raised:
+                    PostgresReadModelRepository._workbench_relation_preview_rows_by_id(
+                        [row, {**row, field: value}]
+                    )
+
+                self.assertEqual(raised.exception.code, "relation_preview_rows_ambiguous")
 
     def test_repository_relation_preview_selection_fails_closed_for_missing_rows(self) -> None:
         class MissingRowConnection:
