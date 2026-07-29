@@ -354,14 +354,27 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             "categories": category_payloads,
         }
 
-    def _refresh_bank_flow_rule_batch_runtime_snapshot_if_missing(self, batch_id: str) -> None:
+    def _ensure_formal_bank_flow_rule_batch_runtime_item(
+        self,
+        batch_id: str,
+        *,
+        allowed_statuses: set[str],
+    ) -> bool:
         try:
-            self._bank_batch_service.get_batch(batch_id)
-            return
+            batch = self._bank_batch_service.get_batch(batch_id)
+            return str(batch.get("status") or "").strip() in allowed_statuses
         except KeyError:
-            self._restore_bank_flow_rule_batch_runtime_item(batch_id)
+            return self._restore_formal_bank_flow_rule_batch_runtime_item(
+                batch_id,
+                allowed_statuses=allowed_statuses,
+            )
 
-    def _restore_bank_flow_rule_batch_runtime_item(self, batch_id: str) -> bool:
+    def _restore_formal_bank_flow_rule_batch_runtime_item(
+        self,
+        batch_id: str,
+        *,
+        allowed_statuses: set[str],
+    ) -> bool:
         normalized_batch_id = str(batch_id or "").strip()
         read_batch = getattr(self._query_repository, "read_batch", None)
         replace_snapshot = getattr(self._bank_batch_service, "replace_snapshot", None)
@@ -369,7 +382,10 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         if not normalized_batch_id or not callable(read_batch) or not callable(replace_snapshot):
             return False
         batch = read_batch(normalized_batch_id)
-        if not isinstance(batch, dict):
+        if (
+            not isinstance(batch, dict)
+            or str(batch.get("status") or "").strip() not in allowed_statuses
+        ):
             return False
         current_snapshot = snapshot() if callable(snapshot) else {}
         current_batches = current_snapshot.get("batches") if isinstance(current_snapshot, dict) else None
@@ -405,8 +421,15 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         if isinstance(current, dict) and str(current.get("status") or "") == "submitted":
             return None
         if not str(scope_month or "").strip():
-            self._refresh_bank_flow_rule_batch_runtime_snapshot_if_missing(batch_id)
-            return None
+            if self._ensure_formal_bank_flow_rule_batch_runtime_item(
+                batch_id,
+                allowed_statuses={"submitted"},
+            ):
+                return None
+            raise BankBatchRelationMutationError(
+                "bank_flow_rule_batch_candidate_conflict",
+                "流水规则候选月份缺失，请刷新列表后重试。",
+            )
         normalized_month = str(scope_month or "").strip()
         if not SEARCH_MONTH_RE.match(normalized_month):
             raise BankBatchRelationMutationError(
@@ -538,7 +561,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             )
             relation_source_versions = relation_bundle.get("source_versions")
             source_versions = (
-                self.canonical_draft_source_versions(
+                self.candidate_source_versions_for_scope(
                     scope_key=months[0],
                     relation_mode=relation_mode,
                     relation_source_versions=(
@@ -694,7 +717,10 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         expected_version: int | None,
         reason: str | None,
     ) -> dict[str, object]:
-        self._refresh_bank_flow_rule_batch_runtime_snapshot_if_missing(batch_id)
+        self._ensure_formal_bank_flow_rule_batch_runtime_item(
+            batch_id,
+            allowed_statuses={"submitted"},
+        )
         return super().withdraw_batch(
             batch_id,
             actor=actor,
@@ -719,7 +745,10 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         for batch in batches:
             batch_id = str(batch.get("batch_id") or "").strip()
             if batch_id:
-                self._restore_bank_flow_rule_batch_runtime_item(batch_id)
+                self._restore_formal_bank_flow_rule_batch_runtime_item(
+                    batch_id,
+                    allowed_statuses={"submitted"},
+                )
         return batches
 
     def reset_submitted_bank_flow_rule_batches(
@@ -827,6 +856,11 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 for scope_key in changed_scope_keys
                 if SEARCH_MONTH_RE.match(str(scope_key).strip())
             ]
+            normalized_batch_ids = [
+                str(batch_id).strip()
+                for batch_id in list(changed_batch_ids or changed_case_ids)
+                if str(batch_id).strip()
+            ]
             save_mutation = getattr(self._state_store, "save_bank_flow_rule_batch_mutation", None)
             if not callable(save_mutation):
                 raise RuntimeError("bank_flow_rule_batch mutation persistence requires save_bank_flow_rule_batch_mutation.")
@@ -837,7 +871,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 bank_flow_rule_batch_snapshot=self._bank_batch_public_snapshot(),
                 changed_case_ids=changed_case_ids,
                 changed_scope_keys=normalized_scope_keys,
-                changed_batch_ids=list(changed_batch_ids or []),
+                changed_batch_ids=normalized_batch_ids,
                 candidate_guard=(
                     dict(candidate_guard)
                     if isinstance(candidate_guard, dict)
@@ -966,15 +1000,6 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             },
         }
         self._commit_tag_rule_update(prepared=prepared)
-        if affected_scope_keys:
-            self.enqueue_background_refresh(
-                affected_scope_keys,
-                reason="bank_flow_rule_batch_tag_rule_change",
-                metadata={
-                    "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
-                    "changed_tag_codes": changed_tag_codes,
-                },
-            )
         return self._tag_rule_update_response(
             result,
             changed_tag_codes=changed_tag_codes,
@@ -1018,16 +1043,6 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             ).strip()
             in changed_codes
         }
-        affected.update(
-            str(batch.get("scope_month") or "").strip()
-            for batch in self._bank_batch_service.list_batches(
-                {
-                    "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
-                    "status": "draft",
-                }
-            )
-            if str(batch.get("batch_type") or "").strip() in changed_codes
-        )
         return sorted(scope_key for scope_key in affected if SEARCH_MONTH_RE.match(scope_key))
 
     def _state_store_backend(self) -> str:

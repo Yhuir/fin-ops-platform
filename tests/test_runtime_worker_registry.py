@@ -44,6 +44,7 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
             "oa-pending-payment",
             "cost-tax",
             "tax-offset",
+            "bank-flow-rule-batch",
         ):
             self.assertNotIn(instance_name, registrations)
 
@@ -142,10 +143,6 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
         self.assertNotIn("pending_invoice", APP_STATUS_READ_MODEL_REGISTRY)
         self.assertNotIn("tax_offset", APP_STATUS_READ_MODEL_REGISTRY)
         self.assertNotIn("bank_flow_rule_batch", APP_STATUS_READ_MODEL_REGISTRY)
-        bank_flow = registrations["bank-flow-rule-batch"]
-        self.assertEqual(bank_flow.worker_kind, "bank-flow-rule-batch-canonical-draft")
-        self.assertEqual(bank_flow.event_types, ("bank_flow_rule_batch.canonical_draft.refresh",))
-        self.assertFalse(bank_flow.rabbitmq_eligible)
         self.assertNotIn("cost-statistics", registrations)
         self.assertNotIn("cost-statistics-secondary", registrations)
         self.assertNotIn("cost_statistics", APP_STATUS_READ_MODEL_REGISTRY)
@@ -202,8 +199,12 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
                 self.assertEqual(definition.refresh_event_type, event_type)
 
     def test_retired_worker_flags_are_not_accepted(self) -> None:
-        with self.assertRaises(SystemExit):
-            worker_app.build_parser().parse_args(["--enable-bank-account-balance-read-model-refresh"])
+        for retired_flag in (
+            "--enable-bank-account-balance-read-model-refresh",
+            "--enable-bank-flow-rule-batch-canonical-draft-refresh",
+        ):
+            with self.subTest(retired_flag=retired_flag), self.assertRaises(SystemExit):
+                worker_app.build_parser().parse_args([retired_flag])
 
     def test_turnover_ledger_worker_registration_is_removed(self) -> None:
         self.assertNotIn("turnover-ledger", registration_by_instance_name())
@@ -213,13 +214,6 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
         args = worker_app.build_parser().parse_args(["--enable-no-oa-bank-batch-read-model-refresh"])
 
         self.assertEqual(worker_app._infer_worker_kind(args), "no-oa-bank-batch-read-model")
-
-    def test_worker_kind_inference_uses_registry_for_bank_flow_rule_batch_worker(self) -> None:
-        args = worker_app.build_parser().parse_args(
-            ["--enable-bank-flow-rule-batch-canonical-draft-refresh"]
-        )
-
-        self.assertEqual(worker_app._infer_worker_kind(args), "bank-flow-rule-batch-canonical-draft")
 
     def test_worker_registration_check_outputs_registry_derived_configuration(self) -> None:
         stdout = io.StringIO()
@@ -243,25 +237,6 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
         self.assertEqual(payload["handlers"], ["workbench_relation.read_model.refresh"])
         self.assertEqual(payload["registration"]["instance_name"], "workbench-relation")
         self.assertEqual(payload["registration"]["exclude_claim_scope_keys"], [])
-
-    def test_bank_flow_rule_batch_registration_check_bootstraps_canonical_draft_owner(self) -> None:
-        stdout = io.StringIO()
-
-        with contextlib.redirect_stdout(stdout):
-            exit_code = worker_app.main(
-                [
-                    "--registration",
-                    "bank-flow-rule-batch",
-                    "--worker-instance",
-                    "bank-flow-rule-batch",
-                    "--check",
-                ]
-            )
-
-        payload = json.loads(stdout.getvalue())
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(payload["worker_instance"], "bank-flow-rule-batch")
-        self.assertIn("bank_flow_rule_batch.canonical_draft.refresh", payload["handlers"])
 
     def test_unknown_worker_registration_fails_fast(self) -> None:
         with self.assertRaises(SystemExit):

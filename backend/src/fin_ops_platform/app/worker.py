@@ -13,18 +13,6 @@ from fin_ops_platform.services.app_settings_service import (
     DEFAULT_OA_RETENTION_CUTOFF_DATE,
     AppSettingsService,
 )
-from fin_ops_platform.services.bank_batch_service import (
-    BANK_FLOW_RULE_BATCH_ID_PREFIX,
-    BANK_FLOW_RULE_BATCH_RELATION_MODE,
-    BANK_FLOW_RULE_BATCH_SCHEMA_VERSION,
-    BankBatchRelationRepairReadPort,
-    BankBatchService,
-)
-from fin_ops_platform.services.bank_flow_rule_batch_canonical_draft_owner import (
-    BANK_FLOW_RULE_BATCH_DRAFT_REFRESH_EVENT_TYPE,
-    BankFlowRuleBatchCanonicalDraftOwner,
-    BankFlowRuleBatchCanonicalDraftPersistencePort,
-)
 from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
 from fin_ops_platform.services.bank_transaction_effective_category_provider import (
@@ -143,7 +131,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enable-workbench-relation-read-model-refresh", action="store_true", help="Register workbench relation distribution read model refresh handler.")
     parser.add_argument("--enable-search-read-model-refresh", action="store_true", help="Register search SQL read model refresh handler.")
     parser.add_argument("--enable-no-oa-bank-batch-read-model-refresh", action="store_true", help="Register no-OA bank batch SQL read model refresh handler.")
-    parser.add_argument("--enable-bank-flow-rule-batch-canonical-draft-refresh", action="store_true", help="Register bank-flow canonical draft refresh handler.")
     parser.add_argument("--enable-oa-sync", action="store_true", help="Register OA Mongo to PostgreSQL projection sync handler.")
     parser.add_argument("--enable-import-job-processing", action="store_true", help="Register import job worker handler.")
     parser.add_argument("--enable-workbench-matching", action="store_true", help="Poll DB-backed workbench matching dirty scopes.")
@@ -371,54 +358,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         handlers[NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE] = _read_model_handler(refresh_service.handle_runtime_event)
         if NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE not in config.event_types:
             config.event_types.append(NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE)
-    if args.enable_bank_flow_rule_batch_canonical_draft_refresh:
-        state_store = PostgresStateStore(data_dir=default_data_dir(), connection=connection) if connection is not None else None
-        category_service = BankTransactionCategoryService.from_snapshot(
-            state_store.load_bank_transaction_categories() if state_store is not None else {}
-        )
-        auto_category_service = BankTransactionAutoCategoryService(category_service=category_service)
-        app_settings_service = AppSettingsService(
-            state_store,
-            SimpleNamespace(restore_manual_projects=lambda _projects: None, list_projects=lambda: []),
-            bank_transaction_category_service=category_service,
-            bank_transaction_auto_category_service=auto_category_service,
-        )
-        relation_service = PairRelationService()
-        bank_flow_service = BankBatchService.from_snapshot(
-            state_store.load_bank_flow_rule_batches() if state_store is not None else {},
-            relation_read_port=BankBatchRelationRepairReadPort(relation_service),
-            schema_version=BANK_FLOW_RULE_BATCH_SCHEMA_VERSION,
-            batch_id_prefix=BANK_FLOW_RULE_BATCH_ID_PREFIX,
-            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
-        )
-        refresh_service = BankFlowRuleBatchCanonicalDraftOwner(
-            import_service=ImportNormalizationService(
-                fact_repository=state_store.import_fact_repository if state_store is not None else None
-            ),
-            effective_category_provider=BankTransactionEffectiveCategoryProvider(
-                category_service=category_service,
-                auto_category_service=auto_category_service,
-            ),
-            bank_batch_service=bank_flow_service,
-            app_settings_service=app_settings_service,
-            bank_transaction_category_service=category_service,
-            relation_snapshot_service=relation_service,
-            state_store=state_store or SimpleNamespace(save_bank_flow_rule_batches=lambda _snapshot: None),
-            materialization_persistence=BankFlowRuleBatchCanonicalDraftPersistencePort(
-                state_store or SimpleNamespace(save_bank_flow_rule_batches=lambda _snapshot: None)
-            ),
-            workbench_matching_source_versions_provider=lambda: _bank_batch_workbench_matching_source_versions(
-                app_settings_service
-            ),
-            relation_source_repository=(
-                PostgresWorkbenchRelationRepository(connection)
-                if connection is not None
-                else None
-            ),
-        )
-        handlers[BANK_FLOW_RULE_BATCH_DRAFT_REFRESH_EVENT_TYPE] = refresh_service.handle_runtime_event
-        if BANK_FLOW_RULE_BATCH_DRAFT_REFRESH_EVENT_TYPE not in config.event_types:
-            config.event_types.append(BANK_FLOW_RULE_BATCH_DRAFT_REFRESH_EVENT_TYPE)
     if args.enable_import_job_processing:
         import_processors = (
             check_import_job_processors()

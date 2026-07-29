@@ -86,7 +86,7 @@ class BankBatchMaterializationService:
                 if isinstance(relation_bundle, dict)
                 else None
             )
-            precheck_source_versions = self._application_service.canonical_draft_source_versions(
+            precheck_source_versions = self._application_service.candidate_source_versions_for_scope(
                 scope_key=scope_key,
                 relation_mode=relation_mode,
                 relation_source_versions=(

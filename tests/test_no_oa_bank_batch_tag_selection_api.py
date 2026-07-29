@@ -557,9 +557,6 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
             [{"transaction_id": row_id, "category_code": "fee"}],
             actor="tester",
         )
-        app._bank_flow_rule_batch_canonical_draft_producer = lambda: SimpleNamespace(
-            enqueue=lambda scope_keys, **_kwargs: bool(scope_keys)
-        )
         self._set_bank_flow_rule_requirements(
             app,
             tag_code="fee",

@@ -243,6 +243,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "bank-flow-rule-batch-canonical-draft",
             "enqueue_bank_flow_canonical_drafts",
             "bank_flow_rule_batch_canonical_draft_scope_lock",
+            "save_bank_flow_rule_batches_scope",
         )
         production_roots = (
             SOURCE_ROOT,
@@ -2800,34 +2801,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if snippet not in executor_source:
                 violations.append(f"no-OA bank batch lifecycle executor is missing behavior {snippet}")
-
-        self.assertEqual(violations, [])
-
-    def test_bank_flow_rule_batch_derived_lifecycle_uses_own_executor_boundary(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        app_factory_source = _function_source(server_tree, server_source, "_bank_flow_rule_batch_derived_lifecycle_executor")
-        executor_path = SERVICES_ROOT / "bank_flow_rule_batch_derived_lifecycle_executor.py"
-        executor_source = executor_path.read_text(encoding="utf-8") if executor_path.exists() else ""
-        violations: list[str] = []
-
-        if "BankFlowRuleBatchDerivedLifecycleExecutor(" not in app_factory_source:
-            violations.append("bank-flow rule batch lifecycle executor is not wired through its own executor")
-        if "NoOaBankBatchDerivedLifecycleExecutor(" in app_factory_source:
-            violations.append("bank-flow rule batch lifecycle executor still reuses the no-OA executor")
-        for forbidden in ("read_model_name=", "default_reason="):
-            if forbidden in app_factory_source:
-                violations.append(f"bank-flow lifecycle executor still uses configurable no-OA identity {forbidden}")
-        for snippet in (
-            "class BankFlowRuleBatchDerivedLifecycleExecutor",
-            "def execute(",
-            'reason=str(domain_plan.get("reason") or "derived_lifecycle_bank_flow_rule_batch")',
-            '"deleted_counts": {"bank_flow_rule_batch_canonical_drafts": 0}',
-            '"enqueued_jobs": ["bank_flow_rule_batch.canonical_draft.refresh"] if enqueued else []',
-        ):
-            if snippet not in executor_source:
-                violations.append(f"bank-flow lifecycle executor is missing behavior {snippet}")
 
         self.assertEqual(violations, [])
 
@@ -5454,7 +5427,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         paths = (
             APP_ROOT / "routes_bank_flow_rule_batches.py",
             SERVICES_ROOT / "bank_flow_rule_batch_application_service.py",
-            SERVICES_ROOT / "bank_flow_rule_batch_canonical_draft_owner.py",
         )
         violations: list[str] = []
         for path in paths:

@@ -16,7 +16,6 @@ from fin_ops_platform.services.runtime_paths import default_data_dir as _default
 
 FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 GRIDFS_REF_PREFIX = "gridfs://"
-BANK_FLOW_RULE_BATCH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
 
 
 def _etc_business_batch_bucket(status: str) -> str | None:
@@ -27,26 +26,6 @@ def _etc_business_batch_bucket(status: str) -> str | None:
     if status in {"deleted", "superseded"}:
         return None
     return "unsubmitted"
-
-
-def _base_read_model_scope_key(scope_key: object) -> str:
-    normalized = str(scope_key or "").strip()
-    if normalized.startswith("visibility:"):
-        return normalized.rsplit(":", 1)[-1].strip() or "all"
-    return normalized or "all"
-
-
-def _bank_flow_rule_batch_month_scopes(scope_keys: object) -> list[str]:
-    ordered: list[str] = []
-    seen: set[str] = set()
-    iterable = sorted(scope_keys) if isinstance(scope_keys, set) else scope_keys
-    for scope_key in iterable if isinstance(iterable, (list, tuple, set)) else []:
-        base_scope_key = _base_read_model_scope_key(scope_key)
-        if not BANK_FLOW_RULE_BATCH_SCOPE_RE.match(base_scope_key) or base_scope_key in seen:
-            continue
-        ordered.append(base_scope_key)
-        seen.add(base_scope_key)
-    return ordered
 
 
 class ApplicationStateStore:
@@ -820,15 +799,6 @@ class ApplicationStateStore:
         with self._bank_flow_rule_batches_path.open("wb") as handle:
             pickle.dump(normalized_snapshot, handle)
 
-    def save_bank_flow_rule_batches_scope(
-        self,
-        snapshot: dict[str, Any],
-        *,
-        scope_key: str,
-    ) -> None:
-        _ = scope_key
-        self.save_bank_flow_rule_batches(snapshot)
-
     def save_no_oa_bank_batch_mutation(
         self,
         *,
@@ -857,8 +827,12 @@ class ApplicationStateStore:
         candidate_guard: dict[str, object] | None = None,
     ) -> None:
         normalized_case_ids = [str(case_id).strip() for case_id in changed_case_ids if str(case_id).strip()]
-        normalized_scope_keys = [str(scope_key).strip() for scope_key in changed_scope_keys if str(scope_key).strip()]
-        batch_scope_keys = _bank_flow_rule_batch_month_scopes(normalized_scope_keys)
+        _ = changed_scope_keys
+        normalized_batch_ids = {
+            str(batch_id).strip()
+            for batch_id in changed_batch_ids
+            if str(batch_id).strip()
+        }
         if isinstance(candidate_guard, dict):
             batches = bank_flow_rule_batch_snapshot.get("batches")
             candidate = (
@@ -887,11 +861,9 @@ class ApplicationStateStore:
                 pair_relation_snapshot,
                 changed_case_ids=normalized_case_ids,
             )
-        if batch_scope_keys:
-            for scope_key in batch_scope_keys:
-                self.save_bank_flow_rule_batches_scope(bank_flow_rule_batch_snapshot, scope_key=scope_key)
-        else:
-            self.save_bank_flow_rule_batches(bank_flow_rule_batch_snapshot)
+        if not normalized_batch_ids:
+            raise ValueError("bank-flow rule batch mutation requires an explicit changed batch id")
+        self.save_bank_flow_rule_batches(bank_flow_rule_batch_snapshot)
 
     def load_bank_transaction_categories(self) -> dict[str, Any]:
         current_payload = self._load_local_pickle()

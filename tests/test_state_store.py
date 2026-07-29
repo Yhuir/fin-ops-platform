@@ -556,6 +556,7 @@ class StateStoreTests(unittest.TestCase):
                 },
                 changed_case_ids=["CASE-1"],
                 changed_scope_keys=["all", "visibility:paired:2026-05"],
+                changed_batch_ids=["batch-1"],
             )
 
             reloaded = ApplicationStateStore(data_dir)

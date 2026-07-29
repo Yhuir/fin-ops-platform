@@ -145,15 +145,6 @@ RUNTIME_WORKER_REGISTRY: tuple[RuntimeWorkerRegistration, ...] = (
         read_model_key="no_oa_bank_batch",
         read_model_scope_type="no_oa_bank_batch",
     ),
-    RuntimeWorkerRegistration(
-        instance_name="bank-flow-rule-batch",
-        worker_kind="bank-flow-rule-batch-canonical-draft",
-        handler_flags=("--enable-bank-flow-rule-batch-canonical-draft-refresh",),
-        event_types=("bank_flow_rule_batch.canonical_draft.refresh",),
-        required=True,
-        rabbitmq_eligible=False,
-        env_example="fin-ops.worker.bank-flow-rule-batch.env.example",
-    ),
 )
 
 

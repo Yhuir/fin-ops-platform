@@ -5,14 +5,9 @@ from io import StringIO
 import json
 import os
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from fin_ops_platform.app import rabbitmq_dispatcher
-from fin_ops_platform.services.bank_flow_rule_batch_canonical_draft_producer import (
-    BANK_FLOW_RULE_BATCH_DRAFT_REFRESH_EVENT_TYPE,
-    BANK_FLOW_RULE_BATCH_DRAFT_SCOPE_TYPE,
-    BankFlowRuleBatchCanonicalDraftProducer,
-)
 from fin_ops_platform.services.rabbitmq_runtime import (
     RabbitMqConsumer,
     RabbitMqDispatcher,
@@ -26,10 +21,6 @@ from fin_ops_platform.services.rabbitmq_runtime import (
 )
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent, RuntimeQueueSettings
 from fin_ops_platform.services.runtime_worker import RuntimeWorkerResult
-from fin_ops_platform.services.runtime_worker_registry import (
-    get_registration_by_instance_name,
-    read_model_event_types,
-)
 
 
 def event(**overrides: object) -> RuntimeQueueEvent:
@@ -323,35 +314,6 @@ class RabbitMqRuntimeTests(unittest.TestCase):
         self.assertEqual(routes["workbench_relation.read_model.refresh"].queue, "finops.workbench_relation.read_model.refresh")
         self.assertEqual(routes["search.read_model.refresh"].queue, "finops.search.read_model.refresh")
         self.assertEqual(routes["no_oa_bank_batch.read_model.refresh"].queue, "finops.no_oa_bank_batch.read_model.refresh")
-
-    def test_bank_flow_canonical_draft_event_is_postgres_only_non_read_model_and_deduped(self) -> None:
-        registration = get_registration_by_instance_name("bank-flow-rule-batch")
-        queue = Mock()
-        queue.enqueue.return_value.event_id = "draft-event-1"
-        producer = BankFlowRuleBatchCanonicalDraftProducer(queue_repository_provider=lambda: queue)
-
-        event_ids = producer.enqueue_scope_keys(
-            ["2026-07", "2026-07"],
-            reason="bank_fact_changed",
-        )
-
-        self.assertEqual(registration.event_types, (BANK_FLOW_RULE_BATCH_DRAFT_REFRESH_EVENT_TYPE,))
-        self.assertFalse(registration.rabbitmq_eligible)
-        self.assertIsNone(registration.read_model_key)
-        self.assertNotIn(BANK_FLOW_RULE_BATCH_DRAFT_REFRESH_EVENT_TYPE, SUPPORTED_EVENT_TYPES)
-        self.assertNotIn(BANK_FLOW_RULE_BATCH_DRAFT_REFRESH_EVENT_TYPE, read_model_event_types())
-        self.assertEqual(event_ids, ["draft-event-1"])
-        queue.enqueue.assert_called_once()
-        enqueue_kwargs = queue.enqueue.call_args.kwargs
-        self.assertEqual(enqueue_kwargs["event_type"], BANK_FLOW_RULE_BATCH_DRAFT_REFRESH_EVENT_TYPE)
-        self.assertEqual(enqueue_kwargs["aggregate_type"], "bank_flow_rule_batch")
-        self.assertEqual(enqueue_kwargs["scope_type"], BANK_FLOW_RULE_BATCH_DRAFT_SCOPE_TYPE)
-        self.assertEqual(enqueue_kwargs["scope_key"], "2026-07")
-        self.assertEqual(
-            enqueue_kwargs["dedupe_key"],
-            "bank_flow_rule_batch.canonical_draft.refresh:default:bank_flow_rule_batch_draft:2026-07",
-        )
-        self.assertEqual(enqueue_kwargs["payload"]["reason"], "bank_fact_changed")
 
     def test_consumer_subscribes_to_queues_for_registered_event_types(self) -> None:
         queue = FakeQueue()

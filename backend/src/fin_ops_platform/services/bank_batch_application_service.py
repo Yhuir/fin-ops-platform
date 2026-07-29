@@ -583,7 +583,7 @@ class BankBatchApplicationService:
                 reason=self._source_version_precheck_reason(relation_mode),
             )
 
-    def canonical_draft_source_versions(
+    def candidate_source_versions_for_scope(
         self,
         *,
         scope_key: str,

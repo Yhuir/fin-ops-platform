@@ -77,19 +77,6 @@ class RecordingConnection:
         return None
 
 
-class CanonicalProofConnection(RecordingConnection):
-    def __init__(self, proof: dict[str, object]) -> None:
-        super().__init__()
-        self.proof = dict(proof)
-
-    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
-        normalized_sql = " ".join(sql.split())
-        self.fetched_one.append((normalized_sql, params))
-        if "with scoped_bank as materialized" in normalized_sql:
-            return dict(self.proof)
-        return None
-
-
 def write_sql(connection: RecordingConnection) -> list[str]:
     return [
         *(sql for sql, _params in connection.executed),
@@ -736,44 +723,6 @@ def test_no_oa_bank_batch_scoped_save_deletes_only_target_scope_before_upsert() 
     assert replaced_event_params == [("march-batch",)]
 
 
-def test_bank_flow_rule_batch_save_uses_dedicated_physical_tables() -> None:
-    connection = RecordingConnection()
-    repository = PostgresWorkbenchRepository(connection)
-
-    repository.save_bank_flow_rule_batches(
-        {
-            "batches": {
-                "bank-flow-batch": {
-                    "batch_id": "bank-flow-batch",
-                    "status": "submitted",
-                    "status_bucket": "submitted",
-                    "version": 2,
-                    "scope_month": "2026-03",
-                    "account_key": "acct",
-                    "row_ids": ["txn-1"],
-                    "total_amount": "10.00",
-                    "relation_mode": "bank_flow_rule_batch",
-                }
-            },
-            "audit_log": [{"batch_id": "bank-flow-batch", "operation": "submitted"}],
-        }
-    )
-
-    executed_sql = write_sql(connection)
-    assert not any("read_model.bank_flow_rule_batch_rows" in sql for sql in executed_sql)
-    assert any("delete from app.bank_flow_rule_batch_events" in sql for sql in executed_sql)
-    assert any("delete from app.bank_flow_rule_batches" in sql for sql in executed_sql)
-    assert any("insert into app.bank_flow_rule_batches(" in sql for sql in executed_sql)
-    assert any("insert into app.bank_flow_rule_batch_events(" in sql for sql in executed_sql)
-    assert not any(sql.startswith("insert into app.bank_flow_rule_batches(") for sql, _params in connection.executed)
-    forbidden_tables = (
-        "app.no_oa_bank_batches",
-        "app.no_oa_bank_batch_events",
-        "read_model.no_oa_bank_batch_rows",
-    )
-    assert not any(forbidden in sql for sql in executed_sql for forbidden in forbidden_tables)
-
-
 def test_bank_flow_rule_batch_delta_save_only_upserts_changed_batch_items() -> None:
     connection = RecordingConnection()
     repository = PostgresWorkbenchRepository(connection)
@@ -885,12 +834,7 @@ def test_bank_flow_rule_batch_query_reads_canonical_tables_without_page_projecti
     read_sql = [*(sql for sql, _ in connection.fetched_all), *(sql for sql, _ in connection.fetched_one)]
     assert any("from app.bank_flow_rule_batches batch" in sql for sql in read_sql)
     assert any("from app.workbench_pair_relations relation" in sql for sql in read_sql)
-    assert any("limit %s offset %s" in sql for sql in read_sql)
-    assert any(
-        any(left == 50 and right == 50 for left, right in zip(params, params[1:]))
-        for sql, params in connection.fetched_one
-        if "limit %s offset %s" in sql
-    )
+    assert not any("limit %s offset %s" in sql for sql in read_sql)
     assert not any("read_model.bank_flow_rule_batch_rows" in sql for sql in read_sql)
     assert not any("from read_model.no_oa_bank_batch_rows" in sql for sql in read_sql)
 
@@ -909,9 +853,9 @@ def test_bank_flow_rule_batch_affected_scope_lookup_is_one_set_based_query() -> 
     assert len(connection.fetched_all) == 1
     sql, params = connection.fetched_all[0]
     assert "from app.bank_transactions bank" in sql
-    assert "from app.bank_flow_rule_batches batch" in sql
-    assert "in ('draft', 'unsubmitted')" in sql
-    assert params == (["fee", "salary"], ["fee", "salary"])
+    assert "from app.bank_flow_rule_batches batch" not in sql
+    assert "in ('draft', 'unsubmitted')" not in sql
+    assert params == (["fee", "salary"],)
 
 
 def test_bank_flow_rule_settings_version_check_locks_and_saves_in_caller_transaction() -> None:
@@ -1351,59 +1295,7 @@ def test_workbench_repository_uses_pair_relations_only_for_canonical_bank_flow_p
     }
 
     assert {snippet for snippet in forbidden_snippets if snippet in repository_source} == set()
-    assert repository_source.count("from app.workbench_pair_relations relation") == 1
-
-
-def test_bank_flow_canonical_publish_rejects_stale_membership_proof_under_scope_lock() -> None:
-    current_proof = {
-        "bank_count": 2,
-        "bank_membership_version": "bank-new",
-        "category_count": 2,
-        "category_membership_version": "category-new",
-        "relation_count": 1,
-        "relation_membership_version": "relation-new",
-        "settings_version": 4,
-        "settings_updated_at": "2026-07-27 10:00:00+00",
-    }
-    stale_proof = {
-        **current_proof,
-        "bank_membership_version": "bank-old-non-max-member",
-        "relation_membership_version": "relation-before-null-month-member",
-    }
-    connection = CanonicalProofConnection(current_proof)
-    repository = PostgresWorkbenchRepository(connection)
-
-    stale_published = repository.save_bank_flow_rule_batches_scope(
-        {"batches": {}, "audit_log": []},
-        scope_key="2026-07",
-        expected_source_proof=stale_proof,
-    )
-
-    assert stale_published is False
-    assert connection.transaction_enters == 1
-    assert connection.transaction_exits == 1
-    assert "pg_advisory_xact_lock" in connection.executed[0][0]
-    assert not any("delete from app.bank_flow_rule_batches" in sql for sql, _params in connection.executed)
-
-    current_published = repository.save_bank_flow_rule_batches_scope(
-        {"batches": {}, "audit_log": []},
-        scope_key="2026-07",
-        expected_source_proof=current_proof,
-    )
-
-    assert current_published is True
-    assert connection.transaction_enters == 2
-    proof_sql = connection.fetched_one[-1][0]
-    assert "string_agg" in proof_sql
-    assert "bank.data_fingerprint" in proof_sql
-    assert "relation.row_ids && array" in proof_sql
-    assert "relation.month_scope = %s::date or relation.row_ids &&" in proof_sql
-    assert "max(" not in proof_sql
-    assert any("delete from app.bank_flow_rule_batches" in sql for sql, _params in connection.executed)
-
-
-
-
+    assert "from app.workbench_pair_relations relation" not in repository_source
 
 
 def test_max_numeric_suffix_supports_dash_and_underscore_identifiers() -> None:

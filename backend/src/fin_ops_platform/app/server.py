@@ -104,12 +104,6 @@ from fin_ops_platform.services.bank_details_relation_tag_projection_service impo
 )
 from fin_ops_platform.services.bank_details_service import BankDetailsService
 from fin_ops_platform.services.bank_flow_rule_batch_application_service import BankFlowRuleBatchApplicationService
-from fin_ops_platform.services.bank_flow_rule_batch_canonical_draft_producer import (
-    BankFlowRuleBatchCanonicalDraftProducer,
-)
-from fin_ops_platform.services.bank_flow_rule_batch_derived_lifecycle_executor import (
-    BankFlowRuleBatchDerivedLifecycleExecutor,
-)
 from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
 from fin_ops_platform.services.bank_transaction_category_mutation_writer import (
     BankTransactionCategoryMutationWriter,
@@ -1052,7 +1046,6 @@ class Application:
             bank_scope_keys_for_import_file_session=self._bank_scope_keys_for_import_file_session,
             input_invoice_usage_scope_keys_for_import_file_session=self._input_invoice_usage_scope_keys_for_import_file_session,
             output_invoice_collection_scope_keys_for_import_file_session=self._output_invoice_collection_scope_keys_for_import_file_session,
-            enqueue_bank_flow_canonical_drafts=self._bank_flow_rule_batch_canonical_draft_producer().enqueue,
             link_etc_import_result_to_existing_invoices=self._link_etc_import_result_to_existing_invoices,
             etc_import_preview_service=self._etc_import_preview_service,
             oa_manual_import_create_processor=self._process_oa_manual_import_create_job,
@@ -7131,7 +7124,6 @@ class Application:
             workbench_matching_source_versions_provider=self._bank_batch_workbench_source_versions,
             bank_transaction_category_affected_months_provider=self._bank_transaction_category_affected_months,
             search_cache_clearer=self._search_service.clear_cache,
-            background_refresh_producer=self._bank_flow_rule_batch_canonical_draft_producer(),
             relation_command_service=self._workbench_relation_command_service(
                 repository=self._state_store,
                 save_repository=False,
@@ -7188,11 +7180,6 @@ class Application:
             affected_months_provider=getattr(self, "_bank_transaction_category_affected_months", lambda _transaction_ids: []),
             suggestion_provider=suggestion_provider if callable(suggestion_provider) else None,
             category_mutation_writer=category_mutation_writer,
-            after_category_mutation=lambda months: self._bank_flow_rule_batch_canonical_draft_producer().enqueue(
-                months,
-                reason="effective_bank_category_changed",
-                metadata={"source": "bank_details_category_mutation"},
-            ),
         )
 
     def _bank_transaction_category_mutation_writer(self) -> BankTransactionCategoryMutationWriter | None:
@@ -7220,15 +7207,6 @@ class Application:
 
     def _no_oa_bank_batch_read_model_refresh_producer(self) -> NoOaBankBatchReadModelRefreshProducer:
         return NoOaBankBatchReadModelRefreshProducer(refresh_gateway_provider=self._read_model_refresh_gateway)
-
-    def _bank_flow_rule_batch_canonical_draft_producer(self) -> BankFlowRuleBatchCanonicalDraftProducer:
-        return BankFlowRuleBatchCanonicalDraftProducer(
-            queue_repository_provider=lambda: getattr(
-                getattr(self, "_runtime_repositories", None),
-                "queue_repository",
-                None,
-            )
-        )
 
     def _no_oa_bank_batch_workbench_payload_decorator(self) -> NoOaBankBatchWorkbenchPayloadDecorator:
         return NoOaBankBatchWorkbenchPayloadDecorator(batch_provider=self._no_oa_bank_batch_service.get_batch)
@@ -9255,7 +9233,6 @@ class Application:
             "workbench_relation_read_model": self._workbench_relation_derived_lifecycle_executor().execute,
             "workbench_matching_dirty_scopes": self._derived_lifecycle_dirty_scopes_executor,
             "no_oa_bank_batch_read_model": self._no_oa_bank_batch_derived_lifecycle_executor().execute,
-            "bank_flow_rule_batch_canonical_draft": self._bank_flow_rule_batch_derived_lifecycle_executor().execute,
             "search_cache": self._derived_lifecycle_search_cache_executor,
             "oa_adapter_records_cache": self._derived_lifecycle_oa_adapter_cache_executor,
             "historical_etc_repair_state": self._derived_lifecycle_historical_etc_executor,
@@ -9314,11 +9291,6 @@ class Application:
     def _no_oa_bank_batch_derived_lifecycle_executor(self) -> NoOaBankBatchDerivedLifecycleExecutor:
         return NoOaBankBatchDerivedLifecycleExecutor(
             enqueue_refresh=self._no_oa_bank_batch_read_model_refresh_producer().enqueue,
-        )
-
-    def _bank_flow_rule_batch_derived_lifecycle_executor(self) -> BankFlowRuleBatchDerivedLifecycleExecutor:
-        return BankFlowRuleBatchDerivedLifecycleExecutor(
-            enqueue_refresh=self._bank_flow_rule_batch_canonical_draft_producer().enqueue,
         )
 
     def _derived_lifecycle_search_cache_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:

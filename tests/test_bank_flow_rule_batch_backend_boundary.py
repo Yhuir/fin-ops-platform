@@ -3,9 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 import unittest
 
-from fin_ops_platform.services.runtime_worker_registry import registration_by_instance_name
-
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 APP_ROOT = REPO_ROOT / "backend/src/fin_ops_platform/app"
 SERVICES_ROOT = REPO_ROOT / "backend/src/fin_ops_platform/services"
@@ -40,13 +37,12 @@ class BankFlowRuleBatchBackendBoundaryTests(unittest.TestCase):
         for relative_path in (
             APP_ROOT / "routes_bank_flow_rule_batches.py",
             SERVICES_ROOT / "bank_flow_rule_batch_application_service.py",
-            SERVICES_ROOT / "bank_flow_rule_batch_canonical_draft_owner.py",
         ):
             source = relative_path.read_text(encoding="utf-8")
             for snippet in forbidden:
                 self.assertNotIn(snippet, source, f"{relative_path.name} still references {snippet}")
 
-    def test_server_and_worker_bank_flow_wiring_use_bank_flow_io_names(self) -> None:
+    def test_server_bank_flow_wiring_uses_live_query_and_formal_mutation_boundaries(self) -> None:
         server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
         worker_source = (APP_ROOT / "worker.py").read_text(encoding="utf-8")
 
@@ -58,24 +54,14 @@ class BankFlowRuleBatchBackendBoundaryTests(unittest.TestCase):
         self.assertIn('"workbench_relation_repository"', server_body)
         self.assertIn("relation_source_repository=relation_source_repository", server_body)
         self.assertIn("bank_batch_query_repository=query_repository", server_body)
-        self.assertIn("background_refresh_producer=", server_body)
+        self.assertNotIn("background_refresh_producer=", server_body)
         self.assertNotIn("queue_repository=", server_body)
         self.assertNotIn("relation_facade=", server_body)
         self.assertNotIn("no_oa_bank_batch_service=", server_body)
         self.assertNotIn("no_oa_bank_batch_read_model_repository=", server_body)
 
-        worker_start = worker_source.index("    if args.enable_bank_flow_rule_batch_canonical_draft_refresh:")
-        worker_end = worker_source.index("\n    if args.enable_import_job_processing:", worker_start)
-        worker_body = worker_source[worker_start:worker_end]
-        self.assertIn("bank_batch_service=bank_flow_service", worker_body)
-        self.assertIn("BankFlowRuleBatchCanonicalDraftPersistencePort", worker_body)
-        self.assertIn("load_bank_flow_rule_batches()", worker_body)
-        self.assertIn("relation_source_repository=(", worker_body)
-        self.assertIn("PostgresWorkbenchRelationRepository(connection)", worker_body)
-        self.assertNotIn("load_workbench_pair_relations()", worker_body)
-        self.assertNotIn("relation_facade=workbench_relation_read_facade", worker_body)
-        self.assertNotIn("no_oa_bank_batch_service=", worker_body)
-        self.assertNotIn("NoOaBankBatchReadModelPersistencePort", worker_body)
+        self.assertNotIn("BankFlowRuleBatchCanonicalDraft", worker_source)
+        self.assertNotIn("--enable-bank-flow-rule-batch-canonical-draft-refresh", worker_source)
 
     def test_canonical_page_query_does_not_read_projection_or_no_oa_fallback(self) -> None:
         source = (
@@ -96,7 +82,7 @@ class BankFlowRuleBatchBackendBoundaryTests(unittest.TestCase):
         self.assertNotIn("READ_MODEL_STATUS_SOURCE_KEYS", source)
         self.assertNotIn('"bank_flow_rule_batch": "no_oa_bank_batch"', source)
 
-    def test_postgres_state_store_bank_flow_storage_uses_dedicated_repository_io(self) -> None:
+    def test_postgres_state_store_bank_flow_storage_is_targeted_to_formal_mutations(self) -> None:
         source = (SERVICES_ROOT / "postgres_state_store.py").read_text(encoding="utf-8")
         start = source.index("    def load_bank_flow_rule_batches")
         end = source.index("\n    def save_no_oa_bank_batches", start)
@@ -104,26 +90,10 @@ class BankFlowRuleBatchBackendBoundaryTests(unittest.TestCase):
         self.assertIn("load_bank_flow_rule_batches()", load_body)
         self.assertNotIn("load_no_oa_bank_batches()", load_body)
 
-        start = source.index("    def save_bank_flow_rule_batches")
-        end = source.index("\n    def save_bank_flow_rule_batch_items", start)
-        save_body = source[start:end]
-        self.assertIn("_workbench_repository.save_bank_flow_rule_batches(", save_body)
-        self.assertIn("expected_source_proof=expected_source_proof", save_body)
-        self.assertIn("_workbench_repository.save_bank_flow_rule_batches_scope(", save_body)
-        self.assertNotIn("save_no_oa_bank_batches", save_body)
-
-    def test_bank_flow_canonical_draft_runtime_contract_is_independent(self) -> None:
-        worker = registration_by_instance_name()["bank-flow-rule-batch"]
-
-        self.assertEqual(
-            worker.handler_flags,
-            ("--enable-bank-flow-rule-batch-canonical-draft-refresh",),
-        )
-        self.assertEqual(
-            worker.event_types,
-            ("bank_flow_rule_batch.canonical_draft.refresh",),
-        )
-        self.assertIsNone(worker.read_model_scope_type)
+        self.assertNotIn("def save_bank_flow_rule_batches(", source)
+        self.assertNotIn("def save_bank_flow_rule_batches_scope(", source)
+        self.assertIn("def save_bank_flow_rule_batch_items(", source)
+        self.assertIn("bank-flow rule batch mutation requires an explicit changed batch id", source)
 
     def test_tag_rule_save_cannot_rewrite_relations_or_run_broad_lifecycle(self) -> None:
         bank_flow_source = (SERVICES_ROOT / "bank_flow_rule_batch_application_service.py").read_text(encoding="utf-8")
@@ -143,7 +113,7 @@ class BankFlowRuleBatchBackendBoundaryTests(unittest.TestCase):
             "bank_flow_rule_batch_changed",
         ):
             self.assertNotIn(forbidden, body)
-        self.assertIn("enqueue_background_refresh(", body)
+        self.assertNotIn("enqueue_background_refresh(", body)
         self.assertNotIn("enqueue_read_model_refreshes_in_transaction", body)
         self.assertNotIn("_read_model_refresh_producer", body)
         self.assertIn("affected_scope_keys_for_tag_codes", body)

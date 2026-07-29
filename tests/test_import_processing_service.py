@@ -57,7 +57,6 @@ def _assert_file_import_confirm_job_returns_import_write_targets(*, fail_persist
         bank_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: ["2026-06"],
         input_invoice_usage_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
         output_invoice_collection_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
-        enqueue_bank_flow_canonical_drafts=lambda *_args, **_kwargs: events.append("bankflow"),
         link_etc_import_result_to_existing_invoices=lambda _result: [],
         etc_import_preview_service=SimpleNamespace(),
     )
@@ -84,7 +83,7 @@ def _assert_file_import_confirm_job_returns_import_write_targets(*, fail_persist
         background_job_id="",
     )
 
-    assert events == ["persist", "bankflow", "matching"]
+    assert events == ["persist", "matching"]
     assert result["affected_months"] == ["2026-06"]
     assert persisted[0]["import_state_payload"] is import_state_payload
     assert result["affected_scope_keys"] == ["2026-06"]

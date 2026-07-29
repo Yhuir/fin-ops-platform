@@ -26,7 +26,6 @@ class ImportProcessingService:
         link_etc_import_result_to_existing_invoices: Callable[[Any], list[str]],
         etc_import_preview_service: Any,
         oa_manual_import_create_processor: Callable[[ImportJob], dict[str, object]] | None = None,
-        enqueue_bank_flow_canonical_drafts: Callable[..., bool] | None = None,
     ) -> None:
         self._file_import_service = file_import_service
         self._tax_certified_import_service = tax_certified_import_service
@@ -43,7 +42,6 @@ class ImportProcessingService:
         )
         self._input_invoice_usage_scope_keys_for_import_file_session = input_invoice_usage_scope_keys_for_import_file_session
         self._output_invoice_collection_scope_keys_for_import_file_session = output_invoice_collection_scope_keys_for_import_file_session
-        self._enqueue_bank_flow_canonical_drafts = enqueue_bank_flow_canonical_drafts
         self._link_etc_import_result_to_existing_invoices = link_etc_import_result_to_existing_invoices
         self._etc_import_preview_service = etc_import_preview_service
         self._oa_manual_import_create_processor = oa_manual_import_create_processor
@@ -160,15 +158,6 @@ class ImportProcessingService:
             self._persist_confirmed_import_delta(
                 import_state_payload=import_state_payload,
             )
-            if bank_scope_keys and self._enqueue_bank_flow_canonical_drafts is not None:
-                self._enqueue_bank_flow_canonical_drafts(
-                    bank_scope_keys,
-                    reason="bank_import_confirmed",
-                    metadata={
-                        "session_id": confirmed_session.id,
-                        "selected_file_ids": selected_file_ids,
-                    },
-                )
             matching_job_id = None
             if any(file.status == "confirmed" for file in confirmed_session.files):
                 matching_job = self._enqueue_workbench_auto_matching_for_scopes(

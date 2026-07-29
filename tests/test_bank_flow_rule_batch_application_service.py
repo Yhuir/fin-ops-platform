@@ -18,12 +18,6 @@ from fin_ops_platform.services.bank_batch_service import (
 from fin_ops_platform.services.bank_flow_rule_batch_application_service import (
     BankFlowRuleBatchApplicationService,
 )
-from fin_ops_platform.services.bank_flow_rule_batch_canonical_draft_owner import (
-    BANK_FLOW_RULE_BATCH_DRAFT_REFRESH_EVENT_TYPE,
-    BankFlowRuleBatchCanonicalDraftOwner,
-    BankFlowRuleBatchCanonicalDraftPersistencePort,
-)
-from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 from fin_ops_platform.services.workbench_pair_relation_service import (
     WorkbenchPairRelationService,
 )
@@ -32,8 +26,6 @@ from fin_ops_platform.services.workbench_pair_relation_service import (
 class RecordingStateStore:
     def __init__(self, *, bank_flow_batch_snapshot: dict[str, object] | None = None) -> None:
         self.bank_flow_mutations: list[dict[str, object]] = []
-        self.bank_flow_snapshots: list[dict[str, object]] = []
-        self.bank_flow_scopes: list[dict[str, object]] = []
         self.bank_flow_batch_snapshot = dict(bank_flow_batch_snapshot or {})
         self.load_bank_flow_batch_calls = 0
 
@@ -43,24 +35,6 @@ class RecordingStateStore:
 
     def save_bank_flow_rule_batch_mutation(self, **kwargs: object) -> None:
         self.bank_flow_mutations.append(dict(kwargs))
-
-    def save_bank_flow_rule_batches(self, snapshot: dict[str, object]) -> None:
-        self.bank_flow_snapshots.append(dict(snapshot))
-
-    def save_bank_flow_rule_batches_scope(
-        self,
-        snapshot: dict[str, object],
-        *,
-        scope_key: str,
-        expected_source_proof: dict[str, object] | None = None,
-    ) -> None:
-        self.bank_flow_scopes.append(
-            {
-                "snapshot": dict(snapshot),
-                "scope_key": scope_key,
-                "expected_source_proof": expected_source_proof,
-            }
-        )
 
     def save_no_oa_bank_batch_mutation(self, **_kwargs: object) -> None:
         raise AssertionError("bank-flow mutation must not call no-OA persistence")
@@ -413,83 +387,6 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
 
         self.assertEqual(result["batch"]["status"], "withdrawn")
         self.assertEqual(batch_service.withdraw_calls[0]["batch_id"], "batch-1")
-        self.assertEqual(refresh_calls, [])
-
-    def test_submit_uses_current_bank_flow_batch_without_all_scope_refresh(self) -> None:
-        service, batch_service, refresh_calls = self._service_with_refresh_aware_batch(status="draft")
-        service._pair_relation_snapshot_port = SimpleNamespace(
-            snapshot=lambda: (_ for _ in ()).throw(AssertionError("bank-flow submit must not snapshot all relations")),
-            restore=lambda _snapshot: (_ for _ in ()).throw(AssertionError("bank-flow submit must not restore all relations")),
-        )
-
-        result = service.submit_batch(
-            "batch-1",
-            actor="finance-user",
-            expected_version=2,
-            note="提交",
-            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
-        )
-
-        self.assertEqual(result["batch"]["status"], "submitted")
-        self.assertEqual(batch_service.submit_calls[0]["batch_id"], "batch-1")
-        self.assertEqual(refresh_calls, [])
-
-    def test_submit_restores_canonical_batch_when_runtime_is_missing(self) -> None:
-        service, batch_service, refresh_calls = self._service_with_refresh_aware_batch(
-            requires_refresh_before_lookup=True,
-            status="draft",
-        )
-        state_store = RecordingStateStore(
-            bank_flow_batch_snapshot={
-                "batches": {
-                    "batch-1": {
-                        "batch_id": "batch-1",
-                        "batch_type": "internal_transfer",
-                        "batch_label": "内部往来款",
-                        "status": "draft",
-                        "status_bucket": "unsubmitted",
-                        "version": 2,
-                        "row_ids": ["bank-pay", "bank-receive"],
-                        "row_count": 2,
-                        "total_amount": "7000.00",
-                        "relation_case_id": "batch-1",
-                        "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
-                    }
-                },
-                "audit_log": [],
-            }
-        )
-        service._state_store = state_store
-
-        result = service.submit_batch(
-            "batch-1",
-            actor="finance-user",
-            expected_version=2,
-            note="提交",
-            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
-        )
-
-        self.assertEqual(result["batch"]["status"], "submitted")
-        self.assertEqual(batch_service.submit_calls[0]["batch_id"], "batch-1")
-        self.assertEqual(state_store.load_bank_flow_batch_calls, 0)
-        self.assertEqual(refresh_calls, [])
-
-    def test_submit_does_not_refresh_projection_when_runtime_batch_is_missing(self) -> None:
-        service, batch_service, refresh_calls = self._service_with_refresh_aware_batch(
-            requires_refresh_before_lookup=True,
-            status="draft",
-        )
-
-        result = service.submit_batch(
-            "batch-1",
-            actor="finance-user",
-            expected_version=2,
-            note="提交",
-            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
-        )
-
-        self.assertEqual(result["batch"]["status"], "submitted")
-        self.assertEqual(batch_service.submit_calls[0]["batch_id"], "batch-1")
         self.assertEqual(refresh_calls, [])
 
     def test_submit_selected_bank_flow_rows_uses_row_scoped_inputs_without_all_refresh(self) -> None:
@@ -923,6 +820,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         service.persist_mutation(
             changed_case_ids=["case-1"],
             changed_scope_keys=["2026-05", "not-a-month"],
+            changed_batch_ids=["batch-1"],
         )
 
         self.assertEqual(len(state_store.bank_flow_mutations), 1)
@@ -935,7 +833,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         self.assertNotIn("workbench_read_model_snapshot", mutation)
         self.assertEqual(mutation["changed_case_ids"], ["case-1"])
         self.assertEqual(mutation["changed_scope_keys"], ["2026-05"])
-        self.assertEqual(mutation["changed_batch_ids"], [])
+        self.assertEqual(mutation["changed_batch_ids"], ["batch-1"])
 
     def test_persist_mutation_fails_fast_without_bank_flow_boundary(self) -> None:
         service = object.__new__(BankFlowRuleBatchApplicationService)
@@ -995,24 +893,6 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         self.assertEqual(bundle["source_versions"]["scope_key"], "2026-07")
         self.assertTrue(bundle["source_versions"]["snapshot_version"])
 
-    def test_refresh_persistence_uses_bank_flow_scope_boundary(self) -> None:
-        state_store = RecordingStateStore()
-        port = BankFlowRuleBatchCanonicalDraftPersistencePort(state_store)
-
-        port.save_public_snapshot({"batches": {}}, scope_key="2026-05")
-
-        self.assertEqual(
-            state_store.bank_flow_scopes,
-            [
-                {
-                    "snapshot": {"batches": {}},
-                    "scope_key": "2026-05",
-                    "expected_source_proof": None,
-                }
-            ],
-        )
-        self.assertEqual(state_store.bank_flow_snapshots, [])
-
     def test_tag_selection_payload_reads_bank_flow_rule_settings_boundary(self) -> None:
         settings = RecordingBankFlowRuleSettings()
         service = object.__new__(BankFlowRuleBatchApplicationService)
@@ -1034,12 +914,6 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         service._commit_tag_rule_update = (  # type: ignore[method-assign]
             lambda **kwargs: commit_calls.append(dict(kwargs))
         )
-        service._background_refresh_producer = SimpleNamespace(
-            enqueue=lambda scope_keys, **kwargs: enqueue_calls.append(
-                {"scope_keys": list(scope_keys), **dict(kwargs)}
-            )
-            or True
-        )
 
         result = service.update_tag_selection(
             {"expected_version": 7, "rules": [{"tag_code": "fee"}]},
@@ -1054,19 +928,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         self.assertNotIn("affected_scope_keys", result)
         self.assertNotIn("refresh_enqueued", result)
         self.assertEqual(set(commit_calls[0]), {"prepared"})
-        self.assertEqual(
-            enqueue_calls,
-            [
-                {
-                    "scope_keys": ["2026-05"],
-                    "reason": "bank_flow_rule_batch_tag_rule_change",
-                    "metadata": {
-                        "relation_mode": "bank_flow_rule_batch",
-                        "changed_tag_codes": ["fee"],
-                    },
-                }
-            ],
-        )
+        self.assertEqual(enqueue_calls, [])
 
     def test_update_tag_selection_noop_does_not_enqueue_refresh(self) -> None:
         settings = RecordingBankFlowRuleSettings()
@@ -1378,7 +1240,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
             ]
         )
 
-        versions = service.canonical_draft_source_versions(
+        versions = service.candidate_source_versions_for_scope(
             scope_key="2026-02",
             relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
             relation_source_versions={
@@ -1485,7 +1347,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                 for index in range(4)
             ]
         )
-        expected_versions = service.canonical_draft_source_versions(
+        expected_versions = service.candidate_source_versions_for_scope(
             scope_key="2026-07",
             relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
             relation_source_versions={
@@ -1761,6 +1623,49 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                 }
             ],
         )
+
+    def test_submit_without_scope_rejects_lingering_persisted_draft_without_write(self) -> None:
+        class Repository:
+            def read_batch(self, _batch_id: str) -> dict[str, object]:
+                return {
+                    "batch_id": "bank_flow_rule_batch_v1_lingering",
+                    "status": "draft",
+                    "status_bucket": "unsubmitted",
+                    "scope_month": "2026-05",
+                    "batch_type": "fee",
+                    "row_ids": ["bank-lingering"],
+                    "total_amount": "8.80",
+                }
+
+            def read_page(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("missing scope must fail before live candidate re-derive")
+
+        state_store = RecordingStateStore()
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+        service._query_repository = Repository()
+        service._state_store = state_store
+        service._bank_batch_service = BankBatchService(
+            schema_version=BANK_FLOW_RULE_BATCH_SCHEMA_VERSION,
+            batch_id_prefix=BANK_FLOW_RULE_BATCH_ID_PREFIX,
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+        )
+        service._pair_relation_snapshot_port = None
+
+        with self.assertRaises(BankBatchRelationMutationError) as raised:
+            service.submit_batch(
+                "bank_flow_rule_batch_v1_lingering",
+                actor="finance-user",
+                expected_version=1,
+                note=None,
+                scope_month=None,
+            )
+
+        self.assertEqual(
+            raised.exception.error_code,
+            "bank_flow_rule_batch_candidate_conflict",
+        )
+        self.assertEqual(state_store.bank_flow_mutations, [])
+        self.assertEqual(service._bank_batch_service.snapshot()["batches"], {})
 
     def test_candidate_guard_conflict_restores_relation_and_writes_no_formal_batch(self) -> None:
         class Repository:
@@ -2111,445 +2016,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         )
         self.assertEqual(occupied_payload["batches"], [])
 
-    def test_bank_flow_refresh_publishes_prechecked_scope_source_versions(self) -> None:
-        class ImportService:
-            def list_transactions(self, *, month: str = "all") -> list[dict[str, object]]:
-                self.month = month
-                return [
-                    {
-                        "id": "bank-1",
-                        "txn_date": "2026-07-01",
-                        "txn_direction": "outflow",
-                        "amount": "12.00",
-                        "bank_name": "CCB",
-                        "account_no": "6222000000008106",
-                        "counterparty_name": "供应商",
-                    }
-                ]
 
-        class EffectiveCategoryProvider:
-            def canonical_category_source_proof_for_rows(
-                self,
-                rows: list[dict[str, object]],
-            ) -> dict[str, object]:
-                return {
-                    "source": "canonical_bank_transaction_categories",
-                    "row_count": len(rows),
-                    "membership_category_digest": "category-v1",
-                }
-
-            def bulk_get_for_rows(self, rows: list[dict[str, object]]) -> dict[str, dict[str, object]]:
-                return {
-                    str(row["id"]): {
-                        "transaction_id": row["id"],
-                        "category_code": "fee",
-                        "category_label": "手续费",
-                        "category_source": "auto",
-                    }
-                    for row in rows
-                }
-
-        class RelationFacade:
-            def source_versions_for_month(self, month: str, **_kwargs: object) -> dict[str, object]:
-                return {
-                    "status": "fresh",
-                    "source_versions": {
-                        "scope_key": month,
-                        "relation_signature": "relation-v1",
-                    },
-                }
-
-            def list_by_month(self, *_args: object, **_kwargs: object) -> dict[str, object]:
-                raise AssertionError("bank-flow refresh must not read the relation read model")
-
-        class RelationSourceRepository:
-            def __init__(self) -> None:
-                self.calls: list[dict[str, object]] = []
-
-            def workbench_relation_source_bundle_from_source(
-                self,
-                *,
-                scope_key: str,
-                row_ids: list[str],
-            ) -> dict[str, object]:
-                self.calls.append({"scope_key": scope_key, "row_ids": list(row_ids)})
-                return {
-                    "rows": [
-                        {
-                            "case_id": "submitted-batch",
-                            "status": "active",
-                            "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
-                            "row_ids": ["bank-1"],
-                            "row_types": ["bank_transaction"],
-                        }
-                    ],
-                    "source_versions": {
-                        "source": "workbench_pair_relations",
-                        "scope_key": scope_key,
-                        "relation_count": 1,
-                        "relation_updated_at": "2026-07-21 16:20:00+08",
-                    },
-                }
-
-        class Repository:
-            def bank_flow_rule_batch_source_versions_summary(
-                self,
-                _filters: dict[str, object],
-            ) -> dict[str, object]:
-                return {
-                    "read_model_status": "fresh",
-                    "row_count": 1,
-                    "source_versions": {"different": "version"},
-                }
-
-        class StateStore:
-            bank_flow_rule_batch_sql_read_repository = Repository()
-
-        class QueueRepository:
-            def __init__(self) -> None:
-                self.completions: list[dict[str, object]] = []
-
-            def read_model_refresh_is_current(self, **_kwargs: object) -> bool:
-                return True
-
-            def complete_read_model_refresh(self, **kwargs: object) -> None:
-                self.completions.append(dict(kwargs))
-
-        class BatchService:
-            def __init__(self) -> None:
-                self.published_source_versions: dict[str, object] = {}
-                self.published_active_relations: list[dict[str, object]] = []
-                self._snapshot: dict[str, object] = {"batches": {}}
-
-            def build_batches(self, *_args: object, **_kwargs: object) -> None:
-                self.published_source_versions = dict(_args[3])
-                self.published_active_relations = [dict(row) for row in list(_args[2])]
-                self._snapshot = {
-                    "batches": {
-                        "batch-1": {
-                            "batch_id": "batch-1",
-                            "batch_type": "fee",
-                            "status": "draft",
-                            "scope_month": "2026-07",
-                            "source_versions": self.published_source_versions,
-                        }
-                    }
-                }
-
-            def public_snapshot(self) -> dict[str, object]:
-                return dict(self._snapshot)
-
-            def last_legacy_migration_result(self) -> dict[str, object]:
-                return {"changed": False}
-
-        class Persistence:
-            def __init__(self) -> None:
-                self.saved: list[dict[str, object]] = []
-
-            def save_public_snapshot(
-                self,
-                snapshot: dict[str, object],
-                *,
-                scope_key: str = "all",
-                relation_mode: str = BANK_FLOW_RULE_BATCH_RELATION_MODE,
-                expected_source_proof: dict[str, object] | None = None,
-            ) -> None:
-                self.saved.append(
-                    {
-                        "scope_key": scope_key,
-                        "relation_mode": relation_mode,
-                        "expected_source_proof": expected_source_proof,
-                        "snapshot": dict(snapshot),
-                    }
-                )
-
-        batch_service = BatchService()
-        persistence = Persistence()
-        queue = QueueRepository()
-        relation_source_repository = RelationSourceRepository()
-        service = BankFlowRuleBatchCanonicalDraftOwner(
-            import_service=ImportService(),
-            effective_category_provider=EffectiveCategoryProvider(),
-            bank_batch_service=batch_service,
-            app_settings_service=RecordingBankFlowRuleSettings(),
-            bank_transaction_category_service=SimpleNamespace(snapshot=lambda: {}),
-            pair_relation_service=SimpleNamespace(snapshot=lambda: {}),
-            state_store=StateStore(),
-            materialization_persistence=persistence,
-            workbench_matching_source_versions_provider=lambda: {"workbench_formal_relation_rule_version": "rules-v1"},
-            relation_facade=RelationFacade(),
-            relation_source_repository=relation_source_repository,
-        )
-
-        result = service.handle_runtime_event(
-            RuntimeQueueEvent(
-                event_id="evt-bank-flow-refresh",
-                tenant_id="default",
-                event_type=BANK_FLOW_RULE_BATCH_DRAFT_REFRESH_EVENT_TYPE,
-                aggregate_type="bank_flow_rule_batch",
-                aggregate_id="2026-07",
-                scope_type="bank_flow_rule_batch_draft",
-                scope_key="2026-07",
-                dedupe_key="bank_flow_rule_batch.canonical_draft.refresh:2026-07:test",
-                payload={
-                    "scope_type": "bank_flow_rule_batch_draft",
-                    "scope_key": "2026-07",
-                    "source_version": 9,
-                    "metadata": {"relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE},
-                },
-                attempts=1,
-                status="processing",
-                source_version=9,
-            )
-        )
-
-        self.assertEqual(result["scope_key"], "2026-07")
-        self.assertEqual(
-            batch_service.published_source_versions["category_source_proof"],
-            {
-                "source": "canonical_bank_transaction_categories",
-                "row_count": 1,
-                "membership_category_digest": "category-v1",
-            },
-        )
-        self.assertEqual(
-            persistence.saved[0]["snapshot"]["batches"]["batch-1"]["source_versions"],
-            batch_service.published_source_versions,
-        )
-        self.assertEqual(
-            batch_service.published_active_relations[0]["case_id"],
-            "submitted-batch",
-        )
-        self.assertEqual(
-            batch_service.published_source_versions["workbench_relation_source_versions"]["relation_count"],
-            1,
-        )
-        self.assertEqual(
-            relation_source_repository.calls,
-            [
-                {"scope_key": "2026-07", "row_ids": ["bank-1"]},
-                {"scope_key": "2026-07", "row_ids": ["bank-1"]},
-            ],
-        )
-        self.assertEqual(queue.completions, [])
-
-    def test_bank_flow_force_refresh_rebuilds_canonical_draft(self) -> None:
-        class ApplicationService:
-            def __init__(self) -> None:
-                self.rebuild_calls = 0
-
-            def canonical_draft_source_versions(self, **_kwargs: object) -> dict[str, object]:
-                return {
-                    "version": "current",
-                    "workbench_relation_source_versions": {"relation_count": 0},
-                }
-
-            def bank_transaction_rows(self, **_kwargs: object) -> list[dict[str, object]]:
-                return [{"id": "bank-1"}]
-
-            def active_relation_source_bundle_for_bank_rows(
-                self,
-                _rows: object,
-                **_kwargs: object,
-            ) -> dict[str, object]:
-                return {"rows": [], "source_versions": {"relation_count": 0}}
-
-            def effective_categories_for_rows(self, _rows: object) -> dict[str, object]:
-                return {}
-
-            def load_relation_source_versions_for_bank_rows(self, _rows: object, **_kwargs: object) -> None:
-                return None
-
-            def active_relations_for_bank_rows(self, _rows: object) -> list[dict[str, object]]:
-                return []
-
-            def refresh_batches_from_prepared_rows(self, **_kwargs: object) -> tuple[list[object], dict[str, object]]:
-                self.rebuild_calls += 1
-                return list(_kwargs.get("bank_rows") or []), {}
-
-        application_service = ApplicationService()
-        completions: list[dict[str, object]] = []
-        saved: list[dict[str, object]] = []
-        service = object.__new__(BankFlowRuleBatchCanonicalDraftOwner)
-        service._refresh_event_type = BANK_FLOW_RULE_BATCH_DRAFT_REFRESH_EVENT_TYPE
-        service._scope_type = "bank_flow_rule_batch_draft"
-        service._relation_mode = BANK_FLOW_RULE_BATCH_RELATION_MODE
-        service._application_service = application_service
-        service._bank_batch_service = SimpleNamespace(public_snapshot=lambda: {"batches": {}})
-        service._materialization_persistence = SimpleNamespace(
-            save_public_snapshot=lambda snapshot, **kwargs: saved.append({"snapshot": snapshot, **kwargs})
-        )
-        service._queue_repository = SimpleNamespace(
-            read_model_refresh_is_current=lambda **_kwargs: True,
-            complete_read_model_refresh=lambda **kwargs: completions.append(dict(kwargs)),
-        )
-
-        result = service.handle_runtime_event(
-            RuntimeQueueEvent(
-                event_id="evt-bank-flow-force-refresh",
-                tenant_id="default",
-                event_type=BANK_FLOW_RULE_BATCH_DRAFT_REFRESH_EVENT_TYPE,
-                aggregate_type="bank_flow_rule_batch",
-                aggregate_id="2026-07",
-                scope_type="bank_flow_rule_batch_draft",
-                scope_key="2026-07",
-                dedupe_key="bank_flow_rule_batch.canonical_draft.refresh:2026-07:force",
-                payload={
-                    "scope_type": "bank_flow_rule_batch_draft",
-                    "scope_key": "2026-07",
-                    "metadata": {"force_refresh": True},
-                },
-                attempts=1,
-                status="processing",
-                source_version=10,
-            )
-        )
-
-        self.assertEqual(application_service.rebuild_calls, 1)
-        self.assertEqual(result["bank_row_count"], 1)
-        self.assertEqual(len(saved), 1)
-        self.assertEqual(completions, [])
-
-    def test_bank_flow_refresh_does_not_generate_unsubmitted_rows_occupied_by_canonical_relation(self) -> None:
-        class ImportService:
-            def list_transactions(self, *, month: str = "all") -> list[dict[str, object]]:
-                self.month = month
-                return [
-                    {
-                        "id": "bank-occupied",
-                        "txn_date": "2026-07-03",
-                        "txn_direction": "outflow",
-                        "amount": "4.00",
-                        "bank_name": "民生银行",
-                        "account_no": "6222000000009486",
-                        "counterparty_name": "中国民生银行",
-                    }
-                ]
-
-        class EffectiveCategoryProvider:
-            def canonical_category_source_proof_for_rows(
-                self,
-                rows: list[dict[str, object]],
-            ) -> dict[str, object]:
-                return {
-                    "source": "canonical_bank_transaction_categories",
-                    "row_count": len(rows),
-                    "membership_category_digest": "category-v1",
-                }
-
-            def bulk_get_for_rows(self, rows: list[dict[str, object]]) -> dict[str, dict[str, object]]:
-                return {
-                    str(row["id"]): {
-                        "transaction_id": row["id"],
-                        "category_code": "fee",
-                        "category_label": "手续费",
-                        "category_source": "auto",
-                    }
-                    for row in rows
-                }
-
-        class Settings:
-            def get_bank_flow_rule_batch_tag_rules_payload(self) -> dict[str, object]:
-                return {
-                    "version": 1,
-                    "active_tags": [{"code": "fee", "status": "active"}],
-                    "requirements_by_tag_code": {
-                        "fee": {"requires_oa": False, "requires_invoice": False},
-                    },
-                }
-
-        class RelationSourceRepository:
-            def workbench_relation_source_bundle_from_source(
-                self,
-                *,
-                scope_key: str,
-                row_ids: list[str],
-            ) -> dict[str, object]:
-                self.call = {"scope_key": scope_key, "row_ids": list(row_ids)}
-                return {
-                    "rows": [
-                        {
-                            "case_id": "submitted-batch",
-                            "status": "active",
-                            "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
-                            "row_ids": ["bank-occupied"],
-                            "row_types": ["bank_transaction"],
-                        }
-                    ],
-                    "source_versions": {
-                        "source": "workbench_pair_relations",
-                        "scope_key": scope_key,
-                        "relation_count": 1,
-                        "relation_updated_at": "2026-07-21 16:20:00+08",
-                    },
-                }
-
-        class Persistence:
-            def __init__(self) -> None:
-                self.saved: list[dict[str, object]] = []
-
-            def save_public_snapshot(self, snapshot: dict[str, object], **kwargs: object) -> None:
-                self.saved.append({"snapshot": dict(snapshot), **kwargs})
-
-        persistence = Persistence()
-        relation_source_repository = RelationSourceRepository()
-        worker = BankFlowRuleBatchCanonicalDraftOwner(
-            import_service=ImportService(),
-            effective_category_provider=EffectiveCategoryProvider(),
-            bank_batch_service=BankBatchService(
-                schema_version=BANK_FLOW_RULE_BATCH_SCHEMA_VERSION,
-                batch_id_prefix=BANK_FLOW_RULE_BATCH_ID_PREFIX,
-                relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
-            ),
-            app_settings_service=Settings(),
-            bank_transaction_category_service=SimpleNamespace(snapshot=lambda: {}),
-            pair_relation_service=SimpleNamespace(snapshot=lambda: {}),
-            state_store=SimpleNamespace(),
-            materialization_persistence=persistence,
-            workbench_matching_source_versions_provider=lambda: {},
-            relation_source_repository=relation_source_repository,
-        )
-
-        result = worker.handle_runtime_event(
-            RuntimeQueueEvent(
-                event_id="evt-bank-flow-canonical-occupied",
-                tenant_id="default",
-                event_type=BANK_FLOW_RULE_BATCH_DRAFT_REFRESH_EVENT_TYPE,
-                aggregate_type="bank_flow_rule_batch",
-                aggregate_id="2026-07",
-                scope_type="bank_flow_rule_batch_draft",
-                scope_key="2026-07",
-                dedupe_key="bank_flow_rule_batch.canonical_draft.refresh:canonical-occupied",
-                payload={
-                    "scope_type": "bank_flow_rule_batch_draft",
-                    "scope_key": "2026-07",
-                    "metadata": {"force_refresh": True},
-                },
-                attempts=1,
-                status="processing",
-                source_version=11,
-            )
-        )
-
-        self.assertEqual(result["bank_row_count"], 1)
-        self.assertEqual(result["batch_count"], 1)
-        persisted_batches = persistence.saved[0]["snapshot"]["batches"]
-        self.assertTrue(isinstance(persisted_batches, dict))
-        self.assertEqual(
-            [batch["status"] for batch in persisted_batches.values() if isinstance(batch, dict)],
-            ["submitted"],
-        )
-        self.assertFalse(
-            any(
-                batch.get("status_bucket") == "unsubmitted"
-                for batch in persisted_batches.values()
-                if isinstance(batch, dict)
-            )
-        )
-        self.assertEqual(
-            relation_source_repository.call,
-            {"scope_key": "2026-07", "row_ids": ["bank-occupied"]},
-        )
 
 if __name__ == "__main__":
     unittest.main()

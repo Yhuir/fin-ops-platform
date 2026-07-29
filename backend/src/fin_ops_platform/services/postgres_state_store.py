@@ -47,7 +47,6 @@ from fin_ops_platform.services.workbench_relation_read_model_repository import W
 APP_SETTINGS_KEY = "app_settings"
 GRIDFS_REF_PREFIX = "gridfs://"
 FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
-BANK_FLOW_RULE_BATCH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
 
 
 class _ReadyHealthRabbitMqMetricsUnavailable:
@@ -63,19 +62,6 @@ def _base_read_model_scope_key(scope_key: object) -> str:
     if normalized.startswith("visibility:"):
         return normalized.rsplit(":", 1)[-1].strip() or "all"
     return normalized or "all"
-
-
-def _bank_flow_rule_batch_month_scopes(scope_keys: object) -> list[str]:
-    ordered: list[str] = []
-    seen: set[str] = set()
-    iterable = sorted(scope_keys) if isinstance(scope_keys, set) else scope_keys
-    for scope_key in iterable if isinstance(iterable, (list, tuple, set)) else []:
-        base_scope_key = _base_read_model_scope_key(scope_key)
-        if not BANK_FLOW_RULE_BATCH_SCOPE_RE.match(base_scope_key) or base_scope_key in seen:
-            continue
-        ordered.append(base_scope_key)
-        seen.add(base_scope_key)
-    return ordered
 
 
 def _default_app_settings_payload() -> dict[str, Any]:
@@ -680,14 +666,6 @@ class PostgresStateStore:
             )
         return {}
 
-    def bank_flow_rule_batch_canonical_source_proof(
-        self,
-        scope_key: str,
-    ) -> dict[str, object]:
-        return self._workbench_repository.bank_flow_rule_batch_canonical_source_proof(
-            scope_key
-        )
-
     def save_no_oa_bank_batches(
         self,
         snapshot: dict[str, Any],
@@ -707,30 +685,6 @@ class PostgresStateStore:
             snapshot,
             scope_key=scope_key,
             relation_mode=relation_mode,
-        )
-
-    def save_bank_flow_rule_batches(
-        self,
-        snapshot: dict[str, Any],
-        *,
-        expected_source_proof: dict[str, object] | None = None,
-    ) -> bool:
-        return self._workbench_repository.save_bank_flow_rule_batches(
-            snapshot,
-            expected_source_proof=expected_source_proof,
-        )
-
-    def save_bank_flow_rule_batches_scope(
-        self,
-        snapshot: dict[str, Any],
-        *,
-        scope_key: str,
-        expected_source_proof: dict[str, object] | None = None,
-    ) -> bool:
-        return self._workbench_repository.save_bank_flow_rule_batches_scope(
-            snapshot,
-            scope_key=scope_key,
-            expected_source_proof=expected_source_proof,
         )
 
     def save_bank_flow_rule_batch_items(
@@ -776,9 +730,8 @@ class PostgresStateStore:
         candidate_guard: dict[str, object] | None = None,
     ) -> None:
         normalized_case_ids = {str(case_id).strip() for case_id in changed_case_ids if str(case_id).strip()}
-        normalized_scope_keys = {str(scope_key).strip() for scope_key in changed_scope_keys if str(scope_key).strip()}
+        _ = changed_scope_keys
         normalized_batch_ids = {str(batch_id).strip() for batch_id in changed_batch_ids if str(batch_id).strip()}
-        batch_scope_keys = _bank_flow_rule_batch_month_scopes(normalized_scope_keys)
         mutation_batch_ids = normalized_batch_ids | self._bank_flow_rule_batch_ids_from_mutation(
             pair_relation_snapshot=pair_relation_snapshot,
             bank_flow_rule_batch_snapshot=bank_flow_rule_batch_snapshot,
@@ -801,11 +754,8 @@ class PostgresStateStore:
                     bank_flow_rule_batch_snapshot,
                     batch_ids=mutation_batch_ids,
                 )
-            elif batch_scope_keys:
-                for scope_key in batch_scope_keys:
-                    self.save_bank_flow_rule_batches_scope(bank_flow_rule_batch_snapshot, scope_key=scope_key)
             else:
-                self.save_bank_flow_rule_batches(bank_flow_rule_batch_snapshot)
+                raise ValueError("bank-flow rule batch mutation requires an explicit changed batch id")
 
         run_in_transaction(self._connection, write)
 
@@ -1066,11 +1016,6 @@ class PostgresStateStore:
             "pending_invoice_commands": self.load_pending_invoice_commands(),
         }
         return snapshot
-
-    def bank_flow_rule_batch_canonical_draft_scope_lock(self, scope_key: str) -> Any:
-        return self._workbench_repository.bank_flow_rule_batch_canonical_draft_scope_lock(
-            scope_key
-        )
 
     def save(self, payload: dict[str, Any]) -> None:
         normalized = self._serialize_value(payload)

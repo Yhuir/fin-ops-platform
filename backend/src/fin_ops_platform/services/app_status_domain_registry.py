@@ -89,8 +89,6 @@ APP_STATUS_DOMAIN_REGISTRY: tuple[AppStatusDomainDefinition, ...] = (
         key="bank_flow_rule_batches",
         label="流水规则批量处理",
         route="/bank-flow-rule-batches",
-        worker_instances=("bank-flow-rule-batch",),
-        job_types=("bank_flow_rule_batch.canonical_draft.refresh",),
     ),
     AppStatusDomainDefinition(
         key="batch_accounting",

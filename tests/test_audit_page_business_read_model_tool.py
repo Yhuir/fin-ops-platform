@@ -3,6 +3,8 @@ from __future__ import annotations
 import io
 import json
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories import page_business_audit
@@ -180,41 +182,65 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertNotIn("read_model.source_versions as row_source_versions", queried_sql)
 
     def test_missing_live_bank_flow_candidate_is_a_blocking_expected_set_gap(self) -> None:
-        connection = FakeConnection(
-            rows_by_check={
-                "canonical_expected_set": [
-                    {
-                        "subject_id": "bank_flow_rule_batch_v1_missing",
-                        "scope_key": "2026-05",
-                        "mismatch_kind": "live_candidate_missing_from_page",
-                        "expected_member_ids": ["bank-in-188500", "bank-out-188500"],
-                        "expected_total_amount": "188500.00",
-                    }
-                ]
-            }
-        )
-
-        report = audit_page_business_read_model.audit_page_business_read_model(
-            connection,
-            domain_key="bank_flow_rule_batches",
-        )
+        connection = FakeConnection()
+        source = _bank_flow_188500_candidate_source()
+        empty_service = SimpleNamespace(snapshot=lambda: {"batches": {}})
+        with (
+            patch.object(
+                page_business_audit.BankFlowRuleBatchCanonicalQueryRepository,
+                "candidate_scope_months",
+                return_value=["2026-05"],
+            ),
+            patch.object(
+                page_business_audit.BankFlowRuleBatchCanonicalQueryRepository,
+                "read_candidate_guard_source",
+                return_value=source,
+            ),
+            patch.object(
+                page_business_audit,
+                "build_live_bank_flow_rule_batch_service",
+                return_value=empty_service,
+            ),
+        ):
+            report = audit_page_business_read_model.audit_page_business_read_model(
+                connection,
+                domain_key="bank_flow_rule_batches",
+            )
 
         self.assertEqual(report["overall_status"], "issues_found")
         self.assertEqual(
             report["summary"]["issue_sample_counts_by_code"],
             {"bank_flow_rule_batches_canonical_expected_set_mismatch": 1},
         )
-        expected_sql = next(
-            sql
-            for sql, _params in connection.fetch_all_calls
-            if "/* check: canonical_expected_set */" in sql
+        self.assertEqual(
+            {
+                issue["details"]["mismatch_kind"]
+                for issue in report["issues"]
+                if issue["code"] == "bank_flow_rule_batches_canonical_expected_set_mismatch"
+            },
+            {"live_candidate_source_row_uncovered"},
         )
-        self.assertIn("app.bank_transactions", expected_sql)
-        self.assertIn("app.bank_transaction_category_confirmations", expected_sql)
-        self.assertIn("app.bank_transaction_categories", expected_sql)
-        self.assertIn("app.app_settings", expected_sql)
-        self.assertIn("app.workbench_pair_relations", expected_sql)
-        self.assertNotIn("where batch.status in ('draft', 'unsubmitted')", expected_sql)
+
+    def test_188500_live_bank_flow_candidate_passes_shared_builder_audit(self) -> None:
+        connection = FakeConnection()
+        with (
+            patch.object(
+                page_business_audit.BankFlowRuleBatchCanonicalQueryRepository,
+                "candidate_scope_months",
+                return_value=["2026-05"],
+            ),
+            patch.object(
+                page_business_audit.BankFlowRuleBatchCanonicalQueryRepository,
+                "read_candidate_guard_source",
+                return_value=_bank_flow_188500_candidate_source(),
+            ),
+        ):
+            report = audit_page_business_read_model.audit_page_business_read_model(
+                connection,
+                domain_key="bank_flow_rule_batches",
+            )
+
+        self.assertEqual(report["overall_status"], "pass")
 
     def test_bank_flow_rule_batch_audit_proves_page_and_active_relation_member_sets(self) -> None:
         connection = FakeConnection()
@@ -232,13 +258,13 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("unnest(batch.bank_transaction_ids)", consumer_sql)
         self.assertNotIn("read_model.bank_flow_rule_batch_rows", consumer_sql)
         self.assertIn("where relation_mode = 'bank_flow_rule_batch'", consumer_sql)
-        self.assertIn("join active_bank_relations relation", consumer_sql)
-        self.assertIn("where batch.status in ('draft', 'unsubmitted')", consumer_sql)
+        self.assertIn("from active_bank_relations", consumer_sql)
+        self.assertIn("left join active_batch_relations relation", consumer_sql)
+        self.assertIn("where batch.status in ('submitted', 'withdrawn', 'stale')", consumer_sql)
         self.assertIn("submitted_batch_missing_active_relation", consumer_sql)
         self.assertIn("non_submitted_batch_has_active_relation", consumer_sql)
         self.assertIn("active_relation_member_set_mismatch", consumer_sql)
-        self.assertIn("batch_members_occupied_by_other_active_relation", consumer_sql)
-        self.assertIn("relation.relation_member_ids && batch.canonical_member_ids", consumer_sql)
+        self.assertNotIn("batch_members_occupied_by_other_active_relation", consumer_sql)
         self.assertIn("active_relation_without_canonical_batch", consumer_sql)
         self.assertEqual(params, (51,))
         self.assertIn("consumer_relation_edge_equality", report["audit_contract"]["proof_checks"])
@@ -774,6 +800,44 @@ class BankDetailAuditPostgresTests(unittest.TestCase):
             report["summary"]["issue_sample_counts_by_code"],
             {"bank_details_canonical_relation_bank_member_missing": 1},
         )
+
+
+def _bank_flow_188500_candidate_source() -> dict[str, object]:
+    return {
+        "candidate_rows": [
+            {
+                "id": "bank-out-188500",
+                "trade_time": "2026-05-14T09:00:00",
+                "account_key": "CCB:8106",
+                "direction": "expense",
+                "amount": "188500.00",
+                "category_code": "internal_transfer",
+                "category_source": "confirmed",
+            },
+            {
+                "id": "bank-in-188500",
+                "trade_time": "2026-05-14T09:30:00",
+                "account_key": "ICBC:6386",
+                "direction": "income",
+                "amount": "188500.00",
+                "category_code": "internal_transfer",
+                "category_source": "confirmed",
+            },
+        ],
+        "active_relations": [],
+        "formal_items": [],
+        "tag_policy": {
+            "active_tags": [
+                {"code": "internal_transfer", "label": "内部往来款"}
+            ],
+            "requirements_by_tag_code": {
+                "internal_transfer": {
+                    "requires_oa": False,
+                    "requires_invoice": False,
+                }
+            },
+        },
+    }
 
 
 def _check_name(sql: str) -> str:

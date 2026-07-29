@@ -9,136 +9,6 @@ from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.postgres_repositories.common import int_value, month_start, row_payload, text, text_list
 
 
-_VISIBLE_BATCHES_CTE = """
-with canonical_batches as (
-    select
-        batch.batch_id,
-        batch.status,
-        batch.status_bucket,
-        batch.version,
-        batch.scope_month,
-        batch.account_key,
-        batch.total_amount,
-        batch.bank_transaction_ids,
-        batch.submitted_by,
-        batch.submitted_at,
-        batch.withdrawn_by,
-        batch.withdrawn_at,
-        batch.created_at,
-        batch.updated_at,
-        coalesce(batch.raw_payload->'normalized_payload', '{}'::jsonb) as payload,
-        coalesce(
-            nullif(batch.raw_payload->'normalized_payload'->>'batch_type', ''),
-            ''
-        ) as batch_type,
-        coalesce(
-            nullif(batch.raw_payload->'normalized_payload'->>'relation_case_id', ''),
-            batch.batch_id
-        ) as relation_case_id,
-        exists (
-            select 1
-            from app.workbench_pair_relations relation
-            where relation.status = 'active'
-              and relation.case_id = coalesce(
-                  nullif(batch.raw_payload->'normalized_payload'->>'relation_case_id', ''),
-                  batch.batch_id
-              )
-        ) as has_active_relation
-    from app.bank_flow_rule_batches batch
-    where batch.status <> 'superseded'
-),
-presented_batches as (
-    select
-        canonical_batches.*,
-        case
-            when status = 'unsubmitted' and status_bucket = 'unsubmitted' then 'draft'
-            when status = 'stale' and has_active_relation then 'submitted'
-            else status
-        end as presented_status
-    from canonical_batches
-),
-visible_batches as (
-    select
-        presented_batches.*,
-        case presented_status
-            when 'draft' then 'unsubmitted'
-            when 'submitted' then 'submitted'
-            when 'withdrawn' then 'withdrawn'
-            else status_bucket
-        end as presented_status_bucket
-    from presented_batches
-    where presented_status in ('draft', 'submitted', 'withdrawn')
-      and (
-          presented_status <> 'draft'
-          or (
-              batch_type = any(%s::text[])
-              and cardinality(bank_transaction_ids) > 0
-              and not exists (
-                  select 1
-                  from app.workbench_pair_relations occupied
-                  where occupied.status = 'active'
-                    and occupied.row_ids && bank_transaction_ids
-              )
-              and not exists (
-                  select 1
-                  from unnest(bank_transaction_ids) requested(transaction_id)
-                  left join lateral (
-                      select legacy_bank.*
-                      from app.bank_transactions legacy_bank
-                      where legacy_bank.legacy_mongo_id = requested.transaction_id
-                      union all
-                      select uuid_bank.*
-                      from app.bank_transactions uuid_bank
-                      where uuid_bank.id = case
-                          when requested.transaction_id ~* (
-                              '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-'
-                              '[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-                          )
-                          then requested.transaction_id::uuid
-                          else null
-                      end
-                        and uuid_bank.legacy_mongo_id is distinct from requested.transaction_id
-                      limit 1
-                  ) bank on true
-                  left join lateral (
-                      select confirmation.category_code
-                      from app.bank_transaction_category_confirmations confirmation
-                      where confirmation.tenant_id = 'default'
-                        and confirmation.status = 'active'
-                        and (
-                            confirmation.bank_transaction_id = bank.id
-                            or confirmation.legacy_transaction_id in (
-                                coalesce(bank.legacy_mongo_id, bank.id::text),
-                                bank.id::text
-                            )
-                        )
-                      order by confirmation.confirmed_at desc, confirmation.id desc
-                      limit 1
-                  ) confirmed_category on true
-                  left join lateral (
-                      select manual.category
-                      from app.bank_transaction_categories manual
-                      where manual.status = 'active'
-                        and (
-                            manual.bank_transaction_id = bank.id
-                            or manual.legacy_transaction_id in (
-                                coalesce(bank.legacy_mongo_id, bank.id::text),
-                                bank.id::text
-                            )
-                        )
-                      order by manual.updated_at desc, manual.id desc
-                      limit 1
-                  ) manual_category on true
-                  where bank.id is null
-                     or bank.status = 'deleted'
-                     or coalesce(confirmed_category.category_code, manual_category.category, '') <> batch_type
-              )
-          )
-      )
-)
-"""
-
-
 class BankFlowRuleBatchCanonicalQueryRepository:
     """Page query boundary backed only by PostgreSQL canonical facts."""
 
@@ -366,6 +236,66 @@ class BankFlowRuleBatchCanonicalQueryRepository:
         }
 
     @classmethod
+    def candidate_scope_months(cls, transaction: Any) -> list[str]:
+        tag_policy = cls._tag_policy(transaction)
+        eligible_codes = cls._eligible_codes(tag_policy)
+        if not eligible_codes:
+            return []
+        rows = transaction.fetch_all(
+            """
+            /* check: bank_flow_live_candidate_scopes */
+            select to_char(
+                       coalesce(bank.txn_month, date_trunc('month', bank.txn_date)::date),
+                       'YYYY-MM'
+                   ) as scope_month
+            from app.bank_transactions bank
+            left join lateral (
+                select confirmation.category_code
+                from app.bank_transaction_category_confirmations confirmation
+                where confirmation.tenant_id = 'default'
+                  and confirmation.status = 'active'
+                  and (
+                      confirmation.bank_transaction_id = bank.id
+                      or confirmation.legacy_transaction_id in (
+                          coalesce(bank.legacy_mongo_id, bank.id::text),
+                          bank.id::text
+                      )
+                  )
+                order by confirmation.confirmed_at desc, confirmation.id desc
+                limit 1
+            ) confirmed_category on true
+            left join lateral (
+                select manual.category
+                from app.bank_transaction_categories manual
+                where manual.status = 'active'
+                  and (
+                      manual.bank_transaction_id = bank.id
+                      or manual.legacy_transaction_id in (
+                          coalesce(bank.legacy_mongo_id, bank.id::text),
+                          bank.id::text
+                      )
+                  )
+                order by manual.updated_at desc, manual.id desc
+                limit 1
+            ) manual_category on true
+            where bank.status <> 'deleted'
+              and coalesce(
+                  confirmed_category.category_code,
+                  manual_category.category,
+                  ''
+              ) = any(%s::text[])
+            group by coalesce(bank.txn_month, date_trunc('month', bank.txn_date)::date)
+            order by coalesce(bank.txn_month, date_trunc('month', bank.txn_date)::date)
+            """,
+            (eligible_codes,),
+        )
+        return [
+            scope_month
+            for row in rows
+            if (scope_month := text(row.get("scope_month")))
+        ]
+
+    @classmethod
     def read_candidate_guard_source(
         cls,
         transaction: Any,
@@ -510,7 +440,7 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                     ) as has_active_relation
                 from app.bank_flow_rule_batches batch
                 where batch.batch_id = %s
-                  and batch.status <> 'superseded'
+                  and batch.status in ('submitted', 'withdrawn', 'stale')
                 limit 1
                 """,
                 (normalized_batch_id,),
@@ -680,14 +610,6 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                 ) manual_category on true
                 where bank.status <> 'deleted'
                   and coalesce(confirmed_category.category_code, manual_category.category, '') = any(%s::text[])
-                union
-                select batch.scope_month
-                from app.bank_flow_rule_batches batch
-                where batch.status in ('draft', 'unsubmitted')
-                  and coalesce(
-                      nullif(batch.raw_payload->'normalized_payload'->>'batch_type', ''),
-                      ''
-                  ) = any(%s::text[])
             )
             select to_char(scope_month, 'YYYY-MM') as scope_key
             from categorized_scopes
@@ -695,7 +617,7 @@ class BankFlowRuleBatchCanonicalQueryRepository:
             group by scope_month
             order by scope_month
             """,
-            (normalized_codes, normalized_codes),
+            (normalized_codes,),
         )
         return [scope_key for row in rows if (scope_key := text(row.get("scope_key")))]
 

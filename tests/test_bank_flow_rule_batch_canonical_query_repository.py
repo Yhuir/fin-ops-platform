@@ -339,9 +339,9 @@ def test_affected_scope_lookup_is_one_set_based_canonical_query() -> None:
     assert len(connection.fetched_all) == 1
     sql, params = connection.fetched_all[0]
     assert "from app.bank_transactions bank" in sql
-    assert "from app.bank_flow_rule_batches batch" in sql
+    assert "from app.bank_flow_rule_batches batch" not in sql
     assert "read_model." not in sql
-    assert params == (["fee", "salary"], ["fee", "salary"])
+    assert params == (["fee", "salary"],)
 
 
 @pytest.mark.parametrize(

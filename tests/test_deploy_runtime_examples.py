@@ -128,17 +128,14 @@ class DeployRuntimeExampleTests(unittest.TestCase):
         self.assertIn("--poll-interval-seconds 5([^0-9.]|$)", helper)
         self.assertTrue((WORKER_ENV_DIR / "fin-ops.worker.workbench.env.example").exists())
 
-    def test_bank_flow_worker_env_migrates_retired_read_model_runtime_args(self) -> None:
+    def test_bank_flow_draft_worker_runtime_is_absent(self) -> None:
         helper = ENSURE_RUNTIME_WORKERS.read_text(encoding="utf-8")
 
-        self.assertIn("migrate_bank_flow_rule_batch_canonical_draft", helper)
-        self.assertIn(
-            "FIN_OPS_WORKER_KIND=bank-flow-rule-batch-canonical-draft",
-            helper,
-        )
-        self.assertIn("--enable-bank-flow-rule-batch-canonical-draft-refresh", helper)
-        self.assertIn("bank_flow_rule_batch.canonical_draft.refresh", helper)
-        self.assertIn('"${runtime_args[@]}"', helper)
+        self.assertNotIn("migrate_bank_flow_rule_batch_canonical_draft", helper)
+        self.assertNotIn("FIN_OPS_WORKER_KIND=bank-flow-rule-batch-canonical-draft", helper)
+        self.assertNotIn("--enable-bank-flow-rule-batch-canonical-draft-refresh", helper)
+        self.assertNotIn("bank_flow_rule_batch.canonical_draft.refresh", helper)
+        self.assertFalse((WORKER_ENV_DIR / "fin-ops.worker.bank-flow-rule-batch.env.example").exists())
 
     def test_retired_invoice_page_worker_examples_are_absent(self) -> None:
         helper = ENSURE_RUNTIME_WORKERS.read_text(encoding="utf-8")

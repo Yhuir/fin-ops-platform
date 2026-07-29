@@ -83,16 +83,6 @@ migrate_legacy_worker_poll_interval() {
   fi
 }
 
-migrate_bank_flow_rule_batch_canonical_draft() {
-  local target_file="$env_dir/fin-ops.worker.bank-flow-rule-batch.env"
-  [ -f "$target_file" ] || return 0
-  sed -i \
-    -e 's/^FIN_OPS_WORKER_KIND=bank-flow-rule-batch-read-model$/FIN_OPS_WORKER_KIND=bank-flow-rule-batch-canonical-draft/' \
-    -e 's/--enable-bank-flow-rule-batch-read-model-refresh/--enable-bank-flow-rule-batch-canonical-draft-refresh/g' \
-    -e 's/bank_flow_rule_batch\.read_model\.refresh/bank_flow_rule_batch.canonical_draft.refresh/g' \
-    "$target_file"
-}
-
 migrate_rabbitmq_worker_drain_interval() {
   local target_file="$env_dir/fin-ops.rabbitmq-worker.env"
   [ -f "$target_file" ] || return 0
@@ -160,9 +150,6 @@ fi
 for worker in $required_workers $optional_workers; do
   ensure_worker_env "$worker"
   migrate_legacy_worker_poll_interval "$worker"
-  if [ "$worker" = "bank-flow-rule-batch" ]; then
-    migrate_bank_flow_rule_batch_canonical_draft
-  fi
 done
 
 if [ ! -f "$env_dir/fin-ops.common.env" ]; then

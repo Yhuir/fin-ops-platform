@@ -5,9 +5,6 @@ import unittest
 from fin_ops_platform.services.no_oa_bank_batch_derived_lifecycle_executor import (
     NoOaBankBatchDerivedLifecycleExecutor,
 )
-from fin_ops_platform.services.bank_flow_rule_batch_derived_lifecycle_executor import (
-    BankFlowRuleBatchDerivedLifecycleExecutor,
-)
 
 
 class NoOaBankBatchDerivedLifecycleExecutorTests(unittest.TestCase):
@@ -85,33 +82,6 @@ class NoOaBankBatchDerivedLifecycleExecutorTests(unittest.TestCase):
                 "enqueued_jobs": [],
             },
         )
-
-
-class BankFlowRuleBatchDerivedLifecycleExecutorTests(unittest.TestCase):
-    def test_execute_uses_bank_flow_boundary_names(self) -> None:
-        enqueued: list[dict[str, object]] = []
-        executor = BankFlowRuleBatchDerivedLifecycleExecutor(
-            enqueue_refresh=lambda scope_keys, **kwargs: enqueued.append(
-                {"scope_keys": list(scope_keys), **dict(kwargs)}
-            )
-            or True,
-        )
-
-        result = executor.execute({"scope_keys": ["bank_flow_rule_batch:2026-04"]})
-
-        self.assertEqual(
-            enqueued,
-            [{"scope_keys": ["2026-04"], "reason": "derived_lifecycle_bank_flow_rule_batch", "metadata": None}],
-        )
-        self.assertEqual(
-            result,
-            {
-                "deleted_counts": {"bank_flow_rule_batch_canonical_drafts": 0},
-                "invalidated_scopes": ["2026-04"],
-                "enqueued_jobs": ["bank_flow_rule_batch.canonical_draft.refresh"],
-            },
-        )
-
 
 if __name__ == "__main__":
     unittest.main()

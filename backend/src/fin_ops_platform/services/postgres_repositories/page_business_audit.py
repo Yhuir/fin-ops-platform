@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from fin_ops_platform.services.bank_flow_rule_batch_canonical_query import (
+    build_live_bank_flow_rule_batch_service,
+)
 from fin_ops_platform.services.postgres_repositories.audit_report import (
     AuditIssue,
     AuditSnapshot,
@@ -14,6 +17,9 @@ from fin_ops_platform.services.postgres_repositories.audit_report import (
 from fin_ops_platform.services.postgres_repositories.page_consumer_relation_audit import (
     BANK_FLOW_RULE_BATCH_CONSUMER,
     page_consumer_relation_edge_equality_issues,
+)
+from fin_ops_platform.services.postgres_repositories.bank_flow_rule_batch_canonical_query import (
+    BankFlowRuleBatchCanonicalQueryRepository,
 )
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_query import (
     list_oa_pending_payment_relation_visibility_gaps,
@@ -743,97 +749,147 @@ def _canonical_expected_set_issues(
             message="批量账务 active relation 的 relation_mode 与 source owner 不一致。",
         )
     if contract.domain_key == "bank_flow_rule_batches":
-        return _proof_query_issues(
-            connection,
-            sql="""
-                /* check: canonical_expected_set */
-                with current_settings as materialized (
-                    select settings_payload
-                    from app.app_settings
-                    where settings_key = 'app_settings'
-                    limit 1
-                ),
-                effective_bank_facts as materialized (
-                    select
-                        coalesce(bank.legacy_mongo_id, bank.id::text) as row_id,
-                        to_char(coalesce(bank.txn_date, bank.txn_month), 'YYYY-MM') as scope_key,
-                        bank.txn_direction,
-                        bank.amount,
-                        coalesce(
-                            confirmed.category_code,
-                            manual.category,
-                            ''
-                        ) as category_code
-                    from app.bank_transactions bank
-                    left join lateral (
-                        select confirmation.category_code
-                        from app.bank_transaction_category_confirmations confirmation
-                        where confirmation.tenant_id = 'default'
-                          and confirmation.status = 'active'
-                          and (
-                              confirmation.bank_transaction_id = bank.id
-                              or confirmation.legacy_transaction_id in (
-                                  coalesce(bank.legacy_mongo_id, bank.id::text),
-                                  bank.id::text
-                              )
-                          )
-                        order by confirmation.confirmed_at desc, confirmation.id desc
-                        limit 1
-                    ) confirmed on true
-                    left join lateral (
-                        select category.category
-                        from app.bank_transaction_categories category
-                        where category.status = 'active'
-                          and (
-                              category.bank_transaction_id = bank.id
-                              or category.legacy_transaction_id in (
-                                  coalesce(bank.legacy_mongo_id, bank.id::text),
-                                  bank.id::text
-                              )
-                          )
-                        order by category.updated_at desc, category.id desc
-                        limit 1
-                    ) manual on true
-                    where bank.status <> 'deleted'
-                ),
-                occupied_members as materialized (
-                    select distinct member.row_id
-                    from app.workbench_pair_relations relation
-                    cross join lateral unnest(relation.row_ids) member(row_id)
-                    where relation.status = 'active'
-                ),
-                persisted_formal_facts as materialized (
-                    select batch.batch_id
-                    from app.bank_flow_rule_batches batch
-                    where batch.status in ('submitted', 'withdrawn', 'stale')
-                )
-                select fact.row_id as subject_id,
-                       fact.scope_key,
-                       'invalid_live_candidate_source_fact' as mismatch_kind,
-                       fact.category_code,
-                       fact.txn_direction,
-                       fact.amount::text
-                from effective_bank_facts fact
-                cross join current_settings settings
-                left join occupied_members occupied on occupied.row_id = fact.row_id
-                where nullif(fact.row_id, '') is null
-                   or nullif(fact.scope_key, '') is null
-                   or nullif(fact.category_code, '') is null
-                   or fact.amount is null
-                   or settings.settings_payload is null
-                   or exists (
-                       select 1
-                       from persisted_formal_facts formal
-                       where formal.batch_id is null
-                   )
-                order by fact.scope_key, fact.row_id
-                limit %s
-            """,
-            params=(limit,),
-            code="bank_flow_rule_batches_canonical_expected_set_mismatch",
-            message="流水规则 live candidate expected set 与 canonical facts 不一致。",
-        )
+        return _bank_flow_live_expected_set_issues(connection, limit=limit)
     return []
+
+
+def _bank_flow_live_expected_set_issues(
+    connection: Any,
+    *,
+    limit: int,
+) -> list[AuditIssue]:
+    issues: list[AuditIssue] = []
+    for scope_month in BankFlowRuleBatchCanonicalQueryRepository.candidate_scope_months(
+        connection
+    ):
+        source = BankFlowRuleBatchCanonicalQueryRepository.read_candidate_guard_source(
+            connection,
+            scope_month=scope_month,
+        )
+        first = build_live_bank_flow_rule_batch_service(source)
+        second = build_live_bank_flow_rule_batch_service(source)
+        first_batches = _bank_flow_batch_signature(first.snapshot())
+        second_batches = _bank_flow_batch_signature(second.snapshot())
+        occupied_row_ids = {
+            str(row_id).strip()
+            for relation in list(source.get("active_relations") or [])
+            if isinstance(relation, dict)
+            for row_id in list(relation.get("row_ids") or [])
+            if str(row_id).strip()
+        }
+        candidate_row_ids = {
+            str(row.get("id") or row.get("transaction_id") or "").strip()
+            for row in list(source.get("candidate_rows") or [])
+            if isinstance(row, dict)
+            and str(row.get("id") or row.get("transaction_id") or "").strip()
+        }
+        covered_row_ids = {
+            row_id
+            for batch in first_batches.values()
+            for row_id in list(batch.get("row_ids") or [])
+        }
+        uncovered_row_ids = sorted(
+            candidate_row_ids - occupied_row_ids - covered_row_ids
+        )
+        if uncovered_row_ids:
+            issues.append(
+                _bank_flow_expected_set_issue(
+                    subject_id=scope_month,
+                    scope_month=scope_month,
+                    mismatch_kind="live_candidate_source_row_uncovered",
+                    details={"row_ids": uncovered_row_ids},
+                )
+            )
+        if len(issues) >= limit:
+            return issues
+        if first_batches != second_batches:
+            issues.append(
+                _bank_flow_expected_set_issue(
+                    subject_id=scope_month,
+                    scope_month=scope_month,
+                    mismatch_kind="live_candidate_derivation_not_deterministic",
+                    details={
+                        "first_batch_ids": sorted(first_batches),
+                        "second_batch_ids": sorted(second_batches),
+                    },
+                )
+            )
+        seen_members: dict[str, str] = {}
+        for batch_id, batch in first_batches.items():
+            row_ids = list(batch.get("row_ids") or [])
+            if batch_id != str(batch.get("batch_id") or "").strip():
+                issues.append(
+                    _bank_flow_expected_set_issue(
+                        subject_id=batch_id,
+                        scope_month=scope_month,
+                        mismatch_kind="live_candidate_identity_mismatch",
+                        details={"payload_batch_id": batch.get("batch_id")},
+                    )
+                )
+            occupied = sorted(set(row_ids).intersection(occupied_row_ids))
+            if occupied and str(batch.get("status") or "") in {"draft", "unsubmitted"}:
+                issues.append(
+                    _bank_flow_expected_set_issue(
+                        subject_id=batch_id,
+                        scope_month=scope_month,
+                        mismatch_kind="live_candidate_uses_occupied_member",
+                        details={"occupied_row_ids": occupied},
+                    )
+                )
+            for row_id in row_ids:
+                prior_batch_id = seen_members.setdefault(row_id, batch_id)
+                if prior_batch_id != batch_id:
+                    issues.append(
+                        _bank_flow_expected_set_issue(
+                            subject_id=row_id,
+                            scope_month=scope_month,
+                            mismatch_kind="live_candidate_member_duplicated",
+                            details={
+                                "batch_ids": sorted({prior_batch_id, batch_id}),
+                            },
+                        )
+                    )
+            if len(issues) >= limit:
+                return issues
+    return issues[:limit]
+
+
+def _bank_flow_batch_signature(snapshot: dict[str, object]) -> dict[str, dict[str, object]]:
+    batches = snapshot.get("batches")
+    if not isinstance(batches, dict):
+        return {}
+    return {
+        str(batch_id): {
+            "batch_id": str(batch.get("batch_id") or "").strip(),
+            "status": str(batch.get("status") or "").strip(),
+            "row_ids": sorted(
+                str(row_id).strip()
+                for row_id in list(batch.get("row_ids") or [])
+                if str(row_id).strip()
+            ),
+            "total_amount": str(batch.get("total_amount") or "0"),
+            "batch_type": str(batch.get("batch_type") or "").strip(),
+        }
+        for batch_id, batch in batches.items()
+        if isinstance(batch, dict)
+    }
+
+
+def _bank_flow_expected_set_issue(
+    *,
+    subject_id: str,
+    scope_month: str,
+    mismatch_kind: str,
+    details: dict[str, object],
+) -> AuditIssue:
+    return AuditIssue(
+        severity="error",
+        code="bank_flow_rule_batches_canonical_expected_set_mismatch",
+        message="流水规则 live candidate expected set 与 canonical facts 不一致。",
+        subject_id=subject_id,
+        scope_key=scope_month,
+        details={"mismatch_kind": mismatch_kind, **details},
+    )
 
 
 def _key_display_field_issues(

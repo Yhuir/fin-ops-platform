@@ -356,10 +356,6 @@ class PostgresStateStoreTests(unittest.TestCase):
         store.save_bank_flow_rule_batch_items = lambda snapshot, *, batch_ids: calls.append(  # type: ignore[method-assign]
             ("bank_flow_items", {"snapshot": snapshot, "batch_ids": batch_ids})
         )
-        store.save_bank_flow_rule_batches_scope = lambda snapshot, *, scope_key: calls.append(  # type: ignore[method-assign]
-            ("bank_flow_scope", {"snapshot": snapshot, "scope_key": scope_key})
-        )
-        store.save_bank_flow_rule_batches = lambda _snapshot: calls.append(("bank_flow_all", {}))  # type: ignore[method-assign]
         store.save_workbench_read_models = lambda *_args, **_kwargs: (_ for _ in ()).throw(  # type: ignore[method-assign]
             AssertionError("bank-flow mutation must not write workbench read model synchronously")
         )

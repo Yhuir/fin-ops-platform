@@ -36,7 +36,6 @@ APP_STATUS_BACKGROUND_JOB_REGISTRY: dict[str, AppStatusBackgroundJobDefinition] 
     "search.read_model.refresh": AppStatusBackgroundJobDefinition("search.read_model.refresh", "刷新全局搜索索引", (), "/operations/app-health"),
     "oa.sync": AppStatusBackgroundJobDefinition("oa.sync", "OA同步", ("oa_pending_payments",), "/oa-pending-payments"),
     "no_oa_bank_batch.read_model.refresh": AppStatusBackgroundJobDefinition("no_oa_bank_batch.read_model.refresh", "刷新免OA批次", ("no_oa_bank_batches",), "/no-oa-bank-batches"),
-    "bank_flow_rule_batch.canonical_draft.refresh": AppStatusBackgroundJobDefinition("bank_flow_rule_batch.canonical_draft.refresh", "重建流水规则草稿", ("bank_flow_rule_batches",), "/bank-flow-rule-batches"),
     "settings_refresh": AppStatusBackgroundJobDefinition("settings_refresh", "刷新设置", ("settings",), "/settings", legacy=True),
     "settings_data_reset": AppStatusBackgroundJobDefinition("settings_data_reset", "设置数据重置", ("settings",), "/settings", legacy=True),
     "historical_etc_reconcile": AppStatusBackgroundJobDefinition("historical_etc_reconcile", "历史ETC核对", ("etc_tickets",), "/etc-tickets", legacy=True),

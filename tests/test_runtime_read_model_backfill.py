@@ -121,51 +121,11 @@ class RuntimeReadModelBackfillTests(unittest.TestCase):
         self.assertIn("--enable-workbench-relation-read-model-refresh", worker_args)
         self.assertIn("--enable-search-read-model-refresh", worker_args)
         self.assertIn("--enable-no-oa-bank-batch-read-model-refresh", worker_args)
-        self.assertIn("--enable-bank-flow-rule-batch-canonical-draft-refresh", worker_args)
-        self.assertIn("bank_flow_rule_batch.canonical_draft.refresh", worker_args)
+        self.assertNotIn("--enable-bank-flow-rule-batch-canonical-draft-refresh", worker_args)
+        self.assertNotIn("bank_flow_rule_batch.canonical_draft.refresh", worker_args)
         self.assertNotIn("input_invoice_usage.read_model.refresh", worker_args)
         self.assertNotIn("output_invoice_collection.read_model.refresh", worker_args)
         self.assertNotIn("bank_detail.read_model.refresh", worker_args)
-
-    def test_bank_flow_repair_replay_uses_generic_domain_event_without_dirty_scope(self) -> None:
-        module = load_backfill_script_module()
-        queue = FakeQueue()
-        module.RuntimeQueueRepository = lambda _connection: queue
-
-        report = module.enqueue_bank_flow_canonical_draft_replay(
-            FakeConnection(),
-            scope_keys=["2026-05"],
-            dry_run=False,
-            reason="operator_replay",
-            actor_id="ops-user-42",
-            trace_id="replay-trace-42",
-        )
-
-        self.assertEqual(report["enqueued_count"], 1)
-        event = queue.refreshes[0]
-        self.assertEqual(
-            event["event_type"],
-            "bank_flow_rule_batch.canonical_draft.refresh",
-        )
-        self.assertEqual(event["scope_type"], "bank_flow_rule_batch_draft")
-        self.assertNotIn("reason", event)
-        self.assertEqual(event["payload"]["metadata"]["actor_id"], "ops-user-42")
-        self.assertEqual(event["payload"]["metadata"]["source"], "operator_replay")
-        self.assertEqual(event["payload"]["metadata"]["trace_id"], "replay-trace-42")
-        self.assertEqual(event["payload"]["metadata"]["trigger"], "repair_replay")
-
-    def test_bank_flow_repair_replay_rejects_actorless_non_dry_run(self) -> None:
-        module = load_backfill_script_module()
-
-        with self.assertRaisesRegex(ValueError, "actor_id is required"):
-            module.enqueue_bank_flow_canonical_draft_replay(
-                FakeConnection(),
-                scope_keys=["2026-05"],
-                dry_run=False,
-                reason="operator_replay",
-                actor_id=None,
-                trace_id="replay-trace-42",
-            )
 
     def test_coverage_report_is_limited_to_active_registry_and_queue_state(self) -> None:
         module = load_backfill_script_module()
