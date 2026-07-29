@@ -1863,3 +1863,9 @@
 - 当前 Workbench expected/published proof 覆盖 projection 的完整直接输入：relation/exception/override/claim、scope 与跨月成员 OA/银行/发票、ETC 四表和实际消费的 settings fingerprint；撤回、soft delete、跨月成员与 ETC ownership 变化都由同一 source vector 驱动 exact scope stale。
 - `server.py` 只注入 Application 已持有的 shared `WorkbenchSqlProjectionBuilder`。并发同 scope 请求只共享 active proof I/O，不缓存已完成结果；PostgreSQL dirty/outbox、gateway 和 active-generation publish 合同不变。
 - v7 已随 `main-719c9a34-20260725101310` 完成 migration `0125` 和正式 `workbench-rehydrate`，没有增加 read model、queue、worker、registry、cache 或 transport。最终生产 correctness/Audit/queue closure 前保持 Phase 27 open；3 秒指标单列为性能 follow-up。
+
+## 2026-07-29 - workbench_relation scope writer 绑定修复
+
+- 生产 failed scope 暴露 `PostgresSearchWorkbenchRelationReadModelRepository._upsert_workbench_relation_scope` 被实例调用但缺少 `@staticmethod`，Python 将 repository 实例错误绑定为第一个位置参数，导致 full、partial 和 empty scope 发布都可能在 metadata upsert 前失败。
+- 修复只把这个无实例状态 helper 明确为 staticmethod；SQL、事务、scope、source versions、durable queue、worker registry 和消费者合同均未改变，也没有增加 fallback writer。
+- failed scope 必须通过正式 runtime queue operator 重试；禁止直接 SQL 把 dirty scope 标成 fresh。

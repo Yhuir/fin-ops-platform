@@ -1804,6 +1804,7 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
             ),
         )
 
+    @staticmethod
     def _upsert_workbench_relation_scope(
         connection: Any,
         *,

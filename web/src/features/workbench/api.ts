@@ -69,6 +69,8 @@ export type WorkbenchBootstrapProgress = {
 
 export const WORKBENCH_GROUP_PAGE_SIZE = 50;
 
+const workbenchInitialPageRequests = new Map<string, Promise<ApiWorkbenchInitialPayload>>();
+
 type ApiRelation = {
   code: string;
   label: string;
@@ -2607,6 +2609,7 @@ export async function fetchWorkbenchInitialPage(
   onProgress?: (progress: WorkbenchBootstrapProgress) => void,
   zoneQueries: Partial<Record<WorkbenchZoneId, WorkbenchGroupsPageQuery>> = {},
 ): Promise<WorkbenchInitialPageResult> {
+  const requestUrl = workbenchInitialUrl(month, zoneQueries);
   onProgress?.({
     label: "加载关联台首屏",
     loadedBytes: 0,
@@ -2614,10 +2617,17 @@ export async function fetchWorkbenchInitialPage(
     percent: 20,
     indeterminate: false,
   });
-  const payload = await requestJson<ApiWorkbenchInitialPayload>(workbenchInitialUrl(month, zoneQueries), {
-    method: "GET",
-    signal,
-  });
+  let payloadRequest: Promise<ApiWorkbenchInitialPayload>;
+  if (signal) {
+    payloadRequest = requestJson<ApiWorkbenchInitialPayload>(requestUrl, { method: "GET", signal });
+  } else {
+    payloadRequest = workbenchInitialPageRequests.get(requestUrl)
+      ?? requestJson<ApiWorkbenchInitialPayload>(requestUrl, { method: "GET" }).finally(() => {
+        workbenchInitialPageRequests.delete(requestUrl);
+      });
+    workbenchInitialPageRequests.set(requestUrl, payloadRequest);
+  }
+  const payload = await payloadRequest;
   const readModelVersion = payload.read_model_version ?? payload.active_generation_id ?? null;
   const readModelStatus = mapReadModelStatus(payload.read_model_status);
   const pairedPayload: ApiWorkbenchGroupsPayload = {

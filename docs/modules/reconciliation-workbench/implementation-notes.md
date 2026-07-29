@@ -1385,3 +1385,9 @@
 - UI：申请类型移到申请人栏；项目栏只显示“多个项目 · N”、紧邻但不同样式的父 OA 金额以及逐项项目名；金额栏只显示逐项金额；关系和附件解析 chip 不再污染项目栏。子项点击仍传父 OA ID，只有父摘要行保留 action。
 - 存量：Workbench month/all schema 升级为 v8；旧 active generation 与 Redis page cache 不能冒充 fresh，经既有 freshness gateway 重建。
 - 验证：backend service/API、frontend API/component/selection 回归、production build；生产发布后还需等待 OA sync 和 Workbench scopes fresh，并对真实 413 元样例做只读 UI/API/性能核验。
+
+## 2026-07-29 - combined initial 并发请求合并
+
+- 页面仍通过 `fetchWorkbenchInitialPage` 读取 fresh active generation；确认的 operation projection、撤回等待真实 fresh、refresh-status 轻量轮询和 worker/queue 合同均不改变。
+- 相同 URL 的无 `AbortSignal` combined-initial 请求只在网络请求进行期间共享一次 raw payload Promise，请求成功或失败后立即删除。搜索、筛选和页面激活使用的可取消请求保持独立，因此没有新增 TTL cache、Redis、状态库或陈旧数据路径。
+- 性能门：fresh 初始读取与 `/groups` p95 `<=1000ms`；confirm committed feedback p95 `<=1000ms`；withdraw 最终 fresh p95 `<=2000ms`、p99 `<=3000ms`。正确性、CAS、幂等、审计、zero write-time fan-out 和 active-generation fresh 仍是硬门。

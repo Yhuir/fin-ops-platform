@@ -552,6 +552,21 @@ def test_workbench_relation_distribution_partial_save_deletes_overlap_and_counts
     assert any("insert into read_model.workbench_relation_rows" in sql for sql in bulk_sql)
 
 
+def test_workbench_relation_distribution_empty_scope_updates_scope_metadata() -> None:
+    connection = RecordingConnection()
+    repository = PostgresReadModelRepository(connection)
+
+    repository.mark_workbench_relation_scope_empty(
+        scope_key="2026-05",
+        source_versions={"source_version": 11},
+    )
+
+    executed_sql = [sql for sql, _params in connection.executed]
+    assert "delete from read_model.workbench_relation_rows where tenant_id = %s and scope_key = %s" in executed_sql
+    assert "delete from read_model.workbench_relation_groups where tenant_id = %s and scope_key = %s" in executed_sql
+    assert any("insert into read_model.workbench_relation_scopes" in sql for sql in executed_sql)
+
+
 def test_workbench_relation_row_id_aliases_resolve_storage_and_legacy_ids() -> None:
     class AliasConnection(RecordingConnection):
         def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:

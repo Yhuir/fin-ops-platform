@@ -428,7 +428,7 @@ describe("workbench api bank amount mapping", () => {
     expect(result).not.toHaveProperty("operationBarrierTargets");
   });
 
-  test("loads initial workbench page with one versioned request", async () => {
+  test("coalesces concurrent identical initial workbench loads into one versioned request", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);
       if (url.startsWith("/api/workbench?")) {
@@ -573,12 +573,17 @@ describe("workbench api bank amount mapping", () => {
       return Promise.reject(new Error(`unexpected url ${url}`));
     });
 
-    const result = await fetchWorkbenchInitialPage("all", undefined, undefined, {
+    const zoneQueries = {
       paired: { sort: "bank:desc" },
       unpaired: { search: "供应商" },
-    });
+    };
+    const [result, duplicateResult] = await Promise.all([
+      fetchWorkbenchInitialPage("all", undefined, undefined, zoneQueries),
+      fetchWorkbenchInitialPage("all", undefined, undefined, zoneQueries),
+    ]);
 
     expect(result.data.summary.pairedCount).toBe(1);
+    expect(duplicateResult).toEqual(result);
     expect(result.data.summary.zoneCounts.paired.bank).toBe(7);
     expect(result.pages.paired.rowCounts.bank).toBe(7);
     expect(result.data.paired.groups[0].id).toBe("case:paired");
@@ -604,6 +609,8 @@ describe("workbench api bank amount mapping", () => {
     expect(JSON.parse(initialUrl.searchParams.get("unpaired_query") ?? "{}")).toEqual({
       search: "供应商",
     });
+    expect(await fetchWorkbenchInitialPage("all", undefined, undefined, zoneQueries)).toEqual(result);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
   test("maps formal relation groups from workbench group pages", async () => {

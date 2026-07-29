@@ -14,6 +14,8 @@
 4. 关联台与三个共享 projection 均通过 gateway、durable queue、freshness proof 和登记 worker
    闭环；关联台页面只读取 fresh active generation，共享模型的 `all` 只作 fan-out command。
 5. 历史 migration/table 只供回滚，不能被当前生产代码或测试 fixture 当作事实源。
+6. `workbench_relation` full、partial 与 empty scope repository 写入都必须更新 scope metadata；
+   method binding、事务或批量写回归不得把 scope 留在 failed/dead-letter。
 
 ## 七类测试
 

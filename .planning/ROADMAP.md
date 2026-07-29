@@ -672,4 +672,29 @@ Plans:
 
 - [ ] 33-01-PLAN — Direct canonical read cutover, legacy removal, targeted verification and production closure.
 
+### Phase 34: 关联台一秒交互热路径与共享投影恢复
+
+**Goal:** Remove duplicate concurrent Workbench initial reads, restore the broken shared
+`workbench_relation` projection writer, and verify the existing confirm/withdraw consistency
+contracts against explicit production latency targets without adding another cache or read path.
+**Requirements:** Performance follow-up from Phase 30; no new product requirement IDs.
+**Depends on:** Phase 30 Workbench mutation and active-generation contracts.
+**Canonical refs:** `.planning/phases/34-workbench-performance-slo/34-01-PLAN.md`,
+`docs/modules/reconciliation-workbench/boundary-io.md`,
+`docs/modules/workbench-relations/boundary-io.md`,
+`docs/modules/read-models/boundary-io.md`,
+`docs/modules/runtime-workers/boundary-io.md`
+**Success Criteria** (what must be TRUE):
+
+  1. Concurrent identical background combined-initial reads share one in-flight HTTP request; completed requests are never cached and cancellable search/filter reads remain independent.
+  2. Full, partial and empty `workbench_relation` projection writes all update scope metadata without worker dead letters.
+  3. Confirm keeps immediate committed projection feedback, withdraw waits for real fresh active-generation convergence, and neither write restores page fan-out.
+  4. Targeted local gates, one `main` deployment, queue recovery, authenticated production reads and a reversible write probe record real latency without weakening correctness.
+
+**Plans:** 1 plan
+
+Plans:
+
+- [ ] 34-01-PLAN — Fix the shared repository binding, coalesce exact in-flight reads, run targeted gates, deploy once and close production evidence.
+
 ---
