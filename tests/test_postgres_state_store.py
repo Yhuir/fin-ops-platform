@@ -346,43 +346,88 @@ class PostgresStateStoreTests(unittest.TestCase):
         self.assertNotIn("workbench_generation_status_counts", executed_sql)
 
     def test_bank_flow_rule_batch_mutation_uses_scoped_batch_write_only(self) -> None:
+        transaction = object()
+
+        class TransactionContext:
+            def __enter__(self) -> object:
+                return transaction
+
+            def __exit__(self, *_args: object) -> None:
+                return None
+
+        class Connection:
+            def transaction(self) -> TransactionContext:
+                return TransactionContext()
+
         store = object.__new__(PostgresStateStore)
-        store._connection = object()
+        store._connection = Connection()
         calls: list[tuple[str, object]] = []
 
-        store.save_workbench_pair_relations = lambda snapshot, *, changed_case_ids=None: calls.append(  # type: ignore[method-assign]
-            ("pair_relations", {"snapshot": snapshot, "changed_case_ids": changed_case_ids})
-        )
-        store.save_bank_flow_rule_batch_items = lambda snapshot, *, batch_ids: calls.append(  # type: ignore[method-assign]
-            ("bank_flow_items", {"snapshot": snapshot, "batch_ids": batch_ids})
-        )
-        store.save_workbench_read_models = lambda *_args, **_kwargs: (_ for _ in ()).throw(  # type: ignore[method-assign]
-            AssertionError("bank-flow mutation must not write workbench read model synchronously")
-        )
+        class TransactionBoundRepository:
+            def __init__(self, connection: object) -> None:
+                self._connection = connection
+                calls.append(("repository_connection", connection))
 
-        store.save_bank_flow_rule_batch_mutation(
-            pair_relation_snapshot={
-                "pair_relations": {
-                    "CASE-1": {
-                        "case_id": "CASE-1",
-                        "special_metadata": {"source_batch_id": "batch-1"},
+            def save_workbench_pair_relations(
+                self,
+                snapshot: dict[str, object],
+                *,
+                changed_case_ids: set[str],
+            ) -> None:
+                calls.append(
+                    (
+                        "pair_relations",
+                        {
+                            "snapshot": snapshot,
+                            "changed_case_ids": changed_case_ids,
+                        },
+                    )
+                )
+
+            def save_bank_flow_rule_batch_items(
+                self,
+                snapshot: dict[str, object],
+                *,
+                batch_ids: set[str],
+            ) -> None:
+                calls.append(
+                    (
+                        "bank_flow_items",
+                        {
+                            "snapshot": snapshot,
+                            "batch_ids": batch_ids,
+                        },
+                    )
+                )
+
+        with patch(
+            "fin_ops_platform.services.postgres_state_store.PostgresWorkbenchRepository",
+            TransactionBoundRepository,
+        ):
+            store.save_bank_flow_rule_batch_mutation(
+                pair_relation_snapshot={
+                    "pair_relations": {
+                        "CASE-1": {
+                            "case_id": "CASE-1",
+                            "special_metadata": {"source_batch_id": "batch-1"},
+                        }
                     }
-                }
-            },
-            bank_flow_rule_batch_snapshot={
-                "batches": {
-                    "batch-1": {"batch_id": "batch-1", "relation_case_id": "CASE-1"},
-                    "batch-2": {"batch_id": "batch-2", "relation_case_id": "CASE-2"},
-                }
-            },
-            changed_case_ids=["CASE-1"],
-            changed_scope_keys=["all", "visibility:paired:2026-02", "2026-02"],
-            changed_batch_ids=["batch-2"],
-        )
+                },
+                bank_flow_rule_batch_snapshot={
+                    "batches": {
+                        "batch-1": {"batch_id": "batch-1", "relation_case_id": "CASE-1"},
+                        "batch-2": {"batch_id": "batch-2", "relation_case_id": "CASE-2"},
+                    }
+                },
+                changed_case_ids=["CASE-1"],
+                changed_scope_keys=["all", "visibility:paired:2026-02", "2026-02"],
+                changed_batch_ids=["batch-2"],
+            )
 
         self.assertEqual(
             calls,
             [
+                ("repository_connection", transaction),
                 (
                     "pair_relations",
                     {
@@ -411,6 +456,153 @@ class PostgresStateStoreTests(unittest.TestCase):
                 ),
             ],
         )
+
+    def test_bank_flow_mutations_roll_back_relation_and_batch_when_event_write_fails(self) -> None:
+        class Transaction:
+            def __init__(self) -> None:
+                self.relations: dict[str, object] = {}
+                self.history: list[object] = []
+                self.batches: dict[str, object] = {}
+                self.events: list[object] = []
+
+        class TransactionContext:
+            def __init__(self, connection: "Connection") -> None:
+                self._connection = connection
+                self.transaction = Transaction()
+
+            def __enter__(self) -> Transaction:
+                self._connection.transaction_count += 1
+                return self.transaction
+
+            def __exit__(
+                self,
+                exc_type: type[BaseException] | None,
+                _exc: BaseException | None,
+                _traceback: object,
+            ) -> None:
+                if exc_type is None:
+                    self._connection.committed = self.transaction
+                else:
+                    self._connection.rollback_count += 1
+
+        class Connection:
+            def __init__(self) -> None:
+                self.committed = Transaction()
+                self.transaction_count = 0
+                self.rollback_count = 0
+
+            def transaction(self) -> TransactionContext:
+                return TransactionContext(self)
+
+        class FailingEventRepository:
+            def __init__(self, transaction: Transaction) -> None:
+                if not isinstance(transaction, Transaction):
+                    raise AssertionError("repository must bind to the caller-owned transaction")
+                self._transaction = transaction
+
+            def save_workbench_pair_relations(
+                self,
+                snapshot: dict[str, object],
+                *,
+                changed_case_ids: set[str],
+            ) -> None:
+                self._transaction.relations.update(
+                    {
+                        case_id: dict(payload)
+                        for case_id, payload in dict(
+                            snapshot.get("pair_relations") or {}
+                        ).items()
+                        if case_id in changed_case_ids
+                    }
+                )
+                self._transaction.history.extend(
+                    list(snapshot.get("pair_relation_history") or [])
+                )
+
+            def save_bank_flow_rule_batch_items(
+                self,
+                snapshot: dict[str, object],
+                *,
+                batch_ids: set[str],
+            ) -> None:
+                self._transaction.batches.update(
+                    {
+                        batch_id: dict(payload)
+                        for batch_id, payload in dict(
+                            snapshot.get("batches") or {}
+                        ).items()
+                        if batch_id in batch_ids
+                    }
+                )
+                raise RuntimeError("injected bank-flow event write failure")
+
+        for mutation_type in (
+            "single_submit",
+            "selected_row_submit",
+            "withdraw",
+            "reset_submitted",
+        ):
+            with self.subTest(mutation_type=mutation_type):
+                connection = Connection()
+                store = object.__new__(PostgresStateStore)
+                store._connection = connection
+                with patch(
+                    "fin_ops_platform.services.postgres_state_store.PostgresWorkbenchRepository",
+                    FailingEventRepository,
+                ):
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "injected bank-flow event write failure",
+                    ):
+                        store.save_bank_flow_rule_batch_mutation(
+                            pair_relation_snapshot={
+                                "pair_relations": {
+                                    f"CASE-{mutation_type}": {
+                                        "case_id": f"CASE-{mutation_type}",
+                                        "status": (
+                                            "cancelled"
+                                            if mutation_type in {"withdraw", "reset_submitted"}
+                                            else "active"
+                                        ),
+                                    }
+                                },
+                                "pair_relation_history": [
+                                    {
+                                        "case_id": f"CASE-{mutation_type}",
+                                        "operation_type": mutation_type,
+                                    }
+                                ],
+                            },
+                            bank_flow_rule_batch_snapshot={
+                                "batches": {
+                                    f"batch-{mutation_type}": {
+                                        "batch_id": f"batch-{mutation_type}",
+                                        "relation_case_id": f"CASE-{mutation_type}",
+                                        "status": (
+                                            "withdrawn"
+                                            if mutation_type in {"withdraw", "reset_submitted"}
+                                            else "submitted"
+                                        ),
+                                    }
+                                },
+                                "audit_log": [
+                                    {
+                                        "batch_id": f"batch-{mutation_type}",
+                                        "operation": mutation_type,
+                                    }
+                                ],
+                            },
+                            changed_case_ids=[f"CASE-{mutation_type}"],
+                            changed_scope_keys=["2026-05"],
+                            changed_batch_ids=[f"batch-{mutation_type}"],
+                        )
+
+                self.assertEqual(connection.transaction_count, 1)
+                self.assertEqual(connection.rollback_count, 1)
+                self.assertEqual(connection.committed.relations, {})
+                self.assertEqual(connection.committed.history, [])
+                self.assertEqual(connection.committed.batches, {})
+                self.assertEqual(connection.committed.events, [])
 
     def test_candidate_guard_fails_closed_when_rule_eligibility_changes(self) -> None:
         class Transaction:

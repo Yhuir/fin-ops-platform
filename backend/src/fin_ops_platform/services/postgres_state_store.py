@@ -739,19 +739,20 @@ class PostgresStateStore:
             changed_case_ids=normalized_case_ids,
         )
 
-        def write(_connection: Any) -> None:
+        def write(transaction: Any) -> None:
+            transaction_repository = PostgresWorkbenchRepository(transaction)
             if isinstance(candidate_guard, dict):
                 self._assert_bank_flow_rule_batch_candidate_guard(
-                    _connection,
+                    transaction,
                     candidate_guard,
                 )
             if normalized_case_ids:
-                self.save_workbench_pair_relations(
+                transaction_repository.save_workbench_pair_relations(
                     pair_relation_snapshot,
                     changed_case_ids=normalized_case_ids,
                 )
             if mutation_batch_ids:
-                self.save_bank_flow_rule_batch_items(
+                transaction_repository.save_bank_flow_rule_batch_items(
                     bank_flow_rule_batch_snapshot,
                     batch_ids=mutation_batch_ids,
                 )

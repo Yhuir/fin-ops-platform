@@ -566,6 +566,73 @@ class StateStoreTests(unittest.TestCase):
         self.assertEqual(pair_snapshot["pair_relations"]["CASE-1"]["row_ids"], ["bank-1"])
         self.assertEqual(bank_flow_snapshot["batches"]["batch-1"]["status"], "submitted")
 
+    def test_save_bank_flow_rule_batch_mutation_failure_leaves_no_local_half_write(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            store = ApplicationStateStore(data_dir)
+            store.save_workbench_pair_relations(
+                {
+                    "pair_relations": {
+                        "CASE-existing": {
+                            "case_id": "CASE-existing",
+                            "status": "active",
+                        }
+                    }
+                }
+            )
+            store.save_bank_flow_rule_batches(
+                {
+                    "batches": {
+                        "batch-existing": {
+                            "batch_id": "batch-existing",
+                            "status": "submitted",
+                        }
+                    }
+                }
+            )
+
+            with patch.object(
+                store,
+                "_save_local_pickle",
+                side_effect=RuntimeError("injected atomic replace failure"),
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "injected atomic replace failure",
+                ):
+                    store.save_bank_flow_rule_batch_mutation(
+                        pair_relation_snapshot={
+                            "pair_relations": {
+                                "CASE-new": {
+                                    "case_id": "CASE-new",
+                                    "status": "active",
+                                }
+                            }
+                        },
+                        bank_flow_rule_batch_snapshot={
+                            "batches": {
+                                "batch-new": {
+                                    "batch_id": "batch-new",
+                                    "status": "submitted",
+                                }
+                            }
+                        },
+                        changed_case_ids=["CASE-new"],
+                        changed_scope_keys=["2026-05"],
+                        changed_batch_ids=["batch-new"],
+                    )
+
+            reloaded = ApplicationStateStore(data_dir)
+
+            self.assertEqual(
+                set(reloaded.load_workbench_pair_relations()["pair_relations"]),
+                {"CASE-existing"},
+            )
+            self.assertEqual(
+                set(reloaded.load_bank_flow_rule_batches()["batches"]),
+                {"batch-existing"},
+            )
+
 
 
     def test_save_turnover_relations_persists_locally_across_store_instances(self) -> None:

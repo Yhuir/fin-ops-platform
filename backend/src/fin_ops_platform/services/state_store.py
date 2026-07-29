@@ -777,6 +777,10 @@ class ApplicationStateStore:
         return loaded if isinstance(loaded, dict) else {}
 
     def load_bank_flow_rule_batches(self) -> dict[str, Any]:
+        current_payload = self._load_local_pickle()
+        snapshot = current_payload.get("bank_flow_rule_batches")
+        if isinstance(snapshot, dict):
+            return snapshot
         if not self._bank_flow_rule_batches_path.exists():
             return {}
         with self._bank_flow_rule_batches_path.open("rb") as handle:
@@ -796,8 +800,10 @@ class ApplicationStateStore:
 
     def save_bank_flow_rule_batches(self, snapshot: dict[str, Any]) -> None:
         normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        with self._bank_flow_rule_batches_path.open("wb") as handle:
-            pickle.dump(normalized_snapshot, handle)
+        with self._local_pickle_lock:
+            current_payload = self._load_local_pickle()
+            current_payload["bank_flow_rule_batches"] = normalized_snapshot
+            self._save_local_pickle(current_payload)
 
     def save_no_oa_bank_batch_mutation(
         self,
@@ -856,14 +862,46 @@ class ApplicationStateStore:
             )
             if not isinstance(candidate, dict) or expected_members != actual_members:
                 raise RuntimeError("bank_flow_rule_batch_candidate_guard_conflict")
-        if normalized_case_ids:
-            self.save_workbench_pair_relations(
-                pair_relation_snapshot,
-                changed_case_ids=normalized_case_ids,
-            )
         if not normalized_batch_ids:
             raise ValueError("bank-flow rule batch mutation requires an explicit changed batch id")
-        self.save_bank_flow_rule_batches(bank_flow_rule_batch_snapshot)
+        with self._local_pickle_lock:
+            current_payload = self._load_local_pickle()
+            if normalized_case_ids:
+                normalized_relation_snapshot = (
+                    pair_relation_snapshot
+                    if isinstance(pair_relation_snapshot, dict)
+                    else {}
+                )
+                existing_snapshot = current_payload.get("workbench_pair_relations")
+                merged_snapshot = (
+                    dict(existing_snapshot)
+                    if isinstance(existing_snapshot, dict)
+                    else {}
+                )
+                existing_relations = merged_snapshot.get("pair_relations")
+                merged_relations = (
+                    dict(existing_relations)
+                    if isinstance(existing_relations, dict)
+                    else {}
+                )
+                incoming_relations = normalized_relation_snapshot.get("pair_relations")
+                if isinstance(incoming_relations, dict):
+                    merged_relations.update(incoming_relations)
+                merged_snapshot.update(
+                    {
+                        key: value
+                        for key, value in normalized_relation_snapshot.items()
+                        if key != "pair_relations"
+                    }
+                )
+                merged_snapshot["pair_relations"] = merged_relations
+                current_payload["workbench_pair_relations"] = merged_snapshot
+            current_payload["bank_flow_rule_batches"] = (
+                bank_flow_rule_batch_snapshot
+                if isinstance(bank_flow_rule_batch_snapshot, dict)
+                else {}
+            )
+            self._save_local_pickle(current_payload)
 
     def load_bank_transaction_categories(self) -> dict[str, Any]:
         current_payload = self._load_local_pickle()
