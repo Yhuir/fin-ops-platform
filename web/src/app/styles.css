@@ -25299,6 +25299,17 @@ body.column-layout-dragging {
   border-color: color-mix(in srgb, var(--fp-primary) 24%, var(--fp-border));
 }
 
+.etc-disclosure-header {
+  display: flex;
+  align-items: stretch;
+  background: color-mix(in srgb, var(--fp-surface-muted) 34%, var(--fp-surface));
+}
+
+.etc-disclosure-header > :first-child {
+  min-width: 0;
+  flex: 1;
+}
+
 .etc-disclosure-trigger {
   width: 100%;
   min-height: 42px;
@@ -25352,6 +25363,19 @@ body.column-layout-dragging {
 
 .etc-disclosure-indicator {
   color: var(--fp-text-secondary);
+}
+
+.etc-disclosure-header-action {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  padding-right: var(--fp-space-3);
+}
+
+.etc-disclosure-download-action {
+  min-height: 30px;
+  padding: var(--fp-space-1) var(--fp-space-2);
+  white-space: nowrap;
 }
 
 .etc-disclosure-body {

@@ -14,6 +14,7 @@ from fin_ops_platform.services.etc_invoice_pdf_bundle_service import (
 )
 from fin_ops_platform.services.etc_service import (
     ETC_BUSINESS_BATCH_MANUAL_STATUS_ALLOWED_STATUSES,
+    ETC_BUSINESS_BATCH_SUBMITTED_STATUSES,
     EtcBusinessBatch,
     EtcBusinessBatchInvalidTransitionError,
     EtcBusinessBatchNotFoundError,
@@ -213,6 +214,13 @@ class EtcBusinessBatchApplicationService:
 
     def invoice_pdf_bundle(self, business_batch_id: str, *, actor: EtcBusinessBatchActor) -> EtcInvoicePdfBundle:
         batch = self._scoped_batch(business_batch_id, actor)
+        has_oa_draft = bool(str(getattr(batch, "oa_draft_id", "") or "").strip())
+        status = str(getattr(batch, "status", "") or "")
+        if not has_oa_draft and status not in ETC_BUSINESS_BATCH_SUBMITTED_STATUSES:
+            raise EtcInvoicePdfBundleError(
+                "审批草稿创建成功或批次已提交后才能下载 ETC 发票 PDF。",
+                code="invoice_pdf_bundle_not_ready",
+            )
         invoice_ids = list(getattr(batch, "invoice_ids", []) or [])
         try:
             invoices = self._etc_service.list_invoices_by_ids(invoice_ids)

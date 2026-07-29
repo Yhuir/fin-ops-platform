@@ -534,25 +534,37 @@ type EtcDisclosureSectionProps = {
   title: string;
   summary?: ReactNode;
   meta?: ReactNode;
+  headerAction?: ReactNode;
   children: ReactNode;
   className?: string;
 };
 
-function EtcDisclosureSection({ id, title, summary, meta, children, className }: EtcDisclosureSectionProps) {
+function EtcDisclosureSection({
+  id,
+  title,
+  summary,
+  meta,
+  headerAction,
+  children,
+  className,
+}: EtcDisclosureSectionProps) {
   return (
     <Disclosure id={id} className={["etc-disclosure-section", className ?? ""].filter(Boolean).join(" ")}>
-      <Disclosure.Heading>
-        <Button slot="trigger" className="etc-disclosure-trigger" fullWidth size="sm" variant="tertiary">
-          <span className="etc-disclosure-title-block">
-            <span className="etc-disclosure-title">{title}</span>
-            {summary ? <span className="etc-disclosure-summary">{summary}</span> : null}
-          </span>
-          <span className="etc-disclosure-meta">
-            {meta}
-            <Disclosure.Indicator className="etc-disclosure-indicator" />
-          </span>
-        </Button>
-      </Disclosure.Heading>
+      <div className="etc-disclosure-header">
+        <Disclosure.Heading>
+          <Button slot="trigger" className="etc-disclosure-trigger" fullWidth size="sm" variant="tertiary">
+            <span className="etc-disclosure-title-block">
+              <span className="etc-disclosure-title">{title}</span>
+              {summary ? <span className="etc-disclosure-summary">{summary}</span> : null}
+            </span>
+            <span className="etc-disclosure-meta">
+              {meta}
+              <Disclosure.Indicator className="etc-disclosure-indicator" />
+            </span>
+          </Button>
+        </Disclosure.Heading>
+        {headerAction ? <div className="etc-disclosure-header-action">{headerAction}</div> : null}
+      </div>
       <Disclosure.Content>
         <Disclosure.Body className="etc-disclosure-body">
           {children}
@@ -2726,6 +2738,18 @@ export default function EtcTicketManagementPage() {
                       title="发票明细"
                       summary={`${invoiceRows.length} 行`}
                       meta={<CountChip>{invoiceRows.length} 行</CountChip>}
+                      headerAction={isSubmittedBusinessStatus(selectedBatch.status) ? (
+                        <button
+                          type="button"
+                          className="etc-secondary-action etc-disclosure-download-action"
+                          aria-busy={invoicePdfDownloadingBatchId === selectedBatch.businessBatchId}
+                          disabled={invoicePdfDownloadingBatchId === selectedBatch.businessBatchId}
+                          onClick={() => void handleDownloadInvoicePdf(selectedBatch)}
+                        >
+                          <Download aria-hidden="true" size={16} />
+                          {invoicePdfDownloadingBatchId === selectedBatch.businessBatchId ? "正在合并..." : "下载 PDF"}
+                        </button>
+                      ) : null}
                     >
                       {detailLoading ? <StatePanel tone="loading" compact>加载中。</StatePanel> : null}
                       {batchDetailError ? (

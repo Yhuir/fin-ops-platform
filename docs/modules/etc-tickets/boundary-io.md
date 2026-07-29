@@ -42,7 +42,7 @@
 | 信用卡账单 PDF | `POST /api/etc/reconciliation-tasks/{task_id}/credit-card-statement`、`CcbCreditCardStatementParser` | 先落 source file 元数据，再从可选文字解析交易行；无可用交易行时才按页渲染并用布局 OCR 重建表格行。OCR 结果附带人工核对 warning；两种路径都输出同一 `FileParseResult`/`CreditCardItem` 合同。解析提交与 source file 删除互斥；OCR 期间源文件已删除时返回 HTTP 409 / `source_file_deleted_during_parse`，不得生成孤儿明细。 |
 | ETC 发票导入/识别 | imports/services/parsers | 输出批次、任务、附件识别结果 |
 | ETC invoice list | `GET /api/etc/invoices` | 只读查询入口；route owner 只接收 `etc_service`、`json_response`、`serialize_invoice` 三个读侧端口，不接收 JSON body、link refresh 或状态回退端口 |
-| OA 草稿后发票 PDF 下载 | `GET /api/etc/business-batches/{id}/invoice-pdf` | 使用 read session；application service 校验 actor scope、OA 草稿和 `business_batch.invoice_ids`，再把发票元数据与 `EtcService.read_invoice_pdf_bytes` 读取端口交给 PDF bundle service；不直接读取 HTTP cookie/header，不写业务状态 |
+| OA 草稿/已提交批次发票 PDF 下载 | `GET /api/etc/business-batches/{id}/invoice-pdf` | 使用 read session；application service 校验 actor scope，并要求存在 OA 草稿或批次属于 `ETC_BUSINESS_BATCH_SUBMITTED_STATUSES`；历史已提交批次不因缺少 `oa_draft_id` 被拒绝。成员只取 `business_batch.invoice_ids`，再把发票元数据与 `EtcService.read_invoice_pdf_bytes` 读取端口交给 PDF bundle service；不直接读取 HTTP cookie/header，不写业务状态 |
 | 历史修复/迁移 | tools | 只作为显式运维入口。单批次 tombstone 恢复必须同时核对业务批次 ID、版本、OA row、发票数量与含税总额，并通过 dry-run fingerprint 执行；canonical invoice link backfill 必须限定同一 business batch 且核对严格候选数 |
 | 页面 Audit | `GET /api/operations/app-health/page-audit?page=etc-tickets` | 管理员只读；同一 `REPEATABLE READ READ ONLY` snapshot 直接读取 canonical tables，不创建或刷新 read model |
 
@@ -53,6 +53,7 @@
 | ETC ticket/batch payload | 前端页面 | summary DTO 只含列表展示、三 bucket counts 和统一 `createOaDraftAction`；不含 invoice IDs、import attempts、audit events 或 task 嵌套详情。detail DTO 才包含当前业务批次明细 |
 | Worker 持久化后的查询可见性 | ETC 票据/导入页面 | PostgreSQL 模式的 task、business batch、invoice 查询在读取前重载正式 snapshot，保证独立 import worker 的完成结果无需 API 重启即可见；file/memory backend 保持原有进程内语义 |
 | ETC 发票合并 PDF | 浏览器下载 | `application/pdf`、RFC 5987 UTF-8 文件名、`private, no-store`；按开票日期/发票号/ID 稳定排序，每张发票恰好贡献一页；任一来源不可读、损坏、hash 不一致或不是单页时整包失败；成功记录 `etc_invoice_pdf_bundle_downloaded` 审计，不新增批次状态或 read model |
+| ETC OA 附件引用 | OA form draft | `HttpEtcOAClient` 在上传响应边界把已知 OA absolute `/fileManager/` / `/profile/` URL 归一为根相对路径；已有相对路径与 opaque file id 保持不变，未知 absolute host/path fail closed。现有 payload builder 把同一规范值写入 `response.data` 与 `response.extra.filePath`，页面/Nginx 不做补偿拼接 |
 | linked reconciliation task title | ETC 发票导入 ready task 下拉 | business batch title 更新后同步 task title，导入页下拉展示最新批次标题 |
 | 关联候选/关系影响 | workbench relation/lifecycle | 不直接写下游 read model |
 | 修复/迁移结果 | 运维工具 | 可审计、可回滚或可重复；恢复只写回原 tombstone 成员，不创建第二个业务批次，不直接写 Workbench relation |

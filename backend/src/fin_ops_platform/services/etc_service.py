@@ -18,7 +18,7 @@ from tempfile import TemporaryDirectory
 from typing import Any, Callable, Protocol
 import xml.etree.ElementTree as ET
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urljoin
+from urllib.parse import quote, urljoin, urlsplit
 from urllib.request import Request, urlopen
 from uuid import uuid4
 from zipfile import BadZipFile, ZipFile
@@ -285,10 +285,31 @@ class HttpEtcOAClient:
             for key in ("url", "id", "fileId", "file_id", "path"):
                 value = data.get(key)
                 if value not in (None, ""):
-                    return str(value)
+                    return self._normalize_uploaded_attachment_reference(str(value), is_path=key in {"url", "path"})
         if isinstance(data, str) and data.strip():
-            return data.strip()
+            return self._normalize_uploaded_attachment_reference(data, is_path=True)
         raise EtcOAClientError("OA attachment upload response did not include a file id or URL.")
+
+    def _normalize_uploaded_attachment_reference(self, value: str, *, is_path: bool) -> str:
+        reference = value.strip()
+        if not reference:
+            raise EtcOAClientError("OA attachment upload response included an empty file reference.")
+        if not is_path:
+            return reference
+        parsed = urlsplit(reference)
+        if not parsed.scheme and not parsed.netloc:
+            return reference
+        if parsed.scheme not in {"http", "https"}:
+            raise EtcOAClientError("OA attachment upload response included an unsupported absolute URL.")
+
+        configured_host = urlsplit(str(self._settings.base_url or "")).hostname
+        if parsed.hostname not in {configured_host, "127.0.0.1", "localhost"}:
+            raise EtcOAClientError("OA attachment upload response included an unexpected host.")
+        for prefix in ("/fileManager/", "/profile/"):
+            prefix_index = parsed.path.find(prefix)
+            if prefix_index >= 0:
+                return parsed.path[prefix_index:]
+        raise EtcOAClientError("OA attachment upload response included an unsupported file path.")
 
     def create_form_draft(self, *, form_id: int, payload: dict[str, object]) -> tuple[str, str]:
         path = self._settings.form_draft_path_template.format(form_id=form_id)

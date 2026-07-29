@@ -40,12 +40,6 @@ class EtcInvoicePdfBundleService:
         self._max_total_bytes = max_total_bytes
 
     def build(self, *, batch: object, invoices: Iterable[object]) -> EtcInvoicePdfBundle:
-        if not str(getattr(batch, "oa_draft_id", "") or "").strip():
-            raise EtcInvoicePdfBundleError(
-                "审批草稿创建成功后才能下载 ETC 发票 PDF。",
-                code="invoice_pdf_bundle_not_ready",
-            )
-
         ordered_invoices = sorted(
             list(invoices),
             key=lambda invoice: (

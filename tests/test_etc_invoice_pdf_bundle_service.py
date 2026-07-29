@@ -105,17 +105,17 @@ class EtcInvoicePdfBundleServiceTests(unittest.TestCase):
                     )
                 self.assertEqual(caught.exception.code, expected_code)
 
-    def test_requires_a_successfully_created_oa_draft(self) -> None:
+    def test_builds_pdf_without_owning_batch_lifecycle_eligibility(self) -> None:
         content = _pdf_bytes("ETC-001")
         service = EtcInvoicePdfBundleService(read_invoice_pdf=lambda _invoice_id: content)
 
-        with self.assertRaises(EtcInvoicePdfBundleError) as caught:
-            service.build(
-                batch=SimpleNamespace(oa_draft_id=None, title="ETC"),
-                invoices=[_invoice("ETC-001", content)],
-            )
+        result = service.build(
+            batch=SimpleNamespace(oa_draft_id=None, status="draft", title="ETC"),
+            invoices=[_invoice("ETC-001", content)],
+        )
 
-        self.assertEqual(caught.exception.code, "invoice_pdf_bundle_not_ready")
+        self.assertEqual(result.invoice_count, 1)
+        self.assertEqual(result.page_count, 1)
 
     def test_rejects_empty_batches_and_bounded_resource_overflow(self) -> None:
         content = _pdf_bytes("ETC-001")
@@ -200,6 +200,14 @@ class EtcInvoicePdfBundleApiTests(unittest.TestCase):
                 stored_batch.oa_draft_url = "https://oa.example.test/draft/oa-draft-pdf-001"
                 app._etc_service._persist()
 
+                draft_response = app.handle_request(
+                    "GET",
+                    f"/api/etc/business-batches/{batch.business_batch_id}/invoice-pdf",
+                )
+                stored_batch.status = EtcBusinessBatchStatus.MANUALLY_MARKED_SUBMITTED.value
+                stored_batch.oa_draft_id = None
+                stored_batch.oa_draft_url = None
+                app._etc_service._persist()
                 response = app.handle_request(
                     "GET",
                     f"/api/etc/business-batches/{batch.business_batch_id}/invoice-pdf",
@@ -208,6 +216,7 @@ class EtcInvoicePdfBundleApiTests(unittest.TestCase):
             finally:
                 app._background_job_service.shutdown()
 
+        self.assertEqual(draft_response.status_code, 200)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["Content-Type"], "application/pdf")
         self.assertIn("filename*=UTF-8''", response.headers["Content-Disposition"])

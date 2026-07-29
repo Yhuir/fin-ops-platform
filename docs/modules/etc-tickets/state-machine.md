@@ -22,7 +22,7 @@
   - prepare/finalize/recovery 的 durable write 必须以目标 business batch 当前 version 为 CAS 前置条件，并只写当前 attempt 拥有的 business batch、submission batch 及确实发生变化的 invoice/import rows；不能回写全量旧 snapshot。business batch 已进入 `oa_confirmation_pending`、但 linked task OA 元数据写入失败时，相同 idempotency key 或相同 recovery 证据只执行修复写，禁止第二次调用 OA。
   - 暂存批次选择“我已在 OA 系统上完成 OA 草稿的提交”进入已提交；选择“我已在 OA 系统上删除该 OA 草稿”进入 `not_submitted`，清空 submission/draft 占用但保留批次、发票成员、源文件和核对数据。
   - 创建 OA 草稿后只能由 `manual-oa-status` 人工确认 `submitted` 或 `not_submitted`。
-  - OA 草稿创建成功后允许只读下载当前 business batch 关联的 ETC 发票合并 PDF；下载不改变批次状态。`invoice_ids` 决定成员，稳定排序后每张发票必须恰好贡献一页，任一来源异常时整包失败。
+  - OA 草稿创建成功后，或 business batch 已进入 `oa_submitted` / `manually_marked_submitted` / `closed` 后，允许只读下载当前批次关联的 ETC 发票合并 PDF；历史已提交批次不要求补造 OA 草稿 ID。暂存区与已提交“发票明细”标题栏复用同一 API，下载不改变批次/折叠状态。`invoice_ids` 决定成员，稳定排序后每张发票必须恰好贡献一页，任一来源异常时整包失败。
   - `submitted` 成功后，关联台 open 区生成一条 `source_kind=etc_invoice_summary` 折叠汇总发票行，金额取业务批次上报金额，等待未来 OA 和银行流水进入后普通配对。
   - 任意业务阶段允许删除本地批次记录；删除必须写入审计并校验 `expectedVersion` 防并发覆盖，但不得因 `importing`、`oa_draft_created`、`submitted_confirmed`、`closed` 等流程状态阻塞。
   - 删除未提交批次会清理本地导入批次、ETC metadata/附件关系和绑定任务；删除已提交批次会本地 reset 业务批次，释放 ETC 发票 `current_batch_id`，让 `etc_invoice_summary` 消失；只有原本已存在于统一发票池的发票才可能回到普通发票视图。
@@ -49,7 +49,7 @@
 - upload/delete conflict：上传仍在解析时若来源被并发删除，页面接收 HTTP 409 和“源文件在解析完成前已被删除，请重新上传”，不得显示上传成功；刷新后“已上传文件”和解析明细必须由同一组 source `file_id` 派生。
   - submitted delete confirm：仅尚无正式 OA 行的本地 submitted 批次允许 reset；已绑定 `oa_row_id` 时后端 fail fast。历史错误 tombstone 恢复为原 submitted 状态，重复执行不追加第二次恢复审计。
 - stale/refreshing：ETC 页面本身不触发 OA 自动检测；关联台 read model 刷新状态由关联台页面展示。
-- permission disabled/hidden：权限不足时隐藏或禁用创建、导入、草稿、人工确认入口；read-export 用户在 actor scope 内仍可下载 OA 草稿批次的发票合并 PDF；删除入口不做流程状态阻塞，后端只保留版本并发校验和本地清理一致性校验。
+- permission disabled/hidden：权限不足时隐藏或禁用创建、导入、草稿、人工确认入口；read-export 用户在 actor scope 内仍可下载 OA 草稿或正式已提交批次的发票合并 PDF；删除入口不做流程状态阻塞，后端只保留版本并发校验和本地清理一致性校验。
 
 ## Read Model / Worker 状态
 

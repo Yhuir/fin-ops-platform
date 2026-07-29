@@ -6,12 +6,12 @@
 
 | 层级 | 当前入口 | 回归风险 |
 | --- | --- | --- |
-| Frontend page | `web/src/pages/EtcTicketManagementPage.tsx` | unsubmitted/staged/submitted 三 bucket、summary 首屏、单次精确 detail、无 full task list/双 selection、明确 action disabled reason、OA intent idempotency、对账任务 OA 金额与实际发票金额分离展示、两按钮暂存确认/退回未提交、error/loading/delete dialog、OA 草稿后发票 PDF 下载、source file 和严格浏览器错误捕获 |
+| Frontend page | `web/src/pages/EtcTicketManagementPage.tsx` | unsubmitted/staged/submitted 三 bucket、summary 首屏、单次精确 detail、无 full task list/双 selection、明确 action disabled reason、OA intent idempotency、对账任务 OA 金额与实际发票金额分离展示、两按钮暂存确认/退回未提交、error/loading/delete dialog、暂存与已提交发票明细标题栏复用批次 PDF 下载且不触发折叠、source file 和严格浏览器错误捕获 |
 | Frontend API mapper | `web/src/features/etc/api.ts` | `/api/etc/business-batches*` 三 bucket/count/action envelope、精确 detail、OA recovery contract、发票 PDF blob/UTF-8 文件名、HTML/proxy error、multipart upload、stale preview error、本地化错误、旧 `/api/etc/batches*` 和 `/api/etc/invoices/revoke-submitted` API 不得回归 |
 | Workbench UI | `web/src/components/workbench/CandidateGroupGrid.tsx` | `etc_invoice_summary` 折叠/展开、open/paired 区显示、撤回/删除后 summary 释放和已存在 canonical invoice 可见性 |
 | HTTP routes | `server.py` `/api/etc*` | business batch、business batch title patch、reconciliation task、只读 invoice list、`invoice-pdf` 二进制响应/错误码/权限、import preview/confirm、source files、manual status、delete/reset 的状态码和结构化错误；慢解析期间 source file 被删除时必须返回 409 / `source_file_deleted_during_parse`；旧 `/api/etc/batches*`、`/api/etc/business-batches/{id}/oa-status/refresh`、`/api/etc/invoices/revoke-submitted` 不得回归 |
 | Business service | `EtcService`、`EtcBatchInvoiceLinkService` | 业务批次幂等、标题持久化/版本/提交后锁定、状态流转、ETC metadata/附件占用释放、已存在 canonical invoice 关联、ETC batch invoice link 幂等写入、历史 batch 迁移、删除 audit |
-| Application service | `EtcBusinessBatchApplicationService`、`EtcInvoicePdfBundleService` | OA 草稿、manual OA status、source file、绑定 task 恢复、发票 PDF scope/成员/排序/单页/大小/hash/审计、Workbench invalidation |
+| Application service | `EtcBusinessBatchApplicationService`、`EtcInvoicePdfBundleService` | OA 草稿、manual OA status、source file、绑定 task 恢复、发票 PDF actor scope/草稿或 submitted 资格/历史无草稿批次/成员/排序/单页/大小/hash/审计、OA 上传 absolute URL 归一与未知 host fail-closed、Workbench invalidation |
 | Reconciliation service | `EtcReconciliationTaskService`、`CcbCreditCardStatementParser` | task ready/importing/imported/closed/deleted、source files、version、tombstone、重启 hydrate；信用卡 PDF 可选文字优先、图像型 PDF 布局 OCR fallback、OCR 人工核对 warning；解析提交与删除互斥、已删除来源拒绝提交、历史孤儿解析结果可审计清理 |
 | Import worker | `ImportProcessingService`、runtime import worker | `etc_invoice_import` job、同 session 重试/幂等、后台导入成功后的 business batch 与 ETC metadata/附件关系保存，以及常驻 API 无需重启即可读取 worker 的 PostgreSQL 写入 |
 | Workbench projection | `WorkbenchSqlProjectionBuilder`、`WorkbenchPairRelationService` | submitted business batch -> `etc_invoice_summary`、active relation 排除 open summary、submitted ETC 重叠正式发票不再作为普通 open invoice row、delete/reset 后不恢复旧 OA+银行二栏 relation |

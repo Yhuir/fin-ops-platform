@@ -1284,6 +1284,46 @@ class EtcServiceTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertIn("Bearer oa-token", str(calls[0].headers))
 
+    def test_http_oa_client_normalizes_known_absolute_attachment_urls(self) -> None:
+        upload_urls = iter(
+            [
+                "http://127.0.0.1:9300/fileManager/2026/05/20/internal.pdf",
+                "https://www.yn-sourcing.com/oa-api/fileManager/2026/05/20/public.pdf",
+            ]
+        )
+
+        def fake_urlopen(request: object, *, timeout: float) -> FakeHTTPResponse:
+            return FakeHTTPResponse({"code": 200, "data": {"url": next(upload_urls)}})
+
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "invoice.pdf"
+            path.write_bytes(b"%PDF-1.4\n")
+            client = HttpEtcOAClient(
+                token="oa-token",
+                settings=EtcOAHttpClientSettings(base_url="https://www.yn-sourcing.com/oa-api"),
+            )
+            with patch("fin_ops_platform.services.etc_service.urlopen", fake_urlopen):
+                internal_path = client.upload_attachment(path)
+                public_path = client.upload_attachment(path)
+
+        self.assertEqual(internal_path, "/fileManager/2026/05/20/internal.pdf")
+        self.assertEqual(public_path, "/fileManager/2026/05/20/public.pdf")
+
+    def test_http_oa_client_rejects_unexpected_absolute_attachment_host(self) -> None:
+        def fake_urlopen(request: object, *, timeout: float) -> FakeHTTPResponse:
+            return FakeHTTPResponse({"code": 200, "data": {"url": "https://files.example.test/fileManager/invoice.pdf"}})
+
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "invoice.pdf"
+            path.write_bytes(b"%PDF-1.4\n")
+            client = HttpEtcOAClient(
+                token="oa-token",
+                settings=EtcOAHttpClientSettings(base_url="https://www.yn-sourcing.com/oa-api"),
+            )
+            with patch("fin_ops_platform.services.etc_service.urlopen", fake_urlopen):
+                with self.assertRaises(EtcOAClientError):
+                    client.upload_attachment(path)
+
     def test_http_oa_settings_treats_oa_page_base_as_oa_api_base(self) -> None:
         settings = EtcOAHttpClientSettings(base_url="https://www.yn-sourcing.com/oa")
 

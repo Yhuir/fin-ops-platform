@@ -3469,6 +3469,40 @@ describe("ETC ticket management page", () => {
     });
   });
 
+  test("downloads a submitted batch PDF from the invoice header without toggling the disclosure", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const createObjectUrl = vi.fn(() => "blob:submitted-etc-invoice-pdf");
+    const revokeObjectUrl = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectUrl });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectUrl });
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    const downloadInvoicePdf = vi.spyOn(etcApi, "downloadEtcBusinessBatchInvoicePdf").mockResolvedValue({
+      blob: new Blob(["merged-pdf"], { type: "application/pdf" }),
+      fileName: "ETC发票_1月批次_1张.pdf",
+    });
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    await user.click(await within(page).findByRole("radio", { name: "已提交 1" }));
+    await within(page).findByTestId("etc-batch-row-etc-batch-submitted-01");
+    const downloadButton = await within(page).findByRole("button", { name: "下载 PDF" });
+    const disclosureTrigger = await within(page).findByRole("button", { name: /发票明细/ });
+    const expandedBeforeDownload = disclosureTrigger.getAttribute("aria-expanded");
+
+    expect(disclosureTrigger.contains(downloadButton)).toBe(false);
+    await user.click(downloadButton);
+
+    await waitFor(() => {
+      expect(downloadInvoicePdf).toHaveBeenCalledWith("etc-batch-submitted-01");
+    });
+    expect(disclosureTrigger).toHaveAttribute("aria-expanded", expandedBeforeDownload);
+    expect(createObjectUrl).toHaveBeenCalledWith(expect.any(Blob));
+    expect(anchorClick).toHaveBeenCalledTimes(1);
+    expect(revokeObjectUrl).toHaveBeenCalledWith("blob:submitted-etc-invoice-pdf");
+  });
+
   test("renders batch invoice details with a native table instead of DataGrid", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
