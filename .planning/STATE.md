@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Phase 33 direct-canonical Turnover implementation started; Phase 32 production proof joins the same candidate
-last_updated: "2026-07-29T17:11:46+08:00"
-last_activity: 2026-07-29 -- Quick 260729-nh8 Workbench cross-month canonical preview dedupe deployed and production-verified
+status: verifying
+stopped_at: Completed 30-04-PLAN.md with safe production blocker
+last_updated: "2026-07-29T16:00:33.706Z"
+last_activity: 2026-07-29 -- Phase 35 execution started
 progress:
-  total_phases: 30
-  completed_phases: 5
-  total_plans: 79
-  completed_plans: 57
-  percent: 17
+  total_phases: 33
+  completed_phases: 7
+  total_plans: 83
+  completed_plans: 59
+  percent: 21
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-16)
 
 **Core value:** Preserve production finance workflow correctness while improving individual pages through isolated, reviewable GSD phases.
-**Current focus:** Phase 33 — turnover-direct-canonical-read
+**Current focus:** Phase 35 — bank-flow-rule-batch-live-candidates
 
 ## Current Position
 
-Phase: 33 (turnover-direct-canonical-read) — EXECUTING
+Phase: 35 (bank-flow-rule-batch-live-candidates) — EXECUTING
 Plan: 1 of 1
-Status: Direct-canonical implementation in progress
-Last activity: 2026-07-26 -- Phase 33 implementation started after full boundary review
+Status: Phase complete — ready for verification
+Last activity: 2026-07-29 -- Phase 35 execution started
 
 Progress: [██░░░░░░░░] boundary review and executable plan complete
 
@@ -49,6 +49,7 @@ Progress: [██░░░░░░░░] boundary review and executable plan c
 | Phase 30 P02 | 31min | 3 tasks | 17 files |
 | Phase 30 P03 | 24min | 3 tasks | 14 files |
 | Phase 30 P04 | 24min | 3 tasks | 12 files |
+| Phase 35 P01 | 1h 46m | 4 tasks | 65 files |
 
 ## Accumulated Context
 
@@ -134,6 +135,9 @@ Progress: [██░░░░░░░░] boundary review and executable plan c
 - [Phase 30]: OA pending-payment freshness and projection share the structured active relation set; membership count/digest invalidates exact scopes and historical raw payload no longer owns activity.
 - [Phase 30]: Final Candidate D `77c580f01` is active as `main-77c580f0-20260726052834`; confirm/withdraw, nine consumers, zero fan-out, inverse recovery, queue drain and System Audit 16/16 passed in production.
 - [Phase 30]: The relaxed correctness gate passed, while 4.58–14.02 second affected-page convergence and 3.69 second withdraw-preview p95 remain an explicit non-blocking performance follow-up.
+- [Phase 35]: 未提交 bank-flow 候选只从请求月份（内部转账含 ±2 天窗口）的 canonical facts 实时推导；persisted draft 不参与查询、提交或 Audit expected set。 — 消除异步预写 draft 的延迟、遗漏和双事实源。
+- [Phase 35]: GET、提交 guard、selected-row proof 与 Audit 共用 BankBatchService 内核；非法金额或方向 fail fast，不做 fallback。 — 保证候选身份和写入 proof 使用同一业务语义。
+- [Phase 35]: 只有正式 batch/event 历史持久化；canonical draft event、owner、producer、worker、replay、env 与 deploy 接线全部删除。 — 保留正式历史所有权，同时避免旧运行链重新可达。
 
 ### Roadmap Evolution
 
@@ -210,6 +214,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-07-25T19:51:00.368Z
+Last session: 2026-07-29T16:00:08.149Z
 Stopped at: Completed 30-04-PLAN.md with safe production blocker
 Resume file: None

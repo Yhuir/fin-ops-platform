@@ -697,4 +697,30 @@ Plans:
 
 - [x] 34-01-PLAN — Fix the shared repository binding, coalesce exact in-flight reads, run targeted gates, deploy once and close production evidence.
 
+### Phase 35: 流水规则批量处理实时统一事实源候选
+
+**Goal:** Derive unsubmitted bank-flow rule candidates directly from current canonical bank,
+classification, rule, settings and active-relation facts on page access; preserve submitted/history
+facts and canonical relation writes; remove the asynchronous canonical-draft runtime chain.
+**Requirements:** Correctness and legacy-removal follow-up from the direct-canonical bank-flow page.
+**Depends on:** Phase 34 release baseline and the current canonical relation command contracts.
+**Canonical refs:** `.planning/phases/35-bank-flow-rule-batch-live-candidates/35-01-PLAN.md`,
+`docs/modules/bank-flow-rule-batches/boundary-io.md`,
+`docs/modules/bank-details/boundary-io.md`,
+`docs/modules/workbench-relations/boundary-io.md`,
+`docs/modules/runtime-workers/boundary-io.md`
+**Success Criteria** (what must be TRUE):
+
+  1. Unsubmitted candidates are live-derived in one canonical snapshot and never depend on a prewritten draft, worker, replay or cache.
+  2. The known 188500 internal-transfer pair appears once in May with the correct two members and single-side amount.
+  3. Submit/withdraw preserves the existing formal relation UoW, idempotency and history while rereading the live candidate at command time.
+  4. Audit detects missing expected candidates, UI facets reflect actual candidates, and the canonical-draft owner/producer/event/deploy chain is deleted.
+  5. Targeted local gates, one pushed `main` release and authenticated production probes prove correctness, isolation and sub-second warm reads without Redis or a new read model.
+
+**Plans:** 1/1 plans complete
+
+Plans:
+
+- [x] 35-01-PLAN — Live candidate derivation, command revalidation, Audit/UI closure, canonical-draft deletion and production verification.
+
 ---
