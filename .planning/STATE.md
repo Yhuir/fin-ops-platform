@@ -200,6 +200,7 @@ None yet.
 | 260729-037 | 关联台搜索与 ETC/流水规则批次折叠状态解耦 | 2026-07-29 | a21cb8e36 | [260729-037-etc](./quick/260729-037-etc/) |
 | 260729-dg6 | ETC 已提交批次 PDF 下载、历史附件恢复与 OA URL 修复 | 2026-07-29 | 0c72cae27 | [260729-dg6](./quick/260729-dg6-etc-submitted-batch-pdf-download-and-oa-/) |
 | 260729-nh8 | 关联台跨月 canonical row 预览去重并保留真实冲突阻断 | 2026-07-29 | bf429ea3e | [260729-nh8](./quick/260729-nh8-canonical-row-fail-closed/) |
+| 260729-ohq | ETC 已提交批次四张缺失成员修复、Workbench/Search 收敛与生产验证 | 2026-07-29 | 0bbeb2d4b | [260729-ohq](./quick/260729-ohq-repair-submitted-etc-batch-etc-20260720-/) |
 
 ## Deferred Items
 

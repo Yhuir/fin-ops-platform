@@ -1,7 +1,8 @@
 ---
 quick_id: 260729-ohq
 mode: quick-validate-inline
-status: executing
+status: completed
+completed_at: 2026-07-29
 must_haves:
   truths:
     - Submitted ETC business batch etc_20260720_001 contains the four verified canonical ETC invoices and converges from 64 / 3686.36 to 68 / 3740.82.
