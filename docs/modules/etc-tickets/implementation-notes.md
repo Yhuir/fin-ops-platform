@@ -933,3 +933,10 @@
 - 安全边界：逐记录原文备份、SHA-256、写前重读比较；只替换已知 URL 前缀，金额、流程状态、创建信息和附件成员保持不变。
 - 验证结果：全表复扫错误引用为 0；7 条 ETC OA 的 206 个唯一 PDF 引用全部通过 HTTP 状态、MIME 和 PDF magic 校验。用户报告的 3740.82 OA 从 128 个错误字段收敛为 0。
 - 架构结论：未来写入继续由 `HttpEtcOAClient.upload_attachment()` 的单一 adapter 边界归一；不增加页面/Nginx fallback、read model、worker、缓存或第二条修复链路。
+
+## 2026-07-29 - 已提交 ETC 批次缺失成员精确修复
+
+- 目标：只把已存在于统一发票池、且经人工确认归属 `etc_20260720_001` 的 4 张 ETC 发票补入原 submitted business/submission batch，使实际成员从 64 张 / 3686.36 元收敛到 68 张 / 3740.82 元。
+- 边界：绑定 business/submission/external 三重 owner、4 个发票号与车牌、54.46 元目标金额、68 / 3740.82 结果和 dry-run fingerprint；事务内复用 ETC invoice link 与 canonical overlap 合同，更新成员、汇总、版本和审计。OA 草稿与已关闭对账任务不写入，缺失 PDF/XML 不伪造。
+- 收敛：执行成功后复用 historical ETC lifecycle enqueue 精确 Workbench scope；不直写 relation/read model，不增加 API、页面、worker、表、缓存或常驻扫描。
+- 测试：`tests/test_repair_submitted_etc_batch_members_tool.py` 覆盖精确计划、部分修复阻断、幂等重放和 lifecycle scope。

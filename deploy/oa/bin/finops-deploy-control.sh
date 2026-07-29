@@ -66,6 +66,8 @@ commands:
   etc-batch-invoice-link-backfill <release-name> --business-batch-id ID --limit N --dry-run
   etc-batch-invoice-link-backfill <release-name> --business-batch-id ID --limit N --apply --expected-auto-backfill-count N --operator ACTOR --reason TEXT
                                       backfill strict canonical invoice links for one ETC business batch
+  etc-submitted-batch-member-repair <release-name> [tool args]
+                                      repair proven canonical invoices into one submitted ETC batch
   read-model-scope-contract <release-name> [args]
                                       check or repair read model scope contracts using runtime env
   read-model-slo-smoke <release-name> [args]
@@ -767,6 +769,18 @@ etc_batch_invoice_link_backfill() {
   run_with_runtime_env "$src" -m fin_ops_platform.tools.backfill_etc_batch_invoice_links "$@"
 }
 
+etc_submitted_batch_member_repair() {
+  local release="${1:-}"
+  [[ -n "$release" ]] || die "etc-submitted-batch-member-repair requires release name"
+  shift
+  [[ "${1:-}" == "--business-batch-id" && "${2:-}" =~ ^[A-Za-z0-9._:-]+$ ]] || \
+    die "invalid ETC business batch id"
+  local src
+  src="$(release_src "$release")"
+  assert_runtime_env_contract
+  run_with_runtime_env "$src" -m fin_ops_platform.tools.repair_submitted_etc_batch_members "$@"
+}
+
 read_model_scope_contract() {
   local release="${1:-}"
   [[ -n "$release" ]] || die "read-model-scope-contract requires release name"
@@ -1164,6 +1178,10 @@ case "$cmd" in
   etc-batch-invoice-link-backfill)
     shift
     etc_batch_invoice_link_backfill "$@"
+    ;;
+  etc-submitted-batch-member-repair)
+    shift
+    etc_submitted_batch_member_repair "$@"
     ;;
   read-model-scope-contract)
     shift

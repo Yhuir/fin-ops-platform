@@ -459,6 +459,10 @@ sudo /usr/local/sbin/finops-deploy-control workbench-matching-retry <release-nam
 sudo /usr/local/sbin/finops-deploy-control etc-deleted-batch-restore <release-name> \
   --business-batch-id <id> --expected-invoice-count <n> --expected-total-amount <amount> \
   --expected-oa-row-id <oa-id> --dry-run
+sudo /usr/local/sbin/finops-deploy-control etc-submitted-batch-member-repair <release-name> \
+  --business-batch-id <id> --submission-batch-id <id> --external-etc-batch-id <id> \
+  --invoice <invoice-number=plate> --expected-target-total <amount> \
+  --expected-result-count <n> --expected-result-total <amount> --dry-run
 sudo /usr/local/sbin/finops-deploy-control etc-batch-invoice-link-backfill <release-name> \
   --business-batch-id <id> --limit <n> --dry-run
 sudo /usr/local/sbin/finops-deploy-control read-model-scope-contract <release-name> --json
@@ -503,6 +507,11 @@ sudo /usr/local/sbin/finops-deploy-control runtime-queue-resolve-covered <releas
 和 `manual_invoice_import` source-link 全部闭环时允许把精确的 `pending/preview_ready` 降级态恢复为
 `completed/confirmed`，并按 batch + source identity 一对一恢复被旧 preview 清空的 import row link。
 它不修改 canonical invoice/source-link，不扫描或修改其它生命周期记录，也不重新发布 read model 事件。
+
+`etc-submitted-batch-member-repair` 只用于已有 submitted ETC 批次的已证明缺失成员。dry-run 必须同时绑定
+business/submission/external 三个 ID、全部精确发票号与车牌、目标/结果金额；execute 还必须传入同一
+fingerprint、operator 和 reason。它只补 canonical ETC member/link、归一化原批次汇总并写审计，
+不改 OA 草稿、已关闭对账任务或附件；完成后由既有 historical ETC lifecycle 让 Workbench 收敛。
 
 `workbench-audit-identity` 只运行 `fin_ops_platform.tools.audit_object_identity`，
 用于查看强身份跨区重复、OA alias 和孤儿关系样本。
