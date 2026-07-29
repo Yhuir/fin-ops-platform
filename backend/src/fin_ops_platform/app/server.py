@@ -4583,11 +4583,18 @@ class Application:
         ]
         if not normalized_months:
             return
+        metadata = {"source": "historical_etc_repair_link", "reason": reason}
         self._execute_explicit_maintenance_lifecycle(
             "etc_business_batch_changed",
             months=normalized_months,
             include_all=False,
-            metadata={"source": "historical_etc_repair_link", "reason": reason},
+            metadata=metadata,
+        )
+        self._enqueue_generic_read_model_refreshes(
+            "workbench",
+            normalized_months,
+            reason=reason,
+            metadata=metadata,
         )
 
     def _etc_business_application_service(self) -> EtcBusinessBatchApplicationService:

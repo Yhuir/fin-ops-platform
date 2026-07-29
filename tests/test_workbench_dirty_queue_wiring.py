@@ -242,6 +242,44 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
             {"source": "historical_etc_repair_link"},
         )
 
+    def test_historical_etc_repair_refreshes_exact_workbench_months(self) -> None:
+        app = build_application()
+        queue = RecordingReadModelQueue()
+        app._runtime_repositories = SimpleNamespace(queue_repository=queue)
+
+        app._refresh_after_historical_etc_repair_link(
+            ["2026-06", "invalid", "2026-05", "2026-06"],
+            reason="submitted_etc_batch_members_repaired",
+        )
+
+        workbench_calls = [
+            call for call in queue.calls if call.get("scope_type") == "workbench"
+        ]
+        self.assertEqual(
+            workbench_calls,
+            [
+                {
+                    "scope_type": "workbench",
+                    "scope_key": "2026-05",
+                    "reason": "submitted_etc_batch_members_repaired",
+                    "metadata": {
+                        "source": "historical_etc_repair_link",
+                        "reason": "submitted_etc_batch_members_repaired",
+                    },
+                },
+                {
+                    "scope_type": "workbench",
+                    "scope_key": "2026-06",
+                    "reason": "submitted_etc_batch_members_repaired",
+                    "metadata": {
+                        "source": "historical_etc_repair_link",
+                        "reason": "submitted_etc_batch_members_repaired",
+                    },
+                },
+            ],
+        )
+        self.assertNotIn("all", [call["scope_key"] for call in workbench_calls])
+
     def test_ordinary_write_events_are_not_accepted_by_maintenance_boundary(self) -> None:
         app = build_application()
 

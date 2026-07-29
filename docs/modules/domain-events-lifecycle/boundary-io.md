@@ -35,7 +35,7 @@
 | --- | --- | --- |
 | Dirty scope/outbox | runtime queue | 经 gateway 或等价事务合同 |
 | Derived job | runtime worker/background job | 可观察、可失败恢复 |
-| `etc_business_batch_changed` event | historical ETC repair | 仅按修复得到的精确月份输出维护计划；普通 ETC import、submit/revoke 不调用。 |
+| `etc_business_batch_changed` event | historical ETC repair | 仅按修复得到的精确月份输出维护计划；统一 runtime port 在 lifecycle 之外复用 `ReadModelRefreshGateway` 投递同一组精确 Workbench scope，覆盖“成员变化但正式关系无变化”的 generation 收敛；普通 ETC import、submit/revoke 不调用，不投 `all`。 |
 | `settings_reset_completed` event | admin data reset | reset canonical/state 完成并 reload runtime 后执行显式全域维护；不是普通 settings Drawer 保存路径。 |
 | Import/OA/category/rule facts | 各 canonical owner | 只推进 canonical/source/rule version；消费页面在访问时比较版本并 enqueue 自己的精确 scope，不经过本模块。 |
 

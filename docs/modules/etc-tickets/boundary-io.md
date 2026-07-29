@@ -57,7 +57,7 @@
 | ETC OA 附件引用 | OA form draft | `HttpEtcOAClient` 在上传响应边界把已知 OA absolute `/fileManager/` / `/profile/` URL 归一为根相对路径；已有相对路径与 opaque file id 保持不变，未知 absolute host/path fail closed。现有 payload builder 把同一规范值写入 `response.data` 与 `response.extra.filePath`，页面/Nginx 不做补偿拼接 |
 | linked reconciliation task title | ETC 发票导入 ready task 下拉 | business batch title 更新后同步 task title，导入页下拉展示最新批次标题 |
 | 关联候选/关系影响 | workbench relation/lifecycle | 不直接写下游 read model |
-| 修复/迁移结果 | 运维工具 | 可审计、可回滚或可重复；恢复只写回原 tombstone 或精确缺失成员，不创建第二个业务批次，不直接写 Workbench relation；成员修复完成后只通过 official lifecycle enqueue 精确 Workbench scope |
+| 修复/迁移结果 | 运维工具 | 可审计、可回滚或可重复；恢复只写回原 tombstone 或精确缺失成员，不创建第二个业务批次，不直接写 Workbench relation/read model；成员修复完成后通过 historical ETC repair runtime port 执行 official lifecycle，并经 `ReadModelRefreshGateway` enqueue 精确月份的 Workbench refresh，不投 `all` |
 | Completed import job consumption | background job progress / current page load | ETC 发票导入 job 完成后当前可见页执行一次普通 canonical GET；其它页面不被写后强制重建。 |
 | 前端刷新提示 | `etcBusinessBatchUpdated` / `invoiceFactUpdated` | 事件仅允许刷新当前可见且订阅该领域的页面；hidden 页面忽略且不重放。事件不是 freshness 事实源，也不得触发其它页面重建 |
 | Audit proof report | 统一页面 Audit UI | 输出 canonical expected-set、结构化展示字段、批次/任务/文件/发票/导入/提交内部 typed edge、统一发票桥和 durable import queue 证明；不宣称 shared Workbench relation 或外部 ETC/OA 完整性 |
@@ -84,7 +84,7 @@
 | Backend service | `etc_service.py`、`etc_business_batch_application_service.py`、`etc_invoice_pdf_bundle_service.py`、`etc_document_parsers.py`、`etc_reconciliation_*`、`invoice_attachment_recognition_service.py` |
 | Audit proof owner | `services/postgres_repositories/etc_tickets_page_audit.py`、`services/page_audit_registry.py`、`services/postgres_repositories/operations_audit.py` |
 | Workbench integration | `workbench_canonical_rows.py`、`workbench_pair_relation_service.py`、`workbench_relation_command_service.py` |
-| Tools | `cleanup_orphan_etc_reconciliation_tasks.py`、`restore_deleted_etc_business_batch.py`、`backfill_etc_batch_invoice_links.py`、`repair_submitted_etc_batch_members.py`、`services/postgres_repositories/submitted_etc_batch_member_repair.py`；删除批次恢复或已提交批次成员修复都必须先 dry-run 并绑定 owner/version/fingerprint。成员修复只补精确 canonical invoice facts/link，归一化 business/submission 统计并通过 tool runtime port 触发既有 historical ETC lifecycle，使 Workbench matching dirty scope 与页面 read model 一起收敛 |
+| Tools | `cleanup_orphan_etc_reconciliation_tasks.py`、`restore_deleted_etc_business_batch.py`、`backfill_etc_batch_invoice_links.py`、`repair_submitted_etc_batch_members.py`、`services/postgres_repositories/submitted_etc_batch_member_repair.py`；删除批次恢复或已提交批次成员修复都必须先 dry-run 并绑定 owner/version/fingerprint。成员修复只补精确 canonical invoice facts/link，归一化 business/submission 统计并通过 tool runtime port 触发既有 historical ETC lifecycle；该 port 还通过共享 gateway 投递精确月份 Workbench refresh，保证正式关系无变化时页面 generation 仍收敛 |
 | Tests | `tests/test_etc_*.py`、`web/src/test/Etc*.test.*`、`web/e2e/etc-tickets-flow.spec.ts` |
 
 ## 依赖方向
