@@ -17,7 +17,7 @@
 - 页头统计仅在本次页面会话的首次 explorer 请求计算；后续请求使用 `include_statistics=false`，页头沿用同一 canonical 响应得到的统计值。
 - repository 只在后续非 `all` 请求下推 `txn_month` 范围；成本视图以命中银行流水筛 active relation 后扩展全部 relation 成员，避免破坏跨月份配对。
 - `time / bank_tag` 后续请求不读取 OA 与配对关系。所有路径仍在单个 `REPEATABLE READ READ ONLY` 快照内直接读取 canonical tables，没有 read model、cache、worker 或 fallback。
-- 按标签桌面列宽为 `20% / 20% / 60%`；支出在上、收入在下，零金额只隐藏金额数值。
+- 按标签桌面列宽为 `20% / 20% / 60%`；支出在上、收入在下，零金额方向项不进入金额区。
 
 ## 2026-07-28：日常报销付款明细级成本分配
 
@@ -44,3 +44,9 @@
 - 五个视图复用一个紧凑搜索框，使用 200ms debounce、IME composition 保护和 AbortController；项目/银行三栏采用 `24% / 24% / 52%`，右侧明细禁止横向滚动。
 - 删除手动“加载更多”按钮和死样式；复用现有 cursor API，在表格原生滚动容器接近底部时自动追加，失败只在当前明细区重试。
 - 保持 canonical API 直读，不引入 Redis、read model、worker、新 endpoint、依赖或跨页面 I/O。
+
+## 2026-07-29：按标签零金额方向项清理
+
+- 主标签和子标签的金额区复用同一个 `DirectionAmount` 合同：对应金额为零时，方向字样、金额值和无障碍标签整体不渲染；非零金额的颜色、顺序和格式保持不变。
+- 笔数区继续显示 `支出/收入 N 笔`，包括零笔；页面总计、排序、搜索、下钻和 API DTO 不变。
+- 删除旧 `hideZeroValue` 语义，不保留 CSS 隐藏、调用方分支或兼容属性；本次没有新增 I/O、状态、依赖或跨页面行为。

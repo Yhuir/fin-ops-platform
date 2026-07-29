@@ -177,24 +177,27 @@ function formatCostTradeTime(value: string) {
 
 function DirectionAmount({
   amount,
-  hideZeroValue = false,
+  hideWhenZero = false,
   label,
   tone,
 }: {
   amount: string;
-  hideZeroValue?: boolean;
+  hideWhenZero?: boolean;
   label: string;
   tone: "expense" | "income";
 }) {
+  const numericAmount = Number(amount.replace(/,/g, ""));
+  if (hideWhenZero && Number.isFinite(numericAmount) && numericAmount === 0) {
+    return null;
+  }
   const formattedAmount = formatCostAmount(amount);
-  const hideValue = hideZeroValue && Number(amount) === 0;
   return (
     <span
-      aria-label={hideValue ? label : `${label} ${formattedAmount}`}
+      aria-label={`${label} ${formattedAmount}`}
       className={`cost-direction-amount cost-direction-amount--aligned cost-direction-amount--${tone}`}
     >
       <span className="cost-direction-amount-label">{label}</span>
-      {hideValue ? null : <span className="cost-direction-amount-value">{formattedAmount}</span>}
+      <span className="cost-direction-amount-value">{formattedAmount}</span>
     </span>
   );
 }
@@ -2262,8 +2265,8 @@ export default function CostStatisticsPage() {
                     )}
                     renderMeta={(row) => (
                       <div className="cost-direction-meta">
-                        <DirectionAmount amount={row.expenseAmount} hideZeroValue label="支出" tone="expense" />
-                        <DirectionAmount amount={row.incomeAmount} hideZeroValue label="收入" tone="income" />
+                        <DirectionAmount amount={row.expenseAmount} hideWhenZero label="支出" tone="expense" />
+                        <DirectionAmount amount={row.incomeAmount} hideWhenZero label="收入" tone="income" />
                       </div>
                     )}
                   />
@@ -2289,8 +2292,8 @@ export default function CostStatisticsPage() {
                     )}
                     renderMeta={(row) => (
                       <div className="cost-direction-meta">
-                        <DirectionAmount amount={row.expenseAmount} hideZeroValue label="支出" tone="expense" />
-                        <DirectionAmount amount={row.incomeAmount} hideZeroValue label="收入" tone="income" />
+                        <DirectionAmount amount={row.expenseAmount} hideWhenZero label="支出" tone="expense" />
+                        <DirectionAmount amount={row.incomeAmount} hideWhenZero label="收入" tone="income" />
                       </div>
                     )}
                   />

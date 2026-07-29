@@ -628,16 +628,28 @@ describe("Cost statistics page", () => {
     const incomeOnlyRow = within(primaryLane as HTMLElement).getByRole("button", { name: /经营收入/ });
     expect(
       Array.from(incomeOnlyRow.querySelectorAll(".cost-direction-amount-label")).map((node) => node.textContent),
-    ).toEqual(["支出", "收入"]);
-    expect(within(incomeOnlyRow).getByLabelText("支出")).toBeInTheDocument();
+    ).toEqual(["收入"]);
+    expect(within(incomeOnlyRow).queryByLabelText("支出")).not.toBeInTheDocument();
     expect(within(incomeOnlyRow).queryByText("0.00")).not.toBeInTheDocument();
+    const expenseOnlyRow = within(primaryLane as HTMLElement).getByRole("button", { name: /项目开销/ });
+    expect(expenseOnlyRow).toHaveTextContent("收入 0 笔");
+    expect(
+      Array.from(expenseOnlyRow.querySelectorAll(".cost-direction-amount-label")).map((node) => node.textContent),
+    ).toEqual(["支出"]);
+    expect(within(expenseOnlyRow).queryByLabelText("收入")).not.toBeInTheDocument();
 
-    await user.click(within(primaryLane as HTMLElement).getByRole("button", { name: /项目开销/ }));
+    await user.click(expenseOnlyRow);
 
     const subLane = screen.getByRole("heading", { name: "子标签" }).closest(".cost-explorer-lane");
     expect(subLane).not.toBeNull();
     expect(within(subLane as HTMLElement).getByText("设备材料")).toBeInTheDocument();
-    await user.click(within(subLane as HTMLElement).getByRole("button", { name: /设备材料/ }));
+    const expenseOnlySubRow = within(subLane as HTMLElement).getByRole("button", { name: /设备材料/ });
+    expect(expenseOnlySubRow).toHaveTextContent("收入 0 笔");
+    expect(
+      Array.from(expenseOnlySubRow.querySelectorAll(".cost-direction-amount-label")).map((node) => node.textContent),
+    ).toEqual(["支出"]);
+    expect(within(expenseOnlySubRow).queryByLabelText("收入")).not.toBeInTheDocument();
+    await user.click(expenseOnlySubRow);
 
     const transactionTable = screen.getByRole("grid", { name: "流水标签对应流水表" });
     expectProjectCostTable("流水标签对应流水表");
