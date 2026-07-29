@@ -332,22 +332,41 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             requires_oa=False,
             requires_invoice=False,
         )
+        source_service = app._no_oa_bank_batch_application_service()
+        candidate_rows = source_service.no_oa_bank_transaction_rows_by_ids(row_ids)
+        categories = source_service.effective_categories_for_rows(candidate_rows)
+        for row in candidate_rows:
+            category = categories.get(str(row.get("id") or "")) or {}
+            row["category_code"] = category.get("category_code")
         app._bank_flow_rule_batch_canonical_query_repository = SimpleNamespace(
-            read_page=lambda *_args, **_kwargs: {}
+            read_page=lambda *_args, **_kwargs: {
+                "candidate_rows": candidate_rows,
+                "active_relations": [],
+                "formal_items": [],
+                "tag_policy": app._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload(),
+            }
         )
         application_service = app._bank_flow_rule_batch_application_service()
-        application_service.refresh_batches(relation_mode="bank_flow_rule_batch")
         draft = next(
             batch
-            for batch in app._bank_flow_rule_batch_service.list_batches({"bucket": "unsubmitted"})
+            for batch in application_service.list_batches_payload(
+                {"month": ["2026-02"], "bucket": ["unsubmitted"]}
+            )["batches"]
             if batch["batch_type"] == "internal_transfer"
             and set(batch["row_ids"]) == set(row_ids)
         )
+        app._bank_flow_rule_batch_application_service = lambda: application_service
 
         response = app.handle_request(
             "POST",
             f"/api/bank-flow-rule-batches/{draft['batch_id']}/submit",
-            body=json.dumps({"expected_version": draft["version"], "note": "流水规则提交内部往来"}),
+            body=json.dumps(
+                {
+                    "expected_version": draft["version"],
+                    "note": "流水规则提交内部往来",
+                    "scope_month": draft["scope_month"],
+                }
+            ),
             headers={"Content-Type": "application/json"},
         )
 
