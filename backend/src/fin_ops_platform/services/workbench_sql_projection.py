@@ -1747,8 +1747,6 @@ class WorkbenchSqlProjectionBuilder:
             ),
         )
         for row in business_rows:
-            if str(row.get("external_etc_batch_id") or "").strip() in linked_external_batch_ids:
-                continue
             append_summary_source_row(
                 row,
                 batch_payload=self._etc_business_summary_batch_payload(row),

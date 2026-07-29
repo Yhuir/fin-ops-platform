@@ -5,7 +5,7 @@
 ## 2026-07-28 逐栏折叠、普通行直显与搜索真实预览
 
 - Business core：`no_oa_bank_batch` 与普通关系保留全部真实行；`bank_flow_rule_batch` 只有银行成员数 `>3` 才生成银行栏 summary/collapsed rows，1 到 3 行直接显示；ETC 仍只折叠发票栏。
-- Repository/read model：summary page 不再把普通银行/发票行截成 3 行；无搜索的折叠栏只传 summary + count，搜索时最多传 3 条真实命中 collapsed rows。schema v10 淘汰旧 generation/page cache，不新增表、worker、cache 或 API。
+- Repository/read model：summary page 不再把普通银行/发票行截成 3 行；无搜索的折叠栏只传 summary + count，搜索时最多传 3 条真实命中 collapsed rows。ETC business batch 即使只有部分成员已建立严格 link，折叠汇总仍保留完整 `invoice_ids` 成员并按发票身份去重。schema v11 淘汰旧 generation/page cache，不新增表、worker、cache 或 API。
 - API/Frontend：group detail 按 `collapsed_row_counts.<pane>` 逐栏验证；ETC 的 OA/银行栏验证正常 rows，发票栏验证 collapsed rows。闭合态搜索直接渲染真实命中行并高亮，不显示“隐藏内容命中”、不自动展开或预取详情。
 - Regression：普通多行与 legacy no-OA 不出现通用“还有 N 条，展开”；bank-flow 与 ETC 保留 click-only detail、失败可重试和同 generation fail-closed。
 

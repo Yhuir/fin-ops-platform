@@ -17,7 +17,7 @@
 - 根因：summary repository 无条件把普通银行/发票栏截成 3 行，前端再用组级 `display_mode=collapsed_summary` 校验三个栏的 collapsed rows。ETC 实际只折叠发票栏，因此 OA/银行正常行被错误按空 collapsed rows 校验，详情 API 虽完整仍显示“加载失败，点击重试”；普通关系则被旧通用 preview 强制增加详情加载入口。
 - 修复：`collapsed_row_counts.<pane>` 成为唯一逐栏折叠合同。ETC 只折叠发票栏；`bank_flow_rule_batch` 仅在银行成员 `>3` 时折叠银行栏；普通关系、legacy `no_oa_bank_batch` 和 bank-flow 1 到 3 行直接输出全部真实行。详情 API 逐栏 fail closed，不再把组级显示模式传播到其它栏。
 - 搜索：折叠成员仍参与服务端关联组搜索；2026-07-29 起 summary payload 不再携带折叠明细，前端闭合态只显示摘要，不展示“隐藏内容命中”、不自动展开或预取详情。
-- 版本与边界：Workbench display schema 升级到 v10，使旧 generation/page cache 失效；统一事实源、active relation、freshness/queue/worker、API route 和其它页面 I/O 不变。OA 待付款核对继续 API 直读，不消费本 projection。
+- 版本与边界：Workbench display schema 升级到 v11，使旧 generation/page cache 失效；ETC 折叠汇总合并部分严格 link 与完整 business batch 成员并按发票身份去重，统一事实源、active relation、freshness/queue/worker、API route 和其它页面 I/O 不变。OA 待付款核对继续 API 直读，不消费本 projection。
 
 ## 2026-07-25 - 同次 freshness proof 复用
 

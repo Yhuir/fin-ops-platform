@@ -1980,13 +1980,13 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(result["read_model_stale_reasons"], ["builder_mismatch"])
         self.assertEqual(result["refresh_scope_keys"], [])
 
-    def test_workbench_v10_rejects_v9_month_all_and_cache_versions(self) -> None:
+    def test_workbench_v11_rejects_v10_month_all_and_cache_versions(self) -> None:
         app = object.__new__(Application)
-        old_month = "2026-07-28-oa-item-alignment-v9"
-        old_all = "workbench_sql_projection.composed_active_month_shards.oa_item_alignment.v9"
+        old_month = "2026-07-28-pane-collapse-v10"
+        old_all = "workbench_sql_projection.composed_active_month_shards.pane_collapse.v10"
 
-        self.assertIn("v10", WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION)
-        self.assertIn("v10", WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
+        self.assertIn("v11", WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION)
+        self.assertIn("v11", WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
         self.assertIn(WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION, WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION)
         self.assertIn(WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION, WORKBENCH_INITIAL_PAGE_CACHE_SCHEMA_VERSION)
         self.assertIn(
@@ -2775,6 +2775,30 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertNotIn("etc_invoices.scope_month = %s::date", connection.business_summary_query)
         self.assertEqual([row["id"] for row in summary_row["etc_invoice_detail_rows"]], ["ETC001", "ETC002"])
 
+    def test_sql_projection_keeps_all_business_members_when_strict_links_are_partial(self) -> None:
+        connection = EtcBusinessSummaryProjectionConnection()
+        builder = WorkbenchSqlProjectionBuilder(connection=connection)
+        business_rows = connection.fetch_all(
+            "from app.etc_business_batches join app.etc_invoices etc_invoices"
+        )
+
+        with (
+            patch.object(builder, "_etc_invoice_summary_link_rows", return_value=business_rows[:1]),
+            patch.object(
+                builder,
+                "_etc_invoice_summary_link_source_ids",
+                return_value={"etc_20260520_001"},
+            ),
+        ):
+            rows = builder._unpaired_etc_invoice_summary_rows("2026-05")
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["etc_invoice_count"], 2)
+        self.assertEqual(rows[0]["total_with_tax"], "27.14")
+        self.assertEqual(
+            [row["id"] for row in rows[0]["etc_invoice_detail_rows"]],
+            ["ETC001", "ETC002"],
+        )
 
     def test_sql_projection_excludes_unpaired_etc_summary_when_batch_has_active_relation(self) -> None:
         connection = EtcBusinessSummaryWithActiveRelationConnection()
