@@ -225,4 +225,5 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_w
 - `bank_oa_invoice` 的 affected consumers 固定为关联台、银行明细、待找发票、进项使用、OA 待付款、成本统计；销项收款与税务抵扣只作 isolation。测试按当前 scenario entry 断言 role，不使用其它 relation shape 的 affected 联集。
 - 同条件旧/新 10 次 characterization 继续采用 Task 30-02 的同一 PostgreSQL fixture、scope/version/row IDs、连接与 warm-up：新路径固定每次 6 条 counted SQL、完整 generation scan 为 0、formal snapshot dependency 为 0，最大新样本 5.089ms。
 - 相同 URL、无独立 `AbortSignal`、仍在进行的 combined initial 必须只产生一个 HTTP 请求；所有调用方都获得同一映射结果。请求完成或失败后必须移除 in-flight entry，后续读取重新访问服务器；搜索/筛选可取消请求不得被该合并吞掉。
+- 正式 confirm/withdraw 的 canonical row resolver 必须读取生产已配置的 `_workbench_sql_read_repository.get_workbench_row_detail(...)`；不得重新引用已退役、未注入的 `_workbench_canonical_query_repository` 而静默回退到全量 live builder。preview selection 仍只用于 preview，正式 command/UoW 不得消费 preview DTO。
 - 本地 release gate：700 项定向 backend/deploy unittest、123 项 scoped Vitest、3 项 Chromium E2E、repository lint、docs gate 与 production build 全部通过。没有运行 pytest、完整 CI 或 183 项 Browser suite。

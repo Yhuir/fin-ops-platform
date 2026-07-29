@@ -59,6 +59,32 @@ class _RelationCommandRepositoryFactory(_RecordingRepositoryFactory):
 
 
 class WorkbenchWriteCharacterizationTests(unittest.TestCase):
+    def test_formal_write_row_resolution_uses_configured_sql_read_repository(self) -> None:
+        calls: list[dict[str, object]] = []
+
+        class Repository:
+            def get_workbench_row_detail(self, **kwargs: object) -> dict[str, object]:
+                calls.append(dict(kwargs))
+                row_id = str(kwargs["row_id"])
+                return {"row": {"id": row_id, "type": "oa" if row_id.startswith("oa") else "bank"}}
+
+        app = Application.__new__(Application)
+        app._workbench_sql_read_repository = Repository()
+
+        rows = app._resolve_rows_from_workbench_canonical_query(
+            ["oa-1", "bank-1"],
+            month_hint="2026-05",
+        )
+
+        self.assertEqual(list(rows), ["oa-1", "bank-1"])
+        self.assertEqual(
+            calls,
+            [
+                {"scope_key": "2026-05", "row_id": "oa-1"},
+                {"scope_key": "2026-05", "row_id": "bank-1"},
+            ],
+        )
+
     def _build_app(self) -> Application:
         app = build_application()
         app._emit_workbench_action_timing = lambda **kwargs: None

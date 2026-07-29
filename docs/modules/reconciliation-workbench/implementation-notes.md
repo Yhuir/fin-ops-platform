@@ -1391,3 +1391,9 @@
 - 页面仍通过 `fetchWorkbenchInitialPage` 读取 fresh active generation；确认的 operation projection、撤回等待真实 fresh、refresh-status 轻量轮询和 worker/queue 合同均不改变。
 - 相同 URL 的无 `AbortSignal` combined-initial 请求只在网络请求进行期间共享一次 raw payload Promise，请求成功或失败后立即删除。搜索、筛选和页面激活使用的可取消请求保持独立，因此没有新增 TTL cache、Redis、状态库或陈旧数据路径。
 - 性能门：fresh 初始读取与 `/groups` p95 `<=1000ms`；confirm committed feedback p95 `<=1000ms`；withdraw 最终 fresh p95 `<=2000ms`、p99 `<=3000ms`。正确性、CAS、幂等、审计、zero write-time fan-out 和 active-generation fresh 仍是硬门。
+
+## 2026-07-29 - 关系写入 canonical row resolver 运行时接线修复
+
+- 生产 action timing 证明确认关联的 `resolve_rows` p50/p95 为 `3275.986/5670.447ms`，撤回预览 OA alias 解析 p50/p95 为 `1694.998/2179.911ms`；正式 relation UoW、鉴权和关系事务本身均低于 130ms，瓶颈不在 PostgreSQL relation writer。
+- 根因是 `Application._resolve_rows_from_workbench_canonical_query(...)` 仍读取已退役且生产未配置的 `_workbench_canonical_query_repository` 属性，导致每次都错过现有 active-generation SQL row-detail owner，随后回退到 live canonical facts builder。确认和 OA alias 解析因此重复执行过宽事实源组装。
+- 修复只把该调用接回已经注入并由 `WorkbenchQueryFacade` 使用的 `_workbench_sql_read_repository`。正式写仍由 route freshness/version gate、canonical relation command/UoW、CAS、幂等和审计闭环；preview DTO 不进入正式 command，live facts fallback 仅保留给 active generation 中确实不存在的 row。没有新增 repository、API、Redis、worker、表、SQL 或兼容链。

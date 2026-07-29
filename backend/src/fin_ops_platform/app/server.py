@@ -10059,7 +10059,7 @@ class Application:
         month_hint: str | None = None,
     ) -> dict[str, dict[str, object]]:
         resolved_rows: dict[str, dict[str, object]] = {}
-        repository = getattr(self, "_workbench_canonical_query_repository", None)
+        repository = getattr(self, "_workbench_sql_read_repository", None)
         read_detail = getattr(repository, "get_workbench_row_detail", None)
         if not callable(read_detail):
             return resolved_rows
