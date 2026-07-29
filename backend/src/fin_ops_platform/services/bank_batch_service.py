@@ -189,6 +189,7 @@ class BankBatchService:
         apply_relation_repairs: bool = True,
         refresh_scope_key: str = "all",
         relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
+        include_relation_backed_submitted_batches: bool = True,
     ) -> list[dict[str, Any]]:
         normalized_refresh_scope_key = str(refresh_scope_key or "all").strip() or "all"
         normalized_relation_mode = self._normalize_relation_mode(relation_mode)
@@ -202,6 +203,7 @@ class BankBatchService:
                 eligible_batch_types=eligible_batch_types,
                 apply_relation_repairs=apply_relation_repairs,
                 relation_mode=normalized_relation_mode,
+                include_relation_backed_submitted_batches=include_relation_backed_submitted_batches,
             )
 
         rows = [dict(row) for row in list(bank_rows or []) if isinstance(row, dict)]
@@ -238,12 +240,16 @@ class BankBatchService:
             relation_mode=normalized_relation_mode,
         )
         occupied_row_ids = self._active_relation_row_ids(effective_active_relations)
-        relation_backed_submitted_batches = self._relation_backed_submitted_batches(
-            effective_active_relations,
-            rows,
-            categories,
-            source_version_payload,
-            relation_mode=normalized_relation_mode,
+        relation_backed_submitted_batches = (
+            self._relation_backed_submitted_batches(
+                effective_active_relations,
+                rows,
+                categories,
+                source_version_payload,
+                relation_mode=normalized_relation_mode,
+            )
+            if include_relation_backed_submitted_batches
+            else {}
         )
 
         generated: dict[str, dict[str, Any]] = {}
@@ -340,6 +346,7 @@ class BankBatchService:
         eligible_batch_types: set[str] | list[str] | tuple[str, ...] | None,
         apply_relation_repairs: bool,
         relation_mode: str,
+        include_relation_backed_submitted_batches: bool,
     ) -> list[dict[str, Any]]:
         normalized_relation_mode = self._normalize_relation_mode(relation_mode)
         original_batches = deepcopy(self._batches)
@@ -368,6 +375,7 @@ class BankBatchService:
             apply_relation_repairs=apply_relation_repairs,
             refresh_scope_key="all",
             relation_mode=normalized_relation_mode,
+            include_relation_backed_submitted_batches=include_relation_backed_submitted_batches,
         )
         scoped_snapshot = scoped_service.snapshot()
         scoped_snapshot_batches = scoped_snapshot.get("batches") if isinstance(scoped_snapshot, dict) else {}
@@ -2272,42 +2280,7 @@ class BankBatchService:
                 )
                 continue
 
-            if len(inflows) != len(outflows):
-                batches[self._batch_id(batch_key)] = self._conflict_batch(
-                    batch_key=batch_key,
-                    scope_month=scope_month,
-                    rows=sorted_rows,
-                    row_ids=row_ids,
-                    total_amount=Decimal(amount_text),
-                    categories=categories,
-                    source_versions=source_versions,
-                    conflict_code="multiple_internal_transfer_matches",
-                    conflict_reason="内部往来存在多解，不能自动形成可提交批次。",
-                    evidence={"income_count": len(inflows), "expense_count": len(outflows)},
-                )
-                continue
-
             matched_pairs = self._nearest_internal_transfer_pairs(outflows, inflows)
-            if len(matched_pairs) != len(outflows):
-                batches[self._batch_id(batch_key)] = self._conflict_batch(
-                    batch_key=batch_key,
-                    scope_month=scope_month,
-                    rows=sorted_rows,
-                    row_ids=row_ids,
-                    total_amount=Decimal(amount_text),
-                    categories=categories,
-                    source_versions=source_versions,
-                    conflict_code="multiple_internal_transfer_matches",
-                    conflict_reason="内部往来存在多解，不能自动形成可提交批次。",
-                    evidence={
-                        "income_count": len(inflows),
-                        "expense_count": len(outflows),
-                        "matched_pair_count": len(matched_pairs),
-                        "match_window_hours": 48,
-                    },
-                )
-                continue
-
             for outflow, inflow, time_delta_seconds in matched_pairs:
                 pair_rows = sorted([outflow, inflow], key=self._row_id)
                 pair_row_ids = [self._row_id(row) for row in pair_rows]
@@ -2338,6 +2311,52 @@ class BankBatchService:
                     self._account_payload(inflow),
                 ]
                 batches[str(batch["batch_id"])] = batch
+            matched_row_ids = {
+                self._row_id(row)
+                for outflow, inflow, _time_delta_seconds in matched_pairs
+                for row in (outflow, inflow)
+            }
+            unmatched_rows = [
+                row for row in sorted_rows if self._row_id(row) not in matched_row_ids
+            ]
+            if unmatched_rows:
+                unmatched_row_ids = [self._row_id(row) for row in unmatched_rows]
+                unmatched_inflows = [
+                    row for row in unmatched_rows if self._direction(row) == "inflow"
+                ]
+                unmatched_outflows = [
+                    row for row in unmatched_rows if self._direction(row) == "outflow"
+                ]
+                missing_side = not unmatched_inflows or not unmatched_outflows
+                conflict_key = (
+                    f"internal_transfer_conflict:{scope_month}:{amount_text}:"
+                    f"{':'.join(unmatched_row_ids)}"
+                )
+                batches[self._batch_id(conflict_key)] = self._conflict_batch(
+                    batch_key=conflict_key,
+                    scope_month=scope_month,
+                    rows=unmatched_rows,
+                    row_ids=unmatched_row_ids,
+                    total_amount=Decimal(amount_text),
+                    categories=categories,
+                    source_versions=source_versions,
+                    conflict_code=(
+                        "missing_internal_transfer_counterpart"
+                        if missing_side
+                        else "multiple_internal_transfer_matches"
+                    ),
+                    conflict_reason=(
+                        "内部往来收入或支出单边缺失。"
+                        if missing_side
+                        else "内部往来存在多解，不能自动形成可提交批次。"
+                    ),
+                    evidence={
+                        "income_count": len(unmatched_inflows),
+                        "expense_count": len(unmatched_outflows),
+                        "matched_pair_count": len(matched_pairs),
+                        "match_window_hours": 48,
+                    },
+                )
         return batches
 
     def _nearest_internal_transfer_pairs(
@@ -2369,15 +2388,48 @@ class BankBatchService:
                     )
                 )
 
+        remaining = list(candidates)
         pairs: list[tuple[dict[str, Any], dict[str, Any], int]] = []
-        used_outflow_ids: set[str] = set()
-        used_inflow_ids: set[str] = set()
-        for delta_seconds, outflow_id, inflow_id, outflow, inflow in sorted(candidates):
-            if outflow_id in used_outflow_ids or inflow_id in used_inflow_ids:
-                continue
-            used_outflow_ids.add(outflow_id)
-            used_inflow_ids.add(inflow_id)
-            pairs.append((outflow, inflow, delta_seconds))
+        while remaining:
+            by_outflow: dict[str, list[tuple[int, str, str, dict[str, Any], dict[str, Any]]]] = {}
+            by_inflow: dict[str, list[tuple[int, str, str, dict[str, Any], dict[str, Any]]]] = {}
+            for candidate in remaining:
+                by_outflow.setdefault(candidate[1], []).append(candidate)
+                by_inflow.setdefault(candidate[2], []).append(candidate)
+            safe_candidates: list[
+                tuple[int, str, str, dict[str, Any], dict[str, Any]]
+            ] = []
+            for candidate in remaining:
+                outflow_candidates = sorted(by_outflow[candidate[1]])
+                inflow_candidates = sorted(by_inflow[candidate[2]])
+                if (
+                    len(outflow_candidates) >= 2
+                    and outflow_candidates[0][0] == outflow_candidates[1][0]
+                ):
+                    continue
+                if (
+                    len(inflow_candidates) >= 2
+                    and inflow_candidates[0][0] == inflow_candidates[1][0]
+                ):
+                    continue
+                if outflow_candidates[0][:3] == candidate[:3] and inflow_candidates[0][:3] == candidate[:3]:
+                    safe_candidates.append(candidate)
+            if not safe_candidates:
+                break
+            matched_outflows: set[str] = set()
+            matched_inflows: set[str] = set()
+            for delta_seconds, outflow_id, inflow_id, outflow, inflow in sorted(safe_candidates):
+                if outflow_id in matched_outflows or inflow_id in matched_inflows:
+                    continue
+                matched_outflows.add(outflow_id)
+                matched_inflows.add(inflow_id)
+                pairs.append((outflow, inflow, delta_seconds))
+            remaining = [
+                candidate
+                for candidate in remaining
+                if candidate[1] not in matched_outflows
+                and candidate[2] not in matched_inflows
+            ]
         return pairs
 
     def _draft_batch(

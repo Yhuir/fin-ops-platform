@@ -84,44 +84,31 @@ class _Connection:
         self.fetched_one.append((normalized, params))
         if "from app.app_settings" in normalized:
             return {"settings_payload": _settings_payload()}
-        if "jsonb_agg( to_jsonb(page_row)" in normalized:
+        if "candidate_rows" in normalized and "formal_items" in normalized:
             if self.empty_page:
-                return {"total": 0, "items": [], "aggregates": []}
+                return {
+                    "candidate_rows": [],
+                    "active_relations": [],
+                    "formal_items": [],
+                }
             return {
-                "total": 1,
-                "items": [
+                "candidate_rows": [
                     {
-                        "batch_id": "batch-fee",
-                        "status": "draft",
-                        "presented_status": "draft",
-                        "presented_status_bucket": "unsubmitted",
-                        "version": 1,
-                        "scope_month": date(2026, 5, 1),
-                        "account_key": "建设银行:8106",
-                        "total_amount": "8.80",
-                        "bank_transaction_ids": ["bank-1"],
-                        "has_active_relation": False,
+                        "transaction_id": "bank-1",
+                        "account_no": "622200008106",
+                        "txn_direction": "outflow",
+                        "amount": "8.80",
+                        "trade_time": datetime(2026, 5, 4, 8, 0, tzinfo=UTC),
+                        "category_code": "fee",
+                        "category_source": "auto_confirmation",
                         "payload": {
-                            "batch_id": "batch-fee",
-                            "batch_type": "fee",
-                            "batch_label": "手续费",
-                            "row_ids": ["bank-1"],
-                            "row_count": 1,
+                            "bank_name": "建设银行",
+                            "account_last4": "8106",
                         },
                     }
                 ],
-                "aggregates": [
-                    {
-                        "batch_type": "fee",
-                        "presented_status": "draft",
-                        "batch_count": 1,
-                        "row_count": 1,
-                        "batch_label": "手续费",
-                        "category_primary_label": "费用",
-                        "category_sub_label": "手续费",
-                        "total_amount": "8.80",
-                    }
-                ],
+                "active_relations": [],
+                "formal_items": [],
             }
         if "from app.bank_flow_rule_batches batch" in normalized and "where batch.batch_id = %s" in normalized:
             return {
@@ -232,9 +219,10 @@ def test_page_query_uses_one_repeatable_read_snapshot_and_two_fixed_selects() ->
         page_size=50,
     )
 
-    assert result["total"] == 1
-    assert result["items"][0]["batch_id"] == "batch-fee"
-    assert result["items"][0]["status"] == "draft"
+    assert result["candidate_rows"][0]["id"] == "bank-1"
+    assert result["candidate_rows"][0]["category_code"] == "fee"
+    assert result["active_relations"] == []
+    assert result["formal_items"] == []
     assert connection.transaction_enters == connection.transaction_exits == 1
     assert len(connection.fetched_one) == 2
     assert len(connection.fetched_all) == 0
@@ -247,13 +235,12 @@ def test_page_query_uses_one_repeatable_read_snapshot_and_two_fixed_selects() ->
     assert any("from app.bank_flow_rule_batches batch" in sql for sql in all_sql)
     assert any("from app.workbench_pair_relations" in sql for sql in all_sql)
     assert any("from app.bank_transaction_category_confirmations" in sql for sql in all_sql)
-    page_params = next(
+    source_params = next(
         params
         for sql, params in connection.fetched_one
-        if "jsonb_agg( to_jsonb(page_row)" in sql
+        if "candidate_rows" in sql and "formal_items" in sql
     )
-    assert page_params[1:3] == ("2026-05-01", "unsubmitted")
-    assert page_params[3:5] == (50, 50)
+    assert source_params[1:3] == ("2026-05-01", "2026-05-01")
 
 
 def test_page_query_returns_an_explicit_empty_result() -> None:
@@ -261,9 +248,9 @@ def test_page_query_returns_an_explicit_empty_result() -> None:
 
     result = repository.read_page({"month": "2026-05"})
 
-    assert result["total"] == 0
-    assert result["items"] == []
-    assert result["aggregates"] == []
+    assert result["candidate_rows"] == []
+    assert result["active_relations"] == []
+    assert result["formal_items"] == []
 
 
 def test_page_query_returns_live_candidate_inputs_in_the_same_snapshot() -> None:

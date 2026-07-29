@@ -1527,16 +1527,21 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                     }
                 )
                 return {
-                    "items": [dict(row)],
-                    "total": 1,
-                    "aggregates": [
+                    "candidate_rows": [
                         {
-                            "batch_type": "fee",
-                            "presented_status": "draft",
-                            "batch_count": 1,
-                            "total_amount": "12.00",
+                            "id": "bank-1",
+                            "trade_time": "2026-07-04T10:20:00",
+                            "account_key": "CCB:8106",
+                            "bank_name": "建设银行",
+                            "account_no": "6222000000008106",
+                            "direction": "expense",
+                            "amount": "12.00",
+                            "category_code": "fee",
+                            "category_source": "confirmed",
                         }
                     ],
+                    "active_relations": [],
+                    "formal_items": [],
                     "tag_policy": {
                         "active_tags": [
                             {
@@ -1653,8 +1658,8 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
             ["bank-in-188500", "bank-out-188500"],
         )
         self.assertEqual(batch["total_amount"], "188500.00")
-        self.assertEqual(payload["summary"]["counts"]["unsubmitted"], 1)
-        self.assertEqual(payload["summary"]["amounts"]["unsubmitted"], "188500.00")
+        self.assertEqual(payload["summary"]["draft_count"], 1)
+        self.assertEqual(payload["summary"]["total_amount"], "188500.00")
 
     def test_bank_flow_live_internal_transfer_keeps_unique_pair_and_fails_closed_on_ambiguous_remainder(
         self,
@@ -1799,12 +1804,17 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
             {"month": ["2026-05"], "bucket": ["unsubmitted"]},
             relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
         )
+        self.assertEqual(payload["batches"], [])
+
+        rows[1]["trade_time"] = "2026-05-31T23:45:00"
+        same_month_payload = service.list_batches_payload(
+            {"month": ["2026-05"], "bucket": ["unsubmitted"]},
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+        )
         self.assertEqual(
-            [batch["row_ids"] for batch in payload["batches"]],
+            [batch["row_ids"] for batch in same_month_payload["batches"]],
             [["boundary-in", "boundary-out"]],
         )
-        self.assertEqual(payload["batches"][0]["scope_month"], "2026-05")
-
         repository.active_relations = [
             {
                 "case_id": "occupied-case",

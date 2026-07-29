@@ -11,7 +11,13 @@ from fin_ops_platform.services.bank_batch_application_service import (
     BankBatchPersistenceError,
     BankBatchRelationMutationError,
 )
-from fin_ops_platform.services.bank_batch_service import BANK_FLOW_RULE_BATCH_RELATION_MODE, BankBatchService
+from fin_ops_platform.services.bank_batch_service import (
+    BANK_FLOW_RULE_BATCH_ID_PREFIX,
+    BANK_FLOW_RULE_BATCH_RELATION_MODE,
+    BANK_FLOW_RULE_BATCH_SCHEMA_VERSION,
+    BankBatchService,
+)
+from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 
 class BankFlowRuleBatchPersistenceError(BankBatchPersistenceError):
@@ -65,23 +71,195 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             if isinstance(definition, dict) and str(definition.get("code") or "").strip()
         }
         eligible_tag_codes = self._eligible_bank_flow_rule_batch_tag_codes(tag_policy)
+        live_batch_service = self._live_batch_service(
+            page_result,
+            eligible_tag_codes=eligible_tag_codes,
+        )
+        batches_for_summary = self._public_batches(
+            live_batch_service.list_batches(
+                self._batch_filters(
+                    summary_filters,
+                    relation_mode=relation_mode,
+                )
+            )
+        )
+        filtered_batches = self._public_batches(
+            live_batch_service.list_batches(
+                self._batch_filters(
+                    filters,
+                    relation_mode=relation_mode,
+                )
+            )
+        )
+        filtered_batches.sort(key=lambda batch: str(batch.get("batch_id") or ""))
+        filtered_batches.sort(key=lambda batch: str(batch.get("scope_month") or ""), reverse=True)
+        total = len(filtered_batches)
+        if pagination is not None:
+            offset = (pagination["page"] - 1) * pagination["page_size"]
+            filtered_batches = filtered_batches[offset : offset + pagination["page_size"]]
         batches = self.resolve_labels(
-            self._public_batches(page_result.get("items")),
+            filtered_batches,
             definitions_by_code=definitions_by_code,
         )
         payload: dict[str, object] = {
             "summary": self._summary_from_aggregates(
-                page_result.get("aggregates"),
+                self._aggregates_for_batches(batches_for_summary),
                 eligible_tag_codes=eligible_tag_codes,
                 definitions_by_code=definitions_by_code,
             ),
             "batches": batches,
             **self._bank_flow_pagination_payload(
                 pagination,
-                total=int(page_result.get("total") or 0),
+                total=total,
             ),
         }
         return payload
+
+    @staticmethod
+    def _batch_filters(
+        filters: dict[str, object],
+        *,
+        relation_mode: str,
+    ) -> dict[str, object]:
+        return {
+            key: value
+            for key, value in {
+                **filters,
+                "relation_mode": relation_mode,
+            }.items()
+            if str(value or "").strip() not in {"", "all"}
+        }
+
+    def _live_batch_service(
+        self,
+        page_result: dict[str, object],
+        *,
+        eligible_tag_codes: set[str],
+    ) -> BankBatchService:
+        rows = [
+            dict(row)
+            for row in list(page_result.get("candidate_rows") or [])
+            if isinstance(row, dict)
+        ]
+        active_relations = [
+            dict(relation)
+            for relation in list(page_result.get("active_relations") or [])
+            if isinstance(relation, dict)
+        ]
+        formal_batches = {
+            str(batch.get("batch_id") or ""): dict(batch)
+            for batch in list(page_result.get("formal_items") or [])
+            if isinstance(batch, dict) and str(batch.get("batch_id") or "").strip()
+        }
+        definitions = {
+            str(definition.get("code") or "").strip(): dict(definition)
+            for definition in list(
+                (
+                    page_result.get("tag_policy")
+                    if isinstance(page_result.get("tag_policy"), dict)
+                    else {}
+                ).get("active_tags")
+                or []
+            )
+            if isinstance(definition, dict) and str(definition.get("code") or "").strip()
+        }
+        categories = {
+            str(row.get("id") or row.get("transaction_id") or ""): {
+                "transaction_id": str(row.get("id") or row.get("transaction_id") or ""),
+                "category_code": str(row.get("category_code") or ""),
+                "category_label": str(
+                    definitions.get(str(row.get("category_code") or ""), {}).get("label")
+                    or row.get("category_label")
+                    or row.get("category_code")
+                    or ""
+                ),
+                "category_primary_label": str(
+                    definitions.get(str(row.get("category_code") or ""), {}).get(
+                        "output_primary_label"
+                    )
+                    or row.get("category_primary_label")
+                    or ""
+                ),
+                "category_sub_label": str(
+                    definitions.get(str(row.get("category_code") or ""), {}).get(
+                        "output_sub_label"
+                    )
+                    or row.get("category_sub_label")
+                    or ""
+                ),
+                "category_source": str(row.get("category_source") or ""),
+            }
+            for row in rows
+            if str(row.get("id") or row.get("transaction_id") or "").strip()
+        }
+        pair_service = WorkbenchPairRelationService.from_snapshot(
+            {
+                "pair_relations": {
+                    str(relation.get("case_id") or ""): relation
+                    for relation in active_relations
+                    if str(relation.get("case_id") or "").strip()
+                }
+            }
+        )
+        batch_service = BankBatchService(
+            batches=formal_batches,
+            pair_relation_service=pair_service,
+            schema_version=BANK_FLOW_RULE_BATCH_SCHEMA_VERSION,
+            batch_id_prefix=BANK_FLOW_RULE_BATCH_ID_PREFIX,
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+        )
+        batch_service.build_batches(
+            rows,
+            categories,
+            active_relations,
+            {},
+            eligible_batch_types=eligible_tag_codes,
+            apply_relation_repairs=False,
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+            include_relation_backed_submitted_batches=False,
+        )
+        return batch_service
+
+    @staticmethod
+    def _aggregates_for_batches(
+        batches: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
+        aggregates: dict[tuple[str, str], dict[str, object]] = {}
+        for batch in batches:
+            batch_type = str(batch.get("batch_type") or "").strip()
+            status = str(batch.get("status") or "").strip()
+            if not batch_type or status not in {"draft", "submitted", "withdrawn"}:
+                continue
+            key = (batch_type, status)
+            aggregate = aggregates.setdefault(
+                key,
+                {
+                    "batch_type": batch_type,
+                    "presented_status": status,
+                    "batch_count": 0,
+                    "row_count": 0,
+                    "batch_label": str(batch.get("batch_label") or batch_type),
+                    "category_primary_label": str(batch.get("category_primary_label") or ""),
+                    "category_sub_label": str(batch.get("category_sub_label") or ""),
+                    "total_amount": Decimal("0.00"),
+                },
+            )
+            aggregate["batch_count"] = int(aggregate["batch_count"]) + 1
+            aggregate["row_count"] = int(aggregate["row_count"]) + int(
+                batch.get("row_count") or len(list(batch.get("row_ids") or []))
+            )
+            try:
+                amount = Decimal(str(batch.get("total_amount") or "0").replace(",", ""))
+            except (InvalidOperation, ValueError):
+                amount = Decimal("0.00")
+            aggregate["total_amount"] = Decimal(str(aggregate["total_amount"])) + amount
+        return [
+            {
+                **aggregate,
+                "total_amount": f"{Decimal(str(aggregate['total_amount'])):.2f}",
+            }
+            for aggregate in aggregates.values()
+        ]
 
     def active_relation_source_bundle_for_bank_rows(
         self,

@@ -155,93 +155,213 @@ class BankFlowRuleBatchCanonicalQueryRepository:
         page: int = 1,
         page_size: int | None = 50,
     ) -> dict[str, object]:
-        normalized_page = max(int_value(page, 1), 1)
-        normalized_page_size = None if page_size is None else min(max(int_value(page_size, 50), 1), 200)
-        where_sql, params = self._filters_sql(filters)
-        summary_where_sql, summary_params = self._filters_sql(summary_filters)
+        _ = max(int_value(page, 1), 1)
+        _ = None if page_size is None else min(max(int_value(page_size, 50), 1), 200)
+        self._filters_sql(filters)
+        self._filters_sql(summary_filters)
+        resolved_filters = filters if isinstance(filters, dict) else {}
+        resolved_summary_filters = summary_filters if isinstance(summary_filters, dict) else {}
+        source_month = text(
+            resolved_summary_filters.get("month") or resolved_filters.get("month")
+        )
+        source_account_key = text(
+            resolved_summary_filters.get("account_key")
+            or resolved_filters.get("account_key")
+        )
+        candidate_requested = text(resolved_filters.get("status")) not in {
+            "submitted",
+            "withdrawn",
+        } and text(resolved_filters.get("bucket")) not in {
+            "submitted",
+            "withdrawn",
+        }
+        candidate_scope_sql = "and false"
+        candidate_scope_params: list[object] = []
+        formal_scope_sql = ""
+        formal_scope_params: list[object] = []
+        if source_month and candidate_requested:
+            scope_start = month_start(source_month)
+            candidate_scope_sql = """
+                and coalesce(bank.txn_date, bank.txn_month) >= %s::date - interval '2 days'
+                and coalesce(bank.txn_date, bank.txn_month) < %s::date + interval '1 month 2 days'
+            """
+            candidate_scope_params.extend([scope_start, scope_start])
+        if source_month:
+            scope_start = month_start(source_month)
+            formal_scope_sql += " and batch.scope_month = %s::date"
+            formal_scope_params.append(scope_start)
+        if source_account_key:
+            formal_scope_sql += " and batch.account_key = %s"
+            formal_scope_params.append(source_account_key)
         with self._snapshot() as transaction:
             tag_policy = self._tag_policy(transaction)
             eligible_codes = self._eligible_codes(tag_policy)
-            page_limit_sql = ""
-            page_params: tuple[object, ...] = ()
-            if normalized_page_size is not None:
-                page_limit_sql = "limit %s offset %s"
-                page_params = (
-                    normalized_page_size,
-                    (normalized_page - 1) * normalized_page_size,
-                )
-            page_result = transaction.fetch_one(
+            source_result = transaction.fetch_one(
                 f"""
-                {_VISIBLE_BATCHES_CTE}
-                , filtered_batches as materialized (
-                    select *
-                    from visible_batches
-                    where {where_sql}
-                ),
-                page_rows as materialized (
-                    select *
-                    from filtered_batches
-                    order by scope_month desc nulls last, updated_at desc, batch_id
-                    {page_limit_sql}
-                ),
-                summary_aggregates as materialized (
+                with candidate_rows as materialized (
                     select
-                        batch_type,
-                        presented_status,
-                        count(*)::bigint as batch_count,
-                        coalesce(sum(cardinality(bank_transaction_ids)), 0)::bigint as row_count,
-                        (array_agg(nullif(payload->>'batch_label', '') order by updated_at desc)
-                            filter (where nullif(payload->>'batch_label', '') is not null))[1]
-                            as batch_label,
-                        (array_agg(nullif(payload->>'category_primary_label', '') order by updated_at desc)
-                            filter (where nullif(payload->>'category_primary_label', '') is not null))[1]
-                            as category_primary_label,
-                        (array_agg(nullif(payload->>'category_sub_label', '') order by updated_at desc)
-                            filter (where nullif(payload->>'category_sub_label', '') is not null))[1]
-                            as category_sub_label,
-                        coalesce(sum(total_amount), 0)::text as total_amount
-                    from visible_batches
-                    where {summary_where_sql}
-                    group by batch_type, presented_status
+                        bank.*,
+                        coalesce(bank.legacy_mongo_id, bank.id::text) as transaction_id,
+                        coalesce(
+                            bank.raw_payload->'normalized_payload',
+                            '{{}}'::jsonb
+                        ) as payload,
+                        coalesce(
+                            confirmed_category.category_code,
+                            manual_category.category,
+                            ''
+                        ) as category_code,
+                        case
+                            when confirmed_category.category_code is not null
+                                then 'auto_confirmation'
+                            else coalesce(manual_category.source, '')
+                        end as category_source
+                    from app.bank_transactions bank
+                    left join lateral (
+                        select confirmation.category_code
+                        from app.bank_transaction_category_confirmations confirmation
+                        where confirmation.tenant_id = 'default'
+                          and confirmation.status = 'active'
+                          and (
+                              confirmation.bank_transaction_id = bank.id
+                              or confirmation.legacy_transaction_id in (
+                                  coalesce(bank.legacy_mongo_id, bank.id::text),
+                                  bank.id::text
+                              )
+                          )
+                        order by confirmation.confirmed_at desc, confirmation.id desc
+                        limit 1
+                    ) confirmed_category on true
+                    left join lateral (
+                        select manual.category, manual.source
+                        from app.bank_transaction_categories manual
+                        where manual.status = 'active'
+                          and (
+                              manual.bank_transaction_id = bank.id
+                              or manual.legacy_transaction_id in (
+                                  coalesce(bank.legacy_mongo_id, bank.id::text),
+                                  bank.id::text
+                              )
+                          )
+                        order by manual.updated_at desc, manual.id desc
+                        limit 1
+                    ) manual_category on true
+                    where bank.status <> 'deleted'
+                      and coalesce(
+                          confirmed_category.category_code,
+                          manual_category.category,
+                          ''
+                      ) = any(%s::text[])
+                      {candidate_scope_sql}
+                ),
+                active_relations as materialized (
+                    select relation.*
+                    from app.workbench_pair_relations relation
+                    where relation.status = 'active'
+                      and exists (
+                          select 1
+                          from candidate_rows candidate
+                          where candidate.transaction_id = any(relation.row_ids)
+                             or candidate.id::text = any(relation.row_ids)
+                      )
+                ),
+                formal_items as materialized (
+                    select
+                        batch.*,
+                        coalesce(
+                            batch.raw_payload->'normalized_payload',
+                            '{{}}'::jsonb
+                        ) as payload,
+                        exists (
+                            select 1
+                            from app.workbench_pair_relations relation
+                            where relation.status = 'active'
+                              and relation.case_id = coalesce(
+                                  nullif(
+                                      batch.raw_payload->'normalized_payload'
+                                          ->>'relation_case_id',
+                                      ''
+                                  ),
+                                  batch.batch_id
+                              )
+                        ) as has_active_relation
+                    from app.bank_flow_rule_batches batch
+                    where (
+                        batch.status in ('submitted', 'withdrawn')
+                        or (
+                            batch.status = 'stale'
+                            and exists (
+                                select 1
+                                from app.workbench_pair_relations relation
+                                where relation.status = 'active'
+                                  and relation.case_id = coalesce(
+                                      nullif(
+                                          batch.raw_payload->'normalized_payload'
+                                              ->>'relation_case_id',
+                                          ''
+                                      ),
+                                      batch.batch_id
+                                  )
+                            )
+                        )
+                    )
+                    {formal_scope_sql}
                 )
                 select
-                    (select count(*)::bigint from filtered_batches) as total,
                     coalesce(
                         (
                             select jsonb_agg(
-                                to_jsonb(page_row)
-                                order by scope_month desc nulls last, updated_at desc, batch_id
+                                to_jsonb(candidate)
+                                order by candidate.txn_date, candidate.transaction_id
                             )
-                            from page_rows page_row
+                            from candidate_rows candidate
                         ),
                         '[]'::jsonb
-                    ) as items,
+                    ) as candidate_rows,
+                    coalesce(
+                        (
+                            select jsonb_agg(to_jsonb(relation) order by relation.case_id)
+                            from active_relations relation
+                        ),
+                        '[]'::jsonb
+                    ) as active_relations,
                     coalesce(
                         (
                             select jsonb_agg(
-                                to_jsonb(summary_row)
-                                order by batch_type, presented_status
+                                to_jsonb(batch)
+                                order by batch.scope_month, batch.batch_id
                             )
-                            from summary_aggregates summary_row
+                            from formal_items batch
                         ),
                         '[]'::jsonb
-                    ) as aggregates
+                    ) as formal_items
                 """,
-                (
+                tuple(
+                    [
                     eligible_codes,
-                    *params,
-                    *page_params,
-                    *summary_params,
+                    *candidate_scope_params,
+                    *formal_scope_params,
+                    ]
                 ),
             ) or {}
-        rows = page_result.get("items")
-        rows = rows if isinstance(rows, list) else []
-        aggregates = page_result.get("aggregates")
-        aggregates = aggregates if isinstance(aggregates, list) else []
+        candidate_rows = source_result.get("candidate_rows")
+        candidate_rows = candidate_rows if isinstance(candidate_rows, list) else []
+        active_relations = source_result.get("active_relations")
+        active_relations = active_relations if isinstance(active_relations, list) else []
+        formal_items = source_result.get("formal_items")
+        formal_items = formal_items if isinstance(formal_items, list) else []
         return {
-            "items": [self._batch_payload(row) for row in rows],
-            "total": int_value(page_result.get("total"), 0),
-            "aggregates": [dict(row) for row in aggregates if isinstance(row, dict)],
+            "candidate_rows": [
+                self._bank_row_payload(row)
+                for row in candidate_rows
+                if isinstance(row, dict)
+            ],
+            "active_relations": [
+                dict(row) for row in active_relations if isinstance(row, dict)
+            ],
+            "formal_items": [
+                self._batch_payload(row) for row in formal_items if isinstance(row, dict)
+            ],
             "tag_policy": tag_policy,
         }
 
@@ -587,7 +707,7 @@ class BankFlowRuleBatchCanonicalQueryRepository:
         transaction_id = text(row.get("transaction_id"))
         amount = BankFlowRuleBatchCanonicalQueryRepository._decimal_text(row.get("amount"))
         direction = text(row.get("txn_direction")).lower()
-        account_no = text(row.get("account_no"))
+        account_no = text(row.get("account_no")) or ""
         bank_name = text(result.get("bank_name") or result.get("imported_bank_name"))
         account_last4 = text(result.get("account_last4") or result.get("imported_bank_last4"))
         if not account_last4:
