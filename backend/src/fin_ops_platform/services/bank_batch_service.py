@@ -2250,18 +2250,22 @@ class BankBatchService:
             and self._row_id(row) not in occupied_row_ids
             and self._category_code(row, categories) == "internal_transfer"
         ]
-        grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        grouped: dict[str, list[dict[str, Any]]] = {}
         for row in internal_rows:
             amount = self._amount(row)
-            month = self._scope_month(row)
-            if amount is None or not month:
+            if amount is None or not self._scope_month(row):
                 continue
-            grouped.setdefault((month, self._format_amount(amount)), []).append(row)
+            grouped.setdefault(self._format_amount(amount), []).append(row)
 
         batches: dict[str, dict[str, Any]] = {}
-        for (scope_month, amount_text), group_rows in grouped.items():
+        for amount_text, group_rows in grouped.items():
             sorted_rows = sorted(group_rows, key=self._row_id)
             row_ids = [self._row_id(row) for row in sorted_rows]
+            scope_month = min(
+                self._scope_month(row)
+                for row in sorted_rows
+                if self._scope_month(row)
+            )
             batch_key = f"internal_transfer:{scope_month}:{amount_text}:{':'.join(row_ids)}"
             inflows = [row for row in sorted_rows if self._direction(row) == "inflow"]
             outflows = [row for row in sorted_rows if self._direction(row) == "outflow"]
@@ -2284,18 +2288,26 @@ class BankBatchService:
             for outflow, inflow, time_delta_seconds in matched_pairs:
                 pair_rows = sorted([outflow, inflow], key=self._row_id)
                 pair_row_ids = [self._row_id(row) for row in pair_rows]
-                pair_batch_key = f"internal_transfer:{scope_month}:{amount_text}:{':'.join(pair_row_ids)}"
+                pair_scope_month = min(
+                    self._scope_month(outflow),
+                    self._scope_month(inflow),
+                )
+                pair_batch_key = (
+                    f"internal_transfer:{pair_scope_month}:{amount_text}:"
+                    f"{':'.join(pair_row_ids)}"
+                )
                 evidence = {
                     "rule_code": "internal_transfer_pair",
                     "match_window_hours": 48,
                     "matched_fields": ["amount", "direction", "account", "transaction_at"],
                     "time_delta_seconds": time_delta_seconds,
                     "source_group_row_ids": row_ids,
+                    "scope_owner_rule": "earliest_member_month",
                 }
                 batch = self._draft_batch(
                     batch_key=pair_batch_key,
                     batch_type="internal_transfer",
-                    scope_month=scope_month,
+                    scope_month=pair_scope_month,
                     account_key="",
                     rows=pair_rows,
                     row_ids=pair_row_ids,
@@ -2321,6 +2333,11 @@ class BankBatchService:
             ]
             if unmatched_rows:
                 unmatched_row_ids = [self._row_id(row) for row in unmatched_rows]
+                unmatched_scope_month = min(
+                    self._scope_month(row)
+                    for row in unmatched_rows
+                    if self._scope_month(row)
+                )
                 unmatched_inflows = [
                     row for row in unmatched_rows if self._direction(row) == "inflow"
                 ]
@@ -2329,12 +2346,12 @@ class BankBatchService:
                 ]
                 missing_side = not unmatched_inflows or not unmatched_outflows
                 conflict_key = (
-                    f"internal_transfer_conflict:{scope_month}:{amount_text}:"
+                    f"internal_transfer_conflict:{unmatched_scope_month}:{amount_text}:"
                     f"{':'.join(unmatched_row_ids)}"
                 )
                 batches[self._batch_id(conflict_key)] = self._conflict_batch(
                     batch_key=conflict_key,
-                    scope_month=scope_month,
+                    scope_month=unmatched_scope_month,
                     rows=unmatched_rows,
                     row_ids=unmatched_row_ids,
                     total_amount=Decimal(amount_text),

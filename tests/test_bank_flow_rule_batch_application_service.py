@@ -2084,7 +2084,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
             [["unique-in", "unique-out"]],
         )
 
-    def test_bank_flow_live_internal_transfer_matches_across_month_boundary_and_excludes_occupied_pair(
+    def test_bank_flow_live_internal_transfer_has_one_stable_owner_across_month_boundary(
         self,
     ) -> None:
         rows = [
@@ -2141,17 +2141,35 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
             {"month": ["2026-05"], "bucket": ["unsubmitted"]},
             relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
         )
-        self.assertEqual(payload["batches"], [])
-
-        rows[1]["trade_time"] = "2026-05-31T23:45:00"
-        same_month_payload = service.list_batches_payload(
+        repeated_payload = service.list_batches_payload(
             {"month": ["2026-05"], "bucket": ["unsubmitted"]},
             relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
         )
         self.assertEqual(
-            [batch["row_ids"] for batch in same_month_payload["batches"]],
+            [batch["row_ids"] for batch in payload["batches"]],
             [["boundary-in", "boundary-out"]],
         )
+        self.assertEqual(
+            [batch["batch_id"] for batch in payload["batches"]],
+            [batch["batch_id"] for batch in repeated_payload["batches"]],
+        )
+        self.assertEqual(
+            [batch["row_ids"] for batch in payload["batches"]],
+            [batch["row_ids"] for batch in repeated_payload["batches"]],
+        )
+        self.assertEqual(payload["batches"][0]["scope_month"], "2026-05")
+        self.assertEqual(payload["batches"][0]["total_amount"], "188500.00")
+        self.assertEqual(
+            payload["batches"][0]["evidence"]["scope_owner_rule"],
+            "earliest_member_month",
+        )
+
+        adjacent_month_payload = service.list_batches_payload(
+            {"month": ["2026-06"], "bucket": ["unsubmitted"]},
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+        )
+        self.assertEqual(adjacent_month_payload["batches"], [])
+
         repository.active_relations = [
             {
                 "case_id": "occupied-case",
