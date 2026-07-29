@@ -32,8 +32,8 @@
 
 - live candidate submit 必须携带合法 `scope_month`；提交事务内按 candidate identity 重读并重算银行流水身份、成员、金额、分类、规则和 active relation 占用，遗留 persisted draft 必须返回 conflict。
 - active relation 只从 `app.workbench_pair_relations` 读取，禁止使用 Workbench page read model 或 relation projection。
-- 内部转账必须保持一收一支、不同账户、48 小时窗口；批次金额只计单边金额。
-- submit/submit-selection/withdraw/reset 必须继续通过 relation command、占用检查、幂等/CAS、审计和 changed-batch delta writer 原子提交。
+- 内部转账必须保持一收一支、不同账户、48 小时窗口；批次金额只计单边金额。跨月配对由最早成员月份唯一拥有，±2 天窗口只用于发现配对，后一个月份不得生成重复 candidate。
+- submit/submit-selection/withdraw/reset 必须继续通过 relation command、占用检查、幂等/CAS、审计和 changed-batch delta writer 原子提交。PostgreSQL 由 `save_bank_flow_rule_batch_mutation(...)` 持有唯一 caller-owned transaction，relation/history 与 batch/events 共用该 transaction；任一步失败整体 rollback。
 - reset 使用一次 bulk relation cancel 和一次 batch delta 保存；禁止手写 SQL 改状态。
 - 每次写成功后，当前页只执行一次普通列表 GET。
 

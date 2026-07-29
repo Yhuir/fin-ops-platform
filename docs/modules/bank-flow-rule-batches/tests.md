@@ -6,8 +6,8 @@
 
 | 类别 | 是否适用 | 当前覆盖 |
 | --- | --- | --- |
-| 1. Business core unit tests | 适用 | OA/发票只有双 false 合格；未知、停用、重复标签 fail fast；提交冻结 requirement/category metadata；内部转账金额只计单边；重复选择、占用和版本冲突保持原领域错误。 |
-| 2. Service-layer tests | 适用 | canonical query repository 在一个 `REPEATABLE READ / READ ONLY` snapshot 中读取 live candidate 输入和正式历史；提交事务用同一 builder 复核 candidate guard，失败恢复 relation/batch snapshot；submit/withdraw/reset 继续走 relation command 与 batch delta writer。 |
+| 1. Business core unit tests | 适用 | OA/发票只有双 false 合格；未知、停用、重复标签 fail fast；提交冻结 requirement/category metadata；内部转账金额只计单边；5 月 31 日/6 月 1 日配对只由最早成员月份拥有且重复查询 identity 稳定；重复选择、占用和版本冲突保持原领域错误。 |
+| 2. Service-layer tests | 适用 | canonical query repository 在一个 `REPEATABLE READ / READ ONLY` snapshot 中读取 live candidate 输入和正式历史；提交事务用同一 builder 复核 candidate guard；single submit、selected-row submit、withdraw、reset 在 relation 已暂存后注入 batch/event 失败，均断言 relation/history/batch/events 零半写；本地原子替换失败保留旧快照。 |
 | 3. API contract tests | 适用 | 权限、非法参数、空集、筛选、排序、分页、summary、详情、提交/撤回/reset、规则 CAS；明确断言响应不含 `read_model_*`、refresh 或 operation-barrier 字段。 |
 | 4. Read model, cache, and background job tests | 适用（清理回归） | 页面 SQL 禁止读取 persisted draft、`read_model.bank_flow_rule_batch_rows` 和 no-OA 表；canonical draft event/owner/producer/worker/replay/deploy 负向门禁保持删除；no-OA 自身 worker 回归保留。 |
 | 5. Frontend component and interaction tests | 适用 | loading/empty/error、筛选、分页、详情、规则抽屉、权限、提交/撤回/reset；每次成功写命令只触发一次当前列表 GET，不启动 freshness polling。 |
@@ -36,7 +36,8 @@
 - 非法月份、bucket、status、页码或 page size。
 - 规则 CAS 冲突、未知/停用/重复 tag code。
 - 空选择、重复 row、跨月、跨账户、混合标签、active relation 已占用、规则版本过期。
-- Relation command 或 batch delta writer 失败时不得留下半批次。
+- Relation command、batch 或 event writer 失败时不得留下半关系或半批次；single submit、selected-row submit、withdraw、reset 四类 mutation 都必须验证 relation/history/batch/events 一起 rollback。
+- 5 月 31 日与 6 月 1 日的 ±2 天跨月内部转账只由最早成员月份返回一个稳定 candidate；相邻月份不得重复返回。
 - 缺少 `scope_month`、规则漂移、成员漂移或 active relation 新占用必须返回 candidate conflict；遗留 persisted draft 不得被恢复提交。
 - Audit 必须调用共享 builder；故意过滤 188500 候选时 expected-set gate 必须失败。
 - 空列表必须来自已完成的 canonical snapshot，不能由 missing/stale 投影伪造。
