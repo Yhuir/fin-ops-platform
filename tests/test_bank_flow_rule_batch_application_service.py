@@ -543,6 +543,17 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         self.assertEqual(result["batch"]["row_ids"], ["bank-row-1", "bank-row-2"])
         self.assertEqual(confirm_calls[0]["relation_mode"], BANK_FLOW_RULE_BATCH_RELATION_MODE)
         self.assertTrue(mutation_calls[0]["persist"])
+        self.assertEqual(
+            mutation_calls[0]["candidate_guard"]["guard_mode"],
+            "selected_rows",
+        )
+        self.assertEqual(
+            [
+                proof["row_id"]
+                for proof in mutation_calls[0]["candidate_guard"]["selected_row_proofs"]
+            ],
+            ["bank-row-1", "bank-row-2"],
+        )
         self.assertNotIn("read_model_key", mutation_calls[0])
 
     def test_submit_selected_bank_flow_internal_transfer_fails_fast_without_legacy_refresh(self) -> None:
@@ -604,6 +615,85 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         self.assertEqual(str(raised.exception), "内部往来批次请使用单批提交。")
         self.assertEqual(import_service.get_calls, ["bank-row-1"])
         self.assertEqual(import_service.list_calls, [])
+
+    def test_submit_selected_guard_conflict_restores_relation_and_batch(self) -> None:
+        rows = [
+            {
+                "id": "bank-fee-1",
+                "trade_time": "2026-06-03 10:20:00",
+                "account_key": "ccb:8106",
+                "direction": "expense",
+                "amount": "8.80",
+            },
+            {
+                "id": "bank-fee-2",
+                "trade_time": "2026-06-04 10:20:00",
+                "account_key": "ccb:8106",
+                "direction": "expense",
+                "amount": "18.20",
+            },
+        ]
+        categories = {
+            str(row["id"]): {
+                "category_code": "fee",
+                "effective_category_code": "fee",
+            }
+            for row in rows
+        }
+
+        class RejectingStateStore:
+            def save_bank_flow_rule_batch_mutation(self, **kwargs: object) -> None:
+                guard = kwargs.get("candidate_guard")
+                assert isinstance(guard, dict)
+                assert guard["guard_mode"] == "selected_rows"
+                raise RuntimeError("bank_flow_rule_batch_candidate_guard_conflict")
+
+        pair_service = WorkbenchPairRelationService()
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+        service._bank_batch_service = BankBatchService(
+            schema_version=BANK_FLOW_RULE_BATCH_SCHEMA_VERSION,
+            batch_id_prefix=BANK_FLOW_RULE_BATCH_ID_PREFIX,
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+        )
+        service._pair_relation_snapshot_port = BankBatchPairRelationSnapshotPort(
+            pair_service
+        )
+        service._state_store = RejectingStateStore()
+        service._search_cache_clearer = lambda: None
+        service._bank_transaction_category_affected_months_provider = lambda _row_ids: []
+        service.bank_transaction_rows_by_ids = lambda _row_ids: list(rows)  # type: ignore[method-assign]
+        service.effective_categories_for_rows = lambda _rows: dict(categories)  # type: ignore[method-assign]
+        service.active_relation_source_bundle_for_bank_rows = (  # type: ignore[method-assign]
+            lambda _rows, **_kwargs: {"rows": [], "source_versions": {}}
+        )
+        service.candidate_source_versions_for_scope = lambda **_kwargs: {}  # type: ignore[method-assign]
+        service._eligible_tag_codes_for_relation_mode = lambda _mode: {"fee"}  # type: ignore[method-assign]
+
+        def confirm_relation(batch: dict[str, object], **_kwargs: object) -> None:
+            pair_service.create_active_relation(
+                case_id=str(batch["batch_id"]),
+                row_ids=[str(row_id) for row_id in list(batch["row_ids"])],
+                row_types=["bank_transaction", "bank_transaction"],
+                relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                created_by="finance-user",
+                month_scope="2026-06",
+            )
+
+        service._confirm_relation_for_batch = confirm_relation  # type: ignore[method-assign]
+
+        with self.assertRaises(BankBatchRelationMutationError) as raised:
+            service.submit_selected_rows(
+                row_ids=["bank-fee-1", "bank-fee-2"],
+                actor="finance-user",
+                note="提交",
+            )
+
+        self.assertEqual(
+            raised.exception.error_code,
+            "bank_flow_rule_batch_candidate_conflict",
+        )
+        self.assertEqual(pair_service.list_active_relations(), [])
+        self.assertEqual(service._bank_batch_service.snapshot()["batches"], {})
 
     def test_mutation_rejects_non_bank_flow_relation_mode(self) -> None:
         service = object.__new__(BankFlowRuleBatchApplicationService)

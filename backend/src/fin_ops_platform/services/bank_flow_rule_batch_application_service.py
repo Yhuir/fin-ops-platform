@@ -19,6 +19,7 @@ from fin_ops_platform.services.bank_batch_service import (
 )
 from fin_ops_platform.services.bank_flow_rule_batch_canonical_query import (
     bank_flow_rule_batch_candidate_guard,
+    bank_flow_rule_batch_selected_row_proofs,
     build_live_bank_flow_rule_batch_service,
 )
 
@@ -553,6 +554,9 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 "内部往来批次请使用单批提交。",
             )
         previous_batch_snapshot = self._bank_batch_service.snapshot()
+        relation_snapshot_port = getattr(self, "_pair_relation_snapshot_port", None)
+        previous_relation_snapshot: dict[str, object] = {}
+        submitted_batch_id = ""
         try:
             months = self._months_for_bank_rows(bank_rows)
             relation_bundle = self.active_relation_source_bundle_for_bank_rows(
@@ -591,14 +595,39 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 note=note,
                 relation_mode=relation_mode,
             )
+            submitted_batch_id = str(batch.get("batch_id") or "").strip()
+            snapshot_case_ids = getattr(
+                relation_snapshot_port,
+                "snapshot_case_ids",
+                None,
+            )
+            if callable(snapshot_case_ids) and submitted_batch_id:
+                previous_relation_snapshot = snapshot_case_ids(
+                    [submitted_batch_id]
+                )
+            candidate_guard = {
+                **bank_flow_rule_batch_candidate_guard(batch),
+                "guard_mode": "selected_rows",
+                "selected_row_proofs": bank_flow_rule_batch_selected_row_proofs(
+                    bank_rows,
+                    categories_by_transaction_id,
+                ),
+            }
             self._confirm_relation_for_batch(batch, actor=actor, note=note, relation_mode=relation_mode)
             return self._mutation_result(
                 batch,
                 status="submitted",
                 persist=True,
+                candidate_guard=candidate_guard,
             )
         except Exception:
             self._restore_batch_service_snapshot(self._bank_batch_service, previous_batch_snapshot)
+            restore_case_ids = getattr(relation_snapshot_port, "restore_case_ids", None)
+            if callable(restore_case_ids) and submitted_batch_id:
+                restore_case_ids(
+                    previous_relation_snapshot,
+                    case_ids=[submitted_batch_id],
+                )
             raise
 
     def _selected_rows_include_internal_transfer(

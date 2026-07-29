@@ -490,6 +490,74 @@ class PostgresStateStoreTests(unittest.TestCase):
         )
         self.assertEqual(len(transaction.lock_queries), 4)
 
+    def test_selected_row_guard_fails_closed_on_canonical_fact_drift(self) -> None:
+        class Transaction:
+            def execute(self, _sql: str, _params: tuple[object, ...] = ()) -> int:
+                return 0
+
+            def fetch_all(
+                self,
+                _sql: str,
+                _params: tuple[object, ...] = (),
+            ) -> list[dict[str, object]]:
+                return []
+
+        source = {
+            "candidate_rows": [
+                {
+                    "id": "bank-fee-1",
+                    "trade_time": "2026-06-03 10:20:00",
+                    "account_key": "ccb:8106",
+                    "direction": "expense",
+                    "amount": "9.80",
+                    "category_code": "fee",
+                }
+            ],
+            "active_relations": [],
+            "formal_items": [],
+            "tag_policy": {
+                "active_tags": [{"code": "fee"}],
+                "requirements_by_tag_code": {
+                    "fee": {
+                        "requires_oa": False,
+                        "requires_invoice": False,
+                    }
+                },
+            },
+        }
+
+        with patch.object(
+            BankFlowRuleBatchCanonicalQueryRepository,
+            "read_candidate_guard_source",
+            return_value=source,
+        ), self.assertRaisesRegex(
+            RuntimeError,
+            "bank_flow_rule_batch_candidate_guard_conflict",
+        ):
+            PostgresStateStore._assert_bank_flow_rule_batch_candidate_guard(
+                Transaction(),
+                {
+                    "batch_id": "bank_flow_rule_batch_selected",
+                    "scope_month": "2026-06",
+                    "batch_type": "fee",
+                    "row_ids": ["bank-fee-1"],
+                    "total_amount": "8.80",
+                    "version": 1,
+                    "guard_mode": "selected_rows",
+                    "selected_row_proofs": [
+                        {
+                            "row_id": "bank-fee-1",
+                            "scope_month": "2026-06",
+                            "category_code": "fee",
+                            "amount": "8.80",
+                            "direction": "expense",
+                            "account_key": "ccb:8106",
+                            "trade_time": "2026-06-03 10:20:00",
+                        }
+                    ],
+                },
+            )
+
     def test_workbench_pair_relation_scoped_loader_delegates_to_canonical_repository(self) -> None:
         class RelationRepository:
             def __init__(self) -> None:

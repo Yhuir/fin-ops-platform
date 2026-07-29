@@ -32,6 +32,7 @@ from fin_ops_platform.services.postgres_repositories.bank_flow_rule_batch_canoni
 )
 from fin_ops_platform.services.bank_flow_rule_batch_canonical_query import (
     bank_flow_rule_batch_candidate_guard,
+    bank_flow_rule_batch_selected_row_proofs,
     build_live_bank_flow_rule_batch_service,
 )
 from fin_ops_platform.services.postgres_repositories.common import run_in_transaction
@@ -824,6 +825,39 @@ class PostgresStateStore:
             transaction,
             scope_month=str(candidate_guard.get("scope_month") or ""),
         )
+        if candidate_guard.get("guard_mode") == "selected_rows":
+            active_row_ids = {
+                str(active_row_id).strip()
+                for relation in list(source.get("active_relations") or [])
+                if isinstance(relation, dict)
+                for active_row_id in list(relation.get("row_ids") or [])
+                if str(active_row_id).strip()
+            }
+            expected_proofs = [
+                dict(proof)
+                for proof in list(candidate_guard.get("selected_row_proofs") or [])
+                if isinstance(proof, dict)
+            ]
+            actual_proofs = bank_flow_rule_batch_selected_row_proofs(
+                [
+                    dict(row)
+                    for row in list(source.get("candidate_rows") or [])
+                    if isinstance(row, dict)
+                    and str(row.get("id") or row.get("transaction_id") or "").strip()
+                    in row_ids
+                ]
+            )
+            if (
+                active_row_ids.intersection(row_ids)
+                or actual_proofs != expected_proofs
+                or {proof.get("row_id") for proof in actual_proofs} != set(row_ids)
+                or {proof.get("scope_month") for proof in actual_proofs}
+                != {str(candidate_guard.get("scope_month") or "")}
+                or {proof.get("category_code") for proof in actual_proofs}
+                != {str(candidate_guard.get("batch_type") or "")}
+            ):
+                raise RuntimeError("bank_flow_rule_batch_candidate_guard_conflict")
+            return
         live_service = build_live_bank_flow_rule_batch_service(source)
         try:
             candidate = live_service.get_batch(

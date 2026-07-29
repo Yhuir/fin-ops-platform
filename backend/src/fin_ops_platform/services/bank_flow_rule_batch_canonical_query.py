@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from fin_ops_platform.services.bank_batch_service import (
@@ -129,3 +130,57 @@ def bank_flow_rule_batch_candidate_guard(batch: dict[str, Any]) -> dict[str, obj
         "total_amount": str(batch.get("total_amount") or "0"),
         "version": int(batch.get("version") or 1),
     }
+
+
+def bank_flow_rule_batch_selected_row_proofs(
+    rows: list[dict[str, object]],
+    categories_by_transaction_id: dict[str, dict[str, object]] | None = None,
+) -> list[dict[str, str]]:
+    categories = categories_by_transaction_id or {}
+    proofs: list[dict[str, str]] = []
+    for row in rows:
+        row_id = str(row.get("id") or row.get("transaction_id") or "").strip()
+        if not row_id:
+            continue
+        category = categories.get(row_id) or {}
+        raw_direction = str(
+            row.get("direction") or row.get("txn_direction") or ""
+        ).strip().lower()
+        raw_month = str(
+            row.get("scope_month")
+            or row.get("month")
+            or row.get("txn_month")
+            or row.get("trade_time")
+            or row.get("txn_date")
+            or ""
+        ).strip()
+        try:
+            amount = f"{Decimal(str(row.get('amount') or 0)):.2f}"
+        except (InvalidOperation, ValueError):
+            amount = "0.00"
+        proofs.append(
+            {
+                "row_id": row_id,
+                "scope_month": raw_month[:7],
+                "category_code": str(
+                    category.get("effective_category_code")
+                    or category.get("category_code")
+                    or row.get("category_code")
+                    or ""
+                ).strip(),
+                "amount": amount,
+                "direction": (
+                    "income"
+                    if raw_direction in {"inflow", "income", "收", "进"}
+                    else "expense"
+                ),
+                "account_key": str(row.get("account_key") or "").strip(),
+                "trade_time": str(
+                    row.get("trade_time")
+                    or row.get("pay_receive_time")
+                    or row.get("txn_date")
+                    or ""
+                ).strip(),
+            }
+        )
+    return sorted(proofs, key=lambda proof: proof["row_id"])
