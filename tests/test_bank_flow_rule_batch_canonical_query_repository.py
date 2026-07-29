@@ -266,6 +266,61 @@ def test_page_query_returns_an_explicit_empty_result() -> None:
     assert result["aggregates"] == []
 
 
+def test_page_query_returns_live_candidate_inputs_in_the_same_snapshot() -> None:
+    class LiveSourceConnection(_Connection):
+        def fetch_one(
+            self,
+            sql: str,
+            params: tuple[object, ...] = (),
+        ) -> dict[str, object] | None:
+            normalized = " ".join(sql.split())
+            self.fetched_one.append((normalized, params))
+            if "from app.app_settings" in normalized:
+                return {"settings_payload": _settings_payload()}
+            if "candidate_rows" in normalized and "formal_items" in normalized:
+                return {
+                    "candidate_rows": [
+                        {
+                            "transaction_id": "bank-out-188500",
+                            "amount": "188500.00",
+                            "txn_direction": "outflow",
+                            "trade_time": datetime(2026, 5, 14, 9, 0, tzinfo=UTC),
+                            "category_code": "internal_transfer",
+                            "category_source": "auto_confirmation",
+                            "payload": {
+                                "bank_name": "建设银行",
+                                "account_key": "CCB:8106",
+                            },
+                        }
+                    ],
+                    "active_relations": [],
+                    "formal_items": [],
+                }
+            return None
+
+    connection = LiveSourceConnection()
+    repository = BankFlowRuleBatchCanonicalQueryRepository(connection)
+
+    result = repository.read_page(
+        {"month": "2026-05", "bucket": "unsubmitted"},
+        summary_filters={"month": "2026-05"},
+        page=1,
+        page_size=50,
+    )
+
+    assert result["candidate_rows"][0]["id"] == "bank-out-188500"
+    assert result["candidate_rows"][0]["category_code"] == "internal_transfer"
+    assert result["active_relations"] == []
+    assert result["formal_items"] == []
+    assert connection.transaction_enters == connection.transaction_exits == 1
+    assert len(connection.fetched_one) == 2
+    combined_sql = connection.fetched_one[1][0]
+    assert "from app.bank_transactions" in combined_sql
+    assert "from app.workbench_pair_relations" in combined_sql
+    assert "from app.bank_flow_rule_batches" in combined_sql
+    assert "read_model." not in combined_sql
+
+
 def test_detail_reads_bank_rows_events_and_only_active_canonical_relations() -> None:
     connection = _Connection()
     repository = BankFlowRuleBatchCanonicalQueryRepository(connection)
