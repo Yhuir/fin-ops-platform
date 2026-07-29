@@ -1518,5 +1518,31 @@ describe("BankFlowRuleBatchPage", () => {
         }),
       ]),
     );
+    });
   });
-});
+
+  test("rejects an internal transfer candidate without a month scope", async () => {
+    const user = userEvent.setup();
+    const payloadWithoutScope = {
+      ...listPayload,
+      batches: listPayload.batches.map((batch) => (
+        batch.batch_id === "batch-draft-transfer"
+          ? { ...batch, scope_month: undefined }
+          : batch
+      )),
+    };
+    const fetchMock = installFetchMock(payloadWithoutScope);
+    renderPage();
+    await user.click(await screen.findByRole("button", { name: "往来 1批 · 2条" }));
+    await user.click(await screen.findByRole("button", { name: "内部往来款 1批 · 2条" }));
+    await user.click(await screen.findByRole("button", { name: "提交内部往来批次" }));
+
+    expect(await screen.findByText("流水规则候选月份缺失，请刷新列表后重试")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input, init]) => {
+      const url = new URL(
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url,
+        "http://localhost",
+      );
+      return url.pathname.endsWith("/submit") && init?.method === "POST";
+    })).toBe(false);
+  });
