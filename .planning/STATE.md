@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
+status: verified
 stopped_at: Completed 30-04-PLAN.md with safe production blocker
-last_updated: "2026-07-29T16:00:33.706Z"
-last_activity: 2026-07-29 -- Phase 35 execution started
+last_updated: "2026-07-29T17:45:00.000Z"
+last_activity: 2026-07-30 -- Phase 35 production verification passed
 progress:
   total_phases: 33
-  completed_phases: 7
+  completed_phases: 8
   total_plans: 83
   completed_plans: 59
   percent: 21
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 
 ## Current Position
 
-Phase: 35 (bank-flow-rule-batch-live-candidates) — EXECUTING
+Phase: 35 (bank-flow-rule-batch-live-candidates) — VERIFIED
 Plan: 1 of 1
-Status: Phase complete — ready for verification
-Last activity: 2026-07-29 -- Phase 35 execution started
+Status: Phase complete — production verification passed 6/6
+Last activity: 2026-07-30 -- release `main-9aff7370-20260730014104` verified
 
-Progress: [██░░░░░░░░] boundary review and executable plan complete
+Progress: [██████████] implementation, release and production verification complete
 
 ## Performance Metrics
 

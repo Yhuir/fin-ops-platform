@@ -65,6 +65,7 @@ completed: 2026-07-29
 ## Accomplishments
 
 - 页面列表在同一 `REPEATABLE READ / READ ONLY` snapshot 批量读取请求月份（内部转账含 ±2 天窗口）的银行流水、有效分类、paired policy、active relation 和正式历史，再由共享内核实时生成候选、summary、过滤、排序与分页。
+- 生产发现的 auto-only 分类缺口已在共享有效分类边界修复：repository 不再用手工/确认分类 SQL 预过滤，列表、详情、提交 guard 与 Audit 统一复用银行明细的 manual/confirmation/auto 优先级。
 - 188500 元一收一支内部往来、跨月窗口、稳定匹配、歧义 fail closed、部分唯一配对、已占用排除和 Audit 完全缺失 expected candidate 均有硬回归。
 - 单批 submit 与 selected-row submit 都携带 canonical proof；写事务内重读、重算和锁定候选依赖，规则/成员/金额/分类/占用漂移时 relation 与 batch 不留半写。
 - 删除 canonical draft owner、producer、derived lifecycle executor、event/worker/registry/status、backfill replay、deploy env 和旧测试；no-OA 自有 worker/read model 与正式历史保持不变。
@@ -151,10 +152,18 @@ Each task was committed atomically:
 **Total deviations:** 4 auto-fixed（2 bug、1 missing critical、1 blocking）
 **Impact on plan:** 全部为 live candidate 写入正确性、信任边界和回归迁移所需的小范围修正；未新增架构或扩大业务行为。
 
+## Production Closure
+
+- `9aff73707` 已推送到 `origin/main`，通过 `./scripts/deploy-oa.sh` 部署为 `main-9aff7370-20260730014104`。
+- 生产 Bank Details 中 `txn_imported_0024`（收入）和 `txn_imported_0057`（支出）均为 `188500.00`、`internal_transfer`；May 未提交 API 返回唯一批次 `bank_flow_rule_batch_c701b64fff0b373f30a8`，成员正是这两行。
+- 生产 Page Audit 为 `pass / fresh / drained`，0 issue；退休的 `fin-ops-worker@bank-flow-rule-batch.service` 为 inactive/disabled，独立 legacy `no-oa-bank-batch` worker 保持 active/enabled。
+- 生产认证读性能使用 3 次 warmup + 20 次测量，20/20 HTTP 200；p50 `354.487ms`、p95/max `456.474ms`，全部低于 800ms 和 1s。
+- 生产验证只读，不提交或撤回真实 `188500` 业务候选。
+
 ## Issues Encountered
 
 - 本地 production build 仍报告第三方生成 CSS 中空 `:is()` selector 与大 chunk 警告，但构建 exit code 为 0；这些是既有、与本计划无关的非阻塞警告。
-- 按直接用户约束，本次不执行 push、`./scripts/deploy-oa.sh`、生产 token 读取、188500 生产只读核验或 20 次 P95 采样。因此 production-validation 状态保持 pending，不声称已获得生产性能/worker/queue/System Audit 证据。
+- 初次使用 Python HTTP SLO probe 时，本机 CA 证书链报 `CERTIFICATE_VERIFY_FAILED`；实际公网 curl 认证请求正常。最终性能证据通过同一生产 URL、同一 admin token 的 `curl` 通道完成，20 次均为 HTTP 200。
 
 ## Verification
 
@@ -164,6 +173,8 @@ Each task was committed atomically:
 - `bash scripts/verify.sh lint`：通过。
 - `bash scripts/verify.sh docs`：通过。
 - `git diff --check`：通过。
+- 本轮 auto-only 根因修复扩大回归：后端 **462 passed, 1 skipped**；`BankFlowRuleBatchPage.test.tsx` **30 passed**；production build 与标准 deploy 通过。
+- 生产只读：188500 候选、Bank Details 分类、Page Audit、worker 隔离与 20 次 P95 全部通过。
 
 ## Test Coverage
 
@@ -192,7 +203,7 @@ None - no external service configuration or new dependency required.
 ## Next Phase Readiness
 
 - 本地实现、回归、文档与 runtime removal gates 完成，正式历史和 no-OA 独立边界保留。
-- 若用户后续单独授权发布，应从 exact main SHA 执行标准 deploy，并补充生产 188500 只读页面/Audit、旧 draft event/worker 为零、System Audit 与月份列表 20 次 P95 证据；不得提交或撤回真实 188500 数据。
+- exact main SHA 已发布并完成生产只读验收；真实 `188500` 候选未执行 submit/withdraw，后续仅在有独立生产写审批和恢复方案时才允许操作。
 
 ## Self-Check: PASSED
 

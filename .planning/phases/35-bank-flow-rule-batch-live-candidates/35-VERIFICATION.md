@@ -1,42 +1,27 @@
 ---
 phase: 35-bank-flow-rule-batch-live-candidates
-verified: 2026-07-29T16:43:56Z
-status: gaps_found
-score: 5/6 must-haves verified
+verified: 2026-07-29T17:45:00Z
+status: passed
+score: 6/6 must-haves verified
 overrides_applied: 0
 re_verification:
   previous_status: gaps_found
-  previous_score: 4/6
+  previous_score: 5/6
   gaps_closed:
-    - "Submit/withdraw preserves the existing formal relation UoW, idempotency and history while rereading the live candidate at command time."
-    - "受影响 lifecycle test 已更新为断言退休 draft domain 不会恢复，定向与受影响文件回归均通过。"
-    - "May 31/June 1 内部转账现在由最早成员月份唯一拥有，相邻月份不重复。"
-  gaps_remaining:
-    - "Roadmap SC5 的 pushed main release 与 authenticated production correctness/isolation/P95 evidence 尚未执行。"
+    - "生产 main release 9aff73707 已部署，May 188500 候选、Page Audit、worker 隔离和 20 次 warm-read P95 均通过。"
+  gaps_remaining: []
   regressions: []
-gaps:
-  - truth: "Targeted local gates, one pushed `main` release and authenticated production probes prove correctness, isolation and sub-second warm reads without Redis or a new read model."
-    status: partial
-    reason: "本地 targeted gates 已通过，但本次明确禁止 push、deploy 和生产操作；因此 pushed main release、真实 188500、隔离/System Audit、queue/worker 和至少 20 次 sub-second warm-read P95 证据仍不存在。"
-    artifacts:
-      - path: ".planning/phases/35-bank-flow-rule-batch-live-candidates/35-01-SUMMARY.md"
-        issue: "production-validation 仍记录为 pending，未包含 pushed/deployed exact SHA 或认证生产探针结果。"
-      - path: "backend/src/fin_ops_platform/services/postgres_repositories/bank_flow_rule_batch_canonical_query.py"
-        issue: "性能合同仍需生产数据量下的认证 warm-read 采样；repository 读取月份窗口后由 application service 内存过滤、排序和分页。"
-    missing:
-      - "在获得授权后 push exact verified main SHA 并执行标准 deploy。"
-      - "执行认证生产只读 188500/Audit/旧 runtime 零引用/no-OA 隔离/queue-worker/System Audit 检查。"
-      - "记录至少 20 次 warm read 并证明 P95 < 1s；若失败则以 EXPLAIN/查询统计定位。"
+gaps: []
 ---
 
 # Phase 35: 流水规则批量处理实时统一事实源候选 Verification Report
 
 **Phase Goal:** Derive unsubmitted bank-flow rule candidates directly from current canonical bank, classification, rule, settings and active-relation facts on page access; preserve submitted/history facts and canonical relation writes; remove the asynchronous canonical-draft runtime chain.
 
-**Verified:** 2026-07-29T16:43:56Z  
-**Status:** gaps_found  
-**Re-verification:** Yes — after commits `4f5434576`, `f0e3b741f`, `c1fc045f2`, `3d5059d78`  
-**Examined range:** `eebfb699f..3d5059d78`
+**Verified:** 2026-07-29T17:45:00Z
+**Status:** passed
+**Re-verification:** Yes — after production root-cause fix `9aff73707`
+**Examined range:** `eebfb699f..9aff73707`
 
 ## Goal Achievement
 
@@ -45,13 +30,13 @@ gaps:
 | # | Truth | Status | Evidence |
 |---|---|---|---|
 | 1 | Unsubmitted candidates are live-derived in one canonical snapshot and never depend on a prewritten draft, worker, replay or cache. | ✓ VERIFIED | Direct canonical page/API/query path and retired runtime negative guards remain intact; quick regression checks pass. |
-| 2 | The known 188500 internal-transfer pair appears once in May with the correct two members and single-side amount. | ✓ VERIFIED（code-level） | Exact May test passes. May 31/June 1 test now returns one stable `188500.00` candidate owned by `2026-05`, and returns none for `2026-06`. |
+| 2 | The known 188500 internal-transfer pair appears once in May with the correct two members and single-side amount. | ✓ VERIFIED | Production May API returns exactly one `188500.00` candidate, `bank_flow_rule_batch_c701b64fff0b373f30a8`, with `txn_imported_0024` and `txn_imported_0057`; Bank Details reports both as `internal_transfer`. |
 | 3 | Submit/withdraw preserves the existing formal relation UoW, idempotency and history while rereading the live candidate at command time. | ✓ VERIFIED | `PostgresStateStore` creates one outer transaction, passes its `PostgresTransaction` to `PostgresWorkbenchRepository`, and both repository `run_in_transaction` calls directly reuse it because `PostgresTransaction` has no `transaction()` factory. Four mutation failure-injection cases prove zero committed relation/history/batch/event facts. |
 | 4 | Audit detects missing expected candidates, UI facets reflect actual candidates, and the canonical-draft owner/producer/event/deploy chain is deleted. | ✓ VERIFIED | Audit omission, runtime deletion, worker registry and no-OA isolation regression tests pass; frontend/UI path was unchanged by the four closure commits. |
-| 5 | Targeted local gates, one pushed `main` release and authenticated production probes prove correctness, isolation and sub-second warm reads without Redis or a new read model. | ✗ FAILED — RELEASE EVIDENCE PENDING | Local gates pass, but push/deploy/production probes are explicitly outside this re-verification and have not occurred. |
+| 5 | Targeted local gates, one pushed `main` release and authenticated production probes prove correctness, isolation and sub-second warm reads without Redis or a new read model. | ✓ VERIFIED | `9aff73707` pushed to `origin/main` and deployed as `main-9aff7370-20260730014104`; 20 authenticated warm reads were all HTTP 200 with p50 `354.487ms`, p95/max `456.474ms`; Page Audit is pass/fresh/drained. |
 | 6 | 不新增 Redis、read model、表、队列、worker 或缓存版本体系。 | ✓ VERIFIED | Closure commits only repair transaction ownership, local persistence, lifecycle test, cross-month matching and docs; no runtime infrastructure was added. |
 
-**Score:** 5/6 truths verified
+**Score:** 6/6 truths verified
 
 ## Closed Gap Verification
 
@@ -150,21 +135,29 @@ The regression proves:
 | eight exact closure tests | exact node IDs across Postgres/local/lifecycle/application service | `8 passed in 0.24s` | ✓ PASS |
 | four full affected test files | `pytest -q test_postgres_state_store.py test_state_store.py test_derived_data_lifecycle_service.py test_bank_flow_rule_batch_application_service.py` | `115 passed in 0.37s` | ✓ PASS |
 | Audit omission, old runtime deletion, worker registry and no-OA isolation | four exact node IDs | `4 passed in 0.93s` | ✓ PASS |
+| expanded affected backend regression | 15 bank-flow/state-store/Audit/runtime/no-OA test files | `462 passed, 1 skipped in 36.72s` | ✓ PASS |
+| frontend interaction regression | `BankFlowRuleBatchPage.test.tsx` | `30 passed` | ✓ PASS |
 | Python lint | `bash scripts/verify.sh lint` | `All checks passed!` | ✓ PASS |
 | docs verification | `bash scripts/verify.sh docs` | exit 0 | ✓ PASS |
 | diff whitespace | `git diff --check d3885d85b..HEAD` | exit 0 | ✓ PASS |
-| authenticated production correctness/performance | not run by explicit scope restriction | no evidence | ✗ PENDING |
+| authenticated production correctness | May unsubmitted + Bank Details + Page Audit | one `188500.00`/2-row candidate; both rows `internal_transfer`; Audit pass/fresh/drained with 0 issue | ✓ PASS |
+| authenticated production performance | 3 warmups + 20 measured May reads | HTTP 200; p50 `354.487ms`, p95/max `456.474ms`; all <800ms and <1s | ✓ PASS |
+| production runtime isolation | systemd state | retired bank-flow worker inactive/disabled; legacy no-OA worker active/enabled | ✓ PASS |
 
-No full workspace suite was rerun. Re-verification used the four complete affected backend test files plus exact cross-boundary isolation/Audit/runtime checks.
+No full workspace suite or browser E2E was rerun. Re-verification used the complete affected backend/API/runtime set, the focused frontend component suite, production build/deploy and authenticated read-only production probes.
 
 ## Probe Execution
 
-No checked-in `probe-*.sh` is declared for Phase 35. Push, deploy and authenticated production probes remain intentionally unexecuted.
+No checked-in `probe-*.sh` is declared for Phase 35. Production probes used the repository token loader plus read-only authenticated HTTP and systemd status checks; no real candidate was submitted or withdrawn.
 
 | Probe | Result | Status |
 |---|---|---|
 | Local structural and behavioral closure | 119 tests plus lint/docs/diff gates passed | ✓ PASS |
-| Production 188500/Audit/isolation/P95 closure | prohibited in this re-verification | ✗ PENDING |
+| Production release | `origin/main` `9aff73707`, release `main-9aff7370-20260730014104` | ✓ PASS |
+| Production 188500 | candidate `bank_flow_rule_batch_c701b64fff0b373f30a8`, rows `txn_imported_0024` / `txn_imported_0057`, amount `188500.00`, month `2026-05` | ✓ PASS |
+| Production Audit | `pass / fresh / drained`, 0 issue | ✓ PASS |
+| Production runtime isolation | retired bank-flow worker inactive/disabled; no-OA worker active/enabled | ✓ PASS |
+| Production P95 | 20/20 HTTP 200; p95/max `456.474ms` | ✓ PASS |
 
 ## Requirements Coverage
 
@@ -173,10 +166,10 @@ No checked-in `probe-*.sh` is declared for Phase 35. Push, deploy and authentica
 | Requirement | Status | Evidence |
 |---|---|---|
 | Roadmap SC1 | ✓ SATISFIED | direct canonical snapshot/no draft runtime |
-| Roadmap SC2 | ✓ SATISFIED（code-level） | May 188500 plus cross-month unique-owner regressions |
+| Roadmap SC2 | ✓ SATISFIED | May 188500 production candidate plus cross-month unique-owner regressions |
 | Roadmap SC3 | ✓ SATISFIED | one PostgreSQL UoW and four failure rollback proofs |
 | Roadmap SC4 | ✓ SATISFIED | Audit/UI/runtime removal regression |
-| Roadmap SC5 | ✗ PARTIAL | local gates pass; push/deploy/production/P95 absent |
+| Roadmap SC5 | ✓ SATISFIED | exact main release deployed; authenticated correctness, Audit, isolation and P95 evidence passed |
 | Plan no-new-runtime must-have | ✓ SATISFIED | no new infrastructure |
 
 ## Anti-Patterns Found
@@ -187,7 +180,7 @@ The previous nested/independent transaction anti-pattern and misleading cross-mo
 
 ## Remaining Risk
 
-The only remaining contract gap is release evidence. The canonical query still reads the bounded month window and performs candidate building/filtering/sorting/pagination in application memory. Local tests establish correctness but cannot establish production P95 under real row counts, category lateral joins and active-relation cardinality. SC5 therefore remains failed until the authorized exact-SHA deployment and authenticated warm-read measurements complete.
+The authorized real business candidate was not submitted or withdrawn; production mutation correctness therefore remains protected by local transaction/UoW, conflict and rollback tests rather than a mutation of the real `188500` facts. This is deliberate production safety, not a release blocker. Read performance passed the current data volume with substantial margin; future row-count growth should continue to be watched by the existing HTTP SLO tooling.
 
 ## Human Verification Required
 
@@ -195,11 +188,9 @@ None. The remaining item is objective production release/probe evidence, not sub
 
 ## Gaps Summary
 
-The code blockers from the previous verification are closed. Phase 35 is locally ready for the authorized release workflow, but the phase as a whole cannot be marked `passed` because its Roadmap contract explicitly includes a pushed `main` release and authenticated production correctness, isolation and sub-second warm-read proof.
-
-No later milestone phase exists to defer this item.
+The code, release and production evidence blockers are closed. Phase 35 passes all six observable truths with no Redis, new read model, queue or worker.
 
 ---
 
-_Verified: 2026-07-29T16:43:56Z_  
+_Verified: 2026-07-29T17:45:00Z_
 _Verifier: the agent (gsd-verifier)_
