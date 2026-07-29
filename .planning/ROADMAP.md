@@ -695,6 +695,6 @@ contracts against explicit production latency targets without adding another cac
 
 Plans:
 
-- [ ] 34-01-PLAN — Fix the shared repository binding, coalesce exact in-flight reads, run targeted gates, deploy once and close production evidence.
+- [x] 34-01-PLAN — Fix the shared repository binding, coalesce exact in-flight reads, run targeted gates, deploy once and close production evidence.
 
 ---

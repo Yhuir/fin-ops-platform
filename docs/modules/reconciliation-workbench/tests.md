@@ -229,3 +229,10 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_w
 - relation preview 必须保留首尾 fresh/version drift 门禁，但同一次 selection 只允许一次 generation proof；末次 freshness 的 active version 是结束 version 证据，不得再次执行等价 proof。`active_relations_for_row_ids` 必须走 active-only repository loader，不能为 active lookup 读取 relation history；withdraw restore preview 仍保留 history loader。
 - `tests/test_workbench_relation_command_repository_adapter.py::WorkbenchRelationCommandRepositoryAdapterTests::test_scoped_load_filters_in_memory_snapshot_when_repository_has_no_scope_boundary` 使用禁止 `snapshot()` 的 service，证明撤回 scoped read 直接调用既有 `snapshot_for_row_ids(...)`，只复制目标 relation/history，不重建全量进程内状态。
 - 本地 release gate：700 项定向 backend/deploy unittest、123 项 scoped Vitest、3 项 Chromium E2E、repository lint、docs gate 与 production build 全部通过。没有运行 pytest、完整 CI 或 183 项 Browser suite。
+
+## 2026-07-29 - Phase 34 最终验证
+
+- 最新后端根因修复的定向矩阵为 550 passed，覆盖 command adapter/service、pair relation service、write characterization、SQL runtime、鉴权/幂等、runtime boundary 与 relation repository。
+- 前端 combined-initial in-flight 合并由 `web/src/test/WorkbenchApi.test.ts` 保护；本轮后端-only scoped snapshot 修复未新增重复 UI 测试。
+- production release `main-632dd2aa-20260729153028` 的 Page Audit 为 `pass / fresh / drained`，issues 为空；20 次 gzip 样本的 combined initial、groups 首屏、confirm preview、withdraw preview、refresh status p95 分别为 `312.664/712.718/718.591/557.145/138.925ms`。
+- 未运行无关完整 CI 或浏览器套件。未执行真实生产 confirm/withdraw mutation：现有 scenario 不是 test-owned 且缺完整恢复检查点，不能为了测速修改真实财务关系。

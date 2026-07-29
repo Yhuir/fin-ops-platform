@@ -1409,3 +1409,10 @@
 - 生产认证采样中，撤回预检 56 个滚动样本的 request p50/p95 为 `770.082/1147.490ms`，其中数据库 p50 仅 `118.139ms`；主要耗时不在 SQL，而在默认 command adapter 先对进程内全部 relation/history 做 `snapshot()` 深复制，再重建一个临时 service，最后才截取目标 case。
 - 修复复用 `WorkbenchPairRelationService.snapshot_for_row_ids(...)` 这一既有 scoped 边界，直接从当前内存 owner 截取命中的 relation 和可恢复 history。删除全量 snapshot -> normalize -> scoped snapshot 的重复 CPU/内存路径；PostgreSQL scoped loader、撤回历史恢复、freshness/source-version gate、CAS、幂等、审计和 API shape 均不改变。
 - 不接入 Redis：该热点是同进程重复对象复制，不是可缓存的稳定查询；缓存会增加 relation version 失配和失效责任，不能替代当前 active-generation/read-model freshness 合同。
+
+## 2026-07-29 - Phase 34 生产性能闭环
+
+- release `main-632dd2aa-20260729153028` 已由正式部署入口激活；API、dispatcher 与 required workers active，关联台 Page Audit 为 `pass / fresh / drained`，issues 为空。
+- 浏览器等价 gzip 请求预热 2 次后各采样 20 次：combined initial p50/p95 `221.362/312.664ms`，paired groups 首屏 `629.546/712.718ms`，confirm preview `190.279/718.591ms`，withdraw preview `135.048/557.145ms`，refresh status `116.143/138.925ms`。所有交互链路满足 p95 `<=1000ms`。
+- 同一 withdraw preview 样例在修复前 p50/p95 为 `936.006/1216.494ms`；删除全量 snapshot 重建后分别下降约 `85.6%/54.2%`。App Health 服务端滚动窗口同样记录 withdraw preview p50/p95 `50.852/467.079ms`。
+- 生产只执行 fresh 读取和无副作用 preview；当前 scenario 缺少 `fixture_ownership=test_owned` 与完整恢复检查点，因此未对真实财务关系执行 mutation。CAS、幂等、审计、UoW、历史恢复和 zero fan-out 继续由定向回归保护。
