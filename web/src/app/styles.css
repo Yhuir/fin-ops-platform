@@ -19276,6 +19276,39 @@ body.column-layout-dragging {
   max-height: 480px;
 }
 
+.cost-finance-table--fit .finance-table__scroll {
+  overflow-x: hidden;
+}
+
+.cost-finance-table--fit .finance-table__content {
+  width: 100%;
+  min-width: 100%;
+}
+
+.cost-auto-load-status {
+  display: flex;
+  min-height: 30px;
+  align-items: center;
+  justify-content: center;
+  gap: var(--fp-space-2);
+  padding: 5px var(--fp-space-3);
+  border-top: 1px solid var(--fp-border-subtle);
+  color: var(--fp-text-muted);
+  background: var(--fp-surface-raised);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.cost-auto-load-status button {
+  padding: 2px 8px;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  color: var(--fp-accent);
+  font: inherit;
+  cursor: pointer;
+}
+
 .cost-table {
   width: 100%;
   border-collapse: collapse;
@@ -19359,7 +19392,7 @@ body.column-layout-dragging {
 }
 
 .cost-explorer-grid.project {
-  grid-template-columns: minmax(220px, 0.95fr) minmax(220px, 0.95fr) minmax(0, 1.45fr);
+  grid-template-columns: minmax(190px, 24fr) minmax(190px, 24fr) minmax(0, 52fr);
 }
 
 .cost-explorer-grid.expense {
@@ -19371,11 +19404,42 @@ body.column-layout-dragging {
 }
 
 @media (min-width: 1025px) {
+  .cost-analysis-layout.time-layout,
   .cost-explorer-grid.project,
   .cost-explorer-grid.expense,
   .cost-explorer-grid.bank-tag {
     height: max(560px, calc(100dvh - 240px));
     align-items: stretch;
+  }
+
+  .cost-analysis-layout.time-layout .cost-table-section {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-height: 0;
+  }
+
+  .cost-analysis-layout.time-layout .cost-table-shell,
+  .cost-analysis-layout.time-layout .cost-finance-table,
+  .cost-analysis-layout.time-layout .finance-table__scroll,
+  .cost-explorer-grid > .cost-explorer-lane {
+    min-height: 0;
+  }
+
+  .cost-analysis-layout.time-layout .cost-table-shell,
+  .cost-explorer-lane-table .cost-table-shell {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .cost-analysis-layout.time-layout .cost-table-shell,
+  .cost-analysis-layout.time-layout .cost-finance-table,
+  .cost-analysis-layout.time-layout .finance-table__scroll {
+    height: 100%;
+  }
+
+  .cost-analysis-layout.time-layout .finance-table__scroll {
+    max-height: none;
+    overflow-y: auto;
   }
 
   .cost-explorer-grid > .cost-explorer-lane {
@@ -19487,6 +19551,92 @@ body.column-layout-dragging {
 
 .cost-project-scope-actions {
   align-items: flex-start;
+}
+
+.cost-view-search {
+  width: clamp(210px, 18vw, 280px);
+  min-width: 190px;
+}
+
+.cost-view-search-group {
+  display: flex;
+  width: 100%;
+  min-height: 42px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 8px 0 11px;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  color: var(--fp-text-muted);
+  transition:
+    border-color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
+}
+
+.cost-view-search-group:hover {
+  border-color: var(--fp-border-strong);
+}
+
+.cost-view-search-group[data-focus-within] {
+  border-color: var(--fp-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-accent) 14%, transparent);
+}
+
+.cost-view-search-icon,
+.cost-view-search-spinner {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+  color: var(--fp-accent);
+}
+
+.cost-view-search-input {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--fp-text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.cost-view-search-input::placeholder {
+  color: var(--fp-text-muted);
+  opacity: 1;
+}
+
+.cost-view-search-clear {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  color: var(--fp-text-muted);
+}
+
+.cost-tag-counts {
+  display: flex;
+  align-items: center;
+  gap: 5px 9px;
+  flex-wrap: wrap;
+}
+
+.cost-tag-count {
+  font-family: var(--fp-font-data);
+  font-weight: 900;
+}
+
+.cost-tag-count--expense {
+  color: var(--fp-warning);
+}
+
+.cost-tag-count--income {
+  color: var(--fp-success);
 }
 
 .cost-scope-controls {

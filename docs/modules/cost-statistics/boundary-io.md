@@ -37,10 +37,14 @@ HTTP GET
 - 页面首次访问和浏览器刷新走同一条链。
 - 首次 explorer 请求读取完整 canonical snapshot 并返回全局 `statistics`；同一页面后续视图、范围和下钻请求发送 `include_statistics=false`，避免重复计算不变的页头统计。
 - `include_statistics=false` 且范围不是 `all` 时，repository 用 `bank_transactions.txn_month` 下推范围。`time|bank_tag` 不读取 OA 配对关系；`project|bank|expense_type` 只读取命中银行流水的 active relation，并扩展该 relation 的全部银行/OA 成员，保证跨月份配对分配语义不变。
+- explorer 的 `query` 在 service 中折叠空白并限制为 200 字符，写入 cursor identity；policy 先过滤当前视图事实行，再计算 summary、facets、row count 和分页。`project|bank|expense_type` 搜索域只包含 OA 配对 allocation，`time|bank_tag` 搜索域只包含 canonical 银行事实。
 - 前端将后续请求限制在内容区：范围/视图只替换统计 surface，左栏选择只加载中/右栏，中栏选择只加载右栏；只有首次数据尚未验证时才使用页面内交互锁。
+- 前端搜索使用 IME-safe 200ms debounce 和请求取消；搜索、下钻和时间范围变化都只替换受影响内容区。明细表在内部滚动容器距底部 160px 内复用现有 cursor 追加请求，正常态无手动加载按钮，下一页失败保留已有 rows 并提供局部重试。
 - API 失败时明确返回错误；用户再次刷新会重新打开数据库快照并完整重试。
 - `CostStatisticsPolicy` 将支付申请作为一个分配单元，将日常报销的 canonical `expense_items` 作为付款明细分配单元；仅在单流水与全部分配金额按分精确相等时拆分。任何歧义都不猜测，流水金额只计一次并归入共同维度或 `未归集项目` / `未分类`。
 - `project / bank / expense_type`、transaction detail 和导出共享同一分配结果；成本统计链路不生成 `多项目` / `多费用类型`。
+- `time` 行只映射银行交易时间、对方户名、标签、方向、金额、银行账户和流水摘要，不用 OA 占位值伪装项目或费用类型。
+- 主标签和子标签复用同一个“仅支出、混合、仅收入、零金额”排序键；同组再按总金额、笔数和标签名稳定排序。
 - 标签规则保存只修改 App Settings；保存成功后的页面 reload 重新应用最新规则。
 - 不产生 `cost_statistics.read_model.refresh`、dirty scope、readiness 或 Cost worker I/O。
 
@@ -76,5 +80,6 @@ migration `0126` 负责停止遗留运行时事件并删除旧表。除该迁移
 - 分配计算按 relation 成员和 OA 付款明细线性遍历，不新增数据库查询或逐明细 I/O。
 - OA 查询只映射成本 policy 消费的父单字段、明细字段和明细金额，不递归复制附件/发票树；附件仍由其 owner 页面读取，不进入 Cost 请求内存。
 - 分页、详情和导出保持现有上限；导出仍受 `COST_STATISTICS_EXPORT_ROW_LIMIT` 保护。
+- 查询只对已加载 snapshot 做一次线性文本匹配，不新增 SQL、cache、worker 或逐行 I/O；前端搜索取消过期请求，避免竞态回写。
 - 本次不承诺 3 秒硬 SLO，但候选发布必须记录各视图多次请求的 p50/p95，并确认无 Cost queue/worker I/O。
 - 已测的后续请求热点只在 repository 内做等价 scope/identity 下推；不得恢复 Cost read model、添加页面 cache 或建立页面间依赖。

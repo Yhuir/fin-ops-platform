@@ -1,4 +1,5 @@
 import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type SetStateAction } from "react";
+import { SearchField, Spinner } from "@heroui/react";
 import { useNavigate } from "react-router-dom";
 
 import { formatMonthLabel } from "../components/MonthPicker";
@@ -86,6 +87,9 @@ function getExplorerTransitionScope(
   const previous = JSON.parse(previousRequestKey) as CostStatisticsExplorerPageRequest;
   const next = JSON.parse(nextRequestKey) as CostStatisticsExplorerPageRequest;
   if (previous.scope !== next.scope || previous.view !== next.view || previous.projectScope !== next.projectScope) {
+    return "surface";
+  }
+  if (previous.query !== next.query) {
     return "surface";
   }
   if (
@@ -206,6 +210,45 @@ function CostSurfaceSkeleton({ loading }: { loading: boolean }) {
       <span />
       <span />
     </div>
+  );
+}
+
+function CostViewSearch({
+  composing,
+  pending,
+  value,
+  onChange,
+  onCompositionChange,
+}: {
+  composing: boolean;
+  pending: boolean;
+  value: string;
+  onChange: (value: string) => void;
+  onCompositionChange: (value: boolean) => void;
+}) {
+  return (
+    <SearchField
+      aria-label="搜索当前成本统计表格"
+      className="cost-view-search"
+      maxLength={200}
+      onChange={onChange}
+      value={value}
+    >
+      <SearchField.Group className="cost-view-search-group">
+        {pending && !composing ? (
+          <Spinner aria-label="搜索中" className="cost-view-search-spinner" color="current" size="sm" />
+        ) : (
+          <SearchField.SearchIcon className="cost-view-search-icon" />
+        )}
+        <SearchField.Input
+          className="cost-view-search-input"
+          onCompositionEnd={() => onCompositionChange(false)}
+          onCompositionStart={() => onCompositionChange(true)}
+          placeholder="搜索当前表格"
+        />
+        <SearchField.ClearButton aria-label="清空搜索" className="cost-view-search-clear" />
+      </SearchField.Group>
+    </SearchField>
   );
 }
 
@@ -470,6 +513,7 @@ export default function CostStatisticsPage() {
   const [transactionDetail, setTransactionDetail] = useState<CostTransactionDetail | null>(null);
   const [isExplorerLoading, setIsExplorerLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [isExportReferenceLoading, setIsExportReferenceLoading] = useState(false);
   const [detailLoadingMessage, setDetailLoadingMessage] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -486,6 +530,9 @@ export default function CostStatisticsPage() {
   const [isTagRulesLoading, setIsTagRulesLoading] = useState(false);
   const [isTagRulesSaving, setIsTagRulesSaving] = useState(false);
   const [tagRulesError, setTagRulesError] = useState<string | null>(null);
+  const [searchDraft, setSearchDraft] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isSearchComposing, setIsSearchComposing] = useState(false);
 
   const [timeRangeMode, setTimeRangeMode] = useState<ExportRangeMode>("month");
   const [timeMonth, setTimeMonth] = useState(DEFAULT_MONTH);
@@ -608,6 +655,7 @@ export default function CostStatisticsPage() {
       ? { bankTagPrimaryLabel: selectedBankTagPrimaryLabel }
       : {}),
     ...(viewMode === "bankTag" && selectedBankTagSubLabel ? { bankTagSubLabel: selectedBankTagSubLabel } : {}),
+    ...(searchQuery ? { query: searchQuery } : {}),
   };
   const explorerRequestKey = JSON.stringify(explorerRequest);
   const statisticsRefreshKey = `${activationGeneration}:${domainRefreshNonce}`;
@@ -654,6 +702,32 @@ export default function CostStatisticsPage() {
       setSelectedBankTagSubLabel(null);
     }
   }, [resetDetailSelection]);
+
+  useEffect(() => {
+    if (!active || isSearchComposing) {
+      return undefined;
+    }
+    const timeoutId = window.setTimeout(() => {
+      const normalizedQuery = searchDraft.trim().replace(/\s+/g, " ");
+      if (normalizedQuery === searchQuery) {
+        return;
+      }
+      loadMoreRequestRef.current?.abort();
+      loadMoreRequestRef.current = null;
+      setIsLoadingMore(false);
+      setLoadMoreError(null);
+      resetExplorerSelection(viewMode);
+      setSearchQuery(normalizedQuery);
+    }, 200);
+    return () => window.clearTimeout(timeoutId);
+  }, [
+    active,
+    isSearchComposing,
+    resetExplorerSelection,
+    searchDraft,
+    searchQuery,
+    viewMode,
+  ]);
 
   const updateScopeSelection = useCallback((
     targetView: CostViewMode,
@@ -806,6 +880,7 @@ export default function CostStatisticsPage() {
       loadMoreRequestRef.current?.abort();
       loadMoreRequestRef.current = null;
       setIsLoadingMore(false);
+      setLoadMoreError(null);
       setLoadError(null);
       setExportFeedback(null);
       resetDetailSelection();
@@ -864,7 +939,7 @@ export default function CostStatisticsPage() {
     const controller = new AbortController();
     loadMoreRequestRef.current = controller;
     setIsLoadingMore(true);
-    setLoadError(null);
+    setLoadMoreError(null);
     try {
       const request = JSON.parse(explorerRequestKey) as CostStatisticsExplorerPageRequest;
       const nextPage = await fetchCostStatisticsExplorerPage({
@@ -889,7 +964,7 @@ export default function CostStatisticsPage() {
         : current);
     } catch (caught) {
       if (!controller.signal.aborted) {
-        setLoadError(getCostStatisticsLoadErrorMessage(caught));
+        setLoadMoreError(getCostStatisticsLoadErrorMessage(caught));
       }
     } finally {
       if (loadMoreRequestRef.current === controller) {
@@ -1161,7 +1236,11 @@ export default function CostStatisticsPage() {
     exportReferenceRequestRef.current = null;
     setIsExportReferenceLoading(false);
     setLoadError(null);
+    setLoadMoreError(null);
     setExportFeedback(null);
+    setSearchDraft("");
+    setSearchQuery("");
+    setIsSearchComposing(false);
     resetExplorerSelection(nextViewMode);
     setTimeScopePanel(null);
     setProjectScopePanel(null);
@@ -1525,8 +1604,14 @@ export default function CostStatisticsPage() {
   const timeColumns = useMemo<CostStatisticsTableColumn<CostTimeRow>[]>(
     () => [
       { key: "tradeTime", header: "时间", width: 170, render: (row) => formatCostTradeTime(row.tradeTime) },
-      { key: "projectName", header: "项目名", flex: 1.4, render: (row) => row.projectName },
-      { key: "expenseType", header: "费用类型", width: 150, render: (row) => row.expenseType },
+      { key: "counterpartyName", header: "对方户名", flex: 1.1, render: (row) => row.counterpartyName || "--" },
+      {
+        key: "bankTag",
+        header: "流水标签",
+        flex: 0.8,
+        getTextValue: (row) => row.bankTagLabelPath.join(" / "),
+        render: (row) => row.bankTagLabelPath.join(" / ") || "未标记",
+      },
       {
         key: "amount",
         header: "金额",
@@ -1539,7 +1624,7 @@ export default function CostStatisticsPage() {
           toneByDirection: true,
         }),
       },
-      { key: "expenseContent", header: "费用内容", flex: 1.2, render: (row) => row.expenseContent },
+      { key: "expenseContent", header: "流水摘要", flex: 1.25, render: (row) => row.expenseContent || row.remark || "--" },
     ],
     [],
   );
@@ -1584,6 +1669,22 @@ export default function CostStatisticsPage() {
     ?? selectedBankTransactionId
     ?? selectedExpenseTransactionId
     ?? selectedBankTagTransactionId;
+  const costViewSearch = (
+    <CostViewSearch
+      composing={isSearchComposing}
+      pending={isExplorerLoading || searchDraft.trim().replace(/\s+/g, " ") !== searchQuery}
+      value={searchDraft}
+      onChange={setSearchDraft}
+      onCompositionChange={setIsSearchComposing}
+    />
+  );
+  const autoLoadTableProps = {
+    fitContainer: true,
+    hasNextPage: Boolean(explorerData?.nextCursor),
+    loadingMore: isLoadingMore,
+    loadMoreError,
+    onRequestNextPage: () => void loadMoreExplorerRows(),
+  };
   const isExportActionBusy = isExportReferenceLoading || isExporting || isPreviewLoading || Boolean(detailLoadingMessage);
   const visibleStatistics = pageStatistics;
   const titleAccessory = (
@@ -1789,6 +1890,7 @@ export default function CostStatisticsPage() {
                       </div>
 	                    </div>
 	                    <div className="cost-section-heading-actions cost-project-scope-actions">
+                        {costViewSearch}
 	                      <div ref={scopeControlsRef} className="cost-scope-controls">
 	                        <ScopeRangePicker
 	                          ariaLabel="时间统计时间范围"
@@ -1816,6 +1918,7 @@ export default function CostStatisticsPage() {
                       emptyLabel="当前时间范围没有收入或支出流水。"
                       onRowClick={(row) => void openTransactionDetail(row, "time")}
                       getRowActionLabel={(row) => `查看流水 ${row.transactionId}`}
+                      {...autoLoadTableProps}
                     />
                   )}
                 </section>
@@ -1830,6 +1933,7 @@ export default function CostStatisticsPage() {
                     <DirectionAmount amount={projectTotalAmount} label="支出金额" tone="expense" />
 	                  </div>
 	                  <div className="cost-section-heading-actions cost-project-scope-actions">
+                      {costViewSearch}
 	                    <div ref={scopeControlsRef} className="cost-scope-controls">
 	                      <ScopeRangePicker
 	                        ariaLabel="项目统计时间范围"
@@ -1915,6 +2019,7 @@ export default function CostStatisticsPage() {
                         onRowClick={(row) => void openTransactionDetail(row, "project")}
                         getRowActionLabel={(row) => `查看流水 ${row.transactionId}`}
                         emptyLabel="该费用类型下暂无流水。"
+                        {...autoLoadTableProps}
                       />
                     ) : <div className="cost-explorer-empty" />}
                   </section>
@@ -1931,6 +2036,7 @@ export default function CostStatisticsPage() {
                     <DirectionAmount amount={bankTotalAmount} label="支出金额" tone="expense" />
 	                  </div>
 	                  <div className="cost-section-heading-actions cost-project-scope-actions">
+                      {costViewSearch}
 	                    <div ref={scopeControlsRef} className="cost-scope-controls">
 	                      <ScopeRangePicker
 	                        ariaLabel="银行统计时间范围"
@@ -2014,6 +2120,7 @@ export default function CostStatisticsPage() {
                         onRowClick={(row) => void openTransactionDetail(row, "bank")}
                         getRowActionLabel={(row) => `查看流水 ${row.transactionId}`}
                         emptyLabel="该项目下暂无流水。"
+                        {...autoLoadTableProps}
                       />
                     ) : <div className="cost-explorer-empty" />}
                   </section>
@@ -2030,6 +2137,7 @@ export default function CostStatisticsPage() {
                     <DirectionAmount amount={expenseTypeTotalAmount} label="支出金额" tone="expense" />
 	                  </div>
 	                  <div className="cost-section-heading-actions cost-project-scope-actions">
+                      {costViewSearch}
 	                    <div ref={scopeControlsRef} className="cost-scope-controls">
 	                      <ScopeRangePicker
 	                        ariaLabel="OA费用类型统计时间范围"
@@ -2090,6 +2198,7 @@ export default function CostStatisticsPage() {
                         onRowClick={(row) => void openTransactionDetail(row, "expenseType")}
                         getRowActionLabel={(row) => `查看流水 ${row.transactionId}`}
                         emptyLabel="该费用类型下暂无流水。"
+                        {...autoLoadTableProps}
                       />
                     ) : <div className="cost-explorer-empty" />}
                   </section>
@@ -2109,6 +2218,7 @@ export default function CostStatisticsPage() {
                     </div>
                   </div>
                   <div className="cost-section-heading-actions cost-project-scope-actions">
+                    {costViewSearch}
                     <div ref={scopeControlsRef} className="cost-scope-controls">
                       <ScopeRangePicker
                         ariaLabel="流水标签统计时间范围"
@@ -2144,7 +2254,11 @@ export default function CostStatisticsPage() {
                     }}
                     renderPrimary={(row) => row.primaryLabel}
                     renderSecondary={(row) => (
-                      `支出 ${row.expenseTransactionCount} 笔 / 收入 ${row.incomeTransactionCount} 笔 / ${row.subTagCount} 个子标签`
+                      <span className="cost-tag-counts">
+                        <span>支出 <strong className="cost-tag-count cost-tag-count--expense">{row.expenseTransactionCount}</strong> 笔</span>
+                        <span>收入 <strong className="cost-tag-count cost-tag-count--income">{row.incomeTransactionCount}</strong> 笔</span>
+                        <span>{row.subTagCount} 个子标签</span>
+                      </span>
                     )}
                     renderMeta={(row) => (
                       <div className="cost-direction-meta">
@@ -2167,7 +2281,12 @@ export default function CostStatisticsPage() {
                       setTransactionDetail(null);
                     }}
                     renderPrimary={(row) => row.subLabel}
-                    renderSecondary={(row) => `支出 ${row.expenseTransactionCount} 笔 / 收入 ${row.incomeTransactionCount} 笔`}
+                    renderSecondary={(row) => (
+                      <span className="cost-tag-counts">
+                        <span>支出 <strong className="cost-tag-count cost-tag-count--expense">{row.expenseTransactionCount}</strong> 笔</span>
+                        <span>收入 <strong className="cost-tag-count cost-tag-count--income">{row.incomeTransactionCount}</strong> 笔</span>
+                      </span>
+                    )}
                     renderMeta={(row) => (
                       <div className="cost-direction-meta">
                         <DirectionAmount amount={row.expenseAmount} hideZeroValue label="支出" tone="expense" />
@@ -2194,23 +2313,12 @@ export default function CostStatisticsPage() {
                         onRowClick={(row) => void openTransactionDetail(row, "bankTag")}
                         getRowActionLabel={(row) => `查看流水 ${row.transactionId}`}
                         emptyLabel="该流水标签下暂无流水。"
+                        {...autoLoadTableProps}
                       />
                     ) : <div className="cost-explorer-empty" />}
                   </section>
                 </div>
                 )}
-              </div>
-            ) : null}
-            {explorerData.nextCursor ? (
-              <div className="cost-load-more">
-                <button
-                  className="cost-export-button"
-                  type="button"
-                  disabled={isLoadingMore}
-                  onClick={() => void loadMoreExplorerRows()}
-                >
-                  {isLoadingMore ? "正在加载更多..." : `加载更多（已显示 ${explorerData.rows.length} / ${explorerData.rowCount}）`}
-                </button>
               </div>
             ) : null}
           </>

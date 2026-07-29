@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 
 import BankAccountValue from "../BankAccountValue";
 import DirectionTag from "../DirectionTag";
@@ -40,6 +40,11 @@ type CostStatisticsTableProps<Row extends object> = {
   emptyLabel?: string;
   onRowClick?: (row: Row) => void;
   getRowActionLabel?: (row: Row) => string;
+  fitContainer?: boolean;
+  hasNextPage?: boolean;
+  loadingMore?: boolean;
+  loadMoreError?: string | null;
+  onRequestNextPage?: () => void;
 };
 
 export default function CostStatisticsTable<Row extends object>({
@@ -50,12 +55,53 @@ export default function CostStatisticsTable<Row extends object>({
   emptyLabel = "当前视图暂无数据。",
   onRowClick,
   getRowActionLabel,
+  fitContainer = false,
+  hasNextPage = false,
+  loadingMore = false,
+  loadMoreError,
+  onRequestNextPage,
 }: CostStatisticsTableProps<Row>) {
   const minWidth = columns.reduce((total, column) => total + (column.width ?? (column.flex ? 180 : 140)), 0);
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const requestNextPageRef = useRef(onRequestNextPage);
+  requestNextPageRef.current = onRequestNextPage;
+
+  useEffect(() => {
+    const scrollElement = shellRef.current?.querySelector<HTMLDivElement>(".finance-table__scroll");
+    if (
+      !scrollElement
+      || rows.length === 0
+      || !hasNextPage
+      || loadingMore
+      || loadMoreError
+    ) {
+      return undefined;
+    }
+    let requested = false;
+    const requestIfNearBottom = () => {
+      const remaining = scrollElement.scrollHeight
+        - scrollElement.scrollTop
+        - scrollElement.clientHeight;
+      if (!requested && remaining <= 160) {
+        requested = true;
+        requestNextPageRef.current?.();
+      }
+    };
+    scrollElement.addEventListener("scroll", requestIfNearBottom, { passive: true });
+    const frameId = window.requestAnimationFrame(requestIfNearBottom);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      scrollElement.removeEventListener("scroll", requestIfNearBottom);
+    };
+  }, [hasNextPage, loadMoreError, loadingMore, rows.length]);
 
   return (
-    <div className="cost-table-shell cost-finance-table-shell">
-      <FinanceTable ariaLabel={ariaLabel} className="cost-finance-table" minWidth={Math.max(720, minWidth)}>
+    <div ref={shellRef} className="cost-table-shell cost-finance-table-shell">
+      <FinanceTable
+        ariaLabel={ariaLabel}
+        className={fitContainer ? "cost-finance-table cost-finance-table--fit" : "cost-finance-table"}
+        minWidth={fitContainer ? "100%" : Math.max(720, minWidth)}
+      >
         <FinanceTableHeader>
           {columns.map((column, columnIndex) => (
             <FinanceTableColumn
@@ -126,6 +172,18 @@ export default function CostStatisticsTable<Row extends object>({
           })}
         </FinanceTableBody>
       </FinanceTable>
+      {loadingMore || loadMoreError ? (
+        <div aria-live="polite" className="cost-auto-load-status">
+          {loadMoreError ? (
+            <>
+              <span>{loadMoreError}</span>
+              <button onClick={onRequestNextPage} type="button">重试</button>
+            </>
+          ) : (
+            <span>正在加载更多流水…</span>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { vi } from "vitest";
 
 import { AppChromeProvider } from "../contexts/AppChromeContext";
+import CostStatisticsTable from "../components/cost-statistics/CostStatisticsTable";
 import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
 import type { SessionPayload } from "../features/session/api";
@@ -124,6 +125,26 @@ async function chooseScopeOption(user: ReturnType<typeof userEvent.setup>, trigg
 }
 
 describe("Cost statistics page", () => {
+  test("loads the next page near the table bottom and keeps retry local", async () => {
+    const user = userEvent.setup();
+    const onRequestNextPage = vi.fn();
+    const props = {
+      ariaLabel: "自动加载测试表",
+      columns: [{ key: "label", header: "内容", render: (row: { id: string }) => row.id }],
+      rows: [{ id: "row-1" }],
+      getRowKey: (row: { id: string }) => row.id,
+      hasNextPage: true,
+      onRequestNextPage,
+    };
+    const rendered = render(<CostStatisticsTable {...props} />);
+
+    await waitFor(() => expect(onRequestNextPage).toHaveBeenCalledTimes(1));
+
+    rendered.rerender(<CostStatisticsTable {...props} loadMoreError="下一页加载失败" />);
+    await user.click(screen.getByRole("button", { name: "重试" }));
+    expect(onRequestNextPage).toHaveBeenCalledTimes(2);
+  });
+
   test("locks compact premium surface and motion styling contracts", () => {
     const css = readFileSync("src/app/styles.css", "utf8");
 
@@ -206,6 +227,12 @@ describe("Cost statistics page", () => {
     expect(document.querySelector(".cost-page .stat-card")).toBeNull();
     const timeGrid = await screen.findByRole("grid", { name: "按时间统计表" });
     expectProjectCostTable("按时间统计表");
+    expect(within(timeGrid).getByRole("columnheader", { name: "时间" })).toBeInTheDocument();
+    expect(within(timeGrid).getByRole("columnheader", { name: "对方户名" })).toBeInTheDocument();
+    expect(within(timeGrid).getByRole("columnheader", { name: "流水标签" })).toBeInTheDocument();
+    expect(within(timeGrid).getByRole("columnheader", { name: "流水摘要" })).toBeInTheDocument();
+    expect(within(timeGrid).queryByRole("columnheader", { name: "项目名" })).not.toBeInTheDocument();
+    expect(within(timeGrid).queryByRole("columnheader", { name: "费用类型" })).not.toBeInTheDocument();
     expect(await within(timeGrid).findByRole("button", { name: "查看流水 cost-txn-003" })).toBeInTheDocument();
     expect(within(timeGrid).queryByRole("button", { name: "查看流水 cost-txn-004" })).not.toBeInTheDocument();
     expect(within(timeGrid).getByText("2026-03-10 21:27:55")).toBeInTheDocument();
@@ -218,6 +245,7 @@ describe("Cost statistics page", () => {
     expect(await within(timeGrid).findByRole("button", { name: "查看流水 cost-income-001" })).toBeInTheDocument();
     expect(within(timeGrid).getByText("2,000.00").closest(".money-cell-value")).toHaveClass("cost-flow-amount--income");
     expect(screen.getByRole("button", { name: "时间统计时间范围：2026年3月" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /加载更多/ })).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&page_size=50",
       expect.any(Object),
@@ -237,6 +265,28 @@ describe("Cost statistics page", () => {
       "/api/cost-statistics/explorer?scope=2026-04&view=time&project_scope=active&page_size=50",
       expect.any(Object),
     );
+  });
+
+  test("searches only the active view without refreshing the page chrome", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+
+    renderCostStatisticsPage();
+
+    expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
+    const heading = screen.getByRole("heading", { name: "成本统计" });
+    await user.type(screen.getByRole("searchbox", { name: "搜索当前成本统计表格" }), "昆明设备");
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&query=${encodeURIComponent("昆明设备")}&page_size=50`,
+        expect.any(Object),
+      );
+    });
+    expect(heading).toBeInTheDocument();
+    expect(screen.queryByTestId("cost-statistics-interaction-overlay")).not.toBeInTheDocument();
+    expect(screen.getByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
   });
 
   test("closes tag rules drawer after canonical save without waiting for a read model barrier", async () => {
@@ -569,7 +619,12 @@ describe("Cost statistics page", () => {
     expect(screen.getByLabelText("支出金额 13,360.00")).toHaveClass("cost-direction-amount--expense");
     expect(screen.getByLabelText("收入金额 2,000.00")).toHaveClass("cost-direction-amount--income");
     expect(within(primaryLane as HTMLElement).queryByText(/%$/)).not.toBeInTheDocument();
-    expect(within(primaryLane as HTMLElement).getByText("支出 0 笔 / 收入 1 笔 / 1 个子标签")).toBeInTheDocument();
+    const incomeCountRow = within(primaryLane as HTMLElement).getByRole("button", { name: /经营收入/ });
+    expect(incomeCountRow).toHaveTextContent("支出 0 笔");
+    expect(incomeCountRow).toHaveTextContent("收入 1 笔");
+    expect(incomeCountRow).toHaveTextContent("1 个子标签");
+    expect(incomeCountRow.querySelector(".cost-tag-count--expense")).toHaveTextContent("0");
+    expect(incomeCountRow.querySelector(".cost-tag-count--income")).toHaveTextContent("1");
     const incomeOnlyRow = within(primaryLane as HTMLElement).getByRole("button", { name: /经营收入/ });
     expect(
       Array.from(incomeOnlyRow.querySelectorAll(".cost-direction-amount-label")).map((node) => node.textContent),

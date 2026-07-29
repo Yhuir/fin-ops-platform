@@ -35,3 +35,12 @@
 - explorer route/service 删除从未命中的 ETag/304 占位合同，响应继续使用 `private, no-cache` 并每次读取当前事实源。
 - 时间范围选择在一次 session state 更新中同时提交 mode/year/month，并在发请求前清除下游选择；项目、银行、OA 费用类型、标签视图不再先携带旧选择请求一次、随后再补发清理后的请求。
 - 页面切换和三栏下钻继续局部加载；同一次用户操作最多产生一个 explorer 请求，不清空整页。
+
+## 2026-07-29：当前视图搜索、真实时间字段与自动分页
+
+- explorer 增加一个最长 200 字符的规范化 `query`，并将其绑定 cursor；policy 在聚合、facets、summary 和分页之前过滤当前视图事实行，不增加 repository 查询。
+- `project / bank / expense_type` 只搜索 OA 配对 allocation；`time / bank_tag` 只搜索完整 canonical 银行事实。`time` 不再渲染“未配对OA / 未分类”占位字段。
+- 主标签和子标签复用同一个仅支出、混合、仅收入、零金额排序键；UI 将支出放在收入上方，用独立笔数字段和既有方向颜色表达。
+- 五个视图复用一个紧凑搜索框，使用 200ms debounce、IME composition 保护和 AbortController；项目/银行三栏采用 `24% / 24% / 52%`，右侧明细禁止横向滚动。
+- 删除手动“加载更多”按钮和死样式；复用现有 cursor API，在表格原生滚动容器接近底部时自动追加，失败只在当前明细区重试。
+- 保持 canonical API 直读，不引入 Redis、read model、worker、新 endpoint、依赖或跨页面 I/O。

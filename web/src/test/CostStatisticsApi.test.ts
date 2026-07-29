@@ -109,6 +109,7 @@ describe("Cost statistics export API", () => {
       view: "project",
       projectScope: "all",
       projectName: "云南溯源科技",
+      query: "PLC",
       pageSize: 50,
       includeStatistics: false,
     });
@@ -124,7 +125,7 @@ describe("Cost statistics export API", () => {
     });
 
     expect(global.fetch).toHaveBeenCalledWith(
-      `/api/cost-statistics/explorer?scope=all&view=project&project_scope=all&project_name=${encodeURIComponent("云南溯源科技")}&page_size=50&include_statistics=false`,
+      `/api/cost-statistics/explorer?scope=all&view=project&project_scope=all&project_name=${encodeURIComponent("云南溯源科技")}&query=PLC&page_size=50&include_statistics=false`,
       expect.any(Object),
     );
     expect(global.fetch).toHaveBeenCalledWith(

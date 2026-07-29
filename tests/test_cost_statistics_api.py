@@ -296,6 +296,40 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertIsNone(payload["statistics"])
         self.assertEqual(payload["row_count"], 1)
 
+    def test_search_uses_current_view_canonical_fields_before_aggregation(
+        self,
+    ) -> None:
+        status, time_payload = self._json(
+            "/api/cost-statistics/explorer?scope=2026-03&view=time"
+            "&query=昆明设备"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(time_payload["row_count"], 1)
+        self.assertEqual(time_payload["summary"]["total_amount"], "1,250.00")
+        self.assertEqual(time_payload["rows"][0]["project_name"], "")
+        self.assertEqual(time_payload["rows"][0]["expense_type"], "")
+
+        status, expense_payload = self._json(
+            "/api/cost-statistics/explorer?scope=2026-03&view=expense_type"
+            "&project_scope=all&query=PLC"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            [
+                row["expense_type"]
+                for row in expense_payload["facets"]["expense_types"]
+            ],
+            ["设备货款及材料费"],
+        )
+
+        status, empty_payload = self._json(
+            "/api/cost-statistics/explorer?scope=2026-03&view=expense_type"
+            "&project_scope=all&query=不存在的内容"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(empty_payload["summary"]["total_amount"], "0.00")
+        self.assertEqual(empty_payload["facets"]["expense_types"], [])
+
     def test_invalid_query_contracts_fail_closed(self) -> None:
         cases = (
             (
@@ -314,6 +348,11 @@ class CostStatisticsApiTests(unittest.TestCase):
             (
                 "/api/cost-statistics/explorer"
                 "?scope=2026-03&view=time&include_statistics=maybe",
+                "invalid_cost_statistics_query",
+            ),
+            (
+                "/api/cost-statistics/explorer?scope=2026-03&view=time"
+                f"&query={'x' * 201}",
                 "invalid_cost_statistics_query",
             ),
         )

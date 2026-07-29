@@ -65,8 +65,10 @@
 
 `GET /api/cost-statistics/explorer`
 
-- query 保持 `scope`、`view`、`project_scope`、筛选、cursor 与 `page_size` 合同。
+- query 保持 `scope`、`view`、`project_scope`、筛选、cursor 与 `page_size` 合同；可选 `query` 会折叠空白并限制为 200 字符。
 - 每个请求从一个 PostgreSQL `REPEATABLE READ READ ONLY` snapshot 读取 canonical 银行流水、OA、正式关系、标签和设置，再返回 `summary`、`statistics`、`facets`、`rows`、`row_count` 与 `next_cursor`。
+- `query` 只搜索当前 view 的事实域，并在 summary、facets、row count 和 cursor 分页之前生效；cursor identity 必须包含规范化 query，禁止跨搜索条件复用。
+- `project|bank|expense_type` 只搜索 OA 配对 allocation；`time|bank_tag` 只搜索 canonical 银行事实。`time` 行返回真实银行对手方、标签和摘要，不用 OA 占位项目/费用类型。
 - 成功固定返回 `200`；不返回 `read_model_status`、`statistics_status`、Cost scope/version，也不返回 `202/409 read model not fresh`。
 - 数据库或业务计算失败必须返回明确错误；浏览器刷新会重新执行完整请求，不读取旧 payload 伪装成功。
 

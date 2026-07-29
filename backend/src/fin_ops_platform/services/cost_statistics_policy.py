@@ -102,6 +102,11 @@ class CostStatisticsPolicy:
                 scope_value=scope_value,
             )
         ]
+        query = _clean_text(filters.get("query")).casefold()
+        if query:
+            base_rows = [
+                row for row in base_rows if _row_matches_query(row, query)
+            ]
         base_rows.sort(key=_row_sort_key, reverse=True)
         project_name = _clean_text(filters.get("project_name"))
         expense_type = _clean_text(filters.get("expense_type"))
@@ -499,13 +504,13 @@ def _serialize_bank_row(row: dict[str, Any]) -> dict[str, Any]:
         "month": trade_time[:7],
         "trade_time": trade_time,
         "direction": direction,
-        "project_name": "未配对OA",
+        "project_name": "",
         "project_id": "",
-        "expense_type": UNCATEGORIZED_EXPENSE_TYPE,
+        "expense_type": "",
         "expense_content": _clean_text(
             row.get("summary") or row.get("remark")
         )
-        or UNCATEGORIZED_EXPENSE_TYPE,
+        or "—",
         "amount": _money(amount),
         "counterparty_name": _clean_text(
             row.get("counterparty_name")
@@ -1193,9 +1198,9 @@ def _bank_tag_primary_facets(
         }
         for bucket in sorted(
             buckets.values(),
-            key=lambda item: (
-                -(item["expense_amount"] + item["income_amount"]),
-                item["primary_label"],
+            key=lambda item: _bank_tag_facet_sort_key(
+                item,
+                label_key="primary_label",
             ),
         )
     ]
@@ -1236,12 +1241,38 @@ def _bank_tag_sub_facets(
         }
         for bucket in sorted(
             buckets.values(),
-            key=lambda item: (
-                -(item["expense_amount"] + item["income_amount"]),
-                item["sub_label"],
+            key=lambda item: _bank_tag_facet_sort_key(
+                item,
+                label_key="sub_label",
             ),
         )
     ]
+
+
+def _bank_tag_facet_sort_key(
+    item: dict[str, Any],
+    *,
+    label_key: str,
+) -> tuple[int, Decimal, int, str]:
+    expense_amount = item["expense_amount"]
+    income_amount = item["income_amount"]
+    if expense_amount > ZERO and income_amount == ZERO:
+        direction_rank = 0
+    elif expense_amount > ZERO and income_amount > ZERO:
+        direction_rank = 1
+    elif income_amount > ZERO:
+        direction_rank = 2
+    else:
+        direction_rank = 3
+    transaction_count = len(item["expense_transactions"]) + len(
+        item["income_transactions"]
+    )
+    return (
+        direction_rank,
+        -(expense_amount + income_amount),
+        -transaction_count,
+        str(item[label_key]),
+    )
 
 
 def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1458,6 +1489,27 @@ def _clean_text(value: Any) -> str:
         return ""
     text = str(value).strip()
     return "" if text in {"-", "--", "—", "——"} else text
+
+
+def _row_matches_query(row: dict[str, Any], query: str) -> bool:
+    searchable_fields = (
+        "trade_time",
+        "counterparty_name",
+        "payment_account_label",
+        "direction",
+        "amount",
+        "expense_content",
+        "remark",
+        "project_name",
+        "expense_type",
+        "oa_applicant",
+        "bank_tag_primary_label",
+        "bank_tag_sub_label",
+        "bank_tag_label",
+    )
+    return query in "\n".join(
+        _clean_text(row.get(field)) for field in searchable_fields
+    ).casefold()
 
 
 def _decimal(value: Any) -> Decimal | None:

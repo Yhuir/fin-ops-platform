@@ -742,16 +742,24 @@ class CostStatisticsQueryService:
             raise ValueError(
                 "view must be time, project, bank, expense_type, or bank_tag"
             )
+        query = " ".join(str(filters.get("query") or "").split())
+        if len(query) > 200:
+            raise ValueError("query must be at most 200 characters")
         return (
             normalized_view,
             {
-                key: str(filters.get(key) or "").strip()
+                key: (
+                    query
+                    if key == "query"
+                    else str(filters.get(key) or "").strip()
+                )
                 for key in (
                     "project_name",
                     "expense_type",
                     "payment_account_label",
                     "bank_tag_primary_label",
                     "bank_tag_sub_label",
+                    "query",
                 )
             },
         )

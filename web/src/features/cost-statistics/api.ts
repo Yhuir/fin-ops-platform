@@ -302,6 +302,7 @@ export async function fetchCostStatisticsExplorerPage(
       payment_account_label: request.paymentAccountLabel,
       bank_tag_primary_label: request.bankTagPrimaryLabel,
       bank_tag_sub_label: request.bankTagSubLabel,
+      query: request.query,
       cursor: request.cursor,
       page_size: request.pageSize ? String(request.pageSize) : undefined,
       include_statistics: request.includeStatistics === false ? "false" : undefined,

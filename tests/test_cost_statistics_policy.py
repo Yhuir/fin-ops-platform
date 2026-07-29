@@ -33,6 +33,155 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         self.assertIsNone(page["statistics"])
         self.assertEqual(page["available_years"], ["2026"])
 
+    def test_explorer_search_filters_rows_summary_and_facets_before_paging(
+        self,
+    ) -> None:
+        policy = CostStatisticsPolicy(
+            {
+                "settings": {},
+                "bank_rows": [
+                    {
+                        **self._bank_row("bank-match"),
+                        "amount": "125.00",
+                        "direction": "支出",
+                        "counterparty_name": "昆明设备供应商",
+                    },
+                    {
+                        **self._bank_row("bank-other"),
+                        "amount": "500.00",
+                        "direction": "支出",
+                        "counterparty_name": "大理住宿供应商",
+                    },
+                ],
+                "cost_groups": [
+                    self._group(
+                        group_id="project-match",
+                        oa_row=self._oa_row(
+                            project_name="项目甲",
+                            expense_content="PLC 模块采购",
+                        ),
+                        bank_rows=[
+                            self._bank_row(
+                                "cost-match",
+                                debit_amount="125.00",
+                            )
+                        ],
+                    ),
+                    self._group(
+                        group_id="project-other",
+                        oa_row=self._oa_row(
+                            project_name="项目乙",
+                            expense_content="住宿费",
+                        ),
+                        bank_rows=[
+                            self._bank_row(
+                                "cost-other",
+                                debit_amount="500.00",
+                            )
+                        ],
+                    ),
+                ],
+            },
+            project_scope="all",
+        )
+
+        time_page = policy.explorer_page(
+            scope_kind="month",
+            scope_value="2026-03",
+            view="time",
+            filters={"query": "昆明设备"},
+            cursor_values=None,
+            page_size=1,
+        )
+        project_page = policy.explorer_page(
+            scope_kind="month",
+            scope_value="2026-03",
+            view="project",
+            filters={"query": "PLC"},
+            cursor_values=None,
+            page_size=1,
+        )
+
+        self.assertEqual(time_page["summary"]["total_amount"], "125.00")
+        self.assertEqual(time_page["row_count"], 1)
+        self.assertEqual(time_page["rows"][0]["project_name"], "")
+        self.assertEqual(time_page["rows"][0]["expense_type"], "")
+        self.assertEqual(
+            [row["project_name"] for row in project_page["primary_facets"]],
+            ["项目甲"],
+        )
+        self.assertEqual(project_page["summary"]["total_amount"], "125.00")
+
+    def test_bank_tag_facets_sort_expense_mixed_income_then_zero(self) -> None:
+        def tagged_bank(
+            row_id: str,
+            *,
+            label: str,
+            amount: str,
+            direction: str,
+        ) -> dict[str, object]:
+            return {
+                **self._bank_row(row_id),
+                "amount": amount,
+                "direction": direction,
+                "bank_tag_primary_label": label,
+                "bank_tag_sub_label": f"{label}子标签",
+            }
+
+        policy = CostStatisticsPolicy(
+            {
+                "settings": {},
+                "bank_rows": [
+                    tagged_bank(
+                        "expense",
+                        label="仅支出",
+                        amount="100.00",
+                        direction="支出",
+                    ),
+                    tagged_bank(
+                        "mixed-expense",
+                        label="收支都有",
+                        amount="10.00",
+                        direction="支出",
+                    ),
+                    tagged_bank(
+                        "mixed-income",
+                        label="收支都有",
+                        amount="20.00",
+                        direction="收入",
+                    ),
+                    tagged_bank(
+                        "income",
+                        label="仅收入",
+                        amount="500.00",
+                        direction="收入",
+                    ),
+                    tagged_bank(
+                        "zero",
+                        label="零金额",
+                        amount="0.00",
+                        direction="支出",
+                    ),
+                ],
+                "cost_groups": [],
+            },
+            project_scope="all",
+        )
+
+        page = policy.explorer_page(
+            scope_kind="month",
+            scope_value="2026-03",
+            view="bank_tag",
+            filters={},
+            cursor_values=None,
+            page_size=50,
+        )
+
+        self.assertEqual(
+            [row["primary_label"] for row in page["primary_facets"]],
+            ["仅支出", "收支都有", "仅收入", "零金额"],
+        )
+
     def _payload(
         self,
         groups: list[dict[str, object]],

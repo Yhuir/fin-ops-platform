@@ -112,6 +112,7 @@ export type CostStatisticsExplorerPageRequest = {
   paymentAccountLabel?: string;
   bankTagPrimaryLabel?: string;
   bankTagSubLabel?: string;
+  query?: string;
   cursor?: string;
   pageSize?: number;
   includeStatistics?: boolean;

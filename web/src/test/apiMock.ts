@@ -4129,6 +4129,12 @@ function buildCostStatisticsExplorerPayload(
         }]
       : [];
   const bankFlowTimeRows = [...timeRows, ...incomeRows]
+    .map((row) => ({
+      ...row,
+      project_name: "",
+      expense_type: "",
+      expense_content: row.remark || row.expense_content || "—",
+    }))
     .sort((left, right) => right.trade_time.localeCompare(left.trade_time));
 
   const projectRows = Object.entries(projectRowMap)
@@ -4220,12 +4226,28 @@ function buildCostStatisticsExplorerPagePayload(
   const paymentAccountLabel = url.searchParams.get("payment_account_label") ?? "";
   const primaryLabel = url.searchParams.get("bank_tag_primary_label") ?? "";
   const subLabel = url.searchParams.get("bank_tag_sub_label") ?? "";
+  const query = (url.searchParams.get("query") ?? "").trim().toLocaleLowerCase("zh-CN");
   const inScope = <Row extends { trade_time: string }>(rows: Row[]) => rows.filter((row) => (
     scope === "all"
     || (scope.startsWith("year:") ? row.trade_time.startsWith(`${scope.slice(5)}-`) : row.trade_time.startsWith(scope))
   ));
-  const costRows = inScope(payload.time_rows);
-  const bankFlowRows = inScope(payload.bank_flow_time_rows);
+  const matchesQuery = (row: Record<string, unknown>) => !query || [
+    row.trade_time,
+    row.counterparty_name,
+    row.payment_account_label,
+    row.direction,
+    row.amount,
+    row.expense_content,
+    row.remark,
+    row.project_name,
+    row.expense_type,
+    row.oa_applicant,
+    row.bank_tag_primary_label,
+    row.bank_tag_sub_label,
+    row.bank_tag_label,
+  ].map((value) => String(value ?? "")).join("\n").toLocaleLowerCase("zh-CN").includes(query);
+  const costRows = inScope(payload.time_rows).filter(matchesQuery);
+  const bankFlowRows = inScope(payload.bank_flow_time_rows).filter(matchesQuery);
   const amountNumber = (value: string) => Number(value.replace(/,/g, "")) || 0;
   const percentage = (amount: number, total: number) => `${((amount / (total || 1)) * 100).toFixed(1)}%`;
 
@@ -4291,11 +4313,23 @@ function buildCostStatisticsExplorerPagePayload(
     expense_transaction_count: rows.filter((row) => row.direction === "支出").length,
     income_transaction_count: rows.filter((row) => row.direction === "收入").length,
   });
-  const bankTagPrimary = Array.from(tagGroups.entries()).map(([label, group]) => ({
-    primary_label: label,
-    ...directionFacet(group.rows),
-    sub_tag_count: group.subLabels.size,
-  }));
+  const bankTagPrimary = Array.from(tagGroups.entries())
+    .map(([label, group]) => ({
+      primary_label: label,
+      ...directionFacet(group.rows),
+      sub_tag_count: group.subLabels.size,
+    }))
+    .sort((left, right) => {
+      const rank = (row: typeof left) => {
+        const expense = amountNumber(row.expense_amount);
+        const income = amountNumber(row.income_amount);
+        return expense > 0 && income === 0 ? 0 : expense > 0 && income > 0 ? 1 : income > 0 ? 2 : 3;
+      };
+      return rank(left) - rank(right)
+        || amountNumber(right.expense_amount) + amountNumber(right.income_amount)
+          - amountNumber(left.expense_amount) - amountNumber(left.income_amount)
+        || left.primary_label.localeCompare(right.primary_label, "zh-CN");
+    });
   const bankTagSub = primaryLabel
     ? Array.from(new Set((tagGroups.get(primaryLabel)?.rows ?? []).map((row) => row.bank_tag_sub_label || row.bank_tag_label || primaryLabel)))
         .map((label) => {
