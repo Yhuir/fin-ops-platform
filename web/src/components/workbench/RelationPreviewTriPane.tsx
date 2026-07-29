@@ -124,35 +124,37 @@ function RelationPreviewTriPane({
       className={`relation-preview-section relation-preview-tri-pane-section${sectionToneClass ? ` ${sectionToneClass}` : ""}`}
       data-testid={testId}
     >
-      <div className="relation-preview-section-title">
-        <h3>{title}</h3>
-        <span className={`relation-preview-status relation-preview-status-${previewStatus}`}>
-          {PREVIEW_STATUS_LABELS[previewStatus]}
-        </span>
-      </div>
-      <div className="relation-preview-summary relation-preview-summary-inline" data-testid="relation-preview-summary">
-        <span className="relation-preview-summary-title">金额核对</span>
-        <div className="relation-preview-summary-value-list">
-          {PREVIEW_PANES.map((pane) => {
-            const mismatch = visualMismatchFields.includes(pane.mismatchField);
-            const paneTotal = resolvePaneTotal(totals, pane.id);
-            return (
-              <div
-                key={`summary-${pane.id}`}
-                className={`relation-preview-summary-metric relation-preview-summary-metric-${pane.id}${mismatch ? " mismatch relation-preview-summary-metric-mismatch" : ""}`}
-              data-testid={`relation-preview-summary-metric-${pane.id}`}
-            >
-              <span className="relation-preview-summary-label">{pane.title}</span>
-                <strong>{formatDisplayAmount(paneTotal, rowCountByPane[pane.id] > 0)}</strong>
-              </div>
-            );
-          })}
-        </div>
-        {deltaAmount ? (
-          <span className="relation-preview-delta relation-preview-delta-pill" data-testid="relation-preview-delta">
-            差额 {deltaAmount}
+      <div className="relation-preview-section-heading">
+        <div className="relation-preview-section-title">
+          <h3>{title}</h3>
+          <span className={`relation-preview-status relation-preview-status-${previewStatus}`}>
+            {PREVIEW_STATUS_LABELS[previewStatus]}
           </span>
-        ) : null}
+        </div>
+        <div className="relation-preview-summary relation-preview-summary-inline" data-testid="relation-preview-summary">
+          <span className="relation-preview-summary-title">金额核对</span>
+          <div className="relation-preview-summary-value-list">
+            {PREVIEW_PANES.map((pane) => {
+              const mismatch = visualMismatchFields.includes(pane.mismatchField);
+              const paneTotal = resolvePaneTotal(totals, pane.id);
+              return (
+                <div
+                  key={`summary-${pane.id}`}
+                  className={`relation-preview-summary-metric relation-preview-summary-metric-${pane.id}${mismatch ? " mismatch relation-preview-summary-metric-mismatch" : ""}`}
+                  data-testid={`relation-preview-summary-metric-${pane.id}`}
+                >
+                  <span className="relation-preview-summary-label">{pane.title}</span>
+                  <strong>{formatDisplayAmount(paneTotal, rowCountByPane[pane.id] > 0)}</strong>
+                </div>
+              );
+            })}
+          </div>
+          {deltaAmount ? (
+            <span className="relation-preview-delta relation-preview-delta-pill" data-testid="relation-preview-delta">
+              差额 {deltaAmount}
+            </span>
+          ) : null}
+        </div>
       </div>
       <div ref={gridRef} className="candidate-grid relation-preview-tri-pane" data-testid="tri-pane">
         <div className="candidate-grid-head relation-preview-tri-pane-head" style={{ gridTemplateColumns: ROW_TEMPLATE_COLUMNS }}>

@@ -1,3 +1,4 @@
+import { Button } from "@heroui/react";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import AppDrawer from "../components/common/AppDrawer";
@@ -2559,15 +2560,17 @@ function countRelationPreviewRows(groups: WorkbenchRelationGroup[]) {
 function relationPreviewOperationCopy(preview: WorkbenchRelationPreview) {
   if (preview.operation === "withdraw_link") {
     return {
-      title: "撤回关联预览",
+      title: "撤回关联",
       submitLabel: "确认撤回",
+      retryLabel: "重试撤回",
       submittingMessage: "正在撤回关联...",
       statusLabel: "待撤回",
     };
   }
   return {
-    title: "确认关联预览",
+    title: "确认关联",
     submitLabel: "确认关联",
+    retryLabel: "重试确认",
     submittingMessage: "正在确认关联...",
     statusLabel: "待确认",
   };
@@ -2663,29 +2666,32 @@ function RelationPreviewDialog({
     </span>
   );
   const subtitle = (
-    <div className="relation-preview-title-block">
-      <span className="relation-preview-operation-title">{operationCopy.title}</span>
-      <span className="relation-preview-subtitle">
-        <span>OA {rowCounts.oa}</span>
-        <span>流水 {rowCounts.bank}</span>
-        <span>发票 {rowCounts.invoice}</span>
-      </span>
+    <div className="relation-preview-subtitle">
+      <span>OA {rowCounts.oa}</span>
+      <span>流水 {rowCounts.bank}</span>
+      <span>发票 {rowCounts.invoice}</span>
     </div>
   );
   const footer = (
-    <div className="detail-modal-actions relation-preview-actions">
+    <div className="relation-preview-actions">
       {isCommittedError || isNonRetryableError ? (
-        <button className="secondary-btn" type="button" onClick={closePreview}>
+        <Button onPress={closePreview} size="sm" variant="secondary">
           关闭
-        </button>
+        </Button>
       ) : (
         <>
-          <button className="secondary-btn" disabled={isBusy} type="button" onClick={closePreview}>
+          <Button isDisabled={isBusy} onPress={closePreview} size="sm" variant="secondary">
             取消
-          </button>
-          <button className="primary-action-btn" disabled={primaryDisabled} type="button" onClick={handleSubmitClick}>
-            {submitState.phase === "error" ? "重试" : operationCopy.submitLabel}
-          </button>
+          </Button>
+          <Button
+            isDisabled={primaryDisabled}
+            isPending={isBusy}
+            onPress={handleSubmitClick}
+            size="sm"
+            variant={preview.operation === "withdraw_link" ? "danger" : "primary"}
+          >
+            {submitState.phase === "error" ? operationCopy.retryLabel : operationCopy.submitLabel}
+          </Button>
         </>
       )}
     </div>
@@ -2701,12 +2707,27 @@ function RelationPreviewDialog({
       headerAside={headerAside}
       open
       subtitle={subtitle}
-      title="关联预览"
+      title={operationCopy.title}
       width="min(1080px, 100vw)"
       onClose={closePreview}
     >
       <div className="relation-preview-body">
         {preview.message ? <div className={`relation-preview-message ${preview.requiresNote ? "warning" : ""}`}>{preview.message}</div> : null}
+        <label className="relation-preview-note">
+          <span>
+            {preview.operation === "withdraw_link"
+              ? `撤回说明（${noteRequired ? "必填" : "可选"}）`
+              : noteRequired
+                ? "差额说明（必填）"
+                : "备注（可选）"}
+          </span>
+          <textarea
+            aria-label={preview.operation === "withdraw_link" ? "撤回说明" : noteRequired ? "差额说明" : "备注"}
+            disabled={isBusy || isCommittedError || isNonRetryableError}
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+          />
+        </label>
         {submitState.phase !== "idle" ? (
           <div
             className={`relation-preview-progress-panel relation-preview-progress-${submitState.phase}`}
@@ -2739,15 +2760,6 @@ function RelationPreviewDialog({
             columnLayouts={columnLayouts}
           />
         </div>
-        <label className="relation-preview-note">
-          <span>备注{noteRequired ? "（必填）" : ""}</span>
-          <textarea
-            aria-label="备注"
-            disabled={isBusy || isCommittedError || isNonRetryableError}
-            value={note}
-            onChange={(event) => setNote(event.target.value)}
-          />
-        </label>
       </div>
     </AppDrawer>
   );

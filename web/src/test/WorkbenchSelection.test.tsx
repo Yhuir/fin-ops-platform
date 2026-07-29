@@ -48,7 +48,7 @@ function expectRelationPreviewTriPane(section: HTMLElement) {
 }
 
 function expectRelationPreviewBlocking(_preview: HTMLElement, submitLabel: string) {
-  const currentPreview = screen.getByRole("dialog", { name: "关联预览" });
+  const currentPreview = screen.getByRole("dialog", { name: /^(确认|撤回)关联$/ });
   expect(screen.queryByRole("dialog", { name: "全局操作进度" })).not.toBeInTheDocument();
   expect(currentPreview).toHaveAttribute("aria-busy", "true");
   expect(within(currentPreview).getByRole("button", { name: "关闭关联预览" })).toBeDisabled();
@@ -124,13 +124,13 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(screen.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ }));
     await user.click(screen.getByRole("button", { name: "确认关联" }));
 
-    const preview = await screen.findByRole("dialog", { name: "关联预览" });
+    const preview = await screen.findByRole("dialog", { name: /^(确认|撤回)关联$/ });
     await user.click(within(preview).getByRole("button", { name: "确认关联" }));
 
     await waitFor(() => {
       const initialRequests = fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input as RequestInfo | URL));
       expect(initialRequests).toHaveLength(2);
-      expect(screen.queryByRole("dialog", { name: "关联预览" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: /^(确认|撤回)关联$/ })).not.toBeInTheDocument();
       expect(screen.getAllByText("已选 0")).toHaveLength(2);
     });
     expect(await screen.findByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeInTheDocument();
@@ -326,7 +326,8 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(openInvoiceRow);
     await user.click(screen.getByRole("button", { name: "确认关联" }));
 
-    const dialog = await screen.findByRole("dialog", { name: "关联预览" });
+    const dialog = await screen.findByRole("dialog", { name: /^(确认|撤回)关联$/ });
+    expect(within(dialog).getByRole("heading", { name: "确认关联" })).toBeInTheDocument();
     expect(within(dialog).getByRole("heading", { name: "操作前" })).toBeInTheDocument();
     expect(within(dialog).getByRole("heading", { name: "操作后" })).toBeInTheDocument();
     const before = within(dialog).getByTestId("relation-preview-before");
@@ -423,7 +424,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(previewCalls).toBe(1);
 
     releasePreview();
-    expect(await screen.findByRole("dialog", { name: "关联预览" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: /^(确认|撤回)关联$/ })).toBeInTheDocument();
   });
 
   test("withdraw preview is busy on the next render and duplicate clicks send one POST", async () => {
@@ -461,7 +462,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(previewCalls).toBe(1);
 
     releasePreview();
-    expect(await screen.findByRole("dialog", { name: "关联预览" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: /^(确认|撤回)关联$/ })).toBeInTheDocument();
   });
 
   test("drops a confirm preview response after the selected rows change", async () => {
@@ -493,7 +494,7 @@ describe("Workbench row selection and detail drawer", () => {
     await waitFor(() => {
       expect(within(unpairedZone).getByRole("button", { name: "确认关联" })).toBeDisabled();
     });
-    expect(screen.queryByRole("dialog", { name: "关联预览" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /^(确认|撤回)关联$/ })).not.toBeInTheDocument();
   });
 
   test("preview failure restores the entry without exposing backend English", async () => {
@@ -558,7 +559,7 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(await screen.findByRole("row", { name: /91330108MA27B4011E.*杭州溯源科技有限公司/ }));
     await user.click(screen.getByRole("button", { name: "确认关联" }));
 
-    const dialog = await screen.findByRole("dialog", { name: "关联预览" });
+    const dialog = await screen.findByRole("dialog", { name: /^(确认|撤回)关联$/ });
     expect(within(dialog).getByText("金额不一致，请填写备注。")).toBeInTheDocument();
     const after = within(dialog).getByTestId("relation-preview-after");
     const summary = expectRelationPreviewSummary(after);
@@ -575,7 +576,7 @@ describe("Workbench row selection and detail drawer", () => {
     });
     expect(within(dialog).getByRole("button", { name: "确认关联" })).toBeDisabled();
 
-    await user.type(within(dialog).getByRole("textbox", { name: "备注" }), "发票税额尾差，财务已复核");
+    await user.type(within(dialog).getByRole("textbox", { name: "差额说明" }), "发票税额尾差，财务已复核");
     await user.click(within(dialog).getByRole("button", { name: "确认关联" }));
 
     await waitFor(() => {
@@ -713,14 +714,12 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(await screen.findByRole("row", { name: /2026-03-28.*智能工厂设备商/ }));
     await user.click(screen.getByRole("button", { name: "确认关联" }));
 
-    const dialog = await screen.findByRole("dialog", { name: "关联预览" });
+    const dialog = await screen.findByRole("dialog", { name: /^(确认|撤回)关联$/ });
     const after = within(dialog).getByTestId("relation-preview-after");
     expect(within(after).getByText("金额一致")).toBeInTheDocument();
     expect(within(after).queryByTestId("relation-preview-delta")).not.toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "确认关联" })).toBeEnabled();
-    expect(within(dialog).getByRole("button", { name: "确认关联" }).closest(".detail-modal-actions")).toHaveClass(
-      "relation-preview-actions",
-    );
+    expect(within(dialog).getByRole("button", { name: "确认关联" }).closest(".relation-preview-actions")).toBeInTheDocument();
   });
 
   test("confirm preview for an already linked selection submits withdraw instead of confirm", async () => {
@@ -791,8 +790,8 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(await screen.findByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ }));
     await user.click(screen.getByRole("button", { name: "确认关联" }));
 
-    const dialog = await screen.findByRole("dialog", { name: "关联预览" });
-    expect(within(dialog).getByText("撤回关联预览")).toBeInTheDocument();
+    const dialog = await screen.findByRole("dialog", { name: /^(确认|撤回)关联$/ });
+    expect(within(dialog).getByRole("heading", { name: "撤回关联" })).toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: "确认关联" })).not.toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "确认撤回" }));
 
@@ -846,7 +845,7 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(openInvoiceRow);
     await user.click(screen.getByRole("button", { name: "确认关联" }));
 
-    const dialog = await screen.findByRole("dialog", { name: "关联预览" });
+    const dialog = await screen.findByRole("dialog", { name: /^(确认|撤回)关联$/ });
     const after = within(dialog).getByTestId("relation-preview-after");
     const afterSummary = expectRelationPreviewSummary(after);
     const sourceOaMetric = within(afterSummary).getByTestId("relation-preview-summary-metric-oa");
@@ -903,7 +902,7 @@ describe("Workbench row selection and detail drawer", () => {
 
     await user.click(within(unpairedZone).getByRole("button", { name: "确认关联" }));
 
-    expect(await screen.findByRole("dialog", { name: "关联预览" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: /^(确认|撤回)关联$/ })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/workbench/actions/confirm-link/preview",
       expect.objectContaining({
@@ -941,7 +940,7 @@ describe("Workbench row selection and detail drawer", () => {
 
     await user.click(within(unpairedZone).getByRole("button", { name: "确认关联" }));
 
-    expect(await screen.findByRole("dialog", { name: "关联预览" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: /^(确认|撤回)关联$/ })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/workbench/actions/confirm-link/preview",
       expect.objectContaining({
@@ -981,7 +980,7 @@ describe("Workbench row selection and detail drawer", () => {
 
     await user.click(within(pairedZone).getByRole("button", { name: "撤回关联" }));
 
-    expect(await screen.findByRole("dialog", { name: "关联预览" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: /^(确认|撤回)关联$/ })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/workbench/actions/withdraw-link/preview",
       expect.objectContaining({
@@ -1120,7 +1119,7 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(openBankRow);
     await user.click(openInvoiceRow);
     await user.click(screen.getByRole("button", { name: "确认关联" }));
-    const preview = await screen.findByRole("dialog", { name: "关联预览" });
+    const preview = await screen.findByRole("dialog", { name: /^(确认|撤回)关联$/ });
     await user.click(within(preview).getByRole("button", { name: "确认关联" }));
 
     expectRelationPreviewBlocking(preview, "确认关联");
@@ -1128,7 +1127,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(unpairedZone).toHaveTextContent("2026-03-28");
     expect(unpairedZone).toHaveTextContent("智能工厂设备商");
     await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "关联预览" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: /^(确认|撤回)关联$/ })).not.toBeInTheDocument();
     }, { timeout: 5_000 });
     expect(
       within(unpairedZone).queryByRole("row", {
@@ -1169,13 +1168,13 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(openBankRow);
     await user.click(openInvoiceRow);
     await user.click(screen.getByRole("button", { name: "确认关联" }));
-    const preview = await screen.findByRole("dialog", { name: "关联预览" });
+    const preview = await screen.findByRole("dialog", { name: /^(确认|撤回)关联$/ });
     await user.click(within(preview).getByRole("button", { name: "确认关联" }));
 
     expectRelationPreviewBlocking(preview, "确认关联");
     expect(within(preview).getByText("正在确认关联...")).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "关联预览" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: /^(确认|撤回)关联$/ })).not.toBeInTheDocument();
     }, { timeout: 2_000 });
 
     const barrierCalls = fetchMock.mock.calls.filter(([input]) => fetchPath(input).startsWith("/api/operation-barrier/status"));
@@ -1206,14 +1205,14 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(openBankRow);
     await user.click(openInvoiceRow);
     await user.click(screen.getByRole("button", { name: "确认关联" }));
-    const preview = await screen.findByRole("dialog", { name: "关联预览" });
+    const preview = await screen.findByRole("dialog", { name: /^(确认|撤回)关联$/ });
     await user.click(within(preview).getByRole("button", { name: "确认关联" }));
 
     expectRelationPreviewBlocking(preview, "确认关联");
     expect(unpairedZone).toHaveTextContent("2026-03-28");
     expect(unpairedZone).toHaveTextContent("智能工厂设备商");
     await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "关联预览" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: /^(确认|撤回)关联$/ })).not.toBeInTheDocument();
     });
   });
 
@@ -1237,7 +1236,7 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(openInvoiceRow);
     expect(screen.getByRole("button", { name: "确认关联" })).toBeDisabled();
     expect(screen.getByText("关联台正在刷新，当前显示上一版稳定数据；刷新完成前写操作已禁用。")).toBeInTheDocument();
-    expect(screen.queryByRole("dialog", { name: "关联预览" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /^(确认|撤回)关联$/ })).not.toBeInTheDocument();
   });
 
   test("initial workbench rows render before slow ignored and settings requests finish", async () => {
@@ -1317,8 +1316,8 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(pairedInvoiceRow);
     await user.click(within(pairedZone).getByRole("button", { name: "撤回关联" }));
 
-    const preview = await screen.findByRole("dialog", { name: "关联预览" });
-    expect(within(preview).getByText("撤回关联预览")).toBeInTheDocument();
+    const preview = await screen.findByRole("dialog", { name: /^(确认|撤回)关联$/ });
+    expect(within(preview).getByRole("heading", { name: "撤回关联" })).toBeInTheDocument();
     expect(within(preview).getByRole("heading", { name: "操作前" })).toBeInTheDocument();
     expect(within(preview).getByRole("heading", { name: "操作后" })).toBeInTheDocument();
     const before = within(preview).getByTestId("relation-preview-before");
@@ -1348,7 +1347,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(pairedZone).toHaveTextContent("华东设备供应商");
     expect(unpairedZone).not.toHaveTextContent(/2026-03-25\s*14:22/);
     await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "关联预览" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: /^(确认|撤回)关联$/ })).not.toBeInTheDocument();
     });
     expect(
       within(pairedZone).queryByRole("row", {
@@ -2311,7 +2310,7 @@ describe("Workbench row selection and detail drawer", () => {
     });
     await user.click(within(pairedZone).getByRole("button", { name: "撤回关联" }));
 
-    expect(await screen.findByRole("dialog", { name: "关联预览" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: /^(确认|撤回)关联$/ })).toBeInTheDocument();
   });
 
   test("paired zone withdraw preview blocks immutable OA attachment invoice binding", async () => {
@@ -2417,8 +2416,8 @@ describe("Workbench row selection and detail drawer", () => {
     );
     await user.click(within(pairedZone).getByRole("button", { name: "撤回关联" }));
 
-    const preview = await screen.findByRole("dialog", { name: "关联预览" });
-    expect(within(preview).getByText("撤回关联预览")).toBeInTheDocument();
+    const preview = await screen.findByRole("dialog", { name: /^(确认|撤回)关联$/ });
+    expect(within(preview).getByRole("heading", { name: "撤回关联" })).toBeInTheDocument();
     expect(within(preview).getByText("无法撤回：OA 附件发票必须和来源 OA 保持绑定。")).toBeInTheDocument();
     expect(within(preview).getByRole("button", { name: "确认撤回" })).toBeDisabled();
     expect(within(preview).getAllByText("陈佳玉").length).toBeGreaterThanOrEqual(2);
@@ -2443,7 +2442,7 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(pairedBankRow);
     await user.click(pairedInvoiceRow);
     await user.click(within(pairedZone).getByRole("button", { name: "撤回关联" }));
-    const preview = await screen.findByRole("dialog", { name: "关联预览" });
+    const preview = await screen.findByRole("dialog", { name: /^(确认|撤回)关联$/ });
     await user.click(within(preview).getByRole("button", { name: "确认撤回" }));
 
     await waitFor(() => {
