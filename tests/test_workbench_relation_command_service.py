@@ -171,6 +171,44 @@ class FakeEtcBatchLinkRepository:
 
 
 class WorkbenchRelationCommandServiceTests(unittest.TestCase):
+    def test_active_relation_read_uses_active_only_repository_loader(self) -> None:
+        class ActiveOnlyRepository:
+            def load_workbench_pair_relations_for_row_ids(
+                self,
+                row_ids: list[str],
+                *,
+                case_ids: list[str] | None = None,
+            ) -> dict[str, object]:
+                raise AssertionError("active relation reads must not load relation history")
+
+            def load_active_workbench_pair_relations_for_row_ids(
+                self,
+                row_ids: list[str],
+                *,
+                case_ids: list[str] | None = None,
+            ) -> dict[str, object]:
+                self.row_ids = list(row_ids)
+                return {
+                    "pair_relations": {
+                        "case:active": {
+                            "case_id": "case:active",
+                            "status": "active",
+                            "row_ids": ["oa-1", "bank-1"],
+                            "row_types": ["oa", "bank"],
+                            "relation_mode": "oa_bank",
+                            "month_scope": "2026-05",
+                        }
+                    }
+                }
+
+        repository = ActiveOnlyRepository()
+        service = WorkbenchRelationCommandService(relation_repository=repository)
+
+        relations = service.active_relations_for_row_ids(["oa-1"])
+
+        self.assertEqual(repository.row_ids, ["oa-1"])
+        self.assertEqual([relation["case_id"] for relation in relations], ["case:active"])
+
     def test_enrich_etc_batch_link_requires_typed_oa_member_and_is_idempotent(self) -> None:
         repository = FakeRelationRepository(
             {

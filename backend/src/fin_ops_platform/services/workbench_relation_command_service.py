@@ -1249,7 +1249,10 @@ class WorkbenchRelationCommandService:
         )
 
     def active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:
-        return self._pair_service_for_row_ids(list(row_ids or [])).active_relations_for_row_ids(list(row_ids or []))
+        normalized_row_ids = list(row_ids or [])
+        return self._active_pair_service_for_row_ids(
+            normalized_row_ids
+        ).active_relations_for_row_ids(normalized_row_ids)
 
     def list_active_relations(self) -> list[dict[str, Any]]:
         return self._pair_service().list_active_relations()

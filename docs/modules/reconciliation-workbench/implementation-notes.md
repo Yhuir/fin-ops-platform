@@ -1,5 +1,11 @@
 # 关联台 实施记录
 
+## 2026-07-29 - relation preview 重复 I/O 删除
+
+- 生产认证采样显示首屏和 groups 的 p95 已进入 1 秒，但 confirm/withdraw preview 尾延迟仍超过 1 秒。调用链审计发现 preview 在末尾 freshness gate 已返回当前 active generation version 后，又重复执行一次相同 generation proof；active relation lookup 也通过包含 history 的 scoped loader 读取只需要的 active relation。
+- 最小修复复用末次 freshness 返回的 `read_model_version` 做首尾 version drift 校验，并把 active relation lookup 接到既有 active-only repository loader。首个 generation proof、generation set、首尾 fresh gate、CAS/version conflict、withdraw history restore、正式 relation command/UoW、幂等与审计均保留。
+- 未新增 Redis、表、索引、worker、queue、API、fallback 或缓存状态。模块边界和 I/O 不变；仅删除同一次请求内可证明等价的数据库读取。
+
 ## 2026-07-29 - 搜索与折叠状态解耦
 
 - 根因：前端在搜索词存在时绕过 `expandedPaneGroups`，直接把 summary response 中的 `collapsedRows` 拼入可见行；因此按钮仍是“展开”但明细已经出现。用户点击展开加载完整详情后，点击收起虽然删除了展开 key，旧搜索分支仍再次显示完整 `collapsedRows`，造成无法收起。

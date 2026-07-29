@@ -226,4 +226,5 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_w
 - 同条件旧/新 10 次 characterization 继续采用 Task 30-02 的同一 PostgreSQL fixture、scope/version/row IDs、连接与 warm-up：新路径固定每次 6 条 counted SQL、完整 generation scan 为 0、formal snapshot dependency 为 0，最大新样本 5.089ms。
 - 相同 URL、无独立 `AbortSignal`、仍在进行的 combined initial 必须只产生一个 HTTP 请求；所有调用方都获得同一映射结果。请求完成或失败后必须移除 in-flight entry，后续读取重新访问服务器；搜索/筛选可取消请求不得被该合并吞掉。
 - 正式 confirm/withdraw 的 canonical row resolver 必须读取生产已配置的 `_workbench_sql_read_repository.get_workbench_row_detail(...)`；不得重新引用已退役、未注入的 `_workbench_canonical_query_repository` 而静默回退到全量 live builder。preview selection 仍只用于 preview，正式 command/UoW 不得消费 preview DTO。
+- relation preview 必须保留首尾 fresh/version drift 门禁，但同一次 selection 只允许一次 generation proof；末次 freshness 的 active version 是结束 version 证据，不得再次执行等价 proof。`active_relations_for_row_ids` 必须走 active-only repository loader，不能为 active lookup 读取 relation history；withdraw restore preview 仍保留 history loader。
 - 本地 release gate：700 项定向 backend/deploy unittest、123 项 scoped Vitest、3 项 Chromium E2E、repository lint、docs gate 与 production build 全部通过。没有运行 pytest、完整 CI 或 183 项 Browser suite。

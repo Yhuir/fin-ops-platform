@@ -6234,7 +6234,13 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 raise AssertionError(f"unexpected relation preview SQL: {normalized}")
 
         class Repository(PostgresReadModelRepository):
+            def __init__(self, connection: object) -> None:
+                super().__init__(connection)
+                self.freshness_calls = 0
+                self.proof_calls = 0
+
             def get_workbench_groups_freshness_status(self, *, scope_key: str | None = None) -> dict[str, object]:
+                self.freshness_calls += 1
                 return {
                     "scope_key": scope_key,
                     "read_model_status": "fresh",
@@ -6243,6 +6249,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 }
 
             def _workbench_relation_preview_generation_proof(self, scope_key: str) -> dict[str, object]:
+                self.proof_calls += 1
                 return {
                     "version": "generation-1",
                     "generation_set": [
@@ -6264,6 +6271,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in payload["context_rows"]], ["invoice-attachment-1"])
         self.assertEqual(payload["read_model_version"], "generation-1")
         self.assertEqual(len(connection.fetch_all_calls), 2)
+        self.assertEqual(repository.freshness_calls, 2)
+        self.assertEqual(repository.proof_calls, 1)
         selected_sql, selected_params = connection.fetch_all_calls[0]
         self.assertIn("r.row_id = any(%s::text[])", selected_sql)
         self.assertIn("r.generation_id = active.generation_id", selected_sql)

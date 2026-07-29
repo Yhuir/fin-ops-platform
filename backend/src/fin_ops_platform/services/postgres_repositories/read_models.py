@@ -5307,6 +5307,14 @@ class PostgresReadModelRepository:
         start_version = text(start_proof.get("version"))
         if expected_version != start_version:
             raise WorkbenchReadModelVersionConflictError(expected=expected_version, current=start_version)
+        freshness_version = text(
+            freshness.get("read_model_version") or freshness.get("active_generation_id")
+        )
+        if freshness_version != start_version:
+            raise WorkbenchReadModelVersionConflictError(
+                expected=expected_version,
+                current=start_version,
+            )
         generation_set = [
             dict(item)
             for item in list(start_proof.get("generation_set") or [])
@@ -5422,8 +5430,10 @@ class PostgresReadModelRepository:
             )
 
         end_freshness = self.get_workbench_groups_freshness_status(scope_key=normalized_scope_key)
-        end_proof = self._workbench_relation_preview_generation_proof(normalized_scope_key)
-        end_version = text(end_proof.get("version"))
+        end_version = text(
+            end_freshness.get("read_model_version")
+            or end_freshness.get("active_generation_id")
+        )
         if (
             text(end_freshness.get("read_model_status")) != "fresh"
             or end_version != start_version
