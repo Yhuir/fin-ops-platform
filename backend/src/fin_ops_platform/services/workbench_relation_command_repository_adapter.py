@@ -35,9 +35,10 @@ class WorkbenchRelationCommandRepositoryAdapter:
         if callable(loader):
             snapshot = loader(list(row_ids or []), case_ids=list(case_ids or []))
             return deepcopy(snapshot) if isinstance(snapshot, dict) else {}
-        return WorkbenchPairRelationService.from_snapshot(
-            self.load_workbench_pair_relations()
-        ).snapshot_for_row_ids(list(row_ids or []), case_ids=list(case_ids or []))
+        return self._pair_relation_service.snapshot_for_row_ids(
+            list(row_ids or []),
+            case_ids=list(case_ids or []),
+        )
 
     def load_active_workbench_pair_relation_by_case_id(self, case_id: str) -> dict[str, Any] | None:
         normalized_case_id = str(case_id or "").strip()

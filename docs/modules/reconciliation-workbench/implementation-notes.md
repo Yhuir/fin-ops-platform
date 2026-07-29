@@ -1403,3 +1403,9 @@
 - 生产 action timing 证明确认关联的 `resolve_rows` p50/p95 为 `3275.986/5670.447ms`，撤回预览 OA alias 解析 p50/p95 为 `1694.998/2179.911ms`；正式 relation UoW、鉴权和关系事务本身均低于 130ms，瓶颈不在 PostgreSQL relation writer。
 - 根因是 `Application._resolve_rows_from_workbench_canonical_query(...)` 仍读取已退役且生产未配置的 `_workbench_canonical_query_repository` 属性，导致每次都错过现有 active-generation SQL row-detail owner，随后回退到 live canonical facts builder。确认和 OA alias 解析因此重复执行过宽事实源组装。
 - 修复只把该调用接回已经注入并由 `WorkbenchQueryFacade` 使用的 `_workbench_sql_read_repository`。正式写仍由 route freshness/version gate、canonical relation command/UoW、CAS、幂等和审计闭环；preview DTO 不进入正式 command，live facts fallback 仅保留给 active generation 中确实不存在的 row。没有新增 repository、API、Redis、worker、表、SQL 或兼容链。
+
+## 2026-07-29 - 撤回预检 scoped snapshot 去全量复制
+
+- 生产认证采样中，撤回预检 56 个滚动样本的 request p50/p95 为 `770.082/1147.490ms`，其中数据库 p50 仅 `118.139ms`；主要耗时不在 SQL，而在默认 command adapter 先对进程内全部 relation/history 做 `snapshot()` 深复制，再重建一个临时 service，最后才截取目标 case。
+- 修复复用 `WorkbenchPairRelationService.snapshot_for_row_ids(...)` 这一既有 scoped 边界，直接从当前内存 owner 截取命中的 relation 和可恢复 history。删除全量 snapshot -> normalize -> scoped snapshot 的重复 CPU/内存路径；PostgreSQL scoped loader、撤回历史恢复、freshness/source-version gate、CAS、幂等、审计和 API shape 均不改变。
+- 不接入 Redis：该热点是同进程重复对象复制，不是可缓存的稳定查询；缓存会增加 relation version 失配和失效责任，不能替代当前 active-generation/read-model freshness 合同。

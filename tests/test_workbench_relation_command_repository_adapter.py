@@ -127,17 +127,15 @@ class WorkbenchRelationCommandRepositoryAdapterTests(unittest.TestCase):
         self.assertEqual(repository.scoped_loads, [{"row_ids": ["bank-db"], "case_ids": ["DURABLE"]}])
 
     def test_scoped_load_filters_in_memory_snapshot_when_repository_has_no_scope_boundary(self) -> None:
-        pair_service = WorkbenchPairRelationService.from_snapshot(
-            {
-                "pair_relations": {
-                    "CASE-1": {"case_id": "CASE-1", "row_ids": ["bank-1"], "row_types": ["bank"], "status": "active"},
-                    "CASE-2": {"case_id": "CASE-2", "row_ids": ["bank-2"], "row_types": ["bank"], "status": "active"},
-                },
-                "pair_relation_history": [
-                    {"operation_type": "old-1", "after_relations": [{"case_id": "CASE-1"}]},
-                    {"operation_type": "old-2", "after_relations": [{"case_id": "CASE-2"}]},
-                ],
-            }
+        pair_service = SnapshotBlockingPairRelationService(
+            pair_relations={
+                "CASE-1": {"case_id": "CASE-1", "row_ids": ["bank-1"], "row_types": ["bank"], "status": "active"},
+                "CASE-2": {"case_id": "CASE-2", "row_ids": ["bank-2"], "row_types": ["bank"], "status": "active"},
+            },
+            pair_relation_history=[
+                {"operation_type": "old-1", "after_relations": [{"case_id": "CASE-1"}]},
+                {"operation_type": "old-2", "after_relations": [{"case_id": "CASE-2"}]},
+            ],
         )
         adapter = WorkbenchRelationCommandRepositoryAdapter(pair_relation_service=pair_service)
 
