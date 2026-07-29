@@ -110,6 +110,27 @@ class EtcBusinessBatchApiRoutes:
             return self._error_response(exc)
         return HTTPStatus.OK, result
 
+    def repair_invoice_attachments(
+        self,
+        business_batch_id: str,
+        uploads: list[UploadedEtcZipFile],
+        *,
+        expected_version: int | None,
+        reason: str,
+        session: OARequestSession,
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        try:
+            result = self._application_service.repair_invoice_attachments_payload(
+                business_batch_id,
+                uploads,
+                expected_version=expected_version,
+                reason=reason,
+                actor=self._actor(session),
+            )
+        except Exception as exc:
+            return self._error_response(exc)
+        return self._success(HTTPStatus.OK, result)
+
     def delete_batch(
         self,
         business_batch_id: str,

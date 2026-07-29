@@ -234,6 +234,30 @@ class EtcBusinessBatchApplicationService:
             self._record_invoice_pdf_download(actor, batch, bundle)
         return bundle
 
+    def repair_invoice_attachments_payload(
+        self,
+        business_batch_id: str,
+        uploads: list[UploadedEtcZipFile],
+        *,
+        expected_version: int | None,
+        reason: str,
+        actor: EtcBusinessBatchActor,
+    ) -> dict[str, object]:
+        self._scoped_batch(business_batch_id, actor)
+        if not actor.can_admin_access:
+            raise EtcBusinessBatchScopeError("只有管理员可以恢复 ETC 批次附件。")
+        if expected_version is None:
+            raise EtcBusinessBatchInvalidTransitionError(
+                "expectedVersion is required.",
+                code="expected_version_required",
+            )
+        return self._etc_service.repair_business_batch_invoice_attachments(
+            business_batch_id,
+            uploads,
+            expected_version=expected_version,
+            reason=reason,
+        )
+
     def preview_import_payload(
         self,
         business_batch_id: str,

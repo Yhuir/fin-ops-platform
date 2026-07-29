@@ -4761,6 +4761,28 @@ class Application:
         if isinstance(session, Response):
             return session
         routes = self._etc_business_routes()
+        if method == "POST" and action == "invoice-pdf/repair":
+            fields, files, error = self._load_multipart_body(body, headers)
+            if error is not None:
+                return error
+            if not files or any(not file.file_name.lower().endswith(".zip") for file in files):
+                return self._etc_business_response(
+                    HTTPStatus.BAD_REQUEST,
+                    None,
+                    code="invalid_invoice_attachment_repair_request",
+                    message="At least one original ETC zip file is required.",
+                )
+            uploads = [UploadedEtcZipFile(file_name=file.file_name, content=file.content) for file in files]
+            status_code, payload = routes.repair_invoice_attachments(
+                business_batch_id,
+                uploads,
+                expected_version=self._optional_int(
+                    (fields.get("expectedVersion") or fields.get("expected_version") or [None])[0]
+                ),
+                reason=str((fields.get("reason") or [""])[0] or "").strip(),
+                session=session,
+            )
+            return self._json_response(status_code, payload)
         if method == "POST" and action == "source-files":
             _fields, files, error = self._load_multipart_body(body, headers)
             if error is not None:

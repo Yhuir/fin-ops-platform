@@ -23,6 +23,7 @@
   - 暂存批次选择“我已在 OA 系统上完成 OA 草稿的提交”进入已提交；选择“我已在 OA 系统上删除该 OA 草稿”进入 `not_submitted`，清空 submission/draft 占用但保留批次、发票成员、源文件和核对数据。
   - 创建 OA 草稿后只能由 `manual-oa-status` 人工确认 `submitted` 或 `not_submitted`。
   - OA 草稿创建成功后，或 business batch 已进入 `oa_submitted` / `manually_marked_submitted` / `closed` 后，允许只读下载当前批次关联的 ETC 发票合并 PDF；历史已提交批次不要求补造 OA 草稿 ID。暂存区与已提交“发票明细”标题栏复用同一 API，下载不改变批次/折叠状态。`invoice_ids` 决定成员，稳定排序后每张发票必须恰好贡献一页，任一来源异常时整包失败。
+  - 历史已提交批次若 PDF/XML 对象缺失，管理员可用原始 ZIP、当前版本和原因执行受限附件恢复；只有与既有 hash 完全一致的缺失附件可写回。恢复不改变批次状态、成员、OA 或配对关系，重复执行必须幂等。
   - `submitted` 成功后，关联台 open 区生成一条 `source_kind=etc_invoice_summary` 折叠汇总发票行，金额取业务批次上报金额，等待未来 OA 和银行流水进入后普通配对。
   - 任意业务阶段允许删除本地批次记录；删除必须写入审计并校验 `expectedVersion` 防并发覆盖，但不得因 `importing`、`oa_draft_created`、`submitted_confirmed`、`closed` 等流程状态阻塞。
   - 删除未提交批次会清理本地导入批次、ETC metadata/附件关系和绑定任务；删除已提交批次会本地 reset 业务批次，释放 ETC 发票 `current_batch_id`，让 `etc_invoice_summary` 消失；只有原本已存在于统一发票池的发票才可能回到普通发票视图。
