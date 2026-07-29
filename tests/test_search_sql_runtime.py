@@ -97,6 +97,28 @@ class QueueRecorder:
 
 
 class SearchSqlRuntimeTests(unittest.TestCase):
+    def test_canonical_search_scan_uses_background_statement_timeout(self) -> None:
+        class RecordingRepository(PostgresWorkbenchCanonicalQueryRepository):
+            def __init__(self) -> None:
+                self.statement_timeout_seconds = 0
+
+            def _in_snapshot(
+                self,
+                _operation: object,
+                *,
+                statement_timeout_seconds: int = 2,
+            ) -> list[dict[str, object]]:
+                self.statement_timeout_seconds = statement_timeout_seconds
+                return []
+
+        repository = RecordingRepository()
+
+        self.assertEqual(
+            repository.list_canonical_search_rows(scope_key="2026-06"),
+            [],
+        )
+        self.assertEqual(repository.statement_timeout_seconds, 90)
+
     def test_projection_uses_only_canonical_repository_contract(self) -> None:
         repository = RecordingSearchRepository()
         builder = SearchSqlProjectionBuilder(

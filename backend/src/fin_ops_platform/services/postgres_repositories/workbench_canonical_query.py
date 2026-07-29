@@ -662,7 +662,8 @@ class PostgresWorkbenchCanonicalQueryRepository:
 
     def list_canonical_search_rows(self, *, scope_key: str) -> list[dict[str, Any]]:
         return self._in_snapshot(
-            lambda repository: repository._search_rows(scope_key=scope_key)
+            lambda repository: repository._search_rows(scope_key=scope_key),
+            statement_timeout_seconds=90,
         )
 
     def list_workbench_search_scope_keys(self) -> list[str]:
@@ -830,13 +831,20 @@ class PostgresWorkbenchCanonicalQueryRepository:
             "override_membership_version": str(payload.get("override_membership_version") or ""),
         }
 
-    def _in_snapshot(self, operation: Callable[[PostgresWorkbenchCanonicalQueryRepository], Any]) -> Any:
+    def _in_snapshot(
+        self,
+        operation: Callable[[PostgresWorkbenchCanonicalQueryRepository], Any],
+        *,
+        statement_timeout_seconds: int = 2,
+    ) -> Any:
         transaction_factory = getattr(self._connection, "transaction", None)
         if not callable(transaction_factory):
             raise RuntimeError("Workbench canonical queries require PostgreSQL transaction support.")
         with transaction_factory() as transaction:
             transaction.execute("set transaction isolation level repeatable read read only")
-            transaction.execute("set local statement_timeout = '2s'")
+            transaction.execute(
+                f"set local statement_timeout = '{int(statement_timeout_seconds)}s'"
+            )
             return _without_retired_page_runtime_fields(
                 operation(PostgresWorkbenchCanonicalQueryRepository(transaction))
             )

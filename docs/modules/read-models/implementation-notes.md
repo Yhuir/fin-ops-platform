@@ -1869,3 +1869,9 @@
 - 生产 failed scope 暴露 `PostgresSearchWorkbenchRelationReadModelRepository._upsert_workbench_relation_scope` 被实例调用但缺少 `@staticmethod`，Python 将 repository 实例错误绑定为第一个位置参数，导致 full、partial 和 empty scope 发布都可能在 metadata upsert 前失败。
 - 修复只把这个无实例状态 helper 明确为 staticmethod；SQL、事务、scope、source versions、durable queue、worker registry 和消费者合同均未改变，也没有增加 fallback writer。
 - failed scope 必须通过正式 runtime queue operator 重试；禁止直接 SQL 把 dirty scope 标成 fresh。
+
+## 2026-07-29 - Search 后台 canonical scan 超时边界修复
+
+- 生产 `search:2026-06` refresh 证明 worker 虽配置 90 秒 statement budget，但复用的 Workbench canonical repository 在每个 snapshot 内固定覆盖为 2 秒，导致后台 rebuild 重试直至 dead-letter。
+- 修复只让 `list_canonical_search_rows(...)` 显式使用现有 90 秒 worker budget；Workbench 页面 initial/groups/detail 等热路径继续使用 2 秒 fail-fast。未新增表、索引、worker、queue、cache、fallback 或 API 字段。
+- 定向测试锁定后台与页面超时边界不能再次互相污染；生产通过正式 refresh gateway 重建 exact `search:2026-06` scope，不直接改 readiness 或 read model rows。

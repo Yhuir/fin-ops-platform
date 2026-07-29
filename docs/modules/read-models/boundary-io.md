@@ -36,6 +36,9 @@
 | `search` | `search` month / `all` fan-out command | `search` 及并行 search 实例 | Search read API | `SearchReadModelRepositoryPort` |
 | `no_oa_bank_batch` | `no_oa_bank_batch` month / `all` fan-out command | `no-oa-bank-batch` | `NoOaBankBatchApplicationService` | `NoOaBankBatchReadModelRepositoryPort` |
 
+Search 后台 canonical month scan 使用既有 search worker 的 90 秒 statement budget；Workbench 页面
+canonical 查询仍保持 2 秒 fail-fast。两者共用 repository 事实口径，但不得共用页面热路径超时上限。
+
 三个共享模型的 `all` 只是 maintenance fan-out 命令。关联台页面的 `all` 查询由 active month
 generations 组合，不发布 materialized `all` parent；各 producer 必须枚举真实 month shards。
 普通业务写不得用 `all` 代替精确影响范围。

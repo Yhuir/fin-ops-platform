@@ -41,6 +41,8 @@
 - `tests/test_write_operation_impact_matrix.py`
 - `tests/test_deploy_runtime_examples.py`
 - `tests/test_postgres_migrations.py`
+- `tests/test_search_sql_runtime.py`：锁定 Search 后台 canonical scan 使用 90 秒 worker budget，
+  同时 Workbench 页面 snapshot 继续保持 2 秒 fail-fast。
 
 各页面的业务和交互测试归对应 `docs/modules/<module>/tests.md`，本文件不维护第二份
 页面清单。
