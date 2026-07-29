@@ -179,6 +179,43 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("key_display_fields", queried_sql)
         self.assertNotIn("read_model.source_versions as row_source_versions", queried_sql)
 
+    def test_missing_live_bank_flow_candidate_is_a_blocking_expected_set_gap(self) -> None:
+        connection = FakeConnection(
+            rows_by_check={
+                "canonical_expected_set": [
+                    {
+                        "subject_id": "bank_flow_rule_batch_v1_missing",
+                        "scope_key": "2026-05",
+                        "mismatch_kind": "live_candidate_missing_from_page",
+                        "expected_member_ids": ["bank-in-188500", "bank-out-188500"],
+                        "expected_total_amount": "188500.00",
+                    }
+                ]
+            }
+        )
+
+        report = audit_page_business_read_model.audit_page_business_read_model(
+            connection,
+            domain_key="bank_flow_rule_batches",
+        )
+
+        self.assertEqual(report["overall_status"], "issues_found")
+        self.assertEqual(
+            report["summary"]["issue_sample_counts_by_code"],
+            {"bank_flow_rule_batches_canonical_expected_set_mismatch": 1},
+        )
+        expected_sql = next(
+            sql
+            for sql, _params in connection.fetch_all_calls
+            if "/* check: canonical_expected_set */" in sql
+        )
+        self.assertIn("app.bank_transactions", expected_sql)
+        self.assertIn("app.bank_transaction_category_confirmations", expected_sql)
+        self.assertIn("app.bank_transaction_categories", expected_sql)
+        self.assertIn("app.app_settings", expected_sql)
+        self.assertIn("app.workbench_pair_relations", expected_sql)
+        self.assertNotIn("where batch.status in ('draft', 'unsubmitted')", expected_sql)
+
     def test_bank_flow_rule_batch_audit_proves_page_and_active_relation_member_sets(self) -> None:
         connection = FakeConnection()
 

@@ -1395,7 +1395,7 @@ describe("BankFlowRuleBatchPage", () => {
         "/api/bank-flow-rule-batches/batch-draft-transfer/submit",
         expect.objectContaining({
           method: "POST",
-          body: JSON.stringify({ expected_version: 1, note: "" }),
+          body: JSON.stringify({ expected_version: 1, scope_month: "2026-05", note: "" }),
         }),
       );
     });
@@ -1422,6 +1422,38 @@ describe("BankFlowRuleBatchPage", () => {
       expect.anything(),
     );
     expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
+  });
+
+  test("does not render eligible tag labels with no live candidate", async () => {
+    installFetchMock(listPayload, {
+      tagSelection: {
+        ...tagSelectionPayload,
+        active_tags: [
+          ...tagSelectionPayload.active_tags,
+          {
+            code: "ghost_live_candidate",
+            label: "幽灵候选",
+            output_primary_label: "幽灵分组",
+            output_sub_label: "幽灵候选",
+            status: "active",
+          },
+        ],
+        rules: [
+          ...tagSelectionPayload.rules,
+          {
+            tag_code: "ghost_live_candidate",
+            requires_oa: false,
+            requires_invoice: false,
+          },
+        ],
+      },
+    });
+
+    renderPage();
+
+    await screen.findByText("网银手续费");
+    expect(screen.queryByRole("button", { name: /幽灵分组/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /幽灵候选/ })).not.toBeInTheDocument();
   });
 
   test("does not expose internal transfer conflicts in the main list", async () => {

@@ -1661,6 +1661,186 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["draft_count"], 1)
         self.assertEqual(payload["summary"]["total_amount"], "188500.00")
 
+    def test_submit_live_candidate_rederives_the_bounded_month_before_write(self) -> None:
+        class Repository:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def read_batch(self, _batch_id: str) -> None:
+                return None
+
+            def read_page(
+                self,
+                filters: dict[str, object],
+                *,
+                summary_filters: dict[str, object],
+                page: int,
+                page_size: int | None,
+            ) -> dict[str, object]:
+                self.calls.append(
+                    {
+                        "filters": dict(filters),
+                        "summary_filters": dict(summary_filters),
+                        "page": page,
+                        "page_size": page_size,
+                    }
+                )
+                return {
+                    "candidate_rows": [
+                        {
+                            "id": "bank-out-188500",
+                            "trade_time": "2026-05-14T09:00:00",
+                            "account_key": "CCB:8106",
+                            "direction": "expense",
+                            "amount": "188500.00",
+                            "category_code": "internal_transfer",
+                            "category_source": "confirmed",
+                        },
+                        {
+                            "id": "bank-in-188500",
+                            "trade_time": "2026-05-14T09:30:00",
+                            "account_key": "ICBC:6386",
+                            "direction": "income",
+                            "amount": "188500.00",
+                            "category_code": "internal_transfer",
+                            "category_source": "confirmed",
+                        },
+                    ],
+                    "active_relations": [],
+                    "formal_items": [],
+                    "tag_policy": {
+                        "active_tags": [{"code": "internal_transfer", "label": "内部往来款"}],
+                        "requirements_by_tag_code": {
+                            "internal_transfer": {
+                                "requires_oa": False,
+                                "requires_invoice": False,
+                            }
+                        },
+                    },
+                }
+
+        repository = Repository()
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+        service._query_repository = repository
+        service._bank_batch_service = BankBatchService(
+            schema_version=BANK_FLOW_RULE_BATCH_SCHEMA_VERSION,
+            batch_id_prefix=BANK_FLOW_RULE_BATCH_ID_PREFIX,
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+        )
+        service._confirm_relation_for_batch = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
+        service._mutation_result = (  # type: ignore[method-assign]
+            lambda batch, **_kwargs: {"batch": dict(batch)}
+        )
+        candidate = service.list_batches_payload(
+            {"month": ["2026-05"], "bucket": ["unsubmitted"]},
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+        )["batches"][0]
+        repository.calls.clear()
+
+        result = service.submit_batch(
+            str(candidate["batch_id"]),
+            actor="finance-user",
+            expected_version=int(candidate["version"]),
+            note="提交",
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+            scope_month="2026-05",
+        )
+
+        self.assertEqual(result["batch"]["status"], "submitted")
+        self.assertEqual(
+            repository.calls,
+            [
+                {
+                    "filters": {"month": "2026-05", "bucket": "unsubmitted"},
+                    "summary_filters": {"month": "2026-05"},
+                    "page": 1,
+                    "page_size": None,
+                }
+            ],
+        )
+
+    def test_withdrawn_formal_item_does_not_hide_requalified_live_candidate(self) -> None:
+        class Repository:
+            def read_page(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+                rows = [
+                    {
+                        "id": "bank-out-188500",
+                        "trade_time": "2026-05-14T09:00:00",
+                        "account_key": "CCB:8106",
+                        "direction": "expense",
+                        "amount": "188500.00",
+                        "category_code": "internal_transfer",
+                        "category_source": "confirmed",
+                    },
+                    {
+                        "id": "bank-in-188500",
+                        "trade_time": "2026-05-14T09:30:00",
+                        "account_key": "ICBC:6386",
+                        "direction": "income",
+                        "amount": "188500.00",
+                        "category_code": "internal_transfer",
+                        "category_source": "confirmed",
+                    },
+                ]
+                candidate_service = BankBatchService(
+                    schema_version=BANK_FLOW_RULE_BATCH_SCHEMA_VERSION,
+                    batch_id_prefix=BANK_FLOW_RULE_BATCH_ID_PREFIX,
+                    relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                )
+                candidate_service.build_batches(
+                    rows,
+                    {
+                        str(row["id"]): {
+                            "category_code": "internal_transfer",
+                            "category_source": "confirmed",
+                        }
+                        for row in rows
+                    },
+                    [],
+                    {},
+                    eligible_batch_types={"internal_transfer"},
+                    relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                )
+                withdrawn = candidate_service.list_batches()[0]
+                withdrawn.update(
+                    {
+                        "status": "withdrawn",
+                        "status_bucket": "withdrawn",
+                        "version": 3,
+                    }
+                )
+                return {
+                    "candidate_rows": rows,
+                    "active_relations": [],
+                    "formal_items": [withdrawn],
+                    "tag_policy": {
+                        "active_tags": [{"code": "internal_transfer", "label": "内部往来款"}],
+                        "requirements_by_tag_code": {
+                            "internal_transfer": {
+                                "requires_oa": False,
+                                "requires_invoice": False,
+                            }
+                        },
+                    },
+                }
+
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+        service._query_repository = Repository()
+        service._bank_batch_service = BankBatchService(
+            schema_version=BANK_FLOW_RULE_BATCH_SCHEMA_VERSION,
+            batch_id_prefix=BANK_FLOW_RULE_BATCH_ID_PREFIX,
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+        )
+
+        payload = service.list_batches_payload(
+            {"month": ["2026-05"], "bucket": ["unsubmitted"]},
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+        )
+
+        self.assertEqual(len(payload["batches"]), 1)
+        self.assertEqual(payload["batches"][0]["status"], "draft")
+        self.assertEqual(payload["batches"][0]["total_amount"], "188500.00")
+
     def test_bank_flow_live_internal_transfer_keeps_unique_pair_and_fails_closed_on_ambiguous_remainder(
         self,
     ) -> None:
