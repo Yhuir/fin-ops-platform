@@ -1422,3 +1422,4 @@
 - 真实根因：`month=all` 的 bounded relation preview 会按 active generation-set 读取全部月份；跨月 `turnover_manual_closure` 依法在每个成员月完整投影同一 canonical bank row，旧 row-id 索引把任何重复都误判为冲突，导致合法确认预览返回 `relation_preview_rows_ambiguous`。
 - 修复只在 confirm/withdraw 共用的 repository 行索引边界合并规范化内容完全相同的 row；同 row id 的金额、状态、来源或其它规范化字段不一致仍 fail closed。selected 顺序、OA attachment context、两次 freshness/version 门禁、20/100 行上限和正式 command/UoW canonical reread 均不变。
 - 不改 projection、relation fact、generation、SQL、schema、worker、queue、Redis 或正式写入；不使用 `DISTINCT` 隐藏真实冲突。前端只新增该稳定错误码的批准中文文案。
+- 生产 release `main-bf429ea3-20260729170433` 上，原 409 的真实 1 OA + 4 流水选区返回 200、`can_submit=true`、金额 matched；20 次稳态 preview p50/p95/max 为 `252.383/730.272/814.141ms`。combined initial 与搜索组 p95 为 `303.235/175.834ms`，Page Audit 为 `pass/fresh/drained`、issues 为空。
