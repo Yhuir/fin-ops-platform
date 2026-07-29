@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Phase 33 direct-canonical Turnover implementation started; Phase 32 production proof joins the same candidate
-last_updated: "2026-07-29T00:32:00+08:00"
-last_activity: 2026-07-29 -- Quick 260729-037 Workbench collapse/search fix deployed and production-verified
+last_updated: "2026-07-29T10:54:29+08:00"
+last_activity: 2026-07-29 -- Quick 260729-dg6 ETC submitted PDF/OA attachment repair deployed and production-verified
 progress:
   total_phases: 30
   completed_phases: 5
@@ -198,6 +198,7 @@ None yet.
 | 260728-g9q | OA 来源别名确定性归一到 canonical OA ID | 2026-07-28 | 454b0a5f2 | [260728-g9q-oa-oa-id-validate](./quick/260728-g9q-oa-oa-id-validate/) |
 | 260728-ngb | 关联台逐栏折叠、ETC 明细和搜索真实命中修复 | 2026-07-28 | — | [260728-ngb-etc](./quick/260728-ngb-etc/) |
 | 260729-037 | 关联台搜索与 ETC/流水规则批次折叠状态解耦 | 2026-07-29 | a21cb8e36 | [260729-037-etc](./quick/260729-037-etc/) |
+| 260729-dg6 | ETC 已提交批次 PDF 下载、历史附件恢复与 OA URL 修复 | 2026-07-29 | 0c72cae27 | [260729-dg6](./quick/260729-dg6-etc-submitted-batch-pdf-download-and-oa-/) |
 
 ## Deferred Items
 
