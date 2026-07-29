@@ -227,6 +227,52 @@ def _bare_application(*, backend: str = "postgres", bootstrap_mode: str = "produ
     return app
 
 class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
+    def test_bank_flow_canonical_draft_runtime_chain_stays_deleted(self) -> None:
+        retired_files = (
+            SERVICES_ROOT / "bank_flow_rule_batch_canonical_draft_owner.py",
+            SERVICES_ROOT / "bank_flow_rule_batch_canonical_draft_producer.py",
+            SERVICES_ROOT / "bank_flow_rule_batch_derived_lifecycle_executor.py",
+            REPO_ROOT / "deploy" / "oa" / "env" / "fin-ops.worker.bank-flow-rule-batch.env.example",
+        )
+        retired_tokens = (
+            "bank_flow_rule_batch.canonical_draft.refresh",
+            "BankFlowRuleBatchCanonicalDraftOwner",
+            "BankFlowRuleBatchCanonicalDraftProducer",
+            "BankFlowRuleBatchDerivedLifecycleExecutor",
+            "--enable-bank-flow-rule-batch-canonical-draft-refresh",
+            "bank-flow-rule-batch-canonical-draft",
+            "enqueue_bank_flow_canonical_drafts",
+            "bank_flow_rule_batch_canonical_draft_scope_lock",
+        )
+        production_roots = (
+            SOURCE_ROOT,
+            REPO_ROOT / "scripts",
+            REPO_ROOT / "deploy",
+        )
+        violations = [
+            f"retired file still exists: {_relative(path)}"
+            for path in retired_files
+            if path.exists()
+        ]
+        for path in (
+            candidate
+            for root in production_roots
+            for candidate in root.rglob("*")
+            if candidate.is_file()
+            and (
+                candidate.suffix in {".py", ".sh"}
+                or ".env" in candidate.name
+            )
+        ):
+            source = path.read_text(encoding="utf-8", errors="ignore")
+            for token in retired_tokens:
+                if token in source:
+                    violations.append(
+                        f"{_relative(path)} retains retired bank-flow draft token {token}"
+                    )
+
+        self.assertEqual(violations, [])
+
     def test_file_import_has_one_durable_confirm_path_and_removed_revert_fallbacks(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
