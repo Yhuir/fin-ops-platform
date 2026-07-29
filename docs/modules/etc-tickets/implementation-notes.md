@@ -925,3 +925,11 @@
 - 关键决策：恢复原 business/submission batch，不生成第二个内部 ID，不重新提交 OA；dry-run 同时核对版本、OA row、发票数量和含税总额，旧 OA 来源 ID 只有经 `app.oa_source_aliases.status=active` 证明后才能归一到当前 canonical OA ID，execute 使用 fingerprint。canonical invoice link 只通过目标批次限定的严格 backfill，关联台 `etc_batch_link` 只由 matching worker 的正式 relation UoW 生成。
 - 旧逻辑删除：移除 `scripts/repair_historical_etc_batches.py --apply` 及其直接 `create_active_relation` 写入旁路。
 - 测试覆盖：service 覆盖删除 guard、历史 tombstone 恢复、成员/金额/OA 边界和幂等重试；tool 覆盖 fingerprint 执行；backfill 覆盖 exact business batch filter；静态边界 guard 防止旧 relation 旁路回流。
+
+## 2026-07-29 - 历史 ETC OA 附件 URL 全量收敛
+
+- 目标：纠正首次只验证一条 OA 的生产验证缺口，确保全部历史 ETC OA 不再返回 `127.0.0.1` 内部附件地址。
+- 生产范围：全量读取 form 2 的 1,554 条记录，识别 7 条 ETC OA；另发现 4 条受影响记录、344 个错误字段，非 ETC 同类错误为 0。
+- 安全边界：逐记录原文备份、SHA-256、写前重读比较；只替换已知 URL 前缀，金额、流程状态、创建信息和附件成员保持不变。
+- 验证结果：全表复扫错误引用为 0；7 条 ETC OA 的 206 个唯一 PDF 引用全部通过 HTTP 状态、MIME 和 PDF magic 校验。用户报告的 3740.82 OA 从 128 个错误字段收敛为 0。
+- 架构结论：未来写入继续由 `HttpEtcOAClient.upload_attachment()` 的单一 adapter 边界归一；不增加页面/Nginx fallback、read model、worker、缓存或第二条修复链路。

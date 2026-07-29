@@ -171,3 +171,10 @@
 - 决策：schedule item 分别保存 `fee_content` 与 `fee_description`；`expense_content` 继续使用首个非空字段作为兼容输出，不新增表、worker、read model 或第二同步链路。
 - 存量：`OA_PROJECTION_SYNC_VERSION` 升级为 `2026-07-28-expense-item-display-fields-v3`，只通过既有 durable `oa.sync` worker 幂等重投。
 - 不变项：原 OA Mongo 只读、父 OA relation identity、统一发票池和附件 promotion 规则不变；禁止 fuzzy item/invoice mapping。
+
+## 2026-07-29 ETC OA 历史附件引用全量修复
+
+- 目标：修复 ETC OA 表单历史数据中保存的 `http://127.0.0.1:9300/fileManager/...`，避免 OA 前端生成 `/oa-apihttp://...` 空白链接。
+- 受控写入：全量扫描 form 2，按 ETC 强 marker 限定对象；逐记录备份、哈希并发门禁后，只把内部绝对前缀替换为根相对 `/fileManager/`。
+- 生产结果：1,554 条记录全量复扫，7 条 ETC OA 与全部非 ETC OA 的目标错误引用均为 0；206 个唯一 ETC PDF 全部验证为真实 PDF。
+- 不变项：不重提 OA，不修改 `processStatus`、金额、附件成员、App canonical facts、配对关系或任何 read model/worker。

@@ -94,6 +94,19 @@ JSON API 响应 `Content-Type` 必须是 JSON 类型；`invoice-pdf` 必须是 `
 - 已确认未创建：同一管理员入口提供当前版本、原因、核实证据和 `confirmedNotCreated=true`，批次进入明确失败后才允许新的用户 intent。
 - 无法确认：保持 creating，Audit 继续失败并升级给 OA owner；不得用猜测结果换取绿色状态。
 
+## 历史 ETC OA 附件引用修复
+
+历史版本若把 OA 内部地址保存成 `http://127.0.0.1:9300/fileManager/...`，浏览器会错误拼成 `/oa-apihttp://127.0.0.1:9300/...`。修复必须是受控数据操作，不得在页面或 Nginx 增加兼容拼接：
+
+1. 通过 OA form 2 的正式分页 API读取全部记录，使用 `ETC批量提交`、`etc_batch_id=` 或 `business_batch_id=etc_business_batch` 的强标识限定 ETC 记录；同时报告 ETC 与非 ETC 的错误引用数量。
+2. 对每条受影响记录保存原文和 SHA-256；写入前再次读取并比较 canonical record hash，记录变化时停止，不覆盖并发修改。
+3. 只允许把字符串前缀 `http://127.0.0.1:9300/fileManager/` 精确替换为 `/fileManager/`；不得改变金额、流程状态、附件成员或其它业务字段。
+4. 更新后逐条回读并与“原数据 + 精确 URL 替换”的期望 payload 做完整相等比较。
+5. 再次全量扫描 form 2；只有 ETC 与非 ETC 的目标错误引用均为 0 才能通过。不得用一条 OA、一个批次或页面截图代替全量门禁。
+6. 提取全部 ETC OA 的唯一 `/fileManager/*.pdf` 引用，逐一验证 HTTP 200/206、`application/pdf` 和 `%PDF-` 文件头。
+
+本操作不重新提交 OA，不创建附件，不改变 ETC business batch、统一发票、配对关系、read model、worker 或缓存。
+
 ## 业务批次本地删除
 
 ETC 批次删除是本地清理操作，不是 OA 撤销。删除入口包括：
