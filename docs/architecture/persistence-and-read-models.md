@@ -69,8 +69,9 @@ Manifest、scope policy、App Status registry 和带 `read_model_key` 的 worker
 缓存 freshness gate 已证明的 payload；RabbitMQ 只能作为 optional transport/wakeup，消费方仍需回
 PostgreSQL claim/ack。
 
-`bank_flow_rule_batch.canonical_draft.refresh`、OA sync、import processing 和 Workbench matching 是领域或
-集成任务，不是页面 read model，不能登记到 read-model manifest。
+OA sync、import processing 和 Workbench matching 是领域或集成任务，不是页面 read model，不能登记到
+read-model manifest。Bank-flow 未提交候选是请求内 live derive，不是任务；不得登记 event、queue、worker、
+readiness、cache 或 replay。
 
 ## 旧链删除与回滚
 

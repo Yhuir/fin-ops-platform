@@ -1,6 +1,6 @@
 # 流水规则批量处理状态机
 
-> `/bank-flow-rule-batches` 只调用页面专属 API。列表、summary、分页和详情直接读取 PostgreSQL canonical facts；页面没有 read-model freshness、refresh enqueue、202 reconcile 或后台轮询状态。
+> `/bank-flow-rule-batches` 只调用页面专属 API。列表、summary 和分页在同一 PostgreSQL snapshot 读取 canonical facts、请求内实时推导候选，详情读取正式历史；页面没有 read-model freshness、refresh enqueue、202 reconcile 或后台轮询状态。
 
 ## 标签规则状态
 
@@ -21,16 +21,16 @@
 
 | 状态 | 事实源 | 语义 | 允许流转 |
 | --- | --- | --- | --- |
-| `candidate` | `app.bank_flow_rule_batches` + 当前银行/标签规则事实 + active relation | 当前筛选下可提交且未被 active relation 占用。 | 用户选择后进入 `selected_draft`；提交后进入 `submitted`。 |
+| `candidate` | 请求内 live builder + 当前银行/标签规则事实 + active relation | 当前筛选下实时生成、可提交且未被 active relation 占用；不是持久化状态。 | 用户选择后进入 `selected_draft`；提交后进入 `submitted`。 |
 | `document_flow_only` | 当前标签规则 | 需要 OA、发票或缺少双 false 规则，不属于本页未提交候选。 | 规则未来改为双 false 且无 active relation 时可重新成为 candidate。 |
 | `selected_draft` | 页面本地状态 | 用户本次选择，尚未写事实。 | 提交成功进入 `submitted`；清空或切换筛选回到 candidate。 |
 | `submitted` | `app.bank_flow_rule_batches` + `app.workbench_pair_relations.status='active'` | relation command 已原子创建正式关系。 | withdraw/reset 后进入 `withdrawn`。 |
-| `withdrawn` | batch event + cancelled relation | 历史批次保留，银行流水释放。 | 不自动恢复；再次处理走新 command。 |
+| `withdrawn` | batch event + cancelled relation | 历史批次保留，银行流水释放。 | 当前事实仍合格时，下一次 GET 同时实时生成新的 candidate；再次提交走新 command。 |
 | `blocked` | service validation | 重复、跨月、跨账户、混合标签、占用、CAS、权限或写入失败。 | 修复输入或重新读取后再提交。 |
 
 提交规则：
 
-- `transaction_ids` 必填、非空、去重；提交前重查银行流水身份、月份、账户、当前标签资格和 active relation 占用。
+- live candidate submit 必须携带合法 `scope_month`；提交事务内按 candidate identity 重读并重算银行流水身份、成员、金额、分类、规则和 active relation 占用，遗留 persisted draft 必须返回 conflict。
 - active relation 只从 `app.workbench_pair_relations` 读取，禁止使用 Workbench page read model 或 relation projection。
 - 内部转账必须保持一收一支、不同账户、48 小时窗口；批次金额只计单边金额。
 - submit/submit-selection/withdraw/reset 必须继续通过 relation command、占用检查、幂等/CAS、审计和 changed-batch delta writer 原子提交。
@@ -61,4 +61,4 @@
 | `submitting` | command 进行中；成功后执行一次列表 GET。 |
 | `resetting_submitted` | bulk withdraw 进行中；成功后执行一次列表 GET。 |
 
-列表响应只包含 `summary`、`batches`、`pagination`。一次请求中的 rows、total 和 summary 必须处于同一显式 `REPEATABLE READ / READ ONLY` snapshot；查询数固定，服务端过滤、排序和分页。
+列表响应只包含 `summary`、`batches`、`pagination`。一次请求中的 rows、total 和 summary 必须处于同一显式 `REPEATABLE READ / READ ONLY` snapshot；repository 以固定数量集合查询读取请求月份窗口，application service 对同一 live candidate 集合执行过滤、排序和分页。

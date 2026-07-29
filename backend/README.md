@@ -79,7 +79,6 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.app.worker --check
 - `worker-workbench-relation`：`--enable-workbench-relation-read-model-refresh --worker-kind workbench-relation-read-model --event-type workbench_relation.read_model.refresh`
 - `worker-no-oa-bank-batch`：`--enable-no-oa-bank-batch-read-model-refresh --worker-kind no-oa-bank-batch-read-model --event-type no_oa_bank_batch.read_model.refresh`
 - `worker-search-*`：`--enable-search-read-model-refresh --worker-kind search-read-model --event-type search.read_model.refresh`
-- `worker-bank-flow-rule-batch`：`--enable-bank-flow-rule-batch-canonical-draft-refresh --worker-kind bank-flow-rule-batch-canonical-draft --event-type bank_flow_rule_batch.canonical_draft.refresh`
 - `worker-import`：`--enable-import-job-processing --worker-kind import-job --event-type import.process.requested`
 
 Workbench、银行明细、待找发票、进项使用、销项收款、OA 待付款、税金抵扣和成本统计页面直接读取 canonical facts，不再配置页面 read-model worker。

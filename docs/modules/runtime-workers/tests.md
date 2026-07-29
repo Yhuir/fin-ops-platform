@@ -7,15 +7,15 @@
   `no_oa_bank_batch`；retired page worker/event/env 不存在。
 - PostgreSQL durable queue 是 job/read-model 状态事实源；RabbitMQ 只负责 wakeup。
 - Worker 不依赖 `Application`、Flask/session/header/HTTP response。
-- import、OA sync、Workbench matching、BankFlow canonical draft 是领域/integration job，
-  不能登记为页面 read model。
+- import、OA sync、Workbench matching 是领域/integration job，不能登记为页面 read model；
+  BankFlow live candidate 不是 job，不得登记 event 或 worker。
 - deploy 必须 stop/disable 未登记 instance，并在 retired processing work 存在时拒绝激活。
 
 ## 七类测试
 
 | 类别 | 适用性 | 当前入口 |
 | --- | --- | --- |
-| 1. 业务核心 | 间接适用 | 各 handler owner 测试保护 import/OA/matching/canonical draft 业务规则 |
+| 1. 业务核心 | 间接适用 | 各 handler owner 测试保护 import/OA/matching 业务规则；BankFlow live candidate 由页面模块测试覆盖 |
 | 2. Service/repository | 适用 | `tests/test_runtime_worker.py`、`tests/test_runtime_queue.py`：claim、retry、defer、ack、heartbeat、timeout |
 | 3. API contract | 间接适用 | job/App Status API tests 保护状态和错误 shape；worker 自身无 HTTP API |
 | 4. Read model/cache/background job | 核心适用 | `tests/test_runtime_worker_registry.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_read_model_manifest.py` |
@@ -27,7 +27,7 @@
 
 - retired page `*.read_model.refresh`、scope、handler、registration、env/systemd unit 不存在。
 - registry/manifest/scope/App Status 集合精确三项。
-- `bank_flow_rule_batch.canonical_draft.refresh` 不进入 read-model manifest/readiness。
+- BankFlow draft event/owner/producer/worker/env/replay 保持删除，且不进入 registry、manifest 或 readiness。
 - RabbitMQ consumer 必须回 PostgreSQL claim；publish success 不代表 done/fresh。
 - import/OA sync 不写 full-state snapshot 或 retired page fan-out。
 - deploy preflight 不删除历史表/backlog，不在门禁失败时停止所有保留 worker。

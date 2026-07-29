@@ -102,9 +102,8 @@ freshness gate。
 
 - `workbench`、`workbench_relation`、`search`、`no_oa_bank_batch` 仍通过 gateway、durable queue、
   worker 和 App Status 闭环，只服务各自登记消费者。
-- Workbench matching/rebuild、OA sync、import processing 和
-  `bank_flow_rule_batch.canonical_draft.refresh` 是 canonical integration/domain jobs，
-  不是页面 projection。
+- Workbench matching/rebuild、OA sync 和 import processing 是 canonical integration/domain jobs。
+- `bank_flow_rule_batches` 的未提交候选由请求内 live builder 实时推导，没有 event、worker、replay 或页面 projection；正式 submitted/withdrawn/history 继续读取持久化事实。
 - `/api/operation-barrier/status` 只保留给合同明确返回非空 target 的 maintenance/job；
   普通页面 mutation 不调用。
 

@@ -4,7 +4,7 @@
 - 类型: 页面模块
 - Route: `/bank-flow-rule-batches`
 - Page key: `bank-flow-rule-batches`
-- 状态: implementation-complete / merge-validation-pending。生产页面、API、Bank Transaction Paired Policy、提交/撤回/reset 和关联台合同已接入；列表、summary、分页和详情通过页面专属 canonical query repository 在 PostgreSQL `REPEATABLE READ / READ ONLY` snapshot 中直接读取批次/事件、银行/标签规则和 active pair relations。页面不再读取 `read_model.bank_flow_rule_batch_rows`，不返回 freshness/status/version，不 enqueue 或 polling；写命令成功后只执行一次当前列表 GET。旧 no-OA 仍是独立 legacy 模块，不进入本页面运行链；共享 worker/registry 清理、合并后生产验证和 BRB-E2E-003 fixture 修复由主控完成。
+- 状态: implementation-complete / production-validation-pending。未提交候选由页面 API 在 PostgreSQL `REPEATABLE READ / READ ONLY` snapshot 中从银行流水、当前有效分类、paired policy 与 active relation 实时推导；`app.bank_flow_rule_batches/events` 只保存 submitted、withdrawn、stale 等正式业务历史。页面不读取 read model，不 enqueue 或 polling；旧 canonical draft owner/producer/event/worker/replay/deploy 链已删除。旧 no-OA 仍是独立 legacy 模块。
 
 ## 修改前必读
 
@@ -25,8 +25,8 @@
 - Frontend feature: `web/src/features/bankFlowRuleBatches/api.ts`（HTTP/DTO mapping）、`types.ts`（public DTO/domain types）、`policy.ts`（状态/权限策略）、`viewModel.ts`（格式化、规则 grid view model）、`components.tsx`（分页、状态标签、label rail）。API 指向 `/api/bank-flow-rule-batches`。
 - Backend route: `backend/src/fin_ops_platform/app/routes_bank_flow_rule_batches.py`，只承载 `/api/bank-flow-rule-batches/*`。
 - Backend service: `backend/src/fin_ops_platform/services/bank_flow_rule_batch_application_service.py`，新提交写 `relation_mode=bank_flow_rule_batch`；共享批次计算内核在中性 `bank_batch_application_service.py` / `bank_batch_service.py`，由显式 relation mode/schema/ID prefix 直接生成正式 bank-flow 领域错误和身份，bank-flow 不继承 no-OA application service，route 不保留 legacy 错误翻译或 fallback。
-- Backend query: `backend/src/fin_ops_platform/services/postgres_repositories/bank_flow_rule_batch_canonical_query.py`；SQL 只读 PostgreSQL canonical facts 和 `app.workbench_pair_relations.status='active'`，不读 Workbench projection 或 no-OA fallback。
-- 旧 read-model producer/worker/manifest/deploy 注册已在跨页面清理中删除；`canonical_draft.refresh` 是批次领域后台任务，不是页面 read model。
+- Backend query: `backend/src/fin_ops_platform/services/postgres_repositories/bank_flow_rule_batch_canonical_query.py`；SQL 在同一 snapshot 读取当前候选输入与正式历史，不读 persisted draft、Workbench projection 或 no-OA fallback。
+- 未提交候选使用 `bank_flow_rule_batch_canonical_query.py` 中的共享 live builder 与 `BankBatchService` 内核；页面读取、提交事务复核和 Audit 不得复制第二套匹配算法。
 - Rule persistence: `app_settings.bank_flow_rule_batch_tag_rules.requirements_by_tag_code`；新 API 和服务边界只读写 `rules`，拒绝 `selected_tag_codes`，重复 `tag_code` fail fast。`0111_bank_flow_rule_batch_tag_rules_canonical_shape.sql` 已将一次性复制的 legacy selected seed 合并并删除。
 - Browser E2E: `web/e2e/bank-flow-rule-batches-flow.spec.ts`。
 

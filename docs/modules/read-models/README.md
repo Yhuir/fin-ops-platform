@@ -30,7 +30,7 @@
 - 状态：页面 read model 退役完成，生产发布验证待完成。
 - 当前 registry/manifest 登记 `workbench` active-generation 页面 read model，以及 `workbench_relation`、`search`、`no_oa_bank_batch` 三个共享 projection。共享 projection 只服务各自独立消费者，不能作为 canonical 直读页面的运行时依赖。
 - 关联台继续通过 freshness/status/enqueue、Redis fresh cache 和 Workbench worker 读取 active generation。银行明细、待找发票、进项发票使用、销项发票收款、OA 待付款、税金抵扣和流水规则批量处理直接读取 canonical PostgreSQL snapshot；成本统计、外部往来和批量账务也保持各自 canonical query 边界。
-- BankFlow 的异步任务是 `bank_flow_rule_batch.canonical_draft.refresh`，只重建 `app.bank_flow_rule_batches/events` 中的 canonical draft facts，不是 read model，不登记 readiness/dirty scope/manifest。
+- BankFlow 未提交候选由页面请求内实时推导；没有 draft event、worker、readiness、dirty scope、manifest 或 replay。`app.bank_flow_rule_batches/events` 只保留正式状态和历史。
 - migration `0127_direct_canonical_page_runtime_retirement.sql` 是纯 no-op 退休标记；旧 outbox、dirty scope、readiness 与历史物理 projection 表均不改写、不删除，完整保留上一版本回滚能力。deploy preflight 先停止/disable 退休 instance 并要求退休 runtime 不存在 `processing`；门禁通过后才停止仍登记的上一版本 worker。门禁失败不会中断 import/matching/保留 read-model worker。
 
 ## 当前边界

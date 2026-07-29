@@ -54,8 +54,8 @@ dedupe 后入队。
 - OA sync：原子提交 completed/admission/payment-status/watermark canonical snapshot，不
   fan-out 已退役页面 refresh。
 - Workbench matching：产生 canonical formal relation plan/facts，不发布页面 projection。
-- `bank_flow_rule_batch.canonical_draft.refresh`：幂等维护 canonical batch/event facts，
-  不写 read-model readiness/dirty scope。
+- BankFlow 未提交候选没有 runtime worker；请求内 live derive 直接读取 canonical facts，
+  正式 batch/event 只由业务 command 写入。
 
 这些 worker 可被 App Status 观测，但不能出现在 read-model manifest/scope policy 中。
 
@@ -73,7 +73,7 @@ dedupe 后入队。
 
 - deploy preflight 先 stop/disable 当前 registry 未登记的旧 worker instance，再确认 retired
   event/dirty scope 没有 `processing`。
-- 门禁失败时保留 import、matching、canonical draft 和四个保留 read-model worker 运行，
+- 门禁失败时保留 import、matching 和四个保留 read-model worker 运行，
   不进入“全部 worker 已停”的半发布状态。
 - queue retry、dead-letter repair、history prune 和 worker instance convergence 只通过
   `finops-deploy-control`/登记运维工具执行；prune 只删除 `done` 历史。

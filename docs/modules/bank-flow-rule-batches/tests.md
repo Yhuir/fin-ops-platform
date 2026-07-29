@@ -7,12 +7,12 @@
 | 类别 | 是否适用 | 当前覆盖 |
 | --- | --- | --- |
 | 1. Business core unit tests | 适用 | OA/发票只有双 false 合格；未知、停用、重复标签 fail fast；提交冻结 requirement/category metadata；内部转账金额只计单边；重复选择、占用和版本冲突保持原领域错误。 |
-| 2. Service-layer tests | 适用 | canonical query repository 在一个 `REPEATABLE READ / READ ONLY` snapshot 中完成列表 count、分页 rows 和 summary 聚合；详情集合读取银行流水、当前分类、active relation 和批次事件；submit/withdraw/reset 继续走 relation command 与 batch delta writer。 |
+| 2. Service-layer tests | 适用 | canonical query repository 在一个 `REPEATABLE READ / READ ONLY` snapshot 中读取 live candidate 输入和正式历史；提交事务用同一 builder 复核 candidate guard，失败恢复 relation/batch snapshot；submit/withdraw/reset 继续走 relation command 与 batch delta writer。 |
 | 3. API contract tests | 适用 | 权限、非法参数、空集、筛选、排序、分页、summary、详情、提交/撤回/reset、规则 CAS；明确断言响应不含 `read_model_*`、refresh 或 operation-barrier 字段。 |
-| 4. Read model, cache, and background job tests | 适用（清理回归） | 页面 SQL 禁止读取 `read_model.bank_flow_rule_batch_rows` 和 no-OA 表；页面 service 不 enqueue、不走 relation projection，前端首次 GET 后不后台轮询。共享 registry/worker 的最终删除由主控合并任务处理。 |
+| 4. Read model, cache, and background job tests | 适用（清理回归） | 页面 SQL 禁止读取 persisted draft、`read_model.bank_flow_rule_batch_rows` 和 no-OA 表；canonical draft event/owner/producer/worker/replay/deploy 负向门禁保持删除；no-OA 自身 worker 回归保留。 |
 | 5. Frontend component and interaction tests | 适用 | loading/empty/error、筛选、分页、详情、规则抽屉、权限、提交/撤回/reset；每次成功写命令只触发一次当前列表 GET，不启动 freshness polling。 |
 | 6. End-to-end business-flow integration tests | 适用 | 规则/选择 -> relation command -> canonical batch/event 保存 -> 当前页 GET -> 关联台 active relation 展示；生产合并后补 PostgreSQL 与 Browser smoke。 |
-| 7. Existing feature regression tests | 适用 | no-OA legacy API、Workbench 正式关系、bank-details 标签、成本/外部往来款、权限与审计不受页面读路径迁移影响。 |
+| 7. Existing feature regression tests | 适用 | 188500 元一收一支内部往来、no-OA legacy API/worker、Workbench 正式关系、bank-details 标签、成本/外部往来款、权限与审计不受迁移影响。 |
 
 ## 主要测试入口
 
@@ -37,6 +37,8 @@
 - 规则 CAS 冲突、未知/停用/重复 tag code。
 - 空选择、重复 row、跨月、跨账户、混合标签、active relation 已占用、规则版本过期。
 - Relation command 或 batch delta writer 失败时不得留下半批次。
+- 缺少 `scope_month`、规则漂移、成员漂移或 active relation 新占用必须返回 candidate conflict；遗留 persisted draft 不得被恢复提交。
+- Audit 必须调用共享 builder；故意过滤 188500 候选时 expected-set gate 必须失败。
 - 空列表必须来自已完成的 canonical snapshot，不能由 missing/stale 投影伪造。
 - submitted/withdrawn 历史使用冻结标签和 requirement metadata；当前标签改名或归档不得改写历史。
 - canonical relation 查询只接受 `app.workbench_pair_relations.status='active'`，不得读取 Workbench page projection。

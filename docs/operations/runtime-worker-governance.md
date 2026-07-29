@@ -657,18 +657,6 @@ cd "$release_src"
 
 `0127_direct_canonical_page_runtime_retirement.sql` 是纯 no-op 退休标记：不终止或删除历史 outbox/dirty/readiness，也不 DROP 旧表，因此上一 release 回滚时仍保有完整 backlog、状态和 projection 证据。`finops-deploy-control activate` 必须先停止/disable 新 registry 未登记的退休页面 instance，再查询 PostgreSQL，确认非当前 manifest 的 read-model outbox 与 dirty scope 均无 `processing`；门禁通过后才停止其余上一版本 worker、运行 migration 并激活。门禁失败时不得运行 migration 或激活新版本，且已登记的 import/matching/保留 read-model worker 继续运行，避免生产 runtime 被留在全停状态。新版本的 registry、RabbitMQ dispatcher 和 App Status 不 claim/展示退休历史。`workbench`、Search、`workbench_relation`、no-OA 与 Workbench matching 继续保留；ETC 仍只使用 import worker，没有自己的页面 read model。
 
-Bank-flow 页面本身直接读 canonical facts。`bank_flow_rule_batch.canonical_draft.refresh` 是写侧 canonical draft 任务，不是 read-model refresh：worker kind 为 `bank-flow-rule-batch-canonical-draft`，只写 `app.bank_flow_rule_batches/events`，不写 `read_model.bank_flow_rule_batch_rows`、dirty scope 或 readiness。运维 repair/replay 必须投递该领域事件；不得恢复旧 `bank_flow_rule_batch.read_model.refresh`。
+Bank-flow 未提交候选由页面 API 请求内实时推导，没有 canonical draft event、queue、worker、env 或 replay。`app.bank_flow_rule_batches/events` 只保存 submitted、withdrawn、stale 等正式业务状态和审计历史；运维不得投递 draft refresh、启动 bank-flow worker、手工写 draft 或恢复旧 `bank_flow_rule_batch.read_model.refresh`。
 
-受控 replay 只能在具备目标环境 PostgreSQL 凭据的运维主机运行，并显式记录操作人和 trace：
-
-```bash
-python3 scripts/backfill-runtime-read-models.py \
-  --enqueue-bank-flow-canonical-draft \
-  --bank-flow-scope 2026-05 \
-  --actor-id <operator-id> \
-  --trace-id <change-or-incident-id> \
-  --reason operator_replay \
-  --json
-```
-
-非 dry-run 缺少 `--actor-id` 时脚本必须拒绝执行；不得用 `system`、`unknown` 或空值代替真实操作人。领域事件 payload metadata 固定记录 `actor_id`、`source=operator_replay` 和 `trace_id`，用于队列审计与问题追踪。可以先加 `--dry-run` 检查 scope，但 dry-run 不写队列。
+发布验证必须确认 runtime registry、systemd env、outbox 与 backfill CLI 均不存在 bank-flow draft handler/event；旧数据库 draft 行不参与新列表、提交或 Audit expected set。物理清理遗留 draft 数据必须另立 dry-run、幂等、仅命中明确 draft/unsubmitted 状态的受控 migration，禁止删除正式历史。

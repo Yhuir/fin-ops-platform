@@ -86,16 +86,11 @@ Manifest、scope policy、App Status registry 与所有带 `read_model_key` 的 
 - 当前页面成功后只执行一次 normal GET；不主动读取、刷新或等待其它页面。
 - 两个浏览器页面之间以共同 canonical facts 达成一致，不建立跨页面同步协调器。
 
-## 非 read-model 后台任务
+## Bank-flow live candidate
 
-`bank_flow_rule_batch.canonical_draft.refresh` 是领域后台任务：
+流水规则未提交候选不是 read model 或后台任务。页面 API 在同一只读 snapshot 中读取 canonical 银行流水、有效分类、paired policy 和 active relation，并用共享 `BankBatchService` 内核实时推导。`app.bank_flow_rule_batches/events` 只保存正式状态和历史；旧 canonical draft event/owner/producer/worker/replay 不得恢复。
 
-- owner 为 `BankFlowRuleBatchCanonicalDraftOwner`。
-- 幂等写入 `app.bank_flow_rule_batches` / `app.bank_flow_rule_batch_events` canonical drafts。
-- 不登记 read-model manifest、scope policy、App Status readiness、dirty scope 或 RabbitMQ dispatcher。
-- 不写页面 projection，也不能复用 no-OA refresh service。
-
-OA sync、import processing 与 Workbench matching 也属于 canonical integration/domain jobs；它们不是页面 read model。
+OA sync、import processing 与 Workbench matching 仍属于 canonical integration/domain jobs；它们不是页面 read model。
 
 ## Queue、freshness 与 transport
 

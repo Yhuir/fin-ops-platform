@@ -9,8 +9,8 @@
 - `RUNTIME_WORKER_REGISTRY`、`READ_MODEL_MANIFEST`、App Status registry 和 scope policy registry 必须保持同一集合。
 - 除关联台外的页面 read model runtime 已退休。migration `0127` 是纯 no-op 标记，不改写旧 queue/readiness，也不删除回滚表；新版本仅从 registry、dispatcher、App Status 和 worker claim 合同中退出已退休 runtime。
 - Workbench matching 仍是独立 canonical matching owner，不属于 read model registry。
-- BankFlow 规则批次的异步 owner 是 canonical draft worker，事件为
-  `bank_flow_rule_batch.canonical_draft.refresh`；它不是 read model refresh。
+- BankFlow 未提交候选由请求内 live derive 生成；它不是 read model refresh，也没有
+  event、queue、worker 或 replay。
 
 ## 职责边界
 
@@ -25,7 +25,7 @@
 - 不拥有业务页面 canonical facts。
 - 不为直接 canonical 页面提供 projection、worker、scope、readiness 或 refresh API。
 - 不把 Redis 或 RabbitMQ 作为 freshness 事实源。
-- 不把 Workbench matching、BankFlow canonical draft 或普通 background job 登记为 read model。
+- 不把 Workbench matching、BankFlow live candidate 或普通 background job 登记为 read model。
 
 ## 当前 Manifest
 
@@ -48,7 +48,7 @@ generations 组合，不发布 materialized `all` parent；各 producer 必须�
 以下页面在请求内读取 canonical PostgreSQL facts，不依赖 read model registry、worker、queue 或 readiness：
 
 - OA 待付款。
-- BankFlow 规则批次；异步 canonical draft 只负责 canonical draft facts。
+- BankFlow 规则批次；未提交候选由同一请求内的 canonical facts 实时推导。
 - ETC 管理。
 - Turnover ledger。
 - 进项发票使用。
@@ -67,7 +67,7 @@ affected months；不得为隐藏页面 enqueue refresh、返回 operation barri
 | Scope key | `ReadModelScopePolicyRegistry` | 四种 scope 均只接受 `YYYY-MM` 或 `all`；空值和其它形状 fail fast |
 | Canonical source proof | 各 projection producer | 必须包含 own schema version 与实际依赖版本；dirty `source_version` 只作发布 CAS 令牌 |
 | Query request | facade/API | payload I/O 前检查 durable dirty/outbox 与 canonical source proof；cache 不能替代 proof |
-| Maintenance command | `scripts/backfill-runtime-read-models.py` | `--enqueue-missing` 只向四个 active scope type 写入 `all` fan-out command；显式 BankFlow replay 是独立 canonical domain event，非 read-model refresh，非 dry-run 必须提供操作人 |
+| Maintenance command | `scripts/backfill-runtime-read-models.py` | `--enqueue-missing` 只向四个 active scope type 写入 `all` fan-out command；该 CLI 不提供 BankFlow draft replay |
 
 ## 输出 I/O
 
@@ -77,7 +77,7 @@ affected months；不得为隐藏页面 enqueue refresh、返回 operation barri
 | Fresh payload | 页面 API/Redis | Redis 只能保存 fresh gate 后 payload；旧版本必须能被当前 proof 拒绝 |
 | Readiness/status | App Status / Operations | 只包含当前 manifest 四项；retired event/readiness 只可作为历史清理对象，不能进入当前状态 |
 | RabbitMQ envelope | optional transport | 只发布 registry 登记且 `rabbitmq_eligible` 的事件；consumer 仍回 PostgreSQL claim/ack |
-| Canonical draft event | BankFlow worker | 不进入 read model manifest、scope policy、readiness 或 RabbitMQ dispatcher |
+| BankFlow live candidate | 页面 API | 请求内读取 canonical facts 并实时推导；不产生 event、scope、readiness 或 RabbitMQ envelope |
 
 ## 特殊边界
 

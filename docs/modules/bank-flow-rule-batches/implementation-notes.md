@@ -1,5 +1,13 @@
 # 流水规则批量处理实施记录
 
+## 2026-07-29 未提交 live candidate 与 draft runtime 退休
+
+- 未提交候选不再读取或写入 persisted draft；repository 在同一 `REPEATABLE READ / READ ONLY` snapshot 中批量读取请求月份（内部转账含 ±2 天窗口）的银行流水、有效分类、paired policy、active relation 和正式历史，application service 使用共享 live builder 计算 summary、过滤、排序与分页。
+- GET、提交事务复核与 Page/System Audit 使用同一 `BankBatchService` 匹配内核；候选 identity、成员、金额、188500 元内部往来匹配与占用判断保持确定性，歧义 fail closed。
+- 提交携带 `scope_month`，在写事务内重读并锁定候选依赖；规则、成员、金额、分类或 active relation 漂移返回 candidate conflict，relation/batch 写入整体回滚。
+- canonical draft event、owner、producer、worker、registry/env、repair/replay 和 deploy 接线已删除；`app.bank_flow_rule_batches/events` 只保存 submitted、withdrawn、stale 等正式业务状态和历史。
+- 下方 2026-07-27 及更早记录是迁移过程审计，不再作为当前运行时合同；当前合同以本节、`README.md`、`boundary-io.md` 和 `state-machine.md` 为准。
+
 ## 2026-07-27 页面 canonical direct-read 迁移
 
 - 列表、summary、分页和详情改由 `BankFlowRuleBatchCanonicalQueryRepository` 直接读取 `app.bank_flow_rule_batches/events`、银行/分类/settings facts 和 `app.workbench_pair_relations.status='active'`。

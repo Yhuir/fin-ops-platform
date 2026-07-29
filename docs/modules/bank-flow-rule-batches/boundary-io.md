@@ -1,6 +1,6 @@
 # Bank Transaction Paired Policy / 流水规则批量处理模块边界与 I/O
 
-日期：2026-07-27
+日期：2026-07-29
 
 ## 模块化状态
 
@@ -8,7 +8,7 @@
 - 页面 `/bank-flow-rule-batches` 只调用 `/api/bank-flow-rule-batches/*`。
 - route 只做鉴权、参数解析和 HTTP 映射；`BankFlowRuleBatchApplicationService` 组合业务 payload；`BankFlowRuleBatchCanonicalQueryRepository` 持有 SQL。
 - 页面列表、summary、分页、详情和写后回读不读取 `read_model.bank_flow_rule_batch_rows`，不读取 Workbench page projection，也不从 no-OA table/service/read model fallback。
-- 页面 read model 已退役；未提交 canonical draft 由独立后台 owner 写入 `app.bank_flow_rule_batches/events`，不登记 read-model scope/readiness/manifest。
+- 页面 read model 与 canonical draft runtime 均已退役；未提交候选只在请求内存中生成，`app.bank_flow_rule_batches/events` 只承载正式状态和历史。
 
 ## 职责边界
 
@@ -33,10 +33,10 @@
 
 | 输入 | 事实源 | 合同 |
 | --- | --- | --- |
-| 页面查询 | `GET /api/bank-flow-rule-batches` | `month`、`type`、`status`、`bucket`、`account_key`、`page`、`page_size`；非法值 fail fast。后端服务端过滤、固定排序和分页，`page_size` 上限 200。 |
-| 批次事实 | `app.bank_flow_rule_batches` | 读取非 superseded 批次、成员、金额、版本和冻结 `normalized_payload`；submitted/withdrawn 历史不被当前标签改名或归档改写。 |
+| 页面查询 | `GET /api/bank-flow-rule-batches` | `month`、`type`、`status`、`bucket`、`account_key`、`page`、`page_size`；非法值 fail fast。repository 按请求月份（含内部转账 ±2 天窗口）批量读取候选输入，application service 在共享 live builder 结果上执行过滤、固定排序和分页，`page_size` 上限 200。 |
+| 正式批次事实 | `app.bank_flow_rule_batches` | 只读取 submitted/withdrawn/stale 批次、成员、金额、版本和冻结 `normalized_payload`；persisted draft/unsubmitted 不参与列表、提交或 Audit expected set。 |
 | 批次事件 | `app.bank_flow_rule_batch_events` | 详情按 batch id 一次集合查询，保持 submitted/withdrawn/audit history。 |
-| 银行流水 | `app.bank_transactions` | 详情按 batch member ids 一次集合查询；未提交资格校验只接受 non-deleted 当前行。 |
+| 银行流水 | `app.bank_transactions` | 未提交月份边界内批量读取 non-deleted 当前行；正式详情按 batch member ids 集合读取。 |
 | 当前分类 | `app.bank_transaction_category_confirmations`、`app.bank_transaction_categories` | confirmation 优先于 manual category；只影响未提交资格与未提交详情标签。 |
 | 标签与 paired policy | `app.app_settings` | active tags 与 `requirements_by_tag_code` 同一次 canonical snapshot 读取；缺规则默认需要 OA 和发票。 |
 | 正式关系 | `app.workbench_pair_relations` | 只接受 `status='active'`。active relation 决定占用和 submitted 可撤回；禁止使用 `workbench_relation` projection。 |
@@ -60,13 +60,13 @@
 ## 一致性与查询预算
 
 - 一次列表请求中的 tag policy、total、page rows 和 summary aggregates 位于同一显式 `REPEATABLE READ / READ ONLY` transaction。
-- 列表固定 2 次 SELECT：settings，以及一次组合 total/page rows/summary 的集合查询；批次数、分页深度和每批行数不增加查询次数。
+- 列表使用固定数量的集合查询读取 settings、请求月份（内部转账含 ±2 天窗口）内的候选输入、正式历史和 active relation；批次数、分页深度和每批行数不增加查询次数。
 - 详情固定 4 次 SELECT：settings、batch、批量 bank rows/active relation aggregates、events。
-- 查询不得先加载全量 rows 再在 Python 或浏览器过滤分页；不得逐 batch、逐 row 或逐 relation N+1。
-- 未提交 batch 必须同时满足：标签当前双 false、所有成员仍存在且分类一致、成员未与任一 active relation overlap。
+- repository 不得加载跨月份全量银行流水；application service 可以对已按月份窗口约束的 live candidate 集合统一计算 summary、过滤、排序和分页。不得逐 batch、逐 row 或逐 relation N+1，也不得把分页下放浏览器。
+- 未提交 batch 由共享 builder 实时推导，必须同时满足：标签当前双 false、所有成员仍存在且分类一致、成员未与任一 active relation overlap。
 - submitted 的可撤回性只由同一 canonical batch 的 active relation 决定。
 - 内部转账维持一收一支、不同账户、48 小时窗口；金额只计单边。
-- 页面查询不新增 cache、materialized view、queue、fallback 或双读。canonical draft owner 是写侧领域任务，不参与 GET；只有 EXPLAIN 证明确有需要时才统一新增索引 migration。
+- 页面查询不新增 cache、materialized view、queue、worker、fallback 或双读；只有 EXPLAIN 证明确有需要时才统一新增索引 migration。
 
 ## 持久化和写边界
 
@@ -98,7 +98,7 @@ Canonical facts：
 | Backend route | `backend/src/fin_ops_platform/app/routes_bank_flow_rule_batches.py` |
 | Backend service | `backend/src/fin_ops_platform/services/bank_flow_rule_batch_application_service.py` |
 | Canonical query repository | `backend/src/fin_ops_platform/services/postgres_repositories/bank_flow_rule_batch_canonical_query.py` |
-| Canonical draft owner | `backend/src/fin_ops_platform/services/bank_flow_rule_batch_canonical_draft_owner.py`、`bank_flow_rule_batch_canonical_draft_producer.py` |
+| Live candidate builder | `backend/src/fin_ops_platform/services/bank_flow_rule_batch_canonical_query.py` |
 | PostgreSQL assembly | `backend/src/fin_ops_platform/services/postgres_state_store.py`、`backend/src/fin_ops_platform/app/server.py` 的最小依赖接线 |
 | Mutation persistence | `backend/src/fin_ops_platform/services/postgres_repositories/workbench.py` 的既有 bank-flow delta writer |
 | Tests | `tests/test_bank_flow_rule_batch*.py`、`web/src/test/BankFlowRuleBatch*.test.*`、相关 relation/no-OA regressions |
@@ -112,13 +112,13 @@ Canonical facts：
 - 禁止：bank-flow -> no-OA service/read model/table fallback。
 - 禁止：service 直接读 HTTP cookie/header 或 repository SQL 外溢到 service。
 
-## Canonical draft 后台合同
+## Live candidate 合同
 
-- 事件：`bank_flow_rule_batch.canonical_draft.refresh`；scope type 为 `bank_flow_rule_batch_draft`，不是 read-model scope。
-- 四类触发：银行事实变化、有效标签规则变化、设置重置、显式 repair/replay。标签规则变化必须使用 canonical repository 算出的精确月份，不得 fallback `all`。
-- handler 对同一 scope 重放必须幂等；只 replace/upsert `app.bank_flow_rule_batches` 与 `app.bank_flow_rule_batch_events`，不得写 `read_model.bank_flow_rule_batch_rows`、readiness 或 dirty scope。
-- 页面 GET 只读 canonical repository，绝不触发该事件。
-- 旧 no-OA read model/worker 仍属于独立 legacy 域，不随本模块退役。
+- GET、提交事务复核与 Page/System Audit 都调用同一 live builder；输入来自当前银行流水、有效分类、paired policy、active relation 和正式历史占用。
+- 候选 identity、成员、金额与内部往来匹配必须确定性；歧义 fail closed，内部往来金额只计单边。
+- 提交必须携带合法 `scope_month` 并在写事务内重读、重算、锁定和复核；遗留 persisted draft 不能被恢复或提交。
+- 撤回释放关系后，若当前事实仍合格，下一次 GET 自动重新生成候选。
+- 旧 no-OA read model/worker 属于独立 legacy 域，不随本模块退役。
 
 ## 测试与验证
 

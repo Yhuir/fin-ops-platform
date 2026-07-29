@@ -225,7 +225,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 ## Bank Transaction Paired Policy / 流水规则批量处理 API
 
-状态：close。当前生产前端和公开 API 使用 `bank-flow-rule-batches`；HTTP route、application service、页面专属 PostgreSQL canonical query repository、批次/事件表、relation command/delta writer 和 `app_settings.bank_flow_rule_batch_tag_rules` 使用 `bank_flow_rule_batch`。列表、summary、分页和详情不读取页面 read model，不返回 freshness/status/version，不 enqueue 或 polling。迁移 `0082`、`0083`、`0111` 仅保留既有数据迁移语义；运行时不把 no-OA 物理表、settings family 或旧 `selected_tag_codes` 作为 fallback。
+状态：close。当前生产前端和公开 API 使用 `bank-flow-rule-batches`；HTTP route、application service、页面专属 PostgreSQL canonical query repository、relation command/delta writer 和 `app_settings.bank_flow_rule_batch_tag_rules` 使用 `bank_flow_rule_batch`。未提交列表由同一只读 snapshot 的银行流水、有效分类、paired policy 和 active relation 实时推导；批次/事件表只提供正式状态与历史。API 不读取页面 read model 或 persisted draft，不返回 freshness/status/version，不 enqueue 或 polling。迁移 `0082`、`0083`、`0111` 仅保留既有数据迁移语义；运行时不把 no-OA 物理表、settings family 或旧 `selected_tag_codes` 作为 fallback。
 
 `GET /api/bank-flow-rule-batches/tag-rules`
 
