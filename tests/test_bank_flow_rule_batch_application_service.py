@@ -759,6 +759,66 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         self.assertEqual(batch_service.withdraw_calls[0]["batch_id"], "batch-1")
         self.assertEqual(refresh_calls, [])
 
+    def test_submit_selected_rows_rejects_invalid_amount_or_direction_without_writes(self) -> None:
+        valid_row = {
+            "id": "bank-fee-1",
+            "trade_time": "2026-06-03 10:20:00",
+            "account_key": "ccb:8106",
+            "direction": "expense",
+            "amount": "8.80",
+        }
+        invalid_rows = {
+            "invalid_amount": {
+                **valid_row,
+                "amount": "not-a-number",
+            },
+            "invalid_direction": {
+                **valid_row,
+                "direction": "",
+            },
+        }
+
+        for expected_suffix, row in invalid_rows.items():
+            with self.subTest(expected_suffix=expected_suffix):
+                pair_service = WorkbenchPairRelationService()
+                service = object.__new__(BankFlowRuleBatchApplicationService)
+                service._bank_batch_service = BankBatchService()
+                service._pair_relation_snapshot_port = BankBatchPairRelationSnapshotPort(
+                    pair_service
+                )
+                service.bank_transaction_rows_by_ids = lambda _row_ids, selected=row: [  # type: ignore[method-assign]
+                    dict(selected)
+                ]
+                service.effective_categories_for_rows = lambda _rows: {  # type: ignore[method-assign]
+                    "bank-fee-1": {"category_code": "fee"}
+                }
+                service.active_relation_source_bundle_for_bank_rows = (  # type: ignore[method-assign]
+                    lambda _rows, **_kwargs: {"rows": [], "source_versions": {}}
+                )
+                service.candidate_source_versions_for_scope = (  # type: ignore[method-assign]
+                    lambda **_kwargs: {}
+                )
+                service.bank_batch_source_versions = lambda **_kwargs: {}  # type: ignore[method-assign]
+                service._eligible_tag_codes_for_relation_mode = lambda _mode: {"fee"}  # type: ignore[method-assign]
+                confirm_calls: list[dict[str, object]] = []
+                service._confirm_relation_for_batch = (  # type: ignore[method-assign]
+                    lambda batch, **_kwargs: confirm_calls.append(dict(batch))
+                )
+
+                with self.assertRaisesRegex(
+                    ValueError,
+                    f"bank_flow_rule_batch_selection_{expected_suffix}",
+                ):
+                    service.submit_selected_rows(
+                        row_ids=["bank-fee-1"],
+                        actor="finance-user",
+                        note="提交",
+                    )
+
+                self.assertEqual(confirm_calls, [])
+                self.assertEqual(pair_service.list_active_relations(), [])
+                self.assertEqual(service._bank_batch_service.snapshot()["batches"], {})
+
     def test_submitted_candidate_lookup_reads_canonical_batches(self) -> None:
         service = object.__new__(BankFlowRuleBatchApplicationService)
         service._bank_batch_service = SimpleNamespace()

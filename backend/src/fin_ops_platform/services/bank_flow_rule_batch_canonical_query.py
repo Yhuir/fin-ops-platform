@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from fin_ops_platform.services.bank_batch_service import (
@@ -143,9 +142,16 @@ def bank_flow_rule_batch_selected_row_proofs(
         if not row_id:
             continue
         category = categories.get(row_id) or {}
-        raw_direction = str(
-            row.get("direction") or row.get("txn_direction") or ""
-        ).strip().lower()
+        amount = BankBatchService._amount(row)
+        if amount is None:
+            raise ValueError(
+                "bank_flow_rule_batch_selection_invalid_amount"
+            )
+        direction = BankBatchService._direction(row)
+        if not direction:
+            raise ValueError(
+                "bank_flow_rule_batch_selection_invalid_direction"
+            )
         raw_month = str(
             row.get("scope_month")
             or row.get("month")
@@ -154,10 +160,6 @@ def bank_flow_rule_batch_selected_row_proofs(
             or row.get("txn_date")
             or ""
         ).strip()
-        try:
-            amount = f"{Decimal(str(row.get('amount') or 0)):.2f}"
-        except (InvalidOperation, ValueError):
-            amount = "0.00"
         proofs.append(
             {
                 "row_id": row_id,
@@ -168,12 +170,8 @@ def bank_flow_rule_batch_selected_row_proofs(
                     or row.get("category_code")
                     or ""
                 ).strip(),
-                "amount": amount,
-                "direction": (
-                    "income"
-                    if raw_direction in {"inflow", "income", "收", "进"}
-                    else "expense"
-                ),
+                "amount": BankBatchService._format_amount(amount),
+                "direction": "income" if direction == "inflow" else "expense",
                 "account_key": str(row.get("account_key") or "").strip(),
                 "trade_time": str(
                     row.get("trade_time")
