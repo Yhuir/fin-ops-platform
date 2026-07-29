@@ -7,11 +7,42 @@ class _CaptureConnection:
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple[object, ...]]] = []
 
-    def execute(self, sql: str, params: tuple[object, ...]) -> None:
+    def execute(self, sql: str, params: tuple[object, ...]) -> int:
         self.calls.append((sql, params))
+        return 1
 
 
 class PostgresCoreRepositoryTests(unittest.TestCase):
+    def test_submitted_etc_overlap_casts_json_audit_values_to_text(self) -> None:
+        connection = _CaptureConnection()
+
+        updated = PostgresCoreRepository(connection).repair_submitted_etc_invoice_overlap(
+            invoice_id="invoice-1",
+            etc_invoice_id="etc-invoice-1",
+            etc_batch_id="batch-1",
+            reason="repair",
+            operator="ops",
+        )
+
+        sql, params = connection.calls[0]
+        self.assertEqual(updated, 1)
+        self.assertIn("'source_id', %s::text", sql)
+        self.assertIn("'batch_id', coalesce(%s::text, '')", sql)
+        self.assertIn("'repair_reason', %s::text", sql)
+        self.assertIn("'operator', %s::text", sql)
+        self.assertEqual(
+            params,
+            (
+                "etc-invoice-1",
+                "etc-invoice-1",
+                "batch-1",
+                "repair",
+                "ops",
+                "etc-invoice-1",
+                "invoice-1",
+            ),
+        )
+
     def test_save_invoice_drops_weak_fingerprint_when_source_unique_key_exists(self) -> None:
         connection = _CaptureConnection()
         repository = PostgresCoreRepository(connection)

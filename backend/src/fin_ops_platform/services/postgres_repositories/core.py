@@ -869,11 +869,11 @@ class PostgresCoreRepository:
                     source_links = coalesce(source_links, '[]'::jsonb) || jsonb_build_array(
                         jsonb_build_object(
                             'source_type', 'etc_invoice_import',
-                            'source_id', %s,
-                            'batch_id', coalesce(%s, ''),
+                            'source_id', %s::text,
+                            'batch_id', coalesce(%s::text, ''),
                             'created_at', now()::text,
-                            'repair_reason', %s,
-                            'operator', %s
+                            'repair_reason', %s::text,
+                            'operator', %s::text
                         )
                     ),
                     raw_payload = jsonb_set(
