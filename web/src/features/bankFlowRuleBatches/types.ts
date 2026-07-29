@@ -43,7 +43,7 @@ export type BankFlowRuleBatch = {
   batchId: string;
   batchType: BankFlowRuleBatchType | string;
   batchLabel: string;
-  scopeMonth: string;
+  scopeMonth?: string;
   accountKey: string;
   bankName: string;
   accountLast4: string;
@@ -141,6 +141,7 @@ export type BankFlowRuleBatchDetail = {
 export type SubmitBankFlowRuleBatchRequest = {
   batchId: string;
   expectedVersion: number | null;
+  scopeMonth: string;
   note?: string;
   signal?: AbortSignal;
 };

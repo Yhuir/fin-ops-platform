@@ -24,6 +24,9 @@ from fin_ops_platform.services.bank_flow_rule_batch_canonical_draft_owner import
     BankFlowRuleBatchCanonicalDraftPersistencePort,
 )
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
+from fin_ops_platform.services.workbench_pair_relation_service import (
+    WorkbenchPairRelationService,
+)
 
 
 class RecordingStateStore:
@@ -1757,6 +1760,105 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                     "page_size": None,
                 }
             ],
+        )
+
+    def test_candidate_guard_conflict_restores_relation_and_writes_no_formal_batch(self) -> None:
+        class Repository:
+            def read_page(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+                return {
+                    "candidate_rows": [
+                        {
+                            "id": "bank-out-188500",
+                            "trade_time": "2026-05-14T09:00:00",
+                            "account_key": "CCB:8106",
+                            "direction": "expense",
+                            "amount": "188500.00",
+                            "category_code": "internal_transfer",
+                            "category_source": "confirmed",
+                        },
+                        {
+                            "id": "bank-in-188500",
+                            "trade_time": "2026-05-14T09:30:00",
+                            "account_key": "ICBC:6386",
+                            "direction": "income",
+                            "amount": "188500.00",
+                            "category_code": "internal_transfer",
+                            "category_source": "confirmed",
+                        },
+                    ],
+                    "active_relations": [],
+                    "formal_items": [],
+                    "tag_policy": {
+                        "active_tags": [{"code": "internal_transfer", "label": "内部往来款"}],
+                        "requirements_by_tag_code": {
+                            "internal_transfer": {
+                                "requires_oa": False,
+                                "requires_invoice": False,
+                            }
+                        },
+                    },
+                }
+
+        class GuardRejectingStateStore:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def save_bank_flow_rule_batch_mutation(self, **kwargs: object) -> None:
+                self.calls.append(dict(kwargs))
+                raise RuntimeError("bank_flow_rule_batch_candidate_guard_conflict")
+
+        pair_service = WorkbenchPairRelationService()
+        batch_service = BankBatchService(
+            schema_version=BANK_FLOW_RULE_BATCH_SCHEMA_VERSION,
+            batch_id_prefix=BANK_FLOW_RULE_BATCH_ID_PREFIX,
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+        )
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+        service._query_repository = Repository()
+        service._bank_batch_service = batch_service
+        service._pair_relation_snapshot_port = BankBatchPairRelationSnapshotPort(pair_service)
+        service._state_store = GuardRejectingStateStore()
+        service._search_cache_clearer = lambda: None
+        service._bank_transaction_category_affected_months_provider = lambda _row_ids: []
+        service.resolve_labels = lambda batches, **_kwargs: batches  # type: ignore[method-assign]
+
+        candidate = service.list_batches_payload(
+            {"month": ["2026-05"], "bucket": ["unsubmitted"]},
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+        )["batches"][0]
+
+        def create_relation(batch: dict[str, object], **_kwargs: object) -> None:
+            pair_service.create_active_relation(
+                case_id=str(batch["batch_id"]),
+                row_ids=[str(row_id) for row_id in list(batch["row_ids"])],
+                row_types=["bank", "bank"],
+                relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                created_by="finance-user",
+                month_scope="2026-05",
+            )
+
+        service._confirm_relation_for_batch = create_relation  # type: ignore[method-assign]
+
+        with self.assertRaises(BankBatchRelationMutationError) as raised:
+            service.submit_batch(
+                str(candidate["batch_id"]),
+                actor="finance-user",
+                expected_version=int(candidate["version"]),
+                note="提交",
+                relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                scope_month="2026-05",
+            )
+
+        self.assertEqual(
+            raised.exception.error_code,
+            "bank_flow_rule_batch_candidate_conflict",
+        )
+        self.assertEqual(pair_service.list_active_relations(), [])
+        self.assertEqual(batch_service.snapshot()["batches"], {})
+        self.assertEqual(len(service._state_store.calls), 1)
+        self.assertEqual(
+            service._state_store.calls[0]["candidate_guard"]["row_ids"],
+            ["bank-in-188500", "bank-out-188500"],
         )
 
     def test_withdrawn_formal_item_does_not_hide_requalified_live_candidate(self) -> None:

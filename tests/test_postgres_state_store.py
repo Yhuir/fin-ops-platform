@@ -8,6 +8,9 @@ from unittest.mock import patch
 
 from fin_ops_platform.services.postgres_connection import PostgresConfigurationError, PostgresSettings, redact_database_url
 from fin_ops_platform.services.postgres_repositories.common import serialize_value
+from fin_ops_platform.services.postgres_repositories.bank_flow_rule_batch_canonical_query import (
+    BankFlowRuleBatchCanonicalQueryRepository,
+)
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 from fin_ops_platform.services.state_store_diff import diff_state_snapshots
@@ -412,6 +415,84 @@ class PostgresStateStoreTests(unittest.TestCase):
                 ),
             ],
         )
+
+    def test_candidate_guard_fails_closed_when_rule_eligibility_changes(self) -> None:
+        class Transaction:
+            def __init__(self) -> None:
+                self.executed: list[str] = []
+                self.lock_queries: list[str] = []
+
+            def execute(self, sql: str, _params: tuple[object, ...] = ()) -> int:
+                self.executed.append(sql)
+                return 0
+
+            def fetch_all(
+                self,
+                sql: str,
+                _params: tuple[object, ...] = (),
+            ) -> list[dict[str, object]]:
+                self.lock_queries.append(sql)
+                return []
+
+        transaction = Transaction()
+        now_ineligible_source = {
+            "candidate_rows": [
+                {
+                    "id": "bank-out-188500",
+                    "trade_time": "2026-05-14T09:00:00",
+                    "account_key": "CCB:8106",
+                    "direction": "expense",
+                    "amount": "188500.00",
+                    "category_code": "internal_transfer",
+                },
+                {
+                    "id": "bank-in-188500",
+                    "trade_time": "2026-05-14T09:30:00",
+                    "account_key": "ICBC:6386",
+                    "direction": "income",
+                    "amount": "188500.00",
+                    "category_code": "internal_transfer",
+                },
+            ],
+            "active_relations": [],
+            "formal_items": [],
+            "tag_policy": {
+                "active_tags": [{"code": "internal_transfer"}],
+                "requirements_by_tag_code": {
+                    "internal_transfer": {
+                        "requires_oa": True,
+                        "requires_invoice": False,
+                    }
+                },
+            },
+        }
+
+        with patch.object(
+            BankFlowRuleBatchCanonicalQueryRepository,
+            "read_candidate_guard_source",
+            return_value=now_ineligible_source,
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "bank_flow_rule_batch_candidate_guard_conflict",
+            ):
+                PostgresStateStore._assert_bank_flow_rule_batch_candidate_guard(
+                    transaction,
+                    {
+                        "batch_id": "bank_flow_rule_batch_stale",
+                        "scope_month": "2026-05",
+                        "batch_type": "internal_transfer",
+                        "row_ids": ["bank-in-188500", "bank-out-188500"],
+                        "total_amount": "188500.00",
+                        "version": 1,
+                    },
+                )
+
+        self.assertEqual(
+            transaction.executed,
+            ["set transaction isolation level serializable"],
+        )
+        self.assertEqual(len(transaction.lock_queries), 4)
 
     def test_workbench_pair_relation_scoped_loader_delegates_to_canonical_repository(self) -> None:
         class RelationRepository:

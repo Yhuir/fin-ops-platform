@@ -137,6 +137,25 @@ class BankBatchPairRelationSnapshotPort:
         if hasattr(self._pair_relation_service, "_pair_relation_history"):
             self._pair_relation_service._pair_relation_history = deepcopy(restored_relation_service._pair_relation_history)
 
+    def restore_case_ids(
+        self,
+        relation_snapshot: dict[str, Any],
+        *,
+        case_ids: list[str],
+    ) -> None:
+        apply_delta = getattr(self._pair_relation_service, "apply_snapshot_delta", None)
+        if not callable(apply_delta):
+            raise RuntimeError("Pair relation snapshot port cannot restore changed cases.")
+        apply_delta(
+            deepcopy(relation_snapshot),
+            changed_case_ids=[
+                str(case_id).strip()
+                for case_id in case_ids
+                if str(case_id).strip()
+            ],
+            replace_history=True,
+        )
+
 
 def _stable_dependency_source_versions(source_versions: dict[str, object]) -> dict[str, object]:
     result: dict[str, object] = {}
@@ -1279,15 +1298,19 @@ class BankBatchApplicationService:
         *,
         status: str,
         persist: bool,
+        candidate_guard: dict[str, object] | None = None,
     ) -> dict[str, object]:
         relation_case_id = str(batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
         relation = self.pair_relation_snapshot_by_case_id(relation_case_id)
         affected_months = self.affected_months(batch)
         if persist:
-            self.persist_mutation(
-                changed_case_ids=[relation_case_id] if relation_case_id else [],
-                changed_scope_keys=affected_months,
-            )
+            persist_kwargs: dict[str, object] = {
+                "changed_case_ids": [relation_case_id] if relation_case_id else [],
+                "changed_scope_keys": affected_months,
+            }
+            if candidate_guard is not None:
+                persist_kwargs["candidate_guard"] = dict(candidate_guard)
+            self.persist_mutation(**persist_kwargs)
         return {
             "batch": self.resolve_labels([batch])[0],
             "pair_relation": relation or {},

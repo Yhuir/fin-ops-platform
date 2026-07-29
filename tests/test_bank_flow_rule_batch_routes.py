@@ -39,7 +39,16 @@ class FakeBankFlowRuleBatchApplicationService:
             "affected_months": ["2026-05"],
         }
 
-    def submit_batch(self, batch_id, *, actor, expected_version, note, relation_mode):  # type: ignore[no-untyped-def]
+    def submit_batch(  # type: ignore[no-untyped-def]
+        self,
+        batch_id,
+        *,
+        actor,
+        expected_version,
+        note,
+        relation_mode,
+        scope_month=None,
+    ):
         self.calls.append(
             (
                 "submit_batch",
@@ -49,6 +58,7 @@ class FakeBankFlowRuleBatchApplicationService:
                     "expected_version": expected_version,
                     "note": note,
                     "relation_mode": relation_mode,
+                    "scope_month": scope_month,
                 },
             )
         )
@@ -206,6 +216,7 @@ class BankFlowRuleBatchRoutesTests(unittest.TestCase):
                         "expected_version": 2,
                         "note": "ok",
                         "relation_mode": "bank_flow_rule_batch",
+                        "scope_month": None,
                     },
                 ),
                 (
@@ -219,6 +230,29 @@ class BankFlowRuleBatchRoutesTests(unittest.TestCase):
                 ),
             ],
         )
+
+    def test_live_candidate_guard_conflict_returns_409(self) -> None:
+        class ConflictService(FakeBankFlowRuleBatchApplicationService):
+            def submit_batch(self, *_args, **_kwargs):  # type: ignore[no-untyped-def]
+                raise BankBatchRelationMutationError(
+                    "bank_flow_rule_batch_candidate_conflict",
+                    "流水规则候选已变化或被占用，请刷新列表后重试。",
+                )
+
+        routes = BankFlowRuleBatchApiRoutes(
+            application_service=ConflictService(),  # type: ignore[arg-type]
+        )
+
+        status, payload = routes.submit_batch(
+            "batch-001",
+            {"expected_version": 1, "scope_month": "2026-05"},
+            session=SimpleNamespace(
+                identity=SimpleNamespace(username="finance-user", user_id="oa-001")
+            ),
+        )
+
+        self.assertEqual(status, HTTPStatus.CONFLICT)
+        self.assertEqual(payload["error"], "bank_flow_rule_batch_candidate_conflict")
 
     def test_reset_route_maps_actor_and_reason(self) -> None:
         service = FakeBankFlowRuleBatchApplicationService()

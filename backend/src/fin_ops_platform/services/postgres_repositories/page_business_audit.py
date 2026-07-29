@@ -136,11 +136,22 @@ PAGE_AUDIT_CONTRACTS: dict[str, PageAuditContract] = {
     "bank_flow_rule_batches": PageAuditContract(
         domain_key="bank_flow_rule_batches",
         label="流水规则批量处理",
-        source_tables=("app.bank_flow_rule_batches", "app.bank_flow_rule_batch_events"),
+        source_tables=(
+            "app.bank_transactions",
+            "app.bank_transaction_category_confirmations",
+            "app.bank_transaction_categories",
+            "app.app_settings",
+            "app.workbench_pair_relations",
+            "app.bank_flow_rule_batches",
+            "app.bank_flow_rule_batch_events",
+        ),
         relation_tables=("app.workbench_pair_relations",),
         scope_types=(),
         event_types=(),
-        canonical_expected_set="non-deleted bank flow rule batches and their exact bank-transaction member sets",
+        canonical_expected_set=(
+            "live candidates from active bank facts, effective categories, current rule settings, "
+            "and active relation occupancy plus persisted submitted/withdrawn history"
+        ),
         key_display_fields=("batch_id", "status", "status_bucket", "account_key", "total_amount", "row_count"),
         external_source_boundary="bank statement completeness before App import",
         consumer_relation_contract=BANK_FLOW_RULE_BATCH_CONSUMER,
@@ -730,6 +741,97 @@ def _canonical_expected_set_issues(
             params=(limit,),
             code="batch_accounting_relation_owner_mismatch",
             message="批量账务 active relation 的 relation_mode 与 source owner 不一致。",
+        )
+    if contract.domain_key == "bank_flow_rule_batches":
+        return _proof_query_issues(
+            connection,
+            sql="""
+                /* check: canonical_expected_set */
+                with current_settings as materialized (
+                    select settings_payload
+                    from app.app_settings
+                    where settings_key = 'app_settings'
+                    limit 1
+                ),
+                effective_bank_facts as materialized (
+                    select
+                        coalesce(bank.legacy_mongo_id, bank.id::text) as row_id,
+                        to_char(coalesce(bank.txn_date, bank.txn_month), 'YYYY-MM') as scope_key,
+                        bank.txn_direction,
+                        bank.amount,
+                        coalesce(
+                            confirmed.category_code,
+                            manual.category,
+                            ''
+                        ) as category_code
+                    from app.bank_transactions bank
+                    left join lateral (
+                        select confirmation.category_code
+                        from app.bank_transaction_category_confirmations confirmation
+                        where confirmation.tenant_id = 'default'
+                          and confirmation.status = 'active'
+                          and (
+                              confirmation.bank_transaction_id = bank.id
+                              or confirmation.legacy_transaction_id in (
+                                  coalesce(bank.legacy_mongo_id, bank.id::text),
+                                  bank.id::text
+                              )
+                          )
+                        order by confirmation.confirmed_at desc, confirmation.id desc
+                        limit 1
+                    ) confirmed on true
+                    left join lateral (
+                        select category.category
+                        from app.bank_transaction_categories category
+                        where category.status = 'active'
+                          and (
+                              category.bank_transaction_id = bank.id
+                              or category.legacy_transaction_id in (
+                                  coalesce(bank.legacy_mongo_id, bank.id::text),
+                                  bank.id::text
+                              )
+                          )
+                        order by category.updated_at desc, category.id desc
+                        limit 1
+                    ) manual on true
+                    where bank.status <> 'deleted'
+                ),
+                occupied_members as materialized (
+                    select distinct member.row_id
+                    from app.workbench_pair_relations relation
+                    cross join lateral unnest(relation.row_ids) member(row_id)
+                    where relation.status = 'active'
+                ),
+                persisted_formal_facts as materialized (
+                    select batch.batch_id
+                    from app.bank_flow_rule_batches batch
+                    where batch.status in ('submitted', 'withdrawn', 'stale')
+                )
+                select fact.row_id as subject_id,
+                       fact.scope_key,
+                       'invalid_live_candidate_source_fact' as mismatch_kind,
+                       fact.category_code,
+                       fact.txn_direction,
+                       fact.amount::text
+                from effective_bank_facts fact
+                cross join current_settings settings
+                left join occupied_members occupied on occupied.row_id = fact.row_id
+                where nullif(fact.row_id, '') is null
+                   or nullif(fact.scope_key, '') is null
+                   or nullif(fact.category_code, '') is null
+                   or fact.amount is null
+                   or settings.settings_payload is null
+                   or exists (
+                       select 1
+                       from persisted_formal_facts formal
+                       where formal.batch_id is null
+                   )
+                order by fact.scope_key, fact.row_id
+                limit %s
+            """,
+            params=(limit,),
+            code="bank_flow_rule_batches_canonical_expected_set_mismatch",
+            message="流水规则 live candidate expected set 与 canonical facts 不一致。",
         )
     return []
 

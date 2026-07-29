@@ -592,6 +592,7 @@ export async function fetchBankFlowRuleBatchDetail(batchId: string, signal?: Abo
 export async function submitBankFlowRuleBatch({
   batchId,
   expectedVersion,
+  scopeMonth,
   note,
   signal,
 }: SubmitBankFlowRuleBatchRequest): Promise<BankFlowRuleBatchMutationResult> {
@@ -600,7 +601,11 @@ export async function submitBankFlowRuleBatch({
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ expected_version: expectedVersion, note: note ?? "" }),
+      body: JSON.stringify({
+        expected_version: expectedVersion,
+        ...(scopeMonth ? { scope_month: scopeMonth } : {}),
+        note: note ?? "",
+      }),
       signal,
     },
   );

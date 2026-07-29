@@ -854,10 +854,34 @@ class ApplicationStateStore:
         changed_case_ids: set[str] | list[str] | tuple[str, ...],
         changed_scope_keys: set[str] | list[str] | tuple[str, ...],
         changed_batch_ids: set[str] | list[str] | tuple[str, ...] = (),
+        candidate_guard: dict[str, object] | None = None,
     ) -> None:
         normalized_case_ids = [str(case_id).strip() for case_id in changed_case_ids if str(case_id).strip()]
         normalized_scope_keys = [str(scope_key).strip() for scope_key in changed_scope_keys if str(scope_key).strip()]
         batch_scope_keys = _bank_flow_rule_batch_month_scopes(normalized_scope_keys)
+        if isinstance(candidate_guard, dict):
+            batches = bank_flow_rule_batch_snapshot.get("batches")
+            candidate = (
+                batches.get(str(candidate_guard.get("batch_id") or ""))
+                if isinstance(batches, dict)
+                else None
+            )
+            expected_members = sorted(
+                str(row_id).strip()
+                for row_id in list(candidate_guard.get("row_ids") or [])
+                if str(row_id).strip()
+            )
+            actual_members = sorted(
+                str(row_id).strip()
+                for row_id in (
+                    list(candidate.get("row_ids") or [])
+                    if isinstance(candidate, dict)
+                    else []
+                )
+                if str(row_id).strip()
+            )
+            if not isinstance(candidate, dict) or expected_members != actual_members:
+                raise RuntimeError("bank_flow_rule_batch_candidate_guard_conflict")
         if normalized_case_ids:
             self.save_workbench_pair_relations(
                 pair_relation_snapshot,

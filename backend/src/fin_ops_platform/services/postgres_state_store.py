@@ -30,6 +30,10 @@ from fin_ops_platform.services.postgres_repositories import (
 from fin_ops_platform.services.postgres_repositories.bank_flow_rule_batch_canonical_query import (
     BankFlowRuleBatchCanonicalQueryRepository,
 )
+from fin_ops_platform.services.bank_flow_rule_batch_canonical_query import (
+    bank_flow_rule_batch_candidate_guard,
+    build_live_bank_flow_rule_batch_service,
+)
 from fin_ops_platform.services.postgres_repositories.common import run_in_transaction
 from fin_ops_platform.services.postgres_snapshot_contracts import (
     normalize_no_oa_bank_batches,
@@ -769,6 +773,7 @@ class PostgresStateStore:
         changed_case_ids: set[str] | list[str] | tuple[str, ...],
         changed_scope_keys: set[str] | list[str] | tuple[str, ...],
         changed_batch_ids: set[str] | list[str] | tuple[str, ...] = (),
+        candidate_guard: dict[str, object] | None = None,
     ) -> None:
         normalized_case_ids = {str(case_id).strip() for case_id in changed_case_ids if str(case_id).strip()}
         normalized_scope_keys = {str(scope_key).strip() for scope_key in changed_scope_keys if str(scope_key).strip()}
@@ -781,6 +786,11 @@ class PostgresStateStore:
         )
 
         def write(_connection: Any) -> None:
+            if isinstance(candidate_guard, dict):
+                self._assert_bank_flow_rule_batch_candidate_guard(
+                    _connection,
+                    candidate_guard,
+                )
             if normalized_case_ids:
                 self.save_workbench_pair_relations(
                     pair_relation_snapshot,
@@ -798,6 +808,89 @@ class PostgresStateStore:
                 self.save_bank_flow_rule_batches(bank_flow_rule_batch_snapshot)
 
         run_in_transaction(self._connection, write)
+
+    @staticmethod
+    def _assert_bank_flow_rule_batch_candidate_guard(
+        transaction: Any,
+        candidate_guard: dict[str, object],
+    ) -> None:
+        transaction.execute("set transaction isolation level serializable")
+        row_ids = [
+            str(row_id).strip()
+            for row_id in list(candidate_guard.get("row_ids") or [])
+            if str(row_id).strip()
+        ]
+        transaction.fetch_all(
+            """
+            select id
+            from app.bank_transactions
+            where id::text = any(%s::text[])
+               or legacy_mongo_id = any(%s::text[])
+            order by id
+            for update
+            """,
+            (row_ids, row_ids),
+        )
+        transaction.fetch_all(
+            """
+            select id
+            from app.bank_transaction_category_confirmations
+            where status = 'active'
+              and (
+                  bank_transaction_id::text = any(%s::text[])
+                  or legacy_transaction_id = any(%s::text[])
+              )
+            order by id
+            for share
+            """,
+            (row_ids, row_ids),
+        )
+        transaction.fetch_all(
+            """
+            select id
+            from app.bank_transaction_categories
+            where status = 'active'
+              and (
+                  bank_transaction_id::text = any(%s::text[])
+                  or legacy_transaction_id = any(%s::text[])
+              )
+            order by id
+            for share
+            """,
+            (row_ids, row_ids),
+        )
+        transaction.fetch_all(
+            """
+            select case_id
+            from app.workbench_pair_relations
+            where status = 'active'
+              and row_ids && %s::text[]
+            order by case_id
+            for update
+            """,
+            (row_ids,),
+        )
+        source = BankFlowRuleBatchCanonicalQueryRepository.read_candidate_guard_source(
+            transaction,
+            scope_month=str(candidate_guard.get("scope_month") or ""),
+        )
+        live_service = build_live_bank_flow_rule_batch_service(source)
+        try:
+            candidate = live_service.get_batch(
+                str(candidate_guard.get("batch_id") or "")
+            )
+        except KeyError as exc:
+            raise RuntimeError(
+                "bank_flow_rule_batch_candidate_guard_conflict"
+            ) from exc
+        actual_guard = bank_flow_rule_batch_candidate_guard(candidate)
+        expected_guard = {
+            **candidate_guard,
+            "row_ids": sorted(row_ids),
+            "version": int(candidate_guard.get("version") or 1),
+        }
+        if actual_guard != expected_guard:
+            raise RuntimeError("bank_flow_rule_batch_candidate_guard_conflict")
 
     @staticmethod
     def _bank_flow_rule_batch_ids_from_mutation(

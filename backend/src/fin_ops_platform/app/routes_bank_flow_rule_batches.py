@@ -19,6 +19,7 @@ BANK_FLOW_RULE_BATCH_CONFLICT_ERROR_CODES = frozenset(
         "bank_flow_rule_batch_version_conflict",
         "bank_flow_rule_batch_relation_active_row_conflict",
         "bank_flow_rule_batch_selection_occupied",
+        "bank_flow_rule_batch_candidate_conflict",
     }
 )
 
@@ -141,6 +142,7 @@ class BankFlowRuleBatchApiRoutes:
                 expected_version=self._optional_int(payload.get("expected_version")),
                 note=str(payload.get("note") or "").strip() or None,
                 relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                scope_month=str(payload.get("scope_month") or "").strip() or None,
             )
         except KeyError:
             return self._unknown_batch_response()

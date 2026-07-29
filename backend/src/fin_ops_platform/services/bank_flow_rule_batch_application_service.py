@@ -17,7 +17,10 @@ from fin_ops_platform.services.bank_batch_service import (
     BANK_FLOW_RULE_BATCH_SCHEMA_VERSION,
     BankBatchService,
 )
-from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from fin_ops_platform.services.bank_flow_rule_batch_canonical_query import (
+    bank_flow_rule_batch_candidate_guard,
+    build_live_bank_flow_rule_batch_service,
+)
 
 
 class BankFlowRuleBatchPersistenceError(BankBatchPersistenceError):
@@ -136,89 +139,10 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         *,
         eligible_tag_codes: set[str],
     ) -> BankBatchService:
-        rows = [
-            dict(row)
-            for row in list(page_result.get("candidate_rows") or [])
-            if isinstance(row, dict)
-        ]
-        active_relations = [
-            dict(relation)
-            for relation in list(page_result.get("active_relations") or [])
-            if isinstance(relation, dict)
-        ]
-        formal_batches = {
-            str(batch.get("batch_id") or ""): dict(batch)
-            for batch in list(page_result.get("formal_items") or [])
-            if isinstance(batch, dict) and str(batch.get("batch_id") or "").strip()
-        }
-        definitions = {
-            str(definition.get("code") or "").strip(): dict(definition)
-            for definition in list(
-                (
-                    page_result.get("tag_policy")
-                    if isinstance(page_result.get("tag_policy"), dict)
-                    else {}
-                ).get("active_tags")
-                or []
-            )
-            if isinstance(definition, dict) and str(definition.get("code") or "").strip()
-        }
-        categories = {
-            str(row.get("id") or row.get("transaction_id") or ""): {
-                "transaction_id": str(row.get("id") or row.get("transaction_id") or ""),
-                "category_code": str(row.get("category_code") or ""),
-                "category_label": str(
-                    definitions.get(str(row.get("category_code") or ""), {}).get("label")
-                    or row.get("category_label")
-                    or row.get("category_code")
-                    or ""
-                ),
-                "category_primary_label": str(
-                    definitions.get(str(row.get("category_code") or ""), {}).get(
-                        "output_primary_label"
-                    )
-                    or row.get("category_primary_label")
-                    or ""
-                ),
-                "category_sub_label": str(
-                    definitions.get(str(row.get("category_code") or ""), {}).get(
-                        "output_sub_label"
-                    )
-                    or row.get("category_sub_label")
-                    or ""
-                ),
-                "category_source": str(row.get("category_source") or ""),
-            }
-            for row in rows
-            if str(row.get("id") or row.get("transaction_id") or "").strip()
-        }
-        pair_service = WorkbenchPairRelationService.from_snapshot(
-            {
-                "pair_relations": {
-                    str(relation.get("case_id") or ""): relation
-                    for relation in active_relations
-                    if str(relation.get("case_id") or "").strip()
-                }
-            }
+        return build_live_bank_flow_rule_batch_service(
+            page_result,
+            eligible_tag_codes=eligible_tag_codes,
         )
-        batch_service = BankBatchService(
-            batches=formal_batches,
-            pair_relation_service=pair_service,
-            schema_version=BANK_FLOW_RULE_BATCH_SCHEMA_VERSION,
-            batch_id_prefix=BANK_FLOW_RULE_BATCH_ID_PREFIX,
-            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
-        )
-        batch_service.build_batches(
-            rows,
-            categories,
-            active_relations,
-            {},
-            eligible_batch_types=eligible_tag_codes,
-            apply_relation_repairs=False,
-            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
-            include_relation_backed_submitted_batches=False,
-        )
-        return batch_service
 
     @staticmethod
     def _aggregates_for_batches(
@@ -464,11 +388,73 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         except KeyError:
             return False
 
-    def _prepare_batch_for_submit(self, batch_id: str, *, relation_mode: str) -> None:
-        if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
+    def _prepare_batch_for_submit(
+        self,
+        batch_id: str,
+        *,
+        relation_mode: str,
+        scope_month: str | None = None,
+    ) -> dict[str, object] | None:
+        if relation_mode != BANK_FLOW_RULE_BATCH_RELATION_MODE:
+            super()._prepare_batch_for_submit(batch_id, relation_mode=relation_mode)
+            return None
+        try:
+            current = self._bank_batch_service.get_batch(batch_id)
+        except KeyError:
+            current = None
+        if isinstance(current, dict) and str(current.get("status") or "") == "submitted":
+            return None
+        if not str(scope_month or "").strip():
             self._refresh_bank_flow_rule_batch_runtime_snapshot_if_missing(batch_id)
-            return
-        super()._prepare_batch_for_submit(batch_id, relation_mode=relation_mode)
+            return None
+        normalized_month = str(scope_month or "").strip()
+        if not SEARCH_MONTH_RE.match(normalized_month):
+            raise BankBatchRelationMutationError(
+                "bank_flow_rule_batch_candidate_conflict",
+                "流水规则候选月份无效，请刷新列表后重试。",
+            )
+        read_page = getattr(self._query_repository, "read_page", None)
+        if not callable(read_page):
+            raise RuntimeError("bank_flow_rule_batch canonical query repository requires read_page.")
+        source = read_page(
+            {"month": normalized_month, "bucket": "unsubmitted"},
+            summary_filters={"month": normalized_month},
+            page=1,
+            page_size=None,
+        )
+        tag_policy = source.get("tag_policy") if isinstance(source, dict) else None
+        tag_policy = tag_policy if isinstance(tag_policy, dict) else {}
+        live_service = self._live_batch_service(
+            source if isinstance(source, dict) else {},
+            eligible_tag_codes=self._eligible_bank_flow_rule_batch_tag_codes(tag_policy),
+        )
+        try:
+            candidate = live_service.get_batch(batch_id)
+        except KeyError as exc:
+            raise BankBatchRelationMutationError(
+                "bank_flow_rule_batch_candidate_conflict",
+                "流水规则候选已变化或被占用，请刷新列表后重试。",
+            ) from exc
+        if (
+            str(candidate.get("status") or "") != "draft"
+            or str(candidate.get("scope_month") or "") != normalized_month
+        ):
+            raise BankBatchRelationMutationError(
+                "bank_flow_rule_batch_candidate_conflict",
+                "流水规则候选已变化或被占用，请刷新列表后重试。",
+            )
+        snapshot = self._bank_batch_service.snapshot()
+        batches = snapshot.get("batches") if isinstance(snapshot, dict) else None
+        self._bank_batch_service.replace_snapshot(
+            {
+                **(snapshot if isinstance(snapshot, dict) else {}),
+                "batches": {
+                    **(batches if isinstance(batches, dict) else {}),
+                    batch_id: candidate,
+                },
+            }
+        )
+        return bank_flow_rule_batch_candidate_guard(candidate)
 
     def submit_batch(
         self,
@@ -479,6 +465,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         note: str | None,
         relation_mode: str = BANK_FLOW_RULE_BATCH_RELATION_MODE,
         persist: bool = True,
+        scope_month: str | None = None,
     ) -> dict[str, object]:
         if relation_mode != BANK_FLOW_RULE_BATCH_RELATION_MODE:
             raise BankBatchRelationMutationError(
@@ -486,8 +473,19 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 "流水规则批次服务只接受 bank_flow_rule_batch relation mode。",
             )
         previous_batch_snapshot = self._bank_batch_service.snapshot()
+        relation_snapshot_port = getattr(self, "_pair_relation_snapshot_port", None)
+        snapshot_case_ids = getattr(relation_snapshot_port, "snapshot_case_ids", None)
+        previous_relation_snapshot = (
+            snapshot_case_ids([batch_id])
+            if callable(snapshot_case_ids)
+            else {}
+        )
         try:
-            self._prepare_batch_for_submit(batch_id, relation_mode=relation_mode)
+            candidate_guard = self._prepare_batch_for_submit(
+                batch_id,
+                relation_mode=relation_mode,
+                scope_month=scope_month,
+            )
             before_batch = self._bank_batch_service.get_batch(batch_id)
             already_submitted = str(before_batch.get("status") or "") == "submitted"
             batch = self._bank_batch_service.submit_batch(
@@ -502,9 +500,13 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 batch,
                 status="submitted",
                 persist=persist,
+                candidate_guard=candidate_guard,
             )
         except Exception:
             self._restore_batch_service_snapshot(self._bank_batch_service, previous_batch_snapshot)
+            restore_case_ids = getattr(relation_snapshot_port, "restore_case_ids", None)
+            if callable(restore_case_ids):
+                restore_case_ids(previous_relation_snapshot, case_ids=[batch_id])
             raise
 
     def submit_selected_rows(
@@ -815,6 +817,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         changed_case_ids: list[str],
         changed_scope_keys: list[str],
         changed_batch_ids: list[str] | None = None,
+        candidate_guard: dict[str, object] | None = None,
     ) -> None:
         if self._state_store is None:
             return
@@ -835,8 +838,18 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 changed_case_ids=changed_case_ids,
                 changed_scope_keys=normalized_scope_keys,
                 changed_batch_ids=list(changed_batch_ids or []),
+                candidate_guard=(
+                    dict(candidate_guard)
+                    if isinstance(candidate_guard, dict)
+                    else None
+                ),
             )
         except Exception as exc:
+            if "bank_flow_rule_batch_candidate_guard_conflict" in str(exc):
+                raise BankBatchRelationMutationError(
+                    "bank_flow_rule_batch_candidate_conflict",
+                    "流水规则候选已变化或被占用，请刷新列表后重试。",
+                ) from exc
             raise BankFlowRuleBatchPersistenceError(str(exc)) from exc
 
     def resolve_labels(

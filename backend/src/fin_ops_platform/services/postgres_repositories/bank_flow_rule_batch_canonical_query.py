@@ -365,6 +365,129 @@ class BankFlowRuleBatchCanonicalQueryRepository:
             "tag_policy": tag_policy,
         }
 
+    @classmethod
+    def read_candidate_guard_source(
+        cls,
+        transaction: Any,
+        *,
+        scope_month: str,
+    ) -> dict[str, object]:
+        scope_start = month_start(text(scope_month))
+        tag_policy = cls._tag_policy(transaction)
+        eligible_codes = cls._eligible_codes(tag_policy)
+        result = transaction.fetch_one(
+            """
+            with candidate_rows as materialized (
+                select
+                    bank.*,
+                    coalesce(bank.legacy_mongo_id, bank.id::text) as transaction_id,
+                    coalesce(bank.raw_payload->'normalized_payload', '{}'::jsonb) as payload,
+                    coalesce(
+                        confirmed_category.category_code,
+                        manual_category.category,
+                        ''
+                    ) as category_code,
+                    case
+                        when confirmed_category.category_code is not null
+                            then 'auto_confirmation'
+                        else coalesce(manual_category.source, '')
+                    end as category_source
+                from app.bank_transactions bank
+                left join lateral (
+                    select confirmation.category_code
+                    from app.bank_transaction_category_confirmations confirmation
+                    where confirmation.tenant_id = 'default'
+                      and confirmation.status = 'active'
+                      and (
+                          confirmation.bank_transaction_id = bank.id
+                          or confirmation.legacy_transaction_id in (
+                              coalesce(bank.legacy_mongo_id, bank.id::text),
+                              bank.id::text
+                          )
+                      )
+                    order by confirmation.confirmed_at desc, confirmation.id desc
+                    limit 1
+                ) confirmed_category on true
+                left join lateral (
+                    select manual.category, manual.source
+                    from app.bank_transaction_categories manual
+                    where manual.status = 'active'
+                      and (
+                          manual.bank_transaction_id = bank.id
+                          or manual.legacy_transaction_id in (
+                              coalesce(bank.legacy_mongo_id, bank.id::text),
+                              bank.id::text
+                          )
+                      )
+                    order by manual.updated_at desc, manual.id desc
+                    limit 1
+                ) manual_category on true
+                where bank.status <> 'deleted'
+                  and coalesce(
+                      confirmed_category.category_code,
+                      manual_category.category,
+                      ''
+                  ) = any(%s::text[])
+                  and coalesce(bank.txn_date, bank.txn_month) >= %s::date - interval '2 days'
+                  and coalesce(bank.txn_date, bank.txn_month) < %s::date + interval '1 month 2 days'
+            ),
+            active_relations as materialized (
+                select relation.*
+                from app.workbench_pair_relations relation
+                where relation.status = 'active'
+                  and exists (
+                      select 1
+                      from candidate_rows candidate
+                      where candidate.transaction_id = any(relation.row_ids)
+                         or candidate.id::text = any(relation.row_ids)
+                  )
+            )
+            select
+                coalesce(
+                    (
+                        select jsonb_agg(
+                            to_jsonb(candidate)
+                            order by candidate.txn_date, candidate.transaction_id
+                        )
+                        from candidate_rows candidate
+                    ),
+                    '[]'::jsonb
+                ) as candidate_rows,
+                coalesce(
+                    (
+                        select jsonb_agg(to_jsonb(relation) order by relation.case_id)
+                        from active_relations relation
+                    ),
+                    '[]'::jsonb
+                ) as active_relations
+            """,
+            (eligible_codes, scope_start, scope_start),
+        ) or {}
+        candidate_rows = result.get("candidate_rows")
+        active_relations = result.get("active_relations")
+        return {
+            "candidate_rows": (
+                [
+                    cls._bank_row_payload(row)
+                    for row in candidate_rows
+                    if isinstance(row, dict)
+                ]
+                if isinstance(candidate_rows, list)
+                else []
+            ),
+            "active_relations": (
+                [
+                    dict(row)
+                    for row in active_relations
+                    if isinstance(row, dict)
+                ]
+                if isinstance(active_relations, list)
+                else []
+            ),
+            "formal_items": [],
+            "tag_policy": tag_policy,
+        }
+
     def read_detail(self, batch_id: str) -> dict[str, object] | None:
         normalized_batch_id = text(batch_id)
         if not normalized_batch_id:

@@ -40,7 +40,6 @@ import {
   directionTagLabel,
   formatMoney,
   isAbortLikeError,
-  isUnsubmittedEligible,
   relationContextLabels,
   requirementFor,
   requirementsFromSelection,
@@ -232,33 +231,19 @@ export default function BankFlowRuleBatchPage() {
 
   const tagNodesByCode = useMemo(() => {
     const nodes = new Map<string, BankFlowRuleTagNode>();
-    if (bucket === "unsubmitted") {
-      tagSelection.activeTags.forEach((tag) => {
-        if (!isUnsubmittedEligible(tagSelection.requirementsByTagCode, tag.code)) {
-          return;
-        }
-        nodes.set(tag.code, {
-          code: tag.code,
-          label: tag.label || tag.code,
-          primaryLabel: tagPrimaryLabel(tag) || tag.label || tag.code,
-          subLabel: tagSubLabel(tag),
-        });
+    payload.summary.categories.forEach((category) => {
+      if (categoryCountForBucket(category, bucket) <= 0) {
+        return;
+      }
+      nodes.set(category.code, {
+        code: category.code,
+        label: category.label || category.code,
+        primaryLabel: tagPrimaryLabel(category) || category.label || category.code,
+        subLabel: tagSubLabel(category),
       });
-    } else {
-      payload.summary.categories.forEach((category) => {
-        if (categoryCountForBucket(category, bucket) <= 0) {
-          return;
-        }
-        nodes.set(category.code, {
-          code: category.code,
-          label: category.label || category.code,
-          primaryLabel: tagPrimaryLabel(category) || category.label || category.code,
-          subLabel: tagSubLabel(category),
-        });
-      });
-    }
+    });
     return nodes;
-  }, [bucket, payload.summary.categories, tagSelection.activeTags, tagSelection.requirementsByTagCode]);
+  }, [bucket, payload.summary.categories]);
 
   const visibleBucketBatches = useMemo(
     () => payload.batches.filter((batch) => statusBucketFor(batch) === bucket),
@@ -502,6 +487,7 @@ export default function BankFlowRuleBatchPage() {
           const submitResult = await submitBankFlowRuleBatch({
             batchId: batch.batchId,
             expectedVersion: batch.version,
+            scopeMonth: batch.scopeMonth,
             note: "",
           });
           setMessage("正在加载流水规则批次最新数据...");
