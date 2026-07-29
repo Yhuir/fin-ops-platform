@@ -11,6 +11,10 @@ from fin_ops_platform.services.postgres_repositories.common import serialize_val
 from fin_ops_platform.services.postgres_repositories.bank_flow_rule_batch_canonical_query import (
     BankFlowRuleBatchCanonicalQueryRepository,
 )
+from fin_ops_platform.services.bank_flow_rule_batch_canonical_query import (
+    bank_flow_rule_batch_candidate_guard,
+    build_live_bank_flow_rule_batch_service,
+)
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 from fin_ops_platform.services.state_store_diff import diff_state_snapshots
@@ -680,7 +684,70 @@ class PostgresStateStoreTests(unittest.TestCase):
             transaction.executed,
             ["set transaction isolation level serializable"],
         )
-        self.assertEqual(len(transaction.lock_queries), 4)
+        self.assertEqual(len(transaction.lock_queries), 5)
+        self.assertTrue(
+            any(
+                "from app.app_settings" in query
+                for query in transaction.lock_queries
+            )
+        )
+
+    def test_candidate_guard_accepts_auto_only_internal_transfer_pair(self) -> None:
+        class Transaction:
+            def execute(self, _sql: str, _params: tuple[object, ...] = ()) -> int:
+                return 0
+
+            def fetch_all(
+                self,
+                _sql: str,
+                _params: tuple[object, ...] = (),
+            ) -> list[dict[str, object]]:
+                return []
+
+        source = {
+            "candidate_rows": [
+                {
+                    "id": "bank-out-188500",
+                    "trade_time": "2026-05-14T09:00:00",
+                    "account_key": "CCB:8106",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "direction": "expense",
+                    "amount": "188500.00",
+                },
+                {
+                    "id": "bank-in-188500",
+                    "trade_time": "2026-05-14T09:30:00",
+                    "account_key": "ICBC:6386",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "direction": "income",
+                    "amount": "188500.00",
+                },
+            ],
+            "active_relations": [],
+            "formal_items": [],
+            "tag_policy": {
+                "active_tags": [{"code": "internal_transfer"}],
+                "requirements_by_tag_code": {
+                    "internal_transfer": {
+                        "requires_oa": False,
+                        "requires_invoice": False,
+                    }
+                },
+            },
+        }
+
+        with patch.object(
+            BankFlowRuleBatchCanonicalQueryRepository,
+            "read_candidate_guard_source",
+            return_value=source,
+        ):
+            candidate = build_live_bank_flow_rule_batch_service(
+                source
+            ).list_batches()[0]
+            PostgresStateStore._assert_bank_flow_rule_batch_candidate_guard(
+                Transaction(),
+                bank_flow_rule_batch_candidate_guard(candidate),
+            )
 
     def test_selected_row_guard_fails_closed_on_canonical_fact_drift(self) -> None:
         class Transaction:

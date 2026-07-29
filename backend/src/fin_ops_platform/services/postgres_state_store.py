@@ -32,6 +32,7 @@ from fin_ops_platform.services.postgres_repositories.bank_flow_rule_batch_canoni
 )
 from fin_ops_platform.services.bank_flow_rule_batch_canonical_query import (
     bank_flow_rule_batch_candidate_guard,
+    bank_flow_rule_batch_effective_categories,
     bank_flow_rule_batch_selected_row_proofs,
     build_live_bank_flow_rule_batch_service,
 )
@@ -822,9 +823,20 @@ class PostgresStateStore:
             """,
             (row_ids,),
         )
+        transaction.fetch_all(
+            """
+            select settings_key
+            from app.app_settings
+            where settings_key = 'app_settings'
+            for share
+            """
+        )
         source = BankFlowRuleBatchCanonicalQueryRepository.read_candidate_guard_source(
             transaction,
             scope_month=str(candidate_guard.get("scope_month") or ""),
+        )
+        categories_by_transaction_id = bank_flow_rule_batch_effective_categories(
+            source
         )
         if candidate_guard.get("guard_mode") == "selected_rows":
             active_row_ids = {
@@ -846,7 +858,8 @@ class PostgresStateStore:
                     if isinstance(row, dict)
                     and str(row.get("id") or row.get("transaction_id") or "").strip()
                     in row_ids
-                ]
+                ],
+                categories_by_transaction_id,
             )
             if (
                 active_row_ids.intersection(row_ids)

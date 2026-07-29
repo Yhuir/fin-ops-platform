@@ -6,7 +6,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fin_ops_platform.services.bank_flow_rule_batch_canonical_query import (
+    bank_flow_rule_batch_effective_categories,
     build_live_bank_flow_rule_batch_service,
+    eligible_bank_flow_rule_batch_codes,
 )
 from fin_ops_platform.services.postgres_repositories.audit_report import (
     AuditIssue,
@@ -777,11 +779,26 @@ def _bank_flow_live_expected_set_issues(
             for row_id in list(relation.get("row_ids") or [])
             if str(row_id).strip()
         }
+        categories_by_transaction_id = bank_flow_rule_batch_effective_categories(
+            source
+        )
+        tag_policy = source.get("tag_policy")
+        eligible_codes = eligible_bank_flow_rule_batch_codes(
+            tag_policy if isinstance(tag_policy, dict) else {}
+        )
         candidate_row_ids = {
             str(row.get("id") or row.get("transaction_id") or "").strip()
             for row in list(source.get("candidate_rows") or [])
             if isinstance(row, dict)
             and str(row.get("id") or row.get("transaction_id") or "").strip()
+            and str(
+                categories_by_transaction_id.get(
+                    str(row.get("id") or row.get("transaction_id") or "").strip(),
+                    {},
+                ).get("effective_category_code")
+                or ""
+            ).strip()
+            in eligible_codes
         }
         covered_row_ids = {
             row_id

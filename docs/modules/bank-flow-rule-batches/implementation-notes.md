@@ -3,6 +3,7 @@
 ## 2026-07-29 未提交 live candidate 与 draft runtime 退休
 
 - 未提交候选不再读取或写入 persisted draft；repository 在同一 `REPEATABLE READ / READ ONLY` snapshot 中批量读取请求月份（内部转账含 ±2 天窗口）的银行流水、有效分类、paired policy、active relation 和正式历史，application service 使用共享 live builder 计算 summary、过滤、排序与分页。
+- 生产验证发现旧 SQL 在 live builder 前只按 manual/confirmation category 预筛，导致银行明细可自动识别的 188500 元内部往来款仍被遗漏。修复后 repository 返回月份窗口内全部 non-deleted 银行流水和分类事实，GET、详情、提交 guard 与 Audit 统一复用 `BankTransactionEffectiveCategoryProvider` 批量计算 effective category；写事务同时锁定当前 app settings 规则行，禁止查询与提交间规则漂移。
 - GET、提交事务复核与 Page/System Audit 使用同一 `BankBatchService` 匹配内核；候选 identity、成员、金额、188500 元内部往来匹配与占用判断保持确定性，歧义 fail closed。
 - 提交携带 `scope_month`，在写事务内重读并锁定候选依赖；规则、成员、金额、分类或 active relation 漂移返回 candidate conflict，relation/batch 写入整体回滚。
 - canonical draft event、owner、producer、worker、registry/env、repair/replay 和 deploy 接线已删除；`app.bank_flow_rule_batches/events` 只保存 submitted、withdrawn、stale 等正式业务状态和历史。

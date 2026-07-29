@@ -64,8 +64,8 @@ class BankFlowRuleBatchCanonicalQueryRepository:
             formal_scope_sql += " and batch.account_key = %s"
             formal_scope_params.append(source_account_key)
         with self._snapshot() as transaction:
-            tag_policy = self._tag_policy(transaction)
-            eligible_codes = self._eligible_codes(tag_policy)
+            tag_sources = self._tag_sources(transaction)
+            tag_policy = tag_sources["tag_policy"]
             source_result = transaction.fetch_one(
                 f"""
                 with candidate_rows as materialized (
@@ -85,10 +85,15 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                             when confirmed_category.category_code is not null
                                 then 'auto_confirmation'
                             else coalesce(manual_category.source, '')
-                        end as category_source
+                        end as category_source,
+                        coalesce(
+                            confirmed_category.version,
+                            manual_category.version,
+                            0
+                        )::integer as category_version
                     from app.bank_transactions bank
                     left join lateral (
-                        select confirmation.category_code
+                        select confirmation.category_code, confirmation.version
                         from app.bank_transaction_category_confirmations confirmation
                         where confirmation.tenant_id = 'default'
                           and confirmation.status = 'active'
@@ -103,7 +108,7 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                         limit 1
                     ) confirmed_category on true
                     left join lateral (
-                        select manual.category, manual.source
+                        select manual.category, manual.source, manual.version
                         from app.bank_transaction_categories manual
                         where manual.status = 'active'
                           and (
@@ -117,11 +122,6 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                         limit 1
                     ) manual_category on true
                     where bank.status <> 'deleted'
-                      and coalesce(
-                          confirmed_category.category_code,
-                          manual_category.category,
-                          ''
-                      ) = any(%s::text[])
                       {candidate_scope_sql}
                 ),
                 active_relations as materialized (
@@ -207,11 +207,7 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                     ) as formal_items
                 """,
                 tuple(
-                    [
-                    eligible_codes,
-                    *candidate_scope_params,
-                    *formal_scope_params,
-                    ]
+                    [*candidate_scope_params, *formal_scope_params]
                 ),
             ) or {}
         candidate_rows = source_result.get("candidate_rows")
@@ -233,6 +229,7 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                 self._batch_payload(row) for row in formal_items if isinstance(row, dict)
             ],
             "tag_policy": tag_policy,
+            "tag_dictionary": tag_sources["tag_dictionary"],
         }
 
     @classmethod
@@ -249,45 +246,10 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                        'YYYY-MM'
                    ) as scope_month
             from app.bank_transactions bank
-            left join lateral (
-                select confirmation.category_code
-                from app.bank_transaction_category_confirmations confirmation
-                where confirmation.tenant_id = 'default'
-                  and confirmation.status = 'active'
-                  and (
-                      confirmation.bank_transaction_id = bank.id
-                      or confirmation.legacy_transaction_id in (
-                          coalesce(bank.legacy_mongo_id, bank.id::text),
-                          bank.id::text
-                      )
-                  )
-                order by confirmation.confirmed_at desc, confirmation.id desc
-                limit 1
-            ) confirmed_category on true
-            left join lateral (
-                select manual.category
-                from app.bank_transaction_categories manual
-                where manual.status = 'active'
-                  and (
-                      manual.bank_transaction_id = bank.id
-                      or manual.legacy_transaction_id in (
-                          coalesce(bank.legacy_mongo_id, bank.id::text),
-                          bank.id::text
-                      )
-                  )
-                order by manual.updated_at desc, manual.id desc
-                limit 1
-            ) manual_category on true
             where bank.status <> 'deleted'
-              and coalesce(
-                  confirmed_category.category_code,
-                  manual_category.category,
-                  ''
-              ) = any(%s::text[])
             group by coalesce(bank.txn_month, date_trunc('month', bank.txn_date)::date)
             order by coalesce(bank.txn_month, date_trunc('month', bank.txn_date)::date)
-            """,
-            (eligible_codes,),
+            """
         )
         return [
             scope_month
@@ -303,8 +265,8 @@ class BankFlowRuleBatchCanonicalQueryRepository:
         scope_month: str,
     ) -> dict[str, object]:
         scope_start = month_start(text(scope_month))
-        tag_policy = cls._tag_policy(transaction)
-        eligible_codes = cls._eligible_codes(tag_policy)
+        tag_sources = cls._tag_sources(transaction)
+        tag_policy = tag_sources["tag_policy"]
         result = transaction.fetch_one(
             """
             with candidate_rows as materialized (
@@ -321,10 +283,15 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                         when confirmed_category.category_code is not null
                             then 'auto_confirmation'
                         else coalesce(manual_category.source, '')
-                    end as category_source
+                    end as category_source,
+                    coalesce(
+                        confirmed_category.version,
+                        manual_category.version,
+                        0
+                    )::integer as category_version
                 from app.bank_transactions bank
                 left join lateral (
-                    select confirmation.category_code
+                    select confirmation.category_code, confirmation.version
                     from app.bank_transaction_category_confirmations confirmation
                     where confirmation.tenant_id = 'default'
                       and confirmation.status = 'active'
@@ -339,7 +306,7 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                     limit 1
                 ) confirmed_category on true
                 left join lateral (
-                    select manual.category, manual.source
+                    select manual.category, manual.source, manual.version
                     from app.bank_transaction_categories manual
                     where manual.status = 'active'
                       and (
@@ -353,11 +320,6 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                     limit 1
                 ) manual_category on true
                 where bank.status <> 'deleted'
-                  and coalesce(
-                      confirmed_category.category_code,
-                      manual_category.category,
-                      ''
-                  ) = any(%s::text[])
                   and coalesce(bank.txn_date, bank.txn_month) >= %s::date - interval '2 days'
                   and coalesce(bank.txn_date, bank.txn_month) < %s::date + interval '1 month 2 days'
             ),
@@ -391,7 +353,7 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                     '[]'::jsonb
                 ) as active_relations
             """,
-            (eligible_codes, scope_start, scope_start),
+            (scope_start, scope_start),
         ) or {}
         candidate_rows = result.get("candidate_rows")
         active_relations = result.get("active_relations")
@@ -416,6 +378,7 @@ class BankFlowRuleBatchCanonicalQueryRepository:
             ),
             "formal_items": [],
             "tag_policy": tag_policy,
+            "tag_dictionary": tag_sources["tag_dictionary"],
         }
 
     def read_detail(self, batch_id: str) -> dict[str, object] | None:
@@ -423,7 +386,8 @@ class BankFlowRuleBatchCanonicalQueryRepository:
         if not normalized_batch_id:
             return None
         with self._snapshot() as transaction:
-            tag_policy = self._tag_policy(transaction)
+            tag_sources = self._tag_sources(transaction)
+            tag_policy = tag_sources["tag_policy"]
             batch_row = transaction.fetch_one(
                 """
                 select
@@ -460,12 +424,17 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                         when confirmed_category.category_code is not null then 'auto_confirmation'
                         else coalesce(manual_category.source, '')
                     end as category_source,
+                    coalesce(
+                        confirmed_category.version,
+                        manual_category.version,
+                        0
+                    )::integer as category_version,
                     coalesce(active_relations.case_ids, array[]::text[]) as relation_case_ids,
                     coalesce(active_relations.linked_oa_count, 0)::integer as linked_oa_count,
                     coalesce(active_relations.linked_invoice_count, 0)::integer as linked_invoice_count
                 from app.bank_transactions bank
                 left join lateral (
-                    select confirmation.category_code
+                    select confirmation.category_code, confirmation.version
                     from app.bank_transaction_category_confirmations confirmation
                     where confirmation.tenant_id = 'default'
                       and confirmation.status = 'active'
@@ -480,7 +449,7 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                     limit 1
                 ) confirmed_category on true
                 left join lateral (
-                    select manual.category, manual.source
+                    select manual.category, manual.source, manual.version
                     from app.bank_transaction_categories manual
                     where manual.status = 'active'
                       and (
@@ -540,6 +509,7 @@ class BankFlowRuleBatchCanonicalQueryRepository:
             "rows": [self._bank_row_payload(row) for row in bank_rows],
             "events": [self._event_payload(row) for row in events],
             "tag_policy": tag_policy,
+            "tag_dictionary": tag_sources["tag_dictionary"],
         }
 
     def read_batch(self, batch_id: str) -> dict[str, object] | None:
@@ -579,45 +549,14 @@ class BankFlowRuleBatchCanonicalQueryRepository:
             with categorized_scopes as (
                 select coalesce(bank.txn_month, date_trunc('month', bank.txn_date)::date) as scope_month
                 from app.bank_transactions bank
-                left join lateral (
-                    select confirmation.category_code
-                    from app.bank_transaction_category_confirmations confirmation
-                    where confirmation.tenant_id = 'default'
-                      and confirmation.status = 'active'
-                      and (
-                          confirmation.bank_transaction_id = bank.id
-                          or confirmation.legacy_transaction_id in (
-                              coalesce(bank.legacy_mongo_id, bank.id::text),
-                              bank.id::text
-                          )
-                      )
-                    order by confirmation.confirmed_at desc, confirmation.id desc
-                    limit 1
-                ) confirmed_category on true
-                left join lateral (
-                    select manual.category
-                    from app.bank_transaction_categories manual
-                    where manual.status = 'active'
-                      and (
-                          manual.bank_transaction_id = bank.id
-                          or manual.legacy_transaction_id in (
-                              coalesce(bank.legacy_mongo_id, bank.id::text),
-                              bank.id::text
-                          )
-                      )
-                    order by manual.updated_at desc, manual.id desc
-                    limit 1
-                ) manual_category on true
                 where bank.status <> 'deleted'
-                  and coalesce(confirmed_category.category_code, manual_category.category, '') = any(%s::text[])
             )
             select to_char(scope_month, 'YYYY-MM') as scope_key
             from categorized_scopes
             where scope_month is not null
             group by scope_month
             order by scope_month
-            """,
-            (normalized_codes,),
+            """
         )
         return [scope_key for row in rows if (scope_key := text(row.get("scope_key")))]
 
@@ -629,6 +568,12 @@ class BankFlowRuleBatchCanonicalQueryRepository:
 
     @staticmethod
     def _tag_policy(transaction: Any) -> dict[str, object]:
+        return BankFlowRuleBatchCanonicalQueryRepository._tag_sources(transaction)[
+            "tag_policy"
+        ]
+
+    @staticmethod
+    def _tag_sources(transaction: Any) -> dict[str, dict[str, object]]:
         row = transaction.fetch_one(
             """
             select settings_payload
@@ -641,10 +586,14 @@ class BankFlowRuleBatchCanonicalQueryRepository:
         settings = settings if isinstance(settings, dict) else {}
         rules = settings.get("bank_flow_rule_batch_tag_rules")
         tags = settings.get("bank_transaction_tags")
-        return AppSettingsService._public_bank_transaction_paired_policy(
-            rules if isinstance(rules, dict) else {},
-            bank_transaction_tags=tags if isinstance(tags, dict) else {},
-        )
+        tag_dictionary = tags if isinstance(tags, dict) else {}
+        return {
+            "tag_policy": AppSettingsService._public_bank_transaction_paired_policy(
+                rules if isinstance(rules, dict) else {},
+                bank_transaction_tags=tag_dictionary,
+            ),
+            "tag_dictionary": tag_dictionary,
+        }
 
     @staticmethod
     def _eligible_codes(tag_policy: dict[str, object]) -> list[str]:

@@ -240,7 +240,7 @@ def test_page_query_uses_one_repeatable_read_snapshot_and_two_fixed_selects() ->
         for sql, params in connection.fetched_one
         if "candidate_rows" in sql and "formal_items" in sql
     )
-    assert source_params[1:3] == ("2026-05-01", "2026-05-01")
+    assert source_params[:2] == ("2026-05-01", "2026-05-01")
 
 
 def test_page_query_returns_an_explicit_empty_result() -> None:
@@ -305,6 +305,7 @@ def test_page_query_returns_live_candidate_inputs_in_the_same_snapshot() -> None
     assert "from app.bank_transactions" in combined_sql
     assert "from app.workbench_pair_relations" in combined_sql
     assert "from app.bank_flow_rule_batches" in combined_sql
+    assert "manual_category.category, '' ) = any" not in combined_sql
     assert "read_model." not in combined_sql
 
 
@@ -341,7 +342,7 @@ def test_affected_scope_lookup_is_one_set_based_canonical_query() -> None:
     assert "from app.bank_transactions bank" in sql
     assert "from app.bank_flow_rule_batches batch" not in sql
     assert "read_model." not in sql
-    assert params == (["fee", "salary"],)
+    assert params == ()
 
 
 @pytest.mark.parametrize(

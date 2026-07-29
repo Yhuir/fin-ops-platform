@@ -19,6 +19,7 @@ from fin_ops_platform.services.bank_batch_service import (
 )
 from fin_ops_platform.services.bank_flow_rule_batch_canonical_query import (
     bank_flow_rule_batch_candidate_guard,
+    bank_flow_rule_batch_effective_categories,
     bank_flow_rule_batch_selected_row_proofs,
     build_live_bank_flow_rule_batch_service,
 )
@@ -666,21 +667,49 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             for row in list(detail.get("rows") or [])
             if isinstance(row, dict)
         ]
+        categories_by_transaction_id = bank_flow_rule_batch_effective_categories(
+            {
+                "rows": source_rows,
+                "tag_dictionary": detail.get("tag_dictionary"),
+            }
+        )
         for row in source_rows:
-            category_code = str(row.get("category_code") or "").strip()
+            transaction_id = str(row.get("id") or "").strip()
+            category = categories_by_transaction_id.get(transaction_id, {})
+            category_code = str(
+                category.get("effective_category_code")
+                or category.get("category_code")
+                or ""
+            ).strip()
             definition = definitions_by_code.get(category_code, {})
-            if not category_code or not definition:
+            if not category_code:
                 continue
+            row["category_code"] = category_code
+            row["category_source"] = str(
+                category.get("effective_category_source")
+                or category.get("category_source")
+                or ""
+            )
             row["category_label"] = str(
-                definition.get("label")
+                category.get("effective_category_label")
+                or category.get("category_label")
+                or definition.get("label")
                 or definition.get("output_sub_label")
                 or definition.get("output_primary_label")
                 or category_code
             )
             row["category_primary_label"] = str(
-                definition.get("output_primary_label") or row["category_label"]
+                category.get("effective_category_primary_label")
+                or category.get("category_primary_label")
+                or definition.get("output_primary_label")
+                or row["category_label"]
             )
-            row["category_sub_label"] = str(definition.get("output_sub_label") or "")
+            row["category_sub_label"] = str(
+                category.get("effective_category_sub_label")
+                or category.get("category_sub_label")
+                or definition.get("output_sub_label")
+                or ""
+            )
             row["category_label_path"] = [
                 label
                 for label in (

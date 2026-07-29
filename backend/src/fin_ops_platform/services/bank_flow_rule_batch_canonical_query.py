@@ -8,6 +8,15 @@ from fin_ops_platform.services.bank_batch_service import (
     BANK_FLOW_RULE_BATCH_SCHEMA_VERSION,
     BankBatchService,
 )
+from fin_ops_platform.services.bank_transaction_auto_category_service import (
+    BankTransactionAutoCategoryService,
+)
+from fin_ops_platform.services.bank_transaction_category_service import (
+    BankTransactionCategoryService,
+)
+from fin_ops_platform.services.bank_transaction_effective_category_provider import (
+    BankTransactionEffectiveCategoryProvider,
+)
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 
@@ -47,40 +56,7 @@ def build_live_bank_flow_rule_batch_service(
     }
     tag_policy = source.get("tag_policy")
     tag_policy = tag_policy if isinstance(tag_policy, dict) else {}
-    definitions = {
-        str(definition.get("code") or "").strip(): dict(definition)
-        for definition in list(tag_policy.get("active_tags") or [])
-        if isinstance(definition, dict) and str(definition.get("code") or "").strip()
-    }
-    categories = {
-        str(row.get("id") or row.get("transaction_id") or ""): {
-            "transaction_id": str(row.get("id") or row.get("transaction_id") or ""),
-            "category_code": str(row.get("category_code") or ""),
-            "category_label": str(
-                definitions.get(str(row.get("category_code") or ""), {}).get("label")
-                or row.get("category_label")
-                or row.get("category_code")
-                or ""
-            ),
-            "category_primary_label": str(
-                definitions.get(str(row.get("category_code") or ""), {}).get(
-                    "output_primary_label"
-                )
-                or row.get("category_primary_label")
-                or ""
-            ),
-            "category_sub_label": str(
-                definitions.get(str(row.get("category_code") or ""), {}).get(
-                    "output_sub_label"
-                )
-                or row.get("category_sub_label")
-                or ""
-            ),
-            "category_source": str(row.get("category_source") or ""),
-        }
-        for row in rows
-        if str(row.get("id") or row.get("transaction_id") or "").strip()
-    }
+    categories = bank_flow_rule_batch_effective_categories(source)
     pair_service = WorkbenchPairRelationService.from_snapshot(
         {
             "pair_relations": {
@@ -112,6 +88,43 @@ def build_live_bank_flow_rule_batch_service(
         include_relation_backed_submitted_batches=False,
     )
     return batch_service
+
+
+def bank_flow_rule_batch_effective_categories(
+    source: dict[str, object],
+) -> dict[str, dict[str, Any]]:
+    rows = [
+        dict(row)
+        for row in list(source.get("candidate_rows") or source.get("rows") or [])
+        if isinstance(row, dict)
+    ]
+    manual_categories: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        transaction_id = str(
+            row.get("id") or row.get("transaction_id") or ""
+        ).strip()
+        category_code = str(row.get("category_code") or "").strip()
+        if not transaction_id or not category_code:
+            continue
+        category_source = str(row.get("category_source") or "").strip()
+        manual_categories[transaction_id] = {
+            "transaction_id": transaction_id,
+            "category_code": category_code,
+            "source": category_source,
+            "manual_assignment": category_source == "manual",
+            "version": int(row.get("category_version") or 0),
+        }
+    tag_dictionary = source.get("tag_dictionary")
+    category_service = BankTransactionCategoryService(
+        categories=manual_categories,
+        tag_dictionary=tag_dictionary if isinstance(tag_dictionary, dict) else None,
+    )
+    return BankTransactionEffectiveCategoryProvider(
+        category_service=category_service,
+        auto_category_service=BankTransactionAutoCategoryService(
+            category_service=category_service,
+        ),
+    ).bulk_get_for_rows(rows)
 
 
 def bank_flow_rule_batch_candidate_guard(batch: dict[str, Any]) -> dict[str, object]:

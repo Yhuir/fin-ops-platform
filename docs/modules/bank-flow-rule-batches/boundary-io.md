@@ -37,7 +37,7 @@
 | 正式批次事实 | `app.bank_flow_rule_batches` | 只读取 submitted/withdrawn/stale 批次、成员、金额、版本和冻结 `normalized_payload`；persisted draft/unsubmitted 不参与列表、提交或 Audit expected set。 |
 | 批次事件 | `app.bank_flow_rule_batch_events` | 详情按 batch id 一次集合查询，保持 submitted/withdrawn/audit history。 |
 | 银行流水 | `app.bank_transactions` | 未提交月份边界内批量读取 non-deleted 当前行；正式详情按 batch member ids 集合读取。 |
-| 当前分类 | `app.bank_transaction_category_confirmations`、`app.bank_transaction_categories` | confirmation 优先于 manual category；只影响未提交资格与未提交详情标签。 |
+| 当前有效分类 | `app.bank_transactions`、`app.bank_transaction_category_confirmations`、`app.bank_transaction_categories`、`app_settings.bank_transaction_tags` | repository 返回月份窗口内全部 non-deleted 银行流水及人工/确认事实，不用人工分类 SQL 预筛；application service 复用 `BankTransactionEffectiveCategoryProvider` 与现有自动分类规则批量得出 effective category。confirmation、manual 与 auto 的优先级和银行明细一致。 |
 | 标签与 paired policy | `app.app_settings` | active tags 与 `requirements_by_tag_code` 同一次 canonical snapshot 读取；缺规则默认需要 OA 和发票。 |
 | 正式关系 | `app.workbench_pair_relations` | 只接受 `status='active'`。active relation 决定占用和 submitted 可撤回；禁止使用 `workbench_relation` projection。 |
 | 规则写入 | `GET/PUT /api/bank-flow-rule-batches/tag-rules` | PUT 使用 `expected_version` CAS；未知、停用、重复标签 fail fast；语义 no-op 不递增版本。 |
@@ -60,10 +60,10 @@
 ## 一致性与查询预算
 
 - 一次列表请求中的 tag policy、total、page rows 和 summary aggregates 位于同一显式 `REPEATABLE READ / READ ONLY` transaction。
-- 列表使用固定数量的集合查询读取 settings、请求月份（内部转账含 ±2 天窗口）内的候选输入、正式历史和 active relation；批次数、分页深度和每批行数不增加查询次数。
+- 列表使用固定数量的集合查询读取 settings、请求月份（内部转账含 ±2 天窗口）内全部 non-deleted 银行流水、人工/确认分类事实、正式历史和 active relation；effective category 在共享 service 内批量计算，批次数、分页深度和每批行数不增加查询次数。
 - 详情固定 4 次 SELECT：settings、batch、批量 bank rows/active relation aggregates、events。
 - repository 不得加载跨月份全量银行流水；application service 可以对已按月份窗口约束的 live candidate 集合统一计算 summary、过滤、排序和分页。不得逐 batch、逐 row 或逐 relation N+1，也不得把分页下放浏览器。
-- 未提交 batch 由共享 builder 实时推导，必须同时满足：标签当前双 false、所有成员仍存在且分类一致、成员未与任一 active relation overlap。
+- 未提交 batch 由共享 builder 实时推导，必须同时满足：有效分类命中当前双 false 标签、所有成员仍存在且分类一致、成员未与任一 active relation overlap。禁止在 SQL 层仅按 manual/confirmation category 预筛，否则 auto-only 候选会被静默遗漏。
 - submitted 的可撤回性只由同一 canonical batch 的 active relation 决定。
 - 内部转账维持一收一支、不同账户、48 小时窗口；金额只计单边。跨月配对以最早成员所在月份作为唯一 owner month：例如 5 月 31 日与 6 月 1 日配对只属于 5 月请求，6 月请求不得重复生成相邻月份候选。
 - 页面查询不新增 cache、materialized view、queue、worker、fallback 或双读；只有 EXPLAIN 证明确有需要时才统一新增索引 migration。
@@ -121,7 +121,7 @@ Canonical facts：
 
 ## Live candidate 合同
 
-- GET、提交事务复核与 Page/System Audit 都调用同一 live builder；输入来自当前银行流水、有效分类、paired policy、active relation 和正式历史占用。
+- GET、提交事务复核与 Page/System Audit 都调用同一 live builder 和有效分类 provider；输入来自当前银行流水、人工/确认分类事实、当前自动规则、paired policy、active relation 和正式历史占用。
 - 候选 identity、成员、金额与内部往来匹配必须确定性；歧义 fail closed，内部往来金额只计单边。内部往来的 ±2 天查询窗口只用于发现跨月配对，配对 owner month 固定为最早成员月份，相邻月份查询不得重复返回。
 - 提交必须携带合法 `scope_month` 并在写事务内重读、重算、锁定和复核；遗留 persisted draft 不能被恢复或提交。
 - 撤回释放关系后，若当前事实仍合格，下一次 GET 自动重新生成候选。

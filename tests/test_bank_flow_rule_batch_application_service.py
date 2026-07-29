@@ -1552,7 +1552,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                             "direction": "expense",
                             "amount": "12.00",
                             "category_code": "fee",
-                            "category_source": "confirmed",
+                            "category_source": "auto_confirmation",
                         }
                     ],
                     "active_relations": [],
@@ -1622,10 +1622,9 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                             "account_key": "CCB:8106",
                             "bank_name": "建设银行",
                             "account_no": "6222000000008106",
+                            "counterparty_name": "云南溯源科技有限公司",
                             "direction": "expense",
                             "amount": "188500.00",
-                            "category_code": "internal_transfer",
-                            "category_source": "confirmed",
                         },
                         {
                             "id": "bank-in-188500",
@@ -1633,10 +1632,9 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                             "account_key": "ICBC:6386",
                             "bank_name": "工商银行",
                             "account_no": "6222000000006386",
+                            "counterparty_name": "云南溯源科技有限公司",
                             "direction": "income",
                             "amount": "188500.00",
-                            "category_code": "internal_transfer",
-                            "category_source": "confirmed",
                         },
                     ],
                     "active_relations": [],
@@ -1709,7 +1707,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                             "direction": "expense",
                             "amount": "188500.00",
                             "category_code": "internal_transfer",
-                            "category_source": "confirmed",
+                            "category_source": "auto_confirmation",
                         },
                         {
                             "id": "bank-in-188500",
@@ -1718,7 +1716,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                             "direction": "income",
                             "amount": "188500.00",
                             "category_code": "internal_transfer",
-                            "category_source": "confirmed",
+                            "category_source": "auto_confirmation",
                         },
                     ],
                     "active_relations": [],
@@ -1829,7 +1827,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                             "direction": "expense",
                             "amount": "188500.00",
                             "category_code": "internal_transfer",
-                            "category_source": "confirmed",
+                            "category_source": "auto_confirmation",
                         },
                         {
                             "id": "bank-in-188500",
@@ -1838,7 +1836,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                             "direction": "income",
                             "amount": "188500.00",
                             "category_code": "internal_transfer",
-                            "category_source": "confirmed",
+                            "category_source": "auto_confirmation",
                         },
                     ],
                     "active_relations": [],
@@ -1927,7 +1925,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                         "direction": "expense",
                         "amount": "188500.00",
                         "category_code": "internal_transfer",
-                        "category_source": "confirmed",
+                        "category_source": "auto_confirmation",
                     },
                     {
                         "id": "bank-in-188500",
@@ -1936,7 +1934,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                         "direction": "income",
                         "amount": "188500.00",
                         "category_code": "internal_transfer",
-                        "category_source": "confirmed",
+                        "category_source": "auto_confirmation",
                     },
                 ]
                 candidate_service = BankBatchService(
@@ -1949,7 +1947,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                     {
                         str(row["id"]): {
                             "category_code": "internal_transfer",
-                            "category_source": "confirmed",
+                            "category_source": "auto_confirmation",
                         }
                         for row in rows
                     },
@@ -2017,7 +2015,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                         "direction": direction,
                         "amount": "188500.00",
                         "category_code": "internal_transfer",
-                        "category_source": "confirmed",
+                        "category_source": "auto_confirmation",
                     }
 
                 return {
@@ -2095,7 +2093,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                 "direction": "expense",
                 "amount": "188500.00",
                 "category_code": "internal_transfer",
-                "category_source": "confirmed",
+                "category_source": "auto_confirmation",
             },
             {
                 "id": "boundary-in",
@@ -2104,7 +2102,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                 "direction": "income",
                 "amount": "188500.00",
                 "category_code": "internal_transfer",
-                "category_source": "confirmed",
+                "category_source": "auto_confirmation",
             },
         ]
 
