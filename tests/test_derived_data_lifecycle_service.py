@@ -41,9 +41,9 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         self.assertEqual(plan["affected_scopes"], ["all"])
         domains = [domain["domain"] for domain in plan["domains"]]
         self.assertIn("oa_adapter_records_cache", domains)
-        self.assertIn("bank_flow_rule_batch_canonical_draft", domains)
         self.assertIn("file_import_sessions", domains)
         self.assertIn("historical_etc_repair_state", domains)
+        self.assertNotIn("bank_flow_rule_batch_canonical_draft", domains)
         self.assertNotIn("bank_account_balance_read_model", domains)
 
     def test_ordinary_write_events_fail_fast(self) -> None:
