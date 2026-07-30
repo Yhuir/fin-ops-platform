@@ -9,6 +9,10 @@ from fin_ops_platform.services.postgres_repositories.audit_report import (
     evaluate_audit_issues,
     use_audit_snapshot,
 )
+from fin_ops_platform.services.postgres_repositories.canonical_etc_summary_sql import (
+    CANONICAL_ETC_BATCH_CANDIDATES_SQL,
+    WORKBENCH_RELATION_EXTERNAL_ETC_BATCH_ID_SQL,
+)
 from fin_ops_platform.services.workbench_relation_modes import TURNOVER_MANUAL_CLOSURE_RELATION_MODE
 
 
@@ -70,94 +74,18 @@ def audit_workbench_relation_display(
 
 def _canonical_relation_issues(connection: Any, *, limit: int) -> list[AuditIssue]:
     rows = connection.fetch_all(
-        """
+        f"""
         /* check: canonical_relation_integrity */
         with active_relations as (
             select
                 relation.*,
-                coalesce(
-                    nullif(relation.amount_check->>'external_etc_batch_id', ''),
-                    nullif(relation.amount_check->>'etc_batch_id', ''),
-                    nullif(relation.special_metadata->>'external_etc_batch_id', ''),
-                    nullif(relation.special_metadata->>'etc_batch_id', ''),
-                    nullif(relation.special_metadata#>>'{etc_batch_link,external_etc_batch_id}', ''),
-                    nullif(relation.special_metadata#>>'{etc_batch_link,etc_batch_id}', ''),
-                    nullif(
-                        relation.special_metadata#>>'{historical_etc_business_batch_migration,external_etc_batch_id}',
-                        ''
-                    ),
-                    nullif(
-                        relation.special_metadata#>>'{historical_etc_business_batch_migration,etc_batch_id}',
-                        ''
-                    )
-                ) as external_etc_batch_id
+                {WORKBENCH_RELATION_EXTERNAL_ETC_BATCH_ID_SQL} as external_etc_batch_id
             from app.workbench_pair_relations relation
             where relation.status = 'active'
               and relation.relation_mode <> %s
         ),
         canonical_etc_batch_candidates as (
-            select coalesce(
-                       nullif(batch.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
-                       nullif(batch.raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
-                       nullif(batch.raw_payload->'normalized_payload'->>'submission_batch_id', ''),
-                       nullif(batch.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
-                       link.business_batch_id
-                   ) as external_batch_id
-            from app.etc_batch_invoice_links link
-            join app.invoices invoice
-              on invoice.id = link.invoice_id
-            left join app.etc_business_batches batch
-              on batch.business_batch_id = link.business_batch_id
-            where link.link_status = 'active'
-              and invoice.status <> 'deleted'
-            union all
-            select coalesce(
-                       nullif(batch.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
-                       nullif(batch.raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
-                       nullif(batch.raw_payload->'normalized_payload'->>'submission_batch_id', ''),
-                       nullif(batch.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
-                       batch.business_batch_id
-                   ) as external_batch_id
-            from app.etc_business_batches batch
-            join lateral jsonb_array_elements_text(
-                case
-                    when jsonb_typeof(batch.raw_payload->'normalized_payload'->'invoice_ids') = 'array'
-                        then batch.raw_payload->'normalized_payload'->'invoice_ids'
-                    else '[]'::jsonb
-                end
-            ) member(invoice_id) on true
-            join app.etc_invoices invoice
-              on invoice.etc_invoice_id = member.invoice_id
-              or coalesce(invoice.legacy_mongo_id, '') = member.invoice_id
-            where batch.status in ('oa_submitted', 'manually_marked_submitted', 'closed')
-              and invoice.status <> 'deleted'
-            union all
-            select coalesce(
-                       nullif(submission.raw_payload->'normalized_payload'->>'etc_batch_id', ''),
-                       submission.submission_batch_id
-                   ) as external_batch_id
-            from app.etc_submission_batches submission
-            join app.invoices invoice
-              on submission.submission_batch_id = coalesce(
-                  invoice.raw_payload->'normalized_payload'->>'etc_submission_batch_id',
-                  ''
-              )
-              or coalesce(
-                  nullif(submission.raw_payload->'normalized_payload'->>'etc_batch_id', ''),
-                  submission.submission_batch_id
-              ) = coalesce(
-                  invoice.raw_payload->'normalized_payload'->>'etc_submission_batch_id',
-                  ''
-              )
-            where submission.status in ('submitted_confirmed', 'submitted', 'closed')
-              and invoice.status <> 'deleted'
-              and (
-                    invoice.workbench_visibility = 'hidden_after_etc_submission'
-                 or invoice.raw_payload->'normalized_payload'->>'workbench_visibility'
-                        = 'hidden_after_etc_submission'
-                 or invoice.raw_payload->'normalized_payload'->>'etc_submission_status'
-                        = 'submitted'
-              )
+            {CANONICAL_ETC_BATCH_CANDIDATES_SQL}
         ),
         canonical_etc_batches as (
             select distinct external_batch_id

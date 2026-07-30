@@ -129,6 +129,64 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
             },
         )
 
+    def test_direct_relation_audit_uses_exact_canonical_etc_summary_contract(self) -> None:
+        connection = FakeConnection()
+
+        report = audit_page_business_read_model.audit_page_business_read_model(
+            connection,
+            domain_key="bank_details",
+        )
+
+        self.assertEqual(report["overall_status"], "pass")
+        invoice_sql = next(
+            sql
+            for sql, _params in connection.fetch_all_calls
+            if "canonical_relation_invoice_member_exists" in sql
+        )
+        self.assertIn("app.etc_business_batches", invoice_sql)
+        self.assertIn("app.etc_submission_batches", invoice_sql)
+        self.assertIn("app.etc_batch_invoice_links", invoice_sql)
+        self.assertIn(
+            "etc_batch.external_batch_id = member.external_etc_batch_id",
+            invoice_sql,
+        )
+        self.assertIn("'etc-summary-' || regexp_replace(", invoice_sql)
+        self.assertIn("source.id is null", invoice_sql)
+        self.assertIn("etc_batch.external_batch_id is null", invoice_sql)
+        self.assertIn("source.status <> 'deleted'", invoice_sql)
+        for check_name in {
+            "canonical_relation_bank_member_exists",
+            "canonical_relation_oa_member_exists",
+        }:
+            source_sql = next(
+                sql
+                for sql, _params in connection.fetch_all_calls
+                if check_name in sql
+            )
+            self.assertIn("source.status <> 'deleted'", source_sql)
+
+    def test_invalid_noncanonical_etc_summary_remains_blocking_for_direct_pages(self) -> None:
+        report = audit_page_business_read_model.audit_page_business_read_model(
+            FakeConnection(
+                rows_by_check={
+                    "canonical_relation_invoice_member_exists": [
+                        {
+                            "subject_id": "CASE-INVALID",
+                            "scope_key": "2026-07",
+                            "row_id": "etc-summary-not-a-canonical-batch",
+                        }
+                    ]
+                }
+            ),
+            domain_key="bank_details",
+        )
+
+        self.assertEqual(report["overall_status"], "issues_found")
+        self.assertEqual(
+            report["summary"]["issue_sample_counts_by_code"],
+            {"bank_details_canonical_relation_invoice_member_missing": 1},
+        )
+
     def test_pending_invoice_canonical_member_gap_is_blocking(self) -> None:
         report = audit_page_business_read_model.audit_page_business_read_model(
             FakeConnection(

@@ -16,6 +16,10 @@ from fin_ops_platform.services.postgres_repositories.audit_report import (
     evaluate_audit_issues,
     use_audit_snapshot,
 )
+from fin_ops_platform.services.postgres_repositories.canonical_etc_summary_sql import (
+    CANONICAL_ETC_BATCH_CANDIDATES_SQL,
+    WORKBENCH_RELATION_EXTERNAL_ETC_BATCH_ID_SQL,
+)
 from fin_ops_platform.services.postgres_repositories.page_consumer_relation_audit import (
     BANK_FLOW_RULE_BATCH_CONSUMER,
     page_consumer_relation_edge_equality_issues,
@@ -484,8 +488,11 @@ def _turnover_ledger_direct_canonical_issues(
                    member.row_id, member.row_type
             from members member
             left join app.bank_transactions source
-              on source.id::text = member.row_id
-              or source.legacy_mongo_id = member.row_id
+              on (
+                    source.id::text = member.row_id
+                 or source.legacy_mongo_id = member.row_id
+              )
+             and source.status <> 'deleted'
             where member.row_type in ('bank', 'bank_transaction')
               and source.id is null
             order by member.case_id, member.row_id
@@ -596,8 +603,11 @@ def _bank_details_direct_canonical_issues(
                    member.row_id, member.row_type
             from members member
             left join app.bank_transactions source
-              on source.id::text = member.row_id
-              or source.legacy_mongo_id = member.row_id
+              on (
+                    source.id::text = member.row_id
+                 or source.legacy_mongo_id = member.row_id
+              )
+             and source.status <> 'deleted'
             where member.row_type in ('bank', 'bank_transaction')
               and source.id is null
             order by member.case_id, member.row_id
@@ -641,7 +651,9 @@ def _bank_details_direct_canonical_issues(
                    to_char(member.month_scope, 'YYYY-MM') as scope_key,
                    member.row_id
             from members member
-            left join app.oa_applications source on source.row_id = member.row_id
+            left join app.oa_applications source
+              on source.row_id = member.row_id
+             and source.status <> 'deleted'
             where source.row_id is null
             order by member.case_id, member.row_id
             limit %s
@@ -650,24 +662,52 @@ def _bank_details_direct_canonical_issues(
             "统一配对关系引用了不存在的 OA 记录。",
         ),
         (
-            """
+            f"""
             /* check: canonical_relation_invoice_member_exists */
-            with members as (
-                select relation.case_id, relation.month_scope,
-                       member.row_id, relation.row_types[member.ordinality] as row_type
+            with active_relations as (
+                select relation.*,
+                       {WORKBENCH_RELATION_EXTERNAL_ETC_BATCH_ID_SQL}
+                           as external_etc_batch_id
                 from app.workbench_pair_relations relation
-                join lateral unnest(relation.row_ids) with ordinality member(row_id, ordinality) on true
                 where relation.status = 'active'
+            ),
+            canonical_etc_batch_candidates as (
+                {CANONICAL_ETC_BATCH_CANDIDATES_SQL}
+            ),
+            canonical_etc_batches as (
+                select distinct external_batch_id
+                from canonical_etc_batch_candidates
+                where nullif(external_batch_id, '') is not null
+            ),
+            members as (
+                select relation.case_id, relation.month_scope,
+                       relation.external_etc_batch_id,
+                       member.row_id,
+                       relation.row_types[member.ordinality] as row_type
+                from active_relations relation
+                join lateral unnest(relation.row_ids) with ordinality member(row_id, ordinality) on true
             )
             select member.case_id as subject_id,
                    to_char(member.month_scope, 'YYYY-MM') as scope_key,
                    member.row_id
             from members member
             left join app.invoices source
-              on source.id::text = member.row_id
-              or source.legacy_mongo_id = member.row_id
+              on (
+                    source.id::text = member.row_id
+                 or source.legacy_mongo_id = member.row_id
+              )
+             and source.status <> 'deleted'
+            left join canonical_etc_batches etc_batch
+              on etc_batch.external_batch_id = member.external_etc_batch_id
+             and member.row_id = 'etc-summary-' || regexp_replace(
+                 member.external_etc_batch_id,
+                 '[^A-Za-z0-9_-]+',
+                 '-',
+                 'g'
+             )
             where member.row_type in ('invoice', 'input_invoice', 'output_invoice')
               and source.id is null
+              and etc_batch.external_batch_id is null
             order by member.case_id, member.row_id
             limit %s
             """,
