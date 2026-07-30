@@ -168,10 +168,10 @@ class ReadModelReadinessReporterTests(unittest.TestCase):
         for assignment in expected_assignments:
             self.assertIn(assignment, worker_source)
         self.assertEqual(worker_source.count(" = _read_model_handler("), len(expected_assignments))
-        self.assertIn(
-            "handlers[BANK_FLOW_RULE_BATCH_DRAFT_REFRESH_EVENT_TYPE] = refresh_service.handle_runtime_event",
-            worker_source,
-        )
+        no_oa_worker_block = worker_source.split(
+            "if args.enable_no_oa_bank_batch_read_model_refresh:", 1
+        )[1].split("if args.enable_import_job_processing:", 1)[0]
+        self.assertIn("queue_repository=queue", no_oa_worker_block)
         for retired_event in (
             "bank_detail.read_model.refresh",
             "bank_account_balance.read_model.refresh",

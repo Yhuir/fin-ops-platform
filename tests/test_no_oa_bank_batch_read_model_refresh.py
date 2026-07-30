@@ -13,7 +13,31 @@ from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 
+class RefreshQueue:
+    def __init__(self) -> None:
+        self.completions: list[dict[str, object]] = []
+
+    def read_model_refresh_is_current(self, **_kwargs) -> bool:
+        return True
+
+    def complete_read_model_refresh(self, **kwargs) -> None:
+        self.completions.append(dict(kwargs))
+
+
 class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
+    def test_refresh_service_requires_durable_queue_completion_boundary(self) -> None:
+        with self.assertRaisesRegex(ValueError, "durable queue repository"):
+            NoOaBankBatchReadModelRefreshService(
+                import_service=None,
+                effective_category_provider=None,
+                no_oa_bank_batch_service=None,
+                app_settings_service=None,
+                bank_transaction_category_service=None,
+                pair_relation_service=None,
+                state_store=None,
+                queue_repository=None,
+            )
+
     def test_persistence_port_delegates_to_store_snapshot_save(self) -> None:
         class StateStore:
             def __init__(self) -> None:
@@ -92,6 +116,7 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
             bank_transaction_category_service=app._bank_transaction_category_service,
             pair_relation_service=app._workbench_pair_relation_service,
             state_store=StateStore(),
+            queue_repository=RefreshQueue(),
             read_model_persistence=persistence,
             workbench_matching_source_versions_provider=app._workbench_matching_source_versions,
         )
@@ -218,6 +243,7 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
             bank_transaction_category_service=type("CategoryService", (), {"snapshot": lambda _self: {}})(),
             pair_relation_service=pair_relation_service,
             state_store=state_store,
+            queue_repository=RefreshQueue(),
             workbench_matching_source_versions_provider=lambda: {},
             relation_facade=type(
                 "RelationFacade",
@@ -275,6 +301,7 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
             bank_transaction_category_service=app._bank_transaction_category_service,
             pair_relation_service=app._workbench_pair_relation_service,
             state_store=app._state_store,
+            queue_repository=RefreshQueue(),
             workbench_matching_source_versions_provider=lambda: {
                 **app._workbench_matching_source_versions(),
                 "pair_relation_snapshot_version": "stale-in-memory-hash",
@@ -324,6 +351,7 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
             bank_transaction_category_service=app._bank_transaction_category_service,
             pair_relation_service=app._workbench_pair_relation_service,
             state_store=StateStore(),
+            queue_repository=RefreshQueue(),
             workbench_matching_source_versions_provider=app._workbench_matching_source_versions,
         )
 
@@ -415,6 +443,7 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
             bank_transaction_category_service=category_service,
             pair_relation_service=app._workbench_pair_relation_service,
             state_store=StateStore(),
+            queue_repository=RefreshQueue(),
             workbench_matching_source_versions_provider=app._workbench_matching_source_versions,
         )
 
@@ -723,6 +752,7 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
             bank_transaction_category_service=type("CategoryService", (), {"snapshot": lambda _self: {}})(),
             pair_relation_service=pair_relation_service,
             state_store=state_store,
+            queue_repository=RefreshQueue(),
             workbench_matching_source_versions_provider=lambda: {},
             relation_facade=type(
                 "RelationFacade",

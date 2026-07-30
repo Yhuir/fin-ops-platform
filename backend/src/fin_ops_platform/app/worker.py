@@ -347,6 +347,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             bank_transaction_category_service=category_service,
             pair_relation_service=pair_relation_service,
             state_store=state_store or SimpleNamespace(save_no_oa_bank_batches=lambda _snapshot: None),
+            queue_repository=queue,
             read_model_persistence=NoOaBankBatchReadModelPersistencePort(
                 state_store or SimpleNamespace(save_no_oa_bank_batches=lambda _snapshot: None)
             ),

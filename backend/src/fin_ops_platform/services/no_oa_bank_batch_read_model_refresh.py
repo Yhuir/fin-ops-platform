@@ -48,7 +48,7 @@ class NoOaBankBatchReadModelRefreshService:
         bank_transaction_category_service: Any,
         pair_relation_service: Any,
         state_store: Any,
-        queue_repository: Any | None = None,
+        queue_repository: Any,
         read_model_persistence: Any | None = None,
         workbench_matching_source_versions_provider: Callable[[], dict[str, object]] | None = None,
         relation_facade: Any | None = None,
@@ -57,6 +57,12 @@ class NoOaBankBatchReadModelRefreshService:
     ) -> None:
         self._refresh_event_type = str(refresh_event_type or NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE).strip()
         self._scope_type = str(scope_type or NO_OA_BANK_BATCH_SCOPE_TYPE).strip()
+        for method_name in ("read_model_refresh_is_current", "complete_read_model_refresh"):
+            if not callable(getattr(queue_repository, method_name, None)):
+                raise ValueError(
+                    "No-OA read model refresh requires a durable queue repository "
+                    f"with {method_name}()."
+                )
         self._queue_repository = queue_repository
         self._read_model_persistence = read_model_persistence or NoOaBankBatchReadModelPersistencePort(state_store)
         no_oa_bank_batch_read_model_repository = getattr(state_store, "no_oa_bank_batch_sql_read_repository", None)
@@ -147,21 +153,16 @@ class NoOaBankBatchReadModelRefreshService:
         }
 
     def _complete_dirty_scope(self, event: RuntimeQueueEvent, *, scope_key: str) -> None:
-        complete_dirty_scope = getattr(self._queue_repository, "complete_read_model_refresh", None)
-        if callable(complete_dirty_scope):
-            complete_dirty_scope(
-                tenant_id=event.tenant_id,
-                scope_type=self._scope_type,
-                scope_key=scope_key,
-                source_version=event.source_version or event.payload.get("source_version"),
-            )
+        self._queue_repository.complete_read_model_refresh(
+            tenant_id=event.tenant_id,
+            scope_type=self._scope_type,
+            scope_key=scope_key,
+            source_version=event.source_version or event.payload.get("source_version"),
+        )
 
     def _event_source_version_is_current(self, event: RuntimeQueueEvent, *, scope_key: str) -> bool:
-        is_current = getattr(self._queue_repository, "read_model_refresh_is_current", None)
-        if not callable(is_current):
-            return True
         return bool(
-            is_current(
+            self._queue_repository.read_model_refresh_is_current(
                 tenant_id=event.tenant_id,
                 scope_type=self._scope_type,
                 scope_key=scope_key,
