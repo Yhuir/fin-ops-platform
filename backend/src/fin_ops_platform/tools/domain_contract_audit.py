@@ -5,7 +5,7 @@ from dataclasses import replace
 import json
 import sys
 from typing import Any, TextIO
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 from fin_ops_platform.services.postgres_connection import (
     PostgresConfigurationError,
@@ -209,6 +209,7 @@ from invoice_counts, bank_counts, relation_counts, background_job_counts, outbox
 
 
 def audit_domain_contracts(connection: Any) -> dict[str, Any]:
+    _assert_read_only(connection)
     row = connection.fetch_one(_AUDIT_SQL)
     if row is None:
         raise RuntimeError("domain contract audit query returned no aggregate row")
@@ -220,6 +221,14 @@ def audit_domain_contracts(connection: Any) -> dict[str, Any]:
         "summary": {"blocking_issue_count": blocking_issue_count},
         "contracts": counts,
     }
+
+
+def _assert_read_only(connection: Any) -> None:
+    row = connection.fetch_one(
+        "select current_setting('transaction_read_only') as transaction_read_only"
+    )
+    if row is None or row.get("transaction_read_only") != "on":
+        raise RuntimeError("domain contract audit connection is not read-only")
 
 
 def _contract_counts(row: Mapping[str, Any]) -> dict[str, int]:
@@ -252,7 +261,7 @@ def _force_read_only(settings: PostgresSettings) -> PostgresSettings:
             parsed.scheme,
             parsed.netloc,
             parsed.path,
-            urlencode(query),
+            urlencode(query, quote_via=quote),
             parsed.fragment,
         )
     )

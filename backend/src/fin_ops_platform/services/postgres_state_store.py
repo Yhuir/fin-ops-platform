@@ -1206,20 +1206,20 @@ class PostgresStateStore:
                 continue
             if self._is_object_storage_ref(normalized):
                 self._delete_object_file(normalized)
-                self._connection.execute(
+                row_count = self._connection.execute(
                     "update app.import_files set status = 'deleted' where stored_file_path = %s",
                     (normalized,),
                 )
-                deleted += 1
+                deleted += max(row_count, 1)
                 continue
             file_path = Path(normalized)
             if file_path.exists():
                 file_path.unlink()
-                self._connection.execute(
-                    "update app.import_files set status = 'deleted' where stored_file_path = %s",
-                    (normalized,),
-                )
-                deleted += 1
+            row_count = self._connection.execute(
+                "update app.import_files set status = 'deleted' where stored_file_path = %s",
+                (normalized,),
+            )
+            deleted += max(row_count, 1)
         return deleted
 
     def import_session_exists(self, session_id: str) -> bool:

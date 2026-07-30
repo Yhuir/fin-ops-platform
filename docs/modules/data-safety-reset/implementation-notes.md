@@ -13,6 +13,14 @@
 
 ## 历史记录
 
+## 2026-07-30 - PostgreSQL reset 文件清理可重试闭环
+
+- 根因：正式 migration 已删除 `app.import_files.import_batch_id`，但 reset repository 仍把它作为 batch type fallback 和 update 目标；同时数据库事务提交后才删除文件，删除异常会留下数据库已清理但文件状态不可恢复的半完成结果。
+- 决策：只复用现有 `app.import_files.status` 和 background job，不新增队列或表。reset 事务按 `raw_payload.normalized_payload.batch_type/override_batch_type` 识别文件并标记 `deleting`；提交后现有 state store 幂等删除文件/对象并标记 `deleted`。
+- 旧链路删除：移除全部 `app.import_files.import_batch_id` fallback/detach SQL；文件已经不存在时仍完成 metadata `deleted`，避免重试永久卡住。
+- 失败语义：物理存储删除异常继续使 reset job failed，目标行保留 `deleting`；修复存储依赖后重跑相同 action 即可继续清理。
+- 生产约束：本轮生产验证不得触发 data reset，只验证 schema、合同审计、部署和只读链路；真实 reset 仍需 staging 备份/恢复 smoke。
+
 ## 2026-07-16 - OA reset completion 与关联台 fresh 解耦
 
 - 目标：移除 OA reset 请求/job 线程中的 Workbench 全页 completion probe，避免重置接口同步执行昂贵查询并误报重建完成。

@@ -186,6 +186,79 @@ class CanonicalFinanceDomainContractsPostgresIntegrationTests(unittest.TestCase)
             """,
         )
 
+    def test_validation_normalizes_legacy_global_job_month_and_closes_constraints(
+        self,
+    ) -> None:
+        migrate.run_psql(
+            self.database_url,
+            sql="""
+            insert into job.background_jobs(
+                job_id, job_type, status, affected_months, raw_payload
+            ) values (
+                'historical-global-scope',
+                'test',
+                'done',
+                array['all', '2026-05'],
+                '{"normalized_payload":{"job_id":"historical-global-scope","affected_months":["all","2026-05"]}}'::jsonb
+            );
+            """,
+        )
+
+        apply_test_migrations_through(self.database_url, "0131")
+
+        normalized_months = fetch_scalar(
+            self.database_url,
+            """
+            select
+                array_to_string(affected_months, ',')
+                || E'\t'
+                || raw_payload #>> '{normalized_payload,affected_months,0}'
+            from job.background_jobs
+            where job_id = 'historical-global-scope';
+            """,
+        )
+        self.assertEqual(normalized_months, "2026-05\t2026-05")
+
+        unvalidated_contracts = fetch_scalar(
+            self.database_url,
+            """
+            select count(*)
+            from pg_constraint
+            where conname = any(array[
+                'outbox_events_attempts_nonnegative_chk',
+                'outbox_events_attempt_count_mirror_chk',
+                'outbox_events_publish_attempt_count_nonnegative_chk',
+                'outbox_events_event_type_nonempty_chk',
+                'outbox_events_tenant_id_nonempty_chk',
+                'outbox_events_payload_object_chk',
+                'outbox_events_raw_payload_object_chk',
+                'outbox_events_runtime_lock_pair_chk',
+                'outbox_events_processing_lock_required_chk',
+                'outbox_events_publish_lock_pair_chk',
+                'outbox_events_publishing_lock_required_chk',
+                'outbox_events_terminal_processed_at_chk',
+                'outbox_events_dead_letter_timestamp_chk',
+                'outbox_events_published_timestamps_chk',
+                'invoices_canonical_date_month_chk',
+                'invoices_source_links_array_chk',
+                'invoices_raw_payload_object_chk',
+                'bank_transactions_direction_chk',
+                'bank_transactions_canonical_date_month_chk',
+                'bank_transactions_text_fields_array_chk',
+                'bank_transactions_raw_payload_object_chk',
+                'workbench_pair_relations_version_chk',
+                'workbench_pair_relations_month_scope_chk',
+                'workbench_pair_relations_row_cardinality_chk',
+                'workbench_pair_relations_row_values_chk',
+                'workbench_pair_relations_json_objects_chk',
+                'background_jobs_affected_months_chk',
+                'background_jobs_json_objects_chk'
+            ])
+              and not convalidated;
+            """,
+        )
+        self.assertEqual(unvalidated_contracts, "0")
+
 
 if __name__ == "__main__":
     unittest.main()

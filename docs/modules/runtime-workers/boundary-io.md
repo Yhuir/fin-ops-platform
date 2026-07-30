@@ -53,6 +53,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | Job result/status | runtime queue/app health | 成功、失败、重试和 readiness 可观察；影响 read model 的 job completion result summary 必须携带 target envelope 或明确不适用 |
+| Background job affected months | `job.background_jobs.affected_months` | 只保存实际 `YYYY-MM`；无月份归属保存空数组。全量运维 scope 使用 scope/event 合同中的 `all`，不得再写入月份数组。migration `0131` 已清理历史 `all` 并验证该约束。 |
 | Fan-out parent result | readiness / app health | manifest 为 `fan_out_command` 的 command-only `all` parent 只负责入队 child scopes，不写 current readiness；parent event/dirty scope 的当前失败仍可观察，历史 readiness 只作为 diagnostics。 |
 | Worker heartbeat | `job.runtime_worker_heartbeats` | 空轮询 `idle` heartbeat 必须节流，禁止每个 0.05s poll 同步写库；`processing`、`deferred`、`failed`、`stopping`、`stopped` 等事件状态必须即时写入 |
 | Read model projection | 对应 repository | 只写 worker 对应投影 |

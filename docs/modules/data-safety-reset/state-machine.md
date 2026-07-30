@@ -12,6 +12,7 @@
 | `password_verified` | `_validate_settings_data_reset_request` | 仅表示当前请求可继续，不持久化密码 |
 | `reset_queued` | `BackgroundJobService.create_job(type="settings_data_reset")` | 异步重置排队，`source/result_summary` 只能保存 action 等非敏感字段 |
 | `reset_running` | background job `status=running` + progress | UI 可离开后恢复；同 owner 再提交必须返回 `409 settings_data_reset_job_running` |
+| `file_cleanup_pending` | `app.import_files.status=deleting` | 数据库事实已事务性清理，文件/对象等待提交后删除；此状态必须可由同一 reset action 重试。 |
 | `reset_succeeded` | job `succeeded` / serialized `completed` | 删除和 durable 派生生命周期登记完成；仍需依赖 App Status/read model 验证最终 fresh |
 | `rebuild_pending` | OA reset result `rebuild_status=pending` | 关联台重建已经可靠入队但尚未证明 fresh；不得同步查询全页 payload 后改成 completed |
 | `reset_failed` | job `failed` 或同步 API structured error | 必须进入 App Health attention；保留错误但不泄露密码 |
@@ -21,6 +22,7 @@
 ## 允许流转
 
 - `impact_preview` -> `password_pending` -> `password_verified` -> `reset_queued` -> `reset_running` -> `reset_succeeded`
+- 银行/发票 reset 的文件子状态：active import file -> `deleting` -> `deleted`。文件缺失按幂等删除成功处理；删除异常保留 `deleting` 并使 job failed。
 - OA reset 的下游状态独立流转：`rebuild_pending` -> read model `refreshing` -> `fresh`，或 -> `failed`。
 - `impact_preview` -> `password_pending` -> `password_failed`
 - `reset_running` -> `reset_failed`
@@ -74,6 +76,7 @@
 1. 先查 Settings data reset job payload，确认 action、phase、message、result。
 2. 查 App Health/App Status，确认 background job、dirty scopes、worker readiness 和 dependency 状态。
 3. 查 `protected_targets` 和 state store/import file 状态，确认是否出现半删除。
+   - `deleting` 表示待重试清理，不得手工伪改 `deleted`；修复存储依赖后重跑同一 reset action。
 4. 对 read model stale/missing 先 requeue/rebuild，不直接手改 fresh。
 5. 涉及真实生产数据时先恢复到 staging 验证，再决定生产 repair 或 PITR。
 
@@ -81,5 +84,6 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-07-30 | 银行/发票 reset 增加 `deleting -> deleted` 文件清理意图 | 移除已删除 `import_batch_id` fallback；数据库提交与文件删除之间的失败可诊断、可幂等重试 | `tests.test_postgres_state_store`、`tests.test_postgres_state_store_integration` |
 | 2026-07-16 | OA reset 改为 durable lifecycle 后返回 `rebuild_status=pending` | 删除同步 Workbench 全页 completion probe 与重复 matching enqueue，区分 reset job 完成和 read model fresh | `tests.test_settings_data_reset_service` |
 | 2026-06-11 | 补齐 data-safety-reset 状态机 | 明确密码校验、job、protected target、read model/worker 和 UI 状态 | 待本轮模块验证 |

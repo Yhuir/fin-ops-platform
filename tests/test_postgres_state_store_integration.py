@@ -675,6 +675,54 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
         self.assertEqual(self.store.delete_import_files([stored_path, stored_path]), 1)
         self.assertEqual(fetch_scalar(self.database_url, "select status from app.import_files where legacy_mongo_id = 'file-1';"), "deleted")
 
+    def test_bank_reset_records_retryable_file_cleanup_intent_on_current_schema(
+        self,
+    ) -> None:
+        missing_path = str(Path(self._temp_dir.name) / "already-missing.xlsx")
+        self.connection.execute(
+            """
+            insert into app.import_files(
+                legacy_mongo_id, session_id, stored_file_path, original_filename,
+                status, raw_payload
+            )
+            values (%s, %s, %s, %s, 'confirmed', %s::jsonb)
+            """,
+            (
+                "bank-reset-file",
+                "bank-reset-session",
+                missing_path,
+                "bank.xlsx",
+                json.dumps(
+                    {
+                        "normalized_payload": {
+                            "id": "bank-reset-file",
+                            "batch_type": "bank_transaction",
+                        }
+                    }
+                ),
+            ),
+        )
+
+        reset_result = self.store.reset_bank_transaction_data()
+
+        self.assertEqual(reset_result["file_import_files"], 1)
+        self.assertEqual(reset_result["stored_import_file_paths"], [missing_path])
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                "select status from app.import_files where legacy_mongo_id = 'bank-reset-file';",
+            ),
+            "deleting",
+        )
+        self.assertEqual(self.store.delete_import_files([missing_path]), 1)
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                "select status from app.import_files where legacy_mongo_id = 'bank-reset-file';",
+            ),
+            "deleted",
+        )
+
     def test_imports_and_file_imports_round_trip_through_formal_tables(self) -> None:
         import_service = ImportNormalizationService()
         preview = import_service.preview_import(

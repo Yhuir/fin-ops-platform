@@ -60,7 +60,9 @@ class PostgresSettingsDataResetRepository:
         deleted_counts["bank_transactions"] = self._connection.execute(
             "delete from app.bank_transactions"
         )
-        deleted_counts.update(self._mark_import_files_deleted(self._BANK_BATCH_TYPES, file_state))
+        deleted_counts.update(
+            self._mark_import_files_deleting(self._BANK_BATCH_TYPES, file_state)
+        )
         deleted_counts.update(self._delete_import_batches(self._BANK_BATCH_TYPES))
         deleted_counts["invoices"] = 0
         return {
@@ -91,7 +93,9 @@ class PostgresSettingsDataResetRepository:
             **self._delete_matching(),
         }
         deleted_counts["invoices"] = self._connection.execute("delete from app.invoices")
-        deleted_counts.update(self._mark_import_files_deleted(self._INVOICE_BATCH_TYPES, file_state))
+        deleted_counts.update(
+            self._mark_import_files_deleting(self._INVOICE_BATCH_TYPES, file_state)
+        )
         deleted_counts.update(self._delete_import_batches(self._INVOICE_BATCH_TYPES))
         deleted_counts["tax_certified_import_records"] = self._connection.execute(
             "delete from app.tax_certified_import_records"
@@ -228,37 +232,28 @@ class PostgresSettingsDataResetRepository:
                 [
                     str(row.get("stored_file_path") or "").strip()
                     for row in rows
-                    if str(row.get("stored_file_path") or "").strip()
+                    if str(row.get("status") or "").strip().lower() != "deleted"
+                    and str(row.get("stored_file_path") or "").strip()
                 ]
             ),
         }
 
-    def _mark_import_files_deleted(
+    def _mark_import_files_deleting(
         self,
         batch_types: tuple[str, ...],
         file_state: dict[str, Any],
     ) -> dict[str, int]:
-        detached_batch_references = self._connection.execute(
-            f"""
-            update app.import_files
-            set import_batch_id = null
-            where import_batch_id is not null
-              and {self._import_file_batch_type_predicate()}
-            """,
-            (list(batch_types),),
-        )
         return {
             "file_import_sessions": int(file_state.get("file_import_sessions") or 0),
             "file_import_files": self._connection.execute(
                 f"""
                 update app.import_files
-                set status = 'deleted'
-                where status <> 'deleted'
+                set status = 'deleting'
+                where status not in ('deleted', 'deleting')
                   and {self._import_file_batch_type_predicate()}
                 """,
                 (list(batch_types),),
             ),
-            "file_import_batch_references_detached": detached_batch_references,
         }
 
     def _delete_workbench_domain(
@@ -326,12 +321,7 @@ class PostgresSettingsDataResetRepository:
         return """
         coalesce(
             nullif(raw_payload #>> '{normalized_payload,override_batch_type}', ''),
-            nullif(raw_payload #>> '{normalized_payload,batch_type}', ''),
-            (
-                select import_batches.batch_type
-                from app.import_batches import_batches
-                where import_batches.id = import_batch_id
-            )
+            nullif(raw_payload #>> '{normalized_payload,batch_type}', '')
         ) = any(%s::text[])
         """
 

@@ -16,6 +16,9 @@ from fin_ops_platform.services.bank_flow_rule_batch_canonical_query import (
     build_live_bank_flow_rule_batch_service,
 )
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
+from fin_ops_platform.services.postgres_repositories.settings_data_reset import (
+    PostgresSettingsDataResetRepository,
+)
 from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 from fin_ops_platform.services.state_store_diff import diff_state_snapshots
 from fin_ops_platform.services.state_store_factory import build_state_store
@@ -1232,6 +1235,38 @@ class PostgresStateStoreTests(unittest.TestCase):
             self.assertTrue(Path(stored_path).exists())
             self.assertEqual(store.delete_import_files([stored_path, stored_path]), 1)
             self.assertFalse(Path(stored_path).exists())
+
+    def test_postgres_store_marks_missing_import_file_deleted_for_idempotent_retry(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temp_dir:
+            connection = FakePostgresConnection()
+            store = PostgresStateStore(data_dir=Path(temp_dir), connection=connection)
+            missing_path = str(Path(temp_dir) / "already-missing.xlsx")
+
+            self.assertEqual(store.delete_import_files([missing_path]), 1)
+            self.assertIn(
+                "update app.import_files set status = 'deleted'",
+                connection.executed[-1][0],
+            )
+
+    def test_postgres_reset_uses_normalized_file_type_and_deleting_intent(
+        self,
+    ) -> None:
+        connection = FakePostgresConnection()
+
+        PostgresSettingsDataResetRepository(connection).reset_bank_transaction_data()
+
+        import_file_sql = [
+            " ".join(sql.lower().split())
+            for sql, _params in connection.executed
+            if "app.import_files" in sql.lower()
+        ]
+        self.assertTrue(import_file_sql)
+        self.assertTrue(
+            any("set status = 'deleting'" in sql for sql in import_file_sql)
+        )
+        self.assertTrue(all("import_batch_id" not in sql for sql in import_file_sql))
 
     def test_postgres_store_rejects_legacy_gridfs_reference(self) -> None:
         with TemporaryDirectory() as temp_dir:

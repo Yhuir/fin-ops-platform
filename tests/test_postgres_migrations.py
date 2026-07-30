@@ -144,6 +144,7 @@ EXPECTED_MIGRATIONS = [
     "0128_tax_offset_plan_runtime_grant.sql",
     "0129_runtime_outbox_canonical_attempts_contract.sql",
     "0130_canonical_finance_domain_contracts.sql",
+    "0131_validate_canonical_finance_domain_contracts.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -299,7 +300,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 131)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 132)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -1766,6 +1767,66 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             self.assertIn(f"constraint {constraint}", normalized_sql)
         self.assertEqual(normalized_sql.count("not valid"), 14)
         self.assertNotIn("validate constraint", normalized_sql)
+
+    def test_canonical_finance_domain_contract_validation_is_scoped_and_complete(self) -> None:
+        sql = strip_sql_comments(
+            (
+                MIGRATIONS_DIR
+                / "0131_validate_canonical_finance_domain_contracts.sql"
+            ).read_text(encoding="utf-8")
+        ).lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn("set local lock_timeout = '5s'", normalized_sql)
+        self.assertIn("set local statement_timeout = '2min'", normalized_sql)
+        self.assertIn(
+            "array_remove(affected_months, 'all') as affected_months",
+            normalized_sql,
+        )
+        self.assertIn("where 'all' = any(affected_months)", normalized_sql)
+        self.assertIn(
+            "jsonb_build_object( 'affected_months', to_jsonb(normalized_jobs.affected_months) )",
+            normalized_sql,
+        )
+        for constraint in (
+            "outbox_events_attempts_nonnegative_chk",
+            "outbox_events_attempt_count_mirror_chk",
+            "outbox_events_publish_attempt_count_nonnegative_chk",
+            "outbox_events_event_type_nonempty_chk",
+            "outbox_events_tenant_id_nonempty_chk",
+            "outbox_events_payload_object_chk",
+            "outbox_events_raw_payload_object_chk",
+            "outbox_events_runtime_lock_pair_chk",
+            "outbox_events_processing_lock_required_chk",
+            "outbox_events_publish_lock_pair_chk",
+            "outbox_events_publishing_lock_required_chk",
+            "outbox_events_terminal_processed_at_chk",
+            "outbox_events_dead_letter_timestamp_chk",
+            "outbox_events_published_timestamps_chk",
+            "invoices_canonical_date_month_chk",
+            "invoices_source_links_array_chk",
+            "invoices_raw_payload_object_chk",
+            "bank_transactions_direction_chk",
+            "bank_transactions_canonical_date_month_chk",
+            "bank_transactions_text_fields_array_chk",
+            "bank_transactions_raw_payload_object_chk",
+            "workbench_pair_relations_version_chk",
+            "workbench_pair_relations_month_scope_chk",
+            "workbench_pair_relations_row_cardinality_chk",
+            "workbench_pair_relations_row_values_chk",
+            "workbench_pair_relations_json_objects_chk",
+            "background_jobs_affected_months_chk",
+            "background_jobs_json_objects_chk",
+        ):
+            self.assertIn(f"validate constraint {constraint}", normalized_sql)
+        self.assertEqual(normalized_sql.count("validate constraint"), 28)
+        for forbidden in (
+            "delete from",
+            "truncate ",
+            "drop table",
+            "alter table read_model.",
+        ):
+            self.assertNotIn(forbidden, normalized_sql)
 
 
 

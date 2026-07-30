@@ -56,7 +56,7 @@
 - 权限和身份：必须是管理员；重置前必须校验当前 OA 密码；响应和 job payload 不得回显密码。
 - 数据事实：PostgreSQL app facts 是主事实源；OA Mongo 只读；旧 app Mongo 只作迁移/审计参考，不能覆盖 PostgreSQL。
 - 发票事实：`app.invoices` 是唯一 canonical 发票池；`app.etc_batch_invoice_links` 是 ETC 批次到 canonical invoice 的关系事实；`app.etc_invoices` 只保留 ETC ZIP/PDF/XML 源 metadata、附件和审计。`reset_invoices` 不能留下指向旧 invoice id 的 active link，重导后必须通过 dry-run/backfill 恢复有效 link 再刷新关联台。
-- 文件/对象：导入文件删除必须和 state store 清理一致；失败要保留可诊断 job 状态。
+- 文件/对象：PostgreSQL 事务先把目标导入文件标为 `deleting`，提交后再删除本地文件或对象；成功后标为 `deleted`。删除失败必须保留 `deleting` 和可诊断 job 状态，同一 reset 可安全重试。
 - Read model/cache：重置后不能把旧 read model 或 Redis cache 显示为 fresh。
 - Worker/job：后台 job 必须可恢复进度、可查询 active、失败进入 App Health attention。
 - 派生生命周期：`settings_reset_completed` 必须 fan-out 到受影响 read model/worker。

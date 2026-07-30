@@ -157,7 +157,7 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(tuple(updated.split("\t")), ("5", "5"))
 
-    def test_outbox_progressive_envelope_constraints_are_installed_not_valid(self) -> None:
+    def test_outbox_progressive_envelope_constraints_are_validated(self) -> None:
         expected_constraints = {
             "outbox_events_attempts_nonnegative_chk",
             "outbox_events_attempt_count_mirror_chk",
@@ -185,7 +185,7 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         )
 
         self.assertEqual({row["conname"] for row in rows}, expected_constraints)
-        self.assertTrue(all(row["convalidated"] is False for row in rows))
+        self.assertTrue(all(row["convalidated"] is True for row in rows))
 
     def test_outbox_progressive_envelope_constraints_reject_new_invalid_rows(self) -> None:
         invalid_inserts = {

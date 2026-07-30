@@ -40,6 +40,7 @@
 | Lifecycle event | derived data lifecycle | `settings_reset_completed` 等显式事件 |
 | Read model invalidation | runtime queue/app status | 不留下伪 fresh |
 | OA rebuild status | reset API/job caller | durable lifecycle 成功登记后返回 `pending`；只有下游 worker/read model 自己能证明 fresh，reset 不得返回同步 `completed`。 |
+| Import file cleanup intent | `app.import_files.status` | PostgreSQL 事务内从 active 状态转为 `deleting`；物理文件/对象删除成功后转为 `deleted`，失败保留 `deleting` 供原 reset job 重试。 |
 
 ## 持久化与投影
 
@@ -51,7 +52,8 @@
 
 | 层 | 文件或目录 |
 | --- | --- |
-| Backend service | `backend/src/fin_ops_platform/services/settings_data_reset_service.py` |
+| Backend service | `backend/src/fin_ops_platform/services/settings_data_reset_service.py`、`backend/src/fin_ops_platform/services/postgres_repositories/settings_data_reset.py` |
+| File cleanup | `backend/src/fin_ops_platform/services/postgres_state_store.py` |
 | Backend route | data reset endpoints in `backend/src/fin_ops_platform/app/server.py` |
 | Job | `BackgroundJobService`、`settings_data_reset`；旧 `DataResetJob` / `_data_reset_jobs` 内存路径已删除 |
 | Lifecycle | `derived_data_lifecycle_service.py` |
@@ -73,5 +75,6 @@
 ## 当前缺口和删除条件
 
 - 生产数据操作必须同步 operations 文档和回滚/备份策略。
+- PostgreSQL reset 只按 `raw_payload.normalized_payload.batch_type/override_batch_type` 识别导入文件；已删除的 `app.import_files.import_batch_id` 不得作为 fallback 回归。
 - 本地可执行边界已 close；真实基础设施恢复、worker drain 和大库最终 fresh 只能由 staging/production smoke 证明，作为运维风险跟踪。
 - OA reset job 的 `completed` 只证明清理与 durable lifecycle 登记完成；`rebuild_status=pending` 到最终 fresh 的收敛由关联台 worker/read model 状态负责。

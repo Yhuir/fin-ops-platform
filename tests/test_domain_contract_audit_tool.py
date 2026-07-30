@@ -17,6 +17,8 @@ class FakeConnection:
 
     def fetch_one(self, sql: str) -> dict[str, int]:
         self.queries.append(sql)
+        if "transaction_read_only" in sql:
+            return {"transaction_read_only": "on"}
         return {
             column: self.counts.get(contract, 0)
             for contract, column in domain_contract_audit._CONTRACT_COLUMNS.items()
@@ -39,13 +41,14 @@ class DomainContractAuditToolTests(unittest.TestCase):
             set(domain_contract_audit._CONTRACT_COLUMNS),
         )
         self.assertTrue(all(count == 0 for count in report["contracts"].values()))
-        self.assertEqual(len(connection.queries), 1)
-        self.assertIn("from app.invoices", connection.queries[0])
-        self.assertIn("from app.bank_transactions", connection.queries[0])
-        self.assertIn("from app.workbench_pair_relations", connection.queries[0])
-        self.assertIn("from job.background_jobs", connection.queries[0])
-        self.assertIn("from job.outbox_events", connection.queries[0])
-        lowered_sql = connection.queries[0].lower()
+        self.assertEqual(len(connection.queries), 2)
+        self.assertIn("transaction_read_only", connection.queries[0])
+        self.assertIn("from app.invoices", connection.queries[1])
+        self.assertIn("from app.bank_transactions", connection.queries[1])
+        self.assertIn("from app.workbench_pair_relations", connection.queries[1])
+        self.assertIn("from job.background_jobs", connection.queries[1])
+        self.assertIn("from job.outbox_events", connection.queries[1])
+        lowered_sql = connection.queries[1].lower()
         for mutation in ("insert ", "update ", "delete ", "alter ", "drop ", "truncate "):
             self.assertNotIn(mutation, lowered_sql)
 
@@ -106,6 +109,8 @@ class DomainContractAuditToolTests(unittest.TestCase):
 
         self.assertIs(result, connection)
         actual_settings = connection_type.call_args.args[0]
+        raw_query = urlsplit(actual_settings.database_url).query
+        self.assertNotIn("+default_transaction_read_only", raw_query)
         query = parse_qs(urlsplit(actual_settings.database_url).query)
         self.assertEqual(query["sslmode"], ["require"])
         self.assertIn(
@@ -126,6 +131,15 @@ class DomainContractAuditToolTests(unittest.TestCase):
 
         options = parse_qs(urlsplit(result.database_url).query)["options"][0]
         self.assertEqual(options.count("-c default_transaction_read_only=on"), 1)
+
+    def test_audit_refuses_a_connection_that_is_not_read_only(self) -> None:
+        connection = FakeConnection()
+        connection.fetch_one = mock.Mock(
+            return_value={"transaction_read_only": "off"}
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "not read-only"):
+            domain_contract_audit.audit_domain_contracts(connection)
 
 
 if __name__ == "__main__":
