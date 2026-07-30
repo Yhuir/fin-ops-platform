@@ -138,6 +138,7 @@ event 或 worker instance 时，必须先更新 registry，再让 deploy/preflig
 - scenario 必须使用登记的可逆 relation shape，包含 checkpoints 与 inverse/recovery，并证明最终关系 inactive；旧式 discovery 输出、真实待处理业务对象或缺少 recovery 的 scenario 必须 fail closed。
 - `runtime_sync_closure_gate` 在所有 profile 开始时先校验该合同；只有 T+0 `full` profile 执行 mutation，
   T+60/T+300 `stability` 只验证写后收敛证据，不重复 confirm/withdraw。
+- gate 失败证据必须保留 RabbitMQ 总量和逐事件队列的 `messages`、`unacked`、`consumers`、DLQ 明细，禁止只记录总积压后依赖 root 权限二次排查。
 - runner 每次执行为所有 mutation 生成独立 idempotency key；静态 root-owned scenario 不保存可跨 checkpoint 复用的 mutation key。
 - discovery 只读 PostgreSQL 事实并输出审核上下文；真正 apply 仍必须提供真实 OA/Admin auth，但不再需要临时业务 ticket。
 - 标准文件禁止通过 shell 重定向或普通复制直接覆盖。候选文件必须先保存为

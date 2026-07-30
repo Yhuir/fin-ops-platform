@@ -41,6 +41,25 @@ class EmptyRuntimeMonitoringRepository:
         return {}
 
 
+class BackloggedRabbitMqRuntimeMonitoringRepository:
+    def __init__(self, _connection) -> None:
+        pass
+
+    def ready_health_summary(self) -> dict[str, object]:
+        summary = FakeRuntimeMonitoringRepository(None).ready_health_summary()
+        summary["rabbitmq_queue_depth"] = 1
+        summary["rabbitmq_queues"] = {
+            "no_oa_bank_batch.read_model.refresh": {
+                "queue": "finops.no_oa_bank_batch.read_model.refresh",
+                "messages": 1,
+                "unacked": 0,
+                "consumers": 1,
+                "dead_letter_messages": 0,
+            }
+        }
+        return summary
+
+
 def read_model_pass_report() -> dict[str, object]:
     return {
         "status": "pass",
@@ -332,6 +351,24 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
         runtime_check = next(check for check in report["checks"] if check["name"] == "runtime_health")
         self.assertEqual(runtime_check["payload"]["error"], "runtime_health_missing_facts")
         self.assertIn("queue_backlog", runtime_check["payload"]["missing_fields"])
+
+    def test_runtime_health_failure_preserves_per_queue_rabbitmq_diagnostics(self) -> None:
+        with patch.object(
+            gate,
+            "RuntimeMonitoringRepository",
+            BackloggedRabbitMqRuntimeMonitoringRepository,
+        ):
+            check = gate._runtime_health_check(
+                object(),
+                timeout_seconds=0,
+                poll_interval_seconds=0.05,
+            )
+
+        self.assertEqual(check.status, gate.FAIL)
+        self.assertEqual(
+            check.payload["snapshot"]["rabbitmq_queues"]["no_oa_bank_batch.read_model.refresh"]["messages"],
+            1,
+        )
 
     def test_gate_fails_without_authenticated_http_and_write_scenario(self) -> None:
         with patch.object(gate, "RuntimeMonitoringRepository", FakeRuntimeMonitoringRepository), patch.object(

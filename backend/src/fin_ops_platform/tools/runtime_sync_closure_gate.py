@@ -359,6 +359,7 @@ def _runtime_health_check(
                             "rabbitmq_queue_depth",
                             "rabbitmq_unacked_messages",
                             "rabbitmq_dlq_count",
+                            "rabbitmq_queues",
                         )
                         if key in summary
                     },

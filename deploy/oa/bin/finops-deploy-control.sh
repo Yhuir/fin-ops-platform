@@ -1552,6 +1552,7 @@ for check in closure_checks:
         "slowest_results",
         "failed_probes",
         "slowest_probes",
+        "snapshot",
     )
     diagnostics = {
         key: check_payload.get(key)
