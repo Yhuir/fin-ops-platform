@@ -1567,6 +1567,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("app.etc_submission_batches", source_sql)
         self.assertIn("app.etc_business_batches", source_sql)
         self.assertIn("app.etc_invoices", source_sql)
+        self.assertIn("invoice.business_batch_id = business_batch.business_batch_id", source_sql)
         self.assertIn("app.etc_batch_invoice_links", source_sql)
         self.assertIn("active_relation_row_ids", source_sql)
         self.assertEqual(source_params, (["2026-05-01"],))
@@ -1980,13 +1981,13 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(result["read_model_stale_reasons"], ["builder_mismatch"])
         self.assertEqual(result["refresh_scope_keys"], [])
 
-    def test_workbench_v12_rejects_v11_month_all_and_cache_versions(self) -> None:
+    def test_workbench_v13_rejects_v12_month_all_and_cache_versions(self) -> None:
         app = object.__new__(Application)
-        old_month = "2026-07-29-etc-batch-members-v11"
-        old_all = "workbench_sql_projection.composed_active_month_shards.etc_batch_members.v11"
+        old_month = "2026-07-30-etc-relation-proof-v12"
+        old_all = "workbench_sql_projection.composed_active_month_shards.etc_relation_proof.v12"
 
-        self.assertIn("v12", WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION)
-        self.assertIn("v12", WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
+        self.assertIn("v13", WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION)
+        self.assertIn("v13", WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
         self.assertIn(WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION, WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION)
         self.assertIn(WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION, WORKBENCH_INITIAL_PAGE_CACHE_SCHEMA_VERSION)
         self.assertIn(
@@ -2771,6 +2772,11 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(summary_row["invoice_bank_relation"]["code"], "pending_oa_bank_match")
         self.assertIn("ETC001", summary_row["detail_fields"]["发票清单"])
         self.assertIn("ETC002", summary_row["detail_fields"]["发票清单"])
+        self.assertIn(
+            "etc_invoices.business_batch_id = business_batches.business_batch_id",
+            connection.business_summary_query,
+        )
+        self.assertNotIn("jsonb_array_elements_text", connection.business_summary_query)
         self.assertIn("business_batches.scope_month = %s::date", connection.business_summary_query)
         self.assertNotIn("etc_invoices.scope_month = %s::date", connection.business_summary_query)
         self.assertEqual([row["id"] for row in summary_row["etc_invoice_detail_rows"]], ["ETC001", "ETC002"])

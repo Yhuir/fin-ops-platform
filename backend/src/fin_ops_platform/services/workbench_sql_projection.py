@@ -596,33 +596,8 @@ class WorkbenchSqlProjectionBuilder:
                 from requested_scopes scopes
                 join app.etc_business_batches business_batch
                   on business_batch.scope_month = scopes.scope_month
-                join lateral jsonb_array_elements_text(
-                  case
-                    when jsonb_typeof(
-                      business_batch.raw_payload->'normalized_payload'->'invoice_ids'
-                    ) = 'array'
-                    then business_batch.raw_payload->'normalized_payload'->'invoice_ids'
-                    else '[]'::jsonb
-                  end
-                ) member(invoice_id) on true
                 join app.etc_invoices invoice
-                  on invoice.etc_invoice_id = member.invoice_id
-                union all
-                select scopes.scope_month, invoice.updated_at
-                from requested_scopes scopes
-                join app.etc_business_batches business_batch
-                  on business_batch.scope_month = scopes.scope_month
-                join lateral jsonb_array_elements_text(
-                  case
-                    when jsonb_typeof(
-                      business_batch.raw_payload->'normalized_payload'->'invoice_ids'
-                    ) = 'array'
-                    then business_batch.raw_payload->'normalized_payload'->'invoice_ids'
-                    else '[]'::jsonb
-                  end
-                ) member(invoice_id) on true
-                join app.etc_invoices invoice
-                  on invoice.legacy_mongo_id = member.invoice_id
+                  on invoice.business_batch_id = business_batch.business_batch_id
             ),
             etc_invoice_versions as (
                 select scope_month, max(updated_at)::text as etc_invoices_updated_at
@@ -1725,12 +1700,7 @@ class WorkbenchSqlProjectionBuilder:
             left join submitted_batches
               on submitted_batches.submission_batch_id = business_batches.submission_batch_id
             join app.etc_invoices etc_invoices
-              on exists (
-                  select 1
-                  from jsonb_array_elements_text(coalesce(business_batches.business_batch_payload->'invoice_ids', '[]'::jsonb)) invoice_ids(invoice_id)
-                  where invoice_ids.invoice_id = etc_invoices.etc_invoice_id
-                     or invoice_ids.invoice_id = coalesce(etc_invoices.legacy_mongo_id, '')
-              )
+              on etc_invoices.business_batch_id = business_batches.business_batch_id
             where {" and ".join(self._etc_business_summary_filters(
                 normalized_month,
                 normalized_external_batch_ids,
@@ -1790,13 +1760,8 @@ class WorkbenchSqlProjectionBuilder:
             f"""
             select distinct {batch_id_expr} as external_etc_batch_id
             from app.etc_business_batches batch
-            join lateral jsonb_array_elements_text(
-                case when jsonb_typeof(batch.raw_payload->'normalized_payload'->'invoice_ids') = 'array'
-                     then batch.raw_payload->'normalized_payload'->'invoice_ids' else '[]'::jsonb end
-            ) member(invoice_id) on true
             join app.etc_invoices invoice
-              on invoice.etc_invoice_id = member.invoice_id
-              or coalesce(invoice.legacy_mongo_id, '') = member.invoice_id
+              on invoice.business_batch_id = batch.business_batch_id
             where {" and ".join(filters)}
             """,
             tuple(params),
