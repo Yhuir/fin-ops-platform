@@ -114,13 +114,15 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         function_name = fetch_scalar(
             self.database_url,
             """
-            select pronamespace::regnamespace::text || '.' || proname
-            from pg_proc
-            where pronamespace = 'job'::regnamespace
-              and proname = 'sync_outbox_event_attempts';
+            select procedure.pronamespace::regnamespace::text || '.' || procedure.proname
+            from pg_trigger trigger
+            join pg_proc procedure on procedure.oid = trigger.tgfoid
+            where trigger.tgrelid = 'job.outbox_events'::regclass
+              and trigger.tgname = 'outbox_events_sync_attempts_trg'
+              and not trigger.tgisinternal;
             """,
         )
-        self.assertEqual(function_name, "job.sync_outbox_event_attempts")
+        self.assertEqual(function_name, "job.mirror_outbox_event_attempts")
 
         inserted = fetch_scalar(
             self.database_url,

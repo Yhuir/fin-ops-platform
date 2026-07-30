@@ -3,7 +3,10 @@ set local statement_timeout = '2min';
 
 -- `attempts` is the durable queue retry counter. `attempt_count` remains only
 -- as a compatibility mirror for legacy readers.
-create or replace function job.sync_outbox_event_attempts()
+-- Use a new function name instead of replacing the legacy 0009 function.
+-- Existing production databases may retain that function under its original
+-- migration owner, while the table/trigger are owned by the migrator role.
+create function job.mirror_outbox_event_attempts()
 returns trigger
 language plpgsql
 as $$
@@ -18,7 +21,7 @@ drop trigger if exists outbox_events_sync_attempts_trg on job.outbox_events;
 create trigger outbox_events_sync_attempts_trg
     before insert or update of attempts, attempt_count on job.outbox_events
     for each row
-    execute function job.sync_outbox_event_attempts();
+    execute function job.mirror_outbox_event_attempts();
 
 update job.outbox_events
 set attempt_count = attempts

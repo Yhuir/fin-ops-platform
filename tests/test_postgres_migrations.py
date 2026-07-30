@@ -1742,6 +1742,8 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         ).lower()
         normalized_sql = " ".join(sql.split())
 
+        self.assertIn("create function job.mirror_outbox_event_attempts()", normalized_sql)
+        self.assertNotIn("create or replace function job.sync_outbox_event_attempts()", normalized_sql)
         self.assertIn("new.attempt_count := new.attempts", normalized_sql)
         self.assertNotIn("new.attempts :=", normalized_sql)
         self.assertIn("update job.outbox_events set attempt_count = attempts", normalized_sql)
