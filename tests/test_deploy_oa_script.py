@@ -383,6 +383,8 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("FIN_OPS_QUEUE_BACKEND=rabbitmq", script)
         self.assertIn("restore_rabbitmq_worker_envs", script)
         self.assertIn("wait_rabbitmq_required_queues_drained", script)
+        self.assertIn('source "$RABBITMQ_MONITORING_ENV"', script)
+        self.assertIn("RuntimeMonitoringRepository(connection).ready_health_summary()", script)
         self.assertIn('"queues_without_consumers": without_consumers', script)
         self.assertIn('"rabbitmq_queue_depth": int(runtime.get("rabbitmq_queue_depth") or 0)', script)
         self.assertIn("original worker env files were restored", script)

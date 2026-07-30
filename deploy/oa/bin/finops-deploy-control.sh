@@ -655,27 +655,37 @@ restore_rabbitmq_worker_envs() {
 }
 
 wait_rabbitmq_required_queues_drained() {
-  local event_types="$1"
+  local src="$1"
+  local event_types="$2"
   local timeout="${FINOPS_RABBITMQ_CUTOVER_TIMEOUT_SECONDS:-600}"
-  local deadline health status_json readiness_status=1
+  local deadline status_json readiness_status=1
   [[ "$timeout" =~ ^[0-9]+$ ]] || die "invalid FINOPS_RABBITMQ_CUTOVER_TIMEOUT_SECONDS: $timeout"
   deadline=$((SECONDS + timeout))
-  health=""
+  status_json=""
   while [ "$SECONDS" -lt "$deadline" ]; do
-    health="$(curl -fsS --max-time 5 http://127.0.0.1:18001/health 2>&1 || true)"
     readiness_status=0
-    status_json="$(printf '%s' "$health" | EXPECTED_EVENT_TYPES="$event_types" python3 -c '
+    status_json="$(
+      set -a
+      # shellcheck disable=SC1090
+      source "$COMMON_ENV"
+      # shellcheck disable=SC1090
+      source "$SECRETS_ENV"
+      [[ -r "$RABBITMQ_MONITORING_ENV" ]] || exit 1
+      # shellcheck disable=SC1090
+      source "$RABBITMQ_MONITORING_ENV"
+      set +a
+      EXPECTED_EVENT_TYPES="$event_types" \
+      PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}" \
+      "$API_PYTHON" - <<'PY'
 import json
 import os
 import sys
 
-try:
-    data = json.load(sys.stdin)
-except Exception:
-    sys.exit(1)
-runtime = data.get("runtime_infrastructure")
-if not isinstance(runtime, dict):
-    sys.exit(1)
+from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
+
+connection = PostgresConnection(PostgresSettings.from_env())
+runtime = RuntimeMonitoringRepository(connection).ready_health_summary()
 queues = runtime.get("rabbitmq_queues")
 if not isinstance(queues, dict):
     sys.exit(1)
@@ -704,7 +714,8 @@ ready = (
     and not runtime.get("rabbitmq_metric_error")
 )
 sys.exit(0 if ready else 2)
-' 2>/dev/null)" || readiness_status="$?"
+PY
+    )" || readiness_status="$?"
     case "$readiness_status" in
       0)
         printf 'RabbitMQ required queues drained: %s\n' "$status_json"
@@ -718,7 +729,7 @@ sys.exit(0 if ready else 2)
     esac
     sleep 2
   done
-  printf 'RabbitMQ required queues did not drain within %s seconds: %s\n' "$timeout" "$health" >&2
+  printf 'RabbitMQ required queues did not drain within %s seconds: %s\n' "$timeout" "$status_json" >&2
   return 1
 }
 
@@ -755,7 +766,7 @@ rabbitmq_required_worker_cutover() {
       systemctl restart "fin-ops-worker@$instance.service" || exit 1
     done
     wait_required_workers_ready || exit 1
-    wait_rabbitmq_required_queues_drained "$event_types" || exit 1
+    wait_rabbitmq_required_queues_drained "$src" "$event_types" || exit 1
   ); then
     restore_rabbitmq_worker_envs "$backup_dir" "$instances"
     wait_required_workers_ready
