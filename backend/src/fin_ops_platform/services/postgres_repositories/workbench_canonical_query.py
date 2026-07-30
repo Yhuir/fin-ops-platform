@@ -21,6 +21,7 @@ from fin_ops_platform.services.workbench_relation_preview_policy import (
     WORKBENCH_RELATION_PREVIEW_MAX_CONTEXT_ROWS,
     WorkbenchRelationPreviewSelectionError,
 )
+from fin_ops_platform.services.workbench_write_conflict import WorkbenchWriteConflict
 from fin_ops_platform.services.workbench_canonical_rows import (
     WorkbenchCanonicalRowsBuilder,
 )
@@ -480,8 +481,6 @@ relation_groups as materialized (
         case
             when not ('bank' = any(relation.row_types)) then 'paired'
             when coalesce(relation.special_metadata->>'source', '') = 'batch_accounting' then 'paired'
-            when relation.special_metadata ? 'etc_batch_link' then 'paired'
-            when nullif(relation.external_etc_batch_id, '') is not null then 'paired'
             when coalesce(
                 (relation.special_metadata->>'requires_oa')::boolean,
                 (relation.special_metadata->>'paired_requires_oa')::boolean,
@@ -507,8 +506,6 @@ relation_groups as materialized (
                    )
                    and not ('oa' = any(relation.row_types))
                    and coalesce(relation.special_metadata->>'source', '') <> 'batch_accounting'
-                   and not (relation.special_metadata ? 'etc_batch_link')
-                   and nullif(relation.external_etc_batch_id, '') is null
                  then 'oa' end,
             case when 'bank' = any(relation.row_types)
                    and coalesce(
@@ -518,8 +515,6 @@ relation_groups as materialized (
                    )
                    and not ('invoice' = any(relation.row_types))
                    and coalesce(relation.special_metadata->>'source', '') <> 'batch_accounting'
-                   and not (relation.special_metadata ? 'etc_batch_link')
-                   and nullif(relation.external_etc_batch_id, '') is null
                  then 'invoice' end
         ], null) as missing_row_types
     from active_relations relation
@@ -622,7 +617,7 @@ class PostgresWorkbenchCanonicalQueryRepository:
         *,
         scope_key: str,
         row_ids: list[str],
-    ) -> dict[str, str]:
+    ) -> dict[str, dict[str, str]]:
         normalized_scope = self._scope_key(scope_key)
         normalized_row_ids = list(
             dict.fromkeys(
@@ -634,7 +629,11 @@ class PostgresWorkbenchCanonicalQueryRepository:
         rows = self._connection.fetch_all(
             f"""
             with {_CANONICAL_GROUPS_CTE}
-            select distinct member.row_id, member.pane
+            select distinct
+                member.row_id,
+                member.pane,
+                member.source_kind,
+                member.external_batch_id
             from canonical_groups groups
             join lateral unnest(groups.member_ids) member_id(row_id) on true
             join canonical_rows member on member.row_id = member_id.row_id
@@ -643,17 +642,23 @@ class PostgresWorkbenchCanonicalQueryRepository:
             """,
             tuple([*self._scope_params(normalized_scope), normalized_row_ids]),
         )
-        row_types = {
-            str(row.get("row_id") or ""): str(row.get("pane") or "")
+        descriptors = {
+            str(row.get("row_id") or ""): {
+                "pane": str(row.get("pane") or ""),
+                "source_kind": str(row.get("source_kind") or ""),
+                "external_etc_batch_id": str(row.get("external_batch_id") or ""),
+            }
             for row in rows
             if str(row.get("row_id") or "").strip()
         }
-        if set(row_types) != set(normalized_row_ids):
-            raise WorkbenchRelationPreviewSelectionError(
-                code="relation_preview_rows_missing",
-                message="所选工作台记录已变化，请刷新后重试。",
+        if set(descriptors) != set(normalized_row_ids):
+            raise WorkbenchWriteConflict(
+                action="confirm_link",
+                reason="canonical_selection_changed",
+                expected={"row_ids": normalized_row_ids},
+                actual={"row_ids": sorted(descriptors)},
             )
-        return row_types
+        return descriptors
 
     def list_workbench_ignored_rows(self, *, scope_key: str) -> list[dict[str, Any]]:
         return self._in_snapshot(

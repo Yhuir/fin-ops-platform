@@ -28,7 +28,7 @@ Manifest、scope policy、App Status registry 与所有带 `read_model_key` 的 
 
 - 关联台页面继续读取 PostgreSQL `read_model.workbench_*` active generations；canonical facts 与 `app.workbench_pair_relations` 只由 projection builder 在 refresh 时读取。
 - 每次查询必须先通过 `WorkbenchQueryFreshnessService` 比较 canonical source proof、durable queue 状态与 active generation source versions；旧 generation 不得伪装 fresh。
-- Redis 只缓存已通过 freshness gate 的 groups payload；缺失、stale、refreshing 或 failed 时 fail closed 并经 gateway enqueue 精确月份 scope。
+- Redis 只缓存已通过 freshness gate 的 groups payload；stale、refreshing 或 failed 时只允许按当前 active generation 的精确 payload version 只读命中，禁止写入或让 Redis 参与 freshness 判定。Workbench 若已有 active generation，可返回该稳定 generation 并显式标记 non-fresh、阻断写入；缺失 active generation 时仍 fail closed，不得用 false-empty 覆盖页面。恢复请求继续经 gateway enqueue 精确月份 scope。
 - Workbench matching 是独立 canonical domain job；`workbench_relation` 是独立共享 distribution，二者都不能替代页面 active generation。
 
 ### `workbench_relation`

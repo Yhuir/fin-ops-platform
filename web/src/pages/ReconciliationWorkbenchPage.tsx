@@ -719,13 +719,28 @@ export default function ReconciliationWorkbenchPage() {
     workbenchPayload: WorkbenchInitialPageResult,
     resolvedZoneQueries: Record<"paired" | "unpaired", WorkbenchGroupsPageQuery>,
   ) {
+    const nextStatus = workbenchZonePagesReadModelStatus(workbenchPayload.pages);
+    const previousVersion = activeWorkbenchReadModelVersionRef.current;
+    if (previousVersion && nextStatus !== "fresh") {
+      setStatistics(null);
+      setZonePages((current) => ({
+        paired: {
+          ...current.paired,
+          readModelStatus: workbenchPayload.pages.paired.readModelStatus,
+        },
+        unpaired: {
+          ...current.unpaired,
+          readModelStatus: workbenchPayload.pages.unpaired.readModelStatus,
+        },
+      }));
+      return;
+    }
     loadMoreRequestSeqRef.current.paired += 1;
     loadMoreRequestSeqRef.current.unpaired += 1;
     loadMoreInFlightRef.current = { paired: false, unpaired: false };
     setLoadingMoreByZone({ paired: false, unpaired: false });
     setLoadMoreErrorByZone({ paired: null, unpaired: null });
     const nextVersion = workbenchActiveReadModelVersion(workbenchPayload.pages);
-    const previousVersion = activeWorkbenchReadModelVersionRef.current;
     if (previousVersion && nextVersion && previousVersion !== nextVersion) {
       detailRequestSeqRef.current += 1;
       clearSelection();
@@ -742,7 +757,7 @@ export default function ReconciliationWorkbenchPage() {
     }
     activeWorkbenchReadModelVersionRef.current = nextVersion;
     setWorkbenchData(workbenchPayload.data);
-    setStatistics(workbenchZonePagesReadModelStatus(workbenchPayload.pages) === "fresh" ? workbenchPayload.statistics ?? null : null);
+    setStatistics(nextStatus === "fresh" ? workbenchPayload.statistics ?? null : null);
     setLoadedZoneServerPageQueryKeys(createWorkbenchZoneServerPageQueryKeys(resolvedZoneQueries));
     setZonePages(workbenchPayload.pages);
   }

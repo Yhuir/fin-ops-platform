@@ -5,7 +5,7 @@
 ## 2026-07-28 逐栏折叠、普通行直显与搜索真实预览
 
 - Business core：`no_oa_bank_batch` 与普通关系保留全部真实行；`bank_flow_rule_batch` 只有银行成员数 `>3` 才生成银行栏 summary/collapsed rows，1 到 3 行直接显示；ETC 仍只折叠发票栏。
-- Repository/read model：summary page 不再把普通银行/发票行截成 3 行；无搜索的折叠栏只传 summary + count，搜索时最多传 3 条真实命中 collapsed rows。ETC business batch 即使只有部分成员已建立严格 link，折叠汇总仍保留完整 `invoice_ids` 成员并按发票身份去重。schema v11 淘汰旧 generation/page cache，不新增表、worker、cache 或 API。
+- Repository/read model：summary page 不再把普通银行/发票行截成 3 行；折叠栏只传 summary + count，搜索只决定组命中、不携带或自动展开 collapsed rows。ETC business batch 即使只有部分成员已建立严格 link，折叠汇总仍保留完整 `invoice_ids` 成员并按发票身份去重。schema v12 淘汰旧 generation/page cache，并统一 ETC relation proof，不新增表、worker、cache 或 API。
 - API/Frontend：group detail 按 `collapsed_row_counts.<pane>` 逐栏验证；ETC 的 OA/银行栏验证正常 rows，发票栏验证 collapsed rows。闭合态搜索直接渲染真实命中行并高亮，不显示“隐藏内容命中”、不自动展开或预取详情。
 - Regression：普通多行与 legacy no-OA 不出现通用“还有 N 条，展开”；bank-flow 与 ETC 保留 click-only detail、失败可重试和同 generation fail-closed。
 
@@ -173,7 +173,10 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_w
 ## 2026-07-28 OA 子项对齐与完整性回归
 
 - `tests/test_mongo_oa_adapter.py`、`tests/test_workbench_query_service.py` 保护来源费用内容/费用说明分别保真并进入 Workbench DTO，既有 `expense_content` 口径不变。
-- `tests/test_workbench_relation_grouping.py` 保护普通 OA+发票 active relation 缺银行时保持同 case、进入 `unpaired` 并报告 `missing_row_types=["bank"]`；batch-accounting/ETC 豁免不回归。
+- `tests/test_workbench_relation_grouping.py` 保护普通 OA+发票 active relation 缺银行时保持同 case、进入 `unpaired` 并报告 `missing_row_types=["bank"]`；只有 batch-accounting 豁免，ETC marker 不再绕过冻结要求。
+- `tests/test_workbench_auth_context_idempotency.py` 保护 confirm 在同一 UoW 内重读 selected canonical rows、拒绝漂移/多 batch，并把合法 ETC summary 的 external batch identity 持久化。
+- `tests/test_workbench_page_audit.py` 保护合法 synthetic ETC summary 只有在 canonical batch + exact deterministic row id 双重证明时通过；任意 `etc-summary-*` 不得绕过 canonical integrity。
+- `tests/test_workbench_query_facade.py`、`tests/test_workbench_sql_runtime.py` 与 `web/src/test/WorkbenchSelection.test.tsx` 保护 refreshing 时继续显示上一版 active generation、禁止 Redis payload 写入，并阻止迟到 non-fresh 响应覆盖操作投影。
 - `web/src/test/WorkbenchApi.test.ts`、`web/src/test/RelationGroupGrid.test.tsx` 保护发票只按 exact `source_expense_item_id` 对齐，输入乱序不影响付款项顺序，费用内容/说明在申请事由列显示，点击子项仍选择父 OA。
 - Workbench month/all schema 升至 v9，旧 v8 generation 与 page cache 必须返回 builder mismatch 并经既有 freshness gateway 重建。
 

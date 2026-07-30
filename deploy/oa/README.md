@@ -438,6 +438,17 @@ sudo /usr/local/sbin/finops-deploy-control workbench-requirement-repair <release
 sudo /usr/local/sbin/finops-deploy-control workbench-requirement-repair <release-name> \
   --rollback \
   --expected-fingerprint <executed-source-fingerprint>
+sudo /usr/local/sbin/finops-deploy-control workbench-etc-summary-repair <release-name> \
+  --case-id <case-id> --external-etc-batch-id <batch-id> --dry-run
+sudo /usr/local/sbin/finops-deploy-control workbench-etc-summary-repair <release-name> \
+  --case-id <case-id> --external-etc-batch-id <batch-id> \
+  --execute --expected-fingerprint <dry-run-source-fingerprint>
+sudo /usr/local/sbin/finops-deploy-control workbench-etc-summary-repair <release-name> \
+  --case-id <case-id> --external-etc-batch-id <batch-id> \
+  --rollback-dry-run --expected-fingerprint <executed-source-fingerprint>
+sudo /usr/local/sbin/finops-deploy-control workbench-etc-summary-repair <release-name> \
+  --case-id <case-id> --external-etc-batch-id <batch-id> \
+  --rollback --expected-fingerprint <executed-source-fingerprint>
 sudo /usr/local/sbin/finops-deploy-control batch-accounting-metadata-cleanup <release-name> \
   --dry-run
 sudo /usr/local/sbin/finops-deploy-control batch-accounting-metadata-cleanup <release-name> \
@@ -524,6 +535,11 @@ fingerprint、operator 和 reason。它只补 canonical ETC member/link、归一
 中断后幂等续跑。`rollback-dry-run` / `rollback` 只选择同 fingerprint 的 execute history，在首写前检查
 after-image drift，并通过 `WorkbenchRelationCommandService` 原地精确恢复完整 `special_metadata` preimage；
 不 cancel/recreate relation。ETC 与批量账务不在修复范围；命令不开放 SQL、任意脚本或常驻回扫。
+`workbench-etc-summary-repair` 只修复一个明确 case 与 external ETC batch 的 durable relation marker。
+dry-run 要求 active relation 精确包含由 batch ID 确定性生成的 invoice summary row，fingerprint 绑定
+case、batch、scope、mode 和有序 row ids/types；冲突 marker、缺 summary 或类型不一致全部 fail closed。
+execute/rollback 只走正式 relation command、history、idempotency 和 changed-case persistence，不修改
+OA、流水、发票或 ETC canonical facts，也不开放通配扫描或 SQL。
 `batch-accounting-metadata-cleanup` 只选择 active `relation_mode=batch_accounting` 且仍含
 `bank_row_id`、`oa_row_ids`、`invoice_row_ids` 或旧 `year` alias 的关系。dry-run fingerprint 绑定完整
 relation preimage 与清理后的 metadata；execute/rollback 复用正式 relation command、history 和

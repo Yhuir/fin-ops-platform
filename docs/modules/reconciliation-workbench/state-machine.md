@@ -63,9 +63,9 @@ preview 请求本身只有一个页面级临时状态：`idle -> pending(confirm
 | 状态 | 页面行为 |
 | --- | --- |
 | `fresh` | 可展示，满足权限和 write-safety 时可写 |
-| `refreshing` | 展示刷新诊断，不把旧结果当新事实 |
-| `stale` | 明确陈旧；禁止依赖该版本提交关系写入 |
-| `failed` | 展示错误和重试入口，不显示 false-empty |
+| `refreshing` | 已有 active generation 时继续显示上一版稳定 rows，并展示刷新诊断；不得把它当新事实、覆盖操作投影或提交写入 |
+| `stale` | 已有 active generation 时可稳定展示，但明确陈旧并禁止依赖该版本提交关系写入 |
+| `failed` | 保留上一版稳定 generation、展示真实错误和重试入口，不显示 false-empty |
 | `missing` | 触发受控 enqueue；不得回退旧 candidate/snapshot 链路 |
 
 只有完成、校验通过并原子激活的 generation 可成为页面事实。

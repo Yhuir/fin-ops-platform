@@ -1,5 +1,11 @@
 # 关联台 实施记录
 
+## 2026-07-30 - ETC summary durable identity 与刷新态稳定 generation
+
+- 根因：折叠 ETC summary 可被人工确认，但旧 confirm 未把 canonical row 的 external batch identity 持久化；worker 重建时无法证明 `etc-summary-*`，scope 重试后 dead-letter。与此同时，non-fresh API 和前端会用同 generation 的全零/旧响应覆盖稳定页面或刚完成的 operation projection。
+- 修复：relation UoW 在事务内重读 selected canonical rows，拒绝缺行、pane/type 漂移和多 batch，并持久化唯一 `external_etc_batch_id`；worker、grouping 与 Page Audit 统一为 batch identity + deterministic summary row 双重证明。ETC marker 不再等同 relation complete，只有显式 batch-accounting 保留豁免。
+- 刷新态继续读取上一版 active generation，但标记 non-fresh、阻断写入；Redis 仅可按该 active generation 的精确 payload version 只读命中，禁止写入或决定 freshness。前端拒绝同 generation 的 non-fresh 响应覆盖操作投影。schema 升级为 v12。生产存量通过指纹守卫的 relation command repair + history + exact scope rehydrate 修复，不直接改 canonical facts。
+
 ## 2026-07-29 - relation preview 重复 I/O 删除
 
 - 生产认证采样显示首屏和 groups 的 p95 已进入 1 秒，但 confirm/withdraw preview 尾延迟仍超过 1 秒。调用链审计发现 preview 在末尾 freshness gate 已返回当前 active generation version 后，又重复执行一次相同 generation proof；active relation lookup 也通过包含 history 的 scoped loader 读取只需要的 active relation。

@@ -251,14 +251,6 @@ class WorkbenchQueryFacade:
                 if isinstance(statistics_status_payload, dict)
                 else ""
             )
-        if refresh_status and refresh_status != "fresh":
-            return self._non_fresh_initial_page_result(
-                current_month=current_month,
-                scope_key=scope_key,
-                read_model_status=refresh_status,
-                read_model_version=expected_payload_version or None,
-                reason="workbench_freshness_gate",
-            )
         cache_version = expected_payload_version
         if scope_key != "all" and expected_payload_version and statistics_cache_version:
             cache_version = f"{expected_payload_version}|all-statistics:{statistics_cache_version}"
@@ -269,12 +261,7 @@ class WorkbenchQueryFacade:
         )
         payload: object = None
         loaded_from_cache = False
-        cache_status_allows_read = refresh_status in {"fresh", "refreshing"}
-        if scope_key != "all":
-            cache_status_allows_read = (
-                refresh_status == "fresh"
-                and statistics_cache_status == "fresh"
-            )
+        cache_status_allows_read = bool(expected_payload_version)
         if cache_key and cache_status_allows_read:
             get_cached = getattr(self._redis_helper, "get_json", None)
             if callable(get_cached):
@@ -382,7 +369,7 @@ class WorkbenchQueryFacade:
             )
         if (
             refresh_status_payload
-            and expected_payload_version == payload_version
+            and (not expected_payload_version or expected_payload_version == payload_version)
             and refresh_status in {"refreshing", "stale"}
         ):
             payload["read_model_status"] = refresh_status
@@ -512,17 +499,6 @@ class WorkbenchQueryFacade:
             if isinstance(refresh_status_payload, dict)
             else ""
         )
-        if refresh_status_value and refresh_status_value != "fresh":
-            return self._non_fresh_groups_result(
-                current_month=current_month,
-                scope_key=scope_key,
-                zone=zone,
-                page=page,
-                page_size=page_size,
-                read_model_status=refresh_status_value,
-                read_model_version=current_version or None,
-                refresh_status_payload=refresh_status_payload,
-            )
         get_cached = getattr(self._redis_helper, "get_json", None)
         get_text = getattr(self._redis_helper, "get_text", None)
         set_text = getattr(self._redis_helper, "set_text", None)
@@ -658,9 +634,24 @@ class WorkbenchQueryFacade:
                 *list(payload.get("read_model_stale_reasons") if isinstance(payload.get("read_model_stale_reasons"), list) else []),
                 *stale_reasons,
             ]
+        if refresh_status_value and refresh_status_value != "fresh":
+            payload["read_model_status"] = refresh_status_value
+            if current_version:
+                payload["read_model_version"] = current_version
+            refresh_stale_reasons = refresh_status_payload.get("read_model_stale_reasons")
+            if isinstance(refresh_stale_reasons, list) and refresh_stale_reasons:
+                payload["read_model_stale_reasons"] = [
+                    *list(
+                        payload.get("read_model_stale_reasons")
+                        if isinstance(payload.get("read_model_stale_reasons"), list)
+                        else []
+                    ),
+                    *refresh_stale_reasons,
+                ]
         groups_status = str(payload.get("read_model_status") or "fresh")
         if groups_status != "fresh":
-            self._enqueue_refresh(scope_key, reason="api_groups_stale")
+            if groups_status != "refreshing":
+                self._enqueue_refresh(scope_key, reason="api_groups_stale")
             self._emit_status_metric(
                 endpoint="/api/workbench/groups",
                 scope_key=scope_key,
@@ -670,50 +661,6 @@ class WorkbenchQueryFacade:
         set_cached = getattr(self._redis_helper, "set_json", None)
         if cache_key and can_use_groups_redis_cache and callable(set_cached) and payload.get("read_model_status") == "fresh":
             set_cached(cache_key, {"payload": payload}, ttl_seconds=self._groups_redis_ttl_seconds())
-        return WorkbenchQueryResult(HTTPStatus.OK, payload)
-
-    def _non_fresh_groups_result(
-        self,
-        *,
-        current_month: str,
-        scope_key: str,
-        zone: str,
-        page: str | None,
-        page_size: str | None,
-        read_model_status: str,
-        read_model_version: str | None,
-        refresh_status_payload: dict[str, object],
-    ) -> WorkbenchQueryResult:
-        try:
-            normalized_page = max(int(page or 1), 1)
-        except (TypeError, ValueError):
-            normalized_page = 1
-        try:
-            normalized_page_size = min(max(int(page_size or 50), 1), 200)
-        except (TypeError, ValueError):
-            normalized_page_size = 50
-        payload: dict[str, object] = {
-            "month": current_month,
-            "scope_key": scope_key,
-            "read_model_scope_key": scope_key,
-            "zone": zone,
-            "page": normalized_page,
-            "page_size": normalized_page_size,
-            "total": 0,
-            "has_more": False,
-            "groups": [],
-            "read_model_status": read_model_status,
-            "read_model_version": read_model_version,
-        }
-        stale_reasons = refresh_status_payload.get("read_model_stale_reasons")
-        if isinstance(stale_reasons, list) and stale_reasons:
-            payload["read_model_stale_reasons"] = list(stale_reasons)
-        self._emit_status_metric(
-            endpoint="/api/workbench/groups",
-            scope_key=scope_key,
-            read_model_status=read_model_status,
-            reason="workbench_freshness_gate",
-        )
         return WorkbenchQueryResult(HTTPStatus.OK, payload)
 
     def group_detail(

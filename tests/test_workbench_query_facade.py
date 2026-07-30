@@ -138,7 +138,9 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(result.payload["read_model_status"], "refreshing")
         self.assertEqual(queue.refreshes, [("all", "api_initial_page_miss")])
 
-    def test_initial_page_refreshing_status_skips_cold_repository_query(self) -> None:
+    def test_initial_page_refreshing_status_reuses_active_generation(self) -> None:
+        calls: list[dict[str, object]] = []
+
         class Repository:
             @staticmethod
             def get_workbench_groups_freshness_status(*, scope_key: str) -> dict[str, object]:
@@ -149,8 +151,17 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
                 }
 
             @staticmethod
-            def get_workbench_initial_page(**_kwargs: object) -> dict[str, object]:
-                raise AssertionError("refreshing read model must skip the cold initial-page query")
+            def get_workbench_initial_page(**kwargs: object) -> dict[str, object]:
+                calls.append(dict(kwargs))
+                return {
+                    "month": "2026-05",
+                    "summary": {"paired_count": 2},
+                    "paired": {"groups": [{"group_id": "stable-paired"}], "total": 2},
+                    "unpaired": {"groups": [{"group_id": "stable-unpaired"}], "total": 1},
+                    "source_versions": {"builder": "v1"},
+                    "read_model_status": "fresh",
+                    "read_model_version": "generation-2026-05",
+                }
 
         queue = QueueRecorder()
         facade = WorkbenchQueryFacade(
@@ -170,10 +181,13 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(result.status_code, HTTPStatus.OK)
         self.assertEqual(result.payload["read_model_status"], "refreshing")
         self.assertEqual(result.payload["read_model_version"], "generation-2026-05")
-        self.assertEqual(result.payload["paired"]["groups"], [])
+        self.assertEqual(result.payload["paired"]["groups"], [{"group_id": "stable-paired"}])
+        self.assertEqual(calls, [{"scope_key": "2026-05", "paired_query": None, "unpaired_query": None}])
         self.assertEqual(queue.refreshes, [])
 
     def test_searched_initial_all_page_enqueues_only_exact_workbench_mismatch_scopes(self) -> None:
+        calls: list[dict[str, object]] = []
+
         class Repository:
             @staticmethod
             def get_workbench_groups_freshness_status(**_kwargs: object) -> dict[str, object]:
@@ -184,8 +198,16 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
                 }
 
             @staticmethod
-            def get_workbench_initial_page(**_kwargs: object) -> dict[str, object]:
-                raise AssertionError("non-fresh Workbench source proof must skip the cold initial-page query")
+            def get_workbench_initial_page(**kwargs: object) -> dict[str, object]:
+                calls.append(dict(kwargs))
+                return {
+                    "summary": {"unpaired_count": 1},
+                    "paired": {"groups": [], "total": 0},
+                    "unpaired": {"groups": [{"group_id": "stable-search-hit"}], "total": 1},
+                    "source_versions": {"builder": "v1"},
+                    "read_model_status": "fresh",
+                    "read_model_version": "generation-set-1",
+                }
 
         queue = QueueRecorder()
         facade = WorkbenchQueryFacade(
@@ -220,6 +242,8 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
             ],
         )
         self.assertNotIn(("all", "api_groups_source_versions_stale"), queue.refreshes)
+        self.assertEqual(result.payload["unpaired"]["groups"], [{"group_id": "stable-search-hit"}])
+        self.assertEqual(calls[0]["unpaired_query"], {"search": "梁秭涛"})
 
     def test_initial_all_page_does_not_fan_out_while_exact_refresh_is_active(self) -> None:
         class Repository:
@@ -234,7 +258,14 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
 
             @staticmethod
             def get_workbench_initial_page(**_kwargs: object) -> dict[str, object]:
-                raise AssertionError("active exact refresh must stop before the cold initial-page query")
+                return {
+                    "summary": {"paired_count": 1},
+                    "paired": {"groups": [{"group_id": "stable-active-refresh"}], "total": 1},
+                    "unpaired": {"groups": [], "total": 0},
+                    "source_versions": {"builder": "v1"},
+                    "read_model_status": "fresh",
+                    "read_model_version": "generation-set-active",
+                }
 
         queue = QueueRecorder()
         facade = WorkbenchQueryFacade(
@@ -253,6 +284,7 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         result = facade.initial_page("all")
 
         self.assertEqual(result.payload["read_model_status"], "stale")
+        self.assertEqual(result.payload["paired"]["groups"], [{"group_id": "stable-active-refresh"}])
         self.assertEqual(queue.refreshes, [])
 
     def test_month_initial_does_not_enqueue_unrelated_all_statistics_scopes(self) -> None:
@@ -1093,13 +1125,23 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(result.status_code, HTTPStatus.CONFLICT)
         self.assertEqual(result.payload["read_model_version"], "current")
 
-    def test_groups_refreshing_status_bypasses_and_does_not_write_redis_payload(self) -> None:
+    def test_groups_refreshing_status_keeps_active_generation_rows_without_cache_write(self) -> None:
         class Repository:
             def get_workbench_refresh_status(self, **_kwargs: object) -> dict[str, object]:
                 return {"read_model_status": "refreshing", "dirty_scopes": [{"scope_key": "all"}]}
 
             def get_workbench_groups_page(self, **_kwargs: object) -> dict[str, object]:
-                raise AssertionError("refreshing status must stop before the heavy page query")
+                return {
+                    "month": "all",
+                    "zone": "unpaired",
+                    "page": 1,
+                    "page_size": 50,
+                    "total": 1,
+                    "has_more": False,
+                    "groups": [{"group_id": "stable-generation"}],
+                    "read_model_status": "fresh",
+                    "read_model_version": "v7",
+                }
 
         cache_key = "workbench:v7:groups:digest"
         redis = RedisRecorder(
@@ -1132,9 +1174,9 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         result = facade.groups("all", zone="unpaired")
 
         self.assertEqual(result.status_code, HTTPStatus.OK)
-        self.assertEqual(result.payload["groups"], [])
+        self.assertEqual(result.payload["groups"], [{"group_id": "stable-generation"}])
         self.assertEqual(result.payload["read_model_status"], "refreshing")
-        self.assertEqual(redis.get_text_calls, [])
+        self.assertEqual(redis.get_text_calls, ["workbench:groups:version:all"])
         self.assertEqual(redis.get_json_calls, [])
         self.assertEqual(redis.set_json_calls, [])
         self.assertEqual(queue.refreshes, [])

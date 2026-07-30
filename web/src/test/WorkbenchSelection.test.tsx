@@ -1216,6 +1216,69 @@ describe("Workbench row selection and detail drawer", () => {
     });
   });
 
+  test("refreshing response cannot overwrite the committed confirm projection", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({ actionDelayMs: 20 });
+    const defaultFetch = fetchMock.getMockImplementation();
+    let initialSnapshot: Record<string, unknown> | null = null;
+    let confirmCommitted = false;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = fetchPath(input);
+      if (confirmCommitted && isWorkbenchInitialRequest(input) && initialSnapshot) {
+        const refreshingSnapshot = JSON.parse(JSON.stringify(initialSnapshot)) as {
+          paired: Record<string, unknown>;
+          unpaired: Record<string, unknown>;
+          read_model_status: string;
+        };
+        refreshingSnapshot.read_model_status = "refreshing";
+        refreshingSnapshot.paired.read_model_status = "refreshing";
+        refreshingSnapshot.unpaired.read_model_status = "refreshing";
+        return jsonResponse(refreshingSnapshot);
+      }
+      if (!defaultFetch) {
+        throw new Error("Mock API fetch is not installed.");
+      }
+      const response = await defaultFetch(input, init);
+      if (isWorkbenchInitialRequest(input) && !initialSnapshot) {
+        initialSnapshot = await response.json() as Record<string, unknown>;
+        return jsonResponse(initialSnapshot);
+      }
+      if (path === "/api/workbench/actions/confirm-link") {
+        confirmCommitted = true;
+      }
+      return response;
+    });
+    renderWorkbenchPage();
+
+    await user.click(await screen.findByRole("row", {
+      name: /2026-03-28.*智能工厂设备商/,
+    }));
+    await user.click(screen.getByRole("row", {
+      name: /91330108MA27B4011D.*杭州溯源科技有限公司/,
+    }));
+    await user.click(screen.getByRole("button", { name: "确认关联" }));
+    const preview = await screen.findByRole("dialog", { name: /^(确认|撤回)关联$/ });
+    await user.click(within(preview).getByRole("button", { name: "确认关联" }));
+
+    await waitFor(() => {
+      const initialRequests = fetchMock.mock.calls.filter(([input]) => (
+        isWorkbenchInitialRequest(input as RequestInfo | URL)
+      ));
+      expect(initialRequests).toHaveLength(2);
+    });
+    const pairedZone = screen.getByTestId("zone-paired");
+    const unpairedZone = screen.getByTestId("zone-unpaired");
+    expect(within(pairedZone).getByRole("row", {
+      name: /2026-03-28.*智能工厂设备商/,
+    })).toBeInTheDocument();
+    expect(within(unpairedZone).queryByRole("row", {
+      name: /2026-03-28.*智能工厂设备商/,
+    })).not.toBeInTheDocument();
+    expect(screen.getByText(
+      "关联台正在刷新，当前显示上一版稳定数据；刷新完成前写操作已禁用。",
+    )).toBeInTheDocument();
+  });
+
   test("disables relation writes while the workbench generation is refreshing", async () => {
     const user = userEvent.setup();
     installMockApiFetch({

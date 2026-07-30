@@ -26,6 +26,7 @@ class WorkbenchWriteUnitOfWorkContext:
     exception_cases: Any
     row_overrides: Any
     idempotency_store: Any
+    canonical_query: Any | None
 
 
 class WorkbenchWriteUnitOfWork:
@@ -82,6 +83,7 @@ class WorkbenchWriteUnitOfWork:
                 exception_cases=repositories.exception_cases,
                 row_overrides=repositories.row_overrides,
                 idempotency_store=idempotency_store,
+                canonical_query=getattr(repositories, "canonical_query", None),
             )
             handler_started_at = monotonic()
             handler_result = handler(context)

@@ -56,12 +56,7 @@ def evaluate_bank_relation_completion(
 ) -> dict[str, object]:
     normalized_types = tuple(str(value or "").strip().lower() for value in row_types)
     metadata = special_metadata if isinstance(special_metadata, dict) else {}
-    check = amount_check if isinstance(amount_check, dict) else {}
-    is_etc_batch_relation = bool(
-        isinstance(metadata.get("etc_batch_link"), dict)
-        or str(check.get("external_etc_batch_id") or check.get("etc_batch_id") or "").strip()
-    )
-    if str(metadata.get("source") or "").strip() == "batch_accounting" or is_etc_batch_relation:
+    if str(metadata.get("source") or "").strip() == "batch_accounting":
         return {"is_complete": True, "missing_row_types": []}
     present = set(normalized_types)
     if "oa" in present and "bank" not in present:

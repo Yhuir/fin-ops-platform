@@ -83,11 +83,47 @@ class _InProgressUoW:
 
 
 class _HandlerCallingUoW:
+    def __init__(self, canonical_rows: dict[str, dict[str, object]] | None = None) -> None:
+        self._canonical_rows = canonical_rows
+
     def replay_committed(self, command: object) -> None:
         return None
 
     def run(self, command: object, handler: object) -> dict[str, object]:
-        ctx = type("UoWContext", (), {"transaction": object(), "pair_relations": object()})()
+        canonical_rows = self._canonical_rows or {
+            row_id: {
+                "pane": (
+                    "oa"
+                    if row_id.startswith("oa")
+                    else "invoice"
+                    if row_id.startswith(("invoice", "etc-summary-"))
+                    else "bank"
+                ),
+                "source_kind": "etc_invoice_summary" if row_id.startswith("etc-summary-") else "",
+                "external_etc_batch_id": (
+                    row_id.removeprefix("etc-summary-") if row_id.startswith("etc-summary-") else ""
+                ),
+            }
+            for row_id in list(getattr(command, "row_ids", []))
+        }
+        canonical_query = type(
+            "CanonicalQuery",
+            (),
+            {
+                "validate_workbench_relation_selection_in_current_transaction": staticmethod(
+                    lambda **_: canonical_rows
+                )
+            },
+        )()
+        ctx = type(
+            "UoWContext",
+            (),
+            {
+                "transaction": object(),
+                "pair_relations": object(),
+                "canonical_query": canonical_query,
+            },
+        )()
         return handler(ctx)
 
 
@@ -386,6 +422,7 @@ def _new_facade(
     bank_flow_rule_tag_rules_payload: object | None = None,
     list_ignored_rows: object | None = None,
     relation_preview_selection: object | None = None,
+    amount_check_for_rows_by_type: object | None = None,
 ) -> WorkbenchWriteFacade:
     resolved_pair_relation_service = pair_relation_service or _PairRelationService()
     resolved_amount_rows = resolve_rows_for_amount_check or (
@@ -456,7 +493,7 @@ def _new_facade(
         resolve_live_rows_direct=resolve_live_rows_direct or (lambda *_, **__: list(live_rows or [])),
         relation_groups=relation_groups or (lambda *_, **__: []),
         withdraw_rows_and_after_relations=withdraw_rows_and_after_relations or (lambda *_, **__: ([], [], [])),
-        amount_check_for_rows_by_type=lambda _: {},
+        amount_check_for_rows_by_type=amount_check_for_rows_by_type or (lambda _: {}),
         transaction_amount_for_row_id=lambda _: 0,
         list_ignored_rows=list_ignored_rows or (lambda *_, **__: []),
         save_exception_cases_snapshot=lambda: None,
@@ -870,6 +907,77 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         metadata = relation_command.confirm_calls[0]["special_metadata"]
         self.assertEqual(metadata["paired_requirement_version"], 3)
         self.assertFalse(metadata["requires_invoice"])
+
+    def test_confirm_link_uow_persists_etc_summary_canonical_identity(self) -> None:
+        relation_command = _RecordingRelationCommandService()
+        etc_row_id = "etc-summary-etc_20260720_001"
+        facade = _new_facade(
+            confirm_uow=_HandlerCallingUoW(),
+            relation_command_service=relation_command,
+            resolve_rows_for_amount_check=lambda row_ids, **_: [
+                {
+                    "id": row_id,
+                    "type": "invoice" if row_id == etc_row_id else "bank",
+                    "source_kind": "etc_invoice_summary" if row_id == etc_row_id else "bank",
+                }
+                for row_id in row_ids
+            ],
+            amount_check_for_rows_by_type=lambda _: {"status": "matched"},
+            bank_transaction_category_codes_for_row_ids=lambda row_ids: {
+                row_id: "etc" for row_id in row_ids
+            },
+            bank_flow_rule_tag_rules_payload=lambda: {
+                "requirements_by_tag_code": {
+                    "etc": {"requires_oa": True, "requires_invoice": False}
+                }
+            },
+        )
+
+        result = facade.confirm_link(
+            {
+                "month": "2026-07",
+                "row_ids": ["bank-1", etc_row_id],
+                "idempotency_key": "confirm:etc-summary",
+            },
+            actor_id="oa-user-1",
+            tenant_id="default",
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(
+            relation_command.confirm_calls[0]["special_metadata"]["external_etc_batch_id"],
+            "etc_20260720_001",
+        )
+        self.assertTrue(relation_command.confirm_calls[0]["special_metadata"]["requires_oa"])
+        self.assertFalse(relation_command.confirm_calls[0]["special_metadata"]["requires_invoice"])
+
+    def test_confirm_link_uow_rejects_canonical_selection_drift(self) -> None:
+        facade = _new_facade(
+            confirm_uow=_HandlerCallingUoW(
+                canonical_rows={
+                    "oa-1": {"pane": "oa", "source_kind": "oa", "external_etc_batch_id": ""}
+                }
+            ),
+            relation_command_service=_RecordingRelationCommandService(),
+            resolve_rows_for_amount_check=lambda row_ids, **_: [
+                {"id": row_id, "type": "oa" if row_id.startswith("oa") else "bank"}
+                for row_id in row_ids
+            ],
+        )
+
+        result = facade.confirm_link(
+            {
+                "month": "2026-05",
+                "row_ids": ["oa-1", "bank-1"],
+                "idempotency_key": "confirm:canonical-drift",
+            },
+            actor_id="oa-user-1",
+            tenant_id="default",
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.CONFLICT)
+        self.assertEqual(result.payload["error"], "workbench_write_conflict")
+        self.assertEqual(result.payload["conflict"]["reason"], "canonical_selection_changed")
 
     def test_withdraw_link_response_omits_retired_downstream_freshness_targets(self) -> None:
         facade = _new_facade(

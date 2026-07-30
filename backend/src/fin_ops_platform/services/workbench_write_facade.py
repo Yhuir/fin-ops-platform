@@ -745,6 +745,49 @@ class WorkbenchWriteFacade:
                 raise _WorkbenchWritePersistenceError("Workbench UoW context is missing transaction.")
             if self._persist_pair_relations_in_transaction is None:
                 raise _WorkbenchWritePersistenceError("confirm-link UoW requires transaction-bound pair relation persistence.")
+            canonical_query = getattr(ctx, "canonical_query", None)
+            validate_selection = getattr(
+                canonical_query,
+                "validate_workbench_relation_selection_in_current_transaction",
+                None,
+            )
+            if not callable(validate_selection):
+                raise _WorkbenchWritePersistenceError(
+                    "confirm-link UoW requires transaction-bound canonical selection validation."
+                )
+            canonical_rows = validate_selection(scope_key=month, row_ids=row_ids)
+            if set(canonical_rows) != set(row_ids):
+                raise WorkbenchWriteConflict(
+                    action=action_name,
+                    reason="canonical_selection_changed",
+                    expected={"row_ids": row_ids},
+                    actual={"row_ids": sorted(canonical_rows)},
+                )
+            canonical_row_types = [str(canonical_rows[row_id].get("pane") or "") for row_id in row_ids]
+            if canonical_row_types != row_types:
+                raise WorkbenchWriteConflict(
+                    action=action_name,
+                    reason="canonical_selection_changed",
+                    expected={"row_ids": row_ids, "row_types": row_types},
+                    actual={"row_ids": row_ids, "row_types": canonical_row_types},
+                )
+            external_etc_batch_ids = list(
+                dict.fromkeys(
+                    str(canonical_rows[row_id].get("external_etc_batch_id") or "").strip()
+                    for row_id in row_ids
+                    if str(canonical_rows[row_id].get("external_etc_batch_id") or "").strip()
+                )
+            )
+            if len(external_etc_batch_ids) > 1:
+                raise WorkbenchWriteConflict(
+                    action=action_name,
+                    reason="multiple_etc_batches_selected",
+                    expected={"external_etc_batch_count": 1},
+                    actual={"external_etc_batch_ids": external_etc_batch_ids},
+                )
+            transaction_metadata = dict(paired_policy_metadata)
+            if external_etc_batch_ids:
+                transaction_metadata["external_etc_batch_id"] = external_etc_batch_ids[0]
             pair_relation_started_at = monotonic()
             relation_command = self._relation_command_service_for(repository=getattr(ctx, "pair_relations", None))
             if relation_command is None:
@@ -762,7 +805,7 @@ class WorkbenchWriteFacade:
                 history_before_relations=history_before_relations,
                 idempotency_key=None,
                 selected_rows=selected_rows,
-                paired_policy_metadata=paired_policy_metadata,
+                paired_policy_metadata=transaction_metadata,
             )
             self._emit_timing_if_requested(
                 request_id=request_id,

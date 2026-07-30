@@ -1980,13 +1980,13 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(result["read_model_stale_reasons"], ["builder_mismatch"])
         self.assertEqual(result["refresh_scope_keys"], [])
 
-    def test_workbench_v11_rejects_v10_month_all_and_cache_versions(self) -> None:
+    def test_workbench_v12_rejects_v11_month_all_and_cache_versions(self) -> None:
         app = object.__new__(Application)
-        old_month = "2026-07-28-pane-collapse-v10"
-        old_all = "workbench_sql_projection.composed_active_month_shards.pane_collapse.v10"
+        old_month = "2026-07-29-etc-batch-members-v11"
+        old_all = "workbench_sql_projection.composed_active_month_shards.etc_batch_members.v11"
 
-        self.assertIn("v11", WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION)
-        self.assertIn("v11", WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
+        self.assertIn("v12", WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION)
+        self.assertIn("v12", WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
         self.assertIn(WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION, WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION)
         self.assertIn(WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION, WORKBENCH_INITIAL_PAGE_CACHE_SCHEMA_VERSION)
         self.assertIn(
@@ -2359,7 +2359,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         payload = builder._group_payload("2026-02", with_test_object_identities(rows_by_id), [relation])
 
-        groups = payload["paired"]["groups"]
+        groups = payload["unpaired"]["groups"]
         self.assertEqual(len(groups), 1)
         group = groups[0]
         self.assertEqual(group["group_id"], "case:CASE-BATCH-txn_imported_1328")
@@ -5375,11 +5375,14 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
-        self.assertEqual(payload["groups"], [])
-        self.assertEqual(redis.get_text_calls, [])
+        self.assertEqual(
+            payload["groups"],
+            [{"group_id": "fresh-db", "oa_rows": [], "bank_rows": [], "invoice_rows": []}],
+        )
+        self.assertEqual(redis.get_text_calls, ["workbench:groups:version:all"])
         self.assertEqual(redis.get_json_calls, [])
         self.assertEqual(redis.set_json_calls, [])
-        self.assertEqual(page_calls, [])
+        self.assertEqual(len(page_calls), 1)
         self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertEqual(queue.refreshes, [])
 

@@ -399,21 +399,44 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         self.assertTrue(partially_missing["requires_oa"])
         self.assertTrue(partially_missing["requires_invoice"])
 
-    def test_batch_accounting_and_etc_completion_exemptions_remain_complete(self) -> None:
-        for relation_mode, metadata, amount_check in [
-            ("manual_confirmed", {"source": "batch_accounting"}, {}),
-            ("manual_confirmed", {"etc_batch_link": {"batch_id": "etc-1"}}, {}),
-            ("manual_confirmed", {}, {"etc_batch_id": "etc-2"}),
+    def test_only_batch_accounting_source_bypasses_bank_completion_requirements(self) -> None:
+        self.assertEqual(
+            evaluate_bank_relation_completion(
+                row_types=["oa", "invoice"],
+                special_metadata={"source": "batch_accounting"},
+                relation_mode="manual_confirmed",
+            ),
+            {"is_complete": True, "missing_row_types": []},
+        )
+
+    def test_etc_batch_identity_does_not_bypass_bank_completion_requirements(self) -> None:
+        for metadata, amount_check in [
+            (
+                {
+                    "etc_batch_link": {"external_etc_batch_id": "etc-1"},
+                    "requires_oa": True,
+                    "requires_invoice": False,
+                },
+                {},
+            ),
+            (
+                {
+                    "external_etc_batch_id": "etc-2",
+                    "requires_oa": True,
+                    "requires_invoice": False,
+                },
+                {"etc_batch_id": "etc-2"},
+            ),
         ]:
             with self.subTest(metadata=metadata, amount_check=amount_check):
                 self.assertEqual(
                     evaluate_bank_relation_completion(
-                        row_types=["oa", "invoice"],
+                        row_types=["bank", "invoice"],
                         special_metadata=metadata,
-                        relation_mode=relation_mode,
+                        relation_mode="manual_confirmed",
                         amount_check=amount_check,
                     ),
-                    {"is_complete": True, "missing_row_types": []},
+                    {"is_complete": False, "missing_row_types": ["oa"]},
                 )
 
     def test_ordinary_oa_relation_without_bank_is_incomplete(self) -> None:

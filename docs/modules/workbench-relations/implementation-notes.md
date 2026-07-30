@@ -1,5 +1,11 @@
 # 关联台关系事实源 实施记录
 
+## 2026-07-30 - 人工 ETC summary 写入合同
+
+人工 confirm 不再信任 preview DTO 作为写入事实：relation UoW 使用同一事务的 canonical query 重新解析 selected row ids/types，任何漂移整批冲突退出。合法折叠 ETC summary 必须解析为唯一 external batch 并写入 relation special metadata；多个 batch、缺 summary 或类型不一致不写 relation/history/idempotency。
+
+ETC batch identity 只承担 summary canonical ownership 与重建证明，不再让关系无条件进入 paired。显式 `batch_accounting` 完成合同保持不变。历史缺 marker 的单一关系只允许通过固定 case/batch、dry-run 指纹、relation command/history 和可逆 rollback 工具修复，禁止 ad-hoc SQL 或 read-time fallback。
+
 ## 2026-07-23 - 普通关系写迁移为访问时收敛
 
 当前合同取代本文中更早关于 relation transaction/UoW/repository 直投 Workbench、Cost、OA、invoice、Search 或其它页面的描述。confirm/withdraw/cancel/split/exception/ignore/cash 只原子保存 canonical relation/history/idempotency/audit 与版本，`freshness_targets` / `operation_barrier_targets` 为空。当前可见消费页的正常 GET 比较 canonical expected version 与已发布 proof，只 enqueue 自身精确 scope；隐藏页面延迟到再次可见。

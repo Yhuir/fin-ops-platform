@@ -48,6 +48,11 @@ commands:
   workbench-requirement-repair <release-name> --rollback-dry-run --expected-fingerprint <sha256>
   workbench-requirement-repair <release-name> --rollback --expected-fingerprint <sha256>
                                       repair historical frozen OA/invoice requirements through relation commands
+  workbench-etc-summary-repair <release-name> --case-id ID --external-etc-batch-id ID --dry-run
+  workbench-etc-summary-repair <release-name> --case-id ID --external-etc-batch-id ID --execute --expected-fingerprint <sha256>
+  workbench-etc-summary-repair <release-name> --case-id ID --external-etc-batch-id ID --rollback-dry-run --expected-fingerprint <sha256>
+  workbench-etc-summary-repair <release-name> --case-id ID --external-etc-batch-id ID --rollback --expected-fingerprint <sha256>
+                                      repair one proven ETC summary relation through relation commands
   batch-accounting-metadata-cleanup <release-name> --dry-run
   batch-accounting-metadata-cleanup <release-name> --execute --expected-fingerprint <sha256>
   batch-accounting-metadata-cleanup <release-name> --rollback-dry-run --expected-fingerprint <sha256>
@@ -632,6 +637,33 @@ workbench_requirement_repair() {
   run_with_runtime_env "$src" -m fin_ops_platform.tools.workbench_relation_requirement_repair_ops "$@"
 }
 
+workbench_etc_summary_repair() {
+  local release="${1:-}"
+  [[ -n "$release" ]] || die "workbench-etc-summary-repair requires release name"
+  shift
+  [[ "${1:-}" == "--case-id" && "${2:-}" =~ ^[A-Za-z0-9._-]+$ ]] || \
+    die "workbench-etc-summary-repair requires a safe --case-id"
+  [[ "${3:-}" == "--external-etc-batch-id" && "${4:-}" =~ ^[A-Za-z0-9._-]+$ ]] || \
+    die "workbench-etc-summary-repair requires a safe --external-etc-batch-id"
+  local mode="${5:-}"
+  case "$mode" in
+    --dry-run)
+      [[ "$#" -eq 5 ]] || die "workbench-etc-summary-repair only permits the four fixed modes"
+      ;;
+    --execute|--rollback-dry-run|--rollback)
+      [[ "$#" -eq 7 && "${6:-}" == "--expected-fingerprint" && "${7:-}" =~ ^[0-9a-f]{64}$ ]] || \
+        die "workbench-etc-summary-repair only permits the four fixed modes"
+      ;;
+    *)
+      die "workbench-etc-summary-repair only permits the four fixed modes"
+      ;;
+  esac
+  local src
+  src="$(release_src "$release")"
+  assert_runtime_env_contract
+  run_with_runtime_env "$src" -m fin_ops_platform.tools.workbench_etc_summary_relation_repair_ops "$@"
+}
+
 batch_accounting_metadata_cleanup() {
   local release="${1:-}"
   [[ -n "$release" ]] || die "batch-accounting-metadata-cleanup requires release name"
@@ -1154,6 +1186,10 @@ case "$cmd" in
   workbench-requirement-repair)
     shift
     workbench_requirement_repair "$@"
+    ;;
+  workbench-etc-summary-repair)
+    shift
+    workbench_etc_summary_repair "$@"
     ;;
   batch-accounting-metadata-cleanup)
     shift

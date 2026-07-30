@@ -311,6 +311,9 @@ from fin_ops_platform.services.postgres_repositories.tax_offset import (
     PostgresTaxOffsetCanonicalRepository,
 )
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
+from fin_ops_platform.services.postgres_repositories.workbench_canonical_query import (
+    PostgresWorkbenchCanonicalQueryRepository,
+)
 from fin_ops_platform.services.postgres_repositories.workbench_idempotency import PostgresWorkbenchIdempotencyRepository
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 from fin_ops_platform.services.project_costing import ProjectCostingService
@@ -3011,6 +3014,7 @@ class Application:
             pair_relations=relation_repository,
             exception_cases=workbench_repository,
             row_overrides=workbench_repository,
+            canonical_query=PostgresWorkbenchCanonicalQueryRepository(transaction),
         )
 
     def _workbench_write_response(self, result: WorkbenchWriteResult) -> Response:
