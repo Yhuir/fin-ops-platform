@@ -809,7 +809,6 @@ class BatchAccountingService:
             row.get("bank_name")
             or row.get("selected_bank_name")
             or row.get("imported_bank_name")
-            or row.get("account_name")
         )
         account_no = cls._clean_text(row.get("account_no"))
         account_last4 = cls._clean_text(

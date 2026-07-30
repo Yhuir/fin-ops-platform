@@ -1,6 +1,6 @@
 # 批量账务测试合同
 
-日期：2026-07-27
+日期：2026-07-30
 
 ## 七类测试映射
 
@@ -20,7 +20,7 @@
 
 ### `tests/test_batch_accounting_api.py`
 
-- canonical 未提交/已提交响应和空集。
+- canonical 未提交/已提交响应和空集；银行名缺失时不得退回账户户名。
 - 银行/OA 双分页、OA search 参数与 summary。
 - 最大 200 银行 + 200 OA + 200 附件发票的 route/service DTO assembly guard。
 - active batch relation 和 canonical member detail。
@@ -33,6 +33,7 @@
 - 固定 query count：未提交 5、已提交 4、submit context 4，均包含 isolation statement。
 - SQL 不引用 `read_model.` 或 Workbench generations。
 - 配置 `FIN_OPS_TEST_DATABASE_URL` 时验证 canonical bank/OA/attachment/invoice/active relation、筛选、分页、submitted detail 和窄提交上下文。
+- 未提交、已提交和 submit context 三条 SQL 链路都必须只提取银行名/尾号标量，不返回完整 `raw_payload`。
 
 ### `tests/test_platform_runtime_boundary_guards.py`
 
@@ -44,7 +45,7 @@
 ## 前端与 E2E
 
 - `web/src/test/BatchAccountingApi.test.ts`：canonical DTO、OA search query、mutation DTO 无 barrier。
-- `web/src/test/BatchAccountingPage.test.tsx`：loading/empty/error、双分页、搜索、选择、金额、submit/withdraw、写后一次 GET。
+- `web/src/test/BatchAccountingPage.test.tsx`：loading/empty/error、双分页、搜索、选择、金额、`+08` 时间展示、旧请求竞态隔离、submit/withdraw、写后一次 GET。
 - `web/e2e/batch-accounting-flow.spec.ts`：浏览器关键业务路径、临时加载失败恢复、窄屏、权限相关回归。
 - `web/e2e/fixtures/apiMocks.ts`：batch response 不再模拟 read-model status。
 

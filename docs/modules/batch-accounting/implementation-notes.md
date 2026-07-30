@@ -1,5 +1,13 @@
 # 批量账务 实施记录
 
+## 2026-07-30 - 银行 chip、短时区时间与请求竞态修复
+
+- 根因：页面三条 canonical 银行查询只返回账户户名，service 又把 `account_name` 当银行名兜底，导致 chip 显示“云南溯源科技有限公司 8106”；PostgreSQL `to_char(...OF)` 返回 `+08`，旧前端格式器只识别 `+08:00/+0800`；快速搜索或翻页时，已中止旧请求的 `finally` 还可能提前结束新请求 loading。
+- 修复：未提交、已提交和 submit context 三条 SQL 都只从 `normalized_payload` 提取结构化银行名/尾号标量，service 删除账户户名兜底；时间格式器兼容 `+08` 且不做时区换算；页面以请求序号保护 payload、error 和 loading，只允许最新请求更新状态。
+- 性能与旧链路：保持 5/4/4 固定 statement count，不返回完整 `raw_payload`，不新增查询、缓存、read model、worker、索引、依赖或兼容分支。
+- 测试：service 锁定银行名缺失时返回空串；PostgreSQL 三链路锁定正确银行字段及禁止完整 JSON I/O；组件覆盖 `+08` 展示和 abort 后旧响应不得覆盖新搜索请求。
+- docs impact assessment：HTTP shape、模块职责、状态机和依赖方向不变；更新本模块 bank row 字段来源、测试合同与实施记录，其它长期文档不适用。
+
 ## 2026-07-27 - typed membership 与 Audit 合同闭环
 
 - 根因：页面已经 canonical API 直读，但 Audit 仍把已废弃的 `special_metadata.bank_row_id/oa_row_ids/invoice_row_ids` 当成员事实；历史关系中这些冗余字段漂移会产生假失败。submitted repository 同时把 PostgreSQL `date` 放入 JSONB DTO，导致接口序列化 500。

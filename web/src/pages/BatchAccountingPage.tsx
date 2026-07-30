@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FocusEvent, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent, type MouseEvent } from "react";
 import { AlertTriangle, ChevronLeft, ChevronRight, RefreshCw, Search, X } from "lucide-react";
 
 import AppDialog from "../components/common/AppDialog";
@@ -80,7 +80,7 @@ function formatTradeTime(value: string | null | undefined) {
   if (!text) {
     return "-";
   }
-  const isoMatch = text.match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2}(?::\d{2})?)(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$/);
+  const isoMatch = text.match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2}(?::\d{2})?)(?:\.\d+)?(?:Z|[+-]\d{2}(?::?\d{2})?)?$/);
   if (!isoMatch) {
     return text;
   }
@@ -246,6 +246,7 @@ export default function BatchAccountingPage() {
   const [oaSearchQuery, setOaSearchQuery] = useState("");
   const [differenceNote, setDifferenceNote] = useState("");
   const [feedback, setFeedback] = useState<{ severity: "success" | "error"; message: string } | null>(null);
+  const loadRequestIdRef = useRef(0);
 
   const selectedBankRow = useMemo(
     () => (
@@ -348,6 +349,8 @@ export default function BatchAccountingPage() {
     if (!isValidYear(bankYear)) {
       return;
     }
+    const requestId = loadRequestIdRef.current + 1;
+    loadRequestIdRef.current = requestId;
     setLoading(true);
     setError(null);
     fetchBatchAccounting({
@@ -360,15 +363,23 @@ export default function BatchAccountingPage() {
       oaSearch: bucket === "unsubmitted" ? oaSearchQuery : undefined,
       signal,
     })
-      .then(applyBatchAccountingPayload)
+      .then((nextPayload) => {
+        if (requestId === loadRequestIdRef.current) {
+          applyBatchAccountingPayload(nextPayload);
+        }
+      })
       .catch((caught: unknown) => {
-        if (isAbortLikeError(caught)) {
+        if (isAbortLikeError(caught) || requestId !== loadRequestIdRef.current) {
           return;
         }
         setPayload(EMPTY_PAYLOAD);
         setError(caught instanceof Error ? caught.message : "批量账务数据加载失败");
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (requestId === loadRequestIdRef.current) {
+          setLoading(false);
+        }
+      });
   }, [applyBatchAccountingPayload, bankPage, bankYear, bucket, oaPage, oaSearchQuery]);
 
   useEffect(() => {
@@ -377,7 +388,10 @@ export default function BatchAccountingPage() {
     }
     const controller = new AbortController();
     loadData(controller.signal);
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      loadRequestIdRef.current += 1;
+    };
   }, [active, activationGeneration, loadData]);
 
   useEffect(() => {

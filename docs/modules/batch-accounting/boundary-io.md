@@ -1,6 +1,6 @@
 # 批量账务模块边界与 I/O
 
-日期：2026-07-27
+日期：2026-07-30
 
 ## 模块化状态
 
@@ -36,7 +36,7 @@
 | 银行分页 | `bank_page`、`bank_page_size` | 服务端执行；page/page size 必须为正数，page size 最大 200 |
 | OA 分页 | `oa_page`、`oa_page_size` | 仅未提交 bucket 使用；服务端执行，最大 200 |
 | OA 搜索 | `oa_search` | 最长 200 字符；在 canonical OA SQL 中匹配申请人、项目、金额、事由 |
-| 银行候选 | `app.bank_transactions` | 指定年份、未删除、对方户名“批量账务集中处理”、`txn_direction='outflow'`、金额大于 0、没有任何 active relation |
+| 银行候选 | `app.bank_transactions` | 指定年份、未删除、对方户名“批量账务集中处理”、`txn_direction='outflow'`、金额大于 0、没有任何 active relation；银行名/尾号只取 normalized payload 的结构化银行字段，不得用账户户名冒充银行名 |
 | OA 候选 | `app.oa_applications` | 未删除、已完成状态别名、日常报销主单、不限年份、没有包含 canonical 银行成员的 active relation |
 | OA 附件发票 | `app.invoices.source_links` + `app.oa_attachments` | 只按当前可见或本次选中的 OA IDs 批量查询；不得扫描全量附件 |
 | submitted relations | `app.workbench_pair_relations` | 只读 `status='active' and relation_mode='batch_accounting'`，并要求关系包含指定年份的 canonical 银行成员 |
@@ -50,7 +50,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | `summary` | 页面 | `unsubmitted_count`、`submitted_count`、`bank_year` 与 rows 在同一 snapshot |
-| `bank_rows` | 页面 | 当前 bucket 的服务端分页银行行 |
+| `bank_rows` | 页面 | 当前 bucket 的服务端分页银行行；`bank_name + account_last4` 是银行 chip，`trade_time` 是 canonical 时间文本，页面只做无时区换算的展示归一化 |
 | `oa_rows` | 页面 | 未提交 bucket 的服务端分页 OA 候选；submitted 返回空列表 |
 | `relations_by_bank_row_id` | 页面 | submitted 当前页 active batch relation 及 canonical OA/发票成员详情 |
 | `pagination` | 页面 | 银行分页始终返回；未提交同时返回 OA 分页 |

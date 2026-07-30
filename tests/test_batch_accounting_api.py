@@ -38,7 +38,9 @@ def bank_row(
         "debit_amount": amount,
         "signed_amount": f"-{amount}",
         "direction": "outflow",
-        "account_name": "建行基本户",
+        "account_name": "云南溯源科技有限公司",
+        "bank_name": "建设银行",
+        "account_last4": "8106",
         "account_no": "6227000012348106",
         "version": 1,
     }
@@ -244,7 +246,7 @@ class BatchAccountingServiceTests(unittest.TestCase):
             ],
         )
         self.assertEqual(payload["summary"]["unsubmitted_count"], 1)
-        self.assertEqual(payload["bank_rows"][0]["bank_name"], "建行基本户")
+        self.assertEqual(payload["bank_rows"][0]["bank_name"], "建设银行")
         self.assertEqual(payload["bank_rows"][0]["account_last4"], "8106")
         self.assertEqual(payload["oa_rows"][0]["linked_invoice_row_ids"], [INVOICE_ROW_ID])
         self.assertEqual(payload["pagination"]["bank_rows"]["total"], 1)
@@ -274,6 +276,17 @@ class BatchAccountingServiceTests(unittest.TestCase):
         self.assertEqual(payload["oa_rows"], [])
         self.assertEqual(payload["summary"]["submitted_count"], 0)
         self.assertEqual(payload["pagination"]["oa_rows"]["total"], 0)
+
+    def test_bank_name_does_not_fall_back_to_account_holder(self) -> None:
+        repository = FakeBatchAccountingQueryRepository()
+        row = bank_row()
+        row.pop("bank_name")
+        repository.list_payload["bank_rows"] = [row]
+
+        payload = service(repository).build_payload(bank_year="2026", bucket="unsubmitted")
+
+        self.assertEqual(payload["bank_rows"][0]["bank_name"], "")
+        self.assertEqual(payload["bank_rows"][0]["account_last4"], "8106")
 
     def test_maximum_page_payload_assembly_is_bounded(self) -> None:
         repository = FakeBatchAccountingQueryRepository()

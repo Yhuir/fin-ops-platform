@@ -92,7 +92,11 @@ class BatchAccountingQueryCountTests(unittest.TestCase):
             self.assertEqual(statements[0], "set transaction isolation level repeatable read read only")
             self.assertNotIn("read_model.", combined_sql)
             self.assertNotIn("workbench_generations", combined_sql)
-            self.assertNotIn("raw_payload", combined_sql)
+            self.assertIn("->>'imported_bank_name'", combined_sql)
+            self.assertIn("->>'imported_bank_last4'", combined_sql)
+            self.assertNotRegex(combined_sql, r"\b(?:bank|source)\.raw_payload\s*(?:,|\bas\b)")
+            self.assertNotIn(" as raw_payload", combined_sql.lower())
+            self.assertNotIn("'raw_payload'", combined_sql)
             self.assertNotIn("'source_links', invoice.source_links", combined_sql)
 
 
@@ -120,29 +124,34 @@ class BatchAccountingPostgresIntegrationTests(unittest.TestCase):
             )
             values
                 (
-                    'txn-batch-unsubmitted', '6227000012348106', '建行基本户', 'outflow',
+                    'txn-batch-unsubmitted', '6227000012348106', '云南溯源科技有限公司', 'outflow',
                     '批量账务集中处理', 1200, -1200, '2026-01-07', '2026-01-01',
-                    '2026-01-07 15:54:00+08', 'active', '{}'::jsonb
+                    '2026-01-07 15:54:00+08', 'active',
+                    '{"normalized_payload":{"imported_bank_name":"建设银行","imported_bank_last4":"8106"}}'::jsonb
                 ),
                 (
-                    'txn-batch-submitted', '6227000012348106', '建行基本户', 'outflow',
+                    'txn-batch-submitted', '6227000012348106', '云南溯源科技有限公司', 'outflow',
                     '批量账务集中处理', 800, -800, '2026-02-07', '2026-02-01',
-                    '2026-02-07 15:54:00+08', 'active', '{}'::jsonb
+                    '2026-02-07 15:54:00+08', 'active',
+                    '{"normalized_payload":{"imported_bank_name":"建设银行","imported_bank_last4":"8106"}}'::jsonb
                 ),
                 (
-                    'txn-batch-linked-other', '6227000012348106', '建行基本户', 'outflow',
+                    'txn-batch-linked-other', '6227000012348106', '云南溯源科技有限公司', 'outflow',
                     '批量账务集中处理', 500, -500, '2026-03-07', '2026-03-01',
-                    '2026-03-07 15:54:00+08', 'active', '{}'::jsonb
+                    '2026-03-07 15:54:00+08', 'active',
+                    '{"normalized_payload":{"imported_bank_name":"建设银行","imported_bank_last4":"8106"}}'::jsonb
                 ),
                 (
-                    'txn-batch-income', '6227000012348106', '建行基本户', 'inflow',
+                    'txn-batch-income', '6227000012348106', '云南溯源科技有限公司', 'inflow',
                     '批量账务集中处理', 300, 300, '2026-04-07', '2026-04-01',
-                    '2026-04-07 15:54:00+08', 'active', '{}'::jsonb
+                    '2026-04-07 15:54:00+08', 'active',
+                    '{"normalized_payload":{"imported_bank_name":"建设银行","imported_bank_last4":"8106"}}'::jsonb
                 ),
                 (
-                    'txn-other-counterparty', '6227000012348106', '建行基本户', 'outflow',
+                    'txn-other-counterparty', '6227000012348106', '云南溯源科技有限公司', 'outflow',
                     '其他对方', 300, -300, '2026-05-07', '2026-05-01',
-                    '2026-05-07 15:54:00+08', 'active', '{}'::jsonb
+                    '2026-05-07 15:54:00+08', 'active',
+                    '{"normalized_payload":{"imported_bank_name":"建设银行","imported_bank_last4":"8106"}}'::jsonb
                 )
             """
         )
@@ -287,6 +296,9 @@ class BatchAccountingPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["unsubmitted_count"], 1)
         self.assertEqual(payload["summary"]["submitted_count"], 1)
         self.assertEqual([row["id"] for row in payload["bank_rows"]], ["txn-batch-unsubmitted"])
+        self.assertEqual(payload["bank_rows"][0]["bank_name"], "建设银行")
+        self.assertEqual(payload["bank_rows"][0]["account_last4"], "8106")
+        self.assertNotEqual(payload["bank_rows"][0]["bank_name"], "云南溯源科技有限公司")
         self.assertEqual(
             [row["id"] for row in payload["oa_rows"]],
             ["oa-batch-invoice-only", "oa-batch-eligible"],
@@ -312,6 +324,8 @@ class BatchAccountingPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["submitted_count"], 1)
         self.assertEqual([row["case_id"] for row in payload["relations"]], ["CASE-BATCH-SUBMITTED"])
         self.assertEqual(payload["relations"][0]["bank_row"]["id"], "txn-batch-submitted")
+        self.assertEqual(payload["relations"][0]["bank_row"]["bank_name"], "建设银行")
+        self.assertEqual(payload["relations"][0]["bank_row"]["account_last4"], "8106")
         self.assertEqual(
             {(row["member_type"], row["id"]) for row in payload["member_rows"]},
             {("oa", "oa-batch-submitted"), ("invoice", "oa-att-inv-submitted")},
@@ -335,6 +349,8 @@ class BatchAccountingPostgresIntegrationTests(unittest.TestCase):
         )
 
         self.assertEqual([row["id"] for row in payload["bank_rows"]], ["txn-batch-unsubmitted"])
+        self.assertEqual(payload["bank_rows"][0]["bank_name"], "建设银行")
+        self.assertEqual(payload["bank_rows"][0]["account_last4"], "8106")
         self.assertEqual([row["id"] for row in payload["oa_rows"]], ["oa-batch-eligible"])
         self.assertEqual([row["id"] for row in payload["invoice_rows"]], ["oa-att-inv-eligible"])
 

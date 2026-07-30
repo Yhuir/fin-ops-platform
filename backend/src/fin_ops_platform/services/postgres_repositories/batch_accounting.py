@@ -242,7 +242,23 @@ class PostgresBatchAccountingQueryRepository:
                     bank.amount as debit_amount,
                     bank.signed_amount,
                     bank.txn_direction as direction,
-                    bank.account_name,
+                    coalesce(
+                        nullif(bank.raw_payload->'normalized_payload'->>'imported_bank_name', ''),
+                        nullif(bank.raw_payload->'normalized_payload'->>'bank_name', ''),
+                        ''
+                    ) as bank_name,
+                    coalesce(
+                        nullif(bank.raw_payload->'normalized_payload'->>'imported_bank_last4', ''),
+                        nullif(bank.raw_payload->'normalized_payload'->>'account_last4', ''),
+                        right(
+                            coalesce(
+                                nullif(bank.raw_payload->'normalized_payload'->>'account_no', ''),
+                                bank.account_no,
+                                ''
+                            ),
+                            4
+                        )
+                    ) as account_last4,
                     bank.account_no,
                     1::integer as version
                 from app.bank_transactions bank
@@ -326,7 +342,23 @@ class PostgresBatchAccountingQueryRepository:
                 bank.amount as debit_amount,
                 bank.signed_amount,
                 bank.txn_direction as direction,
-                bank.account_name,
+                coalesce(
+                    nullif(bank.raw_payload->'normalized_payload'->>'imported_bank_name', ''),
+                    nullif(bank.raw_payload->'normalized_payload'->>'bank_name', ''),
+                    ''
+                ) as bank_name,
+                coalesce(
+                    nullif(bank.raw_payload->'normalized_payload'->>'imported_bank_last4', ''),
+                    nullif(bank.raw_payload->'normalized_payload'->>'account_last4', ''),
+                    right(
+                        coalesce(
+                            nullif(bank.raw_payload->'normalized_payload'->>'account_no', ''),
+                            bank.account_no,
+                            ''
+                        ),
+                        4
+                    )
+                ) as account_last4,
                 bank.account_no,
                 1::integer as version
             from app.bank_transactions bank
@@ -500,7 +532,8 @@ class PostgresBatchAccountingQueryRepository:
                     'debit_amount', bank.amount,
                     'signed_amount', bank.signed_amount,
                     'direction', bank.direction,
-                    'account_name', bank.account_name,
+                    'bank_name', bank.bank_name,
+                    'account_last4', bank.account_last4,
                     'account_no', bank.account_no,
                     'version', relation.version,
                     'relation_id', relation.case_id
@@ -519,7 +552,23 @@ class PostgresBatchAccountingQueryRepository:
                     source.amount,
                     source.signed_amount,
                     source.txn_direction as direction,
-                    source.account_name,
+                    coalesce(
+                        nullif(source.raw_payload->'normalized_payload'->>'imported_bank_name', ''),
+                        nullif(source.raw_payload->'normalized_payload'->>'bank_name', ''),
+                        ''
+                    ) as bank_name,
+                    coalesce(
+                        nullif(source.raw_payload->'normalized_payload'->>'imported_bank_last4', ''),
+                        nullif(source.raw_payload->'normalized_payload'->>'account_last4', ''),
+                        right(
+                            coalesce(
+                                nullif(source.raw_payload->'normalized_payload'->>'account_no', ''),
+                                source.account_no,
+                                ''
+                            ),
+                            4
+                        )
+                    ) as account_last4,
                     source.account_no
                 from app.bank_transactions source
                 where coalesce(source.legacy_mongo_id, source.id::text) = any(relation.row_ids)

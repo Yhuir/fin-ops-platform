@@ -47,7 +47,7 @@ const unsubmittedPayload = {
   bank_rows: [
     {
       id: "bank-row-001",
-      trade_time: "2026-01-07T15:54:00+08:00",
+      trade_time: "2026-01-07T15:54:00+08",
       counterparty_name: "批量账务集中处理",
       direction: "expense",
       direction_label: "支出",
@@ -476,7 +476,7 @@ describe("BatchAccountingPage", () => {
     expect(screen.getByRole("group", { name: "可关联OA项分页" })).toHaveTextContent("1-3 / 3");
     expect(within(bankList).queryByRole("table")).not.toBeInTheDocument();
     expect(within(bankList).getByText("2026-01-07 15:54:00")).toBeInTheDocument();
-    expect(within(bankList).queryByText("2026-01-07T15:54:00+08:00")).not.toBeInTheDocument();
+    expect(within(bankList).queryByText("2026-01-07T15:54:00+08")).not.toBeInTheDocument();
     expect(within(bankList).getByRole("button", { name: /批量账务集中处理.*1,200.00.*2026-01-07 15:54:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true");
 
     const oaTable = screen.getByRole("table", { name: "可关联OA项" });
@@ -549,6 +549,54 @@ describe("BatchAccountingPage", () => {
 
     expect(await screen.findByText("当前年份暂无批量账务流水")).toBeInTheDocument();
     expect(screen.getByText("暂无可关联 OA")).toBeInTheDocument();
+  });
+
+  test("ignores an aborted stale response until the latest search request completes", async () => {
+    const user = userEvent.setup();
+    const pendingResolvers: Array<(response: Response) => void> = [];
+    const requestSignals: Array<AbortSignal | null | undefined> = [];
+    const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      requestSignals.push(init?.signal);
+      return new Promise<Response>((resolve) => {
+        pendingResolvers.push(resolve);
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    expect(await screen.findByText("正在加载流水")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("搜索OA内容"), "刘");
+    await waitFor(() => expect(pendingResolvers).toHaveLength(2));
+    expect(requestSignals[0]?.aborted).toBe(true);
+
+    pendingResolvers[0]?.(jsonResponse({
+      ...unsubmittedPayload,
+      bank_rows: [{
+        ...unsubmittedPayload.bank_rows[0],
+        id: "bank-stale",
+        amount: "111.00",
+        bank_name: "旧银行",
+        account_last4: "1111",
+      }],
+    }));
+    await waitFor(() => expect(screen.getByText("正在加载流水")).toBeInTheDocument());
+    expect(screen.queryByText("旧银行 1111")).not.toBeInTheDocument();
+
+    pendingResolvers[1]?.(jsonResponse({
+      ...unsubmittedPayload,
+      bank_rows: [{
+        ...unsubmittedPayload.bank_rows[0],
+        id: "bank-latest",
+        amount: "222.00",
+        bank_name: "新银行",
+        account_last4: "2222",
+      }],
+    }));
+
+    expect(await screen.findByText("新银行 2222")).toBeInTheDocument();
+    expect(screen.queryByText("正在加载流水")).not.toBeInTheDocument();
+    expect(screen.queryByText("旧银行 1111")).not.toBeInTheDocument();
   });
 
   test("shows the page error fallback when batch accounting data fails to load", async () => {
