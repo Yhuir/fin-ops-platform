@@ -64,6 +64,15 @@ class WorkbenchObjectIdentityArbitrationService:
         row_type = _text(row.get("type"))
         source_kind = _text(row.get("source_kind"))
         if row_type == "invoice":
+            if source_kind == "etc_invoice_summary":
+                return ObjectIdentity(
+                    object_type="invoice",
+                    source_kind=source_kind,
+                    source_row_id=row_id,
+                    canonical_key=row_id,
+                    canonical_key_kind="etc_batch_summary_id",
+                    confidence="canonical",
+                )
             if source_kind == "oa_attachment_invoice":
                 identity = self._identity_policy.identify_oa_attachment_invoice(
                     row,

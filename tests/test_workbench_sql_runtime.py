@@ -1981,13 +1981,13 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(result["read_model_stale_reasons"], ["builder_mismatch"])
         self.assertEqual(result["refresh_scope_keys"], [])
 
-    def test_workbench_v13_rejects_v12_month_all_and_cache_versions(self) -> None:
+    def test_workbench_v14_rejects_v13_month_all_and_cache_versions(self) -> None:
         app = object.__new__(Application)
-        old_month = "2026-07-30-etc-relation-proof-v12"
-        old_all = "workbench_sql_projection.composed_active_month_shards.etc_relation_proof.v12"
+        old_month = "2026-07-30-etc-owner-link-v13"
+        old_all = "workbench_sql_projection.composed_active_month_shards.etc_owner_link.v13"
 
-        self.assertIn("v13", WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION)
-        self.assertIn("v13", WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
+        self.assertIn("v14", WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION)
+        self.assertIn("v14", WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
         self.assertIn(WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION, WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION)
         self.assertIn(WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION, WORKBENCH_INITIAL_PAGE_CACHE_SCHEMA_VERSION)
         self.assertIn(

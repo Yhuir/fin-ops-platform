@@ -67,6 +67,36 @@ class WorkbenchObjectIdentityArbitrationTests(unittest.TestCase):
         self.assertIn("invoice-right", rows_by_id)
         self.assertEqual(rows_by_id["invoice-left"]["object_identity_kind"], "tax_amount_fingerprint")
 
+    def test_etc_batch_summaries_with_the_same_invoice_count_keep_distinct_batch_identity(self) -> None:
+        rows_by_id = {
+            row_id: {
+                "id": row_id,
+                "type": "invoice",
+                "source_kind": "etc_invoice_summary",
+                "status": "paired",
+                "invoice_code": batch_id,
+                "invoice_no": "ETC发票 68 张",
+                "digital_invoice_no": "ETC发票 68 张",
+            }
+            for batch_id, row_id in (
+                ("etc_20260720_001", "etc-summary-etc_20260720_001"),
+                ("etc_batch_0045", "etc-summary-etc_batch_0045"),
+            )
+        }
+
+        result = WorkbenchObjectIdentityArbitrationService().arbitrate_rows(rows_by_id)
+
+        self.assertEqual(result["suppressed_row_ids"], [])
+        self.assertEqual(set(rows_by_id), {"etc-summary-etc_20260720_001", "etc-summary-etc_batch_0045"})
+        self.assertEqual(
+            rows_by_id["etc-summary-etc_20260720_001"]["object_identity_key"],
+            "etc-summary-etc_20260720_001",
+        )
+        self.assertEqual(
+            rows_by_id["etc-summary-etc_20260720_001"]["object_identity_kind"],
+            "etc_batch_summary_id",
+        )
+
     def test_stable_bank_identity_is_audited_but_not_collapsed_when_all_rows_are_unpaired(self) -> None:
         rows_by_id = {
             "bank-left": self._bank_row("bank-left"),
