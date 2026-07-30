@@ -527,6 +527,8 @@ sudo /usr/local/sbin/finops-deploy-control api-request-error <request-id>
 sudo /usr/local/sbin/finops-deploy-control api-request-timing <request-id>
 sudo /usr/local/sbin/finops-deploy-control read-model-refresh <release-name> \
   --scope search=all --dry-run
+sudo /usr/local/sbin/finops-deploy-control no-oa-read-model-refresh-drain \
+  <release-name> <YYYY-MM> <reason>
 sudo /usr/local/sbin/finops-deploy-control settings-normalize <release-name> --dry-run
 sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> --dry-run
 sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> \
@@ -538,6 +540,11 @@ sudo /usr/local/sbin/finops-deploy-control bank-transaction-category-repair <rel
 sudo /usr/local/sbin/finops-deploy-control runtime-queue-resolve-covered <release-name> \
   --limit 100 --dry-run
 ```
+
+`no-oa-read-model-refresh-drain` 仅用于候选版本已经修复 no-OA worker、但当前版本遗留的精确月份
+dirty scope 阻塞发布门禁时。命令只允许 `YYYY-MM` scope，先暂停当前 no-OA worker，再用候选版本
+通过 durable gateway 强制入队并以 PostgreSQL transport 单次收敛，退出时始终恢复当前 worker。
+它不激活候选版本，也不放宽 release gate 的 `dirty_scope_count = 0` 合同。
 
 `import-audit-repair` 只用于恢复已登记严格合同 import facts：先运行 `--dry-run` 保存
 `source_fingerprint` 与 rollback manifest；确认期间数据未变化后，使用

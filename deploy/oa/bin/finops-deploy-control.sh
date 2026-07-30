@@ -97,6 +97,8 @@ commands:
                                       run the fixed production relation runner; admin token is read from stdin
   read-model-refresh <release-name> [args]
                                       validate or enqueue read-model refresh scopes through the durable gateway
+  no-oa-read-model-refresh-drain <release-name> <YYYY-MM> <reason>
+                                      drain one exact no-OA dirty scope with candidate code before release gating
   settings-normalize <release-name> [--dry-run|--execute]
                                       normalize App settings through the canonical service/repository boundary
   import-audit-repair <release-name> [--dry-run|--execute --expected-fingerprint <sha256>]
@@ -1259,6 +1261,57 @@ read_model_refresh() {
     enqueue-read-model-refresh "$@"
 }
 
+no_oa_read_model_refresh_drain() {
+  local release="${1:-}"
+  local scope_key="${2:-}"
+  local reason="${3:-}"
+  [[ -n "$release" && -n "$scope_key" && -n "$reason" && "$#" -eq 3 ]] \
+    || die "no-oa-read-model-refresh-drain requires release name, YYYY-MM scope, and reason"
+  [[ "$scope_key" =~ ^[0-9]{4}-(0[1-9]|1[0-2])$ ]] \
+    || die "no-OA read model scope must be YYYY-MM"
+  [[ "$reason" =~ ^[A-Za-z0-9._:-]+$ ]] \
+    || die "no-OA read model drain reason contains unsupported characters"
+  local src service drain_status
+  src="$(release_src "$release")"
+  service="fin-ops-worker@no-oa-bank-batch.service"
+  assert_runtime_env_contract
+  drain_status=0
+  (
+    trap 'systemctl start fin-ops-worker@no-oa-bank-batch.service || true' EXIT
+    systemctl stop "$service"
+    run_with_runtime_env "$src" -m fin_ops_platform.tools.runtime_queue_ops \
+      enqueue-read-model-refresh \
+      --scope "no_oa_bank_batch=$scope_key" \
+      --reason "$reason" \
+      --force-refresh \
+      --execute
+    run_with_runtime_env "$src" -c '
+import os
+import runpy
+
+os.environ["FIN_OPS_QUEUE_BACKEND"] = "postgres"
+runpy.run_module("fin_ops_platform.app.worker", run_name="__main__")
+' \
+      --worker-id "release-recovery-no-oa-$scope_key" \
+      --worker-instance no-oa-bank-batch \
+      --worker-kind no-oa-bank-batch-read-model \
+      --event-type no_oa_bank_batch.read_model.refresh \
+      --claim-scope-key "$scope_key" \
+      --enable-no-oa-bank-batch-read-model-refresh \
+      --poll-interval-seconds 0.1 \
+      --lock-timeout-seconds 30 \
+      --task-timeout-seconds 120 \
+      --statement-timeout-seconds 60 \
+      --max-attempts 5 \
+      --max-events-per-iteration 8 \
+      --max-iterations 100
+  ) || drain_status="$?"
+  systemctl is-active --quiet "$service" \
+    || die "no-OA worker was not restored after candidate drain"
+  [[ "$drain_status" == "0" ]] \
+    || die "candidate no-OA read model drain failed with status $drain_status"
+}
+
 settings_normalize() {
   local release="${1:-}"
   [[ -n "$release" ]] || die "settings-normalize requires release name"
@@ -1867,6 +1920,10 @@ case "$cmd" in
   read-model-refresh)
     shift
     read_model_refresh "$@"
+    ;;
+  no-oa-read-model-refresh-drain)
+    shift
+    no_oa_read_model_refresh_drain "$@"
     ;;
   settings-normalize)
     shift
