@@ -667,6 +667,12 @@ describe("BankFlowRuleBatchPage", () => {
     const transactionRegion = screen.getByRole("region", { name: "流水" });
     expect(within(transactionRegion).getByText("建设银行8106")).toBeInTheDocument();
     expect(await within(transactionRegion).findByText("网银手续费")).toBeInTheDocument();
+    const detailGet = fetchMock.mock.calls.find(([input]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee";
+    });
+    expect(detailGet).toBeTruthy();
+    expect(new URL(String(detailGet?.[0]), "http://localhost").searchParams.get("scope_month")).toBe("2026-05");
     const bankTagGroup = within(transactionRegion).getByLabelText("银行明细标签 bank-row-001");
     expect(within(bankTagGroup).getByText("费用")).toBeInTheDocument();
     expect(within(bankTagGroup).getByText("手续费")).toBeInTheDocument();

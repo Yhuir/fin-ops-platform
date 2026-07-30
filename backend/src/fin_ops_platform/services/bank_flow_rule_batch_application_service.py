@@ -432,10 +432,29 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 "bank_flow_rule_batch_candidate_conflict",
                 "流水规则候选月份缺失，请刷新列表后重试。",
             )
+        candidate, _source = self._live_candidate(batch_id, scope_month)
+        snapshot = self._bank_batch_service.snapshot()
+        batches = snapshot.get("batches") if isinstance(snapshot, dict) else None
+        self._bank_batch_service.replace_snapshot(
+            {
+                **(snapshot if isinstance(snapshot, dict) else {}),
+                "batches": {
+                    **(batches if isinstance(batches, dict) else {}),
+                    batch_id: candidate,
+                },
+            }
+        )
+        return bank_flow_rule_batch_candidate_guard(candidate)
+
+    def _live_candidate(
+        self,
+        batch_id: str,
+        scope_month: str | None,
+    ) -> tuple[dict[str, object], dict[str, object]]:
         normalized_month = str(scope_month or "").strip()
         if not SEARCH_MONTH_RE.match(normalized_month):
             raise BankBatchRelationMutationError(
-                "bank_flow_rule_batch_candidate_conflict",
+                "invalid_bank_flow_rule_batch_month",
                 "流水规则候选月份无效，请刷新列表后重试。",
             )
         read_page = getattr(self._query_repository, "read_page", None)
@@ -468,18 +487,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 "bank_flow_rule_batch_candidate_conflict",
                 "流水规则候选已变化或被占用，请刷新列表后重试。",
             )
-        snapshot = self._bank_batch_service.snapshot()
-        batches = snapshot.get("batches") if isinstance(snapshot, dict) else None
-        self._bank_batch_service.replace_snapshot(
-            {
-                **(snapshot if isinstance(snapshot, dict) else {}),
-                "batches": {
-                    **(batches if isinstance(batches, dict) else {}),
-                    batch_id: candidate,
-                },
-            }
-        )
-        return bank_flow_rule_batch_candidate_guard(candidate)
+        return candidate, source
 
     def submit_batch(
         self,
@@ -642,13 +650,33 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             if isinstance(row, dict)
         }
 
-    def detail_payload(self, batch_id: str) -> dict[str, object]:
+    def detail_payload(
+        self,
+        batch_id: str,
+        *,
+        scope_month: str | None = None,
+    ) -> dict[str, object]:
+        normalized_month = str(scope_month or "").strip()
+        if normalized_month and not SEARCH_MONTH_RE.match(normalized_month):
+            raise BankBatchRelationMutationError(
+                "invalid_bank_flow_rule_batch_month",
+                "流水规则候选月份无效，请刷新列表后重试。",
+            )
         read_detail = getattr(self._query_repository, "read_detail", None)
         if not callable(read_detail):
             raise RuntimeError("bank_flow_rule_batch canonical query repository requires read_detail.")
         detail = read_detail(batch_id)
         if not isinstance(detail, dict):
-            raise KeyError("bank_flow_rule_batch_not_found")
+            if not normalized_month:
+                raise KeyError("bank_flow_rule_batch_not_found")
+            candidate, source = self._live_candidate(batch_id, normalized_month)
+            detail = {
+                "batch": candidate,
+                "rows": source.get("candidate_rows"),
+                "events": [],
+                "tag_policy": source.get("tag_policy"),
+                "tag_dictionary": source.get("tag_dictionary"),
+            }
         batch = detail.get("batch")
         if not isinstance(batch, dict):
             raise KeyError("bank_flow_rule_batch_not_found")

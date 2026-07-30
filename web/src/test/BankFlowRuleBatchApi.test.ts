@@ -459,10 +459,10 @@ describe("bank flow rule batch API", () => {
       }), { status: 200, headers: { "Content-Type": "application/json" } })),
     );
 
-    const detail = await fetchBankFlowRuleBatchDetail("batch-fee-2026-05");
+    const detail = await fetchBankFlowRuleBatchDetail("batch-fee-2026-05", "2026-05");
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/bank-flow-rule-batches/batch-fee-2026-05",
+      "/api/bank-flow-rule-batches/batch-fee-2026-05?scope_month=2026-05",
       expect.objectContaining({ method: "GET" }),
     );
     expect(detail.rows[0]).toMatchObject({

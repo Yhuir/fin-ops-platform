@@ -21,6 +21,12 @@ class FakeBankFlowRuleBatchApplicationService:
         self.calls.append(("list", query))
         return {"summary": {}, "batches": []}
 
+    def detail_payload(self, batch_id, *, scope_month=None):  # type: ignore[no-untyped-def]
+        self.calls.append(
+            ("detail", {"batch_id": batch_id, "scope_month": scope_month})
+        )
+        return {"batch": {"batch_id": batch_id}, "rows": []}
+
     def tag_selection_payload(self):  # type: ignore[no-untyped-def]
         self.calls.append(("tag_rules", None))
         return {"version": 1, "rules": [{"tag_code": "fee", "requires_oa": False, "requires_invoice": False}]}
@@ -119,6 +125,30 @@ class BankFlowRuleBatchRoutesTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "canonical query failed"):
             routes.list_batches({})
+
+    def test_detail_route_forwards_live_candidate_scope_month(self) -> None:
+        service = FakeBankFlowRuleBatchApplicationService()
+        routes = BankFlowRuleBatchApiRoutes(application_service=service)  # type: ignore[arg-type]
+
+        status, payload = routes.detail(
+            "bank-flow-draft-1",
+            {"scope_month": ["2026-07"]},
+        )
+
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(payload["batch"]["batch_id"], "bank-flow-draft-1")
+        self.assertEqual(
+            service.calls,
+            [
+                (
+                    "detail",
+                    {
+                        "batch_id": "bank-flow-draft-1",
+                        "scope_month": "2026-07",
+                    },
+                )
+            ],
+        )
 
     def test_tag_rules_return_policy_rules_and_map_conflict(self) -> None:
         service = FakeBankFlowRuleBatchApplicationService()

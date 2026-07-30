@@ -243,6 +243,26 @@ def test_page_query_uses_one_repeatable_read_snapshot_and_two_fixed_selects() ->
     assert source_params[:2] == ("2026-05-01", "2026-05-01")
 
 
+def test_submitted_page_query_keeps_candidate_rows_and_active_relations_in_snapshot() -> None:
+    connection = _Connection()
+    repository = BankFlowRuleBatchCanonicalQueryRepository(connection)
+
+    repository.read_page(
+        {"month": "2026-05", "bucket": "submitted"},
+        summary_filters={"month": "2026-05"},
+        page=1,
+        page_size=50,
+    )
+
+    source_sql, source_params = next(
+        (sql, params)
+        for sql, params in connection.fetched_one
+        if "candidate_rows" in sql and "formal_items" in sql
+    )
+    assert "where bank.status <> 'deleted' and false" not in source_sql
+    assert source_params[:2] == ("2026-05-01", "2026-05-01")
+
+
 def test_page_query_returns_an_explicit_empty_result() -> None:
     repository = BankFlowRuleBatchCanonicalQueryRepository(_Connection(empty_page=True))
 

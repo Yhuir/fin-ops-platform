@@ -334,6 +334,7 @@ export default function BankFlowRuleBatchPage() {
     const codes = new Set(selectedSubGroup?.codes ?? []);
     return visibleBucketBatches.filter((batch) => codes.has(batch.batchType));
   }, [selectedSubGroup, visibleBucketBatches]);
+  const selectedBatch = visibleBatches.find((batch) => batch.batchId === selectedBatchId) ?? null;
   const listPagination = payload.pagination ?? {
     page: batchPage,
     pageSize: BANK_FLOW_RULE_BATCH_PAGE_SIZE,
@@ -354,17 +355,18 @@ export default function BankFlowRuleBatchPage() {
   }, [selectedBatchId, visibleBatches]);
 
   useEffect(() => {
-    if (!selectedBatchId || details[selectedBatchId] || detailErrors[selectedBatchId]) {
+    if (!selectedBatch || details[selectedBatch.batchId] || detailErrors[selectedBatch.batchId]) {
       return undefined;
     }
+    const batchId = selectedBatch.batchId;
     const controller = new AbortController();
     const requestId = detailRequestSeqRef.current + 1;
     detailRequestSeqRef.current = requestId;
     let cancelled = false;
-    fetchBankFlowRuleBatchDetail(selectedBatchId, controller.signal)
+    fetchBankFlowRuleBatchDetail(batchId, selectedBatch.scopeMonth, controller.signal)
       .then((detail) => {
         if (!cancelled && requestId === detailRequestSeqRef.current) {
-          setDetails((current) => ({ ...current, [selectedBatchId]: detail }));
+          setDetails((current) => ({ ...current, [batchId]: detail }));
         }
       })
       .catch((caught) => {
@@ -374,7 +376,7 @@ export default function BankFlowRuleBatchPage() {
         if (!cancelled && requestId === detailRequestSeqRef.current) {
           setDetailErrors((current) => ({
             ...current,
-            [selectedBatchId]: caught instanceof Error ? caught.message : "批次明细加载失败",
+            [batchId]: caught instanceof Error ? caught.message : "批次明细加载失败",
           }));
         }
       });
@@ -382,7 +384,7 @@ export default function BankFlowRuleBatchPage() {
       cancelled = true;
       controller.abort();
     };
-  }, [detailErrors, details, selectedBatchId]);
+  }, [detailErrors, details, selectedBatch]);
 
   useEffect(() => {
     if (!feedback) {

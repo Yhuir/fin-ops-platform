@@ -296,6 +296,10 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 响应只包含 `summary`、`batches`、`pagination`。标签规则、total、当前页 batches 和 summary aggregates 必须位于同一个显式 `REPEATABLE READ / READ ONLY` snapshot；查询数固定，服务端过滤、固定排序和分页。summary 对完整 summary filter 范围聚合，并为总计和每个 category 返回 draft/submitted/withdrawn 的 batch count 与 `*_row_count`，历史 category 携带冻结 label/primary/sub label，不能由当前页推算。默认页面 `page_size=50`。未提交标签只展示当前 OA/发票双 false 的 active tags，已提交/历史只展示对应状态 count > 0 的 summary categories。空 batches 是 canonical snapshot 的真实空集；查询错误返回错误，不以 read-model stale/missing 伪装。正式关系只读取 `app.workbench_pair_relations.status='active'`，不得读取 Workbench page projection。详情 payload 可保留 `relation_case_ids` 供机器诊断，但页面只显示“已有未撤回关联”和 OA/发票数量。
 
+`GET /api/bank-flow-rule-batches/{batch_id}`
+
+返回一个批次的银行流水明细、分类、标签、方向统计和 events。正式 submitted/withdrawn/stale 批次直接读取持久化正式事实。列表中的 live candidate 不是 persisted draft，前端必须把列表项月份作为 `scope_month=YYYY-MM` 查询参数；后端使用列表、提交 guard 和 Audit 共用的 canonical builder 按 `batch_id + scope_month` 确定性重算详情。非法月份返回 `400 invalid_bank_flow_rule_batch_month`；候选已变化、被占用或不再存在时不得返回旧 draft。
+
 `POST /api/bank-flow-rule-batches/submit-selection`
 
 提交当前页面选中的银行流水，生成一个流水规则批量处理批次并通过 relation command service 创建 active relation。

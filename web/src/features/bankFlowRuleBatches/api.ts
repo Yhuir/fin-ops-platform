@@ -576,9 +576,14 @@ export async function saveBankFlowRuleBatchTagSelection({
   return mapTagSelection(payload);
 }
 
-export async function fetchBankFlowRuleBatchDetail(batchId: string, signal?: AbortSignal): Promise<BankFlowRuleBatchDetail> {
+export async function fetchBankFlowRuleBatchDetail(
+  batchId: string,
+  scopeMonth?: string,
+  signal?: AbortSignal,
+): Promise<BankFlowRuleBatchDetail> {
+  const search = scopeMonth ? `?scope_month=${encodeURIComponent(scopeMonth)}` : "";
   const payload = await requestJson<ApiBankFlowRuleBatchDetail>(
-    `/api/bank-flow-rule-batches/${encodeURIComponent(batchId)}`,
+    `/api/bank-flow-rule-batches/${encodeURIComponent(batchId)}${search}`,
     { method: "GET", signal },
   );
   return {

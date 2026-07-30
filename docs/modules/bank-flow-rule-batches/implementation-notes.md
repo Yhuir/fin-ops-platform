@@ -1,5 +1,11 @@
 # 流水规则批量处理实施记录
 
+## 2026-07-30 live detail 与 submitted bucket 完整性修复
+
+- 根因一：列表生成的 live candidate 没有持久化，但页面自动选择后调用了只读取正式批次的详情 API，因此返回“流水规则批次不存在”。详情现以列表项 `scope_month` 调用同一 canonical builder 重算，提交 guard 复用该 helper，不增加 draft 存储、read model、Redis 或 fallback。
+- 根因二：submitted/withdrawn bucket 曾跳过月份 candidate rows 和 active relation 输入，导致共享 builder 无法重建正式状态，出现 summary 有数而列表为空。repository 现在对所有 bucket 读取同一月份窗口的 bounded canonical 输入。
+- 回归覆盖列表到 live 详情 identity、月份路由透传、submitted summary/list 一致和页面自动详情请求；页面仍为 API 直读，旧 persisted draft/read model 链路未恢复。
+
 ## 2026-07-29 未提交 live candidate 与 draft runtime 退休
 
 - 未提交候选不再读取或写入 persisted draft；repository 在同一 `REPEATABLE READ / READ ONLY` snapshot 中批量读取请求月份（内部转账含 ±2 天窗口）的银行流水、有效分类、paired policy、active relation 和正式历史，application service 使用共享 live builder 计算 summary、过滤、排序与分页。

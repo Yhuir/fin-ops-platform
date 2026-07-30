@@ -38,18 +38,11 @@ class BankFlowRuleBatchCanonicalQueryRepository:
             resolved_summary_filters.get("account_key")
             or resolved_filters.get("account_key")
         )
-        candidate_requested = text(resolved_filters.get("status")) not in {
-            "submitted",
-            "withdrawn",
-        } and text(resolved_filters.get("bucket")) not in {
-            "submitted",
-            "withdrawn",
-        }
         candidate_scope_sql = "and false"
         candidate_scope_params: list[object] = []
         formal_scope_sql = ""
         formal_scope_params: list[object] = []
-        if source_month and candidate_requested:
+        if source_month:
             scope_start = month_start(source_month)
             candidate_scope_sql = """
                 and coalesce(bank.txn_date, bank.txn_month) >= %s::date - interval '2 days'

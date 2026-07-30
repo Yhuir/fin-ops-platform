@@ -68,7 +68,7 @@ class BankFlowRuleBatchApiRoutes:
             return None
         if method == "GET":
             batch_id = unquote(route_path[len(prefix):])
-            return self._json_response_for(*self.detail(batch_id))
+            return self._json_response_for(*self.detail(batch_id, query))
         if method == "POST" and route_path.endswith(submit_suffix):
             batch_id = unquote(route_path[len(prefix):-len(submit_suffix)])
             return self._json_write(
@@ -94,11 +94,22 @@ class BankFlowRuleBatchApiRoutes:
         except ValueError as exc:
             return self._value_error_response(exc)
 
-    def detail(self, batch_id: str) -> tuple[HTTPStatus, dict[str, Any]]:
+    def detail(
+        self,
+        batch_id: str,
+        query: dict[str, list[str]] | None = None,
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
         try:
-            return HTTPStatus.OK, self._application_service.detail_payload(batch_id)
+            scope_values = (query or {}).get("scope_month") or [""]
+            scope_month = str(scope_values[0]).strip() or None
+            return HTTPStatus.OK, self._application_service.detail_payload(
+                batch_id,
+                scope_month=scope_month,
+            )
         except KeyError:
             return self._unknown_batch_response()
+        except ValueError as exc:
+            return self._value_error_response(exc)
 
     def tag_rules(self) -> tuple[HTTPStatus, dict[str, Any]]:
         return HTTPStatus.OK, self._application_service.tag_selection_payload()
