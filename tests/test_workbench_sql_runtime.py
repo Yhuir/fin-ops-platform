@@ -5551,17 +5551,20 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
     def test_workbench_groups_api_redis_cache_key_hashes_colon_version(self) -> None:
         app = object.__new__(Application)
 
+        cache_kwargs = {
+            "scope_key": "all",
+            "zone": "unpaired",
+            "page": "1",
+            "page_size": "50",
+            "status": None,
+            "source_kind": None,
+            "search": None,
+            "sort": None,
+            "detail_level": "summary",
+        }
         key = app._workbench_groups_redis_cache_key_from_version(
             cache_version=COMPOSED_ALL_VERSION,
-            scope_key="all",
-            zone="unpaired",
-            page="1",
-            page_size="50",
-            status=None,
-            source_kind=None,
-            search=None,
-            sort=None,
-            detail_level="summary",
+            **cache_kwargs,
         )
 
         self.assertIsNotNone(key)
@@ -5570,6 +5573,13 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertNotEqual(parsed_version, "workbench")
         self.assertNotIn(":", parsed_version or "")
         self.assertEqual(len(parsed_version or ""), 24)
+        self.assertEqual(
+            app._workbench_groups_redis_cache_key_from_version(
+                cache_version=parsed_version,
+                **cache_kwargs,
+            ),
+            key,
+        )
 
     def test_workbench_groups_api_redis_cache_key_includes_groups_page_schema_version(self) -> None:
         app = object.__new__(Application)

@@ -46,7 +46,10 @@ def workbench_groups_redis_cache_version_from_key(cache_key: str) -> str | None:
 
 
 def _workbench_groups_cache_version_token(cache_version: str) -> str:
-    return hashlib.sha256(str(cache_version).encode("utf-8")).hexdigest()[:24]
+    normalized = str(cache_version).strip().lower()
+    if len(normalized) == 24 and not set(normalized) - set("0123456789abcdef"):
+        return normalized
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:24]
 
 
 def is_default_workbench_initial_query(
