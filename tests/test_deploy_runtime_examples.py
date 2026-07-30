@@ -161,7 +161,7 @@ class DeployRuntimeExampleTests(unittest.TestCase):
 
     def test_deploy_control_retires_unregistered_workers_and_requires_quiescence_before_migration(self) -> None:
         deploy_control = DEPLOY_CONTROL.read_text(encoding="utf-8")
-        activate_case = deploy_control.split("  activate)", 1)[1].split("    ;;", 1)[0]
+        activate_case = deploy_control.split("activate_release() {", 1)[1].split("\n}", 1)[0]
 
         self.assertIn("runtime_worker_manifest --instances", deploy_control)
         self.assertIn("stop_runtime_worker_services_for_activation", deploy_control)
@@ -192,9 +192,11 @@ class DeployRuntimeExampleTests(unittest.TestCase):
 
     def test_deploy_control_gate_failure_does_not_stop_registered_workers(self) -> None:
         deploy_control = DEPLOY_CONTROL.read_text(encoding="utf-8")
-        activate_case = deploy_control.split("  activate)", 1)[1].split("    ;;", 1)[0]
+        activate_case = deploy_control.split("activate_release() {", 1)[1].split("\n}", 1)[0]
 
         self.assertIn("set -Eeuo pipefail", deploy_control)
+        self.assertNotIn("  activate)", deploy_control)
+        self.assertIn("  release-gate-activate)", deploy_control)
         self.assertLess(
             activate_case.index('assert_retired_page_runtime_quiesced "$src"'),
             activate_case.index("stop_runtime_worker_services_for_activation"),

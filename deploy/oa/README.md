@@ -276,8 +276,8 @@ systemd 模板位于：
 - `deploy/oa/systemd/finops-enqueue-oa-sync.service.example`
 - `deploy/oa/systemd/finops-enqueue-oa-sync.timer.example`
 
-这些 `.service.example` 中的 `REPLACE_WITH_RELEASE` 只是 bootstrap 占位；标准发布会由
-`finops-deploy-control activate` 写入 `99-deploy-release.conf`，把 API、worker 和 dispatcher 指向
+这些 `.service.example` 中的 `REPLACE_WITH_RELEASE` 只是 bootstrap 占位；标准发布只允许由
+`finops-deploy-control release-gate-activate` 的内部受控激活阶段写入 `99-deploy-release.conf`，把 API、worker 和 dispatcher 指向
 实际 `/opt/fin-ops/releases/<release>/src`。不要把 systemd unit 重新指回旧
 `/opt/fin-ops/current/backend`。
 
@@ -380,8 +380,10 @@ python -m fin_ops_platform.app.worker \
   安装 release 内的 `deploy/oa/bin/finops-deploy-control.sh`，再执行完整 helper contract 和后续发布动作
 - 调用服务器 root-owned helper：
   - `/usr/local/sbin/finops-deploy-control check-release <release-name>`
-  - `/usr/local/sbin/finops-deploy-control activate <release-name>`
-- `activate` 会先用 `/etc/fin-ops/fin-ops.postgres-migrator.env` 执行 PostgreSQL schema migration，
+  - `/usr/local/sbin/finops-deploy-control release-gate-activate <release-name>`
+- `release-gate-activate` 是唯一正常激活入口；公开 `activate` 命令已删除。它先对当前 release
+  执行 production-equivalent pre checkpoint，再用 `/etc/fin-ops/fin-ops.postgres-migrator.env`
+  执行 PostgreSQL schema migration，
   成功后才激活 API、RabbitMQ worker 和 dispatcher 指向该 release；重启前还会以 release registry
   为白名单 stop/disable 已启用、运行或失败的未注册 `fin-ops-worker@*.service`，避免历史/WIP unit
   继续消费队列或 crash-loop。该动作不删除实例 env，保留受控回滚能力
@@ -389,19 +391,27 @@ python -m fin_ops_platform.app.worker \
   `/etc/fin-ops/fin-ops.common.env` 和 `/etc/fin-ops/fin-ops.secrets.env`，避免历史
   `/opt/fin-ops/fin-ops.env` 覆盖 release `PYTHONPATH` 导致新服务仍导入 `/opt/fin-ops/current`
   旧代码
-- `activate` 会把历史 `/opt/fin-ops/current` 归档到 `/opt/fin-ops/legacy-current-archives/current-<timestamp>`；
+- 门禁内部受控激活阶段会把历史 `/opt/fin-ops/current` 归档到 `/opt/fin-ops/legacy-current-archives/current-<timestamp>`；
   release 模式只允许从 `/opt/fin-ops/releases/<release-name>/src` 运行，`current` 目录不再参与运行时
 - `/health` 是轻量 liveness，暴露 runtime identity，包括工作目录、实际 `fin_ops_platform.__file__`、
   `PYTHONPATH` 和 `RELEASE.json`，不会跑 workbench read model self-test；release 运行时若实际导入路径
   不在当前 release 的 `backend/src` 下，健康状态必须是 `not_ready`
 - `/health/ready` 是部署 readiness 边界；`/health/deep` 才执行较重的 workbench API self-test，
   不作为发布脚本的快速就绪检查
-- `activate` 内部通过 `/usr/local/sbin/finops-ensure-runtime-workers /opt/fin-ops/releases/<release-name>/src`
+- 门禁内部通过 `/usr/local/sbin/finops-ensure-runtime-workers /opt/fin-ops/releases/<release-name>/src`
   确保常驻 worker 矩阵已安装、开机自启并重启到当前 release；外层发布脚本不再重复调用该 helper
 - 验证前端 `index.html` 与激活 release 的 `web/dist/index.html` 哈希一致
 - 清理可删除的旧 release，默认保留最近 4 个，并始终保护当前 active release
 - 激活发布会在创建新 release 目录前先执行一次旧 release 清理，并检查 release 所在文件系统至少有
   512MB 可用空间；空间不足时会输出 `df` 和关键目录大小后停止，不会继续解包到半失败状态
+- 候选激活后在 T+0、T+60s、T+300s 复用同一完整 checkpoint，连接真实 PostgreSQL 与 RabbitMQ，
+  检查 exact worker inventory、queue/dirty/dead-letter 收敛、critical read-model SLO、固定可逆写
+  smoke、domain/page canonical audit 及 API/health/SSE 性能；page audit 证据直接复用可逆写 smoke
+  内部的全页面 canonical audit，不维护第二条审计链路
+- 最终 PASS evidence 写入
+  `/opt/fin-ops/runtime-smoke/release-gates/<release-name>/evidence.json`，绑定 release 与 Git commit；
+  任一 checkpoint 或 evidence 合同失败都会自动恢复 previous release 并验证回滚后的完整链路；
+  pre checkpoint 失败时还会恢复 previous release 的 deploy-control/runtime-worker helper
 
 常用参数：
 
@@ -608,7 +618,8 @@ sudo /usr/local/sbin/finops-deploy-control check-release <已上传的-release-n
 ```
 
 `scripts/deploy-oa.sh` 会在 release 解包后先调用 deploy-control 自更新，再检查 helper 是否仍引用历史 root env；
-如果自更新或检查失败，会在 `activate` 之前中止，避免前端已发布但后端无法监听 `127.0.0.1:18001`。helper 的 `activate`
+如果自更新或检查失败，会在生产切换之前中止，避免前端已发布但后端无法监听 `127.0.0.1:18001`。helper 的
+`release-gate-activate`
 还必须先停止/disable 新 registry 未登记的退休页面 instance，并确认退休 read-model outbox/dirty scope 均无 `processing`；门禁通过后才停止其余上一版本 worker，执行 schema migration、reset 旧 `EnvironmentFile` 并归档 legacy `/opt/fin-ops/current`。`0127_direct_canonical_page_runtime_retirement.sql` 只是 no-op 标记，不会改写 pending backlog、readiness 或回滚 projection 证据；门禁失败时 release 不得继续激活，已登记的 import/matching/保留 read-model worker 继续运行。不要手工创建业务表、
 不要用运行时账号代替 migrator 账号，也不要让旧 `/opt/fin-ops/fin-ops.env` 或 `/opt/fin-ops/current`
 参与 release 运行时。

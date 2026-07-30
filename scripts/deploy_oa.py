@@ -238,29 +238,10 @@ def build_release_remote_deploy_script(config: DeploymentConfig) -> str:
         [
             mark_remote_deploy_step("deploy-control check-release"),
             f"sudo -n {quoted_deploy_control} check-release {quoted_release_name}",
+            mark_remote_deploy_step("release upload validated"),
+            'echo "release uploaded and validated: $RELEASE_NAME"',
         ]
     )
-    if config.activate:
-        commands.extend(
-            [
-                mark_remote_deploy_step("deploy-control activate"),
-                f"sudo -n {quoted_deploy_control} activate {quoted_release_name}",
-                mark_remote_deploy_step("backend readiness check"),
-                build_backend_readiness_check(),
-                mark_remote_deploy_step("deploy-control status"),
-                f"sudo -n {quoted_deploy_control} status",
-                mark_remote_deploy_step("frontend hash check"),
-                build_frontend_hash_check(config),
-                mark_remote_deploy_step("public session route check"),
-                build_public_api_route_check(config),
-            ]
-        )
-        if config.keep_releases > 0:
-            commands.append(mark_remote_deploy_step("cleanup old releases"))
-            commands.append(f"sudo -n {quoted_deploy_control} cleanup-releases --keep {int(config.keep_releases)}")
-    else:
-        commands.append(mark_remote_deploy_step("release upload validated"))
-        commands.append('echo "release uploaded and validated; activation skipped: $RELEASE_NAME"')
     return "\n".join(commands) + "\n"
 
 
@@ -337,6 +318,14 @@ def build_deploy_control_contract_check() -> str:
             "    fi",
             "    if ! grep -q 'ensure_runtime_workers \"$src\"' \"$DEPLOY_CONTROL\"; then",
             "      printf '%s\\n' 'deploy-control helper does not run runtime worker ensure inside activate; install deploy/oa/bin/finops-deploy-control.sh before activating releases' >&2",
+            "      exit 68",
+            "    fi",
+            "    if ! grep -q 'release-gate-activate <release-name>' \"$DEPLOY_CONTROL\"; then",
+            "      printf '%s\\n' 'deploy-control helper does not expose the production-equivalent release gate' >&2",
+            "      exit 68",
+            "    fi",
+            "    if grep -q '^  activate)' \"$DEPLOY_CONTROL\"; then",
+            "      printf '%s\\n' 'deploy-control helper still exposes the ungated activate command' >&2",
             "      exit 68",
             "    fi",
             "  fi",
@@ -431,87 +420,6 @@ def build_release_storage_preflight_check() -> str:
     )
 
 
-def build_frontend_hash_check(config: DeploymentConfig) -> str:
-    remote_frontend_index = str(Path(config.remote_frontend_dir) / "index.html")
-    return "\n".join(
-        [
-            "release_index_hash=$(sha256sum \"$RELEASE_DIR/src/web/dist/index.html\" | awk '{print $1}')",
-            (
-                f"live_index_hash=$(sha256sum {shlex.quote(remote_frontend_index)} 2>/dev/null "
-                "| awk '{print $1}' || true)"
-            ),
-            (
-                'if [ -n "$live_index_hash" ] && [ "$release_index_hash" != "$live_index_hash" ]; then '
-                'echo "frontend dist hash mismatch after activation; deploy-control must publish web/dist" >&2; '
-                "exit 65; "
-                "fi"
-            ),
-        ]
-    )
-
-
-def build_backend_readiness_check() -> str:
-    return "\n".join(
-        [
-            "wait_finops_backend_ready() {",
-            "  deadline=$((SECONDS + 90))",
-            "  last_health=\"\"",
-            "  while [ \"$SECONDS\" -lt \"$deadline\" ]; do",
-            "    health=$(curl -fsS --max-time 5 http://127.0.0.1:18001/health/ready 2>&1 || true)",
-            (
-                "    if printf '%s' \"$health\" | "
-                "python3 -c 'import json, sys; data = json.load(sys.stdin); "
-                "sys.exit(0 if data.get(\"status\") == \"ready\" else 1)' 2>/dev/null; then"
-            ),
-            "      return 0",
-            "    fi",
-            "    last_health=\"$health\"",
-            "    sleep 2",
-            "  done",
-            "  echo \"backend did not become ready after release activation\" >&2",
-            "  printf '%s\\n' \"$last_health\" >&2",
-            "  exit 67",
-            "}",
-            "wait_finops_backend_ready",
-        ]
-    )
-
-
-def build_public_api_route_check(config: DeploymentConfig) -> str:
-    quoted_domain = shlex.quote(config.domain)
-    return "\n".join(
-        [
-            f"PUBLIC_DOMAIN={quoted_domain}",
-            "check_finops_session_route() {",
-            "  route=\"$1\"",
-            "  route_deadline=$((SECONDS + 60))",
-            "  headers=\"\"",
-            "  status=\"\"",
-            "  content_type=\"\"",
-            "  while :; do",
-            "    headers=$(curl -skI --max-time 10 \"https://${PUBLIC_DOMAIN}${route}\" || true)",
-            "    status=$(printf '%s\\n' \"$headers\" | awk '/^HTTP\\// { code=$2 } END { print code }')",
-            (
-                "    content_type=$(printf '%s\\n' \"$headers\" | "
-                "awk 'BEGIN{IGNORECASE=1} /^content-type:/ { sub(/^[^:]+:[[:space:]]*/, \"\"); print; exit }')"
-            ),
-            "    if [ \"$status\" = \"401\" ] && printf '%s' \"$content_type\" | grep -qi 'application/json'; then",
-            "      return 0",
-            "    fi",
-            "    if [ \"$SECONDS\" -ge \"$route_deadline\" ]; then",
-            "      printf 'session API route is not proxied as JSON: %s status=%s content-type=%s\\n' \"$route\" \"$status\" \"$content_type\" >&2",
-            "      printf '%s\\n' \"$headers\" >&2",
-            "      exit 66",
-            "    fi",
-            "    sleep 2",
-            "  done",
-            "}",
-            "check_finops_session_route /fin-ops-api/api/session/me",
-            "check_finops_session_route /fin-ops/api/session/me",
-        ]
-    )
-
-
 def build_remote_deploy_script(config: DeploymentConfig) -> str:
     return build_release_remote_deploy_script(config)
 
@@ -529,6 +437,28 @@ def build_ssh_base_command(config: DeploymentConfig) -> list[str]:
 
 def build_remote_command(config: DeploymentConfig, remote_script: str) -> list[str]:
     return build_ssh_base_command(config) + [f"bash -lc {shlex.quote(remote_script)}"]
+
+
+def build_release_gate_command(config: DeploymentConfig) -> list[str]:
+    return build_ssh_base_command(config) + [
+        "sudo -n "
+        f"{shlex.quote(config.deploy_control_path)} "
+        f"release-gate-activate {shlex.quote(config.release_name)}"
+    ]
+
+
+def release_gate_input() -> bytes:
+    token = (
+        os.environ.get("FIN_OPS_E2E_ADMIN_TOKEN")
+        or os.environ.get("FIN_OPS_HTTP_SLO_ADMIN_TOKEN")
+        or ""
+    ).strip()
+    if not token:
+        raise RuntimeError(
+            "production-equivalent release gate requires a local admin token; "
+            "run scripts/with-production-admin-token.sh --store once, then deploy through that wrapper"
+        )
+    return f"{token}\n".encode()
 
 
 def run_command(command: list[str], *, dry_run: bool, input_bytes: bytes | None = None) -> None:
@@ -661,6 +591,13 @@ def deploy(config: DeploymentConfig) -> None:
     archive_bytes = archive_path.read_bytes()
     remote_command = build_remote_command(config, remote_script)
     run_command(remote_command, dry_run=config.dry_run, input_bytes=archive_bytes)
+    if config.activate:
+        gate_input = None if config.dry_run else release_gate_input()
+        run_command(
+            build_release_gate_command(config),
+            dry_run=config.dry_run,
+            input_bytes=gate_input,
+        )
 
 
 def main(argv: list[str] | None = None) -> int:

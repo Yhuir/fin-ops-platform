@@ -21,6 +21,7 @@ DEPLOY_CONTROL_HELPER="${FINOPS_DEPLOY_CONTROL_HELPER:-/usr/local/sbin/finops-de
 ENSURE_RUNTIME_WORKERS_HELPER="${FINOPS_ENSURE_RUNTIME_WORKERS_HELPER:-/usr/local/sbin/finops-ensure-runtime-workers}"
 WRITE_E2E_BACKUP_ROOT="${FINOPS_WRITE_E2E_BACKUP_ROOT:-/opt/fin-ops/backups/write-operation-e2e}"
 STANDARD_WRITE_E2E_SCENARIO="${FINOPS_STANDARD_WRITE_E2E_SCENARIO:-/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json}"
+RELEASE_GATE_EVIDENCE_ROOT="${FINOPS_RELEASE_GATE_EVIDENCE_ROOT:-/opt/fin-ops/runtime-smoke/release-gates}"
 PRUNE_WORKBENCH_GENERATIONS_HELPER="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_HELPER:-/usr/local/sbin/finops-prune-workbench-generations}"
 PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT:-/etc/systemd/system/finops-prune-workbench-generations.service}"
 PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT:-/etc/systemd/system/finops-prune-workbench-generations.timer}"
@@ -38,7 +39,8 @@ usage: finops-deploy-control <command> [args]
 commands:
   check-release <release-name>         validate a release under /opt/fin-ops/releases
   self-update <release-name>           install deploy-control helper from a validated release
-  activate <release-name>              point API/workers/dispatcher at release and restart active services
+  release-gate-activate <release-name>
+                                      run production-equivalent gate, activate, watch through T+300, rollback on failure
   workbench-rehydrate <release-name> [args]
                                       rebuild Workbench SQL read models using runtime env
   workbench-audit-identity <release-name> [args]
@@ -141,6 +143,81 @@ registered_worker_instances() {
   local src="$1"
   PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}" \
     "$WORKER_PYTHON" -m fin_ops_platform.tools.runtime_worker_manifest --instances
+}
+
+required_worker_instances() {
+  local src="$1"
+  PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}" \
+    "$WORKER_PYTHON" -m fin_ops_platform.tools.runtime_worker_manifest --required-instances
+}
+
+known_worker_services() {
+  {
+    all_worker_services
+    systemctl list-unit-files --no-legend 'fin-ops-worker@*.service' \
+      | awk '{print $1}' \
+      | grep -E '^fin-ops-worker@[-A-Za-z0-9_.]+\.service$' || true
+  } | sort -u
+}
+
+worker_inventory_report() {
+  local src="$1"
+  local output="$2"
+  local registered required active unknown missing service instance
+  registered="$(registered_worker_instances "$src")"
+  required="$(required_worker_instances "$src")"
+  active="$(
+    active_worker_services \
+      | sed -E 's/^fin-ops-worker@//; s/\.service$//' \
+      | tr '\n' ' '
+  )"
+  unknown=""
+  while IFS= read -r service; do
+    [[ -n "$service" ]] || continue
+    instance="${service#fin-ops-worker@}"
+    instance="${instance%.service}"
+    if [[ " $registered " == *" $instance "* ]]; then
+      continue
+    fi
+    unknown+=" $instance"
+  done < <(known_worker_services)
+  missing=""
+  for instance in $required; do
+    if [[ " $active " != *" $instance "* ]]; then
+      missing+=" $instance"
+    fi
+  done
+  REGISTERED_WORKERS="$registered" \
+  REQUIRED_WORKERS="$required" \
+  ACTIVE_WORKERS="$active" \
+  UNKNOWN_WORKERS="$unknown" \
+  MISSING_WORKERS="$missing" \
+    "$API_PYTHON" - "$output" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+def words(name):
+    return sorted(set(os.environ.get(name, "").split()))
+
+unknown = words("UNKNOWN_WORKERS")
+missing = words("MISSING_WORKERS")
+payload = {
+    "status": "PASS" if not unknown and not missing else "FAIL",
+    "registered_workers": words("REGISTERED_WORKERS"),
+    "required_workers": words("REQUIRED_WORKERS"),
+    "active_workers": words("ACTIVE_WORKERS"),
+    "unknown_workers": unknown,
+    "missing_required_workers": missing,
+    "unknown_worker_count": len(unknown),
+    "required_worker_not_ready": len(missing),
+}
+Path(sys.argv[1]).write_text(
+    json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+    encoding="utf-8",
+)
+PY
 }
 
 stop_runtime_worker_services_for_activation() {
@@ -1151,6 +1228,382 @@ runtime_queue_resolve_covered() {
     resolve-covered-dead-letters "$@"
 }
 
+activate_release() {
+  local release="$1"
+  local src
+  src="$(release_src "$release")"
+  install_deploy_control_helper "$src"
+  install_runtime_worker_helper "$src"
+  assert_runtime_env_contract
+  sync_python_envs "$src"
+  retire_unregistered_worker_services "$src"
+  assert_retired_page_runtime_quiesced "$src"
+  stop_runtime_worker_services_for_activation
+  run_schema_migrations "$src"
+  archive_legacy_current
+  write_api_dropin "$src"
+  write_worker_dropin "$src"
+  write_dispatcher_dropin "$src"
+  ensure_runtime_workers "$src"
+  install_workbench_generation_retention "$src"
+  install_runtime_queue_history_retention "$src"
+  install_oa_sync_enqueue_timer "$src"
+  publish_frontend "$src"
+  restart_services
+  wait_required_workers_ready
+  status
+}
+
+release_gate_checkpoint() {
+  local release="$1"
+  local label="$2"
+  local admin_token="$3"
+  local evidence_dir="$4"
+  local verification_release="${5:-$release}"
+  local src verification_src checkpoint_dir rabbit_report domain_report closure_report inventory_report runtime_report
+  src="$(release_src "$release")"
+  verification_src="$(release_src "$verification_release")"
+  checkpoint_dir="$evidence_dir/$label"
+  rabbit_report="$checkpoint_dir/rabbitmq-topology.json"
+  domain_report="$checkpoint_dir/domain-contract-audit.json"
+  closure_report="$checkpoint_dir/runtime-sync-closure.json"
+  inventory_report="$checkpoint_dir/worker-inventory.json"
+  runtime_report="$checkpoint_dir/runtime-health.json"
+  install -d -m 0700 "$checkpoint_dir"
+  worker_inventory_report "$src" "$inventory_report"
+  (
+    set -a
+    # shellcheck disable=SC1090
+    source "$COMMON_ENV"
+    # shellcheck disable=SC1090
+    source "$SECRETS_ENV"
+    set +a
+    export PYTHONPATH="$verification_src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
+    export FIN_OPS_DATA_DIR="${FIN_OPS_DATA_DIR:-/opt/fin-ops/data}"
+    cd "$verification_src"
+    "$API_PYTHON" -m fin_ops_platform.app.rabbitmq_topology --apply >"$rabbit_report"
+  ) || true
+  (
+    set -a
+    # shellcheck disable=SC1090
+    source "$COMMON_ENV"
+    # shellcheck disable=SC1090
+    source "$SECRETS_ENV"
+    set +a
+    export PYTHONPATH="$verification_src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
+    export FIN_OPS_DATA_DIR="${FIN_OPS_DATA_DIR:-/opt/fin-ops/data}"
+    cd "$verification_src"
+    "$API_PYTHON" -m fin_ops_platform.tools.domain_contract_audit >"$domain_report"
+  ) || true
+  (
+    set -a
+    # shellcheck disable=SC1090
+    source "$COMMON_ENV"
+    # shellcheck disable=SC1090
+    source "$SECRETS_ENV"
+    set +a
+    export PYTHONPATH="$verification_src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
+    "$API_PYTHON" - "$runtime_report" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
+
+connection = PostgresConnection(PostgresSettings.from_env())
+summary = RuntimeMonitoringRepository(connection).health_summary()
+Path(sys.argv[1]).write_text(
+    json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n",
+    encoding="utf-8",
+)
+PY
+  ) || true
+  (
+    set -a
+    # shellcheck disable=SC1090
+    source "$COMMON_ENV"
+    # shellcheck disable=SC1090
+    source "$SECRETS_ENV"
+    set +a
+    [[ -n "${FIN_OPS_WRITE_E2E_APPROVAL_TICKET:-}" ]] \
+      || die "FIN_OPS_WRITE_E2E_APPROVAL_TICKET is required for the production-equivalent release gate"
+    [[ -f "$STANDARD_WRITE_E2E_SCENARIO" ]] \
+      || die "standard write-operation E2E scenario is missing: $STANDARD_WRITE_E2E_SCENARIO"
+    [[ "$(stat -c '%u:%a' "$STANDARD_WRITE_E2E_SCENARIO")" == "0:600" ]] \
+      || die "standard write-operation E2E scenario must be root-owned with mode 0600"
+    export PYTHONPATH="$verification_src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
+    export FIN_OPS_DATA_DIR="${FIN_OPS_DATA_DIR:-/opt/fin-ops/data}"
+    export FIN_OPS_HTTP_SLO_ADMIN_TOKEN="$admin_token"
+    export FIN_OPS_E2E_ADMIN_TOKEN="$admin_token"
+    cd "$verification_src"
+    "$API_PYTHON" -m fin_ops_platform.tools.runtime_sync_closure_gate \
+      --base-url http://127.0.0.1:18001 \
+      --api-prefix "" \
+      --apply-read-model-smoke \
+      --write-scenario "$STANDARD_WRITE_E2E_SCENARIO" \
+      --apply-write-scenarios \
+      --read-model-target-ms 5000 \
+      --write-target-ms 5000 \
+      --http-target-ms 1000 \
+      --sse-target-ms 1000 \
+      --health-ready-target-ms 1000 \
+      --timeout-seconds 120 \
+      --output "$closure_report" >/dev/null
+  ) || true
+  RELEASE_NAME="$release" \
+  CHECKPOINT_LABEL="$label" \
+  RABBIT_REPORT="$rabbit_report" \
+  DOMAIN_REPORT="$domain_report" \
+  CLOSURE_REPORT="$closure_report" \
+  INVENTORY_REPORT="$inventory_report" \
+  RUNTIME_REPORT="$runtime_report" \
+    "$API_PYTHON" - "$checkpoint_dir/checkpoint.json" <<'PY'
+from datetime import UTC, datetime
+import json
+import os
+from pathlib import Path
+import sys
+
+def load(name):
+    path = Path(os.environ[name])
+    if not path.is_file():
+        return {"status": "missing", "path": str(path)}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return {"status": "invalid", "path": str(path), "error": str(exc)}
+
+inventory = load("INVENTORY_REPORT")
+rabbit = load("RABBIT_REPORT")
+domain = load("DOMAIN_REPORT")
+closure = load("CLOSURE_REPORT")
+runtime = load("RUNTIME_REPORT")
+write_e2e = next(
+    (
+        check
+        for check in closure.get("checks", [])
+        if isinstance(check, dict) and check.get("name") == "write_operation_e2e"
+    ),
+    {},
+) if isinstance(closure, dict) else {}
+write_e2e_payload = write_e2e.get("payload", {}) if isinstance(write_e2e, dict) else {}
+page_canonical_audit = (
+    write_e2e_payload.get("page_canonical_audit", {})
+    if isinstance(write_e2e_payload, dict)
+    else {}
+)
+page_canonical_audit_ready = (
+    isinstance(page_canonical_audit, dict)
+    and page_canonical_audit.get("status") == "pass"
+    and int(page_canonical_audit.get("audit_count") or 0) > 0
+)
+queue_backlog = runtime.get("queue_backlog", {}) if isinstance(runtime, dict) else {}
+dirty_scopes = runtime.get("dirty_scopes", {}) if isinstance(runtime, dict) else {}
+pending = (
+    sum(int(queue_backlog.get(status) or 0) for status in ("pending", "processing"))
+    if isinstance(queue_backlog, dict)
+    else -1
+)
+failed = int(queue_backlog.get("failed") or 0) if isinstance(queue_backlog, dict) else -1
+durable_dead_letters = int(queue_backlog.get("dead_lettered") or 0) if isinstance(queue_backlog, dict) else -1
+rabbitmq_metrics_ready = (
+    isinstance(runtime, dict)
+    and runtime.get("rabbitmq_management_configured") is True
+    and not runtime.get("rabbitmq_metric_error")
+    and "rabbitmq_dlq_count" in runtime
+)
+rabbitmq_dead_letters = int(runtime.get("rabbitmq_dlq_count") or 0) if rabbitmq_metrics_ready else -1
+dead_letters = (
+    durable_dead_letters + rabbitmq_dead_letters
+    if durable_dead_letters >= 0 and rabbitmq_dead_letters >= 0
+    else -1
+)
+dirty = sum(int(value or 0) for value in dirty_scopes.values()) if isinstance(dirty_scopes, dict) else -1
+passed = (
+    inventory.get("status") == "PASS"
+    and rabbit.get("status") == "applied"
+    and domain.get("status") == "pass"
+    and closure.get("status") == "pass"
+    and page_canonical_audit_ready
+    and rabbitmq_metrics_ready
+    and pending == 0
+    and failed == 0
+    and dead_letters == 0
+    and dirty == 0
+)
+payload = {
+    "release_gate_status": "PASS" if passed else "FAIL",
+    "release_name": os.environ["RELEASE_NAME"],
+    "checkpoint": os.environ["CHECKPOINT_LABEL"],
+    "checked_at": datetime.now(UTC).isoformat(),
+    "unknown_worker_count": int(inventory.get("unknown_worker_count") or 0),
+    "required_worker_not_ready": int(inventory.get("required_worker_not_ready") or 0),
+    "dirty_scope_count": dirty,
+    "pending_outbox_count": pending,
+    "failed_outbox_count": failed,
+    "durable_dead_letter_count": durable_dead_letters,
+    "rabbitmq_dead_letter_count": rabbitmq_dead_letters,
+    "dead_letter_count": dead_letters,
+    "page_canonical_audit": page_canonical_audit,
+    "reports": {
+        "worker_inventory": os.environ["INVENTORY_REPORT"],
+        "rabbitmq_topology": os.environ["RABBIT_REPORT"],
+        "domain_contract_audit": os.environ["DOMAIN_REPORT"],
+        "runtime_health": os.environ["RUNTIME_REPORT"],
+        "runtime_sync_closure": os.environ["CLOSURE_REPORT"],
+    },
+}
+output = Path(sys.argv[1])
+output.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+sys.exit(0 if passed else 1)
+PY
+}
+
+write_release_gate_evidence() {
+  local release="$1"
+  local previous_release="$2"
+  local evidence_dir="$3"
+  local gate_status="$4"
+  local rolled_back="$5"
+  local failure_checkpoint="${6:-}"
+  RELEASE_NAME="$release" \
+  PREVIOUS_RELEASE="$previous_release" \
+  EVIDENCE_DIR="$evidence_dir" \
+  GATE_STATUS="$gate_status" \
+  ROLLED_BACK="$rolled_back" \
+  FAILURE_CHECKPOINT="$failure_checkpoint" \
+    "$API_PYTHON" - "$RELEASE_ROOT/$release/src/RELEASE.json" "$evidence_dir/evidence.json" <<'PY'
+from datetime import UTC, datetime
+import json
+import os
+from pathlib import Path
+import sys
+
+release_meta = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+root = Path(os.environ["EVIDENCE_DIR"])
+checkpoints = {}
+for label in ("pre", "t0", "t60", "t300", "rollback"):
+    path = root / label / "checkpoint.json"
+    if path.is_file():
+        checkpoints[label] = json.loads(path.read_text(encoding="utf-8"))
+latest = next((checkpoints[name] for name in ("t300", "t60", "t0", "pre") if name in checkpoints), {})
+pre_dlq = int(checkpoints.get("pre", {}).get("dead_letter_count", 0))
+final_dlq = int(latest.get("dead_letter_count", pre_dlq))
+passed = os.environ["GATE_STATUS"] == "PASS" and "t300" in checkpoints
+payload = {
+    "release_gate_status": "PASS" if passed else "FAIL",
+    "release_name": os.environ["RELEASE_NAME"],
+    "git_commit": release_meta.get("git_commit"),
+    "previous_release": os.environ["PREVIOUS_RELEASE"],
+    "generated_at": datetime.now(UTC).isoformat(),
+    "rolled_back": os.environ["ROLLED_BACK"] == "true",
+    "failure_checkpoint": os.environ.get("FAILURE_CHECKPOINT") or None,
+    "unknown_worker_count": int(latest.get("unknown_worker_count", -1)),
+    "required_worker_not_ready": int(latest.get("required_worker_not_ready", -1)),
+    "dirty_scope_count": int(latest.get("dirty_scope_count", -1)),
+    "pending_outbox_count": int(latest.get("pending_outbox_count", -1)),
+    "dead_letter_delta": final_dlq - pre_dlq,
+    "page_canonical_audit_status": (
+        latest.get("page_canonical_audit", {}).get("status")
+        if isinstance(latest.get("page_canonical_audit"), dict)
+        else None
+    ),
+    "queue_stable_after_300_seconds": passed,
+    "checkpoints": checkpoints,
+}
+output = Path(sys.argv[2])
+temporary = output.with_suffix(".tmp")
+temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+temporary.replace(output)
+output.chmod(0o600)
+PY
+}
+
+rollback_release_gate() {
+  local candidate="$1"
+  local previous_release="$2"
+  local admin_token="$3"
+  local evidence_dir="$4"
+  local failure_checkpoint="$5"
+  local rolled_back=false
+  if (activate_release "$previous_release") \
+    && release_gate_checkpoint "$previous_release" rollback "$admin_token" "$evidence_dir" "$candidate"; then
+    rolled_back=true
+  fi
+  write_release_gate_evidence \
+    "$candidate" "$previous_release" "$evidence_dir" FAIL "$rolled_back" "$failure_checkpoint"
+  [[ "$rolled_back" == true ]] \
+    || die "release gate failed at $failure_checkpoint and automatic rollback validation also failed"
+  die "release gate failed at $failure_checkpoint; previous release $previous_release was restored"
+}
+
+release_gate_activate() {
+  local release="${1:-}"
+  [[ -n "$release" && "$#" -eq 1 ]] || die "release-gate-activate accepts only release name"
+  local admin_token previous_release active_count evidence_dir src
+  release_src "$release" >/dev/null
+  assert_runtime_env_contract
+  IFS= read -r admin_token
+  [[ -n "$admin_token" ]] || die "production admin token stdin is empty"
+  previous_release="$(active_release_names)"
+  active_count="$(printf '%s\n' "$previous_release" | sed '/^$/d' | wc -l | tr -d ' ')"
+  [[ "$active_count" == "1" ]] \
+    || die "release gate requires exactly one active release, found $active_count"
+  [[ "$previous_release" != "$release" ]] || die "candidate release is already active"
+  evidence_dir="$RELEASE_GATE_EVIDENCE_ROOT/$release"
+  [[ ! -e "$evidence_dir" ]] || die "release gate evidence already exists: $evidence_dir"
+  install -d -m 0700 "$evidence_dir"
+  if ! release_gate_checkpoint "$previous_release" pre "$admin_token" "$evidence_dir" "$release"; then
+    src="$(release_src "$previous_release")"
+    install_deploy_control_helper "$src"
+    install_runtime_worker_helper "$src"
+    write_release_gate_evidence "$release" "$previous_release" "$evidence_dir" FAIL false pre
+    die "current production runtime failed the pre-activation release gate"
+  fi
+  if ! (activate_release "$release"); then
+    rollback_release_gate "$release" "$previous_release" "$admin_token" "$evidence_dir" activation
+  fi
+  if ! release_gate_checkpoint "$release" t0 "$admin_token" "$evidence_dir"; then
+    rollback_release_gate "$release" "$previous_release" "$admin_token" "$evidence_dir" t0
+  fi
+  sleep 60
+  if ! release_gate_checkpoint "$release" t60 "$admin_token" "$evidence_dir"; then
+    rollback_release_gate "$release" "$previous_release" "$admin_token" "$evidence_dir" t60
+  fi
+  sleep 240
+  if ! release_gate_checkpoint "$release" t300 "$admin_token" "$evidence_dir"; then
+    rollback_release_gate "$release" "$previous_release" "$admin_token" "$evidence_dir" t300
+  fi
+  if ! write_release_gate_evidence "$release" "$previous_release" "$evidence_dir" PASS false; then
+    rollback_release_gate "$release" "$previous_release" "$admin_token" "$evidence_dir" evidence
+  fi
+  if ! "$API_PYTHON" - "$evidence_dir/evidence.json" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+evidence = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+required = {
+    "release_gate_status": "PASS",
+    "unknown_worker_count": 0,
+    "required_worker_not_ready": 0,
+    "dirty_scope_count": 0,
+    "pending_outbox_count": 0,
+    "dead_letter_delta": 0,
+    "page_canonical_audit_status": "pass",
+    "queue_stable_after_300_seconds": True,
+}
+violations = {key: {"expected": value, "actual": evidence.get(key)} for key, value in required.items() if evidence.get(key) != value}
+if violations:
+    raise SystemExit(f"release gate evidence contract failed: {json.dumps(violations, ensure_ascii=False, sort_keys=True)}")
+print(json.dumps(evidence, ensure_ascii=False, indent=2, sort_keys=True))
+PY
+  then
+    rollback_release_gate "$release" "$previous_release" "$admin_token" "$evidence_dir" evidence_contract
+  fi
+}
+
 cmd="${1:-}"
 case "$cmd" in
   check-release)
@@ -1163,28 +1616,9 @@ case "$cmd" in
     install_deploy_control_helper "$src"
     install_runtime_worker_helper "$src"
     ;;
-  activate)
-    src="$(release_src "${2:-}")"
-    install_deploy_control_helper "$src"
-    install_runtime_worker_helper "$src"
-    assert_runtime_env_contract
-    sync_python_envs "$src"
-    retire_unregistered_worker_services "$src"
-    assert_retired_page_runtime_quiesced "$src"
-    stop_runtime_worker_services_for_activation
-    run_schema_migrations "$src"
-    archive_legacy_current
-    write_api_dropin "$src"
-    write_worker_dropin "$src"
-    write_dispatcher_dropin "$src"
-    ensure_runtime_workers "$src"
-    install_workbench_generation_retention "$src"
-    install_runtime_queue_history_retention "$src"
-    install_oa_sync_enqueue_timer "$src"
-    publish_frontend "$src"
-    restart_services
-    wait_required_workers_ready
-    status
+  release-gate-activate)
+    shift
+    release_gate_activate "$@"
     ;;
   workbench-rehydrate)
     shift

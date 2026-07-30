@@ -22,6 +22,7 @@ class FakeRuntimeMonitoringRepository:
             "stale_required_worker_count": 0,
             "mismatched_required_worker_count": 0,
             "worker_metrics": [{"worker_kind": "workbench", "status": "ok", "required": True}],
+            "rabbitmq_management_configured": True,
             "rabbitmq_queue_depth": 0,
             "rabbitmq_unacked_messages": 0,
             "rabbitmq_dlq_count": 0,
@@ -114,6 +115,24 @@ def write_e2e_pass_report() -> dict[str, object]:
                 "steps": [{"name": "step_1", "status": "pass"}],
                 "write_slo": {"status": "pass"},
                 "post_api": {"status": "skipped"},
+                "preflight": {
+                    "status": "pass",
+                    "system_audit_id": "system-audit:test-preflight",
+                    "snapshot_identity": "snapshot:test-preflight",
+                    "external_evidence": "pass",
+                },
+                "checkpoints": [
+                    {
+                        "name": "step_1",
+                        "status": "pass",
+                        "system_audit": {
+                            "status": "pass",
+                            "system_audit_id": "system-audit:test-checkpoint",
+                            "snapshot_identity": "snapshot:test-checkpoint",
+                            "external_evidence": "pass",
+                        },
+                    }
+                ],
             }
         ],
     }
@@ -128,6 +147,48 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
         )
         self._health_ready_patch.start()
         self.addCleanup(self._health_ready_patch.stop)
+
+    def test_page_canonical_audit_summary_requires_unique_snapshot_evidence(self) -> None:
+        report = write_e2e_pass_report()
+
+        summary = gate._page_canonical_audit_summary(report)
+
+        self.assertEqual(summary["status"], "pass")
+        self.assertEqual(summary["audit_count"], 2)
+        self.assertEqual(
+            [audit["system_audit_id"] for audit in summary["system_audits"]],
+            ["system-audit:test-preflight", "system-audit:test-checkpoint"],
+        )
+
+    def test_page_canonical_audit_summary_rejects_missing_evidence(self) -> None:
+        summary = gate._page_canonical_audit_summary(
+            {"status": "pass", "results": [{"status": "pass", "checkpoints": []}]}
+        )
+
+        self.assertEqual(summary["status"], "fail")
+        self.assertEqual(summary["audit_count"], 0)
+
+    def test_active_dirty_scope_prevents_runtime_closure(self) -> None:
+        blockers = gate._runtime_blockers(
+            {
+                "dirty_scopes": {"cost_statistics": 1},
+                "queue_backlog": {},
+                "rabbitmq_management_configured": True,
+            }
+        )
+
+        self.assertEqual(blockers, {"dirty_scopes": {"cost_statistics": 1}})
+
+    def test_missing_rabbitmq_management_metrics_prevents_runtime_closure(self) -> None:
+        blockers = gate._runtime_blockers(
+            {
+                "queue_backlog": {},
+                "dirty_scopes": {},
+                "rabbitmq_management_configured": False,
+            }
+        )
+
+        self.assertEqual(blockers, {"rabbitmq_management_configured": False})
 
     def test_runtime_health_empty_summary_prevents_closure_pass(self) -> None:
         with TemporaryDirectory() as temp_dir:

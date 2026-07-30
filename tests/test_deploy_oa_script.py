@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "deploy_oa.py"
@@ -120,10 +121,8 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("DEPLOY_STEP='verify runtime worker helper contract'", remote_script)
         self.assertIn("DEPLOY_STEP='deploy-control self-update'", remote_script)
         self.assertIn("DEPLOY_STEP='verify deploy-control contract'", remote_script)
-        self.assertIn("DEPLOY_STEP='deploy-control activate'", remote_script)
         self.assertIn("DEPLOY_STEP='preflight cleanup old releases'", remote_script)
         self.assertIn("DEPLOY_STEP='storage preflight'", remote_script)
-        self.assertIn("DEPLOY_STEP='cleanup old releases'", remote_script)
         self.assertIn('printf "== finops deploy step: %s ==\\n" "$DEPLOY_STEP" >&2', remote_script)
         self.assertIn("RELEASE_DIR=/opt/fin-ops/releases/main-abcdef1-20260524170000", remote_script)
         self.assertIn("REMOTE_MIN_FREE_MB=512", remote_script)
@@ -136,8 +135,8 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control check-release main-abcdef1-20260524170000", remote_script)
         self.assertNotIn("sudo -n install", remote_script)
         self.assertNotIn("DEPLOY_STEP='install runtime worker ensure helper'", remote_script)
-        self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control activate main-abcdef1-20260524170000", remote_script)
-        self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control status", remote_script)
+        self.assertNotIn("sudo -n /usr/local/sbin/finops-deploy-control activate ", remote_script)
+        self.assertNotIn("sudo -n /usr/local/sbin/finops-deploy-control status", remote_script)
         self.assertIn("verify_finops_deploy_control_contract", remote_script)
         self.assertIn("verify_finops_runtime_worker_ensure_contract", remote_script)
         self.assertIn("deploy-control helper is not readable; cannot verify deploy contract", remote_script)
@@ -152,20 +151,16 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("deploy-control helper does not self-update from versioned releases", remote_script)
         self.assertIn("deploy-control helper does not install versioned OA sync enqueue timer", remote_script)
         self.assertIn("deploy-control helper does not run runtime worker ensure inside activate", remote_script)
+        self.assertIn("deploy-control helper does not expose the production-equivalent release gate", remote_script)
+        self.assertIn("deploy-control helper still exposes the ungated activate command", remote_script)
         self.assertIn("runtime worker ensure helper is missing or not executable", remote_script)
         self.assertIn("runtime worker ensure helper does not use runtime worker manifest", remote_script)
         self.assertIn("runtime worker ensure helper does not refresh worker unit templates", remote_script)
         self.assertNotIn("runtime worker ensure helper does not migrate Workbench scope split", remote_script)
         self.assertIn("runtime worker ensure helper does not validate worker registrations", remote_script)
         self.assertNotIn('sudo -n /usr/local/sbin/finops-ensure-runtime-workers "$RELEASE_DIR/src"', remote_script)
-        self.assertIn("wait_finops_backend_ready", remote_script)
-        self.assertIn("check_finops_session_route /fin-ops-api/api/session/me", remote_script)
-        self.assertIn("check_finops_session_route /fin-ops/api/session/me", remote_script)
-        self.assertIn("session API route is not proxied as JSON", remote_script)
-        self.assertLess(
-            remote_script.index("wait_finops_backend_ready"),
-            remote_script.index("check_finops_session_route /fin-ops-api/api/session/me"),
-        )
+        self.assertNotIn("wait_finops_backend_ready", remote_script)
+        self.assertNotIn("check_finops_session_route", remote_script)
         self.assertLess(
             remote_script.index("verify_finops_deploy_control_bootstrap"),
             remote_script.index('mkdir -p "$RELEASE_DIR"'),
@@ -186,10 +181,6 @@ class DeployOAScriptTest(unittest.TestCase):
             remote_script.index("verify_finops_runtime_worker_ensure_contract"),
             remote_script.index("DEPLOY_STEP='deploy-control check-release'"),
         )
-        self.assertLess(
-            remote_script.index("verify_finops_runtime_worker_ensure_contract"),
-            remote_script.index("DEPLOY_STEP='deploy-control activate'"),
-        )
         self.assertNotIn("sudo -n /bin/bash", remote_script)
         self.assertIn("KEEP_RELEASES=8", remote_script)
         self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control cleanup-releases --keep 8", remote_script)
@@ -200,21 +191,32 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertNotIn("systemctl restart fin-ops.service", remote_script)
         self.assertNotIn("pip install -r", remote_script)
 
-    def test_release_remote_script_waits_for_backend_before_public_route_smoke(self) -> None:
+    def test_activation_uses_separate_fail_closed_release_gate_command(self) -> None:
         config = self._deployment_config(Path("/Users/yu/Desktop/fin-ops-platform"))
         config.skip_build = False
         config.activate = True
 
-        remote_script = self.module.build_release_remote_deploy_script(config)
+        command = self.module.build_release_gate_command(config)
 
-        self.assertIn("curl -fsS --max-time 5 http://127.0.0.1:18001/health/ready", remote_script)
-        self.assertIn("backend did not become ready after release activation", remote_script)
-        self.assertIn("route_deadline=$((SECONDS + 60))", remote_script)
-        self.assertIn("return 0", remote_script)
-        self.assertLess(
-            remote_script.index("wait_finops_backend_ready"),
-            remote_script.index("check_finops_session_route /fin-ops-api/api/session/me"),
+        self.assertEqual(
+            command[-1],
+            "sudo -n /usr/local/sbin/finops-deploy-control "
+            "release-gate-activate main-abcdef1-20260524170000",
         )
+        self.assertIn("ControlMaster=no", command)
+
+    def test_release_gate_input_requires_local_admin_token(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"FIN_OPS_E2E_ADMIN_TOKEN": "", "FIN_OPS_HTTP_SLO_ADMIN_TOKEN": ""},
+            clear=False,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "production-equivalent release gate"):
+                self.module.release_gate_input()
+
+    def test_release_gate_input_uses_admin_token_without_printing_it(self) -> None:
+        with patch.dict(os.environ, {"FIN_OPS_E2E_ADMIN_TOKEN": "secret-token"}, clear=False):
+            self.assertEqual(self.module.release_gate_input(), b"secret-token\n")
 
     def test_release_remote_script_can_upload_without_activation(self) -> None:
         config = self._deployment_config(Path("/Users/yu/Desktop/fin-ops-platform"))
@@ -367,6 +369,29 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('ensure_runtime_workers "$src"', script)
         self.assertIn('"$ENSURE_RUNTIME_WORKERS_HELPER" "$src"', script)
         self.assertIn("wait_required_workers_ready", script)
+        self.assertIn("release-gate-activate <release-name>", script)
+        self.assertIn("release_gate_activate()", script)
+        self.assertNotIn("  activate)", script)
+        self.assertIn("worker_inventory_report", script)
+        self.assertIn("rabbitmq_topology --apply", script)
+        self.assertIn("domain_contract_audit", script)
+        self.assertIn("runtime_sync_closure_gate", script)
+        self.assertIn("--apply-read-model-smoke", script)
+        self.assertIn("--apply-write-scenarios", script)
+        self.assertIn("--read-model-target-ms 5000", script)
+        self.assertIn("--write-target-ms 5000", script)
+        self.assertIn("--http-target-ms 1000", script)
+        self.assertIn("sleep 60", script)
+        self.assertIn("sleep 240", script)
+        self.assertIn("rollback_release_gate", script)
+        self.assertIn('"release_gate_status": "PASS"', script)
+        self.assertIn('"unknown_worker_count": 0', script)
+        self.assertIn('"required_worker_not_ready": 0', script)
+        self.assertIn('"dirty_scope_count": 0', script)
+        self.assertIn('"pending_outbox_count": 0', script)
+        self.assertIn('"dead_letter_delta": 0', script)
+        self.assertIn('"page_canonical_audit_status": "pass"', script)
+        self.assertIn('"queue_stable_after_300_seconds": True', script)
         self.assertIn("read-model-scope-contract <release-name> [args]", script)
         self.assertIn("workbench-requirement-repair <release-name>", script)
         self.assertIn("workbench_requirement_repair()", script)
@@ -394,6 +419,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('"password": "PGPASSWORD"', script)
         self.assertIn('environment["PGAPPNAME"] = "finops-write-operation-restore-point"', script)
         self.assertIn('["pg_dump", "--format=custom", "--no-owner", "--no-acl", f"--file={sys.argv[1]}"]', script)
+
         self.assertIn('pg_restore --list "$temp_path"', script)
         self.assertIn('sha256sum "$dump_path"', script)
         self.assertNotIn('pg_dump "$FIN_OPS_POSTGRES_DATABASE_URL"', script)
@@ -476,6 +502,24 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertNotIn("/root/fin_ops_stage23_postgres_runtime.env", script)
         self.assertNotIn("FIN_OPS_POSTGRES_DATABASE_URL=", script)
         self.assertNotIn("--worker-kind \\${FIN_OPS_WORKER_KIND}", script)
+
+    def test_release_gate_restores_stable_helpers_when_precheck_fails(self) -> None:
+        script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
+        start = script.index('if ! release_gate_checkpoint "$previous_release" pre')
+        end = script.index('if ! (activate_release "$release")', start)
+        pre_failure_branch = script[start:end]
+
+        self.assertIn(
+            'release_gate_checkpoint "$previous_release" pre "$admin_token" "$evidence_dir" "$release"',
+            script,
+        )
+        self.assertIn(
+            'release_gate_checkpoint "$previous_release" rollback "$admin_token" "$evidence_dir" "$candidate"',
+            script,
+        )
+        self.assertIn('src="$(release_src "$previous_release")"', pre_failure_branch)
+        self.assertIn('install_deploy_control_helper "$src"', pre_failure_branch)
+        self.assertIn('install_runtime_worker_helper "$src"', pre_failure_branch)
 
     def test_deploy_control_read_model_slo_smoke_refuses_apply_before_release_lookup(self) -> None:
         env = {**os.environ, "FINOPS_RELEASE_ROOT": "/tmp/finops-release-root-does-not-exist"}

@@ -45,12 +45,14 @@ read model 刷新状态事实源，systemd 管 worker 进程，App 只负责写�
 - deploy helper 负责：从 registry 生成 required worker 矩阵，安装 env，执行 `--check`，重启
   systemd unit，并在发布阶段等待 worker readiness 收敛。release deploy 解包并校验 release layout 后，
   会先通过 `/usr/local/sbin/finops-deploy-control self-update <release-name>` 安装 release 内的
-  `deploy/oa/bin/finops-deploy-control.sh`，再执行完整 helper contract、`check-release` 和 `activate`，
+  `deploy/oa/bin/finops-deploy-control.sh`，再执行完整 helper contract、`check-release` 和
+  `release-gate-activate`，
   避免新增 versioned timer/helper 时被旧远端 deploy-control 卡住。首次接入或旧 helper 不支持
   `self-update` 时仍需要一次 root bootstrap。`/usr/local/sbin/finops-ensure-runtime-workers`
-  仍是预安装的 root helper；release deploy 只校验该 helper 的合同并通过 `finops-deploy-control activate`
-  间接调用它，不在发布链路中覆盖该 runtime worker helper。
-- 当前 release 的 worker registry 同时是生产实例白名单。`activate` 在重启服务前枚举全部已加载
+  仍是预安装的 root helper；release deploy 只校验该 helper 的合同并通过
+  `finops-deploy-control release-gate-activate` 的内部受控激活阶段间接调用它，不在发布链路中覆盖该
+  runtime worker helper。
+- 当前 release 的 worker registry 同时是生产实例白名单。发布门禁在切换前后枚举全部已加载和已安装
   `fin-ops-worker@*.service`，对已启用、运行或失败但不在 registry 中的实例执行 stop/disable；不删除实例 env，
   因而可通过恢复含该 registration 的 release 受控回滚。禁止把 WIP 性能 worker 或手工 systemd 实例留在
   registry 外长期运行，也禁止通过给未知实例补空参数来绕过 registration contract。
@@ -511,7 +513,8 @@ PYTHONPATH="$release_src/backend/src" \
 
 ## 发布闭环
 
-`finops-deploy-control activate <release>` 的 worker 顺序是：
+公开 `activate` 命令已删除。`finops-deploy-control release-gate-activate <release>` 是唯一正常激活入口，
+其内部受控激活阶段的 worker 顺序是：
 
 1. 执行 PostgreSQL migration。
 2. 写入 API、worker、dispatcher release drop-in。
@@ -519,6 +522,31 @@ PYTHONPATH="$release_src/backend/src" \
 4. 重启 API、worker、dispatcher。
 5. 等待 `/health` worker readiness 收敛。
 6. 输出状态。
+
+入口先对当前 release 执行 production-equivalent pre checkpoint；候选激活后分别在 T+0、T+60s、
+T+300s 执行同一完整 checkpoint。每次检查都必须使用真实 PostgreSQL 和 RabbitMQ，验证 exact
+registry/systemd inventory、worker readiness、dirty scope、pending/processing outbox、durable 与
+RabbitMQ dead letter、critical read-model enqueue-to-fresh SLO、固定可逆写 smoke、domain/page
+canonical audit 和 API/health/SSE 性能。page canonical audit 直接取可逆写 smoke 已验证的全页面审计证据，
+不重复调用另一条审计路径。RabbitMQ management 未配置或读取失败时 fail closed。
+
+最终证据写入
+`/opt/fin-ops/runtime-smoke/release-gates/<release>/evidence.json`，权限为 root `0600`，并绑定
+release 与 Git commit。PASS 必须满足：
+
+- `unknown_worker_count = 0`
+- `required_worker_not_ready = 0`
+- `dirty_scope_count = 0`
+- `pending_outbox_count = 0`
+- `dead_letter_delta = 0`
+- `page_canonical_audit_status = pass`
+- `queue_stable_after_300_seconds = true`
+
+任一 checkpoint、最终证据写入或证据合同校验失败，都必须自动恢复 previous release，并在回滚后执行完整
+checkpoint；pre checkpoint 失败时还必须恢复 previous release 的 deploy-control/runtime-worker helper。
+pre 与 rollback checkpoint 使用候选 release 的门禁代码检查实际运行 release；worker inventory 仍按实际
+运行 release 的 registry 核对。这样首次启用新门禁时不依赖旧 release 中尚不存在的检查逻辑。
+不存在“候选已激活但没有有效 gate evidence”的成功状态。
 
 worker readiness 不是 systemd active。发布脚本会等待：
 
@@ -655,7 +683,7 @@ cd "$release_src"
 
 ### Direct canonical page runtime retirement
 
-`0127_direct_canonical_page_runtime_retirement.sql` 是纯 no-op 退休标记：不终止或删除历史 outbox/dirty/readiness，也不 DROP 旧表，因此上一 release 回滚时仍保有完整 backlog、状态和 projection 证据。`finops-deploy-control activate` 必须先停止/disable 新 registry 未登记的退休页面 instance，再查询 PostgreSQL，确认非当前 manifest 的 read-model outbox 与 dirty scope 均无 `processing`；门禁通过后才停止其余上一版本 worker、运行 migration 并激活。门禁失败时不得运行 migration 或激活新版本，且已登记的 import/matching/保留 read-model worker 继续运行，避免生产 runtime 被留在全停状态。新版本的 registry、RabbitMQ dispatcher 和 App Status 不 claim/展示退休历史。`workbench`、Search、`workbench_relation`、no-OA 与 Workbench matching 继续保留；ETC 仍只使用 import worker，没有自己的页面 read model。
+`0127_direct_canonical_page_runtime_retirement.sql` 是纯 no-op 退休标记：不终止或删除历史 outbox/dirty/readiness，也不 DROP 旧表，因此上一 release 回滚时仍保有完整 backlog、状态和 projection 证据。`finops-deploy-control release-gate-activate` 的内部受控激活阶段必须先停止/disable 新 registry 未登记的退休页面 instance，再查询 PostgreSQL，确认非当前 manifest 的 read-model outbox 与 dirty scope 均无 `processing`；门禁通过后才停止其余上一版本 worker、运行 migration 并激活。门禁失败时不得运行 migration 或激活新版本，且已登记的 import/matching/保留 read-model worker 继续运行，避免生产 runtime 被留在全停状态。新版本的 registry、RabbitMQ dispatcher 和 App Status 不 claim/展示退休历史。`workbench`、Search、`workbench_relation`、no-OA 与 Workbench matching 继续保留；ETC 仍只使用 import worker，没有自己的页面 read model。
 
 Bank-flow 未提交候选由页面 API 请求内实时推导，没有 canonical draft event、queue、worker、env 或 replay。`app.bank_flow_rule_batches/events` 只保存 submitted、withdrawn、stale 等正式业务状态和审计历史；运维不得投递 draft refresh、启动 bank-flow worker、手工写 draft 或恢复旧 `bank_flow_rule_batch.read_model.refresh`。
 

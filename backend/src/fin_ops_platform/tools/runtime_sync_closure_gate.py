@@ -36,6 +36,10 @@ RUNTIME_HEALTH_REQUIRED_FIELDS = (
     "mismatched_required_worker_count",
     "read_model_refresh_failure_rate",
     "worker_metrics",
+    "rabbitmq_management_configured",
+    "rabbitmq_queue_depth",
+    "rabbitmq_unacked_messages",
+    "rabbitmq_dlq_count",
 )
 
 
@@ -289,6 +293,7 @@ def _runtime_health_check(connection: Any) -> ClosureCheck:
                 key: summary.get(key)
                 for key in (
                     "queue_backlog",
+                    "dirty_scopes",
                     "failed_jobs",
                     "max_pending_age_seconds",
                     "stale_dirty_scope_count",
@@ -636,6 +641,7 @@ def _write_operation_e2e_check(
         poll_interval_seconds=poll_interval_seconds,
         limit=limit,
     )
+    page_canonical_audit = _page_canonical_audit_summary(report)
     scenario_count = _safe_int(report.get("scenario_count"))
     result_count = len(report.get("results") or []) if isinstance(report.get("results"), list) else 0
     if report.get("status") == PASS and (scenario_count <= 0 or result_count <= 0):
@@ -648,16 +654,73 @@ def _write_operation_e2e_check(
                 "error": "write_operation_e2e_empty_samples",
             },
         )
+    if report.get("status") == PASS and page_canonical_audit.get("status") != PASS:
+        return ClosureCheck(
+            "write_operation_e2e",
+            FAIL,
+            "Controlled write-operation E2E did not produce a passing canonical page audit.",
+            {
+                **_compact_report(report),
+                "page_canonical_audit": page_canonical_audit,
+                "error": "page_canonical_audit_missing",
+            },
+        )
     return ClosureCheck(
         "write_operation_e2e",
         PASS if report.get("status") == PASS else FAIL,
         "Controlled mutating write-operation scenarios met the SLO." if report.get("status") == PASS else "Controlled mutating write-operation scenarios failed or were not authenticated.",
-        _compact_report(report),
+        {
+            **_compact_report(report),
+            "page_canonical_audit": page_canonical_audit,
+        },
     )
+
+
+def _page_canonical_audit_summary(report: Mapping[str, Any]) -> dict[str, Any]:
+    audits: list[dict[str, Any]] = []
+    for result in report.get("results") or []:
+        if not isinstance(result, Mapping):
+            continue
+        candidates = [result.get("preflight")]
+        candidates.extend(
+            checkpoint.get("system_audit")
+            for checkpoint in result.get("checkpoints") or []
+            if isinstance(checkpoint, Mapping)
+        )
+        for candidate in candidates:
+            if (
+                isinstance(candidate, Mapping)
+                and candidate.get("status") == PASS
+                and candidate.get("system_audit_id")
+                and candidate.get("snapshot_identity")
+            ):
+                audits.append(
+                    {
+                        "system_audit_id": str(candidate["system_audit_id"]),
+                        "snapshot_identity": str(candidate["snapshot_identity"]),
+                        "external_evidence": candidate.get("external_evidence"),
+                    }
+                )
+    audit_ids = [audit["system_audit_id"] for audit in audits]
+    passed = bool(audits) and len(audit_ids) == len(set(audit_ids))
+    return {
+        "status": PASS if passed else FAIL,
+        "audit_count": len(audits),
+        "system_audits": audits,
+        **(
+            {"error": "canonical_page_audit_missing_or_reused"}
+            if not passed
+            else {}
+        ),
+    }
 
 
 def _runtime_blockers(summary: Mapping[str, Any]) -> dict[str, Any]:
     blockers: dict[str, Any] = {}
+    if summary.get("rabbitmq_management_configured") is not True:
+        blockers["rabbitmq_management_configured"] = summary.get("rabbitmq_management_configured")
+    if summary.get("rabbitmq_metric_error"):
+        blockers["rabbitmq_metric_error"] = summary.get("rabbitmq_metric_error")
     for key in ("missing_required_worker_count", "stale_required_worker_count", "mismatched_required_worker_count"):
         if int(summary.get(key) or 0) > 0:
             blockers[key] = summary.get(key)
@@ -667,6 +730,9 @@ def _runtime_blockers(summary: Mapping[str, Any]) -> dict[str, Any]:
     queue_backlog = summary.get("queue_backlog")
     if isinstance(queue_backlog, dict) and any(int(value or 0) > 0 for value in queue_backlog.values()):
         blockers["queue_backlog"] = queue_backlog
+    dirty_scopes = summary.get("dirty_scopes")
+    if isinstance(dirty_scopes, dict) and any(int(value or 0) > 0 for value in dirty_scopes.values()):
+        blockers["dirty_scopes"] = dirty_scopes
     failure_rate = summary.get("read_model_refresh_failure_rate")
     if isinstance(failure_rate, (int, float)) and float(failure_rate) > 0:
         blockers["read_model_refresh_failure_rate"] = failure_rate

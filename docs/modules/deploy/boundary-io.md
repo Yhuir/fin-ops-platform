@@ -7,7 +7,7 @@
 - 状态：closed
 - 当前边界可信度：high
 - 目标边界：部署模块负责发布、runtime worker/systemd/env/nginx/verify，不承载业务逻辑。
-- 当前缺口：无 P0/P1 模块化缺口；新增 read model/worker 仍必须同步 deploy examples 和 runtime worker manifest。
+- 当前缺口：无 P0/P1 模块化缺口；新增 read model/worker 仍必须同步 deploy examples、runtime worker manifest 和生产等价发布门禁。
 - 旧代码删除状态：`legacy-current` 覆盖式发布入口、旧单文件 `deploy/oa/fin_ops.env.example` 和 systemd 示例中的 current/backend runtime 路径已移除；import worker/dispatcher env 已移除退役的 `import.fact.changed` event，只保留 `import.process.requested`。release helper 只保留历史 `/opt/fin-ops/current` 归档/guard，不作为旧发布 I/O。
 
 ## 职责边界
@@ -27,7 +27,8 @@
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| Deploy command | `scripts/deploy-oa.sh` | 使用明确 release/remote/env |
+| Deploy command | `scripts/deploy-oa.sh` | 使用明确 release/remote/env；正常激活只允许调用 `finops-deploy-control release-gate-activate <release>`，公开 `activate` 入口已删除。`--no-activate` 只上传和校验，不生成门禁证据 |
+| Release-gate credential | 本机 `scripts/with-production-admin-token.sh` | Admin Token 只通过部署进程 stdin 交给 root helper，不写入 release、证据、命令行或日志；缺失时必须在任何生产切换前 fail closed |
 | Runtime worker manifest | `runtime_worker_manifest.py` | 必须匹配 registry |
 | Verify command | `scripts/verify.sh` | 按 backend/web/docs/ops 分类执行 |
 | Runtime env examples | `deploy/oa/env/*.env.example` | 按 common/secrets/migrator/worker/dispatcher 拆分，禁止恢复单文件 env |
@@ -44,6 +45,7 @@
 | Release artifact | 生产服务器 | 可追踪版本 |
 | systemd/env files | deploy/oa | 与 registry 一致 |
 | Verification result | operator/CI | 失败不得伪装成功 |
+| Production-equivalent release evidence | `/opt/fin-ops/runtime-smoke/release-gates/<release>/evidence.json` | root-owned `0600` 原子写入，并绑定 release 名称、candidate Git commit 和 previous release。最终 PASS 必须同时证明 `unknown_worker_count=0`、`required_worker_not_ready=0`、`dirty_scope_count=0`、`pending_outbox_count=0`、`dead_letter_delta=0`、`queue_stable_after_300_seconds=true` |
 | Bounded request traceback | operator | 仅用于把已知生产 500 定位到 release 文件和行号；不得输出业务 payload、token 或任意日志窗口 |
 | Write smoke restore-point manifest | operator | 固定记录 release、run-id、UTC 时间、dump 路径、字节数、格式和 SHA-256；不得包含 DSN、token 或业务 payload |
 
@@ -73,6 +75,7 @@
 ## 测试与验证
 
 - `tests/test_deploy_oa_script.py`
+- `tests/test_runtime_sync_closure_gate.py`
 - `tests/test_deploy_runtime_examples.py`
 - `bash scripts/verify.sh docs`
 
@@ -82,6 +85,14 @@
 - 禁止恢复 `--mode legacy-current`、`build_legacy_remote_deploy_script`、`create_legacy_release_archive` 或 `deploy/oa/fin_ops.env.example`。
 - 禁止在 systemd examples 或发布脚本中恢复 `/opt/fin-ops/current/backend` 作为运行目录。
 - `finops-deploy-control` 对 legacy current 的归档只用于 release 激活前清理历史 runtime，不得重新变成覆盖式发布入口。
+- 禁止恢复公开 `activate` 命令或在上传脚本中直接切换 release。激活前必须以当前 release 完成 pre checkpoint；候选激活后必须完成 T+0、T+60s、T+300s checkpoint。任一检查或最终 evidence 合同失败都必须自动恢复 previous release，并对回滚后的 runtime 再执行完整 checkpoint。
+
+## Production-equivalent Release Gate（2026-07-31）
+
+- 每个 checkpoint 复用现有权威工具，而不是维护第二套 SQL、worker 清单或页面审计：`runtime_worker_manifest`/systemd exact inventory、`rabbitmq_topology --apply`、`domain_contract_audit`、`RuntimeMonitoringRepository.health_summary()`、`runtime_sync_closure_gate` 和固定 `bank_oa_invoice` 可逆写 smoke；页面 canonical audit 直接取该 smoke 的全页面审计证据。
+- 门禁连接生产真实 PostgreSQL schema 和 RabbitMQ topology/management；RabbitMQ management 未配置、指标读取失败或 dead-letter 增量非零均 fail closed。Redis 不是本门禁事实源。
+- `runtime_sync_closure_gate` 必须同时执行 critical read-model enqueue-to-fresh smoke、API/health/SSE 性能探针和可逆写操作；目标分别为 5000ms 与 1000ms。业务合同失败不能由重试或兼容 fallback 掩盖。
+- pre checkpoint 在任何切换前完成；pre 失败必须恢复 previous release 的 deploy-control/runtime-worker helper。候选激活后按 T+0、T+60s、T+300s 复核真实 worker、queue、read model、写链路、页面 canonical audit 与性能；只有最终 evidence 验证成功，发布才返回成功。
 
 ## Phase 19 受控生产命令（2026-07-12）
 
