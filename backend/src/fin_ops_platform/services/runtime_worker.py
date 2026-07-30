@@ -23,6 +23,9 @@ READ_MODEL_NOT_FRESH_RE = re.compile(r"([a-z0-9_]+)_read_model_not_fresh")
 MONTH_SCOPE_RE = re.compile(r"\d{4}-\d{2}")
 PARENT_SCOPE_KEYS_RE = re.compile(r"parent_scope_keys=([0-9]{4}-[0-9]{2}(?:,[0-9]{4}-[0-9]{2})*)")
 FORCED_HEARTBEAT_STATUSES = frozenset({"processing", "deferred", "failed", "stopping", "stopped"})
+STALE_SOURCE_VERSION_SKIP_REASONS = frozenset(
+    {"stale_source_version", "stale_source_version_after_publish"}
+)
 READ_MODEL_MANIFEST_BY_SCOPE_TYPE = read_model_manifest_by_scope_type()
 
 
@@ -142,6 +145,7 @@ class RuntimeWorker:
             started_at = monotonic()
             with self._task_timeout(self._config.task_timeout_seconds):
                 result_payload = handler(event)
+                self._enqueue_stale_source_version_successor(event, result_payload)
         except RuntimeWorkerShutdownRequested as exc:
             reason = str(exc) or "shutdown_requested"
             self._release_event(event, reason)
@@ -344,6 +348,34 @@ class RuntimeWorker:
                 continue
             enqueued.extend({"scope_type": scope_type, "scope_key": normalized_scope_key} for normalized_scope_key in normalized_scope_keys)
         return enqueued
+
+    def _enqueue_stale_source_version_successor(
+        self,
+        event: RuntimeQueueEvent,
+        result_payload: dict[str, Any] | None,
+    ) -> None:
+        skip_reason = (
+            str(result_payload.get("skip_reason") or "").strip()
+            if isinstance(result_payload, dict)
+            else ""
+        )
+        if skip_reason not in STALE_SOURCE_VERSION_SKIP_REASONS:
+            return
+        scope_type = str(event.scope_type or "").strip()
+        scope_key = str(event.scope_key or "").strip()
+        if not scope_type or not scope_key or not self._read_model_refresh_gateway.can_enqueue():
+            raise RuntimeError(
+                f"{skip_reason} requires a durable successor refresh for event {event.event_id}."
+            )
+        self._read_model_refresh_gateway.enqueue_one(
+            scope_type,
+            scope_key,
+            reason="stale_source_version_successor",
+            tenant_id=event.tenant_id,
+            priority=str(event.priority or "normal"),
+            trace_id=event.trace_id,
+            metadata={"action_name": skip_reason},
+        )
 
     def _dependency_refresh_is_active(self, tenant_id: str, scope_type: str, scope_key: str) -> bool:
         checker = getattr(self._queue, "read_model_refresh_is_active", None)

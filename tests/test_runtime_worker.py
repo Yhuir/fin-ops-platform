@@ -188,6 +188,83 @@ class RuntimeWorkerTests(unittest.TestCase):
         self.assertEqual(queue.completed, [])
         self.assertEqual(queue.failed_events, [("event-1", "worker-1", "transient failure", True, 75, 5)])
 
+    def test_stale_read_model_event_enqueues_successor_before_ack(self) -> None:
+        claimed = RuntimeQueueEvent(
+            **{
+                **event("no_oa_bank_batch.read_model.refresh").__dict__,
+                "scope_type": "no_oa_bank_batch",
+                "scope_key": "2026-07",
+                "source_version": 7,
+            }
+        )
+        queue = FakeQueue(claimed)
+        worker = RuntimeWorker(
+            queue_repository=queue,
+            config=RuntimeWorkerConfig(
+                worker_id="worker-1",
+                event_types=["no_oa_bank_batch.read_model.refresh"],
+            ),
+            handlers={
+                "no_oa_bank_batch.read_model.refresh": lambda _event: {
+                    "skipped": True,
+                    "skip_reason": "stale_source_version",
+                }
+            },
+        )
+
+        result = worker.run_once()
+
+        self.assertEqual(result, RuntimeWorkerResult.PROCESSED)
+        self.assertEqual(queue.acked[0][0:2], ("event-1", "worker-1"))
+        self.assertEqual(
+            queue.enqueued_read_model_refreshes,
+            [
+                {
+                    "scope_type": "no_oa_bank_batch",
+                    "scope_key": "2026-07",
+                    "reason": "stale_source_version_successor",
+                    "metadata": {"action_name": "stale_source_version"},
+                }
+            ],
+        )
+
+    def test_stale_read_model_event_is_not_acked_when_successor_enqueue_fails(self) -> None:
+        claimed = RuntimeQueueEvent(
+            **{
+                **event("search.read_model.refresh").__dict__,
+                "scope_type": "search",
+                "scope_key": "2026-07",
+            }
+        )
+        queue = FakeQueue(claimed)
+
+        def fail_enqueue(**_kwargs: object) -> RuntimeQueueEvent:
+            raise RuntimeError("successor queue unavailable")
+
+        queue.enqueue_read_model_refresh = fail_enqueue  # type: ignore[method-assign]
+        worker = RuntimeWorker(
+            queue_repository=queue,
+            config=RuntimeWorkerConfig(
+                worker_id="worker-1",
+                event_types=["search.read_model.refresh"],
+            ),
+            handlers={
+                "search.read_model.refresh": lambda _event: {
+                    "skipped": True,
+                    "skip_reason": "stale_source_version_after_publish",
+                }
+            },
+        )
+
+        result = worker.run_once()
+
+        self.assertEqual(result, RuntimeWorkerResult.FAILED_RETRYABLE)
+        self.assertEqual(queue.acked, [])
+        self.assertEqual(
+            queue.failed_events,
+            [("event-1", "worker-1", "successor queue unavailable", True, 60, 5)],
+        )
+
     def test_run_once_defers_dependency_not_fresh_without_marking_failed(self) -> None:
         queue = FakeQueue(event())
 

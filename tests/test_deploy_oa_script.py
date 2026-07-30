@@ -392,6 +392,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('"dead_letter_delta": 0', script)
         self.assertIn('"runtime_sync_closure_failed_checks"', script)
         self.assertIn('"runtime_sync_closure_failures"', script)
+        self.assertIn('"diagnostics": diagnostics or None', script)
         self.assertIn('"page_canonical_audit_status": "pass"', script)
         self.assertIn('"queue_stable_after_300_seconds": True', script)
         self.assertIn("read-model-scope-contract <release-name> [args]", script)

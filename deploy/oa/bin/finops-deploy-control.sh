@@ -1407,6 +1407,22 @@ for check in closure_checks:
         if isinstance(check_payload.get("page_canonical_audit"), dict)
         else {}
     )
+    diagnostic_keys = (
+        "summary",
+        "failed_count",
+        "failed_scenario_count",
+        "failed_probe_count",
+        "auth_configured",
+        "failed_results",
+        "slowest_results",
+        "failed_probes",
+        "slowest_probes",
+    )
+    diagnostics = {
+        key: check_payload.get(key)
+        for key in diagnostic_keys
+        if key in check_payload
+    }
     closure_failures.append(
         {
             "name": check.get("name"),
@@ -1421,6 +1437,7 @@ for check in closure_checks:
             }
             if audit
             else None,
+            "diagnostics": diagnostics or None,
         }
     )
 write_e2e = next(
