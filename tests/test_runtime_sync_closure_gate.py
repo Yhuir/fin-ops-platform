@@ -13,6 +13,9 @@ class FakeRuntimeMonitoringRepository:
         pass
 
     def health_summary(self) -> dict[str, object]:
+        raise AssertionError("release gate must not treat historical health as readiness")
+
+    def ready_health_summary(self) -> dict[str, object]:
         return {
             "queue_backlog": {},
             "dirty_scopes": {},
@@ -26,7 +29,6 @@ class FakeRuntimeMonitoringRepository:
             "rabbitmq_queue_depth": 0,
             "rabbitmq_unacked_messages": 0,
             "rabbitmq_dlq_count": 0,
-            "read_model_refresh_failure_rate": 0.0,
         }
 
 
@@ -34,7 +36,7 @@ class EmptyRuntimeMonitoringRepository:
     def __init__(self, _connection) -> None:
         pass
 
-    def health_summary(self) -> dict[str, object]:
+    def ready_health_summary(self) -> dict[str, object]:
         return {}
 
 

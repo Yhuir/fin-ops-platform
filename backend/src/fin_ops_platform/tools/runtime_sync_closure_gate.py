@@ -34,7 +34,6 @@ RUNTIME_HEALTH_REQUIRED_FIELDS = (
     "missing_required_worker_count",
     "stale_required_worker_count",
     "mismatched_required_worker_count",
-    "read_model_refresh_failure_rate",
     "worker_metrics",
     "rabbitmq_management_configured",
     "rabbitmq_queue_depth",
@@ -266,7 +265,7 @@ def run_closure_gate(
 
 def _runtime_health_check(connection: Any) -> ClosureCheck:
     try:
-        summary = RuntimeMonitoringRepository(connection).health_summary()
+        summary = RuntimeMonitoringRepository(connection).ready_health_summary()
     except Exception as exc:
         return ClosureCheck("runtime_health", FAIL, "runtime monitoring health summary unavailable.", {"error": str(exc) or exc.__class__.__name__})
     missing_fields = [key for key in RUNTIME_HEALTH_REQUIRED_FIELDS if key not in summary]
@@ -303,7 +302,6 @@ def _runtime_health_check(connection: Any) -> ClosureCheck:
                     "rabbitmq_queue_depth",
                     "rabbitmq_unacked_messages",
                     "rabbitmq_dlq_count",
-                    "read_model_refresh_failure_rate",
                 )
                 if key in summary
             },
@@ -733,9 +731,6 @@ def _runtime_blockers(summary: Mapping[str, Any]) -> dict[str, Any]:
     dirty_scopes = summary.get("dirty_scopes")
     if isinstance(dirty_scopes, dict) and any(int(value or 0) > 0 for value in dirty_scopes.values()):
         blockers["dirty_scopes"] = dirty_scopes
-    failure_rate = summary.get("read_model_refresh_failure_rate")
-    if isinstance(failure_rate, (int, float)) and float(failure_rate) > 0:
-        blockers["read_model_refresh_failure_rate"] = failure_rate
     return blockers
 
 

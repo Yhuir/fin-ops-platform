@@ -1323,7 +1323,7 @@ from fin_ops_platform.services.postgres_connection import PostgresConnection, Po
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
 
 connection = PostgresConnection(PostgresSettings.from_env())
-summary = RuntimeMonitoringRepository(connection).health_summary()
+summary = RuntimeMonitoringRepository(connection).ready_health_summary()
 Path(sys.argv[1]).write_text(
     json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n",
     encoding="utf-8",
@@ -1395,6 +1395,34 @@ rabbit = load("RABBIT_REPORT")
 domain = load("DOMAIN_REPORT")
 closure = load("CLOSURE_REPORT")
 runtime = load("RUNTIME_REPORT")
+closure_checks = closure.get("checks", []) if isinstance(closure, dict) else []
+closure_failures = []
+for check in closure_checks:
+    if not isinstance(check, dict) or check.get("status") == "pass":
+        continue
+    check_payload = check.get("payload", {}) if isinstance(check.get("payload"), dict) else {}
+    blockers = check_payload.get("blockers", {}) if isinstance(check_payload.get("blockers"), dict) else {}
+    audit = (
+        check_payload.get("page_canonical_audit", {})
+        if isinstance(check_payload.get("page_canonical_audit"), dict)
+        else {}
+    )
+    closure_failures.append(
+        {
+            "name": check.get("name"),
+            "status": check.get("status"),
+            "detail": check.get("detail"),
+            "error": check_payload.get("error"),
+            "blocker_keys": sorted(str(key) for key in blockers),
+            "page_canonical_audit": {
+                "status": audit.get("status"),
+                "audit_count": audit.get("audit_count"),
+                "error": audit.get("error"),
+            }
+            if audit
+            else None,
+        }
+    )
 write_e2e = next(
     (
         check
@@ -1469,6 +1497,10 @@ payload = {
     "durable_dead_letter_count": durable_dead_letters,
     "rabbitmq_dead_letter_count": rabbitmq_dead_letters,
     "dead_letter_count": dead_letters,
+    "runtime_sync_closure_failed_checks": [
+        failure.get("name") for failure in closure_failures
+    ],
+    "runtime_sync_closure_failures": closure_failures,
     "page_canonical_audit": page_canonical_audit,
     "reports": {
         "worker_inventory": os.environ["INVENTORY_REPORT"],
