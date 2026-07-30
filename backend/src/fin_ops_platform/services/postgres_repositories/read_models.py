@@ -8007,6 +8007,7 @@ def _materialize_workbench_group_payload(group: dict[str, Any], member_rows: lis
     for key in WORKBENCH_GROUP_MEMBER_PAYLOAD_KEYS:
         result.pop(key, None)
     collapsed_rows: dict[str, list[dict[str, Any]]] = {}
+    visible_row_keys: set[tuple[str, str]] = set()
     for member in member_rows:
         pane = text(member.get("pane")) or "rows"
         row_id = text(member.get("row_id"))
@@ -8038,6 +8039,11 @@ def _materialize_workbench_group_payload(group: dict[str, Any], member_rows: lis
         if row_role == "collapsed":
             collapsed_rows.setdefault(pane, []).append(row_payload_value)
             continue
+        visible_row_key = (pane, row_id or "")
+        if row_id and visible_row_key in visible_row_keys:
+            continue
+        if row_id:
+            visible_row_keys.add(visible_row_key)
         result.setdefault(f"{pane}_rows", []).append(row_payload_value)
     for pane in ("oa", "bank", "invoice"):
         result.setdefault(f"{pane}_rows", [])

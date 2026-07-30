@@ -16,6 +16,7 @@ from fin_ops_platform.services.app_health_service import AppHealthService
 from fin_ops_platform.services.postgres_repositories.read_models import (
     WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION,
     PostgresReadModelRepository,
+    _materialize_workbench_group_payload,
     _workbench_group_row_records,
     _workbench_composed_all_source_versions,
     _workbench_literal_ilike_pattern,
@@ -4424,6 +4425,42 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 for row in group_rows
             },
         )
+
+    def test_workbench_materializer_deduplicates_visible_summary_relation_member(self) -> None:
+        summary_row = {
+            "id": "etc-summary-batch-1",
+            "type": "invoice",
+            "source_kind": "etc_invoice_summary",
+        }
+        group = {
+            "group_id": "case:etc-linked",
+            "workbench_group_rows_materialized": True,
+            "summary_row": summary_row,
+        }
+
+        materialized = _materialize_workbench_group_payload(
+            group,
+            [
+                {
+                    "pane": "invoice",
+                    "row_id": "etc-summary-batch-1",
+                    "row_role": "normal",
+                    "row_payload": summary_row,
+                },
+                {
+                    "pane": "invoice",
+                    "row_id": "etc-summary-batch-1",
+                    "row_role": "summary",
+                    "row_payload": summary_row,
+                },
+            ],
+        )
+
+        self.assertEqual(
+            [row["id"] for row in materialized["invoice_rows"]],
+            ["etc-summary-batch-1"],
+        )
+        self.assertEqual(materialized["summary_row"]["id"], "etc-summary-batch-1")
 
         unpaired_payload = _workbench_row_payload_for_write(
             {
