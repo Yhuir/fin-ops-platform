@@ -9,6 +9,7 @@ from typing import Sequence, TextIO
 from fin_ops_platform.services.runtime_worker_registry import (
     RuntimeWorkerRegistration,
     get_registration_by_instance_name,
+    rabbitmq_dispatch_event_types,
     required_worker_instance_names,
     worker_check_command_args,
     worker_command_args,
@@ -21,6 +22,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", action="store_true", help="Print full worker registry as JSON.")
     parser.add_argument("--instances", action="store_true", help="Print all registered worker instance names.")
     parser.add_argument("--required-instances", action="store_true", help="Print required worker instance names.")
+    parser.add_argument(
+        "--rabbitmq-required-instances",
+        action="store_true",
+        help="Print required RabbitMQ-eligible worker instance names.",
+    )
+    parser.add_argument(
+        "--rabbitmq-dispatch-event-types",
+        action="store_true",
+        help="Print event types published by the RabbitMQ dispatcher.",
+    )
     parser.add_argument("--env-example", help="Print env example filename for a worker instance.")
     parser.add_argument("--worker-check-command", help="Print app.worker --check args for a worker instance.")
     parser.add_argument("--worker-command", help="Print app.worker args for a worker instance.")
@@ -35,6 +46,18 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO = sys.stdout) -> i
         return 0
     if args.required_instances:
         print(" ".join(required_worker_instance_names()), file=stdout)
+        return 0
+    if args.rabbitmq_required_instances:
+        print(
+            " ".join(
+                registration.instance_name
+                for registration in worker_registrations(required_only=True, rabbitmq_eligible_only=True)
+            ),
+            file=stdout,
+        )
+        return 0
+    if args.rabbitmq_dispatch_event_types:
+        print(" ".join(rabbitmq_dispatch_event_types()), file=stdout)
         return 0
     if args.env_example:
         print(get_registration_by_instance_name(args.env_example).env_example, file=stdout)

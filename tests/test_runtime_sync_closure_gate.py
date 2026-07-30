@@ -9,6 +9,19 @@ from fin_ops_platform.tools import runtime_sync_closure_gate as gate
 from fin_ops_platform.tools.write_operation_e2e_smoke import WriteCheckpoint, WriteScenario
 
 
+def clean_rabbitmq_queues() -> dict[str, dict[str, object]]:
+    return {
+        event_type: {
+            "queue": f"finops.{event_type}",
+            "messages": 0,
+            "unacked": 0,
+            "consumers": 1,
+            "dead_letter_messages": 0,
+        }
+        for event_type in gate.rabbitmq_dispatch_event_types()
+    }
+
+
 class FakeRuntimeMonitoringRepository:
     def __init__(self, _connection) -> None:
         pass
@@ -30,6 +43,7 @@ class FakeRuntimeMonitoringRepository:
             "rabbitmq_queue_depth": 0,
             "rabbitmq_unacked_messages": 0,
             "rabbitmq_dlq_count": 0,
+            "rabbitmq_queues": clean_rabbitmq_queues(),
         }
 
 
@@ -48,14 +62,12 @@ class BackloggedRabbitMqRuntimeMonitoringRepository:
     def ready_health_summary(self) -> dict[str, object]:
         summary = FakeRuntimeMonitoringRepository(None).ready_health_summary()
         summary["rabbitmq_queue_depth"] = 1
-        summary["rabbitmq_queues"] = {
-            "no_oa_bank_batch.read_model.refresh": {
-                "queue": "finops.no_oa_bank_batch.read_model.refresh",
-                "messages": 1,
-                "unacked": 0,
-                "consumers": 1,
-                "dead_letter_messages": 0,
-            }
+        summary["rabbitmq_queues"]["no_oa_bank_batch.read_model.refresh"] = {
+            "queue": "finops.no_oa_bank_batch.read_model.refresh",
+            "messages": 1,
+            "unacked": 0,
+            "consumers": 1,
+            "dead_letter_messages": 0,
         }
         return summary
 
@@ -369,6 +381,21 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             check.payload["snapshot"]["rabbitmq_queues"]["no_oa_bank_batch.read_model.refresh"]["messages"],
             1,
         )
+
+    def test_runtime_blockers_require_metrics_and_consumers_for_every_dispatched_event(self) -> None:
+        summary = FakeRuntimeMonitoringRepository(None).ready_health_summary()
+        event_types = gate.rabbitmq_dispatch_event_types()
+        rabbitmq_queues = summary["rabbitmq_queues"]
+        assert isinstance(rabbitmq_queues, dict)
+        rabbitmq_queues.pop(event_types[0])
+        queue_metrics = rabbitmq_queues[event_types[1]]
+        assert isinstance(queue_metrics, dict)
+        queue_metrics["consumers"] = 0
+
+        blockers = gate._runtime_blockers(summary)
+
+        self.assertEqual(blockers["rabbitmq_queue_metrics_missing"], [event_types[0]])
+        self.assertEqual(blockers["rabbitmq_queues_without_consumers"], [event_types[1]])
 
     def test_gate_fails_without_authenticated_http_and_write_scenario(self) -> None:
         with patch.object(gate, "RuntimeMonitoringRepository", FakeRuntimeMonitoringRepository), patch.object(

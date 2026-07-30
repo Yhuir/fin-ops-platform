@@ -599,6 +599,20 @@ PostgreSQL durable queue 和 readiness 为准：
 - `job.read_model_dirty_scopes`
 - `read_model.app_status_readiness`
 
+正式生产切换只走受控入口：
+
+```bash
+sudo /usr/local/sbin/finops-deploy-control \
+  rabbitmq-required-worker-cutover <release-name>
+```
+
+该命令直接从 worker registry 推导精确 required eligible 实例与 dispatcher event types，不维护第二份
+清单；验证共享与实例环境文件为 root-owned、非符号链接且不可被 group/world 写入；备份所有目标
+instance env；原子写入 `FIN_OPS_QUEUE_BACKEND=rabbitmq`；重启精确目标 worker；等待 worker ready、
+每个目标 queue 均有 consumer、depth/unacked 自然清空且 DLQ 为 0。任何步骤失败都会恢复备份并重启
+原 worker。禁止 purge 队列、跳过 consumer 检查或削弱 release gate；PostgreSQL durable queue 始终保留。
+production-equivalent release gate 对缺失 queue metrics 或 consumer 为 0 的 dispatcher event 一律阻断。
+
 生产启用 required RabbitMQ real consumers 的顺序：
 
 1. 发布包含 RabbitMQ preflight、systemd env hook 和 consumer clean interrupt 的 release。

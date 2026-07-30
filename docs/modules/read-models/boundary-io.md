@@ -76,7 +76,7 @@ affected months；不得为隐藏页面 enqueue refresh、返回 operation barri
 | Dirty scope/outbox | PostgreSQL durable queue | `job.outbox_events` 与 `job.read_model_dirty_scopes` 是唯一状态事实源 |
 | Fresh payload | 页面 API/Redis | Redis 只能保存 fresh gate 后 payload；旧版本必须能被当前 proof 拒绝 |
 | Readiness/status | App Status / Operations | 只包含当前 manifest 四项；retired event/readiness 只可作为历史清理对象，不能进入当前状态 |
-| RabbitMQ envelope | optional transport | 只发布 registry 登记且 `rabbitmq_eligible` 的事件；consumer 仍回 PostgreSQL claim/ack |
+| RabbitMQ envelope | optional transport | 只发布 registry 登记且 `rabbitmq_eligible` 的事件；consumer 仍回 PostgreSQL claim/ack；dispatcher event 缺失 queue metrics 或 consumer=0 时 production-equivalent gate 阻断 |
 | BankFlow live candidate | 页面 API | 请求内读取 canonical facts 并实时推导；不产生 event、scope、readiness 或 RabbitMQ envelope |
 
 ## 特殊边界

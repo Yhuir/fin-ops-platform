@@ -19,6 +19,8 @@ SECRETS_ENV="$ENV_DIR/fin-ops.secrets.env"
 MIGRATOR_ENV="$ENV_DIR/fin-ops.postgres-migrator.env"
 RABBITMQ_TOPOLOGY_ENV="${FINOPS_RABBITMQ_TOPOLOGY_ENV:-$ENV_DIR/fin-ops.rabbitmq-topology.env}"
 RABBITMQ_MONITORING_ENV="${FINOPS_RABBITMQ_MONITORING_ENV:-$ENV_DIR/fin-ops.rabbitmq-monitoring.env}"
+RABBITMQ_WORKER_ENV="${FINOPS_RABBITMQ_WORKER_ENV:-$ENV_DIR/fin-ops.rabbitmq-worker.env}"
+RABBITMQ_WORKER_CUTOVER_BACKUP_ROOT="${FINOPS_RABBITMQ_WORKER_CUTOVER_BACKUP_ROOT:-/opt/fin-ops/backups/rabbitmq-worker-cutover}"
 DEPLOY_CONTROL_HELPER="${FINOPS_DEPLOY_CONTROL_HELPER:-/usr/local/sbin/finops-deploy-control}"
 ENSURE_RUNTIME_WORKERS_HELPER="${FINOPS_ENSURE_RUNTIME_WORKERS_HELPER:-/usr/local/sbin/finops-ensure-runtime-workers}"
 WRITE_E2E_BACKUP_ROOT="${FINOPS_WRITE_E2E_BACKUP_ROOT:-/opt/fin-ops/backups/write-operation-e2e}"
@@ -42,6 +44,8 @@ usage: finops-deploy-control <command> [args]
 commands:
   check-release <release-name>         validate a release under /opt/fin-ops/releases
   self-update <release-name>           install deploy-control helper from a validated release
+  rabbitmq-required-worker-cutover <release-name>
+                                      switch exactly the required RabbitMQ-eligible workers, drain queues, rollback on failure
   release-gate-activate <release-name>
                                       run production-equivalent gate, activate, watch through T+300, rollback on failure
   workbench-rehydrate <release-name> [args]
@@ -156,6 +160,18 @@ required_worker_instances() {
   local src="$1"
   PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}" \
     "$WORKER_PYTHON" -m fin_ops_platform.tools.runtime_worker_manifest --required-instances
+}
+
+rabbitmq_required_worker_instances() {
+  local src="$1"
+  PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}" \
+    "$WORKER_PYTHON" -m fin_ops_platform.tools.runtime_worker_manifest --rabbitmq-required-instances
+}
+
+rabbitmq_dispatch_event_types() {
+  local src="$1"
+  PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}" \
+    "$WORKER_PYTHON" -m fin_ops_platform.tools.runtime_worker_manifest --rabbitmq-dispatch-event-types
 }
 
 known_worker_services() {
@@ -602,6 +618,150 @@ sys.exit(0 if missing == 0 and stale == 0 and mismatched == 0 and not bad_worker
   echo "required runtime workers did not become ready after release activation" >&2
   printf '%s\n' "$health" >&2
   exit 68
+}
+
+assert_root_owned_runtime_env() {
+  local path="$1"
+  [[ -f "$path" && ! -L "$path" ]] || die "runtime env must be a regular non-symlink file: $path"
+  [[ "$(stat -c '%u' "$path")" == "0" ]] || die "runtime env must be root-owned: $path"
+  [[ -z "$(find "$path" -maxdepth 0 -perm /022 -print -quit)" ]] \
+    || die "runtime env must not be group/world writable: $path"
+}
+
+write_rabbitmq_transport_env() {
+  local path="$1"
+  local temporary="${path}.rabbitmq-cutover.$$"
+  if ! awk '!/^FIN_OPS_QUEUE_BACKEND=/' "$path" >"$temporary" \
+    || ! printf '%s\n' 'FIN_OPS_QUEUE_BACKEND=rabbitmq' >>"$temporary" \
+    || ! chown --reference="$path" "$temporary" \
+    || ! chmod --reference="$path" "$temporary" \
+    || ! mv -f "$temporary" "$path"; then
+    rm -f -- "$temporary"
+    return 1
+  fi
+}
+
+restore_rabbitmq_worker_envs() {
+  local backup_dir="$1"
+  local instances="$2"
+  local instance path
+  for instance in $instances; do
+    path="$ENV_DIR/fin-ops.worker.$instance.env"
+    cp -a -- "$backup_dir/$(basename "$path")" "$path"
+  done
+  for instance in $instances; do
+    systemctl restart "fin-ops-worker@$instance.service"
+  done
+}
+
+wait_rabbitmq_required_queues_drained() {
+  local event_types="$1"
+  local timeout="${FINOPS_RABBITMQ_CUTOVER_TIMEOUT_SECONDS:-600}"
+  local deadline health status_json readiness_status=1
+  [[ "$timeout" =~ ^[0-9]+$ ]] || die "invalid FINOPS_RABBITMQ_CUTOVER_TIMEOUT_SECONDS: $timeout"
+  deadline=$((SECONDS + timeout))
+  health=""
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    health="$(curl -fsS --max-time 5 http://127.0.0.1:18001/health 2>&1 || true)"
+    readiness_status=0
+    status_json="$(printf '%s' "$health" | EXPECTED_EVENT_TYPES="$event_types" python3 -c '
+import json
+import os
+import sys
+
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+runtime = data.get("runtime_infrastructure")
+if not isinstance(runtime, dict):
+    sys.exit(1)
+queues = runtime.get("rabbitmq_queues")
+if not isinstance(queues, dict):
+    sys.exit(1)
+expected = tuple(os.environ.get("EXPECTED_EVENT_TYPES", "").split())
+missing = [event_type for event_type in expected if not isinstance(queues.get(event_type), dict)]
+without_consumers = [
+    event_type
+    for event_type in expected
+    if isinstance(queues.get(event_type), dict)
+    and int(queues[event_type].get("consumers") or 0) <= 0
+]
+payload = {
+    "missing_queue_metrics": missing,
+    "queues_without_consumers": without_consumers,
+    "rabbitmq_queue_depth": int(runtime.get("rabbitmq_queue_depth") or 0),
+    "rabbitmq_unacked_messages": int(runtime.get("rabbitmq_unacked_messages") or 0),
+    "rabbitmq_dlq_count": int(runtime.get("rabbitmq_dlq_count") or 0),
+}
+print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+ready = (
+    not missing
+    and not without_consumers
+    and payload["rabbitmq_queue_depth"] == 0
+    and payload["rabbitmq_unacked_messages"] == 0
+    and payload["rabbitmq_dlq_count"] == 0
+    and not runtime.get("rabbitmq_metric_error")
+)
+sys.exit(0 if ready else 2)
+' 2>/dev/null)" || readiness_status="$?"
+    case "$readiness_status" in
+      0)
+        printf 'RabbitMQ required queues drained: %s\n' "$status_json"
+        return 0
+        ;;
+      2)
+        health="$status_json"
+        ;;
+      *)
+        ;;
+    esac
+    sleep 2
+  done
+  printf 'RabbitMQ required queues did not drain within %s seconds: %s\n' "$timeout" "$health" >&2
+  return 1
+}
+
+rabbitmq_required_worker_cutover() {
+  local release="${1:-}"
+  [[ -n "$release" && "$#" -eq 1 ]] || die "rabbitmq-required-worker-cutover accepts only release name"
+  local src instances event_types backup_dir instance path
+  src="$(release_src "$release")"
+  assert_root_owned_runtime_env "$RABBITMQ_WORKER_ENV"
+  grep -Eq '^RABBITMQ_URL=.+$' "$RABBITMQ_WORKER_ENV" \
+    || die "missing RABBITMQ_URL in $RABBITMQ_WORKER_ENV"
+  ! grep -Eq '^FIN_OPS_QUEUE_BACKEND=' "$RABBITMQ_WORKER_ENV" \
+    || die "shared RabbitMQ env must not define FIN_OPS_QUEUE_BACKEND: $RABBITMQ_WORKER_ENV"
+  instances="$(rabbitmq_required_worker_instances "$src")"
+  event_types="$(rabbitmq_dispatch_event_types "$src")"
+  [[ -n "$instances" ]] || die "registry returned no required RabbitMQ worker instances"
+  [[ -n "$event_types" ]] || die "registry returned no RabbitMQ dispatcher event types"
+  for instance in $instances; do
+    path="$ENV_DIR/fin-ops.worker.$instance.env"
+    assert_root_owned_runtime_env "$path"
+  done
+  backup_dir="$RABBITMQ_WORKER_CUTOVER_BACKUP_ROOT/$(date -u +%Y%m%dT%H%M%SZ)-$$"
+  install -d -m 0700 "$RABBITMQ_WORKER_CUTOVER_BACKUP_ROOT" "$backup_dir"
+  for instance in $instances; do
+    path="$ENV_DIR/fin-ops.worker.$instance.env"
+    cp -a -- "$path" "$backup_dir/$(basename "$path")"
+  done
+  if ! (
+    set -Eeuo pipefail
+    for instance in $instances; do
+      write_rabbitmq_transport_env "$ENV_DIR/fin-ops.worker.$instance.env" || exit 1
+    done
+    for instance in $instances; do
+      systemctl restart "fin-ops-worker@$instance.service" || exit 1
+    done
+    wait_required_workers_ready || exit 1
+    wait_rabbitmq_required_queues_drained "$event_types" || exit 1
+  ); then
+    restore_rabbitmq_worker_envs "$backup_dir" "$instances"
+    wait_required_workers_ready
+    die "RabbitMQ worker cutover failed; original worker env files were restored from $backup_dir"
+  fi
+  printf 'RabbitMQ worker cutover passed; rollback backup retained at %s\n' "$backup_dir"
 }
 
 status() {
@@ -1829,6 +1989,10 @@ case "$cmd" in
     src="$(release_src "${2:-}")"
     install_deploy_control_helper "$src"
     install_runtime_worker_helper "$src"
+    ;;
+  rabbitmq-required-worker-cutover)
+    shift
+    rabbitmq_required_worker_cutover "$@"
     ;;
   release-gate-activate)
     shift

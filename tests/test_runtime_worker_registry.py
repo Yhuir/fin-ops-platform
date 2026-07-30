@@ -261,6 +261,22 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
         self.assertEqual(tuple(stdout.getvalue().split()), required_worker_instance_names())
 
         stdout = io.StringIO()
+        exit_code = runtime_worker_manifest.main(["--rabbitmq-required-instances"], stdout=stdout)
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            tuple(stdout.getvalue().split()),
+            tuple(
+                registration.instance_name
+                for registration in worker_registrations(required_only=True, rabbitmq_eligible_only=True)
+            ),
+        )
+
+        stdout = io.StringIO()
+        exit_code = runtime_worker_manifest.main(["--rabbitmq-dispatch-event-types"], stdout=stdout)
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(tuple(stdout.getvalue().split()), rabbitmq_dispatch_event_types())
+
+        stdout = io.StringIO()
         exit_code = runtime_worker_manifest.main(
             ["--env-example", "workbench-relation"],
             stdout=stdout,

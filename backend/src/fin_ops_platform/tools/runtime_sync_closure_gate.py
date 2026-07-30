@@ -12,6 +12,7 @@ from typing import Any, Mapping, Sequence, TextIO
 
 from fin_ops_platform.services.postgres_connection import PostgresConfigurationError, PostgresConnection, PostgresSettings
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
+from fin_ops_platform.services.runtime_worker_registry import rabbitmq_dispatch_event_types
 from fin_ops_platform.tools import (
     health_ready_payload_probe,
     http_slo_probe,
@@ -41,6 +42,7 @@ RUNTIME_HEALTH_REQUIRED_FIELDS = (
     "rabbitmq_queue_depth",
     "rabbitmq_unacked_messages",
     "rabbitmq_dlq_count",
+    "rabbitmq_queues",
 )
 
 
@@ -824,6 +826,24 @@ def _runtime_blockers(summary: Mapping[str, Any]) -> dict[str, Any]:
     dirty_scopes = summary.get("dirty_scopes")
     if isinstance(dirty_scopes, dict) and any(int(value or 0) > 0 for value in dirty_scopes.values()):
         blockers["dirty_scopes"] = dirty_scopes
+    rabbitmq_queues = summary.get("rabbitmq_queues")
+    if isinstance(rabbitmq_queues, Mapping):
+        expected_event_types = rabbitmq_dispatch_event_types()
+        missing_metrics = [
+            event_type
+            for event_type in expected_event_types
+            if not isinstance(rabbitmq_queues.get(event_type), Mapping)
+        ]
+        without_consumers = [
+            event_type
+            for event_type in expected_event_types
+            if isinstance(rabbitmq_queues.get(event_type), Mapping)
+            and _safe_int(rabbitmq_queues[event_type].get("consumers")) <= 0
+        ]
+        if missing_metrics:
+            blockers["rabbitmq_queue_metrics_missing"] = missing_metrics
+        if without_consumers:
+            blockers["rabbitmq_queues_without_consumers"] = without_consumers
     return blockers
 
 
