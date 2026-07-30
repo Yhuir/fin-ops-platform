@@ -1014,6 +1014,24 @@ class PostgresWorkbenchCanonicalQueryRepository:
             "groups": groups,
         }
 
+    def _search_group_descriptors(
+        self,
+        *,
+        scope_key: str,
+        zone: str,
+    ) -> list[dict[str, Any]]:
+        normalized_scope = self._scope_key(scope_key)
+        return self._connection.fetch_all(
+            f"""
+            with {_CANONICAL_GROUPS_CTE}
+            select groups.*
+            from canonical_groups groups
+            where groups.zone = %s
+            order by groups.internal_key
+            """,
+            tuple([*self._scope_params(normalized_scope), zone]),
+        )
+
     def _group_detail(
         self,
         *,
@@ -1089,40 +1107,39 @@ class PostgresWorkbenchCanonicalQueryRepository:
 
         contexts_by_row_id: dict[str, dict[str, Any]] = {}
         for zone in ("paired", "unpaired"):
-            page = 1
-            while True:
-                payload = self._groups_page(
-                    scope_key=normalized_scope,
-                    zone=zone,
-                    page=page,
-                    page_size=200,
-                    detail_level="full",
+            descriptors = self._search_group_descriptors(
+                scope_key=normalized_scope,
+                zone=zone,
+            )
+            groups = self._hydrate_groups(
+                month=normalized_scope,
+                descriptors=descriptors,
+                detail_level="full",
+                column_filters={},
+                time_filters={},
+            )
+            for group in groups:
+                if not isinstance(group, dict):
+                    continue
+                rows = self._group_rows(group)
+                project_names = sorted(
+                    {
+                        str(row.get("project_name") or "").strip()
+                        for row in rows
+                        if str(row.get("type") or "") == "oa"
+                        and str(row.get("project_name") or "").strip()
+                    }
                 )
-                for group in list(payload.get("groups") or []):
-                    if not isinstance(group, dict):
+                for row in rows:
+                    row_id = str(row.get("id") or "").strip()
+                    if not row_id or row_id in contexts_by_row_id:
                         continue
-                    rows = self._group_rows(group)
-                    project_names = sorted(
-                        {
-                            str(row.get("project_name") or "").strip()
-                            for row in rows
-                            if str(row.get("type") or "") == "oa"
-                            and str(row.get("project_name") or "").strip()
-                        }
-                    )
-                    for row in rows:
-                        row_id = str(row.get("id") or "").strip()
-                        if not row_id or row_id in contexts_by_row_id:
-                            continue
-                        contexts_by_row_id[row_id] = {
-                            "row": row,
-                            "zone_hint": zone,
-                            "group_id": str(group.get("group_id") or "") or None,
-                            "project_names": project_names,
-                        }
-                if not payload.get("has_more"):
-                    break
-                page += 1
+                    contexts_by_row_id[row_id] = {
+                        "row": row,
+                        "zone_hint": zone,
+                        "group_id": str(group.get("group_id") or "") or None,
+                        "project_names": project_names,
+                    }
 
         for row in self._ignored_rows(scope_key=normalized_scope):
             row_id = str(row.get("id") or "").strip()

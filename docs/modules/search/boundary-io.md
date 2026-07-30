@@ -48,6 +48,7 @@
 
 - source versions 与 scope summary一致时，worker 返回 `source_versions_unchanged`，不扫描/写索引。
 - source 变化时只重建当前月份；空结果允许清空当前 scope。
+- canonical Workbench 搜索源在每个 paired/unpaired zone 各执行一次 descriptor scan，再批量 hydrate 命中行；禁止通过分页 count + page loop 重复扫描同一 zone。
 - Redis 只缓存 freshness gate 后的结果；RabbitMQ 只作 transport/wakeup。
 - repository unavailable、非法 scope 或 proof 缺失必须 fail closed。
 

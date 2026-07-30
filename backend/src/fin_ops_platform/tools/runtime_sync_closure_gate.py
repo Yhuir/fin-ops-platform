@@ -59,6 +59,11 @@ def build_parser() -> argparse.ArgumentParser:
         description="Run the production runtime sync closure gate for all-page true freshness SLO.",
     )
     parser.add_argument("--base-url", default=os.getenv("FIN_OPS_HTTP_SLO_BASE_URL", "http://127.0.0.1:18001"))
+    parser.add_argument(
+        "--page-base-url",
+        default=os.getenv("FIN_OPS_HTTP_SLO_PAGE_BASE_URL", ""),
+        help="Optional public page origin. API/SSE/write probes continue to use --base-url.",
+    )
     parser.add_argument("--api-prefix", default=os.getenv("FIN_OPS_HTTP_SLO_API_PREFIX", ""))
     parser.add_argument("--tenant-id", default="default")
     parser.add_argument("--bearer-token", default=os.getenv("FIN_OPS_HTTP_SLO_BEARER_TOKEN", ""))
@@ -111,6 +116,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
     report = run_closure_gate(
         connection,
         base_url=str(args.base_url),
+        page_base_url=str(args.page_base_url or args.base_url),
         api_prefix=str(args.api_prefix),
         tenant_id=str(args.tenant_id or "default"),
         headers=headers,
@@ -144,6 +150,7 @@ def run_closure_gate(
     connection: Any,
     *,
     base_url: str,
+    page_base_url: str | None = None,
     api_prefix: str = "",
     tenant_id: str = "default",
     headers: Mapping[str, str] | None = None,
@@ -174,7 +181,6 @@ def run_closure_gate(
     write_scenarios, write_scenario_error = _load_write_scenarios(write_scenario, http_target_ms=http_target_ms)
     write_audit_operations = _write_scenario_operations(write_scenarios)
     checks = [
-        _runtime_health_check(connection),
         _read_model_smoke_check(
             connection,
             apply=apply_read_model_smoke,
@@ -185,6 +191,7 @@ def run_closure_gate(
         ),
         _http_slo_check(
             base_url=base_url,
+            page_base_url=page_base_url or base_url,
             api_prefix=api_prefix,
             headers=normalized_headers,
             admin_headers=normalized_admin_headers,
@@ -234,6 +241,8 @@ def run_closure_gate(
             poll_interval_seconds=poll_interval_seconds,
             limit=limit,
         ),
+        # Sample runtime convergence after every read/write smoke has completed.
+        _runtime_health_check(connection),
     ]
     status = _overall_status(checks)
     return {
@@ -356,6 +365,7 @@ def _read_model_smoke_check(
 def _http_slo_check(
     *,
     base_url: str,
+    page_base_url: str,
     api_prefix: str,
     headers: Mapping[str, str],
     admin_headers: Mapping[str, str],
@@ -377,7 +387,7 @@ def _http_slo_check(
                 *[
                     http_slo_probe.HttpProbe(
                         name=http_slo_probe._page_probe_name(path, fallback_index=index),
-                        path=path,
+                        path=http_slo_probe.resolve_probe_url(page_base_url, path),
                         kind="page",
                         expected_statuses=(200,),
                         target_ms=target_ms,
@@ -761,7 +771,12 @@ def _load_write_scenarios(
     if scenario_path is None:
         return None, None
     try:
-        return write_operation_e2e_smoke.load_scenarios(scenario_path, http_target_ms=http_target_ms), None
+        scenarios = write_operation_e2e_smoke.load_scenarios(
+            scenario_path,
+            http_target_ms=http_target_ms,
+        )
+        _validate_release_write_scenarios(scenarios)
+        return scenarios, None
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         return None, {
             "status": "input_error",
@@ -778,13 +793,46 @@ def _write_scenario_operations(scenarios: Sequence[Any] | None) -> tuple[str, ..
     operations: list[str] = []
     seen: set[str] = set()
     for scenario in scenarios:
-        for operation in getattr(scenario, "operations", ()):
+        checkpoints = [
+            *tuple(getattr(scenario, "checkpoints", ()) or ()),
+            *(
+                (getattr(scenario, "recovery_checkpoint"),)
+                if getattr(scenario, "recovery_checkpoint", None) is not None
+                else ()
+            ),
+        ]
+        scenario_operations = [
+            *tuple(getattr(scenario, "operations", ()) or ()),
+            *[
+                operation
+                for checkpoint in checkpoints
+                for operation in tuple(getattr(checkpoint, "operations", ()) or ())
+            ],
+        ]
+        for operation in scenario_operations:
             normalized = str(operation or "").strip()
             if not normalized or normalized in seen:
                 continue
             seen.add(normalized)
             operations.append(normalized)
     return tuple(operations) or None
+
+
+def _validate_release_write_scenarios(scenarios: Sequence[Any]) -> None:
+    registered_shapes = write_operation_e2e_smoke.REVERSIBLE_RELATION_SHAPE_CONTRACTS
+    for scenario in scenarios:
+        recovery = getattr(scenario, "recovery_checkpoint", None)
+        if (
+            getattr(scenario, "fixture_ownership", None) != "test_owned"
+            or getattr(scenario, "shape", None) not in registered_shapes
+            or not tuple(getattr(scenario, "checkpoints", ()) or ())
+            or recovery is None
+            or getattr(recovery, "relation_state_after", None) != "inactive"
+        ):
+            raise ValueError(
+                "production release gate requires registered test_owned reversible "
+                "confirm/withdraw scenarios with an inactive recovery checkpoint."
+            )
 
 
 def _compact_report(report: Mapping[str, Any]) -> dict[str, Any]:

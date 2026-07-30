@@ -408,6 +408,18 @@ python -m fin_ops_platform.app.worker \
   检查 exact worker inventory、queue/dirty/dead-letter 收敛、critical read-model SLO、固定可逆写
   smoke、domain/page canonical audit 及 API/health/SSE 性能；page audit 证据直接复用可逆写 smoke
   内部的全页面 canonical audit，不维护第二条审计链路
+- 页面 shell 探针固定使用公开站点 origin；API/SSE/可逆写探针固定使用当前 release 的内部服务 origin，
+  防止内部地址页面 404 或公开 Nginx fallback 被误判为业务 API 结果
+- 固定可逆写输入必须是运维维护的 `test_owned`、登记 shape、带 checkpoints 和 inverse/recovery 的受控
+  relation scenario；只读 discovery 输出和普通生产业务关系不能直接成为 release gate 输入。runner 每次
+  checkpoint 为 mutation 生成独立 idempotency key，并证明最终关系 inactive
+- 更新标准 scenario 时先把候选文件放到
+  `/tmp/finops-write-e2e-<run-id>.json`，再执行
+  `sudo /usr/local/sbin/finops-deploy-control write-operation-e2e-scenario-install <release-name> <temporary-scenario-path>`。
+  helper 使用候选 release 的严格合同校验后原子安装 root-owned `0600` 文件，并保留一份 `.previous`；
+  不允许直接覆盖标准 scenario、跟随符号链接或绕过候选代码校验
+- runtime health 在所有 read-model、HTTP/SSE 和可逆写 smoke 之后采样，最终 evidence 必须反映 smoke
+  触发后的 durable queue、dirty scope、worker 与 dead-letter 收敛状态
 - 门禁按 systemd 的既有边界分别加载 `/etc/fin-ops/fin-ops.rabbitmq-topology.env` 与
   `/etc/fin-ops/fin-ops.rabbitmq-monitoring.env`，任一缺失或不可读都 fail closed；可逆写 smoke
   优先使用 common env 中的 approval ticket，缺失时使用运维合同登记的固定 standing ticket，

@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from fin_ops_platform.tools import runtime_sync_closure_gate as gate
+from fin_ops_platform.tools.write_operation_e2e_smoke import WriteCheckpoint, WriteScenario
 
 
 class FakeRuntimeMonitoringRepository:
@@ -140,6 +141,39 @@ def write_e2e_pass_report() -> dict[str, object]:
     }
 
 
+def strict_write_scenarios() -> list[WriteScenario]:
+    confirm = WriteCheckpoint(
+        name="confirm",
+        operations=("workbench_relation_confirm",),
+        steps=(),
+        relation_state_after="active",
+    )
+    withdraw = WriteCheckpoint(
+        name="withdraw",
+        operations=("workbench_relation_withdraw",),
+        steps=(),
+        relation_state_after="inactive",
+    )
+    recovery = WriteCheckpoint(
+        name="recovery",
+        operations=("workbench_relation_withdraw",),
+        steps=(),
+        relation_state_after="inactive",
+    )
+    return [
+        WriteScenario(
+            name="strict",
+            operations=(),
+            steps=(),
+            post_api_probes=(),
+            checkpoints=(confirm, withdraw),
+            recovery_checkpoint=recovery,
+            fixture_ownership="test_owned",
+            shape="bank_invoice",
+        )
+    ]
+
+
 class RuntimeSyncClosureGateTests(unittest.TestCase):
     def setUp(self) -> None:
         self._health_ready_patch = patch.object(
@@ -222,7 +256,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             ), patch.object(
                 gate.write_operation_e2e_smoke,
                 "load_scenarios",
-                return_value=[object()],
+                return_value=strict_write_scenarios(),
             ), patch.object(
                 gate.write_operation_e2e_smoke,
                 "run_write_operation_e2e_smoke",
@@ -311,7 +345,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             ), patch.object(
                 gate.write_operation_e2e_smoke,
                 "load_scenarios",
-                return_value=[object()],
+                return_value=strict_write_scenarios(),
             ), patch.object(
                 gate.write_operation_e2e_smoke,
                 "run_write_operation_e2e_smoke",
@@ -334,6 +368,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
         self.assertEqual(report["targets"]["health_ready_payload_ms"], 1_000.0)
         self.assertEqual(report["targets"]["health_ready_max_response_bytes"], 50_000)
         self.assertEqual(report["targets"]["health_ready_max_api_performance_endpoints"], 20)
+        self.assertEqual(report["checks"][-1]["name"], "runtime_health")
 
     def test_gate_passes_admin_headers_to_http_slo_probe(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -365,7 +400,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             ), patch.object(
                 gate.write_operation_e2e_smoke,
                 "load_scenarios",
-                return_value=[object()],
+                return_value=strict_write_scenarios(),
             ), patch.object(
                 gate.write_operation_e2e_smoke,
                 "run_write_operation_e2e_smoke",
@@ -436,7 +471,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             ), patch.object(
                 gate.write_operation_e2e_smoke,
                 "load_scenarios",
-                return_value=[object()],
+                return_value=strict_write_scenarios(),
             ), patch.object(
                 gate.write_operation_e2e_smoke,
                 "run_write_operation_e2e_smoke",
@@ -490,7 +525,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             ), patch.object(
                 gate.write_operation_e2e_smoke,
                 "load_scenarios",
-                return_value=[object()],
+                return_value=strict_write_scenarios(),
             ), patch.object(
                 gate.write_operation_e2e_smoke,
                 "run_write_operation_e2e_smoke",
@@ -541,7 +576,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             ), patch.object(
                 gate.write_operation_e2e_smoke,
                 "load_scenarios",
-                return_value=[object()],
+                return_value=strict_write_scenarios(),
             ), patch.object(
                 gate.write_operation_e2e_smoke,
                 "run_write_operation_e2e_smoke",
@@ -592,7 +627,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             ), patch.object(
                 gate.write_operation_e2e_smoke,
                 "load_scenarios",
-                return_value=[object()],
+                return_value=strict_write_scenarios(),
             ), patch.object(
                 gate.write_operation_e2e_smoke,
                 "run_write_operation_e2e_smoke",
@@ -643,7 +678,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             ), patch.object(
                 gate.write_operation_e2e_smoke,
                 "load_scenarios",
-                return_value=[object()],
+                return_value=strict_write_scenarios(),
             ), patch.object(
                 gate.write_operation_e2e_smoke,
                 "run_write_operation_e2e_smoke",
@@ -694,7 +729,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             ), patch.object(
                 gate.write_operation_e2e_smoke,
                 "load_scenarios",
-                return_value=[object()],
+                return_value=strict_write_scenarios(),
             ), patch.object(
                 gate.write_operation_e2e_smoke,
                 "run_write_operation_e2e_smoke",
@@ -751,6 +786,10 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                 side_effect=audit_stub,
             ), patch.object(
                 gate.write_operation_e2e_smoke,
+                "load_scenarios",
+                return_value=strict_write_scenarios(),
+            ), patch.object(
+                gate.write_operation_e2e_smoke,
                 "run_write_operation_e2e_smoke",
                 return_value=write_e2e_pass_report(),
             ):
@@ -765,7 +804,61 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                 )
 
         self.assertEqual(report["status"], gate.PASS)
-        self.assertEqual(audit_calls[0]["operations"], ("workbench_relation_confirm",))
+        self.assertEqual(
+            audit_calls[0]["operations"],
+            ("workbench_relation_confirm", "workbench_relation_withdraw"),
+        )
+
+    def test_http_slo_uses_public_page_origin_and_internal_api_origin(self) -> None:
+        captured: dict[str, object] = {}
+
+        def collect_stub(**kwargs):
+            captured.update(kwargs)
+            return http_pass_report()
+
+        with patch.object(gate.http_slo_probe, "collect_http_slo", side_effect=collect_stub):
+            check = gate._http_slo_check(
+                base_url="http://127.0.0.1:18001",
+                page_base_url="https://www.yn-sourcing.com",
+                api_prefix="",
+                headers={"Authorization": "Bearer token"},
+                admin_headers={},
+                target_ms=1_000,
+                timeout_seconds=30,
+                require_auth=True,
+            )
+
+        self.assertEqual(check.status, gate.PASS)
+        probes = captured["probes"]
+        page_probes = [probe for probe in probes if probe.kind == "page"]
+        api_probes = [probe for probe in probes if probe.kind == "api"]
+        self.assertTrue(page_probes)
+        self.assertTrue(api_probes)
+        self.assertTrue(
+            all(probe.path.startswith("https://www.yn-sourcing.com/") for probe in page_probes)
+        )
+        self.assertTrue(all(probe.path.startswith("/api/") for probe in api_probes))
+
+    def test_release_gate_rejects_legacy_non_fixture_write_scenario(self) -> None:
+        legacy = WriteScenario(
+            name="legacy",
+            operations=("workbench_relation_confirm",),
+            steps=(),
+            post_api_probes=(),
+        )
+        with patch.object(
+            gate.write_operation_e2e_smoke,
+            "load_scenarios",
+            return_value=[legacy],
+        ):
+            scenarios, error = gate._load_write_scenarios(
+                Path("/tmp/legacy-write-scenario.json"),
+                http_target_ms=1_000,
+            )
+
+        self.assertIsNone(scenarios)
+        self.assertEqual(error["error"], "scenario_input_error")
+        self.assertIn("test_owned reversible", error["message"])
 
     def test_write_scenario_dry_run_does_not_satisfy_closure(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -797,7 +890,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             ), patch.object(
                 gate.write_operation_e2e_smoke,
                 "load_scenarios",
-                return_value=[object()],
+                return_value=strict_write_scenarios(),
             ), patch.object(
                 gate.write_operation_e2e_smoke,
                 "run_write_operation_e2e_smoke",
@@ -852,7 +945,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             ), patch.object(
                 gate.write_operation_e2e_smoke,
                 "load_scenarios",
-                return_value=[object()],
+                return_value=strict_write_scenarios(),
             ), patch.object(
                 gate.write_operation_e2e_smoke,
                 "run_write_operation_e2e_smoke",
@@ -966,7 +1059,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             ), patch.object(
                 gate.write_operation_e2e_smoke,
                 "load_scenarios",
-                return_value=[object()],
+                return_value=strict_write_scenarios(),
             ), patch.object(
                 gate.write_operation_e2e_smoke,
                 "run_write_operation_e2e_smoke",

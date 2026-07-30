@@ -127,13 +127,22 @@ event 或 worker instance 时，必须先更新 registry，再让 deploy/preflig
 
 ## 固定写操作 smoke 输入
 
-生产 write-operation E2E smoke 不再逐次询问 scenario 或 approval ticket。标准输入由
-`fin_ops_platform.tools.write_operation_scenario_discovery` 生成和报告：
+生产 write-operation E2E smoke 不再逐次询问 scenario 或 approval ticket。标准 scenario 是运维维护的
+`test_owned`、bounded、可逆关系测试对象；只读
+`fin_ops_platform.tools.write_operation_scenario_discovery` 只提供候选审核上下文，不能把普通生产业务关系
+写成 release gate 的可执行输入：
 
 - `FIN_OPS_WRITE_E2E_SCENARIO=/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json`
 - `FIN_OPS_WRITE_E2E_APPROVAL_TICKET=FINOPS-WRITE-SMOKE-STANDING-20260702`
 - 每个 operation 最多写入 1 个受控 scenario，避免同一月份连续撤回造成 Workbench/read model 串行刷新长尾。
-- discovery 只读 PostgreSQL 事实并输出候选；真正 apply 仍必须提供真实 OA/Admin auth，但不再需要临时业务 ticket。
+- scenario 必须使用登记的可逆 relation shape，包含 checkpoints 与 inverse/recovery，并证明最终关系 inactive；旧式 discovery 输出、真实待处理业务对象或缺少 recovery 的 scenario 必须 fail closed。
+- runner 每次执行为所有 mutation 生成独立 idempotency key；静态 root-owned scenario 不保存可跨 checkpoint 复用的 mutation key。
+- discovery 只读 PostgreSQL 事实并输出审核上下文；真正 apply 仍必须提供真实 OA/Admin auth，但不再需要临时业务 ticket。
+- 标准文件禁止通过 shell 重定向或普通复制直接覆盖。候选文件必须先保存为
+  `/tmp/finops-write-e2e-<run-id>.json`，再由
+  `finops-deploy-control write-operation-e2e-scenario-install <release-name> <temporary-scenario-path>`
+  使用候选 release 的严格校验器验证并原子安装；helper 拒绝链接、不安全权限、非 finops-deploy
+  所有者、超限文件和不完整 scenario，并保留 root-owned `.previous` 作为恢复点。
 - Workbench relation 的 test-owned checkpoint 必须显式执行三步 I/O：先按目标月份读取
   `/api/workbench?month=...` 并捕获 `read_model_version`，再让 preview 与 mutation 同时携带该精确版本；
   confirm 后的 withdraw 必须重新读取版本，禁止复用上一个 generation、隐藏重试或省略写前置条件。

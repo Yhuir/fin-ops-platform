@@ -1394,6 +1394,37 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(len(scenario.checkpoints), 1)
         self.assertEqual(scenario.checkpoints[0].name, "legacy")
 
+    def test_runtime_scenario_refreshes_mutation_idempotency_keys_per_run(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "scenario.json"
+            path.write_text(
+                json.dumps([_raw_bank_invoice_scenario("strict", "static")]),
+                encoding="utf-8",
+            )
+            scenario = write_operation_e2e_smoke.load_scenarios(
+                path,
+                http_target_ms=1000,
+            )[0]
+
+        first = write_operation_e2e_smoke._runtime_scenario(scenario)
+        second = write_operation_e2e_smoke._runtime_scenario(scenario)
+
+        def mutation_keys(value) -> list[str]:
+            checkpoints = [
+                *value.checkpoints,
+                *((value.recovery_checkpoint,) if value.recovery_checkpoint else ()),
+            ]
+            return [
+                str((step.json_body or {})["idempotency_key"])
+                for checkpoint in checkpoints
+                for step in checkpoint.steps
+                if step.mutation
+            ]
+
+        self.assertTrue(all(key.startswith("static-") for key in mutation_keys(scenario)))
+        self.assertNotEqual(mutation_keys(first), mutation_keys(second))
+        self.assertTrue(all(key.startswith("write-e2e:") for key in mutation_keys(first)))
+
     def test_checkpoint_contract_requires_test_owned_fixture_idempotency_consumers_audit_and_recovery(self) -> None:
         base = {
             "name": "closure",
@@ -2955,10 +2986,10 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             )
 
         self.assertEqual(report["status"], "pass")
-        durable_receipt.assert_called_once_with(
-            unittest.mock.ANY,
-            tenant_id="default",
-            idempotency_key="withdraw-key",
+        durable_receipt.assert_called_once()
+        self.assertEqual(durable_receipt.call_args.kwargs["tenant_id"], "default")
+        self.assertTrue(
+            durable_receipt.call_args.kwargs["idempotency_key"].startswith("write-e2e:")
         )
         self.assertIsNone(wait_slo.call_args_list[0].kwargs["event_ids"])
         self.assertEqual(wait_slo.call_args_list[1].kwargs["event_ids"], ["event-withdraw"])

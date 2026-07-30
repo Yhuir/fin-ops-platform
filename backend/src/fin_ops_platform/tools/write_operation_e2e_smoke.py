@@ -538,6 +538,7 @@ def run_write_operation_e2e_smoke(
             "planned_scenarios": plan,
         }
     request = request_fn or _http_request
+    runtime_scenarios = [_runtime_scenario(scenario) for scenario in scenarios]
     results = [
         _run_one_scenario(
             connection,
@@ -554,7 +555,7 @@ def run_write_operation_e2e_smoke(
             limit=limit,
             request_fn=request,
         )
-        for scenario in scenarios
+        for scenario in runtime_scenarios
     ]
     failed = [result for result in results if result.get("status") != "pass"]
     return {
@@ -924,6 +925,38 @@ def _runtime_preimage_recovery_checkpoint(
         checkpoint,
         name=f"{checkpoint.name}-preimage-normalization",
         steps=tuple(runtime_steps),
+    )
+
+
+def _runtime_scenario(scenario: WriteScenario) -> WriteScenario:
+    return replace(
+        scenario,
+        steps=tuple(_runtime_step(step) for step in scenario.steps),
+        checkpoints=tuple(_runtime_checkpoint(checkpoint) for checkpoint in scenario.checkpoints),
+        recovery_checkpoint=(
+            _runtime_checkpoint(scenario.recovery_checkpoint)
+            if scenario.recovery_checkpoint is not None
+            else None
+        ),
+    )
+
+
+def _runtime_checkpoint(checkpoint: WriteCheckpoint) -> WriteCheckpoint:
+    return replace(
+        checkpoint,
+        steps=tuple(_runtime_step(step) for step in checkpoint.steps),
+    )
+
+
+def _runtime_step(step: WriteStep) -> WriteStep:
+    if not step.mutation or "idempotency_key" not in (step.json_body or {}):
+        return step
+    return replace(
+        step,
+        json_body={
+            **(step.json_body or {}),
+            "idempotency_key": f"write-e2e:{uuid4().hex}",
+        },
     )
 
 

@@ -97,6 +97,47 @@ class QueueRecorder:
 
 
 class SearchSqlRuntimeTests(unittest.TestCase):
+    def test_canonical_search_scans_each_zone_once_without_page_count_queries(self) -> None:
+        class RecordingRepository(PostgresWorkbenchCanonicalQueryRepository):
+            def __init__(self) -> None:
+                self.zones: list[str] = []
+
+            def _search_group_descriptors(self, *, scope_key: str, zone: str):
+                self.zones.append(zone)
+                return [{"internal_key": f"{zone}-group"}]
+
+            def _hydrate_groups(self, *, descriptors, **_kwargs):
+                descriptor = descriptors[0]
+                zone = str(descriptor["internal_key"]).removesuffix("-group")
+                return [
+                    {
+                        "group_id": f"{zone}-group",
+                        "bank_rows": [
+                            {
+                                "id": f"{zone}-bank",
+                                "type": "bank",
+                                "counterparty_name": zone,
+                            }
+                        ],
+                    }
+                ]
+
+            def _groups_page(self, **_kwargs):
+                raise AssertionError("search refresh must not execute paginated count queries")
+
+            def _ignored_rows(self, *, scope_key: str):
+                return []
+
+        repository = RecordingRepository()
+
+        rows = repository._search_rows(scope_key="2026-06")
+
+        self.assertEqual(repository.zones, ["paired", "unpaired"])
+        self.assertEqual(
+            [item["row"]["id"] for item in rows],
+            ["paired-bank", "unpaired-bank"],
+        )
+
     def test_canonical_search_scan_uses_background_statement_timeout(self) -> None:
         class RecordingRepository(PostgresWorkbenchCanonicalQueryRepository):
             def __init__(self) -> None:

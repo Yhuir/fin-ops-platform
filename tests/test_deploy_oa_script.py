@@ -433,6 +433,17 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('rm -f -- "$dump_path" "$manifest_path"', script)
         self.assertIn('rmdir -- "$output_dir"', script)
         self.assertIn(
+            "write-operation-e2e-scenario-install <release-name> <temporary-scenario-path>",
+            script,
+        )
+        self.assertIn("write_operation_e2e_scenario_install()", script)
+        self.assertIn("from fin_ops_platform.tools.runtime_sync_closure_gate import _load_write_scenarios", script)
+        self.assertIn('install -m 0600 -o root -g root "$scenario" "$staged"', script)
+        self.assertIn('[[ ! -L "$target_dir" ]]', script)
+        self.assertIn('[[ ! -L "$backup" ]]', script)
+        self.assertIn('[[ -L "$STANDARD_WRITE_E2E_SCENARIO" ]]', script)
+        self.assertIn('mv -f -- "$staged" "$STANDARD_WRITE_E2E_SCENARIO"', script)
+        self.assertIn(
             "write-operation-e2e-smoke <release-name> <scenario-path> "
             "[--dry-run|--apply-stdin] [preview-samples]",
             script,
@@ -549,6 +560,11 @@ class DeployOAScriptTest(unittest.TestCase):
             '-$STANDARD_WRITE_E2E_APPROVAL_TICKET}"',
             checkpoint,
         )
+        self.assertIn("--page-base-url https://www.yn-sourcing.com", checkpoint)
+        self.assertLess(
+            checkpoint.index("-m fin_ops_platform.tools.runtime_sync_closure_gate"),
+            checkpoint.index('"$API_PYTHON" - "$runtime_report"'),
+        )
 
     def test_deploy_control_read_model_slo_smoke_refuses_apply_before_release_lookup(self) -> None:
         env = {**os.environ, "FINOPS_RELEASE_ROOT": "/tmp/finops-release-root-does-not-exist"}
@@ -592,6 +608,28 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(
             "scenario path must be the fixed standard scenario or match /tmp/finops-write-e2e-*.json",
+            result.stderr,
+        )
+        self.assertNotIn("release src directory not found", result.stderr)
+
+    def test_deploy_control_scenario_install_refuses_untrusted_path_before_release_lookup(self) -> None:
+        result = subprocess.run(
+            [
+                str(DEPLOY_CONTROL_SCRIPT_PATH),
+                "write-operation-e2e-scenario-install",
+                "fake-release",
+                "/etc/passwd",
+            ],
+            cwd=Path(__file__).resolve().parents[1],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "temporary scenario path must match /tmp/finops-write-e2e-*.json",
             result.stderr,
         )
         self.assertNotIn("release src directory not found", result.stderr)

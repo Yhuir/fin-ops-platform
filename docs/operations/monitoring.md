@@ -533,17 +533,12 @@ scenario 文件示例：
   - `FIN_OPS_WRITE_E2E_SCENARIO=/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json`
   - `FIN_OPS_WRITE_E2E_APPROVAL_TICKET=FINOPS-WRITE-SMOKE-STANDING-20260702`
 
-标准 scenario 文件由只读 discovery 生成，不把生产业务 ID 写入仓库：
+标准 scenario 文件由运维维护为 root-owned `0600` 输入，只允许登记过的 `test_owned` 可逆 relation
+shape，并必须包含 checkpoints、inverse/recovery 与最终 inactive 断言。runner 在每次 checkpoint
+执行时生成独立 idempotency key，文件本身不保存可复用 mutation key。
 
-```bash
-PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_scenario_discovery \
-  --limit 1 \
-  --scenario-output "$FIN_OPS_WRITE_E2E_SCENARIO" \
-  --output /tmp/finops-write-scenario-discovery-$(date +%Y%m%d%H%M%S).json
-chmod 600 "$FIN_OPS_WRITE_E2E_SCENARIO"
-```
-
-如果某一类没有满足安全边界的候选，标准文件可以少于 3 个 scenario；主控 workflow 应记录该类候选缺失并准备可回滚测试对象，
+`write_operation_scenario_discovery` 仍可生成只读候选报告，但其普通生产业务候选不得写入 release gate
+的可执行标准文件。如果没有满足安全边界的 test-owned 对象，门禁必须失败并先准备可回滚测试对象，
 不得为了凑齐数量回退到旧 API 路径、宽泛 SQL 选择或真实待处理业务对象。
 
 页面 / 模块 write scenario 与 approval ticket 矩阵：
@@ -625,8 +620,9 @@ export FIN_OPS_HTTP_SLO_ADMIN_TOKEN='真实管理员 Admin-Token'
 export FIN_OPS_WRITE_E2E_SCENARIO=/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json
 export FIN_OPS_WRITE_E2E_APPROVAL_TICKET=FINOPS-WRITE-SMOKE-STANDING-20260702
 PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_sync_closure_gate \
-  --base-url https://www.yn-sourcing.com \
-  --api-prefix /fin-ops-api \
+  --base-url http://127.0.0.1:18001 \
+  --page-base-url https://www.yn-sourcing.com \
+  --api-prefix "" \
   --apply-read-model-smoke \
   --write-scenario "$FIN_OPS_WRITE_E2E_SCENARIO" \
   --apply-write-scenarios \
@@ -641,6 +637,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_sync_closure_ga
 
 该 gate 必须全部通过才可宣称“所有页面一秒级真同步”：
 
+- 双 origin：页面 shell 在公开站点探测，API/SSE/写操作在当前 release 的内部服务 origin 探测；禁止让 Nginx 页面 fallback 掩盖内部 API 错误，也禁止把内部 API origin 当作页面站点。
 - runtime health：required worker、RabbitMQ queue/unacked/DLQ、dirty scope、failure rate 没有当前 blocker。
 - health-ready payload：`/fin-ops-api/health/ready` 自身在 1000ms 内返回轻量 JSON，`api_performance` bounded 且带截断 metadata。
 - direct read model smoke：显式 `--apply-read-model-smoke` 后，每个 App Status read model 的 enqueue-to-fresh 在目标内。
@@ -648,6 +645,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_sync_closure_ga
 - 登录态 SSE smoke：必须使用真实 OA token/Admin-Token/cookie，覆盖 App Health 和 Workbench event-stream 首事件 `<= 1000ms`，并拒绝 HTML fallback 或错误事件名。
 - 真实写操作 audit：最近真实 durable outbox 样本覆盖内置高影响 operation profile，并满足写入后 outbox done SLO。
 - 受控写操作 E2E：必须提供安全、可回滚的 scenario，并显式 `--apply-write-scenarios` 和 `--write-approval-ticket` 通过 mutating HTTP + 写后 outbox/readiness + 可选 post API。
+- 采样顺序：runtime health 在所有 read-model、HTTP/SSE 与写 smoke 之后执行，最终 evidence 证明的是门禁动作完成后的队列收敛，而不是写操作前的旧快照。
 
 缺少真实认证、缺少 scenario、只 dry-run、缺少审批引用、invalid scenario、runtime health 缺事实字段、或 write audit 没有样本时，gate 会返回 `fail`。
 Postgres-backed gates 在缺少 `FIN_OPS_POSTGRES_DATABASE_URL` / `DATABASE_URL` 时会返回

@@ -88,6 +88,8 @@ commands:
                                       create and verify a fixed full PostgreSQL backup before write smoke
   write-operation-restore-point-delete <run-id> <expected-sha256>
                                       delete one exact verified write-smoke backup
+  write-operation-e2e-scenario-install <release-name> <temporary-scenario-path>
+                                      validate and atomically install the fixed root-owned write-smoke scenario
   write-operation-e2e-smoke <release-name> <scenario-path> [--dry-run|--apply-stdin] [preview-samples]
   api-request-error <request-id>
   api-request-trace <request-id>
@@ -1062,6 +1064,73 @@ PY
   printf '{"status":"deleted","run_id":"%s","sha256":"%s"}\n' "$run_id" "$expected_checksum"
 }
 
+write_operation_e2e_scenario_install() {
+  local release="${1:-}" scenario="${2:-}"
+  [[ -n "$release" ]] || die "write-operation-e2e-scenario-install requires release name"
+  [[ "$scenario" =~ ^/tmp/finops-write-e2e-[A-Za-z0-9._-]+\.json$ ]] \
+    || die "temporary scenario path must match /tmp/finops-write-e2e-*.json"
+  [[ -f "$scenario" && ! -L "$scenario" ]] || die "temporary scenario must be a regular non-symlink file"
+  [[ "$(stat -c '%U' "$scenario")" == "finops-deploy" ]] \
+    || die "temporary scenario must be owned by finops-deploy"
+  [[ "$(stat -c '%s' "$scenario")" -le 1048576 ]] || die "temporary scenario exceeds 1 MiB"
+  find "$scenario" -maxdepth 0 -perm /022 -print -quit | grep -q . \
+    && die "temporary scenario must not be group/world writable"
+  [[ $# -eq 2 ]] || die "write-operation-e2e-scenario-install accepts only release name and scenario path"
+
+  local src target_dir staged backup validation
+  src="$(release_src "$release")"
+  validation="$(
+    PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}" \
+      "$API_PYTHON" - "$scenario" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+from fin_ops_platform.tools.runtime_sync_closure_gate import _load_write_scenarios
+
+path = Path(sys.argv[1])
+scenarios, error = _load_write_scenarios(path, http_target_ms=1000.0)
+if error is not None or not scenarios:
+    raise SystemExit(
+        "write-operation scenario validation failed: "
+        + json.dumps(error or {"error": "empty_scenarios"}, ensure_ascii=False, sort_keys=True)
+    )
+print(
+    json.dumps(
+        {
+            "status": "valid",
+            "scenario_count": len(scenarios),
+            "scenario_names": [str(scenario.name) for scenario in scenarios],
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+)
+PY
+  )"
+
+  target_dir="$(dirname "$STANDARD_WRITE_E2E_SCENARIO")"
+  [[ ! -L "$target_dir" ]] || die "write-operation scenario directory must not be a symlink"
+  install -d -m 0700 -o root -g root "$target_dir"
+  staged="$(mktemp "$target_dir/.write-operation-e2e-scenarios.XXXXXX")"
+  backup="$STANDARD_WRITE_E2E_SCENARIO.previous"
+  [[ ! -L "$backup" ]] || die "write-operation scenario backup must not be a symlink"
+  if ! install -m 0600 -o root -g root "$scenario" "$staged"; then
+    rm -f -- "$staged"
+    die "failed to stage validated write-operation scenario"
+  fi
+  if [[ -f "$STANDARD_WRITE_E2E_SCENARIO" && ! -L "$STANDARD_WRITE_E2E_SCENARIO" ]]; then
+    install -m 0600 -o root -g root "$STANDARD_WRITE_E2E_SCENARIO" "$backup"
+  elif [[ -L "$STANDARD_WRITE_E2E_SCENARIO" ]]; then
+    rm -f -- "$staged"
+    die "write-operation scenario target must not be a symlink"
+  fi
+  mv -f -- "$staged" "$STANDARD_WRITE_E2E_SCENARIO"
+  printf '%s\n' "$validation"
+}
+
 write_operation_e2e_smoke() {
   local release="${1:-}" scenario="${2:-}" mode="${3:---dry-run}" preview_samples="${4:-1}"
   [[ -n "$release" ]] || die "write-operation-e2e-smoke requires release name"
@@ -1313,6 +1382,44 @@ release_gate_checkpoint() {
     # shellcheck disable=SC1090
     source "$RABBITMQ_MONITORING_ENV"
     set +a
+    export FIN_OPS_WRITE_E2E_APPROVAL_TICKET="${FIN_OPS_WRITE_E2E_APPROVAL_TICKET:-$STANDARD_WRITE_E2E_APPROVAL_TICKET}"
+    [[ -n "${FIN_OPS_WRITE_E2E_APPROVAL_TICKET:-}" ]] \
+      || die "FIN_OPS_WRITE_E2E_APPROVAL_TICKET is required for the production-equivalent release gate"
+    [[ -f "$STANDARD_WRITE_E2E_SCENARIO" ]] \
+      || die "standard write-operation E2E scenario is missing: $STANDARD_WRITE_E2E_SCENARIO"
+    [[ "$(stat -c '%u:%a' "$STANDARD_WRITE_E2E_SCENARIO")" == "0:600" ]] \
+      || die "standard write-operation E2E scenario must be root-owned with mode 0600"
+    export PYTHONPATH="$verification_src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
+    export FIN_OPS_DATA_DIR="${FIN_OPS_DATA_DIR:-/opt/fin-ops/data}"
+    export FIN_OPS_HTTP_SLO_ADMIN_TOKEN="$admin_token"
+    export FIN_OPS_E2E_ADMIN_TOKEN="$admin_token"
+    cd "$verification_src"
+    "$API_PYTHON" -m fin_ops_platform.tools.runtime_sync_closure_gate \
+      --base-url http://127.0.0.1:18001 \
+      --page-base-url https://www.yn-sourcing.com \
+      --api-prefix "" \
+      --apply-read-model-smoke \
+      --write-scenario "$STANDARD_WRITE_E2E_SCENARIO" \
+      --apply-write-scenarios \
+      --read-model-target-ms 5000 \
+      --write-target-ms 5000 \
+      --http-target-ms 1000 \
+      --sse-target-ms 1000 \
+      --health-ready-target-ms 1000 \
+      --timeout-seconds 120 \
+      --output "$closure_report" >/dev/null
+  ) || true
+  (
+    set -a
+    # shellcheck disable=SC1090
+    source "$COMMON_ENV"
+    # shellcheck disable=SC1090
+    source "$SECRETS_ENV"
+    [[ -r "$RABBITMQ_MONITORING_ENV" ]] \
+      || die "RabbitMQ monitoring env is missing or unreadable: $RABBITMQ_MONITORING_ENV"
+    # shellcheck disable=SC1090
+    source "$RABBITMQ_MONITORING_ENV"
+    set +a
     export PYTHONPATH="$verification_src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
     "$API_PYTHON" - "$runtime_report" <<'PY'
 import json
@@ -1329,43 +1436,6 @@ Path(sys.argv[1]).write_text(
     encoding="utf-8",
 )
 PY
-  ) || true
-  (
-    set -a
-    # shellcheck disable=SC1090
-    source "$COMMON_ENV"
-    # shellcheck disable=SC1090
-    source "$SECRETS_ENV"
-    [[ -r "$RABBITMQ_MONITORING_ENV" ]] \
-      || die "RabbitMQ monitoring env is missing or unreadable: $RABBITMQ_MONITORING_ENV"
-    # shellcheck disable=SC1090
-    source "$RABBITMQ_MONITORING_ENV"
-    set +a
-    export FIN_OPS_WRITE_E2E_APPROVAL_TICKET="${FIN_OPS_WRITE_E2E_APPROVAL_TICKET:-$STANDARD_WRITE_E2E_APPROVAL_TICKET}"
-    [[ -n "${FIN_OPS_WRITE_E2E_APPROVAL_TICKET:-}" ]] \
-      || die "FIN_OPS_WRITE_E2E_APPROVAL_TICKET is required for the production-equivalent release gate"
-    [[ -f "$STANDARD_WRITE_E2E_SCENARIO" ]] \
-      || die "standard write-operation E2E scenario is missing: $STANDARD_WRITE_E2E_SCENARIO"
-    [[ "$(stat -c '%u:%a' "$STANDARD_WRITE_E2E_SCENARIO")" == "0:600" ]] \
-      || die "standard write-operation E2E scenario must be root-owned with mode 0600"
-    export PYTHONPATH="$verification_src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
-    export FIN_OPS_DATA_DIR="${FIN_OPS_DATA_DIR:-/opt/fin-ops/data}"
-    export FIN_OPS_HTTP_SLO_ADMIN_TOKEN="$admin_token"
-    export FIN_OPS_E2E_ADMIN_TOKEN="$admin_token"
-    cd "$verification_src"
-    "$API_PYTHON" -m fin_ops_platform.tools.runtime_sync_closure_gate \
-      --base-url http://127.0.0.1:18001 \
-      --api-prefix "" \
-      --apply-read-model-smoke \
-      --write-scenario "$STANDARD_WRITE_E2E_SCENARIO" \
-      --apply-write-scenarios \
-      --read-model-target-ms 5000 \
-      --write-target-ms 5000 \
-      --http-target-ms 1000 \
-      --sse-target-ms 1000 \
-      --health-ready-target-ms 1000 \
-      --timeout-seconds 120 \
-      --output "$closure_report" >/dev/null
   ) || true
   RELEASE_NAME="$release" \
   CHECKPOINT_LABEL="$label" \
@@ -1757,6 +1827,10 @@ case "$cmd" in
   write-operation-restore-point-delete)
     shift
     write_operation_restore_point_delete "$@"
+    ;;
+  write-operation-e2e-scenario-install)
+    shift
+    write_operation_e2e_scenario_install "$@"
     ;;
   write-operation-e2e-smoke)
     shift
