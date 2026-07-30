@@ -80,11 +80,17 @@ function formatCountWithSupplement(value: number | null | undefined, supplementa
   return `${base}（${formatNumber(supplementary)}）`;
 }
 
-function inventorySourceLabel(source: OperationsDashboardInventoryBlock["sources"][number]) {
-  if (source.key === "oa_attachment") {
-    return `${source.label}（进入统一发票池的数量）`;
+function inventorySource(block: OperationsDashboardInventoryBlock, key: string) {
+  return block.sources.find((source) => source.key === key);
+}
+
+function partitionDifference(total: number | null | undefined, values: Array<number | null | undefined>) {
+  const knownValues = values.filter((value): value is number => value !== null && value !== undefined && Number.isFinite(value));
+  if (total === null || total === undefined || !Number.isFinite(total) || knownValues.length !== values.length) {
+    return null;
   }
-  return source.label;
+  const difference = Math.abs(total - knownValues.reduce((sum, value) => sum + value, 0));
+  return difference === 0 ? null : difference;
 }
 
 function formatMs(value: number | null | undefined) {
@@ -405,34 +411,125 @@ function RuntimeOverview({ payload }: { payload: OperationsDashboardPayload }) {
   );
 }
 
-function InventorySummary({ title, block }: { title: string; block: OperationsDashboardInventoryBlock }) {
+function InventoryPanel({
+  title,
+  syncedAt,
+  children,
+}: {
+  title: string;
+  syncedAt: string | null | undefined;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="app-health-inventory-card">
-      <div className="app-health-inventory-card__title">{title}</div>
-      <div className="app-health-inventory-card__value">{formatNumber(block.total_count)}</div>
-      <div className="app-health-inventory-card__meta">{formatTimestamp(block.latest_synced_at)}</div>
-    </div>
+    <section className="app-health-inventory-panel">
+      <header className="app-health-inventory-panel__header">
+        <h3>{title}</h3>
+        <span>同步 {formatTimestamp(syncedAt)}</span>
+      </header>
+      <div className="app-health-inventory-table-shell">{children}</div>
+    </section>
   );
 }
 
-function InventorySourceRows({ title, block }: { title: string; block: OperationsDashboardInventoryBlock }) {
+function BankInventory({ block }: { block: OperationsDashboardInventoryBlock }) {
   return (
-    <FinanceTable ariaLabel={`${title}来源`} minWidth={360}>
-      <FinanceTableHeader>
-        <FinanceTableColumn columnRole="identity" isRowHeader>来源</FinanceTableColumn>
-        <FinanceTableColumn columnRole="quantity">数量</FinanceTableColumn>
-        <FinanceTableColumn columnRole="date">同步</FinanceTableColumn>
-      </FinanceTableHeader>
-      <FinanceTableBody>
+    <InventoryPanel title="流水" syncedAt={block.latest_synced_at}>
+      <table aria-label="银行流水来源" className="app-health-inventory-table">
+        <thead>
+          <tr><th scope="col">来源</th><th scope="col">数量</th><th scope="col">最近同步</th></tr>
+        </thead>
+        <tbody>
           {block.sources.map((source) => (
-            <FinanceTableRow key={source.key} id={source.key}>
-              <FinanceTableCell columnRole="identity" textValue={inventorySourceLabel(source)}>{inventorySourceLabel(source)}</FinanceTableCell>
-              <FinanceTableCell columnRole="quantity">{formatCountWithSupplement(source.count, source.supplementary_count)}</FinanceTableCell>
-              <FinanceTableCell columnRole="date">{formatTimestamp(source.latest_synced_at)}</FinanceTableCell>
-            </FinanceTableRow>
+            <tr key={source.key}>
+              <th scope="row">{source.label}</th>
+              <td className="app-health-inventory-table__number">{formatNumber(source.count)}</td>
+              <td>{formatTimestamp(source.latest_synced_at)}</td>
+            </tr>
           ))}
-      </FinanceTableBody>
-    </FinanceTable>
+        </tbody>
+      </table>
+    </InventoryPanel>
+  );
+}
+
+function InvoiceInventory({ block }: { block: OperationsDashboardInventoryBlock }) {
+  const input = inventorySource(block, "input_invoice");
+  const output = inventorySource(block, "output_invoice");
+  const manual = inventorySource(block, "manual");
+  const oa = inventorySource(block, "oa_attachment");
+  const typeDifference = partitionDifference(block.total_count, [input?.count, output?.count]);
+  const importDifference = partitionDifference(block.total_count, [manual?.count, oa?.supplementary_count]);
+
+  const dimensionCell = (label: string, difference: number | null) => (
+    <th className="app-health-inventory-table__dimension" rowSpan={2} scope="rowgroup">
+      <span>{label}</span>
+      {difference !== null ? <small role="status">口径未闭合 · 差异 {formatNumber(difference)}</small> : null}
+    </th>
+  );
+
+  return (
+    <InventoryPanel title="发票统计" syncedAt={block.latest_synced_at}>
+      <table aria-label="发票统计" className="app-health-inventory-table app-health-inventory-table--invoice">
+        <thead>
+          <tr><th scope="col">统计维度</th><th scope="col">分类</th><th scope="col">数量</th><th scope="col">合计</th><th scope="col">最近同步</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            {dimensionCell("按类型分", typeDifference)}
+            <th scope="row">{input?.label ?? "进项发票"}</th>
+            <td className="app-health-inventory-table__number">{formatNumber(input?.count)}</td>
+            <td className="app-health-inventory-table__total" rowSpan={2}>{formatNumber(block.total_count)}</td>
+            <td>{formatTimestamp(input?.latest_synced_at)}</td>
+          </tr>
+          <tr>
+            <th scope="row">{output?.label ?? "销项发票"}</th>
+            <td className="app-health-inventory-table__number">{formatNumber(output?.count)}</td>
+            <td>{formatTimestamp(output?.latest_synced_at)}</td>
+          </tr>
+          <tr>
+            {dimensionCell("按导入方式分", importDifference)}
+            <th scope="row">{manual?.label ?? "手工导入"}</th>
+            <td className="app-health-inventory-table__number">{formatNumber(manual?.count)}</td>
+            <td className="app-health-inventory-table__total" rowSpan={2}>{formatNumber(block.total_count)}</td>
+            <td>{formatTimestamp(manual?.latest_synced_at)}</td>
+          </tr>
+          <tr>
+            <th scope="row">
+              <span>{oa?.label ?? "OA 解析"}</span>
+              <small className="app-health-inventory-table__annotation">仅新增入池</small>
+            </th>
+            <td className="app-health-inventory-table__number">{formatNumber(oa?.supplementary_count)}</td>
+            <td>{formatTimestamp(oa?.latest_synced_at)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </InventoryPanel>
+  );
+}
+
+function OaInventory({ block }: { block: OperationsDashboardInventoryBlock }) {
+  const rows = [
+    inventorySource(block, "oa_records_completed"),
+    inventorySource(block, "oa_records_in_progress"),
+  ];
+
+  return (
+    <InventoryPanel title="OA 状态" syncedAt={block.latest_synced_at}>
+      <table aria-label="OA 状态" className="app-health-inventory-table">
+        <thead>
+          <tr><th scope="col">状态</th><th scope="col">数量</th><th scope="col">最近同步</th></tr>
+        </thead>
+        <tbody>
+          {rows.map((source, index) => (
+            <tr key={source?.key ?? index}>
+              <th scope="row">{source?.label ?? (index === 0 ? "已完成 OA" : "进行中 OA")}</th>
+              <td className="app-health-inventory-table__number">{formatNumber(source?.count)}</td>
+              <td>{formatTimestamp(source?.latest_synced_at)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </InventoryPanel>
   );
 }
 
@@ -485,14 +582,9 @@ function DataInventory({ payload, onOpenImportHistory }: { payload: OperationsDa
   return (
     <Section title="数据" testId="app-health-data">
       <div className="app-health-inventory-grid">
-        <InventorySummary title="流水" block={payload.data_inventory.bank} />
-        <InventorySummary title="发票" block={payload.data_inventory.invoice} />
-        <InventorySummary title="OA" block={payload.data_inventory.oa} />
-      </div>
-      <div className="app-health-source-grid">
-        <InventorySourceRows title="银行流水" block={payload.data_inventory.bank} />
-        <InventorySourceRows title="发票" block={payload.data_inventory.invoice} />
-        <InventorySourceRows title="OA" block={payload.data_inventory.oa} />
+        <BankInventory block={payload.data_inventory.bank} />
+        <InvoiceInventory block={payload.data_inventory.invoice} />
+        <OaInventory block={payload.data_inventory.oa} />
       </div>
       <div className="app-health-import-events">
         <div className="app-health-import-events__header">

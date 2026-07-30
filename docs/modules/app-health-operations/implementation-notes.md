@@ -1,5 +1,12 @@
 # 系统状态 实施记录
 
+## 2026-07-30 - 发票双维度与 OA 状态展示收敛
+
+- 目标：把 AppHealth 发票 inventory 从混合来源平铺改为“按类型 / 按导入方式”两组可闭合统计，并把 OA 页面统计收敛为已完成和进行中两个状态。
+- 影响范围：仅 AppHealth 前端展示、mock、组件/Browser 回归测试和模块文档；不修改 dashboard API、canonical 事实源、read model、worker、权限或部署合同。
+- 关键决策：类型维度使用进项/销项；导入方式维度使用手工导入与 `oa_attachment.supplementary_count`（OA 独占新增入池），不使用会与手工导入重叠的 OA 总关联数，不补造“其他”分类。OA 的单据/明细仍保留在后端 audit 合同中，但不进入运维页面状态展示。
+- 测试覆盖：前端组件测试覆盖两个发票维度、独占 OA 数量、闭合差异、unknown 和 OA 两状态；既有 App shell Browser smoke 覆盖 Audit projection 后分组仍正确。
+
 ## 2026-07-23 - 生产写闭环恢复门与 Dashboard 冷路径修复
 
 - 目标：修复 test-owned 生产 confirm smoke 失败后的恢复基线被 1 秒读性能门错误阻断，以及 App Health dashboard 冷缓存约 6.7 秒的问题。

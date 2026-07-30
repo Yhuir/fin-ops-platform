@@ -93,8 +93,8 @@
 - required worker missing/stale/mismatch -> runtime infrastructure warning -> App Health dashboard 和 App Status domain 可定位。
 - import/data reset/background job running -> active background task -> App Status 显示任务进度和 affected domains；`BackgroundJobServiceTests.test_job_acceptance_and_progress_visibility_contract` 锁定 job accepted 后 queued payload 立即可见、progress 更新后 active payload 同步变化。
 - dashboard refresh 成功后展示数据/请求/后台三块；下一次刷新失败时保留旧 dashboard 并显示 warning。
-- dashboard 发票来源展示 `手工导入`、`进项发票`、`销项发票` 和 `OA 解析`；`进项发票` / `销项发票` 来自 canonical invoice `invoice_type`，`OA 解析` 来自 canonical invoice `source_links[].source_type='oa_attachment_invoice'`，括号内数量是 OA 解析来源且不含 `manual_invoice_import` source link 的发票数，前端标签说明括号代表“进入统一发票池的数量”。`普通导入` 和 `ETC` 不再作为 App Health 发票来源展示；OA 附件 OCR cache 不作为 dashboard 发票 inventory 事实源。
-- dashboard OA 来源展示 `单据`、`已完成 OA`、`进行中 OA` 和 `明细`；`单据` 是 `app.oa_applications` 申请主表行数，`明细` 是 `app.oa_application_items` 明细行数，`已完成 OA` 按 OA projection 的完成态合同统计，`进行中 OA` 按 OA 待付款 read model 的 `viewCounts.in_progress` 等价唯一 OA ID 统计。
+- dashboard 发票统计按“类型”和“导入方式”两个维度分别闭合：类型使用 `input_invoice` / `output_invoice`，导入方式使用 `manual` / `oa_attachment.supplementary_count`；前端测试必须锁定 OA 独占新增数量而不是重叠的 `oa_attachment.count`，并覆盖已知数量不闭合时显示差异、未知数量不误报差异。`普通导入`、`ETC` 和 OA 附件 OCR cache 不进入该展示口径。
+- dashboard OA 页面只展示 `oa_records_completed` 和 `oa_records_in_progress`；`oa_records` 与 `oa_items` 继续保留在 API/audit 合同中，但前端测试必须锁定“单据”“明细”和含义不同的 OA 总数不会重新进入状态表。
 - dashboard OA 卡片上次读取时间来自最近成功 `app.oa_sync_runs(sync_type='oa_projection')`；`/api/oa-sync/status` 只读 `oa.sync` outbox、`oa-sync` worker heartbeat 和最新 projection run，不能从 HTTP 进程内 polling 状态或 projection row `synced_at` 推断。
 - dashboard 主页面只展示最新 5 条导入历史，右侧抽屉展示全量历史；导入历史只包含手工银行流水和发票批次，每条数量使用 `app.import_batches.success_count`，不用预览候选数、附件数、OA 解析数或 OA 同步数。
 - admin 调用进项/销项 audit -> `server -> OperationsAuditService -> PostgresOperationsAuditRepository` 只读检查 canonical facts、页面 read model、Workbench relation 和 freshness；只有结构化 integrity/freshness 通过才可作为已登记 invariant 一致的证据。非 admin 403、无 PostgreSQL 连接 503，发现问题返回 200 + 有上限样本，不写入修复。

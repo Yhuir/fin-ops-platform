@@ -435,6 +435,13 @@ function inventoryBlock(label: string) {
         status: "available",
       },
     ]
+    : label === "发票"
+      ? [
+        { key: "manual", label: "手工导入", count: 1, latest_synced_at: "2026-06-17T01:00:00Z", status: "available" },
+        { key: "input_invoice", label: "进项发票", count: 1, latest_synced_at: "2026-06-17T01:00:00Z", status: "available" },
+        { key: "output_invoice", label: "销项发票", count: 0, latest_synced_at: "2026-06-17T01:00:00Z", status: "available" },
+        { key: "oa_attachment", label: "OA 解析", count: 0, supplementary_count: 0, latest_synced_at: "2026-06-17T01:00:00Z", status: "available" },
+      ]
     : [
       {
         key: `${label}-mock`,

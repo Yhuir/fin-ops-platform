@@ -53,8 +53,8 @@
 - `/health` / `/health/ready`：公开或探针使用的轻量运行健康摘要；`api_performance.endpoints` 只保留 bounded 最慢 endpoint 摘要，完整 endpoint 明细由 `/metrics` 或 admin-only operations dashboard 提供。
 - App Status icon/popover：全局状态入口，只消费后端 `app_status`，不读取当前页面局部 loading；popover 必须显示 read model、worker 和 queue 的整体摘要。
 - App Status overview：由 session、background jobs、read model readiness、dirty scopes、outbox、worker heartbeat、dependencies、alerts 推导 green/yellow/red。
-- Dashboard 发票 inventory 展示 `手工导入`、`进项发票`、`销项发票` 和 `OA 解析`，不再展示 `普通导入` 或 `ETC`。统计事实源是统一发票池 `app.invoices`：`手工导入` 统计 `source_links[].source_type='manual_invoice_import'` 的 active 发票，`进项发票` / `销项发票` 按 `invoice_type` 统计 active 发票，`OA 解析` 统计 `source_links[].source_type='oa_attachment_invoice'` 的 active 发票，`OA 解析` 括号内数量统计带 OA 来源但不带手工导入来源的 active 发票。
-- Dashboard OA inventory 的 `单据` 统计 `app.oa_applications` 申请主表行数，`明细` 统计 `app.oa_application_items` 明细行数；同一卡片额外展示 `已完成 OA` 和 `进行中 OA`。`已完成 OA` 按 canonical OA projection 完成态合同统计唯一 OA 单据，空/历史完成态别名归入已完成；`进行中 OA` 按 `app.oa_pending_payment_admissions` 的唯一 OA ID 统计，不读取已退役页面 projection，也不只按 `app.oa_applications.workflow_status` 推导。
+- Dashboard 发票 inventory 按两个互斥维度展示：`进项发票 + 销项发票 = 发票总数`，以及 `手工导入 + OA 解析仅新增入池 = 发票总数`。统计事实源是统一发票池 `app.invoices`：类型维度按 `invoice_type`；导入方式维度的手工导入统计 `source_links[].source_type='manual_invoice_import'`，OA 解析使用带 OA 来源但不带手工导入来源的 `oa_attachment.supplementary_count`，不能使用会与手工导入重叠的 OA 总关联数。已知数量不闭合时页面显示差异，不补造“其他”分类；未知数量显示 `--`。`普通导入`、`ETC` 和 OA 附件 OCR cache 不进入该展示口径。
+- Dashboard OA 页面只展示 `已完成 OA` 和 `进行中 OA` 两个状态。API 仍保留 `oa_records` / `oa_items` 供 audit 和系统合同使用，但页面不展示“单据”“明细”或含义不同的 OA 总数；`已完成 OA` 按 canonical OA projection 完成态合同统计唯一 OA 单据，空/历史完成态别名归入已完成；`进行中 OA` 按 `app.oa_pending_payment_admissions` 的唯一 OA ID 统计，不读取已退役页面 projection，也不只按 `app.oa_applications.workflow_status` 推导。
 - Dashboard 导入历史只展示手工导入的银行流水和发票批次；OA 解析和 OA 单据同步只属于发票/OA inventory 与运行状态，不进入最近导入记录。主页面只显示最新 5 条，右侧抽屉展示所有历史记录。
 
 ## 运行事实源

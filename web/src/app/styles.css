@@ -9736,7 +9736,6 @@ textarea {
 }
 
 .app-health-inventory-grid,
-.app-health-source-grid,
 .app-health-runtime-grid {
   display: grid;
   gap: var(--fp-space-2);
@@ -9744,12 +9743,8 @@ textarea {
 }
 
 .app-health-inventory-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.app-health-source-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin-top: var(--fp-space-2);
+  grid-template-columns: minmax(260px, 0.75fr) minmax(520px, 1.5fr) minmax(300px, 0.85fr);
+  align-items: start;
 }
 
 .app-health-import-events {
@@ -9941,50 +9936,124 @@ textarea {
   white-space: nowrap;
 }
 
-.app-health-inventory-card {
+.app-health-inventory-panel {
   min-width: 0;
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-md);
-  padding: 10px 12px;
   background: var(--fp-surface);
-  transition:
-    border-color var(--motion-fast) var(--ease-standard),
-    background-color var(--motion-fast) var(--ease-standard);
+  overflow: hidden;
 }
 
-.app-health-inventory-card:hover {
-  border-color: var(--fp-border-strong);
-  background: var(--fp-surface-raised);
+.app-health-inventory-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--fp-space-2);
+  border-bottom: 1px solid var(--fp-border);
+  padding: 8px 10px;
+  background: var(--fp-surface-muted);
 }
 
-.app-health-inventory-card__title {
+.app-health-inventory-panel__header h3 {
+  margin: 0;
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-body);
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.app-health-inventory-panel__header span {
   color: var(--fp-text-muted);
+  font-family: var(--fp-font-data);
   font-size: var(--fp-text-label);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.app-health-inventory-table-shell {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.app-health-inventory-table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-label);
+  line-height: 1.35;
+}
+
+.app-health-inventory-table th,
+.app-health-inventory-table td {
+  border-top: 1px solid var(--fp-border);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.app-health-inventory-table thead th {
+  border-top: 0;
+  background: var(--fp-surface);
+  color: var(--fp-text-muted);
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.app-health-inventory-table tbody th {
+  font-weight: 700;
+}
+
+.app-health-inventory-table__number,
+.app-health-inventory-table__total {
+  font-family: var(--fp-font-data);
+  font-variant-numeric: tabular-nums;
+  font-weight: 750;
+  text-align: right !important;
+  white-space: nowrap;
+}
+
+.app-health-inventory-table__total {
+  background: var(--fp-surface-muted);
+  color: var(--fp-text-primary);
+  font-weight: 850;
+}
+
+.app-health-inventory-table__dimension {
+  width: 22%;
+  background: var(--fp-surface-muted);
+  color: var(--fp-text-secondary);
+  vertical-align: top !important;
+}
+
+.app-health-inventory-table__dimension span,
+.app-health-inventory-table__dimension small,
+.app-health-inventory-table__annotation {
+  display: block;
+}
+
+.app-health-inventory-table__dimension small {
+  margin-top: 3px;
+  color: var(--fp-warning);
+  font-size: 11px;
   font-weight: 700;
   line-height: 1.3;
 }
 
-.app-health-inventory-card__value {
-  margin-top: var(--fp-space-1);
-  color: var(--fp-ink);
-  font-family: var(--fp-font-data);
-  font-size: 22px;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-  line-height: 1.2;
-}
-
-.app-health-inventory-card__meta {
-  margin-top: var(--fp-space-1);
+.app-health-inventory-table__annotation {
+  margin-top: 2px;
   color: var(--fp-text-muted);
-  font-family: var(--fp-font-data);
-  font-size: var(--fp-text-label);
-  font-variant-numeric: tabular-nums;
-  line-height: 1.35;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.25;
 }
 
-@media (max-width: 1024px) {
-  .app-health-source-grid,
+.app-health-inventory-table--invoice {
+  min-width: 500px;
+}
+
+@media (max-width: 1200px) {
+  .app-health-inventory-grid,
   .app-health-audit-grid,
   .app-health-runtime-overview,
   .app-health-runtime-grid--primary,
@@ -10004,10 +10073,6 @@ textarea {
 
   .app-health-title {
     font-size: 24px;
-  }
-
-  .app-health-inventory-grid {
-    grid-template-columns: 1fr;
   }
 
   .app-health-section__body {

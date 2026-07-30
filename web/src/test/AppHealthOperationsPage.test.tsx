@@ -40,7 +40,7 @@ describe("AppHealthOperationsPage", () => {
     expect(styles).toMatch(/\.app-health-page\s*\{[\s\S]*gap:\s*var\(--fp-space-3\)/);
     expect(styles).toMatch(/\.app-health-title\s*\{[\s\S]*font-size:\s*var\(--fp-text-display\)/);
     expect(styles).toMatch(/\.app-health-section__header\s*\{[\s\S]*background:\s*var\(--fp-surface-muted\)/);
-    expect(styles).toMatch(/\.app-health-inventory-card__value\s*\{[\s\S]*font-family:\s*var\(--fp-font-data\)/);
+    expect(styles).toMatch(/\.app-health-inventory-table__number,[\s\S]*font-family:\s*var\(--fp-font-data\)/);
     expect(styles).toMatch(/\.app-health-audit-grid\s*\{[\s\S]*grid-template-columns:\s*repeat\(6,\s*minmax\(0,\s*1fr\)\)/);
     expect(styles).toMatch(/\.app-health-refresh-button\s*\{[\s\S]*transition:[\s\S]*border-color var\(--motion-fast\) var\(--ease-standard\)/);
   });
@@ -67,19 +67,23 @@ describe("AppHealthOperationsPage", () => {
     expect(data).toHaveTextContent("数据");
     expect(data).toHaveTextContent("流水");
     expect(data).toHaveTextContent("128");
-    expect(data).toHaveTextContent("发票");
-    expect(data).toHaveTextContent("256");
-    expect(data).toHaveTextContent("手工导入");
-    expect(data).toHaveTextContent("进项发票");
-    expect(data).toHaveTextContent("236");
-    expect(data).toHaveTextContent("销项发票");
-    expect(data).toHaveTextContent("20");
-    expect(data).toHaveTextContent("OA 解析（进入统一发票池的数量）");
-    expect(data).toHaveTextContent("40（5）");
+    const invoiceStats = within(data).getByRole("table", { name: "发票统计" });
+    expect(invoiceStats).toHaveTextContent("按类型分");
+    expect(invoiceStats).toHaveTextContent("进项发票236");
+    expect(invoiceStats).toHaveTextContent("销项发票20");
+    expect(invoiceStats).toHaveTextContent("按导入方式分");
+    expect(invoiceStats).toHaveTextContent("手工导入251");
+    expect(invoiceStats).toHaveTextContent("OA 解析仅新增入池5");
+    expect(within(invoiceStats).getAllByText("256")).toHaveLength(2);
+    expect(invoiceStats).not.toHaveTextContent("40");
+    expect(invoiceStats).not.toHaveTextContent("口径未闭合");
     expect(data).not.toHaveTextContent("普通导入");
     expect(data).not.toHaveTextContent("ETC");
-    expect(data).toHaveTextContent("已完成 OA");
-    expect(data).toHaveTextContent("进行中 OA");
+    const oaStats = within(data).getByRole("table", { name: "OA 状态" });
+    expect(oaStats).toHaveTextContent("已完成 OA61");
+    expect(oaStats).toHaveTextContent("进行中 OA11");
+    expect(oaStats).not.toHaveTextContent("单据");
+    expect(oaStats).not.toHaveTextContent("明细");
     const recentImportEvents = within(data).getByRole("grid", { name: "最近导入记录" });
     expect(recentImportEvents).toBeInTheDocument();
     expect(data).toHaveTextContent("bank-5.xlsx");
@@ -87,9 +91,7 @@ describe("AppHealthOperationsPage", () => {
     expect(recentImportEvents).not.toHaveTextContent("OA 同步");
     expect(recentImportEvents).not.toHaveTextContent("OA 附件解析");
     expect(data).not.toHaveTextContent("bank-6.xlsx");
-    expect(within(data).getByRole("grid", { name: "银行流水来源" })).toBeInTheDocument();
-    expect(within(data).getByRole("grid", { name: "发票来源" })).toBeInTheDocument();
-    expect(within(data).getByRole("grid", { name: "OA来源" })).toBeInTheDocument();
+    expect(within(data).getByRole("table", { name: "银行流水来源" })).toBeInTheDocument();
 
     const audit = screen.getByTestId("app-health-system-audit");
     expectProjectSection(audit);
@@ -347,6 +349,7 @@ describe("AppHealthOperationsPage", () => {
 
     const data = await screen.findByTestId("app-health-data", {}, { timeout: PAGE_TIMEOUT });
     expect(within(data).getAllByText("--").length).toBeGreaterThan(2);
+    expect(within(data).getByRole("table", { name: "发票统计" })).not.toHaveTextContent("口径未闭合");
     expect(screen.getByTestId("app-health-requests")).toHaveTextContent("--");
     expect(within(screen.getByTestId("app-health-requests")).getAllByText("--")[0].closest("td")).toHaveAttribute("data-tone", "unknown");
     expect(screen.getByTestId("app-health-runtime")).toHaveTextContent("--");
@@ -409,6 +412,7 @@ describe("AppHealthOperationsPage", () => {
 
     const data = await screen.findByTestId("app-health-data", {}, { timeout: PAGE_TIMEOUT });
     expect(data).toHaveTextContent("128");
+    expect(within(data).getByRole("table", { name: "发票统计" })).toHaveTextContent("口径未闭合 · 差异 245");
 
     await user.click(screen.getByRole("button", { name: "刷新" }));
 
