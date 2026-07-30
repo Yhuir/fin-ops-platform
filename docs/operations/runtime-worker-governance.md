@@ -536,7 +536,8 @@ common env、worker env 或跳过 RabbitMQ。固定可逆写 smoke 优先读取 
 
 最终证据写入
 `/opt/fin-ops/runtime-smoke/release-gates/<release>/evidence.json`，权限为 root `0600`，并绑定
-release 与 Git commit。PASS 必须满足：
+release 与 Git commit。PRE 失败时，部署命令只返回不含 token、环境变量值和业务样本的组件状态与
+队列计数摘要，供运维修复真实阻塞项；不得据此绕过门禁。PASS 必须满足：
 
 - `unknown_worker_count = 0`
 - `required_worker_not_ready = 0`

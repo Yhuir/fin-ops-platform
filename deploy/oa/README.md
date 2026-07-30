@@ -415,7 +415,8 @@ python -m fin_ops_platform.app.worker \
 - 最终 PASS evidence 写入
   `/opt/fin-ops/runtime-smoke/release-gates/<release-name>/evidence.json`，绑定 release 与 Git commit；
   任一 checkpoint 或 evidence 合同失败都会自动恢复 previous release 并验证回滚后的完整链路；
-  pre checkpoint 失败时还会恢复 previous release 的 deploy-control/runtime-worker helper
+  pre checkpoint 失败时还会恢复 previous release 的 deploy-control/runtime-worker helper，并在部署
+  命令中输出不含 token 和业务样本的组件状态及队列计数摘要
 
 常用参数：
 

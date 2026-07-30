@@ -520,6 +520,8 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('src="$(release_src "$previous_release")"', pre_failure_branch)
         self.assertIn('install_deploy_control_helper "$src"', pre_failure_branch)
         self.assertIn('install_runtime_worker_helper "$src"', pre_failure_branch)
+        self.assertIn('cat "$evidence_dir/pre/checkpoint.json" >&2', pre_failure_branch)
+        self.assertIn('"component_statuses": {', script)
 
     def test_release_gate_loads_rabbitmq_env_boundaries_and_standard_write_approval(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()

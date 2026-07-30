@@ -1453,6 +1453,14 @@ payload = {
     "release_name": os.environ["RELEASE_NAME"],
     "checkpoint": os.environ["CHECKPOINT_LABEL"],
     "checked_at": datetime.now(UTC).isoformat(),
+    "component_statuses": {
+        "worker_inventory": inventory.get("status"),
+        "rabbitmq_topology": rabbit.get("status"),
+        "domain_contract_audit": domain.get("status"),
+        "runtime_sync_closure": closure.get("status"),
+        "page_canonical_audit": page_canonical_audit.get("status"),
+        "rabbitmq_metrics": "pass" if rabbitmq_metrics_ready else "fail",
+    },
     "unknown_worker_count": int(inventory.get("unknown_worker_count") or 0),
     "required_worker_not_ready": int(inventory.get("required_worker_not_ready") or 0),
     "dirty_scope_count": dirty,
@@ -1571,6 +1579,7 @@ release_gate_activate() {
   [[ ! -e "$evidence_dir" ]] || die "release gate evidence already exists: $evidence_dir"
   install -d -m 0700 "$evidence_dir"
   if ! release_gate_checkpoint "$previous_release" pre "$admin_token" "$evidence_dir" "$release"; then
+    cat "$evidence_dir/pre/checkpoint.json" >&2
     src="$(release_src "$previous_release")"
     install_deploy_control_helper "$src"
     install_runtime_worker_helper "$src"
