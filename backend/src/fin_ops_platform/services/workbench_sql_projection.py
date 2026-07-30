@@ -1227,7 +1227,8 @@ class WorkbenchSqlProjectionBuilder:
                     row = deepcopy(summary_row)
                     row["case_id"] = case_id
                     row["status"] = relation_zone
-                    row["workbench_display_role"] = "summary"
+                    if str(row["id"]) not in set(relation.get("row_ids") or []):
+                        row["workbench_display_role"] = "summary"
                     row["relation_mode"] = relation.get("relation_mode")
                     self._apply_active_relation_metadata(row, relation)
                     row["invoice_bank_relation"] = {

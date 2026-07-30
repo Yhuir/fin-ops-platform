@@ -1981,13 +1981,13 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(result["read_model_stale_reasons"], ["builder_mismatch"])
         self.assertEqual(result["refresh_scope_keys"], [])
 
-    def test_workbench_v14_rejects_v13_month_all_and_cache_versions(self) -> None:
+    def test_workbench_v15_rejects_v14_month_all_and_cache_versions(self) -> None:
         app = object.__new__(Application)
-        old_month = "2026-07-30-etc-owner-link-v13"
-        old_all = "workbench_sql_projection.composed_active_month_shards.etc_owner_link.v13"
+        old_month = "2026-07-30-etc-batch-summary-identity-v14"
+        old_all = "workbench_sql_projection.composed_active_month_shards.etc_batch_summary_identity.v14"
 
-        self.assertIn("v14", WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION)
-        self.assertIn("v14", WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
+        self.assertIn("v15", WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION)
+        self.assertIn("v15", WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
         self.assertIn(WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION, WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION)
         self.assertIn(WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION, WORKBENCH_INITIAL_PAGE_CACHE_SCHEMA_VERSION)
         self.assertIn(
@@ -2381,6 +2381,40 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(summary_row["etc_invoice_count"], 2)
         self.assertEqual(summary_row["total_with_tax"], "144.50")
         self.assertEqual(summary_row["etc_invoice_detail_count"], 2)
+
+    def test_sql_projection_keeps_persisted_etc_summary_as_canonical_relation_member(self) -> None:
+        builder = WorkbenchSqlProjectionBuilder(connection=EtcSummaryProjectionConnection())
+        summary_row_id = "etc-summary-ETC-OA-20260215-154900"
+        rows_by_id = {
+            "oa-exp-1994": {
+                "id": "oa-exp-1994",
+                "type": "oa",
+                "amount": "1549.00",
+            }
+        }
+        relation = {
+            "case_id": "CASE-ETC-SUMMARY-MEMBER",
+            "relation_mode": "manual_confirmed",
+            "row_ids": ["oa-exp-1994", summary_row_id],
+            "row_types": ["oa", "invoice"],
+            "amount_check": {
+                "external_etc_batch_id": "ETC-OA-20260215-154900",
+                "status": "mismatch",
+            },
+        }
+
+        payload = builder._group_payload(
+            "2026-02",
+            with_test_object_identities(rows_by_id),
+            [relation],
+        )
+
+        group = payload["unpaired"]["groups"][0]
+        self.assertEqual(group["group_id"], "case:CASE-ETC-SUMMARY-MEMBER")
+        self.assertEqual(group["summary_row"]["id"], summary_row_id)
+        self.assertEqual(group["summary_row"]["source_kind"], "etc_invoice_summary")
+        self.assertEqual([row["id"] for row in group["invoice_rows"]], [summary_row_id])
+        self.assertEqual(group["collapsed_row_counts"], {"invoice": 2})
 
 
     def test_sql_projection_keeps_active_manual_oa_bank_relation_unpaired_without_requirement_metadata(self) -> None:

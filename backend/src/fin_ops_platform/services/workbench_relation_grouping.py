@@ -194,7 +194,16 @@ class WorkbenchRelationGroupingService:
         display_tags = self._display_tags(rows, relation)
         if display_tags:
             group["display_tags"] = display_tags
-        self._apply_display_summary(group, display_rows_by_case.get(case_id, []), zone=zone)
+        canonical_etc_summaries = [
+            row
+            for row in group["invoice_rows"]
+            if str(row.get("source_kind") or "").strip() == "etc_invoice_summary"
+        ]
+        self._apply_display_summary(
+            group,
+            canonical_etc_summaries or display_rows_by_case.get(case_id, []),
+            zone=zone,
+        )
         if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
             self._apply_bank_batch_summary(group, relation_mode=relation_mode, zone=zone)
         return group

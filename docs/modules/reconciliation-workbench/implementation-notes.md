@@ -3,6 +3,7 @@
 ## 2026-07-30 - ETC 批次摘要身份仲裁
 
 - 根因：`etc_invoice_summary.digital_invoice_no` 使用“ETC发票 N 张”展示文案，通用对象身份仲裁却把它当单张发票号码；不同 ETC 批次张数相同时会被错误合并，活动关系引用的 summary 可能在分组前消失并使 generation 重建失败。
+- 修复：正式关系已把 `etc-summary-{batch_id}` 持久化为 invoice 成员时，投影不再把该行降级为 display-only summary；关系外附加摘要仍保持原折叠展示语义。schema 升级为 v15，避免 v14 失败 generation/cache 被继续消费；没有新增表、worker、队列、缓存或兼容链。
 - 修复：ETC summary 在既有仲裁边界内按 deterministic `etc-summary-{batch_id}` 识别为批次聚合对象，不再参与单张发票强身份折叠；真实发票、OA 附件发票和银行流水的既有去重不变。schema 升级为 v14，淘汰可能已错误仲裁的旧 generation/cache；没有新增表、worker、队列、缓存、API 或兼容链。
 
 ## 2026-07-30 - ETC summary durable identity 与刷新态稳定 generation
