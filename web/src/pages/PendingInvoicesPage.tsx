@@ -19,7 +19,6 @@ import {
   downloadPendingInvoiceExport,
   fetchPendingInvoiceCandidatesBatch,
   fetchPendingInvoiceExportPreview,
-  fetchPendingInvoiceFilterOptions,
   fetchPendingInvoiceObjectDetail,
   fetchPendingInvoiceRelationDetail,
   fetchPendingInvoiceRows,
@@ -234,6 +233,7 @@ export default function PendingInvoicesPage() {
     setTotal(payload.pagination.total);
     setSourceSummary(payload.summary.sourceSummary ?? null);
     setStatistics(payload.statistics ?? null);
+    setColumnFilterFields(payload.filterFields);
     const version = payload.tagDictionary?.version;
     if (typeof version === "number" && version > 0) {
       const previousVersion = tagVersionRef.current;
@@ -271,29 +271,6 @@ export default function PendingInvoicesPage() {
     loadRows(controller.signal);
     return () => controller.abort();
   }, [active, activationGeneration, loadRows, refreshToken]);
-
-  useEffect(() => {
-    if (!active) {
-      return undefined;
-    }
-    const controller = new AbortController();
-    fetchPendingInvoiceFilterOptions({
-      direction,
-      filter: query.filter,
-      keyword,
-      filters: queryFilters,
-      sortField,
-      sortDirection,
-      signal: controller.signal,
-    })
-      .then((payload) => setColumnFilterFields(payload.fields))
-      .catch((caught) => {
-        if (!isAbortLikeError(caught)) {
-          setColumnFilterFields([]);
-        }
-    });
-    return () => controller.abort();
-  }, [active, activationGeneration, direction, keyword, query.filter, queryFilters, sortDirection, sortField, refreshToken]);
 
   const filterOptions = useMemo(() => statusFilterOptionsForDirection(direction), [direction]);
 

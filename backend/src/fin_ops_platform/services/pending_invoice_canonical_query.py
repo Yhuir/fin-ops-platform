@@ -5,7 +5,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from http import HTTPStatus
 import json
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, Mapping
 
 from fin_ops_platform.domain.enums import TransactionDirection
 from fin_ops_platform.services.pending_invoice_rules import (
@@ -1600,6 +1600,28 @@ class LocalPendingInvoiceCanonicalRepository:
         return self._query_service.oa_detail(oa_id)
 
 
+def _filter_options_payload(
+    request: Mapping[str, Any],
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    options: dict[str, list[dict[str, Any]]] = {field["field"]: [] for field in FILTER_FIELDS}
+    for item in list(payload.get("options") or []):
+        if not isinstance(item, dict):
+            continue
+        field = str(item.get("field") or "")
+        value = str(item.get("value") or "")
+        if field in options and value:
+            options[field].append(
+                {"value": value, "label": value, "count": int(item.get("count") or 0)}
+            )
+    return {
+        "direction": request["direction"],
+        "filter": request["filter"],
+        "fields": [{**field, "options": options[field["field"]]} for field in FILTER_FIELDS],
+        "options": options,
+    }
+
+
 class PendingInvoiceCanonicalQueryService:
     def __init__(
         self,
@@ -1640,27 +1662,13 @@ class PendingInvoiceCanonicalQueryService:
             },
             "statistics": dict(payload.get("statistics") or {}),
             "tag_dictionary": dict((payload.get("settings") or {}).get("bank_transaction_tags") or {}),
+            "filter_options": _filter_options_payload(request, payload),
         }
 
     def filter_options(self, query: dict[str, list[str]]) -> dict[str, Any]:
         request = _request(query)
         payload = self._repository.query(request, page=1, page_size=1)
-        options: dict[str, list[dict[str, Any]]] = {field["field"]: [] for field in FILTER_FIELDS}
-        for item in list(payload.get("options") or []):
-            if not isinstance(item, dict):
-                continue
-            field = str(item.get("field") or "")
-            value = str(item.get("value") or "")
-            if field in options and value:
-                options[field].append(
-                    {"value": value, "label": value, "count": int(item.get("count") or 0)}
-                )
-        return {
-            "direction": request["direction"],
-            "filter": request["filter"],
-            "fields": [{**field, "options": options[field["field"]]} for field in FILTER_FIELDS],
-            "options": options,
-        }
+        return _filter_options_payload(request, payload)
 
     def all_rows(self, query: dict[str, list[str]]) -> dict[str, Any]:
         request = _request(query)

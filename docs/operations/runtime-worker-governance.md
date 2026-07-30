@@ -136,6 +136,8 @@ event 或 worker instance 时，必须先更新 registry，再让 deploy/preflig
 - `FIN_OPS_WRITE_E2E_APPROVAL_TICKET=FINOPS-WRITE-SMOKE-STANDING-20260702`
 - 每个 operation 最多写入 1 个受控 scenario，避免同一月份连续撤回造成 Workbench/read model 串行刷新长尾。
 - scenario 必须使用登记的可逆 relation shape，包含 checkpoints 与 inverse/recovery，并证明最终关系 inactive；旧式 discovery 输出、真实待处理业务对象或缺少 recovery 的 scenario 必须 fail closed。
+- `runtime_sync_closure_gate` 在所有 profile 开始时先校验该合同；只有 T+0 `full` profile 执行 mutation，
+  T+60/T+300 `stability` 只验证写后收敛证据，不重复 confirm/withdraw。
 - runner 每次执行为所有 mutation 生成独立 idempotency key；静态 root-owned scenario 不保存可跨 checkpoint 复用的 mutation key。
 - discovery 只读 PostgreSQL 事实并输出审核上下文；真正 apply 仍必须提供真实 OA/Admin auth，但不再需要临时业务 ticket。
 - 标准文件禁止通过 shell 重定向或普通复制直接覆盖。候选文件必须先保存为
@@ -532,12 +534,14 @@ PYTHONPATH="$release_src/backend/src" \
 5. 等待 `/health` worker readiness 收敛。
 6. 输出状态。
 
-入口先对当前 release 执行 production-equivalent pre checkpoint；候选激活后分别在 T+0、T+60s、
-T+300s 执行同一完整 checkpoint。每次检查都必须使用真实 PostgreSQL 和 RabbitMQ，验证 exact
-registry/systemd inventory、worker readiness、dirty scope、pending/processing outbox、durable 与
-RabbitMQ dead letter、critical read-model enqueue-to-fresh SLO、固定可逆写 smoke、domain/page
-canonical audit 和 API/health/SSE 性能。page canonical audit 直接取可逆写 smoke 已验证的全页面审计证据，
-不重复调用另一条审计路径。RabbitMQ management 未配置或读取失败时 fail closed。checkpoint 必须按实际
+入口先对当前 release 执行 production-equivalent `preflight` checkpoint；候选激活后在 T+0 执行
+`full` checkpoint，并分别在 T+60s、T+300s 执行 `stability` checkpoint。所有 profile 都先严格验证
+root-owned 标准 scenario 是登记的 `test_owned` 可逆合同；只有 T+0 `full` 执行一次 confirm/withdraw/recovery
+和页面 canonical audit，延迟 checkpoint 不重复业务 mutation。每次检查都必须使用真实 PostgreSQL 和 RabbitMQ，
+验证 exact registry/systemd inventory、worker readiness、dirty scope、pending/processing outbox、durable 与
+RabbitMQ dead letter、critical read-model enqueue-to-fresh SLO、domain audit 和 API/health/SSE 性能。
+最终 evidence 复用 T+0 已验证的写操作与页面 canonical audit，并以 T+300 runtime 采样证明 queue 持续稳定。
+RabbitMQ management 未配置或读取失败时 fail closed。checkpoint 必须按实际
 systemd I/O 边界分别加载 `/etc/fin-ops/fin-ops.rabbitmq-topology.env`（topology apply）和
 `/etc/fin-ops/fin-ops.rabbitmq-monitoring.env`（runtime health/closure）；文件缺失或不可读不得退回
 common env、worker env 或跳过 RabbitMQ。固定可逆写 smoke 优先读取 common env 的 approval ticket，
@@ -556,8 +560,8 @@ release 与 Git commit。PRE 失败时，部署命令只返回不含 token、环
 - `page_canonical_audit_status = pass`
 - `queue_stable_after_300_seconds = true`
 
-任一 checkpoint、最终证据写入或证据合同校验失败，都必须自动恢复 previous release，并在回滚后执行完整
-checkpoint；pre checkpoint 失败时还必须恢复 previous release 的 deploy-control/runtime-worker helper。
+任一 checkpoint、最终证据写入或证据合同校验失败，都必须自动恢复 previous release，并在回滚后执行
+`preflight` checkpoint；pre checkpoint 失败时还必须恢复 previous release 的 deploy-control/runtime-worker helper。
 pre 与 rollback checkpoint 使用候选 release 的门禁代码检查实际运行 release；worker inventory 仍按实际
 运行 release 的 registry 核对。这样首次启用新门禁时不依赖旧 release 中尚不存在的检查逻辑。
 不存在“候选已激活但没有有效 gate evidence”的成功状态。

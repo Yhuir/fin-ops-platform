@@ -199,6 +199,16 @@ describe("pending invoices and tag settings API mapping", () => {
         version: 9,
         tags: [{ code: "fee", label: "手续费", path: ["自动识别", "手续费"], status: "active", source: "system" }],
       },
+      filter_options: {
+        fields: [
+          {
+            field: "counterparty_name",
+            label: "对方户名",
+            operators: ["in", "contains"],
+            options: [{ value: "云南供应商", label: "云南供应商", count: 2 }],
+          },
+        ],
+      },
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -246,6 +256,14 @@ describe("pending invoices and tag settings API mapping", () => {
       expenseTransactionCount: undefined,
       incomeTransactionCount: undefined,
     }));
+    expect(payload.filterFields).toEqual([
+      {
+        field: "counterparty_name",
+        label: "对方户名",
+        operators: ["in", "contains"],
+        options: [{ value: "云南供应商", label: "云南供应商", count: 2 }],
+      },
+    ]);
     expect(payload.rows[0]).toMatchObject({
       id: "txn_001",
       bankTransaction: {

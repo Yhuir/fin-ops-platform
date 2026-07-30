@@ -412,6 +412,74 @@ function batchAttachRow() {
   };
 }
 
+function pendingInvoiceFilterFields() {
+  return [
+    {
+      field: "counterparty_name",
+      label: "对方户名",
+      operators: ["in", "contains"],
+      options: [
+        { value: "云南开票供应商", label: "云南开票供应商", count: 1 },
+        { value: "分期供应商", label: "分期供应商", count: 1 },
+      ],
+    },
+    {
+      field: "transaction_tag",
+      label: "流水标签",
+      operators: ["in", "contains"],
+      options: [
+        { value: "货款 / 设备采购", label: "货款 / 设备采购", count: 1 },
+        { value: "费用 / 手续费", label: "费用 / 手续费", count: 2 },
+      ],
+    },
+    {
+      field: "bank_account",
+      label: "银行账户",
+      operators: ["in", "contains"],
+      options: [
+        { value: "建行 8106", label: "建行 8106", count: 3 },
+        { value: "光大 8826", label: "光大 8826", count: 1 },
+      ],
+    },
+    {
+      field: "direction",
+      label: "收支",
+      operators: ["in"],
+      options: [
+        { value: "expense", label: "支出", count: 356 },
+        { value: "income", label: "收入", count: 75 },
+      ],
+    },
+    {
+      field: "seller_name",
+      label: "销方",
+      operators: ["in", "contains"],
+      options: [{ value: "分期供应商", label: "分期供应商", count: 1 }],
+    },
+    {
+      field: "oa_applicant",
+      label: "申请人",
+      operators: ["in", "contains"],
+      options: [{ value: "李四", label: "李四", count: 1 }],
+    },
+    {
+      field: "oa_application_type",
+      label: "类型",
+      operators: ["in", "contains"],
+      options: [
+        { value: "支付", label: "支付", count: 2 },
+        { value: "报销", label: "报销", count: 1 },
+      ],
+    },
+    {
+      field: "project_name",
+      label: "项目",
+      operators: ["in", "contains"],
+      options: [{ value: "建设项目", label: "建设项目", count: 1 }],
+    },
+  ];
+}
+
 function installPendingInvoiceFetch(options: {
   rulesPayload?: () => ReturnType<typeof pendingInvoiceRulesPayload>;
   rowsPayload?: (url: URL) => Array<Record<string, unknown>>;
@@ -447,6 +515,7 @@ function installPendingInvoiceFetch(options: {
           },
         },
         tag_dictionary: { version: 1, tags: [] },
+        filter_options: { fields: pendingInvoiceFilterFields() },
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
     if (url.pathname === "/api/pending-invoices/rules" && method === "GET") {
@@ -470,71 +539,7 @@ function installPendingInvoiceFetch(options: {
     }
     if (url.pathname === "/api/pending-invoices/filter-options") {
       return new Response(JSON.stringify({
-        fields: [
-          {
-            field: "counterparty_name",
-            label: "对方户名",
-            operators: ["in", "contains"],
-            options: [
-              { value: "云南开票供应商", label: "云南开票供应商", count: 1 },
-              { value: "分期供应商", label: "分期供应商", count: 1 },
-            ],
-          },
-          {
-            field: "transaction_tag",
-            label: "流水标签",
-            operators: ["in", "contains"],
-            options: [
-              { value: "货款 / 设备采购", label: "货款 / 设备采购", count: 1 },
-              { value: "费用 / 手续费", label: "费用 / 手续费", count: 2 },
-            ],
-          },
-          {
-            field: "bank_account",
-            label: "银行账户",
-            operators: ["in", "contains"],
-            options: [
-              { value: "建行 8106", label: "建行 8106", count: 3 },
-              { value: "光大 8826", label: "光大 8826", count: 1 },
-            ],
-          },
-          {
-            field: "direction",
-            label: "收支",
-            operators: ["in"],
-            options: [
-              { value: "expense", label: "支出", count: 356 },
-              { value: "income", label: "收入", count: 75 },
-            ],
-          },
-          {
-            field: "seller_name",
-            label: "销方",
-            operators: ["in", "contains"],
-            options: [{ value: "分期供应商", label: "分期供应商", count: 1 }],
-          },
-          {
-            field: "oa_applicant",
-            label: "申请人",
-            operators: ["in", "contains"],
-            options: [{ value: "李四", label: "李四", count: 1 }],
-          },
-          {
-            field: "oa_application_type",
-            label: "类型",
-            operators: ["in", "contains"],
-            options: [
-              { value: "支付", label: "支付", count: 2 },
-              { value: "报销", label: "报销", count: 1 },
-            ],
-          },
-          {
-            field: "project_name",
-            label: "项目",
-            operators: ["in", "contains"],
-            options: [{ value: "建设项目", label: "建设项目", count: 1 }],
-          },
-        ],
+        fields: pendingInvoiceFilterFields(),
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
     if (url.pathname === "/api/pending-invoices/rules" && method === "PUT") {
@@ -1136,6 +1141,9 @@ describe("Pending invoices page", () => {
 
     const page = await findPendingInvoicesPage();
     await within(page).findByText("云南开票供应商");
+    expect(
+      fetchMock.mock.calls.some(([input]) => new URL(String(input), "http://localhost").pathname === "/api/pending-invoices/filter-options"),
+    ).toBe(false);
 
     await user.click(within(page).getByRole("button", { name: "筛选 对方户名" }));
     const filterMenu = await screen.findByRole("menu", { hidden: true });

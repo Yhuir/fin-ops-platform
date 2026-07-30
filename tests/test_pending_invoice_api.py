@@ -311,6 +311,8 @@ class PendingInvoiceApiTests(unittest.TestCase):
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["rows"][0]["bank_transaction"]["counterparty_name"], "Vendor No Repository")
+        self.assertIn("filter_options", payload)
+        self.assertIn("fields", payload["filter_options"])
         self.assertNotIn("read_model_status", payload)
 
     def test_manual_invoice_endpoints_are_not_reachable(self) -> None:

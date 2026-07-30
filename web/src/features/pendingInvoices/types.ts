@@ -293,6 +293,7 @@ export type PendingInvoiceRowsResponse = {
   };
   statistics?: PendingInvoiceStatistics;
   tagDictionary?: BankTransactionTagDictionary;
+  filterFields: PendingInvoiceFilterField[];
 };
 
 export type FetchPendingInvoiceRowsRequest = {

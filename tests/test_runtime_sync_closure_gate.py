@@ -226,6 +226,61 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
 
         self.assertEqual(blockers, {"rabbitmq_management_configured": False})
 
+    def test_rejects_unknown_gate_profile(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unsupported release gate profile"):
+            gate.run_closure_gate(
+                object(),
+                base_url="https://example.test",
+                profile="unknown",
+            )
+
+    def test_preflight_checks_contract_health_and_runtime_without_mutating_probes(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            scenario_path = Path(temp_dir) / "scenario.json"
+            scenario_path.write_text('{"scenarios":[]}')
+            with patch.object(
+                gate,
+                "RuntimeMonitoringRepository",
+                FakeRuntimeMonitoringRepository,
+            ), patch.object(
+                gate.write_operation_e2e_smoke,
+                "load_scenarios",
+                return_value=strict_write_scenarios(),
+            ), patch.object(
+                gate.read_model_slo_smoke,
+                "run_smoke",
+            ) as read_model_smoke, patch.object(
+                gate.http_slo_probe,
+                "collect_http_slo",
+            ) as http_slo, patch.object(
+                gate.sse_smoke_probe,
+                "collect_sse_smoke",
+            ) as sse_smoke, patch.object(
+                gate.write_operation_slo_audit,
+                "audit_write_operation_slo",
+            ) as write_audit, patch.object(
+                gate.write_operation_e2e_smoke,
+                "run_write_operation_e2e_smoke",
+            ) as write_e2e:
+                report = gate.run_closure_gate(
+                    object(),
+                    base_url="https://example.test",
+                    profile="preflight",
+                    write_scenario=scenario_path,
+                )
+
+        self.assertEqual(report["status"], gate.PASS)
+        self.assertEqual(report["profile"], "preflight")
+        self.assertEqual(
+            [check["name"] for check in report["checks"]],
+            ["write_scenario_contract", "health_ready_payload", "runtime_health"],
+        )
+        read_model_smoke.assert_not_called()
+        http_slo.assert_not_called()
+        sse_smoke.assert_not_called()
+        write_audit.assert_not_called()
+        write_e2e.assert_not_called()
+
     def test_runtime_health_empty_summary_prevents_closure_pass(self) -> None:
         with TemporaryDirectory() as temp_dir:
             scenario_path = Path(temp_dir) / "scenario.json"
@@ -323,7 +378,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                 gate.read_model_slo_smoke,
                 "run_smoke",
                 return_value=read_model_pass_report(),
-            ), patch.object(
+            ) as read_model_smoke, patch.object(
                 gate.http_slo_probe,
                 "collect_http_slo",
                 return_value=http_pass_report(),
@@ -369,6 +424,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
         self.assertEqual(report["targets"]["health_ready_max_response_bytes"], 50_000)
         self.assertEqual(report["targets"]["health_ready_max_api_performance_endpoints"], 20)
         self.assertEqual(report["checks"][-1]["name"], "runtime_health")
+        self.assertTrue(read_model_smoke.call_args.kwargs["critical_only"])
 
     def test_gate_passes_admin_headers_to_http_slo_probe(self) -> None:
         with TemporaryDirectory() as temp_dir:

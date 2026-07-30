@@ -220,6 +220,17 @@ type ApiPendingInvoiceRowsResponse = {
   }> | null;
   tag_dictionary?: ApiTagDictionary | null;
   bank_transaction_tags?: ApiTagDictionary | null;
+  filter_options?: ApiPendingInvoiceFilterOptionsPayload | null;
+};
+
+type ApiPendingInvoiceFilterOptionsPayload = {
+  fields?: Array<{
+    field?: string;
+    label?: string;
+    operators?: unknown[];
+    options?: Array<{ value?: string; label?: string; count?: number }>;
+  }>;
+  options?: Record<string, Array<{ value?: string; label?: string; count?: number }>>;
 };
 
 type ApiPendingInvoiceRulesPayload = {
@@ -703,6 +714,26 @@ function mapRowsResponse(payload: ApiPendingInvoiceRowsResponse, request: FetchP
       linkedOutputInvoiceTransactionCount: optionalCount(payload.statistics.linked_output_invoice_transaction_count),
     } : undefined,
     tagDictionary: mapBankTransactionTagDictionary(payload.tag_dictionary ?? payload.bank_transaction_tags),
+    filterFields: mapFilterOptions(payload.filter_options).fields,
+  };
+}
+
+function mapFilterOptions(payload?: ApiPendingInvoiceFilterOptionsPayload | null): PendingInvoiceFilterOptionsResponse {
+  return {
+    fields: (payload?.fields ?? []).map((field) => {
+      const fieldName = stringValue(field.field);
+      const options = field.options ?? payload?.options?.[fieldName] ?? [];
+      return {
+        field: fieldName,
+        label: stringValue(field.label, fieldName),
+        operators: stringList(field.operators),
+        options: options.map((option) => ({
+          value: stringValue(option.value),
+          label: stringValue(option.label, stringValue(option.value)),
+          count: numberValue(option.count),
+        })),
+      };
+    }),
   };
 }
 
@@ -752,29 +783,11 @@ export async function fetchPendingInvoiceRows(request: FetchPendingInvoiceRowsRe
 }
 
 export async function fetchPendingInvoiceFilterOptions(request: FetchPendingInvoiceRowsRequest): Promise<PendingInvoiceFilterOptionsResponse> {
-  const payload = await requestJson<{
-    fields?: Array<{ field?: string; label?: string; operators?: unknown[]; options?: Array<{ value?: string; label?: string; count?: number }> }>;
-    options?: Record<string, Array<{ value?: string; label?: string; count?: number }>>;
-  }>(
+  const payload = await requestJson<ApiPendingInvoiceFilterOptionsPayload>(
     `/api/pending-invoices/filter-options?${buildRowsQuery(request, false)}`,
     { method: "GET", signal: request.signal },
   );
-  return {
-    fields: (payload.fields ?? []).map((field) => {
-      const fieldName = stringValue(field.field);
-      const options = field.options ?? payload.options?.[fieldName] ?? [];
-      return {
-        field: fieldName,
-        label: stringValue(field.label, fieldName),
-        operators: stringList(field.operators),
-        options: options.map((option) => ({
-          value: stringValue(option.value),
-          label: stringValue(option.label, stringValue(option.value)),
-          count: numberValue(option.count),
-        })),
-      };
-    }),
-  };
+  return mapFilterOptions(payload);
 }
 
 const RULE_LABELS = {

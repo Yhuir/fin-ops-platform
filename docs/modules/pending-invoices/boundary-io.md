@@ -42,7 +42,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | rows + summary + statistics | 前端页面 | 同一显式 `REPEATABLE READ / READ ONLY` snapshot；settings SELECT + 一次 set-based 页面 SELECT；固定两次 SELECT |
-| filter-options | 前端筛选 | 有界每字段最多 50 项；数据库聚合，不把全部 rows 加载到 Python/浏览器 |
+| rows.filter_options | 前端筛选 | 与 rows/summary/statistics 共用同一 `REPEATABLE READ` snapshot 和同一次 HTTP 响应；有界每字段最多 50 项，数据库聚合，不把全部 rows 加载到 Python/浏览器 |
 | export-preview/export | 前端导出 | 复用同一 canonical row DTO；最大 20,000 行，超限先报错；不读取页面 read model |
 | relation/object detail | 前端抽屉 | active canonical relations；`kind=bank|invoice|oa` 只控制响应分区 |
 | invoice candidates | 前端选择已有发票抽屉 | 服务端过滤、排序、分页；固定两次 SELECT；返回 candidate/bank relation status 与关联流水数 |
@@ -52,6 +52,8 @@
 
 - `PostgresPendingInvoiceCanonicalRepository.query()` 显式开启 `REPEATABLE READ / READ ONLY`。
 - rows、当前筛选 summary、全期间 statistics、facets/counts 由一次 set-based SQL 计算，分页在 SQL 中执行。
+- 页面首次加载和筛选变更只调用 `/api/pending-invoices/rows`；独立
+  `/api/pending-invoices/filter-options` 只保留为兼容 API，页面不得再并行发出重复聚合请求。
 - 分类/确认/income override、relation members、invoice/OA/bank summaries 都批量聚合；禁止 per-row/per-group N+1。
 - 自动规则字符串使用 PostgreSQL `normalize(..., NFKC)`、空白折叠及现有“帐户→账户”口径。
 - SQL 分类后由 `pending_invoice_status_payload` 再校验；若 SQL 和领域策略分歧则请求失败。

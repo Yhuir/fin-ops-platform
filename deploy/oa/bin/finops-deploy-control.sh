@@ -1331,8 +1331,12 @@ release_gate_checkpoint() {
   local label="$2"
   local admin_token="$3"
   local evidence_dir="$4"
-  local verification_release="${5:-$release}"
+  local profile="${5:-full}"
+  local verification_release="${6:-$release}"
   local src verification_src checkpoint_dir rabbit_report domain_report closure_report inventory_report runtime_report
+  local -a closure_args
+  [[ "$profile" == "preflight" || "$profile" == "full" || "$profile" == "stability" ]] \
+    || die "unsupported release gate profile: $profile"
   src="$(release_src "$release")"
   verification_src="$(release_src "$verification_release")"
   checkpoint_dir="$evidence_dir/$label"
@@ -1383,8 +1387,10 @@ release_gate_checkpoint() {
     source "$RABBITMQ_MONITORING_ENV"
     set +a
     export FIN_OPS_WRITE_E2E_APPROVAL_TICKET="${FIN_OPS_WRITE_E2E_APPROVAL_TICKET:-$STANDARD_WRITE_E2E_APPROVAL_TICKET}"
-    [[ -n "${FIN_OPS_WRITE_E2E_APPROVAL_TICKET:-}" ]] \
-      || die "FIN_OPS_WRITE_E2E_APPROVAL_TICKET is required for the production-equivalent release gate"
+    if [[ "$profile" == "full" ]]; then
+      [[ -n "${FIN_OPS_WRITE_E2E_APPROVAL_TICKET:-}" ]] \
+        || die "FIN_OPS_WRITE_E2E_APPROVAL_TICKET is required for the production-equivalent release gate"
+    fi
     [[ -f "$STANDARD_WRITE_E2E_SCENARIO" ]] \
       || die "standard write-operation E2E scenario is missing: $STANDARD_WRITE_E2E_SCENARIO"
     [[ "$(stat -c '%u:%a' "$STANDARD_WRITE_E2E_SCENARIO")" == "0:600" ]] \
@@ -1394,20 +1400,25 @@ release_gate_checkpoint() {
     export FIN_OPS_HTTP_SLO_ADMIN_TOKEN="$admin_token"
     export FIN_OPS_E2E_ADMIN_TOKEN="$admin_token"
     cd "$verification_src"
-    "$API_PYTHON" -m fin_ops_platform.tools.runtime_sync_closure_gate \
-      --base-url http://127.0.0.1:18001 \
-      --page-base-url https://www.yn-sourcing.com \
-      --api-prefix "" \
-      --apply-read-model-smoke \
-      --write-scenario "$STANDARD_WRITE_E2E_SCENARIO" \
-      --apply-write-scenarios \
-      --read-model-target-ms 5000 \
-      --write-target-ms 5000 \
-      --http-target-ms 1000 \
-      --sse-target-ms 1000 \
-      --health-ready-target-ms 1000 \
-      --timeout-seconds 120 \
-      --output "$closure_report" >/dev/null
+    closure_args=(
+      --base-url http://127.0.0.1:18001
+      --page-base-url https://www.yn-sourcing.com
+      --api-prefix ""
+      --profile "$profile"
+      --apply-read-model-smoke
+      --write-scenario "$STANDARD_WRITE_E2E_SCENARIO"
+      --read-model-target-ms 5000
+      --write-target-ms 5000
+      --http-target-ms 1000
+      --sse-target-ms 1000
+      --health-ready-target-ms 1000
+      --timeout-seconds 120
+      --output "$closure_report"
+    )
+    if [[ "$profile" == "full" ]]; then
+      closure_args+=(--apply-write-scenarios)
+    fi
+    "$API_PYTHON" -m fin_ops_platform.tools.runtime_sync_closure_gate "${closure_args[@]}" >/dev/null
   ) || true
   (
     set -a
@@ -1439,6 +1450,7 @@ PY
   ) || true
   RELEASE_NAME="$release" \
   CHECKPOINT_LABEL="$label" \
+  CHECKPOINT_PROFILE="$profile" \
   RABBIT_REPORT="$rabbit_report" \
   DOMAIN_REPORT="$domain_report" \
   CLOSURE_REPORT="$closure_report" \
@@ -1529,6 +1541,8 @@ page_canonical_audit_ready = (
     and page_canonical_audit.get("status") == "pass"
     and int(page_canonical_audit.get("audit_count") or 0) > 0
 )
+profile = os.environ["CHECKPOINT_PROFILE"]
+page_canonical_audit_required = profile == "full"
 queue_backlog = runtime.get("queue_backlog", {}) if isinstance(runtime, dict) else {}
 dirty_scopes = runtime.get("dirty_scopes", {}) if isinstance(runtime, dict) else {}
 pending = (
@@ -1556,7 +1570,7 @@ passed = (
     and rabbit.get("status") == "applied"
     and domain.get("status") == "pass"
     and closure.get("status") == "pass"
-    and page_canonical_audit_ready
+    and (page_canonical_audit_ready or not page_canonical_audit_required)
     and rabbitmq_metrics_ready
     and pending == 0
     and failed == 0
@@ -1567,13 +1581,14 @@ payload = {
     "release_gate_status": "PASS" if passed else "FAIL",
     "release_name": os.environ["RELEASE_NAME"],
     "checkpoint": os.environ["CHECKPOINT_LABEL"],
+    "profile": profile,
     "checked_at": datetime.now(UTC).isoformat(),
     "component_statuses": {
         "worker_inventory": inventory.get("status"),
         "rabbitmq_topology": rabbit.get("status"),
         "domain_contract_audit": domain.get("status"),
         "runtime_sync_closure": closure.get("status"),
-        "page_canonical_audit": page_canonical_audit.get("status"),
+        "page_canonical_audit": page_canonical_audit.get("status") if page_canonical_audit_required else "not_required",
         "rabbitmq_metrics": "pass" if rabbitmq_metrics_ready else "fail",
     },
     "unknown_worker_count": int(inventory.get("unknown_worker_count") or 0),
@@ -1631,6 +1646,7 @@ for label in ("pre", "t0", "t60", "t300", "rollback"):
     if path.is_file():
         checkpoints[label] = json.loads(path.read_text(encoding="utf-8"))
 latest = next((checkpoints[name] for name in ("t300", "t60", "t0", "pre") if name in checkpoints), {})
+t0_page_audit = checkpoints.get("t0", {}).get("page_canonical_audit", {})
 pre_dlq = int(checkpoints.get("pre", {}).get("dead_letter_count", 0))
 final_dlq = int(latest.get("dead_letter_count", pre_dlq))
 passed = os.environ["GATE_STATUS"] == "PASS" and "t300" in checkpoints
@@ -1648,8 +1664,8 @@ payload = {
     "pending_outbox_count": int(latest.get("pending_outbox_count", -1)),
     "dead_letter_delta": final_dlq - pre_dlq,
     "page_canonical_audit_status": (
-        latest.get("page_canonical_audit", {}).get("status")
-        if isinstance(latest.get("page_canonical_audit"), dict)
+        t0_page_audit.get("status")
+        if isinstance(t0_page_audit, dict)
         else None
     ),
     "queue_stable_after_300_seconds": passed,
@@ -1671,7 +1687,7 @@ rollback_release_gate() {
   local failure_checkpoint="$5"
   local rolled_back=false
   if (activate_release "$previous_release") \
-    && release_gate_checkpoint "$previous_release" rollback "$admin_token" "$evidence_dir" "$candidate"; then
+    && release_gate_checkpoint "$previous_release" rollback "$admin_token" "$evidence_dir" preflight; then
     rolled_back=true
   fi
   write_release_gate_evidence \
@@ -1697,7 +1713,7 @@ release_gate_activate() {
   evidence_dir="$RELEASE_GATE_EVIDENCE_ROOT/$release"
   [[ ! -e "$evidence_dir" ]] || die "release gate evidence already exists: $evidence_dir"
   install -d -m 0700 "$evidence_dir"
-  if ! release_gate_checkpoint "$previous_release" pre "$admin_token" "$evidence_dir" "$release"; then
+  if ! release_gate_checkpoint "$previous_release" pre "$admin_token" "$evidence_dir" preflight "$release"; then
     cat "$evidence_dir/pre/checkpoint.json" >&2
     src="$(release_src "$previous_release")"
     install_deploy_control_helper "$src"
@@ -1708,15 +1724,15 @@ release_gate_activate() {
   if ! (activate_release "$release"); then
     rollback_release_gate "$release" "$previous_release" "$admin_token" "$evidence_dir" activation
   fi
-  if ! release_gate_checkpoint "$release" t0 "$admin_token" "$evidence_dir"; then
+  if ! release_gate_checkpoint "$release" t0 "$admin_token" "$evidence_dir" full; then
     rollback_release_gate "$release" "$previous_release" "$admin_token" "$evidence_dir" t0
   fi
   sleep 60
-  if ! release_gate_checkpoint "$release" t60 "$admin_token" "$evidence_dir"; then
+  if ! release_gate_checkpoint "$release" t60 "$admin_token" "$evidence_dir" stability; then
     rollback_release_gate "$release" "$previous_release" "$admin_token" "$evidence_dir" t60
   fi
   sleep 240
-  if ! release_gate_checkpoint "$release" t300 "$admin_token" "$evidence_dir"; then
+  if ! release_gate_checkpoint "$release" t300 "$admin_token" "$evidence_dir" stability; then
     rollback_release_gate "$release" "$previous_release" "$admin_token" "$evidence_dir" t300
   fi
   if ! write_release_gate_evidence "$release" "$previous_release" "$evidence_dir" PASS false; then

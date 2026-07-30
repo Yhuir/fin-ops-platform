@@ -404,10 +404,13 @@ python -m fin_ops_platform.app.worker \
 - 清理可删除的旧 release，默认保留最近 4 个，并始终保护当前 active release
 - 激活发布会在创建新 release 目录前先执行一次旧 release 清理，并检查 release 所在文件系统至少有
   512MB 可用空间；空间不足时会输出 `df` 和关键目录大小后停止，不会继续解包到半失败状态
-- 候选激活后在 T+0、T+60s、T+300s 复用同一完整 checkpoint，连接真实 PostgreSQL 与 RabbitMQ，
-  检查 exact worker inventory、queue/dirty/dead-letter 收敛、critical read-model SLO、固定可逆写
-  smoke、domain/page canonical audit 及 API/health/SSE 性能；page audit 证据直接复用可逆写 smoke
-  内部的全页面 canonical audit，不维护第二条审计链路
+- 激活前运行 `preflight`：用候选 gate 代码检查当前 stable runtime、worker/queue/RabbitMQ 收敛，并严格
+  校验标准可逆 scenario，但不执行业务 mutation
+- 候选激活后 T+0 运行 `full`：连接真实 PostgreSQL 与 RabbitMQ，检查 exact worker inventory、
+  queue/dirty/dead-letter 收敛、critical read-model SLO、一次固定可逆写 smoke、domain/page canonical
+  audit 及 API/health/SSE 性能；page audit 证据直接复用该 smoke 内部的全页面 canonical audit
+- T+60s、T+300s 运行 `stability`：重跑 critical read-model、性能、domain audit 和 runtime 收敛检查，
+  不重复 confirm/withdraw；最终证据复用 T+0 写操作/page audit，并以 T+300 证明异步拓扑持续稳定
 - 页面 shell 探针固定使用公开站点 origin；API/SSE/可逆写探针固定使用当前 release 的内部服务 origin，
   防止内部地址页面 404 或公开 Nginx fallback 被误判为业务 API 结果
 - 固定可逆写输入必须是运维维护的 `test_owned`、登记 shape、带 checkpoints 和 inverse/recovery 的受控

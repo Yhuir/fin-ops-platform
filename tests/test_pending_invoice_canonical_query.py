@@ -214,7 +214,9 @@ class PendingInvoiceCanonicalQueryServiceTests(unittest.TestCase):
                     "current_direction_rows": 0,
                     "excluded_direction_rows": 0,
                 },
-                "options": [],
+                "options": [
+                    {"field": "counterparty_name", "value": "云南供应商", "count": 2}
+                ],
                 "settings": {},
             }
         )
@@ -225,6 +227,11 @@ class PendingInvoiceCanonicalQueryServiceTests(unittest.TestCase):
         self.assertEqual(payload["rows"], [])
         self.assertEqual(payload["summary"]["total_rows"], 0)
         self.assertEqual(payload["statistics"], {"bank_transaction_count": 0})
+        self.assertEqual(
+            payload["filter_options"]["options"]["counterparty_name"],
+            [{"value": "云南供应商", "label": "云南供应商", "count": 2}],
+        )
+        self.assertEqual(len(repository.calls), 1)
         self.assertNotIn("read_model_status", payload)
 
     def test_rejects_invalid_direction_filter_sort_dates_filters_and_pagination(self) -> None:

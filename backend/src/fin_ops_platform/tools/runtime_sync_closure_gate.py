@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import sys
+from time import monotonic, sleep
 from typing import Any, Mapping, Sequence, TextIO
 
 from fin_ops_platform.services.postgres_connection import PostgresConfigurationError, PostgresConnection, PostgresSettings
@@ -25,6 +26,7 @@ from fin_ops_platform.tools.cli_reports import postgres_configuration_missing_re
 PASS = "pass"
 FAIL = "fail"
 SKIP = "skip"
+GATE_PROFILES = ("preflight", "full", "stability")
 WRITE_E2E_REQUIRED_ARGS = ("--write-scenario", "--apply-write-scenarios", "--write-approval-ticket")
 RUNTIME_HEALTH_REQUIRED_FIELDS = (
     "queue_backlog",
@@ -70,6 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--admin-token", default=os.getenv("FIN_OPS_HTTP_SLO_ADMIN_TOKEN", ""))
     parser.add_argument("--cookie", default=os.getenv("FIN_OPS_HTTP_SLO_COOKIE", ""))
     parser.add_argument("--allow-unauthenticated-http", action="store_true")
+    parser.add_argument("--profile", choices=GATE_PROFILES, default="full")
     parser.add_argument("--apply-read-model-smoke", action="store_true")
     parser.add_argument("--write-scenario", type=Path)
     parser.add_argument("--apply-write-scenarios", action="store_true")
@@ -122,6 +125,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         headers=headers,
         admin_headers=admin_headers,
         allow_unauthenticated_http=bool(args.allow_unauthenticated_http),
+        profile=str(args.profile),
         apply_read_model_smoke=bool(args.apply_read_model_smoke),
         write_scenario=args.write_scenario,
         apply_write_scenarios=bool(args.apply_write_scenarios),
@@ -156,6 +160,7 @@ def run_closure_gate(
     headers: Mapping[str, str] | None = None,
     admin_headers: Mapping[str, str] | None = None,
     allow_unauthenticated_http: bool = False,
+    profile: str = "full",
     apply_read_model_smoke: bool = False,
     write_scenario: Path | None = None,
     apply_write_scenarios: bool = False,
@@ -172,6 +177,8 @@ def run_closure_gate(
     poll_interval_seconds: float = 0.5,
     limit: int = 2_000,
 ) -> dict[str, Any]:
+    if profile not in GATE_PROFILES:
+        raise ValueError(f"unsupported release gate profile: {profile}")
     normalized_headers = {str(key): str(value) for key, value in dict(headers or {}).items() if str(value).strip()}
     normalized_admin_headers = {
         str(key): str(value)
@@ -180,73 +187,105 @@ def run_closure_gate(
     }
     write_scenarios, write_scenario_error = _load_write_scenarios(write_scenario, http_target_ms=http_target_ms)
     write_audit_operations = _write_scenario_operations(write_scenarios)
-    checks = [
-        _read_model_smoke_check(
-            connection,
-            apply=apply_read_model_smoke,
-            tenant_id=tenant_id,
-            target_ms=read_model_target_ms,
-            timeout_seconds=timeout_seconds,
-            poll_interval_seconds=poll_interval_seconds,
-        ),
-        _http_slo_check(
-            base_url=base_url,
-            page_base_url=page_base_url or base_url,
-            api_prefix=api_prefix,
-            headers=normalized_headers,
-            admin_headers=normalized_admin_headers,
-            target_ms=http_target_ms,
-            timeout_seconds=timeout_seconds,
-            require_auth=not allow_unauthenticated_http,
-        ),
-        _sse_smoke_check(
-            base_url=base_url,
-            api_prefix=api_prefix,
-            headers=normalized_headers,
-            target_ms=sse_target_ms,
-            timeout_seconds=timeout_seconds,
-            require_auth=not allow_unauthenticated_http,
-        ),
-        _health_ready_payload_check(
-            base_url=base_url,
-            api_prefix=api_prefix,
-            target_ms=health_ready_target_ms,
-            timeout_seconds=timeout_seconds,
-            max_response_bytes=health_ready_max_response_bytes,
-            max_api_performance_endpoints=health_ready_max_api_performance_endpoints,
-        ),
-        _write_operation_audit_check(
-            connection,
-            tenant_id=tenant_id,
-            target_ms=write_target_ms,
-            lookback_hours=write_audit_lookback_hours,
-            limit=limit,
-            operations=write_audit_operations,
-            scenario_error=write_scenario_error,
-        ),
-        _write_operation_e2e_check(
-            connection,
-            scenario_path=write_scenario,
-            scenario_error=write_scenario_error,
-            scenarios=write_scenarios,
-            apply=apply_write_scenarios,
-            approval_reference=write_approval_ticket,
-            base_url=base_url,
-            api_prefix=api_prefix,
-            tenant_id=tenant_id,
-            headers=normalized_headers,
-            write_target_ms=write_target_ms,
-            http_target_ms=http_target_ms,
-            timeout_seconds=timeout_seconds,
-            poll_interval_seconds=poll_interval_seconds,
-            limit=limit,
-        ),
+    checks = [_write_scenario_contract_check(write_scenario, write_scenario_error, write_scenarios)]
+    if profile == "preflight":
+        checks.extend(
+            [
+                _health_ready_payload_check(
+                    base_url=base_url,
+                    api_prefix=api_prefix,
+                    target_ms=health_ready_target_ms,
+                    timeout_seconds=timeout_seconds,
+                    max_response_bytes=health_ready_max_response_bytes,
+                    max_api_performance_endpoints=health_ready_max_api_performance_endpoints,
+                ),
+                _runtime_health_check(
+                    connection,
+                    timeout_seconds=timeout_seconds,
+                    poll_interval_seconds=poll_interval_seconds,
+                ),
+            ]
+        )
+    else:
+        checks.extend(
+            [
+                _read_model_smoke_check(
+                    connection,
+                    apply=apply_read_model_smoke,
+                    tenant_id=tenant_id,
+                    target_ms=read_model_target_ms,
+                    timeout_seconds=timeout_seconds,
+                    poll_interval_seconds=poll_interval_seconds,
+                ),
+                _http_slo_check(
+                    base_url=base_url,
+                    page_base_url=page_base_url or base_url,
+                    api_prefix=api_prefix,
+                    headers=normalized_headers,
+                    admin_headers=normalized_admin_headers,
+                    target_ms=http_target_ms,
+                    timeout_seconds=timeout_seconds,
+                    require_auth=not allow_unauthenticated_http,
+                ),
+                _sse_smoke_check(
+                    base_url=base_url,
+                    api_prefix=api_prefix,
+                    headers=normalized_headers,
+                    target_ms=sse_target_ms,
+                    timeout_seconds=timeout_seconds,
+                    require_auth=not allow_unauthenticated_http,
+                ),
+                _health_ready_payload_check(
+                    base_url=base_url,
+                    api_prefix=api_prefix,
+                    target_ms=health_ready_target_ms,
+                    timeout_seconds=timeout_seconds,
+                    max_response_bytes=health_ready_max_response_bytes,
+                    max_api_performance_endpoints=health_ready_max_api_performance_endpoints,
+                ),
+                _write_operation_audit_check(
+                    connection,
+                    tenant_id=tenant_id,
+                    target_ms=write_target_ms,
+                    lookback_hours=write_audit_lookback_hours,
+                    limit=limit,
+                    operations=write_audit_operations,
+                    scenario_error=write_scenario_error,
+                ),
+            ]
+        )
+        if profile == "full":
+            checks.append(
+                _write_operation_e2e_check(
+                    connection,
+                    scenario_path=write_scenario,
+                    scenario_error=write_scenario_error,
+                    scenarios=write_scenarios,
+                    apply=apply_write_scenarios,
+                    approval_reference=write_approval_ticket,
+                    base_url=base_url,
+                    api_prefix=api_prefix,
+                    tenant_id=tenant_id,
+                    headers=normalized_headers,
+                    write_target_ms=write_target_ms,
+                    http_target_ms=http_target_ms,
+                    timeout_seconds=timeout_seconds,
+                    poll_interval_seconds=poll_interval_seconds,
+                    limit=limit,
+                )
+            )
         # Sample runtime convergence after every read/write smoke has completed.
-        _runtime_health_check(connection),
-    ]
+        checks.append(
+            _runtime_health_check(
+                connection,
+                timeout_seconds=timeout_seconds,
+                poll_interval_seconds=poll_interval_seconds,
+            )
+        )
     status = _overall_status(checks)
     return {
         "version": 1,
+        "profile": profile,
         "status": status,
         "generated_at": datetime.now(UTC).isoformat(),
         "targets": {
@@ -272,50 +311,60 @@ def run_closure_gate(
     }
 
 
-def _runtime_health_check(connection: Any) -> ClosureCheck:
-    try:
-        summary = RuntimeMonitoringRepository(connection).ready_health_summary()
-    except Exception as exc:
-        return ClosureCheck("runtime_health", FAIL, "runtime monitoring health summary unavailable.", {"error": str(exc) or exc.__class__.__name__})
-    missing_fields = [key for key in RUNTIME_HEALTH_REQUIRED_FIELDS if key not in summary]
-    worker_metrics = summary.get("worker_metrics")
-    if missing_fields or not isinstance(worker_metrics, list) or not worker_metrics:
-        return ClosureCheck(
-            "runtime_health",
-            FAIL,
-            "Runtime health summary is missing required durable queue or worker facts.",
-            {
-                "error": "runtime_health_missing_facts",
-                "missing_fields": missing_fields,
-                "worker_metric_count": len(worker_metrics) if isinstance(worker_metrics, list) else 0,
-            },
-        )
-    blockers = _runtime_blockers(summary)
-    return ClosureCheck(
-        "runtime_health",
-        PASS if not blockers else FAIL,
-        "Runtime queue, worker, RabbitMQ and dirty-scope blockers are clear." if not blockers else "Runtime health has current blockers.",
-        {
-            "blockers": blockers,
-            "snapshot": {
-                key: summary.get(key)
-                for key in (
-                    "queue_backlog",
-                    "dirty_scopes",
-                    "failed_jobs",
-                    "max_pending_age_seconds",
-                    "stale_dirty_scope_count",
-                    "missing_required_worker_count",
-                    "stale_required_worker_count",
-                    "mismatched_required_worker_count",
-                    "rabbitmq_queue_depth",
-                    "rabbitmq_unacked_messages",
-                    "rabbitmq_dlq_count",
-                )
-                if key in summary
-            },
-        },
-    )
+def _runtime_health_check(
+    connection: Any,
+    *,
+    timeout_seconds: float,
+    poll_interval_seconds: float,
+) -> ClosureCheck:
+    deadline = monotonic() + max(0.0, timeout_seconds)
+    repository = RuntimeMonitoringRepository(connection)
+    while True:
+        try:
+            summary = repository.ready_health_summary()
+        except Exception as exc:
+            return ClosureCheck("runtime_health", FAIL, "runtime monitoring health summary unavailable.", {"error": str(exc) or exc.__class__.__name__})
+        missing_fields = [key for key in RUNTIME_HEALTH_REQUIRED_FIELDS if key not in summary]
+        worker_metrics = summary.get("worker_metrics")
+        if missing_fields or not isinstance(worker_metrics, list) or not worker_metrics:
+            return ClosureCheck(
+                "runtime_health",
+                FAIL,
+                "Runtime health summary is missing required durable queue or worker facts.",
+                {
+                    "error": "runtime_health_missing_facts",
+                    "missing_fields": missing_fields,
+                    "worker_metric_count": len(worker_metrics) if isinstance(worker_metrics, list) else 0,
+                },
+            )
+        blockers = _runtime_blockers(summary)
+        if not blockers or monotonic() >= deadline:
+            return ClosureCheck(
+                "runtime_health",
+                PASS if not blockers else FAIL,
+                "Runtime queue, worker, RabbitMQ and dirty-scope blockers are clear." if not blockers else "Runtime health did not converge before the gate deadline.",
+                {
+                    "blockers": blockers,
+                    "snapshot": {
+                        key: summary.get(key)
+                        for key in (
+                            "queue_backlog",
+                            "dirty_scopes",
+                            "failed_jobs",
+                            "max_pending_age_seconds",
+                            "stale_dirty_scope_count",
+                            "missing_required_worker_count",
+                            "stale_required_worker_count",
+                            "mismatched_required_worker_count",
+                            "rabbitmq_queue_depth",
+                            "rabbitmq_unacked_messages",
+                            "rabbitmq_dlq_count",
+                        )
+                        if key in summary
+                    },
+                },
+            )
+        sleep(min(max(0.05, poll_interval_seconds), max(0.0, deadline - monotonic())))
 
 
 def _read_model_smoke_check(
@@ -334,6 +383,7 @@ def _read_model_smoke_check(
         target_ms=target_ms,
         timeout_seconds=timeout_seconds,
         poll_interval_seconds=poll_interval_seconds,
+        critical_only=True,
     )
     if not apply:
         return ClosureCheck(
@@ -357,7 +407,7 @@ def _read_model_smoke_check(
     return ClosureCheck(
         "read_model_direct_smoke",
         PASS if report.get("status") == PASS else FAIL,
-        "All App Status read models converged within target." if report.get("status") == PASS else "One or more read models missed the direct-scope SLO.",
+        "All critical App Status read models converged within target." if report.get("status") == PASS else "One or more critical read models missed the direct-scope SLO.",
         _compact_report(report),
     )
 
@@ -502,6 +552,38 @@ def _health_ready_payload_check(
         PASS if report.get("status") == PASS else FAIL,
         "/health/ready is fast, JSON, and bounded." if report.get("status") == PASS else "/health/ready payload gate failed.",
         _compact_report(report),
+    )
+
+
+def _write_scenario_contract_check(
+    scenario_path: Path | None,
+    scenario_error: dict[str, Any] | None,
+    scenarios: Sequence[Any] | None,
+) -> ClosureCheck:
+    if scenario_path is None:
+        return ClosureCheck(
+            "write_scenario_contract",
+            FAIL,
+            "No controlled write-operation scenario was provided.",
+            {"error": "write_scenario_missing", "missing_args": ["--write-scenario"]},
+        )
+    if scenario_error is not None:
+        return ClosureCheck(
+            "write_scenario_contract",
+            FAIL,
+            "Controlled write-operation scenario is invalid.",
+            scenario_error,
+        )
+    scenario_count = len(list(scenarios or ()))
+    return ClosureCheck(
+        "write_scenario_contract",
+        PASS if scenario_count > 0 else FAIL,
+        "Controlled reversible write-operation scenario contract is valid." if scenario_count > 0 else "Controlled write-operation scenario contains no scenarios.",
+        {
+            "scenario_path": str(scenario_path),
+            "scenario_count": scenario_count,
+            **({"error": "write_scenario_empty"} if scenario_count <= 0 else {}),
+        },
     )
 
 

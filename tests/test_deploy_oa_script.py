@@ -524,11 +524,19 @@ class DeployOAScriptTest(unittest.TestCase):
         pre_failure_branch = script[start:end]
 
         self.assertIn(
-            'release_gate_checkpoint "$previous_release" pre "$admin_token" "$evidence_dir" "$release"',
+            'release_gate_checkpoint "$previous_release" pre "$admin_token" "$evidence_dir" preflight "$release"',
             script,
         )
         self.assertIn(
-            'release_gate_checkpoint "$previous_release" rollback "$admin_token" "$evidence_dir" "$candidate"',
+            'release_gate_checkpoint "$previous_release" rollback "$admin_token" "$evidence_dir" preflight',
+            script,
+        )
+        self.assertIn(
+            'release_gate_checkpoint "$release" t0 "$admin_token" "$evidence_dir" full',
+            script,
+        )
+        self.assertIn(
+            'release_gate_checkpoint "$release" t300 "$admin_token" "$evidence_dir" stability',
             script,
         )
         self.assertIn('src="$(release_src "$previous_release")"', pre_failure_branch)

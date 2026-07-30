@@ -142,11 +142,6 @@ DEFAULT_API_PROBES: tuple[HttpProbe, ...] = (
         "/api/pending-invoices/rows?direction=expense&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
         expected_statuses=(200, 202),
     ),
-    HttpProbe(
-        "pending_invoices_filter_options",
-        "/api/pending-invoices/filter-options?direction=expense&sort_field=trade_date&sort_direction=desc",
-        expected_statuses=(200, 202),
-    ),
     HttpProbe("pending_invoices_rules", "/api/pending-invoices/rules", expected_statuses=(200, 202)),
     HttpProbe("input_invoice_usage_rows", "/api/input-invoice-usage/rows?page=1&page_size=20", expected_statuses=(200, 202)),
     HttpProbe("input_invoice_usage_filter_options", "/api/input-invoice-usage/filter-options", expected_statuses=(200, 202)),
