@@ -1067,7 +1067,6 @@ class Application:
                 workbench_override_service=self._workbench_override_service,
                 workbench_pair_snapshot_port=SettingsDataResetPairSnapshotPort(
                     pair_relation_snapshot=self._workbench_pair_relation_service.snapshot,
-                    save_pair_relation_snapshot=self._state_store.save_workbench_pair_relations,
                 ),
                 tax_certified_import_service=self._tax_certified_import_service,
             )

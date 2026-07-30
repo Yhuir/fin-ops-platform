@@ -5,7 +5,7 @@ import unittest
 
 from fin_ops_platform.postgres import migrate
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
-from fin_ops_platform.services.runtime_queue import RuntimeQueueDataError, RuntimeQueueRepository
+from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 from tests.postgres_test_utils import (
     apply_test_migrations,
     apply_test_migrations_through,
@@ -98,7 +98,7 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
             )
         )
 
-    def test_outbox_attempt_columns_stay_synchronized(self) -> None:
+    def test_outbox_attempt_count_is_an_exact_one_way_mirror_of_attempts(self) -> None:
         trigger_name = fetch_scalar(
             self.database_url,
             """
@@ -131,7 +131,18 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
             """,
         )
         event_id, attempt_count, attempts = inserted.split("\t")
-        self.assertEqual((attempt_count, attempts), ("3", "3"))
+        self.assertEqual((attempt_count, attempts), ("0", "0"))
+
+        compatibility_only_update = fetch_scalar(
+            self.database_url,
+            f"""
+            update job.outbox_events
+            set attempt_count = 9
+            where id = '{event_id}'::uuid
+            returning attempt_count::text || E'\t' || attempts::text;
+            """,
+        )
+        self.assertEqual(tuple(compatibility_only_update.split("\t")), ("0", "0"))
 
         updated = fetch_scalar(
             self.database_url,
@@ -143,6 +154,100 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
             """,
         )
         self.assertEqual(tuple(updated.split("\t")), ("5", "5"))
+
+    def test_outbox_progressive_envelope_constraints_are_installed_not_valid(self) -> None:
+        expected_constraints = {
+            "outbox_events_attempts_nonnegative_chk",
+            "outbox_events_attempt_count_mirror_chk",
+            "outbox_events_publish_attempt_count_nonnegative_chk",
+            "outbox_events_event_type_nonempty_chk",
+            "outbox_events_tenant_id_nonempty_chk",
+            "outbox_events_payload_object_chk",
+            "outbox_events_raw_payload_object_chk",
+            "outbox_events_runtime_lock_pair_chk",
+            "outbox_events_processing_lock_required_chk",
+            "outbox_events_publish_lock_pair_chk",
+            "outbox_events_publishing_lock_required_chk",
+            "outbox_events_terminal_processed_at_chk",
+            "outbox_events_dead_letter_timestamp_chk",
+            "outbox_events_published_timestamps_chk",
+        }
+        rows = self.connection.fetch_all(
+            """
+            select conname, convalidated
+            from pg_constraint
+            where conrelid = 'job.outbox_events'::regclass
+              and conname::text = any(%s::text[])
+            """,
+            (sorted(expected_constraints),),
+        )
+
+        self.assertEqual({row["conname"] for row in rows}, expected_constraints)
+        self.assertTrue(all(row["convalidated"] is False for row in rows))
+
+    def test_outbox_progressive_envelope_constraints_reject_new_invalid_rows(self) -> None:
+        invalid_inserts = {
+            "negative_attempts": """
+                insert into job.outbox_events(event_type, attempts)
+                values ('runtime.integration.invalid-attempts', -1);
+            """,
+            "negative_publish_attempts": """
+                insert into job.outbox_events(event_type, publish_attempt_count)
+                values ('runtime.integration.invalid-publish-attempts', -1);
+            """,
+            "empty_event_type": """
+                insert into job.outbox_events(event_type)
+                values ('   ');
+            """,
+            "empty_tenant_id": """
+                insert into job.outbox_events(event_type, tenant_id)
+                values ('runtime.integration.invalid-tenant', '   ');
+            """,
+            "non_object_payload": """
+                insert into job.outbox_events(event_type, payload)
+                values ('runtime.integration.invalid-payload', '[]'::jsonb);
+            """,
+            "non_object_raw_payload": """
+                insert into job.outbox_events(event_type, raw_payload)
+                values ('runtime.integration.invalid-raw-payload', '[]'::jsonb);
+            """,
+            "partial_runtime_lock": """
+                insert into job.outbox_events(event_type, locked_by)
+                values ('runtime.integration.invalid-runtime-lock', 'worker-a');
+            """,
+            "processing_without_lock": """
+                insert into job.outbox_events(event_type, status)
+                values ('runtime.integration.invalid-processing-lock', 'processing');
+            """,
+            "partial_publish_lock": """
+                insert into job.outbox_events(event_type, publish_locked_by)
+                values ('runtime.integration.invalid-publish-lock', 'publisher-a');
+            """,
+            "publishing_without_lock": """
+                insert into job.outbox_events(event_type, publish_status)
+                values ('runtime.integration.invalid-publishing-lock', 'publishing');
+            """,
+            "terminal_without_timestamp": """
+                insert into job.outbox_events(event_type, status)
+                values ('runtime.integration.invalid-terminal-timestamp', 'done');
+            """,
+            "dead_letter_without_dead_letter_timestamp": """
+                insert into job.outbox_events(event_type, status, processed_at)
+                values (
+                    'runtime.integration.invalid-dead-letter-timestamp',
+                    'dead_lettered',
+                    clock_timestamp()
+                );
+            """,
+            "published_without_timestamps": """
+                insert into job.outbox_events(event_type, publish_status)
+                values ('runtime.integration.invalid-publish-timestamps', 'published');
+            """,
+        }
+
+        for case_name, sql in invalid_inserts.items():
+            with self.subTest(case_name=case_name), self.assertRaises(migrate.MigrationError):
+                migrate.run_psql(self.database_url, sql=sql)
 
     def test_outbox_status_check_constraint_rejects_invalid_status(self) -> None:
         constraint_name = fetch_scalar(
@@ -159,8 +264,13 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         migrate.run_psql(
             self.database_url,
             sql="""
-            insert into job.outbox_events(event_type, status)
-            values ('runtime_infrastructure_test', 'dead_lettered');
+            insert into job.outbox_events(event_type, status, processed_at, dead_lettered_at)
+            values (
+                'runtime_infrastructure_test',
+                'dead_lettered',
+                clock_timestamp(),
+                clock_timestamp()
+            );
             """,
         )
 
@@ -369,8 +479,14 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         migrate.run_psql(
             self.database_url,
             sql="""
-            insert into job.outbox_events(event_type, status, tenant_id, dedupe_key)
-            values ('runtime_infrastructure_dedupe_test', 'done', 'tenant-a', 'same-key');
+            insert into job.outbox_events(event_type, status, tenant_id, dedupe_key, processed_at)
+            values (
+                'runtime_infrastructure_dedupe_test',
+                'done',
+                'tenant-a',
+                'same-key',
+                clock_timestamp()
+            );
             """,
         )
 
@@ -643,6 +759,62 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(row["attempts"], 1)
         self.assertEqual(row["attempt_count"], 1)
 
+    def test_runtime_queue_release_and_defer_persist_attempt_decrements(self) -> None:
+        event = self.runtime_queue.enqueue(event_type="runtime.integration.attempt-decrement")
+        claimed = self.runtime_queue.claim_next(
+            "worker-attempt-decrement",
+            event_types=["runtime.integration.attempt-decrement"],
+        )
+        self.assertIsNotNone(claimed)
+        self.assertEqual(claimed.attempts, 1)
+
+        self.assertTrue(
+            self.runtime_queue.release_event(
+                event.event_id,
+                "worker-attempt-decrement",
+                reason="integration-release",
+            )
+        )
+        released = self.connection.fetch_one(
+            """
+            select status, attempts, attempt_count, locked_by, locked_at
+            from job.outbox_events
+            where id = %s
+            """,
+            (event.event_id,),
+        )
+        self.assertEqual(released["status"], "pending")
+        self.assertEqual((released["attempts"], released["attempt_count"]), (0, 0))
+        self.assertIsNone(released["locked_by"])
+        self.assertIsNone(released["locked_at"])
+
+        reclaimed = self.runtime_queue.claim_next(
+            "worker-attempt-decrement",
+            event_types=["runtime.integration.attempt-decrement"],
+        )
+        self.assertIsNotNone(reclaimed)
+        self.assertEqual(reclaimed.attempts, 1)
+        self.assertTrue(
+            self.runtime_queue.defer_event(
+                event.event_id,
+                "worker-attempt-decrement",
+                reason="integration-defer",
+                delay_seconds=0.1,
+            )
+        )
+        deferred = self.connection.fetch_one(
+            """
+            select status, attempts, attempt_count, locked_by, locked_at
+            from job.outbox_events
+            where id = %s
+            """,
+            (event.event_id,),
+        )
+        self.assertEqual(deferred["status"], "pending")
+        self.assertEqual((deferred["attempts"], deferred["attempt_count"]), (0, 0))
+        self.assertIsNone(deferred["locked_by"])
+        self.assertIsNone(deferred["locked_at"])
+
     def test_runtime_queue_claim_next_reclaims_stale_processing_event(self) -> None:
         row = self.connection.fetch_one(
             """
@@ -744,36 +916,6 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         self.assertIsNotNone(claimed_after_available)
         self.assertEqual(claimed_after_available.event_id, row["event_id"])
         self.assertEqual(claimed_after_available.attempts, 3)
-
-    def test_runtime_queue_claim_next_raises_data_error_for_non_object_payload(self) -> None:
-        inserted = self.connection.fetch_one(
-            """
-            insert into job.outbox_events(event_type, status, payload)
-            values (
-              'runtime.integration.malformed-payload',
-              'pending',
-              '[]'::jsonb
-            )
-            returning id::text as event_id
-            """
-        )
-
-        with self.assertRaises(RuntimeQueueDataError) as context:
-            self.runtime_queue.claim_next("worker-malformed", event_types=["runtime.integration.malformed-payload"])
-
-        self.assertIn("list", str(context.exception))
-        row = self.connection.fetch_one(
-            """
-            select status, locked_by, attempts, attempt_count
-            from job.outbox_events
-            where id = %s
-            """,
-            (inserted["event_id"],),
-        )
-        self.assertEqual(row["status"], "pending")
-        self.assertIsNone(row["locked_by"])
-        self.assertEqual(row["attempts"], 0)
-        self.assertEqual(row["attempt_count"], 0)
 
     def test_runtime_queue_complete_marks_done_and_sets_processed_at(self) -> None:
         event = self.runtime_queue.enqueue(event_type="runtime.integration.complete")

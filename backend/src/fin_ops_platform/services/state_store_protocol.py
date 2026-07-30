@@ -22,6 +22,26 @@ class ApplicationStateStoreProtocol(Protocol):
 
     def save(self, payload: dict[str, Any]) -> None: ...
 
+    def reset_bank_transaction_data(
+        self,
+        *,
+        source_snapshot: dict[str, Any] | None = None,
+    ) -> dict[str, Any]: ...
+
+    def reset_invoice_data(
+        self,
+        *,
+        source_snapshot: dict[str, Any] | None = None,
+    ) -> dict[str, Any]: ...
+
+    def reset_oa_workbench_data(
+        self,
+        *,
+        row_ids: list[str],
+        case_ids: list[str],
+        source_snapshot: dict[str, Any] | None = None,
+    ) -> dict[str, Any]: ...
+
     def save_import_delta(self, payload: dict[str, Any]) -> None: ...
 
     def save_invoices(self, invoices: list[Any]) -> None: ...

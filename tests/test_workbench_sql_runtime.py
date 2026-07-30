@@ -901,6 +901,35 @@ class WorkbenchConsistencySqlConnection:
         return []
 
 
+class WorkbenchMissingMaterializedRowConsistencyConnection(WorkbenchConsistencySqlConnection):
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_all_calls.append((normalized, params))
+        return [
+            {
+                "scope_key": "2026-02",
+                "generation_id": "gen-missing-detail",
+                "row_count": 1,
+                "group_count": 1,
+                "summary_count": 1,
+                "build_metadata": {},
+                "actual_row_count": 0,
+                "actual_group_count": 1,
+                "actual_group_row_count": 1,
+                "missing_materialized_row_count": 1,
+                "missing_materialized_row_samples": ["oa-pay-missing"],
+                "actual_summary_count": 1,
+                "duplicate_invoice_identity_count": 0,
+                "duplicate_bank_identity_count": 0,
+                "duplicate_identity_samples": [],
+                "duplicate_row_membership_count": 0,
+                "duplicate_row_membership_samples": [],
+                "active_relation_unpaired_membership_count": 0,
+                "active_relation_unpaired_membership_samples": [],
+            }
+        ]
+
+
 class WorkbenchDuplicateIdentityConsistencyConnection(WorkbenchConsistencySqlConnection):
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         normalized = " ".join(sql.lower().split())
@@ -1130,6 +1159,49 @@ class WorkbenchWriteConnection:
     def execute(self, sql: str, params: tuple = ()) -> int:
         self.executed.append((" ".join(sql.lower().split()), params))
         return 1
+
+
+class EqualSourceVersionWorkbenchWriteConnection(WorkbenchWriteConnection):
+    def __init__(self, *, consistent: bool) -> None:
+        super().__init__()
+        self.consistent = consistent
+
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_one_calls.append((normalized, params))
+        if (
+            "select generation_id" in normalized
+            and "from read_model.workbench_generations" in normalized
+            and "status = 'active'" in normalized
+        ):
+            return {"generation_id": "gen-active"}
+        if "from read_model.workbench_snapshots" in normalized:
+            return {"source_versions": {"source_version": 6}}
+        return super().fetch_one(sql, params)
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        if "with target_generations as" in normalized:
+            self.fetch_all_calls.append((normalized, params))
+            if self.consistent:
+                return []
+            return [
+                {
+                    "scope_key": "2026-05",
+                    "generation_id": "gen-active",
+                    "row_count": 1,
+                    "group_count": 1,
+                    "summary_count": 1,
+                    "build_metadata": {},
+                    "actual_row_count": 0,
+                    "actual_group_count": 1,
+                    "actual_group_row_count": 1,
+                    "missing_materialized_row_count": 1,
+                    "missing_materialized_row_samples": ["oa-row-missing"],
+                    "actual_summary_count": 1,
+                }
+            ]
+        return super().fetch_all(sql, params)
 
 
 class CopyWorkbenchWriteConnection(WorkbenchWriteConnection):
@@ -3333,6 +3405,22 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             sql,
         )
 
+    def test_repository_generation_consistency_reports_visible_rows_without_detail_materialization(self) -> None:
+        connection = WorkbenchMissingMaterializedRowConsistencyConnection()
+
+        failures = PostgresReadModelRepository._workbench_generation_consistency_failures(
+            connection,
+            scope_key="2026-02",
+        )
+
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0]["missing_materialized_row_count"], 1)
+        self.assertEqual(failures[0]["missing_materialized_row_samples"], ["oa-pay-missing"])
+        self.assertIn("missing_materialized_row count=1", failures[0]["reasons"])
+        sql = connection.fetch_all_calls[0][0]
+        self.assertIn("missing_materialized_rows as", sql)
+        self.assertIn("left join read_model.workbench_rows r", sql)
+
     def test_repository_generation_consistency_reports_cross_zone_invoice_identity_duplicates(self) -> None:
         connection = WorkbenchDuplicateIdentityConsistencyConnection()
 
@@ -4817,6 +4905,86 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertNotIn("on conflict (generation_id, scope_key, zone, group_id, pane, row_role, row_id)", sql)
         self.assertIn("status = 'active'", sql)
 
+    def test_repository_skips_equal_source_version_publish_when_active_generation_is_consistent(self) -> None:
+        connection = EqualSourceVersionWorkbenchWriteConnection(consistent=True)
+        repository = PostgresReadModelRepository(connection)
+
+        published = repository.save_workbench_read_models(
+            {
+                "read_models": {
+                    "2026-05": {
+                        "scope_key": "2026-05",
+                        "payload": {"paired": {"groups": []}, "unpaired": {"groups": []}},
+                        "source_versions": {"source_version": 6},
+                    }
+                }
+            },
+            changed_scope_keys={"2026-05"},
+        )
+
+        self.assertEqual(published, set())
+        self.assertFalse(any("insert into read_model.workbench_generations" in sql for sql, _ in connection.executed))
+
+    def test_repository_rebuilds_equal_source_version_when_active_generation_is_inconsistent(self) -> None:
+        connection = EqualSourceVersionWorkbenchWriteConnection(consistent=False)
+        repository = PostgresReadModelRepository(connection)
+
+        published = repository.save_workbench_read_models(
+            {
+                "read_models": {
+                    "2026-05": {
+                        "scope_key": "2026-05",
+                        "payload": {"paired": {"groups": []}, "unpaired": {"groups": []}},
+                        "source_versions": {"source_version": 6},
+                    }
+                }
+            },
+            changed_scope_keys={"2026-05"},
+        )
+
+        self.assertEqual(published, {"2026-05"})
+        self.assertTrue(any("insert into read_model.workbench_generations" in sql for sql, _ in connection.executed))
+
+    def test_repository_rejects_visible_group_rows_without_materialized_detail_rows(self) -> None:
+        connection = WorkbenchWriteConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        with patch.object(repository, "_iter_workbench_rows", return_value=[]):
+            with self.assertRaisesRegex(RuntimeError, "visible rows without materialized detail rows"):
+                repository.save_workbench_read_models(
+                    {
+                        "read_models": {
+                            "2026-05": {
+                                "scope_key": "2026-05",
+                                "payload": {
+                                    "paired": {"groups": []},
+                                    "unpaired": {
+                                        "groups": [
+                                            {
+                                                "group_id": "unpaired:oa-row-1",
+                                                "oa_rows": [
+                                                    {
+                                                        "id": "oa-row-1",
+                                                        "type": "oa",
+                                                        "source_kind": "oa",
+                                                        "status": "unpaired",
+                                                    }
+                                                ],
+                                                "bank_rows": [],
+                                                "invoice_rows": [],
+                                            }
+                                        ]
+                                    },
+                                },
+                                "source_versions": {"source_version": 7},
+                            }
+                        }
+                    },
+                    changed_scope_keys={"2026-05"},
+                )
+
+        self.assertFalse(any("insert into read_model.workbench_generations" in sql for sql, _ in connection.executed))
+
     def test_repository_copies_workbench_generation_rows_before_atomic_activation(self) -> None:
         connection = CopyWorkbenchWriteConnection()
         repository = PostgresReadModelRepository(connection)
@@ -6294,6 +6462,57 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["read_model_status"], "fresh")
         self.assertTrue(any("from read_model.workbench_rows r" in sql for sql, _params in connection.fetch_one_calls))
 
+    def test_repository_reads_workbench_row_detail_in_one_repeatable_read_snapshot(self) -> None:
+        class TransactionalRowDetailConnection(WorkbenchWriteConnection):
+            def __init__(self) -> None:
+                super().__init__()
+                self.transaction_count = 0
+
+            @contextmanager
+            def transaction(self):
+                self.transaction_count += 1
+                yield self
+
+            def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_one_calls.append((normalized, params))
+                if (
+                    "select generation_id" in normalized
+                    and "from read_model.workbench_generations" in normalized
+                    and "status = 'active'" in normalized
+                ):
+                    return {"generation_id": "gen-active"}
+                if "from read_model.workbench_rows r" in normalized:
+                    return {
+                        "row_id": "oa-pay-1976",
+                        "source_kind": "oa",
+                        "status": "paired",
+                        "scope_key": "2026-01",
+                        "generation_id": "gen-active",
+                        "source_versions": {"builder": "workbench-sql:v1"},
+                        "payload": {"id": "oa-pay-1976", "type": "oa"},
+                    }
+                return None
+
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                self.fetch_all_calls.append((" ".join(sql.lower().split()), params))
+                return []
+
+        connection = TransactionalRowDetailConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.get_workbench_row_detail(
+            scope_key="2026-01",
+            row_id="oa-pay-1976",
+            expected_read_model_version="gen-active",
+        )
+
+        self.assertIsNotNone(payload)
+        self.assertEqual(connection.transaction_count, 1)
+        executed_sql = [sql for sql, _params in connection.executed]
+        self.assertIn("set transaction isolation level repeatable read read only", executed_sql)
+        self.assertIn("set local statement_timeout = '2s'", executed_sql)
+
     def test_repository_exposes_bounded_relation_preview_selection_read(self) -> None:
         repository = PostgresReadModelRepository(WorkbenchWriteConnection())
 
@@ -6526,7 +6745,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("and true", sql)
         self.assertNotIn("r.scope_key in (%s, 'all')", sql)
 
-    def test_repository_reads_legacy_group_member_payload_when_row_detail_row_is_missing(self) -> None:
+    def test_repository_does_not_fall_back_to_group_member_payload_when_detail_row_is_missing(self) -> None:
         class LegacyGroupMemberConnection(WorkbenchWriteConnection):
             def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
                 normalized = " ".join(sql.lower().split())
@@ -6573,39 +6792,10 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         payload = repository.get_workbench_row_detail(scope_key="all", row_id="oa-pay-legacy")
 
-        self.assertIsNotNone(payload)
-        assert payload is not None
-        self.assertEqual(payload["row"]["id"], "oa-pay-legacy")
-        self.assertEqual(payload["row"]["amount"], "1500.00")
-        self.assertEqual(payload["scope_key"], "2026-05")
-        self.assertTrue(str(payload["active_generation_id"]).startswith("workbench:all:active-generation-set:"))
-        self.assertTrue(any("from read_model.workbench_group_rows gr" in sql for sql, _params in connection.fetch_one_calls))
-
-    def test_repository_does_not_synthesize_row_detail_from_empty_group_member_payload(self) -> None:
-        class EmptyGroupMemberConnection(WorkbenchWriteConnection):
-            def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
-                normalized = " ".join(sql.lower().split())
-                self.fetch_one_calls.append((normalized, params))
-                if "from read_model.workbench_rows r" in normalized:
-                    return None
-                if "from read_model.workbench_group_rows gr" in normalized:
-                    return {
-                        "row_id": "oa-pay-empty",
-                        "pane": "oa",
-                        "source_kind": "oa",
-                        "status": "unpaired",
-                        "scope_key": "2026-05",
-                        "generation_id": "gen-2026-05-active",
-                        "member_payload": {},
-                    }
-                return None
-
-        connection = EmptyGroupMemberConnection()
-        repository = PostgresReadModelRepository(connection)
-
-        payload = repository.get_workbench_row_detail(scope_key="all", row_id="oa-pay-empty")
-
         self.assertIsNone(payload)
+        self.assertFalse(
+            any("from read_model.workbench_group_rows gr" in sql for sql, _params in connection.fetch_one_calls)
+        )
 
     def test_repository_finds_workbench_row_active_month_scope_key(self) -> None:
         class RowScopeConnection(WorkbenchWriteConnection):

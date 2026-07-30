@@ -3160,6 +3160,32 @@ class PostgresReadModelRepository:
                  and target_generations.scope_key = gr.scope_key
                 group by gr.generation_id, gr.scope_key
             ),
+            missing_materialized_rows as (
+                select distinct
+                    gr.generation_id,
+                    gr.scope_key,
+                    gr.row_id
+                from read_model.workbench_group_rows gr
+                join target_generations
+                  on target_generations.generation_id = gr.generation_id
+                 and target_generations.scope_key = gr.scope_key
+                left join read_model.workbench_rows r
+                  on r.generation_id = gr.generation_id
+                 and r.scope_key = gr.scope_key
+                 and r.row_id = gr.row_id
+                where coalesce(gr.row_role, '') <> 'summary'
+                  and gr.row_id is not null
+                  and r.row_id is null
+            ),
+            missing_materialized_row_counts as (
+                select
+                    generation_id,
+                    scope_key,
+                    count(*)::bigint as missing_materialized_row_count,
+                    (array_agg(row_id order by row_id))[1:10] as missing_materialized_row_samples
+                from missing_materialized_rows
+                group by generation_id, scope_key
+            ),
             summary_counts as (
                 select s.generation_id, s.scope_key, count(*)::bigint as actual_summary_count
                 from read_model.workbench_summary s
@@ -3300,6 +3326,10 @@ class PostgresReadModelRepository:
                 coalesce(row_counts.actual_row_count, 0)::bigint as actual_row_count,
                 coalesce(group_counts.actual_group_count, 0)::bigint as actual_group_count,
                 coalesce(group_row_counts.actual_group_row_count, 0)::bigint as actual_group_row_count,
+                coalesce(missing_materialized_row_counts.missing_materialized_row_count, 0)::bigint
+                    as missing_materialized_row_count,
+                coalesce(missing_materialized_row_counts.missing_materialized_row_samples, array[]::text[])
+                    as missing_materialized_row_samples,
                 coalesce(summary_counts.actual_summary_count, 0)::bigint as actual_summary_count,
                 coalesce(duplicate_identity_counts.duplicate_invoice_identity_count, 0)::bigint
                     as duplicate_invoice_identity_count,
@@ -3325,6 +3355,9 @@ class PostgresReadModelRepository:
             left join group_row_counts
               on group_row_counts.generation_id = gen.generation_id
              and group_row_counts.scope_key = gen.scope_key
+            left join missing_materialized_row_counts
+              on missing_materialized_row_counts.generation_id = gen.generation_id
+             and missing_materialized_row_counts.scope_key = gen.scope_key
             left join summary_counts
               on summary_counts.generation_id = gen.generation_id
              and summary_counts.scope_key = gen.scope_key
@@ -3352,6 +3385,7 @@ class PostgresReadModelRepository:
             summary_count = int_value(row.get("summary_count"), 0)
             actual_group_count = int_value(row.get("actual_group_count"), 0)
             actual_group_row_count = int_value(row.get("actual_group_row_count"), 0)
+            missing_materialized_row_count = int_value(row.get("missing_materialized_row_count"), 0)
             actual_summary_count = int_value(row.get("actual_summary_count"), 0)
             duplicate_invoice_identity_count = int_value(row.get("duplicate_invoice_identity_count"), 0)
             duplicate_bank_identity_count = int_value(row.get("duplicate_bank_identity_count"), 0)
@@ -3362,6 +3396,8 @@ class PostgresReadModelRepository:
                 reasons.append(f"group_count metadata={group_count} actual={actual_group_count}")
             if row_count > 0 and actual_group_row_count == 0 and not is_tombstone:
                 reasons.append(f"row_count metadata={row_count} actual_group_rows={actual_group_row_count}")
+            if missing_materialized_row_count:
+                reasons.append(f"missing_materialized_row count={missing_materialized_row_count}")
             if summary_count > 0 and actual_summary_count == 0 and not is_tombstone:
                 reasons.append(f"summary_count metadata={summary_count} actual={actual_summary_count}")
             if duplicate_invoice_identity_count:
@@ -3383,6 +3419,12 @@ class PostgresReadModelRepository:
                         "actual_row_count": int_value(row.get("actual_row_count"), 0),
                         "actual_group_count": actual_group_count,
                         "actual_group_row_count": actual_group_row_count,
+                        "missing_materialized_row_count": missing_materialized_row_count,
+                        "missing_materialized_row_samples": [
+                            str(value)
+                            for value in list(row.get("missing_materialized_row_samples") or [])
+                            if text(value)
+                        ],
                         "actual_summary_count": actual_summary_count,
                         "duplicate_invoice_identity_count": duplicate_invoice_identity_count,
                         "duplicate_bank_identity_count": duplicate_bank_identity_count,
@@ -5150,6 +5192,29 @@ class PostgresReadModelRepository:
         row_id: str,
         expected_read_model_version: str | None = None,
     ) -> dict[str, Any] | None:
+        transaction_factory = getattr(self._connection, "transaction", None)
+        if not callable(transaction_factory):
+            return self._get_workbench_row_detail_in_snapshot(
+                scope_key=scope_key,
+                row_id=row_id,
+                expected_read_model_version=expected_read_model_version,
+            )
+        with transaction_factory() as transaction:
+            transaction.execute("set transaction isolation level repeatable read read only")
+            transaction.execute("set local statement_timeout = '2s'")
+            return PostgresReadModelRepository(transaction)._get_workbench_row_detail_in_snapshot(
+                scope_key=scope_key,
+                row_id=row_id,
+                expected_read_model_version=expected_read_model_version,
+            )
+
+    def _get_workbench_row_detail_in_snapshot(
+        self,
+        *,
+        scope_key: str,
+        row_id: str,
+        expected_read_model_version: str | None = None,
+    ) -> dict[str, Any] | None:
         normalized_scope_key = str(scope_key or "").strip() or "all"
         normalized_row_id = text(row_id)
         if not normalized_row_id:
@@ -5166,11 +5231,9 @@ class PostgresReadModelRepository:
             raise WorkbenchReadModelVersionConflictError(expected=expected_version, current=active_generation_id)
         if normalized_scope_key == "all":
             row_scope_clause = "true"
-            group_row_scope_clause = "true"
             scope_params: tuple[Any, ...] = ()
         else:
             row_scope_clause = "r.scope_key in (%s, 'all')"
-            group_row_scope_clause = "gr.scope_key in (%s, 'all')"
             scope_params = (normalized_scope_key,)
         row = self._connection.fetch_one(
             f"""
@@ -5201,60 +5264,6 @@ class PostgresReadModelRepository:
             """,
             (normalized_row_id, *scope_params, normalized_scope_key),
         )
-        if not isinstance(row, dict):
-            row = self._connection.fetch_one(
-                f"""
-                select
-                  gr.row_id,
-                  gr.pane,
-                  gr.source_kind,
-                  gr.status,
-                  gr.payload as member_payload,
-                  gr.raw_payload as member_raw_payload,
-                  gr.scope_key,
-                  gr.generation_id,
-                  gen.source_versions
-                from read_model.workbench_group_rows gr
-                join read_model.workbench_generations gen
-                  on gen.generation_id = gr.generation_id
-                 and gen.scope_key = gr.scope_key
-                 and gen.status = 'active'
-                where gr.row_id = %s
-                  and {group_row_scope_clause}
-                order by
-                  case
-                    when gr.scope_key = %s then 0
-                    when gr.scope_key = 'all' then 1
-                    else 2
-                  end,
-                  gr.updated_at desc nulls last
-                limit 1
-                """,
-                (normalized_row_id, *scope_params, normalized_scope_key),
-            )
-            if isinstance(row, dict):
-                payload = row_payload(row, "member_payload", "member_raw_payload")
-                if not isinstance(payload, dict) or not payload:
-                    return None
-                payload = dict(payload)
-                payload.setdefault("id", normalized_row_id)
-                payload.setdefault("row_id", normalized_row_id)
-                payload.setdefault("type", text(row.get("source_kind")) or text(row.get("pane")) or "unknown")
-                source_kind = text(row.get("source_kind"))
-                if source_kind:
-                    payload.setdefault("source_kind", source_kind)
-                status = text(row.get("status"))
-                if status:
-                    payload.setdefault("status", status)
-                resolved_scope_key = text(row.get("scope_key")) or normalized_scope_key
-                return {
-                    "row": payload,
-                    "scope_key": resolved_scope_key,
-                    "source_versions": row.get("source_versions"),
-                    "active_generation_id": active_generation_id,
-                    "read_model_version": active_generation_id,
-                    "read_model_status": self._workbench_read_model_status_for_groups_page(scope_key=resolved_scope_key),
-                }
         if not isinstance(row, dict):
             return None
         payload = _read_model_payload(row)
@@ -6209,6 +6218,21 @@ class PostgresReadModelRepository:
                 scope_month = month_start(payload.get("scope_month") or payload.get("month") or grouped_payload.get("month") or scope_key)
                 workbench_rows = list(self._iter_workbench_rows(grouped_payload))
                 workbench_groups = list(self._iter_workbench_groups(grouped_payload))
+                materialized_row_ids = {
+                    row_id
+                    for row in workbench_rows
+                    if (row_id := _workbench_row_id(row))
+                }
+                visible_fact_row_ids: set[str] = set()
+                for group in workbench_groups:
+                    group_payload = group.get("payload") if isinstance(group.get("payload"), dict) else group
+                    for group_row in _workbench_group_row_records(
+                        _workbench_group_payload_for_rows(group, payload=group_payload)
+                    ):
+                        row_id = text(group_row.get("row_id"))
+                        if row_id and text(group_row.get("row_role")) != "summary":
+                            visible_fact_row_ids.add(row_id)
+                missing_materialized_row_ids = sorted(visible_fact_row_ids - materialized_row_ids)
                 summary_payload = self._workbench_summary_from_payload(
                     scope_key=scope_key,
                     grouped_payload=grouped_payload,
@@ -6242,6 +6266,17 @@ class PostgresReadModelRepository:
                     )
                 existing_source_versions = existing_row.get("source_versions") if isinstance(existing_row, dict) else {}
                 if (
+                    active_generation_id
+                    and normalize_source_versions(source_versions)
+                    == normalize_source_versions(existing_source_versions)
+                    and not self._workbench_generation_consistency_failures(
+                        connection,
+                        scope_key=scope_key,
+                        include_all=False,
+                    )
+                ):
+                    continue
+                if (
                     incoming_source_version is not None
                     and _source_version_value(existing_source_versions) is not None
                     and incoming_source_version < _source_version_value(existing_source_versions)
@@ -6251,6 +6286,12 @@ class PostgresReadModelRepository:
                     )
                 ):
                     continue
+                if missing_materialized_row_ids:
+                    raise RuntimeError(
+                        "Workbench generation contains visible rows without materialized detail rows: "
+                        f"count={len(missing_materialized_row_ids)} "
+                        f"samples={missing_materialized_row_ids[:10]}"
+                    )
                 generation_id = self._new_workbench_generation_id(scope_key)
                 row_count = len(workbench_rows) or int_value(payload.get("row_count"), 0)
                 group_count = len(workbench_groups)

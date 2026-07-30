@@ -66,7 +66,7 @@ class DirectCanonicalRuntimeRetirementMigrationTests(unittest.TestCase):
                     values (
                         %s, 'read_model', %s,
                         %s, 'all', %s, 'pending',
-                        %s, %s, null
+                        %s, %s, now()
                     )
                     """,
                     (
@@ -120,12 +120,15 @@ class DirectCanonicalRuntimeRetirementMigrationTests(unittest.TestCase):
                     insert into job.outbox_events(
                         event_type, aggregate_type, aggregate_id,
                         scope_type, scope_key, dedupe_key, status,
-                        last_error, locked_by, locked_at
+                        last_error, locked_by, locked_at,
+                        processed_at, dead_lettered_at
                     )
                     values (
                         'workbench.read_model.refresh', 'read_model', %s,
                         'workbench', %s, %s, %s,
-                        %s, %s, case when %s = 'processing' then now() end
+                        %s, %s, now(),
+                        case when %s in ('failed', 'dead_lettered') then now() end,
+                        case when %s = 'dead_lettered' then now() end
                     )
                     """,
                     (
@@ -135,6 +138,7 @@ class DirectCanonicalRuntimeRetirementMigrationTests(unittest.TestCase):
                         status,
                         f"evidence:{status}",
                         f"worker:{status}",
+                        status,
                         status,
                     ),
                 )

@@ -11,14 +11,13 @@ OA 提供：
 
 本系统不修改 OA 源业务数据，只读取、映射、缓存和投影。
 
-## MongoDB
+## MongoDB 与 PostgreSQL
 
-当前有两类 Mongo：
+- OA Mongo：外部只读源，只允许同步 owner 读取后写入 PostgreSQL canonical facts。
+- PostgreSQL：生产 app 状态、业务事实、关系、任务和 read model 的唯一读写库。
+- 历史 App Mongo：离线迁移遗留物，不属于 runtime、回滚、审计、缓存或 read model 链路。
 
-- OA Mongo：外部只读源。
-- App Mongo：本系统状态、文件、缓存和 read model。
-
-不要混淆两者权限。生产环境 app 对 OA Mongo 应保持只读。
+生产环境 app 对 OA Mongo 必须保持只读，也不得回退读取历史 App Mongo。
 
 ## 部署资产
 

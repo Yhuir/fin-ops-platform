@@ -484,6 +484,13 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         self.assertEqual(violations, [])
         self.assertIn("FIN_OPS_APP_STORAGE_BACKEND=postgres", common_source)
 
+    def test_local_backend_launcher_does_not_restore_app_mongo_runtime(self) -> None:
+        source = (REPO_ROOT / "scripts" / "start-backend.sh").read_text(encoding="utf-8")
+
+        self.assertNotIn("FIN_OPS_APP_MONGO_", source)
+        self.assertNotIn("mongo_only", source)
+        self.assertNotIn("FIN_OPS_STORAGE_MODE", source)
+
     def test_canonical_fact_legacy_source_paths_stay_in_removal_baseline(self) -> None:
         production_paths = {
             "backend/src/fin_ops_platform/app/server.py": APP_ROOT / "server.py",
@@ -6826,12 +6833,16 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for snippet in (
             "class SettingsDataResetPairSnapshotPort",
             "def pair_relations(",
-            "def save_pair_relations(",
             "def snapshot(",
-            "save_pair_relation_snapshot",
         ):
             if snippet not in port_source:
                 violations.append(f"settings data reset pair snapshot port missing {snippet}")
+        for forbidden in (
+            "def save_pair_relations(",
+            "save_pair_relation_snapshot",
+        ):
+            if forbidden in port_source:
+                violations.append(f"settings data reset read port still owns write behavior {forbidden}")
         for forbidden in (
             "workbench_pair_relation_service:",
             "self._workbench_pair_relation_service",
@@ -6842,17 +6853,18 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("SettingsDataResetService does not require explicit pair snapshot port")
         if "_workbench_pair_snapshot_port.pair_relations()" not in service_class_source:
             violations.append("SettingsDataResetService does not read pair relations through the port")
-        if "_workbench_pair_snapshot_port.save_pair_relations(kept_pair_relations)" not in service_class_source:
-            violations.append("SettingsDataResetService does not save filtered pair relations through the port")
-        if "_persist_import_reset_state(" not in service_class_source:
-            violations.append("SettingsDataResetService import resets no longer share explicit persistence boundary")
         for snippet in (
-            "self._state_store.save_workbench_overrides({})",
-            "self._state_store.save_workbench_pair_relations({})",
+            "self._state_store.reset_bank_transaction_data(",
+            "self._state_store.reset_invoice_data(",
+            "self._state_store.reset_oa_workbench_data(",
         ):
             if snippet not in service_class_source:
-                violations.append(f"SettingsDataResetService reset persistence no longer uses explicit port {snippet}")
+                violations.append(f"SettingsDataResetService reset no longer uses explicit transaction port {snippet}")
         for forbidden in (
+            "_persist_import_reset_state(",
+            "self._state_store.save(",
+            "self._state_store.save_workbench_overrides(",
+            "self._state_store.save_workbench_pair_relations(",
             '"workbench_overrides": {}',
             '"workbench_pair_relations": {}',
             '"workbench_read_models": {}',
@@ -7106,6 +7118,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
     def test_app_invoice_writes_stay_in_core_repository(self) -> None:
         allowed_write_paths = {
             "backend/src/fin_ops_platform/services/postgres_repositories/core.py",
+            "backend/src/fin_ops_platform/services/postgres_repositories/settings_data_reset.py",
         }
         write_patterns = (
             "insert into app.invoices",

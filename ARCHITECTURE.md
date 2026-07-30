@@ -6,7 +6,7 @@
 
 - 前端：React + TypeScript + Vite，正式页面在 `web/`。
 - 后端：Python 服务，HTTP 入口仍是自定义 server，业务服务集中在 `backend/src/fin_ops_platform/services/`。
-- App 状态：生产主读写使用 PostgreSQL；Mongo detailed collections/GridFS 旧路径保留为迁移观察期回滚、shadow-read 和审计工具使用。
+- App 状态：PostgreSQL 是生产 app 状态和业务事实的唯一读写库；当前 runtime 不读取 app Mongo，也没有 app Mongo fallback、shadow-read 或导出/审计旁路。
 - OA 数据源：通过 `MongoOAAdapter` 只读读取 OA MongoDB。
 - 部署：当前已有 OA 同域部署资产，前端路径 `/fin-ops/`，后端路径 `/fin-ops-api/`。
 
@@ -34,22 +34,23 @@ OA Adapter       Import/File Services
    +------> 业务服务与状态投影 <------+
                     |                 |
                     v                 |
-              PostgreSQL app store    |
-                    |                 |
-                    v                 |
-        Workbench pair relations      |
-                    |                 |
-                    v                 |
-        Workbench read models / search|
-                    |                 |
-                    v                 |
-              React 前端页面
+              PostgreSQL app store
+                 |             |
+                 |             +----> 页面专属 canonical query ----> React 前端页面
+                 v
+        Workbench pair relations
+                 |
+                 v
+        四个登记 read model / search
+                 |
+                 v
+        关联台及登记的独立消费者
 ```
 
 ## 架构原则
 
 - 核销事实必须落到结构化模型，不靠备注表达业务状态。
-- 写模型和读模型分离：确认、撤回、异常处理只改最小事实；页面读取优先走物化读模型。工作台读模型采用 generation 原子发布，刷新期间只暴露最近 active generation，不读取 building/failed 中间状态。
+- 写入只改变最小 canonical 事实。除关联台外，财务页面通过页面专属 query service 在单个只读快照中直接读取 canonical facts 和 active relations；只有 `workbench`、`workbench_relation`、`search`、`no_oa_bank_batch` 四个明确登记的 read model 使用 freshness/status/enqueue/worker 合同。工作台采用 generation 原子发布，刷新期间只暴露最近 active generation，不读取 building/failed 中间状态。
 - 外部系统只通过适配层接入，OA 原始库保持只读。
 - 导入必须先预览后确认，确认动作必须幂等并可审计。
 - 生产操作必须有权限、审计、状态反馈和回滚路径。
@@ -58,9 +59,9 @@ OA Adapter       Import/File Services
 
 当前系统已经拆出 pair relations、read models、candidate matches、dirty scopes 等性能相关模型。后续如果做高性能生产重构，建议优先处理：
 
-1. 完成 PostgreSQL primary 的观察期，保留 app Mongo 回滚路径直到 contract 阶段。
-2. 继续把 `ApplicationStateStore` 中的兼容 snapshot 语义收敛成明确 repository。
-3. 将工作台、搜索、成本统计、税金抵扣的高频查询进一步优化为数据库可索引查询和物化读模型；工作台 Redis page cache 以 active generation 作为版本边界。
+1. 持续优化页面专属 canonical query 的 SQL、索引和批量读取，保持单快照一致性并建立 p95/p99 基线。
+2. 生产业务 I/O 继续收敛到明确 service/repository；`ApplicationStateStore` 仅保留本地 tooling/test 用途，不参与生产事实读取。
+3. 只优化已登记的四个 read model，不为已直读页面恢复 projection/worker；工作台 Redis page cache 以 freshness gate 通过后的 active generation 为版本边界。
 4. 将导入、OCR、OA 同步、统计预热迁入后台任务。
 5. 对核心接口建立压测基线和 `EXPLAIN ANALYZE` 调优闭环。
 

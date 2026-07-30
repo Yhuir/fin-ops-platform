@@ -133,6 +133,35 @@ class ReadModelManifestTests(unittest.TestCase):
                     self.assertTrue(auxiliary.required)
                     self.assertIn(entry.refresh_event_type, auxiliary.event_types)
 
+    def test_manifest_and_runtime_registry_have_exact_worker_instance_sets(self) -> None:
+        registrations_by_read_model: dict[str, set[str]] = {}
+        registrations = registration_by_instance_name()
+
+        for registration in registrations.values():
+            if registration.read_model_key is None:
+                continue
+            self.assertIsNotNone(registration.read_model_scope_type)
+            registrations_by_read_model.setdefault(registration.read_model_key, set()).add(
+                registration.instance_name
+            )
+
+        self.assertEqual(set(registrations_by_read_model), set(READ_MODEL_MANIFEST))
+        for entry in READ_MODEL_MANIFEST.values():
+            with self.subTest(read_model_key=entry.key):
+                expected_instances = {
+                    entry.primary_worker_instance,
+                    *entry.auxiliary_refresh_worker_instances,
+                }
+                self.assertEqual(
+                    registrations_by_read_model[entry.key],
+                    expected_instances,
+                )
+                for worker_instance in expected_instances:
+                    registration = registrations[worker_instance]
+                    self.assertEqual(registration.read_model_key, entry.key)
+                    self.assertEqual(registration.read_model_scope_type, entry.scope_type)
+                    self.assertIn(entry.refresh_event_type, registration.event_types)
+
     def test_manifest_scope_types_are_policy_registered(self) -> None:
         registered_scope_types = set(DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY.registered_scope_types())
 

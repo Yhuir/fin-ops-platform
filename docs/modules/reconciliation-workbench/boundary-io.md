@@ -27,7 +27,7 @@
 | active relations | workbench-relations | 只接受 `status=active` 的正式关系；row ids 必须存在且不可跨 case 重叠 |
 | row overrides / exception cases | workbench control repositories | 仅对没有 active formal relation ownership 的 row 生效；优先级为 formal relation > override > exception，projection 与 Page Audit 必须共用该合同 |
 | list query | Workbench API | `month`、zone=`paired|unpaired`、分页、区域级 `search`、排序、generation/source versions；已配对与未配对各自只有一个不超过 200 字符的搜索词，按普通文本、不区分大小写地查询该区所有 OA/流水/发票结构化展示字段；任一行命中即返回完整关联组，包含当前隐藏 pane 与折叠明细，内部 row/group id 和 detail-only 字段不属于搜索面；`%`、`_`、反斜杠不得成为 SQL 通配符。普通关系和 `no_oa_bank_batch` 的 summary page 必须返回全部可见行，不得截成三行 preview；只有 ETC 发票栏和银行流水规则批量处理的银行栏（成员数 `>3`）允许逐栏折叠。折叠栏的 summary 只返回摘要与权威 `collapsed_row_counts`，不得附带 `collapsed_rows` 搜索预览；搜索只决定完整关联组是否命中，不能自动加载、展开或显示折叠成员。完整 `collapsed_rows` 只由用户点击后调用 group detail 获得。默认无筛选 `month=all` 查询使用现有 canonical active-month group/member SQL 一次计算精确 total 与 row counts，分页继续只取有界 payload；查询开始和返回前复核 active-month generation-set digest，切换时 fail closed。带条件查询只物化 active generation 的窄 group keys；active member CTE 必须允许条件下推，禁止强制物化全部 active members 后再搜索。单条 SQL 一次得到精确 total、row counts 与匹配 group ids，分页按匹配 ids 取 payload，禁止重复扫描历史 generation；普通标量列同列多选按 OR，不同列/不同 pane 按 AND；银行金额表头的方向+付款账号复合筛选继续按 AND |
-| row/group detail | Workbench read repository | 必须固定到同一 active generation；miss 不得合成占位行或回退旧 snapshot |
+| row/group detail | Workbench read repository | active generation 版本校验与 `workbench_rows` 详情读取必须处于同一个只读 repeatable-read 快照；miss 必须 fail closed，不得合成占位行、读取旧 generation 或回退 `workbench_group_rows.payload` |
 | confirm/withdraw command | Workbench action route / Turnover adapter | canonical row ids、actor、tenant、idempotency、expected versions、preview identity。通用页面调用保持原合同；Turnover cash-closure 撤回可在同一事务先调用 `prepare_withdraw_relation(case_id)`，以一次 case lock/scoped snapshot/freshness 得到 owner-bound preparation，再交给 `withdraw_relation(..., preparation=...)`，case、rows 或 aliases 不一致必须 fail closed，禁止重复加载关系 |
 | matching scope | durable matching dirty queue | 合法 `YYYY-MM`；repository 读取 ±365 日组合窗口，显式引用可补载全部保留历史 |
 | matching source versions | matching worker / orchestrator | 只跟踪会改变正式关系计算结果的输入；Workbench 展示投影 schema 不是 matching 输入，禁止因纯展示版本升级重算历史月份。 |
@@ -51,7 +51,7 @@
 | formal relation write result | caller | before/after、version、affected months、audit；普通操作的 outbox/barrier targets 为空 |
 | relation source version | Workbench/Cost/其他消费页 | canonical relation 事实提供可比较的版本证明。普通关系事务不直接投递 Cost 或任何其它页面；消费页只在自身访问时检测 mismatch 并投递精确 scope。 |
 | matching summary | worker/App Health | planned/created/extended/preserved/ambiguous/resource-limited/unsafe counts；不输出候选 rows |
-| read model generation | Workbench query | 新 generation 完整写入并校验后原子激活；building/failed 不可读为 fresh |
+| read model generation | Workbench query | 新 generation 完整写入并校验后原子激活；每个可见非 summary group row 都必须有同 generation 的 `workbench_rows` 详情行，否则拒绝发布。active generation 健康且 `source_versions` 完全相同时必须保持现有 generation；building/failed 不可读为 fresh |
 | all-scope query statistics | Workbench groups query | all-scope total、三类 row counts 与标题 statistics 直接从当前 active monthly generations 的 canonical group/member owner 集合计算；不写第二份 all-scope statistics，不把全历史聚合放进月份发布事务。查询返回前必须复核 generation-set digest，切换时 fail closed |
 | superseded generation retention | `finops-prune-workbench-generations.timer` | 低峰期有界删除非 active generation；发布热路径不得同步扫描/删除旧 generation，清理失败不得影响 fresh generation 或页面写后可见性 |
 | refreshing query status | Workbench initial/detail query | 返回 refreshing/遮罩状态；读入口不得再次补投 `all` refresh，只有真正 missing 或 freshness gate 已证明的 exact stale scope 才能请求恢复，避免读 I/O 扩成全月份写 fan-out |

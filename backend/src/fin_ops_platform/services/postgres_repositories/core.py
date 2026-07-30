@@ -261,6 +261,8 @@ class PostgresCoreRepository:
         if text := self._text(status):
             clauses.append("import_files.status = %s")
             params.append(text)
+        else:
+            clauses.append("import_files.status <> 'deleted'")
         where_sql = "where " + " and ".join(clauses) if clauses else ""
         count_clauses = [*clauses, "import_files.uploaded_at is not null"]
         count_where_sql = "where " + " and ".join(count_clauses)
@@ -919,6 +921,7 @@ class PostgresCoreRepository:
                    import_files.uploaded_by, import_files.uploaded_at,
                    import_files.raw_payload
             from app.import_files import_files
+            where import_files.status <> 'deleted'
             order by import_files.session_id, import_files.original_filename, legacy_id
             """
         )

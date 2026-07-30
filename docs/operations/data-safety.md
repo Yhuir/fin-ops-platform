@@ -52,6 +52,15 @@
 | read model backfill | scope、source version、dirty scope、worker drain、freshness 验证 |
 | 批量撤回/repair | affected objects、审计、跨页刷新、回滚说明 |
 
+## 统一事实源合同只读审计
+
+发布前后可通过 root-owned helper 运行
+`sudo /usr/local/sbin/finops-deploy-control domain-contract-audit <release-name>`。
+该命令连接 activation 将迁移的 PostgreSQL primary，并在强制只读会话中只统计 canonical 发票、银行流水、关联关系、后台任务和
+durable outbox 的结构合同违规数，
+不返回业务样本、不执行修复；`summary.blocking_issue_count` 非零时退出码为 1，
+数据库配置缺失时退出码为 2，均不得视为通过。
+
 ## 银行分类历史 `unknown` 修复
 
 `tools/repair_unknown_bank_transaction_categories.py` 只处理旧人工撤销错误留下的 active `category=unknown, source=manual`。工具默认拒绝写入；生产操作必须依次执行：

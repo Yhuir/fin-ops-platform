@@ -17,6 +17,9 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_relation
     PostgresOaPendingPaymentRelationRepository,
 )
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
+from fin_ops_platform.services.postgres_repositories.settings_data_reset import (
+    PostgresSettingsDataResetRepository,
+)
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.postgres_repositories.workbench_idempotency import PostgresWorkbenchIdempotencyRepository
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
@@ -32,6 +35,7 @@ __all__ = [
     "PostgresOpsTaxEtcRepository",
     "PostgresOaPendingPaymentRelationRepository",
     "PostgresReadModelRepository",
+    "PostgresSettingsDataResetRepository",
     "PostgresWorkbenchRepository",
     "PostgresWorkbenchIdempotencyRepository",
     "PostgresWorkbenchRelationRepository",

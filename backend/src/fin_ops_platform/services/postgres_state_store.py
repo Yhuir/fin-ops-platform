@@ -24,6 +24,7 @@ from fin_ops_platform.services.postgres_repositories import (
     PostgresOAProjectionRepository,
     PostgresOpsTaxEtcRepository,
     PostgresReadModelRepository,
+    PostgresSettingsDataResetRepository,
     PostgresWorkbenchRelationRepository,
     PostgresWorkbenchRepository,
 )
@@ -1039,6 +1040,42 @@ class PostgresStateStore:
     def load(self) -> dict[str, Any]:
         return self._load_snapshot_payload(include_import_facts=True)
 
+    def reset_bank_transaction_data(
+        self,
+        *,
+        source_snapshot: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        del source_snapshot
+        with self._connection.transaction() as transaction:
+            return PostgresSettingsDataResetRepository(
+                transaction
+            ).reset_bank_transaction_data()
+
+    def reset_invoice_data(
+        self,
+        *,
+        source_snapshot: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        del source_snapshot
+        with self._connection.transaction() as transaction:
+            return PostgresSettingsDataResetRepository(transaction).reset_invoice_data()
+
+    def reset_oa_workbench_data(
+        self,
+        *,
+        row_ids: list[str],
+        case_ids: list[str],
+        source_snapshot: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        del source_snapshot
+        with self._connection.transaction() as transaction:
+            return PostgresSettingsDataResetRepository(
+                transaction
+            ).reset_oa_workbench_data(
+                row_ids=row_ids,
+                case_ids=case_ids,
+            )
+
     def load_imports_snapshot(self) -> dict[str, Any]:
         return self._load_imports()
 
@@ -1186,7 +1223,10 @@ class PostgresStateStore:
         return deleted
 
     def import_session_exists(self, session_id: str) -> bool:
-        row = self._connection.fetch_one("select 1 from app.import_files where session_id = %s limit 1", (session_id,))
+        row = self._connection.fetch_one(
+            "select 1 from app.import_files where session_id = %s and status <> 'deleted' limit 1",
+            (session_id,),
+        )
         return row is not None
 
     def import_file_exists(self, file_id: str) -> bool:
@@ -1198,11 +1238,14 @@ class PostgresStateStore:
             select 1
             from app.import_files import_files
             left join app.file_objects file_objects on file_objects.id = import_files.file_object_id
-            where import_files.legacy_mongo_id = %s
-               or import_files.id::text = %s
-               or file_objects.legacy_mongo_id = %s
-               or file_objects.legacy_gridfs_id = %s
-               or file_objects.object_key = %s
+            where import_files.status <> 'deleted'
+              and (
+                   import_files.legacy_mongo_id = %s
+                or import_files.id::text = %s
+                or file_objects.legacy_mongo_id = %s
+                or file_objects.legacy_gridfs_id = %s
+                or file_objects.object_key = %s
+              )
             limit 1
             """,
             (normalized_file_id, normalized_file_id, normalized_file_id, normalized_file_id, normalized_file_id),

@@ -622,7 +622,10 @@ class BankTransactionImportPageAuditPostgresTests(unittest.TestCase):
         self.connection.execute(
             """
             update job.outbox_events
-            set status = 'dead_lettered', last_error = 'fixture dead letter'
+            set status = 'dead_lettered',
+                processed_at = clock_timestamp(),
+                dead_lettered_at = clock_timestamp(),
+                last_error = 'fixture dead letter'
             where id = '00000000-0000-0000-0000-000000000007'
             """
         )

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
@@ -952,6 +953,345 @@ class ApplicationStateStore:
 
     def load(self) -> dict[str, Any]:
         return self._load_local_pickle()
+
+    def reset_bank_transaction_data(
+        self,
+        *,
+        source_snapshot: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self._reset_local_import_domain(
+            source_snapshot=source_snapshot,
+            removed_batch_types={"bank_transaction"},
+            remove_bank_transactions=True,
+            remove_invoices=False,
+            workbench_row_types={"bank", "bank_transaction"},
+            workbench_row_id_prefixes=("bk-", "bk_", "txn-", "txn_", "bank-", "bank_"),
+        )
+
+    def reset_invoice_data(
+        self,
+        *,
+        source_snapshot: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        result = self._reset_local_import_domain(
+            source_snapshot=source_snapshot,
+            removed_batch_types={"input_invoice", "output_invoice"},
+            remove_bank_transactions=False,
+            remove_invoices=True,
+            workbench_row_types={"invoice", "input_invoice", "output_invoice"},
+            workbench_row_id_prefixes=(
+                "iv-",
+                "iv_",
+                "inv-",
+                "inv_",
+                "invoice-",
+                "invoice_",
+                "oa-att-inv-",
+                "etc-summary-",
+            ),
+        )
+        tax_snapshot = (
+            dict(source_snapshot.get("tax_certified_imports") or {})
+            if isinstance(source_snapshot, dict)
+            else self.load_tax_certified_imports()
+        )
+        result.update(
+            {
+                "tax_certified_import_sessions": len(
+                    dict(tax_snapshot.get("sessions") or {})
+                ),
+                "tax_certified_import_batches": len(
+                    dict(tax_snapshot.get("batches") or {})
+                ),
+                "tax_certified_import_records": len(
+                    dict(tax_snapshot.get("records") or {})
+                ),
+                "etc_batch_invoice_links": 0,
+            }
+        )
+        self.save_tax_certified_imports({})
+        return result
+
+    def reset_oa_workbench_data(
+        self,
+        *,
+        row_ids: list[str],
+        case_ids: list[str],
+        source_snapshot: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized_row_ids = {
+            str(row_id or "").strip()
+            for row_id in row_ids
+            if str(row_id or "").strip()
+        }
+        normalized_case_ids = {
+            str(case_id or "").strip()
+            for case_id in case_ids
+            if str(case_id or "").strip()
+        }
+        with self._local_pickle_lock:
+            current_payload = self._load_local_pickle()
+            override_snapshot = (
+                source_snapshot.get("workbench_overrides")
+                if isinstance(source_snapshot, dict)
+                else current_payload.get("workbench_overrides")
+            )
+            row_overrides = (
+                dict(override_snapshot.get("row_overrides") or {})
+                if isinstance(override_snapshot, dict)
+                else {}
+            )
+            kept_row_overrides = {
+                row_id: override
+                for row_id, override in row_overrides.items()
+                if str(row_id) not in normalized_row_ids
+            }
+            relation_snapshot = (
+                source_snapshot.get("workbench_pair_relations")
+                if isinstance(source_snapshot, dict)
+                else current_payload.get("workbench_pair_relations")
+            )
+            pair_relations = (
+                dict(relation_snapshot.get("pair_relations") or {})
+                if isinstance(relation_snapshot, dict)
+                else {}
+            )
+            kept_pair_relations = {
+                case_id: relation
+                for case_id, relation in pair_relations.items()
+                if str(case_id) not in normalized_case_ids
+            }
+            current_payload["workbench_overrides"] = self._snapshot_with_filtered_items(
+                override_snapshot,
+                key="row_overrides",
+                items=kept_row_overrides,
+            )
+            current_payload["workbench_pair_relations"] = {
+                **(dict(relation_snapshot) if isinstance(relation_snapshot, dict) else {}),
+                "pair_relations": kept_pair_relations,
+            }
+            self._save_local_pickle(current_payload)
+        removed_override_count = len(row_overrides) - len(kept_row_overrides)
+        removed_relation_count = len(pair_relations) - len(kept_pair_relations)
+        return {
+            "workbench_row_overrides": removed_override_count,
+            "workbench_oa_row_overrides": removed_override_count,
+            "workbench_pair_relations": removed_relation_count,
+            "workbench_oa_pair_relations": removed_relation_count,
+            "workbench_pair_relation_history_preserved": 0,
+            "workbench_preserved_non_oa_pair_relations": len(kept_pair_relations),
+        }
+
+    def _reset_local_import_domain(
+        self,
+        *,
+        source_snapshot: dict[str, Any] | None,
+        removed_batch_types: set[str],
+        remove_bank_transactions: bool,
+        remove_invoices: bool,
+        workbench_row_types: set[str],
+        workbench_row_id_prefixes: tuple[str, ...],
+    ) -> dict[str, Any]:
+        normalized_batch_types = {
+            str(batch_type or "").strip()
+            for batch_type in removed_batch_types
+            if str(batch_type or "").strip()
+        }
+        with self._local_pickle_lock:
+            current_payload = self._load_local_pickle()
+            reset_source = source_snapshot if isinstance(source_snapshot, dict) else current_payload
+            imports_snapshot = deepcopy(reset_source.get("imports") or {})
+            batches = dict(imports_snapshot.get("batches") or {})
+            invoices = list(imports_snapshot.get("invoices") or [])
+            transactions = list(imports_snapshot.get("transactions") or [])
+            filtered_batches = {
+                batch_id: preview
+                for batch_id, preview in batches.items()
+                if self._local_preview_batch_type(preview) not in normalized_batch_types
+            }
+            imports_snapshot["batches"] = filtered_batches
+            if remove_bank_transactions:
+                imports_snapshot["transactions"] = []
+            if remove_invoices:
+                imports_snapshot["invoices"] = []
+
+            file_snapshot = deepcopy(reset_source.get("file_imports") or {})
+            sessions = dict(file_snapshot.get("sessions") or {})
+            kept_sessions: dict[str, Any] = {}
+            removed_file_paths: list[str] = []
+            removed_file_count = 0
+            removed_session_count = 0
+            for session_id, session in sessions.items():
+                files = list(self._get_container_value(session, "files") or [])
+                kept_files: list[Any] = []
+                for file_item in files:
+                    if (
+                        self._local_file_batch_type(file_item)
+                        not in normalized_batch_types
+                    ):
+                        kept_files.append(file_item)
+                        continue
+                    removed_file_count += 1
+                    stored_file_path = self._get_container_value(
+                        file_item,
+                        "stored_file_path",
+                    )
+                    if stored_file_path:
+                        removed_file_paths.append(str(stored_file_path))
+                if not kept_files:
+                    if files:
+                        removed_session_count += 1
+                    continue
+                updated_session = deepcopy(session)
+                self._set_container_value(updated_session, "files", kept_files)
+                self._set_container_value(updated_session, "file_count", len(kept_files))
+                kept_sessions[str(session_id)] = updated_session
+            file_snapshot["sessions"] = kept_sessions
+
+            override_snapshot = reset_source.get("workbench_overrides")
+            row_overrides = (
+                dict(override_snapshot.get("row_overrides") or {})
+                if isinstance(override_snapshot, dict)
+                else {}
+            )
+            kept_row_overrides = {
+                row_id: override
+                for row_id, override in row_overrides.items()
+                if not self._local_workbench_item_matches_domain(
+                    row_id=str(row_id),
+                    row_type=self._get_container_value(override, "type"),
+                    row_types=workbench_row_types,
+                    row_id_prefixes=workbench_row_id_prefixes,
+                )
+            }
+
+            relation_snapshot = reset_source.get("workbench_pair_relations")
+            pair_relations = (
+                dict(relation_snapshot.get("pair_relations") or {})
+                if isinstance(relation_snapshot, dict)
+                else {}
+            )
+            kept_pair_relations = {
+                case_id: relation
+                for case_id, relation in pair_relations.items()
+                if not self._local_relation_matches_domain(
+                    relation,
+                    row_types=workbench_row_types,
+                    row_id_prefixes=workbench_row_id_prefixes,
+                )
+            }
+
+            matching_snapshot = reset_source.get("matching")
+            matching_runs = (
+                dict(matching_snapshot.get("runs") or {})
+                if isinstance(matching_snapshot, dict)
+                else {}
+            )
+            matching_results = (
+                dict(matching_snapshot.get("results") or {})
+                if isinstance(matching_snapshot, dict)
+                else {}
+            )
+            current_payload["imports"] = imports_snapshot
+            current_payload["file_imports"] = file_snapshot
+            current_payload["matching"] = {}
+            current_payload["workbench_overrides"] = self._snapshot_with_filtered_items(
+                override_snapshot,
+                key="row_overrides",
+                items=kept_row_overrides,
+            )
+            current_payload["workbench_pair_relations"] = self._snapshot_with_filtered_items(
+                relation_snapshot,
+                key="pair_relations",
+                items=kept_pair_relations,
+            )
+            if remove_bank_transactions:
+                current_payload["bank_transaction_categories"] = {}
+                current_payload["turnover_relations"] = {}
+            self._save_local_pickle(current_payload)
+
+        return {
+            "import_batches": len(batches) - len(filtered_batches),
+            "import_batch_rows": 0,
+            "invoices": len(invoices) if remove_invoices else 0,
+            "bank_transactions": (
+                len(transactions) if remove_bank_transactions else 0
+            ),
+            "file_import_sessions": removed_session_count,
+            "file_import_files": removed_file_count,
+            "matching_runs": len(matching_runs),
+            "matching_results": len(matching_results),
+            "workbench_row_overrides": len(row_overrides) - len(kept_row_overrides),
+            "workbench_pair_relations": len(pair_relations)
+            - len(kept_pair_relations),
+            "workbench_pair_relation_history_preserved": 0,
+            "stored_import_file_paths": list(dict.fromkeys(removed_file_paths)),
+        }
+
+    @staticmethod
+    def _snapshot_with_filtered_items(
+        snapshot: Any,
+        *,
+        key: str,
+        items: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not items:
+            return {}
+        normalized = dict(snapshot) if isinstance(snapshot, dict) else {}
+        normalized[key] = items
+        return normalized
+
+    @classmethod
+    def _local_relation_matches_domain(
+        cls,
+        relation: Any,
+        *,
+        row_types: set[str],
+        row_id_prefixes: tuple[str, ...],
+    ) -> bool:
+        if not isinstance(relation, dict):
+            return False
+        relation_row_ids = list(relation.get("row_ids") or [])
+        relation_row_types = list(relation.get("row_types") or [])
+        for index, row_id in enumerate(relation_row_ids):
+            row_type = (
+                relation_row_types[index]
+                if index < len(relation_row_types)
+                else ""
+            )
+            if cls._local_workbench_item_matches_domain(
+                row_id=str(row_id or ""),
+                row_type=row_type,
+                row_types=row_types,
+                row_id_prefixes=row_id_prefixes,
+            ):
+                return True
+        return False
+
+    @staticmethod
+    def _local_workbench_item_matches_domain(
+        *,
+        row_id: str,
+        row_type: Any,
+        row_types: set[str],
+        row_id_prefixes: tuple[str, ...],
+    ) -> bool:
+        normalized_row_type = str(row_type or "").strip().lower()
+        normalized_row_id = str(row_id or "").strip().lower()
+        return normalized_row_type in row_types or normalized_row_id.startswith(
+            row_id_prefixes
+        )
+
+    @classmethod
+    def _local_preview_batch_type(cls, preview: Any) -> str:
+        batch = cls._get_container_value(preview, "batch")
+        batch_type = cls._get_container_value(batch, "batch_type")
+        return str(getattr(batch_type, "value", batch_type) or "")
+
+    @classmethod
+    def _local_file_batch_type(cls, file_item: Any) -> str:
+        batch_type = cls._get_container_value(file_item, "batch_type")
+        return str(getattr(batch_type, "value", batch_type) or "")
 
     def save(self, payload: dict[str, Any]) -> None:
         self._save_local_pickle(payload)

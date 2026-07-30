@@ -30,13 +30,10 @@ bash scripts/verify.sh lint
 bash scripts/verify.sh runtime-check
 ```
 
-`runtime-check` 会读取当前环境变量和 `.runtime/fin_ops_platform/*_config.json`。如果 `.runtime/fin_ops_platform/app_mongo_config.json` 仍存在，后端会尝试加载 legacy app Mongo；旧 pickle snapshot 可能因为字段或 slot 迁移失败。PostgreSQL primary 开发环境不应依赖 app Mongo 旧路径，可先保留备份并禁用本地 app Mongo 配置：
-
-```bash
-mv .runtime/fin_ops_platform/app_mongo_config.json .runtime/fin_ops_platform/app_mongo_config.json.disabled
-```
-
-不要删除或重命名 `.runtime/fin_ops_platform/oa_mongo_config.json`，OA Mongo 仍是外部只读来源。
+`runtime-check` 使用当前 PostgreSQL runtime 配置并执行 fail-fast 启动检查；它不会读取
+`.runtime/fin_ops_platform/app_mongo_config.json`、旧 pickle snapshot 或其它 App Mongo
+旁路。不要删除或重命名 `.runtime/fin_ops_platform/oa_mongo_config.json`，OA Mongo
+仍是外部只读来源。
 
 后端启动：
 
@@ -93,7 +90,7 @@ RabbitMQ 相关变量当前只作为未来投递通道边界预留；本地同�
 完整检查会验证 `/health` 使用 PostgreSQL runtime、Redis 和对象存储可用，并确认 `/api/workbench` 组合首屏与 `/api/workbench/groups` 能从 SQL read model 返回非空数据。
 工作台首屏只使用一个 combined initial endpoint，`/api/workbench/groups` 只用于后续搜索、筛选和分页。不要用机器上残留的 `127.0.0.1:8000` 旧 `backend.api.main:app` 进程判断本项目状态；本仓库默认后端端口是 `8001`，前端 Vite proxy 也默认指向 `http://127.0.0.1:8001`。
 
-没有 PostgreSQL 连接配置时，脚本仍保留本地 legacy mode 兼容路径；本地和服务器同构验收必须使用 PostgreSQL runtime。
+没有 PostgreSQL 连接配置时，后端按正式 runtime 合同 fail fast；本地和服务器同构验收都必须使用 PostgreSQL runtime。
 
 ## 前端依赖
 
@@ -119,12 +116,9 @@ npm run build
 - `.runtime/fin_ops_platform/oa_mongo_config.json`
 - 或环境变量 `FIN_OPS_OA_MONGO_*`
 
-App Mongo 可配置：
-
-- `.runtime/fin_ops_platform/app_mongo_config.json`
-- 或旧的 app Mongo 环境配置；当前生产 runtime 不再读取这类配置。
-
-PostgreSQL primary runtime 下，App Mongo 只保留为迁移观察期回滚、shadow-read 或审计参考，不作为日常 app 事实源。保留该配置会让 `runtime-check` 继续读取旧 app Mongo 数据；`backend` / `all` 验证不会读取它。
+历史 `.runtime/fin_ops_platform/app_mongo_config.json` 和旧 App Mongo 环境变量不再被
+backend、worker、`runtime-check` 或其它正式验证入口读取。需要保留迁移前证据时只能
+离线归档，不能重新接入 runtime。
 
 ## 常见检查
 

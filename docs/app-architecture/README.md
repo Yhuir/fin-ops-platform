@@ -26,11 +26,12 @@
 - Durable queue：`backend/src/fin_ops_platform/services/runtime_queue.py`
 - Worker registry：`backend/src/fin_ops_platform/services/runtime_worker_registry.py`
 
-## 页面直读例外
+## 页面读取合同
 
 成本统计、银行明细、OA 待付款、流水规则批量处理、批量账务、ETC、税金抵扣、待找发票、进项使用、销项收款与外部往来款都是登记的 page-specific canonical direct-read 页面。页面 query facade/repository 在单个 `REPEATABLE READ READ ONLY` PostgreSQL snapshot 内组合 canonical facts 与 active formal relations，不消费页面 read model、Redis、refresh status/SSE、queue 或 worker。
 
-关联台是明确例外：继续使用 `workbench` active-generation read model、freshness/status/enqueue、Redis fresh cache 和 Workbench worker；`workbench_relation`、`search`、`no_oa_bank_batch` 三个共享 read model 继续服务各自登记消费者。
+关联台是唯一仍使用页面 read model 的财务页面：继续使用 `workbench` active-generation read model、freshness/status/enqueue、Redis fresh cache 和 Workbench worker；`workbench_relation`、`search`、`no_oa_bank_batch` 三个共享 read model 继续服务各自登记消费者。
+
 ## 使用规则
 
 新增或修改页面、API、read model、worker 或 derived lifecycle 事件时，先做文档影响评估；影响当前事实源时更新本目录和对应产品、开发或运维文档。历史 prompt、阶段计划和旧归档不再作为当前事实源。

@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import asdict, dataclass
 from typing import Any, Callable
 
-from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.state_store_protocol import ApplicationStateStoreProtocol
 
 
@@ -27,23 +25,13 @@ class SettingsDataResetPairSnapshotPort:
         self,
         *,
         pair_relation_snapshot: Callable[[], dict[str, Any]],
-        save_pair_relation_snapshot: Callable[[dict[str, Any]], None],
     ) -> None:
         self._pair_relation_snapshot = pair_relation_snapshot
-        self._save_pair_relation_snapshot = save_pair_relation_snapshot
 
     def pair_relations(self) -> dict[str, Any]:
         snapshot = self.snapshot()
         pair_relations = snapshot.get("pair_relations")
         return pair_relations if isinstance(pair_relations, dict) else {}
-
-    def save_pair_relations(self, pair_relations: dict[str, Any]) -> None:
-        self._save_pair_relation_snapshot(
-            {
-                **self.snapshot(),
-                "pair_relations": dict(pair_relations),
-            }
-        )
 
     def snapshot(self) -> dict[str, Any]:
         return dict(self._pair_relation_snapshot() or {})
@@ -115,29 +103,17 @@ class SettingsDataResetService:
         *,
         progress_callback: SettingsDataResetProgressCallback | None,
     ) -> SettingsDataResetResult:
-        self._emit_progress(progress_callback, "prepare_imports", "正在统计银行流水域数据。", 0, 4)
-        imports_snapshot, import_deleted_counts = self._build_filtered_imports_snapshot(
-            remove_bank_transactions=True,
-            remove_invoices=False,
+        self._emit_progress(progress_callback, "reset_data", "正在事务性清除银行流水域数据。", 0, 2)
+        reset_result = dict(
+            self._state_store.reset_bank_transaction_data(
+                source_snapshot=self._local_source_snapshot(),
+            )
         )
-        self._emit_progress(progress_callback, "prepare_file_imports", "正在统计银行流水导入文件。", 1, 4)
-        file_imports_snapshot, removed_file_paths, file_deleted_counts = self._build_filtered_file_imports_snapshot(
-            removed_batch_types={BatchType.BANK_TRANSACTION.value}
-        )
-        self._emit_progress(progress_callback, "persist_state", "正在写入银行流水重置结果。", 2, 4)
-        self._persist_import_reset_state(
-            imports_snapshot=imports_snapshot,
-            file_imports_snapshot=file_imports_snapshot,
-        )
-        self._emit_progress(progress_callback, "delete_import_files", "正在删除银行流水导入文件。", 3, 4)
+        removed_file_paths = list(reset_result.pop("stored_import_file_paths", []) or [])
+        self._emit_progress(progress_callback, "delete_import_files", "正在删除银行流水导入文件。", 1, 2)
         deleted_blob_count = self._state_store.delete_import_files(removed_file_paths)
         deleted_counts = {
-            **import_deleted_counts,
-            **file_deleted_counts,
-            "matching_runs": len(self._matching_service.list_runs()),
-            "matching_results": len(self._matching_service.list_results()),
-            "workbench_row_overrides": len(self._row_overrides()),
-            "workbench_pair_relations": len(self._pair_relations()),
+            **reset_result,
             "stored_import_files": deleted_blob_count,
         }
         return SettingsDataResetResult(
@@ -149,6 +125,10 @@ class SettingsDataResetService:
                 "matching_results",
                 "workbench_row_overrides",
                 "workbench_pair_relations",
+                "bank_transaction_categories",
+                "bank_flow_rule_batches",
+                "no_oa_bank_batches",
+                "turnover_relations",
                 "import_batches(bank_transaction)",
                 "file_import_sessions(bank_transaction)",
                 "file_import_files(bank_transaction)",
@@ -165,35 +145,17 @@ class SettingsDataResetService:
         *,
         progress_callback: SettingsDataResetProgressCallback | None,
     ) -> SettingsDataResetResult:
-        self._emit_progress(progress_callback, "prepare_imports", "正在统计发票域数据。", 0, 5)
-        imports_snapshot, import_deleted_counts = self._build_filtered_imports_snapshot(
-            remove_bank_transactions=False,
-            remove_invoices=True,
+        self._emit_progress(progress_callback, "reset_data", "正在事务性清除发票域数据。", 0, 2)
+        reset_result = dict(
+            self._state_store.reset_invoice_data(
+                source_snapshot=self._local_source_snapshot(),
+            )
         )
-        self._emit_progress(progress_callback, "prepare_file_imports", "正在统计发票导入文件。", 1, 5)
-        file_imports_snapshot, removed_file_paths, file_deleted_counts = self._build_filtered_file_imports_snapshot(
-            removed_batch_types={BatchType.INPUT_INVOICE.value, BatchType.OUTPUT_INVOICE.value}
-        )
-        self._emit_progress(progress_callback, "prepare_tax_certified_imports", "正在统计税金认证记录。", 2, 5)
-        tax_deleted_counts = self._tax_import_deleted_counts()
-        self._emit_progress(progress_callback, "persist_state", "正在写入发票重置结果。", 3, 5)
-        self._persist_import_reset_state(
-            imports_snapshot=imports_snapshot,
-            file_imports_snapshot=file_imports_snapshot,
-        )
-        self._state_store.save_tax_certified_imports({})
-        self._emit_progress(progress_callback, "delete_import_files", "正在删除发票导入文件。", 4, 5)
+        removed_file_paths = list(reset_result.pop("stored_import_file_paths", []) or [])
+        self._emit_progress(progress_callback, "delete_import_files", "正在删除发票导入文件。", 1, 2)
         deleted_blob_count = self._state_store.delete_import_files(removed_file_paths)
         deleted_counts = {
-            **import_deleted_counts,
-            **file_deleted_counts,
-            "matching_runs": len(self._matching_service.list_runs()),
-            "matching_results": len(self._matching_service.list_results()),
-            "workbench_row_overrides": len(self._row_overrides()),
-            "workbench_pair_relations": len(self._pair_relations()),
-            "tax_certified_import_sessions": tax_deleted_counts["sessions"],
-            "tax_certified_import_batches": tax_deleted_counts["batches"],
-            "tax_certified_import_records": tax_deleted_counts["records"],
+            **reset_result,
             "stored_import_files": deleted_blob_count,
         }
         return SettingsDataResetResult(
@@ -227,34 +189,22 @@ class SettingsDataResetService:
         self._emit_progress(progress_callback, "clear_oa_state", "正在清空 OA 工作台人工状态。", 0, 2)
         row_overrides = self._row_overrides()
         pair_relations = self._pair_relations()
-        kept_row_overrides = {
-            row_id: override
+        oa_row_ids = [
+            str(row_id)
             for row_id, override in row_overrides.items()
-            if not self._is_oa_workbench_row_override(row_id, override)
-        }
-        kept_pair_relations = {
-            case_id: relation
+            if self._is_oa_workbench_row_override(row_id, override)
+        ]
+        oa_case_ids = [
+            str(case_id)
             for case_id, relation in pair_relations.items()
-            if not self._is_oa_pair_relation(relation)
-        }
-        removed_oa_override_count = len(row_overrides) - len(kept_row_overrides)
-        removed_oa_pair_relation_count = len(pair_relations) - len(kept_pair_relations)
-        preserved_non_oa_pair_relation_count = len(kept_pair_relations)
-        deleted_counts = {
-            "workbench_row_overrides": removed_oa_override_count,
-            "workbench_oa_row_overrides": removed_oa_override_count,
-            "workbench_pair_relations": removed_oa_pair_relation_count,
-            "workbench_oa_pair_relations": removed_oa_pair_relation_count,
-            "workbench_preserved_non_oa_pair_relations": preserved_non_oa_pair_relation_count,
-        }
+            if self._is_oa_pair_relation(relation)
+        ]
         self._emit_progress(progress_callback, "persist_state", "正在写入 OA 重置结果。", 1, 2)
-        self._state_store.save_workbench_overrides(
-            {
-                **self._workbench_override_service.snapshot(),
-                "row_overrides": kept_row_overrides,
-            }
+        deleted_counts = self._state_store.reset_oa_workbench_data(
+            row_ids=oa_row_ids,
+            case_ids=oa_case_ids,
+            source_snapshot=self._local_source_snapshot(),
         )
-        self._workbench_pair_snapshot_port.save_pair_relations(kept_pair_relations)
         return SettingsDataResetResult(
             action=RESET_OA_AND_REBUILD_ACTION,
             status="completed",
@@ -279,109 +229,6 @@ class SettingsDataResetService:
         if progress_callback is not None:
             progress_callback(phase, message, current, total)
 
-    def _persist_import_reset_state(self, *, imports_snapshot: dict[str, Any], file_imports_snapshot: dict[str, Any]) -> None:
-        self._state_store.save(
-            {
-                "imports": imports_snapshot,
-                "file_imports": file_imports_snapshot,
-                "matching": {},
-            }
-        )
-        self._state_store.save_workbench_overrides({})
-        self._state_store.save_workbench_pair_relations({})
-
-    def _build_filtered_imports_snapshot(
-        self,
-        *,
-        remove_bank_transactions: bool,
-        remove_invoices: bool,
-    ) -> tuple[dict[str, Any], dict[str, int]]:
-        snapshot = deepcopy(self._import_service.snapshot())
-        batches = snapshot.get("batches", {})
-        invoices = list(snapshot.get("invoices", []))
-        transactions = list(snapshot.get("transactions", []))
-
-        removed_batch_count = 0
-        filtered_batches: dict[str, Any] = {}
-        for batch_id, preview in batches.items():
-            batch_type = self._preview_batch_type(preview)
-            if remove_bank_transactions and batch_type == BatchType.BANK_TRANSACTION.value:
-                removed_batch_count += 1
-                continue
-            if remove_invoices and batch_type in {BatchType.INPUT_INVOICE.value, BatchType.OUTPUT_INVOICE.value}:
-                removed_batch_count += 1
-                continue
-            filtered_batches[str(batch_id)] = preview
-
-        removed_invoice_count = len(invoices) if remove_invoices else 0
-        removed_transaction_count = len(transactions) if remove_bank_transactions else 0
-
-        snapshot["batches"] = filtered_batches
-        snapshot["invoices"] = [] if remove_invoices else invoices
-        snapshot["transactions"] = [] if remove_bank_transactions else transactions
-        return (
-            snapshot,
-            {
-                "import_batches": removed_batch_count,
-                "invoices": removed_invoice_count,
-                "bank_transactions": removed_transaction_count,
-            },
-        )
-
-    def _build_filtered_file_imports_snapshot(
-        self,
-        *,
-        removed_batch_types: set[str],
-    ) -> tuple[dict[str, Any], list[str], dict[str, int]]:
-        snapshot = deepcopy(self._file_import_service.snapshot())
-        sessions = snapshot.get("sessions", {})
-        filtered_sessions: dict[str, Any] = {}
-        removed_session_count = 0
-        removed_file_count = 0
-        removed_file_paths: list[str] = []
-        normalized_removed_batch_types = {str(item).strip() for item in removed_batch_types if str(item).strip()}
-
-        for session_id, session in sessions.items():
-            files = list(self._get_value(session, "files") or [])
-            kept_files: list[Any] = []
-            removed_any = False
-            for file_item in files:
-                batch_type = self._file_batch_type(file_item)
-                if batch_type in normalized_removed_batch_types:
-                    removed_any = True
-                    removed_file_count += 1
-                    stored_file_path = self._get_value(file_item, "stored_file_path")
-                    if stored_file_path:
-                        removed_file_paths.append(str(stored_file_path))
-                    continue
-                kept_files.append(file_item)
-            if not kept_files:
-                if removed_any:
-                    removed_session_count += 1
-                continue
-            updated_session = deepcopy(session)
-            self._set_value(updated_session, "files", kept_files)
-            self._set_value(updated_session, "file_count", len(kept_files))
-            filtered_sessions[str(session_id)] = updated_session
-
-        snapshot["sessions"] = filtered_sessions
-        return (
-            snapshot,
-            removed_file_paths,
-            {
-                "file_import_sessions": removed_session_count,
-                "file_import_files": removed_file_count,
-            },
-        )
-
-    def _tax_import_deleted_counts(self) -> dict[str, int]:
-        snapshot = self._tax_certified_import_service.snapshot()
-        return {
-            "sessions": len(snapshot.get("sessions", {})),
-            "batches": len(snapshot.get("batches", {})),
-            "records": len(snapshot.get("records", {})),
-        }
-
     def _row_overrides(self) -> dict[str, Any]:
         snapshot = self._workbench_override_service.snapshot()
         row_overrides = snapshot.get("row_overrides")
@@ -389,6 +236,18 @@ class SettingsDataResetService:
 
     def _pair_relations(self) -> dict[str, Any]:
         return self._workbench_pair_snapshot_port.pair_relations()
+
+    def _local_source_snapshot(self) -> dict[str, Any] | None:
+        if self._state_store.storage_backend != "local_pickle":
+            return None
+        return {
+            "imports": self._import_service.snapshot(),
+            "file_imports": self._file_import_service.snapshot(),
+            "matching": self._matching_service.snapshot(),
+            "workbench_overrides": self._workbench_override_service.snapshot(),
+            "workbench_pair_relations": self._workbench_pair_snapshot_port.snapshot(),
+            "tax_certified_imports": self._tax_certified_import_service.snapshot(),
+        }
 
     @classmethod
     def _is_oa_workbench_row_override(cls, row_id: str, override: Any) -> bool:
@@ -448,31 +307,3 @@ class SettingsDataResetService:
             "affected_row_id",
             "affected_row_ids",
         }
-
-    @staticmethod
-    def _preview_batch_type(preview: Any) -> str:
-        batch = SettingsDataResetService._get_value(preview, "batch")
-        batch_type = SettingsDataResetService._get_value(batch, "batch_type")
-        if batch_type is None:
-            return ""
-        return str(getattr(batch_type, "value", batch_type))
-
-    @staticmethod
-    def _file_batch_type(file_item: Any) -> str:
-        batch_type = SettingsDataResetService._get_value(file_item, "batch_type")
-        if batch_type is None:
-            return ""
-        return str(getattr(batch_type, "value", batch_type))
-
-    @staticmethod
-    def _get_value(container: Any, key: str) -> Any:
-        if isinstance(container, dict):
-            return container.get(key)
-        return getattr(container, key, None)
-
-    @staticmethod
-    def _set_value(container: Any, key: str, value: Any) -> None:
-        if isinstance(container, dict):
-            container[key] = value
-            return
-        setattr(container, key, value)

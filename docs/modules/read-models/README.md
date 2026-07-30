@@ -27,9 +27,9 @@
 
 ## 当前闭环状态
 
-- 状态：页面 read model 退役完成，生产发布验证待完成。
+- 状态：当前 runtime 合同已收敛并关闭；每次生产发布仍按 App Health、worker registry 和运维 runbook 验证实际实例、backlog、freshness 与页面读链，不以历史迁移阶段文字代替当前证据。
 - 当前 registry/manifest 登记 `workbench` active-generation 页面 read model，以及 `workbench_relation`、`search`、`no_oa_bank_batch` 三个共享 projection。共享 projection 只服务各自独立消费者，不能作为 canonical 直读页面的运行时依赖。
-- 关联台继续通过 freshness/status/enqueue、Redis fresh cache 和 Workbench worker 读取 active generation。银行明细、待找发票、进项发票使用、销项发票收款、OA 待付款、税金抵扣和流水规则批量处理直接读取 canonical PostgreSQL snapshot；成本统计、外部往来和批量账务也保持各自 canonical query 边界。
+- 关联台继续通过 freshness/status/enqueue、Redis fresh cache 和 Workbench worker 读取 active generation。银行明细、待找发票、进项发票使用、销项发票收款、OA 待付款、税金抵扣和流水规则批量处理直接读取 canonical PostgreSQL snapshot；成本统计、外部往来、批量账务与 ETC 也保持各自 canonical query 边界。
 - BankFlow 未提交候选由页面请求内实时推导；没有 draft event、worker、readiness、dirty scope、manifest 或 replay。`app.bank_flow_rule_batches/events` 只保留正式状态和历史。
 - migration `0127_direct_canonical_page_runtime_retirement.sql` 是纯 no-op 退休标记；旧 outbox、dirty scope、readiness 与历史物理 projection 表均不改写、不删除，完整保留上一版本回滚能力。deploy preflight 先停止/disable 退休 instance 并要求退休 runtime 不存在 `processing`；门禁通过后才停止仍登记的上一版本 worker。门禁失败不会中断 import/matching/保留 read-model worker。
 
@@ -37,7 +37,7 @@
 
 只有登记的 read model 查询才走 freshness/status/enqueue 边界。refresh 入队前必须通过统一 scope policy/gateway 做 normalize、validate 和 dedupe；`RuntimeQueueRepository` 只负责 durable queue 持久化。
 
-`read_model_scope_policy.py`、`read_model_manifest.py`、`APP_STATUS_READ_MODEL_REGISTRY` 和 runtime worker registry 必须具有同一组 read-model key：`workbench`、`workbench_relation`、`search`、`no_oa_bank_batch`。七个 canonical 页面不得在任何一个 registry 中重新出现，也不得读取其历史 projection、readiness 或 dirty scope。
+`read_model_scope_policy.py`、`read_model_manifest.py`、`APP_STATUS_READ_MODEL_REGISTRY` 和 runtime worker registry 必须具有同一组 read-model key：`workbench`、`workbench_relation`、`search`、`no_oa_bank_batch`。Manifest 声明的 primary/auxiliary worker instances 必须与 runtime registry 中同 key 的全部实例双向相等；当前 `workbench` 对应 `workbench`、`workbench-secondary`。canonical 页面不得在任何一个 registry 中重新出现，也不得读取其历史 projection、readiness 或 dirty scope。
 
 canonical 页面 GET 以一次 `REPEATABLE READ / READ ONLY` snapshot 为读取边界，直接返回业务 payload；不返回页面 `read_model_status`，不因 GET enqueue，写后只重新执行当前页面 normal GET。缺少 canonical repository 是配置错误，必须 fail fast，不能回退到历史 projection。
 
@@ -107,14 +107,14 @@ canonical 页面 GET 以一次 `REPEATABLE READ / READ ONLY` snapshot 为读取�
 
 | Legacy path | 当前状态 | 保留条件 | 禁止行为 | 测试证明 |
 | --- | --- | --- | --- | --- |
-| 七个 canonical 页面历史 projection 代码/物理表 | `rollback-only` | 只供上一版本回滚；0127 不删表 | 在当前 registry、worker、RabbitMQ、App Status、scope policy 或页面 GET 中重新接线 | `tests/test_runtime_worker_registry.py`、`tests/test_read_model_manifest.py`、`tests/test_postgres_migrations.py` |
+| 已退休页面历史 projection 代码/物理表 | `rollback-only` | 只供上一版本回滚；0127 不删表 | 在当前 registry、worker、RabbitMQ、App Status、scope policy 或页面 GET 中重新接线 | `tests/test_runtime_worker_registry.py`、`tests/test_read_model_manifest.py`、`tests/test_postgres_migrations.py` |
 | Workbench/Search/no-OA/workbench relation worker lanes | `active` | 只服务各自登记消费者 | 被无关 canonical 页面用作 freshness/readiness 依赖 | `tests/test_runtime_worker_registry.py`、`tests/test_read_model_manifest.py` |
 | fan-out-only `all` scope | `quarantined semantics` | 只作为 refresh command 或明确 aggregate rebuild target | 发布不可查询 parent fresh proof；页面等待永不发布的 parent | `tests/test_read_model_manifest.py`、scope/gateway/query runtime tests |
 | broad shared SQL repository | `transition owner` | SQL/table knowledge 过渡期集中；公共方法必须有单一 manifest owner | 新增未登记跨模块方法或让业务 service 依赖 broad repository surface | `tests/test_read_model_manifest.py`、repository port isolation tests |
 
 ### Partitioned scoped incremental 目标
 
-该目标适用于三个保留的共享 projection；Workbench 使用独立 active-generation scoped publish。七个 canonical 页面不再以 scoped projection 为目标，也不应因历史优化目标重新引入页面 worker。
+该目标适用于三个保留的共享 projection；Workbench 使用独立 active-generation scoped publish。已退休页面不再以 scoped projection 为目标，也不应因历史优化目标重新引入页面 worker。
 
 Scoped incremental projection 可以在当前 SQL view 已 fresh 且 `source_versions` 与本次计算出的 source contract 完全一致时返回 `skipped/source_versions_unchanged`，但这只是 worker 性能优化，不是 freshness 证明替代品。缺少 fresh SQL view、dirty/outbox 仍 active、source_versions 缺失或不一致时，必须重建或返回 refreshing/stale；不能把 volatile queue event `source_version` 当成业务内容变化，也不能过滤掉真正代表内容变化的 schema/rule/signature 字段。
 

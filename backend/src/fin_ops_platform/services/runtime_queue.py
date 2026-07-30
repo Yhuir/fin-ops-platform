@@ -1372,7 +1372,6 @@ class RuntimeQueueRepository:
                 set
                     status = 'pending',
                     attempts = 0,
-                    attempt_count = 0,
                     available_at = now(),
                     publish_status = 'unpublished',
                     published_at = null,

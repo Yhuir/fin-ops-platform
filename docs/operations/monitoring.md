@@ -20,7 +20,7 @@
 - 四个保留 read model 的 dirty scopes。
 - 后台任务状态。
 - Runtime durable queue backlog、failed outbox event、stale read model dirty scopes。
-- Mongo 连接错误。
+- OA Mongo 只读同步连接错误。
 - 导入和重置任务失败。
 
 ## 告警建议
@@ -29,7 +29,7 @@
 
 - 后端不可用。
 - OA 会话接口不可用。
-- App Mongo 写入失败。
+- OA Mongo 只读同步连续失败或 PostgreSQL canonical commit 失败。
 - 后台任务连续失败。
 - `job.outbox_events` pending 积压时间持续增长。
 - `job.outbox_events` failed/dead_lettered 数量非零且持续增加。

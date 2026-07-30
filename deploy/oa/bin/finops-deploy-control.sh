@@ -60,6 +60,8 @@ commands:
                                       remove retired batch membership metadata through relation commands
   batch-accounting-audit <release-name>
                                       run the fixed read-only Batch Accounting business audit
+  domain-contract-audit <release-name>
+                                      count canonical PostgreSQL contract violations without samples or writes
   batch-accounting-read-smoke <release-name> --bank-year YYYY [--iterations N]
                                       time and validate both canonical read buckets without HTTP auth
   workbench-matching-retry <release-name> --scope-month YYYY-MM --dry-run
@@ -697,6 +699,15 @@ batch_accounting_audit() {
     batch_accounting --json --fail-on-issues --tenant-id default --limit 50
 }
 
+domain_contract_audit() {
+  local release="${1:-}"
+  [[ -n "$release" && "$#" -eq 1 ]] || die "domain-contract-audit accepts only release name"
+  local src
+  src="$(release_src "$release")"
+  assert_runtime_env_contract
+  run_with_runtime_env "$src" -m fin_ops_platform.tools.domain_contract_audit
+}
+
 batch_accounting_read_smoke() {
   local release="${1:-}"
   [[ -n "$release" ]] || die "batch-accounting-read-smoke requires release name"
@@ -1198,6 +1209,10 @@ case "$cmd" in
   batch-accounting-audit)
     shift
     batch_accounting_audit "$@"
+    ;;
+  domain-contract-audit)
+    shift
+    domain_contract_audit "$@"
     ;;
   batch-accounting-read-smoke)
     shift

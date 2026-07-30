@@ -324,6 +324,7 @@ function isWorkbenchReadModelRejected(error: unknown) {
     code === "workbench_read_model_version_conflict"
     || code === "workbench_read_model_not_fresh"
     || code === "workbench_stale"
+    || code === "workbench_row_not_found"
   );
 }
 
@@ -718,6 +719,7 @@ export default function ReconciliationWorkbenchPage() {
   function applyWorkbenchInitialPageResult(
     workbenchPayload: WorkbenchInitialPageResult,
     resolvedZoneQueries: Record<"paired" | "unpaired", WorkbenchGroupsPageQuery>,
+    preserveDetailRequest = false,
   ) {
     const nextStatus = workbenchZonePagesReadModelStatus(workbenchPayload.pages);
     const previousVersion = activeWorkbenchReadModelVersionRef.current;
@@ -742,11 +744,13 @@ export default function ReconciliationWorkbenchPage() {
     setLoadMoreErrorByZone({ paired: null, unpaired: null });
     const nextVersion = workbenchActiveReadModelVersion(workbenchPayload.pages);
     if (previousVersion && nextVersion && previousVersion !== nextVersion) {
-      detailRequestSeqRef.current += 1;
       clearSelection();
-      closeDetail();
-      setDetailError(null);
-      setIsDetailLoading(false);
+      if (!preserveDetailRequest) {
+        detailRequestSeqRef.current += 1;
+        closeDetail();
+        setDetailError(null);
+        setIsDetailLoading(false);
+      }
       setSelectionSourceGroups({ paired: [], unpaired: [] });
       setExpandedZoneId(null);
       setActionDialog(null);
@@ -771,6 +775,7 @@ export default function ReconciliationWorkbenchPage() {
       zoneQueries?: Record<"paired" | "unpaired", WorkbenchGroupsPageQuery>;
       propagateError?: boolean;
       deferStateApply?: boolean;
+      preserveDetailRequest?: boolean;
     },
   ): Promise<WorkbenchInitialPageResult | null> {
     const requestSeq = loadRequestSeqRef.current + 1;
@@ -808,7 +813,11 @@ export default function ReconciliationWorkbenchPage() {
         return null;
       }
       if (!deferStateApply) {
-        applyWorkbenchInitialPageResult(workbenchPayload, resolvedZoneQueries);
+        applyWorkbenchInitialPageResult(
+          workbenchPayload,
+          resolvedZoneQueries,
+          options?.preserveDetailRequest ?? false,
+        );
       }
       setBackgroundLoadError(null);
       if (!background) {
@@ -1452,30 +1461,54 @@ export default function ReconciliationWorkbenchPage() {
       return;
     }
 
-    void fetchWorkbenchRowDetail(row.id, {
-      month: WORKBENCH_VIEW_MONTH,
-      expectedReadModelVersion,
-    })
-      .then((detailedRow) => {
+    const loadDetail = async () => {
+      try {
+        const detailedRow = await fetchWorkbenchRowDetail(row.id, {
+          month: WORKBENCH_VIEW_MONTH,
+          expectedReadModelVersion,
+        });
+        return { detailedRow, readModelVersion: expectedReadModelVersion };
+      } catch (error) {
+        if (!isWorkbenchReadModelRejected(error)) {
+          throw error;
+        }
+        const refreshed = await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
+          background: true,
+          includeAuxiliary: false,
+          zoneQueries: zoneServerPageQueries,
+          propagateError: true,
+          preserveDetailRequest: true,
+        });
+        if (detailRequestSeqRef.current !== requestSeq || !refreshed) {
+          return null;
+        }
+        const refreshedVersion = workbenchActiveReadModelVersion(refreshed.pages);
+        if (!refreshedVersion) {
+          throw error;
+        }
+        const detailedRow = await fetchWorkbenchRowDetail(row.id, {
+          month: WORKBENCH_VIEW_MONTH,
+          expectedReadModelVersion: refreshedVersion,
+        });
+        return { detailedRow, readModelVersion: refreshedVersion };
+      }
+    };
+
+    void loadDetail()
+      .then((result) => {
+        if (!result) {
+          return;
+        }
         if (
           detailRequestSeqRef.current === requestSeq
-          && activeWorkbenchReadModelVersionRef.current === expectedReadModelVersion
+          && activeWorkbenchReadModelVersionRef.current === result.readModelVersion
         ) {
-          replaceDetailRow(detailedRow);
+          replaceDetailRow(result.detailedRow);
         }
       })
-      .catch((error) => {
+      .catch(() => {
         if (detailRequestSeqRef.current === requestSeq) {
-          if (isWorkbenchReadModelRejected(error)) {
-            void loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
-              background: true,
-              includeAuxiliary: false,
-              zoneQueries: zoneServerPageQueries,
-            });
-            setDetailError("关联台数据版本已更新，页面正在重新加载。");
-          } else {
-            setDetailError("详情加载失败，请稍后重试。");
-          }
+          setDetailError("详情加载失败，请稍后重试。");
         }
       })
       .finally(() => {

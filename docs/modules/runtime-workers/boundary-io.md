@@ -7,8 +7,8 @@
 - 状态：closed
 - 当前边界可信度：high
 - 目标边界：所有后台 worker 由 registry、durable queue、handler 和部署 manifest 显式声明。
-- 当前 worker 入口使用 registration contract；instance、event type、env、manifest/check 与 App Health 由 `runtime_worker_registry.py` 派生。关联台保留 `workbench` 页面 worker registration/event/env/readiness；银行明细、待找发票、进/销项、OA 待付款、税金抵扣、成本和外部往来页面已改为 direct canonical read。
-- 生产证据状态：既有 worker 治理已上线；本次 direct-canonical 收敛的生产发布后仍需验证退休页面 event 不再新增、页面读性能及 confirm/withdraw 跨页一致性。
+- 当前 worker 入口使用 registration contract；instance、event type、env、manifest/check 与 App Health 由 `runtime_worker_registry.py` 派生。关联台保留 `workbench`、`workbench-secondary` 页面 worker registration/event/env/readiness；银行明细、待找发票、进/销项、OA 待付款、税金抵扣、成本和外部往来页面已改为 direct canonical read。
+- 生产证据状态：runtime 合同已关闭；每次发布仍必须以当前 registry/App Health、队列 backlog、页面读性能及 confirm/withdraw 跨页一致性 smoke 形成 point-in-time 证据，不沿用历史“待发布”结论。
 - 旧代码删除状态：旧 `worker_legacy_application` / `RuntimeWorkerApplicationBridge` / GridFS migration worker / 手写生产 worker 矩阵已移除；`import.fact.changed` 与 `turnover_ledger.read_model.refresh` 的 registration、handler、env event type 和 runtime derived-lifecycle bridge 均已删除。import worker 只 claim `import.process.requested`。
 
 ## 职责边界

@@ -6,8 +6,8 @@
 
 - app 主读写已切到 PostgreSQL primary runtime。
 - OA MongoDB 保持外部只读源。
-- app Mongo 旧路径只用于观察期审计、shadow-read 或回滚参考。
-- PostgreSQL schema version 到达 `0008` 后完成 production read switch。
+- app Mongo 旧路径曾用于迁移观察期审计、shadow-read 和回滚参考；相关 runtime/rehearsal 工具现已删除。
+- PostgreSQL schema version 到达 `0008` 是当时 production read switch 的历史里程碑，不代表当前 schema version。
 - 迁移分支已合入 main，并完成 main release redeploy。
 
 ## 迁移阶段浓缩
@@ -29,9 +29,9 @@
 | production mode | `postgres_primary` |
 | storage backend | `postgres` |
 | read backend | `postgres` |
-| schema version | `0008` / health 中显示 `8` |
+| cutover schema milestone | `0008`；当前版本以 migration runner 和 `/health` 为准 |
 | OA Mongo | 只读接入，不触碰 `form_data_db.form_data` 写入边界 |
-| app Mongo | 回滚/审计参考，不再作为当前开发事实源 |
+| app Mongo | 离线历史遗留物；不进入 runtime、回滚、审计或当前开发事实链路 |
 
 ## 迁移遗留规则
 

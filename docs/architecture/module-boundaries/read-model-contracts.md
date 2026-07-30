@@ -1,6 +1,6 @@
 # Read Model 边界合同
 
-扫描日期：2026-07-27。
+扫描日期：2026-07-30。
 
 本文件只记录当前运行时合同。历史 projection 设计和迁移过程不再作为架构依据；可执行事实源是：
 
@@ -20,7 +20,7 @@ App 当前登记四个 runtime read model：一个关联台页面 active-generat
 | `search` | `search.read_model.refresh` | `search`、`search-secondary`、`search-tertiary` | fan-out command | Search read API | `SearchReadModelRepositoryPort` |
 | `no_oa_bank_batch` | `no_oa_bank_batch.read_model.refresh` | `no-oa-bank-batch` | fan-out command | `NoOaBankBatchApplicationService` | `NoOaBankBatchReadModelRepositoryPort` |
 
-Manifest、scope policy、App Status registry 与所有带 `read_model_key` 的 worker registration 必须精确等于这个集合。四种 scope 都只接受 `YYYY-MM` 或 `all`。三个共享 read model 的 `all` 只负责枚举并投递月份 shard；关联台查询层可将 active month generations 组合为 `all` 视图，但 worker 仍只发布月份 shard。
+Manifest、scope policy、App Status registry 与所有带 `read_model_key` 的 worker registration 必须精确等于这个集合。每个 manifest entry 的 `primary_worker_instance + auxiliary_refresh_worker_instances` 还必须与 runtime registry 中同一 `read_model_key` 的完整 instance 集合双向相等，不能只验证 manifest 指向的 worker 存在。四种 scope 都只接受 `YYYY-MM` 或 `all`。三个共享 read model 的 `all` 只负责枚举并投递月份 shard；关联台查询层可将 active month generations 组合为 `all` 视图，但 worker 仍只发布月份 shard。
 
 ## 保留原因与边界
 

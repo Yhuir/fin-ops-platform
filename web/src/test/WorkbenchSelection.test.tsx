@@ -193,6 +193,51 @@ describe("Workbench row selection and detail drawer", () => {
     );
   });
 
+  test("detail reloads the active generation once and retries after a version conflict", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({
+      workbenchReadModelVersions: ["generation-v1", "generation-v2"],
+    });
+    const defaultFetch = fetchMock.getMockImplementation();
+    let detailRequestCount = 0;
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (fetchPath(input).startsWith("/api/workbench/rows/")) {
+        detailRequestCount += 1;
+        if (detailRequestCount === 1) {
+          return Promise.resolve(jsonResponse({
+            error: "workbench_read_model_version_conflict",
+            message: "关联台数据版本已更新。",
+            read_model_status: "fresh",
+            read_model_version: "generation-v2",
+          }, 409));
+        }
+      }
+      if (!defaultFetch) {
+        throw new Error("Mock API fetch is not installed.");
+      }
+      return defaultFetch(input, init);
+    });
+    renderWorkbenchPage();
+
+    const bankRow = await screen.findByRole("row", {
+      name: /2026-03-25 14:22.*华东设备供应商/,
+    });
+    await user.click(within(bankRow).getByRole("button", { name: /查看银行流水 .* 详情/ }));
+
+    const dialog = await screen.findByRole("dialog", { name: "银行流水详情" });
+    expect(await within(dialog).findByText("账号")).toBeInTheDocument();
+    expect(within(dialog).getByText("招商银行")).toBeInTheDocument();
+    expect(within(dialog).queryByText("详情加载失败，请稍后重试。")).not.toBeInTheDocument();
+    expect(detailRequestCount).toBe(2);
+    expect(
+      fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input as RequestInfo | URL)),
+    ).toHaveLength(2);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench/rows/bk-p-202603-001?month=all&expected_read_model_version=generation-v2",
+      expect.any(Object),
+    );
+  });
+
   test("detail drawer opens before the row detail request resolves", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();

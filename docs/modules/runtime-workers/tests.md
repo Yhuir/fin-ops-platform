@@ -3,8 +3,8 @@
 ## 当前不变量
 
 - `RUNTIME_WORKER_REGISTRY` 是 registration/event/handler/scope lane 的唯一清单。
-- 带 `read_model_key` 的 registration 精确覆盖 `workbench_relation`、`search`、
-  `no_oa_bank_batch`；retired page worker/event/env 不存在。
+- 带 `read_model_key` 的 registration 精确覆盖 `workbench`、`workbench_relation`、`search`、
+  `no_oa_bank_batch`；manifest 声明的 primary/auxiliary instance 集合与 registry 双向相等，retired page worker/event/env 不存在。
 - PostgreSQL durable queue 是 job/read-model 状态事实源；RabbitMQ 只负责 wakeup。
 - Worker 不依赖 `Application`、Flask/session/header/HTTP response。
 - import、OA sync、Workbench matching 是领域/integration job，不能登记为页面 read model；
@@ -26,7 +26,7 @@
 ## 必须保留的负向断言
 
 - retired page `*.read_model.refresh`、scope、handler、registration、env/systemd unit 不存在。
-- registry/manifest/scope/App Status 集合精确三项。
+- registry/manifest/scope/App Status 集合精确四项；同一 read-model key 的 worker instance 集合也必须完全一致。
 - BankFlow draft event/owner/producer/worker/env/replay 保持删除，且不进入 registry、manifest 或 readiness。
 - RabbitMQ consumer 必须回 PostgreSQL claim；publish success 不代表 done/fresh。
 - import/OA sync 不写 full-state snapshot 或 retired page fan-out。

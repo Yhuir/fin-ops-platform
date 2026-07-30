@@ -17,21 +17,32 @@ flowchart LR
   Queue --> Outbox["job.outbox_events / job.read_model_dirty_scopes"]
   Worker["Runtime workers"] --> Outbox
   Worker --> Projection["SQL read models"]
-  UI --> Gateway["ReadModelQueryGateway"]
+  Service -. "registered read-model consumers only" .-> Gateway["Freshness service / ReadModelQueryGateway"]
   Gateway --> Projection
   Gateway --> Queue
 ```
 
 ## 读请求
 
-1. 页面调用 `web/src/features/*/api.ts`。
-2. Flask route 完成 HTTP 参数解析、权限映射和响应 shape。
-3. 查询型 service 或 `ReadModelQueryGateway` 带着 expected schema/source contract 判断 read model 是否 fresh。
-4. fresh 必须同时满足 expected contract、actual projection metadata、dirty/readiness 状态；缺少 expected contract 或 actual schema/source proof 时不能标 fresh。
-5. fresh 时读取 SQL projection 或 repository；stale/missing/schema/source mismatch 时返回状态并按需 enqueue refresh。
-6. 页面根据 `read_model_status`、`refreshing`、`stale`、`job` 等字段展示加载、刷新或不可用状态。
+当前存在两种互斥读取合同，页面必须选择其模块登记的唯一合同，不能双读或 fallback：
 
-页面不能自行假设 read model fresh，也不能为了“有数据”绕过 freshness gate。
+### 页面专属 direct canonical read
+
+1. 页面调用 `web/src/features/*/api.ts`，Flask route 完成 HTTP 参数解析、权限映射和响应 shape。
+2. 页面 query service 调用 page-specific repository，在一个 `REPEATABLE READ / READ ONLY` PostgreSQL snapshot 中读取 canonical facts、active formal relations、summary/facets 与分页结果。
+3. API 直接返回页面 DTO；不读取 projection/Redis，不比较 read-model version，不访问 dirty/outbox/readiness，也不 enqueue 或返回 `read_model_status`。
+4. 缺少 canonical repository 或 snapshot 合同时 fail fast，不能回退历史 projection、进程内 snapshot 或 app Mongo。
+
+成本统计、银行明细、OA 待付款、流水规则批量处理、批量账务、ETC、税金抵扣、待找发票、进项使用、销项收款和外部往来款均使用该合同。
+
+### 已登记 read model read
+
+只有 `workbench`、`workbench_relation`、`search`、`no_oa_bank_batch` 使用 read-model runtime：
+
+1. Query owner 带 expected schema/source contract 调用自身 freshness service 或 `ReadModelQueryGateway`。
+2. fresh 必须同时满足 expected contract、actual projection metadata、dirty/outbox/readiness 状态；缺少 expected contract 或 actual schema/source proof 时不能标 fresh。
+3. fresh 时读取 SQL projection；stale/missing/schema/source mismatch 时返回明确状态，并只按登记 scope policy enqueue 精确 refresh。
+4. 登记消费者根据 `read_model_status` 或等价 freshness 语义展示刷新/不可用状态。它们不能为了“有数据”绕过 freshness gate，Redis 也不能参与 fresh 判定。
 
 ### 批量账务读路径
 
@@ -61,7 +72,7 @@ React 启动时由 `SessionProvider` 调用 `fetchSessionMe()`，通过 `Session
 3. 普通写只提交 owner canonical facts、可比较 source version、审计/idempotency 与必要领域任务；返回精确 affected scopes 作为信息，不产生页面 dirty/outbox。
 4. API 返回写入结果、受影响月份/对象和版本；普通写的 `freshness_targets`、`operation_barrier_targets` 为空，不等待任何未访问页面重建。
 5. 当前页可以在成功后重新执行自己的普通 GET；其它已打开、未访问或 hidden 页面不执行 I/O。
-6. route 进入/重进、页面查询变化、浏览器手动刷新或用户明确重试时，页面 query owner 比较 expected/actual source versions。只有 missing/stale 的当前精确 scope 经 `ReadModelRefreshGateway` 入 durable queue，worker 异步重建 projection，页面有界、可取消地轮询。
+6. route 进入/重进、页面查询变化、浏览器手动刷新或用户明确重试时，direct canonical 页面只执行 normal GET；只有已登记 read-model consumer 的 query owner 比较 expected/actual source versions，并在当前精确 scope missing/stale 时经 `ReadModelRefreshGateway` 入 durable queue。
 
 authoritative integration snapshot 默认同样只提交 canonical facts/source version；当前 OA sync 不主动入队页面 refresh。只有 data reset、repair/backfill/reapply 和人工 maintenance 可按已登记合同主动入队；它们必须被标记为 batch/full-history，经过 scope policy/gateway，并与普通用户写严格区分。`DerivedDataLifecycleService` 只服务管理员 settings reset 与历史 ETC repair，不是普通写后的默认分发器。
 
@@ -75,7 +86,7 @@ authoritative integration snapshot 默认同样只提交 canonical facts/source 
 
 1. 写 API 成功代表 canonical write、version、audit/idempotency 已提交，并返回 affected scopes/months。
 2. 写操作立即结束，不轮询其它页面的 operation barrier，也不把无关后台工作显示为本次操作阻塞。
-3. 当前可见页若需要立即展示结果，只重新调用自己的正常 GET。GET 的 freshness gate 负责 exact-scope enqueue、refreshing/failed 状态和有界轮询。
+3. 当前可见页若需要立即展示结果，只重新调用自己的正常 GET。direct canonical 页面直接读取新事实；已登记 read-model consumer 才由 freshness gate 负责 exact-scope enqueue、refreshing/failed 状态和有界轮询。
 4. 其它已打开、未挂载或 document hidden 的页面不响应业务刷新事件、不缓冲重放、不执行 load。focus、hidden→visible 与 BFCache 恢复不触发业务页面 I/O；route 重新 mount、页面查询变化、浏览器手动刷新或明确重试才重新运行该页 load/freshness contract。
 5. 排序、分页和筛选只改变当前查询参数，不是页面激活，也不能触发其它页面重建。
 

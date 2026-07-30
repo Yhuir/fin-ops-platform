@@ -120,7 +120,8 @@
 - 关联台 Audit 绿色结果必须绑定 active Workbench read-model version + 页面 freshness status；generation/status 改变立即清除旧绿色结果。`workbench_matching_scope_not_converged` 属于 freshness+queue 阻断，`workbench_generation_source_versions_mismatch` 属于 freshness 阻断。
 - matching source-version 回归必须证明纯 Workbench projection schema 不进入 matching provider；bank-flow/no-OA read-model provider 仍保留自身所需的 Workbench projection dependency。失败 scope 运维重试必须覆盖 dry-run 零写、fingerprint drift 零写、非 failed 拒绝和 exact month 单次 durable requeue。
 - 普通标量列的同列多选必须按 OR，`全选`不能把结果清空；不同列/不同 pane 继续按 AND，银行金额表头的方向+付款账号复合筛选继续要求同一行同时满足。前端本地过滤、HTTP mock、repository SQL 和 summary preview 必须使用同一合同。
-- group detail 必须稳定输出三个 pane 数组；展开 Promise 只有在同一 active read-model version 的完整详情已安装后才能成功。详情保持 click-only lazy load，禁止恢复 mount/update 自动预取或静默吞错。
+- group detail 必须稳定输出三个 pane 数组；展开 Promise 只有在同一 active read-model version 的完整详情已安装后才能成功。详情保持 click-only lazy load，禁止恢复 mount/update 自动预取或静默吞错。row detail 的 active version 校验与详情读取必须处于同一个 repeatable-read 快照；version 冲突或 row miss 时前端只允许等待一次 combined initial 刷新并重试一次，期间保持抽屉请求身份，禁止循环重试或让旧响应覆盖新 generation。
+- 每个可见非 summary group row 必须在同 generation 具有 `workbench_rows` 详情行；发布前校验与 active generation consistency Audit 都必须阻断缺失行。健康 generation 遇到完全相同的 `source_versions` 必须保持 generation version，不得制造无事实变化的版本漂移；同版本但 consistency 失败时必须重建。
 
 ## 验证命令
 
@@ -238,4 +239,10 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_w
 - 最新后端根因修复的定向矩阵为 550 passed，覆盖 command adapter/service、pair relation service、write characterization、SQL runtime、鉴权/幂等、runtime boundary 与 relation repository。
 - 前端 combined-initial in-flight 合并由 `web/src/test/WorkbenchApi.test.ts` 保护；本轮后端-only scoped snapshot 修复未新增重复 UI 测试。
 - production release `main-632dd2aa-20260729153028` 的 Page Audit 为 `pass / fresh / drained`，issues 为空；20 次 gzip 样本的 combined initial、groups 首屏、confirm preview、withdraw preview、refresh status p95 分别为 `312.664/712.718/718.591/557.145/138.925ms`。
+
+## 2026-07-30 - 详情 generation 一致性回归
+
+- `tests/test_workbench_sql_runtime.py` 保护 active version 与 row detail 在一个只读 repeatable-read 快照内读取；详情缺失不得回退空的 group-member payload。
+- 同文件保护健康 active generation 在相同 `source_versions` 下不重复发布；active consistency 失败时允许重建；任何可见非 summary row 缺少 `workbench_rows` 物化详情都必须在激活前失败，并进入 active consistency 报告。
+- `web/src/test/WorkbenchSelection.test.tsx` 保护 OA、流水、发票共享的详情入口：遇到 generation version conflict 或 row miss 时，只等待一次 combined initial 刷新并重试一次详情请求；成功后安装新 generation 详情，失败则保留明确错误，不循环请求。
 - 未运行无关完整 CI 或浏览器套件。未执行真实生产 confirm/withdraw mutation：现有 scenario 不是 test-owned 且缺完整恢复检查点，不能为了测速修改真实财务关系。

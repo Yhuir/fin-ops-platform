@@ -4,11 +4,10 @@
 
 ## 发布前检查
 
-- 已备份 App Mongo 数据库、GridFS、部署环境变量、后端版本、前端构建产物和 Nginx 配置。
+- 已备份 PostgreSQL、对象存储、部署环境变量、后端版本、前端构建产物和 Nginx 配置。
 - `business-batches` 功能开关默认关闭，迁移和索引检查通过后再打开。
-- App Mongo detailed collections 已创建 `etc_business_batches` 集合，且满足同一 `task_id` 只有一个 active 批次的存储层约束。
-- 如果 Mongo 支持 partial unique index，检查 `unique(task_id, active=true)` 已存在；如果不支持，检查 `task_active_key` 唯一索引已存在，且非 active 批次不会保留该 key。
-- 生产部署不得使用本地 state 文件模式承载该功能；如启动参数声明 `FINOPS_STORAGE_MODE=local_state`，只能用于单进程本地开发。
+- PostgreSQL `app.etc_business_batches` 已迁移，并存在同一非撤回 `task_id` 只能绑定一个业务批次的 partial unique index。
+- 生产部署必须使用 PostgreSQL runtime；历史 App Mongo、GridFS 或本地 state 文件不得作为 ETC 批次事实源或回滚路径。
 - ETC 专用 OA 自动检测链路已移除；ETC 页面创建 OA 草稿后由用户手动确认“已提交”或“未提交”。
 - OA 草稿创建请求必须携带稳定 idempotency key；外部 OA I/O 不得持 ETC 业务锁。发布前确认管理员 recovery route 受权限保护，禁止对未知结果直接重试或手工 SQL 改状态。
 - 后端不得提供 ETC `oa-status/refresh` 入口，不得注册 ETC OA 检测 worker，不得在创建 OA 草稿或应用启动恢复时自动为 ETC 业务批次入队 `etc_business.oa_detection.refresh`。

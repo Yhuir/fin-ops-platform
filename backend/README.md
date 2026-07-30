@@ -61,7 +61,7 @@ PYTHONPATH=backend/src python3 -m unittest discover -s tests -v
 - 生产主读写通过 `FIN_OPS_APP_STORAGE_BACKEND=postgres` 和 `FIN_OPS_APP_READ_BACKEND=postgres` 接入 PostgreSQL。
 - PostgreSQL 运行时连接使用 `FIN_OPS_POSTGRES_DATABASE_URL` 或 `DATABASE_URL`，生产环境应从 root-only credential file 注入。
 - PostgreSQL migration 连接优先使用 `DATABASE_URL`，其次使用专用 `FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL`，最后才回退到 `FIN_OPS_POSTGRES_DATABASE_URL`。
-- app Mongo 旧路径仍保留，用于迁移观察期回滚、shadow-read、导出和审计工具。
+- PostgreSQL 是生产 app 状态和业务事实的唯一读写库。`ApplicationStateStore` 不读取 app Mongo；生产 runtime 不提供 app Mongo fallback、shadow-read、导出或审计旁路。
 - OA 数据库保持只读，只能通过 `MongoOAAdapter` 读取，不能作为 app 写库。
 
 ## Worker
@@ -76,12 +76,13 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.app.worker --check
 
 - `worker-oa-sync`：`--enable-oa-sync --worker-kind oa-sync --event-type oa.sync`
 - `worker-workbench-matching`：`--enable-workbench-matching --worker-kind workbench-matching`
+- `worker-workbench` / `worker-workbench-secondary`：分别使用 `--registration workbench` / `--registration workbench-secondary`，共同消费 `workbench.read_model.refresh`
 - `worker-workbench-relation`：`--enable-workbench-relation-read-model-refresh --worker-kind workbench-relation-read-model --event-type workbench_relation.read_model.refresh`
 - `worker-no-oa-bank-batch`：`--enable-no-oa-bank-batch-read-model-refresh --worker-kind no-oa-bank-batch-read-model --event-type no_oa_bank_batch.read_model.refresh`
 - `worker-search-*`：`--enable-search-read-model-refresh --worker-kind search-read-model --event-type search.read_model.refresh`
 - `worker-import`：`--enable-import-job-processing --worker-kind import-job --event-type import.process.requested`
 
-Workbench、银行明细、待找发票、进项使用、销项收款、OA 待付款、税金抵扣和成本统计页面直接读取 canonical facts，不再配置页面 read-model worker。
+关联台读取 `workbench` active-generation read model，并由 `workbench` / `workbench-secondary` worker 收敛。银行明细、待找发票、进项使用、销项收款、OA 待付款、税金抵扣、成本统计、流水规则批量处理、批量账务、ETC 与外部往来页面直接读取 canonical facts，不配置页面 read-model worker。
 
 最小生产正确性先用 PostgreSQL polling worker，不需要 RabbitMQ。标准 release 发布会自动运行服务器
 root-owned helper `/usr/local/sbin/finops-ensure-runtime-workers`，确保常驻 worker 矩阵安装、开机自启并重启到当前 release。
@@ -138,9 +139,10 @@ set +a
   --json
 ```
 
-read model refresh worker 不构造完整 `Application`，不调用 `StateStore.load()`；维护入口只会为
+read model refresh worker 不构造完整 `Application`，不调用 `StateStore.load()`；维护 backfill 入口只会为
 `workbench_relation`、`search`、`no_oa_bank_batch` 三个共享 read model 写入 `all` fan-out 命令，
-由各自 producer 枚举精确 month shard。其余页面直接读取 canonical fact，不参与 runtime read-model backfill。
+由各自 producer 枚举精确 month shard。关联台 active generation 通过自己的 freshness gateway 和
+`workbench` worker 收敛；其余页面直接读取 canonical facts，不参与 runtime read-model backfill。
 
 ## 相关文档
 
