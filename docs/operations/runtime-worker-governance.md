@@ -528,7 +528,11 @@ T+300s 执行同一完整 checkpoint。每次检查都必须使用真实 Postgre
 registry/systemd inventory、worker readiness、dirty scope、pending/processing outbox、durable 与
 RabbitMQ dead letter、critical read-model enqueue-to-fresh SLO、固定可逆写 smoke、domain/page
 canonical audit 和 API/health/SSE 性能。page canonical audit 直接取可逆写 smoke 已验证的全页面审计证据，
-不重复调用另一条审计路径。RabbitMQ management 未配置或读取失败时 fail closed。
+不重复调用另一条审计路径。RabbitMQ management 未配置或读取失败时 fail closed。checkpoint 必须按实际
+systemd I/O 边界分别加载 `/etc/fin-ops/fin-ops.rabbitmq-topology.env`（topology apply）和
+`/etc/fin-ops/fin-ops.rabbitmq-monitoring.env`（runtime health/closure）；文件缺失或不可读不得退回
+common env、worker env 或跳过 RabbitMQ。固定可逆写 smoke 优先读取 common env 的 approval ticket，
+缺失时使用本文“固定写操作 smoke 输入”登记的 standing ticket，不恢复逐次临时审批或无审批写入。
 
 最终证据写入
 `/opt/fin-ops/runtime-smoke/release-gates/<release>/evidence.json`，权限为 root `0600`，并绑定

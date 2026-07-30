@@ -408,6 +408,10 @@ python -m fin_ops_platform.app.worker \
   检查 exact worker inventory、queue/dirty/dead-letter 收敛、critical read-model SLO、固定可逆写
   smoke、domain/page canonical audit 及 API/health/SSE 性能；page audit 证据直接复用可逆写 smoke
   内部的全页面 canonical audit，不维护第二条审计链路
+- 门禁按 systemd 的既有边界分别加载 `/etc/fin-ops/fin-ops.rabbitmq-topology.env` 与
+  `/etc/fin-ops/fin-ops.rabbitmq-monitoring.env`，任一缺失或不可读都 fail closed；可逆写 smoke
+  优先使用 common env 中的 approval ticket，缺失时使用运维合同登记的固定 standing ticket，
+  不恢复逐次临时审批或无审批写入
 - 最终 PASS evidence 写入
   `/opt/fin-ops/runtime-smoke/release-gates/<release-name>/evidence.json`，绑定 release 与 Git commit；
   任一 checkpoint 或 evidence 合同失败都会自动恢复 previous release 并验证回滚后的完整链路；

@@ -29,6 +29,8 @@
 | --- | --- | --- |
 | Deploy command | `scripts/deploy-oa.sh` | 使用明确 release/remote/env；正常激活只允许调用 `finops-deploy-control release-gate-activate <release>`，公开 `activate` 入口已删除。`--no-activate` 只上传和校验，不生成门禁证据 |
 | Release-gate credential | 本机 `scripts/with-production-admin-token.sh` | Admin Token 只通过部署进程 stdin 交给 root helper，不写入 release、证据、命令行或日志；缺失时必须在任何生产切换前 fail closed |
+| Release-gate RabbitMQ env | `/etc/fin-ops/fin-ops.rabbitmq-topology.env`、`/etc/fin-ops/fin-ops.rabbitmq-monitoring.env` | topology apply 与 runtime health/closure 分别加载自己的 systemd 运维边界；缺失或不可读必须 fail closed，不得读取 worker consumer 凭据代替 |
+| Release-gate write approval | common env 或固定 standing ticket 合同 | 可逆写 smoke 优先使用 common env；缺失时只允许使用 `FINOPS-WRITE-SMOKE-STANDING-20260702`，不得无 approval 执行或恢复逐次临时审批 |
 | Runtime worker manifest | `runtime_worker_manifest.py` | 必须匹配 registry |
 | Verify command | `scripts/verify.sh` | 按 backend/web/docs/ops 分类执行 |
 | Runtime env examples | `deploy/oa/env/*.env.example` | 按 common/secrets/migrator/worker/dispatcher 拆分，禁止恢复单文件 env |

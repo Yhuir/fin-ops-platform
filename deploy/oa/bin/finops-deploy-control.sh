@@ -17,10 +17,13 @@ LEGACY_CURRENT_ARCHIVE_DIR="${FINOPS_LEGACY_CURRENT_ARCHIVE_DIR:-/opt/fin-ops/le
 COMMON_ENV="$ENV_DIR/fin-ops.common.env"
 SECRETS_ENV="$ENV_DIR/fin-ops.secrets.env"
 MIGRATOR_ENV="$ENV_DIR/fin-ops.postgres-migrator.env"
+RABBITMQ_TOPOLOGY_ENV="${FINOPS_RABBITMQ_TOPOLOGY_ENV:-$ENV_DIR/fin-ops.rabbitmq-topology.env}"
+RABBITMQ_MONITORING_ENV="${FINOPS_RABBITMQ_MONITORING_ENV:-$ENV_DIR/fin-ops.rabbitmq-monitoring.env}"
 DEPLOY_CONTROL_HELPER="${FINOPS_DEPLOY_CONTROL_HELPER:-/usr/local/sbin/finops-deploy-control}"
 ENSURE_RUNTIME_WORKERS_HELPER="${FINOPS_ENSURE_RUNTIME_WORKERS_HELPER:-/usr/local/sbin/finops-ensure-runtime-workers}"
 WRITE_E2E_BACKUP_ROOT="${FINOPS_WRITE_E2E_BACKUP_ROOT:-/opt/fin-ops/backups/write-operation-e2e}"
 STANDARD_WRITE_E2E_SCENARIO="${FINOPS_STANDARD_WRITE_E2E_SCENARIO:-/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json}"
+STANDARD_WRITE_E2E_APPROVAL_TICKET="${FINOPS_STANDARD_WRITE_E2E_APPROVAL_TICKET:-FINOPS-WRITE-SMOKE-STANDING-20260702}"
 RELEASE_GATE_EVIDENCE_ROOT="${FINOPS_RELEASE_GATE_EVIDENCE_ROOT:-/opt/fin-ops/runtime-smoke/release-gates}"
 PRUNE_WORKBENCH_GENERATIONS_HELPER="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_HELPER:-/usr/local/sbin/finops-prune-workbench-generations}"
 PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT:-/etc/systemd/system/finops-prune-workbench-generations.service}"
@@ -1277,6 +1280,10 @@ release_gate_checkpoint() {
     source "$COMMON_ENV"
     # shellcheck disable=SC1090
     source "$SECRETS_ENV"
+    [[ -r "$RABBITMQ_TOPOLOGY_ENV" ]] \
+      || die "RabbitMQ topology env is missing or unreadable: $RABBITMQ_TOPOLOGY_ENV"
+    # shellcheck disable=SC1090
+    source "$RABBITMQ_TOPOLOGY_ENV"
     set +a
     export PYTHONPATH="$verification_src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
     export FIN_OPS_DATA_DIR="${FIN_OPS_DATA_DIR:-/opt/fin-ops/data}"
@@ -1301,6 +1308,10 @@ release_gate_checkpoint() {
     source "$COMMON_ENV"
     # shellcheck disable=SC1090
     source "$SECRETS_ENV"
+    [[ -r "$RABBITMQ_MONITORING_ENV" ]] \
+      || die "RabbitMQ monitoring env is missing or unreadable: $RABBITMQ_MONITORING_ENV"
+    # shellcheck disable=SC1090
+    source "$RABBITMQ_MONITORING_ENV"
     set +a
     export PYTHONPATH="$verification_src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
     "$API_PYTHON" - "$runtime_report" <<'PY'
@@ -1325,7 +1336,12 @@ PY
     source "$COMMON_ENV"
     # shellcheck disable=SC1090
     source "$SECRETS_ENV"
+    [[ -r "$RABBITMQ_MONITORING_ENV" ]] \
+      || die "RabbitMQ monitoring env is missing or unreadable: $RABBITMQ_MONITORING_ENV"
+    # shellcheck disable=SC1090
+    source "$RABBITMQ_MONITORING_ENV"
     set +a
+    export FIN_OPS_WRITE_E2E_APPROVAL_TICKET="${FIN_OPS_WRITE_E2E_APPROVAL_TICKET:-$STANDARD_WRITE_E2E_APPROVAL_TICKET}"
     [[ -n "${FIN_OPS_WRITE_E2E_APPROVAL_TICKET:-}" ]] \
       || die "FIN_OPS_WRITE_E2E_APPROVAL_TICKET is required for the production-equivalent release gate"
     [[ -f "$STANDARD_WRITE_E2E_SCENARIO" ]] \

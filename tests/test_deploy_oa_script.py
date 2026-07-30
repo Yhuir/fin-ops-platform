@@ -521,6 +521,30 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('install_deploy_control_helper "$src"', pre_failure_branch)
         self.assertIn('install_runtime_worker_helper "$src"', pre_failure_branch)
 
+    def test_release_gate_loads_rabbitmq_env_boundaries_and_standard_write_approval(self) -> None:
+        script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
+        checkpoint = script.split("release_gate_checkpoint() {", 1)[1].split(
+            "\nrelease_gate_checkpoint_passed() {",
+            1,
+        )[0]
+
+        self.assertIn('RABBITMQ_TOPOLOGY_ENV="${FINOPS_RABBITMQ_TOPOLOGY_ENV:-', script)
+        self.assertIn('RABBITMQ_MONITORING_ENV="${FINOPS_RABBITMQ_MONITORING_ENV:-', script)
+        self.assertEqual(checkpoint.count('source "$RABBITMQ_TOPOLOGY_ENV"'), 1)
+        self.assertEqual(checkpoint.count('source "$RABBITMQ_MONITORING_ENV"'), 2)
+        self.assertIn("RabbitMQ topology env is missing or unreadable", checkpoint)
+        self.assertIn("RabbitMQ monitoring env is missing or unreadable", checkpoint)
+        self.assertIn(
+            'STANDARD_WRITE_E2E_APPROVAL_TICKET="${FINOPS_STANDARD_WRITE_E2E_APPROVAL_TICKET:'
+            '-FINOPS-WRITE-SMOKE-STANDING-20260702}"',
+            script,
+        )
+        self.assertIn(
+            'export FIN_OPS_WRITE_E2E_APPROVAL_TICKET="${FIN_OPS_WRITE_E2E_APPROVAL_TICKET:'
+            '-$STANDARD_WRITE_E2E_APPROVAL_TICKET}"',
+            checkpoint,
+        )
+
     def test_deploy_control_read_model_slo_smoke_refuses_apply_before_release_lookup(self) -> None:
         env = {**os.environ, "FINOPS_RELEASE_ROOT": "/tmp/finops-release-root-does-not-exist"}
 
