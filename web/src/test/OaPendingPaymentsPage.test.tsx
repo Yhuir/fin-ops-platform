@@ -494,9 +494,11 @@ function installOaPendingPaymentsFetch(overrides?: {
   writebackPaidResponses?: Array<{ status: number; payload: Record<string, unknown> }>;
   bankCandidatesPayload?: (url: URL) => Record<string, unknown>;
   bankCandidatesDelay?: Promise<void>;
+  bankCandidatesResponses?: Array<{ delay?: Promise<void>; payload: Record<string, unknown> }>;
 }) {
   const writebackPaidResponses = [...(overrides?.writebackPaidResponses ?? [])];
   const rowsResponses = [...(overrides?.rowsResponses ?? [])];
+  const bankCandidatesResponses = [...(overrides?.bankCandidatesResponses ?? [])];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
     const detailPayload = overrides?.detailPayloads?.[url.pathname];
@@ -531,8 +533,9 @@ function installOaPendingPaymentsFetch(overrides?: {
       });
     }
     if (url.pathname === "/api/oa-pending-payments/bank-transaction-candidates") {
-      await overrides?.bankCandidatesDelay;
-      return new Response(JSON.stringify(overrides?.bankCandidatesPayload?.(url) ?? {
+      const scriptedResponse = bankCandidatesResponses.shift();
+      await (scriptedResponse?.delay ?? overrides?.bankCandidatesDelay);
+      return new Response(JSON.stringify(scriptedResponse?.payload ?? overrides?.bankCandidatesPayload?.(url) ?? {
         rows: [
           {
             id: "bank-drawer-001",
@@ -1186,6 +1189,58 @@ describe("OA pending payments page", () => {
       expect(lastRequest?.searchParams.get("page")).toBe("1");
       expect(lastRequest?.searchParams.get("relation_status")).toBe("matched");
     });
+  });
+
+  test("commits candidate searches through one owner and ignores stale responses", async () => {
+    const staleRequest = deferred();
+    const candidatePayload = (id: string, counterpartyName: string) => ({
+      rows: [{
+        id,
+        counterpartyName,
+        tradeTime: "2026-06-14 09:41:55",
+        amount: "100.00",
+        bankAccount: "工商银行 6386",
+        directionLabel: "支出",
+        summary: "查询支出流水",
+        relationStatus: "unmatched",
+        relationStatusLabel: "未配对",
+      }],
+      pagination: { page: 1, pageSize: 100, total: 1 },
+    });
+    const fetchMock = installOaPendingPaymentsFetch({
+      bankCandidatesResponses: [
+        { payload: candidatePayload("initial", "初始结果") },
+        { delay: staleRequest.promise, payload: candidatePayload("stale", "旧查询结果") },
+        { payload: candidatePayload("fresh", "新查询结果") },
+      ],
+    });
+    const user = userEvent.setup();
+
+    renderAuthenticatedAppAt("/oa-pending-payments");
+    const page = await screen.findByTestId("oa-pending-payments-page");
+    await within(page).findByText("候选付款人");
+    await user.click(within(page).getByRole("button", { name: /进行中 OA/ }));
+    const candidateRow = within(page).getByRole("row", { name: /候选付款人/ });
+    await user.click(within(candidateRow).getByRole("checkbox", { name: /候选付款人/ }));
+    await user.click(within(page).getByRole("button", { name: "关联支出流水" }));
+
+    const drawer = await screen.findByLabelText("关联支出流水抽屉");
+    expect(await within(drawer).findByText("初始结果")).toBeInTheDocument();
+    const search = within(drawer).getByPlaceholderText("对方户名 / 摘要 / 金额");
+    const requestsAfterOpen = bankCandidateRequests(fetchMock).length;
+    await user.type(search, "旧查询");
+    expect(bankCandidateRequests(fetchMock)).toHaveLength(requestsAfterOpen);
+    await user.click(within(drawer).getByRole("button", { name: "查询" }));
+    await waitFor(() => expect(bankCandidateRequests(fetchMock).at(-1)?.searchParams.get("keyword")).toBe("旧查询"));
+
+    await user.clear(search);
+    await user.type(search, "新查询");
+    await user.click(within(drawer).getByRole("button", { name: "查询" }));
+    expect(await within(drawer).findByText("新查询结果")).toBeInTheDocument();
+    staleRequest.resolve();
+    await act(async () => staleRequest.promise);
+    expect(within(drawer).queryByText("旧查询结果")).not.toBeInTheDocument();
+    expect(within(drawer).getByText("新查询结果")).toBeInTheDocument();
   });
 
   test("shows row writeback only for paid rows that are not written", async () => {

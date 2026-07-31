@@ -529,6 +529,7 @@ function OaBankLinkDrawer({
   onClose: () => void;
 }) {
   const [relationStatus, setRelationStatus] = useState<OaPendingPaymentBankCandidateRelationStatus>("all");
+  const [keywordDraft, setKeywordDraft] = useState("");
   const [keyword, setKeyword] = useState("");
   const [rows, setRows] = useState<OaPendingPaymentBankCandidate[]>([]);
   const [selectedBankIds, setSelectedBankIds] = useState<Set<string>>(() => new Set());
@@ -536,6 +537,7 @@ function OaBankLinkDrawer({
   const [submitting, setSubmitting] = useState(false);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const candidateRequestSeqRef = useRef(0);
   const pageCount = Math.max(1, Math.ceil(total / BANK_CANDIDATE_PAGE_SIZE));
   const closeBlocked = loading || submitting;
 
@@ -543,6 +545,8 @@ function OaBankLinkDrawer({
     if (!open) {
       return;
     }
+    const requestId = candidateRequestSeqRef.current + 1;
+    candidateRequestSeqRef.current = requestId;
     setLoading(true);
     fetchOaPendingPaymentBankCandidates({
       relationStatus,
@@ -553,11 +557,14 @@ function OaBankLinkDrawer({
       signal,
     })
       .then((payload) => {
+        if (signal?.aborted || requestId !== candidateRequestSeqRef.current) {
+          return;
+        }
         setRows(payload.rows ?? []);
         setTotal(payload.pagination?.total ?? payload.rows?.length ?? 0);
       })
       .catch((caught: unknown) => {
-        if (signal?.aborted) {
+        if (signal?.aborted || requestId !== candidateRequestSeqRef.current) {
           return;
         }
         setRows([]);
@@ -565,7 +572,7 @@ function OaBankLinkDrawer({
         onError(caught instanceof Error ? caught.message : "支出流水加载失败。");
       })
       .finally(() => {
-        if (!signal?.aborted) {
+        if (!signal?.aborted && requestId === candidateRequestSeqRef.current) {
           setLoading(false);
         }
       });
@@ -594,15 +601,12 @@ function OaBankLinkDrawer({
   };
 
   const searchCandidates = () => {
-    if (page === 1) {
-      loadCandidates();
-    } else {
-      setPage(1);
-    }
+    setPage(1);
+    setKeyword(keywordDraft.trim());
   };
 
   const submit = () => {
-    if (selectedOaRowIds.length === 0 || selectedBankIds.size === 0) {
+    if (loading || submitting || selectedOaRowIds.length === 0 || selectedBankIds.size === 0) {
       return;
     }
     setSubmitting(true);
@@ -634,7 +638,7 @@ function OaBankLinkDrawer({
           <button disabled={closeBlocked} onClick={onClose} type="button">取消</button>
           <button
             className="oa-pending-payments-button oa-pending-payments-button--primary"
-            disabled={submitting || selectedOaRowIds.length === 0 || selectedBankIds.size === 0}
+            disabled={loading || submitting || selectedOaRowIds.length === 0 || selectedBankIds.size === 0}
             onClick={submit}
             type="button"
           >
@@ -667,11 +671,8 @@ function OaBankLinkDrawer({
           <span>搜索</span>
           <input
             placeholder="对方户名 / 摘要 / 金额"
-            value={keyword}
-            onChange={(event) => {
-              setKeyword(event.target.value);
-              setPage(1);
-            }}
+            value={keywordDraft}
+            onChange={(event) => setKeywordDraft(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 searchCandidates();
