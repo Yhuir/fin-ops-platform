@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { act } from "react";
 import userEvent from "@testing-library/user-event";
 import type React from "react";
@@ -188,6 +188,52 @@ describe("common platform components", () => {
     expect(onClose).not.toHaveBeenCalled();
     expect(appDrawerSource).toContain("isDismissable={!closeDisabled}");
     expect(appDrawerSource).toContain("isKeyboardDismissDisabled={closeDisabled}");
+  });
+
+  test("retains the last open modal content throughout its exit", async () => {
+    let finishAnimation!: () => void;
+    const animationFinished = new Promise<void>((resolve) => {
+      finishAnimation = resolve;
+    });
+    const originalGetAnimations = HTMLElement.prototype.getAnimations;
+    vi.stubGlobal("CSSTransition", class {});
+    Object.defineProperty(HTMLElement.prototype, "getAnimations", {
+      configurable: true,
+      value: () => [{ finished: animationFinished }],
+    });
+
+    try {
+      const { rerender } = renderWithProject(
+        <AppDrawer onClose={vi.fn()} open title="OA详情">
+          <p>原 OA 正文</p>
+        </AppDrawer>,
+      );
+
+      rerender(
+        <AppDrawer onClose={vi.fn()} open={false} title="详情">
+          <p>空正文</p>
+        </AppDrawer>,
+      );
+
+      const exitingDialog = screen.getByRole("dialog", { name: "OA详情" });
+      expect(exitingDialog).toHaveTextContent("原 OA 正文");
+      expect(exitingDialog).not.toHaveTextContent("空正文");
+      await waitFor(() => {
+        expect(exitingDialog.closest(".finance-drawer__content")).toHaveAttribute("data-exiting", "true");
+      });
+
+      await act(async () => finishAnimation());
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "OA详情" })).not.toBeInTheDocument());
+    } finally {
+      if (originalGetAnimations) {
+        Object.defineProperty(HTMLElement.prototype, "getAnimations", {
+          configurable: true,
+          value: originalGetAnimations,
+        });
+      } else {
+        Reflect.deleteProperty(HTMLElement.prototype, "getAnimations");
+      }
+    }
   });
 
   test("keeps persistent app drawer mounted for its exit motion", () => {

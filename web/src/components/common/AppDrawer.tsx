@@ -44,11 +44,18 @@ export default function AppDrawer({
   const [persistentMounted, setPersistentMounted] = useState(open);
   const [persistentVisible, setPersistentVisible] = useState(false);
   const [persistentClosing, setPersistentClosing] = useState(false);
+  const lastOpenModalContentRef = useRef({ ariaLabel, children, footer, headerAside, subtitle, title });
   const persistentCloseTimerRef = useRef<number | null>(null);
   const persistentFrameRef = useRef<number | null>(null);
   const drawerStyle: AppDrawerStyle = {
     "--finance-drawer-width": typeof width === "number" ? `${width}px` : width,
   };
+  if (open) {
+    lastOpenModalContentRef.current = { ariaLabel, children, footer, headerAside, subtitle, title };
+  }
+  const modalContent = open
+    ? { ariaLabel, children, footer, headerAside, subtitle, title }
+    : lastOpenModalContentRef.current;
 
   useLayoutEffect(() => {
     if (!open && !persistentMounted) {
@@ -177,20 +184,20 @@ export default function AppDrawer({
     >
       <Drawer.Content className="finance-drawer__content" data-placement="right" placement="right">
         <Drawer.Dialog
-          aria-label={ariaLabel}
+          aria-label={modalContent.ariaLabel}
           aria-busy={ariaBusy ? "true" : undefined}
-          aria-labelledby={ariaLabel ? undefined : titleId}
+          aria-labelledby={modalContent.ariaLabel ? undefined : titleId}
           className={`finance-drawer${className ? ` ${className}` : ""}`}
           style={drawerStyle}
         >
           <Drawer.Header className="finance-drawer__header">
             <div className="finance-drawer__heading">
               <Drawer.Heading className="finance-drawer__title" id={titleId}>
-                {title}
+                {modalContent.title}
               </Drawer.Heading>
-              {subtitle ? <div className="finance-drawer__subtitle">{subtitle}</div> : null}
+              {modalContent.subtitle ? <div className="finance-drawer__subtitle">{modalContent.subtitle}</div> : null}
             </div>
-            {headerAside ? <div className="finance-drawer__header-aside">{headerAside}</div> : null}
+            {modalContent.headerAside ? <div className="finance-drawer__header-aside">{modalContent.headerAside}</div> : null}
             <Button
               aria-label={closeLabel ?? "关闭抽屉"}
               isDisabled={closeDisabled}
@@ -202,8 +209,8 @@ export default function AppDrawer({
               <span aria-hidden="true">×</span>
             </Button>
           </Drawer.Header>
-          <Drawer.Body className="finance-drawer__body">{children}</Drawer.Body>
-          {footer ? <Drawer.Footer className="finance-drawer__footer">{footer}</Drawer.Footer> : null}
+          <Drawer.Body className="finance-drawer__body">{modalContent.children}</Drawer.Body>
+          {modalContent.footer ? <Drawer.Footer className="finance-drawer__footer">{modalContent.footer}</Drawer.Footer> : null}
         </Drawer.Dialog>
       </Drawer.Content>
     </Drawer.Backdrop>
