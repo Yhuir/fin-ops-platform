@@ -377,6 +377,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("publish_status = 'publishing'", normalized_recovery_sql)
         self.assertIn("publish_status = 'published'", normalized_recovery_sql)
         self.assertIn("terminal_event_already_completed", normalized_recovery_sql)
+        self.assertIn("publish_locked_at is null", normalized_recovery_sql)
         self.assertIn("publish_locked_at < now() - (%s * interval '1 second')", normalized_recovery_sql)
         self.assertEqual(recovery_params, (120,))
         _, sql, params = transaction.calls[1]
@@ -386,6 +387,23 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("publish_status in ('unpublished', 'failed')", normalized_sql)
         self.assertIn("for update skip locked", normalized_sql)
         self.assertEqual(params, ("publisher-1", 120, ["workbench_relation.read_model.refresh"], 10))
+
+    def test_reconcile_completed_publish_states_is_explicit_and_idempotent(self) -> None:
+        transaction = FakeTransaction(counts=[28])
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        reconciled = repository.reconcile_completed_publish_states(lock_timeout_seconds=180)
+
+        self.assertEqual(reconciled, 28)
+        method, sql, params = transaction.calls[0]
+        normalized_sql = " ".join(sql.lower().split())
+        self.assertEqual(method, "execute")
+        self.assertIn("status = 'done'", normalized_sql)
+        self.assertIn("publish_status = 'publishing'", normalized_sql)
+        self.assertIn("publish_status = 'published'", normalized_sql)
+        self.assertIn("publish_locked_at is null", normalized_sql)
+        self.assertEqual(params, (180,))
+        self.assertEqual(transaction.outcomes, ["commit"])
 
     def test_mark_published_requires_publish_lock_and_records_confirm(self) -> None:
         transaction = FakeTransaction(rows=[{"id": "event-1"}])

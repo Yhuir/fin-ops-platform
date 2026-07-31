@@ -1847,6 +1847,32 @@ sys.exit(0 if passed else 1)
 PY
 }
 
+reconcile_completed_publish_states() {
+  local verification_release="$1"
+  local verification_src
+  verification_src="$(release_src "$verification_release")"
+  (
+    set -a
+    # shellcheck disable=SC1090
+    source "$COMMON_ENV"
+    # shellcheck disable=SC1090
+    source "$SECRETS_ENV"
+    set +a
+    export PYTHONPATH="$verification_src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
+    cd "$verification_src"
+    "$API_PYTHON" - <<'PY'
+import json
+
+from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
+
+connection = PostgresConnection(PostgresSettings.from_env())
+reconciled = RuntimeQueueRepository(connection).reconcile_completed_publish_states()
+print(json.dumps({"reconciled_completed_publish_states": reconciled}, sort_keys=True))
+PY
+  )
+}
+
 write_release_gate_evidence() {
   local release="$1"
   local previous_release="$2"
@@ -1944,6 +1970,7 @@ release_gate_activate() {
   evidence_dir="$RELEASE_GATE_EVIDENCE_ROOT/$release"
   [[ ! -e "$evidence_dir" ]] || die "release gate evidence already exists: $evidence_dir"
   install -d -m 0700 "$evidence_dir"
+  reconcile_completed_publish_states "$release"
   if ! release_gate_checkpoint "$previous_release" pre "$admin_token" "$evidence_dir" preflight "$release"; then
     cat "$evidence_dir/pre/checkpoint.json" >&2
     src="$(release_src "$previous_release")"

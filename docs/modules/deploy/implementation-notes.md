@@ -17,7 +17,7 @@
 ## 2026-07-31 - Release Gate publishing 终态门禁
 
 - 根因：RabbitMQ consumer 可能先完成 PostgreSQL durable event，dispatcher 随后才写 publish confirm；进程在两者之间退出时会留下 `status=done/publish_status=publishing`，旧 claim 不再领取它，旧 gate 又只检查 pending/processing，因此 transport 中间态可永久残留。
-- 修复：复用 dispatcher 的 publish claim 事务，先把超过 lock timeout 且 durable event 已 done 的行收敛为 published；监控和 release evidence 增加 `publishing_outbox_count`，任何 checkpoint 非零均 fail closed。consumer 已完成即证明消息已经送达，禁止重发。
+- 修复：复用 dispatcher 的 publish claim 事务，把 publish lock 为空或超过 timeout 且 durable event 已 done 的行收敛为 published；候选激活前用候选 release 的同一 repository 方法完成一次幂等终态协调，避免旧 release 不具备修复能力时形成激活死锁。监控和 release evidence 增加 `publishing_outbox_count`，任何 checkpoint 非零均 fail closed。consumer 已完成即证明消息已经送达，禁止重发。
 - 边界：PostgreSQL 仍是状态事实源，RabbitMQ 仍只做 transport/wakeup；没有新增 worker、表、队列、缓存、定时器或兼容链路。
 - 验证：runtime queue/monitoring/deploy contract 定向测试和 production-equivalent T+0/T+60/T+300 gate。
 

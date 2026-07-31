@@ -969,27 +969,14 @@ class RuntimeQueueRepository:
             )
         return _event_from_row(row) if row is not None else None
 
-    def claim_publishable_events(
-        self,
+    @staticmethod
+    def _reconcile_completed_publish_states_in_transaction(
+        transaction: PostgresTransaction,
         *,
-        publisher_id: str,
-        event_types: Iterable[str] | None = None,
-        lock_timeout_seconds: int = 300,
-        limit: int = 100,
-    ) -> list[RuntimeQueueEvent]:
-        normalized_limit = max(1, int(limit))
-        event_type_list = list(event_types or [])
-        event_type_filter = ""
-        params: tuple[Any, ...]
-        if event_type_list:
-            event_type_filter = "and event_type = any(%s)"
-            params = (publisher_id, lock_timeout_seconds, event_type_list, normalized_limit)
-        else:
-            params = (publisher_id, lock_timeout_seconds, normalized_limit)
-
-        with self._connection.transaction() as transaction:
-            transaction.execute(
-                """
+        lock_timeout_seconds: int,
+    ) -> int:
+        return transaction.execute(
+            """
                 update job.outbox_events
                 set
                     publish_status = 'published',
@@ -1013,9 +1000,43 @@ class RuntimeQueueRepository:
                     )
                 where status = 'done'
                   and publish_status = 'publishing'
-                  and publish_locked_at < now() - (%s * interval '1 second')
-                """,
-                (lock_timeout_seconds,),
+                  and (
+                      publish_locked_at is null
+                      or publish_locked_at < now() - (%s * interval '1 second')
+                  )
+            """,
+            (lock_timeout_seconds,),
+        )
+
+    def reconcile_completed_publish_states(self, *, lock_timeout_seconds: int = 300) -> int:
+        with self._connection.transaction() as transaction:
+            return self._reconcile_completed_publish_states_in_transaction(
+                transaction,
+                lock_timeout_seconds=lock_timeout_seconds,
+            )
+
+    def claim_publishable_events(
+        self,
+        *,
+        publisher_id: str,
+        event_types: Iterable[str] | None = None,
+        lock_timeout_seconds: int = 300,
+        limit: int = 100,
+    ) -> list[RuntimeQueueEvent]:
+        normalized_limit = max(1, int(limit))
+        event_type_list = list(event_types or [])
+        event_type_filter = ""
+        params: tuple[Any, ...]
+        if event_type_list:
+            event_type_filter = "and event_type = any(%s)"
+            params = (publisher_id, lock_timeout_seconds, event_type_list, normalized_limit)
+        else:
+            params = (publisher_id, lock_timeout_seconds, normalized_limit)
+
+        with self._connection.transaction() as transaction:
+            self._reconcile_completed_publish_states_in_transaction(
+                transaction,
+                lock_timeout_seconds=lock_timeout_seconds,
             )
             rows = transaction.fetch_all(
                 f"""

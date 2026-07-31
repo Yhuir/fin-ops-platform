@@ -410,6 +410,11 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('"dirty_scope_count": 0', script)
         self.assertIn('"pending_outbox_count": 0', script)
         self.assertIn('"publishing_outbox_count": 0', script)
+        self.assertIn('reconcile_completed_publish_states "$release"', script)
+        self.assertIn(
+            "RuntimeQueueRepository(connection).reconcile_completed_publish_states()",
+            script,
+        )
         self.assertIn('"dead_letter_delta": 0', script)
         self.assertIn('"runtime_sync_closure_failed_checks"', script)
         self.assertIn('"runtime_sync_closure_failures"', script)
