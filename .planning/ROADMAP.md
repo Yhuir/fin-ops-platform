@@ -723,4 +723,24 @@ Plans:
 
 - [x] 35-01-PLAN — Live candidate derivation, command revalidation, Audit/UI closure, canonical-draft deletion and production verification.
 
+### Phase 36: 全站右侧抽屉滑入动效与详情链路生产闭环
+
+**Goal:** Make every right-side drawer enter from the right and exit back to the right through one native HeroUI/CSS motion contract, remove custom drawer shells that bypass it, and release the already-landed Workbench exact-generation detail fix with measured production correctness and performance.
+**Requirements:** User-approved drawer motion and Workbench detail production closure; no new product requirement IDs.
+**Depends on:** Phase 35 verified release baseline and commit `825d34011` Workbench stable-generation detail contract.
+**Canonical refs:** `.planning/phases/36-right-drawer-motion-production-closure/36-01-PLAN.md`, `docs/refactor-ui/interaction_smoothness.md`, `docs/modules/finance-table-system/boundary-io.md`, `docs/modules/reconciliation-workbench/boundary-io.md`
+**Success Criteria** (what must be TRUE):
+
+  1. Modal right drawers reuse HeroUI Drawer placement and animate the container from 100% right to 0 on enter and back to 100% on exit, with a 240ms/180ms transform-only contract and reduced-motion support.
+  2. The OA bank-link and bank-flow tag-management custom shells are replaced by `AppDrawer` without changing their business I/O, permissions, forms, loading, error or mutation behavior.
+  3. The tax certified-results complementary rail remains non-modal but collapses/expands with transform and opacity, correct inert/focus behavior, and no width/grid layout animation.
+  4. Conflicting legacy keyframes, transition overrides, duplicate Escape ownership and obsolete custom shells are deleted; no animation dependency, fallback path or parallel abstraction is added.
+  5. Targeted frontend/backend gates, one pushed `main` deployment, authenticated Workbench detail probes and browser motion measurements prove correctness, page isolation and production performance.
+
+**Plans:** 1/1 plans complete
+
+Plans:
+
+- [x] 36-01-PLAN — Shared native drawer motion, custom-shell migration, regression gates, deployment and production verification.
+
 ---

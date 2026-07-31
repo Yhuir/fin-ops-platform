@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verified
-stopped_at: Completed 30-04-PLAN.md with safe production blocker
-last_updated: "2026-07-29T17:45:00.000Z"
-last_activity: 2026-07-30 -- Phase 35 production verification passed
+status: verifying
+stopped_at: Completed 36-01-PLAN.md local implementation; production handoff to main orchestrator
+last_updated: "2026-07-31T16:18:15.365Z"
+last_activity: 2026-07-31 -- Phase 36 local implementation and browser verification passed
 progress:
-  total_phases: 33
+  total_phases: 34
   completed_phases: 8
-  total_plans: 83
-  completed_plans: 59
-  percent: 21
+  total_plans: 84
+  completed_plans: 60
+  percent: 24
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-16)
 
 **Core value:** Preserve production finance workflow correctness while improving individual pages through isolated, reviewable GSD phases.
-**Current focus:** Phase 35 — bank-flow-rule-batch-live-candidates
+**Current focus:** Phase 36 — right-drawer-motion-production-closure
 
 ## Current Position
 
-Phase: 35 (bank-flow-rule-batch-live-candidates) — VERIFIED
+Phase: 36 (right-drawer-motion-production-closure) — READY FOR VERIFICATION
 Plan: 1 of 1
-Status: Phase complete — production verification passed 6/6
-Last activity: 2026-07-30 -- release `main-9aff7370-20260730014104` verified
+Status: Local implementation complete — production push/deploy/verification pending main orchestrator
+Last activity: 2026-07-31 -- Phase 36 local implementation and browser verification passed
 
-Progress: [██████████] implementation, release and production verification complete
+Progress: [███████░░░] local implementation and verification complete; production closure pending
 
 ## Performance Metrics
 
@@ -50,6 +50,7 @@ Progress: [██████████] implementation, release and productio
 | Phase 30 P03 | 24min | 3 tasks | 14 files |
 | Phase 30 P04 | 24min | 3 tasks | 12 files |
 | Phase 35 P01 | 1h 46m | 4 tasks | 65 files |
+| Phase 36 P01 | 20min | 4 tasks | 20 files |
 
 ## Accumulated Context
 
@@ -138,6 +139,10 @@ Progress: [██████████] implementation, release and productio
 - [Phase 35]: 未提交 bank-flow 候选只从请求月份（内部转账含 ±2 天窗口）的 canonical facts 实时推导；persisted draft 不参与查询、提交或 Audit expected set。 — 消除异步预写 draft 的延迟、遗漏和双事实源。
 - [Phase 35]: GET、提交 guard、selected-row proof 与 Audit 共用 BankBatchService 内核；非法金额或方向 fail fast，不做 fallback。 — 保证候选身份和写入 proof 使用同一业务语义。
 - [Phase 35]: 只有正式 batch/event 历史持久化；canonical draft event、owner、producer、worker、replay、env 与 deploy 接线全部删除。 — 保留正式历史所有权，同时避免旧运行链重新可达。
+- [Phase 36]: Bind modal motion to the moving Drawer.Dialog, not the stationary full-viewport Drawer.Content wrapper. — Real Chromium sampling showed the wrapper has zero travel while HeroUI translates the dialog.
+- [Phase 36]: Use HeroUI right Drawer and CSS individual translate without a third-party animation dependency. — HeroUI already owns modal placement, focus, dismissal, and enter-exit state.
+- [Phase 36]: Keep tax certified results as an accessible complementary rail with transform-opacity motion and inert collapse. — It is supporting persistent content, not a focus-trapped modal operation.
+- [Phase 36]: Migrate OA and bank-flow presentation shells without changing business I/O or module boundaries. — The requested motion does not require API, persistence, permission, worker, or read-model changes.
 
 ### Roadmap Evolution
 
@@ -214,6 +219,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-07-29T16:00:08.149Z
-Stopped at: Completed 30-04-PLAN.md with safe production blocker
+Last session: 2026-07-31T16:18:15.357Z
+Stopped at: Completed 36-01-PLAN.md local implementation; production handoff to main orchestrator
 Resume file: None
