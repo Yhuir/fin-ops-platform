@@ -9,6 +9,7 @@
 - Worker 不依赖 `Application`、Flask/session/header/HTTP response。
 - import、OA sync、Workbench matching 是领域/integration job，不能登记为页面 read model；
   BankFlow live candidate 不是 job，不得登记 event 或 worker。
+- `settings-maintenance` 是 required PostgreSQL-only maintenance worker；settings reset job/outbox 不含密码，API 进程不执行 destructive handler。
 - deploy 必须 stop/disable 未登记 instance，并在 retired processing work 存在时拒绝激活。
 
 ## 七类测试
@@ -16,8 +17,8 @@
 | 类别 | 适用性 | 当前入口 |
 | --- | --- | --- |
 | 1. 业务核心 | 间接适用 | 各 handler owner 测试保护 import/OA/matching 业务规则；BankFlow live candidate 由页面模块测试覆盖 |
-| 2. Service/repository | 适用 | `tests/test_runtime_worker.py`、`tests/test_runtime_queue.py`：claim、retry、defer、ack、heartbeat、timeout |
-| 3. API contract | 间接适用 | job/App Status API tests 保护状态和错误 shape；worker 自身无 HTTP API |
+| 2. Service/repository | 适用 | `tests/test_runtime_worker.py`、`tests/test_runtime_queue.py`、`tests/test_settings_data_reset_job.py`：claim、retry、defer、ack、heartbeat、timeout、destructive reset crash fail-closed |
+| 3. API contract | 间接适用 | `tests/test_settings_data_reset_job.py` 与 job/App Status API tests 保护权限、secret 隔离、状态和错误 shape；worker 自身无 HTTP API |
 | 4. Read model/cache/background job | 核心适用 | `tests/test_runtime_worker_registry.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_read_model_manifest.py` |
 | 5. 前端交互 | 间接适用 | App Status、job progress 和导入页面 tests；worker 不拥有 UI |
 | 6. 端到端 | 适用 | import/OA/settings/BankFlow E2E 与 backend integration flows |

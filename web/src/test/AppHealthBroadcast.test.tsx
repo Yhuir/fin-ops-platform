@@ -143,7 +143,6 @@ describe("AppHealth BroadcastChannel sync", () => {
   beforeEach(() => {
     vi.unstubAllGlobals();
     vi.clearAllMocks();
-    vi.stubGlobal("EventSource", undefined);
     installMockBroadcastChannel();
     mocked.appHealth = healthyPayload("2026-05-06T10:00:00+08:00");
   });

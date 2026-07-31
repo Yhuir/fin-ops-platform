@@ -266,18 +266,15 @@ class ReadModelArchitectureGuardTests(unittest.TestCase):
 
     def test_global_refresh_is_owned_only_by_explicit_settings_reset(self) -> None:
         offenders: list[str] = []
-        server_path = SOURCE_ROOT / "app" / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        reset_start = server_source.index("    def _execute_settings_data_reset(")
-        reset_end = server_source.index("\n    def ", reset_start + 5)
-        reset_body = server_source[reset_start:reset_end]
-        if reset_body.count("include_all=True") != 1:
-            offenders.append("settings reset must own exactly one explicit include_all=True maintenance call")
+        reset_worker_path = SOURCE_ROOT / "services" / "runtime_worker_handlers.py"
+        reset_worker_source = reset_worker_path.read_text(encoding="utf-8")
+        if 'for scope_type in ("workbench", "workbench_relation", "search", "no_oa_bank_batch")' not in reset_worker_source:
+            offenders.append("settings maintenance worker must own the explicit global read-model refresh set")
+        if 'gateway.enqueue_one(scope_type, "all"' not in reset_worker_source:
+            offenders.append("settings maintenance worker must enqueue global scopes through ReadModelRefreshGateway")
         for path in SOURCE_ROOT.rglob("*.py"):
             source = path.read_text(encoding="utf-8")
             count = source.count("include_all=True")
-            if path == server_path:
-                count -= reset_body.count("include_all=True")
             if count:
                 offenders.append(f"{path.relative_to(REPO_ROOT)} keeps {count} non-maintenance include_all=True call(s)")
 

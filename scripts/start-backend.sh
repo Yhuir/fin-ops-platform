@@ -219,4 +219,7 @@ if [[ -n "${FIN_OPS_REDIS_DEFAULT_TTL_SECONDS:-}" ]]; then
   ENV_ARGS+=(FIN_OPS_REDIS_DEFAULT_TTL_SECONDS="${FIN_OPS_REDIS_DEFAULT_TTL_SECONDS}")
 fi
 
-exec env "${ENV_ARGS[@]}" "${PYTHON_BIN}" -m fin_ops_platform.app.main --host "${HOST}" --port "${PORT}"
+exec env "${ENV_ARGS[@]}" FIN_OPS_HTTP_BIND="${HOST}:${PORT}" \
+  "${PYTHON_BIN}" -m gunicorn \
+  --config python:fin_ops_platform.app.gunicorn_conf \
+  fin_ops_platform.app.wsgi:application

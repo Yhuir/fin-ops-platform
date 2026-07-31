@@ -38,7 +38,6 @@ import type {
   WorkbenchReadModelStatus,
   WorkbenchRefreshScopeStatus,
   WorkbenchRefreshStatus,
-  WorkbenchRefreshStatusEvent,
   WorkbenchZoneCounts,
   WorkbenchZoneId,
   WorkbenchZonePageInfo,
@@ -2364,64 +2363,6 @@ export async function fetchWorkbenchRefreshStatus(month: string, signal?: AbortS
     signal,
   });
   return mapWorkbenchRefreshStatus(payload);
-}
-
-export type WorkbenchRefreshSubscription = {
-  close: () => void;
-};
-
-export function subscribeWorkbenchRefreshEvents(
-  month: string,
-  onEvent: (event: WorkbenchRefreshStatusEvent) => void,
-  onError: (error: unknown) => void,
-): WorkbenchRefreshSubscription | null {
-  if (typeof globalThis.EventSource !== "function") {
-    return null;
-  }
-
-  const params = new URLSearchParams({ month });
-  const eventSource = new EventSource(apiUrl(`/api/workbench/events?${params.toString()}`), {
-    withCredentials: true,
-  });
-  let closed = false;
-
-  const close = () => {
-    if (closed) {
-      return;
-    }
-    closed = true;
-    eventSource.close();
-  };
-
-  const handleStatusEvent = (eventName: string) => (event: MessageEvent) => {
-    try {
-      onEvent({
-        event: eventName,
-        status: mapWorkbenchRefreshStatus(JSON.parse(event.data) as ApiWorkbenchRefreshStatus),
-      });
-    } catch (error) {
-      close();
-      onError(error);
-    }
-  };
-
-  [
-    "workbench.read_model.refresh_started",
-    "workbench.read_model.progress",
-    "workbench.read_model.page_available",
-    "workbench.read_model.summary_updated",
-    "workbench.read_model.completed",
-    "workbench.read_model.failed",
-  ].forEach((eventName) => {
-    eventSource.addEventListener(eventName, handleStatusEvent(eventName));
-  });
-
-  eventSource.onerror = (event) => {
-    close();
-    onError(event);
-  };
-
-  return { close };
 }
 
 function workbenchGroupsUrl(

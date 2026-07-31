@@ -66,10 +66,12 @@ from fin_ops_platform.services.runtime_worker import (
 )
 from fin_ops_platform.services.runtime_worker_handlers import (
     ImportRuntimeProcessorFactory,
+    SettingsDataResetRuntimeFactory,
     WorkbenchMatchingWorkerFactory,
     build_import_job_handler_bundle,
     check_import_job_processors,
 )
+from fin_ops_platform.services.settings_data_reset_job import SETTINGS_DATA_RESET_REQUESTED_EVENT
 from fin_ops_platform.services.runtime_worker_registry import (
     RuntimeWorkerRegistration,
     get_registration_by_instance_name,
@@ -133,6 +135,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enable-no-oa-bank-batch-read-model-refresh", action="store_true", help="Register no-OA bank batch SQL read model refresh handler.")
     parser.add_argument("--enable-oa-sync", action="store_true", help="Register OA Mongo to PostgreSQL projection sync handler.")
     parser.add_argument("--enable-import-job-processing", action="store_true", help="Register import job worker handler.")
+    parser.add_argument("--enable-settings-maintenance", action="store_true", help="Register durable settings maintenance handler.")
     parser.add_argument("--enable-workbench-matching", action="store_true", help="Poll DB-backed workbench matching dirty scopes.")
     parser.add_argument("--workbench-matching-batch-size", type=int, default=10)
     parser.add_argument("--workbench-matching-lease-seconds", type=int, default=600)
@@ -376,6 +379,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         handlers.update(import_handlers.handlers)
         if IMPORT_PROCESS_REQUESTED_EVENT not in config.event_types:
             config.event_types.append(IMPORT_PROCESS_REQUESTED_EVENT)
+    settings_maintenance_factory = None
+    if args.enable_settings_maintenance:
+        if args.check:
+            handlers[SETTINGS_DATA_RESET_REQUESTED_EVENT] = lambda _event: {"status": "check"}
+        else:
+            settings_maintenance_factory = SettingsDataResetRuntimeFactory(
+                data_dir=default_data_dir(),
+                connection=connection,
+                queue_repository=queue,
+            )
+            handlers[SETTINGS_DATA_RESET_REQUESTED_EVENT] = (
+                settings_maintenance_factory.build_handler().handle_runtime_event
+            )
+        if SETTINGS_DATA_RESET_REQUESTED_EVENT not in config.event_types:
+            config.event_types.append(SETTINGS_DATA_RESET_REQUESTED_EVENT)
 
     if args.check:
         print(
@@ -420,6 +438,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         )
         return 0
+
+    if settings_maintenance_factory is not None:
+        settings_maintenance_factory.recover_runtime_state()
 
     if args.enable_workbench_matching:
         workbench_dirty_scope_worker = WorkbenchMatchingWorkerFactory(

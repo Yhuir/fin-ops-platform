@@ -2,6 +2,12 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
+## 2026-08-01 - Data reset durable execution 与 runtime reload 闭环
+
+- 重置 API 不再执行或启动任何清理线程，只持久化非敏感 job/event；worker 从 PostgreSQL durable queue 领取并显式更新 lifecycle。
+- destructive job 的未知中断状态禁止自动重放；queue 失败会同步把新 job 标为 failed，密码验证失败时零 job/零 queue write。
+- worker 完成清理和 refresh 登记后，只向 systemd RuntimeDirectory 内、owner/cmdline 均校验通过的 Gunicorn pidfile 发送 reload；reload 失败使 job partial/failed，不能伪装成功。
+
 ## 当前决策
 
 - data reset 是跨模块危险操作，不归入单一 Settings 页面测试；每次改动都必须按数据事实、文件/object storage、read model/worker、App Health、权限和旧页面影响面审计。

@@ -106,7 +106,7 @@ class ImportFileApiTests(unittest.TestCase):
             self.assertEqual(payload["items"][0]["row_count"], 1)
             self.assertNotIn("row_results", payload["items"][0])
             self.assertNotIn("normalized_rows", payload["items"][0])
-            app.shutdown_background_jobs()
+            app.close()
 
     def test_preview_files_uses_lightweight_import_preview_persistence(self) -> None:
         app = build_application()

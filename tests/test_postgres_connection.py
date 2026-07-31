@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings, PostgresTransaction
 
@@ -8,9 +9,16 @@ from fin_ops_platform.services.postgres_connection import PostgresConnection, Po
 class FakePool:
     def __init__(self) -> None:
         self.wait_calls: list[int] = []
+        self.closed = False
 
     def wait(self, *, timeout: int) -> None:
         self.wait_calls.append(timeout)
+
+    def close(self) -> None:
+        self.closed = True
+
+    def get_stats(self) -> dict[str, int]:
+        return {"pool_size": 3, "requests_waiting": 1}
 
 
 class FakeCursor:
@@ -64,6 +72,21 @@ class FakeRawConnection:
 
 
 class PostgresConnectionTests(unittest.TestCase):
+    def test_settings_read_bounded_pool_wait_configuration(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "FIN_OPS_POSTGRES_DATABASE_URL": "postgresql://user:secret@db/fin_ops",
+                "FIN_OPS_POSTGRES_POOL_ACQUIRE_TIMEOUT_SECONDS": "3",
+                "FIN_OPS_POSTGRES_POOL_MAX_WAITING": "12",
+            },
+            clear=True,
+        ):
+            settings = PostgresSettings.from_env()
+
+        self.assertEqual(settings.pool_acquire_timeout_seconds, 3)
+        self.assertEqual(settings.pool_max_waiting, 12)
+
     def test_warm_up_waits_for_existing_pool(self) -> None:
         connection = PostgresConnection(
             PostgresSettings(
@@ -78,6 +101,17 @@ class PostgresConnectionTests(unittest.TestCase):
         connection.warm_up()
 
         self.assertEqual(pool.wait_calls, [7])
+
+    def test_close_releases_pool_and_pool_stats_are_exposed(self) -> None:
+        connection = PostgresConnection(PostgresSettings(database_url="postgresql://user:secret@db/fin_ops"))
+        pool = FakePool()
+        connection._pool = pool
+
+        self.assertEqual(connection.pool_stats(), {"pool_size": 3, "requests_waiting": 1})
+        connection.close()
+
+        self.assertTrue(pool.closed)
+        self.assertEqual(connection.pool_stats(), {})
 
     def test_execute_many_values_batches_insert_values(self) -> None:
         connection = FakeRawConnection()

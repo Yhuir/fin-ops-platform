@@ -1,4 +1,3 @@
-import { apiUrl } from "../../app/runtime";
 import { ApiClientError, apiRequestJson } from "../apiClient";
 import type {
   ApiAppHealthPayload,
@@ -100,46 +99,4 @@ export async function fetchPageAudit<T extends PageAuditPayload = PageAuditPaylo
     `/api/operations/app-health/page-audit?page=${encodeURIComponent(pageKey)}`,
     signal,
   );
-}
-
-export type AppHealthSubscription = {
-  close: () => void;
-};
-
-export function subscribeAppHealth(
-  onSnapshot: (payload: ApiAppHealthPayload) => void,
-  onError: (error: unknown) => void,
-): AppHealthSubscription | null {
-  if (typeof globalThis.EventSource !== "function") {
-    return null;
-  }
-
-  const eventSource = new EventSource(apiUrl("/api/app-health/stream"), {
-    withCredentials: true,
-  });
-  let closed = false;
-
-  const close = () => {
-    if (closed) {
-      return;
-    }
-    closed = true;
-    eventSource.close();
-  };
-
-  eventSource.addEventListener("app_health", (event) => {
-    try {
-      onSnapshot(JSON.parse(event.data) as ApiAppHealthPayload);
-    } catch (error) {
-      close();
-      onError(error);
-    }
-  });
-
-  eventSource.onerror = (event) => {
-    close();
-    onError(event);
-  };
-
-  return { close };
 }

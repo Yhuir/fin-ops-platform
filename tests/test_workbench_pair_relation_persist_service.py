@@ -25,22 +25,7 @@ class StateStoreStub:
         )
 
 
-class CapturedThread:
-    started: list[dict[str, Any]] = []
-
-    def __init__(self, *, target, kwargs: dict[str, Any], daemon: bool) -> None:
-        self._target = target
-        self._kwargs = kwargs
-        self._daemon = daemon
-
-    def start(self) -> None:
-        self.started.append({"target": self._target, "kwargs": dict(self._kwargs), "daemon": self._daemon})
-
-
 class WorkbenchPairRelationPersistServiceTests(unittest.TestCase):
-    def setUp(self) -> None:
-        CapturedThread.started = []
-
     def test_persist_clears_cache_and_saves_changed_case_snapshot(self) -> None:
         state_store = StateStoreStub()
         clear_calls: list[str] = []
@@ -61,31 +46,7 @@ class WorkbenchPairRelationPersistServiceTests(unittest.TestCase):
             ["CASE-001"],
         )
 
-    def test_schedule_coalesces_pending_case_ids_when_async_workers_overlap(self) -> None:
-        state_store = StateStoreStub()
-        service = WorkbenchPairRelationPersistService(
-            pair_relation_service=self._pair_relation_service(),
-            state_store=state_store,
-            clear_search_cache=lambda: None,
-            emit_action_timing=lambda **_: None,
-            duration_ms=lambda _: 0,
-            async_enabled=lambda: True,
-            thread_factory=CapturedThread,
-        )
-
-        service.schedule(changed_case_ids=["CASE-001"], action_name="confirm_link")
-        service.schedule(changed_case_ids=["CASE-002"], action_name="confirm_link")
-
-        self.assertEqual(len(CapturedThread.started), 2)
-        CapturedThread.started[0]["target"](**CapturedThread.started[0]["kwargs"])
-        self.assertEqual(state_store.saved, [])
-
-        CapturedThread.started[1]["target"](**CapturedThread.started[1]["kwargs"])
-
-        self.assertEqual(state_store.saved[0]["changed_case_ids"], ["CASE-001", "CASE-002"])
-        self.assertEqual(service.pending_case_ids, set())
-
-    def test_schedule_persists_synchronously_when_async_disabled_and_emits_timing(self) -> None:
+    def test_schedule_persists_synchronously_and_emits_timing(self) -> None:
         state_store = StateStoreStub()
         timing_calls: list[dict[str, Any]] = []
         service = WorkbenchPairRelationPersistService(
@@ -94,7 +55,6 @@ class WorkbenchPairRelationPersistServiceTests(unittest.TestCase):
             clear_search_cache=lambda: None,
             emit_action_timing=lambda **kwargs: timing_calls.append(kwargs),
             duration_ms=lambda started_at: int(20 - started_at),
-            async_enabled=lambda: False,
             monotonic_clock=lambda: 7.0,
         )
 

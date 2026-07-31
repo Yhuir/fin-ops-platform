@@ -241,26 +241,6 @@ def http_latency_fail_report() -> dict[str, object]:
     }
 
 
-def sse_pass_report() -> dict[str, object]:
-    return {
-        "status": "pass",
-        "auth_configured": True,
-        "summary": {
-            "probe_count": 1,
-            "failed_probe_count": 0,
-            "max_first_event_ms": 500.0,
-        },
-        "probes": [
-            {
-                "name": "workbench_events_all",
-                "status": "pass",
-                "first_event_ms": 500.0,
-                "event_names": ["workbench.read_model.completed"],
-            }
-        ],
-    }
-
-
 def health_ready_pass_report() -> dict[str, object]:
     return {
         "status": "pass",
@@ -456,9 +436,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             gate.http_slo_probe,
             "collect_http_slo",
         ) as http_slo, patch.object(
-            gate.sse_smoke_probe,
-            "collect_sse_smoke",
-        ) as sse_smoke, patch.object(
             gate.write_operation_slo_audit,
             "audit_write_operation_slo",
         ) as write_audit, patch.object(
@@ -483,7 +460,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
         )
         read_model_smoke.assert_not_called()
         http_slo.assert_not_called()
-        sse_smoke.assert_not_called()
         write_audit.assert_not_called()
         business_write_e2e.assert_not_called()
 
@@ -586,10 +562,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             "collect_http_slo",
             return_value=http_pass_report(),
         ), patch.object(
-            gate.sse_smoke_probe,
-            "collect_sse_smoke",
-            return_value=sse_pass_report(),
-        ), patch.object(
             gate.write_operation_slo_audit,
             "audit_write_operation_slo",
             return_value=write_audit_pass_report(),
@@ -611,7 +583,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                 "postgres_reversible_write",
                 "read_model_direct_smoke",
                 "authenticated_http_slo",
-                "sse_first_event_smoke",
                 "health_ready_payload",
                 "write_operation_audit",
                 "runtime_health_before_final_convergence",
@@ -648,14 +619,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                 "summary": {"probe_count": 0, "sample_count": 0},
             },
         ), patch.object(
-            gate.sse_smoke_probe,
-            "collect_sse_smoke",
-            return_value={
-                "status": "auth_missing",
-                "auth_configured": False,
-                "summary": {"probe_count": 0},
-            },
-        ), patch.object(
             gate.write_operation_slo_audit,
             "audit_write_operation_slo",
             return_value=write_audit_pass_report(),
@@ -670,7 +633,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
         self.assertIn("page_canonical_audit", report["failed_checks"])
         self.assertIn("read_model_direct_smoke", report["failed_checks"])
         self.assertIn("authenticated_http_slo", report["failed_checks"])
-        self.assertIn("sse_first_event_smoke", report["failed_checks"])
         self.assertFalse(report["auth_configured"])
 
     def test_gate_passes_admin_headers_to_http_and_canonical_audit(self) -> None:
@@ -706,10 +668,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             gate.http_slo_probe,
             "collect_http_slo",
             side_effect=collect_http,
-        ), patch.object(
-            gate.sse_smoke_probe,
-            "collect_sse_smoke",
-            return_value=sse_pass_report(),
         ), patch.object(
             gate.write_operation_slo_audit,
             "audit_write_operation_slo",
@@ -750,14 +708,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                 "probes": [],
             },
         ), patch.object(
-            gate.sse_smoke_probe,
-            "collect_sse_smoke",
-            return_value={
-                "status": "pass",
-                "summary": {"probe_count": 0},
-                "probes": [],
-            },
-        ), patch.object(
             gate.write_operation_slo_audit,
             "audit_write_operation_slo",
             return_value={
@@ -777,7 +727,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
         self.assertEqual(report["status"], gate.FAIL)
         self.assertIn("read_model_direct_smoke", report["failed_checks"])
         self.assertIn("authenticated_http_slo", report["failed_checks"])
-        self.assertIn("sse_first_event_smoke", report["failed_checks"])
         self.assertIn("write_operation_audit", report["failed_checks"])
 
     def test_write_audit_uses_recent_real_operations_without_scenario_filter(self) -> None:
@@ -799,10 +748,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             gate.http_slo_probe,
             "collect_http_slo",
             return_value=http_pass_report(),
-        ), patch.object(
-            gate.sse_smoke_probe,
-            "collect_sse_smoke",
-            return_value=sse_pass_report(),
         ), patch.object(
             gate.write_operation_slo_audit,
             "audit_write_operation_slo",
@@ -840,39 +785,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
 
         self.assertEqual(report["status"], gate.FAIL)
         self.assertIn("health_ready_payload", report["failed_checks"])
-
-    def test_sse_failure_preserves_diagnostics(self) -> None:
-        with patch.object(
-            gate.sse_smoke_probe,
-            "collect_sse_smoke",
-            return_value={
-                "status": "fail",
-                "auth_configured": True,
-                "summary": {"probe_count": 1, "failed_probe_count": 1},
-                "probes": [
-                    {
-                        "name": "workbench_events_all",
-                        "status": "fail",
-                        "first_event_ms": 1_500.0,
-                        "errors": ["sse_first_event_slo_miss"],
-                    }
-                ],
-            },
-        ):
-            check = gate._sse_smoke_check(
-                base_url="https://example.test",
-                api_prefix="/fin-ops-api",
-                headers={"Authorization": "Bearer token"},
-                target_ms=1_000,
-                timeout_seconds=1,
-                require_auth=True,
-            )
-
-        self.assertEqual(check.status, gate.FAIL)
-        self.assertEqual(
-            check.payload["failed_probes"][0]["errors"],
-            ["sse_first_event_slo_miss"],
-        )
 
     def test_http_slo_separates_public_pages_from_internal_api(self) -> None:
         captured: dict[str, object] = {}

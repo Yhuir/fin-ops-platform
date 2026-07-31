@@ -44,7 +44,7 @@
 - 新增 dependency 时必须更新 app status dependency registry 和 dependency provider。dependency key 缺失不能默认 available；critical dependency missing/unavailable 必须进入 red，optional unavailable 进入 yellow。
 - 新增用户可见后台任务必须写入统一 background job progress contract，至少包含任务身份、状态、短标签、消息、进度字段、影响范围和可跳转 route。
 - 页面 table/drawer/form loading 不进入全局状态；只有 read model、worker、queue、dependency、background job 等 runtime facts 影响左上角全局 icon。
-- `/api/app-health.app_status` 是全局 icon 和 hover 面板的事实源。SSE/轮询/BroadcastChannel 只是传输和缓存优化，不替代 durable runtime facts。
+- `/api/app-health.app_status` 是全局 icon 和 hover 面板的事实源。有界轮询/BroadcastChannel 只是传输和缓存优化，不替代 durable runtime facts；旧 SSE/EventSource 路径不得恢复。
 - `server.py` 只能通过 state store / repository 的公开方法读取 app status runtime snapshot；禁止为 app status 访问 `_connection` 或在 `AppStatusOverviewService` 中写 `job.*` SQL。
 - 前端 `app_status` mapper 对 `overall`、domain 和 task 的关键字段必须 fail closed；不能把 malformed payload 默认为 green/ready。
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import re
+import signal
 from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,6 +34,7 @@ from fin_ops_platform.services.matching import MatchingEngineService
 from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncService
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
+from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.postgres_repositories.workbench_formal_relation import (
     PostgresWorkbenchFormalRelationFactRepository,
@@ -41,8 +44,14 @@ from fin_ops_platform.services.postgres_repositories.workbench_idempotency impor
 )
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 from fin_ops_platform.services.project_costing import ProjectCostingService
+from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.reconciliation import ManualReconciliationService
 from fin_ops_platform.services.search_service import SearchService
+from fin_ops_platform.services.settings_data_reset_job import SettingsDataResetJobHandler
+from fin_ops_platform.services.settings_data_reset_service import (
+    SettingsDataResetPairSnapshotPort,
+    SettingsDataResetService,
+)
 from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedImportService
 from fin_ops_platform.services.workbench_exception_projection import EXCEPTION_PROJECTION_VERSION
 from fin_ops_platform.services.workbench_exception_rules import RULE_VERSION as WORKBENCH_EXCEPTION_RULE_VERSION
@@ -213,19 +222,33 @@ class WorkbenchMatchingWorkerFactory:
             repository_factory=self._workbench_uow_repository_factory,
             idempotency_store=PostgresWorkbenchIdempotencyRepository(self._connection),
         )
+        dirty_queue = WorkbenchReconciliationDirtyQueue(repository=read_model_repository)
+        source_versions_provider = lambda: _workbench_matching_source_versions(app_settings_service)
+        if (os.environ.get("FIN_OPS_STARTUP_WORKBENCH_MATCHING_STALE_SCAN_ENABLED") or "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }:
+            dirty_queue.mark_stale_completed_scopes(
+                source_versions=source_versions_provider(),
+                reason="worker_startup_matching_source_versions_changed",
+                debounce_seconds=0,
+                limit=1000,
+            )
         return build_workbench_matching_dirty_scope_worker(
-            dirty_queue=WorkbenchReconciliationDirtyQueue(repository=read_model_repository),
+            dirty_queue=dirty_queue,
             matching_orchestrator=WorkbenchMatchingOrchestrator(
                 fact_repository=PostgresWorkbenchFormalRelationFactRepository(self._connection),
                 matcher=WorkbenchFreeMatchingEngine(),
                 relation_uow=relation_uow,
-                source_versions_provider=lambda: _workbench_matching_source_versions(app_settings_service),
+                source_versions_provider=source_versions_provider,
                 bank_category_provider=category_provider,
                 bank_flow_rule_tag_rules_payload=(
                     app_settings_service.get_bank_flow_rule_batch_tag_rules_payload
                 ),
             ),
-            source_versions_provider=lambda: _workbench_matching_source_versions(app_settings_service),
+            source_versions_provider=source_versions_provider,
             heartbeat_recorder=heartbeat_recorder,
             worker_id=worker_id,
             poll_interval_seconds=poll_interval_seconds,
@@ -249,6 +272,130 @@ class WorkbenchMatchingWorkerFactory:
             exception_cases=workbench_repository,
             row_overrides=workbench_repository,
         )
+
+
+class SettingsDataResetRuntimeFactory:
+    def __init__(self, *, data_dir: str | Path, connection: Any, queue_repository: Any) -> None:
+        self._data_dir = data_dir
+        self._connection = connection
+        self._queue_repository = queue_repository
+
+    def build_handler(self) -> SettingsDataResetJobHandler:
+        return SettingsDataResetJobHandler(
+            reset_executor=self._execute_reset,
+            supported_actions=set(SettingsDataResetService.supported_actions()),
+            background_jobs=BackgroundJobService(self._state_store()),
+            scope_months_provider=self._scope_months,
+            lifecycle_executor=self._execute_lifecycle,
+            runtime_reload_request=_request_api_runtime_reload,
+        )
+
+    def _execute_reset(self, action: str, **kwargs: Any) -> Any:
+        state_store = self._state_store()
+        import_service = ImportNormalizationService.from_snapshot(
+            _call_or_empty(state_store, "load_imports_snapshot"),
+            id_registry=state_store,
+            fact_repository=getattr(state_store, "import_fact_repository", None),
+        )
+        empty_snapshot = SimpleNamespace(snapshot=lambda: {})
+        reset_service = SettingsDataResetService(
+            state_store=state_store,
+            import_service=import_service,
+            file_import_service=empty_snapshot,
+            matching_service=empty_snapshot,
+            workbench_override_service=SimpleNamespace(snapshot=state_store.load_workbench_overrides),
+            workbench_pair_snapshot_port=SettingsDataResetPairSnapshotPort(
+                pair_relation_snapshot=state_store.load_workbench_pair_relations,
+            ),
+            tax_certified_import_service=empty_snapshot,
+        )
+        execute_reset = reset_service.execute
+        return execute_reset(action, **kwargs)
+
+    def _scope_months(self) -> list[str]:
+        state_store = self._state_store()
+        import_service = ImportNormalizationService.from_snapshot(
+            _call_or_empty(state_store, "load_imports_snapshot"),
+            id_registry=state_store,
+            fact_repository=getattr(state_store, "import_fact_repository", None),
+        )
+        oa_months = PostgresOAProjectionRepository(self._connection).list_available_months()
+        return sorted(set(oa_months) | set(_known_import_months(import_service)))
+
+    def _execute_lifecycle(self, months: list[str], action: str) -> dict[str, object]:
+        state_store = self._state_store()
+        app_settings_service = _app_settings_service(state_store)
+        source_versions_provider = lambda: _workbench_matching_source_versions(app_settings_service)
+        reason = f"settings_data_reset:{action}"
+        errors: list[dict[str, str]] = []
+        invalidated_scopes: list[str] = []
+        enqueued_jobs: list[str] = []
+        gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
+        for scope_type in ("workbench", "workbench_relation", "search", "no_oa_bank_batch"):
+            try:
+                gateway.enqueue_one(scope_type, "all", reason=reason, metadata={"action": action})
+                invalidated_scopes.append(f"{scope_type}:all")
+                enqueued_jobs.append(f"{scope_type}.read_model.refresh")
+            except Exception as exc:
+                errors.append({"domain": f"{scope_type}_read_model", "error": str(exc)})
+        try:
+            dirty_months = (
+                WorkbenchReconciliationDirtyQueue(
+                    repository=getattr(state_store, "read_model_repository", None)
+                ).mark_dirty_expanded(
+                    months,
+                    reason=reason,
+                    source_versions=source_versions_provider(),
+                    debounce_seconds=0,
+                )
+                if months
+                else []
+            )
+            invalidated_scopes.extend(f"workbench_matching:{month}" for month in dirty_months)
+        except Exception as exc:
+            errors.append({"domain": "workbench_matching_dirty_scopes", "error": str(exc)})
+        return {
+            "event": "settings_reset_completed",
+            "dry_run": False,
+            "deleted_counts": {},
+            "invalidated_scopes": invalidated_scopes,
+            "enqueued_jobs": enqueued_jobs,
+            "skipped": ["process_local_caches", "historical_etc_repair_explicit_maintenance"],
+            "errors": errors,
+        }
+
+    def recover_runtime_state(self) -> None:
+        state_store = self._state_store()
+        background_jobs = BackgroundJobService(state_store)
+        background_jobs.recover_interrupted_jobs()
+        EtcReconciliationTaskService(state_store=state_store).recover_interrupted_imports(
+            active_import_session_ids=background_jobs.active_source_values(
+                job_type="etc_invoice_import",
+                source_key="session_id",
+            )
+        )
+
+    def _state_store(self) -> Any:
+        from fin_ops_platform.services.postgres_state_store import PostgresStateStore
+
+        return PostgresStateStore(data_dir=self._data_dir, connection=self._connection)
+
+
+def _request_api_runtime_reload() -> None:
+    pidfile = Path(os.environ.get("FIN_OPS_HTTP_PIDFILE", "/run/fin-ops/gunicorn.pid"))
+    stat = pidfile.stat()
+    if stat.st_uid != os.getuid():
+        raise RuntimeError("Gunicorn pidfile is not owned by the runtime user.")
+    try:
+        pid = int(pidfile.read_text(encoding="utf-8").strip())
+    except ValueError as exc:
+        raise RuntimeError("Gunicorn pidfile does not contain a valid process id.") from exc
+    if pid <= 1:
+        raise RuntimeError("Gunicorn process id is invalid.")
+    command_line = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\x00", b" ").decode("utf-8", errors="replace")
+    if "gunicorn" not in command_line or "fin_ops_platform.app.wsgi:application" not in command_line:
+        raise RuntimeError("Gunicorn pidfile does not reference the fin-ops API process.")
+    os.kill(pid, signal.SIGHUP)
 
 
 def build_import_job_handler_bundle(

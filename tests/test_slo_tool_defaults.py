@@ -10,7 +10,6 @@ from fin_ops_platform.tools import (
     http_slo_probe,
     read_model_slo_smoke,
     runtime_sync_closure_gate,
-    sse_smoke_probe,
     write_operation_e2e_smoke,
     write_operation_slo_audit,
 )
@@ -20,14 +19,12 @@ class SloToolDefaultTests(unittest.TestCase):
     def test_cli_defaults_match_p2p3_one_second_closure_targets(self) -> None:
         http_args = http_slo_probe.build_parser().parse_args([])
         read_model_args = read_model_slo_smoke.build_parser().parse_args([])
-        sse_args = sse_smoke_probe.build_parser().parse_args([])
         write_audit_args = write_operation_slo_audit.build_parser().parse_args([])
         write_e2e_args = write_operation_e2e_smoke.build_parser().parse_args(["--scenario", "/tmp/scenario.json"])
         closure_gate_args = runtime_sync_closure_gate.build_parser().parse_args([])
 
         self.assertEqual(http_args.target_ms, 1_000.0)
         self.assertEqual(read_model_args.target_ms, 1_000.0)
-        self.assertEqual(sse_args.target_ms, 1_000.0)
         self.assertEqual(write_audit_args.target_ms, 1_000.0)
         self.assertIsNone(write_audit_args.p99_target_ms)
         self.assertEqual(write_operation_slo_audit.effective_p99_target_ms_for(write_audit_args.target_ms, None), 3_000.0)
@@ -35,14 +32,13 @@ class SloToolDefaultTests(unittest.TestCase):
         self.assertEqual(write_e2e_args.refresh_target_ms, 30_000.0)
         self.assertEqual(write_e2e_args.http_target_ms, 1_000.0)
         self.assertEqual(closure_gate_args.http_target_ms, 1_000.0)
-        self.assertEqual(closure_gate_args.sse_target_ms, 1_000.0)
         self.assertEqual(closure_gate_args.health_ready_target_ms, 1_000.0)
         self.assertEqual(closure_gate_args.health_ready_max_response_bytes, 50_000)
         self.assertEqual(closure_gate_args.health_ready_max_api_performance_endpoints, 20)
         self.assertEqual(closure_gate_args.read_model_target_ms, 1_000.0)
         self.assertEqual(closure_gate_args.write_target_ms, 1_000.0)
 
-    def test_http_sse_and_closure_gate_share_auth_env_defaults(self) -> None:
+    def test_http_and_closure_gate_share_auth_env_defaults(self) -> None:
         env = {
             "FIN_OPS_HTTP_SLO_BASE_URL": "https://example.test",
             "FIN_OPS_HTTP_SLO_API_PREFIX": "/fin-ops-api",
@@ -53,10 +49,9 @@ class SloToolDefaultTests(unittest.TestCase):
 
         with patch.dict(os.environ, env, clear=False):
             http_args = http_slo_probe.build_parser().parse_args([])
-            sse_args = sse_smoke_probe.build_parser().parse_args([])
             closure_gate_args = runtime_sync_closure_gate.build_parser().parse_args([])
 
-        for args in (http_args, sse_args, closure_gate_args):
+        for args in (http_args, closure_gate_args):
             with self.subTest(parser=args):
                 self.assertEqual(args.base_url, "https://example.test")
                 self.assertEqual(args.api_prefix, "/fin-ops-api")

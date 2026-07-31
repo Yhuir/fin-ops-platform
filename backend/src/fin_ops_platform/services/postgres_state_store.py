@@ -189,6 +189,13 @@ class PostgresStateStore:
     def mongo_database_name(self) -> str | None:
         return None
 
+    def close(self) -> None:
+        connections = {id(self._connection): self._connection, id(self._sql_read_connection): self._sql_read_connection}
+        for connection in connections.values():
+            close = getattr(connection, "close", None)
+            if callable(close):
+                close()
+
     def health_summary(self) -> dict[str, object]:
         summary: dict[str, object]
         if hasattr(self._connection, "health_summary"):

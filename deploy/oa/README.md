@@ -410,10 +410,10 @@ python -m fin_ops_platform.app.worker \
   明细字段可以由完整逐页 proof 证明，字段只返回一部分、漏页或顺序漂移仍 fail closed
 - 候选激活后 T+0 运行 `full`：连接真实 PostgreSQL 与 RabbitMQ，检查 exact worker inventory、
   queue/dirty/dead-letter 收敛、critical read-model SLO、隔离事务写入能力、domain/page canonical
-  audit 及 API/health/SSE 性能
+  audit 及 API/health 性能
 - T+60s、T+300s 运行 `stability`：重跑 critical read-model、性能、domain audit 和 runtime 收敛检查，
   全程不执行 confirm/withdraw；最终证据以 T+300 证明异步拓扑持续稳定
-- 页面 shell 探针固定使用公开站点 origin；API/SSE 探针固定使用当前 release 的内部服务 origin，
+- 页面 shell 探针固定使用公开站点 origin；API 探针固定使用当前 release 的内部服务 origin，
   防止内部地址页面 404 或公开 Nginx fallback 被误判为业务 API 结果
 - 自动 release gate 不读取受控业务 scenario、standing approval，也不修改真实业务关系。隔离写探针只在
   当前 PostgreSQL 连接的 `pg_temp` 临时表内执行 insert/read/delete/rollback，不接触 canonical facts、

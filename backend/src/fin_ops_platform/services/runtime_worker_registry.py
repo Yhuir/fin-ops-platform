@@ -134,6 +134,17 @@ RUNTIME_WORKER_REGISTRY: tuple[RuntimeWorkerRegistration, ...] = (
         heartbeat_stale_after_seconds=900,
     ),
     RuntimeWorkerRegistration(
+        instance_name="settings-maintenance",
+        worker_kind="settings-maintenance",
+        handler_flags=("--enable-settings-maintenance",),
+        event_types=("settings.data_reset.requested",),
+        required=True,
+        rabbitmq_eligible=False,
+        env_example="fin-ops.worker.settings-maintenance.env.example",
+        heartbeat_stale_after_seconds=900,
+        dependencies=("postgres",),
+    ),
+    RuntimeWorkerRegistration(
         instance_name="no-oa-bank-batch",
         worker_kind="no-oa-bank-batch-read-model",
         handler_flags=("--enable-no-oa-bank-batch-read-model-refresh",),

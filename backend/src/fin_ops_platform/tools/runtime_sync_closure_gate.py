@@ -19,7 +19,6 @@ from fin_ops_platform.tools import (
     health_ready_payload_probe,
     http_slo_probe,
     read_model_slo_smoke,
-    sse_smoke_probe,
     write_operation_e2e_smoke,
     write_operation_slo_audit,
 )
@@ -71,7 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--page-base-url",
         default=os.getenv("FIN_OPS_HTTP_SLO_PAGE_BASE_URL", ""),
-        help="Optional public page origin. API/SSE/write probes continue to use --base-url.",
+        help="Optional public page origin. API/write probes continue to use --base-url.",
     )
     parser.add_argument("--api-prefix", default=os.getenv("FIN_OPS_HTTP_SLO_API_PREFIX", ""))
     parser.add_argument("--tenant-id", default="default")
@@ -84,7 +83,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--read-model-target-ms", type=float, default=1_000.0)
     parser.add_argument("--write-target-ms", type=float, default=1_000.0)
     parser.add_argument("--http-target-ms", type=float, default=1_000.0)
-    parser.add_argument("--sse-target-ms", type=float, default=1_000.0)
     parser.add_argument("--health-ready-target-ms", type=float, default=health_ready_payload_probe.DEFAULT_TARGET_MS)
     parser.add_argument("--health-ready-max-response-bytes", type=int, default=health_ready_payload_probe.DEFAULT_MAX_RESPONSE_BYTES)
     parser.add_argument("--health-ready-max-api-performance-endpoints", type=int, default=health_ready_payload_probe.DEFAULT_MAX_API_PERFORMANCE_ENDPOINTS)
@@ -130,7 +128,6 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         read_model_target_ms=max(1.0, float(args.read_model_target_ms)),
         write_target_ms=max(1.0, float(args.write_target_ms)),
         http_target_ms=max(1.0, float(args.http_target_ms)),
-        sse_target_ms=max(1.0, float(args.sse_target_ms)),
         health_ready_target_ms=max(1.0, float(args.health_ready_target_ms)),
         health_ready_max_response_bytes=max(1, int(args.health_ready_max_response_bytes)),
         health_ready_max_api_performance_endpoints=max(0, int(args.health_ready_max_api_performance_endpoints)),
@@ -162,7 +159,6 @@ def run_closure_gate(
     read_model_target_ms: float = 1_000.0,
     write_target_ms: float = 1_000.0,
     http_target_ms: float = 1_000.0,
-    sse_target_ms: float = 1_000.0,
     health_ready_target_ms: float = health_ready_payload_probe.DEFAULT_TARGET_MS,
     health_ready_max_response_bytes: int = health_ready_payload_probe.DEFAULT_MAX_RESPONSE_BYTES,
     health_ready_max_api_performance_endpoints: int = health_ready_payload_probe.DEFAULT_MAX_API_PERFORMANCE_ENDPOINTS,
@@ -226,14 +222,6 @@ def run_closure_gate(
                     require_auth=not allow_unauthenticated_http,
                     poll_interval_seconds=poll_interval_seconds,
                 ),
-                _sse_smoke_check(
-                    base_url=base_url,
-                    api_prefix=api_prefix,
-                    headers=normalized_headers,
-                    target_ms=sse_target_ms,
-                    timeout_seconds=timeout_seconds,
-                    require_auth=not allow_unauthenticated_http,
-                ),
                 _health_ready_payload_check(
                     base_url=base_url,
                     api_prefix=api_prefix,
@@ -287,7 +275,6 @@ def run_closure_gate(
         "generated_at": datetime.now(UTC).isoformat(),
         "targets": {
             "page_api_first_response_p95_ms": http_target_ms,
-            "sse_first_event_ms": sse_target_ms,
             "health_ready_payload_ms": health_ready_target_ms,
             "health_ready_max_response_bytes": health_ready_max_response_bytes,
             "health_ready_max_api_performance_endpoints": health_ready_max_api_performance_endpoints,
@@ -546,59 +533,6 @@ def _http_slo_has_only_transient_freshness_failures(report: Mapping[str, Any]) -
             or _safe_int(probe.get("refresh_enqueued_count")) > 0
         )
         for probe in failed_probes
-    )
-
-
-def _sse_smoke_check(
-    *,
-    base_url: str,
-    api_prefix: str,
-    headers: Mapping[str, str],
-    target_ms: float,
-    timeout_seconds: float,
-    require_auth: bool,
-) -> ClosureCheck:
-    report = sse_smoke_probe.collect_sse_smoke(
-        base_url=base_url,
-        api_prefix=api_prefix,
-        headers=headers,
-        timeout_seconds=min(max(1.0, timeout_seconds), 30.0),
-        require_auth=require_auth,
-        probes=[
-            sse_smoke_probe.SseProbe(
-                probe.name,
-                probe.path,
-                probe.expected_event_prefixes,
-                expected_statuses=probe.expected_statuses,
-                target_ms=target_ms,
-            )
-            for probe in sse_smoke_probe.DEFAULT_SSE_PROBES
-        ],
-    )
-    if report.get("status") == "auth_missing":
-        return ClosureCheck(
-            "sse_first_event_smoke",
-            FAIL,
-            "Authenticated SSE first-event smoke cannot be proven without a real OA token or Admin-Token cookie.",
-            _compact_report(report),
-        )
-    summary = report.get("summary") if isinstance(report.get("summary"), Mapping) else {}
-    probe_count = _safe_int(summary.get("probe_count"))
-    if report.get("status") == PASS and probe_count <= 0:
-        return ClosureCheck(
-            "sse_first_event_smoke",
-            FAIL,
-            "Authenticated SSE smoke produced no probe evidence; final closure requires non-empty first-event samples.",
-            {
-                **_compact_report(report),
-                "error": "sse_smoke_empty_samples",
-            },
-        )
-    return ClosureCheck(
-        "sse_first_event_smoke",
-        PASS if report.get("status") == PASS else FAIL,
-        "Authenticated App Health and Workbench SSE first events met target." if report.get("status") == PASS else "Authenticated SSE first-event smoke failed.",
-        _compact_report(report),
     )
 
 

@@ -310,11 +310,6 @@ export type WorkbenchRefreshStatus = {
   retryable: boolean;
 };
 
-export type WorkbenchRefreshStatusEvent = {
-  event: string;
-  status: WorkbenchRefreshStatus;
-};
-
 export type WorkbenchZoneCounts = {
   groups: number;
   oa: number;

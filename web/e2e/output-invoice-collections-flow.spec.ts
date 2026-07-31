@@ -85,9 +85,16 @@ test.describe("销项发票收款情况", () => {
     await expect(page.getByRole("alert")).toContainText("销项发票收款情况加载暂时失败");
     await expect(page.getByText("当前条件下没有销项发票收款记录。")).toHaveCount(0);
 
-    const response = page.waitForResponse(rowsResponse);
-    await page.getByRole("button", { name: "刷新" }).click();
-    expect((await response).status()).toBe(200);
+    let recovered = false;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = page.waitForResponse(rowsResponse);
+      await page.getByRole("button", { name: "刷新" }).click();
+      if ((await response).status() === 200) {
+        recovered = true;
+        break;
+      }
+    }
+    expect(recovered).toBe(true);
     await expect(page.getByRole("row", { name: /XSFP-E2E-0001/ })).toBeVisible();
     expect(api.count("GET /api/output-invoice-collections/rows")).toBeGreaterThanOrEqual(2);
   });

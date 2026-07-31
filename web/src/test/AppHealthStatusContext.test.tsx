@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ApiAppHealthPayload, AppHealthStatus } from "../features/appHealth/types";
@@ -61,59 +61,6 @@ vi.mock("../features/appHealth/api", async (importOriginal) => {
     fetchOaSyncStatus: vi.fn(async () => ({ status: "synced", dirty_scopes: [] })),
   };
 });
-
-type MockEventSourceInstance = {
-  url: string;
-  options?: EventSourceInit;
-  close: ReturnType<typeof vi.fn>;
-  onerror: ((event: Event) => void) | null;
-  listeners: Map<string, Array<(event: MessageEvent) => void>>;
-  addEventListener: (type: string, listener: (event: MessageEvent) => void) => void;
-};
-
-const eventSourceInstances: MockEventSourceInstance[] = [];
-
-function installMockEventSource() {
-  eventSourceInstances.length = 0;
-  const MockEventSource = vi.fn((url: string, options?: EventSourceInit) => {
-    const instance: MockEventSourceInstance = {
-      url,
-      options,
-      close: vi.fn(),
-      onerror: null,
-      listeners: new Map(),
-      addEventListener: vi.fn((type: string, listener: (event: MessageEvent) => void) => {
-        const listeners = instance.listeners.get(type) ?? [];
-        listeners.push(listener);
-        instance.listeners.set(type, listeners);
-      }),
-    };
-    eventSourceInstances.push(instance);
-    return instance;
-  });
-  vi.stubGlobal("EventSource", MockEventSource);
-  return MockEventSource;
-}
-
-function emitAppHealthSnapshot(payload: ApiAppHealthPayload) {
-  const instance = eventSourceInstances[0];
-  expect(instance).toBeDefined();
-  const listeners = instance.listeners.get("app_health") ?? [];
-  expect(listeners.length).toBeGreaterThan(0);
-  act(() => {
-    listeners.forEach((listener) => listener(new MessageEvent("app_health", {
-      data: JSON.stringify(payload),
-    })));
-  });
-}
-
-function emitSseError() {
-  const instance = eventSourceInstances[0];
-  expect(instance).toBeDefined();
-  act(() => {
-    instance.onerror?.(new Event("error"));
-  });
-}
 
 const { fetchAppHealth } = await import("../features/appHealth/api");
 const { AppHealthStatusProvider, useAppHealthStatus, useCanMutateWithHealth } = await import("../contexts/AppHealthStatusContext");
@@ -389,32 +336,7 @@ describe("AppHealthStatusProvider", () => {
     expect(screen.getByLabelText("health")).toHaveTextContent("\"workbench\":\"stale\"");
   });
 
-  it("updates from an app_health SSE snapshot before polling", async () => {
-    installMockEventSource();
-    renderProbe();
-
-    await waitFor(() => {
-      expect(eventSourceInstances).toHaveLength(1);
-    });
-
-    emitAppHealthSnapshot({
-      status: "busy",
-      generated_at: "2026-05-06T09:00:00+08:00",
-      session: { status: "authenticated" },
-      oa_sync: { status: "synced", dirty_scopes: [] },
-      workbench_matching: { status: "stale", dirty_scopes: ["oa"] },
-      background_jobs: { active: 0, queued: 0, running: 0, attention: 0 },
-    });
-
-    await waitFor(() => {
-      expect(screen.getByLabelText("health")).toHaveAttribute("data-level", "busy");
-      expect(screen.getByLabelText("health")).toHaveAttribute("data-reason", "关联台待刷新");
-    });
-    expect(fetchAppHealth).not.toHaveBeenCalled();
-  });
-
-  it("falls back to polling after SSE errors", async () => {
-    installMockEventSource();
+  it("loads app health through bounded polling", async () => {
     mocked.appHealth = {
       status: "ok",
       generated_at: "2026-05-06T09:01:00+08:00",
@@ -426,12 +348,6 @@ describe("AppHealthStatusProvider", () => {
     renderProbe();
 
     await waitFor(() => {
-      expect(eventSourceInstances).toHaveLength(1);
-    });
-    emitSseError();
-
-    await waitFor(() => {
-      expect(eventSourceInstances[0].close).toHaveBeenCalled();
       expect(fetchAppHealth).toHaveBeenCalled();
       expect(screen.getByLabelText("health")).toHaveAttribute("data-level", "ok");
     });

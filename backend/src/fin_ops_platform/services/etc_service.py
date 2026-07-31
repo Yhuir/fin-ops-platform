@@ -714,7 +714,18 @@ class _ArchiveEntry:
     content: bytes
 
 
+@dataclass(slots=True)
+class _ArchiveBudget:
+    entry_count: int = 0
+    total_uncompressed_bytes: int = 0
+
+
 SAFE_PATH_RE = re.compile(r"[^A-Za-z0-9._-]+")
+MAX_ARCHIVE_DEPTH = 8
+MAX_ARCHIVE_ENTRIES = 2_000
+MAX_ARCHIVE_ENTRY_BYTES = 64 * 1024 * 1024
+MAX_ARCHIVE_TOTAL_UNCOMPRESSED_BYTES = 256 * 1024 * 1024
+MAX_ARCHIVE_COMPRESSION_RATIO = 200
 
 
 FIELD_ALIASES = {
@@ -3309,16 +3320,35 @@ class EtcService:
         *,
         depth: int = 0,
         path_prefix: str = "",
+        budget: _ArchiveBudget | None = None,
     ) -> list[_ArchiveEntry]:
-        if depth > 8:
+        if depth > MAX_ARCHIVE_DEPTH:
             raise BadZipFile("nested zip depth exceeds limit")
+        budget = budget or _ArchiveBudget()
         entries: list[_ArchiveEntry] = []
         with ZipFile(BytesIO(content)) as archive:
             for info in archive.infolist():
                 if info.is_dir():
                     continue
-                file_content = archive.read(info)
                 path = f"{path_prefix}{info.filename}"
+                normalized_parts = Path(info.filename.replace("\\", "/")).parts
+                if Path(info.filename).is_absolute() or ".." in normalized_parts:
+                    raise BadZipFile(f"unsafe archive path: {path}")
+                if info.flag_bits & 0x1:
+                    raise BadZipFile(f"encrypted archive entry is not supported: {path}")
+                budget.entry_count += 1
+                budget.total_uncompressed_bytes += int(info.file_size)
+                if budget.entry_count > MAX_ARCHIVE_ENTRIES:
+                    raise BadZipFile("archive entry count exceeds limit")
+                if info.file_size > MAX_ARCHIVE_ENTRY_BYTES:
+                    raise BadZipFile(f"archive entry exceeds size limit: {path}")
+                if budget.total_uncompressed_bytes > MAX_ARCHIVE_TOTAL_UNCOMPRESSED_BYTES:
+                    raise BadZipFile("archive total uncompressed size exceeds limit")
+                if info.file_size > 0 and info.compress_size == 0:
+                    raise BadZipFile(f"archive compression ratio exceeds limit: {path}")
+                if info.compress_size > 0 and info.file_size / info.compress_size > MAX_ARCHIVE_COMPRESSION_RATIO:
+                    raise BadZipFile(f"archive compression ratio exceeds limit: {path}")
+                file_content = archive.read(info)
                 if path.lower().endswith(".zip"):
                     entries.extend(
                         self._extract_archive_entries(
@@ -3326,6 +3356,7 @@ class EtcService:
                             file_content,
                             depth=depth + 1,
                             path_prefix=f"{path}/",
+                            budget=budget,
                         )
                     )
                 else:

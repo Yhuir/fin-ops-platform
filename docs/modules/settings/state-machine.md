@@ -51,10 +51,10 @@
 ### 数据重置
 
 - 支持动作：`reset_bank_transactions`、`reset_invoices`、`reset_oa_and_rebuild`。
-- job 状态：`idle`、`confirming`、`queued`、`running`、`succeeded`、`failed`、`cancelled/unavailable`。
+- job 状态：`idle`、`confirming`、`queued`、`running`、`succeeded`、`failed`、`cancelled/unavailable`；执行事实源是 `settings.data_reset.requested` durable event 与独立 `settings-maintenance` worker。
 - protected targets：`form_data_db.form_data`、`fin_ops_platform_app.app_settings`、`fin_ops_platform_app.*_meta`、`fin_ops_platform_app.import_file_metadata`。
 - 允许流转：
-  - admin 输入确认密码后创建 job。
+  - admin 输入确认密码后，API 创建 job 并只把 job id、owner、action 入队；密码不进入 job/outbox。
   - 页面重进后可恢复 active running job。
   - reset OA 清理完成并可靠登记 lifecycle 后返回 `rebuild_status=pending`；下游按 OA retention cutoff 重建并复用缓存附件发票。
 - 禁止流转：
@@ -63,6 +63,7 @@
   - 删除 protected targets。
   - reset 后让旧 read model/cache 显示为 fresh。
   - reset 请求/job 线程同步读取 Workbench 全页 payload、OA 行投影或 OCR，并把该结果当成重建完成证明。
+  - API 启动生命周期隐式恢复/执行 reset，或 worker 自动重放未知的 interrupted destructive job。
 
 ## UI 状态
 
@@ -80,8 +81,7 @@
 - 设置事实本身不是 read model，普通 save 不产生页面 dirty scope/outbox。
 - `workbench_relation`、`search`、`no_oa_bank_batch` 只有在各自 owner 明确登记的
   reset/maintenance 合同中接收精确 refresh；Settings 不维护第二份 fan-out matrix。
-- `startup_stale_scan` 默认关闭；启用时只标记 Workbench matching 领域 scope，不刷新
-  用户可见页面 projection。
+- Workbench stale scan 只由 matching worker 启动，不属于 API 生命周期；API 初始化不得执行 reset recovery、historical reconcile 或 maintenance。
 - settings save 只等待 canonical settings transaction；data reset 单独展示 durable job
   状态，不用 read-model barrier 伪装 job 完成。
 - 失败恢复：
@@ -93,6 +93,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-08-01 | data reset 迁移到 durable settings-maintenance worker | API 不再持有线程任务；密码不持久化；worker 独立构造 reset 依赖并在完成后安全 reload API runtime | `tests.test_settings_data_reset_job`、`tests.test_runtime_worker_registry` |
 | - | 初始骨架 | 待补充 | - |
 | 2026-06-10 | 新增 OA 申请人凭据管理后端状态 | 设置页新增独立凭据事实源，admin-only，状态为 `已配置/未配置` | `tests.test_oa_applicant_credentials_service`、`tests.test_oa_applicant_credentials_api`、`tests.test_postgres_oa_applicant_credentials_repository`、`tests.test_postgres_migrations` |
 | 2026-06-10 | 落地 OA申请人凭据设置页 UI | 管理员可在设置页维护目标申请人凭据；保存走独立凭据 API；普通 settings save 不包含密码 | `web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx` |

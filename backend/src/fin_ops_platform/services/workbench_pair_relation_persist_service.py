@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import os
-from threading import Lock, Thread
+from threading import Lock
 from time import monotonic
 from typing import Any, Callable
 
@@ -17,8 +16,6 @@ class WorkbenchPairRelationPersistService:
         clear_search_cache: Callable[[], None],
         emit_action_timing: Callable[..., None],
         duration_ms: Callable[[float], int],
-        async_enabled: Callable[[], bool] | None = None,
-        thread_factory: Callable[..., Any] = Thread,
         monotonic_clock: Callable[[], float] = monotonic,
         initial_version: int = 0,
         initial_pending_case_ids: set[str] | list[str] | None = None,
@@ -28,8 +25,6 @@ class WorkbenchPairRelationPersistService:
         self._clear_search_cache = clear_search_cache
         self._emit_action_timing = emit_action_timing
         self._duration_ms = duration_ms
-        self._async_enabled = async_enabled or self.async_enabled_from_env
-        self._thread_factory = thread_factory
         self._monotonic_clock = monotonic_clock
         self._version = int(initial_version or 0)
         self._pending_case_ids: set[str] = set(self._normalize_case_ids(initial_pending_case_ids))
@@ -83,26 +78,14 @@ class WorkbenchPairRelationPersistService:
             self._pending_case_ids.update(normalized_case_ids)
             self._version += 1
             version = self._version
-        if not self._async_enabled():
-            self.persist_in_background(
-                version=version,
-                case_ids=normalized_case_ids,
-                request_id=request_id,
-                action_name=action_name,
-            )
-            return
-        self._thread_factory(
-            target=self.persist_in_background,
-            kwargs={
-                "version": version,
-                "case_ids": normalized_case_ids,
-                "request_id": request_id,
-                "action_name": action_name,
-            },
-            daemon=True,
-        ).start()
+        self.persist_pending(
+            version=version,
+            case_ids=normalized_case_ids,
+            request_id=request_id,
+            action_name=action_name,
+        )
 
-    def persist_in_background(
+    def persist_pending(
         self,
         *,
         version: int,
@@ -130,13 +113,6 @@ class WorkbenchPairRelationPersistService:
                 duration_ms=self._duration_ms(persist_started_at),
                 detail=",".join(case_ids_to_persist),
             )
-
-    @staticmethod
-    def async_enabled_from_env() -> bool:
-        override = os.getenv("FIN_OPS_WORKBENCH_PAIR_RELATION_PERSIST_ASYNC")
-        if override is None:
-            return False
-        return override.strip().lower() not in {"0", "false", "no", "off"}
 
     @staticmethod
     def _normalize_case_ids(case_ids: set[str] | list[str] | None) -> list[str]:

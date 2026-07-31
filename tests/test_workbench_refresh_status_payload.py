@@ -48,14 +48,5 @@ class WorkbenchRefreshStatusPayloadNormalizerTests(unittest.TestCase):
         self.assertEqual(payload["read_model_version"], 12)
         self.assertFalse(payload["retryable"])
 
-    def test_event_name_maps_canonical_statuses(self) -> None:
-        normalizer = WorkbenchRefreshStatusPayloadNormalizer()
-
-        self.assertEqual(normalizer.event_name({"read_model_status": "fresh"}), "workbench.read_model.completed")
-        self.assertEqual(normalizer.event_name({"read_model_status": "failed"}), "workbench.read_model.failed")
-        self.assertEqual(normalizer.event_name({"read_model_status": "stale"}), "workbench.read_model.progress")
-        self.assertEqual(normalizer.event_name({"read_model_status": "refreshing"}), "workbench.read_model.progress")
-
-
 if __name__ == "__main__":
     unittest.main()

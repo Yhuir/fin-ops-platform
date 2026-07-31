@@ -23,6 +23,8 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
 ./scripts/start-backend.sh
 ```
 
+脚本和生产 systemd 都通过 Gunicorn + `WsgiHttpAdapter` 启动，不再使用自定义 `ThreadingHTTPServer`。默认监听 `127.0.0.1:18001`；并发线程、backlog、请求体、DB pool acquire 和 graceful shutdown 上限由 `FIN_OPS_HTTP_*` / `FIN_OPS_POSTGRES_POOL_*` 配置。
+
 脚本默认加载 `.runtime/fin_ops_platform/local-postgres.env`。该文件不入库；本地需要接入服务器 PostgreSQL/MinIO/Redis 时，把 `FIN_OPS_POSTGRES_DATABASE_URL`、`FIN_OPS_REDIS_URL`、对象存储变量和可选 `FIN_OPS_SSH_TUNNEL_*` 写在这里即可。检测到 PostgreSQL URL 后，脚本会自动启用 PostgreSQL storage/read backend。非交互 shell 解析到错误 Python 时，可在该文件中设置 `FIN_OPS_PYTHON_BIN=/path/to/python3`。
 
 本地执行 schema migration 时不要复用 runtime 账号。把 migrator DSN 放在 `.runtime/fin_ops_platform/local-postgres-migrator.env`，只配置 `FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL`，然后执行：
@@ -48,7 +50,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.postgres apply
 ./scripts/check-local-runtime.sh --require-backend
 ```
 
-确认 `/health`、PostgreSQL、Redis、MinIO/S3、`/api/workbench` combined initial 和 `/api/workbench/groups` 都正常。前端首屏只读 combined initial，groups 只用于后续搜索、筛选和分页；如果本地 `8000` 上还残留旧 `backend.api.main:app` 进程，应停止它并使用 `./scripts/start-backend.sh` 默认的 `8001` 入口。
+确认 `/health`、PostgreSQL、Redis、MinIO/S3、`/api/workbench` combined initial 和 `/api/workbench/groups` 都正常。前端首屏只读 combined initial，groups 只用于后续搜索、筛选和分页；如果本地仍残留旧 `backend.api.main:app` 或 `fin_ops_platform.app.main --host` 进程，应停止它并使用 `./scripts/start-backend.sh` 的 Gunicorn 入口。
 
 ## 测试
 
@@ -81,6 +83,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.app.worker --check
 - `worker-no-oa-bank-batch`：`--enable-no-oa-bank-batch-read-model-refresh --worker-kind no-oa-bank-batch-read-model --event-type no_oa_bank_batch.read_model.refresh`
 - `worker-search-*`：`--enable-search-read-model-refresh --worker-kind search-read-model --event-type search.read_model.refresh`
 - `worker-import`：`--enable-import-job-processing --worker-kind import-job --event-type import.process.requested`
+- `worker-settings-maintenance`：`--registration settings-maintenance`，消费 `settings.data_reset.requested` 并负责显式 runtime recovery
 
 关联台读取 `workbench` active-generation read model，并由 `workbench` / `workbench-secondary` worker 收敛。银行明细、待找发票、进项使用、销项收款、OA 待付款、税金抵扣、成本统计、流水规则批量处理、批量账务、ETC 与外部往来页面直接读取 canonical facts，不配置页面 read-model worker。
 

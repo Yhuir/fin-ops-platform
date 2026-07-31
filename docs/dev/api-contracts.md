@@ -190,7 +190,7 @@
 
 ## App Health 全局状态 API
 
-`GET /api/app-health` 保留既有字段，并新增 `app_status` 作为 Global Runtime Status Plane 的用户可见投影。SSE `/api/app-health/stream` 的 `app_health` 事件必须携带同样的 `app_status` shape。
+`GET /api/app-health` 保留既有字段，并新增 `app_status` 作为 Global Runtime Status Plane 的用户可见投影。前端通过有界 polling/focus refresh 重读该 snapshot；旧 `/api/app-health/stream` 已删除并返回 `404`。
 
 `app_status` 字段：
 
@@ -1006,19 +1006,9 @@ Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`sou
 | `last_error` | 最近失败摘要；没有失败为 `null`。 |
 | `retryable` | 当前状态是否可通过后台任务重试或重新排队。 |
 
-`GET /api/workbench/events?month=all`
+`GET /api/workbench/refresh-status?month=all`
 
-SSE 事件流。支持事件：
-
-- `workbench.read_model.refresh_started`
-- `workbench.read_model.progress`
-- `workbench.read_model.page_available`
-- `workbench.read_model.summary_updated`
-- `workbench.read_model.completed`
-- `workbench.read_model.failed`
-- `heartbeat`
-
-事件 payload 与 `/api/workbench/refresh-status` 使用同一状态结构。前端收到完成或 `read_model_version`/`active_generation_id` 变化事件后，只重新读取当前查询上下文的 `summary` 与 `groups` 分页；SSE 不可用时轮询 `/api/workbench/refresh-status`。
+返回 Workbench 当前 scope 的 read model 状态。前端只使用有界 polling，并在 `read_model_version` / `active_generation_id` 变化或状态进入 terminal 时重新读取当前查询上下文的 summary/groups 分页。旧 `/api/workbench/events` SSE route 已删除并返回 `404`。
 
 ## ETC 业务批次 API
 
@@ -1057,7 +1047,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 - 未登录或登录态失效返回现有 `401 invalid_oa_session`。
 - 非管理员返回 `403 admin_only`。
 
-该接口独立于 `/api/app-health`。`/api/app-health` 仍用于全局健康状态、SSE、多标签页同步和写操作 gating。
+该接口独立于 `/api/app-health`。`/api/app-health` 仍用于全局健康状态、有界轮询、多标签页同步和写操作 gating。
 
 响应结构：
 

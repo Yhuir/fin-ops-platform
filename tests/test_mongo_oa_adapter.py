@@ -2210,7 +2210,7 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual(records[0].attachment_invoices[0]["amount"], "212.86")
         self.assertEqual(cache.entries[cache_key]["invoices"][0]["amount"], "212.86")
 
-    def test_expense_claim_reparses_stale_attachment_invoice_cache_entry(self) -> None:
+    def test_expense_claim_defers_stale_attachment_cache_to_oa_sync_worker(self) -> None:
         cache = MemoryAttachmentInvoiceCache()
         file_entry = {"fileName": "invoice-a.pdf", "filePath": "/invoice-a.pdf", "suffix": "pdf"}
         adapter = StubMongoOAAdapter(
@@ -2249,16 +2249,16 @@ class MongoOAAdapterTests(unittest.TestCase):
             {"invoices": []},
         )
 
-        with (
-            patch.object(adapter._attachment_invoice_service, "parse_files", side_effect=AssertionError("should not parse synchronously")),
-            patch.object(adapter, "_schedule_attachment_invoice_parse") as schedule_parse,
+        with patch.object(
+            adapter._attachment_invoice_service,
+            "parse_files",
+            side_effect=AssertionError("API read must not parse attachments"),
         ):
             records = adapter.list_application_records("2026-03")
 
         self.assertEqual(records[0].attachment_invoices, [])
-        schedule_parse.assert_called_once()
 
-    def test_expense_claim_schedules_background_attachment_parse_on_cache_miss(self) -> None:
+    def test_expense_claim_defers_cache_miss_to_oa_sync_worker(self) -> None:
         cache = MemoryAttachmentInvoiceCache()
         file_entry = {"fileName": "invoice-a.pdf", "filePath": "/invoice-a.pdf", "suffix": "pdf"}
         adapter = StubMongoOAAdapter(
@@ -2293,60 +2293,23 @@ class MongoOAAdapterTests(unittest.TestCase):
             attachment_invoice_cache=cache,
         )
 
-        with (
-            patch.object(adapter._attachment_invoice_service, "parse_files", side_effect=AssertionError("should not parse synchronously")),
-            patch.object(adapter, "_schedule_attachment_invoice_parse") as schedule_parse,
+        with patch.object(
+            adapter._attachment_invoice_service,
+            "parse_files",
+            side_effect=AssertionError("API read must not parse attachments"),
         ):
             records = adapter.list_application_records("2026-03")
 
         self.assertEqual(records[0].attachment_invoices, [])
-        schedule_parse.assert_called_once()
 
-    def test_background_attachment_parse_saves_cache_and_notifies_month(self) -> None:
+    def test_worker_sync_attachment_parse_saves_cache(self) -> None:
         cache = MemoryAttachmentInvoiceCache()
-        notified_months: list[str] = []
         file_entry = {"fileName": "invoice-a.pdf", "filePath": "/invoice-a.pdf", "suffix": "pdf"}
         adapter = StubMongoOAAdapter(
             form_documents={"2": [], "32": []},
             project_documents=[],
             attachment_invoice_cache=cache,
         )
-        adapter.set_attachment_invoice_cache_updated_callback(lambda months: notified_months.extend(months))
-        cache_key = adapter._attachment_invoice_cache_key(file_entry)
-
-        with patch.object(
-            adapter._attachment_invoice_service,
-            "parse_evidences",
-            return_value=[{"evidence_type": "tax_invoice", "invoice_no": "40512344", "attachment_name": "invoice-a.pdf"}],
-        ):
-            adapter._parse_attachment_invoice_files_in_background([(cache_key, file_entry)], month="2026-03")
-
-        cached_invoice = cache.entries[cache_key]["invoices"][0]
-        self.assertEqual(cached_invoice["invoice_no"], "40512344")
-        self.assertEqual(cached_invoice["attachment_name"], "invoice-a.pdf")
-        self.assertEqual(cache.entries[cache_key]["evidences"][0]["invoice_no"], "40512344")
-        self.assertEqual(cache.entries[cache_key]["artifacts"][0]["parse_status"], "parsed")
-        for field in (
-            "source_expense_row_index",
-            "source_expense_item_id",
-            "source_attachment_key",
-            "source_attachment_name",
-        ):
-            self.assertTrue(cached_invoice.get(field), field)
-        self.assertEqual(cache.entries[cache_key]["parser_version"], adapter._attachment_invoice_cache_parser_version())
-        self.assertEqual(cache.entries[cache_key]["cache_schema_version"], "2026-05-11-evidence-v1")
-        self.assertEqual(notified_months, ["2026-03"])
-
-    def test_sync_attachment_parse_saves_cache_without_background_notification(self) -> None:
-        cache = MemoryAttachmentInvoiceCache()
-        notified_months: list[str] = []
-        file_entry = {"fileName": "invoice-a.pdf", "filePath": "/invoice-a.pdf", "suffix": "pdf"}
-        adapter = StubMongoOAAdapter(
-            form_documents={"2": [], "32": []},
-            project_documents=[],
-            attachment_invoice_cache=cache,
-        )
-        adapter.set_attachment_invoice_cache_updated_callback(lambda months: notified_months.extend(months))
         cache_key = adapter._attachment_invoice_cache_key(file_entry)
 
         with patch.object(
@@ -2371,7 +2334,6 @@ class MongoOAAdapterTests(unittest.TestCase):
             self.assertTrue(cache.entries[cache_key]["invoices"][0].get(field), field)
         self.assertEqual(cache.entries[cache_key]["parser_version"], adapter._attachment_invoice_cache_parser_version())
         self.assertEqual(cache.entries[cache_key]["cache_schema_version"], "2026-05-11-evidence-v1")
-        self.assertEqual(notified_months, [])
 
     def test_fetch_projects_and_counterparties_derive_from_form_data(self) -> None:
         adapter = StubMongoOAAdapter(

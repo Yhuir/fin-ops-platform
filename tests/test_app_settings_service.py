@@ -820,7 +820,7 @@ class AppSettingsServiceTests(unittest.TestCase):
                 payload = json.loads(response.body)
                 current = app._app_settings_service.get_settings_payload()
             finally:
-                app.shutdown_background_jobs()
+                app.close()
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(payload["error"], "bank_transaction_tags_write_forbidden")
@@ -1644,7 +1644,7 @@ class AppSettingsServiceTests(unittest.TestCase):
                 get_response = app.handle_request("GET", "/api/workbench/settings")
                 get_payload = json.loads(get_response.body)
             finally:
-                app.shutdown_background_jobs()
+                app.close()
 
         self.assertEqual(update_response.status_code, 200)
         self.assertEqual(

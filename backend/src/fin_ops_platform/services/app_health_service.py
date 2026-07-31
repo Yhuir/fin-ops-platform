@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-import json
 from typing import Any
 
 from fin_ops_platform.services.app_status_dependency_registry import APP_STATUS_DEPENDENCY_REGISTRY
@@ -257,10 +256,6 @@ class AppHealthService:
                 cls._job_sort_time(job),
             ),
         )
-
-    @staticmethod
-    def serialize_sse_event(event: str, payload: dict[str, Any]) -> str:
-        return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
     @staticmethod
     def seconds_since(value: object, now: datetime | None = None) -> float:

@@ -10,7 +10,6 @@ import json
 import os
 from pathlib import Path
 import re
-from threading import Lock, Thread
 from time import monotonic
 from typing import Any, Callable, Protocol
 from urllib.parse import quote_plus
@@ -232,10 +231,6 @@ class MongoOAAdapter(OAAdapter):
     ) -> None:
         self._settings = settings
         self._attachment_invoice_cache = attachment_invoice_cache
-        self._attachment_invoice_cache_updated_callback: Callable[[list[str]], None] | None = None
-        self._attachment_invoice_parse_lock = Lock()
-        self._attachment_invoice_parse_inflight: set[str] = set()
-        self._attachment_invoice_parse_suppression_depth = 0
         self._attachment_invoice_sync_parse_depth = 0
         self._attachment_invoice_force_reparse_depth = 0
         self._client: MongoClient | None = None
@@ -259,9 +254,6 @@ class MongoOAAdapter(OAAdapter):
     def set_import_filter_provider(self, provider: Callable[[], dict[str, list[str]]] | None) -> None:
         self.set_import_settings_provider(provider)
 
-    def set_attachment_invoice_cache_updated_callback(self, callback: Callable[[list[str]], None] | None) -> None:
-        self._attachment_invoice_cache_updated_callback = callback
-
     def invalidate_records_cache(self, months: list[str] | None = None) -> None:
         normalized_months = {
             str(month).strip()
@@ -277,17 +269,6 @@ class MongoOAAdapter(OAAdapter):
             self._records_cache.pop(month, None)
         self._records_cache.pop("__all__", None)
         self._available_months_cache = None
-
-    @contextmanager
-    def suppress_attachment_invoice_background_parse(self):
-        self._attachment_invoice_parse_suppression_depth += 1
-        try:
-            yield
-        finally:
-            self._attachment_invoice_parse_suppression_depth = max(
-                0,
-                self._attachment_invoice_parse_suppression_depth - 1,
-            )
 
     @contextmanager
     def force_attachment_invoice_sync_parse(self):
@@ -1820,8 +1801,7 @@ class MongoOAAdapter(OAAdapter):
             cached_evidences.extend(parsed_pool["evidences"])
             cached_invoices.extend(parsed_pool["invoices"])
             cached_artifacts.extend(parsed_pool["artifacts"])
-        elif missing_files and self._attachment_invoice_parse_suppression_depth <= 0:
-            self._schedule_attachment_invoice_parse(missing_files, month=month)
+        elif missing_files:
             cached_artifacts.extend(
                 self._attachment_artifact_for_file(file_entry, evidences=[])
                 for _cache_key, file_entry in missing_files
@@ -2135,29 +2115,6 @@ class MongoOAAdapter(OAAdapter):
     def _is_attachment_invoice_evidence(evidence: dict[str, object]) -> bool:
         return OBJECT_IDENTITY_POLICY.is_oa_attachment_invoice_evidence(evidence)
 
-    def _schedule_attachment_invoice_parse(
-        self,
-        files: list[tuple[str, dict[str, object]]],
-        *,
-        month: str | None = None,
-    ) -> None:
-        if self._attachment_invoice_cache is None:
-            return
-        scheduled_files: list[tuple[str, dict[str, object]]] = []
-        with self._attachment_invoice_parse_lock:
-            for cache_key, file_entry in files:
-                if cache_key in self._attachment_invoice_parse_inflight:
-                    continue
-                self._attachment_invoice_parse_inflight.add(cache_key)
-                scheduled_files.append((cache_key, file_entry))
-        if not scheduled_files:
-            return
-        Thread(
-            target=self._parse_attachment_invoice_files_in_background,
-            kwargs={"files": scheduled_files, "month": month},
-            daemon=True,
-        ).start()
-
     def _parse_attachment_invoice_files_now(
         self,
         files: list[tuple[str, dict[str, object]]],
@@ -2214,60 +2171,6 @@ class MongoOAAdapter(OAAdapter):
             "invoices": parsed_invoices,
             "artifacts": parsed_artifacts,
         }
-
-    def _parse_attachment_invoice_files_in_background(
-        self,
-        files: list[tuple[str, dict[str, object]]],
-        *,
-        month: str | None = None,
-    ) -> None:
-        cache = self._attachment_invoice_cache
-        if cache is None:
-            return
-        updated = False
-        try:
-            for cache_key, file_entry in files:
-                file_result = self._parse_attachment_file_result_from_service(file_entry)
-                evidences = [
-                    self._normalize_parsed_attachment_evidence(evidence, file_entry=file_entry)
-                    for evidence in list(file_result.get("evidences") or [])
-                    if isinstance(evidence, dict)
-                ]
-                invoices = self._dedupe_attachment_invoices(self._attachment_invoices_from_evidences(evidences))
-                artifacts = [
-                    self._attachment_artifact_for_file(
-                        file_entry,
-                        evidences=evidences,
-                        parse_status=clean_string(file_result.get("parse_status") or ""),
-                        parse_error=clean_string(file_result.get("parse_error") or ""),
-                    )
-                ]
-                cache.save_oa_attachment_invoice_cache_entry(
-                    cache_key,
-                    {
-                        "cache_key": cache_key,
-                        "parser_version": self._attachment_invoice_cache_parser_version(),
-                        "cache_schema_version": ATTACHMENT_INVOICE_CACHE_SCHEMA_VERSION,
-                        "evidences": evidences,
-                        "invoices": invoices,
-                        "artifacts": artifacts,
-                        "parsed_at": datetime.now().isoformat(),
-                    },
-                )
-                updated = True
-        finally:
-            with self._attachment_invoice_parse_lock:
-                for cache_key, _file_entry in files:
-                    self._attachment_invoice_parse_inflight.discard(cache_key)
-        if not updated:
-            return
-        if month and month in self._records_cache:
-            self._records_cache.pop(month, None)
-            self._records_cache.pop("__all__", None)
-        else:
-            self._records_cache.clear()
-        if self._attachment_invoice_cache_updated_callback is not None and month:
-            self._attachment_invoice_cache_updated_callback([month])
 
     def _project_name_index(self) -> dict[str, str]:
         if self._project_name_cache is not None:

@@ -8,7 +8,8 @@ PostgreSQL 业务唯一真相的全局 owner matrix 见 `../architecture/module-
 
 ```mermaid
 flowchart LR
-  UI["React pages"] --> API["Flask routes"]
+  UI["React pages"] --> HTTP["Nginx / Gunicorn / WSGI adapter"]
+  HTTP --> API["HTTP route owners"]
   API --> Service["Application / domain services"]
   Service --> Repo["Repositories / SQL stores"]
   Repo --> PG["PostgreSQL"]
@@ -23,6 +24,8 @@ flowchart LR
 ```
 
 ## 读请求
+
+HTTP 请求先经过 `WsgiHttpAdapter` 的 body/request-ID/access-log 边界，再进入 `Application.handle_request()`。Gunicorn 提供有界线程、backlog、graceful shutdown 和 worker recycling；数据库连接池另有 acquire timeout/max waiting，不能把 HTTP 排队无限传递到 PostgreSQL。App Health 与 Workbench 状态通过有界 polling 读取；运行时不再维护长连接 SSE。
 
 当前存在两种互斥读取合同，页面必须选择其模块登记的唯一合同，不能双读或 fallback：
 

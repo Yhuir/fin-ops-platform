@@ -56,7 +56,7 @@
 - error：dashboard/API 请求失败显示错误；如果已有 dashboard payload，保留旧 payload 并提示 stale warning。
 - stale/refreshing：来自后端 app_status/domain/readiness，不由当前页面局部 loading 推导。
 - permission disabled/hidden：dashboard 仅 admin 可见；非 admin 不请求 dashboard API。App Status popover 的运维入口仅 admin 显示。
-- SSE/轮询：SSE snapshot/heartbeat 失败时可回退轮询；跨 tab BroadcastChannel 同步只传播后端 snapshot。
+- 有界轮询：App Health snapshot 按固定间隔刷新，focus/online 时立即刷新；跨 tab BroadcastChannel 只传播后端 snapshot。旧 SSE/EventSource 路径不得恢复。
 
 ## Read Model / Worker 状态
 
@@ -69,7 +69,7 @@
 - `unavailable`：runtime repository/readiness reader 不可用；blocked/red，不能空 green。
 - current-effective blocker：`scopes[]`、dirty scope 和 outbox failed/dead-letter 只有在仍代表当前 scope 未收敛时才参与 overall/domain 判定。成本统计 legacy scope `all` / 裸 `YYYY-MM`、以及已被后续同 scope `done`、fresh readiness 或同 scope active dirty scope 覆盖的 outbox 失败，只能进入历史诊断或 repair 队列，不能把 canonical fresh/refreshing 页面拖成 blocked。同一 current-effective scope 如果旧 `failed` 已被新的 `pending`/`processing` 覆盖，当前状态是 `refreshing`，旧 `last_error` 不再作为当前阻断。
 - historical diagnostics：`historical_read_model_scopes[]` 暴露历史失败、废弃 scope contract 和可审计修复对象；该字段不作为 fresh 证明，也不参与 `details`、`level` 或 `blocks_mutations` 推导。
-- refresh 触发来源：各业务模块 lifecycle event、settings reset、read model miss/stale API enqueue、worker/backfill。`startup_stale_scan` 默认关闭；启用时只标记 stale workbench matching dirty scopes，不应直接刷新用户可见 read model。
+- refresh 触发来源：各业务模块 lifecycle event、settings reset、read model miss/stale API enqueue、worker/backfill。stale scan 只能由显式启用的 `workbench-matching` worker 启动，不得在 API Application 初始化时运行。
 - 失败恢复：通过对应 runbook、runtime queue ops、readiness backfill、worker restart/drain；App Health 只展示和定位，不直接执行 repair。
 
 ## 变更记录

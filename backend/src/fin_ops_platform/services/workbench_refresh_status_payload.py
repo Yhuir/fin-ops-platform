@@ -2,7 +2,7 @@ from __future__ import annotations
 
 
 class WorkbenchRefreshStatusPayloadNormalizer:
-    """Pure Workbench refresh-status payload and SSE event-name normalizer."""
+    """Pure Workbench refresh-status payload normalizer."""
 
     def normalize(
         self,
@@ -79,14 +79,3 @@ class WorkbenchRefreshStatusPayloadNormalizer:
             "last_error": last_error,
             "retryable": bool(read_model_status in {"failed", "stale", "unavailable"}),
         }
-
-    @staticmethod
-    def event_name(payload: dict[str, object]) -> str:
-        status = str(payload.get("read_model_status") or "").strip().lower()
-        if status == "fresh":
-            return "workbench.read_model.completed"
-        if status == "failed":
-            return "workbench.read_model.failed"
-        if status in {"refreshing", "stale"}:
-            return "workbench.read_model.progress"
-        return "workbench.read_model.progress"

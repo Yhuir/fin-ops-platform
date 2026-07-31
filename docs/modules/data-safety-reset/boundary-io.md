@@ -6,7 +6,7 @@
 
 - 状态：closed
 - 当前边界可信度：high
-- 目标边界：所有数据重置通过 SettingsDataResetService 和 background job 执行，必须可审计、可阻断误用、可验证。
+- 目标边界：所有数据重置通过 `SettingsDataResetService`、durable event 和独立 `settings-maintenance` worker 执行，必须可审计、可阻断误用、可验证。
 - 当前缺口：无 final closure blocker；真实 PostgreSQL/PITR、对象存储恢复、Redis/RabbitMQ/systemd worker drain 和大库收敛仍是 staging/operations smoke 风险，不阻塞模块边界 close。
 - 旧代码删除条件：旧 reset script/API 不再绕过 service；旧内存 data reset job path 不得回归；Workbench reset 清理不得通过 broad state payload 写跨域 state。
 
@@ -14,8 +14,9 @@
 
 ### 负责
 
-- 设置页数据重置、reset job、进度查询和安全防护。
-- 重置后只触发 derived lifecycle/read model rebuild 队列；不在 reset 请求或 job 线程中查询、投影或组装下游页面 payload。
+- 设置页数据重置、durable reset job、进度查询和安全防护。
+- API 只校验 admin/当前 OA 密码并写 job + durable outbox；独立 worker 执行清理、read model/matching enqueue 和 API graceful reload。
+- 重置后只触发 derived lifecycle/read model rebuild 队列；不在 API 请求线程中执行重置、查询、投影或组装下游页面 payload。
 - 运维脚本和生产安全约束。
 
 ### 不负责
@@ -36,7 +37,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| Reset job | `BackgroundJobService` | 可追踪、可失败恢复；禁止恢复 `DataResetJob` / `_data_reset_jobs` 内存 job path。 |
+| Reset job | `BackgroundJobService` + `settings.data_reset.requested` | 可追踪、可失败恢复；密码不得进入 job/outbox；未知的 interrupted destructive reset 不自动重放。 |
 | Lifecycle event | derived data lifecycle | `settings_reset_completed` 等显式事件 |
 | Read model invalidation | runtime queue/app status | 不留下伪 fresh |
 | OA rebuild status | reset API/job caller | durable lifecycle 成功登记后返回 `pending`；只有下游 worker/read model 自己能证明 fresh，reset 不得返回同步 `completed`。 |
@@ -52,10 +53,10 @@
 
 | 层 | 文件或目录 |
 | --- | --- |
-| Backend service | `backend/src/fin_ops_platform/services/settings_data_reset_service.py`、`backend/src/fin_ops_platform/services/postgres_repositories/settings_data_reset.py` |
+| Backend service | `backend/src/fin_ops_platform/services/settings_data_reset_service.py`、`backend/src/fin_ops_platform/services/settings_data_reset_job.py`、`backend/src/fin_ops_platform/services/postgres_repositories/settings_data_reset.py` |
 | File cleanup | `backend/src/fin_ops_platform/services/postgres_state_store.py` |
-| Backend route | data reset endpoints in `backend/src/fin_ops_platform/app/server.py` |
-| Job | `BackgroundJobService`、`settings_data_reset`；旧 `DataResetJob` / `_data_reset_jobs` 内存路径已删除 |
+| Backend route | `routes_settings.py` 的 data reset job endpoints；旧同步 `POST /api/workbench/settings/data-reset` 已删除 |
+| Job/worker | `BackgroundJobService`、`settings_data_reset`、`settings-maintenance` registration；旧 executor/thread 与 `DataResetJob` / `_data_reset_jobs` 内存路径已删除 |
 | Lifecycle | `derived_data_lifecycle_service.py` |
 | Frontend | `web/src/pages/SettingsPage.tsx`、`web/src/components/workbench/SettingsDataResetDialogs.tsx` |
 | Operations | `scripts/reset_demo_db.sh`、`docs/operations/data-safety.md` |
@@ -63,8 +64,8 @@
 
 ## 依赖方向
 
-- 允许依赖：`BackgroundJobService`、derived lifecycle service、app status、state store 的显式 save/load ports。
-- 必须通过：`SettingsDataResetService` 和 `BackgroundJobService`。
+- 允许依赖：`BackgroundJobService`、`RuntimeQueueRepository`、`ReadModelRefreshGateway`、state store 的显式 save/load ports。
+- 必须通过：`SettingsDataResetService`、durable queue 和 `settings-maintenance` worker。
 - 禁止绕过：直接数据库清理；绕过权限/审计执行 reset；恢复旧内存 job；通过 broad state payload 清理 Workbench relation/read-model state；调用 Workbench 全页 builder、同步读取页面 projection 或重复登记 matching dirty scope 来伪造重建完成。
 
 ## 测试与验证

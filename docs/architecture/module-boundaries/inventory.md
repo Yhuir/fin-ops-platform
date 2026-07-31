@@ -2,13 +2,13 @@
 
 本清单记录当前仓库的模块入口和文件范围定位方式。详细边界、I/O、状态机、测试矩阵和实施记录以每个 `docs/modules/<module>/` 目录为准；每个登记模块都必须维护 `boundary-io.md`。
 
-扫描日期：2026-07-30。
+扫描日期：2026-08-01。
 
 ## 文件范围规则
 
 模块文件范围必须覆盖以下层级，不能只写前端页面或只写后端 service：
 
-- 后端 HTTP 边界：`backend/src/fin_ops_platform/app/routes_*.py` 和 `server.py` 中的依赖组装。
+- 后端 HTTP 边界：`backend/src/fin_ops_platform/app/http_adapter.py`、`application_factory.py`、`routes_*.py` 和 `server.py` 中的依赖组装。
 - 后端业务边界：`backend/src/fin_ops_platform/services/` 下的 service、facade、orchestrator、gateway、read model service。
 - 后端持久化边界：repository port、`postgres_repositories/`、SQL projection、state store、runtime queue。
 - Worker 边界：`runtime_worker_registry.py`、worker service、projection runner、tooling。
@@ -60,7 +60,7 @@
 - PostgreSQL 业务唯一真相已经登记为 `canonical-facts` 资源治理模块；它维护 owner matrix 和全局写入/读取规则，但不替代各业务 owner 模块。
 - Read model 当前以 `backend/src/fin_ops_platform/services/read_model_manifest.py` 为可执行合同，精确覆盖 `workbench`、`workbench_relation`、`search`、`no_oa_bank_batch` 四个 runtime read model，详见 `read-model-contracts.md`。
 - Worker 当前以 `backend/src/fin_ops_platform/services/runtime_worker_registry.py` 为可执行合同，read model worker/event 与 manifest 可以互相核对。
-- 后端路由已拆出多个 `routes_*.py` route owner，`server.py` 仍承担依赖组装和部分历史入口职责；后续后端重构必须继续把业务逻辑推向 service/repository 边界。
+- HTTP runtime 由 Gunicorn + `WsgiHttpAdapter` 提供有界并发、请求体、request ID、access log 和 graceful shutdown；`application_factory.py` 负责构造依赖，`server.py` 保留路由/HTTP 映射，后台任务只允许由 worker/显式 maintenance 入口启动。
 - 前端页面已按 `web/src/pages/` 与 `web/src/features/<feature>/` 组织；修改页面时必须同步核对后端 API、该页面的 direct canonical 或已登记 read-model 读取合同，以及模块测试文档。
 - `.planning/refactors/` 中的模块化记录只能作为历史分析参考；已确认的长期规则需要落到本目录和对应模块文档。
 

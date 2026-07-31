@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import sys
-import traceback
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import UTC, datetime
@@ -12,10 +10,9 @@ from decimal import Decimal
 from enum import Enum
 from hmac import compare_digest
 from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from threading import Lock, Thread
-from time import monotonic, sleep
+from threading import Lock
+from time import monotonic
 from types import SimpleNamespace
 from typing import Any, Callable, Iterable
 from urllib.parse import parse_qs, quote, unquote, urlparse
@@ -35,6 +32,7 @@ from fin_ops_platform.app.auth import (
     resolve_oa_request_session,
     tenant_id_for_session,
 )
+from fin_ops_platform.app.http_upload import MultipartBodyError, parse_multipart_body
 from fin_ops_platform.app.routes_bank_details import BankDetailsApiRoutes
 from fin_ops_platform.app.routes_bank_flow_rule_batches import BankFlowRuleBatchApiRoutes
 from fin_ops_platform.app.routes_batch_accounting import BatchAccountingApiRoutes
@@ -56,7 +54,6 @@ from fin_ops_platform.app.routes_turnover_ledger import (
     TurnoverLedgerApiRoutes,
 )
 from fin_ops_platform.app.routes_workbench import (
-    WorkbenchEventsApiRoutes,
     WorkbenchGroupDetailApiRoutes,
     WorkbenchReadApiRoutes,
     WorkbenchRowDetailApiRoutes,
@@ -151,6 +148,7 @@ from fin_ops_platform.services.etc_service import (
 )
 from fin_ops_platform.services.health_payload_compaction import compact_ready_payload
 from fin_ops_platform.services.historical_etc_repair_service import HistoricalEtcRepairService
+from fin_ops_platform.services.http_runtime_metrics import HTTP_RUNTIME_METRICS
 from fin_ops_platform.services.import_file_service import FileImportService, UploadedImportFile
 from fin_ops_platform.services.import_job_queue import ImportJob, ImportJobRepository
 from fin_ops_platform.services.import_preview_audit import ImportPreviewStaleError
@@ -328,11 +326,10 @@ from fin_ops_platform.services.search_service import SUPPORTED_STATUSES as SEARC
 from fin_ops_platform.services.search_service import SearchService
 from fin_ops_platform.services.seeds import build_demo_seed
 from fin_ops_platform.services.settings_data_reset_service import (
-    RESET_INVOICES_ACTION,
-    RESET_OA_AND_REBUILD_ACTION,
     SettingsDataResetPairSnapshotPort,
     SettingsDataResetService,
 )
+from fin_ops_platform.services.settings_data_reset_job import SETTINGS_DATA_RESET_REQUESTED_EVENT
 from fin_ops_platform.services.state_store_factory import build_state_store
 from fin_ops_platform.services.target_oa_applicant_token_provider import (
     OaLoginClient,
@@ -385,7 +382,6 @@ from fin_ops_platform.services.workbench_groups_page_cache import (
     workbench_groups_redis_ttl_seconds_from_env,
     workbench_groups_redis_version_key,
 )
-from fin_ops_platform.services.workbench_events_active_stream_registry import WorkbenchEventsActiveStreamRegistry
 from fin_ops_platform.services.workbench_query_freshness_service import (
     WorkbenchQueryFreshnessService,
 )
@@ -394,9 +390,6 @@ from fin_ops_platform.services.workbench_relation_grouping import (
     WorkbenchRelationPreviewGroupingService,
 )
 from fin_ops_platform.services.workbench_refresh_status_payload import WorkbenchRefreshStatusPayloadNormalizer
-from fin_ops_platform.services.workbench_refresh_status_payload_provider import (
-    WorkbenchRefreshStatusPayloadProvider,
-)
 from fin_ops_platform.services.workbench_write_facade import (
     WorkbenchWriteFacade,
     WorkbenchWriteRelationReadSnapshotPort,
@@ -479,8 +472,7 @@ def _truthy_env(name: str) -> bool:
 @dataclass(slots=True)
 class Response:
     status_code: int
-    body: str | bytes | Iterable[bytes]
-    stream: bool = False
+    body: str | bytes
     headers: dict[str, str] = field(
         default_factory=lambda: {
             "Content-Type": "application/json; charset=utf-8",
@@ -524,32 +516,19 @@ class Application:
         self._app_health_dashboard_cache: tuple[float, dict[str, object]] | None = None
         self._app_status_runtime_snapshot_cache_lock = Lock()
         self._app_status_runtime_snapshot_cache: tuple[float, dict[str, object]] | None = None
-        self._workbench_matching_dirty_worker_lock = Lock()
-        self._workbench_matching_dirty_worker_started = False
-        self._workbench_matching_run_lock = Lock()
-        self._workbench_matching_running_scope_months: set[str] = set()
-        self._workbench_events_active_stream_registry = WorkbenchEventsActiveStreamRegistry()
         self._seed_payload = build_demo_seed()
         if self._bootstrap_mode == "lightweight":
             return
         self._initialize_runtime_services(self._runtime_bootstrap_state())
-        if _truthy_env("FIN_OPS_STARTUP_WORKBENCH_MATCHING_STALE_SCAN_ENABLED"):
-            self._schedule_startup_workbench_matching_stale_scan()
-        if (
-            os.getenv("FIN_OPS_DISABLE_STARTUP_HISTORICAL_ETC_REPAIR", "").strip() not in {"1", "true", "yes"}
-            and self._historical_etc_repair_needs_startup_reconcile()
-        ):
-            self._maybe_reconcile_historical_etc_repair(reason="application_startup")
 
     @property
     def runtime_repositories(self) -> RuntimeRepositoryContext:
         return self._runtime_repositories
 
-    def shutdown_background_jobs(self, *, wait: bool = True) -> None:
-        background_job_service = getattr(self, "_background_job_service", None)
-        shutdown = getattr(background_job_service, "shutdown", None)
-        if callable(shutdown):
-            shutdown(wait=wait)
+    def close(self) -> None:
+        close = getattr(self._state_store, "close", None)
+        if callable(close):
+            close()
 
     @staticmethod
     def _normalize_bootstrap_mode(value: str | None) -> str:
@@ -1001,12 +980,6 @@ class Application:
         if background_job_service is None:
             background_job_service = BackgroundJobService(self._state_store)
         self._background_job_service = background_job_service
-        self._etc_reconciliation_task_service.recover_interrupted_imports(
-            active_import_session_ids=self._background_job_service.active_source_values(
-                job_type="etc_invoice_import",
-                source_key="session_id",
-            )
-        )
         self._import_processing_service = ImportProcessingService(
             file_import_service=self._file_import_service,
             tax_certified_import_service=self._tax_certified_import_service,
@@ -1403,24 +1376,6 @@ class Application:
         except Exception:
             return False
 
-    def _historical_etc_repair_needs_startup_reconcile(self) -> bool:
-        if self._state_store is None:
-            return False
-        try:
-            bundles = self._state_store.load_historical_etc_repair_bundle_metadata()
-            if not bundles:
-                return False
-            states = self._state_store.load_historical_etc_repair_states()
-        except Exception:
-            return False
-        for bundle_id in bundles:
-            state = states.get(str(bundle_id))
-            if not isinstance(state, dict):
-                return True
-            if str(state.get("status") or "").strip() not in {"ok"}:
-                return True
-        return False
-
     def _maybe_reconcile_historical_etc_repair(self, *, reason: str) -> dict[str, object] | None:
         if self._historical_etc_repair_service is None or not self._historical_etc_repair_seeded():
             return None
@@ -1565,8 +1520,6 @@ class Application:
             return response
         if method == "GET" and route_path == "/api/workbench/refresh-status":
             return self._handle_api_workbench_refresh_status(query.get("month", [None])[0])
-        if method == "GET" and route_path == "/api/workbench/events":
-            return self._handle_api_workbench_events(query.get("month", [None])[0])
         if route_path.startswith("/api/bank-details/"):
             bank_detail_response = self._bank_details_routes().route(method, route_path, query, body, headers)
             if bank_detail_response is not None:
@@ -1621,8 +1574,6 @@ class Application:
                 return turnover_ledger_response
         if method == "GET" and route_path == "/api/oa-sync/status":
             return self._handle_api_oa_sync_status()
-        if method == "GET" and route_path == "/api/app-health/stream":
-            return self._handle_api_app_health_stream(headers)
         if method == "GET" and route_path == "/api/app-health":
             return self._handle_api_app_health(headers)
         if method == "POST" and route_path == "/api/operation-barrier/status":
@@ -2260,6 +2211,7 @@ class Application:
         payload["api_performance"] = self._api_performance_recorder.summary(
             max_endpoints=api_performance_endpoint_limit,
         )
+        payload["http_runtime"] = asdict(HTTP_RUNTIME_METRICS.snapshot())
 
     def _handle_api_workbench(
         self,
@@ -3116,22 +3068,6 @@ class Application:
         status_code, payload = self._workbench_read_routes().refresh_status(month)
         return self._json_response(status_code, payload)
 
-    def _handle_api_workbench_events(self, month: str | None) -> Response:
-        status_code, body, headers = self._workbench_events_routes().events(month)
-        return Response(
-            status_code=int(status_code),
-            body=body,
-            stream=True,
-            headers=headers,
-        )
-
-    def _workbench_events_stream_registry(self) -> WorkbenchEventsActiveStreamRegistry:
-        registry = getattr(self, "_workbench_events_active_stream_registry", None)
-        if registry is None:
-            registry = WorkbenchEventsActiveStreamRegistry()
-            self._workbench_events_active_stream_registry = registry
-        return registry
-
     @staticmethod
     def _is_missing_workbench_groups_read_model_error(error: Exception) -> bool:
         message = str(error).lower()
@@ -3367,43 +3303,6 @@ class Application:
             "outbox_statuses": {},
             "worker_statuses": {},
         }
-
-    def _handle_api_app_health_stream(self, headers: dict[str, str] | None) -> Response:
-        session, error_response = self._resolve_app_health_session(headers)
-        if error_response is not None:
-            return error_response
-        assert session is not None
-
-        def event_stream() -> Iterable[str]:
-            while True:
-                yield self._app_health_service.serialize_sse_event(
-                    "heartbeat",
-                    {
-                        "generated_at": datetime.now(UTC).isoformat(),
-                        "phase": "connected",
-                    },
-                )
-                started_at = monotonic()
-                snapshot = self._build_app_health_snapshot(session, started_at=started_at)
-                heartbeat = {"generated_at": snapshot.get("generated_at")}
-                yield self._app_health_service.serialize_sse_event("app_health", snapshot)
-                yield self._app_health_service.serialize_sse_event("heartbeat", heartbeat)
-                sleep(5)
-
-        return Response(
-            status_code=int(HTTPStatus.OK),
-            body=event_stream(),
-            stream=True,
-            headers={
-                "Content-Type": "text/event-stream; charset=utf-8",
-                "Cache-Control": "no-cache, no-transform",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Headers": "Content-Type",
-                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-            },
-        )
 
     def _handle_api_operations_app_health_dashboard(self, headers: dict[str, str] | None) -> Response:
         _, admin_error = self._resolve_admin_session(headers)
@@ -3790,10 +3689,6 @@ class Application:
             payload = {}
         matching_queue = getattr(self, "_workbench_reconciliation_dirty_queue", None)
         matching_dirty_scopes = matching_queue.list_dirty_scopes() if matching_queue is not None else []
-        with self._workbench_matching_run_lock:
-            matching_running_scopes = sorted(self._workbench_matching_running_scope_months)
-        if matching_running_scopes:
-            payload["workbench_matching_running_scopes"] = matching_running_scopes
         if not matching_dirty_scopes:
             return payload
         payload["workbench_matching_dirty_scopes"] = matching_dirty_scopes
@@ -5193,24 +5088,6 @@ class Application:
             if isinstance(evidence, dict)
         ]
 
-    def start_workbench_matching_dirty_scope_worker(self, *, interval_seconds: float | None = None) -> bool:
-        _ = interval_seconds
-        return False
-
-    def _schedule_startup_workbench_matching_stale_scan(self) -> dict[str, object] | None:
-        if getattr(self, "_workbench_reconciliation_dirty_queue", None) is None:
-            return None
-        stale_months = self._workbench_reconciliation_dirty_queue.mark_stale_completed_scopes(
-            source_versions=self._workbench_matching_source_versions(),
-            reason="startup_matching_source_versions_changed",
-            debounce_seconds=0,
-            limit=1000,
-        )
-        if not stale_months:
-            return None
-        return {"queued_months": list(stale_months), "reason": "startup_matching_source_versions_changed"}
-
-
     @staticmethod
     def _normalize_oa_sync_scope_keys(scope_keys: list[str]) -> list[str]:
         normalized = {
@@ -5473,7 +5350,7 @@ class Application:
             load_json_body=self._load_json_body,
             json_response=self._json_response,
             finalize_settings_event=self._finalize_workbench_settings_event,
-            execute_data_reset=self._execute_settings_data_reset,
+            enqueue_data_reset=self._enqueue_settings_data_reset_job,
             serialize_sync_run=self._serialize_sync_run,
             serialize_data_reset_background_job=self._serialize_data_reset_background_job,
             import_job_processing_enabled=self._import_job_processing_enabled,
@@ -5484,6 +5361,24 @@ class Application:
         )
         self._settings_api_routes = routes
         return routes
+
+    def _enqueue_settings_data_reset_job(self, job: object, action: str) -> None:
+        queue = getattr(self._runtime_repositories, "queue_repository", None)
+        enqueue = getattr(queue, "enqueue", None)
+        if not callable(enqueue):
+            raise RuntimeError("Durable settings maintenance queue is unavailable.")
+        job_id = str(getattr(job, "job_id", "") or "").strip()
+        owner_user_id = str(getattr(job, "owner_user_id", "") or "").strip()
+        enqueue(
+            event_type=SETTINGS_DATA_RESET_REQUESTED_EVENT,
+            aggregate_type="settings_data_reset",
+            aggregate_id=job_id,
+            scope_type="settings",
+            scope_key=action,
+            dedupe_key=f"settings-data-reset:{job_id}",
+            priority="urgent",
+            payload={"job_id": job_id, "owner_user_id": owner_user_id, "action": action},
+        )
 
     def _input_invoice_usage_oa_reverse_service(self) -> InputInvoiceUsageOaReverseService:
         service = getattr(self, "_input_invoice_usage_oa_reverse_service_instance", None)
@@ -6200,75 +6095,6 @@ class Application:
             "affected_scope_keys": target_scope_keys,
         }
 
-    def _execute_settings_data_reset(
-        self,
-        action: str,
-        progress: Callable[[str, str, int], None] | None = None,
-    ) -> dict[str, object]:
-        if progress is not None:
-            progress("clear", "正在清理 app 内部状态。", 5)
-        service_progress_end = 15 if action == RESET_OA_AND_REBUILD_ACTION else 80
-
-        def service_progress(phase: str, message: str, current: int, total: int) -> None:
-            if progress is None:
-                return
-            safe_total = max(int(total), 1)
-            safe_current = max(0, min(int(current), safe_total))
-            percent = 5 + round((safe_current / safe_total) * (service_progress_end - 5))
-            progress(phase, message, percent)
-
-        try:
-            result = self._settings_data_reset_service.execute(action, progress_callback=service_progress)
-        except ValueError:
-            raise
-        if progress is not None:
-            reload_percent = 15 if action == RESET_OA_AND_REBUILD_ACTION else 90
-            progress("reload", "正在重新载入运行时服务。", reload_percent)
-        self._reload_runtime_services()
-        lifecycle_summary = self._execute_explicit_maintenance_lifecycle(
-            "settings_reset_completed",
-            include_all=True,
-            metadata={"action": action},
-        )
-        if action == RESET_OA_AND_REBUILD_ACTION:
-            workbench_lifecycle_errors = [
-                error
-                for error in list(lifecycle_summary.get("errors") or [])
-                if isinstance(error, dict)
-                and str(error.get("domain") or "")
-                == "workbench_matching_dirty_scopes"
-            ]
-            if workbench_lifecycle_errors:
-                result.status = "partial"
-                result.rebuild_status = "failed"
-                result.message = "已清空 OA 工作台人工状态并保留 OA 附件发票解析结果，但关联台后台重建入队失败。"
-            else:
-                result.rebuild_status = "pending"
-                result.message = "已清空 OA 相关工作台人工状态并保留 OA 附件发票解析结果，关联台重建已进入后台队列。"
-            if progress is not None:
-                progress("rebuild", result.message, 95)
-        if action in {RESET_INVOICES_ACTION, RESET_OA_AND_REBUILD_ACTION}:
-            repair_payload = None
-            if progress is not None:
-                progress("historical_etc_repair", "正在检查历史 ETC 批次恢复状态。", 98)
-            try:
-                repair_payload = self._maybe_reconcile_historical_etc_repair(
-                    reason=f"settings_data_reset:{action}",
-                )
-            except Exception as exc:
-                result.status = "partial"
-                result.message = f"{result.message} 历史 ETC 自动恢复失败：{exc}"
-            if repair_payload is not None:
-                payload_status = str(repair_payload.get("status") or "")
-                if payload_status == "attention":
-                    result.status = "partial"
-                    result.message = f"{result.message} 历史 ETC 批次需要确认或等待前置数据。"
-        if progress is not None:
-            progress("complete", "数据重置已完成。", 100)
-        payload = result.to_payload()
-        payload["derived_data_lifecycle"] = lifecycle_summary
-        return payload
-
     @staticmethod
     def _serialize_data_reset_background_job(job) -> dict[str, object]:
         result = dict(job.result_summary) if isinstance(job.result_summary, dict) else {}
@@ -6300,31 +6126,6 @@ class Application:
             result.setdefault("job_id", job.job_id)
             payload["result"] = result
         return payload
-
-    def _parse_oa_attachment_invoices_for_reset_rebuild(
-        self,
-        *,
-        progress: Callable[[str, str, int], None] | None = None,
-    ) -> None:
-        adapter = self._workbench_query_service._oa_adapter
-        parse_attachment_invoices_for_months = getattr(adapter, "parse_attachment_invoices_for_months", None)
-        if not callable(parse_attachment_invoices_for_months):
-            return
-        cutoff_date = self._parse_oa_retention_date(self._app_settings_service.get_oa_retention_cutoff_date())
-        if cutoff_date is None:
-            months = self._workbench_query_service.list_available_months()
-        else:
-            months = self._retained_oa_months_for_all_scope(cutoff_date)
-        if not months:
-            return
-        total_months = len(months)
-        for index, month in enumerate(months, start=1):
-            if progress is not None:
-                percent = 20 + int(((index - 1) / total_months) * 70)
-                progress("parse_oa_attachments", f"正在解析 OA 附件发票（{index}/{total_months}）：{month}", percent)
-            parse_attachment_invoices_for_months([month])
-        if progress is not None:
-            progress("parse_oa_attachments", f"OA 附件发票解析完成（{total_months}/{total_months}）。", 90)
 
     def _handle_api_workbench_row_detail(
         self,
@@ -6459,45 +6260,12 @@ class Application:
     def _build_workbench_read_api_routes(self) -> WorkbenchReadApiRoutes:
         return WorkbenchReadApiRoutes(query_facade_provider=self._workbench_query_facade)
 
-    def _workbench_events_routes(self) -> WorkbenchEventsApiRoutes:
-        routes = getattr(self, "_workbench_events_api_routes", None)
-        if routes is None:
-            routes = self._build_workbench_events_api_routes()
-            self._workbench_events_api_routes = routes
-        return routes
-
-    def _build_workbench_events_api_routes(self) -> WorkbenchEventsApiRoutes:
-        stream_registry = self._workbench_events_stream_registry()
-        status_payload_normalizer = self._workbench_refresh_status_payload_normalizer()
-        status_payload_provider = self._workbench_refresh_status_payload_provider()
-        return WorkbenchEventsApiRoutes(
-            scope_key_for_month=self._workbench_read_model_scope_key,
-            status_payload_for_scope=status_payload_provider.payload_for_scope,
-            event_name_for_payload=status_payload_normalizer.event_name,
-            serialize_sse_event=self._app_health_service.serialize_sse_event,
-            mark_stream_started=stream_registry.mark_started,
-            mark_stream_closed=stream_registry.mark_closed,
-            sleep_seconds=sleep,
-        )
-
     def _workbench_refresh_status_payload_normalizer(self) -> WorkbenchRefreshStatusPayloadNormalizer:
         normalizer = getattr(self, "_workbench_refresh_status_payload_normalizer_instance", None)
         if normalizer is None:
             normalizer = WorkbenchRefreshStatusPayloadNormalizer()
             self._workbench_refresh_status_payload_normalizer_instance = normalizer
         return normalizer
-
-    def _workbench_refresh_status_payload_provider(self) -> WorkbenchRefreshStatusPayloadProvider:
-        provider = getattr(self, "_workbench_refresh_status_payload_provider_instance", None)
-        if provider is None:
-            source_freshness = self._workbench_query_freshness_service()
-            provider = WorkbenchRefreshStatusPayloadProvider(
-                repository_provider=lambda: getattr(self, "_workbench_sql_read_repository", None),
-                source_freshness=source_freshness.apply,
-                normalizer=self._workbench_refresh_status_payload_normalizer(),
-            )
-            self._workbench_refresh_status_payload_provider_instance = provider
-        return provider
 
     def _workbench_group_detail_routes(self) -> WorkbenchGroupDetailApiRoutes:
         routes = getattr(self, "_workbench_group_detail_api_routes", None)
@@ -8516,71 +8284,25 @@ class Application:
             affected_months=normalized_months,
         )
 
-        def run_workbench_matching(running_job):
-            self._background_job_service.update_progress(
-                running_job.job_id,
-                phase="workbench_matching",
-                message=f"正在生成正式配对关系：{', '.join(normalized_months)}。",
-                current=0,
-                total=len(normalized_months),
-                result_summary={
-                    "processed_months": [],
-                    "affected_months": normalized_months,
-                    "planned_relation_count": 0,
-                    "created_relation_count": 0,
-                },
-            )
-
-            def progress_callback(progress_summary: dict[str, object]) -> None:
-                processed_months = list(progress_summary.get("processed_months") or [])
-                current_month = str(progress_summary.get("current_month") or "").strip()
-                self._background_job_service.update_progress(
-                    running_job.job_id,
-                    phase="workbench_matching",
-                    message=f"正在生成正式配对关系：{current_month or ', '.join(normalized_months)}。",
-                    current=len(processed_months),
-                    total=len(normalized_months),
-                    result_summary={
-                        **progress_summary,
-                        "affected_months": normalized_months,
-                    },
-                )
-
+        try:
             summary = self._schedule_or_run_workbench_auto_matching_for_scopes(
                 normalized_months,
                 reason=reason,
-                request_id=f"workbench-match-job-{running_job.job_id}",
-                progress_callback=progress_callback,
+                request_id=f"workbench-match-job-{job.job_id}",
             ) or {}
-            processed_months = (
-                list(summary.get("processed_months") or [])
-                if summary.get("queued_months")
-                else list(summary.get("processed_months") or normalized_months)
-            )
-            queued_months = list(summary.get("queued_months") or [])
-            result_summary = {
+        except Exception as exc:
+            self._background_job_service.fail_job(job.job_id, "关联台匹配排队失败。", str(exc))
+            raise
+        queued_months = list(summary.get("queued_months") or [])
+        return self._background_job_service.succeed_job(
+            job.job_id,
+            f"关联台匹配已排队：{', '.join(queued_months)}。",
+            {
                 **summary,
-                "processed_months": processed_months,
+                "processed_months": [],
                 "affected_months": normalized_months,
-            }
-            completion_message = (
-                f"关联台匹配已排队：{', '.join(queued_months)}。"
-                if queued_months
-                else f"关联台正式配对已完成：{', '.join(normalized_months)}。"
-            )
-            self._background_job_service.update_progress(
-                running_job.job_id,
-                phase="workbench_matching",
-                message=completion_message,
-                current=0 if queued_months else len(normalized_months),
-                total=len(normalized_months),
-                result_summary=result_summary,
-            )
-            self._persist_state()
-            return result_summary
-
-        self._background_job_service.run_job(job, run_workbench_matching)
-        return job
+            },
+        )
 
     def _run_workbench_auto_matching_for_scopes(
         self,
@@ -8771,31 +8493,6 @@ class Application:
         )
         self._sync_workbench_pair_relation_persist_compat_state(service)
 
-    @staticmethod
-    def _workbench_pair_relation_persist_async_enabled() -> bool:
-        return WorkbenchPairRelationPersistService.async_enabled_from_env()
-
-    def _persist_workbench_pair_relations_in_background(
-        self,
-        *,
-        version: int,
-        case_ids: list[str],
-        request_id: str | None = None,
-        action_name: str | None = None,
-    ) -> None:
-        service = self._workbench_pair_relation_persist_service()
-        service.force_state(
-            version=getattr(self, "_workbench_pair_relation_persist_version", 0),
-            pending_case_ids=getattr(self, "_pending_workbench_pair_relation_case_ids", set()),
-        )
-        service.persist_in_background(
-            version=version,
-            case_ids=case_ids,
-            request_id=request_id,
-            action_name=action_name,
-        )
-        self._sync_workbench_pair_relation_persist_compat_state(service)
-
     def _workbench_pair_relation_persist_service(self) -> WorkbenchPairRelationPersistService:
         service = getattr(self, "_workbench_pair_relation_persist_service_instance", None)
         if service is None:
@@ -8805,8 +8502,6 @@ class Application:
                 clear_search_cache=lambda: self._search_service.clear_cache(),
                 emit_action_timing=lambda **kwargs: self._emit_workbench_action_timing(**kwargs),
                 duration_ms=self._duration_ms,
-                async_enabled=self._workbench_pair_relation_persist_async_enabled,
-                thread_factory=lambda **kwargs: Thread(**kwargs),
                 initial_version=getattr(self, "_workbench_pair_relation_persist_version", 0),
                 initial_pending_case_ids=getattr(self, "_pending_workbench_pair_relation_case_ids", set()),
             )
@@ -10227,67 +9922,16 @@ class Application:
         if isinstance(body, str):
             body = body.encode("utf-8")
         content_type = headers.get("Content-Type") or headers.get("content-type") or ""
-        if "multipart/form-data" not in content_type:
+        try:
+            fields, files = parse_multipart_body(body, content_type)
+        except MultipartBodyError as exc:
             return {}, [], Response(
-                status_code=int(HTTPStatus.BAD_REQUEST),
+                status_code=exc.status_code,
                 body=json.dumps(
-                    {
-                        "error": "invalid_multipart_body",
-                        "message": "Content-Type must be multipart/form-data.",
-                    },
+                    {"error": exc.error, "message": exc.message},
                     ensure_ascii=False,
                 ),
             )
-        boundary_marker = "boundary="
-        if boundary_marker not in content_type:
-            return {}, [], Response(
-                status_code=int(HTTPStatus.BAD_REQUEST),
-                body=json.dumps(
-                    {"error": "invalid_multipart_body", "message": "Multipart boundary is missing."},
-                    ensure_ascii=False,
-                ),
-            )
-        boundary = content_type.split(boundary_marker, 1)[1].strip().strip('"')
-        delimiter = f"--{boundary}".encode("utf-8")
-        fields: dict[str, list[str]] = {}
-        files: list[UploadedImportFile] = []
-        for raw_part in body.split(delimiter):
-            part = raw_part
-            if part.startswith(b"\r\n"):
-                part = part[2:]
-            if part.endswith(b"--\r\n"):
-                part = part[:-4]
-            elif part.endswith(b"--"):
-                part = part[:-2]
-            elif part.endswith(b"\r\n"):
-                part = part[:-2]
-            if not part:
-                continue
-            header_blob, separator, content = part.partition(b"\r\n\r\n")
-            if not separator:
-                continue
-            header_lines = header_blob.decode("utf-8").split("\r\n")
-            header_map: dict[str, str] = {}
-            for header_line in header_lines:
-                if ":" not in header_line:
-                    continue
-                key, value = header_line.split(":", 1)
-                header_map[key.strip().lower()] = value.strip()
-            disposition = header_map.get("content-disposition", "")
-            name_match = None
-            filename_match = None
-            for token in disposition.split(";"):
-                token = token.strip()
-                if token.startswith("name="):
-                    name_match = token.split("=", 1)[1].strip('"')
-                elif token.startswith("filename="):
-                    filename_match = token.split("=", 1)[1].strip('"')
-            if not name_match:
-                continue
-            if filename_match is not None:
-                files.append(UploadedImportFile(file_name=filename_match, content=content))
-            else:
-                fields.setdefault(name_match, []).append(content.decode("utf-8").strip())
         return fields, files, None
 
     @staticmethod
@@ -10345,85 +9989,3 @@ def build_application(*, data_dir: Path | None = None, bootstrap_mode: str | Non
 
 def _operation_text(value: object) -> str:
     return str(value or "").strip()
-
-def run_http_server(host: str, port: int, app: Application | None = None) -> None:
-    application = app or build_application()
-    handler_factory = _build_handler_factory(application)
-    server = ThreadingHTTPServer((host, port), handler_factory)
-    print(f"Serving fin-ops-platform foundation API on http://{host}:{port}")
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.server_close()
-
-def _build_handler_factory(app: Application) -> Callable[..., BaseHTTPRequestHandler]:
-    class RequestHandler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:  # noqa: N802
-            self._dispatch("GET")
-
-        def do_POST(self) -> None:  # noqa: N802
-            self._dispatch("POST")
-
-        def do_PATCH(self) -> None:  # noqa: N802
-            self._dispatch("PATCH")
-
-        def do_PUT(self) -> None:  # noqa: N802
-            self._dispatch("PUT")
-
-        def do_DELETE(self) -> None:  # noqa: N802
-            self._dispatch("DELETE")
-
-        def do_OPTIONS(self) -> None:  # noqa: N802
-            self._dispatch("OPTIONS")
-
-        def _dispatch(self, method: str) -> None:
-            body: bytes | None = None
-            if method in {"POST", "PUT", "PATCH", "DELETE"}:
-                content_length = int(self.headers.get("Content-Length", "0"))
-                body = self.rfile.read(content_length) if content_length > 0 else None
-            try:
-                response = app.handle_request(method, self.path, body, dict(self.headers.items()))
-            except Exception as error:  # pragma: no cover - exercised through deployed HTTP server
-                request_id = uuid4().hex[:12]
-                print(
-                    f"[fin-ops-api] unhandled request error request_id={request_id} method={method} path={self.path}: {error}",
-                    file=sys.stderr,
-                )
-                traceback.print_exc()
-                response = Response(
-                    status_code=int(HTTPStatus.INTERNAL_SERVER_ERROR),
-                    body=json.dumps(
-                        {
-                            "error": "internal_server_error",
-                            "message": "接口处理失败，请联系管理员查看后端日志。",
-                            "requestId": request_id,
-                        },
-                        ensure_ascii=False,
-                    ),
-                )
-            try:
-                self.send_response(response.status_code)
-                for key, value in response.headers.items():
-                    self.send_header(key, value)
-                if response.stream:
-                    self.end_headers()
-                    for chunk in response.body:
-                        encoded_chunk = chunk.encode("utf-8") if isinstance(chunk, str) else chunk
-                        if not encoded_chunk:
-                            continue
-                        self.wfile.write(encoded_chunk)
-                        self.wfile.flush()
-                    return
-                encoded = response.body.encode("utf-8") if isinstance(response.body, str) else response.body
-                self.send_header("Content-Length", str(len(encoded)))
-                self.end_headers()
-                self.wfile.write(encoded)
-            except (BrokenPipeError, ConnectionResetError):
-                return
-
-        def log_message(self, format: str, *args: object) -> None:
-            return
-
-    return RequestHandler

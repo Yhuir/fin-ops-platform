@@ -10,7 +10,6 @@ import {
   mapAppHealthBackgroundJobsSource,
   mapAppHealthWorkbenchSource,
   mapOaSyncSource,
-  subscribeAppHealth,
 } from "../features/appHealth/api";
 import {
   createAppHealthBroadcast,
@@ -279,7 +278,6 @@ export function AppHealthStatusProvider({ children }: { children: ReactNode }) {
   const [fallbackOaSync, setFallbackOaSync] = useState<ApiOaSyncStatus | null>(null);
   const [remoteSessionSource, setRemoteSessionSource] = useState<AppHealthSessionSource | null>(null);
   const [failureCount, setFailureCount] = useState(0);
-  const [sseUnavailable, setSseUnavailable] = useState(false);
   const broadcastRef = useRef<AppHealthBroadcast | null>(null);
   const latestSnapshotGeneratedAtRef = useRef<string | null>(null);
 
@@ -328,7 +326,6 @@ export function AppHealthStatusProvider({ children }: { children: ReactNode }) {
       setFallbackOaSync(null);
       setRemoteSessionSource(null);
       setFailureCount(0);
-      setSseUnavailable(false);
       latestSnapshotGeneratedAtRef.current = null;
       return undefined;
     }
@@ -336,7 +333,6 @@ export function AppHealthStatusProvider({ children }: { children: ReactNode }) {
     let mounted = true;
     let timerId: number | null = null;
     let controller: AbortController | null = null;
-    let sseSubscription: { close: () => void } | null = null;
 
     const clearTimer = () => {
       if (timerId !== null) {
@@ -386,32 +382,10 @@ export function AppHealthStatusProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    if (!sseUnavailable) {
-      sseSubscription = subscribeAppHealth(
-        (payload) => {
-          if (mounted) {
-            applyAppHealthSnapshot(payload);
-          }
-        },
-        () => {
-          if (!mounted) {
-            return;
-          }
-          sseSubscription?.close();
-          sseSubscription = null;
-          setSseUnavailable(true);
-        },
-      );
-    }
-
-    if (!sseSubscription) {
-      void poll();
-    }
+    void poll();
 
     const handleFocus = () => {
-      if (!sseSubscription) {
-        void poll();
-      }
+      void poll();
     };
     window.addEventListener("focus", handleFocus);
 
@@ -419,10 +393,9 @@ export function AppHealthStatusProvider({ children }: { children: ReactNode }) {
       mounted = false;
       clearTimer();
       controller?.abort();
-      sseSubscription?.close();
       window.removeEventListener("focus", handleFocus);
     };
-  }, [applyAppHealthSnapshot, session.status, sseUnavailable]);
+  }, [applyAppHealthSnapshot, session.status]);
 
   const value = useMemo<AppHealthStatus>(() => {
     const appStatus = mapAppStatusOverview(apiPayload?.app_status);

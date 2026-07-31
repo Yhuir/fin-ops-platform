@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -382,40 +381,8 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(queue.mark_calls, [])
 
-    def test_http_server_does_not_start_workbench_dirty_worker_by_default(self) -> None:
-        class FakeServer:
-            def __init__(self, address, handler_factory) -> None:
-                self.address = address
-                self.handler_factory = handler_factory
-
-            def serve_forever(self) -> None:
-                raise KeyboardInterrupt()
-
-            def server_close(self) -> None:
-                pass
-
-        class FakeApplication:
-            def __init__(self) -> None:
-                self.workbench_dirty_started = False
-
-            def start_workbench_matching_dirty_scope_worker(self) -> bool:
-                self.workbench_dirty_started = True
-                return True
-
-        app = FakeApplication()
-        env = {
-            key: value
-            for key, value in os.environ.items()
-            if key
-            not in {
-                "FIN_OPS_WORKBENCH_MATCHING_DIRTY_WORKER_ENABLED",
-            }
-        }
-        env["FIN_OPS_OA_POLLING_ENABLED"] = "1"
-        with patch.dict(os.environ, env, clear=True), patch.object(server_module, "ThreadingHTTPServer", FakeServer):
-            server_module.run_http_server("127.0.0.1", 0, app)
-
-        self.assertFalse(app.workbench_dirty_started)
+    def test_api_runtime_has_no_in_process_matching_worker(self) -> None:
+        self.assertFalse(hasattr(server_module.Application, "start_workbench_matching_dirty_scope_worker"))
 
     def test_oa_invoice_offset_settings_change_marks_all_available_months_dirty(self) -> None:
         app = build_application()
@@ -453,58 +420,14 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(queue.mark_calls, [])
 
-    def test_startup_stale_scan_is_disabled_during_application_startup_by_default(self) -> None:
-        with patch.object(
-            server_module.Application,
-            "_schedule_startup_workbench_matching_stale_scan",
-            autospec=True,
-        ) as scan:
-            with patch.dict(os.environ, {"FIN_OPS_STARTUP_WORKBENCH_MATCHING_STALE_SCAN_ENABLED": "0"}):
-                build_application()
+    def test_stale_scan_is_owned_only_by_matching_worker_factory(self) -> None:
+        worker_source = Path(
+            "backend/src/fin_ops_platform/services/runtime_worker_handlers.py"
+        ).read_text(encoding="utf-8")
+        server_source = Path("backend/src/fin_ops_platform/app/server.py").read_text(encoding="utf-8")
 
-        scan.assert_not_called()
-
-    def test_startup_stale_scan_can_be_enabled_during_application_startup(self) -> None:
-        with patch.object(
-            server_module.Application,
-            "_schedule_startup_workbench_matching_stale_scan",
-            autospec=True,
-        ) as scan:
-            with patch.dict(os.environ, {"FIN_OPS_STARTUP_WORKBENCH_MATCHING_STALE_SCAN_ENABLED": "1"}):
-                build_application()
-
-        scan.assert_called_once()
-
-    def test_startup_stale_scan_requeues_only_stale_completed_durable_scopes(self) -> None:
-        app = build_application()
-        queue = RecordingDirtyQueue(stale_months=["2026-05"])
-        app._workbench_reconciliation_dirty_queue = queue
-
-        summary = app._schedule_startup_workbench_matching_stale_scan()
-
-        self.assertEqual(
-            queue.stale_scan_calls,
-            [
-                {
-                    "source_versions": app._workbench_matching_source_versions(),
-                    "reason": "startup_matching_source_versions_changed",
-                    "debounce_seconds": 0,
-                    "limit": 1000,
-                }
-            ],
-        )
-        self.assertEqual(
-            summary,
-            {"queued_months": ["2026-05"], "reason": "startup_matching_source_versions_changed"},
-        )
-
-    def test_startup_stale_scan_is_noop_when_durable_queue_has_no_stale_completed_scope(self) -> None:
-        app = build_application()
-        queue = RecordingDirtyQueue()
-        app._workbench_reconciliation_dirty_queue = queue
-
-        self.assertIsNone(app._schedule_startup_workbench_matching_stale_scan())
-        self.assertEqual(len(queue.stale_scan_calls), 1)
+        self.assertIn("worker_startup_matching_source_versions_changed", worker_source)
+        self.assertNotIn("FIN_OPS_STARTUP_WORKBENCH_MATCHING_STALE_SCAN_ENABLED", server_source)
 
     def test_worker_cli_exposes_workbench_matching_dirty_queue_options(self) -> None:
         args = build_parser().parse_args(

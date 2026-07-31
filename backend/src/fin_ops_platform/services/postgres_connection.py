@@ -23,6 +23,9 @@ class PostgresSettings:
     statement_timeout_ms: int = 10_000
     pool_min_size: int = 1
     pool_max_size: int = 10
+    pool_acquire_timeout_seconds: int = 2
+    pool_max_waiting: int = 32
+    pool_name: str = "fin-ops"
     pool_enabled: bool = True
 
     @classmethod
@@ -38,6 +41,12 @@ class PostgresSettings:
             statement_timeout_ms=_positive_int_from_env("FIN_OPS_POSTGRES_STATEMENT_TIMEOUT_MS", 10_000),
             pool_min_size=_positive_int_from_env("FIN_OPS_POSTGRES_POOL_MIN_SIZE", 1),
             pool_max_size=_positive_int_from_env("FIN_OPS_POSTGRES_POOL_MAX_SIZE", 10),
+            pool_acquire_timeout_seconds=_positive_int_from_env(
+                "FIN_OPS_POSTGRES_POOL_ACQUIRE_TIMEOUT_SECONDS",
+                2,
+            ),
+            pool_max_waiting=_positive_int_from_env("FIN_OPS_POSTGRES_POOL_MAX_WAITING", 32),
+            pool_name=(os.environ.get("FIN_OPS_POSTGRES_POOL_NAME") or "fin-ops").strip() or "fin-ops",
             pool_enabled=(os.environ.get("FIN_OPS_POSTGRES_POOL_ENABLED") or "1").strip().lower()
             not in {"0", "false", "no", "off"},
         )
@@ -51,6 +60,11 @@ class PostgresSettings:
         default_statement_timeout_ms = _positive_int_from_env("FIN_OPS_POSTGRES_STATEMENT_TIMEOUT_MS", 10_000)
         default_pool_min_size = _positive_int_from_env("FIN_OPS_POSTGRES_POOL_MIN_SIZE", 1)
         default_pool_max_size = _positive_int_from_env("FIN_OPS_POSTGRES_POOL_MAX_SIZE", 10)
+        default_pool_acquire_timeout_seconds = _positive_int_from_env(
+            "FIN_OPS_POSTGRES_POOL_ACQUIRE_TIMEOUT_SECONDS",
+            2,
+        )
+        default_pool_max_waiting = _positive_int_from_env("FIN_OPS_POSTGRES_POOL_MAX_WAITING", 32)
         return cls(
             database_url=database_url,
             connect_timeout_seconds=_positive_int_from_env(
@@ -63,6 +77,16 @@ class PostgresSettings:
             ),
             pool_min_size=_positive_int_from_env("FIN_OPS_POSTGRES_READ_POOL_MIN_SIZE", default_pool_min_size),
             pool_max_size=_positive_int_from_env("FIN_OPS_POSTGRES_READ_POOL_MAX_SIZE", default_pool_max_size),
+            pool_acquire_timeout_seconds=_positive_int_from_env(
+                "FIN_OPS_POSTGRES_READ_POOL_ACQUIRE_TIMEOUT_SECONDS",
+                default_pool_acquire_timeout_seconds,
+            ),
+            pool_max_waiting=_positive_int_from_env(
+                "FIN_OPS_POSTGRES_READ_POOL_MAX_WAITING",
+                default_pool_max_waiting,
+            ),
+            pool_name=(os.environ.get("FIN_OPS_POSTGRES_READ_POOL_NAME") or "fin-ops-read").strip()
+            or "fin-ops-read",
             pool_enabled=(os.environ.get("FIN_OPS_POSTGRES_READ_POOL_ENABLED") or os.environ.get("FIN_OPS_POSTGRES_POOL_ENABLED") or "1")
             .strip()
             .lower()
@@ -150,6 +174,9 @@ class PostgresConnection:
                     conninfo=self.settings.database_url,
                     min_size=self.settings.pool_min_size,
                     max_size=max(self.settings.pool_max_size, self.settings.pool_min_size),
+                    timeout=self.settings.pool_acquire_timeout_seconds,
+                    max_waiting=self.settings.pool_max_waiting,
+                    name=self.settings.pool_name,
                     kwargs={
                         "connect_timeout": self.settings.connect_timeout_seconds,
                         "row_factory": dict_row,
@@ -184,8 +211,26 @@ class PostgresConnection:
             with self._direct_connection() as connection:
                 yield connection
             return
-        with pool.connection() as connection:
+        with pool.connection(timeout=self.settings.pool_acquire_timeout_seconds) as connection:
             yield connection
+
+    def close(self) -> None:
+        with self._pool_lock:
+            pool = self._pool
+            self._pool = None
+        if pool is not None:
+            pool.close()
+
+    def pool_stats(self) -> dict[str, int]:
+        pool = self._pool
+        get_stats = getattr(pool, "get_stats", None)
+        if not callable(get_stats):
+            return {}
+        return {
+            str(key): int(value)
+            for key, value in dict(get_stats()).items()
+            if isinstance(value, int)
+        }
 
     def _prepare_connection(self, connection: Any) -> None:
         connection.autocommit = True
@@ -254,6 +299,7 @@ class PostgresConnection:
             "postgres_database": row.get("database") if row else None,
             "postgres_user": row.get("user") if row else None,
             "postgres_schema_version": parsed_schema_version,
+            "postgres_pool": self.pool_stats(),
         }
 
 

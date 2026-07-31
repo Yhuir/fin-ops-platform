@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import json
 import tempfile
-import time
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from threading import Event, Thread
 
 from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.services.background_job_service import BackgroundJobService
@@ -386,7 +384,7 @@ class BackgroundJobServiceTests(unittest.TestCase):
         self.assertEqual(persisted[job.job_id]["source"], {"session_id": "session-001"})
         self.assertEqual(persisted[job.job_id]["result_summary"], {"created": 1})
 
-    def test_service_start_marks_stale_running_jobs_failed(self) -> None:
+    def test_explicit_worker_recovery_marks_stale_running_jobs_failed(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = ApplicationStateStore(Path(temp_dir))
             stale_time = (datetime.now(UTC) - timedelta(minutes=10)).isoformat()
@@ -421,84 +419,12 @@ class BackgroundJobServiceTests(unittest.TestCase):
             )
 
             service = BackgroundJobService(store, stale_after_seconds=1)
+            self.assertEqual(service.recover_interrupted_jobs(), 1)
             job = service.get_job("job_stale", "user-001")
 
         self.assertEqual(job.status, "failed")
         self.assertEqual(job.message, "服务重启，任务已中断，请重新执行。")
         self.assertEqual(job.error, "interrupted_by_restart")
-
-    def test_run_job_executes_handler_and_marks_success(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            service = self._service(temp_dir)
-            job = service.create_job(
-                job_type="workbench_rebuild",
-                label="重建关联台",
-                owner_user_id="user-001",
-                total=1,
-            )
-            handler_started = Event()
-
-            def handler(running_job):
-                handler_started.set()
-                service.update_progress(running_job.job_id, phase="rebuild", message="正在重建关联台。", current=1, total=1)
-                return {"rebuilt": 1}
-
-            service.run_job(job, handler)
-            self.assertTrue(handler_started.wait(timeout=2))
-            deadline = time.monotonic() + 2
-            completed = service.get_job(job.job_id, "user-001")
-            while time.monotonic() < deadline:
-                completed = service.get_job(job.job_id, "user-001")
-                if completed.status == "succeeded":
-                    break
-                time.sleep(0.02)
-
-        self.assertEqual(completed.status, "succeeded")
-        self.assertEqual(completed.result_summary, {"rebuilt": 1})
-
-    def test_wait_for_job_completion_waits_until_runner_returns(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            service = self._service(temp_dir)
-            job = service.create_job(
-                job_type="etc_invoice_import",
-                label="导入 ETC发票",
-                owner_user_id="user-001",
-            )
-            terminal_written = Event()
-            release_handler = Event()
-            waiter_finished = Event()
-            wait_errors: list[BaseException] = []
-
-            def handler(running_job):
-                service.succeed_job(running_job.job_id, "ETC发票导入完成。")
-                terminal_written.set()
-                if not release_handler.wait(timeout=2):
-                    raise RuntimeError("handler was not released")
-                return {"imported": 1}
-
-            service.run_job(job, handler)
-            self.assertTrue(terminal_written.wait(timeout=2))
-            self.assertEqual(service.get_job(job.job_id, "user-001").status, "succeeded")
-
-            def wait_for_completion() -> None:
-                try:
-                    service.wait_for_job_completion(job.job_id, timeout=2)
-                except BaseException as exc:  # pragma: no cover - asserted below
-                    wait_errors.append(exc)
-                finally:
-                    waiter_finished.set()
-
-            waiter = Thread(target=wait_for_completion)
-            waiter.start()
-            time.sleep(0.05)
-            self.assertFalse(waiter_finished.is_set())
-
-            release_handler.set()
-            self.assertTrue(waiter_finished.wait(timeout=2))
-            waiter.join(timeout=2)
-            service.shutdown()
-
-        self.assertEqual(wait_errors, [])
 
     def test_background_job_api_returns_and_acknowledges_jobs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

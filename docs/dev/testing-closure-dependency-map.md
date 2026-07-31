@@ -419,8 +419,8 @@
 | --- | --- | --- |
 | Frontend operations page | `web/src/pages/AppHealthOperationsPage.tsx` | admin-only、只读 dashboard、unknown 不等于 0、refresh failure 后保留旧 payload 并提示 stale |
 | Frontend global status | `web/src/components/shell/AppStatusIndicator.tsx`、`AppHealthStatusContext` | 状态必须来自全局 `app_status`；路由切换不改变 icon；admin 才显示运维入口 |
-| Frontend API mappers | `web/src/features/appHealth/api.ts`、`web/src/features/appStatus/api.ts` | malformed payload 不得默认 green；SSE/轮询/BroadcastChannel 只传播后端 snapshot |
-| HTTP routes | `server.py` `/api/app-health*`、`/api/operations/app-health-dashboard`、统一 `/api/operations/app-health/page-audit` | auth guard、SSE contract、dashboard cache、admin-only、`app_status` response shape、页面审计只读/fail-closed report shape |
+| Frontend API mappers | `web/src/features/appHealth/api.ts`、`web/src/features/appStatus/api.ts` | malformed payload 不得默认 green；有界轮询/BroadcastChannel 只传播后端 snapshot |
+| HTTP routes | `server.py` `/api/app-health*`、`/api/operations/app-health-dashboard`、统一 `/api/operations/app-health/page-audit` | auth guard、polling contract、dashboard cache、admin-only、`app_status` response shape、页面审计只读/fail-closed report shape |
 | Overview service | `AppStatusOverviewService` | green/yellow/red 优先级、readiness missing、critical failed/unavailable、worker/dependency/job/domain 映射 |
 | Runtime repository | `RuntimeMonitoringRepository` | dirty scopes/outbox/workers/readiness/RabbitMQ/API metrics 聚合；runtime unavailable 不能空 green |
 | Registries | `app_status_domain_registry.py`、`app_status_read_model_registry.py`、`app_status_job_registry.py`、`app_status_dependency_registry.py`、`runtime_worker_registry.py` | 新页面/read model/worker/job/dependency 漏同步会让全局状态误判 |
@@ -442,12 +442,12 @@
 
 关键回归保护：
 
-- `tests/test_app_health_api.py` 保护 `/api/app-health`、SSE、dashboard admin-only、进项使用审计 admin-only/只读 report、dirty scopes、jobs、dependencies、cache stale after error。
+- `tests/test_app_health_api.py` 保护 `/api/app-health` polling snapshot、dashboard admin-only、进项使用审计 admin-only/只读 report、dirty scopes、jobs、dependencies、cache stale after error。
 - `tests/test_app_status_overview_service.py` 保护 registry 一致性、状态优先级、readiness missing/failed、worker missing、runtime unavailable 和 API contract。
 - `tests/test_runtime_monitoring.py` 保护 queue backlog、failed jobs、stale dirty scopes、RabbitMQ、worker metrics 和 mismatch。
 - `tests/test_app_status_readiness_backfill.py`、`tests/test_runtime_queue_ops.py` 保护 readiness 不伪造 fresh、dead letter resolve 前置条件。
 - `tests/test_runtime_worker_registry.py`、`tests/test_deploy_runtime_examples.py` 保护 worker manifest、env examples 和 deploy runtime 配置。
-- `web/src/test/AppHealthOperationsPage.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx`、`web/src/test/AppStatusApi.test.ts`、`web/src/test/AppHealthStatusContext.test.tsx`、`web/src/test/AppHealthBroadcast.test.tsx` 保护 dashboard、global icon、mapper、SSE/轮询和跨 tab sync。
+- `web/src/test/AppHealthOperationsPage.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx`、`web/src/test/AppStatusApi.test.ts`、`web/src/test/AppHealthStatusContext.test.tsx`、`web/src/test/AppHealthBroadcast.test.tsx` 保护 dashboard、global icon、mapper、有界轮询和跨 tab sync。
 
 ## 模块细化：permissions-and-audit
 

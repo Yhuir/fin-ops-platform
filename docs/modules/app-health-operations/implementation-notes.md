@@ -1,5 +1,11 @@
 # 系统状态 实施记录
 
+## 2026-08-01 - 有界 WSGI runtime 与 polling 状态传输
+
+- 生产 API 改由 Gunicorn `gthread` + `WsgiHttpAdapter` 启动，统一限制请求体、HTTP 并发/backlog、DB pool acquire/max waiting，并输出 request ID、结构化 access/slow log 和 active/rejected 指标。
+- App Health/Workbench 统一使用有界 HTTP polling 与 focus refresh；旧 SSE routes、EventSource、stream registry、SSE smoke 和 release gate 参数已删除。
+- 当前保持单 Gunicorn worker 以保护进程内 command state 一致性；线程数和 DB pool 有明确上限，后续只有在 command state 外置后才允许横向增加 worker。
+
 ## 2026-07-30 - 发票双维度与 OA 状态展示收敛
 
 - 目标：把 AppHealth 发票 inventory 从混合来源平铺改为“按类型 / 按导入方式”两组可闭合统计，并把 OA 页面统计收敛为已完成和进行中两个状态。

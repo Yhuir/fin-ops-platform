@@ -45,12 +45,12 @@
 本模块维护全局运行状态的读侧投影和运维只读 dashboard：
 
 - `/api/app-health`：面向页面和 App Status provider 的运行健康 snapshot，包含 workbench/read model、background jobs、dependencies、alerts、`app_status`。
-- `/api/app-health/stream`：SSE snapshot/heartbeat，只负责通知 UI 更新状态，不替代 durable facts。
+- App Status provider 对 `/api/app-health` 使用有界 polling，并在 focus/online 时立即刷新；旧 `/api/app-health/stream` SSE route 已删除。
 - `/api/operations/app-health-dashboard`：admin-only 只读运维 dashboard，展示数据 inventory、导入历史、请求性能、runtime outbox/read model/worker 指标。RabbitMQ 管理接口是可选 transport 观测，不是 read model freshness 事实源；dashboard 默认不阻塞等待 RabbitMQ management API，需显式设置 `FIN_OPS_APP_HEALTH_DASHBOARD_RABBITMQ_METRICS=1` 才读取实时队列管理指标。
 - `/api/operations/app-health/page-audit?page=<page_key>`：17 页统一 admin-only 只读 Audit。普通页面只执行 registry 选定的有限 proof owner；`page=app-health-operations` 是 system owner，在一个 outer `REPEATABLE READ READ ONLY` snapshot 内执行其余 16 页 proof、App Health dashboard database inventory 和 durable runtime/registry证明。该入口只输出 `pass/issues_found`，不刷新、不修复、不写业务数据。
 - System Audit 返回 `database_system_snapshot`、`runtime_observation`、`external_evidence`。数据库面绑定 snapshot id、system audit id、17 页 revision、read model manifest 和 worker registry fingerprint；进程内 request metrics/RabbitMQ 仅为 point-in-time observation。外部面只读取已审计登记的银行/OA/发票/ETC `complete_snapshot/all` manifest，在同一 outer snapshot 内对 canonical item set、关键字段 fingerprint 和 controls 做精确双向 equality。四域全部通过才返回 `proven_as_of_external_evidence`；缺失为 unknown，撤销/过期/不一致为 fail，内部通过不能覆盖外部结论。
 - 进项使用、销项收款和待找发票的旧 AppHealth refresh routes 已删除；调用返回 `404`，不得写 runtime queue。完整性证明只走统一只读 page audit。
-- `/health` / `/health/ready`：公开或探针使用的轻量运行健康摘要；`api_performance.endpoints` 只保留 bounded 最慢 endpoint 摘要，完整 endpoint 明细由 `/metrics` 或 admin-only operations dashboard 提供。
+- `/health` / `/health/ready`：公开或探针使用的轻量运行健康摘要；除 bounded `api_performance` 外还暴露 `http_runtime` active/peak/rejection counters 与 PostgreSQL pool stats，完整 endpoint 明细由 `/metrics` 或 admin-only operations dashboard 提供。
 - App Status icon/popover：全局状态入口，只消费后端 `app_status`，不读取当前页面局部 loading；popover 必须显示 read model、worker 和 queue 的整体摘要。
 - App Status overview：由 session、background jobs、read model readiness、dirty scopes、outbox、worker heartbeat、dependencies、alerts 推导 green/yellow/red。
 - Dashboard 发票 inventory 按两个互斥维度展示：`进项发票 + 销项发票 = 发票总数`，以及 `手工导入 + OA 解析仅新增入池 = 发票总数`。统计事实源是统一发票池 `app.invoices`：类型维度按 `invoice_type`；导入方式维度的手工导入统计 `source_links[].source_type='manual_invoice_import'`，OA 解析使用带 OA 来源但不带手工导入来源的 `oa_attachment.supplementary_count`，不能使用会与手工导入重叠的 OA 总关联数。已知数量不闭合时页面显示差异，不补造“其他”分类；未知数量显示 `--`。`普通导入`、`ETC` 和 OA 附件 OCR cache 不进入该展示口径。

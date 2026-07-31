@@ -37,7 +37,6 @@ import {
   previewWorkbenchConfirmLink,
   previewWorkbenchWithdrawLink,
   saveWorkbenchSettings,
-  subscribeWorkbenchRefreshEvents,
   unignoreWorkbenchRow,
   withdrawWorkbenchLink,
   WorkbenchApiError,
@@ -1145,7 +1144,6 @@ export default function ReconciliationWorkbenchPage() {
     let isActive = true;
     let pollIntervalId: number | null = null;
     let pollController: AbortController | null = null;
-    let subscription: { close: () => void } | null = null;
 
     const pollRefreshStatus = () => {
       pollController?.abort();
@@ -1169,23 +1167,7 @@ export default function ReconciliationWorkbenchPage() {
       pollIntervalId = window.setInterval(pollRefreshStatus, WORKBENCH_REFRESH_POLL_INTERVAL_MS);
     };
 
-    subscription = subscribeWorkbenchRefreshEvents(
-      WORKBENCH_VIEW_MONTH,
-      ({ status }) => {
-        if (isActive) {
-          applyWorkbenchRefreshStatus(status);
-        }
-      },
-      () => {
-        subscription?.close();
-        subscription = null;
-        startPolling();
-      },
-    );
-
-    if (!subscription) {
-      startPolling();
-    }
+    startPolling();
 
     const handleFocus = () => {
       pollRefreshStatus();
@@ -1194,7 +1176,6 @@ export default function ReconciliationWorkbenchPage() {
 
     return () => {
       isActive = false;
-      subscription?.close();
       if (pollIntervalId !== null) {
         window.clearInterval(pollIntervalId);
       }

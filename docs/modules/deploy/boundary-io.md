@@ -1,6 +1,6 @@
 # 部署模块边界与 I/O
 
-日期：2026-07-05
+日期：2026-08-01
 
 ## 模块化状态
 
@@ -8,7 +8,7 @@
 - 当前边界可信度：high
 - 目标边界：部署模块负责发布、runtime worker/systemd/env/nginx/verify，不承载业务逻辑。
 - 当前缺口：无 P0/P1 模块化缺口；新增 read model/worker 仍必须同步 deploy examples、runtime worker manifest 和生产等价发布门禁。
-- 旧代码删除状态：`legacy-current` 覆盖式发布入口、旧单文件 `deploy/oa/fin_ops.env.example` 和 systemd 示例中的 current/backend runtime 路径已移除；import worker/dispatcher env 已移除退役的 `import.fact.changed` event，只保留 `import.process.requested`。release helper 只保留历史 `/opt/fin-ops/current` 归档/guard，不作为旧发布 I/O。
+- 旧代码删除状态：`legacy-current` 覆盖式发布入口、旧单文件 `deploy/oa/fin_ops.env.example`、自定义 `ThreadingHTTPServer` 和 systemd 示例中的 current/backend runtime 路径已移除；import worker/dispatcher env 已移除退役的 `import.fact.changed` event，只保留 `import.process.requested`。release helper 只保留历史 `/opt/fin-ops/current` 归档/guard，不作为旧发布 I/O。
 
 ## 职责边界
 
@@ -33,6 +33,7 @@
 | Runtime worker manifest | `runtime_worker_manifest.py` | 必须匹配 registry |
 | Verify command | `scripts/verify.sh` | 按 backend/web/docs/ops 分类执行 |
 | Runtime env examples | `deploy/oa/env/*.env.example` | 按 common/secrets/migrator/worker/dispatcher 拆分，禁止恢复单文件 env |
+| HTTP runtime | systemd + Gunicorn + Nginx | systemd 只启动 Gunicorn WSGI；当前单 worker/有界 gthread 保持进程内 command state 一致。Gunicorn 约束 threads/backlog/recycling/graceful timeout，Nginx 约束 client body/upstream timeout；pidfile 只写入 systemd `RuntimeDirectory`。 |
 | Controlled write smoke stdin | operator | `--apply-stdin` 第一行为 Admin Token、第二行为 approval ticket；两者均必填且不落盘。scenario 只接受固定 root-owned `0600` 标准文件，或 `finops-deploy` 持有且不可 group/world write 的 `/tmp/finops-write-e2e-*.json`；可选 preview sample count 只接受 `1..20`，默认 1，且只重复只读 preview。mutation response 显式 `outbox_event_ids: []` 是普通写零 fan-out receipt，runner 不得把它误当 receipt 缺失而强制查询 disabled-by-default durable idempotency；字段缺失时才允许走 durable receipt 查询。每个 checkpoint 必须清除上一 checkpoint 的 receipt。同一受影响页面可声明最多三个明确 scope probe，用于逐一模拟用户访问该页的 active/all 等正式 scope；`bank_oa_invoice` 的 Cost probes 必须至少包含一个 `project_scope=active` 的 Workbench-dependent semantic probe，可追加 `project_scope=all` 以收敛 System Audit，但二者都不得使用 time/bank_tag 冒充 relation proof。不得以多 scope probe 投递 sibling scope 或放宽业务 fan-out。isolation 页面仍必须恰好一个 probe。consumer assertion 只接受 typed `equals` / `contains` / `excludes`；`excludes` 只能证明已登记业务根不再含显式 test-owned row/case identity，不能解除 fixture identity gate。consumer `target_ms` 同时约束单次 fresh HTTP 和该 consumer 首次访问到 fresh/业务可见的总耗时；`operation_commit_to_visible_ms` 仅保留为观察值，不得把访问前的 zero-fan-out 审计时间算入访问 SLO。任一强制门超限都必须 fail closed |
 | Optional write smoke restore point | operator | 只在风险与成本相称时使用 `write-operation-restore-point <release> <run-id>`；明确 test-owned、幂等且自动执行 inverse/recovery 的 relation smoke 不以全库备份作为固定前置。创建命令使用既有 migrator DSN 跨 schema 只读导出，只通过 `PG*` 子进程环境传递连接字段，并以 `pg_restore --list` + SHA-256 manifest 验证；删除只能用 `write-operation-restore-point-delete <run-id> <expected-sha256>` 精确匹配固定目录、文件集合、manifest identity 和 dump checksum |
 | Request error lookup | API `requestId` | 只接受 12 位小写十六进制 ID，并从最近两小时 API journal 返回精确匹配的单行异常；不开放任意日志查询 |
@@ -92,11 +93,11 @@
 
 - 每个 checkpoint 复用现有权威工具，而不是维护第二套 SQL、worker 清单或页面审计：`runtime_worker_manifest`/systemd exact inventory、`rabbitmq_topology --apply`、`domain_contract_audit`、`RuntimeMonitoringRepository.health_summary()`、`runtime_sync_closure_gate`、隔离 PostgreSQL 可逆写探针和只读页面 canonical audit。
 - 门禁连接生产真实 PostgreSQL schema 和 RabbitMQ topology/management；RabbitMQ management 未配置、指标读取失败或 dead-letter 增量非零均 fail closed。Redis 不是本门禁事实源。
-- `runtime_sync_closure_gate` 使用三个明确 profile：`preflight` 检查当前 stable runtime readiness、worker/queue/RabbitMQ 收敛、隔离事务写入能力和只读 canonical audit；`full` 在 T+0 追加 critical read-model enqueue-to-fresh、API/health/SSE；`stability` 在 T+60/T+300 重跑读侧、性能和 runtime 收敛检查。三个 profile 都不得 confirm、withdraw 或修改任何真实业务关系。critical read-model 与 HTTP 类目标分别为 5000ms 与 1000ms。页面 shell 使用公开 origin，API/SSE 使用内部服务 origin，禁止把内部 API origin 误用于页面探针。业务合同失败不能由重试或兼容 fallback 掩盖。候选代码检查旧 stable API 时，页面完整性以候选 `PAGE_AUDIT_REGISTRY`、响应 summary 和逐页 proof 三者严格一致为准；只允许旧响应整体缺少 registry 明细，不接受部分字段、漏页、额外页面或顺序漂移。
+- `runtime_sync_closure_gate` 使用三个明确 profile：`preflight` 检查当前 stable runtime readiness、worker/queue/RabbitMQ 收敛、隔离事务写入能力和只读 canonical audit；`full` 在 T+0 追加 critical read-model enqueue-to-fresh、API/health；`stability` 在 T+60/T+300 重跑读侧、性能和 runtime 收敛检查。页面 shell 使用公开 origin，API 使用内部服务 origin；旧 SSE route/tool 已退出 gate。
 - 隔离写探针只在当前数据库连接的 `pg_temp` 临时表内执行 begin/insert/read/delete/rollback，验证真实 PostgreSQL 写事务、约束和回滚能力；它不接触 canonical facts、关系、read model、outbox 或 dirty scope。页面 canonical audit 只调用既有 admin audit API，不执行修复。
 - 登记过的 `test_owned` 可逆业务 scenario、standing approval 和 `write-operation-e2e-smoke` 只保留为显式 operator 工具，不属于自动 release gate。release activate 不读取 scenario，不接受 approval ticket，也不自动恢复或撤回任何业务关系。
 - 标准 scenario 的唯一写入口是 `finops-deploy-control write-operation-e2e-scenario-install`：输入仅接受 `/tmp/finops-write-e2e-*.json` 的 finops-deploy-owned、非链接、非 group/world-writable 文件和一个已存在 release；helper 使用该 release 的合同校验器验证后，原子安装 root-owned `0600` 文件并保留 `.previous`。输出只包含校验状态、scenario 名称/数量和内容摘要，不返回业务行内容。
-- runtime health 必须在 canonical audit 前完成收敛；`full`/`stability` 还必须在 read-model、HTTP/SSE 和隔离写探针之后采样。canonical audit 是每个 checkpoint 的最后一项只读证明，确保页面审计读取的是 terminal publish 已协调并取得干净样本后的 durable queue、dirty scope、worker 与 dead-letter 状态。
+- runtime health 必须在 canonical audit 前完成收敛；`full`/`stability` 还必须在 read-model、HTTP 和隔离写探针之后采样。canonical audit 是每个 checkpoint 的最后一项只读证明。
 - pre checkpoint 在任何切换前完成。`runtime_sync_closure_gate` 允许通过既有 repository 幂等收敛一次已经 `done` 且 publish lock 为空或过期的 `publishing` 终态，但 reconciliation 必须写入 checkpoint evidence，并在同一 checkpoint 内再取得至少一个无残留、无再次 reconciliation 的干净采样才可 PASS；持续复发按 dispatcher/状态机故障 fail closed。部署 shell 不得在 gate 外隐式清理。pre 失败必须恢复 previous release 的 deploy-control/runtime-worker helper。候选激活后 T+0 运行 `full`，T+60s/T+300s 运行 `stability`；最终 evidence 要求每个 checkpoint 的 terminal publish reconciliation 已稳定、`publishing_outbox_count=0`，并证明真实 worker、queue、read model、dead-letter 与性能持续收敛。只有最终 evidence 验证成功，发布才返回成功。
 
 ## Phase 19 受控生产命令（2026-07-12）

@@ -2,6 +2,12 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
+## 2026-08-01 - Production HTTP runtime 边界
+
+- systemd API unit 只启动 Gunicorn WSGI，使用单 worker/有界 threads、backlog、worker recycle 和 graceful timeout；Nginx 同步限制 client body 与 upstream timeout。
+- PostgreSQL API read/write pool 各有 acquire timeout、max waiting 和 pool name；HTTP overload/DB pool timeout 映射 503，避免无限线程等待十个连接。
+- pidfile 位于 systemd `RuntimeDirectory=fin-ops`，供 data reset worker 完成后受校验请求 Gunicorn reload；旧 custom server 和 SSE release gate 已退出部署链路。
+
 ## 当前决策
 
 - 生产发布入口保持 `./scripts/deploy-oa.sh`，只走 release-based 部署；`legacy-current` 覆盖式部署入口已经移除。

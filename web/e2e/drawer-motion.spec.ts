@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
+import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 
 type DrawerMotionSample = {
   elapsed: number;
@@ -149,6 +150,7 @@ test.describe("right drawer motion", () => {
     expect(await page.evaluate(() => (
       window as typeof window & { __drawerCls?: number }
     ).__drawerCls ?? 0)).toBeLessThan(0.01);
+    await expectNoUnexpectedSuccessUiErrors(page);
   });
 
   test("applies the same viewport motion to the migrated bank-flow modal", async ({ page }) => {
@@ -171,6 +173,7 @@ test.describe("right drawer motion", () => {
     await expect(drawer).toHaveCount(0);
     expect(api.calls.length).toBe(requestsBeforeClose);
     expect(api.count("PUT /api/bank-flow-rule-batches/tag-rules")).toBe(0);
+    await expectNoUnexpectedSuccessUiErrors(page);
   });
 
   test("covers the OA bank-link modal lifecycle and blocks dismissal while candidates load", async ({ page }) => {
@@ -217,6 +220,7 @@ test.describe("right drawer motion", () => {
     await expect(drawer).toHaveCount(0);
     expect(api.calls.length).toBe(requestsBeforeClose);
     expect(api.count("POST /api/oa-pending-payments/link-bank-transactions")).toBe(0);
+    await expectNoUnexpectedSuccessUiErrors(page);
   });
 
   test("applies viewport motion and safe exit state to the production persistent drawer", async ({ page }) => {
@@ -243,6 +247,7 @@ test.describe("right drawer motion", () => {
     await expect(persistentDrawer).toHaveCount(0);
     expect(api.calls.length).toBe(requestsBeforeClose);
     expect(api.count("POST /api/input-invoice-usage/oa-reverse/oa-draft")).toBe(0);
+    await expectNoUnexpectedSuccessUiErrors(page);
   });
 
   test("keeps the tax results rail mounted and inert while collapsed", async ({ page }) => {
@@ -267,6 +272,7 @@ test.describe("right drawer motion", () => {
     expect(api.calls.length).toBe(requestsBeforeExpand);
     expect(api.count("POST /api/tax-offset/plans")).toBe(0);
     expect(api.count("POST /api/tax-offset/certified-import/confirm")).toBe(0);
+    await expectNoUnexpectedSuccessUiErrors(page);
   });
 
   test("disables spatial transitions for reduced motion", async ({ page }) => {
@@ -289,5 +295,6 @@ test.describe("right drawer motion", () => {
     });
     expect(motion.durationMs).toBeLessThanOrEqual(1);
     expect(["none", "translate"]).toContain(motion.property);
+    await expectNoUnexpectedSuccessUiErrors(page);
   });
 });

@@ -611,24 +611,6 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["dependencies"]["oa_sync"]["status"], "unavailable")
         self.assertEqual(payload["alerts"]["active"][0]["kind"], "dependency_unavailable")
 
-    def test_app_health_stream_returns_sse_snapshot_and_heartbeat(self) -> None:
-        app = build_application()
-
-        response = app.handle_request("GET", "/api/app-health/stream")
-        stream = iter(response.body)
-        first_heartbeat_event = next(stream)
-        snapshot_event = next(stream)
-        second_heartbeat_event = next(stream)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.stream)
-        self.assertIn("text/event-stream", response.headers["Content-Type"])
-        self.assertIn("event: heartbeat", first_heartbeat_event)
-        self.assertIn('"phase": "connected"', first_heartbeat_event)
-        self.assertIn("event: app_health", snapshot_event)
-        self.assertIn('"status": "ok"', snapshot_event)
-        self.assertIn("event: heartbeat", second_heartbeat_event)
-
     def test_app_health_uses_existing_auth_guard_when_session_is_missing(self) -> None:
         with self._temporary_env(FIN_OPS_TEST_DEFAULT_AUTH="0"), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

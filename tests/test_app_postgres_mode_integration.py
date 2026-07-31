@@ -143,8 +143,8 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
             ),
             "confirmed",
         )
-        stale_api.shutdown_background_jobs()
-        worker_api.shutdown_background_jobs()
+        stale_api.close()
+        worker_api.close()
 
     def test_controlled_import_repair_restores_only_exact_downgraded_lifecycle(self) -> None:
         app = self._build_app()
@@ -240,7 +240,7 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
                 )
             )
         self.assertEqual(terminal_plan["lifecycle_repairs"], [])
-        app.shutdown_background_jobs()
+        app.close()
 
     def test_workbench_settings_round_trip_survives_app_rebuild(self) -> None:
         app = self._build_app()

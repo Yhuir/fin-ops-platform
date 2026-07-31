@@ -34,7 +34,7 @@ SettingsServiceProvider = Callable[[], AppSettingsService]
 SettingsDataResetServiceProvider = Callable[[], SettingsDataResetService | None]
 ServiceProvider = Callable[[], Any]
 FinalizeSettingsEvent = Callable[[dict[str, Any]], None]
-DataResetExecutor = Callable[[str, Callable[[str, str, int], None] | None], dict[str, object]]
+DataResetEnqueuer = Callable[[Any, str], None]
 
 
 class SettingsApiRoutes:
@@ -57,7 +57,7 @@ class SettingsApiRoutes:
         load_json_body: JsonBodyLoader,
         json_response: JsonResponse,
         finalize_settings_event: FinalizeSettingsEvent,
-        execute_data_reset: DataResetExecutor,
+        enqueue_data_reset: DataResetEnqueuer,
         serialize_sync_run: Callable[[object], dict[str, object]],
         serialize_data_reset_background_job: Callable[[Any], dict[str, object]],
         import_job_processing_enabled: Callable[[], bool],
@@ -80,7 +80,7 @@ class SettingsApiRoutes:
         self._load_json_body = load_json_body
         self._json_response = json_response
         self._finalize_settings_event = finalize_settings_event
-        self._execute_data_reset = execute_data_reset
+        self._enqueue_data_reset = enqueue_data_reset
         self._serialize_sync_run = serialize_sync_run
         self._serialize_data_reset_background_job = serialize_data_reset_background_job
         self._import_job_processing_enabled = import_job_processing_enabled
@@ -134,8 +134,6 @@ class SettingsApiRoutes:
         if method == "GET" and route_path.startswith("/api/workbench/settings/data-reset/jobs/"):
             job_id = unquote(route_path.rsplit("/", 1)[-1])
             return self.data_reset_job(job_id, headers)
-        if method == "POST" and route_path == "/api/workbench/settings/data-reset":
-            return self.execute_data_reset_inline(body, headers)
         return None
 
     def settings(self) -> Any:
@@ -491,17 +489,6 @@ class SettingsApiRoutes:
         settings_payload = self._app_settings_service().delete_project(normalized_project_id)
         return self._json_response(HTTPStatus.OK, {"settings": settings_payload})
 
-    def execute_data_reset_inline(self, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
-        payload, error = self._validate_data_reset_request(body, headers)
-        if error is not None:
-            return error
-        action = str(payload.get("action") or "").strip()
-        try:
-            result = self._execute_data_reset(action, None)
-        except ValueError:
-            return self._unsupported_settings_data_reset_response()
-        return self._json_response(HTTPStatus.OK, result)
-
     def create_data_reset_job(self, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
         payload, error = self._validate_data_reset_request(body, headers)
         if error is not None:
@@ -537,7 +524,20 @@ class SettingsApiRoutes:
             source={"action": action},
             affected_scopes=["settings", "workbench"],
         )
-        background_job_service.run_job(job, lambda running_job: self._run_data_reset_background_job(running_job, action))
+        try:
+            self._enqueue_data_reset(job, action)
+        except Exception as exc:
+            background_job_service.fail_job(job.job_id, "数据重置任务入队失败。", str(exc))
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "settings_data_reset_enqueue_failed",
+                    "message": "数据重置任务暂时无法入队，请稍后重试。",
+                    "job": self._serialize_data_reset_background_job(
+                        background_job_service.get_job(job.job_id, owner_user_id)
+                    ),
+                },
+            )
         return self._json_response(HTTPStatus.ACCEPTED, {"job": self._serialize_data_reset_background_job(job)})
 
     def data_reset_job(self, job_id: str, headers: dict[str, str] | None) -> Any:
@@ -558,44 +558,6 @@ class SettingsApiRoutes:
             HTTPStatus.OK,
             {"job": self._serialize_data_reset_background_job(active_job) if active_job is not None else None},
         )
-
-    def _run_data_reset_background_job(self, running_job: Any, action: str) -> dict[str, object]:
-        background_job_service = self._background_job_service()
-
-        def update(phase: str, message: str, percent: int) -> None:
-            background_job_service.update_progress(
-                running_job.job_id,
-                phase=phase,
-                message=message,
-                current=max(0, min(int(percent), 100)),
-                total=100,
-                result_summary={"action": action},
-            )
-
-        update("start", "数据重置任务已开始。", 1)
-        result = self._execute_data_reset(action, update)
-        failed = str(result.get("status") or "") == "partial" or str(result.get("rebuild_status") or "") == "failed"
-        background_job_service.update_progress(
-            running_job.job_id,
-            phase="failed" if failed else "complete",
-            message=str(result.get("message") or ("数据重置失败。" if failed else "数据重置已完成。")),
-            current=100,
-            total=100,
-            result_summary=result,
-        )
-        if failed:
-            background_job_service.fail_job(
-                running_job.job_id,
-                str(result.get("message") or "数据重置失败。"),
-                str(result.get("message") or "数据重置失败。"),
-            )
-        else:
-            background_job_service.succeed_job(
-                running_job.job_id,
-                str(result.get("message") or "数据重置已完成。"),
-                result_summary=result,
-            )
-        return result
 
     def _validate_data_reset_request(
         self,

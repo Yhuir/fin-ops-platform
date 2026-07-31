@@ -6,9 +6,6 @@ import unittest
 from contextlib import contextmanager
 from http import HTTPStatus
 from io import BytesIO
-from http.client import HTTPConnection
-from http.server import ThreadingHTTPServer
-from threading import Thread
 from unittest.mock import patch
 from decimal import Decimal
 from pathlib import Path
@@ -17,10 +14,8 @@ from types import SimpleNamespace
 from pymongo.errors import ServerSelectionTimeoutError
 from openpyxl import load_workbook
 
-from fin_ops_platform.app.server import (
-    Application,
-    _build_handler_factory,
-)
+from fin_ops_platform.app.http_adapter import WsgiHttpAdapter
+from fin_ops_platform.app.server import Application
 from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.services.bank_details_export_service import BANK_DETAIL_EXPORT_ROW_LIMIT
 from fin_ops_platform.domain.enums import BatchType
@@ -311,37 +306,40 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_id = self._create_imported_bank_transaction(app)
-            server = ThreadingHTTPServer(("127.0.0.1", 0), _build_handler_factory(app))
-            thread = Thread(target=server.serve_forever, daemon=True)
-            thread.start()
-            connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
-            try:
-                connection.request(
-                    "PATCH",
-                    "/api/bank-details/transactions/categories",
-                    body=json.dumps(
+            request_body = json.dumps(
+                {
+                    "updates": [
                         {
-                            "updates": [
-                                {
-                                    "transaction_id": transaction_id,
-                                    "category_code": "borrow_in_company_pending_repayment",
-                                    "expected_version": 0,
-                                }
-                            ]
+                            "transaction_id": transaction_id,
+                            "category_code": "borrow_in_company_pending_repayment",
+                            "expected_version": 0,
                         }
-                    ),
-                    headers={"Content-Type": "application/json"},
-                )
-                response = connection.getresponse()
-                response_body = response.read().decode("utf-8")
-            finally:
-                connection.close()
-                server.shutdown()
-                server.server_close()
-                thread.join(timeout=5)
+                    ]
+                }
+            ).encode("utf-8")
+            response_status: list[str] = []
+            response_headers: dict[str, str] = {}
 
-        self.assertEqual(response.status, 410)
-        self.assertEqual(response.getheader("Content-Type"), "application/json; charset=utf-8")
+            def start_response(status: str, headers: list[tuple[str, str]]) -> None:
+                response_status.append(status)
+                response_headers.update(headers)
+
+            response_body = b"".join(
+                WsgiHttpAdapter(app)(
+                    {
+                        "REQUEST_METHOD": "PATCH",
+                        "PATH_INFO": "/api/bank-details/transactions/categories",
+                        "QUERY_STRING": "",
+                        "CONTENT_TYPE": "application/json",
+                        "CONTENT_LENGTH": str(len(request_body)),
+                        "wsgi.input": BytesIO(request_body),
+                    },
+                    start_response,
+                )
+            ).decode("utf-8")
+
+        self.assertEqual(response_status, ["410 Gone"])
+        self.assertEqual(response_headers["Content-Type"], "application/json; charset=utf-8")
         payload = json.loads(response_body)
         self.assertEqual(payload["error"], "manual_bank_transaction_category_disabled")
 
@@ -660,7 +658,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 "GET",
                 "/api/bank-details/transactions?account_key=%E5%B7%A5%E5%95%86%E9%93%B6%E8%A1%8C%3A6386",
             )
-            app.shutdown_background_jobs()
+            app.close()
 
         self.assertEqual(linked_response.status_code, 200, linked_response.body)
         linked_payload = json.loads(linked_response.body)
@@ -844,13 +842,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
     def test_enqueued_workbench_auto_matching_only_marks_durable_scopes(self) -> None:
         app = build_application()
 
-        def run_job_inline(job, handler):
-            result = handler(job)
-            app._background_job_service.succeed_job(job.job_id, "done", result_summary=result)
-            return SimpleNamespace(done=lambda: True)
-
         with (
-            patch.object(app._background_job_service, "run_job", side_effect=run_job_inline),
             patch.object(
                 app,
                 "_mark_workbench_matching_dirty_scopes",

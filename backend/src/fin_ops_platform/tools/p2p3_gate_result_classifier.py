@@ -103,8 +103,8 @@ def _classification_for(
             "Deploy bounded readiness fixes or repair runtime blockers only after an explicit plan with rollback approval.",
             "Rerun health_ready_payload_probe and runtime_sync_closure_gate before claiming one-second production sync closure.",
         ]
-    if any(check in failed_checks for check in ("authenticated_http_slo", "sse_first_event_smoke")):
-        return "authenticated-smoke-required", ["Inspect auth, API prefix, Nginx fallback, first-event latency, p95 samples, and freshness status before optimizing."]
+    if "authenticated_http_slo" in failed_checks:
+        return "authenticated-smoke-required", ["Inspect auth, API prefix, Nginx fallback, p95 samples, and freshness status before optimizing."]
     if any(check in failed_checks for check in ("read_model_direct_smoke", "write_operation_audit", "write_operation_e2e")):
         return "durable-evidence-required", ["Inspect sample counts, outbox status, dirty scope status, readiness status, p95/p99 latency, and scenario/apply requirements."]
     if status == "fail":

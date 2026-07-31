@@ -26,7 +26,9 @@
 - `web/src/components/workbench/WorkbenchSettingsModal.tsx`
 - `web/src/features/workbench/api.ts`
 - `backend/src/fin_ops_platform/app/routes_settings.py` 中 `/api/workbench/settings*`、数据重置和 OA 申请人凭据 routes
-- `backend/src/fin_ops_platform/app/server.py` 中 settings route owner 组装和 runtime reset executor
+- `backend/src/fin_ops_platform/app/server.py` 中 settings route owner 组装和 durable reset enqueue
+- `backend/src/fin_ops_platform/services/settings_data_reset_job.py`
+- `backend/src/fin_ops_platform/services/runtime_worker_handlers.py` 中 `SettingsDataResetRuntimeFactory`
 - `backend/src/fin_ops_platform/services/app_settings_service.py`
 - `backend/src/fin_ops_platform/services/settings_data_reset_service.py`
 - `backend/src/fin_ops_platform/services/oa_applicant_credentials.py`
@@ -64,8 +66,8 @@ canonical query，也可能影响关联台 `workbench` 或三个共享 read mode
 | 访问控制变化 | state store + OA role sync | 下一次 session/API 权限校验生效 |
 | OA 导入过滤/留存/promotion | state store，供后续 OA sync/reset 使用 | 页面下次 GET 读取已提交 OA canonical facts |
 | OA 申请人凭据维护 | 独立 credential repository | 进项 OA 反提 token provider 使用；普通 settings payload 不含 secret |
-| 数据重置 | durable reset job + canonical cleanup | job 显示进度；页面下次 GET 读取重置结果；共享模型只按明确 reset 合同处理 |
-| 启动补扫 | `startup_stale_scan` 默认关闭 | 只标记 Workbench matching 领域 scope，不刷新页面 projection |
+| 数据重置 | `settings.data_reset.requested` durable event + `settings-maintenance` worker | API 只校验权限/密码并入队；worker 执行 canonical cleanup、登记派生刷新并请求 Gunicorn graceful reload，job 显示进度/失败 |
+| 启动补扫与恢复 | `settings-maintenance` / `workbench-matching` worker | API 构造与启动无业务写副作用；stale scan 仅在 matching worker 显式启用时执行 |
 
 ## 维护触发器
 

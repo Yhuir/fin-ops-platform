@@ -1,5 +1,11 @@
 # 设置 实施记录
 
+## 2026-08-01 - 数据重置执行边界迁入 durable worker
+
+- Settings API 只负责 admin/OA 密码复核、创建 BackgroundJob 和投递 `settings.data_reset.requested`；密码不进入 job、outbox、日志或 result。
+- 删除进程内 executor/inline reset 路径；独立 `settings-maintenance` worker 构造 reset 依赖并更新 job，重启遇到未知 destructive running job 时 fail closed。
+- reset 完成后先登记正式 lifecycle/read-model refresh，再安全 reload Gunicorn runtime，防止 API 继续持有 reset 前进程内状态。
+
 ## 2026-07-21 - 流水规则 formal/raw 审计镜像修复
 
 - 生产跨页验收发现设置页 Audit 仅在 `bank_flow_rule_batch_tag_rules` 报 `settings_formal_raw_payload_mismatch`；规则正式值与页面行为正确。

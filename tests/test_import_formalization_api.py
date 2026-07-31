@@ -130,8 +130,8 @@ class ImportFormalizationApiTests(unittest.TestCase):
             self.assertEqual(workbench_payload["month"], "2026-01")
             self.assertGreater(workbench_payload["summary"]["bank_count"], 0)
             self.assertGreater(workbench_payload["summary"]["invoice_count"], 0)
-            app.shutdown_background_jobs()
-            restarted.shutdown_background_jobs()
+            app.close()
+            restarted.close()
 
     def test_stale_api_preview_cannot_downgrade_another_process_confirmed_import(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -201,9 +201,9 @@ class ImportFormalizationApiTests(unittest.TestCase):
                 "completed",
             )
 
-            stale_api.shutdown_background_jobs()
-            worker_api.shutdown_background_jobs()
-            restarted.shutdown_background_jobs()
+            stale_api.close()
+            worker_api.close()
+            restarted.close()
 
     def test_templates_retry_with_invoice_batch_override_and_original_file_retention(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -318,7 +318,7 @@ class ImportFormalizationApiTests(unittest.TestCase):
             self.assertEqual(retry_response.status_code, 200)
             retry_payload = json.loads(retry_response.body)
             self.assertEqual(retry_payload["files"][0]["batch_type"], "input_invoice")
-            app.shutdown_background_jobs()
+            app.close()
 
     def test_revert_batch_and_download_batch_export(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -374,7 +374,7 @@ class ImportFormalizationApiTests(unittest.TestCase):
             )
             session_payload = json.loads(session_response.body)
             self.assertEqual(session_payload["files"][0]["status"], "confirmed")
-            app.shutdown_background_jobs()
+            app.close()
 
 
 if __name__ == "__main__":

@@ -850,7 +850,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             before_payload = json.loads(before_response.body)
             flat_payload = json.loads(flat_response.body)
             grouped_payload = json.loads(grouped_response.body)
-            app.shutdown_background_jobs()
+            app.close()
 
         self.assertEqual(before_response.status_code, 200)
         self.assertEqual(before_payload["pagination"]["total"], 0)
@@ -2035,7 +2035,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             )
             payload = json.loads(response.body)
             saved_category = app._bank_transaction_category_service.get(transaction_ids[0])
-            app.shutdown_background_jobs()
+            app.close()
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["updated_categories"][0]["category_code"], "borrow_in_company_pending_repayment")
@@ -2289,7 +2289,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                 ),
             )
             payload = json.loads(response.body)
-            app.shutdown_background_jobs()
+            app.close()
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["updated"], 2)
@@ -4146,7 +4146,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                 )
                 payload = json.loads(response.body)
             finally:
-                app.shutdown_background_jobs()
+                app.close()
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["relation"]["relation_id"], relation_id)

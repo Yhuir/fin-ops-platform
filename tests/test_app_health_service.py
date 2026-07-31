@@ -258,12 +258,5 @@ class AppHealthServiceTests(unittest.TestCase):
         self.assertEqual(snapshot["dependencies"]["oa_sync"]["status"], "unavailable")
         self.assertEqual(snapshot["workbench_matching"]["status"], "error")
 
-    def test_sse_event_serializes_named_event(self) -> None:
-        body = AppHealthService.serialize_sse_event("app_health", {"status": "ok"})
-
-        self.assertTrue(body.startswith("event: app_health\n"))
-        self.assertEqual(json.loads(body.split("data: ", 1)[1]), {"status": "ok"})
-
-
 if __name__ == "__main__":
     unittest.main()

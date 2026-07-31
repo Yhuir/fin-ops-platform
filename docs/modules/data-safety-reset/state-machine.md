@@ -13,7 +13,7 @@
 | `reset_queued` | `BackgroundJobService.create_job(type="settings_data_reset")` | 异步重置排队，`source/result_summary` 只能保存 action 等非敏感字段 |
 | `reset_running` | background job `status=running` + progress | UI 可离开后恢复；同 owner 再提交必须返回 `409 settings_data_reset_job_running` |
 | `file_cleanup_pending` | `app.import_files.status=deleting` | 数据库事实已事务性清理，文件/对象等待提交后删除；此状态必须可由同一 reset action 重试。 |
-| `reset_succeeded` | job `succeeded` / serialized `completed` | 删除和 durable 派生生命周期登记完成；仍需依赖 App Status/read model 验证最终 fresh |
+| `reset_succeeded` | job `succeeded` / serialized `completed` | 删除、durable 派生生命周期登记和 API runtime reload request 完成；仍需依赖 App Status/read model 验证最终 fresh |
 | `rebuild_pending` | OA reset result `rebuild_status=pending` | 关联台重建已经可靠入队但尚未证明 fresh；不得同步查询全页 payload 后改成 completed |
 | `reset_failed` | job `failed` 或同步 API structured error | 必须进入 App Health attention；保留错误但不泄露密码 |
 | `reset_partial` | result `status=partial` 或 `rebuild_status=failed` | 按 failed job 处理；用户需要运维检查 affected scopes 和 rebuild status |
@@ -25,7 +25,7 @@
 - 银行/发票 reset 的文件子状态：active import file -> `deleting` -> `deleted`。文件缺失按幂等删除成功处理；删除异常保留 `deleting` 并使 job failed。
 - OA reset 的下游状态独立流转：`rebuild_pending` -> read model `refreshing` -> `fresh`，或 -> `failed`。
 - `impact_preview` -> `password_pending` -> `password_failed`
-- `reset_running` -> `reset_failed`
+- `reset_running` -> `reset_failed`；worker 重启发现未知的 destructive `running` job 时必须 fail closed，禁止自动重放。
 - `reset_running` -> `reset_partial`
 - `reset_failed` / `reset_partial` -> 运维 acknowledge / repair / retry，不允许自动伪装成功
 
@@ -38,6 +38,7 @@
 - reset 请求/job 线程调用 Workbench 全页 query、OA 行投影或 OCR，并据此把 `rebuild_status` 标成 `completed`。
 - 在 `settings_reset_completed` lifecycle 已登记 matching dirty scopes 后再走一条重复 enqueue 路径。
 - 在 job payload、error、audit summary、App Health payload、前端 state 中保存或回显 `oa_password`。
+- settings maintenance worker 绕过 pidfile owner/命令行校验向任意进程发送 reload signal，或在 reload 失败时把 job 标成成功。
 - OA reset 删除纯银行+发票 relation，或绕过 OA 保留月份策略全量扫描/重建。
 
 ## UI 状态
@@ -69,7 +70,7 @@
 - `reset_oa_and_rebuild` 复用 `settings_reset_completed` 的 Workbench read model refresh 与 matching dirty scope；不得额外重复 enqueue。
 - 发票或 OA reset 后的 historical ETC repair。
 - 后续 read model query miss/stale enqueue。
-- `startup_stale_scan` 默认关闭；启用时只标记 stale workbench matching dirty scopes；reset 主链路仍由 `settings_reset_completed` 和 reset job 显式清理/重建 read model。
+- Workbench stale scan 只由 matching worker 启动；API 进程初始化不得触发 scan、historical ETC reconcile 或 interrupted job recovery。reset 主链路仍由 `settings.data_reset.requested` worker、`settings_reset_completed` 和显式 read-model refresh 完成。
 
 ## 失败恢复
 
@@ -84,6 +85,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-08-01 | data reset 改为独立 durable `settings-maintenance` worker | API 只校验/建 job/入队；密码不持久化；中断 destructive job fail closed；成功后安全 reload API runtime 清除进程内状态 | `tests.test_settings_data_reset_job`、`tests.test_runtime_worker_registry`、`tests.test_platform_runtime_boundary_guards` |
 | 2026-07-30 | 银行/发票 reset 增加 `deleting -> deleted` 文件清理意图 | 移除已删除 `import_batch_id` fallback；数据库提交与文件删除之间的失败可诊断、可幂等重试 | `tests.test_postgres_state_store`、`tests.test_postgres_state_store_integration` |
 | 2026-07-16 | OA reset 改为 durable lifecycle 后返回 `rebuild_status=pending` | 删除同步 Workbench 全页 completion probe 与重复 matching enqueue，区分 reset job 完成和 read model fresh | `tests.test_settings_data_reset_service` |
 | 2026-06-11 | 补齐 data-safety-reset 状态机 | 明确密码校验、job、protected target、read model/worker 和 UI 状态 | 待本轮模块验证 |

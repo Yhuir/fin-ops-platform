@@ -276,7 +276,7 @@ class EtcInvoicePdfBundleApiTests(unittest.TestCase):
                     f"/api/etc/business-batches/{batch.business_batch_id}/invoice-pdf",
                 )
             finally:
-                app._background_job_service.shutdown()
+                app.close()
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(forbidden.status_code, 403)
@@ -332,7 +332,7 @@ class EtcInvoicePdfBundleApiTests(unittest.TestCase):
                         reason="mismatched source",
                     )
             finally:
-                app._background_job_service.shutdown()
+                app.close()
 
         self.assertEqual(caught.exception.code, "invoice_attachment_repair_hash_mismatch")
         self.assertIsNone(invoice.pdf_file_path)
@@ -414,7 +414,7 @@ class EtcInvoicePdfBundleApiTests(unittest.TestCase):
                 )
                 audit_entries = app._audit_service.as_dicts()
             finally:
-                app._background_job_service.shutdown()
+                app.close()
 
         self.assertEqual(draft_response.status_code, 200)
         self.assertEqual(response.status_code, 200)
@@ -443,7 +443,7 @@ class EtcInvoicePdfBundleApiTests(unittest.TestCase):
                     f"/api/etc/business-batches/{batch.business_batch_id}/invoice-pdf",
                 )
             finally:
-                app._background_job_service.shutdown()
+                app.close()
 
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 409)

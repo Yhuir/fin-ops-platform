@@ -672,33 +672,6 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(response.status_code, int(HTTPStatus.SERVICE_UNAVAILABLE))
         self.assertEqual(payload["error"], "oa_sync_queue_unavailable")
 
-    def test_http_server_does_not_support_in_process_oa_polling(self) -> None:
-        class FakeServer:
-            def __init__(self, *_args, **_kwargs) -> None:
-                pass
-
-            def serve_forever(self) -> None:
-                raise KeyboardInterrupt()
-
-            def server_close(self) -> None:
-                pass
-
-        class FakeApplication:
-            def __init__(self) -> None:
-                self.workbench_dirty_started = False
-
-            def start_workbench_matching_dirty_scope_worker(self) -> bool:
-                self.workbench_dirty_started = True
-                return True
-
-        app = FakeApplication()
-        env = {
-            key: value
-            for key, value in os.environ.items()
-            if key not in {"FIN_OPS_WORKBENCH_MATCHING_DIRTY_WORKER_ENABLED"}
-        }
-        env["FIN_OPS_OA_POLLING_ENABLED"] = "1"
-        with patch.dict(os.environ, env, clear=True), patch.object(server_module, "ThreadingHTTPServer", FakeServer):
-            server_module.run_http_server("127.0.0.1", 0, app)
-
-        self.assertFalse(app.workbench_dirty_started)
+    def test_api_module_has_no_in_process_polling_server(self) -> None:
+        self.assertFalse(hasattr(server_module, "run_http_server"))
+        self.assertFalse(hasattr(server_module, "ThreadingHTTPServer"))

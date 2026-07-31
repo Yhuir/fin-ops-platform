@@ -7,7 +7,7 @@
 | 文件 | 用途 |
 | --- | --- |
 | `pages.md` | 页面路由、组件入口、API client、刷新来源和页面间影响关系。 |
-| `runtime-and-ownership.md` | 运行时调用链、dirty/outbox、read model refresh、worker、SSE/App Health 和模块 owner。 |
+| `runtime-and-ownership.md` | HTTP/WSGI 调用链、dirty/outbox、read model refresh、worker、轮询/App Health 和模块 owner。 |
 | `docs-maintenance.md` | 文档维护规则、删除归档规则和核心设计原则。 |
 
 页面或功能域的日常维护入口在 `../modules/`。修改或新增功能前，先按 `../modules/README.md` 定位目标模块，再回到本目录和其他长期事实源校验页面、API、read model、worker 和跨页面影响关系。
@@ -19,6 +19,7 @@
 - 侧边栏导航：`web/src/components/shell/sidebarItems.ts`（从页面注册表派生）
 - 页面入口：`web/src/pages/*`
 - 前端 API client：`web/src/features/*/api.ts`
+- 后端 HTTP adapter：`backend/src/fin_ops_platform/app/http_adapter.py`、`backend/src/fin_ops_platform/app/wsgi.py`
 - 后端 HTTP 分发：`backend/src/fin_ops_platform/app/server.py`
 - 后端 route modules：`backend/src/fin_ops_platform/app/routes_*.py`
 - 派生数据生命周期：`backend/src/fin_ops_platform/services/derived_data_lifecycle_service.py`
@@ -28,7 +29,7 @@
 
 ## 页面读取合同
 
-成本统计、银行明细、OA 待付款、流水规则批量处理、批量账务、ETC、税金抵扣、待找发票、进项使用、销项收款与外部往来款都是登记的 page-specific canonical direct-read 页面。页面 query facade/repository 在单个 `REPEATABLE READ READ ONLY` PostgreSQL snapshot 内组合 canonical facts 与 active formal relations，不消费页面 read model、Redis、refresh status/SSE、queue 或 worker。
+成本统计、银行明细、OA 待付款、流水规则批量处理、批量账务、ETC、税金抵扣、待找发票、进项使用、销项收款与外部往来款都是登记的 page-specific canonical direct-read 页面。页面 query facade/repository 在单个 `REPEATABLE READ READ ONLY` PostgreSQL snapshot 内组合 canonical facts 与 active formal relations，不消费页面 read model、Redis、refresh status、queue 或 worker。
 
 关联台是唯一仍使用页面 read model 的财务页面：继续使用 `workbench` active-generation read model、freshness/status/enqueue、Redis fresh cache 和 Workbench worker；`workbench_relation`、`search`、`no_oa_bank_batch` 三个共享 read model 继续服务各自登记消费者。
 

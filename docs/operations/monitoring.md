@@ -72,7 +72,7 @@ create index if not exists workbench_group_rows_column_values_gin on read_model.
 - read model API 指标日志使用 `workbench_api_metric`，生产指标系统按 `endpoint` 聚合 p95。
 - read model stale/unavailable 计数日志使用 `workbench_read_model_status_metric`，按 `endpoint`、`scope_key`、`read_model_status` 和 `reason` 聚合。
 - workbench generation consistency failure 会把 `/api/app-health.workbench_read_model.status` 提升为 `error`，并在 `last_error` 中保留 `generation_metadata_actual_mismatch`、all-scope parent inconsistency、`duplicate_invoice_identity_cross_zone` 或 `duplicate_bank_identity_cross_zone` 原因。
-- 工作台实时刷新事件由 `/api/workbench/events` 暴露。SSE 连接失败时前端应回退 `/api/workbench/refresh-status`，运维排障需要同时查看代理是否缓冲 `text/event-stream`、worker lag 和 dirty scope 状态。
+- 工作台刷新状态由 `/api/workbench/refresh-status` 有界轮询；排障同时查看 HTTP timeout、worker lag、dirty scope 和 outbox 状态。
 - `/health` / `/health/ready` 输出 bounded `api_performance` 进程内 rolling window 摘要，按 `METHOD path` 聚合 `duration_ms`、`connection_acquire_ms`、`sql_execute_fetch_ms`、`database_duration_ms` 和 `database_query_count` 的 p50/p95/p99，但只保留 p95 最慢的有限 endpoint，并通过 `endpoint_count` / `omitted_endpoint_count` 标明是否被截断。完整 endpoint 明细由 `/metrics` 或 admin-only `/api/operations/app-health-dashboard` 提供。
 - P2/P3 readiness payload gate 使用 `health_ready_payload_probe` 验证 `/fin-ops-api/health/ready` 本身不成为慢探针：默认要求 1000ms 内、JSON、response 不超过 50KB、`api_performance.endpoints<=20` 且带 `endpoint_count` / `omitted_endpoint_count`；ready payload 只保留 runtime blocker 需要的 counts、status summary 和 bounded problem samples，不输出完整 `entrypoints`、`worker_metrics` 或重复的 `storage.runtime_infrastructure`；慢、大、未截断、缺 metadata 或 HTML fallback 均视为失败。
 - `/health/ready` 只计算当前 blocker：current-effective outbox、dirty scope、required worker heartbeat 和发布状态；历史完成 refresh 的 duration/failure 样本不属于 readiness blocker，不在该热路径读取。完整历史/窗口性能指标保留在 `/health`、`/metrics` 和 admin-only Operations dashboard。
@@ -338,7 +338,7 @@ enqueue-to-fresh 是否满足目标。`summary.enqueue_to_fresh_ms` 会输出 p5
 
 ## 生产外部 Gate 输入预检
 
-生产 admin Browser smoke、authenticated HTTP/SSE SLO 和 controlled write-operation apply 依赖真实登录态、
+生产 admin Browser smoke、authenticated HTTP SLO 和 controlled write-operation apply 依赖真实登录态、
 管理员凭据、数据库连接、写操作 scenario 和审批 ticket。执行这些 gate 前先运行：
 
 ```bash
@@ -421,34 +421,11 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.http_slo_probe \
 ```
 - 输出不包含 token、cookie 或 Authorization header；采样结果可以进入阶段报告和事故复盘。
 
-## SSE 首事件 Smoke
+## HTTP 运行时与轮询 Smoke
 
-App Health 和 Workbench 依赖 SSE 做运行状态/刷新状态提示。P2/P3 中 Nginx/OA iframe/SSE buffering 不能只靠页面 shell 或普通
-HTTP probe 证明，使用只读 `sse_smoke_probe` 验证 event-stream 首事件：
+App Health 与 Workbench 使用有界 HTTP polling。生产验证必须同时采样 `/api/app-health`、`/api/workbench/refresh-status?month=all`、`/health/ready` 和登记的首屏 API；返回 HTML fallback、认证失败、错误状态、超时或零样本都不能算通过。
 
-```bash
-export FIN_OPS_HTTP_SLO_ADMIN_TOKEN='真实管理员 Admin-Token'
-PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.sse_smoke_probe \
-  --base-url https://www.yn-sourcing.com \
-  --api-prefix /fin-ops-api \
-  --target-ms 1000 \
-  --output /tmp/finops-sse-smoke-$(date +%Y%m%d%H%M%S).json
-```
-
-默认 probe 覆盖：
-
-- `/api/app-health/stream`：期望 `event: app_health` 或 `event: heartbeat`。
-- `/api/workbench/events?month=all`：期望 `event: workbench.read_model.*` 或 `event: heartbeat`。
-
-App Health stream 建连后允许先返回轻量 `heartbeat` 作为首事件，完整 `app_health` snapshot 随后发送；首事件 SLO 用来证明代理未缓冲/连接已可读，不替代 `/api/app-health` HTTP payload 和 App Status freshness 验证。
-
-判定原则：
-
-- 默认目标是首个 SSE event `<= 1000ms`；超过目标返回 `sse_first_event_slo_miss`。
-- 缺少 token/cookie 返回 `auth_missing`，不能作为生产 SSE 证据。
-- 返回 HTML 页面壳按 `html_response_for_api_probe` 失败；这通常表示 API prefix 或 Nginx fallback 配置错误。
-- 返回非 `text/event-stream`、没有 `event:` 行或事件名不匹配均失败；失败时先区分 auth、proxy buffering、API prefix、后端 route 和 worker/readiness 源头。
-- 输出不包含 token、cookie 或 Authorization header。
+`/health.http_runtime` 与 `/metrics` 暴露 active/peak requests、body rejection 和 database backpressure rejection；`storage.runtime_infrastructure.postgres_pool` 暴露 pool stats。检查这些值时必须结合 Gunicorn worker/thread/backlog、pool acquire timeout/max waiting 和 Nginx upstream timeout，不能只看 SQL 时间。
 
 ## 真实写操作刷新 SLO 审计
 
@@ -632,7 +609,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_sync_closure_ga
 
 该 gate 必须全部通过才可宣称“所有页面一秒级真同步”：
 
-- 双 origin：页面 shell 在公开站点探测，API/SSE 在当前 release 的内部服务 origin 探测；禁止让 Nginx 页面 fallback 掩盖内部 API 错误，也禁止把内部 API origin 当作页面站点。
+- 双 origin：页面 shell 在公开站点探测，API 在当前 release 的内部服务 origin 探测；禁止让 Nginx 页面 fallback 掩盖内部 API 错误，也禁止把内部 API origin 当作页面站点。
 - runtime health：required worker、RabbitMQ queue/unacked/DLQ、dirty scope、failure rate 没有当前 blocker。
 - health-ready payload：`/fin-ops-api/health/ready` 自身在 1000ms 内返回轻量 JSON，`api_performance` bounded 且带截断 metadata。
 - direct read model smoke：显式 `--apply-read-model-smoke` 后，每个 App Status read model 的 enqueue-to-fresh 在目标内。
@@ -640,11 +617,10 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_sync_closure_ga
 - 登录态 HTTP SLO 若仅命中 `read_model_status=refreshing` / `refresh_enqueued`，会在同一 checkpoint 的有界 timeout
   内重新执行完整采样；最终样本仍必须全部 `fresh` 且满足 p95。鉴权、HTTP 状态、HTML fallback、响应错误或延迟
   超标不会重试或降级，freshness 到期仍未收敛也会失败。
-- 登录态 SSE smoke：必须使用真实 OA token/Admin-Token/cookie，覆盖 App Health 和 Workbench event-stream 首事件 `<= 1000ms`，并拒绝 HTML fallback 或错误事件名。
 - 真实写操作 audit：最近真实 durable outbox 样本覆盖内置高影响 operation profile，并满足写入后 outbox done SLO。
 - 隔离 PostgreSQL 写探针：只在 `pg_temp` 临时表内执行 insert/read/delete/rollback，必须在目标内完成且不能留下 residue；不得修改 canonical facts、关系、read model、outbox 或 dirty scope。
 - 页面 canonical audit：只读调用既有 admin audit API，不能执行修复。
-- 采样顺序：所有 read-model、HTTP/SSE 与隔离写探针完成后再读取 runtime 严格快照。若 gate 幂等收敛了一次
+- 采样顺序：所有 read-model、HTTP 与隔离写探针完成后再读取 runtime 严格快照。若 gate 幂等收敛了一次
   `status=done/publish_status=publishing` 终态，必须记录 reconciliation，并在同一 checkpoint 内再取得
   至少一个无残留、无再次 reconciliation 的干净采样；持续复发按 dispatcher/状态机故障失败。
 
@@ -662,9 +638,7 @@ health-ready payload 慢、大、未截断、缺 `endpoint_count` / `omitted_end
 `runtime_blockers`。这些字段用于在不登录服务器的第一步区分 release 未部署、dirty/outbox backlog、
 failed jobs、worker mismatch、Postgres/readiness 状态异常或 runtime guard 问题；`dirty_scopes.done`
 等完成态计数不应被当作 blocker。
-HTTP SLO 没有 probe/sample 时，`authenticated_http_slo` check 会返回 `http_slo_empty_samples`；SSE smoke
-没有 probe 时，`sse_first_event_smoke` check 会返回 `sse_smoke_empty_samples`。这通常表示 probe 配置、认证、
-API prefix 或采样输入错误，不能作为一秒级证据。
+HTTP SLO 没有 probe/sample 时，`authenticated_http_slo` check 会返回 `http_slo_empty_samples`。这通常表示 probe 配置、认证、API prefix 或采样输入错误，不能作为一秒级证据。
 独立调用 `write_operation_e2e_smoke` 时，空 scenario list 返回 `input_error` / `scenario_empty`，不能作为 dry-run
 或 apply 成功；apply 缺 approval 时必须在连接 PostgreSQL 或发送 mutating HTTP 前失败。该工具的证据不由
 `runtime_sync_closure_gate` 自动消费，避免发布激活隐式修改生产业务关系。
@@ -751,7 +725,7 @@ checkpoint 的 receipt 独立，confirm/withdraw/recovery 之间不得复用。
 - 页面显示“关联台正在刷新”但已有数据可见：正常，说明前端正在使用最近稳定 read model。
 - 页面显示“关联台刷新失败”：查看 `/api/workbench/refresh-status.last_error`、`job.read_model_dirty_scopes.status=failed` 和 worker 日志。
 - 页面显示“关联台读模型不可用”：优先检查 PostgreSQL migration、read repository 初始化和生产配置，不要回落旧全量 snapshot。
-- 用户只能刷新浏览器才看到新数据：检查 `/api/workbench/events` 是否被代理缓冲或断开，以及前端是否回退轮询 `/api/workbench/refresh-status`。
+- 用户只能刷新浏览器才看到新数据：检查 `/api/workbench/refresh-status` polling 是否被认证、代理 timeout 或页面 visibility 状态阻断，并核对 worker/dirty scope 是否收敛。
 - OA 附件正式发票在 Workbench/税金中缺失时，先检查是否已 promotion 到 `app.invoices` 且 `raw_payload.source_links[].source_type='oa_attachment_invoice'`；再检查 `app.oa_attachment_invoice_cache_sources` 的 `attachment_identity_*` bridge 是否能把 parser cache 映射回真实附件。生产 repair 必须先 dry-run：
 
 ```bash

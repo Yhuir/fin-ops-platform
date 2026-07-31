@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from threading import Lock
@@ -91,18 +90,14 @@ class BackgroundJobService:
         self,
         state_store: ApplicationStateStoreProtocol | None = None,
         *,
-        max_workers: int = 2,
         recent_success_seconds: int = 8,
         stale_after_seconds: int = 300,
     ) -> None:
         self._state_store = state_store
         self._lock = Lock()
-        self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="background-job")
         self._recent_success_window = timedelta(seconds=max(0, int(recent_success_seconds)))
         self._stale_after = timedelta(seconds=max(1, int(stale_after_seconds)))
         self._memory_jobs: dict[str, dict[str, object]] = {}
-        self._futures: dict[str, Future] = {}
-        self._mark_interrupted_jobs_failed()
 
     def create_job(
         self,
@@ -527,41 +522,6 @@ class BackgroundJobService:
         )
         return active_jobs, attention_jobs
 
-    def run_job(self, job: BackgroundJob, handler: Callable[[BackgroundJob], dict[str, object] | None]) -> Future:
-        def runner() -> None:
-            running_job = self.start_job(job.job_id)
-            try:
-                result_summary = handler(running_job)
-            except Exception as exc:
-                self.fail_job(job.job_id, "后台任务失败。", str(exc))
-                return
-            completed = self.get_job(job.job_id, running_job.owner_user_id)
-            if completed.status not in TERMINAL_BACKGROUND_JOB_STATUSES:
-                self.succeed_job(job.job_id, completed.message or "后台任务已完成。", result_summary=result_summary)
-
-        future = self._executor.submit(runner)
-        with self._lock:
-            self._futures[job.job_id] = future
-        future.add_done_callback(lambda completed: self._clear_future(job.job_id, completed))
-        return future
-
-    def wait_for_job_completion(self, job_id: str, *, timeout: float | None = None) -> None:
-        normalized_job_id = str(job_id or "").strip()
-        if not normalized_job_id:
-            return
-        with self._lock:
-            future = self._futures.get(normalized_job_id)
-        if future is not None:
-            future.result(timeout=timeout)
-
-    def shutdown(self, *, wait: bool = True) -> None:
-        self._executor.shutdown(wait=wait)
-
-    def _clear_future(self, job_id: str, future: Future) -> None:
-        with self._lock:
-            if self._futures.get(job_id) is future:
-                self._futures.pop(job_id, None)
-
     def _mutate_job(self, job_id: str, mutator: Callable[[BackgroundJob], None]) -> BackgroundJob:
         normalized_job_id = str(job_id or "").strip()
         with self._lock:
@@ -576,8 +536,9 @@ class BackgroundJobService:
             self._save_jobs(jobs)
             return job
 
-    def _mark_interrupted_jobs_failed(self) -> None:
+    def recover_interrupted_jobs(self) -> int:
         cutoff = datetime.now(UTC) - self._stale_after
+        recovered = 0
         with self._lock:
             jobs = self._load_jobs()
             changed = False
@@ -598,8 +559,10 @@ class BackgroundJobService:
                 job.short_label = self._build_short_label(job)
                 jobs[job_id] = job.to_payload()
                 changed = True
+                recovered += 1
             if changed:
                 self._save_jobs(jobs)
+        return recovered
 
     def _load_jobs(self) -> dict[str, dict[str, object]]:
         if self._state_store is not None:

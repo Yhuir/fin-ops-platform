@@ -3505,7 +3505,7 @@ class EtcApiTests(unittest.TestCase):
                 )
                 detail_response = app.handle_request("GET", f"/api/etc/business-batches/{created['businessBatchId']}")
             finally:
-                app.shutdown_background_jobs()
+                app.close()
 
         self.assertEqual(create_response.status_code, 201)
         self.assertEqual(preview_response.status_code, 200)
@@ -3571,7 +3571,7 @@ class EtcApiTests(unittest.TestCase):
                         f"/api/etc/business-batches/{created['businessBatchId']}",
                     )
             finally:
-                app.shutdown_background_jobs()
+                app.close()
 
         self.assertEqual(create_response.status_code, 201)
         self.assertEqual(preview_response.status_code, 200)
@@ -4003,7 +4003,7 @@ class EtcApiTests(unittest.TestCase):
                 )
                 payload = json.loads(response.body)["data"]["businessBatch"]
             finally:
-                app.shutdown_background_jobs()
+                app.close()
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["status"], "manually_marked_submitted")
@@ -5200,7 +5200,7 @@ class EtcApiTests(unittest.TestCase):
                 )
                 task = app._etc_reconciliation_task_service.get_task(task_id)
             finally:
-                app._background_job_service.shutdown()
+                app.close()
 
         self.assertEqual(preview_response.status_code, 200)
         self.assertEqual(result.failed, 0)

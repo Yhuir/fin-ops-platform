@@ -1,5 +1,11 @@
 # Runtime Worker 实施记录
 
+## 2026-08-01 - API 启动副作用迁出与 Settings reset durable worker
+
+- API 初始化不再启动 stale scan、historical ETC reconcile、interrupted job recovery 或进程内线程任务；matching stale scan 和统一 recovery 归 worker 启动，historical reconcile 只保留显式 maintenance 入口。
+- `settings.data_reset.requested` 由独立 required `settings-maintenance` registration 消费。事件只含 job id/owner/action；未知 interrupted destructive job fail closed，成功后通过受校验 Gunicorn pidfile 请求 runtime reload。
+- 没有新增队列、表或 transport；复用现有 PostgreSQL outbox、BackgroundJob、worker registry 和 lifecycle/read-model gateway。
+
 ## 2026-07-31 - RabbitMQ publish 终态收敛
 
 - durable consumer 可以在 dispatcher 写 publish confirm 前完成 event；旧链路因此可能留下永不再 claim 的 `done/publishing`。dispatcher 现在在同一 publish claim 事务内收敛超过 lock timeout 的终态行，monitoring 与 release gate 明确阻断任何 publishing backlog。

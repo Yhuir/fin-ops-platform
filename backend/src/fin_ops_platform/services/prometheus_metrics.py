@@ -54,6 +54,19 @@ def render_prometheus_metrics(health_payload: Mapping[str, Any]) -> str:
 
     runtime = _mapping(health_payload.get("runtime_infrastructure"))
     _runtime_metrics(writer, runtime)
+    http_runtime = _mapping(health_payload.get("http_runtime"))
+    for name in (
+        "active_requests",
+        "peak_active_requests",
+        "rejected_requests",
+        "request_body_rejections",
+        "database_backpressure_rejections",
+    ):
+        writer.gauge(
+            f"finops_http_{name}",
+            _help_text(f"http_{name}"),
+            http_runtime.get(name),
+        )
     _api_performance_metrics(writer, _mapping(health_payload.get("api_performance")))
     return writer.render()
 

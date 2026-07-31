@@ -24,7 +24,7 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             try:
                 yield app
             finally:
-                app.shutdown_background_jobs()
+                app.close()
 
     @contextmanager
     def _without_default_test_auth(self):

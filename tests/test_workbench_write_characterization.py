@@ -1798,10 +1798,8 @@ class WorkbenchWriteWorkerTriggerCharacterizationTests(unittest.TestCase):
     def test_http_process_never_starts_matching_dirty_scope_worker(self) -> None:
         app = build_application()
 
-        with patch("fin_ops_platform.app.server.Thread") as thread_class:
-            self.assertFalse(app.start_workbench_matching_dirty_scope_worker(interval_seconds=0))
-            self.assertFalse(app.start_workbench_matching_dirty_scope_worker(interval_seconds=1))
-            self.assertFalse(thread_class.called)
+        self.assertFalse(hasattr(app, "start_workbench_matching_dirty_scope_worker"))
+        self.assertFalse(hasattr(app, "_schedule_startup_workbench_matching_stale_scan"))
 
     def test_standalone_matching_loop_honors_max_iterations_without_sleeping_after_final_iteration(self) -> None:
         class FakeDirtyQueue:

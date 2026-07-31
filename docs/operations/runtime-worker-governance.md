@@ -41,6 +41,8 @@ read model 刷新状态事实源，systemd 管 worker 进程，App 只负责写�
   接收 worker heartbeat，并在 `/health` 与 App Health 中暴露 missing/stale/mismatch/backlog。
 - file import confirm 必须先写 `job.import_jobs` 再通过同一 repository/gateway 写 `import.process.requested` outbox；`FIN_OPS_IMPORT_PROCESSING_BACKEND` 只允许 `postgres` 或 `rabbitmq`。PostgreSQL polling 是 durable 基线，RabbitMQ 只是 wakeup；API 进程不得 inline confirm，queue/repository 缺失必须 `503` fail closed。
 - ETC invoice confirm 遵循同一 durable 基线，但 preview 还必须先登记 `app.etc_import_sessions`、session files 和 verified file objects。独立 worker 从 session 重载 ZIP；Web 进程内存、inline `run_job` 和先改 task 再 enqueue 都不是允许的生产路径。
+- Settings data reset 通过 required `settings-maintenance` worker 消费 `settings.data_reset.requested`。API 只做 admin/OA 密码复核、创建 durable job 和入队；event/job/source/log 不得包含密码。worker 启动时显式执行 background-job/ETC interrupted-state recovery，API 构造期不执行 recovery、historical reconcile 或 stale scan。destructive reset 进入 `running` 后若进程中断，不自动重放，必须由管理员核对后重新发起。
+- Reset 完成后 maintenance worker 读取 root-owned runtime env 中的 `FIN_OPS_HTTP_PIDFILE`，校验同用户 Gunicorn master 后发送 `SIGHUP`，让 API worker graceful reload 进程内状态。pidfile 缺失、owner/命令不匹配或信号失败时 reset job 标为 failed/partial，不能伪报完整闭环。
 - systemd 负责：启动、停止、重启 worker 进程，保持进程常驻。
 - deploy helper 负责：从 registry 生成 required worker 矩阵，安装 env，执行 `--check`，重启
   systemd unit，并在发布阶段等待 worker readiness 收敛。release deploy 解包并校验 release layout 后，
@@ -540,7 +542,7 @@ PYTHONPATH="$release_src/backend/src" \
 `pg_temp` 临时表完成隔离 insert/read/delete/rollback 探针，并在 runtime 收敛后执行只读页面 canonical
 audit；任何 profile 都不得 confirm、withdraw、recovery 或修改真实业务关系。每次检查都必须使用真实 PostgreSQL 和 RabbitMQ，
 验证 exact registry/systemd inventory、worker readiness、dirty scope、pending/processing outbox、durable 与
-RabbitMQ dead letter、critical read-model enqueue-to-fresh SLO、domain audit 和 API/health/SSE 性能。
+RabbitMQ dead letter、critical read-model enqueue-to-fresh SLO、domain audit 和 API/health 性能。
 最终 evidence 复用只读页面 canonical audit，并以 T+300 runtime 采样证明 queue 持续稳定。
 RabbitMQ management 未配置或读取失败时 fail closed。checkpoint 必须按实际
 systemd I/O 边界分别加载 `/etc/fin-ops/fin-ops.rabbitmq-topology.env`（topology apply）和

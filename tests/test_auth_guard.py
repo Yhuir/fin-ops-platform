@@ -107,7 +107,11 @@ class AuthGuardTests(unittest.TestCase):
                 ("PUT", "/api/input-invoice-usage/payment-status-rules", {}),
                 ("PUT", "/api/turnover-ledger/tag-selection", {}),
                 ("POST", "/api/bank-details/auto-tag-rules/reapply", {}),
-                ("POST", "/api/workbench/settings/data-reset", {"scope": "all"}),
+                (
+                    "POST",
+                    "/api/workbench/settings/data-reset/jobs",
+                    {"action": "reset_bank_transactions", "oa_password": "not-used-for-non-admin"},
+                ),
             ]
 
             readable_responses = []

@@ -5,7 +5,7 @@
 ## 当前形态
 
 - 前端：React + TypeScript + Vite，正式页面在 `web/`。
-- 后端：Python 服务，HTTP 入口仍是自定义 server，业务服务集中在 `backend/src/fin_ops_platform/services/`。
+- 后端：Python WSGI 服务，由 Gunicorn `gthread` 运行；`http_adapter.py` 负责请求边界，业务服务集中在 `backend/src/fin_ops_platform/services/`。
 - App 状态：PostgreSQL 是生产 app 状态和业务事实的唯一读写库；当前 runtime 不读取 app Mongo，也没有 app Mongo fallback、shadow-read 或导出/审计旁路。
 - OA 数据源：通过 `MongoOAAdapter` 只读读取 OA MongoDB。
 - 部署：当前已有 OA 同域部署资产，前端路径 `/fin-ops/`，后端路径 `/fin-ops-api/`。
@@ -62,7 +62,14 @@ OA Adapter       Import/File Services
 1. 持续优化页面专属 canonical query 的 SQL、索引和批量读取，保持单快照一致性并建立 p95/p99 基线。
 2. 生产业务 I/O 继续收敛到明确 service/repository；`ApplicationStateStore` 仅保留本地 tooling/test 用途，不参与生产事实读取。
 3. 只优化已登记的四个 read model，不为已直读页面恢复 projection/worker；工作台 Redis page cache 以 freshness gate 通过后的 active generation 为版本边界。
-4. 将导入、OCR、OA 同步、统计预热迁入后台任务。
+4. 导入、OCR、OA 同步、设置数据重置和启动恢复均由 durable worker/显式 maintenance 执行，API 启动不隐式运行这些任务。
 5. 对核心接口建立压测基线和 `EXPLAIN ANALYZE` 调优闭环。
+
+## HTTP 运行时边界
+
+- systemd 只启动 Gunicorn，不再启动 `ThreadingHTTPServer`。当前使用单个有界 `gthread` worker，保持现有进程内 command state 的一致性；并发、backlog、worker recycling、graceful timeout 都由 Gunicorn 配置约束。
+- WSGI adapter 在业务分发前校验 `Content-Length` 和按内容类型区分的 body 上限，生成/透传 request ID，并把数据库连接池 backpressure 映射为可重试 `503`。
+- PostgreSQL pool 有明确 acquire timeout、max waiting 和 pool metrics；Nginx 同时限制 client body、连接及 upstream timeout。
+- 当前状态通知统一使用有界 HTTP polling；旧 App Health/Workbench SSE routes、前端 `EventSource` 和 SSE smoke 已删除。
 
 详细文档见 `docs/architecture/index.md`。

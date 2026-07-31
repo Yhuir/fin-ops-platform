@@ -411,7 +411,7 @@ Environment=PYTHONPATH=$src/backend/src
 Environment=FIN_OPS_DATA_DIR=/opt/fin-ops/data
 WorkingDirectory=$src
 ExecStart=
-ExecStart=$API_PYTHON -m fin_ops_platform.app.main --host 127.0.0.1 --port 18001
+ExecStart=$API_PYTHON -m gunicorn --config python:fin_ops_platform.app.gunicorn_conf fin_ops_platform.app.wsgi:application
 DROPIN
 }
 
@@ -1623,7 +1623,6 @@ release_gate_checkpoint() {
       --read-model-target-ms 5000
       --write-target-ms 5000
       --http-target-ms 1000
-      --sse-target-ms 1000
       --health-ready-target-ms 1000
       --timeout-seconds 120
       --output "$closure_report"
