@@ -566,7 +566,7 @@ function installOaPendingPaymentsFetch(overrides?: {
         ],
         pagination: { page: 1, pageSize: 100, total: 2 },
       }), {
-        status: 200,
+        status: scriptedResponse?.status ?? 200,
         headers: { "Content-Type": "application/json" },
       });
     }
@@ -634,7 +634,7 @@ function installOaPendingPaymentsFetch(overrides?: {
       }), { status: init?.method === "PUT" ? 200 : 200, headers: { "Content-Type": "application/json" } });
     }
     return new Response(JSON.stringify({}), {
-        status: scriptedResponse?.status ?? 200,
+      status: 200,
       headers: { "Content-Type": "application/json" },
     });
   });
@@ -1275,7 +1275,10 @@ describe("OA pending payments page", () => {
     renderAuthenticatedAppAt("/oa-pending-payments");
     const page = await screen.findByTestId("oa-pending-payments-page");
     await within(page).findByText("候选付款人");
+    const rowsBeforeViewSwitch = rowsRequests(fetchMock).length;
     await user.click(within(page).getByRole("button", { name: /进行中 OA/ }));
+    await waitFor(() => expect(rowsRequests(fetchMock).length).toBeGreaterThan(rowsBeforeViewSwitch));
+    await waitFor(() => expect(within(page).queryByLabelText("OA待付款核对加载中")).not.toBeInTheDocument());
     const candidateRow = within(page).getByRole("row", { name: /候选付款人/ });
     await user.click(within(candidateRow).getByRole("checkbox", { name: /候选付款人/ }));
     await user.click(within(page).getByRole("button", { name: "关联支出流水" }));
@@ -1288,6 +1291,7 @@ describe("OA pending payments page", () => {
 
     await user.click(queryButton);
     await waitFor(() => expect(bankCandidateRequests(fetchMock)).toHaveLength(requestsAfterOpen + 1));
+    expect(await within(page).findByRole("alert", { hidden: true })).toHaveTextContent("候选查询暂时失败");
     expect(await within(drawer).findByText("暂无支出流水")).toBeInTheDocument();
 
     await user.click(queryButton);
