@@ -370,7 +370,16 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0].publish_status, "publishing")
         self.assertEqual(events[0].publish_attempt_count, 2)
-        _, sql, params = transaction.calls[0]
+        recovery_method, recovery_sql, recovery_params = transaction.calls[0]
+        self.assertEqual(recovery_method, "execute")
+        normalized_recovery_sql = " ".join(recovery_sql.lower().split())
+        self.assertIn("status = 'done'", normalized_recovery_sql)
+        self.assertIn("publish_status = 'publishing'", normalized_recovery_sql)
+        self.assertIn("publish_status = 'published'", normalized_recovery_sql)
+        self.assertIn("terminal_event_already_completed", normalized_recovery_sql)
+        self.assertIn("publish_locked_at < now() - (%s * interval '1 second')", normalized_recovery_sql)
+        self.assertEqual(recovery_params, (120,))
+        _, sql, params = transaction.calls[1]
         normalized_sql = " ".join(sql.lower().split())
         self.assertIn("publish_status = 'publishing'", normalized_sql)
         self.assertIn("publish_attempt_count = publish_attempt_count + 1", normalized_sql)

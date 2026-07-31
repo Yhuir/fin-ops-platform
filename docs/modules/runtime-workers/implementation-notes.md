@@ -1,5 +1,10 @@
 # Runtime Worker 实施记录
 
+## 2026-07-31 - RabbitMQ publish 终态收敛
+
+- durable consumer 可以在 dispatcher 写 publish confirm 前完成 event；旧链路因此可能留下永不再 claim 的 `done/publishing`。dispatcher 现在在同一 publish claim 事务内收敛超过 lock timeout 的终态行，monitoring 与 release gate 明确阻断任何 publishing backlog。
+- 该恢复不重发已完成消息，不改变 pending/processing claim、worker handler、RabbitMQ topology 或 PostgreSQL 事实源；定向 queue/monitoring/deploy tests 保护状态机。
+
 ## 2026-07-25 - Workbench/Cost access proof 有界复用
 
 - 最新候选保留 gate-first 和 exact-scope 合同，但生产证据证明“下一次访问才登记 Cost child”仍有串行空档。当前 gate 发现 Workbench stale 时，同次只登记 exact Workbench 和当前 project/page 的 exact Cost child waiter，不登记 parent 或 sibling。

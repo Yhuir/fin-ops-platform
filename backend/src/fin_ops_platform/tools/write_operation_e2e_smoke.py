@@ -2118,15 +2118,32 @@ def _collect_system_audit(
             raise ValueError("system_audit_snapshot_not_repeatable_read_only")
         if not isinstance(contract, dict) or not contract:
             raise ValueError("system_audit_contract_missing")
+        registered_page_keys = contract.get("registered_page_keys")
+        audited_business_page_keys = contract.get("audited_business_page_keys")
+        system_page_key = contract.get("system_page_key")
+        if (
+            not isinstance(registered_page_keys, list)
+            or not registered_page_keys
+            or any(not isinstance(key, str) or not key for key in registered_page_keys)
+            or len(registered_page_keys) != len(set(registered_page_keys))
+            or not isinstance(audited_business_page_keys, list)
+            or any(not isinstance(key, str) or not key for key in audited_business_page_keys)
+            or len(audited_business_page_keys) != len(set(audited_business_page_keys))
+            or not isinstance(system_page_key, str)
+            or not system_page_key
+            or system_page_key not in registered_page_keys
+            or set(audited_business_page_keys) != set(registered_page_keys) - {system_page_key}
+        ):
+            raise ValueError("system_audit_registry_contract_failed")
         if not isinstance(summary, dict) or (
-            summary.get("registered_page_count") != 17
-            or summary.get("audited_business_page_count") != 16
-            or summary.get("passed_business_page_count") != 16
-            or summary.get("database_internal_contracts") != "pass"
+            summary.get("registered_page_count") != len(registered_page_keys)
+            or summary.get("audited_business_page_count") != len(audited_business_page_keys)
+            or summary.get("passed_business_page_count") != len(audited_business_page_keys)
         ):
             raise ValueError("system_audit_page_count_or_contract_failed")
         if (
             payload.get("overall_status") != "pass"
+            or summary.get("database_internal_contracts") != "pass"
             or not isinstance(audit_status, dict)
             or any(
                 audit_status.get(key) != expected
@@ -2135,9 +2152,15 @@ def _collect_system_audit(
         ):
             raise ValueError("system_audit_internal_gate_failed")
         page_results = snapshot.get("page_results")
+        page_result_keys = (
+            [str(page.get("page_key") or "") for page in page_results if isinstance(page, dict)]
+            if isinstance(page_results, list)
+            else []
+        )
         if (
             not isinstance(page_results, list)
-            or len(page_results) != 16
+            or len(page_results) != len(audited_business_page_keys)
+            or page_result_keys != audited_business_page_keys
             or any(
                 not isinstance(page, dict)
                 or page.get("overall_status") != "pass"
@@ -2163,6 +2186,7 @@ def _collect_system_audit(
 
 
 _RETRYABLE_SYSTEM_AUDIT_ERRORS = {
+    "system_audit_registry_contract_failed",
     "system_audit_page_count_or_contract_failed",
     "system_audit_internal_gate_failed",
     "system_audit_business_pages_failed",

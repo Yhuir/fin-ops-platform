@@ -246,6 +246,11 @@ class AppHealthSystemAuditTests(unittest.TestCase):
         self.assertEqual(report["overall_status"], "pass")
         self.assertEqual(report["summary"]["registered_page_count"], 17)
         self.assertEqual(report["summary"]["audited_business_page_count"], 16)
+        self.assertEqual(
+            set(report["audit_contract"]["audited_business_page_keys"]),
+            set(report["audit_contract"]["registered_page_keys"]) - {"app-health-operations"},
+        )
+        self.assertEqual(report["audit_contract"]["system_page_key"], "app-health-operations")
         self.assertEqual(report["external_evidence"]["status"], "unknown")
         self.assertEqual(report["external_evidence"]["end_to_end_source_truth"], "unproven")
         self.assertTrue(report["database_system_snapshot"]["evidence_fingerprint"])

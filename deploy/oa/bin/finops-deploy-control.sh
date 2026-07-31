@@ -1770,11 +1770,13 @@ profile = os.environ["CHECKPOINT_PROFILE"]
 page_canonical_audit_required = profile == "full"
 queue_backlog = runtime.get("queue_backlog", {}) if isinstance(runtime, dict) else {}
 dirty_scopes = runtime.get("dirty_scopes", {}) if isinstance(runtime, dict) else {}
+publish_status = runtime.get("rabbitmq_publish_status", {}) if isinstance(runtime, dict) else {}
 pending = (
     sum(int(queue_backlog.get(status) or 0) for status in ("pending", "processing"))
     if isinstance(queue_backlog, dict)
     else -1
 )
+publishing = int(publish_status.get("publishing") or 0) if isinstance(publish_status, dict) else -1
 failed = int(queue_backlog.get("failed") or 0) if isinstance(queue_backlog, dict) else -1
 durable_dead_letters = int(queue_backlog.get("dead_lettered") or 0) if isinstance(queue_backlog, dict) else -1
 rabbitmq_metrics_ready = (
@@ -1798,6 +1800,7 @@ passed = (
     and (page_canonical_audit_ready or not page_canonical_audit_required)
     and rabbitmq_metrics_ready
     and pending == 0
+    and publishing == 0
     and failed == 0
     and dead_letters == 0
     and dirty == 0
@@ -1820,6 +1823,7 @@ payload = {
     "required_worker_not_ready": int(inventory.get("required_worker_not_ready") or 0),
     "dirty_scope_count": dirty,
     "pending_outbox_count": pending,
+    "publishing_outbox_count": publishing,
     "failed_outbox_count": failed,
     "durable_dead_letter_count": durable_dead_letters,
     "rabbitmq_dead_letter_count": rabbitmq_dead_letters,
@@ -1887,6 +1891,7 @@ payload = {
     "required_worker_not_ready": int(latest.get("required_worker_not_ready", -1)),
     "dirty_scope_count": int(latest.get("dirty_scope_count", -1)),
     "pending_outbox_count": int(latest.get("pending_outbox_count", -1)),
+    "publishing_outbox_count": int(latest.get("publishing_outbox_count", -1)),
     "dead_letter_delta": final_dlq - pre_dlq,
     "page_canonical_audit_status": (
         t0_page_audit.get("status")
@@ -1976,6 +1981,7 @@ required = {
     "required_worker_not_ready": 0,
     "dirty_scope_count": 0,
     "pending_outbox_count": 0,
+    "publishing_outbox_count": 0,
     "dead_letter_delta": 0,
     "page_canonical_audit_status": "pass",
     "queue_stable_after_300_seconds": True,

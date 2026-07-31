@@ -82,6 +82,12 @@
 - 未测风险：当前账号不能通过 deploy-control 执行自定义生产 EXPLAIN；本次已用 authenticated HTTP SLO 证明 rows 首屏热路径在生产 fresh read model 下闭合。真实 confirm/withdraw/no-OA withdraw 写操作链路仍需要受控业务样本或明确批准的可回滚演练，不能用只读探针替代。
 - 后续事项：若 rows API 再次超过 1s，优先检查是否违反当前三条热路径合同：`nulls last` 索引、canonical `payload` 单写单读、页级 `bank_account_mappings` 复用；不要回退到同步扫描、伪缓存或绕过 freshness gate。
 
+## 2026-07-31 - canonical rule matching 规范化复用
+
+- 生产诊断显示 rows 1/10/50 与 filter-options 都约 1.8 秒，瓶颈不随返回行数增长，定位到 canonical SQL 中每条银行流水对每条规则重复执行相同文本规范化。
+- 保持 direct canonical API 和既有业务 SQL，只在 `banks` materialized CTE 中为每条流水计算一次规则候选文本，`rule_matches` 直接复用；不新增 Redis、read model、表、索引、worker 或 response 字段。
+- SQL 合同测试保护预计算路径；最终性能由 production-equivalent release gate 的 authenticated API p95 `<=1000ms` 验证。
+
 ## 2026-06-25 - route-owner local closure audit
 
 - 目标：审计待找发票 route callback collapse 后 `server.py` 的剩余 pending invoice surface，判断本地 route-owner 支持是否已 accounted。

@@ -32,6 +32,10 @@ def audit_app_health_system_snapshot(
     dashboard_payload: dict[str, Any] | None,
 ) -> dict[str, Any]:
     dashboard = dict(dashboard_payload or {})
+    registered_page_keys = [registration.page_key for registration in registrations]
+    system_page_keys = [registration.page_key for registration in registrations if registration.executor == "system"]
+    system_page_key = system_page_keys[0] if len(system_page_keys) == 1 else ""
+    audited_business_page_keys = [str(report.get("page_key") or "") for report in page_reports]
     issues = _page_report_issues(
         registrations=registrations,
         page_reports=page_reports,
@@ -130,6 +134,9 @@ def audit_app_health_system_snapshot(
         "external_evidence": external_evidence,
         "page_projection": dashboard,
         "audit_contract": {
+            "registered_page_keys": registered_page_keys,
+            "audited_business_page_keys": audited_business_page_keys,
+            "system_page_key": system_page_key,
             "source_tables": [
                 "app.bank_transactions",
                 "app.invoices",

@@ -512,6 +512,7 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertNotIn("read_model_refresh_sample_count", summary)
         self.assertNotIn("read_model_refresh_failure_rate", summary)
         self.assertEqual(summary["rabbitmq_publish_status"], {"unpublished": 4, "failed": 2})
+        self.assertEqual(summary["rabbitmq_publishing_backlog"], 0)
         self.assertEqual(summary["rabbitmq_queue_depth"], 5)
         self.assertEqual(summary["stale_dirty_scope_count"], 1)
         self.assertEqual(summary["pending_outbox_events_by_scope"][0]["event_type"], "workbench_relation.read_model.refresh")
@@ -531,6 +532,9 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertEqual(executed_sql.count("ready_outbox_snapshot"), 1)
         self.assertEqual(executed_sql.count("ready_dirty_scope_snapshot"), 1)
         self.assertIn("current_events as materialized", executed_sql)
+        self.assertIn("e.status = 'done'", executed_sql)
+        self.assertIn("e.publish_status = 'publishing'", executed_sql)
+        self.assertIn("(status = 'pending' or publish_status = 'publishing')", executed_sql)
         self.assertIn("current_dirty_scopes as materialized", executed_sql)
         self.assertIn(
             "dirty_counts as ( select status, count(*)::bigint as count from current_dirty_scopes",

@@ -203,7 +203,30 @@ banks as materialized (
         manual.category_source as manual_category_source,
         manual.category_payload as manual_category_payload,
         confirmation.category_code as confirmed_category_code,
-        income_override.status_code as income_override_status
+        income_override.status_code as income_override_status,
+        {_normalize_sql_text("bank.counterparty_name")} as rule_counterparty_name,
+        {_normalize_sql_text("bank.counterparty_account_no")} as rule_counterparty_account,
+        {_normalize_sql_text("bank.counterparty_bank_name")} as rule_counterparty_bank,
+        {_normalize_sql_text("coalesce(bank.raw_payload->'normalized_payload'->>'purpose', bank.raw_payload->>'purpose', '')")}
+            as rule_purpose_text,
+        {_normalize_sql_text("bank.summary")} as rule_summary_text,
+        {_normalize_sql_text("bank.remark")} as rule_note_text,
+        {_normalize_sql_text("coalesce(bank.raw_payload->'normalized_payload'->>'detail_text', bank.raw_payload->>'detail_text', '')")}
+            as rule_detail_text,
+        coalesce(
+            (
+                select array_agg({_normalize_sql_text("text_field->>'value'")})
+                from jsonb_array_elements(
+                    case
+                        when jsonb_typeof(bank.bank_text_fields) = 'array'
+                        then bank.bank_text_fields
+                        else '[]'::jsonb
+                    end
+                ) text_fields(text_field)
+                where nullif(text_field->>'value', '') is not null
+            ),
+            array[]::text[]
+        ) as rule_bank_detail_texts
     from bank_source bank
     left join manual_categories manual on manual.row_id = bank.row_id
     left join confirmed_categories confirmation on confirmation.row_id = bank.row_id
@@ -466,7 +489,7 @@ rule_matches as materialized (
     from banks b
     cross join rule_definitions definition
     cross join lateral (
-        select coalesce(array_agg({_normalize_sql_text("candidate.value")}), array[]::text[]) as texts
+        select coalesce(array_agg(candidate.value), array[]::text[]) as texts
         from jsonb_array_elements_text(
             case
                 when jsonb_typeof(definition.definition#>'{{rules,match_fields}}') = 'array'
@@ -478,21 +501,19 @@ rule_matches as materialized (
             select source.value
             from (
                 values
-                    ('counterparty_name', b.counterparty_name),
-                    ('counterparty_account', b.counterparty_account_no),
-                    ('counterparty_bank', b.counterparty_bank_name),
-                    ('purpose_text', coalesce(b.raw_payload->'normalized_payload'->>'purpose', b.raw_payload->>'purpose', '')),
-                    ('summary_text', b.summary),
-                    ('note_text', b.remark),
-                    ('detail_text', coalesce(b.raw_payload->'normalized_payload'->>'detail_text', b.raw_payload->>'detail_text', ''))
+                    ('counterparty_name', b.rule_counterparty_name),
+                    ('counterparty_account', b.rule_counterparty_account),
+                    ('counterparty_bank', b.rule_counterparty_bank),
+                    ('purpose_text', b.rule_purpose_text),
+                    ('summary_text', b.rule_summary_text),
+                    ('note_text', b.rule_note_text),
+                    ('detail_text', b.rule_detail_text)
             ) source(field, value)
             where source.field = match_field.field
                or match_field.field = 'all_text'
             union all
-            select coalesce(text_field->>'value', '')
-            from jsonb_array_elements(
-                case when jsonb_typeof(b.bank_text_fields) = 'array' then b.bank_text_fields else '[]'::jsonb end
-            ) text_fields(text_field)
+            select detail_text.value
+            from unnest(b.rule_bank_detail_texts) detail_text(value)
             where match_field.field in ('detail_text', 'all_text')
         ) candidate
         where nullif(candidate.value, '') is not null

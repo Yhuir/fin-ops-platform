@@ -47,7 +47,7 @@
 | Release artifact | 生产服务器 | 可追踪版本 |
 | systemd/env files | deploy/oa | 与 registry 一致 |
 | Verification result | operator/CI | 失败不得伪装成功 |
-| Production-equivalent release evidence | `/opt/fin-ops/runtime-smoke/release-gates/<release>/evidence.json` | root-owned `0600` 原子写入，并绑定 release 名称、candidate Git commit 和 previous release。最终 PASS 必须同时证明 `unknown_worker_count=0`、`required_worker_not_ready=0`、`dirty_scope_count=0`、`pending_outbox_count=0`、`dead_letter_delta=0`、`queue_stable_after_300_seconds=true` |
+| Production-equivalent release evidence | `/opt/fin-ops/runtime-smoke/release-gates/<release>/evidence.json` | root-owned `0600` 原子写入，并绑定 release 名称、candidate Git commit 和 previous release。最终 PASS 必须同时证明 `unknown_worker_count=0`、`required_worker_not_ready=0`、`dirty_scope_count=0`、`pending_outbox_count=0`、`publishing_outbox_count=0`、`dead_letter_delta=0`、`queue_stable_after_300_seconds=true` |
 | Bounded request traceback | operator | 仅用于把已知生产 500 定位到 release 文件和行号；不得输出业务 payload、token 或任意日志窗口 |
 | Write smoke restore-point manifest | operator | 固定记录 release、run-id、UTC 时间、dump 路径、字节数、格式和 SHA-256；不得包含 DSN、token 或业务 payload |
 

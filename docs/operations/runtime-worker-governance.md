@@ -557,6 +557,7 @@ release 与 Git commit。PRE 失败时，部署命令只返回不含 token、环
 - `required_worker_not_ready = 0`
 - `dirty_scope_count = 0`
 - `pending_outbox_count = 0`
+- `publishing_outbox_count = 0`
 - `dead_letter_delta = 0`
 - `page_canonical_audit_status = pass`
 - `queue_stable_after_300_seconds = true`
@@ -566,6 +567,10 @@ release 与 Git commit。PRE 失败时，部署命令只返回不含 token、环
 pre 与 rollback checkpoint 使用候选 release 的门禁代码检查实际运行 release；worker inventory 仍按实际
 运行 release 的 registry 核对。这样首次启用新门禁时不依赖旧 release 中尚不存在的检查逻辑。
 不存在“候选已激活但没有有效 gate evidence”的成功状态。
+
+RabbitMQ dispatcher 每次领取待发布事件前，会把超过 publish lock timeout 且业务消费已经完成的
+`status=done/publish_status=publishing` 行收敛为 `published`。这类行证明消息已经到达 consumer，
+不得重复发布；release gate 同时要求 `publishing_outbox_count=0`，防止终态事件卡在 transport 中间态。
 
 worker readiness 不是 systemd active。发布脚本会等待：
 

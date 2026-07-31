@@ -59,6 +59,7 @@
 | Read model projection | 对应 repository | 只写 worker 对应投影 |
 | Import canonical delta | state-store/import repository | 只通过 `save_import_delta` 窄端口；PostgreSQL 幂等 upsert、本地按稳定 id 合并，禁止 generic full-state replace。durable delta 成功后只允许当前 import 合同明确的非页面领域任务；页面 write target/freshness/barrier 均为空。持久化失败时不得产生任何下游事件 |
 | Wakeup/transport | RabbitMQ 可选 | 不能作为状态事实源；dispatcher 发布的每个 registry event 必须有 required consumer，缺失 metrics 或 consumer=0 时 release gate 阻断；正式切换由 deploy-control 根据 registry 精确备份、执行并失败回滚 |
+| Publish terminal recovery | PostgreSQL outbox / RabbitMQ dispatcher | consumer 已把 durable event 完成后，超过 publish lock timeout 的 `status=done/publish_status=publishing` 由 dispatcher 收敛为 `published`，不得重复发布；release gate 必须同时证明 publishing backlog 为 0 |
 | Queue history retention result | runtime queue ops / deploy timer | 只删除 `done` 历史；输出按 outbox event type 与 dirty scope type 聚合的 candidate/deleted count |
 
 ## 文件范围

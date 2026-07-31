@@ -76,13 +76,14 @@ def _turnover_withdraw_rows() -> list[dict[str, object]]:
 
 
 def _system_audit_payload(audit_id: str = "system-audit:test-1") -> dict[str, object]:
+    audited_page_keys = [f"page-{index}" for index in range(16)]
     page_results = [
         {
-            "page_key": f"page-{index}",
+            "page_key": page_key,
             "overall_status": "pass",
             "audit_status": {"integrity": "pass", "freshness": "fresh", "queue": "drained"},
         }
-        for index in range(16)
+        for page_key in audited_page_keys
     ]
     return {
         "overall_status": "pass",
@@ -100,7 +101,12 @@ def _system_audit_payload(audit_id: str = "system-audit:test-1") -> dict[str, ob
             "database_snapshot": True,
             "page_results": page_results,
         },
-        "audit_contract": {"contract_revision": "page-audit-contract.v26"},
+        "audit_contract": {
+            "contract_revision": "page-audit-contract.v26",
+            "registered_page_keys": [*audited_page_keys, "app-health-operations"],
+            "audited_business_page_keys": audited_page_keys,
+            "system_page_key": "app-health-operations",
+        },
         "external_evidence": {"status": "unknown"},
     }
 

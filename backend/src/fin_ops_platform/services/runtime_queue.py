@@ -988,6 +988,35 @@ class RuntimeQueueRepository:
             params = (publisher_id, lock_timeout_seconds, normalized_limit)
 
         with self._connection.transaction() as transaction:
+            transaction.execute(
+                """
+                update job.outbox_events
+                set
+                    publish_status = 'published',
+                    published_at = coalesce(published_at, now()),
+                    publish_confirmed_at = coalesce(publish_confirmed_at, now()),
+                    publish_last_error = null,
+                    publish_locked_by = null,
+                    publish_locked_at = null,
+                    rabbitmq_message_id = coalesce(rabbitmq_message_id, id::text),
+                    updated_at = now(),
+                    raw_payload = jsonb_set(
+                        coalesce(raw_payload, '{}'::jsonb),
+                        '{rabbitmq_publish_recovery}',
+                        jsonb_build_object(
+                            'reason',
+                            'terminal_event_already_completed',
+                            'recovered_at',
+                            now()
+                        ),
+                        true
+                    )
+                where status = 'done'
+                  and publish_status = 'publishing'
+                  and publish_locked_at < now() - (%s * interval '1 second')
+                """,
+                (lock_timeout_seconds,),
+            )
             rows = transaction.fetch_all(
                 f"""
                 update job.outbox_events

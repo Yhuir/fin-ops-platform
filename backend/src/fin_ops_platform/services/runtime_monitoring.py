@@ -1349,6 +1349,7 @@ class RuntimeMonitoringRepository:
             "read_model_refresh_current_slow_events": read_model_refresh_current_slow_events,
             "rabbitmq_publish_status": publish_status,
             "rabbitmq_unpublished_backlog": int(publish_status.get("unpublished", 0)),
+            "rabbitmq_publishing_backlog": int(publish_status.get("publishing", 0)),
             "rabbitmq_publish_failed_backlog": int(publish_status.get("failed", 0)),
             "rabbitmq_dispatcher_lag_seconds": (publish_lag_row or {}).get("max_unpublished_age_seconds"),
             "rabbitmq_publish_confirm_latency_ms": {
@@ -1408,6 +1409,7 @@ class RuntimeMonitoringRepository:
             "mismatched_required_worker_count": mismatched_required_worker_count,
             "rabbitmq_publish_status": publish_status,
             "rabbitmq_unpublished_backlog": int(publish_status.get("unpublished", 0)),
+            "rabbitmq_publishing_backlog": int(publish_status.get("publishing", 0)),
             "rabbitmq_publish_failed_backlog": int(publish_status.get("failed", 0)),
             "rabbitmq_dispatcher_lag_seconds": outbox_summary["max_unpublished_age_seconds"],
             **rabbitmq_metrics,
@@ -1432,18 +1434,27 @@ class RuntimeMonitoringRepository:
                 e.attempts,
                 e.last_error
               from job.outbox_events e
-              where e.status <> 'done'
-                and {_current_effective_outbox_attention_predicate_sql("e")}
+              where (
+                  (
+                    e.status <> 'done'
+                    and {_current_effective_outbox_attention_predicate_sql("e")}
+                  )
+                  or (
+                    e.status = 'done'
+                    and e.publish_status = 'publishing'
+                  )
+                )
             ),
             queue_counts as (
               select status, count(*)::bigint as count
               from current_events
+              where status <> 'done'
               group by status
             ),
             publish_counts as (
               select publish_status, count(*)::bigint as count
               from current_events
-              where status = 'pending'
+              where (status = 'pending' or publish_status = 'publishing')
                 and event_type = any(%s)
               group by publish_status
             ),
