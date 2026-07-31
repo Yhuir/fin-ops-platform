@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import type { ReactNode } from "react";
 
 import BankAccountValue from "../BankAccountValue";
 import AppDrawer from "../common/AppDrawer";
@@ -28,21 +28,6 @@ type DetailTableSection = {
 };
 
 export default function DetailDrawer({ row, loading, error, onClose }: DetailDrawerProps) {
-  useEffect(() => {
-    if (!row) {
-      return undefined;
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [row, onClose]);
-
   const open = Boolean(row);
   const title = row ? drawerTitles[row.recordType] : "详情";
   const sections = row ? detailTableSections(row, loading, error) : [];

@@ -40,8 +40,10 @@ export default function AppDrawer({
 }: AppDrawerProps) {
   const titleId = useId();
   const [persistentMounted, setPersistentMounted] = useState(open);
+  const [persistentVisible, setPersistentVisible] = useState(false);
   const [persistentClosing, setPersistentClosing] = useState(false);
   const persistentCloseTimerRef = useRef<number | null>(null);
+  const persistentFrameRef = useRef<number | null>(null);
   const drawerStyle: AppDrawerStyle = {
     "--finance-drawer-width": typeof width === "number" ? `${width}px` : width,
   };
@@ -71,22 +73,38 @@ export default function AppDrawer({
       window.clearTimeout(persistentCloseTimerRef.current);
       persistentCloseTimerRef.current = null;
     }
+    if (persistentFrameRef.current !== null) {
+      window.cancelAnimationFrame(persistentFrameRef.current);
+      persistentFrameRef.current = null;
+    }
 
     if (open) {
       setPersistentMounted(true);
-      setPersistentClosing(false);
-      return undefined;
+      persistentFrameRef.current = window.requestAnimationFrame(() => {
+        persistentFrameRef.current = null;
+        setPersistentClosing(false);
+        setPersistentVisible(true);
+      });
+      return () => {
+        if (persistentFrameRef.current !== null) {
+          window.cancelAnimationFrame(persistentFrameRef.current);
+          persistentFrameRef.current = null;
+        }
+      };
     }
 
     if (!persistentMounted) {
+      setPersistentVisible(false);
       setPersistentClosing(false);
       return undefined;
     }
 
+    setPersistentVisible(false);
     setPersistentClosing(true);
     persistentCloseTimerRef.current = window.setTimeout(() => {
       persistentCloseTimerRef.current = null;
       setPersistentMounted(false);
+      setPersistentVisible(false);
       setPersistentClosing(false);
     }, persistentDrawerExitMs);
 
@@ -107,7 +125,7 @@ export default function AppDrawer({
       <aside
         aria-hidden={persistentClosing ? true : undefined}
         className="finance-drawer__content finance-drawer__content--persistent"
-        data-entering={open && !persistentClosing ? true : undefined}
+        data-entering={persistentVisible && !persistentClosing ? true : undefined}
         data-exiting={persistentClosing ? true : undefined}
         data-placement="right"
       >
@@ -145,6 +163,7 @@ export default function AppDrawer({
 
   return (
     <Drawer.Backdrop
+      className="finance-drawer__backdrop"
       isOpen={open}
       onOpenChange={(isOpen) => {
         if (!isOpen) {

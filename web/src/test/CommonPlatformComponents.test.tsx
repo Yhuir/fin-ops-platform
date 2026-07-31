@@ -186,7 +186,7 @@ describe("common platform components", () => {
   });
 
   test("keeps persistent app drawer mounted for its exit motion", () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"] });
     const onClose = vi.fn();
 
     try {
@@ -197,6 +197,9 @@ describe("common platform components", () => {
       );
 
       expect(screen.getByText("持久抽屉正文")).toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(16);
+      });
       expect(screen.getByText("持久抽屉正文").closest(".finance-drawer__content")).toHaveAttribute("data-entering", "true");
 
       rerender(
@@ -220,7 +223,7 @@ describe("common platform components", () => {
   });
 
   test("cancels a pending persistent exit when the drawer reopens", () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"] });
     const onClose = vi.fn();
 
     try {
@@ -229,6 +232,9 @@ describe("common platform components", () => {
           <p>快速切换正文</p>
         </AppDrawer>,
       );
+      act(() => {
+        vi.advanceTimersByTime(16);
+      });
 
       rerender(
         <AppDrawer modal={false} onClose={onClose} open={false} title="非模态抽屉">
@@ -243,7 +249,7 @@ describe("common platform components", () => {
         </AppDrawer>,
       );
       act(() => {
-        vi.advanceTimersByTime(180);
+        vi.advanceTimersByTime(16);
       });
 
       expect(screen.getByText("快速切换正文").closest(".finance-drawer__content")).not.toHaveAttribute("data-exiting");
