@@ -197,6 +197,50 @@ def http_pass_report() -> dict[str, object]:
     }
 
 
+def http_freshness_fail_report() -> dict[str, object]:
+    return {
+        "status": "fail",
+        "auth_configured": True,
+        "summary": {"probe_count": 1, "sample_count": 3, "failed_probe_count": 1},
+        "probes": [
+            {
+                "name": "workbench_groups_all_paired",
+                "status": "fail",
+                "sample_count": 3,
+                "success_count": 3,
+                "failure_count": 0,
+                "slo_pass": True,
+                "freshness_pass": False,
+                "errors": [],
+                "non_fresh_read_model_statuses": {"refreshing": 3},
+                "refresh_enqueued_count": 0,
+            }
+        ],
+    }
+
+
+def http_latency_fail_report() -> dict[str, object]:
+    return {
+        "status": "fail",
+        "auth_configured": True,
+        "summary": {"probe_count": 1, "sample_count": 3, "failed_probe_count": 1},
+        "probes": [
+            {
+                "name": "workbench_groups_all_paired",
+                "status": "fail",
+                "sample_count": 3,
+                "success_count": 3,
+                "failure_count": 0,
+                "slo_pass": False,
+                "freshness_pass": True,
+                "errors": [],
+                "non_fresh_read_model_statuses": {},
+                "refresh_enqueued_count": 0,
+            }
+        ],
+    }
+
+
 def sse_pass_report() -> dict[str, object]:
     return {
         "status": "pass",
@@ -868,6 +912,86 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
         self.assertTrue(
             all(probe.path.startswith("/api/") for probe in api_probes)
         )
+
+    def test_http_slo_waits_for_transient_freshness_then_requires_full_pass(self) -> None:
+        with patch.object(
+            gate.http_slo_probe,
+            "collect_http_slo",
+            side_effect=[http_freshness_fail_report(), http_pass_report()],
+        ) as collect, patch.object(
+            gate,
+            "monotonic",
+            side_effect=[0.0, 0.1, 0.2],
+        ), patch.object(gate, "sleep") as sleep:
+            check = gate._http_slo_check(
+                base_url="https://example.test",
+                page_base_url="https://example.test",
+                api_prefix="/fin-ops-api",
+                headers={"Authorization": "Bearer token"},
+                admin_headers={},
+                target_ms=1_000,
+                timeout_seconds=1,
+                poll_interval_seconds=0.05,
+                require_auth=True,
+            )
+
+        self.assertEqual(check.status, gate.PASS)
+        self.assertEqual(check.payload["freshness_wait_attempts"], 1)
+        self.assertEqual(collect.call_count, 2)
+        sleep.assert_called_once_with(0.05)
+
+    def test_http_slo_fails_when_freshness_does_not_converge_before_deadline(self) -> None:
+        with patch.object(
+            gate.http_slo_probe,
+            "collect_http_slo",
+            side_effect=[http_freshness_fail_report(), http_freshness_fail_report()],
+        ) as collect, patch.object(
+            gate,
+            "monotonic",
+            side_effect=[0.0, 0.5, 1.0, 1.0],
+        ), patch.object(gate, "sleep") as sleep:
+            check = gate._http_slo_check(
+                base_url="https://example.test",
+                page_base_url="https://example.test",
+                api_prefix="/fin-ops-api",
+                headers={"Authorization": "Bearer token"},
+                admin_headers={},
+                target_ms=1_000,
+                timeout_seconds=1,
+                poll_interval_seconds=0.5,
+                require_auth=True,
+            )
+
+        self.assertEqual(check.status, gate.FAIL)
+        self.assertEqual(check.payload["freshness_wait_attempts"], 1)
+        self.assertEqual(collect.call_count, 2)
+        sleep.assert_called_once_with(0.5)
+
+    def test_http_slo_does_not_retry_latency_failure(self) -> None:
+        with patch.object(
+            gate.http_slo_probe,
+            "collect_http_slo",
+            return_value=http_latency_fail_report(),
+        ) as collect, patch.object(
+            gate,
+            "monotonic",
+            side_effect=[0.0, 0.1],
+        ), patch.object(gate, "sleep") as sleep:
+            check = gate._http_slo_check(
+                base_url="https://example.test",
+                page_base_url="https://example.test",
+                api_prefix="/fin-ops-api",
+                headers={"Authorization": "Bearer token"},
+                admin_headers={},
+                target_ms=1_000,
+                timeout_seconds=1,
+                require_auth=True,
+            )
+
+        self.assertEqual(check.status, gate.FAIL)
+        self.assertEqual(check.payload["freshness_wait_attempts"], 0)
+        collect.assert_called_once()
+        sleep.assert_not_called()
 
 
 if __name__ == "__main__":

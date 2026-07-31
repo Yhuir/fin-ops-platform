@@ -224,6 +224,7 @@ def run_closure_gate(
                     target_ms=http_target_ms,
                     timeout_seconds=timeout_seconds,
                     require_auth=not allow_unauthenticated_http,
+                    poll_interval_seconds=poll_interval_seconds,
                 ),
                 _sse_smoke_check(
                     base_url=base_url,
@@ -453,39 +454,56 @@ def _http_slo_check(
     target_ms: float,
     timeout_seconds: float,
     require_auth: bool,
+    poll_interval_seconds: float = 0.5,
 ) -> ClosureCheck:
-    report = http_slo_probe.collect_http_slo(
-        base_url=base_url,
-        api_prefix=api_prefix,
-        headers=headers,
-        admin_headers=admin_headers,
-        iterations=3,
-        warmup=1,
-        timeout_seconds=min(max(1.0, timeout_seconds), 30.0),
-        require_auth=require_auth,
-        probes=http_slo_probe._with_target(
-            [
-                *[
-                    http_slo_probe.HttpProbe(
-                        name=http_slo_probe._page_probe_name(path, fallback_index=index),
-                        path=http_slo_probe.resolve_probe_url(page_base_url, path),
-                        kind="page",
-                        expected_statuses=(200,),
-                        target_ms=target_ms,
-                    )
-                    for index, path in enumerate(http_slo_probe.DEFAULT_PAGE_PATHS, start=1)
-                ],
-                *http_slo_probe.DEFAULT_API_PROBES,
+    probes = http_slo_probe._with_target(
+        [
+            *[
+                http_slo_probe.HttpProbe(
+                    name=http_slo_probe._page_probe_name(path, fallback_index=index),
+                    path=http_slo_probe.resolve_probe_url(page_base_url, path),
+                    kind="page",
+                    expected_statuses=(200,),
+                    target_ms=target_ms,
+                )
+                for index, path in enumerate(http_slo_probe.DEFAULT_PAGE_PATHS, start=1)
             ],
-            target_ms,
-        ),
+            *http_slo_probe.DEFAULT_API_PROBES,
+        ],
+        target_ms,
     )
+    started = monotonic()
+    deadline = started + max(1.0, timeout_seconds)
+    attempts = 0
+    while True:
+        attempts += 1
+        report = http_slo_probe.collect_http_slo(
+            base_url=base_url,
+            api_prefix=api_prefix,
+            headers=headers,
+            admin_headers=admin_headers,
+            iterations=3,
+            warmup=1,
+            timeout_seconds=min(max(1.0, timeout_seconds), 30.0),
+            require_auth=require_auth,
+            probes=probes,
+        )
+        if report.get("status") == PASS or not _http_slo_has_only_transient_freshness_failures(report):
+            break
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            break
+        sleep(min(max(0.05, poll_interval_seconds), remaining))
+    wait_payload = {
+        "freshness_wait_attempts": max(0, attempts - 1),
+        "freshness_wait_elapsed_ms": round(max(0.0, monotonic() - started) * 1000, 3),
+    }
     if report.get("status") == "auth_missing":
         return ClosureCheck(
             "authenticated_http_slo",
             FAIL,
             "Authenticated page/API SLO cannot be proven without a real OA token or Admin-Token cookie.",
-            _compact_report(report),
+            {**_compact_report(report), **wait_payload},
         )
     summary = report.get("summary") if isinstance(report.get("summary"), Mapping) else {}
     probe_count = _safe_int(summary.get("probe_count"))
@@ -497,6 +515,7 @@ def _http_slo_check(
             "Authenticated HTTP SLO produced no probe/sample evidence; final closure requires non-empty page/API samples.",
             {
                 **_compact_report(report),
+                **wait_payload,
                 "error": "http_slo_empty_samples",
             },
         )
@@ -504,7 +523,29 @@ def _http_slo_check(
         "authenticated_http_slo",
         PASS if report.get("status") == PASS else FAIL,
         "Authenticated page shells and first-screen APIs met p95 target." if report.get("status") == PASS else "Authenticated HTTP SLO failed.",
-        _compact_report(report),
+        {**_compact_report(report), **wait_payload},
+    )
+
+
+def _http_slo_has_only_transient_freshness_failures(report: Mapping[str, Any]) -> bool:
+    probes = report.get("probes")
+    if report.get("status") != FAIL or not isinstance(probes, list):
+        return False
+    failed_probes = [
+        probe
+        for probe in probes
+        if isinstance(probe, Mapping) and probe.get("status") != PASS
+    ]
+    return bool(failed_probes) and all(
+        _safe_int(probe.get("failure_count")) == 0
+        and not probe.get("errors")
+        and probe.get("slo_pass") is True
+        and probe.get("freshness_pass") is False
+        and (
+            bool(probe.get("non_fresh_read_model_statuses"))
+            or _safe_int(probe.get("refresh_enqueued_count")) > 0
+        )
+        for probe in failed_probes
     )
 
 

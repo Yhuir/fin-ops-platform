@@ -637,6 +637,9 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_sync_closure_ga
 - health-ready payload：`/fin-ops-api/health/ready` 自身在 1000ms 内返回轻量 JSON，`api_performance` bounded 且带截断 metadata。
 - direct read model smoke：显式 `--apply-read-model-smoke` 后，每个 App Status read model 的 enqueue-to-fresh 在目标内。
 - 登录态 HTTP SLO：必须使用真实 OA token/Admin-Token/cookie，覆盖全 app 页面 shell 与首屏 API p95。
+- 登录态 HTTP SLO 若仅命中 `read_model_status=refreshing` / `refresh_enqueued`，会在同一 checkpoint 的有界 timeout
+  内重新执行完整采样；最终样本仍必须全部 `fresh` 且满足 p95。鉴权、HTTP 状态、HTML fallback、响应错误或延迟
+  超标不会重试或降级，freshness 到期仍未收敛也会失败。
 - 登录态 SSE smoke：必须使用真实 OA token/Admin-Token/cookie，覆盖 App Health 和 Workbench event-stream 首事件 `<= 1000ms`，并拒绝 HTML fallback 或错误事件名。
 - 真实写操作 audit：最近真实 durable outbox 样本覆盖内置高影响 operation profile，并满足写入后 outbox done SLO。
 - 隔离 PostgreSQL 写探针：只在 `pg_temp` 临时表内执行 insert/read/delete/rollback，必须在目标内完成且不能留下 residue；不得修改 canonical facts、关系、read model、outbox 或 dirty scope。
