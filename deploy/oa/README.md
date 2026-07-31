@@ -408,6 +408,9 @@ python -m fin_ops_platform.app.worker \
   隔离 PostgreSQL 可逆写探针和只读页面 canonical audit，不执行业务 mutation。候选 gate 读取旧
   stable API 时，以候选内置页面 registry 对响应 summary 与逐页 proof 做严格对账；旧响应缺少 registry
   明细字段可以由完整逐页 proof 证明，字段只返回一部分、漏页或顺序漂移仍 fail closed
+- `preflight` 的 worker readiness 使用当前 stable release 的 required worker inventory；新增 required
+  worker 由激活阶段的 ensure helper 安装，并从 T+0 起按候选 registry 严格校验，避免候选 registry 在
+  激活前把尚未部署的新 worker 误报为旧 runtime 故障
 - 候选激活后 T+0 运行 `full`：连接真实 PostgreSQL 与 RabbitMQ，检查 exact worker inventory、
   queue/dirty/dead-letter 收敛、critical read-model SLO、隔离事务写入能力、domain/page canonical
   audit 及 API/health 性能

@@ -8,6 +8,14 @@
 - PostgreSQL API read/write pool 各有 acquire timeout、max waiting 和 pool name；HTTP overload/DB pool timeout 映射 503，避免无限线程等待十个连接。
 - pidfile 位于 systemd `RuntimeDirectory=fin-ops`，供 data reset worker 完成后受校验请求 Gunicorn reload；旧 custom server 和 SSE release gate 已退出部署链路。
 
+## 2026-08-01 - 新增 required worker 的 preflight registry 边界
+
+- 生产预激活门禁暴露升级顺序缺陷：候选 gate 用候选 registry 审计 stable runtime，会把尚未安装的新增
+  `settings-maintenance` worker 误报为缺失。
+- `runtime_sync_closure_gate` 增加显式 required worker inventory 输入；deploy-control 仅在 `preflight` 从
+  stable release manifest 传入，T+0/T+60/T+300 仍使用候选 registry。没有预启动候选 worker，也没有绕过门禁。
+- 回归覆盖 stable inventory 透传、runtime monitoring scope 和 deploy-control 脚本合同。
+
 ## 当前决策
 
 - 生产发布入口保持 `./scripts/deploy-oa.sh`，只走 release-based 部署；`legacy-current` 覆盖式部署入口已经移除。

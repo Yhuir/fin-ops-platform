@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 from fin_ops_platform.services.runtime_queue import DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
@@ -540,6 +541,16 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
             "dirty_counts as ( select status, count(*)::bigint as count from current_dirty_scopes",
             " ".join(executed_sql.split()),
         )
+
+    def test_ready_health_summary_scopes_required_workers_for_release_preflight(self) -> None:
+        connection = FakeConnection()
+        repository = RuntimeMonitoringRepository(connection, rabbitmq_metrics_provider=FakeRabbitMqMetrics())
+        expected_instances = {"import", "oa-sync"}
+
+        with patch.object(repository, "dashboard_worker_metrics", return_value=[]) as worker_metrics:
+            repository.ready_health_summary(required_worker_instances=expected_instances)
+
+        worker_metrics.assert_called_once_with(worker_instances=expected_instances)
 
     def test_dashboard_outbox_metric_only_scans_current_attention_statuses(self) -> None:
         class OutboxMetricConnection:

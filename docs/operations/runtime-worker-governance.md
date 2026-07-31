@@ -544,6 +544,9 @@ audit；任何 profile 都不得 confirm、withdraw、recovery 或修改真实�
 验证 exact registry/systemd inventory、worker readiness、dirty scope、pending/processing outbox、durable 与
 RabbitMQ dead letter、critical read-model enqueue-to-fresh SLO、domain audit 和 API/health 性能。
 最终 evidence 复用只读页面 canonical audit，并以 T+300 runtime 采样证明 queue 持续稳定。
+`preflight` 由候选 gate 代码执行，但 worker readiness 的 required instance 集合必须显式取自当前 stable
+release；候选新增 worker 只能在 `activate_release` 的 ensure 阶段安装，并在 T+0 以后按候选 registry 验证。
+这保证旧 runtime 按自己的已部署拓扑审计，同时不降低候选激活后的 exact inventory 门禁。
 RabbitMQ management 未配置或读取失败时 fail closed。checkpoint 必须按实际
 systemd I/O 边界分别加载 `/etc/fin-ops/fin-ops.rabbitmq-topology.env`（topology apply）和
 `/etc/fin-ops/fin-ops.rabbitmq-monitoring.env`（runtime health/closure）；文件缺失或不可读不得退回

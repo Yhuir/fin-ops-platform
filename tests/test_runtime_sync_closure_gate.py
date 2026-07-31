@@ -121,6 +121,18 @@ class RecurrentTerminalPublishRaceQueueRepository:
         return 1
 
 
+class RequiredWorkerOverrideMonitoringRepository(FakeRuntimeMonitoringRepository):
+    required_worker_instances: set[str] | None = None
+
+    def ready_health_summary(
+        self,
+        *,
+        required_worker_instances: set[str] | None = None,
+    ) -> dict[str, object]:
+        type(self).required_worker_instances = required_worker_instances
+        return super().ready_health_summary()
+
+
 class FakeWriteTransaction:
     def __init__(self) -> None:
         self.marker: str | None = None
@@ -478,6 +490,26 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
         self.assertEqual(check.status, gate.FAIL)
         self.assertEqual(check.payload["error"], "runtime_health_missing_facts")
         self.assertIn("queue_backlog", check.payload["missing_fields"])
+
+    def test_runtime_health_can_use_stable_release_worker_inventory(self) -> None:
+        RequiredWorkerOverrideMonitoringRepository.required_worker_instances = None
+        with patch.object(
+            gate,
+            "RuntimeMonitoringRepository",
+            RequiredWorkerOverrideMonitoringRepository,
+        ):
+            check = gate._runtime_health_check(
+                object(),
+                timeout_seconds=0,
+                poll_interval_seconds=0.05,
+                required_worker_instances={"import", "oa-sync"},
+            )
+
+        self.assertEqual(check.status, gate.PASS)
+        self.assertEqual(
+            RequiredWorkerOverrideMonitoringRepository.required_worker_instances,
+            {"import", "oa-sync"},
+        )
 
     def test_runtime_health_preserves_per_queue_diagnostics(self) -> None:
         with patch.object(

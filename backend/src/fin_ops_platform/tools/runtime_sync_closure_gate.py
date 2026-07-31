@@ -90,6 +90,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout-seconds", type=float, default=90.0)
     parser.add_argument("--poll-interval-seconds", type=float, default=0.5)
     parser.add_argument("--limit", type=int, default=2_000)
+    parser.add_argument(
+        "--required-worker-instance",
+        action="append",
+        default=[],
+        help="Override the required worker inventory used by runtime health checks.",
+    )
     parser.add_argument("--output", type=Path)
     parser.add_argument("--json", action="store_true", help="Print JSON output. This is the default output shape.")
     return parser
@@ -135,6 +141,11 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         timeout_seconds=max(1.0, float(args.timeout_seconds)),
         poll_interval_seconds=max(0.05, float(args.poll_interval_seconds)),
         limit=max(1, int(args.limit)),
+        required_worker_instances={
+            str(instance).strip()
+            for instance in args.required_worker_instance
+            if str(instance).strip()
+        } or None,
     )
     encoded = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True, default=str)
     if args.output is not None:
@@ -166,6 +177,7 @@ def run_closure_gate(
     timeout_seconds: float = 90.0,
     poll_interval_seconds: float = 0.5,
     limit: int = 2_000,
+    required_worker_instances: set[str] | None = None,
 ) -> dict[str, Any]:
     if profile not in GATE_PROFILES:
         raise ValueError(f"unsupported release gate profile: {profile}")
@@ -189,6 +201,7 @@ def run_closure_gate(
                     connection,
                     timeout_seconds=timeout_seconds,
                     poll_interval_seconds=poll_interval_seconds,
+                    required_worker_instances=required_worker_instances,
                 ),
                 _health_ready_payload_check(
                     base_url=base_url,
@@ -245,6 +258,7 @@ def run_closure_gate(
                 timeout_seconds=timeout_seconds,
                 poll_interval_seconds=poll_interval_seconds,
                 name="runtime_health_before_final_convergence",
+                required_worker_instances=required_worker_instances,
             )
             checks.append(pre_final_health)
         # Sample runtime convergence after every release-gate probe has completed.
@@ -253,6 +267,7 @@ def run_closure_gate(
                 connection,
                 timeout_seconds=timeout_seconds,
                 poll_interval_seconds=poll_interval_seconds,
+                required_worker_instances=required_worker_instances,
             )
         )
     # The canonical snapshot is the final proof after every queue-producing probe
@@ -299,6 +314,7 @@ def _runtime_health_check(
     timeout_seconds: float,
     poll_interval_seconds: float,
     name: str = "runtime_health",
+    required_worker_instances: set[str] | None = None,
 ) -> ClosureCheck:
     deadline = monotonic() + max(0.0, timeout_seconds)
     monitoring_repository = RuntimeMonitoringRepository(connection)
@@ -313,7 +329,13 @@ def _runtime_health_check(
                 clean_samples_after_reconciliation = 0
             elif reconciled_completed_publish_states > 0:
                 clean_samples_after_reconciliation += 1
-            summary = monitoring_repository.ready_health_summary()
+            summary = (
+                monitoring_repository.ready_health_summary()
+                if required_worker_instances is None
+                else monitoring_repository.ready_health_summary(
+                    required_worker_instances=required_worker_instances,
+                )
+            )
         except Exception as exc:
             return ClosureCheck(
                 name,

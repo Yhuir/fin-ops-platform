@@ -400,6 +400,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("--read-model-target-ms 5000", script)
         self.assertIn("--write-target-ms 5000", script)
         self.assertIn("--http-target-ms 1000", script)
+        self.assertIn('--required-worker-instance "$required_worker_instance"', script)
         self.assertIn("sleep 60", script)
         self.assertIn("sleep 240", script)
         self.assertIn("rollback_release_gate", script)
@@ -598,6 +599,8 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertNotIn("--apply-write-scenarios", checkpoint)
         self.assertNotIn("--write-scenario", checkpoint)
         self.assertIn("--page-base-url https://www.yn-sourcing.com", checkpoint)
+        self.assertIn('if [[ "$profile" == "preflight" ]]', checkpoint)
+        self.assertIn('required_worker_instances "$src"', checkpoint)
         self.assertLess(
             checkpoint.index("-m fin_ops_platform.tools.runtime_sync_closure_gate"),
             checkpoint.index('"$API_PYTHON" - "$runtime_report"'),

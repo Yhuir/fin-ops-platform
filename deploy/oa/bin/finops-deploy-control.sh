@@ -1557,6 +1557,7 @@ release_gate_checkpoint() {
   local profile="${5:-full}"
   local verification_release="${6:-$release}"
   local src verification_src checkpoint_dir rabbit_report domain_report closure_report inventory_report runtime_report
+  local required_worker_instance
   local -a closure_args
   [[ "$profile" == "preflight" || "$profile" == "full" || "$profile" == "stability" ]] \
     || die "unsupported release gate profile: $profile"
@@ -1627,6 +1628,11 @@ release_gate_checkpoint() {
       --timeout-seconds 120
       --output "$closure_report"
     )
+    if [[ "$profile" == "preflight" ]]; then
+      for required_worker_instance in $(required_worker_instances "$src"); do
+        closure_args+=(--required-worker-instance "$required_worker_instance")
+      done
+    fi
     "$API_PYTHON" -m fin_ops_platform.tools.runtime_sync_closure_gate "${closure_args[@]}" >/dev/null
   ) || true
   (

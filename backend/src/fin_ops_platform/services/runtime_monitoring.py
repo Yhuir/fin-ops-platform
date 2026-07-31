@@ -1366,7 +1366,12 @@ class RuntimeMonitoringRepository:
             "dirty_scopes_by_scope": dirty_scopes_by_scope,
         }
 
-    def ready_health_summary(self, *, stale_after_seconds: int = 300) -> dict[str, Any]:
+    def ready_health_summary(
+        self,
+        *,
+        stale_after_seconds: int = 300,
+        required_worker_instances: set[str] | None = None,
+    ) -> dict[str, Any]:
         outbox_summary = self._ready_outbox_summary()
         dirty_summary = self._ready_dirty_scope_summary(stale_after_seconds=stale_after_seconds)
         worker_lag_row = self._connection.fetch_one(
@@ -1387,7 +1392,7 @@ class RuntimeMonitoringRepository:
         dirty_scopes = dirty_summary["dirty_scopes"]
         publish_status = outbox_summary["publish_status"]
         stale_dirty_scopes = dirty_summary["stale_dirty_scopes"]
-        worker_metrics = self.dashboard_worker_metrics()
+        worker_metrics = self.dashboard_worker_metrics(worker_instances=required_worker_instances)
         missing_required_worker_count = sum(1 for row in worker_metrics if row.get("warning_code") == "required_worker_missing")
         stale_required_worker_count = sum(1 for row in worker_metrics if row.get("warning_code") == "worker_heartbeat_stale")
         mismatched_required_worker_count = sum(
