@@ -1360,9 +1360,13 @@ describe("Input invoice usage workflow drawers", () => {
     }
 
     render(<Harness />);
-    await user.click(screen.getByRole("button", { name: "以发票反提 OA" }));
+    const oaReverseOpener = screen.getByRole("button", { name: "以发票反提 OA" });
+    await user.click(oaReverseOpener);
     await screen.findByLabelText("以发票反提 OA 工作流");
     await user.click(screen.getByRole("button", { name: "关闭以发票反提 OA 工作流" }));
+    const exitingOaReverse = document.querySelector(".finance-drawer__content--persistent[data-exiting]");
+    expect(exitingOaReverse).toHaveAttribute("inert");
+    expect(document.activeElement).toBe(oaReverseOpener);
     await user.click(screen.getByRole("button", { name: "发票与支付状态规则设置" }));
     await screen.findByLabelText("发票与支付状态规则设置");
 

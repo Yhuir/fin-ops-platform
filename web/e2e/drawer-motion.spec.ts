@@ -151,6 +151,70 @@ test.describe("right drawer motion", () => {
     ).__drawerCls ?? 0)).toBeLessThan(0.01);
   });
 
+  test("applies the same viewport motion to the migrated bank-flow modal", async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 900 });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    await page.goto("/bank-flow-rule-batches");
+    const opener = page.getByRole("button", { name: "流水规则标签管理" });
+    await expect(opener).toBeEnabled();
+
+    await armDrawerSampler(page);
+    await opener.click();
+    const drawer = page.getByRole("dialog", { name: "流水规则标签管理" });
+    await expect(drawer).toBeVisible();
+    expectFullWidthTravel(await drawerSamples(page), "enter");
+
+    await armDrawerSampler(page, 300);
+    await drawer.getByRole("button", { name: "关闭流水规则标签管理" }).click();
+    expectFullWidthTravel(await drawerSamples(page), "exit");
+    await expect(drawer).toHaveCount(0);
+    expect(api.count("PUT /api/bank-flow-rule-batches/tag-rules")).toBe(0);
+  });
+
+  test("applies viewport motion and safe exit state to the production persistent drawer", async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 900 });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    await page.goto("/input-invoice-usage");
+    const opener = page.getByRole("button", { name: "以发票反提 OA" });
+    await expect(opener).toBeEnabled();
+
+    await armDrawerSampler(page);
+    await opener.click();
+    const workflow = page.getByLabel("以发票反提 OA 工作流", { exact: true });
+    await expect(workflow).toBeVisible();
+    expectFullWidthTravel(await drawerSamples(page), "enter");
+
+    await armDrawerSampler(page, 300);
+    await page.getByRole("button", { name: "关闭以发票反提 OA 工作流" }).click();
+    const persistentDrawer = page.locator(".finance-drawer__content--persistent");
+    await expect(persistentDrawer).toHaveAttribute("data-exiting", "true");
+    await expect(persistentDrawer).toHaveAttribute("inert", "");
+    await expect(opener).toBeFocused();
+    expectFullWidthTravel(await drawerSamples(page), "exit");
+    await expect(persistentDrawer).toHaveCount(0);
+    expect(api.count("POST /api/input-invoice-usage/oa-reverse/oa-draft")).toBe(0);
+  });
+
+  test("keeps the tax results rail mounted and inert while collapsed", async ({ page }) => {
+    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    await page.goto("/tax-offset");
+    const rail = page.getByRole("complementary", { name: "已认证结果" });
+    const body = rail.locator("#tax-certified-results-body");
+    await expect(body).toBeVisible();
+
+    await rail.getByRole("button", { name: /收起已认证结果/ }).click();
+    await expect(body).toBeAttached();
+    await expect(body).toHaveAttribute("aria-hidden", "true");
+    await expect(body).toHaveAttribute("inert", "");
+    await expect(rail.getByRole("button", { name: /展开已认证结果/ })).toHaveAttribute("aria-expanded", "false");
+
+    await rail.getByRole("button", { name: /展开已认证结果/ }).click();
+    await expect(body).toHaveAttribute("aria-hidden", "false");
+    await expect(rail.getByRole("button", { name: /收起已认证结果/ })).toHaveAttribute("aria-expanded", "true");
+    expect(api.count("POST /api/tax-offset/plans")).toBe(0);
+    expect(api.count("POST /api/tax-offset/certified-import/confirm")).toBe(0);
+  });
+
   test("disables spatial transitions for reduced motion", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await installDeterministicApiMocks(page, {

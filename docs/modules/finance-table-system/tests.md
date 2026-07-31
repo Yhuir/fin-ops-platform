@@ -2,10 +2,10 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
-## 2026-07-31 共享右抽屉 motion 回归
+## 2026-08-01 共享右抽屉 motion 回归
 
-- `web/src/test/CommonPlatformComponents.test.tsx`：共享 `AppDrawer` right placement、modal/persistent open-close、rapid reopen、180ms 退出卸载、busy dismiss、reduced-motion，以及旧 keyframes/短距离 transform/重复 Escape 的源码负向门禁。
-- `web/e2e/drawer-motion.spec.ts`：真实 Chromium 采样 Workbench 详情进入/退出位置序列，要求存在中间帧和大于 75% 面板宽度的可观察位移；关闭不增加业务 API，页面级 CLS 小于 `0.01`，reduced-motion 最长过渡不超过 1ms。
+- `web/src/test/CommonPlatformComponents.test.tsx`：共享 `AppDrawer` right placement、modal 退出内容保留、persistent `inert`/focus return、rapid reopen、180ms 退出卸载、busy dismiss、reduced-motion，以及旧 keyframes/短距离 transform/重复 Escape 的源码负向门禁。
+- `web/e2e/drawer-motion.spec.ts`：真实 Chromium 采样 Workbench 和流水规则 modal、进项反提 persistent drawer 的进入/退出位置序列，校验 viewport 端点、中间帧、方向和全宽位移；同时覆盖 tax rail 常驻/inert 折叠，且不发业务写请求。Workbench 关闭不增加业务 API，页面级 CLS 小于 `0.01`，reduced-motion 最长过渡不超过 1ms。
 - 适用类别：第 5 类 frontend interaction 与第 7 类 existing regression；业务规则、service、API/read model 均未变化，第 1–4 类不新增测试；第 6 类由同一 Workbench 浏览器详情链覆盖 UI 端完整开关流程。
 
 ## 影响面清单

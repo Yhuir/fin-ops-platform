@@ -213,7 +213,9 @@ describe("Tax offset workbench", () => {
     expect(screen.queryByLabelText("进项票认证计划横向滚动")).not.toBeInTheDocument();
     expect(screen.getByLabelText("税金抵扣表格横向滚动")).toBeInTheDocument();
 
-    expect(screen.getByRole("complementary", { name: "已认证结果" })).toBeInTheDocument();
+    const certifiedRail = screen.getByRole("complementary", { name: "已认证结果" });
+    const certifiedBody = certifiedRail.querySelector("#tax-certified-results-body");
+    expect(certifiedBody).not.toBeNull();
     expect(screen.getByText("已匹配计划")).toBeInTheDocument();
     expect(screen.getByText("已认证但未进入计划")).toBeInTheDocument();
     expect(screen.getByText("税金抵扣计划与试算")).toBeInTheDocument();
@@ -222,7 +224,16 @@ describe("Tax offset workbench", () => {
     expect(screen.queryByText("正式申报")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /已认证结果/ }));
-    expect(screen.getByRole("button", { name: /展开已认证结果/ })).toBeInTheDocument();
+    const expandCertifiedRail = screen.getByRole("button", { name: /展开已认证结果/ });
+    expect(expandCertifiedRail).toHaveAttribute("aria-expanded", "false");
+    expect(certifiedBody).toHaveAttribute("aria-hidden", "true");
+    expect(certifiedBody).toHaveAttribute("inert");
+    expect(within(certifiedBody as HTMLElement).getByText("已匹配计划")).toBeInTheDocument();
+
+    await user.click(expandCertifiedRail);
+    expect(screen.getByRole("button", { name: /收起已认证结果/ })).toHaveAttribute("aria-expanded", "true");
+    expect(certifiedBody).toHaveAttribute("aria-hidden", "false");
+    expect(certifiedBody).not.toHaveAttribute("inert");
   });
 
   test("remounts the tax offset page and revalidates without restoring data snapshots", async () => {

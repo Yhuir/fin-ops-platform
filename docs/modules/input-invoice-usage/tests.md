@@ -10,7 +10,7 @@
 | 2. Service/repository | 适用 | canonical query service、RR/RO snapshot、固定查询次数、OA reverse/export、同事务组装 |
 | 3. API contract | 适用 | 权限拒绝、非法日期/月/filters、空集、筛选/排序/分页、summary、详情、导出、旧状态字段缺失 |
 | 4. Read model/worker cleanup | 适用 | route/frontend 不再依赖 gate、202、polling、filter-options；旧 invoice-usage/lifecycle projection、worker、registry、deploy 保持删除 |
-| 5. Frontend interaction | 适用 | loading/empty/error、筛选/排序/分页、详情、导出、OA reverse、写后 GET、权限 |
+| 5. Frontend interaction | 适用 | loading/empty/error、筛选/排序/分页、详情、导出、OA reverse persistent drawer 的退出 inert/focus、写后 GET、权限 |
 | 6. E2E 业务流 | 适用 | 读/导出、支付规则保存后 GET、OA reverse、关系详情、失败恢复 |
 | 7. 既有功能回归 | 适用 | OA reverse、支付规则、Workbench relation fanout、permissions/audit |
 
@@ -38,6 +38,7 @@
 - `web/src/test/InputInvoiceUsagePage.test.tsx`
 - `web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx`
 - `web/e2e/input-invoice-usage-flow.spec.ts`
+- `web/e2e/drawer-motion.spec.ts`
 - `web/e2e/input-invoice-relation-fanout.spec.ts`
 
 ## 最小验证命令

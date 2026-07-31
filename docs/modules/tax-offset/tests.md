@@ -6,7 +6,7 @@
 
 - `web/src/test/TaxOffsetPage.test.tsx` 保护 complementary rail 常驻、toggle `aria-controls/aria-expanded`、折叠内容 `inert/aria-hidden/pointer-events`、transform/opacity-only 和 reduced-motion；不得回归 grid/width 动画。
 - 本次只改变前端展示动效，适用第 5 类 frontend interaction 与第 7 类 existing regression；业务规则、service/repository、API、import job/read model 与跨模块业务流未变化，第 1–4、6 类不新增测试。
-- 共享 modal drawer 的真实 Chromium motion 由 `web/e2e/drawer-motion.spec.ts` 负责；tax 页面既有 `tax-offset-flow.spec.ts` 继续保护认证导入和计划业务链。
+- `web/e2e/drawer-motion.spec.ts` 在真实 Chromium 覆盖 tax rail 常驻 body、折叠 `inert/aria-hidden`、再次展开和零 tax 写请求；`tax-offset-flow.spec.ts` 继续保护认证导入和计划业务链。
 
 ## 核心验收
 
