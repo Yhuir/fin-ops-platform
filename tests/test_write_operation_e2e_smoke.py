@@ -1159,6 +1159,8 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(report["results"][0]["write_slo"]["status"], "skipped")
         self.assertEqual(report["results"][0]["steps"][0]["response_error_code"], "conflict")
         self.assertIsNone(report["results"][0]["steps"][0]["request_id"])
+        self.assertFalse(report["results"][0]["checkpoints"][0]["mutation_committed"])
+        self.assertFalse(report["results"][0]["checkpoints"][0]["mutation_ambiguous"])
 
     def test_write_step_reports_safe_request_id_for_bounded_log_lookup(self) -> None:
         step = write_operation_e2e_smoke.WriteStep(
@@ -1185,6 +1187,8 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
 
         self.assertEqual(executed.result.request_id, "abcdef123456")
         self.assertEqual(executed.result.response_error_code, "internal_server_error")
+        self.assertFalse(executed.committed)
+        self.assertTrue(executed.ambiguous)
 
     def test_write_step_reports_success_request_id_from_response_header(self) -> None:
         step = write_operation_e2e_smoke.WriteStep(
@@ -2732,7 +2736,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         )
         self.assertEqual(report["results"][0]["checkpoints"], [])
 
-    def test_active_test_owned_workbench_preimage_runs_registered_recovery_before_confirm(self) -> None:
+    def test_active_test_owned_workbench_preimage_fails_closed_without_recovery(self) -> None:
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "scenario.json"
             path.write_text(
@@ -2740,9 +2744,6 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 encoding="utf-8",
             )
             scenario = write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)[0]
-
-        checkpoint_names: list[str] = []
-        mutation_keys: list[str] = []
 
         def request_fn(
             url: str, method: str, headers, body, timeout_seconds: float
@@ -2766,18 +2767,6 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 body=json.dumps(payload).encode(),
             )
 
-        def run_checkpoint(_connection, checkpoint, **_kwargs):
-            checkpoint_names.append(checkpoint.name)
-            mutation_keys.append(
-                str((next(step for step in checkpoint.steps if step.mutation).json_body or {})["idempotency_key"])
-            )
-            return {
-                "name": checkpoint.name,
-                "status": "pass",
-                "mutation_committed": True,
-                "mutation_ambiguous": False,
-            }
-
         with (
             patch(
                 "fin_ops_platform.tools.write_operation_e2e_smoke._capture_isolation_baseline",
@@ -2785,8 +2774,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             ),
             patch(
                 "fin_ops_platform.tools.write_operation_e2e_smoke._run_checkpoint",
-                side_effect=run_checkpoint,
-            ),
+            ) as run_checkpoint,
         ):
             report = write_operation_e2e_smoke.run_write_operation_e2e_smoke(
                 FakeConnection([]),
@@ -2801,15 +2789,16 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             )
 
         result = report["results"][0]
-        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(result["checkpoints"], [])
+        self.assertEqual(result["fixture_precondition"]["status"], "fail")
+        self.assertEqual(result["fixture_precondition"]["action"], "blocked")
         self.assertEqual(
-            checkpoint_names,
-            ["withdraw-link-preimage-normalization", "confirm-link", "withdraw-link"],
+            result["fixture_precondition"]["error"],
+            "test_owned_workbench_fixture_in_use",
         )
-        self.assertEqual(result["preimage_normalization"]["status"], "pass")
-        self.assertEqual(result["preimage_normalization"]["action"], "normalized")
-        self.assertNotEqual(mutation_keys[0], mutation_keys[2])
         self.assertFalse(result["recovery_required"])
+        run_checkpoint.assert_not_called()
 
     def test_inactive_test_owned_workbench_preimage_does_not_run_recovery(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -2876,7 +2865,10 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         result = report["results"][0]
         self.assertEqual(report["status"], "pass")
         self.assertEqual(checkpoint_names, ["confirm-link", "withdraw-link"])
-        self.assertEqual(result["preimage_normalization"], {"status": "pass", "action": "not_required"})
+        self.assertEqual(
+            result["fixture_precondition"],
+            {"status": "pass", "action": "available"},
+        )
 
     def test_unknown_test_owned_workbench_preimage_fails_closed_before_mutation(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -2925,9 +2917,9 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         result = report["results"][0]
         self.assertEqual(report["status"], "fail")
         self.assertEqual(result["checkpoints"], [])
-        self.assertEqual(result["preimage_normalization"]["status"], "fail")
-        self.assertEqual(result["preimage_normalization"]["action"], "blocked")
-        self.assertTrue(result["recovery_required"])
+        self.assertEqual(result["fixture_precondition"]["status"], "fail")
+        self.assertEqual(result["fixture_precondition"]["action"], "blocked")
+        self.assertFalse(result["recovery_required"])
         run_checkpoint.assert_not_called()
 
     def test_ordered_checkpoints_have_independent_timestamps_exact_events_consumers_and_audits(self) -> None:

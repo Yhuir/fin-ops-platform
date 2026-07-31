@@ -9,6 +9,7 @@ from pathlib import Path
 import sys
 from time import monotonic, sleep
 from typing import Any, Mapping, Sequence, TextIO
+from uuid import uuid4
 
 from fin_ops_platform.services.postgres_connection import PostgresConfigurationError, PostgresConnection, PostgresSettings
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
@@ -29,7 +30,7 @@ PASS = "pass"
 FAIL = "fail"
 SKIP = "skip"
 GATE_PROFILES = ("preflight", "full", "stability")
-WRITE_E2E_REQUIRED_ARGS = ("--write-scenario", "--apply-write-scenarios", "--write-approval-ticket")
+STANDALONE_WRITE_E2E_REQUIRED_ARGS = ("--scenario", "--apply", "--approval-ticket")
 RUNTIME_HEALTH_REQUIRED_FIELDS = (
     "queue_backlog",
     "dirty_scopes",
@@ -80,13 +81,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--allow-unauthenticated-http", action="store_true")
     parser.add_argument("--profile", choices=GATE_PROFILES, default="full")
     parser.add_argument("--apply-read-model-smoke", action="store_true")
-    parser.add_argument("--write-scenario", type=Path)
-    parser.add_argument("--apply-write-scenarios", action="store_true")
-    parser.add_argument(
-        "--write-approval-ticket",
-        default=os.getenv("FIN_OPS_WRITE_E2E_APPROVAL_TICKET", ""),
-        help="Required with --apply-write-scenarios. Business approval reference for mutating write-operation smoke.",
-    )
     parser.add_argument("--read-model-target-ms", type=float, default=1_000.0)
     parser.add_argument("--write-target-ms", type=float, default=1_000.0)
     parser.add_argument("--http-target-ms", type=float, default=1_000.0)
@@ -133,9 +127,6 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         allow_unauthenticated_http=bool(args.allow_unauthenticated_http),
         profile=str(args.profile),
         apply_read_model_smoke=bool(args.apply_read_model_smoke),
-        write_scenario=args.write_scenario,
-        apply_write_scenarios=bool(args.apply_write_scenarios),
-        write_approval_ticket=str(args.write_approval_ticket or ""),
         read_model_target_ms=max(1.0, float(args.read_model_target_ms)),
         write_target_ms=max(1.0, float(args.write_target_ms)),
         http_target_ms=max(1.0, float(args.http_target_ms)),
@@ -168,9 +159,6 @@ def run_closure_gate(
     allow_unauthenticated_http: bool = False,
     profile: str = "full",
     apply_read_model_smoke: bool = False,
-    write_scenario: Path | None = None,
-    apply_write_scenarios: bool = False,
-    write_approval_ticket: str = "",
     read_model_target_ms: float = 1_000.0,
     write_target_ms: float = 1_000.0,
     http_target_ms: float = 1_000.0,
@@ -191,9 +179,21 @@ def run_closure_gate(
         for key, value in dict(admin_headers or {}).items()
         if str(value).strip()
     }
-    write_scenarios, write_scenario_error = _load_write_scenarios(write_scenario, http_target_ms=http_target_ms)
-    write_audit_operations = _write_scenario_operations(write_scenarios)
-    checks = [_write_scenario_contract_check(write_scenario, write_scenario_error, write_scenarios)]
+    canonical_audit_headers = normalized_admin_headers or normalized_headers
+    checks = [
+        _postgres_reversible_write_check(
+            connection,
+            target_ms=min(write_target_ms, 1_000.0),
+        ),
+        _page_canonical_audit_check(
+            base_url=base_url,
+            api_prefix=api_prefix,
+            headers=canonical_audit_headers,
+            timeout_seconds=timeout_seconds,
+            poll_interval_seconds=poll_interval_seconds,
+            require_auth=not allow_unauthenticated_http,
+        ),
+    ]
     if profile == "preflight":
         checks.extend(
             [
@@ -255,48 +255,18 @@ def run_closure_gate(
                     target_ms=write_target_ms,
                     lookback_hours=write_audit_lookback_hours,
                     limit=limit,
-                    operations=write_audit_operations,
-                    scenario_error=write_scenario_error,
                 ),
             ]
         )
         if profile == "full":
-            pre_write_health = _runtime_health_check(
+            pre_final_health = _runtime_health_check(
                 connection,
                 timeout_seconds=timeout_seconds,
                 poll_interval_seconds=poll_interval_seconds,
-                name="runtime_health_before_write",
+                name="runtime_health_before_final_convergence",
             )
-            checks.append(pre_write_health)
-            if pre_write_health.status == PASS:
-                checks.append(
-                    _write_operation_e2e_check(
-                        connection,
-                        scenario_path=write_scenario,
-                        scenario_error=write_scenario_error,
-                        scenarios=write_scenarios,
-                        apply=apply_write_scenarios,
-                        approval_reference=write_approval_ticket,
-                        base_url=base_url,
-                        api_prefix=api_prefix,
-                        tenant_id=tenant_id,
-                        headers=normalized_headers,
-                        write_target_ms=write_target_ms,
-                        http_target_ms=http_target_ms,
-                        timeout_seconds=timeout_seconds,
-                        poll_interval_seconds=poll_interval_seconds,
-                        limit=limit,
-                    )
-                )
-            else:
-                checks.append(
-                    ClosureCheck(
-                        "write_operation_e2e",
-                        SKIP,
-                        "Write-operation E2E was not started because runtime health did not converge.",
-                    )
-                )
-        # Sample runtime convergence after every read/write smoke has completed.
+            checks.append(pre_final_health)
+        # Sample runtime convergence after every release-gate probe has completed.
         checks.append(
             _runtime_health_check(
                 connection,
@@ -325,8 +295,6 @@ def run_closure_gate(
         },
         "auth_configured": _auth_configured(normalized_headers) or _auth_configured(normalized_admin_headers),
         "apply_read_model_smoke": bool(apply_read_model_smoke),
-        "apply_write_scenarios": bool(apply_write_scenarios),
-        "write_approval_configured": bool(str(write_approval_ticket or "").strip()),
         "checks": [check.to_payload() for check in checks],
         "failed_checks": [check.name for check in checks if check.status == FAIL],
         "skipped_checks": [check.name for check in checks if check.status == SKIP],
@@ -344,9 +312,15 @@ def _runtime_health_check(
     monitoring_repository = RuntimeMonitoringRepository(connection)
     queue_repository = RuntimeQueueRepository(connection)
     reconciled_completed_publish_states = 0
+    clean_samples_after_reconciliation = 0
     while True:
         try:
-            reconciled_completed_publish_states += queue_repository.reconcile_completed_publish_states()
+            reconciled = queue_repository.reconcile_completed_publish_states()
+            reconciled_completed_publish_states += reconciled
+            if reconciled > 0:
+                clean_samples_after_reconciliation = 0
+            elif reconciled_completed_publish_states > 0:
+                clean_samples_after_reconciliation += 1
             summary = monitoring_repository.ready_health_summary()
         except Exception as exc:
             return ClosureCheck(
@@ -369,7 +343,22 @@ def _runtime_health_check(
                 },
             )
         blockers = _runtime_blockers(summary)
-        if not blockers or monotonic() >= deadline:
+        reconciliation_stable = (
+            reconciled_completed_publish_states == 0
+            or clean_samples_after_reconciliation > 0
+        )
+        timed_out = monotonic() >= deadline
+        if not blockers and not reconciliation_stable and not timed_out:
+            sleep(min(max(0.05, poll_interval_seconds), max(0.0, deadline - monotonic())))
+            continue
+        if not blockers and not reconciliation_stable:
+            blockers = {
+                "terminal_publish_reconciliation_not_stable": {
+                    "reconciled_count": reconciled_completed_publish_states,
+                    "clean_samples_after_reconciliation": clean_samples_after_reconciliation,
+                }
+            }
+        if not blockers or timed_out:
             return ClosureCheck(
                 name,
                 PASS if not blockers else FAIL,
@@ -377,6 +366,8 @@ def _runtime_health_check(
                 {
                     "blockers": blockers,
                     "reconciled_completed_publish_states": reconciled_completed_publish_states,
+                    "clean_samples_after_reconciliation": clean_samples_after_reconciliation,
+                    "terminal_publish_reconciliation_stable": reconciliation_stable,
                     "snapshot": {
                         key: summary.get(key)
                         for key in (
@@ -591,34 +582,136 @@ def _health_ready_payload_check(
     )
 
 
-def _write_scenario_contract_check(
-    scenario_path: Path | None,
-    scenario_error: dict[str, Any] | None,
-    scenarios: Sequence[Any] | None,
+def _postgres_reversible_write_check(
+    connection: Any,
+    *,
+    target_ms: float,
 ) -> ClosureCheck:
-    if scenario_path is None:
+    marker = uuid4().hex
+    started = monotonic()
+    try:
+        with connection.transaction() as transaction:
+            transaction.execute(
+                """
+                create temporary table finops_release_gate_write_probe (
+                    marker text primary key
+                ) on commit drop
+                """
+            )
+            inserted = transaction.execute(
+                """
+                insert into pg_temp.finops_release_gate_write_probe (marker)
+                values (%s)
+                """,
+                (marker,),
+            )
+            written = transaction.fetch_one(
+                """
+                select marker
+                from pg_temp.finops_release_gate_write_probe
+                where marker = %s
+                """,
+                (marker,),
+            )
+            deleted = transaction.execute(
+                """
+                delete from pg_temp.finops_release_gate_write_probe
+                where marker = %s
+                """,
+                (marker,),
+            )
+            residue = transaction.fetch_one(
+                """
+                select marker
+                from pg_temp.finops_release_gate_write_probe
+                where marker = %s
+                """,
+                (marker,),
+            )
+    except Exception as exc:
         return ClosureCheck(
-            "write_scenario_contract",
+            "postgres_reversible_write",
             FAIL,
-            "No controlled write-operation scenario was provided.",
-            {"error": "write_scenario_missing", "missing_args": ["--write-scenario"]},
+            "Isolated PostgreSQL write probe failed.",
+            {
+                "isolation": "pg_temp",
+                "error": str(exc) or exc.__class__.__name__,
+            },
         )
-    if scenario_error is not None:
-        return ClosureCheck(
-            "write_scenario_contract",
-            FAIL,
-            "Controlled write-operation scenario is invalid.",
-            scenario_error,
-        )
-    scenario_count = len(list(scenarios or ()))
+    elapsed_ms = round((monotonic() - started) * 1_000, 3)
+    passed = (
+        inserted == 1
+        and written == {"marker": marker}
+        and deleted == 1
+        and residue is None
+        and elapsed_ms <= target_ms
+    )
     return ClosureCheck(
-        "write_scenario_contract",
-        PASS if scenario_count > 0 else FAIL,
-        "Controlled reversible write-operation scenario contract is valid." if scenario_count > 0 else "Controlled write-operation scenario contains no scenarios.",
+        "postgres_reversible_write",
+        PASS if passed else FAIL,
+        (
+            "Isolated PostgreSQL write/read/delete probe met target without touching business rows."
+            if passed
+            else "Isolated PostgreSQL write probe did not prove reversible persistence within target."
+        ),
         {
-            "scenario_path": str(scenario_path),
-            "scenario_count": scenario_count,
-            **({"error": "write_scenario_empty"} if scenario_count <= 0 else {}),
+            "isolation": "pg_temp",
+            "rows_inserted": inserted,
+            "rows_deleted": deleted,
+            "residue_count": 0 if residue is None else 1,
+            "elapsed_ms": elapsed_ms,
+            "target_ms": target_ms,
+            **({"error": "postgres_reversible_write_invariant_failed"} if not passed else {}),
+        },
+    )
+
+
+def _page_canonical_audit_check(
+    *,
+    base_url: str,
+    api_prefix: str,
+    headers: Mapping[str, str],
+    timeout_seconds: float,
+    poll_interval_seconds: float,
+    require_auth: bool,
+) -> ClosureCheck:
+    if require_auth and not _auth_configured(headers):
+        return ClosureCheck(
+            "page_canonical_audit",
+            FAIL,
+            "Canonical page audit requires authenticated HTTP evidence.",
+            {"error": "auth_required"},
+        )
+    checkpoint = write_operation_e2e_smoke.WriteCheckpoint(
+        name="release-gate-canonical-page-audit",
+        operations=(),
+        steps=(),
+        system_audit_path=write_operation_e2e_smoke.SYSTEM_AUDIT_PATH,
+    )
+    audit = write_operation_e2e_smoke._wait_for_system_audit(
+        checkpoint,
+        base_url=base_url,
+        api_prefix=api_prefix,
+        headers=headers,
+        timeout_seconds=timeout_seconds,
+        poll_interval_seconds=poll_interval_seconds,
+        request_fn=write_operation_e2e_smoke._http_request,
+        excluded_audit_ids=set(),
+    )
+    passed = audit.get("status") == PASS
+    return ClosureCheck(
+        "page_canonical_audit",
+        PASS if passed else FAIL,
+        (
+            "Canonical page audit passed against one repeatable-read database snapshot."
+            if passed
+            else "Canonical page audit failed."
+        ),
+        {
+            "status": PASS if passed else FAIL,
+            "audit_count": 1 if passed else 0,
+            "system_audits": [audit] if passed else [],
+            **({"error": audit.get("error") or "page_canonical_audit_failed"} if not passed else {}),
         },
     )
 
@@ -631,15 +724,7 @@ def _write_operation_audit_check(
     lookback_hours: float,
     limit: int,
     operations: Sequence[str] | None = None,
-    scenario_error: dict[str, Any] | None = None,
 ) -> ClosureCheck:
-    if scenario_error is not None:
-        return ClosureCheck(
-            "write_operation_audit",
-            FAIL,
-            "Write-operation audit cannot be limited to approved scenario operations because the scenario file is invalid.",
-            scenario_error,
-        )
     report = write_operation_slo_audit.audit_write_operation_slo(
         connection,
         tenant_id=tenant_id,
@@ -648,7 +733,6 @@ def _write_operation_audit_check(
         limit=limit,
         operations=operations,
     )
-    targeted = bool(operations)
     event_sample_count = _safe_int(report.get("event_sample_count"))
     expectation_count = _safe_int(report.get("expectation_count"))
     if report.get("status") == PASS and (event_sample_count <= 0 or expectation_count <= 0):
@@ -665,180 +749,12 @@ def _write_operation_audit_check(
         "write_operation_audit",
         PASS if report.get("status") == PASS else FAIL,
         (
-            "Recent approved scenario write-operation outbox samples satisfy the SLO."
-            if targeted and report.get("status") == PASS
-            else "Recent real write-operation outbox samples satisfy the SLO."
+            "Recent real write-operation outbox samples satisfy the SLO."
             if report.get("status") == PASS
-            else "Recent approved scenario write-operation outbox samples are missing or outside SLO."
-            if targeted
             else "Recent real write-operation outbox samples are missing or outside SLO."
         ),
         _compact_report(report),
     )
-
-
-def _write_operation_e2e_check(
-    connection: Any,
-    *,
-    scenario_path: Path | None,
-    scenario_error: dict[str, Any] | None,
-    scenarios: Sequence[Any] | None,
-    apply: bool,
-    approval_reference: str,
-    base_url: str,
-    api_prefix: str,
-    tenant_id: str,
-    headers: Mapping[str, str],
-    write_target_ms: float,
-    http_target_ms: float,
-    timeout_seconds: float,
-    poll_interval_seconds: float,
-    limit: int,
-) -> ClosureCheck:
-    if scenario_path is None:
-        return ClosureCheck(
-            "write_operation_e2e",
-            FAIL,
-            "No controlled write-operation scenario was provided; final closure requires real mutating endpoint evidence.",
-            {
-                "status": "input_required",
-                "missing_args": ["--write-scenario"],
-                "required_args": list(WRITE_E2E_REQUIRED_ARGS),
-            },
-        )
-    if scenario_error is not None:
-        return ClosureCheck(
-            "write_operation_e2e",
-            FAIL,
-            "Controlled write-operation scenario is invalid; final closure requires a valid approved scenario.",
-            scenario_error,
-        )
-    loaded_scenarios = list(scenarios or [])
-    if not apply:
-        report = write_operation_e2e_smoke.run_write_operation_e2e_smoke(
-            connection,
-            scenarios=loaded_scenarios,
-            apply=False,
-            base_url=base_url,
-            api_prefix=api_prefix,
-            tenant_id=tenant_id,
-            headers=headers,
-            approval_reference=approval_reference,
-            write_target_ms=write_target_ms,
-            refresh_target_ms=write_target_ms,
-            timeout_seconds=timeout_seconds,
-            poll_interval_seconds=poll_interval_seconds,
-            limit=limit,
-        )
-        return ClosureCheck(
-            "write_operation_e2e",
-            FAIL,
-            "Write-operation scenario was only dry-run; final closure requires --apply-write-scenarios.",
-            {
-                **_compact_report(report),
-                "missing_args": ["--apply-write-scenarios"],
-                "required_args": list(WRITE_E2E_REQUIRED_ARGS),
-            },
-        )
-    if not str(approval_reference or "").strip():
-        return ClosureCheck(
-            "write_operation_e2e",
-            FAIL,
-            "Write-operation scenario has --apply-write-scenarios but no business approval reference.",
-            {
-                "status": "approval_missing",
-                "error": "write_operation_e2e_requires_approval_ticket",
-                "missing_args": ["--write-approval-ticket"],
-                "required_args": list(WRITE_E2E_REQUIRED_ARGS),
-            },
-        )
-    report = write_operation_e2e_smoke.run_write_operation_e2e_smoke(
-        connection,
-        scenarios=loaded_scenarios,
-        apply=True,
-        base_url=base_url,
-        api_prefix=api_prefix,
-        tenant_id=tenant_id,
-        headers=headers,
-        approval_reference=approval_reference,
-        write_target_ms=write_target_ms,
-        refresh_target_ms=write_target_ms,
-        timeout_seconds=timeout_seconds,
-        poll_interval_seconds=poll_interval_seconds,
-        limit=limit,
-    )
-    page_canonical_audit = _page_canonical_audit_summary(report)
-    scenario_count = _safe_int(report.get("scenario_count"))
-    result_count = len(report.get("results") or []) if isinstance(report.get("results"), list) else 0
-    if report.get("status") == PASS and (scenario_count <= 0 or result_count <= 0):
-        return ClosureCheck(
-            "write_operation_e2e",
-            FAIL,
-            "Controlled write-operation E2E produced no scenario/result evidence; final closure requires non-empty mutating write samples.",
-            {
-                **_compact_report(report),
-                "error": "write_operation_e2e_empty_samples",
-            },
-        )
-    if report.get("status") == PASS and page_canonical_audit.get("status") != PASS:
-        return ClosureCheck(
-            "write_operation_e2e",
-            FAIL,
-            "Controlled write-operation E2E did not produce a passing canonical page audit.",
-            {
-                **_compact_report(report),
-                "page_canonical_audit": page_canonical_audit,
-                "error": "page_canonical_audit_missing",
-            },
-        )
-    return ClosureCheck(
-        "write_operation_e2e",
-        PASS if report.get("status") == PASS else FAIL,
-        "Controlled mutating write-operation scenarios met the SLO." if report.get("status") == PASS else "Controlled mutating write-operation scenarios failed or were not authenticated.",
-        {
-            **_compact_report(report),
-            "page_canonical_audit": page_canonical_audit,
-        },
-    )
-
-
-def _page_canonical_audit_summary(report: Mapping[str, Any]) -> dict[str, Any]:
-    audits: list[dict[str, Any]] = []
-    for result in report.get("results") or []:
-        if not isinstance(result, Mapping):
-            continue
-        candidates = [result.get("preflight")]
-        candidates.extend(
-            checkpoint.get("system_audit")
-            for checkpoint in result.get("checkpoints") or []
-            if isinstance(checkpoint, Mapping)
-        )
-        for candidate in candidates:
-            if (
-                isinstance(candidate, Mapping)
-                and candidate.get("status") == PASS
-                and candidate.get("system_audit_id")
-                and candidate.get("snapshot_identity")
-            ):
-                audits.append(
-                    {
-                        "system_audit_id": str(candidate["system_audit_id"]),
-                        "snapshot_identity": str(candidate["snapshot_identity"]),
-                        "external_evidence": candidate.get("external_evidence"),
-                    }
-                )
-    audit_ids = [audit["system_audit_id"] for audit in audits]
-    passed = bool(audits) and len(audit_ids) == len(set(audit_ids))
-    return {
-        "status": PASS if passed else FAIL,
-        "audit_count": len(audits),
-        "system_audits": audits,
-        **(
-            {"error": "canonical_page_audit_missing_or_reused"}
-            if not passed
-            else {}
-        ),
-    }
 
 
 def _runtime_blockers(summary: Mapping[str, Any]) -> dict[str, Any]:
@@ -928,39 +844,8 @@ def _load_write_scenarios(
             "error": "scenario_input_error",
             "message": str(exc) or exc.__class__.__name__,
             "scenario_path": str(scenario_path),
-            "required_args": list(WRITE_E2E_REQUIRED_ARGS),
+            "required_args": list(STANDALONE_WRITE_E2E_REQUIRED_ARGS),
         }
-
-
-def _write_scenario_operations(scenarios: Sequence[Any] | None) -> tuple[str, ...] | None:
-    if not scenarios:
-        return None
-    operations: list[str] = []
-    seen: set[str] = set()
-    for scenario in scenarios:
-        checkpoints = [
-            *tuple(getattr(scenario, "checkpoints", ()) or ()),
-            *(
-                (getattr(scenario, "recovery_checkpoint"),)
-                if getattr(scenario, "recovery_checkpoint", None) is not None
-                else ()
-            ),
-        ]
-        scenario_operations = [
-            *tuple(getattr(scenario, "operations", ()) or ()),
-            *[
-                operation
-                for checkpoint in checkpoints
-                for operation in tuple(getattr(checkpoint, "operations", ()) or ())
-            ],
-        ]
-        for operation in scenario_operations:
-            normalized = str(operation or "").strip()
-            if not normalized or normalized in seen:
-                continue
-            seen.add(normalized)
-            operations.append(normalized)
-    return tuple(operations) or None
 
 
 def _validate_release_write_scenarios(scenarios: Sequence[Any]) -> None:

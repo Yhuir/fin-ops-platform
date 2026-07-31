@@ -483,10 +483,10 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 - 新发布后的 turnover UoW 事件会把非敏感 `action_name` 写入 outbox payload；工具会用它区分共享同一 reason 的不同写操作。
 - 样本必须 `event_status=done`，dirty scope 必须为空或 `done`，且 p95 enqueue-to-done `<= target-ms`、p99
   enqueue-to-done `<= p99-target-ms`。P2/P3 一秒级闭环默认使用 p95 `1000ms`、p99 `3000ms`。
-- 该工具能证明“最近真实写操作产生的 refresh 是否及时完成”，但不能证明没有被执行过的操作；最终闭环仍需要受控
-  E2E 写操作 smoke 覆盖关联、撤回、导入确认和规则变更。
+- 该工具能证明“最近真实写操作产生的 refresh 是否及时完成”，但不能证明没有被执行过的操作。自动发布门禁不为补齐
+  样本而修改生产业务数据；需要验证某个真实写入口时，使用下节显式、经审批、test-owned 的独立 E2E 工具。
 
-## 受控写操作 E2E SLO Smoke
+## 独立受控写操作 E2E SLO Smoke（不属于自动 Release Gate）
 
 真实写操作闭环使用 `write_operation_e2e_smoke` 执行。该工具默认只校验 scenario 并输出计划；只有显式 `--apply`、存在真实认证 header/cookie，且提供业务审批引用 `--approval-ticket` / `FIN_OPS_WRITE_E2E_APPROVAL_TICKET` 时才会发起 mutating HTTP 请求。
 
@@ -538,13 +538,13 @@ shape，并必须包含 checkpoints、inverse/recovery 与最终 inactive 断言
 执行时生成独立 idempotency key，文件本身不保存可复用 mutation key。
 
 `write_operation_scenario_discovery` 仍可生成只读候选报告，但其普通生产业务候选不得写入 release gate
-的可执行标准文件。如果没有满足安全边界的 test-owned 对象，门禁必须失败并先准备可回滚测试对象，
+的可执行标准文件。如果没有满足安全边界的 test-owned 对象，独立 write E2E runner 必须失败并先准备可回滚测试对象，
 不得为了凑齐数量回退到旧 API 路径、宽泛 SQL 选择或真实待处理业务对象。
 
 页面 / 模块 write scenario 与 approval ticket 矩阵：
 
 该矩阵同时写入 `write_operation_scenario_discovery` 的 `page_write_scenario_policy` 和生成的 scenario JSON；
-主控 workflow 必须读取该矩阵，不再为标准 production smoke 逐次询问 scenario 或 approval ticket。若某类没有安全候选，记录为候选缺失并准备可回滚测试对象，
+独立受控写 workflow 必须读取该矩阵，不再为标准 production smoke 逐次询问 scenario 或 approval ticket。若某类没有安全候选，记录为候选缺失并准备可回滚测试对象，
 禁止回退旧 API、宽泛 SQL 或真实待处理业务对象。
 
 | 页面 / 模块 | Apply policy | 标准写场景 | Approval ticket | 说明 |
@@ -598,7 +598,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_e2e_smo
 `write_operation_e2e_smoke` 的写后 SLO 事件读取会按当前 scenario 的 operation expectation 过滤 outbox，并保持有效采样窗口下限。runner 在 mutation 成功后先并发执行 consumer 的正常页面 GET，再执行 zero-fan-out 审计，避免验证器自身阻塞访问触发。每个 consumer 的 `target_ms` 同时是单次 fresh HTTP 上限和该 consumer 首次访问到 fresh、业务断言通过的总耗时上限；后一计时包含 exact enqueue、worker、依赖和重试，不能只用最后一次快速 GET 冒充收敛通过。`operation_commit_to_visible_ms` 仅保留为端到端观察值。
 
 bank+OA+invoice 的 Cost 证明允许一个 exact scope 用 `/rows == []` 表达受项目范围过滤后的确定空集，但 active checkpoint 仍必须在另一个 exact scope 断言 `project_name`、`project_id`、`expense_type` 或 `cost_allocations`，并绑定 test-owned fixture 身份；空集不能单独替代关系语义证明。
-因此主控 workflow 可以继续使用最小 scenario 输入；审计会拒绝同一写事务产生的任何普通页面 refresh，并由 post API probes 验证页面访问时收敛。
+因此独立受控写 workflow 可以继续使用最小 scenario 输入；审计会拒绝同一写事务产生的任何普通页面 refresh，并由 post API probes 验证页面访问时收敛。
 
 执行前要求：
 
@@ -613,20 +613,15 @@ bank+OA+invoice 的 Cost 证明允许一个 exact scope 用 `/rows == []` 表达
 
 ## 全 App 同步闭环 Gate
 
-最终闭环使用 `runtime_sync_closure_gate` 聚合检查，避免把 direct smoke、页面 shell 或历史 audit 中任意单项误判为“全 app 已闭环”。
+自动发布闭环使用 `runtime_sync_closure_gate` 聚合检查，避免把 direct smoke、页面 shell 或历史 audit 中任意单项误判为“全 app 已闭环”。它不会读取业务 write scenario，也不会执行 confirm/withdraw。
 
 ```bash
 export FIN_OPS_HTTP_SLO_ADMIN_TOKEN='真实管理员 Admin-Token'
-export FIN_OPS_WRITE_E2E_SCENARIO=/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json
-export FIN_OPS_WRITE_E2E_APPROVAL_TICKET=FINOPS-WRITE-SMOKE-STANDING-20260702
 PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_sync_closure_gate \
   --base-url http://127.0.0.1:18001 \
   --page-base-url https://www.yn-sourcing.com \
   --api-prefix "" \
   --apply-read-model-smoke \
-  --write-scenario "$FIN_OPS_WRITE_E2E_SCENARIO" \
-  --apply-write-scenarios \
-  --write-approval-ticket "$FIN_OPS_WRITE_E2E_APPROVAL_TICKET" \
   --http-target-ms 1000 \
   --sse-target-ms 1000 \
   --health-ready-target-ms 1000 \
@@ -637,19 +632,20 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_sync_closure_ga
 
 该 gate 必须全部通过才可宣称“所有页面一秒级真同步”：
 
-- 双 origin：页面 shell 在公开站点探测，API/SSE/写操作在当前 release 的内部服务 origin 探测；禁止让 Nginx 页面 fallback 掩盖内部 API 错误，也禁止把内部 API origin 当作页面站点。
+- 双 origin：页面 shell 在公开站点探测，API/SSE 在当前 release 的内部服务 origin 探测；禁止让 Nginx 页面 fallback 掩盖内部 API 错误，也禁止把内部 API origin 当作页面站点。
 - runtime health：required worker、RabbitMQ queue/unacked/DLQ、dirty scope、failure rate 没有当前 blocker。
 - health-ready payload：`/fin-ops-api/health/ready` 自身在 1000ms 内返回轻量 JSON，`api_performance` bounded 且带截断 metadata。
 - direct read model smoke：显式 `--apply-read-model-smoke` 后，每个 App Status read model 的 enqueue-to-fresh 在目标内。
 - 登录态 HTTP SLO：必须使用真实 OA token/Admin-Token/cookie，覆盖全 app 页面 shell 与首屏 API p95。
 - 登录态 SSE smoke：必须使用真实 OA token/Admin-Token/cookie，覆盖 App Health 和 Workbench event-stream 首事件 `<= 1000ms`，并拒绝 HTML fallback 或错误事件名。
 - 真实写操作 audit：最近真实 durable outbox 样本覆盖内置高影响 operation profile，并满足写入后 outbox done SLO。
-- 受控写操作 E2E：必须提供安全、可回滚的 scenario，并显式 `--apply-write-scenarios` 和 `--write-approval-ticket` 通过 mutating HTTP + 写后 outbox/readiness + 可选 post API。
-- 采样顺序：runtime health 在可逆写前先阻止未收敛 mutation，并在所有 read-model、HTTP/SSE 与写 smoke
-  之后再次执行；每轮采样先幂等收敛 `status=done/publish_status=publishing` 终态，再读取严格快照，
-  因而最终 evidence 覆盖门禁内部探针新触发的 refresh，而不是写操作前的旧快照。
+- 隔离 PostgreSQL 写探针：只在 `pg_temp` 临时表内执行 insert/read/delete/rollback，必须在目标内完成且不能留下 residue；不得修改 canonical facts、关系、read model、outbox 或 dirty scope。
+- 页面 canonical audit：只读调用既有 admin audit API，不能执行修复。
+- 采样顺序：所有 read-model、HTTP/SSE 与隔离写探针完成后再读取 runtime 严格快照。若 gate 幂等收敛了一次
+  `status=done/publish_status=publishing` 终态，必须记录 reconciliation，并在同一 checkpoint 内再取得
+  至少一个无残留、无再次 reconciliation 的干净采样；持续复发按 dispatcher/状态机故障失败。
 
-缺少真实认证、缺少 scenario、只 dry-run、缺少审批引用、invalid scenario、runtime health 缺事实字段、或 write audit 没有样本时，gate 会返回 `fail`。
+缺少真实认证、runtime health 缺事实字段、隔离写探针失败、canonical audit 失败或 write audit 没有样本时，gate 会返回 `fail`。
 Postgres-backed gates 在缺少 `FIN_OPS_POSTGRES_DATABASE_URL` / `DATABASE_URL` 时会返回
 `status=configuration_missing`、`blocking_condition=database_url_required`、`required_env`、
 安全 `next_actions`、`allowed_remote_evidence` 和 `forbidden_without_approval`。这表示需要在安全运行环境
@@ -666,16 +662,13 @@ failed jobs、worker mismatch、Postgres/readiness 状态异常或 runtime guard
 HTTP SLO 没有 probe/sample 时，`authenticated_http_slo` check 会返回 `http_slo_empty_samples`；SSE smoke
 没有 probe 时，`sse_first_event_smoke` check 会返回 `sse_smoke_empty_samples`。这通常表示 probe 配置、认证、
 API prefix 或采样输入错误，不能作为一秒级证据。
-缺少受控写 E2E 参数时，`write_operation_e2e` check 会暴露 `missing_args` / `required_args`；scenario 文件存在但
-不可用时，`write_operation_audit` 和 `write_operation_e2e` 会返回 `input_error`，不会退回运行 unscoped write audit。
-直接调用 `write_operation_e2e_smoke` 时，空 scenario list 返回 `input_error` / `scenario_empty`，不能作为 dry-run
-或 apply 成功。
-受控写 E2E apply 后没有 scenario/result 样本时，`write_operation_e2e` check 会返回
-`write_operation_e2e_empty_samples`，不能作为真实 mutating 写入证据。
+独立调用 `write_operation_e2e_smoke` 时，空 scenario list 返回 `input_error` / `scenario_empty`，不能作为 dry-run
+或 apply 成功；apply 缺 approval 时必须在连接 PostgreSQL 或发送 mutating HTTP 前失败。该工具的证据不由
+`runtime_sync_closure_gate` 自动消费，避免发布激活隐式修改生产业务关系。
 write audit 没有真实 event/expectation 样本时，`write_operation_audit` check 会返回
 `write_operation_audit_empty_samples`。
-主控 workflow 应据此分流到 scenario 生成、输入修复、审批或 apply。上述失败是预期行为，不应改成 `pass` 或
-`skip` 来绕过最终验收。
+自动发布 workflow 应修复 durable evidence；独立业务 E2E workflow 才分流到 scenario 生成、输入修复、审批或
+apply。上述失败是预期行为，不应改成 `pass` 或 `skip` 来绕过各自验收。
 
 ## 写操作 Scenario 发现
 

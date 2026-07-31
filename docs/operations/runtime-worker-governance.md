@@ -125,19 +125,19 @@ event 或 worker instance 时，必须先更新 registry，再让 deploy/preflig
 - `fin-ops.rabbitmq-worker.env` 只放共享 RabbitMQ 凭据和 consumer fallback 参数，不设置 `FIN_OPS_QUEUE_BACKEND`；RabbitMQ 灰度切换只能发生在单 worker instance env。`RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS` 当前基线为 `0.05`，避免 RabbitMQ envelope 丢失或 dispatcher 延迟时让 1s read model SLO 卡在 fallback drain。
 - Redis 生产 env 模板必须和 `RuntimeRedisSettings.from_env()` 保持一致；Redis 只能缓存 fresh gate 后 payload，不能成为 worker/readiness 状态事实源。
 
-## 固定写操作 smoke 输入
+## 独立受控业务写 smoke 输入（不属于自动 Release Gate）
 
-生产 write-operation E2E smoke 不再逐次询问 scenario 或 approval ticket。标准 scenario 是运维维护的
+显式 operator write-operation E2E smoke 使用标准 scenario 和 approval ticket。标准 scenario 是运维维护的
 `test_owned`、bounded、可逆关系测试对象；只读
 `fin_ops_platform.tools.write_operation_scenario_discovery` 只提供候选审核上下文，不能把普通生产业务关系
-写成 release gate 的可执行输入：
+写成可执行输入：
 
 - `FIN_OPS_WRITE_E2E_SCENARIO=/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json`
 - `FIN_OPS_WRITE_E2E_APPROVAL_TICKET=FINOPS-WRITE-SMOKE-STANDING-20260702`
 - 每个 operation 最多写入 1 个受控 scenario，避免同一月份连续撤回造成 Workbench/read model 串行刷新长尾。
 - scenario 必须使用登记的可逆 relation shape，包含 checkpoints 与 inverse/recovery，并证明最终关系 inactive；旧式 discovery 输出、真实待处理业务对象或缺少 recovery 的 scenario 必须 fail closed。
-- `runtime_sync_closure_gate` 在所有 profile 开始时先校验该合同；只有 T+0 `full` profile 执行 mutation，
-  T+60/T+300 `stability` 只验证写后收敛证据，不重复 confirm/withdraw。
+- `runtime_sync_closure_gate` 不读取该合同，也不执行 mutation；自动 release gate 只运行隔离
+  PostgreSQL 可逆写探针和只读 canonical audit。
 - gate 失败证据必须保留 RabbitMQ 总量和逐事件队列的 `messages`、`unacked`、`consumers`、DLQ 明细，禁止只记录总积压后依赖 root 权限二次排查。
 - runner 每次执行为所有 mutation 生成独立 idempotency key；静态 root-owned scenario 不保存可跨 checkpoint 复用的 mutation key。
 - discovery 只读 PostgreSQL 事实并输出审核上下文；真正 apply 仍必须提供真实 OA/Admin auth，但不再需要临时业务 ticket。
@@ -536,19 +536,16 @@ PYTHONPATH="$release_src/backend/src" \
 6. 输出状态。
 
 入口先对当前 release 执行 production-equivalent `preflight` checkpoint；候选激活后在 T+0 执行
-`full` checkpoint，并分别在 T+60s、T+300s 执行 `stability` checkpoint。所有 profile 都先严格验证
-root-owned 标准 scenario 是登记的 `test_owned` 可逆合同；只有 T+0 `full` 执行一次 confirm/withdraw/recovery
-和页面 canonical audit，延迟 checkpoint 不重复业务 mutation。每次检查都必须使用真实 PostgreSQL 和 RabbitMQ，
+`full` checkpoint，并分别在 T+60s、T+300s 执行 `stability` checkpoint。所有 profile 都使用
+`pg_temp` 临时表完成隔离 insert/read/delete/rollback 探针，并执行只读页面 canonical audit；任何 profile
+都不得 confirm、withdraw、recovery 或修改真实业务关系。每次检查都必须使用真实 PostgreSQL 和 RabbitMQ，
 验证 exact registry/systemd inventory、worker readiness、dirty scope、pending/processing outbox、durable 与
 RabbitMQ dead letter、critical read-model enqueue-to-fresh SLO、domain audit 和 API/health/SSE 性能。
-`full` 在可逆写 smoke 前先要求 durable publish、dirty scope、worker 与 RabbitMQ 全部收敛；只有该检查
-PASS 才允许执行 mutation，并在 smoke 后再次验证同一组 runtime health 合同。
-最终 evidence 复用 T+0 已验证的写操作与页面 canonical audit，并以 T+300 runtime 采样证明 queue 持续稳定。
+最终 evidence 复用只读页面 canonical audit，并以 T+300 runtime 采样证明 queue 持续稳定。
 RabbitMQ management 未配置或读取失败时 fail closed。checkpoint 必须按实际
 systemd I/O 边界分别加载 `/etc/fin-ops/fin-ops.rabbitmq-topology.env`（topology apply）和
 `/etc/fin-ops/fin-ops.rabbitmq-monitoring.env`（runtime health/closure）；文件缺失或不可读不得退回
-common env、worker env 或跳过 RabbitMQ。固定可逆写 smoke 优先读取 common env 的 approval ticket，
-缺失时使用本文“固定写操作 smoke 输入”登记的 standing ticket，不恢复逐次临时审批或无审批写入。
+common env、worker env 或跳过 RabbitMQ。自动门禁不读取业务 write scenario 或 standing approval。
 
 最终证据写入
 `/opt/fin-ops/runtime-smoke/release-gates/<release>/evidence.json`，权限为 root `0600`，并绑定
@@ -562,6 +559,7 @@ release 与 Git commit。PRE 失败时，部署命令只返回不含 token、环
 - `publishing_outbox_count = 0`
 - `dead_letter_delta = 0`
 - `page_canonical_audit_status = pass`
+- `terminal_publish_reconciliation_stable = true`
 - `queue_stable_after_300_seconds = true`
 
 任一 checkpoint、最终证据写入或证据合同校验失败，都必须自动恢复 previous release，并在回滚后执行
@@ -575,12 +573,11 @@ RabbitMQ dispatcher 每次领取待发布事件前，会把业务消费已经完
 `status=done` 是消息已经到达 consumer 并完成处理的 durable 终态证据，继续等待或重复发布都没有意义；
 稍后到达的 dispatcher publish confirm 对该终态幂等成功。release gate 同时要求
 `publishing_outbox_count=0`，防止终态事件卡在 transport 中间态。
-每个 checkpoint 在 closure gate 前先使用 verification release 代码中的同一 repository 方法，幂等收敛
-已经 `done` 的终态；closure 完成后、最终 runtime evidence 采样前再执行一次相同收敛。因此候选尚未
-激活、preflight 自身新建事件或可逆写 smoke 产生终态事件时都不会形成激活死锁。该步骤不认领、重放或
-重新发布事件，也不绕过 `unpublished/publishing/publish_failed = 0` 强门禁。closure gate 的每轮
-runtime health 采样也执行同一幂等收敛，处理探针运行期间才完成的 publish 终态；若收敛与采样之间又有
-事件完成，下一轮继续收敛，直到严格快照无 blocker 或达到超时。
+只有 closure gate 内部可以调用同一 repository 方法幂等收敛已经 `done` 的终态；部署 shell 不得在 gate
+前后隐式修复。任何 reconciliation 都必须写入 checkpoint evidence，随后至少再取得一个
+`publishing_outbox_count=0` 且本轮没有再次 reconciliation 的干净采样才可 PASS。若采样期间重复出现，
+视为 dispatcher/状态机持续故障并 fail closed；T+60/T+300 还会再次验证没有复发。该步骤不认领、重放或
+重新发布事件，也不绕过 `unpublished/publishing/publish_failed = 0` 强门禁。
 
 worker readiness 不是 systemd active。发布脚本会等待：
 

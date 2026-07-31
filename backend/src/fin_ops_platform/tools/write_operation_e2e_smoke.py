@@ -623,7 +623,7 @@ def _run_one_scenario(
     checkpoint_results: list[dict[str, Any]] = []
     audit_ids: set[str] = set()
     preflight: dict[str, Any] | None = None
-    preimage_normalization: dict[str, Any] | None = None
+    fixture_precondition: dict[str, Any] | None = None
     if scenario.fixture_ownership == "test_owned":
         preflight = _wait_for_system_audit(
             checkpoints[0],
@@ -655,7 +655,7 @@ def _run_one_scenario(
                 request_fn=request_fn,
             )
             if preimage_probe["status"] != "pass":
-                preimage_normalization = {
+                fixture_precondition = {
                     **preimage_probe,
                     "action": "blocked",
                 }
@@ -664,57 +664,28 @@ def _run_one_scenario(
                     "status": "fail",
                     "checkpoints": [],
                     "preflight": preflight,
-                    "preimage_normalization": preimage_normalization,
-                    "recovery_required": True,
+                    "fixture_precondition": fixture_precondition,
+                    "recovery_required": False,
                 }
             if preimage_probe["state"] == "active":
-                normalized_checkpoint = _runtime_preimage_recovery_checkpoint(
-                    preimage_checkpoint
-                )
-                normalization_result = _run_checkpoint(
-                    connection,
-                    normalized_checkpoint,
-                    base_url=base_url,
-                    api_prefix=api_prefix,
-                    tenant_id=tenant_id,
-                    headers=headers,
-                    write_target_ms=write_target_ms,
-                    refresh_target_ms=refresh_target_ms,
-                    timeout_seconds=timeout_seconds,
-                    poll_interval_seconds=poll_interval_seconds,
-                    relation_preview_samples=relation_preview_samples,
-                    limit=limit,
-                    request_fn=request_fn,
-                    variables=variables,
-                    audit_ids=audit_ids,
-                    strict=True,
-                )
-                normalization_passed = (
-                    normalization_result.get("status") == "pass"
-                    and bool(normalization_result.get("mutation_committed"))
-                    and not bool(normalization_result.get("mutation_ambiguous"))
-                )
-                preimage_normalization = {
-                    "status": "pass" if normalization_passed else "fail",
-                    "action": "normalized",
-                    "checkpoint": normalization_result,
+                fixture_precondition = {
+                    **preimage_probe,
+                    "status": "fail",
+                    "action": "blocked",
+                    "error": "test_owned_workbench_fixture_in_use",
                 }
-                if not normalization_passed:
-                    return {
-                        "name": scenario.name,
-                        "status": "fail",
-                        "checkpoints": [],
-                        "preflight": preflight,
-                        "preimage_normalization": preimage_normalization,
-                        "recovery_required": (
-                            not bool(normalization_result.get("mutation_committed"))
-                            or bool(normalization_result.get("mutation_ambiguous"))
-                        ),
-                    }
+                return {
+                    "name": scenario.name,
+                    "status": "fail",
+                    "checkpoints": [],
+                    "preflight": preflight,
+                    "fixture_precondition": fixture_precondition,
+                    "recovery_required": False,
+                }
             else:
-                preimage_normalization = {
+                fixture_precondition = {
                     "status": "pass",
-                    "action": "not_required",
+                    "action": "available",
                 }
     relation_active = False
     recovery_required = False
@@ -798,8 +769,8 @@ def _run_one_scenario(
         "recovery_required": recovery_required,
         **({"preflight": preflight} if preflight is not None else {}),
         **(
-            {"preimage_normalization": preimage_normalization}
-            if preimage_normalization is not None
+            {"fixture_precondition": fixture_precondition}
+            if fixture_precondition is not None
             else {}
         ),
         **({"recovery": recovery} if recovery is not None else {}),
@@ -902,30 +873,6 @@ def _probe_test_owned_workbench_preimage(
         "state": "active",
         "steps": [asdict(result) for result in step_results],
     }
-
-
-def _runtime_preimage_recovery_checkpoint(
-    checkpoint: WriteCheckpoint,
-) -> WriteCheckpoint:
-    runtime_steps: list[WriteStep] = []
-    for step in checkpoint.steps:
-        if not step.mutation:
-            runtime_steps.append(step)
-            continue
-        runtime_steps.append(
-            replace(
-                step,
-                json_body={
-                    **(step.json_body or {}),
-                    "idempotency_key": f"write-e2e-preimage:{uuid4().hex}",
-                },
-            )
-        )
-    return replace(
-        checkpoint,
-        name=f"{checkpoint.name}-preimage-normalization",
-        steps=tuple(runtime_steps),
-    )
 
 
 def _runtime_scenario(scenario: WriteScenario) -> WriteScenario:
@@ -1386,8 +1333,20 @@ def _execute_step(
         return _ExecutedStep(
             result=result,
             captures=captures,
-            committed=bool(step.mutation and status_ok and not html_api_error),
-            ambiguous=bool(step.mutation and (not status_ok or html_api_error)),
+            committed=bool(
+                step.mutation
+                and status_ok
+                and 200 <= response.status_code < 300
+                and not html_api_error
+            ),
+            ambiguous=bool(
+                step.mutation
+                and (
+                    html_api_error
+                    or response.status_code >= 500
+                    or (200 <= response.status_code < 300 and not status_ok)
+                )
+            ),
         )
     except Exception as exc:
         elapsed_ms = (monotonic() - started) * 1000

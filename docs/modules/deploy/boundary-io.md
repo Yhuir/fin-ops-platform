@@ -30,7 +30,6 @@
 | Deploy command | `scripts/deploy-oa.sh` | 使用明确 release/remote/env；正常激活只允许调用 `finops-deploy-control release-gate-activate <release>`，公开 `activate` 入口已删除。`--no-activate` 只上传和校验，不生成门禁证据 |
 | Release-gate credential | 本机 `scripts/with-production-admin-token.sh` | Admin Token 只通过部署进程 stdin 交给 root helper，不写入 release、证据、命令行或日志；缺失时必须在任何生产切换前 fail closed |
 | Release-gate RabbitMQ env | `/etc/fin-ops/fin-ops.rabbitmq-topology.env`、`/etc/fin-ops/fin-ops.rabbitmq-monitoring.env` | topology apply 与 runtime health/closure 分别加载自己的 systemd 运维边界；缺失或不可读必须 fail closed，不得读取 worker consumer 凭据代替 |
-| Release-gate write approval | common env 或固定 standing ticket 合同 | 可逆写 smoke 优先使用 common env；缺失时只允许使用 `FINOPS-WRITE-SMOKE-STANDING-20260702`，不得无 approval 执行或恢复逐次临时审批 |
 | Runtime worker manifest | `runtime_worker_manifest.py` | 必须匹配 registry |
 | Verify command | `scripts/verify.sh` | 按 backend/web/docs/ops 分类执行 |
 | Runtime env examples | `deploy/oa/env/*.env.example` | 按 common/secrets/migrator/worker/dispatcher 拆分，禁止恢复单文件 env |
@@ -91,13 +90,14 @@
 
 ## Production-equivalent Release Gate（2026-07-31）
 
-- 每个 checkpoint 复用现有权威工具，而不是维护第二套 SQL、worker 清单或页面审计：`runtime_worker_manifest`/systemd exact inventory、`rabbitmq_topology --apply`、`domain_contract_audit`、`RuntimeMonitoringRepository.health_summary()`、`runtime_sync_closure_gate` 和固定 `bank_oa_invoice` 可逆写 smoke；页面 canonical audit 直接取该 smoke 的全页面审计证据。
+- 每个 checkpoint 复用现有权威工具，而不是维护第二套 SQL、worker 清单或页面审计：`runtime_worker_manifest`/systemd exact inventory、`rabbitmq_topology --apply`、`domain_contract_audit`、`RuntimeMonitoringRepository.health_summary()`、`runtime_sync_closure_gate`、隔离 PostgreSQL 可逆写探针和只读页面 canonical audit。
 - 门禁连接生产真实 PostgreSQL schema 和 RabbitMQ topology/management；RabbitMQ management 未配置、指标读取失败或 dead-letter 增量非零均 fail closed。Redis 不是本门禁事实源。
-- `runtime_sync_closure_gate` 使用三个明确 profile：`preflight` 只验证候选写场景合同、当前 stable runtime readiness 与 worker/queue/RabbitMQ 收敛；`full` 在 T+0 执行 critical read-model enqueue-to-fresh、API/health/SSE、一次可逆写操作和页面 canonical audit；`stability` 在 T+60/T+300 重跑读侧、性能和 runtime 收敛检查，但不得重复业务 mutation。critical read-model/写链路与 HTTP 类目标分别为 5000ms 与 1000ms。页面 shell 使用公开 origin，API/SSE/写操作使用内部服务 origin，禁止把内部 API origin 误用于页面探针。业务合同失败不能由重试或兼容 fallback 掩盖。
-- release gate 只接受登记过的 `test_owned` 可逆关系 shape：scenario 必须包含 checkpoints、inverse/recovery，并在结束时证明关系 inactive；只读 discovery 结果和旧式生产业务候选不得作为可执行 gate 输入。runner 每次执行为 mutation 生成独立 idempotency key，静态 scenario 不保存可复用 mutation key。
+- `runtime_sync_closure_gate` 使用三个明确 profile：`preflight` 检查当前 stable runtime readiness、worker/queue/RabbitMQ 收敛、隔离事务写入能力和只读 canonical audit；`full` 在 T+0 追加 critical read-model enqueue-to-fresh、API/health/SSE；`stability` 在 T+60/T+300 重跑读侧、性能和 runtime 收敛检查。三个 profile 都不得 confirm、withdraw 或修改任何真实业务关系。critical read-model 与 HTTP 类目标分别为 5000ms 与 1000ms。页面 shell 使用公开 origin，API/SSE 使用内部服务 origin，禁止把内部 API origin 误用于页面探针。业务合同失败不能由重试或兼容 fallback 掩盖。
+- 隔离写探针只在当前数据库连接的 `pg_temp` 临时表内执行 begin/insert/read/delete/rollback，验证真实 PostgreSQL 写事务、约束和回滚能力；它不接触 canonical facts、关系、read model、outbox 或 dirty scope。页面 canonical audit 只调用既有 admin audit API，不执行修复。
+- 登记过的 `test_owned` 可逆业务 scenario、standing approval 和 `write-operation-e2e-smoke` 只保留为显式 operator 工具，不属于自动 release gate。release activate 不读取 scenario，不接受 approval ticket，也不自动恢复或撤回任何业务关系。
 - 标准 scenario 的唯一写入口是 `finops-deploy-control write-operation-e2e-scenario-install`：输入仅接受 `/tmp/finops-write-e2e-*.json` 的 finops-deploy-owned、非链接、非 group/world-writable 文件和一个已存在 release；helper 使用该 release 的合同校验器验证后，原子安装 root-owned `0600` 文件并保留 `.previous`。输出只包含校验状态、scenario 名称/数量和内容摘要，不返回业务行内容。
-- runtime health 必须在 read-model、HTTP/SSE 和可逆写 smoke 之后采样，确保 evidence 记录的是所有门禁动作完成后的 durable queue、dirty scope、worker 与 dead-letter 收敛状态。
-- pre checkpoint 在任何切换前完成；每个 checkpoint 的 smoke 完成后、runtime health 采样前，使用 verification release 的 `RuntimeQueueRepository` 幂等收敛已经 `done` 且 publish lock 为空或过期的 `publishing` 终态，随后仍须验证 `publishing_outbox_count=0`，不得认领、重放或重新发布事件。pre 失败必须恢复 previous release 的 deploy-control/runtime-worker helper。候选激活后 T+0 运行 `full`，T+60s/T+300s 运行 `stability`，最终 evidence 复用 T+0 的写操作与页面 canonical audit 证据，并要求延迟 checkpoint 证明真实 worker、queue、read model、dead-letter 与性能持续收敛；只有最终 evidence 验证成功，发布才返回成功。
+- runtime health 必须在 read-model、HTTP/SSE 和隔离写探针之后采样，确保 evidence 记录的是所有门禁动作完成后的 durable queue、dirty scope、worker 与 dead-letter 收敛状态。
+- pre checkpoint 在任何切换前完成。`runtime_sync_closure_gate` 允许通过既有 repository 幂等收敛一次已经 `done` 且 publish lock 为空或过期的 `publishing` 终态，但 reconciliation 必须写入 checkpoint evidence，并在同一 checkpoint 内再取得至少一个无残留、无再次 reconciliation 的干净采样才可 PASS；持续复发按 dispatcher/状态机故障 fail closed。部署 shell 不得在 gate 外隐式清理。pre 失败必须恢复 previous release 的 deploy-control/runtime-worker helper。候选激活后 T+0 运行 `full`，T+60s/T+300s 运行 `stability`；最终 evidence 要求每个 checkpoint 的 terminal publish reconciliation 已稳定、`publishing_outbox_count=0`，并证明真实 worker、queue、read model、dead-letter 与性能持续收敛。只有最终 evidence 验证成功，发布才返回成功。
 
 ## Phase 19 受控生产命令（2026-07-12）
 

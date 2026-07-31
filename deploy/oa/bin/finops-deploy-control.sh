@@ -25,7 +25,6 @@ DEPLOY_CONTROL_HELPER="${FINOPS_DEPLOY_CONTROL_HELPER:-/usr/local/sbin/finops-de
 ENSURE_RUNTIME_WORKERS_HELPER="${FINOPS_ENSURE_RUNTIME_WORKERS_HELPER:-/usr/local/sbin/finops-ensure-runtime-workers}"
 WRITE_E2E_BACKUP_ROOT="${FINOPS_WRITE_E2E_BACKUP_ROOT:-/opt/fin-ops/backups/write-operation-e2e}"
 STANDARD_WRITE_E2E_SCENARIO="${FINOPS_STANDARD_WRITE_E2E_SCENARIO:-/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json}"
-STANDARD_WRITE_E2E_APPROVAL_TICKET="${FINOPS_STANDARD_WRITE_E2E_APPROVAL_TICKET:-FINOPS-WRITE-SMOKE-STANDING-20260702}"
 RELEASE_GATE_EVIDENCE_ROOT="${FINOPS_RELEASE_GATE_EVIDENCE_ROOT:-/opt/fin-ops/runtime-smoke/release-gates}"
 PRUNE_WORKBENCH_GENERATIONS_HELPER="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_HELPER:-/usr/local/sbin/finops-prune-workbench-generations}"
 PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT:-/etc/systemd/system/finops-prune-workbench-generations.service}"
@@ -1599,7 +1598,6 @@ release_gate_checkpoint() {
     cd "$verification_src"
     "$API_PYTHON" -m fin_ops_platform.tools.domain_contract_audit >"$domain_report"
   ) || true
-  reconcile_completed_publish_states "$verification_release"
   (
     set -a
     # shellcheck disable=SC1090
@@ -1611,15 +1609,6 @@ release_gate_checkpoint() {
     # shellcheck disable=SC1090
     source "$RABBITMQ_MONITORING_ENV"
     set +a
-    export FIN_OPS_WRITE_E2E_APPROVAL_TICKET="${FIN_OPS_WRITE_E2E_APPROVAL_TICKET:-$STANDARD_WRITE_E2E_APPROVAL_TICKET}"
-    if [[ "$profile" == "full" ]]; then
-      [[ -n "${FIN_OPS_WRITE_E2E_APPROVAL_TICKET:-}" ]] \
-        || die "FIN_OPS_WRITE_E2E_APPROVAL_TICKET is required for the production-equivalent release gate"
-    fi
-    [[ -f "$STANDARD_WRITE_E2E_SCENARIO" ]] \
-      || die "standard write-operation E2E scenario is missing: $STANDARD_WRITE_E2E_SCENARIO"
-    [[ "$(stat -c '%u:%a' "$STANDARD_WRITE_E2E_SCENARIO")" == "0:600" ]] \
-      || die "standard write-operation E2E scenario must be root-owned with mode 0600"
     export PYTHONPATH="$verification_src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
     export FIN_OPS_DATA_DIR="${FIN_OPS_DATA_DIR:-/opt/fin-ops/data}"
     export FIN_OPS_HTTP_SLO_ADMIN_TOKEN="$admin_token"
@@ -1631,7 +1620,6 @@ release_gate_checkpoint() {
       --api-prefix ""
       --profile "$profile"
       --apply-read-model-smoke
-      --write-scenario "$STANDARD_WRITE_E2E_SCENARIO"
       --read-model-target-ms 5000
       --write-target-ms 5000
       --http-target-ms 1000
@@ -1640,12 +1628,8 @@ release_gate_checkpoint() {
       --timeout-seconds 120
       --output "$closure_report"
     )
-    if [[ "$profile" == "full" ]]; then
-      closure_args+=(--apply-write-scenarios)
-    fi
     "$API_PYTHON" -m fin_ops_platform.tools.runtime_sync_closure_gate "${closure_args[@]}" >/dev/null
   ) || true
-  reconcile_completed_publish_states "$verification_release"
   (
     set -a
     # shellcheck disable=SC1090
@@ -1704,6 +1688,22 @@ domain = load("DOMAIN_REPORT")
 closure = load("CLOSURE_REPORT")
 runtime = load("RUNTIME_REPORT")
 closure_checks = closure.get("checks", []) if isinstance(closure, dict) else []
+runtime_checks = [
+    check
+    for check in closure_checks
+    if isinstance(check, dict)
+    and str(check.get("name") or "").startswith("runtime_health")
+]
+terminal_publish_reconciliation_count = sum(
+    int((check.get("payload") or {}).get("reconciled_completed_publish_states") or 0)
+    for check in runtime_checks
+    if isinstance(check.get("payload"), dict)
+)
+terminal_publish_reconciliation_stable = all(
+    (check.get("payload") or {}).get("terminal_publish_reconciliation_stable") is True
+    for check in runtime_checks
+    if isinstance(check.get("payload"), dict)
+)
 closure_failures = []
 for check in closure_checks:
     if not isinstance(check, dict) or check.get("status") == "pass":
@@ -1711,7 +1711,9 @@ for check in closure_checks:
     check_payload = check.get("payload", {}) if isinstance(check.get("payload"), dict) else {}
     blockers = check_payload.get("blockers", {}) if isinstance(check_payload.get("blockers"), dict) else {}
     audit = (
-        check_payload.get("page_canonical_audit", {})
+        check_payload
+        if check.get("name") == "page_canonical_audit"
+        else check_payload.get("page_canonical_audit", {})
         if isinstance(check_payload.get("page_canonical_audit"), dict)
         else {}
     )
@@ -1749,18 +1751,17 @@ for check in closure_checks:
             "diagnostics": diagnostics or None,
         }
     )
-write_e2e = next(
+page_audit_check = next(
     (
         check
         for check in closure.get("checks", [])
-        if isinstance(check, dict) and check.get("name") == "write_operation_e2e"
+        if isinstance(check, dict) and check.get("name") == "page_canonical_audit"
     ),
     {},
 ) if isinstance(closure, dict) else {}
-write_e2e_payload = write_e2e.get("payload", {}) if isinstance(write_e2e, dict) else {}
 page_canonical_audit = (
-    write_e2e_payload.get("page_canonical_audit", {})
-    if isinstance(write_e2e_payload, dict)
+    page_audit_check.get("payload", {})
+    if isinstance(page_audit_check, dict)
     else {}
 )
 page_canonical_audit_ready = (
@@ -1769,7 +1770,7 @@ page_canonical_audit_ready = (
     and int(page_canonical_audit.get("audit_count") or 0) > 0
 )
 profile = os.environ["CHECKPOINT_PROFILE"]
-page_canonical_audit_required = profile == "full"
+page_canonical_audit_required = True
 queue_backlog = runtime.get("queue_backlog", {}) if isinstance(runtime, dict) else {}
 dirty_scopes = runtime.get("dirty_scopes", {}) if isinstance(runtime, dict) else {}
 publish_status = runtime.get("rabbitmq_publish_status", {}) if isinstance(runtime, dict) else {}
@@ -1818,7 +1819,7 @@ payload = {
         "rabbitmq_topology": rabbit.get("status"),
         "domain_contract_audit": domain.get("status"),
         "runtime_sync_closure": closure.get("status"),
-        "page_canonical_audit": page_canonical_audit.get("status") if page_canonical_audit_required else "not_required",
+        "page_canonical_audit": page_canonical_audit.get("status"),
         "rabbitmq_metrics": "pass" if rabbitmq_metrics_ready else "fail",
     },
     "unknown_worker_count": int(inventory.get("unknown_worker_count") or 0),
@@ -1830,6 +1831,8 @@ payload = {
     "durable_dead_letter_count": durable_dead_letters,
     "rabbitmq_dead_letter_count": rabbitmq_dead_letters,
     "dead_letter_count": dead_letters,
+    "terminal_publish_reconciliation_count": terminal_publish_reconciliation_count,
+    "terminal_publish_reconciliation_stable": terminal_publish_reconciliation_stable,
     "runtime_sync_closure_failed_checks": [
         failure.get("name") for failure in closure_failures
     ],
@@ -1847,32 +1850,6 @@ output = Path(sys.argv[1])
 output.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 sys.exit(0 if passed else 1)
 PY
-}
-
-reconcile_completed_publish_states() {
-  local verification_release="$1"
-  local verification_src
-  verification_src="$(release_src "$verification_release")"
-  (
-    set -a
-    # shellcheck disable=SC1090
-    source "$COMMON_ENV"
-    # shellcheck disable=SC1090
-    source "$SECRETS_ENV"
-    set +a
-    export PYTHONPATH="$verification_src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
-    cd "$verification_src"
-    "$API_PYTHON" - <<'PY'
-import json
-
-from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
-from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
-
-connection = PostgresConnection(PostgresSettings.from_env())
-reconciled = RuntimeQueueRepository(connection).reconcile_completed_publish_states()
-print(json.dumps({"reconciled_completed_publish_states": reconciled}, sort_keys=True))
-PY
-  )
 }
 
 write_release_gate_evidence() {
@@ -1921,6 +1898,14 @@ payload = {
     "pending_outbox_count": int(latest.get("pending_outbox_count", -1)),
     "publishing_outbox_count": int(latest.get("publishing_outbox_count", -1)),
     "dead_letter_delta": final_dlq - pre_dlq,
+    "terminal_publish_reconciliation_count": sum(
+        int(checkpoint.get("terminal_publish_reconciliation_count") or 0)
+        for checkpoint in checkpoints.values()
+    ),
+    "terminal_publish_reconciliation_stable": all(
+        checkpoint.get("terminal_publish_reconciliation_stable") is True
+        for checkpoint in checkpoints.values()
+    ),
     "page_canonical_audit_status": (
         t0_page_audit.get("status")
         if isinstance(t0_page_audit, dict)
@@ -2011,6 +1996,7 @@ required = {
     "pending_outbox_count": 0,
     "publishing_outbox_count": 0,
     "dead_letter_delta": 0,
+    "terminal_publish_reconciliation_stable": True,
     "page_canonical_audit_status": "pass",
     "queue_stable_after_300_seconds": True,
 }

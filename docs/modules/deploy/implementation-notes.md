@@ -14,12 +14,24 @@
 
 ## 历史记录
 
-## 2026-07-31 - Release Gate publishing 终态门禁
+## 2026-07-31 - Release Gate 隔离写探针与 publishing 静默采样
 
-- 根因：RabbitMQ consumer 可能先完成 PostgreSQL durable event，dispatcher 随后才写 publish confirm；进程在两者之间退出时会留下 `status=done/publish_status=publishing`，旧 claim 不再领取它，旧 gate 又只检查 pending/processing，因此 transport 中间态可永久残留。
-- 修复：复用 dispatcher 的 publish claim 事务，把 publish lock 为空或超过 timeout 且 durable event 已 done 的行收敛为 published；每个 checkpoint 在 smoke 完成后、runtime health 采样前，用 verification release 的同一 repository 方法完成一次幂等终态协调，避免旧 release 不具备修复能力或 preflight 自身新建事件时形成激活死锁。监控和 release evidence 增加 `publishing_outbox_count`，任何 checkpoint 非零均 fail closed。consumer 已完成即证明消息已经送达，禁止重发。
-- 边界：PostgreSQL 仍是状态事实源，RabbitMQ 仍只做 transport/wakeup；没有新增 worker、表、队列、缓存、定时器或兼容链路。
-- 验证：runtime queue/monitoring/deploy contract 定向测试和 production-equivalent T+0/T+60/T+300 gate。
+- 根因一：自动 release gate 曾在候选激活后用真实生产业务关系执行 confirm/withdraw；即使输入标记为
+  `test_owned`，真实关系的版本冲突也会返回 409 并触发回滚。这类业务 mutation 不应是部署基础设施
+  门禁的职责。
+- 根因二：RabbitMQ consumer 可能先完成 PostgreSQL durable event，dispatcher 随后才写 publish
+  confirm；进程在两者之间退出时会留下 `status=done/publish_status=publishing`。该终态可以安全协调，
+  但部署 shell 在 gate 前后隐式协调会掩盖持续复发的 dispatcher/状态机故障。
+- 修复：自动 gate 只执行同一生产 PostgreSQL 上的 `pg_temp` 事务内 insert/read/delete/rollback
+  可逆写探针，以及只读 canonical page audit；不再读取业务 scenario、approval ticket 或修改真实业务
+  关系。`done/publishing` 只允许 closure gate 调用现有 repository 方法协调，并把数量写入 evidence；
+  协调后必须再取得一次没有新协调且 `publishing_outbox_count=0` 的干净采样，采样期复发直接 fail
+  closed。T+0、T+60、T+300 会重复验证该合同。
+- 边界：PostgreSQL 仍是 durable 状态事实源，RabbitMQ 仍只做 transport/wakeup；独立、显式、经审批的
+  `write_operation_e2e_smoke` 保留给 operator 验证真实业务入口，但不属于自动发布门禁。没有新增
+  worker、表、队列、缓存、定时器或兼容链路。
+- 验证：隔离写、canonical audit、409 非提交语义、一次协调后干净采样、持续复发阻断、deploy evidence
+  和 production-equivalent T+0/T+60/T+300 gate。
 
 ## 2026-07-26 - Workbench relation Cost active/all 生产验证闭环
 

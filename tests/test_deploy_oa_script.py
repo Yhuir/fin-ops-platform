@@ -397,7 +397,6 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("domain_contract_audit", script)
         self.assertIn("runtime_sync_closure_gate", script)
         self.assertIn("--apply-read-model-smoke", script)
-        self.assertIn("--apply-write-scenarios", script)
         self.assertIn("--read-model-target-ms 5000", script)
         self.assertIn("--write-target-ms 5000", script)
         self.assertIn("--http-target-ms 1000", script)
@@ -410,12 +409,11 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('"dirty_scope_count": 0', script)
         self.assertIn('"pending_outbox_count": 0', script)
         self.assertIn('"publishing_outbox_count": 0', script)
-        self.assertIn('reconcile_completed_publish_states "$verification_release"', script)
-        self.assertIn(
-            "RuntimeQueueRepository(connection).reconcile_completed_publish_states()",
-            script,
-        )
+        self.assertNotIn('reconcile_completed_publish_states "$verification_release"', script)
+        self.assertNotIn("reconcile_completed_publish_states() {", script)
         self.assertIn('"dead_letter_delta": 0', script)
+        self.assertIn('"terminal_publish_reconciliation_count"', script)
+        self.assertIn('"terminal_publish_reconciliation_stable": True', script)
         self.assertIn('"runtime_sync_closure_failed_checks"', script)
         self.assertIn('"runtime_sync_closure_failures"', script)
         self.assertIn('"diagnostics": diagnostics or None', script)
@@ -582,7 +580,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('cat "$evidence_dir/pre/checkpoint.json" >&2', pre_failure_branch)
         self.assertIn('"component_statuses": {', script)
 
-    def test_release_gate_loads_rabbitmq_env_boundaries_and_standard_write_approval(self) -> None:
+    def test_release_gate_loads_rabbitmq_env_without_automatic_business_write(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
         checkpoint = script.split("release_gate_checkpoint() {", 1)[1].split(
             "\nrelease_gate_checkpoint_passed() {",
@@ -595,33 +593,18 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertEqual(checkpoint.count('source "$RABBITMQ_MONITORING_ENV"'), 2)
         self.assertIn("RabbitMQ topology env is missing or unreadable", checkpoint)
         self.assertIn("RabbitMQ monitoring env is missing or unreadable", checkpoint)
-        self.assertIn(
-            'STANDARD_WRITE_E2E_APPROVAL_TICKET="${FINOPS_STANDARD_WRITE_E2E_APPROVAL_TICKET:'
-            '-FINOPS-WRITE-SMOKE-STANDING-20260702}"',
-            script,
-        )
-        self.assertIn(
-            'export FIN_OPS_WRITE_E2E_APPROVAL_TICKET="${FIN_OPS_WRITE_E2E_APPROVAL_TICKET:'
-            '-$STANDARD_WRITE_E2E_APPROVAL_TICKET}"',
-            checkpoint,
-        )
+        self.assertNotIn("STANDARD_WRITE_E2E_APPROVAL_TICKET", checkpoint)
+        self.assertNotIn("FIN_OPS_WRITE_E2E_APPROVAL_TICKET", checkpoint)
+        self.assertNotIn("--apply-write-scenarios", checkpoint)
+        self.assertNotIn("--write-scenario", checkpoint)
         self.assertIn("--page-base-url https://www.yn-sourcing.com", checkpoint)
         self.assertLess(
             checkpoint.index("-m fin_ops_platform.tools.runtime_sync_closure_gate"),
             checkpoint.index('"$API_PYTHON" - "$runtime_report"'),
         )
-        reconciliations = [
-            index
-            for index in range(len(checkpoint))
-            if checkpoint.startswith(
-                'reconcile_completed_publish_states "$verification_release"',
-                index,
-            )
-        ]
-        closure_gate = checkpoint.index("-m fin_ops_platform.tools.runtime_sync_closure_gate")
-        self.assertEqual(len(reconciliations), 2)
-        self.assertLess(reconciliations[0], closure_gate)
-        self.assertGreater(reconciliations[1], closure_gate)
+        self.assertNotIn("reconcile_completed_publish_states", checkpoint)
+        self.assertIn("terminal_publish_reconciliation_count", checkpoint)
+        self.assertIn("terminal_publish_reconciliation_stable", checkpoint)
 
     def test_deploy_control_read_model_slo_smoke_refuses_apply_before_release_lookup(self) -> None:
         env = {**os.environ, "FINOPS_RELEASE_ROOT": "/tmp/finops-release-root-does-not-exist"}
