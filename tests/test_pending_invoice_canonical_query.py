@@ -126,8 +126,14 @@ class PendingInvoiceCanonicalRepositoryTests(unittest.TestCase):
         self.assertIn("r.status = 'active'", page_sql)
         self.assertIn("r.relation_mode <> 'turnover_manual_closure'", page_sql)
         self.assertIn("as rule_counterparty_name", page_sql)
-        self.assertIn("unnest(b.rule_bank_detail_texts)", page_sql)
-        self.assertIn("select coalesce(array_agg(candidate.value)", page_sql)
+        self.assertIn("as rule_account_type", page_sql)
+        self.assertIn("raw_rule_definitions as materialized", page_sql)
+        self.assertIn("as account_scope_values", page_sql)
+        self.assertIn("as exact_values", page_sql)
+        self.assertIn("as contains_values", page_sql)
+        self.assertIn("as contains_all_values", page_sql)
+        self.assertIn("as excluded_values", page_sql)
+        self.assertIn("as regex_values", page_sql)
         self.assertNotIn("read_model.", page_sql)
         self.assertEqual(page_params[-6:-4], (50, 50))
         self.assertEqual(payload["pagination"], {"page": 2, "page_size": 50, "total": 0})
@@ -199,6 +205,25 @@ class PendingInvoiceCanonicalRepositoryTests(unittest.TestCase):
         self.assertIn("relation_mode <> 'turnover_manual_closure'", CANDIDATE_QUERY_SQL)
         for sql in (CANDIDATE_QUERY_SQL, BANK_DETAIL_SQL, INVOICE_DETAIL_SQL, OA_DETAIL_SQL):
             self.assertNotIn("read_model.", sql)
+
+    def test_rule_match_hot_path_reuses_precomputed_normalized_arrays(self) -> None:
+        rule_match_sql = PAGE_QUERY_SQL.split(
+            "rule_matches as materialized (",
+            maxsplit=1,
+        )[1].split(
+            "winning_rule_priority as materialized (",
+            maxsplit=1,
+        )[0]
+
+        self.assertIn("definition.match_fields", rule_match_sql)
+        self.assertIn("definition.account_scope_values", rule_match_sql)
+        self.assertIn("unnest(definition.exact_values)", rule_match_sql)
+        self.assertIn("unnest(definition.contains_values)", rule_match_sql)
+        self.assertIn("unnest(definition.excluded_values)", rule_match_sql)
+        self.assertIn("unnest(definition.regex_values)", rule_match_sql)
+        self.assertNotIn("jsonb_array_elements_text", rule_match_sql)
+        self.assertNotIn("normalize(", rule_match_sql)
+        self.assertNotIn("regexp_replace(", rule_match_sql)
 
 
 class PendingInvoiceCanonicalQueryServiceTests(unittest.TestCase):

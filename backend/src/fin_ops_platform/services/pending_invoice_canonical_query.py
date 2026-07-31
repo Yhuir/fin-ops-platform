@@ -88,17 +88,6 @@ def _normalize_sql_text(expression: str) -> str:
     )
 
 
-NORM_RULE_VALUE_SQL = _normalize_sql_text("rule_value.value")
-NORM_SCOPE_VALUE_SQL = _normalize_sql_text("scope_value.value")
-NORM_ACCOUNT_SQL = _normalize_sql_text("b.account_no")
-NORM_ACCOUNT_TYPE_SQL = _normalize_sql_text(
-    "coalesce(b.raw_payload->'normalized_payload'->>'account_type', b.raw_payload->>'account_type')"
-)
-NORM_BANK_SQL = _normalize_sql_text(
-    "coalesce(b.raw_payload->'normalized_payload'->>'bank_name', b.raw_payload->>'bank_name')"
-)
-
-
 PAGE_QUERY_SQL = f"""
 with recursive
 request_config as materialized (
@@ -213,6 +202,11 @@ banks as materialized (
         {_normalize_sql_text("bank.remark")} as rule_note_text,
         {_normalize_sql_text("coalesce(bank.raw_payload->'normalized_payload'->>'detail_text', bank.raw_payload->>'detail_text', '')")}
             as rule_detail_text,
+        {_normalize_sql_text("bank.account_no")} as rule_account,
+        {_normalize_sql_text("coalesce(bank.raw_payload->'normalized_payload'->>'account_type', bank.raw_payload->>'account_type')")}
+            as rule_account_type,
+        {_normalize_sql_text("coalesce(bank.raw_payload->'normalized_payload'->>'bank_name', bank.raw_payload->>'bank_name')")}
+            as rule_bank,
         coalesce(
             (
                 select array_agg({_normalize_sql_text("text_field->>'value'")})
@@ -458,7 +452,7 @@ internal_matches as materialized (
     union
     select incoming_id from explicit_greedy where step > 0
 ),
-rule_definitions as materialized (
+raw_rule_definitions as materialized (
     select definition
     from request_config config
     cross join lateral jsonb_array_elements(
@@ -481,150 +475,202 @@ rule_definitions as materialized (
             and jsonb_array_length(rule_entry.value) > 0
       )
 ),
+rule_definitions as materialized (
+    select
+        raw.definition,
+        greatest(coalesce(nullif(raw.definition->>'priority', '')::integer, 2), 2) as priority,
+        coalesce(raw.definition->>'direction', 'any') as direction,
+        coalesce(raw.definition#>>'{{account_scope,type}}', 'any') as account_scope_type,
+        coalesce(
+            (
+                select array_agg({_normalize_sql_text("scope_value.value")})
+                from jsonb_array_elements_text(
+                    case
+                        when jsonb_typeof(raw.definition#>'{{account_scope,values}}') = 'array'
+                        then raw.definition#>'{{account_scope,values}}'
+                        else '[]'::jsonb
+                    end
+                ) scope_value(value)
+            ),
+            array[]::text[]
+        ) as account_scope_values,
+        coalesce(
+            (
+                select array_agg(match_field.value)
+                from jsonb_array_elements_text(
+                    case
+                        when jsonb_typeof(raw.definition#>'{{rules,match_fields}}') = 'array'
+                        then raw.definition#>'{{rules,match_fields}}'
+                        else '[]'::jsonb
+                    end
+                ) match_field(value)
+            ),
+            array[]::text[]
+        ) as match_fields,
+        coalesce(
+            (
+                select array_agg({_normalize_sql_text("rule_value.value")})
+                from jsonb_array_elements_text(
+                    case
+                        when jsonb_typeof(raw.definition#>'{{rules,exact_any}}') = 'array'
+                        then raw.definition#>'{{rules,exact_any}}'
+                        when jsonb_typeof(raw.definition#>'{{rules,exact}}') = 'array'
+                        then raw.definition#>'{{rules,exact}}'
+                        else '[]'::jsonb
+                    end
+                ) rule_value(value)
+            ),
+            array[]::text[]
+        ) as exact_values,
+        coalesce(
+            (
+                select array_agg({_normalize_sql_text("rule_value.value")})
+                from jsonb_array_elements_text(
+                    case
+                        when jsonb_typeof(raw.definition#>'{{rules,contains_any}}') = 'array'
+                        then raw.definition#>'{{rules,contains_any}}'
+                        when jsonb_typeof(raw.definition#>'{{rules,contains}}') = 'array'
+                        then raw.definition#>'{{rules,contains}}'
+                        else '[]'::jsonb
+                    end
+                ) rule_value(value)
+            ),
+            array[]::text[]
+        ) as contains_values,
+        coalesce(
+            (
+                select array_agg({_normalize_sql_text("rule_value.value")})
+                from jsonb_array_elements_text(
+                    case
+                        when jsonb_typeof(raw.definition#>'{{rules,contains_all}}') = 'array'
+                        then raw.definition#>'{{rules,contains_all}}'
+                        else '[]'::jsonb
+                    end
+                ) rule_value(value)
+            ),
+            array[]::text[]
+        ) as contains_all_values,
+        coalesce(
+            (
+                select array_agg({_normalize_sql_text("rule_value.value")})
+                from jsonb_array_elements_text(
+                    case
+                        when jsonb_typeof(raw.definition#>'{{rules,none_of}}') = 'array'
+                        then raw.definition#>'{{rules,none_of}}'
+                        when jsonb_typeof(raw.definition#>'{{rules,excludes}}') = 'array'
+                        then raw.definition#>'{{rules,excludes}}'
+                        else '[]'::jsonb
+                    end
+                ) rule_value(value)
+            ),
+            array[]::text[]
+        ) as excluded_values,
+        coalesce(
+            (
+                select array_agg(rule_value.value)
+                from jsonb_array_elements_text(
+                    case
+                        when jsonb_typeof(raw.definition#>'{{rules,regex_any}}') = 'array'
+                        then raw.definition#>'{{rules,regex_any}}'
+                        else '[]'::jsonb
+                    end
+                ) rule_value(value)
+            ),
+            array[]::text[]
+        ) as regex_values
+    from raw_rule_definitions raw
+),
 rule_matches as materialized (
     select
         b.row_id,
         definition.definition,
-        greatest(coalesce(nullif(definition.definition->>'priority', '')::integer, 2), 2) as priority
+        definition.priority
     from banks b
     cross join rule_definitions definition
     cross join lateral (
-        select coalesce(array_agg(candidate.value), array[]::text[]) as texts
-        from jsonb_array_elements_text(
-            case
-                when jsonb_typeof(definition.definition#>'{{rules,match_fields}}') = 'array'
-                then definition.definition#>'{{rules,match_fields}}'
-                else '[]'::jsonb
-            end
-        ) match_field(field)
-        cross join lateral (
-            select source.value
-            from (
-                values
-                    ('counterparty_name', b.rule_counterparty_name),
-                    ('counterparty_account', b.rule_counterparty_account),
-                    ('counterparty_bank', b.rule_counterparty_bank),
-                    ('purpose_text', b.rule_purpose_text),
-                    ('summary_text', b.rule_summary_text),
-                    ('note_text', b.rule_note_text),
-                    ('detail_text', b.rule_detail_text)
-            ) source(field, value)
-            where source.field = match_field.field
-               or match_field.field = 'all_text'
-            union all
-            select detail_text.value
-            from unnest(b.rule_bank_detail_texts) detail_text(value)
-            where match_field.field in ('detail_text', 'all_text')
-        ) candidate
-        where nullif(candidate.value, '') is not null
+        select array_remove(
+            array_remove(
+                array[
+                    case when 'all_text' = any(definition.match_fields)
+                              or 'counterparty_name' = any(definition.match_fields)
+                         then b.rule_counterparty_name end,
+                    case when 'all_text' = any(definition.match_fields)
+                              or 'counterparty_account' = any(definition.match_fields)
+                         then b.rule_counterparty_account end,
+                    case when 'all_text' = any(definition.match_fields)
+                              or 'counterparty_bank' = any(definition.match_fields)
+                         then b.rule_counterparty_bank end,
+                    case when 'all_text' = any(definition.match_fields)
+                              or 'purpose_text' = any(definition.match_fields)
+                         then b.rule_purpose_text end,
+                    case when 'all_text' = any(definition.match_fields)
+                              or 'summary_text' = any(definition.match_fields)
+                         then b.rule_summary_text end,
+                    case when 'all_text' = any(definition.match_fields)
+                              or 'note_text' = any(definition.match_fields)
+                         then b.rule_note_text end,
+                    case when 'all_text' = any(definition.match_fields)
+                              or 'detail_text' = any(definition.match_fields)
+                         then b.rule_detail_text end
+                ]::text[] ||
+                case
+                    when 'all_text' = any(definition.match_fields)
+                      or 'detail_text' = any(definition.match_fields)
+                    then b.rule_bank_detail_texts
+                    else array[]::text[]
+                end,
+                ''
+            ),
+            null
+        ) as texts
     ) candidates
     where not exists (select 1 from internal_matches match where match.row_id = b.row_id)
       and (
-          coalesce(definition.definition->>'direction', 'any') in ('', 'any')
-          or definition.definition->>'direction' = b.direction
+          definition.direction in ('', 'any')
+          or definition.direction = b.direction
       )
       and (
-          coalesce(definition.definition#>>'{{account_scope,type}}', 'any') = 'any'
-          or not exists (
-              select 1
-              from jsonb_array_elements_text(
-                  case
-                      when jsonb_typeof(definition.definition#>'{{account_scope,values}}') = 'array'
-                      then definition.definition#>'{{account_scope,values}}'
-                      else '[]'::jsonb
-                  end
-              ) scope_value(value)
-          )
-          or exists (
-              select 1
-              from jsonb_array_elements_text(definition.definition#>'{{account_scope,values}}') scope_value(value)
-              where {NORM_SCOPE_VALUE_SQL} = case definition.definition#>>'{{account_scope,type}}'
-                  when 'bank_account' then {NORM_ACCOUNT_SQL}
-                  when 'account_type' then {NORM_ACCOUNT_TYPE_SQL}
-                  when 'bank' then {NORM_BANK_SQL}
-                  else {NORM_SCOPE_VALUE_SQL}
-              end
-          )
+          definition.account_scope_type = 'any'
+          or cardinality(definition.account_scope_values) = 0
+          or definition.account_scope_type not in ('bank_account', 'account_type', 'bank')
+          or case definition.account_scope_type
+              when 'bank_account' then b.rule_account
+              when 'account_type' then b.rule_account_type
+              when 'bank' then b.rule_bank
+          end = any(definition.account_scope_values)
       )
       and cardinality(candidates.texts) > 0
       and not exists (
-          select 1
-          from jsonb_array_elements_text(
-              case
-                  when jsonb_typeof(definition.definition#>'{{rules,none_of}}') = 'array'
-                  then definition.definition#>'{{rules,none_of}}'
-                  when jsonb_typeof(definition.definition#>'{{rules,excludes}}') = 'array'
-                  then definition.definition#>'{{rules,excludes}}'
-                  else '[]'::jsonb
-              end
-          ) rule_value(value)
+          select 1 from unnest(definition.excluded_values) rule_value(value)
           where exists (
               select 1 from unnest(candidates.texts) candidate_text
-              where position({NORM_RULE_VALUE_SQL} in candidate_text) > 0
+              where position(rule_value.value in candidate_text) > 0
           )
       )
       and not exists (
-          select 1
-          from jsonb_array_elements_text(
-              case
-                  when jsonb_typeof(definition.definition#>'{{rules,contains_all}}') = 'array'
-                  then definition.definition#>'{{rules,contains_all}}'
-                  else '[]'::jsonb
-              end
-          ) rule_value(value)
-          where position({NORM_RULE_VALUE_SQL} in array_to_string(candidates.texts, ' ')) = 0
+          select 1 from unnest(definition.contains_all_values) rule_value(value)
+          where position(rule_value.value in array_to_string(candidates.texts, ' ')) = 0
       )
       and (
           exists (
-              select 1
-              from jsonb_array_elements_text(
-                  case
-                      when jsonb_typeof(definition.definition#>'{{rules,exact_any}}') = 'array'
-                      then definition.definition#>'{{rules,exact_any}}'
-                      when jsonb_typeof(definition.definition#>'{{rules,exact}}') = 'array'
-                      then definition.definition#>'{{rules,exact}}'
-                      else '[]'::jsonb
-                  end
-              ) rule_value(value)
-              where {NORM_RULE_VALUE_SQL} = any(candidates.texts)
+              select 1 from unnest(definition.exact_values) rule_value(value)
+              where rule_value.value = any(candidates.texts)
           )
           or exists (
-              select 1
-              from jsonb_array_elements_text(
-                  case
-                      when jsonb_typeof(definition.definition#>'{{rules,contains_any}}') = 'array'
-                      then definition.definition#>'{{rules,contains_any}}'
-                      when jsonb_typeof(definition.definition#>'{{rules,contains}}') = 'array'
-                      then definition.definition#>'{{rules,contains}}'
-                      else '[]'::jsonb
-                  end
-              ) rule_value(value)
+              select 1 from unnest(definition.contains_values) rule_value(value)
               where exists (
                   select 1 from unnest(candidates.texts) candidate_text
-                  where position({NORM_RULE_VALUE_SQL} in candidate_text) > 0
+                  where position(rule_value.value in candidate_text) > 0
               )
           )
           or exists (
-              select 1
-              from jsonb_array_elements_text(
-                  case
-                      when jsonb_typeof(definition.definition#>'{{rules,regex_any}}') = 'array'
-                      then definition.definition#>'{{rules,regex_any}}'
-                      else '[]'::jsonb
-                  end
-              ) rule_value(value)
+              select 1 from unnest(definition.regex_values) rule_value(value)
               where exists (
                   select 1 from unnest(candidates.texts) candidate_text
                   where candidate_text ~* rule_value.value
               )
           )
-          or jsonb_array_length(
-              case
-                  when jsonb_typeof(definition.definition#>'{{rules,contains_all}}') = 'array'
-                  then definition.definition#>'{{rules,contains_all}}'
-                  else '[]'::jsonb
-              end
-          ) > 0
+          or cardinality(definition.contains_all_values) > 0
       )
 ),
 winning_rule_priority as materialized (

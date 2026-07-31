@@ -110,4 +110,6 @@
   保持 root-owned `0600`；临时 scenario 保持 `/tmp` + `finops-deploy` owner 边界。
 - write-operation runner 的 consumer 与隔离/causal 写前 baseline 共用有界 freshness 语义：只对
   `202 refreshing`、`read_model_not_fresh`、dependency `503` 轮询；业务断言、认证、合同和页面 SLO 失败仍立即
-  fail closed，避免瞬态 read model 状态阻断已提交关系的 canonical recovery。
+  fail closed，避免瞬态 read model 状态阻断已提交关系的 canonical recovery。Direct canonical API
+  不返回 `read_model_status` 时按其同步响应合同验收；只有响应显式声明非 fresh、refresh 已入队或 statistics
+  非 fresh 时才进入 freshness 重试，禁止把“没有 read model”误判成“read model 不新鲜”。

@@ -2387,6 +2387,46 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(result["status"], "fail")
         self.assertEqual(result["results"][0]["assertions"][0]["error"], "non_consumer_changed")
 
+    def test_isolation_baseline_accepts_direct_canonical_api_without_freshness_metadata(self) -> None:
+        checkpoint = write_operation_e2e_smoke.WriteCheckpoint(
+            name="canonical-isolation",
+            operations=("turnover_relation_confirm_cross_page",),
+            steps=(),
+            consumers=(
+                write_operation_e2e_smoke.ConsumerProbe(
+                    probe=http_slo_probe.HttpProbe("isolation", "/api/input-invoice-usage", target_ms=1000),
+                    assertions=(
+                        write_operation_e2e_smoke.JsonPointerAssertion("/rows/0/id", "equals", "stable"),
+                    ),
+                    page_key="input-invoice-usage",
+                    role="isolation",
+                ),
+            ),
+        )
+
+        def direct_canonical_response(*_args) -> http_slo_probe.HttpProbeResponse:
+            return http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=b'{"rows":[{"id":"stable"}]}',
+            )
+
+        baseline = write_operation_e2e_smoke._capture_isolation_baseline(
+            checkpoint,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            headers={"Authorization": "Bearer token"},
+            timeout_seconds=1,
+            request_fn=direct_canonical_response,
+            variables={},
+        )
+
+        self.assertEqual(baseline["status"], "pass")
+        self.assertEqual(
+            baseline["values"]["input-invoice-usage\x1f/rows/0/id"],
+            "stable",
+        )
+
     def test_isolation_baseline_waits_for_transient_refresh_before_recovery(self) -> None:
         checkpoint = write_operation_e2e_smoke.WriteCheckpoint(
             name="recovery",

@@ -85,8 +85,8 @@
 ## 2026-07-31 - canonical rule matching 规范化复用
 
 - 生产诊断显示 rows 1/10/50 与 filter-options 都约 1.8 秒，瓶颈不随返回行数增长，定位到 canonical SQL 中每条银行流水对每条规则重复执行相同文本规范化。
-- 保持 direct canonical API 和既有业务 SQL，只在 `banks` materialized CTE 中为每条流水计算一次规则候选文本，`rule_matches` 直接复用；不新增 Redis、read model、表、索引、worker 或 response 字段。
-- SQL 合同测试保护预计算路径；最终性能由 production-equivalent release gate 的 authenticated API p95 `<=1000ms` 验证。
+- 保持 direct canonical API 和既有业务 SQL：`banks` materialized CTE 对每条流水只计算一次候选文本与账户 scope，`rule_definitions` 对每条规则只解析、规范化一次匹配数组，`rule_matches` 仅复用预计算数组；不新增 Redis、read model、表、索引、worker 或 response 字段。
+- SQL 合同测试禁止 `rule_matches` 热路径重新出现 JSON 展开或 Unicode/正则规范化；最终性能由 production-equivalent release gate 的 authenticated API p95 `<=1000ms` 验证。
 
 ## 2026-06-25 - route-owner local closure audit
 
