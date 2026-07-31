@@ -494,7 +494,11 @@ function installOaPendingPaymentsFetch(overrides?: {
   writebackPaidResponses?: Array<{ status: number; payload: Record<string, unknown> }>;
   bankCandidatesPayload?: (url: URL) => Record<string, unknown>;
   bankCandidatesDelay?: Promise<void>;
-  bankCandidatesResponses?: Array<{ delay?: Promise<void>; payload: Record<string, unknown> }>;
+  bankCandidatesResponses?: Array<{
+    status?: number;
+    delay?: Promise<void>;
+    payload: Record<string, unknown>;
+  }>;
 }) {
   const writebackPaidResponses = [...(overrides?.writebackPaidResponses ?? [])];
   const rowsResponses = [...(overrides?.rowsResponses ?? [])];
@@ -630,7 +634,7 @@ function installOaPendingPaymentsFetch(overrides?: {
       }), { status: init?.method === "PUT" ? 200 : 200, headers: { "Content-Type": "application/json" } });
     }
     return new Response(JSON.stringify({}), {
-      status: 200,
+        status: scriptedResponse?.status ?? 200,
       headers: { "Content-Type": "application/json" },
     });
   });
@@ -1241,6 +1245,61 @@ describe("OA pending payments page", () => {
     await act(async () => staleRequest.promise);
     expect(within(drawer).queryByText("旧查询结果")).not.toBeInTheDocument();
     expect(within(drawer).getByText("新查询结果")).toBeInTheDocument();
+  });
+
+  test("retries the same committed candidate search once per Query or Enter action", async () => {
+    const candidatePayload = (id: string, counterpartyName: string) => ({
+      rows: [{
+        id,
+        counterpartyName,
+        tradeTime: "2026-06-14 09:41:55",
+        amount: "100.00",
+        bankAccount: "工商银行 6386",
+        directionLabel: "支出",
+        summary: "重复查询支出流水",
+        relationStatus: "unmatched",
+        relationStatusLabel: "未配对",
+      }],
+      pagination: { page: 1, pageSize: 100, total: 1 },
+    });
+    const fetchMock = installOaPendingPaymentsFetch({
+      bankCandidatesResponses: [
+        { payload: candidatePayload("initial", "初始结果") },
+        { status: 503, payload: { message: "候选查询暂时失败" } },
+        { payload: candidatePayload("retry", "重试结果") },
+        { payload: candidatePayload("enter", "回车重试结果") },
+      ],
+    });
+    const user = userEvent.setup();
+
+    renderAuthenticatedAppAt("/oa-pending-payments");
+    const page = await screen.findByTestId("oa-pending-payments-page");
+    await within(page).findByText("候选付款人");
+    await user.click(within(page).getByRole("button", { name: /进行中 OA/ }));
+    const candidateRow = within(page).getByRole("row", { name: /候选付款人/ });
+    await user.click(within(candidateRow).getByRole("checkbox", { name: /候选付款人/ }));
+    await user.click(within(page).getByRole("button", { name: "关联支出流水" }));
+
+    const drawer = await screen.findByLabelText("关联支出流水抽屉");
+    expect(await within(drawer).findByText("初始结果")).toBeInTheDocument();
+    const search = within(drawer).getByPlaceholderText("对方户名 / 摘要 / 金额");
+    const queryButton = within(drawer).getByRole("button", { name: "查询" });
+    const requestsAfterOpen = bankCandidateRequests(fetchMock).length;
+
+    await user.click(queryButton);
+    await waitFor(() => expect(bankCandidateRequests(fetchMock)).toHaveLength(requestsAfterOpen + 1));
+    expect(await within(drawer).findByText("暂无支出流水")).toBeInTheDocument();
+
+    await user.click(queryButton);
+    await waitFor(() => expect(bankCandidateRequests(fetchMock)).toHaveLength(requestsAfterOpen + 2));
+    expect(await within(drawer).findByText("重试结果")).toBeInTheDocument();
+
+    await user.type(search, "{Enter}");
+    await waitFor(() => expect(bankCandidateRequests(fetchMock)).toHaveLength(requestsAfterOpen + 3));
+    expect(await within(drawer).findByText("回车重试结果")).toBeInTheDocument();
+    expect(bankCandidateRequests(fetchMock).slice(requestsAfterOpen).map((request) => (
+      request.searchParams.get("keyword")
+    ))).toEqual([null, null, null]);
   });
 
   test("shows row writeback only for paid rows that are not written", async () => {

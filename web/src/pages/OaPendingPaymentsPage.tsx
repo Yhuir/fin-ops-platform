@@ -537,6 +537,7 @@ function OaBankLinkDrawer({
   const [submitting, setSubmitting] = useState(false);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const [searchGeneration, setSearchGeneration] = useState(0);
   const candidateRequestSeqRef = useRef(0);
   const pageCount = Math.max(1, Math.ceil(total / BANK_CANDIDATE_PAGE_SIZE));
   const closeBlocked = loading || submitting;
@@ -586,7 +587,7 @@ function OaBankLinkDrawer({
     setSelectedBankIds(new Set());
     loadCandidates(controller.signal);
     return () => controller.abort();
-  }, [loadCandidates, open]);
+  }, [loadCandidates, open, searchGeneration]);
 
   const toggleBank = (bankId: string) => {
     setSelectedBankIds((current) => {
@@ -603,6 +604,7 @@ function OaBankLinkDrawer({
   const searchCandidates = () => {
     setPage(1);
     setKeyword(keywordDraft.trim());
+    setSearchGeneration((current) => current + 1);
   };
 
   const submit = () => {
