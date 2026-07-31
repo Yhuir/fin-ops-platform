@@ -1644,6 +1644,7 @@ release_gate_checkpoint() {
     fi
     "$API_PYTHON" -m fin_ops_platform.tools.runtime_sync_closure_gate "${closure_args[@]}" >/dev/null
   ) || true
+  reconcile_completed_publish_states "$verification_release"
   (
     set -a
     # shellcheck disable=SC1090
@@ -1970,7 +1971,6 @@ release_gate_activate() {
   evidence_dir="$RELEASE_GATE_EVIDENCE_ROOT/$release"
   [[ ! -e "$evidence_dir" ]] || die "release gate evidence already exists: $evidence_dir"
   install -d -m 0700 "$evidence_dir"
-  reconcile_completed_publish_states "$release"
   if ! release_gate_checkpoint "$previous_release" pre "$admin_token" "$evidence_dir" preflight "$release"; then
     cat "$evidence_dir/pre/checkpoint.json" >&2
     src="$(release_src "$previous_release")"

@@ -571,8 +571,9 @@ pre 与 rollback checkpoint 使用候选 release 的门禁代码检查实际运�
 RabbitMQ dispatcher 每次领取待发布事件前，会把超过 publish lock timeout 且业务消费已经完成的
 `status=done/publish_status=publishing` 行收敛为 `published`。这类行证明消息已经到达 consumer，
 不得重复发布；release gate 同时要求 `publishing_outbox_count=0`，防止终态事件卡在 transport 中间态。
-候选 release 尚未激活时，激活前门禁使用候选代码中的同一 repository 方法，幂等收敛已经 `done` 且
-publish lock 为空或过期的终态，再执行 pre checkpoint；该步骤不认领、重放或重新发布事件，也不绕过
+每个 checkpoint 在全部 smoke 完成后、runtime health 采样前，使用 verification release 代码中的同一
+repository 方法，幂等收敛已经 `done` 且 publish lock 为空或过期的终态；因此候选尚未激活或 preflight
+自身新建事件时也不会形成激活死锁。该步骤不认领、重放或重新发布事件，也不绕过
 `publishing_outbox_count=0` 强门禁。
 
 worker readiness 不是 systemd active。发布脚本会等待：
