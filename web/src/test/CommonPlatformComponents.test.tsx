@@ -309,6 +309,88 @@ describe("common platform components", () => {
     }
   });
 
+  test("makes persistent exit inert and restores focus across a rapid reopen", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"] });
+    const inertDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "inert");
+    if (!inertDescriptor) {
+      Object.defineProperty(HTMLElement.prototype, "inert", {
+        configurable: true,
+        get() {
+          return this.hasAttribute("inert");
+        },
+        set(value: boolean) {
+          this.toggleAttribute("inert", value);
+        },
+      });
+    }
+
+    try {
+      const { rerender } = renderWithProject(
+        <>
+          <button type="button">打开抽屉</button>
+          <AppDrawer modal={false} onClose={vi.fn()} open={false} title="持久抽屉">
+            <button type="button">抽屉操作</button>
+          </AppDrawer>
+        </>,
+      );
+      const opener = screen.getByRole("button", { name: "打开抽屉" });
+      opener.focus();
+
+      rerender(
+        <>
+          <button type="button">打开抽屉</button>
+          <AppDrawer modal={false} onClose={vi.fn()} open title="持久抽屉">
+            <button type="button">抽屉操作</button>
+          </AppDrawer>
+        </>,
+      );
+      act(() => vi.advanceTimersByTime(16));
+      screen.getByRole("button", { name: "抽屉操作" }).focus();
+
+      rerender(
+        <>
+          <button type="button">打开抽屉</button>
+          <AppDrawer modal={false} onClose={vi.fn()} open={false} title="持久抽屉">
+            <button type="button">抽屉操作</button>
+          </AppDrawer>
+        </>,
+      );
+      const exitingDrawer = screen.getByText("持久抽屉").closest(".finance-drawer__content") as HTMLElement & { inert: boolean };
+      expect(exitingDrawer.inert).toBe(true);
+      expect(document.activeElement).toBe(opener);
+
+      rerender(
+        <>
+          <button type="button">打开抽屉</button>
+          <AppDrawer modal={false} onClose={vi.fn()} open title="持久抽屉">
+            <button type="button">抽屉操作</button>
+          </AppDrawer>
+        </>,
+      );
+      act(() => vi.advanceTimersByTime(16));
+      expect(screen.getByText("持久抽屉").closest(".finance-drawer__content")).not.toHaveAttribute("data-exiting");
+
+      rerender(
+        <>
+          <button type="button">打开抽屉</button>
+          <AppDrawer modal={false} onClose={vi.fn()} open={false} title="持久抽屉">
+            <button type="button">抽屉操作</button>
+          </AppDrawer>
+        </>,
+      );
+      act(() => vi.advanceTimersByTime(180));
+      expect(screen.queryByText("持久抽屉")).not.toBeInTheDocument();
+      expect(document.activeElement).toBe(opener);
+    } finally {
+      if (inertDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, "inert", inertDescriptor);
+      } else {
+        Reflect.deleteProperty(HTMLElement.prototype, "inert");
+      }
+      vi.useRealTimers();
+    }
+  });
+
   test("uses HeroUI right translate motion without the legacy child transform animation", () => {
     expect(appStyles).toMatch(/\.finance-drawer\s*\{[^}]*display:\s*flex/s);
     expect(appStyles).toMatch(/\.finance-drawer\s*\{[^}]*flex-direction:\s*column/s);

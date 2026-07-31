@@ -47,6 +47,9 @@ export default function AppDrawer({
   const lastOpenModalContentRef = useRef({ ariaLabel, children, footer, headerAside, subtitle, title });
   const persistentCloseTimerRef = useRef<number | null>(null);
   const persistentFrameRef = useRef<number | null>(null);
+  const persistentOpenerRef = useRef<HTMLElement | null>(null);
+  const persistentRootRef = useRef<HTMLElement | null>(null);
+  const persistentWasOpenRef = useRef(false);
   const drawerStyle: AppDrawerStyle = {
     "--finance-drawer-width": typeof width === "number" ? `${width}px` : width,
   };
@@ -88,6 +91,10 @@ export default function AppDrawer({
     }
 
     if (open) {
+      if (!persistentWasOpenRef.current) {
+        persistentOpenerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      }
+      persistentWasOpenRef.current = true;
       setPersistentMounted(true);
       persistentFrameRef.current = window.requestAnimationFrame(() => {
         persistentFrameRef.current = null;
@@ -103,11 +110,18 @@ export default function AppDrawer({
     }
 
     if (!persistentMounted) {
+      persistentWasOpenRef.current = false;
       setPersistentVisible(false);
       setPersistentClosing(false);
       return undefined;
     }
 
+    persistentWasOpenRef.current = false;
+    const focusedElement = document.activeElement;
+    const opener = persistentOpenerRef.current;
+    if (focusedElement instanceof Node && persistentRootRef.current?.contains(focusedElement) && opener?.isConnected) {
+      opener.focus();
+    }
     setPersistentVisible(false);
     setPersistentClosing(true);
     persistentCloseTimerRef.current = window.setTimeout(() => {
@@ -137,6 +151,8 @@ export default function AppDrawer({
         data-entering={persistentVisible && !persistentClosing ? true : undefined}
         data-exiting={persistentClosing ? true : undefined}
         data-placement="right"
+        inert={persistentClosing ? true : undefined}
+        ref={persistentRootRef}
       >
         <section
           aria-busy={ariaBusy ? "true" : undefined}
