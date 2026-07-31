@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 36-01-PLAN.md local implementation; production handoff to main orchestrator
-last_updated: "2026-07-31T19:36:24.936Z"
-last_activity: 2026-07-31 -- Phase 38 execution started
+status: active
+stopped_at: Phase 38 verified in production
+last_updated: "2026-08-01T04:34:42+08:00"
+last_activity: 2026-08-01 -- Phase 38 production closure passed
 progress:
   total_phases: 36
-  completed_phases: 9
+  completed_phases: 10
   total_plans: 86
-  completed_plans: 61
-  percent: 25
+  completed_plans: 62
+  percent: 27
 ---
 
 # Project State
@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 
 ## Current Position
 
-Phase: 38 (etc) — EXECUTING
+Phase: 38 (etc) — COMPLETE
 Plan: 1 of 1
-Status: Executing Phase 38
-Last activity: 2026-07-31 -- Phase 38 execution started
+Status: Production verified
+Last activity: 2026-08-01 -- Phase 38 production closure passed
 
 Progress: [██████████] complete
 
@@ -36,7 +36,7 @@ Progress: [██████████] complete
 
 **Velocity:**
 
-- Total plans completed: 39
+- Total plans completed: 40
 - Baseline planning docs completed: 1
 - Average duration: N/A
 - Total execution time: 1 hour 40 minutes
@@ -52,11 +52,16 @@ Progress: [██████████] complete
 | Phase 35 P01 | 1h 46m | 4 tasks | 65 files |
 | Phase 36 P01 | 20min | 4 tasks | 20 files |
 | Phase 37 P01 | 2h | 4 tasks | 24 files |
+| Phase 38 P01 | 1h | 4 tasks | 21 files |
 
 ## Accumulated Context
 
 ### Decisions
 
+- [Phase 38]: Production release `main-af00cefe-20260801041334` is active at exact Git SHA `af00cefece8f3420c46bba709e092165f2718dc2`; AppHealth, 16-route shell and authenticated ETC desktop/mobile probes passed with zero mutation.
+- [Phase 38]: The four-stage lifecycle is an O(1) presentation projection over existing batch/task facts; no stage API, persistent state, dependency, read model, worker, cache or timer was introduced.
+- [Phase 38]: Page-owned plate/keyword state, DOM, request parameters and conflicting card selectors are deleted. The formal optional API query contract remains available outside this page.
+- [Phase 38]: Production warm list/detail/task p95 is 174.9/102.0/327.3ms; desktop/mobile frame p95 is 18.0/18.4ms, CLS is 0.001479 and >100ms long tasks are zero.
 - [Phase 37]: Production release `main-99a7b536-20260801030234` is active at exact Git SHA `99a7b536a914f2b854b5004d1fdc4921872bd4a2`; pre/T+0/T+60/T+300, queue/worker health and System Audit all passed.
 - [Phase 37]: Current OA identity comes only from SessionContext; the account popover adds zero session/image I/O, and the static local status mark preserves the existing App Status path without a new dependency.
 - [Phase 37]: Sidebar state is isolated from the business page; width/flex layout motion, rotating SVG/keyframes and inherited `--sidebar-width` are deleted. Production 6-cycle aggregate frame p95 is 19.56ms with CLS 0.

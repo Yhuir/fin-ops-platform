@@ -777,10 +777,10 @@ Plans:
   4. No dependency, backend state, API, cache, read model or worker is added; targeted/full local gates and cross-page regressions pass.
   5. One pushed `main` release and authenticated production probes prove the UI, request-count, performance, worker/queue and health contracts.
 
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 
 Plans:
 
-- [ ] 38-01-PLAN — ETC lifecycle summary, flat workspace, legacy cleanup, regression gates, deployment and production verification.
+- [x] 38-01-PLAN — ETC lifecycle summary, flat workspace, legacy cleanup, regression gates, deployment and production verification.
 
 ---
