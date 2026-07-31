@@ -179,8 +179,12 @@ test.describe("right drawer motion", () => {
       oaPendingPaymentBankLinkFlow: true,
       sessionMode: "full_access",
     });
+    let releaseCandidates!: () => void;
+    const candidatesGate = new Promise<void>((resolve) => {
+      releaseCandidates = resolve;
+    });
     await page.route("**/api/oa-pending-payments/bank-transaction-candidates*", async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 450));
+      await candidatesGate;
       await route.fallback();
     });
     await page.goto("/oa-pending-payments");
@@ -201,6 +205,8 @@ test.describe("right drawer motion", () => {
     await page.keyboard.press("Escape");
     await page.locator(".finance-drawer__backdrop").evaluate((backdrop: HTMLElement) => backdrop.click());
     await expect(drawer).toBeVisible();
+    await expect(drawer.getByText("加载中")).toBeVisible();
+    releaseCandidates();
     await expect(drawer.getByText("显示 3 / 3 条")).toBeVisible();
     expectFullWidthTravel(await drawerSamples(page), "enter");
     const requestsBeforeClose = api.calls.length;
