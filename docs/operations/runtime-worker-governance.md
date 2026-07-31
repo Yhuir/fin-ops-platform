@@ -537,8 +537,8 @@ PYTHONPATH="$release_src/backend/src" \
 
 入口先对当前 release 执行 production-equivalent `preflight` checkpoint；候选激活后在 T+0 执行
 `full` checkpoint，并分别在 T+60s、T+300s 执行 `stability` checkpoint。所有 profile 都使用
-`pg_temp` 临时表完成隔离 insert/read/delete/rollback 探针，并执行只读页面 canonical audit；任何 profile
-都不得 confirm、withdraw、recovery 或修改真实业务关系。每次检查都必须使用真实 PostgreSQL 和 RabbitMQ，
+`pg_temp` 临时表完成隔离 insert/read/delete/rollback 探针，并在 runtime 收敛后执行只读页面 canonical
+audit；任何 profile 都不得 confirm、withdraw、recovery 或修改真实业务关系。每次检查都必须使用真实 PostgreSQL 和 RabbitMQ，
 验证 exact registry/systemd inventory、worker readiness、dirty scope、pending/processing outbox、durable 与
 RabbitMQ dead letter、critical read-model enqueue-to-fresh SLO、domain audit 和 API/health/SSE 性能。
 最终 evidence 复用只读页面 canonical audit，并以 T+300 runtime 采样证明 queue 持续稳定。
@@ -566,6 +566,9 @@ release 与 Git commit。PRE 失败时，部署命令只返回不含 token、环
 `preflight` checkpoint；pre checkpoint 失败时还必须恢复 previous release 的 deploy-control/runtime-worker helper。
 pre 与 rollback checkpoint 使用候选 release 的门禁代码检查实际运行 release；worker inventory 仍按实际
 运行 release 的 registry 核对。这样首次启用新门禁时不依赖旧 release 中尚不存在的检查逻辑。
+页面 audit 则以候选 release 的 `PAGE_AUDIT_REGISTRY` 为预期集合，严格核对当前 runtime 返回的 summary
+和逐页 proof。旧 runtime 尚未返回 registry 明细字段时，只有逐页 proof、页数和顺序全部与候选 registry
+一致才可通过；三个 registry 字段部分缺失、漏页或额外页面均 fail closed。
 不存在“候选已激活但没有有效 gate evidence”的成功状态。
 
 RabbitMQ dispatcher 每次领取待发布事件前，会把业务消费已经完成的

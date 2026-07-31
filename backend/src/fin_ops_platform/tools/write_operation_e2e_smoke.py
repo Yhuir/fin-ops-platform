@@ -20,6 +20,7 @@ from fin_ops_platform.services.postgres_connection import (
     PostgresConnection,
     PostgresSettings,
 )
+from fin_ops_platform.services.page_audit_registry import PAGE_AUDIT_REGISTRY
 from fin_ops_platform.tools import http_slo_probe, write_operation_slo_audit
 from fin_ops_platform.tools.cli_reports import (
     input_file_error_report,
@@ -2078,27 +2079,41 @@ def _collect_system_audit(
             raise ValueError("system_audit_snapshot_not_repeatable_read_only")
         if not isinstance(contract, dict) or not contract:
             raise ValueError("system_audit_contract_missing")
+        expected_registered_page_keys = list(PAGE_AUDIT_REGISTRY)
+        expected_system_page_keys = [
+            registration.page_key
+            for registration in PAGE_AUDIT_REGISTRY.values()
+            if registration.executor == "system"
+        ]
+        if len(expected_system_page_keys) != 1:
+            raise ValueError("system_audit_local_registry_contract_failed")
+        expected_system_page_key = expected_system_page_keys[0]
+        expected_audited_business_page_keys = [
+            registration.page_key
+            for registration in PAGE_AUDIT_REGISTRY.values()
+            if registration.executor != "system"
+        ]
         registered_page_keys = contract.get("registered_page_keys")
         audited_business_page_keys = contract.get("audited_business_page_keys")
         system_page_key = contract.get("system_page_key")
-        if (
-            not isinstance(registered_page_keys, list)
-            or not registered_page_keys
-            or any(not isinstance(key, str) or not key for key in registered_page_keys)
-            or len(registered_page_keys) != len(set(registered_page_keys))
-            or not isinstance(audited_business_page_keys, list)
-            or any(not isinstance(key, str) or not key for key in audited_business_page_keys)
-            or len(audited_business_page_keys) != len(set(audited_business_page_keys))
-            or not isinstance(system_page_key, str)
-            or not system_page_key
-            or system_page_key not in registered_page_keys
-            or set(audited_business_page_keys) != set(registered_page_keys) - {system_page_key}
+        registry_contract_fields = (
+            registered_page_keys,
+            audited_business_page_keys,
+            system_page_key,
+        )
+        registry_contract_field_count = sum(value is not None for value in registry_contract_fields)
+        if registry_contract_field_count not in {0, len(registry_contract_fields)}:
+            raise ValueError("system_audit_registry_contract_failed")
+        if registry_contract_field_count and (
+            registered_page_keys != expected_registered_page_keys
+            or audited_business_page_keys != expected_audited_business_page_keys
+            or system_page_key != expected_system_page_key
         ):
             raise ValueError("system_audit_registry_contract_failed")
         if not isinstance(summary, dict) or (
-            summary.get("registered_page_count") != len(registered_page_keys)
-            or summary.get("audited_business_page_count") != len(audited_business_page_keys)
-            or summary.get("passed_business_page_count") != len(audited_business_page_keys)
+            summary.get("registered_page_count") != len(expected_registered_page_keys)
+            or summary.get("audited_business_page_count") != len(expected_audited_business_page_keys)
+            or summary.get("passed_business_page_count") != len(expected_audited_business_page_keys)
         ):
             raise ValueError("system_audit_page_count_or_contract_failed")
         if (
@@ -2139,8 +2154,8 @@ def _collect_system_audit(
         )
         if (
             not isinstance(page_results, list)
-            or len(page_results) != len(audited_business_page_keys)
-            or page_result_keys != audited_business_page_keys
+            or len(page_results) != len(expected_audited_business_page_keys)
+            or page_result_keys != expected_audited_business_page_keys
             or any(
                 not isinstance(page, dict)
                 or page.get("overall_status") != "pass"

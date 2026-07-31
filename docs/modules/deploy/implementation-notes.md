@@ -32,6 +32,11 @@
   worker、表、队列、缓存、定时器或兼容链路。
 - 验证：隔离写、canonical audit、409 非提交语义、一次协调后干净采样、持续复发阻断、deploy evidence
   和 production-equivalent T+0/T+60/T+300 gate。
+- 预激活合同错位修复：候选 gate 会读取仍在运行的旧 stable API，不能要求旧响应已经包含候选新增的
+  registry 明细字段。门禁现在用候选 `PAGE_AUDIT_REGISTRY` 严格核对旧响应的 summary 与完整逐页 proof；
+  只有三个 registry 字段整体缺失时可由这两类证据证明，部分字段、漏页、额外页和顺序漂移全部失败关闭。
+  同时 canonical audit 移到 runtime convergence 之后，避免在可安全协调的 `done/publishing` 终态清理前
+  先制造一次确定失败。
 
 ## 2026-07-26 - Workbench relation Cost active/all 生产验证闭环
 

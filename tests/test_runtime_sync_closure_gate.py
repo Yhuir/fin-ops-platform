@@ -432,9 +432,9 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             [check["name"] for check in report["checks"]],
             [
                 "postgres_reversible_write",
-                "page_canonical_audit",
-                "health_ready_payload",
                 "runtime_health",
+                "health_ready_payload",
+                "page_canonical_audit",
             ],
         )
         read_model_smoke.assert_not_called()
@@ -565,7 +565,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             [check["name"] for check in report["checks"]],
             [
                 "postgres_reversible_write",
-                "page_canonical_audit",
                 "read_model_direct_smoke",
                 "authenticated_http_slo",
                 "sse_first_event_smoke",
@@ -573,6 +572,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                 "write_operation_audit",
                 "runtime_health_before_final_convergence",
                 "runtime_health",
+                "page_canonical_audit",
             ],
         )
         business_write_e2e.assert_not_called()

@@ -76,7 +76,18 @@ def _turnover_withdraw_rows() -> list[dict[str, object]]:
 
 
 def _system_audit_payload(audit_id: str = "system-audit:test-1") -> dict[str, object]:
-    audited_page_keys = [f"page-{index}" for index in range(16)]
+    registrations = tuple(write_operation_e2e_smoke.PAGE_AUDIT_REGISTRY.values())
+    registered_page_keys = [registration.page_key for registration in registrations]
+    audited_page_keys = [
+        registration.page_key
+        for registration in registrations
+        if registration.executor != "system"
+    ]
+    system_page_key = next(
+        registration.page_key
+        for registration in registrations
+        if registration.executor == "system"
+    )
     page_results = [
         {
             "page_key": page_key,
@@ -89,9 +100,9 @@ def _system_audit_payload(audit_id: str = "system-audit:test-1") -> dict[str, ob
         "overall_status": "pass",
         "audit_status": {"integrity": "pass", "freshness": "fresh", "queue": "drained"},
         "summary": {
-            "registered_page_count": 17,
-            "audited_business_page_count": 16,
-            "passed_business_page_count": 16,
+            "registered_page_count": len(registered_page_keys),
+            "audited_business_page_count": len(audited_page_keys),
+            "passed_business_page_count": len(audited_page_keys),
             "database_internal_contracts": "pass",
         },
         "database_system_snapshot": {
@@ -103,9 +114,9 @@ def _system_audit_payload(audit_id: str = "system-audit:test-1") -> dict[str, ob
         },
         "audit_contract": {
             "contract_revision": "page-audit-contract.v26",
-            "registered_page_keys": [*audited_page_keys, "app-health-operations"],
+            "registered_page_keys": registered_page_keys,
             "audited_business_page_keys": audited_page_keys,
-            "system_page_key": "app-health-operations",
+            "system_page_key": system_page_key,
         },
         "external_evidence": {"status": "unknown"},
     }
@@ -2020,6 +2031,111 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             audit["diagnostics"]["issues"][0]["details"]["publishing_outbox_count"],
             1,
         )
+
+    def test_system_audit_accepts_previous_release_contract_when_registry_proof_is_complete(
+        self,
+    ) -> None:
+        checkpoint = _strict_checkpoint("confirm", key="confirm-key", relation_state_after="active")
+        payload = _system_audit_payload()
+        contract = payload["audit_contract"]
+        assert isinstance(contract, dict)
+        for key in ("registered_page_keys", "audited_business_page_keys", "system_page_key"):
+            contract.pop(key)
+
+        audit = write_operation_e2e_smoke._collect_system_audit(
+            checkpoint,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            headers={"Authorization": "Bearer token"},
+            timeout_seconds=1,
+            request_fn=lambda *args: http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=json.dumps(payload).encode(),
+            ),
+        )
+
+        self.assertEqual(audit["status"], "pass")
+
+    def test_system_audit_rejects_partial_previous_release_registry_contract(self) -> None:
+        checkpoint = _strict_checkpoint("confirm", key="confirm-key", relation_state_after="active")
+        payload = _system_audit_payload()
+        contract = payload["audit_contract"]
+        assert isinstance(contract, dict)
+        contract.pop("system_page_key")
+
+        audit = write_operation_e2e_smoke._collect_system_audit(
+            checkpoint,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            headers={"Authorization": "Bearer token"},
+            timeout_seconds=1,
+            request_fn=lambda *args: http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=json.dumps(payload).encode(),
+            ),
+        )
+
+        self.assertEqual(audit["status"], "fail")
+        self.assertEqual(audit["error"], "system_audit_registry_contract_failed")
+
+    def test_system_audit_rejects_candidate_registry_order_drift(self) -> None:
+        checkpoint = _strict_checkpoint("confirm", key="confirm-key", relation_state_after="active")
+        payload = _system_audit_payload()
+        contract = payload["audit_contract"]
+        assert isinstance(contract, dict)
+        registered_page_keys = contract["registered_page_keys"]
+        assert isinstance(registered_page_keys, list)
+        registered_page_keys[0], registered_page_keys[1] = (
+            registered_page_keys[1],
+            registered_page_keys[0],
+        )
+
+        audit = write_operation_e2e_smoke._collect_system_audit(
+            checkpoint,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            headers={"Authorization": "Bearer token"},
+            timeout_seconds=1,
+            request_fn=lambda *args: http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=json.dumps(payload).encode(),
+            ),
+        )
+
+        self.assertEqual(audit["status"], "fail")
+        self.assertEqual(audit["error"], "system_audit_registry_contract_failed")
+
+    def test_system_audit_rejects_previous_release_missing_business_page_proof(self) -> None:
+        checkpoint = _strict_checkpoint("confirm", key="confirm-key", relation_state_after="active")
+        payload = _system_audit_payload()
+        contract = payload["audit_contract"]
+        snapshot = payload["database_system_snapshot"]
+        assert isinstance(contract, dict)
+        assert isinstance(snapshot, dict)
+        for key in ("registered_page_keys", "audited_business_page_keys", "system_page_key"):
+            contract.pop(key)
+        page_results = snapshot["page_results"]
+        assert isinstance(page_results, list)
+        page_results.pop()
+
+        audit = write_operation_e2e_smoke._collect_system_audit(
+            checkpoint,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            headers={"Authorization": "Bearer token"},
+            timeout_seconds=1,
+            request_fn=lambda *args: http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=json.dumps(payload).encode(),
+            ),
+        )
+
+        self.assertEqual(audit["status"], "fail")
+        self.assertEqual(audit["error"], "system_audit_business_pages_failed")
 
     def test_checkpoint_consumers_probe_open_pages_in_parallel_and_keep_scenario_order(self) -> None:
         checkpoint = write_operation_e2e_smoke.WriteCheckpoint(

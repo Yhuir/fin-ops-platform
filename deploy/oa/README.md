@@ -405,7 +405,9 @@ python -m fin_ops_platform.app.worker \
 - 激活发布会在创建新 release 目录前先执行一次旧 release 清理，并检查 release 所在文件系统至少有
   512MB 可用空间；空间不足时会输出 `df` 和关键目录大小后停止，不会继续解包到半失败状态
 - 激活前运行 `preflight`：用候选 gate 代码检查当前 stable runtime、worker/queue/RabbitMQ 收敛、
-  隔离 PostgreSQL 可逆写探针和只读页面 canonical audit，不执行业务 mutation
+  隔离 PostgreSQL 可逆写探针和只读页面 canonical audit，不执行业务 mutation。候选 gate 读取旧
+  stable API 时，以候选内置页面 registry 对响应 summary 与逐页 proof 做严格对账；旧响应缺少 registry
+  明细字段可以由完整逐页 proof 证明，字段只返回一部分、漏页或顺序漂移仍 fail closed
 - 候选激活后 T+0 运行 `full`：连接真实 PostgreSQL 与 RabbitMQ，检查 exact worker inventory、
   queue/dirty/dead-letter 收敛、critical read-model SLO、隔离事务写入能力、domain/page canonical
   audit 及 API/health/SSE 性能
@@ -422,8 +424,10 @@ python -m fin_ops_platform.app.worker \
   `sudo /usr/local/sbin/finops-deploy-control write-operation-e2e-scenario-install <release-name> <temporary-scenario-path>`。
   helper 使用候选 release 的严格合同校验后原子安装 root-owned `0600` 文件，并保留一份 `.previous`；
   不允许直接覆盖标准 scenario、跟随符号链接或绕过候选代码校验
-- runtime health 在门禁探针完成后采样，保证最终 evidence 反映 durable queue、dirty scope、worker 与
-  dead-letter 收敛状态。closure gate 允许幂等收敛一次已完成的 durable publish 终态，但必须记录
+- runtime health 在 canonical audit 之前完成收敛；`full`/`stability` 还要在所有可能产生队列活动的探针
+  之后再次采样。canonical audit 始终作为每个 checkpoint 的最终只读证明，保证它看到的是 durable
+  queue、dirty scope、worker 与 dead-letter 已收敛的状态。closure gate 允许幂等收敛一次已完成的
+  durable publish 终态，但必须记录
   reconciliation 并在同一 checkpoint 内再取得一个无残留、无再次 reconciliation 的干净采样；持续复发
   按 dispatcher/状态机故障 fail closed，部署 shell 不得在 gate 外隐式清理
 - 门禁按 systemd 的既有边界分别加载 `/etc/fin-ops/fin-ops.rabbitmq-topology.env` 与

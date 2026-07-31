@@ -184,19 +184,16 @@ def run_closure_gate(
         _postgres_reversible_write_check(
             connection,
             target_ms=min(write_target_ms, 1_000.0),
-        ),
-        _page_canonical_audit_check(
-            base_url=base_url,
-            api_prefix=api_prefix,
-            headers=canonical_audit_headers,
-            timeout_seconds=timeout_seconds,
-            poll_interval_seconds=poll_interval_seconds,
-            require_auth=not allow_unauthenticated_http,
-        ),
+        )
     ]
     if profile == "preflight":
         checks.extend(
             [
+                _runtime_health_check(
+                    connection,
+                    timeout_seconds=timeout_seconds,
+                    poll_interval_seconds=poll_interval_seconds,
+                ),
                 _health_ready_payload_check(
                     base_url=base_url,
                     api_prefix=api_prefix,
@@ -204,11 +201,6 @@ def run_closure_gate(
                     timeout_seconds=timeout_seconds,
                     max_response_bytes=health_ready_max_response_bytes,
                     max_api_performance_endpoints=health_ready_max_api_performance_endpoints,
-                ),
-                _runtime_health_check(
-                    connection,
-                    timeout_seconds=timeout_seconds,
-                    poll_interval_seconds=poll_interval_seconds,
                 ),
             ]
         )
@@ -274,6 +266,18 @@ def run_closure_gate(
                 poll_interval_seconds=poll_interval_seconds,
             )
         )
+    # The canonical snapshot is the final proof after every queue-producing probe
+    # and terminal publish reconciliation has converged.
+    checks.append(
+        _page_canonical_audit_check(
+            base_url=base_url,
+            api_prefix=api_prefix,
+            headers=canonical_audit_headers,
+            timeout_seconds=timeout_seconds,
+            poll_interval_seconds=poll_interval_seconds,
+            require_auth=not allow_unauthenticated_http,
+        )
+    )
     status = _overall_status(checks)
     return {
         "version": 1,
