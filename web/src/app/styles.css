@@ -10338,20 +10338,28 @@ textarea {
 }
 
 .finance-drawer__content {
+  max-width: 100vw;
+}
+
+.finance-drawer__content[data-exiting] {
+  pointer-events: none;
+}
+
+.finance-drawer {
   --finance-drawer-enter-duration: 240ms;
   --finance-drawer-exit-duration: 180ms;
-  max-width: 100vw;
   transition-duration: var(--finance-drawer-enter-duration);
   transition-property: translate;
   transition-timing-function: var(--ease-out-quart);
 }
 
-.finance-drawer__content[data-exiting] {
-  pointer-events: none;
+.finance-drawer__content[data-exiting] .finance-drawer {
   transition-duration: var(--finance-drawer-exit-duration);
 }
 
 .finance-drawer__backdrop {
+  --finance-drawer-enter-duration: 240ms;
+  --finance-drawer-exit-duration: 180ms;
   transition-duration: var(--finance-drawer-enter-duration);
   transition-property: opacity;
   transition-timing-function: var(--ease-out-quart);
@@ -10368,6 +10376,8 @@ textarea {
 }
 
 .finance-drawer__content--persistent {
+  --finance-drawer-enter-duration: 240ms;
+  --finance-drawer-exit-duration: 180ms;
   position: fixed;
   z-index: 40;
   top: 0;
@@ -10377,6 +10387,9 @@ textarea {
   justify-content: flex-end;
   pointer-events: none;
   translate: 100% 0;
+  transition-duration: var(--finance-drawer-enter-duration);
+  transition-property: translate;
+  transition-timing-function: var(--ease-out-quart);
 }
 
 .finance-drawer__content--persistent[data-entering] {
@@ -10385,6 +10398,7 @@ textarea {
 
 .finance-drawer__content--persistent[data-exiting] {
   translate: 100% 0;
+  transition-duration: var(--finance-drawer-exit-duration);
 }
 
 .finance-drawer__content--persistent .finance-drawer {
@@ -10474,13 +10488,15 @@ textarea {
 
 @media (prefers-reduced-motion: reduce) {
   .finance-drawer__backdrop,
-  .finance-drawer__content {
+  .finance-drawer,
+  .finance-drawer__content--persistent {
     transition: none;
   }
 }
 
 [data-reduce-motion="true"] .finance-drawer__backdrop,
-[data-reduce-motion="true"] .finance-drawer__content {
+[data-reduce-motion="true"] .finance-drawer,
+[data-reduce-motion="true"] .finance-drawer__content--persistent {
   transition: none;
 }
 

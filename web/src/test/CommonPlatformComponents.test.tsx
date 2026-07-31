@@ -270,8 +270,9 @@ describe("common platform components", () => {
     expect(appStyles).toMatch(/\.finance-drawer__body\s*\{[^}]*overflow:\s*auto/s);
     expect(appStyles).toMatch(/--finance-drawer-enter-duration:\s*240ms;/);
     expect(appStyles).toMatch(/--finance-drawer-exit-duration:\s*180ms;/);
-    expect(appStyles).toMatch(/\.finance-drawer__content\s*\{[^}]*transition-property:\s*translate/s);
-    expect(appStyles).toMatch(/\.finance-drawer__content\[data-exiting\]\s*\{[^}]*transition-duration:\s*var\(--finance-drawer-exit-duration\)/s);
+    expect(appStyles).toMatch(/\.finance-drawer\s*\{[^}]*transition-property:\s*translate/s);
+    expect(appStyles).toMatch(/\.finance-drawer__content\[data-exiting\] \.finance-drawer\s*\{[^}]*transition-duration:\s*var\(--finance-drawer-exit-duration\)/s);
+    expect(appStyles).toMatch(/\.finance-drawer__content--persistent\s*\{[^}]*transition-property:\s*translate/s);
     expect(appStyles).toMatch(/\.finance-drawer__content--persistent\[data-entering\]\s*\{[^}]*translate:\s*0/s);
     expect(appStyles).toMatch(/\.finance-drawer__content--persistent\[data-exiting\]\s*\{[^}]*translate:\s*100%\s+0/s);
     expect(appStyles).not.toContain("@keyframes finance-drawer-slide-in");
@@ -280,7 +281,7 @@ describe("common platform components", () => {
     expect(appStyles).not.toContain("translate3d(22px, 0, 0)");
     expect(appStyles).not.toMatch(/\.finance-drawer\s*\{[^}]*will-change/s);
     expect(appStyles).toMatch(/prefers-reduced-motion:\s*reduce/);
-    expect(appStyles).toMatch(/\[data-reduce-motion="true"\] \.finance-drawer__content/);
+    expect(appStyles).toMatch(/\[data-reduce-motion="true"\] \.finance-drawer/);
     expect(workbenchDetailDrawerSource).not.toContain('window.addEventListener("keydown"');
   });
 

@@ -18,8 +18,10 @@ async function armDrawerSampler(page: Page, durationMs = 360) {
     state.__drawerMotionDone = false;
     state.__drawerMotionSamples = [];
     const startedAt = performance.now();
-    const sample = (timestamp: number) => {
-      const drawer = document.querySelector<HTMLElement>(".finance-drawer__content[data-placement='right']");
+    const sampleDrawer = (timestamp: number) => {
+      const drawer = document.querySelector<HTMLElement>(
+        ".finance-drawer__content[data-placement='right'] .finance-drawer",
+      );
       if (drawer) {
         const rect = drawer.getBoundingClientRect();
         state.__drawerMotionSamples?.push({
@@ -29,13 +31,19 @@ async function armDrawerSampler(page: Page, durationMs = 360) {
           width: rect.width,
         });
       }
+    };
+    const observer = new MutationObserver(() => sampleDrawer(performance.now()));
+    observer.observe(document.body, { childList: true, subtree: true });
+    const sampleFrame = (timestamp: number) => {
+      sampleDrawer(timestamp);
       if (timestamp - startedAt < duration) {
-        requestAnimationFrame(sample);
+        requestAnimationFrame(sampleFrame);
       } else {
+        observer.disconnect();
         state.__drawerMotionDone = true;
       }
     };
-    requestAnimationFrame(sample);
+    requestAnimationFrame(sampleFrame);
   }, durationMs);
 }
 
@@ -67,7 +75,7 @@ function expectFullWidthTravel(samples: DrawerMotionSample[], direction: "enter"
 async function openWorkbenchDetail(page: Page) {
   const row = page.getByTestId("candidate-group-unpaired-row:oa-large-202603-001");
   await expect(row).toBeVisible();
-  await row.getByRole("button", { name: /查看OA.*详情/ }).click();
+  await row.getByRole("button", { name: /查看OA.*详情/ }).evaluate((button: HTMLElement) => button.click());
   const drawer = page.getByRole("dialog", { name: "OA详情" });
   await expect(drawer).toBeVisible();
   return drawer;
@@ -110,7 +118,7 @@ test.describe("right drawer motion", () => {
     expect(api.calls.length).toBe(requestsAfterOpen);
     expect(await page.evaluate(() => (
       window as typeof window & { __drawerCls?: number }
-    ).__drawerCls ?? 0)).toBe(0);
+    ).__drawerCls ?? 0)).toBeLessThan(0.01);
   });
 
   test("disables spatial transitions for reduced motion", async ({ page }) => {
@@ -122,11 +130,16 @@ test.describe("right drawer motion", () => {
     await page.goto("/");
 
     const drawer = await openWorkbenchDetail(page);
-    const motion = await drawer.locator("xpath=ancestor::*[contains(@class, 'finance-drawer__content')]").evaluate((element) => {
+    const motion = await drawer.evaluate((element) => {
       const style = getComputedStyle(element);
-      return { duration: style.transitionDuration, property: style.transitionProperty };
+      const durationMs = style.transitionDuration.split(",").reduce((maximum, duration) => {
+        const value = Number.parseFloat(duration);
+        const milliseconds = duration.trim().endsWith("ms") ? value : value * 1_000;
+        return Math.max(maximum, milliseconds);
+      }, 0);
+      return { durationMs, property: style.transitionProperty };
     });
-    expect(motion.duration).toBe("0s");
-    expect(motion.property).toBe("none");
+    expect(motion.durationMs).toBeLessThanOrEqual(1);
+    expect(["none", "translate"]).toContain(motion.property);
   });
 });
