@@ -521,7 +521,7 @@ describe("BankFlowRuleBatchPage", () => {
     });
     const forbiddenLegacySurfaces = bankFlowRuleBatchSourceFiles.flatMap((path) => {
       const source = sourceByPath[path];
-      return /RefreshOutlinedIcon|CloseIcon|ToggleButton|TextField|TableCell|TableRow|TableHead|TableBody|Drawer\b|DialogTitle|DialogContent|DialogActions|Snackbar|Chip|IconButton/.test(source)
+      return /RefreshOutlinedIcon|CloseIcon|ToggleButton|TextField|TableCell|TableRow|TableHead|TableBody|(?<!App)Drawer\b|DialogTitle|DialogContent|DialogActions|Snackbar|Chip|IconButton/.test(source)
         ? [path]
         : [];
     });
@@ -530,9 +530,9 @@ describe("BankFlowRuleBatchPage", () => {
     const missingPrimitiveTargets = [
       pageSource.includes("PageScaffold") ? null : "BankFlowRuleBatchPage.tsx should keep PageScaffold",
       pageSource.includes("StatePanel") ? null : "BankFlowRuleBatchPage.tsx should keep StatePanel for loading/empty/error states",
-      /AppDrawer|no-oa-bank-batch.*drawer|bank-flow-rule-batches.*drawer/.test(pageSource)
+      pageSource.includes("AppDrawer")
         ? null
-        : "Tag management should use AppDrawer or a project drawer class",
+        : "Tag management should use AppDrawer",
       /AppDialog|no-oa-bank-batch.*dialog|bank-flow-rule-batches.*dialog/.test(pageSource)
         ? null
         : "Withdraw confirmation should use AppDialog or a project dialog class",
@@ -555,6 +555,15 @@ describe("BankFlowRuleBatchPage", () => {
       forbiddenLegacySurfaces: [],
       missingPrimitiveTargets: [],
     });
+  });
+
+  test("removes the legacy tag drawer shell after adopting AppDrawer", () => {
+    const pageSource = readWebSource("src/pages/BankFlowRuleBatchPage.tsx");
+
+    expect(pageSource).toContain('import AppDrawer from "../components/common/AppDrawer"');
+    expect(pageSource).not.toContain("bank-flow-rule-batches-drawer-shell");
+    expect(pageSource).not.toContain("bank-flow-rule-batches-drawer__close");
+    expect(pageSource).not.toMatch(/<aside[^>]+bank-flow-rule-batches-drawer/);
   });
 
   test("keeps premium compact rails, transaction table, and interaction CSS contracts", () => {

@@ -81,6 +81,7 @@ describe("Tax offset workbench", () => {
   test("keeps tax offset premium visual polish scoped to project primitives", () => {
     const styles = readFileSync("src/app/styles.css", "utf8");
     const summarySource = readFileSync("src/components/tax/TaxSummaryCards.tsx", "utf8");
+    const certifiedDrawerSource = readFileSync("src/components/tax/CertifiedResultsDrawer.tsx", "utf8");
 
     expect(summarySource).toContain("tax-summary-strip");
     expect(summarySource).toContain("tax-summary-card");
@@ -88,6 +89,11 @@ describe("Tax offset workbench", () => {
     expect(styles).toMatch(/\.tax-result-panel\s*\{[\s\S]*border-left:\s*3px solid var\(--fp-primary\)/);
     expect(styles).toMatch(/\.tax-panel-header\s*\{[\s\S]*background:\s*var\(--fp-surface-muted\)/);
     expect(styles).toMatch(/\.tax-certified-drawer\s*\{[\s\S]*border-radius:\s*var\(--fp-radius-md\)/);
+    expect(styles).toMatch(/\.tax-certified-drawer-body\s*\{[^}]*transition:[^}]*opacity[^}]*transform/s);
+    expect(styles).toMatch(/\.tax-certified-drawer\.collapsed \.tax-certified-drawer-body\s*\{[^}]*opacity:\s*0[^}]*transform:\s*translateX\(100%\)[^}]*pointer-events:\s*none/s);
+    expect(certifiedDrawerSource).toContain("inert={isCollapsed ? true : undefined}");
+    expect(certifiedDrawerSource).toContain("aria-hidden={isCollapsed}");
+    expect(certifiedDrawerSource).not.toContain("{!isCollapsed ? (");
     expect(styles).toMatch(/\.tax-status-tag,[\s\S]*\.tax-date-tag,[\s\S]*\.tax-rate-tag\s*\{[\s\S]*height:\s*var\(--fp-tag-height-table\)/);
   });
 

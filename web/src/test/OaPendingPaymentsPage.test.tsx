@@ -709,6 +709,15 @@ afterEach(() => {
 });
 
 describe("OA pending payments page", () => {
+  test("routes the bank-link surface through the shared AppDrawer shell", () => {
+    const pageSource = readWebSource("src/pages/OaPendingPaymentsPage.tsx");
+
+    expect(pageSource).toContain('import AppDrawer from "../components/common/AppDrawer"');
+    expect(pageSource).toContain("<AppDrawer");
+    expect(pageSource).not.toContain("oa-pending-payments-drawer-backdrop");
+    expect(pageSource).not.toMatch(/if \(!open\)\s*\{\s*return null;/);
+  });
+
   test("targets project primitives for page shell and grouped table", () => {
     const sourceByPath = Object.fromEntries(oaPendingPaymentsSourceFiles.map((path) => [path, readWebSource(path)]));
     const forbiddenMuiImports = oaPendingPaymentsSourceFiles.flatMap((path) => {
