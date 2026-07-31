@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
-stopped_at: Completed 36-01-PLAN.md local implementation; production handoff to main orchestrator
-last_updated: "2026-07-31T16:18:15.365Z"
-last_activity: 2026-07-31 -- Phase 36 local implementation and browser verification passed
+status: complete
+stopped_at: Phase 36 deployed and production-verified on main-d6266b05-20260801015117
+last_updated: "2026-07-31T18:13:36Z"
+last_activity: 2026-08-01 -- Phase 36 production release and performance closure passed
 progress:
   total_phases: 34
   completed_phases: 8
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 
 ## Current Position
 
-Phase: 36 (right-drawer-motion-production-closure) — READY FOR VERIFICATION
+Phase: 36 (right-drawer-motion-production-closure) — COMPLETE
 Plan: 1 of 1
-Status: Local implementation complete — production push/deploy/verification pending main orchestrator
-Last activity: 2026-07-31 -- Phase 36 local implementation and browser verification passed
+Status: Production release active and fully verified
+Last activity: 2026-08-01 -- Phase 36 production release and performance closure passed
 
-Progress: [███████░░░] local implementation and verification complete; production closure pending
+Progress: [██████████] implementation, review, main push, deployment and production verification complete
 
 ## Performance Metrics
 
@@ -55,6 +55,9 @@ Progress: [███████░░░] local implementation and verification
 ## Accumulated Context
 
 ### Decisions
+
+- [Phase 36]: Production release `main-d6266b05-20260801015117` is active at exact Git SHA `d6266b053c9669aec35af841f26e6f77405c23dc`; pre/T+0/T+60/T+300, queue/worker health and System Audit all passed.
+- [Phase 36]: Production browser evidence closes the performance contract: modal drawer frame p95 16.8–18.6ms, Workbench five-cycle p95 18.6ms, tax rail p95 18.5ms, CLS 0 and zero close-time business I/O; Workbench detail 20-read p95 is 67.707ms.
 
 - Phase 29 closure: Workbench operation recovery performs one trigger combined-initial load, lightweight public refresh-status waiting and one final fresh combined-initial load; repeated full payload polling is deleted.
 - Phase 29 SQL root fix: the existing all-scope active-member CTE is `NOT MATERIALIZED`, so search/source/column/time predicates can reach existing tables and indexes. The same SQL owner, generation, exact totals, row counts and matching IDs remain authoritative; no cache, table, index, migration or second query path was added.
@@ -165,6 +168,8 @@ Progress: [███████░░░] local implementation and verification
 None yet.
 
 ### Blockers/Concerns
+
+- Phase 36 has no remaining release blocker. Production invariant/unavailable 503 was intentionally not induced because that would require corrupting or disabling a live dependency; its explicit no-retry contract remains covered by targeted local tests. Headless Chromium observed non-blocking 52–194ms long-task tail samples while all agreed frame-p95, travel, endpoint, CLS and I/O thresholds passed.
 
 - Phase 29 has no remaining correctness, isolation, recovery, runtime or data-safety blocker. The deliberately deferred hard 3-second concurrent SLO, Cost/Turnover tail latency, unavailable RabbitMQ management metrics and external control evidence `unknown` are explicit non-blocking follow-ups.
 - Phase 28 has no remaining correctness, isolation, recovery, runtime or data-safety blocker. Non-blocking follow-ups are the deliberately deferred hard 3-second SLO, unavailable RabbitMQ management metrics and external bank/OA/invoice/ETC control evidence remaining unknown; PostgreSQL durable queue evidence is drained and authoritative.

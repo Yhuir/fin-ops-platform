@@ -104,6 +104,14 @@ Each task was committed atomically using TDD RED/GREEN slices:
 - `git diff --check` — passed.
 - Whole-repository source scan confirmed all modal right drawers use `AppDrawer`; the mobile navigation drawer is intentionally left-placed, tax certified results is the explicit complementary rail, and settings rule surfaces remain popover/menu where designed.
 
+## Production Closure
+
+- Pushed exact candidate `d6266b053c9669aec35af841f26e6f77405c23dc` to `origin/main` and deployed active release `main-d6266b05-20260801015117`.
+- The first activation attempt failed closed on transient production freshness/queue/SLO state and automatically restored the previous release. After the read model and queue baseline converged, the second activation of the same Git SHA passed pre, T+0, T+60, and T+300 without relaxing any gate.
+- Final release evidence has zero dirty scopes, pending/publishing/failed outbox, dead letters, unknown workers, or required workers not ready; queue stability and System Audit/page canonical proof passed through T+300.
+- Authenticated production Chromium measured full-width right-edge motion with modal frame p95 16.8–18.6ms, Workbench five-cycle aggregate p95 18.6ms, tax-rail aggregate p95 18.5ms, CLS 0, zero close-time business I/O, and zero mutation requests.
+- A real same-generation Workbench detail returned 200/fresh; 20 warm reads were 20/20 successful with p95 67.707ms. Read-only conflict/missing probes returned the expected 409/404 contracts.
+
 ## Seven-Category Test Assessment
 
 - **1. Business core:** Not applicable; no business rule, amount, state-transition, matching, permission-decision, or validation contract changed.
@@ -154,9 +162,8 @@ None - no dependency, environment variable, migration, or external service confi
 
 ## Next Phase Readiness
 
-- Local implementation and regression gates are complete on `main`.
-- The main orchestrator owns the authorized `origin/main` push, `./scripts/deploy-oa.sh` deployment, and read-only production correctness/performance verification for the shared drawer surfaces and existing Workbench same-generation detail fix.
-- Production acceptance must record drawer frame interval p95, drawer-induced CLS, animation API delta, Workbench warm-detail p95, release/worker/queue health, and System Audit without mutating real business relations.
+- Phase 36 is fully closed on local, remote `main`, and production. Detailed release and measurement evidence is recorded in `36-VERIFICATION.md`.
+- No migration, dependency, environment setup, follow-up compatibility path, or production data repair is required.
 
 ## Self-Check: PASSED
 
