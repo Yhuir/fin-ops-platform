@@ -43,6 +43,7 @@ usage: finops-deploy-control <command> [args]
 commands:
   check-release <release-name>         validate a release under /opt/fin-ops/releases
   self-update <release-name>           install deploy-control helper from a validated release
+  repair-active-api-runtime            restore the API drop-in for exactly the active release
   rabbitmq-required-worker-cutover <release-name>
                                       switch exactly the required RabbitMQ-eligible workers, drain queues, rollback on failure
   release-gate-activate <release-name>
@@ -400,6 +401,13 @@ archive_legacy_current() {
 
 write_api_dropin() {
   local src="$1"
+  local api_exec_start
+  if [[ -f "$src/backend/src/fin_ops_platform/app/wsgi.py" \
+    && -f "$src/backend/src/fin_ops_platform/app/gunicorn_conf.py" ]]; then
+    api_exec_start="$API_PYTHON -m gunicorn --config python:fin_ops_platform.app.gunicorn_conf fin_ops_platform.app.wsgi:application"
+  else
+    api_exec_start="$API_PYTHON -m fin_ops_platform.app.main --host 127.0.0.1 --port 18001"
+  fi
   mkdir -p "$API_DROPIN_DIR"
   cat > "$API_DROPIN" <<DROPIN
 [Service]
@@ -410,8 +418,10 @@ EnvironmentFile=-$ENV_DIR/fin-ops.rabbitmq-monitoring.env
 Environment=PYTHONPATH=$src/backend/src
 Environment=FIN_OPS_DATA_DIR=/opt/fin-ops/data
 WorkingDirectory=$src
+RuntimeDirectory=fin-ops
+RuntimeDirectoryMode=0750
 ExecStart=
-ExecStart=$API_PYTHON -m gunicorn --config python:fin_ops_platform.app.gunicorn_conf fin_ops_platform.app.wsgi:application
+ExecStart=$api_exec_start
 DROPIN
 }
 
@@ -1549,6 +1559,23 @@ activate_release() {
   status
 }
 
+repair_active_api_runtime() {
+  [[ "$#" -eq 0 ]] || die "repair-active-api-runtime accepts no arguments"
+  local release active_count src
+  release="$(active_release_names)"
+  active_count="$(printf '%s\n' "$release" | sed '/^$/d' | wc -l | tr -d ' ')"
+  [[ "$active_count" == "1" ]] \
+    || die "API runtime repair requires exactly one active release, found $active_count"
+  src="$(release_src "$release")"
+  assert_runtime_env_contract
+  write_api_dropin "$src"
+  systemctl daemon-reload
+  systemctl reset-failed fin-ops.service || true
+  systemctl restart fin-ops.service
+  wait_required_workers_ready
+  status
+}
+
 release_gate_checkpoint() {
   local release="$1"
   local label="$2"
@@ -2026,6 +2053,10 @@ case "$cmd" in
     src="$(release_src "${2:-}")"
     install_deploy_control_helper "$src"
     install_runtime_worker_helper "$src"
+    ;;
+  repair-active-api-runtime)
+    shift
+    repair_active_api_runtime "$@"
     ;;
   rabbitmq-required-worker-cutover)
     shift

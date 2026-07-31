@@ -537,6 +537,12 @@ PYTHONPATH="$release_src/backend/src" \
 5. 等待 `/health` worker readiness 收敛。
 6. 输出状态。
 
+API release drop-in 必须声明 `RuntimeDirectory=fin-ops`，保证 Gunicorn pidfile 目录由 systemd 创建并
+管理。启动命令由目标 release 的实际模块决定：新 runtime 使用 Gunicorn；自动回滚到尚无 WSGI/Gunicorn
+模块的历史 release 时使用该历史 release 的 `app.main` 入口。紧急恢复命令
+`finops-deploy-control repair-active-api-runtime` 不接受 release 参数，只允许修复当前唯一 active release，
+并在返回前等待 API/required worker readiness，禁止将它作为绕过 release gate 的激活入口。
+
 入口先对当前 release 执行 production-equivalent `preflight` checkpoint；候选激活后在 T+0 执行
 `full` checkpoint，并分别在 T+60s、T+300s 执行 `stability` checkpoint。所有 profile 都使用
 `pg_temp` 临时表完成隔离 insert/read/delete/rollback 探针，并在 runtime 收敛后执行只读页面 canonical

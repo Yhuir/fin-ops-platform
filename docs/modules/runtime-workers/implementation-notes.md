@@ -5,6 +5,9 @@
 - API 初始化不再启动 stale scan、historical ETC reconcile、interrupted job recovery 或进程内线程任务；matching stale scan 和统一 recovery 归 worker 启动，historical reconcile 只保留显式 maintenance 入口。
 - `settings.data_reset.requested` 由独立 required `settings-maintenance` registration 消费。事件只含 job id/owner/action；未知 interrupted destructive job fail closed，成功后通过受校验 Gunicorn pidfile 请求 runtime reload。
 - 没有新增队列、表或 transport；复用现有 PostgreSQL outbox、BackgroundJob、worker registry 和 lifecycle/read-model gateway。
+- systemd API drop-in 现在显式创建 Gunicorn runtime directory，并按目标 release 是否包含 WSGI/Gunicorn
+  模块选择启动入口；因此新 release 不依赖服务器历史 unit 内容，旧 release 自动回滚也不会被新入口污染。
+  无参数的 active-release API repair 命令仅用于恢复损坏 drop-in，不提供旁路激活能力。
 
 ## 2026-07-31 - RabbitMQ publish 终态收敛
 

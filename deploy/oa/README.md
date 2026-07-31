@@ -391,6 +391,10 @@ python -m fin_ops_platform.app.worker \
   `/etc/fin-ops/fin-ops.common.env` 和 `/etc/fin-ops/fin-ops.secrets.env`，避免历史
   `/opt/fin-ops/fin-ops.env` 覆盖 release `PYTHONPATH` 导致新服务仍导入 `/opt/fin-ops/current`
   旧代码
+- API drop-in 固定创建 `/run/fin-ops`；包含 `app/wsgi.py` 与 `app/gunicorn_conf.py` 的 release
+  使用 Gunicorn，回滚到不包含这两个模块的历史 release 时只对该目标 release 恢复其原生
+  `app.main` 启动入口。API drop-in 损坏时仅允许执行无参数的 `repair-active-api-runtime`，该命令
+  只重写当前唯一 active release 的 API drop-in 并验证 readiness，不能指定或激活其它 release
 - 门禁内部受控激活阶段会把历史 `/opt/fin-ops/current` 归档到 `/opt/fin-ops/legacy-current-archives/current-<timestamp>`；
   release 模式只允许从 `/opt/fin-ops/releases/<release-name>/src` 运行，`current` 目录不再参与运行时
 - `/health` 是轻量 liveness，暴露 runtime identity，包括工作目录、实际 `fin_ops_platform.__file__`、
