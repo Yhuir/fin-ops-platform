@@ -763,4 +763,24 @@ Plans:
 
 - [x] 37-01-PLAN — Sidebar identity, spacing, legacy cleanup, regression gates, main deployment and production verification.
 
+### Phase 38: ETC 票据页面扁平化与流程可见性生产闭环
+
+**Goal:** Flatten the ETC ticket page into one batch rail and one continuous workflow surface, remove the obsolete page-level plate/keyword query path, and present a fact-driven four-stage reconciliation/import/OA lifecycle without changing backend contracts or downstream behavior.
+**Requirements:** User-approved ETC page redesign; no new product requirement IDs.
+**Depends on:** Phase 37
+**Canonical refs:** `.planning/phases/38-etc/38-01-PLAN.md`, `docs/modules/etc-tickets/boundary-io.md`, `docs/modules/imports-etc-invoices/boundary-io.md`, `web/src/pages/EtcTicketManagementPage.tsx`, `web/src/features/etc/api.ts`
+**Success Criteria** (what must be TRUE):
+
+  1. The page keeps one left batch rail and one continuous right workflow, removes the plate/keyword UI/request/CSS/test/docs path, and deletes conflicting nested-card legacy rules.
+  2. A read-only four-stage summary derives only from current business batch, reconciliation task, import and OA facts, including failure, retry, rollback and manual-confirmation states.
+  3. Existing permissions, actions, stale-request protection, independent ETC import route, import worker and Workbench ETC summary remain behaviorally unchanged.
+  4. No dependency, backend state, API, cache, read model or worker is added; targeted/full local gates and cross-page regressions pass.
+  5. One pushed `main` release and authenticated production probes prove the UI, request-count, performance, worker/queue and health contracts.
+
+**Plans:** 1 plan
+
+Plans:
+
+- [ ] 38-01-PLAN — ETC lifecycle summary, flat workspace, legacy cleanup, regression gates, deployment and production verification.
+
 ---

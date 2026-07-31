@@ -43,6 +43,7 @@
 - empty：未提交或已提交 tab 下无批次时只显示该 bucket 的空态；一个业务批次在前端只出现一次。
 - initial load：页面进入和刷新只能读取已有业务批次/对账任务，不得自动创建空 ETC 对账任务；新建批次只能由用户点击“新建批次”触发。
 - batch list：左侧批次列表和 tab 计数只使用 `/api/etc/business-batches*` 的窄 summary 事实；页面不再提供月份选择器，默认展示全部用户可见批次并分“未提交/暂存/已提交”三个互斥 bucket；task-only active task 只允许出现在 workflow 内部状态或异常恢复入口，不得混入批次列表。
+- workflow progress：页面按“准备核对资料 / 确认核对结果 / 导入 ETC 发票 / 提交 OA 审批”展示四阶段只读投影。`draft/reviewing/ready_for_import/importing/imported/OA creating/pending/failed/not_submitted/submitted/closed` 及失败、部分失败、迁移冲突必须映射为已完成、当前、处理中、待人工确认或需要处理；不得新增业务状态或把 `oa_confirmation_pending`、失败、回退伪装成已完成。
 - amount contract：创建 OA 草稿前同时显示对账任务 `oaTotalAmount` 与业务批次实际 `invoiceSummary`。OA 草稿始终使用前者；两者差额只做非阻断说明。创建结果弹窗只保留两个状态决定按钮，不提供打开草稿或关闭按钮；Escape/遮罩仍可退出，暂存区继续提供打开草稿与下载 PDF。
 - selection loading：用户切换批次时必须同步失效旧 task mutation target；新 batch 的精确 task 请求与 detail 请求并发发起。任一请求未完成时，旧 task 只能作为已清除状态，不能继续上传、删除、刷新匹配、确认或 reopen；人工状态变更由 active bucket effect 作为唯一 list reload owner。
 - title editing：未提交 business batch 行的标题可点击内联编辑，Enter 或失焦保存，Esc 取消；保存失败保留错误提示，不伪装为已保存。已提交 bucket 不展示标题编辑入口。
@@ -66,6 +67,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-08-01 | ETC 页面改为左侧批次 rail + 右侧连续工作面，删除车牌/关键词页面查询链路，并新增基于既有 batch/task 状态的四阶段只读进度 | 仅 ETC 前端页面结构、展示投影与页面请求参数；后端 API/状态机/read model/worker/权限/跨页 I/O 不变 | `web/src/test/EtcTicketManagementPage.test.tsx`；`web/src/test/EtcApi.test.ts`；`web/e2e/etc-tickets-flow.spec.ts`；production build |
 | 2026-07-19 | 固定 OA 草稿金额来自对账任务，业务批次发票汇总恢复为实际发票事实；结果弹窗收敛为两个明确决定并删除旧 batch DTO/伪金额映射 | ETC 页面与 business batch payload；无共享 read model/worker/跨页面 I/O 变化 | `tests.test_etc_backend.EtcApiTests.test_reconciliation_backed_oa_draft_uploads_supplements_and_uses_oa_total`；`tests.test_audit_etc_tickets_read_model_tool`；`web/src/test/EtcTicketManagementPage.test.tsx`；`web/e2e/etc-tickets-flow.spec.ts` |
 | 2026-07-14 | OA 草稿成功后新增批次 ETC 发票 PDF 合并下载；成员按 business batch 事实、单票单页、全有或全无，并写下载审计 | ETC 页面审批确认区、business batch read API、对象存储读取端口、PyMuPDF 合并边界 | `tests/test_etc_invoice_pdf_bundle_service.py`；`web/src/test/EtcApi.test.ts`；`web/src/test/EtcTicketManagementPage.test.tsx`；`web/e2e/etc-tickets-flow.spec.ts` |
 | 2026-07-14 | 修复慢 OCR 与 source file 删除并发造成的孤儿解析结果；新增解析提交存在性校验、互斥、孤儿清理和 formal file row deleted 对账 | 信用卡/票根上传、source file 删除、对账任务 payload、PostgreSQL formal file 状态、409 错误合同 | `tests/test_etc_reconciliation_service.py`；`tests/test_etc_backend.py`；`tests/test_postgres_repositories_boundaries.py` |

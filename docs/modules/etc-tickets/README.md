@@ -48,7 +48,8 @@
 当前事实边界：
 
 - 用户可见事实源是 `/api/etc/business-batches*` 与 `etc_business_batches`；`etc_reconciliation_tasks` 保留为导入、核对、source file 和 workflow 状态。
-- ETC 票据管理页不再提供月份选择器；左侧列表通过窄 `business-batches` summary 查询读取全部用户可见业务批次，分为互斥的“未提交 / 暂存 / 已提交”三个 bucket，并可按车牌和关键词过滤。`oa_confirmation_pending` 是唯一暂存事实；短时 `oa_draft_creating` 仍属于未提交操作态。后端 `month` 参数只作为兼容/运维筛选保留。
+- ETC 票据管理页不提供月份、车牌或关键词搜索框；左侧列表通过窄 `business-batches` summary 查询读取全部用户可见业务批次，并分为互斥的“未提交 / 暂存 / 已提交”三个 bucket。后端 `month`、`plate`、`keyword` 参数继续作为兼容/运维查询合同保留。`oa_confirmation_pending` 是唯一暂存事实；短时 `oa_draft_creating` 仍属于未提交操作态。
+- 页面使用左侧批次 rail 和右侧连续工作面；四阶段 `准备核对资料 → 确认核对结果 → 导入 ETC 发票 → 提交 OA 审批` 只从当前 business batch 与绑定 task 投影。该 UI 投影不发请求、不保存状态、不改变 API/read model/worker；失败、部分失败、回退和人工确认均保留非完成语义。
 - “新建批次”入口调用 `POST /api/etc/business-batches`；前端不直接把空 reconciliation task 当作批次展示，后端 application service 负责编排 task + active business batch 并返回统一 business batch payload。
 - 未提交业务批次标题由 business batch `title` 持久化；页面允许点击批次标题内联编辑，保存走 `PATCH /api/etc/business-batches/{id}` 并使用 `expectedVersion`。保存成功后必须同步 linked reconciliation task title，确保 `/imports/etc-invoices` ready task 下拉显示最新标题；已提交/closed 批次标题锁定。
 - 没有 active business batch 绑定的 task-only 记录不得进入左侧批次列表或 tab 计数；只可作为 workflow 内部状态、异常恢复线索或运维清理对象处理。

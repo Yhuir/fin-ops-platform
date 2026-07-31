@@ -7,6 +7,8 @@ import { afterEach, vi } from "vitest";
 import { installMockApiFetch } from "./apiMock";
 import { renderAppAt } from "./renderHelpers";
 import * as etcApi from "../features/etc/api";
+import { deriveEtcBatchProgress } from "../features/etc/EtcBatchProgress";
+import type { EtcReconciliationTask } from "../features/etc/types";
 
 const etcTicketSourceFiles = [
   "src/pages/EtcTicketManagementPage.tsx",
@@ -151,24 +153,21 @@ describe("ETC ticket management page", () => {
     });
   });
 
-  test("keeps premium ETC list, upload, table, dialog, and motion CSS contracts", () => {
+  test("keeps the ETC rail, continuous workflow, semantic progress, table, and upload contracts", () => {
     const styles = readWebSource("src/app/styles.css");
-    const surfaceRule = cssRule(
+    const railRule = cssRule(styles, ".etc-batch-rail", "position: sticky");
+    const rightColumnRule = cssRule(styles, ".etc-right-column", "overflow: hidden");
+    const flatWorkflowRule = cssRule(styles, ".etc-workflow-surface,\n.etc-batch-records");
+    const progressRule = cssRule(styles, ".etc-batch-progress", "grid-template-columns: repeat(4");
+    const progressProblemRule = cssRule(
       styles,
-      ".etc-filter-bar,\n.etc-batch-list-panel,\n.etc-batch-detail-panel,\n.etc-reconciliation-workspace,\n.etc-manual-review-panel,\n.etc-oa-status-panel,\n.etc-import-attempts",
+      ".etc-batch-progress__step[data-state=\"problem\"] .etc-batch-progress__marker",
     );
+    const compactProgressRule = cssRule(styles, ".etc-batch-progress__step[aria-current=\"step\"]");
     const controlMotionRule = cssRule(
       styles,
       ".etc-page-action-link,\n.etc-primary-action,\n.etc-secondary-action,\n.etc-danger-action,\n.etc-icon-action,\n.etc-status-segmented__button,\n.etc-list-row-button,\n.etc-file-picker,\n.etc-upload-drop-box,\n.etc-reconciliation-description-toggle,\n.etc-inline-icon-action",
       "--motion-fast",
-    );
-    const filterInputRule = cssRule(
-      styles,
-      ".etc-filter-field input,\n.etc-manual-review-field input,\n.etc-manual-review-field select,\n.etc-dialog-field textarea",
-    );
-    const rowSurfaceRule = cssRule(
-      styles,
-      ".etc-batch-row,\n.etc-source-file-row,\n.etc-detail-metrics > div,\n.etc-reconciliation-metrics > div,\n.etc-plate-summary-item,\n.etc-manual-review-card,\n.etc-supplement-upload-target,\n.etc-import-attempt-row",
     );
     const tagRule = cssRule(styles, ".etc-count-tag,\n.etc-status-tag");
     const uploadRule = cssRule(styles, ".etc-upload-drop-box", "min-height: 96px");
@@ -182,14 +181,17 @@ describe("ETC ticket management page", () => {
     const reconciliationMoneyRule = cssRule(styles, ".etc-reconciliation-money");
     const inlineActionRule = cssRule(styles, ".etc-inline-icon-action");
 
-    expect(surfaceRule).toContain("var(--fp-border)");
-    expect(surfaceRule).toContain("var(--fp-radius-sm)");
-    expect(surfaceRule).toContain("color-mix(in srgb, var(--fp-surface-muted)");
+    expect(railRule).toContain("position: sticky");
+    expect(railRule).toContain("overflow: hidden");
+    expect(rightColumnRule).toContain("var(--fp-border)");
+    expect(flatWorkflowRule).toContain("border: 0");
+    expect(flatWorkflowRule).toContain("border-radius: 0");
+    expect(progressRule).toContain("repeat(4, minmax(0, 1fr))");
+    expect(progressRule).toContain("var(--fp-border)");
+    expect(progressProblemRule).toContain("var(--fp-danger)");
+    expect(compactProgressRule).toContain("grid-template-columns: auto minmax(0, 1fr)");
     expect(controlMotionRule).toContain("--motion-fast");
     expect(controlMotionRule).toContain("--ease-out-quart");
-    expect(filterInputRule).toContain("var(--fp-border)");
-    expect(filterInputRule).toContain("--motion-fast");
-    expect(rowSurfaceRule).toContain("var(--fp-surface)");
     expect(tagRule).toContain("min-height: var(--fp-tag-height-table)");
     expect(tagRule).toContain("border-radius: var(--fp-tag-radius-table)");
     expect(uploadRule).toContain("min-height: 96px");
@@ -201,10 +203,13 @@ describe("ETC ticket management page", () => {
     expect(reconciliationMoneyRule).toContain("font-variant-numeric: tabular-nums");
     expect(inlineActionRule).toContain("var(--fp-primary)");
     expect([
-      surfaceRule,
+      railRule,
+      rightColumnRule,
+      flatWorkflowRule,
+      progressRule,
+      progressProblemRule,
+      compactProgressRule,
       controlMotionRule,
-      filterInputRule,
-      rowSurfaceRule,
       tagRule,
       uploadRule,
       invoiceCellRule,
@@ -212,6 +217,27 @@ describe("ETC ticket management page", () => {
       reconciliationHighlightRule,
       inlineActionRule,
     ].join("\n")).not.toMatch(/0\.16s ease|#2563eb|#dbe3ef|#f9fbfe|#eff6ff|#fef2f2|#fffbeb|#172033/i);
+
+    const pageSource = readWebSource("src/pages/EtcTicketManagementPage.tsx");
+    expect(pageSource).not.toMatch(/etc-filter-bar|etc-filter-field|etc-batch-list-panel|etc-batch-detail-panel|etc-reconciliation-workspace/);
+    expect(pageSource).not.toMatch(/const \[plate|const \[keyword/);
+  });
+
+  test.each([
+    ["draft", "draft", ["current", "pending", "pending", "pending"]],
+    ["reviewing", "reviewing", ["complete", "current", "pending", "pending"]],
+    ["ready_for_import", "ready_for_import", ["complete", "complete", "current", "pending"]],
+    ["importing", "importing", ["complete", "complete", "processing", "pending"]],
+    ["imported", "imported", ["complete", "complete", "complete", "current"]],
+    ["oa_confirmation_pending", "imported", ["complete", "complete", "complete", "manual"]],
+    ["import_failed", "ready_for_import", ["complete", "complete", "problem", "pending"]],
+    ["oa_draft_failed", "imported", ["complete", "complete", "complete", "problem"]],
+    ["oa_submitted", "closed", ["complete", "complete", "complete", "complete"]],
+  ])("projects batch %s and task %s into the four business stages", (batchStatus, taskStatus, expectedStates) => {
+    const batch = businessBatchFixture({ status: batchStatus });
+    const task = { status: taskStatus } as EtcReconciliationTask;
+
+    expect(deriveEtcBatchProgress(batch as never, task).map((step) => step.state)).toEqual(expectedStates);
   });
 
   test("refreshes batch list when ETC import background job completes", async () => {
@@ -335,7 +361,7 @@ describe("ETC ticket management page", () => {
     expect(businessBatchRequests.length).toBeGreaterThanOrEqual(2);
   });
 
-  test("filters business batches, switches submitted tab, and keeps task-only actions out of submitted mode", async () => {
+  test("removes page search fields, switches submitted tab, and keeps task-only actions out of submitted mode", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderAppAt("/etc-tickets");
@@ -347,12 +373,17 @@ describe("ETC ticket management page", () => {
     expect(within(page).getByRole("link", { name: "导入发票" })).toHaveAttribute("href", "/imports/etc-invoices");
 
     expect(within(page).queryByLabelText("月份")).not.toBeInTheDocument();
-    await user.type(within(page).getByLabelText("车牌"), "云ADA0381");
-    await user.type(within(page).getByLabelText("关键词"), "ETC-2026");
+    expect(within(page).queryByLabelText("车牌")).not.toBeInTheDocument();
+    expect(within(page).queryByLabelText("关键词")).not.toBeInTheDocument();
+    expect(await within(page).findByRole("list", { name: "批次生命周期" })).toBeInTheDocument();
+    expect(within(page).getByText("准备核对资料")).toBeInTheDocument();
+    expect(within(page).getByText("确认核对结果")).toBeInTheDocument();
+    expect(within(page).getByText("导入 ETC 发票")).toBeInTheDocument();
+    expect(within(page).getByText("提交 OA 审批")).toBeInTheDocument();
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/etc/business-batches?bucket=unsubmitted&plate=%E4%BA%91ADA0381&keyword=ETC-2026&page=1&page_size=100",
+        "/api/etc/business-batches?bucket=unsubmitted&page=1&page_size=100",
         expect.objectContaining({ method: "GET" }),
       );
     });
@@ -361,10 +392,11 @@ describe("ETC ticket management page", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/etc/business-batches?bucket=submitted&plate=%E4%BA%91ADA0381&keyword=ETC-2026&page=1&page_size=100",
+        "/api/etc/business-batches?bucket=submitted&page=1&page_size=100",
         expect.objectContaining({ method: "GET" }),
       );
     });
+    expect(fetchMock.mock.calls.map(([url]) => String(url)).join("\n")).not.toMatch(/[?&](?:plate|keyword)=/);
     expect(within(page).getByRole("radio", { name: /已提交/ })).toHaveAttribute("aria-checked", "true");
     expect(within(page).queryByRole("region", { name: "ETC对账任务列表" })).not.toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "新建批次" })).not.toBeInTheDocument();
@@ -822,7 +854,7 @@ describe("ETC ticket management page", () => {
     });
   });
 
-  test("invalidates the old task when an asynchronous filtered list automatically selects another batch", async () => {
+  test("invalidates the old task when an asynchronous refresh automatically selects another batch", async () => {
     expect(readWebSource("src/pages/EtcTicketManagementPage.tsx")).toContain(
       "selectedTask?.taskId === selectedBusinessBatchTaskId",
     );
@@ -844,17 +876,19 @@ describe("ETC ticket management page", () => {
       oaDraftId: "",
       oaDraftUrl: "",
     });
-    let resolveFilteredList!: (value: unknown) => void;
+    let resolveRefreshedList!: (value: unknown) => void;
     let resolveTaskB!: (value: unknown) => void;
-    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockImplementation((query = {}) => (
-      query.keyword
-        ? new Promise((resolvePromise) => { resolveFilteredList = resolvePromise; })
+    let listRequestCount = 0;
+    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockImplementation(() => {
+      listRequestCount += 1;
+      return (listRequestCount > 1
+        ? new Promise((resolvePromise) => { resolveRefreshedList = resolvePromise; })
         : Promise.resolve({
           counts: { unsubmitted: 1, staged: 0, submitted: 0 },
           items: [batchA],
           pagination: { page: 1, pageSize: 100, total: 1 },
-        })
-    ) as never);
+        })) as never;
+    });
     vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockImplementation((batchId) => Promise.resolve({
       ...(batchId === batchB.businessBatchId ? batchB : batchA),
       invoiceItems: [],
@@ -880,9 +914,9 @@ describe("ETC ticket management page", () => {
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     expect(await within(page).findByLabelText("上传信用卡账单")).toBeInTheDocument();
-    await user.type(within(page).getByLabelText("关键词"), "B");
+    await user.click(within(page).getByRole("button", { name: /^刷新$/ }));
     await act(async () => {
-      resolveFilteredList({
+      resolveRefreshedList({
         counts: { unsubmitted: 1, staged: 0, submitted: 0 },
         items: [batchB],
         pagination: { page: 1, pageSize: 100, total: 1 },

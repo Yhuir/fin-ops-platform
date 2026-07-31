@@ -23824,9 +23824,10 @@ body.column-layout-dragging {
   gap: 14px;
 }
 
-.etc-filter-bar,
 .etc-panel-heading,
-.etc-detail-heading {
+.etc-detail-heading,
+.etc-batch-context__title,
+.etc-current-task-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -23862,7 +23863,7 @@ body.column-layout-dragging {
 }
 
 .etc-page-content,
-.etc-reconciliation-workspace-content,
+.etc-workflow-surface__content,
 .etc-reconciliation-task-content,
 .etc-dialog-stack {
   display: grid;
@@ -23877,18 +23878,6 @@ body.column-layout-dragging {
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
-}
-
-.etc-filter-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  justify-content: flex-start;
-  padding: 12px;
-  background: #f9fbfe;
-  border: 1px solid #dbe3ef;
-  border-radius: 8px;
 }
 
 .etc-page-action-link,
@@ -24007,67 +23996,6 @@ body.column-layout-dragging {
 .etc-status-segmented__button[aria-checked="true"] {
   color: #ffffff;
   background: #2563eb;
-}
-
-.etc-filter-field {
-  display: grid;
-  gap: 4px;
-  min-width: 150px;
-  color: #52677a;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.etc-filter-field input {
-  min-height: 36px;
-  padding: 0 10px;
-  color: #102033;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  background: #ffffff;
-  border: 1px solid #d5deea;
-  border-radius: 6px;
-}
-
-.etc-filter-field input:focus {
-  outline: none;
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
-}
-
-.etc-layout {
-  display: grid;
-  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
-  gap: 14px;
-  align-items: start;
-}
-
-.etc-batch-list-panel,
-.etc-batch-detail-panel,
-.etc-reconciliation-workspace {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px;
-  background: #ffffff;
-  border-radius: 8px;
-}
-
-.etc-reconciliation-workspace {
-  min-width: 0;
-}
-
-.etc-batch-list-panel {
-  min-height: 560px;
-}
-
-.etc-batch-detail-panel {
-  min-width: 0;
-}
-
-.etc-right-column {
-  min-width: 0;
 }
 
 .etc-batch-list {
@@ -25210,7 +25138,7 @@ body.column-layout-dragging {
     grid-template-columns: 1fr;
   }
 
-  .etc-batch-list-panel {
+  .etc-batch-rail {
     min-height: auto;
   }
 }
@@ -25243,20 +25171,12 @@ body.column-layout-dragging {
   color: var(--fp-text-secondary);
 }
 
-.etc-filter-bar,
-.etc-batch-list-panel,
-.etc-batch-detail-panel,
-.etc-reconciliation-workspace,
 .etc-manual-review-panel,
 .etc-oa-status-panel,
 .etc-import-attempts {
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm);
   background: color-mix(in srgb, var(--fp-surface-muted) 36%, var(--fp-surface));
-}
-
-.etc-filter-bar {
-  padding: var(--fp-space-2) var(--fp-space-3);
 }
 
 .etc-page-action-link,
@@ -25538,7 +25458,6 @@ body.column-layout-dragging {
   margin-bottom: var(--fp-space-2);
 }
 
-.etc-filter-field input,
 .etc-manual-review-field input,
 .etc-manual-review-field select,
 .etc-dialog-field textarea {
@@ -25552,7 +25471,6 @@ body.column-layout-dragging {
     background-color var(--motion-fast) var(--ease-out-quart);
 }
 
-.etc-filter-field input:focus,
 .etc-manual-review-field input:focus,
 .etc-manual-review-field select:focus,
 .etc-dialog-field textarea:focus {
@@ -25691,21 +25609,6 @@ body.column-layout-dragging {
 .etc-invoice-money-cell {
   text-align: right;
   font-variant-numeric: tabular-nums;
-}
-
-.etc-layout {
-  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
-  gap: var(--fp-space-3);
-}
-
-.etc-batch-list-panel,
-.etc-batch-detail-panel,
-.etc-reconciliation-workspace {
-  gap: var(--fp-space-2);
-  padding: var(--fp-space-2);
-  border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-md);
-  background: var(--fp-surface);
 }
 
 .etc-batch-list {
@@ -25869,4 +25772,367 @@ body.column-layout-dragging {
   border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
   color: var(--fp-primary);
+}
+
+/* ETC page: one rail and one continuous workflow surface. */
+.etc-layout {
+  display: grid;
+  grid-template-columns: minmax(248px, 292px) minmax(0, 1fr);
+  gap: var(--fp-space-3);
+  align-items: start;
+}
+
+.etc-batch-rail {
+  position: sticky;
+  top: var(--fp-space-3);
+  display: flex;
+  min-height: min(720px, calc(100vh - 184px));
+  max-height: calc(100vh - 148px);
+  flex-direction: column;
+  gap: var(--fp-space-2);
+  padding: var(--fp-space-3);
+  overflow: hidden;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+}
+
+.etc-batch-rail .etc-status-segmented {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: 100%;
+}
+
+.etc-batch-rail .etc-status-segmented__button {
+  min-width: 0;
+  padding-inline: var(--fp-space-2);
+}
+
+.etc-batch-rail .etc-batch-list {
+  min-height: 0;
+  flex: 1;
+  align-content: start;
+  overflow: auto;
+  border: 0;
+  border-top: 1px solid var(--fp-border);
+  border-radius: 0;
+}
+
+.etc-batch-rail .etc-batch-row {
+  border-bottom: 1px solid var(--fp-border);
+}
+
+.etc-batch-rail .etc-list-row-button[data-selected="true"] {
+  background: color-mix(in srgb, var(--fp-primary-soft) 64%, var(--fp-surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fp-primary) 24%, transparent);
+}
+
+.etc-right-column {
+  display: grid;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+}
+
+.etc-batch-context {
+  display: grid;
+  gap: var(--fp-space-2);
+  padding: var(--fp-space-4);
+  border-bottom: 1px solid var(--fp-border);
+}
+
+.etc-batch-context__title,
+.etc-current-task-heading {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.etc-batch-context__title h2,
+.etc-current-task-heading h3 {
+  margin: 0;
+  color: var(--fp-text-primary);
+  font-size: 16px;
+  font-weight: 850;
+}
+
+.etc-batch-context__title p,
+.etc-current-task-heading p {
+  margin: 5px 0 0;
+  color: var(--fp-text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.etc-batch-context__eyebrow {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--fp-text-secondary);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.etc-batch-progress {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--fp-space-2);
+  padding: var(--fp-space-3) var(--fp-space-4);
+  margin: 0;
+  list-style: none;
+  border-bottom: 1px solid var(--fp-border);
+  background: color-mix(in srgb, var(--fp-surface-muted) 32%, var(--fp-surface));
+}
+
+.etc-batch-progress__step {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 7px;
+  min-width: 0;
+  text-align: center;
+}
+
+.etc-batch-progress__step:not(:last-child)::after {
+  position: absolute;
+  z-index: 0;
+  top: 15px;
+  left: calc(50% + 19px);
+  width: calc(100% - 30px);
+  height: 1px;
+  content: "";
+  background: var(--fp-border-strong);
+}
+
+.etc-batch-progress__step[data-state="complete"]:not(:last-child)::after {
+  background: color-mix(in srgb, var(--fp-success) 58%, var(--fp-border));
+}
+
+.etc-batch-progress__marker {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--fp-border-strong);
+  border-radius: 999px;
+  background: var(--fp-surface);
+  color: var(--fp-text-secondary);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.etc-batch-progress__step[data-state="complete"] .etc-batch-progress__marker {
+  border-color: var(--fp-success);
+  background: var(--fp-success);
+  color: var(--fp-surface);
+}
+
+.etc-batch-progress__step[data-state="current"] .etc-batch-progress__marker,
+.etc-batch-progress__step[data-state="processing"] .etc-batch-progress__marker {
+  border-color: var(--fp-primary);
+  background: var(--fp-primary);
+  color: var(--fp-surface);
+}
+
+.etc-batch-progress__step[data-state="manual"] .etc-batch-progress__marker {
+  border-color: var(--fp-warning);
+  background: var(--fp-warning-soft);
+  color: color-mix(in srgb, var(--fp-warning) 78%, black);
+}
+
+.etc-batch-progress__step[data-state="problem"] .etc-batch-progress__marker {
+  border-color: var(--fp-danger);
+  background: var(--fp-danger-soft);
+  color: var(--fp-danger);
+}
+
+.etc-batch-progress__copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.etc-batch-progress__copy strong {
+  color: var(--fp-text-primary);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.etc-batch-progress__copy span {
+  color: var(--fp-text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.etc-batch-summary {
+  display: grid;
+  gap: var(--fp-space-2);
+  padding: var(--fp-space-3) var(--fp-space-4);
+  border-bottom: 1px solid var(--fp-border);
+}
+
+.etc-batch-summary .etc-detail-metrics {
+  border: 0;
+  border-radius: 0;
+}
+
+.etc-batch-summary .etc-detail-metrics > div {
+  padding: 8px var(--fp-space-4);
+  background: transparent;
+}
+
+.etc-batch-summary .etc-detail-metrics > div:first-child {
+  padding-left: 0;
+}
+
+.etc-batch-summary .etc-plate-summary-item {
+  border: 0;
+  border-radius: var(--fp-tag-radius-table);
+}
+
+.etc-workflow-surface,
+.etc-batch-records {
+  min-width: 0;
+  padding: var(--fp-space-4);
+  border: 0;
+  border-radius: 0;
+  background: var(--fp-surface);
+}
+
+.etc-workflow-surface {
+  border-bottom: 1px solid var(--fp-border);
+}
+
+.etc-workflow-surface__content,
+.etc-reconciliation-task-content {
+  gap: var(--fp-space-3);
+}
+
+.etc-workflow-command-strip {
+  padding: 0 0 var(--fp-space-3);
+  border: 0;
+  border-bottom: 1px solid var(--fp-border);
+  border-radius: 0;
+  background: transparent;
+}
+
+.etc-workflow-command-strip > div {
+  padding: var(--fp-space-2) var(--fp-space-3);
+  background: color-mix(in srgb, var(--fp-surface-muted) 34%, transparent);
+}
+
+.etc-workflow-surface .etc-disclosure-group,
+.etc-batch-records .etc-disclosure-group {
+  gap: 0;
+}
+
+.etc-workflow-surface .etc-disclosure-section,
+.etc-batch-records .etc-disclosure-section {
+  border: 0;
+  border-top: 1px solid var(--fp-border);
+  border-radius: 0;
+}
+
+.etc-workflow-surface .etc-disclosure-section:has(.etc-disclosure-trigger[aria-expanded="true"]),
+.etc-batch-records .etc-disclosure-section:has(.etc-disclosure-trigger[aria-expanded="true"]) {
+  border-color: var(--fp-border);
+}
+
+.etc-workflow-surface .etc-disclosure-header,
+.etc-workflow-surface .etc-disclosure-trigger,
+.etc-batch-records .etc-disclosure-header,
+.etc-batch-records .etc-disclosure-trigger {
+  background: var(--fp-surface);
+}
+
+.etc-workflow-surface .etc-disclosure-body,
+.etc-batch-records .etc-disclosure-body {
+  padding: var(--fp-space-3) 0 var(--fp-space-4);
+  background: var(--fp-surface);
+}
+
+.etc-manual-review-card {
+  padding: var(--fp-space-2) 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.etc-import-attempts {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.etc-import-attempt-row {
+  padding: var(--fp-space-2) 0;
+  border: 0;
+  border-bottom: 1px solid var(--fp-border);
+  border-radius: 0;
+  background: transparent;
+}
+
+.etc-import-attempt-row:last-child {
+  border-bottom: 0;
+}
+
+@media (max-width: 1100px) {
+  .etc-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .etc-batch-rail {
+    position: static;
+    min-height: auto;
+    max-height: none;
+  }
+
+  .etc-batch-rail .etc-batch-list {
+    max-height: 320px;
+  }
+}
+
+@media (max-width: 720px) {
+  .etc-batch-context__title {
+    display: grid;
+  }
+
+  .etc-batch-context .etc-section-actions {
+    justify-content: flex-start;
+  }
+
+  .etc-batch-progress {
+    display: block;
+  }
+
+  .etc-batch-progress__step {
+    display: none;
+  }
+
+  .etc-batch-progress__step[aria-current="step"] {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    justify-items: start;
+    text-align: left;
+  }
+
+  .etc-batch-progress__step::after {
+    display: none;
+  }
+
+  .etc-batch-summary .etc-detail-metrics > div,
+  .etc-batch-summary .etc-detail-metrics > div:first-child {
+    padding: var(--fp-space-2) 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--fp-border);
+  }
+
+  .etc-batch-summary .etc-detail-metrics > div:last-child {
+    border-bottom: 0;
+  }
 }

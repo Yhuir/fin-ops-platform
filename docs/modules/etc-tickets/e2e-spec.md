@@ -17,7 +17,7 @@ ETC 票据管理页面以 `/api/etc/business-batches*` 和 `etc_business_batches
 
 | Spec ID | 场景 | 优先级 | 验收标准 |
 | --- | --- | --- | --- |
-| `ETC-TICKET-E2E-001` | 页面 ready、三 bucket 和批次列表 | P0 | 进入 `/etc-tickets` 后显示 ETC 票据标题、未提交/暂存/已提交三个互斥状态和计数；左侧列表只能显示当前 bucket 的 business batch，不显示 task-only orphan。 |
+| `ETC-TICKET-E2E-001` | 页面 ready、三 bucket、四阶段和批次列表 | P0 | 进入 `/etc-tickets` 后显示 ETC 票据标题、未提交/暂存/已提交三个互斥状态和计数；页面不存在月份/车牌/关键词搜索框；左侧列表只能显示当前 bucket 的 business batch，不显示 task-only orphan；右侧按准备资料、确认核对、导入发票、提交 OA 展示四阶段。 |
 | `ETC-TICKET-E2E-002` | 发票明细和批次金额证据 | P0 | 选择未提交业务批次后，页面显示 ETC 发票明细、发票号、批次号、发票数量和补充凭证数量；summary 金额和结构化金额必须支持 Workbench/search 使用。 |
 | `ETC-TICKET-E2E-003` | 创建 OA 草稿并进入暂存 | P0 | 用户点击提交 OA 后必须打开创建草稿确认 dialog；确认后只调用一次 `POST /api/etc/business-batches/{id}/oa-draft`，成功后批次进入暂存并显示 OA 提交确认 dialog 和打开草稿入口；即使未提交列表 selection 被清空，确认操作仍必须携带该 batch 的最新 version。 |
 | `ETC-TICKET-E2E-004` | 人工确认已提交并进入 submitted bucket | P0 | 用户人工点击已提交后只调用一次 `manual-oa-status`；页面切换到已提交 bucket，隐藏提交 OA 入口，显示人工确认已提交状态和原批次证据；不得出现隐藏浏览器错误。 |

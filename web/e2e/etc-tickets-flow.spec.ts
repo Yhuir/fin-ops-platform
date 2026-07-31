@@ -107,7 +107,7 @@ test.describe("ETC ticket management browser flow", () => {
     }, async (mark) => {
       await page.goto("/etc-tickets");
       await page.getByRole("radio", { name: "暂存 1" }).click();
-      const downloadButton = page.getByLabel("ETC批次详情").getByRole("button", { name: "下载发票PDF" });
+      const downloadButton = page.getByRole("button", { name: "下载发票PDF" });
       await mark("firstVisibleResponseLatencyMs", expect(downloadButton).toBeVisible());
       const downloadPromise = page.waitForEvent("download");
       await downloadButton.click();
@@ -171,6 +171,15 @@ test.describe("ETC ticket management browser flow", () => {
     const row = page.getByTestId("etc-batch-row-etc-business-e2e-001");
     await expect(row).toBeVisible();
     await expect(row).toContainText("3月批次");
+    await expect(page.getByLabel("车牌", { exact: true })).toHaveCount(0);
+    await expect(page.getByLabel("关键词", { exact: true })).toHaveCount(0);
+    const lifecycle = page.getByRole("list", { name: "批次生命周期" });
+    await expect(lifecycle).toBeVisible();
+    await expect(lifecycle.getByRole("listitem")).toHaveCount(4);
+    await expect(lifecycle.getByText("准备核对资料", { exact: true })).toBeVisible();
+    await expect(lifecycle.getByText("确认核对结果", { exact: true })).toBeVisible();
+    await expect(lifecycle.getByText("导入 ETC 发票", { exact: true })).toBeVisible();
+    await expect(lifecycle.getByText("提交 OA 审批", { exact: true })).toBeVisible();
     await expect(page.getByRole("table", { name: "ETC发票明细" })).toBeVisible();
     await expect(page.getByRole("cell", { name: "ETC-E2E-001" })).toBeVisible();
     await expect(page.getByRole("button", { name: "提交审批" })).toBeEnabled();

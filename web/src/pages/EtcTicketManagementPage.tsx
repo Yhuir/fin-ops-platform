@@ -22,6 +22,7 @@ import StatePanel from "../components/common/StatePanel";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import { useBackgroundJobProgress } from "../features/backgroundJobs/BackgroundJobProgressProvider";
+import EtcBatchProgress from "../features/etc/EtcBatchProgress";
 import {
   EtcApiError,
   confirmEtcReconciliationTask,
@@ -716,8 +717,6 @@ export default function EtcTicketManagementPage() {
   const { jobs } = useBackgroundJobProgress();
   const { canMutateData } = useSessionPermissions();
   const [activeStatus, setActiveStatus] = useState<EtcBusinessBatchBucket>("unsubmitted");
-  const [plate, setPlate] = useState("");
-  const [keyword, setKeyword] = useState("");
   const [counts, setCounts] = useState(initialCounts);
   const [statistics, setStatistics] = useState<EtcPageStatistics | null>(null);
   const [businessBatches, setBusinessBatches] = useState<EtcBusinessBatchSummary[]>([]);
@@ -743,7 +742,7 @@ export default function EtcTicketManagementPage() {
   const [taskActionLoading, setTaskActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [workflowExpandedKeys, setWorkflowExpandedKeys] = useState<Set<Key>>(() => new Set(["upload", "reconciliation"]));
-  const [batchDetailExpandedKeys, setBatchDetailExpandedKeys] = useState<Set<Key>>(() => new Set(["summary", "invoices"]));
+  const [batchDetailExpandedKeys, setBatchDetailExpandedKeys] = useState<Set<Key>>(() => new Set(["invoices"]));
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
@@ -776,8 +775,6 @@ export default function EtcTicketManagementPage() {
     try {
       const payload = await fetchEtcBusinessBatches({
         bucket: effectiveStatus,
-        plate: plate.trim(),
-        keyword: keyword.trim(),
         signal,
       });
       setBusinessBatches(payload.items);
@@ -802,7 +799,7 @@ export default function EtcTicketManagementPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeStatus, keyword, plate]);
+  }, [activeStatus]);
 
   useEffect(() => {
     if (!active) {
@@ -1990,69 +1987,8 @@ export default function EtcTicketManagementPage() {
             </StatePanel>
           ) : null}
 
-          <div className="etc-filter-bar" aria-label="ETC筛选">
-            <ToggleButtonGroup
-              aria-label="ETC批次状态"
-              className="etc-status-segmented"
-              disallowEmptySelection
-              selectedKeys={new Set<Key>([activeStatus])}
-              selectionMode="single"
-              size="sm"
-              onSelectionChange={(keys) => {
-                const [next] = Array.from(keys);
-                if (next === "submitted" || next === "staged" || next === "unsubmitted") {
-                  handleStatusChange(next);
-                }
-              }}
-            >
-              <ToggleButton id="unsubmitted" className="etc-status-segmented__button">
-                未提交 {counts.unsubmitted}
-              </ToggleButton>
-              <ToggleButton id="staged" className="etc-status-segmented__button">
-                <ToggleButtonGroup.Separator />
-                暂存 {counts.staged}
-              </ToggleButton>
-              <ToggleButton id="submitted" className="etc-status-segmented__button">
-                <ToggleButtonGroup.Separator />
-                已提交 {counts.submitted}
-              </ToggleButton>
-            </ToggleButtonGroup>
-            <label className="etc-filter-field">
-              <span>车牌</span>
-              <input
-                value={plate}
-                placeholder="云ADA0381"
-                onChange={(event) => setPlate(event.target.value)}
-              />
-            </label>
-            <label className="etc-filter-field">
-              <span>关键词</span>
-              <input
-                value={keyword}
-                placeholder="批次、审批或发票"
-                onChange={(event) => setKeyword(event.target.value)}
-              />
-            </label>
-            {activeStatus === "unsubmitted" ? (
-              <Button
-                className="etc-primary-action"
-                isDisabled={!canSubmitCurrentBatch || draftCreating}
-                isPending={draftCreating}
-                aria-label={canSubmitCurrentBatch ? "提交审批" : submitDisabledReason}
-                onPress={() => setCreateDialogOpen(true)}
-                size="sm"
-                variant="primary"
-              >
-                提交审批
-              </Button>
-            ) : null}
-            {activeStatus === "unsubmitted" && currentBusinessBatch && !canSubmitCurrentBatch ? (
-              <span className="etc-action-disabled-reason" role="status">{submitDisabledReason}</span>
-            ) : null}
-          </div>
-
           <div className="etc-layout">
-            <section className="etc-batch-list-panel" aria-label="ETC批次列表区">
+            <section className="etc-batch-rail" aria-label="ETC批次列表区">
               <div className="etc-panel-heading">
                 <div className="etc-panel-heading__title">
                   <h2>批次列表</h2>
@@ -2072,6 +2008,32 @@ export default function EtcTicketManagementPage() {
                   </Button>
                 ) : null}
               </div>
+              <ToggleButtonGroup
+                aria-label="ETC批次状态"
+                className="etc-status-segmented"
+                disallowEmptySelection
+                selectedKeys={new Set<Key>([activeStatus])}
+                selectionMode="single"
+                size="sm"
+                onSelectionChange={(keys) => {
+                  const [next] = Array.from(keys);
+                  if (next === "submitted" || next === "staged" || next === "unsubmitted") {
+                    handleStatusChange(next);
+                  }
+                }}
+              >
+                <ToggleButton id="unsubmitted" className="etc-status-segmented__button">
+                  未提交 {counts.unsubmitted}
+                </ToggleButton>
+                <ToggleButton id="staged" className="etc-status-segmented__button">
+                  <ToggleButtonGroup.Separator />
+                  暂存 {counts.staged}
+                </ToggleButton>
+                <ToggleButton id="submitted" className="etc-status-segmented__button">
+                  <ToggleButtonGroup.Separator />
+                  已提交 {counts.submitted}
+                </ToggleButton>
+              </ToggleButtonGroup>
               {loading ? <StatePanel tone="loading" compact>加载中。</StatePanel> : null}
               {batchListError ? <StatePanel tone="error" compact>{batchListError}</StatePanel> : null}
               {!loading && !batchListError && visibleBatches.length === 0 ? <StatePanel tone="empty" compact>无匹配批次。</StatePanel> : null}
@@ -2193,45 +2155,121 @@ export default function EtcTicketManagementPage() {
             </section>
 
             <div className="etc-right-column">
-              {activeStatus === "unsubmitted" ? (
-              <section className="etc-reconciliation-workspace" aria-label="ETC批次流程">
-                <div className="etc-reconciliation-workspace-content">
-                  <div className="etc-detail-heading">
-                    <div>
-                      <h2>批次流程</h2>
-                      <p>{selectedTask ? `${formatTaskTitle(selectedTask)} / v${selectedTask.version}` : "选择左侧批次，或新建批次。"}</p>
+              <header className="etc-batch-context">
+                <div className="etc-batch-context__title">
+                  <div>
+                    <span className="etc-batch-context__eyebrow">当前批次</span>
+                    <div className="etc-detail-title-line">
+                      <h2>{selectedBatch ? batchDisplayTitle(selectedBatch) : "选择一个批次"}</h2>
+                      {selectedBatch ? (
+                        <StatusChip tone={businessBatchTone(selectedBatch.status)}>
+                          {businessBatchStatusLabel(selectedBatch.status)}
+                        </StatusChip>
+                      ) : null}
                     </div>
-                    <div className="etc-section-actions">
-                      {selectedTask && selectedTask.status === "ready_for_import" ? (
-                        <Button className="etc-secondary-action" isDisabled={!taskMutationTarget || taskActionLoading} onPress={handleReopenReconciliationTask} size="sm" variant="secondary">
+                    {selectedBatch ? (
+                      <p>
+                        {selectedTask ? `流程 ${selectedTask.taskId} / v${selectedTask.version}` : `批次 ${selectedBatch.businessBatchId}`}
+                        {selectedBatch.oaRowId ? ` · OA ${selectedBatch.oaRowId}` : ""}
+                      </p>
+                    ) : (
+                      <p>从左侧列表选择批次，或新建一个批次开始处理。</p>
+                    )}
+                  </div>
+                  {activeStatus === "unsubmitted" ? (
+                    <div className="etc-section-actions" aria-label="当前批次操作">
+                      {selectedTask?.status === "ready_for_import" ? (
+                        <Button
+                          className="etc-secondary-action"
+                          isDisabled={!taskMutationTarget || taskActionLoading}
+                          onPress={handleReopenReconciliationTask}
+                          size="sm"
+                          variant="secondary"
+                        >
                           重新打开
                         </Button>
                       ) : null}
                       <Button
-                        className="etc-primary-action"
+                        className="etc-secondary-action"
                         isDisabled={!taskMutationTarget || !canConfirmSelectedTask || taskActionLoading}
                         isPending={taskActionLoading}
                         onPress={handleConfirmReconciliationTask}
                         size="sm"
-                        variant="primary"
+                        variant="secondary"
                       >
                         确认对账
                       </Button>
                       <Button
-                        className="etc-secondary-action"
-                        isDisabled={!selectedTask}
-                        onPress={() => {
-                          setWorkflowExpandedKeys((current) =>
-                            current.size > 0
-                              ? new Set()
-                              : new Set(["upload", "sources", "review", "reconciliation", "imported"])
-                          );
-                        }}
+                        className="etc-primary-action"
+                        isDisabled={!canSubmitCurrentBatch || draftCreating}
+                        isPending={draftCreating}
+                        aria-label={canSubmitCurrentBatch ? "提交审批" : submitDisabledReason}
+                        onPress={() => setCreateDialogOpen(true)}
                         size="sm"
-                        variant="secondary"
+                        variant="primary"
                       >
-                        {workflowExpandedKeys.size > 0 ? "全部折叠" : "展开流程"}
+                        提交审批
                       </Button>
+                    </div>
+                  ) : null}
+                </div>
+                {activeStatus === "unsubmitted" && currentBusinessBatch && !canSubmitCurrentBatch ? (
+                  <span className="etc-action-disabled-reason" role="status">{submitDisabledReason}</span>
+                ) : null}
+              </header>
+
+              <EtcBatchProgress
+                batch={selectedBatch}
+                task={selectedTask}
+                taskLoading={taskLoading}
+                taskError={taskListError}
+              />
+
+              {selectedBatch ? (
+                <section className="etc-batch-summary" aria-label="批次摘要">
+                  <div className="etc-detail-metrics" aria-label="批次指标">
+                    <div>
+                      <span>总金额</span>
+                      <strong>{formatMoney(selectedBatch.invoiceSummary.amount)}</strong>
+                    </div>
+                    <div>
+                      <span>发票数</span>
+                      <strong>{selectedBatch.invoiceSummary.count} 张</strong>
+                    </div>
+                    <div>
+                      <span>开票日期</span>
+                      <strong>{formatDateRange(selectedBatchMetrics?.issueStartDate ?? null, selectedBatchMetrics?.issueEndDate ?? null)}</strong>
+                    </div>
+                    <div>
+                      <span>通行日期</span>
+                      <strong>{formatDateRange(selectedBatchMetrics?.passageStartDate ?? null, selectedBatchMetrics?.passageEndDate ?? null)}</strong>
+                    </div>
+                  </div>
+                  {(selectedBatchMetrics?.plateSummary.length ?? 0) > 0 ? (
+                    <div className="etc-plate-summary" aria-label="车牌汇总">
+                      {(selectedBatchMetrics?.plateSummary ?? []).map((item) => (
+                        <span key={item.plateNumber} className="etc-plate-summary-item">
+                          <strong>{item.plateNumber || "未记录车牌"}</strong>
+                          <span>{item.invoiceCount} 张</span>
+                          <strong>{formatMoney(item.totalAmount)}</strong>
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                </section>
+              ) : null}
+
+              {selectedBusinessBatch && isOaConfirmationPendingStatus(selectedBusinessBatch.status)
+                ? renderOaStatusPanel(selectedBusinessBatch)
+                : null}
+
+              {activeStatus === "unsubmitted" ? (
+              <section className="etc-workflow-surface" aria-label="ETC批次流程">
+                <div className="etc-workflow-surface__content">
+                  <div className="etc-current-task-heading">
+                    <div>
+                      <h3>核对工作区</h3>
+                      <p>{selectedTask ? `${formatTaskTitle(selectedTask)} / v${selectedTask.version}` : "选择左侧批次，或新建批次。"}</p>
                     </div>
                   </div>
 
@@ -2635,9 +2673,6 @@ export default function EtcTicketManagementPage() {
                           ) : null}
                         </DisclosureGroup>
 
-                        {selectedBusinessBatch && isOaConfirmationPendingStatus(selectedBusinessBatch.status)
-                          ? renderOaStatusPanel(selectedBusinessBatch)
-                          : null}
                       </div>
                     ) : !taskLoading && !taskListError ? (
                       <StatePanel tone="empty">暂无批次流程。</StatePanel>
@@ -2647,92 +2682,16 @@ export default function EtcTicketManagementPage() {
               </section>
               ) : null}
 
-              <section className="etc-batch-detail-panel" aria-label="ETC批次详情">
-                <div className="etc-batch-detail-content">
-                  <div className="etc-detail-heading">
-                    <div>
-                      <h2>批次详情</h2>
-                      <p>{selectedBatch ? batchDisplayTitle(selectedBatch) : "选择左侧批次。"}</p>
-                    </div>
-                    {selectedBatch ? (
-                      <Button
-                        className="etc-secondary-action"
-                        onPress={() => {
-                          setBatchDetailExpandedKeys((current) =>
-                            current.size > 0 ? new Set() : new Set(["summary", "invoices", "attempts"])
-                          );
-                        }}
-                        size="sm"
-                        variant="secondary"
-                      >
-                        {batchDetailExpandedKeys.size > 0 ? "全部折叠" : "展开详情"}
-                      </Button>
-                    ) : null}
-                  </div>
-                  <div id="etc-batch-detail-content">
-                    {!selectedBatch ? (
-                      <StatePanel tone="empty">选择左侧批次。</StatePanel>
-                    ) : (
-                      <div className="etc-batch-detail-content">
-                  <div className="etc-detail-heading">
-                    <div>
-                      <div className="etc-detail-title-line">
-                        <h2>{batchDisplayTitle(selectedBatch)}</h2>
-                        <StatusChip tone={businessBatchTone(selectedBatch.status)}>
-                          {businessBatchStatusLabel(selectedBatch.status)}
-                        </StatusChip>
-                      </div>
-                      {selectedBatch.oaRowId ? <p>OA {selectedBatch.oaRowId}</p> : null}
-                    </div>
-                  </div>
-
-                  {selectedBusinessBatch
-                    && isOaConfirmationPendingStatus(selectedBusinessBatch.status)
-                    ? renderOaStatusPanel(selectedBusinessBatch)
-                    : null}
-
+              <section className="etc-batch-records" aria-label="ETC批次详情">
+                {!selectedBatch ? (
+                  <StatePanel tone="empty">选择左侧批次。</StatePanel>
+                ) : (
                   <DisclosureGroup
                     allowsMultipleExpanded
                     className="etc-disclosure-group etc-disclosure-group--detail"
                     expandedKeys={batchDetailExpandedKeys}
                     onExpandedChange={setBatchDetailExpandedKeys}
                   >
-                    <EtcDisclosureSection
-                      id="summary"
-                      title="批次摘要"
-                      summary={`${selectedBatch.invoiceSummary.count} 张 / ${formatMoney(selectedBatch.invoiceSummary.amount)}`}
-                      meta={<StatusChip tone={businessBatchTone(selectedBatch.status)}>{businessBatchStatusLabel(selectedBatch.status)}</StatusChip>}
-                    >
-                      <div className="etc-detail-metrics" aria-label="批次指标">
-                        <div>
-                          <span>总金额</span>
-                          <strong>{formatMoney(selectedBatch.invoiceSummary.amount)}</strong>
-                        </div>
-                        <div>
-                          <span>发票数</span>
-                          <strong>{selectedBatch.invoiceSummary.count} 张</strong>
-                        </div>
-                        <div>
-                          <span>开票日期</span>
-                          <strong>{formatDateRange(selectedBatchMetrics?.issueStartDate ?? null, selectedBatchMetrics?.issueEndDate ?? null)}</strong>
-                        </div>
-                        <div>
-                          <span>通行日期</span>
-                          <strong>{formatDateRange(selectedBatchMetrics?.passageStartDate ?? null, selectedBatchMetrics?.passageEndDate ?? null)}</strong>
-                        </div>
-                      </div>
-
-                      <div className="etc-plate-summary" aria-label="车牌汇总">
-                        {(selectedBatchMetrics?.plateSummary ?? []).map((item) => (
-                          <div key={item.plateNumber} className="etc-plate-summary-item">
-                            <strong>{item.plateNumber || "未记录车牌"}</strong>
-                            <span>{item.invoiceCount} 张</span>
-                            <strong>{formatMoney(item.totalAmount)}</strong>
-                          </div>
-                        ))}
-                      </div>
-                    </EtcDisclosureSection>
-
                     <EtcDisclosureSection
                       id="invoices"
                       title="发票明细"
@@ -2788,10 +2747,7 @@ export default function EtcTicketManagementPage() {
                       </EtcDisclosureSection>
                     ) : null}
                   </DisclosureGroup>
-                      </div>
-                    )}
-                  </div>
-                </div>
+                )}
               </section>
             </div>
           </div>

@@ -940,3 +940,12 @@
 - 边界：绑定 business/submission/external 三重 owner、4 个发票号与车牌、54.46 元目标金额、68 / 3740.82 结果和 dry-run fingerprint；事务内复用 ETC invoice link 与 canonical overlap 合同，更新成员、汇总、版本和审计。OA 草稿与已关闭对账任务不写入，缺失 PDF/XML 不伪造。
 - 收敛：执行成功后复用 historical ETC lifecycle enqueue 精确 Workbench scope；不直写 relation/read model，不增加 API、页面、worker、表、缓存或常驻扫描。
 - 测试：`tests/test_repair_submitted_etc_batch_members_tool.py` 覆盖精确计划、部分修复阻断、幂等重放和 lifecycle scope。
+
+## 2026-08-01 - ETC 页面扁平化与四阶段流程可见性
+
+- 目标：减少 ETC 页面卡片嵌套和重复上下文，在不改变业务状态机的前提下显示可信流程，并按产品决定移除页面级车牌/关键词搜索。
+- 影响范围：`EtcTicketManagementPage.tsx`、ETC 域内只读 progress 组件、ETC CSS、组件/E2E 测试和模块长期文档；后端 route/service/repository、API response shape、read model、worker、权限和其它页面不变。
+- 关键决策：使用左侧批次 rail + 右侧连续工作面；四阶段严格按“准备核对资料 → 确认核对结果 → 导入 ETC 发票 → 提交 OA 审批”排列，只消费当前 batch/task。`oa_confirmation_pending` 显示待人工确认，导入/OA 失败显示需要处理，submitted/closed 才完成最后阶段。
+- 旧逻辑删除：删除页面 `plate/keyword` state、输入 DOM、列表请求参数/effect 依赖、旧筛选 CSS、重复批次标题/摘要/OA 状态区、旧外层卡片容器类和对应过期测试；后端/API client 可选查询参数作为兼容/运维合同保留。
+- 性能与隔离：阶段映射为固定四项 O(1) 纯函数；新增网络请求、timer、listener、store、依赖、缓存、read model、worker 和跨页面写入均为 0。保留既有 detail/task 并发、AbortController 和 stale selection 防护。
+- 测试覆盖：组件覆盖九组 task/batch 状态、无旧搜索 I/O、语义化四阶段、扁平 CSS 与刷新竞态；Playwright 覆盖真实 Chromium 可见四阶段、无旧搜索框及既有失败恢复主链路；独立 ETC 导入与 Workbench 回归按发布门禁执行。

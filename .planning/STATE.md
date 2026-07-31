@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: active
-stopped_at: Phase 37 verified in production
-last_updated: "2026-08-01T03:16:06+08:00"
-last_activity: 2026-08-01 -- Phase 37 production closure passed
+status: executing
+stopped_at: Completed 36-01-PLAN.md local implementation; production handoff to main orchestrator
+last_updated: "2026-07-31T19:36:24.936Z"
+last_activity: 2026-07-31 -- Phase 38 execution started
 progress:
-  total_phases: 34
+  total_phases: 36
   completed_phases: 9
-  total_plans: 84
+  total_plans: 86
   completed_plans: 61
-  percent: 26
+  percent: 25
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-16)
 
 **Core value:** Preserve production finance workflow correctness while improving individual pages through isolated, reviewable GSD phases.
-**Current focus:** Phase 37 — app-shell-sidebar-identity
+**Current focus:** Phase 38 — etc
 
 ## Current Position
 
-Phase: 37 (app-shell-sidebar-identity) — COMPLETE
+Phase: 38 (etc) — EXECUTING
 Plan: 1 of 1
-Status: Production verified
-Last activity: 2026-08-01 -- Phase 37 production closure passed
+Status: Executing Phase 38
+Last activity: 2026-07-31 -- Phase 38 execution started
 
 Progress: [██████████] complete
 
