@@ -1911,8 +1911,9 @@ rollback_release_gate() {
   local evidence_dir="$4"
   local failure_checkpoint="$5"
   local rolled_back=false
+  cat "$evidence_dir/$failure_checkpoint/checkpoint.json" >&2 || true
   if (activate_release "$previous_release") \
-    && release_gate_checkpoint "$previous_release" rollback "$admin_token" "$evidence_dir" preflight; then
+    && release_gate_checkpoint "$previous_release" rollback "$admin_token" "$evidence_dir" preflight "$candidate"; then
     rolled_back=true
   fi
   write_release_gate_evidence \

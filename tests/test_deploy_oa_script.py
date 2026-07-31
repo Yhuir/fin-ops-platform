@@ -558,9 +558,10 @@ class DeployOAScriptTest(unittest.TestCase):
             script,
         )
         self.assertIn(
-            'release_gate_checkpoint "$previous_release" rollback "$admin_token" "$evidence_dir" preflight',
+            'release_gate_checkpoint "$previous_release" rollback "$admin_token" "$evidence_dir" preflight "$candidate"',
             script,
         )
+        self.assertIn('cat "$evidence_dir/$failure_checkpoint/checkpoint.json" >&2 || true', script)
         self.assertIn(
             'release_gate_checkpoint "$release" t0 "$admin_token" "$evidence_dir" full',
             script,
