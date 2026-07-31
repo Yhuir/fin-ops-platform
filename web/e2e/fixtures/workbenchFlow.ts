@@ -84,7 +84,7 @@ export async function confirmWorkbenchRelation(
     await mark("finalSettledLatencyMs", expect(openZone.getByText("已选 3")).toBeVisible());
   });
 
-  const previewDialog = page.getByRole("dialog", { name: "关联预览" });
+  const previewDialog = page.getByRole("dialog", { name: "确认关联" });
   await runOperation(recordLatency, {
     route: "/",
     pageKey: "reconciliation-workbench",

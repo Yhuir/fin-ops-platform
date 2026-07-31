@@ -5,6 +5,7 @@ from typing import Any
 
 
 TURNOVER_MANUAL_CLOSURE_RELATION_MODE = "turnover_manual_closure"
+OUTPUT_INVOICE_REVERSAL_RELATION_MODE = "output_invoice_reversal"
 
 
 VALID_WORKBENCH_RELATION_MODES = frozenset(
@@ -25,6 +26,7 @@ VALID_WORKBENCH_RELATION_MODES = frozenset(
         "input_invoice_oa_reverse",
         "personal_advance_repayment_settlement",
         "oa_invoice_offset_auto_match",
+        OUTPUT_INVOICE_REVERSAL_RELATION_MODE,
     }
 )
 

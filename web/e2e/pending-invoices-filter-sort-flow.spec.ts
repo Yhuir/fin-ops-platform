@@ -170,7 +170,6 @@ test.describe("pending invoices filter and sort browser flow", () => {
     expect(amountDescUrl.searchParams.get("sort_field")).toBe("amount");
     expect(amountDescUrl.searchParams.get("sort_direction")).toBe("desc");
 
-    const applyButton = page.locator(".pending-invoices-column-filter-menu__apply");
     let filteredUrl: URL | undefined;
     await recordLatency({
       operationId: "pending-invoices.apply-counterparty-filter",
@@ -190,10 +189,9 @@ test.describe("pending invoices filter and sort browser flow", () => {
           && filter.values?.includes("智能工厂设备商二号")
         ));
       });
-      await page.locator(".pending-invoices-column-filter-menu__option").filter({ hasText: "对方户名：智能工厂设备商二号" }).click();
-      if (await applyButton.isVisible({ timeout: 500 }).catch(() => false)) {
-        await applyButton.click({ force: true });
-      }
+      const filterMenu = page.getByRole("menu", { name: "对方户名筛选" });
+      await filterMenu.getByRole("menuitemcheckbox", { name: /对方户名：智能工厂设备商二号/ }).click();
+      await page.getByRole("button", { name: "应用筛选" }).click();
       filteredUrl = new URL((await mark("apiLatencyMs", filteredRowsRequest)).url());
       await mark("finalSettledLatencyMs", expect.poll(() => visibleCounterparties(page)).toEqual(["智能工厂设备商二号"]));
     });

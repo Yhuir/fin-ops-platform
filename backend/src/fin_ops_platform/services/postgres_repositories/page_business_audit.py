@@ -89,16 +89,11 @@ PAGE_AUDIT_CONTRACTS: dict[str, PageAuditContract] = {
             "app.invoices",
             "app.bank_transactions",
             "app.workbench_pair_relations",
-            "app.output_invoice_collection_status_overrides",
-            "app.output_invoice_collection_reminders",
-            "app.output_invoice_collection_red_relations",
-            "app.output_invoice_receipts",
-            "app.output_invoice_receipt_events",
         ),
         relation_tables=("app.workbench_pair_relations",),
         canonical_expected_set=(
-            "active output invoices, bank facts, lifecycle overrides, receipts, "
-            "and active relation membership read in one database snapshot"
+            "active output invoices, bank facts, and active relation membership "
+            "read in one database snapshot"
         ),
         key_display_fields=("invoice_id", "invoice_no", "invoice_date", "total_with_tax", "collection_status", "relation members"),
         external_source_boundary="invoice and bank completeness before App import",

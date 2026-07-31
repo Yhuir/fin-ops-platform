@@ -24,21 +24,12 @@ class InvoiceLifecyclePolicy:
         self,
         *,
         input_payment_rules_provider: InputInvoiceUsagePaymentRulesProvider | None = None,
-        output_collection_status_rule_service: Any | None = None,
     ) -> None:
         self._input_payment_rules_provider = input_payment_rules_provider
-        if output_collection_status_rule_service is None:
-            from fin_ops_platform.services.output_invoice_collection_service import (
-                OutputInvoiceCollectionStatusRuleService,
-            )
-
-            output_collection_status_rule_service = OutputInvoiceCollectionStatusRuleService()
-        self._output_collection_status_rule_service = output_collection_status_rule_service
 
     def source_versions(self) -> dict[str, object]:
         versions: dict[str, object] = {
             "invoice_lifecycle_policy_schema_version": INVOICE_LIFECYCLE_POLICY_SCHEMA_VERSION,
-            "output_invoice_collection_status_rules_version": "sheet6-static-v1+lifecycle-v1",
         }
         if self._input_payment_rules_provider is not None:
             versions["input_invoice_usage_payment_rules_version"] = self._input_payment_rules_provider.rules_source_version()
@@ -113,25 +104,6 @@ class InvoiceLifecyclePolicy:
         if amount is not None and _within_cent(paid, amount):
             return _status("paid", "已支付", "已存在已配对支出流水关系")
         return _status("paid", "已支付", "已存在已配对支出流水关系，金额差额不影响付款状态")
-
-    def evaluate_output_invoice_collection(
-        self,
-        *,
-        invoice_total: Any,
-        own_inflow_total: Any,
-        related_inflow_total: Any,
-        related_outflow_total: Any,
-        has_red_relation: bool,
-        fully_matched: bool,
-    ) -> dict[str, Any]:
-        return self._output_collection_status_rule_service.classify(
-            invoice_total=_decimal(invoice_total),
-            own_inflow_total=_decimal(own_inflow_total),
-            related_inflow_total=_decimal(related_inflow_total),
-            related_outflow_total=_decimal(related_outflow_total),
-            has_red_relation=has_red_relation,
-            fully_matched=fully_matched,
-        )
 
     def evaluate_tax_certification(
         self,

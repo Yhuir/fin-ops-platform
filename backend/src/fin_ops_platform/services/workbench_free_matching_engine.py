@@ -101,6 +101,8 @@ class FormalRelationFact:
     evidence_keys: tuple[tuple[str, str], ...] = ()
     references: tuple[FormalRelationReference, ...] = ()
     source_version: str = ""
+    reversal_key: tuple[str, ...] | None = None
+    reversal_polarity: Literal["blue", "red"] | None = None
 
     def __post_init__(self) -> None:
         row_type, identity = canonical_member_key(self.row_type, self.canonical_object_identity)
@@ -117,6 +119,17 @@ class FormalRelationFact:
             raise ValueError("Formal relation fact direction must be expenditure or income.")
         if self.fact_date is not None and not isinstance(self.fact_date, date):
             raise TypeError("Formal relation fact fact_date must be a date or None.")
+        if self.reversal_polarity not in {None, "blue", "red"}:
+            raise ValueError("Formal relation fact reversal_polarity must be blue, red or None.")
+        reversal_key = (
+            tuple(str(item or "").strip() for item in self.reversal_key)
+            if self.reversal_key is not None
+            else None
+        )
+        if reversal_key is not None and (not reversal_key or any(not item for item in reversal_key)):
+            raise ValueError("Formal relation fact reversal_key values must be non-empty.")
+        if (reversal_key is None) != (self.reversal_polarity is None):
+            raise ValueError("Formal relation fact reversal key and polarity must be provided together.")
         normalized_evidence: set[tuple[str, str]] = set()
         for raw_kind, raw_value in self.evidence_keys:
             kind = str(raw_kind or "").strip().lower()
@@ -134,6 +147,7 @@ class FormalRelationFact:
         object.__setattr__(self, "evidence_keys", tuple(sorted(normalized_evidence)))
         object.__setattr__(self, "references", tuple(sorted(set(self.references))))
         object.__setattr__(self, "source_version", str(self.source_version or "").strip())
+        object.__setattr__(self, "reversal_key", reversal_key)
 
     @property
     def member_key(self) -> MemberKey:
@@ -219,6 +233,7 @@ class FormalRelationPlan:
     batch_hash: str
     target_case_id: str | None = None
     oa_attachment_bindings: tuple[tuple[str, str], ...] = ()
+    relation_mode: str = "manual_confirmed"
 
     @property
     def idempotency_key(self) -> str:
@@ -288,6 +303,13 @@ class WorkbenchFreeMatchingEngine:
         if not available:
             return FormalRelationMatchResult(preserved_active_count=preserved_active_count)
 
+        reversal_plans, reversal_claimed, reversal_ambiguous = self._output_invoice_reversal_plans(
+            batch=batch,
+            available=available,
+        )
+        if reversal_ambiguous:
+            blocked["ambiguous_output_invoice_reversal"] = reversal_ambiguous
+
         try:
             budget.consume(working_bytes=len(available) * 512)
             edges = self._build_edges(batch.facts, budget)
@@ -299,7 +321,11 @@ class WorkbenchFreeMatchingEngine:
             )
 
         facts_by_key = {fact.member_key: fact for fact in batch.facts}
-        available_keys = {fact.member_key for fact in available}
+        available_keys = {
+            fact.member_key
+            for fact in available
+            if fact.reversal_polarity != "red"
+        } - reversal_claimed
         extension_plans, extension_claimed, extension_ambiguous = self._active_extension_plans(
             batch=batch,
             edges=edges,
@@ -315,8 +341,8 @@ class WorkbenchFreeMatchingEngine:
             if edge.left in available_keys - extension_claimed and edge.right in available_keys - extension_claimed
         ]
         components = self._components(available_keys - extension_claimed, graph_edges)
-        plans = list(extension_plans)
-        ambiguous_components = extension_ambiguous
+        plans = [*reversal_plans, *extension_plans]
+        ambiguous_components = extension_ambiguous + reversal_ambiguous
         resource_limited_components = 0
         unsafe_components = 0
         for component in components:
@@ -353,6 +379,57 @@ class WorkbenchFreeMatchingEngine:
             preserved_active_count=preserved_active_count,
             blocked_reason_counts=tuple(sorted(blocked.items())),
         )
+
+    def _output_invoice_reversal_plans(
+        self,
+        *,
+        batch: FormalRelationFactBatch,
+        available: list[FormalRelationFact],
+    ) -> tuple[list[FormalRelationPlan], set[MemberKey], int]:
+        facts_by_key = {fact.member_key: fact for fact in batch.facts}
+        groups: dict[tuple[str, ...], list[FormalRelationFact]] = {}
+        for fact in available:
+            if fact.reversal_key is not None:
+                groups.setdefault(fact.reversal_key, []).append(fact)
+
+        plans: list[FormalRelationPlan] = []
+        claimed: set[MemberKey] = set()
+        ambiguous = 0
+        for facts in groups.values():
+            blue = [fact for fact in facts if fact.reversal_polarity == "blue"]
+            red = [fact for fact in facts if fact.reversal_polarity == "red"]
+            if not blue or not red:
+                continue
+            if len(blue) != 1 or len(red) != 1:
+                ambiguous += 1
+                continue
+            blue_fact, red_fact = blue[0], red[0]
+            if (
+                blue_fact.fact_date is None
+                or red_fact.fact_date is None
+                or red_fact.fact_date < blue_fact.fact_date
+            ):
+                continue
+            members = (blue_fact.member_key, red_fact.member_key)
+            fingerprint = relation_fingerprint(members)
+            if fingerprint in batch.withdrawal_fingerprints:
+                continue
+            plans.append(
+                self._plan(
+                    batch=batch,
+                    member_keys=members,
+                    facts_by_key=facts_by_key,
+                    rule_code="output_invoice_exact_reversal",
+                    evidence_kinds={"output_invoice_reversal"},
+                    relation_mode="output_invoice_reversal",
+                    evidence_summary_extra=(
+                        ("blue_invoice_identity", blue_fact.canonical_object_identity),
+                        ("red_invoice_identity", red_fact.canonical_object_identity),
+                    ),
+                )
+            )
+            claimed.update(members)
+        return plans, claimed, ambiguous
 
     def _build_edges(self, facts: tuple[FormalRelationFact, ...], budget: _Budget) -> list[_Edge]:
         facts_by_key = {fact.member_key: fact for fact in facts}
@@ -670,6 +747,8 @@ class WorkbenchFreeMatchingEngine:
         rule_code: str,
         evidence_kinds: set[str],
         target_case_id: str | None = None,
+        relation_mode: str = "manual_confirmed",
+        evidence_summary_extra: tuple[tuple[str, str], ...] = (),
     ) -> FormalRelationPlan:
         members = tuple(sorted(set(member_keys), key=_member_sort_key))
         fingerprint = relation_fingerprint(members)
@@ -694,6 +773,7 @@ class WorkbenchFreeMatchingEngine:
             ("evidence_kinds", ",".join(sorted(evidence_kinds))),
             ("member_count", str(len(members))),
             ("pane_count", str(len({row_type for row_type, _identity in members}))),
+            *evidence_summary_extra,
         )
         attachment_bindings = {
             (row_ids_by_key[target], fact.row_id)
@@ -720,6 +800,7 @@ class WorkbenchFreeMatchingEngine:
             batch_hash=batch.batch_hash,
             target_case_id=target_case_id,
             oa_attachment_bindings=tuple(sorted(attachment_bindings)),
+            relation_mode=relation_mode,
         )
 
 

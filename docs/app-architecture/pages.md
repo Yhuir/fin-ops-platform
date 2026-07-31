@@ -52,7 +52,7 @@ freshness gate。
 | `pending_invoices` | `/pending-invoices` | canonical PostgreSQL snapshot；无页面 read model/worker |
 | `oa_pending_payments` | `/oa-pending-payments` | canonical PostgreSQL snapshot；无页面 read model/worker |
 | `input_invoice_usage` | `/input-invoice-usage` | PostgreSQL canonical repeatable-read snapshot；active `app.workbench_pair_relations`；无页面 read model/worker |
-| `output_invoice_collections` | `/output-invoice-collections` | PostgreSQL canonical repeatable-read snapshot；active `app.workbench_pair_relations` 与 canonical lifecycle facts；无页面 read model/worker |
+| `output_invoice_collections` | `/output-invoice-collections` | PostgreSQL canonical repeatable-read snapshot；销项发票、收入流水与 active `app.workbench_pair_relations`；红蓝票由 `output_invoice_reversal` 正式关系驱动；无页面 read model/worker 或 lifecycle overlay |
 | `tax_offset` | `/tax-offset` | 单次 PostgreSQL repeatable-read canonical snapshot；页面无 Tax Offset read model/worker 依赖 |
 | `cost_statistics` | `/cost-statistics` | 单次 PostgreSQL repeatable-read canonical snapshot；无 Cost read model/worker |
 | `bank_flow_rule_batches` | `/bank-flow-rule-batches` | 单次 PostgreSQL repeatable-read canonical snapshot；无页面 read model/worker |

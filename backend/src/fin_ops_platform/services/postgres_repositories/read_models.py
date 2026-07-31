@@ -287,7 +287,6 @@ OUTPUT_INVOICE_COLLECTION_FILTER_FIELDS = {
     "bank_amount": ("bank_amount", "money", {"between", "equals"}),
     "bank_name": ("bank_name", "text", {"in"}),
     "bank_summary": ("bank_summary", "text", {"contains"}),
-    "receipt_status": ("receipt_status", "text", {"in"}),
 }
 OUTPUT_INVOICE_COLLECTION_SORT_EXPRESSIONS = {
     field: expression

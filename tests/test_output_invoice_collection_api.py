@@ -1,626 +1,177 @@
 from __future__ import annotations
 
-from decimal import Decimal
 from http import HTTPStatus
-from io import BytesIO
-import json
-from pathlib import Path
-import tempfile
-from typing import Any
 import unittest
-from urllib.parse import quote
+from typing import Any
 
-from openpyxl import load_workbook
-
-from tests.app_test_support import build_local_state_application as build_application
-from fin_ops_platform.app.server import Application
-from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
-from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
-from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.app.routes_output_invoice_collections import (
+    OutputInvoiceCollectionApiRoutes,
+)
 from fin_ops_platform.services.output_invoice_collection_service import (
     OutputInvoiceCollectionError,
-    OutputInvoiceCollectionQueryService,
 )
-from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 
-class FakeOutputRelationFacade:
-    def __init__(self, relations: list[dict[str, Any]]) -> None:
-        self.relations = [dict(relation) for relation in relations]
+class RecordingQueryService:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, object, str]] = []
+        self.error_on: str | None = None
 
-    def get_by_row_ids(self, row_ids: list[str], **_kwargs: Any) -> dict[str, Any]:
-        wanted = {str(row_id) for row_id in row_ids}
-        groups = [self._group(relation) for relation in self.relations if wanted & set(relation.get("row_ids") or [])]
-        return self._payload(groups)
+    def _record(self, name: str, value: object, tenant_id: str) -> dict[str, Any]:
+        self.calls.append((name, value, tenant_id))
+        if self.error_on == name:
+            raise OutputInvoiceCollectionError(
+                "output_invoice_collection_invalid_request",
+                "invalid request",
+            )
+        return {"source": name}
 
-    def list_by_month(self, _month: str, **_kwargs: Any) -> dict[str, Any]:
-        return self._payload([self._group(relation) for relation in self.relations])
+    def rows(self, query: object, *, tenant_id: str) -> dict[str, Any]:
+        return self._record("rows", query, tenant_id)
 
-    def _payload(self, groups: list[dict[str, Any]]) -> dict[str, Any]:
-        rows: list[dict[str, Any]] = []
-        for group in groups:
-            group_id = str(group["group_id"])
-            payload = group["payload"]
-            for row_id, row_type in zip(payload["row_ids"], payload["row_types"]):
-                rows.append({"row_id": row_id, "row_type": row_type, "relation_status": "linked", "group_ids": [group_id]})
-        return {"status": "fresh", "rows": rows, "groups": groups, "source_versions": {}, "read_model_scope_keys": []}
+    def filter_options(self, query: object, *, tenant_id: str) -> dict[str, Any]:
+        return self._record("filter_options", query, tenant_id)
 
-    @staticmethod
-    def _group(relation: dict[str, Any]) -> dict[str, Any]:
-        case_id = str(relation.get("case_id") or "")
-        row_ids = [str(row_id) for row_id in list(relation.get("row_ids") or [])]
-        row_types = [str(row_type) for row_type in list(relation.get("row_types") or [])]
-        return {
-            "group_id": case_id,
-            "scope_month": relation.get("month_scope") or "2026-05",
-            "oa_row_ids": [row_id for row_id, row_type in zip(row_ids, row_types) if row_type == "oa"],
-            "bank_transaction_ids": [row_id for row_id, row_type in zip(row_ids, row_types) if row_type == "bank"],
-            "input_invoice_ids": [],
-            "output_invoice_ids": [row_id for row_id, row_type in zip(row_ids, row_types) if row_type == "invoice"],
-            "payload": {
-                "case_id": case_id,
-                "row_ids": row_ids,
-                "row_types": row_types,
-                "relation_mode": relation.get("relation_mode") or "",
-                "amount_check": dict(relation.get("amount_check") or {}),
-                "special_metadata": dict(relation.get("special_metadata") or {}),
-            },
-        }
+    def export_preview(self, query: object, *, tenant_id: str) -> dict[str, Any]:
+        return self._record("export_preview", query, tenant_id)
+
+    def export(self, query: object, *, tenant_id: str) -> tuple[str, bytes]:
+        self._record("export", query, tenant_id)
+        return "销项发票收款情况.xlsx", b"xlsx"
+
+    def invoice_detail(self, invoice_id: str, *, tenant_id: str) -> dict[str, Any]:
+        return self._record("invoice_detail", invoice_id, tenant_id)
+
+    def bank_transaction_detail(
+        self,
+        bank_transaction_id: str,
+        *,
+        tenant_id: str,
+    ) -> dict[str, Any]:
+        return self._record("bank_transaction_detail", bank_transaction_id, tenant_id)
+
+    def relation_details(
+        self,
+        row_id: str,
+        query: object,
+        *,
+        tenant_id: str,
+    ) -> dict[str, Any]:
+        return self._record("relation_details", (row_id, query), tenant_id)
 
 
 class OutputInvoiceCollectionApiTests(unittest.TestCase):
-    def test_rows_route_returns_direct_output_invoice_collection_payload(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            self._install_service(
-                app,
-                invoices=[
-                    self._invoice("out-api-1", "1001", "甲客户", total_with_tax="30.00"),
-                    self._invoice("out-api-2", "1002", "乙客户", total_with_tax="10.00"),
-                    self._invoice("out-api-3", "1003", "甲客户", total_with_tax="20.00"),
-                ],
-            )
-            filters = quote(json.dumps([{"field": "buyer_name", "operator": "in", "values": ["甲客户"]}]))
+    def setUp(self) -> None:
+        self.service = RecordingQueryService()
+        self.routes = OutputInvoiceCollectionApiRoutes(
+            query_service=self.service,
+            json_response=lambda status, payload: {
+                "status": int(status),
+                "payload": payload,
+            },
+            xlsx_response=lambda filename, content: {
+                "filename": filename,
+                "content": content,
+            },
+            error_response=lambda exc: {
+                "status": int(exc.status_code),
+                "error": exc.error_code,
+            },
+        )
 
-            response = app.handle_request(
-                "GET",
-                f"/api/output-invoice-collections/rows?page=1&page_size=1&filters={filters}&sort_field=total_with_tax&sort_direction=desc",
-            )
+    def test_all_read_only_routes_dispatch_to_the_canonical_query_service(self) -> None:
+        cases = [
+            ("rows", "/api/output-invoice-collections/rows"),
+            ("filter_options", "/api/output-invoice-collections/filter-options"),
+            ("export_preview", "/api/output-invoice-collections/export-preview"),
+            ("export", "/api/output-invoice-collections/export"),
+            (
+                "invoice_detail",
+                "/api/output-invoice-collections/invoices/invoice%2F1/detail",
+            ),
+            (
+                "bank_transaction_detail",
+                "/api/output-invoice-collections/bank-transactions/bank%2F1/detail",
+            ),
+            (
+                "relation_details",
+                "/api/output-invoice-collections/rows/row%2F1/relation-details",
+            ),
+        ]
 
-        payload = json.loads(response.body)
-        self.assertEqual(response.status_code, 200)
-        self.assertNotIn("readModelStatus", payload)
-        self.assertNotIn("read_model_status", payload)
-        self.assertIn("filterOptions", payload)
-        self.assertEqual(payload["pagination"], {"page": 1, "pageSize": 1, "total": 2})
-        self.assertEqual(payload["rows"][0]["invoiceId"], "out-api-1")
-        self.assertEqual(payload["rows"][0]["invoice"]["buyerName"], "甲客户")
-
-    def test_export_preview_and_download_use_current_filter_without_pagination(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            self._install_service(
-                app,
-                invoices=[
-                    self._invoice("out-export-1", "9001", "甲客户", total_with_tax="300.00"),
-                    self._invoice("out-export-2", "9002", "乙客户", total_with_tax="100.00"),
-                    self._invoice("out-export-3", "9003", "甲客户", total_with_tax="200.00"),
-                ],
-            )
-            filters = quote(json.dumps([{"field": "buyer_name", "operator": "in", "values": ["甲客户"]}]))
-
-            preview_response = app.handle_request(
-                "GET",
-                f"/api/output-invoice-collections/export-preview?filters={filters}&sort_field=total_with_tax&sort_direction=desc",
-            )
-            download_response = app.handle_request(
-                "GET",
-                f"/api/output-invoice-collections/export?filters={filters}&sort_field=total_with_tax&sort_direction=desc",
-            )
-
-        preview = json.loads(preview_response.body)
-        self.assertEqual(preview_response.status_code, 200)
-        self.assertEqual(preview["row_count"], 2)
-        self.assertIn("发票号码", preview["columns"])
-        self.assertIn("红蓝票依据", preview["columns"])
-        self.assertEqual(preview["sample_rows"][0]["发票号码"], "9001")
-        self.assertEqual(preview["sample_rows"][0]["购方"], "甲客户")
-
-        self.assertEqual(download_response.status_code, 200)
-        self.assertIn("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", download_response.headers["Content-Type"])
-        self.assertIn("filename*=", download_response.headers["Content-Disposition"])
-        workbook = load_workbook(BytesIO(download_response.body))
-        sheet = workbook.active
-        self.assertEqual(sheet.title, "销项收款")
-        self.assertEqual(sheet.cell(row=1, column=2).value, "发票号码")
-        self.assertEqual(sheet.cell(row=2, column=2).value, "9001")
-        self.assertEqual(sheet.cell(row=2, column=4).value, "甲客户")
-        self.assertEqual(sheet.cell(row=3, column=2).value, "9003")
-        self.assertIsNone(sheet.cell(row=4, column=2).value)
-
-    def test_export_rejects_row_count_over_contract_limit(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            self._install_service(app, invoices=[self._invoice("out-limit", "9101", "超量客户")])
-
-            def too_many_rows(*_args: object, **_kwargs: object) -> list[dict[str, object]]:
-                raise OutputInvoiceCollectionError(
-                    "output_invoice_collection_export_row_limit_exceeded",
-                    "当前筛选结果超过 20000 行，请缩小筛选范围后导出。",
-                    details={"total": 20001, "limit": 20000},
+        for expected_call, path in cases:
+            with self.subTest(path=path):
+                response = self.routes.route(
+                    "GET",
+                    path,
+                    {"kind": ["invoice"]},
+                    None,
+                    None,
                 )
+                self.assertIsNotNone(response)
+                self.assertEqual(self.service.calls[-1][0], expected_call)
+                self.assertEqual(self.service.calls[-1][2], "default")
 
-            app._output_invoice_collection_page_query_service()._export_rows = too_many_rows
-            preview_response = app.handle_request("GET", "/api/output-invoice-collections/export-preview")
-            download_response = app.handle_request("GET", "/api/output-invoice-collections/export")
+        self.assertEqual(response, {"status": 200, "payload": {"source": "relation_details"}})
 
-        self.assertEqual(preview_response.status_code, 400)
+    def test_removed_mutation_and_legacy_routes_are_not_owned(self) -> None:
+        removed = [
+            ("GET", "/api/output-invoice-collections/status-rules"),
+            ("GET", "/api/output-invoice-collections/receipts/history"),
+            ("POST", "/api/output-invoice-collections/receipt-preview"),
+            ("PUT", "/api/output-invoice-collections/rows/row-1/collection-status"),
+            ("POST", "/api/output-invoice-collections/red-invoice-relations"),
+            ("POST", "/api/output-invoice-collections/receipts"),
+        ]
+
+        for method, path in removed:
+            with self.subTest(path=path):
+                self.assertIsNone(self.routes.route(method, path, {}, "{}", None))
+
+        self.assertEqual(self.service.calls, [])
+
+    def test_read_auth_error_short_circuits_without_querying(self) -> None:
+        routes = OutputInvoiceCollectionApiRoutes(
+            query_service=self.service,
+            resolve_read_session=lambda _headers: (
+                None,
+                {"status": int(HTTPStatus.UNAUTHORIZED)},
+            ),
+            json_response=lambda status, payload: (status, payload),
+            xlsx_response=lambda filename, content: (filename, content),
+            error_response=lambda exc: exc.error_code,
+        )
+
+        response = routes.route(
+            "GET",
+            "/api/output-invoice-collections/rows",
+            {},
+            None,
+            {},
+        )
+
+        self.assertEqual(response, {"status": 401})
+        self.assertEqual(self.service.calls, [])
+
+    def test_domain_error_is_mapped_by_the_http_error_port(self) -> None:
+        self.service.error_on = "rows"
+
+        response = self.routes.route(
+            "GET",
+            "/api/output-invoice-collections/rows",
+            {},
+            None,
+            None,
+        )
+
         self.assertEqual(
-            json.loads(preview_response.body)["error"]["code"],
-            "output_invoice_collection_export_row_limit_exceeded",
-        )
-        self.assertEqual(download_response.status_code, 400)
-        self.assertEqual(
-            json.loads(download_response.body)["error"]["details"]["limit"],
-            20000,
+            response,
+            {
+                "status": 400,
+                "error": "output_invoice_collection_invalid_request",
+            },
         )
 
-    def test_export_and_filter_routes_ignore_legacy_read_model_reader(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            self._install_service(app, invoices=[self._invoice("out-refresh", "9201", "刷新客户")])
 
-            app._get_output_invoice_collection_all_rows_from_sql_read_model = (
-                lambda _query: (_ for _ in ()).throw(
-                    AssertionError("legacy page read-model reader must not be called")
-                )
-            )
-            filter_response = app.handle_request("GET", "/api/output-invoice-collections/filter-options")
-            preview_response = app.handle_request("GET", "/api/output-invoice-collections/export-preview")
-            download_response = app.handle_request("GET", "/api/output-invoice-collections/export")
-
-        filter_payload = json.loads(filter_response.body)
-        preview_payload = json.loads(preview_response.body)
-        self.assertEqual(filter_response.status_code, int(HTTPStatus.OK))
-        self.assertEqual(preview_response.status_code, int(HTTPStatus.OK))
-        self.assertEqual(download_response.status_code, int(HTTPStatus.OK))
-        self.assertNotIn("read_model_status", filter_payload)
-        self.assertNotIn("readModelStatus", preview_payload)
-
-    def test_detail_rules_preview_history_and_relation_routes(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            invoice = self._invoice("out-detail", "2001", "详情客户")
-            bank = self._bank("bank-detail", "100.00", TransactionDirection.INFLOW)
-            pair_service = WorkbenchPairRelationService()
-            pair_service.create_active_relation(
-                case_id="case-detail",
-                row_ids=[invoice.id, bank.id],
-                row_types=["invoice", "bank"],
-                relation_mode="manual_confirmed",
-                created_by="tester",
-                amount_check={"matched": True},
-            )
-            self._install_service(app, invoices=[invoice], transactions=[bank], pair_service=pair_service)
-
-            rows_response = app.handle_request("GET", "/api/output-invoice-collections/rows")
-            row = json.loads(rows_response.body)["rows"][0]
-            filter_response = app.handle_request("GET", "/api/output-invoice-collections/filter-options?month=2026-05")
-            rules_response = app.handle_request("GET", "/api/output-invoice-collections/status-rules")
-            invoice_response = app.handle_request("GET", "/api/output-invoice-collections/invoices/out-detail/detail")
-            bank_response = app.handle_request("GET", "/api/output-invoice-collections/bank-transactions/bank-detail/detail")
-            relation_response = app.handle_request(
-                "GET",
-                f"/api/output-invoice-collections/rows/{row['id']}/relation-details?kind=bank",
-            )
-            preview_response = app.handle_request(
-                "POST",
-                "/api/output-invoice-collections/receipt-preview",
-                body=json.dumps({"rowId": row["id"]}),
-            )
-            history_response = app.handle_request(
-                "GET",
-                "/api/output-invoice-collections/receipts/history?invoice_id=out-detail",
-            )
-
-        self.assertEqual(filter_response.status_code, 200)
-        self.assertEqual(rules_response.status_code, 200)
-        self.assertEqual(invoice_response.status_code, 200)
-        self.assertEqual(bank_response.status_code, 200)
-        self.assertEqual(relation_response.status_code, 200)
-        self.assertEqual(preview_response.status_code, 200)
-        self.assertEqual(history_response.status_code, 200)
-        self.assertIn("collection_status", [field["field"] for field in json.loads(filter_response.body)["fields"]])
-        self.assertEqual(json.loads(rules_response.body)["rules"][0]["label"], "开票已收款，冲红并退款")
-        self.assertEqual(json.loads(invoice_response.body)["id"], "out-detail")
-        self.assertEqual(json.loads(bank_response.body)["id"], "bank-detail")
-        self.assertEqual(json.loads(relation_response.body)["kind"], "bank")
-        self.assertTrue(json.loads(preview_response.body)["canPreview"])
-        self.assertTrue(json.loads(history_response.body)["sourceAvailable"])
-        self.assertEqual(json.loads(history_response.body)["receipts"], [])
-
-    def test_invoice_relation_details_returns_all_related_output_invoices(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            invoices = [
-                self._invoice("out-relation-a", "3001", "多发票客户", total_with_tax="300.00"),
-                self._invoice("out-relation-b", "3002", "多发票客户", total_with_tax="100.00"),
-                self._invoice("out-relation-c", "3003", "多发票客户", total_with_tax="200.00"),
-            ]
-            pair_service = WorkbenchPairRelationService()
-            pair_service.create_active_relation(
-                case_id="case-output-invoices",
-                row_ids=[invoice.id for invoice in invoices],
-                row_types=["invoice", "invoice", "invoice"],
-                relation_mode="manual_confirmed",
-                created_by="tester",
-                amount_check={"matched": True},
-            )
-            self._install_service(app, invoices=invoices, pair_service=pair_service)
-
-            rows_response = app.handle_request("GET", "/api/output-invoice-collections/rows")
-            row = json.loads(rows_response.body)["rows"][0]
-            relation_response = app.handle_request(
-                "GET",
-                f"/api/output-invoice-collections/rows/{row['id']}/relation-details?kind=invoice",
-            )
-
-        payload = json.loads(relation_response.body)
-        self.assertEqual(relation_response.status_code, 200)
-        self.assertEqual(row["invoiceRelations"]["relationCount"], 3)
-        self.assertEqual(row["invoiceRelations"]["totalWithTax"], "600.00")
-        self.assertEqual(payload["kind"], "invoice")
-        self.assertEqual(payload["relationCount"], 3)
-        self.assertEqual(
-            {summary["invoiceId"] for summary in payload["summaries"]},
-            {"out-relation-a", "out-relation-b", "out-relation-c"},
-        )
-
-    def test_production_requires_canonical_query_repository(self) -> None:
-        app = object.__new__(Application)
-        app._bootstrap_mode = "production"
-        app._state_store = type("StateStore", (), {"storage_backend": "postgres"})()
-        app._output_invoice_collection_canonical_query_repository = None
-        app._output_invoice_collection_query_service = OutputInvoiceCollectionQueryService(
-            import_service=ImportNormalizationService(),
-            relation_facade=FakeOutputRelationFacade([]),
-        )
-
-        with self.assertRaisesRegex(RuntimeError, "canonical query repository"):
-            app._output_invoice_collection_page_query_service()
-
-    def test_relation_details_do_not_read_legacy_page_repository(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            invoices = [
-                self._invoice("out-direct-a", "3101", "直读客户"),
-                self._invoice("out-direct-b", "3102", "直读客户", total_with_tax="-100.00"),
-            ]
-            pair_service = WorkbenchPairRelationService()
-            pair_service.create_active_relation(
-                case_id="case-direct",
-                row_ids=[invoice.id for invoice in invoices],
-                row_types=["invoice", "invoice"],
-                relation_mode="manual_confirmed",
-                created_by="tester",
-                amount_check={"matched": True},
-            )
-            self._install_service(app, invoices=invoices, pair_service=pair_service)
-            app._output_invoice_collection_sql_read_repository = object()
-            row = json.loads(
-                app.handle_request("GET", "/api/output-invoice-collections/rows").body
-            )["rows"][0]
-            response = app.handle_request(
-                "GET",
-                f"/api/output-invoice-collections/rows/{row['id']}/relation-details?kind=invoice",
-            )
-
-        payload = json.loads(response.body)
-        self.assertEqual(response.status_code, int(HTTPStatus.OK))
-        self.assertNotIn("read_model_status", payload)
-        self.assertEqual(row["invoiceRelations"]["totalWithTax"], "0.00")
-        self.assertEqual(
-            {summary["invoiceId"] for summary in row["invoiceRelations"]["summaries"]},
-            {invoice.id for invoice in invoices},
-        )
-        self.assertEqual(payload["relationCount"], 2)
-        self.assertEqual({summary["invoiceId"] for summary in payload["summaries"]}, {invoice.id for invoice in invoices})
-
-    def test_detail_routes_require_output_collection_read_session(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            invoice = self._invoice("out-auth-detail", "2101", "权限客户")
-            bank = self._bank("bank-auth-detail", "100.00", TransactionDirection.INFLOW)
-            self._install_service(app, invoices=[invoice], transactions=[bank])
-            row = json.loads(app.handle_request("GET", "/api/output-invoice-collections/rows").body)["rows"][0]
-
-            def deny_read_session(headers: dict[str, str] | None = None) -> tuple[None, object]:
-                return None, app._json_response(
-                    HTTPStatus.UNAUTHORIZED,
-                    {"error": {"code": "oa_session_required", "message": "需要登录 OA。"}},
-                )
-
-            app._resolve_output_invoice_collection_read_session = deny_read_session
-            invoice_response = app.handle_request("GET", "/api/output-invoice-collections/invoices/out-auth-detail/detail")
-            bank_response = app.handle_request("GET", "/api/output-invoice-collections/bank-transactions/bank-auth-detail/detail")
-            relation_response = app.handle_request(
-                "GET",
-                f"/api/output-invoice-collections/rows/{row['id']}/relation-details?kind=bank",
-            )
-
-        self.assertEqual(invoice_response.status_code, 401)
-        self.assertEqual(bank_response.status_code, 401)
-        self.assertEqual(relation_response.status_code, 401)
-
-    def test_routes_return_structured_validation_and_not_found_errors(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            self._install_service(app, invoices=[])
-
-            invalid_page = app.handle_request("GET", "/api/output-invoice-collections/rows?page=0")
-            invalid_sort = app.handle_request("GET", "/api/output-invoice-collections/rows?sort_field=unknown")
-            invalid_filters = quote(json.dumps([{"field": "bad", "operator": "equals", "value": "x"}]))
-            invalid_filter = app.handle_request(
-                "GET",
-                f"/api/output-invoice-collections/rows?filters={invalid_filters}",
-            )
-            invalid_month = app.handle_request(
-                "GET",
-                "/api/output-invoice-collections/rows?month=2026-13",
-            )
-            reversed_dates = app.handle_request(
-                "GET",
-                "/api/output-invoice-collections/rows?invoice_date_from=2026-06-01&invoice_date_to=2026-05-01",
-            )
-            missing_detail = app.handle_request("GET", "/api/output-invoice-collections/invoices/missing/detail")
-
-        self.assertEqual(invalid_page.status_code, 400)
-        self.assertEqual(json.loads(invalid_page.body)["error"]["code"], "invalid_paging")
-        self.assertEqual(invalid_sort.status_code, 400)
-        self.assertEqual(json.loads(invalid_sort.body)["error"]["code"], "invalid_sort_field")
-        self.assertEqual(invalid_filter.status_code, 400)
-        self.assertEqual(json.loads(invalid_filter.body)["error"]["code"], "invalid_filter_field")
-        self.assertEqual(invalid_month.status_code, 400)
-        self.assertEqual(json.loads(invalid_month.body)["error"]["code"], "invalid_date_filter")
-        self.assertEqual(reversed_dates.status_code, 400)
-        self.assertEqual(json.loads(reversed_dates.body)["error"]["code"], "invalid_date_filter")
-        self.assertEqual(missing_detail.status_code, 404)
-        self.assertEqual(json.loads(missing_detail.body)["error"]["code"], "invoice_not_found")
-
-    def test_lifecycle_write_routes_overlay_rows_and_create_real_receipt_history(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            invoice = self._invoice("out-lifecycle", "3001", "生命周期客户", total_with_tax="100.00")
-            red_invoice = self._invoice("out-red", "3002", "生命周期客户", total_with_tax="-100.00")
-            bank = self._bank("bank-lifecycle", "100.00", TransactionDirection.INFLOW)
-            pair_service = WorkbenchPairRelationService()
-            pair_service.create_active_relation(
-                case_id="case-lifecycle",
-                row_ids=[invoice.id, bank.id],
-                row_types=["invoice", "bank"],
-                relation_mode="manual_confirmed",
-                created_by="tester",
-                amount_check={"matched": True},
-            )
-            self._install_service(app, invoices=[invoice, red_invoice], transactions=[bank], pair_service=pair_service)
-            rows = json.loads(app.handle_request("GET", "/api/output-invoice-collections/rows").body)["rows"]
-            row = next(item for item in rows if item["invoiceId"] == "out-lifecycle")
-
-            status_response = app.handle_request(
-                "PUT",
-                f"/api/output-invoice-collections/rows/{row['id']}/collection-status",
-                body=json.dumps(
-                    {
-                        "statusCode": "pending_red_invoice",
-                        "expectedCollectionDate": "2026-06-20",
-                        "note": "待冲红",
-                        "expectedVersion": 0,
-                    }
-                ),
-            )
-            reminder_response = app.handle_request(
-                "PUT",
-                f"/api/output-invoice-collections/rows/{row['id']}/collection-reminder",
-                body=json.dumps({"remindAt": "2026-06-15T09:00:00+08:00", "channel": "oa", "note": "提醒"}),
-            )
-            reminder_id = json.loads(reminder_response.body)["reminder"]["id"]
-            red_relation_response = app.handle_request(
-                "POST",
-                f"/api/output-invoice-collections/rows/{row['id']}/red-invoice-relations",
-                body=json.dumps(
-                    {
-                        "relatedInvoiceIdentityKey": "id:out-red",
-                        "relatedInvoiceId": "out-red",
-                        "relationType": "red_invoice",
-                        "evidence": "客户邮件确认",
-                    }
-                ),
-            )
-            relation_id = json.loads(red_relation_response.body)["relation"]["id"]
-            receipt_response = app.handle_request(
-                "POST",
-                f"/api/output-invoice-collections/rows/{row['id']}/receipts",
-                body=json.dumps({"bankTransactionId": "bank-lifecycle", "idempotencyKey": "receipt-api-1"}),
-            )
-            receipt_id = json.loads(receipt_response.body)["receipt"]["id"]
-            reminder_delete_response = app.handle_request(
-                "DELETE",
-                f"/api/output-invoice-collections/rows/{row['id']}/collection-reminder/{reminder_id}",
-            )
-            red_relation_delete_response = app.handle_request(
-                "DELETE",
-                f"/api/output-invoice-collections/red-invoice-relations/{relation_id}",
-            )
-            void_response = app.handle_request(
-                "POST",
-                f"/api/output-invoice-collections/receipts/{receipt_id}/void",
-                body=json.dumps({"reason": "API 作废"}),
-            )
-            reissue_response = app.handle_request(
-                "POST",
-                f"/api/output-invoice-collections/receipts/{receipt_id}/reissue",
-                body=json.dumps({"reason": "API 重开"}),
-            )
-            duplicate_reissue_response = app.handle_request(
-                "POST",
-                f"/api/output-invoice-collections/receipts/{receipt_id}/reissue",
-                body=json.dumps({"reason": "API 重复重开"}),
-            )
-            missing_void_response = app.handle_request(
-                "POST",
-                "/api/output-invoice-collections/receipts/not-found/void",
-                body=json.dumps({"reason": "missing"}),
-            )
-            history_response = app.handle_request(
-                "GET",
-                "/api/output-invoice-collections/receipts/history?invoice_id=out-lifecycle",
-            )
-            refreshed_row = json.loads(app.handle_request("GET", "/api/output-invoice-collections/rows").body)["rows"][0]
-
-        status_payload = json.loads(status_response.body)
-        reminder_payload = json.loads(reminder_response.body)
-        red_relation_payload = json.loads(red_relation_response.body)
-        receipt_payload = json.loads(receipt_response.body)
-        reminder_delete_payload = json.loads(reminder_delete_response.body)
-        void_payload = json.loads(void_response.body)
-        reissue_payload = json.loads(reissue_response.body)
-        red_relation_delete_payload = json.loads(red_relation_delete_response.body)
-        self.assertEqual(status_response.status_code, 200)
-        self.assertEqual(reminder_response.status_code, 200)
-        self.assertEqual(red_relation_response.status_code, 200)
-        self.assertEqual(receipt_response.status_code, 200)
-        self.assertEqual(reminder_delete_response.status_code, 200)
-        self.assertEqual(red_relation_delete_response.status_code, 200)
-        self.assertEqual(void_response.status_code, 200)
-        self.assertEqual(reissue_response.status_code, 200)
-        self.assertEqual(duplicate_reissue_response.status_code, 409)
-        self.assertEqual(missing_void_response.status_code, 404)
-        self.assertEqual(set(status_payload), {"override"})
-        self.assertEqual(set(reminder_payload), {"reminder"})
-        self.assertEqual(set(red_relation_payload), {"relation"})
-        self.assertEqual(set(receipt_payload), {"receipt"})
-        self.assertEqual(set(reminder_delete_payload), {"reminder"})
-        self.assertEqual(set(red_relation_delete_payload), {"relation"})
-        self.assertEqual(set(void_payload), {"receipt"})
-        self.assertEqual(set(reissue_payload), {"receipt"})
-        self.assertEqual(refreshed_row["collectionStatus"]["code"], "pending_red_invoice")
-        self.assertIsNone(refreshed_row["collectionStatus"]["reminder"])
-        self.assertFalse(any(item["source"] == "manual" for item in refreshed_row["redInvoiceRelation"]["summaries"]))
-        self.assertEqual(refreshed_row["receipt"]["status"], "issued")
-        self.assertTrue(json.loads(history_response.body)["sourceAvailable"])
-        self.assertEqual([item["status"] for item in json.loads(history_response.body)["receipts"]], ["issued", "voided"])
-
-    def test_write_then_direct_get_applies_lifecycle_overlay(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            invoice = self._invoice("out-sql-overlay", "4001", "SQL 覆盖客户", total_with_tax="100.00")
-            red_invoice = self._invoice("out-sql-red", "4002", "SQL 覆盖客户", total_with_tax="-100.00")
-            self._install_service(app, invoices=[invoice, red_invoice])
-            live_rows = json.loads(app.handle_request("GET", "/api/output-invoice-collections/rows").body)["rows"]
-            row = next(item for item in live_rows if item["invoiceId"] == "out-sql-overlay")
-
-            status_response = app.handle_request(
-                "PUT",
-                f"/api/output-invoice-collections/rows/{row['id']}/collection-status",
-                body=json.dumps(
-                    {
-                        "statusCode": "pending_red_invoice",
-                        "expectedCollectionDate": "2026-06-20",
-                        "note": "SQL fresh 路径也必须展示人工状态",
-                        "expectedVersion": 0,
-                    }
-                ),
-            )
-            relation_response = app.handle_request(
-                "POST",
-                f"/api/output-invoice-collections/rows/{row['id']}/red-invoice-relations",
-                body=json.dumps(
-                    {
-                        "relatedInvoiceIdentityKey": "id:out-sql-red",
-                        "relatedInvoiceId": "out-sql-red",
-                        "relationType": "red_invoice",
-                        "evidence": "SQL overlay 验证",
-                    }
-                ),
-            )
-            response = app.handle_request("GET", "/api/output-invoice-collections/rows?month=2026-05")
-
-        payload = json.loads(response.body)
-        self.assertEqual(status_response.status_code, 200)
-        self.assertEqual(relation_response.status_code, 200)
-        self.assertEqual(response.status_code, 200)
-        self.assertNotIn("readModelStatus", payload)
-        self.assertEqual(payload["rows"][0]["collectionStatus"]["manualOverride"]["note"], "SQL fresh 路径也必须展示人工状态")
-        red_relation_summaries = payload["rows"][0]["redInvoiceRelation"]["summaries"]
-        self.assertTrue(
-            any(
-                item.get("source") == "manual" and item.get("relatedInvoiceId") == "out-sql-red"
-                for item in red_relation_summaries
-            )
-        )
-
-    @staticmethod
-    def _install_service(
-        app: object,
-        *,
-        invoices: list[Invoice],
-        transactions: list[BankTransaction] | None = None,
-        pair_service: WorkbenchPairRelationService | None = None,
-    ) -> None:
-        import_service = ImportNormalizationService(
-            existing_invoices=invoices,
-            existing_transactions=transactions or [],
-        )
-        relation_service = pair_service or WorkbenchPairRelationService()
-        app._import_service = import_service
-        app._workbench_pair_relation_service = relation_service
-        app._output_invoice_collection_query_service = OutputInvoiceCollectionQueryService(
-            import_service=import_service,
-            relation_facade=FakeOutputRelationFacade(relation_service.list_active_relations()),
-            lifecycle_repository=getattr(app, "_output_invoice_collection_lifecycle_repository", None),
-        )
-        app._output_invoice_collection_page_query_service_instance = None
-
-    @staticmethod
-    def _invoice(invoice_id: str, invoice_no: str, buyer_name: str, *, total_with_tax: str = "100.00") -> Invoice:
-        counterparty = Counterparty(
-            id=f"cp-{invoice_id}",
-            name=buyer_name,
-            normalized_name=buyer_name,
-            counterparty_type="customer",
-            tax_no="91530000BUYER",
-        )
-        return Invoice(
-            id=invoice_id,
-            invoice_type=InvoiceType.OUTPUT,
-            invoice_no=invoice_no,
-            counterparty=counterparty,
-            amount=Decimal(total_with_tax),
-            signed_amount=Decimal(total_with_tax),
-            invoice_date="2026-05-20",
-            seller_name="云南溯源科技有限公司",
-            buyer_name=buyer_name,
-            seller_tax_no="91530000SELLER",
-            buyer_tax_no="91530000BUYER",
-            tax_rate="6%",
-            tax_amount=Decimal("0.00"),
-            total_with_tax=Decimal(total_with_tax),
-            taxable_item_name="服务费",
-            is_positive_invoice="是",
-        )
-
-    @staticmethod
-    def _bank(transaction_id: str, amount: str, direction: TransactionDirection) -> BankTransaction:
-        return BankTransaction(
-            id=transaction_id,
-            account_no="622200001234",
-            txn_direction=direction,
-            counterparty_name_raw="详情客户",
-            amount=Decimal(amount),
-            signed_amount=Decimal(amount) if direction == TransactionDirection.INFLOW else -Decimal(amount),
-            txn_date="2026-05-21",
-            trade_time="2026-05-21 10:00:00",
-            imported_bank_name="中国银行",
-            imported_bank_last4="1234",
-            summary="服务费",
-        )
+if __name__ == "__main__":
+    unittest.main()

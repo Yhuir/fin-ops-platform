@@ -2,36 +2,15 @@ import { useEffect, useState } from "react";
 
 import AppDrawer from "../common/AppDrawer";
 import StatePanel from "../common/StatePanel";
-
-export type OutputInvoiceCollectionDetailTarget = {
-  kind: "invoice" | "bank" | "relationList";
-  id: string;
-  rowId?: string;
-  relationKind?: "oa" | "bank" | "invoice" | "red_invoice" | "receipt";
-};
-
-export type OutputInvoiceCollectionDetailField = {
-  label: string;
-  value: string | number | null | undefined;
-};
-
-export type OutputInvoiceCollectionDetailSection = {
-  title: string;
-  fields: OutputInvoiceCollectionDetailField[];
-};
-
-export type OutputInvoiceCollectionDetailPayload = {
-  title?: string;
-  subtitle?: string;
-  detailAvailable?: boolean;
-  unavailableReason?: string;
-  sections: OutputInvoiceCollectionDetailSection[];
-};
+import type {
+  OutputInvoiceCollectionDetailResponse,
+  OutputInvoiceCollectionDetailTarget,
+} from "../../features/outputInvoiceCollections/types";
 
 type OutputInvoiceCollectionDetailDrawerProps = {
   open: boolean;
   target: OutputInvoiceCollectionDetailTarget | null;
-  loadDetail: (target: OutputInvoiceCollectionDetailTarget) => Promise<OutputInvoiceCollectionDetailPayload>;
+  loadDetail: (target: OutputInvoiceCollectionDetailTarget) => Promise<OutputInvoiceCollectionDetailResponse>;
   onClose: () => void;
 };
 
@@ -41,7 +20,7 @@ export default function OutputInvoiceCollectionDetailDrawer({
   loadDetail,
   onClose,
 }: OutputInvoiceCollectionDetailDrawerProps) {
-  const [detail, setDetail] = useState<OutputInvoiceCollectionDetailPayload | null>(null);
+  const [detail, setDetail] = useState<OutputInvoiceCollectionDetailResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -128,13 +107,10 @@ function drawerTitle(target: OutputInvoiceCollectionDetailTarget | null) {
   if (target?.kind === "bank" || target?.relationKind === "bank") {
     return "流水详情";
   }
-  if (target?.relationKind === "oa") {
-    return "OA详情";
-  }
   return "销项发票详情";
 }
 
-function visibleSections(sections: OutputInvoiceCollectionDetailSection[]) {
+function visibleSections(sections: OutputInvoiceCollectionDetailResponse["sections"]) {
   return sections
     .map((section) => ({
       ...section,
@@ -143,7 +119,7 @@ function visibleSections(sections: OutputInvoiceCollectionDetailSection[]) {
     .filter((section) => section.fields.length > 0);
 }
 
-function isVisibleField(field: OutputInvoiceCollectionDetailField) {
+function isVisibleField(field: OutputInvoiceCollectionDetailResponse["sections"][number]["fields"][number]) {
   const label = field.label.trim();
   if (!label || /[A-Za-z_]/.test(label)) {
     return false;

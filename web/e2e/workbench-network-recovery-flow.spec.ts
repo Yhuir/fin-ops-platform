@@ -39,9 +39,8 @@ async function selectAllOpenRows(page: Page) {
 async function openConfirmRelationPreview(page: Page) {
   const { openZone, openGroup } = await selectAllOpenRows(page);
   await openZone.getByRole("button", { name: "确认关联" }).click();
-  const previewDialog = page.getByRole("dialog", { name: "关联预览" });
+  const previewDialog = page.getByRole("dialog", { name: "确认关联" });
   await expect(previewDialog).toBeVisible();
-  await expect(previewDialog.getByText("确认关联预览")).toBeVisible();
   await expect(previewDialog.getByTestId("relation-preview-before").getByText("智能工厂设备商").first()).toBeVisible();
   await expect(previewDialog.getByTestId("relation-preview-after").getByText("完全关联").first()).toBeVisible();
   return { openZone, openGroup, previewDialog };
@@ -59,9 +58,8 @@ async function openWithdrawRelationPreview(page: Page) {
   await expect(pairedZone.getByText("已选 3")).toBeVisible();
 
   await pairedZone.getByRole("button", { name: "撤回关联" }).click();
-  const previewDialog = page.getByRole("dialog", { name: "关联预览" });
+  const previewDialog = page.getByRole("dialog", { name: "撤回关联" });
   await expect(previewDialog).toBeVisible();
-  await expect(previewDialog.getByText("撤回关联预览")).toBeVisible();
   await expect(previewDialog.getByTestId("relation-preview-before").getByText("完全关联").first()).toBeVisible();
   return { pairedGroup, pairedZone, previewDialog };
 }
@@ -87,7 +85,7 @@ test.describe("workbench network recovery and duplicate submit browser flow", ()
     const workbenchLoadsBeforeRetry = api.count("GET /api/workbench");
     await previewDialog.getByRole("button", { name: "重试" }).click();
 
-    await expect(page.getByRole("dialog", { name: "关联预览" })).toHaveCount(0);
+    await expect(previewDialog).toHaveCount(0);
     await expect(page.getByTestId("candidate-group-paired-case:CASE-202603-101")).toBeVisible();
     await expect(page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001")).toHaveCount(0);
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(2);
@@ -134,7 +132,7 @@ test.describe("workbench network recovery and duplicate submit browser flow", ()
     await expect(previewDialog).toHaveAttribute("aria-busy", "true");
     await expect(submitButton).toBeDisabled();
     await expect(previewDialog.getByRole("button", { name: "取消" })).toBeDisabled();
-    await expect(page.getByRole("dialog", { name: "关联预览" })).toHaveCount(0);
+    await expect(previewDialog).toHaveCount(0);
     await expect(page.getByTestId("candidate-group-paired-case:CASE-202603-101")).toBeVisible();
     const submitBody = api.lastBody("POST /api/workbench/actions/confirm-link");
     expect(submitBody.row_ids).toEqual(expect.arrayContaining(workbenchRowIds));
@@ -159,7 +157,7 @@ test.describe("workbench network recovery and duplicate submit browser flow", ()
     await expect(previewDialog).toHaveAttribute("aria-busy", "true");
     await expect(submitButton).toBeDisabled();
     await expect(pairedGroup).toBeVisible();
-    await expect(page.getByRole("dialog", { name: "关联预览" })).toHaveCount(0);
+    await expect(previewDialog).toHaveCount(0);
     await expect(page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001")).toBeVisible();
     await expect(page.getByTestId("candidate-group-unpaired-row:bk-o-202603-001")).toBeVisible();
     await expect(page.getByTestId("candidate-group-unpaired-row:iv-o-202603-001")).toBeVisible();

@@ -212,20 +212,20 @@
       "page_key": "output-invoice-collections",
       "route": "/output-invoice-collections",
       "read_model_keys": [],
-      "freshness_probe_names": ["output_invoice_collections_rows", "output_invoice_collections_filter_options", "output_invoice_collections_status_rules"],
-      "fact_sources": ["app.invoices", "app.output_invoice_receipts", "app.bank_transactions"],
+      "freshness_probe_names": ["output_invoice_collections_rows", "output_invoice_collections_filter_options"],
+      "fact_sources": ["app.invoices", "app.bank_transactions"],
       "pairing_relation_fact_sources": ["app.workbench_pair_relations"],
       "deterministic_evidence": [
         {
           "path": "web/e2e/output-invoice-collections-flow.spec.ts",
-          "required_markers": ["XSFP-E2E-0001", "待收款，已收部分款", "recovers rows after a transient load failure"]
+          "required_markers": ["XSFP-E2E-0001", "已被红冲", "短暂读取失败后刷新可恢复且不会伪装为空数据"]
         },
         {
           "path": "web/e2e/output-invoice-red-relation-fanout.spec.ts",
-          "required_markers": ["红蓝票关系", "XSFP-E2E-0002", "浏览器 e2e 红蓝票关系确认"]
+          "required_markers": ["销项发票自动红蓝票关系", "XSFP-E2E-0002", "output_invoice_reversal"]
         }
       ],
-      "production_readonly_gates": ["http_slo_probe:output_invoice_collections_rows", "http_slo_probe:output_invoice_collections_filter_options", "http_slo_probe:output_invoice_collections_status_rules"]
+      "production_readonly_gates": ["http_slo_probe:output_invoice_collections_rows", "http_slo_probe:output_invoice_collections_filter_options"]
     },
     {
       "module": "settings",

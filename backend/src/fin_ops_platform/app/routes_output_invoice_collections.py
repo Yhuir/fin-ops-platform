@@ -4,40 +4,37 @@ from http import HTTPStatus
 from typing import Any, Callable
 from urllib.parse import unquote
 
-from fin_ops_platform.app.auth import OARequestSession, actor_id_for_session, tenant_id_for_session
-from fin_ops_platform.services.output_invoice_collection_lifecycle_service import OutputInvoiceCollectionLifecycleService
-from fin_ops_platform.services.output_invoice_collection_receipt_service import OutputInvoiceCollectionReceiptService
-from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionError
+from fin_ops_platform.app.auth import OARequestSession, tenant_id_for_session
+from fin_ops_platform.services.output_invoice_collection_service import (
+    OutputInvoiceCollectionError,
+)
 
 
-ReadSessionResolver = Callable[[dict[str, str] | None], tuple[OARequestSession | None, Any | None]]
+ReadSessionResolver = Callable[
+    [dict[str, str] | None], tuple[OARequestSession | None, Any | None]
+]
 JsonResponse = Callable[[HTTPStatus, object], Any]
 XlsxResponse = Callable[[str, bytes], Any]
 ErrorResponse = Callable[[OutputInvoiceCollectionError], Any]
-JsonBodyLoader = Callable[[str | bytes | None], tuple[dict[str, Any], Any | None]]
 
 
 class OutputInvoiceCollectionApiRoutes:
+    """Read-only HTTP boundary for canonical output-invoice collection data."""
+
     def __init__(
         self,
         *,
         query_service: Any,
-        lifecycle_service: OutputInvoiceCollectionLifecycleService,
-        receipt_service: OutputInvoiceCollectionReceiptService,
         resolve_read_session: ReadSessionResolver | None = None,
         json_response: JsonResponse | None = None,
         xlsx_response: XlsxResponse | None = None,
         error_response: ErrorResponse | None = None,
-        load_json_body: JsonBodyLoader | None = None,
     ) -> None:
         self._query_service = query_service
-        self._lifecycle_service = lifecycle_service
-        self._receipt_service = receipt_service
         self._resolve_read_session = resolve_read_session
         self._json_response = json_response
         self._xlsx_response = xlsx_response
         self._error_response = error_response
-        self._load_json_body = load_json_body
 
     def route(
         self,
@@ -47,12 +44,25 @@ class OutputInvoiceCollectionApiRoutes:
         body: str | bytes | None,
         headers: dict[str, str] | None,
     ) -> Any | None:
+        del body
         if method == "GET" and route_path == "/api/output-invoice-collections/rows":
-            return self._json_read(headers, lambda session: self.rows(query, session=session))
-        if method == "GET" and route_path == "/api/output-invoice-collections/filter-options":
-            return self._json_read(headers, lambda session: self.filter_options(query, session=session))
-        if method == "GET" and route_path == "/api/output-invoice-collections/export-preview":
-            return self._json_read(headers, lambda session: self.export_preview(query, session=session))
+            return self._json_read(
+                headers, lambda session: self.rows(query, session=session)
+            )
+        if (
+            method == "GET"
+            and route_path == "/api/output-invoice-collections/filter-options"
+        ):
+            return self._json_read(
+                headers, lambda session: self.filter_options(query, session=session)
+            )
+        if (
+            method == "GET"
+            and route_path == "/api/output-invoice-collections/export-preview"
+        ):
+            return self._json_read(
+                headers, lambda session: self.export_preview(query, session=session)
+            )
         if method == "GET" and route_path == "/api/output-invoice-collections/export":
             session, auth_error = self._read_session(headers)
             if auth_error is not None:
@@ -62,163 +72,107 @@ class OutputInvoiceCollectionApiRoutes:
             except OutputInvoiceCollectionError as exc:
                 return self._error(exc)
             return self._xlsx(filename, content)
-        if method == "GET" and route_path == "/api/output-invoice-collections/status-rules":
-            return self._json_read(headers, lambda session: (HTTPStatus.OK, self.status_rules(session=session)))
-        if method == "GET" and route_path == "/api/output-invoice-collections/receipts/history":
-            return self._json_read(headers, lambda session: (HTTPStatus.OK, self.receipt_history(query, session=session)))
-        if method == "GET" and route_path.startswith("/api/output-invoice-collections/invoices/") and route_path.endswith("/detail"):
+        if (
+            method == "GET"
+            and route_path.startswith("/api/output-invoice-collections/invoices/")
+            and route_path.endswith("/detail")
+        ):
             invoice_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._json_read(headers, lambda session: (HTTPStatus.OK, self.invoice_detail(invoice_id, session=session)))
-        if method == "GET" and route_path.startswith("/api/output-invoice-collections/bank-transactions/") and route_path.endswith("/detail"):
+            return self._json_read(
+                headers,
+                lambda session: (
+                    HTTPStatus.OK,
+                    self.invoice_detail(invoice_id, session=session),
+                ),
+            )
+        if (
+            method == "GET"
+            and route_path.startswith(
+                "/api/output-invoice-collections/bank-transactions/"
+            )
+            and route_path.endswith("/detail")
+        ):
             bank_transaction_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._json_read(headers, lambda session: (HTTPStatus.OK, self.bank_transaction_detail(bank_transaction_id, session=session)))
-        if method == "GET" and route_path.startswith("/api/output-invoice-collections/rows/") and route_path.endswith("/relation-details"):
+            return self._json_read(
+                headers,
+                lambda session: (
+                    HTTPStatus.OK,
+                    self.bank_transaction_detail(
+                        bank_transaction_id, session=session
+                    ),
+                ),
+            )
+        if (
+            method == "GET"
+            and route_path.startswith("/api/output-invoice-collections/rows/")
+            and route_path.endswith("/relation-details")
+        ):
             row_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._relation_details_response(headers, row_id, query)
-        if method == "POST" and route_path == "/api/output-invoice-collections/receipt-preview":
-            return self._json_body_read(body, headers, lambda payload, session: self.receipt_preview(payload, session=session))
-        if route_path == "/api/output-invoice-collections/receipt-settings":
-            if method == "GET":
-                return self._json_read(headers, lambda session: (HTTPStatus.OK, self.get_receipt_settings(session=session)))
-            if method == "PUT":
-                return self._json_body_mutation(body, headers, lambda payload, session: self.update_receipt_settings(payload, session=session))
-        if method == "POST" and route_path.startswith("/api/output-invoice-collections/receipts/") and route_path.endswith("/void"):
-            receipt_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._json_body_mutation(
-                body,
+            return self._json_read(
                 headers,
-                lambda payload, session: self.void_receipt(
-                    receipt_id,
-                    payload,
-                    session=session,
-                    trace_id=_trace_id(headers),
-                ),
-            )
-        if method == "POST" and route_path.startswith("/api/output-invoice-collections/receipts/") and route_path.endswith("/reissue"):
-            receipt_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._json_body_mutation(
-                body,
-                headers,
-                lambda payload, session: self.reissue_receipt(
-                    receipt_id,
-                    payload,
-                    session=session,
-                    trace_id=_trace_id(headers),
-                ),
-            )
-        if method == "DELETE" and route_path.startswith("/api/output-invoice-collections/red-invoice-relations/"):
-            relation_id = unquote(route_path.rsplit("/", 1)[-1])
-            return self._json_session(
-                headers,
-                lambda session: self.revoke_red_invoice_relation(
-                    relation_id,
-                    session=session,
-                    trace_id=_trace_id(headers),
-                ),
-            )
-        if method == "PUT" and route_path.startswith("/api/output-invoice-collections/rows/") and route_path.endswith("/collection-status"):
-            row_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._json_body_mutation(
-                body,
-                headers,
-                lambda payload, session: self.set_collection_status(
-                    row_id,
-                    payload,
-                    session=session,
-                    trace_id=_trace_id(headers),
-                ),
-            )
-        if method == "PUT" and route_path.startswith("/api/output-invoice-collections/rows/") and route_path.endswith("/collection-reminder"):
-            row_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._json_body_mutation(
-                body,
-                headers,
-                lambda payload, session: self.upsert_collection_reminder(
-                    row_id,
-                    payload,
-                    session=session,
-                    trace_id=_trace_id(headers),
-                ),
-            )
-        if method == "DELETE" and route_path.startswith("/api/output-invoice-collections/rows/") and "/collection-reminder/" in route_path:
-            prefix = "/api/output-invoice-collections/rows/"
-            remainder = route_path[len(prefix):]
-            row_part, reminder_part = remainder.split("/collection-reminder/", 1)
-            return self._json_session(
-                headers,
-                lambda session: self.cancel_collection_reminder(
-                    unquote(row_part.strip("/")),
-                    unquote(reminder_part.strip("/")),
-                    session=session,
-                    trace_id=_trace_id(headers),
-                ),
-            )
-        if method == "POST" and route_path.startswith("/api/output-invoice-collections/rows/") and route_path.endswith("/red-invoice-relations"):
-            row_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._json_body_mutation(
-                body,
-                headers,
-                lambda payload, session: self.confirm_red_invoice_relation(
-                    row_id,
-                    payload,
-                    session=session,
-                    trace_id=_trace_id(headers),
-                ),
-            )
-        if method == "POST" and route_path.startswith("/api/output-invoice-collections/rows/") and route_path.endswith("/receipts"):
-            row_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._json_body_mutation(
-                body,
-                headers,
-                lambda payload, session: self.create_receipt(
-                    row_id,
-                    payload,
-                    session=session,
-                    idempotency_key=_idempotency_key(headers),
-                    trace_id=_trace_id(headers),
+                lambda session: (
+                    HTTPStatus.OK,
+                    self.relation_details(row_id, query, session=session),
                 ),
             )
         return None
 
-    def rows(self, query: dict[str, list[str]], *, session: OARequestSession | None = None) -> tuple[HTTPStatus, dict[str, Any]]:
-        tenant_id = _tenant_id(session)
-        return HTTPStatus.OK, self._query_service.rows(query, tenant_id=tenant_id)
+    def rows(
+        self,
+        query: dict[str, list[str]],
+        *,
+        session: OARequestSession | None = None,
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        return HTTPStatus.OK, self._query_service.rows(
+            query, tenant_id=_tenant_id(session)
+        )
 
-    def filter_options(self, query: dict[str, list[str]], *, session: OARequestSession | None = None) -> tuple[HTTPStatus, dict[str, Any]]:
-        tenant_id = _tenant_id(session)
+    def filter_options(
+        self,
+        query: dict[str, list[str]],
+        *,
+        session: OARequestSession | None = None,
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
         return HTTPStatus.OK, self._query_service.filter_options(
-            query,
-            tenant_id=tenant_id,
+            query, tenant_id=_tenant_id(session)
         )
 
-    def export_preview(self, query: dict[str, list[str]], *, session: OARequestSession | None = None) -> tuple[HTTPStatus, dict[str, Any]]:
-        tenant_id = _tenant_id(session)
+    def export_preview(
+        self,
+        query: dict[str, list[str]],
+        *,
+        session: OARequestSession | None = None,
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
         return HTTPStatus.OK, self._query_service.export_preview(
-            query,
-            tenant_id=tenant_id,
+            query, tenant_id=_tenant_id(session)
         )
 
-    def export(self, query: dict[str, list[str]], *, session: OARequestSession | None = None) -> tuple[str, bytes]:
+    def export(
+        self,
+        query: dict[str, list[str]],
+        *,
+        session: OARequestSession | None = None,
+    ) -> tuple[str, bytes]:
         return self._query_service.export(query, tenant_id=_tenant_id(session))
 
-    def status_rules(self, *, session: OARequestSession | None = None) -> dict[str, Any]:
-        payload = self._query_service.status_rules()
-        payload["permissions"] = {
-            "can_save": bool(getattr(session, "can_mutate_data", True)),
-            "can_admin": bool(getattr(session, "can_admin_access", False)),
-        }
-        return payload
-
-    def invoice_detail(self, invoice_id: str, *, session: OARequestSession | None = None) -> dict[str, Any]:
+    def invoice_detail(
+        self,
+        invoice_id: str,
+        *,
+        session: OARequestSession | None = None,
+    ) -> dict[str, Any]:
         return self._query_service.invoice_detail(
-            invoice_id,
-            tenant_id=_tenant_id(session),
+            invoice_id, tenant_id=_tenant_id(session)
         )
 
-    def bank_transaction_detail(self, bank_transaction_id: str, *, session: OARequestSession | None = None) -> dict[str, Any]:
+    def bank_transaction_detail(
+        self,
+        bank_transaction_id: str,
+        *,
+        session: OARequestSession | None = None,
+    ) -> dict[str, Any]:
         return self._query_service.bank_transaction_detail(
-            bank_transaction_id,
-            tenant_id=_tenant_id(session),
+            bank_transaction_id, tenant_id=_tenant_id(session)
         )
 
     def relation_details(
@@ -229,192 +183,15 @@ class OutputInvoiceCollectionApiRoutes:
         session: OARequestSession | None = None,
     ) -> dict[str, Any]:
         return self._query_service.relation_details(
-            row_id,
-            query,
-            tenant_id=_tenant_id(session),
+            row_id, query, tenant_id=_tenant_id(session)
         )
-
-    def receipt_preview(self, payload: dict[str, Any], *, session: OARequestSession | None = None) -> dict[str, Any]:
-        row_id = str(payload.get("rowId") or payload.get("row_id") or "").strip()
-        if row_id:
-            return self._receipt_service.preview(
-                row_id,
-                payload,
-                tenant_id=_tenant_id(session),
-            )
-        return self._query_service.receipt_preview(payload, tenant_id=_tenant_id(session))
-
-    def receipt_history(self, query: dict[str, list[str]], *, session: OARequestSession | None = None) -> dict[str, Any]:
-        return self._query_service.receipt_history(invoice_id=query.get("invoice_id", [""])[0], tenant_id=_tenant_id(session))
-
-    def set_collection_status(
-        self,
-        row_id: str,
-        payload: dict[str, Any],
-        *,
-        session: OARequestSession | None,
-        trace_id: str | None = None,
-    ) -> dict[str, Any]:
-        self._require_mutation(session, "当前账户没有设置销项发票收款状态权限。")
-        return self._lifecycle_service.set_collection_status(
-            row_id,
-            payload,
-            actor_id=_actor_id(session),
-            tenant_id=_tenant_id(session),
-            trace_id=trace_id,
-        )
-
-    def upsert_collection_reminder(
-        self,
-        row_id: str,
-        payload: dict[str, Any],
-        *,
-        session: OARequestSession | None,
-        trace_id: str | None = None,
-    ) -> dict[str, Any]:
-        self._require_mutation(session, "当前账户没有设置销项发票收款提醒权限。")
-        return self._lifecycle_service.upsert_collection_reminder(
-            row_id,
-            payload,
-            actor_id=_actor_id(session),
-            tenant_id=_tenant_id(session),
-            trace_id=trace_id,
-        )
-
-    def cancel_collection_reminder(
-        self,
-        row_id: str,
-        reminder_id: str,
-        *,
-        session: OARequestSession | None,
-        trace_id: str | None = None,
-    ) -> dict[str, Any]:
-        self._require_mutation(session, "当前账户没有取消销项发票收款提醒权限。")
-        return self._lifecycle_service.cancel_collection_reminder(
-            row_id,
-            reminder_id,
-            actor_id=_actor_id(session),
-            tenant_id=_tenant_id(session),
-            trace_id=trace_id,
-        )
-
-    def confirm_red_invoice_relation(
-        self,
-        row_id: str,
-        payload: dict[str, Any],
-        *,
-        session: OARequestSession | None,
-        trace_id: str | None = None,
-    ) -> dict[str, Any]:
-        self._require_mutation(session, "当前账户没有确认红蓝票关系权限。")
-        return self._lifecycle_service.confirm_red_invoice_relation(
-            row_id,
-            payload,
-            actor_id=_actor_id(session),
-            tenant_id=_tenant_id(session),
-            trace_id=trace_id,
-        )
-
-    def revoke_red_invoice_relation(
-        self,
-        relation_id: str,
-        *,
-        session: OARequestSession | None,
-        trace_id: str | None = None,
-    ) -> dict[str, Any]:
-        self._require_mutation(session, "当前账户没有撤销红蓝票关系权限。")
-        return self._lifecycle_service.revoke_red_invoice_relation(
-            relation_id,
-            actor_id=_actor_id(session),
-            tenant_id=_tenant_id(session),
-            trace_id=trace_id,
-        )
-
-    def create_receipt(
-        self,
-        row_id: str,
-        payload: dict[str, Any],
-        *,
-        session: OARequestSession | None,
-        idempotency_key: str | None = None,
-        trace_id: str | None = None,
-    ) -> dict[str, Any]:
-        self._require_mutation(session, "当前账户没有创建正式收据权限。")
-        body = dict(payload or {})
-        if idempotency_key and not body.get("idempotencyKey"):
-            body["idempotencyKey"] = idempotency_key
-        return self._receipt_service.create_receipt(
-            row_id,
-            body,
-            actor_id=_actor_id(session),
-            tenant_id=_tenant_id(session),
-            trace_id=trace_id,
-        )
-
-    def void_receipt(
-        self,
-        receipt_id: str,
-        payload: dict[str, Any],
-        *,
-        session: OARequestSession | None,
-        trace_id: str | None = None,
-    ) -> dict[str, Any]:
-        self._require_mutation(session, "当前账户没有作废正式收据权限。")
-        return self._receipt_service.void_receipt(
-            receipt_id,
-            payload,
-            actor_id=_actor_id(session),
-            tenant_id=_tenant_id(session),
-            trace_id=trace_id,
-        )
-
-    def reissue_receipt(
-        self,
-        receipt_id: str,
-        payload: dict[str, Any],
-        *,
-        session: OARequestSession | None,
-        trace_id: str | None = None,
-    ) -> dict[str, Any]:
-        self._require_mutation(session, "当前账户没有重开正式收据权限。")
-        return self._receipt_service.reissue_receipt(
-            receipt_id,
-            payload,
-            actor_id=_actor_id(session),
-            tenant_id=_tenant_id(session),
-            trace_id=trace_id,
-        )
-
-    def get_receipt_settings(self, *, session: OARequestSession | None) -> dict[str, Any]:
-        self._require_admin(session)
-        return self._receipt_service.get_settings(tenant_id=_tenant_id(session))
-
-    def update_receipt_settings(self, payload: dict[str, Any], *, session: OARequestSession | None) -> dict[str, Any]:
-        self._require_admin(session)
-        return self._receipt_service.update_settings(
-            payload,
-            actor_id=_actor_id(session),
-            tenant_id=_tenant_id(session),
-        )
-
-    @staticmethod
-    def _require_mutation(session: OARequestSession | None, message: str) -> None:
-        if session is None:
-            return
-        if not getattr(session, "can_mutate_data", False):
-            raise OutputInvoiceCollectionError("permission_denied", message, status_code=HTTPStatus.FORBIDDEN)
-
-    @staticmethod
-    def _require_admin(session: OARequestSession | None) -> None:
-        if session is None:
-            return
-        if not getattr(session, "can_admin_access", False):
-            raise OutputInvoiceCollectionError("admin_only", "当前账户没有维护收据编号设置权限。", status_code=HTTPStatus.FORBIDDEN)
 
     def _json_read(
         self,
         headers: dict[str, str] | None,
-        callback: Callable[[OARequestSession | None], tuple[HTTPStatus, dict[str, Any]]],
+        callback: Callable[
+            [OARequestSession | None], tuple[HTTPStatus, dict[str, Any]]
+        ],
     ) -> Any:
         session, auth_error = self._read_session(headers)
         if auth_error is not None:
@@ -425,89 +202,25 @@ class OutputInvoiceCollectionApiRoutes:
             return self._error(exc)
         return self._json(status_code, payload)
 
-    def _relation_details_response(
-        self,
-        headers: dict[str, str] | None,
-        row_id: str,
-        query: dict[str, list[str]],
-    ) -> Any:
-        session, auth_error = self._read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        try:
-            payload = self.relation_details(row_id, query, session=session)
-        except OutputInvoiceCollectionError as exc:
-            return self._error(exc)
-        return self._json(HTTPStatus.OK, payload)
-
-    def _json_body_read(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-        callback: Callable[[dict[str, Any], OARequestSession | None], dict[str, Any]],
-    ) -> Any:
-        payload, error = self._json_body(body)
-        if error is not None:
-            return error
-        session, auth_error = self._read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        try:
-            result = callback(payload, session)
-        except OutputInvoiceCollectionError as exc:
-            return self._error(exc)
-        return self._json(HTTPStatus.OK, result)
-
-    def _json_body_mutation(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-        callback: Callable[[dict[str, Any], OARequestSession], dict[str, Any]],
-    ) -> Any:
-        payload, error = self._json_body(body)
-        if error is not None:
-            return error
-        session, auth_error = self._read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        try:
-            result = callback(payload, session)
-        except OutputInvoiceCollectionError as exc:
-            return self._error(exc)
-        return self._json(HTTPStatus.OK, result)
-
-    def _json_session(
-        self,
-        headers: dict[str, str] | None,
-        callback: Callable[[OARequestSession | None], dict[str, Any]],
-    ) -> Any:
-        session, auth_error = self._read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        try:
-            result = callback(session)
-        except OutputInvoiceCollectionError as exc:
-            return self._error(exc)
-        return self._json(HTTPStatus.OK, result)
-
-    def _json_body(self, body: str | bytes | None) -> tuple[dict[str, Any], Any | None]:
-        if not callable(self._load_json_body):
-            raise RuntimeError("output invoice collection json body loader port is not configured")
-        return self._load_json_body(body)
-
-    def _read_session(self, headers: dict[str, str] | None) -> tuple[OARequestSession | None, Any | None]:
+    def _read_session(
+        self, headers: dict[str, str] | None
+    ) -> tuple[OARequestSession | None, Any | None]:
         if callable(self._resolve_read_session):
             return self._resolve_read_session(headers)
         return None, None
 
     def _json(self, status: HTTPStatus, payload: object) -> Any:
         if not callable(self._json_response):
-            raise RuntimeError("output invoice collection json response port is not configured")
+            raise RuntimeError(
+                "output invoice collection json response port is not configured"
+            )
         return self._json_response(status, payload)
 
     def _xlsx(self, filename: str, content: bytes) -> Any:
         if not callable(self._xlsx_response):
-            raise RuntimeError("output invoice collection xlsx response port is not configured")
+            raise RuntimeError(
+                "output invoice collection xlsx response port is not configured"
+            )
         return self._xlsx_response(filename, content)
 
     def _error(self, exc: OutputInvoiceCollectionError) -> Any:
@@ -516,17 +229,5 @@ class OutputInvoiceCollectionApiRoutes:
         return self._error_response(exc)
 
 
-def _actor_id(session: OARequestSession | None) -> str:
-    return actor_id_for_session(session) if session is not None else "local"
-
-
 def _tenant_id(session: OARequestSession | None) -> str:
     return tenant_id_for_session(session) if session is not None else "default"
-
-
-def _trace_id(headers: dict[str, str] | None) -> str | None:
-    return (headers or {}).get("x-request-id")
-
-
-def _idempotency_key(headers: dict[str, str] | None) -> str | None:
-    return (headers or {}).get("idempotency-key") or (headers or {}).get("Idempotency-Key")

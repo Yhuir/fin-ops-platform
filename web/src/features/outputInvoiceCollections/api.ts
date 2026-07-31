@@ -6,19 +6,9 @@ import type {
   OutputInvoiceCollectionExportPreview,
   OutputInvoiceCollectionFilter,
   OutputInvoiceCollectionFilterOptionsResponse,
-  OutputInvoiceCollectionMutationResponse,
   OutputInvoiceCollectionQuery,
-  OutputInvoiceCollectionRedRelationRequest,
   OutputInvoiceCollectionRowsResponse,
   OutputInvoiceCollectionSortDirection,
-  OutputInvoiceCollectionReminderUpdateRequest,
-  OutputInvoiceCollectionStatusUpdateRequest,
-  OutputInvoiceCollectionStatusRulesResponse,
-  OutputInvoiceReceiptCreateRequest,
-  OutputInvoiceReceiptHistoryResponse,
-  OutputInvoiceReceiptPreviewRequest,
-  OutputInvoiceReceiptPreviewResponse,
-  OutputInvoiceReceiptSettingsResponse,
 } from "./types";
 
 type FetchRowsRequest = Pick<
@@ -72,10 +62,6 @@ function encodeFilters(filters: OutputInvoiceCollectionFilter[]) {
 function objectStringMap(value: unknown): Record<string, string> {
   const raw = objectValue(value);
   return Object.fromEntries(Object.entries(raw).map(([key, item]) => [key, stringValue(item)]));
-}
-
-function mapMutationResponse(payload: unknown): OutputInvoiceCollectionMutationResponse {
-  return { raw: payload };
 }
 
 function appendRowsQuery(params: URLSearchParams, request: FetchRowsRequest, includePagination = true) {
@@ -192,31 +178,12 @@ function mapInvoice(rawValue: unknown): OutputInvoiceCollectionRowsResponse["row
 
 function mapCollectionStatus(rawValue: unknown): OutputInvoiceCollectionRowsResponse["rows"][number]["collectionStatus"] {
   const raw = objectValue(rawValue);
-  const manualOverride = objectValue(camelOrSnake(raw, "manualOverride", "manual_override"));
-  const reminder = objectValue(raw.reminder);
   return {
     code: stringValue(raw.code),
     label: stringValue(raw.label),
     reason: stringValue(raw.reason),
     collectedAmount: stringValue(camelOrSnake(raw, "collectedAmount", "collected_amount")),
     pendingAmount: stringValue(camelOrSnake(raw, "pendingAmount", "pending_amount")),
-    severity: stringValue(raw.severity),
-    matchedRuleId: stringValue(camelOrSnake(raw, "matchedRuleId", "matched_rule_id")),
-    manualOverride: Object.keys(manualOverride).length > 0 ? {
-      id: stringValue(manualOverride.id),
-      statusCode: stringValue(camelOrSnake(manualOverride, "statusCode", "status_code")),
-      expectedCollectionDate: stringValue(camelOrSnake(manualOverride, "expectedCollectionDate", "expected_collection_date")),
-      note: stringValue(manualOverride.note),
-      version: numberValue(manualOverride.version, 0),
-    } : null,
-    expectedCollectionDate: stringValue(camelOrSnake(raw, "expectedCollectionDate", "expected_collection_date")),
-    reminder: Object.keys(reminder).length > 0 ? {
-      id: stringValue(reminder.id),
-      remindAt: stringValue(camelOrSnake(reminder, "remindAt", "remind_at")),
-      channel: stringValue(reminder.channel),
-      note: stringValue(reminder.note),
-      status: stringValue(reminder.status),
-    } : null,
   };
 }
 
@@ -247,30 +214,6 @@ function mapBank(rawValue: unknown): OutputInvoiceCollectionRowsResponse["rows"]
   };
 }
 
-function mapOa(rawValue: unknown): OutputInvoiceCollectionRowsResponse["rows"][number]["oa"]["primary"] {
-  const raw = objectValue(rawValue);
-  const id = stringValue(raw.id ?? camelOrSnake(raw, "oaId", "oa_id") ?? camelOrSnake(raw, "primaryOaId", "primary_oa_id"));
-  const applicantName = stringValue(camelOrSnake(raw, "applicantName", "applicant_name"));
-  const applicationType = stringValue(camelOrSnake(raw, "applicationType", "application_type"));
-  const projectName = stringValue(camelOrSnake(raw, "projectName", "project_name"));
-  const amount = stringValue(raw.amount);
-  if (!id && !applicantName && !applicationType && !projectName && !amount) {
-    return null;
-  }
-  return {
-    id,
-    applicantName,
-    applicationType,
-    projectName,
-    amount,
-    status: stringValue(raw.status),
-    relationCaseId: stringValue(camelOrSnake(raw, "relationCaseId", "relation_case_id")),
-    relationStatus: formalRelationStatus(camelOrSnake(raw, "relationStatus", "relation_status")),
-    relationSource: stringValue(camelOrSnake(raw, "relationSource", "relation_source")),
-    detailAvailable: booleanValue(camelOrSnake(raw, "detailAvailable", "detail_available")) || id !== "",
-  };
-}
-
 function mapRelatedInvoice(rawValue: unknown): OutputInvoiceCollectionRowsResponse["rows"][number]["invoiceRelations"]["primary"] {
   const raw = objectValue(rawValue);
   const id = stringValue(raw.id ?? camelOrSnake(raw, "invoiceId", "invoice_id") ?? camelOrSnake(raw, "primaryInvoiceId", "primary_invoice_id"));
@@ -281,6 +224,7 @@ function mapRelatedInvoice(rawValue: unknown): OutputInvoiceCollectionRowsRespon
   }
   return {
     id,
+    displayNo: stringValue(camelOrSnake(raw, "displayNo", "display_no") ?? invoiceNo),
     invoiceNo,
     invoiceCode: stringValue(camelOrSnake(raw, "invoiceCode", "invoice_code")),
     digitalInvoiceNo: stringValue(camelOrSnake(raw, "digitalInvoiceNo", "digital_invoice_no")),
@@ -289,31 +233,11 @@ function mapRelatedInvoice(rawValue: unknown): OutputInvoiceCollectionRowsRespon
     buyerTaxNo: stringValue(camelOrSnake(raw, "buyerTaxNo", "buyer_tax_no")),
     totalWithTax,
     taxableItemName: stringValue(camelOrSnake(raw, "taxableItemName", "taxable_item_name")),
+    relationId: stringValue(camelOrSnake(raw, "relationId", "relation_id")),
+    relationMode: stringValue(camelOrSnake(raw, "relationMode", "relation_mode")),
     relationCaseId: stringValue(camelOrSnake(raw, "relationCaseId", "relation_case_id")),
     relationStatus: formalRelationStatus(camelOrSnake(raw, "relationStatus", "relation_status")),
     relationSource: stringValue(camelOrSnake(raw, "relationSource", "relation_source")),
-  };
-}
-
-function mapRedInvoice(rawValue: unknown): OutputInvoiceCollectionRowsResponse["rows"][number]["redInvoice"]["primary"] {
-  const raw = objectValue(rawValue);
-  const id = stringValue(camelOrSnake(raw, "relatedInvoiceId", "related_invoice_id") ?? raw.id);
-  const invoiceNo = stringValue(camelOrSnake(raw, "invoiceNo", "invoice_no"));
-  if (!id && !invoiceNo) {
-    return null;
-  }
-  return {
-    id,
-    relationId: stringValue(camelOrSnake(raw, "relationId", "relation_id")),
-    invoiceNo,
-    invoiceDate: stringValue(camelOrSnake(raw, "invoiceDate", "invoice_date")),
-    buyerName: stringValue(camelOrSnake(raw, "buyerName", "buyer_name")),
-    totalWithTax: stringValue(camelOrSnake(raw, "totalWithTax", "total_with_tax")),
-    relationType: stringValue(camelOrSnake(raw, "relationType", "relation_type")),
-    reason: stringValue(raw.reason),
-    evidence: stringValue(raw.evidence),
-    confidence: stringValue(raw.confidence),
-    source: stringValue(raw.source),
   };
 }
 
@@ -347,8 +271,6 @@ function mapRowsResponse(payload: unknown): OutputInvoiceCollectionRowsResponse 
   return {
     rows: arrayValue(raw.rows).map((item) => {
       const row = objectValue(item);
-      const receipt = objectValue(row.receipt);
-      const latestReceipt = objectValue(camelOrSnake(receipt, "latestReceipt", "latest_receipt"));
       return {
         id: stringValue(row.id),
         invoiceId: stringValue(camelOrSnake(row, "invoiceId", "invoice_id")),
@@ -358,24 +280,8 @@ function mapRowsResponse(payload: unknown): OutputInvoiceCollectionRowsResponse 
           id: stringValue(camelOrSnake(row, "invoiceId", "invoice_id") ?? objectValue(row.invoice).id),
         },
         collectionStatus: mapCollectionStatus(camelOrSnake(row, "collectionStatus", "collection_status")),
-        oa: mapRelation(row.oa, mapOa),
         bank: mapRelation(camelOrSnake(row, "bank", "bankTransactions"), mapBank),
         invoiceRelations: mapRelation(camelOrSnake(row, "invoiceRelations", "invoice_relations"), mapRelatedInvoice),
-        redInvoice: mapRelation(camelOrSnake(row, "redInvoice", "redInvoiceRelation"), mapRedInvoice),
-        receipt: {
-          status: stringValue(receipt.status),
-          label: stringValue(receipt.label),
-          reason: stringValue(receipt.reason),
-          previewAvailable: booleanValue(camelOrSnake(receipt, "previewAvailable", "preview_available")),
-          sourceAvailable: booleanValue(camelOrSnake(receipt, "sourceAvailable", "source_available")),
-          latestReceipt: Object.keys(latestReceipt).length > 0 ? {
-            id: stringValue(latestReceipt.id),
-            receiptNo: stringValue(camelOrSnake(latestReceipt, "receiptNo", "receipt_no")),
-            amount: stringValue(latestReceipt.amount),
-            status: stringValue(latestReceipt.status),
-            createdAt: stringValue(camelOrSnake(latestReceipt, "createdAt", "created_at")),
-          } : null,
-        },
       };
     }),
     summary: raw.summary && typeof raw.summary === "object" ? (() => {
@@ -387,21 +293,17 @@ function mapRowsResponse(payload: unknown): OutputInvoiceCollectionRowsResponse 
         pendingAmount: stringValue(camelOrSnake(summary, "pendingAmount", "pending_amount")),
         pendingCollectionCount: numberValue(camelOrSnake(summary, "pendingCollectionCount", "pending_collection_count"), 0),
         partialCollectionCount: numberValue(camelOrSnake(summary, "partialCollectionCount", "partial_collection_count"), 0),
-        receiptPendingCount: numberValue(camelOrSnake(summary, "receiptPendingCount", "receipt_pending_count"), 0),
       };
     })() : undefined,
     statistics: raw.statistics && typeof raw.statistics === "object" ? (() => {
       const statistics = objectValue(raw.statistics);
       return {
         invoiceCount: optionalCount(camelOrSnake(statistics, "invoiceCount", "invoice_count")),
-        linkedOaInvoiceCount: optionalCount(camelOrSnake(statistics, "linkedOaInvoiceCount", "linked_oa_invoice_count")),
         linkedIncomeBankInvoiceCount: optionalCount(camelOrSnake(statistics, "linkedIncomeBankInvoiceCount", "linked_income_bank_invoice_count")),
         collectedInvoiceCount: optionalCount(camelOrSnake(statistics, "collectedInvoiceCount", "collected_invoice_count")),
-        unlinkedOaInvoiceCount: optionalCount(camelOrSnake(statistics, "unlinkedOaInvoiceCount", "unlinked_oa_invoice_count")),
         unlinkedBankInvoiceCount: optionalCount(camelOrSnake(statistics, "unlinkedBankInvoiceCount", "unlinked_bank_invoice_count")),
         uncollectedInvoiceCount: optionalCount(camelOrSnake(statistics, "uncollectedInvoiceCount", "uncollected_invoice_count")),
         redInvoiceCount: optionalCount(camelOrSnake(statistics, "redInvoiceCount", "red_invoice_count")),
-        issuedReceiptCount: optionalCount(camelOrSnake(statistics, "issuedReceiptCount", "issued_receipt_count")),
       };
     })() : undefined,
     pagination: {
@@ -519,15 +421,6 @@ function relationSummarySection(kind: string, item: unknown, index: number) {
   }
 
   const raw = objectValue(item);
-  if (kind === "oa") {
-    return detailSection(`申请 ${index + 1}`, [
-      detailField("申请人", camelOrSnake(raw, "applicantName", "applicant_name") ?? raw.applicant),
-      detailField("申请类型", camelOrSnake(raw, "applicationType", "application_type")),
-      detailField("项目", camelOrSnake(raw, "projectName", "project_name")),
-      detailField("金额", raw.amount),
-      detailField("状态", raw.status),
-    ]);
-  }
   if (kind === "bank") {
     return detailSection(`流水 ${index + 1}`, [
       detailField("对方户名", camelOrSnake(raw, "counterpartyName", "counterparty_name")),
@@ -547,15 +440,17 @@ function relationSummarySection(kind: string, item: unknown, index: number) {
     detailField("购买方", camelOrSnake(raw, "buyerName", "buyer_name")),
     detailField("价税合计", camelOrSnake(raw, "totalWithTax", "total_with_tax")),
     detailField("货物或服务", camelOrSnake(raw, "taxableItemName", "taxable_item_name")),
+    detailField("关系模式", camelOrSnake(raw, "relationMode", "relation_mode")),
+    detailField("关系来源", camelOrSnake(raw, "relationSource", "relation_source")),
   ]);
 }
 
 function mapRelationDetailResponse(payload: unknown): OutputInvoiceCollectionDetailResponse {
   const raw = objectValue(payload);
   const kind = stringValue(raw.kind);
-  const label = kind === "oa" ? "申请" : kind === "bank" ? "流水" : kind === "receipt" ? "收据" : "销项发票";
+  const label = kind === "bank" ? "流水" : "销项发票";
   const summaries = arrayValue(raw.summaries);
-  const title = kind === "oa" ? "OA详情" : kind === "bank" ? "流水详情" : kind === "receipt" ? "收据详情" : "销项发票详情";
+  const title = kind === "bank" ? "流水详情" : "销项发票详情";
   return {
     title,
     detailAvailable: camelOrSnake(raw, "detailAvailable", "detail_available") !== false,
@@ -657,137 +552,6 @@ export async function fetchOutputInvoiceCollectionRowRelationDetail(
     { method: "GET", signal },
   );
   return mapRelationDetailResponse(payload);
-}
-
-export async function fetchOutputInvoiceCollectionStatusRules(signal?: AbortSignal) {
-  return apiRequestJson<OutputInvoiceCollectionStatusRulesResponse>("/api/output-invoice-collections/status-rules", {
-    method: "GET",
-    signal,
-  });
-}
-
-export async function fetchOutputInvoiceReceiptHistory(invoiceId: string, signal?: AbortSignal) {
-  const payload = await apiRequestJson<unknown>(
-    `/api/output-invoice-collections/receipts/history?invoice_id=${encodeURIComponent(invoiceId)}`,
-    { method: "GET", signal },
-  );
-  const raw = objectValue(payload);
-  return {
-    invoiceId: stringValue(camelOrSnake(raw, "invoiceId", "invoice_id")),
-    sourceAvailable: booleanValue(camelOrSnake(raw, "sourceAvailable", "source_available")),
-    sourceName: stringValue(camelOrSnake(raw, "sourceName", "source_name")),
-    receipts: arrayValue(raw.receipts).map((item) => {
-      const receipt = objectValue(item);
-      return {
-        id: stringValue(receipt.id ?? camelOrSnake(receipt, "receiptId", "receipt_id")),
-        receiptNo: stringValue(camelOrSnake(receipt, "receiptNo", "receipt_no")),
-        amount: stringValue(receipt.amount),
-        createdAt: stringValue(camelOrSnake(receipt, "createdAt", "created_at") ?? camelOrSnake(receipt, "issuedAt", "issued_at")),
-        voidedAt: stringValue(camelOrSnake(receipt, "voidedAt", "voided_at")),
-        voidReason: stringValue(camelOrSnake(receipt, "voidReason", "void_reason")),
-        reissuedFromReceiptId: stringValue(camelOrSnake(receipt, "reissuedFromReceiptId", "reissued_from_receipt_id")),
-        status: stringValue(receipt.status),
-      };
-    }),
-    message: stringValue(raw.message),
-  };
-}
-
-export async function previewOutputInvoiceReceipt(
-  request: OutputInvoiceReceiptPreviewRequest,
-  signal?: AbortSignal,
-) {
-  return apiRequestJson<OutputInvoiceReceiptPreviewResponse>("/api/output-invoice-collections/receipt-preview", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(request),
-    signal,
-  });
-}
-
-export async function updateOutputInvoiceCollectionStatus(rowId: string, request: OutputInvoiceCollectionStatusUpdateRequest) {
-  const payload = await apiRequestJson<unknown>(`/api/output-invoice-collections/rows/${encodeURIComponent(rowId)}/collection-status`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(request),
-  });
-  return mapMutationResponse(payload);
-}
-
-export async function updateOutputInvoiceCollectionReminder(rowId: string, request: OutputInvoiceCollectionReminderUpdateRequest) {
-  const payload = await apiRequestJson<unknown>(`/api/output-invoice-collections/rows/${encodeURIComponent(rowId)}/collection-reminder`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(request),
-  });
-  return mapMutationResponse(payload);
-}
-
-export async function cancelOutputInvoiceCollectionReminder(rowId: string, reminderId: string) {
-  const payload = await apiRequestJson<unknown>(
-    `/api/output-invoice-collections/rows/${encodeURIComponent(rowId)}/collection-reminder/${encodeURIComponent(reminderId)}`,
-    { method: "DELETE" },
-  );
-  return mapMutationResponse(payload);
-}
-
-export async function confirmOutputInvoiceRedRelation(rowId: string, request: OutputInvoiceCollectionRedRelationRequest) {
-  const payload = await apiRequestJson<unknown>(`/api/output-invoice-collections/rows/${encodeURIComponent(rowId)}/red-invoice-relations`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(request),
-  });
-  return mapMutationResponse(payload);
-}
-
-export async function revokeOutputInvoiceRedRelation(relationId: string) {
-  const payload = await apiRequestJson<unknown>(
-    `/api/output-invoice-collections/red-invoice-relations/${encodeURIComponent(relationId)}`,
-    { method: "DELETE" },
-  );
-  return mapMutationResponse(payload);
-}
-
-export async function createOutputInvoiceReceipt(rowId: string, request: OutputInvoiceReceiptCreateRequest) {
-  const payload = await apiRequestJson<unknown>(`/api/output-invoice-collections/rows/${encodeURIComponent(rowId)}/receipts`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Idempotency-Key": request.idempotencyKey },
-    body: JSON.stringify(request),
-  });
-  return mapMutationResponse(payload);
-}
-
-export async function voidOutputInvoiceReceipt(receiptId: string, reason = "") {
-  const payload = await apiRequestJson<unknown>(`/api/output-invoice-collections/receipts/${encodeURIComponent(receiptId)}/void`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ reason }),
-  });
-  return mapMutationResponse(payload);
-}
-
-export async function reissueOutputInvoiceReceipt(receiptId: string, reason = "") {
-  const payload = await apiRequestJson<unknown>(`/api/output-invoice-collections/receipts/${encodeURIComponent(receiptId)}/reissue`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ reason }),
-  });
-  return mapMutationResponse(payload);
-}
-
-export async function fetchOutputInvoiceReceiptSettings(signal?: AbortSignal): Promise<OutputInvoiceReceiptSettingsResponse> {
-  return apiRequestJson<OutputInvoiceReceiptSettingsResponse>("/api/output-invoice-collections/receipt-settings", {
-    method: "GET",
-    signal,
-  });
-}
-
-export async function updateOutputInvoiceReceiptSettings(request: { prefix: string; resetPeriod: string }) {
-  return apiRequestJson<OutputInvoiceReceiptSettingsResponse>("/api/output-invoice-collections/receipt-settings", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(request),
-  });
 }
 
 export function nextSortDirection(

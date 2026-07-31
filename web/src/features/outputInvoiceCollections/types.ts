@@ -13,19 +13,7 @@ export type OutputInvoiceCollectionFilter = {
   values?: string[];
 };
 
-export type OutputInvoiceCollectionWorkflow =
-  | { kind: "statusRules" }
-  | { kind: "export" }
-  | { kind: "collectionStatus"; rowId: string }
-  | { kind: "redRelation"; rowId: string }
-  | { kind: "receiptHistory"; invoiceId: string; rowId: string }
-  | { kind: "receiptPreview"; rowId: string }
-  | { kind: "receiptSettings" }
-  | null;
-
-export type OutputInvoiceCollectionMutationResponse = {
-  raw: unknown;
-};
+export type OutputInvoiceCollectionWorkflow = { kind: "export" } | null;
 
 export type OutputInvoiceCollectionQuery = {
   page: number;
@@ -45,7 +33,7 @@ export type OutputInvoiceCollectionDetailTarget = {
   kind: "invoice" | "bank" | "relationList";
   id: string;
   rowId?: string;
-  relationKind?: "oa" | "bank" | "invoice" | "red_invoice" | "receipt";
+  relationKind?: "bank" | "invoice";
   scopeKey?: string;
 };
 
@@ -74,23 +62,6 @@ export type OutputInvoiceCollectionStatus = {
   reason: string;
   collectedAmount: string;
   pendingAmount: string;
-  severity?: "success" | "warning" | "error" | "info" | string;
-  matchedRuleId?: string;
-  manualOverride?: {
-    id?: string;
-    statusCode?: string;
-    expectedCollectionDate?: string | null;
-    note?: string;
-    version?: number;
-  } | null;
-  expectedCollectionDate?: string | null;
-  reminder?: {
-    id?: string;
-    remindAt?: string;
-    channel?: string;
-    note?: string;
-    status?: string;
-  } | null;
 };
 
 export type OutputInvoiceCollectionBankSummary = {
@@ -110,21 +81,9 @@ export type OutputInvoiceCollectionBankSummary = {
   detailAvailable: boolean;
 };
 
-export type OutputInvoiceCollectionOaSummary = {
-  id: string;
-  applicantName: string;
-  applicationType: string;
-  projectName: string;
-  amount: string;
-  status: string;
-  relationCaseId?: string;
-  relationStatus?: "linked" | "unlinked";
-  relationSource?: string;
-  detailAvailable: boolean;
-};
-
 export type OutputInvoiceCollectionRelatedInvoiceSummary = {
   id: string;
+  displayNo: string;
   invoiceNo: string;
   invoiceCode: string;
   digitalInvoiceNo: string;
@@ -133,6 +92,8 @@ export type OutputInvoiceCollectionRelatedInvoiceSummary = {
   buyerTaxNo: string;
   totalWithTax: string;
   taxableItemName: string;
+  relationId?: string;
+  relationMode?: string;
   relationCaseId?: string;
   relationStatus?: "linked" | "unlinked";
   relationSource?: string;
@@ -148,58 +109,23 @@ export type OutputInvoiceCollectionRelationSummary<T> = {
   summaries: T[];
 };
 
-export type OutputInvoiceCollectionRedInvoiceSummary = {
-  id: string;
-  relationId?: string;
-  invoiceNo: string;
-  invoiceDate: string;
-  buyerName: string;
-  totalWithTax: string;
-  relationType: string;
-  reason: string;
-  evidence?: string;
-  confidence?: string;
-  source?: string;
-};
-
-export type OutputInvoiceCollectionReceiptSummary = {
-  status: string;
-  label: string;
-  reason: string;
-  previewAvailable: boolean;
-  sourceAvailable: boolean;
-  latestReceipt?: {
-    id?: string;
-    receiptNo?: string;
-    amount?: string;
-    status?: string;
-    createdAt?: string;
-  } | null;
-};
-
 export type OutputInvoiceCollectionRow = {
   id: string;
   invoiceId: string;
   invoiceIdentityKey?: string;
   invoice: OutputInvoiceCollectionInvoiceSummary;
   collectionStatus: OutputInvoiceCollectionStatus;
-  oa: OutputInvoiceCollectionRelationSummary<OutputInvoiceCollectionOaSummary>;
   bank: OutputInvoiceCollectionRelationSummary<OutputInvoiceCollectionBankSummary>;
   invoiceRelations: OutputInvoiceCollectionRelationSummary<OutputInvoiceCollectionRelatedInvoiceSummary>;
-  redInvoice: OutputInvoiceCollectionRelationSummary<OutputInvoiceCollectionRedInvoiceSummary>;
-  receipt: OutputInvoiceCollectionReceiptSummary;
 };
 
 export type OutputInvoiceCollectionStatistics = {
   invoiceCount?: number;
-  linkedOaInvoiceCount?: number;
   linkedIncomeBankInvoiceCount?: number;
   collectedInvoiceCount?: number;
-  unlinkedOaInvoiceCount?: number;
   unlinkedBankInvoiceCount?: number;
   uncollectedInvoiceCount?: number;
   redInvoiceCount?: number;
-  issuedReceiptCount?: number;
 };
 
 export type OutputInvoiceCollectionRowsResponse = {
@@ -211,7 +137,6 @@ export type OutputInvoiceCollectionRowsResponse = {
     pendingAmount: string;
     pendingCollectionCount: number;
     partialCollectionCount: number;
-    receiptPendingCount: number;
   };
   statistics?: OutputInvoiceCollectionStatistics;
   pagination: {
@@ -268,123 +193,4 @@ export type OutputInvoiceCollectionDetailResponse = {
     title: string;
     fields: Array<{ label: string; value: string | number | null | undefined }>;
   }>;
-};
-
-export type OutputInvoiceCollectionStatusRulesResponse = {
-  version?: string;
-  readOnly?: boolean;
-  rules: Array<{
-    id?: string;
-    code?: string;
-    label: string;
-    description: string;
-    recognitionMode?: string;
-    requiredFacts?: string[];
-    workbenchRequirement?: string;
-    priority: number;
-  }>;
-  manualStatusOptions?: Array<{
-    code: string;
-    label: string;
-    severity?: string;
-    matchedRuleId?: string;
-  }>;
-  permissions?: {
-    can_save?: boolean;
-    can_admin?: boolean;
-  };
-  futureWriteBoundary?: Record<string, string>;
-};
-
-export type OutputInvoiceReceiptHistoryResponse = {
-  invoiceId: string;
-  sourceAvailable: boolean;
-  sourceName?: string;
-  receipts: Array<{
-    id?: string;
-    receiptNo?: string;
-    amount?: string;
-    createdAt?: string;
-    voidedAt?: string;
-    voidReason?: string;
-    reissuedFromReceiptId?: string;
-    status?: string;
-  }>;
-  message?: string;
-};
-
-export type OutputInvoiceReceiptSettingsResponse = {
-  settings: {
-    tenantId?: string;
-    prefix: string;
-    resetPeriod: "monthly" | "yearly" | "none" | string;
-    version?: number;
-    updatedBy?: string;
-    updatedAt?: string;
-  };
-};
-
-export type OutputInvoiceCollectionStatusUpdateRequest = {
-  statusCode?: string;
-  expectedCollectionDate?: string;
-  note?: string;
-  expectedVersion?: number;
-};
-
-export type OutputInvoiceCollectionReminderUpdateRequest = {
-  remindAt: string;
-  channel: string;
-  note?: string;
-};
-
-export type OutputInvoiceCollectionRedRelationRequest = {
-  relatedInvoiceIdentityKey?: string;
-  relatedInvoiceId?: string;
-  relationType: "red_invoice" | "blue_invoice";
-  evidence: string;
-  confidence?: string;
-};
-
-export type OutputInvoiceReceiptCreateRequest = {
-  bankTransactionId?: string;
-  selectedBankTransactionId?: string;
-  idempotencyKey: string;
-};
-
-export type OutputInvoiceReceiptPreviewRequest = {
-  rowId: string;
-  selectedBankTransactionId?: string;
-};
-
-export type OutputInvoiceReceiptPreviewResponse = {
-  canPreview: boolean;
-  reasonCode?: string;
-  reason?: string;
-  pendingAmount?: string;
-  selectedBankTransactionId?: string;
-  candidates: Array<{
-    bankTransactionId: string;
-    counterpartyName: string;
-    tradeTime: string;
-    amount: string;
-    bankName: string;
-    summary?: string;
-  }>;
-  receipt?: {
-    templateVersion: string;
-    companyName: string;
-    title: string;
-    date: string;
-    dateParts: { year: string; month: string; day: string };
-    payerName: string;
-    summary: string;
-    amount: string;
-    amountUppercase: string;
-    remark: string;
-    bankName?: string;
-    bankTransactionId?: string;
-    canCreateFormalReceipt?: boolean;
-    nextAction?: string;
-  };
-  warnings?: string[];
 };

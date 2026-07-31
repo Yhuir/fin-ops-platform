@@ -1,61 +1,65 @@
 # 销项发票收款情况测试矩阵
 
-日期：2026-07-27
+日期：2026-07-31
 
 ## 七类测试适用性
 
 | 类别 | 适用性 | 覆盖 |
 | --- | --- | --- |
-| 1. 业务核心单元 | 适用 | 收款状态、提醒、红蓝票、收据生命周期、幂等/CAS、多发票净额和负数成员 |
-| 2. Service/repository | 适用 | canonical query service、RR/RO snapshot、固定查询次数、同事务 lifecycle overlay |
-| 3. API contract | 适用 | 权限拒绝、非法参数、空集、筛选/排序/分页、summary、详情、导出、冲突和旧状态字段缺失 |
-| 4. Read model/worker cleanup | 适用 | route/frontend 不再依赖 gate、202、polling、filter-options；旧 invoice-usage/lifecycle projection、worker、registry、deploy 保持删除 |
-| 5. Frontend interaction | 适用 | loading/empty/error、筛选/排序/分页、详情、导出、状态/提醒/收据、写后 GET、权限 |
-| 6. E2E 业务流 | 适用 | 读/导出、状态/提醒、收据 create/void/reissue、红蓝票 relation、失败恢复 |
-| 7. 既有功能回归 | 适用 | 收据幂等、permissions/audit、pending invoice、red relation fanout |
+| 1. 业务核心单元 | 适用 | 红蓝票精确 identity、正负极性、唯一性、日期、歧义拒绝、六种状态、收入金额 |
+| 2. Service/repository | 适用 | canonical query、固定查询边界、关系组装、支出流水排除、详情与导出 |
+| 3. API contract | 适用 | 七个 GET、权限、非法参数、404、错误映射、旧 mutation route 不存在 |
+| 4. Read model/cache/worker | 不新增运行时覆盖 | 页面不使用 read model/cache/worker；boundary guard 保护旧链路不回归 |
+| 5. Frontend interaction | 适用 | loading/empty/error、三组表头、六种 chip、筛选、刷新、详情、导出、旧 UI 缺失 |
+| 6. E2E 业务流 | 适用 | canonical rows、自动红蓝票展示、详情、搜索、导出、暂时失败恢复、零 mutation |
+| 7. 既有功能回归 | 适用 | Workbench 普通匹配不受影响、红票不误匹配、权限矩阵和其他发票页面合同不变 |
 
 ## 关键合同
 
-- canonical repository 只查询 canonical tables 和 `app.workbench_pair_relations status='active'`。
-- 不查询 `read_model.output_invoice_collection_*`、`read_model.workbench_relation_*` 或 `read_model.invoice_lifecycle_*`。
-- 一个页面 snapshot 最多 11 条批量 SQL statement，无逐行 N+1；rows/summary/facets 只计算一次 materialized canonical CTE，lifecycle overlay 复用同一 transaction。
-- linked 多发票 relation 输出一行净额，负数/红字发票保留在 summaries。
-- `/rows` 同时返回 rows/summary/statistics/filter options，前端不请求 `/filter-options`。
-- lifecycle/receipt 成功响应不含 operation barrier；当前页面随后执行 GET。
-- API/frontend 响应不含页面 `read_model_status`、source version、refresh enqueue 或 polling 语义。
+- 红蓝票匹配同时验证 tax IDs、currency、tax rate、gross/net/tax 绝对值、日期和唯一性。
+- 匹配结果写入正式 relation mode `output_invoice_reversal`；重复执行幂等，歧义不写。
+- 红票不进入通用自由匹配。
+- 蓝票和红票各自保留为独立行，并通过 `invoiceRelations.summaries` 互相引用。
+- 已收金额只统计 active relation 中的收入流水，支出流水不计入。
+- row 顶层只含七个当前字段，不含 OA、receipt、manual status 或 reminder。
+- 页面只注册七个 GET route，旧 lifecycle/receipt/manual-red route 返回未匹配。
+- 前端只呈现三组表格，不显示旧按钮、旧抽屉、OA 或收据列。
 
 ## 主要测试入口
 
+- `tests/test_workbench_free_matching_engine.py`
 - `tests/test_invoice_usage_collection_canonical_query.py`
 - `tests/test_output_invoice_collection_api.py`
 - `tests/test_output_invoice_collection_service.py`
-- `tests/test_output_invoice_collection_lifecycle.py`
-- `tests/test_pending_invoice_service.py`
 - `tests/test_platform_runtime_boundary_guards.py`
-- `tests/test_read_model_architecture_guards.py`
 - `web/src/test/OutputInvoiceCollectionsPage.test.tsx`
 - `web/e2e/output-invoice-collections-flow.spec.ts`
 - `web/e2e/output-invoice-red-relation-fanout.spec.ts`
+- `web/e2e/permissions-role-matrix.spec.ts`
 
-## 最小验证命令
+## 验证命令
 
 ```bash
 bash scripts/verify.sh lint
 
 python3 -m pytest -q \
+  tests/test_workbench_free_matching_engine.py \
   tests/test_invoice_usage_collection_canonical_query.py \
   tests/test_output_invoice_collection_api.py \
   tests/test_output_invoice_collection_service.py \
-  tests/test_output_invoice_collection_lifecycle.py \
-  tests/test_pending_invoice_service.py
+  tests/test_platform_runtime_boundary_guards.py
 
-cd web && npm test -- --run src/test/OutputInvoiceCollectionsPage.test.tsx
-cd web && npm run e2e -- e2e/output-invoice-collections-flow.spec.ts --project=chromium
-cd web && npm run build
+npm --prefix web test -- --run src/test/OutputInvoiceCollectionsPage.test.tsx
+npm --prefix web run build
+npm --prefix web run e2e -- \
+  e2e/output-invoice-collections-flow.spec.ts \
+  e2e/output-invoice-red-relation-fanout.spec.ts \
+  --project=chromium
 ```
+
+发布前还必须通过仓库 release gate；部署后执行页面 canonical audit、关键 GET 性能和 T+0/T+60/T+300 延迟复核。
 
 ## 剩余风险
 
-- fake transaction 测试保护查询上界、snapshot 命令和 SQL 边界；一次性本地 PostgreSQL 17 测试库另以 20,003 张销项发票验证 20,001 个净额聚合行：200 行页面请求稳定约 1.2–1.3 秒，精确 20,000 行 DTO 导出约 3.9 秒。
-- 本地数据不等价于生产分布；生产 `EXPLAIN (ANALYZE, BUFFERS)`、锁等待、收据编号并发和真实 XLSX 下载耗时仍需主控在 staging/生产验证。
-- 历史 invoice-usage/lifecycle 表仍存在但无运行时 reader/writer；物理 drop 留给单独可回滚 migration。
+- deterministic 测试不等价于生产历史数据分布；生产验证必须检查歧义红蓝票不会被自动关系吞并。
+- 历史 lifecycle/receipt 表仍存在但无运行时 reader/writer；本任务不执行不可逆 drop。

@@ -1308,33 +1308,52 @@ System Audit 的 `overall_status=pass` 只证明该 immutable snapshot 内 17 �
 
 ## 销项发票收款情况 API
 
-`/api/output-invoice-collections/*` 由 Invoices 模块承接。`server.py` 只做 HTTP dispatch、统一 JSON/error 包装和 route object 装配；`app/routes_output_invoice_collections.py` 只做路径、session、权限和响应映射；rows/filter/export/relation detail 的读侧编排在 `OutputInvoiceCollectionCanonicalQueryService`，SQL 在 `PostgresOutputInvoiceCollectionQueryRepository`；业务事实写入在 lifecycle/receipt service 和 repository 层。
+`/api/output-invoice-collections/*` 由 Invoices 模块承接。页面直接读取 canonical
+销项发票、收入流水与 active Workbench 正式关系，不使用页面 read model。`server.py`
+只装配 route object；`app/routes_output_invoice_collections.py` 只负责路径、session、
+权限和 HTTP 映射；查询编排在 `OutputInvoiceCollectionCanonicalQueryService`，SQL
+在 `PostgresOutputInvoiceCollectionQueryRepository`。
 
 读接口：
 
-- `GET /api/output-invoice-collections/rows`：在一个显式 `REPEATABLE READ READ ONLY` snapshot 中读取 canonical output invoices、PostgreSQL OA/bank snapshot、`app.workbench_pair_relations status='active'` 和 canonical lifecycle facts。响应包含 `rows`、`summary`、`statistics`、`pagination`、`filterConfig`、全局 `filterOptions`、统一关系 `oa`、`bankTransactions`、`invoiceRelations`、手动状态/提醒、人工红蓝票关系和正式收据摘要。旧 `/filter-options` 不是前端运行时合同。
-- `GET /api/output-invoice-collections/status-rules`：返回 Sheet6 静态规则、手动状态选项和权限。
-- `GET /api/output-invoice-collections/receipts/history?invoice_id=...`：返回正式收据 lifecycle facts，不再伪造空历史。
-- `GET /api/output-invoice-collections/rows/{row_id}/relation-details?kind=oa|bank|invoice|red_invoice|receipt`：返回当前 row 对应关系摘要。`kind=oa|bank|invoice` 必须在同一 canonical snapshot 中读取 `app.workbench_pair_relations status='active'` 及 OA/银行/发票事实；`summaries` 展示该 relation 下全部 OA、收入流水或销项发票项，`relationCount` 为该类对象总数。前端在 `detailMode=list` 且 `relationCount>1` 时以 `+(relationCount-1)` 展开全部明细；销项发票栏必须同时展示当前行发票主信息和 `invoiceRelations.totalWithTax` 多张发票合计，不能只显示展开入口。
+- `GET /api/output-invoice-collections/rows`
+- `GET /api/output-invoice-collections/filter-options`
+- `GET /api/output-invoice-collections/export-preview`
+- `GET /api/output-invoice-collections/export`
+- `GET /api/output-invoice-collections/invoices/{invoice_id}/detail`
+- `GET /api/output-invoice-collections/bank-transactions/{transaction_id}/detail`
+- `GET /api/output-invoice-collections/rows/{row_id}/relation-details?kind=bank|invoice`
 
-rows 中统一关系字段要求：
+`rows` 每行只包含：
 
-- rows summary 中的 `invoiceCount` 按唯一销项发票 ID 统计，用于页面表头展示“销项票 N”。`pagination.total` 是表格行数/配对组行数；linked 多销项发票 relation 归并成一条收款 row 时，`invoiceCount` 必须计入所有 `invoiceRelations.summaries` 成员。
-- `oa`、`bankTransactions`、`invoiceRelations` 都携带 `primary` 或兼容 primary 字段、`relationCount`、`hasMultiple`、`detailMode`、`summaries`；多项时 `detailMode=list`。
-- linked relation 下多张销项发票只输出一条 rows 记录；负数/红字发票不得被过滤，必须进入 `invoiceRelations.summaries` 并参与 `invoiceRelations.totalWithTax`、`invoiceTotal` 和收款状态计算。
-- `bankTransactions.receivedTotal` 只统计 linked 收入流水；未被正式化为 active relation 的自动匹配 decision 不进入销项收款下游关系字段，也不得计入已收款和 confirmed relation 判断。
-- 页面读响应不含 `read_model_status`、source version、refresh enqueue、scope 或 polling 字段；loading、empty 和 error 通过正常 HTTP/页面状态表达。
+- `id`
+- `invoiceId`
+- `invoiceIdentityKey`
+- `invoice`
+- `collectionStatus`
+- `bankTransactions`
+- `invoiceRelations`
 
-写接口：
+页面不返回 OA、收据、人工状态、提醒或手工红蓝票字段，也不返回
+`read_model_status`、refresh enqueue、scope 或 polling 字段。页面表格只有
+“销项发票 / 收款状态 / 收入流水”三个分组。
 
-- `PUT /api/output-invoice-collections/rows/{row_id}/collection-status`
-- `PUT /api/output-invoice-collections/rows/{row_id}/collection-reminder`
-- `DELETE /api/output-invoice-collections/rows/{row_id}/collection-reminder/{reminder_id}`
-- `POST /api/output-invoice-collections/rows/{row_id}/red-invoice-relations`
-- `DELETE /api/output-invoice-collections/red-invoice-relations/{relation_id}`
-- `POST /api/output-invoice-collections/rows/{row_id}/receipts`
-- `POST /api/output-invoice-collections/receipts/{receipt_id}/void`
-- `POST /api/output-invoice-collections/receipts/{receipt_id}/reissue`
-- `GET|PUT /api/output-invoice-collections/receipt-settings`
+收款状态由 canonical 事实派生：
 
-写接口必须使用 OA session 派生的 `actor_id`、tenant 和权限布尔值；service 不读取 headers。PostgreSQL 模式下只提交 canonical lifecycle facts、audit、CAS/idempotency 状态；成功后当前页面重跑 `GET /rows`，不等待页面 read model 或 operation barrier。正式收据创建必须提供 `Idempotency-Key` 或 body `idempotencyKey`。
+- `pending_collection`：待收款。
+- `partial_collected`：部分收款。
+- `collected`：已收款。
+- `reversed_by_red`：正数蓝票已被红票冲销。
+- `reverses_blue`：负数红票已冲销蓝票。
+- `unmatched_red`：负数红票尚未找到唯一可证明的蓝票。
+
+红蓝票关系由 Workbench 自动匹配并写入 active 正式关系，关系
+`mode=output_invoice_reversal`。只有销方税号、购方税号、币种、税率以及价税、
+不含税、税额绝对值全部一致，且候选集合唯一为一蓝一红、红票日期不早于蓝票时
+才自动配对；模糊候选保持未配对，不做猜测。该关系同时驱动关联台分组和本页状态。
+
+导出固定为当前 canonical 查询的 15 列，不包含 OA、收据、人工状态、提醒或手工
+红蓝票字段。
+
+旧状态、提醒、手工红蓝票、正式收据、收据历史和收据编号设置端点均已删除并返回
+`404 not_found`；不得重新添加兼容 fallback。

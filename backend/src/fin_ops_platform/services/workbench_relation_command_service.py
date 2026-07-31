@@ -614,6 +614,13 @@ class WorkbenchRelationCommandService:
                 "currency": str(getattr(plan, "currency", "CNY") or "CNY"),
             }
             evidence = dict(tuple(getattr(plan, "evidence_summary", ()) or ()))
+            relation_mode = str(getattr(plan, "relation_mode", "manual_confirmed") or "").strip()
+            if relation_mode not in VALID_WORKBENCH_RELATION_MODES:
+                raise WorkbenchRelationCommandError(
+                    "invalid_formal_relation_mode",
+                    "Formal relation plan uses an unsupported relation mode.",
+                    payload={"case_id": case_id, "relation_mode": relation_mode},
+                )
             attachment_bindings = {
                 (str(parent_oa_row_id), str(invoice_row_id))
                 for parent_oa_row_id, invoice_row_id in tuple(
@@ -630,6 +637,12 @@ class WorkbenchRelationCommandService:
                     "rule_version": str(getattr(plan, "rule_version", "") or ""),
                 }
             }
+            if relation_mode == "output_invoice_reversal":
+                special_metadata["output_invoice_reversal"] = {
+                    "blue_invoice_identity": evidence.get("blue_invoice_identity", ""),
+                    "red_invoice_identity": evidence.get("red_invoice_identity", ""),
+                    "match_rule": "seller_buyer_currency_gross_net_tax_rate_exact",
+                }
             special_metadata.update(
                 _formal_oa_attachment_metadata(
                     row_ids=plan_row_ids,
@@ -682,7 +695,7 @@ class WorkbenchRelationCommandService:
                     case_id=target_case_id,
                     row_ids=plan_row_ids,
                     row_types=plan_row_types,
-                    relation_mode="manual_confirmed",
+                    relation_mode=relation_mode,
                     created_by=actor_id,
                     month_scope=month_scope,
                     note="系统确定性配对扩展",
@@ -700,7 +713,7 @@ class WorkbenchRelationCommandService:
                     case_id=case_id,
                     row_ids=plan_row_ids,
                     row_types=plan_row_types,
-                    relation_mode="manual_confirmed",
+                    relation_mode=relation_mode,
                     created_by=actor_id,
                     month_scope=month_scope,
                     note="系统确定性配对",

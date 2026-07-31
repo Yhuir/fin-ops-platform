@@ -149,7 +149,6 @@ DEFAULT_API_PROBES: tuple[HttpProbe, ...] = (
     HttpProbe("oa_pending_payments_rows", "/api/oa-pending-payments/rows?page=1&page_size=20", expected_statuses=(200, 202)),
     HttpProbe("output_invoice_collections_rows", "/api/output-invoice-collections/rows?page=1&page_size=20", expected_statuses=(200, 202)),
     HttpProbe("output_invoice_collections_filter_options", "/api/output-invoice-collections/filter-options", expected_statuses=(200, 202)),
-    HttpProbe("output_invoice_collections_status_rules", "/api/output-invoice-collections/status-rules", expected_statuses=(200, 202)),
     HttpProbe("tax_offset_summary", f"/api/tax-offset/summary?month={DEFAULT_BUSINESS_MONTH}", expected_statuses=(200, 202)),
     HttpProbe("tax_offset_rows", f"/api/tax-offset?month={DEFAULT_BUSINESS_MONTH}", expected_statuses=(200, 202)),
     HttpProbe(

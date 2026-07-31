@@ -10,7 +10,6 @@ type WorkbenchHealthMockStatus = "ready" | "stale" | "rebuilding" | "error";
 type WorkbenchRefreshMockStatus = "fresh" | "refreshing" | "stale" | "failed" | "unavailable";
 type WorkbenchPageMockStatus = "fresh" | "refreshing" | "stale";
 type OperationBarrierMockMode = "fresh" | "refreshing" | "blocked";
-type OutputInvoiceReceiptLifecycleState = "none" | "issued" | "voided" | "reissued";
 type BankDetailClassificationMockMode = "auto_matched" | "needs_confirmation" | "unmatched";
 type BankDetailCategoryOverride = {
   categoryCode: string;
@@ -94,22 +93,9 @@ type ApiMockOptions = {
   oaPendingPaymentRowsFailuresBeforeSuccess?: number;
   oaPendingPaymentRelationFanout?: boolean;
   outputInvoiceCollectionExportRowLimitError?: boolean;
-  outputInvoiceCollectionInitialReceiptCreated?: boolean;
   outputInvoiceCollectionListInteractions?: boolean;
   outputInvoiceCollectionRowsFailOnce?: boolean;
   outputInvoiceCollectionRowsFailuresBeforeSuccess?: number;
-  outputInvoiceCollectionReceiptCreateFailOnce?: boolean;
-  outputInvoiceCollectionReceiptCreateFailuresBeforeSuccess?: number;
-  outputInvoiceCollectionReceiptReissueFailOnce?: boolean;
-  outputInvoiceCollectionReceiptReissueFailuresBeforeSuccess?: number;
-  outputInvoiceCollectionReceiptVoidFailOnce?: boolean;
-  outputInvoiceCollectionReceiptVoidFailuresBeforeSuccess?: number;
-  outputInvoiceCollectionReminderFailOnce?: boolean;
-  outputInvoiceCollectionReminderFailuresBeforeSuccess?: number;
-  outputInvoiceCollectionStatusFailOnce?: boolean;
-  outputInvoiceCollectionStatusFailuresBeforeSuccess?: number;
-  outputInvoiceDownstreamFanout?: boolean;
-  outputInvoiceRedRelationCandidate?: boolean;
   pendingInvoiceAttachExistingBatchRows?: boolean;
   pendingInvoiceAttachExistingConfirmFailOnce?: boolean;
   pendingInvoiceAttachExistingConfirmFailuresBeforeSuccess?: number;
@@ -5649,90 +5635,45 @@ function bankFlowRuleBatchTagSelectionPayloadForScenario(
   };
 }
 
-function outputInvoiceCollectionStatus(saved: boolean, reminderSaved: boolean) {
-  if (saved) {
-    return {
-      code: "pending_red_invoice",
-      label: "待冲红",
-      reason: "浏览器 e2e 已保存手动收款状态。",
-      collected_amount: "5,000.00",
-      pending_amount: "7,345.67",
-      severity: "warning",
-      manual_override: {
-        id: "output-status-override-e2e-001",
-        status_code: "pending_red_invoice",
-        expected_collection_date: "2026-06-20",
-        note: "浏览器 e2e 状态备注",
-        version: 1,
-      },
-      expected_collection_date: "2026-06-20",
-      reminder: reminderSaved
-        ? {
-          id: "output-reminder-e2e-001",
-          remind_at: "2026-06-18T09:30:00+08:00",
-          channel: "oa",
-          note: "浏览器 e2e 提醒备注",
-          status: "active",
-        }
-        : null,
-    };
-  }
-  return {
-    code: "partial_collected",
-    label: "待收款，已收部分款",
-    reason: "存在收入流水，但收入流水合计小于发票价税合计。",
-    collected_amount: "5,000.00",
-    pending_amount: "7,345.67",
-    severity: "warning",
-    manual_override: null,
-    expected_collection_date: null,
-    reminder: null,
+function outputInvoiceReversalRelationSummaries() {
+  const relation = {
+    relation_id: "output-reversal-relation-e2e-001",
+    relation_mode: "output_invoice_reversal",
+    relation_case_id: "case-output-reversal-e2e-001",
+    relation_status: "linked",
+    relation_source: "auto",
   };
-}
-
-function outputInvoiceRedInvoiceRelation(confirmed: boolean) {
-  if (!confirmed) {
-    return {
-      relation_count: 0,
-      has_multiple: false,
-      detail_mode: "none",
-      summaries: [],
-    };
-  }
-
-  const manualRelation = {
-    id: "out-e2e-002",
-    related_invoice_id: "out-e2e-002",
-    relation_id: "output-red-relation-e2e-001",
-    invoice_no: "XSFP-E2E-0002",
-    invoice_date: "2026-05-06",
-    buyer_name: "浏览器销项客户",
-    total_with_tax: "-12,345.67",
-    relation_type: "red_invoice",
-    reason: "浏览器 e2e 红字发票关系",
-    evidence: "浏览器 e2e 红蓝票关系确认",
-    confidence: "manual_confirmed",
-    source: "manual",
-  };
-
-  return {
-    primary: manualRelation,
-    relation_count: 1,
-    has_multiple: false,
-    detail_mode: "single",
-    summaries: [manualRelation],
-  };
+  return [
+    {
+      id: "out-e2e-001",
+      invoice_no: "XSFP-E2E-0001",
+      digital_invoice_no: "XSFP-E2E-0001",
+      invoice_date: "2026-05-02",
+      buyer_name: "浏览器销项客户",
+      buyer_tax_no: "91530100E2E001",
+      total_with_tax: "12,345.67",
+      taxable_item_name: "浏览器 e2e 销项收款服务",
+      ...relation,
+    },
+    {
+      id: "out-e2e-002",
+      invoice_no: "XSFP-E2E-0002",
+      digital_invoice_no: "XSFP-E2E-0002",
+      invoice_date: "2026-05-06",
+      buyer_name: "浏览器销项客户",
+      buyer_tax_no: "91530100E2E001",
+      total_with_tax: "-12,345.67",
+      taxable_item_name: "浏览器 e2e 红字发票",
+      ...relation,
+    },
+  ];
 }
 
 function outputInvoiceCollectionRowsPayload(
-  statusSaved: boolean,
-  reminderSaved: boolean,
-  receiptCreated: boolean,
-  redRelationConfirmed = false,
-  includeRedRelationCandidate = false,
   url?: URL,
   includeInvoiceImportRows = false,
 ) {
+  const reversalRelations = outputInvoiceReversalRelationSummaries();
   const rows: Array<Record<string, unknown>> = [
     {
       id: "output-collection-row-e2e-001",
@@ -5756,7 +5697,13 @@ function outputInvoiceCollectionRowsPayload(
         specific_business_type: "信息技术服务",
         taxable_item_name: "浏览器 e2e 销项收款服务",
       },
-      collection_status: outputInvoiceCollectionStatus(statusSaved || redRelationConfirmed, reminderSaved),
+      collection_status: {
+        code: "reversed_by_red",
+        label: "已被红冲",
+        reason: "该蓝字发票已与红字发票建立自动正式关联。",
+        collected_amount: "0.00",
+        pending_amount: "0.00",
+      },
       bank: {
         primary: {
           bank_transaction_id: "bank-output-e2e-001",
@@ -5777,35 +5724,16 @@ function outputInvoiceCollectionRowsPayload(
         detail_mode: "single",
         summaries: [],
       },
-      redInvoiceRelation: outputInvoiceRedInvoiceRelation(redRelationConfirmed),
-      receipt: receiptCreated
-        ? {
-          status: "issued",
-          label: "已出收据",
-          reason: "正式收据已创建。",
-          preview_available: true,
-          source_available: true,
-          latest_receipt: {
-            id: "receipt-output-e2e-001",
-            receipt_no: "SK2026050002",
-            amount: "5,000.00",
-            status: "issued",
-            created_at: "2026-05-03T10:40:00+08:00",
-          },
-        }
-        : {
-          status: "pending",
-          label: "待出收据",
-          reason: "可基于收入流水生成正式收据。",
-          preview_available: true,
-          source_available: true,
-          latest_receipt: null,
-        },
+      invoice_relations: {
+        primary: reversalRelations[1],
+        relation_count: 2,
+        has_multiple: true,
+        total_with_tax: "0.00",
+        detail_mode: "list",
+        summaries: reversalRelations,
+      },
     },
-  ];
-
-  if (includeRedRelationCandidate) {
-    rows.push({
+    {
       id: "output-collection-row-e2e-002",
       invoice_id: "out-e2e-002",
       invoice_identity_key: "id:out-e2e-002",
@@ -5828,15 +5756,11 @@ function outputInvoiceCollectionRowsPayload(
         taxable_item_name: "浏览器 e2e 红字发票",
       },
       collection_status: {
-        code: "red_invoice_candidate",
-        label: "红字发票待关联",
-        reason: "等待与原蓝字发票建立人工关系。",
+        code: "reverses_blue",
+        label: "已冲销蓝票",
+        reason: "该红字发票已与蓝字发票建立自动正式关联。",
         collected_amount: "0.00",
         pending_amount: "0.00",
-        severity: "info",
-        manual_override: null,
-        expected_collection_date: null,
-        reminder: null,
       },
       bank: {
         relation_count: 0,
@@ -5845,22 +5769,17 @@ function outputInvoiceCollectionRowsPayload(
         detail_mode: "none",
         summaries: [],
       },
-      redInvoiceRelation: {
-        relation_count: 0,
-        has_multiple: false,
-        detail_mode: "none",
-        summaries: [],
+      invoice_relations: {
+        primary: reversalRelations[0],
+        relation_count: 2,
+        has_multiple: true,
+        total_with_tax: "0.00",
+        detail_mode: "list",
+        summaries: reversalRelations,
       },
-      receipt: {
-        status: "not_applicable",
-        label: "无需收据",
-        reason: "红字发票不生成收据。",
-        preview_available: false,
-        source_available: true,
-        latest_receipt: null,
-      },
-    });
-  }
+    },
+  ];
+
   if (includeInvoiceImportRows) {
     rows.push({
       id: "output-collection-row-e2e-import",
@@ -5890,10 +5809,6 @@ function outputInvoiceCollectionRowsPayload(
         reason: "发票导入后等待收入流水关系刷新。",
         collected_amount: "0.00",
         pending_amount: "65,540.00",
-        severity: "warning",
-        manual_override: null,
-        expected_collection_date: null,
-        reminder: null,
       },
       bank: {
         relation_count: 0,
@@ -5902,14 +5817,12 @@ function outputInvoiceCollectionRowsPayload(
         detail_mode: "none",
         summaries: [],
       },
-      redInvoiceRelation: outputInvoiceRedInvoiceRelation(false),
-      receipt: {
-        status: "pending",
-        label: "待出收据",
-        reason: "等待收款关系后生成正式收据。",
-        preview_available: false,
-        source_available: true,
-        latest_receipt: null,
+      invoice_relations: {
+        relation_count: 0,
+        has_multiple: false,
+        total_with_tax: "0.00",
+        detail_mode: "none",
+        summaries: [],
       },
     });
   }
@@ -5924,19 +5837,26 @@ function outputInvoiceCollectionRowsPayload(
     summary: {
       invoice_count: filteredRows.length,
       total_with_tax: "12,345.67",
-      collected_amount: "5,000.00",
-      pending_amount: "7,345.67",
-      pending_collection_count: statusSaved ? 0 : 1,
-      partial_collection_count: statusSaved ? 0 : 1,
-      receipt_pending_count: receiptCreated ? 0 : 1,
+      collected_amount: "0.00",
+      pending_amount: "65,540.00",
+      pending_collection_count: includeInvoiceImportRows ? 1 : 0,
+      partial_collection_count: 0,
+    },
+    statistics: {
+      invoice_count: filteredRows.length,
+      linked_income_bank_invoice_count: 1,
+      collected_invoice_count: 0,
+      unlinked_bank_invoice_count: Math.max(filteredRows.length - 1, 0),
+      uncollected_invoice_count: includeInvoiceImportRows ? 1 : 0,
+      red_invoice_count: 1,
     },
     pagination: { page, page_size: pageSize, total: filteredRows.length },
     filter_config: [
       { field: "invoice_no", label: "发票号码", mode: "text", sortable: true, operators: ["contains", "equals"] },
       { field: "collection_status", label: "收款状态", mode: "enum_multi", sortable: true, operators: ["in"] },
-      { field: "receipt_status", label: "收据情况", mode: "enum_multi", sortable: true, operators: ["in"] },
+      { field: "buyer_name", label: "购方", mode: "text", sortable: true, operators: ["contains", "equals"] },
     ],
-    filter_options: outputInvoiceCollectionFilterOptionsPayload(statusSaved, receiptCreated).fields,
+    filter_options: outputInvoiceCollectionFilterOptionsPayload().fields,
   };
 }
 
@@ -5977,9 +5897,6 @@ function outputInvoiceCollectionFieldValue(row: Record<string, unknown>, field: 
   }
   if (field === "collection_status") {
     return outputInvoiceCollectionNestedString(row, ["collection_status", "code"]);
-  }
-  if (field === "receipt_status") {
-    return outputInvoiceCollectionNestedString(row, ["receipt", "status"]);
   }
   if (field === "buyer_name") {
     return outputInvoiceCollectionNestedString(row, ["invoice", "buyer_name"]);
@@ -6031,10 +5948,7 @@ function applyOutputInvoiceCollectionListQuery(rows: Array<Record<string, unknow
   return nextRows;
 }
 
-function outputInvoiceCollectionFilterOptionsPayload(
-  statusSaved: boolean,
-  receiptCreated: boolean,
-) {
+function outputInvoiceCollectionFilterOptionsPayload() {
   return {
     fields: [
       {
@@ -6052,169 +5966,90 @@ function outputInvoiceCollectionFilterOptionsPayload(
         sortable: true,
         operators: ["in"],
         options: [
-          {
-            value: statusSaved ? "pending_red_invoice" : "partial_collected",
-            label: statusSaved ? "待冲红" : "待收款，已收部分款",
-            count: 1,
-          },
+          { value: "reversed_by_red", label: "已被红冲", count: 1 },
+          { value: "reverses_blue", label: "已冲销蓝票", count: 1 },
+          { value: "pending_collection", label: "待收款", count: 1 },
         ],
       },
       {
-        field: "receipt_status",
-        label: "收据情况",
-        mode: "enum_multi",
+        field: "buyer_name",
+        label: "购方",
+        mode: "text",
         sortable: true,
-        operators: ["in"],
-        options: [
-          {
-            value: receiptCreated ? "issued" : "pending",
-            label: receiptCreated ? "已出收据" : "待出收据",
-            count: 1,
-          },
-        ],
+        operators: ["contains", "equals"],
+        options: [],
       },
     ],
   };
 }
 
-function outputInvoiceCollectionExportPreviewPayload(redRelationConfirmed = false) {
+function outputInvoiceCollectionExportPreviewPayload() {
   return {
     file_name: "output-invoice-collections.xlsx",
-    row_count: 1,
+    row_count: 2,
     scope_label: "当前筛选",
     columns: [
       "序号",
       "发票号码",
+      "开票日期",
       "购方",
+      "购方识别号",
+      "价税合计",
       "收款状态",
+      "已收金额",
+      "待收金额",
       "收款方",
+      "收款时间",
       "收款金额",
+      "收款银行",
+      "摘要",
       "红蓝票关系",
-      "红蓝票来源",
-      "红蓝票依据",
-      "收据状态",
     ],
     sample_rows: [
       {
         序号: "1",
         发票号码: "XSFP-E2E-0001",
+        开票日期: "2026-05-02",
         购方: "浏览器销项客户",
-        收款状态: "待收款，已收部分款",
+        购方识别号: "91530100E2E001",
+        价税合计: "12,345.67",
+        收款状态: "已被红冲",
+        已收金额: "0.00",
+        待收金额: "0.00",
         收款方: "浏览器销项客户",
+        收款时间: "2026-05-03 10:30:00",
         收款金额: "5,000.00",
-        红蓝票关系: redRelationConfirmed ? "XSFP-E2E-0002" : "",
-        红蓝票来源: redRelationConfirmed ? "manual" : "",
-        红蓝票依据: redRelationConfirmed ? "浏览器 e2e 红蓝票关系确认" : "",
-        收据状态: "待出收据",
+        收款银行: "建设银行 8106",
+        摘要: "浏览器 e2e 客户回款",
+        红蓝票关系: "自动红蓝票关系 · XSFP-E2E-0002 · output_invoice_reversal",
       },
     ],
   };
 }
 
-function outputInvoiceCollectionExportBody(redRelationConfirmed: boolean, url: URL) {
+function outputInvoiceCollectionExportBody(url: URL) {
   return createMinimalXlsx([
-    ["序号", "发票号码", "购方", "收款状态", "收款方", "收款金额", "红蓝票关系", "红蓝票来源", "红蓝票依据", "收据状态"],
+    ["序号", "发票号码", "开票日期", "购方", "购方识别号", "价税合计", "收款状态", "已收金额", "待收金额", "收款方", "收款时间", "收款金额", "收款银行", "摘要", "红蓝票关系"],
     [
       "1",
       "XSFP-E2E-0001",
+      "2026-05-02",
       "浏览器销项客户",
-      "待收款，已收部分款",
+      "91530100E2E001",
+      "12,345.67",
+      "已被红冲",
+      "0.00",
+      "0.00",
       "浏览器销项客户",
+      "2026-05-03 10:30:00",
       "5,000.00",
-      redRelationConfirmed ? "XSFP-E2E-0002" : "",
-      redRelationConfirmed ? "manual" : "",
-      redRelationConfirmed ? "浏览器 e2e 红蓝票关系确认" : "",
-      "待出收据",
+      "建设银行 8106",
+      "浏览器 e2e 客户回款",
+      "自动红蓝票关系 · XSFP-E2E-0002 · output_invoice_reversal",
     ],
     ["keyword", url.searchParams.get("keyword") ?? ""],
     ["page", url.searchParams.get("page") ?? ""],
   ], "销项收款");
-}
-
-function outputInvoiceCollectionStatusRulesPayload() {
-  return {
-    version: "sheet6-browser-e2e-v1",
-    readOnly: true,
-    rules: [
-      {
-        id: "partial_collected",
-        label: "待收款，已收部分款",
-        description: "收入流水金额小于销项发票金额。",
-        recognitionMode: "自动识别",
-        requiredFacts: ["销项发票", "收入流水"],
-        workbenchRequirement: "关联台或银行流水证明已收部分款。",
-        priority: 4,
-      },
-      {
-        id: "pending_red_invoice",
-        label: "待冲红",
-        description: "人工确认未来需要冲红。",
-        recognitionMode: "手动标记",
-        requiredFacts: ["销项发票"],
-        workbenchRequirement: "人工确认。",
-        priority: 6,
-      },
-    ],
-    manualStatusOptions: [
-      { code: "pending_collection", label: "待收款", severity: "warning" },
-      { code: "pending_red_invoice", label: "待冲红", severity: "warning" },
-    ],
-    permissions: { can_save: true, can_admin: true },
-  };
-}
-
-function outputInvoiceReceiptPreviewPayload() {
-  return {
-    canPreview: true,
-    selectedBankTransactionId: "bank-output-e2e-001",
-    candidates: [],
-    receipt: {
-      templateVersion: "sheet7-browser-e2e-v1",
-      companyName: "云南溯源科技有限公司",
-      title: "收 据",
-      date: "2026-05-03",
-      dateParts: { year: "2026", month: "05", day: "03" },
-      payerName: "浏览器销项客户",
-      summary: "浏览器 e2e 销项收款服务",
-      amount: "5,000.00",
-      amountUppercase: "人民币伍仟元整",
-      remark: "销项发票 XSFP-E2E-0001",
-      bankName: "建设银行",
-      bankTransactionId: "bank-output-e2e-001",
-      canCreateFormalReceipt: true,
-    },
-  };
-}
-
-function outputInvoiceReceiptHistoryPayload(receiptState: OutputInvoiceReceiptLifecycleState) {
-  const receipts = [];
-  if (receiptState === "issued" || receiptState === "voided" || receiptState === "reissued") {
-    receipts.push({
-      id: "receipt-output-e2e-001",
-      receipt_no: "SK2026050002",
-      amount: "5,000.00",
-      created_at: "2026-05-03T10:40:00+08:00",
-      status: receiptState === "issued" ? "issued" : "voided",
-      voided_at: receiptState === "issued" ? "" : "2026-05-03T11:10:00+08:00",
-      void_reason: receiptState === "issued" ? "" : "浏览器 e2e 作废收据",
-    });
-  }
-  if (receiptState === "reissued") {
-    receipts.push({
-      id: "receipt-output-e2e-002",
-      receipt_no: "SK2026050003",
-      amount: "5,000.00",
-      created_at: "2026-05-03T11:20:00+08:00",
-      status: "issued",
-      reissued_from_receipt_id: "receipt-output-e2e-001",
-    });
-  }
-  return {
-    invoice_id: "out-e2e-001",
-    source_available: true,
-    source_name: "formal_receipt_lifecycle",
-    receipts,
-  };
 }
 
 function amountSummary() {
@@ -7543,7 +7378,10 @@ function pendingInvoiceFilterSortRowsPayload(
   payload.summary.source_summary.bank_transaction_rows = rows.length;
   payload.summary.source_summary.expense_rows = rows.length;
   payload.summary.source_summary.current_direction_rows = rows.length;
-  return payload;
+  return {
+    ...payload,
+    filter_options: pendingInvoiceFilterSortOptionsPayload(),
+  };
 }
 
 function pendingInvoiceIncomeRow(id: string, counterpartyName: string, amount: string, statusCode: "income_pending_invoice" | "income_no_invoice_required" | "cash_income") {
@@ -8083,29 +7921,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
   let taxCertifiedImported = false;
   let taxSelectedInputIds = ["ti-202603-001", "ti-202603-002"];
   let taxOffsetPlanSaveConflictRemaining = Boolean(options.taxOffsetPlanSaveConflict);
-  let outputInvoiceStatusSaved = false;
-  let outputInvoiceReminderSaved = false;
-  let outputInvoiceReceiptState: OutputInvoiceReceiptLifecycleState = options.outputInvoiceCollectionInitialReceiptCreated
-    ? "issued"
-    : "none";
   let outputInvoiceCollectionRowsFailuresRemaining =
     options.outputInvoiceCollectionRowsFailuresBeforeSuccess ?? (options.outputInvoiceCollectionRowsFailOnce ? 1 : 0);
-  let outputInvoiceCollectionReceiptCreateFailuresRemaining =
-    options.outputInvoiceCollectionReceiptCreateFailuresBeforeSuccess
-    ?? (options.outputInvoiceCollectionReceiptCreateFailOnce ? 1 : 0);
-  let outputInvoiceCollectionReceiptVoidFailuresRemaining =
-    options.outputInvoiceCollectionReceiptVoidFailuresBeforeSuccess
-    ?? (options.outputInvoiceCollectionReceiptVoidFailOnce ? 1 : 0);
-  let outputInvoiceCollectionReceiptReissueFailuresRemaining =
-    options.outputInvoiceCollectionReceiptReissueFailuresBeforeSuccess
-    ?? (options.outputInvoiceCollectionReceiptReissueFailOnce ? 1 : 0);
-  let outputInvoiceCollectionReminderFailuresRemaining =
-    options.outputInvoiceCollectionReminderFailuresBeforeSuccess
-    ?? (options.outputInvoiceCollectionReminderFailOnce ? 1 : 0);
-  let outputInvoiceCollectionStatusFailuresRemaining =
-    options.outputInvoiceCollectionStatusFailuresBeforeSuccess
-    ?? (options.outputInvoiceCollectionStatusFailOnce ? 1 : 0);
-  let outputInvoiceRedRelationConfirmed = false;
   let inputInvoiceOaSubmitted = false;
   let inputInvoicePaymentRulesVersion = 1;
   let inputInvoicePaymentRulesSaved = false;
@@ -8450,7 +8267,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       return json(route, { businessBatch: etcBusinessBatchPayload(etcBusinessBatchStatus, true) });
     }
 
-    const outputInvoiceDownstreamConfirmed = outputInvoiceRedRelationConfirmed && Boolean(options.outputInvoiceDownstreamFanout);
     const invoiceImportDownstreamConfirmed = importConfirmed.invoice && Boolean(options.invoiceImportDownstreamFanout);
     const etcImportDownstreamConfirmed = etcImportConfirmed && Boolean(options.etcImportDownstreamFanout);
     const bankImportDownstreamConfirmed = importConfirmed.bank && Boolean(options.bankImportDownstreamFanout);
@@ -8832,8 +8648,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       const payload = costStatisticsExplorerPayload(
         "all",
         explorerProjectScope,
-        relationConfirmed || outputInvoiceDownstreamConfirmed,
-        Boolean(options.costStatisticsRelationFanout) || outputInvoiceDownstreamConfirmed,
+        relationConfirmed,
+        Boolean(options.costStatisticsRelationFanout),
         invoiceImportDownstreamConfirmed,
         etcImportDownstreamConfirmed,
         bankImportDownstreamConfirmed,
@@ -8848,8 +8664,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     if (path === "/api/cost-statistics/export-preview") {
       return json(route, costStatisticsExportPreviewPayload(
         url,
-        relationConfirmed || outputInvoiceDownstreamConfirmed,
-        Boolean(options.costStatisticsRelationFanout) || outputInvoiceDownstreamConfirmed,
+        relationConfirmed,
+        Boolean(options.costStatisticsRelationFanout),
         invoiceImportDownstreamConfirmed,
         etcImportDownstreamConfirmed,
         bankImportDownstreamConfirmed,
@@ -8868,8 +8684,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           },
           body: costStatisticsExportBody(
             url,
-            relationConfirmed || outputInvoiceDownstreamConfirmed,
-            Boolean(options.costStatisticsRelationFanout) || outputInvoiceDownstreamConfirmed,
+            relationConfirmed,
+            Boolean(options.costStatisticsRelationFanout),
             invoiceImportDownstreamConfirmed,
             etcImportDownstreamConfirmed,
             bankImportDownstreamConfirmed,
@@ -8889,8 +8705,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     if (costTransactionDetailMatch) {
       return json(route, costTransactionPayload(
         decodeURIComponent(costTransactionDetailMatch[1] ?? ""),
-        relationConfirmed || outputInvoiceDownstreamConfirmed,
-        Boolean(options.costStatisticsRelationFanout) || outputInvoiceDownstreamConfirmed,
+        relationConfirmed,
+        Boolean(options.costStatisticsRelationFanout),
         invoiceImportDownstreamConfirmed,
         etcImportDownstreamConfirmed,
         bankImportDownstreamConfirmed,
@@ -8992,7 +8808,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           },
         }, 400);
       }
-      return json(route, outputInvoiceCollectionExportPreviewPayload(outputInvoiceRedRelationConfirmed));
+      return json(route, outputInvoiceCollectionExportPreviewPayload());
     }
 
     if (path === "/api/output-invoice-collections/export") {
@@ -9011,7 +8827,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         headers: {
           "Content-Disposition": "attachment; filename*=UTF-8''output-invoice-collections.xlsx",
         },
-        body: outputInvoiceCollectionExportBody(outputInvoiceRedRelationConfirmed, url),
+        body: outputInvoiceCollectionExportBody(url),
       });
     }
 
@@ -9024,174 +8840,35 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         }, 503);
       }
       return json(route, outputInvoiceCollectionRowsPayload(
-        outputInvoiceStatusSaved,
-        outputInvoiceReminderSaved,
-        outputInvoiceReceiptState !== "none",
-        outputInvoiceRedRelationConfirmed,
-        Boolean(options.outputInvoiceRedRelationCandidate || options.outputInvoiceCollectionListInteractions),
         options.outputInvoiceCollectionListInteractions ? url : undefined,
         invoiceImportDownstreamConfirmed,
       ));
     }
 
-    if (path === "/api/output-invoice-collections/status-rules") {
-      return json(route, outputInvoiceCollectionStatusRulesPayload());
+    if (path === "/api/output-invoice-collections/filter-options") {
+      return json(route, outputInvoiceCollectionFilterOptionsPayload());
     }
 
-    if (path === "/api/output-invoice-collections/receipt-settings") {
-      if (request.method() === "GET") {
-        return json(route, {
-          settings: {
-            tenant_id: "default",
-            prefix: "SK",
-            reset_period: "monthly",
-            version: 1,
-            updated_by: "系统",
-            updated_at: "2026-04-30T10:00:00+08:00",
-          },
-        });
-      }
-      if (request.method() === "PUT") {
-        const body = parseJsonBody(request.postData());
-        const prefix = typeof body.prefix === "string" ? body.prefix : "SK";
-        const resetPeriod = typeof body.resetPeriod === "string" ? body.resetPeriod : "monthly";
-        return json(route, {
-          settings: {
-            tenant_id: "default",
-            prefix,
-            reset_period: resetPeriod,
-            version: 2,
-            updated_by: "管理员",
-            updated_at: "2026-04-30T10:05:00+08:00",
-          },
-        });
-      }
-    }
-
-    if (path === "/api/output-invoice-collections/receipt-preview") {
-      return json(route, outputInvoiceReceiptPreviewPayload());
-    }
-
-    if (path === "/api/output-invoice-collections/receipts/history") {
-      return json(route, outputInvoiceReceiptHistoryPayload(outputInvoiceReceiptState));
-    }
-
-    if (path === "/api/output-invoice-collections/rows/output-collection-row-e2e-001/collection-status") {
-      if (outputInvoiceCollectionStatusFailuresRemaining > 0) {
-        outputInvoiceCollectionStatusFailuresRemaining -= 1;
-        return json(route, {
-          error: "output_invoice_collection_status_temporarily_unavailable",
-          message: "收款状态保存暂时失败，请重试。",
-        }, 503);
-      }
-      outputInvoiceStatusSaved = true;
+    if (path === "/api/output-invoice-collections/invoices/out-e2e-001/detail") {
       return json(route, {
-        ok: true,
-        row_id: "output-collection-row-e2e-001",
-        lifecycle_status: "updated",
+        kind: "invoice",
+        invoice: outputInvoiceCollectionRowsPayload().rows[0]?.invoice,
       });
     }
 
-    if (path === "/api/output-invoice-collections/rows/output-collection-row-e2e-001/collection-reminder") {
-      if (outputInvoiceCollectionReminderFailuresRemaining > 0) {
-        outputInvoiceCollectionReminderFailuresRemaining -= 1;
-        return json(route, {
-          error: "output_invoice_collection_reminder_temporarily_unavailable",
-          message: "收款提醒保存暂时失败，请重试。",
-        }, 503);
-      }
-      outputInvoiceReminderSaved = true;
+    if (path === "/api/output-invoice-collections/bank-transactions/bank-output-e2e-001/detail") {
       return json(route, {
-        ok: true,
-        row_id: "output-collection-row-e2e-001",
-        reminder_id: "output-reminder-e2e-001",
+        kind: "bank",
+        bank: outputInvoiceCollectionRowsPayload().rows[0]?.bank,
       });
     }
 
-    if (path === "/api/output-invoice-collections/rows/output-collection-row-e2e-001/receipts") {
-      const idempotencyKey = request.headers()["idempotency-key"];
-      if (!idempotencyKey) {
-        return json(route, {
-          error: "idempotency_key_required",
-          message: "创建正式收据需要 Idempotency-Key。",
-        }, 400);
-      }
-      if (outputInvoiceCollectionReceiptCreateFailuresRemaining > 0) {
-        outputInvoiceCollectionReceiptCreateFailuresRemaining -= 1;
-        return json(route, {
-          error: "output_invoice_receipt_create_temporarily_unavailable",
-          message: "正式收据创建暂时失败，请重试。",
-        }, 503);
-      }
-      outputInvoiceReceiptState = "issued";
+    if (path === "/api/output-invoice-collections/rows/output-collection-row-e2e-001/relation-details") {
       return json(route, {
-        ok: true,
-        receipt: {
-          id: "receipt-output-e2e-001",
-          receipt_no: "SK2026050002",
-          status: "issued",
-        },
-      });
-    }
-
-    if (path === "/api/output-invoice-collections/receipts/receipt-output-e2e-001/void") {
-      if (outputInvoiceCollectionReceiptVoidFailuresRemaining > 0) {
-        outputInvoiceCollectionReceiptVoidFailuresRemaining -= 1;
-        return json(route, {
-          error: "output_invoice_receipt_void_temporarily_unavailable",
-          message: "正式收据作废暂时失败，请重试。",
-        }, 503);
-      }
-      outputInvoiceReceiptState = "voided";
-      return json(route, {
-        ok: true,
-        receipt: {
-          id: "receipt-output-e2e-001",
-          receipt_no: "SK2026050002",
-          status: "voided",
-        },
-      });
-    }
-
-    if (path === "/api/output-invoice-collections/receipts/receipt-output-e2e-001/reissue") {
-      if (outputInvoiceCollectionReceiptReissueFailuresRemaining > 0) {
-        outputInvoiceCollectionReceiptReissueFailuresRemaining -= 1;
-        return json(route, {
-          error: "output_invoice_receipt_reissue_temporarily_unavailable",
-          message: "正式收据重开暂时失败，请重试。",
-        }, 503);
-      }
-      outputInvoiceReceiptState = "reissued";
-      return json(route, {
-        ok: true,
-        receipt: {
-          id: "receipt-output-e2e-002",
-          receipt_no: "SK2026050003",
-          status: "issued",
-          reissued_from_receipt_id: "receipt-output-e2e-001",
-        },
-      });
-    }
-
-    if (path === "/api/output-invoice-collections/rows/output-collection-row-e2e-001/red-invoice-relations") {
-      outputInvoiceRedRelationConfirmed = true;
-      return json(route, {
-        ok: true,
-        relation: {
-          id: "output-red-relation-e2e-001",
-          row_id: "output-collection-row-e2e-001",
-          related_invoice_id: "out-e2e-002",
-          relation_type: "red_invoice",
-          source: "manual",
-        },
-      });
-    }
-
-    if (path === "/api/output-invoice-collections/red-invoice-relations/output-red-relation-e2e-001") {
-      outputInvoiceRedRelationConfirmed = false;
-      return json(route, {
-        ok: true,
-        relation_id: "output-red-relation-e2e-001",
+        kind: "invoice",
+        relation_count: 2,
+        has_multiple: true,
+        summaries: outputInvoiceReversalRelationSummaries(),
       });
     }
 

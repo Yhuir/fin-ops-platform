@@ -11,7 +11,6 @@ from fin_ops_platform.services.input_invoice_usage_payment_rules import AppSetti
 from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageQueryService
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_pending_payment_canonical_rows import build_oa_pending_payment_rows
-from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionQueryService
 from fin_ops_platform.services.pending_invoice_service import PendingInvoiceQueryService
 
 
@@ -19,7 +18,6 @@ class FakeLifecyclePolicy:
     def __init__(self) -> None:
         self.pending_calls = 0
         self.input_calls = 0
-        self.output_calls = 0
         self.oa_calls = 0
 
     def evaluate_pending_invoice_acquisition(self, **_: object) -> dict[str, object]:
@@ -41,18 +39,6 @@ class FakeLifecyclePolicy:
             "reason": "from lifecycle policy",
             "matchedRuleId": "invoice_lifecycle_policy",
             "severity": "info",
-        }
-
-    def evaluate_output_invoice_collection(self, **_: object) -> dict[str, object]:
-        self.output_calls += 1
-        return {
-            "code": "policy_output_collection",
-            "label": "统一销项收款",
-            "reason": "from lifecycle policy",
-            "matchedRuleId": "invoice_lifecycle_policy",
-            "severity": "info",
-            "collectedAmount": "0.00",
-            "pendingAmount": "88.00",
         }
 
     def evaluate_oa_payment(self, **_: object) -> dict[str, object]:
@@ -107,20 +93,6 @@ class InvoiceLifecyclePageIntegrationTests(unittest.TestCase):
 
         self.assertEqual(row["paymentStatus"]["code"], "policy_input_payment")
         self.assertEqual(policy.input_calls, 1)
-
-    def test_output_invoice_collection_rows_delegate_collection_status_to_lifecycle_policy(self) -> None:
-        policy = FakeLifecyclePolicy()
-        service = OutputInvoiceCollectionQueryService(
-            import_service=ImportNormalizationService(
-                existing_invoices=[_invoice("inv-out", InvoiceType.OUTPUT, "88.00")]
-            ),
-            lifecycle_policy=policy,
-        )
-
-        row = service.list_rows()["rows"][0]
-
-        self.assertEqual(row["collectionStatus"]["code"], "policy_output_collection")
-        self.assertEqual(policy.output_calls, 1)
 
     def test_oa_pending_payment_rows_delegate_payment_status_to_lifecycle_policy(self) -> None:
         policy = FakeLifecyclePolicy()

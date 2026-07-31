@@ -286,7 +286,7 @@ describe("Cost statistics page", () => {
     });
     expect(heading).toBeInTheDocument();
     expect(screen.queryByTestId("cost-statistics-interaction-overlay")).not.toBeInTheDocument();
-    expect(screen.getByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
+    expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
   });
 
   test("closes tag rules drawer after canonical save without waiting for a read model barrier", async () => {

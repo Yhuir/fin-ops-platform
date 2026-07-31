@@ -5,14 +5,12 @@
 
 ## 当前决策
 
-- 列表读路径以 SQL read model 为优先事实源；只有 fresh payload 才叠加 lifecycle overlay 并返回 `200`。
-- stale/missing/schema/source version mismatch 不做请求线程 live rebuild，统一返回 `202` 和 `read_model_status=refreshing`。
-- 销项收款状态由 `InvoiceLifecyclePolicy` 统一判定，页面和 query service 不各自维护业务状态口径。
-- 手动状态、提醒、红蓝票关系和正式收据写入必须经过 lifecycle/receipt service；service 只接收 route 传入的 actor/tenant/权限结果，不读取 HTTP header/cookie。
-- 普通 PostgreSQL 写路径只在业务事务中提交 lifecycle/canonical fact、版本、审计和信息性 affected scope；不得同时写 `output_invoice_collection` 或其它页面 dirty/outbox。显式 repair/reapply/force refresh 才能按自己的合同进入 queue。
-- 手动状态、提醒、红蓝票关系和正式收据写入成功后立即结束命令阻塞，普通 `freshness_targets` 为空。当前可见页面重跑 normal GET，由 fresh gate 比较 exact month/source proof 并仅在 mismatch 时入队；隐藏页、其它窗口和其它页面在各自访问/重新激活时独立收敛，无法证明月份时 fail closed，禁止回退 `all` fan-out。
-- 正式收据 history 只返回真实 lifecycle facts；不得为了 UI 方便伪造历史。
-- OA、收入流水和销项发票项统一走 `workbench_relation` 分发事实源；linked relation 下多张销项发票由 read model 投影为一条净额收款行，负数/红字发票必须保留在 `invoiceRelations.summaries`。多项时 UI 使用 `+N`，其中 `N=relationCount-1` 表示额外项数。销项发票栏多项时仍展示当前行发票主信息和多张发票价税合计，再显示 `+N` 展开全部发票 summaries。
+- 页面直接读取 canonical 销项发票、收入流水和 active Workbench 正式关系；没有页面 read model、lifecycle overlay 或 refresh queue。
+- HTTP 合同只有七个只读 GET；旧人工状态、提醒、收据、收据编号和手工红蓝票写链路已删除。
+- 精确且唯一的一蓝一红候选由 Workbench 自动写入 `mode=output_invoice_reversal` 正式关系；模糊候选保持未配对。
+- 页面只展示“销项发票 / 收款状态 / 收入流水”三组；红蓝票状态与关联台使用同一正式关系事实源。
+
+以下按日期记录的旧实施条目只用于解释历史迁移，不覆盖以上当前决策。
 
 ## 2026-07-07 - 读侧应用服务边界闭环
 

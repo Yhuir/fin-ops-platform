@@ -38,12 +38,14 @@ test.describe("workbench withdraw browser flow", () => {
     await pairedZone.getByRole("button", { name: "撤回关联" }).click();
     await expect(pairedZone.getByRole("button", { name: "正在准备撤回预览" })).toBeVisible();
     await expect(pairedZone.getByRole("button", { name: "正在准备撤回预览" })).toBeDisabled();
-    const previewDialog = page.getByRole("dialog", { name: "关联预览" });
+    const previewDialog = page.getByRole("dialog", { name: "撤回关联" });
     await expect(previewDialog).toBeVisible();
-    await expect(previewDialog.getByText("撤回关联预览")).toBeVisible();
     await expect(previewDialog.getByText("所选记录已确认关联，可在此撤回这组配对关系。")).toBeVisible();
     await expect(previewDialog.getByTestId("relation-preview-before").getByText("完全关联").first()).toBeVisible();
-    await expect(previewDialog.getByTestId("relation-preview-after").getByText("待找流水与发票").first()).toBeVisible();
+    const afterPreview = previewDialog.getByTestId("relation-preview-after");
+    await expect(afterPreview.getByRole("row", { name: /陈涛.*智能工厂设备商/ })).toBeVisible();
+    await expect(afterPreview.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeVisible();
+    await expect(afterPreview.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })).toBeVisible();
 
     const previewBody = api.lastBody("POST /api/workbench/actions/withdraw-link/preview");
     expect(previewBody).toMatchObject({ month: "all" });
@@ -51,7 +53,7 @@ test.describe("workbench withdraw browser flow", () => {
     expect(previewBody.row_ids).toHaveLength(workbenchRowIds.length);
 
     const workbenchLoadsBeforeWithdraw = api.count("GET /api/workbench");
-    await previewDialog.getByRole("textbox", { name: "备注" }).fill("浏览器撤回主链路回归");
+    await previewDialog.getByRole("textbox", { name: "撤回说明" }).fill("浏览器撤回主链路回归");
     await previewDialog.getByRole("button", { name: "确认撤回" }).click();
 
     await expect(previewDialog).toHaveAttribute("aria-busy", "true");
@@ -59,11 +61,11 @@ test.describe("workbench withdraw browser flow", () => {
     await expect(previewDialog.getByRole("button", { name: "确认撤回" })).toBeDisabled();
     await expect(previewDialog.getByRole("button", { name: "取消" })).toBeDisabled();
     await expect(previewDialog.getByRole("button", { name: "关闭关联预览" })).toBeDisabled();
-    await expect(previewDialog.getByRole("textbox", { name: "备注" })).toBeDisabled();
+    await expect(previewDialog.getByRole("textbox", { name: "撤回说明" })).toBeDisabled();
     await expect(pairedGroup).toBeVisible();
     await expect(page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001")).toHaveCount(0);
 
-    await expect(page.getByRole("dialog", { name: "关联预览" })).toHaveCount(0);
+    await expect(previewDialog).toHaveCount(0);
     await expect(page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001")).toBeVisible();
     await expect(page.getByTestId("candidate-group-unpaired-row:bk-o-202603-001")).toBeVisible();
     await expect(page.getByTestId("candidate-group-unpaired-row:iv-o-202603-001")).toBeVisible();

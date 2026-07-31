@@ -55,7 +55,7 @@ test.describe("workbench read-export permission browser flow", () => {
     await expect(unpairedGroup.getByRole("button", { name: "标记异常" })).toHaveCount(0);
     await expect(unpairedGroup.getByRole("button", { name: "异常处理" })).toHaveCount(0);
     await expect(unpairedGroup.getByRole("button", { name: "确认关联" })).toHaveCount(0);
-    await expect(page.getByRole("dialog", { name: "关联预览" })).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: /确认关联|撤回关联/ })).toHaveCount(0);
     await expect(page.getByRole("dialog", { name: "统一异常处理" })).toHaveCount(0);
 
     expectNoWorkbenchMutationCalls(api);
@@ -77,7 +77,7 @@ test.describe("workbench read-export permission browser flow", () => {
     await expect(pairedGroup.getByRole("button", { name: "取消关联" })).toHaveCount(0);
     await expect(pairedGroup.getByRole("button", { name: "异常处理" })).toHaveCount(0);
     await expect(page.getByRole("menuitem", { name: "取消关联" })).toHaveCount(0);
-    await expect(page.getByRole("dialog", { name: "关联预览" })).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: /确认关联|撤回关联/ })).toHaveCount(0);
 
     expectNoWorkbenchMutationCalls(api);
   });
@@ -151,7 +151,7 @@ test.describe("workbench App Health write-safety browser flow", () => {
     await expect(unpairedGroup.getByRole("button", { name: "标记异常" })).toHaveCount(0);
     await expect(unpairedGroup.getByRole("button", { name: "异常处理" })).toHaveCount(0);
     await expect(unpairedGroup.getByRole("button", { name: "确认关联" })).toHaveCount(0);
-    await expect(page.getByRole("dialog", { name: "关联预览" })).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: /确认关联|撤回关联/ })).toHaveCount(0);
 
     expectNoWorkbenchMutationCalls(api);
   });

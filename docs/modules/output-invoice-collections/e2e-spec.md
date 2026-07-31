@@ -1,34 +1,25 @@
 # 销项发票收款情况 Spec-first E2E Spec
 
-本文件定义 `/output-invoice-collections` 页面在真实浏览器中的业务验收合同。测试必须证明用户可见的销项收款、红蓝票关系和收据流程，而不是保护当前组件实现细节。
+本文件定义 `/output-invoice-collections` 的真实浏览器业务验收合同。
 
 ## 模块目标
 
-销项发票收款情况页面用于查看销项发票、收入流水、收款状态、红蓝票关系和正式收据生命周期。页面只展示 canonical PostgreSQL direct-read 结果；手动状态、提醒、红蓝票关系和收据写入后必须重新读取后端 rows，不能只靠前端局部状态伪装成功。
+页面直接展示 canonical 销项发票、收款状态、收入流水和 Workbench 自动红蓝票正式关系。页面是只读业务视图，不维护 OA、收据、提醒、手工收款状态或手工红蓝票关系。
 
-## 用户角色
-
-- `admin`：可读写并维护收据编号设置。
-- `full_access`：可读写收款状态、提醒、红蓝票关系和收据流程。
-- `read_export_only`：可查看/导出，不能触发写操作。
-- forbidden/expired session：不能进入页面或调用受保护 API。
-
-## Spec 场景
+## 场景
 
 | Spec ID | 场景 | 优先级 | 验收标准 |
 | --- | --- | --- | --- |
-| `OUT-COLL-E2E-001` | canonical rows/filter/table baseline | P0 | 页面一次加载 rows/summary/facets，展示发票、收款状态、收入流水、收据状态；首屏 page size 有界，筛选/排序不从当前页伪造全局选项。 |
-| `OUT-COLL-E2E-002` | 手动收款状态/提醒 -> canonical GET | P0 | 保存状态和提醒后命令立即结束，页面重新请求自身 rows 并展示 canonical lifecycle facts；状态保存暂时失败时保留 drawer、用户输入和原 rows，不触发提醒半提交，重试成功后才刷新 rows；若状态已保存成功但提醒保存暂时失败，重试时不得重复提交未改变的状态 payload。 |
-| `OUT-COLL-E2E-003` | 正式收据 preview/create/void/reissue/history | P0 | 预览展示收据信息，创建必须带 idempotency key；创建、作废和重开后重跑当前 rows/history normal GET，访问边界按需收敛；创建暂时失败时必须保留预览 drawer、错误和重试入口，不能提前进入已出收据或读取伪历史；作废/重开暂时失败时必须保留原因弹窗、用户输入和当前 history，不得提前刷新 rows/history。 |
-| `OUT-COLL-E2E-004` | 红蓝票关系 confirm/revoke -> normal GET -> relation overlay | P0 | 选择关联发票并确认后命令不等待页面重建，页面重新读取自身 rows；红蓝票 drawer 的已有依据展示人工关系、来源和证据，撤销后该人工依据消失。 |
-| `OUT-COLL-E2E-005` | direct-read error recovery | P0 | rows 暂时失败时显示 error、不伪装 empty、不自动 polling；用户刷新后恢复 canonical rows。 |
-| `OUT-COLL-E2E-006` | 权限和 admin-only 设置 | P1 | `read_export_only` 不触发写 API，`admin` 才显示收据编号设置；API 403 不被 UI 当作成功。 |
-| `OUT-COLL-E2E-007` | 导出/download | P1 | 浏览器 download event 成功，字段、筛选、权限和 row-limit 反馈与后端 contract 一致。 |
-| `OUT-COLL-E2E-008` | 下游 relation consumer 访问收敛 | P1 | 红蓝票关系变化后销项页重跑 canonical GET；成本和搜索等实际 consumer 按自己的读取边界展示一致结果，税金抵扣不消费 relation。 |
+| `OUT-COLL-E2E-001` | canonical baseline | P0 | 首屏只展示 `销项发票 / 收款状态 / 收入流水` 三组；筛选、排序、分页和 summary 来自 API。 |
+| `OUT-COLL-E2E-002` | 自动红蓝票关系 | P0 | 蓝票展示“已被红冲”，红票展示“已冲销蓝票”，两行关系详情互相引用且 mode 为 `output_invoice_reversal`。 |
+| `OUT-COLL-E2E-003` | 未匹配红票 | P0 | 歧义或无匹配负票展示“红票待核对”，不得自动选择任一候选。 |
+| `OUT-COLL-E2E-004` | direct-read error recovery | P0 | rows 暂时失败时显示 error、不伪装 empty、不自动 polling；用户刷新后恢复。 |
+| `OUT-COLL-E2E-005` | 只读权限和旧入口删除 | P0 | view/export 用户可读可导出；页面没有状态/提醒、红蓝票手工操作、收据、OA 或 admin 设置入口，零 mutation 请求。 |
+| `OUT-COLL-E2E-006` | 详情 | P1 | 发票、银行流水和 `kind=bank|invoice` 关系详情从 canonical GET 返回；404/失败可见。 |
+| `OUT-COLL-E2E-007` | 导出 | P1 | download event 成功，字段和当前筛选一致，导出不包含 OA、收据或手工状态列。 |
 
 ## 不属于本地 deterministic E2E 的风险
 
-- 真实 PostgreSQL 大数据、历史半迁移、EXPLAIN 和锁等待。
-- 下游仍使用 read model 的 consumer，其真实 RabbitMQ/Redis/systemd worker drain。
-- 真实生产下载保存、浏览器 profile 权限和大文件导出性能。
-- 真实税金/成本/search 全量链路需要 staging 或生产前 smoke。
+- 生产历史数据中的重复、缺失税号和歧义红蓝票分布。
+- 真实 PostgreSQL 查询计划、锁等待和大文件导出耗时。
+- Workbench 后台自动正式化及发布后 T+300 队列稳定性；由 release gate/生产 smoke 验证。

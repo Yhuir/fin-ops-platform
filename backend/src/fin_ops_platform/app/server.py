@@ -253,11 +253,6 @@ from fin_ops_platform.services.operations_dashboard import OperationsDashboardSe
 from fin_ops_platform.services.output_invoice_collection_canonical_query_service import (
     OutputInvoiceCollectionCanonicalQueryService,
 )
-from fin_ops_platform.services.output_invoice_collection_lifecycle_service import (
-    InMemoryOutputInvoiceCollectionLifecycleRepository,
-    OutputInvoiceCollectionLifecycleService,
-)
-from fin_ops_platform.services.output_invoice_collection_receipt_service import OutputInvoiceCollectionReceiptService
 from fin_ops_platform.services.output_invoice_collection_service import (
     OutputInvoiceCollectionError,
     OutputInvoiceCollectionQueryService,
@@ -303,9 +298,6 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
     PostgresOAProjectionAdapter,
 )
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
-from fin_ops_platform.services.postgres_repositories.output_invoice_collection import (
-    build_output_invoice_collection_lifecycle_repository,
-)
 from fin_ops_platform.services.postgres_repositories.tax_offset import (
     LocalTaxOffsetCanonicalRepository,
     PostgresTaxOffsetCanonicalRepository,
@@ -750,9 +742,6 @@ class Application:
             "bank_flow_rule_batch_canonical_query_repository",
             None,
         )
-        self._output_invoice_collection_lifecycle_repository = build_output_invoice_collection_lifecycle_repository(
-            state_connection
-        )
         self._import_service = ImportNormalizationService.from_snapshot(
             persisted_state.get("imports"),
             id_registry=self._state_store,
@@ -944,24 +933,7 @@ class Application:
         self._output_invoice_collection_query_service = OutputInvoiceCollectionQueryService(
             import_service=self._import_service,
             relation_facade=self._workbench_relation_read_facade(),
-            oa_projection=oa_adapter,
-            lifecycle_repository=self._output_invoice_collection_lifecycle_repository,
-            lifecycle_policy=self._invoice_lifecycle_policy(),
             require_fresh_relations=False,
-        )
-        self._output_invoice_collection_lifecycle_service = OutputInvoiceCollectionLifecycleService(
-            repository=self._output_invoice_collection_lifecycle_repository,
-            row_provider=lambda row_id, tenant_id: self._output_invoice_collection_page_query_service().row_by_id(
-                row_id,
-                tenant_id=tenant_id,
-            ),
-        )
-        self._output_invoice_collection_receipt_service = OutputInvoiceCollectionReceiptService(
-            repository=self._output_invoice_collection_lifecycle_repository,
-            row_provider=lambda row_id, tenant_id: self._output_invoice_collection_page_query_service().row_by_id(
-                row_id,
-                tenant_id=tenant_id,
-            ),
         )
         self._pending_invoice_application_service = PendingInvoiceApplicationService(
             import_service=self._import_service,
@@ -1971,9 +1943,6 @@ class Application:
                 "/api/oa-pending-payments/rows/{row_id}/relation-details",
                 "/api/output-invoice-collections/rows",
                 "/api/output-invoice-collections/filter-options",
-                "/api/output-invoice-collections/status-rules",
-                "/api/output-invoice-collections/receipt-preview",
-                "/api/output-invoice-collections/receipts/history",
                 "/api/output-invoice-collections/invoices/{invoice_id}/detail",
                 "/api/output-invoice-collections/bank-transactions/{bank_transaction_id}/detail",
                 "/api/output-invoice-collections/rows/{row_id}/relation-details",
@@ -5846,17 +5815,9 @@ class Application:
         service = getattr(self, "_output_invoice_collection_query_service", None)
         if isinstance(service, OutputInvoiceCollectionQueryService):
             return service
-        lifecycle_repository = getattr(self, "_output_invoice_collection_lifecycle_repository", None)
-        if lifecycle_repository is None:
-            lifecycle_repository = InMemoryOutputInvoiceCollectionLifecycleRepository()
-            self._output_invoice_collection_lifecycle_repository = lifecycle_repository
         service = OutputInvoiceCollectionQueryService(
             import_service=self._import_service,
             relation_facade=self._workbench_relation_read_facade(),
-            oa_projection=self._postgres_oa_projection_repository()
-            or getattr(getattr(self, "_workbench_query_service", None), "_oa_adapter", None),
-            lifecycle_repository=lifecycle_repository,
-            lifecycle_policy=self._invoice_lifecycle_policy(),
             require_fresh_relations=False,
         )
         self._output_invoice_collection_query_service = service
@@ -5881,39 +5842,12 @@ class Application:
         return service
 
     def _output_invoice_collection_routes(self) -> OutputInvoiceCollectionApiRoutes:
-        lifecycle_repository = getattr(self, "_output_invoice_collection_lifecycle_repository", None)
-        if lifecycle_repository is None:
-            lifecycle_repository = InMemoryOutputInvoiceCollectionLifecycleRepository()
-            self._output_invoice_collection_lifecycle_repository = lifecycle_repository
-        lifecycle_service = getattr(self, "_output_invoice_collection_lifecycle_service", None)
-        if not isinstance(lifecycle_service, OutputInvoiceCollectionLifecycleService):
-            lifecycle_service = OutputInvoiceCollectionLifecycleService(
-                repository=lifecycle_repository,
-                row_provider=lambda row_id, tenant_id: self._output_invoice_collection_page_query_service().row_by_id(
-                    row_id,
-                    tenant_id=tenant_id,
-                ),
-            )
-            self._output_invoice_collection_lifecycle_service = lifecycle_service
-        receipt_service = getattr(self, "_output_invoice_collection_receipt_service", None)
-        if not isinstance(receipt_service, OutputInvoiceCollectionReceiptService):
-            receipt_service = OutputInvoiceCollectionReceiptService(
-                repository=lifecycle_repository,
-                row_provider=lambda row_id, tenant_id: self._output_invoice_collection_page_query_service().row_by_id(
-                    row_id,
-                    tenant_id=tenant_id,
-                ),
-            )
-            self._output_invoice_collection_receipt_service = receipt_service
         return OutputInvoiceCollectionApiRoutes(
             query_service=self._output_invoice_collection_page_query_service(),
-            lifecycle_service=lifecycle_service,
-            receipt_service=receipt_service,
             resolve_read_session=self._resolve_output_invoice_collection_read_session,
             json_response=self._json_response,
             xlsx_response=self._output_invoice_collection_xlsx_response,
             error_response=self._output_invoice_collection_error_response,
-            load_json_body=self._load_json_body,
         )
 
     def _output_invoice_collection_xlsx_response(self, filename: str, content: bytes) -> Response:

@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from fin_ops_platform.services.input_invoice_usage_canonical_query_service import (
-    _StaticOaProjection,
     _dedupe_objects,
     _filter_options,
     _first,
@@ -184,10 +183,10 @@ class OutputInvoiceCollectionCanonicalQueryService:
         tenant_id: str = "default",
     ) -> dict[str, Any]:
         kind = _first(query, "kind")
-        if kind not in {"oa", "bank", "invoice", "red_invoice"}:
+        if kind not in {"bank", "invoice"}:
             raise OutputInvoiceCollectionError(
                 "invalid_relation_kind",
-                "kind must be oa, bank, invoice or red_invoice.",
+                "kind must be bank or invoice.",
             )
         row = self.row_by_id(row_id, tenant_id=tenant_id)
         if row is None:
@@ -197,19 +196,15 @@ class OutputInvoiceCollectionCanonicalQueryService:
                 status_code=404,
             )
         relation_payload = {
-            "oa": row["oa"],
             "bank": row["bankTransactions"],
             "invoice": row["invoiceRelations"],
-            "red_invoice": row["redInvoiceRelation"],
         }[kind]
         return {
             "rowId": row_id,
             "kind": kind,
             "title": {
-                "oa": "OA关联明细",
                 "bank": "银行流水关联明细",
                 "invoice": "发票关联明细",
-                "red_invoice": "红蓝票关联明细",
             }[kind],
             "relationCount": int(relation_payload.get("relationCount") or 0),
             "summaries": list(relation_payload.get("summaries") or []),
@@ -287,44 +282,6 @@ class OutputInvoiceCollectionCanonicalQueryService:
             "currency": transaction.currency or "CNY",
             "bankTextFields": list(transaction.bank_text_fields),
         }
-
-    def status_rules(self) -> dict[str, Any]:
-        return self._row_assembler.status_rules()
-
-    def receipt_preview(
-        self,
-        payload: dict[str, Any],
-        *,
-        tenant_id: str = "default",
-    ) -> dict[str, Any]:
-        row_id = str(payload.get("rowId") or payload.get("row_id") or "")
-        row = self.row_by_id(row_id, tenant_id=tenant_id)
-        if row is None:
-            raise OutputInvoiceCollectionError(
-                "row_not_found",
-                f"Output invoice collection row not found: {row_id}",
-                status_code=404,
-            )
-        return self._row_assembler._receipt_preview_service.preview(
-            row=row,
-            selected_bank_transaction_id=str(
-                payload.get("bankTransactionId")
-                or payload.get("bank_transaction_id")
-                or ""
-            )
-            or None,
-        )
-
-    def receipt_history(
-        self,
-        *,
-        invoice_id: str,
-        tenant_id: str = "default",
-    ) -> dict[str, Any]:
-        return self._row_assembler.receipt_history(
-            invoice_id=invoice_id,
-            tenant_id=tenant_id,
-        )
 
     def _export_rows(
         self,
@@ -421,7 +378,7 @@ class OutputInvoiceCollectionCanonicalQueryService:
             str(group.get("group_key") or ""): group
             for group in all_groups
         }
-        rows = [
+        return [
             self._row_assembler._row_payload(
                 group,
                 [
@@ -436,11 +393,6 @@ class OutputInvoiceCollectionCanonicalQueryService:
             )
             for group in snapshot.groups
         ]
-        return _apply_overlays(
-            self._row_assembler,
-            rows,
-            overlays=snapshot.overlays,
-        )
 
 
 def _context(
@@ -457,50 +409,10 @@ def _context(
             existing_transactions=list(snapshot.transactions),
         ),
         relation_facade=None,
-        oa_projection=_StaticOaProjection(snapshot.oa_records),
         require_fresh_relations=False,
     )
     context.add_distributed_relations(snapshot.relations)
     return context
-
-
-def _apply_overlays(
-    assembler: OutputInvoiceCollectionQueryService,
-    rows: list[dict[str, Any]],
-    *,
-    overlays: dict[str, dict[str, Any]],
-) -> list[dict[str, Any]]:
-    result: list[dict[str, Any]] = []
-    for row in rows:
-        overlay = overlays.get(str(row.get("invoiceIdentityKey") or ""))
-        if not isinstance(overlay, dict):
-            result.append(row)
-            continue
-        updated = dict(row)
-        updated["collectionStatus"] = assembler._status_overlay_service.apply_manual_override(
-            dict(updated.get("collectionStatus") or {}),
-            override=(
-                overlay.get("override")
-                if isinstance(overlay.get("override"), dict)
-                else None
-            ),
-            reminder=(
-                overlay.get("reminder")
-                if isinstance(overlay.get("reminder"), dict)
-                else None
-            ),
-        )
-        updated["redInvoiceRelation"] = assembler._overlay_red_relations(
-            dict(updated.get("redInvoiceRelation") or {}),
-            list(overlay.get("redRelations") or []),
-        )
-        updated["receipt"] = assembler._overlay_receipt_payload(
-            dict(updated.get("receipt") or {}),
-            list(overlay.get("receipts") or []),
-            dict(updated.get("collectionStatus") or {}),
-        )
-        result.append(updated)
-    return result
 
 
 def _query_kwargs(query: dict[str, list[str]]) -> dict[str, Any]:
@@ -584,9 +496,6 @@ def _local_statistics(rows: list[dict[str, Any]]) -> dict[str, int]:
         )
         for row in rows
     )
-    linked_oa = sum(
-        1 for row in rows if int((row.get("oa") or {}).get("relationCount") or 0)
-    )
     linked_bank = sum(
         1
         for row in rows
@@ -607,24 +516,17 @@ def _local_statistics(rows: list[dict[str, Any]]) -> dict[str, int]:
         1
         for row in rows
         if str((row.get("collectionStatus") or {}).get("code") or "")
-        in {"collected", "collected_red_refunded"}
+        in {"collected", "reversed_by_red", "reverses_blue"}
     )
     return {
         "invoiceCount": invoice_count,
-        "linkedOaInvoiceCount": linked_oa,
         "linkedIncomeBankInvoiceCount": linked_bank,
         "collectedInvoiceCount": collected,
-        "unlinkedOaInvoiceCount": max(0, invoice_count - linked_oa),
         "unlinkedBankInvoiceCount": max(0, invoice_count - linked_bank),
         "uncollectedInvoiceCount": max(0, invoice_count - collected),
         "redInvoiceCount": sum(
             1
             for row in rows
             if str((row.get("invoice") or {}).get("totalWithTax") or "").startswith("-")
-        ),
-        "issuedReceiptCount": sum(
-            1
-            for row in rows
-            if str((row.get("receipt") or {}).get("status") or "") == "issued"
         ),
     }

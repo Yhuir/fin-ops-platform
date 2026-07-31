@@ -3,7 +3,7 @@
 - Module key：`output-invoice-collections`
 - Route：`/output-invoice-collections`
 - Page key：`output-invoice-collections`
-- 当前读架构：页面专属 canonical PostgreSQL 直读
+- 当前架构：canonical PostgreSQL API 直读、只读页面
 
 ## 修改前必读
 
@@ -12,53 +12,66 @@
 - `docs/dev/api-contracts.md`
 - `docs/modules/output-invoice-collections/boundary-io.md`
 - `docs/modules/workbench-relations/boundary-io.md`
-- `docs/modules/domain-events-lifecycle/boundary-io.md`
 - `docs/modules/permissions-and-audit/boundary-io.md`
 
 ## 代码入口
 
 - `web/src/pages/OutputInvoiceCollectionsPage.tsx`
-- `web/src/components/outputInvoiceCollections/*`
+- `web/src/components/outputInvoiceCollections/OutputInvoiceCollectionsTable.tsx`
+- `web/src/components/outputInvoiceCollections/OutputInvoiceCollectionDetailDrawer.tsx`
 - `web/src/features/outputInvoiceCollections/api.ts`
 - `backend/src/fin_ops_platform/app/routes_output_invoice_collections.py`
 - `backend/src/fin_ops_platform/services/output_invoice_collection_canonical_query_service.py`
 - `backend/src/fin_ops_platform/services/output_invoice_collection_service.py`
-- `backend/src/fin_ops_platform/services/output_invoice_collection_lifecycle_service.py`
-- `backend/src/fin_ops_platform/services/output_invoice_collection_receipt_service.py`
 - `backend/src/fin_ops_platform/services/postgres_repositories/invoice_usage_collection_query.py`
-- `backend/src/fin_ops_platform/services/postgres_repositories/output_invoice_collection.py`
+- `backend/src/fin_ops_platform/services/workbench_free_matching_engine.py`
+- `backend/src/fin_ops_platform/services/postgres_repositories/workbench_formal_relation.py`
 
 ## 当前事实边界
 
-- 浏览器只调用 `/api/output-invoice-collections/*` 页面专属 API。首屏、筛选、排序、分页、summary、statistics 和 filter options 由一次 `/rows` 请求返回。
-- 生产查询由 `OutputInvoiceCollectionCanonicalQueryService` 调用 `PostgresOutputInvoiceCollectionQueryRepository`。repository 在同一显式 `REPEATABLE READ READ ONLY` 事务内读取 rows、summary、statistics、facets、关系和 lifecycle overlay。
-- 发票、银行流水、OA snapshot、收款/红字/收据 lifecycle facts 来自 PostgreSQL canonical tables。页面请求热路径不得访问 OA、MongoDB、MySQL 或对象存储。
-- 正式关系只读取 `app.workbench_pair_relations` 中 `status='active'` 的关系。不得读取 `read_model.workbench_relation_*`、`read_model.output_invoice_collection_*` 或 `read_model.invoice_lifecycle_*` 作为页面事实。
-- 同一 active relation component 中的多张销项发票归并为一行，金额按成员净额合计；负数和红字发票必须保留在 `invoiceRelations.summaries`。
-- 收款状态由 canonical relation、银行流水和 lifecycle overlay 组合；正式收据 create/void/reissue、手动状态、提醒和红蓝票关系继续写 canonical facts。
-- `/rows/{row_id}/relation-details`、详情、导出和写后查询使用同一 canonical query 边界，不允许 live fallback、双读或全量 Python 过滤。
-- rows 响应不含 `read_model_status`、`source_versions`、refresh target 或 polling 合同；前端只维护 loading、empty、error 和用户主动刷新状态。
-- 写命令保持权限、审计、CAS/idempotency 和冲突合同；成功后当前页面重跑正常 GET，不等待 operation barrier。
+- 浏览器只调用 `/api/output-invoice-collections/*` 的七个 GET API；页面没有收款状态、提醒、收据编号、正式收据或手工红蓝票写入口。
+- rows、summary、statistics、facets、筛选、排序、分页、详情和导出直接读取 PostgreSQL canonical facts，不读取页面 read model，也不访问 OA、MongoDB、MySQL 或对象存储。
+- 正式关系只来自 `app.workbench_pair_relations status='active'`。销项红蓝票由 Workbench 匹配引擎确定性识别并以 `mode=output_invoice_reversal` 写入同一正式关系事实源。
+- 蓝票与红票各自保留为独立表格行，通过 `invoiceRelations` 互相引用；页面不再把多张销项票折叠成一条净额行。
+- 收款状态只由发票正负、有效红蓝票关系和已关联收入流水计算，不接受页面手工覆盖。
+- 页面只展示三组：`销项发票`、`收款状态`、`收入流水`。OA 和收据不属于本页 DTO。
+- 页面请求失败时结构化报错，不回退旧 projection；前端只维护 loading、empty、error 和用户主动刷新状态。
+
+## 红蓝票确定性规则
+
+只有同时满足以下条件且候选唯一时才自动正式化：
+
+1. 同为销项发票，且一张价税合计为正、一张为负。
+2. 销方识别号、购方识别号、币种、税率一致。
+3. 价税合计、不含税金额、税额的绝对值一致。
+4. 红票开票日期不早于蓝票。
+5. 一组 identity 内恰好一张蓝票和一张红票；重复或歧义候选保持未配对。
+
+正式关系写入 `app.workbench_pair_relations`，`mode=output_invoice_reversal`，并保留规则与匹配证据。红票不再进入通用自由匹配，避免被错误配到流水、OA 或其他发票。
 
 ## 权限与审计
 
-- 页面读取和导出沿用现有 view/export 权限。
-- 收款状态、提醒、红蓝票、收据生命周期和编号设置沿用原 full-access/admin 权限。
+- 页面读取、详情和导出沿用现有 view/export 权限。
+- 本模块没有页面写权限或 admin-only 设置入口。
 - route 只做 session、权限、参数和 HTTP 映射；service 不读取 header/cookie，repository 不做权限判断。
-- App Health 中历史 read-model 审计入口仍是共享运维能力，不是本页面读路径；其最终清理由全局任务处理。
+- 自动红蓝票关系沿用 Workbench 正式关系的审计、幂等和撤回边界，不建立第二套关系表。
 
-## 维护触发器
+## 旧链路删除合同
 
-发生以下变化时更新本目录，并按影响同步长期事实源：
+以下运行时代码不得恢复：
 
-- 页面筛选、排序、分页、详情、导出、drawer/dialog 或权限变化。
-- canonical 表、active relation 口径、净额归并、lifecycle 或 rows/summary/facets DTO 变化。
-- snapshot 一致性、查询次数、SQL 性能、收据幂等或写后 GET 行为变化。
-- 页面专属旧 read-model 代码或共享 worker/manifest 的最终清理。
+- output collection lifecycle/status/reminder service 和 repository。
+- 正式收据 preview/create/void/reissue/history/settings。
+- 手工红蓝票确认/撤销 drawer 和 API。
+- 页面 OA/收据列、状态/提醒按钮及对应 DTO。
+- output collection 页面 read model、worker、freshness/polling/fallback。
+
+历史 migration/表可以作为回滚证据保留，但不得有运行时 reader、writer、route 或页面入口。
 
 ## 本目录文件
 
 - `boundary-io.md`：当前输入、输出、文件和依赖边界。
 - `tests.md`：七类测试适用性、命令和剩余风险。
-- `state-machine.md`：收款、提醒、红蓝票和收据生命周期。
-- `implementation-notes.md`：历史决策记录；历史 read-model 描述不覆盖本 README 的当前事实。
+- `state-machine.md`：六个只读收款/红蓝票状态。
+- `e2e-spec.md`、`e2e-coverage.md`：浏览器业务合同与覆盖。
+- `implementation-notes.md`：历史记录；历史 read-model/lifecycle 描述不覆盖本 README。

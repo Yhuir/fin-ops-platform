@@ -16,9 +16,6 @@ from fin_ops_platform.services.postgres_repositories.invoice_usage_collection_qu
     PostgresOutputInvoiceCollectionQueryRepository,
     _facet_counts,
 )
-from fin_ops_platform.services.postgres_repositories.output_invoice_collection import (
-    PostgresOutputInvoiceCollectionLifecycleRepository,
-)
 
 
 class RecordingTransaction:
@@ -175,9 +172,12 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         self.assertIn("bool_or(member.total_with_tax < 0)", sql)
         self.assertIn("from app.workbench_pair_relations relation", sql)
         self.assertIn("where relation.status = 'active'", sql)
-        self.assertIn("app.output_invoice_collection_status_overrides", sql)
-        self.assertIn("then 'pending'", sql)
-        self.assertIn("else 'not_available'", sql)
+        self.assertIn("then 'reversed_by_red'", sql)
+        self.assertIn("then 'reverses_blue'", sql)
+        self.assertIn("then 'unmatched_red'", sql)
+        self.assertNotIn("app.output_invoice_collection_status_overrides", sql)
+        self.assertNotIn("receipt_status", sql)
+        self.assertNotIn("oa_applications", sql)
         self.assertIn("filtered_rows as materialized", sql)
         self.assertIn("jsonb_agg(", sql)
         self.assertNotIn("read_model.output_invoice_collection", sql)
@@ -223,21 +223,6 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
 
         self.assertEqual(payload.summary["invoiceCount"], 2)
         self.assertEqual(payload.summary["totalWithTax"], "800.00")
-
-    def test_lifecycle_overlays_can_join_the_existing_page_snapshot(self) -> None:
-        connection = RecordingConnection()
-        repository = PostgresOutputInvoiceCollectionLifecycleRepository(connection)
-        transaction = RecordingTransaction()
-
-        payload = repository.overlays_for_identity_keys(
-            ["invoice:one"],
-            tenant_id="tenant-a",
-            transaction=transaction,
-        )
-
-        self.assertEqual(payload["invoice:one"]["redRelations"], [])
-        self.assertEqual(len(transaction.statements), 4)
-        self.assertEqual(connection.transactions, [])
 
     def test_invoice_lookup_map_is_reused_across_export_rows(self) -> None:
         import_service = CountingImportService()
@@ -322,25 +307,34 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
 
         self.assertEqual(assembler.candidate_keys, ["current", "related"])
 
-    def test_collection_and_receipt_pending_facets_keep_distinct_labels(self) -> None:
+    def test_collection_status_facets_use_the_canonical_labels(self) -> None:
         counts = _facet_counts(
             [
                 {
                     "field": "collection_status",
-                    "value": "pending",
+                    "value": "pending_collection",
                     "option_count": 1,
                 },
                 {
-                    "field": "receipt_status",
-                    "value": "pending",
+                    "field": "collection_status",
+                    "value": "reversed_by_red",
                     "option_count": 2,
                 },
             ],
-            status_labels={"pending": "待处理"},
+            status_labels={
+                "pending_collection": "待收款",
+                "reversed_by_red": "已被红冲",
+            },
         )
 
-        self.assertEqual(counts["collection_status"][0]["label"], "待处理")
-        self.assertEqual(counts["receipt_status"][0]["label"], "待出收据")
+        self.assertEqual(
+            counts["collection_status"],
+            [
+                {"value": "pending_collection", "label": "待收款", "count": 1},
+                {"value": "reversed_by_red", "label": "已被红冲", "count": 2},
+            ],
+        )
+        self.assertNotIn("receipt_status", counts)
 
 
 if __name__ == "__main__":

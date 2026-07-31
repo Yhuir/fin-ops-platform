@@ -3872,14 +3872,6 @@ textarea {
   width: 190px;
 }
 
-.output-invoice-collections-col-oaApplicant {
-  width: 140px;
-}
-
-.output-invoice-collections-col-oaProject {
-  width: 150px;
-}
-
 .output-invoice-collections-col-bankCounterparty {
   width: 160px;
 }
@@ -3890,10 +3882,6 @@ textarea {
 
 .output-invoice-collections-col-bankSummary {
   width: 150px;
-}
-
-.output-invoice-collections-col-receiptStatus {
-  width: 110px;
 }
 
 .output-invoice-collections-table-group-header,
@@ -3922,16 +3910,8 @@ textarea {
   background: color-mix(in srgb, var(--fp-warning-soft) 66%, var(--fp-surface));
 }
 
-.output-invoice-collections-table-group-header--oa {
-  background: color-mix(in srgb, var(--fp-info-soft) 72%, var(--fp-surface));
-}
-
 .output-invoice-collections-table-group-header--bank {
   background: color-mix(in srgb, var(--fp-primary-soft) 72%, var(--fp-surface));
-}
-
-.output-invoice-collections-table-group-header--receipt {
-  background: color-mix(in srgb, var(--fp-surface-muted) 78%, var(--fp-surface));
 }
 
 .output-invoice-collections-table-sub-header {
@@ -3952,16 +3932,63 @@ textarea {
   background: color-mix(in srgb, var(--fp-warning-soft) 38%, var(--fp-surface));
 }
 
-.output-invoice-collections-table-sub-header--oa {
-  background: color-mix(in srgb, var(--fp-info-soft) 42%, var(--fp-surface));
-}
-
 .output-invoice-collections-table-sub-header--bank {
   background: color-mix(in srgb, var(--fp-primary-soft) 42%, var(--fp-surface));
 }
 
-.output-invoice-collections-table-sub-header--receipt {
-  background: color-mix(in srgb, var(--fp-surface-muted) 48%, var(--fp-surface));
+.output-invoice-collection-status-cell {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+}
+
+.output-invoice-collection-status {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-tag-radius-table);
+  padding: 0 var(--fp-space-2);
+  font-size: var(--fp-text-label);
+  font-weight: 850;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.output-invoice-collection-status--pending_collection {
+  border-color: color-mix(in srgb, var(--fp-warning) 45%, var(--fp-border));
+  background: var(--fp-warning-soft);
+  color: var(--fp-warning);
+}
+
+.output-invoice-collection-status--partial_collected {
+  border-color: color-mix(in srgb, var(--fp-info) 45%, var(--fp-border));
+  background: var(--fp-info-soft);
+  color: var(--fp-info);
+}
+
+.output-invoice-collection-status--collected {
+  border-color: color-mix(in srgb, var(--fp-success) 45%, var(--fp-border));
+  background: var(--fp-success-soft);
+  color: var(--fp-success);
+}
+
+.output-invoice-collection-status--reversed_by_red {
+  border-color: color-mix(in srgb, var(--fp-danger) 45%, var(--fp-border));
+  background: var(--fp-danger-soft);
+  color: var(--fp-danger);
+}
+
+.output-invoice-collection-status--reverses_blue {
+  border-color: color-mix(in srgb, var(--fp-primary) 45%, var(--fp-border));
+  background: var(--fp-primary-soft);
+  color: var(--fp-primary);
+}
+
+.output-invoice-collection-status--unmatched_red {
+  border-color: var(--fp-danger);
+  background: var(--fp-surface);
+  color: var(--fp-danger);
 }
 
 .output-invoice-collections-table-header-stack {
@@ -4915,175 +4942,9 @@ textarea {
   margin-top: 2px;
 }
 
-.output-invoice-collection-receipt-history-list {
-  display: grid;
-  gap: var(--fp-space-3);
-}
-
-.output-invoice-collection-receipt-history-card {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: var(--fp-space-3);
-  border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
-  background: var(--fp-surface);
-  padding: var(--fp-space-3);
-}
-
-.output-invoice-collection-receipt-history-card h3,
-.output-invoice-collection-receipt-history-card p {
-  margin: 0;
-}
-
-.output-invoice-collection-receipt-history-card h3 {
-  color: var(--fp-text-primary);
-  font-size: var(--fp-text-body);
-  font-weight: 900;
-  line-height: 1.3;
-}
-
-.output-invoice-collection-receipt-history-card__main {
-  display: grid;
-  min-width: 0;
-  gap: var(--fp-space-1);
-  color: var(--fp-text-secondary);
-  font-size: var(--fp-text-body);
-  line-height: 1.45;
-}
-
-.output-invoice-collection-receipt-history-card__voided {
-  font-size: var(--fp-text-label);
-  overflow-wrap: anywhere;
-}
-
-.output-invoice-collection-receipt-history-card__actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: var(--fp-space-2);
-}
-
-.output-invoice-collection-receipt-card {
-  display: grid;
-  gap: var(--fp-space-4);
-  border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
-  background: var(--fp-surface);
-  padding: var(--fp-space-4);
-}
-
-.output-invoice-collection-receipt-card__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--fp-space-2);
-  color: var(--fp-text-primary);
-  font-size: var(--fp-text-body);
-}
-
-.output-invoice-collection-receipt-card__title {
-  margin: 0;
-  color: var(--fp-text-primary);
-  font-size: var(--fp-text-title);
-  font-weight: 900;
-  line-height: 1.25;
-  text-align: center;
-}
-
-.output-invoice-collection-receipt-card__date,
-.output-invoice-collection-receipt-card__payer,
-.output-invoice-collection-receipt-card__note {
-  margin: 0;
-  color: var(--fp-text-secondary);
-  font-size: var(--fp-text-body);
-  line-height: 1.5;
-}
-
-.output-invoice-collection-receipt-card__date {
-  text-align: right;
-}
-
-.output-invoice-collection-receipt-card__payer {
-  color: var(--fp-text-primary);
-}
-
-.output-invoice-collection-receipt-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(120px, 140px) minmax(0, 1fr);
-  overflow: hidden;
-  border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
-}
-
-.output-invoice-collection-receipt-grid__cell {
-  min-height: 40px;
-  border-right: 1px solid var(--fp-border);
-  border-bottom: 1px solid var(--fp-border);
-  color: var(--fp-text-primary);
-  font-size: var(--fp-text-body);
-  font-weight: 600;
-  line-height: 1.45;
-  overflow-wrap: anywhere;
-  padding: var(--fp-space-2) var(--fp-space-3);
-}
-
-.output-invoice-collection-receipt-grid__cell:nth-child(3n) {
-  border-right: 0;
-}
-
-.output-invoice-collection-receipt-grid__cell:nth-last-child(-n + 3) {
-  border-bottom: 0;
-}
-
-.output-invoice-collection-receipt-grid__cell--strong {
-  background: var(--fp-surface-muted);
-  color: var(--fp-text-secondary);
-  font-weight: 900;
-}
-
-.output-invoice-collection-receipt-card__totals {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--fp-space-2);
-  color: var(--fp-text-primary);
-  font-size: var(--fp-text-body);
-  font-variant-numeric: tabular-nums;
-  line-height: 1.45;
-}
-
 @media (max-width: 640px) {
   .output-invoice-collection-detail-grid {
     grid-template-columns: 1fr;
-  }
-
-  .output-invoice-collection-receipt-history-card {
-    grid-template-columns: 1fr;
-  }
-
-  .output-invoice-collection-receipt-history-card__actions {
-    justify-content: flex-start;
-  }
-
-  .output-invoice-collection-receipt-card {
-    padding: var(--fp-space-4);
-  }
-
-  .output-invoice-collection-receipt-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .output-invoice-collection-receipt-grid__cell,
-  .output-invoice-collection-receipt-grid__cell:nth-child(3n),
-  .output-invoice-collection-receipt-grid__cell:nth-last-child(-n + 3) {
-    border-right: 0;
-    border-bottom: 1px solid var(--fp-border);
-  }
-
-  .output-invoice-collection-receipt-grid__cell:last-child {
-    border-bottom: 0;
   }
 }
 
@@ -8649,7 +8510,7 @@ textarea {
   display: grid;
   gap: var(--fp-space-2);
   width: 100%;
-  max-height: 300px;
+  min-height: 0;
   overflow: auto;
   padding: 0;
   background: var(--fp-surface);
@@ -8657,7 +8518,12 @@ textarea {
 }
 
 .pending-invoices-column-filter-popover {
+  position: fixed;
+  z-index: 1600;
+  display: flex;
+  flex-direction: column;
   width: 268px;
+  overflow: hidden;
   padding: var(--fp-space-2);
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm);

@@ -24,7 +24,6 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `保存并刷新` | input invoice usage 支付状态规则保存并刷新 read model |
 | `保存外部往来款` | turnover extra save |
 | `保存补充信息` | bank details 人工补分类 |
-| `保存收据编号设置` | output invoice receipt settings |
 | `保存凭据` | settings OA 申请人凭据 |
 | `清空密码` | settings OA 申请人凭据 |
 | `新增账户` | settings 访问账户管理 |
@@ -34,14 +33,11 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `确认导入` | import confirm |
 | `确认对账` | ETC reconciliation |
 | `确认闭环` | turnover closure |
-| `确认关系` | output red invoice relation |
 | `确认关联` | workbench relation |
 | `确认买票` | cash ticket/cost confirmation |
 | `确认为买票` | cash ticket/cost confirmation |
 | `确认为过账` | cash posting confirmation |
 | `确认已支付` | OA pending payment |
-| `确认作废` | output receipt void dialog |
-| `确认重开` | output receipt reissue dialog |
 | `确认拆分` | workbench candidate split |
 | `确认撤回` | withdraw confirmation |
 | `取消现金处理` | cash ticket/cost rollback |
@@ -50,10 +46,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `撤回关联` | workbench/batch relation withdraw |
 | `撤回忽略` | workbench ignored recovery |
 | `删除` | ETC/settings destructive actions |
-| `作废收据` | output receipt history |
-| `重开收据` | output receipt history |
 | `新建批次` | ETC batch |
-| `创建正式收据` | output receipt preview |
 | `创建 OA 草稿` | input/OA/ETC draft |
 | `创建OA草稿` | compact OA draft label |
 | `上传` | import/upload controls |
@@ -91,13 +84,6 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `新增账户` | `web/src/components/settings/SettingsAccessAccountsSection.tsx` | settings 访问账户管理。 |
 | `保存凭据` | `web/src/components/settings/SettingsOaApplicantCredentialsSection.tsx` | settings OA 申请人凭据保存。 |
 | `清空密码` | `web/src/components/settings/SettingsOaApplicantCredentialsSection.tsx` | settings OA 申请人凭据清空。 |
-| `保存收据编号设置` | `web/src/components/outputInvoiceCollections/ReceiptSettingsDrawer.tsx` | 销项收款收据编号设置。 |
-| `创建正式收据` | `web/src/components/outputInvoiceCollections/ReceiptPreviewDrawer.tsx` | 销项收款正式收据创建。 |
-| `作废收据` | `web/src/components/outputInvoiceCollections/ReceiptHistoryDrawer.tsx` | 销项收款收据历史作废。 |
-| `重开收据` | `web/src/components/outputInvoiceCollections/ReceiptHistoryDrawer.tsx` | 销项收款收据历史重开。 |
-| `确认作废` | `web/src/components/outputInvoiceCollections/ReceiptHistoryDrawer.tsx` | 销项收款收据作废确认。 |
-| `确认重开` | `web/src/components/outputInvoiceCollections/ReceiptHistoryDrawer.tsx` | 销项收款收据重开确认。 |
-| `确认关系` | `web/src/components/outputInvoiceCollections/RedInvoiceRelationDrawer.tsx` | 销项红蓝票关系确认。 |
 | `创建 OA 草稿` | `web/src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx` | 进项发票反提 OA 草稿创建。 |
 | `关联支出流水` | `web/src/pages/OaPendingPaymentsPage.tsx` | OA pending 关联支出流水。 |
 | `关联OA项` | `web/src/pages/BatchAccountingPage.tsx` | 批量账务关联 OA 项与流水。 |
@@ -132,7 +118,6 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `bankFlowRuleBatches/api.ts` | `bank-flow-rule-batches` | 流水规则批量处理标签规则、提交、撤回和内部往来迁移底座写入口。 |
 | `oaPendingPayments/api.ts` | `oa-pending-payments` | OA 待付款确认写回和关联支出流水。 |
 | `operationBarrier/api.ts` | `app-health-operations` | 写操作后置 freshness barrier，用于运维/写安全闭环。 |
-| `outputInvoiceCollections/api.ts` | `output-invoice-collections` | 销项收款状态、红蓝票、收据和编号设置写入口。 |
 | `pendingInvoices/api.ts` | `pending-invoices` | 待找发票规则、选择发票和收入状态写入口。 |
 | `tax/api.ts` | `tax-offset` | 税金计划保存和已认证发票导入。 |
 | `turnoverLedger/api.ts` | `turnover-ledger` | 外部往来标签、闭环、撤回和 extra 写入口。 |
@@ -157,8 +142,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `pending-invoices:income-batch` | `pending-invoices` | 收入批量状态区 | read-export 下标记无需开票/现金收入禁用，且复扫候选。 |
 | `input-invoice-usage:payment-rules` | `input-invoice-usage` | 发票与支付状态规则抽屉 | read-export 下规则只读、无保存/还原，且复扫候选。 |
 | `input-invoice-usage:oa-reverse` | `input-invoice-usage` | 以发票反提 OA 工作流抽屉 | read-export 下允许 read-like preview POST，返回 `canCreateDraft=false`，创建 OA 草稿禁用，durable write endpoints 零调用，且复扫候选。 |
-| `output-invoice-collections:collection-rules` | `output-invoice-collections` | 收款状态规则抽屉 | read-export 下状态/红蓝票/待出收据/编号设置入口不可用，规则抽屉复扫候选。 |
-| `output-invoice-collections:receipt-history` | `output-invoice-collections` | 已出收据历史抽屉 | read-export 下作废/重开入口不可用，且复扫候选。 |
+| `output-invoice-collections:canonical-read-only` | `output-invoice-collections` | canonical 三组只读表格 | read-export、full-access、admin 均只提供查询、详情和导出；旧状态/红蓝票/收据写入口不存在，durable mutation 为 0。 |
 | `oa-pending-payments:in-progress` | `oa-pending-payments` | 进行中 OA 区域 | read-export 下关联支出流水禁用、确认写回和 OA 选择不可见，且复扫候选。 |
 | `oa-pending-payments:expense-rules` | `oa-pending-payments` | 支出流水无需开票规则抽屉 | read-export 下规则只读、保存规则禁用，且复扫候选。 |
 | `etc-tickets:reconciliation-workflow` | `etc-tickets` | ETC 对账流程区 | read-export 下上传信用卡账单/票根网、确认对账、人工核对处理动作禁用，且复扫候选。 |
@@ -196,7 +180,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `batch-accounting` | 关联 OA 项与流水、撤回关联 | `covered-browser` | 本轮 `web/e2e/permissions-role-matrix.spec.ts` 覆盖 read-export 下选择 OA 后 submit disabled、已提交 bucket 撤回关联 disabled 且 submit/withdraw 零 mutation；`web/e2e/batch-accounting-flow.spec.ts` 覆盖 full_access submit/withdraw | 新增 batch accounting command 时补同类 Browser 断言。 |
 | `turnover-ledger` | 标签准入保存、确认闭环、撤回闭环、extra 保存/confirm/withdraw、导出 | `covered-browser` | 本轮 `web/e2e/permissions-role-matrix.spec.ts` 覆盖标签抽屉保存 disabled、flow checkbox disabled、extra 编辑入口 disabled、确认闭环 disabled 且零 mutation；extra 抽屉内部保存/confirm/withdraw 因只读角色无法进入写入口，组件/API 覆盖内部按钮和 guard；`web/e2e/turnover-ledger-flow.spec.ts` 覆盖 full_access 主链路 | 新增 turnover 写入口或把 extra 改成只读可打开时，必须补对应 Browser 断言。 |
 | `input-invoice-usage` | 支付规则保存、OA reverse 草稿创建 | `covered-browser` | `web/e2e/input-invoice-usage-flow.spec.ts`；本轮 `web/e2e/permissions-role-matrix.spec.ts` 会在 read-export 下打开支付状态规则抽屉和以发票反提 OA 工作流，断言规则只读、OA reverse preview 不可创建草稿、durable write endpoints 零调用并复跑 DOM 写控件候选扫描 | 新增 payment/OA 写入口时补。 |
-| `output-invoice-collections` | 状态/提醒保存、红蓝票关系、正式收据、收据编号、history void/reopen | `covered-browser` | `web/e2e/output-invoice-collections-flow.spec.ts`、`web/e2e/output-invoice-red-relation-fanout.spec.ts`、组件/API tests；本轮 `web/e2e/permissions-role-matrix.spec.ts` 会在 read-export 下打开收款状态规则和已出收据历史，断言收据编号/状态/红蓝票/待出收据/作废/重开入口不可用并复跑 DOM 写控件候选扫描；admin role matrix 会打开收据编号设置并保存一次 `PUT /api/output-invoice-collections/receipt-settings` | 新增收款 write command 时补。 |
+| `output-invoice-collections` | 无业务写入口；仅 canonical 查询、详情和导出 | `covered-browser` | `web/e2e/output-invoice-collections-flow.spec.ts`、`web/e2e/output-invoice-red-relation-fanout.spec.ts`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx`、API tests；`web/e2e/permissions-role-matrix.spec.ts` 通过 `output-invoice-collections:canonical-read-only` 证明三种角色均无旧状态/提醒/人工红蓝票/收据写入口且 durable mutation 为 0。 | 若新增写入口，必须先恢复权限、API、审计和回滚合同；当前保持只读。 |
 | `oa-pending-payments` | 进行中 OA confirm-paid、link-bank、支出流水无需开票规则保存 | `covered-browser` | 本轮 `web/e2e/permissions-role-matrix.spec.ts` 覆盖 read-export 下 confirm-paid 隐藏、link-bank disabled、OA 选择隐藏、支出流水无需开票规则 drawer 只读且保存禁用，并保持零 mutation；`web/e2e/oa-pending-payments-*` 覆盖 full_access 主链路 | 新增 OA command 时补。 |
 | `cost-statistics` | 标签准入规则保存、导出 | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts` 在 read-export 下打开标签规则抽屉，断言 `保存` disabled 且 tag-rules PUT 零调用；`web/src/test/CostStatisticsPage.test.tsx` 覆盖 writable canonical save→query-time reload 且零 barrier；`web/e2e/cost-statistics-flow.spec.ts` 覆盖 read-export download | 真实 XLSX、代理 header 和生产 rule write audit 归 staging。 |
 | `etc-tickets` | OA 草稿、人工提交、delete/reset、source file/upload/import/manual reconciliation | `covered-browser` | 本轮 `web/e2e/permissions-role-matrix.spec.ts` 覆盖 read-export 下提交 OA、新建批次、删除按钮、source file 上传、确认对账和人工核对动作禁用且零 mutation；`web/e2e/etc-tickets-flow.spec.ts` 覆盖 full_access OA 草稿和人工提交主链路；组件/API tests 覆盖 source file/upload/manual reconciliation guard | 新增 ETC 写入口时补同类 Browser 断言。 |
@@ -211,4 +195,4 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 
 ## 仍未完全闭合
 
-`PERM-E2E-003` 仍不能标记为全量 `covered`：新增页面/route 漏登记、非 admin route 漏进 role matrix、covered row 缺 Browser 证据、dynamic opener 与 Playwright/inventory 不一致已由 `tests/test_permissions_write_entry_inventory.py` 自动拦截，read-export 首屏 visible enabled 写控件和当前 role matrix 已打开的关联台列顺序拖拽 settings 保存入口、关联台未配对候选动作、关联台已配对撤回动作、关联台现金处理行级菜单、关联台已处理/已忽略恢复、银行分类确认、银行人工待分类、银行自动标签、no-OA 标签、pending 规则、收入批量、进项支付规则、进项 OA reverse、销项收款规则/收据历史、OA pending 进行中/规则、ETC 对账流程、batch accounting 选择与已提交撤回、turnover 等动态区域已由 DOM 候选扫描拦截；但尚未由 role matrix 自动打开的页面特定抽屉/弹窗深层爬取尚未完成，真实 OA/代理/生产审计也不能由本地 Browser mock 证明。后续每轮新增按钮时，必须先更新本文件，再补对应 Browser 断言。
+`PERM-E2E-003` 仍不能标记为全量 `covered`：新增页面/route 漏登记、非 admin route 漏进 role matrix、covered row 缺 Browser 证据、dynamic opener 与 Playwright/inventory 不一致已由 `tests/test_permissions_write_entry_inventory.py` 自动拦截，read-export 首屏 visible enabled 写控件和当前 role matrix 已打开的关联台列顺序拖拽 settings 保存入口、关联台未配对候选动作、关联台已配对撤回动作、关联台现金处理行级菜单、关联台已处理/已忽略恢复、银行分类确认、银行人工待分类、银行自动标签、no-OA 标签、pending 规则、收入批量、进项支付规则、进项 OA reverse、销项 canonical 只读区域、OA pending 进行中/规则、ETC 对账流程、batch accounting 选择与已提交撤回、turnover 等动态区域已由 DOM 候选扫描拦截；但尚未由 role matrix 自动打开的页面特定抽屉/弹窗深层爬取尚未完成，真实 OA/代理/生产审计也不能由本地 Browser mock 证明。后续每轮新增按钮时，必须先更新本文件，再补对应 Browser 断言。

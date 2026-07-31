@@ -2814,12 +2814,9 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
     def test_output_invoice_collection_boundary_does_not_depend_on_redis_or_rabbitmq_clients(self) -> None:
         output_invoice_collection_paths = {
             APP_ROOT / "routes_output_invoice_collections.py",
-            SERVICES_ROOT / "output_invoice_collection_lifecycle_service.py",
-            SERVICES_ROOT / "output_invoice_collection_models.py",
-            SERVICES_ROOT / "output_invoice_collection_receipt_service.py",
+            SERVICES_ROOT / "output_invoice_collection_canonical_query_service.py",
             SERVICES_ROOT / "output_invoice_collection_service.py",
-            SERVICES_ROOT / "output_invoice_collection_status_service.py",
-            SERVICES_ROOT / "postgres_repositories" / "output_invoice_collection.py",
+            SERVICES_ROOT / "postgres_repositories" / "invoice_usage_collection_query.py",
         }
         forbidden_modules = {
             "redis",
@@ -2837,6 +2834,15 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             imported_forbidden = sorted(module for module in forbidden_modules if module in modules)
             if imported_forbidden:
                 violations.append(f"{_relative(path)} imports {imported_forbidden}")
+        for retired_path in (
+            SERVICES_ROOT / "output_invoice_collection_lifecycle_service.py",
+            SERVICES_ROOT / "output_invoice_collection_models.py",
+            SERVICES_ROOT / "output_invoice_collection_receipt_service.py",
+            SERVICES_ROOT / "output_invoice_collection_status_service.py",
+            SERVICES_ROOT / "postgres_repositories" / "output_invoice_collection.py",
+        ):
+            if retired_path.exists():
+                violations.append(f"{_relative(retired_path)} must be removed")
 
         self.assertEqual(violations, [])
 
@@ -2865,25 +2871,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "/api/output-invoice-collections/filter-options",
             "/api/output-invoice-collections/export-preview",
             "/api/output-invoice-collections/export",
-            "/api/output-invoice-collections/status-rules",
-            "/api/output-invoice-collections/receipts/history",
-            "/api/output-invoice-collections/receipt-preview",
-            "/api/output-invoice-collections/receipt-settings",
-            "/api/output-invoice-collections/receipts/",
-            "/api/output-invoice-collections/red-invoice-relations/",
             "/api/output-invoice-collections/invoices/",
             "/api/output-invoice-collections/bank-transactions/",
             "/api/output-invoice-collections/rows/",
-            "/collection-status",
-            "/collection-reminder",
-            "/red-invoice-relations",
-            "/receipts",
             "def _json_read(",
-            "def _json_body_mutation(",
-            "def _json_session(",
-            "def _relation_details_response(",
-            "_idempotency_key(headers)",
-            "_trace_id(headers)",
         ):
             if required not in route_class:
                 violations.append(f"Output collection route owner is missing {required}")
@@ -2897,6 +2888,15 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "_sql_relation_details_provider",
             "read_model_status",
             "readModelStatus",
+            "/status-rules",
+            "/receipt",
+            "/collection-status",
+            "/collection-reminder",
+            "/red-invoice-relations",
+            "def _json_body_mutation(",
+            "def _json_session(",
+            "_idempotency_key(headers)",
+            "_trace_id(headers)",
         ):
             if forbidden in route_class:
                 violations.append(

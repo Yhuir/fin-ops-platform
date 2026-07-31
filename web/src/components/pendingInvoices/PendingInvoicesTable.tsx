@@ -1,6 +1,7 @@
-import { Button, Dropdown, Label, Table, type Selection } from "@heroui/react";
+import { Button, Table } from "@heroui/react";
 import { Filter, Info } from "lucide-react";
-import { useState, type MutableRefObject, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type MutableRefObject, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 import {
   AmountCell,
@@ -190,7 +191,12 @@ function ColumnFilterMenu({
   onApply: (filters: PendingInvoiceColumnFilter[]) => void;
   onClear: (fields: string[]) => void;
 }) {
+  const popoverWidth = 268;
+  const containerRef = useRef<HTMLSpanElement | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
+  const [popoverStyle, setPopoverStyle] = useState<{ top: number; left: number; maxHeight: number } | null>(null);
   const [draft, setDraft] = useState<Record<string, Set<string>>>(() => Object.fromEntries(
     group.fields.map((field) => [field.field, selectedValues(columnFilters, field.field)]),
   ));
@@ -207,26 +213,16 @@ function ColumnFilterMenu({
     return `${field}::${value}`;
   }
 
-  function selectedKeysFromDraft() {
-    return new Set(group.fields.flatMap((field) => (
-      [...(draft[field.field] ?? new Set<string>())].map((value) => itemKey(field.field, value))
-    )));
-  }
-
-  function applySelection(keys: Selection) {
-    if (keys === "all") {
-      return;
-    }
-    const next: Record<string, Set<string>> = Object.fromEntries(group.fields.map((field) => [field.field, new Set<string>()]));
-    for (const key of keys) {
-      const rawKey = String(key);
-      const [field, ...valueParts] = rawKey.split("::");
-      const value = valueParts.join("::");
-      if (field in next && value) {
-        next[field].add(value);
+  function toggleDraftValue(field: string, value: string) {
+    setDraft((current) => {
+      const nextValues = new Set(current[field] ?? []);
+      if (nextValues.has(value)) {
+        nextValues.delete(value);
+      } else {
+        nextValues.add(value);
       }
-    }
-    setDraft(next);
+      return { ...current, [field]: nextValues };
+    });
   }
 
   function applyDraft() {
@@ -238,55 +234,126 @@ function ColumnFilterMenu({
     setOpen(false);
   }
 
+  useLayoutEffect(() => {
+    if (!open || !buttonRef.current) {
+      return;
+    }
+
+    const updatePosition = () => {
+      const rect = buttonRef.current?.getBoundingClientRect();
+      if (!rect) {
+        return;
+      }
+      const viewportInset = 8;
+      const maxLeft = Math.max(viewportInset, window.innerWidth - popoverWidth - viewportInset);
+      const belowTop = rect.bottom + 6;
+      const belowAvailable = window.innerHeight - belowTop - viewportInset;
+      const aboveAvailable = rect.top - viewportInset * 2;
+      const shouldOpenAbove = belowAvailable < 180 && aboveAvailable > belowAvailable;
+      const availableHeight = shouldOpenAbove ? aboveAvailable : belowAvailable;
+      const maxHeight = Math.max(160, Math.min(360, availableHeight));
+      setPopoverStyle({
+        top: shouldOpenAbove ? Math.max(viewportInset, rect.top - 6 - maxHeight) : belowTop,
+        left: Math.min(Math.max(viewportInset, rect.right - popoverWidth), maxLeft),
+        maxHeight,
+      });
+    };
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!containerRef.current?.contains(target) && !popoverRef.current?.contains(target)) {
+        setOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+        buttonRef.current?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
   const active = group.fields.some((field) => selectedValues(columnFilters, field.field).size > 0);
   return (
-    <span className="pending-invoices-column-filter">
-      <Dropdown
-        isOpen={open}
-        onOpenChange={(isOpen) => {
-          setOpen(isOpen);
-          if (isOpen) {
-            resetDraftFromFilters();
-          }
+    <span ref={containerRef} className="pending-invoices-column-filter">
+      <Button
+        ref={buttonRef}
+        isIconOnly
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label={`筛选 ${group.label}`}
+        className={cx("pending-invoices-column-filter-button", active && "pending-invoices-column-filter-button--active")}
+        onPress={() => {
+          setOpen((current) => {
+            if (!current) {
+              resetDraftFromFilters();
+            }
+            return !current;
+          });
         }}
+        size="sm"
+        variant="ghost"
       >
-        <Button
-          isIconOnly
-          aria-label={`筛选 ${group.label}`}
-          className={cx("pending-invoices-column-filter-button", active && "pending-invoices-column-filter-button--active")}
-          size="sm"
-          variant="ghost"
+        <Filter aria-hidden="true" size={13} strokeWidth={2.4} />
+      </Button>
+      {open && popoverStyle ? createPortal(
+        <div
+          ref={popoverRef}
+          aria-label={`${group.label}筛选`}
+          className="pending-invoices-column-filter-popover"
+          role="menu"
+          style={{
+            top: `${popoverStyle.top}px`,
+            left: `${popoverStyle.left}px`,
+            maxHeight: `${popoverStyle.maxHeight}px`,
+          }}
         >
-          <Filter aria-hidden="true" size={13} strokeWidth={2.4} />
-        </Button>
-        <Dropdown.Popover isNonModal className="pending-invoices-column-filter-popover" placement="bottom end">
-          <Dropdown.Menu
-            aria-label={`${group.label}筛选`}
-            className="pending-invoices-column-filter-menu"
-            selectedKeys={selectedKeysFromDraft()}
-            selectionMode="multiple"
-            onSelectionChange={applySelection}
-          >
-          {fields.map((field) => (
-              <Dropdown.Section className="pending-invoices-column-filter-menu__group" key={field.field}>
-                <Label className="pending-invoices-column-filter-menu__label">{field.label}</Label>
-              {field.options.length === 0 ? <div className="pending-invoices-column-filter-menu__empty">暂无选项</div> : null}
-                {field.options.map((option) => (
-                  <Dropdown.Item
-                    className="pending-invoices-column-filter-menu__option"
-                    id={itemKey(field.field, option.value)}
-                    key={itemKey(field.field, option.value)}
-                    textValue={`${field.label}：${option.label} ${option.count}`}
-                  >
-                    <span>{field.label}：{option.label}</span>
-                    <span>{option.count}</span>
-                    <Dropdown.ItemIndicator />
-                  </Dropdown.Item>
-                ))}
-              </Dropdown.Section>
-          ))}
-          </Dropdown.Menu>
-          <div className="pending-invoices-column-filter-menu__actions" onClick={(event) => event.stopPropagation()}>
+          <div className="pending-invoices-column-filter-menu">
+            {fields.map((field) => (
+              <div className="pending-invoices-column-filter-menu__group" key={field.field} role="group" aria-label={field.label}>
+                <div className="pending-invoices-column-filter-menu__label">{field.label}</div>
+                {field.options.length === 0 ? <div className="pending-invoices-column-filter-menu__empty">暂无选项</div> : null}
+                {field.options.map((option) => {
+                  const selected = draft[field.field]?.has(option.value) ?? false;
+                  return (
+                    <button
+                      aria-checked={selected}
+                      aria-label={`${field.label}：${option.label} ${option.count}`}
+                      className="pending-invoices-column-filter-menu__option"
+                      key={itemKey(field.field, option.value)}
+                      onClick={() => toggleDraftValue(field.field, option.value)}
+                      role="menuitemcheckbox"
+                      type="button"
+                    >
+                      <span>{field.label}：{option.label}</span>
+                      <span>{option.count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+          <div className="pending-invoices-column-filter-menu__actions">
             <Button
               className="pending-invoices-column-filter-menu__clear"
               onPress={() => {
@@ -306,8 +373,9 @@ function ColumnFilterMenu({
               应用筛选
             </Button>
           </div>
-        </Dropdown.Popover>
-      </Dropdown>
+        </div>,
+        document.body,
+      ) : null}
     </span>
   );
 }

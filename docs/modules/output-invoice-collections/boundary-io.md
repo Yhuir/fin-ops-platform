@@ -1,91 +1,110 @@
 # 销项发票收款情况模块边界与 I/O
 
-日期：2026-07-27
+日期：2026-07-31
 
 ## 模块化状态
 
 - 状态：`canonical-direct-read`
-- 当前边界可信度：high
+- 页面能力：只读、筛选、排序、分页、详情、导出
 - Query owner：`OutputInvoiceCollectionCanonicalQueryService`
 - PostgreSQL owner：`PostgresOutputInvoiceCollectionQueryRepository`
-- 旧页面 read model：API/frontend、projection/repository、worker/registry/deploy 和 lifecycle 间接链均已删除。
+- 自动红蓝票关系 owner：Workbench matching/formal relation 边界
+- 页面 read model/worker：无
 
 ## 职责边界
 
 ### 负责
 
-- 销项发票收款 rows、summary、statistics、facets、筛选、排序和服务端分页。
-- OA、收入流水、关联发票、红蓝票、收据详情和当前筛选导出。
-- active relation component 的多发票净额归并，保留负数/红字成员。
-- 手动收款状态、提醒、红蓝票 relation 和正式收据 canonical 写入及写后 GET。
+- 销项发票 rows、summary、statistics、facets、筛选、排序和服务端分页。
+- 销项发票、已关联收入流水和销项发票关系详情。
+- 当前筛选结果的导出预览和 XLSX 下载。
+- 根据 canonical facts 计算六种收款/红蓝票状态。
+- 消费 Workbench 已正式化的 `output_invoice_reversal` 关系。
 
 ### 不负责
 
-- 不拥有进项发票使用或外部 OA 同步业务。
-- 不拥有 `app.workbench_pair_relations` 的写模型。
-- 不读取或刷新 Workbench、invoice lifecycle 或页面 read model。
-- 不修改共享 worker、manifest、scope policy、dispatcher、deploy env 或 App Status registry。
+- 不拥有 OA、收据、提醒、预计收款日期或手工收款状态。
+- 不提供手工红蓝票确认/撤销 API。
+- 不拥有 `app.workbench_pair_relations` 写模型；自动关系由 Workbench 边界创建和撤回。
+- 不读取或刷新任何页面、Workbench relation 或 invoice lifecycle read model。
+- 不修改共享 worker、manifest、dispatcher 或 deploy env。
 
 ## 输入 I/O
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| rows 查询 | `OutputInvoiceCollectionsPage.tsx` | `page`、`page_size`、keyword、日期/月、filters、sort；非法值返回 400 |
-| canonical invoices | `app.invoices` | 只取非删除 output invoices；正数、负数和红字成员都保留 |
-| formal relations | `app.workbench_pair_relations` | 只取 `status='active'`；按 relation component 聚合 |
-| bank/OA facts | `app.bank_transactions`、`app.oa_applications` | 只读取已同步 PostgreSQL snapshot |
-| lifecycle facts | output collection lifecycle/receipt tables | 同 transaction 读取 status/reminder/red relation/receipt overlay |
-| lifecycle command | 页面专属写 API | 保持权限、审计、CAS/idempotency 和冲突合同；成功后 GET |
+| rows 查询 | `OutputInvoiceCollectionsPage.tsx` | `page`、`page_size`、keyword、月份、filters、sort；非法值返回 400 |
+| canonical invoices | `app.invoices` | 只取非删除 output invoices；正票和负票分别保留 |
+| formal relations | `app.workbench_pair_relations` | 只取 `status='active'`；红蓝票关系识别 `mode=output_invoice_reversal` |
+| bank facts | `app.bank_transactions` | 只统计 active relation 中的收入流水；支出不计入已收金额 |
+| exact reversal candidates | Workbench matching engine | 标准化税号、币种、税率及金额绝对值；唯一、日期合法才允许正式化 |
 
 ## 输出 I/O
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| `/rows` | 页面 | 同一 snapshot 返回 `rows`、`summary`、`statistics`、`pagination`、`filterConfig`、`filterOptions` |
-| relation/details | drawer | 按 row/invoice/bank/OA id 定向读取；不存在返回 404 |
-| export preview/download | export drawer | 复用 canonical filters/sort；20,000 行上限和原错误合同不变 |
-| lifecycle/receipt result | 页面 | 响应只含 canonical mutation result；不含 refresh target/barrier |
-| write convergence | 页面 | 成功后重跑当前 GET，读取同一 canonical query contract |
+| `GET /rows` | 页面 | 返回 `rows`、`summary`、`statistics`、`pagination`、`filterConfig`、`filterOptions` |
+| `GET /filter-options` | 页面/兼容调用 | 返回同一 canonical facets；不读取缓存或 read model |
+| invoice/bank detail | 详情抽屉 | 按 canonical id 定向读取；不存在返回 404 |
+| relation detail | 详情抽屉 | 只支持 `kind=bank|invoice` |
+| export preview/download | 导出 | 复用 canonical filters/sort；20,000 行上限 |
 
-`/rows` 不输出 `read_model_status`、`source_versions`、`refresh_enqueued`、scope 或 polling 字段。
+row 顶层只包含：
+
+`id`、`invoiceId`、`invoiceIdentityKey`、`invoice`、`collectionStatus`、`bank`、`invoiceRelations`。
+
+禁止输出 OA、receipt、manual status、reminder、read-model freshness、source version、refresh target 或 polling 字段。
+
+## 状态输出
+
+| code | 展示 | 判定 |
+| --- | --- | --- |
+| `pending_collection` | 待收款 | 正票且没有足额关联收入 |
+| `partial_collected` | 部分收款 | 正票已关联部分收入 |
+| `collected` | 已收款 | 正票已关联足额收入 |
+| `reversed_by_red` | 已被红冲 | 正票处于有效 `output_invoice_reversal` 关系 |
+| `reverses_blue` | 已冲销蓝票 | 负票处于有效 `output_invoice_reversal` 关系 |
+| `unmatched_red` | 红票待核对 | 负票没有有效红蓝票关系 |
 
 ## 一致性与性能合同
 
-- 每个页面读请求开启一个 `REPEATABLE READ READ ONLY` transaction。
-- rows、summary、statistics、facets、facts 和 lifecycle overlay 都在该 transaction 中读取。
-- rows/summary/facets 复用一次 materialized canonical CTE；含 supporting red pair 与 lifecycle overlay 时整个请求最多 11 条批量 SQL statement，数量不随当前页行数或 relation 数增长。
-- 服务端完成筛选、排序、分页；Python 只组装当前页有界 facts。
-- 多发票 relation 金额使用成员净额，负数/红字发票不得在 SQL 或 DTO 中丢失。
-- 只有 EXPLAIN 或真实慢查询证据支持时才增加索引；本模块不自行创建 migration。
+- 一个页面请求使用一个 `REPEATABLE READ READ ONLY` snapshot。
+- repository set-based 完成筛选、排序、分页和聚合；service 只组装当前页有界 DTO。
+- SQL 数量不得随当前页行数、关系数量或红蓝票数量线性增长。
+- 自动红蓝票关系必须确定性、幂等；歧义时不创建关系。
+- 页面不通过 Redis/read model 提速；只有真实慢查询证据才增加索引或缓存。
+- API 错误必须 fail closed，不回退已删除的 lifecycle/receipt/read-model 路径。
 
 ## 文件范围
 
 | 层 | 文件或目录 |
 | --- | --- |
-| Frontend | `web/src/pages/OutputInvoiceCollectionsPage.tsx`、`web/src/features/outputInvoiceCollections/*`、`web/src/components/outputInvoiceCollections/*` |
+| Frontend | `web/src/pages/OutputInvoiceCollectionsPage.tsx`、`web/src/features/outputInvoiceCollections/*`、`web/src/components/outputInvoiceCollections/OutputInvoiceCollection*.tsx` |
 | Route | `backend/src/fin_ops_platform/app/routes_output_invoice_collections.py` |
-| Query service | `output_invoice_collection_canonical_query_service.py` |
-| Business assembler | `output_invoice_collection_service.py` |
-| Query repository | `postgres_repositories/invoice_usage_collection_query.py` |
-| Lifecycle repository | `postgres_repositories/output_invoice_collection.py` |
-| Commands | `output_invoice_collection_lifecycle_service.py`、`output_invoice_collection_receipt_service.py` |
-| Tests | `tests/test_output_invoice_collection*.py`、`tests/test_invoice_usage_collection_canonical_query.py`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx`、`web/e2e/output-invoice-collections*.spec.ts` |
+| Query service | `backend/src/fin_ops_platform/services/output_invoice_collection_canonical_query_service.py` |
+| Assembler | `backend/src/fin_ops_platform/services/output_invoice_collection_service.py` |
+| Query repository | `backend/src/fin_ops_platform/services/postgres_repositories/invoice_usage_collection_query.py` |
+| Matching/formal relation | `workbench_free_matching_engine.py`、`workbench_relation_command_service.py`、`postgres_repositories/workbench_formal_relation.py` |
+| Tests | `tests/test_output_invoice_collection*.py`、`tests/test_invoice_usage_collection_canonical_query.py`、`tests/test_workbench_free_matching_engine.py`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx`、`web/e2e/output-invoice-*.spec.ts` |
 
 ## 依赖方向
 
-`frontend -> route -> canonical query service -> page query repository -> canonical PostgreSQL tables`
+读取：
 
-写路径为：
+`frontend -> route -> canonical query service -> query repository -> canonical PostgreSQL tables`
 
-`frontend -> route -> lifecycle/receipt service -> canonical repository/audit -> current rows GET`
+自动红蓝票：
 
-禁止依赖方向：
+`Workbench matcher -> relation command service -> formal relation repository -> app.workbench_pair_relations`
+
+禁止：
 
 - route -> SQL
 - query service -> HTTP/session
-- page query repository -> read-model tables
-- frontend -> filter-options/read-model refresh/status endpoint
+- page query repository -> read-model/lifecycle/receipt tables
+- frontend -> mutation/status/reminder/receipt/manual-red API
+- output collection module -> Workbench repository 直接写关系
 
-## 跨页面清理结果
+## 旧代码删除条件
 
-`InvoiceUsageCollectionSqlProjectionBuilder` 的 output projection、invoice-usage-collection worker/handler/registry/manifest/deploy、output read-model scope/App Status/audit/repair 和 invoice-lifecycle 注册项已删除。`workbench_relation` 仅保留给明确登记的独立消费者，不进入本页面。历史 migration/表暂留作回滚证据。
+旧 lifecycle/status/reminder/receipt/manual-red 文件、route、frontend drawer、API client、DTO、E2E mock 和权限 opener 必须保持删除。历史 schema/migration 只有在独立、可回滚的数据迁移中才物理删除。

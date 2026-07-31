@@ -52,22 +52,6 @@ class InvoiceLifecyclePolicyTests(unittest.TestCase):
                 invoice_oa_amount_matched=True,
             )
 
-    def test_unifies_output_invoice_collection_status(self) -> None:
-        policy = InvoiceLifecyclePolicy()
-
-        status = policy.evaluate_output_invoice_collection(
-            invoice_total=Decimal("100.00"),
-            own_inflow_total=Decimal("60.00"),
-            related_inflow_total=Decimal("0.00"),
-            related_outflow_total=Decimal("0.00"),
-            has_red_relation=False,
-            fully_matched=False,
-        )
-
-        self.assertEqual(status["code"], "partial_collected")
-        self.assertEqual(status["collectedAmount"], "60.00")
-        self.assertEqual(status["pendingAmount"], "40.00")
-
     def test_unifies_tax_certification_status(self) -> None:
         policy = InvoiceLifecyclePolicy()
 

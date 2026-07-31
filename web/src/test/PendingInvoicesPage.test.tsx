@@ -929,7 +929,7 @@ describe("Pending invoices page", () => {
       pendingInvoicesTableSource.includes("<colgroup>") ? null : "PendingInvoicesTable.tsx should keep a colgroup so group headers and body columns share widths",
       !pendingInvoicesTableSource.includes("Table.Content") && !pendingInvoicesTableSource.includes("Table.Column") ? null : "PendingInvoicesTable.tsx should not use RAC table content because it blocks body text selection",
       pendingInvoicesTableSource.includes("aria-sort") && pendingInvoicesTableSource.includes("handleNativeSort") ? null : "PendingInvoicesTable.tsx should keep native accessible sorting",
-      pendingInvoicesTableSource.includes("Dropdown.Menu") && pendingInvoicesTableSource.includes('selectionMode="multiple"') ? null : "PendingInvoicesTable.tsx should use HeroUI Dropdown multi-select filtering",
+      pendingInvoicesTableSource.includes("createPortal") && pendingInvoicesTableSource.includes('role="menuitemcheckbox"') ? null : "PendingInvoicesTable.tsx should use the project portal pattern for reliable multi-select filtering",
       sourceByPath["src/components/pendingInvoices/PendingInvoiceDrawerFrame.tsx"].includes("AppDrawer") ? null : "PendingInvoiceDrawerFrame.tsx should use AppDrawer for right drawer shape",
       !sourceByPath["src/components/pendingInvoices/PendingInvoiceDetailDrawer.tsx"].includes("AppDialog") ? null : "PendingInvoiceDetailDrawer.tsx should keep object details in the right drawer",
     ].filter(Boolean);

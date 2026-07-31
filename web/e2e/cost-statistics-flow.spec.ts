@@ -705,18 +705,14 @@ test.describe("cost statistics browser flow", () => {
     await expectVisibleAndUncovered(page.getByRole("button", { name: "导出中心" }), "narrow export center button");
     const timeGrid = page.getByRole("grid", { name: "按时间统计表" });
     await expect(timeGrid).toBeVisible();
-    const loadMore = page.getByRole("button", { name: /加载更多/ });
-    await expect(loadMore).toHaveText(/50 \/ /);
-    await loadMore.click();
-    await expect(loadMore).toHaveText(/100 \/ /);
-    await loadMore.click();
-    await expect(loadMore).toBeHidden();
-    await expect(timeGrid).toContainText("大型成本流水费用内容 120");
-    await expect(timeGrid).toContainText("大型成本浏览器稳定性项目");
-
     const timeTableScroll = page.locator(".cost-table-section").filter({ has: timeGrid }).locator(".finance-table__scroll").first();
+    await timeTableScroll.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await expect(timeGrid).toContainText("大型成本流水费用内容 120");
+
     await expectHorizontalScroll(timeTableScroll, "large time-view cost table");
-    await expectInViewport(page.getByRole("columnheader", { name: "费用内容" }), "time-view rightmost cost column");
+    await expectInViewport(timeGrid.getByRole("columnheader", { name: "流水摘要" }), "time-view rightmost cost column");
     await expectVerticalScroll(timeTableScroll, "large time-view cost table");
 
     const projectExplorerResponsePromise = page.waitForResponse((response) => {

@@ -11,11 +11,12 @@
 - 使用/收款状态：是否已和支出流水、OA 付款或销项收款建立关系。
 - 异常状态：重复、冲突、缺少来源、金额/税额不一致、关系撤回。
 
-当前架构采用 `InvoiceLifecyclePolicy` + `invoice_lifecycle` read boundary：
+当前架构按页面事实源选择生命周期边界：
 
-- `InvoiceLifecyclePolicy` 是唯一规则入口，负责待找发票获取状态、进项付款状态、OA 付款状态、销项收款状态和税局认证状态。
+- `InvoiceLifecyclePolicy` 是待找发票、进项付款、OA 付款和税局认证状态的共享规则入口。
 - `read_model.invoice_lifecycle_rows` 是跨页面分发边界，按月分片预计算 subject lifecycle。HTTP 热路径只批量读取 read model，不同步扫描发票、银行流水、OA 和关联台事实。
-- 现有页面 API shape 保持兼容：待找发票继续返回 `invoice_acquisition_status`，进项使用继续返回 `paymentStatus`，OA 待付款继续返回 `paymentStatus`，销项收款继续返回 `collectionStatus`，税金抵扣继续返回认证字段。
+- 销项发票收款情况是显式例外：它不读取 `invoice_lifecycle` 或页面 read model，而是在同一 canonical PostgreSQL snapshot 中根据销项发票、收入流水和 active Workbench 关系直接派生 `collectionStatus`。
+- 现有页面 API shape 保持明确：待找发票返回 `invoice_acquisition_status`，进项使用返回 `paymentStatus`，OA 待付款返回 `paymentStatus`，销项收款返回 `collectionStatus`，税金抵扣返回认证字段。
 - 页面自己的 read model 仍保留筛选、分页、导出和页面 DTO；生命周期 read model 只分发生命周期结果，不替代业务页面 read model。
 
 需要接入生命周期的页面：
@@ -25,7 +26,7 @@
 | 待找发票 | `bank_transaction` | `acquisition_status` |
 | 进项发票使用情况 | `input_invoice` | `payment_status`、后续 `certification_status` |
 | OA 待付款核对 | `oa_application` | `payment_status` |
-| 销项发票收款情况 | `output_invoice` | `collection_status` |
+| 销项发票收款情况 | `output_invoice` | canonical query 派生 `pending_collection`、`partial_collected`、`collected`、`reversed_by_red`、`reverses_blue`、`unmatched_red` |
 | 税金抵扣 | `input_invoice` | `certification_status` |
 
 进项发票使用情况和销项发票收款情况的页面表头发票数量用于核对发票拉取完整性，必须读取 rows summary 中按唯一发票 ID 统计的 `invoiceCount`；`pagination.total` 仍表示表格行数或配对组行数。同一 linked relation 折叠多张发票到一行时，表头发票数必须计入所有成员发票，不能用行数替代。
@@ -87,7 +88,10 @@ OA 待付款核对页用于对齐 OA 单据、付款流水和进项发票，并�
 | 撤回发票关系 | 相关页面回到待处理或异常状态 |
 | 发票认证/抵扣变化 | 税金抵扣和发票使用 read model 刷新 |
 
-生命周期变化必须先 dirty/enqueue `invoice_lifecycle.read_model.refresh`，再刷新待找发票、进项使用、OA 待付款、销项收款、税金抵扣、成本统计和搜索等下游页面 read model。
+需要生命周期 read model 的事实变化必须先 dirty/enqueue
+`invoice_lifecycle.read_model.refresh`，再刷新其真实下游。销项收款不属于该 fan-out：
+它在每次查询时直接读取 canonical 事实与 active Workbench 关系，不得通过
+`invoice_lifecycle`、页面 read model 或隐藏 fallback 获得状态。
 
 ## 相关文档
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 import random
+from typing import Literal
 import unittest
 
 from fin_ops_platform.services.workbench_free_matching_engine import (
@@ -31,6 +32,8 @@ def fact(
     direction: str = "expenditure",
     evidence: tuple[tuple[str, str], ...] = (("counterparty", "供应商A"),),
     references: tuple[FormalRelationReference, ...] = (),
+    reversal_key: tuple[str, ...] | None = None,
+    reversal_polarity: Literal["blue", "red"] | None = None,
 ) -> FormalRelationFact:
     return FormalRelationFact(
         row_type=row_type,
@@ -43,6 +46,8 @@ def fact(
         evidence_keys=evidence,
         references=references,
         source_version=f"source:{identity}",
+        reversal_key=reversal_key,
+        reversal_polarity=reversal_polarity,
     )
 
 
@@ -58,6 +63,68 @@ def batch(*facts: FormalRelationFact, withdrawals: frozenset[str] = frozenset())
 class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
     def setUp(self) -> None:
         self.engine = WorkbenchFreeMatchingEngine()
+
+    def test_exact_unique_output_reversal_creates_formal_relation(self) -> None:
+        key = ("SELLER", "BUYER", "CNY", "9805000", "9250000", "555000", "0.06")
+        blue = fact(
+            "invoice",
+            "blue-invoice",
+            9_805_000,
+            fact_date=date(2026, 6, 1),
+            direction="income",
+            reversal_key=key,
+            reversal_polarity="blue",
+        )
+        red = fact(
+            "invoice",
+            "red-invoice",
+            9_805_000,
+            fact_date=date(2026, 6, 29),
+            direction="income",
+            reversal_key=key,
+            reversal_polarity="red",
+        )
+
+        result = self.engine.plan_relations(batch(blue, red))
+
+        self.assertEqual(len(result.plans), 1)
+        self.assertEqual(result.plans[0].relation_mode, "output_invoice_reversal")
+        self.assertEqual(result.plans[0].rule_code, "output_invoice_exact_reversal")
+
+    def test_ambiguous_output_reversal_is_not_auto_matched(self) -> None:
+        key = ("SELLER", "BUYER", "CNY", "9805000", "9250000", "555000", "0.06")
+        blue = fact(
+            "invoice",
+            "blue-invoice",
+            9_805_000,
+            direction="income",
+            reversal_key=key,
+            reversal_polarity="blue",
+        )
+        red_one = fact(
+            "invoice",
+            "red-one",
+            9_805_000,
+            direction="income",
+            reversal_key=key,
+            reversal_polarity="red",
+        )
+        red_two = fact(
+            "invoice",
+            "red-two",
+            9_805_000,
+            direction="income",
+            reversal_key=key,
+            reversal_polarity="red",
+        )
+
+        result = self.engine.plan_relations(batch(blue, red_one, red_two))
+
+        self.assertEqual(result.plans, ())
+        self.assertEqual(
+            dict(result.blocked_reason_counts)["ambiguous_output_invoice_reversal"],
+            1,
+        )
 
     def test_520_fixture_is_preserved_active_without_recreation(self) -> None:
         fixture = yunnan_lifu_520_fixture()

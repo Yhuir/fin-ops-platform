@@ -70,19 +70,19 @@ const ordinaryBankFlowRuleCheckboxCases = [
     transactionId: "bank-flow-rule-e2e-fee",
   },
   {
-    primaryButton: "人工成本 1批 · 1条",
+    primaryButton: "薪资社保福利 4批 · 4条",
     subButton: "工资 1批 · 1条",
     tableName: "工商银行6386流水",
     transactionId: "bank-flow-rule-e2e-salary",
   },
   {
-    primaryButton: "薪资社保福利 3批 · 3条",
+    primaryButton: "薪资社保福利 4批 · 4条",
     subButton: "过节费 1批 · 1条",
     tableName: "中国银行7001流水",
     transactionId: "bank-flow-rule-e2e-holiday_bonus",
   },
   {
-    primaryButton: "薪资社保福利 3批 · 3条",
+    primaryButton: "薪资社保福利 4批 · 4条",
     subButton: "奖金 1批 · 1条",
     tableName: "招商银行9988流水",
     transactionId: "bank-flow-rule-e2e-bonus",
@@ -100,7 +100,7 @@ const ordinaryBankFlowRuleCheckboxCases = [
     transactionId: "bank-flow-rule-e2e-treasury_tax_collection",
   },
   {
-    primaryButton: "薪资社保福利 3批 · 3条",
+    primaryButton: "薪资社保福利 4批 · 4条",
     subButton: "社保 1批 · 1条",
     tableName: "民生银行5566流水",
     transactionId: "bank-flow-rule-e2e-social_security",
@@ -423,8 +423,9 @@ test.describe("bank flow rule batches browser flow", () => {
     const submitBody = JSON.parse((await submitRequest).postData() ?? "{}") as {
       expected_version?: number;
       note?: string;
+      scope_month?: string;
     };
-    expect(submitBody).toEqual({ expected_version: 1, note: "" });
+    expect(submitBody).toEqual({ expected_version: 1, note: "", scope_month: "2026-01" });
     expect((await submitResponse).status()).toBe(200);
     expect(Date.now() - startedAt).toBeLessThan(3_000);
     expect(api.count("POST /api/bank-flow-rule-batches/bank-flow-internal-ccb-8106/submit")).toBe(1);
@@ -613,7 +614,7 @@ test.describe("bank flow rule batches browser flow", () => {
     );
     await openZone.getByRole("button", { name: "确认关联" }).click();
     expect((await previewResponse).status()).toBe(200);
-    const previewDialog = page.getByRole("dialog", { name: "关联预览" });
+    const previewDialog = page.getByRole("dialog", { name: "确认关联" });
     await expect(previewDialog.getByText("确认后将把 1 条流水和 1 条发票按流水规则闭环。")).toBeVisible();
 
     const confirmResponse = page.waitForResponse((response) =>

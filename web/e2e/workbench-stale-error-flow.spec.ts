@@ -12,8 +12,7 @@ async function openConfirmRelationPreview(page: Page) {
   await openZone.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ }).click();
   await expect(openZone.getByText("已选 3")).toBeVisible();
   await openZone.getByRole("button", { name: "确认关联" }).click();
-  const previewDialog = page.getByRole("dialog", { name: "关联预览" });
-  await expect(previewDialog.getByText("确认关联预览")).toBeVisible();
+  const previewDialog = page.getByRole("dialog", { name: "确认关联" });
   await expect(previewDialog.getByTestId("relation-preview-before").getByText("智能工厂设备商").first()).toBeVisible();
   await expect(previewDialog.getByTestId("relation-preview-after").getByText("完全关联").first()).toBeVisible();
   return { openGroup, previewDialog };

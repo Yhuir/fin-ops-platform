@@ -3,7 +3,7 @@ from __future__ import annotations
 from calendar import monthrange
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from typing import Any, Iterable
+from typing import Any, Iterable, Literal
 
 from fin_ops_platform.services.postgres_repositories.common import row_payload, text
 from fin_ops_platform.services.postgres_repositories.oa_projection import COMPLETED_WORKFLOW_STATUS_SQL
@@ -152,6 +152,8 @@ class PostgresWorkbenchFormalRelationFactRepository:
                 invoice_date as fact_date,
                 amount,
                 signed_amount,
+                tax_rate,
+                tax_amount,
                 total_with_tax,
                 currency,
                 counterparty_name,
@@ -584,6 +586,8 @@ class PostgresWorkbenchFormalRelationFactRepository:
                 invoice_date as fact_date,
                 amount,
                 signed_amount,
+                tax_rate,
+                tax_amount,
                 total_with_tax,
                 currency,
                 counterparty_name,
@@ -721,18 +725,58 @@ def _invoice_fact(
         *_references_from_payload(normalized, oa_aliases=oa_aliases),
         *_references_from_source_links(row.get("source_links"), oa_aliases=oa_aliases),
     ]
+    reversal_key, reversal_polarity = _output_invoice_reversal_identity(row)
     return FormalRelationFact(
         row_type="invoice",
         canonical_object_identity=_required_identity(row),
         row_id=_required_row_id(row),
-        amount_minor=_minor_units(amount),
+        amount_minor=abs(_minor_units(amount)),
         currency=text(row.get("currency")) or "CNY",
         direction=direction,
         fact_date=_date_value(row.get("fact_date")),
         evidence_keys=evidence,
         references=tuple(sorted(set(references))),
         source_version=_source_version(row),
+        reversal_key=reversal_key,
+        reversal_polarity=reversal_polarity,
     )
+
+
+def _output_invoice_reversal_identity(
+    row: dict[str, Any],
+) -> tuple[tuple[str, ...] | None, Literal["blue", "red"] | None]:
+    if str(row.get("invoice_type") or "").strip().lower() != "output":
+        return None, None
+    seller_tax_no = _normalized_identifier(row.get("seller_tax_no"))
+    buyer_tax_no = _normalized_identifier(row.get("buyer_tax_no"))
+    currency = str(row.get("currency") or "CNY").strip().upper()
+    tax_rate = _decimal_value(row.get("tax_rate"))
+    gross = _decimal_value(row.get("total_with_tax"))
+    net = _decimal_value(row.get("amount"))
+    tax = _decimal_value(row.get("tax_amount"))
+    if not seller_tax_no or not buyer_tax_no or tax_rate is None or gross is None or net is None or tax is None:
+        return None, None
+    if (
+        gross == 0
+        or net == 0
+        or (gross > 0) != (net > 0)
+        or (tax != 0 and (gross > 0) != (tax > 0))
+    ):
+        return None, None
+    key = (
+        seller_tax_no,
+        buyer_tax_no,
+        currency,
+        str(abs(_minor_units(gross))),
+        str(abs(_minor_units(net))),
+        str(abs(_minor_units(tax))),
+        format(abs(tax_rate).normalize(), "f"),
+    )
+    return key, "blue" if gross > 0 else "red"
+
+
+def _normalized_identifier(value: Any) -> str:
+    return "".join(character for character in str(value or "").upper() if character.isalnum())
 
 
 def _references_from_payload(

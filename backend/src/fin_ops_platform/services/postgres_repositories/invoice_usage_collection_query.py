@@ -14,9 +14,6 @@ from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRep
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
     PostgresOAProjectionRepository,
 )
-from fin_ops_platform.services.postgres_repositories.output_invoice_collection import (
-    PostgresOutputInvoiceCollectionLifecycleRepository,
-)
 
 
 _MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
@@ -155,7 +152,6 @@ class PostgresInputInvoiceUsageQueryRepository:
             cte = _fact_cte(
                 invoice_type="input",
                 month=normalized_month,
-                tenant_id=None,
                 status_case=status_case,
             )
             base_params: list[Any] = [*status_params]
@@ -418,10 +414,9 @@ class PostgresOutputInvoiceCollectionQueryRepository:
             cte = _fact_cte(
                 invoice_type="output",
                 month=normalized_month,
-                tenant_id=tenant_id,
                 status_case=None,
             )
-            base_params: list[Any] = [tenant_id]
+            base_params: list[Any] = []
             where_sql, where_params = _where_sql(
                 keyword=keyword,
                 invoice_date_from=invoice_date_from,
@@ -450,6 +445,9 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                         identity_key,
                         primary_invoice_id,
                         invoice_ids,
+                        status_code,
+                        collected_amount,
+                        pending_amount,
                         red_related_group_keys as supporting_group_keys,
                         count(*) over()::bigint as filtered_total,
                         row_number() over ({order_sql}) as page_order
@@ -469,29 +467,17 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                         count(*) filter (
                             where status_code = 'partial_collected'
                         )::bigint as partial_collection_count,
-                        count(*) filter (where receipt_status = 'pending')::bigint
-                            as receipt_pending_count,
-                        coalesce(
-                            sum(invoice_count) filter (where oa_count > 0),
-                            0
-                        )::bigint as linked_oa_count,
                         coalesce(
                             sum(invoice_count) filter (where bank_inflow_total > 0),
                             0
                         )::bigint as linked_income_bank_count,
                         coalesce(sum(invoice_count) filter (
-                            where status_code in (
-                                'collected',
-                                'collected_red_refunded'
-                            )
+                            where status_code = 'collected'
                         ), 0)::bigint as collected_count,
                         coalesce(
                             sum(invoice_count) filter (where has_negative_invoice),
                             0
-                        )::bigint as red_invoice_count,
-                        coalesce(sum(invoice_count) filter (
-                            where receipt_status = 'issued'
-                        ), 0)::bigint as issued_receipt_count
+                        )::bigint as red_invoice_count
                     from filtered_rows
                 ),
                 facet_rows as (
@@ -505,12 +491,8 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                             ('specific_business_type', specific_business_type),
                             ('taxable_item_name', taxable_item_name),
                             ('collection_status', status_code),
-                            ('oa_applicant', oa_applicant),
-                            ('oa_application_type', oa_application_type),
-                            ('oa_project_name', oa_project_name),
                             ('bank_counterparty_name', bank_counterparty_name),
-                            ('bank_name', bank_name),
-                            ('receipt_status', receipt_status)
+                            ('bank_name', bank_name)
                     ) facet(field, value)
                     where nullif(facet.value, '') is not null
                     group by facet.field, facet.value
@@ -561,6 +543,9 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                         identity_key,
                         primary_invoice_id,
                         invoice_ids,
+                        status_code,
+                        collected_amount,
+                        pending_amount,
                         red_related_group_keys as supporting_group_keys
                     from final_rows
                     where group_key = any(%s::text[])
@@ -576,45 +561,25 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                 supporting_group_rows=supporting_group_rows,
                 invoice_type="output",
             )
-            identity_keys = _texts(
-                row.get("identity_key")
-                for row in [*group_rows, *supporting_group_rows]
-            )
-            overlays = (
-                PostgresOutputInvoiceCollectionLifecycleRepository(
-                    self._connection
-                ).overlays_for_identity_keys(
-                    identity_keys,
-                    tenant_id=tenant_id,
-                    transaction=transaction,
-                )
-                if identity_keys
-                else {}
-            )
         filtered_total = int((group_rows[0] if group_rows else {}).get("filtered_total") or 0)
         invoice_count = int(summary_row.get("invoice_count") or 0)
-        linked_oa = int(summary_row.get("linked_oa_count") or 0)
         linked_bank = int(summary_row.get("linked_income_bank_count") or 0)
         collected = int(summary_row.get("collected_count") or 0)
         status_labels = {
-            "collected_red_refunded": "开票已收款，冲红并退款",
-            "red_invoiced_no_collection": "开票后冲红",
+            "reversed_by_red": "已被红冲",
+            "reverses_blue": "已冲销蓝票",
+            "unmatched_red": "红票待核对",
             "collected": "已收款",
-            "partial_collected": "待收款，已收部分款",
+            "partial_collected": "部分收款",
             "pending_collection": "待收款",
-            "pending_red_invoice": "待冲红",
-            "pending": "待处理",
-            "issued": "已开具",
-            "not_available": "无可出收据流水",
-            "blocked": "不可开具",
         }
         return InvoiceUsageCollectionCanonicalSnapshot(
             groups=facts["groups"],
             supporting_groups=facts["supporting_groups"],
             relations=facts["relations"],
             transactions=facts["transactions"],
-            oa_records=facts["oa_records"],
-            overlays=overlays,
+            oa_records=[],
+            overlays={},
             pagination={"page": page, "pageSize": page_size, "total": filtered_total},
             summary={
                 "invoiceCount": invoice_count,
@@ -627,22 +592,14 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                 "partialCollectionCount": int(
                     summary_row.get("partial_collection_count") or 0
                 ),
-                "receiptPendingCount": int(
-                    summary_row.get("receipt_pending_count") or 0
-                ),
             },
             statistics={
                 "invoiceCount": invoice_count,
-                "linkedOaInvoiceCount": linked_oa,
                 "linkedIncomeBankInvoiceCount": linked_bank,
                 "collectedInvoiceCount": collected,
-                "unlinkedOaInvoiceCount": max(0, invoice_count - linked_oa),
                 "unlinkedBankInvoiceCount": max(0, invoice_count - linked_bank),
                 "uncollectedInvoiceCount": max(0, invoice_count - collected),
                 "redInvoiceCount": int(summary_row.get("red_invoice_count") or 0),
-                "issuedReceiptCount": int(
-                    summary_row.get("issued_receipt_count") or 0
-                ),
             },
             facet_counts=_facet_counts(facet_rows, status_labels=status_labels),
             payment_status_labels={},
@@ -686,15 +643,11 @@ _OUTPUT_FIELDS = {
     "taxable_item_name": "taxable_item_name",
     "collection_status": "status_code",
     "pending_amount": "pending_amount",
-    "oa_applicant": "oa_applicant",
-    "oa_application_type": "oa_application_type",
-    "oa_project_name": "oa_project_name",
     "bank_counterparty_name": "bank_counterparty_name",
     "bank_trade_time": "bank_trade_time",
     "bank_amount": "bank_amount",
     "bank_name": "bank_name",
     "bank_summary": "bank_summary",
-    "receipt_status": "receipt_status",
 }
 
 _NUMERIC_FILTER_FIELDS = {
@@ -727,7 +680,6 @@ def _fact_cte(
     *,
     invoice_type: str,
     month: str | None,
-    tenant_id: str | None,
     status_case: str | None,
 ) -> str:
     if invoice_type not in {"input", "output"}:
@@ -752,52 +704,6 @@ def _fact_cte(
             else 'id:' || coalesce(invoice.legacy_mongo_id, invoice.id::text)
         end
     """
-    lifecycle_ctes = ""
-    lifecycle_joins = ""
-    lifecycle_columns = """
-        null::text as override_status_code,
-        false as has_manual_red_relation,
-        false as has_issued_receipt
-    """
-    if invoice_type == "output":
-        lifecycle_ctes = """
-        , active_overrides as (
-            select invoice_identity_key, status_code
-            from app.output_invoice_collection_status_overrides
-            where tenant_id = %s and status = 'active'
-        ),
-        manual_red_relations as (
-            select distinct invoice_identity_key
-            from app.output_invoice_collection_red_relations
-            where tenant_id = %s and status = 'active'
-        ),
-        issued_receipts as (
-            select distinct invoice_identity_key
-            from app.output_invoice_receipts
-            where tenant_id = %s and status in ('issued', 'reissued')
-        )
-        """
-        # The same tenant value is reused by a numbered SQL CTE parameter through
-        # one params tuple expansion in _output_base_params.
-        lifecycle_ctes = lifecycle_ctes.replace("%s", "(select tenant_id from query_tenant)")
-        lifecycle_joins = """
-        left join active_overrides override_fact
-          on override_fact.invoice_identity_key = grouped.identity_key
-        left join manual_red_relations manual_red
-          on manual_red.invoice_identity_key = grouped.identity_key
-        left join issued_receipts receipt_fact
-          on receipt_fact.invoice_identity_key = grouped.identity_key
-        """
-        lifecycle_columns = """
-        override_fact.status_code as override_status_code,
-        (manual_red.invoice_identity_key is not null) as has_manual_red_relation,
-        (receipt_fact.invoice_identity_key is not null) as has_issued_receipt
-        """
-    tenant_cte = (
-        "query_tenant as (select %s::text as tenant_id),"
-        if tenant_id is not None
-        else ""
-    )
     final_status_sql = (
         f"""
         , final_rows as (
@@ -805,157 +711,157 @@ def _fact_cte(
                 facts.*,
                 {status_case} as status_code,
                 0::numeric as collected_amount,
-                abs(facts.total_with_tax)::numeric as pending_amount,
-                'pending'::text as receipt_status,
-                array[]::text[] as red_related_group_keys
+                abs(facts.total_with_tax)::numeric as pending_amount
             from group_facts facts
         )
         """
         if invoice_type == "input"
         else """
-        , red_candidates as (
-            select
-                negative.group_key as negative_group_key,
-                positive.group_key as positive_group_key,
-                case
-                    when abs(positive.bank_inflow_total - abs(positive.total_with_tax)) <= 0.01
-                     and negative.bank_outflow_total > 0 then 0
-                    when positive.bank_inflow_total <= 0
-                     and negative.bank_outflow_total <= 0 then 1
-                    when abs(positive.bank_inflow_total - abs(positive.total_with_tax)) <= 0.01
-                        then 2
-                    else 3
-                end as priority,
-                abs(
-                    extract(epoch from coalesce(positive.invoice_date, date '1970-01-01')::timestamp)
-                    - extract(epoch from coalesce(negative.invoice_date, date '1970-01-01')::timestamp)
-                ) as date_distance
-            from group_facts positive
-            join group_facts negative
-              on positive.group_key <> negative.group_key
-             and positive.total_with_tax > 0
-             and negative.total_with_tax < 0
-             and coalesce(nullif(positive.buyer_tax_no, ''), positive.buyer_name)
-                 = coalesce(nullif(negative.buyer_tax_no, ''), negative.buyer_name)
-             and abs(abs(positive.total_with_tax) - abs(negative.total_with_tax)) <= 0.01
-        ),
-        selected_red_pairs as (
-            select negative_group_key, positive_group_key
-            from (
-                select
-                    candidate.*,
-                    row_number() over (
-                        partition by negative_group_key
-                        order by priority, date_distance, positive_group_key
-                    ) as rank_no
-                from red_candidates candidate
-                where priority < 3
-            ) ranked
-            where rank_no = 1
-        ),
-        red_links as (
-            select negative_group_key as group_key, positive_group_key as related_group_key
-            from selected_red_pairs
-            union all
-            select positive_group_key, negative_group_key
-            from selected_red_pairs
-        ),
-        red_rollup as (
-            select
-                link.group_key,
-                array_agg(distinct link.related_group_key order by link.related_group_key)
-                    as related_group_keys,
-                coalesce(sum(related.bank_inflow_total), 0)::numeric as related_inflow_total,
-                coalesce(sum(related.bank_outflow_total), 0)::numeric as related_outflow_total
-            from red_links link
-            join group_facts related on related.group_key = link.related_group_key
-            group by link.group_key
-        ),
-        automatic_status as (
+        , final_rows as (
             select
                 facts.*,
-                coalesce(red.related_group_keys, array[]::text[]) as red_related_group_keys,
-                (
-                    facts.has_manual_red_relation
-                    or coalesce(cardinality(red.related_group_keys), 0) > 0
-                ) as has_red_relation,
                 case
-                    when (
-                        facts.has_manual_red_relation
-                        or coalesce(cardinality(red.related_group_keys), 0) > 0
-                    )
-                     and greatest(facts.bank_inflow_total, coalesce(red.related_inflow_total, 0)) > 0
-                     and coalesce(red.related_outflow_total, 0) > 0
-                        then 'collected_red_refunded'
-                    when (
-                        facts.has_manual_red_relation
-                        or coalesce(cardinality(red.related_group_keys), 0) > 0
-                    )
-                     and greatest(facts.bank_inflow_total, coalesce(red.related_inflow_total, 0)) <= 0
-                        then 'red_invoiced_no_collection'
+                    when cardinality(facts.red_related_group_keys) > 0
+                     and facts.total_with_tax > 0 then 'reversed_by_red'
+                    when cardinality(facts.red_related_group_keys) > 0
+                     and facts.total_with_tax < 0 then 'reverses_blue'
+                    when facts.total_with_tax < 0 then 'unmatched_red'
                     when abs(facts.bank_inflow_total - abs(facts.total_with_tax)) <= 0.01
-                     and abs(facts.total_with_tax) > 0
-                        then 'collected'
+                     and abs(facts.total_with_tax) > 0 then 'collected'
                     when facts.bank_inflow_total > 0
                      and facts.bank_inflow_total < abs(facts.total_with_tax)
                         then 'partial_collected'
-                    when facts.bank_inflow_total <= 0 then 'pending_collection'
-                    else 'pending'
-                end as automatic_status_code,
-                case
-                    when (
-                        facts.has_manual_red_relation
-                        or coalesce(cardinality(red.related_group_keys), 0) > 0
-                    )
-                     and greatest(facts.bank_inflow_total, coalesce(red.related_inflow_total, 0)) > 0
-                     and coalesce(red.related_outflow_total, 0) > 0
-                        then greatest(facts.bank_inflow_total, coalesce(red.related_inflow_total, 0))
-                    else facts.bank_inflow_total
-                end::numeric as automatic_collected_amount
-            from group_facts facts
-            left join red_rollup red on red.group_key = facts.group_key
-        ),
-        final_rows as (
-            select
-                automatic.*,
-                case
-                    when automatic.automatic_status_code not in (
-                        'collected_red_refunded', 'red_invoiced_no_collection'
-                    )
-                     and nullif(automatic.override_status_code, '') is not null
-                        then automatic.override_status_code
-                    else automatic.automatic_status_code
+                    else 'pending_collection'
                 end as status_code,
-                automatic.automatic_collected_amount as collected_amount,
+                facts.bank_inflow_total::numeric as collected_amount,
                 case
-                    when automatic.automatic_status_code in (
-                        'collected_red_refunded', 'red_invoiced_no_collection', 'collected'
-                    ) then 0
-                    when automatic.override_status_code = 'collected'
-                     and automatic.automatic_status_code not in (
-                        'collected_red_refunded', 'red_invoiced_no_collection'
-                     ) then 0
+                    when cardinality(facts.red_related_group_keys) > 0
+                      or facts.total_with_tax < 0
+                      or (
+                          abs(facts.bank_inflow_total - abs(facts.total_with_tax)) <= 0.01
+                          and abs(facts.total_with_tax) > 0
+                      )
+                        then 0
                     else greatest(
                         0,
-                        abs(automatic.total_with_tax)
-                        - automatic.automatic_collected_amount
+                        abs(facts.total_with_tax) - facts.bank_inflow_total
                     )
-                end::numeric as pending_amount,
-                case
-                    when automatic.has_issued_receipt then 'issued'
-                    when automatic.automatic_status_code in (
-                        'collected_red_refunded', 'red_invoiced_no_collection'
-                    ) then 'blocked'
-                    when automatic.automatic_collected_amount > 0 then 'pending'
-                    else 'not_available'
-                end as receipt_status
-            from automatic_status automatic
+                end::numeric as pending_amount
+            from group_facts facts
         )
         """
     )
+    oa_ctes_sql = (
+        """
+        ,
+        group_oa_rows as (
+            select
+                relation.group_key,
+                oa.row_id as oa_id,
+                oa.applicant,
+                coalesce(
+                    oa.normalized_payload->>'apply_type',
+                    oa.normalized_payload->>'application_type',
+                    oa.form_type,
+                    ''
+                ) as application_type,
+                coalesce(
+                    oa.normalized_payload->>'project_name_display',
+                    oa.project_name,
+                    ''
+                ) as project_name,
+                oa.amount,
+                bool_or(
+                    coalesce(
+                        member.amount_check->>'matched' = 'true',
+                        member.amount_check->>'status' = 'matched',
+                        false
+                    )
+                    or member.relation_mode = 'oa_invoice_offset_auto_match'
+                ) as amount_matched
+            from group_relation_ids relation
+            join relation_members member on member.relation_id = relation.relation_id
+            join app.oa_applications oa on oa.row_id = member.row_id
+            where member.row_type = 'oa'
+            group by
+                relation.group_key,
+                oa.row_id,
+                oa.applicant,
+                coalesce(
+                    oa.normalized_payload->>'apply_type',
+                    oa.normalized_payload->>'application_type',
+                    oa.form_type,
+                    ''
+                ),
+                coalesce(
+                    oa.normalized_payload->>'project_name_display',
+                    oa.project_name,
+                    ''
+                ),
+                oa.amount
+        ),
+        group_oa as (
+            select
+                grouped.group_key,
+                count(distinct oa.oa_id)::bigint as oa_count,
+                coalesce(sum(oa.amount) filter (where oa.amount_matched), 0)::numeric
+                    as matched_oa_total,
+                (array_agg(oa.applicant order by oa.oa_id))[1]
+                    as oa_applicant,
+                (array_agg(oa.application_type order by oa.oa_id))[1]
+                    as oa_application_type,
+                (array_agg(oa.project_name order by oa.oa_id))[1]
+                    as oa_project_name
+            from grouped_invoices grouped
+            left join group_oa_rows oa on oa.group_key = grouped.group_key
+            group by grouped.group_key
+        )
+        """
+        if invoice_type == "input"
+        else ""
+    )
+    oa_facts_sql = (
+        """
+                coalesce(oa.oa_count, 0)::bigint as oa_count,
+                coalesce(oa.matched_oa_total, 0)::numeric as matched_oa_total,
+                coalesce(oa.oa_applicant, '') as oa_applicant,
+                coalesce(oa.oa_application_type, '') as oa_application_type,
+                coalesce(oa.oa_project_name, '') as oa_project_name,
+        """
+        if invoice_type == "input"
+        else """
+                0::bigint as oa_count,
+                0::numeric as matched_oa_total,
+                ''::text as oa_applicant,
+                ''::text as oa_application_type,
+                ''::text as oa_project_name,
+        """
+    )
+    match_facts_sql = (
+        """
+                (
+                    abs(coalesce(oa.matched_oa_total, 0) - grouped.total_with_tax) <= 0.01
+                ) as invoice_oa_amount_matched,
+                (
+                    abs(coalesce(oa.matched_oa_total, 0) - grouped.total_with_tax) <= 0.01
+                    and abs(coalesce(banks.matched_bank_total, 0) - abs(grouped.total_with_tax)) <= 0.01
+                ) as fully_matched
+        """
+        if invoice_type == "input"
+        else """
+                false as invoice_oa_amount_matched,
+                (
+                    abs(coalesce(banks.matched_bank_total, 0) - abs(grouped.total_with_tax)) <= 0.01
+                ) as fully_matched
+        """
+    )
+    oa_join_sql = (
+        "left join group_oa oa on oa.group_key = grouped.group_key"
+        if invoice_type == "input"
+        else ""
+    )
     return f"""
         with recursive
-        {tenant_cte}
         invoice_rows as (
             select
                 coalesce(invoice.legacy_mongo_id, invoice.id::text) as invoice_id,
@@ -1047,7 +953,8 @@ def _fact_cte(
         relation_reach(root_relation_id, relation_id) as (
             select relation.id, relation.id
             from active_relations relation
-            where exists (
+            where coalesce(relation.relation_mode, '') <> 'output_invoice_reversal'
+              and exists (
                 select 1
                 from relation_members seed
                 join invoice_aliases alias on alias.row_id = seed.row_id
@@ -1063,6 +970,7 @@ def _fact_cte(
               on current_member.relation_id = reach.relation_id
             join relation_members neighbour
               on neighbour.row_id = current_member.row_id
+             and coalesce(neighbour.relation_mode, '') <> 'output_invoice_reversal'
         ),
         relation_component_ids as (
             select
@@ -1084,6 +992,7 @@ def _fact_cte(
             where member.row_type in (
                 'invoice', 'input_invoice', 'output_invoice'
             )
+              and coalesce(member.relation_mode, '') <> 'output_invoice_reversal'
         ),
         eligible_relation_components as (
             select
@@ -1174,6 +1083,32 @@ def _fact_cte(
                 bool_or(member.total_with_tax < 0) as has_negative_invoice
             from ranked_members member
             group by member.group_key
+        ),
+        group_reversal_links as (
+            select
+                grouped.group_key,
+                array_agg(
+                    distinct related_group.group_key
+                    order by related_group.group_key
+                ) as related_group_keys
+            from grouped_invoices grouped
+            cross join lateral unnest(grouped.invoice_ids) own_invoice(invoice_id)
+            join invoice_aliases own_alias
+              on own_alias.invoice_id = own_invoice.invoice_id
+            join relation_members reversal
+              on reversal.row_id = own_alias.row_id
+             and reversal.relation_mode = 'output_invoice_reversal'
+            join relation_members related_member
+              on related_member.relation_id = reversal.relation_id
+             and related_member.row_id <> reversal.row_id
+             and related_member.row_type in (
+                 'invoice', 'input_invoice', 'output_invoice'
+             )
+            join invoice_aliases related_alias
+              on related_alias.row_id = related_member.row_id
+            join group_members related_group
+              on related_group.invoice_id = related_alias.invoice_id
+            group by grouped.group_key
         ),
         group_relation_components as (
             select distinct
@@ -1282,78 +1217,16 @@ def _fact_cte(
             from grouped_invoices grouped
             left join group_bank_rows bank on bank.group_key = grouped.group_key
             group by grouped.group_key
-        ),
-        group_oa_rows as (
-            select
-                relation.group_key,
-                oa.row_id as oa_id,
-                oa.applicant,
-                coalesce(
-                    oa.normalized_payload->>'apply_type',
-                    oa.normalized_payload->>'application_type',
-                    oa.form_type,
-                    ''
-                ) as application_type,
-                coalesce(
-                    oa.normalized_payload->>'project_name_display',
-                    oa.project_name,
-                    ''
-                ) as project_name,
-                oa.amount,
-                bool_or(
-                    coalesce(
-                        member.amount_check->>'matched' = 'true',
-                        member.amount_check->>'status' = 'matched',
-                        false
-                    )
-                    or member.relation_mode = 'oa_invoice_offset_auto_match'
-                ) as amount_matched
-            from group_relation_ids relation
-            join relation_members member on member.relation_id = relation.relation_id
-            join app.oa_applications oa on oa.row_id = member.row_id
-            where member.row_type = 'oa'
-            group by
-                relation.group_key,
-                oa.row_id,
-                oa.applicant,
-                coalesce(
-                    oa.normalized_payload->>'apply_type',
-                    oa.normalized_payload->>'application_type',
-                    oa.form_type,
-                    ''
-                ),
-                coalesce(
-                    oa.normalized_payload->>'project_name_display',
-                    oa.project_name,
-                    ''
-                ),
-                oa.amount
-        ),
-        group_oa as (
-            select
-                grouped.group_key,
-                count(distinct oa.oa_id)::bigint as oa_count,
-                coalesce(sum(oa.amount) filter (where oa.amount_matched), 0)::numeric
-                    as matched_oa_total,
-                (array_agg(oa.applicant order by oa.oa_id))[1]
-                    as oa_applicant,
-                (array_agg(oa.application_type order by oa.oa_id))[1]
-                    as oa_application_type,
-                (array_agg(oa.project_name order by oa.oa_id))[1]
-                    as oa_project_name
-            from grouped_invoices grouped
-            left join group_oa_rows oa on oa.group_key = grouped.group_key
-            group by grouped.group_key
         )
-        {lifecycle_ctes},
+        {oa_ctes_sql},
         group_facts as (
             select
                 grouped.*,
-                coalesce(oa.oa_count, 0)::bigint as oa_count,
-                coalesce(oa.matched_oa_total, 0)::numeric as matched_oa_total,
-                coalesce(oa.oa_applicant, '') as oa_applicant,
-                coalesce(oa.oa_application_type, '') as oa_application_type,
-                coalesce(oa.oa_project_name, '') as oa_project_name,
+                coalesce(
+                    reversal.related_group_keys,
+                    array[]::text[]
+                ) as red_related_group_keys,
+                {oa_facts_sql}
                 coalesce(banks.bank_count, 0)::bigint as bank_count,
                 coalesce(banks.bank_inflow_total, 0)::numeric as bank_inflow_total,
                 coalesce(banks.bank_outflow_total, 0)::numeric as bank_outflow_total,
@@ -1365,18 +1238,12 @@ def _fact_cte(
                 coalesce(banks.bank_account, '') as bank_account,
                 coalesce(banks.bank_direction, '') as bank_direction,
                 coalesce(banks.bank_summary, '') as bank_summary,
-                (
-                    abs(coalesce(oa.matched_oa_total, 0) - grouped.total_with_tax) <= 0.01
-                ) as invoice_oa_amount_matched,
-                (
-                    abs(coalesce(oa.matched_oa_total, 0) - grouped.total_with_tax) <= 0.01
-                    and abs(coalesce(banks.matched_bank_total, 0) - abs(grouped.total_with_tax)) <= 0.01
-                ) as fully_matched,
-                {lifecycle_columns}
+                {match_facts_sql}
             from grouped_invoices grouped
-            left join group_oa oa on oa.group_key = grouped.group_key
+            left join group_reversal_links reversal
+              on reversal.group_key = grouped.group_key
+            {oa_join_sql}
             left join group_banks banks on banks.group_key = grouped.group_key
-            {lifecycle_joins}
         )
         {final_status_sql}
     """
@@ -1612,7 +1479,7 @@ def _load_facts(
         PostgresOAProjectionRepository(transaction).list_application_records_by_row_ids(
             oa_ids
         )
-        if oa_ids
+        if invoice_type == "input" and oa_ids
         else []
     )
     return {
@@ -1658,6 +1525,9 @@ def _group_payload(
         if relation_case_id:
             payload["relation_group_id"] = relation_case_id
     else:
+        payload["status_code"] = str(row.get("status_code") or "")
+        payload["collected_amount"] = _money(row.get("collected_amount"))
+        payload["pending_amount"] = _money(row.get("pending_amount"))
         payload["supporting_group_keys"] = [
             str(value)
             for value in list(row.get("supporting_group_keys") or [])
@@ -1755,14 +1625,7 @@ def _facet_counts(
         if not field or not value:
             continue
         label = status_labels.get(value, value)
-        if field == "receipt_status":
-            label = {
-                "issued": "已开具",
-                "pending": "待出收据",
-                "not_available": "无可出收据流水",
-                "blocked": "不可开具",
-            }.get(value, value)
-        elif field == "bank_direction":
+        if field == "bank_direction":
             label = {"inflow": "收入", "outflow": "支出"}.get(value, value)
         result.setdefault(field, []).append(
             {
