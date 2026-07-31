@@ -38,6 +38,7 @@
 - 测试覆盖：Vitest 保护 OA identity/popover、导航层级、静态图标和 legacy negative guard；Playwright 保护移动账号交互零额外 session I/O、桌面展开耗时、frame p95 和 CLS。
 - 验证命令：`npm --prefix web test -- --run src/test/AppSidebar.test.tsx src/test/App.test.tsx`、`npm --prefix web run build`、`npm --prefix web run e2e -- e2e/app-shell-responsive.spec.ts --project=chromium`、`bash scripts/verify.sh lint`、`bash scripts/verify.sh docs`。
 - 未测风险：缺失的 Figma 原图无法做像素级还原；品牌 SVG 已隔离，可在拿到正式导出资产后直接替换而不改组件或 I/O。
+- 生产证据：提交 `99a7b536a` 已发布为 `main-99a7b536-20260801030234`，pre/T+0/T+60/T+300 全部 PASS；16-route shell 与 admin AppHealth smoke 通过且 mutation=0。真实 OA 账号弹层 first-visible 47.4ms、settled 199.5ms、新增 session I/O=0；桌面 6 段共 149 个 frame interval，p95 19.56ms、CLS=0，静态状态入口与移动 drawer 均通过。
 
 ## 2026-06-19 - 生产 user-scope route-shell smoke
 

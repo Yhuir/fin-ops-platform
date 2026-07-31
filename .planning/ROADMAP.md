@@ -757,10 +757,10 @@ Plans:
   4. Page names, route order, permissions and business pages are unchanged; no dependency is added.
   5. Targeted/full frontend gates, browser interaction/performance proof, one pushed main deployment and production route/health smoke pass.
 
-**Plans:** 0/1 plans complete
+**Plans:** 1/1 plans complete
 
 Plans:
 
-- [ ] 37-01-PLAN — Sidebar identity, spacing, legacy cleanup, regression gates, main deployment and production verification.
+- [x] 37-01-PLAN — Sidebar identity, spacing, legacy cleanup, regression gates, main deployment and production verification.
 
 ---

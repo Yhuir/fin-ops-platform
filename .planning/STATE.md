@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: active
-stopped_at: Executing Phase 37 sidebar identity and hierarchy
-last_updated: "2026-08-01T03:01:45+08:00"
-last_activity: 2026-08-01 -- Phase 37 execution started
+stopped_at: Phase 37 verified in production
+last_updated: "2026-08-01T03:16:06+08:00"
+last_activity: 2026-08-01 -- Phase 37 production closure passed
 progress:
   total_phases: 34
-  completed_phases: 8
+  completed_phases: 9
   total_plans: 84
-  completed_plans: 60
-  percent: 24
+  completed_plans: 61
+  percent: 26
 ---
 
 # Project State
@@ -25,18 +25,18 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 
 ## Current Position
 
-Phase: 37 (app-shell-sidebar-identity) — IN PROGRESS
+Phase: 37 (app-shell-sidebar-identity) — COMPLETE
 Plan: 1 of 1
-Status: Implementing approved sidebar UI contract
-Last activity: 2026-08-01 -- Phase 37 execution started
+Status: Production verified
+Last activity: 2026-08-01 -- Phase 37 production closure passed
 
-Progress: [██░░░░░░░░] implementation in progress
+Progress: [██████████] complete
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 38
+- Total plans completed: 39
 - Baseline planning docs completed: 1
 - Average duration: N/A
 - Total execution time: 1 hour 40 minutes
@@ -51,11 +51,15 @@ Progress: [██░░░░░░░░] implementation in progress
 | Phase 30 P04 | 24min | 3 tasks | 12 files |
 | Phase 35 P01 | 1h 46m | 4 tasks | 65 files |
 | Phase 36 P01 | 20min | 4 tasks | 20 files |
+| Phase 37 P01 | 2h | 4 tasks | 24 files |
 
 ## Accumulated Context
 
 ### Decisions
 
+- [Phase 37]: Production release `main-99a7b536-20260801030234` is active at exact Git SHA `99a7b536a914f2b854b5004d1fdc4921872bd4a2`; pre/T+0/T+60/T+300, queue/worker health and System Audit all passed.
+- [Phase 37]: Current OA identity comes only from SessionContext; the account popover adds zero session/image I/O, and the static local status mark preserves the existing App Status path without a new dependency.
+- [Phase 37]: Sidebar state is isolated from the business page; width/flex layout motion, rotating SVG/keyframes and inherited `--sidebar-width` are deleted. Production 6-cycle aggregate frame p95 is 19.56ms with CLS 0.
 - [Phase 36]: Production release `main-d6266b05-20260801015117` is active at exact Git SHA `d6266b053c9669aec35af841f26e6f77405c23dc`; pre/T+0/T+60/T+300, queue/worker health and System Audit all passed.
 - [Phase 36]: Production browser evidence closes the performance contract: modal drawer frame p95 16.8–18.6ms, Workbench five-cycle p95 18.6ms, tax rail p95 18.5ms, CLS 0 and zero close-time business I/O; Workbench detail 20-read p95 is 67.707ms.
 
