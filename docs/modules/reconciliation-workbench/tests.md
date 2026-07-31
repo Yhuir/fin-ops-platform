@@ -67,6 +67,7 @@
 - Repository：production-shape materialized group 只有银行成员时，group detail 仍必须返回 `oa_rows=[]`、完整 `bank_rows`、`invoice_rows=[]`，且折叠计数与明细成员一致。
 - API client：HTTP 200 若缺少任一 pane 数组、group identity 不一致，或逐栏声明成员数与实际详情不一致，必须 fail-closed，不能把不完整 payload 安装为可展开数据；有 `collapsed_row_counts.<pane>` 的栏校验 collapsed rows，其它栏校验正常 rows。
 - 前端交互：页面加载和 group 更新不得自动预取折叠明细；用户点击后只发一次详情请求，成功后展开，失败后保持折叠并显示可重试状态。
+- 列筛选定位继续由 `WorkbenchColumnLayout.test.tsx`、`WorkbenchPaneFilter.test.ts` 和 App Shell Chromium smoke 保护；打开时读取真实侧栏宽度，不得恢复 `--sidebar-width` 继承状态或因侧栏开关重新渲染业务页面。
 - E2E：首屏只显示 3 条流水摘要时不请求详情；用户点击“展开 4 条明细”后恰好请求一次 group detail，并渲染 4 条完整流水。
 
 ## 2026-07-20 Turnover 撤回 preparation 隔离回归

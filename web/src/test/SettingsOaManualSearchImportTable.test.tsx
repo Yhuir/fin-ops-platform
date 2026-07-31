@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import OaManualSearchImportTable from "../components/settings/OaManualSearchImportTable";
 import AppSidebar from "../components/shell/AppSidebar";
 import { AppChromeProvider, useAppChrome } from "../contexts/AppChromeContext";
+import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
 import type { AppHealthStatus } from "../features/appHealth/types";
 
 const searchRows = [
@@ -77,6 +78,11 @@ const healthyStatus: AppHealthStatus = {
   },
 };
 
+const loadingSession: SessionContextValue = {
+  status: "loading",
+  refresh: () => undefined,
+};
+
 function SidebarStatusHarness() {
   const { workbenchStatus } = useAppChrome();
   return (
@@ -97,9 +103,11 @@ function renderTable({ withSidebar = false }: { withSidebar?: boolean } = {}) {
   return render(
     <AppChromeProvider>
       {withSidebar ? (
-        <MemoryRouter>
-          <SidebarStatusHarness />
-        </MemoryRouter>
+        <SessionContext.Provider value={loadingSession}>
+          <MemoryRouter>
+            <SidebarStatusHarness />
+          </MemoryRouter>
+        </SessionContext.Provider>
       ) : null}
       <OaManualSearchImportTable />
     </AppChromeProvider>,

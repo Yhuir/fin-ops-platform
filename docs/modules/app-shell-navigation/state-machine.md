@@ -44,14 +44,16 @@
 
 | 状态 | 行为 |
 | --- | --- |
-| desktop expanded | `expanded=true`，显示文字和 icon；宽度 `expandedSidebarWidth`。 |
-| desktop collapsed | `expanded=false`，保留文本节点但隐藏 label，icon-only；宽度 `collapsedSidebarWidth`。 |
+| desktop expanded | `expanded=true`，显示文字和 icon；CSS 宽度 `232px`。 |
+| desktop collapsed | `expanded=false`，保留文本节点但隐藏 label，icon-only；CSS 宽度 `72px`。 |
 | compact closed | `isCompact=true` 且 `mobileOpen=false`，侧栏 drawer 关闭。 |
 | compact open | top bar 点击“打开菜单”后 `mobileOpen=true`，侧栏 drawer 打开。 |
 | active item | 当前 path/search 匹配 item `to`，且 `item.active !== false`。 |
 | inactive shortcut | import shortcut 等 `active:false` 项即使路径匹配也不显示 `aria-current`。 |
 
 允许：hover/focus/touch start 调用 `item.preload()`；点击 compact drawer 中的 link 后关闭 drawer 并交给 React Router 导航。
+
+账号区状态直接映射 SessionContext：authenticated/forbidden 显示当前 OA identity 并可打开详情；loading 显示“账号加载中”；expired/error 显示“账号不可用”。账号交互不改变 session 状态，也不发起 API。
 
 禁止：preload 改变 route、preload 失败阻塞点击、侧栏内部维护独立 route 清单。
 

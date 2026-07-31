@@ -2,11 +2,9 @@ import { Drawer, Separator } from "@heroui/react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
+import AppSidebarAccount from "./AppSidebarAccount";
 import AppStatusIndicator from "./AppStatusIndicator";
 import { sidebarGroups } from "./sidebarItems";
-
-export const expandedSidebarWidth = 232;
-export const collapsedSidebarWidth = 72;
 
 type AppSidebarProps = {
   embedded: boolean;
@@ -94,7 +92,7 @@ export default function AppSidebar({
                     onTouchStart={prefetchRoute}
                   >
                     <span className="app-sidebar-link-icon">
-                      <Icon aria-hidden="true" size={15} strokeWidth={2} />
+                      <Icon aria-hidden="true" size={16} strokeWidth={2} />
                     </span>
                     <span className="app-sidebar-link-label" aria-hidden={!showExpandedContent}>
                       <span className="app-sidebar-link-label-text">{item.label}</span>
@@ -112,6 +110,10 @@ export default function AppSidebar({
           </section>
         ))}
       </nav>
+
+      <div className="app-sidebar-account-footer">
+        <AppSidebarAccount showExpandedContent={showExpandedContent} />
+      </div>
     </div>
   );
 

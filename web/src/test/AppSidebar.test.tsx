@@ -5,19 +5,49 @@ import { vi } from "vitest";
 
 import AppSidebar from "../components/shell/AppSidebar";
 import { sidebarGroups } from "../components/shell/sidebarItems";
+import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
+
+const sidebarSession: SessionContextValue = {
+  status: "authenticated",
+  session: {
+    allowed: true,
+    user: {
+      userId: "101",
+      username: "liuji",
+      nickname: "刘际涛",
+      displayName: "刘际涛",
+      deptId: "88",
+      deptName: "财务部",
+      avatar: null,
+    },
+    roles: ["finance"],
+    permissions: ["finops:app:view"],
+    accessTier: "full_access",
+    canAccessApp: true,
+    canMutateData: true,
+    canAdminAccess: false,
+  },
+  refresh: () => undefined,
+};
+
+function withSidebarSession(children: React.ReactNode) {
+  return <SessionContext.Provider value={sidebarSession}>{children}</SessionContext.Provider>;
+}
 
 function renderSidebar(expanded = false) {
   return render(
-    <MemoryRouter initialEntries={["/fin-ops/workbench"]}>
-      <AppSidebar
-        embedded={false}
-        expanded={expanded}
-        isCompact={false}
-        mobileOpen={false}
-        onCloseMobile={() => undefined}
-        onToggleExpanded={() => undefined}
-      />
-    </MemoryRouter>,
+    withSidebarSession(
+      <MemoryRouter initialEntries={["/fin-ops/workbench"]}>
+        <AppSidebar
+          embedded={false}
+          expanded={expanded}
+          isCompact={false}
+          mobileOpen={false}
+          onCloseMobile={() => undefined}
+          onToggleExpanded={() => undefined}
+        />
+      </MemoryRouter>,
+    ),
   );
 }
 
@@ -32,39 +62,46 @@ function renderSidebarAt(
   }>,
 ) {
   return render(
-    <MemoryRouter initialEntries={[initialPath]}>
-      <AppSidebar
-        embedded={false}
-        expanded={props?.expanded ?? true}
-        isCompact={props?.isCompact ?? false}
-        mobileOpen={props?.mobileOpen ?? false}
-        onCloseMobile={props?.onCloseMobile ?? (() => undefined)}
-        onToggleExpanded={props?.onToggleExpanded ?? (() => undefined)}
-      />
-    </MemoryRouter>,
+    withSidebarSession(
+      <MemoryRouter initialEntries={[initialPath]}>
+        <AppSidebar
+          embedded={false}
+          expanded={props?.expanded ?? true}
+          isCompact={props?.isCompact ?? false}
+          mobileOpen={props?.mobileOpen ?? false}
+          onCloseMobile={props?.onCloseMobile ?? (() => undefined)}
+          onToggleExpanded={props?.onToggleExpanded ?? (() => undefined)}
+        />
+      </MemoryRouter>,
+    ),
   );
 }
 
 function renderEmbeddedSidebar(expanded = true) {
   return render(
-    <MemoryRouter initialEntries={["/fin-ops/workbench"]}>
-      <AppSidebar
-        embedded={true}
-        expanded={expanded}
-        isCompact={false}
-        mobileOpen={false}
-        onCloseMobile={() => undefined}
-        onToggleExpanded={() => undefined}
-      />
-    </MemoryRouter>,
+    withSidebarSession(
+      <MemoryRouter initialEntries={["/fin-ops/workbench"]}>
+        <AppSidebar
+          embedded={true}
+          expanded={expanded}
+          isCompact={false}
+          mobileOpen={false}
+          onCloseMobile={() => undefined}
+          onToggleExpanded={() => undefined}
+        />
+      </MemoryRouter>,
+    ),
   );
 }
 
 describe("AppSidebar shell contract", () => {
   const appSidebarSource = readFileSync("src/components/shell/AppSidebar.tsx", "utf8");
+  const appStatusSource = readFileSync("src/components/shell/AppStatusIndicator.tsx", "utf8");
+  const appSource = readFileSync("src/app/App.tsx", "utf8");
+  const workbenchFilterSource = readFileSync("src/components/workbench/WorkbenchColumnFilterMenu.tsx", "utf8");
   const appStyles = readFileSync("src/app/styles.css", "utf8");
 
-  test("keeps the desktop rail fixed and uses compact navigation row rhythm", () => {
+  test("keeps the desktop rail fixed and uses the approved navigation rhythm", () => {
     const sidebarRule = appStyles.match(/\.app-sidebar\s*\{[^}]*\}/s)?.[0] ?? "";
     const paperRule = appStyles.match(/\.app-sidebar-paper\s*\{[^}]*\}/s)?.[0] ?? "";
     const brandRule = appStyles.match(/\.app-sidebar-brand\s*\{[^}]*\}/s)?.[0] ?? "";
@@ -79,16 +116,25 @@ describe("AppSidebar shell contract", () => {
     expect(sidebarRule).toMatch(/height:\s*100dvh;/);
     expect(paperRule).toMatch(/background:\s*#334154;/);
     expect(paperRule).toMatch(/color:\s*#e6f0ff;/);
-    expect(brandRule).toMatch(/min-height:\s*52px;/);
+    expect(brandRule).toMatch(/min-height:\s*64px;/);
     expect(groupTitleRule).toMatch(/color:\s*#b8cce5;/);
-    expect(itemRule).toMatch(/min-height:\s*30px;/);
-    expect(linkRule).toMatch(/min-height:\s*30px;/);
-    expect(linkRule).toMatch(/font-size:\s*13px;/);
+    expect(itemRule).toMatch(/min-height:\s*36px;/);
+    expect(linkRule).toMatch(/min-height:\s*36px;/);
+    expect(linkRule).toMatch(/font-size:\s*14px;/);
+    expect(linkRule).toMatch(/font-weight:\s*500;/);
     expect(iconRule).toMatch(/width:\s*26px;/);
     expect(iconRule).toMatch(/min-width:\s*26px;/);
-    expect(iconSvgRule).toMatch(/width:\s*15px;/);
-    expect(iconSvgRule).toMatch(/height:\s*15px;/);
-    expect(appSidebarSource).toMatch(/size=\{15\}/);
+    expect(iconSvgRule).toMatch(/width:\s*16px;/);
+    expect(iconSvgRule).toMatch(/height:\s*16px;/);
+    expect(appSidebarSource).toMatch(/size=\{16\}/);
+    expect(appStyles).toMatch(/\.app-sidebar-list\s*\{[^}]*gap:\s*4px;/s);
+    expect(appStyles).toMatch(/\.app-sidebar-account-footer\s*\{[^}]*flex:\s*0 0 72px;/s);
+    expect(appStyles).toMatch(/\.app-sidebar-dialog \.app-sidebar-link\s*\{[^}]*min-height:\s*44px;/s);
+    expect(appSource).toContain("function StatefulAppSidebar");
+    expect(appSource).not.toMatch(/style=\{shellStyle\}|const sidebarWidth/);
+    expect(appStyles).not.toContain("--sidebar-width");
+    expect(workbenchFilterSource).toContain('querySelector<HTMLElement>(".app-sidebar")');
+    expect(workbenchFilterSource).not.toContain("--sidebar-width");
   });
 
   test("does not render the OA embedded layout explanation card", () => {
@@ -99,14 +145,34 @@ describe("AppSidebar shell contract", () => {
     expect(appStyles).not.toMatch(/\.app-sidebar-embedded-note\s*\{/);
   });
 
-  test("keeps the status icon mark free of decorative gradient backgrounds", () => {
+  test("uses a static local brand mark and deletes the rotating status path", () => {
     const brandMarkRule = appStyles.match(/\.app-sidebar-brand-mark\s*\{[^}]*\}/s)?.[0] ?? "";
 
     expect(brandMarkRule).not.toMatch(/radial-gradient|linear-gradient/);
     expect(brandMarkRule).toMatch(/border:\s*0;/);
-    expect(brandMarkRule).toMatch(/border-radius:\s*50%;/);
+    expect(brandMarkRule).toMatch(/border-radius:\s*9px;/);
     expect(brandMarkRule).toMatch(/background:\s*transparent;/);
     expect(brandMarkRule).toMatch(/color:\s*#86efac;/);
+    expect(appStatusSource).toContain("finance-platform-mark.svg");
+    expect(appStatusSource).not.toMatch(/<circle|status-track|status-sweep/);
+    expect(appStyles).not.toMatch(/sidebar-status-orbit|app-sidebar-brand-status-track|app-sidebar-brand-status-sweep/);
+    expect(appStyles).not.toMatch(/\.app-sidebar[^}]*animation:\s*[^;]*infinite/s);
+  });
+
+  test("shows the current OA account and opens its details without a second identity source", async () => {
+    renderSidebar(true);
+
+    expect(screen.getByText("刘际涛")).toBeInTheDocument();
+    expect(screen.getByText("liuji")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "当前账号：刘际涛" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "当前 OA 账号详情" });
+    expect(dialog).toHaveTextContent("当前登录 OA 账号");
+    expect(dialog).toHaveTextContent("liuji");
+    expect(dialog).toHaveTextContent("财务部");
+    expect(appSidebarSource).toContain("AppSidebarAccount");
+    expect(appSidebarSource).not.toContain("财务运营管理员");
   });
 
   test("renders the expand control as an icon-only control without visible tooltip copy", () => {
@@ -134,15 +200,17 @@ describe("AppSidebar shell contract", () => {
     expect(screen.getByText("财务业务")).toBeInTheDocument();
     expect(screen.getByText("关联台")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "银行明细" })).toHaveAttribute("title", "银行明细");
-    expect(sidebarRule).toMatch(/--app-sidebar-motion:\s*var\(--motion-slow\) var\(--ease-out-quart\)/);
     expect(sidebarRule).toMatch(/--app-sidebar-content-motion:\s*var\(--motion-base\) var\(--ease-out-quart\)/);
-    expect(contentRule).toMatch(/transition:[^;]*var\(--app-sidebar-motion\)/);
-    expect(brandTextRule).toMatch(/opacity[^;]*var\(--app-sidebar-motion\)/);
-    expect(brandTextRule).toMatch(/transform[^;]*var\(--app-sidebar-motion\)/);
+    expect(contentRule).not.toMatch(/transition:\s*width|will-change:\s*width/);
+    expect(sidebarRule).not.toMatch(/transition:\s*width|will-change:\s*width/);
+    expect(brandTextRule).toMatch(/opacity[^;]*var\(--app-sidebar-content-motion\)/);
+    expect(brandTextRule).toMatch(/transform[^;]*var\(--app-sidebar-content-motion\)/);
+    expect(brandTextRule).not.toMatch(/transition:[^;]*(max-width|max-height|padding)/);
     expect(collapsedBrandTextRule).toMatch(/opacity:\s*0;/);
     expect(linkLabelRule).toMatch(/opacity[^;]*var\(--app-sidebar-content-motion\)/);
     expect(linkLabelRule).toMatch(/transform[^;]*var\(--app-sidebar-content-motion\)/);
-    expect(collapsedLinkLabelRule).toMatch(/max-width:\s*0;/);
+    expect(collapsedLinkLabelRule).toMatch(/opacity:\s*0;/);
+    expect(linkLabelRule).not.toMatch(/transition:[^;]*(max-width|max-height|padding)/);
     expect(collapsedGroupRule).toMatch(/width:\s*34px;/);
     expect(collapsedListRule).toMatch(/width:\s*34px;/);
     expect(appSidebarSource).not.toMatch(/Tooltip\.Trigger/);

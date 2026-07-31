@@ -6,6 +6,7 @@ import { Link as RouterLink } from "react-router-dom";
 import { useAppHealthStatus, useAppStatusOverview } from "../../contexts/AppHealthStatusContext";
 import { useOptionalSessionPermissions } from "../../contexts/SessionContext";
 import type { AppStatusDomain, AppStatusQueueSummary, AppStatusRuntimeSummaryGroup, AppStatusTask } from "../../features/appStatus/types";
+import financePlatformMark from "./finance-platform-mark.svg";
 
 function toneFromLevel(level: string) {
   if (level === "blocked") {
@@ -304,10 +305,8 @@ export default function AppStatusIndicator() {
             }
           }}
         >
-          <svg className="app-sidebar-brand-status-icon" viewBox="0 0 100 100" aria-hidden="true">
-            <circle className="app-sidebar-brand-status-track" cx="50" cy="50" r="37" />
-            <circle className="app-sidebar-brand-status-sweep" cx="50" cy="50" r="37" />
-          </svg>
+          <img alt="" className="app-sidebar-brand-status-icon" src={financePlatformMark} />
+          <span className="app-sidebar-brand-status-dot" aria-hidden="true" />
         </span>
       {open ? createPortal(
         <div

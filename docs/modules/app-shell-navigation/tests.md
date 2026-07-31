@@ -11,6 +11,7 @@
 | Lazy route fallback | `web/src/test/PageRouteHost.test.tsx` | lazy chunk 未 resolve 时显示轻量 fallback；未知路径 redirect root |
 | Browser lifecycle isolation | `web/src/test/PageRouteHost.test.tsx` | focus、visibility 与 BFCache 不触发当前业务页 reload；route 重进仍重新 mount |
 | Sidebar active/preload | `web/src/test/AppSidebar.test.tsx` | active route、nested path、import shortcut inactive、hover/focus preload 不改 link target |
+| Sidebar hierarchy/account/status | `web/src/test/AppSidebar.test.tsx`、`web/e2e/app-shell-responsive.spec.ts` | 64/36/44/72px 层级、OA identity、账号弹层、静态状态图标、旧无限动画删除、零额外 session I/O、展开性能与 CLS |
 | Compact/mobile sidebar | `web/src/test/AppSidebar.test.tsx`、`web/src/test/App.test.tsx`、`web/e2e/app-shell-responsive.spec.ts` | top bar 打开菜单；点击导航关闭 compact drawer；导航入口仍完整；真实 Chromium 移动视口 drawer 打开/导航/关闭 |
 | Session gate | `web/src/test/SessionGate.test.tsx` | loading/forbidden/expired/error/retry；业务 route 在 authenticated 后渲染 |
 | Global operation overlay | `web/src/test/GlobalOperationOverlayContext.test.tsx` | 写操作运行期间全屏阻塞、成功自动关闭、失败保留错误并由用户确认关闭 |
@@ -30,6 +31,9 @@
 | 侧栏 hover/focus preload | 已覆盖 | `AppSidebar.test.tsx` |
 | nested path active、import shortcut inactive | 已覆盖，2026-06-11 新增 | `AppSidebar.test.tsx` |
 | compact drawer 点击导航后关闭 | 已覆盖，2026-06-11 新增 | `AppSidebar.test.tsx` |
+| 当前 OA 账号区、身份弹层与移动抽屉零额外 session I/O | 已覆盖，2026-08-01 新增 | `AppSidebar.test.tsx`、`app-shell-responsive.spec.ts` |
+| 侧栏 232/72 展开动画不超过 300ms、frame p95 ≤25ms、CLS=0 | 已覆盖，2026-08-01 新增 | `app-shell-responsive.spec.ts` |
+| 静态品牌状态入口与旧旋转圆环/keyframes 删除 | 已覆盖，2026-08-01 新增 | `AppSidebar.test.tsx` source guard |
 | 指定发票页入口位于财务业务分组末尾且仍在系统操作上方 | 已覆盖，2026-06-18 更新 | `App.test.tsx` |
 | SessionGate loading/forbidden/expired/error/retry | 已覆盖 | `SessionGate.test.tsx` |
 | 全局写操作 overlay 成功/失败状态 | 已覆盖，2026-06-14 新增 | `GlobalOperationOverlayContext.test.tsx` |
@@ -66,7 +70,8 @@
 2. 从关联台导航到税金抵扣，旧页面卸载，税金页面使用自己的月份控件和 API。
 3. 从成本统计打开 compact sidebar，点击设置后进入 `/settings` 并关闭移动抽屉。
 4. 从成本统计进入银行流水导入，路径变成 `/imports/bank-transactions`，导入 shortcut 不标记为 active。
-5. focus、visibility 与 BFCache 恢复不触发当前业务页面 reload；重新进入 route 仍重新 mount。
+5. 点击底部当前 OA 账号打开身份弹层，展示用户名和部门，session 请求计数不增加。
+6. focus、visibility 与 BFCache 恢复不触发当前业务页面 reload；重新进入 route 仍重新 mount。
 6. 真实 Chromium 打开 `/operations/app-health`，admin 可以看到导航和 dashboard；read_export_only/forbidden/expired 不会触发受保护 dashboard API。
 7. 真实 Chromium 移动视口打开成本统计，打开主导航菜单，点击设置后 drawer 关闭并进入设置页。
 8. 真实 Chromium 打开 `/?embedded=oa`，shell 使用 embedded 样式，桌面侧栏默认折叠并可展开。

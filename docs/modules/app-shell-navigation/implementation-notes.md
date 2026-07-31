@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-08-01 - 侧栏视觉层级、OA 身份区与静态品牌状态入口
+
+- 目标：在保持页面名称、路由、权限和业务 I/O 不变的前提下，降低侧栏拥挤感，显示当前 OA 用户，并移除持续旋转的状态图标。
+- 影响范围：`AppSidebar`、新 `AppSidebarAccount`、`AppStatusIndicator`、局部 `.app-sidebar-*` 样式和 shell 测试。
+- 关键决策：保持 `232px/72px` 外部宽度合同；使用固定 64px 品牌区、独立滚动导航、固定 72px 账号区；账号直接消费 SessionContext；使用本地首字头像和独立静态 SVG，不加载 OA 远程头像、不新增依赖；静态状态点继续复用原 App Status 弹层。桌面展开状态下沉到 `StatefulAppSidebar`，避免每次切换重新渲染整棵业务页面；删除 width/flex/max-width/max-height 布局动画，只保留文本和图标的 transform/opacity 过渡。
+- 旧代码清理：删除旋转圆环 SVG、track/sweep class、无限 keyframes 及其 reduced-motion 分支，不保留 fallback；删除只有 Workbench 筛选弹层读取的 `--sidebar-width` 继承状态，改为按需读取真实侧栏几何，避免整棵页面样式失效。
+- 文档影响：Session identity 新增为 app-shell 的展示输出，因此更新 README、boundary I/O 和测试矩阵；API、read model、worker、业务状态机和运维合同不变。
+- 测试覆盖：Vitest 保护 OA identity/popover、导航层级、静态图标和 legacy negative guard；Playwright 保护移动账号交互零额外 session I/O、桌面展开耗时、frame p95 和 CLS。
+- 验证命令：`npm --prefix web test -- --run src/test/AppSidebar.test.tsx src/test/App.test.tsx`、`npm --prefix web run build`、`npm --prefix web run e2e -- e2e/app-shell-responsive.spec.ts --project=chromium`、`bash scripts/verify.sh lint`、`bash scripts/verify.sh docs`。
+- 未测风险：缺失的 Figma 原图无法做像素级还原；品牌 SVG 已隔离，可在拿到正式导出资产后直接替换而不改组件或 I/O。
+
 ## 2026-06-19 - 生产 user-scope route-shell smoke
 
 - 目标：在真实生产域名、真实 OA 登录态和真实浏览器下，补一层发布后 route-shell 证据，确认核心页面不会卡在 session gate、页面加载中、隐藏浏览器错误或意外写请求。

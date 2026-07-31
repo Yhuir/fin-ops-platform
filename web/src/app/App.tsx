@@ -1,10 +1,9 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useState } from "react";
 import { Alert } from "@heroui/react";
 import { BrowserRouter, useLocation } from "react-router-dom";
 
 import SessionGate from "../components/auth/SessionGate";
 import AppSidebar from "../components/shell/AppSidebar";
-import { collapsedSidebarWidth, expandedSidebarWidth } from "../components/shell/AppSidebar";
 import AppTopBar from "../components/shell/AppTopBar";
 import BackgroundProgressBlock from "../components/common/BackgroundProgressBlock";
 import { AppChromeProvider } from "../contexts/AppChromeContext";
@@ -70,6 +69,45 @@ function useShellMediaQuery(query: string) {
   return matches;
 }
 
+function StatefulAppSidebar({
+  embedded,
+  isCompact,
+  mobileOpen,
+  onCloseMobile,
+}: {
+  embedded: boolean;
+  isCompact: boolean;
+  mobileOpen: boolean;
+  onCloseMobile: () => void;
+}) {
+  const storageKey = embedded ? EMBEDDED_OA_SIDEBAR_STORAGE_KEY : DEFAULT_SIDEBAR_STORAGE_KEY;
+  const defaultExpanded = !embedded;
+  const [expanded, setExpanded] = useState(() => readPersistedSidebarState(storageKey, defaultExpanded));
+
+  useEffect(() => {
+    setExpanded(readPersistedSidebarState(storageKey, defaultExpanded));
+  }, [defaultExpanded, storageKey]);
+
+  const toggleExpanded = () => {
+    setExpanded((current) => {
+      const next = !current;
+      persistSidebarState(storageKey, next);
+      return next;
+    });
+  };
+
+  return (
+    <AppSidebar
+      embedded={embedded}
+      isCompact={isCompact}
+      mobileOpen={mobileOpen}
+      expanded={expanded}
+      onCloseMobile={onCloseMobile}
+      onToggleExpanded={toggleExpanded}
+    />
+  );
+}
+
 function AppShell() {
   const location = useLocation();
   const {
@@ -84,16 +122,9 @@ function AppShell() {
   } = useBackgroundJobProgress();
   const embedded = isOaEmbeddedMode();
   const isCompact = useShellMediaQuery("(max-width: 899.95px)");
-  const storageKey = embedded ? EMBEDDED_OA_SIDEBAR_STORAGE_KEY : DEFAULT_SIDEBAR_STORAGE_KEY;
-  const defaultExpanded = !embedded;
-  const [sidebarExpanded, setSidebarExpanded] = useState(() => readPersistedSidebarState(storageKey, defaultExpanded));
   const [mobileOpen, setMobileOpen] = useState(false);
   const isBankDetailsRoute = location.pathname === "/bank-details";
   const showProgressStack = !isBankDetailsRoute && (connectionFailed || primaryJob || operationError);
-
-  useEffect(() => {
-    setSidebarExpanded(readPersistedSidebarState(storageKey, defaultExpanded));
-  }, [defaultExpanded, storageKey]);
 
   useEffect(() => {
     if (!isCompact) {
@@ -101,29 +132,13 @@ function AppShell() {
     }
   }, [isCompact]);
 
-  const toggleSidebarExpanded = () => {
-    setSidebarExpanded((current) => {
-      const next = !current;
-      persistSidebarState(storageKey, next);
-      return next;
-    });
-  };
-
-  const sidebarWidth = isCompact ? 0 : sidebarExpanded ? expandedSidebarWidth : collapsedSidebarWidth;
-
-  const shellStyle = {
-    "--sidebar-width": `${sidebarWidth}px`,
-  } as CSSProperties;
-
   return (
-    <div className={`app-shell${embedded ? " embedded-shell" : ""}${isBankDetailsRoute ? " app-shell--bank-details" : ""}`} style={shellStyle}>
-      <AppSidebar
+    <div className={`app-shell${embedded ? " embedded-shell" : ""}${isBankDetailsRoute ? " app-shell--bank-details" : ""}`}>
+      <StatefulAppSidebar
         embedded={embedded}
         isCompact={isCompact}
         mobileOpen={mobileOpen}
-        expanded={sidebarExpanded}
         onCloseMobile={() => setMobileOpen(false)}
-        onToggleExpanded={toggleSidebarExpanded}
       />
       <section className="app-shell-content">
         <AppTopBar

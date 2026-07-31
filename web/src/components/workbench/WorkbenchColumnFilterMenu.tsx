@@ -36,10 +36,7 @@ function WorkbenchColumnFilterMenu({
       if (!rect) {
         return;
       }
-      const shell = document.querySelector<HTMLElement>(".app-shell");
-      const sidebarWidth = shell
-        ? Number.parseFloat(getComputedStyle(shell).getPropertyValue("--sidebar-width")) || 0
-        : 0;
+      const sidebarWidth = document.querySelector<HTMLElement>(".app-sidebar")?.getBoundingClientRect().width ?? 0;
       const viewportInset = 8;
       const viewportMaxLeft = Math.max(viewportInset, window.innerWidth - popoverWidth - viewportInset);
       const preferredLeftInset = sidebarWidth > 0 ? sidebarWidth + 16 : viewportInset;

@@ -1,6 +1,6 @@
 # App Shell 与导航模块边界与 I/O
 
-日期：2026-07-22
+日期：2026-08-01
 
 ## 模块化状态
 
@@ -15,6 +15,7 @@
 ### 负责
 
 - 页面注册、路由 host、sidebar/topbar、session context、page runtime context。
+- 通过既有 SessionContext 展示当前 OA 身份；固定品牌区、独立滚动导航和固定账号区属于 shell 布局职责。
 - 只挂载当前 route，并向页面提供稳定的 `pageKey/active` runtime identity。
 - 全局 operation overlay、app health indicator、页面 session state。
 - 为页面提供通用壳体，不解释业务数据。
@@ -41,6 +42,8 @@
 | --- | --- | --- |
 | Route rendering | `PageRouteHost` | 根据 registry 渲染页面 |
 | Navigation | sidebar/topbar | 不硬编码业务查询 |
+| Current OA identity | sidebar account footer | 只展示 `displayName/username/deptName`；弹层开关不产生 API、图片或业务 I/O |
+| Global runtime status entry | static local brand mark | 静态状态点展示 level，并复用既有 App Status 弹层；不使用无限动画 |
 | Runtime context | pages/components | 提供 `{pageKey, active, activationGeneration}` 兼容 shape；load 由页面 mount/query/retry owner 触发，shell 不改变 generation |
 
 ## 持久化与投影
@@ -55,7 +58,7 @@
 | --- | --- |
 | App root | `web/src/app/App.tsx`、`main.tsx` |
 | Routing | `web/src/app/pageRegistry.tsx`、`router.tsx`、`PageRouteHost.tsx`、`runtime.ts` |
-| Shell components | `web/src/components/shell/AppSidebar.tsx`、`AppTopBar.tsx`、`sidebarItems.ts`、`AppStatusIndicator.tsx` |
+| Shell components | `web/src/components/shell/AppSidebar.tsx`、`AppSidebarAccount.tsx`、`AppTopBar.tsx`、`sidebarItems.ts`、`AppStatusIndicator.tsx`、`finance-platform-mark.svg` |
 | Shell styles | `web/src/app/styles.css` 中 `.app-sidebar-*` 导航样式 |
 | Contexts | `GlobalOperationOverlayContext.tsx`、`PageRuntimeContext.tsx`、`PageSessionStateContext.tsx`、`SessionContext.tsx` |
 | Hooks | `web/src/hooks/useFinanceTableSession.ts` |
@@ -63,7 +66,7 @@
 
 ## 依赖方向
 
-- 允许依赖：session API, app health context, page registry。
+- 允许依赖：SessionContext, app health context, page registry, HeroUI shell primitives。
 - 必须通过：registered page metadata。
 - 禁止绕过：shell 直接 import 页面 service business logic；sidebar 硬编码权限外业务规则。
 

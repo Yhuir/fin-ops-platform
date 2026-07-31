@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: complete
-stopped_at: Phase 36 deployed and production-verified on main-d6266b05-20260801015117
-last_updated: "2026-07-31T18:13:36Z"
-last_activity: 2026-08-01 -- Phase 36 production release and performance closure passed
+status: active
+stopped_at: Executing Phase 37 sidebar identity and hierarchy
+last_updated: "2026-08-01T03:01:45+08:00"
+last_activity: 2026-08-01 -- Phase 37 execution started
 progress:
   total_phases: 34
   completed_phases: 8
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-16)
 
 **Core value:** Preserve production finance workflow correctness while improving individual pages through isolated, reviewable GSD phases.
-**Current focus:** Phase 36 — right-drawer-motion-production-closure
+**Current focus:** Phase 37 — app-shell-sidebar-identity
 
 ## Current Position
 
-Phase: 36 (right-drawer-motion-production-closure) — COMPLETE
+Phase: 37 (app-shell-sidebar-identity) — IN PROGRESS
 Plan: 1 of 1
-Status: Production release active and fully verified
-Last activity: 2026-08-01 -- Phase 36 production release and performance closure passed
+Status: Implementing approved sidebar UI contract
+Last activity: 2026-08-01 -- Phase 37 execution started
 
-Progress: [██████████] implementation, review, main push, deployment and production verification complete
+Progress: [██░░░░░░░░] implementation in progress
 
 ## Performance Metrics
 

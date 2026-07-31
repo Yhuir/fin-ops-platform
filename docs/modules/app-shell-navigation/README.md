@@ -21,7 +21,9 @@
 - `web/src/app/pageRegistry.tsx`：页面注册表、route chunks、sidebar groups 的唯一事实源。
 - `web/src/app/router.tsx`：把 `appPageRoutes` 交给 `PageRouteHost`。
 - `web/src/app/PageRouteHost.tsx`：route match、未知路由 redirect、当前页面挂载、lazy fallback、`PageRuntimeProvider`。
-- `web/src/components/shell/AppSidebar.tsx`：桌面/移动侧栏、active route、icon-only collapse、hover/focus/touch preload。
+- `web/src/components/shell/AppSidebar.tsx`：桌面/移动侧栏、固定品牌/导航/账号三区、active route、icon-only collapse、hover/focus/touch preload。
+- `web/src/components/shell/AppSidebarAccount.tsx`：只消费现有 SessionContext 的当前 OA 用户入口与身份详情弹层，不发起独立请求。
+- `web/src/components/shell/AppStatusIndicator.tsx`：静态品牌图标、静态运行状态点和全局运行状态弹层入口。
 - `web/src/components/shell/sidebarItems.ts`：只重导出 `pageRegistry` 的 `sidebarGroups`，不能维护第二份导航事实。
 - `web/src/components/shell/AppTopBar.tsx`：compact top bar 和移动端打开菜单。
 - `web/src/contexts/PageRuntimeContext.tsx`：当前页面激活上下文、active page event 订阅。
@@ -37,6 +39,7 @@
 - 页面 session state 只保存当前浏览器标签页内的轻量 UI 状态，例如查询、筛选、分页、排序、tab、选中行、展开行和详情 drawer target；不保存 read model payload、业务事实、权限事实、loading/error/toast 或失败中的提交。
 - `SessionGate` 是 shell 级入口。会话 loading/forbidden/expired/error 会阻止业务 route 渲染，但侧栏和全局 shell 仍按现有布局显示。
 - `AppStatusIndicator` 在 shell 中消费后端 app status projection；路由切换不能改变全局状态事实。
+- 侧栏账号区只消费 SessionContext 已归一化的 `displayName/username/deptName`，不加载 OA 头像、不重取 session、不提供业务写操作。
 - `GlobalOperationOverlayProvider` 是 shell 级交互保护层。它只承载写操作后的短暂等待和错误反馈，不保存业务 payload，不决定 freshness，不替代 App Status 或页面 read boundary。页面不得各自实现第二套全屏操作阻塞层。
 - import pages 是独立 route，但其侧栏入口设置 `active: false`，避免进入导入页时误把导入入口高亮为当前业务页面。
 

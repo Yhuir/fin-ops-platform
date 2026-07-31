@@ -743,4 +743,24 @@ Plans:
 
 - [x] 36-01-PLAN — Shared native drawer motion, custom-shell migration, regression gates, deployment and production verification.
 
+### Phase 37: App Shell 侧栏层级、OA 身份区与静态品牌状态入口
+
+**Goal:** Improve sidebar hierarchy and spacing, add a fixed clickable current-OA-user area, and replace the rotating status graphic with a static local brand mark while preserving the global status popover and all existing route/business I/O contracts.
+**Requirements:** User-approved sidebar redesign; no new product requirement IDs.
+**Depends on:** Phase 36 verified shell and drawer baseline.
+**Canonical refs:** `.planning/phases/37-app-shell-sidebar-identity/37-01-PLAN.md`, `docs/modules/app-shell-navigation/boundary-io.md`, `web/src/components/shell/AppSidebar.tsx`, `web/src/contexts/SessionContext.tsx`
+**Success Criteria** (what must be TRUE):
+
+  1. Desktop, collapsed and mobile sidebars use a fixed brand zone, independently scrollable navigation and fixed OA account footer without changing the `232px / 72px` shell width contract.
+  2. Current account identity comes only from existing SessionContext and opens a lightweight details popover with zero additional API or image I/O.
+  3. The static local brand mark remains the global runtime-status entry; the rotating SVG, keyframes and obsolete styles are deleted without a fallback or second status path.
+  4. Page names, route order, permissions and business pages are unchanged; no dependency is added.
+  5. Targeted/full frontend gates, browser interaction/performance proof, one pushed main deployment and production route/health smoke pass.
+
+**Plans:** 0/1 plans complete
+
+Plans:
+
+- [ ] 37-01-PLAN — Sidebar identity, spacing, legacy cleanup, regression gates, main deployment and production verification.
+
 ---

@@ -1,6 +1,6 @@
 # 关联台模块边界与 I/O
 
-日期：2026-07-29
+日期：2026-08-01
 
 ## 职责
 
@@ -69,6 +69,7 @@
 - `WorkbenchRelationCommandService` 拥有正式关系状态转换；repository/UoW 拥有 SQL 与事务，普通关系写入不拥有下游 durable outbox。
 - `WorkbenchRelationGroupingService` 只消费 canonical rows + active relations；relation requirement snapshot 是唯一可改变关联台 zone 的业务 metadata，其他 display decorations 不得改变 membership 或 zone。
 - 前端只消费 API，不读取 relation provenance 推断分区。
+- 列筛选弹层只在打开/resize/scroll 时读取当前 `.app-sidebar` 的真实几何来约束视口 inset；不消费继承 CSS 变量、不持有 shell state，也不触发业务 I/O。
 
 ## Read model 与 worker
 
