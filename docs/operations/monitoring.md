@@ -645,7 +645,9 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_sync_closure_ga
 - 登录态 SSE smoke：必须使用真实 OA token/Admin-Token/cookie，覆盖 App Health 和 Workbench event-stream 首事件 `<= 1000ms`，并拒绝 HTML fallback 或错误事件名。
 - 真实写操作 audit：最近真实 durable outbox 样本覆盖内置高影响 operation profile，并满足写入后 outbox done SLO。
 - 受控写操作 E2E：必须提供安全、可回滚的 scenario，并显式 `--apply-write-scenarios` 和 `--write-approval-ticket` 通过 mutating HTTP + 写后 outbox/readiness + 可选 post API。
-- 采样顺序：runtime health 在所有 read-model、HTTP/SSE 与写 smoke 之后执行，最终 evidence 证明的是门禁动作完成后的队列收敛，而不是写操作前的旧快照。
+- 采样顺序：runtime health 在可逆写前先阻止未收敛 mutation，并在所有 read-model、HTTP/SSE 与写 smoke
+  之后再次执行；每轮采样先幂等收敛 `status=done/publish_status=publishing` 终态，再读取严格快照，
+  因而最终 evidence 覆盖门禁内部探针新触发的 refresh，而不是写操作前的旧快照。
 
 缺少真实认证、缺少 scenario、只 dry-run、缺少审批引用、invalid scenario、runtime health 缺事实字段、或 write audit 没有样本时，gate 会返回 `fail`。
 Postgres-backed gates 在缺少 `FIN_OPS_POSTGRES_DATABASE_URL` / `DATABASE_URL` 时会返回

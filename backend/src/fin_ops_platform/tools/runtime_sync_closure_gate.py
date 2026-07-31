@@ -12,6 +12,7 @@ from typing import Any, Mapping, Sequence, TextIO
 
 from fin_ops_platform.services.postgres_connection import PostgresConfigurationError, PostgresConnection, PostgresSettings
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
+from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 from fin_ops_platform.services.runtime_worker_registry import rabbitmq_dispatch_event_types
 from fin_ops_platform.tools import (
     health_ready_payload_probe,
@@ -340,15 +341,18 @@ def _runtime_health_check(
     name: str = "runtime_health",
 ) -> ClosureCheck:
     deadline = monotonic() + max(0.0, timeout_seconds)
-    repository = RuntimeMonitoringRepository(connection)
+    monitoring_repository = RuntimeMonitoringRepository(connection)
+    queue_repository = RuntimeQueueRepository(connection)
+    reconciled_completed_publish_states = 0
     while True:
         try:
-            summary = repository.ready_health_summary()
+            reconciled_completed_publish_states += queue_repository.reconcile_completed_publish_states()
+            summary = monitoring_repository.ready_health_summary()
         except Exception as exc:
             return ClosureCheck(
                 name,
                 FAIL,
-                "runtime monitoring health summary unavailable.",
+                "runtime queue reconciliation or monitoring health summary unavailable.",
                 {"error": str(exc) or exc.__class__.__name__},
             )
         missing_fields = [key for key in RUNTIME_HEALTH_REQUIRED_FIELDS if key not in summary]
@@ -372,6 +376,7 @@ def _runtime_health_check(
                 "Runtime queue, worker, RabbitMQ and dirty-scope blockers are clear." if not blockers else "Runtime health did not converge before the gate deadline.",
                 {
                     "blockers": blockers,
+                    "reconciled_completed_publish_states": reconciled_completed_publish_states,
                     "snapshot": {
                         key: summary.get(key)
                         for key in (

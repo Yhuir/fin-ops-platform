@@ -423,7 +423,8 @@ python -m fin_ops_platform.app.worker \
   helper 使用候选 release 的严格合同校验后原子安装 root-owned `0600` 文件，并保留一份 `.previous`；
   不允许直接覆盖标准 scenario、跟随符号链接或绕过候选代码校验
 - runtime health 在可逆写 smoke 前后各采样一次：前置采样阻止在未收敛 runtime 上执行 mutation，后置
-  采样保证最终 evidence 反映 smoke 触发后的 durable queue、dirty scope、worker 与 dead-letter 收敛状态
+  采样保证最终 evidence 反映 smoke 触发后的 durable queue、dirty scope、worker 与 dead-letter 收敛状态；
+  每轮严格采样前都会幂等收敛已完成的 durable publish 终态，覆盖门禁内部探针新触发的 refresh
 - 门禁按 systemd 的既有边界分别加载 `/etc/fin-ops/fin-ops.rabbitmq-topology.env` 与
   `/etc/fin-ops/fin-ops.rabbitmq-monitoring.env`，任一缺失或不可读都 fail closed；可逆写 smoke
   优先使用 common env 中的 approval ticket，缺失时使用运维合同登记的固定 standing ticket，

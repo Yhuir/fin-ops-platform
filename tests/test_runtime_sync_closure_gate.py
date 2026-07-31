@@ -50,6 +50,14 @@ class FakeRuntimeMonitoringRepository:
         }
 
 
+class FakeRuntimeQueueRepository:
+    def __init__(self, _connection) -> None:
+        pass
+
+    def reconcile_completed_publish_states(self) -> int:
+        return 0
+
+
 class EmptyRuntimeMonitoringRepository:
     def __init__(self, _connection) -> None:
         pass
@@ -72,6 +80,37 @@ class BackloggedRabbitMqRuntimeMonitoringRepository:
             "consumers": 1,
             "dead_letter_messages": 0,
         }
+        return summary
+
+
+class TerminalPublishRace:
+    def __init__(self) -> None:
+        self.publishing = 0
+        self.reconciliations = 0
+        self.samples = 0
+
+
+class TerminalPublishRaceQueueRepository:
+    def __init__(self, connection: TerminalPublishRace) -> None:
+        self._connection = connection
+
+    def reconcile_completed_publish_states(self) -> int:
+        self._connection.reconciliations += 1
+        reconciled = self._connection.publishing
+        self._connection.publishing = 0
+        return reconciled
+
+
+class TerminalPublishRaceMonitoringRepository:
+    def __init__(self, connection: TerminalPublishRace) -> None:
+        self._connection = connection
+
+    def ready_health_summary(self) -> dict[str, object]:
+        self._connection.samples += 1
+        if self._connection.samples == 1:
+            self._connection.publishing = 1
+        summary = FakeRuntimeMonitoringRepository(None).ready_health_summary()
+        summary["rabbitmq_publishing_backlog"] = self._connection.publishing
         return summary
 
 
@@ -210,6 +249,13 @@ def strict_write_scenarios() -> list[WriteScenario]:
 
 class RuntimeSyncClosureGateTests(unittest.TestCase):
     def setUp(self) -> None:
+        self._runtime_queue_patch = patch.object(
+            gate,
+            "RuntimeQueueRepository",
+            FakeRuntimeQueueRepository,
+        )
+        self._runtime_queue_patch.start()
+        self.addCleanup(self._runtime_queue_patch.stop)
         self._health_ready_patch = patch.object(
             gate.health_ready_payload_probe,
             "collect_health_ready_payload",
@@ -384,6 +430,28 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             check.payload["snapshot"]["rabbitmq_queues"]["no_oa_bank_batch.read_model.refresh"]["messages"],
             1,
         )
+
+    def test_runtime_health_reconciles_terminal_publish_race_before_strict_sampling(self) -> None:
+        connection = TerminalPublishRace()
+        with patch.object(
+            gate,
+            "RuntimeQueueRepository",
+            TerminalPublishRaceQueueRepository,
+        ), patch.object(
+            gate,
+            "RuntimeMonitoringRepository",
+            TerminalPublishRaceMonitoringRepository,
+        ):
+            check = gate._runtime_health_check(
+                connection,
+                timeout_seconds=1,
+                poll_interval_seconds=0.05,
+            )
+
+        self.assertEqual(check.status, gate.PASS)
+        self.assertEqual(connection.samples, 2)
+        self.assertEqual(connection.reconciliations, 2)
+        self.assertEqual(check.payload["reconciled_completed_publish_states"], 1)
 
     def test_runtime_blockers_require_metrics_and_consumers_for_every_dispatched_event(self) -> None:
         summary = FakeRuntimeMonitoringRepository(None).ready_health_summary()

@@ -578,7 +578,9 @@ RabbitMQ dispatcher 每次领取待发布事件前，会把业务消费已经完
 每个 checkpoint 在 closure gate 前先使用 verification release 代码中的同一 repository 方法，幂等收敛
 已经 `done` 的终态；closure 完成后、最终 runtime evidence 采样前再执行一次相同收敛。因此候选尚未
 激活、preflight 自身新建事件或可逆写 smoke 产生终态事件时都不会形成激活死锁。该步骤不认领、重放或
-重新发布事件，也不绕过 `unpublished/publishing/publish_failed = 0` 强门禁。
+重新发布事件，也不绕过 `unpublished/publishing/publish_failed = 0` 强门禁。closure gate 的每轮
+runtime health 采样也执行同一幂等收敛，处理探针运行期间才完成的 publish 终态；若收敛与采样之间又有
+事件完成，下一轮继续收敛，直到严格快照无 blocker 或达到超时。
 
 worker readiness 不是 systemd active。发布脚本会等待：
 
