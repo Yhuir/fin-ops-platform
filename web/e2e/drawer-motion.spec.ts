@@ -7,6 +7,7 @@ type DrawerMotionSample = {
   left: number;
   right: number;
   width: number;
+  viewportWidth: number;
 };
 
 async function armDrawerSampler(page: Page, durationMs = 360) {
@@ -29,6 +30,7 @@ async function armDrawerSampler(page: Page, durationMs = 360) {
           left: rect.left,
           right: rect.right,
           width: rect.width,
+          viewportWidth: window.innerWidth,
         });
       }
     };
@@ -51,24 +53,52 @@ async function drawerSamples(page: Page) {
   await expect.poll(() => page.evaluate(() => (
     window as typeof window & { __drawerMotionDone?: boolean }
   ).__drawerMotionDone)).toBe(true);
-  return page.evaluate(() => (
-    window as typeof window & { __drawerMotionSamples?: DrawerMotionSample[] }
-  ).__drawerMotionSamples ?? []);
+  return page.evaluate(() => {
+    const samples = (
+      window as typeof window & { __drawerMotionSamples?: DrawerMotionSample[] }
+    ).__drawerMotionSamples ?? [];
+    const drawer = document.querySelector<HTMLElement>(
+      ".finance-drawer__content[data-placement='right'] .finance-drawer",
+    );
+    if (drawer) {
+      const rect = drawer.getBoundingClientRect();
+      samples.push({
+        elapsed: (samples.at(-1)?.elapsed ?? 0) + 1,
+        left: rect.left,
+        right: rect.right,
+        width: rect.width,
+        viewportWidth: window.innerWidth,
+      });
+    }
+    return samples;
+  });
 }
 
 function expectFullWidthTravel(samples: DrawerMotionSample[], direction: "enter" | "exit") {
-  expect(samples.length).toBeGreaterThan(3);
-  const lefts = samples.map((sample) => sample.left);
+  const frames = samples.filter((sample) => sample.width > 0);
+  expect(frames.length).toBeGreaterThan(3);
+  const lefts = frames.map((sample) => sample.left);
   const minLeft = Math.min(...lefts);
   const maxLeft = Math.max(...lefts);
-  const width = samples.find((sample) => sample.width > 0)?.width ?? 0;
+  const width = frames[0]?.width ?? 0;
+  const openFrame = direction === "enter" ? frames.at(-1) : frames[0];
+  const closedFrame = direction === "enter" ? frames[0] : frames.at(-1);
+  const intermediateIndex = frames.findIndex((sample) => (
+    sample.left > (openFrame?.left ?? 0) + 8
+    && sample.left < (closedFrame?.left ?? 0) - 8
+  ));
   expect(width).toBeGreaterThan(0);
   expect(maxLeft - minLeft).toBeGreaterThan(width * 0.75);
-  expect(lefts.some((left) => left > minLeft + 8 && left < maxLeft - 8)).toBe(true);
+  expect(Math.abs((openFrame?.right ?? 0) - (openFrame?.viewportWidth ?? 0))).toBeLessThanOrEqual(2);
+  expect(closedFrame?.left).toBeGreaterThanOrEqual((closedFrame?.viewportWidth ?? 0) - 2);
+  expect(intermediateIndex).toBeGreaterThan(0);
+  expect(frames[intermediateIndex]?.left).toBeGreaterThan(openFrame?.left ?? 0);
+  expect(frames[intermediateIndex]?.left).toBeLessThan(closedFrame?.left ?? 0);
   if (direction === "enter") {
-    expect(samples.at(-1)?.left).toBeCloseTo(minLeft, 0);
+    expect(intermediateIndex).toBeLessThan(frames.length - 1);
+    expect(openFrame?.left).toBeCloseTo(minLeft, 0);
   } else {
-    expect(samples.at(-1)?.left).toBeGreaterThan(minLeft + width * 0.5);
+    expect(closedFrame?.left).toBeCloseTo(maxLeft, 0);
   }
 }
 
