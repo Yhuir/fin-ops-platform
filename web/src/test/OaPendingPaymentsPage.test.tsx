@@ -493,6 +493,7 @@ function installOaPendingPaymentsFetch(overrides?: {
   writebackPaidPayload?: Record<string, unknown>;
   writebackPaidResponses?: Array<{ status: number; payload: Record<string, unknown> }>;
   bankCandidatesPayload?: (url: URL) => Record<string, unknown>;
+  bankCandidatesDelay?: Promise<void>;
 }) {
   const writebackPaidResponses = [...(overrides?.writebackPaidResponses ?? [])];
   const rowsResponses = [...(overrides?.rowsResponses ?? [])];
@@ -530,6 +531,7 @@ function installOaPendingPaymentsFetch(overrides?: {
       });
     }
     if (url.pathname === "/api/oa-pending-payments/bank-transaction-candidates") {
+      await overrides?.bankCandidatesDelay;
       return new Response(JSON.stringify(overrides?.bankCandidatesPayload?.(url) ?? {
         rows: [
           {
@@ -1106,6 +1108,32 @@ describe("OA pending payments page", () => {
     await waitFor(() => {
       expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("view_mode")).toBe("in_progress");
     });
+  });
+
+  test("blocks every drawer dismissal path while bank candidates are loading", async () => {
+    const candidates = deferred();
+    const fetchMock = installOaPendingPaymentsFetch({ bankCandidatesDelay: candidates.promise });
+    const user = userEvent.setup();
+
+    renderAuthenticatedAppAt("/oa-pending-payments");
+
+    const page = await screen.findByTestId("oa-pending-payments-page");
+    await within(page).findByText("候选付款人");
+    await user.click(within(page).getByRole("button", { name: /进行中 OA/ }));
+    const candidateRow = within(page).getByRole("row", { name: /候选付款人/ });
+    await user.click(within(candidateRow).getByRole("checkbox", { name: /候选付款人/ }));
+    await user.click(within(page).getByRole("button", { name: "关联支出流水" }));
+
+    const drawer = await screen.findByLabelText("关联支出流水抽屉");
+    expect(within(drawer).getByRole("button", { name: "取消" })).toBeDisabled();
+    expect(within(drawer).getByRole("button", { name: "关闭关联支出流水抽屉" })).toBeDisabled();
+    await user.keyboard("{Escape}");
+    fireEvent.click(drawer.closest(".finance-drawer__backdrop") as HTMLElement);
+    expect(screen.getByLabelText("关联支出流水抽屉")).toBeInTheDocument();
+    expect(linkBankRequests(fetchMock)).toHaveLength(0);
+
+    candidates.resolve();
+    await waitFor(() => expect(within(drawer).getByRole("button", { name: "取消" })).toBeEnabled());
   });
 
   test("paginates bank candidate drawer and keeps filter context", async () => {

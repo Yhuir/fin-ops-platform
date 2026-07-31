@@ -537,6 +537,7 @@ function OaBankLinkDrawer({
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const pageCount = Math.max(1, Math.ceil(total / BANK_CANDIDATE_PAGE_SIZE));
+  const closeBlocked = loading || submitting;
 
   const loadCandidates = useCallback((signal?: AbortSignal) => {
     if (!open) {
@@ -623,14 +624,14 @@ function OaBankLinkDrawer({
 
   return (
     <AppDrawer
-      ariaBusy={loading || submitting}
+      ariaBusy={closeBlocked}
       ariaLabel="关联支出流水抽屉"
       className="oa-pending-payments-bank-drawer"
-      closeDisabled={loading || submitting}
+      closeDisabled={closeBlocked}
       closeLabel="关闭关联支出流水抽屉"
       footer={(
         <div className="oa-pending-payments-bank-drawer__footer">
-          <button onClick={onClose} type="button">取消</button>
+          <button disabled={closeBlocked} onClick={onClose} type="button">取消</button>
           <button
             className="oa-pending-payments-button oa-pending-payments-button--primary"
             disabled={submitting || selectedOaRowIds.length === 0 || selectedBankIds.size === 0}
