@@ -972,8 +972,6 @@ class RuntimeQueueRepository:
     @staticmethod
     def _reconcile_completed_publish_states_in_transaction(
         transaction: PostgresTransaction,
-        *,
-        lock_timeout_seconds: int,
     ) -> int:
         return transaction.execute(
             """
@@ -1000,20 +998,12 @@ class RuntimeQueueRepository:
                     )
                 where status = 'done'
                   and publish_status = 'publishing'
-                  and (
-                      publish_locked_at is null
-                      or publish_locked_at < now() - (%s * interval '1 second')
-                  )
             """,
-            (lock_timeout_seconds,),
         )
 
-    def reconcile_completed_publish_states(self, *, lock_timeout_seconds: int = 300) -> int:
+    def reconcile_completed_publish_states(self) -> int:
         with self._connection.transaction() as transaction:
-            return self._reconcile_completed_publish_states_in_transaction(
-                transaction,
-                lock_timeout_seconds=lock_timeout_seconds,
-            )
+            return self._reconcile_completed_publish_states_in_transaction(transaction)
 
     def claim_publishable_events(
         self,
@@ -1034,10 +1024,7 @@ class RuntimeQueueRepository:
             params = (publisher_id, lock_timeout_seconds, normalized_limit)
 
         with self._connection.transaction() as transaction:
-            self._reconcile_completed_publish_states_in_transaction(
-                transaction,
-                lock_timeout_seconds=lock_timeout_seconds,
-            )
+            self._reconcile_completed_publish_states_in_transaction(transaction)
             rows = transaction.fetch_all(
                 f"""
                 update job.outbox_events
@@ -1142,11 +1129,28 @@ class RuntimeQueueRepository:
                         true
                     )
                 where id = %s
-                  and publish_status = 'publishing'
-                  and publish_locked_by = %s
+                  and (
+                      (
+                          publish_status = 'publishing'
+                          and publish_locked_by = %s
+                      )
+                      or (
+                          status = 'done'
+                          and publish_status = 'published'
+                          and rabbitmq_message_id = %s
+                      )
+                  )
                 returning id
                 """,
-                (exchange, routing_key, message_id, self._json_param(result_payload), event_id, publisher_id),
+                (
+                    exchange,
+                    routing_key,
+                    message_id,
+                    self._json_param(result_payload),
+                    event_id,
+                    publisher_id,
+                    message_id,
+                ),
             )
         return row is not None
 
