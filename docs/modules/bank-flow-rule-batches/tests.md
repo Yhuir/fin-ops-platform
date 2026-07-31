@@ -2,6 +2,12 @@
 
 状态：covered-close。页面列表、summary、分页、详情和写后回读已切到 PostgreSQL canonical query boundary；页面 API 不再返回 read-model status/version、refresh enqueue 或 operation-barrier targets，前端不再轮询 freshness。
 
+## 2026-07-31 标签管理抽屉回归
+
+- `web/src/test/BankFlowRuleBatchPage.test.tsx` 保护共享 `AppDrawer`、`min(960px, 92vw)`、busy dismiss、权限、dirty/form/table/save/nested dialog 行为，并阻止旧 backdrop/aside/header/close/footer shell 回归。
+- `web/e2e/drawer-motion.spec.ts` 保护共享 HeroUI right drawer 的进入/退出中间帧、方向、reduced-motion、页面 CLS 严格阈值和关闭零新增业务请求；页面既有 Browser spec 继续保护规则到 canonical batch 的业务链路。
+- 适用第 5 类 frontend interaction 与第 7 类 existing regression；本次展示壳迁移没有改变第 1–4 类合同，也没有新增第 6 类跨模块业务链。
+
 ## 七类测试适用性
 
 | 类别 | 是否适用 | 当前覆盖 |

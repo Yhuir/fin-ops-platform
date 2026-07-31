@@ -2,6 +2,12 @@
 
 日期：2026-07-28
 
+## 2026-07-31 关联支出流水抽屉回归
+
+- `web/src/test/OaPendingPaymentsPage.test.tsx` 保护共享 `AppDrawer` 复用、560px 宽度、busy close guard、搜索/筛选/分页/选择/提交和旧自定义 shell 删除。
+- `web/e2e/drawer-motion.spec.ts` 通过共享 Workbench 详情实例机械证明 HeroUI right drawer 的进入/退出中间帧、方向、reduced-motion、CLS 严格阈值和关闭零新增业务请求；OA 页面原有 `oa-pending-payments-flow.spec.ts` 继续保护本模块详情/关联业务流。
+- 适用第 5 类 frontend interaction 与第 7 类 existing regression；本次没有业务规则、service、API、read model 或跨模块数据流变更，第 1–4 类和新的第 6 类后端链路测试不适用。
+
 ## 风险模型
 
 本模块跨 OA integration canonical snapshots、Workbench/pending relations、银行/发票 facts、外部写回、PostgreSQL direct query、权限和前端交互。测试必须证明：

@@ -1,5 +1,14 @@
 # Finance Table System 实施记录
 
+## 2026-07-31 - 共享右抽屉原生 motion 恢复
+
+- 目标：修复共享 `AppDrawer` 被项目 CSS 覆盖 HeroUI individual `translate` 后瞬时出现的问题，并让所有业务模态右抽屉继承同一生命周期。
+- 影响范围：`AppDrawer`、Workbench 详情、共享 drawer CSS、组件测试和 Chromium motion proof；表格 query/session、页面业务 I/O、API shape 与模块职责不变。
+- 关键决策：过渡绑定到真正移动的 HeroUI dialog，不绑定全屏 content wrapper；进入 240ms、退出 180ms，persistent branch 使用相同完整视口路径。删除旧 28px/22px keyframes、业务 children transform 和重复 Escape listener，不增加动画依赖或 drawer abstraction。
+- 文档影响：只更新交互动效和测试证据；模块边界、输入输出与 read model contract 未变化，因此 `boundary-io.md` 不适用。
+- 测试覆盖：`CommonPlatformComponents.test.tsx` 保护 native right placement、快速开关、退出卸载、reduced-motion 和旧样式负向门禁；`drawer-motion.spec.ts` 保护真实浏览器中间帧、方向、CLS、关闭零新增业务请求。
+- 未测风险：本地 deterministic Chromium 不替代生产设备负载和真实页面数据规模；生产 frame interval/详情 latency 由发布后只读验证闭环。
+
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 

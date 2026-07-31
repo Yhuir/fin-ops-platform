@@ -1,5 +1,12 @@
 # OA待付款核对 实施记录
 
+## 2026-07-31 - 关联支出流水抽屉迁移到共享壳
+
+- 只把 `OaBankLinkDrawer` 的自定义 backdrop/aside/header/close 展示壳替换为共享 `AppDrawer`，保留 560px、搜索、筛选、分页、选择、提交、AbortController、权限、loading/error 和写入时机。
+- 删除 `if (!open) return null` 和旧 shell CSS，让 HeroUI right drawer 完成 240ms 进入与 180ms 退出；busy 期间共享关闭语义 fail closed。
+- OA、流水、发票事实来源、API 请求/响应、模块 I/O 和 boundary 均未变化，因此不修改 `boundary-io.md`；没有新增动画依赖或兼容 fallback。
+- 回归由 `OaPendingPaymentsPage.test.tsx` 的业务行为/源码负向门禁和 `drawer-motion.spec.ts` 的共享浏览器 motion 合同承担。
+
 ## 2026-07-27 - 页面 PostgreSQL canonical facts 直读迁移
 
 - 页面 rows/details 从 `OaPendingPaymentReadModelService` 切换到页面专属 `OaPendingPaymentQueryService` + `PostgresOaPendingPaymentQueryRepository`。同一 rows 响应在一个显式 `REPEATABLE READ READ ONLY` snapshot 内读取 canonical OA/admission/payment status、active pending/formal relations、银行和进项发票事实；SQL 完成过滤、排序、服务端分页、summary、statistics 和 facets，当前页再固定次数批量 hydrate。

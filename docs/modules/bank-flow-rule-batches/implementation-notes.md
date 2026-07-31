@@ -1,5 +1,12 @@
 # 流水规则批量处理实施记录
 
+## 2026-07-31 标签管理抽屉迁移到共享壳
+
+- 只把标签管理的自定义 backdrop/aside/header/close/footer 壳替换为共享 `AppDrawer`，保留 `min(960px, 92vw)`、表格、权限、dirty/busy、nested dialog、规则 CAS 与保存后回读时机。
+- 退出生命周期改由 HeroUI right drawer 统一管理；loading/mutation 期间禁止 dismiss，旧 shell CSS 和并行生命周期已删除。
+- canonical query、规则 I/O、API shape、写事务和模块边界均未变化，因此不修改 `boundary-io.md`；没有新增第三方动画库、fallback 或第二套 drawer abstraction。
+- 回归由 `BankFlowRuleBatchPage.test.tsx` 的交互/旧 shell 负向门禁和 `drawer-motion.spec.ts` 的共享真实浏览器 motion 合同承担。
+
 ## 2026-07-30 live detail 与 submitted bucket 完整性修复
 
 - 根因一：列表生成的 live candidate 没有持久化，但页面自动选择后调用了只读取正式批次的详情 API，因此返回“流水规则批次不存在”。详情现以列表项 `scope_month` 调用同一 canonical builder 重算，提交 guard 复用该 helper，不增加 draft 存储、read model、Redis 或 fallback。

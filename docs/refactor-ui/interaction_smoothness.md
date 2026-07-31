@@ -143,3 +143,12 @@ if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnap
 ```
 
 Add page-specific tests and browser smoke for each business page slice.
+
+## 2026-07-31 - 全站右抽屉动效合同
+
+- 模态右抽屉统一复用 `AppDrawer` 的 HeroUI `Drawer.Content placement="right"` 与 `Drawer.Dialog`；真正发生位移的是 dialog，禁止在全屏 content wrapper 或业务 children 上叠加 `transform`、keyframes 或第二套进入/退出生命周期。
+- dialog 使用 individual `translate`：进入 240ms、退出 180ms、`cubic-bezier(0.25, 1, 0.5, 1)`；backdrop 只过渡 opacity。非模态 persistent drawer 复用相同 100% → 0 → 100% 路径与 180ms 卸载时机。
+- `prefers-reduced-motion` 与 app `data-reduce-motion` 都必须把空间位移降为近即时；退出期间 backdrop/content fail closed，避免重复点击和额外业务请求。
+- OA 关联支出流水、流水规则标签管理已只迁移展示壳；筛选、分页、权限、表单、错误、请求和写入时机不变。税金认证结果是唯一显式 complementary rail，保持 mounted，通过 transform/opacity 收起并用 `inert`、`aria-hidden`、`pointer-events` 隔离隐藏内容。
+- 不引入第三方动画库：HeroUI 原生状态与 CSS individual translate 已满足性能、可访问性和退出生命周期要求，避免增加 bundle、运行时调度和重复抽屉抽象。
+- 浏览器证据由 `web/e2e/drawer-motion.spec.ts` 提供：rAF/MutationObserver 采样进入和退出中间帧，保护方向、页面 CLS 严格阈值、关闭零新增业务 I/O 与 reduced-motion；禁止用逐像素截图代替行为合同。

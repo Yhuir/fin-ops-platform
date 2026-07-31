@@ -1,5 +1,12 @@
 # 税金抵扣 实施记录
 
+## 2026-07-31 - 认证结果 complementary rail 动效
+
+- 认证结果继续是 mounted `role="complementary"` rail，不改造成 modal drawer；只在内容容器上用 transform/opacity 展开收起，避免动画 grid/width 引发布局重排。
+- 隐藏态同步 `inert`、`aria-hidden` 与 `pointer-events:none`，toggle 保留 `aria-controls/aria-expanded`；reduced-motion 下近即时完成。
+- 认证导入、job、计划、canonical API、权限、错误与模块 I/O 均未变化，因此不修改 `boundary-io.md`；没有新增动画依赖。
+- `TaxOffsetPage.test.tsx` 保护 rail 语义和隐藏交互隔离，`drawer-motion.spec.ts` 保护共享 modal drawer motion，不把 rail 错归为第二个 modal 抽屉。
+
 ## 2026-07-27 - canonical PostgreSQL 页面直读
 
 - 目标：移除 `/tax-offset` 对 tax read model、Redis、refresh gateway、202/non-fresh polling 和 source-version UI 的运行时依赖。
