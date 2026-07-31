@@ -416,14 +416,18 @@ function installFetchMock(
   options: {
     listFailuresBeforeSuccess?: number;
     tagSelection?: Record<string, unknown>;
+    tagSelectionResponses?: Array<{ delay?: Promise<void>; payload?: Record<string, unknown> }>;
   } = {},
 ) {
   let listFailuresRemaining = options.listFailuresBeforeSuccess ?? 0;
   const tagSelection = options.tagSelection ?? tagSelectionPayload;
+  const tagSelectionResponses = [...(options.tagSelectionResponses ?? [])];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
     if (url.pathname === "/api/bank-flow-rule-batches/tag-rules" && (!init?.method || init.method === "GET")) {
-      return jsonResponse(tagSelection);
+      const response = tagSelectionResponses.shift();
+      await response?.delay;
+      return jsonResponse(response?.payload ?? tagSelection);
     }
     if (url.pathname === "/api/bank-flow-rule-batches/tag-rules" && init?.method === "PUT") {
       const body = JSON.parse(String(init.body ?? "{}"));
@@ -491,6 +495,14 @@ function installFetchMock(
   });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
+}
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((promiseResolve) => {
+    resolve = promiseResolve;
+  });
+  return { promise, resolve };
 }
 
 function operationBarrierRequests(fetchMock: ReturnType<typeof installFetchMock>) {
@@ -900,6 +912,28 @@ describe("BankFlowRuleBatchPage", () => {
     });
     expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
     expect(await screen.findByText("流水规则已保存")).toBeInTheDocument();
+  });
+
+  test("does not save stale tag rules before the opening request completes", async () => {
+    const openingRequest = deferred();
+    const user = userEvent.setup();
+    const fetchMock = installFetchMock(listPayload, {
+      tagSelectionResponses: [{}, { delay: openingRequest.promise }],
+    });
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "流水规则标签管理" }));
+    const drawer = screen.getByRole("dialog", { name: "流水规则标签管理" });
+    const save = within(drawer).getByRole("button", { name: "保存" });
+    expect(save).toBeDisabled();
+    fireEvent.click(save);
+    expect(fetchMock.mock.calls.filter(([input, init]) => (
+      new URL(String(input), "http://localhost").pathname === "/api/bank-flow-rule-batches/tag-rules"
+      && init?.method === "PUT"
+    ))).toHaveLength(0);
+
+    openingRequest.resolve();
+    await waitFor(() => expect(save).toBeEnabled());
   });
 
   test("groups tag drawer direction and main label cells with shared main-label background", async () => {

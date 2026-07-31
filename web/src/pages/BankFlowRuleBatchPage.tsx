@@ -121,6 +121,7 @@ export default function BankFlowRuleBatchPage() {
   const [withdrawReason, setWithdrawReason] = useState("");
   const [feedback, setFeedback] = useState<{ severity: "success" | "warning" | "error"; message: string } | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
+  const tagRequestSeqRef = useRef(0);
   const batchRequestSeqRef = useRef(0);
   const detailRequestSeqRef = useRef(0);
   const batchQueryKeyRef = useRef("");
@@ -128,18 +129,27 @@ export default function BankFlowRuleBatchPage() {
   const suppressNextAutoSelectRef = useRef(false);
 
   const loadTagSelection = useCallback((signal?: AbortSignal) => {
+    const requestId = tagRequestSeqRef.current + 1;
+    tagRequestSeqRef.current = requestId;
     setTagLoading(true);
     fetchBankFlowRuleBatchTagSelection(signal)
       .then((nextSelection) => {
+        if (signal?.aborted || requestId !== tagRequestSeqRef.current) {
+          return;
+        }
         setTagSelection(nextSelection);
         setDraftTagRequirements(requirementsFromSelection(nextSelection));
       })
       .catch((caught) => {
-        if (!isAbortLikeError(caught)) {
+        if (!signal?.aborted && requestId === tagRequestSeqRef.current && !isAbortLikeError(caught)) {
           setFeedback({ severity: "error", message: caught instanceof Error ? caught.message : "流水标签配置加载失败" });
         }
       })
-      .finally(() => setTagLoading(false));
+      .finally(() => {
+        if (!signal?.aborted && requestId === tagRequestSeqRef.current) {
+          setTagLoading(false);
+        }
+      });
   }, []);
 
   const clearSelection = useCallback(() => {
@@ -579,7 +589,7 @@ export default function BankFlowRuleBatchPage() {
   };
 
   const saveTagSelection = async () => {
-    if (!canMutateData || mutating) {
+    if (!canMutateData || tagLoading || mutating) {
       return;
     }
     const rules: BankFlowRuleBatchTagRule[] = tagSelection.activeTags.map((tag) => {
@@ -1033,7 +1043,7 @@ export default function BankFlowRuleBatchPage() {
           <div className="bank-flow-rule-batches-drawer__actions">
             <button
               className="bank-flow-rule-batches-button bank-flow-rule-batches-button--compact bank-flow-rule-batches-button--primary"
-              disabled={!canMutateData || mutating}
+              disabled={!canMutateData || tagLoading || mutating}
               onClick={saveTagSelection}
               type="button"
             >
