@@ -69,3 +69,16 @@ preview 请求本身只有一个页面级临时状态：`idle -> pending(confirm
 | `missing` | 触发受控 enqueue；不得回退旧 candidate/snapshot 链路 |
 
 只有完成、校验通过并原子激活的 generation 可成为页面事实。
+
+## Row detail 读取状态
+
+```text
+列表 exact generation + 同 generation detail row -> 200，打开抽屉
+expected generation 已切换                    -> 409，只重载列表并重试一次
+active group 中无该 row                        -> 404，直接显示记录不可用
+可见非 summary row 缺 detail row               -> 503，报告投影不变量破坏
+repository / migration / timeout 不可用         -> 503，显示详情暂不可用
+关闭抽屉或打开另一行                           -> abort 旧请求
+```
+
+row detail GET 是纯读操作：稳定 generation 即使处于 `refreshing/stale` 也可读取，不执行第二次 canonical freshness proof，不触发 dirty scope、outbox、refresh 或 generation 切换。ETC 与流水规则 summary 只负责展开完整成员，不进入 row detail 状态机。

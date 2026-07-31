@@ -63,7 +63,8 @@ function WorkbenchRecordCard({
 }: WorkbenchRecordCardProps) {
   const columns = columnsProp ?? getWorkbenchColumns(paneId);
   const hasActionColumn = !readOnly && showActionColumn;
-  const showInlineDetail = !readOnly && actionMode === "default" && (paneId === "oa" || paneId === "bank" || paneId === "invoice");
+  const isSummaryRow = row.sourceKind === "etc_invoice_summary" || row.sourceKind === "bank_flow_rule_batch_summary";
+  const showInlineDetail = !isSummaryRow && !readOnly && actionMode === "default" && (paneId === "oa" || paneId === "bank" || paneId === "invoice");
   const sheetStateClass =
     rowState === "selected"
       ? " record-card-sheet-selected"
@@ -106,7 +107,7 @@ function WorkbenchRecordCard({
             canMutateData={canMutateData}
             mode={actionMode}
             recordType={row.recordType}
-            showDetailAction={actionMode !== "default" || !showInlineDetail}
+            showDetailAction={!isSummaryRow && (actionMode !== "default" || !showInlineDetail)}
             showWorkflowActions={showWorkflowActions}
             variant={row.actionVariant}
             onAction={(action, event) => {

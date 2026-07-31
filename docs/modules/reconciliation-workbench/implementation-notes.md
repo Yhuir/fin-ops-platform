@@ -1,5 +1,12 @@
 # 关联台 实施记录
 
+## 2026-07-31 - row detail 稳定代际纯读修复
+
+- 根因：`WorkbenchQueryFacade.row_detail(...)` 在 repository 已按 exact active generation 取到详情后，又用最新 canonical source version 做第二次 freshness proof；canonical 已前进时它把稳定详情伪装成 404，并由 GET enqueue refresh。前端再把 404 与 409 合并重载重试，导致首批伪 404 推动 generation 切换，后续 OA/流水/发票详情批量冲突。
+- 修复：row detail 成功路径直接返回同快照 stable generation payload 与 repository status，删除第二次 proof 和 GET enqueue；保留真实 404 和 409，并在 miss 冷分支复用 active group membership 区分 `503 workbench_row_detail_invariant_broken`，不恢复任何 group payload fallback。repository/migration/timeout 统一为详情专属 503。
+- 前端：三类详情共享状态机只对 `workbench_read_model_version_conflict` 重载一次；404/503 直接展示批准的安全中文错误，关闭或切换详情 abort 旧请求。ETC 与流水规则 summary 只保留展开入口，不再暴露 row detail。
+- 复杂度：复用既有 repeatable-read、active generation、publish/audit 完整性门禁、API 错误和 AbortController；没有新增表、索引、cache、worker、queue、依赖、fallback 或并行详情链路。
+
 ## 2026-07-30 - ETC 批次摘要身份仲裁
 
 - 根因：`etc_invoice_summary.digital_invoice_no` 使用“ETC发票 N 张”展示文案，通用对象身份仲裁却把它当单张发票号码；不同 ETC 批次张数相同时会被错误合并，活动关系引用的 summary 可能在分组前消失并使 generation 重建失败。

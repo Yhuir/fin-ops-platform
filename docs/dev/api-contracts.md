@@ -975,9 +975,11 @@ Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`sou
 
 契约要求：
 
-- 读取优先级是 live service / in-memory cache / SQL active generation；live/cache miss 后不得只依赖从 row id 解析月份，opaque OA id 也必须可通过 query facade/repository 查 active generation。
-- SQL 读取必须走 `WorkbenchQueryFacade` 和 read model repository，不直接在 route 中拼 SQL；该接口只读详情，不写 relation，也不接入 `WorkbenchRelationCommandService`。
-- 找不到 row 返回 `404`；read model stale/refreshing/unavailable 需要返回明确状态或触发既有 refresh gateway，不返回 HTML 或空 body。
+- 唯一生产链路是 `WorkbenchRowDetailApiRoutes -> WorkbenchQueryFacade -> active generation repository`；不读取 live service/in-memory cache，不从 row id 猜月份，也不回退 group member payload。
+- 客户端必须携带列表返回的 `expected_read_model_version`。版本校验与详情读取处于同一 `REPEATABLE READ / READ ONLY` 快照；expected generation 已切换返回 `409 workbench_read_model_version_conflict`，前端只对此错误重新读取一次列表并重试。
+- exact stable generation 中存在详情行时返回 `200`，即使 canonical source 已更新；响应保留 repository 给出的 `read_model_status=fresh|refreshing|stale`。详情 GET 不执行第二次 canonical source proof，不写 dirty scope/outbox，也不 enqueue refresh。
+- active group 中真实不存在的 row 返回 `404 workbench_row_not_found`；可见非 summary group member 缺少同 generation `workbench_rows` 详情行返回 `503 workbench_row_detail_invariant_broken`；repository、migration 或查询超时返回 `503 workbench_detail_unavailable`。
+- ETC 与流水规则批次 summary 只用于折叠展开，不提供 row detail 入口。该接口不写 relation，也不接入 `WorkbenchRelationCommandService`。
 
 ### 工作台 read model 刷新状态
 

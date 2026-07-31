@@ -38,6 +38,7 @@ from fin_ops_platform.services.workbench_read_model_version import (
     WORKBENCH_RELATION_PREVIEW_MAX_SELECTED_ROWS,
     WorkbenchReadModelVersionConflictError,
     WorkbenchRelationPreviewSelectionError,
+    WorkbenchRowDetailInvariantError,
 )
 from fin_ops_platform.services.workbench_relation_modes import TURNOVER_MANUAL_CLOSURE_RELATION_MODE
 MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
@@ -5264,6 +5265,28 @@ class PostgresReadModelRepository:
             (normalized_row_id, *scope_params, normalized_scope_key),
         )
         if not isinstance(row, dict):
+            group_scope_clause = "true" if normalized_scope_key == "all" else "gr.scope_key in (%s, 'all')"
+            visible_group_row = self._connection.fetch_one(
+                f"""
+                select gr.scope_key, gr.generation_id
+                from read_model.workbench_group_rows gr
+                join read_model.workbench_generations gen
+                  on gen.generation_id = gr.generation_id
+                 and gen.scope_key = gr.scope_key
+                 and gen.status = 'active'
+                where gr.row_id = %s
+                  and coalesce(gr.row_role, '') <> 'summary'
+                  and {group_scope_clause}
+                limit 1
+                """,
+                (normalized_row_id, *scope_params),
+            )
+            if isinstance(visible_group_row, dict):
+                raise WorkbenchRowDetailInvariantError(
+                    scope_key=text(visible_group_row.get("scope_key")) or normalized_scope_key,
+                    row_id=normalized_row_id,
+                    generation_id=text(visible_group_row.get("generation_id")),
+                )
             return None
         payload = _read_model_payload(row)
         if not isinstance(payload, dict):

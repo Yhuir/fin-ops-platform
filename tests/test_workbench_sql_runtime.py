@@ -38,6 +38,7 @@ from fin_ops_platform.services.workbench_groups_page_cache import (
 from fin_ops_platform.services.workbench_read_model_version import (
     WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION,
     WorkbenchRelationPreviewSelectionError,
+    WorkbenchRowDetailInvariantError,
 )
 from fin_ops_platform.services.workbench_read_model_refresh import WorkbenchReadModelRefreshService
 from fin_ops_platform.services.workbench_query_freshness_service import (
@@ -6745,7 +6746,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("and true", sql)
         self.assertNotIn("r.scope_key in (%s, 'all')", sql)
 
-    def test_repository_does_not_fall_back_to_group_member_payload_when_detail_row_is_missing(self) -> None:
+    def test_repository_classifies_visible_group_member_without_detail_as_invariant(self) -> None:
         class LegacyGroupMemberConnection(WorkbenchWriteConnection):
             def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
                 normalized = " ".join(sql.lower().split())
@@ -6790,10 +6791,25 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         connection = LegacyGroupMemberConnection()
         repository = PostgresReadModelRepository(connection)
 
-        payload = repository.get_workbench_row_detail(scope_key="all", row_id="oa-pay-legacy")
+        with self.assertRaises(WorkbenchRowDetailInvariantError) as raised:
+            repository.get_workbench_row_detail(scope_key="all", row_id="oa-pay-legacy")
+
+        self.assertEqual(raised.exception.scope_key, "2026-05")
+        group_queries = [
+            sql for sql, _params in connection.fetch_one_calls if "from read_model.workbench_group_rows gr" in sql
+        ]
+        self.assertEqual(len(group_queries), 1)
+        self.assertNotIn("payload", group_queries[0])
+        self.assertNotIn("member_payload", group_queries[0])
+
+    def test_repository_returns_none_when_row_is_absent_from_active_detail_and_group_rows(self) -> None:
+        connection = WorkbenchWriteConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.get_workbench_row_detail(scope_key="all", row_id="missing-row")
 
         self.assertIsNone(payload)
-        self.assertFalse(
+        self.assertTrue(
             any("from read_model.workbench_group_rows gr" in sql for sql, _params in connection.fetch_one_calls)
         )
 

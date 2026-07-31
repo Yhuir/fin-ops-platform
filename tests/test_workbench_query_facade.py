@@ -9,7 +9,10 @@ from fin_ops_platform.services.workbench_groups_page_cache import (
     is_default_workbench_initial_query,
 )
 from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryFacade
-from fin_ops_platform.services.workbench_read_model_version import WorkbenchReadModelVersionConflictError
+from fin_ops_platform.services.workbench_read_model_version import (
+    WorkbenchReadModelVersionConflictError,
+    WorkbenchRowDetailInvariantError,
+)
 
 
 class QueueRecorder:
@@ -841,6 +844,37 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(result.payload["read_model_status"], "fresh")
         self.assertEqual(repository.calls, [{"scope_key": "all", "row_id": "oa-pay-1976"}])
 
+    def test_row_detail_reads_the_stable_generation_without_rechecking_canonical_sources(self) -> None:
+        class Repository:
+            @staticmethod
+            def get_workbench_row_detail(**_kwargs: object) -> dict[str, object]:
+                return {
+                    "row": {"id": "bank-1", "type": "bank"},
+                    "source_versions": {"builder": "previous"},
+                    "read_model_status": "refreshing",
+                    "read_model_version": "generation-1",
+                }
+
+        queue = QueueRecorder()
+        facade = WorkbenchQueryFacade(
+            repository=Repository(),
+            redis_helper=None,
+            enqueue_refresh=queue.enqueue,
+            scope_key_for_month=scope_key_for_month,
+            stale_reasons=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("row detail must not run a second canonical freshness proof")
+            ),
+            emit_status_metric=MetricRecorder().emit,
+            missing_read_model_error=lambda _error: False,
+        )
+
+        result = facade.row_detail("all", row_id="bank-1", expected_read_model_version="generation-1")
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(result.payload["row"]["id"], "bank-1")
+        self.assertEqual(result.payload["read_model_status"], "refreshing")
+        self.assertEqual(queue.refreshes, [])
+
     def test_row_detail_all_scope_does_not_run_a_second_scope_lookup_or_fallback_query(self) -> None:
         class Repository:
             def __init__(self) -> None:
@@ -890,6 +924,61 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(result.status_code, HTTPStatus.CONFLICT)
         self.assertEqual(result.payload["error"], "workbench_read_model_version_conflict")
         self.assertEqual(result.payload["read_model_version"], "current")
+
+    def test_row_detail_visible_member_without_detail_returns_invariant_503(self) -> None:
+        class Repository:
+            @staticmethod
+            def get_workbench_row_detail(**_kwargs: object) -> object:
+                raise WorkbenchRowDetailInvariantError(
+                    scope_key="2026-05",
+                    row_id="oa-1",
+                    generation_id="generation-1",
+                )
+
+        queue = QueueRecorder()
+        metrics = MetricRecorder()
+        facade = WorkbenchQueryFacade(
+            repository=Repository(),
+            redis_helper=None,
+            enqueue_refresh=queue.enqueue,
+            scope_key_for_month=scope_key_for_month,
+            stale_reasons=no_stale_reasons,
+            emit_status_metric=metrics.emit,
+            missing_read_model_error=lambda _error: False,
+        )
+
+        result = facade.row_detail("all", row_id="oa-1", expected_read_model_version="generation-1")
+
+        self.assertEqual(result.status_code, HTTPStatus.SERVICE_UNAVAILABLE)
+        self.assertEqual(result.payload["error"], "workbench_row_detail_invariant_broken")
+        self.assertEqual(result.payload["read_model_status"], "unavailable")
+        self.assertEqual(queue.refreshes, [])
+        self.assertEqual(metrics.calls[0]["reason"], "row_detail_invariant_broken")
+
+    def test_row_detail_timeout_returns_detail_unavailable_without_enqueue(self) -> None:
+        class Repository:
+            @staticmethod
+            def get_workbench_row_detail(**_kwargs: object) -> object:
+                raise RuntimeError("canceling statement due to statement timeout")
+
+        queue = QueueRecorder()
+        facade = WorkbenchQueryFacade(
+            repository=Repository(),
+            redis_helper=None,
+            enqueue_refresh=queue.enqueue,
+            scope_key_for_month=scope_key_for_month,
+            stale_reasons=no_stale_reasons,
+            emit_status_metric=MetricRecorder().emit,
+            missing_read_model_error=lambda _error: False,
+            transient_read_model_error=lambda error: "statement timeout" in str(error).lower(),
+        )
+
+        result = facade.row_detail("all", row_id="bank-1")
+
+        self.assertEqual(result.status_code, HTTPStatus.SERVICE_UNAVAILABLE)
+        self.assertEqual(result.payload["error"], "workbench_detail_unavailable")
+        self.assertTrue(result.payload["retryable"])
+        self.assertEqual(queue.refreshes, [])
 
     def test_group_detail_stale_source_versions_do_not_return_stale_group(self) -> None:
         class Repository:

@@ -2,6 +2,13 @@
 
 日期：2026-07-28
 
+## 2026-07-31 row detail 稳定代际纯读与错误分层
+
+- Service/API：`tests/test_workbench_query_facade.py` 证明 stable generation 详情即使 repository 状态为 `refreshing` 仍返回 200，不调用第二次 canonical stale proof、零 refresh enqueue；同时覆盖 404 真缺失、409 version conflict、503 visible-member invariant 与 timeout unavailable。
+- Repository/read model：`tests/test_workbench_sql_runtime.py` 证明 version check 与 detail read 继续位于同一 repeatable-read snapshot；仅在 detail miss 的冷分支检查 active group membership，区分真 404 与可见成员缺详情 503，且绝不读取 `workbench_group_rows.payload/member_payload` fallback。
+- Frontend：`WorkbenchSelection.test.tsx` 证明只有 409 重载一次 active generation；404 不重载、不重试并显示安全中文错误；关闭抽屉 abort 在途详情。`WorkbenchApi.test.ts` 覆盖新增 503 错误映射；`RelationGroupGrid.test.tsx` 证明 ETC/流水规则 summary 没有 row detail 入口。
+- Regression：OA、流水、发票继续共用同一 drawer/API/facade/repository 链路；没有新增表、索引、cache、worker、queue 或第二详情实现。生产验证要求为三类详情 p95 `<1s`、同一 exact generation 请求全成功、读取前后 generation/dirty scope/outbox 无增量，并完成 release gate T+0/T+60/T+300。
+
 ## 2026-07-28 逐栏折叠、普通行直显与搜索真实预览
 
 - Business core：`no_oa_bank_batch` 与普通关系保留全部真实行；`bank_flow_rule_batch` 只有银行成员数 `>3` 才生成银行栏 summary/collapsed rows，1 到 3 行直接显示；ETC 仍只折叠发票栏。

@@ -238,12 +238,44 @@ describe("Workbench row selection and detail drawer", () => {
     );
   });
 
+  test("detail shows a real row miss without reloading or retrying", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    const defaultFetch = fetchMock.getMockImplementation();
+    let detailRequestCount = 0;
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (fetchPath(input).startsWith("/api/workbench/rows/")) {
+        detailRequestCount += 1;
+        return Promise.resolve(jsonResponse({ error: "workbench_row_not_found" }, 404));
+      }
+      if (!defaultFetch) {
+        throw new Error("Mock API fetch is not installed.");
+      }
+      return defaultFetch(input, init);
+    });
+    renderWorkbenchPage();
+
+    const bankRow = await screen.findByRole("row", {
+      name: /2026-03-25 14:22.*华东设备供应商/,
+    });
+    await user.click(within(bankRow).getByRole("button", { name: /查看银行流水 .* 详情/ }));
+
+    const dialog = await screen.findByRole("dialog", { name: "银行流水详情" });
+    expect(await within(dialog).findByText("所选关联台记录已不可用，请刷新后重新选择。")).toBeInTheDocument();
+    expect(detailRequestCount).toBe(1);
+    expect(
+      fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input as RequestInfo | URL)),
+    ).toHaveLength(1);
+  });
+
   test("detail drawer opens before the row detail request resolves", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     const defaultFetch = fetchMock.getMockImplementation();
+    let detailSignal: AbortSignal | null = null;
     fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       if (fetchPath(input).startsWith("/api/workbench/rows/")) {
+        detailSignal = init?.signal ?? null;
         return new Promise<Response>(() => undefined);
       }
       if (!defaultFetch) {
@@ -265,6 +297,11 @@ describe("Workbench row selection and detail drawer", () => {
       "/api/workbench/rows/bk-p-202603-001?month=all&expected_read_model_version=mock-workbench-generation-1",
       expect.any(Object),
     );
+    expect(detailSignal?.aborted).toBe(false);
+
+    await user.click(within(dialog).getByRole("button", { name: "关闭详情抽屉" }));
+
+    expect(detailSignal?.aborted).toBe(true);
   });
 
   test("OA applicant column keeps the detail icon on the first line and time chip on the second line", async () => {

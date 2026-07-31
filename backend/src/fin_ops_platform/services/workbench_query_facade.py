@@ -8,6 +8,7 @@ from fin_ops_platform.services.workbench_read_model_version import (
     WORKBENCH_RELATION_PREVIEW_MAX_SELECTED_ROWS,
     WorkbenchReadModelVersionConflictError,
     WorkbenchRelationPreviewSelectionError,
+    WorkbenchRowDetailInvariantError,
 )
 
 
@@ -797,7 +798,7 @@ class WorkbenchQueryFacade:
             return WorkbenchQueryResult(
                 HTTPStatus.SERVICE_UNAVAILABLE,
                 {
-                    "error": "read_model_unavailable",
+                    "error": "workbench_detail_unavailable",
                     "read_model_status": "unavailable",
                     "scope_key": scope_key,
                     "message": "Workbench SQL row detail repository is not configured.",
@@ -829,6 +830,22 @@ class WorkbenchQueryFacade:
                         "read_model_version": error.current,
                     },
                 )
+            if isinstance(error, WorkbenchRowDetailInvariantError):
+                self._emit_status_metric(
+                    endpoint="/api/workbench/rows/{row_id}",
+                    scope_key=error.scope_key,
+                    read_model_status="unavailable",
+                    reason="row_detail_invariant_broken",
+                )
+                return WorkbenchQueryResult(
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                    {
+                        "error": "workbench_row_detail_invariant_broken",
+                        "read_model_status": "unavailable",
+                        "scope_key": error.scope_key,
+                        "row_id": error.row_id,
+                    },
+                )
             if self._missing_read_model_error(error):
                 self._emit_status_metric(
                     endpoint="/api/workbench/rows/{row_id}",
@@ -839,16 +856,20 @@ class WorkbenchQueryFacade:
                 return WorkbenchQueryResult(
                     HTTPStatus.SERVICE_UNAVAILABLE,
                     {
-                        "error": "read_model_unavailable",
+                        "error": "workbench_detail_unavailable",
                         "read_model_status": "unavailable",
                         "scope_key": scope_key,
                         "message": "Workbench SQL row detail read model table is not migrated.",
                     },
                 )
             if self._transient_read_model_error(error):
-                return self._read_model_temporarily_unavailable_result(
+                unavailable = self._read_model_temporarily_unavailable_result(
                     endpoint="/api/workbench/rows/{row_id}",
                     scope_key=scope_key,
+                )
+                return WorkbenchQueryResult(
+                    unavailable.status_code,
+                    {**unavailable.payload, "error": "workbench_detail_unavailable"},
                 )
             raise
         if not isinstance(payload, dict) or not isinstance(payload.get("row"), dict):
@@ -857,24 +878,6 @@ class WorkbenchQueryFacade:
                 {"error": "workbench_row_not_found", "scope_key": scope_key, "row_id": normalized_row_id},
             )
         result = dict(payload)
-        stale_reasons = self._stale_reasons(result.get("source_versions"), scope_key=str(result.get("scope_key") or scope_key))
-        if stale_reasons:
-            result["read_model_status"] = "stale"
-            result["read_model_stale_reasons"] = [
-                *list(result.get("read_model_stale_reasons") if isinstance(result.get("read_model_stale_reasons"), list) else []),
-                *stale_reasons,
-            ]
-            self._enqueue_refresh(str(result.get("scope_key") or scope_key), reason="api_row_detail_source_versions_stale")
-            self._emit_status_metric(
-                endpoint="/api/workbench/rows/{row_id}",
-                scope_key=str(result.get("scope_key") or scope_key),
-                read_model_status="stale",
-                reason="sql_status",
-            )
-            return WorkbenchQueryResult(
-                HTTPStatus.NOT_FOUND,
-                {"error": "workbench_row_not_found", "scope_key": scope_key, "row_id": normalized_row_id},
-            )
         result.setdefault("scope_key", scope_key)
         result.setdefault("read_model_status", "fresh")
         return WorkbenchQueryResult(HTTPStatus.OK, result)

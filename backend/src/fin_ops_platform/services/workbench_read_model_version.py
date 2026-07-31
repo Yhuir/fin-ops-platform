@@ -16,6 +16,14 @@ class WorkbenchReadModelVersionConflictError(RuntimeError):
         self.current = current
 
 
+class WorkbenchRowDetailInvariantError(RuntimeError):
+    def __init__(self, *, scope_key: str, row_id: str, generation_id: str | None) -> None:
+        super().__init__("Visible Workbench row is missing its same-generation detail row.")
+        self.scope_key = scope_key
+        self.row_id = row_id
+        self.generation_id = generation_id
+
+
 class WorkbenchRelationPreviewSelectionError(RuntimeError):
     def __init__(self, *, code: str, message: str) -> None:
         super().__init__(message)

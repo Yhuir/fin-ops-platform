@@ -2046,6 +2046,8 @@ const WORKBENCH_API_ERROR_MESSAGES: Record<string, string> = {
   workbench_relation_preview_stale: "关联预览已失效，请重新预览。",
   workbench_relation_preview_conflict: "关联预览已失效，请重新预览。",
   workbench_row_not_found: "所选关联台记录已不可用，请刷新后重新选择。",
+  workbench_row_detail_invariant_broken: "关联台详情数据不完整，请稍后重试或联系管理员。",
+  workbench_detail_unavailable: "关联台详情暂时不可用，请稍后重试。",
   workbench_relation_not_found: "所选关联关系已不可用，请刷新后重新选择。",
   relation_preview_rows_missing: "关联预览无效，请刷新后重新选择。",
   relation_preview_rows_ambiguous: "所选关联台记录存在跨版本内容冲突，请刷新后重试。",

@@ -1450,7 +1450,9 @@ describe("Workbench candidate grouping layout", () => {
     renderNoOaGrid(createBankFlowCollapsedGroup());
 
     const expandButton = screen.getByRole("button", { name: "展开流水规则批次明细，15 条" });
+    const summaryRow = screen.getByRole("row", { name: /流水规则手续费批次/ });
     expect(expandButton).toHaveTextContent("展开 15 条明细");
+    expect(within(summaryRow).queryByRole("button", { name: /^查看银行流水 .* 详情$|^详情$/ })).not.toBeInTheDocument();
     expect(screen.queryByText("当前显示 1 条摘要")).not.toBeInTheDocument();
     expect(screen.queryByText("实际 15 条流水")).not.toBeInTheDocument();
   });
@@ -1611,7 +1613,9 @@ describe("Workbench candidate grouping layout", () => {
     );
 
     const invoiceCell = screen.getByTestId("candidate-scroll-paired-case:ETC-OA-20260215-154900-invoice");
+    const summaryRow = within(invoiceCell).getByRole("row", { name: /ETC-OA-20260215-154900/ });
     expect(screen.getByText("ETC批次")).toBeInTheDocument();
+    expect(within(summaryRow).queryByRole("button", { name: /^查看发票 .* 详情$|^详情$/ })).not.toBeInTheDocument();
     expect(screen.queryByText("ETC-001")).not.toBeInTheDocument();
     expect(screen.queryByText("ETC-002")).not.toBeInTheDocument();
     const expandButton = screen.getByRole("button", { name: "展开ETC发票明细，2 张" });

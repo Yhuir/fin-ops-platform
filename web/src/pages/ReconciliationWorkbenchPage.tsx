@@ -416,6 +416,7 @@ export default function ReconciliationWorkbenchPage() {
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const detailRequestSeqRef = useRef(0);
+  const detailRequestAbortControllerRef = useRef<AbortController | null>(null);
   const loadRequestSeqRef = useRef(0);
   const loadMoreRequestSeqRef = useRef<Record<"paired" | "unpaired", number>>({ paired: 0, unpaired: 0 });
   const loadMoreInFlightRef = useRef<Record<"paired" | "unpaired", boolean>>({ paired: false, unpaired: false });
@@ -746,6 +747,8 @@ export default function ReconciliationWorkbenchPage() {
     if (previousVersion && nextVersion && previousVersion !== nextVersion) {
       clearSelection();
       if (!preserveDetailRequest) {
+        detailRequestAbortControllerRef.current?.abort();
+        detailRequestAbortControllerRef.current = null;
         detailRequestSeqRef.current += 1;
         closeDetail();
         setDetailError(null);
@@ -1449,6 +1452,7 @@ export default function ReconciliationWorkbenchPage() {
   }, [sourceAllGroups, sourceAllRows]);
 
   const handleOpenDetail = useCallback((row: WorkbenchRecord) => {
+    detailRequestAbortControllerRef.current?.abort();
     const requestSeq = detailRequestSeqRef.current + 1;
     detailRequestSeqRef.current = requestSeq;
     setDetailError(null);
@@ -1460,26 +1464,32 @@ export default function ReconciliationWorkbenchPage() {
       setIsDetailLoading(false);
       return;
     }
+    const controller = new AbortController();
+    detailRequestAbortControllerRef.current = controller;
 
     const loadDetail = async () => {
       try {
         const detailedRow = await fetchWorkbenchRowDetail(row.id, {
           month: WORKBENCH_VIEW_MONTH,
           expectedReadModelVersion,
+          signal: controller.signal,
         });
         return { detailedRow, readModelVersion: expectedReadModelVersion };
       } catch (error) {
-        if (!isWorkbenchReadModelRejected(error)) {
+        if (
+          !(error instanceof WorkbenchApiError)
+          || error.code !== "workbench_read_model_version_conflict"
+        ) {
           throw error;
         }
-        const refreshed = await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
+        const refreshed = await loadWorkbenchData(WORKBENCH_VIEW_MONTH, controller.signal, {
           background: true,
           includeAuxiliary: false,
           zoneQueries: zoneServerPageQueries,
           propagateError: true,
           preserveDetailRequest: true,
         });
-        if (detailRequestSeqRef.current !== requestSeq || !refreshed) {
+        if (controller.signal.aborted || detailRequestSeqRef.current !== requestSeq || !refreshed) {
           return null;
         }
         const refreshedVersion = workbenchActiveReadModelVersion(refreshed.pages);
@@ -1489,6 +1499,7 @@ export default function ReconciliationWorkbenchPage() {
         const detailedRow = await fetchWorkbenchRowDetail(row.id, {
           month: WORKBENCH_VIEW_MONTH,
           expectedReadModelVersion: refreshedVersion,
+          signal: controller.signal,
         });
         return { detailedRow, readModelVersion: refreshedVersion };
       }
@@ -1506,12 +1517,15 @@ export default function ReconciliationWorkbenchPage() {
           replaceDetailRow(result.detailedRow);
         }
       })
-      .catch(() => {
-        if (detailRequestSeqRef.current === requestSeq) {
-          setDetailError("详情加载失败，请稍后重试。");
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted && detailRequestSeqRef.current === requestSeq) {
+          setDetailError(error instanceof WorkbenchApiError ? error.message : "详情加载失败，请稍后重试。");
         }
       })
       .finally(() => {
+        if (detailRequestAbortControllerRef.current === controller) {
+          detailRequestAbortControllerRef.current = null;
+        }
         if (detailRequestSeqRef.current === requestSeq) {
           setIsDetailLoading(false);
         }
@@ -1519,6 +1533,8 @@ export default function ReconciliationWorkbenchPage() {
   }, [openDetail, replaceDetailRow, zoneServerPageQueries]);
 
   const handleCloseDetail = useCallback(() => {
+    detailRequestAbortControllerRef.current?.abort();
+    detailRequestAbortControllerRef.current = null;
     detailRequestSeqRef.current += 1;
     setDetailError(null);
     setIsDetailLoading(false);
