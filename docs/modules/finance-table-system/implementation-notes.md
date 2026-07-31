@@ -6,7 +6,7 @@
 - 影响范围：`AppDrawer`、Workbench 详情、共享 drawer CSS、组件测试和 Chromium motion proof；表格 query/session、页面业务 I/O、API shape 与模块职责不变。
 - 关键决策：过渡绑定到真正移动的 HeroUI dialog，不绑定全屏 content wrapper；进入 240ms、退出 180ms，persistent branch 使用相同完整视口路径。删除旧 28px/22px keyframes、业务 children transform 和重复 Escape listener，不增加动画依赖或 drawer abstraction。
 - 文档影响：只更新交互动效和测试证据；模块边界、输入输出与 read model contract 未变化，因此 `boundary-io.md` 不适用。
-- 测试覆盖：`CommonPlatformComponents.test.tsx` 保护 native right placement、快速开关、退出卸载、reduced-motion 和旧样式负向门禁；`drawer-motion.spec.ts` 保护真实浏览器中间帧、方向、CLS、关闭零新增业务请求。
+- 测试覆盖：`CommonPlatformComponents.test.tsx` 保护 native right placement、快速开关、退出卸载、reduced-motion 和旧样式负向门禁；`drawer-motion.spec.ts` 保护 Workbench、流水规则、OA 支出流水关联和 persistent 右抽屉的真实浏览器中间帧、方向、busy 拒绝关闭，以及关闭或 rail 收展期间完整 API 调用数不变与业务写请求为零。
 - 未测风险：本地 deterministic Chromium 不替代生产设备负载和真实页面数据规模；生产 frame interval/详情 latency 由发布后只读验证闭环。
 
 

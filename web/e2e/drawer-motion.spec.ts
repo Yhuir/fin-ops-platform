@@ -163,12 +163,54 @@ test.describe("right drawer motion", () => {
     const drawer = page.getByRole("dialog", { name: "流水规则标签管理" });
     await expect(drawer).toBeVisible();
     expectFullWidthTravel(await drawerSamples(page), "enter");
+    const requestsBeforeClose = api.calls.length;
 
     await armDrawerSampler(page, 300);
     await drawer.getByRole("button", { name: "关闭流水规则标签管理" }).click();
     expectFullWidthTravel(await drawerSamples(page), "exit");
     await expect(drawer).toHaveCount(0);
+    expect(api.calls.length).toBe(requestsBeforeClose);
     expect(api.count("PUT /api/bank-flow-rule-batches/tag-rules")).toBe(0);
+  });
+
+  test("covers the OA bank-link modal lifecycle and blocks dismissal while candidates load", async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 900 });
+    const api = await installDeterministicApiMocks(page, {
+      oaPendingPaymentBankLinkFlow: true,
+      sessionMode: "full_access",
+    });
+    await page.route("**/api/oa-pending-payments/bank-transaction-candidates*", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 450));
+      await route.fallback();
+    });
+    await page.goto("/oa-pending-payments");
+    await page.getByRole("button", { name: /进行中 OA/ }).click();
+    const row = page.getByRole("row", { name: /进行中关联申请人/ });
+    await expect(row).toBeVisible();
+    await row.getByRole("checkbox", { name: /选择 OA 进行中关联申请人/ }).check();
+    const opener = page.getByRole("button", { name: "关联支出流水" });
+    await expect(opener).toBeEnabled();
+
+    await armDrawerSampler(page, 700);
+    await opener.click();
+    const drawer = page.getByRole("dialog", { name: "关联支出流水抽屉" });
+    await expect(drawer).toBeVisible();
+    await expect(drawer.getByText("加载中")).toBeVisible();
+    await expect(drawer.getByRole("button", { name: "取消" })).toBeDisabled();
+    await expect(drawer.getByRole("button", { name: "关闭关联支出流水抽屉" })).toBeDisabled();
+    await page.keyboard.press("Escape");
+    await page.locator(".finance-drawer__backdrop").evaluate((backdrop: HTMLElement) => backdrop.click());
+    await expect(drawer).toBeVisible();
+    await expect(drawer.getByText("显示 3 / 3 条")).toBeVisible();
+    expectFullWidthTravel(await drawerSamples(page), "enter");
+    const requestsBeforeClose = api.calls.length;
+
+    await armDrawerSampler(page, 300);
+    await drawer.getByRole("button", { name: "关闭关联支出流水抽屉" }).click();
+    expectFullWidthTravel(await drawerSamples(page), "exit");
+    await expect(drawer).toHaveCount(0);
+    expect(api.calls.length).toBe(requestsBeforeClose);
+    expect(api.count("POST /api/oa-pending-payments/link-bank-transactions")).toBe(0);
   });
 
   test("applies viewport motion and safe exit state to the production persistent drawer", async ({ page }) => {
@@ -183,6 +225,7 @@ test.describe("right drawer motion", () => {
     const workflow = page.getByLabel("以发票反提 OA 工作流", { exact: true });
     await expect(workflow).toBeVisible();
     expectFullWidthTravel(await drawerSamples(page), "enter");
+    const requestsBeforeClose = api.calls.length;
 
     await armDrawerSampler(page, 300);
     await page.getByRole("button", { name: "关闭以发票反提 OA 工作流" }).click();
@@ -192,6 +235,7 @@ test.describe("right drawer motion", () => {
     await expect(opener).toBeFocused();
     expectFullWidthTravel(await drawerSamples(page), "exit");
     await expect(persistentDrawer).toHaveCount(0);
+    expect(api.calls.length).toBe(requestsBeforeClose);
     expect(api.count("POST /api/input-invoice-usage/oa-reverse/oa-draft")).toBe(0);
   });
 
@@ -202,15 +246,19 @@ test.describe("right drawer motion", () => {
     const body = rail.locator("#tax-certified-results-body");
     await expect(body).toBeVisible();
 
+    const requestsBeforeCollapse = api.calls.length;
     await rail.getByRole("button", { name: /收起已认证结果/ }).click();
     await expect(body).toBeAttached();
     await expect(body).toHaveAttribute("aria-hidden", "true");
     await expect(body).toHaveAttribute("inert", "");
     await expect(rail.getByRole("button", { name: /展开已认证结果/ })).toHaveAttribute("aria-expanded", "false");
+    expect(api.calls.length).toBe(requestsBeforeCollapse);
 
+    const requestsBeforeExpand = api.calls.length;
     await rail.getByRole("button", { name: /展开已认证结果/ }).click();
     await expect(body).toHaveAttribute("aria-hidden", "false");
     await expect(rail.getByRole("button", { name: /收起已认证结果/ })).toHaveAttribute("aria-expanded", "true");
+    expect(api.calls.length).toBe(requestsBeforeExpand);
     expect(api.count("POST /api/tax-offset/plans")).toBe(0);
     expect(api.count("POST /api/tax-offset/certified-import/confirm")).toBe(0);
   });
