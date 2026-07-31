@@ -541,6 +541,8 @@ root-owned 标准 scenario 是登记的 `test_owned` 可逆合同；只有 T+0 `
 和页面 canonical audit，延迟 checkpoint 不重复业务 mutation。每次检查都必须使用真实 PostgreSQL 和 RabbitMQ，
 验证 exact registry/systemd inventory、worker readiness、dirty scope、pending/processing outbox、durable 与
 RabbitMQ dead letter、critical read-model enqueue-to-fresh SLO、domain audit 和 API/health/SSE 性能。
+`full` 在可逆写 smoke 前先要求 durable publish、dirty scope、worker 与 RabbitMQ 全部收敛；只有该检查
+PASS 才允许执行 mutation，并在 smoke 后再次验证同一组 runtime health 合同。
 最终 evidence 复用 T+0 已验证的写操作与页面 canonical audit，并以 T+300 runtime 采样证明 queue 持续稳定。
 RabbitMQ management 未配置或读取失败时 fail closed。checkpoint 必须按实际
 systemd I/O 边界分别加载 `/etc/fin-ops/fin-ops.rabbitmq-topology.env`（topology apply）和
@@ -573,10 +575,10 @@ RabbitMQ dispatcher 每次领取待发布事件前，会把业务消费已经完
 `status=done` 是消息已经到达 consumer 并完成处理的 durable 终态证据，继续等待或重复发布都没有意义；
 稍后到达的 dispatcher publish confirm 对该终态幂等成功。release gate 同时要求
 `publishing_outbox_count=0`，防止终态事件卡在 transport 中间态。
-每个 checkpoint 在全部 smoke 完成后、runtime health 采样前，使用 verification release 代码中的同一
-repository 方法，幂等收敛已经 `done` 的终态；因此候选尚未激活或 preflight
-自身新建事件时也不会形成激活死锁。该步骤不认领、重放或重新发布事件，也不绕过
-`publishing_outbox_count=0` 强门禁。
+每个 checkpoint 在 closure gate 前先使用 verification release 代码中的同一 repository 方法，幂等收敛
+已经 `done` 的终态；closure 完成后、最终 runtime evidence 采样前再执行一次相同收敛。因此候选尚未
+激活、preflight 自身新建事件或可逆写 smoke 产生终态事件时都不会形成激活死锁。该步骤不认领、重放或
+重新发布事件，也不绕过 `unpublished/publishing/publish_failed = 0` 强门禁。
 
 worker readiness 不是 systemd active。发布脚本会等待：
 

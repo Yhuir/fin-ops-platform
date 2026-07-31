@@ -33,9 +33,14 @@ _DOCUMENTED_MISMATCH_CONFIRM_NOTE = "characterization regression covers document
 
 
 class _RelationCommandRepositoryFactory(_RecordingRepositoryFactory):
-    def __init__(self, persisted: list[dict[str, object]]) -> None:
+    def __init__(
+        self,
+        persisted: list[dict[str, object]],
+        canonical_rows: dict[str, dict[str, object]],
+    ) -> None:
         super().__init__()
         self._persisted = persisted
+        self._canonical_rows = canonical_rows
 
     def __call__(self, transaction: object):
         repository = super().__call__(transaction)
@@ -55,7 +60,26 @@ class _RelationCommandRepositoryFactory(_RecordingRepositoryFactory):
 
         repository.pair_relations.save_workbench_pair_relations = save_workbench_pair_relations
         repository.pair_relations.save_workbench_pair_relation_delta = save_workbench_pair_relations
+        repository.canonical_query = _CanonicalSelectionRepository(self._canonical_rows)
         return repository
+
+
+class _CanonicalSelectionRepository:
+    def __init__(self, rows: dict[str, dict[str, object]]) -> None:
+        self._rows = rows
+
+    def validate_workbench_relation_selection_in_current_transaction(
+        self,
+        *,
+        scope_key: str,
+        row_ids: list[str],
+    ) -> dict[str, dict[str, object]]:
+        del scope_key
+        return {
+            row_id: dict(self._rows[row_id])
+            for row_id in row_ids
+            if row_id in self._rows
+        }
 
 
 class WorkbenchWriteCharacterizationTests(unittest.TestCase):
@@ -135,6 +159,12 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
     def _default_invoice_row_id(self, app: Application) -> str:
         return str(self._default_open_rows(app)["invoice"]["id"])
 
+    def _canonical_rows(self, app: Application) -> dict[str, dict[str, object]]:
+        return {
+            str(row["id"]): {**row, "pane": row_type}
+            for row_type, row in self._default_open_rows(app).items()
+        }
+
     def _post(self, app: Application, path: str, payload: dict[str, object]):
         payload.setdefault("expected_read_model_version", "characterization-generation")
         if path == "/api/workbench/actions/confirm-link":
@@ -157,7 +187,10 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         persisted: list[dict[str, object]] = []
         app._workbench_confirm_link_uow_override = WorkbenchWriteUnitOfWork(
             connection=connection,
-            repository_factory=_RelationCommandRepositoryFactory(persisted),
+            repository_factory=_RelationCommandRepositoryFactory(
+                persisted,
+                self._canonical_rows(app),
+            ),
             idempotency_store=InMemoryWorkbenchIdempotencyRepository(),
         )
         return connection, writer, persisted
@@ -173,7 +206,10 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         persisted: list[dict[str, object]] = []
         app._workbench_cancel_link_uow_override = WorkbenchWriteUnitOfWork(
             connection=connection,
-            repository_factory=_RelationCommandRepositoryFactory(persisted),
+            repository_factory=_RelationCommandRepositoryFactory(
+                persisted,
+                self._canonical_rows(app),
+            ),
             idempotency_store=InMemoryWorkbenchIdempotencyRepository(),
         )
         return connection, writer, persisted
@@ -189,7 +225,10 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         persisted: list[dict[str, object]] = []
         app._workbench_withdraw_link_uow_override = WorkbenchWriteUnitOfWork(
             connection=connection,
-            repository_factory=_RelationCommandRepositoryFactory(persisted),
+            repository_factory=_RelationCommandRepositoryFactory(
+                persisted,
+                self._canonical_rows(app),
+            ),
             idempotency_store=InMemoryWorkbenchIdempotencyRepository(),
         )
         return connection, writer, persisted
@@ -325,7 +364,10 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         connection = _RecordingConnection()
         writer = _RecordingDirtyOutboxWriter()
         persisted: list[dict[str, object]] = []
-        repository_factory = _RelationCommandRepositoryFactory(persisted)
+        repository_factory = _RelationCommandRepositoryFactory(
+            persisted,
+            self._canonical_rows(app),
+        )
         app._workbench_confirm_link_uow_override = WorkbenchWriteUnitOfWork(
             connection=connection,
             repository_factory=repository_factory,

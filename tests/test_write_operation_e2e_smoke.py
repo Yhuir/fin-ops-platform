@@ -1976,6 +1976,47 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(audit["status"], "fail")
         self.assertEqual(audit["error"], "system_audit_snapshot_missing")
 
+    def test_system_audit_internal_failure_preserves_gate_diagnostics(self) -> None:
+        checkpoint = _strict_checkpoint("confirm", key="confirm-key", relation_state_after="active")
+        payload = _system_audit_payload()
+        payload["overall_status"] = "issues_found"
+        payload["audit_status"] = {
+            "integrity": "pass",
+            "freshness": "fresh",
+            "queue": "backlog",
+        }
+        summary = payload["summary"]
+        assert isinstance(summary, dict)
+        summary["database_internal_contracts"] = "issues_found"
+        payload["issues"] = [
+            {
+                "code": "page_runtime_queue_not_drained",
+                "subject": "app-health-operations",
+                "details": {"publishing_outbox_count": 1},
+            }
+        ]
+
+        audit = write_operation_e2e_smoke._collect_system_audit(
+            checkpoint,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            headers={"Authorization": "Bearer token"},
+            timeout_seconds=1,
+            request_fn=lambda *args: http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=json.dumps(payload).encode(),
+            ),
+        )
+
+        self.assertEqual(audit["status"], "fail")
+        self.assertEqual(audit["error"], "system_audit_internal_gate_failed")
+        self.assertEqual(audit["diagnostics"]["audit_status"]["queue"], "backlog")
+        self.assertEqual(
+            audit["diagnostics"]["issues"][0]["details"]["publishing_outbox_count"],
+            1,
+        )
+
     def test_checkpoint_consumers_probe_open_pages_in_parallel_and_keep_scenario_order(self) -> None:
         checkpoint = write_operation_e2e_smoke.WriteCheckpoint(
             name="parallel-pages",

@@ -1599,6 +1599,7 @@ release_gate_checkpoint() {
     cd "$verification_src"
     "$API_PYTHON" -m fin_ops_platform.tools.domain_contract_audit >"$domain_report"
   ) || true
+  reconcile_completed_publish_states "$verification_release"
   (
     set -a
     # shellcheck disable=SC1090

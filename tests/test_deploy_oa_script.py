@@ -610,6 +610,18 @@ class DeployOAScriptTest(unittest.TestCase):
             checkpoint.index("-m fin_ops_platform.tools.runtime_sync_closure_gate"),
             checkpoint.index('"$API_PYTHON" - "$runtime_report"'),
         )
+        reconciliations = [
+            index
+            for index in range(len(checkpoint))
+            if checkpoint.startswith(
+                'reconcile_completed_publish_states "$verification_release"',
+                index,
+            )
+        ]
+        closure_gate = checkpoint.index("-m fin_ops_platform.tools.runtime_sync_closure_gate")
+        self.assertEqual(len(reconciliations), 2)
+        self.assertLess(reconciliations[0], closure_gate)
+        self.assertGreater(reconciliations[1], closure_gate)
 
     def test_deploy_control_read_model_slo_smoke_refuses_apply_before_release_lookup(self) -> None:
         env = {**os.environ, "FINOPS_RELEASE_ROOT": "/tmp/finops-release-root-does-not-exist"}

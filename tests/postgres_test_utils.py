@@ -142,6 +142,7 @@ EXPECTED_MIGRATION_FILES = [
     "0128_tax_offset_plan_runtime_grant.sql",
     "0129_runtime_outbox_canonical_attempts_contract.sql",
     "0130_canonical_finance_domain_contracts.sql",
+    "0131_validate_canonical_finance_domain_contracts.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (

@@ -2151,7 +2151,27 @@ def _collect_system_audit(
                 for key, expected in (("integrity", "pass"), ("freshness", "fresh"), ("queue", "drained"))
             )
         ):
-            raise ValueError("system_audit_internal_gate_failed")
+            issues = payload.get("issues")
+            return {
+                "status": "fail",
+                "error": "system_audit_internal_gate_failed",
+                "diagnostics": {
+                    "overall_status": payload.get("overall_status"),
+                    "audit_status": audit_status,
+                    "database_internal_contracts": summary.get("database_internal_contracts"),
+                    "issues": [
+                        {
+                            key: issue.get(key)
+                            for key in ("code", "subject", "details")
+                            if key in issue
+                        }
+                        for issue in issues[:10]
+                        if isinstance(issue, dict)
+                    ]
+                    if isinstance(issues, list)
+                    else [],
+                },
+            }
         page_results = snapshot.get("page_results")
         page_result_keys = (
             [str(page.get("page_key") or "") for page in page_results if isinstance(page, dict)]

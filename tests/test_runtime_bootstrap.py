@@ -372,7 +372,7 @@ class RuntimeBootstrapTests(unittest.TestCase):
         self.assertNotIn("SearchPendingSqlProjectionBuilder(", source)
         self.assertEqual(
             source.count("effective_category_provider=BankTransactionEffectiveCategoryProvider("),
-            2,
+            1,
         )
 
     def test_production_services_do_not_depend_on_retired_bank_tag_facade(self) -> None:

@@ -34,6 +34,9 @@ class FakeRuntimeMonitoringRepository:
             "queue_backlog": {},
             "dirty_scopes": {},
             "failed_jobs": 0,
+            "rabbitmq_unpublished_backlog": 0,
+            "rabbitmq_publishing_backlog": 0,
+            "rabbitmq_publish_failed_backlog": 0,
             "stale_dirty_scope_count": 0,
             "missing_required_worker_count": 0,
             "stale_required_worker_count": 0,
@@ -397,6 +400,18 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
         self.assertEqual(blockers["rabbitmq_queue_metrics_missing"], [event_types[0]])
         self.assertEqual(blockers["rabbitmq_queues_without_consumers"], [event_types[1]])
 
+    def test_runtime_blockers_reject_durable_publish_backlog(self) -> None:
+        summary = FakeRuntimeMonitoringRepository(None).ready_health_summary()
+        summary["rabbitmq_unpublished_backlog"] = 1
+        summary["rabbitmq_publishing_backlog"] = 2
+        summary["rabbitmq_publish_failed_backlog"] = 3
+
+        blockers = gate._runtime_blockers(summary)
+
+        self.assertEqual(blockers["rabbitmq_unpublished_backlog"], 1)
+        self.assertEqual(blockers["rabbitmq_publishing_backlog"], 2)
+        self.assertEqual(blockers["rabbitmq_publish_failed_backlog"], 3)
+
     def test_gate_fails_without_authenticated_http_and_write_scenario(self) -> None:
         with patch.object(gate, "RuntimeMonitoringRepository", FakeRuntimeMonitoringRepository), patch.object(
             gate.read_model_slo_smoke,
@@ -487,6 +502,11 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
         self.assertEqual(report["targets"]["health_ready_payload_ms"], 1_000.0)
         self.assertEqual(report["targets"]["health_ready_max_response_bytes"], 50_000)
         self.assertEqual(report["targets"]["health_ready_max_api_performance_endpoints"], 20)
+        check_names = [check["name"] for check in report["checks"]]
+        self.assertLess(
+            check_names.index("runtime_health_before_write"),
+            check_names.index("write_operation_e2e"),
+        )
         self.assertEqual(report["checks"][-1]["name"], "runtime_health")
         self.assertTrue(read_model_smoke.call_args.kwargs["critical_only"])
 

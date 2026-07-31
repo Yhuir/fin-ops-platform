@@ -33,6 +33,9 @@ RUNTIME_HEALTH_REQUIRED_FIELDS = (
     "queue_backlog",
     "dirty_scopes",
     "failed_jobs",
+    "rabbitmq_unpublished_backlog",
+    "rabbitmq_publishing_backlog",
+    "rabbitmq_publish_failed_backlog",
     "stale_dirty_scope_count",
     "missing_required_worker_count",
     "stale_required_worker_count",
@@ -257,25 +260,41 @@ def run_closure_gate(
             ]
         )
         if profile == "full":
-            checks.append(
-                _write_operation_e2e_check(
-                    connection,
-                    scenario_path=write_scenario,
-                    scenario_error=write_scenario_error,
-                    scenarios=write_scenarios,
-                    apply=apply_write_scenarios,
-                    approval_reference=write_approval_ticket,
-                    base_url=base_url,
-                    api_prefix=api_prefix,
-                    tenant_id=tenant_id,
-                    headers=normalized_headers,
-                    write_target_ms=write_target_ms,
-                    http_target_ms=http_target_ms,
-                    timeout_seconds=timeout_seconds,
-                    poll_interval_seconds=poll_interval_seconds,
-                    limit=limit,
-                )
+            pre_write_health = _runtime_health_check(
+                connection,
+                timeout_seconds=timeout_seconds,
+                poll_interval_seconds=poll_interval_seconds,
+                name="runtime_health_before_write",
             )
+            checks.append(pre_write_health)
+            if pre_write_health.status == PASS:
+                checks.append(
+                    _write_operation_e2e_check(
+                        connection,
+                        scenario_path=write_scenario,
+                        scenario_error=write_scenario_error,
+                        scenarios=write_scenarios,
+                        apply=apply_write_scenarios,
+                        approval_reference=write_approval_ticket,
+                        base_url=base_url,
+                        api_prefix=api_prefix,
+                        tenant_id=tenant_id,
+                        headers=normalized_headers,
+                        write_target_ms=write_target_ms,
+                        http_target_ms=http_target_ms,
+                        timeout_seconds=timeout_seconds,
+                        poll_interval_seconds=poll_interval_seconds,
+                        limit=limit,
+                    )
+                )
+            else:
+                checks.append(
+                    ClosureCheck(
+                        "write_operation_e2e",
+                        SKIP,
+                        "Write-operation E2E was not started because runtime health did not converge.",
+                    )
+                )
         # Sample runtime convergence after every read/write smoke has completed.
         checks.append(
             _runtime_health_check(
@@ -318,6 +337,7 @@ def _runtime_health_check(
     *,
     timeout_seconds: float,
     poll_interval_seconds: float,
+    name: str = "runtime_health",
 ) -> ClosureCheck:
     deadline = monotonic() + max(0.0, timeout_seconds)
     repository = RuntimeMonitoringRepository(connection)
@@ -325,12 +345,17 @@ def _runtime_health_check(
         try:
             summary = repository.ready_health_summary()
         except Exception as exc:
-            return ClosureCheck("runtime_health", FAIL, "runtime monitoring health summary unavailable.", {"error": str(exc) or exc.__class__.__name__})
+            return ClosureCheck(
+                name,
+                FAIL,
+                "runtime monitoring health summary unavailable.",
+                {"error": str(exc) or exc.__class__.__name__},
+            )
         missing_fields = [key for key in RUNTIME_HEALTH_REQUIRED_FIELDS if key not in summary]
         worker_metrics = summary.get("worker_metrics")
         if missing_fields or not isinstance(worker_metrics, list) or not worker_metrics:
             return ClosureCheck(
-                "runtime_health",
+                name,
                 FAIL,
                 "Runtime health summary is missing required durable queue or worker facts.",
                 {
@@ -342,7 +367,7 @@ def _runtime_health_check(
         blockers = _runtime_blockers(summary)
         if not blockers or monotonic() >= deadline:
             return ClosureCheck(
-                "runtime_health",
+                name,
                 PASS if not blockers else FAIL,
                 "Runtime queue, worker, RabbitMQ and dirty-scope blockers are clear." if not blockers else "Runtime health did not converge before the gate deadline.",
                 {
@@ -353,6 +378,9 @@ def _runtime_health_check(
                             "queue_backlog",
                             "dirty_scopes",
                             "failed_jobs",
+                            "rabbitmq_unpublished_backlog",
+                            "rabbitmq_publishing_backlog",
+                            "rabbitmq_publish_failed_backlog",
                             "max_pending_age_seconds",
                             "stale_dirty_scope_count",
                             "missing_required_worker_count",
@@ -817,7 +845,16 @@ def _runtime_blockers(summary: Mapping[str, Any]) -> dict[str, Any]:
     for key in ("missing_required_worker_count", "stale_required_worker_count", "mismatched_required_worker_count"):
         if int(summary.get(key) or 0) > 0:
             blockers[key] = summary.get(key)
-    for key in ("rabbitmq_queue_depth", "rabbitmq_unacked_messages", "rabbitmq_dlq_count", "stale_dirty_scope_count", "failed_jobs"):
+    for key in (
+        "rabbitmq_queue_depth",
+        "rabbitmq_unacked_messages",
+        "rabbitmq_dlq_count",
+        "rabbitmq_unpublished_backlog",
+        "rabbitmq_publishing_backlog",
+        "rabbitmq_publish_failed_backlog",
+        "stale_dirty_scope_count",
+        "failed_jobs",
+    ):
         if int(summary.get(key) or 0) > 0:
             blockers[key] = summary.get(key)
     queue_backlog = summary.get("queue_backlog")

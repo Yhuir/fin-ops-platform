@@ -408,7 +408,8 @@ python -m fin_ops_platform.app.worker \
   校验标准可逆 scenario，但不执行业务 mutation
 - 候选激活后 T+0 运行 `full`：连接真实 PostgreSQL 与 RabbitMQ，检查 exact worker inventory、
   queue/dirty/dead-letter 收敛、critical read-model SLO、一次固定可逆写 smoke、domain/page canonical
-  audit 及 API/health/SSE 性能；page audit 证据直接复用该 smoke 内部的全页面 canonical audit
+  audit 及 API/health/SSE 性能；可逆写之前必须先通过 durable publish/dirty/worker/RabbitMQ 收敛门禁，
+  page audit 证据直接复用该 smoke 内部的全页面 canonical audit
 - T+60s、T+300s 运行 `stability`：重跑 critical read-model、性能、domain audit 和 runtime 收敛检查，
   不重复 confirm/withdraw；最终证据复用 T+0 写操作/page audit，并以 T+300 证明异步拓扑持续稳定
 - 页面 shell 探针固定使用公开站点 origin；API/SSE/可逆写探针固定使用当前 release 的内部服务 origin，
@@ -421,8 +422,8 @@ python -m fin_ops_platform.app.worker \
   `sudo /usr/local/sbin/finops-deploy-control write-operation-e2e-scenario-install <release-name> <temporary-scenario-path>`。
   helper 使用候选 release 的严格合同校验后原子安装 root-owned `0600` 文件，并保留一份 `.previous`；
   不允许直接覆盖标准 scenario、跟随符号链接或绕过候选代码校验
-- runtime health 在所有 read-model、HTTP/SSE 和可逆写 smoke 之后采样，最终 evidence 必须反映 smoke
-  触发后的 durable queue、dirty scope、worker 与 dead-letter 收敛状态
+- runtime health 在可逆写 smoke 前后各采样一次：前置采样阻止在未收敛 runtime 上执行 mutation，后置
+  采样保证最终 evidence 反映 smoke 触发后的 durable queue、dirty scope、worker 与 dead-letter 收敛状态
 - 门禁按 systemd 的既有边界分别加载 `/etc/fin-ops/fin-ops.rabbitmq-topology.env` 与
   `/etc/fin-ops/fin-ops.rabbitmq-monitoring.env`，任一缺失或不可读都 fail closed；可逆写 smoke
   优先使用 common env 中的 approval ticket，缺失时使用运维合同登记的固定 standing ticket，

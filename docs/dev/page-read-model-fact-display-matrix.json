@@ -172,7 +172,7 @@
       "page_key": "pending-invoices",
       "route": "/pending-invoices",
       "read_model_keys": [],
-      "freshness_probe_names": ["pending_invoices_rows", "pending_invoices_filter_options", "pending_invoices_rules"],
+      "freshness_probe_names": ["pending_invoices_rows", "pending_invoices_rules"],
       "fact_sources": ["app.bank_transactions", "app.invoices", "app.pending_invoice_rules", "app.workbench_pair_relations"],
       "pairing_relation_fact_sources": ["app.workbench_pair_relations"],
       "deterministic_evidence": [
@@ -185,7 +185,7 @@
           "required_markers": ["智能工厂设备商", "12561048"]
         }
       ],
-      "production_readonly_gates": ["http_slo_probe:pending_invoices_rows", "http_slo_probe:pending_invoices_filter_options", "http_slo_probe:pending_invoices_rules"]
+      "production_readonly_gates": ["http_slo_probe:pending_invoices_rows", "http_slo_probe:pending_invoices_rules"]
     },
     {
       "module": "input-invoice-usage",
