@@ -81,6 +81,20 @@ drawer open
 
 详情不访问外部 OA，也不等待 read-model worker。relation kind 非法返回 `400`；identifier 不存在返回结构化 `404`。
 
+## 支出流水候选抽屉状态
+
+```text
+closed
+  -> loading
+  -> ready(rows) | empty | candidate-error
+  -> loading(retry)
+```
+
+- 候选 GET 仍由单一 abortable effect 发起；每次明确查询或回车只产生一个请求，晚到、已取消或旧 generation 的结果不能覆盖当前状态。
+- `candidate-error` 只属于 `OaBankLinkDrawer`，在当前请求开始和成功时清空，仅由当前未取消且未过期的失败设置，并在抽屉内以 accessible alert 展示。
+- 候选查询错误不得写入或清除页面 `error` / `actionError`；关联提交和页面写回等 mutation 错误继续由页面级错误状态负责。
+- 抽屉关闭后候选错误反馈不可残留在页面；重新打开时由新的当前请求开始清理。
+
 ## 写回状态机
 
 ### `writeback-paid`

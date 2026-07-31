@@ -1263,6 +1263,10 @@ describe("OA pending payments page", () => {
       pagination: { page: 1, pageSize: 100, total: 1 },
     });
     const fetchMock = installOaPendingPaymentsFetch({
+      writebackPaidResponses: [{
+        status: 503,
+        payload: { message: "新的写回失败" },
+      }],
       bankCandidatesResponses: [
         { payload: candidatePayload("initial", "初始结果") },
         { status: 503, payload: { message: "候选查询暂时失败" } },
@@ -1291,12 +1295,13 @@ describe("OA pending payments page", () => {
 
     await user.click(queryButton);
     await waitFor(() => expect(bankCandidateRequests(fetchMock)).toHaveLength(requestsAfterOpen + 1));
-    expect(await within(page).findByRole("alert", { hidden: true })).toHaveTextContent("候选查询暂时失败");
+    expect(await within(drawer).findByRole("alert")).toHaveTextContent("候选查询暂时失败");
     expect(await within(drawer).findByText("暂无支出流水")).toBeInTheDocument();
 
     await user.click(queryButton);
     await waitFor(() => expect(bankCandidateRequests(fetchMock)).toHaveLength(requestsAfterOpen + 2));
     expect(await within(drawer).findByText("重试结果")).toBeInTheDocument();
+    expect(within(drawer).queryByRole("alert")).not.toBeInTheDocument();
 
     await user.type(search, "{Enter}");
     await waitFor(() => expect(bankCandidateRequests(fetchMock)).toHaveLength(requestsAfterOpen + 3));
@@ -1304,6 +1309,17 @@ describe("OA pending payments page", () => {
     expect(bankCandidateRequests(fetchMock).slice(requestsAfterOpen).map((request) => (
       request.searchParams.get("keyword")
     ))).toEqual([null, null, null]);
+
+    await user.click(within(drawer).getByRole("button", { name: "关闭关联支出流水抽屉" }));
+    await waitFor(() => expect(screen.queryByLabelText("关联支出流水抽屉")).not.toBeInTheDocument());
+    expect(screen.queryByText("候选查询暂时失败")).not.toBeInTheDocument();
+
+    await user.click(within(page).getByRole("button", { name: /已完成 OA/ }));
+    await waitFor(() => expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("view_mode")).toBe("completed"));
+    await user.click(within(page).getByRole("button", { name: "写回 OA 王五" }));
+    await waitFor(() => expect(writebackPaidRequests(fetchMock)).toHaveLength(1));
+    expect(await within(page).findByRole("alert")).toHaveTextContent("新的写回失败");
+    expect(screen.queryByText("候选查询暂时失败")).not.toBeInTheDocument();
   });
 
   test("shows row writeback only for paid rows that are not written", async () => {

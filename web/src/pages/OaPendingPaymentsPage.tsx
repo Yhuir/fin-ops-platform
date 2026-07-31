@@ -537,6 +537,7 @@ function OaBankLinkDrawer({
   const [submitting, setSubmitting] = useState(false);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const [candidateError, setCandidateError] = useState<string | null>(null);
   const [searchGeneration, setSearchGeneration] = useState(0);
   const candidateRequestSeqRef = useRef(0);
   const pageCount = Math.max(1, Math.ceil(total / BANK_CANDIDATE_PAGE_SIZE));
@@ -548,6 +549,7 @@ function OaBankLinkDrawer({
     }
     const requestId = candidateRequestSeqRef.current + 1;
     candidateRequestSeqRef.current = requestId;
+    setCandidateError(null);
     setLoading(true);
     fetchOaPendingPaymentBankCandidates({
       relationStatus,
@@ -561,6 +563,7 @@ function OaBankLinkDrawer({
         if (signal?.aborted || requestId !== candidateRequestSeqRef.current) {
           return;
         }
+        setCandidateError(null);
         setRows(payload.rows ?? []);
         setTotal(payload.pagination?.total ?? payload.rows?.length ?? 0);
       })
@@ -568,16 +571,16 @@ function OaBankLinkDrawer({
         if (signal?.aborted || requestId !== candidateRequestSeqRef.current) {
           return;
         }
+        setCandidateError(caught instanceof Error ? caught.message : "支出流水加载失败。");
         setRows([]);
         setTotal(0);
-        onError(caught instanceof Error ? caught.message : "支出流水加载失败。");
       })
       .finally(() => {
         if (!signal?.aborted && requestId === candidateRequestSeqRef.current) {
           setLoading(false);
         }
       });
-  }, [keyword, onError, open, page, relationStatus, selectedOaRowIds]);
+  }, [keyword, open, page, relationStatus, selectedOaRowIds]);
 
   useEffect(() => {
     if (!open) {
@@ -686,6 +689,11 @@ function OaBankLinkDrawer({
         <div className="oa-pending-payments-bank-drawer__meta">
           {loading ? "加载中" : `显示 ${rows.length} / ${total} 条`}
         </div>
+        {candidateError ? (
+          <div className="oa-pending-payments-alert" role="alert">
+            {candidateError}
+          </div>
+        ) : null}
         <div className="oa-pending-payments-bank-drawer__list">
           {rows.length === 0 && !loading ? <div className="oa-pending-payments-bank-drawer__empty">暂无支出流水</div> : null}
           {rows.map((row) => (
