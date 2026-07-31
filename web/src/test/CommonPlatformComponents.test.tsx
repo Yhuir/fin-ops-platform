@@ -21,6 +21,7 @@ function renderWithProject(ui: React.ReactElement) {
 describe("common platform components", () => {
   const appDrawerSource = readFileSync("src/components/common/AppDrawer.tsx", "utf8");
   const appStyles = readFileSync("src/app/styles.css", "utf8");
+  const workbenchDetailDrawerSource = readFileSync("src/components/workbench/DetailDrawer.tsx", "utf8");
 
   test("renders state panels with accessible roles and loading affordances", () => {
     renderWithProject(
@@ -218,19 +219,58 @@ describe("common platform components", () => {
     }
   });
 
-  test("defines right drawer slide motion with reduced-motion safeguards", () => {
+  test("cancels a pending persistent exit when the drawer reopens", () => {
+    vi.useFakeTimers();
+    const onClose = vi.fn();
+
+    try {
+      const { rerender } = renderWithProject(
+        <AppDrawer modal={false} onClose={onClose} open title="非模态抽屉">
+          <p>快速切换正文</p>
+        </AppDrawer>,
+      );
+
+      rerender(
+        <AppDrawer modal={false} onClose={onClose} open={false} title="非模态抽屉">
+          <p>快速切换正文</p>
+        </AppDrawer>,
+      );
+      expect(screen.getByText("快速切换正文").closest(".finance-drawer__content")).toHaveAttribute("data-exiting", "true");
+
+      rerender(
+        <AppDrawer modal={false} onClose={onClose} open title="非模态抽屉">
+          <p>快速切换正文</p>
+        </AppDrawer>,
+      );
+      act(() => {
+        vi.advanceTimersByTime(180);
+      });
+
+      expect(screen.getByText("快速切换正文").closest(".finance-drawer__content")).not.toHaveAttribute("data-exiting");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("uses HeroUI right translate motion without the legacy child transform animation", () => {
     expect(appStyles).toMatch(/\.finance-drawer\s*\{[^}]*display:\s*flex/s);
     expect(appStyles).toMatch(/\.finance-drawer\s*\{[^}]*flex-direction:\s*column/s);
     expect(appStyles).toMatch(/\.finance-drawer\s*\{[^}]*max-height:\s*100vh/s);
     expect(appStyles).toMatch(/\.finance-drawer__body\s*\{[^}]*overflow:\s*auto/s);
-    expect(appStyles).toMatch(/--finance-drawer-enter-duration:\s*220ms;/);
-    expect(appStyles).toMatch(/--finance-drawer-exit-duration:\s*170ms;/);
-    expect(appStyles).toMatch(/@keyframes finance-drawer-slide-in/);
-    expect(appStyles).toMatch(/@keyframes finance-drawer-slide-out/);
-    expect(appStyles).toMatch(/translate3d\(28px, 0, 0\)/);
-    expect(appStyles).toMatch(/translate3d\(22px, 0, 0\)/);
+    expect(appStyles).toMatch(/--finance-drawer-enter-duration:\s*240ms;/);
+    expect(appStyles).toMatch(/--finance-drawer-exit-duration:\s*180ms;/);
+    expect(appStyles).toMatch(/\.finance-drawer__content\s*\{[^}]*transition-property:\s*translate/s);
+    expect(appStyles).toMatch(/\.finance-drawer__content\[data-exiting\]\s*\{[^}]*transition-duration:\s*var\(--finance-drawer-exit-duration\)/s);
+    expect(appStyles).toMatch(/\.finance-drawer__content--persistent\[data-entering\]\s*\{[^}]*translate:\s*0/s);
+    expect(appStyles).toMatch(/\.finance-drawer__content--persistent\[data-exiting\]\s*\{[^}]*translate:\s*100%\s+0/s);
+    expect(appStyles).not.toContain("@keyframes finance-drawer-slide-in");
+    expect(appStyles).not.toContain("@keyframes finance-drawer-slide-out");
+    expect(appStyles).not.toContain("translate3d(28px, 0, 0)");
+    expect(appStyles).not.toContain("translate3d(22px, 0, 0)");
+    expect(appStyles).not.toMatch(/\.finance-drawer\s*\{[^}]*will-change/s);
     expect(appStyles).toMatch(/prefers-reduced-motion:\s*reduce/);
-    expect(appStyles).toMatch(/\[data-reduce-motion="true"\] \.finance-drawer/);
+    expect(appStyles).toMatch(/\[data-reduce-motion="true"\] \.finance-drawer__content/);
+    expect(workbenchDetailDrawerSource).not.toContain('window.addEventListener("keydown"');
   });
 
   test("renders page scaffold heading, description, actions, and children", () => {
