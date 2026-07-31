@@ -4,6 +4,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties
 type AppDrawerProps = {
   open: boolean;
   title: string;
+  ariaLabel?: string;
   ariaBusy?: boolean;
   subtitle?: ReactNode;
   headerAside?: ReactNode;
@@ -26,6 +27,7 @@ const persistentDrawerExitMs = 180;
 export default function AppDrawer({
   open,
   title,
+  ariaLabel,
   ariaBusy,
   subtitle,
   headerAside,
@@ -164,17 +166,20 @@ export default function AppDrawer({
   return (
     <Drawer.Backdrop
       className="finance-drawer__backdrop"
+      isDismissable={!closeDisabled}
+      isKeyboardDismissDisabled={closeDisabled}
       isOpen={open}
       onOpenChange={(isOpen) => {
-        if (!isOpen) {
+        if (!isOpen && !closeDisabled) {
           onClose();
         }
       }}
     >
       <Drawer.Content className="finance-drawer__content" data-placement="right" placement="right">
         <Drawer.Dialog
+          aria-label={ariaLabel}
           aria-busy={ariaBusy ? "true" : undefined}
-          aria-labelledby={titleId}
+          aria-labelledby={ariaLabel ? undefined : titleId}
           className={`finance-drawer${className ? ` ${className}` : ""}`}
           style={drawerStyle}
         >

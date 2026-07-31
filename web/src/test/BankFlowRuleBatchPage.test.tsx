@@ -561,6 +561,7 @@ describe("BankFlowRuleBatchPage", () => {
     const pageSource = readWebSource("src/pages/BankFlowRuleBatchPage.tsx");
 
     expect(pageSource).toContain('import AppDrawer from "../components/common/AppDrawer"');
+    expect(pageSource).toContain('width="min(960px, 92vw)"');
     expect(pageSource).not.toContain("bank-flow-rule-batches-drawer-shell");
     expect(pageSource).not.toContain("bank-flow-rule-batches-drawer__close");
     expect(pageSource).not.toMatch(/<aside[^>]+bank-flow-rule-batches-drawer/);
@@ -585,13 +586,11 @@ describe("BankFlowRuleBatchPage", () => {
     const tagRule = cssRule(styles, ".bank-flow-rule-batches-status,\\n.bank-flow-rule-batches-tag");
     const bankTagsRule = cssRule(styles, ".bank-flow-rule-batches-bank-tags,\\n.bank-flow-rule-batches-relation-cell");
     const bankDetailTagRule = cssRule(styles, ".bank-flow-rule-batches-tag--bank-detail");
-    const drawerRule = cssRule(styles, ".bank-flow-rule-batches-drawer");
     const drawerGridWrapRule = cssRule(styles, ".bank-flow-rule-batches-drawer__grid-wrap");
     const drawerGridRule = cssRule(styles, ".bank-flow-rule-batches-drawer__grid");
     const drawerDirectionColRule = cssRule(styles, ".bank-flow-rule-batches-drawer__direction-col");
     const drawerGridCellRule = cssRule(styles, ".bank-flow-rule-batches-drawer__grid th,\\n.bank-flow-rule-batches-drawer__grid td");
     const drawerCheckColRule = cssRule(styles, ".bank-flow-rule-batches-drawer__check-col");
-    const drawerCloseRule = cssRule(styles, ".bank-flow-rule-batches-drawer__close");
     const textareaRule = cssRule(styles, ".bank-flow-rule-batches-dialog__field textarea");
     const paginationButtonRule = cssRule(styles, ".bank-flow-rule-batches-pagination__button");
     const toastRule = cssRule(styles, ".bank-flow-rule-batches-toast");
@@ -605,7 +604,6 @@ describe("BankFlowRuleBatchPage", () => {
     expect(railItemRule).toContain("var(--motion-fast)");
     expect(batchRule).toContain("var(--motion-fast)");
     expect(tableCellRule).toContain("var(--motion-fast)");
-    expect(drawerCloseRule).toContain("var(--motion-fast)");
     expect(textareaRule).toContain("var(--motion-fast)");
     expect(paginationButtonRule).toContain("var(--motion-fast)");
     expect(toastButtonRule).toContain("var(--motion-fast)");
@@ -621,8 +619,6 @@ describe("BankFlowRuleBatchPage", () => {
     expect(tagRule).toContain("background: var(--fp-surface-muted)");
     expect(bankTagsRule).toContain("flex-wrap: wrap");
     expect(bankDetailTagRule).toContain("var(--fp-primary)");
-    expect(drawerRule).toContain("min(960px, 92vw)");
-    expect(drawerRule).toContain("box-shadow: var(--fp-shadow-drawer)");
     expect(drawerGridWrapRule).toContain("overflow: auto");
     expect(drawerGridRule).toContain("border-collapse: collapse");
     expect(drawerGridRule).toContain("min-width: 620px");
@@ -633,7 +629,6 @@ describe("BankFlowRuleBatchPage", () => {
     expect(paginationButtonRule).toContain("height: 30px");
     expect(toastRule).toContain("box-shadow: var(--fp-shadow-popover)");
     expect(tagRule).not.toContain("--fp-bg-muted");
-    expect(drawerRule).not.toContain("--fp-shadow-lg");
     expect(toastRule).not.toContain("--fp-shadow-lg");
   });
 

@@ -1,6 +1,7 @@
 import { ChevronLeft, ChevronRight, PanelRightOpen, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import AppDrawer from "../components/common/AppDrawer";
 import PageScaffold from "../components/common/PageScaffold";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import PageToolbar from "../components/common/PageToolbar";
@@ -620,20 +621,32 @@ function OaBankLinkDrawer({
     })();
   };
 
-  if (!open) {
-    return null;
-  }
-
   return (
-    <div className="oa-pending-payments-drawer-backdrop" role="presentation">
-      <aside aria-label="关联支出流水抽屉" className="oa-pending-payments-bank-drawer">
-        <div className="oa-pending-payments-bank-drawer__header">
-          <div>
-            <h2>关联支出流水</h2>
-            <p>已选 OA {selectedOaRowIds.length} 条</p>
-          </div>
-          <button aria-label="关闭关联支出流水抽屉" onClick={onClose} type="button">×</button>
+    <AppDrawer
+      ariaBusy={loading || submitting}
+      ariaLabel="关联支出流水抽屉"
+      className="oa-pending-payments-bank-drawer"
+      closeDisabled={loading || submitting}
+      closeLabel="关闭关联支出流水抽屉"
+      footer={(
+        <div className="oa-pending-payments-bank-drawer__footer">
+          <button onClick={onClose} type="button">取消</button>
+          <button
+            className="oa-pending-payments-button oa-pending-payments-button--primary"
+            disabled={submitting || selectedOaRowIds.length === 0 || selectedBankIds.size === 0}
+            onClick={submit}
+            type="button"
+          >
+            {submitting ? "关联中" : `确认关联 ${selectedBankIds.size} 条流水`}
+          </button>
         </div>
+      )}
+      onClose={onClose}
+      open={open}
+      subtitle={`已选 OA ${selectedOaRowIds.length} 条`}
+      title="关联支出流水"
+      width="min(560px, 100vw)"
+    >
         <div className="oa-pending-payments-bank-drawer__filters">
           {(["all", "unmatched", "matched", "linked_in_progress"] as OaPendingPaymentBankCandidateRelationStatus[]).map((status) => (
             <button
@@ -713,19 +726,7 @@ function OaBankLinkDrawer({
             </button>
           </div>
         </div>
-        <div className="oa-pending-payments-bank-drawer__footer">
-          <button onClick={onClose} type="button">取消</button>
-          <button
-            className="oa-pending-payments-button oa-pending-payments-button--primary"
-            disabled={submitting || selectedOaRowIds.length === 0 || selectedBankIds.size === 0}
-            onClick={submit}
-            type="button"
-          >
-            {submitting ? "关联中" : `确认关联 ${selectedBankIds.size} 条流水`}
-          </button>
-        </div>
-      </aside>
-    </div>
+    </AppDrawer>
   );
 }
 

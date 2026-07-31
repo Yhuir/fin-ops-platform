@@ -183,6 +183,11 @@ describe("common platform components", () => {
 
     await user.click(closeButton);
     expect(onClose).not.toHaveBeenCalled();
+
+    await user.keyboard("{Escape}");
+    expect(onClose).not.toHaveBeenCalled();
+    expect(appDrawerSource).toContain("isDismissable={!closeDisabled}");
+    expect(appDrawerSource).toContain("isKeyboardDismissDisabled={closeDisabled}");
   });
 
   test("keeps persistent app drawer mounted for its exit motion", () => {

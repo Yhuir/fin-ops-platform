@@ -69,6 +69,8 @@ export default function CertifiedResultsDrawer({
       role="complementary"
     >
       <Button
+        aria-controls="tax-certified-results-body"
+        aria-expanded={!isCollapsed}
         aria-label={`${isCollapsed ? "展开" : "收起"}已认证结果 ${totalCount}`}
         className="tax-certified-drawer-toggle"
         type="button"
@@ -79,8 +81,12 @@ export default function CertifiedResultsDrawer({
         <strong>{totalCount}</strong>
       </Button>
 
-      {!isCollapsed ? (
-        <div className="tax-certified-drawer-body">
+        <div
+          aria-hidden={isCollapsed}
+          className="tax-certified-drawer-body"
+          id="tax-certified-results-body"
+          inert={isCollapsed ? true : undefined}
+        >
           <DrawerGroup
             title="已匹配计划"
             rows={matchedRows}
@@ -89,7 +95,6 @@ export default function CertifiedResultsDrawer({
           />
           <DrawerGroup title="已认证但未进入计划" rows={outsidePlanRows} buttonLabelPrefix="查看未进入计划的已认证发票" />
         </div>
-      ) : null}
     </aside>
   );
 }

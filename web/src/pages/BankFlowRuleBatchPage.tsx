@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 import { RefreshCw } from "lucide-react";
 
 import AppDialog from "../components/common/AppDialog";
+import AppDrawer from "../components/common/AppDrawer";
 import PageScaffold from "../components/common/PageScaffold";
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import StatePanel from "../components/common/StatePanel";
@@ -1023,28 +1024,28 @@ export default function BankFlowRuleBatchPage() {
         </section>
       </div>
 
-      {tagDrawerOpen ? (
-        <div className="bank-flow-rule-batches-drawer-shell">
-          <button
-            aria-label="关闭流水规则标签管理"
-            className="bank-flow-rule-batches-drawer-shell__backdrop"
-            onClick={() => setTagDrawerOpen(false)}
-            type="button"
-          />
-          <aside aria-label="流水规则标签管理" className="bank-flow-rule-batches-drawer" role="dialog">
-            <header className="bank-flow-rule-batches-drawer__header">
-              <div>
-                <h2 className="bank-flow-rule-batches-drawer__title">流水规则标签管理</h2>
-              </div>
-              <button
-                aria-label="关闭流水规则标签管理"
-                className="bank-flow-rule-batches-drawer__close"
-                onClick={() => setTagDrawerOpen(false)}
-                type="button"
-              >
-                ×
-              </button>
-            </header>
+      <AppDrawer
+        ariaBusy={tagLoading || mutating}
+        className="bank-flow-rule-batches-drawer"
+        closeDisabled={tagLoading || mutating}
+        closeLabel="关闭流水规则标签管理"
+        footer={(
+          <div className="bank-flow-rule-batches-drawer__actions">
+            <button
+              className="bank-flow-rule-batches-button bank-flow-rule-batches-button--compact bank-flow-rule-batches-button--primary"
+              disabled={!canMutateData || mutating}
+              onClick={saveTagSelection}
+              type="button"
+            >
+              保存
+            </button>
+          </div>
+        )}
+        onClose={() => setTagDrawerOpen(false)}
+        open={tagDrawerOpen}
+        title="流水规则标签管理"
+        width="min(960px, 92vw)"
+      >
             <div className="bank-flow-rule-batches-drawer__body">
               <div className="bank-flow-rule-batches-drawer__grid-wrap">
                 <table className="bank-flow-rule-batches-drawer__grid">
@@ -1133,21 +1134,7 @@ export default function BankFlowRuleBatchPage() {
                 </table>
               </div>
             </div>
-            <footer className="bank-flow-rule-batches-drawer__footer">
-              <div className="bank-flow-rule-batches-drawer__actions">
-                <button
-                  className="bank-flow-rule-batches-button bank-flow-rule-batches-button--compact bank-flow-rule-batches-button--primary"
-                  disabled={!canMutateData || mutating}
-                  onClick={saveTagSelection}
-                  type="button"
-                >
-                  保存
-                </button>
-              </div>
-            </footer>
-          </aside>
-        </div>
-      ) : null}
+      </AppDrawer>
 
       <AppDialog
         maxWidth="xs"
