@@ -17,6 +17,10 @@
 - 只可看和只可导出：允许查询和导出，不允许写操作。
 - 所有操作均可：允许业务处理操作。
 - 管理员：`YNSYLP005` 固定拥有管理能力，包括访问账户管理和数据重置。
+- `YNSYLP005` 是唯一受保护管理员；应用的任何 HTTP 请求都不能新增、删除、提升、降级或轮换管理员。
+- 普通设置 `GET/POST /api/workbench/settings` 不读取、返回或写入 ACL；提交任何历史 ACL key 返回 `400 access_control_write_forbidden`。
+- 只有受保护管理员可调用 `GET/PUT /api/workbench/settings/access-control` 管理其他账户的 `full_access`、`read_export_only`、`denied`。写入使用 `expected_version`、数据库 CAS、同事务 durable audit；`409` 不覆盖新版本。
+- PostgreSQL migration `0132` 把唯一管理员约束固化为 validated CHECK。发布必须先停止旧 API，再执行 migration，禁止自动回滚到没有 `settings-access-control-v1` 指纹的 release。
 
 ## 数据保护
 

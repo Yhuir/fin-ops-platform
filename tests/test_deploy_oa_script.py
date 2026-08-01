@@ -3,10 +3,12 @@ from __future__ import annotations
 import contextlib
 import io
 import importlib.util
+import json
 import os
 from pathlib import Path
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -63,6 +65,12 @@ class DeployOAScriptTest(unittest.TestCase):
         (dist_dir / "assets").mkdir()
         (dist_dir / "assets" / "index.js").write_text("console.log('ok');", encoding="utf-8")
         (backend_dir / "requirements.txt").write_text("", encoding="utf-8")
+        migration = backend_dir / "src/fin_ops_platform/postgres/migrations/0132_settings_access_control_guard.sql"
+        migration.parent.mkdir(parents=True)
+        migration.write_text("select 1;\n", encoding="utf-8")
+        helper = root_dir / "deploy/oa/bin/finops-deploy-control.sh"
+        helper.parent.mkdir(parents=True)
+        helper.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
 
     def test_parser_defaults_match_oa_server(self) -> None:
         parser = self.module.build_parser()
@@ -108,6 +116,16 @@ class DeployOAScriptTest(unittest.TestCase):
             archive_path = self.module.create_versioned_release_archive(self._deployment_config(root_dir))
 
         self.assertTrue(archive_path.exists())
+        with tarfile.open(archive_path, "r:gz") as archive:
+            metadata_file = archive.extractfile("src/RELEASE.json")
+            self.assertIsNotNone(metadata_file)
+            metadata = json.loads(metadata_file.read().decode("utf-8"))
+        self.assertEqual(
+            metadata["settings_access_control"]["capability"],
+            "settings-access-control-v1",
+        )
+        self.assertRegex(metadata["settings_access_control"]["migration_sha256"], r"^[0-9a-f]{64}$")
+        self.assertRegex(metadata["settings_access_control"]["deploy_control_sha256"], r"^[0-9a-f]{64}$")
 
     def test_release_remote_script_uses_versioned_release_and_deploy_control(self) -> None:
         config = self._deployment_config(Path("/Users/yu/Desktop/fin-ops-platform"))
@@ -119,7 +137,6 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("finops remote deploy failed at step", remote_script)
         self.assertIn("DEPLOY_STEP='verify deploy-control bootstrap'", remote_script)
         self.assertIn("DEPLOY_STEP='verify runtime worker helper contract'", remote_script)
-        self.assertIn("DEPLOY_STEP='deploy-control self-update'", remote_script)
         self.assertIn("DEPLOY_STEP='verify deploy-control contract'", remote_script)
         self.assertIn("DEPLOY_STEP='preflight cleanup old releases'", remote_script)
         self.assertIn("DEPLOY_STEP='storage preflight'", remote_script)
@@ -130,8 +147,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("insufficient storage for release deploy", remote_script)
         self.assertIn('df -Pm -- "$path"', remote_script)
         self.assertIn("tar -xzf - -C \"$RELEASE_DIR\"", remote_script)
-        self.assertIn('sudo -n "$DEPLOY_CONTROL" self-update "$RELEASE_NAME"', remote_script)
-        self.assertIn("deploy-control helper cannot self-update; run initial root bootstrap", remote_script)
+        self.assertNotIn("self-update", remote_script)
         self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control check-release main-abcdef1-20260524170000", remote_script)
         self.assertNotIn("sudo -n install", remote_script)
         self.assertNotIn("DEPLOY_STEP='install runtime worker ensure helper'", remote_script)
@@ -148,7 +164,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("deploy-control helper does not tolerate non-ready worker readiness polls under set -e", remote_script)
         self.assertIn("deploy-control helper does not preserve worker dependency-not-fresh delay in release drop-ins", remote_script)
         self.assertIn("deploy-control helper does not install versioned runtime queue history retention", remote_script)
-        self.assertIn("deploy-control helper does not self-update from versioned releases", remote_script)
+        self.assertIn("settings access-control safety contract", remote_script)
         self.assertIn("deploy-control helper does not install versioned OA sync enqueue timer", remote_script)
         self.assertIn("deploy-control helper does not run runtime worker ensure inside activate", remote_script)
         self.assertIn("deploy-control helper does not expose the production-equivalent release gate", remote_script)
@@ -167,10 +183,6 @@ class DeployOAScriptTest(unittest.TestCase):
         )
         self.assertLess(
             remote_script.index('tar -xzf - -C "$RELEASE_DIR"'),
-            remote_script.index("DEPLOY_STEP='deploy-control self-update'"),
-        )
-        self.assertLess(
-            remote_script.index("DEPLOY_STEP='deploy-control self-update'"),
             remote_script.index("verify_finops_deploy_control_contract"),
         )
         self.assertLess(
@@ -204,6 +216,47 @@ class DeployOAScriptTest(unittest.TestCase):
             "release-gate-activate main-abcdef1-20260524170000",
         )
         self.assertIn("ControlMaster=no", command)
+
+    def test_activate_existing_is_zero_build_upload_or_self_update(self) -> None:
+        parser = self.module.build_parser()
+        config = self.module.build_config(
+            parser.parse_args(
+                ["--activate-existing", "--release-name", "main-abcdef1-20260524170000"]
+            ),
+            root_dir=Path("/Users/yu/Desktop/fin-ops-platform"),
+        )
+
+        with (
+            patch.dict(os.environ, {"FIN_OPS_E2E_ADMIN_TOKEN": "secret-token"}, clear=False),
+            patch.object(self.module, "run_command") as run_command,
+            patch.object(self.module, "ensure_clean_git_tree") as ensure_clean,
+            patch.object(self.module, "build_frontend") as build_frontend,
+            patch.object(self.module, "create_release_archive") as create_archive,
+        ):
+            self.module.deploy(config)
+
+        run_command.assert_called_once()
+        ensure_clean.assert_not_called()
+        build_frontend.assert_not_called()
+        create_archive.assert_not_called()
+        self.assertEqual(run_command.call_args.kwargs["input_bytes"], b"secret-token\n")
+        self.assertIn("release-gate-activate main-abcdef1-20260524170000", run_command.call_args.args[0][-1])
+
+    def test_activate_existing_rejects_upload_and_build_options(self) -> None:
+        parser = self.module.build_parser()
+        for option in ("--no-activate", "--replace-release", "--skip-build", "--allow-dirty"):
+            with self.subTest(option=option), self.assertRaisesRegex(ValueError, "cannot be combined"):
+                self.module.build_config(
+                    parser.parse_args(
+                        ["--activate-existing", "--release-name", "main-safe", option]
+                    ),
+                    root_dir=Path("/Users/yu/Desktop/fin-ops-platform"),
+                )
+        with self.assertRaisesRegex(ValueError, "requires --release-name"):
+            self.module.build_config(
+                parser.parse_args(["--activate-existing"]),
+                root_dir=Path("/Users/yu/Desktop/fin-ops-platform"),
+            )
 
     def test_release_gate_input_requires_local_admin_token(self) -> None:
         with patch.dict(
@@ -362,9 +415,9 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('ENSURE_RUNTIME_WORKERS_HELPER="${FINOPS_ENSURE_RUNTIME_WORKERS_HELPER:-/usr/local/sbin/finops-ensure-runtime-workers}"', script)
         self.assertIn('DEPLOY_CONTROL_HELPER="${FINOPS_DEPLOY_CONTROL_HELPER:-/usr/local/sbin/finops-deploy-control}"', script)
         self.assertIn('WRITE_E2E_BACKUP_ROOT="${FINOPS_WRITE_E2E_BACKUP_ROOT:-/opt/fin-ops/backups/write-operation-e2e}"', script)
-        self.assertIn("self-update <release-name>", script)
+        self.assertNotIn("self-update <release-name>", script)
         self.assertIn("repair-active-api-runtime", script)
-        self.assertIn("install_deploy_control_helper", script)
+        self.assertNotIn("install_deploy_control_helper", script)
         self.assertIn("install_runtime_worker_helper", script)
         self.assertIn('install_runtime_worker_helper "$src"', script)
         self.assertIn('ensure_runtime_workers "$src"', script)
@@ -411,6 +464,15 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("sleep 60", script)
         self.assertIn("sleep 240", script)
         self.assertIn("rollback_release_gate", script)
+        self.assertIn("contract-version [--require VERSION]", script)
+        self.assertIn("candidate-status <release-name> --json", script)
+        self.assertIn("settings-access-control-preflight <release-name>", script)
+        self.assertIn("settings-access-control-post-deploy <release-name>", script)
+        self.assertIn('assert_settings_access_control_preflight "$release"', script)
+        self.assertIn("previous release lacks $SETTINGS_ACL_CONTRACT", script)
+        activate = script.split("activate_release() {", 1)[1].split("\n}\n", 1)[0]
+        self.assertLess(activate.index("systemctl stop fin-ops.service"), activate.index('run_schema_migrations "$src"'))
+        self.assertNotIn("install_deploy_control_helper", activate)
         self.assertIn('"release_gate_status": "PASS"', script)
         self.assertIn('"unknown_worker_count": 0', script)
         self.assertIn('"required_worker_not_ready": 0', script)
@@ -580,9 +642,8 @@ class DeployOAScriptTest(unittest.TestCase):
             'release_gate_checkpoint "$release" t300 "$admin_token" "$evidence_dir" stability',
             script,
         )
-        self.assertIn('src="$(release_src "$previous_release")"', pre_failure_branch)
-        self.assertIn('install_deploy_control_helper "$src"', pre_failure_branch)
-        self.assertIn('install_runtime_worker_helper "$src"', pre_failure_branch)
+        self.assertNotIn("install_deploy_control_helper", pre_failure_branch)
+        self.assertNotIn("install_runtime_worker_helper", pre_failure_branch)
         self.assertIn('cat "$evidence_dir/pre/checkpoint.json" >&2', pre_failure_branch)
         self.assertIn('"component_statuses": {', script)
 

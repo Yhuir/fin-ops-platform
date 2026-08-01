@@ -159,7 +159,7 @@ class DeployRuntimeExampleTests(unittest.TestCase):
             self.assertNotIn("| `worker-", content, doc_path.name)
             self.assertNotIn("file migration", content.lower(), doc_path.name)
 
-    def test_deploy_control_retires_unregistered_workers_and_requires_quiescence_before_migration(self) -> None:
+    def test_deploy_control_retires_unregistered_workers_before_runtime_restart(self) -> None:
         deploy_control = DEPLOY_CONTROL.read_text(encoding="utf-8")
         activate_case = deploy_control.split("activate_release() {", 1)[1].split("\n}", 1)[0]
 
@@ -174,23 +174,23 @@ class DeployRuntimeExampleTests(unittest.TestCase):
         self.assertIn("where status = %s", deploy_control)
         self.assertIn('"processing", "%.read_model.refresh", active_event_types', deploy_control)
         self.assertLess(
-            activate_case.index('retire_unregistered_worker_services "$src"'),
-            activate_case.index('assert_retired_page_runtime_quiesced "$src"'),
-        )
-        self.assertLess(
-            activate_case.index('assert_retired_page_runtime_quiesced "$src"'),
-            activate_case.index("stop_runtime_worker_services_for_activation"),
-        )
-        self.assertLess(
             activate_case.index("stop_runtime_worker_services_for_activation"),
             activate_case.index('run_schema_migrations "$src"'),
+        )
+        self.assertLess(
+            activate_case.index('run_schema_migrations "$src"'),
+            activate_case.index('retire_unregistered_worker_services "$src"'),
+        )
+        self.assertLess(
+            activate_case.index('retire_unregistered_worker_services "$src"'),
+            activate_case.index('assert_retired_page_runtime_quiesced "$src"'),
         )
         self.assertLess(
             activate_case.index('assert_retired_page_runtime_quiesced "$src"'),
             activate_case.index('ensure_runtime_workers "$src"'),
         )
 
-    def test_deploy_control_gate_failure_does_not_stop_registered_workers(self) -> None:
+    def test_deploy_control_stops_api_and_workers_before_acl_migration(self) -> None:
         deploy_control = DEPLOY_CONTROL.read_text(encoding="utf-8")
         activate_case = deploy_control.split("activate_release() {", 1)[1].split("\n}", 1)[0]
 
@@ -198,7 +198,7 @@ class DeployRuntimeExampleTests(unittest.TestCase):
         self.assertNotIn("  activate)", deploy_control)
         self.assertIn("  release-gate-activate)", deploy_control)
         self.assertLess(
-            activate_case.index('assert_retired_page_runtime_quiesced "$src"'),
+            activate_case.index("systemctl stop fin-ops.service"),
             activate_case.index("stop_runtime_worker_services_for_activation"),
         )
         self.assertLess(

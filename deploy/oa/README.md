@@ -375,17 +375,16 @@ python -m fin_ops_platform.app.worker \
 
 - 本地重新构建 `web/dist`
 - 打包生产运行所需的 `backend + web/dist + scripts + deploy/oa`
-- 生成 `src/RELEASE.json`，记录 release 名称、Git commit、分支和构建信息
+- 生成 `src/RELEASE.json`，记录 release 名称、Git commit、分支、`settings-access-control-v1` capability、0132 migration sha256 和 deploy-control sha256
 - 通过 `finops-prod` 免密 SSH 推送到：
   - `/opt/fin-ops/releases/<release-name>/src`
-- 解包 release 后先通过 `/usr/local/sbin/finops-deploy-control self-update <release-name>`
-  安装 release 内的 `deploy/oa/bin/finops-deploy-control.sh`，再执行完整 helper contract 和后续发布动作
+- release 上传路径不自更新 `/usr/local/sbin`。deploy-control 变更必须使用下文 hash-pinned、同文件系统 temp、`mv -f` 原子 bootstrap；禁止旧 `self-update`，也禁止在 bootstrap 中触碰 runtime-worker helper
 - 调用服务器 root-owned helper：
   - `/usr/local/sbin/finops-deploy-control check-release <release-name>`
   - `/usr/local/sbin/finops-deploy-control release-gate-activate <release-name>`
-- `release-gate-activate` 是唯一正常激活入口；公开 `activate` 命令已删除。它先对当前 release
+- `release-gate-activate` 是唯一正常激活入口；公开 `activate` 命令已删除。ACL 安全发布必须先生成并校验双 token 的 read-only preflight artifact。它先对当前 release
   执行 production-equivalent pre checkpoint，再用 `/etc/fin-ops/fin-ops.postgres-migrator.env`
-  执行 PostgreSQL schema migration，
+  停止旧 API 和 runtime workers，再执行 PostgreSQL schema migration/validated CHECK，
   成功后才激活 API、RabbitMQ worker 和 dispatcher 指向该 release；重启前还会以 release registry
   为白名单 stop/disable 已启用、运行或失败的未注册 `fin-ops-worker@*.service`，避免历史/WIP unit
   继续消费队列或 crash-loop。该动作不删除实例 env，保留受控回滚能力
@@ -443,9 +442,7 @@ python -m fin_ops_platform.app.worker \
   `/etc/fin-ops/fin-ops.rabbitmq-monitoring.env`，任一缺失或不可读都 fail closed
 - 最终 PASS evidence 写入
   `/opt/fin-ops/runtime-smoke/release-gates/<release-name>/evidence.json`，绑定 release 与 Git commit；
-  任一 checkpoint 或 evidence 合同失败都会自动恢复 previous release 并验证回滚后的完整链路；
-  pre checkpoint 失败时还会恢复 previous release 的 deploy-control/runtime-worker helper，并在部署
-  命令中输出不含 token 和业务样本的组件状态及队列计数摘要
+  任一 checkpoint 或 evidence 合同失败只允许恢复同样带 `settings-access-control-v1` capability 且 fingerprint 有效的 previous release；旧 release 不满足时保持 API maintenance/fail-closed，执行 forward repair，绝不重启 vulnerable binary。pre checkpoint 失败不改任何 helper
 
 常用参数：
 
@@ -454,6 +451,7 @@ python -m fin_ops_platform.app.worker \
 ./scripts/deploy-oa.sh --skip-build
 ./scripts/deploy-oa.sh --release-name main-abcdef12-20260524170000
 ./scripts/deploy-oa.sh --no-activate
+./scripts/deploy-oa.sh --activate-existing --release-name main-abcdef12-20260524170000
 ./scripts/deploy-oa.sh --keep-releases 12
 ./scripts/deploy-oa.sh --remote-min-free-mb 1024
 ```
@@ -619,42 +617,39 @@ Nginx 的 `/fin-ops-api/`、`/api/` 和兼容 `/fin-ops/api/` location 必须显
 - `git push main` 只更新远端仓库，不会自动改变服务器；服务器生效必须执行发布脚本并激活 release
 - 默认拒绝从 dirty worktree 发布；确需发布未提交代码时必须显式加 `--allow-dirty`，但生产发布不建议这样做
 
-历史服务器首次接入 release 自动化时，需要 root 一次性安装固定 helper。后续正常激活发布会通过
-`finops-deploy-control self-update` 从 release 自动更新 `/usr/local/sbin/finops-deploy-control`，但
-`/usr/local/sbin/finops-ensure-runtime-workers` 仍按固定 root helper 管理。API 与 worker 必须共用
+历史服务器首次接入或本次 ACL control-plane 升级时，需要 root 一次性原子安装固定 helper。release 上传和激活都不允许 helper 自更新；
+`/usr/local/sbin/finops-ensure-runtime-workers` 继续按独立固定 root helper 管理。API 与 worker 必须共用
 `/etc/fin-ops/fin-ops.common.env` 和 `/etc/fin-ops/fin-ops.secrets.env`，不要再让 API helper
 引用历史 `/root/fin_ops_stage23_postgres_runtime.env`。否则 API 和 worker 会读取不同 secret 来源，
 release 激活后可能出现 worker 正常但 `fin-ops.service` 因缺少 PostgreSQL DSN 反复退出。
 `scripts/deploy-oa.sh --no-activate` 只上传并运行 release 校验，不会覆盖 `/usr/local/sbin` helper；
-需要真正更新 deploy-control 时必须执行激活发布。若服务器上的旧 helper 还不支持 `self-update`，
-需要使用本段 bootstrap 命令做一次首次接入/应急升级。
+`--activate-existing --release-name <exact-release>` 不 build、不 upload、不 replace、不 self-update，只调用 root release gate。
+
+一次性 bootstrap 必须绑定已上传 exact release 和预先批准的 candidate helper sha256。所有 temp/backup 都放 `/usr/local/sbin` 同一文件系统；bootstrap 只改变 deploy-control，不能 restart service、运行 migration、修改 DB/OA/ACL 或覆盖 runtime-worker helper：
 
 ```bash
-sudo install -m 0755 -o root -g root \
-  deploy/oa/bin/finops-deploy-control.sh \
-  /usr/local/sbin/finops-deploy-control
-sudo install -m 0755 -o root -g root \
-  deploy/oa/bin/finops-ensure-runtime-workers.sh \
-  /usr/local/sbin/finops-ensure-runtime-workers
-printf '%s\n' \
-  'finops-deploy ALL=(root) NOPASSWD: /usr/local/sbin/finops-deploy-control' \
-  'finops-deploy ALL=(root) NOPASSWD: /usr/local/sbin/finops-ensure-runtime-workers /opt/fin-ops/releases/*/src' |
-  sudo tee /etc/sudoers.d/finops-release-helpers >/dev/null
-sudo visudo -cf /etc/sudoers.d/finops-release-helpers
+release=<已上传的-release-name>
+approved_sha256=<已批准的-64位-sha256>
+candidate="/opt/fin-ops/releases/${release}/src/deploy/oa/bin/finops-deploy-control.sh"
+temp="/usr/local/sbin/.finops-deploy-control.${release}.tmp"
+backup="/usr/local/sbin/.finops-deploy-control.${release}.previous"
+
+test "$(sha256sum "$candidate" | awk '{print $1}')" = "$approved_sha256"
+sudo install -m 0755 -o root -g root "$candidate" "$temp"
+sudo bash -n "$temp"
+sudo "$temp" contract-version --require settings-access-control-v1
+sudo cp -p /usr/local/sbin/finops-deploy-control "$backup"
+sudo chown root:root "$backup"
+sudo chmod 0600 "$backup"
+sudo mv -f "$temp" /usr/local/sbin/finops-deploy-control
+sudo test "$(sudo sha256sum /usr/local/sbin/finops-deploy-control | awk '{print $1}')" = "$approved_sha256"
+sudo /usr/local/sbin/finops-deploy-control contract-version --require settings-access-control-v1
+sudo /usr/local/sbin/finops-deploy-control candidate-status "$release" --json
 ```
 
-首次安装后先验证 helper 合同，再发布：
+若 post-validation 失败，不能直接把 0600 backup 移回 live：把 backup `install` 到同目录 rollback temp，设为 `root:root 0755`，核验旧 approved hash 和 `bash -n` 后再 `mv -f` 原子恢复。整个 bootstrap 要记录 deploy-control before/after hash、runtime-worker helper hash、active release、service、DB/OA/ACL fingerprint 到 root-owned `/opt/fin-ops/evidence/<release>/settings-access-control-bootstrap.json` 并生成 sha256；任一非 helper 事实变化立即停止。
 
-```bash
-grep -q '/etc/fin-ops/fin-ops.secrets.env' /usr/local/sbin/finops-deploy-control
-! grep -q '/root/fin_ops_stage23_postgres_runtime.env' /usr/local/sbin/finops-deploy-control
-sudo /usr/local/sbin/finops-deploy-control check-release <已上传的-release-name>
-```
-
-`scripts/deploy-oa.sh` 会在 release 解包后先调用 deploy-control 自更新，再检查 helper 是否仍引用历史 root env；
-如果自更新或检查失败，会在生产切换之前中止，避免前端已发布但后端无法监听 `127.0.0.1:18001`。helper 的
-`release-gate-activate`
-还必须先停止/disable 新 registry 未登记的退休页面 instance，并确认退休 read-model outbox/dirty scope 均无 `processing`；门禁通过后才停止其余上一版本 worker，执行 schema migration、reset 旧 `EnvironmentFile` 并归档 legacy `/opt/fin-ops/current`。`0127_direct_canonical_page_runtime_retirement.sql` 只是 no-op 标记，不会改写 pending backlog、readiness 或回滚 projection 证据；门禁失败时 release 不得继续激活，已登记的 import/matching/保留 read-model worker 继续运行。不要手工创建业务表、
+`release-gate-activate` 先验证 approved preflight 与 candidate/active fingerprint 未漂移；门禁通过后先停止 API 和上一版本 workers，再执行 0132 和 validated CHECK，然后安装普通 runtime assets、发布候选并恢复服务。`0127_direct_canonical_page_runtime_retirement.sql` 只是 no-op 标记，不会改写 pending backlog、readiness 或回滚 projection 证据。不要手工创建业务表、
 不要用运行时账号代替 migrator 账号，也不要让旧 `/opt/fin-ops/fin-ops.env` 或 `/opt/fin-ops/current`
 参与 release 运行时。
 覆盖式 `legacy-current` 部署入口已经移除；`scripts/deploy-oa.sh` 只生成 versioned release payload，
@@ -736,11 +731,42 @@ OA 菜单按当前同域 iframe 口径配置：
 - `deploy/oa/fin_ops_role_binding.mysql.sql`
 - `deploy/oa/fin_ops_user_role_sync.mysql.sql`
 
+## ACL 安全发布与生产证据
+
+1. 本地全回归和 clean commit 后上传但不激活：`./scripts/deploy-oa.sh --no-activate --release-name <release>`。
+2. 按上文 manual-root 流程原子 bootstrap deploy-control；禁止 `self-update`，并证明 runtime-worker helper、active release、service、DB、OA、ACL 不变。
+3. 本地 0600 token 文件必须同时提供 admin token 和专用、初始 denied 的 bearer token。两者经 SSH stdin 传递，不进入 argv、artifact 或日志：
+
+```bash
+./scripts/with-production-admin-token.sh --require-bearer sh -c '
+  printf "%s\n%s\n" "$FIN_OPS_HTTP_SLO_ADMIN_TOKEN" "$FIN_OPS_HTTP_SLO_BEARER_TOKEN" |
+  ssh -o StrictHostKeyChecking=accept-new -o ControlMaster=no finops-deploy@finops-prod \
+    "sudo -n /usr/local/sbin/finops-deploy-control settings-access-control-preflight <release> --http-tokens-stdin --dry-run --json"'
+ssh -o StrictHostKeyChecking=accept-new -o ControlMaster=no finops-deploy@finops-prod \
+  'sudo -n sha256sum --check /opt/fin-ops/evidence/<release>/settings-access-control-preflight.json.sha256'
+```
+
+Preflight 必须 `eligible=true`：admin session 是 `YNSYLP005/admin`；专用 bearer 是不同的非 admin identity 且初始 denied；DB ACL、root env 和 OA 三角色一致；artifact 只含 salted username hashes/counts/diff。任何 token/identity/OA/fingerprint 漂移都重新阻断。
+
+4. 只用 exact candidate 零重传激活：`./scripts/deploy-oa.sh --activate-existing --release-name <release>`。顺序固定为 preflight assertion → current runtime checkpoint → API/worker quiesce → 0132/CHECK → safe candidate → T+0/T+60/T+300 evidence。previous release 没有同等安全 capability 时失败保持 maintenance 并 forward repair。
+5. 激活成功后用相同双 token 运行 `settings-access-control-post-deploy`。它把专用 bearer 依次改为 full、read、denied，验证 generic save、两条直接提权攻击、AppHealth/OA credentials/data reset admin-only、OA 三角色、durable audit/request id 和 ACL GET/PUT latency，并在 finally/read-back 中恢复原 accounts/OA/denied session：
+
+```bash
+./scripts/with-production-admin-token.sh --require-bearer sh -c '
+  printf "%s\n%s\n" "$FIN_OPS_HTTP_SLO_ADMIN_TOKEN" "$FIN_OPS_HTTP_SLO_BEARER_TOKEN" |
+  ssh -o StrictHostKeyChecking=accept-new -o ControlMaster=no finops-deploy@finops-prod \
+    "sudo -n /usr/local/sbin/finops-deploy-control settings-access-control-post-deploy <release> --http-tokens-stdin --json"'
+ssh -o StrictHostKeyChecking=accept-new -o ControlMaster=no finops-deploy@finops-prod \
+  'sudo -n sha256sum --check /opt/fin-ops/evidence/<release>/settings-access-control-post-deploy.json.sha256'
+```
+
+post-deploy 只有 `status=pass`、restore 全 true、migration/CHECK true、三档角色和攻击矩阵全通过、ACL GET p95≤1000ms、ACL PUT max≤5000ms 才完成。restore 失败必须非零并立即人工核对 DB/OA/session。
+
 ## 权限同步操作顺序
 
 当 `YNSYLP005` 在 app 的“访问账户管理”里修改权限后，生产环境必须按这个顺序同步：
 
-1. 先保存 app 设置
+1. 通过 admin-only `PUT /api/workbench/settings/access-control` 保存；普通 settings POST 不承载 ACL
 2. 记录本次变更后的三类名单：
    - 只读导出账户
    - 全操作账户
@@ -884,8 +910,8 @@ cd web && npm run build
 
 1. 先在 OA 菜单中隐藏或下线 `财务运营平台`
 2. 撤销目标角色的 `finops:app:view`
-3. 回滚 `/fin-ops/` 前端静态资源
-4. 回滚 `/fin-ops-api/` 后端服务
+3. 只有 previous release 的 `settings-access-control-v1` capability、source/migration fingerprints 都有效时，才允许 release gate 自动恢复其前后端
+4. previous 不安全或不存在时保持 API maintenance；保留已应用 0132/CHECK，使用新的安全 candidate forward repair，禁止手工启动旧 vulnerable binary
 5. 如需要，再回滚 iframe 高度修复或 OA 菜单配置
 
 不要先回滚后端再保留菜单入口，否则用户会进入一个失效页。

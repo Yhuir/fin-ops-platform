@@ -113,6 +113,8 @@ bash scripts/verify.sh docs
 
 ## Nightly CI 覆盖
 
+ACL role sync 回归由 `tests.test_oa_role_sync_service` 和 `tests.test_app_settings_service` 保护：固定 admin、target assignments、connect/read/write timeout、generic/no-op 零调用、真实变化一次 target、已知 DB failure 最多一次 compensation、compensation failure fail closed。真实 OA 三角色成员只由发布前 read-only preflight 与发布后 full→read→denied/restore evidence 证明。
+
 Nightly CI 应至少覆盖：
 
 - 后端 OA adapter / projection / sync / credentials / API contract tests。

@@ -29,7 +29,7 @@
 | 发票使用 | invoice usage pages | invoice usage canonical query routes | canonical 发票、使用状态、销项收款、ETC 发票、active pair relations | 页面进入/重进、查询变化、当前页写后重新 GET |
 | ETC 业务批次 | ETC pages/components | ETC business batch routes/service、invoice PDF bundle service | ETC 票据、人工业务批次、导入草稿、OA 提交确认、草稿后批次发票合并下载 | ETC 导入、OA 草稿创建、人工提交确认、对象存储 PDF 读取与只读下载审计 |
 | 成本统计 | cost statistics page | cost routes/query service | 项目、费用、发票、核销关系 | 项目范围变化、发票/流水关系变化 |
-| 设置 / 账户 / 项目 | settings pages | settings/account/project routes | 用户、角色、项目状态、规则配置 | 配置保存、权限变化、数据重置 |
+| 设置 / 账户 / 项目 | settings pages | generic settings routes + admin-only access-control route | 普通设置、其他账户 full/read/denied、固定管理员、项目状态、规则配置 | 普通配置保存、版本化 ACL 变化、数据重置 |
 | App Health | shell/status components | app health routes、runtime queue、worker registry | queue、read model freshness、worker 状态、cache 状态 | worker heartbeat、refresh job、后台任务 |
 
 ## Global Runtime Status Plane 页面域

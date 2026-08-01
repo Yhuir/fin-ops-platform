@@ -7,6 +7,7 @@ usage() {
   cat <<'USAGE' >&2
 Usage:
   scripts/with-production-admin-token.sh --store
+  scripts/with-production-admin-token.sh --require-bearer <command> [args...]
   scripts/with-production-admin-token.sh <command> [args...]
 
 Loads the local production admin token for Codex-run production validation.
@@ -80,4 +81,12 @@ if [[ $# -eq 0 || "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
 fi
 
 load_token_file
+if [[ "${1:-}" == "--require-bearer" ]]; then
+  shift
+  if [[ -z "${FIN_OPS_HTTP_SLO_BEARER_TOKEN:-}" ]]; then
+    echo "Dedicated production bearer token is not configured in $secret_file." >&2
+    exit 2
+  fi
+  [[ $# -gt 0 ]] || { usage; exit 2; }
+fi
 exec "$@"

@@ -89,10 +89,25 @@
   - data reset 失败必须保留可诊断 job 状态，不泄露密码。
   - PostgreSQL 凭据模式保存/读取密码需要 `FIN_OPS_OA_APPLICANT_CREDENTIAL_KEY`。
 
+## Access control command 状态
+
+| 状态 | 条件 | I/O 与结果 |
+| --- | --- | --- |
+| `loaded` | admin GET 成功 | 返回固定管理员、版本和其他账户；非 admin 403 |
+| `no_op` | memberships 与 canonical 相同 | 200/changed=false；零 DB write、audit、OA |
+| `conflict` | expected_version stale | 409/current_version；保留前端 draft；零覆盖 |
+| `oa_target_failed` | OA 目标角色同步失败 | 502；不开始 app transaction |
+| `db_failed_compensated` | OA target 成功、DB/audit 回滚 | 最多一次 OA compensation，503；canonical 不半写 |
+| `compensation_failed` | DB 失败且 OA 恢复失败 | 503 inconsistent；fail closed，必须人工核对 DB/OA |
+| `committed` | OA target 与 DB transaction 成功 | version +1，settings/audit 原子提交，新 session 生效 |
+
+管理员身份没有状态迁移：`YNSYLP005` 始终是 protected administrator；任何 APP 请求尝试修改该事实均为非法输入。
+
 ## 变更记录
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-08-02 | 关闭 generic ACL 提权链 | ACL 独立 API/CAS/audit/OA 补偿；固定 protected admin；删除旧前后端路径 | `tests.test_app_settings_service`、`tests.test_workbench_settings_sync_api`、`web/src/test/SettingsPage.test.tsx`、`web/e2e/permissions-role-matrix.spec.ts` |
 | 2026-08-01 | data reset 迁移到 durable settings-maintenance worker | API 不再持有线程任务；密码不持久化；worker 独立构造 reset 依赖并在完成后安全 reload API runtime | `tests.test_settings_data_reset_job`、`tests.test_runtime_worker_registry` |
 | - | 初始骨架 | 待补充 | - |
 | 2026-06-10 | 新增 OA 申请人凭据管理后端状态 | 设置页新增独立凭据事实源，admin-only，状态为 `已配置/未配置` | `tests.test_oa_applicant_credentials_service`、`tests.test_oa_applicant_credentials_api`、`tests.test_postgres_oa_applicant_credentials_repository`、`tests.test_postgres_migrations` |

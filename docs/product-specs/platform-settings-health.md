@@ -4,9 +4,11 @@
 
 ## 设置与权限
 
-- 设置页维护账户、角色、项目状态、业务规则和运行配置。
+- 设置页维护其他账户的访问级别、项目状态、业务规则和运行配置。唯一管理员 `YNSYLP005` 不属于可编辑业务数据。
 - 权限影响页面可见性、按钮可用性、API 写入、数据重置和运维修复动作。
 - 权限和审计属于 command/service 边界，不做 read model 分发。
+- 访问账户使用独立的 admin-only ACL API；普通设置保存与 ACL 加载/保存完全分离。管理员只能把其他 OA 账号设为 `full_access`、`read_export_only`，或从列表删除表示 `denied`。
+- ACL semantic no-op 不写 PostgreSQL、不写 audit、不调用 OA；真实变化使用版本冲突保护并同步 OA 三类角色，失败按补偿合同返回明确错误。
 - 规则配置变化如果影响业务判定，必须触发对应 dirty scope。
 
 ## 数据重置入口

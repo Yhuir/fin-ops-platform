@@ -100,6 +100,8 @@ cd web && npm run e2e:smoke
 
 ## Nightly CI 覆盖
 
+T0 ACL 必须额外保留：session 单 snapshot 调用预算、full-access 直接 generic/dedicated 提权拒绝、固定 admin、server actor/request-id、同事务 audit/no-op 零 audit，以及 AppHealth/OA credentials/data reset 的 admin-only 回归。入口为 `tests.test_session_api`、`tests.test_auth_guard`、`tests.test_workbench_settings_sync_api`、`tests.test_app_settings_service`、`tests.test_permissions_write_entry_inventory` 和 `web/e2e/permissions-role-matrix.spec.ts`。
+
 Nightly full suite 应覆盖本模块的 session/auth/permission/audit 后端测试、前端 SessionGate/权限交互测试、Playwright app shell permission smoke、Playwright 全页面角色矩阵、docs verify。模块级快速验证使用上方命令。
 
 ## 未测风险

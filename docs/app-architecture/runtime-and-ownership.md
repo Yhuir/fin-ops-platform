@@ -81,6 +81,8 @@ authoritative integration snapshot 默认同样只提交 canonical facts/source 
 
 写模型、权限认证、冲突校验不做“分发 read model”；它们保留明确 command/service 边界。
 
+Settings ACL 是低频 control-plane command：generic settings route 不含 ACL I/O；admin-only access-control route 把 session actor 和 server request id 交给 `AppSettingsService`，由 settings repository 在 advisory lock/CAS 事务内合并 ACL keys 与 durable audit。`AccessControlService` 每次 session 判定最多读取一次 ACL snapshot；OA integration 只消费归一后的真实变化，不能反向决定管理员或读写 PostgreSQL。
+
 任何写入 PostgreSQL canonical facts 的路径，都必须先落到 `../architecture/module-boundaries/canonical-facts.md` 登记的 owner 模块。非 owner 模块只能通过 owner service、facade、UoW 或明确 adapter 发起写入；不能把 `read_model.*`、Redis、RabbitMQ 或前端事件反向当作业务事实。
 
 ### 写操作后的页面闭环

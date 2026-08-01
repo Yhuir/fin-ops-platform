@@ -45,12 +45,10 @@ read model 刷新状态事实源，systemd 管 worker 进程，App 只负责写�
 - Reset 完成后 maintenance worker 读取 root-owned runtime env 中的 `FIN_OPS_HTTP_PIDFILE`，校验同用户 Gunicorn master 后发送 `SIGHUP`，让 API worker graceful reload 进程内状态。pidfile 缺失、owner/命令不匹配或信号失败时 reset job 标为 failed/partial，不能伪报完整闭环。
 - systemd 负责：启动、停止、重启 worker 进程，保持进程常驻。
 - deploy helper 负责：从 registry 生成 required worker 矩阵，安装 env，执行 `--check`，重启
-  systemd unit，并在发布阶段等待 worker readiness 收敛。release deploy 解包并校验 release layout 后，
-  会先通过 `/usr/local/sbin/finops-deploy-control self-update <release-name>` 安装 release 内的
-  `deploy/oa/bin/finops-deploy-control.sh`，再执行完整 helper contract、`check-release` 和
-  `release-gate-activate`，
-  避免新增 versioned timer/helper 时被旧远端 deploy-control 卡住。首次接入或旧 helper 不支持
-  `self-update` 时仍需要一次 root bootstrap。`/usr/local/sbin/finops-ensure-runtime-workers`
+  systemd unit，并在发布阶段等待 worker readiness 收敛。release upload 只解包和校验 layout，禁止
+  自更新 root helper。deploy-control 变化必须先上传 exact candidate，再由 root 以 approved sha256、
+  同文件系统 temp 和原子 `mv -f` 单独 bootstrap；该步骤不触碰 runtime-worker helper、不激活服务、
+  不迁移 DB。`/usr/local/sbin/finops-ensure-runtime-workers`
   仍是预安装的 root helper；release deploy 只校验该 helper 的合同并通过
   `finops-deploy-control release-gate-activate` 的内部受控激活阶段间接调用它，不在发布链路中覆盖该
   runtime worker helper。
@@ -570,8 +568,9 @@ release 与 Git commit。PRE 失败时，部署命令只返回不含 token、环
 - `terminal_publish_reconciliation_stable = true`
 - `queue_stable_after_300_seconds = true`
 
-任一 checkpoint、最终证据写入或证据合同校验失败，都必须自动恢复 previous release，并在回滚后执行
-`preflight` checkpoint；pre checkpoint 失败时还必须恢复 previous release 的 deploy-control/runtime-worker helper。
+任一 checkpoint、最终证据写入或证据合同校验失败，只能自动恢复带 `settings-access-control-v1`
+capability 且 source/migration fingerprint 有效的 previous release，并在回滚后执行 `preflight` checkpoint；
+previous 不安全或不存在时 API 保持 maintenance，保留 0132/CHECK 并 forward repair。pre checkpoint 失败不修改任何 helper。
 pre 与 rollback checkpoint 使用候选 release 的门禁代码检查实际运行 release；worker inventory 仍按实际
 运行 release 的 registry 核对。这样首次启用新门禁时不依赖旧 release 中尚不存在的检查逻辑。
 页面 audit 则以候选 release 的 `PAGE_AUDIT_REGISTRY` 为预期集合，严格核对当前 runtime 返回的 summary

@@ -85,6 +85,8 @@
 
 - OA token/credential 变更必须同步 permissions/security docs。
 - sync service 的多次 list/month 扫描、adapter fingerprint polling、queue/search/matching collaborators 与 downstream fan-out 已删除；架构 guard 禁止恢复第二套 Mongo 扫描、部分结果 fallback 或混合变化集合 fan-out。
+- ACL role sync 输入只允许 settings canonical snapshot；输出仅为 OA `finops_read_export`、`finops_full_access`、`finops_admin` assignments。它不写 PostgreSQL、不解析 HTTP、不决定权限。
+- protected admin 固定为 `YNSYLP005`；generic settings、semantic no-op 和失败的输入校验不得触发 OA executor。
 
 ## Canonical facts ownership
 

@@ -67,7 +67,7 @@
 
 - 目标：把 settings 的 admin-only 访问账户管理从“入口可见”补成真实 Chromium 保存 payload 证据，覆盖权限事实源自身的高风险写入口。
 - 影响范围：`web/e2e/permissions-role-matrix.spec.ts`、`docs/modules/permissions-and-audit/write-entry-inventory.md`、本模块 coverage/tests/implementation notes 和全局 testing closure state。
-- 关键决策：不改产品逻辑；在 admin role matrix 中新增一个 `read_export_only` 访问账户，随后执行普通 settings 保存，断言 `allowed_usernames`、`readonly_export_usernames` 和 `admin_usernames` payload 正确，deterministic mock 会返回保存后的 access control，Browser 继续断言保存后账户仍显示；同时继续断言 OA 凭据密码不混入 settings 保存 body。
+- 退休说明（2026-08-02）：本段旧 generic ACL 保存方案已删除。当前 admin role matrix 通过 dedicated versioned access-control PUT 保存账户；普通 settings body 含任一 ACL key 都必须失败。OA 凭据仍保持独立且不进入普通 settings payload。
 - 测试覆盖：扩展 `web/e2e/permissions-role-matrix.spec.ts` admin 场景；`tests.test_permissions_write_entry_inventory` 的关键词双向 gate 会锁住 `新增账户`。
 - 未测风险：真实 OA 角色同步、真实生产访问账户配置生效和审计查询/导出仍归 staging/production smoke。
 

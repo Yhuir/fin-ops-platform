@@ -47,6 +47,12 @@
 
 ## 影响面
 
+## ACL role sync boundary
+
+- OA role sync 只消费 settings owner 传入的 normalized snapshot；admin assignment 永远注入固定 `YNSYLP005`，不能从请求、环境变量或 OA 当前角色反推。
+- generic settings save 与 ACL no-op 都是零 OA I/O；只有 ACL 真实变化执行一次 target sync。若 DB/audit 失败，最多执行一次 previous snapshot compensation；补偿失败返回 inconsistent 并要求人工核对。
+- MySQL connect/read/write timeout 分别受限；OA 密码、token、成员明文不进入发布 evidence。
+
 | 入口 | 影响范围 | 关键风险 |
 | --- | --- | --- |
 | `/api/session/me` / session bootstrap | 所有页面、所有 API 权限、page session scope | OA 超时、无权限、token 过期、只读/全操作/admin 分层错误 |

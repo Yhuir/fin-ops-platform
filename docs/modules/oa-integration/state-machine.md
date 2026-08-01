@@ -109,6 +109,18 @@
 
 ## Canonical Projection / Worker 状态
 
+## ACL role sync 状态
+
+| 状态 | 行为 |
+| --- | --- |
+| `not_called` | generic settings、ACL no-op、权限/DTO 失败 |
+| `target_applied` | normalized full/read/admin assignments 一次性写 OA |
+| `committed` | settings ACL 与 audit 随后原子提交 |
+| `compensated` | DB/audit 失败后 previous assignments 最多恢复一次 |
+| `inconsistent` | compensation 失败；停止自动继续并人工核对 DB/OA/session |
+
+该同步是低频同步 I/O，不新增 outbox、worker、read model 或缓存。
+
 | 状态 | 含义 | 页面/API 要求 |
 | --- | --- | --- |
 | `queued` | 显式 `oa.sync` job 已入 durable queue | 返回 job 状态，不返回页面 read-model target |

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 import argparse
+import hashlib
 import io
 import json
 import os
@@ -35,6 +36,7 @@ class DeploymentConfig:
     allow_dirty: bool
     replace_release: bool
     dry_run: bool
+    activate_existing: bool = False
     runtime_worker_ensure_path: str = "/usr/local/sbin/finops-ensure-runtime-workers"
     remote_min_free_mb: int = 512
 
@@ -72,6 +74,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--skip-build", action="store_true", help="Skip local frontend build")
     parser.add_argument("--no-activate", action="store_true", help="Upload and validate the release without activating it")
+    parser.add_argument(
+        "--activate-existing",
+        action="store_true",
+        help="Activate one already-uploaded exact release without building, uploading, replacing, or self-updating helpers.",
+    )
     parser.add_argument("--allow-dirty", action="store_true", help="Allow release deploy from a dirty git worktree")
     parser.add_argument("--replace-release", action="store_true", help="Replace an existing remote release directory with the same name")
     parser.add_argument("--dry-run", action="store_true", help="Print commands without executing")
@@ -87,6 +94,23 @@ def normalize_base_path(value: str) -> str:
 
 
 def build_config(args: argparse.Namespace, *, root_dir: Path) -> DeploymentConfig:
+    if args.activate_existing:
+        if args.release_name is None:
+            raise ValueError("--activate-existing requires --release-name")
+        incompatible = [
+            flag
+            for enabled, flag in (
+                (args.no_activate, "--no-activate"),
+                (args.replace_release, "--replace-release"),
+                (args.skip_build, "--skip-build"),
+                (args.allow_dirty, "--allow-dirty"),
+                (args.keep_releases != 4, "--keep-releases"),
+                (args.remote_min_free_mb != 512, "--remote-min-free-mb"),
+            )
+            if enabled
+        ]
+        if incompatible:
+            raise ValueError(f"--activate-existing cannot be combined with {', '.join(incompatible)}")
     release_name = args.release_name or build_default_release_name(root_dir)
     validate_release_name(release_name)
     if args.keep_releases < 0:
@@ -106,10 +130,11 @@ def build_config(args: argparse.Namespace, *, root_dir: Path) -> DeploymentConfi
         runtime_worker_ensure_path=args.runtime_worker_ensure_path,
         keep_releases=int(args.keep_releases),
         skip_build=bool(args.skip_build),
-        activate=not bool(args.no_activate),
+        activate=bool(args.activate_existing) or not bool(args.no_activate),
         allow_dirty=bool(args.allow_dirty),
         replace_release=bool(args.replace_release),
         dry_run=bool(args.dry_run),
+        activate_existing=bool(args.activate_existing),
         remote_min_free_mb=int(args.remote_min_free_mb),
     )
 
@@ -221,15 +246,6 @@ def build_release_remote_deploy_script(config: DeploymentConfig) -> str:
     if config.activate:
         commands.extend(
             [
-                mark_remote_deploy_step("deploy-control self-update"),
-                (
-                    'if ! sudo -n "$DEPLOY_CONTROL" self-update "$RELEASE_NAME"; then '
-                    "printf 'deploy-control helper cannot self-update; run initial root bootstrap: "
-                    "install -m 0755 -o root -g root %s %s\\n' "
-                    '"$RELEASE_DIR/src/deploy/oa/bin/finops-deploy-control.sh" "$DEPLOY_CONTROL" >&2; '
-                    "exit 68; "
-                    "fi"
-                ),
                 mark_remote_deploy_step("verify deploy-control contract"),
                 build_deploy_control_contract_check(),
             ]
@@ -308,8 +324,8 @@ def build_deploy_control_contract_check() -> str:
             "      printf '%s\\n' 'deploy-control helper does not install versioned runtime queue history retention; install deploy/oa/bin/finops-deploy-control.sh before activating releases' >&2",
             "      exit 68",
             "    fi",
-            "    if ! grep -q 'install_deploy_control_helper' \"$DEPLOY_CONTROL\"; then",
-            "      printf '%s\\n' 'deploy-control helper does not self-update from versioned releases; install deploy/oa/bin/finops-deploy-control.sh before activating releases' >&2",
+            "    if ! grep -q 'settings-access-control-v1' \"$DEPLOY_CONTROL\"; then",
+            "      printf '%s\\n' 'deploy-control helper does not expose the settings access-control safety contract' >&2",
             "      exit 68",
             "    fi",
             "    if ! grep -q 'install_oa_sync_enqueue_timer' \"$DEPLOY_CONTROL\"; then",
@@ -529,6 +545,8 @@ def validate_frontend_dist_base_path(frontend_dist: Path, frontend_base_path: st
 
 
 def build_release_metadata(config: DeploymentConfig) -> dict[str, object]:
+    migration_path = config.root_dir / "backend" / "src" / "fin_ops_platform" / "postgres" / "migrations" / "0132_settings_access_control_guard.sql"
+    helper_path = config.root_dir / "deploy" / "oa" / "bin" / "finops-deploy-control.sh"
     return {
         "release_name": config.release_name,
         "created_at": datetime.now().isoformat(timespec="seconds"),
@@ -537,7 +555,18 @@ def build_release_metadata(config: DeploymentConfig) -> dict[str, object]:
         "git_status_porcelain": _git_output(config.root_dir, "status", "--porcelain"),
         "frontend_base_path": config.frontend_base_path,
         "deploy_mode": "release",
+        "settings_access_control": {
+            "capability": "settings-access-control-v1",
+            "migration": migration_path.name,
+            "migration_sha256": _file_sha256(migration_path),
+            "deploy_control_sha256": _file_sha256(helper_path),
+        },
     }
+
+
+def _file_sha256(path: Path) -> str:
+    with path.open("rb") as handle:
+        return hashlib.file_digest(handle, "sha256").hexdigest()
 
 
 def add_bytes_to_tar(archive: tarfile.TarFile, arcname: str, data: bytes) -> None:
@@ -584,6 +613,14 @@ def build_frontend(config: DeploymentConfig) -> None:
 
 
 def deploy(config: DeploymentConfig) -> None:
+    if config.activate_existing:
+        gate_input = None if config.dry_run else release_gate_input()
+        run_command(
+            build_release_gate_command(config),
+            dry_run=config.dry_run,
+            input_bytes=gate_input,
+        )
+        return
     ensure_clean_git_tree(config)
     build_frontend(config)
     archive_path = create_release_archive(config)

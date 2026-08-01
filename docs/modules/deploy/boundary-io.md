@@ -87,7 +87,7 @@
 - 禁止恢复 `--mode legacy-current`、`build_legacy_remote_deploy_script`、`create_legacy_release_archive` 或 `deploy/oa/fin_ops.env.example`。
 - 禁止在 systemd examples 或发布脚本中恢复 `/opt/fin-ops/current/backend` 作为运行目录。
 - `finops-deploy-control` 对 legacy current 的归档只用于 release 激活前清理历史 runtime，不得重新变成覆盖式发布入口。
-- 禁止恢复公开 `activate` 命令或在上传脚本中直接切换 release。激活前必须以当前 release 完成 pre checkpoint；候选激活后必须完成 T+0、T+60s、T+300s checkpoint。任一检查或最终 evidence 合同失败都必须自动恢复 previous release，并对回滚后的 runtime 再执行完整 checkpoint。
+- 禁止恢复公开 `activate` 命令、helper `self-update` 或在上传脚本中直接切换 release。激活前必须完成 ACL preflight 和当前 release checkpoint；候选激活后必须完成 T+0、T+60s、T+300s checkpoint。失败只可恢复带相同 ACL-safe capability/fingerprint 的 previous release；否则保持 maintenance 并 forward repair。
 
 ## Production-equivalent Release Gate（2026-07-31）
 
@@ -98,7 +98,7 @@
 - 登记过的 `test_owned` 可逆业务 scenario、standing approval 和 `write-operation-e2e-smoke` 只保留为显式 operator 工具，不属于自动 release gate。release activate 不读取 scenario，不接受 approval ticket，也不自动恢复或撤回任何业务关系。
 - 标准 scenario 的唯一写入口是 `finops-deploy-control write-operation-e2e-scenario-install`：输入仅接受 `/tmp/finops-write-e2e-*.json` 的 finops-deploy-owned、非链接、非 group/world-writable 文件和一个已存在 release；helper 使用该 release 的合同校验器验证后，原子安装 root-owned `0600` 文件并保留 `.previous`。输出只包含校验状态、scenario 名称/数量和内容摘要，不返回业务行内容。
 - runtime health 必须在 canonical audit 前完成收敛；`full`/`stability` 还必须在 read-model、HTTP 和隔离写探针之后采样。canonical audit 是每个 checkpoint 的最后一项只读证明。
-- pre checkpoint 在任何切换前完成。`runtime_sync_closure_gate` 允许通过既有 repository 幂等收敛一次已经 `done` 且 publish lock 为空或过期的 `publishing` 终态，但 reconciliation 必须写入 checkpoint evidence，并在同一 checkpoint 内再取得至少一个无残留、无再次 reconciliation 的干净采样才可 PASS；持续复发按 dispatcher/状态机故障 fail closed。部署 shell 不得在 gate 外隐式清理。pre 失败必须恢复 previous release 的 deploy-control/runtime-worker helper。候选激活后 T+0 运行 `full`，T+60s/T+300s 运行 `stability`；最终 evidence 要求每个 checkpoint 的 terminal publish reconciliation 已稳定、`publishing_outbox_count=0`，并证明真实 worker、queue、read model、dead-letter 与性能持续收敛。只有最终 evidence 验证成功，发布才返回成功。
+- pre checkpoint 在任何切换前完成。`runtime_sync_closure_gate` 允许通过既有 repository 幂等收敛一次已经 `done` 且 publish lock 为空或过期的 `publishing` 终态，但 reconciliation 必须写入 checkpoint evidence，并在同一 checkpoint 内再取得至少一个无残留、无再次 reconciliation 的干净采样才可 PASS；持续复发按 dispatcher/状态机故障 fail closed。部署 shell 不得在 gate 外隐式清理。pre 失败不修改 deploy-control/runtime-worker helper。候选激活后 T+0 运行 `full`，T+60s/T+300s 运行 `stability`；最终 evidence 要求每个 checkpoint 的 terminal publish reconciliation 已稳定、`publishing_outbox_count=0`，并证明真实 worker、queue、read model、dead-letter 与性能持续收敛。只有最终 evidence 验证成功，发布才返回成功。
 
 ## Phase 19 受控生产命令（2026-07-12）
 

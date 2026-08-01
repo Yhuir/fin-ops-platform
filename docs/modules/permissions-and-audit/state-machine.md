@@ -50,6 +50,17 @@
 
 ## Read Model / Worker 状态
 
+## ACL 权限判定
+
+| tier | generic settings POST | access-control GET/PUT | admin-only health/credentials/reset |
+| --- | --- | --- | --- |
+| `admin`（仅 `YNSYLP005`） | 允许 | 允许 | 允许 |
+| `full_access` | 允许；ACL key 明确 400 | 403 | 403 |
+| `read_export_only` | 403 | 403 | 403 |
+| `denied` | 403 | 403 | 403 |
+
+页面隐藏只用于体验，所有状态都必须由后端再次判定。管理员身份没有 APP 内状态迁移。
+
 - 权限和审计本身不生成 read model freshness。
 - App Status 会消费 session/permission 作为全局 blocked/red 的一部分，但不替代后端 API guard。
 - Worker/service 不得依赖 `Application`、`app.server`、`app.auth`、HTTP response、cookie/header。

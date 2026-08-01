@@ -96,6 +96,11 @@
 
 `POST /api/workbench/settings`
 
+- 普通 GET response 和 POST request/response 都不得包含 `access_control`、`allowed_usernames`、`readonly_export_usernames`、`full_access_usernames`、`admin_usernames`、`access_control_version`。POST 出现任一历史 ACL key 返回 `400 access_control_write_forbidden`，不静默忽略。
+- `GET /api/workbench/settings/access-control` 仅 `can_admin_access=true` 可用，返回 `{version, administrator, accounts}`；`administrator` 固定为 `{username: "YNSYLP005", access_tier: "admin", protected: true}`。
+- `PUT /api/workbench/settings/access-control` 仅接受 `{expected_version, accounts}`。`accounts[]` 只有 `username` 与 `access_tier=full_access|read_export_only`；删除条目表示 denied，不接受 admin tier、protected admin、重复账号、body actor 或额外字段。
+- stale `expected_version` 返回 `409 access_control_version_conflict` 和 `current_version`。semantic no-op 返回 `200 changed=false` 且零 DB/audit/OA 写 I/O；真实变化返回 `200 changed=true`，ACL 与 audit 同事务提交，OA target/compensation 失败使用稳定 502/503 错误。
+
 保存项目范围、访问控制、银行账户映射、OA 导入/留存、列布局、待找发票规则等设置项。该接口不是银行明细自动标签规则写入口。
 
 - 请求体不得包含 `bank_transaction_tags`。只要出现该字段，后端返回 `400 bank_transaction_tags_write_forbidden`，不得部分保存其它设置。

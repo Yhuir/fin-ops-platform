@@ -33,6 +33,18 @@
 - reset job payload、audit、日志和 error 不包含密码。
 - Settings 不维护第二份 read-model dependency/fan-out matrix。
 
+## T0 ACL 回归责任
+
+- Business core：账户 DTO、protected admin、重复/非法 tier、no-op、stale version。
+- Service/repository：advisory lock、generic-preserve-concurrent-ACL、settings+audit 原子性、lost ACK proof、OA target/compensation 与 I/O 次数。
+- API contract：generic legacy keys 400、专用 admin 200/full 403、409 shape、server actor/request id。
+- Read model/cache/worker：不适用新增行为；负向断言 ACL 不产生 dirty scope/outbox/worker/cache。
+- Frontend：独立 ACL loading/saving/error/conflict、protected row 只读、普通保存不携带 ACL。
+- E2E：full-access 手工 generic/dedicated 提权失败，admin 保存后新 session tier 生效。
+- Existing regression：普通设置、列布局、pending rules、AppHealth、OA credentials、data reset 和其他页面 response 不变。
+
+生产外部事实由 secret-safe preflight/post-deploy 证明；本地 mock 不宣称真实 PostgreSQL/OA/session latency 通过。
+
 ## 验证
 
 ```bash

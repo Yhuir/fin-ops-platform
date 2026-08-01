@@ -28,6 +28,13 @@
 | `SETTINGS-E2E-009` | App Status/read model/worker 可见性 | P1 | settings 变更和 data reset 引起的 dirty/readiness/job 状态必须能被 App Status/App Health 或下游页面诊断；页面不能只靠本地事件宣称 fresh。 |
 | `SETTINGS-E2E-010` | 真实基础设施 data reset 和 worker drain | P1 | 真实 PostgreSQL/RabbitMQ/Redis/systemd/OA/对象存储环境下，data reset、项目范围变更、规则保存和 OA 凭据使用后，相关 read model、worker、cache 和页面最终收敛；该项必须在 staging/runtime smoke 验证。 |
 
+## T0 ACL Browser/API contract
+
+- full-access 页面不显示管理控件，同时直接 `POST /api/workbench/settings` 注入任一 ACL key 必须 400，直接 `PUT /api/workbench/settings/access-control` 必须 403。
+- admin 独立加载/保存 access-control，`YNSYLP005` 行只读；保存后用新 session GET `/api/session/me` 验证目标 tier。
+- 普通 settings save、Workbench 列布局和 pending rules 请求体不允许出现 ACL family。
+- 生产 post-deploy 使用专用初始 denied bearer，按 full→read→denied 验证并 finally 恢复；token、用户名明文不进入 artifact。
+
 ## 不属于本地 deterministic E2E 的风险
 
 - 真实生产数据重置的备份、PITR/恢复、worker pause/drain、Redis/cache 清理和 reset 后全页面 smoke。

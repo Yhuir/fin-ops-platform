@@ -79,3 +79,6 @@
 ## 当前缺口和删除条件
 
 - 新增写 API 必须更新 permissions inventory tests 和模块 boundary docs。
+- 动态管理员 provider、`get_admin_usernames`、运行时 `FIN_OPS_ADMIN_USERNAMES` 和本地 auth clone 已删除；不得以兼容路径恢复。
+- Settings 专用 ACL route 复用 admin session resolver；generic mutation resolver 仍服务 full-access 普通写，不能整体升级为 admin-only。
+- Audit owner 接收 settings transaction 提交的 session actor、版本摘要、changed username hashes、mutation id 和 server request id；不接收 token、密码或完整 ACL payload。

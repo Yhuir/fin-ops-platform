@@ -15,6 +15,15 @@
 | `SETTINGS-E2E-009` | `covered` | `tests/test_derived_data_lifecycle_service.py`、`tests/test_app_status_overview_service.py`、`tests/test_runtime_worker_registry.py`、`web/src/test/AppStatusIndicator.test.tsx`、`web/e2e/settings-data-reset-flow.spec.ts` | 后端覆盖 lifecycle、App Status overview、worker/readiness registry；Browser 通过项目范围到成本统计 fresh read model 证明关键下游读取不使用旧数据；更多页面最终 UI 由各页面 Spec-first 覆盖。 |
 | `SETTINGS-E2E-010` | `external-risk` | `bash scripts/verify.sh infra-smoke` staging gate、runtime worker/read model tests、data reset service tests、write-operation SLO audit profiles | 本地 contract 覆盖 job、dirty scope、worker registry、App Status 和 Browser 用户路径；真实 PostgreSQL/RabbitMQ/Redis/systemd/OA/对象存储、生产备份恢复和全页面 drain 必须在 staging/runtime smoke 验证。 |
 
+## T0 ACL coverage
+
+| Contract | Coverage |
+| --- | --- |
+| full direct generic/dedicated escalation blocked | `web/e2e/permissions-role-matrix.spec.ts` |
+| admin protected row、独立 load/save、409 draft | `web/src/test/SettingsPage.test.tsx` |
+| generic mapper/serializer no ACL | `web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/WorkbenchColumnLayout.test.tsx` |
+| production full→read→denied/OA/audit/latency/restore | `settings-access-control-post-deploy` redacted evidence |
+
 ## Operation latency baseline
 
 `web/e2e/settings-data-reset-flow.spec.ts` 已接入 Playwright `operation-latency-*.json` 附件。本轮记录的设置页操作覆盖：设置页打开、数据重置 section 切换、清除银行流水影响确认、继续到 OA 密码复核、OA 密码填写、确认清理 POST 202 到首个 25% 进度反馈、data reset job polling 到完成、reset 后进入银行明细和待找发票验证 fresh read model、项目状态 section 打开、项目标记完成、保存设置、进入成本统计 active scope fresh 视图，以及切换按项目统计确认已完成项目不出现在 active scope。

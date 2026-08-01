@@ -54,6 +54,13 @@
 
 ## 维护触发器
 
+## Protected administrator contract
+
+- `YNSYLP005` 是代码和数据库约束固定的唯一管理员；permissions 模块不提供动态 admin provider、环境变量 admin list 或可写 admin tier。
+- `AccessControlService` 每次 session 决策最多获取一次 normalized ACL snapshot；provider 失败时非 protected 用户 fail closed，protected admin 保留恢复入口。
+- permissions 只拥有 identity/session/tier 判定和 audit 合同，不保存 ACL。ACL command/persistence 归 settings；OA 角色写入归 OA integration。
+- 成功 ACL audit 使用后端 session actor 和 server-generated request id；客户端 body actor 或 `X-Request-ID` 不能成为权威事实。
+
 发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：
 
 - 页面入口、路由、侧栏、筛选、排序、分页、导出、drawer/dialog 或权限显示变化。

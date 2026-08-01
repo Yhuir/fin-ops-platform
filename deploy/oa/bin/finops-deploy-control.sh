@@ -26,6 +26,8 @@ ENSURE_RUNTIME_WORKERS_HELPER="${FINOPS_ENSURE_RUNTIME_WORKERS_HELPER:-/usr/loca
 WRITE_E2E_BACKUP_ROOT="${FINOPS_WRITE_E2E_BACKUP_ROOT:-/opt/fin-ops/backups/write-operation-e2e}"
 STANDARD_WRITE_E2E_SCENARIO="${FINOPS_STANDARD_WRITE_E2E_SCENARIO:-/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json}"
 RELEASE_GATE_EVIDENCE_ROOT="${FINOPS_RELEASE_GATE_EVIDENCE_ROOT:-/opt/fin-ops/runtime-smoke/release-gates}"
+SETTINGS_ACL_EVIDENCE_ROOT="${FINOPS_SETTINGS_ACL_EVIDENCE_ROOT:-/opt/fin-ops/evidence}"
+SETTINGS_ACL_CONTRACT="settings-access-control-v1"
 PRUNE_WORKBENCH_GENERATIONS_HELPER="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_HELPER:-/usr/local/sbin/finops-prune-workbench-generations}"
 PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT:-/etc/systemd/system/finops-prune-workbench-generations.service}"
 PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT:-/etc/systemd/system/finops-prune-workbench-generations.timer}"
@@ -42,7 +44,13 @@ usage: finops-deploy-control <command> [args]
 
 commands:
   check-release <release-name>         validate a release under /opt/fin-ops/releases
-  self-update <release-name>           install deploy-control helper from a validated release
+  contract-version [--require VERSION] print or require the deploy-control safety contract
+  candidate-status <release-name> --json
+                                      validate candidate source and ACL safety fingerprints
+  settings-access-control-preflight <release-name> --http-tokens-stdin --dry-run --json
+                                      write a secret-safe read-only DB/OA/session preflight artifact
+  settings-access-control-post-deploy <release-name> --http-tokens-stdin --json
+                                      verify the approved production ACL flow and restore the probe account
   repair-active-api-runtime            restore the API drop-in for exactly the active release
   rabbitmq-required-worker-cutover <release-name>
                                       switch exactly the required RabbitMQ-eligible workers, drain queues, rollback on failure
@@ -132,6 +140,253 @@ release_src() {
   [[ -f "$src/backend/requirements.txt" ]] || die "backend requirements not found in release: $src"
   [[ -f "$src/web/dist/index.html" ]] || die "frontend dist not found in release: $src"
   printf '%s\n' "$src"
+}
+
+contract_version() {
+  if [[ "$#" -eq 0 ]]; then
+    printf '%s\n' "$SETTINGS_ACL_CONTRACT"
+    return 0
+  fi
+  [[ "$#" -eq 2 && "$1" == "--require" ]] || die "contract-version accepts only --require VERSION"
+  [[ "$2" == "$SETTINGS_ACL_CONTRACT" ]] \
+    || die "required deploy-control contract $2 is unavailable"
+  printf '%s\n' "$SETTINGS_ACL_CONTRACT"
+}
+
+candidate_status() {
+  local release="${1:-}"
+  [[ "$#" -eq 2 && "$2" == "--json" ]] || die "candidate-status requires release name and --json"
+  local src active_releases
+  src="$(release_src "$release")"
+  active_releases="$(active_release_names)"
+  ACTIVE_RELEASES="$active_releases" "$API_PYTHON" - "$src" "$release" <<'PY'
+import hashlib
+import json
+import os
+from pathlib import Path
+import sys
+
+src = Path(sys.argv[1])
+release = sys.argv[2]
+
+def sha256(path):
+    with path.open("rb") as handle:
+        return hashlib.file_digest(handle, "sha256").hexdigest()
+
+def facts(name):
+    root = src.parents[1] / name / "src"
+    metadata_path = root / "RELEASE.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8")) if metadata_path.is_file() else {}
+    contract = metadata.get("settings_access_control", {})
+    migration = root / "backend/src/fin_ops_platform/postgres/migrations/0132_settings_access_control_guard.sql"
+    helper = root / "deploy/oa/bin/finops-deploy-control.sh"
+    actual_migration = sha256(migration) if migration.is_file() else ""
+    actual_helper = sha256(helper) if helper.is_file() else ""
+    safe = (
+        metadata.get("release_name") == name
+        and contract.get("capability") == "settings-access-control-v1"
+        and contract.get("migration") == "0132_settings_access_control_guard.sql"
+        and contract.get("migration_sha256") == actual_migration
+        and contract.get("deploy_control_sha256") == actual_helper
+    )
+    fingerprint_source = {
+        "release": name,
+        "git_commit": metadata.get("git_commit"),
+        "capability": contract.get("capability"),
+        "migration_sha256": actual_migration,
+        "deploy_control_sha256": actual_helper,
+    }
+    return {
+        **fingerprint_source,
+        "safe": safe,
+        "fingerprint_sha256": hashlib.sha256(
+            json.dumps(fingerprint_source, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest(),
+    }
+
+candidate = facts(release)
+active = [facts(name) for name in os.environ.get("ACTIVE_RELEASES", "").splitlines() if name]
+payload = {
+    "contract": "settings-access-control-v1",
+    "candidate": candidate,
+    "active_releases": active,
+}
+print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+raise SystemExit(0 if candidate["safe"] else 1)
+PY
+}
+
+settings_acl_http_session_fact() {
+  local token="$1"
+  local credential_source="$2"
+  local output="$3"
+  local scratch="$4"
+  local header_file="$scratch/${credential_source}.header"
+  local raw_file="$scratch/${credential_source}.raw.json"
+  local status=0
+  if [[ -n "$token" ]]; then
+    printf 'Authorization: Bearer %s\n' "$token" >"$header_file"
+    chmod 0600 "$header_file"
+    status="$(
+      curl --silent --show-error \
+        --connect-timeout 5 --max-time 15 \
+        --header "@$header_file" \
+        --output "$raw_file" \
+        --write-out '%{http_code}' \
+        http://127.0.0.1:18001/api/session/me \
+        || printf '0'
+    )"
+  fi
+  HTTP_STATUS="$status" CREDENTIAL_SOURCE="$credential_source" \
+    "$API_PYTHON" - "$raw_file" "$output" <<'PY'
+import json
+import os
+from pathlib import Path
+import sys
+
+source = Path(sys.argv[1])
+try:
+    payload = json.loads(source.read_text(encoding="utf-8")) if source.is_file() else {}
+except (OSError, ValueError):
+    payload = {}
+if not isinstance(payload, dict):
+    payload = {}
+try:
+    status = int(os.environ.get("HTTP_STATUS") or 0)
+except ValueError:
+    status = 0
+payload["_preflight_http_status"] = status
+payload["_preflight_credential_source"] = os.environ["CREDENTIAL_SOURCE"]
+Path(sys.argv[2]).write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+PY
+}
+
+settings_access_control_preflight() (
+  local release="${1:-}"
+  [[ "$#" -eq 4 && "$2" == "--http-tokens-stdin" && "$3" == "--dry-run" && "$4" == "--json" ]] \
+    || die "settings-access-control-preflight requires release, --http-tokens-stdin, --dry-run, and --json"
+  local src evidence_dir artifact scratch admin_token bearer_token
+  local admin_session bearer_session deployment_facts
+  src="$(release_src "$release")"
+  evidence_dir="$SETTINGS_ACL_EVIDENCE_ROOT/$release"
+  artifact="$evidence_dir/settings-access-control-preflight.json"
+  install -d -m 0700 "$evidence_dir"
+  scratch="$(mktemp -d /run/finops-settings-acl-preflight.XXXXXX)"
+  chmod 0700 "$scratch"
+  trap 'rm -rf -- "$scratch"' EXIT
+  IFS= read -r admin_token || true
+  IFS= read -r bearer_token || true
+  admin_session="$scratch/admin-session.json"
+  bearer_session="$scratch/bearer-session.json"
+  deployment_facts="$scratch/deployment.json"
+  settings_acl_http_session_fact "$admin_token" admin_stdin "$admin_session" "$scratch"
+  settings_acl_http_session_fact "$bearer_token" dedicated_bearer_stdin "$bearer_session" "$scratch"
+  unset admin_token bearer_token
+  candidate_status "$release" --json >"$deployment_facts"
+  (
+    set -a
+    # shellcheck disable=SC1090
+    source "$COMMON_ENV"
+    # shellcheck disable=SC1090
+    source "$SECRETS_ENV"
+    # shellcheck disable=SC1090
+    source "$MIGRATOR_ENV"
+    set +a
+    PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}" \
+      "$API_PYTHON" -m fin_ops_platform.tools.settings_access_control_preflight \
+        --release "$release" \
+        --admin-session-json "$admin_session" \
+        --bearer-session-json "$bearer_session" \
+        --deployment-facts-json "$deployment_facts" \
+        --output "$artifact"
+  )
+  sha256sum "$artifact" >"$artifact.sha256"
+  cat "$artifact"
+)
+
+settings_access_control_post_deploy() (
+  local release="${1:-}"
+  [[ "$#" -eq 3 && "$2" == "--http-tokens-stdin" && "$3" == "--json" ]] \
+    || die "settings-access-control-post-deploy requires release, --http-tokens-stdin, and --json"
+  local src evidence_dir preflight artifact status_file admin_token bearer_token candidate
+  src="$(release_src "$release")"
+  evidence_dir="$SETTINGS_ACL_EVIDENCE_ROOT/$release"
+  preflight="$evidence_dir/settings-access-control-preflight.json"
+  artifact="$evidence_dir/settings-access-control-post-deploy.json"
+  [[ -f "$preflight" && -f "$preflight.sha256" ]] || die "approved preflight artifact is missing"
+  sha256sum --check "$preflight.sha256" >/dev/null
+  status_file="$(mktemp /run/finops-settings-acl-postdeploy.XXXXXX)"
+  trap 'rm -f -- "$status_file"' EXIT
+  candidate_status "$release" --json >"$status_file"
+  candidate="$release" "$API_PYTHON" - "$status_file" <<'PY'
+import json
+import os
+from pathlib import Path
+import sys
+
+status = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+active = status.get("active_releases", [])
+if status.get("candidate", {}).get("safe") is not True:
+    raise SystemExit("active candidate is not ACL-safe")
+if len(active) != 1 or active[0].get("release") != os.environ["candidate"] or active[0].get("safe") is not True:
+    raise SystemExit("exact ACL-safe candidate is not the sole active release")
+PY
+  IFS= read -r admin_token || true
+  IFS= read -r bearer_token || true
+  local runner_status=0
+  (
+    set -a
+    # shellcheck disable=SC1090
+    source "$COMMON_ENV"
+    # shellcheck disable=SC1090
+    source "$SECRETS_ENV"
+    # shellcheck disable=SC1090
+    source "$MIGRATOR_ENV"
+    set +a
+    printf '%s\n%s\n' "$admin_token" "$bearer_token" \
+      | PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}" \
+        "$API_PYTHON" -m fin_ops_platform.tools.settings_access_control_preflight \
+          --post-deploy \
+          --release "$release" \
+          --preflight-artifact "$preflight" \
+          --output "$artifact"
+  ) || runner_status=$?
+  unset admin_token bearer_token
+  [[ -f "$artifact" ]] || die "settings access-control post-deploy artifact was not created"
+  sha256sum "$artifact" >"$artifact.sha256"
+  cat "$artifact"
+  exit "$runner_status"
+)
+
+assert_settings_access_control_preflight() (
+  local release="$1"
+  local evidence_dir="$SETTINGS_ACL_EVIDENCE_ROOT/$release"
+  local artifact="$evidence_dir/settings-access-control-preflight.json"
+  local current
+  [[ -f "$artifact" && -f "$artifact.sha256" ]] || die "approved settings access-control preflight is missing"
+  sha256sum --check "$artifact.sha256" >/dev/null
+  current="$(mktemp /run/finops-settings-acl-candidate.XXXXXX)"
+  trap 'rm -f -- "$current"' EXIT
+  candidate_status "$release" --json >"$current"
+  "$API_PYTHON" - "$artifact" "$current" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+approved = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+current = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+if approved.get("eligible") is not True:
+    raise SystemExit("settings access-control preflight is not eligible")
+if approved.get("release") != current.get("candidate", {}).get("release"):
+    raise SystemExit("settings access-control preflight release drifted")
+if approved.get("deployment") != current:
+    raise SystemExit("settings access-control candidate or active release fingerprint drifted")
+PY
+)
+
+release_is_acl_safe() {
+  local release="$1"
+  candidate_status "$release" --json >/dev/null 2>&1
 }
 
 active_worker_services() {
@@ -456,16 +711,6 @@ ensure_runtime_workers() {
   local src="$1"
   [[ -x "$ENSURE_RUNTIME_WORKERS_HELPER" ]] || die "runtime worker ensure helper is not executable: $ENSURE_RUNTIME_WORKERS_HELPER"
   "$ENSURE_RUNTIME_WORKERS_HELPER" "$src"
-}
-
-install_deploy_control_helper() {
-  local src="$1"
-  local helper_src="$src/deploy/oa/bin/finops-deploy-control.sh"
-  [[ -f "$helper_src" ]] || die "missing deploy-control helper in release: $helper_src"
-  if [[ -f "$DEPLOY_CONTROL_HELPER" ]] && cmp -s "$helper_src" "$DEPLOY_CONTROL_HELPER"; then
-    return 0
-  fi
-  install -m 0755 -o root -g root "$helper_src" "$DEPLOY_CONTROL_HELPER"
 }
 
 install_runtime_worker_helper() {
@@ -1484,14 +1729,14 @@ activate_release() {
   local release="$1"
   local src
   src="$(release_src "$release")"
-  install_deploy_control_helper "$src"
-  install_runtime_worker_helper "$src"
   assert_runtime_env_contract
-  sync_python_envs "$src"
-  retire_unregistered_worker_services "$src"
-  assert_retired_page_runtime_quiesced "$src"
+  systemctl stop fin-ops.service
   stop_runtime_worker_services_for_activation
   run_schema_migrations "$src"
+  sync_python_envs "$src"
+  install_runtime_worker_helper "$src"
+  retire_unregistered_worker_services "$src"
+  assert_retired_page_runtime_quiesced "$src"
   archive_legacy_current
   write_api_dropin "$src"
   write_worker_dropin "$src"
@@ -1909,6 +2154,13 @@ rollback_release_gate() {
   local failure_checkpoint="$5"
   local rolled_back=false
   cat "$evidence_dir/$failure_checkpoint/checkpoint.json" >&2 || true
+  if ! release_is_acl_safe "$previous_release"; then
+    systemctl stop fin-ops.service || true
+    stop_runtime_worker_services_for_activation || true
+    write_release_gate_evidence \
+      "$candidate" "$previous_release" "$evidence_dir" FAIL false "$failure_checkpoint" || true
+    die "release gate failed at $failure_checkpoint; previous release lacks $SETTINGS_ACL_CONTRACT, production remains in maintenance for forward repair"
+  fi
   if (activate_release "$previous_release") \
     && release_gate_checkpoint "$previous_release" rollback "$admin_token" "$evidence_dir" preflight "$candidate"; then
     rolled_back=true
@@ -1923,9 +2175,10 @@ rollback_release_gate() {
 release_gate_activate() {
   local release="${1:-}"
   [[ -n "$release" && "$#" -eq 1 ]] || die "release-gate-activate accepts only release name"
-  local admin_token previous_release active_count evidence_dir src
+  local admin_token previous_release active_count evidence_dir
   release_src "$release" >/dev/null
   assert_runtime_env_contract
+  assert_settings_access_control_preflight "$release"
   IFS= read -r admin_token
   [[ -n "$admin_token" ]] || die "production admin token stdin is empty"
   previous_release="$(active_release_names)"
@@ -1938,9 +2191,6 @@ release_gate_activate() {
   install -d -m 0700 "$evidence_dir"
   if ! release_gate_checkpoint "$previous_release" pre "$admin_token" "$evidence_dir" preflight "$release"; then
     cat "$evidence_dir/pre/checkpoint.json" >&2
-    src="$(release_src "$previous_release")"
-    install_deploy_control_helper "$src"
-    install_runtime_worker_helper "$src"
     write_release_gate_evidence "$release" "$previous_release" "$evidence_dir" FAIL false pre
     die "current production runtime failed the pre-activation release gate"
   fi
@@ -1996,10 +2246,21 @@ case "$cmd" in
     assert_runtime_env_contract
     echo "$src"
     ;;
-  self-update)
-    src="$(release_src "${2:-}")"
-    install_deploy_control_helper "$src"
-    install_runtime_worker_helper "$src"
+  contract-version)
+    shift
+    contract_version "$@"
+    ;;
+  candidate-status)
+    shift
+    candidate_status "$@"
+    ;;
+  settings-access-control-preflight)
+    shift
+    settings_access_control_preflight "$@"
+    ;;
+  settings-access-control-post-deploy)
+    shift
+    settings_access_control_post_deploy "$@"
     ;;
   repair-active-api-runtime)
     shift
