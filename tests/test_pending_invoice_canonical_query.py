@@ -175,6 +175,61 @@ class PendingInvoiceCanonicalRepositoryTests(unittest.TestCase):
         self.assertEqual(json.loads(str(page_params[0]))["scan_direction"], "expense")
         self.assertIs(page_params[-6], False)
 
+    def test_compacts_common_transaction_text_rule_scans_without_cross_field_matches(self) -> None:
+        class RuleTransaction(_RecordingTransaction):
+            def fetch_one(
+                self,
+                sql: str,
+                params: tuple[object, ...] = (),
+            ) -> dict[str, object]:
+                self.commands.append((sql, params))
+                if "from app.app_settings" in sql:
+                    return {
+                        "settings_payload": {
+                            "bank_transaction_tags": {
+                                "definitions": [
+                                    {
+                                        "code": "expense-fee",
+                                        "direction": "expense",
+                                        "status": "active",
+                                        "rules": {
+                                            "match_fields": [
+                                                "detail_text",
+                                                "note_text",
+                                                "purpose_text",
+                                                "summary_text",
+                                            ],
+                                            "contains_any": ["服务费", "\u0001"],
+                                        },
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                return dict(self.result)
+
+        connection = _RecordingConnection()
+        connection.transaction_state = RuleTransaction()
+        service = PendingInvoiceCanonicalQueryService(
+            repository=PostgresPendingInvoiceCanonicalRepository(connection)
+        )
+
+        service.rows(
+            {
+                "direction": ["expense"],
+                "filter": ["all"],
+                "include_statistics": ["false"],
+            }
+        )
+
+        page_sql, _page_params = connection.transaction_state.commands[4]
+        self.assertIn("as norm_transaction_text", page_sql)
+        self.assertIn("strpos(base.norm_transaction_text, %s) > 0", page_sql)
+        self.assertIn("strpos(base.norm_detail_text, %s) > 0", page_sql)
+        self.assertIn("strpos(base.norm_note_text, %s) > 0", page_sql)
+        self.assertIn("strpos(base.norm_purpose_text, %s) > 0", page_sql)
+        self.assertIn("strpos(base.norm_summary_text, %s) > 0", page_sql)
+
     def test_candidate_repository_uses_one_snapshot_and_two_bounded_selects(self) -> None:
         class CandidateTransaction(_RecordingTransaction):
             def fetch_one(

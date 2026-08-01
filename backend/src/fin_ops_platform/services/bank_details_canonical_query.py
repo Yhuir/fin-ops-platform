@@ -1297,6 +1297,7 @@ def _rule_match_union_sql(
     definitions: list[dict[str, Any]],
     *,
     source_relation: str,
+    combine_transaction_text: bool = False,
 ) -> tuple[str, list[Any]]:
     statements: list[str] = []
     params: list[Any] = []
@@ -1306,7 +1307,10 @@ def _rule_match_union_sql(
         rules = definition.get("rules")
         if not isinstance(rules, dict):
             continue
-        predicate, predicate_params = _rule_predicate(definition)
+        predicate, predicate_params = _rule_predicate(
+            definition,
+            combine_transaction_text=combine_transaction_text,
+        )
         if predicate == "false":
             continue
         try:
@@ -1357,6 +1361,7 @@ def compile_bank_category_rule_sql(
     definitions: list[dict[str, Any]],
     *,
     source_relation: str,
+    combine_transaction_text: bool = False,
 ) -> tuple[str, str, list[Any]]:
     """Compile the one canonical bank-category rule matcher for SQL query owners."""
 
@@ -1365,6 +1370,7 @@ def compile_bank_category_rule_sql(
     rule_sql, rule_params = _rule_match_union_sql(
         definitions,
         source_relation=source_relation,
+        combine_transaction_text=combine_transaction_text,
     )
     return _normalization_select_sql(definitions), rule_sql, rule_params
 
@@ -1452,7 +1458,11 @@ def _normalization_select_sql(definitions: list[dict[str, Any]]) -> str:
     return "\n".join(columns)
 
 
-def _rule_predicate(definition: dict[str, Any]) -> tuple[str, list[Any]]:
+def _rule_predicate(
+    definition: dict[str, Any],
+    *,
+    combine_transaction_text: bool = False,
+) -> tuple[str, list[Any]]:
     rules = definition.get("rules")
     if not isinstance(rules, dict):
         return "false", []
@@ -1465,6 +1475,13 @@ def _rule_predicate(definition: dict[str, Any]) -> tuple[str, list[Any]]:
         return "false", []
     normalized_fields = [_NORMALIZED_FIELD_SQL[field] for field in field_names]
     regex_fields = [_REGEX_FIELD_SQL[field] for field in field_names]
+    combined_transaction_text = (
+        "base.norm_transaction_text"
+        if combine_transaction_text
+        and set(field_names)
+        == {"detail_text", "note_text", "purpose_text", "summary_text"}
+        else None
+    )
     clauses: list[str] = []
     params: list[Any] = []
 
@@ -1504,18 +1521,28 @@ def _rule_predicate(definition: dict[str, Any]) -> tuple[str, list[Any]]:
         if str(value)
     ]
     for token in none_of:
-        clauses.append(
-            "not (" + " or ".join(f"strpos({field}, %s) > 0" for field in normalized_fields) + ")"
+        search_fields = (
+            [combined_transaction_text]
+            if combined_transaction_text and "\x01" not in token
+            else normalized_fields
         )
-        params.extend([token] * len(normalized_fields))
+        clauses.append(
+            "not (" + " or ".join(f"strpos({field}, %s) > 0" for field in search_fields) + ")"
+        )
+        params.extend([token] * len(search_fields))
 
     contains_all = [
         BankTransactionAutoCategoryService._normalize_match_text(value)
         for value in list(rules.get("contains_all") or [])
         if str(value)
     ]
-    joined_fields = " || ".join(f"coalesce({field}, '')" for field in normalized_fields)
     for token in contains_all:
+        search_fields = (
+            [combined_transaction_text]
+            if combined_transaction_text and "\x01" not in token
+            else normalized_fields
+        )
+        joined_fields = " || ".join(f"coalesce({field}, '')" for field in search_fields)
         clauses.append(f"strpos(({joined_fields}), %s) > 0")
         params.append(token)
 
@@ -1532,10 +1559,15 @@ def _rule_predicate(definition: dict[str, Any]) -> tuple[str, list[Any]]:
         token = BankTransactionAutoCategoryService._normalize_match_text(value)
         if not token:
             continue
-        positive.append(
-            "(" + " or ".join(f"strpos({field}, %s) > 0" for field in normalized_fields) + ")"
+        search_fields = (
+            [combined_transaction_text]
+            if combined_transaction_text and "\x01" not in token
+            else normalized_fields
         )
-        params.extend([token] * len(normalized_fields))
+        positive.append(
+            "(" + " or ".join(f"strpos({field}, %s) > 0" for field in search_fields) + ")"
+        )
+        params.extend([token] * len(search_fields))
     for pattern in list(rules.get("regex_any") or []):
         if not str(pattern):
             continue

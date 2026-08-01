@@ -522,6 +522,13 @@
 - 后续同窗证据显示银行明细与待开发票的并发 p95 同时约 `1.3s`，因此复用共享 compiler 的 rule-oriented set scan；pending SQL 不再为每条流水进入完整规则 lateral append。匹配优先级、歧义、manual/confirmation、精确 total 和行 DTO 不变。
 - 进程级采样显示并发 4 会产生超过请求数的高 CPU PostgreSQL 执行进程；rows 主查询在同一 request-scoped transaction 内把 `max_parallel_workers_per_gather` 设为 `0`，避免 HTTP 并发与查询并行相乘。同时把共享 rule matcher 收窄到必需规范化列，把范围去重、精确 total 和排序收窄到 key/scalar 字段，只为首屏 50 行回连完整 bank/invoice/OA JSON。候选、详情、写链和全局数据库配置不受影响。
 - 生产稳定窗仍显示主 SQL p95 为主要耗时；`effective_categories -> enriched -> classified_source` 三个单一消费者 CTE 不再强制 materialize，让 PostgreSQL 内联并消除宽 bank/raw JSON 中间结果的重复写读。多消费者的事实、规则、scope、summary/page key CTE 继续 materialize；业务结果、精确统计和分页不变。
+
+## 2026-08-01 - 同字段组规则扫描合并
+
+- 生产 32 条支出活动规则中，30 条使用同一组 `detail_text/note_text/purpose_text/summary_text`，合计 129 个包含词与 24 个排除词；旧 SQL 对每个词逐一扫描 4 个已规范化字段。
+- 待找发票 canonical 查询现在只把这 4 个已规范化字段用 `chr(1)` 合并一次，shared compiler 仅对字段集合完全一致的 contains/excludes/contains-all 使用合并文本；exact 与 regex 语义不变，规则 token 含该分隔符时继续逐字段判断，避免跨字段误命中。
+- 本地 PostgreSQL 隔离 A/B 使用同一批生产活动规则与 1,014 条合成规范化流水：旧/新命中数一致，参数从 742 降到 283，warm 十次中位耗时从 `29.777ms` 降到 `16.014ms`（`-46.22%`）。未新增索引、表、缓存、worker、依赖或 API 字段。
+
 ## 2026-07-22 - 页面自有全量标题统计
 
 - 目标：让标题统计独立证明待找发票投影实际覆盖的完整流水与关联关系，不把当前筛选后的表格行数或统一事实源数量冒充页面统计。

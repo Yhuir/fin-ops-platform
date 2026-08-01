@@ -67,12 +67,17 @@ class PendingInvoicePostgresIntegrationTests(unittest.TestCase):
                             "output_sub_label": "材料费",
                             "account_scope": {"type": "any", "values": []},
                             "rules": {
-                                "match_fields": ["summary_text"],
+                                "match_fields": [
+                                    "detail_text",
+                                    "note_text",
+                                    "purpose_text",
+                                    "summary_text",
+                                ],
                                 "contains_any": ["材料款"],
                                 "contains_all": [],
                                 "exact_any": [],
                                 "regex_any": [],
-                                "none_of": [],
+                                "none_of": ["退款"],
                             },
                         }
                     ],

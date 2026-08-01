@@ -523,6 +523,13 @@ canonical_rule_banks as materialized (
         bank.rule_summary_text as regex_summary_text,
         bank.rule_note_text as regex_note_text,
         bank.rule_detail_text as regex_detail_text,
+        concat_ws(
+            chr(1),
+            bank.rule_detail_text,
+            bank.rule_note_text,
+            bank.rule_purpose_text,
+            bank.rule_summary_text
+        ) as norm_transaction_text,
         bank.rule_account as account_key
     from rule_banks bank
 ),
@@ -1307,6 +1314,7 @@ class PostgresPendingInvoiceCanonicalRepository:
                 compile_bank_category_rule_sql(
                     definitions,
                     source_relation="canonical_rule_banks",
+                    combine_transaction_text=True,
                 )
             )
             config = {
