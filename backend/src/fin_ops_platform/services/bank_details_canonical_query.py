@@ -769,7 +769,8 @@ def _classification_cte(
         separators=(",", ":"),
     )
     normalization_sql, rule_sql, rule_params = compile_bank_category_rule_sql(
-        definitions
+        definitions,
+        source_relation="base",
     )
     candidate_codes = text_list(candidate_category_codes) or None
     params: list[Any] = [
@@ -1095,15 +1096,7 @@ def _classification_cte(
           from resolved_internal_pairs
         ),
         rule_matches as materialized (
-          select
-            base.row_id,
-            rule_match.priority,
-            rule_match.sort_order,
-            rule_match.definition
-          from base
-          cross join lateral (
-            {rule_sql}
-          ) rule_match
+          {rule_sql}
         ),
         matched_definitions as (
           select
@@ -1266,6 +1259,8 @@ def _validate_pagination(*, page: int, page_size: int) -> None:
 
 def _rule_match_union_sql(
     definitions: list[dict[str, Any]],
+    *,
+    source_relation: str,
 ) -> tuple[str, list[Any]]:
     statements: list[str] = []
     params: list[Any] = []
@@ -1288,9 +1283,11 @@ def _rule_match_union_sql(
             sort_order = 10_000
         statements.append(
             f"""
-            select %s::integer as priority,
+            select base.row_id,
+                   %s::integer as priority,
                    %s::integer as sort_order,
                    %s::jsonb as definition
+            from {source_relation} base
             where {predicate}
             """
         )
@@ -1309,7 +1306,8 @@ def _rule_match_union_sql(
     if not statements:
         return (
             """
-            select null::integer as priority,
+            select null::text as row_id,
+                   null::integer as priority,
                    null::integer as sort_order,
                    null::jsonb as definition
             where false
@@ -1321,10 +1319,17 @@ def _rule_match_union_sql(
 
 def compile_bank_category_rule_sql(
     definitions: list[dict[str, Any]],
+    *,
+    source_relation: str,
 ) -> tuple[str, str, list[Any]]:
     """Compile the one canonical bank-category rule matcher for SQL query owners."""
 
-    rule_sql, rule_params = _rule_match_union_sql(definitions)
+    if source_relation not in {"base", "canonical_rule_banks"}:
+        raise ValueError("Unsupported bank-category rule source relation.")
+    rule_sql, rule_params = _rule_match_union_sql(
+        definitions,
+        source_relation=source_relation,
+    )
     return _normalization_select_sql(definitions), rule_sql, rule_params
 
 

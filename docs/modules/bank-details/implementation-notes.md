@@ -513,3 +513,9 @@
 - 生产并发 4 证据显示银行明细与复用该 classifier 的往来账仍受数据库 CPU 限制，连接获取不是瓶颈。
 - 修复在既有 `_classification_cte(...)` 内将摘要、用途、备注和完整明细对同一 `bank_text_fields` JSON array 的四次独立展开合并为一次带 ordinality 的 lateral aggregate，保留原始数组顺序与首个命中语义。
 - 不改变标签优先级、内部转账、manual/confirmation precedence、API shape 或模块 I/O；未新增索引、表、缓存、read model、worker 或依赖。
+
+## 2026-08-01 - canonical rules 改为 rule-oriented set scan
+
+- 稳定生产并发 4 中，银行明细和待开发票同时出现约 `1.3s` p95，而连接获取 p95 低于 `3ms`；共同热点是 canonical classifier 仍以每条银行行进入完整规则 lateral append。
+- 编译器继续生成相同规范化谓词、priority、sort order 和 definition payload，但执行形态改为每条规则对 materialized canonical base 做集合扫描，再按 row id 聚合。旧的 per-row `cross join lateral` matcher 已删除。
+- 两个页面复用同一个 compiler；没有新分类器、缓存、projection、worker、表、索引或 API 变化。真实 PostgreSQL integration 继续校验规则命中和往来关系语义。

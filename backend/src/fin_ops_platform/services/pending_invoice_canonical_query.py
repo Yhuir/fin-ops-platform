@@ -526,15 +526,14 @@ canonical_rule_banks as materialized (
 ),
 compiled_rule_matches as materialized (
     select
-        base.row_id,
+        rule_match.row_id,
         rule_match.definition,
         rule_match.priority
-    from canonical_rule_banks base
-    cross join lateral (
+    from (
         __RULE_MATCH_SQL__
     ) rule_match
     where not exists (
-        select 1 from internal_matches match where match.row_id = base.row_id
+        select 1 from internal_matches match where match.row_id = rule_match.row_id
     )
 ),
 winning_rule_priority as materialized (
@@ -1277,7 +1276,10 @@ class PostgresPendingInvoiceCanonicalRepository:
                 )
             ]
             _normalization_sql, rule_match_sql, rule_match_params = (
-                compile_bank_category_rule_sql(definitions)
+                compile_bank_category_rule_sql(
+                    definitions,
+                    source_relation="canonical_rule_banks",
+                )
             )
             config = {
                 "scan_direction": scan_direction,

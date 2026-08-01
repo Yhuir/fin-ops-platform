@@ -519,6 +519,7 @@
 - 稳定窗口并发 4 证据显示 rows 单请求约 `607ms`，但 p95 为 `1257.621ms`；App Health 的数据库 p95 为 `888.899ms`、连接获取 p95 仅 `5.614ms`。瓶颈是小数据量、多 CTE 与 43 条活动规则组成的复杂 SQL 在并发下的规划/执行成本，不是连接池等待。
 - 只在 pending rows 主查询所在的 `REPEATABLE READ READ ONLY` transaction 内执行 `SET LOCAL jit = off`；候选、详情和写链不受影响。事务退出即恢复 PostgreSQL 默认值，不改全局数据库配置。
 - 未增加 cache、read model、worker、索引、API 字段或兼容路径；结果集合、精确 total、统计、排序和分页合同保持不变。
+- 后续同窗证据显示银行明细与待开发票的并发 p95 同时约 `1.3s`，因此复用共享 compiler 的 rule-oriented set scan；pending SQL 不再为每条流水进入完整规则 lateral append。匹配优先级、歧义、manual/confirmation、精确 total 和行 DTO 不变。
 ## 2026-07-22 - 页面自有全量标题统计
 
 - 目标：让标题统计独立证明待找发票投影实际覆盖的完整流水与关联关系，不把当前筛选后的表格行数或统一事实源数量冒充页面统计。

@@ -353,6 +353,7 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
         sql, params = transaction.reads[0]
         normalized_sql = " ".join(sql.split()).lower()
         self.assertIn("from classified_with_semantics", normalized_sql)
+        self.assertNotIn("cross join lateral", normalized_sql.split("rule_matches as materialized", 1)[1])
         self.assertIn("effective_category_code = any(%s::text[])", normalized_sql)
         self.assertNotIn("limit %s", normalized_sql)
         self.assertNotIn("read_model.", normalized_sql)
