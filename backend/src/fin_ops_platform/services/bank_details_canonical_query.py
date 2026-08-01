@@ -91,6 +91,7 @@ class PostgresBankDetailsCanonicalQueryRepository:
         normalized_page = max(int(page or 1), 1)
         normalized_page_size = min(max(int(page_size or 100), 1), MAX_PAGE_SIZE)
         with self._snapshot_transaction() as transaction:
+            transaction.execute("set local max_parallel_workers_per_gather = 0")
             settings = self._settings_payload(transaction)
             snapshot = self._load_transaction_page(
                 transaction,

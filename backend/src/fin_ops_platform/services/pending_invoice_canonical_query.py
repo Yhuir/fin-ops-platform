@@ -1254,6 +1254,7 @@ class PostgresPendingInvoiceCanonicalRepository:
     ) -> dict[str, Any]:
         with self._snapshot_transaction() as transaction:
             transaction.execute("set local jit = off")
+            transaction.execute("set local max_parallel_workers_per_gather = 0")
             settings = self._settings(transaction)
             scan_direction = (
                 "all"

@@ -167,7 +167,10 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
         self.assertEqual(connection.transaction_count, 1)
         self.assertEqual(
             transaction.executed,
-            ["set transaction isolation level repeatable read read only"],
+            [
+                "set transaction isolation level repeatable read read only",
+                "set local max_parallel_workers_per_gather = 0",
+            ],
         )
         self.assertEqual(len(transaction.reads), 3)
         main_sql, main_params = transaction.reads[1]

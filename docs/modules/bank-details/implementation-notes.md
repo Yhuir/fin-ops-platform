@@ -519,3 +519,4 @@
 - 稳定生产并发 4 中，银行明细和待开发票同时出现约 `1.3s` p95，而连接获取 p95 低于 `3ms`；共同热点是 canonical classifier 仍以每条银行行进入完整规则 lateral append。
 - 编译器继续生成相同规范化谓词、priority、sort order 和 definition payload，但执行形态改为每条规则对 materialized canonical base 做集合扫描，再按 row id 聚合。旧的 per-row `cross join lateral` matcher 已删除。
 - 两个页面复用同一个 compiler；没有新分类器、缓存、projection、worker、表、索引或 API 变化。真实 PostgreSQL integration 继续校验规则命中和往来关系语义。
+- 进程级并发采样进一步确认 4 个 HTTP 请求会叠加 PostgreSQL 并行执行进程并占满 4 核；银行首屏只在本次 read-only transaction 内把 `max_parallel_workers_per_gather` 设为 `0`，避免两层并行相乘。全局数据库设置、导出和其它页面不变。
