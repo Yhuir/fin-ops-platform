@@ -247,7 +247,11 @@ describe("Cost statistics page", () => {
     expect(screen.getByRole("button", { name: "时间统计时间范围：2026年3月" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /加载更多/ })).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&page_size=50",
+      "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&page_size=50&include_statistics=false",
+      expect.any(Object),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&page_size=1",
       expect.any(Object),
     );
     expect(fetchMock).not.toHaveBeenCalledWith(
@@ -262,7 +266,7 @@ describe("Cost statistics page", () => {
     expect(await within(nextTimeGrid).findByRole("button", { name: "查看流水 cost-txn-102" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "时间统计时间范围：2026年4月" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/explorer?scope=2026-04&view=time&project_scope=active&page_size=50",
+      "/api/cost-statistics/explorer?scope=2026-04&view=time&project_scope=active&page_size=50&include_statistics=false",
       expect.any(Object),
     );
   });
@@ -280,7 +284,7 @@ describe("Cost statistics page", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        `/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&query=${encodeURIComponent("昆明设备")}&page_size=50`,
+        `/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&query=${encodeURIComponent("昆明设备")}&page_size=50&include_statistics=false`,
         expect.any(Object),
       );
     });
@@ -312,7 +316,7 @@ describe("Cost statistics page", () => {
       expect.any(Object),
     );
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&page_size=50",
+      "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&page_size=50&include_statistics=false",
       expect.any(Object),
     );
   });
@@ -366,7 +370,7 @@ describe("Cost statistics page", () => {
     await user.click(screen.getByRole("button", { name: "按项目" }));
     expect(await screen.findByRole("button", { name: "项目统计时间范围：全部时间" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/explorer?scope=all&view=project&project_scope=active&page_size=50",
+      "/api/cost-statistics/explorer?scope=all&view=project&project_scope=active&page_size=50&include_statistics=false",
       expect.any(Object),
     );
     expect(screen.getByText("昆明卷烟厂动力设备控制系统升级改造项目")).toBeInTheDocument();
@@ -903,7 +907,7 @@ describe("Cost statistics page", () => {
     expect(screen.queryByText("成本统计数据加载暂时失败，请刷新后重试。")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "导出中心" })).toBeEnabled();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&page_size=50",
+      "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&page_size=50&include_statistics=false",
       expect.any(Object),
     );
   });
@@ -924,7 +928,7 @@ describe("Cost statistics page", () => {
       () => {
         const explorerCalls = fetchMock.mock.calls.filter(([request]) => (
           String(request)
-            === "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&page_size=50"
+            === "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&page_size=50&include_statistics=false"
         ));
         expect(explorerCalls).toHaveLength(1);
       },
@@ -932,11 +936,11 @@ describe("Cost statistics page", () => {
     );
   });
 
-  test("manual refresh reloads global statistics instead of using the drilldown-only contract", async () => {
+  test("manual refresh reloads scoped content and global statistics", async () => {
     window.history.pushState({}, "", "/cost-statistics");
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
-    const initialUrl = "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&page_size=50";
+    const initialUrl = "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&page_size=50&include_statistics=false";
 
     renderCostStatisticsPage();
 
@@ -945,6 +949,7 @@ describe("Cost statistics page", () => {
 
     await waitFor(() => {
       expect(fetchMock.mock.calls.filter(([request]) => String(request) === initialUrl)).toHaveLength(2);
+      expect(fetchMock.mock.calls.filter(([request]) => String(request) === "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&page_size=1")).toHaveLength(2);
     });
   });
 

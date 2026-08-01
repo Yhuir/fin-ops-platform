@@ -19,6 +19,7 @@ from fin_ops_platform.services.bank_transaction_auto_category_service import (
 )
 from fin_ops_platform.services.bank_transaction_category_service import (
     BankTransactionCategoryService,
+    bank_transaction_tag_dictionary_display_payload,
     default_bank_transaction_tag_dictionary_payload,
 )
 from fin_ops_platform.services.import_file_service import COMPANY_NAME_KEYWORDS
@@ -649,23 +650,25 @@ class BankDetailsCanonicalQueryService:
                 auto_service=auto_service,
             )
             rows.append(
-                mapper.row_payload(
-                    {
-                        **row,
-                        "id": row_id,
-                        "account_key": text(row.get("account_key")) or "",
-                        "txn_direction": (
-                            "inflow"
-                            if text(row.get("direction")) == "income"
-                            else "outflow"
+                _compact_bank_detail_row(
+                    mapper.row_payload(
+                        {
+                            **row,
+                            "id": row_id,
+                            "account_key": text(row.get("account_key")) or "",
+                            "txn_direction": (
+                                "inflow"
+                                if text(row.get("direction")) == "income"
+                                else "outflow"
+                            ),
+                        },
+                        manual_category=_manual_category_payload(
+                            row,
+                            category_service=category_service,
                         ),
-                    },
-                    manual_category=_manual_category_payload(
-                        row,
-                        category_service=category_service,
-                    ),
-                    auto_category=auto_category,
-                    relation=relation_by_row_id.get(row_id),
+                        auto_category=auto_category,
+                        relation=relation_by_row_id.get(row_id),
+                    )
                 )
             )
         category_counts = {
@@ -682,9 +685,34 @@ class BankDetailsCanonicalQueryService:
             "rows": rows,
             "category_counts": category_counts,
             "statistics": dict(snapshot.get("statistics") or {}),
-            "bank_transaction_tags": tags,
+            "bank_transaction_tags": bank_transaction_tag_dictionary_display_payload(tags),
             "pagination": dict(snapshot.get("pagination") or {}),
         }
+
+
+def _compact_bank_detail_row(row: dict[str, Any]) -> dict[str, Any]:
+    legacy_fields = {
+        "auto_category_evidence",
+        "category_code",
+        "category_label",
+        "category_label_path",
+        "category_path",
+        "category_primary_label",
+        "category_source",
+        "category_sub_label",
+        "category_third_label",
+        "category_version",
+        "manual_category_code",
+        "manual_category_label",
+        "manual_category_label_path",
+        "manual_category_path",
+        "manual_category_primary_label",
+        "manual_category_source",
+        "manual_category_sub_label",
+        "manual_category_third_label",
+        "manual_category_version",
+    }
+    return {key: value for key, value in row.items() if key not in legacy_fields}
 
 
 def _classification_cte(

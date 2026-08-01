@@ -43,7 +43,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| App health payload | 页面/indicator | 不伪装 readiness；OA pending/processing outbox 必须显示 refreshing，OA failed outbox/worker/run 必须显示 blocked/error |
+| App health payload | 页面/indicator | 不伪装 readiness；OA pending/processing outbox 必须显示 refreshing，OA failed outbox/worker/run 必须显示 blocked/error。Workbench matching 只把 `dirty/retry/processing/failed` durable scope 作为当前异常状态，历史 `completed` 不进入 payload。runtime snapshot 的短 TTL cache 在 HTTP 进程内 single-flight；alert snapshot 只有发生状态迁移时才持久化，健康 GET 不做无变化写入。 |
 | Read model scope evidence | App Health read model table | 每个 model 展示最近 scope 的 type/key、current-scope/full-history、expected/projection source versions、lag、queue wait、handler duration、attempt/retry、dedupe reason 与 last error；证据查询失败只降级该观测块并返回 warning，不伪装为 fresh。 |
 | Read model historical diagnostics | App Status details | manifest `fan_out_command` 的 command-only parent readiness 不参与当前 domain/overall severity，输出到 `historical_scopes` 且 `current_effective=false`；同 scope 当前 dirty/outbox failure 和 child shard failure 仍参与 blocked/busy。 |
 | Alert/status | shell/status page | 明确 stale/failed/degraded |

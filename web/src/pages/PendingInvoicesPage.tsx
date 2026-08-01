@@ -19,6 +19,7 @@ import {
   downloadPendingInvoiceExport,
   fetchPendingInvoiceCandidatesBatch,
   fetchPendingInvoiceExportPreview,
+  fetchPendingInvoiceFilterOptions,
   fetchPendingInvoiceObjectDetail,
   fetchPendingInvoiceRelationDetail,
   fetchPendingInvoiceRows,
@@ -249,7 +250,16 @@ export default function PendingInvoicesPage() {
     setLoading(true);
     setError(null);
     fetchPendingInvoiceRows({ ...query, signal })
-      .then(applyRowsPayload)
+      .then((payload) => {
+        applyRowsPayload(payload);
+        void fetchPendingInvoiceFilterOptions({ ...query, signal })
+          .then((options) => {
+            if (!signal?.aborted) {
+              setColumnFilterFields(options.fields);
+            }
+          })
+          .catch(() => undefined);
+      })
       .catch((caught) => {
         if (!isAbortLikeError(caught)) {
           setStatistics(null);

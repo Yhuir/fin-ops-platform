@@ -8638,7 +8638,11 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     if (path === "/api/cost-statistics/explorer") {
       const explorerScope = url.searchParams.get("scope") ?? "all";
       const explorerProjectScope = url.searchParams.get("project_scope") ?? "active";
-      if (costStatisticsExplorerFailuresRemaining > 0 && explorerScope !== "all") {
+      if (
+        costStatisticsExplorerFailuresRemaining > 0
+        && explorerScope !== "all"
+        && url.searchParams.get("include_statistics") === "false"
+      ) {
         costStatisticsExplorerFailuresRemaining -= 1;
         return json(route, {
           error: "cost_statistics_explorer_temporarily_unavailable",

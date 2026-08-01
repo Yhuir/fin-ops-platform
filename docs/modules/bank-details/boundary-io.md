@@ -45,7 +45,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | accounts payload | Bank Details 页面 | `accounts`、余额汇总、币种汇总与缺失余额计数来自有界 SQL 聚合；不含 read-model/status/source/job 字段。 |
-| transactions payload | Bank Details 页面 | `rows`、`statistics`、`category_counts`、pagination 和标签字典；rows/summary/facets/relations 在同一个 `REPEATABLE READ READ ONLY` snapshot 中一致。 |
+| transactions payload | Bank Details 页面 | `rows`、`statistics`、`category_counts`、pagination 和展示标签字典；rows/summary/facets/relations 在同一个 `REPEATABLE READ READ ONLY` snapshot 中一致。列表只输出 effective/auto/candidate/relationship 展示字段；旧 `category_*` / `manual_category_*` 重复别名、自动规则 evidence 和标签匹配 rules/account scope 不进入页面 DTO。 |
 | relation tags | 页面/导出 | 只反映 active canonical relation membership；候选、withdrawn relation、Workbench raw payload 和 relation projection 不进入页面事实。 |
 | 导出文件 | 有导出权限的用户 | 复用同一筛选与 relation 语义；服务端生成 XLSX，不先向浏览器加载全量 rows。 |
 | 分类/规则写响应 | 当前页面 | 保留 `changed`、`affected_months`、version、error/message 等业务字段；不返回 freshness target、refresh job、operation barrier 或 202 refreshing envelope。 |

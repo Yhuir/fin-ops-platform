@@ -596,19 +596,28 @@ function statusLabel(code: string) {
 }
 
 export function mapPendingInvoiceRow(row: ApiPendingInvoiceRow): PendingInvoiceRow {
-  const id = stringValue(row.id, stringValue(row.bank_transaction?.id));
-  const bankTransaction = mapBankTransaction(row.bank_transaction, id);
+  const primaryBankPayload = row.bank_transactions?.primary ?? row.bank_transaction;
+  const id = stringValue(row.id, stringValue(primaryBankPayload?.id));
+  const bankTransaction = mapBankTransaction(primaryBankPayload, id);
   const bankSummaries = (row.bank_transactions?.summaries ?? [])
     .map((bankRow) => mapBankTransactionSummary(bankRow, id))
     .filter((item) => item.id || item.counterpartyName);
-  const bankPrimary = row.bank_transactions?.primary
-    ? mapBankTransactionSummary(row.bank_transactions.primary, id)
+  const bankPrimary = primaryBankPayload
+    ? mapBankTransactionSummary(primaryBankPayload, id)
     : (bankSummaries.length === 1 ? bankSummaries[0] : null);
-  const bankTransactionSummaries = bankSummaries.length > 0 ? bankSummaries : [mapBankTransactionSummary(row.bank_transaction, id)];
+  const bankTransactionSummaries = bankSummaries.length > 0
+    ? bankSummaries
+    : bankPrimary
+      ? [bankPrimary]
+      : [];
   const legacyInvoices = (row.invoices ?? []).map(mapInvoice).filter(hasInvoiceIdentity);
   const inputSummaries = (row.input_invoices?.summaries ?? []).map(mapInvoice).filter(hasInvoiceIdentity);
   const primaryInvoice = mapInvoice(row.input_invoices?.primary ?? legacyInvoices[0] ?? null);
-  const invoices = inputSummaries.length > 0 ? inputSummaries : legacyInvoices;
+  const invoices = inputSummaries.length > 0
+    ? inputSummaries
+    : hasInvoiceIdentity(primaryInvoice)
+      ? [primaryInvoice]
+      : legacyInvoices;
   const statusCode = stringValue(row.invoice_acquisition_status?.code);
   const primaryAction = stringValue(row.invoice_acquisition_status?.primary_action);
   if (!statusCode || !primaryAction) {

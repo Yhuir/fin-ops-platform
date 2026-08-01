@@ -27,6 +27,11 @@ Redis cache 或搜索 projection 掩盖慢查询。PostgreSQL 继续拥有 canon
 不得为了满足延迟阈值静默降级。确实不需要精确 total 的新页面可以独立采用 `hasMore`，但不能改变
 既有财务页面 API。
 
+首屏探针必须对应用户可见的 blocking 请求。成本统计首屏固定测量
+`include_statistics=false` 的 scoped explorer；随后非阻塞全局 statistics 单独采样。待找发票 rows 与
+filter options 分开采样；rows 不得重新内嵌高基数 options。银行明细、待找发票和往来款页面 DTO
+不得传输浏览器未消费的规则执行字段、legacy 重复字段或导出专用 allocation lots。
+
 ## 数据规模带
 
 | 级别 | 银行流水 | 发票 | OA | 关系 | 用途 |

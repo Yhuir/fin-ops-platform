@@ -759,7 +759,10 @@ class TurnoverLedgerApiRoutes:
                 page=page,
                 page_size=page_size,
             )
-            return self._normalize_grouped_payload(payload)
+            return self._normalize_grouped_payload(
+                payload,
+                include_allocation_details=False,
+            )
         return self._query_service.list_ledger(
             view=view,
             family=family,
@@ -788,7 +791,10 @@ class TurnoverLedgerApiRoutes:
             page=page,
             page_size=page_size,
         )
-        return self._normalize_grouped_payload(payload)
+        return self._normalize_grouped_payload(
+            payload,
+            include_allocation_details=True,
+        )
 
     def get_relation(self, relation_id: str) -> dict[str, object]:
         if self._query_service is None:
@@ -870,7 +876,12 @@ class TurnoverLedgerApiRoutes:
         return {"relation": relation}
 
     @classmethod
-    def _normalize_grouped_payload(cls, payload: dict[str, object]) -> dict[str, object]:
+    def _normalize_grouped_payload(
+        cls,
+        payload: dict[str, object],
+        *,
+        include_allocation_details: bool,
+    ) -> dict[str, object]:
         normalized_groups: list[dict[str, object]] = []
         for group in list(payload.get("groups") or []):
             if not isinstance(group, dict):
@@ -879,23 +890,30 @@ class TurnoverLedgerApiRoutes:
             legacy_rows = [row for row in list(group.get("rows") or []) if isinstance(row, dict)]
             explicit_summary = group.get("summary_row")
             summary_row = dict(explicit_summary) if isinstance(explicit_summary, dict) else None
-            explicit_lot_rows = [row for row in list(group.get("lot_rows") or []) if isinstance(row, dict)]
             explicit_flow_rows = [row for row in list(group.get("flow_rows") or []) if isinstance(row, dict)]
-            explicit_allocation_lots = [
-                row for row in list(group.get("allocation_lots") or []) if isinstance(row, dict)
-            ]
             if summary_row is None:
                 summary_row = cls._summary_row_from_legacy_rows(legacy_rows)
-            lot_rows = [cls._normalized_lot_row(row) for row in explicit_lot_rows]
-            allocation_lots = [
-                cls._normalized_allocation_lot(row) for row in (explicit_allocation_lots or explicit_lot_rows)
-            ]
             flow_rows = cls._normalized_flow_rows(explicit_flow_rows)
             summary_row = cls._normalized_summary_row(summary_row)
             normalized_group["summary_row"] = summary_row
             normalized_group["flow_rows"] = flow_rows
-            normalized_group["allocation_lots"] = allocation_lots
-            normalized_group["lot_rows"] = lot_rows
+            if include_allocation_details:
+                explicit_lot_rows = [
+                    row for row in list(group.get("lot_rows") or []) if isinstance(row, dict)
+                ]
+                explicit_allocation_lots = [
+                    row for row in list(group.get("allocation_lots") or []) if isinstance(row, dict)
+                ]
+                normalized_group["allocation_lots"] = [
+                    cls._normalized_allocation_lot(row)
+                    for row in (explicit_allocation_lots or explicit_lot_rows)
+                ]
+                normalized_group["lot_rows"] = [
+                    cls._normalized_lot_row(row) for row in explicit_lot_rows
+                ]
+            else:
+                normalized_group.pop("allocation_lots", None)
+                normalized_group.pop("lot_rows", None)
             normalized_group["row_span"] = 1 + len(flow_rows)
             normalized_group.pop("rows", None)
             normalized_groups.append(normalized_group)

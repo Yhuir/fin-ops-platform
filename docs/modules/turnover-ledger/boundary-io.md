@@ -42,7 +42,8 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 页面 rows/groups/summary/statistics | 前端页面 | 直接由当前 canonical snapshot 计算；API 不返回 `read_model_status`、`source_versions`、`refresh_enqueued` 或 refresh scope |
+| 页面 rows/groups/summary/statistics | 前端页面 | 直接由当前 canonical snapshot 计算；页面 grouped DTO 保留 `summary_row` 与 `flow_rows`，不传输未被页面消费的 `allocation_lots` / `lot_rows`；API 不返回 `read_model_status`、`source_versions`、`refresh_enqueued` 或 refresh scope |
+| 导出 grouped payload | XLSX export owner | 复用同一 canonical query，但明确包含 normalized `allocation_lots` / `lot_rows`，保证导出财务字段不因页面瘦身而丢失。 |
 | 统一配对与结算状态 | 外部往来款页面 | 每个 active canonical case 必须独立校验完整且唯一的 bank members、同一业务语义、现金差额和 `principal-settlement` 余额。非零 active case 输出 `cash_pair_linked=true` / `paired_unsettled=true` 及待还/待收余额；只有现金差额和业务余额都为零才输出 `cash_closure_linked=true`。relation mode/source 不得替代计算证明 |
 | 写操作结果 | 当前页面 | 按钮立即进入提交中/disabled；成功后当前页只发一次正常 GET。GET 失败提示“写入已成功、页面重载失败”，不得把成功写入改写为失败 |
 | 关联台可见性 | 关联台 | 关联台在自己下一次访问/手动刷新时读取同一 `app.workbench_pair_relations`；外部往来款写路径不触发关联台读取 |

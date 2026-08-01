@@ -58,12 +58,30 @@ function upgradedRows() {
         primary: {
           id: "txn-paid-pending",
           counterparty_name: "云南开票供应商",
+          counterparty_account_no: "6222000011112222",
+          counterparty_bank_name: "工行昆明分行",
           trade_time: "2026-04-19T10:52:02+08:00",
+          booked_date: "2026-05-02",
           amount: "1200.00",
           debit_amount: "1200.00",
+          credit_amount: "0.00",
+          balance: "9800.00",
+          currency: "人民币元",
           bank_name: "建设银行",
+          bank_short_name: "建行",
+          account_name: "云南溯源科技有限公司",
           account_last4: "8106",
           summary: "电子转账",
+          remark: "维护费",
+          statement_serial_no: "stmt-paid-pending",
+          enterprise_serial_no: "ent-paid-pending",
+          voucher_type: "电子凭证",
+          voucher_no: "v-paid-pending",
+          effective_tag_code: "equipment_purchase",
+          effective_tag_label: "设备采购",
+          effective_tag_primary_label: "货款",
+          effective_tag_sub_label: "设备采购",
+          effective_tag_label_path: ["货款", "设备采购"],
         },
         relation_count: 1,
         linked_relation_count: 1,
@@ -385,22 +403,28 @@ function pendingRuleClosureRow(id: string, counterpartyName: string, statusLabel
 
 function batchAttachRow() {
   const base = upgradedRows()[0];
+  const bankTransaction = {
+    ...base.bank_transaction,
+    id: "txn-paid-pending-2",
+    counterparty_name: "云南开票供应商二号",
+    debit_amount: "36.00",
+    amount: "36.00",
+    trade_time: "2026-04-20T10:52:02+08:00",
+    booked_date: "2026-05-03",
+    summary: "小额设备款",
+    remark: "批量选择验证",
+    statement_serial_no: "stmt-paid-pending-2",
+    enterprise_serial_no: "ent-paid-pending-2",
+    voucher_no: "v-paid-pending-2",
+  };
   return {
     ...base,
     id: "txn-paid-pending-2",
-    bank_transaction: {
-      ...base.bank_transaction,
-      id: "txn-paid-pending-2",
-      counterparty_name: "云南开票供应商二号",
-      debit_amount: "36.00",
-      amount: "36.00",
-      trade_time: "2026-04-20T10:52:02+08:00",
-      booked_date: "2026-05-03",
-      summary: "小额设备款",
-      remark: "批量选择验证",
-      statement_serial_no: "stmt-paid-pending-2",
-      enterprise_serial_no: "ent-paid-pending-2",
-      voucher_no: "v-paid-pending-2",
+    bank_transaction: bankTransaction,
+    bank_transactions: {
+      ...base.bank_transactions,
+      primary: bankTransaction,
+      summaries: [bankTransaction],
     },
     oa: {
       primary: { id: "oa-paid-pending-2", applicant: "张三", application_type: "支付", project_name: "维护项目二期", status: "进行中" },
@@ -1143,7 +1167,7 @@ describe("Pending invoices page", () => {
     await within(page).findByText("云南开票供应商");
     expect(
       fetchMock.mock.calls.some(([input]) => new URL(String(input), "http://localhost").pathname === "/api/pending-invoices/filter-options"),
-    ).toBe(false);
+    ).toBe(true);
 
     await user.click(within(page).getByRole("button", { name: "筛选 对方户名" }));
     const filterMenu = await screen.findByRole("menu", { hidden: true });

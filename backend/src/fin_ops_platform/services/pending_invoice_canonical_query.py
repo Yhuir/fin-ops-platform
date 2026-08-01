@@ -13,6 +13,9 @@ from fin_ops_platform.services.pending_invoice_rules import (
     pending_invoice_group_for_category,
     pending_invoice_tag_group_sets,
 )
+from fin_ops_platform.services.bank_transaction_category_service import (
+    bank_transaction_tag_dictionary_display_payload,
+)
 from fin_ops_platform.services.pending_invoice_relation_identity import (
     is_valid_pending_invoice_oa_row_id,
 )
@@ -1035,7 +1038,7 @@ ranked_options as (
         count(*)::integer as option_count,
         row_number() over (partition by field order by count(*) desc, value) as option_rank
     from option_values
-    where value is not null
+    where %s::boolean and value is not null
     group by field, value
 )
 select
@@ -1428,6 +1431,7 @@ class PostgresPendingInvoiceCanonicalRepository:
                         page_size,
                         (page - 1) * page_size,
                         *source_params,
+                        bool(request.get("_include_filter_options")),
                         direction,
                         direction,
                         direction,
@@ -1585,16 +1589,17 @@ class LocalPendingInvoiceCanonicalRepository:
             for transaction in transactions
         )
         options: list[dict[str, Any]] = []
-        for field in FILTER_EXPRESSIONS:
-            counts: dict[str, int] = {}
-            for row in rows:
-                value = str(PendingInvoiceQueryService._row_field_value(row, field) or "").strip()
-                if value:
-                    counts[value] = counts.get(value, 0) + 1
-            options.extend(
-                {"field": field, "value": value, "count": count}
-                for value, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:FILTER_OPTION_LIMIT]
-            )
+        if request.get("_include_filter_options"):
+            for field in FILTER_EXPRESSIONS:
+                counts: dict[str, int] = {}
+                for row in rows:
+                    value = str(PendingInvoiceQueryService._row_field_value(row, field) or "").strip()
+                    if value:
+                        counts[value] = counts.get(value, 0) + 1
+                options.extend(
+                    {"field": field, "value": value, "count": count}
+                    for value, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:FILTER_OPTION_LIMIT]
+                )
         return {
             "rows": selected,
             "total": len(rows),
@@ -1711,6 +1716,7 @@ class PendingInvoiceCanonicalQueryService:
 
     def rows(self, query: dict[str, list[str]]) -> dict[str, Any]:
         request = _request(query)
+        request["_include_filter_options"] = False
         page = _positive_int(query.get("page", [1])[0], field="page")
         page_size = _positive_int(query.get("page_size", [50])[0], field="page_size")
         if page_size > PAGE_SIZE_LIMIT:
@@ -1719,7 +1725,7 @@ class PendingInvoiceCanonicalQueryService:
                 f"page_size must be between 1 and {PAGE_SIZE_LIMIT}.",
             )
         payload = self._repository.query(request, page=page, page_size=page_size)
-        rows = [_row_payload(row) for row in list(payload.get("rows") or [])]
+        rows = [_compact_page_row(_row_payload(row)) for row in list(payload.get("rows") or [])]
         if callable(self._row_normalizer):
             rows = self._row_normalizer(rows, settings_payload=payload.get("settings"))
         return {
@@ -1738,17 +1744,21 @@ class PendingInvoiceCanonicalQueryService:
                 "source_summary": dict(payload.get("source_summary") or {}),
             },
             "statistics": dict(payload.get("statistics") or {}),
-            "tag_dictionary": dict((payload.get("settings") or {}).get("bank_transaction_tags") or {}),
+            "tag_dictionary": bank_transaction_tag_dictionary_display_payload(
+                (payload.get("settings") or {}).get("bank_transaction_tags")
+            ),
             "filter_options": _filter_options_payload(request, payload),
         }
 
     def filter_options(self, query: dict[str, list[str]]) -> dict[str, Any]:
         request = _request(query)
+        request["_include_filter_options"] = True
         payload = self._repository.query(request, page=1, page_size=1)
         return _filter_options_payload(request, payload)
 
     def all_rows(self, query: dict[str, list[str]]) -> dict[str, Any]:
         request = _request(query)
+        request["_include_filter_options"] = False
         payload = self._repository.query(
             request,
             page=1,
@@ -1761,7 +1771,7 @@ class PendingInvoiceCanonicalQueryService:
                 f"导出结果超过 {PENDING_INVOICE_EXPORT_ROW_LIMIT} 行，请缩小筛选范围后重试。",
                 details={"total": total, "limit": PENDING_INVOICE_EXPORT_ROW_LIMIT},
             )
-        rows = [_row_payload(row) for row in list(payload.get("rows") or [])]
+        rows = [_compact_page_row(_row_payload(row)) for row in list(payload.get("rows") or [])]
         if callable(self._row_normalizer):
             rows = self._row_normalizer(rows, settings_payload=payload.get("settings"))
         return {"rows": rows, "total": total}
@@ -1945,7 +1955,7 @@ class PendingInvoiceCanonicalQueryService:
         oa_payload = row.get("oa") if isinstance(row.get("oa"), dict) else {}
         bank_payload = row.get("bank_transactions") if isinstance(row.get("bank_transactions"), dict) else {}
         result = {
-            "transaction_summary": dict(row.get("bank_transaction") or {}),
+            "transaction_summary": dict(bank_payload.get("primary") or {}),
             "related_invoices": list(invoice_payload.get("summaries") or []),
             "invoice_summaries": list(invoice_payload.get("summaries") or []),
             "payment_rows": list(bank_payload.get("summaries") or []),
@@ -2404,12 +2414,11 @@ def _row_payload(row: dict[str, Any]) -> dict[str, Any]:
         ]
     return {
         "id": bank_transaction["id"],
-        "bank_transaction": bank_transaction,
         "bank_transactions": {
-            "primary": bank_summaries[0],
+            "primary": bank_transaction,
             "relation_count": len(bank_summaries),
             "has_multiple": len(bank_summaries) > 1,
-            "summaries": bank_summaries,
+            "summaries": bank_summaries if len(bank_summaries) > 1 else [],
             "payment_summary": {"paid_total": paid_total},
         },
         "invoice_acquisition_status": status,
@@ -2418,7 +2427,7 @@ def _row_payload(row: dict[str, Any]) -> dict[str, Any]:
             "relation_count": len(invoice_summaries),
             "linked_relation_count": len(invoice_summaries),
             "has_multiple": len(invoice_summaries) > 1,
-            "summaries": invoice_summaries,
+            "summaries": invoice_summaries if len(invoice_summaries) > 1 else [],
             "payment_summary": payment_summary,
         },
         "oa": {
@@ -2426,10 +2435,8 @@ def _row_payload(row: dict[str, Any]) -> dict[str, Any]:
             "relation_count": len(oa_summaries),
             "has_multiple": len(oa_summaries) > 1,
             "detail_available": any(bool(item.get("detail_available")) for item in oa_summaries),
-            "summaries": oa_summaries,
+            "summaries": oa_summaries if len(oa_summaries) > 1 else [],
         },
-        "invoices": invoice_summaries,
-        "oa_applicant": str((oa_summaries[0] if oa_summaries else {}).get("applicant") or "—"),
         "can_create_invoice": can_create_invoice,
         "available_actions": pending_invoice_available_actions(
             status,
@@ -2437,6 +2444,33 @@ def _row_payload(row: dict[str, Any]) -> dict[str, Any]:
         ),
         "relation_case_ids": list(row.get("relation_case_ids") or []),
     }
+
+
+def _compact_page_row(row: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(row)
+    legacy_bank = payload.get("bank_transaction")
+    bank_group = payload.get("bank_transactions")
+    if not isinstance(bank_group, dict):
+        bank_group = {}
+    if not isinstance(bank_group.get("primary"), dict) and isinstance(legacy_bank, dict):
+        bank_group["primary"] = dict(legacy_bank)
+    legacy_invoices = [
+        dict(item)
+        for item in list(payload.get("invoices") or [])
+        if isinstance(item, dict)
+    ]
+    invoice_group = payload.get("input_invoices")
+    if not isinstance(invoice_group, dict):
+        invoice_group = {}
+    if not isinstance(invoice_group.get("primary"), dict) and legacy_invoices:
+        invoice_group["primary"] = legacy_invoices[0]
+    if not list(invoice_group.get("summaries") or []) and len(legacy_invoices) > 1:
+        invoice_group["summaries"] = legacy_invoices
+    payload["bank_transactions"] = bank_group
+    payload["input_invoices"] = invoice_group
+    for legacy_field in ("bank_transaction", "invoices", "oa_applicant"):
+        payload.pop(legacy_field, None)
+    return payload
 
 
 def _local_row_matches(row: dict[str, Any], request: dict[str, Any]) -> bool:

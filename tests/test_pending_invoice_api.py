@@ -25,7 +25,13 @@ class PendingInvoiceApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["direction"], "expense")
         self.assertEqual(payload["rows"][0]["id"], transaction_id)
-        self.assertEqual(payload["rows"][0]["bank_transaction"]["counterparty_name"], "Vendor API")
+        self.assertEqual(
+            payload["rows"][0]["bank_transactions"]["primary"]["counterparty_name"],
+            "Vendor API",
+        )
+        self.assertNotIn("bank_transaction", payload["rows"][0])
+        self.assertNotIn("invoices", payload["rows"][0])
+        self.assertNotIn("oa_applicant", payload["rows"][0])
         self.assertTrue(payload["rows"][0]["can_create_invoice"])
         self.assertEqual(payload["rows"][0]["invoice_acquisition_status"]["code"], "paid_pending_invoice")
 
@@ -310,7 +316,11 @@ class PendingInvoiceApiTests(unittest.TestCase):
 
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["rows"][0]["bank_transaction"]["counterparty_name"], "Vendor No Repository")
+        self.assertEqual(
+            payload["rows"][0]["bank_transactions"]["primary"]["counterparty_name"],
+            "Vendor No Repository",
+        )
+        self.assertNotIn("bank_transaction", payload["rows"][0])
         self.assertIn("filter_options", payload)
         self.assertIn("fields", payload["filter_options"])
         self.assertNotIn("read_model_status", payload)

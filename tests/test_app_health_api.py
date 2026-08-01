@@ -4,9 +4,12 @@ import json
 import os
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from threading import Lock
+from time import sleep
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -386,6 +389,88 @@ class AppHealthApiTests(unittest.TestCase):
             app.handle_request("GET", "/api/app-health")
 
         self.assertEqual(calls, 1)
+
+    def test_app_health_runtime_snapshot_cache_is_single_flight(self) -> None:
+        app = build_application()
+        calls = 0
+        calls_lock = Lock()
+
+        def runtime_snapshot() -> dict[str, object]:
+            nonlocal calls
+            with calls_lock:
+                calls += 1
+            sleep(0.03)
+            return {
+                "read_model_statuses": {},
+                "worker_statuses": {},
+                "outbox_statuses": {},
+            }
+
+        app._state_store = SimpleNamespace(app_status_runtime_snapshot=runtime_snapshot)
+        app._app_status_runtime_snapshot_cache = None
+
+        with self._temporary_env(FIN_OPS_APP_STATUS_RUNTIME_SNAPSHOT_CACHE_TTL_SECONDS="30"):
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                snapshots = list(executor.map(lambda _index: app._app_status_runtime_statuses(), range(4)))
+
+        self.assertEqual(calls, 1)
+        self.assertTrue(all(snapshot["outbox_statuses"] == {} for snapshot in snapshots))
+
+    def test_app_health_ignores_completed_workbench_matching_history(self) -> None:
+        app = build_application()
+        app._workbench_reconciliation_dirty_queue = SimpleNamespace(
+            list_dirty_scopes=lambda: [
+                {
+                    "scope_month": "2026-05",
+                    "status": "completed",
+                    "updated_at": "2026-05-01T00:00:00+00:00",
+                }
+            ]
+        )
+
+        oa_sync = app._app_health_oa_sync_payload()
+        response = app.handle_request("GET", "/api/app-health")
+        payload = json.loads(response.body)
+
+        self.assertNotIn("workbench_matching_dirty_scopes", oa_sync)
+        self.assertEqual(payload["workbench_matching"]["dirty_scopes"], [])
+        self.assertEqual(payload["workbench_matching"]["status"], "ready")
+
+    def test_app_health_keeps_failed_workbench_matching_scope_visible(self) -> None:
+        app = build_application()
+        app._workbench_reconciliation_dirty_queue = SimpleNamespace(
+            list_dirty_scopes=lambda: [
+                {
+                    "scope_month": "2026-05",
+                    "status": "failed",
+                    "last_error": "matching failed",
+                    "updated_at": "2026-05-01T00:00:00+00:00",
+                }
+            ]
+        )
+
+        oa_sync = app._app_health_oa_sync_payload()
+
+        self.assertEqual(oa_sync["workbench_matching_dirty_scopes"][0]["status"], "failed")
+
+    def test_app_health_does_not_persist_unchanged_empty_alert_snapshot(self) -> None:
+        app = build_application()
+        saved_alerts: list[dict[str, object]] = []
+        app._state_store = SimpleNamespace(
+            storage_mode="postgres",
+            storage_backend="postgres",
+            app_status_runtime_snapshot=lambda: {
+                "read_model_statuses": {},
+                "worker_statuses": {},
+                "outbox_statuses": {},
+            },
+            save_app_health_alerts=lambda snapshot: saved_alerts.append(snapshot),
+        )
+
+        response = app.handle_request("GET", "/api/app-health")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(saved_alerts, [])
 
     def test_app_health_reuses_one_runtime_snapshot_with_cache_disabled(self) -> None:
         app = build_application()

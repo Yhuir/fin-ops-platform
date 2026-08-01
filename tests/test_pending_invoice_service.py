@@ -661,6 +661,34 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
 
         self.assertEqual(normalized[0]["bank_transaction"]["bank_short_name"], "中行")
 
+    def test_normalize_row_payloads_applies_bank_mapping_to_canonical_group(self) -> None:
+        service = PendingInvoiceQueryService(
+            import_service=ImportNormalizationService(existing_transactions=[], existing_invoices=[]),
+            category_service=BankTransactionCategoryService(),
+            app_settings_provider=lambda: {},
+        )
+
+        normalized = service.normalize_row_payloads(
+            [
+                {
+                    "id": "txn-1",
+                    "bank_transactions": {
+                        "primary": {"account_no": "6222000000001234"},
+                        "summaries": [{"account_no": "6222000000001234"}],
+                    },
+                }
+            ],
+            settings_payload={
+                "bank_account_mappings": [
+                    {"last4": "1234", "bank_name": "中国银行", "short_name": "中行"},
+                ]
+            },
+        )
+
+        bank_group = normalized[0]["bank_transactions"]
+        self.assertEqual(bank_group["primary"]["bank_short_name"], "中行")
+        self.assertEqual(bank_group["summaries"][0]["bank_short_name"], "中行")
+
     def test_transaction_rows_collapse_multi_bank_relation_into_one_grouped_row(self) -> None:
         vendor = self._counterparty("cp_vendor", "Vendor A")
         txn_1 = self._bank_transaction("txn_group_1", TransactionDirection.OUTFLOW, "Vendor A", "120.00")

@@ -58,6 +58,7 @@ class HttpSloProbeTests(unittest.TestCase):
         probe_paths = {probe.name: probe.path for probe in http_slo_probe.DEFAULT_API_PROBES}
         self.assertNotIn("/api/etc/batches", "\n".join(probe_paths.values()))
         self.assertIn("date_from=", probe_paths["bank_details_transactions"])
+        self.assertIn("include_statistics=false", probe_paths["cost_statistics_explorer_all"])
         self.assertIn("date_to=", probe_paths["bank_details_transactions"])
         self.assertIn("page=1", probe_paths["workbench_groups_all_paired"])
         self.assertIn("page_size=50", probe_paths["workbench_groups_all_paired"])

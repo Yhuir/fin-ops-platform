@@ -35,7 +35,7 @@ HTTP GET
 ```
 
 - 页面首次访问和浏览器刷新走同一条链。
-- 首次 explorer 请求读取完整 canonical snapshot 并返回全局 `statistics`；同一页面后续视图、范围和下钻请求发送 `include_statistics=false`，避免重复计算不变的页头统计。
+- 首次 explorer 内容请求发送 `include_statistics=false`，优先返回当前 scope 的表格/分组；内容可用后再以 `page_size=1` 非阻塞读取全局 `statistics`。统计失败不重新锁住已可用内容；手动刷新会重试两条职责分离的读链。
 - `include_statistics=false` 且范围不是 `all` 时，repository 用 `bank_transactions.txn_month` 下推范围。`time|bank_tag` 不读取 OA 配对关系；`project|bank|expense_type` 只读取命中银行流水的 active relation，并扩展该 relation 的全部银行/OA 成员，保证跨月份配对分配语义不变。
 - explorer 的 `query` 在 service 中折叠空白并限制为 200 字符，写入 cursor identity；policy 先过滤当前视图事实行，再计算 summary、facets、row count 和分页。`project|bank|expense_type` 搜索域只包含 OA 配对 allocation，`time|bank_tag` 搜索域只包含 canonical 银行事实。
 - 前端将后续请求限制在内容区：范围/视图只替换统计 surface，左栏选择只加载中/右栏，中栏选择只加载右栏；只有首次数据尚未验证时才使用页面内交互锁。
@@ -77,6 +77,7 @@ migration `0126` 负责停止遗留运行时事件并删除旧表。除该迁移
 ## 性能边界
 
 - 一次 API 请求只建立一个数据库快照，不轮询、不等待后台任务。
+- 用户可观察的首屏合同以 `include_statistics=false` 的 scoped 内容请求计时；全局 statistics 是随后发出的非阻塞辅助请求，必须单独记录延迟，不能冒充首屏成功或失败。
 - 分配计算按 relation 成员和 OA 付款明细线性遍历，不新增数据库查询或逐明细 I/O。
 - OA 查询只映射成本 policy 消费的父单字段、明细字段和明细金额，不递归复制附件/发票树；附件仍由其 owner 页面读取，不进入 Cost 请求内存。
 - 分页、详情和导出保持现有上限；导出仍受 `COST_STATISTICS_EXPORT_ROW_LIMIT` 保护。

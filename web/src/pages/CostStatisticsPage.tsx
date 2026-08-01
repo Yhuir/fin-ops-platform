@@ -589,6 +589,7 @@ export default function CostStatisticsPage() {
   const lastLockedFocusRef = useRef<HTMLElement | null>(null);
   const shouldRestoreFocusRef = useRef(false);
   const explorerRequestRef = useRef<AbortController | null>(null);
+  const statisticsRequestRef = useRef<AbortController | null>(null);
   const exportReferenceRequestRef = useRef<AbortController | null>(null);
   const exportRequestRef = useRef<AbortController | null>(null);
   const exportPreviewRequestRef = useRef<AbortController | null>(null);
@@ -893,15 +894,12 @@ export default function CostStatisticsPage() {
         const request = JSON.parse(explorerRequestKey) as CostStatisticsExplorerPageRequest;
         const payload = await fetchCostStatisticsExplorerPage({
           ...request,
-          includeStatistics: loadedStatisticsRefreshKeyRef.current !== statisticsRefreshKey,
+          includeStatistics: false,
           signal: controller.signal,
         });
         if (!controller.signal.aborted) {
-          if (payload.statistics) {
-            loadedStatisticsRefreshKeyRef.current = statisticsRefreshKey;
-            setPageStatistics(payload.statistics);
-          }
           setLoadedExplorer({ requestKey: explorerRequestKey, payload });
+          setIsExplorerLoading(false);
         }
       } catch (caught) {
         if (!controller.signal.aborted) {
@@ -927,8 +925,34 @@ export default function CostStatisticsPage() {
     domainRefreshNonce,
     explorerRequestKey,
     resetDetailSelection,
-    statisticsRefreshKey,
   ]);
+
+  useEffect(() => {
+    if (!active || loadedStatisticsRefreshKeyRef.current === statisticsRefreshKey) {
+      return undefined;
+    }
+    statisticsRequestRef.current?.abort();
+    const controller = new AbortController();
+    statisticsRequestRef.current = controller;
+    const request = JSON.parse(explorerRequestKey) as CostStatisticsExplorerPageRequest;
+    void fetchCostStatisticsExplorerPage({
+      ...request,
+      pageSize: 1,
+      includeStatistics: true,
+      signal: controller.signal,
+    }).then((payload) => {
+      if (!controller.signal.aborted && payload.statistics) {
+        loadedStatisticsRefreshKeyRef.current = statisticsRefreshKey;
+        setPageStatistics(payload.statistics);
+      }
+    }).catch(() => undefined);
+    return () => {
+      controller.abort();
+      if (statisticsRequestRef.current === controller) {
+        statisticsRequestRef.current = null;
+      }
+    };
+  }, [active, statisticsRefreshKey]);
 
   async function loadMoreExplorerRows() {
     if (

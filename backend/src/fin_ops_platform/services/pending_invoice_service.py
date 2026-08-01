@@ -240,6 +240,14 @@ class PendingInvoiceQueryService:
         bank = payload.get("bank_transaction")
         if isinstance(bank, dict):
             self._apply_bank_identity(bank, bank_account_mappings=bank_account_mappings)
+        bank_group = payload.get("bank_transactions")
+        if isinstance(bank_group, dict):
+            primary = bank_group.get("primary")
+            if isinstance(primary, dict):
+                self._apply_bank_identity(primary, bank_account_mappings=bank_account_mappings)
+            for summary in list(bank_group.get("summaries") or []):
+                if isinstance(summary, dict):
+                    self._apply_bank_identity(summary, bank_account_mappings=bank_account_mappings)
         return payload
 
     def _get_transaction(self, transaction_id: str) -> BankTransaction:

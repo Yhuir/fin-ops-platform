@@ -3482,9 +3482,11 @@ class Application:
             attention_jobs=attention_jobs,
             alerts={"active": [], "recent_recovered": []},
         )
+        previous_alert_snapshot = self._app_health_alert_service.snapshot()
         alerts = self._app_health_alert_service.evaluate(snapshot)
-        if self._state_store is not None:
-            self._state_store.save_app_health_alerts(self._app_health_alert_service.snapshot())
+        current_alert_snapshot = self._app_health_alert_service.snapshot()
+        if self._state_store is not None and current_alert_snapshot != previous_alert_snapshot:
+            self._state_store.save_app_health_alerts(current_alert_snapshot)
         snapshot["alerts"] = alerts
         metrics = snapshot.get("metrics") if isinstance(snapshot.get("metrics"), dict) else {}
         metrics["active_alert_count"] = len(alerts.get("active", [])) if isinstance(alerts, dict) else 0
@@ -3510,33 +3512,38 @@ class Application:
                 "outbox_statuses": {},
             }
         ttl_seconds = self._app_status_runtime_snapshot_cache_ttl_seconds()
-        if ttl_seconds > 0:
+        cache_lock = getattr(self, "_app_status_runtime_snapshot_cache_lock", None)
+
+        def load_snapshot() -> dict[str, object]:
             now = monotonic()
-            cache_lock = getattr(self, "_app_status_runtime_snapshot_cache_lock", None)
-            if cache_lock is not None:
-                with cache_lock:
-                    cached = getattr(self, "_app_status_runtime_snapshot_cache", None)
-            else:
-                cached = getattr(self, "_app_status_runtime_snapshot_cache", None)
+            cached = getattr(self, "_app_status_runtime_snapshot_cache", None)
             if isinstance(cached, tuple) and len(cached) == 2:
                 expires_at, payload = cached
                 if isinstance(expires_at, (int, float)) and now < float(expires_at) and isinstance(payload, dict):
                     return deepcopy(payload)
+            snapshot = snapshot_provider()
+            normalized = snapshot if isinstance(snapshot, dict) else {
+                "read_model_statuses": None,
+                "worker_statuses": {},
+                "outbox_statuses": {},
+            }
+            self._app_status_runtime_snapshot_cache = (
+                monotonic() + ttl_seconds,
+                deepcopy(normalized),
+            )
+            return normalized
+
+        if ttl_seconds > 0 and cache_lock is not None:
+            with cache_lock:
+                return load_snapshot()
+        if ttl_seconds > 0:
+            return load_snapshot()
         snapshot = snapshot_provider()
-        normalized = snapshot if isinstance(snapshot, dict) else {
+        return snapshot if isinstance(snapshot, dict) else {
             "read_model_statuses": None,
             "worker_statuses": {},
             "outbox_statuses": {},
         }
-        if ttl_seconds > 0:
-            cache_entry = (monotonic() + ttl_seconds, deepcopy(normalized))
-            cache_lock = getattr(self, "_app_status_runtime_snapshot_cache_lock", None)
-            if cache_lock is not None:
-                with cache_lock:
-                    self._app_status_runtime_snapshot_cache = cache_entry
-            else:
-                self._app_status_runtime_snapshot_cache = cache_entry
-        return normalized
 
     @staticmethod
     def _emit_app_health_timing(snapshot: dict[str, object]) -> None:
@@ -3652,7 +3659,17 @@ class Application:
         if not isinstance(payload, dict):
             payload = {}
         matching_queue = getattr(self, "_workbench_reconciliation_dirty_queue", None)
-        matching_dirty_scopes = matching_queue.list_dirty_scopes() if matching_queue is not None else []
+        matching_dirty_scopes = (
+            [
+                entry
+                for entry in matching_queue.list_dirty_scopes()
+                if isinstance(entry, dict)
+                and str(entry.get("status") or "dirty").strip().lower()
+                in {"dirty", "retry", "processing", "failed"}
+            ]
+            if matching_queue is not None
+            else []
+        )
         if not matching_dirty_scopes:
             return payload
         payload["workbench_matching_dirty_scopes"] = matching_dirty_scopes

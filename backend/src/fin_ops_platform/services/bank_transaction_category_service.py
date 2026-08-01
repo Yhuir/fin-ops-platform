@@ -514,6 +514,34 @@ def default_bank_transaction_tag_dictionary_payload() -> dict[str, Any]:
     }
 
 
+def bank_transaction_tag_dictionary_display_payload(
+    payload: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Return only the tag metadata consumed by list-page clients."""
+    source = payload if isinstance(payload, dict) else default_bank_transaction_tag_dictionary_payload()
+    public_fields = (
+        "code",
+        "path",
+        "label",
+        "source",
+        "status",
+        "output_primary_label",
+        "output_sub_label",
+        "output_third_label",
+        "turnover_role",
+        "turnover_action_type",
+        "turnover_family",
+    )
+    return {
+        "version": int(source.get("version") or BANK_TRANSACTION_TAG_DICTIONARY_INITIAL_VERSION),
+        "definitions": [
+            {field: definition[field] for field in public_fields if field in definition}
+            for definition in list(source.get("definitions") or [])
+            if isinstance(definition, dict) and str(definition.get("code") or "").strip()
+        ],
+    }
+
+
 class BankTransactionCategoryError(ValueError):
     def __init__(
         self,

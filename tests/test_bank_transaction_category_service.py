@@ -5,15 +5,39 @@ import tempfile
 
 from fin_ops_platform.services.bank_transaction_category_service import (
     BankAutoTagRulesValidationError,
-    BankTransactionCategoryConflictError,
-    BankTransactionCategoryValidationError,
     BANK_TRANSACTION_CATEGORY_LABELS,
+    BankTransactionCategoryConflictError,
     BankTransactionCategoryService,
+    BankTransactionCategoryValidationError,
+    bank_transaction_tag_dictionary_display_payload,
 )
 from fin_ops_platform.services.bank_batch_application_service import canonical_snapshot_version
 
 
 class BankTransactionCategoryServiceTests(unittest.TestCase):
+    def test_display_dictionary_excludes_runtime_matching_rules(self) -> None:
+        payload = bank_transaction_tag_dictionary_display_payload(
+            {
+                "version": 7,
+                "definitions": [
+                    {
+                        "code": "fee",
+                        "label": "手续费",
+                        "path": ["费用", "手续费"],
+                        "source": "system",
+                        "status": "active",
+                        "rules": {"contains_any": ["手续费"]},
+                        "account_scope": ["6386"],
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(payload["version"], 7)
+        self.assertEqual(payload["definitions"][0]["code"], "fee")
+        self.assertNotIn("rules", payload["definitions"][0])
+        self.assertNotIn("account_scope", payload["definitions"][0])
+
     def test_parse_normalized_bank_flow_fixture_into_file_rules(self) -> None:
         fixture_path = Path("fixtures/bank_auto_tag_rules/bank_flow_tag_rules_ui2.normalized.json")
         source = json.loads(fixture_path.read_text(encoding="utf-8"))

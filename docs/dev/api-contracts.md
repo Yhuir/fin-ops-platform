@@ -67,6 +67,7 @@
 
 - query 保持 `scope`、`view`、`project_scope`、筛选、cursor 与 `page_size` 合同；可选 `query` 会折叠空白并限制为 200 字符。
 - 每个请求从一个 PostgreSQL `REPEATABLE READ READ ONLY` snapshot 读取 canonical 银行流水、OA、正式关系、标签和设置，再返回 `summary`、`statistics`、`facets`、`rows`、`row_count` 与 `next_cursor`。
+- `include_statistics=false` 时 `statistics=null`，repository 可按当前 scope 下推事实读取。成本统计首屏先用该模式取得可见内容，再以独立 `page_size=1` 请求非阻塞加载全局 statistics；辅助统计失败不得清空或重新锁住已返回的内容。
 - `query` 只搜索当前 view 的事实域，并在 summary、facets、row count 和 cursor 分页之前生效；cursor identity 必须包含规范化 query，禁止跨搜索条件复用。
 - `project|bank|expense_type` 只搜索 OA 配对 allocation；`time|bank_tag` 只搜索 canonical 银行事实。`time` 行返回真实银行对手方、标签和摘要，不用 OA 占位项目/费用类型。
 - 成功固定返回 `200`；不返回 `read_model_status`、`statistics_status`、Cost scope/version，也不返回 `202/409 read model not fresh`。
@@ -528,9 +529,9 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 | `collected_amount` | 该类别累计已收款发生额。 |
 | `pending_amount` / `closed_amount` / `row_count` | 兼容字段；`pending_amount` 等于待还款与待收款余额合计，`closed_amount` 固定为 `0.00`。 |
 
-`view=grouped` 响应中的 `groups[*]` 还应稳定输出 `pending_repayment_amount`、`repaid_amount`、`pending_collection_amount`、`collected_amount`、`closed_amount`、`cash_pair_linked`、`cash_pair_case_id`、`paired_unsettled` 和 `cash_closure_linked`。`summary_row` 和 `flow_rows[*]` 应携带 `bank_account_labels`、`category_primary_label`、`category_sub_label`、`category_third_label`、`category_label_path` 和 `repayment_remark`；flow row 还应输出 `cash_pair_linked` / `cash_pair_case_id`。金额列归属以 `turnover_action_type` 归一后的 `borrow_amount` / `repayment_amount` 为准，不得仅按现金流入/流出判断。前端表头应将 `borrow_amount` 展示为“往来发生”、`repayment_amount` 展示为“结清发生”；金额 chip 使用 `borrow_direction` / `repayment_direction` 展示“收”或“支”，并按实际现金方向着色。余额为零但没有 active case 时，`pending_direction=none`，且不得输出闭环状态。
+`view=grouped` 响应中的 `groups[*]` 还应稳定输出 `pending_repayment_amount`、`repaid_amount`、`pending_collection_amount`、`collected_amount`、`closed_amount`、`cash_pair_linked`、`cash_pair_case_id`、`paired_unsettled` 和 `cash_closure_linked`。页面响应保留 `summary_row` 和 `flow_rows[*]`，不返回浏览器未消费的 `allocation_lots` / `lot_rows`；导出内部 grouped payload 仍保留这两组明细。`summary_row` 和 `flow_rows[*]` 应携带 `bank_account_labels`、`category_primary_label`、`category_sub_label`、`category_third_label`、`category_label_path` 和 `repayment_remark`；flow row 还应输出 `cash_pair_linked` / `cash_pair_case_id`。金额列归属以 `turnover_action_type` 归一后的 `borrow_amount` / `repayment_amount` 为准，不得仅按现金流入/流出判断。前端表头应将 `borrow_amount` 展示为“往来发生”、`repayment_amount` 展示为“结清发生”；金额 chip 使用 `borrow_direction` / `repayment_direction` 展示“收”或“支”，并按实际现金方向着色。余额为零但没有 active case 时，`pending_direction=none`，且不得输出闭环状态。
 
-当响应携带 `read_model_status` 且不为 `fresh` 时，前端可以展示当前可用数据，但必须把闭环确认、流水选择、补充信息编辑等写操作置为不可用，直到后续查询恢复 fresh。未返回 `read_model_status` 时按 `fresh` 处理。
+页面直接读取 canonical facts，响应不携带 `read_model_status`、source version、refresh job 或 barrier。写操作是否允许只由权限、当前 canonical relation 前置条件和业务校验决定，不得恢复 read-model polling/fallback。
 
 外部往来款 `deterministic` 只表示系统识别到零差额计算结果，不表示已闭环，也不形成关联台关系组。外部往来闭环的共同事实源是 Workbench active pair relation；来源可以是外部往来页人工确认闭环，也可以是关联台已经把同一往来组内的银行收入/支出配成同一个零差额 case。单个 active case 只有在银行成员完整且唯一、至少一收一支、业务语义一致、现金差额和业务余额都为 `0.00` 时才输出 `cash_closure_linked=true`；active case 余额非零时输出 `cash_pair_linked=true`、`paired_unsettled=true`，并保留真实待还/待收余额。不同 active case 必须分别结算，禁止组级净额抵消。relation mode/source/provenance 只作诊断，不参与闭环资格判断。`view=grouped` 的 `summary_row` 和 `flow_rows[*]` 必须输出 `linked_oa`、`linked_invoice`、`cash_closure_linked`、`cash_closure_case_id`、`cash_closure_source`、`cash_closure_relation_id`；前端只能据此显示“已关联 OA”“已关联 发票”“收支闭环”三个正向 chip，并可据 `cash_pair_linked && !cash_closure_linked` 显示“已配对未结清”。`cash_closure_relation_id` 只用于兼容历史上显式携带 `special_metadata.turnover_relation_id` 的旧闭环，不得从 `cash_closure_case_id` 猜测；现代闭环该字段为空，撤回按 canonical case id 执行。若所选银行流水已存在 OA + 银行 active relation，确认闭环应把新增流水原子扩展进同一个 `turnover_manual_closure` case。active relation 继续决定外部往来闭环 ownership；关联台展示区由该 relation 的显式 completion contract 判定。
 
@@ -621,6 +622,8 @@ rows、`statistics`、`category_counts`、pagination 和当前目标行关系标
 当 `category_resolution_status=needs_confirmation` 时，前端只能展示 `auto_candidate_categories` 作为确认项，不得回退到全量银行明细标签字典。确认后接口返回的行应表现为 `manual_confirmed`，`effective_*` 字段按确认标签填充；撤销后回到当前自动规则重新计算结果。外部往来规则命中但缺少第三层标签时，候选项为同一规则展开出的 `个人往来`、`公司往来`、`银行往来`、`业务往来` 四类第三层标签，`turnover_action_type` 来自规则。
 
 当 `category_resolution_status=unmatched` 且没有 `effective_category_code` 时，前端可展示 `待分类` 人工补分类入口。该入口使用当前响应中的 `bank_transaction_tags.definitions` 过滤 active 标签后按普通主/子标签和外部往来三层标签展示，不能调用自动候选确认接口。
+
+列表 `bank_transaction_tags.definitions` 只返回 code/path/label/status/source 与输出/往来展示元数据；自动匹配 `rules`、account scope 和其它执行期字段不得下发。rows 以 `effective_*`、`auto_*`、candidate 和 relation 字段为展示事实，不再返回与 `effective_*` 重复的旧 `category_*`、`manual_category_*` 别名或 `auto_category_evidence`。
 
 自动候选生成按优先级层级收敛：`内部往来款` priority `1` 先执行并命中即停止；普通规则按 priority 从小到大分桶执行。某个普通 priority 层级一旦存在命中，后端不再检查更低优先级层级；该层级命中一个标签返回 `auto_matched`，命中多个标签返回 `needs_confirmation`，候选列表只包含该层级命中的标签。
 
@@ -867,10 +870,10 @@ Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`sou
 
 契约要求：
 
-- 列表响应必须包含 rows、summary、filters、read model 状态和可解释的状态字段。
-- filter-options 必须来自后端事实，前端不能根据当前页 rows 自行构造全局选项；表头下拉筛选通过 `filters` JSON 提交，字段之间按 AND 组合，同一字段内多值按 IN 组合。
+- 列表响应必须包含 rows、summary、statistics、pagination、稳定筛选字段定义和可解释的状态字段；直接 canonical read 不返回 read model 状态、source version 或 refresh job。
+- filter-options 必须来自后端事实，前端不能根据当前页 rows 自行构造全局选项。`/rows` 不执行高基数 option 聚合；页面渲染 rows 后调用 `/filter-options`，每字段最多 50 项。表头下拉筛选通过 `filters` JSON 提交，字段之间按 AND 组合，同一字段内多值按 IN 组合。
 - `filters` 支持四区表字段：`counterparty_name`、`transaction_tag`、`bank_account`、`direction`、`seller_name`、`oa_applicant`、`oa_application_type`、`project_name` 等；SQL read model 和 query service 必须保持同一字段语义。
-- rows 中 `bank_transactions`、`input_invoices` 和 `oa` 都可以携带 `primary`、`relation_count`、`linked_relation_count`、`has_multiple`、`detail_mode` 和 `summaries`。同一 linked relation 下多笔银行流水、多张进项/销项发票或多张 OA 必须来自统一 `workbench_relation` distribution 并聚合为一条待找发票行；多笔银行流水时前端用 `bank_transactions.summaries` 展示真实对方户名列表，详情入口继续按 `kind=bank` 展开，不用 `+N` 替代户名，也不在户名下显示交易时间。多张发票或多张 OA 时前端仍用 `+N` 表达该类型全部成员，不再同时展示任一成员作为 primary，且同一多流水 relation 的其它成员不得再作为 standalone 行重复出现。
+- rows 中 `bank_transactions`、`input_invoices` 和 `oa` 都可以携带 `primary`、`relation_count`、`linked_relation_count`、`has_multiple`、`detail_mode` 和 `summaries`；单成员事实放在 `primary`，`summaries` 只在多成员时承载列表。旧重复字段 `bank_transaction`、`invoices`、`oa_applicant` 不再返回。同一 linked relation 下多笔银行流水、多张进项/销项发票或多张 OA 必须来自 active canonical relation distribution 并聚合为一条待找发票行；多笔银行流水时前端用 `bank_transactions.summaries` 展示真实对方户名列表，详情入口继续按 `kind=bank` 展开，不用 `+N` 替代户名，也不在户名下显示交易时间。多张发票或多张 OA 时前端仍用 `+N` 表达该类型全部成员，不再同时展示任一成员作为 primary，且同一多流水 relation 的其它成员不得再作为 standalone 行重复出现。
 - `bank_transactions.payment_summary.paid_total` 表示 relation 下 linked 流水合计；`input_invoices.payment_summary` 继续表达发票合计、已付合计、待付金额和差额。未被正式化为 active relation 的自动匹配 decision 不进入下游 relation distribution，也不能作为开票、付款或已关联状态证据。
 - 关系详情和候选发票接口必须返回来源、匹配原因、冲突原因和可操作权限；关系详情必须能表达同一关系中的全部付款流水、发票、OA 和 relation case id。`GET /api/pending-invoices/rows/{transaction_id}/relation-detail` 可接收 `kind=all|bank|invoice|oa`，默认 `all` 保持全量兼容；`bank`、`invoice`、`oa` 只返回对应类型列表，供 `+N` 分栏展开。
 - `requires_invoice` 在列表、filter-options 和导出中是“需要开票”状态桶，不是 `filter_group='requires_invoice'` 的 SQL/规则分组条件。支出状态桶包含 `paid_pending_invoice`、`paid_invoiced`、`paid_pending_future_invoice`、`invoice_not_fully_paid`；收入状态桶包含 `income_pending_invoice`、`income_invoiced`。`filter_group` / `matched_rule` 只用于解释规则命中和表头规则列筛选。

@@ -135,7 +135,8 @@ class PendingInvoiceCanonicalRepositoryTests(unittest.TestCase):
         self.assertIn("as excluded_values", page_sql)
         self.assertIn("as regex_values", page_sql)
         self.assertNotIn("read_model.", page_sql)
-        self.assertEqual(page_params[-6:-4], (50, 50))
+        self.assertEqual(page_params[-7:-5], (50, 50))
+        self.assertIs(page_params[-5], False)
         self.assertEqual(payload["pagination"], {"page": 2, "page_size": 50, "total": 0})
         self.assertNotIn("read_model_status", payload)
         self.assertNotIn("source_versions", payload)
@@ -300,6 +301,7 @@ class PendingInvoiceCanonicalQueryServiceTests(unittest.TestCase):
 
         request, page_size, page = repository.calls[0]
         self.assertEqual((page, page_size), (3, 25))
+        self.assertIs(request["_include_filter_options"], False)
         self.assertEqual(request["sort_field"], "amount")
         self.assertEqual(request["sort_direction"], "asc")
         self.assertEqual(request["filters"], [{"field": "status_code", "operator": "in", "values": ["cash_income"]}])
@@ -311,6 +313,16 @@ class PendingInvoiceCanonicalQueryServiceTests(unittest.TestCase):
             raised.exception.error_code,
             "pending_invoice_export_row_limit_exceeded",
         )
+
+    def test_filter_options_are_loaded_only_by_the_dedicated_query(self) -> None:
+        repository = _PageRepository()
+        service = PendingInvoiceCanonicalQueryService(repository=repository)
+
+        service.filter_options({"direction": ["expense"], "filter": ["all"]})
+
+        request, page_size, page = repository.calls[0]
+        self.assertIs(request["_include_filter_options"], True)
+        self.assertEqual((page, page_size), (1, 1))
 
     def test_candidate_query_is_validated_paginated_and_keeps_money_contract(self) -> None:
         repository = _PageRepository()
