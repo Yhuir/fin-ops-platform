@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: active
-stopped_at: Executing Phase 39 runtime worker topology convergence
-last_updated: "2026-08-01T12:18:00+08:00"
-last_activity: 2026-08-01 -- Phase 39 execution started
+stopped_at: Completed Phase 39 runtime worker topology convergence
+last_updated: "2026-08-01T14:10:00+08:00"
+last_activity: 2026-08-01 -- Phase 39 production verification completed
 progress:
   total_phases: 36
-  completed_phases: 10
+  completed_phases: 11
   total_plans: 86
-  completed_plans: 62
-  percent: 27
+  completed_plans: 63
+  percent: 28
 ---
 
 # Project State
@@ -21,22 +21,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-16)
 
 **Core value:** Preserve production finance workflow correctness while improving individual pages through isolated, reviewable GSD phases.
-**Current focus:** Phase 39 — runtime worker topology convergence
+**Current focus:** Phase 39 complete — runtime worker topology converged and production verified
 
 ## Current Position
 
-Phase: 39 (runtime worker topology convergence) — IN PROGRESS
+Phase: 39 (runtime worker topology convergence) — COMPLETE
 Plan: 1 of 1
-Status: Executing
-Last activity: 2026-08-01 -- Phase 39 execution started
+Status: Production verified
+Last activity: 2026-08-01 -- Phase 39 production verification completed
 
-Progress: [░░░░░░░░░░] in progress
+Progress: [██████████] complete
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 40
+- Total plans completed: 41
 - Baseline planning docs completed: 1
 - Average duration: N/A
 - Total execution time: 1 hour 40 minutes
@@ -58,6 +58,10 @@ Progress: [░░░░░░░░░░] in progress
 
 ### Decisions
 
+- [Phase 39]: Production release `main-a2d03430-20260801133923` is active at exact Git SHA `a2d034307da16a3c17d7ed0fb7b5620a90422f49`; pre/T+0/T+60/T+300, queue drain, canonical audits and six-worker inventory all passed.
+- [Phase 39]: Required runtime converged from 11 to 6 workers and read-model registry from 4 to 2; Search, no-OA derived runtime and capacity replicas are deleted without replacement cache, projection, worker or dependency.
+- [Phase 39]: Production HTTP evidence passed 32 core APIs/640 samples with max p95 751.858ms; current-month no-OA canonical list p95 is 983.787ms, current bank-flow list p95 is 64.097ms and internal-transfer detail p95 is 52.295ms.
+- [Phase 39]: Workbench is fresh with 35 valid bank-flow internal-transfer groups; PostgreSQL pool waiting and HTTP rejection/backpressure are zero. Legacy no-OA all-history query remains an explicit non-first-screen 2.59s boundary and does not justify rebuilding a retired runtime.
 - [Phase 38]: Production release `main-af00cefe-20260801041334` is active at exact Git SHA `af00cefece8f3420c46bba709e092165f2718dc2`; AppHealth, 16-route shell and authenticated ETC desktop/mobile probes passed with zero mutation.
 - [Phase 38]: The four-stage lifecycle is an O(1) presentation projection over existing batch/task facts; no stage API, persistent state, dependency, read model, worker, cache or timer was introduced.
 - [Phase 38]: Page-owned plate/keyword state, DOM, request parameters and conflicting card selectors are deleted. The formal optional API query contract remains available outside this page.

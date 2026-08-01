@@ -1,8 +1,10 @@
 ---
 phase: 39-runtime-worker-topology-convergence
 plan: "01"
-status: local-complete-production-pending
+status: complete
 completed_at: 2026-08-01
+release: main-a2d03430-20260801133923
+git_commit: a2d034307da16a3c17d7ed0fb7b5620a90422f49
 ---
 
 # Phase 39 实施摘要
@@ -28,9 +30,14 @@ completed_at: 2026-08-01
 - whole-repo active runtime scan：生产源码、前端 mock 中 Search/no-OA retired API/class/event 为零；测试中只保留明确负向退休守卫。
 - `git diff --check`：通过。
 
-## 待发布验证
+## 生产发布与验证
 
-- 推送 `origin/main` 并通过 `./scripts/deploy-oa.sh` 发布。
-- 验证 active release、精确 6 worker、旧 unit disabled/inactive、RabbitMQ/PostgreSQL durable queue drain、两个 read model ready。
-- 验证 no-OA canonical list/detail 与 Workbench internal-transfer 只读链；采集暖读 p50/p95/p99/max、HTTP error 和 runtime health。
-- 完成 T+0/T+60/T+300 release gate 后将结果写入 `39-VERIFICATION.md`。
+- `a2d034307da16a3c17d7ed0fb7b5620a90422f49` 已推送 `origin/main`，并通过 `scripts/with-production-admin-token.sh ./scripts/deploy-oa.sh` 发布为 `main-a2d03430-20260801133923`；上一版 `main-d18edd00-20260801072547` 保留为回滚锚点。
+- pre/T+0/T+60/T+300 release gate 全部 PASS；6 个 required worker 全部 active/available，`required_worker_not_ready=0`、`unknown_worker_count=0`，两个保留 read model ready。
+- PostgreSQL durable outbox/dirty scope、RabbitMQ pending/publishing/failed/dead-letter 均为 0；队列 T+300 稳定，page canonical audit 与 domain contract audit 通过，未触发回滚。
+- `no-oa-bank-batch`、`search`、`search-secondary`、`search-tertiary`、`workbench-secondary` systemd unit 全部 `inactive/disabled`。
+- 生产机内环认证 HTTP SLO：32 个核心 API × 20 次，640/640 成功，最慢 p95 `751.858ms`；当前月 no-OA canonical list p50/p95/p99 为 `893.811/983.787/1015.582ms`，p95 满足 `<1s` 首屏合同。
+- 当前产品 bank-flow 未提交/已提交列表 p95 为 `64.097/32.779ms`；内部转账详情 p95 `52.295ms`，20/20 均为 HTTP 200。
+- Workbench 读模型为 `fresh`；170 个 paired group 中 62 个来自 `bank_flow_rule_batch`，其中 35 个为内部转账，零空成员/非 paired 异常。抽样正式批次为 `submitted`、2 条流水且分类全部为 `internal_transfer`。
+- 运行时健康：HTTP active/peak 为 `1/4`，拒绝、body rejection 和 DB backpressure 均为 0；PostgreSQL pool size/max/available/waiting 为 `4/10/3/0`。
+- legacy `month=all` no-OA 跨全历史管理查询 p95 约 `2.59s`；它无当前前端消费者，不是首屏合同。本 Phase 不为已退役页面重建 cache/worker，并保留该显式上限记录。

@@ -797,10 +797,10 @@ Plans:
   4. Workbench generation, relation distribution, OA sync, import and settings maintenance correctness/rollback contracts remain unchanged.
   5. Full local gates, one pushed main deployment and T+300 production evidence prove queue drain, freshness, API performance, page isolation and rollback readiness.
 
-**Plans:** 0/1 plans complete
+**Plans:** 1/1 plans complete
 
 Plans:
 
-- [ ] 39-01-PLAN — Runtime topology convergence, legacy derived-chain deletion, regression gates, deployment and production verification.
+- [x] 39-01-PLAN — Runtime topology convergence, legacy derived-chain deletion, regression gates, deployment and production verification.
 
 ---
