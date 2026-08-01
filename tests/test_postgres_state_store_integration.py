@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from decimal import Decimal
 import json
@@ -27,6 +28,7 @@ from fin_ops_platform.services.postgres_repositories.bank_transaction_category i
 )
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.postgres_state_store import PostgresStateStore
+from fin_ops_platform.services.state_store_protocol import SettingsAccessControlCommitOutcomeUnknown
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.import_file_service import FileImportPreviewItem, FileImportService, FileImportSession
 from fin_ops_platform.services.imports import ImportNormalizationService
@@ -82,6 +84,60 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
                 )
                 raise RuntimeError("force rollback")
         self.assertEqual(fetch_scalar(self.database_url, "select count(*) from app.app_settings where settings_key = 'tx-rollback';"), "0")
+
+    def test_settings_acl_commit_lost_ack_reconciles_under_fresh_lock(self) -> None:
+        self.store.save_app_settings({"manual_projects": []})
+        base_connection = self.connection
+
+        class LostAckConnection:
+            def __init__(self) -> None:
+                self.lost_ack_emitted = False
+
+            def __getattr__(self, name: str):
+                return getattr(base_connection, name)
+
+            @contextmanager
+            def connection(self):
+                with base_connection.connection() as raw_connection:
+                    owner = self
+
+                    class RawProxy:
+                        def __init__(self) -> None:
+                            self.commit_count = 0
+
+                        def __getattr__(self, name: str):
+                            return getattr(raw_connection, name)
+
+                        def commit(self) -> None:
+                            self.commit_count += 1
+                            raw_connection.commit()
+                            if self.commit_count == 2 and not owner.lost_ack_emitted:
+                                owner.lost_ack_emitted = True
+                                raise ConnectionError("synthetic commit acknowledgement loss")
+
+                    yield RawProxy()
+
+        lost_ack_store = PostgresStateStore(
+            data_dir=Path(self._temp_dir.name),
+            connection=LostAckConnection(),
+        )
+        mutation_id = "integration-lost-ack"
+        with self.assertRaises(SettingsAccessControlCommitOutcomeUnknown):
+            with lost_ack_store.begin_settings_acl_critical_section(1) as critical_section:
+                critical_section.commit(
+                    {
+                        "allowed_usernames": ["YNSYLP005", "FULL001"],
+                        "readonly_export_usernames": [],
+                        "admin_usernames": ["YNSYLP005"],
+                        "full_access_usernames": ["FULL001"],
+                    },
+                    {"mutation_id": mutation_id, "actor_id": "YNSYLP005", "request_id": "integration"},
+                )
+
+        recovery = lost_ack_store.recover_settings_acl_commit(mutation_id)
+        self.assertTrue(recovery["audit_present"])
+        self.assertEqual(recovery["access_control"]["access_control_version"], 2)
+        self.assertEqual(recovery["access_control"]["full_access_usernames"], ["FULL001"])
 
     def test_manual_category_clear_executes_json_update_and_returns_to_unmatched_fact(self) -> None:
         repository = PostgresBankTransactionCategoryRepository(self.connection)
@@ -295,14 +351,8 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
                 },
             },
         }
+        self.store.save_app_settings(settings_payload)
         with self.connection.transaction() as transaction:
-            transaction.execute(
-                """
-                insert into app.app_settings(settings_key, settings_payload, raw_payload)
-                values ('app_settings', %s::jsonb, '{}'::jsonb)
-                """,
-                (json.dumps(settings_payload),),
-            )
             for row_id, amount in (("bank-direct-1", "8.80"), ("bank-direct-2", "12.30")):
                 transaction.execute(
                     """
@@ -423,7 +473,7 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
         )
 
     def test_formal_table_writes_for_settings_jobs_workbench_and_read_models(self) -> None:
-        self.store.save_app_settings({"admin_usernames": ["admin"], "manual_projects": []})
+        self.store.save_app_settings({"manual_projects": []})
         self.store.save_pending_invoice_commands(
             {
                 "cmd-1": {

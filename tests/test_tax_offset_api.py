@@ -5,7 +5,10 @@ from types import SimpleNamespace
 from unittest.mock import patch
 import unittest
 
-from tests.app_test_support import build_local_state_application as build_application
+from tests.app_test_support import (
+    build_local_state_application as build_application,
+    configure_access_control,
+)
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from tests.mock_import_files import CERTIFIED_JAN, MockImportFile
@@ -76,12 +79,10 @@ class TaxOffsetApiTests(unittest.TestCase):
         readonly: bool = False,
         allowed: bool = True,
     ) -> None:
-        app._app_settings_service.update_settings(
-            completed_project_ids=[],
-            bank_account_mappings=[],
-            allowed_usernames=[username] if allowed else [],
-            readonly_export_usernames=[username] if readonly else [],
-            admin_usernames=[],
+        configure_access_control(
+            app,
+            full_access=[username] if allowed and not readonly else [],
+            read_export_only=[username] if allowed and readonly else [],
         )
         app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
             user_id=f"{username}-id",

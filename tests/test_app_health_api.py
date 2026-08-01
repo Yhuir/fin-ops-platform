@@ -717,7 +717,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["error"], "admin_only")
 
     def test_operations_app_health_dashboard_returns_read_only_payload_for_admin(self) -> None:
-        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+        with self._temporary_env(FIN_OPS_DEV_ALLOW_LOCAL_SESSION="1", FIN_OPS_DEV_USERNAME="YNSYLP005"), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             setattr(app._state_store, "_connection", FakeOperationsDashboardConnection())
 
@@ -752,7 +752,7 @@ class AppHealthApiTests(unittest.TestCase):
 
         with (
             self._temporary_env(
-                FIN_OPS_ADMIN_USERNAMES="test_finops_user",
+                FIN_OPS_DEV_ALLOW_LOCAL_SESSION="1", FIN_OPS_DEV_USERNAME="YNSYLP005",
                 FIN_OPS_APP_HEALTH_DASHBOARD_CACHE_TTL_SECONDS="30",
             ),
             tempfile.TemporaryDirectory() as temp_dir,
@@ -784,7 +784,7 @@ class AppHealthApiTests(unittest.TestCase):
 
         with (
             self._temporary_env(
-                FIN_OPS_ADMIN_USERNAMES="test_finops_user",
+                FIN_OPS_DEV_ALLOW_LOCAL_SESSION="1", FIN_OPS_DEV_USERNAME="YNSYLP005",
                 FIN_OPS_APP_HEALTH_DASHBOARD_CACHE_TTL_SECONDS="30",
             ),
             tempfile.TemporaryDirectory() as temp_dir,
@@ -811,7 +811,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertNotIn("dashboard_cache_stale_after_error", second_payload["freshness"]["warnings"])
 
     def test_operations_input_invoice_usage_audit_returns_read_only_report_for_admin(self) -> None:
-        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+        with self._temporary_env(FIN_OPS_DEV_ALLOW_LOCAL_SESSION="1", FIN_OPS_DEV_USERNAME="YNSYLP005"), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             connection = FakeInputInvoiceUsageAuditConnection()
             inject_operations_audit_connection(app, connection)
@@ -837,7 +837,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertIn("app.workbench_pair_relations", queried_sql)
 
     def test_operations_output_invoice_collection_audit_returns_read_only_report_for_admin(self) -> None:
-        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+        with self._temporary_env(FIN_OPS_DEV_ALLOW_LOCAL_SESSION="1", FIN_OPS_DEV_USERNAME="YNSYLP005"), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             connection = FakeOutputInvoiceCollectionAuditConnection()
             inject_operations_audit_connection(app, connection)
@@ -862,7 +862,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertIn("app.workbench_pair_relations", queried_sql)
 
     def test_operations_input_invoice_usage_audit_reports_relation_issues_without_writes(self) -> None:
-        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+        with self._temporary_env(FIN_OPS_DEV_ALLOW_LOCAL_SESSION="1", FIN_OPS_DEV_USERNAME="YNSYLP005"), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             connection = FakeInputInvoiceUsageAuditConnection(
                 rows_by_check={
@@ -903,7 +903,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["error"], "admin_only")
 
     def test_operations_page_audit_returns_page_business_report_for_admin(self) -> None:
-        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+        with self._temporary_env(FIN_OPS_DEV_ALLOW_LOCAL_SESSION="1", FIN_OPS_DEV_USERNAME="YNSYLP005"), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             connection = FakePageBusinessAuditConnection()
             inject_operations_audit_connection(app, connection)
@@ -930,7 +930,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertNotIn("read_model.", queried_sql)
 
     def test_operations_page_audit_reports_page_invariants_without_writes(self) -> None:
-        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+        with self._temporary_env(FIN_OPS_DEV_ALLOW_LOCAL_SESSION="1", FIN_OPS_DEV_USERNAME="YNSYLP005"), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             connection = FakePageBusinessAuditConnection(
                 rows_by_check={
@@ -975,7 +975,7 @@ class AppHealthApiTests(unittest.TestCase):
         )
         for page_key, connection_factory, domain_key in cases:
             with self.subTest(page_key=page_key), self._temporary_env(
-                FIN_OPS_ADMIN_USERNAMES="test_finops_user"
+                FIN_OPS_DEV_ALLOW_LOCAL_SESSION="1", FIN_OPS_DEV_USERNAME="YNSYLP005"
             ), tempfile.TemporaryDirectory() as temp_dir:
                 app = build_application(data_dir=Path(temp_dir))
                 connection = connection_factory()
@@ -999,7 +999,7 @@ class AppHealthApiTests(unittest.TestCase):
 
     def test_operations_page_audit_dispatches_etc_direct_canonical_proof(self) -> None:
         with self._temporary_env(
-            FIN_OPS_ADMIN_USERNAMES="test_finops_user"
+            FIN_OPS_DEV_ALLOW_LOCAL_SESSION="1", FIN_OPS_DEV_USERNAME="YNSYLP005"
         ), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             connection = FakeInputInvoiceUsageAuditConnection()
@@ -1026,7 +1026,7 @@ class AppHealthApiTests(unittest.TestCase):
 
     def test_operations_page_audit_dispatches_secret_safe_settings_proof(self) -> None:
         with self._temporary_env(
-            FIN_OPS_ADMIN_USERNAMES="test_finops_user"
+            FIN_OPS_DEV_ALLOW_LOCAL_SESSION="1", FIN_OPS_DEV_USERNAME="YNSYLP005"
         ), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             connection = FakeInputInvoiceUsageAuditConnection()
@@ -1052,7 +1052,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(connection.executed, [])
 
     def test_operations_page_audit_requires_page_key(self) -> None:
-        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+        with self._temporary_env(FIN_OPS_DEV_ALLOW_LOCAL_SESSION="1", FIN_OPS_DEV_USERNAME="YNSYLP005"), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             inject_operations_audit_connection(app, FakePageBusinessAuditConnection())
 
@@ -1063,7 +1063,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["error"], "page_audit_page_required")
 
     def test_operations_page_audit_rejects_unsupported_page(self) -> None:
-        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+        with self._temporary_env(FIN_OPS_DEV_ALLOW_LOCAL_SESSION="1", FIN_OPS_DEV_USERNAME="YNSYLP005"), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             inject_operations_audit_connection(app, FakePageBusinessAuditConnection())
 
@@ -1074,7 +1074,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["error"], "unsupported_page_audit_page")
 
     def test_operations_page_audit_returns_system_proof_for_app_health(self) -> None:
-        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+        with self._temporary_env(FIN_OPS_DEV_ALLOW_LOCAL_SESSION="1", FIN_OPS_DEV_USERNAME="YNSYLP005"), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             inject_operations_audit_connection(app, FakePageBusinessAuditConnection())
 
@@ -1092,7 +1092,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["external_evidence"]["end_to_end_source_truth"], "unproven")
 
     def test_operations_page_audit_returns_unified_workbench_proof(self) -> None:
-        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+        with self._temporary_env(FIN_OPS_DEV_ALLOW_LOCAL_SESSION="1", FIN_OPS_DEV_USERNAME="YNSYLP005"), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             connection = FakePageBusinessAuditConnection()
             inject_operations_audit_connection(app, connection)
@@ -1114,7 +1114,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(connection.executed, [])
 
     def test_operations_page_audit_requires_postgres_connection(self) -> None:
-        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+        with self._temporary_env(FIN_OPS_DEV_ALLOW_LOCAL_SESSION="1", FIN_OPS_DEV_USERNAME="YNSYLP005"), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
 
             response = app.handle_request("GET", "/api/operations/app-health/page-audit?page=bank-details")
@@ -1129,7 +1129,7 @@ class AppHealthApiTests(unittest.TestCase):
             "/api/operations/app-health/output-invoice-collection-refresh",
             "/api/operations/app-health/pending-invoice-refresh",
         )
-        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+        with self._temporary_env(FIN_OPS_DEV_ALLOW_LOCAL_SESSION="1", FIN_OPS_DEV_USERNAME="YNSYLP005"), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             queue = FakeRuntimeQueueRepository()
             app._runtime_repositories = SimpleNamespace(queue_repository=queue)

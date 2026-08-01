@@ -17,8 +17,16 @@ class FakeApplication:
         self.calls: list[dict[str, object]] = []
         self.closed = False
 
-    def handle_request(self, method, path, body=None, headers=None):
-        self.calls.append({"method": method, "path": path, "body": body, "headers": dict(headers or {})})
+    def handle_request(self, method, path, body=None, headers=None, request_id=None):
+        self.calls.append(
+            {
+                "method": method,
+                "path": path,
+                "body": body,
+                "headers": dict(headers or {}),
+                "request_id": request_id,
+            }
+        )
         if self.error is not None:
             raise self.error
         return self.response
@@ -50,13 +58,14 @@ def invoke(adapter: WsgiHttpAdapter, *, method: str = "GET", path: str = "/healt
 
 
 class WsgiHttpAdapterTests(unittest.TestCase):
-    def test_dispatches_request_and_propagates_valid_request_id(self) -> None:
+    def test_dispatches_request_with_server_generated_request_id(self) -> None:
         application = FakeApplication()
 
         status, headers, body = invoke(WsgiHttpAdapter(application), request_id="request-123")
 
         self.assertEqual(status, "200 OK")
-        self.assertEqual(headers["X-Request-ID"], "request-123")
+        self.assertNotEqual(headers["X-Request-ID"], "request-123")
+        self.assertEqual(headers["X-Request-ID"], application.calls[0]["request_id"])
         self.assertEqual(headers["Content-Length"], str(len(body)))
         self.assertEqual(application.calls[0]["path"], "/health")
 

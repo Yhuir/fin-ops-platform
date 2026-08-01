@@ -23,34 +23,12 @@ class AppSettingsPendingInvoiceRulesGateway:
         actor_id: str,
         expected_version: int | None = None,
     ) -> dict[str, Any] | None:
-        update_rule_groups = getattr(self._app_settings_service, "update_pending_invoice_rule_groups", None)
-        if callable(update_rule_groups):
-            return update_rule_groups(
-                direction=direction,
-                editable_groups=editable_groups,
-                expected_version=expected_version,
-                actor_id=actor_id,
-            )
-        current = self.get_pending_invoice_settings_payload()
-        access_control = current.get("access_control") if isinstance(current.get("access_control"), dict) else {}
-        projects = current.get("projects") if isinstance(current.get("projects"), dict) else {}
-        normalized_direction = str(direction or "").strip()
-        settings = self._app_settings_service.update_settings(
-            completed_project_ids=list(projects.get("completed_project_ids") or projects.get("completed") or []),
-            bank_account_mappings=list(current.get("bank_account_mappings") or []),
-            allowed_usernames=list(access_control.get("allowed_usernames") or []),
-            readonly_export_usernames=list(access_control.get("readonly_export_usernames") or []),
-            admin_usernames=list(access_control.get("admin_usernames") or []),
-            workbench_column_layouts=current.get("workbench_column_layouts") if isinstance(current.get("workbench_column_layouts"), dict) else {},
-            oa_retention=current.get("oa_retention") if isinstance(current.get("oa_retention"), dict) else {},
-            oa_import=current.get("oa_import") if isinstance(current.get("oa_import"), dict) else {},
-            oa_invoice_offset=current.get("oa_invoice_offset") if isinstance(current.get("oa_invoice_offset"), dict) else {},
-            bank_transaction_tags=None,
-            pending_invoice_tag_groups=editable_groups if normalized_direction != "income" else None,
-            pending_output_invoice_tag_groups=editable_groups if normalized_direction == "income" else None,
-            actor_id=actor_id or "pending_invoice_rules",
+        return self._app_settings_service.update_pending_invoice_rule_groups(
+            direction=direction,
+            editable_groups=editable_groups,
+            expected_version=expected_version,
+            actor_id=actor_id,
         )
-        return {"settings": settings, "event": None}
 
 
 class PendingInvoiceRulesApplicationService:

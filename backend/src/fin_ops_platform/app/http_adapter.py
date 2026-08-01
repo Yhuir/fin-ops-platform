@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 from dataclasses import dataclass
 from http import HTTPStatus
 from time import monotonic
@@ -17,7 +16,6 @@ from fin_ops_platform.services.http_runtime_metrics import HTTP_RUNTIME_METRICS
 
 
 LOGGER = logging.getLogger("fin_ops_platform.http")
-REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 BODY_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
@@ -60,7 +58,7 @@ class WsgiHttpAdapter:
             body, body_error = self._read_body(environ, method=method, request_id=request_id)
             response = body_error or self._dispatch(method, path, body, self._headers(environ), request_id)
             status_code = int(response.status_code)
-            response.headers.setdefault("X-Request-ID", request_id)
+            response.headers["X-Request-ID"] = request_id
             encoded = response.body.encode("utf-8") if isinstance(response.body, str) else bytes(response.body)
             response.headers.setdefault("Content-Length", str(len(encoded)))
             start_response(
@@ -100,7 +98,13 @@ class WsgiHttpAdapter:
         request_id: str,
     ) -> Response:
         try:
-            return self._application.handle_request(method, path, body=body, headers=headers)
+            return self._application.handle_request(
+                method,
+                path,
+                body=body,
+                headers=headers,
+                request_id=request_id,
+            )
         except (PoolTimeout, TooManyRequests):
             HTTP_RUNTIME_METRICS.reject_database_backpressure()
             return self._json_error(
@@ -202,8 +206,8 @@ class WsgiHttpAdapter:
 
     @staticmethod
     def _request_id(environ: dict[str, Any]) -> str:
-        candidate = str(environ.get("HTTP_X_REQUEST_ID") or "").strip()
-        return candidate if REQUEST_ID_RE.match(candidate) else uuid4().hex
+        _ = environ
+        return uuid4().hex
 
     @staticmethod
     def _json_error(

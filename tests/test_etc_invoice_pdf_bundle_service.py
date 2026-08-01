@@ -189,11 +189,9 @@ class EtcInvoicePdfBundleApiTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             app = build_local_state_application(data_dir=Path(temp_dir))
             try:
-                app._access_control_service.dynamic_allowed_usernames_provider = lambda: ["ADMIN", "NORMAL"]
-                app._access_control_service.dynamic_admin_usernames_provider = lambda: ["ADMIN"]
                 app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
                     user_id=f"{str(token).split('-')[0]}-id",
-                    username="ADMIN" if token == "admin-token" else "NORMAL",
+                    username="YNSYLP005" if token == "admin-token" else "NORMAL",
                     nickname="User",
                     display_name="User",
                     dept_id="D99",

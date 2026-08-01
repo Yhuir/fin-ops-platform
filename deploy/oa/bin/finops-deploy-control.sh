@@ -284,8 +284,7 @@ assert_runtime_env_contract() {
   for required_key in \
     FIN_OPS_OA_BASE_URL \
     FIN_OPS_OA_USER_INFO_PATH \
-    FIN_OPS_ALLOWED_USERNAMES \
-    FIN_OPS_ADMIN_USERNAMES; do
+    FIN_OPS_ALLOWED_USERNAMES; do
     if ! grep -hE "^${required_key}=" "$COMMON_ENV" "$SECRETS_ENV" >/dev/null; then
       die "missing OA session runtime env: $required_key in $COMMON_ENV or $SECRETS_ENV"
     fi

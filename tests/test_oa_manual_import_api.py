@@ -8,7 +8,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application
-from tests.app_test_support import build_local_state_application as build_application
+from tests.app_test_support import (
+    build_local_state_application as build_application,
+    configure_access_control,
+)
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.oa_manual_import_service import OAManualImportService
 from tests.test_oa_manual_import_service import (
@@ -66,9 +69,6 @@ class OAManualImportApiTests(unittest.TestCase):
         app._app_settings_service.update_settings(
             completed_project_ids=[],
             bank_account_mappings=[],
-            allowed_usernames=[],
-            readonly_export_usernames=[],
-            admin_usernames=[],
             oa_retention={"cutoff_date": "2026-03-01"},
         )
 
@@ -171,13 +171,7 @@ class OAManualImportApiTests(unittest.TestCase):
                 adapter=RecordingOAAdapter([oa_record("oa-exp-1981")]),
                 store=store,
             )
-            app._app_settings_service.update_settings(
-                completed_project_ids=[],
-                bank_account_mappings=[],
-                allowed_usernames=["READONLY001"],
-                readonly_export_usernames=["READONLY001"],
-                admin_usernames=[],
-            )
+            configure_access_control(app, read_export_only=["READONLY001"])
             app._oa_identity_service.resolve_identity = lambda _token: self._readonly_identity()
             headers = {"Authorization": "Bearer readonly-token"}
 

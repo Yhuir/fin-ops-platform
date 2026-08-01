@@ -86,7 +86,13 @@ class ApiPerformanceMetricsTests(unittest.TestCase):
         app = object.__new__(Application)
         app._api_performance_recorder = ApiPerformanceRecorder()
 
-        def handle_untracked(_method: str, _path: str, body=None, headers=None) -> Response:
+        def handle_untracked(
+            _method: str,
+            _path: str,
+            body=None,
+            headers=None,
+            authoritative_request_id=None,
+        ) -> Response:
             record_database_connection_acquire(2.0)
             record_database_query(11.0)
             return Response(status_code=202, body="{}")

@@ -143,6 +143,7 @@ EXPECTED_MIGRATION_FILES = [
     "0129_runtime_outbox_canonical_attempts_contract.sql",
     "0130_canonical_finance_domain_contracts.sql",
     "0131_validate_canonical_finance_domain_contracts.sql",
+    "0132_settings_access_control_guard.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (
@@ -264,6 +265,8 @@ RESERVED_DATABASE_NAMES = {"fin_ops", "postgres", "template0", "template1"}
 def require_postgres_test_database_url() -> str:
     database_url = (os.environ.get("FIN_OPS_TEST_DATABASE_URL") or "").strip()
     if not database_url:
+        if os.environ.get("FIN_OPS_REQUIRE_SETTINGS_ACL_POSTGRES") == "1":
+            raise RuntimeError("FIN_OPS_TEST_DATABASE_URL is required for the settings ACL PostgreSQL gate.")
         raise unittest.SkipTest("FIN_OPS_TEST_DATABASE_URL is not set; skipping PostgreSQL integration tests.")
     assert_safe_test_database_url(database_url)
     return database_url

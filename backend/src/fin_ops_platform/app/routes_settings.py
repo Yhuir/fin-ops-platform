@@ -3,12 +3,15 @@ from __future__ import annotations
 from http import HTTPStatus
 from typing import Any, Callable
 from urllib.parse import unquote
+from uuid import uuid4
 
 from pymongo.errors import PyMongoError
 
 from fin_ops_platform.app.auth import OARequestSession, actor_id_for_session
 from fin_ops_platform.services.app_settings_service import (
+    AccessControlSyncInconsistentError,
     AppSettingsService,
+    AppSettingsPersistenceError,
     AppSettingsValidationError,
 )
 from fin_ops_platform.services.background_job_service import BackgroundJobAccessError, BackgroundJobNotFoundError
@@ -26,6 +29,7 @@ from fin_ops_platform.services.settings_data_reset_service import (
     RESET_OA_AND_REBUILD_ACTION,
     SettingsDataResetService,
 )
+from fin_ops_platform.services.state_store_protocol import SettingsAccessControlVersionConflict
 
 JsonResponse = Callable[[HTTPStatus, object], Any]
 JsonBodyLoader = Callable[[str | bytes | None], tuple[dict[str, Any], Any | None]]
@@ -96,11 +100,17 @@ class SettingsApiRoutes:
         query: dict[str, list[str]],
         body: str | bytes | None,
         headers: dict[str, str] | None,
+        *,
+        request_id: str | None = None,
     ) -> Any | None:
         if method == "GET" and route_path == "/api/workbench/settings":
             return self.settings()
         if method == "POST" and route_path == "/api/workbench/settings":
             return self.update_settings(body, headers)
+        if method == "GET" and route_path == "/api/workbench/settings/access-control":
+            return self.access_control(headers)
+        if method == "PUT" and route_path == "/api/workbench/settings/access-control":
+            return self.update_access_control(body, headers, request_id=request_id or uuid4().hex)
         if method == "GET" and route_path == "/api/workbench/settings/oa-applicant-credentials":
             return self.oa_applicant_credentials(headers)
         if route_path.startswith("/api/workbench/settings/oa-applicant-credentials/"):
@@ -150,11 +160,25 @@ class SettingsApiRoutes:
         if auth_error is not None:
             return auth_error
 
+        forbidden_acl_keys = {
+            "access_control",
+            "allowed_usernames",
+            "readonly_export_usernames",
+            "admin_usernames",
+            "full_access_usernames",
+            "access_control_version",
+        }
+        if forbidden_acl_keys.intersection(payload):
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "access_control_write_forbidden",
+                    "message": "Access control can only be changed through the administrator access-control API.",
+                },
+            )
+
         completed_project_ids = payload.get("completed_project_ids", [])
         bank_account_mappings = payload.get("bank_account_mappings", [])
-        allowed_usernames = payload.get("allowed_usernames", [])
-        readonly_export_usernames = payload.get("readonly_export_usernames", [])
-        admin_usernames = payload.get("admin_usernames", [])
         workbench_column_layouts = payload.get("workbench_column_layouts", {})
         oa_retention = payload.get("oa_retention", {})
         oa_invoice_offset = payload.get("oa_invoice_offset", {})
@@ -167,9 +191,6 @@ class SettingsApiRoutes:
         if (
             not isinstance(completed_project_ids, list)
             or not isinstance(bank_account_mappings, list)
-            or not isinstance(allowed_usernames, list)
-            or not isinstance(readonly_export_usernames, list)
-            or not isinstance(admin_usernames, list)
             or not isinstance(workbench_column_layouts, dict)
             or not isinstance(oa_retention, dict)
             or not isinstance(oa_import, dict)
@@ -180,9 +201,8 @@ class SettingsApiRoutes:
                 {
                     "error": "invalid_workbench_settings_request",
                     "message": (
-                        "completed_project_ids, bank_account_mappings, allowed_usernames, "
-                        "readonly_export_usernames, and admin_usernames must be arrays, "
-                        "and workbench_column_layouts, oa_retention, oa_import, and oa_invoice_offset must be objects."
+                        "completed_project_ids and bank_account_mappings must be arrays, and "
+                        "workbench_column_layouts, oa_retention, oa_import, and oa_invoice_offset must be objects."
                     ),
                 },
             )
@@ -214,11 +234,6 @@ class SettingsApiRoutes:
             updated_payload = app_settings_service.update_settings(
                 completed_project_ids=[str(item) for item in completed_project_ids],
                 bank_account_mappings=[item for item in bank_account_mappings if isinstance(item, dict)],
-                allowed_usernames=[str(item).strip() for item in allowed_usernames if str(item).strip()],
-                readonly_export_usernames=[
-                    str(item).strip() for item in readonly_export_usernames if str(item).strip()
-                ],
-                admin_usernames=[str(item).strip() for item in admin_usernames if str(item).strip()],
                 workbench_column_layouts=workbench_column_layouts,
                 oa_retention=oa_retention,
                 oa_import=oa_import,
@@ -233,11 +248,6 @@ class SettingsApiRoutes:
                 HTTPStatus.BAD_REQUEST,
                 {"error": exc.error_code, "message": str(exc)},
             )
-        except OARoleSyncError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_GATEWAY,
-                {"error": "oa_role_sync_failed", "message": f"OA 角色同步失败：{exc}"},
-            )
         except PyMongoError as exc:
             return self._json_response(
                 HTTPStatus.SERVICE_UNAVAILABLE,
@@ -247,6 +257,89 @@ class SettingsApiRoutes:
                 },
             )
         return self._json_response(HTTPStatus.OK, updated_payload)
+
+    def access_control(self, headers: dict[str, str] | None) -> Any:
+        _session, auth_error = self._resolve_admin_session(headers)
+        if auth_error is not None:
+            return auth_error
+        return self._json_response(
+            HTTPStatus.OK,
+            self._app_settings_service().get_access_control_payload(),
+        )
+
+    def update_access_control(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+        *,
+        request_id: str,
+    ) -> Any:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        session, auth_error = self._resolve_admin_session(headers)
+        if auth_error is not None:
+            return auth_error
+        if set(payload) != {"expected_version", "accounts"}:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "invalid_access_control_request",
+                    "message": "Request must contain only expected_version and accounts.",
+                },
+            )
+        expected_version = payload.get("expected_version")
+        accounts = payload.get("accounts")
+        if isinstance(expected_version, bool) or not isinstance(expected_version, int) or expected_version < 1:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_access_control_request", "message": "expected_version must be positive."},
+            )
+        if not isinstance(accounts, list):
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_access_control_request", "message": "accounts must be an array."},
+            )
+        identity = session.identity if session is not None else None
+        try:
+            updated = self._app_settings_service().update_access_control(
+                expected_version=expected_version,
+                accounts=accounts,
+                actor_id=actor_id_for_session(session) if session is not None else "system",
+                actor_name=str(
+                    getattr(identity, "display_name", "")
+                    or getattr(identity, "username", "")
+                    or ""
+                ),
+                request_id=request_id,
+            )
+        except AppSettingsValidationError as exc:
+            return self._json_response(HTTPStatus.BAD_REQUEST, {"error": exc.error_code, "message": str(exc)})
+        except SettingsAccessControlVersionConflict as exc:
+            return self._json_response(
+                HTTPStatus.CONFLICT,
+                {
+                    "error": "access_control_version_conflict",
+                    "message": str(exc),
+                    "current_version": exc.current_version,
+                },
+            )
+        except OARoleSyncError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_GATEWAY,
+                {"error": "oa_role_sync_failed", "message": f"OA 角色同步失败：{exc}"},
+            )
+        except AccessControlSyncInconsistentError as exc:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"error": "access_control_sync_inconsistent", "message": str(exc)},
+            )
+        except AppSettingsPersistenceError as exc:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"error": "access_control_persistence_failed", "message": str(exc)},
+            )
+        return self._json_response(HTTPStatus.OK, updated)
 
     def oa_applicant_credentials(self, headers: dict[str, str] | None) -> Any:
         session, auth_error = self._resolve_read_session(headers)

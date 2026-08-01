@@ -42,10 +42,22 @@ class OARoleSyncSettings:
     readonly_role_key: str
     full_access_role_key: str
     admin_role_key: str
+    read_timeout_seconds: int = 10
+    write_timeout_seconds: int = 10
 
 
 def _is_truthy(value: str | None) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _positive_timeout(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError as exc:
+        raise OARoleSyncConfigurationError(f"{name} must be a positive integer.") from exc
+    if value <= 0:
+        raise OARoleSyncConfigurationError(f"{name} must be a positive integer.")
+    return value
 
 
 def _build_assignments_from_snapshot(snapshot: dict[str, Any]) -> list[OARoleAssignment]:
@@ -108,7 +120,9 @@ class MySQLOARoleSyncExecutor:
                 database=required["database"],
                 username=required["username"],
                 password=required["password"],
-                connect_timeout_seconds=max(int(os.getenv("FIN_OPS_OA_ROLE_SYNC_CONNECT_TIMEOUT_SECONDS", "5")), 1),
+                connect_timeout_seconds=_positive_timeout("FIN_OPS_OA_ROLE_SYNC_CONNECT_TIMEOUT_SECONDS", 5),
+                read_timeout_seconds=_positive_timeout("FIN_OPS_OA_ROLE_SYNC_READ_TIMEOUT_SECONDS", 10),
+                write_timeout_seconds=_positive_timeout("FIN_OPS_OA_ROLE_SYNC_WRITE_TIMEOUT_SECONDS", 10),
                 readonly_role_key=os.getenv("FIN_OPS_OA_ROLE_SYNC_READONLY_ROLE_KEY", "finops_read_export").strip()
                 or "finops_read_export",
                 full_access_role_key=os.getenv("FIN_OPS_OA_ROLE_SYNC_FULL_ACCESS_ROLE_KEY", "finops_full_access").strip()
@@ -135,6 +149,8 @@ class MySQLOARoleSyncExecutor:
             charset="utf8mb4",
             autocommit=False,
             connect_timeout=self._settings.connect_timeout_seconds,
+            read_timeout=self._settings.read_timeout_seconds,
+            write_timeout=self._settings.write_timeout_seconds,
         )
         try:
             with connection.cursor() as cursor:

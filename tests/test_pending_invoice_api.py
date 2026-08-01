@@ -6,7 +6,10 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from tests.app_test_support import build_local_state_application as build_application
+from tests.app_test_support import (
+    build_local_state_application as build_application,
+    configure_access_control,
+)
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.pending_invoice_service import PENDING_INVOICE_EXPORT_ROW_LIMIT
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
@@ -363,13 +366,7 @@ class PendingInvoiceApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             settings = app._app_settings_service.get_settings_payload()
-            app._app_settings_service.update_settings(
-                completed_project_ids=[],
-                bank_account_mappings=[],
-                allowed_usernames=["READONLY001"],
-                readonly_export_usernames=["READONLY001"],
-                admin_usernames=[],
-            )
+            configure_access_control(app, read_export_only=["READONLY001"])
             app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
                 user_id="readonly-user-id",
                 username="READONLY001",
@@ -406,13 +403,7 @@ class PendingInvoiceApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             current = app._app_settings_service.get_settings_payload()
-            app._app_settings_service.update_settings(
-                completed_project_ids=[],
-                bank_account_mappings=[],
-                allowed_usernames=["READONLY001"],
-                readonly_export_usernames=["READONLY001"],
-                admin_usernames=[],
-            )
+            configure_access_control(app, read_export_only=["READONLY001"])
             app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
                 user_id="readonly-user-id",
                 username="READONLY001",

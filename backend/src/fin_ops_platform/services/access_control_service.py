@@ -3,12 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 import logging
 import os
-from typing import Callable, Iterable, Literal
+from typing import Any, Callable, Iterable, Literal
 
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
+from fin_ops_platform.services.state_store_protocol import (
+    PROTECTED_ADMIN_USERNAME,
+    settings_access_control_from_payload,
+)
 
 
-DEFAULT_ADMIN_USERNAME = "YNSYLP005"
+DEFAULT_ADMIN_USERNAME = PROTECTED_ADMIN_USERNAME
 AccessTier = Literal["denied", "read_export_only", "full_access", "admin"]
 logger = logging.getLogger(__name__)
 
@@ -32,45 +36,27 @@ def _parse_csv_environment(name: str) -> list[str]:
     return _normalize_values(part.strip() for part in raw.split(","))
 
 
-def _provider_values(provider: Callable[[], list[str]] | None, *, provider_name: str) -> list[str]:
-    if provider is None:
-        return []
-    try:
-        return _normalize_values(provider())
-    except Exception as exc:
-        logger.warning("Access control dynamic provider failed: %s", provider_name, exc_info=True)
-        return []
-
-
 @dataclass(slots=True)
 class AccessControlService:
     required_permission: str = "finops:app:view"
     allowed_usernames: list[str] | None = None
     allowed_roles: list[str] | None = None
-    dynamic_allowed_usernames_provider: Callable[[], list[str]] | None = None
     readonly_export_usernames: list[str] | None = None
-    admin_usernames: list[str] | None = None
-    dynamic_readonly_export_usernames_provider: Callable[[], list[str]] | None = None
-    dynamic_admin_usernames_provider: Callable[[], list[str]] | None = None
+    access_control_snapshot_provider: Callable[[], dict[str, Any]] | None = None
 
     @classmethod
     def from_environment(
         cls,
         *,
-        dynamic_allowed_usernames_provider: Callable[[], list[str]] | None = None,
-        dynamic_readonly_export_usernames_provider: Callable[[], list[str]] | None = None,
-        dynamic_admin_usernames_provider: Callable[[], list[str]] | None = None,
+        access_control_snapshot_provider: Callable[[], dict[str, Any]] | None = None,
     ) -> "AccessControlService":
         required_permission = os.getenv("FIN_OPS_OA_REQUIRED_PERMISSION", "finops:app:view").strip() or "finops:app:view"
         return cls(
             required_permission=required_permission,
             allowed_usernames=_parse_csv_environment("FIN_OPS_ALLOWED_USERNAMES"),
             allowed_roles=_parse_csv_environment("FIN_OPS_ALLOWED_ROLES"),
-            dynamic_allowed_usernames_provider=dynamic_allowed_usernames_provider,
             readonly_export_usernames=_parse_csv_environment("FIN_OPS_READONLY_EXPORT_USERNAMES"),
-            admin_usernames=_parse_csv_environment("FIN_OPS_ADMIN_USERNAMES"),
-            dynamic_readonly_export_usernames_provider=dynamic_readonly_export_usernames_provider,
-            dynamic_admin_usernames_provider=dynamic_admin_usernames_provider,
+            access_control_snapshot_provider=access_control_snapshot_provider,
         )
 
     def is_allowed(self, identity: OAUserIdentity) -> bool:
@@ -81,10 +67,19 @@ class AccessControlService:
         roles = set(_normalize_values(identity.roles))
         username = identity.username.strip()
 
+        if username == PROTECTED_ADMIN_USERNAME:
+            return AccessDecision(
+                access_tier="admin",
+                can_access_app=True,
+                can_mutate_data=True,
+                can_admin_access=True,
+            )
+
         allowed_usernames = set(_normalize_values(self.allowed_usernames or []))
         readonly_export_usernames = set(_normalize_values(self.readonly_export_usernames or []))
-        admin_usernames = {DEFAULT_ADMIN_USERNAME}
-        admin_usernames.update(_normalize_values(self.admin_usernames or []))
+        snapshot = self._load_access_control_snapshot()
+        allowed_usernames.update(snapshot["allowed_usernames"])
+        readonly_export_usernames.update(snapshot["readonly_export_usernames"])
 
         if self.required_permission and self.required_permission in permissions:
             can_access_app = True
@@ -93,9 +88,7 @@ class AccessControlService:
         elif self.allowed_roles and roles.intersection(self.allowed_roles):
             can_access_app = True
         else:
-            can_access_app = username in set(
-                _provider_values(self.dynamic_allowed_usernames_provider, provider_name="allowed_usernames")
-            )
+            can_access_app = username in allowed_usernames
 
         if not can_access_app:
             return AccessDecision(
@@ -103,27 +96,6 @@ class AccessControlService:
                 can_access_app=False,
                 can_mutate_data=False,
                 can_admin_access=False,
-            )
-
-        readonly_export_usernames.update(
-            _provider_values(
-                self.dynamic_readonly_export_usernames_provider,
-                provider_name="readonly_export_usernames",
-            )
-        )
-        admin_usernames.update(
-            _provider_values(
-                self.dynamic_admin_usernames_provider,
-                provider_name="admin_usernames",
-            )
-        )
-
-        if username in admin_usernames:
-            return AccessDecision(
-                access_tier="admin",
-                can_access_app=True,
-                can_mutate_data=True,
-                can_admin_access=True,
             )
 
         if username in readonly_export_usernames:
@@ -140,6 +112,16 @@ class AccessControlService:
             can_mutate_data=True,
             can_admin_access=False,
         )
+
+    def _load_access_control_snapshot(self) -> dict[str, Any]:
+        provider = self.access_control_snapshot_provider
+        if provider is None:
+            return settings_access_control_from_payload({})
+        try:
+            return settings_access_control_from_payload(provider())
+        except Exception:
+            logger.warning("Access control snapshot provider failed.", exc_info=True)
+            return settings_access_control_from_payload({})
 
 
 @dataclass(slots=True, frozen=True)

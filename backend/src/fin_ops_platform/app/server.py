@@ -834,9 +834,7 @@ class Application:
         )
         self._oa_identity_service = OAIdentityService()
         self._access_control_service = AccessControlService.from_environment(
-            dynamic_allowed_usernames_provider=self._app_settings_service.get_allowed_usernames,
-            dynamic_readonly_export_usernames_provider=self._app_settings_service.get_readonly_export_usernames,
-            dynamic_admin_usernames_provider=self._app_settings_service.get_admin_usernames,
+            access_control_snapshot_provider=self._app_settings_service.get_access_control_snapshot,
         )
         bank_account_resolver = BankAccountResolver(self._app_settings_service.get_bank_account_mapping_dict)
         self._workbench_query_service = WorkbenchQueryService(
@@ -1386,13 +1384,20 @@ class Application:
         path: str,
         body: str | bytes | None = None,
         headers: dict[str, str] | None = None,
+        request_id: str | None = None,
     ) -> Response:
         request_started_at = monotonic()
         route_path = self._normalize_route_path(urlparse(path).path)
         status_code = int(HTTPStatus.INTERNAL_SERVER_ERROR)
         with request_database_timing() as database_timing:
             try:
-                response = self._handle_request_untracked(method, path, body=body, headers=headers)
+                response = self._handle_request_untracked(
+                    method,
+                    path,
+                    body=body,
+                    headers=headers,
+                    authoritative_request_id=request_id,
+                )
                 status_code = int(response.status_code)
                 return response
             finally:
@@ -1413,13 +1418,14 @@ class Application:
         path: str,
         body: str | bytes | None = None,
         headers: dict[str, str] | None = None,
+        authoritative_request_id: str | None = None,
     ) -> Response:
         request_started_at = monotonic()
         parsed = urlparse(path)
         route_path = self._normalize_route_path(parsed.path)
         query = parse_qs(parsed.query)
         timed_action = self._workbench_timed_action_for_route(method=method, route_path=route_path)
-        request_id = uuid4().hex[:12] if timed_action is not None else None
+        request_id = authoritative_request_id or (uuid4().hex[:12] if timed_action is not None else None)
 
         if method == "GET" and route_path == "/health":
             return self._json_response(HTTPStatus.OK, self._health_payload())
@@ -1590,7 +1596,14 @@ class Application:
             month = query.get("month", [None])[0]
             return self._handle_api_workbench_ignored(month)
         if route_path == "/api/workbench/settings" or route_path.startswith("/api/workbench/settings/"):
-            settings_response = self._settings_routes().route(method, route_path, query, body, headers)
+            settings_response = self._settings_routes().route(
+                method,
+                route_path,
+                query,
+                body,
+                headers,
+                request_id=request_id,
+            )
             if settings_response is not None:
                 return settings_response
         if method == "GET" and route_path.startswith("/api/workbench/rows/"):

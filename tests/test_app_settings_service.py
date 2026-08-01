@@ -2,12 +2,17 @@ import inspect
 import json
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
-from tests.app_test_support import build_local_state_application as build_application
+from tests.app_test_support import (
+    build_local_state_application as build_application,
+    configure_access_control,
+)
 from fin_ops_platform.services.app_settings_service import (
     AppSettingsService,
+    AppSettingsPersistenceError,
     AppSettingsValidationError,
     BankAutoTagRulesValidationError,
     COST_STATISTICS_UNCATEGORIZED_TAG_CODE,
@@ -38,6 +43,7 @@ class FakeMongoCollection:
 class RecordingSyncService:
     def __init__(self) -> None:
         self.assignments: list[OARoleAssignment] | None = None
+        self.calls: list[list[OARoleAssignment]] = []
 
     def sync_access_control(self, snapshot: dict[str, object]) -> None:
         readonly = [
@@ -53,6 +59,7 @@ class RecordingSyncService:
             for username in list(snapshot.get("admin_usernames") or [])
         ]
         self.assignments = [*readonly, *full_access, *admin]
+        self.calls.append(list(self.assignments))
 
 
 class RecordingQueueRepository:
@@ -272,10 +279,8 @@ class AppSettingsServiceTests(unittest.TestCase):
                 definitions=[self._external_rule("external_rule_borrow_out")],
             )
             store = ApplicationStateStore(Path(temp_dir))
-            seeded = store.load_app_settings()
-            seeded["allowed_usernames"] = ["boundary-owner"]
-            store.save_app_settings(seeded)
             app = build_application(data_dir=Path(temp_dir))
+            configure_access_control(app, full_access=["boundary-owner"])
             service = app._app_settings_service
             previous_state = service.get_turnover_ledger_tag_selection_state()
             normalized = service.normalize_turnover_ledger_tag_selection_update(
@@ -406,9 +411,6 @@ class AppSettingsServiceTests(unittest.TestCase):
             app._app_settings_service.update_settings(
                 completed_project_ids=[],
                 bank_account_mappings=[],
-                allowed_usernames=[],
-                readonly_export_usernames=[],
-                admin_usernames=[],
                 pending_invoice_tag_groups={
                     "version": current["pending_invoice_tag_groups"]["version"],
                     "groups": {
@@ -736,9 +738,6 @@ class AppSettingsServiceTests(unittest.TestCase):
             saved_settings = app._app_settings_service.update_settings(
                 completed_project_ids=current["projects"]["completed_project_ids"],
                 bank_account_mappings=current["bank_account_mappings"],
-                allowed_usernames=current["access_control"]["allowed_usernames"],
-                readonly_export_usernames=current["access_control"]["readonly_export_usernames"],
-                admin_usernames=current["access_control"]["admin_usernames"],
                 actor_id="settings-owner",
             )
 
@@ -809,9 +808,6 @@ class AppSettingsServiceTests(unittest.TestCase):
                         {
                             "completed_project_ids": [],
                             "bank_account_mappings": [],
-                            "allowed_usernames": [],
-                            "readonly_export_usernames": [],
-                            "admin_usernames": [],
                             "oa_retention": {"cutoff_date": "2026-01-01"},
                             "oa_import": {
                                 "form_types": ["payment_request"],
@@ -866,9 +862,6 @@ class AppSettingsServiceTests(unittest.TestCase):
             mapping_changed = app._app_settings_service.update_settings(
                 completed_project_ids=[],
                 bank_account_mappings=[],
-                allowed_usernames=[],
-                readonly_export_usernames=[],
-                admin_usernames=[],
                 pending_invoice_tag_groups={
                     "groups": {
                         "requires_invoice": {"tag_codes": ["borrow_in_company_pending_repayment"]},
@@ -889,7 +882,6 @@ class AppSettingsServiceTests(unittest.TestCase):
             queue_repository = RecordingQueueRepository()
             app._runtime_repositories = SimpleNamespace(queue_repository=queue_repository)
             current = app._app_settings_service.get_settings_payload()
-            access_control = current["access_control"]
             projects = current["projects"]
 
             response = app.handle_request(
@@ -899,9 +891,6 @@ class AppSettingsServiceTests(unittest.TestCase):
                     {
                         "completed_project_ids": projects["completed_project_ids"],
                         "bank_account_mappings": current["bank_account_mappings"],
-                        "allowed_usernames": access_control["allowed_usernames"],
-                        "readonly_export_usernames": access_control["readonly_export_usernames"],
-                        "admin_usernames": access_control["admin_usernames"],
                         "workbench_column_layouts": current["workbench_column_layouts"],
                         "oa_retention": current["oa_retention"],
                         "oa_import": current["oa_import"],
@@ -971,9 +960,6 @@ class AppSettingsServiceTests(unittest.TestCase):
                     {
                         "completed_project_ids": [],
                         "bank_account_mappings": [],
-                        "allowed_usernames": [],
-                        "readonly_export_usernames": [],
-                        "admin_usernames": [],
                         "bank_transaction_tags": {
                             "version": 1,
                             "tags": [
@@ -1023,9 +1009,6 @@ class AppSettingsServiceTests(unittest.TestCase):
                 app._app_settings_service.update_settings(
                     completed_project_ids=[],
                     bank_account_mappings=[],
-                    allowed_usernames=[],
-                    readonly_export_usernames=[],
-                    admin_usernames=[],
                     pending_invoice_tag_groups={
                         "groups": {
                             "requires_invoice": {"tag_codes": ["not_a_real_tag"]},
@@ -1041,9 +1024,6 @@ class AppSettingsServiceTests(unittest.TestCase):
                 app._app_settings_service.update_settings(
                     completed_project_ids=[],
                     bank_account_mappings=[],
-                    allowed_usernames=[],
-                    readonly_export_usernames=[],
-                    admin_usernames=[],
                     pending_invoice_tag_groups={
                         "groups": {
                             "requires_invoice": {"tag_codes": ["custom_archived"]},
@@ -1059,9 +1039,6 @@ class AppSettingsServiceTests(unittest.TestCase):
                 app._app_settings_service.update_settings(
                     completed_project_ids=[],
                     bank_account_mappings=[],
-                    allowed_usernames=[],
-                    readonly_export_usernames=[],
-                    admin_usernames=[],
                     pending_invoice_tag_groups={
                         "groups": {
                             "requires_invoice": {"tag_codes": ["fee"]},
@@ -1091,9 +1068,6 @@ class AppSettingsServiceTests(unittest.TestCase):
             app._app_settings_service.update_settings(
                 completed_project_ids=[],
                 bank_account_mappings=[],
-                allowed_usernames=[],
-                readonly_export_usernames=[],
-                admin_usernames=[],
                 pending_invoice_tag_groups={
                     "groups": {
                         "requires_invoice": {"tag_codes": ["custom_mapped_pending_invoice"]},
@@ -1190,9 +1164,6 @@ class AppSettingsServiceTests(unittest.TestCase):
             payload = app._app_settings_service.update_settings(
                 completed_project_ids=[],
                 bank_account_mappings=[],
-                allowed_usernames=[],
-                readonly_export_usernames=[],
-                admin_usernames=[],
                 pending_invoice_tag_groups={
                     "groups": {
                         "requires_invoice": {"tag_codes": ["borrow_in_company_pending_repayment"]},
@@ -1249,9 +1220,6 @@ class AppSettingsServiceTests(unittest.TestCase):
             app._app_settings_service.update_settings(
                 completed_project_ids=[],
                 bank_account_mappings=[],
-                allowed_usernames=[],
-                readonly_export_usernames=[],
-                admin_usernames=[],
                 pending_invoice_tag_groups={
                     "groups": {
                         "requires_invoice": {"tag_codes": ["borrow_in_company_pending_repayment"]},
@@ -1312,9 +1280,6 @@ class AppSettingsServiceTests(unittest.TestCase):
                 app._app_settings_service.update_settings(
                     completed_project_ids=[],
                     bank_account_mappings=[],
-                    allowed_usernames=[],
-                    readonly_export_usernames=[],
-                    admin_usernames=[],
                     pending_invoice_tag_groups=payload["pending_invoice_tag_groups"],
                     actor_id="settings-owner",
                 )
@@ -1361,9 +1326,6 @@ class AppSettingsServiceTests(unittest.TestCase):
                 app._app_settings_service.update_settings(
                     completed_project_ids=[],
                     bank_account_mappings=[],
-                    allowed_usernames=[],
-                    readonly_export_usernames=[],
-                    admin_usernames=[],
                     pending_invoice_tag_groups=payload["pending_invoice_tag_groups"],
                     actor_id="settings-owner",
                 )
@@ -1422,48 +1384,46 @@ class AppSettingsServiceTests(unittest.TestCase):
             ["custom_mongo_tag"],
         )
 
-    def test_update_settings_normalizes_access_control_lists_and_keeps_admin_in_allowed(self) -> None:
+    def test_dedicated_access_control_command_keeps_only_protected_admin(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
 
-            payload = app._app_settings_service.update_settings(
-                completed_project_ids=[],
-                bank_account_mappings=[],
-                allowed_usernames=["FULL001", "READONLY001"],
-                readonly_export_usernames=["READONLY001", "OUTSIDER001", "YNSYLP005"],
-                admin_usernames=["ADMIN002"],
+            payload = configure_access_control(
+                app,
+                full_access=["FULL001"],
+                read_export_only=["READONLY001"],
             )
 
-        access_control = payload["access_control"]
+        self.assertEqual(payload["administrator"]["username"], "YNSYLP005")
+        self.assertTrue(payload["administrator"]["protected"])
         self.assertEqual(
-            access_control["allowed_usernames"],
-            ["ADMIN002", "FULL001", "READONLY001", "YNSYLP005"],
+            payload["accounts"],
+            [
+                {"username": "FULL001", "access_tier": "full_access"},
+                {"username": "READONLY001", "access_tier": "read_export_only"},
+            ],
         )
-        self.assertEqual(access_control["readonly_export_usernames"], ["READONLY001"])
-        self.assertEqual(access_control["admin_usernames"], ["ADMIN002", "YNSYLP005"])
-        self.assertEqual(access_control["full_access_usernames"], ["FULL001"])
 
-    def test_update_settings_persists_access_control_lists(self) -> None:
+    def test_generic_settings_save_preserves_dedicated_access_control(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            configure_access_control(app, full_access=["FULL001"])
             app._app_settings_service.update_settings(
                 completed_project_ids=[],
                 bank_account_mappings=[],
-                allowed_usernames=["FULL001"],
-                readonly_export_usernames=[],
-                admin_usernames=[],
                 oa_retention={"cutoff_date": "2026-01-01"},
                 workbench_column_layouts={"oa": ["projectName", "applicant"]},
             )
 
             reloaded_app = build_application(data_dir=Path(temp_dir))
             payload = reloaded_app._app_settings_service.get_settings_payload()
+            access_control = reloaded_app._app_settings_service.get_access_control_payload()
 
-        access_control = payload["access_control"]
-        self.assertEqual(access_control["allowed_usernames"], ["FULL001", "YNSYLP005"])
-        self.assertEqual(access_control["readonly_export_usernames"], [])
-        self.assertEqual(access_control["admin_usernames"], ["YNSYLP005"])
-        self.assertEqual(access_control["full_access_usernames"], ["FULL001"])
+        self.assertNotIn("access_control", payload)
+        self.assertEqual(
+            access_control["accounts"],
+            [{"username": "FULL001", "access_tier": "full_access"}],
+        )
         self.assertEqual(
             payload["workbench_column_layouts"]["oa"],
             ["projectName", "applicant", "amount", "counterparty", "reason"],
@@ -1483,9 +1443,6 @@ class AppSettingsServiceTests(unittest.TestCase):
                         "short_name": "光大",
                     }
                 ],
-                allowed_usernames=[],
-                readonly_export_usernames=[],
-                admin_usernames=[],
             )
 
             payload = build_application(data_dir=Path(temp_dir))._app_settings_service.get_settings_payload()
@@ -1509,9 +1466,6 @@ class AppSettingsServiceTests(unittest.TestCase):
             payload = app._app_settings_service.update_settings(
                 completed_project_ids=[],
                 bank_account_mappings=[],
-                allowed_usernames=[],
-                readonly_export_usernames=[],
-                admin_usernames=[],
                 oa_retention={"cutoff_date": "2026-99-99"},
                 workbench_column_layouts={},
             )
@@ -1526,9 +1480,6 @@ class AppSettingsServiceTests(unittest.TestCase):
             updated_payload = app._app_settings_service.update_settings(
                 completed_project_ids=[],
                 bank_account_mappings=[],
-                allowed_usernames=[],
-                readonly_export_usernames=[],
-                admin_usernames=[],
                 oa_import={
                     "form_types": ["expense_claim", "ticket_type", "payment_request", "payment_request"],
                     "statuses": ["in_progress", "REJECTED", "completed", "0", "completed"],
@@ -1579,9 +1530,6 @@ class AppSettingsServiceTests(unittest.TestCase):
             payload = app._app_settings_service.update_settings(
                 completed_project_ids=[],
                 bank_account_mappings=[],
-                allowed_usernames=[],
-                readonly_export_usernames=[],
-                admin_usernames=[],
                 oa_import={"attachment_invoice_promotion_mode": "always_create"},
                 workbench_column_layouts={},
             )
@@ -1595,9 +1543,6 @@ class AppSettingsServiceTests(unittest.TestCase):
             updated_payload = app._app_settings_service.update_settings(
                 completed_project_ids=[],
                 bank_account_mappings=[],
-                allowed_usernames=[],
-                readonly_export_usernames=[],
-                admin_usernames=[],
                 oa_invoice_offset={"applicant_names": [" 周洁莹 ", "周洁莹", "李四"]},
                 workbench_column_layouts={},
             )
@@ -1606,18 +1551,16 @@ class AppSettingsServiceTests(unittest.TestCase):
         self.assertEqual(updated_payload["oa_invoice_offset"], {"applicant_names": ["周洁莹", "李四"]})
         self.assertEqual(reloaded_payload["oa_invoice_offset"], updated_payload["oa_invoice_offset"])
 
-    def test_update_settings_triggers_oa_role_sync_with_normalized_assignments(self) -> None:
+    def test_dedicated_access_control_triggers_oa_role_sync_with_normalized_assignments(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             sync_service = RecordingSyncService()
             app._app_settings_service._oa_role_sync_service = sync_service
 
-            app._app_settings_service.update_settings(
-                completed_project_ids=[],
-                bank_account_mappings=[],
-                allowed_usernames=["FULL001", "READONLY001"],
-                readonly_export_usernames=["READONLY001"],
-                admin_usernames=[],
+            configure_access_control(
+                app,
+                full_access=["FULL001"],
+                read_export_only=["READONLY001"],
             )
 
         self.assertEqual(
@@ -1629,7 +1572,58 @@ class AppSettingsServiceTests(unittest.TestCase):
             ],
         )
 
-    def test_workbench_settings_api_accepts_and_returns_access_control_lists(self) -> None:
+    def test_access_control_noop_skips_oa_write_and_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            sync_service = RecordingSyncService()
+            app._app_settings_service._oa_role_sync_service = sync_service
+
+            result = app._app_settings_service.update_access_control(
+                expected_version=1,
+                accounts=[],
+                actor_id="YNSYLP005",
+                actor_name="admin",
+                request_id="noop-request",
+            )
+
+        self.assertFalse(result["changed"])
+        self.assertEqual(result["version"], 1)
+        self.assertEqual(sync_service.calls, [])
+
+    def test_access_control_persistence_failure_compensates_oa_before_unlock(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            sync_service = RecordingSyncService()
+            app._app_settings_service._oa_role_sync_service = sync_service
+            original_critical_section = app._state_store.begin_settings_acl_critical_section
+
+            @contextmanager
+            def failing_critical_section(expected_version: int):
+                with original_critical_section(expected_version) as critical_section:
+                    critical_section.commit = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                        RuntimeError("synthetic DB failure")
+                    )
+                    yield critical_section
+
+            app._state_store.begin_settings_acl_critical_section = failing_critical_section
+
+            with self.assertRaises(AppSettingsPersistenceError):
+                app._app_settings_service.update_access_control(
+                    expected_version=1,
+                    accounts=[{"username": "FULL001", "access_tier": "full_access"}],
+                    actor_id="YNSYLP005",
+                    actor_name="admin",
+                    request_id="db-failure",
+                )
+
+        self.assertEqual(len(sync_service.calls), 2)
+        self.assertIn(OARoleAssignment(username="FULL001", tier="full_access"), sync_service.calls[0])
+        self.assertEqual(
+            sync_service.calls[1],
+            [OARoleAssignment(username="YNSYLP005", tier="admin")],
+        )
+
+    def test_workbench_settings_api_rejects_legacy_access_control_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
 
@@ -1658,51 +1652,13 @@ class AppSettingsServiceTests(unittest.TestCase):
                 )
                 updated_payload = json.loads(update_response.body)
 
-                get_response = app.handle_request("GET", "/api/workbench/settings")
-                get_payload = json.loads(get_response.body)
+                get_payload = json.loads(app.handle_request("GET", "/api/workbench/settings").body)
             finally:
                 app.close()
 
-        self.assertEqual(update_response.status_code, 200)
-        self.assertEqual(
-            updated_payload["access_control"],
-            {
-                "allowed_usernames": ["FULL001", "READONLY001", "YNSYLP005"],
-                "readonly_export_usernames": ["READONLY001"],
-                "admin_usernames": ["YNSYLP005"],
-                "full_access_usernames": ["FULL001"],
-            },
-        )
-        self.assertEqual(get_response.status_code, 200)
-        self.assertEqual(get_payload["access_control"], updated_payload["access_control"])
-        self.assertEqual(updated_payload["oa_retention"], {"cutoff_date": "2026-01-01"})
-        self.assertEqual(get_payload["oa_retention"], updated_payload["oa_retention"])
-        self.assertEqual(
-            updated_payload["oa_import"],
-            {
-                "form_types": ["payment_request"],
-                "statuses": ["completed"],
-                "attachment_invoice_promotion_mode": "link_existing_only",
-                "available_form_types": [
-                    {"id": "payment_request", "label": "支付申请"},
-                    {"id": "expense_claim", "label": "日常报销"},
-                ],
-                "available_statuses": [
-                    {"id": "completed", "label": "已完成"},
-                    {"id": "in_progress", "label": "进行中"},
-                ],
-            },
-        )
-        self.assertEqual(get_payload["oa_import"], updated_payload["oa_import"])
-        self.assertEqual(
-            updated_payload["workbench_column_layouts"],
-            {
-                "oa": ["projectName", "applicant", "amount", "counterparty", "reason"],
-                "bank": ["amount", "counterparty", "loanRepaymentDate", "note"],
-                "invoice": ["sellerName", "buyerName", "issueDate", "amount", "grossAmount"],
-            },
-        )
-        self.assertEqual(get_payload["workbench_column_layouts"], updated_payload["workbench_column_layouts"])
+        self.assertEqual(update_response.status_code, 400)
+        self.assertEqual(updated_payload["error"], "access_control_write_forbidden")
+        self.assertNotIn("access_control", get_payload)
 
     def test_sync_oa_projects_returns_source_and_status_in_settings_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1782,9 +1738,6 @@ class AppSettingsServiceTests(unittest.TestCase):
             app._app_settings_service.update_settings(
                 completed_project_ids=[project_id],
                 bank_account_mappings=[],
-                allowed_usernames=[],
-                readonly_export_usernames=[],
-                admin_usernames=[],
             )
 
             deleted_payload = app._app_settings_service.delete_project(project_id)

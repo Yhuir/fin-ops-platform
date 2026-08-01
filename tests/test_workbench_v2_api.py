@@ -1188,9 +1188,6 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             app._app_settings_service.update_settings(
                 completed_project_ids=[],
                 bank_account_mappings=[],
-                allowed_usernames=[],
-                readonly_export_usernames=[],
-                admin_usernames=[],
                 oa_import={"attachment_invoice_promotion_mode": "disabled"},
                 workbench_column_layouts={},
             )
@@ -1257,9 +1254,6 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             app._app_settings_service.update_settings(
                 completed_project_ids=[],
                 bank_account_mappings=[],
-                allowed_usernames=[],
-                readonly_export_usernames=[],
-                admin_usernames=[],
                 oa_import={"attachment_invoice_promotion_mode": "create_missing"},
                 workbench_column_layouts={},
             )

@@ -45,6 +45,17 @@ class _RecordingTransaction:
     def execute(self, sql: str, params: tuple[object, ...]) -> None:
         self.executed.append({"sql": sql, "params": params})
 
+    def fetch_one(self, sql: str, params: tuple[object, ...]) -> dict[str, object]:
+        return {
+            "settings_payload": {
+                "allowed_usernames": ["YNSYLP005"],
+                "readonly_export_usernames": [],
+                "admin_usernames": ["YNSYLP005"],
+                "full_access_usernames": [],
+                "access_control_version": 1,
+            }
+        }
+
 
 class _TransactionContext:
     def __init__(self, owner: "_RecordingConnection", transaction: _RecordingTransaction) -> None:
@@ -3429,8 +3440,9 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             transaction=transaction,
         )
 
-        self.assertEqual(len(transaction.executed), 1)
-        call = transaction.executed[0]
+        self.assertEqual(len(transaction.executed), 2)
+        self.assertIn("pg_advisory_xact_lock", str(transaction.executed[0]["sql"]))
+        call = transaction.executed[1]
         self.assertIn("app.app_settings", str(call["sql"]))
         self.assertEqual(call["params"][0], "app_settings")
 

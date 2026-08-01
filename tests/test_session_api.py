@@ -5,7 +5,10 @@ import unittest
 from contextlib import contextmanager
 from pathlib import Path
 
-from tests.app_test_support import build_local_state_application as build_application
+from tests.app_test_support import (
+    build_local_state_application as build_application,
+    configure_access_control,
+)
 from fin_ops_platform.services.oa_identity_service import OASessionExpiredError, OAUserIdentity
 
 
@@ -64,13 +67,7 @@ class SessionApiTests(unittest.TestCase):
     def test_get_session_me_does_not_fail_when_dynamic_settings_provider_is_unavailable_for_permitted_user(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            app._access_control_service.dynamic_allowed_usernames_provider = lambda: (_ for _ in ()).throw(
-                RuntimeError("settings store unavailable")
-            )
-            app._access_control_service.dynamic_readonly_export_usernames_provider = lambda: (_ for _ in ()).throw(
-                RuntimeError("settings store unavailable")
-            )
-            app._access_control_service.dynamic_admin_usernames_provider = lambda: (_ for _ in ()).throw(
+            app._access_control_service.access_control_snapshot_provider = lambda: (_ for _ in ()).throw(
                 RuntimeError("settings store unavailable")
             )
             app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
@@ -96,7 +93,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertTrue(payload["allowed"])
         self.assertEqual(payload["access_tier"], "full_access")
         self.assertTrue(payload["can_access_app"])
-        self.assertTrue(any("dynamic provider failed" in message for message in logs.output))
+        self.assertTrue(any("snapshot provider failed" in message for message in logs.output))
 
     def test_get_session_me_accepts_admin_token_cookie(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -141,17 +138,12 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(payload["allowed"])
         self.assertEqual(payload["user"]["username"], "local_finops_admin")
-        self.assertEqual(payload["access_tier"], "admin")
-        self.assertTrue(payload["can_admin_access"])
+        self.assertEqual(payload["access_tier"], "full_access")
+        self.assertFalse(payload["can_admin_access"])
 
     def test_get_session_me_allows_username_from_workbench_settings_even_without_permission_code(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            app._app_settings_service.update_settings(
-                completed_project_ids=[],
-                bank_account_mappings=[],
-                allowed_usernames=["YNSYLP005"],
-            )
             app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
                 user_id="201",
                 username="YNSYLP005",
@@ -178,13 +170,7 @@ class SessionApiTests(unittest.TestCase):
     def test_get_session_me_marks_readonly_export_user_as_non_mutating(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            app._app_settings_service.update_settings(
-                completed_project_ids=[],
-                bank_account_mappings=[],
-                allowed_usernames=["READONLY001"],
-                readonly_export_usernames=["READONLY001"],
-                admin_usernames=[],
-            )
+            configure_access_control(app, read_export_only=["READONLY001"])
             app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
                 user_id="202",
                 username="READONLY001",
@@ -211,13 +197,7 @@ class SessionApiTests(unittest.TestCase):
     def test_get_session_me_marks_non_admin_allowed_user_as_full_access(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            app._app_settings_service.update_settings(
-                completed_project_ids=[],
-                bank_account_mappings=[],
-                allowed_usernames=["FULL001"],
-                readonly_export_usernames=[],
-                admin_usernames=[],
-            )
+            configure_access_control(app, full_access=["FULL001"])
             app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
                 user_id="203",
                 username="FULL001",
@@ -244,12 +224,10 @@ class SessionApiTests(unittest.TestCase):
     def test_get_session_me_projects_access_tier_matrix_from_settings(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            app._app_settings_service.update_settings(
-                completed_project_ids=[],
-                bank_account_mappings=[],
-                allowed_usernames=["READONLY001", "FULL001"],
-                readonly_export_usernames=["READONLY001", "ADMIN001"],
-                admin_usernames=["ADMIN001"],
+            configure_access_control(
+                app,
+                full_access=["FULL001"],
+                read_export_only=["READONLY001"],
             )
             identities = {
                 "readonly": OAUserIdentity(
@@ -306,7 +284,7 @@ class SessionApiTests(unittest.TestCase):
             cases = {
                 "readonly": ("read_export_only", True, False, False),
                 "full": ("full_access", True, True, False),
-                "admin": ("admin", True, True, True),
+                "admin": ("denied", False, False, False),
                 "default-admin": ("admin", True, True, True),
                 "permission": ("full_access", True, True, False),
                 "outsider": ("denied", False, False, False),

@@ -15,7 +15,10 @@ from urllib.parse import quote
 
 from fin_ops_platform.app.routes_oa_pending_payments import OaPendingPaymentApiRoutes
 from fin_ops_platform.app.server import Application, Response
-from tests.app_test_support import build_local_state_application as build_application
+from tests.app_test_support import (
+    build_local_state_application as build_application,
+    configure_access_control,
+)
 from fin_ops_platform.domain.enums import TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
@@ -307,13 +310,6 @@ class OaPendingPaymentApiTests(unittest.TestCase):
     def test_read_endpoints_require_fin_ops_access(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            app._app_settings_service.update_settings(
-                completed_project_ids=[],
-                bank_account_mappings=[],
-                allowed_usernames=["OTHER_USER"],
-                readonly_export_usernames=[],
-                admin_usernames=[],
-            )
             app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
                 user_id="blocked-user-id",
                 username="BLOCKED_USER",
@@ -368,13 +364,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
     def test_module_owned_write_auth_rejects_readonly_user(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            app._app_settings_service.update_settings(
-                completed_project_ids=[],
-                bank_account_mappings=[],
-                allowed_usernames=["OA_READONLY"],
-                readonly_export_usernames=["OA_READONLY"],
-                admin_usernames=[],
-            )
+            configure_access_control(app, read_export_only=["OA_READONLY"])
             app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
                 user_id="oa-readonly-id",
                 username="OA_READONLY",

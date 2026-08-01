@@ -354,7 +354,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("FIN_OPS_OA_BASE_URL", script)
         self.assertIn("FIN_OPS_OA_USER_INFO_PATH", script)
         self.assertIn("FIN_OPS_ALLOWED_USERNAMES", script)
-        self.assertIn("FIN_OPS_ADMIN_USERNAMES", script)
+        self.assertNotIn("FIN_OPS_ADMIN_USERNAMES", script)
         self.assertIn("EnvironmentFile=\nEnvironmentFile=$COMMON_ENV", script)
         self.assertGreaterEqual(script.count("EnvironmentFile=\nEnvironmentFile=$COMMON_ENV"), 2)
         self.assertIn("EnvironmentFile=$COMMON_ENV", script)

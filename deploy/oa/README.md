@@ -141,7 +141,6 @@ FIN_OPS_OA_PAYMENT_STATUS_PASSWORD=<least-privilege mysql password>
 FIN_OPS_OA_PAYMENT_STATUS_CONNECT_TIMEOUT_SECONDS=5
 FIN_OPS_ALLOWED_USERNAMES=YNSYLP005
 FIN_OPS_READONLY_EXPORT_USERNAMES=
-FIN_OPS_ADMIN_USERNAMES=YNSYLP005
 FIN_OPS_ALLOWED_ROLES=
 FIN_OPS_PROMETHEUS_BEARER_TOKEN=<root-only long random metrics token>
 VITE_APP_BASE_PATH=/fin-ops/
@@ -151,7 +150,7 @@ VITE_APP_BASE_PATH=/fin-ops/
 
 - `FIN_OPS_OA_BASE_URL` 必须指向 OA 网关对外地址
 - `finops-deploy-control check-release` 会在发布前校验 PostgreSQL DSN 以及
-  `FIN_OPS_OA_BASE_URL / FIN_OPS_OA_USER_INFO_PATH / FIN_OPS_ALLOWED_USERNAMES / FIN_OPS_ADMIN_USERNAMES`，
+  `FIN_OPS_OA_BASE_URL / FIN_OPS_OA_USER_INFO_PATH / FIN_OPS_ALLOWED_USERNAMES`，
   缺任一项都会停止发布，避免上线后才出现“未配置 OA 用户信息服务地址”
 - `FIN_OPS_OA_REQUIRED_PERMISSION` 默认就是 `finops:app:view`
 - `FIN_OPS_OA_LOGIN_PATH` 默认 `/auth/login`；`创建 OA 草稿` 会用目标 OA 申请人的账号密码登录 OA，并用返回 token 创建 `isDraft=true` 草稿
@@ -159,13 +158,16 @@ VITE_APP_BASE_PATH=/fin-ops/
 - `FIN_OPS_OA_LOGIN_RSA_PUBLIC_KEY` 是 OA 登录接口使用的 RSA 公钥，可配置 PEM 或 base64 DER；后端登录目标申请人前会用该公钥加密密码，不发送明文密码
 - 服务器 runtime 必须能执行 `openssl`，用于目标申请人登录密码 RSA 加密；缺失时 `创建 OA 草稿` 会返回目标 OA 登录不可用
 - `FIN_OPS_OA_PAYMENT_STATUS_*` 用于进行中 OA “确认已支付”写回 OA MySQL `t_payment_simple`。2026-06-17 实机验证显示 `t_payment_simple.flow_id` 对应 OA Mongo `form_data._id`，不是 Flowable `PROC_INST_ID_`。应用正常运行时直接通过 MySQL 连接写回，不需要 SSH 登录 OA 服务器；如果 MySQL 只允许服务器本机访问，应将 app 部署在可访问该 MySQL 的同机/内网，或配置受控隧道/专用网络。未启用时页面仍可读取 OA 待付款数据，但 confirm-paid 会返回写回未配置。
-- `FIN_OPS_ALLOWED_USERNAMES / FIN_OPS_READONLY_EXPORT_USERNAMES / FIN_OPS_ADMIN_USERNAMES`
-  是启动期兜底配置，真实长期口径仍以 app 设置持久化为准
+- `FIN_OPS_ALLOWED_USERNAMES / FIN_OPS_READONLY_EXPORT_USERNAMES` 是非管理员启动期兜底配置；
+  管理员固定为 `YNSYLP005`，不再接受环境变量或普通 settings payload 覆盖
 - `FIN_OPS_PROMETHEUS_BEARER_TOKEN` 用于 `/metrics` Prometheus scrape；未配置时 `/metrics`
   返回 `404`，配置后必须带 `Authorization: Bearer <token>`
 - 如果希望“访问账户管理”保存后自动同步 OA 菜单角色，还需要配置：
   - `FIN_OPS_OA_ROLE_SYNC_ENABLED=1`
   - `FIN_OPS_OA_ROLE_SYNC_HOST / PORT / DATABASE / USERNAME / PASSWORD`
+  - `FIN_OPS_OA_ROLE_SYNC_CONNECT_TIMEOUT_SECONDS=5`
+  - `FIN_OPS_OA_ROLE_SYNC_READ_TIMEOUT_SECONDS=10`
+  - `FIN_OPS_OA_ROLE_SYNC_WRITE_TIMEOUT_SECONDS=10`
   - `FIN_OPS_OA_ROLE_SYNC_READONLY_ROLE_KEY / FULL_ACCESS_ROLE_KEY / ADMIN_ROLE_KEY`
 - `VITE_APP_BASE_PATH` 必须是 `/fin-ops/`
 - 业务数据相关的 Mongo 配置仍按现有 `fin-ops` 运行说明提供，不在这里重复展开
@@ -672,7 +674,7 @@ release 会占用服务器磁盘。生产策略不是无限保留，而是默认
 按当前业务要求，初始配置至少要包含：
 
 - `FIN_OPS_ALLOWED_USERNAMES=YNSYLP005`
-- `FIN_OPS_ADMIN_USERNAMES=YNSYLP005`
+- 唯一受保护管理员固定为 `YNSYLP005`，无需且禁止通过 env 配置第二管理员
 
 后续再通过关联台里的“访问账户管理”维护：
 

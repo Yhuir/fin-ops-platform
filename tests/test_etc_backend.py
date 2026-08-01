@@ -3768,8 +3768,6 @@ class EtcApiTests(unittest.TestCase):
     def test_etc_business_batch_scope_uses_session_dept_id(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            app._access_control_service.dynamic_allowed_usernames_provider = lambda: ["OWNER", "OTHER", "ADMIN"]
-            app._access_control_service.dynamic_admin_usernames_provider = lambda: ["ADMIN"]
 
             identities = {
                 "owner-token": OAUserIdentity(
@@ -3790,7 +3788,7 @@ class EtcApiTests(unittest.TestCase):
                 ),
                 "admin-token": OAUserIdentity(
                     user_id="admin-id",
-                    username="ADMIN",
+                    username="YNSYLP005",
                     nickname="Admin",
                     display_name="Admin",
                     dept_id="D99",

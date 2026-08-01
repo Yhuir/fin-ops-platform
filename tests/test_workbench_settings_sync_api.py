@@ -8,7 +8,10 @@ from unittest.mock import patch
 
 from pymongo.errors import NetworkTimeout
 
-from tests.app_test_support import build_local_state_application as build_application
+from tests.app_test_support import (
+    build_local_state_application as build_application,
+    configure_access_control,
+)
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncError
 
@@ -46,27 +49,103 @@ class WorkbenchSettingsSyncApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._app_settings_service._oa_role_sync_service = ExplodingSyncService()
+            app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
+                user_id="admin-id",
+                username="YNSYLP005",
+                nickname="管理员",
+                display_name="管理员",
+                roles=[],
+                permissions=[],
+            )
 
             response = app.handle_request(
-                "POST",
-                "/api/workbench/settings",
+                "PUT",
+                "/api/workbench/settings/access-control",
                 body=json.dumps(
                     {
-                        "completed_project_ids": [],
-                        "bank_account_mappings": [],
-                        "allowed_usernames": ["YNSYLP006"],
-                        "readonly_export_usernames": ["YNSYLP006"],
-                        "admin_usernames": ["YNSYLP005"],
+                        "expected_version": 1,
+                        "accounts": [
+                            {"username": "YNSYLP006", "access_tier": "read_export_only"}
+                        ],
                     }
                 ),
+                headers={"Authorization": "Bearer admin"},
             )
             payload = json.loads(response.body)
-            settings_payload = json.loads(app.handle_request("GET", "/api/workbench/settings").body)
+            settings_payload = app._app_settings_service.get_access_control_payload()
 
         self.assertEqual(response.status_code, 502)
         self.assertEqual(payload["error"], "oa_role_sync_failed")
-        self.assertEqual(settings_payload["access_control"]["allowed_usernames"], ["YNSYLP005"])
-        self.assertEqual(settings_payload["access_control"]["readonly_export_usernames"], [])
+        self.assertEqual(settings_payload["accounts"], [])
+
+    def test_only_protected_admin_can_use_versioned_access_control_api(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            identities = {
+                "admin": OAUserIdentity(
+                    user_id="admin-id",
+                    username="YNSYLP005",
+                    nickname="管理员",
+                    display_name="管理员",
+                    roles=[],
+                    permissions=[],
+                ),
+                "full": OAUserIdentity(
+                    user_id="full-id",
+                    username="FULL001",
+                    nickname="业务用户",
+                    display_name="业务用户",
+                    roles=[],
+                    permissions=["finops:app:view"],
+                ),
+            }
+            app._oa_identity_service.resolve_identity = lambda token: identities[token]
+
+            attack = app.handle_request(
+                "POST",
+                "/api/workbench/settings",
+                body=json.dumps({"admin_usernames": ["FULL001"]}),
+                headers={"Authorization": "Bearer full"},
+            )
+            forbidden = app.handle_request(
+                "PUT",
+                "/api/workbench/settings/access-control",
+                body=json.dumps({"expected_version": 1, "accounts": []}),
+                headers={"Authorization": "Bearer full"},
+            )
+            updated = app.handle_request(
+                "PUT",
+                "/api/workbench/settings/access-control",
+                body=json.dumps(
+                    {
+                        "expected_version": 1,
+                        "accounts": [{"username": "FULL001", "access_tier": "full_access"}],
+                    }
+                ),
+                headers={"Authorization": "Bearer admin", "X-Request-ID": "spoofed-client-id"},
+                request_id="server-request-id",
+            )
+            stale = app.handle_request(
+                "PUT",
+                "/api/workbench/settings/access-control",
+                body=json.dumps({"expected_version": 1, "accounts": []}),
+                headers={"Authorization": "Bearer admin"},
+            )
+            generic_payload = json.loads(app.handle_request("GET", "/api/workbench/settings").body)
+            audit_events = json.loads((Path(temp_dir) / "app_settings.json").read_text(encoding="utf-8"))[
+                "_settings_acl_audit_events"
+            ]
+
+        self.assertEqual(attack.status_code, 400)
+        self.assertEqual(json.loads(attack.body)["error"], "access_control_write_forbidden")
+        self.assertEqual(forbidden.status_code, 403)
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(json.loads(updated.body)["version"], 2)
+        self.assertEqual(stale.status_code, 409)
+        self.assertEqual(json.loads(stale.body)["current_version"], 2)
+        self.assertNotIn("access_control", generic_payload)
+        self.assertEqual(audit_events[-1]["request_id"], "server-request-id")
+        self.assertNotEqual(audit_events[-1]["request_id"], "spoofed-client-id")
 
     def test_settings_update_returns_clear_error_when_app_mongo_save_times_out(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -84,9 +163,6 @@ class WorkbenchSettingsSyncApiTests(unittest.TestCase):
                     {
                         "completed_project_ids": [],
                         "bank_account_mappings": [],
-                        "allowed_usernames": [],
-                        "readonly_export_usernames": [],
-                        "admin_usernames": [],
                     }
                 ),
             )
@@ -177,13 +253,7 @@ class WorkbenchSettingsSyncApiTests(unittest.TestCase):
             tempfile.TemporaryDirectory() as temp_dir,
         ):
             app = build_application(data_dir=Path(temp_dir))
-            app._app_settings_service.update_settings(
-                completed_project_ids=[],
-                bank_account_mappings=[],
-                allowed_usernames=["READONLY001"],
-                readonly_export_usernames=["READONLY001"],
-                admin_usernames=[],
-            )
+            configure_access_control(app, read_export_only=["READONLY001"])
             created_payload = app._app_settings_service.create_manual_project(
                 actor_id="settings_owner",
                 project_code="LOCAL-001",

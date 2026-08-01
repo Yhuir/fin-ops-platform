@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/verify.sh [lint|backend|frontend|e2e|docs|runtime-check|infra-smoke|all]
+Usage: scripts/verify.sh [lint|backend|frontend|e2e|docs|runtime-check|infra-smoke|settings-acl-postgres|all]
 
 lint      Run Ruff lint checks for backend Python code, tests, and scripts.
 backend   Run clean backend check and full backend unittest discovery.
@@ -20,6 +20,8 @@ infra-smoke
           Always print the production external gate input preflight without secrets.
           Set FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS to run read-only
           write-operation SLO audits against recent real outbox events.
+settings-acl-postgres
+          Run the fail-closed settings ACL lost-ack test against a visibly disposable PostgreSQL database.
 all       Run backend, frontend, deterministic browser e2e, and docs checks. This is the default.
 USAGE
 }
@@ -60,6 +62,19 @@ PY
 run_runtime_check() {
   cd "$ROOT_DIR"
   PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+}
+
+run_settings_acl_postgres() {
+  cd "$ROOT_DIR"
+  if [[ -z "${FIN_OPS_TEST_DATABASE_URL:-}" ]]; then
+    echo "FIN_OPS_TEST_DATABASE_URL is required for settings-acl-postgres." >&2
+    exit 2
+  fi
+  FIN_OPS_REQUIRE_SETTINGS_ACL_POSTGRES=1 \
+    PYTHONPATH=backend/src:tests \
+    python3 -m unittest \
+      tests.test_postgres_state_store_integration.PostgresStateStoreIntegrationTests.test_settings_acl_commit_lost_ack_reconciles_under_fresh_lock \
+      -v
 }
 
 run_backend() {
@@ -254,6 +269,9 @@ case "$target" in
     ;;
   infra-smoke)
     run_infra_smoke
+    ;;
+  settings-acl-postgres)
+    run_settings_acl_postgres
     ;;
   all)
     run_backend

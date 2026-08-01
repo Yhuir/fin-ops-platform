@@ -5,11 +5,47 @@ import unittest
 from contextlib import contextmanager
 from pathlib import Path
 
-from tests.app_test_support import build_local_state_application as build_application
+from tests.app_test_support import (
+    build_local_state_application as build_application,
+    configure_access_control,
+)
 from fin_ops_platform.services.oa_identity_service import OASessionExpiredError, OAUserIdentity
+from fin_ops_platform.services.access_control_service import AccessControlService
 
 
 class AuthGuardTests(unittest.TestCase):
+    def test_access_control_uses_one_snapshot_and_cannot_create_second_admin(self) -> None:
+        snapshot_reads = 0
+
+        def snapshot_provider() -> dict[str, object]:
+            nonlocal snapshot_reads
+            snapshot_reads += 1
+            return {
+                "allowed_usernames": ["ATTACKER"],
+                "readonly_export_usernames": [],
+                "admin_usernames": ["ATTACKER"],
+                "full_access_usernames": ["ATTACKER"],
+            }
+
+        service = AccessControlService(
+            required_permission="",
+            access_control_snapshot_provider=snapshot_provider,
+        )
+        decision = service.evaluate(
+            OAUserIdentity(
+                user_id="attacker-id",
+                username="ATTACKER",
+                nickname="attacker",
+                display_name="attacker",
+                roles=[],
+                permissions=[],
+            )
+        )
+
+        self.assertEqual(snapshot_reads, 1)
+        self.assertEqual(decision.access_tier, "full_access")
+        self.assertFalse(decision.can_admin_access)
+
     @contextmanager
     def _without_default_test_auth(self):
         previous = os.environ.get("FIN_OPS_TEST_DEFAULT_AUTH")
@@ -78,13 +114,7 @@ class AuthGuardTests(unittest.TestCase):
     def test_readonly_export_user_can_export_but_cannot_mutate_or_admin(self) -> None:
         with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            app._app_settings_service.update_settings(
-                completed_project_ids=[],
-                bank_account_mappings=[],
-                allowed_usernames=["READONLY001"],
-                readonly_export_usernames=["READONLY001"],
-                admin_usernames=[],
-            )
+            configure_access_control(app, read_export_only=["READONLY001"])
             app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
                 user_id="401",
                 username="READONLY001",

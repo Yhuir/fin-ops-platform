@@ -42,6 +42,33 @@ def build_local_state_application(*args, **kwargs):
     return application
 
 
+def configure_access_control(
+    application: Application,
+    *,
+    full_access: list[str] | None = None,
+    read_export_only: list[str] | None = None,
+) -> dict[str, object]:
+    service = application._app_settings_service  # noqa: SLF001
+    current = service.get_access_control_payload()
+    accounts = [
+        *(
+            {"username": username, "access_tier": "full_access"}
+            for username in list(full_access or [])
+        ),
+        *(
+            {"username": username, "access_tier": "read_export_only"}
+            for username in list(read_export_only or [])
+        ),
+    ]
+    return service.update_access_control(
+        expected_version=int(current["version"]),
+        accounts=accounts,
+        actor_id="YNSYLP005",
+        actor_name="test protected administrator",
+        request_id="test-settings-acl",
+    )
+
+
 def seed_confirmed_import(
     application: Application,
     *,

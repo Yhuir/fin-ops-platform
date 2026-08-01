@@ -15,7 +15,10 @@ from openpyxl import load_workbook
 
 from fin_ops_platform.app.routes_turnover_ledger import TurnoverLedgerApiRoutes
 from fin_ops_platform.app.server import Application
-from tests.app_test_support import build_local_state_application as build_application
+from tests.app_test_support import (
+    build_local_state_application as build_application,
+    configure_access_control,
+)
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
@@ -3378,12 +3381,10 @@ class TurnoverLedgerApiTests(unittest.TestCase):
     def test_relation_extra_put_rejects_readonly_user(self) -> None:
         with self._without_default_test_auth(), TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            app._app_settings_service.update_settings(
-                completed_project_ids=[],
-                bank_account_mappings=[],
-                allowed_usernames=["READONLY001", "FULL001"],
-                readonly_export_usernames=["READONLY001"],
-                admin_usernames=[],
+            configure_access_control(
+                app,
+                full_access=["FULL001"],
+                read_export_only=["READONLY001"],
             )
             identities = {
                 "readonly-token": OAUserIdentity(
@@ -3514,12 +3515,10 @@ class TurnoverLedgerApiTests(unittest.TestCase):
     def test_confirm_and_withdraw_require_mutation_permission_and_write_audit(self) -> None:
         with self._without_default_test_auth(), TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            app._app_settings_service.update_settings(
-                completed_project_ids=[],
-                bank_account_mappings=[],
-                allowed_usernames=["READONLY001", "FULL001"],
-                readonly_export_usernames=["READONLY001"],
-                admin_usernames=[],
+            configure_access_control(
+                app,
+                full_access=["FULL001"],
+                read_export_only=["READONLY001"],
             )
             identities = {
                 "readonly-token": OAUserIdentity(

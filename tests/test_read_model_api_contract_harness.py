@@ -146,7 +146,7 @@ class ReadModelApiContractHarnessTests(unittest.TestCase):
                 "session_me": ("user", "allowed", "can_access_app"),
                 "workbench_initial_all": ("paired", "unpaired", "scope_key"),
                 "workbench_groups_all_paired": ("groups", "pagination", "scope_key", "zone"),
-                "workbench_settings": ("projects", "access_control", "workbench_column_layouts"),
+                "workbench_settings": ("projects", "workbench_column_layouts"),
                 "bank_details_accounts": ("accounts",),
                 "bank_details_transactions": ("rows", "pagination"),
                 "pending_invoices_rows": ("rows", "pagination", "summary"),

@@ -1473,9 +1473,6 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         app._app_settings_service.update_settings(
             completed_project_ids=[],
             bank_account_mappings=[],
-            allowed_usernames=[],
-            readonly_export_usernames=[],
-            admin_usernames=[],
             pending_invoice_tag_groups={
                 "version": settings["pending_invoice_tag_groups"]["version"],
                 "groups": {

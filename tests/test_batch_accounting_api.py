@@ -15,7 +15,10 @@ from fin_ops_platform.services.batch_accounting_service import (
     BatchAccountingService,
 )
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
-from tests.app_test_support import build_local_state_application as build_application
+from tests.app_test_support import (
+    build_local_state_application as build_application,
+    configure_access_control,
+)
 
 
 BANK_ROW_ID = "txn_imported_202601_batch_001"
@@ -663,13 +666,7 @@ class BatchAccountingApiRouteTests(unittest.TestCase):
     def test_read_export_only_session_cannot_submit(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            app._app_settings_service.update_settings(
-                completed_project_ids=[],
-                bank_account_mappings=[],
-                allowed_usernames=["READONLY001"],
-                readonly_export_usernames=["READONLY001"],
-                admin_usernames=[],
-            )
+            configure_access_control(app, read_export_only=["READONLY001"])
             app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
                 user_id="202",
                 username="READONLY001",

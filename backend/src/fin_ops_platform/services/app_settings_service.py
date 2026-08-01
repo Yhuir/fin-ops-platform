@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime
+import hashlib
 from time import sleep
 from typing import Any, Callable
+from uuid import uuid4
 
 from fin_ops_platform.domain.models import ProjectMaster
-from fin_ops_platform.services.access_control_service import DEFAULT_ADMIN_USERNAME
 from fin_ops_platform.services.bank_transaction_category_service import (
     BankAutoTagRulesValidationError,
     BankTransactionCategoryService,
@@ -29,7 +30,12 @@ from fin_ops_platform.services.pending_invoice_rules import (
     normalize_pending_invoice_direction,
 )
 from fin_ops_platform.services.project_costing import ProjectCostingService
-from fin_ops_platform.services.state_store_protocol import ApplicationStateStoreProtocol
+from fin_ops_platform.services.state_store_protocol import (
+    PROTECTED_ADMIN_USERNAME,
+    ApplicationStateStoreProtocol,
+    SettingsAccessControlCommitOutcomeUnknown,
+    settings_access_control_from_payload,
+)
 
 DEFAULT_OA_RETENTION_CUTOFF_DATE = "2026-01-01"
 DEFAULT_OA_INVOICE_OFFSET_APPLICANTS = ["周洁莹"]
@@ -90,6 +96,14 @@ class AppSettingsValidationError(ValueError):
     def __init__(self, error_code: str, message: str) -> None:
         super().__init__(message)
         self.error_code = error_code
+
+
+class AppSettingsPersistenceError(RuntimeError):
+    pass
+
+
+class AccessControlSyncInconsistentError(RuntimeError):
+    pass
 
 
 class BankAutoTagRulesPersistenceError(RuntimeError):
@@ -173,12 +187,6 @@ class AppSettingsService:
                 "completed_project_ids": sorted(completed_ids),
             },
             "bank_account_mappings": mappings,
-            "access_control": {
-                "allowed_usernames": list(self._snapshot["allowed_usernames"]),
-                "readonly_export_usernames": list(self._snapshot["readonly_export_usernames"]),
-                "admin_usernames": list(self._snapshot["admin_usernames"]),
-                "full_access_usernames": list(self._snapshot["full_access_usernames"]),
-            },
             "workbench_column_layouts": {
                 pane_id: list(self._snapshot["workbench_column_layouts"][pane_id])
                 for pane_id in ("oa", "bank", "invoice")
@@ -241,14 +249,180 @@ class AppSettingsService:
         payload["pending_invoice_available_tags"] = payload["pending_invoice_available_tags_expense"]
         return payload
 
+    def get_access_control_snapshot(self) -> dict[str, Any]:
+        self._refresh_snapshot_from_state_store()
+        return settings_access_control_from_payload(self._snapshot)
+
+    def get_access_control_payload(self) -> dict[str, Any]:
+        return self._public_access_control_payload(self.get_access_control_snapshot())
+
+    def update_access_control(
+        self,
+        *,
+        expected_version: int,
+        accounts: list[dict[str, Any]],
+        actor_id: str,
+        actor_name: str,
+        request_id: str,
+    ) -> dict[str, Any]:
+        if self._state_store is None:
+            raise AppSettingsPersistenceError("Settings persistence is unavailable.")
+        next_acl = self._access_control_from_accounts(accounts)
+        mutation_id = uuid4().hex
+        try:
+            with self._state_store.begin_settings_acl_critical_section(expected_version) as critical_section:
+                previous_acl = settings_access_control_from_payload(critical_section.locked_current)
+                if self._access_control_memberships(previous_acl) == self._access_control_memberships(next_acl):
+                    self._snapshot = {**self._snapshot, **previous_acl}
+                    return {"changed": False, **self._public_access_control_payload(previous_acl)}
+                if self._oa_role_sync_service is not None:
+                    self._oa_role_sync_service.sync_access_control(next_acl)
+                try:
+                    committed_acl = critical_section.commit(
+                        next_acl,
+                        {
+                            "mutation_id": mutation_id,
+                            "actor_id": str(actor_id or "system"),
+                            "actor_name": str(actor_name or ""),
+                            "request_id": str(request_id or ""),
+                            "changed_username_sha256": self._changed_username_hashes(previous_acl, next_acl),
+                        },
+                    )
+                except SettingsAccessControlCommitOutcomeUnknown:
+                    raise
+                except Exception as exc:
+                    self._compensate_oa_access_control(previous_acl, request_id=request_id)
+                    raise AppSettingsPersistenceError("Settings access-control persistence failed.") from exc
+        except SettingsAccessControlCommitOutcomeUnknown:
+            recovery = self._state_store.recover_settings_acl_commit(mutation_id)
+            canonical = settings_access_control_from_payload(recovery.get("access_control"))
+            if (
+                recovery.get("audit_present")
+                and canonical["access_control_version"] == int(expected_version) + 1
+                and self._access_control_memberships(canonical) == self._access_control_memberships(next_acl)
+            ):
+                committed_acl = canonical
+            elif (
+                not recovery.get("audit_present")
+                and canonical["access_control_version"] == int(expected_version)
+            ):
+                try:
+                    with self._state_store.begin_settings_acl_critical_section(expected_version) as recovery_guard:
+                        locked_recovery = settings_access_control_from_payload(recovery_guard.locked_current)
+                        if self._access_control_memberships(locked_recovery) != self._access_control_memberships(
+                            canonical
+                        ):
+                            raise AccessControlSyncInconsistentError(
+                                f"Settings access-control changed during recovery; request_id={request_id}."
+                            )
+                        self._compensate_oa_access_control(locked_recovery, request_id=request_id)
+                except AccessControlSyncInconsistentError:
+                    raise
+                except Exception as exc:
+                    raise AccessControlSyncInconsistentError(
+                        f"Settings access-control rollback recovery failed; request_id={request_id}."
+                    ) from exc
+                raise AppSettingsPersistenceError("Settings access-control commit rolled back.")
+            else:
+                raise AccessControlSyncInconsistentError(
+                    f"Settings access-control commit outcome is inconsistent; request_id={request_id}."
+                )
+        self._snapshot = {**self._snapshot, **committed_acl}
+        return {"changed": True, **self._public_access_control_payload(committed_acl)}
+
+    def _compensate_oa_access_control(self, previous_acl: dict[str, Any], *, request_id: str) -> None:
+        if self._oa_role_sync_service is None:
+            return
+        try:
+            self._oa_role_sync_service.sync_access_control(previous_acl)
+        except Exception as exc:
+            raise AccessControlSyncInconsistentError(
+                f"OA access-control compensation failed; request_id={request_id}."
+            ) from exc
+
+    @staticmethod
+    def _access_control_from_accounts(accounts: list[dict[str, Any]]) -> dict[str, Any]:
+        if not isinstance(accounts, list):
+            raise AppSettingsValidationError("invalid_access_control_request", "accounts must be an array.")
+        full_access: list[str] = []
+        readonly: list[str] = []
+        seen: set[str] = set()
+        for account in accounts:
+            if not isinstance(account, dict) or set(account) != {"username", "access_tier"}:
+                raise AppSettingsValidationError(
+                    "invalid_access_control_request",
+                    "Each account must contain only username and access_tier.",
+                )
+            username = str(account.get("username") or "").strip()
+            tier = str(account.get("access_tier") or "").strip()
+            if not username or len(username) > 128 or any(ord(character) < 32 for character in username):
+                raise AppSettingsValidationError("invalid_access_control_username", "Invalid account username.")
+            if username == PROTECTED_ADMIN_USERNAME:
+                raise AppSettingsValidationError(
+                    "protected_administrator_immutable",
+                    "The protected administrator cannot be edited.",
+                )
+            if username in seen:
+                raise AppSettingsValidationError("duplicate_access_control_username", "Duplicate account username.")
+            if tier not in {"full_access", "read_export_only"}:
+                raise AppSettingsValidationError("invalid_access_control_tier", "Invalid account access_tier.")
+            seen.add(username)
+            (full_access if tier == "full_access" else readonly).append(username)
+        return {
+            "allowed_usernames": [PROTECTED_ADMIN_USERNAME, *sorted(seen)],
+            "readonly_export_usernames": sorted(readonly),
+            "admin_usernames": [PROTECTED_ADMIN_USERNAME],
+            "full_access_usernames": sorted(full_access),
+        }
+
+    @staticmethod
+    def _access_control_memberships(access_control: dict[str, Any]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        return (
+            tuple(sorted(access_control.get("full_access_usernames") or [])),
+            tuple(sorted(access_control.get("readonly_export_usernames") or [])),
+        )
+
+    @staticmethod
+    def _public_access_control_payload(access_control: dict[str, Any]) -> dict[str, Any]:
+        normalized = settings_access_control_from_payload(access_control)
+        accounts = [
+            *(
+                {"username": username, "access_tier": "full_access"}
+                for username in normalized["full_access_usernames"]
+            ),
+            *(
+                {"username": username, "access_tier": "read_export_only"}
+                for username in normalized["readonly_export_usernames"]
+            ),
+        ]
+        return {
+            "version": normalized["access_control_version"],
+            "administrator": {
+                "username": PROTECTED_ADMIN_USERNAME,
+                "access_tier": "admin",
+                "protected": True,
+            },
+            "accounts": sorted(accounts, key=lambda item: item["username"]),
+        }
+
+    @staticmethod
+    def _changed_username_hashes(previous: dict[str, Any], target: dict[str, Any]) -> list[str]:
+        previous_names = set(previous.get("full_access_usernames") or []) | set(
+            previous.get("readonly_export_usernames") or []
+        )
+        target_names = set(target.get("full_access_usernames") or []) | set(
+            target.get("readonly_export_usernames") or []
+        )
+        return [
+            hashlib.sha256(username.encode("utf-8")).hexdigest()
+            for username in sorted(previous_names.symmetric_difference(target_names))
+        ]
+
     def update_settings(
         self,
         *,
         completed_project_ids: list[str],
         bank_account_mappings: list[dict[str, Any]],
-        allowed_usernames: list[str],
-        readonly_export_usernames: list[str] | None = None,
-        admin_usernames: list[str] | None = None,
         workbench_column_layouts: dict[str, Any] | None = None,
         oa_retention: dict[str, Any] | None = None,
         oa_import: dict[str, Any] | None = None,
@@ -265,9 +439,11 @@ class AppSettingsService:
             {
                 "completed_project_ids": completed_project_ids,
                 "bank_account_mappings": bank_account_mappings,
-                "allowed_usernames": allowed_usernames,
-                "readonly_export_usernames": readonly_export_usernames or [],
-                "admin_usernames": admin_usernames or [],
+                "allowed_usernames": self._snapshot["allowed_usernames"],
+                "readonly_export_usernames": self._snapshot["readonly_export_usernames"],
+                "admin_usernames": self._snapshot["admin_usernames"],
+                "full_access_usernames": self._snapshot["full_access_usernames"],
+                "access_control_version": self._snapshot["access_control_version"],
                 "workbench_column_layouts": workbench_column_layouts or {},
                 "oa_retention": oa_retention or {},
                 "oa_import": (
@@ -311,15 +487,8 @@ class AppSettingsService:
         )
         if tag_settings_event is not None:
             self._apply_tag_settings_versions(previous_snapshot, normalized_snapshot, tag_settings_event)
-        if self._oa_role_sync_service is not None:
-            self._oa_role_sync_service.sync_access_control(normalized_snapshot)
-        try:
-            if self._state_store is not None:
-                self._state_store.save_app_settings(normalized_snapshot)
-        except Exception:
-            if self._oa_role_sync_service is not None:
-                self._oa_role_sync_service.sync_access_control(previous_snapshot)
-            raise
+        if self._state_store is not None:
+            self._state_store.save_app_settings(normalized_snapshot)
         self._snapshot = normalized_snapshot
         self._configure_category_service(normalized_snapshot)
         if tag_settings_event is not None:
@@ -1303,18 +1472,6 @@ class AppSettingsService:
         self._refresh_snapshot_from_state_store()
         return list(self._snapshot["oa_invoice_offset"]["applicant_names"])
 
-    def get_allowed_usernames(self) -> list[str]:
-        self._refresh_snapshot_from_state_store()
-        return list(self._snapshot["allowed_usernames"])
-
-    def get_readonly_export_usernames(self) -> list[str]:
-        self._refresh_snapshot_from_state_store()
-        return list(self._snapshot["readonly_export_usernames"])
-
-    def get_admin_usernames(self) -> list[str]:
-        self._refresh_snapshot_from_state_store()
-        return list(self._snapshot["admin_usernames"])
-
     @staticmethod
     def _normalize_username_list(values: list[Any] | None) -> list[str]:
         return sorted(
@@ -1372,10 +1529,7 @@ class AppSettingsService:
                     "short_name": short_name,
                 }
             )
-        admin_usernames = set(
-            AppSettingsService._normalize_username_list(raw_payload.get("admin_usernames"))
-        )
-        admin_usernames.add(DEFAULT_ADMIN_USERNAME)
+        admin_usernames = {PROTECTED_ADMIN_USERNAME}
 
         allowed_usernames = set(
             AppSettingsService._normalize_username_list(raw_payload.get("allowed_usernames"))
@@ -1391,6 +1545,10 @@ class AppSettingsService:
         full_access_usernames = sorted(
             allowed_usernames.difference(readonly_export_usernames).difference(admin_usernames)
         )
+        try:
+            access_control_version = max(1, int(raw_payload.get("access_control_version") or 1))
+        except (TypeError, ValueError):
+            access_control_version = 1
         raw_layouts = raw_payload.get("workbench_column_layouts")
         normalized_layouts: dict[str, list[str]] = {}
         for pane_id, default_keys in DEFAULT_WORKBENCH_COLUMN_LAYOUTS.items():
@@ -1556,6 +1714,7 @@ class AppSettingsService:
             "readonly_export_usernames": sorted(readonly_export_usernames),
             "admin_usernames": sorted(admin_usernames),
             "full_access_usernames": full_access_usernames,
+            "access_control_version": access_control_version,
             "workbench_column_layouts": normalized_layouts,
             "oa_retention": {"cutoff_date": cutoff_date},
             "oa_import": {
