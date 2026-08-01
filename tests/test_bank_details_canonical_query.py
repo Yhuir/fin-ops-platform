@@ -359,6 +359,53 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
         self.assertEqual(params[-1], ["turnover-personal"])
         self.assertEqual(sql.count("%s"), len(params))
 
+    def test_effective_category_rows_bounds_manual_only_turnover_candidates(self) -> None:
+        class Transaction:
+            def __init__(self) -> None:
+                self.reads: list[tuple[str, tuple[object, ...]]] = []
+
+            def fetch_all(
+                self,
+                sql: str,
+                params: tuple[object, ...] = (),
+            ) -> list[dict[str, object]]:
+                self.reads.append((sql, params))
+                return []
+
+        transaction = Transaction()
+        PostgresBankDetailsCanonicalQueryRepository.effective_category_rows(
+            transaction,
+            settings={
+                "bank_transaction_tags": {
+                    "definitions": [
+                        {
+                            "code": "turnover-personal",
+                            "status": "active",
+                            "turnover_role": "external_turnover",
+                            "turnover_action_type": "pending_repayment",
+                            "output_primary_label": "外部往来款收款",
+                            "output_sub_label": "借入款",
+                            "rules": {
+                                "match_fields": ["summary_text"],
+                                "contains_any": ["借款"],
+                            },
+                        }
+                    ]
+                }
+            },
+            category_codes=["turnover-personal"],
+        )
+
+        _sql, params = transaction.reads[0]
+        self.assertEqual(
+            params[7:10],
+            (
+                ["turnover-personal"],
+                ["turnover-personal"],
+                ["turnover-personal"],
+            ),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

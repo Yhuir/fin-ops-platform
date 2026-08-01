@@ -783,3 +783,9 @@ git diff --check
 - 首次生产业务校验发现集合查询已命中 64 条有效分类行，但 raw tag definition 不持有人工确认的逐行 `turnover_family`，适配层因此把全部行过滤为空。修复复用同一 request 内已配置的 `BankTransactionCategoryService.category_semantics_for_code(...)`，并从 canonical third label 推导 family；不恢复 Python rematch、全量分类 snapshot 或额外 I/O。
 - 旧链删除：生产 query service 不再构造 `ImportNormalizationService`、`BankTransactionEffectiveCategoryProvider`，不再加载全量 category snapshot，也不再对全量银行流水执行 Python 自动匹配。未新增表、索引、缓存、worker、projection、依赖或第二事实源。
 - 验收：本地业务/service/API 回归与 set-based SQL 合同通过；最终查询数和 p95 必须由精确 SHA 部署后的 App Health 与并发 4 SLO probe 复验。
+
+## 2026-08-01 - 外部往来候选集前置收窄
+
+- 最新生产并发 4 基线 p95 为 `1556.559ms`；当前 1,014 条银行流水中只有 65 条命中选中的外部往来标签，但共享 classifier 仍先计算全部流水再做 `effective_category_code` 过滤。
+- 外部往来标签合同要求逐行选择第三层语义，缺少 `output_third_label` 的 external-turnover 定义不会直接形成自动有效标签。因此 repository 仅在“全部已选定义都满足该合同”时，用 active confirmation/manual category 把 classifier source 收窄到候选行；任一定义不满足时自动保留原全量分类，禁止漏掉可自动命中的普通标签。
+- 仍复用同一个 Bank Details canonical classifier 和 Turnover query service，没有新增专用分类器、cache、read model、worker、表、索引、migration、fallback 或第二事实源。真实 PostgreSQL integration 覆盖人工分类、语义恢复和 active Workbench closure。

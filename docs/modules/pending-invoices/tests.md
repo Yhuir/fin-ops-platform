@@ -19,7 +19,7 @@
 | 类别 | 适用性 | 当前入口 |
 | --- | --- | --- |
 | 1. 业务核心 | 适用 | `tests/test_pending_invoice_service.py`、`tests/test_pending_invoice_relation_identity.py`：规则、状态、关系、聚合、冲突、幂等 |
-| 2. Service/repository | 适用 | `tests/test_pending_invoice_canonical_query.py`：snapshot、set-based SQL、active relation、固定查询预算 |
+| 2. Service/repository | 适用 | `tests/test_pending_invoice_canonical_query.py`、`tests/test_pending_invoice_postgres_integration.py`：snapshot、共享 compiled rule SQL、active relation、固定查询预算、真实 PostgreSQL 命中 |
 | 3. API contract | 适用 | `tests/test_pending_invoice_api.py`、`web/src/test/PendingInvoicesApi.test.ts`：rows/detail/rules/candidates/attach/export/权限和 retired 字段缺失 |
 | 4. Read model/cache/worker | 适用（负向） | `tests/test_read_model_manifest.py`、`tests/test_runtime_worker_registry.py`、`tests/test_read_model_architecture_guards.py`：页面 worker/runtime 与独立 Search runtime 保持删除 |
 | 5. 前端交互 | 适用 | `web/src/test/PendingInvoicesPage.test.tsx`、`web/src/test/PendingInvoicesRulesSaveTimeout.test.tsx`：loading/empty/error、筛选/分页/抽屉/批量写/写后 refetch |
@@ -51,3 +51,9 @@ cd web && npm test -- --run \
 
 真实 PostgreSQL integration 需要 `FIN_OPS_TEST_DATABASE_URL`；生产验证必须覆盖大数据分页、
 筛选/导出上限、规则写后 normal GET 和 active relation 可见性。
+
+```bash
+FIN_OPS_TEST_DATABASE_URL=postgresql://localhost/<disposable_db> \
+  PYTHONPATH=backend/src python3 -m unittest \
+  tests.test_pending_invoice_postgres_integration -v
+```

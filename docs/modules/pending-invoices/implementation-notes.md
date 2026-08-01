@@ -1,5 +1,12 @@
 # 待找发票 实施记录
 
+## 2026-08-01 - 删除重复规则解释器并复用 canonical 分类 SQL
+
+- 最新生产并发 4 基线中首屏 p95 为 `1631.917ms`，App Health 证明连接获取不足 `1ms`，主要耗时仍在页面 SQL。待找发票保留了一套 JSON 动态规则解释器，与银行明细 canonical 分类规则重复，且每个请求对流水 × 规则展开 JSON/数组判断。
+- 页面 repository 现在只读取一次 settings，按请求方向筛出适用定义，再复用 `compile_bank_category_rule_sql(...)` 生成与银行明细一致的方向、优先级、账户 scope、exact/contains/exclude/regex 合同；旧 `raw_rule_definitions/rule_definitions/rule_matches` SQL 已删除。
+- I/O 边界、两条 SELECT、同一 `REPEATABLE READ READ ONLY` snapshot、rows/summary/statistics/filter-options/API shape 均不变；未新增 endpoint、缓存、read model、worker、表、索引、migration 或依赖。
+- 测试新增真实 disposable PostgreSQL 规则命中与页面返回集成，并保留 SQL shape、方向收窄、分页、状态和旧 read-model 禁入 guard；最终并发 p95 由精确 SHA 生产部署后复验。
+
 ## 2026-08-01 - 首屏内容与全局统计解耦
 
 - 生产闸门显示 `/api/pending-invoices/rows` p95 在 1 秒合同边缘波动；首屏内容过去同时计算支出、收入规则分类和全期间统计。

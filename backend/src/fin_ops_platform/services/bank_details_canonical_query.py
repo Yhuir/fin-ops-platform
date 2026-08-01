@@ -130,10 +130,15 @@ class PostgresBankDetailsCanonicalQueryRepository:
             for item in list(tags.get("definitions") or [])
             if isinstance(item, dict)
         ]
+        candidate_category_codes = _manual_only_category_codes(
+            tags,
+            category_codes=normalized_codes,
+        )
         cte_sql, cte_params = _classification_cte(
             definitions=definitions,
             date_from=None,
             date_to=None,
+            candidate_category_codes=candidate_category_codes,
         )
         return list(
             transaction.fetch_all(
@@ -756,14 +761,17 @@ def _classification_cte(
     definitions: list[dict[str, Any]],
     date_from: str | None,
     date_to: str | None,
+    candidate_category_codes: list[str] | None = None,
 ) -> tuple[str, list[Any]]:
     tag_definitions_json = json.dumps(
         definitions,
         ensure_ascii=False,
         separators=(",", ":"),
     )
-    rule_sql, rule_params = _rule_match_union_sql(definitions)
-    normalization_sql = _normalization_select_sql(definitions)
+    normalization_sql, rule_sql, rule_params = compile_bank_category_rule_sql(
+        definitions
+    )
+    candidate_codes = text_list(candidate_category_codes) or None
     params: list[Any] = [
         tag_definitions_json,
         "default",
@@ -772,6 +780,9 @@ def _classification_cte(
         date_from,
         date_to,
         date_to,
+        candidate_codes,
+        candidate_codes,
+        candidate_codes,
         [f"%{marker}%" for marker in INTERNAL_TRANSFER_MARKERS],
         [f"%{marker}%" for marker in INTERNAL_TRANSFER_MARKERS],
         [f"%{keyword}%" for keyword in COMPANY_NAME_KEYWORDS],
@@ -857,6 +868,11 @@ def _classification_cte(
           where coalesce(nullif(bank.status, ''), 'active') <> all(%s::text[])
             and (%s::date is null or bank.txn_date >= %s::date - interval '2 days')
             and (%s::date is null or bank.txn_date <= %s::date + interval '2 days')
+            and (
+              %s::text[] is null
+              or confirmation.category_code = any(%s::text[])
+              or manual.category = any(%s::text[])
+            )
         ),
         display_rows as materialized (
           select
@@ -1301,6 +1317,38 @@ def _rule_match_union_sql(
             [],
         )
     return "\nunion all\n".join(statements), params
+
+
+def compile_bank_category_rule_sql(
+    definitions: list[dict[str, Any]],
+) -> tuple[str, str, list[Any]]:
+    """Compile the one canonical bank-category rule matcher for SQL query owners."""
+
+    rule_sql, rule_params = _rule_match_union_sql(definitions)
+    return _normalization_select_sql(definitions), rule_sql, rule_params
+
+
+def _manual_only_category_codes(
+    tags: dict[str, Any],
+    *,
+    category_codes: list[str],
+) -> list[str] | None:
+    definitions = {
+        text(item.get("code")): item
+        for item in list(tags.get("definitions") or [])
+        if isinstance(item, dict) and text(item.get("code"))
+    }
+    category_service = BankTransactionCategoryService(tag_dictionary=tags)
+    for code in category_codes:
+        definition = definitions.get(code)
+        semantics = category_service.category_semantics_for_code(code)
+        if (
+            not isinstance(definition, dict)
+            or text(semantics.get("turnover_role")) != "external_turnover"
+            or text(definition.get("output_third_label"))
+        ):
+            return None
+    return list(category_codes)
 
 
 def _normalization_select_sql(definitions: list[dict[str, Any]]) -> str:
