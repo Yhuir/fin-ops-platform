@@ -50,7 +50,7 @@
 ## 持久化与投影
 
 - Own read model：无单一页面 read model；影响 `oa_pending_payment`、`input_invoice_usage`、`invoice_lifecycle` 等。
-- OA manual import/create/refresh/remove 逻辑上影响 `workbench`、`workbench_relation`、`invoice_lifecycle`、`tax_offset`、`search` 和 `cost_statistics`，但写路径不 enqueue、不等待 operation barrier；消费页面访问时按 source version 收敛。
+- OA manual import/create/refresh/remove 逻辑上影响 `workbench`、`workbench_relation`、invoice lifecycle、tax offset 和 cost statistics，但写路径不 enqueue、不等待 operation barrier；消费页面访问时按 owner contract 读取。
 - OA projection sync 由 runtime worker 一次读取 dual-view source batch、条件写 `app.oa_*` projection并记录 `app.oa_sync_runs` / `app.oa_sync_watermarks`；无论 change cause 如何都不标记页面 dirty scope。周期性相同输入必须是零 projection rewrite；变化输入也只提交 canonical facts。`all` 替换必须把旧 watermark scopes 纳入删除比较，不能漏掉最后一条 completed 被删除的月份。
 - `OA_PROJECTION_SYNC_VERSION=2026-07-28-expense-item-display-fields-v3` 触发一次存量重投，确保历史日常报销的 item/source binding 与 `fee_content` / `fee_description` 保真字段符合当前合同；重投仍由 durable `oa.sync` worker 执行且必须幂等。
 - External system：OA Mongo / OA app。

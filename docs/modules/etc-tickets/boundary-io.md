@@ -22,7 +22,7 @@
 
 - ETC 票据管理页面、ETC 发票/批次、识别、对账、OA 草稿后批次发票 PDF 合并下载、历史批次修复。
 - ETC 与发票附件、关联台候选之间的业务转换。
-- 返回精确 affected scopes；workbench/invoice/search 等页面在 route 进入/重进、查询变化、浏览器手动刷新或明确重试时通过各自 freshness gateway 刷新。
+- 返回精确 affected scopes；保留的 workbench/relation read model 在 route 进入/重进、查询变化、浏览器手动刷新或明确重试时通过各自 owner 刷新，direct-canonical 页面直接读取已提交 facts。
 
 ### 不负责
 
@@ -37,7 +37,7 @@
 | 页面查询/操作 | `EtcTicketManagementPage.tsx`、`features/etc/api.ts` | 进入 ETC routes/services；页面批次列表只发送 `unsubmitted/staged/submitted` bucket 与分页，不提供月份、车牌或关键词搜索框；后端可选 `month/plate/keyword` 参数作为兼容/运维查询合同保留。选择一个 business batch 后只读取一次精确 batch detail 和绑定 task，不调用 full reconciliation task list，不把详情数组塞入列表 DTO。task mutation target 必须同时满足“已加载 task ID = 当前选中 business batch 的 task ID”；bucket 切换或刷新响应自动迁移 selection 时必须同步失效旧 task，禁止旧 task I/O 泄漏到新批次。四阶段进度只读取当前 batch/task 内存事实，网络、持久化与全局 listener I/O 均为零 |
 | OA 草稿 command | `POST /api/etc/business-batches/{id}/oa-draft`、`.../oa-draft/recover` | create 请求携带稳定 idempotency key；prepare 在 ETC 锁内持久化 attempt，OA HTTP 在锁外执行，finalize 通过 `save_etc_oa_draft_attempt` 对单一 business batch 做 version CAS 并只合并该 attempt 改动的 business batch/submission/invoice/import 行；同 key 或同 recovery 结果重放只补齐 linked task 的 OA 元数据，不再次创建 OA 草稿。结果未知禁止自动重试；recover 仅管理员可用，布尔决定必须是严格 JSON boolean，并提供 reason/evidence 与互斥的采纳/未创建证据。历史 creating 行若缺 prepared submission，只能在权威 OA 查询为零后确认未创建并 CAS 回未提交 bucket；禁止采纳草稿或创建伪 attempt。OA draft create/replay/recover 不读取/写入 canonical invoice link，也不触发下游 read model |
 | OA 金额与发票金额展示 | linked reconciliation task `oaTotalAmount`、business batch `invoiceSummary` | `oaTotalAmount` 是 OA 草稿金额事实源；`invoiceSummary` 只从 business batch `invoice_ids` 对应 ETC 发票求数量和含税总额，不得被 submission/OA 金额覆盖。差额在浏览器内按分计算，只提示、不阻断、不写回；禁止为该展示新增共享 API、read model、queue 或跨页面写入 |
-| OA 草稿结果决定 | `POST /api/etc/business-batches/{id}/manual-oa-status` | `submitted` 表示用户已在 OA 完成草稿提交，批次进入已提交；`not_submitted` 表示用户已在 OA 删除草稿，批次回到未提交。结果弹窗只暴露这两个 command，草稿打开/PDF 下载属于暂存区只读工具。该 command 只写 business batch / reconciliation task / audit 与精确 affected scope，禁止 relink canonical invoice，也不写后投递 Workbench/matching/search/Tax/Cost/history 页面 refresh |
+| OA 草稿结果决定 | `POST /api/etc/business-batches/{id}/manual-oa-status` | `submitted` 表示用户已在 OA 完成草稿提交，批次进入已提交；`not_submitted` 表示用户已在 OA 删除草稿，批次回到未提交。结果弹窗只暴露这两个 command，草稿打开/PDF 下载属于暂存区只读工具。该 command 只写 business batch / reconciliation task / audit 与精确 affected scope，禁止 relink canonical invoice，也不写后投递 Workbench/matching/Tax/Cost/history 页面 refresh |
 | 批次标题编辑 | `EtcTicketManagementPage.tsx`、`PATCH /api/etc/business-batches/{id}` | 只允许未提交 business batch 修改 `title`；请求带 `expectedVersion`，后端持久化 business batch title 并同步 linked reconciliation task title |
 | 信用卡账单 PDF | `POST /api/etc/reconciliation-tasks/{task_id}/credit-card-statement`、`CcbCreditCardStatementParser` | 先落 source file 元数据，再从可选文字解析交易行；无可用交易行时才按页渲染并用布局 OCR 重建表格行。OCR 结果附带人工核对 warning；两种路径都输出同一 `FileParseResult`/`CreditCardItem` 合同。解析提交与 source file 删除互斥；OCR 期间源文件已删除时返回 HTTP 409 / `source_file_deleted_during_parse`，不得生成孤儿明细。 |
 | ETC 发票导入/识别 | imports/services/parsers | 输出批次、任务、附件识别结果 |
@@ -66,7 +66,7 @@
 
 - Own read model：无独立 manifest entry。
 - 页面 Audit：`etc-tickets` 是直接 canonical 页面，registry 的 `read_model_keys=()`；UI 只有在统一 Audit 返回 `integrity=pass / freshness=fresh / queue=drained`、正式数据库快照和 versioned ready contract 时才显示通过。Audit 额外证明三 bucket 互斥/计数同口径、creating attempt 完整且不超过 15 分钟、pending draft/submission 完整、submitted/not-submitted 占用闭合。not-submitted 批次保留的是历史成员；发票已由另一个可见批次合法接管时，旧批次不再要求它保持 `unsubmitted`，当前 owner 自己的 submitted/owner/submission 规则负责闭合。只有 import job 的 `pending/processing` 属于 backlog；`failed/dead_lettered` 是终态，若其精确关联的 reconciliation task 已 `imported/closed`，页面审计把它计入 `covered_failed_import_job_count` 而不阻断，否则报告 terminal integrity failure。下游影响 read model 不得冒充页面消费模型。
-- 影响 read model：`workbench`、`workbench_relation`、`invoice_lifecycle`、`search` 等。
+- 影响消费者：`workbench`、`workbench_relation` 以及 invoice lifecycle、税金、成本等 direct-canonical 页面。
 - ETC 导入逻辑上影响 `tax_offset`、`input_invoice_usage`、`pending_invoice`、`oa_pending_payment`、`cost_statistics` 等页面，但普通完成结果不携带这些 barrier targets；页面访问时自行收敛。
 - Worker：import/runtime handler 只负责 durable 领域任务；ETC 页面没有 read model
   worker、freshness gateway 或页面 refresh request。
@@ -117,7 +117,7 @@
 - Shared facts: `app.invoices` 由 canonical invoice pool owner 管理；ETC 只能通过受控 link/promotion port 关联。
 - Allowed writes: ETC import service/job、business batch service、reconciliation service、受控 historical repair/backfill tools。
 - Allowed reads: ETC business batch API、ETC services、canonical invoice existing-link ports。
-- Downstream outputs: 真实 ETC invoice delta 和 manual submitted/not-submitted 只返回精确 affected scopes/source versions；普通写不输出 workbench、workbench_relation、tax/search/cost 页面 dirty scopes。各页面访问时按 owner contract 收敛，Cost 保持两阶段访问收敛。
+- Downstream outputs: 真实 ETC invoice delta 和 manual submitted/not-submitted 只返回精确 affected scopes/source versions；普通写不输出 workbench、workbench_relation、tax/cost 页面 dirty scopes。各页面访问时按 owner contract 收敛，Cost 保持两阶段访问收敛。
 - Forbidden paths: legacy ETC batch pickle、OA detection metadata 或 ETC invoice rows 不得替代 canonical invoice pool；ETC repair 不得绕过 relation command service。
 - Audit I/O boundary: Audit repository 只允许只读查询和 repeatable-read transaction；不得调用 ETC service mutation、refresh gateway、worker ack/retry、对象存储下载或 Workbench relation refresh。`app.workbench_pair_relations` 不是 ETC 页自己的 pairing source。
 - Old code deletion: 生产主链路的 legacy `/api/etc/batches*` source-of-truth fallback、route owner、read facade、delete/lifecycle service、前端测试 mock 假后端和后端兼容测试已删除；页面 full task list、双 selection owner、重复 detail effect、task-row/task-delete UI 私链、页面级 `plate/keyword` state/DOM/request 参数和旧筛选/卡片容器 CSS 已删除。正式 reconciliation/import/source-file API 以及后端可选查询参数保留为 workflow/兼容查询合同。ETC 专用 `oa-status/refresh`、invoice-id 级 `/api/etc/invoices/revoke-submitted`、OA workflow 的 `_link_existing_canonical_invoices(...)` 调用、无调用方 `etc_oa_submitted` / `etc_oa_revoked` lifecycle 和前端 batch+invoice 合并 emitter 已删除，并由 static guard 防回归。historical repair/backfill 工具保留不算页面/API closure 阻断，仍需按工具 owner/dry-run/deletion 条件单独收口。

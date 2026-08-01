@@ -28,7 +28,7 @@ from fin_ops_platform.services.workbench_relation_command_service import Workben
 from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
 
 
-SEARCH_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
+MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
 
 
 def canonical_snapshot_version(snapshot: Any) -> str:
@@ -188,7 +188,6 @@ class BankBatchApplicationService:
         bank_batch_query_repository: Any | None = None,
         workbench_matching_source_versions_provider: Callable[[], dict[str, object]] | None = None,
         bank_transaction_category_affected_months_provider: Callable[[list[str]], list[str]] | None = None,
-        search_cache_clearer: Callable[[], Any] | None = None,
         background_refresh_producer: Any | None = None,
         relation_facade: Any | None = None,
         relation_command_service: Any | None = None,
@@ -206,7 +205,6 @@ class BankBatchApplicationService:
         self._bank_transaction_category_affected_months_provider = (
             bank_transaction_category_affected_months_provider or (lambda _row_ids: [])
         )
-        self._search_cache_clearer = search_cache_clearer or (lambda: None)
         self._background_refresh_producer = background_refresh_producer
         self._relation_facade = relation_facade
         self._relation_command_service = relation_command_service
@@ -575,7 +573,7 @@ class BankBatchApplicationService:
         for month in [
             str(scope_key).strip()
             for scope_key in list(scope_keys or [])
-            if SEARCH_MONTH_RE.match(str(scope_key).strip())
+            if MONTH_SCOPE_RE.match(str(scope_key).strip())
         ]:
             load_source_versions(
                 month,
@@ -597,10 +595,10 @@ class BankBatchApplicationService:
             [
                 str(item).strip()
                 for item in list(source_scope_keys or [])
-                if SEARCH_MONTH_RE.match(str(item).strip())
+                if MONTH_SCOPE_RE.match(str(item).strip())
             ]
             if source_scope_keys is not None
-            else ([normalized_scope_key] if SEARCH_MONTH_RE.match(normalized_scope_key) else [])
+            else ([normalized_scope_key] if MONTH_SCOPE_RE.match(normalized_scope_key) else [])
         )
         precheck_reason = self._source_version_precheck_reason(relation_mode)
         source_versions = self._bank_batch_base_source_versions(relation_mode=relation_mode)
@@ -650,7 +648,7 @@ class BankBatchApplicationService:
         normalized_scope_keys = [
             str(scope_key).strip()
             for scope_key in list(scope_keys or [])
-            if SEARCH_MONTH_RE.match(str(scope_key).strip())
+            if MONTH_SCOPE_RE.match(str(scope_key).strip())
         ]
         if not normalized_scope_keys:
             return {}
@@ -678,7 +676,7 @@ class BankBatchApplicationService:
         normalized_scope_keys = [
             str(scope_key).strip()
             for scope_key in list(scope_keys or [])
-            if SEARCH_MONTH_RE.match(str(scope_key).strip())
+            if MONTH_SCOPE_RE.match(str(scope_key).strip())
         ]
         if not callable(load_source_versions) or not normalized_scope_keys:
             return {}
@@ -1266,9 +1264,8 @@ class BankBatchApplicationService:
             normalized_scope_keys = [
                 str(scope_key).strip()
                 for scope_key in changed_scope_keys
-                if SEARCH_MONTH_RE.match(str(scope_key).strip())
+                if MONTH_SCOPE_RE.match(str(scope_key).strip())
             ]
-            self._search_cache_clearer()
             save_mutation = getattr(self._state_store, "save_no_oa_bank_batch_mutation", None)
             if not callable(save_mutation):
                 raise RuntimeError("No-OA mutation persistence requires save_no_oa_bank_batch_mutation.")
@@ -1325,7 +1322,7 @@ class BankBatchApplicationService:
                 [str(row_id) for row_id in list(batch.get("row_ids") or []) if str(row_id).strip()]
             ),
         }
-        return sorted(month for month in months if SEARCH_MONTH_RE.match(month))
+        return sorted(month for month in months if MONTH_SCOPE_RE.match(month))
 
     def pair_relation_snapshot_by_case_id(self, case_id: str) -> dict[str, object] | None:
         normalized_case_id = str(case_id or "").strip()

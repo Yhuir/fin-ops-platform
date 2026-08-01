@@ -17,7 +17,7 @@
 | `WB-REL-E2E-005` | 非正式历史输入不驱动 linked-only 业务状态 | P0 | 下游页面不能把非 linked 的历史输入推断成已关联 chip；支付/开票/收款/成本等业务状态只按 linked relation 计算。 |
 | `WB-REL-E2E-006` | relation read model non-fresh | P0 | 页面显示 freshness 诊断，不把空 relation 当真实空，不全局禁用具备 canonical write safety 的无关 mutation。 |
 | `WB-REL-E2E-007` | canonical write safety 和 idempotency | P0 | 重复提交不创建第二条 active relation；version conflict 显示明确错误。 |
-| `WB-REL-E2E-008` | relation 后 invoice usage / output collection / OA pending / cost / search 访问收敛与 tax 隔离 | P1 | relation 写时零页面 fan-out；关键下游页面逐个访问后通过自己的 read model 展示一致状态，tax 不消费 relation；unlinked 对象不进入 linked-only 金额。 |
+| `WB-REL-E2E-008` | relation 后 invoice usage / output collection / OA pending / cost 访问一致与 tax 隔离 | P1 | relation 写时零页面 fan-out；关键下游页面逐个访问后从 canonical facts 展示一致状态，tax 不消费 relation；unlinked 对象不进入 linked-only 金额。 |
 | `WB-REL-E2E-009` | real download/export with relation fields | P1 | 含 relation 字段的导出文件在真实浏览器 download event 中成功生成，字段与当前筛选/权限一致。 |
 | `WB-REL-E2E-010` | production/staging relation display audit | P1 | 只读 audit 证明 active relation 成员在 active Workbench generation 中同组展示，没有多 owner、缺失或 all 滞后。 |
 

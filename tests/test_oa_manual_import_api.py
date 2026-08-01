@@ -100,19 +100,17 @@ class OAManualImportApiTests(unittest.TestCase):
     def test_refresh_endpoint_returns_counts_and_invalidates_affected_scopes(self) -> None:
         app = self._build_app_with_service(adapter=RecordingOAAdapter([oa_record("oa-exp-1981", month="2025-12", invoices=[])]))
 
-        with patch.object(app._search_service, "clear_cache") as clear_cache:
-            response = app.handle_request(
-                "POST",
-                "/api/workbench/settings/oa/manual-search/refresh-attachments",
-                json.dumps({"row_ids": ["oa-exp-1981"]}),
-            )
+        response = app.handle_request(
+            "POST",
+            "/api/workbench/settings/oa/manual-search/refresh-attachments",
+            json.dumps({"row_ids": ["oa-exp-1981"]}),
+        )
 
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.body)
         self.assertEqual(payload["rows"][0]["row_id"], "oa-exp-1981")
         self.assertEqual(payload["rows"][0]["importable_invoice_count"], 1)
         self._assert_oa_manual_targets(payload, month="2025-12")
-        clear_cache.assert_called_once()
 
     def test_import_endpoint_imports_completed_rejects_in_progress_and_is_idempotent(self) -> None:
         adapter = RecordingOAAdapter(
@@ -150,12 +148,11 @@ class OAManualImportApiTests(unittest.TestCase):
         app = self._build_app_with_service(adapter=RecordingOAAdapter([oa_record("oa-exp-1981")]), store=store)
 
         list_response = app.handle_request("GET", "/api/workbench/settings/oa/manual-imports")
-        with patch.object(app._search_service, "clear_cache") as clear_cache:
-            delete_response = app.handle_request(
-                "DELETE",
-                "/api/workbench/settings/oa/manual-imports/oa-exp-1981",
-                json.dumps({"actor_id": "tester"}),
-            )
+        delete_response = app.handle_request(
+            "DELETE",
+            "/api/workbench/settings/oa/manual-imports/oa-exp-1981",
+            json.dumps({"actor_id": "tester"}),
+        )
 
         self.assertEqual(list_response.status_code, 200)
         self.assertEqual(json.loads(list_response.body)["row_ids"], ["oa-exp-1981"])
@@ -165,7 +162,6 @@ class OAManualImportApiTests(unittest.TestCase):
         self.assertEqual(delete_payload["row_id"], "oa-exp-1981")
         self._assert_oa_manual_targets(delete_payload, month="2025-12")
         self.assertEqual(store.load_manual_oa_imports()["row_ids"], [])
-        clear_cache.assert_called_once()
 
     def test_manual_import_mutation_endpoints_reject_readonly_session_even_with_spoofed_actor(self) -> None:
         with patch.dict(os.environ, {"FIN_OPS_TEST_DEFAULT_AUTH": "0"}):

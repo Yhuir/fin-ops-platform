@@ -603,3 +603,10 @@
 - 修复：worker entry 在所有 handler 分支前通过既有 `RuntimeQueueRepository.set_statement_timeout_seconds(...)` 应用同一 config；通用 worker 后续重复设置相同值，不改变其它 registration 合同。
 - 恢复入口：`workbench_matching_scope_retry_ops` 只允许 failed exact month，dry-run 生成包含当前 status/attempt/request/error hash/source versions 的 fingerprint，execute 漂移即零写；写入复用 matching repository，不暴露 SQL/DSN。
 - 不变项：未新增 worker、event type、queue/table、HTTP API 或 fallback；matching claim、relation UoW、heartbeat 和 complete/fail owner 不变。
+
+## 2026-08-01 - Phase 39 运行时拓扑收敛
+
+- required registry 从 11 个实例收敛为 `oa-sync`、`workbench-matching`、`workbench`、`workbench-relation`、`import`、`settings-maintenance` 六个；只保留 `workbench` 与 `workbench_relation` 两个 read-model owner。
+- 删除 `workbench-secondary`、Search 三实例、no-OA worker、对应 CLI flag/env/RabbitMQ route/handler/App Status/maintenance wiring。发布控制复用既有 retired-unit 收敛逻辑，停用并禁用不在 registry 的 systemd unit，保留 previous release 与 env 供受控回滚。
+- 没有新增 worker class、transport、process manager、cache、兼容 route 或第三方依赖；registry 继续作为 instance/event/env/health 的单一事实源。
+- 测试将旧 event 字符串从通用正向 fixture 移除，只在退休守卫和部署残留检测中保留负向断言。

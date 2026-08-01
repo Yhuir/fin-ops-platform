@@ -168,7 +168,7 @@ class AppStatusOverviewServiceTests(unittest.TestCase):
             active_jobs=[],
             attention_jobs=[],
             read_model_statuses={
-                "search": {"status": "failed", "last_error": "projection failed"},
+                "workbench_relation": {"status": "failed", "last_error": "projection failed"},
             },
             app_health_snapshot={
                 "generated_at": "2026-06-04T10:00:00+00:00",
@@ -196,9 +196,9 @@ class AppStatusOverviewServiceTests(unittest.TestCase):
             active_jobs=[],
             attention_jobs=[],
             read_model_statuses={
-                "search": {"status": "missing", "reason": "readiness record missing"},
+                "workbench_relation": {"status": "missing", "reason": "readiness record missing"},
             },
-            worker_statuses={"search": {"status": "ready"}},
+            worker_statuses={"workbench_relation": {"status": "ready"}},
             app_health_snapshot={
                 "generated_at": "2026-06-04T10:00:00+00:00",
                 "status": "busy",
@@ -220,37 +220,36 @@ class AppStatusOverviewServiceTests(unittest.TestCase):
             active_jobs=[],
             attention_jobs=[],
             read_model_statuses={
-                "workbench_relation": {"status": "fresh"},
-                "search": {
+                "workbench": {"status": "fresh"},
+                "workbench_relation": {
                     "status": "refreshing",
                     "scopes": [
                         {
-                            "read_model_key": "search",
-                            "scope_type": "search",
+                            "read_model_key": "workbench_relation",
+                            "scope_type": "workbench_relation",
                             "scope_key": "all",
                             "status": "fresh",
                         },
                         {
-                            "read_model_key": "search",
-                            "scope_type": "search",
+                            "read_model_key": "workbench_relation",
+                            "scope_type": "workbench_relation",
                             "scope_key": "2026-05",
                             "status": "failed",
                             "last_error": "projection failed",
                         },
                     ],
                 },
-                "no_oa_bank_batch": {"status": "failed", "last_error": "projection failed"},
             },
             worker_statuses={
                 "runtime-worker": {"status": "ready", "required": True},
                 "workbench-relation": {"status": "working", "required": True},
-                "search": {"status": "stale", "required": True, "warning_code": "heartbeat_stale"},
+                "workbench": {"status": "stale", "required": True, "warning_code": "heartbeat_stale"},
                 "legacy-worker": {"status": "missing", "required": False, "warning_code": "required_worker_missing"},
             },
             outbox_statuses={
                 "workbench_relation.read_model.refresh": {"status": "pending", "count": 2},
-                "search.read_model.refresh": {"status": "processing", "count": 1},
-                "no_oa_bank_batch.read_model.refresh": {"status": "failed", "count": 3},
+                "workbench.read_model.refresh": {"status": "processing", "count": 1},
+                "import.process.requested": {"status": "failed", "count": 3},
             },
             app_health_snapshot={
                 "generated_at": "2026-06-04T10:00:00+00:00",
@@ -263,14 +262,14 @@ class AppStatusOverviewServiceTests(unittest.TestCase):
         self.assertEqual(
             payload["runtime_summary"]["read_models"],
             {
-                "total": 3,
+                "total": 2,
                 "fresh": 1,
                 "refreshing": 1,
                 "stale": 0,
                 "missing": 0,
-                "failed": 1,
+                "failed": 0,
                 "unavailable": 0,
-                "issue_count": 2,
+                "issue_count": 1,
                 "scope_issue_count": 1,
             },
         )
@@ -349,8 +348,8 @@ class FakeRuntimeConnection:
         if "from job.outbox_events" in normalized:
             return [
                 {
-                    "event_type": "search.read_model.refresh",
-                    "scope_type": "search",
+                    "event_type": "workbench_relation.read_model.refresh",
+                    "scope_type": "workbench_relation",
                     "scope_key": "2026-03",
                     "status": "pending",
                     "count": 1,
@@ -361,7 +360,7 @@ class FakeRuntimeConnection:
         if "from job.read_model_dirty_scopes" in normalized:
             return [
                 {
-                    "scope_type": "search",
+                    "scope_type": "workbench_relation",
                     "scope_key": "2026-03",
                     "status": "processing",
                     "count": 2,
@@ -372,12 +371,12 @@ class FakeRuntimeConnection:
         if "from read_model.app_status_readiness" in normalized:
             return [
                 {
-                    "read_model_key": "search",
-                    "scope_type": "search",
+                    "read_model_key": "workbench_relation",
+                    "scope_type": "workbench_relation",
                     "scope_key": "2026-03",
                     "status": "fresh",
                     "schema_version": "v1",
-                    "source_versions": {"search_sources": 1},
+                    "source_versions": {"workbench_relation_sources": 1},
                     "row_count": 10,
                     "generated_at": "2026-06-04T10:00:00+00:00",
                     "updated_at": "2026-06-04T10:00:00+00:00",
@@ -387,14 +386,14 @@ class FakeRuntimeConnection:
         if "from job.runtime_worker_heartbeats" in normalized and "coalesce(payload->>'worker_instance'" in normalized:
             return [
                 {
-                    "worker_id": "search",
-                    "worker_instance": "search",
-                    "worker_kind": "search-read-model",
+                    "worker_id": "workbench-relation",
+                    "worker_instance": "workbench-relation",
+                    "worker_kind": "workbench-relation-read-model",
                     "status": "running",
                     "heartbeat_lag_seconds": 12,
                     "payload": {
-                        "worker_instance": "search",
-                        "configured_event_types": ["search.read_model.refresh"],
+                        "worker_instance": "workbench-relation",
+                        "configured_event_types": ["workbench_relation.read_model.refresh"],
                     },
                 }
             ]
@@ -405,14 +404,14 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
     def test_runtime_repository_groups_dirty_scopes_outbox_and_workers_for_overview(self) -> None:
         snapshot = RuntimeMonitoringRepository(FakeRuntimeConnection()).app_status_runtime_snapshot()
 
-        self.assertEqual(snapshot["read_model_statuses"]["search"]["status"], "refreshing")
-        self.assertEqual(snapshot["outbox_statuses"]["search.read_model.refresh"]["status"], "pending")
+        self.assertEqual(snapshot["read_model_statuses"]["workbench_relation"]["status"], "refreshing")
+        self.assertEqual(snapshot["outbox_statuses"]["workbench_relation.read_model.refresh"]["status"], "pending")
         self.assertEqual(
-            snapshot["outbox_statuses"]["search.read_model.refresh"]["scopes"],
+            snapshot["outbox_statuses"]["workbench_relation.read_model.refresh"]["scopes"],
             [
                 {
-                    "event_type": "search.read_model.refresh",
-                    "scope_type": "search",
+                    "event_type": "workbench_relation.read_model.refresh",
+                    "scope_type": "workbench_relation",
                     "scope_key": "2026-03",
                     "status": "pending",
                     "count": 1,
@@ -420,7 +419,7 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
                 }
             ],
         )
-        self.assertEqual(snapshot["worker_statuses"]["search"]["status"], "ready")
+        self.assertEqual(snapshot["worker_statuses"]["workbench-relation"]["status"], "ready")
 
     def test_runtime_repository_reports_registry_read_model_without_readiness_as_missing(self) -> None:
         class NoReadinessConnection(FakeRuntimeConnection):
@@ -438,8 +437,8 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
 
         snapshot = RuntimeMonitoringRepository(NoReadinessConnection()).app_status_runtime_snapshot()
 
-        self.assertEqual(snapshot["read_model_statuses"]["search"]["status"], "missing")
-        self.assertEqual(snapshot["read_model_statuses"]["search"]["reason"], "readiness record missing")
+        self.assertEqual(snapshot["read_model_statuses"]["workbench_relation"]["status"], "missing")
+        self.assertEqual(snapshot["read_model_statuses"]["workbench_relation"]["reason"], "readiness record missing")
 
     def test_runtime_repository_ignores_outbox_rows_covered_by_later_success(self) -> None:
         class CoveredOutboxConnection(FakeRuntimeConnection):
@@ -452,8 +451,8 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
                     self.outbox_sql = normalized
                     return [
                         {
-                            "event_type": "search.read_model.refresh",
-                            "scope_type": "search",
+                            "event_type": "workbench_relation.read_model.refresh",
+                            "scope_type": "workbench_relation",
                             "scope_key": "2026-05",
                             "status": "dead_lettered",
                             "count": 1,
@@ -492,7 +491,6 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
         connection = CoveredOutboxConnection()
         snapshot = RuntimeMonitoringRepository(connection).app_status_runtime_snapshot()
 
-        self.assertNotIn("search.read_model.refresh", snapshot["outbox_statuses"])
         self.assertEqual(snapshot["outbox_statuses"]["workbench_relation.read_model.refresh"]["status"], "failed")
         self.assertNotIn("no_oa_bank_batch.read_model.refresh", snapshot["outbox_statuses"])
         self.assertIn("e.status <> 'done' and e.publish_status in ('publishing', 'failed')", connection.outbox_sql)
@@ -507,7 +505,7 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
                 if "from job.read_model_dirty_scopes" in normalized:
                     return [
                         {
-                            "scope_type": "search",
+                            "scope_type": "workbench_relation",
                             "scope_key": "all",
                             "status": "pending",
                             "count": 1,
@@ -519,12 +517,12 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
                 if "from read_model.app_status_readiness" in normalized:
                     return [
                         {
-                            "read_model_key": "search",
-                            "scope_type": "search",
+                            "read_model_key": "workbench_relation",
+                            "scope_type": "workbench_relation",
                             "scope_key": "all",
                             "status": "fresh",
                             "schema_version": "v1",
-                            "source_versions": {"search_sources": 7},
+                            "source_versions": {"workbench_relation_sources": 7},
                             "row_count": 128,
                             "generated_at": "2026-06-04T10:00:00+00:00",
                             "updated_at": "2026-06-04T10:00:00+00:00",
@@ -539,7 +537,7 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
 
         snapshot = RuntimeMonitoringRepository(CoveredDirtyScopeConnection()).app_status_runtime_snapshot()
 
-        search_status = snapshot["read_model_statuses"]["search"]
+        search_status = snapshot["read_model_statuses"]["workbench_relation"]
         self.assertEqual(search_status["status"], "refreshing")
         self.assertEqual(search_status["scopes"][0]["status"], "refreshing")
         self.assertEqual(search_status["historical_scopes"][0]["scope_key"], "all")
@@ -554,16 +552,16 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
                 if "from read_model.app_status_readiness" in normalized:
                     return [
                         {
-                            "read_model_key": "search",
-                            "scope_type": "search",
+                            "read_model_key": "workbench_relation",
+                            "scope_type": "workbench_relation",
                             "scope_key": "all",
                             "status": "failed",
                             "updated_at": "2026-07-10T20:31:00+08:00",
                             "last_error": "permission denied for table oa_pending_payment_admissions",
                         },
                         {
-                            "read_model_key": "search",
-                            "scope_type": "search",
+                            "read_model_key": "workbench_relation",
+                            "scope_type": "workbench_relation",
                             "scope_key": "2026-06",
                             "status": "fresh",
                             "updated_at": "2026-07-10T20:32:00+08:00",
@@ -576,7 +574,7 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
 
         snapshot = RuntimeMonitoringRepository(FanOutHistoryConnection()).app_status_runtime_snapshot()
 
-        status = snapshot["read_model_statuses"]["search"]
+        status = snapshot["read_model_statuses"]["workbench_relation"]
         self.assertEqual(status["status"], "fresh")
         self.assertEqual([scope["scope_key"] for scope in status["scopes"]], ["2026-06"])
         self.assertEqual(status["historical_scopes"][0]["scope_key"], "all")
@@ -619,8 +617,8 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
                     "count": 1,
                 },
                 {
-                    "event_type": "search.read_model.refresh",
-                    "scope_type": "search",
+                    "event_type": "workbench_relation.read_model.refresh",
+                    "scope_type": "workbench_relation",
                     "scope_key": "2026-06",
                     "status": "pending",
                     "count": 1,
@@ -636,7 +634,7 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
         )
 
         self.assertNotIn("bank_detail.read_model.refresh", grouped)
-        self.assertIn("search.read_model.refresh", grouped)
+        self.assertIn("workbench_relation.read_model.refresh", grouped)
         self.assertIn("oa.sync", grouped)
 
     def test_runtime_repository_ignores_failed_outbox_row_covered_by_later_pending_retry(self) -> None:
@@ -746,8 +744,8 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
 
         connection = RecordingConnection()
         RuntimeMonitoringRepository(connection).record_read_model_readiness(
-            read_model_key="search",
-            scope_type="search",
+            read_model_key="workbench_relation",
+            scope_type="workbench_relation",
             scope_key="all",
             status="fresh",
             schema_version="v1",
@@ -759,14 +757,14 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
         self.assertEqual(len(connection.executed), 1)
         sql, params = connection.executed[0]
         self.assertIn("read_model.app_status_readiness", sql)
-        self.assertEqual(params[1:5], ("search", "search", "all", "fresh"))
+        self.assertEqual(params[1:5], ("workbench_relation", "workbench_relation", "all", "fresh"))
         self.assertIn('"bank_transactions": 7', str(params[6]))
 
     def test_runtime_repository_rejects_unknown_readiness_status(self) -> None:
         with self.assertRaises(ValueError):
             RuntimeMonitoringRepository(FakeRuntimeConnection()).record_read_model_readiness(
-                read_model_key="search",
-                scope_type="search",
+                read_model_key="workbench_relation",
+                scope_type="workbench_relation",
                 scope_key="all",
                 status="almost_ready",
             )
@@ -814,7 +812,7 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
             active_jobs=[],
             attention_jobs=[],
             worker_statuses={
-                "search": {"status": "missing", "warning_code": "required_worker_missing"},
+                "workbench_relation": {"status": "missing", "warning_code": "required_worker_missing"},
             },
             app_health_snapshot={
                 "generated_at": "2026-06-04T10:00:00+00:00",

@@ -39,9 +39,9 @@ class FakeConnection:
         if "slow_refresh_event_samples" in normalized:
             return [
                 {
-                    "event_id": "event-search-1",
-                    "event_type": "search.read_model.refresh",
-                    "scope_type": "search",
+                    "event_id": "event-workbench-2",
+                    "event_type": "workbench.read_model.refresh",
+                    "scope_type": "workbench",
                     "scope_key": "2026-03",
                     "status": "done",
                     "source_version": 42,
@@ -105,7 +105,7 @@ class FakeConnection:
                 },
                 {
                     "window_name": "all_time",
-                    "event_type": "no_oa_bank_batch.read_model.refresh",
+                    "event_type": "workbench.read_model.refresh",
                     "p50_ms": 50.0,
                     "p95_ms": 80.0,
                     "p99_ms": 90.0,
@@ -395,9 +395,9 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertEqual(summary["read_model_refresh_by_key"][0]["sample_count"], 5)
         self.assertEqual(summary["read_model_refresh_by_key"][0]["failure_rate"], 0.2)
         self.assertEqual(summary["read_model_refresh_by_key"][0]["last_fresh_at"], "2026-06-13 03:00:01+08")
-        self.assertEqual(summary["read_model_refresh_by_key"][1]["key"], "no_oa_bank_batch")
-        self.assertEqual(summary["read_model_refresh_slow_events"][0]["event_id"], "event-search-1")
-        self.assertEqual(summary["read_model_refresh_slow_events"][0]["key"], "search")
+        self.assertEqual(summary["read_model_refresh_by_key"][1]["key"], "workbench")
+        self.assertEqual(summary["read_model_refresh_slow_events"][0]["event_id"], "event-workbench-2")
+        self.assertEqual(summary["read_model_refresh_slow_events"][0]["key"], "workbench")
         self.assertEqual(summary["read_model_refresh_slow_events"][0]["scope_key"], "2026-03")
         self.assertEqual(summary["read_model_refresh_slow_events"][0]["enqueue_to_fresh_ms"], 35150.0)
         self.assertFalse(summary["read_model_refresh_slow_events"][0]["skipped"])
@@ -618,8 +618,8 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
                 self.sql = " ".join(sql.lower().split())
                 return [
                     {
-                        "read_model_key": "search",
-                        "scope_type": "search",
+                        "read_model_key": "workbench_relation",
+                        "scope_type": "workbench_relation",
                         "scope_key": "2026-02",
                         "status": "fresh",
                         "schema_version": "7",
@@ -635,10 +635,10 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
 
         statuses = repository._app_status_readiness_statuses()
 
-        self.assertEqual(statuses["search"]["status"], "fresh")
-        self.assertEqual(statuses["search"]["generated_at"], "2026-07-20T01:00:00+00:00")
+        self.assertEqual(statuses["workbench_relation"]["status"], "fresh")
+        self.assertEqual(statuses["workbench_relation"]["generated_at"], "2026-07-20T01:00:00+00:00")
         self.assertNotIn("source_versions", connection.sql)
-        self.assertNotIn("source_versions", statuses["search"])
+        self.assertNotIn("source_versions", statuses["workbench_relation"])
 
     def test_operation_barrier_runtime_snapshot_queries_only_requested_scopes(self) -> None:
         class TargetScopedConnection:
@@ -651,8 +651,8 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
                 if "from read_model.app_status_readiness" in normalized and "select read_model_key" in normalized:
                     return [
                         {
-                            "read_model_key": "search",
-                            "scope_type": "search",
+                            "read_model_key": "workbench_relation",
+                            "scope_type": "workbench_relation",
                             "scope_key": "2026-02",
                             "status": "fresh",
                             "schema_version": "7",
@@ -669,12 +669,12 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
                 if "from job.runtime_worker_heartbeats" in normalized:
                     return [
                         {
-                            "worker_id": "worker-search",
-                            "worker_instance": "search",
-                            "worker_kind": "search-read-model",
+                            "worker_id": "worker-workbench-relation",
+                            "worker_instance": "workbench-relation",
+                            "worker_kind": "workbench-relation-read-model",
                             "status": "running",
                             "heartbeat_lag_seconds": 1.0,
-                            "payload": {"worker_instance": "search"},
+                            "payload": {"worker_instance": "workbench-relation"},
                         }
                     ]
                 raise AssertionError(normalized)
@@ -685,21 +685,21 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         snapshot = repository.operation_barrier_runtime_snapshot(
             [
                 {
-                    "read_model_key": "search",
-                    "scope_type": "search",
+                    "read_model_key": "workbench_relation",
+                    "scope_type": "workbench_relation",
                     "scope_key": "2026-02",
                 },
                 {
-                    "read_model_key": "search",
-                    "scope_type": "search",
+                    "read_model_key": "workbench_relation",
+                    "scope_type": "workbench_relation",
                     "scope_key": "2026-02",
                 },
             ]
         )
 
-        self.assertEqual(snapshot["read_model_statuses"]["search"]["status"], "fresh")
-        self.assertEqual(snapshot["worker_statuses"]["search"]["status"], "ready")
-        self.assertEqual(set(snapshot["read_model_statuses"]), {"search"})
+        self.assertEqual(snapshot["read_model_statuses"]["workbench_relation"]["status"], "fresh")
+        self.assertEqual(snapshot["worker_statuses"]["workbench-relation"]["status"], "ready")
+        self.assertEqual(set(snapshot["read_model_statuses"]), {"workbench_relation"})
         generic_scoped_calls = [
             call
             for call in connection.calls
@@ -713,19 +713,19 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
             )
             self.assertEqual(
                 params[-3:],
-                (["search"], ["search"], ["2026-02"]),
+                (["workbench_relation"], ["workbench_relation"], ["2026-02"]),
             )
         outbox_call = next(call for call in connection.calls if "cross join lateral" in call[0])
         self.assertIn("candidate_scope", outbox_call[0])
         self.assertIn("limit 1", outbox_call[0])
         self.assertIn("event.created_at desc, event.id desc", outbox_call[0])
         self.assertNotIn("_current_effective_outbox_attention", outbox_call[0])
-        self.assertEqual(outbox_call[1][0], ["search.read_model.refresh"])
-        self.assertEqual(outbox_call[1][1], ["search"])
+        self.assertEqual(outbox_call[1][0], ["workbench_relation.read_model.refresh"])
+        self.assertEqual(outbox_call[1][1], ["workbench_relation"])
         self.assertEqual(outbox_call[1][2], ["2026-02"])
         worker_call = next(call for call in connection.calls if "from job.runtime_worker_heartbeats" in call[0])
-        self.assertEqual(worker_call[1][0], ["search"])
-        self.assertEqual(worker_call[1][1], ["search-read-model"])
+        self.assertEqual(worker_call[1][0], ["workbench-relation"])
+        self.assertEqual(worker_call[1][1], ["workbench-relation-read-model"])
 
     def test_health_summary_counts_worker_mismatches(self) -> None:
         repository = RuntimeMonitoringRepository(FakeWorkerMetricsConnection())

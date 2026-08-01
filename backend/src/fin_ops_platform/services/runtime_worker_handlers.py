@@ -46,7 +46,6 @@ from fin_ops_platform.services.postgres_repositories.workbench_relation import P
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.reconciliation import ManualReconciliationService
-from fin_ops_platform.services.search_service import SearchService
 from fin_ops_platform.services.settings_data_reset_job import SettingsDataResetJobHandler
 from fin_ops_platform.services.settings_data_reset_service import (
     SettingsDataResetPairSnapshotPort,
@@ -77,7 +76,7 @@ IMPORT_JOB_PROCESSOR_TYPES = (
     "tax_certified_import.confirm",
     "oa_manual_import.create",
 )
-SEARCH_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
+MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
 
 
 @dataclass(frozen=True)
@@ -145,7 +144,6 @@ class ImportRuntimeProcessorFactory:
         )
         import_support = _RuntimeWorkerImportSupport(
             state_store=state_store,
-            search_service=_runtime_search_service(import_service),
             workbench_source_versions_provider=lambda: _workbench_matching_source_versions(app_settings_service),
         )
         processing_service = ImportProcessingService(
@@ -331,7 +329,7 @@ class SettingsDataResetRuntimeFactory:
         invalidated_scopes: list[str] = []
         enqueued_jobs: list[str] = []
         gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
-        for scope_type in ("workbench", "workbench_relation", "search", "no_oa_bank_batch"):
+        for scope_type in ("workbench", "workbench_relation"):
             try:
                 gateway.enqueue_one(scope_type, "all", reason=reason, metadata={"action": action})
                 invalidated_scopes.append(f"{scope_type}:all")
@@ -420,11 +418,9 @@ class _RuntimeWorkerImportSupport:
         self,
         *,
         state_store: Any,
-        search_service: SearchService,
         workbench_source_versions_provider: Callable[[], dict[str, object]],
     ) -> None:
         self._state_store = state_store
-        self._search_service = search_service
         self._workbench_source_versions_provider = workbench_source_versions_provider
 
     def enqueue_workbench_matching_job(
@@ -468,10 +464,9 @@ class _RuntimeWorkerImportSupport:
         if not callable(persist):
             raise RuntimeError("File import confirmation requires the import delta persistence port.")
         persist(payload)
-        self._search_service.clear_cache()
 
     def _mark_workbench_matching_months(self, scope_months: list[str], *, reason: str) -> list[str]:
-        months = [month for month in _dedupe_text(scope_months) if SEARCH_MONTH_RE.match(month)]
+        months = [month for month in _dedupe_text(scope_months) if MONTH_SCOPE_RE.match(month)]
         repository = getattr(self._state_store, "read_model_repository", None)
         dirty_queue = WorkbenchReconciliationDirtyQueue(repository=repository)
         return list(
@@ -482,19 +477,15 @@ class _RuntimeWorkerImportSupport:
             )
         )
 
-def _runtime_search_service(import_service: ImportNormalizationService) -> SearchService:
-    return SearchService(known_months_loader=lambda: _known_import_months(import_service))
-
-
 def _known_import_months(import_service: ImportNormalizationService) -> list[str]:
     months: set[str] = set()
     for transaction in import_service.list_transactions(month="all"):
         value = str(transaction.txn_date or transaction.trade_time or "").strip()[:7]
-        if SEARCH_MONTH_RE.match(value):
+        if MONTH_SCOPE_RE.match(value):
             months.add(value)
     for invoice in import_service.list_invoices(month="all"):
         value = str(invoice.invoice_date or "").strip()[:7]
-        if SEARCH_MONTH_RE.match(value):
+        if MONTH_SCOPE_RE.match(value):
             months.add(value)
     return sorted(months, reverse=True)
 
@@ -677,7 +668,7 @@ def _workbench_matching_scope_months_for_import_rows(rows: Any) -> list[str]:
         payload = row if isinstance(row, dict) else getattr(row, "__dict__", {})
         for key in ("trade_time", "trade_date", "pay_receive_time", "invoice_date"):
             value = str(payload.get(key) or "").strip()
-            if SEARCH_MONTH_RE.match(value[:7]):
+            if MONTH_SCOPE_RE.match(value[:7]):
                 months.add(value[:7])
     return sorted(months)
 
@@ -723,7 +714,7 @@ def _bank_scope_keys_for_import_rows(rows: Any) -> list[str]:
             continue
         for key in ("txn_date", "trade_time", "trade_date", "pay_receive_time"):
             value = str(payload.get(key) or "").strip()
-            if SEARCH_MONTH_RE.match(value[:7]):
+            if MONTH_SCOPE_RE.match(value[:7]):
                 months.add(value[:7])
     return sorted(months)
 

@@ -15,7 +15,7 @@
 | Normalization core | `ImportNormalizationService` | input/output invoice identity、digital invoice number fallback、重复/疑似重复、已存在 ETC-linked canonical invoice 合并、submitted ETC metadata 反向链接、source links、tags |
 | Import processing | `ImportProcessingService` | file confirm job 后必须执行发票生命周期、tax/cost/workbench scope 计算和 state persistence |
 | Derived lifecycle | `DerivedDataLifecycleService` | `invoice_import_confirmed` 必须先刷新 `invoice_lifecycle`，再影响待找发票、税金、进项/销项/OA 待付款、成本、搜索 |
-| Read model / worker | `runtime_worker_handlers.py`、runtime queue、App Status registries、`write_operation_slo_audit` | import job 成功不等于下游 fresh；worker/readiness 失败必须在 App Status 暴露；真实发票确认后应能审计到 Workbench、Workbench relation、invoice lifecycle、search、待找发票、OA 待付款、成本统计和税金抵扣 refresh scopes；进项使用/销项收款按本次导入方向命中刷新，未命中方向在审计中为 `skipped` |
+| Read model / worker | `runtime_worker_handlers.py`、runtime queue、App Status registries、`write_operation_slo_audit` | import job 成功不等于下游已展示；worker/readiness 失败必须在 App Status 暴露；真实发票确认后应能审计 Workbench、Workbench relation 以及下游 direct-canonical 页面状态，且已退休 Search/no-OA event 为零 |
 
 ## 场景覆盖清单
 
@@ -49,7 +49,7 @@
 | 3. API contract tests | 适用 | `tests/test_import_api.py`、`tests/test_import_file_api.py`、`tests/test_workbench_v2_api.py`、`tests/test_tax_offset_api.py`、`tests/test_input_invoice_usage_api.py`、`tests/test_oa_pending_payment_api.py`、`tests/test_output_invoice_collection_api.py` | 覆盖 import API shape、`batch_type`、`preview_stale`、job payload、read-model 下游状态字段，以及税金抵扣 canonical snapshot token/无旧状态字段。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_import_job_queue.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py`、`tests/test_invoice_lifecycle_page_integration.py`、`tests/test_write_operation_slo_audit.py` | 覆盖 import worker、invoice lifecycle 顺序、仍存在的 read-model 下游 App Status/readiness，并用 `invoice_import_confirmed` write-operation profile保护共享下游；税金抵扣页面读取不再属于本类。 |
 | 5. Frontend component and interaction tests | 适用 | `web/src/test/ImportCenterPage.test.tsx`、`web/src/test/ImportsApi.test.ts`、`web/src/test/AppStatusIndicator.test.tsx`、`web/e2e/imports-invoices-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 覆盖每文件方向、预览审计、慢预览动作锁定、重复明细、未导入项明细、错误提示、session restore、route unmount、API mapper、全局 status popover，以及真实浏览器中的上传/选择/确认交互、损坏文件混合、preview stale/confirm failure、下游页面重新读取、成功后无可见错误残留和 read-only 导入门禁。 |
-| 6. End-to-end business-flow integration tests | 适用 | `tests/test_workbench_v2_api.py`、`tests/test_tax_offset_api.py`、`tests/test_invoice_lifecycle_page_integration.py`、`web/src/test/ImportCenterPage.test.tsx`、`web/e2e/imports-invoices-flow.spec.ts` | 覆盖 import confirm -> stale protection -> Workbench active-generation/invoice lifecycle 下游收敛，以及 tax direct-canonical 重新 GET；前端导入流程不主动请求 Workbench 页面，由关联台访问时的 freshness gate 负责精确收敛。真实 worker drain 和 search 外层 UI 仍需 staging/后续 smoke。 |
+| 6. End-to-end business-flow integration tests | 适用 | `tests/test_workbench_v2_api.py`、`tests/test_tax_offset_api.py`、`tests/test_invoice_lifecycle_page_integration.py`、`web/src/test/ImportCenterPage.test.tsx`、`web/e2e/imports-invoices-flow.spec.ts` | 覆盖 import confirm -> stale protection -> Workbench active-generation 与 direct-canonical 下游重新 GET；前端导入流程不主动请求 Workbench 页面，由关联台访问时的 freshness gate 负责精确收敛。真实 worker drain 仍需 staging/后续 smoke。 |
 | 7. Existing feature regression tests | 适用 | 上述全部，以及下游模块测试矩阵、`web/e2e/imports-invoices-flow.spec.ts` | 每次改 shared import、invoice fact、lifecycle、read model 或 App Status 时，都必须回归发票导入和下游页面旧行为。 |
 
 ## 历史 bug 回归库
@@ -81,7 +81,7 @@
 ## 关键 smoke flows
 
 - 发票 Excel 上传 -> 每文件选择进项/销项 -> 预览 -> 确认 -> import worker/job 完成 -> `invoice_import_confirmed` / `import_state_changed` / `invoice_file_import_confirm` -> invoice lifecycle -> 待找发票、税金抵扣、命中方向的进项发票使用或销项收款、OA 待付款、成本统计刷新。
-- Staging write-flow audit：真实发票确认后运行 `PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_audit --json --operation invoice_import_confirmed --lookback-hours 24`，必须看到 Workbench、Workbench relation、invoice lifecycle、search、待找发票、OA 待付款、成本统计和税金抵扣 refresh scopes 通过 SLO；进项使用/销项收款按实际导入方向通过或显示 `skipped`。
+- Staging write-flow audit：真实发票确认后运行 `PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_audit --json --operation invoice_import_confirmed --lookback-hours 24`，必须看到两个保留 read model 的 scope 与 direct-canonical 下游检查通过，并确认已退休 Search/no-OA event 为零。
 - Runtime queue drain smoke：真实发票确认后只读核对本次导入时间窗内 `job.outbox_events` 不存在 stuck `processing/pending/dead-lettered`，`job.read_model_dirty_scopes` 中本次发票导入涉及的 `import_state_changed` / `invoice_file_import_confirm` scope 均已 `done`；发票导入不应新增 `import_facts_changed` 旁路，且 pending invoice 使用 `:<YYYY-MM>` 月级 scope 而不是仅有 `expense:all/income:all` 全量 aggregate。
 - 发票 `信息汇总表` Excel 上传 -> 选择进项/销项 -> 表头别名归一 -> 预览行数排除末尾汇总页脚 -> 明细行进入重复审计和确认。
 - 真实 PostgreSQL runtime smoke：5 个真实发票 Excel 上传 -> preview 返回 200 -> `preview_ready` 391 行 -> `app.import_batches`、`app.import_batch_rows`、`app.import_files` 和 `app.file_objects` 均成功写入；确认后通过真实 `*.read_model.refresh` 而不是 `import.fact.changed` 旁路收敛。
@@ -155,7 +155,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 
 - 本地已覆盖 240 行合成发票重复组；真实客户发票 Excel 大文件、历史模板变体、异常编码、超大重复组内存/耗时和真实浏览器上传仍需 staging/manual smoke。
 - 真实 Postgres/RabbitMQ/Redis/systemd import worker drain、worker crash/retry、RabbitMQ transport wakeup 未由本地单测完全证明；`write_operation_slo_audit --operation invoice_import_confirmed` 已有本地契约测试，但仍需要 staging 中真实发票确认样本产生 recent outbox rows 才能证明真实 write-flow。
-- Browser e2e 当前覆盖 deterministic mock 下的发票上传、方向选择、预览审计、慢预览动作锁定、损坏文件混合、确认、显式 operation barrier 等待和零 Workbench 页面请求，以及销项收款/进项使用/待找发票/OA 待付款的 fresh read model、税金抵扣/成本统计的 direct-canonical 展示；search、真实 worker drain、下游真实浏览器大数据表格、长分页、导出下载和网络恢复 smoke 仍是 `documented-risk`。
+- Browser e2e 当前覆盖 deterministic mock 下的发票上传、方向选择、预览审计、慢预览动作锁定、损坏文件混合、确认、显式 operation barrier 等待和零 Workbench 页面请求，以及销项收款/进项使用/待找发票/OA 待付款、税金抵扣/成本统计的下游展示；真实 worker drain、下游真实浏览器大数据表格、长分页、导出下载和网络恢复 smoke 仍是 `documented-risk`。
 - `import.process.requested` 是 file confirm 唯一 durable processing event，不是 inline fallback；具体发票 job 通过 session + selected file ids + batch type 精确归属于发票页，银行/发票任务和 outbox 不得互相阻断 Audit。
 - `tests/test_audit_invoice_import_page.py` 覆盖 direct-canonical expected-set、关键字段、manual source-link 双向 equality、strict 发票同时保留 known legacy invoice-batch edge 的非阻断语义、unknown/non-invoice batch edge 的 fail-closed、file hash、job/outbox 和一次性 PostgreSQL 0001–0097 破坏性反证；`tests/test_platform_runtime_boundary_guards.py` 防止 inline/revert/import-file batch-column 旧链回流。
 

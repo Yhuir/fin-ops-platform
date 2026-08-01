@@ -22,25 +22,15 @@ READ_MODEL_PRODUCTION_EVIDENCE_RUNBOOK = (
 
 DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
     (
-        "backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py",
-        "NoOaBankBatchApplicationService.list_batches_payload",
-        "dict read_model_status=fresh",
-    ): (1, "read-model rows are source-version checked before marking the payload fresh."),
-    (
         "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
-        "PostgresSearchWorkbenchRelationReadModelRepository.get_workbench_relation_rows_by_ids",
+        "PostgresWorkbenchRelationReadModelRepository.get_workbench_relation_rows_by_ids",
         "dict read_model_status=fresh",
     ): (1, "repository fact lookup exposes current relation rows to downstream freshness facade."),
     (
         "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
-        "PostgresSearchWorkbenchRelationReadModelRepository.get_workbench_relation_groups_by_ids",
+        "PostgresWorkbenchRelationReadModelRepository.get_workbench_relation_groups_by_ids",
         "dict read_model_status=fresh",
     ): (1, "repository fact lookup exposes current relation groups to downstream freshness facade."),
-    (
-        "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
-        "PostgresSummaryReadModelRepository._bank_batch_source_versions_summary",
-        "dict read_model_status=fresh",
-    ): (1, "repository summary exposes source_versions metadata only after bank batch readiness is fresh."),
     (
         "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
         "PostgresReadModelRepository._workbench_summary_from_payload",
@@ -219,10 +209,9 @@ class ReadModelArchitectureGuardTests(unittest.TestCase):
         self.assertNotIn('"no_oa_bank_batches"', helper_body)
         self.assertNotIn("_no_oa_bank_batch_service.snapshot()", helper_body)
 
-        service_source = (SOURCE_ROOT / "services" / "no_oa_bank_batch_read_model_refresh.py").read_text(encoding="utf-8")
         state_store_source = (SOURCE_ROOT / "services" / "state_store.py").read_text(encoding="utf-8")
         postgres_state_store_source = (SOURCE_ROOT / "services" / "postgres_state_store.py").read_text(encoding="utf-8")
-        self.assertIn("class NoOaBankBatchReadModelPersistencePort", service_source)
+        self.assertFalse((SOURCE_ROOT / "services" / "no_oa_bank_batch_read_model_refresh.py").exists())
         self.assertIn("def save_no_oa_bank_batch_mutation(", state_store_source)
         self.assertIn("def save_no_oa_bank_batch_mutation(", postgres_state_store_source)
 
@@ -268,7 +257,7 @@ class ReadModelArchitectureGuardTests(unittest.TestCase):
         offenders: list[str] = []
         reset_worker_path = SOURCE_ROOT / "services" / "runtime_worker_handlers.py"
         reset_worker_source = reset_worker_path.read_text(encoding="utf-8")
-        if 'for scope_type in ("workbench", "workbench_relation", "search", "no_oa_bank_batch")' not in reset_worker_source:
+        if 'for scope_type in ("workbench", "workbench_relation")' not in reset_worker_source:
             offenders.append("settings maintenance worker must own the explicit global read-model refresh set")
         if 'gateway.enqueue_one(scope_type, "all"' not in reset_worker_source:
             offenders.append("settings maintenance worker must enqueue global scopes through ReadModelRefreshGateway")

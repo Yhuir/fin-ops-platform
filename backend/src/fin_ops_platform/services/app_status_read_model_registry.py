@@ -27,19 +27,6 @@ APP_STATUS_READ_MODEL_REGISTRY: dict[str, AppStatusReadModelDefinition] = {
         worker_instance="workbench-relation",
         refresh_event_type="workbench_relation.read_model.refresh",
     ),
-    "search": AppStatusReadModelDefinition(
-        key="search",
-        scope_type="search",
-        worker_instance="search",
-        refresh_event_type="search.read_model.refresh",
-    ),
-    "no_oa_bank_batch": AppStatusReadModelDefinition(
-        key="no_oa_bank_batch",
-        scope_type="no_oa_bank_batch",
-        worker_instance="no-oa-bank-batch",
-        refresh_event_type="no_oa_bank_batch.read_model.refresh",
-        critical=False,
-    ),
 }
 
 

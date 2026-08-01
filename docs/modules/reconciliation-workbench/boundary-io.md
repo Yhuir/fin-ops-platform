@@ -55,7 +55,6 @@
 | all-scope query statistics | Workbench groups query | all-scope total、三类 row counts 与标题 statistics 直接从当前 active monthly generations 的 canonical group/member owner 集合计算；不写第二份 all-scope statistics，不把全历史聚合放进月份发布事务。查询返回前必须复核 generation-set digest，切换时 fail closed |
 | superseded generation retention | `finops-prune-workbench-generations.timer` | 低峰期有界删除非 active generation；发布热路径不得同步扫描/删除旧 generation，清理失败不得影响 fresh generation 或页面写后可见性 |
 | refreshing query status | Workbench initial/detail query | 返回 refreshing/遮罩状态；读入口不得再次补投 `all` refresh，只有真正 missing 或 freshness gate 已证明的 exact stale scope 才能请求恢复，避免读 I/O 扩成全月份写 fan-out |
-| Search row context | 非 PostgreSQL 本地 Search | `list_workbench_search_rows(YYYY-MM)` 只返回 active generation 的 row/zone/group/project context；禁止复用 Workbench page/full payload |
 | ignored rows | Workbench ignored API / write command | `list_workbench_ignored_rows(scope_key)` 只读取 active generation；repository 缺失时公开 API 返回 unavailable、写命令 fail fast，禁止回退旧 snapshot |
 | relation action preview selection | confirm/withdraw preview | `WorkbenchQueryFacade.relation_preview_selection -> PostgresReadModelRepository.get_workbench_relation_preview_selection` 按 expected generation/generation-set 一次读取最多 20 个 selected rows 及必要 OA attachment context；month/all 都在读取前后复核 fresh/version。`month=all` 中同一 canonical row 被跨月 relation 投影到多个 active shard 时，规范化内容完全相同才合并为一个逻辑 row；同 row id 内容不一致、missing、跨 generation 或 drift 一律 fail closed。该 DTO 只供 preview group/amount/alias 投影，不进入正式 command/UoW，不读取 `workbench:all` 完整 payload、live builder 或 `workbench_relation` projection |
 
@@ -86,7 +85,7 @@
 - matching scope、workbench scope 和 workbench_relation scope 都以 PostgreSQL durable queue/state 为事实源；Redis 只缓存 fresh payload，RabbitMQ 只做可选唤醒。
 - 历史 ETC 修复如果只改变已提交批次成员而不改变正式关系，matching completion 不足以发布新页面 generation；统一 historical ETC repair runtime port 必须通过 `ReadModelRefreshGateway` 额外 enqueue 修复报告中的精确月份 Workbench scope，不投 `all`、不直接写 active generation。
 - relation UoW/turnover writer不拥有成本计算、存储或下游刷新I/O；repository、自动匹配命令和lifecycle registry不声明成本I/O。Workbench generation publish也不发布Cost fan-out。Cost访问先读取现有gate；gate已non-fresh时跳过canonical Workbench全量证明并使用gate返回的exact upstream/child scope。只有gate可fresh时才检查Workbench canonical expected/active generation版本；上游stale时，同次只ensure当前exact Workbench月份并stage当前project/page所需的exact Cost child，不stage parent或sibling。query把本次gate已验证的expected proof与token成对交给Workbench event；worker校验token/scope后复用proof，missing projection仍不附proof并走首次自愈。Cost child可携带同一Workbench proof作为active waiter target，但不能用历史done替代完整Cost freshness。Cost worker以manifest dependency fail closed/defer，依赖fresh后发布并由成功child收敛parent。Workbench访问刷新由共享PostgreSQL advisory-lock原子合并active/最新成功同target；missing projection与orphan dirty仍可重新入队。禁止写后fan-out、`workbench_shard_published`、旧进程内read-model persist、proof cache或第二协调链路。
-- Search 本地即时查询与 ignored rows 是 repository 窄读接口，不是新的 read model/projection/cache；它们必须固定到 active generation，且不能反向依赖页面 assembler。
+- Workbench 区域内搜索与 ignored rows 由当前 active-generation 查询实现，不是独立 Search API/read model/projection/cache；它们不能反向依赖页面 assembler。
 - Release A 上线后已通过全量 Workbench rehydrate 使旧 `open`/candidate/decision generation 被新的 paired/unpaired generation 原子替换；不得原地修改旧 active generation。当前 v7 已随 exact release `main-719c9a34-20260725101310` 激活，migration `0125` 和正式 `finops-deploy-control workbench-rehydrate` 均已完成；最终只需在同一 release 上关闭页面/Audit/queue/worker correctness 矩阵，不得重复执行 no-op 部署或 rehydrate。这类版本迁移维护操作不属于普通页面性能口径，也不得由普通页面隐式触发全量迁移。纯派生投影迁移不创建额外数据库备份，依赖既有 release rollback 与 test-owned fixture 恢复。Release B 的旧状态 drop migration 只在 A 的零访问和数据安全证据通过后创建，并使用届时下一个可用版本；不得复用已被 OA 使用的 0104。
 
 ## 旧链路删除合同
@@ -99,7 +98,7 @@ Release A 已删除运行时链路且禁止恢复；旧表物理存储只为短�
 - in-memory matching dirty-scope fallback 作为生产状态源。
 - `CandidateGroupGrid` / `CandidateGroupCell` 组件和候选取消写入口。
 - 仅凭 `case:decision:*`、row `case_id` 或旧 section 判断显示归属。
-- legacy `GET /api/workbench` provider/API assembler 与所有跨页面 full-payload consumer；当前首屏只走 `WorkbenchQueryFacade.initial_page(...)`，Search、ignored、Batch Accounting、Cost Statistics 和 Settings 各自使用既有专属窄 I/O。
+- legacy `GET /api/workbench` provider/API assembler 与所有跨页面 full-payload consumer；当前首屏只走 `WorkbenchQueryFacade.initial_page(...)`，ignored、Batch Accounting、Cost Statistics 和 Settings 各自使用既有专属窄 I/O。
 - 旧独立 summary HTTP handler/route/facade 与其 metric owner；运维 probe 和页面只能使用 combined initial 或已有窄查询。
 - 默认无筛选 `month=all` groups 请求中的动态 `count(distinct workbench_group_rows...)` 旧慢路径及其把历史 materialized all generation join 回 active month shards 的污染；它不再作为 generation stats 缺失 fallback。带用户搜索/列筛选时重复执行 member `EXISTS`、分别计算 count/page、或把历史 physical groups join 回 active shards 的旧路径也已删除；精确条件计数只能使用当前 active key 集合。
 - 已删除三栏 `WorkbenchPaneSearch`、`search_by_pane`、`search_mode`、pane-local draft/open/session 状态和对应 cache/repository 分支；不得恢复并行搜索路径或兼容 fallback。页面 session schema 为 v2，旧 v1 搜索状态直接失效。

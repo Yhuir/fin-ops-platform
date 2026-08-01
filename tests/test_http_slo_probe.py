@@ -82,7 +82,7 @@ class HttpSloProbeTests(unittest.TestCase):
         self.assertIn("bank_page_size=200", probe_paths["batch_accounting"])
         self.assertIn("oa_page=1", probe_paths["batch_accounting"])
         self.assertIn("oa_page_size=200", probe_paths["batch_accounting"])
-        self.assertIn("q=%E5%85%AC%E5%8F%B8", probe_paths["search_all"])
+        self.assertNotIn("search_all", probe_paths)
         admin_probe = next(probe for probe in http_slo_probe.DEFAULT_API_PROBES if probe.name == "operations_app_health_dashboard")
         self.assertEqual(admin_probe.auth_scope, "admin")
 

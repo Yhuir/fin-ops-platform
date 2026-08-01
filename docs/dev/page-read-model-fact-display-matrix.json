@@ -115,7 +115,7 @@
       "page_key": "turnover-ledger",
       "route": "/turnover-ledger",
       "read_model_keys": [],
-      "freshness_probe_names": ["turnover_ledger_grouped", "turnover_ledger_tag_selection", "cost_statistics_explorer_all", "search_all"],
+      "freshness_probe_names": ["turnover_ledger_grouped", "turnover_ledger_tag_selection", "cost_statistics_explorer_all"],
       "fact_sources": ["app.bank_transactions", "app.turnover_relations", "app.cost_projects", "app.workbench_pair_relations"],
       "pairing_relation_fact_sources": ["app.workbench_pair_relations"],
       "deterministic_evidence": [
@@ -124,7 +124,7 @@
           "required_markers": ["外部往来闭环已确认", "收支闭环", "浏览器 e2e 归还借款"]
         }
       ],
-      "production_readonly_gates": ["http_slo_probe:turnover_ledger_grouped", "http_slo_probe:turnover_ledger_tag_selection", "http_slo_probe:cost_statistics_explorer_all", "http_slo_probe:search_all"]
+      "production_readonly_gates": ["http_slo_probe:turnover_ledger_grouped", "http_slo_probe:turnover_ledger_tag_selection", "http_slo_probe:cost_statistics_explorer_all"]
     },
     {
       "module": "etc-tickets",

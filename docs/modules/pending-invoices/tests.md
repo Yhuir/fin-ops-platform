@@ -21,7 +21,7 @@
 | 1. 业务核心 | 适用 | `tests/test_pending_invoice_service.py`、`tests/test_pending_invoice_relation_identity.py`：规则、状态、关系、聚合、冲突、幂等 |
 | 2. Service/repository | 适用 | `tests/test_pending_invoice_canonical_query.py`：snapshot、set-based SQL、active relation、固定查询预算 |
 | 3. API contract | 适用 | `tests/test_pending_invoice_api.py`、`web/src/test/PendingInvoicesApi.test.ts`：rows/detail/rules/candidates/attach/export/权限和 retired 字段缺失 |
-| 4. Read model/cache/worker | 适用（负向） | `tests/test_read_model_manifest.py`、`tests/test_runtime_worker_registry.py`、`tests/test_read_model_architecture_guards.py`：页面 worker/runtime 保持删除；Search 仍独立 |
+| 4. Read model/cache/worker | 适用（负向） | `tests/test_read_model_manifest.py`、`tests/test_runtime_worker_registry.py`、`tests/test_read_model_architecture_guards.py`：页面 worker/runtime 与独立 Search runtime 保持删除 |
 | 5. 前端交互 | 适用 | `web/src/test/PendingInvoicesPage.test.tsx`、`web/src/test/PendingInvoicesRulesSaveTimeout.test.tsx`：loading/empty/error、筛选/分页/抽屉/批量写/写后 refetch |
 | 6. 端到端 | 适用 | `web/e2e/pending-invoices-*.spec.ts`：规则、筛选、attach、收入状态、导出与错误恢复 |
 | 7. 既有功能回归 | 适用 | 全量 backend/frontend/E2E；重点保护关联台、发票使用/收款、OA、Search 与正式关系写入 |

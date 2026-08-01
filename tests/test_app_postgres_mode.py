@@ -174,11 +174,11 @@ class AppPostgresModeTests(unittest.TestCase):
                 },
             ],
             "dirty_scopes_by_scope": [
-                {"scope_type": "search", "scope_key": "all", "status": "pending", "count": 1},
-                {"scope_type": "search", "scope_key": "all", "status": "pending", "count": 1},
+                {"scope_type": "workbench_relation", "scope_key": "all", "status": "pending", "count": 1},
+                {"scope_type": "workbench_relation", "scope_key": "all", "status": "pending", "count": 1},
             ],
             "pending_outbox_events_by_scope": [
-                {"event_type": "search.read_model.refresh", "scope_key": "all", "status": "dead_lettered"}
+                {"event_type": "workbench_relation.read_model.refresh", "scope_key": "all", "status": "dead_lettered"}
             ],
         }
         store = FakeStore(runtime_infrastructure=runtime_infrastructure)

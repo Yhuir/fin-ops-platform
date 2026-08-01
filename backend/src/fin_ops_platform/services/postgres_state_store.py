@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 from fin_ops_platform.services.file_object_migration import verified_object_key_from_uri, write_verified_object
-from fin_ops_platform.services.no_oa_bank_batch_read_model_repository import NoOaBankBatchReadModelRepositoryPort
 from fin_ops_platform.services.object_storage import (
     ObjectStorageReadError,
     ObjectStorageRepository,
@@ -44,7 +43,6 @@ from fin_ops_platform.services.postgres_snapshot_contracts import (
     normalize_workbench_pair_relations,
 )
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
-from fin_ops_platform.services.search_read_model_repository import SearchReadModelRepositoryPort
 from fin_ops_platform.services.workbench_relation_read_model_repository import WorkbenchRelationReadModelRepositoryPort
 
 APP_SETTINGS_KEY = "app_settings"
@@ -157,8 +155,6 @@ class PostgresStateStore:
         self._etc_import_session_repository = PostgresEtcImportSessionRepository(connection)
         self._read_model_repository = PostgresReadModelRepository(connection)
         self._sql_read_model_repository = PostgresReadModelRepository(self._sql_read_connection)
-        self._search_sql_read_repository = SearchReadModelRepositoryPort(self._sql_read_model_repository)
-        self._no_oa_bank_batch_sql_read_repository = NoOaBankBatchReadModelRepositoryPort(self._sql_read_model_repository)
         self._bank_flow_rule_batch_canonical_query_repository = (
             BankFlowRuleBatchCanonicalQueryRepository(self._sql_read_connection)
             if callable(getattr(self._sql_read_connection, "transaction", None))
@@ -684,19 +680,6 @@ class PostgresStateStore:
     ) -> None:
         self._workbench_repository.save_no_oa_bank_batches(snapshot, relation_mode=relation_mode)
 
-    def save_no_oa_bank_batches_scope(
-        self,
-        snapshot: dict[str, Any],
-        *,
-        scope_key: str,
-        relation_mode: str = "no_oa_bank_batch",
-    ) -> None:
-        self._workbench_repository.save_no_oa_bank_batches_scope(
-            snapshot,
-            scope_key=scope_key,
-            relation_mode=relation_mode,
-        )
-
     def save_bank_flow_rule_batch_items(
         self,
         snapshot: dict[str, Any],
@@ -997,16 +980,8 @@ class PostgresStateStore:
         return self._workbench_relation_repository
 
     @property
-    def search_sql_read_repository(self) -> SearchReadModelRepositoryPort:
-        return self._search_sql_read_repository
-
-    @property
     def workbench_relation_sql_read_repository(self) -> WorkbenchRelationReadModelRepositoryPort:
         return self._workbench_relation_sql_read_repository
-
-    @property
-    def no_oa_bank_batch_sql_read_repository(self) -> NoOaBankBatchReadModelRepositoryPort:
-        return self._no_oa_bank_batch_sql_read_repository
 
     @property
     def bank_flow_rule_batch_canonical_query_repository(

@@ -21,21 +21,13 @@ from fin_ops_platform.services.no_oa_bank_batch_service import (
     NO_OA_BANK_BATCH_SCHEMA_VERSION,
     NoOaBankBatchService,
 )
-from fin_ops_platform.services.no_oa_bank_batch_read_model_repository import (
-    NoOaBankBatchReadModelRepositoryPort,
-)
 from fin_ops_platform.services.no_oa_managed_rule_policy import NO_OA_MANAGED_LABELS
-from fin_ops_platform.services.read_model_freshness import (
-    require_expected_source_versions,
-    source_version_mismatch_reasons,
-)
-from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
 
 
-SEARCH_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
+MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
 
 
 class NoOaBankBatchPersistenceError(RuntimeError):
@@ -117,12 +109,8 @@ class NoOaBankBatchApplicationService:
         pair_relation_snapshot_port: NoOaPairRelationSnapshotPort,
         state_store: Any | None,
         tag_selection_service: Any | None = None,
-        no_oa_bank_batch_read_model_repository: NoOaBankBatchReadModelRepositoryPort | None = None,
         workbench_matching_source_versions_provider: Callable[[], dict[str, object]] | None = None,
         bank_transaction_category_affected_months_provider: Callable[[list[str]], list[str]] | None = None,
-        search_cache_clearer: Callable[[], Any] | None = None,
-        queue_repository: Any | None = None,
-        read_model_refresh_producer: Any | None = None,
         relation_facade: Any | None = None,
         relation_command_service: Any | None = None,
     ) -> None:
@@ -134,14 +122,10 @@ class NoOaBankBatchApplicationService:
         self._bank_transaction_category_service = bank_transaction_category_service
         self._pair_relation_snapshot_port = pair_relation_snapshot_port
         self._state_store = state_store
-        self._no_oa_bank_batch_read_model_repository = no_oa_bank_batch_read_model_repository
         self._workbench_matching_source_versions_provider = workbench_matching_source_versions_provider or (lambda: {})
         self._bank_transaction_category_affected_months_provider = (
             bank_transaction_category_affected_months_provider or (lambda _row_ids: [])
         )
-        self._search_cache_clearer = search_cache_clearer or (lambda: None)
-        self._queue_repository = queue_repository
-        self._read_model_refresh_producer = read_model_refresh_producer
         self._relation_facade = relation_facade
         self._relation_command_service = relation_command_service
 
@@ -163,69 +147,21 @@ class NoOaBankBatchApplicationService:
             "account_key": filters["account_key"],
             "relation_mode": filters["relation_mode"],
         }
-        refresh_scope_keys = self._refresh_scope_keys_for_filters(filters)
-        list_read_model_batches = getattr(
-            self._no_oa_bank_batch_read_model_repository,
-            "list_no_oa_bank_batch_rows",
-            None,
+        scope_key = str(filters["month"] or "").strip()
+        self.refresh_batches(
+            apply_relation_repairs=False,
+            scope_key=scope_key if MONTH_SCOPE_RE.match(scope_key) else "all",
         )
-        if callable(list_read_model_batches):
-            summary_read_model_batches = list_read_model_batches(summary_filters)
-            read_model_batches = list_read_model_batches(filters)
-            if summary_read_model_batches is None or read_model_batches is None:
-                refresh_reason = "api_no_oa_read_model_missing"
-                refresh_enqueued = self.enqueue_background_refresh(
-                    refresh_scope_keys,
-                    reason=refresh_reason,
-                )
-                return {
-                    "summary": self.summary([]),
-                    "batches": [],
-                    **self._pagination_payload([], pagination),
-                    "read_model_status": "missing",
-                    "read_model_stale_reasons": [],
-                    "refresh_enqueued": refresh_enqueued,
-                    "refresh_reason": refresh_reason,
-                }
-            if summary_read_model_batches is not None and read_model_batches is not None:
-                self.load_relation_source_versions_for_scope_keys(refresh_scope_keys)
-                stale_reasons = self.no_oa_bank_batch_stale_reasons(summary_read_model_batches + read_model_batches)
-                summary_public_batches = self._public_batches(summary_read_model_batches)
-                read_model_public_batches = self._public_batches(read_model_batches)
-                if stale_reasons:
-                    refresh_reason = "api_no_oa_source_versions_stale"
-                    refresh_enqueued = self.enqueue_background_refresh(
-                        refresh_scope_keys,
-                        reason=refresh_reason,
-                    )
-                    return {
-                        "summary": self.summary(summary_public_batches),
-                        "batches": self.resolve_labels(self._page_items(read_model_public_batches, pagination)),
-                        **self._pagination_payload(read_model_public_batches, pagination),
-                        "read_model_status": "stale",
-                        "read_model_stale_reasons": stale_reasons,
-                        "refresh_enqueued": refresh_enqueued,
-                        "refresh_reason": refresh_reason,
-                    }
-                return {
-                    "summary": self.summary(summary_public_batches),
-                    "batches": self.resolve_labels(self._page_items(read_model_public_batches, pagination)),
-                    **self._pagination_payload(read_model_public_batches, pagination),
-                    "read_model_status": "fresh",
-                }
-        refresh_reason = "api_no_oa_read_model_unavailable"
-        refresh_enqueued = self.enqueue_background_refresh(
-            refresh_scope_keys,
-            reason=refresh_reason,
+        summary_batches = self._public_batches(
+            self._no_oa_bank_batch_service.list_batches(summary_filters)
+        )
+        batches = self._public_batches(
+            self._no_oa_bank_batch_service.list_batches(filters)
         )
         return {
-            "summary": self.summary([]),
-            "batches": [],
-            **self._pagination_payload([], pagination),
-            "read_model_status": "unavailable",
-            "read_model_stale_reasons": [],
-            "refresh_enqueued": refresh_enqueued,
-            "refresh_reason": refresh_reason,
+            "summary": self.summary(summary_batches),
+            "batches": self.resolve_labels(self._page_items(batches, pagination)),
+            **self._pagination_payload(batches, pagination),
         }
 
     def tag_selection_payload(self) -> dict[str, Any]:
@@ -562,11 +498,6 @@ class NoOaBankBatchApplicationService:
             }
         }
 
-    @staticmethod
-    def _refresh_scope_keys_for_filters(filters: dict[str, object]) -> list[str]:
-        month = str(filters.get("month") or "").strip()
-        return [month] if SEARCH_MONTH_RE.match(month) else ["all"]
-
     def refresh_batches(
         self,
         *,
@@ -583,166 +514,8 @@ class NoOaBankBatchApplicationService:
             scope_key=refresh_scope_key,
         )
 
-    def unchanged_read_model_scope_result(
-        self,
-        *,
-        scope_key: str,
-        source_versions: dict[str, object],
-        allow_refreshing_read_model_status: bool = False,
-    ) -> dict[str, object] | None:
-        normalized_scope_key = str(scope_key or "all").strip() or "all"
-        filters = {"month": normalized_scope_key} if SEARCH_MONTH_RE.match(normalized_scope_key) else {}
-        source_versions_summary_loader = getattr(
-            self._no_oa_bank_batch_read_model_repository,
-            "no_oa_bank_batch_source_versions_summary",
-            None,
-        )
-        if callable(source_versions_summary_loader):
-            summary = source_versions_summary_loader(filters)
-            allowed_statuses = {"fresh"}
-            if allow_refreshing_read_model_status:
-                allowed_statuses.add("refreshing")
-            if not isinstance(summary, dict) or str(summary.get("read_model_status") or "") not in allowed_statuses:
-                return None
-            existing_source_versions = summary.get("source_versions")
-            if not isinstance(existing_source_versions, dict) or dict(existing_source_versions) != source_versions:
-                return None
-            return {
-                "scope_key": normalized_scope_key,
-                "batch_count": max(int(summary.get("row_count") or 0), 0),
-                "source_versions": source_versions,
-                "skipped": True,
-                "skip_reason": "source_versions_unchanged",
-            }
-        list_read_model_batches = getattr(self._no_oa_bank_batch_read_model_repository, "list_no_oa_bank_batch_rows", None)
-        if not callable(list_read_model_batches):
-            return None
-        read_model_rows = list_read_model_batches(filters)
-        if not read_model_rows:
-            return None
-        existing_versions = [
-            row.get("source_versions")
-            for row in list(read_model_rows)
-            if isinstance(row, dict) and isinstance(row.get("source_versions"), dict)
-        ]
-        if not existing_versions or any(dict(value) != source_versions for value in existing_versions):
-            return None
-        return {
-            "scope_key": normalized_scope_key,
-            "batch_count": len(read_model_rows),
-            "source_versions": source_versions,
-            "skipped": True,
-            "skip_reason": "source_versions_unchanged",
-        }
-
     def active_relations_for_bank_rows(self, bank_rows: list[dict[str, object]]) -> list[dict[str, object]]:
         return self._workbench_relation_active_relations_for_bank_rows(bank_rows)
-
-    def load_relation_source_versions_for_bank_rows(self, bank_rows: list[dict[str, object]]) -> None:
-        if self._relation_facade is None:
-            return
-        load_source_versions = getattr(self._relation_facade, "source_versions_for_month", None)
-        if not callable(load_source_versions):
-            self._workbench_relation_active_relations_for_bank_rows(bank_rows)
-            return
-        self.load_relation_source_versions_for_scope_keys(self._months_for_bank_rows(bank_rows))
-
-    def load_relation_source_versions_for_scope_keys(self, scope_keys: list[str]) -> None:
-        if self._relation_facade is None:
-            return
-        load_source_versions = getattr(self._relation_facade, "source_versions_for_month", None)
-        if not callable(load_source_versions):
-            return
-        for month in [
-            str(scope_key).strip()
-            for scope_key in list(scope_keys or [])
-            if SEARCH_MONTH_RE.match(str(scope_key).strip())
-        ]:
-            load_source_versions(
-                month,
-                require_fresh=False,
-                reason="no_oa_bank_batch_source_version_precheck",
-            )
-
-    def read_model_scope_source_versions(
-        self,
-        *,
-        scope_key: str,
-        category_source_rows: list[dict[str, object]] | None = None,
-    ) -> dict[str, object]:
-        normalized_scope_key = str(scope_key or "all").strip() or "all"
-        scope_keys = [normalized_scope_key] if SEARCH_MONTH_RE.match(normalized_scope_key) else []
-        source_versions = self._no_oa_bank_batch_base_source_versions()
-        category_source_proof = (
-            self._effective_category_provider.canonical_category_source_proof_for_rows(
-                category_source_rows
-            )
-            if category_source_rows is not None
-            else self._category_source_proof_for_scope_keys(scope_keys)
-        )
-        if category_source_proof:
-            source_versions["category_source_proof"] = category_source_proof
-        workbench_relation_source_versions = self._workbench_relation_source_versions_for_scope_keys(scope_keys)
-        if workbench_relation_source_versions:
-            source_versions["workbench_relation_source_versions"] = workbench_relation_source_versions
-        return source_versions
-
-    def bank_row_count_from_source_versions(self, source_versions: dict[str, object]) -> int:
-        category_source_proof = source_versions.get("category_source_proof")
-        if not isinstance(category_source_proof, dict):
-            return 0
-        row_count = category_source_proof.get("row_count")
-        if row_count is None:
-            for value in category_source_proof.values():
-                if isinstance(value, dict) and value.get("row_count") is not None:
-                    row_count = value.get("row_count")
-                    break
-        try:
-            return max(int(row_count or 0), 0)
-        except (TypeError, ValueError):
-            return 0
-
-    def _category_source_proof_for_scope_keys(self, scope_keys: list[str]) -> dict[str, object]:
-        normalized_scope_keys = [
-            str(scope_key).strip()
-            for scope_key in list(scope_keys or [])
-            if SEARCH_MONTH_RE.match(str(scope_key).strip())
-        ]
-        if not normalized_scope_keys:
-            return {}
-        proofs = {
-            scope_key: self._effective_category_provider.canonical_category_source_proof_for_rows(
-                self._import_service.list_transactions(month=scope_key)
-            )
-            for scope_key in normalized_scope_keys
-        }
-        return next(iter(proofs.values())) if len(proofs) == 1 else proofs
-
-    def _workbench_relation_source_versions_for_scope_keys(self, scope_keys: list[str]) -> dict[str, object]:
-        if self._relation_facade is None:
-            return {}
-        load_source_versions = getattr(self._relation_facade, "source_versions_for_month", None)
-        normalized_scope_keys = [
-            str(scope_key).strip()
-            for scope_key in list(scope_keys or [])
-            if SEARCH_MONTH_RE.match(str(scope_key).strip())
-        ]
-        if not callable(load_source_versions) or not normalized_scope_keys:
-            return {}
-        versions_by_scope: dict[str, object] = {}
-        for scope_key in normalized_scope_keys:
-            payload = load_source_versions(
-                scope_key,
-                require_fresh=False,
-                reason="no_oa_bank_batch_source_version_precheck",
-            )
-            source_versions = payload.get("source_versions") if isinstance(payload, dict) else None
-            if isinstance(source_versions, dict) and source_versions:
-                versions_by_scope[scope_key] = dict(source_versions)
-        if len(normalized_scope_keys) == 1:
-            value = versions_by_scope.get(normalized_scope_keys[0])
-            return dict(value) if isinstance(value, dict) else {}
-        return versions_by_scope
 
     def refresh_batches_from_prepared_rows(
         self,
@@ -1217,46 +990,6 @@ class NoOaBankBatchApplicationService:
             enriched.append(next_row)
         return enriched
 
-    def no_oa_bank_batch_stale_reasons(self, batches: object) -> list[str]:
-        batch_rows = batches if isinstance(batches, list) else []
-        if not batch_rows:
-            return []
-        expected = require_expected_source_versions(
-            self.no_oa_bank_batch_source_versions(),
-            context="no_oa_bank_batch_read_model",
-        )
-        reasons: list[str] = []
-        for batch in batch_rows:
-            if not isinstance(batch, dict):
-                continue
-            source_versions = batch.get("source_versions")
-            for reason in source_version_mismatch_reasons(
-                expected=expected,
-                actual=source_versions if isinstance(source_versions, dict) else {},
-            ):
-                if reason not in reasons:
-                    reasons.append(reason)
-        return reasons
-
-    def enqueue_background_refresh(
-        self,
-        scope_keys: list[str],
-        *,
-        reason: str,
-    ) -> bool:
-        if self._read_model_refresh_producer is not None:
-            return bool(self._read_model_refresh_producer.enqueue(scope_keys, reason=reason))
-        refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
-        if not refresh_gateway.can_enqueue():
-            return False
-        return bool(
-            refresh_gateway.enqueue_many(
-                "no_oa_bank_batch",
-                scope_keys,
-                reason=reason,
-            )
-        )
-
     def persist_mutation(self, *, changed_case_ids: list[str], changed_scope_keys: list[str]) -> None:
         if self._state_store is None:
             return
@@ -1264,7 +997,7 @@ class NoOaBankBatchApplicationService:
             normalized_scope_keys = [
                 str(scope_key).strip()
                 for scope_key in changed_scope_keys
-                if SEARCH_MONTH_RE.match(str(scope_key).strip())
+                if MONTH_SCOPE_RE.match(str(scope_key).strip())
             ]
             save_mutation = getattr(self._state_store, "save_no_oa_bank_batch_mutation", None)
             if not callable(save_mutation):
@@ -1319,7 +1052,7 @@ class NoOaBankBatchApplicationService:
                 [str(row_id) for row_id in list(batch.get("row_ids") or []) if str(row_id).strip()]
             ),
         }
-        return sorted(month for month in months if SEARCH_MONTH_RE.match(month))
+        return sorted(month for month in months if MONTH_SCOPE_RE.match(month))
 
     def pair_relation_snapshot_by_case_id(self, case_id: str) -> dict[str, object] | None:
         normalized_case_id = str(case_id or "").strip()

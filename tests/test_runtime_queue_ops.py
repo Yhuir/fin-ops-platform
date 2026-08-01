@@ -102,7 +102,7 @@ class FakeRuntimeQueueRepository:
         return [
             {
                 "event_id": "00000000-0000-0000-0000-000000000001",
-                "event_type": "search.read_model.refresh",
+                "event_type": "workbench_relation.read_model.refresh",
                 "status": "pending",
             }
         ]
@@ -126,7 +126,7 @@ class FakeRuntimeQueueRepository:
         return [
             {
                 "event_id": "00000000-0000-0000-0000-000000000001",
-                "event_type": "search.read_model.refresh",
+                "event_type": "workbench_relation.read_model.refresh",
                 "status": "done",
             }
         ]
@@ -347,9 +347,9 @@ class RuntimeQueueOpsTests(unittest.TestCase):
                 [
                     "enqueue-read-model-refresh",
                     "--scope",
-                    "search=all",
+                    "workbench_relation=all",
                     "--scope",
-                    "no_oa_bank_batch=all",
+                    "workbench=all",
                     "--dry-run",
                 ],
                 stdout=stdout,
@@ -361,8 +361,8 @@ class RuntimeQueueOpsTests(unittest.TestCase):
         self.assertEqual(
             payload["targets"],
             [
-                {"scope_key": "all", "scope_type": "search"},
-                {"scope_key": "all", "scope_type": "no_oa_bank_batch"},
+                {"scope_key": "all", "scope_type": "workbench_relation"},
+                {"scope_key": "all", "scope_type": "workbench"},
             ],
         )
         self.assertEqual(repository.enqueue_read_model_refresh_calls, [])
@@ -419,7 +419,7 @@ class RuntimeQueueOpsTests(unittest.TestCase):
             fetch_all_rows=[
                 {
                     "event_id": "00000000-0000-0000-0000-000000000001",
-                    "event_type": "search.read_model.refresh",
+                    "event_type": "workbench_relation.read_model.refresh",
                     "status": "processing",
                     "locked_age_seconds": 600,
                 }
@@ -432,7 +432,7 @@ class RuntimeQueueOpsTests(unittest.TestCase):
             repository,  # type: ignore[arg-type]
             stale_after_seconds=300,
             limit=25,
-            event_types=["search.read_model.refresh"],
+            event_types=["workbench_relation.read_model.refresh"],
             reason="rabbitmq_stale_processing_repair",
             execute=False,
         )
@@ -447,14 +447,14 @@ class RuntimeQueueOpsTests(unittest.TestCase):
         self.assertIn("locked_at < now() - (%s * interval '1 second')", normalized_sql)
         self.assertIn("stale.event_type = any(%s)", normalized_sql)
         self.assertIn("dedupe_rank = 1", normalized_sql)
-        self.assertEqual(params, (300, ["search.read_model.refresh"], 25))
+        self.assertEqual(params, (300, ["workbench_relation.read_model.refresh"], 25))
 
     def test_release_stale_processing_execute_uses_repository_boundary(self) -> None:
         connection = FakeConnection(
             fetch_all_rows=[
                 {
                     "event_id": "00000000-0000-0000-0000-000000000001",
-                    "event_type": "search.read_model.refresh",
+                    "event_type": "workbench_relation.read_model.refresh",
                     "status": "processing",
                     "locked_age_seconds": 600,
                 }
@@ -467,7 +467,7 @@ class RuntimeQueueOpsTests(unittest.TestCase):
             repository,  # type: ignore[arg-type]
             stale_after_seconds=300,
             limit=25,
-            event_types=["search.read_model.refresh"],
+            event_types=["workbench_relation.read_model.refresh"],
             reason="rabbitmq_stale_processing_repair",
             execute=True,
         )
@@ -482,7 +482,7 @@ class RuntimeQueueOpsTests(unittest.TestCase):
                     "stale_after_seconds": 300,
                     "limit": 25,
                     "reason": "rabbitmq_stale_processing_repair",
-                    "event_types": ("search.read_model.refresh",),
+                    "event_types": ("workbench_relation.read_model.refresh",),
                 }
             ],
         )
@@ -492,7 +492,7 @@ class RuntimeQueueOpsTests(unittest.TestCase):
             fetch_all_rows=[
                 {
                     "event_id": "00000000-0000-0000-0000-000000000001",
-                    "event_type": "search.read_model.refresh",
+                    "event_type": "workbench_relation.read_model.refresh",
                     "status": "processing",
                     "locked_age_seconds": 600,
                     "covered_by_event_id": "00000000-0000-0000-0000-000000000002",
@@ -507,7 +507,7 @@ class RuntimeQueueOpsTests(unittest.TestCase):
             repository,  # type: ignore[arg-type]
             stale_after_seconds=300,
             limit=25,
-            event_types=["search.read_model.refresh"],
+            event_types=["workbench_relation.read_model.refresh"],
             reason="rabbitmq_stale_processing_superseded",
             execute=False,
         )
@@ -521,14 +521,14 @@ class RuntimeQueueOpsTests(unittest.TestCase):
         self.assertIn("join lateral", normalized_sql)
         self.assertIn("newer.status in ('pending', 'processing', 'done')", normalized_sql)
         self.assertIn("stale.event_type = any(%s)", normalized_sql)
-        self.assertEqual(params, (300, ["search.read_model.refresh"], 25))
+        self.assertEqual(params, (300, ["workbench_relation.read_model.refresh"], 25))
 
     def test_resolve_superseded_processing_execute_uses_repository_boundary(self) -> None:
         connection = FakeConnection(
             fetch_all_rows=[
                 {
                     "event_id": "00000000-0000-0000-0000-000000000001",
-                    "event_type": "search.read_model.refresh",
+                    "event_type": "workbench_relation.read_model.refresh",
                     "status": "processing",
                     "locked_age_seconds": 600,
                     "covered_by_event_id": "00000000-0000-0000-0000-000000000002",
@@ -543,7 +543,7 @@ class RuntimeQueueOpsTests(unittest.TestCase):
             repository,  # type: ignore[arg-type]
             stale_after_seconds=300,
             limit=25,
-            event_types=["search.read_model.refresh"],
+            event_types=["workbench_relation.read_model.refresh"],
             reason="rabbitmq_stale_processing_superseded",
             execute=True,
         )
@@ -558,7 +558,7 @@ class RuntimeQueueOpsTests(unittest.TestCase):
                     "stale_after_seconds": 300,
                     "limit": 25,
                     "reason": "rabbitmq_stale_processing_superseded",
-                    "event_types": ("search.read_model.refresh",),
+                    "event_types": ("workbench_relation.read_model.refresh",),
                 }
             ],
         )
@@ -582,8 +582,8 @@ class RuntimeQueueOpsTests(unittest.TestCase):
                 {
                     "event_id": "00000000-0000-0000-0000-000000000001",
                     "tenant_id": "default",
-                    "event_type": "search.read_model.refresh",
-                    "scope_type": "search",
+                    "event_type": "workbench_relation.read_model.refresh",
+                    "scope_type": "workbench_relation",
                     "scope_key": "all",
                     "status": "dead_lettered",
                 },
@@ -602,7 +602,7 @@ class RuntimeQueueOpsTests(unittest.TestCase):
         )
 
         self.assertTrue(result["resolved"])
-        self.assertEqual(result["read_model_key"], "search")
+        self.assertEqual(result["read_model_key"], "workbench_relation")
         self.assertEqual(
             repository.resolve_calls,
             [("00000000-0000-0000-0000-000000000001", "readiness_converged_obsolete_invalid_scope")],
@@ -612,14 +612,14 @@ class RuntimeQueueOpsTests(unittest.TestCase):
         dirty_sql, dirty_params = connection.fetch_one_calls[3]
         self.assertIn("read_model.app_status_readiness", " ".join(readiness_sql.lower().split()))
         self.assertIn("scope_key = %s", " ".join(readiness_sql.lower().split()))
-        self.assertEqual(readiness_params, ("default", "search", "search", "all"))
+        self.assertEqual(readiness_params, ("default", "workbench_relation", "workbench_relation", "all"))
         self.assertIn("status = 'done'", " ".join(later_done_sql.lower().split()))
         self.assertEqual(
             later_done_params,
-            ("default", "search.read_model.refresh", "search", "all", "00000000-0000-0000-0000-000000000001", None),
+            ("default", "workbench_relation.read_model.refresh", "workbench_relation", "all", "00000000-0000-0000-0000-000000000001", None),
         )
         self.assertIn("job.read_model_dirty_scopes", " ".join(dirty_sql.lower().split()))
-        self.assertEqual(dirty_params, ("default", "search", "all"))
+        self.assertEqual(dirty_params, ("default", "workbench_relation", "all"))
 
     def test_resolve_dead_letter_refuses_when_dirty_scope_is_active(self) -> None:
         connection = FakeConnection(
@@ -657,8 +657,8 @@ class RuntimeQueueOpsTests(unittest.TestCase):
                 {
                     "event_id": "00000000-0000-0000-0000-000000000001",
                     "tenant_id": "default",
-                    "event_type": "search.read_model.refresh",
-                    "scope_type": "search",
+                    "event_type": "workbench_relation.read_model.refresh",
+                    "scope_type": "workbench_relation",
                     "scope_key": "2026-03",
                     "status": "dead_lettered",
                 },
@@ -687,8 +687,8 @@ class RuntimeQueueOpsTests(unittest.TestCase):
                 {
                     "event_id": "00000000-0000-0000-0000-000000000001",
                     "tenant_id": "default",
-                    "event_type": "search.read_model.refresh",
-                    "scope_type": "search",
+                    "event_type": "workbench_relation.read_model.refresh",
+                    "scope_type": "workbench_relation",
                     "scope_key": "2026-03",
                     "status": "dead_lettered",
                     "updated_at": datetime(2026, 6, 4, 12, 0, tzinfo=timezone.utc),
@@ -726,8 +726,8 @@ class RuntimeQueueOpsTests(unittest.TestCase):
                 {
                     "event_id": "00000000-0000-0000-0000-000000000001",
                     "tenant_id": "default",
-                    "event_type": "search.read_model.refresh",
-                    "scope_type": "search",
+                    "event_type": "workbench.read_model.refresh",
+                    "scope_type": "workbench",
                     "scope_key": "2026-03",
                     "status": "dead_lettered",
                     "updated_at": datetime(2026, 6, 4, 12, 0, tzinfo=timezone.utc),

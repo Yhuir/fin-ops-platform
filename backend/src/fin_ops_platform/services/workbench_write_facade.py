@@ -4,10 +4,11 @@ from dataclasses import dataclass
 from decimal import Decimal
 from http import HTTPStatus
 import logging
+import re
 from time import monotonic
 from typing import Any, Callable
 
-from fin_ops_platform.services.search_service import MONTH_RE as SEARCH_MONTH_RE
+MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
 from fin_ops_platform.services.workbench_idempotency import (
     WorkbenchIdempotencyFailed,
     WorkbenchIdempotencyInProgress,
@@ -2843,7 +2844,7 @@ class WorkbenchWriteFacade:
                 exception_label="还清个人暂借款",
                 category="oa_bank_settlement",
                 comment=note or None,
-                scope_months=[scope for scope in changed_scope_keys if SEARCH_MONTH_RE.match(scope)],
+                scope_months=[scope for scope in changed_scope_keys if MONTH_SCOPE_RE.match(scope)],
             )
             case_id = f"CASE-{str(exception_case['id'])}"
             amount_check = {

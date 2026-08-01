@@ -61,7 +61,7 @@
 
 - PostgreSQL durable queue：`job.outbox_events`、`job.read_model_dirty_scopes`。
 - Runtime monitoring：`RuntimeMonitoringRepository.app_status_runtime_snapshot()`、`health_summary()` 和 `ready_health_summary()`。这些查询必须使用同一 current-effective 口径过滤已被后续 `done` 或 fresh readiness 覆盖的历史 outbox/dirty scope；App Status summary 只读取状态推导实际消费的 readiness 列，不得解码未消费的逐 scope `source_versions`，完整版本证据由 Operations dashboard 的独立 scope-evidence I/O 负责；ready summary 查询失败必须暴露为 runtime unavailable，不能被空 payload 解释成绿色。
-- Readiness：只覆盖 manifest 登记的关联台 active-generation `workbench` 与三个共享 read model（`workbench_relation`、`search`、`no_oa_bank_batch`），事实源是 `read_model.app_status_readiness` 和 current-effective durable queue；其它已退役页面没有 readiness。
+- Readiness：只覆盖 manifest 登记的 `workbench` 与 `workbench_relation`，事实源是 `read_model.app_status_readiness` 和 current-effective durable queue；Search、no-OA projection 与其它已退役页面没有 readiness。
 - Worker registry：`runtime_worker_registry.py`。
 - Domain/read model/job/dependency registries：`app_status_*_registry.py`。
 - 发票 inventory：读取 `app.invoices.source_links`，只统计已进入统一发票池且未删除的 canonical invoice facts；OA 附件 OCR cache 只作为解析缓存，不作为 App Health 发票 inventory 事实源。

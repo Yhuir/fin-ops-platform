@@ -29,7 +29,7 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | 页面读取 | `AppHealthOperationsPage.tsx`、`features/appHealth/api.ts` | 只读 API |
-| Health probe | app health endpoints | 返回 PostgreSQL、OA sync、canonical matching job、关联台 `workbench` 与三个共享 read model 的 readiness/status；不读取其它已退役页面 generation/projection。`/health/ready` 实时读取 durable facts，同一请求内复用 current-effective outbox/dirty-scope 集合，不扫描历史 `done`；完整性能指标由 `/health`、`/metrics` 和 Operations dashboard 负责。 |
+| Health probe | app health endpoints | 返回 PostgreSQL、OA sync、canonical matching job、`workbench` 与 `workbench_relation` 的 readiness/status；不读取 Search、no-OA 或其它已退役 projection。`/health/ready` 实时读取 durable facts，同一请求内复用 current-effective outbox/dirty-scope 集合，不扫描历史 `done`；完整性能指标由 `/health`、`/metrics` 和 Operations dashboard 负责。 |
 | Runtime registry | app status services | 聚合 worker/read model/job/dependency 状态；App Status summary 的 readiness I/O 只读取状态、scope、时间和错误等实际消费列，不读取/解码逐 scope `source_versions`；版本向量只由 Operations dashboard 的 scope-evidence 查询 owner 读取。operations dashboard 默认不等待 RabbitMQ management API，RabbitMQ queue metrics 作为可选 transport 观测以 unknown 降级。每个 read model 额外读取最近 scope 事件与 readiness，区分 `current_scope` 和 `full_history_batch`；该查询按精确 `event_type` 读取最近 5 条并由 `outbox_events_read_model_scope_evidence_idx` 支撑，禁止对每个 model 重复扫描、排序全量 outbox 历史 |
 | Dashboard inventory facts | `app.bank_transactions`、`app.invoices` / `source_links`、`app.import_batches`、`app.oa_*`、`app.oa_sync_runs` | 发票 inventory 按 canonical invoice source link 和 `invoice_type` 统计；OA 上次读取时间优先使用 `app.oa_sync_runs(sync_type='oa_projection')` 的成功 run；导入历史只读 `app.import_batches` 中手工银行流水和发票导入批次 |
 | OA sync runtime facts | `job.outbox_events(event_type='oa.sync')`、`runtime_worker_heartbeats`、`app.oa_sync_runs` | `/api/oa-sync/status` 和 AppHealth `oa_sync` 只读 durable queue、worker 和 projection run facts；不得依赖 HTTP 进程内内存状态 |
@@ -47,7 +47,7 @@
 | Read model scope evidence | App Health read model table | 每个 model 展示最近 scope 的 type/key、current-scope/full-history、expected/projection source versions、lag、queue wait、handler duration、attempt/retry、dedupe reason 与 last error；证据查询失败只降级该观测块并返回 warning，不伪装为 fresh。 |
 | Read model historical diagnostics | App Status details | manifest `fan_out_command` 的 command-only parent readiness 不参与当前 domain/overall severity，输出到 `historical_scopes` 且 `current_effective=false`；同 scope 当前 dirty/outbox failure 和 child shard failure 仍参与 blocked/busy。 |
 | Alert/status | shell/status page | 明确 stale/failed/degraded |
-| Dashboard payload | operations page | 只读聚合 canonical invoice、OA、bank、import、worker 与四个保留 read model runtime；不读取其它已退役页面 projection。`data_inventory.invoice.sources` 固定为 `manual`、`input_invoice`、`output_invoice`、`oa_attachment`；OA completed/in-progress/items 均由 PostgreSQL canonical OA facts 和最近成功 sync run统计。RabbitMQ 管理指标默认以 unknown 输出，不能阻塞健康探针；任一局部 block 失败只降级该 block 并返回当前其它事实。 |
+| Dashboard payload | operations page | 只读聚合 canonical invoice、OA、bank、import、worker 与两个保留 read model runtime；不读取其它已退役 projection。`data_inventory.invoice.sources` 固定为 `manual`、`input_invoice`、`output_invoice`、`oa_attachment`；OA completed/in-progress/items 均由 PostgreSQL canonical OA facts 和最近成功 sync run统计。RabbitMQ 管理指标默认以 unknown 输出，不能阻塞健康探针；任一局部 block 失败只降级该 block 并返回当前其它事实。 |
 | 进项使用审计报告 | admin/API consumer | `overall_status=pass`、`audit_status.integrity=pass` 且 `audit_status.freshness=fresh` 才能证明已登记 invariant 一致；`*_sample_count` 是有上限样本，不是全量问题总数 |
 | 销项收款审计报告 | admin/API consumer | `overall_status=pass`、`audit_status.integrity=pass` 且 `audit_status.freshness=fresh` 才能证明已登记 invariant 一致；`issues_found` 只报告有上限样本，不做自动修复 |
 | 页面业务审计报告 | 页面标题 Audit icon / admin API consumer | 只有 `proof_availability=ready`、非空 `contract_revision`、`audit_status.integrity=pass`、`freshness=fresh`、`queue=drained` 且 `database_snapshot=true` 才显示“此数据库快照内已登记 App 内部合同一致”。relation consumer 页面还要求 registered typed edge equality；非消费者明确 `not_applicable`。任何页面成功都不证明后续写入，也不能证明外部银行/OA/发票/ETC 来源没有遗漏。 |
@@ -76,7 +76,7 @@
 ## 依赖方向
 
 - 允许依赖：status registries, runtime monitoring, app health services。
-- 必须通过：`server.py(page key) -> OperationsAuditService -> PostgresOperationsAuditRepository -> registry-selected finite proof owner`；registry 只含 metadata，不含 SQL/HTTP/refresh。direct 页面审计 canonical facts/relations，四个保留 read model 由各自 proof owner 审计；`tools/audit_*.py` 只允许命令行参数与输出适配。
+- 必须通过：`server.py(page key) -> OperationsAuditService -> PostgresOperationsAuditRepository -> registry-selected finite proof owner`；registry 只含 metadata，不含 SQL/HTTP/refresh。direct 页面审计 canonical facts/relations，两个保留 read model 由各自 proof owner 审计；`tools/audit_*.py` 只允许命令行参数与输出适配。
 - 禁止绕过：系统状态页面直接改业务/read model 表；隐藏 failed/stale worker；用行级 projection `synced_at` 或内存状态覆盖 durable OA sync run/outbox/worker facts。
 
 ## 测试与验证
@@ -105,6 +105,6 @@
   其它 canonical 页面 Audit 只绑定本次 immutable PostgreSQL snapshot；关联台 Audit 同时证明
   active generation 与 canonical source proof 一致。旧绿色结果不能跨 snapshot 复用。
 - 绿色只证明同一 immutable PostgreSQL snapshot 内“已进入 App 的 canonical facts、
-  页面 expected-set、active canonical relations 与关键字段”一致；四个保留 read model
+  页面 expected-set、active canonical relations 与关键字段”一致；两个保留 read model
   的 freshness/queue 由独立 runtime proof 负责。
 - pre-contract import provenance warning 明确声明历史 workflow artifact 未被证明；对应 canonical bank/invoice/ETC 业务事实仍须由业务页面 Audit 阻断证明。

@@ -48,7 +48,7 @@ class AuthGuardTests(unittest.TestCase):
 
             response = app.handle_request(
                 "GET",
-                "/api/search?q=%E5%88%98&scope=all&month=all&limit=10",
+                "/api/workbench?month=2026-07",
                 headers={"Authorization": "Bearer no-access"},
             )
             payload = json.loads(response.body)

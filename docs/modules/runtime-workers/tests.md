@@ -3,8 +3,7 @@
 ## 当前不变量
 
 - `RUNTIME_WORKER_REGISTRY` 是 registration/event/handler/scope lane 的唯一清单。
-- 带 `read_model_key` 的 registration 精确覆盖 `workbench`、`workbench_relation`、`search`、
-  `no_oa_bank_batch`；manifest 声明的 primary/auxiliary instance 集合与 registry 双向相等，retired page worker/event/env 不存在。
+- required instance 精确为 `oa-sync`、`workbench-matching`、`workbench`、`workbench-relation`、`import`、`settings-maintenance`；带 `read_model_key` 的 registration 精确覆盖 `workbench`、`workbench_relation`，并与 manifest 双向相等。retired Search/no-OA/secondary/page worker、event、CLI flag 与 env 不存在。
 - PostgreSQL durable queue 是 job/read-model 状态事实源；RabbitMQ 只负责 wakeup。
 - Worker 不依赖 `Application`、Flask/session/header/HTTP response。
 - import、OA sync、Workbench matching 是领域/integration job，不能登记为页面 read model；

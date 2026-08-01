@@ -27,12 +27,12 @@ def event(**overrides: object) -> RuntimeQueueEvent:
     payload = {
         "event_id": "event-1",
         "tenant_id": "default",
-        "event_type": "search.read_model.refresh",
+        "event_type": "workbench_relation.read_model.refresh",
         "aggregate_type": "read_model",
         "aggregate_id": "all",
-        "scope_type": "search",
+        "scope_type": "workbench_relation",
         "scope_key": "all",
-        "dedupe_key": "search.read_model.refresh:search:all",
+        "dedupe_key": "workbench_relation.read_model.refresh:workbench_relation:all",
         "payload": {"source_version": 3},
         "attempts": 0,
         "status": "pending",
@@ -204,12 +204,12 @@ class RabbitMqRuntimeTests(unittest.TestCase):
         result = publisher.publish(event().to_envelope())
 
         self.assertEqual(result.exchange, "finops.events")
-        self.assertEqual(result.routing_key, "search.read_model.refresh")
+        self.assertEqual(result.routing_key, "workbench_relation.read_model.refresh")
         self.assertEqual(result.message_id, "event-1")
         self.assertTrue(channel.confirmed)
         call = channel.calls[0][1]
         self.assertEqual(call["exchange"], "finops.events")
-        self.assertEqual(call["routing_key"], "search.read_model.refresh")
+        self.assertEqual(call["routing_key"], "workbench_relation.read_model.refresh")
         self.assertEqual(call["mandatory"], True)
         self.assertIn(b'"event_id":"event-1"', call["body"])
 
@@ -242,9 +242,9 @@ class RabbitMqRuntimeTests(unittest.TestCase):
         self.assertEqual(call_names.count("queue_declare"), len(SUPPORTED_EVENT_TYPES) * 2)
         self.assertEqual(call_names.count("queue_bind"), len(SUPPORTED_EVENT_TYPES) * 2)
         declared_queues = [kwargs["queue"] for name, kwargs in channel.calls if name == "queue_declare"]
+        self.assertIn("finops.workbench.read_model.refresh", declared_queues)
         self.assertIn("finops.workbench_relation.read_model.refresh", declared_queues)
-        self.assertIn("finops.search.read_model.refresh", declared_queues)
-        self.assertIn("finops.no_oa_bank_batch.read_model.refresh", declared_queues)
+        self.assertNotIn("finops.no_oa_bank_batch.read_model.refresh", declared_queues)
         self.assertIn("finops.oa.sync.dlq", declared_queues)
         self.assertIn("finops.import.process.requested", declared_queues)
 
@@ -282,7 +282,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["event_types"], list(SUPPORTED_EVENT_TYPES))
-        self.assertEqual(payload["event_routes"]["search.read_model.refresh"]["queue"], "finops.search.read_model.refresh")
+        self.assertEqual(payload["event_routes"]["workbench_relation.read_model.refresh"]["queue"], "finops.workbench_relation.read_model.refresh")
 
     def test_rabbitmq_routes_keep_only_shared_read_model_refresh_events(self) -> None:
         settings = RuntimeQueueSettings.from_env({"RABBITMQ_URL": "amqp://rabbitmq.internal"})
@@ -292,8 +292,6 @@ class RabbitMqRuntimeTests(unittest.TestCase):
         retained_read_model_events = {
             "workbench.read_model.refresh",
             "workbench_relation.read_model.refresh",
-            "search.read_model.refresh",
-            "no_oa_bank_batch.read_model.refresh",
         }
         self.assertEqual(
             {
@@ -312,8 +310,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
             retained_read_model_events,
         )
         self.assertEqual(routes["workbench_relation.read_model.refresh"].queue, "finops.workbench_relation.read_model.refresh")
-        self.assertEqual(routes["search.read_model.refresh"].queue, "finops.search.read_model.refresh")
-        self.assertEqual(routes["no_oa_bank_batch.read_model.refresh"].queue, "finops.no_oa_bank_batch.read_model.refresh")
+        self.assertNotIn("no_oa_bank_batch.read_model.refresh", routes)
 
     def test_consumer_subscribes_to_queues_for_registered_event_types(self) -> None:
         queue = FakeQueue()
@@ -324,13 +321,13 @@ class RabbitMqRuntimeTests(unittest.TestCase):
             queue_repository=queue,
             worker=FakeWorker(),
             worker_id="worker-1",
-            event_types=["search.read_model.refresh", "workbench_relation.read_model.refresh"],
+            event_types=["workbench.read_model.refresh", "workbench_relation.read_model.refresh"],
             lock_timeout_seconds=300,
         )
 
         self.assertEqual(
             consumer._queue_names_for_event_types(),
-            ["finops.search.read_model.refresh", "finops.workbench_relation.read_model.refresh"],
+            ["finops.workbench.read_model.refresh", "finops.workbench_relation.read_model.refresh"],
         )
 
     def test_consumer_claims_postgres_event_before_acknowledging_rabbitmq(self) -> None:
@@ -343,7 +340,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
             queue_repository=queue,
             worker=worker,
             worker_id="worker-1",
-            event_types=["search.read_model.refresh"],
+            event_types=["workbench_relation.read_model.refresh"],
             lock_timeout_seconds=300,
         )
 
@@ -366,7 +363,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
             queue_repository=queue,
             worker=worker,
             worker_id="worker-1",
-            event_types=["search.read_model.refresh"],
+            event_types=["workbench_relation.read_model.refresh"],
             lock_timeout_seconds=300,
         )
 
@@ -386,7 +383,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
             queue_repository=queue,
             worker=FakeWorker(),
             worker_id="worker-1",
-            event_types=["search.read_model.refresh"],
+            event_types=["workbench_relation.read_model.refresh"],
             lock_timeout_seconds=45,
         )
 
@@ -403,7 +400,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
             queue_repository=FakeQueue(),
             worker=worker,
             worker_id="worker-1",
-            event_types=["search.read_model.refresh"],
+            event_types=["workbench_relation.read_model.refresh"],
             lock_timeout_seconds=45,
         )
 
@@ -430,7 +427,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
             queue_repository=FakeQueue(),
             worker=worker,
             worker_id="worker-1",
-            event_types=["search.read_model.refresh"],
+            event_types=["workbench_relation.read_model.refresh"],
             lock_timeout_seconds=45,
         )
 
@@ -475,7 +472,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
             queue_repository=FakeQueue(),
             worker=worker,
             worker_id="worker-1",
-            event_types=["search.read_model.refresh"],
+            event_types=["workbench_relation.read_model.refresh"],
             lock_timeout_seconds=300,
         )
 
@@ -483,7 +480,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
 
         self.assertEqual(worker.heartbeats[0][0], "idle")
         self.assertEqual(worker.heartbeats[0][1]["transport"], "rabbitmq")
-        self.assertEqual(worker.heartbeats[0][1]["event_types"], ["search.read_model.refresh"])
+        self.assertEqual(worker.heartbeats[0][1]["event_types"], ["workbench_relation.read_model.refresh"])
 
     def test_consumer_exits_cleanly_on_keyboard_interrupt(self) -> None:
         worker = FakeWorker()
@@ -496,7 +493,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
             queue_repository=FakeQueue(),
             worker=worker,
             worker_id="worker-1",
-            event_types=["search.read_model.refresh"],
+            event_types=["workbench_relation.read_model.refresh"],
             lock_timeout_seconds=300,
         )
 
@@ -522,7 +519,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
             queue_repository=queue,
             worker=FakeWorker(),
             worker_id="worker-1",
-            event_types=["search.read_model.refresh"],
+            event_types=["workbench_relation.read_model.refresh"],
             lock_timeout_seconds=300,
         )
 

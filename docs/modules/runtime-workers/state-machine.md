@@ -1,7 +1,6 @@
 # Runtime Worker 状态机
 
-> 本文件描述当前 worker runtime。已退役页面 projector/refresh worker 和 Workbench
-> generation worker 不属于当前状态机。
+> 本文件描述当前 worker runtime。已退役页面 projector/refresh worker 不属于当前状态机。
 
 ## Worker Instance 状态
 
@@ -27,7 +26,7 @@ pending -> processing -> done
                     \-> failed/dead-lettered
 ```
 
-- `job.outbox_events` 与 `job.read_model_dirty_scopes` 是关联台 `workbench` 和三个共享 read model refresh 的
+- `job.outbox_events` 与 `job.read_model_dirty_scopes` 是 `workbench` 和 `workbench_relation` refresh 的
   唯一状态事实源。
 - RabbitMQ 只发送 wakeup/envelope；consumer 必须回 PostgreSQL claim、ack 和记录失败。
 - stale/superseded processing 只能通过受控 queue ops 恢复，不能伪造 done/readiness。
@@ -37,11 +36,10 @@ pending -> processing -> done
 
 带 `read_model_key` 的 registration 必须精确覆盖：
 
+- `workbench`
 - `workbench_relation`
-- `search`
-- `no_oa_bank_batch`
 
-三者只接受 `YYYY-MM` 或 `all` scope；`all` 是 fan-out command，不发布可查询 parent
+二者只接受 `YYYY-MM` 或 `all` scope；`all` 是 fan-out command，不发布可查询 parent
 projection。query miss/stale 必须经 `ReadModelRefreshGateway` normalize、validate、
 dedupe 后入队。
 
@@ -73,7 +71,7 @@ dedupe 后入队。
 
 - deploy preflight 先 stop/disable 当前 registry 未登记的旧 worker instance，再确认 retired
   event/dirty scope 没有 `processing`。
-- 门禁失败时保留 import、matching 和四个保留 read-model worker 运行，
+- 门禁失败时保留 import、matching、OA、settings maintenance 和两个保留 read-model worker 运行，
   不进入“全部 worker 已停”的半发布状态。
 - queue retry、dead-letter repair、history prune 和 worker instance convergence 只通过
   `finops-deploy-control`/登记运维工具执行；prune 只删除 `done` 历史。

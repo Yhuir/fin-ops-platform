@@ -84,7 +84,7 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 
 ## 当前缺口和删除条件
 
-- 发票模板变更必须覆盖导入后首次访问进项/销项/待找/search 时的 downstream fresh 状态。
+- 发票模板变更必须覆盖导入后首次访问进项/销项/待找时的 downstream 展示状态。
 - 普通导入不得恢复下游 operation barrier targets；显式运维 refresh 才能返回并等待其明确 targets。
 
 ## Canonical facts ownership

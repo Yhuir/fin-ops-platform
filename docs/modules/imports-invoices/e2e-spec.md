@@ -11,7 +11,7 @@
 | `IMPORT-INVOICE-E2E-005` | confirm 失败 | confirm API/worker 入队失败时，页面必须显示错误，不展示“已确认导入”，不调用 operation barrier 或 Workbench 页面 API，也不把下游 read model 伪装成 fresh。 |
 | `IMPORT-INVOICE-E2E-006` | confirm 排队和下游访问收敛 | 可确认文件提交后必须返回 durable import job；queue 不可用时显示失败且保持 preview。已完成普通 import result 的 `operation_barrier_targets` 必须为空，不得读取或等待 Workbench/其它业务页面；返回进行中 `job` 时只能展示“已开始后台导入”，不能宣称下游页面 fresh。 |
 | `IMPORT-INVOICE-E2E-007` | 权限和系统保护 | `read_export_only` 不能上传、预览或确认；系统 write-safety blocked 时不能执行确认。 |
-| `IMPORT-INVOICE-E2E-008` | downstream access convergence | `invoice_import_confirmed` 只提交 canonical invoice facts/version/audit，产生零页面 dirty/outbox；Workbench、invoice lifecycle、tax、cost、pending、input/output、OA pending 和 search 分别在访问时通过 freshness/status exact-scope 收敛。 |
+| `IMPORT-INVOICE-E2E-008` | downstream access convergence | `invoice_import_confirmed` 只提交 canonical invoice facts/version/audit，产生零页面 dirty/outbox；Workbench/relation 通过保留的 freshness owner 收敛，invoice lifecycle、tax、cost、pending、input/output、OA pending 分别在访问时读取 canonical facts。 |
 | `IMPORT-INVOICE-E2E-009` | 真实基础设施 worker drain | PostgreSQL/RabbitMQ/Redis/systemd import worker、derived lifecycle worker、下游 read model freshness 和 App Status/import progress 必须在 staging 或生产只读 smoke 验证。 |
 
 ## 非目标

@@ -361,7 +361,7 @@ class RuntimeBootstrapTests(unittest.TestCase):
         self.assertIn("BankTransactionEffectiveCategoryProvider", source)
         self.assertNotIn("BankTransactionTagReadFacade", source)
         self.assertNotIn("SearchService()", source)
-        self.assertIn("_runtime_search_service(import_service)", source)
+        self.assertNotIn("_runtime_search_service", source)
 
     def test_standalone_worker_uses_canonical_category_provider_for_retained_workers(self) -> None:
         source = Path("backend/src/fin_ops_platform/app/worker.py").read_text(encoding="utf-8")
@@ -370,10 +370,7 @@ class RuntimeBootstrapTests(unittest.TestCase):
         self.assertNotIn("bank_transaction_tag_read_facade", source)
         self.assertNotIn("CostStatisticsSqlProjectionBuilder(", source)
         self.assertNotIn("SearchPendingSqlProjectionBuilder(", source)
-        self.assertEqual(
-            source.count("effective_category_provider=BankTransactionEffectiveCategoryProvider("),
-            1,
-        )
+        self.assertNotIn("BankTransactionEffectiveCategoryProvider", source)
 
     def test_production_services_do_not_depend_on_retired_bank_tag_facade(self) -> None:
         paths = Path("backend/src/fin_ops_platform").rglob("*.py")

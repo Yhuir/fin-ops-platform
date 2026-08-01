@@ -1,6 +1,6 @@
 # 免 OA 流水批量处理模块
 
-本模块只维护 legacy `/api/no-oa-bank-batches/*`、`no_oa_bank_batch` canonical batch/relation state 与对应 read model 回归合同；当前产品页面 `/bank-flow-rule-batches` 不经过本模块。
+本模块只维护 legacy `/api/no-oa-bank-batches/*` 与 `no_oa_bank_batch` canonical batch/relation state；当前产品页面 `/bank-flow-rule-batches` 不经过本模块。原 no-OA projection、freshness、worker 与 RabbitMQ 链路已退役。
 
 ## 维护入口
 
@@ -14,5 +14,4 @@
 
 - `backend/src/fin_ops_platform/app/routes_no_oa_bank_batches.py`
 - `backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py`
-- `backend/src/fin_ops_platform/services/no_oa_bank_batch_read_model_*.py`
 - `tests/test_no_oa_bank_batch*.py`

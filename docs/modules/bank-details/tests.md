@@ -26,7 +26,7 @@
 | 4. Read model/cache/worker | 适用（负向） | `tests/test_read_model_manifest.py`、`tests/test_runtime_worker_registry.py`、`tests/test_platform_runtime_boundary_guards.py`：旧 runtime 不得回归 |
 | 5. 前端交互 | 适用 | `web/src/test/BankDetailsPage.test.tsx`：loading/empty/error、筛选/分页/排序、账户、分类和写后 refetch |
 | 6. 端到端 | 适用 | `web/e2e/bank-details-*.spec.ts`、`web/e2e/imports-bank-transactions-flow.spec.ts`：导入/规则/分类/导出/canonical 可见 |
-| 7. 既有功能回归 | 适用 | 全量 backend/frontend/E2E；重点保护关联台、批量账务、成本、外部往来、no-OA 和 Search |
+| 7. 既有功能回归 | 适用 | 全量 backend/frontend/E2E；重点保护关联台、批量账务、成本、外部往来和 no-OA |
 
 ## 必须保留的负向断言
 

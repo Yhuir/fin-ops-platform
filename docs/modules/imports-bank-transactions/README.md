@@ -44,7 +44,7 @@
 - 预览使用 `/imports/files/preview`，通过 `file_overrides` 传递 `batch_type=bank_transaction`、`bank_mapping_id`、`bank_name`、`bank_short_name`、`last4`。
 - 确认使用 `/imports/files/confirm`，返回 `202 Accepted` 和 background `job`；RabbitMQ/import worker 开启时还会返回 `import_job` / `event_id`。
 - 旧 JSON 入口 `/imports/preview`、`/imports/confirm` 及其 `general_import.confirm` worker 链已删除；HTTP 只允许走 files/session API，测试造数可继续使用 service-level normalization ports。
-- 后端确认必须防重复、检查 preview stale、持久化原始文件/session/batch/row，并触发 Workbench matching、银行明细、账户余额、Workbench relation、invoice lifecycle、成本统计和 search 等下游刷新。
+- 后端确认必须防重复、检查 preview stale、持久化原始文件/session/batch/row，并触发必要 owner job；Workbench matching、银行明细、账户余额、Workbench relation、invoice lifecycle、成本统计等消费者按各自边界读取。
 
 ## 当前边界
 
@@ -63,7 +63,7 @@
 | `/imports/files/*` contract | `tests/test_import_file_api.py`、`tests/test_import_file_service.py`、`web/src/features/imports/api.ts` |
 | 银行流水 parser/normalizer/identity | `tests/test_import_api.py`、`tests/test_import_service.py`、`tests/test_import_preview_audit.py` |
 | confirm job / import worker | `tests/test_import_job_queue.py`、`runtime_worker_registry.py`、`runtime_worker_handlers.py` |
-| 下游 read model fan-out | `DerivedDataLifecycleService`、Workbench invalidation、bank detail/account balance、cost/search |
+| 下游消费边界 | `DerivedDataLifecycleService`、Workbench invalidation、bank detail/account balance、cost |
 | App Status/App Health | `app_status_domain_registry.py`、`app_status_job_registry.py`、`tests/test_app_status_overview_service.py` |
 | 旧路径删除/隔离 | `tests/test_platform_runtime_boundary_guards.py` | 防止 `server.py` 重新持有 import confirm processor wrapper，防止银行流水前端回到旧 JSON import API |
 

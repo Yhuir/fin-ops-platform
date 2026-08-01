@@ -20,7 +20,7 @@ from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefres
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository  # noqa: E402
 
 
-ACTIVE_READ_MODEL_SCOPE_TYPES = ("workbench", "workbench_relation", "search", "no_oa_bank_batch")
+ACTIVE_READ_MODEL_SCOPE_TYPES = ("workbench", "workbench_relation")
 
 
 def main() -> int:
@@ -28,7 +28,7 @@ def main() -> int:
         description="Maintain active shared read models."
     )
     parser.add_argument("--backfill-oa-children", action="store_true", help="Populate app.oa_application_items and app.oa_attachments from existing OA application payloads.")
-    parser.add_argument("--enqueue-missing", action="store_true", help="Enqueue fan-out refresh commands for the three active shared read models.")
+    parser.add_argument("--enqueue-missing", action="store_true", help="Enqueue refresh commands for the active Workbench read models.")
     parser.add_argument("--run-worker", action="store_true", help="Drain runtime read model worker events in this process.")
     parser.add_argument("--max-iterations", type=int, default=200)
     parser.add_argument("--lock-timeout-seconds", type=int, default=30, help="Reclaim stale processing events older than this many seconds while draining.")
@@ -60,14 +60,8 @@ def main() -> int:
             "--worker-id",
             "runtime-read-model-backfill",
             "--enable-workbench-relation-read-model-refresh",
-            "--enable-search-read-model-refresh",
-            "--enable-no-oa-bank-batch-read-model-refresh",
             "--event-type",
             "workbench_relation.read_model.refresh",
-            "--event-type",
-            "search.read_model.refresh",
-            "--event-type",
-            "no_oa_bank_batch.read_model.refresh",
             "--max-iterations",
             str(max(1, args.max_iterations)),
             "--max-events-per-iteration",

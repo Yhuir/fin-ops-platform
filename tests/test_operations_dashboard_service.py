@@ -186,7 +186,7 @@ class OperationsDashboardServiceTests(unittest.TestCase):
         endpoints = {row["endpoint"]: row for row in payload["request_performance"]["endpoints"]}
         self.assertEqual(endpoints["GET /api/workbench"]["duration_ms"]["p95"], 640.0)
         self.assertEqual(endpoints["GET /api/workbench"]["database_duration_ms"]["p99"], 310.0)
-        self.assertEqual(endpoints["GET /api/search"]["duration_ms"]["p95"], None)
+        self.assertNotIn("GET /api/search", endpoints)
         self.assertEqual(payload["runtime_performance"]["outbox"]["pending_count"], 3)
         self.assertEqual(payload["runtime_performance"]["queues"][0]["status"], "unknown")
         self.assertIn("rabbitmq_metrics_unavailable", payload["freshness"]["warnings"])
@@ -357,8 +357,8 @@ class OperationsDashboardServiceTests(unittest.TestCase):
                 if "from job.runtime_worker_heartbeats" in normalized:
                     return [
                         {
-                            "worker_id": "worker-search-1",
-                            "worker_kind": "search-read-model",
+                            "worker_id": "worker-oa-sync-1",
+                            "worker_kind": "oa-sync",
                             "status": "idle",
                             "heartbeat_lag_seconds": 900.0,
                         }
@@ -369,8 +369,8 @@ class OperationsDashboardServiceTests(unittest.TestCase):
 
         worker_rows = {row["worker_kind"]: row for row in repository.dashboard_worker_metrics()}
 
-        self.assertEqual(worker_rows["search-read-model"]["status"], "stale")
-        self.assertEqual(worker_rows["search-read-model"]["warning_code"], "worker_heartbeat_stale")
+        self.assertEqual(worker_rows["oa-sync"]["status"], "stale")
+        self.assertEqual(worker_rows["oa-sync"]["warning_code"], "worker_heartbeat_stale")
         self.assertEqual(worker_rows["workbench-relation-read-model"]["status"], "missing")
         self.assertEqual(worker_rows["workbench-relation-read-model"]["warning_code"], "required_worker_missing")
 

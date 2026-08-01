@@ -995,7 +995,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             observed[0][0], "https://example.test/fin-ops-api/api/turnover-ledger/relations/REL-1/withdraw"
         )
         self.assertEqual(report["results"][0]["write_slo"]["status"], "pass")
-        self.assertEqual(len(report["results"][0]["write_slo"]["results"]), 5)
+        self.assertEqual(len(report["results"][0]["write_slo"]["results"]), 4)
 
     def test_write_slo_event_sample_uses_effective_floor_when_scenario_limit_is_one(self) -> None:
         scenario = write_operation_e2e_smoke.WriteScenario(

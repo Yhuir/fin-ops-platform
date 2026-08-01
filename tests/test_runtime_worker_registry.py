@@ -49,7 +49,7 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
             self.assertNotIn(instance_name, registrations)
 
         self.assertEqual(registrations["workbench"].event_types, ("workbench.read_model.refresh",))
-        self.assertEqual(registrations["workbench-secondary"].exclude_claim_scope_keys, ("all",))
+        self.assertNotIn("workbench-secondary", registrations)
 
     def test_required_workers_match_deploy_helper_defaults(self) -> None:
         script = ENSURE_WORKERS_SCRIPT.read_text(encoding="utf-8")
@@ -106,12 +106,10 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
     def test_workbench_page_and_relation_distribution_workers_are_retained(self) -> None:
         registrations = registration_by_instance_name()
         workbench = registrations["workbench"]
-        workbench_secondary = registrations["workbench-secondary"]
         workbench_relation = registrations["workbench-relation"]
 
         self.assertEqual(workbench.event_types, ("workbench.read_model.refresh",))
         self.assertEqual(workbench.worker_kind, "workbench-read-model")
-        self.assertEqual(workbench_secondary.exclude_claim_scope_keys, ("all",))
         self.assertEqual(workbench_relation.event_types, ("workbench_relation.read_model.refresh",))
         self.assertEqual(workbench_relation.worker_kind, "workbench-relation-read-model")
         self.assertEqual(
@@ -123,23 +121,31 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
             ),
         )
 
-    def test_hot_read_model_workers_have_dedicated_parallel_consumers(self) -> None:
+    def test_retired_search_and_no_oa_derived_workers_are_absent(self) -> None:
         registrations = registration_by_instance_name()
-
-        expectations = {
-            "search": ("search-read-model", ("search.read_model.refresh",)),
-            "search-secondary": ("search-secondary-read-model", ("search.read_model.refresh",)),
-            "search-tertiary": ("search-tertiary-read-model", ("search.read_model.refresh",)),
-        }
-        for instance_name, (worker_kind, event_types) in expectations.items():
-            with self.subTest(instance_name=instance_name):
-                registration = registrations[instance_name]
-                self.assertTrue(registration.required)
-                self.assertTrue(registration.rabbitmq_eligible)
-                self.assertEqual(registration.worker_kind, worker_kind)
-                self.assertEqual(registration.event_types, event_types)
-
-        self.assertEqual(APP_STATUS_READ_MODEL_REGISTRY["search"].worker_instance, "search")
+        self.assertEqual(
+            tuple(registrations),
+            (
+                "oa-sync",
+                "workbench-matching",
+                "workbench",
+                "workbench-relation",
+                "import",
+                "settings-maintenance",
+            ),
+        )
+        for instance_name in (
+            "workbench-secondary",
+            "search",
+            "search-secondary",
+            "search-tertiary",
+            "no-oa-bank-batch",
+        ):
+            self.assertNotIn(instance_name, registrations)
+        self.assertNotIn("search", APP_STATUS_READ_MODEL_REGISTRY)
+        self.assertNotIn("no_oa_bank_batch", APP_STATUS_READ_MODEL_REGISTRY)
+        self.assertNotIn("search.read_model.refresh", rabbitmq_dispatch_event_types())
+        self.assertNotIn("no_oa_bank_batch.read_model.refresh", rabbitmq_dispatch_event_types())
         self.assertNotIn("pending_invoice", APP_STATUS_READ_MODEL_REGISTRY)
         self.assertNotIn("tax_offset", APP_STATUS_READ_MODEL_REGISTRY)
         self.assertNotIn("bank_flow_rule_batch", APP_STATUS_READ_MODEL_REGISTRY)
@@ -202,6 +208,8 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
         for retired_flag in (
             "--enable-bank-account-balance-read-model-refresh",
             "--enable-bank-flow-rule-batch-canonical-draft-refresh",
+            "--enable-search-read-model-refresh",
+            "--enable-no-oa-bank-batch-read-model-refresh",
         ):
             with self.subTest(retired_flag=retired_flag), self.assertRaises(SystemExit):
                 worker_app.build_parser().parse_args([retired_flag])
@@ -209,11 +217,6 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
     def test_turnover_ledger_worker_registration_is_removed(self) -> None:
         self.assertNotIn("turnover-ledger", registration_by_instance_name())
         self.assertNotIn("turnover_ledger.read_model.refresh", read_model_event_types())
-
-    def test_worker_kind_inference_uses_registry_for_no_oa_bank_batch_worker(self) -> None:
-        args = worker_app.build_parser().parse_args(["--enable-no-oa-bank-batch-read-model-refresh"])
-
-        self.assertEqual(worker_app._infer_worker_kind(args), "no-oa-bank-batch-read-model")
 
     def test_worker_registration_check_outputs_registry_derived_configuration(self) -> None:
         stdout = io.StringIO()

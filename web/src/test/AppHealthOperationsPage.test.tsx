@@ -299,7 +299,7 @@ describe("AppHealthOperationsPage", () => {
           window: { type: "process_rolling_window", sample_limit_per_endpoint: 512, reset_on_restart: true },
           endpoints: [
             {
-              endpoint: "GET /api/search",
+              endpoint: "GET /api/workbench",
               sample_count: 0,
               last_status_code: null,
               duration_ms: { p50: null, p95: null, p99: null },

@@ -42,10 +42,6 @@ class RecordingStateStore:
     def save_no_oa_bank_batches(self, *_args: object, **_kwargs: object) -> None:
         raise AssertionError("bank-flow refresh must not call no-OA snapshot persistence")
 
-    def save_no_oa_bank_batches_scope(self, *_args: object, **_kwargs: object) -> None:
-        raise AssertionError("bank-flow refresh must not call no-OA scoped persistence")
-
-
 class RecordingPairSnapshotPort:
     def __init__(self) -> None:
         self.snapshot_calls = 0
@@ -659,7 +655,6 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
             pair_service
         )
         service._state_store = RejectingStateStore()
-        service._search_cache_clearer = lambda: None
         service._bank_transaction_category_affected_months_provider = lambda _row_ids: []
         service.bank_transaction_rows_by_ids = lambda _row_ids: list(rows)  # type: ignore[method-assign]
         service.effective_categories_for_rows = lambda _rows: dict(categories)  # type: ignore[method-assign]
@@ -963,7 +958,6 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         state_store = RecordingStateStore()
         service = object.__new__(BankFlowRuleBatchApplicationService)
         service._state_store = state_store
-        service._search_cache_clearer = lambda: None
         service._pair_relation_snapshot_port = RecordingPairSnapshotPort()
         service._bank_batch_public_snapshot = lambda: {"batches": {"batch-1": {"batch_id": "batch-1"}}}
 
@@ -988,7 +982,6 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
     def test_persist_mutation_fails_fast_without_bank_flow_boundary(self) -> None:
         service = object.__new__(BankFlowRuleBatchApplicationService)
         service._state_store = object()
-        service._search_cache_clearer = lambda: None
         service._pair_relation_snapshot_port = RecordingPairSnapshotPort()
         service._bank_batch_public_snapshot = lambda: {"batches": {}}
 
@@ -1969,7 +1962,6 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         service._bank_batch_service = batch_service
         service._pair_relation_snapshot_port = BankBatchPairRelationSnapshotPort(pair_service)
         service._state_store = GuardRejectingStateStore()
-        service._search_cache_clearer = lambda: None
         service._bank_transaction_category_affected_months_provider = lambda _row_ids: []
         service.resolve_labels = lambda batches, **_kwargs: batches  # type: ignore[method-assign]
 

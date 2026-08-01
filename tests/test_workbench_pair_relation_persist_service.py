@@ -26,20 +26,17 @@ class StateStoreStub:
 
 
 class WorkbenchPairRelationPersistServiceTests(unittest.TestCase):
-    def test_persist_clears_cache_and_saves_changed_case_snapshot(self) -> None:
+    def test_persist_saves_changed_case_snapshot(self) -> None:
         state_store = StateStoreStub()
-        clear_calls: list[str] = []
         service = WorkbenchPairRelationPersistService(
             pair_relation_service=self._pair_relation_service(),
             state_store=state_store,
-            clear_search_cache=lambda: clear_calls.append("clear"),
             emit_action_timing=lambda **_: None,
             duration_ms=lambda _: 0,
         )
 
         service.persist(changed_case_ids=["CASE-001"])
 
-        self.assertEqual(clear_calls, ["clear"])
         self.assertEqual(state_store.saved[0]["changed_case_ids"], ["CASE-001"])
         self.assertEqual(
             sorted(state_store.saved[0]["snapshot"]["pair_relations"].keys()),
@@ -52,7 +49,6 @@ class WorkbenchPairRelationPersistServiceTests(unittest.TestCase):
         service = WorkbenchPairRelationPersistService(
             pair_relation_service=self._pair_relation_service(),
             state_store=state_store,
-            clear_search_cache=lambda: None,
             emit_action_timing=lambda **kwargs: timing_calls.append(kwargs),
             duration_ms=lambda started_at: int(20 - started_at),
             monotonic_clock=lambda: 7.0,

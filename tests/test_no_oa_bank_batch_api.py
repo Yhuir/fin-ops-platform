@@ -168,13 +168,11 @@ class NoOaBankBatchApiTests(unittest.TestCase):
             }
 
         repository = SimpleNamespace(
-            list_no_oa_bank_batch_rows=lambda filters: batch_service.list_batches(filters),
             list_bank_flow_rule_batch_rows=lambda filters: batch_service.list_batches(filters),
             read_page=read_bank_flow_rule_batch_page,
             read_batch=lambda batch_id: batch_service.get_batch(batch_id),
             read_submitted_batches=lambda: batch_service.list_batches({"bucket": "submitted"}),
         )
-        app._no_oa_bank_batch_sql_read_repository = repository
         app._bank_flow_rule_batch_sql_read_repository = repository
         app._bank_flow_rule_batch_canonical_query_repository = repository
 

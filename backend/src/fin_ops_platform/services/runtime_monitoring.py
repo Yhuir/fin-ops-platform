@@ -2600,22 +2600,6 @@ def _app_status_readiness_backfill_fact(connection: Any, read_model_key: str, *,
             """,
             params,
         )
-    row_spec = APP_STATUS_READINESS_BACKFILL_ROW_TABLES.get(read_model_key)
-    if row_spec:
-        return connection.fetch_one(
-            f"""
-            select
-                'all' as scope_key,
-                {row_spec["status_expr"]} as status,
-                count(*)::integer as row_count,
-                {row_spec["schema_expr"]} as schema_version,
-                coalesce((array_agg(source_versions order by generated_at desc))[1], '{{}}'::jsonb) as source_versions,
-                max(generated_at)::text as generated_at,
-                '' as last_error
-            from {row_spec["table"]}
-            having count(*) >= 0 and max(generated_at) is not null
-            """
-        )
     return None
 
 
@@ -2626,19 +2610,5 @@ APP_STATUS_READINESS_BACKFILL_SCOPE_TABLES = {
         "status_expr": "coalesce(nullif(cache_status, ''), 'fresh')",
         "schema_expr": "''",
         "last_error_expr": "''",
-    },
-}
-
-
-APP_STATUS_READINESS_BACKFILL_ROW_TABLES = {
-    "search": {
-        "table": "read_model.search_index_rows",
-        "status_expr": "coalesce((array_agg(coalesce(nullif(cache_status, ''), 'fresh') order by generated_at desc))[1], 'fresh')",
-        "schema_expr": "''",
-    },
-    "no_oa_bank_batch": {
-        "table": "read_model.no_oa_bank_batch_rows",
-        "status_expr": "coalesce((array_agg(coalesce(nullif(cache_status, ''), 'fresh') order by generated_at desc))[1], 'fresh')",
-        "schema_expr": "''",
     },
 }

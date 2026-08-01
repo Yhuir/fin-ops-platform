@@ -1875,3 +1875,9 @@
 - 生产 `search:2026-06` refresh 证明 worker 虽配置 90 秒 statement budget，但复用的 Workbench canonical repository 在每个 snapshot 内固定覆盖为 2 秒，导致后台 rebuild 重试直至 dead-letter。
 - 修复只让 `list_canonical_search_rows(...)` 显式使用现有 90 秒 worker budget；Workbench 页面 initial/groups/detail 等热路径继续使用 2 秒 fail-fast。未新增表、索引、worker、queue、cache、fallback 或 API 字段。
 - 定向测试锁定后台与页面超时边界不能再次互相污染；生产通过正式 refresh gateway 重建 exact `search:2026-06` scope，不直接改 readiness 或 read model rows。
+
+## 2026-08-01 - Phase 39 两项 manifest 收敛
+
+- `READ_MODEL_MANIFEST`、scope policy、App Status registry、maintenance backfill 与 worker registry 精确对齐为 `workbench`、`workbench_relation`。
+- Search API/index/projection/runtime 与 no-OA projection/runtime 完整删除；历史 migration/table 保留用于数据库兼容和审计，但不再有 reader、writer、event、readiness 或 worker 入口。
+- RabbitMQ 仅作为 active event 的 transport；PostgreSQL durable queue 仍是两个保留 read model 的状态事实源，Workbench active-generation 原子发布合同不变。

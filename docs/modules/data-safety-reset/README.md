@@ -38,9 +38,9 @@
 
 | 动作 | 主要删除/清理 | 必须保留或保护 | 主要 fan-out |
 | --- | --- | --- | --- |
-| `reset_bank_transactions` | 银行流水导入、银行相关 workbench/matching/read model 状态、银行导入文件 | 发票事实、`form_data_db.form_data`、app settings、import metadata | 银行明细、关联台、往来款、成本、search、App Status |
+| `reset_bank_transactions` | 银行流水导入、银行相关 workbench/matching/read model 状态、银行导入文件 | 发票事实、`form_data_db.form_data`、app settings、import metadata | 银行明细、关联台、往来款、成本、App Status |
 | `reset_invoices` | 进/销项发票导入、税金认证记录、发票相关 workbench/matching/read model 状态、发票导入文件、指向被删除发票的 active ETC batch invoice links | 银行流水事实、OA 源数据、ETC 源 metadata/附件审计、app settings、import metadata | 待找发票、税金、进项/销项/OA 待付款、成本、关联台、ETC summary link backfill、App Status |
-| `reset_oa_and_rebuild` | 清理 OA 衍生 workbench override/relation/read model，并通过 durable lifecycle 登记按保留策略后台重建 OA 投影和匹配 | 纯银行+发票关系、OA 附件发票解析缓存、受保护目标 | OA 待付款、进项使用、关联台、ETC、成本、search、App Status；API/job 返回 `rebuild_status=pending`，最终 fresh 由下游证明 |
+| `reset_oa_and_rebuild` | 清理 OA 衍生 workbench override/relation/read model，并通过 durable lifecycle 登记按保留策略后台重建 OA 投影和匹配 | 纯银行+发票关系、OA 附件发票解析缓存、受保护目标 | OA 待付款、进项使用、关联台、ETC、成本、App Status；API/job 返回 `rebuild_status=pending`，最终状态由下游证明 |
 
 受保护目标由 `SettingsDataResetService.protected_targets()` 统一暴露，目前包括：
 

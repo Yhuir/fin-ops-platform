@@ -69,8 +69,8 @@ class RabbitMqStagingPreflightTests(unittest.TestCase):
         dispatcher_command = runner.calls[3][0]
         self.assertIn("--event-type", dispatcher_command)
         self.assertIn("workbench_relation.read_model.refresh", dispatcher_command)
-        self.assertIn("search.read_model.refresh", dispatcher_command)
-        self.assertIn("no_oa_bank_batch.read_model.refresh", dispatcher_command)
+        self.assertNotIn("search.read_model.refresh", dispatcher_command)
+        self.assertNotIn("no_oa_bank_batch.read_model.refresh", dispatcher_command)
         self.assertNotIn("bank_flow_rule_batch.read_model.refresh", dispatcher_command)
         self.assertNotIn("invoice_lifecycle.read_model.refresh", dispatcher_command)
         self.assertNotIn("input_invoice_usage.read_model.refresh", dispatcher_command)

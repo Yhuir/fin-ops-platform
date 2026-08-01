@@ -9,7 +9,7 @@
 | 1. Business core unit tests | 后续代码变更适用 | owner 模块业务状态机、金额、匹配、幂等、权限或冲突规则变化时必须覆盖。 |
 | 2. Service-layer tests | 后续代码变更适用 | command service、repository、UoW、dirty scope、audit、rollback 或 partial failure 变化时必须覆盖。 |
 | 3. API contract tests | 后续 API 变更适用 | 写 API 或读 API response shape、freshness target、error/status 字段变化时必须覆盖。 |
-| 4. Read model/cache/background job tests | 后续影响 read model 适用 | canonical write 影响 list、summary、search、workbench、ledger、tax 等 read model 时必须覆盖 invalidation、fresh/stale/refreshing。 |
+| 4. Read model/cache/background job tests | 后续影响 read model 适用 | canonical write 影响保留的 workbench/relation read model 时必须覆盖 invalidation、fresh/stale/refreshing；list/summary/ledger/tax 等 direct-canonical 查询覆盖访问一致性。 |
 | 5. Frontend component/interaction tests | 后续页面变更适用 | 页面读写 canonical facts 或等待 operation barrier 的 UI 行为变化时必须覆盖。 |
 | 6. E2E business-flow integration tests | 跨模块重构适用 | import -> confirm -> worker -> page、relation confirm -> downstream pages 等跨模块链路变化时必须覆盖至少一条关键路径。 |
 | 7. Existing feature regression tests | 总是评估 | owner 收口可能影响旧页面、旧 API、旧 read model、旧导出、旧权限和旧 worker。 |

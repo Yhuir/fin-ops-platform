@@ -34,8 +34,7 @@
 | `input-invoice-usage` | 进项发票使用情况 | 页面模块 | `/input-invoice-usage` | `../../modules/input-invoice-usage/README.md` + `../../modules/input-invoice-usage/boundary-io.md` | 模块 README 代码入口 + boundary-io + direct canonical read contract |
 | `oa-pending-payments` | OA待付款核对 | 页面模块 | `/oa-pending-payments` | `../../modules/oa-pending-payments/README.md` + `../../modules/oa-pending-payments/boundary-io.md` | 模块 README 代码入口 + boundary-io + direct canonical read contract |
 | `output-invoice-collections` | 销项发票收款情况 | 页面模块 | `/output-invoice-collections` | `../../modules/output-invoice-collections/README.md` + `../../modules/output-invoice-collections/boundary-io.md` | 模块 README 代码入口 + boundary-io + direct canonical read contract |
-| `no-oa-bank-batches` | 免OA流水批量处理 | legacy API/read-model 模块 | `/api/no-oa-bank-batches/*` | `../../modules/no-oa-bank-batches/README.md` + `../../modules/no-oa-bank-batches/boundary-io.md` | 模块 README 代码入口 + boundary-io + no-OA bank batch legacy read model contract |
-| `search` | 搜索索引 | 资源/API 模块 | `/api/search` | `../../modules/search/README.md` + `../../modules/search/boundary-io.md` | 模块 README 代码入口 + boundary-io + search read model contract |
+| `no-oa-bank-batches` | 免OA流水批量处理 | legacy canonical API 模块 | `/api/no-oa-bank-batches/*` | `../../modules/no-oa-bank-batches/README.md` + `../../modules/no-oa-bank-batches/boundary-io.md` | 模块 README 代码入口 + boundary-io；请求内 canonical batch query，无 read model runtime |
 | `batch-accounting` | 批量账务 | 页面模块 | `/batch-accounting` | `../../modules/batch-accounting/README.md` + `../../modules/batch-accounting/boundary-io.md` | 模块 README 代码入口 + boundary-io + direct canonical read contract |
 | `turnover-ledger` | 外部往来款管理 | 页面模块 | `/turnover-ledger` | `../../modules/turnover-ledger/README.md` + `../../modules/turnover-ledger/boundary-io.md` | 模块 README 代码入口 + boundary-io + direct canonical read contract |
 | `etc-tickets` | ETC票据管理 | 页面模块 | `/etc-tickets` | `../../modules/etc-tickets/README.md` + `../../modules/etc-tickets/boundary-io.md` | 模块 README 代码入口 + boundary-io + direct canonical read contract |
@@ -58,7 +57,7 @@
 
 - 页面模块已经统一登记在 `docs/modules/README.md`，每个模块都有维护入口。
 - PostgreSQL 业务唯一真相已经登记为 `canonical-facts` 资源治理模块；它维护 owner matrix 和全局写入/读取规则，但不替代各业务 owner 模块。
-- Read model 当前以 `backend/src/fin_ops_platform/services/read_model_manifest.py` 为可执行合同，精确覆盖 `workbench`、`workbench_relation`、`search`、`no_oa_bank_batch` 四个 runtime read model，详见 `read-model-contracts.md`。
+- Read model 当前以 `backend/src/fin_ops_platform/services/read_model_manifest.py` 为可执行合同，精确覆盖 `workbench`、`workbench_relation` 两个 runtime read model，详见 `read-model-contracts.md`。
 - Worker 当前以 `backend/src/fin_ops_platform/services/runtime_worker_registry.py` 为可执行合同，read model worker/event 与 manifest 可以互相核对。
 - HTTP runtime 由 Gunicorn + `WsgiHttpAdapter` 提供有界并发、请求体、request ID、access log 和 graceful shutdown；`application_factory.py` 负责构造依赖，`server.py` 保留路由/HTTP 映射，后台任务只允许由 worker/显式 maintenance 入口启动。
 - 前端页面已按 `web/src/pages/` 与 `web/src/features/<feature>/` 组织；修改页面时必须同步核对后端 API、该页面的 direct canonical 或已登记 read-model 读取合同，以及模块测试文档。

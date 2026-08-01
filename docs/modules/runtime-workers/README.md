@@ -23,7 +23,7 @@ Worker 不得依赖 Application、app.server、app.auth 或 HTTP response。Work
 
 `settings-maintenance` 是 required、PostgreSQL-only 的非 read-model worker。它独占 `settings.data_reset.requested`，执行 destructive reset、显式 runtime recovery 和重置后的 read-model/matching enqueue；API 进程只创建 job/outbox，不运行后台 executor。重置完成后 worker 通过受控 Gunicorn PID file 请求 graceful reload，使 API 进程内 command/cache state 不继续保留 reset 前快照。
 
-带 `read_model_key` 的 registration 只覆盖四个 runtime read model：`workbench`（`workbench`、`workbench-secondary`）、`workbench_relation`（`workbench-relation`）、`search`（`search`、`search-secondary`、`search-tertiary`）和 `no_oa_bank_batch`（`no-oa-bank-batch`）。完整 instance 集合必须与 `READ_MODEL_MANIFEST` 双向一致。
+当前 registry 精确包含 6 个 required instance：`oa-sync`、`workbench-matching`、`workbench`、`workbench-relation`、`import`、`settings-maintenance`。其中只有 `workbench` 与 `workbench-relation` 带 `read_model_key`，并与 `READ_MODEL_MANIFEST` 双向一致。Search、no-OA projection 与 `workbench-secondary` 已从代码、CLI、env、dispatcher 和部署 manifest 退役。
 
 同一 read model 的 parent/aggregate 依赖必须避免抢占真实 shard work。`*_read_model_not_fresh parent_scope_keys=...` 可以补投 same-scope parent shard；当前 event 必须使用 retry 级退避，让 `YYYY-MM` shard 或其他依赖先完成，不能用亚秒级 retry 反复重发 `all` 聚合事件。
 

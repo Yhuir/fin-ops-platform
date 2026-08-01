@@ -9,7 +9,6 @@ from tests.app_test_support import (
 )
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.no_oa_bank_batch_service import NoOaBankBatchService
-from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 
 
 def flatten_groups(groups: list[dict[str, object]], row_type: str) -> list[dict[str, object]]:
@@ -87,40 +86,6 @@ class PairSnapshotRelationFacade:
 class FailingConfirmLinkUow:
     def run(self, *_args: object, **_kwargs: object) -> dict[str, object]:
         raise AssertionError("internal transfer confirm-link must be submitted through no-OA, not workbench UoW")
-
-
-class NoOaReadModelConnection:
-    def __init__(
-        self,
-        *,
-        readiness_status: str | None = "fresh",
-        dirty_status: str | None = None,
-        readiness_by_scope: dict[str, str | None] | None = None,
-        dirty_by_scope: dict[str, str | None] | None = None,
-    ) -> None:
-        self.readiness_status = readiness_status
-        self.dirty_status = dirty_status
-        self.readiness_by_scope = dict(readiness_by_scope or {})
-        self.dirty_by_scope = dict(dirty_by_scope or {})
-        self.fetch_all_calls: list[tuple[str, tuple]] = []
-        self.fetch_one_calls: list[tuple[str, tuple]] = []
-
-    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
-        self.fetch_all_calls.append((" ".join(sql.lower().split()), params))
-        return []
-
-    def fetch_one(self, sql: str, params: tuple = ()) -> dict[str, object] | None:
-        normalized = " ".join(sql.lower().split())
-        self.fetch_one_calls.append((normalized, params))
-        if "from job.read_model_dirty_scopes" in normalized:
-            scope_key = str(params[1]) if len(params) > 1 else "all"
-            status = self.dirty_by_scope.get(scope_key, self.dirty_status)
-            return {"status": status} if status else None
-        if "from read_model.app_status_readiness" in normalized:
-            scope_key = str(params[2]) if len(params) > 2 else "all"
-            status = self.readiness_by_scope.get(scope_key, self.readiness_status)
-            return {"status": status} if status else None
-        return None
 
 
 class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
@@ -443,23 +408,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         unsubmitted = app._no_oa_bank_batch_service.list_batches({"bucket": "unsubmitted"})
         self.assertFalse(any(set(batch.get("row_ids") or []).intersection(row_ids) for batch in unsubmitted))
 
-    def test_no_oa_bank_batches_do_not_return_stale_sql_source_versions_as_fresh(self) -> None:
-        class StaleNoOaReadRepository:
-            def list_no_oa_bank_batch_rows(self, _filters: dict[str, object]) -> list[dict[str, object]]:
-                return [
-                    {
-                        "batch_id": "stale_sql_batch",
-                        "batch_type": "salary",
-                        "status": "submitted",
-                        "status_bucket": "submitted",
-                        "scope_month": "2026-02",
-                        "row_ids": ["stale-bank-row"],
-                        "row_count": 1,
-                        "total_amount": "1.00",
-                        "source_versions": {"bank_auto_tag_rules_version": 0},
-                    }
-                ]
-
+    def test_no_oa_list_api_reads_canonical_rows_without_read_model_lifecycle(self) -> None:
         app = build_application()
         preview = app._import_service.preview_import(
             batch_type=BatchType.BANK_TRANSACTION,
@@ -481,131 +430,21 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             ],
         )
         app._import_service.confirm_import(preview.id)
-        version = json.loads(app.handle_request("GET", "/api/no-oa-bank-batches/tag-selection").body)["version"]
-        app.handle_request(
-            "PUT",
-            "/api/no-oa-bank-batches/tag-selection",
-            body=json.dumps({"expected_version": version, "selected_tag_codes": ["salary"]}),
-            headers={"Content-Type": "application/json"},
+        row_id = app._import_service.list_transactions()[0].id
+        app._bank_transaction_category_service.apply_updates(
+            [{"transaction_id": row_id, "category_code": "salary"}],
+            actor="tester",
         )
-        app._no_oa_bank_batch_sql_read_repository = StaleNoOaReadRepository()
+        self._enable_no_oa_tags(app, ["salary"])
 
-        response = app.handle_request("GET", "/api/no-oa-bank-batches?bucket=unsubmitted")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["read_model_status"], "stale")
-        self.assertIn("bank_auto_tag_rules_version_mismatch", payload["read_model_stale_reasons"])
-        self.assertEqual(payload["batches"][0]["batch_id"], "stale_sql_batch")
-
-    def test_no_oa_bank_batches_missing_sql_read_model_does_not_refresh_in_get_path(self) -> None:
-        class MissingNoOaReadRepository:
-            def __init__(self) -> None:
-                self.calls: list[dict[str, object]] = []
-
-            def list_no_oa_bank_batch_rows(self, filters: dict[str, object]) -> None:
-                self.calls.append(dict(filters))
-                return None
-
-        class QueueRepository:
-            def __init__(self) -> None:
-                self.enqueued: list[dict[str, object]] = []
-
-            def enqueue_read_model_refresh(self, **kwargs):
-                self.enqueued.append(dict(kwargs))
-                return {"event_id": "queued"}
-
-        app = build_application()
-        app._no_oa_bank_batch_sql_read_repository = MissingNoOaReadRepository()
-        app._runtime_repositories = type(
-            "RuntimeRepositories",
-            (),
-            {"queue_repository": QueueRepository()},
-        )()
-        original_build_batches = app._no_oa_bank_batch_service.build_batches
-
-        def fail_if_refreshed(*_args, **_kwargs):
-            raise AssertionError("GET /api/no-oa-bank-batches must not rebuild no-OA batches synchronously")
-
-        app._no_oa_bank_batch_service.build_batches = fail_if_refreshed
-        try:
-            response = app.handle_request("GET", "/api/no-oa-bank-batches?bucket=unsubmitted")
-        finally:
-            app._no_oa_bank_batch_service.build_batches = original_build_batches
+        response = app.handle_request("GET", "/api/no-oa-bank-batches?month=2026-02&bucket=unsubmitted")
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(payload["read_model_status"], "missing")
-        self.assertEqual(payload["batches"], [])
-        self.assertTrue(payload["refresh_enqueued"])
-        self.assertEqual(
-            app._runtime_repositories.queue_repository.enqueued,
-            [
-                {
-                    "scope_type": "no_oa_bank_batch",
-                    "scope_key": "all",
-                    "reason": "api_no_oa_read_model_missing",
-                }
-            ],
-        )
-
-    def test_no_oa_repository_returns_fresh_empty_rows_when_readiness_is_fresh(self) -> None:
-        connection = NoOaReadModelConnection(readiness_status="fresh")
-        repository = PostgresReadModelRepository(connection)
-
-        rows = repository.list_no_oa_bank_batch_rows({"month": "2026-06", "bucket": "unsubmitted"})
-
-        self.assertEqual(rows, [])
-        executed_sql = " ".join(sql for sql, _params in connection.fetch_all_calls + connection.fetch_one_calls)
-        self.assertIn("read_model.app_status_readiness", executed_sql)
-        self.assertIn("job.read_model_dirty_scopes", executed_sql)
-
-    def test_no_oa_repository_keeps_missing_when_readiness_is_absent_or_refreshing(self) -> None:
-        missing_repository = PostgresReadModelRepository(NoOaReadModelConnection(readiness_status=None))
-        refreshing_repository = PostgresReadModelRepository(
-            NoOaReadModelConnection(readiness_status="fresh", dirty_status="pending")
-        )
-
-        self.assertIsNone(missing_repository.list_no_oa_bank_batch_rows({"month": "2026-06"}))
-        self.assertIsNone(refreshing_repository.list_no_oa_bank_batch_rows({"month": "2026-06"}))
-
-    def test_no_oa_repository_does_not_treat_all_fresh_as_month_fresh_when_month_is_dirty(self) -> None:
-        connection = NoOaReadModelConnection(
-            readiness_by_scope={"all": "fresh", "2026-06": "fresh"},
-            dirty_by_scope={"2026-06": "pending"},
-        )
-        repository = PostgresReadModelRepository(connection)
-
-        rows = repository.list_no_oa_bank_batch_rows({"month": "2026-06", "bucket": "unsubmitted"})
-
-        self.assertIsNone(rows)
-        self.assertIn(
-            ("no_oa_bank_batch", "2026-06"),
-            [
-                tuple(params)
-                for sql, params in connection.fetch_one_calls
-                if "from job.read_model_dirty_scopes" in sql
-            ],
-        )
-
-    def test_no_oa_repository_accepts_month_fresh_without_all_readiness_record(self) -> None:
-        connection = NoOaReadModelConnection(
-            readiness_status=None,
-            readiness_by_scope={"2026-06": "fresh"},
-        )
-        repository = PostgresReadModelRepository(connection)
-
-        rows = repository.list_no_oa_bank_batch_rows({"month": "2026-06", "bucket": "unsubmitted"})
-
-        self.assertEqual(rows, [])
-        self.assertIn(
-            ("no_oa_bank_batch", "no_oa_bank_batch", "2026-06"),
-            [
-                tuple(params)
-                for sql, params in connection.fetch_one_calls
-                if "from read_model.app_status_readiness" in sql
-            ],
-        )
+        self.assertEqual(payload["summary"]["total"], 1)
+        self.assertEqual(payload["batches"][0]["row_ids"], [row_id])
+        self.assertNotIn("read_model_status", payload)
+        self.assertNotIn("refresh_enqueued", payload)
 
     def test_no_oa_bank_batch_detail_does_not_refresh_all_batches(self) -> None:
         app = build_application()

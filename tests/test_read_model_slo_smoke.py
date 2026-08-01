@@ -20,7 +20,7 @@ class FakeConnection:
                 "row_count": 10,
                 "updated_at": "2026-07-27 10:00:00+08",
             }
-            for key in ("workbench", "workbench_relation", "search", "no_oa_bank_batch")
+            for key in ("workbench", "workbench_relation")
         ]
         self.started_at = datetime(2026, 7, 27, 2, 0, tzinfo=timezone.utc)
         self.finished_at = self.started_at + timedelta(milliseconds=350)
@@ -46,8 +46,8 @@ class FakeConnection:
             return {
                 "event_id": params[0],
                 "tenant_id": "default",
-                "event_type": "search.read_model.refresh",
-                "scope_type": "search",
+                "event_type": "workbench_relation.read_model.refresh",
+                "scope_type": "workbench_relation",
                 "scope_key": "2026-01",
                 "status": "done",
                 "source_version": 3,
@@ -99,7 +99,7 @@ class ReadModelSloSmokeTests(unittest.TestCase):
         self.assertEqual(report["status"], "dry_run")
         self.assertEqual(
             {row["read_model_key"] for row in report["planned_scopes"]},
-            {"workbench", "workbench_relation", "search", "no_oa_bank_batch"},
+            {"workbench", "workbench_relation"},
         )
         self.assertFalse(any("workbench_generations" in sql for sql, _params in connection.fetch_all_calls))
 
@@ -115,23 +115,23 @@ class ReadModelSloSmokeTests(unittest.TestCase):
         self.assertEqual(report["missing_read_model_keys"], [])
         self.assertEqual(
             {row["read_model_key"] for row in report["planned_scopes"]},
-            {"workbench", "workbench_relation", "search"},
+            {"workbench", "workbench_relation"},
         )
 
     def test_explicit_key_limits_scope_selection(self) -> None:
         report = read_model_slo_smoke.run_smoke(
             FakeConnection(),
             apply=False,
-            read_model_keys=["search"],
-            scope_overrides={"search": "all"},
+            read_model_keys=["workbench_relation"],
+            scope_overrides={"workbench_relation": "all"},
         )
 
         self.assertEqual(
             report["planned_scopes"],
             [
                 {
-                    "read_model_key": "search",
-                    "scope_type": "search",
+                    "read_model_key": "workbench_relation",
+                    "scope_type": "workbench_relation",
                     "scope_key": "all",
                     "source": "override",
                     "row_count": None,
@@ -148,7 +148,7 @@ class ReadModelSloSmokeTests(unittest.TestCase):
             report = read_model_slo_smoke.run_smoke(
                 connection,
                 apply=True,
-                read_model_keys=["search"],
+                read_model_keys=["workbench_relation"],
                 target_ms=500,
                 poll_interval_seconds=0.05,
             )
@@ -156,7 +156,7 @@ class ReadModelSloSmokeTests(unittest.TestCase):
         self.assertEqual(report["status"], "pass")
         self.assertEqual(report["result_count"], 1)
         self.assertEqual(report["results"][0]["enqueue_to_fresh_ms"], 350.0)
-        self.assertEqual(queue.enqueued[0]["scope_type"], "search")
+        self.assertEqual(queue.enqueued[0]["scope_type"], "workbench_relation")
 
     def test_apply_fails_when_enqueue_to_fresh_exceeds_target(self) -> None:
         connection = FakeConnection()
@@ -166,7 +166,7 @@ class ReadModelSloSmokeTests(unittest.TestCase):
             report = read_model_slo_smoke.run_smoke(
                 connection,
                 apply=True,
-                read_model_keys=["search"],
+                read_model_keys=["workbench_relation"],
                 target_ms=100,
                 poll_interval_seconds=0.05,
             )
@@ -176,10 +176,10 @@ class ReadModelSloSmokeTests(unittest.TestCase):
 
     def test_summary_reports_enqueue_and_handler_percentiles(self) -> None:
         result = read_model_slo_smoke.SmokeEventResult(
-            read_model_key="search",
-            scope_type="search",
+            read_model_key="workbench_relation",
+            scope_type="workbench_relation",
             scope_key="2026-01",
-            event_type="search.read_model.refresh",
+            event_type="workbench_relation.read_model.refresh",
             event_id="event-1",
             status="pass",
             enqueue_to_fresh_ms=350.0,

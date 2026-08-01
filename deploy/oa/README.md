@@ -526,7 +526,7 @@ sudo /usr/local/sbin/finops-deploy-control read-model-scope-contract <release-na
 sudo /usr/local/sbin/finops-deploy-control read-model-slo-smoke <release-name> \
   --json \
   --critical-only \
-  --target-ms 5000
+  --target-ms 1000
 sudo /usr/local/sbin/finops-deploy-control write-operation-restore-point <release-name> \
   <run-id>
 sudo /usr/local/sbin/finops-deploy-control write-operation-restore-point-delete <run-id> \
@@ -538,9 +538,7 @@ sudo /usr/local/sbin/finops-deploy-control write-operation-e2e-smoke <release-na
 sudo /usr/local/sbin/finops-deploy-control api-request-error <request-id>
 sudo /usr/local/sbin/finops-deploy-control api-request-timing <request-id>
 sudo /usr/local/sbin/finops-deploy-control read-model-refresh <release-name> \
-  --scope search=all --dry-run
-sudo /usr/local/sbin/finops-deploy-control no-oa-read-model-refresh-drain \
-  <release-name> <YYYY-MM> <reason>
+  --scope workbench_relation=all --dry-run
 sudo /usr/local/sbin/finops-deploy-control settings-normalize <release-name> --dry-run
 sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> --dry-run
 sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> \
@@ -552,11 +550,6 @@ sudo /usr/local/sbin/finops-deploy-control bank-transaction-category-repair <rel
 sudo /usr/local/sbin/finops-deploy-control runtime-queue-resolve-covered <release-name> \
   --limit 100 --dry-run
 ```
-
-`no-oa-read-model-refresh-drain` 仅用于候选版本已经修复 no-OA worker、但当前版本遗留的精确月份
-dirty scope 阻塞发布门禁时。命令只允许 `YYYY-MM` scope，先暂停当前 no-OA worker，再用候选版本
-通过 durable gateway 强制入队并以 PostgreSQL transport 单次收敛，退出时始终恢复当前 worker。
-它不激活候选版本，也不放宽 release gate 的 `dirty_scope_count = 0` 合同。
 
 `import-audit-repair` 只用于恢复已登记严格合同 import facts：先运行 `--dry-run` 保存
 `source_fingerprint` 与 rollback manifest；确认期间数据未变化后，使用
@@ -857,11 +850,10 @@ curl -sI https://www.yn-sourcing.com/fin-ops/api/session/me | grep -Ei '401|appl
 ### 功能可用性
 
 - [ ] 关联台可正常加载
-- [ ] 搜索弹窗可正常搜索、详情、跳转定位
 - [ ] 税金抵扣可正常加载和试算
 - [ ] 成本统计可正常加载与导出
 - [ ] 工作台导出、成本统计导出都可正常下载
-- [ ] 已授权用户可访问 `workbench / tax / cost / export / search`
+- [ ] 已授权用户可访问 `workbench / tax / cost / export`
 
 ## 自动化回归建议
 

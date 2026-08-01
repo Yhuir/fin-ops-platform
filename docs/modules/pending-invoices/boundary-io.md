@@ -81,5 +81,5 @@
 ## 跨页面清理结果
 
 - `PendingInvoiceReadModelService`、source-version provider、repository/projection、manifest/query-owner 和 `search-pending`/invoice-lifecycle 页面链已删除。
-- Search 独立索引与 `workbench_relation` 共享 distribution 保留给明确登记的消费者，但本页面不消费它们。
+- 独立 Search runtime 已删除；`workbench_relation` 共享 distribution 只保留给明确登记消费者，本页面不消费它。
 - `read_model.pending_invoice_*` 历史 migration/表暂留作回滚证据，没有运行时 reader/writer。

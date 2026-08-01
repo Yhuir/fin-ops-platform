@@ -41,7 +41,7 @@ OA Adapter       Import/File Services
         Workbench pair relations
                  |
                  v
-        四个登记 read model / search
+          两个登记 read model
                  |
                  v
         关联台及登记的独立消费者
@@ -50,7 +50,7 @@ OA Adapter       Import/File Services
 ## 架构原则
 
 - 核销事实必须落到结构化模型，不靠备注表达业务状态。
-- 写入只改变最小 canonical 事实。除关联台外，财务页面通过页面专属 query service 在单个只读快照中直接读取 canonical facts 和 active relations；只有 `workbench`、`workbench_relation`、`search`、`no_oa_bank_batch` 四个明确登记的 read model 使用 freshness/status/enqueue/worker 合同。工作台采用 generation 原子发布，刷新期间只暴露最近 active generation，不读取 building/failed 中间状态。
+- 写入只改变最小 canonical 事实。除关联台外，财务页面通过页面专属 query service 在单个只读快照中直接读取 canonical facts 和 active relations；只有 `workbench` 与 `workbench_relation` 两个明确登记的 read model 使用 freshness/status/enqueue/worker 合同。工作台采用 generation 原子发布，刷新期间只暴露最近 active generation，不读取 building/failed 中间状态。
 - 外部系统只通过适配层接入，OA 原始库保持只读。
 - 导入必须先预览后确认，确认动作必须幂等并可审计。
 - 生产操作必须有权限、审计、状态反馈和回滚路径。
@@ -61,7 +61,7 @@ OA Adapter       Import/File Services
 
 1. 持续优化页面专属 canonical query 的 SQL、索引和批量读取，保持单快照一致性并建立 p95/p99 基线。
 2. 生产业务 I/O 继续收敛到明确 service/repository；`ApplicationStateStore` 仅保留本地 tooling/test 用途，不参与生产事实读取。
-3. 只优化已登记的四个 read model，不为已直读页面恢复 projection/worker；工作台 Redis page cache 以 freshness gate 通过后的 active generation 为版本边界。
+3. 只优化已登记的两个 read model，不为已直读页面或已删除的 Search API 恢复 projection/worker；工作台 Redis page cache 以 freshness gate 通过后的 active generation 为版本边界。
 4. 导入、OCR、OA 同步、设置数据重置和启动恢复均由 durable worker/显式 maintenance 执行，API 启动不隐式运行这些任务。
 5. 对核心接口建立压测基线和 `EXPLAIN ANALYZE` 调优闭环。
 

@@ -108,7 +108,6 @@ class ReadModelApiContractHarnessTests(unittest.TestCase):
                     "groups": [],
                     "pagination": {"page": 1, "page_size": 50, "total": 0},
                 },
-                list_canonical_search_rows=lambda **_kwargs: [],
             )
             bank_details_service = app._bank_details_application_service()  # noqa: SLF001
             bank_details_service._query_service = SimpleNamespace(  # noqa: SLF001
@@ -173,7 +172,6 @@ class ReadModelApiContractHarnessTests(unittest.TestCase):
                 "bank_flow_rule_batches_tag_rules": ("version", "rules"),
                 "turnover_ledger_grouped": ("groups", "pagination", "summary"),
                 "turnover_ledger_tag_selection": ("version", "active_tags", "selected_tag_codes"),
-                "search_all": ("query", "summary", "filters"),
             }
 
             for probe in DEFAULT_API_PROBES:

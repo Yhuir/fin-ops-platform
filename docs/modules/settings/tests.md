@@ -6,7 +6,7 @@
   `AppSettingsService`/专属 service 负责。
 - 普通设置保存只提交 canonical settings/version/audit，不 fan-out 已退役页面 dirty scope，
   不返回 freshness 或 operation-barrier target。
-- canonical 页面在下一次 normal GET 读取新设置；关联台 `workbench` 与三个共享 read model
+- canonical 页面在下一次 normal GET 读取新设置；`workbench` 与 `workbench_relation`
   只按各自 owner 的显式 maintenance/reset 合同刷新。
 - OA applicant credential 使用独立 repository；password/cipher/token 不进入普通 settings
   payload、日志或错误。
@@ -23,7 +23,7 @@
 | 4. Read model/cache/worker | 适用（负向/共享） | `tests/test_settings_data_reset_job.py`、`tests/test_read_model_manifest.py`、`tests/test_runtime_worker_registry.py`、`tests/test_platform_runtime_boundary_guards.py`：durable reset/reload、普通保存零页面 fan-out、registry/manifest 一致 |
 | 5. 前端交互 | 适用 | `web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx` |
 | 6. 端到端 | 适用 | `web/e2e/settings-data-reset-flow.spec.ts`：确认、密码、job polling、reload、错误恢复 |
-| 7. 既有功能回归 | 适用 | 全量 backend/frontend/E2E；重点保护权限、OA、关联台、银行、发票、成本、税金和 Search |
+| 7. 既有功能回归 | 适用 | 全量 backend/frontend/E2E；重点保护权限、OA、关联台、银行、发票、成本和税金 |
 
 ## 必须保留的负向断言
 

@@ -1,6 +1,6 @@
 # Read Model 边界合同
 
-扫描日期：2026-07-30。
+扫描日期：2026-08-01。
 
 本文件只记录当前运行时合同。历史 projection 设计和迁移过程不再作为架构依据；可执行事实源是：
 
@@ -11,16 +11,14 @@
 
 ## 当前唯一集合
 
-App 当前登记四个 runtime read model：一个关联台页面 active-generation read model，以及三个共享 read model。
+App 当前只登记两个 runtime read model：关联台页面 active-generation `workbench`，以及共享 relation distribution `workbench_relation`。
 
 | Key / scope type | Refresh event | Worker | `all` 语义 | Query owner | Repository owner |
 | --- | --- | --- | --- | --- | --- |
-| `workbench` | `workbench.read_model.refresh` | `workbench`、`workbench-secondary` | 冷启动/显式恢复 fan-out；页面查询 `all` 由 active month shards 组合 | `WorkbenchQueryFacade` | `PostgresReadModelRepository`（active generation） |
+| `workbench` | `workbench.read_model.refresh` | `workbench` | 冷启动/显式恢复 fan-out；页面查询 `all` 由 active month shards 组合 | `WorkbenchQueryFacade` | `PostgresReadModelRepository`（active generation） |
 | `workbench_relation` | `workbench_relation.read_model.refresh` | `workbench-relation` | fan-out command | `WorkbenchRelationReadFacade` | `WorkbenchRelationReadModelRepositoryPort` |
-| `search` | `search.read_model.refresh` | `search`、`search-secondary`、`search-tertiary` | fan-out command | Search read API | `SearchReadModelRepositoryPort` |
-| `no_oa_bank_batch` | `no_oa_bank_batch.read_model.refresh` | `no-oa-bank-batch` | fan-out command | `NoOaBankBatchApplicationService` | `NoOaBankBatchReadModelRepositoryPort` |
 
-Manifest、scope policy、App Status registry 与所有带 `read_model_key` 的 worker registration 必须精确等于这个集合。每个 manifest entry 的 `primary_worker_instance + auxiliary_refresh_worker_instances` 还必须与 runtime registry 中同一 `read_model_key` 的完整 instance 集合双向相等，不能只验证 manifest 指向的 worker 存在。四种 scope 都只接受 `YYYY-MM` 或 `all`。三个共享 read model 的 `all` 只负责枚举并投递月份 shard；关联台查询层可将 active month generations 组合为 `all` 视图，但 worker 仍只发布月份 shard。
+Manifest、scope policy、App Status registry 与所有带 `read_model_key` 的 worker registration 必须精确等于这个集合。每个 manifest entry 的 worker instance 必须与 runtime registry 双向相等。两种 scope 都只接受 `YYYY-MM` 或 `all`；`all` 只负责枚举月份 shard，关联台查询层可将 active month generations 组合为 `all` 视图，但 worker 不发布 materialized parent。
 
 ## 保留原因与边界
 
@@ -39,18 +37,11 @@ Manifest、scope policy、App Status registry 与所有带 `read_model_key` 的 
 - `turnover_manual_closure` 等页面专属 relation mode 按各模块合同直接读取 canonical relation，不得无条件进入共享 distribution。
 - 关联台页面不消费该共享 distribution；其 active relations 在 `workbench` projection refresh 时直接取自 canonical relation 表。
 
-### `search`
+### 已移除的 Search 与 no-OA projection
 
-- 只承担搜索索引，不承担页面 rows、summary、详情或筛选事实。
-- 月份 source proof 未变化时允许 no-op；变化时使用 row-level upsert 和 stale-row delete。
-- 页面 read model 退役不得删除 Search，也不得把页面 projection 重新挂到 Search worker。
-
-### `no_oa_bank_batch`
-
-- 只服务 legacy `/api/no-oa-bank-batches/*` 合同，不是当前流水规则批量处理页面的数据源。
-- 只读写 `relation_mode=no_oa_bank_batch` 的 legacy batch/projection；snapshot restore 必须丢弃外来 bank-flow rows。
-- 流水规则批次由 `app.bank_flow_rule_batches`、`app.bank_flow_rule_batch_events` 与 active canonical relation 负责，不能回退到 no-OA read model。
-- no-OA 不属于默认 critical production SLO，但其 queue、freshness 与 worker 合同仍必须完整。
+- `/api/search`、Search service/repository/projector、refresh producer/handler、worker registrations 与 deploy env 已删除；当前页面没有 Search runtime consumer。
+- `/api/no-oa-bank-batches/*` 保留业务 API，但列表由 `NoOaBankBatchApplicationService` 请求内刷新并查询 canonical `app.no_oa_bank_batches/events`；响应不含 `read_model_status`、`refresh_enqueued` 或 operation barrier target。
+- `search`、`no_oa_bank_batch` 的历史 projection 表、outbox、dirty scope 和 readiness 只作上一版本回滚证据；当前 runtime 不读、不写、不 claim。
 
 ## 已退役页面 read model
 
@@ -94,7 +85,7 @@ OA sync、import processing 与 Workbench matching 仍属于 canonical integrati
 
 ## Queue、freshness 与 transport
 
-- `job.outbox_events` 与 `job.read_model_dirty_scopes` 是四个保留 read model 的唯一 refresh 状态事实源。
+- `job.outbox_events` 与 `job.read_model_dirty_scopes` 是两个保留 read model 的唯一 refresh 状态事实源。
 - 非事务 refresh 必须经 `ReadModelRefreshGateway` 和 scope policy normalize、validate、dedupe。
 - 业务 service 不直接 SQL 写 dirty scope/outbox。
 - Redis 只能缓存 freshness gate 已证明的 payload。
@@ -118,9 +109,9 @@ OA sync、import processing 与 Workbench matching 仍属于 canonical integrati
 
 ## 验收
 
-- 四个 registry 集合精确为 `workbench`、`workbench_relation`、`search`、`no_oa_bank_batch`。
+- 四个可执行 registry/manifest 集合精确为 `workbench`、`workbench_relation`。
 - 生产代码中不存在其它 `*.read_model.refresh` 页面事件或 retired projection SQL。
 - retired worker instance/env 不在当前部署 manifest；RabbitMQ dispatcher 只发布登记事件。
 - 除关联台外的目标页面及成本统计、外部往来页的 direct-read API/frontend/权限/写后 GET 回归通过；关联台 active-generation API/frontend 回归通过。
-- 四个保留 read model 的 freshness、queue、worker、App Status 与 scope tests 通过。
+- 两个保留 read model 的 freshness、queue、worker、App Status 与 scope tests 通过。
 - 全量 backend、frontend、build、Browser E2E、lint、docs 和 `git diff --check` 通过后，才允许合并和部署。

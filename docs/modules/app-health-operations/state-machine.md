@@ -60,7 +60,7 @@
 
 ## Read Model / Worker 状态
 
-- `fresh`：关联台 `workbench` 与三个共享 read model 具有
+- `fresh`：`workbench` 与 `workbench_relation` 具有
   `read_model.app_status_readiness` 和 current-effective queue 证明；其它 canonical 页面只依赖 PostgreSQL/runtime 健康证明。
 - `missing`：registry 要求但没有 readiness 记录；busy/yellow。
 - `refreshing`：dirty/outbox/worker 正在处理；busy/yellow。
@@ -76,6 +76,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-08-01 | Readiness 与 worker topology 收敛为 `workbench`、`workbench_relation` 两个 read model 和 6 个 required worker；Search/no-OA projection 历史行退出 current-effective 状态 | App Status registry、runtime summary、部署门禁 | `tests/test_app_status_overview_service.py`、`tests/test_runtime_monitoring.py`、`tests/test_runtime_worker_registry.py` |
 | 2026-07-11 | App Health 成为 17 页 system Audit owner | 一个 outer snapshot 执行其余 16 页 proof；database/runtime/external 三个 evidence plane 分离，旧进项专项面板删除 | `tests/test_audit_app_health_system.py`、`tests/test_app_health_api.py`、`web/src/test/AppHealthOperationsPage.test.tsx`、`web/e2e/app-shell.spec.ts` |
 | 2026-07-11 | 外部 evidence exact proof owner | 四域 immutable manifest 与 canonical facts 做 exact set/field/control equality；显式 page coverage，删除 free-text classifier | `tests/test_external_control_evidence_*.py`、`tests/test_audit_external_control_evidence.py`、`tests/test_audit_app_health_system.py` |
 | - | 初始骨架 | 待补充 | - |

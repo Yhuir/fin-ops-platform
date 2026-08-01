@@ -23,6 +23,6 @@
 ## 下一轮补测建议
 
 1. staging 运行真实 ETC ZIP/source file/OA 草稿 smoke，确认对象存储、Nginx、OA iframe/session 和附件上传。
-2. staging 运行 ETC import -> business batch -> manual submitted -> Workbench summary -> 税金/成本/search fresh 的真实 worker drain smoke。
+2. staging 运行 ETC import -> business batch -> manual submitted -> Workbench summary -> 税金/成本 canonical 展示的真实 worker drain smoke。
 3. 对生产历史 migration/cleanup 先 dry-run，再在运维窗口 execute，并做 Workbench paired/open 口径 smoke。
 4. 若新增 ETC 页面 import confirm 或其它 mutation 级网络恢复 Browser 主链路，必须捕获 destructive mutation 失败、relation command failure 和页面恢复状态；OA draft、manual OA status、未提交/已提交 business batch delete/reset、source file delete 与 ticket-root source upload 暂时失败重试已由本地 Browser 覆盖。

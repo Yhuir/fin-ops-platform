@@ -48,7 +48,7 @@
 
 ETC 发票导入必须绑定一个已经确认且可导入的 ETC 对账任务。预览阶段会用对账任务的 confirmed item set 过滤 ZIP 内发票，并把 task version/hash/generation、原始 ZIP file object、preview counts/fingerprint 和 requirement match edges 持久化；确认阶段从 durable session 重读、校验 freshness，只 enqueue `etc_invoice_import.confirm`。独立 worker 重载原始 ZIP、确定性重建 allowlist 后完成导入。
 
-页面不存在 own read model。统一 Audit 在一个 `REPEATABLE READ READ ONLY` snapshot 内复用 ETC tickets canonical collector，并独立证明 session/file/object、preview match、task、business/import batch、ETC invoice、existing canonical bridge 与 job/outbox。Workbench/tax/cost/lifecycle/search 仍只是写后影响目标。
+页面不存在 own read model。统一 Audit 在一个 `REPEATABLE READ READ ONLY` snapshot 内复用 ETC tickets canonical collector，并独立证明 session/file/object、preview match、task、business/import batch、ETC invoice、existing canonical bridge 与 job/outbox。Workbench/tax/cost/lifecycle 是独立消费者，不由导入页面拥有。
 
 ETC 发票导入确认会创建或复用 task-scoped ETC business batch，写入 ETC import batch、ETC invoice metadata 与 PDF/XML 附件关系，并推进 canonical version；普通确认不触发页面 derived lifecycle。ETC ZIP 不再直接创建统一发票池事实；统一发票池 `app.invoices` 只由正式进/销项发票导入，或 OA 附件识别 service 判定为正式发票且池内不存在时受控创建。业务批次后续 OA 草稿、人工确认“已提交/未提交”、删除和 summary row 释放属于 ETC 票据管理模块；本模块测试必须证明这些写入口零页面 fan-out、消费者访问时收敛。
 
@@ -63,7 +63,7 @@ ETC 导入 runtime 删除链路只清理 ETC task、import batch、business batc
 | preview stale | `stale_reconciliation_task_preview` 或 `preview_stale` | 当前导入页必须清空 preview 并要求重新预览 |
 | confirm queued | `etc_invoice_import` background job、可选 `import.process.requested` | 导入页 job feedback、App Status/App Health；job source 必须携带 `task_id`、`affected_domains=["imports_etc_invoices","etc_tickets"]` 和 route `/imports/etc-invoices` |
 | confirm processed | `ImportProcessingService.execute_etc_invoice_import_confirm_job(...)` | ETC business batch、ETC invoice metadata、PDF/XML 附件关系；只关联已存在 canonical invoice，不创建新 canonical invoice |
-| access convergence | canonical ETC source version | existing canonical metadata 真变更时只推进精确月份 source version；关联台、invoice lifecycle、税金、search 与成本统计在各自访问时收敛。历史 repair 是显式维护入口，不进入导入热路径 |
+| access convergence | canonical ETC source version | existing canonical metadata 真变更时只推进精确月份 source version；关联台、invoice lifecycle、税金与成本统计在各自 owner 边界读取。历史 repair 是显式维护入口，不进入导入热路径 |
 | OA 草稿/人工状态 | `oa-draft`、`manual-oa-status` | OA draft create 只更新 ETC business batch / reconciliation task / audit；manual submitted / not-submitted 不重连 canonical invoice，只按精确月份触发 `etc_business_batch_status_changed` 更新关联台。税金不刷新，成本不直投且只在 Workbench 成功发布后收敛一次 |
 | 业务批次删除 | business batch delete | ETC 票据管理和真实发票事实释放；按返回的精确影响范围刷新 downstream |
 

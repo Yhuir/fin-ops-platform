@@ -46,14 +46,14 @@
 | ETC batch/invoice facts | ETC services | 供 ETC 票据管理读取 |
 | Ready task title | `/imports/etc-invoices` 下拉 | 展示 linked reconciliation task 当前标题，与 business batch `title` 保持同步 |
 | Existing canonical metadata delta | `ImportNormalizationService.upsert_etc_invoice(...)` -> `EtcExistingInvoiceLinkService` | 返回 `{invoice, changed}`；只有字段或 source link 真正变化的 invoice 才持久化并贡献 affected month。无 canonical match 或幂等重放必须返回空月份、零 refresh I/O |
-| Affected scope | 页面 freshness gateway / 必要领域任务 | 只按真实 changed months 返回精确影响；幂等重放为零影响，不在写路径展开 workbench/relation/tax/search/cost 页面 refresh jobs |
+| Affected scope | 页面 owner / 必要领域任务 | 只按真实 changed months 返回精确影响；幂等重放为零影响，不在写路径展开 workbench/relation/tax/cost 页面 refresh jobs |
 | Job completion result envelope | background job result summary / ETC 票据页 | 返回 `affected_months`、`affected_scope_keys`；普通导入的 `read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` 为空，页面立即结束导入反馈，后续页面访问精确收敛 |
 | Imported-invoices removal | ETC reconciliation/business batch service | 只清理 ETC task/import batch/business batch 自有事实并返回 changed months；不得返回或执行 canonical invoice 删除计数 |
 
 ## 持久化与投影
 
 - Own read model：无独立 manifest entry；页面 Audit `registered_read_model_keys=[]`。
-- 逻辑影响 read model：`workbench`、`workbench_relation`、`invoice_lifecycle`、`search`、`tax_offset`、`cost_statistics`；普通导入不直接投递这些页面模型，页面访问通过各 owner freshness gateway 收敛。显式维护命令的 targets 只由对应 owner 返回。
+- 逻辑影响消费者：`workbench`、`workbench_relation`、invoice lifecycle、tax offset、cost statistics；普通导入不直接投递这些页面模型，页面访问通过各 owner 边界读取。显式维护命令的 targets 只由对应 owner 返回。
 - Worker：`etc_invoice_import.confirm` 只走 `job.import_jobs` + `import.process.requested`；worker 幂等执行 `begin_import`，Web 不 inline。
 
 ## 文件范围
@@ -94,7 +94,7 @@
 - Shared facts: `app.invoices` 仍由 canonical invoice pool owner 管理；ETC 只能通过受控 existing-link/promotion port 关联，不创建第二发票池。
 - Allowed writes: ETC import preview/confirm/job、ETC import processing service、受控 batch invoice link adapter。
 - Allowed reads: ETC import/query ports、canonical invoice existing-link ports。
-- Downstream outputs: ETC tickets canonical facts，以及 workbench、workbench_relation、tax/cost/search 可比较的 source-version 变化；各页面访问 gateway 自行创建精确 dirty scope。
+- Downstream outputs: ETC tickets canonical facts，以及 workbench、workbench_relation、tax/cost 可比较的 source-version 变化；保留 read model 的页面访问 gateway 自行创建精确 dirty scope，direct-canonical 页面直接读取 facts。
 - Forbidden paths: `app.etc_invoices` 不得被当作 canonical invoice pool；ETC metadata 不得绕过 invoice owner 直接写 `app.invoices`。
 - Old code deletion: 旧 ETC 导入 fallback、pickle/import snapshot 写事实路径、runtime canonical cleanup surface 已删除；historical repair / invoice-pool cleanup 工具保留不算页面/API closure 阻断。
 

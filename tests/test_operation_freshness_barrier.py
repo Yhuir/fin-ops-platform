@@ -52,11 +52,11 @@ class OperationFreshnessBarrierServiceTests(unittest.TestCase):
     def test_pending_exact_scope_keeps_active_shared_target_refreshing(self) -> None:
         service = _service(
             read_model_statuses={
-                "search": {
+                "workbench_relation": {
                     "status": "fresh",
                     "scopes": [
                         {
-                            "scope_type": "search",
+                            "scope_type": "workbench_relation",
                             "scope_key": "2026-03",
                             "status": "fresh",
                         }
@@ -64,11 +64,11 @@ class OperationFreshnessBarrierServiceTests(unittest.TestCase):
                 }
             },
             outbox_statuses={
-                "search.read_model.refresh": {
+                "workbench_relation.read_model.refresh": {
                     "status": "pending",
                     "scopes": [
                         {
-                            "scope_type": "search",
+                            "scope_type": "workbench_relation",
                             "scope_key": "2026-03",
                             "status": "pending",
                         }
@@ -78,7 +78,7 @@ class OperationFreshnessBarrierServiceTests(unittest.TestCase):
         )
 
         payload = service.status_payload(
-            [OperationFreshnessTarget("search", "2026-03")]
+            [OperationFreshnessTarget("workbench_relation", "2026-03")]
         )
 
         self.assertEqual(payload["status"], "refreshing")
@@ -124,14 +124,14 @@ class OperationFreshnessBarrierServiceTests(unittest.TestCase):
     def test_failed_active_shared_outbox_blocks_target(self) -> None:
         service = _service(
             read_model_statuses={
-                "no_oa_bank_batch": {
+                "workbench_relation": {
                     "status": "fresh",
-                    "scope_type": "no_oa_bank_batch",
+                    "scope_type": "workbench_relation",
                     "scope_key": "all",
                 }
             },
             outbox_statuses={
-                "no_oa_bank_batch.read_model.refresh": {
+                "workbench_relation.read_model.refresh": {
                     "status": "failed",
                     "last_error": "worker crashed",
                 }
@@ -139,7 +139,7 @@ class OperationFreshnessBarrierServiceTests(unittest.TestCase):
         )
 
         payload = service.status_payload(
-            [OperationFreshnessTarget("no_oa_bank_batch", "all")]
+            [OperationFreshnessTarget("workbench_relation", "all")]
         )
 
         self.assertEqual(payload["status"], "blocked")
@@ -158,6 +158,8 @@ class OperationFreshnessBarrierServiceTests(unittest.TestCase):
             "oa_pending_payment",
             "tax_offset",
             "bank_flow_rule_batch",
+            "search",
+            "no_oa_bank_batch",
         ):
             with self.subTest(retired_key=retired_key):
                 payload = service.status_payload(
@@ -171,12 +173,12 @@ class OperationFreshnessBarrierServiceTests(unittest.TestCase):
 
     def test_targets_from_payload_uses_active_registry_scope_type(self) -> None:
         targets = targets_from_payload(
-            {"read_model_key": "search", "scope_key": "2026-05"}
+            {"read_model_key": "workbench_relation", "scope_key": "2026-05"}
         )
 
         self.assertEqual(
             targets,
-            [OperationFreshnessTarget("search", "2026-05", "search")],
+            [OperationFreshnessTarget("workbench_relation", "2026-05", "workbench_relation")],
         )
 
     def test_targets_from_payload_rejects_non_object_entries(self) -> None:

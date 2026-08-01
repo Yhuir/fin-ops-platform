@@ -13,7 +13,6 @@ class WorkbenchPairRelationPersistService:
         *,
         pair_relation_service: WorkbenchPairRelationService,
         state_store: Any | None,
-        clear_search_cache: Callable[[], None],
         emit_action_timing: Callable[..., None],
         duration_ms: Callable[[float], int],
         monotonic_clock: Callable[[], float] = monotonic,
@@ -22,7 +21,6 @@ class WorkbenchPairRelationPersistService:
     ) -> None:
         self._pair_relation_service = pair_relation_service
         self._state_store = state_store
-        self._clear_search_cache = clear_search_cache
         self._emit_action_timing = emit_action_timing
         self._duration_ms = duration_ms
         self._monotonic_clock = monotonic_clock
@@ -49,7 +47,6 @@ class WorkbenchPairRelationPersistService:
             self._pending_case_ids = set(self._normalize_case_ids(pending_case_ids))
 
     def persist(self, *, changed_case_ids: list[str] | None = None) -> None:
-        self._clear_search_cache()
         if self._state_store is None:
             return
         snapshot = (

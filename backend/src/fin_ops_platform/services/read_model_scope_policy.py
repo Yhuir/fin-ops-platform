@@ -97,8 +97,6 @@ def _dedupe_text(values: list[str]) -> list[str]:
 
 DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY = ReadModelScopePolicyRegistry(
     {
-        "no_oa_bank_batch": _month_or_all_scope_policy("no_oa_bank_batch"),
-        "search": _month_or_all_scope_policy("search"),
         "workbench": _month_or_all_scope_policy("workbench"),
         "workbench_relation": _month_or_all_scope_policy("workbench_relation"),
     }

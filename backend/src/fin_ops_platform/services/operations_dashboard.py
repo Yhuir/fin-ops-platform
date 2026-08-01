@@ -13,7 +13,6 @@ from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringReposi
 DEFAULT_OPERATION_ENDPOINTS = (
     "GET /api/workbench",
     "GET /api/workbench/groups",
-    "GET /api/search",
     "GET /api/pending-invoices/rows",
     "GET /api/cost-statistics/explorer",
     "GET /api/tax-offset",

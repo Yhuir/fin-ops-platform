@@ -11,23 +11,9 @@ from fin_ops_platform.services.app_settings_service import (
     DEFAULT_OA_IMPORT_FORM_TYPES,
     DEFAULT_OA_IMPORT_STATUSES,
     DEFAULT_OA_RETENTION_CUTOFF_DATE,
-    AppSettingsService,
-)
-from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
-from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
-from fin_ops_platform.services.bank_transaction_effective_category_provider import (
-    BankTransactionEffectiveCategoryProvider,
 )
 from fin_ops_platform.services.import_job_queue import IMPORT_PROCESS_REQUESTED_EVENT
-from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.mongo_oa_adapter import load_mongo_oa_settings
-from fin_ops_platform.services.no_oa_bank_batch_read_model_refresh import (
-    NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE,
-    NoOaBankBatchReadModelPersistencePort,
-    NoOaBankBatchReadModelRefreshService,
-)
-from fin_ops_platform.services.no_oa_bank_batch_service import NoOaBankBatchService
-from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
 from fin_ops_platform.services.oa_payment_status_service import MySQLOAPaymentStatusRepository
 from fin_ops_platform.services.oa_pending_payment_relation_promotion_service import (
     OaPendingPaymentRelationPromotionService,
@@ -52,7 +38,6 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
-from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 from fin_ops_platform.services.rabbitmq_runtime import RabbitMqConsumer, rabbitmq_event_routes
 from fin_ops_platform.services.read_model_readiness import ReadModelReadinessReporter
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
@@ -78,23 +63,8 @@ from fin_ops_platform.services.runtime_worker_registry import (
     worker_claim_event_types,
     worker_registrations,
 )
-from fin_ops_platform.services.search_read_model_refresh import (
-    SEARCH_REFRESH_EVENT_TYPE,
-    SearchReadModelRefreshService,
-)
-from fin_ops_platform.services.search_sql_projection import SearchSqlProjectionBuilder
-from fin_ops_platform.services.workbench_etc_batch_link import WORKBENCH_ETC_BATCH_LINK_VERSION
-from fin_ops_platform.services.workbench_exception_projection import EXCEPTION_PROJECTION_VERSION
-from fin_ops_platform.services.workbench_exception_rules import RULE_VERSION as WORKBENCH_EXCEPTION_RULE_VERSION
-from fin_ops_platform.services.workbench_free_matching_engine import (
-    RULE_VERSION as WORKBENCH_FORMAL_RELATION_RULE_VERSION,
-)
-from fin_ops_platform.services.workbench_pair_relation_service import (
-    WorkbenchPairRelationService as PairRelationService,
-)
 from fin_ops_platform.services.workbench_read_model_refresh import WorkbenchReadModelRefreshService
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandService
-from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
 from fin_ops_platform.services.workbench_relation_read_model_refresh import (
     WORKBENCH_RELATION_REFRESH_EVENT_TYPE,
     WorkbenchRelationReadModelRefreshService,
@@ -131,8 +101,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-events-per-iteration", type=int, default=1, help="Maximum events to drain before an idle sleep.")
     parser.add_argument("--enable-workbench-read-model-refresh", action="store_true", help="Register workbench SQL read model refresh handler.")
     parser.add_argument("--enable-workbench-relation-read-model-refresh", action="store_true", help="Register workbench relation distribution read model refresh handler.")
-    parser.add_argument("--enable-search-read-model-refresh", action="store_true", help="Register search SQL read model refresh handler.")
-    parser.add_argument("--enable-no-oa-bank-batch-read-model-refresh", action="store_true", help="Register no-OA bank batch SQL read model refresh handler.")
     parser.add_argument("--enable-oa-sync", action="store_true", help="Register OA Mongo to PostgreSQL projection sync handler.")
     parser.add_argument("--enable-import-job-processing", action="store_true", help="Register import job worker handler.")
     parser.add_argument("--enable-settings-maintenance", action="store_true", help="Register durable settings maintenance handler.")
@@ -164,24 +132,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             connection=connection,
             read_model_repository=WorkbenchRelationReadModelRepositoryPort(
                 read_model_repository
-            ),
-        )
-        if read_model_repository is not None
-        else None
-    )
-    workbench_relation_read_facade = (
-        WorkbenchRelationReadFacade(
-            read_model_repository=read_model_repository,
-            queue_repository=queue,
-            expected_source_versions=(
-                workbench_relation_projection_builder.source_versions_for_scope
-                if workbench_relation_projection_builder is not None
-                else None
-            ),
-            expected_source_versions_by_scope=(
-                workbench_relation_projection_builder.source_versions_for_scopes
-                if workbench_relation_projection_builder is not None
-                else None
             ),
         )
         if read_model_repository is not None
@@ -304,64 +254,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         handlers[WORKBENCH_RELATION_REFRESH_EVENT_TYPE] = _read_model_handler(refresh_service.handle_runtime_event)
         if WORKBENCH_RELATION_REFRESH_EVENT_TYPE not in config.event_types:
             config.event_types.append(WORKBENCH_RELATION_REFRESH_EVENT_TYPE)
-    if args.enable_search_read_model_refresh:
-        projection_builder = SearchSqlProjectionBuilder(
-            connection=connection,
-            read_model_repository=read_model_repository,
-        )
-        refresh_service = SearchReadModelRefreshService(
-            projection_builder=projection_builder,
-            queue_repository=queue,
-        )
-        handlers[SEARCH_REFRESH_EVENT_TYPE] = _read_model_handler(
-            refresh_service.handle_runtime_event
-        )
-        if SEARCH_REFRESH_EVENT_TYPE not in config.event_types:
-            config.event_types.append(SEARCH_REFRESH_EVENT_TYPE)
-    if args.enable_no_oa_bank_batch_read_model_refresh:
-        state_store = PostgresStateStore(data_dir=default_data_dir(), connection=connection) if connection is not None else None
-        category_service = BankTransactionCategoryService.from_snapshot(
-            state_store.load_bank_transaction_categories() if state_store is not None else {}
-        )
-        auto_category_service = BankTransactionAutoCategoryService(category_service=category_service)
-        app_settings_service = AppSettingsService(
-            state_store,
-            SimpleNamespace(restore_manual_projects=lambda _projects: None, list_projects=lambda: []),
-            bank_transaction_category_service=category_service,
-            bank_transaction_auto_category_service=auto_category_service,
-        )
-        pair_relation_service = PairRelationService.from_snapshot(
-            state_store.load_workbench_pair_relations() if state_store is not None else {}
-        )
-        no_oa_service = NoOaBankBatchService.from_snapshot(
-            state_store.load_no_oa_bank_batches() if state_store is not None else {},
-            pair_relation_service=pair_relation_service,
-        )
-        refresh_service = NoOaBankBatchReadModelRefreshService(
-            import_service=ImportNormalizationService(
-                fact_repository=state_store.import_fact_repository if state_store is not None else None
-            ),
-            effective_category_provider=BankTransactionEffectiveCategoryProvider(
-                category_service=category_service,
-                auto_category_service=auto_category_service,
-            ),
-            no_oa_bank_batch_service=no_oa_service,
-            app_settings_service=app_settings_service,
-            bank_transaction_category_service=category_service,
-            pair_relation_service=pair_relation_service,
-            state_store=state_store or SimpleNamespace(save_no_oa_bank_batches=lambda _snapshot: None),
-            queue_repository=queue,
-            read_model_persistence=NoOaBankBatchReadModelPersistencePort(
-                state_store or SimpleNamespace(save_no_oa_bank_batches=lambda _snapshot: None)
-            ),
-            workbench_matching_source_versions_provider=lambda: _bank_batch_workbench_matching_source_versions(
-                app_settings_service
-            ),
-            relation_facade=workbench_relation_read_facade,
-        )
-        handlers[NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE] = _read_model_handler(refresh_service.handle_runtime_event)
-        if NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE not in config.event_types:
-            config.event_types.append(NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE)
     if args.enable_import_job_processing:
         import_processors = (
             check_import_job_processors()
@@ -480,34 +372,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-def _bank_batch_workbench_matching_source_versions(app_settings_service: AppSettingsService) -> dict[str, object]:
-    payload: dict[str, object] = {
-        "workbench_formal_relation_rule_version": WORKBENCH_FORMAL_RELATION_RULE_VERSION,
-        "workbench_etc_batch_link_version": WORKBENCH_ETC_BATCH_LINK_VERSION,
-        "workbench_exception_rules_version": WORKBENCH_EXCEPTION_RULE_VERSION,
-        "workbench_exception_projection_version": EXCEPTION_PROJECTION_VERSION,
-        "bank_auto_tag_rules_version": _current_bank_auto_tag_rules_version(app_settings_service),
-    }
-    parser_version = attachment_invoice_cache_parser_version()
-    if parser_version:
-        payload["oa_attachment_invoice_parser_version"] = parser_version
-    if OA_PROJECTION_SYNC_VERSION:
-        payload["oa_projection_sync_version"] = OA_PROJECTION_SYNC_VERSION
-    return payload
-
-
 def _apply_statement_timeout(queue_repository: Any, seconds: int | None) -> None:
     setter = getattr(queue_repository, "set_statement_timeout_seconds", None)
     if callable(setter):
         setter(seconds)
-
-
-def _current_bank_auto_tag_rules_version(app_settings_service: AppSettingsService) -> int:
-    try:
-        payload = app_settings_service.get_bank_auto_tag_rules_payload(can_save=False)
-        return int(payload.get("version") or 1)
-    except Exception:
-        return 1
 
 
 def _infer_worker_kind(args: argparse.Namespace) -> str:

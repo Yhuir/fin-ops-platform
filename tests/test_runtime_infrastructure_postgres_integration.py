@@ -581,7 +581,7 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
 
     def test_atomic_batch_read_model_enqueue_only_creates_uncovered_exact_scopes(self) -> None:
         initial = self.runtime_queue.enqueue_read_model_refreshes_if_inactive(
-            scope_type="search",
+            scope_type="workbench_relation",
             scope_keys=["2026-02", "2026-03"],
             reason="api_source_versions_stale",
         )
@@ -592,7 +592,7 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(
             self.runtime_queue.enqueue_read_model_refreshes_if_inactive(
-                scope_type="search",
+                scope_type="workbench_relation",
                 scope_keys=["2026-02", "2026-03"],
                 reason="api_source_versions_stale",
             ),
@@ -600,7 +600,7 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         )
 
         mixed = self.runtime_queue.enqueue_read_model_refreshes_if_inactive(
-            scope_type="search",
+            scope_type="workbench_relation",
             scope_keys=["2026-02", "2026-04"],
             reason="api_source_versions_stale",
         )
@@ -614,11 +614,11 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
                 (
                     select count(*)::integer
                     from job.read_model_dirty_scopes
-                    where scope_type = 'search'
+                    where scope_type = 'workbench_relation'
                       and status in ('pending', 'processing')
                 ) as active_dirty_count
             from job.outbox_events
-            where event_type = 'search.read_model.refresh'
+            where event_type = 'workbench_relation.read_model.refresh'
             """
         )
         self.assertEqual(counts["active_event_count"], 3)

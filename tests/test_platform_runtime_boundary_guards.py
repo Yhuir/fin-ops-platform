@@ -529,8 +529,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 "GridFSObjectMigrationService": 0,
                 "LegacyGridFSFileReader": 0,
                 "MongoOAAdapter": 0,
-                "WorkbenchPairRelationService": 1,
-                "pair_relation_service": 6,
+                "WorkbenchPairRelationService": 0,
+                "pair_relation_service": 0,
             },
             "backend/src/fin_ops_platform/services/runtime_worker_handlers.py": {
                 "WorkbenchPairRelationService": 0,
@@ -2802,34 +2802,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_no_oa_bank_batch_derived_lifecycle_uses_explicit_executor_boundary(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        executor_path = SERVICES_ROOT / "no_oa_bank_batch_derived_lifecycle_executor.py"
-        executor_source = executor_path.read_text(encoding="utf-8") if executor_path.exists() else ""
-        violations: list[str] = []
-
-        removed_helper = "_derived_lifecycle_no_oa_bank_batch_executor"
-        if _function_source(server_tree, server_source, removed_helper):
-            violations.append(f"server.py still owns removed no-OA bank batch lifecycle executor {removed_helper}")
-        if "NoOaBankBatchDerivedLifecycleExecutor(" not in server_source:
-            violations.append("server.py does not build the explicit no-OA bank batch lifecycle executor")
-        if '"no_oa_bank_batch_read_model": self._no_oa_bank_batch_derived_lifecycle_executor().execute' not in server_source:
-            violations.append("derived lifecycle registry does not use the explicit no-OA bank batch executor")
-        if "class NoOaBankBatchDerivedLifecycleExecutor" not in executor_source:
-            violations.append("no-OA bank batch lifecycle executor service is missing")
-        for snippet in (
-            "def execute(",
-            'reason=str(domain_plan.get("reason") or "derived_lifecycle_no_oa_bank_batch")',
-            '"deleted_counts": {"no_oa_bank_batch_read_models": 0}',
-            '"enqueued_jobs": ["no_oa_bank_batch.read_model.refresh"] if enqueued else []',
-        ):
-            if snippet not in executor_source:
-                violations.append(f"no-OA bank batch lifecycle executor is missing behavior {snippet}")
-
-        self.assertEqual(violations, [])
-
     def test_output_invoice_collection_boundary_does_not_depend_on_redis_or_rabbitmq_clients(self) -> None:
         output_invoice_collection_paths = {
             APP_ROOT / "routes_output_invoice_collections.py",
@@ -3126,7 +3098,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
     def test_downstream_relation_read_models_use_workbench_relation_distribution(self) -> None:
         downstream_paths = {
-            SERVICES_ROOT / "search_sql_projection.py",
             SERVICES_ROOT / "invoice_relation_query_context.py",
             SERVICES_ROOT / "input_invoice_usage_service.py",
             SERVICES_ROOT / "output_invoice_collection_service.py",
@@ -5081,47 +5052,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_no_oa_read_model_refresh_does_not_run_relation_repairs(self) -> None:
-        path = SERVICES_ROOT / "no_oa_bank_batch_read_model_refresh.py"
-        source = path.read_text(encoding="utf-8")
-        tree = _parse(path)
-        handler_source = _function_source(tree, source, "handle_runtime_event")
-
-        violations: list[str] = []
-        if "class NoOaBankBatchReadModelPersistencePort" not in source:
-            violations.append("No-OA read model refresh persistence port is missing")
-        if "save_public_snapshot" not in handler_source:
-            violations.append("No-OA read model refresh must persist through the explicit persistence boundary")
-        if "apply_relation_repairs=False" not in handler_source:
-            violations.append("No-OA read model refresh must call refresh_batches with apply_relation_repairs=False")
-        for forbidden in (
-            "save_no_oa_bank_batches",
-            "save_workbench_pair_relations",
-            "save_no_oa_bank_batch_mutation",
-            "create_active_relation",
-            "cancel_relation",
-        ):
-            if forbidden in handler_source:
-                violations.append(f"No-OA read model refresh keeps relation write side effect {forbidden}")
-
-        self.assertEqual(violations, [])
-
-    def test_no_oa_list_read_model_uses_repository_port(self) -> None:
-        path = SERVICES_ROOT / "no_oa_bank_batch_application_service.py"
-        source = path.read_text(encoding="utf-8")
-        tree = _parse(path)
-        list_source = _function_source(tree, source, "list_batches_payload")
-
-        violations: list[str] = []
-        if "NoOaBankBatchReadModelRepositoryPort" not in source:
-            violations.append("No-OA application service must import the read model repository port")
-        if "_no_oa_bank_batch_read_model_repository" not in list_source:
-            violations.append("No-OA list path must read through the dedicated no-OA read model repository port")
-        if "_workbench_sql_read_repository" in list_source:
-            violations.append("No-OA list path must not read through broad workbench_sql_read_repository")
-
-        self.assertEqual(violations, [])
-
     def test_no_oa_mutation_persistence_requires_atomic_boundary(self) -> None:
         path = SERVICES_ROOT / "no_oa_bank_batch_application_service.py"
         source = path.read_text(encoding="utf-8")
@@ -5140,6 +5070,28 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"No-OA mutation persistence still falls back to broad state-store write {forbidden}")
 
         self.assertEqual(violations, [])
+
+    def test_search_and_no_oa_read_model_runtime_stays_retired(self) -> None:
+        retired_files = (
+            "search_service.py",
+            "search_sql_projection.py",
+            "search_read_model_refresh.py",
+            "search_read_model_refresh_producer.py",
+            "search_read_model_repository.py",
+            "search_query_freshness_service.py",
+            "no_oa_bank_batch_read_model_refresh.py",
+            "no_oa_bank_batch_read_model_refresh_producer.py",
+            "no_oa_bank_batch_read_model_repository.py",
+            "no_oa_bank_batch_derived_lifecycle_executor.py",
+        )
+        self.assertFalse(any((SERVICES_ROOT / name).exists() for name in retired_files))
+
+        server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
+        no_oa_source = (SERVICES_ROOT / "no_oa_bank_batch_application_service.py").read_text(encoding="utf-8")
+        self.assertNotIn('"/api/search"', server_source)
+        self.assertNotIn("_no_oa_bank_batch_read_model_repository", no_oa_source)
+        self.assertIn("self.refresh_batches(", no_oa_source)
+        self.assertIn("self._no_oa_bank_batch_service.list_batches", no_oa_source)
 
     def test_bank_account_balance_derived_lifecycle_runtime_is_retired(self) -> None:
         server_path = APP_ROOT / "server.py"
@@ -5182,64 +5134,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if retired_reference in accounts_source:
                 violations.append(f"Bank Details accounts path still references {retired_reference}")
-
-        self.assertEqual(violations, [])
-
-    def test_no_oa_source_version_helpers_stay_out_of_application(self) -> None:
-        path = APP_ROOT / "server.py"
-        source = path.read_text(encoding="utf-8")
-        tree = _parse(path)
-
-        violations: list[str] = []
-        for removed_helper in (
-            "_no_oa_bank_batch_source_versions",
-            "_no_oa_bank_batch_stale_reasons",
-        ):
-            if _function_source(tree, source, removed_helper):
-                violations.append(f"server.py still owns removed no-OA helper {removed_helper}")
-
-        service_source = (SERVICES_ROOT / "no_oa_bank_batch_application_service.py").read_text(encoding="utf-8")
-        if "def no_oa_bank_batch_source_versions(" not in service_source:
-            violations.append("NoOaBankBatchApplicationService no longer owns no-OA source version calculation")
-        if "def no_oa_bank_batch_stale_reasons(" not in service_source:
-            violations.append("NoOaBankBatchApplicationService no longer owns no-OA stale reason calculation")
-
-        self.assertEqual(violations, [])
-
-    def test_no_oa_bank_batch_refresh_enqueue_uses_producer_boundary(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        producer_path = SERVICES_ROOT / "no_oa_bank_batch_read_model_refresh_producer.py"
-        producer_source = producer_path.read_text(encoding="utf-8")
-        app_service_path = SERVICES_ROOT / "no_oa_bank_batch_application_service.py"
-        app_service_source = app_service_path.read_text(encoding="utf-8")
-        app_service_tree = _parse(app_service_path)
-
-        violations: list[str] = []
-        if _function_source(server_tree, server_source, "_enqueue_no_oa_bank_batch_read_model_refreshes"):
-            violations.append("server.py still owns no-OA bank batch refresh enqueue helper")
-        if 'enqueue_many("no_oa_bank_batch"' in server_source or "enqueue_many('no_oa_bank_batch'" in server_source:
-            violations.append("server.py still directly enqueues no-OA bank batch refresh scopes")
-
-        app_factory_source = _function_source(server_tree, server_source, "_no_oa_bank_batch_read_model_refresh_producer")
-        if "NoOaBankBatchReadModelRefreshProducer" not in app_factory_source:
-            violations.append("Application no longer assembles NoOaBankBatchReadModelRefreshProducer")
-        if "read_model_refresh_producer=self._no_oa_bank_batch_read_model_refresh_producer()" not in server_source:
-            violations.append("NoOaBankBatchApplicationService is not wired with the refresh producer")
-        if "enqueue_refresh=self._no_oa_bank_batch_read_model_refresh_producer().enqueue" not in server_source:
-            violations.append("NoOaBankBatchDerivedLifecycleExecutor is not wired with the refresh producer")
-
-        if "class NoOaBankBatchReadModelRefreshProducer" not in producer_source:
-            violations.append("NoOaBankBatchReadModelRefreshProducer is missing")
-        if "def normalize_scope_keys(" not in producer_source:
-            violations.append("NoOaBankBatchReadModelRefreshProducer no longer owns scope normalization")
-        if 'enqueue_many(\n                "no_oa_bank_batch"' not in producer_source:
-            violations.append("NoOaBankBatchReadModelRefreshProducer no longer enqueues through the gateway")
-
-        enqueue_source = _function_source(app_service_tree, app_service_source, "enqueue_background_refresh")
-        if "_read_model_refresh_producer.enqueue(scope_keys, reason=reason)" not in enqueue_source:
-            violations.append("NoOaBankBatchApplicationService does not prefer the injected refresh producer")
 
         self.assertEqual(violations, [])
 
@@ -5459,98 +5353,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             for forbidden in ("no_oa", "NO_OA", "免OA", "LEGACY_ERROR_CODES"):
                 if forbidden in source:
                     violations.append(f"{_relative(path)} keeps bank-flow legacy marker {forbidden}")
-
-        self.assertEqual(violations, [])
-
-    def test_search_rebuild_helpers_stay_out_of_application(self) -> None:
-        path = APP_ROOT / "server.py"
-        source = path.read_text(encoding="utf-8")
-        tree = _parse(path)
-
-        violations: list[str] = []
-        for removed_helper in (
-            "rebuild_search_index_scope",
-            "_build_search_index_rows_for_month",
-        ):
-            if _function_source(tree, source, removed_helper):
-                violations.append(f"server.py still owns removed search rebuild helper {removed_helper}")
-
-        projection_source = (SERVICES_ROOT / "search_sql_projection.py").read_text(encoding="utf-8")
-        if "def rebuild_search_index_scope(" not in projection_source:
-            violations.append("SearchSqlProjectionBuilder no longer owns search index rebuild")
-        if "SearchReadModelRepositoryPort" not in projection_source:
-            violations.append("Search projection no longer saves through SearchReadModelRepositoryPort")
-
-        self.assertEqual(violations, [])
-
-    def test_search_query_freshness_helpers_stay_out_of_application(self) -> None:
-        path = APP_ROOT / "server.py"
-        source = path.read_text(encoding="utf-8")
-        tree = _parse(path)
-
-        violations: list[str] = []
-        for removed_helper in (
-            "_get_search_payload_from_sql_read_model",
-            "_search_index_expected_source_versions",
-        ):
-            if _function_source(tree, source, removed_helper):
-                violations.append(f"server.py still owns removed search query freshness helper {removed_helper}")
-
-        handle_search_source = _function_source(tree, source, "_handle_api_search")
-        if "_search_query_freshness_service().get_payload" not in handle_search_source:
-            violations.append("/api/search route no longer delegates SQL freshness payloads to SearchQueryFreshnessService")
-
-        service_source = (SERVICES_ROOT / "search_query_freshness_service.py").read_text(encoding="utf-8")
-        if "class SearchQueryFreshnessService" not in service_source:
-            violations.append("SearchQueryFreshnessService is missing")
-        if 'payload.get("refresh_status")' not in service_source:
-            violations.append("SearchQueryFreshnessService no longer honors repository freshness status")
-        if 'reason="api_stale"' not in service_source:
-            violations.append("SearchQueryFreshnessService no longer requests stale scope convergence")
-
-        self.assertEqual(violations, [])
-
-    def test_search_refresh_producer_helpers_stay_out_of_application(self) -> None:
-        path = APP_ROOT / "server.py"
-        source = path.read_text(encoding="utf-8")
-        tree = _parse(path)
-
-        violations: list[str] = []
-        for removed_helper in (
-            "_enqueue_search_read_model_refresh",
-            "_invalidate_search_read_model_scopes",
-        ):
-            if _function_source(tree, source, removed_helper):
-                violations.append(f"server.py still owns removed search refresh helper {removed_helper}")
-
-        app_factory_source = _function_source(tree, source, "_search_read_model_refresh_producer")
-        if "SearchReadModelRefreshProducer" not in app_factory_source:
-            violations.append("Application no longer assembles SearchReadModelRefreshProducer")
-
-        service_source = (SERVICES_ROOT / "search_read_model_refresh_producer.py").read_text(encoding="utf-8")
-        if "class SearchReadModelRefreshProducer" not in service_source:
-            violations.append("SearchReadModelRefreshProducer is missing")
-        if 'enqueue_many(\n                "search"' not in service_source:
-            violations.append("SearchReadModelRefreshProducer no longer enqueues search scopes through the gateway")
-
-        oa_projection_sync_source = (SERVICES_ROOT / "oa_projection_sync.py").read_text(encoding="utf-8")
-        if 'enqueue_many("search"' in oa_projection_sync_source or "enqueue_many('search'" in oa_projection_sync_source:
-            violations.append("OAProjectionSyncService still bypasses SearchReadModelRefreshProducer for search refresh")
-
-        runtime_worker_handlers_source = (SERVICES_ROOT / "runtime_worker_handlers.py").read_text(encoding="utf-8")
-        for bypass in (
-            '_enqueue_scopes("search"',
-            "_enqueue_scopes('search'",
-            'enqueue_many("search"',
-            "enqueue_many('search'",
-        ):
-            if bypass in runtime_worker_handlers_source:
-                violations.append("Runtime worker handlers still bypass SearchReadModelRefreshProducer for search refresh")
-                break
-
-        search_refresh_source = (SERVICES_ROOT / "search_read_model_refresh.py").read_text(encoding="utf-8")
-        if "SearchReadModelRefreshProducer" not in search_refresh_source:
-            violations.append("SearchReadModelRefreshService no longer uses SearchReadModelRefreshProducer")
 
         self.assertEqual(violations, [])
 
@@ -7630,7 +7432,7 @@ class RuntimeWorkerEtcImportLinkExistingTests(unittest.TestCase):
 
     def test_etc_invoice_refresh_does_not_enqueue_page_read_models(self) -> None:
         api_source = inspect.getsource(server_module.Application._refresh_after_etc_invoice_link)
-        self.assertIn("clear_cache", api_source)
+        self.assertNotIn("search", api_source)
         self.assertNotIn("_execute_explicit_maintenance_lifecycle", api_source)
         self.assertNotIn("enqueue", api_source)
 

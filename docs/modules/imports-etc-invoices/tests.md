@@ -31,7 +31,7 @@
 | ETC import service | `EtcService.preview_import_zips(...)`、`confirm_business_batch_import(...)` | import session freshness、duplicate/idempotency、attachments、business batch merge、partial success |
 | Import processing | `ImportProcessingService.execute_etc_invoice_import_confirm_job(...)` | 创建/复用 task-scoped business batch、background progress、mark imported/failed、保存 ETC metadata/PDF/XML 附件关系，并只关联已存在 canonical invoice |
 | Import cleanup | `EtcReconciliationImportCleanupService`、`EtcBusinessBatchDeleteService` | 删除/重导只清理 ETC task/import batch/business batch 自有事实和 changed months，不调用通用 import service 删除或改写 canonical invoice |
-| 页面访问收敛 | import processor、各消费页 fresh gate、`ReadModelRefreshGateway` | `etc_import_confirmed` 只提交 canonical metadata/source version，普通确认零页面 dirty/outbox；ETC 票据、Workbench/relation/matching、invoice lifecycle、tax offset、search、Cost 分别在访问或重新激活时按 exact scope 收敛；historical repair 不进入热路径 |
+| 页面访问收敛 | import processor、各消费页 owner | `etc_import_confirmed` 只提交 canonical metadata/source version，普通确认零页面 dirty/outbox；ETC 票据、Workbench/relation/matching、invoice lifecycle、tax offset、Cost 分别在访问或重新激活时按各自合同读取；historical repair 不进入热路径 |
 | App Status / worker | `import` worker、`app_status_*_registry.py`、`tests/test_platform_runtime_boundary_guards.py` | `etc_invoice_import` job readiness、`import.process.requested` envelope、全局 status 不能误判 ready，且 runtime ETC import link helper 不得调用 canonical invoice create API |
 
 ## 场景覆盖清单
@@ -50,7 +50,7 @@
 - ETC import result 必须保存 ETC metadata/附件并关联已存在 canonical invoices；缺失 canonical invoice 时不得自动创建，也不得把不同 invoice number 的相同金额票据错误合并。
 - runtime worker 的 ETC import link helper 必须只调用 `upsert_etc_invoice` 的 link-existing 入口；缺失 canonical invoice 时不得调用 `upsert_invoice`、`create_invoice` 或 `register_invoice` 等创建入口。
 - 删除导入结果或 business batch 时不得调用通用 import service 做 legacy canonical cleanup；响应不得暴露 `removedCanonicalInvoiceCount` 之类旧清理字段。
-- confirm 只有在 existing canonical metadata 真实变化时才触发精确月份 `etc_import_confirmed`；无匹配或幂等重放必须零 refresh。关联台、税金和 search 走直接 owner，成本由 Workbench publish 后有序收敛。
+- confirm 只有在 existing canonical metadata 真实变化时才触发精确月份 `etc_import_confirmed`；无匹配或幂等重放必须零 refresh。关联台、税金走各自 owner，成本由 Workbench publish 后有序收敛。
 - 后续 business batch OA draft create/replay 不触发 downstream；manual submitted/not-submitted 只触发精确 `etc_business_batch_status_changed`，保护 summary/普通发票可见性但不直刷税金、成本或历史修复；delete 继续保护 summary row、ETC metadata 释放和关联台 relation 取消。
 
 ## 七类测试适用性
@@ -99,8 +99,8 @@
 - Browser e2e smoke：ready task 加载 -> 选择 ETC 对账任务 -> 上传两份 zip -> preview audit/新增/重复/附件补齐/异常项 -> confirm -> `etc_invoice_import` background job feedback -> ETC 票据/税金抵扣/成本统计 fresh read model 展示导入证据 -> 无导入失败/后台导入失败/read model 失败可见残留。
 - Browser negative smoke：ready task 加载 -> zip preview -> confirm 返回 `preview_stale`、`stale_reconciliation_task_preview` 或 500 -> 错误可见 -> 无“已开始后台导入” -> 不走通用 `/imports/files/confirm`。
 - 120 张合成 ETC 发票 + PDF + duplicate XML + malformed XML -> preview summary 分别报告 imported / duplicatesSkipped / failed，且 list invoices 仍为空。
-- ETC import confirm -> ETC metadata/已存在 canonical invoice 真变更 -> 精确月份 `etc_import_confirmed` -> Workbench/税金/search；之后访问 Cost 时先收敛 Workbench 精确月份，再收敛 Cost 自身。无变化重放停在 link boundary。
-- Staging/生产 smoke：真实 ETC zip confirm 后证明显式 import 合同中的 Workbench、Workbench relation、invoice lifecycle、tax offset 精确 scope 收敛；随后独立访问 Cost，证明 normal GET 同次登记的 exact Workbench dependency 与 requested Cost scope由 worker按门槛收敛。不得用 `workbench_shard_published` 或 import 直投 Cost 作为通过条件；search 是 cache clear，不属于 `*.read_model.refresh` profile。
+- ETC import confirm -> ETC metadata/已存在 canonical invoice 真变更 -> 精确月份 `etc_import_confirmed` -> Workbench/税金；之后访问 Cost 时先收敛 Workbench 精确月份，再读取 Cost。无变化重放停在 link boundary。
+- Staging/生产 smoke：真实 ETC zip confirm 后证明显式 import 合同中的 Workbench、Workbench relation、invoice lifecycle、tax offset 精确 scope 收敛；随后独立访问 Cost，证明 normal GET 同次登记的 exact Workbench dependency 与 requested Cost scope 按门槛收敛。不得用 `workbench_shard_published` 或 import 直投 Cost 作为通过条件；已退休 Search 不属于 profile。
 - task 被 reopen 或 source file 删除 -> 旧 zip preview invalidated -> confirm 返回 stale -> 前端清空 preview 并要求重新预览。
 - business batch 创建 OA 草稿 -> 用户手工确认 submitted -> 关联台展示 folded `etc_invoice_summary`；删除 submitted batch -> summary 释放、relation 取消；只有原本已存在于统一发票池的发票才可能回到普通发票视图。
 
@@ -143,7 +143,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
   --lookback-hours 24
 ```
 
-该命令审计 ETC 导入后核心下游 `*.read_model.refresh` 事件；它不替代真实对象存储/OA 草稿/大 zip smoke，也不替代 search cache clear 和页面最终 fresh 展示检查。
+该命令审计 ETC 导入后核心下游 owner event；它不替代真实对象存储/OA 草稿/大 zip smoke，也不替代页面最终展示检查。
 
 ## Nightly CI 覆盖
 
@@ -154,7 +154,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 - 本地已覆盖 120 张合成 ETC 发票、PDF、同包重复 XML 和 malformed XML preview 分离计数；真实票根网 zip、PDF/XML/TXT 混合包、超大 zip、异常编码、重复票号和缺失附件样本仍需 staging/manual smoke。
 - 真实对象存储、Postgres/RabbitMQ/Redis/systemd import worker drain、worker crash/retry、RabbitMQ wakeup 未由本地单测完全证明；`write_operation_slo_audit --operation etc_import_confirmed` 已有本地契约测试，但仍需要 staging 中真实 ETC confirm 样本产生 recent outbox rows 才能证明真实 write-flow。
 - 真实 OA 草稿创建、人工提交确认、Nginx `/api/` 和 `/fin-ops-api/` 代理路径仍需发布后 smoke。
-- Browser e2e 当前覆盖 deterministic mock 下的 ready task zip preview/confirm job feedback、ETC 票据批次、税金抵扣和成本统计下游 fresh read model；大数据 ETC business batch 列表、真实 worker 完成后的 Workbench/search/historical repair 展示、长任务源文件、真实浏览器导出/删除/网络恢复仍是 `documented-risk`。
+- Browser e2e 当前覆盖 deterministic mock 下的 ready task zip preview/confirm job feedback、ETC 票据批次、税金抵扣和成本统计下游展示；大数据 ETC business batch 列表、真实 worker 完成后的 Workbench/historical repair 展示、长任务源文件、真实浏览器导出/删除/网络恢复仍是 `documented-risk`。
 - 共享 `import.process.requested` 仍是多导入域 fallback；具体 ETC confirm job 通过 `etc_invoice_import.source` 精确指向 ETC 导入页和 ETC 票据域。
 
 ## 2026-07-15 历史失败覆盖证明
@@ -166,5 +166,5 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 ## 2026-07-22 Phase 27 写后零 fan-out 回归
 
 - `tests/test_import_processing_service.py`：ETC confirm 仍按真实 changed months 关联 canonical facts、保持幂等与 durable job recovery；无变化重放为零影响，普通完成不发布页面 read-model refresh。
-- 共享导入前端与 ETC 页面测试：完成后只重新读取当前可见页，不等待 tax/search/workbench/cost barrier；其它页面首次访问时按自己的 freshness owner 收敛。
+- 共享导入前端与 ETC 页面测试：完成后只重新读取当前可见页，不等待 tax/workbench/cost barrier；其它页面首次访问时按自己的 owner 合同读取。
 - 旧 `etc_import_confirmed` SLO 中“必须观察到核心下游 refresh 事件”的要求已被零 fan-out 合同取代。

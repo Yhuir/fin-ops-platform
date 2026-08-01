@@ -175,7 +175,6 @@ DEFAULT_API_PROBES: tuple[HttpProbe, ...] = (
     HttpProbe("import_facts_batches", "/api/import-facts/batches?page=1&page_size=50", expected_statuses=(200, 202)),
     HttpProbe("import_facts_files", "/api/import-facts/files?page=1&page_size=50", expected_statuses=(200, 202)),
     HttpProbe("import_facts_invoices", "/api/import-facts/invoices?page=1&page_size=50", expected_statuses=(200, 202)),
-    HttpProbe("search_all", "/api/search?q=%E5%85%AC%E5%8F%B8&scope=all&month=all&limit=5", expected_statuses=(200, 202)),
 )
 
 

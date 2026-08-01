@@ -149,8 +149,8 @@ class RuntimeStatePolicyTests(unittest.TestCase):
         repository_root = Path(__file__).resolve().parents[1]
         production_worker_files = [
             repository_root / "backend/src/fin_ops_platform/app/worker.py",
-            repository_root / "backend/src/fin_ops_platform/services/search_read_model_refresh.py",
-            repository_root / "backend/src/fin_ops_platform/services/search_sql_projection.py",
+            repository_root / "backend/src/fin_ops_platform/services/workbench_read_model_refresh.py",
+            repository_root / "backend/src/fin_ops_platform/services/workbench_relation_read_model_refresh.py",
         ]
         forbidden_tokens = (
             "build_application",

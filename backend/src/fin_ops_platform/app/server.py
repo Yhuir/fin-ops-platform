@@ -194,12 +194,6 @@ from fin_ops_platform.services.no_oa_bank_batch_application_service import (
     NoOaBankBatchApplicationService,
     NoOaPairRelationSnapshotPort,
 )
-from fin_ops_platform.services.no_oa_bank_batch_derived_lifecycle_executor import (
-    NoOaBankBatchDerivedLifecycleExecutor,
-)
-from fin_ops_platform.services.no_oa_bank_batch_read_model_refresh_producer import (
-    NoOaBankBatchReadModelRefreshProducer,
-)
 from fin_ops_platform.services.no_oa_bank_batch_service import (
     NO_OA_BANK_BATCH_RELATION_MODE,
     NoOaBankBatchService,
@@ -316,14 +310,6 @@ from fin_ops_platform.services.read_model_freshness import (
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.reconciliation import ManualReconciliationService
 from fin_ops_platform.services.runtime_bootstrap import RuntimeRepositoryContext
-from fin_ops_platform.services.search_query_freshness_service import (
-    SearchQueryFreshnessService,
-)
-from fin_ops_platform.services.search_read_model_refresh_producer import SearchReadModelRefreshProducer
-from fin_ops_platform.services.search_service import MONTH_RE as SEARCH_MONTH_RE
-from fin_ops_platform.services.search_service import SUPPORTED_SCOPES as SEARCH_SUPPORTED_SCOPES
-from fin_ops_platform.services.search_service import SUPPORTED_STATUSES as SEARCH_SUPPORTED_STATUSES
-from fin_ops_platform.services.search_service import SearchService
 from fin_ops_platform.services.seeds import build_demo_seed
 from fin_ops_platform.services.settings_data_reset_service import (
     SettingsDataResetPairSnapshotPort,
@@ -505,6 +491,7 @@ def _build_content_disposition(filename: str) -> str:
     return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded_name}"
 
 ROW_ID_MONTH_RE = re.compile(r"(20\d{2})(\d{2})")
+MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
 
 class Application:
     def __init__(self, *, data_dir: Path | None = None, bootstrap_mode: str | None = None) -> None:
@@ -701,7 +688,6 @@ class Application:
         )
         self._workbench_sql_read_repository = getattr(self._state_store, "workbench_sql_read_repository", None)
         self._workbench_sql_projection_builder = getattr(self._state_store, "workbench_sql_projection_builder", None)
-        self._search_sql_read_repository = getattr(self._state_store, "search_sql_read_repository", None)
         self._workbench_relation_sql_read_repository = getattr(self._state_store, "workbench_relation_sql_read_repository", None)
         state_connection = getattr(self._state_store, "_connection", None)
         has_postgres = (
@@ -715,7 +701,6 @@ class Application:
             PostgresOutputInvoiceCollectionQueryRepository(state_connection) if has_postgres else None
         )
         self._oa_pending_payment_sql_read_repository = getattr(self._state_store, "oa_pending_payment_sql_read_repository", None)
-        self._no_oa_bank_batch_sql_read_repository = getattr(self._state_store, "no_oa_bank_batch_sql_read_repository", None)
         self._bank_flow_rule_batch_canonical_query_repository = getattr(
             self._state_store,
             "bank_flow_rule_batch_canonical_query_repository",
@@ -1024,10 +1009,6 @@ class Application:
         )
         self._configure_tax_offset_application_services()
         self._configure_cost_statistics_application_services()
-        self._search_service = SearchService(
-            known_months_loader=self._list_search_months,
-            canonical_rows_loader=self._list_canonical_search_rows,
-        )
         self._workbench_pair_relation_persist_version = 0
         self._pending_workbench_pair_relation_case_ids: set[str] = set()
         self._workbench_group_detail_api_routes = self._build_workbench_group_detail_api_routes()
@@ -1582,21 +1563,6 @@ class Application:
             return self._handle_api_operations_app_health_dashboard(headers)
         if method == "GET" and route_path == "/api/operations/app-health/page-audit":
             return self._handle_api_operations_page_audit(query, headers)
-        if method == "GET" and route_path == "/api/search":
-            q = query.get("q", [""])[0]
-            scope = query.get("scope", ["all"])[0]
-            month = query.get("month", ["all"])[0]
-            project_name = query.get("project_name", [None])[0]
-            status = query.get("status", [None])[0]
-            limit = query.get("limit", [None])[0]
-            return self._handle_api_search(
-                q=q,
-                scope=scope,
-                month=month,
-                project_name=project_name,
-                status=status,
-                limit=limit,
-            )
         if method == "GET" and route_path == "/api/background-jobs/active":
             return self._handle_api_background_jobs_active(headers)
         if method == "GET" and route_path.startswith("/api/background-jobs/"):
@@ -1850,7 +1816,6 @@ class Application:
                 "/matching/results",
                 "/api/workbench",
                 "/api/workbench/groups/detail",
-                "/api/search",
                 "/api/bank-details/auto-tag-rules/reapply",
                 "/api/bank-details/accounts",
                 "/api/bank-details/transactions",
@@ -1981,7 +1946,6 @@ class Application:
                 "oa_session_foundation",
                 "project_costing_foundation",
                 "workbench_v2_backend_contracts",
-                "workbench_global_search_foundation",
                 "cost_statistics_foundation",
                 "cost_statistics_export",
                 "etc_invoice_management",
@@ -3744,94 +3708,6 @@ class Application:
             },
         )
 
-    def _handle_api_search(
-        self,
-        *,
-        q: str,
-        scope: str | None,
-        month: str | None,
-        project_name: str | None,
-        status: str | None,
-        limit: str | None,
-    ) -> Response:
-        resolved_scope = scope or "all"
-        resolved_month = month or "all"
-        resolved_status = status or None
-        try:
-            resolved_limit = int(limit) if limit not in (None, "") else 20
-        except (TypeError, ValueError):
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_search_request", "message": "limit must be an integer."},
-            )
-        if resolved_scope not in SEARCH_SUPPORTED_SCOPES:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_search_request", "message": "scope must be all, oa, bank, or invoice."},
-            )
-        if resolved_month != "all" and not SEARCH_MONTH_RE.match(resolved_month):
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_search_request", "message": "month must be all or YYYY-MM."},
-            )
-        if resolved_status is not None and resolved_status not in SEARCH_SUPPORTED_STATUSES:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "invalid_search_request",
-                    "message": "status must be paired, unpaired, ignored, or processed_exception.",
-                },
-            )
-        sql_payload = self._search_query_freshness_service().get_payload(
-            q=q,
-            scope=resolved_scope,
-            month=resolved_month,
-            project_name=project_name,
-            status=resolved_status,
-            limit=resolved_limit,
-        )
-        if sql_payload is not None:
-            status_code = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" and not sql_payload.get("summary", {}).get("total") else HTTPStatus.OK
-            return self._json_response(status_code, sql_payload)
-        if self._requires_sql_read_model_runtime():
-            scope_key = SearchQueryFreshnessService.scope_key(resolved_month)
-            refresh_enqueued = self._search_read_model_refresh_producer().enqueue_one(
-                scope_key,
-                reason="api_sql_repository_unavailable",
-            )
-            payload = SearchQueryFreshnessService.empty_payload(
-                q=q,
-                scope=resolved_scope,
-                month=resolved_month,
-                project_name=project_name,
-                status=resolved_status,
-                limit=resolved_limit,
-                scope_key=scope_key,
-            )
-            payload["error"] = "read_model_unavailable"
-            payload["read_model_status"] = "unavailable"
-            payload["refresh_enqueued"] = refresh_enqueued
-            payload["message"] = "Search SQL read model repository is not configured for production runtime."
-            return self._json_response(HTTPStatus.SERVICE_UNAVAILABLE, payload)
-        payload = self._search_service.search(
-            q=q,
-            scope=resolved_scope,
-            month=resolved_month,
-            project_name=project_name,
-            status=resolved_status,
-            limit=resolved_limit,
-        )
-        return self._json_response(HTTPStatus.OK, payload)
-
-    def _search_query_freshness_service(self) -> SearchQueryFreshnessService:
-        return SearchQueryFreshnessService(
-            read_repository=getattr(self, "_search_sql_read_repository", None),
-            enqueue_refresh=self._search_read_model_refresh_producer().enqueue_one,
-        )
-
-    def _search_read_model_refresh_producer(self) -> SearchReadModelRefreshProducer:
-        return SearchReadModelRefreshProducer(refresh_gateway_provider=self._read_model_refresh_gateway)
-
     def _etc_invoice_routes(self) -> EtcInvoiceApiRoutes:
         routes = getattr(self, "_etc_invoice_api_routes", None)
         if isinstance(routes, EtcInvoiceApiRoutes):
@@ -4378,7 +4254,7 @@ class Application:
                 getattr(etc_invoice, "passage_start_date", None),
                 getattr(etc_invoice, "passage_end_date", None),
             ):
-                if isinstance(date_value, str) and SEARCH_MONTH_RE.match(date_value[:7]):
+                if isinstance(date_value, str) and MONTH_SCOPE_RE.match(date_value[:7]):
                     changed_months.add(date_value[:7])
         return sorted(changed_months)
 
@@ -4417,29 +4293,27 @@ class Application:
         normalized_months = [
             month
             for month in sorted(dict.fromkeys(str(month).strip() for month in changed_months))
-            if SEARCH_MONTH_RE.match(month)
+            if MONTH_SCOPE_RE.match(month)
         ]
         if not normalized_months:
             return
         _ = reason
-        self._search_service.clear_cache()
 
     def _refresh_after_etc_business_batch_status_change(self, changed_months: list[str], *, reason: str) -> None:
         normalized_months = [
             month
             for month in sorted(dict.fromkeys(str(month).strip() for month in changed_months))
-            if SEARCH_MONTH_RE.match(month)
+            if MONTH_SCOPE_RE.match(month)
         ]
         if not normalized_months:
             return
         _ = reason
-        self._search_service.clear_cache()
 
     def _refresh_after_historical_etc_repair_link(self, changed_months: list[str], *, reason: str) -> None:
         normalized_months = [
             month
             for month in sorted(dict.fromkeys(str(month).strip() for month in changed_months))
-            if SEARCH_MONTH_RE.match(month)
+            if MONTH_SCOPE_RE.match(month)
         ]
         if not normalized_months:
             return
@@ -5019,11 +4893,9 @@ class Application:
         }
         if not scope_keys:
             return
-        promoted_count = self._promote_oa_attachment_invoices_to_canonical(scope_keys)
+        self._promote_oa_attachment_invoices_to_canonical(scope_keys)
         scope_keys.add("all")
         normalized_scope_keys = sorted(scope_keys)
-        if promoted_count:
-            self._search_service.clear_cache()
         for scope_key in normalized_scope_keys:
             self._enqueue_oa_projection_sync_refresh(scope_key, reason="oa_attachment_invoice_cache")
 
@@ -5039,7 +4911,7 @@ class Application:
         promoted_count = 0
         promoted_invoices: dict[str, object] = {}
         for month in sorted(scope_keys):
-            if not SEARCH_MONTH_RE.match(month):
+            if not MONTH_SCOPE_RE.match(month):
                 continue
             for record in list_application_records(month):
                 record_id = str(getattr(record, "id", "") or "").strip()
@@ -6030,7 +5902,6 @@ class Application:
                 except TypeError:
                     method(event)
                 break
-        self._search_service.clear_cache()
 
     def _settings_oa_manual_import_affected_scope_keys(
         self,
@@ -6050,7 +5921,7 @@ class Application:
             for row in self._workbench_query_service.list_record_snapshots():
                 if str(row.get("id", "")).strip() in normalized_row_ids:
                     month = str(row.get("_month", "")).strip()
-                    if SEARCH_MONTH_RE.match(month):
+                    if MONTH_SCOPE_RE.match(month):
                         scope_keys.add(month)
             list_application_records_by_row_ids = getattr(
                 self._workbench_query_service._oa_adapter,
@@ -6061,12 +5932,11 @@ class Application:
                 try:
                     for record in list_application_records_by_row_ids(sorted(normalized_row_ids)):
                         month = str(getattr(record, "month", "") or "").strip()
-                        if SEARCH_MONTH_RE.match(month):
+                        if MONTH_SCOPE_RE.match(month):
                             scope_keys.add(month)
                 except Exception:
                     pass
         resolved_scope_keys = sorted(scope_keys)
-        self._search_service.clear_cache()
         invalidate_records_cache = getattr(self._workbench_query_service._oa_adapter, "invalidate_records_cache", None)
         if callable(invalidate_records_cache):
             invalidate_records_cache([scope_key for scope_key in resolved_scope_keys if scope_key != "all"])
@@ -6076,13 +5946,13 @@ class Application:
     def _settings_oa_manual_import_month_from_row(row: dict[str, object]) -> str:
         for key in ("month", "application_date", "apply_date", "date"):
             value = str(row.get(key) or "").strip()
-            if len(value) >= 7 and SEARCH_MONTH_RE.match(value[:7]):
+            if len(value) >= 7 and MONTH_SCOPE_RE.match(value[:7]):
                 return value[:7]
         for item in list(row.get("items") or []):
             if not isinstance(item, dict):
                 continue
             value = str(item.get("date") or "").strip()
-            if len(value) >= 7 and SEARCH_MONTH_RE.match(value[:7]):
+            if len(value) >= 7 and MONTH_SCOPE_RE.match(value[:7]):
                 return value[:7]
         return ""
 
@@ -6784,12 +6654,8 @@ class Application:
             pair_relation_snapshot_port=NoOaPairRelationSnapshotPort(self._workbench_pair_relation_service),
             state_store=self._state_store,
             tag_selection_service=self._no_oa_bank_batch_tag_selection_service,
-            no_oa_bank_batch_read_model_repository=getattr(self, "_no_oa_bank_batch_sql_read_repository", None),
             workbench_matching_source_versions_provider=self._bank_batch_workbench_source_versions,
             bank_transaction_category_affected_months_provider=self._bank_transaction_category_affected_months,
-            search_cache_clearer=self._search_service.clear_cache,
-            queue_repository=getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None),
-            read_model_refresh_producer=self._no_oa_bank_batch_read_model_refresh_producer(),
             relation_facade=self._workbench_relation_read_facade(),
             relation_command_service=self._workbench_relation_command_service(
                 repository=self._state_store,
@@ -6828,7 +6694,6 @@ class Application:
             bank_batch_query_repository=query_repository,
             workbench_matching_source_versions_provider=self._bank_batch_workbench_source_versions,
             bank_transaction_category_affected_months_provider=self._bank_transaction_category_affected_months,
-            search_cache_clearer=self._search_service.clear_cache,
             relation_command_service=self._workbench_relation_command_service(
                 repository=self._state_store,
                 save_repository=False,
@@ -6909,9 +6774,6 @@ class Application:
             load_json_body=self._load_json_body,
             default_auto_tag_rules_source_provider=self._default_bank_auto_tag_rules_file_source,
         )
-
-    def _no_oa_bank_batch_read_model_refresh_producer(self) -> NoOaBankBatchReadModelRefreshProducer:
-        return NoOaBankBatchReadModelRefreshProducer(refresh_gateway_provider=self._read_model_refresh_gateway)
 
     def _no_oa_bank_batch_workbench_payload_decorator(self) -> NoOaBankBatchWorkbenchPayloadDecorator:
         return NoOaBankBatchWorkbenchPayloadDecorator(batch_provider=self._no_oa_bank_batch_service.get_batch)
@@ -7167,7 +7029,7 @@ class Application:
             if not isinstance(payload, dict):
                 continue
             month = str(payload.get("trade_time") or payload.get("txn_date") or "")[:7]
-            if SEARCH_MONTH_RE.match(month):
+            if MONTH_SCOPE_RE.match(month):
                 months.add(month)
         return sorted(months)
 
@@ -7179,7 +7041,7 @@ class Application:
             if not isinstance(row, dict):
                 continue
             month = str(row.get("trade_time") or row.get("txn_date") or "")[:7]
-            if SEARCH_MONTH_RE.match(month):
+            if MONTH_SCOPE_RE.match(month):
                 months.add(month)
         return sorted(months)
 
@@ -7193,7 +7055,6 @@ class Application:
                 except TypeError:
                     method(event)
                 break
-        self._search_service.clear_cache()
 
     def _handle_live_workbench_confirm_link(
         self,
@@ -8088,7 +7949,7 @@ class Application:
                 if len(raw_value) < 7:
                     continue
                 month = raw_value[:7]
-                if SEARCH_MONTH_RE.match(month):
+                if MONTH_SCOPE_RE.match(month):
                     months.add(month)
                     break
         return cls._expand_workbench_matching_months(months)
@@ -8098,7 +7959,7 @@ class Application:
         expanded: set[str] = set()
         for month in months:
             normalized_month = str(month or "").strip()
-            if not SEARCH_MONTH_RE.match(normalized_month):
+            if not MONTH_SCOPE_RE.match(normalized_month):
                 continue
             expanded.add(normalized_month)
             expanded.add(cls._shift_month(normalized_month, -1))
@@ -8147,7 +8008,7 @@ class Application:
             if len(raw_value) < 7:
                 continue
             month = raw_value[:7]
-            if SEARCH_MONTH_RE.match(month):
+            if MONTH_SCOPE_RE.match(month):
                 months.add(month)
         return sorted(months)
 
@@ -8170,7 +8031,7 @@ class Application:
                 if len(raw_value) < 7:
                     continue
                 month = raw_value[:7]
-                if SEARCH_MONTH_RE.match(month):
+                if MONTH_SCOPE_RE.match(month):
                     months.add(month)
                     break
         return sorted(months) if months else ["all"]
@@ -8188,7 +8049,7 @@ class Application:
                 if len(raw_value) < 7:
                     continue
                 month = raw_value[:7]
-                if SEARCH_MONTH_RE.match(month):
+                if MONTH_SCOPE_RE.match(month):
                     months.add(month)
                     break
         return sorted(months)
@@ -8204,7 +8065,7 @@ class Application:
         normalized_months = [
             str(month).strip()
             for month in list(scope_months or [])
-            if SEARCH_MONTH_RE.match(str(month).strip())
+            if MONTH_SCOPE_RE.match(str(month).strip())
         ]
         normalized_months = sorted(dict.fromkeys(normalized_months))
         if not normalized_months:
@@ -8254,7 +8115,7 @@ class Application:
         normalized_months = [
             str(month).strip()
             for month in list(scope_months or [])
-            if SEARCH_MONTH_RE.match(str(month).strip())
+            if MONTH_SCOPE_RE.match(str(month).strip())
         ]
         normalized_months = sorted(dict.fromkeys(normalized_months))
         if not normalized_months:
@@ -8404,7 +8265,6 @@ class Application:
             self._emit_workbench_persistence_warning(operation=operation, detail=str(exc))
 
     def _persist_state(self) -> None:
-        self._search_service.clear_cache()
         if self._state_store is None:
             return
         persistence_calls = [
@@ -8438,7 +8298,6 @@ class Application:
         *,
         import_state_payload: dict[str, object],
     ) -> None:
-        self._search_service.clear_cache()
         if self._state_store is not None:
             payload = dict(import_state_payload or {})
             if not payload or set(payload) - {"imports", "file_imports"}:
@@ -8465,7 +8324,6 @@ class Application:
     ) -> None:
         if transaction is None:
             raise StatePersistenceError("transaction is required for Workbench pair relation persistence.")
-        self._search_service.clear_cache()
         snapshot = (
             self._workbench_pair_relation_service.snapshot_case_ids(changed_case_ids)
             if changed_case_ids is not None
@@ -8499,7 +8357,6 @@ class Application:
             service = WorkbenchPairRelationPersistService(
                 pair_relation_service=self._workbench_pair_relation_service,
                 state_store=self._state_store,
-                clear_search_cache=lambda: self._search_service.clear_cache(),
                 emit_action_timing=lambda **kwargs: self._emit_workbench_action_timing(**kwargs),
                 duration_ms=self._duration_ms,
                 initial_version=getattr(self, "_workbench_pair_relation_persist_version", 0),
@@ -8601,7 +8458,6 @@ class Application:
         return rows
 
     def _save_workbench_overrides_snapshot(self, *, changed_row_ids: list[str] | None = None) -> None:
-        self._search_service.clear_cache()
         if self._state_store is None:
             return
         self._state_store.save_workbench_overrides(
@@ -8610,7 +8466,6 @@ class Application:
         )
 
     def _save_workbench_exception_cases_snapshot(self) -> None:
-        self._search_service.clear_cache()
         if self._state_store is None:
             return
         self._state_store.save_workbench_exception_cases(
@@ -8619,20 +8474,6 @@ class Application:
 
     def _persist_workbench_overrides(self, *, changed_row_ids: list[str] | None = None) -> None:
         self._save_workbench_overrides_snapshot(changed_row_ids=changed_row_ids)
-
-    def _list_search_months(self) -> list[str]:
-        months = set(self._workbench_query_service.list_available_months())
-        months.update(
-            invoice.invoice_date[:7]
-            for invoice in self._import_service.list_invoices()
-            if invoice.invoice_date
-        )
-        months.update(
-            transaction.txn_date[:7]
-            for transaction in self._import_service.list_transactions()
-            if transaction.txn_date
-        )
-        return sorted(month for month in months if month)
 
     def _serialize_file_session(self, session: object) -> dict[str, object]:
         return {
@@ -8678,9 +8519,9 @@ class Application:
         if not parser_version:
             return False
         normalized_scope_key = str(scope_key or "").strip() or "all"
-        if normalized_scope_key != "all" and not SEARCH_MONTH_RE.match(normalized_scope_key):
+        if normalized_scope_key != "all" and not MONTH_SCOPE_RE.match(normalized_scope_key):
             normalized_scope_key = self._workbench_base_scope_key(normalized_scope_key)
-        if normalized_scope_key != "all" and not SEARCH_MONTH_RE.match(normalized_scope_key):
+        if normalized_scope_key != "all" and not MONTH_SCOPE_RE.match(normalized_scope_key):
             return False
         queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
         enqueue = getattr(queue_repository, "enqueue", None)
@@ -8708,14 +8549,6 @@ class Application:
         )
         return True
 
-
-    def _list_canonical_search_rows(self, month: str) -> list[dict[str, object]]:
-        read_repository = getattr(self, "_workbench_canonical_query_repository", None)
-        list_search_rows = getattr(read_repository, "list_canonical_search_rows", None)
-        if not callable(list_search_rows):
-            raise RuntimeError("Workbench canonical search-row repository is not configured.")
-        scope_key = self._workbench_scope_key(month)
-        return self._serialize_value(list_search_rows(scope_key=scope_key))
 
     def _list_workbench_ignored_rows_for_write(self, month: str) -> list[dict[str, object]]:
         read_repository = getattr(self, "_workbench_sql_read_repository", None)
@@ -8864,8 +8697,6 @@ class Application:
         executors = {
             "workbench_relation_read_model": self._workbench_relation_derived_lifecycle_executor().execute,
             "workbench_matching_dirty_scopes": self._derived_lifecycle_dirty_scopes_executor,
-            "no_oa_bank_batch_read_model": self._no_oa_bank_batch_derived_lifecycle_executor().execute,
-            "search_cache": self._derived_lifecycle_search_cache_executor,
             "oa_adapter_records_cache": self._derived_lifecycle_oa_adapter_cache_executor,
             "historical_etc_repair_state": self._derived_lifecycle_historical_etc_executor,
         }
@@ -8919,25 +8750,6 @@ class Application:
                 **kwargs,
             ),
         )
-
-    def _no_oa_bank_batch_derived_lifecycle_executor(self) -> NoOaBankBatchDerivedLifecycleExecutor:
-        return NoOaBankBatchDerivedLifecycleExecutor(
-            enqueue_refresh=self._no_oa_bank_batch_read_model_refresh_producer().enqueue,
-        )
-
-    def _derived_lifecycle_search_cache_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
-        self._search_service.clear_cache()
-        reason = str(domain_plan.get("reason") or "derived_lifecycle_search")
-        metadata = self._read_model_refresh_metadata(domain_plan)
-        self._search_read_model_refresh_producer().enqueue(
-            self._domain_plan_scope_keys(domain_plan) or ["all"],
-            reason=reason,
-            metadata=metadata,
-        )
-        return {
-            "deleted_counts": {"search_cache": 1},
-            "invalidated_scopes": self._domain_plan_scope_keys(domain_plan),
-        }
 
     def _derived_lifecycle_oa_adapter_cache_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
         adapter = self._workbench_query_service._oa_adapter
@@ -9003,7 +8815,7 @@ class Application:
                 part
                 for scope_key in list(scope_keys or [])
                 for part in str(scope_key).split(":")
-                if SEARCH_MONTH_RE.match(str(part).strip())
+                if MONTH_SCOPE_RE.match(str(part).strip())
             }
         )
 

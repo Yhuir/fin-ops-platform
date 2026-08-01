@@ -28,7 +28,7 @@
 ## 当前闭环状态
 
 - 状态：当前 runtime 合同已收敛并关闭；每次生产发布仍按 App Health、worker registry 和运维 runbook 验证实际实例、backlog、freshness 与页面读链，不以历史迁移阶段文字代替当前证据。
-- 当前 registry/manifest 登记 `workbench` active-generation 页面 read model，以及 `workbench_relation`、`search`、`no_oa_bank_batch` 三个共享 projection。共享 projection 只服务各自独立消费者，不能作为 canonical 直读页面的运行时依赖。
+- 当前 registry/manifest 只登记 `workbench` active-generation 页面 read model 与共享 `workbench_relation` projection。Search API/index runtime 与 no-OA projection 已删除；no-OA 列表改为 canonical query。
 - 关联台继续通过 freshness/status/enqueue、Redis fresh cache 和 Workbench worker 读取 active generation。银行明细、待找发票、进项发票使用、销项发票收款、OA 待付款、税金抵扣和流水规则批量处理直接读取 canonical PostgreSQL snapshot；成本统计、外部往来、批量账务与 ETC 也保持各自 canonical query 边界。
 - BankFlow 未提交候选由页面请求内实时推导；没有 draft event、worker、readiness、dirty scope、manifest 或 replay。`app.bank_flow_rule_batches/events` 只保留正式状态和历史。
 - migration `0127_direct_canonical_page_runtime_retirement.sql` 是纯 no-op 退休标记；旧 outbox、dirty scope、readiness 与历史物理 projection 表均不改写、不删除，完整保留上一版本回滚能力。deploy preflight 先停止/disable 退休 instance 并要求退休 runtime 不存在 `processing`；门禁通过后才停止仍登记的上一版本 worker。门禁失败不会中断 import/matching/保留 read-model worker。
@@ -37,15 +37,15 @@
 
 只有登记的 read model 查询才走 freshness/status/enqueue 边界。refresh 入队前必须通过统一 scope policy/gateway 做 normalize、validate 和 dedupe；`RuntimeQueueRepository` 只负责 durable queue 持久化。
 
-`read_model_scope_policy.py`、`read_model_manifest.py`、`APP_STATUS_READ_MODEL_REGISTRY` 和 runtime worker registry 必须具有同一组 read-model key：`workbench`、`workbench_relation`、`search`、`no_oa_bank_batch`。Manifest 声明的 primary/auxiliary worker instances 必须与 runtime registry 中同 key 的全部实例双向相等；当前 `workbench` 对应 `workbench`、`workbench-secondary`。canonical 页面不得在任何一个 registry 中重新出现，也不得读取其历史 projection、readiness 或 dirty scope。
+`read_model_scope_policy.py`、`read_model_manifest.py`、`APP_STATUS_READ_MODEL_REGISTRY` 和 runtime worker registry 必须具有同一组 read-model key：`workbench`、`workbench_relation`。每项只对应一个 worker instance：`workbench`、`workbench-relation`。canonical 页面或已删除的 Search/no-OA runtime 不得在任何 registry 中重新出现，也不得读取其历史 projection、readiness 或 dirty scope。
 
 canonical 页面 GET 以一次 `REPEATABLE READ / READ ONLY` snapshot 为读取边界，直接返回业务 payload；不返回页面 `read_model_status`，不因 GET enqueue，写后只重新执行当前页面 normal GET。缺少 canonical repository 是配置错误，必须 fail fast，不能回退到历史 projection。
 
-共享 `workbench_relation` 可以继续服务仍需 distribution 的独立消费者，但页面是否保留它只由实际消费者决定。Search 和 no-OA 保持各自现有合同；ETC 没有独立页面 read model，Workbench matching 仍是 canonical relation 生产任务而不是页面 projection。
+共享 `workbench_relation` 可以继续服务仍需 distribution 的独立消费者，但是否保留只由实际消费者决定。Search runtime 已删除，no-OA 改为 canonical query；ETC 没有独立页面 read model，Workbench matching 仍是 canonical relation 生产任务而不是页面 projection。
 
 ## 模块 IO 合同
 
-本模块的 IO 合同覆盖当前四个 App Status read model；具体页面的业务字段、筛选、导出和 UI copy 仍由对应 `docs/modules/<page>/` 维护。
+本模块的 IO 合同覆盖当前两个 App Status read model；具体页面的业务字段、筛选、导出和 UI copy 仍由对应 `docs/modules/<page>/` 维护。
 
 ### 输入合同
 
@@ -79,7 +79,7 @@ canonical 页面 GET 以一次 `REPEATABLE READ / READ ONLY` snapshot 为读取�
 ### 权限与审计合同
 
 - route 可以读取 HTTP/session 并映射 actor、tenant、permission；service 只能接收 actor/permission 结果，不能直接读取 HTTP header/cookie 或 import `app.auth`。
-- read model 查询权限由业务 API/session owner 负责，例如 `bank_details_api_session`、`pending_invoices_api_session`、`search_api_session`；本模块只要求 query path 不绕过业务 API。
+- read model 查询权限由业务 API/session owner 负责；本模块只要求 query path 不绕过业务 API。
 - force refresh、runtime repair、scope cleanup 和 production smoke 必须通过 runbook 或受控工具执行，并记录 scope、reason、actor/approver、audit/rollback manifest；不得记录 secrets、tokens、原始敏感 payload。
 
 ### Public surface
@@ -108,7 +108,7 @@ canonical 页面 GET 以一次 `REPEATABLE READ / READ ONLY` snapshot 为读取�
 | Legacy path | 当前状态 | 保留条件 | 禁止行为 | 测试证明 |
 | --- | --- | --- | --- | --- |
 | 已退休页面历史 projection 代码/物理表 | `rollback-only` | 只供上一版本回滚；0127 不删表 | 在当前 registry、worker、RabbitMQ、App Status、scope policy 或页面 GET 中重新接线 | `tests/test_runtime_worker_registry.py`、`tests/test_read_model_manifest.py`、`tests/test_postgres_migrations.py` |
-| Workbench/Search/no-OA/workbench relation worker lanes | `active` | 只服务各自登记消费者 | 被无关 canonical 页面用作 freshness/readiness 依赖 | `tests/test_runtime_worker_registry.py`、`tests/test_read_model_manifest.py` |
+| Workbench/workbench relation worker | `active` | 只服务各自登记消费者 | 被无关 canonical 页面用作 freshness/readiness 依赖 | `tests/test_runtime_worker_registry.py`、`tests/test_read_model_manifest.py` |
 | fan-out-only `all` scope | `quarantined semantics` | 只作为 refresh command 或明确 aggregate rebuild target | 发布不可查询 parent fresh proof；页面等待永不发布的 parent | `tests/test_read_model_manifest.py`、scope/gateway/query runtime tests |
 | broad shared SQL repository | `transition owner` | SQL/table knowledge 过渡期集中；公共方法必须有单一 manifest owner | 新增未登记跨模块方法或让业务 service 依赖 broad repository surface | `tests/test_read_model_manifest.py`、repository port isolation tests |
 
@@ -120,14 +120,12 @@ Scoped incremental projection 可以在当前 SQL view 已 fresh 且 `source_ver
 
 ## Read model 合同清单
 
-下表是当前四个 App Status read model 的合同索引，内容与 `READ_MODEL_MANIFEST` 保持一致，并由 `tests/test_read_model_manifest.py` 防漂移。
+下表是当前两个 App Status read model 的合同索引，内容与 `READ_MODEL_MANIFEST` 保持一致，并由 `tests/test_read_model_manifest.py` 防漂移。
 
 | read_model_key | scope_type | 分区 key | 增量目标 | full rebuild fallback | freshness proof | force refresh / operation barrier |
 | --- | --- | --- | --- | --- | --- | --- |
 | `workbench` | `workbench` | month_scope active generation; all aggregates active month shards | workbench active generation rows, groups, summaries and details for affected month scopes | gateway force refresh rebuilds requested active month generation or all aggregate from canonical facts | active generation metadata, expected relation/rule and scoped canonical object source_versions, active pending claim version, and current-effective dirty/outbox state | `gateway_force_refresh_active_generation_scope` / `app_status_registry_target` |
 | `workbench_relation` | `workbench_relation` | relation month_scope; all is fan-out only | workbench relation distribution rows and groups for affected month scopes | gateway force refresh fan-out rebuilds relation month shards and marks empty scopes | workbench_relation scope source_versions plus app_status readiness and current-effective dirty/outbox state | `gateway_force_refresh` / `app_status_registry_target` |
-| `search` | `search` | search source month_scope; all is fan-out only | search index rows for affected month scopes | gateway force refresh all enumerates search month shards through the search refresh producer | search index source_versions plus current-effective dirty/outbox state | `gateway_force_refresh` / `app_status_registry_target` |
-| `no_oa_bank_batch` | `no_oa_bank_batch` | legacy no-OA bank batch month_scope; all is fan-out only | legacy no-OA bank batch public rows for affected month scopes | gateway force refresh all enumerates no-OA month shards through the refresh producer | no-OA source_versions plus app_status readiness and current-effective dirty/outbox state; non-critical production page SLO | `gateway_force_refresh` / `app_status_registry_target` |
 
 以下段落只保留为 0127 之前的历史设计说明，不是当前 runtime 合同：
 
@@ -143,9 +141,9 @@ fan-out-only `all` refresh 还必须维护子 scope 集合的收敛：worker 发
 
 `/api/operation-barrier/status` 只保留给显式 import/reapply/job 或 manifest 声明的 exact target；不得用于普通 canonical 页面确认、撤回或规则保存。Workbench 使用自身 freshness/write gate。
 
-当前运行时 manifest、scope policy、App Status registry 和 worker registry 必须精确等于 `workbench`、`workbench_relation`、`search`、`no_oa_bank_batch`。自动 matching 直接写 canonical active relations；Workbench refresh 由自己的 dirty scope/worker 收敛，只有仍消费共享 relation distribution 的独立下游刷新 `workbench_relation`。
+当前运行时 manifest、scope policy、App Status registry 和 worker registry 必须精确等于 `workbench`、`workbench_relation`。自动 matching 直接写 canonical active relations；Workbench refresh 由自己的 dirty scope/worker 收敛，只有仍消费共享 relation distribution 的独立下游刷新 `workbench_relation`。
 
-生产旧 runtime 状态通过 `scripts/check-read-model-scope-contracts.py` 检查和修复。默认只读检查 `job.read_model_dirty_scopes`、`job.outbox_events` 与 `read_model.app_status_readiness` 中不符合当前四个 registry key 的行并生成 repair manifest；`--apply` 只删除 policy 明确判定 invalid 的旧行，不补投已退役页面 refresh。当前未覆盖 failure 必须保留为真实 blocker，不能为了 App Status 变绿而删除。
+生产旧 runtime 状态通过 `scripts/check-read-model-scope-contracts.py` 检查和修复。默认只读检查 `job.read_model_dirty_scopes`、`job.outbox_events` 与 `read_model.app_status_readiness` 中不符合当前两个 registry key 的行并生成 repair manifest；`--apply` 只删除 policy 明确判定 invalid 的旧行，不补投已退役页面 refresh。当前未覆盖 failure 必须保留为真实 blocker，不能为了 App Status 变绿而删除。
 
 ## 维护触发器
 

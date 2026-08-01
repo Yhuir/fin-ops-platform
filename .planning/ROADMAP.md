@@ -783,4 +783,24 @@ Plans:
 
 - [x] 38-01-PLAN — ETC lifecycle summary, flat workspace, legacy cleanup, regression gates, deployment and production verification.
 
+### Phase 39: Runtime Worker 拓扑收敛与旧派生链删除
+
+**Goal:** Remove unconsumed Search and No-OA derived runtimes plus pure capacity replicas, preserve canonical relation/business owners, and converge the required production topology from 11 to 6 workers without adding a replacement framework.
+**Requirements:** User-approved worker architecture reduction; no new product requirement IDs.
+**Depends on:** Phase 38 verified release baseline and the current canonical-query-first contracts.
+**Canonical refs:** `.planning/phases/39-runtime-worker-topology-convergence/39-01-PLAN.md`, `docs/modules/runtime-workers/boundary-io.md`, `docs/modules/read-models/boundary-io.md`, `docs/modules/no-oa-bank-batches/boundary-io.md`, `docs/operations/runtime-worker-governance.md`
+**Success Criteria** (what must be TRUE):
+
+  1. Required worker inventory is exactly six instances and release activation disables every removed instance.
+  2. Search API/read model/runtime and the three capacity replicas are deleted with no UI, queue, health, env, test or docs residue.
+  3. No-OA canonical relation and Workbench internal-transfer commands remain; its legacy list API reads canonical facts directly and its read model/worker are deleted.
+  4. Workbench generation, relation distribution, OA sync, import and settings maintenance correctness/rollback contracts remain unchanged.
+  5. Full local gates, one pushed main deployment and T+300 production evidence prove queue drain, freshness, API performance, page isolation and rollback readiness.
+
+**Plans:** 0/1 plans complete
+
+Plans:
+
+- [ ] 39-01-PLAN — Runtime topology convergence, legacy derived-chain deletion, regression gates, deployment and production verification.
+
 ---

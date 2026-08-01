@@ -36,8 +36,8 @@
 
 所有页面必须通过后端 domain registry 接入全局状态平面。新增页面、read model、worker 或后台任务类型时，需要同步更新 registry、readiness projection 和测试，不能只在前端页面里显示局部状态。canonical 直读页面的 domain readiness 只能依赖 PostgreSQL/runtime 健康，不得虚构页面 read model readiness。
 
-domain registry 是页面域入口；`AppStatusReadModelRegistry` 登记 `workbench` 页面 read model，
-以及 `workbench_relation`、`search`、`no_oa_bank_batch` 三个共享 read model。它们从
+domain registry 是页面域入口；`AppStatusReadModelRegistry` 只登记 `workbench` 页面 read model
+和共享 `workbench_relation` read model。它们从
 `read_model.app_status_readiness` 和 current-effective queue 状态得到
 `fresh/missing/refreshing/stale/failed/unavailable`，但不作为 canonical 页面 GET 的
 freshness gate。
@@ -100,8 +100,8 @@ freshness gate。
 
 ## 共享 Read Model 与后台任务
 
-- `workbench`、`workbench_relation`、`search`、`no_oa_bank_batch` 仍通过 gateway、durable queue、
-  worker 和 App Status 闭环，只服务各自登记消费者。
+- `workbench`、`workbench_relation` 通过 gateway、durable queue、worker 和 App Status 闭环，只服务各自登记消费者。
+- Search API/index runtime 已删除；legacy no-OA 列表请求内从 canonical batch facts 推导，不读取 projection、readiness 或 queue。
 - Workbench matching/rebuild、OA sync 和 import processing 是 canonical integration/domain jobs。
 - `bank_flow_rule_batches` 的未提交候选由请求内 live builder 实时推导，没有 event、worker、replay 或页面 projection；正式 submitted/withdrawn/history 继续读取持久化事实。
 - `/api/operation-barrier/status` 只保留给合同明确返回非空 target 的 maintenance/job；

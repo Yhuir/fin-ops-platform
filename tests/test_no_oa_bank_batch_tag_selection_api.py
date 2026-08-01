@@ -171,7 +171,7 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         self.assertEqual(fee_tag["output_sub_label"], saved_fee_rule["output_sub_label"])
         self.assertEqual(fee_tag["direction"], "expense")
 
-    def test_tag_selection_starts_empty_and_no_oa_list_fails_closed_without_read_model(self) -> None:
+    def test_tag_selection_starts_empty_and_no_oa_list_reads_canonical_batches_directly(self) -> None:
         app = build_application()
         preview = app._import_service.preview_import(
             batch_type=BatchType.BANK_TRANSACTION,
@@ -211,8 +211,8 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         self.assertTrue(initial_fee_rule["requires_oa"])
         self.assertTrue(initial_fee_rule["requires_invoice"])
         self.assertEqual(empty_batches["batches"], [])
-        self.assertEqual(empty_batches["read_model_status"], "unavailable")
-        self.assertTrue(empty_batches["refresh_enqueued"])
+        self.assertNotIn("read_model_status", empty_batches)
+        self.assertNotIn("refresh_enqueued", empty_batches)
 
         save_response = app.handle_request(
             "PUT",
@@ -229,8 +229,8 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         self.assertEqual(save_response.status_code, 200)
         self.assertEqual(_json(save_response)["selected_tag_codes"], [])
         self.assertEqual(still_blocked_batches["batches"], [])
-        self.assertEqual(still_blocked_batches["read_model_status"], "unavailable")
-        self.assertTrue(still_blocked_batches["refresh_enqueued"])
+        self.assertNotIn("read_model_status", still_blocked_batches)
+        self.assertNotIn("refresh_enqueued", still_blocked_batches)
 
         next_selection = _json(save_response)
         save_response = app.handle_request(
@@ -251,11 +251,12 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
             _json(save_response)["requirements_by_tag_code"]["fee"],
             {"requires_oa": False, "requires_invoice": False},
         )
-        self.assertEqual(enabled_batches["batches"], [])
-        self.assertEqual(enabled_batches["read_model_status"], "unavailable")
-        self.assertTrue(enabled_batches["refresh_enqueued"])
+        self.assertEqual(len(enabled_batches["batches"]), 1)
+        self.assertEqual(enabled_batches["batches"][0]["batch_type"], "fee")
+        self.assertNotIn("read_model_status", enabled_batches)
+        self.assertNotIn("refresh_enqueued", enabled_batches)
         self.assertNotIn(("no_oa_bank_batch", "all", "no_oa_bank_batch_tag_selection_changed"), queue.enqueued)
-        self.assertIn(("no_oa_bank_batch", "all", "api_no_oa_read_model_unavailable"), queue.enqueued)
+        self.assertEqual(queue.enqueued, [])
 
     def test_new_auto_tag_rule_is_available_but_not_selected_by_default(self) -> None:
         app = build_application()

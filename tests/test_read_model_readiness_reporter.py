@@ -18,8 +18,8 @@ class RecordingReadinessRepository:
 
 def _event(
     *,
-    event_type: str = "search.read_model.refresh",
-    scope_type: str = "search",
+    event_type: str = "workbench_relation.read_model.refresh",
+    scope_type: str = "workbench_relation",
     scope_key: str = "2026-05",
     source_version: int | None = 7,
 ) -> RuntimeQueueEvent:
@@ -46,18 +46,18 @@ class ReadModelReadinessReporterTests(unittest.TestCase):
 
         reporter.record_event_success(
             _event(),
-            {"scope_key": "2026-05", "row_count": 0, "source_versions": {"search_schema_version": 8}},
+            {"scope_key": "2026-05", "row_count": 0, "source_versions": {"relation_schema_version": 8}},
         )
 
         self.assertEqual(len(repository.records), 1)
         record = repository.records[0]
         self.assertEqual(record["tenant_id"], "tenant-a")
-        self.assertEqual(record["read_model_key"], "search")
-        self.assertEqual(record["scope_type"], "search")
+        self.assertEqual(record["read_model_key"], "workbench_relation")
+        self.assertEqual(record["scope_type"], "workbench_relation")
         self.assertEqual(record["scope_key"], "2026-05")
         self.assertEqual(record["status"], "fresh")
         self.assertEqual(record["row_count"], 0)
-        self.assertEqual(record["source_versions"], {"search_schema_version": 8})
+        self.assertEqual(record["source_versions"], {"relation_schema_version": 8})
         self.assertEqual(record["generated_at"], datetime(2026, 6, 4, tzinfo=UTC))
 
     def test_records_failed_then_reraises_wrapped_handler_exception(self) -> None:
@@ -73,7 +73,7 @@ class ReadModelReadinessReporterTests(unittest.TestCase):
             wrapped(_event())
 
         self.assertEqual(repository.records[0]["status"], "failed")
-        self.assertEqual(repository.records[0]["read_model_key"], "search")
+        self.assertEqual(repository.records[0]["read_model_key"], "workbench_relation")
         self.assertEqual(repository.records[0]["last_error"], "projection failed")
 
     def test_dependency_not_fresh_exception_records_refreshing_not_failed(self) -> None:
@@ -88,16 +88,16 @@ class ReadModelReadinessReporterTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "bank_detail_read_model_not_fresh"):
             wrapped(
                 _event(
-                    event_type="no_oa_bank_batch.read_model.refresh",
-                    scope_type="no_oa_bank_batch",
+                    event_type="workbench_relation.read_model.refresh",
+                    scope_type="workbench_relation",
                     scope_key="2026-04",
                 )
             )
 
         self.assertEqual(len(repository.records), 1)
         record = repository.records[0]
-        self.assertEqual(record["read_model_key"], "no_oa_bank_batch")
-        self.assertEqual(record["scope_type"], "no_oa_bank_batch")
+        self.assertEqual(record["read_model_key"], "workbench_relation")
+        self.assertEqual(record["scope_type"], "workbench_relation")
         self.assertEqual(record["scope_key"], "2026-04")
         self.assertEqual(record["status"], "refreshing")
         self.assertEqual(record["last_error"], "bank_detail_read_model_not_fresh")
@@ -126,15 +126,15 @@ class ReadModelReadinessReporterTests(unittest.TestCase):
 
         reporter.record_event_failure(
             _event(
-                event_type="search.read_model.refresh",
-                scope_type="search",
+                event_type="workbench_relation.read_model.refresh",
+                scope_type="workbench_relation",
                 scope_key="2026-05",
             ),
             RuntimeError("projection failed"),
         )
 
         self.assertEqual(len(repository.records), 1)
-        self.assertEqual(repository.records[0]["read_model_key"], "search")
+        self.assertEqual(repository.records[0]["read_model_key"], "workbench_relation")
         self.assertEqual(repository.records[0]["scope_key"], "2026-05")
         self.assertEqual(repository.records[0]["status"], "failed")
 
@@ -162,16 +162,12 @@ class ReadModelReadinessReporterTests(unittest.TestCase):
         expected_assignments = (
             'handlers["workbench.read_model.refresh"] = _read_model_handler',
             "handlers[WORKBENCH_RELATION_REFRESH_EVENT_TYPE] = _read_model_handler",
-            "handlers[SEARCH_REFRESH_EVENT_TYPE] = _read_model_handler",
-            "handlers[NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE] = _read_model_handler",
         )
         for assignment in expected_assignments:
             self.assertIn(assignment, worker_source)
         self.assertEqual(worker_source.count(" = _read_model_handler("), len(expected_assignments))
-        no_oa_worker_block = worker_source.split(
-            "if args.enable_no_oa_bank_batch_read_model_refresh:", 1
-        )[1].split("if args.enable_import_job_processing:", 1)[0]
-        self.assertIn("queue_repository=queue", no_oa_worker_block)
+        self.assertNotIn("SEARCH_REFRESH_EVENT_TYPE", worker_source)
+        self.assertNotIn("NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE", worker_source)
         for retired_event in (
             "bank_detail.read_model.refresh",
             "bank_account_balance.read_model.refresh",

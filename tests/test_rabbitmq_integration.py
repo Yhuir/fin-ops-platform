@@ -39,16 +39,16 @@ class RabbitMqIntegrationTests(unittest.TestCase):
         try:
             channel = connection.channel()
             RabbitMqTopologyManager(settings).apply(channel)
-            route = rabbitmq_event_routes(settings)["search.read_model.refresh"]
+            route = rabbitmq_event_routes(settings)["workbench_relation.read_model.refresh"]
             event = RuntimeQueueEvent(
                 event_id=str(uuid4()),
                 tenant_id="default",
-                event_type="search.read_model.refresh",
+                event_type="workbench_relation.read_model.refresh",
                 aggregate_type="read_model",
                 aggregate_id="all",
-                scope_type="search",
+                scope_type="workbench_relation",
                 scope_key="all",
-                dedupe_key="search.read_model.refresh:search:all",
+                dedupe_key="workbench_relation.read_model.refresh:workbench_relation:all",
                 payload={"source_version": 1},
                 attempts=0,
                 status="pending",

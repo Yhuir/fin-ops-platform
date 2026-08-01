@@ -220,7 +220,7 @@ class DeployRuntimeExampleTests(unittest.TestCase):
         required = {registration.instance_name: registration for registration in RUNTIME_WORKER_REGISTRY if registration.required}
 
         self.assertIn("workbench", required)
-        self.assertIn("workbench-secondary", required)
+        self.assertNotIn("workbench-secondary", required)
         self.assertNotIn("workbench-aggregate", required)
         self.assertIn("workbench-matching", required)
         self.assertIn("workbench-relation", required)
@@ -231,8 +231,8 @@ class DeployRuntimeExampleTests(unittest.TestCase):
 
         self.assertIn("workbench_relation.read_model.refresh", env_example)
         self.assertIn("workbench.read_model.refresh", env_example)
-        self.assertIn("search.read_model.refresh", env_example)
-        self.assertIn("no_oa_bank_batch.read_model.refresh", env_example)
+        self.assertNotIn("search.read_model.refresh", env_example)
+        self.assertNotIn("no_oa_bank_batch.read_model.refresh", env_example)
         for retired_event in (
             "invoice_lifecycle.read_model.refresh",
             "input_invoice_usage.read_model.refresh",
@@ -254,18 +254,14 @@ class DeployRuntimeExampleTests(unittest.TestCase):
         self.assertIn("migrate_rabbitmq_worker_drain_interval", helper)
         self.assertIn("RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS=0.05", helper)
 
-    def test_search_workers_and_dispatcher_exclude_retired_pending_invoice_refresh(self) -> None:
+    def test_retired_search_workers_are_absent(self) -> None:
         self.assertFalse((REPO_ROOT / "deploy/oa/env/fin-ops.worker.search-pending.env.example").exists())
         self.assertFalse((REPO_ROOT / "deploy/oa/env/fin-ops.worker.search-pending-rabbitmq.env.example").exists())
-        postgres_worker_env = (REPO_ROOT / "deploy/oa/env/fin-ops.worker.search.env.example").read_text()
-        secondary_worker_env = (REPO_ROOT / "deploy/oa/env/fin-ops.worker.search-secondary.env.example").read_text()
+        self.assertFalse((REPO_ROOT / "deploy/oa/env/fin-ops.worker.search.env.example").exists())
+        self.assertFalse((REPO_ROOT / "deploy/oa/env/fin-ops.worker.search-secondary.env.example").exists())
+        self.assertFalse((REPO_ROOT / "deploy/oa/env/fin-ops.worker.search-tertiary.env.example").exists())
         dispatcher_env = DISPATCHER_ENV.read_text()
-
-        for env_example in (postgres_worker_env, secondary_worker_env):
-            self.assertIn("--enable-search-read-model-refresh", env_example)
-            self.assertIn("--event-type search.read_model.refresh", env_example)
-            self.assertNotIn("--enable-pending-invoice-read-model-refresh", env_example)
-            self.assertNotIn("--event-type pending_invoice.read_model.refresh", env_example)
+        self.assertNotIn("search.read_model.refresh", dispatcher_env)
         self.assertNotIn("pending_invoice.read_model.refresh", dispatcher_env)
 
     def test_workbench_generation_prune_runtime_is_installed(self) -> None:

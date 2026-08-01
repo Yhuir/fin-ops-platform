@@ -183,7 +183,6 @@ def _should_execute_many_values(sql: str) -> bool:
     return (
         "insert into read_model.workbench_relation_rows" in normalized
         or "insert into read_model.workbench_relation_groups" in normalized
-        or "insert into read_model.search_index_rows" in normalized
     )
 
 
@@ -338,7 +337,7 @@ OA_PENDING_PAYMENT_OPTION_FIELDS = {
 
 
 
-class PostgresSearchWorkbenchRelationReadModelRepository:
+class PostgresWorkbenchRelationReadModelRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
 
@@ -375,217 +374,6 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
                 if row_versions.get(key) != common_versions[key]:
                     common_versions.pop(key, None)
         return common_versions or {}
-
-    def search_index(
-        self,
-        *,
-        q: str,
-        scope: str,
-        month: str,
-        project_name: str | None,
-        status: str | None,
-        limit: int,
-    ) -> dict[str, Any] | None:
-        query = str(q or "").strip()
-        resolved_scope = str(scope or "all").strip() or "all"
-        resolved_month = str(month or "all").strip() or "all"
-        resolved_limit = max(1, min(int_value(limit, 20), 100))
-        if not query:
-            return _empty_search_payload(query, resolved_scope, resolved_month, project_name, status, resolved_limit)
-        where = ["searchable_text ilike %s"]
-        params: list[Any] = [f"%{query}%"]
-        if resolved_scope != "all":
-            where.append("source_kind = %s")
-            params.append(resolved_scope)
-        if resolved_month != "all":
-            where.append("scope_month = %s::date")
-            params.append(month_start(resolved_month))
-        if status:
-            where.append("status = %s")
-            params.append(status)
-        if project_name:
-            where.append("project_name ilike %s")
-            params.append(f"%{project_name}%")
-        params.append(resolved_limit * 3)
-        rows = self._connection.fetch_all(
-            f"""
-            select source_kind, source_versions, payload, raw_payload
-            from read_model.search_index_rows
-            where {" and ".join(where)}
-            order by generated_at desc, row_id
-            limit %s
-            """,
-            tuple(params),
-        )
-        if not rows:
-            return None
-        grouped = {"oa": [], "bank": [], "invoice": []}
-        source_versions: dict[str, Any] = {}
-        for row in rows:
-            if not source_versions and isinstance(row.get("source_versions"), dict):
-                source_versions = dict(row.get("source_versions"))
-            source_kind = text(row.get("source_kind")) or ""
-            if source_kind not in grouped or len(grouped[source_kind]) >= resolved_limit:
-                continue
-            payload = _read_model_payload(row)
-            if isinstance(payload, dict):
-                grouped[source_kind].append(payload)
-        result = {
-            "query": query,
-            "filters": {
-                "scope": resolved_scope,
-                "month": resolved_month,
-                "project_name": project_name or None,
-                "status": status or None,
-                "limit": resolved_limit,
-            },
-            "summary": {
-                "total": len(grouped["oa"]) + len(grouped["bank"]) + len(grouped["invoice"]),
-                "oa": len(grouped["oa"]),
-                "bank": len(grouped["bank"]),
-                "invoice": len(grouped["invoice"]),
-            },
-            "oa_results": grouped["oa"],
-            "bank_results": grouped["bank"],
-            "invoice_results": grouped["invoice"],
-            "refresh_status": self._refresh_status(scope_type="search", scope_key=resolved_month),
-            "source_versions": source_versions,
-        }
-        return result
-
-    def search_index_scope_summary(self, *, month: str) -> dict[str, Any]:
-        scope_month = month_start(month)
-        scope_key = text(month) or ""
-        if scope_month is None or not scope_key:
-            return {"read_model_status": "missing", "row_count": 0, "source_versions": {}}
-        row = self._connection.fetch_one(
-            """
-            select
-                count(*)::int as row_count,
-                min(source_versions::text) as min_source_versions,
-                max(source_versions::text) as max_source_versions,
-                (array_agg(source_versions order by generated_at desc nulls last))[1] as source_versions
-            from read_model.search_index_rows
-            where scope_month = %s::date
-            """,
-            (scope_month,),
-        )
-        row_count = int_value((row or {}).get("row_count"), 0) if isinstance(row, dict) else 0
-        if row_count <= 0:
-            return {"read_model_status": "missing", "row_count": 0, "source_versions": {}}
-        source_versions = (row or {}).get("source_versions") if isinstance(row, dict) else {}
-        consistent = (
-            isinstance(row, dict)
-            and text(row.get("min_source_versions")) == text(row.get("max_source_versions"))
-        )
-        return {
-            "read_model_status": self._refresh_status(scope_type="search", scope_key=scope_key),
-            "row_count": row_count,
-            "source_versions": dict(source_versions) if consistent and isinstance(source_versions, dict) else {},
-        }
-
-
-    def save_search_index_rows(
-        self,
-        *,
-        scope_key: str,
-        rows: list[dict[str, Any]],
-        source_versions: dict[str, Any] | None = None,
-    ) -> None:
-        scope_month = month_start(scope_key)
-        normalized_source_versions = source_versions if isinstance(source_versions, dict) else {}
-
-        def write(connection: Any) -> None:
-            params_by_row_id: dict[str, tuple[Any, ...]] = {}
-            for row in list(rows or []):
-                row_payload = dict(row) if isinstance(row, dict) else {}
-                row_payload["source_versions"] = normalized_source_versions
-                payload = serialize_value(row_payload.get("payload") if isinstance(row_payload.get("payload"), dict) else row_payload)
-                row_id = text(row_payload.get("row_id") or payload.get("row_id"))
-                if not row_id:
-                    continue
-                params_by_row_id[row_id] = (
-                    row_id,
-                    text(row_payload.get("source_kind") or payload.get("record_type")),
-                    scope_month or month_start(payload.get("month")),
-                    text(row_payload.get("status") or payload.get("zone_hint")),
-                    text(row_payload.get("title") or payload.get("title")),
-                    text(row_payload.get("subtitle") or payload.get("secondary_meta")),
-                    text(row_payload.get("searchable_text")),
-                    text(row_payload.get("project_name")),
-                    text(row_payload.get("counterparty_name")),
-                    decimal_text(row_payload.get("amount")),
-                    jsonb(normalized_source_versions),
-                    text(row_payload.get("generated_at")),
-                    jsonb(payload),
-                    jsonb({"normalized_payload": payload}),
-                )
-            params_seq = list(params_by_row_id.values())
-            if params_seq:
-                _execute_many(
-                    connection,
-                    """
-                    insert into read_model.search_index_rows(
-                        row_id, source_kind, scope_month, status, title, subtitle, searchable_text,
-                        project_name, counterparty_name, amount, source_versions, generated_at, payload, raw_payload
-                    )
-                    values (%s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s)
-                    on conflict (row_id) do update set
-                        source_kind = excluded.source_kind,
-                        scope_month = excluded.scope_month,
-                        status = excluded.status,
-                        title = excluded.title,
-                        subtitle = excluded.subtitle,
-                        searchable_text = excluded.searchable_text,
-                        project_name = excluded.project_name,
-                        counterparty_name = excluded.counterparty_name,
-                        amount = excluded.amount,
-                        source_versions = excluded.source_versions,
-                        generated_at = excluded.generated_at,
-                        payload = excluded.payload,
-                        raw_payload = excluded.raw_payload,
-                        updated_at = now()
-                    where (
-                        read_model.search_index_rows.source_kind,
-                        read_model.search_index_rows.scope_month,
-                        read_model.search_index_rows.status,
-                        read_model.search_index_rows.title,
-                        read_model.search_index_rows.subtitle,
-                        read_model.search_index_rows.searchable_text,
-                        read_model.search_index_rows.project_name,
-                        read_model.search_index_rows.counterparty_name,
-                        read_model.search_index_rows.amount,
-                        read_model.search_index_rows.source_versions,
-                        read_model.search_index_rows.generated_at,
-                        read_model.search_index_rows.payload,
-                        read_model.search_index_rows.raw_payload
-                    ) is distinct from (
-                        excluded.source_kind,
-                        excluded.scope_month,
-                        excluded.status,
-                        excluded.title,
-                        excluded.subtitle,
-                        excluded.searchable_text,
-                        excluded.project_name,
-                        excluded.counterparty_name,
-                        excluded.amount,
-                        excluded.source_versions,
-                        excluded.generated_at,
-                        excluded.payload,
-                        excluded.raw_payload
-                    )
-                    """,
-                    params_seq,
-                )
-                if scope_month is not None:
-                    connection.execute(
-                        "delete from read_model.search_index_rows where scope_month = %s::date and not (row_id = any(%s))",
-                        (scope_month, list(params_by_row_id)),
-                    )
-            elif scope_month is not None:
-                connection.execute("delete from read_model.search_index_rows where scope_month = %s::date", (scope_month,))
-
-        run_in_transaction(self._connection, write)
 
 
     def save_workbench_relation_distribution(
@@ -1867,184 +1655,6 @@ class PostgresSummaryReadModelRepository:
         return "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
 
 
-    def list_no_oa_bank_batch_rows(self, filters: dict[str, Any] | None = None) -> list[dict[str, Any]] | None:
-        return self._list_bank_batch_rows(
-            filters,
-            readiness_scope_type="no_oa_bank_batch",
-            table_name="read_model.no_oa_bank_batch_rows",
-            relation_mode_filter_enabled=True,
-        )
-
-    def _list_bank_batch_rows(
-        self,
-        filters: dict[str, Any] | None = None,
-        *,
-        readiness_scope_type: str,
-        table_name: str,
-        relation_mode_filter_enabled: bool,
-    ) -> list[dict[str, Any]] | None:
-        resolved_filters = filters if isinstance(filters, dict) else {}
-        where: list[str] = ["status <> 'superseded'"]
-        params: list[Any] = []
-        if value := text(resolved_filters.get("month")):
-            where.append("scope_month = %s::date")
-            params.append(month_start(value))
-        if value := text(resolved_filters.get("type")):
-            where.append("batch_type = %s")
-            params.append(value)
-        if value := text(resolved_filters.get("status")):
-            where.append("status = %s")
-            params.append(value)
-        if value := text(resolved_filters.get("bucket")):
-            where.append("status_bucket = %s")
-            params.append(value)
-        if value := text(resolved_filters.get("account_key")):
-            where.append("account_key = %s")
-            params.append(value)
-        if value := text(resolved_filters.get("batch_id")):
-            where.append("batch_id = %s")
-            params.append(value)
-        if relation_mode_filter_enabled and (value := text(resolved_filters.get("relation_mode"))):
-            where.append("coalesce(nullif(payload->>'relation_mode', ''), 'no_oa_bank_batch') = %s")
-            params.append(value)
-        rows = self._connection.fetch_all(
-            f"""
-            select batch_id, source_versions, payload, raw_payload
-            from {table_name}
-            where {" and ".join(where)}
-            order by scope_month desc nulls last, generated_at desc, batch_id
-            """,
-            tuple(params),
-        )
-        if not rows:
-            return [] if self._bank_batch_readiness_is_fresh(
-                readiness_scope_type,
-                text(resolved_filters.get("month")),
-            ) else None
-        result: list[dict[str, Any]] = []
-        for row in rows:
-            payload = _read_model_payload(row)
-            if isinstance(payload, dict):
-                if isinstance(row.get("source_versions"), dict):
-                    payload = {**payload, "source_versions": row.get("source_versions")}
-                result.append(payload)
-            elif batch_id := text(row.get("batch_id")):
-                payload = {"batch_id": batch_id}
-                if isinstance(row.get("source_versions"), dict):
-                    payload["source_versions"] = row.get("source_versions")
-                result.append(payload)
-        return result
-
-    def no_oa_bank_batch_source_versions_summary(self, filters: dict[str, Any] | None = None) -> dict[str, Any] | None:
-        return self._bank_batch_source_versions_summary(
-            filters,
-            readiness_scope_type="no_oa_bank_batch",
-            table_name="read_model.no_oa_bank_batch_rows",
-            relation_mode_filter_enabled=True,
-        )
-
-    def _bank_batch_source_versions_summary(
-        self,
-        filters: dict[str, Any] | None = None,
-        *,
-        readiness_scope_type: str,
-        table_name: str,
-        relation_mode_filter_enabled: bool,
-    ) -> dict[str, Any] | None:
-        resolved_filters = filters if isinstance(filters, dict) else {}
-        where: list[str] = ["status <> 'superseded'"]
-        params: list[Any] = []
-        if value := text(resolved_filters.get("month")):
-            where.append("scope_month = %s::date")
-            params.append(month_start(value))
-        if relation_mode_filter_enabled and (value := text(resolved_filters.get("relation_mode"))):
-            where.append("coalesce(nullif(payload->>'relation_mode', ''), 'no_oa_bank_batch') = %s")
-            params.append(value)
-        row = self._connection.fetch_one(
-            f"""
-            select
-              count(*)::bigint as row_count,
-              count(distinct source_versions)::bigint as distinct_source_versions_count,
-              (array_agg(source_versions order by scope_month desc nulls last, batch_id))[1] as source_versions
-            from {table_name}
-            where {" and ".join(where)}
-            """,
-            tuple(params),
-        ) or {}
-        normalized_month = text(resolved_filters.get("month"))
-        row_count = int_value(row.get("row_count"), 0)
-        if row_count <= 0:
-            if not self._bank_batch_readiness_is_fresh(readiness_scope_type, normalized_month):
-                return None
-            return {
-                "read_model_status": "fresh",
-                "row_count": 0,
-                "source_versions": {},
-            }
-        source_versions = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
-        consistent = int_value(row.get("distinct_source_versions_count"), 0) == 1 and bool(source_versions)
-        readiness_fresh = self._bank_batch_readiness_is_fresh(readiness_scope_type, normalized_month)
-        read_model_status = "fresh" if readiness_fresh else "refreshing"
-        if readiness_fresh and normalized_month and not consistent:
-            read_model_status = "schema_mismatch"
-        return {
-            "read_model_status": read_model_status,
-            "row_count": row_count,
-            "source_versions": source_versions if consistent else {},
-        }
-
-    def _no_oa_bank_batch_readiness_is_fresh(self, scope_key: str | None = None) -> bool:
-        return self._bank_batch_readiness_is_fresh("no_oa_bank_batch", scope_key)
-
-    def _bank_batch_readiness_is_fresh(self, scope_type: str, scope_key: str | None = None) -> bool:
-        normalized_scope_type = text(scope_type) or "no_oa_bank_batch"
-        normalized_scope_key = text(scope_key)
-        candidate_scope_keys = [normalized_scope_key, "all"] if normalized_scope_key else ["all"]
-        refresh_statuses: dict[str, str] = {}
-        if normalized_scope_key:
-            refresh_statuses[normalized_scope_key] = self._refresh_status(
-                scope_type=normalized_scope_type,
-                scope_key=normalized_scope_key,
-            )
-            if refresh_statuses[normalized_scope_key] != "fresh":
-                return False
-        for candidate_scope_key in candidate_scope_keys:
-            if not candidate_scope_key:
-                continue
-            refresh_status = refresh_statuses.get(candidate_scope_key)
-            if refresh_status is None:
-                refresh_status = self._refresh_status(
-                    scope_type=normalized_scope_type,
-                    scope_key=candidate_scope_key,
-                )
-            if refresh_status != "fresh":
-                continue
-            if self._bank_batch_readiness_scope_is_fresh(normalized_scope_type, candidate_scope_key):
-                return True
-        return False
-
-    def _no_oa_bank_batch_readiness_scope_is_fresh(self, scope_key: str) -> bool:
-        return self._bank_batch_readiness_scope_is_fresh("no_oa_bank_batch", scope_key)
-
-    def _bank_batch_readiness_scope_is_fresh(self, scope_type: str, scope_key: str) -> bool:
-        normalized_scope_type = text(scope_type) or "no_oa_bank_batch"
-        row = self._connection.fetch_one(
-            """
-            select status
-            from read_model.app_status_readiness
-            where tenant_id = 'default'
-              and read_model_key = %s
-              and scope_type = %s
-              and scope_key = %s
-            limit 1
-            """,
-            (normalized_scope_type, normalized_scope_type, scope_key),
-        )
-        return isinstance(row, dict) and text(row.get("status")) == "fresh"
-
-
-
-
 
     def _load_table_map(self, sql: str, payload_key: str) -> dict[str, Any]:
         rows = self._connection.fetch_all(sql)
@@ -2155,61 +1765,46 @@ class PostgresReadModelRepository:
         self._connection = connection
         self._workbench_generation_consistency_cache: dict[tuple[str, str], list[dict[str, Any]]] = {}
         self._summary_read_model_repository = PostgresSummaryReadModelRepository(connection)
-        self._search_workbench_relation_repository = PostgresSearchWorkbenchRelationReadModelRepository(connection)
-
-    def list_no_oa_bank_batch_rows(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]] | None:
-        return self._summary_read_model_repository.list_no_oa_bank_batch_rows(*args, **kwargs)
-
-    def no_oa_bank_batch_source_versions_summary(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
-        return self._summary_read_model_repository.no_oa_bank_batch_source_versions_summary(*args, **kwargs)
-
-    def search_index(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
-        return self._search_workbench_relation_repository.search_index(*args, **kwargs)
-
-    def search_index_scope_summary(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return self._search_workbench_relation_repository.search_index_scope_summary(*args, **kwargs)
-
-    def save_search_index_rows(self, *args: Any, **kwargs: Any) -> None:
-        self._search_workbench_relation_repository.save_search_index_rows(*args, **kwargs)
+        self._workbench_relation_repository = PostgresWorkbenchRelationReadModelRepository(connection)
 
     def save_workbench_relation_distribution(self, *args: Any, **kwargs: Any) -> None:
-        self._search_workbench_relation_repository.save_workbench_relation_distribution(*args, **kwargs)
+        self._workbench_relation_repository.save_workbench_relation_distribution(*args, **kwargs)
 
     def save_workbench_relation_distribution_rows(self, *args: Any, **kwargs: Any) -> None:
-        self._search_workbench_relation_repository.save_workbench_relation_distribution_rows(*args, **kwargs)
+        self._workbench_relation_repository.save_workbench_relation_distribution_rows(*args, **kwargs)
 
     def mark_workbench_relation_scope_empty(self, *args: Any, **kwargs: Any) -> None:
-        self._search_workbench_relation_repository.mark_workbench_relation_scope_empty(*args, **kwargs)
+        self._workbench_relation_repository.mark_workbench_relation_scope_empty(*args, **kwargs)
 
     def get_workbench_relation_rows_by_ids(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
-        return self._search_workbench_relation_repository.get_workbench_relation_rows_by_ids(*args, **kwargs)
+        return self._workbench_relation_repository.get_workbench_relation_rows_by_ids(*args, **kwargs)
 
     def list_workbench_relation_rows(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
-        return self._search_workbench_relation_repository.list_workbench_relation_rows(*args, **kwargs)
+        return self._workbench_relation_repository.list_workbench_relation_rows(*args, **kwargs)
 
     def get_workbench_relation_groups_by_ids(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
-        return self._search_workbench_relation_repository.get_workbench_relation_groups_by_ids(*args, **kwargs)
+        return self._workbench_relation_repository.get_workbench_relation_groups_by_ids(*args, **kwargs)
 
     def workbench_relation_source_versions(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return self._search_workbench_relation_repository.workbench_relation_source_versions(*args, **kwargs)
+        return self._workbench_relation_repository.workbench_relation_source_versions(*args, **kwargs)
 
     def workbench_relation_scope_summaries(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return self._search_workbench_relation_repository.workbench_relation_scope_summaries(*args, **kwargs)
+        return self._workbench_relation_repository.workbench_relation_scope_summaries(*args, **kwargs)
 
     def list_active_workbench_relation_source_rows(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
-        return self._search_workbench_relation_repository.list_active_workbench_relation_source_rows(*args, **kwargs)
+        return self._workbench_relation_repository.list_active_workbench_relation_source_rows(*args, **kwargs)
 
     def workbench_relation_source_bundle_from_source(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return self._search_workbench_relation_repository.workbench_relation_source_bundle_from_source(*args, **kwargs)
+        return self._workbench_relation_repository.workbench_relation_source_bundle_from_source(*args, **kwargs)
 
     def workbench_relation_source_summary_from_source(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return self._search_workbench_relation_repository.workbench_relation_source_summary_from_source(*args, **kwargs)
+        return self._workbench_relation_repository.workbench_relation_source_summary_from_source(*args, **kwargs)
 
     def workbench_relation_scope_summary(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
-        return self._search_workbench_relation_repository.workbench_relation_scope_summary(*args, **kwargs)
+        return self._workbench_relation_repository.workbench_relation_scope_summary(*args, **kwargs)
 
     def workbench_relation_row_id_aliases(self, *args: Any, **kwargs: Any) -> dict[str, str]:
-        return self._search_workbench_relation_repository.workbench_relation_row_id_aliases(*args, **kwargs)
+        return self._workbench_relation_repository.workbench_relation_row_id_aliases(*args, **kwargs)
 
 
 
@@ -7430,30 +7025,6 @@ UNCATEGORIZED_CATEGORY_FILTER_CODE = "uncategorized"
 
 
 
-
-def _empty_search_payload(
-    query: str,
-    scope: str,
-    month: str,
-    project_name: str | None,
-    status: str | None,
-    limit: int,
-) -> dict[str, Any]:
-    return {
-        "query": query,
-        "filters": {
-            "scope": scope,
-            "month": month,
-            "project_name": project_name or None,
-            "status": status or None,
-            "limit": limit,
-        },
-        "summary": {"total": 0, "oa": 0, "bank": 0, "invoice": 0},
-        "oa_results": [],
-        "bank_results": [],
-        "invoice_results": [],
-        "refresh_status": "fresh",
-    }
 
 def _workbench_literal_ilike_pattern(value: str) -> str:
     escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")

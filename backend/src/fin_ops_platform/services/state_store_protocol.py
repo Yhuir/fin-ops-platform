@@ -119,13 +119,6 @@ class ApplicationStateStoreProtocol(Protocol):
 
     def save_no_oa_bank_batches(self, snapshot: dict[str, Any], *, relation_mode: str = "no_oa_bank_batch") -> None: ...
 
-    def save_no_oa_bank_batches_scope(
-        self,
-        snapshot: dict[str, Any],
-        *,
-        scope_key: str,
-        relation_mode: str = "no_oa_bank_batch",
-    ) -> None: ...
     def load_bank_flow_rule_batches(self) -> dict[str, Any]: ...
     def save_bank_flow_rule_batches(self, snapshot: dict[str, Any]) -> None: ...
     def save_bank_flow_rule_batch_mutation(

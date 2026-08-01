@@ -36,7 +36,7 @@ rows、summary、全期间 statistics、filter options、筛选、排序、服�
 
 候选发票、流水/发票/OA 详情和 relation detail 同样走页面 canonical repository。选择已有发票、收入状态、规则保存的权限、审计、幂等、CAS/占用冲突和 command/relation 写模型保持不变；写成功后页面重新 GET canonical facts，不等待 read-model barrier。
 
-`pending_invoice`、`search-pending` 和 `invoice_lifecycle` 页面 projection/worker 已在跨页面清理中删除。Search 独立索引与 `workbench_relation` 共享 distribution 因仍有明确消费者而保留，但本页面直接读取 canonical facts，不消费二者。
+`pending_invoice`、`search-pending`、`invoice_lifecycle` 页面 projection/worker 与独立 Search runtime 已删除。`workbench_relation` 共享 distribution 仅供仍登记消费者使用，本页面直接读取 canonical facts，不消费它。
 
 ## 维护触发器
 

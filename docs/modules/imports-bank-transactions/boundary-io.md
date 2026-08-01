@@ -61,7 +61,7 @@ confirm 的 I/O 顺序必须是 `save_import_delta` 原子提交在先，必要�
 ## 持久化与投影
 
 - Own read model：无独立 manifest entry。
-- 逻辑影响 read model：`bank_detail`、`bank_account_balance`、`workbench`、`workbench_relation`、`invoice_lifecycle`、`search`、`pending_invoice`、`oa_pending_payment`、`cost_statistics`；这些影响不等于写后立即入队，页面访问按当前 scope 收敛。
+- 逻辑影响消费者：bank detail/account balance、`workbench`、`workbench_relation`、invoice lifecycle、pending invoice、OA pending payment、cost statistics；这些影响不等于写后立即入队，各 owner 在访问时读取已提交 facts。
 - Worker：import job/runtime worker handlers。
 
 ## 文件范围
@@ -111,7 +111,7 @@ confirm 的 I/O 顺序必须是 `save_import_delta` 原子提交在先，必要�
 - Owned facts: `app.bank_transactions` 的导入正式化事实，以及对应 `app.import_batches`、`app.import_batch_rows`、`app.import_files`、`app.file_objects` 中的银行流水导入事实。
 - Allowed writes: bank transaction import preview/confirm/job、import processing service、受控去重/正式化 repository。
 - Allowed reads: bank transaction repository/query ports、bank detail/import API。
-- Downstream outputs: bank_detail、bank_account_balance、workbench、turnover_ledger、no_oa_bank_batch、search 可比较的 canonical source-version 变化；各页面访问 gateway 自行创建精确 dirty scope。
+- Downstream outputs: bank detail/account balance、workbench、turnover ledger、no-OA batch 可比较的 canonical source-version 变化；保留 read model 的访问 gateway 创建精确 dirty scope，其他页面直接查询 canonical facts。
 - Forbidden paths: 银行流水页面不得调用旧 JSON `/imports/preview`、`/imports/confirm`；production API/worker 不得从 full snapshot、local pickle、`state:imports`、`state:full_state` 或前端 payload 直接补写银行流水。
 - Old code deletion: 已删除旧 JSON HTTP route/handler/entrypoint、`general_import.confirm` job producer/processor 及只为该链服务的 preview scope dependencies；snapshot 银行流水 fallback、直接跨模块写银行事实路径必须保持删除。migration/audit/rollback 工具和 file/session worker restore 端口保留不算 closure。
 

@@ -2,12 +2,19 @@
 
 本文是测试闭环 master goal 的控制状态。每轮只处理一个模块或共享边界；结束时必须更新本文件，再根据状态选择下一轮。
 
-## 2026-07-27 - 页面 read model 退休集成
+## 2026-08-01 - Phase 39 Worker / read model 拓扑收敛
+
+- 当前 required runtime 精确为 `oa-sync`、`workbench-matching`、`workbench`、`workbench-relation`、`import`、`settings-maintenance` 六个实例；read-model registry/manifest 精确为 `workbench`、`workbench_relation` 两项。
+- Search API/index/projection/三个 worker 与 no-OA projection/worker 已删除；`GET /api/no-oa-bank-batches` 在请求内刷新并读取 canonical PostgreSQL facts，不返回 freshness/read-model/queue 伪状态。
+- 部署门禁会停用并禁用所有不在 registry 的历史 systemd worker，随后校验 retired event 不处于 `pending`/`processing`、active worker/queue/readiness 收敛。
+- 下方历史阶段中将 Search/no-OA 描述为 read model、worker、fan-out、fresh gate 或 `/api/search` 的内容只作为演进证据，不是当前合同；当前事实以 runtime/read-model/no-OA 模块文档和 Phase 39 验证记录为准。
+
+## 2026-07-27 - 页面 read model 退休集成（历史）
 
 - 当前运行时保留关联台 active-generation `workbench`，以及 `workbench_relation`、`search`、`no_oa_bank_batch` 三个共享 read model；完整合同见 `docs/architecture/module-boundaries/read-model-contracts.md`。
 - 银行明细/余额、OA 待付款、流水规则批量处理、批量账务、ETC、税金抵扣、待找发票、进项使用和销项收款均由页面专属 API 直接读取 canonical PostgreSQL snapshot；成本统计和外部往来继续 direct read。关联台读取 fresh active generation。
 - 下方旧记录中关于这些页面的 freshness、202、barrier、fan-out、worker drain、旧测试文件或 projection 的内容只作为历史演进证据，不是当前测试或部署合同。
-- 当前门禁以 direct canonical API/service/repository/frontend/E2E、关联台 SQL active-generation 回归、四个保留 read model 的 manifest/worker/scope 回归，以及 retired runtime architecture guards 为准。
+- 当时门禁以 direct canonical API/service/repository/frontend/E2E、关联台 SQL active-generation 回归、当时保留 read model 的 manifest/worker/scope 回归，以及 retired runtime architecture guards 为准；当前数量已由 Phase 39 收敛为两个。
 
 ## 2026-07-22 - Phase 27 写后零 fan-out / 访问时收敛 release candidate
 

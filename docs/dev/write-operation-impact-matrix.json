@@ -243,7 +243,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "search",
         "workbench",
         "workbench_relation"
       ],
@@ -278,7 +277,6 @@
         "bank_detail",
         "bank_flow_rule_batch",
         "pending_invoice",
-        "search",
         "workbench",
         "workbench_relation"
       ]
@@ -302,7 +300,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "search",
         "workbench",
         "workbench_relation"
       ],
@@ -345,7 +342,6 @@
         "oa_pending_payment",
         "output_invoice_collection",
         "pending_invoice",
-        "search",
         "workbench",
         "workbench_relation"
       ],
@@ -487,7 +483,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "search",
         "workbench",
         "workbench_relation"
       ],
@@ -530,7 +525,6 @@
         "oa_pending_payment",
         "output_invoice_collection",
         "pending_invoice",
-        "search",
         "tax_offset",
         "workbench",
         "workbench_relation"
@@ -557,8 +551,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "no_oa_bank_batch",
-        "search",
         "workbench",
         "workbench_relation"
       ],
@@ -584,10 +576,12 @@
         }
       ],
       "forbidden_write_time_scope_types": [
-        "no_oa_bank_batch",
-        "search",
         "workbench",
-        "workbench_relation"
+        "workbench_relation",
+        "bank_flow_rule_batch"
+      ],
+      "retired_direct_canonical_scope_types": [
+        "bank_flow_rule_batch"
       ]
     },
     {
@@ -603,9 +597,7 @@
       ],
       "pairing_relation_fact_sources": [],
       "expected_outbox_scope_types": [],
-      "target_read_model_keys": [
-        "no_oa_bank_batch"
-      ],
+      "target_read_model_keys": [],
       "legacy_page_proxy_read_model_keys": [
         "bank_flow_rule_batch"
       ],
@@ -625,10 +617,13 @@
         }
       ],
       "forbidden_write_time_scope_types": [
-        "no_oa_bank_batch"
+        "bank_flow_rule_batch"
       ],
       "direct_canonical_target_page_keys": [
         "bank-flow-rule-batches"
+      ],
+      "retired_direct_canonical_scope_types": [
+        "bank_flow_rule_batch"
       ]
     },
     {
@@ -650,7 +645,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "search",
         "workbench",
         "workbench_relation"
       ],
@@ -683,7 +677,6 @@
         "input_invoice_usage",
         "invoice_lifecycle",
         "pending_invoice",
-        "search",
         "workbench",
         "workbench_relation"
       ]
@@ -708,7 +701,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "search",
         "workbench",
         "workbench_relation"
       ],
@@ -746,7 +738,6 @@
         "invoice_lifecycle",
         "oa_pending_payment",
         "pending_invoice",
-        "search",
         "workbench",
         "workbench_relation"
       ]
@@ -771,7 +762,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "search",
         "workbench",
         "workbench_relation"
       ],
@@ -800,7 +790,6 @@
       ],
       "forbidden_write_time_scope_types": [
         "cost_statistics",
-        "search",
         "turnover_ledger",
         "workbench",
         "workbench_relation"
@@ -1101,7 +1090,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "search",
         "workbench",
         "workbench_relation"
       ],
@@ -1141,7 +1129,6 @@
         "oa_pending_payment",
         "output_invoice_collection",
         "pending_invoice",
-        "search",
         "workbench",
         "workbench_relation"
       ],
@@ -1169,7 +1156,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "search",
         "workbench",
         "workbench_relation"
       ],
@@ -1211,7 +1197,6 @@
         "oa_pending_payment",
         "output_invoice_collection",
         "pending_invoice",
-        "search",
         "workbench",
         "workbench_relation"
       ],
@@ -1238,7 +1223,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "search",
         "workbench",
         "workbench_relation"
       ],
@@ -1273,7 +1257,6 @@
         "oa_pending_payment",
         "output_invoice_collection",
         "pending_invoice",
-        "search",
         "workbench",
         "workbench_relation"
       ]
@@ -1297,7 +1280,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "search",
         "workbench",
         "workbench_relation"
       ],
@@ -1332,7 +1314,6 @@
         "oa_pending_payment",
         "output_invoice_collection",
         "pending_invoice",
-        "search",
         "workbench",
         "workbench_relation"
       ]
@@ -1356,7 +1337,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "search",
         "workbench",
         "workbench_relation"
       ],
@@ -1384,7 +1364,6 @@
       ],
       "forbidden_write_time_scope_types": [
         "cost_statistics",
-        "search",
         "turnover_ledger",
         "workbench",
         "workbench_relation"
@@ -1413,7 +1392,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "search",
         "workbench",
         "workbench_relation"
       ],
@@ -1441,7 +1419,6 @@
       ],
       "forbidden_write_time_scope_types": [
         "cost_statistics",
-        "search",
         "turnover_ledger",
         "workbench",
         "workbench_relation"

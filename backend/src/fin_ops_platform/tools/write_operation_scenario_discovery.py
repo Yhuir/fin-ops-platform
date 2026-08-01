@@ -609,12 +609,6 @@ def _bank_relation_access_probes(month: str) -> list[dict[str, Any]]:
             "expected_statuses": [200, 202],
             "target_ms": 1000,
         },
-        {
-            "name": "search_all",
-            "path": "/api/search?q=%E5%85%AC%E5%8F%B8&scope=all&month=all&limit=5",
-            "expected_statuses": [200, 202],
-            "target_ms": 1000,
-        },
     ]
 
 

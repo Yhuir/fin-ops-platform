@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 
-ACTIVE_SCOPE_TYPES = ("workbench", "workbench_relation", "search", "no_oa_bank_batch")
+ACTIVE_SCOPE_TYPES = ("workbench", "workbench_relation")
 
 
 class FakeQueue:
@@ -47,9 +47,9 @@ class FakeConnection:
         del params
         normalized = " ".join(sql.lower().split())
         if "from job.read_model_dirty_scopes" in normalized:
-            return [{"scope_type": "search", "status": "pending", "count": 1}]
+            return [{"scope_type": "workbench_relation", "status": "pending", "count": 1}]
         if "from job.outbox_events" in normalized:
-            return [{"event_type": "search.read_model.refresh", "status": "pending", "count": 1}]
+            return [{"event_type": "workbench_relation.read_model.refresh", "status": "pending", "count": 1}]
         return []
 
 
@@ -119,8 +119,8 @@ class RuntimeReadModelBackfillTests(unittest.TestCase):
         worker_action = next(action for action in report["actions"] if action["action"] == "run_worker")
         worker_args = worker_action["worker_args"]
         self.assertIn("--enable-workbench-relation-read-model-refresh", worker_args)
-        self.assertIn("--enable-search-read-model-refresh", worker_args)
-        self.assertIn("--enable-no-oa-bank-batch-read-model-refresh", worker_args)
+        self.assertNotIn("--enable-search-read-model-refresh", worker_args)
+        self.assertNotIn("--enable-no-oa-bank-batch-read-model-refresh", worker_args)
         self.assertNotIn("--enable-bank-flow-rule-batch-canonical-draft-refresh", worker_args)
         self.assertNotIn("bank_flow_rule_batch.canonical_draft.refresh", worker_args)
         self.assertNotIn("input_invoice_usage.read_model.refresh", worker_args)
@@ -133,10 +133,10 @@ class RuntimeReadModelBackfillTests(unittest.TestCase):
         report = module.coverage_report(FakeConnection())
 
         self.assertEqual(tuple(report["active_scope_types"]), ACTIVE_SCOPE_TYPES)
-        self.assertEqual(report["dirty"], [{"scope_type": "search", "status": "pending", "count": 1}])
+        self.assertEqual(report["dirty"], [{"scope_type": "workbench_relation", "status": "pending", "count": 1}])
         self.assertEqual(
             report["outbox"],
-            [{"event_type": "search.read_model.refresh", "status": "pending", "count": 1}],
+            [{"event_type": "workbench_relation.read_model.refresh", "status": "pending", "count": 1}],
         )
 
 

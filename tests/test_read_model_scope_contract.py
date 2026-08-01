@@ -145,7 +145,7 @@ class ReadModelScopeContractServiceTests(unittest.TestCase):
 
         self.assertEqual(rows, [])
         sql, params = connection.fetch_all_calls[-1]
-        self.assertEqual(params, (["workbench", "workbench_relation", "search", "no_oa_bank_batch"],))
+        self.assertEqual(params, (["workbench", "workbench_relation"],))
         self.assertIn("scope_type = any(%s)", sql)
         self.assertIn("status in ('pending', 'processing', 'failed')", sql)
 
@@ -156,7 +156,7 @@ class ReadModelScopeContractServiceTests(unittest.TestCase):
 
         self.assertEqual(rows, [])
         sql, params = connection.fetch_all_calls[-1]
-        self.assertEqual(params, (["workbench", "workbench_relation", "search", "no_oa_bank_batch"],))
+        self.assertEqual(params, (["workbench", "workbench_relation"],))
         self.assertIn("coalesce(scope_type, payload->>'scope_type') = any(%s)", sql)
         self.assertIn("event_type like '%%.read_model.refresh'", sql)
 
@@ -170,8 +170,8 @@ class ReadModelScopeContractServiceTests(unittest.TestCase):
         self.assertEqual(
             params,
             (
-                ["workbench", "workbench_relation", "search", "no_oa_bank_batch"],
-                ["workbench", "workbench_relation", "search", "no_oa_bank_batch"],
+                ["workbench", "workbench_relation"],
+                ["workbench", "workbench_relation"],
             ),
         )
         self.assertIn("from read_model.app_status_readiness", sql)
@@ -268,7 +268,7 @@ class ReadModelScopeContractServiceTests(unittest.TestCase):
             {
                 "id": "dirty-invalid",
                 "tenant_id": "default",
-                "scope_type": "search",
+                "scope_type": "workbench_relation",
                 "scope_key": "active:2026-05",
                 "status": "pending",
                 "reason": "read_model_slo_smoke",
@@ -276,7 +276,7 @@ class ReadModelScopeContractServiceTests(unittest.TestCase):
             {
                 "id": "dirty-valid",
                 "tenant_id": "default",
-                "scope_type": "search",
+                "scope_type": "workbench_relation",
                 "scope_key": "2026-05",
                 "status": "pending",
             },
@@ -285,8 +285,8 @@ class ReadModelScopeContractServiceTests(unittest.TestCase):
             {
                 "id": "outbox-invalid",
                 "tenant_id": "default",
-                "event_type": "search.read_model.refresh",
-                "scope_type": "search",
+                "event_type": "workbench_relation.read_model.refresh",
+                "scope_type": "workbench_relation",
                 "scope_key": "active:2026-05",
                 "status": "pending",
             }
@@ -294,8 +294,8 @@ class ReadModelScopeContractServiceTests(unittest.TestCase):
         repository.policy_managed_readiness = [
             {
                 "tenant_id": "default",
-                "read_model_key": "search",
-                "scope_type": "search",
+                "read_model_key": "workbench_relation",
+                "scope_type": "workbench_relation",
                 "scope_key": "active:2026-05",
                 "status": "failed",
             }
@@ -324,7 +324,7 @@ class ReadModelScopeContractServiceTests(unittest.TestCase):
             {
                 "id": "dirty-invalid",
                 "tenant_id": "default",
-                "scope_type": "search",
+                "scope_type": "workbench_relation",
                 "scope_key": "active:2026-05",
                 "status": "pending",
                 "reason": "read_model_slo_smoke",
@@ -334,8 +334,8 @@ class ReadModelScopeContractServiceTests(unittest.TestCase):
             {
                 "id": "outbox-invalid",
                 "tenant_id": "default",
-                "event_type": "search.read_model.refresh",
-                "scope_type": "search",
+                "event_type": "workbench_relation.read_model.refresh",
+                "scope_type": "workbench_relation",
                 "scope_key": "active:2026-05",
                 "status": "pending",
             }
@@ -343,8 +343,8 @@ class ReadModelScopeContractServiceTests(unittest.TestCase):
         repository.policy_managed_readiness = [
             {
                 "tenant_id": "default",
-                "read_model_key": "search",
-                "scope_type": "search",
+                "read_model_key": "workbench_relation",
+                "scope_type": "workbench_relation",
                 "scope_key": "active:2026-05",
                 "status": "failed",
             }
@@ -362,8 +362,8 @@ class ReadModelScopeContractServiceTests(unittest.TestCase):
             [
                 {
                     "tenant_id": "default",
-                    "read_model_key": "search",
-                    "scope_type": "search",
+                    "read_model_key": "workbench_relation",
+                    "scope_type": "workbench_relation",
                     "scope_key": "active:2026-05",
                 }
             ],
@@ -386,7 +386,7 @@ class ReadModelScopeContractServiceTests(unittest.TestCase):
             {
                 "id": "dirty-invalid",
                 "tenant_id": "default",
-                "scope_type": "search",
+                "scope_type": "workbench_relation",
                 "scope_key": "active:2026-05",
                 "status": "pending",
             }

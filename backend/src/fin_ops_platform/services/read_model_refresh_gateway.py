@@ -249,7 +249,6 @@ _ACTIVE_COALESCED_REFRESH_REASONS = {
     "downstream_workbench_relation_read",
     "bank_details_relation_tag_projection",
     "fan_out_command_scope",
-    "search_all_shard",
     "workbench_relation_write_precondition",
     "workbench_relation_month_shard",
 }

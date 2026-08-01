@@ -56,8 +56,6 @@ type MockApiOptions = {
     bank?: string[];
     invoice?: string[];
   };
-  searchDelayMs?: number;
-  searchErrorQueries?: string[];
   emptyBodyPaths?: string[];
   workbenchOaStatus?: {
     code: "idle" | "loading" | "ready" | "error";
@@ -2527,242 +2525,6 @@ function createIgnoredRowStore() {
       return undefined;
     },
   };
-}
-
-type MockSearchResult = {
-  row_id: string;
-  record_type: "oa" | "bank" | "invoice";
-  month: string;
-  zone_hint: "paired" | "unpaired" | "ignored" | "processed_exception";
-  matched_field: string;
-  title: string;
-  primary_meta: string;
-  secondary_meta: string;
-  status_label: string;
-  jump_target: {
-    month: string;
-    row_id: string;
-    zone_hint: "paired" | "unpaired" | "ignored" | "processed_exception";
-    record_type: "oa" | "bank" | "invoice";
-  };
-};
-
-function buildSearchPayload({
-  query,
-  scope,
-  month,
-  projectName,
-  status,
-  limit,
-  workbenchStateStore,
-  ignoredRowStore,
-}: {
-  query: string;
-  scope: string;
-  month: string;
-  projectName?: string;
-  status?: string;
-  limit: number;
-  workbenchStateStore: ReturnType<typeof createWorkbenchStateStore>;
-  ignoredRowStore: ReturnType<typeof createIgnoredRowStore>;
-}) {
-  const normalizedQuery = query.trim().toLowerCase();
-  const months = month === "all" ? [...WORKBENCH_STATE_MONTHS] : [month];
-  const groupedResults = {
-    oa: [] as MockSearchResult[],
-    bank: [] as MockSearchResult[],
-    invoice: [] as MockSearchResult[],
-  };
-
-  if (!normalizedQuery) {
-    return {
-      query,
-      summary: { total: 0, oa: 0, bank: 0, invoice: 0 },
-      oa_results: [],
-      bank_results: [],
-      invoice_results: [],
-    };
-  }
-
-  const matchesField = (value: string | null | undefined) =>
-    value && value.toLowerCase().includes(normalizedQuery);
-
-  for (const resolvedMonth of months) {
-    const payload = workbenchStateStore.get(resolvedMonth);
-    for (const zoneKey of ["paired", "unpaired"] as const) {
-      for (const pane of ["oa", "bank", "invoice"] as const) {
-        for (const row of payload[zoneKey][pane]) {
-          const result = buildSearchResult(row, resolvedMonth, zoneKey, matchesField);
-          if (!result) {
-            continue;
-          }
-          if (projectName && !result.title.includes(projectName) && !result.primary_meta.includes(projectName) && !result.secondary_meta.includes(projectName)) {
-            continue;
-          }
-          if (status && status !== "all" && result.zone_hint !== status) {
-            continue;
-          }
-          if (scope !== "all" && result.record_type !== scope) {
-            continue;
-          }
-          groupedResults[result.record_type].push(result);
-        }
-      }
-    }
-
-    for (const row of ignoredRowStore.get(resolvedMonth)) {
-      const result = buildSearchResult(row, resolvedMonth, "ignored", matchesField);
-      if (!result) {
-        continue;
-      }
-      if (projectName && !result.title.includes(projectName) && !result.primary_meta.includes(projectName) && !result.secondary_meta.includes(projectName)) {
-        continue;
-      }
-      if (status && status !== "all" && result.zone_hint !== status) {
-        continue;
-      }
-      if (scope !== "all" && result.record_type !== scope) {
-        continue;
-      }
-      groupedResults[result.record_type].push(result);
-    }
-  }
-
-  return {
-    query,
-    summary: {
-      total: groupedResults.oa.length + groupedResults.bank.length + groupedResults.invoice.length,
-      oa: groupedResults.oa.length,
-      bank: groupedResults.bank.length,
-      invoice: groupedResults.invoice.length,
-    },
-    oa_results: groupedResults.oa.slice(0, limit),
-    bank_results: groupedResults.bank.slice(0, limit),
-    invoice_results: groupedResults.invoice.slice(0, limit),
-  };
-}
-
-function buildSearchResult(
-  row: RawWorkbenchRow,
-  month: string,
-  zoneHint: "paired" | "unpaired" | "ignored",
-  matchesField: (value: string | null | undefined) => boolean,
-): MockSearchResult | null {
-  if (row.type === "oa") {
-    const detailFields = (row.detail_fields ?? {}) as Record<string, string>;
-    const matchField = resolveMatchedField(
-      [
-        ["项目名称", row.project_name],
-        ["申请人", row.applicant],
-        ["对方户名", row.counterparty_name],
-        ["金额", row.amount],
-        ["费用类型", detailFields["费用类型"]],
-        ["费用内容", detailFields["费用内容"] ?? row.reason],
-        ["OA单号", detailFields["OA单号"]],
-      ],
-      matchesField,
-    );
-    if (!matchField) {
-      return null;
-    }
-    return {
-      row_id: String(row.id),
-      record_type: "oa",
-      month,
-      zone_hint: zoneHint,
-      matched_field: matchField,
-      title: String(row.project_name ?? "未命名项目"),
-      primary_meta: `${row.applicant ?? "--"} / ${row.counterparty_name ?? "--"} / ${row.amount ?? "--"}`,
-      secondary_meta: `${detailFields["费用类型"] ?? "--"} / ${detailFields["费用内容"] ?? row.reason ?? "--"}`,
-      status_label: String(row.oa_bank_relation?.label ?? "待处理"),
-      jump_target: {
-        month,
-        row_id: String(row.id),
-        zone_hint: zoneHint,
-        record_type: "oa",
-      },
-    };
-  }
-
-  if (row.type === "bank") {
-    const detailFields = (row.detail_fields ?? {}) as Record<string, string>;
-    const effectiveZoneHint = row.handled_exception ? "processed_exception" : zoneHint;
-    const matchField = resolveMatchedField(
-      [
-        ["对方户名", row.counterparty_name],
-        ["交易时间", row.trade_time],
-        ["金额", row.debit_amount ?? row.credit_amount],
-        ["支付账户", row.payment_account_label],
-        ["备注", row.remark],
-        ["企业流水号", detailFields["企业流水号"]],
-        ["账户明细编号-交易流水号", detailFields["账户明细编号-交易流水号"]],
-      ],
-      matchesField,
-    );
-    if (!matchField) {
-      return null;
-    }
-    return {
-      row_id: String(row.id),
-      record_type: "bank",
-      month,
-      zone_hint: effectiveZoneHint,
-      matched_field: matchField,
-      title: String(row.counterparty_name ?? "未命名流水"),
-      primary_meta: `${row.trade_time ?? "--"} / ${row.debit_amount ?? row.credit_amount ?? "--"} / ${row.direction ?? (row.debit_amount ? "支出" : "收入")}`,
-      secondary_meta: `${row.payment_account_label ?? "--"} / ${detailFields["企业流水号"] ?? detailFields["账户明细编号-交易流水号"] ?? row.remark ?? "--"}`,
-      status_label: String(row.invoice_relation?.label ?? "待处理"),
-      jump_target: {
-        month,
-        row_id: String(row.id),
-        zone_hint: effectiveZoneHint,
-        record_type: "bank",
-      },
-    };
-  }
-
-  const detailFields = (row.detail_fields ?? {}) as Record<string, string>;
-  const matchField = resolveMatchedField(
-    [
-      ["发票号码", detailFields["发票号码"]],
-      ["数电发票号码", detailFields["数电发票号码"]],
-      ["发票代码", detailFields["发票代码"]],
-      ["销方名称", row.seller_name],
-      ["购方名称", row.buyer_name],
-      ["销方识别号", row.seller_tax_no],
-      ["购方识别号", row.buyer_tax_no],
-      ["金额", row.amount],
-    ],
-    matchesField,
-  );
-  if (!matchField) {
-    return null;
-  }
-  return {
-    row_id: String(row.id),
-    record_type: "invoice",
-    month,
-    zone_hint: zoneHint,
-    matched_field: matchField,
-    title: String(detailFields["发票号码"] ?? detailFields["数电发票号码"] ?? row.seller_name ?? "未命名发票"),
-    primary_meta: `${row.seller_name ?? "--"} / ${row.amount ?? "--"}`,
-    secondary_meta: `${row.issue_date ?? "--"} / ${row.invoice_type ?? "--"}`,
-    status_label: zoneHint === "ignored" ? "已忽略" : String(row.invoice_bank_relation?.label ?? "待处理"),
-    jump_target: {
-      month,
-      row_id: String(row.id),
-      zone_hint: zoneHint,
-      record_type: "invoice",
-    },
-  };
-}
-
-function resolveMatchedField(
-  entries: Array<[string, string | null | undefined]>,
-  matchesField: (value: string | null | undefined) => boolean,
-) {
-  const matched = entries.find(([, value]) => matchesField(value));
-  return matched?.[0] ?? null;
 }
 
 function findWorkbenchGroupRows(payload: RawWorkbenchPayload, section: RawWorkbenchSectionKey, rowId: string) {
@@ -5285,16 +5047,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
                 sql_execute_fetch_ms: { p50: 36, p95: 240, p99: 300 },
                 database_query_count: { p50: 4, p95: 8, p99: 10 },
               },
-              {
-                endpoint: "GET /api/search",
-                sample_count: 0,
-                last_status_code: null,
-                duration_ms: { p50: null, p95: null, p99: null },
-                database_duration_ms: { p50: null, p95: null, p99: null },
-                connection_acquire_ms: { p50: null, p95: null, p99: null },
-                sql_execute_fetch_ms: { p50: null, p95: null, p99: null },
-                database_query_count: { p50: null, p95: null, p99: null },
-              },
             ],
           },
           runtime_performance: {
@@ -5613,29 +5365,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           rebuild_status: jsonBody.action === "reset_oa_and_rebuild" ? "completed" : "not_applicable",
           message: "已完成数据重置。",
         },
-      };
-    },
-    "/api/search": ({ url }) => {
-      const query = url.searchParams.get("q") ?? "";
-      if (options.searchErrorQueries?.includes(query)) {
-        return { status: 500, body: { message: "search failed" } };
-      }
-      const scope = url.searchParams.get("scope") ?? "all";
-      const month = url.searchParams.get("month") ?? "all";
-      const projectName = url.searchParams.get("project_name") ?? undefined;
-      const status = url.searchParams.get("status") ?? "all";
-      const limit = Number.parseInt(url.searchParams.get("limit") ?? "30", 10);
-      return {
-        body: buildSearchPayload({
-          query,
-          scope,
-          month,
-          projectName,
-          status,
-          limit: Number.isFinite(limit) ? limit : 30,
-          workbenchStateStore,
-          ignoredRowStore,
-        }),
       };
     },
     "/api/tax-offset": ({ url }) => {
@@ -8048,9 +7777,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       && isWorkbenchReadPath
     ) {
       await new Promise((resolve) => window.setTimeout(resolve, options.workbenchLoadDelayMs));
-    }
-    if (options.searchDelayMs && url.pathname === "/api/search") {
-      await new Promise((resolve) => window.setTimeout(resolve, options.searchDelayMs));
     }
     const importPreviewDelay =
       (url.pathname === "/imports/files/preview" ? options.importPreviewDelayMs : undefined)

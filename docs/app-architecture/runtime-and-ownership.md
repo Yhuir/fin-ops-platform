@@ -40,7 +40,7 @@ HTTP 请求先经过 `WsgiHttpAdapter` 的 body/request-ID/access-log 边界，�
 
 ### 已登记 read model read
 
-只有 `workbench`、`workbench_relation`、`search`、`no_oa_bank_batch` 使用 read-model runtime：
+只有 `workbench`、`workbench_relation` 使用 read-model runtime：
 
 1. Query owner 带 expected schema/source contract 调用自身 freshness service 或 `ReadModelQueryGateway`。
 2. fresh 必须同时满足 expected contract、actual projection metadata、dirty/outbox/readiness 状态；缺少 expected contract 或 actual schema/source proof 时不能标 fresh。

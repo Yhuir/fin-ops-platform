@@ -83,8 +83,8 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
         from fin_ops_platform.services.read_model_scope_policy import ReadModelScopeError
 
         registered_scope_types = [
-            "no_oa_bank_batch",
-            "search",
+            "workbench",
+            "workbench_relation",
             "workbench_relation",
         ]
 
@@ -99,7 +99,7 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
                 with self.assertRaises(ReadModelScopeError):
                     gateway.enqueue_many(scope_type, ["active:2026-03"], reason="unit_test")
 
-    def test_no_oa_bank_batch_policy_accepts_all_and_month_scopes_only(self) -> None:
+    def test_workbench_policy_accepts_all_and_month_scopes_only(self) -> None:
         from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
         from fin_ops_platform.services.read_model_scope_policy import ReadModelScopeError
 
@@ -107,7 +107,7 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
         gateway = ReadModelRefreshGateway(queue_repository=queue)
 
         enqueued = gateway.enqueue_many(
-            "no_oa_bank_batch",
+            "workbench",
             ["2026-06", "all", "2026-06"],
             reason="unit_test",
         )
@@ -116,12 +116,12 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
         self.assertEqual(
             queue.refreshes,
             [
-                {"scope_type": "no_oa_bank_batch", "scope_key": "2026-06", "reason": "unit_test"},
-                {"scope_type": "no_oa_bank_batch", "scope_key": "all", "reason": "unit_test"},
+                {"scope_type": "workbench", "scope_key": "2026-06", "reason": "unit_test"},
+                {"scope_type": "workbench", "scope_key": "all", "reason": "unit_test"},
             ],
         )
         with self.assertRaises(ReadModelScopeError):
-            gateway.enqueue_many("no_oa_bank_batch", ["active:2026-06"], reason="unit_test")
+            gateway.enqueue_many("workbench", ["active:2026-06"], reason="unit_test")
 
     def test_scope_policy_registry_contains_only_active_shared_read_models(self) -> None:
         from fin_ops_platform.services.read_model_scope_policy import (
@@ -130,7 +130,7 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
 
         self.assertEqual(
             set(DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY.registered_scope_types()),
-            {"no_oa_bank_batch", "search", "workbench", "workbench_relation"},
+            {"workbench", "workbench_relation", "workbench", "workbench_relation"},
         )
 
     def test_metadata_is_passed_to_queue_repository(self) -> None:
@@ -163,9 +163,9 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
         from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
         for scope_type, scope_key, reason in (
-            ("no_oa_bank_batch", "2026-02", "api_no_oa_read_model_missing"),
-            ("search", "2026-02", "api_stale"),
-            ("search", "2026-02", "search_all_shard"),
+            ("workbench", "2026-02", "api_no_oa_read_model_missing"),
+            ("workbench_relation", "2026-02", "api_stale"),
+            ("workbench_relation", "2026-02", "workbench_relation_month_shard"),
             ("workbench_relation", "2026-02", "workbench_relation_write_precondition"),
             ("workbench_relation", "2026-02", "workbench_relation_month_shard"),
         ):
@@ -208,11 +208,11 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
         ):
             with self.subTest(reason=reason):
                 queue = QueueRecorder()
-                queue.active_refreshes.add(("default", "search", "2026-02"))
+                queue.active_refreshes.add(("default", "workbench_relation", "2026-02"))
                 gateway = ReadModelRefreshGateway(queue_repository=queue)
 
                 enqueued = gateway.enqueue_many(
-                    "search",
+                    "workbench_relation",
                     ["2026-02"],
                     reason=reason,
                 )
@@ -221,37 +221,37 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
                 self.assertEqual(queue.active_checks, [])
                 self.assertEqual(
                     queue.refreshes,
-                    [{"scope_type": "search", "scope_key": "2026-02", "reason": reason}],
+                    [{"scope_type": "workbench_relation", "scope_key": "2026-02", "reason": reason}],
                 )
 
-    def test_search_all_shard_reason_does_not_bump_active_scope(self) -> None:
+    def test_workbench_relation_month_shard_reason_does_not_bump_active_scope(self) -> None:
         from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
         queue = QueueRecorder()
-        queue.active_refreshes.add(("default", "search", "2026-02"))
+        queue.active_refreshes.add(("default", "workbench_relation", "2026-02"))
         gateway = ReadModelRefreshGateway(queue_repository=queue)
 
         enqueued = gateway.enqueue_many(
-            "search",
+            "workbench_relation",
             ["2026-02"],
-            reason="search_all_shard",
+            reason="workbench_relation_month_shard",
         )
 
         self.assertEqual(enqueued, ["2026-02"])
-        self.assertEqual(queue.active_checks, [("default", "search", "2026-02")])
+        self.assertEqual(queue.active_checks, [("default", "workbench_relation", "2026-02")])
         self.assertEqual(queue.refreshes, [])
 
     def test_force_refresh_is_not_coalesced_with_active_scope(self) -> None:
         from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
         queue = QueueRecorder()
-        queue.active_refreshes.add(("default", "search", "2026-02"))
+        queue.active_refreshes.add(("default", "workbench_relation", "2026-02"))
         gateway = ReadModelRefreshGateway(queue_repository=queue)
 
         enqueued = gateway.enqueue_many(
-            "search",
+            "workbench_relation",
             ["2026-02"],
-            reason="search_all_shard",
+            reason="workbench_relation_month_shard",
             metadata={"force_refresh": True},
         )
 
@@ -261,9 +261,9 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
             queue.refreshes,
             [
                 {
-                    "scope_type": "search",
+                    "scope_type": "workbench_relation",
                     "scope_key": "2026-02",
-                    "reason": "search_all_shard",
+                    "reason": "workbench_relation_month_shard",
                     "metadata": {"force_refresh": True},
                 }
             ],
@@ -273,25 +273,25 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
         from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
         queue = EventAwareQueueRecorder()
-        queue.active_refreshes.add(("default", "search", "all"))
+        queue.active_refreshes.add(("default", "workbench_relation", "all"))
         gateway = ReadModelRefreshGateway(queue_repository=queue)
 
         enqueued = gateway.enqueue_many(
-            "search",
+            "workbench_relation",
             ["all"],
-            reason="search_all_shard",
+            reason="workbench_relation_month_shard",
         )
 
         self.assertEqual(enqueued, ["all"])
-        self.assertEqual(queue.active_event_checks, [("default", "search", "all")])
+        self.assertEqual(queue.active_event_checks, [("default", "workbench_relation", "all")])
         self.assertEqual(queue.active_checks, [])
         self.assertEqual(
             queue.refreshes,
             [
                 {
-                    "scope_type": "search",
+                    "scope_type": "workbench_relation",
                     "scope_key": "all",
-                    "reason": "search_all_shard",
+                    "reason": "workbench_relation_month_shard",
                 }
             ],
         )
@@ -300,16 +300,16 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
         from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
         queue = EventAwareQueueRecorder()
-        queue.active_events.add(("default", "search", "all"))
+        queue.active_events.add(("default", "workbench_relation", "all"))
         gateway = ReadModelRefreshGateway(queue_repository=queue)
 
         gateway.enqueue_many(
-            "search",
+            "workbench_relation",
             ["all"],
-            reason="search_all_shard",
+            reason="workbench_relation_month_shard",
         )
 
-        self.assertEqual(queue.active_event_checks, [("default", "search", "all")])
+        self.assertEqual(queue.active_event_checks, [("default", "workbench_relation", "all")])
         self.assertEqual(queue.refreshes, [])
 
     def test_api_refresh_uses_atomic_enqueue_without_check_then_enqueue_race(self) -> None:
@@ -319,7 +319,7 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
         gateway = ReadModelRefreshGateway(queue_repository=queue)
 
         events = gateway.enqueue_many_events(
-            "search",
+            "workbench_relation",
             ["2026-02"],
             reason="api_page_stale",
         )
@@ -329,7 +329,7 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
             queue.atomic_refreshes,
             [
                 {
-                    "scope_type": "search",
+                    "scope_type": "workbench_relation",
                     "scope_key": "2026-02",
                     "reason": "api_page_stale",
                 }
@@ -346,7 +346,7 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
         gateway = ReadModelRefreshGateway(queue_repository=queue)
 
         events = gateway.enqueue_many_events(
-            "search",
+            "workbench_relation",
             ["2026-02", "2026-03"],
             reason="api_source_versions_stale",
         )
@@ -356,7 +356,7 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
             queue.atomic_refresh_batches,
             [
                 {
-                    "scope_type": "search",
+                    "scope_type": "workbench_relation",
                     "scope_keys": ["2026-02", "2026-03"],
                     "reason": "api_source_versions_stale",
                     "tenant_id": "default",
@@ -376,9 +376,9 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
         gateway = ReadModelRefreshGateway(queue_repository=queue)
 
         events = gateway.enqueue_many_events(
-            "search",
+            "workbench_relation",
             ["all"],
-            reason="search_all_shard",
+            reason="workbench_relation_month_shard",
         )
 
         self.assertEqual(events, [])

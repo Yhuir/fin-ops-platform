@@ -76,16 +76,11 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                     "deleted_counts": {"workbench_relation_read_models": 1},
                     "invalidated_scopes": domain_plan["scope_keys"],
                 },
-                "search_cache": lambda domain_plan: {
-                    "deleted_count": 1,
-                    "invalidated_scopes": ["search:2026-03"],
-                },
             },
         )
 
         self.assertEqual(summary["deleted_counts"]["workbench_relation_read_models"], 1)
-        self.assertEqual(summary["deleted_counts"]["search_cache"], 1)
-        self.assertEqual(summary["invalidated_scopes"], ["2026-03", "search:2026-03"])
+        self.assertEqual(summary["invalidated_scopes"], ["2026-03"])
         self.assertEqual(summary["errors"], [])
         json.dumps(summary)
 
@@ -101,6 +96,8 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                     for target in domain.get("delete_targets", [])
                 }
                 self.assertTrue(delete_targets.isdisjoint(PROTECTED_TARGETS))
+                self.assertNotIn("search_cache", delete_targets)
+                self.assertNotIn("no_oa_bank_batch_read_model", delete_targets)
                 json.dumps(plan)
 
 

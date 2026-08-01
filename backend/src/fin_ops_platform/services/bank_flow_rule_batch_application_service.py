@@ -6,7 +6,7 @@ from typing import Any
 
 from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
 from fin_ops_platform.services.bank_batch_application_service import (
-    SEARCH_MONTH_RE,
+    MONTH_SCOPE_RE,
     BankBatchApplicationService,
     BankBatchPersistenceError,
     BankBatchRelationMutationError,
@@ -452,7 +452,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         scope_month: str | None,
     ) -> tuple[dict[str, object], dict[str, object]]:
         normalized_month = str(scope_month or "").strip()
-        if not SEARCH_MONTH_RE.match(normalized_month):
+        if not MONTH_SCOPE_RE.match(normalized_month):
             raise BankBatchRelationMutationError(
                 "invalid_bank_flow_rule_batch_month",
                 "流水规则候选月份无效，请刷新列表后重试。",
@@ -657,7 +657,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         scope_month: str | None = None,
     ) -> dict[str, object]:
         normalized_month = str(scope_month or "").strip()
-        if normalized_month and not SEARCH_MONTH_RE.match(normalized_month):
+        if normalized_month and not MONTH_SCOPE_RE.match(normalized_month):
             raise BankBatchRelationMutationError(
                 "invalid_bank_flow_rule_batch_month",
                 "流水规则候选月份无效，请刷新列表后重试。",
@@ -940,7 +940,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             normalized_scope_keys = [
                 str(scope_key).strip()
                 for scope_key in changed_scope_keys
-                if SEARCH_MONTH_RE.match(str(scope_key).strip())
+                if MONTH_SCOPE_RE.match(str(scope_key).strip())
             ]
             normalized_batch_ids = [
                 str(batch_id).strip()
@@ -1108,7 +1108,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             raise RuntimeError(
                 "bank_flow_rule_batch read repository requires affected_scope_keys_for_tag_codes."
             )
-        if any(not SEARCH_MONTH_RE.match(scope_key) for scope_key in scope_keys):
+        if any(not MONTH_SCOPE_RE.match(scope_key) for scope_key in scope_keys):
             raise RuntimeError("bank_flow_rule_batch tag-rule refresh requires month scopes.")
         return scope_keys
 
@@ -1129,7 +1129,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             ).strip()
             in changed_codes
         }
-        return sorted(scope_key for scope_key in affected if SEARCH_MONTH_RE.match(scope_key))
+        return sorted(scope_key for scope_key in affected if MONTH_SCOPE_RE.match(scope_key))
 
     def _state_store_backend(self) -> str:
         if self._state_store is None:
