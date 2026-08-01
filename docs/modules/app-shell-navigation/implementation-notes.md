@@ -32,9 +32,10 @@
 
 - 目标：桌面侧栏收缩后不再显示蓝色 App Logo，只保留居中的展开 toggle；展开和收起都提供快速、连续的宽度过渡。
 - 影响范围：共享 `AppSidebar`、局部 `.app-sidebar-*` 样式、组件/响应式浏览器测试与本模块文档；页面名称、route、API、权限、业务 I/O、read model 和 worker 不变。
-- 关键决策：复用既有 `--motion-base: 180ms` 与 `ease-out-quart`，只在唯一 sidebar 外壳和内容容器上过渡 `232px↔72px`；不增加动画库、不增加 JS 测量循环、不使用 `will-change`。toggle 使用 compositor transform 跟随侧栏边缘；收缩态不挂载 `AppStatusIndicator`，品牌 lockup 同时通过 `visibility:hidden + aria-hidden + inert` 退出视觉、点击、键盘和无障碍树。
+- 关键决策：复用既有 `--motion-base: 180ms` 与 `ease-out-quart`，布局 rail 只切换 `232px/72px` 最终占位，可见 sidebar paper 与其小型导航容器在该占位内同步过渡 `232px↔72px`，避免真实关联台等重型业务页参与每一帧 reflow；不增加动画库、不增加运行时 JS 测量循环、不使用 `will-change`。toggle 使用 compositor transform 跟随 paper 边缘；收缩态保留已加载的 App Status DOM 以避免首次展开冷挂载，但品牌 lockup 通过 `visibility:hidden + aria-hidden + inert` 完整退出视觉、点击、键盘和无障碍树。
 - 旧代码清理：删除收缩态继续保留 `28px` 品牌入口并与 toggle 并排的 width/flex/padding/gap 路径；不保留 fallback 或页面级覆盖。
-- 可访问性与性能：`prefers-reduced-motion` 和产品内 `data-reduce-motion` 均关闭 sidebar/content/brand/toggle transition；真实 Chromium 同时约束展开与收起 100–300ms、frame p95 ≤25ms、CLS=0，并验证收缩 toggle 中心偏差 ≤0.5 CSS px。
+- 可访问性与性能：`prefers-reduced-motion` 和产品内 `data-reduce-motion` 均关闭 paper/brand/toggle transition；真实 Chromium 同时约束展开与收起 100–300ms、动画实际发生区间 frame p95 ≤25ms、CLS=0，并验证收缩 toggle 中心偏差 ≤0.5 CSS px。Playwright actionability 等待与动画帧分开计量，避免把点击前 runner 调度误归因给 CSS 动效。
+- 生产 A/B：首个 release 对外层 rail 做逐帧宽度动画时，真实关联台 6 个周期均出现约 `33.4ms` frame p95；只读浏览器 A/B 将动效收口到 paper/导航树后，3 次展开和 3 次收起均为 `131.8–135.0ms`，动画区间 frame p95 `16.8–18.4ms`。因此删除外层 rail 的 width/flex-basis transition，不用放宽性能门槛掩盖重型页面 reflow。
 - 文档影响：更新 sidebar 状态、边界输出、测试矩阵和 Spec-first coverage；模块职责与业务 I/O 不变。
 - 未测风险：本地确定性 mock 不能替代生产 OA iframe、真实字体/DPR 和长时间高负载页面；若后续发布，需复跑生产 route-shell 与折叠/展开视觉 smoke。
 

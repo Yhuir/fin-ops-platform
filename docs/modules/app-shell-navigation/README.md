@@ -21,7 +21,7 @@
 - `web/src/app/pageRegistry.tsx`：页面注册表、route chunks、sidebar groups 的唯一事实源。
 - `web/src/app/router.tsx`：把 `appPageRoutes` 交给 `PageRouteHost`。
 - `web/src/app/PageRouteHost.tsx`：route match、未知路由 redirect、当前页面挂载、lazy fallback、`PageRuntimeProvider`。
-- `web/src/components/shell/AppSidebar.tsx`：桌面/移动侧栏、固定品牌/导航/账号三区、active route、桌面 `232px/72px` 平滑展开收起、收缩态仅保留居中 toggle、hover/focus/touch preload。
+- `web/src/components/shell/AppSidebar.tsx`：桌面/移动侧栏、固定品牌/导航/账号三区、active route、桌面可见 paper 在 `232px/72px` 间平滑展开收起、收缩态仅保留居中 toggle、hover/focus/touch preload。
 - `web/src/components/shell/AppSidebarAccount.tsx`：只消费现有 SessionContext 的当前 OA 用户入口与身份详情弹层，不发起独立请求。
 - `web/src/components/shell/AppStatusIndicator.tsx`：静态品牌图标、静态运行状态点和全局运行状态弹层入口。
 - `web/src/components/shell/sidebarItems.ts`：只重导出 `pageRegistry` 的 `sidebarGroups`，不能维护第二份导航事实。

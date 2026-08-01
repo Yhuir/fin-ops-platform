@@ -17,7 +17,7 @@
 
 ## Operation latency baseline
 
-`web/e2e/app-shell.spec.ts` 和 `web/e2e/app-shell-responsive.spec.ts` 已接入 Playwright `operation-latency-*.json` 附件。本轮记录的 shell 操作覆盖：admin/read-export/forbidden/expired 进入系统状态 route、移动视口打开 `主导航菜单`、从抽屉点击 `设置` 后导航并关闭抽屉、打开 `?embedded=oa` embedded shell，以及点击 `展开菜单` 后显示折叠菜单。responsive spec 同时附加收缩/展开 sidebar 截图和展开/收起性能附件，逐项验证品牌入口在收缩态隐藏、toggle 中心偏差不超过 `0.5 CSS px`、全部菜单 link/icon slot 中心偏差不超过 `0.5 CSS px`、slot 为 `34px`、SVG 为 `16px`、双向动效为 100–300ms、frame p95 ≤25ms 且 CLS=0。
+`web/e2e/app-shell.spec.ts` 和 `web/e2e/app-shell-responsive.spec.ts` 已接入 Playwright `operation-latency-*.json` 附件。本轮记录的 shell 操作覆盖：admin/read-export/forbidden/expired 进入系统状态 route、移动视口打开 `主导航菜单`、从抽屉点击 `设置` 后导航并关闭抽屉、打开 `?embedded=oa` embedded shell，以及点击 `展开菜单` 后显示折叠菜单。responsive spec 同时附加收缩/展开 sidebar 截图和展开/收起性能附件，逐项验证品牌入口在收缩态隐藏、toggle 中心偏差不超过 `0.5 CSS px`、全部菜单 link/icon slot 中心偏差不超过 `0.5 CSS px`、slot 为 `34px`、SVG 为 `16px`、可见 paper 双向动效为 100–300ms、动画区间 frame p95 ≤25ms 且 CLS=0。
 
 ## 缺口分类
 

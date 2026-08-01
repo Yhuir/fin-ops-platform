@@ -190,8 +190,8 @@ test.describe("app shell responsive browser smoke", () => {
     await testInfo.attach("sidebar-collapsed.png", { path: collapsedScreenshotPath, contentType: "image/png" });
 
     const measureSidebarMotion = (targetWidth: number) => page.evaluate(async (expectedWidth) => {
-      const sidebar = document.querySelector<HTMLElement>(".app-sidebar");
-      if (!sidebar) throw new Error("sidebar missing");
+      const sidebarPaper = document.querySelector<HTMLElement>(".app-sidebar-paper");
+      if (!sidebarPaper) throw new Error("sidebar paper missing");
       let cls = 0;
       const observer = new PerformanceObserver((list) => {
         for (const entry of list.getEntries()) {
@@ -205,13 +205,20 @@ test.describe("app shell responsive browser smoke", () => {
       const startedAt = performance.now();
       while (performance.now() - startedAt < 420) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-        frames.push({ at: performance.now(), width: sidebar.getBoundingClientRect().width });
+        frames.push({ at: performance.now(), width: sidebarPaper.getBoundingClientRect().width });
       }
       observer.disconnect();
       const firstWidth = frames[0]?.width ?? 72;
-      const motionStart = frames.find((frame) => Math.abs(frame.width - firstWidth) > 0.5)?.at ?? startedAt;
-      const target = frames.find((frame) => Math.abs(frame.width - expectedWidth) <= 0.5)?.at ?? Number.POSITIVE_INFINITY;
-      const intervals = frames.slice(1).map((frame, index) => frame.at - frames[index]!.at).sort((a, b) => a - b);
+      const motionStartIndex = frames.findIndex((frame) => Math.abs(frame.width - firstWidth) > 0.5);
+      const targetIndex = frames.findIndex((frame, index) => (
+        index >= motionStartIndex && Math.abs(frame.width - expectedWidth) <= 0.5
+      ));
+      const motionFrames = motionStartIndex >= 0 && targetIndex >= motionStartIndex
+        ? frames.slice(motionStartIndex, targetIndex + 1)
+        : [];
+      const intervals = motionFrames.slice(1)
+        .map((frame, index) => frame.at - motionFrames[index]!.at)
+        .sort((a, b) => a - b);
       const percentile = (ratio: number) => {
         if (intervals.length === 0) return 0;
         const rank = (intervals.length - 1) * ratio;
@@ -222,7 +229,9 @@ test.describe("app shell responsive browser smoke", () => {
       };
       return {
         cls,
-        elapsedMs: target - motionStart,
+        elapsedMs: motionFrames.length >= 2
+          ? motionFrames.at(-1)!.at - motionFrames[0]!.at
+          : Number.POSITIVE_INFINITY,
         firstWidth,
         lastWidth: frames.at(-1)?.width ?? 0,
         frameCount: intervals.length,
@@ -276,7 +285,7 @@ test.describe("app shell responsive browser smoke", () => {
 
     await toggle.click();
     await expect(page.getByRole("button", { name: "折叠菜单" })).toBeVisible();
-    await expect(page.locator(".app-sidebar")).toHaveCSS("width", "232px");
+    await expect(page.locator(".app-sidebar-paper")).toHaveCSS("width", "232px");
     await toggle.click();
     await toggle.click();
     await expect(page.getByRole("button", { name: "折叠菜单" })).toBeVisible();

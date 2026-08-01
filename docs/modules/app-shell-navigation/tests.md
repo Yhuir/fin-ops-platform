@@ -32,7 +32,7 @@
 | nested path active、import shortcut inactive | 已覆盖，2026-06-11 新增 | `AppSidebar.test.tsx` |
 | compact drawer 点击导航后关闭 | 已覆盖，2026-06-11 新增 | `AppSidebar.test.tsx` |
 | 当前 OA 账号区、身份弹层与移动抽屉零额外 session I/O | 已覆盖，2026-08-01 新增 | `AppSidebar.test.tsx`、`app-shell-responsive.spec.ts` |
-| 侧栏 `232px↔72px` 展开和收起均为 100–300ms、frame p95 ≤25ms、CLS=0；收缩态全部菜单 icon slot 居中且 SVG 固定 16px；品牌状态入口隐藏且 toggle 位于 72px 正中 | 已覆盖，2026-08-02 更新 | `app-shell-responsive.spec.ts`，并附收缩/展开 sidebar 截图与双向性能附件 |
+| 可见侧栏 paper `232px↔72px` 展开和收起均为 100–300ms、动画区间 frame p95 ≤25ms、CLS=0；布局 rail 不再逐帧触发业务页 reflow；收缩态全部菜单 icon slot 居中且 SVG 固定 16px；品牌状态入口隐藏且 toggle 位于 72px 正中 | 已覆盖，2026-08-02 更新 | `app-shell-responsive.spec.ts`，并附收缩/展开 sidebar 截图与双向性能附件 |
 | 静态品牌状态入口与旧旋转圆环/keyframes 删除 | 已覆盖，2026-08-01 新增 | `AppSidebar.test.tsx` source guard |
 | 指定发票页入口位于财务业务分组末尾且仍在系统操作上方 | 已覆盖，2026-06-18 更新 | `App.test.tsx` |
 | SessionGate loading/forbidden/expired/error/retry | 已覆盖 | `SessionGate.test.tsx` |
@@ -64,7 +64,7 @@
 | 2026-06-11 | 防止 import shortcut 进入导入页后误显示 active，或移动端点击导航后 drawer 不关闭 | `AppSidebar.test.tsx` active/import shortcut 与 compact drawer tests |
 | 2026-06-14 | 防止各页面重复实现全屏写操作 loading，或失败后自动关闭导致用户继续操作旧事实 | `GlobalOperationOverlayContext.test.tsx` |
 | 2026-08-01 | 防止收缩态透明 label 继续参与 flex，按文字长度压缩图标并导致 active 框内左偏；防止 toggle 恢复透明裸 Chevron 和负 right 越界 | `AppSidebar.test.tsx` CSS/source guard + `app-shell-responsive.spec.ts` 全菜单真实几何 |
-| 2026-08-02 | 防止收缩态继续显示品牌 Logo 并挤压 toggle；防止侧栏恢复瞬时宽度切换或只实现单向动效 | `AppSidebar.test.tsx` brand/inert/CSS guard + `app-shell-responsive.spec.ts` 双向性能与截图 |
+| 2026-08-02 | 防止收缩态继续显示品牌 Logo 并挤压 toggle；防止侧栏恢复瞬时 paper 切换、只实现单向动效或重新让重型业务页参与逐帧宽度 reflow | `AppSidebar.test.tsx` brand/inert/CSS guard + `app-shell-responsive.spec.ts` 双向性能与截图 |
 
 ## 关键 smoke flows
 
@@ -76,7 +76,7 @@
 6. focus、visibility 与 BFCache 恢复不触发当前业务页面 reload；重新进入 route 仍重新 mount。
 7. 真实 Chromium 打开 `/operations/app-health`，admin 可以看到导航和 dashboard；read_export_only/forbidden/expired 不会触发受保护 dashboard API。
 8. 真实 Chromium 移动视口打开成本统计，打开主导航菜单，点击设置后 drawer 关闭并进入设置页。
-9. 真实 Chromium 打开 `/?embedded=oa`，shell 使用 embedded 样式；桌面侧栏默认折叠，只显示居中展开 toggle，并可在 `232px/72px` 间双向平滑切换。
+9. 真实 Chromium 打开 `/?embedded=oa`，shell 使用 embedded 样式；桌面侧栏默认折叠，只显示居中展开 toggle，可见 paper 可在 `232px/72px` 间双向平滑切换，业务页不参与逐帧宽度动画。
 10. 生产真实 Chromium 使用 full-access user cookie 打开 16 个核心路由，页面不能停在 session gate 或“正在加载页面”，不能产生隐藏浏览器错误、原生弹窗、非预期 requestfailed 或任何 mutating HTTP。
 
 ## 模块验证命令

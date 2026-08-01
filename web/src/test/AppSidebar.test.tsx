@@ -193,7 +193,8 @@ describe("AppSidebar shell contract", () => {
     expect(toggle).toHaveAttribute("title", "展开菜单");
     expect(brandLockup).toHaveAttribute("aria-hidden", "true");
     expect(brandLockup).toHaveAttribute("inert");
-    expect(container.querySelector(".app-sidebar-brand-mark")).toBeNull();
+    expect(container.querySelector(".app-sidebar-brand-mark")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "系统状态正常" })).not.toBeInTheDocument();
     expect(screen.queryByText("展开菜单")).not.toBeInTheDocument();
     expect(appSidebarSource).toContain("PanelLeftOpen");
     expect(appSidebarSource).toContain("PanelLeftClose");
@@ -206,6 +207,8 @@ describe("AppSidebar shell contract", () => {
 
     const contentRule = appStyles.match(/\.app-sidebar-content\s*\{[^}]*\}/s)?.[0] ?? "";
     const sidebarRule = appStyles.match(/\.app-sidebar\s*\{[^}]*\}/s)?.[0] ?? "";
+    const paperRule = appStyles.match(/\.app-sidebar-paper\s*\{[^}]*\}/s)?.[0] ?? "";
+    const collapsedPaperRule = appStyles.match(/\.app-sidebar\.collapsed \.app-sidebar-paper\s*\{[^}]*\}/s)?.[0] ?? "";
     const brandLockupRule = appStyles.match(/\.app-sidebar-brand-lockup\s*\{[^}]*\}/s)?.[0] ?? "";
     const collapsedBrandLockupRule = appStyles.match(/\.app-sidebar-brand\.collapsed \.app-sidebar-brand-lockup\s*\{[^}]*\}/s)?.[0] ?? "";
     const toggleRule = appStyles.match(/\.app-sidebar-toggle\s*\{[^}]*\}/s)?.[0] ?? "";
@@ -222,10 +225,15 @@ describe("AppSidebar shell contract", () => {
     expect(screen.getByText("关联台")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "银行明细" })).toHaveAttribute("title", "银行明细");
     expect(sidebarRule).toMatch(/--app-sidebar-content-motion:\s*var\(--motion-base\) var\(--ease-out-quart\)/);
-    expect(sidebarRule).toMatch(/flex-basis var\(--app-sidebar-content-motion\)/);
-    expect(sidebarRule).toMatch(/width var\(--app-sidebar-content-motion\)/);
+    expect(sidebarRule).not.toMatch(/transition:[^}]*(flex-basis|width)/);
+    expect(paperRule).toMatch(/width:\s*232px;/);
+    expect(paperRule).toMatch(/transition:\s*width var\(--app-sidebar-content-motion\)/);
+    expect(collapsedPaperRule).toMatch(/width:\s*72px;/);
+    expect(contentRule).toMatch(/width:\s*232px;/);
     expect(contentRule).toMatch(/transition:\s*width var\(--app-sidebar-content-motion\)/);
+    expect(appStyles).toMatch(/\.app-sidebar-content\.collapsed\s*\{[^}]*width:\s*72px;/s);
     expect(contentRule).not.toMatch(/will-change:\s*width/);
+    expect(paperRule).not.toMatch(/will-change:\s*width/);
     expect(sidebarRule).not.toMatch(/will-change:\s*width/);
     expect(brandLockupRule).toMatch(/opacity[^;]*var\(--motion-fast\)/);
     expect(brandLockupRule).toMatch(/transform[^;]*var\(--motion-base\)/);
@@ -253,7 +261,7 @@ describe("AppSidebar shell contract", () => {
     expect(appStyles).not.toMatch(/\.app-sidebar-brand\.collapsed \.app-sidebar-toggle\s*\{[^}]*right:\s*-7px;/s);
     expect(appSidebarSource).not.toMatch(/Tooltip\.Trigger/);
     expect(appStyles).toMatch(/prefers-reduced-motion:\s*reduce/);
-    expect(appStyles).toMatch(/\[data-reduce-motion="true"\] \.app-sidebar/);
+    expect(appStyles).toMatch(/\[data-reduce-motion="true"\] \.app-sidebar-paper/);
   });
 
   test("prefetches the route chunk on sidebar hover and focus without changing the link target", () => {

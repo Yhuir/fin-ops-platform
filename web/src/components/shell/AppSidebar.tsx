@@ -44,7 +44,7 @@ export default function AppSidebar({
           className="app-sidebar-brand-lockup"
           inert={showExpandedContent ? undefined : true}
         >
-          {showExpandedContent ? <AppStatusIndicator /> : null}
+          <AppStatusIndicator />
           <span className="app-sidebar-brand-text" aria-hidden={!showExpandedContent}>
             <span className="app-sidebar-eyebrow">溯源办公系统</span>
             <span className="app-sidebar-title">财务运营平台</span>
