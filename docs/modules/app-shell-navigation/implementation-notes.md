@@ -28,6 +28,19 @@
 
 ## 历史记录
 
+## 2026-08-01 - 收缩侧栏图标几何、toggle 与品牌状态图标收口
+
+- 目标：修复收缩态菜单图标按 label 长度被 flex 压缩并在 active 框内左偏的问题，重做展开/收缩入口，并用 Figma Make 交付中的蓝色三柱图形替换旧列表/下载品牌图标。
+- 影响范围：`AppSidebar`、`AppStatusIndicator`、本地 `finance-platform-mark.svg`、局部 `.app-sidebar-*` 样式、shell/status 测试和 responsive Playwright；菜单名称、route、page registry、权限、API、read model、worker 和业务 I/O 不变。
+- 根因与关键决策：旧 collapsed label 只有 `opacity: 0` 和 transform，仍以 `flex: 1 1 auto` 参与 `34px` link 排版；icon slot 又允许 shrink，导致生产实测 SVG 宽度随文字长度落在约 `7.92..16px`、active 图标左偏约 `9.39px`。新合同让 collapsed label 使用零 layout basis，icon slot 固定不可压缩 `34px`，SVG 固定 `16px`；外部 `232px/72px` 宽度不变，不增加逐图标补丁。
+- toggle 与品牌：toggle 改用已安装 Lucide `PanelLeftOpen/PanelLeftClose` 和 `32px` tonal surface，删除透明裸 Chevron、双 icon crossfade DOM 与负 right 越界；collapsed 品牌区使用 `28px` 状态入口 + `4px` gap + `32px` toggle。品牌 SVG 使用本地 `#2563EB` 圆角底和白色三柱矢量，运行状态点与既有 App Status 弹层不变。
+- 可访问性与性能：App Status 触点改为原生 button，删除手写 Enter/Space 模拟；toggle 保留动态 `aria-label/aria-expanded` 并增加 title/focus-visible/reduced-motion。交互只使用 CSS 状态反馈，不新增依赖、请求、布局动画或业务副作用。
+- 旧代码清理：删除 `ChevronLeft/ChevronRight`、`.app-sidebar-toggle-icon-*`、collapsed toggle `right: -7px`、旧横线/下箭头 SVG 和可点击 `span role=status` 的自定义键盘分支；测试加入 source negative guard，不保留 fallback。
+- 测试覆盖：Vitest 覆盖 shell、App Status、OA identity、route/preload 和旧代码删除；Playwright 遍历全部侧栏项验证 link/icon center delta `≤0.5px`、icon slot `34px`、SVG `16px`、品牌/toggle 不越过 `72px`，并保护快速双击最终状态、焦点、移动 drawer、embedded OA、截图、展开耗时、frame p95 与 CLS。
+- 本地验证：完整 Vitest `73 files / 901 tests` PASS；完整 Playwright smoke 的 164 条跨页面链路均已通过（共享状态入口迁移后的 15 条相关场景复跑 PASS）；build、lint、docs、diff check PASS。Chromium 本轮展开 `elapsed=0ms`、frame p95 `17.36ms`、CLS `0`，收缩/展开截图人工复核通过。
+- 文档影响：更新 state machine、测试矩阵、Spec-first coverage 与本实施记录；模块职责、boundary I/O 和长期产品/API/运维合同不变。
+- 未测风险：本地 mock 浏览器不能替代生产字体、DPR、真实 OA iframe 和真实会话；发布后必须做生产几何、视觉、console/request failure 和 route-shell smoke。
+
 ## 2026-08-01 - 侧栏视觉层级、OA 身份区与静态品牌状态入口
 
 - 目标：在保持页面名称、路由、权限和业务 I/O 不变的前提下，降低侧栏拥挤感，显示当前 OA 用户，并移除持续旋转的状态图标。

@@ -212,7 +212,7 @@ describe("Finance operations shell", () => {
     render(<App />);
 
     expect(await screen.findByText("赵华", {}, { timeout: WORKBENCH_RENDER_TIMEOUT })).toBeInTheDocument();
-    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "系统状态正常" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "关联台" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "展开菜单" }));
     expect(await screen.findByText("财务运营平台")).toBeInTheDocument();
@@ -232,7 +232,7 @@ describe("Finance operations shell", () => {
 
     render(<App />);
 
-    const statusIndicator = await screen.findByRole("status", { name: "系统状态正常" }, { timeout: WORKBENCH_RENDER_TIMEOUT });
+    const statusIndicator = await screen.findByRole("button", { name: "系统状态正常" }, { timeout: WORKBENCH_RENDER_TIMEOUT });
     expect(statusIndicator).toHaveClass("ok");
     expect(statusIndicator.textContent).toBe("");
     expect(await screen.findByText("OA 连接失败，本次结果未包含完整 OA 数据。")).toBeInTheDocument();

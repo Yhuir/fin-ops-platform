@@ -97,6 +97,7 @@ function renderEmbeddedSidebar(expanded = true) {
 describe("AppSidebar shell contract", () => {
   const appSidebarSource = readFileSync("src/components/shell/AppSidebar.tsx", "utf8");
   const appStatusSource = readFileSync("src/components/shell/AppStatusIndicator.tsx", "utf8");
+  const brandMarkSource = readFileSync("src/components/shell/finance-platform-mark.svg", "utf8");
   const appSource = readFileSync("src/app/App.tsx", "utf8");
   const workbenchFilterSource = readFileSync("src/components/workbench/WorkbenchColumnFilterMenu.tsx", "utf8");
   const appStyles = readFileSync("src/app/styles.css", "utf8");
@@ -124,8 +125,10 @@ describe("AppSidebar shell contract", () => {
     expect(linkRule).toMatch(/font-weight:\s*500;/);
     expect(iconRule).toMatch(/width:\s*26px;/);
     expect(iconRule).toMatch(/min-width:\s*26px;/);
+    expect(iconRule).toMatch(/flex:\s*0 0 26px;/);
     expect(iconSvgRule).toMatch(/width:\s*16px;/);
     expect(iconSvgRule).toMatch(/height:\s*16px;/);
+    expect(iconSvgRule).toMatch(/flex:\s*none;/);
     expect(appSidebarSource).toMatch(/size=\{16\}/);
     expect(appStyles).toMatch(/\.app-sidebar-list\s*\{[^}]*gap:\s*4px;/s);
     expect(appStyles).toMatch(/\.app-sidebar-account-footer\s*\{[^}]*flex:\s*0 0 72px;/s);
@@ -150,11 +153,17 @@ describe("AppSidebar shell contract", () => {
 
     expect(brandMarkRule).not.toMatch(/radial-gradient|linear-gradient/);
     expect(brandMarkRule).toMatch(/border:\s*0;/);
-    expect(brandMarkRule).toMatch(/border-radius:\s*9px;/);
+    expect(brandMarkRule).toMatch(/border-radius:\s*8px;/);
     expect(brandMarkRule).toMatch(/background:\s*transparent;/);
     expect(brandMarkRule).toMatch(/color:\s*#86efac;/);
     expect(appStatusSource).toContain("finance-platform-mark.svg");
+    expect(appStatusSource).toContain("<button");
+    expect(appStatusSource).not.toContain('role="status"');
     expect(appStatusSource).not.toMatch(/<circle|status-track|status-sweep/);
+    expect(brandMarkSource).toContain('fill="#2563EB"');
+    expect(brandMarkSource).toContain('stroke="#FFF"');
+    expect(brandMarkSource).not.toContain("#EAF2FF");
+    expect(brandMarkSource).not.toContain("M8 9.5h16");
     expect(appStyles).not.toMatch(/sidebar-status-orbit|app-sidebar-brand-status-track|app-sidebar-brand-status-sweep/);
     expect(appStyles).not.toMatch(/\.app-sidebar[^}]*animation:\s*[^;]*infinite/s);
   });
@@ -180,7 +189,11 @@ describe("AppSidebar shell contract", () => {
 
     const toggle = screen.getByRole("button", { name: "展开菜单" });
     expect(toggle).toHaveClass("app-sidebar-toggle");
+    expect(toggle).toHaveAttribute("title", "展开菜单");
     expect(screen.queryByText("展开菜单")).not.toBeInTheDocument();
+    expect(appSidebarSource).toContain("PanelLeftOpen");
+    expect(appSidebarSource).toContain("PanelLeftClose");
+    expect(appSidebarSource).not.toMatch(/ChevronLeft|ChevronRight/);
     expect(appSidebarSource).not.toMatch(/Tooltip\.Content[\s\S]*(展开菜单|折叠菜单)/);
   });
 
@@ -210,9 +223,14 @@ describe("AppSidebar shell contract", () => {
     expect(linkLabelRule).toMatch(/opacity[^;]*var\(--app-sidebar-content-motion\)/);
     expect(linkLabelRule).toMatch(/transform[^;]*var\(--app-sidebar-content-motion\)/);
     expect(collapsedLinkLabelRule).toMatch(/opacity:\s*0;/);
+    expect(collapsedLinkLabelRule).toMatch(/width:\s*0;/);
+    expect(collapsedLinkLabelRule).toMatch(/max-width:\s*0;/);
+    expect(collapsedLinkLabelRule).toMatch(/flex:\s*0 0 0;/);
     expect(linkLabelRule).not.toMatch(/transition:[^;]*(max-width|max-height|padding)/);
     expect(collapsedGroupRule).toMatch(/width:\s*34px;/);
     expect(collapsedListRule).toMatch(/width:\s*34px;/);
+    expect(appStyles).toMatch(/\.app-sidebar-content\.collapsed \.app-sidebar-link-icon\s*\{[^}]*flex:\s*0 0 34px;/s);
+    expect(appStyles).not.toMatch(/\.app-sidebar-brand\.collapsed \.app-sidebar-toggle\s*\{[^}]*right:\s*-7px;/s);
     expect(appSidebarSource).not.toMatch(/Tooltip\.Trigger/);
     expect(appStyles).toMatch(/prefers-reduced-motion:\s*reduce/);
     expect(appStyles).toMatch(/\[data-reduce-motion="true"\] \.app-sidebar/);

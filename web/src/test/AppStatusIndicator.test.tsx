@@ -172,7 +172,7 @@ describe("global app status indicator", () => {
     });
     renderAppAt("/");
 
-    const indicator = await screen.findByRole("status", { name: "后台任务处理中" }, { timeout: 10_000 });
+    const indicator = await screen.findByRole("button", { name: "后台任务处理中" }, { timeout: 10_000 });
     expect(indicator).toHaveClass("pending");
 
     await user.hover(indicator);
@@ -239,7 +239,7 @@ describe("global app status indicator", () => {
     });
     renderAppAt("/");
 
-    const indicator = await screen.findByRole("status", { name: "后台任务处理中" });
+    const indicator = await screen.findByRole("button", { name: "后台任务处理中" });
 
     await user.click(indicator);
 

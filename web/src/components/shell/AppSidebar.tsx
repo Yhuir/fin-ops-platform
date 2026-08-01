@@ -1,5 +1,5 @@
 import { Drawer, Separator } from "@heroui/react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
 import AppSidebarAccount from "./AppSidebarAccount";
@@ -51,15 +51,15 @@ export default function AppSidebar({
             aria-label={expanded ? "折叠菜单" : "展开菜单"}
             aria-expanded={expanded}
             className="app-sidebar-toggle"
+            title={expanded ? "折叠菜单" : "展开菜单"}
             type="button"
             onClick={onToggleExpanded}
           >
-            <span className="app-sidebar-toggle-icon app-sidebar-toggle-icon-expanded">
-              <ChevronLeft aria-hidden="true" size={18} strokeWidth={2.2} />
-            </span>
-            <span className="app-sidebar-toggle-icon app-sidebar-toggle-icon-collapsed">
-              <ChevronRight aria-hidden="true" size={18} strokeWidth={2.2} />
-            </span>
+            {expanded ? (
+              <PanelLeftClose aria-hidden="true" className="app-sidebar-toggle-glyph" size={17} strokeWidth={2} />
+            ) : (
+              <PanelLeftOpen aria-hidden="true" className="app-sidebar-toggle-glyph" size={17} strokeWidth={2} />
+            )}
           </button>
         ) : null}
       </div>

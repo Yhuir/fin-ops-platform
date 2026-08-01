@@ -121,7 +121,7 @@ test.describe("workbench App Health write-safety browser flow", () => {
 
     await page.goto("/");
 
-    await expect(page.getByRole("status", { name: "写操作暂不可用" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "写操作暂不可用" })).toBeVisible();
     const { zoneLocator: unpairedZone, group: unpairedGroup } = await selectWorkbenchGroupRows(page, "unpaired");
     await expect(unpairedGroup.getByRole("button", { name: "详情" }).first()).toBeVisible();
     await expect(unpairedZone.getByRole("button", { name: "确认关联" })).toBeDisabled();
@@ -141,7 +141,7 @@ test.describe("workbench App Health write-safety browser flow", () => {
 
     await page.goto("/");
 
-    await expect(page.getByRole("status", { name: "写操作暂不可用" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "写操作暂不可用" })).toBeVisible();
     const { zoneLocator: unpairedZone, group: unpairedGroup } = await selectWorkbenchGroupRows(page, "unpaired");
     await expect(unpairedGroup.getByRole("button", { name: "详情" }).first()).toBeVisible();
     await expect(unpairedZone.getByRole("button", { name: "确认关联" })).toBeDisabled();
@@ -167,7 +167,7 @@ test.describe("workbench App Health write-safety browser flow", () => {
 
     await page.goto("/");
 
-    await expect(page.getByRole("status", { name: "写操作暂不可用" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "写操作暂不可用" })).toBeVisible();
     const { zoneLocator: pairedZone, group: pairedGroup } = await selectWorkbenchGroupRows(page, "paired");
     await expect(pairedGroup.getByText("完全关联").first()).toBeVisible();
     await expect(pairedZone.getByRole("button", { name: "撤回关联" })).toBeDisabled();

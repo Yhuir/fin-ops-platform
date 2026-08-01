@@ -142,6 +142,53 @@ test.describe("app shell responsive browser smoke", () => {
     await expect(page.getByRole("button", { name: "展开菜单" })).toBeVisible();
     await expect(page.getByRole("button", { name: "打开菜单" })).toHaveCount(0);
 
+    const collapsedGeometry = await page.locator(".app-sidebar-link").evaluateAll((links) => links.map((link) => {
+      const icon = link.querySelector<HTMLElement>(".app-sidebar-link-icon");
+      const svg = icon?.querySelector<SVGElement>("svg");
+      if (!icon || !svg) throw new Error("sidebar icon geometry missing");
+      const linkRect = link.getBoundingClientRect();
+      const iconRect = icon.getBoundingClientRect();
+      const svgRect = svg.getBoundingClientRect();
+      return {
+        label: link.getAttribute("aria-label"),
+        centerDeltaPx: Math.abs((linkRect.left + linkRect.width / 2) - (iconRect.left + iconRect.width / 2)),
+        iconWidth: iconRect.width,
+        svgWidth: svgRect.width,
+        svgHeight: svgRect.height,
+      };
+    }));
+    expect(collapsedGeometry.length).toBeGreaterThan(10);
+    for (const item of collapsedGeometry) {
+      expect(item.centerDeltaPx, JSON.stringify(item)).toBeLessThanOrEqual(0.5);
+      expect(item.iconWidth, JSON.stringify(item)).toBeCloseTo(34, 1);
+      expect(item.svgWidth, JSON.stringify(item)).toBeCloseTo(16, 1);
+      expect(item.svgHeight, JSON.stringify(item)).toBeCloseTo(16, 1);
+    }
+
+    const collapsedHeaderGeometry = await page.locator(".app-sidebar-brand").evaluate((brand) => {
+      const sidebar = brand.closest<HTMLElement>(".app-sidebar");
+      const status = brand.querySelector<HTMLElement>(".app-sidebar-brand-mark");
+      const toggle = brand.querySelector<HTMLElement>(".app-sidebar-toggle");
+      if (!sidebar || !status || !toggle) throw new Error("collapsed brand geometry missing");
+      const sidebarRect = sidebar.getBoundingClientRect();
+      const statusRect = status.getBoundingClientRect();
+      const toggleRect = toggle.getBoundingClientRect();
+      return {
+        sidebarLeft: sidebarRect.left,
+        sidebarRight: sidebarRect.right,
+        statusLeft: statusRect.left,
+        statusRight: statusRect.right,
+        toggleLeft: toggleRect.left,
+        toggleRight: toggleRect.right,
+      };
+    });
+    expect(collapsedHeaderGeometry.statusLeft).toBeGreaterThanOrEqual(collapsedHeaderGeometry.sidebarLeft);
+    expect(collapsedHeaderGeometry.toggleRight).toBeLessThanOrEqual(collapsedHeaderGeometry.sidebarRight);
+    expect(collapsedHeaderGeometry.statusRight).toBeLessThanOrEqual(collapsedHeaderGeometry.toggleLeft);
+    const collapsedScreenshotPath = testInfo.outputPath("sidebar-collapsed.png");
+    await page.locator(".app-sidebar").screenshot({ path: collapsedScreenshotPath });
+    await testInfo.attach("sidebar-collapsed.png", { path: collapsedScreenshotPath, contentType: "image/png" });
+
     const sidebarMotion = page.evaluate(async () => {
       const sidebar = document.querySelector<HTMLElement>(".app-sidebar");
       if (!sidebar) throw new Error("sidebar missing");
@@ -201,5 +248,15 @@ test.describe("app shell responsive browser smoke", () => {
     await expect(page.getByText("财务运营平台").first()).toBeVisible();
     await expect(page.getByText("溯源办公系统").first()).toBeVisible();
     await expect(page.getByRole("button", { name: "折叠菜单" })).toBeVisible();
+    const expandedScreenshotPath = testInfo.outputPath("sidebar-expanded.png");
+    await page.locator(".app-sidebar").screenshot({ path: expandedScreenshotPath });
+    await testInfo.attach("sidebar-expanded.png", { path: expandedScreenshotPath, contentType: "image/png" });
+
+    const toggle = page.locator(".app-sidebar-toggle");
+    await toggle.focus();
+    await toggle.click();
+    await toggle.click();
+    await expect(page.getByRole("button", { name: "折叠菜单" })).toBeVisible();
+    await expect(toggle).toBeFocused();
   });
 });

@@ -27,7 +27,7 @@ test.describe("workbench stale and error browser flow", () => {
 
     await page.goto("/");
 
-    await expect(page.getByRole("status", { name: /关联台待刷新/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /关联台待刷新/ })).toBeVisible();
     const openZone = page.getByTestId("zone-unpaired");
     const openGroup = page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001");
     await expect(openGroup).toBeVisible();
@@ -49,7 +49,7 @@ test.describe("workbench stale and error browser flow", () => {
 
     await page.goto("/");
 
-    await expect(page.getByRole("status", { name: /关联台刷新中/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /关联台刷新中/ })).toBeVisible();
     await expect(page.getByText("当前没有可展示的 OA / 银行流水 / 发票记录。")).toHaveCount(0);
 
     const openZone = page.getByTestId("zone-unpaired");
@@ -74,7 +74,7 @@ test.describe("workbench stale and error browser flow", () => {
 
     await page.goto("/");
 
-    await expect(page.getByRole("status", { name: /关联台待刷新/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /关联台待刷新/ })).toBeVisible();
     await expect(page.getByText("当前没有可展示的 OA / 银行流水 / 发票记录。")).toHaveCount(0);
     await expect(page.getByTestId("zone-unpaired").getByText("未配对 0 项").first()).toBeVisible();
     await expect(page.getByTestId("zone-paired").getByText("已配对 0 项").first()).toBeVisible();
@@ -90,7 +90,7 @@ test.describe("workbench stale and error browser flow", () => {
 
     await page.goto("/");
 
-    await expect(page.getByRole("status", { name: /关联台待刷新/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /关联台待刷新/ })).toBeVisible();
     const openZone = page.getByTestId("zone-unpaired");
     const openGroup = page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001");
     await expect(openGroup).toBeVisible();
@@ -115,7 +115,7 @@ test.describe("workbench stale and error browser flow", () => {
 
     await page.goto("/");
 
-    await expect(page.getByRole("status", { name: /OA 正在同步/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /OA 正在同步/ })).toBeVisible();
     const openZone = page.getByTestId("zone-unpaired");
     const openGroup = page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001");
     await expect(openGroup).toBeVisible();
@@ -140,7 +140,7 @@ test.describe("workbench stale and error browser flow", () => {
 
     await page.goto("/");
 
-    await expect(page.getByRole("status", { name: /关联台刷新失败/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /关联台刷新失败/ })).toBeVisible();
     const openZone = page.getByTestId("zone-unpaired");
     const openGroup = page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001");
     await expect(openGroup).toBeVisible();

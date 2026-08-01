@@ -1621,7 +1621,7 @@ describe("Workbench row selection and detail drawer", () => {
     renderAppAt("/");
 
     const unpairedZone = await screen.findByTestId("zone-unpaired");
-    expect(await screen.findByRole("status", { name: /关联台待刷新/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /关联台待刷新/ })).toBeInTheDocument();
     await user.click(await within(unpairedZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ }));
 
     expect(within(unpairedZone).getByRole("button", { name: "确认关联" })).toBeDisabled();
@@ -1671,7 +1671,7 @@ describe("Workbench row selection and detail drawer", () => {
     renderAppAt("/");
 
     const unpairedZone = await screen.findByTestId("zone-unpaired");
-    expect(await screen.findByRole("status", { name: /关联台待刷新/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /关联台待刷新/ })).toBeInTheDocument();
     await user.click(await within(unpairedZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ }));
 
     expect(within(unpairedZone).getByRole("button", { name: "确认关联" })).toBeDisabled();
@@ -2253,7 +2253,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(await screen.findByRole("heading", { name: "ETC发票导入" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "ETC发票导入" })).not.toBeInTheDocument();
     expect(screen.getByTestId("background-progress-block")).toBeInTheDocument();
-    expect(screen.getByRole("status", { name: "正在执行后台任务：正在导入 ETC发票 3/31" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "正在执行后台任务：正在导入 ETC发票 3/31" })).toBeInTheDocument();
     await user.selectOptions(await screen.findByLabelText("ETC对账任务"), "etc_task_ready_001");
     const input =
       (screen.queryByLabelText("上传ETC zip") ?? screen.getByLabelText("上传文件")) as HTMLInputElement;
@@ -2320,7 +2320,7 @@ describe("Workbench row selection and detail drawer", () => {
     });
     renderAppAt("/");
 
-    const statusIndicator = await screen.findByRole("status", { name: "系统状态正常" });
+    const statusIndicator = await screen.findByRole("button", { name: "系统状态正常" });
 
     expect(statusIndicator).toHaveClass("ok");
     expect(statusIndicator.textContent).toBe("");
@@ -2387,18 +2387,18 @@ describe("Workbench row selection and detail drawer", () => {
     });
     renderAppAt("/");
 
-    await screen.findByRole("status", { name: "系统状态正常" });
+    await screen.findByRole("button", { name: "系统状态正常" });
     expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/oa-sync/events"))).toBe(false);
     expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/oa-sync/status"))).toBe(true);
 
     await waitFor(() => {
-      expect(screen.getByRole("status", { name: "系统状态正常" })).toHaveClass("ok");
+      expect(screen.getByRole("button", { name: "系统状态正常" })).toHaveClass("ok");
       expect(screen.queryByRole("status", { name: "OA 正在同步，关联台稍后更新" })).not.toBeInTheDocument();
     }, { timeout: 5_000 });
 
     await waitFor(() => {
       expect(fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/oa-sync/status")).length).toBeGreaterThan(2);
-      expect(screen.getByRole("status", { name: "系统状态正常" })).toHaveClass("ok");
+      expect(screen.getByRole("button", { name: "系统状态正常" })).toHaveClass("ok");
       expect(screen.queryByRole("status", { name: "OA 正在同步，关联台稍后更新" })).not.toBeInTheDocument();
     }, { timeout: 8_000 });
   });

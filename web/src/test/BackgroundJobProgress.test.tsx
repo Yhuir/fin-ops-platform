@@ -153,7 +153,7 @@ describe("global background job page header", () => {
 
     await user.click(screen.getByRole("link", { name: "银行明细" }));
 
-    expect(await screen.findByRole("status", { name: "正在执行后台任务：正在导入 ETC发票 3/31" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "正在执行后台任务：正在导入 ETC发票 3/31" })).toBeInTheDocument();
     expect(screen.queryByTestId("background-progress-block")).not.toBeInTheDocument();
   });
 });

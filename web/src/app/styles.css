@@ -10973,76 +10973,56 @@ body.workbench-focus-mode .global-header {
 }
 
 .app-sidebar-brand.collapsed {
-  justify-content: center;
-  padding: 8px 7px 7px;
+  justify-content: flex-start;
+  gap: 4px;
+  padding: 8px 4px 7px;
 }
 
 .app-sidebar-toggle {
   position: relative;
   display: inline-flex;
-  width: 30px;
-  height: 30px;
-  flex: 0 0 30px;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
   align-items: center;
   justify-content: center;
   padding: 0;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
+  border: 1px solid rgba(191, 219, 254, 0.16);
+  border-radius: 8px;
+  background: rgba(226, 232, 240, 0.07);
   color: #d7e7fb;
   cursor: pointer;
   transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
     color var(--motion-fast) var(--ease-standard),
-    transform var(--motion-fast) var(--ease-standard);
+    box-shadow var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-out-quart);
 }
 
-.app-sidebar-toggle-icon {
-  position: absolute;
-  inset: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  transform: translateX(4px) scale(0.92);
-  transition:
-    opacity var(--motion-base) var(--ease-out-quart),
-    transform var(--motion-base) var(--ease-out-quart);
-}
-
-.app-sidebar-toggle[aria-expanded="true"] .app-sidebar-toggle-icon-expanded,
-.app-sidebar-toggle[aria-expanded="false"] .app-sidebar-toggle-icon-collapsed {
-  opacity: 1;
-  transform: translateX(0) scale(1);
-}
-
-.app-sidebar-toggle[aria-expanded="true"] .app-sidebar-toggle-icon-collapsed {
-  transform: translateX(4px) scale(0.92);
-}
-
-.app-sidebar-toggle[aria-expanded="false"] .app-sidebar-toggle-icon-expanded {
-  transform: translateX(-4px) scale(0.92);
+.app-sidebar-toggle-glyph {
+  flex: none;
 }
 
 .app-sidebar-toggle:hover {
-  background: transparent;
+  border-color: rgba(191, 219, 254, 0.34);
+  background: rgba(226, 232, 240, 0.14);
   color: #ffffff;
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.16);
+  transform: translateY(-1px);
+}
+
+.app-sidebar-toggle:active {
+  box-shadow: none;
+  transform: scale(0.96);
 }
 
 .app-sidebar-toggle:focus-visible {
-  background: transparent;
+  border-color: rgba(191, 219, 254, 0.48);
+  background: rgba(226, 232, 240, 0.14);
   color: #ffffff;
   outline: 2px solid rgba(147, 197, 253, 0.72);
   outline-offset: 2px;
-}
-
-.app-sidebar-brand.collapsed .app-sidebar-toggle {
-  position: absolute;
-  top: 50%;
-  right: -7px;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  transform: translateY(-50%);
 }
 
 .app-sidebar-brand-lockup,
@@ -11056,15 +11036,18 @@ body.workbench-focus-mode .global-header {
 .app-sidebar-brand-mark {
   position: relative;
   display: inline-flex;
-  width: 32px;
-  height: 32px;
-  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
   align-items: center;
   justify-content: center;
+  appearance: none;
+  padding: 0;
   border: 0;
-  border-radius: 9px;
+  border-radius: 8px;
   background: transparent;
   color: #86efac;
+  cursor: pointer;
 }
 
 .app-sidebar-brand-mark:focus-visible {
@@ -11081,16 +11064,16 @@ body.workbench-focus-mode .global-header {
 }
 
 .app-sidebar-brand-status-icon {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
 }
 
 .app-sidebar-brand-status-dot {
   position: absolute;
   right: -1px;
   bottom: -1px;
-  width: 9px;
-  height: 9px;
+  width: 8px;
+  height: 8px;
   border: 2px solid #334154;
   border-radius: 50%;
   background: currentColor;
@@ -11307,7 +11290,8 @@ body.workbench-focus-mode .global-header {
 }
 
 .app-sidebar-brand.collapsed .app-sidebar-brand-lockup {
-  width: 32px;
+  width: 28px;
+  flex: 0 0 28px;
   overflow: hidden;
 }
 
@@ -11441,6 +11425,7 @@ body.workbench-focus-mode .global-header {
   display: inline-flex;
   width: 26px;
   min-width: 26px;
+  flex: 0 0 26px;
   align-items: center;
   justify-content: flex-start;
   color: inherit;
@@ -11449,6 +11434,7 @@ body.workbench-focus-mode .global-header {
 .app-sidebar-link-icon svg {
   width: 16px;
   height: 16px;
+  flex: none;
 }
 
 .app-sidebar-link-label {
@@ -11464,6 +11450,9 @@ body.workbench-focus-mode .global-header {
 }
 
 .app-sidebar-content.collapsed .app-sidebar-link-label {
+  width: 0;
+  max-width: 0;
+  flex: 0 0 0;
   opacity: 0;
   pointer-events: none;
   transform: translateX(-8px);
@@ -11484,7 +11473,8 @@ body.workbench-focus-mode .global-header {
 
 .app-sidebar-content.collapsed .app-sidebar-link-icon {
   width: 34px;
-  min-width: 0;
+  min-width: 34px;
+  flex: 0 0 34px;
   justify-content: center;
 }
 
@@ -11691,7 +11681,7 @@ body.workbench-focus-mode .global-header {
   .app-sidebar-account-label,
   .app-sidebar-group-title,
   .app-sidebar-link-label,
-  .app-sidebar-toggle-icon {
+  .app-sidebar-toggle {
     transition: none;
   }
 }
@@ -11703,7 +11693,7 @@ body.workbench-focus-mode .global-header {
 [data-reduce-motion="true"] .app-sidebar-account-label,
 [data-reduce-motion="true"] .app-sidebar-group-title,
 [data-reduce-motion="true"] .app-sidebar-link-label,
-[data-reduce-motion="true"] .app-sidebar-toggle-icon {
+[data-reduce-motion="true"] .app-sidebar-toggle {
   transition: none;
 }
 

@@ -181,7 +181,7 @@ export default function AppStatusIndicator() {
   const { canAdminAccess } = useOptionalSessionPermissions();
   const [open, setOpen] = useState(false);
   const [popoverPosition, setPopoverPosition] = useState({ left: 0, top: 0 });
-  const triggerRef = useRef<HTMLSpanElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const closeTimerRef = useRef<number | null>(null);
   const reason = appStatus?.overall.reason ?? healthStatus.reason;
@@ -282,32 +282,21 @@ export default function AppStatusIndicator() {
 
   return (
     <>
-        <span
-          ref={triggerRef}
-          aria-label={reason}
-          aria-controls={open ? popperId : undefined}
-          aria-expanded={open}
-          aria-haspopup="dialog"
-          aria-live="polite"
-          className={`app-sidebar-brand-mark ${tone}`}
-          data-status-reason={reason}
-          role="status"
-          tabIndex={0}
-          onClick={openPopover}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              closePopover();
-              return;
-            }
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              openPopover();
-            }
-          }}
-        >
-          <img alt="" className="app-sidebar-brand-status-icon" src={financePlatformMark} />
-          <span className="app-sidebar-brand-status-dot" aria-hidden="true" />
-        </span>
+      <button
+        ref={triggerRef}
+        aria-label={reason}
+        aria-controls={open ? popperId : undefined}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        aria-live="polite"
+        className={`app-sidebar-brand-mark ${tone}`}
+        data-status-reason={reason}
+        type="button"
+        onClick={openPopover}
+      >
+        <img alt="" className="app-sidebar-brand-status-icon" src={financePlatformMark} />
+        <span className="app-sidebar-brand-status-dot" aria-hidden="true" />
+      </button>
       {open ? createPortal(
         <div
           ref={popoverRef}

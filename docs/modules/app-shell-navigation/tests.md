@@ -11,7 +11,7 @@
 | Lazy route fallback | `web/src/test/PageRouteHost.test.tsx` | lazy chunk 未 resolve 时显示轻量 fallback；未知路径 redirect root |
 | Browser lifecycle isolation | `web/src/test/PageRouteHost.test.tsx` | focus、visibility 与 BFCache 不触发当前业务页 reload；route 重进仍重新 mount |
 | Sidebar active/preload | `web/src/test/AppSidebar.test.tsx` | active route、nested path、import shortcut inactive、hover/focus preload 不改 link target |
-| Sidebar hierarchy/account/status | `web/src/test/AppSidebar.test.tsx`、`web/e2e/app-shell-responsive.spec.ts` | 64/36/44/72px 层级、OA identity、账号弹层、静态状态图标、旧无限动画删除、零额外 session I/O、展开性能与 CLS |
+| Sidebar hierarchy/account/status | `web/src/test/AppSidebar.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx`、`web/e2e/app-shell-responsive.spec.ts` | 64/36/44/72px 层级、OA identity、账号弹层、静态状态图标、收缩态全菜单几何居中、品牌区不越界、旧无限动画/旧 Chevron/负定位删除、零额外 session I/O、展开性能与 CLS |
 | Compact/mobile sidebar | `web/src/test/AppSidebar.test.tsx`、`web/src/test/App.test.tsx`、`web/e2e/app-shell-responsive.spec.ts` | top bar 打开菜单；点击导航关闭 compact drawer；导航入口仍完整；真实 Chromium 移动视口 drawer 打开/导航/关闭 |
 | Session gate | `web/src/test/SessionGate.test.tsx` | loading/forbidden/expired/error/retry；业务 route 在 authenticated 后渲染 |
 | Global operation overlay | `web/src/test/GlobalOperationOverlayContext.test.tsx` | 写操作运行期间全屏阻塞、成功自动关闭、失败保留错误并由用户确认关闭 |
@@ -32,7 +32,7 @@
 | nested path active、import shortcut inactive | 已覆盖，2026-06-11 新增 | `AppSidebar.test.tsx` |
 | compact drawer 点击导航后关闭 | 已覆盖，2026-06-11 新增 | `AppSidebar.test.tsx` |
 | 当前 OA 账号区、身份弹层与移动抽屉零额外 session I/O | 已覆盖，2026-08-01 新增 | `AppSidebar.test.tsx`、`app-shell-responsive.spec.ts` |
-| 侧栏 232/72 展开动画不超过 300ms、frame p95 ≤25ms、CLS=0 | 已覆盖，2026-08-01 新增 | `app-shell-responsive.spec.ts` |
+| 侧栏 232/72 展开不超过 300ms、frame p95 ≤25ms、CLS=0；收缩态全部菜单 icon slot 居中且 SVG 固定 16px；品牌状态入口和 toggle 完整位于 72px 内 | 已覆盖，2026-08-01 更新 | `app-shell-responsive.spec.ts`，并附收缩/展开 sidebar 截图 |
 | 静态品牌状态入口与旧旋转圆环/keyframes 删除 | 已覆盖，2026-08-01 新增 | `AppSidebar.test.tsx` source guard |
 | 指定发票页入口位于财务业务分组末尾且仍在系统操作上方 | 已覆盖，2026-06-18 更新 | `App.test.tsx` |
 | SessionGate loading/forbidden/expired/error/retry | 已覆盖 | `SessionGate.test.tsx` |
@@ -63,6 +63,7 @@
 | 2026-07-25 | 防止 focus/visibility/BFCache 或旧 domain/tag event 恢复跨页业务 I/O | `PageRouteHost.test.tsx` lifecycle zero-reload 与 source guard |
 | 2026-06-11 | 防止 import shortcut 进入导入页后误显示 active，或移动端点击导航后 drawer 不关闭 | `AppSidebar.test.tsx` active/import shortcut 与 compact drawer tests |
 | 2026-06-14 | 防止各页面重复实现全屏写操作 loading，或失败后自动关闭导致用户继续操作旧事实 | `GlobalOperationOverlayContext.test.tsx` |
+| 2026-08-01 | 防止收缩态透明 label 继续参与 flex，按文字长度压缩图标并导致 active 框内左偏；防止 toggle 恢复透明裸 Chevron 和负 right 越界 | `AppSidebar.test.tsx` CSS/source guard + `app-shell-responsive.spec.ts` 全菜单真实几何 |
 
 ## 关键 smoke flows
 
@@ -72,10 +73,10 @@
 4. 从成本统计进入银行流水导入，路径变成 `/imports/bank-transactions`，导入 shortcut 不标记为 active。
 5. 点击底部当前 OA 账号打开身份弹层，展示用户名和部门，session 请求计数不增加。
 6. focus、visibility 与 BFCache 恢复不触发当前业务页面 reload；重新进入 route 仍重新 mount。
-6. 真实 Chromium 打开 `/operations/app-health`，admin 可以看到导航和 dashboard；read_export_only/forbidden/expired 不会触发受保护 dashboard API。
-7. 真实 Chromium 移动视口打开成本统计，打开主导航菜单，点击设置后 drawer 关闭并进入设置页。
-8. 真实 Chromium 打开 `/?embedded=oa`，shell 使用 embedded 样式，桌面侧栏默认折叠并可展开。
-9. 生产真实 Chromium 使用 full-access user cookie 打开 16 个核心路由，页面不能停在 session gate 或“正在加载页面”，不能产生隐藏浏览器错误、原生弹窗、非预期 requestfailed 或任何 mutating HTTP。
+7. 真实 Chromium 打开 `/operations/app-health`，admin 可以看到导航和 dashboard；read_export_only/forbidden/expired 不会触发受保护 dashboard API。
+8. 真实 Chromium 移动视口打开成本统计，打开主导航菜单，点击设置后 drawer 关闭并进入设置页。
+9. 真实 Chromium 打开 `/?embedded=oa`，shell 使用 embedded 样式，桌面侧栏默认折叠并可展开。
+10. 生产真实 Chromium 使用 full-access user cookie 打开 16 个核心路由，页面不能停在 session gate 或“正在加载页面”，不能产生隐藏浏览器错误、原生弹窗、非预期 requestfailed 或任何 mutating HTTP。
 
 ## 模块验证命令
 
@@ -104,7 +105,7 @@ cd web && npm run e2e:smoke
 
 ## 未测风险
 
-- 已有真实 Chromium smoke 覆盖 shell/session/protected route、移动 drawer 打开/导航/关闭和 embedded OA shell 展开；CSS sticky/sidebar 像素级视觉、真实触摸手势惯性和真实 OA iframe 尺寸仍需专项 Playwright 或发布前手工 smoke。
+- 已有真实 Chromium smoke 覆盖 shell/session/protected route、移动 drawer 打开/导航/关闭、embedded OA shell 展开、收缩态全部菜单几何和收缩/展开侧栏截图；真实触摸手势惯性、真实 OA iframe 尺寸与生产字体/DPR 仍需发布后手工 smoke。
 - 生产 user-scope route-shell smoke 已证明真实域名和真实 full-access user cookie 下 16 个核心路由可打开且无隐藏浏览器错误/意外写请求，但它不替代页面级业务流、弹窗、下载、iframe、滚动、大表格、网络恢复或写后 read model 收敛测试。
 - route chunk preload 只验证调用和 fallback，不模拟真实网络分包失败后的浏览器缓存行为；当前契约是失败不阻断导航。
 - full route registry 数量测试会在新增页面时失败，需要同步更新预期和 App Status/domain docs，而不是随意放宽。
