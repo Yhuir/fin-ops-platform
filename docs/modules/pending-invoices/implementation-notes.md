@@ -1,5 +1,11 @@
 # 待找发票 实施记录
 
+## 2026-08-01 - 首屏内容与全局统计解耦
+
+- 生产闸门显示 `/api/pending-invoices/rows` p95 在 1 秒合同边缘波动；首屏内容过去同时计算支出、收入规则分类和全期间统计。
+- 保留同一 canonical service/repository 和 API：新增可选 `include_statistics`（默认 `true`）；页面内容显式传 `false`，只计算请求 direction，首屏成功后再以 `direction=all&page_size=1` 非阻塞加载精确统计。
+- source summary 继续直接对 canonical bank facts 计算全局方向计数；内容失败仍 fail-closed，辅助统计失败不覆盖已渲染内容。未新增 endpoint、缓存、projection、worker、表、索引或依赖。
+
 ## 2026-08-01 - 同快照 scope 统计扫描合并
 
 - `scope_rows` 的 total、缺票数和可创建发票数由三个 scalar subquery 合并为一个 `scope_summary` 聚合；rows、全期间 statistics、source summary、top-50 facets 和精确 response shape 不变。
@@ -36,7 +42,7 @@
 - 支出规则版本是 `pending_invoice_tag_groups.version`，收入规则版本是 `pending_output_invoice_tag_groups.version`；二者独立，且都不同于 `bank_transaction_tags.version`。
 - `requires_invoice` 是 active tag complement，由后端实时派生；保存规则时即使请求包含该字段也必须忽略。
 - `requires_invoice` 作为列表 filter 是最终状态桶；支出状态桶包含 `paid_pending_invoice`、`paid_invoiced`、`paid_pending_future_invoice`、`invoice_not_fully_paid`，收入状态桶包含 `income_pending_invoice`、`income_invoiced`。`filter_group` / `matched_rule` 只解释规则命中，不能作为 rows/filter-options/export 的父筛选可见性条件。
-- rows、summary、全期间 statistics、facets/counts 必须在一个显式 repeatable-read/read-only snapshot；filter-options 在 SQL 聚合，不加载全量 rows。
+- 每次 rows 请求的 rows、summary、可选全期间 statistics、facets/counts 必须在一个显式 repeatable-read/read-only snapshot；`include_statistics=false` 只裁剪统计和非请求方向的分类工作，filter-options 在 SQL 聚合且不加载全量 rows。
 - rows 默认排序是 `trade_date desc nulls last, row_id`；分页、候选和导出均服务端有界，不能回退 Python/browser 全量扫描。
 - export-preview/export 从 canonical repository 收集同筛选 rows；超过 20,000 行必须 fail-closed。
 - OA/流水/发票 relation 不是待找发票私有事实；读只接受 active `app.workbench_pair_relations` 并排除 turnover closure，写仍委托 `WorkbenchRelationCommandService`。

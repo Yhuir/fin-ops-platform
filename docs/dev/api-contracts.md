@@ -30,7 +30,7 @@
 
 ## 页面标题完整性统计契约
 
-银行明细、OA 待付款、外部往来款、ETC 业务批次、税金抵扣、待找发票、进项发票使用、销项发票收款、关联台和成本统计的现有页面主响应可以携带 additive `statistics` 对象。前端必须复用该对象，不得为标题统计增加独立 HTTP 请求。
+银行明细、OA 待付款、外部往来款、ETC 业务批次、税金抵扣、待找发票、进项发票使用、销项发票收款、关联台和成本统计的现有页面主响应可以携带 additive `statistics` 对象。前端默认复用该对象；只有本文件明确登记的首屏热路径可以用同一 endpoint 的非阻塞统计请求，禁止新增跨页统一统计接口。
 
 - `statistics` 由当前 endpoint 所属页面的主查询或已发布 read model 计算，不从 Page Audit 或跨页统一统计接口回填。
 - `statistics` 始终覆盖页面未应用 month/search/filter/sort/page 前的完整范围，因此同一已发布版本下改变这些参数不会改变统计对象。
@@ -870,7 +870,7 @@ Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`sou
 
 契约要求：
 
-- 列表响应必须包含 rows、summary、statistics、pagination、稳定筛选字段定义和可解释的状态字段；直接 canonical read 不返回 read model 状态、source version 或 refresh job。
+- 列表响应必须包含 rows、summary、statistics、pagination、稳定筛选字段定义和可解释的状态字段；直接 canonical read 不返回 read model 状态、source version 或 refresh job。`include_statistics` 默认 `true`；显式传 `false` 时 `statistics=null`，repository 只计算当前 direction 的内容依赖。页面首屏先渲染该响应，再用同一 `/rows` endpoint 的 `direction=all&page_size=1&include_statistics=true` 请求非阻塞加载全期间统计；统计失败不得清空或重新锁住已返回内容。
 - filter-options 必须来自后端事实，前端不能根据当前页 rows 自行构造全局选项。`/rows` 不执行高基数 option 聚合；页面渲染 rows 后调用 `/filter-options`，每字段最多 50 项。表头下拉筛选通过 `filters` JSON 提交，字段之间按 AND 组合，同一字段内多值按 IN 组合。
 - `filters` 支持四区表字段：`counterparty_name`、`transaction_tag`、`bank_account`、`direction`、`seller_name`、`oa_applicant`、`oa_application_type`、`project_name` 等；SQL read model 和 query service 必须保持同一字段语义。
 - rows 中 `bank_transactions`、`input_invoices` 和 `oa` 都可以携带 `primary`、`relation_count`、`linked_relation_count`、`has_multiple`、`detail_mode` 和 `summaries`；单成员事实放在 `primary`，`summaries` 只在多成员时承载列表。旧重复字段 `bank_transaction`、`invoices`、`oa_applicant` 不再返回。同一 linked relation 下多笔银行流水、多张进项/销项发票或多张 OA 必须来自 active canonical relation distribution 并聚合为一条待找发票行；多笔银行流水时前端用 `bank_transactions.summaries` 展示真实对方户名列表，详情入口继续按 `kind=bank` 展开，不用 `+N` 替代户名，也不在户名下显示交易时间。多张发票或多张 OA 时前端仍用 `+N` 表达该类型全部成员，不再同时展示任一成员作为 primary，且同一多流水 relation 的其它成员不得再作为 standalone 行重复出现。

@@ -228,6 +228,7 @@ describe("pending invoices and tag settings API mapping", () => {
       filters,
       sortField: "invoice_total",
       sortDirection: "asc",
+      includeStatistics: false,
     });
 
     const url = new URL(String(fetchMock.mock.calls[0][0]), "http://localhost");
@@ -241,6 +242,7 @@ describe("pending invoices and tag settings API mapping", () => {
     expect(url.searchParams.get("keyword")).toBe("供应商");
     expect(url.searchParams.get("sort_field")).toBe("invoice_total");
     expect(url.searchParams.get("sort_direction")).toBe("asc");
+    expect(url.searchParams.get("include_statistics")).toBe("false");
     expect(JSON.parse(url.searchParams.get("filters") ?? "[]")).toEqual(filters);
     expect(payload.summary.sourceSummary).toEqual({
       bankTransactionRows: 431,

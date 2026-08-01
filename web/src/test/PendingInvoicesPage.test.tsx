@@ -538,6 +538,15 @@ function installPendingInvoiceFetch(options: {
             excluded_direction_rows: direction === "income" ? 356 : 75,
           },
         },
+        ...(url.searchParams.get("include_statistics") === "true" ? {
+          statistics: {
+            bank_transaction_count: 431,
+            expense_transaction_count: 356,
+            income_transaction_count: 75,
+            found_invoice_transaction_count: 238,
+            pending_invoice_transaction_count: 193,
+          },
+        } : {}),
         tag_dictionary: { version: 1, tags: [] },
         filter_options: { fields: pendingInvoiceFilterFields() },
       }), { status: 200, headers: { "Content-Type": "application/json" } });
@@ -903,7 +912,10 @@ function installPendingInvoiceFetch(options: {
 function pendingInvoiceRowsRequests(fetchMock: ReturnType<typeof installPendingInvoiceFetch>) {
   return fetchMock.mock.calls
     .map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost"))
-    .filter((url) => url.pathname === "/api/pending-invoices/rows");
+    .filter((url) => (
+      url.pathname === "/api/pending-invoices/rows"
+      && url.searchParams.get("include_statistics") !== "true"
+    ));
 }
 
 function pendingInvoiceRulesRequests(fetchMock: ReturnType<typeof installPendingInvoiceFetch>, method = "GET") {
@@ -1779,13 +1791,25 @@ describe("Pending invoices page", () => {
     expect(within(page).queryByText(/读模型|数据刷新中/)).not.toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "筛选内容导出" })).toBeEnabled();
     await new Promise((resolve) => window.setTimeout(resolve, 400));
-    const rowCalls = fetchMock.mock.calls.filter(([input]) => (
-      new URL(
+    const rowCalls = fetchMock.mock.calls
+      .map(([input]) => new URL(
         typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url,
         "http://localhost",
-      ).pathname === "/api/pending-invoices/rows"
-    ));
+      ))
+      .filter((url) => (
+        url.pathname === "/api/pending-invoices/rows"
+        && url.searchParams.get("include_statistics") !== "true"
+      ));
     expect(rowCalls).toHaveLength(1);
+    expect(fetchMock.mock.calls.some(([input]) => {
+      const url = new URL(
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url,
+        "http://localhost",
+      );
+      return url.pathname === "/api/pending-invoices/rows"
+        && url.searchParams.get("direction") === "all"
+        && url.searchParams.get("include_statistics") === "true";
+    })).toBe(true);
   });
 
 });

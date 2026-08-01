@@ -251,7 +251,13 @@ relation_members as materialized (
 bank_cases as materialized (
     select distinct member.row_id as bank_id, member.case_id
     from relation_members member
+    join bank_source owner_bank on owner_bank.row_id = member.row_id
+    cross join request_config config
     where member.row_type = 'bank'
+      and (
+          coalesce(config.payload->>'scan_direction', 'all') = 'all'
+          or owner_bank.direction = config.payload->>'scan_direction'
+      )
 ),
 bank_case_members as materialized (
     select distinct owner.bank_id, member.row_id as member_bank_id
@@ -590,6 +596,7 @@ rule_matches as materialized (
         definition.priority
     from banks b
     cross join rule_definitions definition
+    cross join request_config config
     cross join lateral (
         select array_remove(
             array_remove(
@@ -628,6 +635,10 @@ rule_matches as materialized (
         ) as texts
     ) candidates
     where not exists (select 1 from internal_matches match where match.row_id = b.row_id)
+      and (
+          coalesce(config.payload->>'scan_direction', 'all') = 'all'
+          or b.direction = config.payload->>'scan_direction'
+      )
       and (
           definition.direction in ('', 'any')
           or definition.direction = b.direction
@@ -730,8 +741,11 @@ effective_categories as materialized (
         end as category_source,
         auto.definition as auto_definition
     from banks b
+    cross join request_config config
     left join internal_matches internal on internal.row_id = b.row_id
     left join auto_rules auto on auto.row_id = b.row_id
+    where coalesce(config.payload->>'scan_direction', 'all') = 'all'
+       or b.direction = config.payload->>'scan_direction'
 ),
 enriched as materialized (
     select
@@ -999,13 +1013,14 @@ statistics as (
         count(*) filter (where direction = 'income' and output_invoice_count > 0)::integer
             as linked_output_invoice_transaction_count
     from classified
+    where %s::boolean
 ),
 source_summary as (
     select
         count(*)::integer as bank_transaction_rows,
         count(*) filter (where direction = 'expense')::integer as expense_rows,
         count(*) filter (where direction = 'income')::integer as income_rows
-    from classified
+    from bank_source
     where __SOURCE_WHERE_SQL__
 ),
 option_values as (
@@ -1391,6 +1406,11 @@ class PostgresPendingInvoiceCanonicalRepository:
         with self._snapshot_transaction() as transaction:
             settings = self._settings(transaction)
             config = {
+                "scan_direction": (
+                    "all"
+                    if request.get("_include_statistics")
+                    else str(request["direction"])
+                ),
                 "settings": settings,
                 "groups": {
                     direction: {
@@ -1431,6 +1451,7 @@ class PostgresPendingInvoiceCanonicalRepository:
                         page_size,
                         (page - 1) * page_size,
                         *source_params,
+                        bool(request.get("_include_statistics")),
                         bool(request.get("_include_filter_options")),
                         direction,
                         direction,
@@ -1716,6 +1737,7 @@ class PendingInvoiceCanonicalQueryService:
 
     def rows(self, query: dict[str, list[str]]) -> dict[str, Any]:
         request = _request(query)
+        request["_include_statistics"] = bool(request["include_statistics"])
         request["_include_filter_options"] = False
         page = _positive_int(query.get("page", [1])[0], field="page")
         page_size = _positive_int(query.get("page_size", [50])[0], field="page_size")
@@ -1743,7 +1765,11 @@ class PendingInvoiceCanonicalQueryService:
                 "create_invoice_available_rows": int(payload.get("create_invoice_available_rows") or 0),
                 "source_summary": dict(payload.get("source_summary") or {}),
             },
-            "statistics": dict(payload.get("statistics") or {}),
+            "statistics": (
+                dict(payload.get("statistics") or {})
+                if request["_include_statistics"]
+                else None
+            ),
             "tag_dictionary": bank_transaction_tag_dictionary_display_payload(
                 (payload.get("settings") or {}).get("bank_transaction_tags")
             ),
@@ -1752,12 +1778,14 @@ class PendingInvoiceCanonicalQueryService:
 
     def filter_options(self, query: dict[str, list[str]]) -> dict[str, Any]:
         request = _request(query)
+        request["_include_statistics"] = False
         request["_include_filter_options"] = True
         payload = self._repository.query(request, page=1, page_size=1)
         return _filter_options_payload(request, payload)
 
     def all_rows(self, query: dict[str, list[str]]) -> dict[str, Any]:
         request = _request(query)
+        request["_include_statistics"] = False
         request["_include_filter_options"] = False
         payload = self._repository.query(
             request,
@@ -2146,6 +2174,14 @@ def _request(query: dict[str, list[str]]) -> dict[str, Any]:
             "sort_direction must be asc or desc.",
         )
     filters = _filters(query.get("filters", [None])[0])
+    include_statistics = str(
+        query.get("include_statistics", ["true"])[0] or "true"
+    ).strip().lower()
+    if include_statistics not in {"true", "false"}:
+        raise PendingInvoiceError(
+            "invalid_pending_invoice_query",
+            "include_statistics must be true or false.",
+        )
     return {
         "direction": direction,
         "filter": filter_name,
@@ -2156,6 +2192,7 @@ def _request(query: dict[str, list[str]]) -> dict[str, Any]:
         "sort_field": sort_field,
         "sort_direction": sort_direction,
         "transaction_id": str(query.get("transaction_id", [""])[0] or "").strip(),
+        "include_statistics": include_statistics == "true",
     }
 
 

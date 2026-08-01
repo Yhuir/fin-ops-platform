@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 
 from fin_ops_platform.services.pending_invoice_canonical_query import (
@@ -135,11 +136,31 @@ class PendingInvoiceCanonicalRepositoryTests(unittest.TestCase):
         self.assertIn("as excluded_values", page_sql)
         self.assertIn("as regex_values", page_sql)
         self.assertNotIn("read_model.", page_sql)
-        self.assertEqual(page_params[-7:-5], (50, 50))
+        self.assertEqual(json.loads(str(page_params[0]))["scan_direction"], "all")
+        self.assertEqual(page_params[-8:-6], (50, 50))
+        self.assertIs(page_params[-6], True)
         self.assertIs(page_params[-5], False)
         self.assertEqual(payload["pagination"], {"page": 2, "page_size": 50, "total": 0})
         self.assertNotIn("read_model_status", payload)
         self.assertNotIn("source_versions", payload)
+
+    def test_without_statistics_scans_only_the_requested_direction(self) -> None:
+        connection = _RecordingConnection()
+        service = PendingInvoiceCanonicalQueryService(
+            repository=PostgresPendingInvoiceCanonicalRepository(connection)
+        )
+
+        service.rows(
+            {
+                "direction": ["expense"],
+                "filter": ["all"],
+                "include_statistics": ["false"],
+            }
+        )
+
+        _page_sql, page_params = connection.transaction_state.commands[2]
+        self.assertEqual(json.loads(str(page_params[0]))["scan_direction"], "expense")
+        self.assertIs(page_params[-6], False)
 
     def test_candidate_repository_uses_one_snapshot_and_two_bounded_selects(self) -> None:
         class CandidateTransaction(_RecordingTransaction):
@@ -196,6 +217,7 @@ class PendingInvoiceCanonicalRepositoryTests(unittest.TestCase):
     def test_query_template_is_bounded_and_has_no_forbidden_page_fact_sources(self) -> None:
         self.assertIn("limit %s offset %s", PAGE_QUERY_SQL.lower())
         self.assertIn("scope_summary as (", PAGE_QUERY_SQL.lower())
+        self.assertIn("from bank_source\n    where __source_where_sql__", PAGE_QUERY_SQL.lower())
         self.assertNotIn("select count(*)::integer from scope_rows", PAGE_QUERY_SQL.lower())
         self.assertNotIn("read_model.pending_invoice", PAGE_QUERY_SQL)
         self.assertNotIn("read_model.bank_detail", PAGE_QUERY_SQL)
@@ -276,6 +298,7 @@ class PendingInvoiceCanonicalQueryServiceTests(unittest.TestCase):
             {"direction": ["expense"], "date_from": ["2026-05-02"], "date_to": ["2026-05-01"]},
             {"direction": ["expense"], "filters": ['{"field":"amount"}']},
             {"direction": ["expense"], "filters": ['[{"field":"unknown","operator":"in","values":[]}]']},
+            {"direction": ["expense"], "include_statistics": ["sometimes"]},
             {"direction": ["expense"], "page": ["0"]},
             {"direction": ["expense"], "page_size": ["201"]},
         )
@@ -301,6 +324,7 @@ class PendingInvoiceCanonicalQueryServiceTests(unittest.TestCase):
 
         request, page_size, page = repository.calls[0]
         self.assertEqual((page, page_size), (3, 25))
+        self.assertIs(request["_include_statistics"], True)
         self.assertIs(request["_include_filter_options"], False)
         self.assertEqual(request["sort_field"], "amount")
         self.assertEqual(request["sort_direction"], "asc")
@@ -309,6 +333,7 @@ class PendingInvoiceCanonicalQueryServiceTests(unittest.TestCase):
         repository.payload["total"] = 20_001
         with self.assertRaises(PendingInvoiceError) as raised:
             service.all_rows({"direction": ["expense"], "filter": ["all"]})
+        self.assertIs(repository.calls[-1][0]["_include_statistics"], False)
         self.assertEqual(
             raised.exception.error_code,
             "pending_invoice_export_row_limit_exceeded",
@@ -321,8 +346,26 @@ class PendingInvoiceCanonicalQueryServiceTests(unittest.TestCase):
         service.filter_options({"direction": ["expense"], "filter": ["all"]})
 
         request, page_size, page = repository.calls[0]
+        self.assertIs(request["_include_statistics"], False)
         self.assertIs(request["_include_filter_options"], True)
         self.assertEqual((page, page_size), (1, 1))
+
+    def test_rows_can_skip_global_statistics_without_changing_page_contract(self) -> None:
+        repository = _PageRepository()
+        service = PendingInvoiceCanonicalQueryService(repository=repository)
+
+        payload = service.rows(
+            {
+                "direction": ["expense"],
+                "filter": ["all"],
+                "include_statistics": ["false"],
+            }
+        )
+
+        self.assertIs(repository.calls[0][0]["_include_statistics"], False)
+        self.assertIsNone(payload["statistics"])
+        self.assertEqual(payload["rows"], [])
+        self.assertEqual(payload["pagination"], {"page": 1, "page_size": 50, "total": 0})
 
     def test_candidate_query_is_validated_paginated_and_keeps_money_contract(self) -> None:
         repository = _PageRepository()

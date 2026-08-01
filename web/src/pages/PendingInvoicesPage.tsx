@@ -208,6 +208,7 @@ export default function PendingInvoicesPage() {
   const [rulesTagRefreshToken, setRulesTagRefreshToken] = useState(0);
   const [pendingIncomeStatusRows, setPendingIncomeStatusRows] = useState<Set<string>>(() => new Set());
   const tagVersionRef = useRef<number | null>(readPersistedTagVersion());
+  const statisticsRef = useRef<PendingInvoiceStatistics | null>(null);
 
   const filterOpen = filterMenuOpen;
 
@@ -227,13 +228,17 @@ export default function PendingInvoicesPage() {
     filters: queryFilters,
     sortField,
     sortDirection,
+    includeStatistics: false,
   }), [direction, keyword, page, pageSize, queryFilters, sortDirection, sortField, statusFilters]);
 
   const applyRowsPayload = useCallback((payload: PendingInvoiceRowsResponse) => {
     setRows(payload.rows);
     setTotal(payload.pagination.total);
     setSourceSummary(payload.summary.sourceSummary ?? null);
-    setStatistics(payload.statistics ?? null);
+    if (payload.statistics) {
+      statisticsRef.current = payload.statistics;
+      setStatistics(payload.statistics);
+    }
     setColumnFilterFields(payload.filterFields);
     const version = payload.tagDictionary?.version;
     if (typeof version === "number" && version > 0) {
@@ -246,12 +251,31 @@ export default function PendingInvoicesPage() {
     }
   }, []);
 
+  const loadStatistics = useCallback((signal?: AbortSignal) => {
+    return fetchPendingInvoiceRows({
+      direction: "all",
+      filter: "all",
+      page: 1,
+      pageSize: 1,
+      includeStatistics: true,
+      signal,
+    }).then((payload) => {
+      if (!signal?.aborted && payload.statistics) {
+        statisticsRef.current = payload.statistics;
+        setStatistics(payload.statistics);
+      }
+    });
+  }, []);
+
   const loadRows = useCallback((signal?: AbortSignal) => {
     setLoading(true);
     setError(null);
     fetchPendingInvoiceRows({ ...query, signal })
       .then((payload) => {
         applyRowsPayload(payload);
+        if (statisticsRef.current === null) {
+          void loadStatistics(signal).catch(() => undefined);
+        }
         void fetchPendingInvoiceFilterOptions({ ...query, signal })
           .then((options) => {
             if (!signal?.aborted) {
@@ -262,6 +286,7 @@ export default function PendingInvoicesPage() {
       })
       .catch((caught) => {
         if (!isAbortLikeError(caught)) {
+          statisticsRef.current = null;
           setStatistics(null);
           setError(caught instanceof Error ? caught.message : "待找发票加载失败。");
         }
@@ -271,7 +296,7 @@ export default function PendingInvoicesPage() {
           setLoading(false);
         }
       });
-  }, [applyRowsPayload, query]);
+  }, [applyRowsPayload, loadStatistics, query]);
 
   useEffect(() => {
     if (!active) {
@@ -389,6 +414,7 @@ export default function PendingInvoicesPage() {
         setMessage("正在刷新当前待找发票页面...");
         const rowsPayload = await fetchPendingInvoiceRows(query);
         applyRowsPayload(rowsPayload);
+        void loadStatistics().catch(() => undefined);
       },
       errorMessage: (caught) => caught instanceof Error ? caught.message : "关联关系同步失败。",
     });
@@ -414,6 +440,7 @@ export default function PendingInvoicesPage() {
         setMessage("正在刷新当前待找发票页面...");
         const rowsPayload = await fetchPendingInvoiceRows(query);
         applyRowsPayload(rowsPayload);
+        void loadStatistics().catch(() => undefined);
         return savedPayload;
       },
       errorMessage: (caught) => caught instanceof Error ? caught.message : "待找发票规则保存失败。",
@@ -422,7 +449,7 @@ export default function PendingInvoicesPage() {
       return result.value;
     }
     throw result.error;
-  }, [applyRowsPayload, direction, query, rulesDirection, runOperation, statusFilters]);
+  }, [applyRowsPayload, direction, loadStatistics, query, rulesDirection, runOperation, statusFilters]);
   const loadCandidates = useCallback(fetchPendingInvoiceCandidatesBatch, []);
   const loadExportPreview = useCallback(() => fetchPendingInvoiceExportPreview(query), [query]);
   const handleDownloadExport = useCallback(() => downloadPendingInvoiceExport(query), [query]);
@@ -510,6 +537,7 @@ export default function PendingInvoicesPage() {
             setMessage("正在刷新当前待找发票页面...");
             const rowsPayload = await fetchPendingInvoiceRows(query);
             applyRowsPayload(rowsPayload);
+            void loadStatistics().catch(() => undefined);
             return result;
           },
           errorMessage: (caught) => caught instanceof Error ? caught.message : "收入流水状态同步失败。",
@@ -531,7 +559,7 @@ export default function PendingInvoicesPage() {
           return next;
         });
       });
-  }, [applyRowsPayload, canMutateData, clearSelectedTransactions, query, runOperation, selectedRows, statusFilters]);
+  }, [applyRowsPayload, canMutateData, clearSelectedTransactions, loadStatistics, query, runOperation, selectedRows, statusFilters]);
 
   const compactStatusText = error
     ? error

@@ -65,6 +65,7 @@ class HttpSloProbeTests(unittest.TestCase):
         self.assertIn("detail_level=summary", probe_paths["workbench_groups_all_paired"])
         self.assertIn("page=1", probe_paths["pending_invoices_rows"])
         self.assertIn("page_size=50", probe_paths["pending_invoices_rows"])
+        self.assertIn("include_statistics=false", probe_paths["pending_invoices_rows"])
         self.assertNotIn("pending_invoices_filter_options", probe_paths)
         self.assertIn("page=1", probe_paths["input_invoice_usage_rows"])
         self.assertIn("page_size=20", probe_paths["input_invoice_usage_rows"])

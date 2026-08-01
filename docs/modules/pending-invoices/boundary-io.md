@@ -31,7 +31,7 @@
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| direction/filter/date/keyword/field filters/sort/page | `PendingInvoicesPage.tsx`、`features/pendingInvoices/api.ts` | route 只传递解析后的 query；service 验证方向、筛选、日期、排序、过滤器和分页；repository 负责 SQL |
+| direction/filter/date/keyword/field filters/sort/page/include_statistics | `PendingInvoicesPage.tsx`、`features/pendingInvoices/api.ts` | route 只传递解析后的 query；service 验证方向、筛选、日期、排序、过滤器、分页和统计开关；repository 负责 SQL |
 | 页面 canonical facts | PostgreSQL `app.*` | 银行流水、分类/确认、settings、pending income overrides、invoice/OA snapshots；禁止读取 `read_model.pending_invoice_*`、`read_model.bank_detail_*`、`read_model.workbench_relation_*`、`read_model.search_*` |
 | 正式配对关系 | `app.workbench_pair_relations` | 只读取 `status='active'`；排除 `turnover_manual_closure`；跨月 relation 不按当前月份截断 |
 | 候选与详情 | 页面专属 API | 候选采用 canonical input invoices + selected canonical expense banks + active relation facts；object detail 按 canonical id 有界读取 |
@@ -41,7 +41,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| rows + summary + statistics | 前端页面 | 同一显式 `REPEATABLE READ / READ ONLY` snapshot；settings SELECT + 一次 set-based 页面 SELECT；固定两次 SELECT |
+| rows + summary + optional statistics | 前端页面 | 每次请求使用同一显式 `REPEATABLE READ / READ ONLY` snapshot；默认返回全期间 statistics，`include_statistics=false` 返回 `statistics=null` |
 | rows.filter_options | 前端筛选 | rows 首响应只返回稳定字段定义，不执行高基数 options 聚合；页面完成首响应后调用专用 `/filter-options`，每字段最多 50 项，数据库聚合且不阻塞表格首屏。 |
 | export-preview/export | 前端导出 | 复用同一 canonical row DTO；最大 20,000 行，超限先报错；不读取页面 read model |
 | relation/object detail | 前端抽屉 | active canonical relations；`kind=bank|invoice|oa` 只控制响应分区 |
@@ -51,16 +51,15 @@
 ## 一致性、查询与性能
 
 - `PostgresPendingInvoiceCanonicalRepository.query()` 显式开启 `REPEATABLE READ / READ ONLY`。
-- rows、当前筛选 summary、全期间 statistics、facets/counts 由一次 set-based SQL 计算，分页在 SQL 中执行。
-- 页面首次加载和筛选变更先调用 `/api/pending-invoices/rows`；成功渲染 rows 后再调用
-  `/api/pending-invoices/filter-options`。两个 endpoint 职责互斥：rows SQL 不计算 options，专用 endpoint 不承担页面 rows。
+- rows、当前筛选 summary 和 counts 由一次 set-based SQL 计算，分页在 SQL 中执行；全期间 statistics 只在 `include_statistics=true` 时聚合。
+- 页面首次加载和筛选变更先调用 `/api/pending-invoices/rows?include_statistics=false`；成功渲染 rows 后再非阻塞调用同一 rows endpoint 加载全期间 statistics，并调用 `/api/pending-invoices/filter-options` 加载选项。辅助请求失败不得清空或锁住已返回 rows。
 - 页面 row DTO 只保留 `bank_transactions.primary|summaries`、`input_invoices.primary|summaries` 和
   `oa.primary|summaries` canonical 容器；旧 `bank_transaction`、`invoices`、`oa_applicant` 重复字段不再输出。
 - 列表标签字典只含展示元数据；规则 matcher、account scope 和其它执行期字段只留在后端 settings/query owner。
 - 分类/确认/income override、relation members、invoice/OA/bank summaries 都批量聚合；禁止 per-row/per-group N+1。
 - 自动规则字符串使用 PostgreSQL `normalize(..., NFKC)`、空白折叠及现有“帐户→账户”口径。
 - SQL 分类后由 `pending_invoice_status_payload` 再校验；若 SQL 和领域策略分歧则请求失败。
-- 50,003 条本地 PostgreSQL canonical bank rows 的实测记录在 `implementation-notes.md`；本次未新增 cache、queue、worker、materialized view、索引或依赖。
+- 50,003 条本地 PostgreSQL canonical bank rows 和生产 SLO 实测记录在 `implementation-notes.md`；本次未新增 cache、queue、worker、materialized view、索引或依赖。
 
 ## 文件范围
 

@@ -775,6 +775,9 @@ function appendRowsQuery(params: URLSearchParams, request: FetchPendingInvoiceRo
   if (request.sortDirection) {
     params.set("sort_direction", request.sortDirection);
   }
+  if (request.includeStatistics !== undefined) {
+    params.set("include_statistics", String(request.includeStatistics));
+  }
 }
 
 function buildRowsQuery(request: FetchPendingInvoiceRowsRequest, includePagination = true) {

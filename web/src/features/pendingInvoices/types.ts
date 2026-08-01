@@ -307,6 +307,7 @@ export type FetchPendingInvoiceRowsRequest = {
   filters?: PendingInvoiceColumnFilter[];
   sortField?: PendingInvoiceSortField;
   sortDirection?: PendingInvoiceSortDirection;
+  includeStatistics?: boolean;
   signal?: AbortSignal;
 };
 

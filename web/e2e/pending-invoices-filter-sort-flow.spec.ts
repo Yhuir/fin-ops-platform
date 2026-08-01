@@ -55,7 +55,7 @@ test.describe("pending invoices filter and sort browser flow", () => {
   test("recovers rows after a transient load failure when refreshed", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
-      pendingInvoiceRowsFailuresBeforeSuccess: 2,
+      pendingInvoiceRowsFailuresBeforeSuccess: 100,
       sessionMode: "full_access",
     });
     const recordLatency = createPendingInvoicesLatencyRecorder(page, testInfo);
@@ -72,7 +72,9 @@ test.describe("pending invoices filter and sort browser flow", () => {
     await expect(page.getByText("待找发票加载失败，请点击刷新重试。")).toBeVisible();
     await expect(page.getByText("当前条件下没有待找发票流水。")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "筛选内容导出" })).toBeDisabled();
-    expect(api.count("GET /api/pending-invoices/rows")).toBeGreaterThanOrEqual(2);
+    const failedRowsRequests = api.count("GET /api/pending-invoices/rows");
+    expect(failedRowsRequests).toBeGreaterThanOrEqual(1);
+    api.recoverPendingInvoiceRows();
 
     await recordLatency({
       operationId: "pending-invoices.refresh-after-load-failure",
@@ -94,7 +96,7 @@ test.describe("pending invoices filter and sort browser flow", () => {
     await expect(recoveredRow.getByText("已支付待开票")).toBeVisible();
     await expect(page.getByRole("button", { name: "筛选内容导出" })).toBeEnabled();
     await expect(page.locator(".pending-invoices-pagination-range")).toHaveText("1-1 / 1");
-    expect(api.count("GET /api/pending-invoices/rows")).toBeGreaterThanOrEqual(3);
+    expect(api.count("GET /api/pending-invoices/rows")).toBeGreaterThan(failedRowsRequests);
     expect(browserErrors.filter((error) => !error.includes("status of 503"))).toEqual([]);
   });
 

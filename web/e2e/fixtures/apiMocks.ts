@@ -9502,31 +9502,47 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/pending-invoices/rows") {
-      if (pendingInvoiceRowsFailuresRemaining > 0) {
+      if (
+        pendingInvoiceRowsFailuresRemaining > 0
+        && url.searchParams.get("include_statistics") === "false"
+      ) {
         pendingInvoiceRowsFailuresRemaining -= 1;
         return json(route, {
           error: "pending_invoice_rows_temporarily_unavailable",
           message: "待找发票加载暂时失败，请刷新后重试。",
         }, 503);
       }
+      let payload: Record<string, unknown>;
       if (options.pendingInvoiceIncomeBatchRows && url.searchParams.get("direction") === "income") {
-        return json(route, pendingInvoiceIncomeRowsPayload(
+        payload = pendingInvoiceIncomeRowsPayload(
           pendingInvoiceIncomeStatus,
-        ));
-      }
-      if (options.pendingInvoiceFilterSortRows) {
-        return json(route, pendingInvoiceFilterSortRowsPayload(
+        );
+      } else if (options.pendingInvoiceFilterSortRows) {
+        payload = pendingInvoiceFilterSortRowsPayload(
           url,
           relationConfirmed,
-        ));
+        );
+      } else {
+        payload = pendingInvoiceRowsPayload(
+          relationConfirmed,
+          Boolean(options.pendingInvoiceRowsEmpty),
+          Boolean(options.pendingInvoiceAttachExistingBatchRows),
+          Boolean(options.pendingInvoiceIncomeBatchRows),
+          invoiceImportDownstreamConfirmed,
+        );
       }
-      return json(route, pendingInvoiceRowsPayload(
-        relationConfirmed,
-        Boolean(options.pendingInvoiceRowsEmpty),
-        Boolean(options.pendingInvoiceAttachExistingBatchRows),
-        Boolean(options.pendingInvoiceIncomeBatchRows),
-        invoiceImportDownstreamConfirmed,
-      ));
+      return json(route, url.searchParams.get("include_statistics") === "true"
+        ? {
+          ...payload,
+          statistics: {
+            bank_transaction_count: 431,
+            expense_transaction_count: 356,
+            income_transaction_count: 75,
+            found_invoice_transaction_count: 238,
+            pending_invoice_transaction_count: 193,
+          },
+        }
+        : payload);
     }
 
     if (path === "/api/pending-invoices/filter-options") {
@@ -9686,6 +9702,9 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     },
     failNextBankDetailsTransactions(count = 1) {
       bankDetailsTransactionsFailuresRemaining += Math.max(1, count);
+    },
+    recoverPendingInvoiceRows() {
+      pendingInvoiceRowsFailuresRemaining = 0;
     },
   };
 }
