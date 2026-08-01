@@ -879,12 +879,12 @@ class PostgresStateStoreTests(unittest.TestCase):
 
             defaults = store.load_app_settings()
             self.assertIn("completed_project_ids", defaults)
-            self.assertEqual(defaults["admin_usernames"], [])
+            self.assertEqual(defaults["admin_usernames"], ["YNSYLP005"])
             self.assertEqual(defaults["bank_transaction_tags"], {})
             self.assertEqual(defaults["pending_invoice_tag_groups"], {})
 
             store.save_app_settings({"admin_usernames": ["admin"], "workbench_column_layouts": {"invoice": ["amount"]}})
-            self.assertEqual(store.load_app_settings()["admin_usernames"], ["admin"])
+            self.assertEqual(store.load_app_settings()["admin_usernames"], ["YNSYLP005"])
             self.assertEqual(store.load_app_settings()["bank_transaction_tags"], {})
             self.assertEqual(store.load_app_settings()["pending_invoice_tag_groups"], {})
 

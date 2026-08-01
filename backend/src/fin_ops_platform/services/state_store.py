@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
@@ -13,10 +14,50 @@ from threading import RLock
 from typing import Any
 
 from fin_ops_platform.services.runtime_paths import default_data_dir as _default_data_dir
+from fin_ops_platform.services.state_store_protocol import (
+    PROTECTED_ADMIN_USERNAME,
+    SETTINGS_ACCESS_CONTROL_KEYS,
+    SettingsAccessControlVersionConflict,
+    settings_access_control_from_payload,
+)
 
 
 FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 GRIDFS_REF_PREFIX = "gridfs://"
+LOCAL_SETTINGS_ACL_AUDIT_KEY = "_settings_acl_audit_events"
+
+
+class _LocalSettingsAccessControlCriticalSection:
+    def __init__(self, store: "ApplicationStateStore", current: dict[str, Any]) -> None:
+        self._store = store
+        self._current = deepcopy(current)
+        self._committed = False
+
+    @property
+    def locked_current(self) -> dict[str, Any]:
+        return deepcopy(settings_access_control_from_payload(self._current))
+
+    def commit(
+        self,
+        next_access_control: dict[str, Any],
+        durable_audit: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self._committed:
+            raise RuntimeError("Settings access-control critical section was already committed.")
+        mutation_id = str(durable_audit.get("mutation_id") or "").strip()
+        if not mutation_id:
+            raise ValueError("Settings access-control audit mutation_id is required.")
+        current_acl = settings_access_control_from_payload(self._current)
+        next_acl = settings_access_control_from_payload(next_access_control)
+        next_acl["access_control_version"] = current_acl["access_control_version"] + 1
+        persisted = {**self._current, **next_acl}
+        audits = list(persisted.get(LOCAL_SETTINGS_ACL_AUDIT_KEY) or [])
+        audits.append({**deepcopy(durable_audit), "access_control_version": next_acl["access_control_version"]})
+        persisted[LOCAL_SETTINGS_ACL_AUDIT_KEY] = audits[-100:]
+        self._store._write_app_settings_unlocked(persisted)
+        self._current = persisted
+        self._committed = True
+        return deepcopy(next_acl)
 
 
 def _etc_business_batch_bucket(status: str) -> str | None:
@@ -77,14 +118,20 @@ class ApplicationStateStore:
         return None
 
     def load_app_settings(self) -> dict[str, Any]:
+        with self._local_pickle_lock:
+            return self._load_app_settings_unlocked()
+
+    def _load_app_settings_unlocked(self) -> dict[str, Any]:
         default_payload = {
             "completed_project_ids": [],
             "manual_projects": [],
             "synced_projects": [],
             "bank_account_mappings": [],
-            "allowed_usernames": [],
+            "allowed_usernames": [PROTECTED_ADMIN_USERNAME],
             "readonly_export_usernames": [],
-            "admin_usernames": [],
+            "admin_usernames": [PROTECTED_ADMIN_USERNAME],
+            "full_access_usernames": [],
+            "access_control_version": 1,
             "workbench_column_layouts": {},
             "oa_retention": {},
             "oa_import": {},
@@ -109,9 +156,7 @@ class ApplicationStateStore:
             "manual_projects": list(loaded.get("manual_projects") or []),
             "synced_projects": list(loaded.get("synced_projects") or []),
             "bank_account_mappings": list(loaded.get("bank_account_mappings") or []),
-            "allowed_usernames": list(loaded.get("allowed_usernames") or []),
-            "readonly_export_usernames": list(loaded.get("readonly_export_usernames") or []),
-            "admin_usernames": list(loaded.get("admin_usernames") or []),
+            **settings_access_control_from_payload(loaded),
             "workbench_column_layouts": dict(loaded.get("workbench_column_layouts") or {}),
             "oa_retention": dict(loaded.get("oa_retention") or {}),
             "oa_import": dict(loaded.get("oa_import") or {}),
@@ -133,17 +178,28 @@ class ApplicationStateStore:
             normalized_payload["turnover_ledger_tag_selection"] = dict(
                 loaded.get("turnover_ledger_tag_selection") or {}
             )
+        if LOCAL_SETTINGS_ACL_AUDIT_KEY in loaded:
+            normalized_payload[LOCAL_SETTINGS_ACL_AUDIT_KEY] = list(
+                loaded.get(LOCAL_SETTINGS_ACL_AUDIT_KEY) or []
+            )
         return normalized_payload
 
     def save_app_settings(self, payload: dict[str, Any]) -> None:
+        with self._local_pickle_lock:
+            current = self._load_app_settings_unlocked()
+            next_payload = dict(payload)
+            next_payload.update({key: current[key] for key in SETTINGS_ACCESS_CONTROL_KEYS})
+            if LOCAL_SETTINGS_ACL_AUDIT_KEY in current:
+                next_payload[LOCAL_SETTINGS_ACL_AUDIT_KEY] = current[LOCAL_SETTINGS_ACL_AUDIT_KEY]
+            self._write_app_settings_unlocked(next_payload)
+
+    def _write_app_settings_unlocked(self, payload: dict[str, Any]) -> None:
         normalized_payload = {
             "completed_project_ids": list(payload.get("completed_project_ids") or []),
             "manual_projects": list(payload.get("manual_projects") or []),
             "synced_projects": list(payload.get("synced_projects") or []),
             "bank_account_mappings": list(payload.get("bank_account_mappings") or []),
-            "allowed_usernames": list(payload.get("allowed_usernames") or []),
-            "readonly_export_usernames": list(payload.get("readonly_export_usernames") or []),
-            "admin_usernames": list(payload.get("admin_usernames") or []),
+            **settings_access_control_from_payload(payload),
             "workbench_column_layouts": dict(payload.get("workbench_column_layouts") or {}),
             "oa_retention": dict(payload.get("oa_retention") or {}),
             "oa_import": dict(payload.get("oa_import") or {}),
@@ -165,10 +221,41 @@ class ApplicationStateStore:
             normalized_payload["turnover_ledger_tag_selection"] = dict(
                 payload.get("turnover_ledger_tag_selection") or {}
             )
-        self._app_settings_path.write_text(
+        if LOCAL_SETTINGS_ACL_AUDIT_KEY in payload:
+            normalized_payload[LOCAL_SETTINGS_ACL_AUDIT_KEY] = list(
+                payload.get(LOCAL_SETTINGS_ACL_AUDIT_KEY) or []
+            )
+        temporary_path = self._app_settings_path.with_suffix(".json.tmp")
+        temporary_path.write_text(
             json.dumps(normalized_payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        temporary_path.replace(self._app_settings_path)
+
+    @contextmanager
+    def begin_settings_acl_critical_section(self, expected_version: int):
+        with self._local_pickle_lock:
+            current = self._load_app_settings_unlocked()
+            current_version = settings_access_control_from_payload(current)["access_control_version"]
+            if current_version != int(expected_version):
+                raise SettingsAccessControlVersionConflict(current_version)
+            yield _LocalSettingsAccessControlCriticalSection(self, current)
+
+    def recover_settings_acl_commit(self, mutation_id: str) -> dict[str, Any]:
+        normalized_mutation_id = str(mutation_id or "").strip()
+        if not normalized_mutation_id:
+            raise ValueError("Settings access-control mutation_id is required.")
+        with self._local_pickle_lock:
+            current = self._load_app_settings_unlocked()
+            audits = list(current.get(LOCAL_SETTINGS_ACL_AUDIT_KEY) or [])
+            return {
+                "access_control": settings_access_control_from_payload(current),
+                "audit_present": any(
+                    str(item.get("mutation_id") or "") == normalized_mutation_id
+                    for item in audits
+                    if isinstance(item, dict)
+                ),
+            }
 
     def load_oa_attachment_invoice_cache_entry(self, cache_key: str) -> dict[str, object] | None:
         normalized_cache_key = str(cache_key).strip()

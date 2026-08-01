@@ -152,10 +152,11 @@ class StateStoreContractTests(unittest.TestCase):
         for name, store in self._with_stores():
             with self.subTest(store=name):
                 settings = store.load_app_settings()
-                self.assertEqual(settings["admin_usernames"], [])
-                settings["admin_usernames"] = ["admin"]
+                self.assertEqual(settings["admin_usernames"], ["YNSYLP005"])
+                self.assertIn("YNSYLP005", settings["allowed_usernames"])
+                settings["admin_usernames"] = ["attacker"]
                 store.save_app_settings(settings)
-                self.assertEqual(store.load_app_settings()["admin_usernames"], ["admin"])
+                self.assertEqual(store.load_app_settings()["admin_usernames"], ["YNSYLP005"])
 
                 store.save({"workbench_pair_relations": {"pair_relations": {"case-1": {"case_id": "case-1"}}}})
                 self.assertEqual(store.load()["workbench_pair_relations"]["pair_relations"]["case-1"]["case_id"], "case-1")
@@ -165,6 +166,32 @@ class StateStoreContractTests(unittest.TestCase):
                 self.assertEqual(store.load_manual_oa_imports()["row_ids"], ["row-1"])
                 self.assertTrue(store.remove_manual_oa_import("row-1", actor_id="tester"))
                 self.assertEqual(store.load_manual_oa_imports()["row_ids"], [])
+
+    def test_local_settings_acl_guard_uses_cas_and_mutation_proof(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            store = ApplicationStateStore(Path(temp_dir))
+
+            with store.begin_settings_acl_critical_section(1) as critical_section:
+                self.assertEqual(critical_section.locked_current["access_control_version"], 1)
+                committed = critical_section.commit(
+                    {
+                        "allowed_usernames": ["YNSYLP005", "user-a"],
+                        "readonly_export_usernames": [],
+                        "admin_usernames": ["YNSYLP005"],
+                        "full_access_usernames": ["user-a"],
+                    },
+                    {"mutation_id": "mutation-1", "actor_id": "YNSYLP005"},
+                )
+
+            self.assertEqual(committed["access_control_version"], 2)
+            self.assertEqual(store.load_app_settings()["full_access_usernames"], ["user-a"])
+            recovery = store.recover_settings_acl_commit("mutation-1")
+            self.assertTrue(recovery["audit_present"])
+            self.assertEqual(recovery["access_control"], committed)
+
+            with self.assertRaisesRegex(RuntimeError, "version conflict"):
+                with store.begin_settings_acl_critical_section(1):
+                    pass
 
     def test_state_store_domain_snapshot_contract_round_trips(self) -> None:
         for name, store in self._with_stores():

@@ -20,9 +20,61 @@ from fin_ops_platform.services.postgres_repositories.common import (
     without_keys,
 )
 from fin_ops_platform.services.postgres_snapshot_contracts import normalize_app_health_alerts
+from fin_ops_platform.services.postgres_connection import PostgresTransaction
+from fin_ops_platform.services.state_store_protocol import (
+    PROTECTED_ADMIN_USERNAME,
+    SETTINGS_ACCESS_CONTROL_KEYS,
+    SettingsAccessControlCommitOutcomeUnknown,
+    SettingsAccessControlVersionConflict,
+    default_settings_access_control,
+    settings_access_control_from_payload,
+)
 
 
 OA_SYNC_STATE_KEY = "oa_sync_state"
+APP_SETTINGS_KEY = "app_settings"
+SETTINGS_ACL_ADVISORY_LOCK_KEY = "fin_ops.app_settings.acl"
+
+
+class _PostgresSettingsAccessControlCriticalSection:
+    def __init__(
+        self,
+        repository: "PostgresOpsTaxEtcRepository",
+        raw_connection: Any,
+        executor: Any,
+        current: dict[str, Any],
+    ) -> None:
+        self._repository = repository
+        self._raw_connection = raw_connection
+        self._executor = executor
+        self._current = serialize_value(current)
+        self._committed = False
+
+    @property
+    def locked_current(self) -> dict[str, Any]:
+        return settings_access_control_from_payload(self._current)
+
+    @property
+    def committed(self) -> bool:
+        return self._committed
+
+    def commit(
+        self,
+        next_access_control: dict[str, Any],
+        durable_audit: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self._committed:
+            raise RuntimeError("Settings access-control critical section was already committed.")
+        result = self._repository._commit_settings_acl(
+            raw_connection=self._raw_connection,
+            executor=self._executor,
+            current=self._current,
+            next_access_control=next_access_control,
+            durable_audit=durable_audit,
+        )
+        self._current = {**self._current, **result}
+        self._committed = True
+        return result
 
 
 @contextmanager
@@ -205,9 +257,15 @@ class PostgresOpsTaxEtcRepository:
         return dict(payload) if isinstance(payload, dict) else {}
 
     def save_settings(self, settings_key: str, payload: dict[str, Any]) -> None:
+        if settings_key == APP_SETTINGS_KEY:
+            self._save_app_settings(payload)
+            return
         self._save_settings_with_executor(self._connection, settings_key, payload)
 
     def save_settings_in_transaction(self, settings_key: str, payload: dict[str, Any], *, transaction: Any) -> None:
+        if settings_key == APP_SETTINGS_KEY:
+            self._save_app_settings_in_transaction(payload, transaction=transaction)
+            return
         self._save_settings_with_executor(transaction, settings_key, payload)
 
     def save_app_settings_in_transaction(self, payload: dict[str, Any], *, transaction: Any) -> None:
@@ -220,15 +278,25 @@ class PostgresOpsTaxEtcRepository:
         expected_version: int,
         transaction: Any,
     ) -> dict[str, Any] | None:
+        transaction.execute(
+            "select pg_advisory_xact_lock(hashtextextended(%s, 0))",
+            (SETTINGS_ACL_ADVISORY_LOCK_KEY,),
+        )
         row = transaction.fetch_one(
             """
             select settings_payload
             from app.app_settings
-            where settings_key = 'app_settings'
+            where settings_key = %s
             for update
-            """
+            """,
+            (APP_SETTINGS_KEY,),
         )
         current_payload = row_payload(row, "settings_payload") if row is not None else {}
+        current_payload = {
+            **default_settings_access_control(),
+            **(current_payload if isinstance(current_payload, dict) else {}),
+            **settings_access_control_from_payload(current_payload),
+        }
         current_rules = (
             current_payload.get("bank_flow_rule_batch_tag_rules")
             if isinstance(current_payload, dict)
@@ -244,11 +312,237 @@ class PostgresOpsTaxEtcRepository:
         if not isinstance(next_rules, dict):
             raise ValueError("bank_flow_rule_batch_tag_rules payload is required.")
         persisted_payload = {
-            **(current_payload if isinstance(current_payload, dict) else {}),
+            **current_payload,
             "bank_flow_rule_batch_tag_rules": dict(next_rules),
         }
-        self.save_app_settings_in_transaction(persisted_payload, transaction=transaction)
+        self._save_settings_with_executor(transaction, APP_SETTINGS_KEY, persisted_payload)
         return persisted_payload
+
+    def _save_app_settings(self, payload: dict[str, Any]) -> None:
+        connection_factory = getattr(self._connection, "connection", None)
+        if not callable(connection_factory):
+            run_in_transaction(
+                self._connection,
+                lambda transaction: self._save_app_settings_in_transaction(payload, transaction=transaction),
+            )
+            return
+        with connection_factory() as raw_connection:
+            executor = PostgresTransaction(raw_connection)
+            lock_acquired = False
+            try:
+                executor.execute(
+                    "select pg_advisory_lock(hashtextextended(%s, 0))",
+                    (SETTINGS_ACL_ADVISORY_LOCK_KEY,),
+                )
+                raw_connection.commit()
+                lock_acquired = True
+                executor.execute("begin")
+                self._save_app_settings_in_transaction(
+                    payload,
+                    transaction=executor,
+                    advisory_lock_already_held=True,
+                )
+                raw_connection.commit()
+            except Exception:
+                raw_connection.rollback()
+                raise
+            finally:
+                if lock_acquired:
+                    self._release_settings_acl_session_lock(raw_connection, executor)
+
+    def _save_app_settings_in_transaction(
+        self,
+        payload: dict[str, Any],
+        *,
+        transaction: Any,
+        advisory_lock_already_held: bool = False,
+    ) -> None:
+        if not advisory_lock_already_held:
+            transaction.execute(
+                "select pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (SETTINGS_ACL_ADVISORY_LOCK_KEY,),
+            )
+        row = transaction.fetch_one(
+            """
+            select settings_payload
+            from app.app_settings
+            where settings_key = %s
+            for update
+            """,
+            (APP_SETTINGS_KEY,),
+        )
+        current = row_payload(row, "settings_payload") if row is not None else {}
+        current = current if isinstance(current, dict) else {}
+        incoming_non_acl = {
+            key: value for key, value in serialize_value(payload).items() if key not in SETTINGS_ACCESS_CONTROL_KEYS
+        }
+        persisted = {
+            **current,
+            **incoming_non_acl,
+            **settings_access_control_from_payload(current),
+        }
+        self._save_settings_with_executor(transaction, APP_SETTINGS_KEY, persisted)
+
+    @contextmanager
+    def begin_settings_acl_critical_section(self, expected_version: int) -> Iterator[Any]:
+        connection_factory = getattr(self._connection, "connection", None)
+        if not callable(connection_factory):
+            raise RuntimeError("PostgreSQL ACL critical sections require a connection context factory.")
+        with connection_factory() as raw_connection:
+            executor = PostgresTransaction(raw_connection)
+            lock_acquired = False
+            critical_section: _PostgresSettingsAccessControlCriticalSection | None = None
+            try:
+                executor.execute(
+                    "select pg_advisory_lock(hashtextextended(%s, 0))",
+                    (SETTINGS_ACL_ADVISORY_LOCK_KEY,),
+                )
+                raw_connection.commit()
+                lock_acquired = True
+                executor.execute("begin")
+                row = executor.fetch_one(
+                    """
+                    select settings_payload
+                    from app.app_settings
+                    where settings_key = %s
+                    for update
+                    """,
+                    (APP_SETTINGS_KEY,),
+                )
+                current = row_payload(row, "settings_payload") if row is not None else {}
+                current = {
+                    **(current if isinstance(current, dict) else {}),
+                    **settings_access_control_from_payload(current),
+                }
+                current_version = current["access_control_version"]
+                if current_version != int(expected_version):
+                    raw_connection.rollback()
+                    raise SettingsAccessControlVersionConflict(current_version)
+                critical_section = _PostgresSettingsAccessControlCriticalSection(
+                    self,
+                    raw_connection,
+                    executor,
+                    current,
+                )
+                yield critical_section
+            finally:
+                if critical_section is None or not critical_section.committed:
+                    try:
+                        raw_connection.rollback()
+                    except Exception:
+                        pass
+                if lock_acquired:
+                    self._release_settings_acl_session_lock(raw_connection, executor)
+
+    def _commit_settings_acl(
+        self,
+        *,
+        raw_connection: Any,
+        executor: Any,
+        current: dict[str, Any],
+        next_access_control: dict[str, Any],
+        durable_audit: dict[str, Any],
+    ) -> dict[str, Any]:
+        mutation_id = str(durable_audit.get("mutation_id") or "").strip()
+        if not mutation_id:
+            raise ValueError("Settings access-control audit mutation_id is required.")
+        current_acl = settings_access_control_from_payload(current)
+        candidate = settings_access_control_from_payload(next_access_control)
+        candidate["access_control_version"] = current_acl["access_control_version"] + 1
+        if candidate["admin_usernames"] != [PROTECTED_ADMIN_USERNAME]:
+            raise ValueError("The protected administrator is immutable.")
+        persisted = {**current, **candidate}
+        audit_payload = {
+            **serialize_value(durable_audit),
+            "before_version": current_acl["access_control_version"],
+            "after_version": candidate["access_control_version"],
+        }
+        try:
+            self._save_settings_with_executor(executor, APP_SETTINGS_KEY, persisted)
+            executor.execute(
+                """
+                insert into audit.events(
+                    event_type, object_type, object_id, actor_id, actor_name, scope, trace_id,
+                    payload, raw_payload
+                ) values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    "settings.access_control.updated",
+                    "app_settings",
+                    APP_SETTINGS_KEY,
+                    str(durable_audit.get("actor_id") or "system"),
+                    str(durable_audit.get("actor_name") or ""),
+                    "access_control",
+                    str(durable_audit.get("request_id") or mutation_id),
+                    jsonb(audit_payload),
+                    jsonb({"normalized_payload": audit_payload}),
+                ),
+            )
+        except Exception:
+            raw_connection.rollback()
+            raise
+        try:
+            raw_connection.commit()
+        except Exception as exc:
+            raise SettingsAccessControlCommitOutcomeUnknown(mutation_id) from exc
+        return candidate
+
+    def recover_settings_acl_commit(self, mutation_id: str) -> dict[str, Any]:
+        normalized_mutation_id = str(mutation_id or "").strip()
+        if not normalized_mutation_id:
+            raise ValueError("Settings access-control mutation_id is required.")
+        connection_factory = getattr(self._connection, "connection", None)
+        if not callable(connection_factory):
+            raise RuntimeError("PostgreSQL ACL commit recovery requires a connection context factory.")
+        with connection_factory() as raw_connection:
+            executor = PostgresTransaction(raw_connection)
+            lock_acquired = False
+            try:
+                executor.execute(
+                    "select pg_advisory_lock(hashtextextended(%s, 0))",
+                    (SETTINGS_ACL_ADVISORY_LOCK_KEY,),
+                )
+                raw_connection.commit()
+                lock_acquired = True
+                executor.execute("begin")
+                row = executor.fetch_one(
+                    "select settings_payload from app.app_settings where settings_key = %s",
+                    (APP_SETTINGS_KEY,),
+                )
+                audit_row = executor.fetch_one(
+                    """
+                    select 1 as audit_present
+                    from audit.events
+                    where event_type = 'settings.access_control.updated'
+                      and payload @> %s
+                    limit 1
+                    """,
+                    (jsonb({"mutation_id": normalized_mutation_id}),),
+                )
+                raw_connection.commit()
+                current = row_payload(row, "settings_payload") if row is not None else {}
+                return {
+                    "access_control": settings_access_control_from_payload(current),
+                    "audit_present": audit_row is not None,
+                }
+            finally:
+                if lock_acquired:
+                    self._release_settings_acl_session_lock(raw_connection, executor)
+
+    @staticmethod
+    def _release_settings_acl_session_lock(raw_connection: Any, executor: Any) -> None:
+        try:
+            raw_connection.rollback()
+            executor.execute(
+                "select pg_advisory_unlock(hashtextextended(%s, 0))",
+                (SETTINGS_ACL_ADVISORY_LOCK_KEY,),
+            )
+            raw_connection.commit()
+        except Exception:
+            try:
+                raw_connection.rollback()
+            except Exception:
+                pass
 
     def _save_settings_with_executor(self, executor: Any, settings_key: str, payload: dict[str, Any]) -> None:
         normalized = serialize_value(payload)

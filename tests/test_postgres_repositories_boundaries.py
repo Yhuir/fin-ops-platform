@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
+import pytest
+
 from fin_ops_platform.services.postgres_repositories.bank_flow_rule_batch_canonical_query import (
     BankFlowRuleBatchCanonicalQueryRepository,
 )
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
+from fin_ops_platform.services.state_store_protocol import (
+    SettingsAccessControlCommitOutcomeUnknown,
+    SettingsAccessControlVersionConflict,
+)
 from fin_ops_platform.services.postgres_repositories.common import max_numeric_suffix
 from fin_ops_platform.services.postgres_repositories.read_models import (
     PostgresReadModelRepository,
@@ -75,6 +82,64 @@ class RecordingConnection:
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
         self.fetched_one.append((" ".join(sql.split()), params))
         return None
+
+
+class RawSettingsCursor:
+    def __init__(self, connection: "RawSettingsConnection") -> None:
+        self.connection = connection
+        self.rowcount = 0
+        self.row: dict | None = None
+
+    def __enter__(self) -> "RawSettingsCursor":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
+
+    def execute(self, sql: str, params: tuple = ()) -> None:
+        normalized = " ".join(sql.lower().split())
+        self.connection.statements.append((normalized, params))
+        self.row = None
+        self.rowcount = 1
+        if "select settings_payload from app.app_settings" in normalized:
+            self.row = {"settings_payload": dict(self.connection.settings)}
+        elif "insert into app.app_settings" in normalized:
+            self.connection.settings = dict(params[1].obj)
+        elif "insert into audit.events" in normalized:
+            audit_payload = dict(params[7].obj)
+            self.connection.audits.append(audit_payload)
+        elif "from audit.events" in normalized:
+            expected = dict(params[0].obj)
+            if any(all(audit.get(key) == value for key, value in expected.items()) for audit in self.connection.audits):
+                self.row = {"audit_present": 1}
+
+    def fetchone(self) -> dict | None:
+        return self.row
+
+
+class RawSettingsConnection:
+    def __init__(self, settings: dict) -> None:
+        self.settings = dict(settings)
+        self.audits: list[dict] = []
+        self.statements: list[tuple[str, tuple]] = []
+        self.commit_count = 0
+        self.rollback_count = 0
+        self.fail_commit_number: int | None = None
+
+    @contextmanager
+    def connection(self):
+        yield self
+
+    def cursor(self) -> RawSettingsCursor:
+        return RawSettingsCursor(self)
+
+    def commit(self) -> None:
+        self.commit_count += 1
+        if self.fail_commit_number == self.commit_count:
+            raise ConnectionError("commit acknowledgement lost")
+
+    def rollback(self) -> None:
+        self.rollback_count += 1
 
 
 def write_sql(connection: RecordingConnection) -> list[str]:
@@ -795,16 +860,113 @@ def test_bank_flow_rule_settings_version_check_locks_and_saves_in_caller_transac
     )
 
     assert saved == {
-        "allowed_usernames": ["concurrent-user"],
+        "allowed_usernames": ["concurrent-user", "YNSYLP005"],
+        "readonly_export_usernames": [],
+        "admin_usernames": ["YNSYLP005"],
+        "full_access_usernames": [],
+        "access_control_version": 1,
         "bank_flow_rule_batch_tag_rules": {"version": 2},
     }
     assert conflict is None
     assert len(connection.fetched_one) == 2
     assert all("for update" in sql for sql, _params in connection.fetched_one)
-    assert len(connection.executed) == 1
-    assert "insert into app.app_settings" in connection.executed[0][0]
-    persisted_payload = connection.executed[0][1][1].obj
-    assert persisted_payload["allowed_usernames"] == ["concurrent-user"]
+    writes = [(sql, params) for sql, params in connection.executed if "insert into app.app_settings" in sql]
+    assert len(writes) == 1
+    persisted_payload = writes[0][1][1].obj
+    assert persisted_payload["allowed_usernames"] == ["concurrent-user", "YNSYLP005"]
+
+
+def test_settings_generic_writer_preserves_acl_under_shared_session_lock() -> None:
+    connection = RawSettingsConnection(
+        {
+            "allowed_usernames": ["YNSYLP005", "existing"],
+            "readonly_export_usernames": ["existing"],
+            "admin_usernames": ["YNSYLP005"],
+            "full_access_usernames": [],
+            "access_control_version": 4,
+            "workbench_column_layouts": {},
+        }
+    )
+    repository = PostgresOpsTaxEtcRepository(connection)
+
+    repository.save_settings(
+        "app_settings",
+        {
+            "admin_usernames": ["attacker"],
+            "access_control_version": 99,
+            "workbench_column_layouts": {"invoice": ["amount"]},
+        },
+    )
+
+    assert connection.settings["admin_usernames"] == ["YNSYLP005"]
+    assert connection.settings["access_control_version"] == 4
+    assert connection.settings["readonly_export_usernames"] == ["existing"]
+    assert connection.settings["workbench_column_layouts"] == {"invoice": ["amount"]}
+    sql = [statement for statement, _params in connection.statements]
+    assert any("pg_advisory_lock" in statement for statement in sql)
+    assert any("for update" in statement for statement in sql)
+    assert any("pg_advisory_unlock" in statement for statement in sql)
+
+
+def test_settings_acl_guard_commits_cas_and_audit_then_recovers_by_mutation_id() -> None:
+    connection = RawSettingsConnection(
+        {
+            "allowed_usernames": ["YNSYLP005"],
+            "readonly_export_usernames": [],
+            "admin_usernames": ["YNSYLP005"],
+            "full_access_usernames": [],
+            "access_control_version": 1,
+        }
+    )
+    repository = PostgresOpsTaxEtcRepository(connection)
+
+    with repository.begin_settings_acl_critical_section(1) as critical_section:
+        committed = critical_section.commit(
+            {
+                "allowed_usernames": ["YNSYLP005", "user-a"],
+                "readonly_export_usernames": [],
+                "admin_usernames": ["YNSYLP005"],
+                "full_access_usernames": ["user-a"],
+            },
+            {"mutation_id": "mutation-1", "actor_id": "YNSYLP005", "request_id": "request-1"},
+        )
+
+    assert committed["access_control_version"] == 2
+    assert connection.settings["full_access_usernames"] == ["user-a"]
+    assert connection.audits[0]["mutation_id"] == "mutation-1"
+    assert repository.recover_settings_acl_commit("mutation-1") == {
+        "access_control": committed,
+        "audit_present": True,
+    }
+    with pytest.raises(SettingsAccessControlVersionConflict):
+        with repository.begin_settings_acl_critical_section(1):
+            pass
+
+
+def test_settings_acl_guard_marks_commit_ack_loss_as_unknown() -> None:
+    connection = RawSettingsConnection(
+        {
+            "allowed_usernames": ["YNSYLP005"],
+            "readonly_export_usernames": [],
+            "admin_usernames": ["YNSYLP005"],
+            "full_access_usernames": [],
+            "access_control_version": 1,
+        }
+    )
+    repository = PostgresOpsTaxEtcRepository(connection)
+    connection.fail_commit_number = 2
+
+    with pytest.raises(SettingsAccessControlCommitOutcomeUnknown):
+        with repository.begin_settings_acl_critical_section(1) as critical_section:
+            critical_section.commit(
+                {
+                    "allowed_usernames": ["YNSYLP005"],
+                    "readonly_export_usernames": [],
+                    "admin_usernames": ["YNSYLP005"],
+                    "full_access_usernames": [],
+                },
+                {"mutation_id": "mutation-unknown", "actor_id": "YNSYLP005"},
+            )
 
 
 

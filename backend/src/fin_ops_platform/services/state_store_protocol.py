@@ -1,7 +1,82 @@
 from __future__ import annotations
 
+from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
+
+
+PROTECTED_ADMIN_USERNAME = "YNSYLP005"
+SETTINGS_ACCESS_CONTROL_KEYS = frozenset(
+    {
+        "allowed_usernames",
+        "readonly_export_usernames",
+        "admin_usernames",
+        "full_access_usernames",
+        "access_control_version",
+    }
+)
+
+
+def default_settings_access_control() -> dict[str, Any]:
+    return {
+        "allowed_usernames": [PROTECTED_ADMIN_USERNAME],
+        "readonly_export_usernames": [],
+        "admin_usernames": [PROTECTED_ADMIN_USERNAME],
+        "full_access_usernames": [],
+        "access_control_version": 1,
+    }
+
+
+def settings_access_control_from_payload(payload: object) -> dict[str, Any]:
+    source = payload if isinstance(payload, dict) else {}
+    try:
+        version = max(1, int(source.get("access_control_version") or 1))
+    except (TypeError, ValueError):
+        version = 1
+
+    def usernames(key: str) -> list[str]:
+        values = source.get(key)
+        if not isinstance(values, list):
+            return []
+        return list(dict.fromkeys(name for value in values if (name := str(value or "").strip())))
+
+    allowed = usernames("allowed_usernames")
+    if PROTECTED_ADMIN_USERNAME not in allowed:
+        allowed.append(PROTECTED_ADMIN_USERNAME)
+    return {
+        "allowed_usernames": allowed,
+        "readonly_export_usernames": [
+            name for name in usernames("readonly_export_usernames") if name != PROTECTED_ADMIN_USERNAME
+        ],
+        "admin_usernames": [PROTECTED_ADMIN_USERNAME],
+        "full_access_usernames": [
+            name for name in usernames("full_access_usernames") if name != PROTECTED_ADMIN_USERNAME
+        ],
+        "access_control_version": version,
+    }
+
+
+class SettingsAccessControlVersionConflict(RuntimeError):
+    def __init__(self, current_version: int) -> None:
+        super().__init__("Settings access-control version conflict.")
+        self.current_version = int(current_version)
+
+
+class SettingsAccessControlCommitOutcomeUnknown(RuntimeError):
+    def __init__(self, mutation_id: str) -> None:
+        super().__init__("Settings access-control commit outcome is unknown.")
+        self.mutation_id = str(mutation_id)
+
+
+class SettingsAccessControlCriticalSectionProtocol(Protocol):
+    @property
+    def locked_current(self) -> dict[str, Any]: ...
+
+    def commit(
+        self,
+        next_access_control: dict[str, Any],
+        durable_audit: dict[str, Any],
+    ) -> dict[str, Any]: ...
 
 
 @runtime_checkable
@@ -51,6 +126,13 @@ class ApplicationStateStoreProtocol(Protocol):
     def load_app_settings(self) -> dict[str, Any]: ...
 
     def save_app_settings(self, payload: dict[str, Any]) -> None: ...
+
+    def begin_settings_acl_critical_section(
+        self,
+        expected_version: int,
+    ) -> AbstractContextManager[SettingsAccessControlCriticalSectionProtocol]: ...
+
+    def recover_settings_acl_commit(self, mutation_id: str) -> dict[str, Any]: ...
 
     def load_pending_invoice_commands(self) -> dict[str, Any]: ...
 

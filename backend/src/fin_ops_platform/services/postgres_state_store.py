@@ -44,6 +44,7 @@ from fin_ops_platform.services.postgres_snapshot_contracts import (
 )
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
 from fin_ops_platform.services.workbench_relation_read_model_repository import WorkbenchRelationReadModelRepositoryPort
+from fin_ops_platform.services.state_store_protocol import default_settings_access_control
 
 APP_SETTINGS_KEY = "app_settings"
 GRIDFS_REF_PREFIX = "gridfs://"
@@ -71,9 +72,7 @@ def _default_app_settings_payload() -> dict[str, Any]:
         "manual_projects": [],
         "synced_projects": [],
         "bank_account_mappings": [],
-        "allowed_usernames": [],
-        "readonly_export_usernames": [],
-        "admin_usernames": [],
+        **default_settings_access_control(),
         "workbench_column_layouts": {},
         "oa_retention": {},
         "oa_import": {},
@@ -280,6 +279,12 @@ class PostgresStateStore:
 
     def save_app_settings(self, payload: dict[str, Any]) -> None:
         self._save_settings(APP_SETTINGS_KEY, payload)
+
+    def begin_settings_acl_critical_section(self, expected_version: int):
+        return self._ops_tax_etc_repository.begin_settings_acl_critical_section(expected_version)
+
+    def recover_settings_acl_commit(self, mutation_id: str) -> dict[str, Any]:
+        return self._ops_tax_etc_repository.recover_settings_acl_commit(mutation_id)
 
     def save_app_settings_for_bank_flow_rule_version_in_transaction(
         self,
