@@ -672,7 +672,7 @@ classified_source as (
         end as status_code
     from enriched
 ),
-classified as not materialized (
+classified as materialized (
     select
         source.row_id,
         source.direction,

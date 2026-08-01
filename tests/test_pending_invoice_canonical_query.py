@@ -142,7 +142,6 @@ class PendingInvoiceCanonicalRepositoryTests(unittest.TestCase):
         self.assertIn("effective_categories as (", page_sql)
         self.assertIn("enriched as (", page_sql)
         self.assertIn("classified_source as (", page_sql)
-        self.assertIn("classified as not materialized (", page_sql)
         self.assertNotIn("effective_categories as materialized", page_sql)
         self.assertNotIn("enriched as materialized", page_sql)
         self.assertNotIn("classified_source as materialized", page_sql)

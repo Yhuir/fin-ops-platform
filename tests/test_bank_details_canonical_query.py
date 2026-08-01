@@ -177,7 +177,6 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
         self.assertIn("canonical_rule_banks as materialized", main_sql)
         self.assertIn("from canonical_rule_banks base", main_sql)
         self.assertIn("page_keys as materialized", main_sql)
-        self.assertIn("classified_with_semantics as not materialized", main_sql)
         self.assertIn("join classified_with_semantics page_rows", main_sql)
         self.assertNotIn("select *\n              from filtered", main_sql)
         rule_source_sql = main_sql.split(

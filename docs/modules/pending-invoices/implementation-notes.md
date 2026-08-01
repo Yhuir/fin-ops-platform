@@ -522,7 +522,6 @@
 - 后续同窗证据显示银行明细与待开发票的并发 p95 同时约 `1.3s`，因此复用共享 compiler 的 rule-oriented set scan；pending SQL 不再为每条流水进入完整规则 lateral append。匹配优先级、歧义、manual/confirmation、精确 total 和行 DTO 不变。
 - 进程级采样显示并发 4 会产生超过请求数的高 CPU PostgreSQL 执行进程；rows 主查询在同一 request-scoped transaction 内把 `max_parallel_workers_per_gather` 设为 `0`，避免 HTTP 并发与查询并行相乘。同时把共享 rule matcher 收窄到必需规范化列，把范围去重、精确 total 和排序收窄到 key/scalar 字段，只为首屏 50 行回连完整 bank/invoice/OA JSON。候选、详情、写链和全局数据库配置不受影响。
 - 生产稳定窗仍显示主 SQL p95 为主要耗时；`effective_categories -> enriched -> classified_source` 三个单一消费者 CTE 不再强制 materialize，让 PostgreSQL 内联并消除宽 bank/raw JSON 中间结果的重复写读。多消费者的事实、规则、scope、summary/page key CTE 继续 materialize；业务结果、精确统计和分页不变。
-- 后续生产分解显示 rows DB p95 仍约 `772ms` 且连接获取 p95 小于 `1ms`；完整页面 DTO `classified` 改为 `NOT MATERIALIZED`，允许全量 scope/summary 路径投影窄字段、完整 DTO 只为 page key 回连行构造。状态分类、可操作项、精确 total、统计和分页合同不变。
 ## 2026-07-22 - 页面自有全量标题统计
 
 - 目标：让标题统计独立证明待找发票投影实际覆盖的完整流水与关联关系，不把当前筛选后的表格行数或统一事实源数量冒充页面统计。
