@@ -471,7 +471,8 @@ internal_matches as materialized (
 ),
 rule_banks as materialized (
     select
-        bank.*,
+        bank.row_id,
+        bank.direction,
         case when config.payload->'rule_fields' ? 'counterparty_name'
             then {_normalize_sql_text("bank.counterparty_name")} else '' end as rule_counterparty_name,
         case when config.payload->'rule_fields' ? 'counterparty_account'
@@ -503,7 +504,8 @@ rule_banks as materialized (
 ),
 canonical_rule_banks as materialized (
     select
-        bank.*,
+        bank.row_id,
+        bank.direction,
         bank.rule_counterparty_name as norm_counterparty_name,
         bank.rule_counterparty_account as norm_counterparty_account,
         bank.rule_counterparty_bank as norm_counterparty_bank,

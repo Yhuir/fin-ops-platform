@@ -91,7 +91,6 @@ class PostgresBankDetailsCanonicalQueryRepository:
         normalized_page = max(int(page or 1), 1)
         normalized_page_size = min(max(int(page_size or 100), 1), MAX_PAGE_SIZE)
         with self._snapshot_transaction() as transaction:
-            transaction.execute("set local max_parallel_workers_per_gather = 0")
             settings = self._settings_payload(transaction)
             snapshot = self._load_transaction_page(
                 transaction,
@@ -771,7 +770,7 @@ def _classification_cte(
     )
     normalization_sql, rule_sql, rule_params = compile_bank_category_rule_sql(
         definitions,
-        source_relation="base",
+        source_relation="canonical_rule_banks",
     )
     candidate_codes = text_list(candidate_category_codes) or None
     params: list[Any] = [
@@ -978,8 +977,15 @@ def _classification_cte(
                 from 1 for 24
               )
             end as account_key
-            {normalization_sql}
           from display_rows display
+        ),
+        canonical_rule_banks as materialized (
+          select
+            base.row_id,
+            base.direction,
+            base.account_key
+            {normalization_sql}
+          from base
         ),
         internal_pair_candidates as materialized (
           select

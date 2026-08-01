@@ -167,13 +167,16 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
         self.assertEqual(connection.transaction_count, 1)
         self.assertEqual(
             transaction.executed,
-            [
-                "set transaction isolation level repeatable read read only",
-                "set local max_parallel_workers_per_gather = 0",
-            ],
+            ["set transaction isolation level repeatable read read only"],
         )
         self.assertEqual(len(transaction.reads), 3)
         main_sql, main_params = transaction.reads[1]
+        self.assertIn("canonical_rule_banks as materialized", main_sql)
+        self.assertIn("from canonical_rule_banks base", main_sql)
+        rule_source_sql = main_sql.split(
+            "canonical_rule_banks as materialized", 1
+        )[1].split("internal_pair_candidates as materialized", 1)[0]
+        self.assertNotIn("base.*", rule_source_sql)
         relation_sql, relation_params = transaction.reads[2]
         normalized_main = " ".join(main_sql.split()).lower()
         normalized_relation = " ".join(relation_sql.split()).lower()
