@@ -520,7 +520,7 @@
 - 只在 pending rows 主查询所在的 `REPEATABLE READ READ ONLY` transaction 内执行 `SET LOCAL jit = off`；候选、详情和写链不受影响。事务退出即恢复 PostgreSQL 默认值，不改全局数据库配置。
 - 未增加 cache、read model、worker、索引、API 字段或兼容路径；结果集合、精确 total、统计、排序和分页合同保持不变。
 - 后续同窗证据显示银行明细与待开发票的并发 p95 同时约 `1.3s`，因此复用共享 compiler 的 rule-oriented set scan；pending SQL 不再为每条流水进入完整规则 lateral append。匹配优先级、歧义、manual/confirmation、精确 total 和行 DTO 不变。
-- 进程级采样显示并发 4 会产生超过请求数的高 CPU PostgreSQL 执行进程；rows 主查询在同一 request-scoped transaction 内把 `max_parallel_workers_per_gather` 设为 `0`，避免 HTTP 并发与查询并行相乘。同时把共享 rule-oriented matcher 的 materialized 输入收窄到 row id、direction 和必需规范化列，避免 43 条 active 规则重复扫描 raw JSON 等宽列。候选、详情、写链和全局数据库配置不受影响。
+- 进程级采样显示并发 4 会产生超过请求数的高 CPU PostgreSQL 执行进程；rows 主查询在同一 request-scoped transaction 内把 `max_parallel_workers_per_gather` 设为 `0`，避免 HTTP 并发与查询并行相乘。同时把共享 rule matcher 收窄到必需规范化列，把范围去重、精确 total 和排序收窄到 key/scalar 字段，只为首屏 50 行回连完整 bank/invoice/OA JSON。候选、详情、写链和全局数据库配置不受影响。
 ## 2026-07-22 - 页面自有全量标题统计
 
 - 目标：让标题统计独立证明待找发票投影实际覆盖的完整流水与关联关系，不把当前筛选后的表格行数或统一事实源数量冒充页面统计。

@@ -799,7 +799,21 @@ classified as materialized (
     ) mapping on true
 ),
 scope_candidates as materialized (
-    select *
+    select
+        row_id,
+        visible_group_key,
+        trade_time,
+        trade_date,
+        amount,
+        counterparty_name,
+        status_code,
+        seller_name,
+        invoice_total,
+        oa_applicant,
+        project_name,
+        direction,
+        input_invoice_count,
+        filter_group
     from classified
     where __WHERE_SQL__
 ),
@@ -832,15 +846,24 @@ scope_summary as (
 ),
 ordered_rows as materialized (
     select
-        scope.*,
+        scope.row_id,
+        scope.visible_group_rank,
         row_number() over (order by __ORDER_SQL__) as page_index
     from scope_rows scope
 ),
-page_rows as materialized (
+page_keys as materialized (
     select *
     from ordered_rows
     order by page_index
     limit %s offset %s
+),
+page_rows as materialized (
+    select
+        row.*,
+        page.page_index,
+        page.visible_group_rank
+    from page_keys page
+    join classified row on row.row_id = page.row_id
 ),
 statistics as (
     select
@@ -876,7 +899,8 @@ source_summary as (
 ),
 option_values as (
     select option.field, nullif(btrim(option.value), '') as value
-    from scope_rows row
+    from scope_rows scope
+    join classified row on row.row_id = scope.row_id
     cross join lateral (
         values
             ('trade_date', coalesce(row.trade_date::text, '')),
@@ -896,6 +920,7 @@ option_values as (
             ('oa_application_type', row.oa_application_type),
             ('project_name', row.project_name)
     ) option(field, value)
+    where %s::boolean
 ),
 ranked_options as (
     select
@@ -904,7 +929,7 @@ ranked_options as (
         count(*)::integer as option_count,
         row_number() over (partition by field order by count(*) desc, value) as option_rank
     from option_values
-    where %s::boolean and value is not null
+    where value is not null
     group by field, value
 )
 select

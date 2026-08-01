@@ -69,7 +69,7 @@ class _Transaction:
             ]
         if "count(*)::bigint as transaction_count" in normalized:
             return [{"account_identity": "acct:one", "transaction_count": 1}]
-        if "page_rows as" in normalized:
+        if "page_keys as" in normalized:
             return list(self.main_rows)
         raise AssertionError(f"Unexpected SQL: {normalized[:160]}")
 
@@ -167,12 +167,18 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
         self.assertEqual(connection.transaction_count, 1)
         self.assertEqual(
             transaction.executed,
-            ["set transaction isolation level repeatable read read only"],
+            [
+                "set transaction isolation level repeatable read read only",
+                "set local jit = off",
+            ],
         )
         self.assertEqual(len(transaction.reads), 3)
         main_sql, main_params = transaction.reads[1]
         self.assertIn("canonical_rule_banks as materialized", main_sql)
         self.assertIn("from canonical_rule_banks base", main_sql)
+        self.assertIn("page_keys as materialized", main_sql)
+        self.assertIn("join classified_with_semantics page_rows", main_sql)
+        self.assertNotIn("select *\n              from filtered", main_sql)
         rule_source_sql = main_sql.split(
             "canonical_rule_banks as materialized", 1
         )[1].split("internal_pair_candidates as materialized", 1)[0]

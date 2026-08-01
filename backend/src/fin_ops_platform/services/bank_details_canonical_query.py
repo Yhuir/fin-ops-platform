@@ -91,6 +91,7 @@ class PostgresBankDetailsCanonicalQueryRepository:
         normalized_page = max(int(page or 1), 1)
         normalized_page_size = min(max(int(page_size or 100), 1), MAX_PAGE_SIZE)
         with self._snapshot_transaction() as transaction:
+            transaction.execute("set local jit = off")
             settings = self._settings_payload(transaction)
             snapshot = self._load_transaction_page(
                 transaction,
@@ -353,7 +354,11 @@ class PostgresBankDetailsCanonicalQueryRepository:
             f"""
             with {cte_sql},
             filtered as materialized (
-              select *
+              select
+                row_id,
+                trade_time_sort,
+                direction,
+                effective_category_code
               from classified_with_semantics
               where {where_sql}
             ),
@@ -379,8 +384,8 @@ class PostgresBankDetailsCanonicalQueryRepository:
                 count(*) filter (where effective_category_code is null)::bigint as unclassified_count
               from filtered
             ),
-            page_rows as (
-              select *
+            page_keys as materialized (
+              select row_id, trade_time_sort
               from filtered
               order by trade_time_sort desc nulls last, row_id desc
               limit %s offset %s
@@ -395,8 +400,10 @@ class PostgresBankDetailsCanonicalQueryRepository:
               category_counts.counts as result_category_counts
             from summary
             cross join category_counts
-            left join page_rows on true
-            order by page_rows.trade_time_sort desc nulls last, page_rows.row_id desc
+            left join page_keys on true
+            left join classified_with_semantics page_rows
+              on page_rows.row_id = page_keys.row_id
+            order by page_keys.trade_time_sort desc nulls last, page_keys.row_id desc
             """,
             tuple(
                 [
@@ -1123,7 +1130,12 @@ def _classification_cte(
         ),
         classified as materialized (
           select
-            base.*,
+            base.row_id,
+            base.confirmation_id,
+            base.confirmed_category_code,
+            base.manual_category_code,
+            base.manual_category_source,
+            base.manual_category_raw_payload,
             internal.counterpart_id,
             internal.matched_amount as internal_matched_amount,
             internal.delta_seconds as internal_delta_seconds,
@@ -1209,32 +1221,49 @@ def _classification_cte(
         ),
         classified_with_semantics as materialized (
           select
-            effective.*,
+            base.*,
+            effective.counterpart_id,
+            effective.internal_matched_amount,
+            effective.internal_delta_seconds,
+            effective.counterpart_account_key,
+            effective.counterpart_trade_time,
+            effective.counterpart_trade_date,
+            effective.counterpart_bank_name,
+            effective.counterpart_account_last4,
+            effective.counterpart_amount,
+            effective.counterpart_direction,
+            effective.counterpart_name,
+            effective.matched_definitions,
+            effective.auto_category_code,
+            effective.auto_resolution_status,
+            effective.effective_category_code,
+            effective.effective_category_source,
             definition.definition as effective_definition,
             coalesce(
-              confirmation_raw_payload->'normalized_payload'->>'category_primary_label',
-              manual_category_raw_payload->'normalized_payload'->>'category_primary_label',
+              base.confirmation_raw_payload->'normalized_payload'->>'category_primary_label',
+              base.manual_category_raw_payload->'normalized_payload'->>'category_primary_label',
               definition.definition->>'output_primary_label',
               definition.definition->>'category_primary_label'
             ) as effective_category_primary_label,
             coalesce(
-              confirmation_raw_payload->'normalized_payload'->>'category_sub_label',
-              manual_category_raw_payload->'normalized_payload'->>'category_sub_label',
+              base.confirmation_raw_payload->'normalized_payload'->>'category_sub_label',
+              base.manual_category_raw_payload->'normalized_payload'->>'category_sub_label',
               definition.definition->>'output_sub_label',
               definition.definition->>'category_sub_label'
             ) as effective_category_sub_label,
             coalesce(
-              confirmation_raw_payload->'normalized_payload'->>'category_third_label',
-              manual_category_raw_payload->'normalized_payload'->>'category_third_label',
+              base.confirmation_raw_payload->'normalized_payload'->>'category_third_label',
+              base.manual_category_raw_payload->'normalized_payload'->>'category_third_label',
               definition.definition->>'output_third_label',
               definition.definition->>'category_third_label'
             ) as effective_category_third_label,
             coalesce(
-              confirmation_raw_payload->'normalized_payload'->>'category_label',
-              manual_category_raw_payload->'normalized_payload'->>'category_label',
+              base.confirmation_raw_payload->'normalized_payload'->>'category_label',
+              base.manual_category_raw_payload->'normalized_payload'->>'category_label',
               definition.definition->>'label'
             ) as effective_category_label
           from effective
+          join base on base.row_id = effective.row_id
           left join tag_definitions definition
             on definition.definition->>'code' = effective.effective_category_code
         )

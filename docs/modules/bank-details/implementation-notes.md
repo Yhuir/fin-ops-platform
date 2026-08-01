@@ -519,4 +519,4 @@
 - 稳定生产并发 4 中，银行明细和待开发票同时出现约 `1.3s` p95，而连接获取 p95 低于 `3ms`；共同热点是 canonical classifier 仍以每条银行行进入完整规则 lateral append。
 - 编译器继续生成相同规范化谓词、priority、sort order 和 definition payload，但执行形态改为每条规则对 materialized canonical base 做集合扫描，再按 row id 聚合。旧的 per-row `cross join lateral` matcher 已删除。
 - 两个页面复用同一个 compiler；没有新分类器、缓存、projection、worker、表、索引或 API 变化。真实 PostgreSQL integration 继续校验规则命中和往来关系语义。
-- 生产并发复测证明禁用 PostgreSQL query parallelism 会让银行首屏更慢，因此撤销该 request-local 设置。真实热点是 43 条 active 规则重复扫描携带 raw JSON/文本数组的宽 `base`；现改为只扫描 row id、direction、account key 和规则必需的规范化列。不改规则、优先级、分页、精确统计、导出或全局数据库设置。
+- 生产并发复测证明禁用 PostgreSQL query parallelism 会让银行首屏更慢，因此撤销该设置，仅在当前 read-only transaction 关闭短查询 JIT。真实热点是 43 条 active 规则重复扫描携带 raw JSON/文本数组的宽 `base`；现改为只扫描规则必需列，分类中间态只保留决策字段，精确统计/排序只处理 key，完整行仅回连首屏分页。不改规则、优先级、分页、精确统计、导出或全局数据库设置。
