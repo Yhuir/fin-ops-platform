@@ -513,6 +513,12 @@
 - 修复：保留双方向 `banks` 供内部转账、relation facts 和业务汇总使用；新增 direction-scoped `rule_banks`，只为本次请求方向执行 NFKC、正则空白处理和 bank text JSON 展开。默认 `include_statistics=true` 仍扫描全部方向，兼容 API 口径。
 - 并发复验后的同边界收敛：从当前活动规则生成 request-scoped `rule_fields`，只规范化规则 `match_fields` 与非空 account scope 实际读取的字段；`all_text`、账户范围和 archived rule 语义均有显式测试。未使用字段不再执行 JSONB 提取、NFKC 或正则。
 - 边界：未新增索引、缓存、read model、worker、依赖或兼容分支；旧的全方向规则文本预计算已从首屏链路删除。
+
+## 2026-08-01 - 复杂规则查询关闭 request-scoped JIT
+
+- 稳定窗口并发 4 证据显示 rows 单请求约 `607ms`，但 p95 为 `1257.621ms`；App Health 的数据库 p95 为 `888.899ms`、连接获取 p95 仅 `5.614ms`。瓶颈是小数据量、多 CTE 与 43 条活动规则组成的复杂 SQL 在并发下的规划/执行成本，不是连接池等待。
+- 只在 pending rows 主查询所在的 `REPEATABLE READ READ ONLY` transaction 内执行 `SET LOCAL jit = off`；候选、详情和写链不受影响。事务退出即恢复 PostgreSQL 默认值，不改全局数据库配置。
+- 未增加 cache、read model、worker、索引、API 字段或兼容路径；结果集合、精确 total、统计、排序和分页合同保持不变。
 ## 2026-07-22 - 页面自有全量标题统计
 
 - 目标：让标题统计独立证明待找发票投影实际覆盖的完整流水与关联关系，不把当前筛选后的表格行数或统一事实源数量冒充页面统计。

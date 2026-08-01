@@ -118,8 +118,9 @@ class PendingInvoiceCanonicalRepositoryTests(unittest.TestCase):
             commands[0][0],
             "set transaction isolation level repeatable read read only",
         )
+        self.assertEqual(commands[1][0], "set local jit = off")
         self.assertEqual(len([sql for sql, _params in commands if sql.lstrip().lower().startswith(("select", "with"))]), 2)
-        page_sql, page_params = commands[2]
+        page_sql, page_params = commands[3]
         self.assertIn("from app.bank_transactions", page_sql)
         self.assertIn("from app.bank_transaction_categories", page_sql)
         self.assertIn("app.invoices", page_sql)
@@ -156,7 +157,7 @@ class PendingInvoiceCanonicalRepositoryTests(unittest.TestCase):
             }
         )
 
-        _page_sql, page_params = connection.transaction_state.commands[2]
+        _page_sql, page_params = connection.transaction_state.commands[3]
         self.assertEqual(json.loads(str(page_params[0]))["scan_direction"], "expense")
         self.assertIs(page_params[-6], False)
 

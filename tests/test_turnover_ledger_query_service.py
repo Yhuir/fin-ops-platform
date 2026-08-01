@@ -82,7 +82,10 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
 
         self.assertEqual(
             transaction.statements,
-            ["set transaction isolation level repeatable read read only"],
+            [
+                "set transaction isolation level repeatable read read only",
+                "set local jit = off",
+            ],
         )
 
     def test_grouped_query_reads_once_without_refresh_metadata(self) -> None:

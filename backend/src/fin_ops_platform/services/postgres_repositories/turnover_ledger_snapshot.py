@@ -16,4 +16,5 @@ def turnover_ledger_canonical_snapshot(
 
     with connection.transaction() as transaction:
         transaction.execute("set transaction isolation level repeatable read read only")
+        transaction.execute("set local jit = off")
         yield PostgresStateStore(data_dir=default_data_dir(), connection=transaction), transaction

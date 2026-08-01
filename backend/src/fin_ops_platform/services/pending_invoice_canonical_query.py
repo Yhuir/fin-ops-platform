@@ -1254,6 +1254,7 @@ class PostgresPendingInvoiceCanonicalRepository:
         page: int,
     ) -> dict[str, Any]:
         with self._snapshot_transaction() as transaction:
+            transaction.execute("set local jit = off")
             settings = self._settings(transaction)
             scan_direction = (
                 "all"

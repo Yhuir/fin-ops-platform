@@ -789,3 +789,9 @@ git diff --check
 - 最新生产并发 4 基线 p95 为 `1556.559ms`；当前 1,014 条银行流水中只有 65 条命中选中的外部往来标签，但共享 classifier 仍先计算全部流水再做 `effective_category_code` 过滤。
 - 外部往来标签合同要求逐行选择第三层语义，缺少 `output_third_label` 的 external-turnover 定义不会直接形成自动有效标签。因此 repository 仅在“全部已选定义都满足该合同”时，用 active confirmation/manual category 把 classifier source 收窄到候选行；任一定义不满足时自动保留原全量分类，禁止漏掉可自动命中的普通标签。
 - 仍复用同一个 Bank Details canonical classifier 和 Turnover query service，没有新增专用分类器、cache、read model、worker、表、索引、migration、fallback 或第二事实源。真实 PostgreSQL integration 覆盖人工分类、语义恢复和 active Workbench closure。
+
+## 2026-08-01 - 只读台账快照关闭 request-scoped JIT
+
+- grouped 查询在稳定窗口的 App Health 数据库 p95 已降至 `564.388ms`，但 HTTP 并发 4 尾延迟仍有抖动；该路径由多个固定查询与动态分类 SQL组成，当前生产数据量不足以摊销 PostgreSQL JIT 编译成本。
+- canonical snapshot 仅在本次 `REPEATABLE READ READ ONLY` transaction 内执行 `SET LOCAL jit = off`，不更改全局设置、连接池、业务 SQL、事实源或 API。
+- 保持现有 Bank Details classifier、relation/FIFO/金额/分页合同；没有新增缓存、read model、worker、索引或第二查询链。
