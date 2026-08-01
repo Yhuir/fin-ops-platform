@@ -902,70 +902,42 @@ def _classification_cte(
               else 'expense'
             end as direction,
             coalesce(
-              (
-                select item->>'value'
-                from jsonb_array_elements(
-                  case
-                    when jsonb_typeof(source.bank_text_fields) = 'array'
-                      then source.bank_text_fields
-                    else '[]'::jsonb
-                  end
-                ) item
-                where item->>'label' in ('摘要')
-                  and nullif(item->>'value', '') is not null
-                limit 1
-              ),
+              text_fields.summary_text,
               source.summary,
               ''
             ) as summary_text,
+            coalesce(text_fields.purpose_text, '') as purpose_text,
             coalesce(
-              (
-                select item->>'value'
-                from jsonb_array_elements(
-                  case
-                    when jsonb_typeof(source.bank_text_fields) = 'array'
-                      then source.bank_text_fields
-                    else '[]'::jsonb
-                  end
-                ) item
-                where item->>'label' in ('用途', '交易用途')
-                  and nullif(item->>'value', '') is not null
-                limit 1
-              ),
-              ''
-            ) as purpose_text,
-            coalesce(
-              (
-                select item->>'value'
-                from jsonb_array_elements(
-                  case
-                    when jsonb_typeof(source.bank_text_fields) = 'array'
-                      then source.bank_text_fields
-                    else '[]'::jsonb
-                  end
-                ) item
-                where item->>'label' in ('备注', '附言', '客户附言')
-                  and nullif(item->>'value', '') is not null
-                limit 1
-              ),
+              text_fields.note_text,
               source.remark,
               ''
             ) as note_text,
-            coalesce(
-              (
-                select string_agg(item->>'value', ' ')
-                from jsonb_array_elements(
-                  case
-                    when jsonb_typeof(source.bank_text_fields) = 'array'
-                      then source.bank_text_fields
-                    else '[]'::jsonb
-                  end
-                ) item
-                where nullif(item->>'value', '') is not null
-              ),
-              ''
-            ) as detail_text
+            coalesce(text_fields.detail_text, '') as detail_text
           from source_rows source
+          left join lateral (
+            select
+              (
+                array_agg(item.payload->>'value' order by item.position)
+                  filter (where item.payload->>'label' = '摘要')
+              )[1] as summary_text,
+              (
+                array_agg(item.payload->>'value' order by item.position)
+                  filter (where item.payload->>'label' in ('用途', '交易用途'))
+              )[1] as purpose_text,
+              (
+                array_agg(item.payload->>'value' order by item.position)
+                  filter (where item.payload->>'label' in ('备注', '附言', '客户附言'))
+              )[1] as note_text,
+              string_agg(item.payload->>'value', ' ' order by item.position) as detail_text
+            from jsonb_array_elements(
+              case
+                when jsonb_typeof(source.bank_text_fields) = 'array'
+                  then source.bank_text_fields
+                else '[]'::jsonb
+              end
+            ) with ordinality item(payload, position)
+            where nullif(item.payload->>'value', '') is not null
+          ) text_fields on true
         ),
         base as materialized (
           select

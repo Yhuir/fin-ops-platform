@@ -11,6 +11,7 @@ from fin_ops_platform.services.pending_invoice_canonical_query import (
     PAGE_QUERY_SQL,
     PendingInvoiceCanonicalQueryService,
     PostgresPendingInvoiceCanonicalRepository,
+    _rule_required_fields,
 )
 from fin_ops_platform.services.pending_invoice_service import PendingInvoiceError
 
@@ -257,6 +258,7 @@ class PendingInvoiceCanonicalRepositoryTests(unittest.TestCase):
         self.assertNotIn("normalize(", banks_sql)
         self.assertIn("normalize(", rule_banks_sql)
         self.assertIn("scan_direction", rule_banks_sql)
+        self.assertIn("config.payload->'rule_fields'", rule_banks_sql)
         self.assertIn("from rule_banks b", rule_match_sql)
         self.assertIn("definition.match_fields", rule_match_sql)
         self.assertIn("definition.account_scope_values", rule_match_sql)
@@ -267,6 +269,27 @@ class PendingInvoiceCanonicalRepositoryTests(unittest.TestCase):
         self.assertNotIn("jsonb_array_elements_text", rule_match_sql)
         self.assertNotIn("normalize(", rule_match_sql)
         self.assertNotIn("regexp_replace(", rule_match_sql)
+
+    def test_rule_field_plan_only_normalizes_fields_used_by_active_rules(self) -> None:
+        fields = _rule_required_fields(
+            {
+                "bank_transaction_tags": {
+                    "definitions": [
+                        {
+                            "status": "active",
+                            "rules": {"match_fields": ["summary_text", "counterparty_name"]},
+                            "account_scope": {"type": "bank", "values": ["建设银行"]},
+                        },
+                        {
+                            "status": "archived",
+                            "rules": {"match_fields": ["all_text"]},
+                        },
+                    ]
+                }
+            }
+        )
+
+        self.assertEqual(fields, ["bank", "counterparty_name", "summary_text"])
 
 
 class PendingInvoiceCanonicalQueryServiceTests(unittest.TestCase):

@@ -504,6 +504,7 @@
 
 - 生产证据：`include_statistics=false` 的 pending rows 响应体已降至约 12KB，但串行 p95 仍为 `1106.169ms`；App Health 显示 DB execute p95 `1112.636ms`、连接获取 p95 `0.23ms`，根因在 SQL 而不是连接池或网络。
 - 修复：保留双方向 `banks` 供内部转账、relation facts 和业务汇总使用；新增 direction-scoped `rule_banks`，只为本次请求方向执行 NFKC、正则空白处理和 bank text JSON 展开。默认 `include_statistics=true` 仍扫描全部方向，兼容 API 口径。
+- 并发复验后的同边界收敛：从当前活动规则生成 request-scoped `rule_fields`，只规范化规则 `match_fields` 与非空 account scope 实际读取的字段；`all_text`、账户范围和 archived rule 语义均有显式测试。未使用字段不再执行 JSONB 提取、NFKC 或正则。
 - 边界：未新增索引、缓存、read model、worker、依赖或兼容分支；旧的全方向规则文本预计算已从首屏链路删除。
 ## 2026-07-22 - 页面自有全量标题统计
 

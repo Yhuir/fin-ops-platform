@@ -507,3 +507,9 @@
 - 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_service tests.test_bank_transaction_auto_category_service tests.test_bank_transaction_category_service -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_bank_auto_tag_rules_api tests.test_bank_details_routes tests.test_platform_runtime_boundary_guards -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime tests.test_bank_account_balance_read_model tests.test_bankdetail_backfill_cli -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_export_service tests.test_bank_transaction_identity_service -v`；`cd web && npm test -- --run src/test/BankDetailsApi.test.ts src/test/BankDetailsPage.test.tsx`。
 - 未测风险：不运行真实生产库 worker drain、真实导入到下游多页面完整 smoke、浏览器视觉/大数据性能验证。
 - 后续事项：下一模块继续处理 `input-invoice-usage`。
+
+## 2026-08-01 - canonical classifier 单次展开 bank text fields
+
+- 生产并发 4 证据显示银行明细与复用该 classifier 的往来账仍受数据库 CPU 限制，连接获取不是瓶颈。
+- 修复在既有 `_classification_cte(...)` 内将摘要、用途、备注和完整明细对同一 `bank_text_fields` JSON array 的四次独立展开合并为一次带 ordinality 的 lateral aggregate，保留原始数组顺序与首个命中语义。
+- 不改变标签优先级、内部转账、manual/confirmation precedence、API shape 或模块 I/O；未新增索引、表、缓存、read model、worker 或依赖。

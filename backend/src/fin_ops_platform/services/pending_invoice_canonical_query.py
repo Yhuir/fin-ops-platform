@@ -82,6 +82,41 @@ FILTER_FIELDS = [
     {"field": "project_name", "label": "项目", "operators": ["contains", "in"]},
 ]
 
+_RULE_TEXT_FIELDS = {
+    "counterparty_name",
+    "counterparty_account",
+    "counterparty_bank",
+    "purpose_text",
+    "summary_text",
+    "note_text",
+    "detail_text",
+}
+
+
+def _rule_required_fields(settings: dict[str, Any]) -> list[str]:
+    tags = settings.get("bank_transaction_tags")
+    definitions = list(tags.get("definitions") or []) if isinstance(tags, dict) else []
+    fields: set[str] = set()
+    for definition in definitions:
+        if not isinstance(definition, dict) or str(definition.get("status") or "active") != "active":
+            continue
+        rules = definition.get("rules")
+        if not isinstance(rules, dict):
+            continue
+        match_fields = {str(field) for field in list(rules.get("match_fields") or [])}
+        fields.update(_RULE_TEXT_FIELDS if "all_text" in match_fields else match_fields & _RULE_TEXT_FIELDS)
+        scope = definition.get("account_scope")
+        if not isinstance(scope, dict) or not list(scope.get("values") or []):
+            continue
+        scope_field = {
+            "bank_account": "account",
+            "account_type": "account_type",
+            "bank": "bank",
+        }.get(str(scope.get("type") or ""))
+        if scope_field:
+            fields.add(scope_field)
+    return sorted(fields)
+
 
 def _normalize_sql_text(expression: str) -> str:
     return (
@@ -564,34 +599,46 @@ rule_definitions as materialized (
 rule_banks as materialized (
     select
         bank.*,
-        {_normalize_sql_text("bank.counterparty_name")} as rule_counterparty_name,
-        {_normalize_sql_text("bank.counterparty_account_no")} as rule_counterparty_account,
-        {_normalize_sql_text("bank.counterparty_bank_name")} as rule_counterparty_bank,
-        {_normalize_sql_text("coalesce(bank.raw_payload->'normalized_payload'->>'purpose', bank.raw_payload->>'purpose', '')")}
-            as rule_purpose_text,
-        {_normalize_sql_text("bank.summary")} as rule_summary_text,
-        {_normalize_sql_text("bank.remark")} as rule_note_text,
-        {_normalize_sql_text("coalesce(bank.raw_payload->'normalized_payload'->>'detail_text', bank.raw_payload->>'detail_text', '')")}
-            as rule_detail_text,
-        {_normalize_sql_text("bank.account_no")} as rule_account,
-        {_normalize_sql_text("coalesce(bank.raw_payload->'normalized_payload'->>'account_type', bank.raw_payload->>'account_type')")}
-            as rule_account_type,
-        {_normalize_sql_text("coalesce(bank.raw_payload->'normalized_payload'->>'bank_name', bank.raw_payload->>'bank_name')")}
-            as rule_bank,
-        coalesce(
-            (
-                select array_agg({_normalize_sql_text("text_field->>'value'")})
-                from jsonb_array_elements(
-                    case
-                        when jsonb_typeof(bank.bank_text_fields) = 'array'
-                        then bank.bank_text_fields
-                        else '[]'::jsonb
-                    end
-                ) text_fields(text_field)
-                where nullif(text_field->>'value', '') is not null
-            ),
-            array[]::text[]
-        ) as rule_bank_detail_texts
+        case when config.payload->'rule_fields' ? 'counterparty_name'
+            then {_normalize_sql_text("bank.counterparty_name")} else '' end as rule_counterparty_name,
+        case when config.payload->'rule_fields' ? 'counterparty_account'
+            then {_normalize_sql_text("bank.counterparty_account_no")} else '' end as rule_counterparty_account,
+        case when config.payload->'rule_fields' ? 'counterparty_bank'
+            then {_normalize_sql_text("bank.counterparty_bank_name")} else '' end as rule_counterparty_bank,
+        case when config.payload->'rule_fields' ? 'purpose_text'
+            then {_normalize_sql_text("coalesce(bank.raw_payload->'normalized_payload'->>'purpose', bank.raw_payload->>'purpose', '')")}
+            else '' end as rule_purpose_text,
+        case when config.payload->'rule_fields' ? 'summary_text'
+            then {_normalize_sql_text("bank.summary")} else '' end as rule_summary_text,
+        case when config.payload->'rule_fields' ? 'note_text'
+            then {_normalize_sql_text("bank.remark")} else '' end as rule_note_text,
+        case when config.payload->'rule_fields' ? 'detail_text'
+            then {_normalize_sql_text("coalesce(bank.raw_payload->'normalized_payload'->>'detail_text', bank.raw_payload->>'detail_text', '')")}
+            else '' end as rule_detail_text,
+        case when config.payload->'rule_fields' ? 'account'
+            then {_normalize_sql_text("bank.account_no")} else '' end as rule_account,
+        case when config.payload->'rule_fields' ? 'account_type'
+            then {_normalize_sql_text("coalesce(bank.raw_payload->'normalized_payload'->>'account_type', bank.raw_payload->>'account_type')")}
+            else '' end as rule_account_type,
+        case when config.payload->'rule_fields' ? 'bank'
+            then {_normalize_sql_text("coalesce(bank.raw_payload->'normalized_payload'->>'bank_name', bank.raw_payload->>'bank_name')")}
+            else '' end as rule_bank,
+        case when config.payload->'rule_fields' ? 'detail_text' then
+            coalesce(
+                (
+                    select array_agg({_normalize_sql_text("text_field->>'value'")})
+                    from jsonb_array_elements(
+                        case
+                            when jsonb_typeof(bank.bank_text_fields) = 'array'
+                            then bank.bank_text_fields
+                            else '[]'::jsonb
+                        end
+                    ) text_fields(text_field)
+                    where nullif(text_field->>'value', '') is not null
+                ),
+                array[]::text[]
+            )
+        else array[]::text[] end as rule_bank_detail_texts
     from banks bank
     cross join request_config config
     where coalesce(config.payload->>'scan_direction', 'all') = 'all'
@@ -1415,6 +1462,7 @@ class PostgresPendingInvoiceCanonicalRepository:
                     else str(request["direction"])
                 ),
                 "settings": settings,
+                "rule_fields": _rule_required_fields(settings),
                 "groups": {
                     direction: {
                         **{
