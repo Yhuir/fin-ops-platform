@@ -328,6 +328,37 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
         main_params = connection.transaction_object.reads[1][1]
         self.assertEqual(main_params[-2:], (BANK_DETAIL_EXPORT_ROW_LIMIT + 1, 0))
 
+    def test_effective_category_rows_reuses_set_based_classifier_without_pagination(self) -> None:
+        class Transaction:
+            def __init__(self) -> None:
+                self.reads: list[tuple[str, tuple[object, ...]]] = []
+
+            def fetch_all(
+                self,
+                sql: str,
+                params: tuple[object, ...] = (),
+            ) -> list[dict[str, object]]:
+                self.reads.append((sql, params))
+                return [{"row_id": "bank-1", "effective_category_code": "turnover-personal"}]
+
+        transaction = Transaction()
+        rows = PostgresBankDetailsCanonicalQueryRepository.effective_category_rows(
+            transaction,
+            settings={"bank_transaction_tags": {"definitions": []}},
+            category_codes=["turnover-personal", "turnover-personal", ""],
+        )
+
+        self.assertEqual(rows[0]["row_id"], "bank-1")
+        self.assertEqual(len(transaction.reads), 1)
+        sql, params = transaction.reads[0]
+        normalized_sql = " ".join(sql.split()).lower()
+        self.assertIn("from classified_with_semantics", normalized_sql)
+        self.assertIn("effective_category_code = any(%s::text[])", normalized_sql)
+        self.assertNotIn("limit %s", normalized_sql)
+        self.assertNotIn("read_model.", normalized_sql)
+        self.assertEqual(params[-1], ["turnover-personal"])
+        self.assertEqual(sql.count("%s"), len(params))
+
 
 if __name__ == "__main__":
     unittest.main()

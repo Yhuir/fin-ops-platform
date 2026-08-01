@@ -499,6 +499,12 @@
 - 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_pending_invoice_service.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_pending_invoice_api.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_relation_command_service.py tests/test_workbench_relation_read_facade.py tests/test_workbench_relation_sql_projection.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_downstream_relation_read_models_use_workbench_relation_distribution -q`；`python3 -m compileall -q backend/src/fin_ops_platform/services/pending_invoice_service.py backend/src/fin_ops_platform/services/workbench_relation_command_service.py`。
 - 未测风险：HTTP 层尚未单独断言 relation read model stale 的 error shape；真实 Postgres 并发 row occupation 仍未用锁或唯一占用约束保护；跨页面真实 worker drain 仍需 staging smoke。
 - 后续事项：迁移 no-OA submit/withdraw/internal transfer confirm-link，继续消除剩余 relation 写事实源。
+
+## 2026-08-01 - 首屏方向规则标准化有界化
+
+- 生产证据：`include_statistics=false` 的 pending rows 响应体已降至约 12KB，但串行 p95 仍为 `1106.169ms`；App Health 显示 DB execute p95 `1112.636ms`、连接获取 p95 `0.23ms`，根因在 SQL 而不是连接池或网络。
+- 修复：保留双方向 `banks` 供内部转账、relation facts 和业务汇总使用；新增 direction-scoped `rule_banks`，只为本次请求方向执行 NFKC、正则空白处理和 bank text JSON 展开。默认 `include_statistics=true` 仍扫描全部方向，兼容 API 口径。
+- 边界：未新增索引、缓存、read model、worker、依赖或兼容分支；旧的全方向规则文本预计算已从首屏链路删除。
 ## 2026-07-22 - 页面自有全量标题统计
 
 - 目标：让标题统计独立证明待找发票投影实际覆盖的完整流水与关联关系，不把当前筛选后的表格行数或统一事实源数量冒充页面统计。

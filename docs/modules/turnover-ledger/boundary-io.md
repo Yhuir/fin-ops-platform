@@ -32,7 +32,7 @@
 | 页面 GET / 筛选 / 分页 / 导出 | `TurnoverLedgerPage.tsx`、`features/turnoverLedger/api.ts` | route 只校验 HTTP/权限并委托 `TurnoverLedgerQueryService`；不得回退 local builder、旧 read model 或 queue |
 | Canonical 页面快照 | `TurnoverLedgerQueryService` | 通过 `turnover_ledger_canonical_snapshot(...)` 开启单个只读 repeatable-read transaction；同次请求中的流水、分类、设置、关系和 extras 必须来自该快照 |
 | 银行流水 | `app.bank_transactions` / import fact repository | 只读取有效事实；ID 同时支持 storage UUID 与公开 legacy id 的既有规范 |
-| 有效分类和标签准入 | `app.bank_transaction_categories`、`app.app_settings` | 分类规则和选中 tag 由既有 category/settings service 解释；query service 不复制规则 |
+| 有效分类和标签准入 | `app.bank_transaction_categories`、`app.bank_transaction_category_confirmations`、`app.app_settings` | 复用 Bank Details canonical classifier 的 set-based SQL 与 `AppSettingsService` 的无 I/O 选择映射；同一快照只返回当前选中 tag codes 的流水，query service 不复制匹配规则 |
 | 统一配对关系 | `app.workbench_pair_relations` | 仅按本页实际银行 row ids 做 bounded overlap 查询；active relation 是关联台与外部往来款共同事实源 |
 | Turnover 自有关系和 extras | `app.turnover_relations`、`app.turnover_ledger_extras` | 保留通用 suggested/confirmed relation 与页面补充字段的现有业务语义 |
 | 页面 Audit | admin-only page audit API | 与页面一样直接审计 canonical facts；检查 relation member shape、银行成员存在性、active case 唯一性和手工 Turnover relation 成员存在性，不读取投影/dirty/outbox |
@@ -59,7 +59,7 @@
   - `app.turnover_relations`
   - `app.turnover_ledger_extras`
 - Query owner：`TurnoverLedgerQueryService`
-- Snapshot repository boundary：`postgres_repositories/turnover_ledger_snapshot.py`
+- Snapshot repository boundary：`postgres_repositories/turnover_ledger_snapshot.py`；银行分类 SQL owner 复用 `PostgresBankDetailsCanonicalQueryRepository.effective_category_rows(...)`，但不读取 Bank Details 页面 DTO。
 - Relation enrichment：`turnover_ledger_relation_context.py`
 - Worker/read model：不适用。
 - Redis/RabbitMQ：不适用。
@@ -71,7 +71,7 @@
 | --- | --- |
 | Frontend | `web/src/pages/TurnoverLedgerPage.tsx`、`web/src/features/turnoverLedger/*`、`web/src/components/turnoverLedger/*` |
 | HTTP route | `backend/src/fin_ops_platform/app/routes_turnover_ledger.py` |
-| Query/read | `turnover_ledger_query_service.py`、`turnover_ledger_service.py`、`turnover_ledger_relation_context.py`、`postgres_repositories/turnover_ledger_snapshot.py` |
+| Query/read | `turnover_ledger_query_service.py`、`turnover_ledger_service.py`、`turnover_ledger_relation_context.py`、`bank_details_canonical_query.py` 的共享分类 SQL、`postgres_repositories/turnover_ledger_snapshot.py` |
 | Write | `turnover_ledger_write_facade.py`、`turnover_ledger_write_uow.py`、`turnover_ledger_write_adapters.py`、`workbench_relation_command_service.py` |
 | Other business services | `turnover_relation_service.py`、`turnover_ledger_extra_service.py`、`turnover_ledger_export_service.py` |
 | Tests | `tests/test_turnover_ledger_*.py`、`web/src/test/TurnoverLedger*.test.*` |
@@ -93,6 +93,7 @@
 - `turnover_ledger_read_model_refresh.py`
 - `turnover_ledger_read_model_refresh_producer.py`
 - `turnover_ledger_source_versions.py`
+- 页面 GET 的全量银行流水加载、全量分类 snapshot 和 Python 自动规则重算；当前请求只接收 SQL 已判定为选中往来标签的 canonical rows
 - composite PostgreSQL repository 中 Turnover projection 的 list/freshness/save/delta/generation/CAS SQL 和 helper
 - worker handler/registry/env、read-model manifest/scope policy、App Status registry、RabbitMQ dispatcher event
 - 前端 stale/refreshing polling 和 API freshness DTO

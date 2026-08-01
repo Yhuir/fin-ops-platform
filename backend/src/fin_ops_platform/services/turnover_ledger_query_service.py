@@ -5,16 +5,12 @@ from types import SimpleNamespace
 from typing import Any, Iterator
 
 from fin_ops_platform.services.app_settings_service import AppSettingsService
-from fin_ops_platform.services.bank_transaction_auto_category_service import (
-    BankTransactionAutoCategoryService,
-)
 from fin_ops_platform.services.bank_transaction_category_service import (
     BankTransactionCategoryService,
 )
-from fin_ops_platform.services.bank_transaction_effective_category_provider import (
-    BankTransactionEffectiveCategoryProvider,
+from fin_ops_platform.services.bank_details_canonical_query import (
+    PostgresBankDetailsCanonicalQueryRepository,
 )
-from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.postgres_repositories.turnover_ledger_snapshot import (
     turnover_ledger_canonical_snapshot,
 )
@@ -76,34 +72,22 @@ class TurnoverLedgerQueryService:
             assert self._local_ledger_service is not None
             yield self._local_ledger_service
             return
-        with turnover_ledger_canonical_snapshot(self._connection) as state_store:
-            category_snapshot = state_store.load_bank_transaction_categories()
+        with turnover_ledger_canonical_snapshot(self._connection) as snapshot:
+            state_store, transaction = snapshot
             settings_snapshot = state_store.load_app_settings()
             tag_dictionary = settings_snapshot.get("bank_transaction_tags")
+            category_service = BankTransactionCategoryService()
             if isinstance(tag_dictionary, dict):
-                category_snapshot = {
-                    **category_snapshot,
-                    "tag_dictionary": tag_dictionary,
-                }
-            category_service = BankTransactionCategoryService.from_snapshot(
-                category_snapshot,
-                transaction_exists=state_store.transaction_exists,
+                category_service.configure_tag_dictionary(tag_dictionary)
+            selected_tag_codes = AppSettingsService.turnover_ledger_selected_tag_codes_from_settings(
+                settings_snapshot
             )
-            auto_category_service = BankTransactionAutoCategoryService(
-                category_service=category_service,
-            )
-            settings_service = AppSettingsService(
-                state_store,
-                SimpleNamespace(
-                    list_projects=lambda: [],
-                    restore_manual_projects=lambda _projects: None,
-                ),
-                bank_transaction_category_service=category_service,
-                bank_transaction_auto_category_service=auto_category_service,
-            )
-            category_provider = BankTransactionEffectiveCategoryProvider(
-                category_service=category_service,
-                auto_category_service=auto_category_service,
+            canonical_rows, canonical_categories = _canonical_turnover_rows(
+                PostgresBankDetailsCanonicalQueryRepository.effective_category_rows(
+                    transaction,
+                    settings=settings_snapshot,
+                    category_codes=selected_tag_codes,
+                )
             )
             relation_service = TurnoverRelationService.from_snapshot(
                 state_store.load_turnover_relations(),
@@ -130,15 +114,71 @@ class TurnoverLedgerQueryService:
                 ]
 
             yield TurnoverLedgerService(
-                import_service=ImportNormalizationService.from_snapshot(
-                    None,
-                    id_registry=state_store,
-                    fact_repository=state_store.import_fact_repository,
+                import_service=SimpleNamespace(
+                    list_transactions=lambda **_kwargs: canonical_rows,
                 ),
                 category_service=category_service,
                 relation_service=relation_service,
                 extra_service=extra_service,
-                category_provider=category_provider,
-                selected_tag_codes_provider=settings_service.turnover_ledger_selected_tag_codes,
+                category_provider=SimpleNamespace(
+                    bulk_get_for_rows=lambda _rows: canonical_categories,
+                ),
+                selected_tag_codes_provider=lambda: selected_tag_codes,
                 workbench_relation_source_provider=relation_source_rows,
             )
+
+
+def _canonical_turnover_rows(
+    rows: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+    transactions: list[dict[str, Any]] = []
+    categories: dict[str, dict[str, Any]] = {}
+    for source in rows:
+        row = dict(source)
+        row_id = str(row.get("row_id") or "").strip()
+        if not row_id:
+            continue
+        definition = row.get("effective_definition")
+        definition = dict(definition) if isinstance(definition, dict) else {}
+        primary = str(row.get("effective_category_primary_label") or "").strip()
+        secondary = str(row.get("effective_category_sub_label") or "").strip()
+        third = str(row.get("effective_category_third_label") or "").strip()
+        label_path = [label for label in (primary, secondary, third) if label]
+        category_path = [
+            str(item)
+            for item in list(definition.get("path") or [])
+            if str(item).strip()
+        ]
+        source_name = str(row.get("effective_category_source") or "").strip()
+        category_version = (
+            row.get("confirmation_version")
+            if source_name == "manual_confirmation"
+            else row.get("manual_category_version")
+        )
+        transactions.append(
+            {
+                **row,
+                "id": row_id,
+                "txn_direction": (
+                    "inflow" if str(row.get("direction") or "") == "income" else "outflow"
+                ),
+            }
+        )
+        categories[row_id] = {
+            "transaction_id": row_id,
+            "category_code": row.get("effective_category_code"),
+            "category_label": row.get("effective_category_label"),
+            "category_path": category_path,
+            "category_label_path": label_path,
+            "category_primary_label": primary,
+            "category_sub_label": secondary,
+            "category_third_label": third,
+            "category_source": source_name,
+            "source": source_name,
+            "category_version": int(category_version or 0),
+            "manual_category_version": int(row.get("manual_category_version") or 0),
+            "turnover_role": definition.get("turnover_role"),
+            "turnover_action_type": definition.get("turnover_action_type"),
+            "turnover_family": definition.get("turnover_family"),
+        }
+    return transactions, categories

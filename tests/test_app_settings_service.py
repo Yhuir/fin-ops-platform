@@ -169,6 +169,23 @@ class AppSettingsServiceTests(unittest.TestCase):
             self.assertTrue(tag["output_sub_label"])
             self.assertTrue(tag["turnover_action_type"])
 
+    def test_turnover_selected_codes_map_an_existing_snapshot_without_state_io(self) -> None:
+        rule = self._external_rule("external_rule_borrow_out")
+        codes = AppSettingsService.turnover_ledger_selected_tag_codes_from_settings(
+            {
+                "bank_transaction_tags": {
+                    "version": 1,
+                    "definitions": [rule],
+                },
+                "turnover_ledger_tag_selection": {
+                    "version": 2,
+                    "selected_tag_codes": ["external_rule_borrow_out", "retired"],
+                },
+            }
+        )
+
+        self.assertEqual(codes, ["external_rule_borrow_out"])
+
     def test_refresh_uses_persisted_settings_contract_not_previous_memory_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             self._seed_settings(

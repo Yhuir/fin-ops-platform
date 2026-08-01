@@ -877,6 +877,21 @@ class AppSettingsService:
             if str(code).strip()
         ]
 
+    @staticmethod
+    def turnover_ledger_selected_tag_codes_from_settings(
+        settings_payload: dict[str, Any],
+    ) -> list[str]:
+        normalized = AppSettingsService.normalize_settings_payload(settings_payload)
+        payload = AppSettingsService._public_turnover_ledger_tag_selection(
+            normalized["turnover_ledger_tag_selection"],
+            bank_transaction_tags=normalized["bank_transaction_tags"],
+        )
+        return [
+            str(code)
+            for code in list(payload.get("selected_tag_codes") or [])
+            if str(code).strip()
+        ]
+
     def get_cost_statistics_tag_selection_payload(self, *, can_save: bool = True) -> dict[str, Any]:
         self._refresh_snapshot_from_state_store()
         return self.cost_statistics_tag_selection_payload_from_settings(

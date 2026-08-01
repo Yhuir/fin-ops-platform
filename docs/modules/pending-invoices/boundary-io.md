@@ -57,7 +57,7 @@
   `oa.primary|summaries` canonical 容器；旧 `bank_transaction`、`invoices`、`oa_applicant` 重复字段不再输出。
 - 列表标签字典只含展示元数据；规则 matcher、account scope 和其它执行期字段只留在后端 settings/query owner。
 - 分类/确认/income override、relation members、invoice/OA/bank summaries 都批量聚合；禁止 per-row/per-group N+1。
-- 自动规则字符串使用 PostgreSQL `normalize(..., NFKC)`、空白折叠及现有“帐户→账户”口径。
+- 自动规则字符串使用 PostgreSQL `normalize(..., NFKC)`、空白折叠及现有“帐户→账户”口径；`include_statistics=false` 时只为请求方向构建规则匹配文本，内部转账与 relation 事实仍读取双方向 canonical rows，禁止用方向裁剪改变业务判断。
 - SQL 分类后由 `pending_invoice_status_payload` 再校验；若 SQL 和领域策略分歧则请求失败。
 - 50,003 条本地 PostgreSQL canonical bank rows 和生产 SLO 实测记录在 `implementation-notes.md`；本次未新增 cache、queue、worker、materialized view、索引或依赖。
 

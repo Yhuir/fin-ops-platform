@@ -9,9 +9,11 @@ from fin_ops_platform.services.runtime_paths import default_data_dir
 
 
 @contextmanager
-def turnover_ledger_canonical_snapshot(connection: Any) -> Iterator[PostgresStateStore]:
+def turnover_ledger_canonical_snapshot(
+    connection: Any,
+) -> Iterator[tuple[PostgresStateStore, Any]]:
     """Expose one read-only canonical snapshot to the Turnover query service."""
 
     with connection.transaction() as transaction:
         transaction.execute("set transaction isolation level repeatable read read only")
-        yield PostgresStateStore(data_dir=default_data_dir(), connection=transaction)
+        yield PostgresStateStore(data_dir=default_data_dir(), connection=transaction), transaction

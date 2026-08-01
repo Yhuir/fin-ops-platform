@@ -9,7 +9,10 @@ from unittest.mock import patch
 from fin_ops_platform.services.postgres_repositories.turnover_ledger_snapshot import (
     turnover_ledger_canonical_snapshot,
 )
-from fin_ops_platform.services.turnover_ledger_query_service import TurnoverLedgerQueryService
+from fin_ops_platform.services.turnover_ledger_query_service import (
+    TurnoverLedgerQueryService,
+    _canonical_turnover_rows,
+)
 from fin_ops_platform.services.turnover_ledger_relation_context import (
     apply_workbench_relation_context,
 )
@@ -68,8 +71,10 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
             "fin_ops_platform.services.postgres_repositories.turnover_ledger_snapshot.default_data_dir",
             return_value=Path(temp_dir),
         ):
-            with turnover_ledger_canonical_snapshot(Connection()) as state_store:
+            with turnover_ledger_canonical_snapshot(Connection()) as snapshot:
+                state_store, yielded_transaction = snapshot
                 self.assertIs(state_store._connection, transaction)
+                self.assertIs(yielded_transaction, transaction)
 
         self.assertEqual(
             transaction.statements,
@@ -115,6 +120,43 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
     def test_missing_canonical_source_fails_fast(self) -> None:
         with self.assertRaisesRegex(ValueError, "canonical connection or local service"):
             TurnoverLedgerQueryService(connection=None)
+
+    def test_canonical_category_rows_preserve_turnover_semantics_without_python_rematch(self) -> None:
+        transactions, categories = _canonical_turnover_rows(
+            [
+                {
+                    "row_id": "bank-1",
+                    "direction": "income",
+                    "effective_category_code": "turnover-personal-in",
+                    "effective_category_label": "个人借入",
+                    "effective_category_primary_label": "外部往来款",
+                    "effective_category_sub_label": "个人",
+                    "effective_category_third_label": "借入",
+                    "effective_category_source": "manual_confirmation",
+                    "confirmation_version": 7,
+                    "manual_category_version": 3,
+                    "effective_definition": {
+                        "path": ["external_turnover", "personal", "borrow_in"],
+                        "turnover_role": "external_turnover",
+                        "turnover_action_type": "pending_repayment",
+                        "turnover_family": "personal",
+                    },
+                }
+            ]
+        )
+
+        self.assertEqual(transactions[0]["id"], "bank-1")
+        self.assertEqual(transactions[0]["txn_direction"], "inflow")
+        self.assertEqual(categories["bank-1"]["category_version"], 7)
+        self.assertEqual(
+            categories["bank-1"]["category_label_path"],
+            ["外部往来款", "个人", "借入"],
+        )
+        self.assertEqual(
+            categories["bank-1"]["category_path"],
+            ["external_turnover", "personal", "borrow_in"],
+        )
+        self.assertEqual(categories["bank-1"]["turnover_family"], "personal")
 
     def test_canonical_relation_context_marks_both_sides_of_zero_difference_closure(self) -> None:
         rows = [

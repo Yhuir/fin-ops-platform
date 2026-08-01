@@ -195,35 +195,7 @@ banks as materialized (
         manual.category_source as manual_category_source,
         manual.category_payload as manual_category_payload,
         confirmation.category_code as confirmed_category_code,
-        income_override.status_code as income_override_status,
-        {_normalize_sql_text("bank.counterparty_name")} as rule_counterparty_name,
-        {_normalize_sql_text("bank.counterparty_account_no")} as rule_counterparty_account,
-        {_normalize_sql_text("bank.counterparty_bank_name")} as rule_counterparty_bank,
-        {_normalize_sql_text("coalesce(bank.raw_payload->'normalized_payload'->>'purpose', bank.raw_payload->>'purpose', '')")}
-            as rule_purpose_text,
-        {_normalize_sql_text("bank.summary")} as rule_summary_text,
-        {_normalize_sql_text("bank.remark")} as rule_note_text,
-        {_normalize_sql_text("coalesce(bank.raw_payload->'normalized_payload'->>'detail_text', bank.raw_payload->>'detail_text', '')")}
-            as rule_detail_text,
-        {_normalize_sql_text("bank.account_no")} as rule_account,
-        {_normalize_sql_text("coalesce(bank.raw_payload->'normalized_payload'->>'account_type', bank.raw_payload->>'account_type')")}
-            as rule_account_type,
-        {_normalize_sql_text("coalesce(bank.raw_payload->'normalized_payload'->>'bank_name', bank.raw_payload->>'bank_name')")}
-            as rule_bank,
-        coalesce(
-            (
-                select array_agg({_normalize_sql_text("text_field->>'value'")})
-                from jsonb_array_elements(
-                    case
-                        when jsonb_typeof(bank.bank_text_fields) = 'array'
-                        then bank.bank_text_fields
-                        else '[]'::jsonb
-                    end
-                ) text_fields(text_field)
-                where nullif(text_field->>'value', '') is not null
-            ),
-            array[]::text[]
-        ) as rule_bank_detail_texts
+        income_override.status_code as income_override_status
     from bank_source bank
     left join manual_categories manual on manual.row_id = bank.row_id
     left join confirmed_categories confirmation on confirmation.row_id = bank.row_id
@@ -589,14 +561,49 @@ rule_definitions as materialized (
         ) as regex_values
     from raw_rule_definitions raw
 ),
+rule_banks as materialized (
+    select
+        bank.*,
+        {_normalize_sql_text("bank.counterparty_name")} as rule_counterparty_name,
+        {_normalize_sql_text("bank.counterparty_account_no")} as rule_counterparty_account,
+        {_normalize_sql_text("bank.counterparty_bank_name")} as rule_counterparty_bank,
+        {_normalize_sql_text("coalesce(bank.raw_payload->'normalized_payload'->>'purpose', bank.raw_payload->>'purpose', '')")}
+            as rule_purpose_text,
+        {_normalize_sql_text("bank.summary")} as rule_summary_text,
+        {_normalize_sql_text("bank.remark")} as rule_note_text,
+        {_normalize_sql_text("coalesce(bank.raw_payload->'normalized_payload'->>'detail_text', bank.raw_payload->>'detail_text', '')")}
+            as rule_detail_text,
+        {_normalize_sql_text("bank.account_no")} as rule_account,
+        {_normalize_sql_text("coalesce(bank.raw_payload->'normalized_payload'->>'account_type', bank.raw_payload->>'account_type')")}
+            as rule_account_type,
+        {_normalize_sql_text("coalesce(bank.raw_payload->'normalized_payload'->>'bank_name', bank.raw_payload->>'bank_name')")}
+            as rule_bank,
+        coalesce(
+            (
+                select array_agg({_normalize_sql_text("text_field->>'value'")})
+                from jsonb_array_elements(
+                    case
+                        when jsonb_typeof(bank.bank_text_fields) = 'array'
+                        then bank.bank_text_fields
+                        else '[]'::jsonb
+                    end
+                ) text_fields(text_field)
+                where nullif(text_field->>'value', '') is not null
+            ),
+            array[]::text[]
+        ) as rule_bank_detail_texts
+    from banks bank
+    cross join request_config config
+    where coalesce(config.payload->>'scan_direction', 'all') = 'all'
+       or bank.direction = config.payload->>'scan_direction'
+),
 rule_matches as materialized (
     select
         b.row_id,
         definition.definition,
         definition.priority
-    from banks b
+    from rule_banks b
     cross join rule_definitions definition
-    cross join request_config config
     cross join lateral (
         select array_remove(
             array_remove(
@@ -635,10 +642,6 @@ rule_matches as materialized (
         ) as texts
     ) candidates
     where not exists (select 1 from internal_matches match where match.row_id = b.row_id)
-      and (
-          coalesce(config.payload->>'scan_direction', 'all') = 'all'
-          or b.direction = config.payload->>'scan_direction'
-      )
       and (
           definition.direction in ('', 'any')
           or definition.direction = b.direction

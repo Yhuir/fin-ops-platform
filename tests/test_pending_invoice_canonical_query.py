@@ -232,6 +232,20 @@ class PendingInvoiceCanonicalRepositoryTests(unittest.TestCase):
             self.assertNotIn("read_model.", sql)
 
     def test_rule_match_hot_path_reuses_precomputed_normalized_arrays(self) -> None:
+        banks_sql = PAGE_QUERY_SQL.split(
+            "banks as materialized (",
+            maxsplit=1,
+        )[1].split(
+            "active_relations as materialized (",
+            maxsplit=1,
+        )[0]
+        rule_banks_sql = PAGE_QUERY_SQL.split(
+            "rule_banks as materialized (",
+            maxsplit=1,
+        )[1].split(
+            "rule_matches as materialized (",
+            maxsplit=1,
+        )[0]
         rule_match_sql = PAGE_QUERY_SQL.split(
             "rule_matches as materialized (",
             maxsplit=1,
@@ -240,6 +254,10 @@ class PendingInvoiceCanonicalRepositoryTests(unittest.TestCase):
             maxsplit=1,
         )[0]
 
+        self.assertNotIn("normalize(", banks_sql)
+        self.assertIn("normalize(", rule_banks_sql)
+        self.assertIn("scan_direction", rule_banks_sql)
+        self.assertIn("from rule_banks b", rule_match_sql)
         self.assertIn("definition.match_fields", rule_match_sql)
         self.assertIn("definition.account_scope_values", rule_match_sql)
         self.assertIn("unnest(definition.exact_values)", rule_match_sql)

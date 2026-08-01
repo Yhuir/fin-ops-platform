@@ -112,6 +112,42 @@ class PostgresBankDetailsCanonicalQueryRepository:
             )
         return {**snapshot, "settings": settings, "relations": relations}
 
+    @staticmethod
+    def effective_category_rows(
+        transaction: Any,
+        *,
+        settings: dict[str, Any],
+        category_codes: list[str],
+    ) -> list[dict[str, Any]]:
+        normalized_codes = list(dict.fromkeys(text_list(category_codes)))
+        if not normalized_codes:
+            return []
+        tags = settings.get("bank_transaction_tags")
+        if not isinstance(tags, dict):
+            tags = default_bank_transaction_tag_dictionary_payload()
+        definitions = [
+            dict(item)
+            for item in list(tags.get("definitions") or [])
+            if isinstance(item, dict)
+        ]
+        cte_sql, cte_params = _classification_cte(
+            definitions=definitions,
+            date_from=None,
+            date_to=None,
+        )
+        return list(
+            transaction.fetch_all(
+                f"""
+                with {cte_sql}
+                select *
+                from classified_with_semantics
+                where effective_category_code = any(%s::text[])
+                order by trade_time_sort desc nulls last, row_id desc
+                """,
+                (*cte_params, normalized_codes),
+            )
+        )
+
     def export_snapshot(
         self,
         *,
