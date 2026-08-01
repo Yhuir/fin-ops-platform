@@ -179,6 +179,8 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         self.assertNotIn("receipt_status", sql)
         self.assertNotIn("oa_applications", sql)
         self.assertIn("filtered_rows as materialized", sql)
+        self.assertIn("page_supporting_keys as", sql)
+        self.assertIn("supporting_group_rows as", sql)
         self.assertIn("jsonb_agg(", sql)
         self.assertNotIn("read_model.output_invoice_collection", sql)
         self.assertNotIn("read_model.workbench_relation", sql)

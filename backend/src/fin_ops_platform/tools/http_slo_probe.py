@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import gzip
@@ -195,6 +196,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--replace-default-probes", action="store_true")
     parser.add_argument("--iterations", type=int, default=DEFAULT_ITERATIONS)
     parser.add_argument("--warmup", type=int, default=DEFAULT_WARMUP)
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=int(os.getenv("FIN_OPS_HTTP_SLO_CONCURRENCY", "1")),
+        help="Maximum concurrent measured requests per probe. Warmup requests remain sequential.",
+    )
     parser.add_argument("--timeout-seconds", type=float, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--target-ms", type=float, default=DEFAULT_TARGET_MS)
     parser.add_argument("--bearer-token", default=os.getenv("FIN_OPS_HTTP_SLO_BEARER_TOKEN", ""))
@@ -233,6 +240,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         admin_headers=admin_headers,
         iterations=max(1, int(args.iterations)),
         warmup=max(0, int(args.warmup)),
+        concurrency=max(1, int(args.concurrency)),
         timeout_seconds=max(0.1, float(args.timeout_seconds)),
         require_auth=not bool(args.allow_unauthenticated),
         include_samples=bool(args.include_samples),
@@ -256,6 +264,7 @@ def collect_http_slo(
     admin_headers: Mapping[str, str] | None = None,
     iterations: int = DEFAULT_ITERATIONS,
     warmup: int = DEFAULT_WARMUP,
+    concurrency: int = 1,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     require_auth: bool = True,
     include_samples: bool = False,
@@ -278,21 +287,58 @@ def collect_http_slo(
         }
     request = request_fn or _urllib_request
     samples: list[HttpProbeSample] = []
+    normalized_iterations = max(1, iterations)
+    normalized_warmup = max(0, warmup)
+    normalized_concurrency = max(1, min(int(concurrency), normalized_iterations))
     for probe in probes or DEFAULT_API_PROBES:
         url = resolve_probe_url(base_url, probe.path, api_prefix=api_prefix)
-        for index in range(max(0, warmup) + max(1, iterations)):
-            warmup_sample = index < warmup
+        probe_headers = _headers_for_probe(
+            probe,
+            user_headers=normalized_headers,
+            admin_headers=normalized_admin_headers,
+        )
+        for index in range(normalized_warmup):
             samples.append(
                 _collect_one(
                     probe,
                     url=url,
                     iteration=index + 1,
-                    warmup=warmup_sample,
-                    headers=_headers_for_probe(probe, user_headers=normalized_headers, admin_headers=normalized_admin_headers),
+                    warmup=True,
+                    headers=probe_headers,
                     timeout_seconds=timeout_seconds,
                     request_fn=request,
                 )
             )
+        measured_indexes = range(normalized_warmup, normalized_warmup + normalized_iterations)
+        if normalized_concurrency == 1:
+            samples.extend(
+                _collect_one(
+                    probe,
+                    url=url,
+                    iteration=index + 1,
+                    warmup=False,
+                    headers=probe_headers,
+                    timeout_seconds=timeout_seconds,
+                    request_fn=request,
+                )
+                for index in measured_indexes
+            )
+        else:
+            with ThreadPoolExecutor(max_workers=normalized_concurrency) as executor:
+                futures = [
+                    executor.submit(
+                        _collect_one,
+                        probe,
+                        url=url,
+                        iteration=index + 1,
+                        warmup=False,
+                        headers=probe_headers,
+                        timeout_seconds=timeout_seconds,
+                        request_fn=request,
+                    )
+                    for index in measured_indexes
+                ]
+                samples.extend(future.result() for future in futures)
     measured = [sample for sample in samples if not sample.warmup]
     probe_summaries = [_summarize_probe(probe, measured) for probe in probes or DEFAULT_API_PROBES]
     status = "pass" if all(item["status"] == "pass" for item in probe_summaries) else "fail"
@@ -303,14 +349,16 @@ def collect_http_slo(
         "base_url": _normalized_base_url(base_url),
         "api_prefix": api_prefix,
         "auth_configured": auth_configured,
-        "iterations": max(1, iterations),
-        "warmup": max(0, warmup),
+        "iterations": normalized_iterations,
+        "warmup": normalized_warmup,
+        "concurrency": normalized_concurrency,
         "timeout_seconds": timeout_seconds,
         "summary": {
             "probe_count": len(probe_summaries),
             "sample_count": len(measured),
             "failed_probe_count": sum(1 for item in probe_summaries if item["status"] != "pass"),
             "max_p95_ms": max((float(item["duration_ms"]["p95"] or 0.0) for item in probe_summaries), default=0.0),
+            "response_bytes_total": sum(sample.response_bytes for sample in measured),
         },
         "probes": probe_summaries,
         **({"samples": [sample.to_payload() for sample in samples]} if include_samples else {}),
@@ -405,6 +453,7 @@ def _urllib_request(url: str, headers: Mapping[str, str], timeout_seconds: float
 def _summarize_probe(probe: HttpProbe, samples: Sequence[HttpProbeSample]) -> dict[str, Any]:
     probe_samples = [sample for sample in samples if sample.name == probe.name]
     durations = [sample.elapsed_ms for sample in probe_samples]
+    response_sizes = [float(sample.response_bytes) for sample in probe_samples]
     status_counts: dict[str, int] = {}
     errors: list[str] = []
     read_model_statuses: dict[str, int] = {}
@@ -442,6 +491,7 @@ def _summarize_probe(probe: HttpProbe, samples: Sequence[HttpProbeSample]) -> di
         "failure_count": len(probe_samples) - success_count,
         "status_counts": status_counts,
         "duration_ms": _percentiles(durations),
+        "response_bytes": _percentiles(response_sizes),
         "slo_pass": bool(passes_slo),
         "freshness_pass": bool(passes_freshness),
         "status": "pass" if passes_status and passes_slo and passes_freshness else "fail",

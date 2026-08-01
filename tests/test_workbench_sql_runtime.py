@@ -3049,12 +3049,15 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         paired_sql, paired_params = page_queries[0]
         _unpaired_sql, unpaired_params = page_queries[1]
         self.assertIn("bank_sort_max desc nulls last", paired_sql)
-        self.assertEqual(unpaired_params[:2], ("unpaired", ["case:1", "case:2"]))
+        self.assertEqual(unpaired_params[:2], ("%云南%", "unpaired"))
         self.assertTrue(
             any(
-                "%云南%" in params and "matching_group_ids" in sql
+                "%云南%" in params and "filtered_workbench_groups" in sql
                 for sql, params in connection.fetch_one_calls
             )
+        )
+        self.assertFalse(
+            any("matching_group_ids" in sql for sql, _params in connection.fetch_one_calls)
         )
         self.assertEqual(paired_params[-2:], (51, 0))
         self.assertEqual(unpaired_params[-2:], (51, 0))
@@ -3628,9 +3631,10 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             for sql, params in connection.fetch_all_calls
             if "select group_id, source_group_id, zone, payload, raw_payload" in sql
         )
-        self.assertIn("g.group_id = any(%s)", filtered_page_query[0])
-        self.assertNotIn("column_values @>", filtered_page_query[0])
-        self.assertEqual(filtered_page_query[1][:2], ("unpaired", ["case:1", "case:2"]))
+        self.assertNotIn("g.group_id = any(%s)", filtered_page_query[0])
+        self.assertIn("active_workbench_members as not materialized", filtered_page_query[0])
+        self.assertIn("column_values @> %s::jsonb", filtered_page_query[0])
+        self.assertEqual(filtered_page_query[1][-3:], ("unpaired", 26, 0))
 
     def test_repository_search_uses_active_structured_rows_without_payload_aggregation(self) -> None:
         connection = WorkbenchSummaryGroupsConnection()

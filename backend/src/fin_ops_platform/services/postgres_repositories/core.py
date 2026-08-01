@@ -1074,6 +1074,39 @@ class PostgresCoreRepository:
         if not isinstance(row_results, list):
             return
         normalized_list = normalized_rows if isinstance(normalized_rows, list) else []
+        insert_sql = """
+            insert into app.import_batch_rows(
+                legacy_mongo_id, import_batch_id, legacy_batch_id, row_no, source_record_type,
+                source_unique_key, data_fingerprint, decision, decision_reason,
+                linked_object_type, linked_object_id, identity_kind, account_no, trade_time,
+                direction, amount, counterparty_name, raw_payload
+            )
+            values (
+                %s,
+                (select id from app.import_batches where legacy_mongo_id = %s or id::text = %s limit 1),
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::timestamptz, %s, %s, %s, %s
+            )
+            on conflict (legacy_mongo_id) do update set
+                import_batch_id = excluded.import_batch_id,
+                legacy_batch_id = excluded.legacy_batch_id,
+                row_no = excluded.row_no,
+                source_record_type = excluded.source_record_type,
+                source_unique_key = excluded.source_unique_key,
+                data_fingerprint = excluded.data_fingerprint,
+                decision = excluded.decision,
+                decision_reason = excluded.decision_reason,
+                linked_object_type = excluded.linked_object_type,
+                linked_object_id = excluded.linked_object_id,
+                identity_kind = excluded.identity_kind,
+                account_no = excluded.account_no,
+                trade_time = excluded.trade_time,
+                direction = excluded.direction,
+                amount = excluded.amount,
+                counterparty_name = excluded.counterparty_name,
+                raw_payload = excluded.raw_payload
+            where app.import_batch_rows.legacy_batch_id = excluded.legacy_batch_id
+        """
+        params_seq: list[tuple[Any, ...]] = []
         for index, row_result in enumerate(row_results):
             payload = self._serialize(row_result)
             if not isinstance(payload, dict):
@@ -1083,39 +1116,7 @@ class PostgresCoreRepository:
                 continue
             normalized = normalized_list[index] if index < len(normalized_list) and isinstance(normalized_list[index], dict) else {}
             raw_payload = {**payload, "normalized_row": normalized}
-            affected = connection.execute(
-                """
-                insert into app.import_batch_rows(
-                    legacy_mongo_id, import_batch_id, legacy_batch_id, row_no, source_record_type,
-                    source_unique_key, data_fingerprint, decision, decision_reason,
-                    linked_object_type, linked_object_id, identity_kind, account_no, trade_time,
-                    direction, amount, counterparty_name, raw_payload
-                )
-                values (
-                    %s,
-                    (select id from app.import_batches where legacy_mongo_id = %s or id::text = %s limit 1),
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::timestamptz, %s, %s, %s, %s
-                )
-                on conflict (legacy_mongo_id) do update set
-                    import_batch_id = excluded.import_batch_id,
-                    legacy_batch_id = excluded.legacy_batch_id,
-                    row_no = excluded.row_no,
-                    source_record_type = excluded.source_record_type,
-                    source_unique_key = excluded.source_unique_key,
-                    data_fingerprint = excluded.data_fingerprint,
-                    decision = excluded.decision,
-                    decision_reason = excluded.decision_reason,
-                    linked_object_type = excluded.linked_object_type,
-                    linked_object_id = excluded.linked_object_id,
-                    identity_kind = excluded.identity_kind,
-                    account_no = excluded.account_no,
-                    trade_time = excluded.trade_time,
-                    direction = excluded.direction,
-                    amount = excluded.amount,
-                    counterparty_name = excluded.counterparty_name,
-                    raw_payload = excluded.raw_payload
-                where app.import_batch_rows.legacy_batch_id = excluded.legacy_batch_id
-                """,
+            params_seq.append(
                 (
                     row_id,
                     batch_id,
@@ -1136,12 +1137,20 @@ class PostgresCoreRepository:
                     self._decimal_text(payload.get("amount")),
                     self._text(payload.get("counterparty_name")),
                     _jsonb({"normalized_payload": raw_payload}),
-                ),
-            )
-            if affected == 0:
-                raise RuntimeError(
-                    f"Import batch row id {row_id} is already owned by another batch; refusing to re-parent it."
                 )
+            )
+        if not params_seq:
+            return
+        execute_many_values = getattr(connection, "execute_many_values", None)
+        affected = (
+            int(execute_many_values(insert_sql, params_seq) or 0)
+            if callable(execute_many_values)
+            else sum(int(connection.execute(insert_sql, params) or 0) for params in params_seq)
+        )
+        if affected != len(params_seq):
+            raise RuntimeError(
+                "One or more import batch rows are already owned by another batch; refusing to re-parent them."
+            )
 
     def _save_invoice(self, connection: Any, invoice: dict[str, Any]) -> None:
         invoice_id = self._text(invoice.get("id"))

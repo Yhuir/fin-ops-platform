@@ -37,6 +37,19 @@ describe("FinanceTable shared primitives", () => {
     expect(onPageChange).toHaveBeenNthCalledWith(2, 3);
   });
 
+  test("keeps pagination DOM bounded for very large exact totals", () => {
+    const onPageChange = vi.fn();
+
+    render(<FinanceTablePagination page={25_000} pageSize={20} total={1_000_000} onPageChange={onPageChange} />);
+
+    expect(screen.getByText("显示 499981-500000 / 1000000")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "25000" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "50000" })).toBeInTheDocument();
+    expect(screen.getAllByLabelText("省略的页码")).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: /^\d+$/ })).toHaveLength(5);
+  });
+
   test("keeps shared finance cell primitives semantically stable", () => {
     render(
       <div>

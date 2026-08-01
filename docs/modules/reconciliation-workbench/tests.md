@@ -33,7 +33,7 @@
 
 - `tests/test_workbench_query_facade.py::WorkbenchQueryFacadeTests::test_refresh_status_uses_fast_freshness_status_instead_of_heavy_diagnostic` 证明公开 refresh-status 优先使用既有轻量 groups freshness port，完整 generation/outbox/worker diagnostic 不进入页面轮询热路径；旧 repository fallback 与 timeout 合同保持。
 - `web/src/test/WorkbenchSelection.test.tsx` 的 withdraw 完整恢复用例把 combined initial 保持为一次 recovery trigger 和一次最终 fresh payload，共 2 次；中间 refreshing 只调用轻量 refresh-status，最终仍验证 OA、银行、发票分别恢复为完整 unpaired singleton。
-- `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_filters_workbench_groups_page_from_structured_group_rows` 锁定 active-member CTE 为 `NOT MATERIALIZED`，防止 all-scope 条件查询恢复“先复制全部 active members、再应用搜索/筛选”的优化屏障；同文件搜索、pane/列/时间、total/row counts/matching ids 回归继续保护原业务语义。
+- `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_filters_workbench_groups_page_from_structured_group_rows` 锁定 active-member CTE 为 `NOT MATERIALIZED`，防止 all-scope 条件查询恢复“先复制全部 active members、再应用搜索/筛选”的优化屏障；同文件搜索、pane/列/时间、total/row counts 和数据库内有界分页回归继续保护原业务语义，并断言不再构造 matching id 数组。
 - 现有 Workbench Selection 全文件继续覆盖 confirm operation projection、withdraw blocking UI、generation version conflict、failed/stale 状态、权限、筛选和详情交互；没有增加 retry fallback、第二轮询器或放宽 fresh 判断。
 
 ## 2026-07-25 访问时 exact Workbench proof 与 consumer 隔离
@@ -122,7 +122,7 @@
 - Workbench groups page cache schema 必须与 projection schema 同步，projection 行为升级后旧 Redis payload 必须自动失效。
 - combined initial 两区首屏必须各为 50 groups、`has_more` 保留真实 total，默认 batch SQL 每区读取最多 51 条用于判定后续页；前端不得显示“已加载 N / total”或手动“加载更多”，仅在 fresh、查询稳定且用户滚动接近区域底部时自动请求下一页；同区请求必须去重，搜索/筛选/version 变化时旧响应不得并入新结果，失败后停止自动重试并提供显式重试。后续 `/groups` 必须绑定同一 `expected_read_model_version`，不得为性能退回 200-group 首屏或全量 payload。
 - 默认无筛选 all-scope `/groups` 的 total/row_counts 必须来自当前 active-month generation-set digest 对应的两条 `workbench_generation_stats`；统计缺失或查询前后 digest 改变时返回 refreshing，不得执行旧的全量 distinct row count。月 generation 发布与该统计必须处于同一事务，多个 scope 同批发布只生成一次最终 digest 统计。
-- all-scope 区域搜索、来源、pane/列/时间筛选必须只 materialize active generation key，条件之间按既有 AND/OR 语义相交；total、row counts、matching group ids 在一条计数 SQL 中得到，分页只按 matching ids 读取 payload。搜索必须覆盖展示字段、排除内部 identity/detail-only 值、转义 ILIKE 通配符并限制 200 字符。测试必须断言 SQL 不读取 `g.*`/payload/raw payload，不 join 历史 physical all group，且不为 count/page 重复执行 member 条件。
+- all-scope 区域搜索、来源、pane/列/时间筛选必须只 materialize active generation key，条件之间按既有 AND/OR 语义相交；计数 SQL 只返回 total 与 row counts，分页在数据库内复用相同 member 条件并只读取 `page_size + 1` 条 payload，禁止把全部 matching group ids 聚合并传入 Python。搜索必须覆盖展示字段、排除内部 identity/detail-only 值、转义 ILIKE 通配符并限制 200 字符。测试必须断言 SQL 不读取历史 generation/payload 做计数，也不构造无界 ID 参数。
 - 前端必须断言每区只有一个 HeroUI `SearchField` 且位于区域 header 同行；输入时使用既有 deferred combined initial 单请求，等待期间保留当前稳定结果并显示 pending，失败可重试。所有可见命中片段都高亮；只命中折叠明细时仍返回对应关联组，但闭合态只显示摘要，不显示折叠成员且不发详情请求。搜索和非搜索状态下，ETC 发票与流水规则批次都只能由用户显式点击展开；收起后必须恢复摘要，搜索切换期间完成的旧详情请求不得重新展开新结果。
 - 搜索框在首个 combined initial 完成前已可输入时，不得提前消费新的 zone query key；初始稳定数据安装后必须补发包含该 query 的 combined initial 请求，不能只对首屏 50 组做本地高亮并漏掉其它组或折叠明细。
 - 关联台 Audit 绿色结果必须绑定 active Workbench read-model version + 页面 freshness status；generation/status 改变立即清除旧绿色结果。`workbench_matching_scope_not_converged` 属于 freshness+queue 阻断，`workbench_generation_source_versions_mismatch` 属于 freshness 阻断。

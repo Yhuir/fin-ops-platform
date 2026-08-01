@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import gzip
 import json
+from threading import Lock
+from time import sleep
 import unittest
 
 from fin_ops_platform.tools import http_slo_probe
@@ -166,6 +168,42 @@ class HttpSloProbeTests(unittest.TestCase):
         self.assertNotIn("secret-token", json.dumps(report))
         self.assertEqual(report["probes"][0]["read_model_statuses"], {"fresh": 2})
         self.assertEqual(report["probes"][0]["cache_statuses"], {"fresh": 2})
+
+    def test_collects_measured_requests_with_bounded_concurrency_and_response_sizes(self) -> None:
+        lock = Lock()
+        active = 0
+        peak_active = 0
+
+        def request_fn(url: str, headers, timeout_seconds: float) -> http_slo_probe.HttpProbeResponse:
+            nonlocal active, peak_active
+            with lock:
+                active += 1
+                peak_active = max(peak_active, active)
+            sleep(0.01)
+            with lock:
+                active -= 1
+            return http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=b'{"status":"ok"}',
+            )
+
+        report = http_slo_probe.collect_http_slo(
+            base_url="https://example.test",
+            probes=[http_slo_probe.HttpProbe("session", "/api/session/me")],
+            headers={"Cookie": "Admin-Token=token"},
+            iterations=6,
+            warmup=1,
+            concurrency=3,
+            request_fn=request_fn,
+        )
+
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["concurrency"], 3)
+        self.assertEqual(report["summary"]["sample_count"], 6)
+        self.assertEqual(report["summary"]["response_bytes_total"], 90)
+        self.assertEqual(report["probes"][0]["response_bytes"]["p95"], 15.0)
+        self.assertEqual(peak_active, 3)
 
     def test_gzip_json_response_is_decoded_for_metadata(self) -> None:
         payload = gzip.compress(b'{"read_model_status":"fresh","cache_status":"fresh"}')

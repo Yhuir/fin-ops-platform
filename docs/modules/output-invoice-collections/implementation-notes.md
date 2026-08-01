@@ -12,6 +12,12 @@
 
 以下按日期记录的旧实施条目只用于解释历史迁移，不覆盖以上当前决策。
 
+## 2026-08-01 - 红蓝票 supporting groups 重复关系图查询删除
+
+- 根因：rows/summary/facets 首次执行完整 recursive canonical CTE 后，当前页存在红蓝票关联时又执行同一整套 CTE 读取 supporting groups。
+- 修复：首次 repeatable-read query 依据 page rows 的有界 supporting keys 同时聚合 supporting group rows；service hydration 与关系/流水读取合同不变，删除第二次完整关系图计算。
+- 未前推可能改变跨月红蓝票关系的 invoice scope，也未无证据增加索引、facet 截断、cache、worker 或 read model。
+
 ## 2026-07-07 - 读侧应用服务边界闭环
 
 - 目标：用 GrillMe 审计销项发票收款情况页面模块化、边界和 I/O 污染后，关闭 route owner 中残留的读侧编排缺口。

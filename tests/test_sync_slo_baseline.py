@@ -158,6 +158,8 @@ class SyncSloBaselineTests(unittest.TestCase):
             payload = sync_slo_baseline.collect_baseline(FakeConnection(), limit=5)
 
         self.assertEqual(payload["mode"], "read_only")
+        self.assertEqual(payload["slo_targets"]["retained_read_model_keys"], ["workbench", "workbench_relation"])
+        self.assertNotIn("heavy_workbench_local_convergence_p95_ms", payload["slo_targets"])
         self.assertEqual(payload["runtime_health"]["data"]["failed_jobs"], 0)
         self.assertIn("search", payload["runtime_snapshot"]["data"]["read_model_attention"])
         self.assertNotIn("cost_statistics", payload["runtime_snapshot"]["data"]["read_model_attention"])

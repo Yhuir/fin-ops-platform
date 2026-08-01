@@ -1,5 +1,10 @@
 # 待找发票 实施记录
 
+## 2026-08-01 - 同快照 scope 统计扫描合并
+
+- `scope_rows` 的 total、缺票数和可创建发票数由三个 scalar subquery 合并为一个 `scope_summary` 聚合；rows、全期间 statistics、source summary、top-50 facets 和精确 response shape 不变。
+- 生产发布前基线 p95 约 816ms，处于 1000ms 合同内；未新增索引、projection、cache、worker 或依赖。进一步优化必须以隔离目标规模 EXPLAIN 为证据。
+
 ## 2026-07-27 - 页面 canonical PostgreSQL 直读
 
 - 目标：把 `/pending-invoices` 从页面 read model 迁移为 page API → canonical query service → page-specific PostgreSQL repository，并删除页面 freshness/polling/fallback 语义。

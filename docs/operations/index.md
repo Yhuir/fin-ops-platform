@@ -7,6 +7,7 @@
 - `invoice-pool-cleanup.md`：统一发票池清理、备份、dry-run、soft reference gate 和重导验收。
 - `object-identity-dedup.md`：业务对象 identity/dedup 统一规则审计、blocking issue、人工 repair 原则。
 - `postgresql-runtime.md`：当前 PostgreSQL primary runtime、queue/read model、备份、回滚和验证边界。
+- `performance-contract.md`：核心读 API、写后可见性、并发、响应体和数据库资源的生产性能合同与证据规则。
 - `read-model-production-evidence-runbook.md`：Read Model 生产证据、业务写样本、operation barrier、性能证据、样本恢复和 bounded DB restore 门禁。
 - `runtime-worker-governance.md`：Worker + Read Model manifest、systemd、deploy readiness、App Health、durable queue、backfill、hardening 和运维修复边界。
 - `runtime-sync-baseline-2026-06-12.md`：2026-06-12 生产只读同步基线、SLO 差距、repair 优先级和后续阶段判断。

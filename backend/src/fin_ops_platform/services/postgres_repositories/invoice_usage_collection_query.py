@@ -455,6 +455,26 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                     {order_sql}
                     limit %s offset %s
                 ),
+                page_supporting_keys as (
+                    select distinct supporting.group_key
+                    from page_rows page
+                    cross join lateral unnest(page.supporting_group_keys)
+                        supporting(group_key)
+                ),
+                supporting_group_rows as (
+                    select
+                        final.group_key,
+                        final.relation_case_id,
+                        final.identity_key,
+                        final.primary_invoice_id,
+                        final.invoice_ids,
+                        final.status_code,
+                        final.collected_amount,
+                        final.pending_amount,
+                        final.red_related_group_keys as supporting_group_keys
+                    from final_rows final
+                    join page_supporting_keys supporting using (group_key)
+                ),
                 summary as (
                     select
                         coalesce(sum(invoice_count), 0)::bigint as invoice_count,
@@ -521,39 +541,25 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                             from facet_rows
                         ),
                         '[]'::jsonb
-                    ) as facet_rows
+                    ) as facet_rows,
+                    coalesce(
+                        (
+                            select jsonb_agg(
+                                to_jsonb(supporting_group_rows)
+                                order by group_key
+                            )
+                            from supporting_group_rows
+                        ),
+                        '[]'::jsonb
+                    ) as supporting_group_rows
                 """,
                 (*base_params, *where_params, page_size, offset),
             ) or {}
             group_rows = _dict_rows(page_result.get("group_rows"))
             summary_row = _dict_value(page_result.get("summary_row"))
             facet_rows = _dict_rows(page_result.get("facet_rows"))
-            supporting_keys = _texts(
-                key
-                for row in group_rows
-                for key in list(row.get("supporting_group_keys") or [])
-            )
-            supporting_group_rows = (
-                transaction.fetch_all(
-                    f"""
-                    {cte}
-                    select
-                        group_key,
-                        relation_case_id,
-                        identity_key,
-                        primary_invoice_id,
-                        invoice_ids,
-                        status_code,
-                        collected_amount,
-                        pending_amount,
-                        red_related_group_keys as supporting_group_keys
-                    from final_rows
-                    where group_key = any(%s::text[])
-                    """,
-                    (*base_params, supporting_keys),
-                )
-                if supporting_keys
-                else []
+            supporting_group_rows = _dict_rows(
+                page_result.get("supporting_group_rows")
             )
             facts = _load_facts(
                 transaction,

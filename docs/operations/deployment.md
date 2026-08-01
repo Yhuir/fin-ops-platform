@@ -190,7 +190,9 @@ RabbitMQ 是 outbox envelope transport，不是业务事实源。生产切换必
 4. 观察 outbox unpublished backlog、publish failed backlog、dispatcher lag、RabbitMQ per-queue depth、DLQ count。同步 SLO 场景下
    dispatcher idle poll 默认应为 `RABBITMQ_DISPATCHER_POLL_INTERVAL_SECONDS=0.5`；如果仍是 5 秒，单个新事件可能在
    投递前就消耗完整页面同步预算。
-5. 按 worker 族逐个切到 `FIN_OPS_QUEUE_BACKEND=rabbitmq`：workbench、search/pending、cost/tax、oa-sync、import-job。RabbitMQ consumer 仍会按 heartbeat 间隔低频 drain PostgreSQL durable queue，RabbitMQ 只作为唤醒层。
+5. 只按 `runtime_worker_registry` 当前 required instance/event type 逐个切到
+   `FIN_OPS_QUEUE_BACKEND=rabbitmq`；不得手写恢复已退役的 Search、no-OA 或页面 projection worker。
+   RabbitMQ consumer 仍会按 heartbeat 间隔低频 drain PostgreSQL durable queue，RabbitMQ 只作为唤醒层。
 6. 每切一组都要触发受控事件验证 PostgreSQL publish/ack 与 RabbitMQ queue/DLQ，再扩 worker 数量和 prefetch。
 
 回滚路径是停止 dispatcher 和 RabbitMQ consumer worker，恢复 worker env 为 `FIN_OPS_QUEUE_BACKEND=postgres`，再启动 PostgreSQL polling worker。详细 runbook 见 `docs/operations/runtime-read-model-hardening.md`。
@@ -198,8 +200,8 @@ RabbitMQ 是 outbox envelope transport，不是业务事实源。生产切换必
 ## 全量 Backfill / Drain
 
 发布 PostgreSQL read model 或 OA projection 变更后，先补结构化 OA 子表，并只为
-`workbench`、`workbench_relation`、`search`、`no_oa_bank_batch` 四个保留 read model enqueue `all`
-fan-out 命令，再由独立 worker drain：
+`workbench`、`workbench_relation` 两个保留 read model enqueue `all` fan-out 命令，再由登记 worker drain。
+Search/no-OA projection runtime 已退役，不得重新 enqueue：
 
 ```bash
 set -a

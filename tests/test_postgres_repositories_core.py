@@ -915,6 +915,47 @@ def test_import_batch_row_upsert_refuses_cross_batch_reparent() -> None:
         raise AssertionError("Cross-batch import row ownership conflict must fail closed.")
 
 
+def test_import_batch_rows_use_bounded_multi_value_upsert() -> None:
+    class BatchConnection:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, list[tuple]]] = []
+
+        def execute_many_values(self, sql: str, params_seq: list[tuple]) -> int:
+            self.calls.append((" ".join(sql.lower().split()), params_seq))
+            return len(params_seq)
+
+        def execute(self, _sql: str, _params: tuple = ()) -> int:
+            raise AssertionError("batch rows must not fall back to one database call per row")
+
+    connection = BatchConnection()
+    repository = PostgresCoreRepository(connection)
+    rows = [
+        ImportedBatchRowResult(
+            id=f"batch_row:batch_import_0002:{row_no:05d}",
+            batch_id="batch_import_0002",
+            row_no=row_no,
+            source_record_type="invoice",
+            source_unique_key=f"invoice-key-{row_no}",
+            data_fingerprint=None,
+            decision=ImportDecision.CREATED,
+            decision_reason="new",
+        )
+        for row_no in (1, 2)
+    ]
+
+    repository._save_batch_rows(
+        connection,
+        "batch_import_0002",
+        rows,
+        [{"invoice_no": "INV-1"}, {"invoice_no": "INV-2"}],
+    )
+
+    assert len(connection.calls) == 1
+    sql, params_seq = connection.calls[0]
+    assert "insert into app.import_batch_rows" in sql
+    assert len(params_seq) == 2
+
+
 def test_imported_invoice_total_repair_requires_unchanged_source_batch_owner() -> None:
     class ChangedOwnerConnection:
         def execute(self, _sql: str, _params: tuple = ()) -> int:

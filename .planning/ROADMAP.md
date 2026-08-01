@@ -803,4 +803,24 @@ Plans:
 
 - [x] 39-01-PLAN — Runtime topology convergence, legacy derived-chain deletion, regression gates, deployment and production verification.
 
+### Phase 40: 性能合同与核心热路径闭环
+
+**Goal:** Establish target-scale/concurrent/browser performance evidence, repair proven frontend/SQL/application/import hot paths, remove stale legacy paths, and close one production release without adding workers, page read models, cache or a query framework.
+**Requirements:** User-approved T0-6 performance audit; no new product requirement IDs.
+**Depends on:** Phase 39 verified six-worker/two-read-model production baseline.
+**Canonical refs:** `.planning/phases/40-performance-contract-hot-path-closure/40-01-PLAN.md`, `docs/operations/monitoring.md`, `docs/architecture/module-boundaries/read-model-contracts.md`, affected module `boundary-io.md` files.
+**Success Criteria** (what must be TRUE):
+
+  1. Target-scale, concurrent and browser evidence separates database, application, payload and rendering costs without writing production business data.
+  2. FinanceTable pagination and proven pending/invoice/Workbench hot paths are bounded while exact financial and generation contracts remain unchanged.
+  3. Only measured application/import hotspots change, using existing repository and batch/COPY capabilities with no new runtime architecture.
+  4. Retired Search/read-model descriptions and unconsumed legacy paths are deleted with no fallback, double-read or consumer regression.
+  5. Full local gates, pushed `main`, exact deployment and authenticated production evidence prove correctness, isolation and p95 performance.
+
+**Plans:** 1 plan
+
+Plans:
+
+- [ ] 40-01-PLAN — Performance contract, bounded hot paths, legacy cleanup, full regression and production closure.
+
 ---

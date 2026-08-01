@@ -194,6 +194,8 @@ class PendingInvoiceCanonicalRepositoryTests(unittest.TestCase):
 
     def test_query_template_is_bounded_and_has_no_forbidden_page_fact_sources(self) -> None:
         self.assertIn("limit %s offset %s", PAGE_QUERY_SQL.lower())
+        self.assertIn("scope_summary as (", PAGE_QUERY_SQL.lower())
+        self.assertNotIn("select count(*)::integer from scope_rows", PAGE_QUERY_SQL.lower())
         self.assertNotIn("read_model.pending_invoice", PAGE_QUERY_SQL)
         self.assertNotIn("read_model.bank_detail", PAGE_QUERY_SQL)
         self.assertNotIn("read_model.workbench_relation", PAGE_QUERY_SQL)

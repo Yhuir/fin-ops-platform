@@ -5,7 +5,7 @@
 生产主读写状态存放在 PostgreSQL：
 
 - `app.*` 保存业务 canonical facts、active relations、设置和领域任务状态。
-- `job.*` 保存后台任务、outbox 和四个保留 read model 的 dirty scope。
+- `job.*` 保存后台任务、outbox 和两个保留 read model 的 dirty scope。
 - `read_model.*` 只承载已登记的关联台 active-generation 与共享 read model；其它历史页面 projection 表不属于当前运行时合同。
 - 原始上传文件和附件进入 MinIO/S3，PostgreSQL `app.file_objects` 只保存 verified object pointer。
 - OA Mongo 是外部只读来源，只能由独立 sync worker 或明确登记的 migration/audit 工具读取；页面 API 读取 PostgreSQL OA projection。
@@ -57,12 +57,11 @@ facts 和 active canonical relations：
 | --- | --- | --- |
 | `workbench` | 关联台页面 active-generation rows/groups/group rows | PostgreSQL canonical facts 与 `app.workbench_pair_relations` |
 | `workbench_relation` | 给仍登记的独立消费者分发 eligible relation context | `app.workbench_pair_relations` |
-| `search` | 全局搜索索引 | PostgreSQL canonical facts |
-| `no_oa_bank_batch` | legacy `/api/no-oa-bank-batches/*` 合同 | no-OA canonical batch/relation facts |
 
 Manifest、scope policy、App Status registry 和带 `read_model_key` 的 worker registration 必须精确等于该集合。
-四个 read model 都使用月份 shard；关联台查询层可组合 fresh active month generations 为 `all` 视图，
-三个共享模型的 `all` 只做 fan-out command。
+两个 read model 都使用月份 shard；关联台查询层可组合 fresh active month generations 为 `all` 视图，
+共享 relation 模型的 `all` 只做 fan-out command。Search runtime 已删除；legacy no-OA API 直接读取
+canonical batch/relation facts，不进入 read-model manifest、worker、queue 或 App Status。
 
 它们的 refresh 状态事实源是 `job.outbox_events` 和 `job.read_model_dirty_scopes`。非事务 refresh 必须经
 `ReadModelRefreshGateway` normalize、validate 和 dedupe；业务 service 不得直接写 queue SQL。Redis 只能
@@ -88,7 +87,7 @@ readiness、cache 或 replay。
 - 页面 query 必须有 bounded pagination、明确 statement timeout、批量 hydration 和避免 N+1 的固定查询数
   合同。
 - 高流量 SQL 通过索引和生产 `EXPLAIN (ANALYZE, BUFFERS)` 验证；不要用 read model 掩盖无界查询。
-- 发布前必须通过 registry 精确集合、退休事件/表访问负向扫描、四个保留 read model 的 freshness/worker
+- 发布前必须通过 registry 精确集合、退休事件/表访问负向扫描、两个保留 read model 的 freshness/worker
   回归、页面 API/frontend/E2E 回归、lint、docs 和 `git diff --check`。
 - 当前部署入口仍是 `./scripts/deploy-oa.sh`；worker 和生产验证以
   [`../operations/runtime-worker-governance.md`](../operations/runtime-worker-governance.md) 为准。

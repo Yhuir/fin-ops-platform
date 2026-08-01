@@ -1,5 +1,11 @@
 # 关联台 实施记录
 
+## 2026-08-01 - all-scope 筛选分页无界 ID 数组删除
+
+- 根因：带搜索/列筛选的 `month=all` 查询把全部匹配 group ids 通过 `array_agg` 返回 Python，再以 `ANY(array)` 取当前页；匹配集合增长会同步放大数据库聚合、网络和应用内存。
+- 修复：count query 只返回精确 total 与 pane row counts；page query 在 PostgreSQL 内复用同一 active-member CTE/筛选，只返回 `page_size + 1` 行。generation-set digest、repeatable-read、排序、筛选和响应 DTO 不变。
+- 未新增索引、cache、worker、read model、依赖或 fallback；SQL runtime 182 tests 覆盖结构化筛选、搜索、initial snapshot、row counts 和 version 合同。
+
 ## 2026-07-31 - row detail 稳定代际纯读修复
 
 - 根因：`WorkbenchQueryFacade.row_detail(...)` 在 repository 已按 exact active generation 取到详情后，又用最新 canonical source version 做第二次 freshness proof；canonical 已前进时它把稳定详情伪装成 404，并由 GET enqueue refresh。前端再把 404 与 409 合并重载重试，导致首批伪 404 推动 generation 切换，后续 OA/流水/发票详情批量冲突。

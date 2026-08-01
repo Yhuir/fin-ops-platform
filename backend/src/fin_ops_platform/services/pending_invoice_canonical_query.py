@@ -949,6 +949,19 @@ scope_rows as materialized (
     from scope_ranked
     where visible_group_rank = 1
 ),
+scope_summary as (
+    select
+        count(*)::integer as total,
+        count(*) filter (where status_code in (
+            'paid_pending_invoice', 'paid_pending_future_invoice', 'income_pending_invoice'
+        ))::integer as missing_invoice_rows,
+        count(*) filter (
+            where direction = 'expense'
+              and input_invoice_count = 0
+              and filter_group <> 'no_invoice_required'
+        )::integer as create_invoice_available_rows
+    from scope_rows
+),
 ordered_rows as materialized (
     select
         scope.*,
@@ -1033,12 +1046,9 @@ select
         ),
         '[]'::jsonb
     ) as rows,
-    (select count(*)::integer from scope_rows) as total,
-    (select count(*)::integer from scope_rows where status_code in (
-        'paid_pending_invoice', 'paid_pending_future_invoice', 'income_pending_invoice'
-    )) as missing_invoice_rows,
-    (select count(*)::integer from scope_rows where direction = 'expense'
-        and input_invoice_count = 0 and filter_group <> 'no_invoice_required') as create_invoice_available_rows,
+    (select total from scope_summary) as total,
+    (select missing_invoice_rows from scope_summary) as missing_invoice_rows,
+    (select create_invoice_available_rows from scope_summary) as create_invoice_available_rows,
     (select to_jsonb(statistics) from statistics) as statistics,
     (
         select jsonb_build_object(

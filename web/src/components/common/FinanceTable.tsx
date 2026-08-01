@@ -158,6 +158,27 @@ type FinanceTablePaginationProps = {
   className?: string;
 };
 
+type FinanceTablePageToken = number | `ellipsis-${number}`;
+
+function financeTablePageTokens(currentPage: number, totalPages: number): FinanceTablePageToken[] {
+  if (totalPages <= 7) return Array.from({ length: totalPages }, (_, index) => index + 1);
+
+  const visiblePages = new Set([1, totalPages]);
+  for (let item = currentPage - 1; item <= currentPage + 1; item += 1) {
+    if (item > 1 && item < totalPages) visiblePages.add(item);
+  }
+
+  const sortedPages = [...visiblePages].sort((left, right) => left - right);
+  const tokens: FinanceTablePageToken[] = [];
+  sortedPages.forEach((item, index) => {
+    const previous = sortedPages[index - 1];
+    if (previous !== undefined && item - previous === 2) tokens.push(previous + 1);
+    if (previous !== undefined && item - previous > 2) tokens.push(`ellipsis-${previous}`);
+    tokens.push(item);
+  });
+  return tokens;
+}
+
 export function FinanceTablePagination({
   page,
   pageSize,
@@ -169,7 +190,7 @@ export function FinanceTablePagination({
   const currentPage = Math.min(Math.max(page, 1), totalPages);
   const start = total === 0 ? 0 : (currentPage - 1) * pageSize + 1;
   const end = Math.min(currentPage * pageSize, total);
-  const pages = Array.from({ length: totalPages }, (_, index) => index + 1);
+  const pageTokens = financeTablePageTokens(currentPage, totalPages);
 
   return (
     <Pagination className={cx("finance-table-pagination", className)} size="sm">
@@ -183,11 +204,15 @@ export function FinanceTablePagination({
             <span>上一页</span>
           </Pagination.Previous>
         </Pagination.Item>
-        {pages.map((item) => (
+        {pageTokens.map((item) => (
           <Pagination.Item key={item}>
-            <Pagination.Link isActive={item === currentPage} onPress={() => onPageChange(item)}>
-              {item}
-            </Pagination.Link>
+            {typeof item === "number" ? (
+              <Pagination.Link isActive={item === currentPage} onPress={() => onPageChange(item)}>
+                {item}
+              </Pagination.Link>
+            ) : (
+              <Pagination.Ellipsis aria-label="省略的页码" />
+            )}
           </Pagination.Item>
         ))}
         <Pagination.Item>

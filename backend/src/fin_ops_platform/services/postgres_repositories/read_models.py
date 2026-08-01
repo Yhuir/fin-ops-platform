@@ -4520,7 +4520,6 @@ class PostgresReadModelRepository:
             if generation_stats_eligible
             else None
         )
-        matching_group_ids: list[str] | None = None
         if materialized_counts is None:
             if composed_all_scope:
                 groups_for_counts_sql = _workbench_active_month_group_keys_sql(
@@ -4549,10 +4548,6 @@ class PostgresReadModelRepository:
                             select count(distinct g.group_id)
                             from filtered_workbench_groups g
                         )::bigint as total_count,
-                        (
-                            select coalesce(array_agg(distinct g.group_id), array[]::text[])
-                            from filtered_workbench_groups g
-                        ) as matching_group_ids,
                         count(distinct {distinct_row_sql}) filter (
                             where r.pane = 'oa'
                               and coalesce(r.row_role, '') <> 'summary'
@@ -4630,31 +4625,38 @@ class PostgresReadModelRepository:
                 )
             total = int_value((count_row or {}).get("total_count"), 0)
             row_counts = _workbench_group_page_row_counts(count_row)
-            if composed_all_scope:
-                matching_group_ids = text_list((count_row or {}).get("matching_group_ids"))
         else:
             total = int_value(materialized_counts.get("total"), 0)
             row_counts = materialized_counts.get("row_counts")
             if not isinstance(row_counts, dict):
                 row_counts = _workbench_group_page_row_counts(None)
-        if composed_all_scope and matching_group_ids is not None:
-            page_where_sql = "g.zone = %s and g.group_id = any(%s)"
-            page_params = [normalized_zone, matching_group_ids, normalized_page_size + 1, offset]
+        if composed_all_scope:
+            page_cte_sql = f"with {_workbench_active_month_members_cte_sql()}"
+            page_join_sql = active_member_filter_join_sql
+            page_params = [
+                *active_member_filter_params,
+                *params,
+                normalized_page_size + 1,
+                offset,
+            ]
         else:
-            page_where_sql = where_sql
+            page_cte_sql = ""
+            page_join_sql = ""
             page_params = [*params, normalized_page_size + 1, offset]
         rows = (
             self._connection.fetch_all(
                 f"""
+                {page_cte_sql}
                 select {group_select_sql}
                 from {groups_from_sql}
-                where {page_where_sql}
+                {page_join_sql}
+                where {where_sql}
                 order by {order_by_sql}
                 limit %s offset %s
                 """,
                 tuple(page_params),
             )
-            if matching_group_ids is None or matching_group_ids
+            if total > 0
             else []
         )
         visible_rows = rows[:normalized_page_size]

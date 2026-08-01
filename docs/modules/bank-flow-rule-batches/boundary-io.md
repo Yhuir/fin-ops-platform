@@ -127,7 +127,8 @@ Canonical facts：
 - 候选 identity、成员、金额与内部往来匹配必须确定性；歧义 fail closed，内部往来金额只计单边。内部往来的 ±2 天查询窗口只用于发现跨月配对，配对 owner month 固定为最早成员月份，相邻月份查询不得重复返回。
 - 提交必须携带合法 `scope_month` 并在写事务内重读、重算、锁定和复核；遗留 persisted draft 不能被恢复或提交。
 - 撤回释放关系后，若当前事实仍合格，下一次 GET 自动重新生成候选。
-- 旧 no-OA read model/worker 属于独立 legacy 域，不随本模块退役。
+- 旧 no-OA read model/worker 已退役；仅独立的 canonical no-OA API/关系域继续存在，当前 bank-flow
+  页面不得读取或回退到该域。
 
 ## 测试与验证
 

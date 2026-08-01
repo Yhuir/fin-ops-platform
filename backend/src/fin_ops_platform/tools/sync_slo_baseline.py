@@ -94,8 +94,9 @@ def collect_baseline(
         "mode": "read_only" if not analyze_explain else "read_only_with_explain_analyze",
         "slo_targets": {
             "page_first_response_p95_ms": 1000,
-            "light_read_model_enqueue_to_fresh_p95_ms": 3000,
-            "heavy_workbench_local_convergence_p95_ms": [10000, 15000],
+            "page_first_response_p99_ms": 2000,
+            "write_operation_to_fresh_p99_ms": 3000,
+            "retained_read_model_keys": ["workbench", "workbench_relation"],
         },
         "runtime_health": _safe_section(lambda: runtime.health_summary()),
         "runtime_snapshot": _runtime_attention_snapshot(runtime),

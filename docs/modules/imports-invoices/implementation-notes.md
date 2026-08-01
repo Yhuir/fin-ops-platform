@@ -9,6 +9,11 @@
 - 发票导入确认后的事实源是 canonical invoice facts + derived lifecycle + read model freshness，不是 confirm API 或 background job 的返回值。
 - 本模块首轮闭环状态为 `documented-risk`：自动化测试已覆盖核心 contract 和历史 bug，但真实大文件、真实 Postgres/RabbitMQ/Redis/systemd worker drain、下游页面真实浏览器 smoke 仍需发布前验证。
 
+## 2026-08-01 - 共享 import batch rows 批量 upsert
+
+- 发票与银行 file/session confirm 共用的 `PostgresCoreRepository` 现以 `execute_many_values` 有界批量 upsert batch rows，删除逐行 DB round-trip；invoice facts 的现有 upsert 语义未改变。
+- owner conflict、幂等、同事务 batch/file rollback 和精确 delta 合同保持；未新增 worker、队列、依赖或兼容写链。
+
 ## 记录模板
 
 ```markdown

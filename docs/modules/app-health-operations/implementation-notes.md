@@ -1,5 +1,11 @@
 # 系统状态 实施记录
 
+## 2026-08-01 - HTTP SLO 有界并发与 payload 证据
+
+- `http_slo_probe` 新增默认关闭的 `--concurrency`，在每个 probe 内使用有界线程池采样；默认 `1` 保持历史串行语义。
+- summary 同时记录压缩传输 `response_bytes` 总量及 p50/p95/p99；错误、认证、gzip、HTML fallback、freshness 判断不变。生产 performance contract 要求 concurrency 4、核心 API p95 1000ms，并同时检查 DB acquire/SQL/active request。
+- 当前 runtime 事实源文档由错误的 4 read models/Search worker 描述收敛为精确 6 workers/2 read models；历史表仅保留回滚证据。
+
 ## 2026-08-01 - 有界 WSGI runtime 与 polling 状态传输
 
 - 生产 API 改由 Gunicorn `gthread` + `WsgiHttpAdapter` 启动，统一限制请求体、HTTP 并发/backlog、DB pool acquire/max waiting，并输出 request ID、结构化 access/slow log 和 active/rejected 指标。

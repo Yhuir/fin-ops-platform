@@ -17,7 +17,7 @@
 - `GET /api/operations/app-health/page-audit?page=output-invoice-collections` 管理员只读销项收款 canonical/relation 对账审计。
 - `GET /api/operations/app-health/page-audit?page=<page_key>` 管理员只读页面业务 canonical/relation 对账审计；registry 全覆盖 17 页，未实现 proof 的页面 fail closed。
 - OA 同步状态。
-- 四个保留 read model 的 dirty scopes。
+- 两个保留 read model（`workbench`、`workbench_relation`）的 dirty scopes。
 - 后台任务状态。
 - Runtime durable queue backlog、failed outbox event、stale read model dirty scopes。
 - OA Mongo 只读同步连接错误。
@@ -35,7 +35,7 @@
 - `job.outbox_events` failed/dead_lettered 数量非零且持续增加。
 - `job.read_model_dirty_scopes` 长时间处于 pending、processing 或 failed。
 - `worker_heartbeat_lag_seconds` 持续超过 worker poll interval 与任务超时阈值。
-- `missing_required_worker_count > 0` 或 `stale_required_worker_count > 0`。required worker 清单来自 `runtime_worker_registry`；例如 Search worker 缺失会导致搜索索引长时间 refreshing。
+- `missing_required_worker_count > 0` 或 `stale_required_worker_count > 0`。required worker 清单来自 `runtime_worker_registry`；例如 Workbench relation worker 缺失会阻断共享 relation distribution 收敛。
 - `read_model_refresh_duration_ms.p95/p99` 持续升高。
 - `read_model_refresh_enqueue_to_fresh_ms.p95/p99` 持续升高。该指标从 durable outbox `created_at -> processed_at` 计算，表示真实 enqueue-to-fresh latency，不等同于单次 worker handler duration。
 - `/api/workbench` 或 `/api/workbench/groups` 的 `workbench_api_metric.duration_ms` p95 超过页面 SLO。
@@ -46,7 +46,7 @@
 - `/health.api_performance.endpoints[*].sql_execute_fetch_ms.p95` 持续升高，表示 SQL 执行/取数本身变慢。
 - Redis `redis_miss_count` 快速增长且 PostgreSQL 热读压力同步升高。
 - 数据重置任务异常结束。
-- Workbench、Search、`workbench_relation` 或 no-OA API 返回 `read_model_unavailable`，表示对应 SQL read repository 未配置或初始化失败；这不是允许回落旧 snapshot 的场景。直接读取页面的 repository 失败使用页面 canonical query 错误，不得伪装成 read-model 状态。
+- Workbench 或 `workbench_relation` 返回 `read_model_unavailable`，表示对应 SQL read repository 未配置或初始化失败；这不是允许回落旧 snapshot 的场景。Search runtime 已删除，no-OA 和其它直接读取页面的 repository 失败使用页面 canonical query 错误，不得伪装成 read-model 状态。
 - `state:full_state` 不应再由 PostgreSQL `PostgresStateStore.save()` 写入。生产 API/worker 不应设置 `FIN_OPS_ENABLE_POSTGRES_FULL_STATE_SNAPSHOT=1`；若出现该 key 写入，应排查旧工具或未迁移路径。
 
 ## Workbench 索引卫生
@@ -320,7 +320,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.sync_slo_baseline --jso
 PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.read_model_slo_smoke --json
 ```
 
-该工具默认 dry-run，只选择四个保留 read model 中已有 fresh readiness 的 direct scope；显式加
+该工具默认 dry-run，只选择两个保留 read model 中已有 fresh readiness 的 direct scope；显式加
 `--apply` 后才会通过 `ReadModelRefreshGateway` 入队，并等待 outbox event `done` 与
 `read_model.app_status_readiness.status='fresh'`，用真实 `created_at -> processed_at` 判断
 enqueue-to-fresh 是否满足目标。`summary.enqueue_to_fresh_ms` 会输出 p50/p95/p99/max，最终 P2/P3 gate
@@ -383,8 +383,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.http_slo_probe \
 - `/api/session/me`、`/api/app-health`、`/api/operations/app-health-dashboard`。
 - 工作台 summary/groups/settings、银行明细账户/流水/规则、待找发票 rows/filter-options/rules、进项发票使用
   rows/filter-options/rules、OA 待付款单一 rows 聚合/ETag 条件读取、销项收款 rows/filter-options/rules、税金抵扣、
-  成本统计、免 OA、批量账务、往来款、ETC、导入 facts、后台任务和搜索首屏 API。
-  `pending-invoices/filter-options` 是历史慢接口，默认必须覆盖。
+  成本统计、免 OA、批量账务、往来款、ETC、导入 facts 和后台任务首屏 API。
 - 工作台 groups probe 必须使用前端首屏同口径的 `detail_level=summary`；不带 `detail_level` 的 full payload 只用于兼容或调试，不作为页面首屏 SLO 证据。
 
 判定原则：
@@ -415,11 +414,15 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.http_slo_probe \
   --allow-unauthenticated \
   --replace-default-probes \
   --iterations 3 \
+  --concurrency 4 \
   --warmup 1 \
   --target-ms 1000 \
   --output /tmp/finops-public-page-shell-$(date +%Y%m%d%H%M%S).json
 ```
 - 输出不包含 token、cookie 或 Authorization header；采样结果可以进入阶段报告和事故复盘。
+- `--concurrency` 只控制每个 probe 的有界并发样本数；默认值 `1` 保持串行兼容。最终生产验收至少执行
+  concurrency `4`，高峰前再执行 `8`，并同时检查 error count、压缩传输字节、active/peak requests、
+  PostgreSQL acquire p95 与 SQL p95，不能只比较总耗时。
 
 ## HTTP 运行时与轮询 Smoke
 

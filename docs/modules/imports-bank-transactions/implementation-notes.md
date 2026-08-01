@@ -11,6 +11,11 @@
 - confirm 是异步导入动作；返回 `job` / `import_job` 只能说明已开始处理，不能说明银行明细、关联台、成本统计等下游已 fresh。
 - 银行导入的跨页一致性以后端 lifecycle、dirty scope、read model worker 和 App Status 为准，前端只展示 job feedback 和刷新提示。
 
+## 2026-08-01 - import batch rows 批量 upsert
+
+- 活动 `save_import_delta` 链路中的 `import_batch_rows` 从逐行 execute 改为复用现有 `execute_many_values` bounded chunk；`ON CONFLICT` owner guard、事务回滚、审计 payload 和 canonical delta 不变。
+- repository 测试证明两行只发生一次批量调用，并继续覆盖跨 batch re-parent 拒绝和 batch/file 任一失败整体回滚。
+
 ## 记录模板
 
 ```markdown
