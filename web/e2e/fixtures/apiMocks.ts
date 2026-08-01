@@ -113,6 +113,7 @@ type ApiMockOptions = {
   pendingInvoiceRulesSaveFailuresBeforeSuccess?: number;
   pendingInvoiceRowsEmpty?: boolean;
   sessionMode?: SessionMode;
+  sessionUsername?: string;
   taxOffsetLargeDataset?: boolean;
   taxOffsetPlanSaveConflict?: boolean;
   dashboardError?: boolean;
@@ -187,12 +188,13 @@ function json(route: Route, body: unknown, status = 200) {
   });
 }
 
-function sessionPayload(accessTier: AccessTier) {
+function sessionPayload(accessTier: AccessTier, username?: string) {
   const allowed = accessTier !== "denied";
+  const resolvedUsername = username ?? (accessTier === "admin" ? "YNSYLP005" : "E2EUSER001");
   return {
     user: {
       user_id: "e2e-user",
-      username: accessTier === "admin" ? "YNSYLP005" : "E2EUSER001",
+      username: resolvedUsername,
       nickname: accessTier === "admin" ? "管理员" : "浏览器测试用户",
       display_name: accessTier === "admin" ? "管理员" : "浏览器测试用户",
       dept_id: "finance",
@@ -1513,11 +1515,6 @@ function findWorkbenchRow(
 function workbenchSettingsPayload(
   completedProjectIds: string[] = [],
   includeCostProject = false,
-  accessControl: {
-    allowedUsernames?: string[];
-    readonlyExportUsernames?: string[];
-    adminUsernames?: string[];
-  } = {},
 ) {
   const settingsProjectCompleted = completedProjectIds.includes(settingsCostProject.id);
   const activeProjects = includeCostProject && !settingsProjectCompleted ? [settingsCostProject] : [];
@@ -1538,14 +1535,6 @@ function workbenchSettingsPayload(
         short_name: "建行",
       },
     ],
-    access_control: {
-      allowed_usernames: accessControl.allowedUsernames ?? [],
-      readonly_export_usernames: accessControl.readonlyExportUsernames ?? [],
-      admin_usernames: accessControl.adminUsernames ?? ["YNSYLP005"],
-      full_access_usernames: (accessControl.allowedUsernames ?? []).filter(
-        (username) => !(accessControl.readonlyExportUsernames ?? []).includes(username),
-      ),
-    },
     workbench_column_layouts: {
       oa: ["applicant", "projectName", "amount", "counterparty", "reason"],
       bank: ["counterparty", "amount", "loanRepaymentDate", "note"],
@@ -7948,9 +7937,32 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
   let turnoverTagSelectionVersion = 1;
   let settingsCompletedProjectIds: string[] = [];
   let settingsAccessControl = {
-    allowedUsernames: [] as string[],
-    readonlyExportUsernames: [] as string[],
-    adminUsernames: ["YNSYLP005"],
+    version: 1,
+    administrator: {
+      username: "YNSYLP005",
+      access_tier: "admin" as const,
+      protected: true as const,
+    },
+    accounts: [] as Array<{
+      username: string;
+      access_tier: "full_access" | "read_export_only";
+    }>,
+  };
+  let activeSessionUsername = options.sessionUsername
+    ?? (options.sessionMode === "admin" ? "YNSYLP005" : "E2EUSER001");
+  const configuredSessionTier = (): AccessTier => {
+    if (activeSessionUsername === "YNSYLP005") {
+      return "admin";
+    }
+    const configured = settingsAccessControl.accounts.find((account) => account.username === activeSessionUsername);
+    if (configured) {
+      return configured.access_tier;
+    }
+    return options.sessionMode === "read_export_only"
+      ? "read_export_only"
+      : options.sessionMode === "forbidden"
+        ? "denied"
+        : "full_access";
   };
   let settingsDataResetJob: {
     action: SettingsDataResetAction;
@@ -7978,14 +7990,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       if (options.sessionMode === "error") {
         return json(route, { error: "session_error", message: "会话校验失败，请稍后重试。" }, 503);
       }
-      const accessTier = options.sessionMode === "admin"
-        ? "admin"
-        : options.sessionMode === "read_export_only"
-          ? "read_export_only"
-          : options.sessionMode === "forbidden"
-            ? "denied"
-            : "full_access";
-      return json(route, sessionPayload(accessTier));
+      return json(route, sessionPayload(configuredSessionTier(), activeSessionUsername));
     }
 
     if (path === "/api/background-jobs/active") {
@@ -8008,33 +8013,87 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       return json(route, operationBarrierPayload(options.operationBarrierMode));
     }
 
+    if (path === "/api/workbench/settings/access-control") {
+      if (configuredSessionTier() !== "admin") {
+        return json(route, { error: "forbidden", message: "当前账号无权执行此操作。" }, 403);
+      }
+      if (request.method() === "PUT") {
+        const body = parseJsonBody(request.postData()) as Record<string, unknown>;
+        if (Object.keys(body).sort().join(",") !== "accounts,expected_version") {
+          return json(route, {
+            error: "invalid_access_control_request",
+            message: "Request must contain only expected_version and accounts.",
+          }, 400);
+        }
+        if (body.expected_version !== settingsAccessControl.version) {
+          return json(route, {
+            error: "access_control_version_conflict",
+            message: "Access control version conflict.",
+            current_version: settingsAccessControl.version,
+          }, 409);
+        }
+        if (!Array.isArray(body.accounts)) {
+          return json(route, { error: "invalid_access_control_request", message: "accounts must be an array." }, 400);
+        }
+        const accounts = body.accounts.map((account) => {
+          const item = account as Record<string, unknown>;
+          return {
+            username: String(item.username ?? "").trim(),
+            access_tier: String(item.access_tier ?? ""),
+            keys: Object.keys(item).sort().join(","),
+          };
+        });
+        const invalid = accounts.some((account) =>
+          account.keys !== "access_tier,username"
+          || !account.username
+          || account.username === "YNSYLP005"
+          || !["full_access", "read_export_only"].includes(account.access_tier),
+        ) || new Set(accounts.map((account) => account.username)).size !== accounts.length;
+        if (invalid) {
+          return json(route, {
+            error: "invalid_access_control_request",
+            message: "Invalid access-control accounts.",
+          }, 400);
+        }
+        const nextAccounts = accounts.map(({ username, access_tier }) => ({
+          username,
+          access_tier: access_tier as "full_access" | "read_export_only",
+        }));
+        if (JSON.stringify(nextAccounts) !== JSON.stringify(settingsAccessControl.accounts)) {
+          settingsAccessControl = {
+            ...settingsAccessControl,
+            version: settingsAccessControl.version + 1,
+            accounts: nextAccounts,
+          };
+        }
+      }
+      return json(route, settingsAccessControl);
+    }
+
     if (path === "/api/workbench/settings") {
       if (request.method() === "POST") {
-        const body = parseJsonBody(request.postData()) as {
-          completed_project_ids?: unknown;
-          allowed_usernames?: unknown;
-          readonly_export_usernames?: unknown;
-          admin_usernames?: unknown;
-        };
+        const body = parseJsonBody(request.postData()) as Record<string, unknown>;
+        const forbiddenAclKeys = [
+          "access_control",
+          "allowed_usernames",
+          "readonly_export_usernames",
+          "admin_usernames",
+          "full_access_usernames",
+          "access_control_version",
+        ];
+        if (forbiddenAclKeys.some((key) => Object.prototype.hasOwnProperty.call(body, key))) {
+          return json(route, {
+            error: "access_control_write_forbidden",
+            message: "Access control can only be changed through the administrator access-control API.",
+          }, 400);
+        }
         settingsCompletedProjectIds = Array.isArray(body.completed_project_ids)
           ? body.completed_project_ids.map((item) => String(item))
           : [];
-        settingsAccessControl = {
-          allowedUsernames: Array.isArray(body.allowed_usernames)
-            ? body.allowed_usernames.map((item) => String(item))
-            : [],
-          readonlyExportUsernames: Array.isArray(body.readonly_export_usernames)
-            ? body.readonly_export_usernames.map((item) => String(item))
-            : [],
-          adminUsernames: Array.isArray(body.admin_usernames)
-            ? body.admin_usernames.map((item) => String(item))
-            : ["YNSYLP005"],
-        };
       }
       return json(route, workbenchSettingsPayload(
         settingsCompletedProjectIds,
         Boolean(options.settingsProjectScopeFanout),
-        settingsAccessControl,
       ));
     }
 
@@ -9699,6 +9758,9 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     lastBody(methodAndPath: string) {
       const bodies = requestBodies.get(methodAndPath) ?? [];
       return bodies[bodies.length - 1] ?? {};
+    },
+    startSession(username: string) {
+      activeSessionUsername = username;
     },
     failNextBankDetailsTransactions(count = 1) {
       bankDetailsTransactionsFailuresRemaining += Math.max(1, count);

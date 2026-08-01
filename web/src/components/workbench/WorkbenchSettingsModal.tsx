@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 
-import SettingsAccessAccountsSection from "../settings/SettingsAccessAccountsSection";
 import SettingsBankAccountsSection from "../settings/SettingsBankAccountsSection";
 import SettingsDataResetSection from "../settings/SettingsDataResetSection";
 import SettingsOaInvoiceOffsetSection from "../settings/SettingsOaInvoiceOffsetSection";
@@ -10,7 +9,6 @@ import SettingsTreeNav from "../settings/SettingsTreeNav";
 import type {
   DataResetActionConfig,
   DataResetStatus,
-  ManagedAccessAccount,
   ProjectActionStatus,
   SettingsNavigationItem,
   SettingsSectionId,
@@ -18,7 +16,6 @@ import type {
 import { useSession } from "../../contexts/SessionContext";
 import type {
   BankAccountMapping,
-  WorkbenchAccessRole,
   WorkbenchProjectSetting,
   WorkbenchSettings,
   WorkbenchSettingsDataResetAction,
@@ -35,9 +32,6 @@ type WorkbenchSettingsModalProps = {
   onSave: (payload: {
     completedProjectIds: string[];
     bankAccountMappings: BankAccountMapping[];
-    allowedUsernames: string[];
-    readonlyExportUsernames: string[];
-    adminUsernames: string[];
     workbenchColumnLayouts: WorkbenchSettings["workbenchColumnLayouts"];
     oaRetention: WorkbenchSettings["oaRetention"];
     oaImport: WorkbenchSettings["oaImport"];
@@ -105,35 +99,6 @@ function sortProjects(projects: WorkbenchProjectSetting[]) {
   return [...projects].sort((left, right) => left.projectName.localeCompare(right.projectName, "zh-CN"));
 }
 
-function buildManagedAccessAccounts(settings: WorkbenchSettings): ManagedAccessAccount[] {
-  const readonlySet = new Set(settings.accessControl.readonlyExportUsernames);
-  const adminSet = new Set(settings.accessControl.adminUsernames);
-  return settings.accessControl.allowedUsernames
-    .filter((username) => !adminSet.has(username))
-    .map((username) => ({
-      id: `access-${username}`,
-      username,
-      role: (readonlySet.has(username) ? "read_export_only" : "full_access") as WorkbenchAccessRole,
-    }))
-    .sort((left, right) => left.username.localeCompare(right.username, "zh-CN"));
-}
-
-function normalizeManagedAccounts(accounts: ManagedAccessAccount[]) {
-  const deduped = new Map<string, ManagedAccessAccount>();
-  accounts.forEach((account, index) => {
-    const username = account.username.trim();
-    if (!username) {
-      return;
-    }
-    deduped.set(username, {
-      id: account.id || `access-${index}`,
-      username,
-      role: account.role,
-    });
-  });
-  return Array.from(deduped.values()).sort((left, right) => left.username.localeCompare(right.username, "zh-CN"));
-}
-
 function parseApplicantNames(value: string) {
   const seen = new Set<string>();
   const names: string[] = [];
@@ -178,9 +143,6 @@ export default function WorkbenchSettingsModal({
   const session = useSession();
   const [completedProjectIds, setCompletedProjectIds] = useState<string[]>(settings.projects.completedProjectIds);
   const [mappings, setMappings] = useState<BankAccountMapping[]>(settings.bankAccountMappings);
-  const [managedAccessAccounts, setManagedAccessAccounts] = useState<ManagedAccessAccount[]>(
-    buildManagedAccessAccounts(settings),
-  );
   const [oaRetentionCutoffDate, setOaRetentionCutoffDate] = useState(settings.oaRetention.cutoffDate);
   const [oaImportFormTypes, setOaImportFormTypes] = useState(settings.oaImport.formTypes);
   const [oaImportStatuses, setOaImportStatuses] = useState(settings.oaImport.statuses);
@@ -197,8 +159,6 @@ export default function WorkbenchSettingsModal({
   const [projectNameDraft, setProjectNameDraft] = useState("");
   const [projectActionStatus, setProjectActionStatus] = useState<ProjectActionStatus | null>(null);
   const [isProjectActionBusy, setIsProjectActionBusy] = useState(false);
-  const [accessUsernameDraft, setAccessUsernameDraft] = useState("");
-  const [accessRoleDraft, setAccessRoleDraft] = useState<WorkbenchAccessRole>("full_access");
   const [activeSectionId, setActiveSectionId] = useState<SettingsSectionId>("projects");
   const [dataResetDialog, setDataResetDialog] = useState<DataResetDialogState>(null);
   const [dataResetPassword, setDataResetPassword] = useState("");
@@ -207,7 +167,6 @@ export default function WorkbenchSettingsModal({
   const [isDataResetting, setIsDataResetting] = useState(false);
 
   const controlsDisabled = !canSave || isSaving || isDataResetting || isProjectActionBusy;
-  const adminUsernames = settings.accessControl.adminUsernames;
 
   const activeProjects = useMemo(
     () => sortProjects(settings.projects.active.filter((project) => !completedProjectIds.includes(project.id))),
@@ -241,7 +200,6 @@ export default function WorkbenchSettingsModal({
   const canAddMapping =
     last4Draft.trim().length === 4 && /^\d{4}$/.test(last4Draft.trim()) && bankNameDraft.trim().length > 0;
   const canAddProject = projectCodeDraft.trim().length > 0 && projectNameDraft.trim().length > 0;
-  const canAddAccessAccount = accessUsernameDraft.trim().length > 0;
   const currentSessionUser =
     session.status === "authenticated" || session.status === "forbidden" ? session.session.user : null;
   const canManageOaInvoiceOffset =
@@ -277,13 +235,6 @@ export default function WorkbenchSettingsModal({
         visible: canManageOaInvoiceOffset,
       },
       {
-        id: "access_accounts" as const,
-        label: "访问账户",
-        description: "可访问账号权限",
-        count: managedAccessAccounts.length + adminUsernames.length,
-        visible: canManageAccessControl,
-      },
-      {
         id: "data_reset" as const,
         label: "数据重置",
         description: "高风险清理工具",
@@ -300,8 +251,6 @@ export default function WorkbenchSettingsModal({
     oaImportStatuses.length,
     oaInvoiceOffsetApplicantsText,
     canManageOaInvoiceOffset,
-    managedAccessAccounts.length,
-    adminUsernames.length,
     canManageAccessControl,
   ]);
 
@@ -410,41 +359,10 @@ export default function WorkbenchSettingsModal({
     }
   }
 
-  function handleAddAccessAccount() {
-    const nextUsername = accessUsernameDraft.trim();
-    if (!nextUsername || controlsDisabled) {
-      return;
-    }
-    setManagedAccessAccounts((current) => {
-      const existingIndex = current.findIndex((item) => item.username === nextUsername);
-      if (existingIndex >= 0) {
-        return current.map((item, index) =>
-          index === existingIndex ? { ...item, role: accessRoleDraft } : item,
-        );
-      }
-      return normalizeManagedAccounts([
-        ...current,
-        {
-          id: `access-${nextUsername}`,
-          username: nextUsername,
-          role: accessRoleDraft,
-        },
-      ]);
-    });
-    setAccessUsernameDraft("");
-    setAccessRoleDraft("full_access");
-  }
-
   function handleSave() {
-    const normalizedAccounts = normalizeManagedAccounts(managedAccessAccounts);
     onSave({
       completedProjectIds,
       bankAccountMappings: mappings,
-      allowedUsernames: normalizedAccounts.map((account) => account.username),
-      readonlyExportUsernames: normalizedAccounts
-        .filter((account) => account.role === "read_export_only")
-        .map((account) => account.username),
-      adminUsernames,
       workbenchColumnLayouts: settings.workbenchColumnLayouts,
       oaRetention: {
         cutoffDate: oaRetentionCutoffDate || "2026-01-01",
@@ -597,26 +515,6 @@ export default function WorkbenchSettingsModal({
                   controlsDisabled={controlsDisabled}
                   applicantsText={oaInvoiceOffsetApplicantsText}
                   onChangeApplicantsText={setOaInvoiceOffsetApplicantsText}
-                />
-              ) : null}
-
-              {activeSectionId === "access_accounts" && canManageAccessControl ? (
-                <SettingsAccessAccountsSection
-                  controlsDisabled={controlsDisabled}
-                  adminUsernames={adminUsernames}
-                  managedAccessAccounts={managedAccessAccounts}
-                  accessUsernameDraft={accessUsernameDraft}
-                  accessRoleDraft={accessRoleDraft}
-                  canAddAccessAccount={canAddAccessAccount}
-                  onChangeAccessUsernameDraft={setAccessUsernameDraft}
-                  onChangeAccessRoleDraft={setAccessRoleDraft}
-                  onAddAccessAccount={handleAddAccessAccount}
-                  onUpdateManagedAccessAccount={(accountId, updater) =>
-                    setManagedAccessAccounts((current) => current.map((item) => (item.id === accountId ? updater(item) : item)))
-                  }
-                  onDeleteManagedAccessAccount={(accountId) =>
-                    setManagedAccessAccounts((current) => current.filter((item) => item.id !== accountId))
-                  }
                 />
               ) : null}
 

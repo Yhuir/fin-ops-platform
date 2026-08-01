@@ -870,7 +870,6 @@ describe("pending invoices and tag settings API mapping", () => {
       return new Response(JSON.stringify({
         projects: { active: [], completed: [], completed_project_ids: [] },
         bank_account_mappings: [],
-        access_control: { allowed_usernames: [], readonly_export_usernames: [], admin_usernames: [], full_access_usernames: [] },
         workbench_column_layouts: { oa: [], bank: [], invoice: [] },
         oa_retention: { cutoff_date: "2026-01-01" },
         oa_import: {
@@ -929,9 +928,6 @@ describe("pending invoices and tag settings API mapping", () => {
     await saveWorkbenchSettings({
       completedProjectIds: [],
       bankAccountMappings: [],
-      allowedUsernames: [],
-      readonlyExportUsernames: [],
-      adminUsernames: [],
       workbenchColumnLayouts: { oa: [], bank: [], invoice: [] },
       oaRetention: { cutoffDate: "2026-01-01" },
       oaImport: {

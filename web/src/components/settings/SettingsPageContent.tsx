@@ -7,6 +7,8 @@ import type {
   BankAccountMapping,
   OaApplicantCredentialSummary,
   SaveOaApplicantCredentialRequest,
+  WorkbenchAccessAccount,
+  WorkbenchAccessControl,
   WorkbenchAccessRole,
   WorkbenchProjectSetting,
   WorkbenchSettings,
@@ -35,7 +37,11 @@ import type {
 
 type SettingsPageContentProps = {
   settings: WorkbenchSettings;
+  accessControl: WorkbenchAccessControl | null;
+  accessControlStatus: ProjectActionStatus | null;
   isSaving: boolean;
+  isAccessControlLoading: boolean;
+  isAccessControlSaving: boolean;
   canSave: boolean;
   canManageAccessControl: boolean;
   activeDataResetJob: WorkbenchSettingsDataResetJob | null;
@@ -45,9 +51,6 @@ type SettingsPageContentProps = {
   onSave: (payload: {
     completedProjectIds: string[];
     bankAccountMappings: BankAccountMapping[];
-    allowedUsernames: string[];
-    readonlyExportUsernames: string[];
-    adminUsernames: string[];
     workbenchColumnLayouts: WorkbenchSettings["workbenchColumnLayouts"];
     oaRetention: WorkbenchSettings["oaRetention"];
     oaImport: WorkbenchSettings["oaImport"];
@@ -55,6 +58,7 @@ type SettingsPageContentProps = {
     bankTransactionTags: WorkbenchSettings["bankTransactionTags"];
     pendingInvoiceTagGroups: WorkbenchSettings["pendingInvoiceTagGroups"];
   }) => void;
+  onSaveAccessControl: (accounts: WorkbenchAccessAccount[]) => Promise<void>;
   onDataReset: (payload: {
     action: WorkbenchSettingsDataResetAction;
     oaPassword: string;
@@ -157,15 +161,12 @@ function sortProjects(projects: WorkbenchProjectSetting[]) {
   return [...projects].sort((left, right) => left.projectName.localeCompare(right.projectName, "zh-CN"));
 }
 
-function buildManagedAccessAccounts(settings: WorkbenchSettings): ManagedAccessAccount[] {
-  const readonlySet = new Set(settings.accessControl.readonlyExportUsernames);
-  const adminSet = new Set(settings.accessControl.adminUsernames);
-  return settings.accessControl.allowedUsernames
-    .filter((username) => !adminSet.has(username))
-    .map((username) => ({
-      id: `access-${username}`,
-      username,
-      role: (readonlySet.has(username) ? "read_export_only" : "full_access") as WorkbenchAccessRole,
+function buildManagedAccessAccounts(accessControl: WorkbenchAccessControl | null): ManagedAccessAccount[] {
+  return (accessControl?.accounts ?? [])
+    .map((account) => ({
+      id: `access-${account.username}`,
+      username: account.username,
+      role: account.accessTier,
     }))
     .sort((left, right) => left.username.localeCompare(right.username, "zh-CN"));
 }
@@ -237,7 +238,11 @@ function parseResetErrorMessage(message: string) {
 export default function SettingsPageContent({
   activeDataResetJob,
   settings,
+  accessControl,
+  accessControlStatus,
   isSaving,
+  isAccessControlLoading,
+  isAccessControlSaving,
   isOaApplicantCredentialLoading,
   isOaApplicantCredentialSaving,
   oaApplicantCredentials,
@@ -248,6 +253,7 @@ export default function SettingsPageContent({
   onDeleteProject,
   onDeleteOaApplicantCredential,
   onSave,
+  onSaveAccessControl,
   onSaveOaApplicantCredential,
   onSyncProjects,
 }: SettingsPageContentProps) {
@@ -279,7 +285,7 @@ export default function SettingsPageContent({
   const [completedProjectIds, setCompletedProjectIds] = useState<string[]>(settings.projects.completedProjectIds);
   const [mappings, setMappings] = useState<BankAccountMapping[]>(settings.bankAccountMappings);
   const [managedAccessAccounts, setManagedAccessAccounts] = useState<ManagedAccessAccount[]>(
-    buildManagedAccessAccounts(settings),
+    buildManagedAccessAccounts(accessControl),
   );
   const [oaRetentionCutoffDate, setOaRetentionCutoffDate] = useState(settings.oaRetention.cutoffDate);
   const [oaImportFormTypes, setOaImportFormTypes] = useState(settings.oaImport.formTypes);
@@ -323,7 +329,10 @@ export default function SettingsPageContent({
   const [isDataResetting, setIsDataResetting] = useState(false);
 
   const controlsDisabled = !canSave || isSaving || isDataResetting || isProjectActionBusy;
-  const adminUsernames = settings.accessControl.adminUsernames;
+  const accessControlControlsDisabled = !canSave
+    || isAccessControlLoading
+    || isAccessControlSaving
+    || accessControl === null;
 
   const activeProjects = useMemo(
     () => sortProjects(settings.projects.active.filter((project) => !completedProjectIds.includes(project.id))),
@@ -337,6 +346,10 @@ export default function SettingsPageContent({
       ]).filter((project, index, rows) => rows.findIndex((row) => row.id === project.id) === index),
     [completedProjectIds, settings.projects.active, settings.projects.completed],
   );
+
+  useEffect(() => {
+    setManagedAccessAccounts(buildManagedAccessAccounts(accessControl));
+  }, [accessControl]);
 
   useEffect(() => {
     const isTerminal =
@@ -357,7 +370,20 @@ export default function SettingsPageContent({
   const canAddMapping =
     last4Draft.trim().length === 4 && /^\d{4}$/.test(last4Draft.trim()) && bankNameDraft.trim().length > 0;
   const canAddProject = projectCodeDraft.trim().length > 0 && projectNameDraft.trim().length > 0;
-  const canAddAccessAccount = accessUsernameDraft.trim().length > 0;
+  const canAddAccessAccount = accessUsernameDraft.trim().length > 0
+    && accessUsernameDraft.trim() !== accessControl?.administrator.username;
+  const normalizedAccessAccounts = managedAccessAccounts.map((account) => ({
+    username: account.username.trim(),
+    accessTier: account.role,
+  }));
+  const normalizedAccessUsernames = normalizedAccessAccounts.map((account) => account.username);
+  const accessControlValidationMessage = normalizedAccessUsernames.some((username) => !username)
+    ? "访问账户不能为空。"
+    : new Set(normalizedAccessUsernames).size !== normalizedAccessUsernames.length
+      ? "访问账户不能重复。"
+      : normalizedAccessUsernames.includes(accessControl?.administrator.username ?? "")
+        ? "受保护管理员不能作为普通访问账户编辑。"
+        : null;
   const canSaveOaApplicantCredential =
     oaApplicantNameDraft.trim().length > 0
     && oaApplicantCodeDraft.trim().length > 0
@@ -418,7 +444,7 @@ export default function SettingsPageContent({
         id: "access_accounts" as const,
         label: "访问账户",
         description: "可访问账号权限",
-        count: managedAccessAccounts.length + adminUsernames.length,
+        count: managedAccessAccounts.length + (accessControl ? 1 : 0),
         visible: canManageAccessControl,
       },
       {
@@ -441,7 +467,7 @@ export default function SettingsPageContent({
     canManageOaInvoiceOffset,
     oaApplicantCredentials,
     managedAccessAccounts.length,
-    adminUsernames.length,
+    accessControl,
     canManageAccessControl,
   ]);
 
@@ -644,15 +670,9 @@ export default function SettingsPageContent({
       setSettingsActionStatus({ tone: "error", message: pendingInvoiceIssue });
       return;
     }
-    const normalizedAccounts = normalizeManagedAccounts(managedAccessAccounts);
     onSave({
       completedProjectIds,
       bankAccountMappings: mappings,
-      allowedUsernames: normalizedAccounts.map((account) => account.username),
-      readonlyExportUsernames: normalizedAccounts
-        .filter((account) => account.role === "read_export_only")
-        .map((account) => account.username),
-      adminUsernames,
       workbenchColumnLayouts: settings.workbenchColumnLayouts,
       oaRetention: {
         cutoffDate: oaRetentionCutoffDate || "2026-01-01",
@@ -669,6 +689,13 @@ export default function SettingsPageContent({
       bankTransactionTags: settings.bankTransactionTags,
       pendingInvoiceTagGroups,
     });
+  }
+
+  async function handleSaveAccessControl() {
+    if (accessControlControlsDisabled || accessControlValidationMessage) {
+      return;
+    }
+    await onSaveAccessControl(normalizedAccessAccounts);
   }
 
   function handleOpenDataResetConfirm(action: WorkbenchSettingsDataResetAction) {
@@ -893,9 +920,13 @@ export default function SettingsPageContent({
 
               {activeSectionId === "access_accounts" && canManageAccessControl ? (
                 <SettingsAccessAccountsSection
-                  controlsDisabled={controlsDisabled}
-                  adminUsernames={adminUsernames}
+                  controlsDisabled={accessControlControlsDisabled}
+                  administrator={accessControl?.administrator ?? null}
                   managedAccessAccounts={managedAccessAccounts}
+                  isLoading={isAccessControlLoading}
+                  isSaving={isAccessControlSaving}
+                  status={accessControlStatus}
+                  validationMessage={accessControlValidationMessage}
                   accessUsernameDraft={accessUsernameDraft}
                   accessRoleDraft={accessRoleDraft}
                   canAddAccessAccount={canAddAccessAccount}
@@ -908,6 +939,7 @@ export default function SettingsPageContent({
                   onDeleteManagedAccessAccount={(accountId) =>
                     setManagedAccessAccounts((current) => current.filter((item) => item.id !== accountId))
                   }
+                  onSave={handleSaveAccessControl}
                 />
               ) : null}
 

@@ -137,12 +137,6 @@ export type WorkbenchSettings = {
     completedProjectIds: string[];
   };
   bankAccountMappings: BankAccountMapping[];
-  accessControl: {
-    allowedUsernames: string[];
-    readonlyExportUsernames: string[];
-    adminUsernames: string[];
-    fullAccessUsernames: string[];
-  };
   workbenchColumnLayouts: WorkbenchColumnLayouts;
   oaRetention: {
     cutoffDate: string;
@@ -399,6 +393,21 @@ export type IgnoredWorkbenchData = {
 };
 
 export type WorkbenchAccessRole = "full_access" | "read_export_only";
+
+export type WorkbenchAccessAccount = {
+  username: string;
+  accessTier: WorkbenchAccessRole;
+};
+
+export type WorkbenchAccessControl = {
+  version: number;
+  administrator: {
+    username: string;
+    accessTier: "admin";
+    protected: true;
+  };
+  accounts: WorkbenchAccessAccount[];
+};
 
 export type WorkbenchSettingsDataResetAction =
   | "reset_bank_transactions"

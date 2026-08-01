@@ -2,6 +2,7 @@ import type {
   BankAccountMapping,
   OaApplicantCredentialSummary,
   SaveOaApplicantCredentialRequest,
+  WorkbenchAccessControl,
   WorkbenchSettings,
   WorkbenchAccessRole,
   WorkbenchOaImportSettings,
@@ -131,8 +132,12 @@ export type SettingsOaApplicantCredentialsSectionProps = {
 
 export type SettingsAccessAccountsSectionProps = {
   controlsDisabled: boolean;
-  adminUsernames: string[];
+  administrator: WorkbenchAccessControl["administrator"] | null;
   managedAccessAccounts: ManagedAccessAccount[];
+  isLoading: boolean;
+  isSaving: boolean;
+  status: ProjectActionStatus | null;
+  validationMessage: string | null;
   accessUsernameDraft: string;
   accessRoleDraft: WorkbenchAccessRole;
   canAddAccessAccount: boolean;
@@ -144,6 +149,7 @@ export type SettingsAccessAccountsSectionProps = {
     updater: (account: ManagedAccessAccount) => ManagedAccessAccount,
   ) => void;
   onDeleteManagedAccessAccount: (accountId: string) => void;
+  onSave: () => Promise<void> | void;
 };
 
 export type SettingsDataResetSectionProps = {

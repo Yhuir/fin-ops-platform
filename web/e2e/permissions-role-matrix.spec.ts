@@ -804,9 +804,46 @@ test.describe("permissions browser role matrix", () => {
       completed_project_ids?: string[];
     };
     expect(saveBody.completed_project_ids).toEqual(["settings-cost-project-e2e"]);
+    expect(saveBody).not.toHaveProperty("access_control");
+    expect(saveBody).not.toHaveProperty("allowed_usernames");
+    expect(saveBody).not.toHaveProperty("readonly_export_usernames");
+    expect(saveBody).not.toHaveProperty("admin_usernames");
     expect((await saveResponse).status()).toBe(200);
     await expect(page.getByText("已保存关联台设置。")).toBeVisible();
     expect(api.count("POST /api/workbench/settings")).toBe(1);
+
+    const browserErrorCountBeforeDirectAttack = browserErrors.length;
+    const directAttack = await page.evaluate(async () => {
+      const generic = await fetch("/api/workbench/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ admin_usernames: ["E2EUSER001"] }),
+      });
+      const dedicated = await fetch("/api/workbench/settings/access-control", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          expected_version: 1,
+          accounts: [{ username: "E2EUSER001", access_tier: "full_access" }],
+        }),
+      });
+      const read = await fetch("/api/workbench/settings/access-control");
+      return {
+        genericStatus: generic.status,
+        genericBody: await generic.json(),
+        dedicatedStatus: dedicated.status,
+        readStatus: read.status,
+      };
+    });
+    expect(directAttack).toMatchObject({
+      genericStatus: 400,
+      genericBody: { error: "access_control_write_forbidden" },
+      dedicatedStatus: 403,
+      readStatus: 403,
+    });
+    const expectedDenialConsoleErrors = browserErrors.splice(browserErrorCountBeforeDirectAttack);
+    expect(expectedDenialConsoleErrors).toHaveLength(3);
+    expect(expectedDenialConsoleErrors.every((entry) => /status of (400|403)/.test(entry))).toBe(true);
 
     await page.goto("/imports/bank-transactions");
     await expect(page.getByText("当前账号仅支持查看和导出，不能导入文件。")).toHaveCount(0);
@@ -880,11 +917,27 @@ test.describe("permissions browser role matrix", () => {
     const accessAccountsRegion = page.getByRole("region", { name: "访问账户管理" });
     await expect(accessAccountsRegion).toBeVisible();
     await expect(accessAccountsRegion.getByText("YNSYLP005")).toBeVisible();
+    await expect(accessAccountsRegion.getByRole("textbox", { name: "YNSYLP005 账户" })).toHaveCount(0);
     await accessAccountsRegion.getByRole("textbox", { name: "新增访问账户" }).fill("READONLY_E2E_ADMIN");
     await accessAccountsRegion.getByLabel("新增账户权限").selectOption({ label: "只可看和只可导出" });
     await accessAccountsRegion.getByRole("button", { name: "新增账户" }).click();
     await expect(accessAccountsRegion.getByRole("textbox", { name: "READONLY_E2E_ADMIN 账户" })).toBeVisible();
     await expect(accessAccountsRegion.getByLabel("READONLY_E2E_ADMIN 权限级别")).toHaveValue("read_export_only");
+
+    const accessSaveRequest = page.waitForRequest((request) =>
+      request.url().endsWith("/api/workbench/settings/access-control")
+      && request.method() === "PUT");
+    const accessSaveResponse = page.waitForResponse((response) =>
+      response.url().endsWith("/api/workbench/settings/access-control")
+      && response.request().method() === "PUT");
+    await accessAccountsRegion.getByRole("button", { name: "保存访问账户" }).click();
+    const accessSavePayload = JSON.parse((await accessSaveRequest).postData() ?? "{}") as Record<string, unknown>;
+    expect(accessSavePayload).toEqual({
+      expected_version: 1,
+      accounts: [{ username: "READONLY_E2E_ADMIN", access_tier: "read_export_only" }],
+    });
+    expect((await accessSaveResponse).status()).toBe(200);
+    await expect(accessAccountsRegion.getByText("已保存访问账户。")).toBeVisible();
 
     const settingsSaveRequest = page.waitForRequest((request) =>
       request.url().endsWith("/api/workbench/settings")
@@ -894,14 +947,11 @@ test.describe("permissions browser role matrix", () => {
       && response.request().method() === "POST");
     await page.getByRole("button", { name: "保存设置" }).click();
     const settingsSaveBody = (await settingsSaveRequest).postData() ?? "";
-    const settingsSavePayload = JSON.parse(settingsSaveBody) as {
-      allowed_usernames?: string[];
-      readonly_export_usernames?: string[];
-      admin_usernames?: string[];
-    };
-    expect(settingsSavePayload.allowed_usernames).toEqual(["READONLY_E2E_ADMIN"]);
-    expect(settingsSavePayload.readonly_export_usernames).toEqual(["READONLY_E2E_ADMIN"]);
-    expect(settingsSavePayload.admin_usernames).toEqual(["YNSYLP005"]);
+    const settingsSavePayload = JSON.parse(settingsSaveBody) as Record<string, unknown>;
+    expect(settingsSavePayload).not.toHaveProperty("access_control");
+    expect(settingsSavePayload).not.toHaveProperty("allowed_usernames");
+    expect(settingsSavePayload).not.toHaveProperty("readonly_export_usernames");
+    expect(settingsSavePayload).not.toHaveProperty("admin_usernames");
     expect(settingsSaveBody).not.toContain("target-password");
     expect(settingsSaveBody).not.toContain("oa_applicant_credentials");
     expect((await settingsSaveResponse).status()).toBe(200);
@@ -928,6 +978,7 @@ test.describe("permissions browser role matrix", () => {
     expect(api.count("GET /api/workbench/settings/oa-applicant-credentials")).toBeGreaterThan(0);
     expect(api.count("PUT /api/workbench/settings/oa-applicant-credentials/fan_zufang")).toBe(1);
     expect(api.count("DELETE /api/workbench/settings/oa-applicant-credentials/fan_zufang")).toBe(1);
+    expect(api.count("PUT /api/workbench/settings/access-control")).toBe(1);
     expect(api.count("POST /api/workbench/settings")).toBe(1);
     expect(api.count("GET /api/workbench/settings/data-reset/jobs/active")).toBeGreaterThan(0);
     expect(api.count("POST /api/workbench/settings/data-reset/jobs")).toBe(dataResetJobCreatesBeforeDialogSmoke);
@@ -941,6 +992,13 @@ test.describe("permissions browser role matrix", () => {
     await expect(page.getByTestId("output-invoice-collections-page")).toBeVisible();
     await expect(page.getByRole("button", { name: "收据编号设置" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "收款状态规则" })).toHaveCount(0);
+
+    api.startSession("READONLY_E2E_ADMIN");
+    await page.goto("/settings");
+    await expect(page.getByText("当前账号仅支持查看和导出，不能保存设置。")).toBeVisible();
+    const readonlySettingsTree = page.getByRole("tree", { name: "设置分类" });
+    await expect(readonlySettingsTree.getByRole("treeitem", { name: /访问账户/ })).toHaveCount(0);
+    await expect(readonlySettingsTree.getByRole("treeitem", { name: /数据重置/ })).toHaveCount(0);
     expect(browserErrors).toEqual([]);
   });
 });

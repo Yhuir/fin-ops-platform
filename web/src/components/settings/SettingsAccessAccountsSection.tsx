@@ -10,8 +10,12 @@ const ACCESS_ROLE_OPTIONS: Array<{ value: WorkbenchAccessRole; label: string }> 
 
 export default function SettingsAccessAccountsSection({
   controlsDisabled,
-  adminUsernames,
+  administrator,
   managedAccessAccounts,
+  isLoading,
+  isSaving,
+  status,
+  validationMessage,
   accessUsernameDraft,
   accessRoleDraft,
   canAddAccessAccount,
@@ -20,6 +24,7 @@ export default function SettingsAccessAccountsSection({
   onAddAccessAccount,
   onUpdateManagedAccessAccount,
   onDeleteManagedAccessAccount,
+  onSave,
 }: SettingsAccessAccountsSectionProps) {
   return (
     <section
@@ -35,11 +40,29 @@ export default function SettingsAccessAccountsSection({
         <div className="settings-access-admin-note" role="status">
           <strong>权限管理员</strong>
           <div className="settings-access-admin-list">
-            {adminUsernames.map((username) => (
-              <span key={username}>{username}</span>
-            ))}
+            <span>{administrator?.username ?? "正在加载..."}</span>
           </div>
+          <small>管理员为受保护账户，不可在 APP 内修改。</small>
         </div>
+
+        {status ? (
+          <div
+            className={`settings-inline-alert settings-inline-alert--${status.tone}`}
+            role={status.tone === "error" ? "alert" : "status"}
+          >
+            {status.message}
+          </div>
+        ) : null}
+        {validationMessage ? (
+          <div className="settings-inline-alert settings-inline-alert--error" role="alert">
+            {validationMessage}
+          </div>
+        ) : null}
+        {isLoading ? (
+          <div className="settings-inline-alert settings-inline-alert--info" role="status">
+            正在加载访问账户...
+          </div>
+        ) : null}
 
         <div className="settings-access-form">
           <label className="settings-field">
@@ -144,6 +167,14 @@ export default function SettingsAccessAccountsSection({
             </table>
           </div>
         )}
+        <button
+          className="settings-primary-button"
+          disabled={controlsDisabled || isLoading || isSaving || validationMessage !== null}
+          type="button"
+          onClick={onSave}
+        >
+          {isSaving ? "保存中..." : "保存访问账户"}
+        </button>
       </div>
     </section>
   );

@@ -56,9 +56,6 @@ describe("Workbench column layout", () => {
     await saveWorkbenchSettings({
       completedProjectIds: settings.projects.completedProjectIds,
       bankAccountMappings: settings.bankAccountMappings,
-      allowedUsernames: settings.accessControl.allowedUsernames,
-      readonlyExportUsernames: settings.accessControl.readonlyExportUsernames,
-      adminUsernames: settings.accessControl.adminUsernames,
       oaRetention: settings.oaRetention,
       oaImport: settings.oaImport,
       workbenchColumnLayouts: {
@@ -89,9 +86,6 @@ describe("Workbench column layout", () => {
     await saveWorkbenchSettings({
       completedProjectIds: settings.projects.completedProjectIds,
       bankAccountMappings: settings.bankAccountMappings,
-      allowedUsernames: settings.accessControl.allowedUsernames,
-      readonlyExportUsernames: settings.accessControl.readonlyExportUsernames,
-      adminUsernames: settings.accessControl.adminUsernames,
       oaRetention: settings.oaRetention,
       oaImport: settings.oaImport,
       workbenchColumnLayouts: {

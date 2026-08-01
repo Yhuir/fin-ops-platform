@@ -13,18 +13,23 @@ import {
   deleteOaApplicantCredential,
   deleteWorkbenchSettingsProject,
   fetchActiveWorkbenchSettingsDataResetJob,
+  fetchWorkbenchAccessControl,
   fetchOaApplicantCredentials,
   fetchWorkbenchSettingsWithProgress,
   resetWorkbenchSettingsData,
   resumeWorkbenchSettingsDataResetJob,
   saveWorkbenchSettings,
+  saveWorkbenchAccessControl,
   saveOaApplicantCredential,
   syncWorkbenchSettingsProjects,
   type WorkbenchBootstrapProgress,
+  WorkbenchApiError,
 } from "../features/workbench/api";
 import type {
   OaApplicantCredentialSummary,
   SaveOaApplicantCredentialRequest,
+  WorkbenchAccessAccount,
+  WorkbenchAccessControl,
   WorkbenchSettings,
   WorkbenchSettingsDataResetAction,
   WorkbenchSettingsDataResetJob,
@@ -78,6 +83,13 @@ export default function SettingsPage() {
   const [oaApplicantCredentials, setOaApplicantCredentials] = useState<OaApplicantCredentialSummary[]>([]);
   const [isOaApplicantCredentialLoading, setIsOaApplicantCredentialLoading] = useState(false);
   const [isOaApplicantCredentialSaving, setIsOaApplicantCredentialSaving] = useState(false);
+  const [accessControl, setAccessControl] = useState<WorkbenchAccessControl | null>(null);
+  const [isAccessControlLoading, setIsAccessControlLoading] = useState(false);
+  const [isAccessControlSaving, setIsAccessControlSaving] = useState(false);
+  const [accessControlStatus, setAccessControlStatus] = useState<{
+    tone: "success" | "error";
+    message: string;
+  } | null>(null);
 
   const loadSettings = useCallback(async (signal?: AbortSignal) => {
     setIsLoading(true);
@@ -112,6 +124,38 @@ export default function SettingsPage() {
       controller.abort();
     };
   }, [active, activationGeneration, loadSettings]);
+
+  useEffect(() => {
+    if (!active || !canAdminAccess) {
+      setAccessControl(null);
+      setAccessControlStatus(null);
+      setIsAccessControlLoading(false);
+      return undefined;
+    }
+    const controller = new AbortController();
+    setIsAccessControlLoading(true);
+    setAccessControlStatus(null);
+    fetchWorkbenchAccessControl(controller.signal)
+      .then((payload) => {
+        if (!controller.signal.aborted) {
+          setAccessControl(payload);
+        }
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          setAccessControlStatus({
+            tone: "error",
+            message: normalizeSettingsError(error, "访问账户加载失败，请稍后重试。"),
+          });
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setIsAccessControlLoading(false);
+        }
+      });
+    return () => controller.abort();
+  }, [active, activationGeneration, canAdminAccess]);
 
   useEffect(() => {
     if (!active || !canAdminAccess) {
@@ -206,9 +250,6 @@ export default function SettingsPage() {
   const handleSaveSettings = async (payload: {
     completedProjectIds: string[];
     bankAccountMappings: WorkbenchSettings["bankAccountMappings"];
-    allowedUsernames: string[];
-    readonlyExportUsernames: string[];
-    adminUsernames: string[];
     workbenchColumnLayouts: WorkbenchSettings["workbenchColumnLayouts"];
     oaRetention: WorkbenchSettings["oaRetention"];
     oaImport: WorkbenchSettings["oaImport"];
@@ -234,6 +275,36 @@ export default function SettingsPage() {
       setPageFeedback({ tone: "error", message: normalizeSettingsError(error, "保存设置失败，请稍后重试。") });
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleSaveAccessControl = async (accounts: WorkbenchAccessAccount[]): Promise<void> => {
+    if (!canAdminAccess || accessControl === null) {
+      setAccessControlStatus({ tone: "error", message: "当前账号没有管理员权限，不能维护访问账户。" });
+      return;
+    }
+    if (healthStatus.blocksMutations) {
+      setAccessControlStatus({ tone: "error", message: "登录已失效或系统不可用，不能维护访问账户。" });
+      return;
+    }
+    setIsAccessControlSaving(true);
+    setAccessControlStatus(null);
+    try {
+      const saved = await saveWorkbenchAccessControl({ version: accessControl.version, accounts });
+      setAccessControl(saved);
+      setAccessControlStatus({ tone: "success", message: "已保存访问账户。" });
+    } catch (error) {
+      const conflictVersion = error instanceof WorkbenchApiError && error.status === 409
+        ? error.currentVersion
+        : null;
+      setAccessControlStatus({
+        tone: "error",
+        message: conflictVersion === null
+          ? normalizeSettingsError(error, "访问账户保存失败，请稍后重试。")
+          : `访问账户已被其他管理员更新（当前版本 ${conflictVersion}），请保留当前编辑并刷新后重试。`,
+      });
+    } finally {
+      setIsAccessControlSaving(false);
     }
   };
 
@@ -388,8 +459,12 @@ export default function SettingsPage() {
       {!isLoading && !loadError && settings ? (
         <SettingsPageContent
           canManageAccessControl={canAdminAccess}
+          accessControl={accessControl}
+          accessControlStatus={accessControlStatus}
           canSave={canMutateData && canMutateWithHealth}
           isSaving={isSaving}
+          isAccessControlLoading={isAccessControlLoading}
+          isAccessControlSaving={isAccessControlSaving}
           isOaApplicantCredentialLoading={isOaApplicantCredentialLoading}
           isOaApplicantCredentialSaving={isOaApplicantCredentialSaving}
           oaApplicantCredentials={oaApplicantCredentials}
@@ -400,6 +475,7 @@ export default function SettingsPage() {
           onDeleteProject={handleDeleteSettingsProject}
           onDeleteOaApplicantCredential={handleDeleteOaApplicantCredential}
           onSave={handleSaveSettings}
+          onSaveAccessControl={handleSaveAccessControl}
           onSaveOaApplicantCredential={handleSaveOaApplicantCredential}
           onSyncProjects={handleSyncSettingsProjects}
         />

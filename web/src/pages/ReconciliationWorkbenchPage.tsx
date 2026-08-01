@@ -609,9 +609,6 @@ export default function ReconciliationWorkbenchPage() {
       void saveWorkbenchSettings({
         completedProjectIds: nextSettings.projects.completedProjectIds,
         bankAccountMappings: nextSettings.bankAccountMappings,
-        allowedUsernames: nextSettings.accessControl.allowedUsernames,
-        readonlyExportUsernames: nextSettings.accessControl.readonlyExportUsernames,
-        adminUsernames: nextSettings.accessControl.adminUsernames,
         workbenchColumnLayouts: nextLayouts,
         oaRetention: nextSettings.oaRetention,
         oaImport: nextSettings.oaImport,

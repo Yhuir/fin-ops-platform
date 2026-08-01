@@ -1817,29 +1817,28 @@ describe("Workbench row selection and detail drawer", () => {
     await user.type(screen.getByLabelText("新增访问账户"), "READONLY001");
     await user.selectOptions(screen.getByLabelText("新增账户权限"), "read_export_only");
     await user.click(screen.getByRole("button", { name: "新增账户" }));
+    await user.click(screen.getByRole("button", { name: "保存访问账户" }));
+    expect(await screen.findByText("已保存访问账户。")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "保存设置" }));
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/workbench/settings",
+      "/api/workbench/settings/access-control",
       expect.objectContaining({
-        method: "POST",
-        body: expect.stringContaining("\"allowed_usernames\":[\"READONLY001\"]"),
+        method: "PUT",
+        body: JSON.stringify({
+          expected_version: 1,
+          accounts: [{ username: "READONLY001", access_tier: "read_export_only" }],
+        }),
       }),
     );
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/workbench/settings",
-      expect.objectContaining({
-        method: "POST",
-        body: expect.stringContaining("\"readonly_export_usernames\":[\"READONLY001\"]"),
-      }),
+    const globalSettingsSave = fetchMock.mock.calls.find(([input, init]) =>
+      input === "/api/workbench/settings" && (init?.method ?? "GET").toUpperCase() === "POST",
     );
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/workbench/settings",
-      expect.objectContaining({
-        method: "POST",
-        body: expect.stringContaining("\"admin_usernames\":[\"YNSYLP005\"]"),
-      }),
-    );
+    const globalSettingsBody = JSON.parse(String(globalSettingsSave?.[1]?.body ?? "{}"));
+    expect(globalSettingsBody).not.toHaveProperty("access_control");
+    expect(globalSettingsBody).not.toHaveProperty("allowed_usernames");
+    expect(globalSettingsBody).not.toHaveProperty("readonly_export_usernames");
+    expect(globalSettingsBody).not.toHaveProperty("admin_usernames");
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/workbench/settings",
       expect.objectContaining({

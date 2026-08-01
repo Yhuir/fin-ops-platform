@@ -51,6 +51,7 @@ import type {
   OaManualSearchRow,
   OaApplicantCredentialSummary,
   SaveOaApplicantCredentialRequest,
+  WorkbenchAccessControl,
 } from "./types";
 import { apiUrl } from "../../app/runtime";
 import { ApiClientError, apiRequestJson } from "../apiClient";
@@ -336,12 +337,6 @@ type ApiWorkbenchSettings = {
     bank_name: string;
     short_name?: string | null;
   }>;
-  access_control?: {
-    allowed_usernames?: string[];
-    readonly_export_usernames?: string[];
-    admin_usernames?: string[];
-    full_access_usernames?: string[];
-  };
   workbench_column_layouts?: Partial<WorkbenchColumnLayouts>;
   oa_retention?: {
     cutoff_date?: string;
@@ -366,6 +361,19 @@ type ApiWorkbenchSettings = {
     bank_statement_as_invoice?: unknown[];
     no_invoice_required?: unknown[];
   };
+};
+
+type ApiWorkbenchAccessControl = {
+  version: number;
+  administrator: {
+    username: string;
+    access_tier: "admin";
+    protected: true;
+  };
+  accounts: Array<{
+    username: string;
+    access_tier: "full_access" | "read_export_only";
+  }>;
 };
 
 type ApiOaApplicantCredentialSummary = {
@@ -746,9 +754,6 @@ type CancelCashSpecialPayload = {
 type WorkbenchSettingsUpdatePayload = {
   completedProjectIds: string[];
   bankAccountMappings: BankAccountMapping[];
-  allowedUsernames: string[];
-  readonlyExportUsernames: string[];
-  adminUsernames: string[];
   workbenchColumnLayouts: WorkbenchColumnLayouts;
   oaRetention: {
     cutoffDate: string;
@@ -1900,20 +1905,6 @@ function mapWorkbenchSettings(payload: ApiWorkbenchSettings): WorkbenchSettings 
       bankName: mapping.bank_name,
       shortName: mapping.short_name ?? "",
     })),
-    accessControl: {
-      allowedUsernames: (payload.access_control?.allowed_usernames ?? [])
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-      readonlyExportUsernames: (payload.access_control?.readonly_export_usernames ?? [])
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-      adminUsernames: (payload.access_control?.admin_usernames ?? [])
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-      fullAccessUsernames: (payload.access_control?.full_access_usernames ?? [])
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-    },
     workbenchColumnLayouts: {
       oa: Array.isArray(rawLayouts.oa) ? rawLayouts.oa.map((item) => String(item)) : [],
       bank: Array.isArray(rawLayouts.bank) ? rawLayouts.bank.map((item) => String(item)) : [],
@@ -2094,13 +2085,18 @@ export class WorkbenchApiError extends Error {
   readonly status: number;
   readonly code: string;
   readonly requestId: string;
+  readonly currentVersion: number | null;
 
-  constructor(message: string, options: { status: number; code: string; requestId: string }) {
+  constructor(
+    message: string,
+    options: { status: number; code: string; requestId: string; currentVersion?: number | null },
+  ) {
     super(message);
     this.name = "WorkbenchApiError";
     this.status = options.status;
     this.code = options.code;
     this.requestId = options.requestId;
+    this.currentVersion = options.currentVersion ?? null;
   }
 }
 
@@ -2113,6 +2109,9 @@ function createWorkbenchApiError(error: ApiClientError) {
       status: error.status,
       code: error.code,
       requestId,
+      currentVersion: typeof (error.payload as { current_version?: unknown } | null)?.current_version === "number"
+        ? (error.payload as { current_version: number }).current_version
+        : null,
     },
   );
 }
@@ -2688,6 +2687,47 @@ export async function fetchWorkbenchSettings(signal?: AbortSignal): Promise<Work
   return fetchWorkbenchSettingsWithProgress(signal);
 }
 
+function mapWorkbenchAccessControl(payload: ApiWorkbenchAccessControl): WorkbenchAccessControl {
+  return {
+    version: payload.version,
+    administrator: {
+      username: payload.administrator.username,
+      accessTier: payload.administrator.access_tier,
+      protected: payload.administrator.protected,
+    },
+    accounts: payload.accounts.map((account) => ({
+      username: account.username,
+      accessTier: account.access_tier,
+    })),
+  };
+}
+
+export async function fetchWorkbenchAccessControl(signal?: AbortSignal): Promise<WorkbenchAccessControl> {
+  return mapWorkbenchAccessControl(await requestJson<ApiWorkbenchAccessControl>(
+    "/api/workbench/settings/access-control",
+    { method: "GET", signal },
+  ));
+}
+
+export async function saveWorkbenchAccessControl(
+  accessControl: Pick<WorkbenchAccessControl, "version" | "accounts">,
+): Promise<WorkbenchAccessControl> {
+  return mapWorkbenchAccessControl(await requestJson<ApiWorkbenchAccessControl>(
+    "/api/workbench/settings/access-control",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        expected_version: accessControl.version,
+        accounts: accessControl.accounts.map((account) => ({
+          username: account.username,
+          access_tier: account.accessTier,
+        })),
+      }),
+    },
+  ));
+}
+
 export async function fetchOaApplicantCredentials(signal?: AbortSignal): Promise<OaApplicantCredentialSummary[]> {
   const payload = await requestJson<ApiOaApplicantCredentialList>(
     "/api/workbench/settings/oa-applicant-credentials",
@@ -2721,9 +2761,6 @@ export async function saveWorkbenchSettings(
         bank_name: mapping.bankName,
         short_name: mapping.shortName,
       })),
-      allowed_usernames: settings.allowedUsernames,
-      readonly_export_usernames: settings.readonlyExportUsernames,
-      admin_usernames: settings.adminUsernames,
       workbench_column_layouts: settings.workbenchColumnLayouts,
       oa_retention: {
         cutoff_date: settings.oaRetention.cutoffDate,

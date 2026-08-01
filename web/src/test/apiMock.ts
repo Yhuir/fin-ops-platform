@@ -4621,12 +4621,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         short_name: "建行",
       },
     ],
-    access_control: {
-      allowed_usernames: [],
-      readonly_export_usernames: [],
-      admin_usernames: ["YNSYLP005"],
-      full_access_usernames: [],
-    },
     workbench_column_layouts: {
       oa: options.workbenchColumnLayouts?.oa ?? ["applicant", "projectName", "amount", "counterparty", "reason"],
       bank: options.workbenchColumnLayouts?.bank ?? ["counterparty", "amount", "loanRepaymentDate", "note"],
@@ -4651,6 +4645,18 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     oa_invoice_offset: {
       applicant_names: ["周洁莹"],
     },
+  };
+  let workbenchAccessControlState = {
+    version: 1,
+    administrator: {
+      username: "YNSYLP005",
+      access_tier: "admin" as const,
+      protected: true as const,
+    },
+    accounts: [] as Array<{
+      username: string;
+      access_tier: "full_access" | "read_export_only";
+    }>,
   };
   let oaApplicantCredentialsState = [
     {
@@ -5187,6 +5193,24 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     },
     "/api/workbench/settings": ({ init, jsonBody }) => {
       if ((init?.method ?? "GET").toUpperCase() === "POST" && jsonBody) {
+        const forbiddenAclKeys = [
+          "access_control",
+          "allowed_usernames",
+          "readonly_export_usernames",
+          "admin_usernames",
+          "full_access_usernames",
+          "access_control_version",
+        ];
+        if (forbiddenAclKeys.some((key) => Object.prototype.hasOwnProperty.call(jsonBody, key))) {
+          return {
+            ok: false,
+            status: 400,
+            body: {
+              error: "access_control_write_forbidden",
+              message: "Access control can only be changed through the administrator access-control API.",
+            },
+          };
+        }
         const completedProjectIds = Array.isArray(jsonBody.completed_project_ids)
           ? (jsonBody.completed_project_ids as string[])
           : workbenchSettingsState.projects.completed_project_ids;
@@ -5204,18 +5228,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             bank_name: item.bank_name ?? item.bankName ?? "未识别银行",
             short_name: item.short_name ?? item.shortName ?? "",
           })),
-          access_control: {
-            allowed_usernames: Array.isArray(jsonBody.allowed_usernames)
-              ? (jsonBody.allowed_usernames as string[]).map((item) => String(item).trim()).filter(Boolean)
-              : workbenchSettingsState.access_control.allowed_usernames,
-            readonly_export_usernames: Array.isArray(jsonBody.readonly_export_usernames)
-              ? (jsonBody.readonly_export_usernames as string[]).map((item) => String(item).trim()).filter(Boolean)
-              : workbenchSettingsState.access_control.readonly_export_usernames,
-            admin_usernames: Array.isArray(jsonBody.admin_usernames)
-              ? (jsonBody.admin_usernames as string[]).map((item) => String(item).trim()).filter(Boolean)
-              : workbenchSettingsState.access_control.admin_usernames,
-            full_access_usernames: [],
-          },
           workbench_column_layouts:
             jsonBody.workbench_column_layouts && typeof jsonBody.workbench_column_layouts === "object"
               ? {
@@ -5267,16 +5279,65 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
               }
               : workbenchSettingsState.oa_invoice_offset,
         };
-        const allowedSet = new Set(workbenchSettingsState.access_control.allowed_usernames);
-        const readonlySet = new Set(
-          workbenchSettingsState.access_control.readonly_export_usernames.filter((item) => allowedSet.has(item)),
-        );
-        const adminSet = new Set(workbenchSettingsState.access_control.admin_usernames);
-        workbenchSettingsState.access_control.full_access_usernames = workbenchSettingsState.access_control.allowed_usernames.filter(
-          (item) => !readonlySet.has(item) && !adminSet.has(item),
-        );
       }
       return { body: cloneJson(workbenchSettingsState) };
+    },
+    "/api/workbench/settings/access-control": ({ init, jsonBody }) => {
+      if (options.sessionAccessTier !== "admin") {
+        return {
+          ok: false,
+          status: 403,
+          body: { error: "forbidden", message: "当前账号无权执行此操作。" },
+        };
+      }
+      if ((init?.method ?? "GET").toUpperCase() === "PUT") {
+        const expectedVersion = jsonBody?.expected_version;
+        const accounts = jsonBody?.accounts;
+        if (expectedVersion !== workbenchAccessControlState.version) {
+          return {
+            ok: false,
+            status: 409,
+            body: {
+              error: "access_control_version_conflict",
+              message: "Access control version conflict.",
+              current_version: workbenchAccessControlState.version,
+            },
+          };
+        }
+        if (!Array.isArray(accounts)) {
+          return {
+            ok: false,
+            status: 400,
+            body: { error: "invalid_access_control_request", message: "accounts must be an array." },
+          };
+        }
+        const normalizedAccounts = accounts.map((account) => ({
+          username: String((account as Record<string, unknown>).username ?? "").trim(),
+          access_tier: String((account as Record<string, unknown>).access_tier ?? ""),
+        }));
+        const invalid = normalizedAccounts.some((account) =>
+          !account.username
+          || account.username === "YNSYLP005"
+          || !["full_access", "read_export_only"].includes(account.access_tier),
+        ) || new Set(normalizedAccounts.map((account) => account.username)).size !== normalizedAccounts.length;
+        if (invalid) {
+          return {
+            ok: false,
+            status: 400,
+            body: { error: "invalid_access_control_request", message: "Invalid access-control accounts." },
+          };
+        }
+        const nextAccounts = normalizedAccounts as typeof workbenchAccessControlState.accounts;
+        const changed = JSON.stringify(nextAccounts) !== JSON.stringify(workbenchAccessControlState.accounts);
+        if (changed) {
+          workbenchAccessControlState = {
+            ...workbenchAccessControlState,
+            version: workbenchAccessControlState.version + 1,
+            accounts: nextAccounts,
+          };
+        }
+      }
+      return { body: cloneJson(workbenchAccessControlState) };
     },
     "/api/workbench/settings/oa-applicant-credentials": () => ({
       body: {
