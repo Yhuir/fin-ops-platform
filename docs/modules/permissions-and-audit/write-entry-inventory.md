@@ -4,6 +4,8 @@
 
 Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.planning/phases/27-read-model-fan-out/27-COVERAGE-MATRIX.md`。它把本清单扩展到当前 17 个注册页面、110 个导出 POST/PUT/PATCH/DELETE 客户端函数、22 个业务 `Drawer.tsx`、23 个 Browser dynamic opener、15 个 manifest read model 和直接 lifecycle/enqueue/barrier 调用点，并由本文件对应测试与 `tests/test_read_model_manifest.py` 双向校验。该矩阵只用于规划、测试和删除审计，不进入生产 I/O，也不建立第二套 runtime registry；其中 `planned` 目标在对应 vertical slice 部署验证前不得描述为已上线。
 
+后端独立 fail-closed 合同由 `route_access_policy.py` 和 `tests/test_route_access_policy.py`/`tests/test_auth_guard.py` 维护：除明确登记的纯读取 POST 外，受保护的 unsafe method 默认要求 mutation 权限。浏览器 inventory 证明 UI 不暴露写控件，后端合同证明手工构造 HTTP 请求也不能越权，二者不能互相替代。
+
 状态说明：
 
 - `covered-browser`：已有 Browser E2E 证明 `read_export_only` 下入口隐藏/禁用，且 durable mutation 为 0。

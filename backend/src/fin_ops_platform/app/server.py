@@ -47,6 +47,7 @@ from fin_ops_platform.app.routes_no_oa_bank_batches import NoOaBankBatchApiRoute
 from fin_ops_platform.app.routes_oa_pending_payments import OaPendingPaymentApiRoutes
 from fin_ops_platform.app.routes_output_invoice_collections import OutputInvoiceCollectionApiRoutes
 from fin_ops_platform.app.routes_pending_invoices import PendingInvoiceApiRoutes, PendingInvoiceExportFile
+from fin_ops_platform.app.route_access_policy import requires_data_mutation
 from fin_ops_platform.app.routes_settings import SettingsApiRoutes
 from fin_ops_platform.app.routes_tax import TaxApiRoutes
 from fin_ops_platform.app.routes_turnover_ledger import (
@@ -1445,7 +1446,8 @@ class Application:
             return Response(status_code=int(HTTPStatus.NO_CONTENT), body="")
         if method == "GET" and route_path == "/foundation/seed":
             return self._json_response(HTTPStatus.OK, self._seed_payload)
-        auth_error = self._enforce_route_access(
+        access_session, auth_error = self._enforce_route_access(
+            method,
             route_path,
             headers,
             request_id=request_id,
@@ -1569,21 +1571,26 @@ class Application:
             return self._handle_api_operations_app_health_dashboard(headers)
         if method == "GET" and route_path == "/api/operations/app-health/page-audit":
             return self._handle_api_operations_page_audit(query, headers)
+        request_actor_id = (
+            str(access_session.identity.username or actor_id_for_session(access_session))
+            if access_session is not None
+            else ""
+        )
         if method == "GET" and route_path == "/api/background-jobs/active":
-            return self._handle_api_background_jobs_active(headers)
+            return self._handle_api_background_jobs_active(request_actor_id)
         if method == "GET" and route_path.startswith("/api/background-jobs/"):
             job_id = unquote(route_path.rsplit("/", 1)[-1])
-            return self._handle_api_background_job(job_id, headers)
+            return self._handle_api_background_job(job_id, request_actor_id)
         if method == "POST" and route_path.startswith("/api/background-jobs/") and route_path.endswith("/acknowledge"):
             job_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._handle_api_background_job_acknowledge(job_id, headers)
+            return self._handle_api_background_job_acknowledge(job_id, request_actor_id)
         if method == "POST" and route_path.startswith("/api/background-jobs/") and route_path.endswith("/retry"):
             job_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._handle_api_background_job_retry(job_id, headers)
+            return self._handle_api_background_job_retry(job_id, request_actor_id)
         if route_path in {"/api/etc/import/preview", "/api/etc/import/confirm"}:
-            return self._etc_import_routes().route(method, route_path, body, headers)
+            return self._etc_import_routes().route(method, route_path, body, headers, actor_id=request_actor_id)
         if route_path == "/api/etc/reconciliation-tasks" or route_path.startswith("/api/etc/reconciliation-tasks/"):
-            return self._etc_reconciliation_routes().route(method, route_path, body, headers)
+            return self._etc_reconciliation_routes().route(method, route_path, body, headers, actor_id=request_actor_id)
         if route_path == "/api/etc/business-batches":
             return self._handle_api_etc_business_batches_route(method, query, body, headers)
         if route_path.startswith("/api/etc/business-batches/"):
@@ -1618,7 +1625,12 @@ class Application:
         if method == "POST" and route_path == "/api/workbench/exception/apply":
             return self._handle_api_workbench_exception_apply(body, request_id=request_id)
         if method == "POST" and route_path == "/api/workbench/actions/confirm-link":
-            response = self._handle_api_workbench_confirm_link(body, request_id=request_id, headers=headers)
+            response = self._handle_api_workbench_confirm_link(
+                body,
+                request_id=request_id,
+                headers=headers,
+                access_session=access_session,
+            )
             response.headers["X-Request-ID"] = request_id or "no-request-id"
             self._emit_workbench_action_timing(
                 request_id=request_id or "no-request-id",
@@ -1642,7 +1654,12 @@ class Application:
         if method == "POST" and route_path == "/api/workbench/actions/mark-exception":
             return self._handle_api_workbench_mark_exception(body)
         if method == "POST" and route_path == "/api/workbench/actions/cancel-link":
-            response = self._handle_api_workbench_cancel_link(body, request_id=request_id, headers=headers)
+            response = self._handle_api_workbench_cancel_link(
+                body,
+                request_id=request_id,
+                headers=headers,
+                access_session=access_session,
+            )
             response.headers["X-Request-ID"] = request_id or "no-request-id"
             self._emit_workbench_action_timing(
                 request_id=request_id or "no-request-id",
@@ -1664,7 +1681,12 @@ class Application:
             )
             return response
         if method == "POST" and route_path == "/api/workbench/actions/withdraw-link":
-            response = self._handle_api_workbench_withdraw_link(body, request_id=request_id, headers=headers)
+            response = self._handle_api_workbench_withdraw_link(
+                body,
+                request_id=request_id,
+                headers=headers,
+                access_session=access_session,
+            )
             response.headers["X-Request-ID"] = request_id or "no-request-id"
             self._emit_workbench_action_timing(
                 request_id=request_id or "no-request-id",
@@ -1700,41 +1722,6 @@ class Application:
             cost_statistics_response = self._cost_statistics_routes().route(method, route_path, query, body, headers)
             if cost_statistics_response is not None:
                 return cost_statistics_response
-        if method == "GET" and route_path == "/integrations/oa":
-            return self._handle_oa_dashboard()
-        if method == "POST" and route_path == "/integrations/oa/sync":
-            return self._handle_oa_sync(body)
-        if method == "GET" and route_path == "/integrations/oa/sync-runs":
-            return self._handle_oa_sync_runs()
-        if method == "GET" and route_path.startswith("/integrations/oa/sync-runs/"):
-            run_id = route_path.rsplit("/", 1)[-1]
-            return self._handle_oa_sync_run_detail(run_id)
-        if method == "GET" and route_path == "/projects":
-            return self._handle_projects()
-        if method == "POST" and route_path == "/projects":
-            return self._handle_project_create(body)
-        if method == "POST" and route_path == "/projects/assign":
-            return self._handle_project_assign(body)
-        if method == "GET" and route_path.startswith("/projects/"):
-            project_id = route_path.rsplit("/", 1)[-1]
-            return self._handle_project_detail(project_id)
-        if method == "GET" and route_path == "/ledgers":
-            view = query.get("view", ["all"])[0]
-            as_of = query.get("as_of", [None])[0]
-            status = query.get("status", [None])[0]
-            return self._handle_ledgers(view=view, as_of=as_of, status=status)
-        if method == "GET" and route_path.startswith("/ledgers/") and not route_path.endswith("/status"):
-            ledger_id = route_path.rsplit("/", 1)[-1]
-            return self._handle_ledger_detail(ledger_id)
-        if method == "POST" and route_path.startswith("/ledgers/") and route_path.endswith("/status"):
-            ledger_id = route_path.rsplit("/", 2)[-2]
-            return self._handle_ledger_status_update(ledger_id, body)
-        if method == "GET" and route_path == "/reminders":
-            as_of = query.get("as_of", [None])[0]
-            status = query.get("status", [None])[0]
-            return self._handle_reminders(as_of=as_of, status=status)
-        if method == "POST" and route_path == "/reminders/run":
-            return self._handle_reminder_run(body)
         if method == "GET" and route_path == "/reconciliation/cases":
             return self._handle_reconciliation_cases()
         if method == "GET" and route_path.startswith("/reconciliation/cases/"):
@@ -1749,21 +1736,14 @@ class Application:
         if method == "GET" and route_path == "/imports/templates":
             return self._handle_import_templates()
         if method == "POST" and route_path == "/imports/files/preview":
-            return self._handle_import_file_preview(body, headers)
+            return self._handle_import_file_preview(body, headers, imported_by=request_actor_id)
         if method == "POST" and route_path == "/imports/files/confirm":
-            return self._handle_import_file_confirm(body, headers)
+            return self._handle_import_file_confirm(body, owner_user_id=request_actor_id)
         if method == "POST" and route_path == "/imports/files/retry":
             return self._handle_import_file_retry(body)
         if method == "GET" and route_path.startswith("/imports/files/sessions/"):
             session_id = route_path.rsplit("/", 1)[-1]
             return self._handle_import_file_session(session_id)
-        if method == "POST" and route_path == "/matching/run":
-            return self._handle_matching_run(body)
-        if method == "GET" and route_path == "/matching/results":
-            return self._handle_matching_results()
-        if method == "GET" and route_path.startswith("/matching/results/"):
-            result_id = route_path.rsplit("/", 1)[-1]
-            return self._handle_matching_result_detail(result_id)
         return self._json_response(
             HTTPStatus.NOT_FOUND,
             {
@@ -1825,8 +1805,6 @@ class Application:
                 "/imports/files/confirm",
                 "/imports/files/retry",
                 "/imports/files/sessions/{session_id}",
-                "/matching/run",
-                "/matching/results",
                 "/api/workbench",
                 "/api/workbench/groups/detail",
                 "/api/bank-details/auto-tag-rules/reapply",
@@ -1934,13 +1912,6 @@ class Application:
                 "/api/cost-statistics/export-preview",
                 "/api/cost-statistics/export",
                 "/api/cost-statistics/transactions/{transaction_id}",
-                "/integrations/oa",
-                "/integrations/oa/sync",
-                "/integrations/oa/sync-runs",
-                "/projects",
-                "/projects/assign",
-                "/ledgers",
-                "/reminders",
                 "/reconciliation/cases",
             ],
             "capabilities": [
@@ -3761,7 +3732,6 @@ class Application:
             load_json_body=self._load_json_body,
             load_multipart_body=self._load_multipart_body,
             reconciliation_error_response=self._reconciliation_error_response,
-            resolve_background_job_owner=self._resolve_background_job_owner,
             enqueue_import_job=self._enqueue_import_process_job,
             serialize_import_job=self._serialize_import_job,
         )
@@ -4110,8 +4080,7 @@ class Application:
             },
         )
 
-    def _handle_api_background_jobs_active(self, headers: dict[str, str] | None) -> Response:
-        owner_user_id = self._resolve_background_job_owner(headers)
+    def _handle_api_background_jobs_active(self, owner_user_id: str) -> Response:
         active_jobs = self._background_job_service.list_active_jobs(owner_user_id, include_system=True)
         attention_jobs = self._background_job_service.list_attention_jobs(owner_user_id, include_system=True)
         active_payloads = [self._serialize_background_job(job) for job in active_jobs]
@@ -4126,8 +4095,7 @@ class Application:
             },
         )
 
-    def _handle_api_background_job(self, job_id: str, headers: dict[str, str] | None) -> Response:
-        owner_user_id = self._resolve_background_job_owner(headers)
+    def _handle_api_background_job(self, job_id: str, owner_user_id: str) -> Response:
         try:
             job = self._background_job_service.get_job(job_id, owner_user_id)
         except (BackgroundJobNotFoundError, BackgroundJobAccessError):
@@ -4137,8 +4105,7 @@ class Application:
             )
         return self._json_response(HTTPStatus.OK, {"job": self._serialize_background_job(job)})
 
-    def _handle_api_background_job_acknowledge(self, job_id: str, headers: dict[str, str] | None) -> Response:
-        owner_user_id = self._resolve_background_job_owner(headers)
+    def _handle_api_background_job_acknowledge(self, job_id: str, owner_user_id: str) -> Response:
         try:
             job = self._background_job_service.acknowledge_job(job_id, owner_user_id)
         except (BackgroundJobNotFoundError, BackgroundJobAccessError):
@@ -4148,8 +4115,7 @@ class Application:
             )
         return self._json_response(HTTPStatus.OK, {"job": self._serialize_background_job(job)})
 
-    def _handle_api_background_job_retry(self, job_id: str, headers: dict[str, str] | None) -> Response:
-        owner_user_id = self._resolve_background_job_owner(headers)
+    def _handle_api_background_job_retry(self, job_id: str, owner_user_id: str) -> Response:
         try:
             job = self._background_job_service.get_job(job_id, owner_user_id)
         except (BackgroundJobNotFoundError, BackgroundJobAccessError):
@@ -4239,17 +4205,6 @@ class Application:
                 "retry_mode": "file_preview",
             },
         )
-
-    def _resolve_background_job_owner(self, headers: dict[str, str] | None) -> str:
-        try:
-            session = resolve_oa_request_session(
-                headers,
-                identity_service=self._oa_identity_service,
-                access_control_service=self._access_control_service,
-            )
-        except (OAAuthError, OAIdentityConfigurationError, OAIdentityServiceError, OASessionExpiredError):
-            return "web_finance_user"
-        return session.identity.username or session.identity.user_id or "web_finance_user"
 
     def _resolve_task_etc_business_batch(
         self,
@@ -4796,13 +4751,8 @@ class Application:
             return False
         protected_prefixes = (
             "/api/",
-            "/integrations",
-            "/projects",
-            "/ledgers",
-            "/reminders",
             "/reconciliation",
             "/imports",
-            "/matching",
         )
         return route_path.startswith(protected_prefixes)
 
@@ -5003,16 +4953,17 @@ class Application:
 
     def _enforce_route_access(
         self,
+        method: str,
         route_path: str,
         headers: dict[str, str] | None,
         *,
         request_id: str | None = None,
         action_name: str | None = None,
-    ) -> Response | None:
+    ) -> tuple[OARequestSession | None, Response | None]:
         if self._route_has_module_owned_oa_access(route_path):
-            return None
+            return None, None
         if not self._route_requires_oa_access(route_path):
-            return None
+            return None, None
         auth_started_at = monotonic()
         try:
             session = resolve_oa_request_session(
@@ -5023,7 +4974,7 @@ class Application:
             if not session.allowed:
                 raise ForbiddenOAAccessError("当前 OA 账户未被授权访问财务运营平台。")
         except UnauthorizedOASessionError as error:
-            return self._json_response(
+            return None, self._json_response(
                 HTTPStatus.UNAUTHORIZED,
                 {
                     "error": "invalid_oa_session",
@@ -5031,7 +4982,7 @@ class Application:
                 },
             )
         except OASessionExpiredError as error:
-            return self._json_response(
+            return None, self._json_response(
                 HTTPStatus.UNAUTHORIZED,
                 {
                     "error": "invalid_oa_session",
@@ -5039,7 +4990,7 @@ class Application:
                 },
             )
         except ForbiddenOAAccessError as error:
-            return self._json_response(
+            return None, self._json_response(
                 HTTPStatus.FORBIDDEN,
                 {
                     "error": "forbidden",
@@ -5047,7 +4998,7 @@ class Application:
                 },
             )
         except OAIdentityConfigurationError as error:
-            return self._json_response(
+            return None, self._json_response(
                 HTTPStatus.SERVICE_UNAVAILABLE,
                 {
                     "error": "oa_identity_unavailable",
@@ -5055,7 +5006,7 @@ class Application:
                 },
             )
         except OAIdentityServiceError as error:
-            return self._json_response(
+            return None, self._json_response(
                 HTTPStatus.BAD_GATEWAY,
                 {
                     "error": "oa_identity_lookup_failed",
@@ -5070,15 +5021,26 @@ class Application:
                     phase="oa_auth",
                     duration_ms=self._duration_ms(auth_started_at),
                 )
-        return None
-
-    def _workbench_write_auth_context(self, headers: dict[str, str] | None) -> tuple[str, str] | Response:
-        try:
-            session = resolve_oa_request_session(
-                headers,
-                identity_service=self._oa_identity_service,
-                access_control_service=self._access_control_service,
+        if requires_data_mutation(method, route_path) and not session.can_mutate_data:
+            return None, self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "permission_denied", "message": "当前账户没有修改数据的权限。"},
             )
+        return session, None
+
+    def _workbench_write_auth_context(
+        self,
+        headers: dict[str, str] | None,
+        *,
+        session: OARequestSession | None = None,
+    ) -> tuple[str, str] | Response:
+        try:
+            if session is None:
+                session = resolve_oa_request_session(
+                    headers,
+                    identity_service=self._oa_identity_service,
+                    access_control_service=self._access_control_service,
+                )
             if not session.allowed:
                 raise ForbiddenOAAccessError("当前 OA 账户未被授权访问财务运营平台。")
             if not session.can_mutate_data:
@@ -5248,7 +5210,6 @@ class Application:
             resolve_admin_session=self._resolve_admin_session,
             verify_reset_oa_password=self._verify_reset_oa_password,
             oa_password_verification_failed_response=self._oa_password_verification_failed_response,
-            resolve_background_job_owner=self._resolve_background_job_owner,
             load_json_body=self._load_json_body,
             json_response=self._json_response,
             finalize_settings_event=self._finalize_workbench_settings_event,
@@ -6280,6 +6241,7 @@ class Application:
         *,
         request_id: str | None = None,
         headers: dict[str, str] | None = None,
+        access_session: OARequestSession | None = None,
     ) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
@@ -6287,7 +6249,7 @@ class Application:
         freshness_error = self._workbench_write_freshness_guard(payload)
         if freshness_error is not None:
             return freshness_error
-        auth_context = self._workbench_write_auth_context(headers)
+        auth_context = self._workbench_write_auth_context(headers, session=access_session)
         if isinstance(auth_context, Response):
             return auth_context
         actor_id, tenant_id = auth_context
@@ -6348,6 +6310,7 @@ class Application:
         *,
         request_id: str | None = None,
         headers: dict[str, str] | None = None,
+        access_session: OARequestSession | None = None,
     ) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
@@ -6355,7 +6318,7 @@ class Application:
         freshness_error = self._workbench_write_freshness_guard(payload)
         if freshness_error is not None:
             return freshness_error
-        auth_context = self._workbench_write_auth_context(headers)
+        auth_context = self._workbench_write_auth_context(headers, session=access_session)
         if isinstance(auth_context, Response):
             return auth_context
         actor_id, tenant_id = auth_context
@@ -6382,6 +6345,7 @@ class Application:
         *,
         request_id: str | None = None,
         headers: dict[str, str] | None = None,
+        access_session: OARequestSession | None = None,
     ) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
@@ -6389,7 +6353,7 @@ class Application:
         freshness_error = self._workbench_write_freshness_guard(payload)
         if freshness_error is not None:
             return freshness_error
-        auth_context = self._workbench_write_auth_context(headers)
+        auth_context = self._workbench_write_auth_context(headers, session=access_session)
         if isinstance(auth_context, Response):
             return auth_context
         actor_id, tenant_id = auth_context
@@ -7160,100 +7124,11 @@ class Application:
         result = self._workbench_action_api_routes.unignore_row(payload)
         return self._workbench_write_response(result)
 
-    def _handle_oa_dashboard(self) -> Response:
-        postgres_dashboard = self._postgres_oa_projection_dashboard()
-        if postgres_dashboard is not None:
-            return self._json_response(HTTPStatus.OK, postgres_dashboard)
-        return self._json_response(HTTPStatus.OK, self._integration_service.build_dashboard())
-
-    def _handle_oa_sync(self, body: str | bytes | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-
-        actor_id = payload.get("actor_id")
-        if not actor_id:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_oa_sync_request", "message": "actor_id is required."},
-            )
-        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
-        enqueue = getattr(queue_repository, "enqueue", None)
-        if callable(enqueue):
-            scope_key = str(payload.get("scope", "all") or "all").strip() or "all"
-            event = enqueue(
-                event_type="oa.sync",
-                aggregate_type="oa",
-                aggregate_id=scope_key,
-                scope_type="oa",
-                scope_key=scope_key,
-                dedupe_key=f"oa.sync:{scope_key}",
-                payload={
-                    "scope_key": scope_key,
-                    "triggered_by": str(actor_id),
-                    "retry_run_id": payload.get("retry_run_id"),
-                },
-            )
-            return self._json_response(
-                HTTPStatus.ACCEPTED,
-                {
-                    "status": "queued",
-                    "event_id": getattr(event, "event_id", None),
-                    "scope_key": scope_key,
-                },
-            )
-        return self._json_response(
-            HTTPStatus.SERVICE_UNAVAILABLE,
-            {
-                "error": "oa_sync_queue_unavailable",
-                "message": "OA 同步必须通过 durable queue 入队；当前运行时未配置 queue repository。",
-            },
-        )
-
-    def _handle_oa_sync_runs(self) -> Response:
-        postgres_runs = self._postgres_oa_projection_sync_runs()
-        if postgres_runs is not None:
-            return self._json_response(HTTPStatus.OK, {"runs": postgres_runs})
-        return self._json_response(
-            HTTPStatus.OK,
-            {"runs": [self._serialize_sync_run(run) for run in self._integration_service.list_sync_runs()]},
-        )
-
-    def _handle_oa_sync_run_detail(self, run_id: str) -> Response:
-        postgres_run = self._postgres_oa_projection_sync_run(run_id)
-        if postgres_run is not None:
-            return self._json_response(HTTPStatus.OK, {"run": postgres_run, "issues": []})
-        try:
-            run = self._integration_service.get_sync_run(run_id)
-        except KeyError:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "oa_sync_run_not_found", "run_id": run_id},
-            )
-        return self._json_response(
-            HTTPStatus.OK,
-            {"run": self._serialize_sync_run(run), "issues": self._serialize_value(run.issues)},
-        )
-
     def _postgres_oa_projection_repository(self) -> object | None:
         if not self._requires_sql_read_model_runtime():
             return None
         repository = getattr(self._state_store, "oa_projection_repository", None)
         return repository if repository is not None else None
-
-    def _postgres_oa_projection_dashboard(self) -> dict[str, object] | None:
-        repository = self._postgres_oa_projection_repository()
-        build_dashboard = getattr(repository, "build_dashboard", None)
-        if not callable(build_dashboard):
-            return None
-        return build_dashboard()
-
-    def _postgres_oa_projection_sync_runs(self) -> list[dict[str, object]] | None:
-        repository = self._postgres_oa_projection_repository()
-        list_runs = getattr(repository, "list_sync_runs", None)
-        if not callable(list_runs):
-            return None
-        return list_runs()
 
     def _postgres_oa_projection_latest_sync_run(self) -> dict[str, object] | None:
         repository = self._postgres_oa_projection_repository()
@@ -7262,162 +7137,6 @@ class Application:
             return None
         runs = list_runs(limit=1)
         return runs[0] if runs else None
-
-    def _postgres_oa_projection_sync_run(self, run_id: str) -> dict[str, object] | None:
-        repository = self._postgres_oa_projection_repository()
-        get_run = getattr(repository, "get_sync_run", None)
-        if not callable(get_run):
-            return None
-        return get_run(run_id)
-
-    def _handle_projects(self) -> Response:
-        return self._json_response(HTTPStatus.OK, self._project_costing_service.build_project_hub())
-
-    def _handle_project_create(self, body: str | bytes | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        actor_id = payload.get("actor_id")
-        if not actor_id:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_project_create_request", "message": "actor_id is required."},
-            )
-        try:
-            project = self._project_costing_service.create_project(
-                actor_id=str(actor_id),
-                project_code=str(payload.get("project_code", "")),
-                project_name=str(payload.get("project_name", "")),
-                project_status=str(payload.get("project_status", "active")),
-                department_name=payload.get("department_name"),
-                owner_name=payload.get("owner_name"),
-            )
-        except ValueError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_project_create_request", "message": str(exc)},
-            )
-        return self._json_response(HTTPStatus.OK, {"project": project, "hub": self._project_costing_service.build_project_hub()})
-
-    def _handle_project_assign(self, body: str | bytes | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        actor_id = payload.get("actor_id")
-        if not actor_id:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_project_assign_request", "message": "actor_id is required."},
-            )
-        try:
-            assignment = self._project_costing_service.assign_project(
-                actor_id=str(actor_id),
-                object_type=str(payload.get("object_type", "")),
-                object_id=str(payload.get("object_id", "")),
-                project_id=str(payload.get("project_id", "")),
-                note=payload.get("note"),
-            )
-        except KeyError as exc:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "project_or_object_not_found", "message": str(exc)},
-            )
-        except ValueError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_project_assign_request", "message": str(exc)},
-            )
-        detail = self._project_costing_service.get_project_detail(assignment.project_id)
-        return self._json_response(HTTPStatus.OK, {"assignment": assignment, **detail})
-
-    def _handle_project_detail(self, project_id: str) -> Response:
-        try:
-            detail = self._project_costing_service.get_project_detail(project_id)
-        except KeyError:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "project_not_found", "project_id": project_id},
-            )
-        return self._json_response(HTTPStatus.OK, detail)
-
-    def _handle_ledgers(self, *, view: str, as_of: str | None, status: str | None) -> Response:
-        try:
-            ledgers = self._ledger_service.list_ledgers(view=view, as_of=as_of, status=status)
-        except ValueError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_ledger_query", "message": str(exc)},
-            )
-        return self._json_response(HTTPStatus.OK, {"ledgers": ledgers})
-
-    def _handle_ledger_detail(self, ledger_id: str) -> Response:
-        try:
-            ledger = self._ledger_service.get_ledger(ledger_id)
-        except KeyError:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "ledger_not_found", "ledger_id": ledger_id},
-            )
-        return self._json_response(HTTPStatus.OK, {"ledger": ledger})
-
-    def _handle_ledger_status_update(self, ledger_id: str, body: str | bytes | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        actor_id = payload.get("actor_id")
-        if not actor_id:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_ledger_status_request", "message": "actor_id is required."},
-            )
-        try:
-            ledger = self._ledger_service.update_ledger(
-                ledger_id,
-                actor_id=str(actor_id),
-                status=payload.get("status"),
-                expected_date=payload.get("expected_date"),
-                note=payload.get("note"),
-            )
-        except KeyError:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "ledger_not_found", "ledger_id": ledger_id},
-            )
-        except ValueError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_ledger_status_request", "message": str(exc)},
-            )
-        return self._json_response(HTTPStatus.OK, {"ledger": ledger})
-
-    def _handle_reminders(self, *, as_of: str | None, status: str | None) -> Response:
-        try:
-            reminders = self._ledger_service.list_reminders(as_of=as_of, status=status)
-        except ValueError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_reminder_query", "message": str(exc)},
-            )
-        return self._json_response(HTTPStatus.OK, {"reminders": reminders})
-
-    def _handle_reminder_run(self, body: str | bytes | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        as_of = payload.get("as_of")
-        if not as_of:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_reminder_run_request", "message": "as_of is required."},
-            )
-        try:
-            sent_reminders = self._ledger_service.run_reminders(as_of=str(as_of))
-        except ValueError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_reminder_run_request", "message": str(exc)},
-            )
-        return self._json_response(HTTPStatus.OK, {"sent_reminders": sent_reminders})
 
     def _handle_reconciliation_cases(self) -> Response:
         return self._json_response(
@@ -7554,16 +7273,12 @@ class Application:
         self,
         body: str | bytes | None,
         headers: dict[str, str] | None,
+        *,
+        imported_by: str,
     ) -> Response:
         fields, files, error = self._load_multipart_body(body, headers)
         if error is not None:
             return error
-        imported_by = (fields.get("imported_by") or [""])[0]
-        if not imported_by:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_import_file_preview_request", "message": "imported_by is required."},
-            )
         if not files:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
@@ -7590,7 +7305,7 @@ class Application:
         self._persist_import_preview_delta(session.id)
         return self._json_response(HTTPStatus.OK, self._serialize_file_session(session))
 
-    def _handle_import_file_confirm(self, body: str | bytes | None, headers: dict[str, str] | None) -> Response:
+    def _handle_import_file_confirm(self, body: str | bytes | None, *, owner_user_id: str) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
@@ -7637,7 +7352,6 @@ class Application:
             )
         total = len(normalized_selected_file_ids)
         label = ImportProcessingService.file_import_job_label(session, normalized_selected_file_ids)
-        owner_user_id = self._resolve_background_job_owner(headers)
         selected_key = ",".join(sorted(normalized_selected_file_ids))
         affected_import_domains, import_route = self._file_import_job_status_scope(
             session,
@@ -7818,43 +7532,6 @@ class Application:
         while len(normalized) < file_count:
             normalized.append({})
         return normalized, None
-
-    def _handle_matching_run(self, body: str | bytes | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        triggered_by = str(payload.get("triggered_by", "system"))
-        run = self._matching_service.run(triggered_by=triggered_by)
-        self._persist_state()
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "run": self._serialize_matching_run(run),
-                "results": self._serialize_value(run.results),
-            },
-        )
-
-    def _handle_matching_results(self) -> Response:
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "runs": [self._serialize_matching_run(run) for run in self._matching_service.list_runs()],
-                "results": self._serialize_value(self._matching_service.list_results()),
-            },
-        )
-
-    def _handle_matching_result_detail(self, result_id: str) -> Response:
-        try:
-            result = self._matching_service.get_result(result_id)
-        except KeyError:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "matching_result_not_found", "result_id": result_id},
-            )
-        return self._json_response(
-            HTTPStatus.OK,
-            {"result": self._serialize_value(result)},
-        )
 
     def _serialize_preview(self, preview: object) -> dict[str, object]:
         return {
@@ -8518,14 +8195,6 @@ class Application:
             "files": self._serialize_value(session.files),
             "duplicate_groups": self._serialize_value(getattr(session, "duplicate_groups", [])),
         }
-
-    def _serialize_matching_run(self, run: object) -> dict[str, object]:
-        payload = self._serialize_value(run)
-        payload["result_count"] = run.result_count
-        payload["automatic_count"] = run.automatic_count
-        payload["suggested_count"] = run.suggested_count
-        payload["manual_review_count"] = run.manual_review_count
-        return payload
 
     def _serialize_sync_run(self, run: object) -> dict[str, object]:
         payload = self._serialize_value(run)

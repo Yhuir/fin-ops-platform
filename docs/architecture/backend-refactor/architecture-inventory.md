@@ -138,7 +138,7 @@ PF-P190 后推荐下一步：
 | `/api/oa-sync/status` | GET | `app/server.py` | Platform / Ops | `services/oa_projection_sync.py` | OA projection 同步状态 |
 | `/api/workbench/*` | GET/POST | `app/routes_workbench.py`、`app/server.py` | Workbench | `tests/test_workbench_v2_api.py`、`docs/product-specs/workbench.md` | 顶层 Workbench 模块 |
 | `/workbench*` | GET/POST | `app/server.py` | Workbench | legacy route tests | legacy UI/API wrapper，需在 Micro-JIT 中确认是否仍生产使用 |
-| `/matching/*` | GET/POST | `app/server.py` | Workbench Matching Engine 候选 | `services/matching.py`、Workbench matching tests | 暂按 Workbench 内部子域归属 |
+| `/matching/*` | retired | — | Legacy HTTP | `tests/test_app.py` | 已删除；正式 Workbench matching 只走当前 service/worker 边界 |
 | `/api/turnover-ledger` | GET | `app/routes_turnover_ledger.py`、`app/server.py:_handle_api_turnover_ledger*` | Turnover Ledger | `tests/test_turnover_ledger_api.py` | 独立模块 |
 | `/api/turnover-ledger/export-preview` | GET | `app/server.py` | Turnover Ledger | `tests/test_turnover_ledger_export_service.py` | 导出预览 |
 | `/api/turnover-ledger/export` | GET | `app/server.py` | Turnover Ledger | `tests/test_turnover_ledger_export_service.py` | 导出 |
@@ -164,8 +164,9 @@ PF-P190 后推荐下一步：
 | `/api/tax-offset*` | GET/POST | `app/routes_tax.py`、`app/server.py` | Tax / Cost / ETC | `docs/product-specs/tax-offset-and-etc.md` | 税金抵扣 |
 | `/api/cost-statistics*` | GET/POST | `app/server.py` | Tax / Cost / ETC | `docs/product-specs/cost-statistics.md` | 成本统计 |
 | `/api/etc/*` | GET/POST | `app/server.py` | Tax / Cost / ETC | `docs/dev/etc-business-batches-api.md` | ETC 对账 |
-| `/integrations/oa` | GET/POST | `app/server.py` | Platform / Ops | `docs/product-specs/oa-integration.md` | OA 集成边界 |
-| `/projects`、`/ledgers`、`/reminders`、`/reconciliation/cases` | GET/POST | `app/server.py` | Legacy / Review | legacy tests / product docs | 后续需判断是否归入 Ops、Workbench 或独立 legacy 模块 |
+| `/integrations/oa*` | retired | — | Legacy HTTP | `tests/test_app.py` | 已删除；正式 OA 同步只通过 durable queue/runtime worker 运维入口 |
+| `/projects*`、`/ledgers*`、`/reminders*` | retired | — | Legacy HTTP | `tests/test_app.py` | 已删除；项目设置使用 `/api/workbench/settings/projects*`，ledger/reminder 不再暴露旧 root API |
+| `/reconciliation/cases*` | GET | `app/server.py` | Legacy / Review | reconciliation tests | 暂保留只读入口，未进入本轮 legacy write 删除范围 |
 
 ## File Ownership
 

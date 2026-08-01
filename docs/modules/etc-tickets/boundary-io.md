@@ -32,6 +32,8 @@
 
 ## 输入 I/O
 
+所有 ETC import/reconciliation/business-batch unsafe route 必须先通过 mutation guard。对账任务的 `created_by`、source upload、patch、confirm、reopen、delete 与 cleanup actor 全部由已认证 session username 注入；JSON/form 中的 `actor`、`createdBy` 只作为废弃输入忽略，不得进入审计或持久化身份。
+
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | 页面查询/操作 | `EtcTicketManagementPage.tsx`、`features/etc/api.ts` | 进入 ETC routes/services；页面批次列表只发送 `unsubmitted/staged/submitted` bucket 与分页，不提供月份、车牌或关键词搜索框；后端可选 `month/plate/keyword` 参数作为兼容/运维查询合同保留。选择一个 business batch 后只读取一次精确 batch detail 和绑定 task，不调用 full reconciliation task list，不把详情数组塞入列表 DTO。task mutation target 必须同时满足“已加载 task ID = 当前选中 business batch 的 task ID”；bucket 切换或刷新响应自动迁移 selection 时必须同步失效旧 task，禁止旧 task I/O 泄漏到新批次。四阶段进度只读取当前 batch/task 内存事实，网络、持久化与全局 listener I/O 均为零 |

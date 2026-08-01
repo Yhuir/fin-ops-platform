@@ -141,7 +141,10 @@ class SettingsDataResetJobTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_local_state_application(data_dir=Path(temp_dir))
             queue = install_durable_import_queue(app)
-            app._resolve_admin_session = lambda _headers: (SimpleNamespace(), None)
+            app._resolve_admin_session = lambda _headers: (
+                SimpleNamespace(identity=SimpleNamespace(user_id="admin-id", username="YNSYLP005")),
+                None,
+            )
             app._verify_reset_oa_password = lambda _session, _password: None
             request = json.dumps({"action": RESET_BANK_TRANSACTIONS_ACTION, "oa_password": "secret-password"})
 
@@ -159,7 +162,10 @@ class SettingsDataResetJobTests(unittest.TestCase):
             app = build_local_state_application(data_dir=Path(temp_dir))
             queue = install_durable_import_queue(app)
             queue.fail_next_enqueue = True
-            app._resolve_admin_session = lambda _headers: (SimpleNamespace(), None)
+            app._resolve_admin_session = lambda _headers: (
+                SimpleNamespace(identity=SimpleNamespace(user_id="admin-id", username="YNSYLP005")),
+                None,
+            )
             app._verify_reset_oa_password = lambda _session, _password: None
 
             response = app.handle_request(

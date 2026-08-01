@@ -17,7 +17,6 @@ class EtcImportApiRoutes:
         load_json_body: Callable[[str | bytes | None], tuple[dict[str, Any], Any | None]],
         load_multipart_body: Callable[[str | bytes | None, dict[str, str] | None], tuple[dict[str, list[str]], list[Any], Any | None]],
         reconciliation_error_response: Callable[[ValueError], Any],
-        resolve_background_job_owner: Callable[[dict[str, str] | None], str],
         enqueue_import_job: Callable[..., tuple[Any, Any]],
         serialize_import_job: Callable[[Any], dict[str, Any]],
     ) -> None:
@@ -27,7 +26,6 @@ class EtcImportApiRoutes:
         self._load_json_body = load_json_body
         self._load_multipart_body = load_multipart_body
         self._reconciliation_error_response = reconciliation_error_response
-        self._resolve_background_job_owner = resolve_background_job_owner
         self._enqueue_import_job = enqueue_import_job
         self._serialize_import_job = serialize_import_job
 
@@ -37,11 +35,13 @@ class EtcImportApiRoutes:
         route_path: str,
         body: str | bytes | None,
         headers: dict[str, str] | None,
+        *,
+        actor_id: str,
     ) -> Any:
         if method == "POST" and route_path == "/api/etc/import/preview":
             return self.preview(body, headers)
         if method == "POST" and route_path == "/api/etc/import/confirm":
-            return self.confirm(body, headers)
+            return self.confirm(body, owner_user_id=actor_id)
         return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_etc_import_route"})
 
     def preview(self, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
@@ -76,7 +76,7 @@ class EtcImportApiRoutes:
             )
         return self._json_response(HTTPStatus.OK, payload)
 
-    def confirm(self, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
+    def confirm(self, body: str | bytes | None, *, owner_user_id: str) -> Any:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
@@ -91,7 +91,6 @@ class EtcImportApiRoutes:
         if not isinstance(task_id, str) or not task_id.strip():
             return self._json_response(HTTPStatus.BAD_REQUEST, {"error": "task_id_required", "message": "task_id is required."})
         normalized_task_id = task_id.strip()
-        owner_user_id = self._resolve_background_job_owner(headers)
         idempotency_key = f"etc_import_session:{normalized_session_id}"
         existing_job = self._background_job_service.get_reusable_idempotent_job(owner_user_id, idempotency_key)
         if existing_job is not None:

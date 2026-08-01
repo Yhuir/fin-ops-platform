@@ -7,6 +7,26 @@ from tests.app_test_support import build_local_state_application as build_applic
 
 
 class AppTests(unittest.TestCase):
+    def test_retired_legacy_http_routes_are_not_reachable(self) -> None:
+        app = build_application()
+
+        for method, route in (
+            ("GET", "/integrations/oa"),
+            ("POST", "/integrations/oa/sync"),
+            ("GET", "/projects"),
+            ("POST", "/projects"),
+            ("POST", "/projects/assign"),
+            ("GET", "/ledgers"),
+            ("POST", "/ledgers/ledger-1/status"),
+            ("GET", "/reminders"),
+            ("POST", "/reminders/run"),
+            ("POST", "/matching/run"),
+            ("GET", "/matching/results"),
+        ):
+            with self.subTest(method=method, route=route):
+                response = app.handle_request(method, route, body="{}")
+                self.assertEqual(response.status_code, 404)
+
     def test_health_endpoint_reports_current_and_future_capabilities(self) -> None:
         app = build_application()
 
@@ -22,11 +42,16 @@ class AppTests(unittest.TestCase):
         self.assertIn("advanced_exceptions", payload["capabilities"])
         self.assertIn("oa_integration_foundation", payload["capabilities"])
         self.assertIn("/metrics", payload["entrypoints"])
-        self.assertIn("/ledgers", payload["entrypoints"])
-        self.assertIn("/integrations/oa", payload["entrypoints"])
-        self.assertIn("/integrations/oa/sync", payload["entrypoints"])
-        self.assertIn("/projects", payload["entrypoints"])
-        self.assertIn("/projects/assign", payload["entrypoints"])
+        for retired_route in (
+            "/integrations/oa",
+            "/integrations/oa/sync",
+            "/projects",
+            "/projects/assign",
+            "/ledgers",
+            "/reminders",
+            "/matching/run",
+        ):
+            self.assertNotIn(retired_route, payload["entrypoints"])
         self.assertIn("/api/workbench", payload["entrypoints"])
         self.assertIn("/api/session/me", payload["entrypoints"])
         self.assertIn("/api/tax-offset", payload["entrypoints"])

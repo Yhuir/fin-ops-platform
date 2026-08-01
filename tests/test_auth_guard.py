@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
+from unittest.mock import patch
 
 from tests.app_test_support import (
     build_local_state_application as build_application,
@@ -142,6 +143,8 @@ class AuthGuardTests(unittest.TestCase):
                     "/api/workbench/settings/data-reset/jobs",
                     {"action": "reset_bank_transactions", "oa_password": "not-used-for-non-admin"},
                 ),
+                ("GET", "/api/workbench/settings/data-reset/jobs/active", {}),
+                ("GET", "/api/workbench/settings/data-reset/jobs/job-1", {}),
             ]
 
             readable_responses = []
@@ -182,6 +185,183 @@ class AuthGuardTests(unittest.TestCase):
             responses_by_route["/api/turnover-ledger/export?family=company"].headers.get("Content-Type"),
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+
+    def test_readonly_export_user_is_rejected_before_all_formerly_unguarded_write_routes(self) -> None:
+        write_routes = (
+            ("POST", "/api/workbench/exception/apply"),
+            ("POST", "/api/workbench/actions/mark-exception"),
+            ("POST", "/api/workbench/actions/confirm-cash-pass-through"),
+            ("POST", "/api/workbench/actions/confirm-cash-ticket-purchase"),
+            ("POST", "/api/workbench/actions/cancel-cash-special"),
+            ("POST", "/api/workbench/actions/update-bank-exception"),
+            ("POST", "/api/workbench/actions/oa-bank-exception"),
+            ("POST", "/api/workbench/actions/confirm-personal-advance-repayment"),
+            ("POST", "/api/workbench/actions/cancel-exception"),
+            ("POST", "/api/workbench/actions/ignore-row"),
+            ("POST", "/api/workbench/actions/unignore-row"),
+            ("POST", "/imports/files/preview"),
+            ("POST", "/imports/files/confirm"),
+            ("POST", "/imports/files/retry"),
+            ("POST", "/api/background-jobs/job-1/acknowledge"),
+            ("POST", "/api/background-jobs/job-1/retry"),
+            ("POST", "/api/etc/import/preview"),
+            ("POST", "/api/etc/import/confirm"),
+            ("POST", "/api/etc/reconciliation-tasks"),
+            ("DELETE", "/api/etc/reconciliation-tasks/task-1"),
+            ("DELETE", "/api/etc/reconciliation-tasks/task-1/source-files/file-1"),
+            ("POST", "/api/etc/reconciliation-tasks/task-1/credit-card-statement"),
+            ("POST", "/api/etc/reconciliation-tasks/task-1/ticket-root-files"),
+            ("POST", "/api/etc/reconciliation-tasks/task-1/ticket-root-texts"),
+            ("POST", "/api/etc/reconciliation-tasks/task-1/supplement-evidences"),
+            ("POST", "/api/etc/reconciliation-tasks/task-1/supplement-evidences/item-1"),
+            ("PATCH", "/api/etc/reconciliation-tasks/task-1/items/item-1"),
+            ("POST", "/api/etc/reconciliation-tasks/task-1/confirm"),
+            ("POST", "/api/etc/reconciliation-tasks/task-1/reopen"),
+            ("POST", "/api/etc/reconciliation-tasks/task-1/refresh-matches"),
+            ("DELETE", "/api/etc/reconciliation-tasks/task-1/imported-invoices"),
+        )
+        with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            configure_access_control(app, read_export_only=["READONLY001"])
+            app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
+                user_id="401",
+                username="READONLY001",
+                nickname="只读导出用户",
+                display_name="只读导出用户",
+                roles=["finance"],
+                permissions=[],
+            )
+            headers = {"Authorization": "Bearer readonly-user"}
+
+            for method, route in write_routes:
+                with self.subTest(method=method, route=route):
+                    response = app.handle_request(method, route, headers=headers, body="{}")
+                    self.assertEqual(response.status_code, 403)
+                    self.assertEqual(json.loads(response.body)["error"], "permission_denied")
+
+    def test_readonly_export_user_keeps_read_only_post_contracts(self) -> None:
+        read_routes = (
+            "/api/operation-barrier/status",
+            "/api/workbench/exception/preview",
+            "/api/workbench/actions/confirm-link/preview",
+            "/api/workbench/actions/withdraw-link/preview",
+            "/api/pending-invoices/invoice-candidates/batch",
+            "/api/pending-invoices/rows/row-1/attach-existing-invoice/preview",
+            "/api/pending-invoices/attach-existing-invoices/preview",
+            "/api/input-invoice-usage/oa-reverse/preview",
+            "/api/tax-offset/calculate",
+        )
+        with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            configure_access_control(app, read_export_only=["READONLY001"])
+            app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
+                user_id="401",
+                username="READONLY001",
+                nickname="只读导出用户",
+                display_name="只读导出用户",
+                roles=["finance"],
+                permissions=[],
+            )
+            headers = {"Authorization": "Bearer readonly-user"}
+
+            for route in read_routes:
+                with self.subTest(route=route):
+                    response = app.handle_request("POST", route, headers=headers, body="{}")
+                    payload = json.loads(response.body)
+                    self.assertNotEqual(response.status_code, 403)
+                    self.assertNotEqual(payload.get("error"), "permission_denied")
+
+    def test_readonly_write_rejection_happens_before_request_body_parsing(self) -> None:
+        with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            configure_access_control(app, read_export_only=["READONLY001"])
+            app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
+                user_id="401",
+                username="READONLY001",
+                nickname="只读导出用户",
+                display_name="只读导出用户",
+                roles=["finance"],
+                permissions=[],
+            )
+            headers = {"Authorization": "Bearer readonly-user"}
+
+            with patch.object(app, "_load_json_body", side_effect=AssertionError("body parsed")):
+                json_response = app.handle_request(
+                    "POST",
+                    "/api/workbench/actions/ignore-row",
+                    headers=headers,
+                    body='{"row_id":"row-1"}',
+                )
+            with patch.object(app, "_load_multipart_body", side_effect=AssertionError("body parsed")):
+                multipart_response = app.handle_request(
+                    "POST",
+                    "/api/etc/import/preview",
+                    headers=headers,
+                    body=b"not-parsed",
+                )
+
+        self.assertEqual(json_response.status_code, 403)
+        self.assertEqual(multipart_response.status_code, 403)
+
+    def test_unknown_protected_post_fails_closed_for_readonly_but_reaches_not_found_for_full_access(self) -> None:
+        with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            configure_access_control(app, full_access=["FULL001"], read_export_only=["READONLY001"])
+            identities = {
+                "readonly-user": OAUserIdentity(
+                    user_id="401",
+                    username="READONLY001",
+                    nickname="只读用户",
+                    display_name="只读用户",
+                ),
+                "full-user": OAUserIdentity(
+                    user_id="402",
+                    username="FULL001",
+                    nickname="可写用户",
+                    display_name="可写用户",
+                ),
+            }
+            app._oa_identity_service.resolve_identity = lambda token: identities[token]
+
+            readonly_response = app.handle_request(
+                "POST",
+                "/api/future-write-route",
+                headers={"Authorization": "Bearer readonly-user"},
+                body="{}",
+            )
+            full_response = app.handle_request(
+                "POST",
+                "/api/future-write-route",
+                headers={"Authorization": "Bearer full-user"},
+                body="{}",
+            )
+
+        self.assertEqual(readonly_response.status_code, 403)
+        self.assertEqual(full_response.status_code, 404)
+
+    def test_etc_reconciliation_actor_comes_from_authenticated_session(self) -> None:
+        with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            configure_access_control(app, full_access=["FULL001"])
+            app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
+                user_id="trusted-user-id",
+                username="FULL001",
+                nickname="可信用户",
+                display_name="可信用户",
+                roles=[],
+                permissions=[],
+            )
+            response = app.handle_request(
+                "POST",
+                "/api/etc/reconciliation-tasks",
+                headers={"Authorization": "Bearer full-user"},
+                body=json.dumps({"title": "actor test", "createdBy": "spoofed-user"}),
+            )
+            task_id = json.loads(response.body)["taskId"]
+            task = app._etc_reconciliation_task_service.get_task(task_id)
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(task.created_by, "FULL001")
 
 
 if __name__ == "__main__":

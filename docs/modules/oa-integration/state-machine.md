@@ -33,7 +33,7 @@
 
 | 状态 | 触发 | 允许流转 |
 | --- | --- | --- |
-| `queued` | `/api/integrations/oa/sync` 或 runtime event 入队 | `queued -> running` |
+| `queued` | 受控运维 CLI/timer 写 durable runtime event | `queued -> running` |
 | `running` | worker 消费 `oa.sync` | `running -> succeeded`、`running -> failed` |
 | `succeeded` | canonical OA 投影原子 upsert 完成并写 sync run | 页面下次 normal GET 读取新事实；不 fan-out 已退役页面 refresh |
 | `failed` | 源 adapter、repository 或 queue 失败 | 记录失败 run，保留旧投影，等待 retry/backoff |

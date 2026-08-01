@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import asdict
 from datetime import datetime
-from http import HTTPStatus
 from types import SimpleNamespace
 from unittest.mock import patch
 import unittest
@@ -626,51 +624,6 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
                 source_record.expense_items[0]["attachment_artifacts"][1],
             ],
         )
-
-    def test_manual_oa_sync_api_enqueues_worker_job_without_running_sync_inline(self) -> None:
-        app = object.__new__(server_module.Application)
-        enqueued: list[dict[str, object]] = []
-        app._runtime_repositories = type(
-            "RuntimeRepos",
-            (),
-            {
-                "queue_repository": type(
-                    "Queue",
-                    (),
-                    {
-                        "enqueue": lambda *_args, **kwargs: enqueued.append(kwargs),
-                    },
-                )()
-            },
-        )()
-        app._integration_service = type(
-            "IntegrationService",
-            (),
-            {"sync": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("OA sync API must not run sync inline"))},
-        )()
-
-        response = app._handle_oa_sync(json.dumps({"actor_id": "tester", "scope": "2026-05"}))
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
-        self.assertEqual(payload["status"], "queued")
-        self.assertEqual(enqueued[0]["event_type"], "oa.sync")
-        self.assertEqual(enqueued[0]["scope_key"], "2026-05")
-
-    def test_manual_oa_sync_api_fails_closed_when_queue_is_unavailable(self) -> None:
-        app = object.__new__(server_module.Application)
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": None})()
-        app._integration_service = type(
-            "IntegrationService",
-            (),
-            {"sync": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("OA sync API must not run sync inline"))},
-        )()
-
-        response = app._handle_oa_sync(json.dumps({"actor_id": "tester", "scope": "2026-05"}))
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, int(HTTPStatus.SERVICE_UNAVAILABLE))
-        self.assertEqual(payload["error"], "oa_sync_queue_unavailable")
 
     def test_api_module_has_no_in_process_polling_server(self) -> None:
         self.assertFalse(hasattr(server_module, "run_http_server"))

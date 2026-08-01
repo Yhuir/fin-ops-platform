@@ -8,6 +8,7 @@
 - 请求后端时携带 `Authorization: Bearer <token>`。
 - 后端通过 OA 会话接口识别当前用户，不信任前端菜单可见性。
 - 未登录或 token 失效返回 `401`；已登录但无权限返回 `403`。
+- 受保护 API 在请求体解析和业务 route 之前统一执行写权限策略：`GET/HEAD/OPTIONS` 与登记的纯计算/preview POST 可读，其余 `POST/PUT/PATCH/DELETE` 默认视为写入并要求 `can_mutate_data=true`；未知新写 route 同样 fail closed。
 
 ## 权限分层
 
@@ -20,6 +21,8 @@
 - `YNSYLP005` 是唯一受保护管理员；应用的任何 HTTP 请求都不能新增、删除、提升、降级或轮换管理员。
 - 普通设置 `GET/POST /api/workbench/settings` 不读取、返回或写入 ACL；提交任何历史 ACL key 返回 `400 access_control_write_forbidden`。
 - 只有受保护管理员可调用 `GET/PUT /api/workbench/settings/access-control` 管理其他账户的 `full_access`、`read_export_only`、`denied`。写入使用 `expected_version`、数据库 CAS、同事务 durable audit；`409` 不覆盖新版本。
+- 写入 actor、导入 owner 和后台任务 owner 只从后端已认证 session 派生，不接受 body/form 中的 `actor`、`createdBy`、`imported_by` 冒充身份。
+- 已删除未进入正式模块边界的 legacy HTTP families：`/integrations/oa*`、`/projects*`、`/ledgers*`、`/reminders*`、`/matching/*`；正式 OA 同步只通过 durable queue/runtime worker 运维入口，项目设置使用 `/api/workbench/settings/projects*`。
 - PostgreSQL migration `0132` 把唯一管理员约束固化为 validated CHECK。发布必须先停止旧 API，再执行 migration，禁止自动回滚到没有 `settings-access-control-v1` 指纹的 release。
 
 ## 数据保护

@@ -9,7 +9,7 @@
 | OA token/session | `backend/src/fin_ops_platform/app/auth.py`、`web/src/features/session/api.ts` | cookie/header 解析、401/403、超时、local dev/test auth、过期 token |
 | Access control | `AccessControlService`、settings access control | denied/read_export_only/full_access/admin 判断，动态 provider 失败时不可误拒绝已授权用户 |
 | Session frontend | `SessionContext`、`SessionGate`、`web/e2e/app-shell.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts`、`tests/test_permissions_write_entry_inventory.py`、`docs/modules/permissions-and-audit/e2e-spec.md`、`docs/modules/permissions-and-audit/e2e-coverage.md`、`docs/modules/permissions-and-audit/write-entry-inventory.md` | loading/forbidden/expired/error/retry，权限 hooks 的默认 fail-closed，真实浏览器下未授权不渲染业务页，只读/全权限/admin 角色矩阵不越权，页面写入口矩阵不伪装 covered，pageRegistry 与 inventory 必须双向一致，pageRegistry 与 role matrix readable route 必须双向一致，新增页面必须进入 role matrix，dynamic opener 必须在 inventory 与 role matrix 双向一致，`covered-browser` row 必须有 dynamic opener 或登记在页面级静态覆盖 registry，dynamic opener/static registry 只能引用当前 `covered-browser` 模块且不能重复归类，Browser E2E 证据路径必须解析到当前文件或匹配真实 glob，新增 mutating feature API client 必须映射到 write-entry inventory，写控件关键词必须在 inventory 与 role matrix DOM 扫描 pattern 双向一致，源码高风险写控件文案 sentinel 必须仍存在且已登记，read-export visible enabled 写控件和已打开的关联台列顺序拖拽 settings 保存入口、关联台未配对候选动作、关联台已配对撤回动作、关联台现金处理行级菜单、关联台已处理/已忽略恢复、银行分类确认、银行人工待分类、银行自动标签、no-OA 标签、pending 规则、收入批量、进项支付规则、进项 OA reverse、销项 canonical 只读区域、OA pending 进行中/规则、ETC 对账流程、batch accounting 选择与已提交撤回、turnover 等动态区被 DOM 候选扫描拦截，并捕获隐藏浏览器错误 |
-| API guards | `server.py` read/mutation/admin route helpers | read API、write API、export API、admin-only API 的二次校验和错误 shape |
+| API guards | `server.py`、`route_access_policy.py`、module-owned guards | read API、登记的只读 POST、默认写 API、export API、admin-only API 的校验和错误 shape；必须在 body/multipart 解析前拒绝 readonly write |
 | App health permissions | App Health dashboard / App Status popover / `web/e2e/app-shell.spec.ts` | dashboard admin-only，非 admin 不请求 dashboard；App Status admin link 受控 |
 | Settings permissions | `SettingsPage`、`AppSettingsService` | admin 账户管理、只读用户不可保存、数据重置和 OA 凭据 admin-only |
 | Export permissions | bank/tax/cost/input/output/turnover exports | read_export_only 可导出但不能写；导出错误/HTML 不能误当文件；`test_readonly_export_user_can_export_but_cannot_mutate_or_admin` 覆盖 cost/turnover 下载、pending export auth pass-through 和代表性写入/admin 403 |
@@ -21,11 +21,11 @@
 | 场景 | 保护测试 | 说明 |
 | --- | --- | --- |
 | OA session bootstrap | `tests/test_session_api.py`、`web/src/test/SessionApi.test.ts`、`web/src/test/SessionGate.test.tsx`、`web/e2e/app-shell.spec.ts` | Authorization header、Admin-Token cookie、超时、expired、forbidden、retry；真实 Chromium 下 forbidden/expired 不触发 protected page API |
-| protected API guard | `tests/test_auth_guard.py`、各 API 权限测试 | 无 token 401、无权限 403、导入端点也受保护；readonly export 聚合 smoke 校验代表性导出可读、写入/admin 仍拒绝 |
+| protected API guard | `tests/test_route_access_policy.py`、`tests/test_auth_guard.py`、各 API 权限测试 | 无 token 401、无权限 403；31 条原漏检 Workbench/import/job/ETC 写入口统一 403；未知 unsafe route fail closed；只读 POST allowlist 可达；JSON/multipart body 未在拒绝前解析 |
 | access tier 判定 | `tests/test_session_api.py`、`tests/test_app_settings_service.py` | settings allowed/readonly/admin/full access、admin 自动 allowed、provider 失败；`test_get_session_me_projects_access_tier_matrix_from_settings` 聚合校验 `/api/session/me` 的角色能力矩阵 |
 | write/admin 权限 | `tests/test_settings_data_reset_service.py`、`tests/test_oa_applicant_credentials_api.py`、`tests/test_tax_offset_api.py`、`tests/test_pending_invoice_api.py`、`tests/test_turnover_ledger_api.py`、`tests/test_bank_auto_tag_rules_api.py` | 写入、规则保存、数据重置、OA 凭据、标签规则、turnover relation 的 403 |
 | 前端隐藏/禁用 | `web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/AppHealthOperationsPage.test.tsx`、`web/src/test/TaxOffsetPage.test.tsx`、`web/src/test/NoOaBankBatchPage.test.tsx`、`web/e2e/app-shell.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts`、`tests/test_permissions_write_entry_inventory.py` | readonly/full-access/admin 不同 UI 能力；AppHealth dashboard admin-only 的真实浏览器 API 调用边界；只读用户全页面可读但 settings/tax/import/no-OA 写入口不可用；full-access settings 普通保存会真实发出 POST、返回 200、显示成功反馈且无隐藏浏览器错误；admin 能新增访问账户、保存权限数组并在保存后继续显示持久化账户，能保存 OA 申请人凭据 PUT/200、清空密码 DELETE/200、清空密码输入、确认页面和普通 settings 保存 body 不泄露密码，并能打开 data reset 影响确认和 OA 密码复核弹窗后取消而不创建 reset job；销项收款在三种角色下均只提供 canonical 查询、详情和导出，旧写入口不存在且 mutation 为 0；read-export 首屏和已打开的关联台列顺序拖拽 settings 保存入口、关联台未配对候选动作、关联台已配对撤回动作、关联台现金处理行级菜单、关联台已处理/已忽略恢复、银行分类确认、银行人工待分类、银行自动标签、no-OA 标签、pending 支出/收入规则、收入批量、进项支付规则、进项 OA reverse、销项 canonical 只读区域、OA pending 进行中/规则、ETC 对账流程、batch accounting 选择与已提交撤回、turnover 等动态区域 visible enabled 写控件关键词扫描防止同页新增按钮漏禁用；关键词覆盖拖动列、确认买票/确认为买票/确认为过账/取消现金处理/保存补充信息/保存凭据/清空密码/新增账户/数据重置等深层写动作，并由 inventory 单测锁住关键关键词不被误删 |
-| audit 记录 | `tests/test_audit_service.py`、`tests/test_workbench_auth_context_idempotency.py`、`tests/test_bank_auto_tag_rules_api.py`、`tests/test_bank_details_sql_runtime.py`、`tests/test_turnover_ledger_uow_contract.py`、业务 service tests | actor/tenant、真实业务 owner 的 audit、失败传播、事务型 writer 的 rollback |
+| audit 记录 | `tests/test_auth_guard.py`、`tests/test_audit_service.py`、`tests/test_workbench_auth_context_idempotency.py`、`tests/test_bank_auto_tag_rules_api.py`、`tests/test_bank_details_sql_runtime.py`、`tests/test_turnover_ledger_uow_contract.py`、业务 service tests | actor/tenant、真实业务 owner 的 audit、ETC 客户端 actor spoof 拒绝、失败传播、事务型 writer 的 rollback |
 | 敏感数据保护 | `tests/test_postgres_migrations.py`、`tests/test_app_postgres_mode_integration.py`、`tests/test_oa_applicant_credentials_api.py`、`tests/test_settings_data_reset_service.py` | SQL 不含 secret、session/app health secret safe、密码不回显 |
 
 ## 七类测试适用性
@@ -52,7 +52,7 @@
 - 真实 Chromium 以 `read_export_only` 逐页打开所有非 admin 页面：页面可读且不触发 POST/PUT/PATCH/DELETE；settings/tax/import/no-OA/OA pending/batch accounting/turnover/ETC 等已知写入口禁用或隐藏。
 - 真实 Chromium 以 `full_access` 打开普通业务写入口并实际完成一次 settings 保存 POST/200/成功反馈，但不能访问 AppHealth dashboard；以 `admin` 打开 settings 高危区、AppHealth dashboard，新增访问账户并保存权限数组、验证保存后账户仍显示，完成一次 OA 申请人凭据 PUT/200 和清空密码 DELETE/200，且不把密码带入普通 settings 保存 body，打开 data reset 影响确认和 OA 密码复核弹窗并在取消后确认不创建 reset job；销项收款在三种角色下只允许查询、详情和导出，不调用 mutation。
 - admin 在 settings 保存访问控制 -> `/api/session/me` 对 allowed/readonly/full/admin 产出正确 tier。
-- readonly export 用户可查询/导出，但看不到写入、导入确认、数据重置、高风险运维入口。
+- readonly export 用户可查询/导出和调用登记的纯计算/preview POST；所有其它受保护 unsafe request 在读取 body 前返回 `403 permission_denied`。
 - full access 用户可业务写入，但不能维护 OA 凭据、访问账户管理、数据重置或 AppHealth dashboard。
 - 写入 command 使用后端 session actor/tenant，不信任 request body actor；audit 与 dirty/outbox 同事务。
 - 数据重置/OA 凭据/运维 dashboard 只允许 admin，失败响应不泄露密码/token。
@@ -62,6 +62,7 @@
 ```bash
 PYTHONPATH=backend/src python3 -m unittest \
   tests.test_session_api.SessionApiTests.test_get_session_me_projects_access_tier_matrix_from_settings \
+  tests.test_route_access_policy \
   tests.test_auth_guard.AuthGuardTests.test_readonly_export_user_can_export_but_cannot_mutate_or_admin \
   tests.test_auth_guard \
   tests.test_session_api \

@@ -1800,7 +1800,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_confirm_link")
         for marker in (
             "_workbench_write_freshness_guard(payload)",
-            "_workbench_write_auth_context(headers)",
+            "_workbench_write_auth_context(headers, session=access_session)",
             "_handle_live_workbench_confirm_link(",
             "request_id=request_id",
             "actor_id=actor_id",
@@ -1877,7 +1877,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_cancel_link")
         for marker in (
             "_workbench_write_freshness_guard(payload)",
-            "_workbench_write_auth_context(headers)",
+            "_workbench_write_auth_context(headers, session=access_session)",
             "_handle_live_workbench_cancel_link(",
             "request_id=request_id",
             "actor_id=actor_id",
@@ -1919,7 +1919,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_withdraw_link")
         for marker in (
             "_workbench_write_freshness_guard(payload)",
-            "_workbench_write_auth_context(headers)",
+            "_workbench_write_auth_context(headers, session=access_session)",
             "_workbench_action_api_routes.withdraw_link(",
             "request_id=request_id",
             "actor_id=actor_id",

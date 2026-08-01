@@ -35,6 +35,8 @@
 | 数据重置请求 | settings data reset dialogs | 必须走 job/control service |
 | 页面 Audit | `GET /api/operations/app-health/page-audit?page=settings` | 管理员只读；同一 repeatable-read snapshot，禁止 secret/provider/reset mutation I/O |
 
+数据重置 create/detail/active 都必须重新取得 admin session；job owner 直接取该 session username。旧的“身份解析失败时回退 `web_finance_user`” resolver 已删除，禁止恢复匿名/共享 owner。
+
 ## 输出 I/O
 
 | 输出 | 目标 | 合同 |

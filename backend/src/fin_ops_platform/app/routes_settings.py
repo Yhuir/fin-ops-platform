@@ -57,7 +57,6 @@ class SettingsApiRoutes:
         resolve_admin_session: SessionResolver,
         verify_reset_oa_password: Callable[[OARequestSession | None, str], Any | None],
         oa_password_verification_failed_response: Callable[[], Any],
-        resolve_background_job_owner: Callable[[dict[str, str] | None], str],
         load_json_body: JsonBodyLoader,
         json_response: JsonResponse,
         finalize_settings_event: FinalizeSettingsEvent,
@@ -80,7 +79,6 @@ class SettingsApiRoutes:
         self._resolve_admin_session = resolve_admin_session
         self._verify_reset_oa_password = verify_reset_oa_password
         self._oa_password_verification_failed_response = oa_password_verification_failed_response
-        self._resolve_background_job_owner = resolve_background_job_owner
         self._load_json_body = load_json_body
         self._json_response = json_response
         self._finalize_settings_event = finalize_settings_event
@@ -583,7 +581,7 @@ class SettingsApiRoutes:
         return self._json_response(HTTPStatus.OK, {"settings": settings_payload})
 
     def create_data_reset_job(self, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
-        payload, error = self._validate_data_reset_request(body, headers)
+        payload, admin_session, error = self._validate_data_reset_request(body, headers)
         if error is not None:
             return error
         action = str(payload.get("action") or "").strip()
@@ -591,7 +589,7 @@ class SettingsApiRoutes:
         if reset_service is None or action not in reset_service.supported_actions():
             return self._unsupported_settings_data_reset_response()
 
-        owner_user_id = self._resolve_background_job_owner(headers)
+        owner_user_id = str(admin_session.identity.username or actor_id_for_session(admin_session))
         active_job = self._active_data_reset_background_job(owner_user_id)
         if active_job is not None:
             return self._json_response(
@@ -634,8 +632,11 @@ class SettingsApiRoutes:
         return self._json_response(HTTPStatus.ACCEPTED, {"job": self._serialize_data_reset_background_job(job)})
 
     def data_reset_job(self, job_id: str, headers: dict[str, str] | None) -> Any:
+        admin_session, auth_error = self._resolve_admin_session(headers)
+        if auth_error is not None:
+            return auth_error
         normalized_job_id = str(job_id or "").strip()
-        owner_user_id = self._resolve_background_job_owner(headers)
+        owner_user_id = str(admin_session.identity.username or actor_id_for_session(admin_session))
         try:
             job = self._background_job_service().get_job(normalized_job_id, owner_user_id)
         except (BackgroundJobNotFoundError, BackgroundJobAccessError):
@@ -645,7 +646,10 @@ class SettingsApiRoutes:
         return self._json_response(HTTPStatus.OK, {"job": self._serialize_data_reset_background_job(job)})
 
     def active_data_reset_job(self, headers: dict[str, str] | None) -> Any:
-        owner_user_id = self._resolve_background_job_owner(headers)
+        admin_session, auth_error = self._resolve_admin_session(headers)
+        if auth_error is not None:
+            return auth_error
+        owner_user_id = str(admin_session.identity.username or actor_id_for_session(admin_session))
         active_job = self._active_data_reset_background_job(owner_user_id)
         return self._json_response(
             HTTPStatus.OK,
@@ -656,9 +660,9 @@ class SettingsApiRoutes:
         self,
         body: str | bytes | None,
         headers: dict[str, str] | None,
-    ) -> tuple[dict[str, object], Any | None]:
+    ) -> tuple[dict[str, object], OARequestSession | None, Any | None]:
         if self._settings_data_reset_service() is None:
-            return {}, self._json_response(
+            return {}, None, self._json_response(
                 HTTPStatus.SERVICE_UNAVAILABLE,
                 {
                     "error": "settings_data_reset_unavailable",
@@ -667,23 +671,23 @@ class SettingsApiRoutes:
             )
         admin_session, admin_error = self._resolve_admin_session(headers)
         if admin_error is not None:
-            return {}, admin_error
+            return {}, None, admin_error
         payload, error = self._load_json_body(body)
         if error is not None:
-            return {}, error
+            return {}, None, error
         action = str(payload.get("action") or "").strip()
         if not action:
-            return {}, self._json_response(
+            return {}, None, self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_workbench_settings_reset_request", "message": "action is required."},
             )
         oa_password = payload.get("oa_password")
         if not isinstance(oa_password, str) or not oa_password:
-            return {}, self._oa_password_verification_failed_response()
+            return {}, None, self._oa_password_verification_failed_response()
         password_error = self._verify_reset_oa_password(admin_session, oa_password)
         if password_error is not None:
-            return {}, password_error
-        return dict(payload), None
+            return {}, None, password_error
+        return dict(payload), admin_session, None
 
     def _unsupported_settings_data_reset_response(self) -> Any:
         reset_service = self._settings_data_reset_service()

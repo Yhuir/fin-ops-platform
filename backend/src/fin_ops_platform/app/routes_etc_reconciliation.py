@@ -55,15 +55,17 @@ class EtcReconciliationTaskApiRoutes:
         route_path: str,
         body: str | bytes | None,
         headers: dict[str, str] | None,
+        *,
+        actor_id: str,
     ) -> Any:
         if method == "GET" and route_path == "/api/etc/reconciliation-tasks/ready-for-import":
             return self.ready_for_import()
         if method == "GET" and route_path == "/api/etc/reconciliation-tasks":
             return self.list_tasks()
         if method == "POST" and route_path == "/api/etc/reconciliation-tasks":
-            return self.create_task(body)
+            return self.create_task(body, actor_id=actor_id)
         if route_path.startswith("/api/etc/reconciliation-tasks/"):
-            return self.route_task(method, route_path, body, headers)
+            return self.route_task(method, route_path, body, headers, actor_id=actor_id)
         return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task_route"})
 
     def list_tasks(self) -> Any:
@@ -87,13 +89,13 @@ class EtcReconciliationTaskApiRoutes:
             },
         )
 
-    def create_task(self, body: str | bytes | None) -> Any:
+    def create_task(self, body: str | bytes | None, *, actor_id: str) -> Any:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
         task = self._task_service.create_task(
             title=str(payload.get("title") or "").strip(),
-            created_by=str(payload.get("createdBy") or payload.get("created_by") or "web_finance_user"),
+            created_by=actor_id,
         )
         return self._json_response(HTTPStatus.CREATED, self._task_payload(task))
 
@@ -103,6 +105,8 @@ class EtcReconciliationTaskApiRoutes:
         route_path: str,
         body: str | bytes | None,
         headers: dict[str, str] | None,
+        *,
+        actor_id: str,
     ) -> Any:
         relative = route_path.removeprefix("/api/etc/reconciliation-tasks/").strip("/")
         parts = [unquote(part) for part in relative.split("/") if part]
@@ -112,15 +116,16 @@ class EtcReconciliationTaskApiRoutes:
         if method == "GET" and len(parts) == 1:
             return self.detail(task_id)
         if method == "DELETE" and len(parts) == 1:
-            return self.delete_task(task_id, body)
+            return self.delete_task(task_id, body, actor_id=actor_id)
         if method == "DELETE" and len(parts) == 3 and parts[1] == "source-files":
-            return self.delete_source_file(task_id, parts[2], body)
+            return self.delete_source_file(task_id, parts[2], body, actor_id=actor_id)
         if method == "POST" and len(parts) == 2 and parts[1] == "credit-card-statement":
             return self.upload_source(
                 task_id=task_id,
                 source_kind=SourceFileKind.CREDIT_CARD_STATEMENT,
                 body=body,
                 headers=headers,
+                actor_id=actor_id,
             )
         if method == "POST" and len(parts) == 2 and parts[1] == "ticket-root-files":
             return self.upload_source(
@@ -128,15 +133,17 @@ class EtcReconciliationTaskApiRoutes:
                 source_kind=SourceFileKind.TICKET_ROOT,
                 body=body,
                 headers=headers,
+                actor_id=actor_id,
             )
         if method == "POST" and len(parts) == 2 and parts[1] == "ticket-root-texts":
-            return self.submit_ticket_root_texts(task_id, body)
+            return self.submit_ticket_root_texts(task_id, body, actor_id=actor_id)
         if method == "POST" and len(parts) == 2 and parts[1] == "supplement-evidences":
             return self.upload_source(
                 task_id=task_id,
                 source_kind=SourceFileKind.SUPPLEMENT_EVIDENCE,
                 body=body,
                 headers=headers,
+                actor_id=actor_id,
             )
         if method == "POST" and len(parts) == 3 and parts[1] == "supplement-evidences":
             return self.upload_supplement_for_card(
@@ -144,17 +151,18 @@ class EtcReconciliationTaskApiRoutes:
                 item_id=parts[2],
                 body=body,
                 headers=headers,
+                actor_id=actor_id,
             )
         if method == "PATCH" and len(parts) == 3 and parts[1] == "items":
-            return self.patch_item(task_id, parts[2], body)
+            return self.patch_item(task_id, parts[2], body, actor_id=actor_id)
         if method == "POST" and len(parts) == 2 and parts[1] == "confirm":
-            return self.confirm_task(task_id, body)
+            return self.confirm_task(task_id, body, actor_id=actor_id)
         if method == "POST" and len(parts) == 2 and parts[1] == "reopen":
-            return self.reopen_task(task_id, body)
+            return self.reopen_task(task_id, body, actor_id=actor_id)
         if method == "POST" and len(parts) == 2 and parts[1] == "refresh-matches":
             return self.refresh_matches(task_id)
         if method == "DELETE" and len(parts) == 2 and parts[1] == "imported-invoices":
-            return self.delete_imported_invoices(task_id, body)
+            return self.delete_imported_invoices(task_id, body, actor_id=actor_id)
         return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task_route"})
 
     def detail(self, task_id: str) -> Any:
@@ -164,7 +172,7 @@ class EtcReconciliationTaskApiRoutes:
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
         return self._json_response(HTTPStatus.OK, self._task_payload(task))
 
-    def delete_imported_invoices(self, task_id: str, body: str | bytes | None) -> Any:
+    def delete_imported_invoices(self, task_id: str, body: str | bytes | None, *, actor_id: str) -> Any:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
@@ -174,7 +182,7 @@ class EtcReconciliationTaskApiRoutes:
             cleanup_result = self._cleanup_service.remove_imported_invoices(
                 task=task,
                 expected_version=expected_version,
-                actor=str(payload.get("actor") or "web_finance_user"),
+                actor=actor_id,
             )
         except KeyError:
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
@@ -196,27 +204,26 @@ class EtcReconciliationTaskApiRoutes:
         response_payload["removedImportBatch"] = cleanup_result.delete_result
         return self._json_response(HTTPStatus.OK, response_payload)
 
-    def delete_task(self, task_id: str, body: str | bytes | None) -> Any:
+    def delete_task(self, task_id: str, body: str | bytes | None, *, actor_id: str) -> Any:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
         cleanup_result = None
         try:
             expected_version = self._expected_version_from_payload(payload)
-            actor = str(payload.get("actor") or "web_finance_user")
             task = self._task_service.get_task(task_id)
             if int(getattr(task, "version", 0) or 0) != expected_version:
                 raise ValueError("task_version_conflict")
             if str(getattr(task, "import_batch_id", "") or "").strip():
                 cleanup_result = self._cleanup_service.cleanup_task_import_sources(
                     task=task,
-                    actor=actor,
+                    actor=actor_id,
                 )
                 task = cleanup_result.task
             result = self._task_service.delete_task(
                 task_id=task_id,
                 expected_version=int(getattr(task, "version", expected_version) or expected_version),
-                actor=actor,
+                actor=actor_id,
                 import_cleanup_confirmed=(
                     cleanup_result is not None
                     and (
@@ -248,6 +255,7 @@ class EtcReconciliationTaskApiRoutes:
         item_id: str,
         body: str | bytes | None,
         headers: dict[str, str] | None,
+        actor_id: str,
     ) -> Any:
         fields, files, error = self._load_multipart_body(body, headers)
         if error is not None:
@@ -257,14 +265,13 @@ class EtcReconciliationTaskApiRoutes:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_reconciliation_upload", "message": "file is required."},
             )
-        actor = (fields.get("actor") or ["web_finance_user"])[0]
         try:
             expected_version = self._expected_version_from_fields(fields)
             task = self._task_service.upload_supplement_evidences_for_card(
                 task_id=task_id,
                 item_id=item_id,
                 expected_version=expected_version,
-                actor=actor,
+                actor=actor_id,
                 files=[
                     {
                         "original_name": upload.file_name,
@@ -291,6 +298,7 @@ class EtcReconciliationTaskApiRoutes:
         source_kind: SourceFileKind,
         body: str | bytes | None,
         headers: dict[str, str] | None,
+        actor_id: str,
     ) -> Any:
         fields, files, error = self._load_multipart_body(body, headers)
         if error is not None:
@@ -300,14 +308,13 @@ class EtcReconciliationTaskApiRoutes:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_reconciliation_upload", "message": "file is required."},
             )
-        actor = (fields.get("actor") or ["web_finance_user"])[0]
         try:
             expected_version = self._expected_version_from_fields(fields)
             task = self._source_upload_service.upload_sources(
                 task_id=task_id,
                 source_kind=source_kind,
                 expected_version=expected_version,
-                actor=actor,
+                actor=actor_id,
                 uploads=[
                     EtcReconciliationSourceUpload(
                         file_name=upload.file_name,
@@ -330,7 +337,7 @@ class EtcReconciliationTaskApiRoutes:
             return self._reconciliation_error_response(error)
         return self._json_response(HTTPStatus.OK, self._task_payload(task))
 
-    def submit_ticket_root_texts(self, task_id: str, body: str | bytes | None) -> Any:
+    def submit_ticket_root_texts(self, task_id: str, body: str | bytes | None, *, actor_id: str) -> Any:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
@@ -340,7 +347,6 @@ class EtcReconciliationTaskApiRoutes:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_ticket_root_text_entries", "message": "entries is required."},
             )
-        actor = str(payload.get("actor") or "web_finance_user")
         try:
             texts: list[str] = []
             for entry in entries:
@@ -359,7 +365,7 @@ class EtcReconciliationTaskApiRoutes:
             task = self._source_upload_service.submit_ticket_root_texts(
                 task_id=task_id,
                 expected_version=self._expected_version_from_payload(payload),
-                actor=actor,
+                actor=actor_id,
                 texts=texts,
             )
         except KeyError:
@@ -370,7 +376,14 @@ class EtcReconciliationTaskApiRoutes:
             return self._reconciliation_error_response(value_error)
         return self._json_response(HTTPStatus.OK, self._task_payload(task))
 
-    def delete_source_file(self, task_id: str, file_id: str, body: str | bytes | None) -> Any:
+    def delete_source_file(
+        self,
+        task_id: str,
+        file_id: str,
+        body: str | bytes | None,
+        *,
+        actor_id: str,
+    ) -> Any:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
@@ -380,7 +393,7 @@ class EtcReconciliationTaskApiRoutes:
                 task_id=task_id,
                 file_id=file_id,
                 expected_version=expected_version,
-                actor=str(payload.get("actor") or "web_finance_user"),
+                actor=actor_id,
             )
         except KeyError as error:
             code = str(error).strip("'") or "unknown_source_file"
@@ -389,7 +402,14 @@ class EtcReconciliationTaskApiRoutes:
             return self._reconciliation_error_response(error)
         return self._json_response(HTTPStatus.OK, self._task_payload(task))
 
-    def patch_item(self, task_id: str, item_id: str, body: str | bytes | None) -> Any:
+    def patch_item(
+        self,
+        task_id: str,
+        item_id: str,
+        body: str | bytes | None,
+        *,
+        actor_id: str,
+    ) -> Any:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
@@ -399,7 +419,7 @@ class EtcReconciliationTaskApiRoutes:
                 task_id=task_id,
                 item_id=item_id,
                 expected_version=expected_version,
-                actor=str(payload.get("actor") or "web_finance_user"),
+                actor=actor_id,
                 payload=payload,
             )
         except KeyError:
@@ -408,7 +428,7 @@ class EtcReconciliationTaskApiRoutes:
             return self._reconciliation_error_response(error)
         return self._json_response(HTTPStatus.OK, self._task_payload(task))
 
-    def confirm_task(self, task_id: str, body: str | bytes | None) -> Any:
+    def confirm_task(self, task_id: str, body: str | bytes | None, *, actor_id: str) -> Any:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
@@ -423,7 +443,7 @@ class EtcReconciliationTaskApiRoutes:
             task = self._task_service.confirm_task(
                 task_id=task_id,
                 expected_version=expected_version,
-                actor=str(payload.get("actor") or "web_finance_user"),
+                actor=actor_id,
                 approved_delta=payload.get("approvedDelta", payload.get("approved_delta")),
                 approved_delta_note=payload.get("approvedDeltaNote", payload.get("approved_delta_note")),
                 confirmed_credit_card_item_ids=confirmed_ids_payload,
@@ -434,7 +454,7 @@ class EtcReconciliationTaskApiRoutes:
             return self._reconciliation_error_response(error)
         return self._json_response(HTTPStatus.OK, self._task_payload(task))
 
-    def reopen_task(self, task_id: str, body: str | bytes | None) -> Any:
+    def reopen_task(self, task_id: str, body: str | bytes | None, *, actor_id: str) -> Any:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
@@ -443,7 +463,7 @@ class EtcReconciliationTaskApiRoutes:
             task = self._task_service.reopen_task(
                 task_id=task_id,
                 expected_version=expected_version,
-                actor=str(payload.get("actor") or "web_finance_user"),
+                actor=actor_id,
             )
         except KeyError:
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
