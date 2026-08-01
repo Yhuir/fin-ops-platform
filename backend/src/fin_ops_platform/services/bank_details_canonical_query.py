@@ -1219,7 +1219,7 @@ def _classification_cte(
             end as effective_category_source
           from classified
         ),
-        classified_with_semantics as materialized (
+        classified_with_semantics as not materialized (
           select
             base.*,
             effective.counterpart_id,

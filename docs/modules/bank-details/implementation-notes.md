@@ -520,3 +520,8 @@
 - 编译器继续生成相同规范化谓词、priority、sort order 和 definition payload，但执行形态改为每条规则对 materialized canonical base 做集合扫描，再按 row id 聚合。旧的 per-row `cross join lateral` matcher 已删除。
 - 两个页面复用同一个 compiler；没有新分类器、缓存、projection、worker、表、索引或 API 变化。真实 PostgreSQL integration 继续校验规则命中和往来关系语义。
 - 生产并发复测证明禁用 PostgreSQL query parallelism 会让银行首屏更慢，因此撤销该设置，仅在当前 read-only transaction 关闭短查询 JIT。真实热点是 43 条 active 规则重复扫描携带 raw JSON/文本数组的宽 `base`；现改为只扫描规则必需列，分类中间态只保留决策字段，精确统计/排序只处理 key，完整行仅回连首屏分页。不改规则、优先级、分页、精确统计、导出或全局数据库设置。
+
+## 2026-08-01 - 首屏完整 DTO 延迟物化
+
+- 生产并发采样显示交易列表 DB p95 仍约 `751ms`，连接获取 p95 小于 `1ms`；`classified_with_semantics` 同时服务全量筛选/统计和当前页回连，默认物化会为全部命中流水构造完整页面 DTO。
+- 该 CTE 改为 `NOT MATERIALIZED`，让 PostgreSQL 对全量路径只投影筛选、分类汇总和 page key 所需窄列，完整 DTO 只为 page key 回连行构造。API、分类优先级、精确 total、category counts、排序与分页不变；未增加索引、缓存、read model、worker 或依赖。
