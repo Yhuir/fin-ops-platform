@@ -9154,6 +9154,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         interest_paid_date: "2026-05-05",
         interest_payment_method: "转账",
         note: "浏览器 e2e 补充信息",
+        updated_at: "2026-06-17T09:00:00+08:00",
       });
     }
 

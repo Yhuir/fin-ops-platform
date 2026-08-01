@@ -230,8 +230,114 @@ test.describe("turnover ledger browser flow", () => {
     });
 
     expect(api.count("PUT /api/turnover-ledger/relations/turnover_rel_e2e_expense/extra")).toBe(1);
+    expect(api.lastBody("PUT /api/turnover-ledger/relations/turnover_rel_e2e_expense/extra")).toMatchObject({
+      interest_rate_value: "0.070000",
+      expected_versions: {
+        "turnover_relation_extra:turnover_rel_e2e_expense": "2026-06-17T09:00:00+08:00",
+      },
+    });
     expect(api.count("GET /api/turnover-ledger")).toBeGreaterThan(ledgerLoadsBeforeSave);
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
+    await expectNoUnexpectedSuccessUiErrors(page);
+    expect(browserErrors).toEqual([]);
+  });
+
+  test("keeps B active when delayed A requests finish and saves only B", async ({ page }) => {
+    const browserErrors = startStrictBrowserErrorCapture(page);
+    await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const putRequests: Array<{ path: string; body: Record<string, unknown> }> = [];
+    let delayedExpenseRequestsFinished = 0;
+
+    await page.route("**/api/turnover-ledger/relations/**", async (route) => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      const method = request.method();
+      const relationMatch = path.match(/^\/api\/turnover-ledger\/relations\/(turnover_rel_e2e_(?:expense|income))(\/extra)?$/);
+      if (!relationMatch) {
+        await route.fallback();
+        return;
+      }
+      const relationId = relationMatch[1];
+      const isExtra = Boolean(relationMatch[2]);
+      if (method === "PUT") {
+        putRequests.push({ path, body: JSON.parse(request.postData() ?? "{}") as Record<string, unknown> });
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            relation_id: relationId,
+            extra: {
+              relation_id: relationId,
+              ...putRequests.at(-1)?.body,
+              updated_at: "2026-06-17T09:30:00+08:00",
+              updated_by: "TESTFULL001",
+            },
+          }),
+        });
+        return;
+      }
+      if (relationId === "turnover_rel_e2e_expense") {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+      try {
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify(isExtra ? {
+            relation_id: relationId,
+            interest_rate_type: "annual",
+            interest_rate_value: relationId.endsWith("income") ? "0.050000" : "0.060000",
+            interest_paid_amount: "10.00",
+            interest_paid_date: "2026-05-05",
+            interest_payment_method: "转账",
+            note: relationId.endsWith("income") ? "B 的浏览器补充信息" : "A 的过期浏览器补充信息",
+            updated_at: relationId.endsWith("income")
+              ? "2026-06-17T09:10:00+08:00"
+              : "2026-06-17T09:00:00+08:00",
+          } : {
+            relation: {
+              relation_id: relationId,
+              status: "confirmed",
+              status_label: "流水",
+            },
+            bank_rows: [],
+            audit_history: [],
+          }),
+        });
+      } catch {
+        // The browser may cancel A after B becomes active; correctness must not depend on a late response being delivered.
+      } finally {
+        if (relationId === "turnover_rel_e2e_expense") {
+          delayedExpenseRequestsFinished += 1;
+        }
+      }
+    });
+
+    await page.goto("/turnover-ledger");
+    const table = page.getByRole("table", { name: "往来款左右双栏台账" });
+    await page.getByRole("button", { name: "展开 云南建设有限公司 流水明细" }).click();
+    await table.getByRole("button", { name: "编辑流水 turnover-bank-expense-1000" }).click();
+    const drawer = page.getByRole("dialog", { name: "编辑流水补充信息" });
+    await expect(drawer).toBeVisible();
+
+    await table.getByRole("button", { name: "编辑流水 turnover-bank-income-1000", includeHidden: true }).evaluate((button) => {
+      (button as HTMLButtonElement).click();
+    });
+    await expect(drawer.getByLabel("备注")).toHaveValue("B 的浏览器补充信息");
+    await expect.poll(() => delayedExpenseRequestsFinished).toBe(2);
+    await expect(drawer.getByLabel("备注")).toHaveValue("B 的浏览器补充信息");
+
+    await drawer.getByLabel("备注").fill("只保存浏览器 B");
+    await drawer.getByRole("button", { name: "保存补充信息" }).click();
+    await expect(page.getByText("补充信息已保存")).toBeVisible();
+
+    expect(putRequests).toEqual([{
+      path: "/api/turnover-ledger/relations/turnover_rel_e2e_income/extra",
+      body: expect.objectContaining({
+        note: "只保存浏览器 B",
+        expected_versions: {
+          "turnover_relation_extra:turnover_rel_e2e_income": "2026-06-17T09:10:00+08:00",
+        },
+      }),
+    }]);
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);
   });

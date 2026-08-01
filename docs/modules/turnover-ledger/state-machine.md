@@ -153,6 +153,24 @@ manual confirmed relation
 
 extra 保存只改变 Turnover canonical extra/version/audit 和局部 UI；前端只重跑本页 normal GET，不发送跨页刷新事件，也不能让无关页面自动读取。
 
+前端 extra 编辑器生命周期：
+
+```text
+open relation A
+  -> abort previous editor GET controller
+  -> create active editor context {relationId=A, controller}
+  -> detail + extra GET 并行
+open relation B / close / page inactive / unmount
+  -> active editor A 立即失效并 abort
+  -> A 的 success/error/finally 因 context identity 不匹配而不得写 UI
+save
+  -> active context relationId == selected row relationId == form relationId
+  -> PUT 携带 turnover_relation_extra:<relationId> 的 expected_versions
+  -> 409 保留 dirty form，不自动重试或 reload
+```
+
+Abort 只减少无效 I/O；正确性以 active editor object identity guard 为准。初始 GET 完成前，或 extra/关系 mutation 进行中，输入、保存和关系动作必须 disabled；写请求进行中关闭入口也 disabled，避免产生服务器已提交但用户误认为已取消的不确定状态。
+
 ## UI 状态
 
 | 状态 | 当前行为 | 测试入口 |
@@ -164,7 +182,7 @@ extra 保存只改变 Turnover canonical extra/version/audit 和局部 UI；前�
 | permission disabled | `canMutateData=false` 时禁用保存、确认、撤回等写动作 | API 403 + 前端 disabled tests |
 | tag drawer | 加载 active tags，保存 selected codes 后 reload ledger | `opens tag selection drawer, saves selected bank detail labels, and reloads ledger` |
 | closure drawer | 允许同组多条未闭环 flow rows；至少一收一支且收支合计差额为 0 才允许确认；仅已关联 OA 或发票但未闭环的 flow row 不阻断确认；点击确定前先等台账 fresh、reload grouped payload，并用最新 row versions 提交 | manual closure/cross-group/fresh-rebind tests |
-| extra drawer | 从真实 flow row 打开，隐藏技术 relation id，可保存 extra | extra drawer tests |
+| extra drawer | 从真实 flow row 打开，隐藏技术 relation id；active editor context 隔离 A→B 乱序响应；加载/保存期间锁定交互；保存前校验 context/row/form relation id 并携带 `expected_versions` | extra drawer race/OCC tests |
 | export dialog | preview 后下载 XLSX，不按 JSON 解析 blob | export API/page tests |
 | operation pending | 只覆盖 tag-selection、extra、confirm、withdraw HTTP 请求；成功后结束全局阻塞并 reload grouped normal GET，non-fresh 使用页面内状态 | page/API tests |
 | workbench relation feedback | grouped payload 中的 flow row 展示后端 direct canonical query 给出的正向 relation chip：`linked_oa=true` 显示“已关联 OA”，`linked_invoice=true` 显示“已关联 发票”，`cash_pair_linked=true && cash_closure_linked=false` 显示“已配对未结清”，`cash_closure_linked=true` 显示“收支闭环”。group 只有全部 flow 都闭环才显示“收支闭环”。toolbar 的确认/撤回只看 `cash_closure_*` 字段，不看 OA/发票 chip；前端不得按 mode/source 或组级金额自行推断 | API mapper / page tests |
@@ -205,6 +223,7 @@ GET /api/turnover-ledger
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-08-02 | relation extra 编辑器增加请求身份隔离和 OCC 提交 | 旧 relation 的 success/error/finally 不再污染新抽屉；关闭、页面停用和卸载都会 abort/失效；保存只允许 context/row/form 同 relation，并复用后端 `expected_versions` 409 合同 | `web/src/test/TurnoverLedgerApi.test.ts`、`web/src/test/TurnoverLedgerPage.test.tsx`、`web/e2e/turnover-ledger-flow.spec.ts` |
 | 2026-06-26（历史） | 普通 turnover 写操作曾从 `turnover_ledger:all` 收敛为 affected month scopes | 该写后 barrier 方案已由 Phase 27 的“写后零页面 fan-out、页面访问时 exact-scope 收敛”取代；本行仅保留演进记录。 | `tests/test_turnover_ledger_api.py`、`tests/test_turnover_ledger_uow_contract.py`、`web/src/test/TurnoverLedgerApi.test.ts`、`web/src/test/TurnoverLedgerPage.test.tsx` |
 | 2026-06-23 | 补 read model manifest 合同守卫 | 不改变外部往来业务/UI/read model/worker 状态；锁定 `turnover_ledger` 为 `partitioned_scoped_incremental`、`all` 为 fan-out command，并保持 query owner、permission owner 和 repository ports 不与 cost/tax 混用 | `tests/test_read_model_manifest.py::ReadModelManifestTests::test_cost_tax_and_turnover_manifest_preserve_summary_contracts` |
 | 2026-06-11 | 补齐外部往来款管理状态机 | 固定标签准入、候选/人工闭环、撤回、extra、UI stale、read model/worker 状态 | 待本轮模块验证命令 |

@@ -18,7 +18,7 @@
 | `TURNOVER-E2E-005` | 撤回恢复 | P0 | 从任一合法入口撤回 active case 后，两页各自手动刷新都不再显示 active pair；可恢复的 OA-bank 历史关系按既有 command 合同恢复 |
 | `TURNOVER-E2E-006` | Workbench/OA 合并边界 | P0 | 仅允许既有 `{oa, bank}` relation 合并；包含 invoice/其它 type 时 fail closed 并提示转关联台 |
 | `TURNOVER-E2E-007` | 旧投影隔离 | P0 | 历史 Turnover projection 即使残留错误/旧行，也不得改变页面响应；API 不返回 projection freshness metadata |
-| `TURNOVER-E2E-008` | relation extra | P1 | expected version 校验、canonical 保存、当前页一次 GET；失败不半写 |
+| `TURNOVER-E2E-008` | relation extra | P0 | A→B 快速切换时 A 的迟到 success/error/finally 不得覆盖 B；保存只提交 active B，携带 B 的 expected version；409 保留 dirty form、不 reload、不半写 |
 | `TURNOVER-E2E-009` | 导出与权限 | P1 | 导出复用 direct query/筛选/权限；超限结构化失败；只读角色零 mutation |
 | `TURNOVER-E2E-010` | 生产运行边界 | P0 | confirm/withdraw 后不产生 `turnover_ledger.read_model.refresh` 或 dirty scope；无 Turnover worker registration；Audit pass；记录 GET 和写操作耗时 |
 
@@ -27,6 +27,9 @@
 - GET loading、empty、error、retry 必须可区分。
 - confirm/withdraw 点击后立即 disabled 并显示进行中，禁止出现“像没点到”。
 - canonical write 成功、随后页面 GET 失败时，提示“操作已成功，页面重新加载失败”；不能弹“操作失败”。
+- relation extra 初始 GET 完成前输入和保存 disabled；保存/关系 mutation 期间输入、关闭和关系切换 disabled。
+- 打开新 relation 必须使上一个 editor context 失效并 abort；旧请求是否真正响应 abort 不影响 UI 正确性。
+- extra PUT 前必须满足 active context、selected row、form 三份 relation id 相同，并携带该 form 的 `updatedAt` 版本；不得自动重试 409。
 - 另一个页面或 tab 不自动刷新。它在自己的手动刷新/重新访问时读取新事实。
 - 不监听 focus/visibility/BFCache，不轮询 App Status，不使用 operation barrier 等待 Turnover 页面。
 

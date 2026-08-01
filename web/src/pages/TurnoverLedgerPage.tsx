@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type SyntheticEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type SyntheticEvent } from "react";
 import { Download, RefreshCw } from "lucide-react";
 
 import AppDrawer from "../components/common/AppDrawer";
@@ -354,6 +354,7 @@ export default function TurnoverLedgerPage() {
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportDownloading, setExportDownloading] = useState(false);
   const [toast, setToast] = useState<{ severity: TurnoverLedgerToastSeverity; message: string } | null>(null);
+  const activeExtraEditorRef = useRef<{ relationId: string; controller: AbortController } | null>(null);
 
   const summary = ledger?.summary ?? DEFAULT_SUMMARY;
   const groups = ledger?.groups ?? [];
@@ -472,6 +473,27 @@ export default function TurnoverLedgerPage() {
     const timer = window.setTimeout(() => setToast(null), 4000);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  useEffect(() => {
+    if (active) {
+      return;
+    }
+    const activeEditor = activeExtraEditorRef.current;
+    activeExtraEditorRef.current = null;
+    activeEditor?.controller.abort();
+    setSelectedRow(null);
+    setDetail(null);
+    setExtraForm(DEFAULT_EXTRA);
+    setExtraDirty(false);
+    setDetailLoading(false);
+    setDetailError(null);
+  }, [active]);
+
+  useEffect(() => () => {
+    const activeEditor = activeExtraEditorRef.current;
+    activeExtraEditorRef.current = null;
+    activeEditor?.controller.abort();
+  }, []);
 
   useEffect(() => {
     if (!active || !exportOpen) {
@@ -602,7 +624,7 @@ export default function TurnoverLedgerPage() {
   }, [tagSelection.activeTags]);
 
   const handleOpenEditor = (row: TurnoverLedgerGroupedRow) => {
-    if (!isFlowRow(row)) {
+    if (!isFlowRow(row) || savingExtra || mutatingRelation) {
       return;
     }
     const normalizedRow = { ...row, relationId: relationIdForRow(row) };
@@ -610,37 +632,86 @@ export default function TurnoverLedgerPage() {
       setToast({ severity: "error", message: "这条流水缺少可编辑关系，无法打开补充信息" });
       return;
     }
+    activeExtraEditorRef.current?.controller.abort();
+    const editorContext = {
+      relationId: normalizedRow.relationId,
+      controller: new AbortController(),
+    };
+    activeExtraEditorRef.current = editorContext;
     setSelectedRow(normalizedRow);
     setDetail(null);
     setDetailError(null);
     setExtraDirty(false);
     setExtraForm(extraFromRow(normalizedRow));
     setDetailLoading(true);
-    const controller = new AbortController();
     Promise.all([
-      fetchTurnoverRelationDetail(normalizedRow.relationId, controller.signal),
-      fetchTurnoverRelationExtra(normalizedRow.relationId, controller.signal),
+      fetchTurnoverRelationDetail(normalizedRow.relationId, editorContext.controller.signal),
+      fetchTurnoverRelationExtra(normalizedRow.relationId, editorContext.controller.signal),
     ])
       .then(([nextDetail, nextExtra]) => {
+        if (activeExtraEditorRef.current !== editorContext || editorContext.controller.signal.aborted) {
+          return;
+        }
         setDetail(nextDetail);
         setExtraForm(nextExtra);
       })
       .catch((caught: unknown) => {
-        if (isAbortLikeError(caught)) {
+        if (
+          activeExtraEditorRef.current !== editorContext
+          || editorContext.controller.signal.aborted
+          || isAbortLikeError(caught)
+        ) {
           return;
         }
         setDetailError(relationDetailErrorMessage(caught));
       })
-      .finally(() => setDetailLoading(false));
+      .finally(() => {
+        if (activeExtraEditorRef.current === editorContext) {
+          setDetailLoading(false);
+        }
+      });
   };
 
   const handleExtraChange = (next: TurnoverLedgerExtra) => {
+    const activeEditor = activeExtraEditorRef.current;
+    if (
+      !activeEditor
+      || activeEditor.relationId !== next.relationId
+      || !canMutateData
+      || detailLoading
+      || detailError
+      || savingExtra
+      || mutatingRelation
+    ) {
+      return;
+    }
     setExtraForm(next);
     setExtraDirty(true);
   };
 
   const handleSaveExtra = async () => {
-    if (!selectedRow || savingExtra) {
+    const editorContext = activeExtraEditorRef.current;
+    if (
+      !editorContext
+      || !selectedRow
+      || detailLoading
+      || detailError
+      || !extraDirty
+      || savingExtra
+      || mutatingRelation
+      || editorContext.relationId !== selectedRow.relationId
+      || editorContext.relationId !== extraForm.relationId
+    ) {
+      if (
+        selectedRow
+        && editorContext
+        && (
+          editorContext.relationId !== selectedRow.relationId
+          || editorContext.relationId !== extraForm.relationId
+        )
+      ) {
+        setDetailError("当前编辑关系已发生变化，请关闭后重新打开。");
+      }
       return;
     }
     const targetRow = selectedRow;
@@ -651,9 +722,16 @@ export default function TurnoverLedgerPage() {
       action: async ({ setMessage }) => {
         setSavingExtra(true);
         try {
-          const saved = await saveTurnoverRelationExtra(targetRow.relationId, nextExtra);
-          setExtraForm(saved.extra);
-          setExtraDirty(false);
+          const saved = await saveTurnoverRelationExtra(targetRow.relationId, {
+            ...nextExtra,
+            expectedVersions: {
+              [`turnover_relation_extra:${targetRow.relationId}`]: nextExtra.updatedAt ?? "",
+            },
+          });
+          if (activeExtraEditorRef.current === editorContext) {
+            setExtraForm(saved.extra);
+            setExtraDirty(false);
+          }
           setMessage("正在刷新往来款台账...");
           postMutationSyncWarning = await reloadLedgerAfterWrite(
             reloadLedgerAfterMutation,
@@ -677,7 +755,16 @@ export default function TurnoverLedgerPage() {
   };
 
   const handleRelationMutation = async (kind: "confirm" | "withdraw") => {
-    if (!selectedRow || mutatingRelation) {
+    const editorContext = activeExtraEditorRef.current;
+    if (
+      !editorContext
+      || !selectedRow
+      || detailLoading
+      || detailError
+      || savingExtra
+      || mutatingRelation
+      || editorContext.relationId !== selectedRow.relationId
+    ) {
       return;
     }
     const targetRow = selectedRow;
@@ -1133,9 +1220,17 @@ export default function TurnoverLedgerPage() {
         mutating={mutatingRelation}
         error={detailError}
         onClose={() => {
+          if (savingExtra || mutatingRelation) {
+            return;
+          }
+          const activeEditor = activeExtraEditorRef.current;
+          activeExtraEditorRef.current = null;
+          activeEditor?.controller.abort();
           setSelectedRow(null);
           setDetail(null);
+          setExtraForm(DEFAULT_EXTRA);
           setDetailError(null);
+          setDetailLoading(false);
           setExtraDirty(false);
         }}
         onExtraChange={handleExtraChange}

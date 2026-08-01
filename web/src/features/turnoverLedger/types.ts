@@ -278,6 +278,7 @@ export type SaveTurnoverLedgerExtraRequest = Partial<
     | "note"
   >
 > & {
+  expectedVersions?: Record<string, string>;
   signal?: AbortSignal;
 };
 

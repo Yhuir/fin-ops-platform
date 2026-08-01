@@ -819,6 +819,9 @@ describe("turnover ledger API", () => {
           interest_paid_date: "2026-05-10",
           interest_payment_method: "银行转账",
           note: "已线下确认",
+          expected_versions: {
+            "turnover_relation_extra:rel-001": "2026-05-11T10:00:00+08:00",
+          },
         });
         return new Response(JSON.stringify({
           extra: {
@@ -868,6 +871,9 @@ describe("turnover ledger API", () => {
       interestPaidDate: "2026-05-10",
       interestPaymentMethod: "银行转账",
       note: "已线下确认",
+      expectedVersions: {
+        "turnover_relation_extra:rel-001": "2026-05-11T10:00:00+08:00",
+      },
     });
     expect(saved.extra.interestRateType).toBe("monthly");
     expect(saved.row?.accruedInterest).toBe("9.67");

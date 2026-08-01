@@ -1,6 +1,6 @@
 # 外部往来款管理测试矩阵
 
-日期：2026-07-26
+日期：2026-08-02
 
 ## 影响面
 
@@ -10,7 +10,7 @@
 | Business composition | `TurnoverLedgerService` / relation context | 标签准入、分组、金额、闭环两侧一致、relation case |
 | Writes | facade/UoW/adapters/Workbench command | OCC、幂等、rollback、确认/撤回、零页面 fan-out |
 | API | `TurnoverLedgerApiRoutes` | 权限、DTO、错误、筛选、分页、导出、无 freshness metadata |
-| Frontend | `TurnoverLedgerPage.tsx` | loading/empty/error/retry、即时按钮反馈、一次 reload、成功后 reload 失败语义 |
+| Frontend | `TurnoverLedgerPage.tsx` | loading/empty/error/retry、extra editor request identity、关闭/停用失效、保存 relation identity/OCC、即时按钮反馈、一次 reload、成功后 reload 失败语义 |
 | Audit/runtime | page audit / registries | canonical invariants、无 Turnover worker/read model/event |
 | Cross-page | Workbench relation | 两页读取同一 active case/members/status |
 
@@ -37,6 +37,10 @@
 - confirm/withdraw 的 canonical write 语义不因 read 链切换而改变。
 - 当前页写成功只 GET 一次；另一个页面/tab 不自动 I/O。
 - GET 失败可由普通刷新恢复；写成功后的 reload 失败不伪装写失败。
+- relation A 的 detail/extra 请求在 relation B 打开后即使忽略 abort 并晚返回，也不能改写 B 的 form/detail/error/loading。
+- extra drawer 关闭、页面停用或卸载后，pending editor GET 必须 abort，后续回调不能恢复旧抽屉。
+- extra 保存只允许 active context、selected row、form 的 relation id 完全一致；PUT 必须携带 `turnover_relation_extra:<id>` 的 `expected_versions`。
+- initial GET 和保存/关系 mutation 期间输入与相关动作 disabled；409 保留用户 form 和 dirty，不 reload、不显示成功。
 - runtime registry、RabbitMQ dispatch、deploy env、App Status 和 manifest 均无 Turnover worker/read model/event。
 
 ## 本地验证命令
@@ -58,6 +62,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_postgres_i
 cd web
 npm test -- --run src/test/TurnoverLedgerApi.test.ts src/test/TurnoverLedgerPage.test.tsx
 npm run build
+npx playwright test e2e/turnover-ledger-flow.spec.ts --project=chromium
 ```
 
 PostgreSQL integration 在没有 `FIN_OPS_TEST_DATABASE_URL` 时按仓库合同 skip；生产 fixture 负责最终真实数据库证据。

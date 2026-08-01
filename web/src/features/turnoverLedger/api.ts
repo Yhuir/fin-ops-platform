@@ -954,9 +954,9 @@ export async function fetchTurnoverRelationExtra(
 
 export async function saveTurnoverRelationExtra(
   relationId: string,
-  { signal, ...extra }: SaveTurnoverLedgerExtraRequest,
+  { expectedVersions, signal, ...extra }: SaveTurnoverLedgerExtraRequest,
 ): Promise<SaveTurnoverLedgerExtraResponse> {
-  const body: Record<string, string | null> = {};
+  const body: Record<string, string | null | Record<string, string>> = {};
   if (extra.interestRateType !== undefined) {
     body.interest_rate_type = extra.interestRateType;
   }
@@ -974,6 +974,9 @@ export async function saveTurnoverRelationExtra(
   }
   if (extra.note !== undefined) {
     body.note = extra.note;
+  }
+  if (expectedVersions !== undefined) {
+    body.expected_versions = expectedVersions;
   }
 
   const payload = await requestJson<ApiSaveTurnoverLedgerExtraResponse>(
