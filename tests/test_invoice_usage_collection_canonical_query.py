@@ -7,6 +7,9 @@ from fin_ops_platform.domain.enums import InvoiceType
 from fin_ops_platform.services.invoice_relation_query_context import (
     DistributedInvoiceRelationContext,
 )
+from fin_ops_platform.services.input_invoice_usage_canonical_query_service import (
+    InputInvoiceUsageCanonicalQueryService,
+)
 from fin_ops_platform.services.output_invoice_collection_canonical_query_service import (
     OutputInvoiceCollectionCanonicalQueryService,
 )
@@ -98,6 +101,28 @@ class RecordingOutputRowAssembler:
             for candidate in candidates
         ]
         return {"invoiceIdentityKey": group["identity_key"]}
+
+
+class RecordingInputRowAssembler:
+    def __init__(self) -> None:
+        self.lifecycle_policies: list[object] = []
+
+    def _row_payload(
+        self,
+        _group: dict[str, object],
+        *,
+        lifecycle_policy: object,
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        self.lifecycle_policies.append(lifecycle_policy)
+        evaluate = getattr(lifecycle_policy, "evaluate_input_invoice_payment")
+        return evaluate(
+            has_oa=False,
+            has_bank=False,
+            applicant_name="",
+            fully_matched=False,
+            invoice_oa_amount_matched=False,
+        )
 
 
 class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
@@ -235,6 +260,43 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
 
         self.assertIs(first, second)
         self.assertEqual(import_service.calls, 1)
+
+    def test_input_row_assembly_reuses_one_snapshot_payment_policy(self) -> None:
+        assembler = RecordingInputRowAssembler()
+        service = InputInvoiceUsageCanonicalQueryService(
+            repository=None,
+            row_assembler=assembler,  # type: ignore[arg-type]
+        )
+        snapshot = InvoiceUsageCollectionCanonicalSnapshot(
+            groups=[{"line_items": []}, {"line_items": []}],
+            supporting_groups=[],
+            relations=[],
+            transactions=[],
+            oa_records=[],
+            overlays={},
+            pagination={},
+            summary={},
+            statistics={},
+            facet_counts={},
+            payment_status_labels={},
+            payment_status_rules={
+                "version": 2,
+                "rules": [
+                    {
+                        "id": "pending_default",
+                        "label": "快照待处理",
+                        "priority": 7,
+                        "enabled": True,
+                        "conditions": {"fallback": True},
+                    }
+                ],
+            },
+        )
+
+        rows = service._rows_from_snapshot(snapshot)
+
+        self.assertEqual([row["label"] for row in rows], ["快照待处理"] * 2)
+        self.assertIs(assembler.lifecycle_policies[0], assembler.lifecycle_policies[1])
 
     def test_relation_context_returns_the_full_active_connected_component(
         self,

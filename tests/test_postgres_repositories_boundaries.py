@@ -320,9 +320,6 @@ def test_no_oa_bank_batch_save_deletes_removed_events_before_removed_batches() -
     )
 
     executed_sql = [sql for sql, _ in connection.executed]
-    read_model_delete_index = next(
-        index for index, sql in enumerate(executed_sql) if "delete from read_model.no_oa_bank_batch_rows" in sql
-    )
     removed_events_delete_index = next(
         index
         for index, sql in enumerate(executed_sql)
@@ -334,12 +331,13 @@ def test_no_oa_bank_batch_save_deletes_removed_events_before_removed_batches() -
         if "delete from app.no_oa_bank_batches" in sql and "not (batch_id = any(%s))" in sql
     )
 
-    assert read_model_delete_index < removed_events_delete_index < removed_batches_delete_index
+    assert removed_events_delete_index < removed_batches_delete_index
+    assert not any("read_model.no_oa_bank_batch_rows" in sql for sql in executed_sql)
     assert connection.executed[removed_events_delete_index][1] == ("no_oa_bank_batch", ["retained-batch"])
     assert connection.executed[removed_batches_delete_index][1] == ("no_oa_bank_batch", ["retained-batch"])
 
 
-def test_no_oa_bank_batch_save_bulk_upserts_app_and_read_model_rows() -> None:
+def test_no_oa_bank_batch_save_bulk_upserts_only_canonical_app_rows() -> None:
     connection = RecordingConnection()
     repository = PostgresWorkbenchRepository(connection)
 
@@ -376,26 +374,20 @@ def test_no_oa_bank_batch_save_bulk_upserts_app_and_read_model_rows() -> None:
         for sql, params_seq in connection.executed_many_values
         if sql.startswith("insert into app.no_oa_bank_batches(")
     ]
-    read_model_upserts = [
-        params_seq
-        for sql, params_seq in connection.executed_many_values
-        if sql.startswith("insert into read_model.no_oa_bank_batch_rows(")
-    ]
     assert [len(params_seq) for params_seq in app_upserts] == [2]
-    assert [len(params_seq) for params_seq in read_model_upserts] == [2]
     assert not any(sql.startswith("insert into app.no_oa_bank_batches(") for sql, _params in connection.executed)
     assert not any(
-        sql.startswith("insert into read_model.no_oa_bank_batch_rows(") for sql, _params in connection.executed
+        "read_model.no_oa_bank_batch_rows" in sql
+        for sql, _params in [*connection.executed, *connection.executed_many_values]
     )
 
 
-def test_read_model_bulk_insert_prefers_multi_values_path_for_allowlisted_tables() -> None:
+def test_workbench_relation_bulk_insert_prefers_multi_values_path() -> None:
     connection = ValuesBulkConnection()
 
     allowlisted_sql = [
         "insert into read_model.workbench_relation_rows(row_id, payload) values (%s, %s)",
         "insert into read_model.workbench_relation_groups(group_id, payload) values (%s, %s)",
-        "insert into read_model.search_index_rows(row_id, payload) values (%s, %s)",
     ]
     for sql in allowlisted_sql:
         _execute_many(
@@ -775,7 +767,7 @@ def test_bank_flow_rule_batch_affected_scope_lookup_is_one_set_based_query() -> 
     assert "from app.bank_transactions bank" in sql
     assert "from app.bank_flow_rule_batches batch" not in sql
     assert "in ('draft', 'unsubmitted')" not in sql
-    assert params == (["fee", "salary"],)
+    assert params == ()
 
 
 def test_bank_flow_rule_settings_version_check_locks_and_saves_in_caller_transaction() -> None:

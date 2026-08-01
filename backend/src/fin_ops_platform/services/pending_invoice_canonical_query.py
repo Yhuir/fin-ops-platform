@@ -552,7 +552,7 @@ auto_rules as materialized (
       on winner.row_id = match.row_id and winner.priority = match.priority
     group by match.row_id
 ),
-effective_categories as materialized (
+effective_categories as (
     select
         b.*,
         case
@@ -598,7 +598,7 @@ effective_categories as materialized (
     where coalesce(config.payload->>'scan_direction', 'all') = 'all'
        or b.direction = config.payload->>'scan_direction'
 ),
-enriched as materialized (
+enriched as (
     select
         category.*,
         case
@@ -650,7 +650,7 @@ enriched as materialized (
     left join relation_oa_facts oa on oa.bank_id = category.row_id
     left join relation_case_facts cases on cases.bank_id = category.row_id
 ),
-classified_source as materialized (
+classified_source as (
     select
         enriched.*,
         case

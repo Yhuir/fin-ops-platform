@@ -54,7 +54,7 @@
 
 - 每个页面读请求开启一个 `REPEATABLE READ READ ONLY` transaction。
 - rows、summary、statistics、facets 和用于组装当前页的 facts 都在该 transaction 中读取。
-- rows/summary/facets 复用一次 materialized canonical CTE；整个请求最多 8 条批量 SQL statement，数量不随当前页行数或 relation 数增长。
+- rows/summary/facets 复用一次 materialized canonical CTE；付款规则从同一 request snapshot 交给有界行装配，禁止逐行重读 `app_settings`。整个请求最多 8 条批量 SQL statement，数量不随当前页行数或 relation 数增长。
 - 服务端完成筛选、排序、分页；Python 只组装当前页有界 facts。
 - 只有 EXPLAIN 或真实慢查询证据支持时才增加索引；本模块不自行创建 migration。
 

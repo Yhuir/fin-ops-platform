@@ -574,7 +574,13 @@ class InputInvoiceUsageQueryService:
                 return row
         return None
 
-    def _row_payload(self, group: dict[str, Any], *, context: DistributedInvoiceRelationContext) -> dict[str, Any]:
+    def _row_payload(
+        self,
+        group: dict[str, Any],
+        *,
+        context: DistributedInvoiceRelationContext,
+        lifecycle_policy: InvoiceLifecyclePolicy | None = None,
+    ) -> dict[str, Any]:
         primary: Invoice = group["primary"]
         line_items: list[Invoice] = group["line_items"]
         relation_lookup_ids = self._invoice_relation_lookup_ids(line_items)
@@ -582,7 +588,15 @@ class InputInvoiceUsageQueryService:
         bank_payload = self._bank_relation_payload(primary, line_items, relations, context=context)
         oa_payload = self._oa_relation_payload(primary, line_items, relations, context=context)
         invoice_relation_payload = self._invoice_relation_payload(primary, line_items, relations, context=context)
-        payment_status = self._payment_status(primary, line_items, relations, oa_payload, bank_payload, context=context)
+        payment_status = self._payment_status(
+            primary,
+            line_items,
+            relations,
+            oa_payload,
+            bank_payload,
+            context=context,
+            lifecycle_policy=lifecycle_policy,
+        )
         row_id = "invoice_usage_row_" + sha1(str(group.get("row_key") or group["identity_key"]).encode("utf-8")).hexdigest()[:16]
         payload = {
             "id": row_id,
@@ -845,6 +859,7 @@ class InputInvoiceUsageQueryService:
         bank_payload: dict[str, Any],
         *,
         context: DistributedInvoiceRelationContext,
+        lifecycle_policy: InvoiceLifecyclePolicy | None = None,
     ) -> dict[str, str]:
         confirmed_relations = [relation for relation in relations if self._relation_is_confirmed(relation)]
         has_oa = any(
@@ -859,7 +874,7 @@ class InputInvoiceUsageQueryService:
         )
         applicant = self._first_confirmed_oa_applicant(confirmed_relations, context=context)
         fully_matched = self._has_fully_matched_relation(line_items, confirmed_relations, context=context)
-        return self._lifecycle_policy.evaluate_input_invoice_payment(
+        return (lifecycle_policy or self._lifecycle_policy).evaluate_input_invoice_payment(
             has_oa=has_oa,
             has_bank=has_bank,
             applicant_name=applicant,

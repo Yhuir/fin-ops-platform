@@ -734,3 +734,8 @@
 - 决策：rows 主响应从 `input_invoice_usage` 完整投影展开 `invoiceRelations.summaries`，按唯一发票 ID 返回 `statistics` / `statistics_status`；筛选、月份、排序和分页不参与统计。Page Audit 保持 canonical expected-set 独立对照。
 - 旧链路：删除前端 `titleInvoiceCount`、`loadTitleTotal`、`queryAffectsTitleTotal` 与 `page_size=1` 额外标题请求，禁止恢复第二浏览器 I/O。
 - 2026-07-24：relation freshness 改为按月份进项发票 IDs 的 consumer-semantic proof，bank-bank/纯销项关系不再令进项页 stale；source version 提升到 `input-invoice-usage:v4-semantic-relation-scope`。
+
+## 2026-08-01 - 首屏付款规则 N+1 删除
+
+- 生产计时显示 `/rows?page_size=20` 每请求执行 31 条数据库语句，而只装配 1 行的 `/filter-options` 为 12 条；差值来自每行支付状态计算重新读取同一份 `app_settings`。
+- repository 已在 `REPEATABLE READ READ ONLY` snapshot 内读取并规范化付款规则；当前页行装配改为复用一个 request-scoped lifecycle policy，旧的逐行 settings I/O 被删除。API shape、规则优先级、详情、导出和写链不变，没有 cache、read model、worker、索引、迁移或新依赖。

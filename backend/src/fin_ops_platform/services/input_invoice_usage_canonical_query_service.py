@@ -7,6 +7,12 @@ from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_query_contract import (
     input_invoice_usage_filter_config,
 )
+from fin_ops_platform.services.input_invoice_usage_payment_rules import (
+    PaymentStatusEvaluationContext,
+    evaluate_payment_status,
+    normalize_payment_status_rules_settings,
+    public_payment_status_rules_payload,
+)
 from fin_ops_platform.services.input_invoice_usage_service import (
     InputInvoiceUsageError,
     InputInvoiceUsageQueryService,
@@ -15,6 +21,7 @@ from fin_ops_platform.services.input_invoice_usage_service import (
 from fin_ops_platform.services.invoice_relation_query_context import (
     DistributedInvoiceRelationContext,
 )
+from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
 from fin_ops_platform.services.postgres_repositories.invoice_usage_collection_query import (
     InvoiceUsageCollectionCanonicalSnapshot,
 )
@@ -361,10 +368,37 @@ class InputInvoiceUsageCanonicalQueryService:
         snapshot: InvoiceUsageCollectionCanonicalSnapshot,
     ) -> list[dict[str, Any]]:
         context = _context(snapshot)
+        lifecycle_policy = InvoiceLifecyclePolicy(
+            input_payment_rules_provider=_SnapshotPaymentRulesProvider(
+                snapshot.payment_status_rules
+            )
+        )
         return [
-            self._row_assembler._row_payload(group, context=context)
+            self._row_assembler._row_payload(
+                group,
+                context=context,
+                lifecycle_policy=lifecycle_policy,
+            )
             for group in snapshot.groups
         ]
+
+
+class _SnapshotPaymentRulesProvider:
+    def __init__(self, settings: dict[str, Any]) -> None:
+        self._settings = normalize_payment_status_rules_settings(settings)
+
+    def payment_status_rules_payload(self, *, can_save: bool = True) -> dict[str, Any]:
+        return public_payment_status_rules_payload(
+            self._settings,
+            read_only=True,
+            can_save=can_save,
+        )
+
+    def rules_source_version(self) -> int:
+        return int(self._settings["version"])
+
+    def evaluate(self, context: PaymentStatusEvaluationContext) -> dict[str, str]:
+        return evaluate_payment_status(self._settings, context)
 
 
 class _StaticOaProjection:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 import re
@@ -32,6 +32,7 @@ class InvoiceUsageCollectionCanonicalSnapshot:
     statistics: dict[str, int]
     facet_counts: dict[str, list[dict[str, Any]]]
     payment_status_labels: dict[str, str]
+    payment_status_rules: dict[str, Any] = field(default_factory=dict)
 
 
 class PostgresInputInvoiceUsageQueryRepository:
@@ -335,6 +336,7 @@ class PostgresInputInvoiceUsageQueryRepository:
             },
             facet_counts=_facet_counts(facet_rows, status_labels=labels),
             payment_status_labels=labels,
+            payment_status_rules=payment_settings,
         )
 
 
