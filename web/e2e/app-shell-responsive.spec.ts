@@ -165,31 +165,31 @@ test.describe("app shell responsive browser smoke", () => {
       expect(item.svgHeight, JSON.stringify(item)).toBeCloseTo(16, 1);
     }
 
+    await expect(page.locator(".app-sidebar-brand-lockup")).toBeHidden();
+    await expect(page.locator(".app-sidebar-brand-mark")).toBeHidden();
     const collapsedHeaderGeometry = await page.locator(".app-sidebar-brand").evaluate((brand) => {
       const sidebar = brand.closest<HTMLElement>(".app-sidebar");
-      const status = brand.querySelector<HTMLElement>(".app-sidebar-brand-mark");
       const toggle = brand.querySelector<HTMLElement>(".app-sidebar-toggle");
-      if (!sidebar || !status || !toggle) throw new Error("collapsed brand geometry missing");
+      if (!sidebar || !toggle) throw new Error("collapsed sidebar header geometry missing");
       const sidebarRect = sidebar.getBoundingClientRect();
-      const statusRect = status.getBoundingClientRect();
       const toggleRect = toggle.getBoundingClientRect();
       return {
-        sidebarLeft: sidebarRect.left,
-        sidebarRight: sidebarRect.right,
-        statusLeft: statusRect.left,
-        statusRight: statusRect.right,
-        toggleLeft: toggleRect.left,
-        toggleRight: toggleRect.right,
+        centerDeltaPx: Math.abs(
+          (sidebarRect.left + sidebarRect.width / 2)
+          - (toggleRect.left + toggleRect.width / 2),
+        ),
+        toggleWidth: toggleRect.width,
+        toggleHeight: toggleRect.height,
       };
     });
-    expect(collapsedHeaderGeometry.statusLeft).toBeGreaterThanOrEqual(collapsedHeaderGeometry.sidebarLeft);
-    expect(collapsedHeaderGeometry.toggleRight).toBeLessThanOrEqual(collapsedHeaderGeometry.sidebarRight);
-    expect(collapsedHeaderGeometry.statusRight).toBeLessThanOrEqual(collapsedHeaderGeometry.toggleLeft);
+    expect(collapsedHeaderGeometry.centerDeltaPx).toBeLessThanOrEqual(0.5);
+    expect(collapsedHeaderGeometry.toggleWidth).toBeCloseTo(32, 1);
+    expect(collapsedHeaderGeometry.toggleHeight).toBeCloseTo(32, 1);
     const collapsedScreenshotPath = testInfo.outputPath("sidebar-collapsed.png");
     await page.locator(".app-sidebar").screenshot({ path: collapsedScreenshotPath });
     await testInfo.attach("sidebar-collapsed.png", { path: collapsedScreenshotPath, contentType: "image/png" });
 
-    const sidebarMotion = page.evaluate(async () => {
+    const measureSidebarMotion = (targetWidth: number) => page.evaluate(async (expectedWidth) => {
       const sidebar = document.querySelector<HTMLElement>(".app-sidebar");
       if (!sidebar) throw new Error("sidebar missing");
       let cls = 0;
@@ -210,7 +210,7 @@ test.describe("app shell responsive browser smoke", () => {
       observer.disconnect();
       const firstWidth = frames[0]?.width ?? 72;
       const motionStart = frames.find((frame) => Math.abs(frame.width - firstWidth) > 0.5)?.at ?? startedAt;
-      const target = frames.find((frame) => frame.width >= 231.5)?.at ?? Number.POSITIVE_INFINITY;
+      const target = frames.find((frame) => Math.abs(frame.width - expectedWidth) <= 0.5)?.at ?? Number.POSITIVE_INFINITY;
       const intervals = frames.slice(1).map((frame, index) => frame.at - frames[index]!.at).sort((a, b) => a - b);
       const percentile = (ratio: number) => {
         if (intervals.length === 0) return 0;
@@ -230,7 +230,8 @@ test.describe("app shell responsive browser smoke", () => {
         frameP50Ms: percentile(0.5),
         frameP95Ms: percentile(0.95),
       };
-    });
+    }, targetWidth);
+    const sidebarMotion = measureSidebarMotion(232);
     await page.getByRole("button", { name: "展开菜单" }).click();
     const motion = await sidebarMotion;
     await testInfo.attach("sidebar-expand-performance.json", {
@@ -240,6 +241,7 @@ test.describe("app shell responsive browser smoke", () => {
 
     expect(motion.firstWidth).toBeCloseTo(72, 0);
     expect(motion.lastWidth).toBeCloseTo(232, 0);
+    expect(motion.elapsedMs).toBeGreaterThanOrEqual(100);
     expect(motion.elapsedMs).toBeLessThanOrEqual(300);
     expect(motion.frameP95Ms, JSON.stringify(motion)).toBeLessThanOrEqual(25);
     expect(motion.cls).toBe(0);
@@ -254,6 +256,27 @@ test.describe("app shell responsive browser smoke", () => {
 
     const toggle = page.locator(".app-sidebar-toggle");
     await toggle.focus();
+    const sidebarCollapseMotion = measureSidebarMotion(72);
+    await toggle.click();
+    const collapseMotion = await sidebarCollapseMotion;
+    await testInfo.attach("sidebar-collapse-performance.json", {
+      body: Buffer.from(JSON.stringify(collapseMotion, null, 2)),
+      contentType: "application/json",
+    });
+
+    expect(collapseMotion.firstWidth).toBeCloseTo(232, 0);
+    expect(collapseMotion.lastWidth).toBeCloseTo(72, 0);
+    expect(collapseMotion.elapsedMs).toBeGreaterThanOrEqual(100);
+    expect(collapseMotion.elapsedMs).toBeLessThanOrEqual(300);
+    expect(collapseMotion.frameP95Ms, JSON.stringify(collapseMotion)).toBeLessThanOrEqual(25);
+    expect(collapseMotion.cls).toBe(0);
+    await expect(page.getByRole("button", { name: "展开菜单" })).toBeVisible();
+    await expect(page.locator(".app-sidebar-brand-mark")).toBeHidden();
+    await expect(toggle).toBeFocused();
+
+    await toggle.click();
+    await expect(page.getByRole("button", { name: "折叠菜单" })).toBeVisible();
+    await expect(page.locator(".app-sidebar")).toHaveCSS("width", "232px");
     await toggle.click();
     await toggle.click();
     await expect(page.getByRole("button", { name: "折叠菜单" })).toBeVisible();

@@ -204,7 +204,7 @@ describe("Finance operations shell", () => {
     expect(screen.queryByRole("button", { name: "年月选择" })).not.toBeInTheDocument();
   });
 
-  test("keeps the sidebar brand available inside the OA iframe", async () => {
+  test("hides the sidebar brand in the collapsed OA iframe until the menu expands", async () => {
     window.history.pushState({}, "", "/?embedded=oa");
     const user = userEvent.setup();
     installMockApiFetch();
@@ -212,9 +212,10 @@ describe("Finance operations shell", () => {
     render(<App />);
 
     expect(await screen.findByText("赵华", {}, { timeout: WORKBENCH_RENDER_TIMEOUT })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "系统状态正常" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "系统状态正常" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "关联台" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "展开菜单" }));
+    expect(screen.getByRole("button", { name: "系统状态正常" })).toBeInTheDocument();
     expect(await screen.findByText("财务运营平台")).toBeInTheDocument();
     expect(screen.getByText("溯源办公系统")).toBeInTheDocument();
     expect(document.querySelector(".app-shell.embedded-shell")).not.toBeNull();

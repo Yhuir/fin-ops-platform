@@ -15,7 +15,7 @@
 ### 负责
 
 - 页面注册、路由 host、sidebar/topbar、session context、page runtime context。
-- 通过既有 SessionContext 展示当前 OA 身份；固定品牌区、独立滚动导航和固定账号区属于 shell 布局职责。
+- 通过既有 SessionContext 展示当前 OA 身份；固定品牌区、独立滚动导航和固定账号区属于 shell 布局职责。桌面收缩态隐藏品牌状态入口，只保留居中的展开 toggle。
 - 只挂载当前 route，并向页面提供稳定的 `pageKey/active` runtime identity。
 - 全局 operation overlay、app health indicator、页面 session state。
 - 为页面提供通用壳体，不解释业务数据。
@@ -43,7 +43,7 @@
 | Route rendering | `PageRouteHost` | 根据 registry 渲染页面 |
 | Navigation | sidebar/topbar | 不硬编码业务查询 |
 | Current OA identity | sidebar account footer | 只展示 `displayName/username/deptName`；弹层开关不产生 API、图片或业务 I/O |
-| Global runtime status entry | static local brand mark | 静态状态点展示 level，并复用既有 App Status 弹层；不使用无限动画 |
+| Global runtime status entry | static local brand mark | 桌面展开态和 compact drawer 展示静态状态点并复用既有 App Status 弹层；桌面收缩态隐藏且退出交互；不使用无限动画 |
 | Runtime context | pages/components | 提供 `{pageKey, active, activationGeneration}` 兼容 shape；load 由页面 mount/query/retry owner 触发，shell 不改变 generation |
 
 ## 持久化与投影

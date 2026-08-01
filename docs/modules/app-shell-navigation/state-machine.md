@@ -44,8 +44,8 @@
 
 | 状态 | 行为 |
 | --- | --- |
-| desktop expanded | `expanded=true`，显示文字和 icon；CSS 宽度 `232px`。 |
-| desktop collapsed | `expanded=false`，保留文本节点但让隐藏 label 退出 flex 尺寸计算；每个 `34px` link 使用不可压缩的 `34px` icon slot 和 `16px` SVG，CSS 外部宽度保持 `72px`。 |
+| desktop expanded | `expanded=true`，在既有 `180ms ease-out-quart` 状态过渡后显示品牌状态入口、文字和 icon；CSS 宽度 `232px`。 |
+| desktop collapsed | `expanded=false`，侧栏平滑收至 `72px`；品牌 lockup 视觉隐藏并通过 `aria-hidden/inert` 退出交互，只保留 `32px` toggle 居中；隐藏 label 退出 flex 尺寸计算，每个 `34px` link 使用不可压缩的 `34px` icon slot 和 `16px` SVG。 |
 | compact closed | `isCompact=true` 且 `mobileOpen=false`，侧栏 drawer 关闭。 |
 | compact open | top bar 点击“打开菜单”后 `mobileOpen=true`，侧栏 drawer 打开。 |
 | active item | 当前 path/search 匹配 item `to`，且 `item.active !== false`。 |
@@ -101,4 +101,5 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-08-02 | 收缩态隐藏品牌入口，并补齐 `232px↔72px` 双向平滑过渡和 reduced-motion 降级 | desktop sidebar header、内容宽度与主内容 reflow | `AppSidebar.test.tsx` + `app-shell-responsive.spec.ts` |
 | 2026-07-25 | 删除 shell 浏览器生命周期业务激活和前端 domain event 协调 | route、page runtime、页面业务 I/O | `cd web && npm test -- --run PageRouteHost App` |

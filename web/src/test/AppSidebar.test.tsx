@@ -185,11 +185,15 @@ describe("AppSidebar shell contract", () => {
   });
 
   test("renders the expand control as an icon-only control without visible tooltip copy", () => {
-    renderSidebar(false);
+    const { container } = renderSidebar(false);
 
     const toggle = screen.getByRole("button", { name: "展开菜单" });
+    const brandLockup = container.querySelector(".app-sidebar-brand-lockup");
     expect(toggle).toHaveClass("app-sidebar-toggle");
     expect(toggle).toHaveAttribute("title", "展开菜单");
+    expect(brandLockup).toHaveAttribute("aria-hidden", "true");
+    expect(brandLockup).toHaveAttribute("inert");
+    expect(container.querySelector(".app-sidebar-brand-mark")).toBeNull();
     expect(screen.queryByText("展开菜单")).not.toBeInTheDocument();
     expect(appSidebarSource).toContain("PanelLeftOpen");
     expect(appSidebarSource).toContain("PanelLeftClose");
@@ -197,11 +201,15 @@ describe("AppSidebar shell contract", () => {
     expect(appSidebarSource).not.toMatch(/Tooltip\.Content[\s\S]*(展开菜单|折叠菜单)/);
   });
 
-  test("keeps collapsed text nodes mounted and animates them with HeroUI-style state transitions", () => {
+  test("keeps collapsed labels mounted while hiding the brand and animating the shared shell", () => {
     renderSidebar(false);
 
     const contentRule = appStyles.match(/\.app-sidebar-content\s*\{[^}]*\}/s)?.[0] ?? "";
     const sidebarRule = appStyles.match(/\.app-sidebar\s*\{[^}]*\}/s)?.[0] ?? "";
+    const brandLockupRule = appStyles.match(/\.app-sidebar-brand-lockup\s*\{[^}]*\}/s)?.[0] ?? "";
+    const collapsedBrandLockupRule = appStyles.match(/\.app-sidebar-brand\.collapsed \.app-sidebar-brand-lockup\s*\{[^}]*\}/s)?.[0] ?? "";
+    const toggleRule = appStyles.match(/\.app-sidebar-toggle\s*\{[^}]*\}/s)?.[0] ?? "";
+    const collapsedToggleRule = appStyles.match(/\.app-sidebar-brand\.collapsed \.app-sidebar-toggle\s*\{[^}]*\}/s)?.[0] ?? "";
     const brandTextRule = appStyles.match(/\.app-sidebar-brand-text\s*\{[^}]*\}/s)?.[0] ?? "";
     const collapsedBrandTextRule = appStyles.match(/\.app-sidebar-content\.collapsed \.app-sidebar-brand-text\s*\{[^}]*\}/s)?.[0] ?? "";
     const linkLabelRule = appStyles.match(/\.app-sidebar-link-label\s*\{[^}]*\}/s)?.[0] ?? "";
@@ -214,8 +222,20 @@ describe("AppSidebar shell contract", () => {
     expect(screen.getByText("关联台")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "银行明细" })).toHaveAttribute("title", "银行明细");
     expect(sidebarRule).toMatch(/--app-sidebar-content-motion:\s*var\(--motion-base\) var\(--ease-out-quart\)/);
-    expect(contentRule).not.toMatch(/transition:\s*width|will-change:\s*width/);
-    expect(sidebarRule).not.toMatch(/transition:\s*width|will-change:\s*width/);
+    expect(sidebarRule).toMatch(/flex-basis var\(--app-sidebar-content-motion\)/);
+    expect(sidebarRule).toMatch(/width var\(--app-sidebar-content-motion\)/);
+    expect(contentRule).toMatch(/transition:\s*width var\(--app-sidebar-content-motion\)/);
+    expect(contentRule).not.toMatch(/will-change:\s*width/);
+    expect(sidebarRule).not.toMatch(/will-change:\s*width/);
+    expect(brandLockupRule).toMatch(/opacity[^;]*var\(--motion-fast\)/);
+    expect(brandLockupRule).toMatch(/transform[^;]*var\(--motion-base\)/);
+    expect(collapsedBrandLockupRule).toMatch(/opacity:\s*0;/);
+    expect(collapsedBrandLockupRule).toMatch(/pointer-events:\s*none;/);
+    expect(collapsedBrandLockupRule).toMatch(/visibility:\s*hidden;/);
+    expect(collapsedBrandLockupRule).not.toMatch(/width:\s*28px|flex:\s*0 0 28px/);
+    expect(toggleRule).toMatch(/position:\s*absolute;/);
+    expect(toggleRule).toMatch(/right:\s*10px;/);
+    expect(collapsedToggleRule).toMatch(/--app-sidebar-toggle-offset:\s*-10px;/);
     expect(brandTextRule).toMatch(/opacity[^;]*var\(--app-sidebar-content-motion\)/);
     expect(brandTextRule).toMatch(/transform[^;]*var\(--app-sidebar-content-motion\)/);
     expect(brandTextRule).not.toMatch(/transition:[^;]*(max-width|max-height|padding)/);

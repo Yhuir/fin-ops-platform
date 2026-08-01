@@ -9,7 +9,7 @@
 | `APP-SHELL-E2E-003` | `covered` | `web/src/test/PageRouteHost.test.tsx`、`web/src/test/AppSidebar.test.tsx`、`web/src/test/App.test.tsx` | 覆盖 registry 同源、未知 route redirect、lazy fallback、sidebar route/preload。 |
 | `APP-SHELL-E2E-004` | `covered` | `web/src/test/AppSidebar.test.tsx`、`web/e2e/app-shell-responsive.spec.ts` | 覆盖 active route、nested path、import shortcut inactive、hover/focus preload，以及收缩态全部菜单 icon slot/SVG 几何一致性。 |
 | `APP-SHELL-E2E-005` | `covered` | `web/src/test/AppSidebar.test.tsx`、`web/src/test/App.test.tsx`、`web/e2e/app-shell-responsive.spec.ts` | 覆盖 compact drawer 打开、导航后关闭和真实 Chromium mobile viewport。 |
-| `APP-SHELL-E2E-006` | `covered` | `web/e2e/app-shell-responsive.spec.ts` | 覆盖 `?embedded=oa` shell、默认折叠、品牌区边界、展开性能、快速双击最终状态和焦点保持。 |
+| `APP-SHELL-E2E-006` | `covered` | `web/e2e/app-shell-responsive.spec.ts` | 覆盖 `?embedded=oa` shell、默认折叠、品牌入口隐藏、toggle 几何居中、展开/收起双向性能、快速双击最终状态和焦点保持。 |
 | `APP-SHELL-E2E-007` | `covered` | `web/src/test/SessionGate.test.tsx`、`web/e2e/app-shell.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 覆盖 forbidden/expired/read-export/full/admin shell gate 和 protected API 零越权。 |
 | `APP-SHELL-E2E-008` | `covered` | `web/src/test/GlobalOperationOverlayContext.test.tsx`、页面级写操作 E2E | 覆盖 overlay 成功自动关闭、失败保留错误、用户确认关闭；页面级写操作验证 freshness。 |
 | `APP-SHELL-E2E-009` | `covered` | `web/src/test/PageSessionStateContext.test.tsx`、`web/src/test/useFinanceTableSession.test.tsx` | 覆盖 page/state/user/version/TTL/session storage fallback 和 table session 恢复。 |
@@ -17,7 +17,7 @@
 
 ## Operation latency baseline
 
-`web/e2e/app-shell.spec.ts` 和 `web/e2e/app-shell-responsive.spec.ts` 已接入 Playwright `operation-latency-*.json` 附件。本轮记录的 shell 操作覆盖：admin/read-export/forbidden/expired 进入系统状态 route、移动视口打开 `主导航菜单`、从抽屉点击 `设置` 后导航并关闭抽屉、打开 `?embedded=oa` embedded shell，以及点击 `展开菜单` 后显示折叠菜单。responsive spec 同时附加收缩/展开 sidebar 截图，逐项验证全部菜单 link/icon slot 中心偏差不超过 `0.5 CSS px`、slot 为 `34px`、SVG 为 `16px`。
+`web/e2e/app-shell.spec.ts` 和 `web/e2e/app-shell-responsive.spec.ts` 已接入 Playwright `operation-latency-*.json` 附件。本轮记录的 shell 操作覆盖：admin/read-export/forbidden/expired 进入系统状态 route、移动视口打开 `主导航菜单`、从抽屉点击 `设置` 后导航并关闭抽屉、打开 `?embedded=oa` embedded shell，以及点击 `展开菜单` 后显示折叠菜单。responsive spec 同时附加收缩/展开 sidebar 截图和展开/收起性能附件，逐项验证品牌入口在收缩态隐藏、toggle 中心偏差不超过 `0.5 CSS px`、全部菜单 link/icon slot 中心偏差不超过 `0.5 CSS px`、slot 为 `34px`、SVG 为 `16px`、双向动效为 100–300ms、frame p95 ≤25ms 且 CLS=0。
 
 ## 缺口分类
 

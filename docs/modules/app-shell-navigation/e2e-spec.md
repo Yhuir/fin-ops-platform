@@ -20,7 +20,7 @@
 | `APP-SHELL-E2E-003` | route、page key、lazy chunk preload 和 sidebar items 均来自 `pageRegistry`，未知路径回到 root，lazy fallback 不阻塞后续导航。 | P0 |
 | `APP-SHELL-E2E-004` | 桌面侧栏 active 状态、nested route、高亮和 import shortcut inactive 行为正确；hover/focus preload 不改变当前 route。 | P1 |
 | `APP-SHELL-E2E-005` | compact/mobile 视口可以打开主导航，点击业务入口后抽屉关闭并进入目标页面。 | P0 |
-| `APP-SHELL-E2E-006` | embedded OA 模式使用 embedded shell；桌面侧栏默认折叠，用户仍可展开/收起，不遮挡页面主体。 | P1 |
+| `APP-SHELL-E2E-006` | embedded OA 模式使用 embedded shell；桌面侧栏默认折叠，只显示居中展开 toggle；品牌入口退出视觉和交互，用户仍可用 100–300ms 双向平滑动效展开/收起，不遮挡页面主体。 | P1 |
 | `APP-SHELL-E2E-007` | forbidden/expired/read-export/full/admin session gate 不触发越权 protected API；不可访问页面展示正确 gate 或不可用状态。 | P0 |
 | `APP-SHELL-E2E-008` | Global operation overlay 只承载写操作后的短暂等待/失败确认，不保存业务事实，不替代 read model freshness。 | P1 |
 | `APP-SHELL-E2E-009` | Page session state 只保存轻量 UI 状态，并按 page/state/user/version/TTL 隔离；不保存 read model payload 或业务事实。 | P1 |
