@@ -255,23 +255,30 @@ Plans:
 
 - [x] 12-01-PLAN — Deliver the direct-canonical ETC page performance path, three-bucket OA lifecycle, recoverable scoped-CAS command flow, fail-closed Audit, legacy cleanup, and release verification.
 
-### Phase 13: 完善设置页面：分析现状、风险、功能缺口和实施计划
+### Phase 13: 关闭 Settings ACL T0-01 权限提权并完成生产发布验证
 
-**Goal:** Capture the settings page's current module facts, code entry points, risks, feature gaps, and executable improvement plan in this phase directory.
+**Goal:** 修复普通 `full_access` 用户通过 generic settings 写入管理员名单的 T0-01 提权链，并完成后端可信边界、ACL 原子持久化与审计、OA 角色同步、前端唯一入口、旧链路删除、安全发布及生产证据闭环。
 **Requirements**: PAGE-15, PAGE-04, PAGE-05, PAR-01, PAR-02, PAR-03
 **Depends on:** Phase 0 cross-page dependency baseline and global `.planning/codebase/` map.
 **Canonical refs:** `docs/modules/settings/README.md`, `docs/modules/settings/state-machine.md`, `docs/modules/settings/tests.md`, `web/src/pages/SettingsPage.tsx`, `web/src/components/settings/*`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/services/app_settings_service.py`, `backend/src/fin_ops_platform/services/settings_data_reset_service.py`
 **Success Criteria** (what must be TRUE):
 
-  1. Phase artifacts identify settings module docs, frontend/backend entry points, read model/worker boundaries, cross-page impacts, and verification commands.
-  2. Any implementation plan preserves `.planning/codebase/` as the global map and writes page-specific analysis only inside this phase directory.
-  3. Tests and docs impact assessment are explicitly mapped before implementation starts.
+  1. `YNSYLP005` 是唯一 protected administrator；普通 settings API 不再读取、返回或写入 ACL，full/read/denied 均不能通过 APP API 自提为 admin。
+  2. admin-only ACL GET/PUT 使用独立 version/CAS，只合并 ACL family，并将 canonical settings 与 secret-safe durable audit 同事务提交；generic writer 保留并发最新 ACL。
+  3. ACL/generic writer共享固定session advisory lock；ACL专用guard内完成stale/no-op、bounded OA target、同步DB commit与锁内失败补偿，确定性并发测试证明settings/audit/OA一致。
+  4. SettingsPage 是唯一 ACL UI；Workbench modal、column-layout、pending fallback、runtime env/dynamic admin、mocks/tests中的旧 ACL 路径完整删除。
+  5. 两级批准把candidate/control-plane bootstrap与activation分离；首次helper bootstrap使用hash-pinned manual-root同文件系统原子替换并禁止legacy self-update/runtime-worker helper变更；remote fingerprints、API quiesce、migration/CHECK、`--activate-existing`及safe rollback gate阻止旧漏洞重开。
+  6. 七类local/candidate回归、production只读DB/OA与双session身份盘点、用户批准后的正式发布和post-deploy full/read/denied逐档API/OA/latency/恢复证据全部通过；不新增表、worker、cache或其它页面/read-model业务事实。
 
-**Plans:** 0 plans
+**Plans:** 5 plans
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 13 to break down)
+- [ ] 13-01-PLAN.md — Wave 0：migration、repository CAS/audit 与 local-store 原子合同。
+- [ ] 13-02-PLAN.md — Wave 1：后端可信 API/auth/request-id/OA 边界及全部 backend legacy caller 删除。
+- [ ] 13-03-PLAN.md — Wave 2：dedicated ACL frontend、第二入口/旧 payload删除与 Browser 直接提权回归。
+- [ ] 13-04-PLAN.md — Wave 3：长期文档、可执行只读production preflight、安全cutover能力和全回归准备。
+- [ ] 13-05-PLAN.md — Wave 4：用户批准后的正式生产发布、post-deploy证据与最终验收checkpoint。
 
 ### Phase 14: 完善系统状态页面：分析现状、风险、功能缺口和实施计划
 
