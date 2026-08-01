@@ -145,6 +145,7 @@ EXPECTED_MIGRATIONS = [
     "0129_runtime_outbox_canonical_attempts_contract.sql",
     "0130_canonical_finance_domain_contracts.sql",
     "0131_validate_canonical_finance_domain_contracts.sql",
+    "0132_settings_access_control_guard.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -300,7 +301,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 132)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 133)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -646,6 +647,28 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         )
         self.assertIn('"canonical_value_changed":false', normalized_sql)
         self.assertNotIn("settings_payload =", normalized_sql)
+
+    def test_settings_access_control_guard_repairs_and_blocks_legacy_admin_writes(self) -> None:
+        sql = (
+            MIGRATIONS_DIR / "0132_settings_access_control_guard.sql"
+        ).read_text(encoding="utf-8").lower()
+        normalized_sql = " ".join(strip_sql_comments(sql).split())
+
+        self.assertIn("update app.app_settings", normalized_sql)
+        self.assertIn("insert into audit.events", normalized_sql)
+        self.assertIn("settings.access_control.migrated", normalized_sql)
+        self.assertIn("sha256", normalized_sql)
+        self.assertIn("'{normalized_payload}'", normalized_sql)
+        self.assertIn("access_control_version", normalized_sql)
+        self.assertIn("admin_usernames", normalized_sql)
+        self.assertIn("readonly_export_usernames", normalized_sql)
+        self.assertIn("full_access_usernames", normalized_sql)
+        self.assertIn("ynsylp005", normalized_sql)
+        self.assertIn("add constraint app_settings_access_control_guard", normalized_sql)
+        self.assertIn("not valid", normalized_sql)
+        self.assertIn("validate constraint app_settings_access_control_guard", normalized_sql)
+        self.assertNotIn("create table", normalized_sql)
+        self.assertNotIn("job.outbox_events", normalized_sql)
 
     def test_runtime_queue_history_retention_indexes_and_migrator_delete_grants_are_declared(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()
@@ -1320,6 +1343,14 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         checked_sql = checked_sql.replace(
             direct_canonical_retirement_sql,
             "approved_direct_canonical_page_runtime_retirement;",
+        )
+        settings_acl_guard_sql = strip_sql_comments(
+            (MIGRATIONS_DIR / "0132_settings_access_control_guard.sql").read_text(encoding="utf-8")
+        ).lower()
+        self.assertIn(settings_acl_guard_sql, checked_sql)
+        checked_sql = checked_sql.replace(
+            settings_acl_guard_sql,
+            "approved_settings_access_control_guard;",
         )
         approved_legacy_drops = (
             "drop table if exists read_model.cost_statistics_bank_flow_rows;",
