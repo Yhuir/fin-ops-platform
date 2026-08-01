@@ -780,5 +780,6 @@ git diff --check
 
 - 生产证据：grouped API 串行 p95 `821.585ms`，并发 4 p95 `2542.039ms`；App Health 显示每请求约 21 条 SQL、DB p95 `1180.561ms`，而生产仅 64 条页面流水/21 个分组。旧链每次加载全部银行流水和完整分类 snapshot，再在 Python 对全部流水重跑自动规则，最后丢弃非往来标签行。
 - 修复：在同一个 `REPEATABLE READ READ ONLY` transaction 内复用 Bank Details canonical classifier，只查询 App Settings 当前选中 tag codes 的 effective rows；设置只读一次，选择合同通过 `AppSettingsService.turnover_ledger_selected_tag_codes_from_settings(...)` 无 I/O 映射。原有 relation、FIFO、金额、分组、筛选、分页和导出计算不变。
+- 首次生产业务校验发现集合查询已命中 64 条有效分类行，但 raw tag definition 不持有人工确认的逐行 `turnover_family`，适配层因此把全部行过滤为空。修复复用同一 request 内已配置的 `BankTransactionCategoryService.category_semantics_for_code(...)`，并从 canonical third label 推导 family；不恢复 Python rematch、全量分类 snapshot 或额外 I/O。
 - 旧链删除：生产 query service 不再构造 `ImportNormalizationService`、`BankTransactionEffectiveCategoryProvider`，不再加载全量 category snapshot，也不再对全量银行流水执行 Python 自动匹配。未新增表、索引、缓存、worker、projection、依赖或第二事实源。
 - 验收：本地业务/service/API 回归与 set-based SQL 合同通过；最终查询数和 p95 必须由精确 SHA 部署后的 App Health 与并发 4 SLO probe 复验。

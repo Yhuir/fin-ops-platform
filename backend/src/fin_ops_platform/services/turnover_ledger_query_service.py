@@ -11,6 +11,9 @@ from fin_ops_platform.services.bank_transaction_category_service import (
 from fin_ops_platform.services.bank_details_canonical_query import (
     PostgresBankDetailsCanonicalQueryRepository,
 )
+from fin_ops_platform.services.bank_turnover_tag_semantics import (
+    turnover_family_for_third_label,
+)
 from fin_ops_platform.services.postgres_repositories.turnover_ledger_snapshot import (
     turnover_ledger_canonical_snapshot,
 )
@@ -87,7 +90,8 @@ class TurnoverLedgerQueryService:
                     transaction,
                     settings=settings_snapshot,
                     category_codes=selected_tag_codes,
-                )
+                ),
+                category_service=category_service,
             )
             relation_service = TurnoverRelationService.from_snapshot(
                 state_store.load_turnover_relations(),
@@ -130,6 +134,8 @@ class TurnoverLedgerQueryService:
 
 def _canonical_turnover_rows(
     rows: list[dict[str, Any]],
+    *,
+    category_service: BankTransactionCategoryService,
 ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
     transactions: list[dict[str, Any]] = []
     categories: dict[str, dict[str, Any]] = {}
@@ -140,6 +146,9 @@ def _canonical_turnover_rows(
             continue
         definition = row.get("effective_definition")
         definition = dict(definition) if isinstance(definition, dict) else {}
+        semantics = category_service.category_semantics_for_code(
+            row.get("effective_category_code")
+        )
         primary = str(row.get("effective_category_primary_label") or "").strip()
         secondary = str(row.get("effective_category_sub_label") or "").strip()
         third = str(row.get("effective_category_third_label") or "").strip()
@@ -177,8 +186,12 @@ def _canonical_turnover_rows(
             "source": source_name,
             "category_version": int(category_version or 0),
             "manual_category_version": int(row.get("manual_category_version") or 0),
-            "turnover_role": definition.get("turnover_role"),
-            "turnover_action_type": definition.get("turnover_action_type"),
-            "turnover_family": definition.get("turnover_family"),
+            "turnover_role": semantics.get("turnover_role")
+            or definition.get("turnover_role"),
+            "turnover_action_type": semantics.get("turnover_action_type")
+            or definition.get("turnover_action_type"),
+            "turnover_family": semantics.get("turnover_family")
+            or turnover_family_for_third_label(third)
+            or definition.get("turnover_family"),
         }
     return transactions, categories

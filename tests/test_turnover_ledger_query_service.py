@@ -6,6 +6,9 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
+from fin_ops_platform.services.bank_transaction_category_service import (
+    BankTransactionCategoryService,
+)
 from fin_ops_platform.services.postgres_repositories.turnover_ledger_snapshot import (
     turnover_ledger_canonical_snapshot,
 )
@@ -16,6 +19,7 @@ from fin_ops_platform.services.turnover_ledger_query_service import (
 from fin_ops_platform.services.turnover_ledger_relation_context import (
     apply_workbench_relation_context,
 )
+from fin_ops_platform.services.turnover_ledger_service import TurnoverLedgerService
 
 
 class _LocalLedger:
@@ -122,6 +126,25 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
             TurnoverLedgerQueryService(connection=None)
 
     def test_canonical_category_rows_preserve_turnover_semantics_without_python_rematch(self) -> None:
+        category_service = BankTransactionCategoryService(
+            tag_dictionary={
+                "version": 1,
+                "definitions": [
+                    {
+                        "code": "turnover-personal-in",
+                        "label": "借入款",
+                        "path": ["自动识别", "借入款"],
+                        "source": "custom",
+                        "status": "active",
+                        "direction": "income",
+                        "output_primary_label": "外部往来款收款",
+                        "output_sub_label": "借入款",
+                        "turnover_action_type": "pending_repayment",
+                        "rules": {"counterparty_keywords": ["借款"]},
+                    }
+                ],
+            }
+        )
         transactions, categories = _canonical_turnover_rows(
             [
                 {
@@ -129,20 +152,19 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
                     "direction": "income",
                     "effective_category_code": "turnover-personal-in",
                     "effective_category_label": "个人借入",
-                    "effective_category_primary_label": "外部往来款",
-                    "effective_category_sub_label": "个人",
-                    "effective_category_third_label": "借入",
+                    "effective_category_primary_label": "外部往来款收款",
+                    "effective_category_sub_label": "借入款",
+                    "effective_category_third_label": "个人往来",
                     "effective_category_source": "manual_confirmation",
                     "confirmation_version": 7,
                     "manual_category_version": 3,
                     "effective_definition": {
-                        "path": ["external_turnover", "personal", "borrow_in"],
-                        "turnover_role": "external_turnover",
+                        "path": ["自动识别", "借入款"],
                         "turnover_action_type": "pending_repayment",
-                        "turnover_family": "personal",
                     },
                 }
-            ]
+            ],
+            category_service=category_service,
         )
 
         self.assertEqual(transactions[0]["id"], "bank-1")
@@ -150,13 +172,20 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
         self.assertEqual(categories["bank-1"]["category_version"], 7)
         self.assertEqual(
             categories["bank-1"]["category_label_path"],
-            ["外部往来款", "个人", "借入"],
+            ["外部往来款收款", "借入款", "个人往来"],
         )
         self.assertEqual(
             categories["bank-1"]["category_path"],
-            ["external_turnover", "personal", "borrow_in"],
+            ["自动识别", "借入款"],
         )
+        self.assertEqual(categories["bank-1"]["turnover_role"], "external_turnover")
+        self.assertEqual(categories["bank-1"]["turnover_action_type"], "pending_repayment")
         self.assertEqual(categories["bank-1"]["turnover_family"], "personal")
+        self.assertTrue(
+            TurnoverLedgerService._is_selected_external_turnover_category(
+                categories["bank-1"]
+            )
+        )
 
     def test_canonical_relation_context_marks_both_sides_of_zero_difference_closure(self) -> None:
         rows = [
