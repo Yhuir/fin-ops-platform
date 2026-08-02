@@ -55,6 +55,30 @@ def _session(
 
 
 class SettingsAccessControlPreflightTests(unittest.TestCase):
+    @staticmethod
+    def _oa_inventory(*, extra_bindings: list[dict[str, object]] | None = None):
+        return {
+            "enabled": True,
+            "required_permission": "finops:app:view",
+            "menu_ids": [101],
+            "role_ids": {
+                "read_export_only": [201],
+                "full_access": [202],
+                "admin": [203],
+            },
+            "bindings": [
+                {"role_id": 201, "menu_id": 101, "role_key": "finops_read_export"},
+                {"role_id": 202, "menu_id": 101, "role_key": "finops_full_access"},
+                {"role_id": 203, "menu_id": 101, "role_key": "finops_admin"},
+                *(extra_bindings or []),
+            ],
+            "members": {
+                "read_export_only": [],
+                "full_access": ["FULL001"],
+                "admin": ["YNSYLP005"],
+            },
+        }
+
     def _report(self, **overrides):
         arguments = {
             "release": "main-security-test",
@@ -70,15 +94,8 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
                 "constraint_present": True,
                 "constraint_validated": True,
             },
-            "environment": {"allowed_usernames": ["YNSYLP005"], "readonly_usernames": []},
-            "oa_roles": {
-                "enabled": True,
-                "members": {
-                    "read_export_only": [],
-                    "full_access": ["FULL001"],
-                    "admin": ["YNSYLP005"],
-                },
-            },
+            "environment": {},
+            "oa_roles": self._oa_inventory(),
             "admin_session": _session("YNSYLP005", "admin", True),
             "bearer_session": _session("SLO_DENIED", "denied", False),
         }
@@ -133,18 +150,79 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
                 self.assertFalse(self._report(**override)["eligible"])
 
     def test_oa_role_drift_fails_closed(self) -> None:
-        report = self._report(oa_roles={
-            "enabled": True,
-            "members": {
-                "read_export_only": [],
-                "full_access": ["FULL001"],
-                "admin": ["YNSYLP005", "ATTACKER"],
-            },
-        })
+        oa_roles = self._oa_inventory()
+        oa_roles["members"]["admin"] = ["YNSYLP005", "ATTACKER"]
+        report = self._report(oa_roles=oa_roles)
 
         self.assertFalse(report["eligible"])
         self.assertFalse(report["oa"]["matches_target"])
         self.assertNotIn("ATTACKER", str(report))
+
+    def test_fixed_menu_inventory_emits_exact_hashed_cleanup_and_rollback_targets(self) -> None:
+        report = self._report(
+            oa_roles=self._oa_inventory(
+                extra_bindings=[
+                    {"role_id": 987654, "menu_id": 101, "role_key": "business_accounting"}
+                ]
+            )
+        )
+
+        self.assertFalse(report["eligible"])
+        self.assertTrue(report["oa"]["cleanup_eligible"])
+        cleanup = report["oa"]["menu_binding_cleanup"]
+        self.assertEqual(cleanup["target_count"], 1)
+        self.assertEqual(cleanup["rollback_target_hashes"], cleanup["target_hashes"])
+        self.assertRegex(cleanup["before_sha256"], r"^[0-9a-f]{64}$")
+        self.assertRegex(cleanup["after_sha256"], r"^[0-9a-f]{64}$")
+        self.assertRegex(cleanup["target_hashes"][0], r"^[0-9a-f]{64}$")
+        rendered = json.dumps(report, sort_keys=True)
+        self.assertNotIn("business_accounting", rendered)
+        self.assertNotIn("987654", rendered)
+
+    def test_selector_role_sync_menu_roles_bindings_and_members_fail_closed(self) -> None:
+        cases: list[tuple[str, dict[str, object]]] = []
+
+        disabled = self._oa_inventory()
+        disabled["enabled"] = False
+        cases.append(("disabled", disabled))
+
+        for selector in ("", "finops:other:view"):
+            inventory = self._oa_inventory()
+            inventory["required_permission"] = selector
+            cases.append((f"selector={selector!r}", inventory))
+
+        duplicate_menu = self._oa_inventory()
+        duplicate_menu["menu_ids"] = [101, 102]
+        cases.append(("duplicate menu", duplicate_menu))
+
+        duplicate_role = self._oa_inventory()
+        duplicate_role["role_ids"]["admin"] = [203, 204]
+        cases.append(("duplicate role", duplicate_role))
+
+        missing_binding = self._oa_inventory()
+        missing_binding["bindings"] = missing_binding["bindings"][:-1]
+        cases.append(("missing binding", missing_binding))
+
+        member_drift = self._oa_inventory()
+        member_drift["members"]["full_access"] = []
+        cases.append(("member drift", member_drift))
+
+        for name, oa_roles in cases:
+            with self.subTest(name=name):
+                report = self._report(oa_roles=oa_roles)
+                self.assertFalse(report["eligible"])
+                self.assertFalse(report["oa"]["cleanup_eligible"])
+
+    def test_retired_app_admission_environment_presence_blocks_release(self) -> None:
+        for name in (
+            "FIN_OPS_ALLOWED_USERNAMES",
+            "FIN_OPS_ALLOWED_ROLES",
+            "FIN_OPS_READONLY_EXPORT_USERNAMES",
+        ):
+            with self.subTest(name=name):
+                report = self._report(environment={"retired_admission_env_present": {name: True}})
+                self.assertFalse(report["eligible"])
+                self.assertEqual(report["environment"]["retired_admission_env_present"], [name])
 
     def test_legacy_runtime_admin_environment_fails_closed_and_is_redacted(self) -> None:
         report = self._report(environment={"admin_usernames": ["ATTACKER"]})
