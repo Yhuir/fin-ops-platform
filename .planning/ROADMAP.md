@@ -273,7 +273,7 @@ Plans:
   8. OA只认证username并使用目标OA实测的共享comparison key；Settings是ACL唯一人工I/O，full/read名单完整展示，absence明确denied。
   9. 固定`FIN_OPS_OA_REQUIRED_PERMISSION=finops:app:view`仅定位OA menu；该menu只绑定finops_read_export/full_access/admin三专用role。disabled/missing/menu/role/binding/drift/timeout均失败，non-dedicated cleanup/rollback只作用于approved exact bindings，不触碰业务role/member或其它menu。
 
-**Plans:** 6/15 plans executed
+**Plans:** 7/15 plans executed
 
 Plans:
 
@@ -283,7 +283,7 @@ Plans:
 - [x] 13-06-PLAN.md — Wave 3：只读实测目标OA username collation/identity并锁定共享comparison contract。
 - [x] 13-07-PLAN.md — Wave 4：删除APP permission/role/三env admission，收敛为005加单次canonical ACL snapshot。
 - [x] 13-08-PLAN.md — Wave 5：OA runtime三专用角色严格menu投影与现有补偿/fail-closed合同。
-- [ ] 13-10-PLAN.md — Wave 6：fixed menu selector、deployment exact cleanup/rollback与secret-safe evidence gate。
+- [x] 13-10-PLAN.md — Wave 6：fixed menu selector、deployment exact cleanup/rollback与secret-safe evidence gate。
 - [ ] 13-09-PLAN.md — Wave 7：backend七类跨模块回归与唯一whole-repo inventory/I-O guard。
 - [ ] 13-11-PLAN.md — Wave 7：frontend fixtures、direct URL/API、17-route与Browser四tier回归。
 - [ ] 13-04-PLAN.md — Wave 8：全局安全、产品、API与app-architecture长期事实同步。
@@ -409,7 +409,7 @@ Phase 0 is the shared baseline and must be completed before page implementation 
 | 10. 免OA流水批量处理 | 0/0 | Not started | - |
 | 11. 批量账务 | 0/0 | Not started | - |
 | 12. ETC票据管理 | 1/1 | Complete — READY_FOR_UNIFIED_DEPLOYMENT; production gates pending | 2026-07-18 |
-| 13. 设置 | 6/15 | In Progress|  |
+| 13. 设置 | 7/15 | In Progress|  |
 | 14. 系统状态 | 0/0 | Not started | - |
 | 15. 银行流水导入 | 0/0 | Not started | - |
 | 16. 发票导入 | 0/0 | Not started | - |

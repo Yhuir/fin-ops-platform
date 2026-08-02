@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 13-08-PLAN.md
-last_updated: "2026-08-02T07:16:34.904Z"
+last_updated: "2026-08-02T07:40:53.483Z"
 last_activity: 2026-08-02 -- Phase 13 execution started
 progress:
   total_phases: 38
   completed_phases: 11
   total_plans: 104
-  completed_plans: 69
+  completed_plans: 70
   percent: 29
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 ## Current Position
 
 Phase: 13 (settings-improvements) — EXECUTING
-Plan: 9 of 15
+Plan: 10 of 15
 Status: Ready to execute
 Last activity: 2026-08-02 -- Phase 13 execution started
 
@@ -56,6 +56,7 @@ Progress: [██░░░░░░░░] in progress
 | Phase 13 P06 | 2 min | 2 tasks | 1 files |
 | Phase 13 P07 | 19min | 2 tasks | 12 files |
 | Phase 13 P08 | 8min | 2 tasks | 6 files |
+| Phase 13 P10 | 18min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -169,6 +170,9 @@ Progress: [██░░░░░░░░] in progress
 - [Phase 13]: FIN_OPS_OA_REQUIRED_PERMISSION must be exactly finops:app:view and remain confined to the OA adapter; it never grants APP access. — The same marker identifies the OA menu but canonical Settings ACL remains the only APP authority.
 - [Phase 13]: Runtime OA sync validates one menu, three unique dedicated roles, and the exact three bindings before changing only sys_user_role memberships. — Validation must fail before DML, while deployment cleanup remains a separate controlled operation.
 - [Phase 13]: Disabled or missing runtime projection fails real ACL mutations through the existing 502 contract; deployment cleanup remains owned by 13-10. — A canonical ACL change cannot report success while the OA menu projection is unavailable.
+- [Phase 13]: 普通 eligible 与 cleanup_eligible 分离；只有 fixed-menu non-dedicated binding 可进入 exact cleanup，selector/role/member/env 漂移仍阻断。
+- [Phase 13]: Rollback 只使用同一 approved before-image 的 salted target hashes，并在恢复 previous release 前完成 read-back。
+- [Phase 13]: 三项退休 APP admission env 只要存在即阻断 release；FIN_OPS_OA_REQUIRED_PERMISSION 仅保留固定 OA selector。
 
 ### Roadmap Evolution
 
@@ -247,6 +251,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-02T07:16:34.895Z
+Last session: 2026-08-02T07:40:22.786Z
 Stopped at: Completed 13-08-PLAN.md
 Resume file: None
