@@ -257,7 +257,7 @@ Plans:
 
 ### Phase 13: 关闭 Settings ACL T0-01 权限提权并完成生产发布验证
 
-**Goal:** 修复普通 `full_access` 用户通过 generic settings 写入管理员名单的 T0-01 提权链，并完成后端可信边界、ACL 原子持久化与审计、OA 角色同步、前端唯一入口、旧链路删除、安全发布及生产证据闭环。
+**Goal:** 修复 Settings ACL T0-01 提权链，使固定 `YNSYLP005` 加 canonical Settings ACL 成为 APP 唯一授权事实源，并把 OA fin-ops menu 收敛为三专用角色的严格投影，完成旧授权链删除、安全发布及生产证据闭环。
 **Requirements**: PAGE-15, PAGE-04, PAGE-05, PAR-01, PAR-02, PAR-03
 **Depends on:** Phase 0 cross-page dependency baseline and global `.planning/codebase/` map.
 **Canonical refs:** `docs/modules/settings/README.md`, `docs/modules/settings/state-machine.md`, `docs/modules/settings/tests.md`, `web/src/pages/SettingsPage.tsx`, `web/src/components/settings/*`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/services/app_settings_service.py`, `backend/src/fin_ops_platform/services/settings_data_reset_service.py`
@@ -269,16 +269,29 @@ Plans:
   4. SettingsPage 是唯一 ACL UI；Workbench modal、column-layout、pending fallback、runtime env/dynamic admin、mocks/tests中的旧 ACL 路径完整删除。
   5. 两级批准把candidate/control-plane bootstrap与activation分离；首次helper bootstrap使用hash-pinned manual-root同文件系统原子替换并禁止legacy self-update/runtime-worker helper变更；remote fingerprints、API quiesce、migration/CHECK、`--activate-existing`及safe rollback gate阻止旧漏洞重开。
   6. 七类local/candidate回归、production只读DB/OA与双session身份盘点、用户批准后的正式发布和post-deploy full/read/denied逐档API/OA/latency/恢复证据全部通过；不新增表、worker、cache或其它页面/read-model业务事实。
+  7. 除固定 `YNSYLP005` 外，APP tier只由一次canonical ACL snapshot决定；OA permission（含`finops:app:view`）、role、三项retired admission env和provider failure均不能授权，缺席即denied且ACL撤权在下一次session/direct API立即生效。
+  8. OA只认证username并使用目标OA实测的共享comparison key；Settings是ACL唯一人工I/O，full/read名单完整展示，absence明确denied。
+  9. 固定`FIN_OPS_OA_REQUIRED_PERMISSION=finops:app:view`仅定位OA menu；该menu只绑定finops_read_export/full_access/admin三专用role。disabled/missing/menu/role/binding/drift/timeout均失败，non-dedicated cleanup/rollback只作用于approved exact bindings，不触碰业务role/member或其它menu。
 
-**Plans:** 5 plans
+**Plans:** 15 plans
 
 Plans:
 
-- [ ] 13-01-PLAN.md — Wave 0：migration、repository CAS/audit 与 local-store 原子合同。
-- [ ] 13-02-PLAN.md — Wave 1：后端可信 API/auth/request-id/OA 边界及全部 backend legacy caller 删除。
-- [ ] 13-03-PLAN.md — Wave 2：dedicated ACL frontend、第二入口/旧 payload删除与 Browser 直接提权回归。
-- [ ] 13-04-PLAN.md — Wave 3：长期文档、可执行只读production preflight、安全cutover能力和全回归准备。
-- [ ] 13-05-PLAN.md — Wave 4：用户批准后的正式生产发布、post-deploy证据与最终验收checkpoint。
+- [x] 13-01-PLAN.md — Wave 0：migration、repository CAS/audit 与 local-store 原子合同。
+- [x] 13-02-PLAN.md — Wave 1：后端可信 API/auth/request-id/OA 边界及全部 backend legacy caller 删除。
+- [x] 13-03-PLAN.md — Wave 2：dedicated ACL frontend、第二入口/旧 payload删除与 Browser 直接提权回归。
+- [ ] 13-06-PLAN.md — Wave 3：只读实测目标OA username collation/identity并锁定共享comparison contract。
+- [ ] 13-07-PLAN.md — Wave 4：删除APP permission/role/三env admission，收敛为005加单次canonical ACL snapshot。
+- [ ] 13-08-PLAN.md — Wave 5：OA runtime三专用角色严格menu投影与现有补偿/fail-closed合同。
+- [ ] 13-10-PLAN.md — Wave 6：fixed menu selector、deployment exact cleanup/rollback与secret-safe evidence gate。
+- [ ] 13-09-PLAN.md — Wave 7：backend七类跨模块回归与唯一whole-repo inventory/I-O guard。
+- [ ] 13-11-PLAN.md — Wave 7：frontend fixtures、direct URL/API、17-route与Browser四tier回归。
+- [ ] 13-04-PLAN.md — Wave 8：全局安全、产品、API与app-architecture长期事实同步。
+- [ ] 13-12-PLAN.md — Wave 9：Settings与permissions/audit模块边界、状态机及测试文档同步。
+- [ ] 13-13-PLAN.md — Wave 10：OA、app-shell与deploy架构/模块合同同步。
+- [ ] 13-14-PLAN.md — Wave 11：candidate preflight/deploy-control、canonical activation gate与全回归准备。
+- [ ] 13-15-PLAN.md — Wave 12：candidate upload、manual-root helper bootstrap、remote preflight与activation批准。
+- [ ] 13-05-PLAN.md — Wave 13：完整JIT preflight→activation→postdeploy/restore→最终验收生产序列。
 
 ### Phase 14: 完善系统状态页面：分析现状、风险、功能缺口和实施计划
 

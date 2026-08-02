@@ -7,7 +7,7 @@
 <domain>
 ## Phase Boundary
 
-本 phase 只规划并在后续执行中修复 T0-01：普通 `full_access` 用户可以通过普通 settings 保存接口写入 `admin_usernames`，把自己提升为管理员。
+本 phase 首先闭合 T0-01：普通 `full_access` 用户可以通过普通 settings 保存接口写入 `admin_usernames`，把自己提升为管理员；本次 follow-up 继续闭合 T0-01 暴露出的账户授权事实源缺口：从 Settings 删除的账号仍可因 OA `finops:app:view`、OA 业务角色或环境变量兜底进入 APP。
 
 本 phase 必须形成从后端授权、Settings API、持久化、审计、OA 角色同步、前端访问账户管理、旧数据清理、部署回滚到自动化验证的生产闭环。除修复该权限事实链所必需的改动外，不改变项目状态、银行账户映射、OA 导入、待找发票规则、数据重置、OA 凭据或其它业务页面行为。
 
@@ -46,6 +46,16 @@
 - **D-17（locked）** 发布前只读盘点 PostgreSQL ACL、root-owned env admin 配置和 OA 三类角色成员。历史非 `YNSYLP005` admin 必须 fail closed 清理并记录迁移 audit，不能在没有明确事实时静默保留为管理员。
 - **D-18（locked）** 发布后必须验证 `YNSYLP005` admin、代表性 full-access、read-export 和 denied session；验证 full-access 普通 settings 保存仍为 200，手工 ACL 提权请求为 403/明确拒绝，AppHealth/OA 凭据/data reset 仍保持 admin-only。
 - **D-19（locked）** 本 phase 不改变其它页面 API response、read model scope、worker、dirty scope、cache key 或业务事实；如果计划发现必须改变这些边界，停止并把扩展范围提交用户确认。
+
+### 唯一授权事实源与 OA 菜单投影
+- **D-20（locked）** 对除 `YNSYLP005` 外的所有账号，Settings 专用 ACL 中的 `accounts` 是 APP 访问等级的唯一业务事实源；账号不在列表中即为 `denied`。OA identity 只证明“这个 token 属于谁”，OA `finops:app:view`、OA roles、`FIN_OPS_ALLOWED_USERNAMES`、`FIN_OPS_ALLOWED_ROLES` 和 `FIN_OPS_READONLY_EXPORT_USERNAMES` 都不能再独立授予 APP 权限。
+- **D-21（locked）** APP 内只有两个可分配等级：`full_access`（所有操作均可）与 `read_export_only`（只可看和只可导出）。`admin` 只属于固定 `YNSYLP005`；`denied` 由账号不在列表中派生，不作为第三个可分配角色。
+- **D-22（locked）** `/settings` 的“访问账户权限”是唯一人工管理入口；只有 `YNSYLP005` 看得见并可调用专用 ACL API。不得恢复 Workbench modal、generic settings、环境变量名单、OA 当前角色或其它页面的第二写入口。
+- **D-23（locked）** OA 菜单由 OA 壳体在 APP 加载前渲染，因此 Settings owner 必须通过既有 OA integration adapter 把 canonical ACL 投影为专用 `finops_read_export`、`finops_full_access`、`finops_admin` 角色成员；用户不需要进入 OA 管理后台手工维护。OA 投影只控制菜单可见性，不能反向成为 APP 授权事实源。
+- **D-24（locked）** 生产菜单只允许绑定上述三类专用 fin-ops 角色。发布前必须盘点并清除 `finops:app:view` 对非专用 OA 角色的历史绑定；否则像 `YNSYLP006` 这类业务角色成员会继续看见入口。清理必须是受控、可审计、可回滚的 exact-target 操作，不能改动其它 OA 菜单或业务角色成员关系。
+- **D-25（locked）** 真实 ACL 变化只有在 canonical ACL、durable audit 与目标 OA 角色投影达到既有一致性/补偿合同后才返回成功；生产若未启用 OA role sync、缺少专用角色/菜单、网络超时或发现非专用角色漂移，必须明确失败或进入 `access_control_sync_inconsistent`，禁止返回“保存成功”但菜单未同步。
+- **D-26（locked）** 删除账号后的后端访问撤销不依赖 OA identity cache：下一次 APP session/API 权限判断必须直接得到 `denied`；直接输入 `/fin-ops/` 或 `/fin-ops-api/*` 也必须被拒绝。OA 菜单可见性以角色投影后的新 OA router/session 读取为验收边界，不承诺在不刷新 OA 壳体的既有浏览器 DOM 中瞬时消失。
+- **D-27（locked）** 本 follow-up 不新增权限框架、数据库表、Redis、read model、worker、outbox 或第二套缓存；复用现有 ACL snapshot、Settings admin API、OA role sync、route policy、SessionGate 与审计边界。必须删除被替代的 permission/role/env 授权分支、部署兜底和测试假设，并用全量角色矩阵、菜单角色独占性、直接 URL/API、其它页面回归与生产双账号证据闭环。
 
 ### the agent's Discretion
 - 在不改变上述合同的前提下，选择最小的现有 repository transaction helper、错误类、DTO type 和测试 helper。
@@ -104,7 +114,7 @@
 
 - 多管理员、管理员委派、双人审批、临时管理员和 UI 内管理员轮换。
 - 把同步 OA role sync 改造成 durable outbox worker。
-- 全面重定义 OA `required_permission` / allowed roles 与本地 allowlist 的授权优先级；本 phase 只保证这些来源不能产生非 `YNSYLP005` admin，并用 characterization/regression 防止意外访问面变化。
+- 多租户、组织/部门级 ACL、临时授权、按页面/字段的细粒度权限。
 - 重构整个巨型 `AppSettingsService` 或拆分所有 setting family。
 - 与 T0-01 无关的普通 settings 缺省值、项目范围、标签、OA import、凭据和 data reset 改造。
 
