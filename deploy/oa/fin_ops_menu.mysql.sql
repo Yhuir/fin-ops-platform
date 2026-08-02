@@ -12,12 +12,13 @@ SET @finops_menu_perms = 'finops:app:view';
 SET @finops_menu_icon = 'money';
 SET @finops_operator = 'finops_deploy';
 
-SET @existing_finops_menu_id = (
-  SELECT menu_id
-  FROM sys_menu
-  WHERE perms = @finops_menu_perms
-  ORDER BY menu_id DESC
-  LIMIT 1
+SET @existing_finops_menu_count = (
+  SELECT COUNT(*) FROM sys_menu WHERE perms = @finops_menu_perms
+);
+SET @existing_finops_menu_id = IF(
+  @existing_finops_menu_count = 1,
+  (SELECT MIN(menu_id) FROM sys_menu WHERE perms = @finops_menu_perms),
+  NULL
 );
 
 UPDATE sys_menu
@@ -38,7 +39,8 @@ SET
   remark = 'fin-ops iframe menu',
   update_by = @finops_operator,
   update_time = SYSDATE()
-WHERE menu_id = @existing_finops_menu_id;
+WHERE menu_id = @existing_finops_menu_id
+  AND @existing_finops_menu_count = 1;
 
 INSERT INTO sys_menu (
   parent_id,
@@ -77,9 +79,10 @@ SELECT
   'fin-ops iframe menu',
   @finops_operator,
   SYSDATE()
-WHERE @existing_finops_menu_id IS NULL;
+WHERE @existing_finops_menu_count = 0;
 
 SELECT
+  @existing_finops_menu_count <= 1 AS selector_precondition_ok,
   menu_id,
   parent_id,
   menu_name,

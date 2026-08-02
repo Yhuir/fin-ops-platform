@@ -20,41 +20,45 @@ SET @target_tier = 'admin';
 SET @readonly_role_key = 'finops_read_export';
 SET @full_access_role_key = 'finops_full_access';
 SET @admin_role_key = 'finops_admin';
+SET @target_user_count = (
+  SELECT COUNT(*) FROM sys_user WHERE user_name = @target_username
+);
+SET @readonly_role_count = (
+  SELECT COUNT(*) FROM sys_role WHERE role_key = @readonly_role_key
+);
+SET @full_access_role_count = (
+  SELECT COUNT(*) FROM sys_role WHERE role_key = @full_access_role_key
+);
+SET @admin_role_count = (
+  SELECT COUNT(*) FROM sys_role WHERE role_key = @admin_role_key
+);
+SET @target_user_id = IF(
+  @target_user_count = 1,
+  (SELECT MIN(user_id) FROM sys_user WHERE user_name = @target_username),
+  NULL
+);
+SET @readonly_role_id = IF(
+  @readonly_role_count = 1,
+  (SELECT MIN(role_id) FROM sys_role WHERE role_key = @readonly_role_key),
+  NULL
+);
+SET @full_access_role_id = IF(
+  @full_access_role_count = 1,
+  (SELECT MIN(role_id) FROM sys_role WHERE role_key = @full_access_role_key),
+  NULL
+);
+SET @admin_role_id = IF(
+  @admin_role_count = 1,
+  (SELECT MIN(role_id) FROM sys_role WHERE role_key = @admin_role_key),
+  NULL
+);
 SET @target_request_valid = (
   @target_tier IN ('hidden', 'read_export_only', 'full_access', 'admin')
   AND (@target_tier <> 'admin' OR @target_username = 'YNSYLP005')
-);
-
-SET @target_user_id = (
-  SELECT user_id
-  FROM sys_user
-  WHERE user_name = @target_username
-  ORDER BY user_id DESC
-  LIMIT 1
-);
-
-SET @readonly_role_id = (
-  SELECT role_id
-  FROM sys_role
-  WHERE role_key = @readonly_role_key
-  ORDER BY role_id DESC
-  LIMIT 1
-);
-
-SET @full_access_role_id = (
-  SELECT role_id
-  FROM sys_role
-  WHERE role_key = @full_access_role_key
-  ORDER BY role_id DESC
-  LIMIT 1
-);
-
-SET @admin_role_id = (
-  SELECT role_id
-  FROM sys_role
-  WHERE role_key = @admin_role_key
-  ORDER BY role_id DESC
-  LIMIT 1
+  AND @target_user_count = 1
+  AND @readonly_role_count = 1
+  AND @full_access_role_count = 1
+  AND @admin_role_count = 1
 );
 
 DELETE FROM sys_user_role
