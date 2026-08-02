@@ -4,20 +4,42 @@ import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 import { createOperationLatencyRecorder } from "./fixtures/operationLatency";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 
-function startStrictBrowserErrorCapture(page: Page, options: { allowExpectedAuthResourceError?: boolean } = {}) {
+function startStrictBrowserErrorCapture(
+  page: Page,
+  options: {
+    expectedAuthResponses?: readonly { pathname: string; status: 401 | 403 }[];
+  } = {},
+) {
   const errors: string[] = [];
+  const expectedAuthResponses = options.expectedAuthResponses ?? [];
+  const expectedAuthStatuses = new Set(expectedAuthResponses.map(({ status }) => status));
   page.on("pageerror", (error) => {
     errors.push(`pageerror: ${error.stack || error.message}`);
   });
   page.on("console", (message) => {
     if (message.type() === "error") {
-      if (
-        options.allowExpectedAuthResourceError
-        && message.text().includes("Failed to load resource: the server responded with a status of 401 (Unauthorized)")
-      ) {
+      const expectedAuthResourceErrors = new Set([
+        ...(expectedAuthStatuses.has(401)
+          ? ["Failed to load resource: the server responded with a status of 401 (Unauthorized)"]
+          : []),
+        ...(expectedAuthStatuses.has(403)
+          ? ["Failed to load resource: the server responded with a status of 403 (Forbidden)"]
+          : []),
+      ]);
+      if (expectedAuthResourceErrors.has(message.text())) {
         return;
       }
       errors.push(`console.error: ${message.text()}`);
+    }
+  });
+  page.on("response", (response) => {
+    if (response.status() < 400) {
+      return;
+    }
+    const isExpectedAuthResponse = expectedAuthResponses.some(({ pathname, status }) =>
+      responsePathMatches(response.url(), pathname) && response.status() === status);
+    if (!isExpectedAuthResponse) {
+      errors.push(`response.error: ${response.request().method()} ${response.url()} ${response.status()}`);
     }
   });
   page.on("requestfailed", (request) => {
@@ -134,7 +156,12 @@ test.describe("app shell browser smoke", () => {
   });
 
   test("shows session-denied state without rendering the protected dashboard", async ({ page }, testInfo) => {
-    const browserErrors = startStrictBrowserErrorCapture(page);
+    const browserErrors = startStrictBrowserErrorCapture(page, {
+      expectedAuthResponses: [
+        { pathname: "/api/session/me", status: 403 },
+        { pathname: "/api/background-jobs/active", status: 403 },
+      ],
+    });
     const api = await installDeterministicApiMocks(page, { sessionMode: "forbidden" });
     const recordLatency = createAppHealthLatencyRecorder(page, testInfo);
 
@@ -150,12 +177,19 @@ test.describe("app shell browser smoke", () => {
     await expect(page.getByRole("heading", { name: "无权访问财务运营平台" })).toBeVisible();
     await expect(page.getByText("当前 OA 账号未开通访问权限，请联系管理员处理。")).toBeVisible();
     await expect(page.getByTestId("app-health-data")).toHaveCount(0);
+    expect(api.count("GET /api/session/me")).toBeGreaterThan(0);
+    expect(api.count("GET /api/background-jobs/active")).toBeGreaterThan(0);
     expect(api.count("GET /api/operations/app-health-dashboard")).toBe(0);
     expect(browserErrors).toEqual([]);
   });
 
   test("shows expired session state and does not call protected page APIs", async ({ page }, testInfo) => {
-    const browserErrors = startStrictBrowserErrorCapture(page, { allowExpectedAuthResourceError: true });
+    const browserErrors = startStrictBrowserErrorCapture(page, {
+      expectedAuthResponses: [
+        { pathname: "/api/session/me", status: 401 },
+        { pathname: "/api/background-jobs/active", status: 403 },
+      ],
+    });
     const api = await installDeterministicApiMocks(page, { sessionMode: "expired" });
     const recordLatency = createAppHealthLatencyRecorder(page, testInfo);
 
@@ -170,6 +204,8 @@ test.describe("app shell browser smoke", () => {
 
     await expect(page.getByRole("heading", { name: "OA 会话已失效" })).toBeVisible();
     await expect(page.getByTestId("app-health-data")).toHaveCount(0);
+    expect(api.count("GET /api/session/me")).toBeGreaterThan(0);
+    expect(api.count("GET /api/background-jobs/active")).toBeGreaterThan(0);
     expect(api.count("GET /api/operations/app-health-dashboard")).toBe(0);
     expect(browserErrors).toEqual([]);
   });
