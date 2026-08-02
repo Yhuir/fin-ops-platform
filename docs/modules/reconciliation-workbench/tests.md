@@ -197,6 +197,12 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_w
 - Performance：测试和 whole-repo scan 保护旧 `assignRowsByAmountFallback` / `findUniqueAmountSubset` 组合枚举不存在；实现只使用已有 DTO 的 Map/Set 线性判断，没有新请求、state/effect、DOM 测量、依赖、read model 或 worker。
 - Workbench month/all schema 升至 v9，旧 v8 generation 与 page cache 必须返回 builder mismatch 并经既有 freshness gateway 重建。
 
+## 2026-08-03 all-scope 成员筛选 SQL 回归
+
+- `tests/test_workbench_sql_runtime.py` 保护 `month=all` 的搜索成员 join 只从 `g` 读取 group 投影字段，禁止重新生成会与成员 join 的 `zone` 冲突的裸列选择。
+- `tests/test_workbench_query_postgres_integration.py` 在 disposable PostgreSQL 中实际执行搜索、来源类型、银行对方名列筛选和银行月份筛选四条成员 join 链路；每条都必须返回同一 active group，零结果搜索仍返回空页而不是 SQL 错误。
+- API response shape、分页、freshness、active generation、worker、缓存与权限合同不变；本次不新增前端交互测试。
+
 ## 2026-07-22 Workbench v6 与历史修复回归
 
 - `tests/test_workbench_sql_runtime.py` 证明当前 month/all v7 同步，groups/initial cache key 随 schema 派生失效，旧 v6 source version 返回 `builder_mismatch`，不能作为 fresh generation 消费。

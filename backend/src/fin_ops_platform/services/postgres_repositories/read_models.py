@@ -4415,9 +4415,9 @@ class PostgresReadModelRepository:
         group_scope_clause = "true" if composed_all_scope else f"g.{scope_where}"
         group_row_join_id_sql = "coalesce(g.source_group_id, g.group_id)" if composed_all_scope else "g.group_id"
         group_select_sql = (
-            "group_id, source_group_id, zone, payload, raw_payload, scope_key, generation_id"
+            "g.group_id, g.source_group_id, g.zone, g.payload, g.raw_payload, g.scope_key, g.generation_id"
             if composed_all_scope
-            else "group_id, zone, payload, raw_payload, scope_key, generation_id"
+            else "g.group_id, g.zone, g.payload, g.raw_payload, g.scope_key, g.generation_id"
         )
         normalized_column_filters = _normalize_workbench_column_filters(column_filters)
         normalized_time_filters = _normalize_workbench_time_filters(time_filters)

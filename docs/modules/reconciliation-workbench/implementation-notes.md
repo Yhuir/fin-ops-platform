@@ -1459,3 +1459,9 @@
 - 修复只在 confirm/withdraw 共用的 repository 行索引边界合并规范化内容完全相同的 row；同 row id 的金额、状态、来源或其它规范化字段不一致仍 fail closed。selected 顺序、OA attachment context、两次 freshness/version 门禁、20/100 行上限和正式 command/UoW canonical reread 均不变。
 - 不改 projection、relation fact、generation、SQL、schema、worker、queue、Redis 或正式写入；不使用 `DISTINCT` 隐藏真实冲突。前端只新增该稳定错误码的批准中文文案。
 - 生产 release `main-bf429ea3-20260729170433` 上，原 409 的真实 1 OA + 4 流水选区返回 200、`can_submit=true`、金额 matched；20 次稳态 preview p50/p95/max 为 `252.383/730.272/814.141ms`。combined initial 与搜索组 p95 为 `303.235/175.834ms`，Page Audit 为 `pass/fresh/drained`、issues 为空。
+
+## 2026-08-03 - all-scope 搜索裸列歧义修复
+
+- 生产 `month=all` 搜索已命中的 group 在最终分页查询报 PostgreSQL `column reference "zone" is ambiguous`；原因是 all-scope 的成员筛选 join 与 group 表同时暴露 `zone`，而共享分页投影仍使用裸列。
+- 修复只在既有 `PostgresReadModelRepository.get_workbench_groups_page(...)` 中把 group 投影字段限定为 `g.*`。搜索、来源类型、列筛选和时间筛选共用该根边界，因此无需为各入口增加分支或 fallback。
+- 不改 SQL 次数、索引、schema、API DTO、read model、worker、缓存、权限或前端；旧的裸列投影断言同步移除，避免旧 SQL 再次污染链路。

@@ -3043,7 +3043,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         page_queries = [
             (sql, params)
             for sql, params in connection.fetch_all_calls
-            if "select group_id, source_group_id, zone, payload, raw_payload" in sql
+            if "select g.group_id, g.source_group_id, g.zone, g.payload, g.raw_payload" in sql
         ]
         self.assertEqual(len(page_queries), 2)
         paired_sql, paired_params = page_queries[0]
@@ -3237,7 +3237,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         )
         self.assertTrue(
             any(
-                "select group_id, source_group_id, zone, payload, raw_payload" in sql
+                "select g.group_id, g.source_group_id, g.zone, g.payload, g.raw_payload" in sql
                 and "join read_model.workbench_generations gen" in sql
                 and "g.scope_key <> 'all'" in sql
                 for sql, params in connection.fetch_all_calls
@@ -3629,7 +3629,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         filtered_page_query = next(
             (sql, params)
             for sql, params in connection.fetch_all_calls
-            if "select group_id, source_group_id, zone, payload, raw_payload" in sql
+            if "select g.group_id, g.source_group_id, g.zone, g.payload, g.raw_payload" in sql
         )
         self.assertNotIn("g.group_id = any(%s)", filtered_page_query[0])
         self.assertIn("active_workbench_members as not materialized", filtered_page_query[0])
@@ -3658,6 +3658,13 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertNotIn("string_agg(canonical_candidates.searchable_text", count_query)
         self.assertNotIn("oa_sort_min", count_query)
         self.assertNotIn("payload", count_query)
+        page_query = next(
+            sql
+            for sql, _params in connection.fetch_all_calls
+            if "select g.group_id, g.source_group_id, g.zone, g.payload, g.raw_payload" in sql
+        )
+        self.assertIn("zone_search_match", page_query)
+        self.assertNotIn("select group_id, source_group_id, zone, payload", page_query)
 
     def test_repository_intersects_zone_search_with_structured_group_row_filters(self) -> None:
         connection = WorkbenchSummaryGroupsConnection()
@@ -3967,7 +3974,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
                 normalized = " ".join(sql.lower().split())
                 self.fetch_all_calls.append((normalized, params))
-                if "select group_id, source_group_id, zone, payload, raw_payload" in normalized:
+                if "select g.group_id, g.source_group_id, g.zone, g.payload, g.raw_payload" in normalized:
                     return [
                         {
                             "group_id": "scope:2026-05:temp:bank-open",
@@ -4017,7 +4024,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         page_queries = [
             (sql, params)
             for sql, params in connection.fetch_all_calls
-            if "select group_id, source_group_id, zone, payload, raw_payload" in sql
+            if "select g.group_id, g.source_group_id, g.zone, g.payload, g.raw_payload" in sql
             and "from read_model.workbench_groups" in sql
         ]
         self.assertTrue(page_queries)
