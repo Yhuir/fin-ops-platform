@@ -10,19 +10,23 @@
 | `SETTINGS-E2E-004` | `covered` | `tests/test_settings_data_reset_service.py`、`web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`tests/test_app_status_overview_service.py` | 后端覆盖 protected targets、active job、并发 409、密码校验失败、reset OA rebuild、失败不泄密、不清数据和 job 状态；组件覆盖 cancel、password failure、reentry 和 progress。真实生产 reset 仍归 `SETTINGS-E2E-010`。 |
 | `SETTINGS-E2E-005` | `covered` | `tests/test_oa_applicant_credentials_service.py`、`tests/test_oa_applicant_credentials_api.py`、`tests/test_postgres_oa_applicant_credentials_repository.py`、`tests/test_target_oa_applicant_token_provider.py`、`web/src/test/SettingsPage.test.tsx` | 覆盖 admin-only、密码必填、列表不回显、settings payload 不泄密、PG 加密存储、target OA token provider 通过 credential service 获取密码和外部失败语义。 |
 | `SETTINGS-E2E-006` | `covered` | `tests/test_app_settings_service.py`、`web/src/test/PendingInvoicesApi.test.ts`、`web/src/test/SettingsPage.test.tsx`、`tests/test_derived_data_lifecycle_service.py`、`web/e2e/bank-details-auto-tag-rules-flow.spec.ts` | settings service/API 覆盖 pending invoice rules version/audit/fan-out，并拒绝 `bank_transaction_tags` 写入；银行自动标签规则保存/reapply 由 bank-details Browser E2E 作为所属页面覆盖。 |
-| `SETTINGS-E2E-007` | `covered` | `web/e2e/permissions-role-matrix.spec.ts`、`web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`tests/test_workbench_settings_sync_api.py`、`tests/test_oa_manual_import_api.py`、`tests/test_settings_data_reset_service.py`、`tests/test_oa_applicant_credentials_api.py` | Role matrix 覆盖 settings 高风险入口和 forbidden/expired gate；组件/API 覆盖只读隐藏/禁用、直接 mutation 拒绝、body actor 伪造拒绝、下游写服务零调用。 |
+| `SETTINGS-E2E-007` | `covered` | `web/e2e/permissions-role-matrix.spec.ts`、`web/src/test/SessionApi.test.ts`、`web/src/test/SessionGate.test.tsx`、`web/src/test/App.test.tsx`、`tests/test_auth_guard.py` | 13-09/13-11 证据保留 permission-bearing `YNSYLP006` 的 hostile OA roles/marker，同时锁定 canonical denied、direct `/fin-ops/` 不 mount 业务树、protected API 403 和零未授权写调用。 |
 | `SETTINGS-E2E-008` | `covered` | `tests/test_oa_manual_import_api.py`、`web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx` | 覆盖 refresh attachments、manual import create/delete 的 mutation gate、session actor 优先和 read-only 403；真实 OA 外部系统归 staging 风险。 |
 | `SETTINGS-E2E-009` | `covered` | `tests/test_derived_data_lifecycle_service.py`、`tests/test_app_status_overview_service.py`、`tests/test_runtime_worker_registry.py`、`web/src/test/AppStatusIndicator.test.tsx`、`web/e2e/settings-data-reset-flow.spec.ts` | 后端覆盖 lifecycle、App Status overview、worker/readiness registry；Browser 通过项目范围到成本统计 fresh read model 证明关键下游读取不使用旧数据；更多页面最终 UI 由各页面 Spec-first 覆盖。 |
 | `SETTINGS-E2E-010` | `external-risk` | `bash scripts/verify.sh infra-smoke` staging gate、runtime worker/read model tests、data reset service tests、write-operation SLO audit profiles | 本地 contract 覆盖 job、dirty scope、worker registry、App Status 和 Browser 用户路径；真实 PostgreSQL/RabbitMQ/Redis/systemd/OA/对象存储、生产备份恢复和全页面 drain 必须在 staging/runtime smoke 验证。 |
+| `SETTINGS-E2E-011` | `covered` | `web/src/test/PageRouteHost.test.tsx`、`web/e2e/permissions-role-matrix.spec.ts`、`tests/test_session_api.py`、`tests/test_app_health_api.py`、`tests/test_oa_applicant_credentials_api.py`、`tests/test_settings_data_reset_job.py` | 精确 17-route admin/full/read/denied matrix、admin-only control plane、管理员 ACL PUT、session tier 切换、finally restore 与即时撤权均由 13-09/13-11 现有证据覆盖。 |
+| `SETTINGS-E2E-012` | `covered-local` | `tests/test_app_settings_service.py`、`tests/test_workbench_settings_sync_api.py`、`tests/test_oa_role_sync_service.py`、唯一 inventory owner `tests/test_permissions_write_entry_inventory.py`、`web/src/test/SettingsPage.test.tsx` | 覆盖 409 draft、502 target、503 persistence/compensation/inconsistent、server actor/request-id、no-op/generic/evaluator I/O budget 与 no-new-runtime；真实 OA/production outcome 仍是外部 gate。 |
 
 ## T0 ACL coverage
 
-| Contract | Coverage |
-| --- | --- |
-| full direct generic/dedicated escalation blocked | `web/e2e/permissions-role-matrix.spec.ts` |
-| admin protected row、独立 load/save、409 draft | `web/src/test/SettingsPage.test.tsx` |
-| generic mapper/serializer no ACL | `web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/WorkbenchColumnLayout.test.tsx` |
-| production full→read→denied/OA/audit/latency/restore | `settings-access-control-post-deploy` redacted evidence |
+| Contract | 状态 | Coverage |
+| --- | --- | --- |
+| permission-present 006、direct session/API、即时撤权 | `covered` | 13-09：`tests/test_session_api.py`、`tests/test_auth_guard.py` |
+| 唯一 authority scanner 与 provider/no-op/runtime I/O budgets | `covered` | 13-09：`tests/test_permissions_write_entry_inventory.py`；不得复制 scanner |
+| normalized frontend、direct URL、17-route、admin-only、ACL restore | `covered` | 13-11：`web/src/test/SessionApi.test.ts`、`SessionGate.test.tsx`、`App.test.tsx`、`PageRouteHost.test.tsx`、`web/e2e/permissions-role-matrix.spec.ts` |
+| admin protected row、独立 load/save、409 draft | `covered` | `web/src/test/SettingsPage.test.tsx` |
+| generic mapper/serializer no ACL | `covered` | `web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/WorkbenchColumnLayout.test.tsx` |
+| fresh production full→read→denied、OA router/menu、audit/latency/restore | `external-risk` | 13-05 production checkpoint；本地 mock 不代替，当前无 production deployment claim |
 
 ## Operation latency baseline
 

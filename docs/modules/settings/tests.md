@@ -17,13 +17,13 @@
 
 | 类别 | 适用性 | 当前入口 |
 | --- | --- | --- |
-| 1. 业务核心 | 适用 | `tests/test_app_settings_service.py`、`tests/test_oa_applicant_credentials_service.py`：normalize、版本、非法映射、权限、凭据 |
-| 2. Service/repository | 适用 | `tests/test_settings_data_reset_service.py`、`tests/test_settings_data_reset_job.py`、`tests/test_postgres_oa_applicant_credentials_repository.py`、`tests/test_target_oa_applicant_token_provider.py` |
-| 3. API contract | 适用 | `tests/test_settings_data_reset_job.py`、`tests/test_workbench_settings_sync_api.py`、`tests/test_oa_manual_import_api.py`、`tests/test_oa_applicant_credentials_api.py`：admin/password、enqueue 失败、错误、secret 隔离、retired target 缺失 |
-| 4. Read model/cache/worker | 适用（负向/共享） | `tests/test_settings_data_reset_job.py`、`tests/test_read_model_manifest.py`、`tests/test_runtime_worker_registry.py`、`tests/test_platform_runtime_boundary_guards.py`：durable reset/reload、普通保存零页面 fan-out、registry/manifest 一致 |
-| 5. 前端交互 | 适用 | `web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx` |
-| 6. 端到端 | 适用 | `web/e2e/settings-data-reset-flow.spec.ts`：确认、密码、job polling、reload、错误恢复 |
-| 7. 既有功能回归 | 适用 | 全量 backend/frontend/E2E；重点保护权限、OA、关联台、银行、发票、成本和税金 |
+| 1. 业务核心 | 适用 | `tests/test_app_settings_service.py`、`tests/test_session_api.py`、`tests/test_oa_role_sync_service.py`：canonical accounts、casefold/overlap、005/full/read/denied、permission-present 006、no-op/version、严格三角色与补偿 |
+| 2. Service/repository | 适用 | `tests/test_app_settings_service.py`、`tests/test_workbench_settings_sync_api.py`、`tests/test_settings_data_reset_service.py`、`tests/test_settings_data_reset_job.py`、`tests/test_postgres_oa_applicant_credentials_repository.py`：ACL critical section、generic-preserve-ACL、durable audit、commit recovery、OA target/compensation |
+| 3. API contract | 适用 | `tests/test_auth_guard.py`、`tests/test_session_api.py`、`tests/test_workbench_settings_sync_api.py`、`tests/test_app_health_api.py`、`tests/test_oa_applicant_credentials_api.py`、`tests/test_settings_data_reset_job.py`：direct URL/API 403、generic 400、dedicated admin-only、409/502/503 shape |
+| 4. Read model/cache/worker | 适用（负向/共享） | 唯一 inventory owner `tests/test_permissions_write_entry_inventory.py` + `tests/test_settings_data_reset_job.py`：每次 evaluator 一次 provider、generic save 零 OA、ACL no-op 早于 OA/commit、零 cache/outbox/dirty/read-model path，并锁定现有两个 read models/六个 workers |
+| 5. 前端交互 | 适用 | `web/src/test/SessionApi.test.ts`、`web/src/test/SessionGate.test.tsx`、`web/src/test/App.test.tsx`、`web/src/test/PageRouteHost.test.tsx`、`web/src/test/SettingsPage.test.tsx`：hostile OA evidence 不授予 tier、direct route gate、精确 17-route、独立 ACL 状态 |
+| 6. 端到端 | 适用 | `web/e2e/permissions-role-matrix.spec.ts`、`web/e2e/settings-data-reset-flow.spec.ts`：admin/full/read/denied、direct protected API、admin-only controls、ACL save/restore/即时撤权及 reset 主链 |
+| 7. 既有功能回归 | 适用 | 13-09 backend/inventory 与 13-11 frontend/Browser 证据；唯一 scanner 继续保护 AppHealth、OA credentials、data reset、17-route、现有两个 read models/六个 workers和普通页面 I/O 不变 |
 
 ## 必须保留的负向断言
 
@@ -33,17 +33,12 @@
 - reset job payload、audit、日志和 error 不包含密码。
 - Settings 不维护第二份 read-model dependency/fan-out matrix。
 
-## T0 ACL 回归责任
+## Phase 13 ACL 证据 ownership
 
-- Business core：账户 DTO、protected admin、重复/非法 tier、no-op、stale version。
-- Service/repository：advisory lock、generic-preserve-concurrent-ACL、settings+audit 原子性、lost ACK proof、OA target/compensation 与 I/O 次数。
-- API contract：generic legacy keys 400、专用 admin 200/full 403、409 shape、server actor/request id。
-- Read model/cache/worker：不适用新增行为；负向断言 ACL 不产生 dirty scope/outbox/worker/cache。
-- Frontend：独立 ACL loading/saving/error/conflict、protected row 只读、普通保存不携带 ACL。
-- E2E：full-access 手工 generic/dedicated 提权失败，admin 保存后新 session tier 生效。
-- Existing regression：普通设置、列布局、pending rules、AppHealth、OA credentials、data reset 和其他页面 response 不变。
-
-生产外部事实由 secret-safe preflight/post-deploy 证明；本地 mock 不宣称真实 PostgreSQL/OA/session latency 通过。
+- 13-09 的 backend matrix 由 `tests/test_session_api.py`、`tests/test_auth_guard.py` 与 admin-only API tests 提供；`YNSYLP006` fixture 刻意保留 OA business/dedicated roles 和 `finops:app:view`，但 canonical ACL 缺席仍 denied。
+- `tests/test_permissions_write_entry_inventory.py` 是退役 authority、fixed OA selector 与 no-new-runtime 的唯一 whole-repo scanner；本模块不复制 scanner 或 allowlist。
+- 13-11 的 frontend/Browser matrix 由四个 session/router component tests 和 `web/e2e/permissions-role-matrix.spec.ts` 提供，锁定 direct `/fin-ops/`、protected API 403、17-route、AppHealth/OA credentials/data reset admin-only，以及管理员 ACL restore 后目标账号即时回到 denied。
+- 真实 OA router/menu、fresh production token/session 和 post-deploy role matrix 只由 13-05 production checkpoint 证明；本地 deterministic mock 不替代该证据，本计划不声称已部署。
 
 ## 验证
 

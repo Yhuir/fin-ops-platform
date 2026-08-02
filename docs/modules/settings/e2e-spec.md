@@ -23,17 +23,20 @@
 | `SETTINGS-E2E-004` | 数据重置安全边界 | P0 | data reset 必须 admin/password gate、protected targets、active job reentry、并发 409、失败不清数据、不泄露密码；重置后旧 read model/cache 不得伪装 fresh。 |
 | `SETTINGS-E2E-005` | OA 申请人凭据独立事实源 | P0 | admin 可维护 OA 申请人凭据；settings GET/POST 和凭据列表不得回显密码、token 或密文；目标 OA token provider 只通过 credential service 取密。 |
 | `SETTINGS-E2E-006` | 业务规则保存和银行标签写边界 | P0 | 待找发票规则保存必须递增版本并触发 downstream lifecycle；`/api/workbench/settings` 携带 `bank_transaction_tags` 必须失败，银行自动标签写入只能走银行明细 API。 |
-| `SETTINGS-E2E-007` | 权限矩阵和零 durable mutation | P0 | `read_export_only` 不显示或禁用 settings 高风险写入口，直接调用 mutation API 返回拒绝且不触发下游写服务；forbidden/expired session 零 protected API 成功。 |
+| `SETTINGS-E2E-007` | 权限矩阵和零 durable mutation | P0 | `read_export_only` 不显示或禁用 settings 高风险写入口，直接调用 mutation API 返回拒绝且不触发下游写服务；保留 OA roles/`finops:app:view` 的 `YNSYLP006` 仍在 direct `/fin-ops/` 与 protected API 边界 denied；forbidden/expired session 零 protected API 成功。 |
 | `SETTINGS-E2E-008` | OA manual import mutation 权限 | P0 | OA manual import refresh/create/delete 必须使用 session actor 和 mutation gate；body actor 伪造不能绕过只读权限。 |
 | `SETTINGS-E2E-009` | App Status/read model/worker 可见性 | P1 | settings 变更和 data reset 引起的 dirty/readiness/job 状态必须能被 App Status/App Health 或下游页面诊断；页面不能只靠本地事件宣称 fresh。 |
 | `SETTINGS-E2E-010` | 真实基础设施 data reset 和 worker drain | P1 | 真实 PostgreSQL/RabbitMQ/Redis/systemd/OA/对象存储环境下，data reset、项目范围变更、规则保存和 OA 凭据使用后，相关 read model、worker、cache 和页面最终收敛；该项必须在 staging/runtime smoke 验证。 |
+| `SETTINGS-E2E-011` | canonical ACL 四层级与恢复 | P0 | 当前 17-route registry 在 admin/full/read/denied 下保持精确可达性；AppHealth、OA credentials、data reset 仅 admin。管理员使用专用 versioned PUT 增加账号、切换 session 验证 tier，finally 恢复空 accounts 后同一身份立即 denied。 |
+| `SETTINGS-E2E-012` | ACL 失败状态与 I/O 预算 | P0 | stale version 保留 draft；OA target、PG persistence、compensation/inconsistent 分别显示 409/502/503 且不伪报成功；generic save 零 OA、no-op 零 PG/audit/OA、evaluator 每次最多一次 snapshot，且无 cache/outbox/dirty/read-model/worker 新路径。 |
 
 ## T0 ACL Browser/API contract
 
 - full-access 页面不显示管理控件，同时直接 `POST /api/workbench/settings` 注入任一 ACL key 必须 400，直接 `PUT /api/workbench/settings/access-control` 必须 403。
 - admin 独立加载/保存 access-control，`YNSYLP005` 行只读；保存后用新 session GET `/api/session/me` 验证目标 tier。
 - 普通 settings save、Workbench 列布局和 pending rules 请求体不允许出现 ACL family。
-- 生产 post-deploy 使用专用初始 denied bearer，按 full→read→denied 验证并 finally 恢复；token、用户名明文不进入 artifact。
+- 13-11 deterministic Browser matrix 必须覆盖 direct URL/API、精确 17-route、admin-only control plane 和 ACL restore；唯一后端 inventory owner负责机械 I/O/topology 预算，不在 E2E 新建 scanner。
+- 生产 post-deploy 使用专用初始 denied bearer，按 full→read→denied 验证并 finally 恢复；fresh OA router/menu 只由 13-05 production checkpoint 证明，token、用户名明文不进入 artifact。本地 mock 不能替代该结论。
 
 ## 不属于本地 deterministic E2E 的风险
 
