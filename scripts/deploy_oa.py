@@ -10,6 +10,7 @@ import json
 import os
 import re
 import shlex
+import stat
 import subprocess
 import sys
 import tarfile
@@ -17,6 +18,18 @@ import tempfile
 
 
 RELEASE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
+RELEASE_EXCLUDED_PARTS = {
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".runtime",
+    ".venv",
+    "__pycache__",
+    "node_modules",
+    "venv",
+}
+RELEASE_STRUCTURAL_DIRS = {Path("deploy"), Path("web")}
 
 
 @dataclass(slots=True)
@@ -106,6 +119,14 @@ def build_config(args: argparse.Namespace, *, root_dir: Path) -> DeploymentConfi
                 (args.allow_dirty, "--allow-dirty"),
                 (args.keep_releases != 4, "--keep-releases"),
                 (args.remote_min_free_mb != 512, "--remote-min-free-mb"),
+                (args.domain != "www.yn-sourcing.com", "--domain"),
+                (normalize_base_path(args.frontend_base_path) != "/fin-ops/", "--frontend-base-path"),
+                (args.remote_frontend_dir.rstrip("/") != "/www/wwwroot/fin-ops/dist", "--remote-frontend-dir"),
+                (args.remote_releases_dir.rstrip("/") != "/opt/fin-ops/releases", "--remote-releases-dir"),
+                (
+                    args.runtime_worker_ensure_path != "/usr/local/sbin/finops-ensure-runtime-workers",
+                    "--runtime-worker-ensure-path",
+                ),
             )
             if enabled
         ]
@@ -560,6 +581,7 @@ def build_release_metadata(config: DeploymentConfig) -> dict[str, object]:
             "migration": migration_path.name,
             "migration_sha256": _file_sha256(migration_path),
             "deploy_control_sha256": _file_sha256(helper_path),
+            "source_sha256": _release_source_sha256(config.root_dir),
         },
     }
 
@@ -567,6 +589,79 @@ def build_release_metadata(config: DeploymentConfig) -> dict[str, object]:
 def _file_sha256(path: Path) -> str:
     with path.open("rb") as handle:
         return hashlib.file_digest(handle, "sha256").hexdigest()
+
+
+def _release_path_excluded(relative_path: Path) -> bool:
+    return (
+        relative_path == Path("RELEASE.json")
+        or any(part in RELEASE_EXCLUDED_PARTS for part in relative_path.parts)
+        or relative_path.name.endswith((".pyc", ".pyo", ".DS_Store"))
+    )
+
+
+def _tree_entries(root: Path, *, prefix: Path = Path()) -> list[tuple[Path, Path]]:
+    entries: list[tuple[Path, Path]] = []
+
+    def visit(directory: Path, relative_directory: Path) -> None:
+        for path in sorted(directory.iterdir(), key=lambda item: item.name):
+            relative_path = relative_directory / path.name
+            if _release_path_excluded(relative_path):
+                continue
+            if relative_path not in RELEASE_STRUCTURAL_DIRS:
+                entries.append((relative_path, path))
+            if path.is_dir() and not path.is_symlink():
+                visit(path, relative_path)
+
+    visit(root, prefix)
+    return entries
+
+
+def _source_entries_sha256(entries: list[tuple[Path, Path]]) -> str:
+    digest = hashlib.sha256()
+    for relative_path, path in sorted(entries, key=lambda item: item[0].as_posix()):
+        metadata = path.lstat()
+        if path.is_symlink():
+            kind = "symlink"
+            payload = os.readlink(path).encode("utf-8")
+        elif path.is_dir():
+            kind = "directory"
+            payload = b""
+        elif path.is_file():
+            kind = "file"
+            payload = path.read_bytes()
+        else:
+            raise RuntimeError(f"unsupported release source entry: {path}")
+        header = (
+            f"{relative_path.as_posix()}\0{kind}\0{stat.S_IMODE(metadata.st_mode):04o}\0{len(payload)}\0"
+        ).encode("utf-8")
+        digest.update(header)
+        digest.update(payload)
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _source_tree_sha256(root: Path) -> str:
+    return _source_entries_sha256(_tree_entries(root))
+
+
+def _release_source_sha256(root_dir: Path) -> str:
+    sources = (
+        (root_dir / "backend", Path("backend")),
+        (root_dir / "web" / "dist", Path("web/dist")),
+        (root_dir / "scripts", Path("scripts")),
+        (root_dir / "deploy" / "oa", Path("deploy/oa")),
+        (root_dir / "README.md", Path("README.md")),
+        (root_dir / "ARCHITECTURE.md", Path("ARCHITECTURE.md")),
+        (root_dir / "AGENTS.md", Path("AGENTS.md")),
+    )
+    entries: list[tuple[Path, Path]] = []
+    for source, archive_path in sources:
+        if not source.exists() and not source.is_symlink():
+            continue
+        entries.append((archive_path, source))
+        if source.is_dir() and not source.is_symlink():
+            entries.extend(_tree_entries(source, prefix=archive_path))
+    return _source_entries_sha256(entries)
 
 
 def add_bytes_to_tar(archive: tarfile.TarFile, arcname: str, data: bytes) -> None:
@@ -580,18 +675,7 @@ def add_bytes_to_tar(archive: tarfile.TarFile, arcname: str, data: bytes) -> Non
 def _tar_filter(tar_info: tarfile.TarInfo) -> tarfile.TarInfo | None:
     name = tar_info.name
     parts = Path(name).parts
-    excluded_parts = {
-        ".git",
-        ".mypy_cache",
-        ".pytest_cache",
-        ".ruff_cache",
-        ".runtime",
-        ".venv",
-        "__pycache__",
-        "node_modules",
-        "venv",
-    }
-    if any(part in excluded_parts for part in parts):
+    if any(part in RELEASE_EXCLUDED_PARTS for part in parts):
         return None
     if name.endswith((".pyc", ".pyo", ".DS_Store")):
         return None

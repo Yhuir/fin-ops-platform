@@ -164,6 +164,8 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
+import stat
 import sys
 
 src = Path(sys.argv[1])
@@ -172,6 +174,59 @@ release = sys.argv[2]
 def sha256(path):
     with path.open("rb") as handle:
         return hashlib.file_digest(handle, "sha256").hexdigest()
+
+EXCLUDED_PARTS = {
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".runtime",
+    ".venv",
+    "__pycache__",
+    "node_modules",
+    "venv",
+}
+STRUCTURAL_DIRS = {Path("deploy"), Path("web")}
+
+def source_tree_sha256(root):
+    entries = []
+
+    def visit(directory, relative_directory=Path()):
+        for path in sorted(directory.iterdir(), key=lambda item: item.name):
+            relative_path = relative_directory / path.name
+            if (
+                relative_path == Path("RELEASE.json")
+                or any(part in EXCLUDED_PARTS for part in relative_path.parts)
+                or relative_path.name.endswith((".pyc", ".pyo", ".DS_Store"))
+            ):
+                continue
+            if relative_path not in STRUCTURAL_DIRS:
+                entries.append((relative_path, path))
+            if path.is_dir() and not path.is_symlink():
+                visit(path, relative_path)
+
+    visit(root)
+    digest = hashlib.sha256()
+    for relative_path, path in sorted(entries, key=lambda item: item[0].as_posix()):
+        metadata = path.lstat()
+        if path.is_symlink():
+            kind = "symlink"
+            payload = os.readlink(path).encode("utf-8")
+        elif path.is_dir():
+            kind = "directory"
+            payload = b""
+        elif path.is_file():
+            kind = "file"
+            payload = path.read_bytes()
+        else:
+            raise RuntimeError(f"unsupported release source entry: {path}")
+        header = (
+            f"{relative_path.as_posix()}\0{kind}\0{stat.S_IMODE(metadata.st_mode):04o}\0{len(payload)}\0"
+        ).encode("utf-8")
+        digest.update(header)
+        digest.update(payload)
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 def facts(name):
     root = src.parents[1] / name / "src"
@@ -182,12 +237,16 @@ def facts(name):
     helper = root / "deploy/oa/bin/finops-deploy-control.sh"
     actual_migration = sha256(migration) if migration.is_file() else ""
     actual_helper = sha256(helper) if helper.is_file() else ""
+    actual_source = source_tree_sha256(root) if root.is_dir() else ""
     safe = (
         metadata.get("release_name") == name
+        and re.fullmatch(r"[0-9a-f]{40}", str(metadata.get("git_commit") or "")) is not None
+        and metadata.get("git_status_porcelain") == ""
         and contract.get("capability") == "settings-access-control-v1"
         and contract.get("migration") == "0132_settings_access_control_guard.sql"
         and contract.get("migration_sha256") == actual_migration
         and contract.get("deploy_control_sha256") == actual_helper
+        and contract.get("source_sha256") == actual_source
     )
     fingerprint_source = {
         "release": name,
@@ -195,6 +254,7 @@ def facts(name):
         "capability": contract.get("capability"),
         "migration_sha256": actual_migration,
         "deploy_control_sha256": actual_helper,
+        "source_sha256": actual_source,
     }
     return {
         **fingerprint_source,

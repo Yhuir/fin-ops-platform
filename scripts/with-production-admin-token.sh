@@ -87,6 +87,10 @@ if [[ "${1:-}" == "--require-bearer" ]]; then
     echo "Dedicated production bearer token is not configured in $secret_file." >&2
     exit 2
   fi
+  if [[ "$FIN_OPS_HTTP_SLO_BEARER_TOKEN" == "$FIN_OPS_HTTP_SLO_ADMIN_TOKEN" ]]; then
+    echo "Dedicated production bearer token and admin token must be distinct." >&2
+    exit 2
+  fi
   [[ $# -gt 0 ]] || { usage; exit 2; }
 fi
 exec "$@"
