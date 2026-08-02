@@ -24,6 +24,9 @@ DEPLOY_CONTROL_SCRIPT_PATH = (
 )
 TOKEN_WRAPPER_PATH = Path(__file__).resolve().parents[1] / "scripts" / "with-production-admin-token.sh"
 OA_SQL_ROOT = Path(__file__).resolve().parents[1] / "deploy" / "oa"
+RETIRED_ALLOWED_USERNAMES = "FIN_OPS_" + "ALLOWED_USERNAMES"
+RETIRED_ALLOWED_ROLES = "FIN_OPS_" + "ALLOWED_ROLES"
+RETIRED_READONLY_USERNAMES = "FIN_OPS_" + "READONLY_EXPORT_USERNAMES"
 
 
 def load_deploy_module():
@@ -741,9 +744,9 @@ class DeployOAScriptTest(unittest.TestCase):
         common = (OA_SQL_ROOT / "env" / "fin-ops.common.env.example").read_text(encoding="utf-8")
 
         self.assertIn("FIN_OPS_OA_REQUIRED_PERMISSION=finops:app:view", common)
-        self.assertNotIn("FIN_OPS_ALLOWED_USERNAMES=", common)
-        self.assertNotIn("FIN_OPS_ALLOWED_ROLES=", common)
-        self.assertNotIn("FIN_OPS_READONLY_EXPORT_USERNAMES=", common)
+        self.assertNotIn(f"{RETIRED_ALLOWED_USERNAMES}=", common)
+        self.assertNotIn(f"{RETIRED_ALLOWED_ROLES}=", common)
+        self.assertNotIn(f"{RETIRED_READONLY_USERNAMES}=", common)
 
     def test_release_gate_runs_artifact_bound_cleanup_and_rollback(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
@@ -758,6 +761,16 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("@approved_after_sha256", script)
         self.assertIn('MYSQL_PWD="$FIN_OPS_OA_ROLE_SYNC_PASSWORD"', script)
         self.assertIn('apply_settings_access_control_menu_binding_cleanup "$release"', activate)
+        self.assertIn('prepare_settings_access_control_runtime_env "$release" "$env_backup_dir"', activate)
+        self.assertIn("assert_runtime_env_prerequisites", activate)
+        self.assertLess(
+            activate.index('release_gate_checkpoint "$previous_release" pre'),
+            activate.index('prepare_settings_access_control_runtime_env "$release" "$env_backup_dir"'),
+        )
+        self.assertLess(
+            activate.index('prepare_settings_access_control_runtime_env "$release" "$env_backup_dir"'),
+            activate.index("assert_runtime_env_contract"),
+        )
         self.assertLess(
             activate.index('release_gate_checkpoint "$previous_release" pre'),
             activate.index('apply_settings_access_control_menu_binding_cleanup "$release"'),
@@ -788,6 +801,7 @@ class DeployOAScriptTest(unittest.TestCase):
 
     def test_runtime_contract_requires_exact_role_sync_and_rejects_retired_env(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
+        prerequisites = script.split("assert_runtime_env_prerequisites() {", 1)[1].split("\n}\n", 1)[0]
         contract = script.split("assert_runtime_env_contract() {", 1)[1].split("\n}\n", 1)[0]
 
         for key in (
@@ -798,14 +812,125 @@ class DeployOAScriptTest(unittest.TestCase):
             "FIN_OPS_OA_ROLE_SYNC_PASSWORD",
             "FIN_OPS_OA_REQUIRED_PERMISSION",
         ):
-            self.assertIn(key, contract)
-        self.assertIn('[[ "$FIN_OPS_OA_REQUIRED_PERMISSION" == "finops:app:view" ]]', contract)
+            self.assertIn(key, prerequisites)
+        self.assertIn('[[ "$FIN_OPS_OA_REQUIRED_PERMISSION" == "finops:app:view" ]]', prerequisites)
+        self.assertIn("assert_runtime_env_prerequisites", contract)
         for retired in (
-            "FIN_OPS_ALLOWED_USERNAMES",
-            "FIN_OPS_ALLOWED_ROLES",
-            "FIN_OPS_READONLY_EXPORT_USERNAMES",
+            RETIRED_ALLOWED_USERNAMES,
+            RETIRED_ALLOWED_ROLES,
+            RETIRED_READONLY_USERNAMES,
         ):
             self.assertIn(retired, contract)
+        self.assertIn("LEGACY_ADMIN_ENV", contract)
+
+    def test_release_gate_env_cleanup_is_exact_atomic_and_restored_only_before_activation(self) -> None:
+        script = DEPLOY_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
+        prepare = script.split("prepare_settings_access_control_runtime_env() {", 1)[1].split(
+            "\n}\n", 1
+        )[0]
+        restore = script.split("restore_settings_access_control_runtime_env() {", 1)[1].split(
+            "\n}\n", 1
+        )[0]
+        activate = script.split("release_gate_activate() {", 1)[1].split("\n}\n", 1)[0]
+
+        for key in (
+            RETIRED_ALLOWED_USERNAMES,
+            RETIRED_ALLOWED_ROLES,
+            RETIRED_READONLY_USERNAMES,
+            "LEGACY_ADMIN_ENV",
+        ):
+            self.assertIn(key, prepare)
+        self.assertIn('mktemp "${path}.settings-acl.XXXXXX"', prepare)
+        self.assertIn('chown --reference="$path" "$temporary"', prepare)
+        self.assertIn('chmod --reference="$path" "$temporary"', prepare)
+        self.assertIn('mv -f -- "$temporary" "$path"', prepare)
+        self.assertIn('sha256sum "$COMMON_ENV"', prepare)
+        self.assertIn('sha256sum "$SECRETS_ENV"', prepare)
+        self.assertNotIn("sed -i", prepare)
+        self.assertIn('cp -a -- "$backup_dir/$(basename "$path")" "$temporary"', restore)
+        self.assertIn('mv -f -- "$temporary" "$path"', restore)
+        self.assertIn('restore_settings_access_control_runtime_env "$env_backup_dir"', activate)
+        self.assertLess(
+            activate.rindex('restore_settings_access_control_runtime_env "$env_backup_dir"'),
+            activate.index('activate_release "$release"'),
+        )
+        after_activation = activate.split('activate_release "$release"', 1)[1]
+        self.assertNotIn("restore_settings_access_control_runtime_env", after_activation)
+
+    def test_runtime_env_cutover_removes_only_exact_keys_and_restores_before_image(self) -> None:
+        script = DEPLOY_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
+        definitions = script.split('\ncmd="${1:-}"', 1)[0]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            env_dir = root / "env"
+            evidence = root / "evidence"
+            backup = root / "backup"
+            env_dir.mkdir()
+            backup.mkdir()
+            common = env_dir / "fin-ops.common.env"
+            secrets = env_dir / "fin-ops.secrets.env"
+            common_before = (
+                "KEEP_COMMON=value\n"
+                f"{RETIRED_ALLOWED_USERNAMES}=legacy\n"
+                "FIN_OPS_" "ADMIN_USERNAMES=YNSYLP005\n"
+                f"NOT_{RETIRED_ALLOWED_ROLES}=keep\n"
+            )
+            secrets_before = (
+                "KEEP_SECRET=value\n"
+                f"{RETIRED_ALLOWED_ROLES}=legacy\n"
+                f"{RETIRED_READONLY_USERNAMES}=legacy\n"
+            )
+            common.write_text(common_before, encoding="utf-8")
+            secrets.write_text(secrets_before, encoding="utf-8")
+            common.chmod(0o600)
+            secrets.chmod(0o600)
+            harness = root / "cutover.sh"
+            harness.write_text(
+                definitions
+                + "\nassert_runtime_env_prerequisites() { :; }\n"
+                + "chown() { :; }\n"
+                + "chmod() {\n"
+                + '  if [[ "$1" == --reference=* ]]; then command chmod 600 "$2"; '
+                + 'else command chmod "$@"; fi\n'
+                + "}\n"
+                + "assert_runtime_env_contract() {\n"
+                + f'  ! grep -hE "^({RETIRED_ALLOWED_USERNAMES}|{RETIRED_ALLOWED_ROLES}|'
+                + f'{RETIRED_READONLY_USERNAMES}|${{LEGACY_ADMIN_ENV}})=" '
+                + '"$COMMON_ENV" "$SECRETS_ENV" >/dev/null\n'
+                + "}\n"
+                + f'prepare_settings_access_control_runtime_env test-release "{backup}"\n'
+                + 'grep -qx "KEEP_COMMON=value" "$COMMON_ENV"\n'
+                + f'grep -qx "NOT_{RETIRED_ALLOWED_ROLES}=keep" "$COMMON_ENV"\n'
+                + 'grep -qx "KEEP_SECRET=value" "$SECRETS_ENV"\n'
+                + 'restore_settings_access_control_runtime_env "'
+                + str(backup)
+                + '"\n',
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                ["bash", str(harness)],
+                env={
+                    **os.environ,
+                    "FINOPS_ENV_DIR": str(env_dir),
+                    "FINOPS_SETTINGS_ACL_EVIDENCE_ROOT": str(evidence),
+                    "FINOPS_API_PYTHON": sys.executable,
+                },
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(common.read_text(encoding="utf-8"), common_before)
+            self.assertEqual(secrets.read_text(encoding="utf-8"), secrets_before)
+            artifact = json.loads(
+                (evidence / "test-release/settings-access-control-env-cutover.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(artifact["files"]["common"]["removed_key_count"], 2)
+            self.assertEqual(artifact["files"]["secrets"]["removed_key_count"], 2)
 
     def test_release_gate_restores_stable_helpers_when_precheck_fails(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()

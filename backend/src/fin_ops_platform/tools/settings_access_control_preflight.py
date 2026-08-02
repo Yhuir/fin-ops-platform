@@ -160,14 +160,39 @@ def build_report(
     ]
     oa_matches_target = oa_enabled and oa_members == target_oa
     legacy_environment_admins = _strings(environment.get("admin_usernames"))
-    retired_environment = sorted(
+    retired_environment_input = sorted(
         name
         for name, present in dict(environment.get("retired_admission_env_present") or {}).items()
-        if name in RETIRED_ADMISSION_ENVS and present is True
+        if present is True
     )
+    retired_environment = [
+        name for name in retired_environment_input if name in RETIRED_ADMISSION_ENVS
+    ]
+    retired_environment_unknown = [
+        name for name in retired_environment_input if name not in RETIRED_ADMISSION_ENVS
+    ]
     identities_distinct = bool(admin["username_sha256"] and bearer["username_sha256"])
     identities_distinct = identities_distinct and admin["username_sha256"] != bearer["username_sha256"]
-    base_eligible = all(
+    bearer_absent_from_canonical_acl = all(
+        REPRESENTATIVE_BEARER_USERNAME not in members for members in current.values()
+    )
+    database_flags = (
+        database.get("migration_0132_applied") is True,
+        database.get("constraint_present") is True,
+        database.get("constraint_validated") is True,
+    )
+    database_state = (
+        "applied"
+        if all(database_flags)
+        else "pending"
+        if not any(database_flags)
+        else "partial"
+    )
+    legacy_environment_cutover_exact = legacy_environment_admins in (
+        [],
+        [PROTECTED_ADMIN_USERNAME],
+    )
+    admin_session_exact = all(
         (
             admin["identity_present"],
             admin["is_protected_administrator"],
@@ -175,15 +200,22 @@ def build_report(
             admin["can_admin_access"],
             admin["http_status"] == 200,
             admin["credential_source"] == "admin_stdin",
+        )
+    )
+    bearer_session_cutover_exact = all(
+        (
             bearer["identity_present"],
             not bearer["is_protected_administrator"],
             bearer["is_representative_bearer"],
             bearer["oa_menu_permission_present"],
-            bearer["access_tier"] == "denied",
+            bearer["access_tier"] in {"denied", "full_access"},
             not bearer["can_admin_access"],
             bearer["http_status"] == 200,
             bearer["credential_source"] == "dedicated_bearer_stdin",
-            identities_distinct,
+        )
+    )
+    oa_projection_exact = all(
+        (
             oa_enabled,
             oa_configured,
             selector_exact,
@@ -192,23 +224,47 @@ def build_report(
             roles_distinct,
             dedicated_bindings_exact,
             oa_matches_target,
-            not legacy_environment_admins,
-            not retired_environment,
         )
     )
-    cleanup_eligible = base_eligible and bool(non_dedicated_bindings)
-    eligible = base_eligible and not non_dedicated_bindings
+    cutover_checks = {
+        "admin_session_invalid": admin_session_exact,
+        "bearer_session_invalid": bearer_session_cutover_exact,
+        "identities_reused": identities_distinct,
+        "bearer_present_in_canonical_acl": bearer_absent_from_canonical_acl,
+        "database_partial": database_state != "partial",
+        "legacy_admin_not_fixed": legacy_environment_cutover_exact,
+        "retired_env_unknown": not retired_environment_unknown,
+        "oa_projection_drift": oa_projection_exact,
+    }
+    blockers = sorted(name for name, passed in cutover_checks.items() if not passed)
+    cutover_eligible = not blockers
+    steady_state_blockers = []
+    if database_state != "applied":
+        steady_state_blockers.append("database_migration_pending")
+    if legacy_environment_admins or retired_environment:
+        steady_state_blockers.append("runtime_env_cleanup_required")
+    if bearer["access_tier"] != "denied":
+        steady_state_blockers.append("bearer_old_runtime_access")
+    if non_dedicated_bindings:
+        steady_state_blockers.append("oa_binding_cleanup_required")
+    cleanup_eligible = cutover_eligible and bool(non_dedicated_bindings)
+    eligible = cutover_eligible and not steady_state_blockers
     before_hash = hashlib.sha256(json.dumps(current, sort_keys=True).encode("utf-8")).hexdigest()
     after_hash = hashlib.sha256(json.dumps(target, sort_keys=True).encode("utf-8")).hexdigest()
     return {
         "contract": "settings-access-control-v1",
         "release": release,
         "eligible": eligible,
+        "cutover_eligible": cutover_eligible,
+        "state": "steady" if eligible else "cutover" if cutover_eligible else "blocked",
+        "blockers": blockers,
+        "steady_state_blockers": sorted(steady_state_blockers),
         "protected_administrator": PROTECTED_ADMIN_USERNAME,
         "database": {
-            "migration_0132_applied": database.get("migration_0132_applied") is True,
-            "constraint_present": database.get("constraint_present") is True,
-            "constraint_validated": database.get("constraint_validated") is True,
+            "migration_0132_applied": database_flags[0],
+            "constraint_present": database_flags[1],
+            "constraint_validated": database_flags[2],
+            "state": database_state,
             "access_control_version": int(payload.get("access_control_version") or 0),
             "member_counts": {key: len(value) for key, value in current.items()},
             "member_hashes": {key: _hashed_usernames(value, salt) for key, value in current.items()},
@@ -218,6 +274,14 @@ def build_report(
             "legacy_admin_member_count": len(legacy_environment_admins),
             "legacy_admin_member_hashes": _hashed_usernames(legacy_environment_admins, salt),
             "retired_admission_env_present": retired_environment,
+            "unknown_retired_admission_env_count": len(retired_environment_unknown),
+            "state": (
+                "blocked"
+                if not legacy_environment_cutover_exact or retired_environment_unknown
+                else "cutover"
+                if legacy_environment_admins or retired_environment
+                else "strict"
+            ),
         },
         "oa": {
             "enabled": oa_enabled,
@@ -251,7 +315,10 @@ def build_report(
         },
         "sessions": {
             "admin": admin,
-            "bearer": bearer,
+            "bearer": {
+                **bearer,
+                "absent_from_canonical_acl": bearer_absent_from_canonical_acl,
+            },
             "identities_distinct": identities_distinct,
         },
         "dry_run_cleanup": {
@@ -608,8 +675,13 @@ def run_post_deploy(
         return response["payload"], accounts
 
     try:
-        if preflight.get("eligible") is not True or preflight.get("release") != release:
-            raise RuntimeError("approved preflight is missing, ineligible, or bound to another release")
+        if (
+            preflight.get("eligible") is not True
+            and preflight.get("cutover_eligible") is not True
+        ) or preflight.get("release") != release:
+            raise RuntimeError(
+                "approved preflight is missing, not cutover eligible, or bound to another release"
+            )
         admin_session = session(admin_token)
         bearer_session = session(bearer_token)
         bearer_username = str((bearer_session.get("user") or {}).get("username") or "").strip()

@@ -28,6 +28,7 @@ STANDARD_WRITE_E2E_SCENARIO="${FINOPS_STANDARD_WRITE_E2E_SCENARIO:-/opt/fin-ops/
 RELEASE_GATE_EVIDENCE_ROOT="${FINOPS_RELEASE_GATE_EVIDENCE_ROOT:-/opt/fin-ops/runtime-smoke/release-gates}"
 SETTINGS_ACL_EVIDENCE_ROOT="${FINOPS_SETTINGS_ACL_EVIDENCE_ROOT:-/opt/fin-ops/evidence}"
 SETTINGS_ACL_CONTRACT="settings-access-control-v1"
+LEGACY_ADMIN_ENV="FIN_OPS_""ADMIN_USERNAMES"
 PRUNE_WORKBENCH_GENERATIONS_HELPER="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_HELPER:-/usr/local/sbin/finops-prune-workbench-generations}"
 PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT:-/etc/systemd/system/finops-prune-workbench-generations.service}"
 PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT:-/etc/systemd/system/finops-prune-workbench-generations.timer}"
@@ -331,6 +332,7 @@ settings_access_control_preflight() (
   local src evidence_dir artifact scratch admin_token bearer_token
   local admin_session bearer_session deployment_facts
   src="$(release_src "$release")"
+  assert_runtime_env_prerequisites
   evidence_dir="$SETTINGS_ACL_EVIDENCE_ROOT/$release"
   artifact="$evidence_dir/settings-access-control-preflight.json"
   install -d -m 0700 "$evidence_dir"
@@ -373,6 +375,7 @@ settings_access_control_post_deploy() (
     || die "settings-access-control-post-deploy requires release, --http-tokens-stdin, and --json"
   local src evidence_dir preflight artifact status_file admin_token bearer_token candidate
   src="$(release_src "$release")"
+  assert_runtime_env_contract
   evidence_dir="$SETTINGS_ACL_EVIDENCE_ROOT/$release"
   preflight="$evidence_dir/settings-access-control-preflight.json"
   artifact="$evidence_dir/settings-access-control-post-deploy.json"
@@ -439,9 +442,8 @@ import sys
 
 approved = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 current = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
-oa = approved.get("oa", {}) if isinstance(approved.get("oa"), dict) else {}
-if approved.get("eligible") is not True and oa.get("cleanup_eligible") is not True:
-    raise SystemExit("settings access-control preflight is neither eligible nor exact-cleanup eligible")
+if approved.get("eligible") is not True and approved.get("cutover_eligible") is not True:
+    raise SystemExit("settings access-control preflight is neither steady nor cutover eligible")
 if approved.get("release") != current.get("candidate", {}).get("release"):
     raise SystemExit("settings access-control preflight release drifted")
 if approved.get("deployment") != current:
@@ -505,8 +507,8 @@ if artifact.get("contract") != "settings-access-control-v1" or artifact.get("rel
 required = cleanup.get("required") is True
 if required and oa.get("cleanup_eligible") is not True:
     raise SystemExit("approved artifact is not exact-cleanup eligible")
-if not required and artifact.get("eligible") is not True:
-    raise SystemExit("approved artifact is not release eligible")
+if not required and artifact.get("eligible") is not True and artifact.get("cutover_eligible") is not True:
+    raise SystemExit("approved artifact is not steady or cutover eligible")
 targets = cleanup.get("target_hashes", [])
 rollback_targets = cleanup.get("rollback_target_hashes", [])
 if not isinstance(targets, list) or targets != rollback_targets:
@@ -794,9 +796,11 @@ retire_unregistered_worker_services() {
   done < <(all_worker_services)
 }
 
-assert_runtime_env_contract() {
+assert_runtime_env_prerequisites() {
   [[ -f "$COMMON_ENV" ]] || die "missing common runtime env: $COMMON_ENV"
   [[ -f "$SECRETS_ENV" ]] || die "missing secret runtime env: $SECRETS_ENV"
+  assert_root_owned_runtime_env "$COMMON_ENV"
+  assert_root_owned_runtime_env "$SECRETS_ENV"
   if ! grep -hE '^(FIN_OPS_POSTGRES_DATABASE_URL|DATABASE_URL)=' "$COMMON_ENV" "$SECRETS_ENV" >/dev/null; then
     die "missing PostgreSQL DSN in $COMMON_ENV or $SECRETS_ENV"
   fi
@@ -812,15 +816,6 @@ assert_runtime_env_contract() {
     FIN_OPS_OA_ROLE_SYNC_PASSWORD; do
     if ! grep -hE "^${required_key}=" "$COMMON_ENV" "$SECRETS_ENV" >/dev/null; then
       die "missing OA session runtime env: $required_key in $COMMON_ENV or $SECRETS_ENV"
-    fi
-  done
-  local retired_key
-  for retired_key in \
-    FIN_OPS_ALLOWED_USERNAMES \
-    FIN_OPS_ALLOWED_ROLES \
-    FIN_OPS_READONLY_EXPORT_USERNAMES; do
-    if grep -hE "^${retired_key}=" "$COMMON_ENV" "$SECRETS_ENV" >/dev/null; then
-      die "retired APP admission env must be absent: $retired_key"
     fi
   done
   (
@@ -848,6 +843,114 @@ assert_runtime_env_contract() {
       && "${FIN_OPS_OA_ROLE_SYNC_ADMIN_ROLE_KEY:-finops_admin}" == "finops_admin" ]] \
       || die "OA role sync must use the three fixed fin-ops role keys"
   )
+}
+
+assert_runtime_env_contract() {
+  assert_runtime_env_prerequisites
+  local retired_key
+  for retired_key in \
+    FIN_OPS_ALLOWED_USERNAMES \
+    FIN_OPS_ALLOWED_ROLES \
+    FIN_OPS_READONLY_EXPORT_USERNAMES \
+    "$LEGACY_ADMIN_ENV"; do
+    if grep -hE "^${retired_key}=" "$COMMON_ENV" "$SECRETS_ENV" >/dev/null; then
+      die "retired APP admission env must be absent: $retired_key"
+    fi
+  done
+}
+
+restore_settings_access_control_runtime_env() {
+  local backup_dir="$1"
+  local path backup temporary
+  for path in "$COMMON_ENV" "$SECRETS_ENV"; do
+    backup="$backup_dir/$(basename "$path")"
+    [[ -f "$backup" && ! -L "$backup" ]] || return 1
+    temporary="$(mktemp "${path}.settings-acl.XXXXXX")" || return 1
+    if ! cp -a -- "$backup_dir/$(basename "$path")" "$temporary" \
+      || ! mv -f -- "$temporary" "$path"; then
+      rm -f -- "$temporary"
+      return 1
+    fi
+  done
+  [[ "$(sha256sum "$COMMON_ENV" | awk '{print $1}')" \
+      == "$(sha256sum "$backup_dir/$(basename "$COMMON_ENV")" | awk '{print $1}')" \
+    && "$(sha256sum "$SECRETS_ENV" | awk '{print $1}')" \
+      == "$(sha256sum "$backup_dir/$(basename "$SECRETS_ENV")" | awk '{print $1}')" ]]
+}
+
+prepare_settings_access_control_runtime_env() {
+  local release="$1"
+  local backup_dir="$2"
+  local evidence_dir="$SETTINGS_ACL_EVIDENCE_ROOT/$release"
+  local artifact="$evidence_dir/settings-access-control-env-cutover.json"
+  local path temporary before_common before_secrets after_common after_secrets
+  local removed_common removed_secrets
+  assert_runtime_env_prerequisites
+  install -d -m 0700 "$evidence_dir"
+  cp -a -- "$COMMON_ENV" "$backup_dir/$(basename "$COMMON_ENV")"
+  cp -a -- "$SECRETS_ENV" "$backup_dir/$(basename "$SECRETS_ENV")"
+  before_common="$(sha256sum "$COMMON_ENV" | awk '{print $1}')"
+  before_secrets="$(sha256sum "$SECRETS_ENV" | awk '{print $1}')"
+  removed_common="$((
+    $(grep -Ec '^(FIN_OPS_ALLOWED_USERNAMES|FIN_OPS_ALLOWED_ROLES|FIN_OPS_READONLY_EXPORT_USERNAMES)=' "$COMMON_ENV" || true)
+    + $(grep -Ec "^${LEGACY_ADMIN_ENV}=" "$COMMON_ENV" || true)
+  ))"
+  removed_secrets="$((
+    $(grep -Ec '^(FIN_OPS_ALLOWED_USERNAMES|FIN_OPS_ALLOWED_ROLES|FIN_OPS_READONLY_EXPORT_USERNAMES)=' "$SECRETS_ENV" || true)
+    + $(grep -Ec "^${LEGACY_ADMIN_ENV}=" "$SECRETS_ENV" || true)
+  ))"
+  for path in "$COMMON_ENV" "$SECRETS_ENV"; do
+    temporary="$(mktemp "${path}.settings-acl.XXXXXX")" || return 1
+    if ! awk -v legacy="$LEGACY_ADMIN_ENV" \
+      '$0 !~ /^(FIN_OPS_ALLOWED_USERNAMES|FIN_OPS_ALLOWED_ROLES|FIN_OPS_READONLY_EXPORT_USERNAMES)=/ && index($0, legacy "=") != 1' \
+      "$path" >"$temporary" \
+      || ! chown --reference="$path" "$temporary" \
+      || ! chmod --reference="$path" "$temporary" \
+      || ! mv -f -- "$temporary" "$path"; then
+      rm -f -- "$temporary"
+      restore_settings_access_control_runtime_env "$backup_dir" || true
+      return 1
+    fi
+  done
+  if ! (assert_runtime_env_contract); then
+    restore_settings_access_control_runtime_env "$backup_dir" || true
+    return 1
+  fi
+  after_common="$(sha256sum "$COMMON_ENV" | awk '{print $1}')"
+  after_secrets="$(sha256sum "$SECRETS_ENV" | awk '{print $1}')"
+  BEFORE_COMMON="$before_common" BEFORE_SECRETS="$before_secrets" \
+    AFTER_COMMON="$after_common" AFTER_SECRETS="$after_secrets" \
+    REMOVED_COMMON="$removed_common" REMOVED_SECRETS="$removed_secrets" \
+    ARTIFACT_RELEASE="$release" "$API_PYTHON" - "$artifact" <<'PY'
+import json
+import os
+from pathlib import Path
+import sys
+
+payload = {
+    "contract": "settings-access-control-v1",
+    "release": os.environ["ARTIFACT_RELEASE"],
+    "status": "prepared",
+    "files": {
+        "common": {
+            "before_sha256": os.environ["BEFORE_COMMON"],
+            "after_sha256": os.environ["AFTER_COMMON"],
+            "removed_key_count": int(os.environ["REMOVED_COMMON"]),
+        },
+        "secrets": {
+            "before_sha256": os.environ["BEFORE_SECRETS"],
+            "after_sha256": os.environ["AFTER_SECRETS"],
+            "removed_key_count": int(os.environ["REMOVED_SECRETS"]),
+        },
+    },
+}
+output = Path(sys.argv[1])
+temporary = output.with_suffix(".tmp")
+temporary.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+temporary.replace(output)
+output.chmod(0o600)
+PY
+  sha256sum "$artifact" >"$artifact.sha256"
 }
 
 sync_python_envs() {
@@ -2487,9 +2590,9 @@ rollback_release_gate() {
 release_gate_activate() {
   local release="${1:-}"
   [[ -n "$release" && "$#" -eq 1 ]] || die "release-gate-activate accepts only release name"
-  local admin_token previous_release active_count evidence_dir
+  local admin_token previous_release active_count evidence_dir env_backup_dir
   release_src "$release" >/dev/null
-  assert_runtime_env_contract
+  assert_runtime_env_prerequisites
   assert_settings_access_control_preflight "$release"
   IFS= read -r admin_token
   [[ -n "$admin_token" ]] || die "production admin token stdin is empty"
@@ -2506,8 +2609,28 @@ release_gate_activate() {
     write_release_gate_evidence "$release" "$previous_release" "$evidence_dir" FAIL false pre
     die "current production runtime failed the pre-activation release gate"
   fi
-  apply_settings_access_control_menu_binding_cleanup "$release" \
-    || die "exact OA menu binding cleanup failed before candidate activation"
+  env_backup_dir="$(mktemp -d /run/finops-settings-acl-env.XXXXXX)"
+  chmod 0700 "$env_backup_dir"
+  trap "rm -rf -- '$env_backup_dir'" EXIT
+  if ! (prepare_settings_access_control_runtime_env "$release" "$env_backup_dir"); then
+    restore_settings_access_control_runtime_env "$env_backup_dir" \
+      || die "runtime env cleanup failed and its before-image could not be restored"
+    (assert_runtime_env_prerequisites) \
+      || die "runtime env cleanup failed and restored prerequisites did not read back"
+    die "runtime env cleanup failed before candidate activation; before-image restored"
+  fi
+  if ! (assert_runtime_env_contract); then
+    restore_settings_access_control_runtime_env "$env_backup_dir" \
+      || die "strict runtime env check failed and its before-image could not be restored"
+    die "runtime env cleanup did not reach the strict steady-state contract; before-image restored"
+  fi
+  if ! apply_settings_access_control_menu_binding_cleanup "$release"; then
+    restore_settings_access_control_runtime_env "$env_backup_dir" \
+      || die "OA cleanup failed and runtime env before-image could not be restored"
+    (assert_runtime_env_prerequisites) \
+      || die "OA cleanup failed and restored runtime env prerequisites did not read back"
+    die "exact OA menu binding cleanup failed before candidate activation; runtime env restored"
+  fi
   if ! (activate_release "$release"); then
     rollback_release_gate "$release" "$previous_release" "$admin_token" "$evidence_dir" activation
   fi
@@ -2551,13 +2674,15 @@ PY
   then
     rollback_release_gate "$release" "$previous_release" "$admin_token" "$evidence_dir" evidence_contract
   fi
+  rm -rf -- "$env_backup_dir"
+  trap - EXIT
 }
 
 cmd="${1:-}"
 case "$cmd" in
   check-release)
     src="$(release_src "${2:-}")"
-    assert_runtime_env_contract
+    assert_runtime_env_prerequisites
     echo "$src"
     ;;
   contract-version)

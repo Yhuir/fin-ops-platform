@@ -67,7 +67,7 @@ created: 2026-08-02
 | 13-15-01 | 15 | 12 | PAR-03 | T13-56/57 | candidate/bootstrap限定批准 | bootstrap checkpoint | targeted evidence + human approval | ✅/manual | ⬜ pending |
 | 13-15-02 | 15 | 12 | PAR-03 | T13-53 | no-activate candidate upload；live state不变 | candidate upload | plan 13-15 Task2 command | ➖ remote | ⬜ pending |
 | 13-15-03 | 15 | 12 | PAR-03 | T13-56 | hash-pinned atomic helper bootstrap/restore | manual root bootstrap | plan 13-15 Task3 command + human | ➖ remote/manual | ⬜ pending |
-| 13-15-04 | 15 | 12 | PAGE-15/PAR-03 | T13-57/58 | remote exact preflight/hash与activation批准 | production checkpoint | plan 13-15 Task4 command + human | ➖ remote/manual | ⬜ pending |
+| 13-15-04 | 15 | 12 | PAGE-15/PAR-03 | T13-57/58 | remote steady/cutover exact preflight/hash与activation批准；006缺席ACL、DB非partial、env旧态有界 | production checkpoint | plan 13-15 Task4 command + human | ➖ remote/manual | ⬜ pending |
 | 13-05-01 | 05 | 13 | PAGE-15/PAR-03 | T13-22/42/43 | JIT selector/menu/exact artifact/fresh identities无漂移 | production gate | explicit SSH command in 13-05 | ➖ remote | ⬜ pending |
 | 13-05-02 | 05 | 13 | PAGE-15/PAR-01/PAR-03 | T13-23/24 | activate-existing zero reupload；safe active/API恢复 | production release | canonical command in 13-05 | ✅ extend | ⬜ pending |
 | 13-05-03 | 05 | 13 | PAGE-15/PAR-02/PAR-03 | T13-25/26/27 | fresh 005/006、direct API、new router、exact roles与restore | production smoke | explicit SSH command in 13-05 | ➖ remote | ⬜ pending |
@@ -107,7 +107,7 @@ created: 2026-08-02
 | 真实 OA 三角色同步 | PAR-02/PAR-03 | local executor/mock不能证明production MySQL角色事实 | 13-15 production只读preflight盘点；13-05批准后由admin对专用bearer账号full→read→denied逐档验证并finally恢复/read-back |
 | 生产历史非法 admin 清理 | PAR-01/PAR-03 | 生产数据不应进入普通测试 | 双token stdin root-owned preflight生成artifact/hash；用户确认后13-05通过canonical deploy应用migration |
 | 生产延迟采样 | PAR-02 | 不编造 SLO | 记录 generic save、ACL GET、ACL no-op/real PUT 的 p50/p95 与 OA/DB 分段，不输出 token/secret |
-| 安全cutover/回滚 | PAR-03 | 涉及live API/migration/OA | deterministic deploy tests锁定顺序；production capability/fingerprint拒绝unsafe previous；任何rollback/maintenance/repair均blocked并重启审批链 |
+| 安全cutover/回滚 | PAR-03 | 涉及live API/migration/OA | deterministic deploy tests锁定 current pre→exact env cleanup/strict→OA cleanup→quiesce/migration 顺序及进入activation前env restore；production capability/fingerprint拒绝unsafe previous；任何rollback/maintenance/repair均blocked并重启审批链 |
 | 正式生产发布 | 全部 | 必须用户明确授权外部写入 | 13-15两级批准完成后，13-05运行`./scripts/deploy-oa.sh --activate-existing --release-name <release>`；仅zero-reupload safe active+API恢复可进入post-deploy |
 
 ## PLAN-CHECK Revision Background

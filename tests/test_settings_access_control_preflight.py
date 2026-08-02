@@ -109,6 +109,9 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
         report = self._report()
 
         self.assertTrue(report["eligible"])
+        self.assertTrue(report["cutover_eligible"])
+        self.assertEqual(report["state"], "steady")
+        self.assertEqual(report["blockers"], [])
         rendered = str(report)
         self.assertNotIn("FULL001", rendered)
         self.assertNotIn("YNSYLP006", rendered)
@@ -255,6 +258,107 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
                 report = self._report(environment={"retired_admission_env_present": {name: True}})
                 self.assertFalse(report["eligible"])
                 self.assertEqual(report["environment"]["retired_admission_env_present"], [name])
+
+    def test_exact_legacy_runtime_state_is_cutover_eligible_before_migration_and_env_cleanup(self) -> None:
+        report = self._report(
+            database={
+                "settings_payload": {
+                    "allowed_usernames": ["YNSYLP005", "FULL001"],
+                    "readonly_export_usernames": [],
+                    "full_access_usernames": ["FULL001"],
+                    "admin_usernames": ["YNSYLP005"],
+                    "access_control_version": 2,
+                },
+                "migration_0132_applied": False,
+                "constraint_present": False,
+                "constraint_validated": False,
+            },
+            environment={
+                "admin_usernames": ["YNSYLP005"],
+                "retired_admission_env_present": {
+                    "FIN_OPS_ALLOWED_USERNAMES": True,
+                    "FIN_OPS_ALLOWED_ROLES": True,
+                    "FIN_OPS_READONLY_EXPORT_USERNAMES": True,
+                },
+            },
+            bearer_session=_session("YNSYLP006", "full_access", False),
+        )
+
+        self.assertFalse(report["eligible"])
+        self.assertTrue(report["cutover_eligible"])
+        self.assertEqual(report["state"], "cutover")
+        self.assertEqual(report["database"]["state"], "pending")
+        self.assertEqual(report["environment"]["state"], "cutover")
+        self.assertTrue(report["sessions"]["bearer"]["absent_from_canonical_acl"])
+        self.assertNotIn("YNSYLP006", json.dumps(report, sort_keys=True))
+
+    def test_cutover_blocks_representative_bearer_present_in_any_canonical_acl_list(self) -> None:
+        for field in (
+            "allowed_usernames",
+            "readonly_export_usernames",
+            "full_access_usernames",
+            "admin_usernames",
+        ):
+            with self.subTest(field=field):
+                settings = {
+                    "allowed_usernames": ["YNSYLP005", "FULL001"],
+                    "readonly_export_usernames": [],
+                    "full_access_usernames": ["FULL001"],
+                    "admin_usernames": ["YNSYLP005"],
+                    "access_control_version": 2,
+                }
+                settings[field] = [*settings[field], "YNSYLP006"]
+                report = self._report(
+                    database={
+                        "settings_payload": settings,
+                        "migration_0132_applied": False,
+                        "constraint_present": False,
+                        "constraint_validated": False,
+                    },
+                    bearer_session=_session("YNSYLP006", "full_access", False),
+                )
+
+                self.assertFalse(report["cutover_eligible"])
+                self.assertIn("bearer_present_in_canonical_acl", report["blockers"])
+
+    def test_cutover_blocks_partial_0132_database_state(self) -> None:
+        report = self._report(
+            database={
+                "settings_payload": {
+                    "allowed_usernames": ["YNSYLP005", "FULL001"],
+                    "readonly_export_usernames": [],
+                    "full_access_usernames": ["FULL001"],
+                    "admin_usernames": ["YNSYLP005"],
+                    "access_control_version": 2,
+                },
+                "migration_0132_applied": True,
+                "constraint_present": False,
+                "constraint_validated": False,
+            }
+        )
+
+        self.assertFalse(report["cutover_eligible"])
+        self.assertEqual(report["database"]["state"], "partial")
+        self.assertIn("database_partial", report["blockers"])
+
+    def test_cutover_allows_only_empty_or_fixed_legacy_admin_environment(self) -> None:
+        fixed = self._report(environment={"admin_usernames": ["YNSYLP005"]})
+        other = self._report(environment={"admin_usernames": ["ATTACKER"]})
+
+        self.assertTrue(fixed["cutover_eligible"])
+        self.assertFalse(other["cutover_eligible"])
+        self.assertIn("legacy_admin_not_fixed", other["blockers"])
+        self.assertNotIn("ATTACKER", str(other))
+
+    def test_cutover_blocks_unknown_retired_environment_keys_without_disclosing_name(self) -> None:
+        report = self._report(
+            environment={"retired_admission_env_present": {"FIN_OPS_UNKNOWN_ADMISSION": True}}
+        )
+
+        self.assertFalse(report["cutover_eligible"])
+        self.assertIn("retired_env_unknown", report["blockers"])
+        self.assertEqual(report["environment"]["unknown_retired_admission_env_count"], 1)
+        self.assertNotIn("FIN_OPS_UNKNOWN_ADMISSION", str(report))
 
     def test_legacy_runtime_admin_environment_fails_closed_and_is_redacted(self) -> None:
         report = self._report(environment={"admin_usernames": ["ATTACKER"]})
