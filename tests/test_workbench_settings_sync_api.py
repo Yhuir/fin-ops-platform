@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -19,6 +20,17 @@ from fin_ops_platform.services.oa_role_sync_service import OARoleSyncError
 class ExplodingSyncService:
     def sync_access_control(self, snapshot: dict[str, object]) -> None:
         raise OARoleSyncError("OA role sync failed")
+
+
+class CompensationFailingSyncService:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def sync_access_control(self, snapshot: dict[str, object]) -> None:
+        del snapshot
+        self.calls += 1
+        if self.calls == 2:
+            raise OARoleSyncError("OA compensation failed")
 
 
 class ExplodingProjectAdapter:
@@ -76,6 +88,87 @@ class WorkbenchSettingsSyncApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 502)
         self.assertEqual(payload["error"], "oa_role_sync_failed")
+        self.assertEqual(settings_payload["accounts"], [])
+
+    def test_settings_update_returns_bad_gateway_when_oa_role_sync_is_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
+                user_id="admin-id",
+                username="YNSYLP005",
+                nickname="管理员",
+                display_name="管理员",
+                roles=[],
+                permissions=[],
+            )
+
+            response = app.handle_request(
+                "PUT",
+                "/api/workbench/settings/access-control",
+                body=json.dumps(
+                    {
+                        "expected_version": 1,
+                        "accounts": [{"username": "YNSYLP006", "access_tier": "read_export_only"}],
+                    }
+                ),
+                headers={"Authorization": "Bearer admin"},
+            )
+            payload = json.loads(response.body)
+            settings_payload = app._app_settings_service.get_access_control_payload()
+            persisted = json.loads((Path(temp_dir) / "app_settings.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(payload["error"], "oa_role_sync_failed")
+        self.assertEqual(settings_payload["accounts"], [])
+        self.assertEqual(persisted.get("_settings_acl_audit_events", []), [])
+
+    def test_settings_update_keeps_existing_inconsistent_contract_when_compensation_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            sync_service = CompensationFailingSyncService()
+            app._app_settings_service._oa_role_sync_service = sync_service
+            app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
+                user_id="admin-id",
+                username="YNSYLP005",
+                nickname="管理员",
+                display_name="管理员",
+                roles=[],
+                permissions=[],
+            )
+            original_critical_section = app._state_store.begin_settings_acl_critical_section
+
+            def failing_critical_section(expected_version: int):
+                context = original_critical_section(expected_version)
+
+                @contextmanager
+                def wrapped():
+                    with context as critical_section:
+                        critical_section.commit = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                            RuntimeError("synthetic DB failure")
+                        )
+                        yield critical_section
+
+                return wrapped()
+
+            app._state_store.begin_settings_acl_critical_section = failing_critical_section
+
+            response = app.handle_request(
+                "PUT",
+                "/api/workbench/settings/access-control",
+                body=json.dumps(
+                    {
+                        "expected_version": 1,
+                        "accounts": [{"username": "FULL001", "access_tier": "full_access"}],
+                    }
+                ),
+                headers={"Authorization": "Bearer admin"},
+            )
+            payload = json.loads(response.body)
+            settings_payload = app._app_settings_service.get_access_control_payload()
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(payload["error"], "access_control_sync_inconsistent")
+        self.assertEqual(sync_service.calls, 2)
         self.assertEqual(settings_payload["accounts"], [])
 
     def test_only_protected_admin_can_use_versioned_access_control_api(self) -> None:

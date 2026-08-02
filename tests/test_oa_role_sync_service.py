@@ -148,6 +148,16 @@ class OARoleSyncServiceTests(unittest.TestCase):
                 }
             )
 
+    def test_sync_access_control_fails_when_runtime_executor_is_disabled(self) -> None:
+        with self.assertRaises(OARoleSyncConfigurationError):
+            OARoleSyncService().sync_access_control(
+                {
+                    "full_access_usernames": ["FULL001"],
+                    "readonly_export_usernames": [],
+                    "admin_usernames": ["YNSYLP005"],
+                }
+            )
+
     def test_mysql_executor_parses_bounded_network_timeouts(self) -> None:
         with patch.dict(
             "os.environ",

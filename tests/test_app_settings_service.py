@@ -18,7 +18,10 @@ from fin_ops_platform.services.app_settings_service import (
     BankAutoTagRulesValidationError,
     COST_STATISTICS_UNCATEGORIZED_TAG_CODE,
 )
-from fin_ops_platform.services.oa_role_sync_service import OARoleAssignment
+from fin_ops_platform.services.oa_role_sync_service import (
+    OARoleAssignment,
+    OARoleSyncConfigurationError,
+)
 from fin_ops_platform.services.state_store import ApplicationStateStore
 
 
@@ -1613,6 +1616,26 @@ class AppSettingsServiceTests(unittest.TestCase):
         self.assertFalse(result["changed"])
         self.assertEqual(result["version"], 1)
         self.assertEqual(sync_service.calls, [])
+
+    def test_access_control_real_change_requires_configured_oa_sync_before_persistence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._app_settings_service._oa_role_sync_service = None
+
+            with self.assertRaises(OARoleSyncConfigurationError):
+                app._app_settings_service.update_access_control(
+                    expected_version=1,
+                    accounts=[{"username": "FULL001", "access_tier": "full_access"}],
+                    actor_id="YNSYLP005",
+                    actor_name="admin",
+                    request_id="missing-oa-sync",
+                )
+
+            payload = app._app_settings_service.get_access_control_payload()
+            persisted = json.loads((Path(temp_dir) / "app_settings.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(payload["accounts"], [])
+        self.assertEqual(persisted.get("_settings_acl_audit_events", []), [])
 
     def test_access_control_persistence_failure_compensates_oa_before_unlock(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
