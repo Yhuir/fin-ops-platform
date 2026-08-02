@@ -62,7 +62,7 @@ class OaApplicantCredentialApiTests(unittest.TestCase):
     def test_full_access_non_admin_cannot_maintain_credentials(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            configure_access_control(app, full_access=["FULL001"])
+            configure_access_control(app, full_access=["YNSYLP006"])
             self._install_identity_resolver(app)
 
             response = app.handle_request(
@@ -102,7 +102,7 @@ class OaApplicantCredentialApiTests(unittest.TestCase):
                 )
             return OAUserIdentity(
                 user_id="102",
-                username="FULL001",
+                username="YNSYLP006",
                 nickname="全操作用户",
                 display_name="全操作用户",
                 roles=["finance"],

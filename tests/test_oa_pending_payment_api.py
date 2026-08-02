@@ -311,15 +311,16 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
-                user_id="blocked-user-id",
-                username="BLOCKED_USER",
+                user_id="006",
+                username="YNSYLP006",
                 nickname="未授权用户",
                 display_name="未授权用户",
-                roles=["finance"],
-                permissions=[],
+                roles=["finance", "finops_full_access"],
+                permissions=["finops:app:view"],
             )
             endpoints = [
                 "/api/oa-pending-payments/rows",
+                "/api/oa-pending-payments/bank-transaction-candidates",
                 "/api/oa-pending-payments/oa/oa-api/detail",
                 "/api/oa-pending-payments/bank-transactions/bank-api/detail",
                 "/api/oa-pending-payments/invoices/inv-api/detail",

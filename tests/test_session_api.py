@@ -276,12 +276,12 @@ class SessionApiTests(unittest.TestCase):
                     roles=["finance"],
                     permissions=[],
                 ),
-                "permission": OAUserIdentity(
+                "006": OAUserIdentity(
                     user_id="305",
-                    username="PERMISSION001",
+                    username="YNSYLP006",
                     nickname="权限码用户",
                     display_name="权限码用户",
-                    roles=["finance"],
+                    roles=["finance", "finops_full_access"],
                     permissions=["finops:app:view"],
                 ),
                 "outsider": OAUserIdentity(
@@ -300,7 +300,7 @@ class SessionApiTests(unittest.TestCase):
                 "full": ("full_access", True, True, False),
                 "admin": ("denied", False, False, False),
                 "default-admin": ("admin", True, True, True),
-                "permission": ("denied", False, False, False),
+                "006": ("denied", False, False, False),
                 "outsider": ("denied", False, False, False),
             }
             payloads: dict[str, dict[str, object]] = {}
@@ -325,6 +325,8 @@ class SessionApiTests(unittest.TestCase):
                 )
 
         self.assertTrue(payloads["readonly"]["allowed"])
+        self.assertEqual(payloads["006"]["roles"], ["finance", "finops_full_access"])
+        self.assertEqual(payloads["006"]["permissions"], ["finops:app:view"])
         self.assertFalse(payloads["outsider"]["allowed"])
 
     def test_environment_and_oa_identity_roles_cannot_grant_app_access(self) -> None:
@@ -359,7 +361,14 @@ class SessionApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             configure_access_control(app, full_access=["CACHED001"])
-            identity = OAUserIdentity("cached", "CACHED001", "cached", "cached")
+            identity = OAUserIdentity(
+                "cached",
+                "CACHED001",
+                "cached",
+                "cached",
+                roles=["finance", "finops_full_access"],
+                permissions=["finops:app:view"],
+            )
             app._oa_identity_service.resolve_identity = lambda _token: identity
             headers = {"Authorization": "Bearer cached-user"}
 
@@ -370,6 +379,8 @@ class SessionApiTests(unittest.TestCase):
 
         self.assertEqual(before["access_tier"], "full_access")
         self.assertEqual(after["access_tier"], "denied")
+        self.assertEqual(after["roles"], ["finance", "finops_full_access"])
+        self.assertEqual(after["permissions"], ["finops:app:view"])
         self.assertEqual(protected_response.status_code, 403)
 
     def test_get_session_me_returns_denied_tier_for_visible_but_unauthorized_user(self) -> None:

@@ -7,6 +7,9 @@ class RouteAccessPolicyTests(unittest.TestCase):
     def test_safe_methods_and_known_read_only_posts_do_not_require_mutation(self) -> None:
         for method, route_path in (
             ("GET", "/api/workbench"),
+            ("GET", "/api/operations/app-health-dashboard"),
+            ("GET", "/api/workbench/settings/oa-applicant-credentials"),
+            ("GET", "/api/workbench/settings/data-reset/jobs/active"),
             ("HEAD", "/api/workbench"),
             ("OPTIONS", "/api/workbench/actions/ignore-row"),
             ("POST", "/api/operation-barrier/status"),
@@ -29,6 +32,8 @@ class RouteAccessPolicyTests(unittest.TestCase):
             ("PUT", "/api/pending-invoices/rules"),
             ("PATCH", "/api/etc/reconciliation-tasks/task-1/items/item-1"),
             ("DELETE", "/api/etc/reconciliation-tasks/task-1"),
+            ("PUT", "/api/workbench/settings/oa-applicant-credentials/user-1"),
+            ("POST", "/api/workbench/settings/data-reset/jobs"),
             ("POST", "/api/future-write-route"),
         ):
             with self.subTest(method=method, route_path=route_path):

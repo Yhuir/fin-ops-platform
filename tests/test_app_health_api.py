@@ -13,9 +13,11 @@ from time import sleep
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
 from tests.app_test_support import (
     build_local_state_application as build_application,
+    configure_access_control,
     install_fresh_workbench_write_gate,
 )
 
@@ -707,10 +709,23 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["error"], "invalid_oa_session")
 
     def test_operations_app_health_dashboard_is_admin_only(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with self._temporary_env(FIN_OPS_TEST_DEFAULT_AUTH="0"), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            configure_access_control(app, full_access=["YNSYLP006"])
+            app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
+                user_id="006",
+                username="YNSYLP006",
+                nickname="普通用户",
+                display_name="普通用户",
+                roles=["finance", "finops_full_access"],
+                permissions=["finops:app:view"],
+            )
 
-            response = app.handle_request("GET", "/api/operations/app-health-dashboard")
+            response = app.handle_request(
+                "GET",
+                "/api/operations/app-health-dashboard",
+                headers={"Authorization": "Bearer full-token"},
+            )
             payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 403)

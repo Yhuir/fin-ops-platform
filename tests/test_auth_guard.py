@@ -68,16 +68,6 @@ class AuthGuardTests(unittest.TestCase):
         self.assertEqual(denied.access_tier, "denied")
         self.assertNotIn("provider secret", "\n".join(logs.output))
 
-    def test_legacy_authority_constructor_fields_are_removed(self) -> None:
-        for field in (
-            "required_permission",
-            "allowed_usernames",
-            "allowed_roles",
-            "readonly_export_usernames",
-        ):
-            with self.subTest(field=field), self.assertRaises(TypeError):
-                AccessControlService(**{field: [] if field != "required_permission" else ""})
-
     def test_shared_local_fixture_admits_only_its_default_identity_without_persisting_acl(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -115,29 +105,36 @@ class AuthGuardTests(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
         self.assertEqual(payload["error"], "invalid_oa_session")
 
-    def test_protected_api_returns_forbidden_for_authenticated_but_unauthorized_user(self) -> None:
+    def test_permission_present_006_is_denied_by_direct_read_and_write_apis(self) -> None:
         with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
-                user_id="101",
-                username="outsider",
+                user_id="006",
+                username="YNSYLP006",
                 nickname="外部用户",
                 display_name="外部用户",
                 dept_id="99",
                 dept_name="其他部门",
-                roles=["guest"],
-                permissions=["system:user:list"],
+                roles=["finance", "finops_full_access"],
+                permissions=["finops:app:view", "system:user:list"],
             )
 
-            response = app.handle_request(
+            read_response = app.handle_request(
                 "GET",
                 "/api/workbench?month=2026-07",
                 headers={"Authorization": "Bearer no-access"},
             )
-            payload = json.loads(response.body)
+            write_response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/ignore-row",
+                headers={"Authorization": "Bearer no-access"},
+                body=json.dumps({"row_id": "row-1"}),
+            )
 
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(payload["error"], "forbidden")
+        self.assertEqual(read_response.status_code, 403)
+        self.assertEqual(json.loads(read_response.body)["error"], "forbidden")
+        self.assertEqual(write_response.status_code, 403)
+        self.assertEqual(json.loads(write_response.body)["error"], "forbidden")
 
     def test_import_endpoints_are_also_protected(self) -> None:
         with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:

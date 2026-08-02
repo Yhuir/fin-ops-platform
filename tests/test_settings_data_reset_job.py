@@ -95,10 +95,10 @@ class SettingsDataResetJobTests(unittest.TestCase):
         with patch.dict(os.environ, {"FIN_OPS_TEST_DEFAULT_AUTH": "0"}), tempfile.TemporaryDirectory() as temp_dir:
             app = build_local_state_application(data_dir=Path(temp_dir))
             queue = install_durable_import_queue(app)
-            configure_access_control(app, full_access=["FULL001"])
+            configure_access_control(app, full_access=["YNSYLP006"])
             app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
                 user_id="finance-id",
-                username="FULL001",
+                username="YNSYLP006",
                 nickname="财务用户",
                 display_name="财务用户",
                 roles=["finance"],
