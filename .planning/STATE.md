@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 13-12-PLAN.md
-last_updated: "2026-08-02T08:53:55.278Z"
+stopped_at: Completed 13-13-PLAN.md
+last_updated: "2026-08-02T09:10:58.675Z"
 last_activity: 2026-08-02 -- Phase 13 execution started
 progress:
   total_phases: 38
   completed_phases: 11
   total_plans: 104
-  completed_plans: 74
+  completed_plans: 75
   percent: 29
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 ## Current Position
 
 Phase: 13 (settings-improvements) — EXECUTING
-Plan: 13 of 15
+Plan: 14 of 15
 Status: Ready to execute
 Last activity: 2026-08-02 -- Phase 13 execution started
 
@@ -61,6 +61,7 @@ Progress: [██░░░░░░░░] in progress
 | Phase 13 P11 | 20min | 2 tasks | 7 files |
 | Phase 13 P04 | 8min | 2 tasks | 6 files |
 | Phase 13 P12 | 8min | 3 tasks | 10 files |
+| Phase 13 P13 | 12min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -188,6 +189,9 @@ Progress: [██░░░░░░░░] in progress
 - [Phase 13]: Settings owns the only human ACL I/O and dedicated versioned command; permissions-and-audit owns evaluator, enforcement and audit semantics.
 - [Phase 13]: Settings and permissions state machines share one snapshot version and the same no-op, conflict, projection, persistence, recovery and compensation outcomes.
 - [Phase 13]: Phase 13 authorization docs reuse the 13-09/13-11 evidence and keep test_permissions_write_entry_inventory.py as the sole whole-repo scanner.
+- [Phase 13]: OA identity only authenticates canonical username; Settings canonical ACL remains the sole APP authority while fixed-menu projection controls visibility only.
+- [Phase 13]: Runtime replaces only three dedicated role memberships; deployment alone owns approved exact non-dedicated cleanup, before-image read-back and rollback.
+- [Phase 13]: Module docs preserve the single authority scanner by describing retired-env semantics without copying its exact key allowlist.
 
 ### Roadmap Evolution
 
@@ -266,6 +270,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-02T08:53:55.270Z
-Stopped at: Completed 13-12-PLAN.md
+Last session: 2026-08-02T09:10:58.666Z
+Stopped at: Completed 13-13-PLAN.md
 Resume file: None
