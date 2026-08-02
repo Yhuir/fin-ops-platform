@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from tests.app_test_support import (
     build_local_state_application as build_application,
     configure_access_control,
+    configure_default_test_access,
 )
 from fin_ops_platform.services.app_settings_service import (
     AppSettingsService,
@@ -799,6 +800,7 @@ class AppSettingsServiceTests(unittest.TestCase):
     def test_workbench_settings_api_rejects_bank_transaction_tags_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            configure_default_test_access(app)
 
             try:
                 response = app.handle_request(
@@ -879,6 +881,7 @@ class AppSettingsServiceTests(unittest.TestCase):
     def test_workbench_settings_api_pending_invoice_rules_do_not_fan_out_on_write(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            configure_default_test_access(app)
             queue_repository = RecordingQueueRepository()
             app._runtime_repositories = SimpleNamespace(queue_repository=queue_repository)
             current = app._app_settings_service.get_settings_payload()
@@ -952,6 +955,7 @@ class AppSettingsServiceTests(unittest.TestCase):
     def test_workbench_settings_api_rejects_frontend_tags_alias_for_bank_transaction_tags(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            configure_default_test_access(app)
 
             response = app.handle_request(
                 "POST",
@@ -1646,6 +1650,7 @@ class AppSettingsServiceTests(unittest.TestCase):
     def test_workbench_settings_api_rejects_legacy_access_control_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            configure_default_test_access(app)
 
             try:
                 update_response = app.handle_request(
