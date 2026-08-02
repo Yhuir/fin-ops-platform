@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 13-13-PLAN.md
-last_updated: "2026-08-02T09:55:56.944Z"
-last_activity: 2026-08-02 -- Phase 13 execution started
+stopped_at: Completed 13-15-PLAN.md
+last_updated: "2026-08-02T12:07:28.704Z"
+last_activity: 2026-08-02 -- 13-15 complete; approved 13-05 production activation remains
 progress:
   total_phases: 38
   completed_phases: 11
   total_plans: 104
-  completed_plans: 76
+  completed_plans: 77
   percent: 29
 ---
 
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 
 Phase: 13 (settings-improvements) — EXECUTING
 Plan: 15 of 15
-Status: Ready to execute
-Last activity: 2026-08-02 -- Phase 13 execution started
+Status: Ready to execute 13-05 production activation
+Last activity: 2026-08-02 -- 13-15 complete; approved 13-05 production activation remains
 
-Progress: [██░░░░░░░░] in progress
+Progress: [█████████░] 14/15 plans complete; 13-05 remains
 
 ## Performance Metrics
 
@@ -63,6 +63,7 @@ Progress: [██░░░░░░░░] in progress
 | Phase 13 P12 | 8min | 3 tasks | 10 files |
 | Phase 13 P13 | 12min | 3 tasks | 10 files |
 | Phase 13 P14 | 40min | 3 tasks | 8 files |
+| Phase 13 P15 | 2h 10m | 4 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -196,6 +197,9 @@ Progress: [██░░░░░░░░] in progress
 - [Phase 13]: Candidate eligibility requires exact permission-bearing YNSYLP006 while APP access starts denied.
 - [Phase 13]: Zero-reupload activation recomputes uploaded source, deploy helper and migration hashes from a clean commit.
 - [Phase 13]: Expected auth browser errors are allowed only for exact endpoint/status pairs; all other browser errors remain fail closed.
+- [Phase 13]: Legacy runtime may be exact cutover-eligible without satisfying candidate strict steady state. — Every cutover fact remains exact and blockers must be empty.
+- [Phase 13]: Remove the four retired APP admission env keys atomically inside the approved activation window. — Restore their before-image on any pre-activation failure.
+- [Phase 13]: Bind activation to bootstrap SHA c5a61c81… and preflight SHA ec63125a…; never auto-rollback to the unsafe active release. — Failure remains in maintenance for forward repair.
 
 ### Roadmap Evolution
 
@@ -274,6 +278,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-02T09:55:31.049Z
-Stopped at: Completed 13-13-PLAN.md
+Last session: 2026-08-02T12:07:28.694Z
+Stopped at: Completed 13-15-PLAN.md
 Resume file: None
