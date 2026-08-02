@@ -23,7 +23,8 @@
 
 ## 代码入口
 
-- OA session / 权限：`backend/src/fin_ops_platform/app/auth.py`、`backend/src/fin_ops_platform/services/oa_identity_service.py`、`backend/src/fin_ops_platform/services/access_control_service.py`、`web/src/features/session/api.ts`
+- OA identity/session：`backend/src/fin_ops_platform/app/auth.py`、`backend/src/fin_ops_platform/services/oa_identity_service.py`、`web/src/features/session/api.ts`
+- OA 菜单 ACL 投影：`backend/src/fin_ops_platform/services/oa_role_sync_service.py`、`backend/src/fin_ops_platform/tools/settings_access_control_preflight.py`、`deploy/oa/fin_ops_role_binding.mysql.sql`、`deploy/oa/bin/finops-deploy-control.sh`
 - OA Mongo 只读 adapter：`backend/src/fin_ops_platform/services/mongo_oa_adapter.py`
 - OA 投影与同步：`backend/src/fin_ops_platform/services/oa_projection_sync.py`、`backend/src/fin_ops_platform/services/postgres_repositories/oa_projection.py`、`backend/src/fin_ops_platform/app/worker.py`
 - OA 待付款：`backend/src/fin_ops_platform/app/routes_oa_pending_payments.py`、`backend/src/fin_ops_platform/services/oa_pending_payment_query_service.py`、`backend/src/fin_ops_platform/services/oa_pending_payment_canonical_rows.py`、`backend/src/fin_ops_platform/services/postgres_repositories/oa_pending_payment_query.py`
@@ -36,9 +37,10 @@
 
 ## 当前边界
 
-- OA 主系统负责登录态、菜单 iframe、用户信息、权限和原始付款申请/报销/项目数据。
+- OA 主系统负责登录态、菜单 iframe、canonical username、信息性 roles/permissions 和原始付款申请/报销/项目数据。
 - 本系统不修改 OA 原始业务库；对 OA Mongo 只读读取、映射、缓存和投影。
-- `Admin-Token` 只作为会话来源；后端必须二次校验 `finops:app:view` 和 app 内访问等级。
+- `Admin-Token` 只作为身份来源；OA roles/permissions 不授予 APP 访问。固定 `YNSYLP005` 与 Settings canonical ACL 是唯一 APP authority，后端 direct API guard 与前端 `SessionGate` 分别强制执行同一结果。
+- `finops:app:view` 只定位唯一 OA menu。Runtime 验证唯一 menu、三个专用 role 和 exact 三绑定后，只替换三 role members；deployment 才能按 approved before-image 清理历史 non-dedicated binding 并回滚。
 - OA 同步通过 worker / durable queue 原子写入本系统 PostgreSQL canonical OA、admission、payment-status 与 watermark facts。它不 fan-out 页面 refresh；各 direct 页面下一次 GET 读取已提交 facts，`workbench`/`workbench_relation` 由各自 owner 按明确合同维护。
 - OA 附件解析结果不直接等同于正式发票事实。附件发票识别只有三种结果：命中统一发票池则建立/补充关系，判定为正式发票且池内不存在时可受控创建并关联，非正式票据、残缺号码、多义匹配或未知证据直接忽略。受控创建由设置页 `OA附件发票晋级` 控制：默认 `link_existing_only` 只关联已有发票，`disabled` 完全跳过 promotion，只有 `create_missing` 才允许创建缺失的统一发票池记录。
 - 目标 OA 申请人凭据只允许 admin 维护，API / settings response 不得回显 password；创建草稿时用目标申请人账号登录 OA 并只使用返回 token。
@@ -50,6 +52,8 @@
 ## ACL role sync boundary
 
 - OA role sync 只消费 settings owner 传入的 normalized snapshot；admin assignment 永远注入固定 `YNSYLP005`，不能从请求、环境变量或 OA 当前角色反推。
+- fixed selector 必须精确为 `finops:app:view`，且 menu、`finops_read_export` / `finops_full_access` / `finops_admin` 三角色和三条 binding 都唯一。任何 disabled、missing、drift 或 timeout 都在 DML 前 fail closed。
+- runtime 只替换三个专用 role members；不创建/删除 menu、role、binding，不改业务 role/member 或其他 menu。non-dedicated fixed-menu binding 由 deployment exact cleanup/read-back/rollback 独立负责。
 - generic settings save 与 ACL no-op 都是零 OA I/O；只有 ACL 真实变化执行一次 target sync。若 DB/audit 失败，最多执行一次 previous snapshot compensation；补偿失败返回 inconsistent 并要求人工核对。
 - MySQL connect/read/write timeout 分别受限；OA 密码、token、成员明文不进入发布 evidence。
 
@@ -63,7 +67,7 @@
 | Target OA applicant login | 进项 OA 草稿、ETC 草稿 | HTTP/网络/无效 JSON/无 token 不能伪装成功，错误不能泄露密码 |
 | Input invoice OA reverse | 进项使用、OA 关系、审计、read model invalidation | preview hash stale、version conflict、idempotency、人工 submitted/not_submitted |
 | ETC OA draft/manual status | ETC 票据、关联台、税金、成本 | 本地状态和真实 OA 状态混淆，删除本地批次误删真实 OA |
-| OA role sync / deploy | OA 菜单可见性、app 权限模型 | OA 角色与 app allowed/readonly/admin 不一致 |
+| OA role sync / deploy | OA 菜单可见性、APP direct denial、exact cleanup/rollback | 菜单投影漂移被误当 APP authority、宽删业务 role/member/menu、rollback 未 read-back |
 
 ## 维护触发器
 

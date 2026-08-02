@@ -1,12 +1,12 @@
 # OA 集成模块边界与 I/O
 
-日期：2026-07-28
+日期：2026-08-02
 
 ## 模块化状态
 
 - 状态：partial
 - 当前边界可信度：medium
-- 目标边界：OA 集成负责 OA 身份、Mongo adapter、projection sync、附件识别、OA 凭证和 OA 相关页面/API 的外部系统边界。
+- 目标边界：OA 集成负责 OA identity、固定菜单投影、Mongo adapter、projection sync、附件识别、OA 凭证和 OA 相关页面/API 的外部系统边界。
 - 当前缺口：OA 相关能力横跨 OA 待付款、ETC、进项反提、设置和权限，变更必须声明受影响模块；生产周期性自动读取必须由运维层定时 enqueue durable `oa.sync`，不能恢复 HTTP 进程内 polling。
 - 旧代码删除条件：旧 Mongo 直读/手写 projection path 不再被业务页面直接调用。
 
@@ -14,7 +14,9 @@
 
 ### 负责
 
-- OA 身份/权限适配、OA Mongo 读取、OA projection sync、OA 附件发票识别和 OA applicant credentials。
+- OA token → canonical username 身份适配；roles/permissions 仅作为信息字段。
+- 把 Settings canonical ACL 投影到唯一 `finops:app:view` menu 的三个专用 OA role members。
+- OA Mongo 读取、OA projection sync、OA 附件发票识别和 OA applicant credentials。
 - 对 OA 待付款、ETC、进项反提等模块提供外部系统 adapter。
 
 ### 不负责
@@ -22,12 +24,17 @@
 - 不拥有业务页面状态机。
 - 不直接确认业务关联或付款。
 - 不把外部 OA 数据直接当作页面 fresh read model。
+- 不从 OA role/permission/menu 或 retired env 授予 APP access；APP evaluator 属于 permissions-and-audit。
+- runtime 不清理 menu/role/binding；历史 non-dedicated binding 的 exact cleanup/rollback 属于 deploy。
 
 ## 输入 I/O
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| OA session/token | `auth.py`、session API | 权限和身份必须可校验 |
+| OA session/token | `auth.py`、session API | 只认证 canonical username；roles/permissions 仅为信息，不能 grant APP access |
+| Canonical ACL snapshot | Settings owner | casefold-preserve-canonical 的 full/read assignments，加固定 `YNSYLP005` admin；是 role sync 唯一输入 |
+| Fixed menu target | `FIN_OPS_OA_REQUIRED_PERMISSION`、OA MySQL | selector 必须精确为 `finops:app:view`；唯一 menu、三个唯一专用 role和 exact 三 binding 必须在任何 DML 前成立 |
+| Deployment cleanup artifact | preflight/deploy control | 只接受 release-bound salted exact non-dedicated target、approved before-image/SHA-256；runtime 不消费 |
 | OA Mongo/query | `mongo_oa_adapter.py` | projection sync 只调用 `load_sync_application_batch(scope_key, retention_cutoff_month=...)`：每个启用 form/scope 单次读取；`all` 在字段校验和附件解析前排除 retention cutoff 以前的文档，然后输出 `projection_records` 与 `admission_records` 两个不可变视图。前者遵守通用 OA form/status 配置；后者固定接纳 completed + in-progress，不受通用 status filter 污染。任一 form 读取失败或保留期内 status/identity 无法稳定判定时整批 fail-closed，不得提交部分集合。合法 in-progress 草稿允许未填写 amount/applicant/reason，仍按稳定 identity 进入 admission，空金额持久化为 `NULL`；保留期内 completed 缺既有必填业务字段仍 fail-closed |
 | OA sync event | `job.outbox_events(event_type='oa.sync')` / runtime worker | 手动同步、附件解析版本变化和 projection 版本变化都必须入 durable queue；HTTP 进程不得 inline sync 或自行轮询 Mongo |
 | OA attachment/import | OA attachment services | 识别结果必须审计和可追踪 |
@@ -41,7 +48,9 @@
 | OA projection rows | canonical repositories | 带 source version；完成态 workflow status 由 OA projection边界统一归一/识别，必须兼容 canonical `completed` 和历史完成态别名（如 `已完成`、`approved`、`2`），下游 read model 不得各自实现完成态判断。日常报销每个 schedule item 必须生成稳定 `expense_item_id=父OA: item:row_index:fingerprint`，保留原 OA source/row index，并分别保真保存来源 `feeContent -> fee_content` 与 `detailCostStatement -> fee_description`；既有 `expense_content` 继续按 `fee_content / fee_description / parent notes` 首个非空值兼容成本统计等现有消费者。附件证据的 `source_expense_item_id` 必须显式绑定到该项；不得用金额或项目名推断。repository 以业务列与规范 JSON 的 `IS DISTINCT FROM` 判定真实变化；相同 snapshot 不更新 `app.oa_applications.updated_at`，不重写 item/attachment。snapshot output 保留 change summaries 供审计/诊断，但 repository 和 sync service 均不据此 enqueue 任何页面 refresh。 |
 | OA sync status/run facts | AppHealth/AppStatus/operations dashboard | `app.oa_sync_runs(sync_type='oa_projection')` 是每次 Mongo/projection run 的事实源；成功、失败都必须落 run，失败不得提交部分 projection/snapshot。`job.outbox_events` 和 worker heartbeat 表示 refreshing/error，不得使用进程内内存状态或行级 `app.oa_applications.synced_at` 覆盖运行事实 |
 | in-progress attachment metadata | OA pending admission | 当前只传递原始/上下文化文件元数据，不执行附件证据解析、发票识别或 OCR，不产生 artifact/evidence/invoice。未来 OCR 必须作为独立版本化链路设计，不得在本同步热路径内隐式启用 |
-| OA session/permission payload | frontend session | 不泄露 secret |
+| OA identity payload | frontend session | canonical username + 信息性 roles/permissions，不泄露 secret；normalized APP tier 来自独立 ACL evaluator |
+| Dedicated role assignments | OA `sys_user_role` | 只替换三个专用 role members；menu/role/binding、业务 role/member 与其他 menu 零写 |
+| Cleanup/read-back/rollback evidence | root-owned release artifact | exact target counts/hashes/fingerprints；不含 raw IDs、业务 role key、token、密码、DSN 或非受保护用户名 |
 | Attachment invoice result | invoice/ETC/input usage modules | 经 service 边界传递 |
 | ETC OA form attachment value | OA form draft | 同一规范化引用同时写入 `response.data` 与 `response.extra.filePath`；历史错误 absolute 引用只能由受控 dry-run/backup/CAS repair 操作修改，不重新提交 OA、不改金额、流程或附件成员 |
 | OA source alias canonicalization | formal matching、Workbench relation alignment、object identity audit / downstream duplicate classifier | 附件来源引用先去掉 `:item:` 子项后缀，再以父 OA 自身显式 alias 归一到 canonical OA row id；原始 `source_expense_item_id` 保留在发票 canonical fact。页面只在同一正式 relation 内按显式 alias + 唯一 `source_expense_row_index` 映射 canonical item id；冲突或缺失保持父 OA 级证据 |
@@ -61,6 +70,8 @@
 | 层 | 文件或目录 |
 | --- | --- |
 | Auth/session | `backend/src/fin_ops_platform/app/auth.py`、`web/src/features/session/api.ts` |
+| Menu projection | `backend/src/fin_ops_platform/services/oa_role_sync_service.py`、`backend/src/fin_ops_platform/tools/settings_access_control_preflight.py` |
+| Controlled cleanup | `deploy/oa/fin_ops_role_binding.mysql.sql`、`deploy/oa/bin/finops-deploy-control.sh` |
 | Adapter/projection | `mongo_oa_adapter.py`、`oa_projection_sync.py`、`postgres_repositories/oa_projection.py`、`runtime_worker_registry.py` |
 | OA services | `oa_identity_service.py`、`oa_manual_import_service.py`、`oa_attachment_invoice_service.py`、`oa_applicant_credentials.py`、`target_oa_applicant_token_provider.py` |
 | Related routes | `routes_oa_pending_payments.py`、`routes_etc.py`、`routes_input_invoice_usage_oa_reverse.py`、`server.py` |
@@ -69,9 +80,9 @@
 
 ## 依赖方向
 
-- 允许依赖：external adapter, credential repository, access control service。
+- 允许依赖：external adapter、credential repository、Settings normalized ACL snapshot。
 - 必须通过：OA adapter/service boundary。
-- 禁止绕过：业务页面直接查 OA Mongo；service 直接读取 HTTP cookie/header。
+- 禁止绕过：业务页面直接查 OA Mongo；service 直接读取 HTTP cookie/header；OA role/permission/menu 反向成为 APP authority；runtime broad cleanup。
 
 ## 测试与验证
 
@@ -80,12 +91,16 @@
 - `tests/test_oa_manual_import_api.py`
 - `tests/test_oa_pending_payment_api.py`
 - `tests/test_target_oa_applicant_token_provider.py`
+- `tests/test_oa_role_sync_service.py`
+- `tests/test_settings_access_control_preflight.py`
+- `tests/test_deploy_oa_script.py`
 
 ## 当前缺口和删除条件
 
 - OA token/credential 变更必须同步 permissions/security docs。
 - sync service 的多次 list/month 扫描、adapter fingerprint polling、queue/search/matching collaborators 与 downstream fan-out 已删除；架构 guard 禁止恢复第二套 Mongo 扫描、部分结果 fallback 或混合变化集合 fan-out。
 - ACL role sync 输入只允许 settings canonical snapshot；输出仅为 OA `finops_read_export`、`finops_full_access`、`finops_admin` assignments。它不写 PostgreSQL、不解析 HTTP、不决定权限。
+- disabled/missing/selector/menu/role/binding drift 和 connect/read/write timeout 必须在 runtime mutation 前失败。唯一允许的历史修复是 deployment 对 approved exact non-dedicated bindings 的 cleanup/read-back/rollback；禁止删除业务 role/member、其他 menu/binding 或任何宽目标。
 - protected admin 固定为 `YNSYLP005`；generic settings、semantic no-op 和失败的输入校验不得触发 OA executor。
 
 ## Canonical facts ownership

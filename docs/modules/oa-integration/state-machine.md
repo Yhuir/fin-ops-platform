@@ -23,10 +23,10 @@
 | 状态 | 触发 | 允许行为 | UI/API contract |
 | --- | --- | --- | --- |
 | `loading` | 前端启动请求 `/api/session/me` | 不渲染业务页面 | `SessionGate` loading |
-| `allowed_read_export_only` | OA 有 `finops:app:view`，app tier 只读导出 | 查询、导出 | 写入按钮隐藏/禁用；API mutation `403 permission_denied` |
-| `allowed_full_access` | app 全操作用户 | 普通业务写入 | admin-only 设置仍禁用 |
-| `allowed_admin` | 管理员 | 账户、凭据、数据重置、App Health 高风险入口 | 仍需二次确认和密码复核 |
-| `forbidden` | 无 OA 权限或不在 app allowed list | 无业务访问 | `/api/session/me` allowed false；业务 API 403 |
+| `allowed_read_export_only` | canonical Settings ACL tier 为 `read_export_only` | 查询、导出 | 写入按钮隐藏/禁用；API mutation `403 permission_denied` |
+| `allowed_full_access` | canonical Settings ACL tier 为 `full_access` | 普通业务写入 | admin-only 设置仍禁用 |
+| `allowed_admin` | canonical username 精确为固定 `YNSYLP005` | 账户、凭据、数据重置、App Health 高风险入口 | 仍需二次确认和密码复核 |
+| `forbidden` | 非管理员缺席 canonical ACL，或 ACL provider fail closed | 无业务访问 | OA role/permission/menu 即使存在也不改变 denied；`/api/session/me` allowed false，业务 API 403 |
 | `expired_or_unavailable` | token 过期、OA userInfo 超时/失败 | retry / 重新登录 OA | 前端 error/expired，不渲染业务页面 |
 
 ## OA Sync / Projection Worker 状态
@@ -111,15 +111,30 @@
 
 ## ACL role sync 状态
 
-| 状态 | 行为 |
-| --- | --- |
-| `not_called` | generic settings、ACL no-op、权限/DTO 失败 |
-| `target_applied` | normalized full/read/admin assignments 一次性写 OA |
-| `committed` | settings ACL 与 audit 随后原子提交 |
-| `compensated` | DB/audit 失败后 previous assignments 最多恢复一次 |
-| `inconsistent` | compensation 失败；停止自动继续并人工核对 DB/OA/session |
+| 状态 | 触发/行为 | 下一状态或结果 |
+| --- | --- | --- |
+| `not_called` | generic settings、ACL no-op、权限/DTO 失败 | 零 OA I/O |
+| `target_validating` | 锁定唯一 `finops:app:view` menu、三个唯一专用 role 和 exact 三 binding | exact → `target_applied`；disabled/missing/drift/timeout → rollback + 502 |
+| `target_applied` | 只替换三个专用 role members；业务 role/member、menu/binding 零写 | PostgreSQL ACL/audit commit |
+| `committed` | Settings ACL 与 durable audit 原子提交 | success |
+| `compensating` | target applied 后 PostgreSQL/audit 失败 | previous snapshot 最多恢复一次 |
+| `compensated` | previous assignments read-back 成功 | persistence failure，未提交新 ACL |
+| `inconsistent` | compensation、read-back 或 commit outcome 无法确认 | 503；停止自动继续并人工核对 DB/OA/session |
 
 该同步是低频同步 I/O，不新增 outbox、worker、read model 或缓存。
+
+## Deployment exact cleanup / rollback 状态
+
+| 状态 | 合同 |
+| --- | --- |
+| `preflight_blocked` | disabled/missing、wrong selector、menu/role/member/env/identity/fingerprint drift；零写并回审批 gate |
+| `preflight_exact` | selector/menu/三 role/三 binding/members 全部 exact，`eligible=true`，无需 cleanup |
+| `cleanup_approved` | 唯一 drift 为 artifact 中 salted non-dedicated fixed-menu binding targets；approved before-image/SHA-256 未漂移 |
+| `cleanup_applied` | 仅删除 exact targets，三 dedicated binding、业务 role/member 和其他 menu/binding fingerprint 不变，after-image read-back 成功 |
+| `cleanup_rolled_back` | 候选失败后用同一 before-image 恢复 exact rows并 read-back，之后才允许恢复 ACL-safe previous release |
+| `maintenance` | cleanup/restore/read-back/capability 任一失败；禁止启动旧 vulnerable binary，只能重新审批/forward repair |
+
+fresh OA menu 验收只接受角色投影后的新 `/system/menu/getRouters` 或新 shell session；旧 DOM 不构成状态事实。
 
 | 状态 | 含义 | 页面/API 要求 |
 | --- | --- | --- |
@@ -137,3 +152,4 @@ facts、audit 和必要领域任务。它们不触发已退役页面 read-model 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
 | 2026-06-11 | 首轮测试闭环补齐 OA 集成状态机 | session、OA sync、凭据、进项 OA 反提、ETC OA 草稿、read model 状态 | `PYTHONPATH=backend/src python3 -m unittest ... -v`、`cd web && npm test -- --run ...`、`bash scripts/verify.sh docs` |
+| 2026-08-02 | 收敛 canonical ACL、fixed-menu 三角色 runtime projection 与 deployment exact cleanup/rollback | OA identity、APP authorization、菜单可见性和发布证据责任分离 | `tests.test_oa_role_sync_service`、`tests.test_settings_access_control_preflight`、`tests.test_deploy_oa_script`、`tests.test_permissions_write_entry_inventory` |

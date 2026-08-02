@@ -1,542 +1,129 @@
 # OA 集成架构
 
-日期：2026-04-07
+日期：2026-08-02
 
-> 注：本文档现已升级到 `2026-04-07` 的权限分层口径。  
-> 旧的“只有单一 `finops:app:view` 就够了”的方案，只能作为 OA 接入第一阶段的历史背景，不能再作为当前真实执行标准。
+本文记录当前 OA 身份、菜单投影和 APP 授权合同。历史上由 `finops:app:view`、OA role/permission 或环境名单直接授予 APP 访问的方案已经退役，不能作为实现、测试或运维依据。
 
-## 1. 目标
+## 系统边界
 
-将当前 `fin-ops-platform` 作为一个受控财务子系统接入现有 OA：
+`fin-ops-platform` 以 OA 同域 iframe 子系统运行：
 
-- 在 OA 页面体系下打开，不单独暴露一套登录页
-- 直接复用 OA 现有登录态
-- 只对少数有权限账户可见
-- 未授权用户即使手工输入地址，也不能访问页面和 API
+- OA 前端路径：`/fin-ops/`
+- APP API 路径：`/fin-ops-api/`
+- OA 登录态：`Admin-Token`，由前端作为 Bearer token 传给 APP API
+- OA 身份接口：`/system/user/getInfo`
+- OA 动态菜单接口：`/system/menu/getRouters`
 
-本方案基于真实 OA 源码分析得出，不是抽象推测：
+OA identity adapter 只认证 token 对应的 canonical username，并保留 display name、department、roles 和 permissions 作为信息字段。APP 不自建登录页，也不信任前端自报 username；OA roles/permissions 不参与 APP tier 决策。
 
-- OA 前端：`/Users/yu/Desktop/sy/smart-oa-ui`
-- OA 后端：`/Users/yu/Desktop/sy/smart_oa`
+## 四个独立责任层
 
-## 2. 结论
+| 层 | Owner | 事实与责任 | 明确不负责 |
+| --- | --- | --- | --- |
+| OA identity | `OAIdentityService` / `auth.py` | 验证 token，取得 `sys_user.user_name` canonical spelling | 不授予 APP tier |
+| APP authorization | `AccessControlService` + Settings canonical ACL | 固定 `YNSYLP005` admin；其他账号按 ACL `full_access` / `read_export_only`，缺席即 denied | 不读取 OA role/permission/env 作为 fallback |
+| OA menu projection | `OARoleSyncService` | 把同一 canonical ACL 结果投影成一个固定菜单的三个专用角色成员 | 不写 APP ACL，不决定 API 权限 |
+| Deployment cleanup | preflight collector + deploy control/SQL | 只按 approved before-image 清理 fixed menu 的历史 non-dedicated bindings，并提供 read-back/rollback | 不做 runtime member sync，不宽删业务 role/member/menu |
 
-这个功能可行，而且可行性高。
+菜单可见性、前端 `SessionGate` 和后端 direct API denial 是独立强制层，但必须投影同一 canonical ACL 结果。菜单可见不等于 APP 已授权；菜单暂时可见的 denied 用户仍必须被 APP session/API 拒绝。
 
-原因有三个：
+## 唯一 APP 授权事实源
 
-1. OA 已经有现成登录体系  
-   OA 前端使用 `Admin-Token` cookie 保存 token，并通过 `Authorization: Bearer ...` 调接口。
+- `YNSYLP005` 是固定 protected administrator。
+- `/settings` 的专用 ACL API 是唯一人工权限入口。
+- 非管理员只允许 `full_access` 或 `read_export_only`；账号不在 ACL 中派生为 `denied`。
+- username 等值与去重使用 casefold comparison key，对外及 OA assignment 保留 `sys_user.user_name` canonical spelling。
+- 每次非管理员判断最多读取一次 canonical ACL snapshot；缺失、格式错误或 provider 失败全部 fail closed。
+- OA identity cache 只缓存身份信息，不缓存 APP access decision；ACL 删除后下一次 session/API 判断立即 denied。
+- `FIN_OPS_ALLOWED_USERNAMES`、`FIN_OPS_ALLOWED_ROLES`、`FIN_OPS_READONLY_EXPORT_USERNAMES` 已退役，存在即阻断 release，不能作为 fallback。
 
-2. OA 已经有现成用户信息与权限体系  
-   当前用户信息通过 `/system/user/getInfo` 获取；菜单通过 `/system/menu/getRouters` 动态下发。
+`FIN_OPS_OA_REQUIRED_PERMISSION` 必须精确为 `finops:app:view`，但它只属于 OA integration：用于定位唯一 `财务运营平台` menu。它不能授予 APP access，也不能替代 Settings ACL。
 
-3. OA 前端已经支持“内链 iframe 页面”  
-   可直接把你现在的 app 作为一个页面嵌入 OA，不需要先把 React 重写成 Vue 子页面。
+## OA fixed-menu projection
 
-## 3. 真实代码依据
-
-### 3.1 OA 登录态
-
-OA 前端 token 存储位置：
-
-- `/Users/yu/Desktop/sy/smart-oa-ui/src/utils/auth.js`
-
-关键点：
-
-- cookie key：`Admin-Token`
-- token 不是 HttpOnly，由前端 JS 可读
-
-OA 请求自动带 token：
-
-- `/Users/yu/Desktop/sy/smart-oa-ui/src/utils/request.js`
-
-关键点：
-
-- 每次请求自动加 `Authorization: Bearer ${token}`
-
-### 3.2 OA 当前用户与权限
-
-OA 前端获取当前用户信息：
-
-- `/Users/yu/Desktop/sy/smart-oa-ui/src/api/login.js`
-
-接口：
-
-- `GET /system/user/getInfo`
-
-OA 后端返回当前用户、角色、权限：
-
-- `/Users/yu/Desktop/sy/smart_oa/smart-oa-modules/smart-oa-system/src/main/java/com/jovefast/system/controller/SysUserController.java`
-
-返回内容包括：
-
-- `user`
-- `roles`
-- `permissions`
-
-### 3.3 OA 动态菜单
-
-OA 前端动态菜单来源：
-
-- `/Users/yu/Desktop/sy/smart-oa-ui/src/api/menu.js`
-- `/Users/yu/Desktop/sy/smart-oa-ui/src/store/modules/permission.js`
-
-接口：
-
-- `GET /system/menu/getRouters`
-
-OA 后端菜单接口：
-
-- `/Users/yu/Desktop/sy/smart_oa/smart-oa-modules/smart-oa-system/src/main/java/com/jovefast/system/controller/SysMenuController.java`
-
-### 3.4 OA 已支持 iframe 内链
-
-OA 内链 iframe 组件：
-
-- `/Users/yu/Desktop/sy/smart-oa-ui/src/layout/components/InnerLink/index.vue`
-
-菜单服务对 http(s) 地址会生成 `InnerLink` 组件：
-
-- `/Users/yu/Desktop/sy/smart_oa/smart-oa-modules/smart-oa-system/src/main/java/com/jovefast/system/service/impl/SysMenuServiceImpl.java`
-
-这意味着：
-
-- 可以直接在 OA 菜单里新增一个“财务运营平台”入口
-- 入口指向部署后的 `fin-ops-platform` 页面地址
-- OA 内部会以 iframe 方式承载
-
-### 3.5 OA 网关已做 token 校验
-
-OA gateway 鉴权过滤器：
-
-- `/Users/yu/Desktop/sy/smart_oa/smart-oa-gateway/src/main/java/com/jovefast/gateway/filter/AuthFilter.java`
-
-关键点：
-
-- 校验 `Authorization`
-- 解析 JWT
-- 查 Redis 会话
-- 向下游注入：
-  - 用户 ID
-  - 用户名
-  - user key
-
-这说明 OA 已有完整的统一鉴权链。
-
-## 4. 推荐集成架构
-
-推荐采用：
-
-- `OA 菜单 + iframe 页面承载`
-- `fin-ops-platform 独立前后端继续部署`
-- `与 OA 同域部署`
-- `app 后端复用 OA token 识别当前用户`
-- `权限同时在 OA 菜单层和 app 后端层生效`
-
-### 4.1 为什么不建议直接塞进 OA 前端代码里
-
-不建议把当前 React app 直接重写进 OA Vue 前端，原因是：
-
-- 当前 app 规模已经不小
-- React 页面、状态和 API 契约已独立成型
-- 强行迁入 OA 前端会显著增加重构成本
-- 后续迭代会和 OA 主系统发布周期强耦合
-
-因此第一阶段最稳的方式是：
-
-- 逻辑独立
-- 登录复用
-- 页面挂载到 OA 菜单里
-
-## 5. 目标部署形态
-
-推荐部署路径：
-
-- OA 主系统：`https://oa.company.com/`
-- fin-ops 前端：`https://oa.company.com/fin-ops/`
-- fin-ops 后端：`https://oa.company.com/fin-ops-api/`
-
-然后在 OA 菜单里配置一个内链地址，例如：
-
-- `https://oa.company.com/fin-ops/`
-
-这样具备几个优势：
-
-- 同域，cookie 可直接共享
-- iframe 无跨域限制问题
-- token 读取更简单
-- 部署和运维边界仍然清楚
-
-## 6. 登录复用方案
-
-## 方案选择
-
-本方案推荐：
-
-- 前端复用 OA 的 `Admin-Token`
-- 后端不自己发 token
-- 后端通过 OA token 获取当前用户并校验权限
-
-### 6.1 前端
-
-`fin-ops-platform` 前端新增一层 OA 会话适配：
-
-- 从 cookie 读取 `Admin-Token`
-- 所有 API 请求自动加：
-  - `Authorization: Bearer ${token}`
-
-当前 app 不再显示自己的登录页。
-
-### 6.2 后端
-
-Python 后端新增鉴权中间层：
-
-1. 从请求头读取 `Authorization`
-2. 使用该 token 请求 OA 的：
-   - `/system/user/getInfo`
-3. 获取：
-   - 当前用户
-   - 角色
-   - 权限
-4. 判断是否有访问 `fin-ops-platform` 的权限
-5. 无权限时返回 `403`
-
-### 6.3 为什么后端不能只信前端
-
-不能只在前端判断“这个用户看不看得见”，因为那样用户手工输入 API 地址仍然能访问数据。
-
-所以必须：
-
-- 前端隐藏
-- 后端强制拦截
-
-## 7. 可见性与权限模型
-
-你的需求是：
-
-- 只有少数账户可见
-- 其他账户完全不可见
-
-推荐权限模型：
-
-### 7.1 两层权限模型
-
-接入 OA 后，权限不再只有“能不能进”这一层，而是拆成两层：
-
-1. **可见性 / 访问层**
-   - `在 OA 系统看得见并可访问此 app`
-   - `在 OA 系统看不见且访问不了此 app`
-2. **操作能力层**
-   - `所有操作均可`
-   - `只可看和只可导出`
-
-### 7.2 OA 侧可见性
-
-OA 菜单层仍然负责“看得见 / 看不见”：
-
-- 有访问权限的账户：看得见菜单，并能进入 app
-- 无访问权限的账户：在 OA 中看不见菜单
-
-建议继续保留一个菜单可见性权限，例如：
-
-- `finops:app:view`
-
-并新增菜单：
-
-- 名称：`财务运营平台`
-- 归属：建议挂在 `财务管理`
-- 类型：菜单
-- 路径：部署后的 `https://oa.company.com/fin-ops/`
-- 组件：由 OA 内链逻辑处理
-- 权限标识：`finops:app:view`
-
-### 7.3 app 后端二次校验
-
-`fin-ops-platform` 后端对每个 API 继续校验两件事：
-
-1. 当前用户是否具备 app 访问资格
-2. 当前用户属于哪种操作能力等级
-
-也就是说：
-
-- 无 app 访问资格：
-  - 页面 `403`
-  - API `403`
-- 有 app 访问资格，但只有 `只可看和只可导出`：
-  - 允许查看、搜索、导出
-  - 禁止导入、确认关联、异常处理、忽略、设置修改等写操作
-
-### 7.4 推荐权限结构
-
-推荐把后端实际判断口径整理成：
-
-- `finops:app:view`
-  - 负责 OA 菜单可见性与基础访问资格
-- `finops:app:operate`
-  - 负责是否拥有“所有操作均可”
-- `finops:app:admin`
-  - 负责是否可管理访问账户与权限模型
-
-如果 OA 现阶段不方便一次性加全三种权限，也可以采用：
-
-- OA 只保留 `finops:app:view`
-- app 自己维护：
-  - `allowed_usernames`
-  - `readonly_export_usernames`
-  - `admin_usernames`
-
-当前正式执行标准最少要确保：
-
-- `YNSYLP005` 是唯一管理员
-- 只读用户不能触发任何写操作
-- 非白名单用户看不见且进不来
-- OA 菜单可见性必须和 `allowed_usernames` 同步
-
-### 7.5 `YNSYLP005` 的特殊角色
-
-当前业务要求里，只有 OA 账户 `YNSYLP005` 可以管理以下内容：
-
-- 哪些账户可访问此 app
-- 这些可访问账户属于：
-  - `所有操作均可`
-  - `只可看和只可导出`
-
-因此，`YNSYLP005` 在系统中需要被视为唯一初始管理员，而且是当前唯一允许管理权限的账户。
-
-建议：
-
-- OA 侧给 `YNSYLP005` 分配最高级别 app 权限
-- app 后端再额外校验 `YNSYLP005` 或管理员名单
-- 关联台 `设置` 中只有管理员能看到“访问账户管理”
-
-### 7.6 设置页中的账户管理能力
-
-关联台 `设置` 应新增/重构为：
-
-- `可访问账户`
-  - 这些账户在 OA 中看得见并可访问此 app
-- `只读导出账户`
-  - 这些账户属于“只可看和只可导出”
-- `全操作账户`
-  - 这些账户属于“所有操作均可”
-- `管理员账户`
-  - 第一阶段固定仅 `YNSYLP005`
-
-后端保存后，真实环境必须同步两个方向：
-
-1. app 自己的访问控制数据
-2. OA 菜单可见性所依赖的角色/权限绑定
-
-建议把 OA 侧角色固定成三类：
+OA 中只允许一个 `permission=finops:app:view` 的 menu，且该 menu 的 role binding key exact set 必须为：
 
 - `finops_read_export`
 - `finops_full_access`
 - `finops_admin`
 
-同步规则：
+三个 role key、menu 和三条 dedicated binding 都必须唯一。任何缺失、重复或额外 non-dedicated binding 都是 drift。
 
-- `allowed_usernames` 之外的账户：
-  - 从 OA 这三类角色全部移除
-- `readonly_export_usernames`：
-  - 绑定到 `finops_read_export`
-- 全操作账户：
-  - 绑定到 `finops_full_access`
-- `YNSYLP005`：
-  - 绑定到 `finops_admin`
+真实 ACL 变化在一个 OA transaction 内先锁定并验证 fixed selector、唯一 menu、三个唯一专用 role、exact 三 binding 且无 non-dedicated binding。全部验证在任何 DML 前完成。通过后 runtime 只替换三个专用 role 的 `sys_user_role` members：
 
-### 7.4 需要保护的范围
+- `read_export_only` → `finops_read_export`
+- `full_access` → `finops_full_access`
+- 固定 `YNSYLP005` → `finops_admin`
 
-必须全部拦住，不只工作台：
+runtime 不创建或删除 menu/role/binding，不修改业务 role、业务 role members、其他 menu 或其他 binding。disabled、missing、selector/role/binding drift、连接/读/写 timeout 都必须 rollback/fail closed，不能返回保存成功。
 
-- 关联台
-- 搜索
-- 税金抵扣
-- 成本统计
-- 导出
-- 设置
-- 导入
-- 任意 `/api/*`
+## Settings persistence and compensation
 
-## 8. 页面集成方案
+- generic settings save 与 ACL semantic no-op 都是零 OA I/O。
+- 真实变化先应用目标 OA members，再以同一 Settings critical section 提交 PostgreSQL canonical ACL 与 durable audit。
+- 目标 OA 失败返回 `502 oa_role_sync_failed`，PostgreSQL/audit 不写入。
+- OA target 已应用但 PostgreSQL 失败时，最多使用 previous snapshot 补偿一次。
+- 补偿成功返回持久化失败；补偿或 commit outcome 无法确认返回 `503 access_control_sync_inconsistent`，停止自动继续并要求人工核对。
 
-## 第一阶段推荐做法
+该链路不新增 outbox、worker、read model、Redis 或 permission cache。
 
-### OA 页面侧
+## Deployment-owned exact cleanup
 
-在 OA 里新增一个菜单入口，使用现有 `InnerLink` 承载当前 app。
+Runtime 发现 non-dedicated fixed-menu binding 会拒绝变更，不会自行清理。部署 preflight 分开报告：
 
-优点：
+- `eligible=true`：selector、menu、roles、bindings、members、env 全部 exact；
+- `cleanup_eligible=true`：唯一 drift 只是 fixed menu 上已收集的 non-dedicated bindings；
+- 其他 disabled、missing、selector、role、member、env、identity 或 fingerprint drift：阻断且零写。
 
-- 实现快
-- 不需要改动 OA 主壳体结构
-- 发布风险低
-- 登录态天然复用
+可清理目标必须来自 release-bound、salted、root-owned `0600` preflight artifact。artifact 记录 counts、rowset hashes、before/after/rollback fingerprints 和 SHA-256，不保存 token、DSN、密码、raw role/menu ID、业务 role key或非受保护用户名。
 
-### fin-ops 页面侧
+清理 transaction 只删除 artifact 指定的 exact non-dedicated binding，并同时证明 fixed menu、三专用 role/binding 未漂移，业务 role/member、其他 menu/binding fingerprint 不变，且 write 后 read-back 精确匹配 approved after-image。任一不变量失败都 rollback。
 
-你的 app 需要增加：
+候选发布后失败时，release rollback 必须先用同一 approved before-image 恢复 exact rows并 read-back；恢复失败保持 maintenance，不能继续恢复旧 binary 后伪装成功。禁止 broad delete、legacy self-update 或任意手工 SQL fallback。
 
-- `session / me` 初始化接口
-- 未授权页 `403`
-- 无 token / token 失效页
-- “当前用户”上下文
+## App shell and direct access enforcement
 
-## 9. 后端改造点
+- 前端启动先请求 `/api/session/me`；`SessionGate` 在 loading/forbidden/expired/error 时不挂载业务 route。
+- 前端只消费 normalized `allowed`、`access_tier` 和 capabilities；OA roles/permissions 只展示为信息。
+- 后端 global route policy 与模块自有 guard 消费同一 ACL outcome。直接输入 `/fin-ops/` 或调用受保护 `/fin-ops-api/*` 不能绕过授权。
+- `read_export_only` 只能查询和导出；业务 mutation 返回 `403 permission_denied`。
+- `YNSYLP005` 才能调用 ACL、App Health、OA credentials、data reset 等 admin-only control plane。
 
-`fin-ops-platform` 后端需要新增一层 OA 安全适配：
+OA 菜单撤销必须用角色投影后的新 `/system/menu/getRouters` 响应或新 OA shell session 验收；刷新前的旧浏览器 DOM 不是证据。APP denial 则以下一次 fresh APP session/direct API response 为边界，不等待 OA shell 刷新。
 
-### 9.1 新增能力
+## Release preparation and evidence
 
-- 读取 Bearer token
-- 获取 OA 当前用户信息
-- 解析 roles / permissions
-- 请求级缓存或短 TTL 缓存
-- 统一鉴权失败返回
+当前仓库已经实现 release-prep 合同，但本文不声称生产已部署：
 
-### 9.2 建议新增接口
+1. 生成并人工批准 candidate-bound read-only preflight artifact及 SHA-256。
+2. 必要时按 approved before-image 执行 exact cleanup。
+3. 通过 manual-root、hash-pinned、同文件系统原子流程 bootstrap deploy-control helper；release 禁止 self-update。
+4. just-in-time 重跑 remote preflight，任一 hash/fingerprint/identity drift 回到审批 gate。
+5. current runtime checkpoint 通过后 quiesce API/workers，再执行 migration/CHECK 和 ACL-safe candidate。
+6. candidate 完成 T+0/T+60/T+300、readiness、queue、audit 与 evidence/hash gate。
+7. post-deploy 使用 fresh admin/representative tokens，逐档证明 full → read → denied、direct API、fresh OA router、三专用 role exact set、non-target invariants、audit 和 finally restore/read-back。
 
-- `GET /api/session/me`
+任何 preflight、cleanup、rollback、router/session restore 或 evidence hash 失败都回审批 gate。previous release 缺少同等 ACL-safe capability/fingerprint 时保持 maintenance 并 forward repair，不能启动 vulnerable binary。
 
-返回：
+生产操作、secret 传递、helper bootstrap 和完整命令以 `../../deploy/oa/README.md` 为唯一 runbook。token 只能经 stdin/受控 loader 传递，不得进入 argv、日志、release 或 artifact。
 
-- 当前用户名
-- 显示名
-- 角色
-- 权限
-- `allowed = true/false`
+## 当前证据与生产边界
 
-作用：
+已完成的本地自动化证据：
 
-- 前端初始化页面时确认当前会话是否可访问本系统
+- backend identity/ACL/direct API/role projection/inventory：`tests/test_session_api.py`、`tests/test_auth_guard.py`、`tests/test_oa_role_sync_service.py`、`tests/test_permissions_write_entry_inventory.py`
+- frontend SessionGate/17-route/restore：`web/src/test/SessionGate.test.tsx`、`web/src/test/PageRouteHost.test.tsx`、`web/e2e/permissions-role-matrix.spec.ts`
+- deploy preflight/exact cleanup/rollback：`tests/test_settings_access_control_preflight.py`、`tests/test_deploy_oa_script.py`
 
-### 9.3 建议新增模块
+本地证据不证明真实 OA schema、network、fresh router、同域 cookie 或 production restore。production 只有在 candidate-bound preflight、cutover、post-deploy artifact/hash 和人工验收全部通过后才可声明完成。
 
-- `backend/src/fin_ops_platform/services/oa_identity_service.py`
-- `backend/src/fin_ops_platform/services/access_control_service.py`
-- `backend/src/fin_ops_platform/app/auth.py`
+## 代码与文档 owner
 
-### 9.4 建议环境变量
-
-- `FIN_OPS_OA_BASE_URL`
-- `FIN_OPS_OA_USER_INFO_PATH`
-- `FIN_OPS_OA_PASSWORD_VERIFY_PATH`
-- `FIN_OPS_OA_REQUIRED_PERMISSION`
-- `FIN_OPS_OA_SESSION_CACHE_TTL_SECONDS`
-
-默认：
-
-- `FIN_OPS_OA_USER_INFO_PATH=/system/user/getInfo`
-- `FIN_OPS_OA_PASSWORD_VERIFY_PATH=/system/user/profile/updatePwd`
-- `FIN_OPS_OA_REQUIRED_PERMISSION=finops:app:view`
-
-## 10. 前端改造点
-
-`fin-ops-platform` 前端需要新增：
-
-- 统一 token 读取
-- `session/me` 启动检查
-- 未授权页
-- 会话过期处理
-
-### 10.1 不再需要的能力
-
-- 不做自己的登录页
-- 不维护自己的用户名密码体系
-
-### 10.2 需要新增的能力
-
-- `web/src/features/session/api.ts`
-- `web/src/contexts/SessionContext.tsx`
-- `web/src/components/auth/ForbiddenPage.tsx`
-- `web/src/components/auth/SessionGate.tsx`
-
-## 11. OA 侧需要改的点
-
-需要改两处仓库：
-
-### 11.1 `smart-oa-ui`
-
-- 新增菜单入口可见性验证
-- 菜单配置挂到现有导航里
-- 如需要，优化 iframe 页面高度、自适应和关闭策略
-
-### 11.2 `smart_oa`
-
-- 新增菜单权限项 `finops:app:view`
-- 给特定角色/用户授权
-- 如部署需要，可补一个更轻量的“当前用户信息”接口给 app 调用
-
-说明：
-
-当前严格来说，`/system/user/getInfo` 已够用，不一定必须再写新接口。
-
-## 12. 风险与控制点
-
-### 风险 1：不同域部署
-
-如果 app 和 OA 不同域：
-
-- token 共享会复杂
-- iframe 会遇到跨域约束
-- 会话判断和导出都更麻烦
-
-控制建议：
-
-- 必须优先争取同域部署
-
-### 风险 2：只做菜单隐藏，不做后端校验
-
-这会导致：
-
-- 用户手工访问 URL 仍能看到系统
-
-控制建议：
-
-- 后端所有 API 做强制鉴权
-
-### 风险 3：Python 后端完全依赖前端传用户名
-
-这会导致：
-
-- 身份可伪造
-
-控制建议：
-
-- 后端只信 OA token 校验结果，不信前端自报身份
-
-## 13. 推荐实施顺序
-
-1. 给 `fin-ops-platform` 增加 OA token 鉴权与 `session/me`
-2. 在 app 后端加权限校验和 `403`
-3. 在 OA 新增菜单与权限码 `finops:app:view`
-4. 把 app 以前端子路径方式部署到 OA 域名下
-5. 联调 iframe、高度、自适应和登出失效
-6. 做全链路验收
-
-## 14. 验收标准
-
-以下全部满足才算完成：
-
-1. OA 登录后，无需再次登录即可打开当前 app
-2. 有权限账户能在 OA 菜单中看到入口
-3. 无权限账户在 OA 菜单中完全看不到入口
-4. 无权限账户直接访问 app URL 时返回 `403`
-5. 所有 `/api/*` 都有权限保护
-6. 登出 OA 后，再访问 app 会失效
-7. 关联台、税金抵扣、成本统计、导出均在授权链路下正常工作
-8. 只读导出用户无法执行任何写操作
-9. 只有 `YNSYLP005` 能管理访问账户权限
-10. app 配置与 OA 菜单可见性同步后，不出现“看得见但进不去”或“进得去但看不见菜单”的不一致
-
-## 15. 对应文档和部署资产
-
-- 产品口径：`../product-specs/oa-integration.md`
-- 权限口径：`../product-specs/settings-and-access-control.md`
-- 部署说明：`../../deploy/oa/README.md`
-- Nginx 示例：`../../deploy/oa/nginx.fin-ops.conf.example`
-- 环境变量模板：`../../deploy/oa/env/fin-ops.common.env.example`、`../../deploy/oa/env/fin-ops.secrets.env.example`
-- 菜单 SQL 模板：`../../deploy/oa/fin_ops_menu.mysql.sql`
-- 角色绑定 SQL 模板：`../../deploy/oa/fin_ops_role_binding.mysql.sql`
-- 用户角色同步 SQL 模板：`../../deploy/oa/fin_ops_user_role_sync.mysql.sql`
-- 当前 app 架构：`../app-architecture/README.md`
+- Identity/session：`backend/src/fin_ops_platform/services/oa_identity_service.py`、`backend/src/fin_ops_platform/app/auth.py`、`web/src/features/session/api.ts`
+- APP authorization：`backend/src/fin_ops_platform/services/access_control_service.py`
+- Settings ACL command：`backend/src/fin_ops_platform/services/app_settings_service.py`
+- OA menu projection：`backend/src/fin_ops_platform/services/oa_role_sync_service.py`
+- Preflight/artifact：`backend/src/fin_ops_platform/tools/settings_access_control_preflight.py`
+- Exact cleanup/rollback：`deploy/oa/fin_ops_role_binding.mysql.sql`、`deploy/oa/bin/finops-deploy-control.sh`
+- Canonical deploy runbook：`../../deploy/oa/README.md`
+- APP runtime ownership：`../app-architecture/runtime-and-ownership.md`
