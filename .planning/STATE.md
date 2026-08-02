@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 13-15-PLAN.md
-last_updated: "2026-08-02T12:40:59.000Z"
-last_activity: 2026-08-02 -- 13-15 re-closed on exact 2298ba8c candidate; approved 13-05 production activation remains
+last_updated: "2026-08-02T18:25:27.000Z"
+last_activity: 2026-08-03 -- Completed quick task 260803-2x7 Workbench pane equal-height contract
 progress:
   total_phases: 38
   completed_phases: 11
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 Phase: 13 (settings-improvements) — EXECUTING
 Plan: 15 of 15
 Status: Ready to execute 13-05 production activation against exact 2298ba8c evidence
-Last activity: 2026-08-02 -- 13-15 re-closed on exact 2298ba8c candidate; approved 13-05 production activation remains
+Last activity: 2026-08-03 -- Completed quick task 260803-2x7 Workbench pane equal-height contract
 
 Progress: [█████████░] 14/15 plans complete; 13-05 remains
 
@@ -269,6 +269,7 @@ None yet.
 | 260729-dg6 | ETC 已提交批次 PDF 下载、历史附件恢复与 OA URL 修复 | 2026-07-29 | 0c72cae27 | [260729-dg6](./quick/260729-dg6-etc-submitted-batch-pdf-download-and-oa-/) |
 | 260729-nh8 | 关联台跨月 canonical row 预览去重并保留真实冲突阻断 | 2026-07-29 | bf429ea3e | [260729-nh8](./quick/260729-nh8-canonical-row-fail-closed/) |
 | 260729-ohq | ETC 已提交批次四张缺失成员修复、Workbench/Search 收敛与生产验证 | 2026-07-29 | 0bbeb2d4b | [260729-ohq](./quick/260729-ohq-repair-submitted-etc-batch-etc-20260720-/) |
+| 260803-2x7 | 关联台非一一对应栏位完整高度与严格一一对应 | 2026-08-03 | 12097b67f | [260803-2x7](./quick/260803-2x7-workbench-pane-equal-height/) |
 
 ## Deferred Items
 
