@@ -35,6 +35,7 @@ from fin_ops_platform.services.state_store_protocol import (
     ApplicationStateStoreProtocol,
     SettingsAccessControlCommitOutcomeUnknown,
     settings_access_control_from_payload,
+    settings_username_comparison_key,
 )
 
 DEFAULT_OA_RETENTION_CUTOFF_DATE = "2026-01-01"
@@ -346,40 +347,36 @@ class AppSettingsService:
             raise AppSettingsValidationError("invalid_access_control_request", "accounts must be an array.")
         full_access: list[str] = []
         readonly: list[str] = []
-        seen: set[str] = set()
         for account in accounts:
             if not isinstance(account, dict) or set(account) != {"username", "access_tier"}:
                 raise AppSettingsValidationError(
                     "invalid_access_control_request",
                     "Each account must contain only username and access_tier.",
                 )
-            username = str(account.get("username") or "").strip()
+            username = account.get("username")
             tier = str(account.get("access_tier") or "").strip()
-            if not username or len(username) > 128 or any(ord(character) < 32 for character in username):
-                raise AppSettingsValidationError("invalid_access_control_username", "Invalid account username.")
-            if username == PROTECTED_ADMIN_USERNAME:
-                raise AppSettingsValidationError(
-                    "protected_administrator_immutable",
-                    "The protected administrator cannot be edited.",
-                )
-            if username in seen:
-                raise AppSettingsValidationError("duplicate_access_control_username", "Duplicate account username.")
             if tier not in {"full_access", "read_export_only"}:
                 raise AppSettingsValidationError("invalid_access_control_tier", "Invalid account access_tier.")
-            seen.add(username)
             (full_access if tier == "full_access" else readonly).append(username)
-        return {
-            "allowed_usernames": [PROTECTED_ADMIN_USERNAME, *sorted(seen)],
-            "readonly_export_usernames": sorted(readonly),
-            "admin_usernames": [PROTECTED_ADMIN_USERNAME],
-            "full_access_usernames": sorted(full_access),
-        }
+        try:
+            return settings_access_control_from_payload(
+                {
+                    "readonly_export_usernames": readonly,
+                    "full_access_usernames": full_access,
+                    "admin_usernames": [PROTECTED_ADMIN_USERNAME],
+                }
+            )
+        except ValueError as exc:
+            raise AppSettingsValidationError("invalid_access_control_username", str(exc)) from exc
 
     @staticmethod
     def _access_control_memberships(access_control: dict[str, Any]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        normalized = settings_access_control_from_payload(access_control)
         return (
-            tuple(sorted(access_control.get("full_access_usernames") or [])),
-            tuple(sorted(access_control.get("readonly_export_usernames") or [])),
+            tuple(sorted(settings_username_comparison_key(name) for name in normalized["full_access_usernames"])),
+            tuple(
+                sorted(settings_username_comparison_key(name) for name in normalized["readonly_export_usernames"])
+            ),
         )
 
     @staticmethod
@@ -1529,26 +1526,7 @@ class AppSettingsService:
                     "short_name": short_name,
                 }
             )
-        admin_usernames = {PROTECTED_ADMIN_USERNAME}
-
-        allowed_usernames = set(
-            AppSettingsService._normalize_username_list(raw_payload.get("allowed_usernames"))
-        )
-        allowed_usernames.update(admin_usernames)
-
-        readonly_export_usernames = set(
-            AppSettingsService._normalize_username_list(raw_payload.get("readonly_export_usernames"))
-        )
-        readonly_export_usernames.intersection_update(allowed_usernames)
-        readonly_export_usernames.difference_update(admin_usernames)
-
-        full_access_usernames = sorted(
-            allowed_usernames.difference(readonly_export_usernames).difference(admin_usernames)
-        )
-        try:
-            access_control_version = max(1, int(raw_payload.get("access_control_version") or 1))
-        except (TypeError, ValueError):
-            access_control_version = 1
+        access_control = settings_access_control_from_payload(raw_payload)
         raw_layouts = raw_payload.get("workbench_column_layouts")
         normalized_layouts: dict[str, list[str]] = {}
         for pane_id, default_keys in DEFAULT_WORKBENCH_COLUMN_LAYOUTS.items():
@@ -1710,11 +1688,7 @@ class AppSettingsService:
             "manual_projects": manual_projects,
             "synced_projects": synced_projects,
             "bank_account_mappings": mappings,
-            "allowed_usernames": sorted(allowed_usernames),
-            "readonly_export_usernames": sorted(readonly_export_usernames),
-            "admin_usernames": sorted(admin_usernames),
-            "full_access_usernames": full_access_usernames,
-            "access_control_version": access_control_version,
+            **access_control,
             "workbench_column_layouts": normalized_layouts,
             "oa_retention": {"cutoff_date": cutoff_date},
             "oa_import": {

@@ -4,6 +4,8 @@ from dataclasses import dataclass
 import os
 from typing import Any, Literal, Protocol
 
+from fin_ops_platform.services.state_store_protocol import settings_access_control_from_payload
+
 
 OARoleTier = Literal["read_export_only", "full_access", "admin"]
 
@@ -61,9 +63,10 @@ def _positive_timeout(name: str, default: int) -> int:
 
 
 def _build_assignments_from_snapshot(snapshot: dict[str, Any]) -> list[OARoleAssignment]:
-    readonly = [str(item).strip() for item in list(snapshot.get("readonly_export_usernames") or []) if str(item).strip()]
-    full_access = [str(item).strip() for item in list(snapshot.get("full_access_usernames") or []) if str(item).strip()]
-    admin = [str(item).strip() for item in list(snapshot.get("admin_usernames") or []) if str(item).strip()]
+    normalized = settings_access_control_from_payload(snapshot)
+    readonly = normalized["readonly_export_usernames"]
+    full_access = normalized["full_access_usernames"]
+    admin = normalized["admin_usernames"]
     return [
         *[OARoleAssignment(username=item, tier="read_export_only") for item in readonly],
         *[OARoleAssignment(username=item, tier="full_access") for item in full_access],
