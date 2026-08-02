@@ -737,7 +737,7 @@ ssh -o StrictHostKeyChecking=accept-new -o ControlMaster=no finops-deploy@finops
   'sudo -n sha256sum --check /opt/fin-ops/evidence/<release>/settings-access-control-preflight.json.sha256'
 ```
 
-Preflight 必须 `eligible=true`，唯一例外是下述仅含 exact cleanup targets 的 `oa.cleanup_eligible=true`：admin session 是 `YNSYLP005/admin`；专用 bearer 是不同的非 admin identity 且初始 denied；DB ACL、root env 和 OA 三角色一致；artifact 只含 salted username/role/menu/binding hashes、counts 与 fingerprints。任何 token/identity/OA/fingerprint 漂移都重新阻断。
+Preflight 必须 `eligible=true`，唯一例外是下述仅含 exact cleanup targets 的 `oa.cleanup_eligible=true`：admin session 是 `YNSYLP005/admin`；专用 bearer 必须精确属于带 `finops:app:view` 菜单权限的 `YNSYLP006`，且 app session 初始 denied；DB ACL、root env 和 OA 三角色一致；artifact 只含 salted username/role/menu/binding hashes、counts 与 fingerprints。任何 token/identity/OA/fingerprint 漂移都重新阻断。
 
 若 fixed menu 上仍有历史 non-dedicated role binding，普通 `eligible` 保持 false，但 artifact 可单独标记
 `oa.cleanup_eligible=true`，并给出 salted exact target hashes、before/after 与 rollback fingerprint。release gate
@@ -745,8 +745,8 @@ Preflight 必须 `eligible=true`，唯一例外是下述仅含 exact cleanup tar
 或 non-target fingerprint 任一漂移都在同一事务内零写/回滚。候选后续失败时，release rollback 会先用同一 before-image
 恢复 exact rows并 read-back；rollback 失败保持 maintenance，禁止继续恢复旧 binary 后伪装成功。
 
-4. 只用 exact candidate 零重传激活：`./scripts/deploy-oa.sh --activate-existing --release-name <release>`。顺序固定为 preflight assertion → current runtime checkpoint → API/worker quiesce → 0132/CHECK → safe candidate → T+0/T+60/T+300 evidence。previous release 没有同等安全 capability 时失败保持 maintenance 并 forward repair。
-5. 激活成功后用相同双 token 运行 `settings-access-control-post-deploy`。它把专用 bearer 依次改为 full、read、denied，验证 generic save、两条直接提权攻击、AppHealth/OA credentials/data reset admin-only、OA 三角色、durable audit/request id 和 ACL GET/PUT latency，并在 finally/read-back 中恢复原 accounts/OA/denied session：
+4. 只用 exact candidate 零重传激活：`./scripts/deploy-oa.sh --activate-existing --release-name <release>`。顺序固定为 preflight assertion → current runtime checkpoint → API/worker quiesce → 执行 migration → 独立 read-back 断言 0132 已应用且 `settings_access_control_policy_shape` CHECK 已验证 → runtime sync/install → safe candidate → T+0/T+60/T+300 evidence。previous release 没有同等安全 capability 时失败保持 maintenance 并 forward repair。
+5. 激活成功后用相同双 token 运行 `settings-access-control-post-deploy`。它把 `YNSYLP006` 专用 bearer 依次改为 full、read、denied，验证 generic save、两条直接提权攻击、AppHealth/OA credentials/data reset admin-only、OA 三角色、fresh OA router 菜单可见性、durable audit/request id 和 ACL GET/PUT latency，并在 finally/read-back 中恢复原 accounts/OA/denied session：
 
 ```bash
 ./scripts/with-production-admin-token.sh --require-bearer sh -c '
@@ -757,7 +757,7 @@ ssh -o StrictHostKeyChecking=accept-new -o ControlMaster=no finops-deploy@finops
   'sudo -n sha256sum --check /opt/fin-ops/evidence/<release>/settings-access-control-post-deploy.json.sha256'
 ```
 
-post-deploy 只有 `status=pass`、restore 全 true、migration/CHECK true、三档角色和攻击矩阵全通过、ACL GET p95≤1000ms、ACL PUT max≤5000ms 才完成。restore 失败必须非零并立即人工核对 DB/OA/session。
+post-deploy 只有 `status=pass`、restore 全 true（包括 OA router 恢复为 denied 不可见）、migration/CHECK true、三档角色和攻击矩阵全通过、fresh OA router 只在 full/read 阶段可见、ACL GET p95≤1000ms、ACL PUT max≤5000ms 才完成。restore 失败必须非零并立即人工核对 DB/OA/session。
 
 ## 权限同步操作顺序
 

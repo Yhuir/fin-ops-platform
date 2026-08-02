@@ -349,6 +349,7 @@ PY
           --post-deploy \
           --release "$release" \
           --preflight-artifact "$preflight" \
+          --oa-base-url "$FIN_OPS_OA_BASE_URL" \
           --output "$artifact"
   ) || runner_status=$?
   unset admin_token bearer_token
@@ -383,6 +384,27 @@ if approved.get("release") != current.get("candidate", {}).get("release"):
 if approved.get("deployment") != current:
     raise SystemExit("settings access-control candidate or active release fingerprint drifted")
 PY
+)
+
+assert_settings_access_control_database_guard() (
+  local src="$1"
+  local release
+  release="$(basename "$(dirname "$src")")"
+  (
+    set -a
+    # shellcheck disable=SC1090
+    source "$COMMON_ENV"
+    # shellcheck disable=SC1090
+    source "$SECRETS_ENV"
+    # shellcheck disable=SC1090
+    source "$MIGRATOR_ENV"
+    set +a
+    PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}" \
+      "$API_PYTHON" -m fin_ops_platform.tools.settings_access_control_preflight \
+        --release "$release" \
+        --database-guard-only \
+        --json
+  )
 )
 
 run_settings_access_control_binding_operation() (
@@ -1952,6 +1974,7 @@ activate_release() {
   systemctl stop fin-ops.service
   stop_runtime_worker_services_for_activation
   run_schema_migrations "$src"
+  assert_settings_access_control_database_guard "$src"
   sync_python_envs "$src"
   install_runtime_worker_helper "$src"
   retire_unregistered_worker_services "$src"

@@ -17,8 +17,10 @@ from fin_ops_platform.services.postgres_connection import PostgresConnection, Po
 
 
 PROTECTED_ADMIN_USERNAME = "YNSYLP005"
+REPRESENTATIVE_BEARER_USERNAME = "YNSYLP006"
 ROLE_TIERS = ("read_export_only", "full_access", "admin")
 OA_MENU_PERMISSION = "finops:app:view"
+OA_MENU_NAME = "财务运营平台"
 ROLE_KEYS = {
     "read_export_only": "finops_read_export",
     "full_access": "finops_full_access",
@@ -77,6 +79,8 @@ def _session_fact(payload: dict[str, Any], salt: str) -> dict[str, Any]:
         "can_admin_access": payload.get("can_admin_access") is True,
         "identity_present": bool(username),
         "is_protected_administrator": username == PROTECTED_ADMIN_USERNAME,
+        "is_representative_bearer": username == REPRESENTATIVE_BEARER_USERNAME,
+        "oa_menu_permission_present": OA_MENU_PERMISSION in _strings(payload.get("permissions")),
         "http_status": int(payload.get("_preflight_http_status") or 0),
         "credential_source": str(payload.get("_preflight_credential_source") or ""),
     }
@@ -173,6 +177,8 @@ def build_report(
             admin["credential_source"] == "admin_stdin",
             bearer["identity_present"],
             not bearer["is_protected_administrator"],
+            bearer["is_representative_bearer"],
+            bearer["oa_menu_permission_present"],
             bearer["access_tier"] == "denied",
             not bearer["can_admin_access"],
             bearer["http_status"] == 200,
@@ -497,6 +503,25 @@ def _latency_summary(values: list[float]) -> dict[str, float | int]:
     }
 
 
+def _oa_router_contains_finops_menu(payload: object) -> bool:
+    if isinstance(payload, list):
+        return any(_oa_router_contains_finops_menu(item) for item in payload)
+    if not isinstance(payload, dict):
+        return False
+    meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+    title = str(
+        meta.get("title")
+        or payload.get("menuName")
+        or payload.get("menu_name")
+        or payload.get("name")
+        or ""
+    ).strip()
+    path = str(payload.get("path") or "")
+    if title == OA_MENU_NAME and "/fin-ops/" in path:
+        return True
+    return any(_oa_router_contains_finops_menu(value) for value in payload.values())
+
+
 def run_post_deploy(
     *,
     release: str,
@@ -505,6 +530,7 @@ def run_post_deploy(
     output_path: str,
     admin_token: str,
     bearer_token: str,
+    oa_base_url: str,
 ) -> tuple[dict[str, Any], int]:
     preflight = _load_json(preflight_path)
     salt = hashlib.sha256(f"settings-access-control-v1\0{release}".encode()).hexdigest()
@@ -518,8 +544,16 @@ def run_post_deploy(
     original_accounts: list[dict[str, Any]] | None = None
     bearer_username = ""
     mutation_request_ids: list[str] = []
-    request_latencies: dict[str, list[float]] = {"acl_get": [], "acl_put": [], "session": [], "generic_save": []}
+    request_latencies: dict[str, list[float]] = {
+        "acl_get": [],
+        "acl_put": [],
+        "session": [],
+        "generic_save": [],
+        "oa_router": [],
+    }
     restore_ok = False
+    router_restore_ok = False
+    router_visibility: dict[str, bool] = {}
 
     def http(method: str, path: str, token: str, payload: dict[str, Any] | None = None, *, bucket: str | None = None):
         response = _http_request(base_url=base_url, method=method, path=path, token=token, payload=payload)
@@ -531,6 +565,19 @@ def run_post_deploy(
         response = http("GET", "/api/session/me", token, bucket="session")
         _expect(response, 200)
         return response["payload"]
+
+    def router_visible(token: str) -> bool:
+        response = _http_request(
+            base_url=oa_base_url,
+            method="GET",
+            path="/system/menu/getRouters",
+            token=token,
+        )
+        request_latencies["oa_router"].append(float(response["elapsed_ms"]))
+        _expect(response, 200)
+        if response["payload"].get("code") != 200:
+            raise RuntimeError("fresh OA router request did not return code=200")
+        return _oa_router_contains_finops_menu(response["payload"].get("data"))
 
     def acl_get() -> dict[str, Any]:
         response = http("GET", "/api/workbench/settings/access-control", admin_token, bucket="acl_get")
@@ -566,8 +613,9 @@ def run_post_deploy(
         admin_session = session(admin_token)
         bearer_session = session(bearer_token)
         bearer_username = str((bearer_session.get("user") or {}).get("username") or "").strip()
-        if not bearer_username or bearer_username == PROTECTED_ADMIN_USERNAME:
-            raise RuntimeError("dedicated bearer identity is missing or protected")
+        bearer_fact = _session_fact(bearer_session, salt)
+        if not bearer_fact["is_representative_bearer"] or not bearer_fact["oa_menu_permission_present"]:
+            raise RuntimeError("dedicated bearer must be permission-bearing YNSYLP006")
         if _session_fact(admin_session, salt)["username_sha256"] != preflight["sessions"]["admin"]["username_sha256"]:
             raise RuntimeError("admin identity hash drifted from approved preflight")
         if _session_fact(bearer_session, salt)["username_sha256"] != preflight["sessions"]["bearer"]["username_sha256"]:
@@ -576,6 +624,14 @@ def run_post_deploy(
             raise RuntimeError("admin session contract failed")
         if bearer_session.get("access_tier") != "denied" or bearer_session.get("can_admin_access") is True:
             raise RuntimeError("bearer must start denied and non-admin")
+        router_visibility.update(
+            {
+                "admin": router_visible(admin_token),
+                "initial_denied": router_visible(bearer_token),
+            }
+        )
+        if router_visibility != {"admin": True, "initial_denied": False}:
+            raise RuntimeError("initial fresh OA router visibility is inconsistent")
         database = collect_database_facts(PostgresConnection(_postgres_settings()))
         if not all(
             (
@@ -608,6 +664,9 @@ def run_post_deploy(
             raise RuntimeError("full-access session transition failed")
         if not _oa_matches_accounts(collect_oa_role_facts(), full_accounts):
             raise RuntimeError("OA roles do not match the full-access target")
+        router_visibility["full_access"] = router_visible(bearer_token)
+        if router_visibility["full_access"] is not True:
+            raise RuntimeError("full-access fresh OA router is missing the fin-ops menu")
         generic_save = http(
             "POST",
             "/api/workbench/settings",
@@ -656,6 +715,9 @@ def run_post_deploy(
             raise RuntimeError("read-export session transition failed")
         if not _oa_matches_accounts(collect_oa_role_facts(), readonly_accounts):
             raise RuntimeError("OA roles do not match the read-export target")
+        router_visibility["read_export_only"] = router_visible(bearer_token)
+        if router_visibility["read_export_only"] is not True:
+            raise RuntimeError("read-export fresh OA router is missing the fin-ops menu")
         _expect(
             http("POST", "/api/workbench/settings", bearer_token, _generic_settings_write_payload(generic_payload)),
             403,
@@ -676,6 +738,9 @@ def run_post_deploy(
             raise RuntimeError("denied session transition failed")
         if not _oa_matches_accounts(collect_oa_role_facts(), denied_accounts):
             raise RuntimeError("OA roles do not match the denied target")
+        router_visibility["denied"] = router_visible(bearer_token)
+        if router_visibility["denied"] is not False:
+            raise RuntimeError("denied fresh OA router still exposes the fin-ops menu")
         _expect(http("POST", "/api/workbench/settings", bearer_token, _generic_settings_write_payload(generic_payload)), 403)
         _expect(
             http(
@@ -725,6 +790,7 @@ def run_post_deploy(
             "admin_only_guards": {key: value["status"] for key, value in full_admin_guards.items()},
             "admin_read_paths": {key: value["status"] for key, value in admin_access.items()},
             "oa_matches_each_target": True,
+            "oa_router_visibility": dict(router_visibility),
             "durable_audit_request_id_matches": audit_matches,
             "http_call_counts": {key: len(values) for key, values in request_latencies.items()},
             "latency": latency,
@@ -754,14 +820,17 @@ def run_post_deploy(
                     and final_session.get("access_tier") == "denied"
                     and _oa_matches_accounts(collect_oa_role_facts(), original_accounts)
                 )
+                router_restore_ok = restore_ok and not router_visible(bearer_token)
             except Exception:
                 restore_ok = False
+                router_restore_ok = False
         report["restore"] = {
             "accounts_restored": restore_ok,
             "bearer_final_tier": "denied" if restore_ok else "unverified",
             "oa_restored": restore_ok,
+            "oa_router_restored": router_restore_ok,
         }
-        if not restore_ok:
+        if not restore_ok or not router_restore_ok:
             report["status"] = "fail"
 
     serialized = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
@@ -780,16 +849,45 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--bearer-session-json")
     parser.add_argument("--deployment-facts-json")
     parser.add_argument("--post-deploy", action="store_true")
+    parser.add_argument("--database-guard-only", action="store_true")
     parser.add_argument("--preflight-artifact")
     parser.add_argument("--base-url", default="http://127.0.0.1:18001")
+    parser.add_argument(
+        "--oa-base-url",
+        default=(os.getenv("FIN_OPS_OA_BASE_URL") or "").strip(),
+    )
     parser.add_argument("--output")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
+    if args.database_guard_only:
+        database = collect_database_facts(PostgresConnection(_postgres_settings()))
+        passed = all(
+            (
+                database["migration_0132_applied"],
+                database["constraint_present"],
+                database["constraint_validated"],
+            )
+        )
+        report = {
+            "contract": "settings-access-control-v1",
+            "release": args.release,
+            "status": "pass" if passed else "fail",
+            "database": {
+                "migration_0132_applied": database["migration_0132_applied"],
+                "constraint_present": database["constraint_present"],
+                "constraint_validated": database["constraint_validated"],
+            },
+        }
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if passed else 2
     if args.post_deploy:
         if not args.preflight_artifact or not args.output:
             parser.error("--post-deploy requires --preflight-artifact and --output")
         admin_token = sys.stdin.readline().rstrip("\r\n")
         bearer_token = sys.stdin.readline().rstrip("\r\n")
+        if not args.oa_base_url:
+            parser.error("--post-deploy requires --oa-base-url or FIN_OPS_OA_BASE_URL")
         report, status = run_post_deploy(
             release=args.release,
             base_url=args.base_url,
@@ -797,6 +895,7 @@ def main(argv: list[str] | None = None) -> int:
             output_path=args.output,
             admin_token=admin_token,
             bearer_token=bearer_token,
+            oa_base_url=args.oa_base_url,
         )
         if args.json:
             print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
