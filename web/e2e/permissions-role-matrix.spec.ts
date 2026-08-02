@@ -632,6 +632,46 @@ const readExportWorkbenchRecoveryWriteControlOpeners: DynamicWriteControlOpener[
 ];
 
 test.describe("permissions browser role matrix", () => {
+  test("permission-bearing denied users stop at the direct URL and protected API boundary", async ({ page }) => {
+    const api = await installDeterministicApiMocks(page, {
+      sessionMode: "forbidden",
+      sessionUsername: "YNSYLP006",
+    });
+
+    await page.goto("/fin-ops/");
+    await expect(page.getByRole("heading", { name: "无权访问财务运营平台" })).toBeVisible();
+    await expect(page.getByTestId("settings-page")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /放大 未配对/ })).toHaveCount(0);
+    expect(api.count("GET /api/workbench")).toBe(0);
+
+    const evidence = await page.evaluate(async () => {
+      const sessionResponse = await fetch("/api/session/me");
+      const session = await sessionResponse.json();
+      const protectedResponse = await fetch("/api/workbench?month=all");
+      return {
+        session,
+        protectedStatus: protectedResponse.status,
+        protectedBody: await protectedResponse.json(),
+      };
+    });
+
+    expect(evidence.session).toMatchObject({
+      user: { username: "YNSYLP006" },
+      roles: ["finance", "business", "finops_full_access"],
+      permissions: ["finops:app:view"],
+      allowed: false,
+      access_tier: "denied",
+      can_access_app: false,
+      can_mutate_data: false,
+      can_admin_access: false,
+    });
+    expect(evidence).toMatchObject({
+      protectedStatus: 403,
+      protectedBody: { error: "forbidden" },
+    });
+    expect(api.count("GET /api/workbench")).toBe(1);
+  });
+
   test("read-export users can open every readable page without mutation APIs", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, { sessionMode: "read_export_only" });
