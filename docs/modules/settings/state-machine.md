@@ -9,7 +9,7 @@
 - 事实源：`AppSettingsService` 从 `ApplicationStateStore` 加载、normalize、保存。
 - 主要状态：`loaded`、`editing`、`saving`、`saved`、`validation_failed`、`version_conflict`、`save_failed`。
 - 允许流转：
-  - `loaded -> editing -> saving -> saved`：保存项目、权限、银行映射、OA 配置、标签和规则。
+  - `loaded -> editing -> saving -> saved`：保存项目、银行映射、OA 配置、标签和规则；ACL 使用下方独立 command 状态机。
   - `saving -> validation_failed`：非法标签、重复映射、历史非法 pending invoice 映射需要显式暴露，不得静默丢弃。
   - `saving -> version_conflict`：银行标签或待找发票规则 stale version。
 - 禁止流转：
@@ -30,9 +30,10 @@
 
 ### 访问控制
 
-- 状态：`allowed`、`readonly_export`、`admin`、`full_access`。
-- 规则：admin 必须归入 allowed；readonly/admin/full access 的 UI 隐藏/禁用和 API 403 必须一致。
-- 影响：权限不走 read model，但会影响所有写入按钮、导出、数据重置和运维修复入口。
+- canonical snapshot：固定 `administrator=YNSYLP005`、独立 `access_control_version`、完整 `full_access` / `read_export_only` memberships；其他账号缺席即 `denied`，管理员不属于可写 membership。
+- 用户名：比较/去重使用共享 casefold key，输出保留 OA canonical spelling；collision、跨 tier overlap、控制字符与 protected-admin 输入直接 `validation_failed`。
+- 消费：permissions evaluator 每次非管理员判断最多读取同一 snapshot 一次；ACL 删除后下一次 session/API 立即 denied，不依赖 OA identity cache。
+- 影响：权限不走 read model，但会影响所有写入按钮、导出、数据重置和运维修复入口；OA 三角色只投影菜单可见性，不能反向改变 APP tier。
 
 ### 业务规则和标签
 
@@ -79,8 +80,8 @@
 ## Read Model / Worker 状态
 
 - 设置事实本身不是 read model，普通 save 不产生页面 dirty scope/outbox。
-- `workbench_relation`、`search`、`no_oa_bank_batch` 只有在各自 owner 明确登记的
-  reset/maintenance 合同中接收精确 refresh；Settings 不维护第二份 fan-out matrix。
+- 仅当前 manifest 登记的 `workbench` / `workbench_relation` 可在各自 owner 明确登记的
+  reset/maintenance 合同中接收精确 refresh；Settings 不维护第二份 fan-out matrix，也不恢复 Search/no-OA projection。
 - Workbench stale scan 只由 matching worker 启动，不属于 API 生命周期；API 初始化不得执行 reset recovery、historical reconcile 或 maintenance。
 - settings save 只等待 canonical settings transaction；data reset 单独展示 durable job
   状态，不用 read-model barrier 伪装 job 完成。
@@ -93,13 +94,16 @@
 
 | 状态 | 条件 | I/O 与结果 |
 | --- | --- | --- |
-| `loaded` | admin GET 成功 | 返回固定管理员、版本和其他账户；非 admin 403 |
-| `no_op` | memberships 与 canonical 相同 | 200/changed=false；零 DB write、audit、OA |
-| `conflict` | expected_version stale | 409/current_version；保留前端 draft；零覆盖 |
-| `oa_target_failed` | OA 目标角色同步失败 | 502；不开始 app transaction |
-| `db_failed_compensated` | OA target 成功、DB/audit 回滚 | 最多一次 OA compensation，503；canonical 不半写 |
-| `compensation_failed` | DB 失败且 OA 恢复失败 | 503 inconsistent；fail closed，必须人工核对 DB/OA |
-| `committed` | OA target 与 DB transaction 成功 | version +1，settings/audit 原子提交，新 session 生效 |
+| `loaded` | admin GET 成功 | 返回固定管理员、当前 snapshot version 和完整 accounts；非 admin 为 `forbidden`/403 |
+| `validation_failed` | DTO、tier、username 或 canonical collision 非法 | 400；在 OA/PG I/O 前失败 |
+| `conflict` | critical section 锁定 snapshot 后发现 `expected_version` stale | 409/current_version；保留前端 draft；零 OA/PG 覆盖 |
+| `no_op` | 同一锁定 snapshot version 下 memberships 语义相同 | 200/changed=false；零 DB write、audit、OA |
+| `oa_target_failed` | 严格 menu/三角色目标未配置、漂移、超时或同步失败 | 502；transaction 回滚，canonical/audit 不变 |
+| `persistence_failed_compensated` | OA target 成功，ACL/audit commit 失败且旧 OA memberships 恢复成功 | 503 `access_control_persistence_failed`；canonical/audit 不半写，OA 回到旧 snapshot |
+| `commit_recovered` | commit ACK 丢失但 mutation audit 与 version+1 canonical snapshot 一致 | 200/changed=true；不重复提交或补偿 |
+| `commit_rolled_back_compensated` | ACK 丢失且确认无 audit/version 未变，旧 OA memberships 恢复成功 | 503 `access_control_persistence_failed`；保持旧 snapshot |
+| `compensation_failed_or_unknown` | OA 恢复失败、snapshot 漂移或 commit outcome 无法一致证明 | 503 `access_control_sync_inconsistent`；fail closed，人工核对同一 version、audit 与 OA members |
+| `committed` | OA target 与 PostgreSQL ACL/audit transaction 成功 | version +1，canonical ACL/audit 原子提交，下一次 session/API 使用新 snapshot |
 
 管理员身份没有状态迁移：`YNSYLP005` 始终是 protected administrator；任何 APP 请求尝试修改该事实均为非法输入。
 

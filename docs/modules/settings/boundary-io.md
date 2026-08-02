@@ -6,7 +6,7 @@
 
 - 状态：closed
 - 当前边界可信度：high
-- 目标边界：设置页面只通过 settings API/route owner/service 修改配置、OA 凭证、数据重置等控制面能力。
+- 目标边界：设置页面只通过 settings API/route owner/service 修改配置、专用 ACL、OA 凭证、数据重置等控制面能力。
 - 当前缺口：页面/API 与 App 内部 control-plane Audit 已闭环；真实生产 reset、真实 OA/provider、credential 登录、worker drain 和多页面 smoke 仍属于外部运维 gate。
 - 旧代码删除状态：`server.py` 中 `/api/workbench/settings*` 旧 handler、settings data reset job handler、OA 手工导入 settings handler 与 `_refresh_local_app_settings_snapshot(...)` 已删除；`AppSettingsService` 不再用内存 `_snapshot` 补齐持久化 settings 缺失字段，外部模块也不得直接读取或替换其 `_snapshot`。
 
@@ -16,6 +16,7 @@
 
 - 平台设置页面、工作台设置、OA 凭证设置、数据重置入口。
 - 调用 app settings、credential provider、data reset service。
+- 拥有 `/settings` 唯一人工 ACL I/O、专用 admin-only GET/PUT command、ACL normalization、独立 version/CAS、OA target/补偿编排，以及 canonical ACL 与 durable audit 的原子提交。
 - 设置变更只提交 setting facts、version 与审计；普通保存不触发跨页面
   read-model fan-out，canonical 页面在下次 normal GET 读取最新设置。
 - app settings 中跨模块只读/写控制面事实，例如成本统计标签规则。
@@ -25,12 +26,16 @@
 - 不直接执行业务导入或 read model projection。
 - 不在前端保存敏感凭证。
 - 不绕过数据安全 reset service。
+- 不判定 APP tier；permissions-and-audit 拥有 evaluator，OA integration 只消费完整 normalized ACL snapshot，部署才拥有历史 menu binding cleanup/rollback。
 
 ## 输入 I/O
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | 设置表单 | `SettingsPage.tsx`、`components/settings/*` | API 负责校验和权限 |
+| 普通 settings GET/POST | Settings page、Workbench 列布局等既有 caller | 不读取、返回或写 ACL；任一历史 ACL key 明确 `400 access_control_write_forbidden` |
+| ACL GET/PUT | 仅 `YNSYLP005` 的后端 admin session | GET 返回完整 snapshot；PUT 只接受正整数 `expected_version` 与完整 `accounts[]`，tier 仅 `full_access\|read_export_only`，列表缺席表示 denied |
+| OA canonical username | normalized ACL snapshot / OA `sys_user.user_name` | 共享 casefold key 负责比较与去重并保留 canonical spelling；collision、跨 tier overlap、控制字符和 protected admin 输入在 OA I/O 前失败 |
 | OA credentials | settings/OA credential API | secret 不进入日志 |
 | 数据重置请求 | settings data reset dialogs | 必须走 job/control service |
 | 页面 Audit | `GET /api/operations/app-health/page-audit?page=settings` | 管理员只读；同一 repeatable-read snapshot，禁止 secret/provider/reset mutation I/O |
@@ -42,6 +47,9 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | 设置 payload/result | 前端页面 | 不泄露 secret |
+| ACL result | Settings ACL UI、permissions evaluator | `{administrator, version, accounts}`；no-op 为 `changed=false`，stale 为 `409 current_version`，不提供兼容 payload |
+| Durable ACL audit | `audit.events` | 与 canonical ACL/version 同一 PostgreSQL transaction；记录 session actor、server request id、mutation/version 与 changed username hashes，不记录 token 或完整 ACL payload |
+| OA target / compensation | `OARoleSyncService` | 只替换三个专用角色 members；目标失败 502 且零 app write，PG 失败最多一次恢复旧 snapshot，无法确认则 503 inconsistent |
 | Reset job | process-owned `BackgroundJobService` / app health | 可查询、可恢复；OA reset 的 runtime service reload 必须复用同一 background-job owner，禁止在任务执行中替换实例、双写同一 job store 或把当前任务误标为进程重启中断。只有应用进程首次启动/真正重启才创建 owner 并执行 interrupted-job recovery。job `completed` 只证明清理和 durable lifecycle 登记完成；OA `rebuild_status` 在下游 fresh 前必须是 `pending`。 |
 | Affected scope/version | 调用页面 | 普通保存只返回业务 version 和信息性 affected scopes；不写页面 refresh queue |
 | OA manual import result envelope | 设置页 | 返回精确 affected scopes，`freshness_targets` 与 `operation_barrier_targets` 为空；后续业务页面 normal GET 读取 canonical facts |
@@ -66,19 +74,19 @@
 | --- | --- |
 | Frontend page | `web/src/pages/SettingsPage.tsx` |
 | Frontend components | `web/src/components/settings/*`、`web/src/components/workbench/WorkbenchSettingsModal.tsx` |
-| Frontend API | `web/src/features/workbench/api.ts` |
-| Backend route | `backend/src/fin_ops_platform/app/routes_settings.py`；`server.py` 只负责 route owner 组装和 runtime side-effect ports |
-| Backend service | `app_settings_service.py`、`settings_data_reset_service.py`、`oa_applicant_credentials.py`、`target_oa_applicant_token_provider.py` |
+| Frontend API | `web/src/features/workbench/api.ts`；普通 mapper/serializer 与专用 ACL client 分离 |
+| Backend route | `backend/src/fin_ops_platform/app/routes_settings.py`；`server.py` 只负责 route owner 与 session/runtime ports 组装 |
+| Backend service | `app_settings_service.py`、`oa_role_sync_service.py`、`settings_data_reset_service.py`、`oa_applicant_credentials.py`、`target_oa_applicant_token_provider.py` |
 | Repository | `postgres_repositories/oa_applicant_credentials.py`、`postgres_repositories/ops_tax_etc.py`；`0118_bank_flow_rule_batch_settings_raw_alignment.sql` 只修复 `bank_flow_rule_batch_tag_rules` 的 formal/raw 镜像一致性，不改变 canonical rule value |
 | Audit proof owner | `postgres_repositories/settings_page_audit.py`、`page_audit_registry.py`、`postgres_repositories/operations_audit.py` |
 | Lifecycle | `derived_data_lifecycle_service.py`、`app_status_domain_registry.py`、`app_status_read_model_registry.py` |
-| Tests | `tests/test_app_settings_service.py`、`tests/test_settings_data_reset_service.py`、`web/src/test/Settings*.test.*` |
+| Tests | `tests/test_app_settings_service.py`、`tests/test_workbench_settings_sync_api.py`、`tests/test_oa_role_sync_service.py`、`tests/test_permissions_write_entry_inventory.py`、`tests/test_settings_data_reset_service.py`、`web/src/test/Settings*.test.*`、`web/e2e/permissions-role-matrix.spec.ts` |
 
 ## 依赖方向
 
-- 允许依赖：settings/data reset service, credential repository, background job service。
-- 必须通过：settings service and explicit reset job API。
-- 禁止绕过：前端直接保存 secret；settings API 直接清库、直接写/同步查询 read model、调用 Workbench 全页 builder 或重复入队 matching dirty scope。
+- 允许依赖：settings/data reset service、credential repository、background job service 和 normalized ACL 的 OA role-sync port。
+- 必须通过：普通 settings service、专用 ACL command/CAS critical section 和 explicit reset job API；permissions evaluator 只通过 Settings snapshot provider 读取 ACL。
+- 禁止绕过：generic settings/Workbench modal/OA 管理后台新增 ACL 写入口；OA role/permission/env 反向授予 APP tier；前端直接保存 secret；settings API 直接清库、直接写/同步查询 read model、调用 Workbench 全页 builder 或重复入队 matching dirty scope。
 
 ## 测试与验证
 

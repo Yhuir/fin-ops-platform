@@ -23,7 +23,7 @@
 
 - `web/src/pages/SettingsPage.tsx`
 - `web/src/components/settings/*`
-- `web/src/components/workbench/WorkbenchSettingsModal.tsx`
+- `web/src/components/workbench/WorkbenchSettingsModal.tsx`（仅普通列布局设置，不承载 ACL）
 - `web/src/features/workbench/api.ts`
 - `backend/src/fin_ops_platform/app/routes_settings.py` 中 `/api/workbench/settings*`、数据重置和 OA 申请人凭据 routes
 - `backend/src/fin_ops_platform/app/server.py` 中 settings route owner 组装和 durable reset enqueue
@@ -43,7 +43,9 @@
 设置模块维护平台级配置事实，不只是设置页 UI。当前边界包括：
 
 - 项目范围：OA 项目同步、手工项目、已完成项目、本地删除 override。
-- 访问控制：独立 admin-only API 维护其他账号的 full/read/denied；唯一 protected administrator `YNSYLP005` 固定且不可由 APP 修改。generic settings 无 ACL I/O。
+- 访问控制：`/settings` 的“访问账户权限”是唯一人工入口；独立 admin-only `GET/PUT /api/workbench/settings/access-control` 维护其他账号的完整 `full_access` / `read_export_only` 列表，列表缺席派生为 `denied`。唯一 protected administrator `YNSYLP005` 固定且不可由 APP 修改，generic settings 与 Workbench modal 均无 ACL I/O。
+- 用户名合同：等值、去重和跨 tier overlap 使用共享 casefold comparison key；输出保留 OA `sys_user.user_name` canonical spelling，碰撞、控制字符、重复和 protected-admin 输入在 OA I/O 前拒绝。
+- 写入合同：专用 PUT 使用独立 `access_control_version` / `expected_version`、PostgreSQL CAS 和同事务 durable audit；semantic no-op 零 PostgreSQL/audit/OA I/O。真实变化严格投影三个专用 OA 角色，OA target、PostgreSQL commit 和补偿按明确的 502/503 状态收敛。
 - 关联台设置：列布局、银行账户映射、OA 留存时间、OA 导入表单类型/状态过滤、OA 附件发票 promotion 模式、OA 发票抵扣申请人。
 - 业务规则：待找发票标签组、免 OA 和往来款标签选择；银行明细自动标签规则只读返回给 settings 页面作为候选事实，`AppSettingsService.update_settings(...)` 不暴露 `bank_transaction_tags` 写参数，写入只能走银行明细 `自动标签规则` 抽屉/API。
 - OA 申请人凭据：独立凭据事实源，只允许 admin 维护，普通 settings payload 不能包含密码、密文或 token。
@@ -63,7 +65,7 @@ canonical query，也可能影响 `workbench` 或 `workbench_relation` owner 的
 | 待找发票规则保存 | income/expense rule version 原子递增 | 待找发票下一次 GET 直接应用；不 fan-out retired page scope |
 | 银行标签/自动标签保存 | 只允许银行明细规则 API 写入并记录 audit | canonical 页面下次 GET 读取；共享 no-OA/Search 只按各自 owner 合同处理 |
 | 项目范围变化 | project settings/version | 成本统计等 direct 页面下次 GET 读取；关联台按 `workbench` freshness 合同刷新 |
-| 访问控制真实变化 | PostgreSQL CAS + durable audit + OA role sync | 下一次 session/API 权限校验生效；no-op 零写 I/O |
+| 访问控制 no-op / 真实变化 | `app.app_settings` ACL family + 独立 version；真实变化同事务写 `audit.events` | no-op 零 I/O；真实变化严格投影 OA 三专用角色后提交，下一次 session/API 使用新 snapshot；失败按补偿状态返回 502/503 |
 | OA 导入过滤/留存/promotion | state store，供后续 OA sync/reset 使用 | 页面下次 GET 读取已提交 OA canonical facts |
 | OA 申请人凭据维护 | 独立 credential repository | 进项 OA 反提 token provider 使用；普通 settings payload 不含 secret |
 | 数据重置 | `settings.data_reset.requested` durable event + `settings-maintenance` worker | API 只校验权限/密码并入队；worker 执行 canonical cleanup、登记派生刷新并请求 Gunicorn graceful reload，job 显示进度/失败 |
