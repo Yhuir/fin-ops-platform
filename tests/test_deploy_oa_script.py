@@ -71,7 +71,7 @@ class DeployOAScriptTest(unittest.TestCase):
         (dist_dir / "assets").mkdir()
         (dist_dir / "assets" / "index.js").write_text("console.log('ok');", encoding="utf-8")
         (backend_dir / "requirements.txt").write_text("", encoding="utf-8")
-        migration = backend_dir / "src/fin_ops_platform/postgres/migrations/0132_settings_access_control_guard.sql"
+        migration = backend_dir / "src/fin_ops_platform/postgres/migrations/0133_settings_access_control_canonical_order.sql"
         migration.parent.mkdir(parents=True)
         migration.write_text("select 1;\n", encoding="utf-8")
         helper = root_dir / "deploy/oa/bin/finops-deploy-control.sh"
@@ -785,7 +785,7 @@ class DeployOAScriptTest(unittest.TestCase):
             rollback.index('activate_release "$previous_release"'),
         )
 
-    def test_activation_validates_0132_guard_after_migration_before_runtime_changes(self) -> None:
+    def test_activation_validates_0133_guard_after_migration_before_runtime_changes(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
         activate = script.split("activate_release() {", 1)[1].split("\n}\n", 1)[0]
 

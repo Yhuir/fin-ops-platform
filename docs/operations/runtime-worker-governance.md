@@ -570,7 +570,7 @@ release 与 Git commit。PRE 失败时，部署命令只返回不含 token、环
 
 任一 checkpoint、最终证据写入或证据合同校验失败，只能自动恢复带 `settings-access-control-v1`
 capability 且 source/migration fingerprint 有效的 previous release，并在回滚后执行 `preflight` checkpoint；
-previous 不安全或不存在时 API 保持 maintenance，保留 0132/CHECK 并 forward repair。pre checkpoint 失败不修改任何 helper。
+previous 不安全或不存在时 API 保持 maintenance，保留 0133/CHECK 并 forward repair。pre checkpoint 失败不修改任何 helper。
 pre 与 rollback checkpoint 使用候选 release 的门禁代码检查实际运行 release；worker inventory 仍按实际
 运行 release 的 registry 核对。这样首次启用新门禁时不依赖旧 release 中尚不存在的检查逻辑。
 页面 audit 则以候选 release 的 `PAGE_AUDIT_REGISTRY` 为预期集合，严格核对当前 runtime 返回的 summary

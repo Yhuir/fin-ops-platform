@@ -743,7 +743,7 @@ Preflight 的 `eligible=true` 表示已经是 post-deploy 稳态；升级旧 run
 `cutover_eligible=true` 表示唯一受控切换态。该切换态要求：admin session 精确为 `YNSYLP005/admin`；专用 bearer
 精确为带 `finops:app:view` 的 `YNSYLP006`、非 admin，且必须从 canonical Settings ACL 的
 allowed/readonly/full/admin 四个集合全部缺席；旧 runtime 因已退休 OA permission fallback 暂时返回
-`full_access` 可以进入切换，但新 runtime 必须返回 denied。0132/CHECK 三项只能全 false（待迁移）或全 true，
+`full_access` 可以进入切换，但新 runtime 必须返回 denied。0133/CHECK 三项只能全 false（待迁移）或全 true，
 禁止 partial；legacy admin env 只能为空或恰好 005；retired env 只能是三个固定 key；OA selector、唯一 menu、
 三 dedicated roles/bindings/members 必须与 canonical ACL 精确一致。artifact 只含非敏感 state/blockers、salted
 hashes/counts/fingerprints。任何 token、identity、canonical ACL、partial DB、env、OA 或 fingerprint 漂移都阻断。
@@ -757,7 +757,7 @@ hashes/counts/fingerprints。任何 token、identity、canonical ACL、partial D
 `rollback_target_hashes`，`target_set_sha256` 也基于该 canonical 顺序；consumer 继续拒绝未排序、重复、非法或不对称 hash set，
 不得用 consumer 端排序掩盖 artifact producer 漂移。
 
-4. 只用 exact candidate 零重传激活：`./scripts/deploy-oa.sh --activate-existing --release-name <release>`。顺序固定为 cutover/steady preflight assertion → current runtime checkpoint → exact env cleanup + strict assertion → exact OA binding cleanup → API/worker quiesce → 执行 migration → 独立 read-back 断言 0132 已应用且 `settings_access_control_policy_shape` CHECK 已验证 → runtime sync/install → safe candidate → T+0/T+60/T+300 evidence。进入 activation 前失败恢复 env before-image；进入 activation 后保持 clean env，previous release 没有同等安全 capability 时保持 maintenance 并 forward repair。
+4. 只用 exact candidate 零重传激活：`./scripts/deploy-oa.sh --activate-existing --release-name <release>`。顺序固定为 cutover/steady preflight assertion → current runtime checkpoint → exact env cleanup + strict assertion → exact OA binding cleanup → API/worker quiesce → 执行 migration → 独立 read-back 断言 0133 已应用且 `app_settings_access_control_canonical_order_guard` CHECK 已验证 → runtime sync/install → safe candidate → T+0/T+60/T+300 evidence。进入 activation 前失败恢复 env before-image；进入 activation 后保持 clean env，previous release 没有同等安全 capability 时保持 maintenance 并 forward repair。
 5. 激活成功后用相同双 token 运行 `settings-access-control-post-deploy`。它把 `YNSYLP006` 专用 bearer 依次改为 full、read、denied，验证 generic save、两条直接提权攻击、AppHealth/OA credentials/data reset admin-only、OA 三角色、fresh OA router 菜单可见性、durable audit/request id 和 ACL GET/PUT latency，并在 finally/read-back 中恢复原 accounts/OA/denied session：
 
 ```bash
@@ -920,7 +920,7 @@ cd web && npm run build
 1. 先在 OA 菜单中隐藏或下线 `财务运营平台`
 2. 撤销目标角色的 `finops:app:view`
 3. 只有 previous release 的 `settings-access-control-v1` capability、source/migration fingerprints 都有效时，才允许 release gate 自动恢复其前后端
-4. previous 不安全或不存在时保持 API maintenance；保留已应用 0132/CHECK，使用新的安全 candidate forward repair，禁止手工启动旧 vulnerable binary
+4. previous 不安全或不存在时保持 API maintenance；保留已应用 0133/CHECK，使用新的安全 candidate forward repair，禁止手工启动旧 vulnerable binary
 5. 如需要，再回滚 iframe 高度修复或 OA 菜单配置
 
 不要先回滚后端再保留菜单入口，否则用户会进入一个失效页。

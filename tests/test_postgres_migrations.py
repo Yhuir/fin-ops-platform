@@ -146,6 +146,7 @@ EXPECTED_MIGRATIONS = [
     "0130_canonical_finance_domain_contracts.sql",
     "0131_validate_canonical_finance_domain_contracts.sql",
     "0132_settings_access_control_guard.sql",
+    "0133_settings_access_control_canonical_order.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -301,7 +302,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 133)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 134)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -667,6 +668,33 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("add constraint app_settings_access_control_guard", normalized_sql)
         self.assertIn("not valid", normalized_sql)
         self.assertIn("validate constraint app_settings_access_control_guard", normalized_sql)
+        self.assertNotIn("create table", normalized_sql)
+        self.assertNotIn("job.outbox_events", normalized_sql)
+
+    def test_settings_access_control_canonical_order_repairs_0132_append_bug(self) -> None:
+        sql = (
+            MIGRATIONS_DIR / "0133_settings_access_control_canonical_order.sql"
+        ).read_text(encoding="utf-8").lower()
+        normalized_sql = " ".join(strip_sql_comments(sql).split())
+
+        self.assertIn("settings.access_control.canonical_order_repaired", normalized_sql)
+        self.assertIn("migration:0133", normalized_sql)
+        self.assertIn("'{normalized_payload}'", normalized_sql)
+        self.assertIn(
+            "'[\"ynsylp005\"]'::jsonb || (settings_payload->'full_access_usernames') "
+            "|| (settings_payload->'readonly_export_usernames')",
+            normalized_sql,
+        )
+        self.assertIn(
+            "settings_payload->'allowed_usernames' = ( '[\"ynsylp005\"]'::jsonb "
+            "|| (settings_payload->'full_access_usernames') "
+            "|| (settings_payload->'readonly_export_usernames') )",
+            normalized_sql,
+        )
+        self.assertIn(
+            "validate constraint app_settings_access_control_canonical_order_guard",
+            normalized_sql,
+        )
         self.assertNotIn("create table", normalized_sql)
         self.assertNotIn("job.outbox_events", normalized_sql)
 
@@ -1351,6 +1379,16 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         checked_sql = checked_sql.replace(
             settings_acl_guard_sql,
             "approved_settings_access_control_guard;",
+        )
+        settings_acl_canonical_order_sql = strip_sql_comments(
+            (
+                MIGRATIONS_DIR / "0133_settings_access_control_canonical_order.sql"
+            ).read_text(encoding="utf-8")
+        ).lower()
+        self.assertIn(settings_acl_canonical_order_sql, checked_sql)
+        checked_sql = checked_sql.replace(
+            settings_acl_canonical_order_sql,
+            "approved_settings_access_control_canonical_order;",
         )
         approved_legacy_drops = (
             "drop table if exists read_model.cost_statistics_bank_flow_rows;",

@@ -237,7 +237,7 @@ def facts(name):
     metadata_path = root / "RELEASE.json"
     metadata = json.loads(metadata_path.read_text(encoding="utf-8")) if metadata_path.is_file() else {}
     contract = metadata.get("settings_access_control", {})
-    migration = root / "backend/src/fin_ops_platform/postgres/migrations/0132_settings_access_control_guard.sql"
+    migration = root / "backend/src/fin_ops_platform/postgres/migrations/0133_settings_access_control_canonical_order.sql"
     helper = root / "deploy/oa/bin/finops-deploy-control.sh"
     actual_migration = sha256(migration) if migration.is_file() else ""
     actual_helper = sha256(helper) if helper.is_file() else ""
@@ -247,7 +247,7 @@ def facts(name):
         and re.fullmatch(r"[0-9a-f]{40}", str(metadata.get("git_commit") or "")) is not None
         and metadata.get("git_status_porcelain") == ""
         and contract.get("capability") == "settings-access-control-v1"
-        and contract.get("migration") == "0132_settings_access_control_guard.sql"
+        and contract.get("migration") == "0133_settings_access_control_canonical_order.sql"
         and contract.get("migration_sha256") == actual_migration
         and contract.get("deploy_control_sha256") == actual_helper
         and contract.get("source_sha256") == actual_source

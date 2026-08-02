@@ -131,7 +131,7 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
                     "admin_usernames": ["YNSYLP005"],
                     "access_control_version": 2,
                 },
-                "migration_0132_applied": True,
+                "migration_0133_applied": True,
                 "constraint_present": True,
                 "constraint_validated": True,
             },
@@ -202,13 +202,13 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
         self.assertFalse(self._report(bearer_session=missing_permission)["eligible"])
         self.assertTrue(self._report()["sessions"]["bearer"]["oa_menu_permission_present"])
 
-    def test_database_guard_only_fails_closed_until_0132_check_is_validated(self) -> None:
+    def test_database_guard_only_fails_closed_until_0133_check_is_validated(self) -> None:
         with (
             patch.object(
                 preflight_module,
                 "collect_database_facts",
                 return_value={
-                    "migration_0132_applied": True,
+                    "migration_0133_applied": True,
                     "constraint_present": True,
                     "constraint_validated": False,
                 },
@@ -364,7 +364,7 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
                     "admin_usernames": ["YNSYLP005"],
                     "access_control_version": 2,
                 },
-                "migration_0132_applied": False,
+                "migration_0133_applied": False,
                 "constraint_present": False,
                 "constraint_validated": False,
             },
@@ -406,7 +406,7 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
                 report = self._report(
                     database={
                         "settings_payload": settings,
-                        "migration_0132_applied": False,
+                        "migration_0133_applied": False,
                         "constraint_present": False,
                         "constraint_validated": False,
                     },
@@ -416,7 +416,7 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
                 self.assertFalse(report["cutover_eligible"])
                 self.assertIn("bearer_present_in_canonical_acl", report["blockers"])
 
-    def test_cutover_blocks_partial_0132_database_state(self) -> None:
+    def test_cutover_blocks_partial_0133_database_state(self) -> None:
         report = self._report(
             database={
                 "settings_payload": {
@@ -426,7 +426,7 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
                     "admin_usernames": ["YNSYLP005"],
                     "access_control_version": 2,
                 },
-                "migration_0132_applied": True,
+                "migration_0133_applied": True,
                 "constraint_present": False,
                 "constraint_validated": False,
             }
@@ -467,7 +467,7 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
 
         facts = collect_database_facts(connection)
 
-        self.assertTrue(facts["migration_0132_applied"])
+        self.assertTrue(facts["migration_0133_applied"])
         self.assertTrue(facts["constraint_validated"])
         self.assertEqual(len(connection.queries), 3)
         for query in connection.queries:
@@ -703,7 +703,7 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
                     preflight_module,
                     "collect_database_facts",
                     return_value={
-                        "migration_0132_applied": True,
+                        "migration_0133_applied": True,
                         "constraint_present": True,
                         "constraint_validated": True,
                     },

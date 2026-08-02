@@ -566,7 +566,7 @@ def validate_frontend_dist_base_path(frontend_dist: Path, frontend_base_path: st
 
 
 def build_release_metadata(config: DeploymentConfig) -> dict[str, object]:
-    migration_path = config.root_dir / "backend" / "src" / "fin_ops_platform" / "postgres" / "migrations" / "0132_settings_access_control_guard.sql"
+    migration_path = config.root_dir / "backend" / "src" / "fin_ops_platform" / "postgres" / "migrations" / "0133_settings_access_control_canonical_order.sql"
     helper_path = config.root_dir / "deploy" / "oa" / "bin" / "finops-deploy-control.sh"
     return {
         "release_name": config.release_name,

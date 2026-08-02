@@ -177,7 +177,7 @@ def build_report(
         REPRESENTATIVE_BEARER_USERNAME not in members for members in current.values()
     )
     database_flags = (
-        database.get("migration_0132_applied") is True,
+        database.get("migration_0133_applied") is True,
         database.get("constraint_present") is True,
         database.get("constraint_validated") is True,
     )
@@ -261,7 +261,7 @@ def build_report(
         "steady_state_blockers": sorted(steady_state_blockers),
         "protected_administrator": PROTECTED_ADMIN_USERNAME,
         "database": {
-            "migration_0132_applied": database_flags[0],
+            "migration_0133_applied": database_flags[0],
             "constraint_present": database_flags[1],
             "constraint_validated": database_flags[2],
             "state": database_state,
@@ -339,7 +339,7 @@ def collect_database_facts(connection: Any) -> dict[str, Any]:
     )
     migration = connection.fetch_one(
         "select exists(select 1 from public.schema_migrations where version = %s) as applied",
-        ("0132",),
+        ("0133",),
     )
     constraint = connection.fetch_one(
         """
@@ -348,11 +348,11 @@ def collect_database_facts(connection: Any) -> dict[str, Any]:
         where conrelid = 'app.app_settings'::regclass
           and conname = %s
         """,
-        ("app_settings_access_control_guard",),
+        ("app_settings_access_control_canonical_order_guard",),
     )
     return {
         "settings_payload": dict((row or {}).get("settings_payload") or {}),
-        "migration_0132_applied": bool((migration or {}).get("applied")),
+        "migration_0133_applied": bool((migration or {}).get("applied")),
         "constraint_present": constraint is not None,
         "constraint_validated": bool((constraint or {}).get("convalidated")),
     }
@@ -707,12 +707,12 @@ def run_post_deploy(
         database = collect_database_facts(PostgresConnection(_postgres_settings()))
         if not all(
             (
-                database["migration_0132_applied"],
+                database["migration_0133_applied"],
                 database["constraint_present"],
                 database["constraint_validated"],
             )
         ):
-            raise RuntimeError("migration 0132 or its validated CHECK is missing")
+            raise RuntimeError("migration 0133 or its validated CHECK is missing")
 
         original = acl_get()
         original_accounts = [dict(item) for item in list(original.get("accounts") or [])]
@@ -829,12 +829,12 @@ def run_post_deploy(
         database = collect_database_facts(PostgresConnection(_postgres_settings()))
         if not all(
             (
-                database["migration_0132_applied"],
+                database["migration_0133_applied"],
                 database["constraint_present"],
                 database["constraint_validated"],
             )
         ):
-            raise RuntimeError("migration 0132 or its validated CHECK is missing")
+            raise RuntimeError("migration 0133 or its validated CHECK is missing")
         connection = PostgresConnection(_postgres_settings())
         audit_matches = 0
         for request_id in mutation_request_ids:
@@ -850,7 +850,7 @@ def run_post_deploy(
         if latency["acl_get"]["p95_ms"] > 1000 or latency["acl_put"]["max_ms"] > 5000:
             raise RuntimeError("settings access-control production latency exceeded its release target")
         report["checks"] = {
-            "migration_0132_applied": True,
+            "migration_0133_applied": True,
             "constraint_present_and_validated": True,
             "protected_administrator_session": True,
             "approved_identity_hashes_match": True,
@@ -935,7 +935,7 @@ def main(argv: list[str] | None = None) -> int:
         database = collect_database_facts(PostgresConnection(_postgres_settings()))
         passed = all(
             (
-                database["migration_0132_applied"],
+                database["migration_0133_applied"],
                 database["constraint_present"],
                 database["constraint_validated"],
             )
@@ -945,7 +945,7 @@ def main(argv: list[str] | None = None) -> int:
             "release": args.release,
             "status": "pass" if passed else "fail",
             "database": {
-                "migration_0132_applied": database["migration_0132_applied"],
+                "migration_0133_applied": database["migration_0133_applied"],
                 "constraint_present": database["constraint_present"],
                 "constraint_validated": database["constraint_validated"],
             },

@@ -119,7 +119,7 @@
 
 - Input：generic settings 只接受普通设置 DTO；历史 ACL keys 一律 `400`。专用 ACL command 只接受 admin session、`expected_version` 和其他账户的 full/read 列表。
 - Output：generic settings 不返回 ACL。专用 GET/PUT 返回固定 `administrator=YNSYLP005`、`version`、`accounts`，冲突返回 `409 current_version`。
-- Persistence：`app.app_settings` 是 canonical singleton；repository 在 shared advisory lock 和同一 PostgreSQL transaction 内只合并 ACL family、递增 `access_control_version` 并写 `audit.events`。migration `0132` 的 validated CHECK 是回滚安全底线。
+- Persistence：`app.app_settings` 是 canonical singleton；repository 在 shared advisory lock 和同一 PostgreSQL transaction 内只合并 ACL family、递增 `access_control_version` 并写 `audit.events`。migration `0133` 把 `allowed_usernames` 固定为 protected admin → full-access → readonly 的精确顺序，并以 validated CHECK 和 raw mirror 作为回滚安全底线。
 - Dependency direction：route 只做 HTTP/auth 映射；`AppSettingsService` 拥有 normalize/OA target/compensation 编排；repository 拥有 row lock/SQL/audit；permissions 只解析 identity/判定 tier；OA integration 只消费完整 normalized snapshot。
 - Old code deletion：generic route/service/client/modal/column save/pending replay 不得携带 ACL；`dynamic_admin_usernames_provider`、`get_admin_usernames`、运行时 `FIN_OPS_ADMIN_USERNAMES` 和可写 admin tier 保持删除。不得新增兼容 fallback 或第二写入口。
 - 本变更不新增 read model、worker、dirty scope、outbox、cache 或其他页面 response 字段。

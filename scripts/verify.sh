@@ -21,7 +21,7 @@ infra-smoke
           Set FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS to run read-only
           write-operation SLO audits against recent real outbox events.
 settings-acl-postgres
-          Run the fail-closed settings ACL lost-ack test against a visibly disposable PostgreSQL database.
+          Run settings ACL persistence and canonical migration tests against a visibly disposable PostgreSQL database.
 all       Run backend, frontend, deterministic browser e2e, and docs checks. This is the default.
 USAGE
 }
@@ -74,6 +74,7 @@ run_settings_acl_postgres() {
     PYTHONPATH=backend/src:tests \
     python3 -m unittest \
       tests.test_postgres_state_store_integration.PostgresStateStoreIntegrationTests.test_settings_acl_commit_lost_ack_reconciles_under_fresh_lock \
+      tests.test_settings_access_control_postgres_integration.SettingsAccessControlPostgresIntegrationTests.test_0133_repairs_0132_order_and_enforces_exact_acl_shape \
       -v
 }
 

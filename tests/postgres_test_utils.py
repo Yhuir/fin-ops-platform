@@ -144,6 +144,7 @@ EXPECTED_MIGRATION_FILES = [
     "0130_canonical_finance_domain_contracts.sql",
     "0131_validate_canonical_finance_domain_contracts.sql",
     "0132_settings_access_control_guard.sql",
+    "0133_settings_access_control_canonical_order.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (
