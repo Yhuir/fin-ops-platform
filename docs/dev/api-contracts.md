@@ -90,6 +90,14 @@
 
 ## Workbench 设置 API
 
+### 会话与直接 API 授权
+
+`GET /api/session/me` 保留 OA identity、roles 和 permissions 作为信息字段，但 `allowed` / `access_tier` / `can_access_app` / `can_mutate_data` / `can_admin_access` 只由固定 `YNSYLP005` 或当次 canonical Settings ACL snapshot 派生。除 `YNSYLP005` 外，ACL 缺席、payload 非法或 provider 失败均返回 `denied`；OA role/permission（包括 `finops:app:view`）不能 grant APP 访问。
+
+全局 route policy 和模块自有 guard 消费同一 normalized session。`denied` 账号即使保留 `finops:app:view` 或业务角色，直接调用受保护 GET/写 API 仍返回 `403 permission_denied`。ACL 删除后下一次 session/API 判断立即使用新 snapshot，不从 OA identity cache 复用 APP tier。自动化回归已保留 permission-bearing `YNSYLP006` 的 denied 证据；这是已完成的合同证据，不代替后续生产发布验收。
+
+用户名比较使用 casefold key，对外保留 OA `sys_user.user_name` canonical spelling。等值重复、跨 tier 重复、空值/控制字符或非 canonical protected-admin spelling 在 OA I/O 前返回 `400`。
+
 `GET /api/workbench/settings`
 
 返回关联台和设置页共享的平台设置 payload。响应可包含 `bank_transaction_tags`，用于前端展示当前银行明细标签事实和配置待找发票、流水规则批量处理、免 OA legacy、往来款等下游规则候选。
@@ -97,17 +105,22 @@
 `POST /api/workbench/settings`
 
 - 普通 GET response 和 POST request/response 都不得包含 `access_control`、`allowed_usernames`、`readonly_export_usernames`、`full_access_usernames`、`admin_usernames`、`access_control_version`。POST 出现任一历史 ACL key 返回 `400 access_control_write_forbidden`，不静默忽略。
-- `GET /api/workbench/settings/access-control` 仅 `can_admin_access=true` 可用，返回 `{version, administrator, accounts}`；`administrator` 固定为 `{username: "YNSYLP005", access_tier: "admin", protected: true}`。
-- `PUT /api/workbench/settings/access-control` 仅接受 `{expected_version, accounts}`。`accounts[]` 只有 `username` 与 `access_tier=full_access|read_export_only`；删除条目表示 denied，不接受 admin tier、protected admin、重复账号、body actor 或额外字段。
-- stale `expected_version` 返回 `409 access_control_version_conflict` 和 `current_version`。semantic no-op 返回 `200 changed=false` 且零 DB/audit/OA 写 I/O；真实变化返回 `200 changed=true`，ACL 与 audit 同事务提交，OA target/compensation 失败使用稳定 502/503 错误。
-
-保存项目范围、访问控制、银行账户映射、OA 导入/留存、列布局、待找发票规则等设置项。该接口不是银行明细自动标签规则写入口。
+保存项目范围、银行账户映射、OA 导入/留存、列布局、待找发票规则等普通设置项。该接口不写 ACL，也不是银行明细自动标签规则写入口。
 
 - 请求体不得包含 `bank_transaction_tags`。只要出现该字段，后端返回 `400 bank_transaction_tags_write_forbidden`，不得部分保存其它设置。
 - `AppSettingsService.update_settings(...)` 不暴露 `bank_transaction_tags` 写参数；银行明细自动标签规则只能通过银行明细自动标签 API 或复用该 application service 的恢复工具保存。
 - 前端 settings/workbench API mapper 不得把 GET 得到的 `bank_transaction_tags` 原样回传到该接口，避免把规则内部元数据洗成只剩 label/path/status 的展示字典。
 - 银行明细标签定义、自动匹配规则、外部往来 `turnover_action_type` / `turnover_role` 等元数据只能通过 `/api/bank-details/auto-tag-rules`、`/api/bank-details/auto-tag-rules/file-replacement` 或相关银行明细规则 service 保存。
 - 待找发票、流水规则批量处理、免 OA legacy、往来款标签选择等下游规则只能引用当前 active 银行明细标签 code；保存这些下游规则不得递增 `bank_transaction_tags.version`。
+
+### Settings access-control 专用 API
+
+- `GET /api/workbench/settings/access-control` 仅 `can_admin_access=true` 可用，返回 `{version, administrator, accounts}`；`administrator` 固定为 `{username: "YNSYLP005", access_tier: "admin", protected: true}`。
+- `PUT /api/workbench/settings/access-control` 仅接受 `{expected_version, accounts}`。`accounts[]` 只有 `username` 与 `access_tier=full_access|read_export_only`；删除条目表示 denied，不接受 admin tier、protected admin、重复账户、body actor 或额外字段。actor 只来自当前后端 session，request ID 只来自受信 HTTP adapter。
+- stale `expected_version` 返回 `409 access_control_version_conflict` 和 `current_version`。semantic no-op 返回 `200 changed=false` 且零 PostgreSQL/audit/OA I/O。
+- 真实变化先把目标 membership 投影到三个专用 OA 角色，再在 PostgreSQL ACL critical section 内以 CAS 同事务提交 canonical ACL 和 durable audit；audit 记录 session actor、version、变更账号摘要和 request ID，不记 token 或完整 ACL payload。
+- OA 未配置、超时或专用 role/menu exact-set 验证失败返回 `502 oa_role_sync_failed`，且不写 PostgreSQL/audit。OA 目标成功后 PG 失败会补偿到旧 membership；补偿或 commit outcome 无法确认返回 `503 access_control_sync_inconsistent`，普通持久化失败返回 `503 access_control_persistence_failed`。
+- `finops:app:view` 只是 OA menu selector。APP evaluator 不读 OA role/permission/env authority；部署负责历史 non-dedicated menu binding 的 exact-target 清理和回滚，runtime API 只验证严格投影目标并同步三个专用角色成员。
 
 ## 日常报销批量账务管理 API
 
