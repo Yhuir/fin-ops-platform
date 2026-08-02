@@ -39,7 +39,7 @@ patterns-established:
 
 requirements-completed: [PAGE-15, PAGE-04, PAGE-05, PAR-01, PAR-02, PAR-03]
 
-duration: 19min
+duration: 29min
 completed: 2026-08-02
 ---
 
@@ -49,11 +49,11 @@ completed: 2026-08-02
 
 ## Performance
 
-- **Duration:** 19 min
+- **Duration:** 29 min (including post-wave regression closure)
 - **Started:** 2026-08-02T06:28:07Z
-- **Completed:** 2026-08-02T06:47:00Z
+- **Completed:** 2026-08-02T07:04:02Z
 - **Tasks:** 2
-- **Files modified:** 12
+- **Files modified:** 21 implementation/test files
 
 ## Accomplishments
 
@@ -62,6 +62,7 @@ completed: 2026-08-02
 - `AccessControlService` 删除 permission、role 与 environment authority fields/branches；005 在 provider 前固定为 admin，其他身份每次仅读取一次 canonical ACL snapshot，缺席或 provider 失败即 denied。
 - `auth.py` 的 local/default synthetic identity 不再复制 OA role/permission；测试通过专用 ACL command helper 显式 seed canonical account。
 - OA identity roles/permissions 仍原样出现在 session information fields，但不参与 APP tier 决策；ACL 删除后同一 cached identity 的下一次 session 与 direct API 立即拒绝。
+- Post-wave 全后端回归将共享本地测试身份统一接入 test-only canonical snapshot provider；显式 OA 身份测试通过 Settings ACL seed，不再读取 permission/role/env authority。
 
 ## Task Commits
 
@@ -70,6 +71,7 @@ completed: 2026-08-02
 3. **Task 2 RED:** `892ce9021` — 锁定 permission/role/env/provider-failure negative matrix 与即时撤权。
 4. **Task 2 GREEN:** `868ae6d1a` — 删除旧 authority 并实现单 snapshot ACL-only evaluator。
 5. **Regression fixture:** `c6f104a56` — 4 个 Settings API 测试改用显式 canonical ACL seed。
+6. **Post-wave regression closure:** `2bdb5c89e` — 修复共享测试 ACL fixture、PostgreSQL fake Settings ACL 与跨模块显式身份，完整后端恢复全绿。
 
 ## Files Created/Modified
 
@@ -78,8 +80,8 @@ completed: 2026-08-02
 - `backend/src/fin_ops_platform/services/oa_role_sync_service.py` — OA assignments 只消费 canonical snapshot。
 - `backend/src/fin_ops_platform/services/access_control_service.py` — fixed-admin + ACL-only single-snapshot evaluator。
 - `backend/src/fin_ops_platform/app/auth.py` — synthetic identity 与 authority seed 分离。
-- `tests/app_test_support.py` — 显式 default-test ACL command helper。
-- 六个目标测试文件 — normalization、service、session/API、authorization 与 inventory regression coverage。
+- `tests/app_test_support.py` — 显式 ACL command helper，以及仅用于 synthetic local identity 的 canonical snapshot provider。
+- 十五个测试文件 — normalization、service、session/API、authorization、PostgreSQL fake store、ETC 与跨模块 regression coverage。
 
 ## Decisions Made
 
@@ -97,6 +99,7 @@ completed: 2026-08-02
 - **Frontend interaction:** 不适用；session wire shape 未改变，13-03 已覆盖现有 UI，13-09 负责 phase-level frontend sentinel。
 - **End-to-end business flow:** cached identity allow → ACL delete → next session denied → direct API 403。
 - **Existing regression:** Settings generic rejection contracts、readonly mutation guards、write-entry inventory 与 OA assignments。
+- **Post-wave fixture sentinel:** synthetic default identity 为 full access、任意 outsider 仍 denied，且 test-only provider 不写入持久化 Settings ACL。
 
 ## Verification
 
@@ -105,6 +108,10 @@ completed: 2026-08-02
 - `bash scripts/verify.sh lint` — passed。
 - `git diff --check` — passed。
 - Runtime sentinel — APP auth source 无 permission/role/env admission symbols or environment reads。
+- 四个代表性集成模块 `test_app_health_api`、`test_read_model_api_contract_harness`、`test_workbench_write_characterization`、`test_app_postgres_mode` — 100 passed。
+- auth/session/settings/ETC focused regression — 217 passed，4 skipped。
+- 六个残余 fixture 模块 focused regression — 44 passed。
+- `bash scripts/verify.sh backend` — 3821 passed，52 skipped，0 failures，0 errors。
 
 ## Deviations from Plan
 
@@ -117,9 +124,16 @@ completed: 2026-08-02
 - **Files modified:** `tests/test_app_settings_service.py`
 - **Commit:** `c6f104a56`
 
+**2. [Rule 3 - Blocking] Closed post-wave shared fixture regressions after authority removal**
+- **Found during:** Wave integration gate before 13-08
+- **Issue:** Shared local application tests expected the synthetic `test_finops_user` to succeed without a Settings ACL, PostgreSQL fake settings returned an invalid empty admin tier, and several explicit OA identities still relied on removed permission fields.
+- **Fix:** Installed a test-only provider that augments the real canonical Settings snapshot with only the synthetic default identity; retained explicit denied/read/admin fixtures; converted non-default success identities to dedicated Settings ACL commands; replaced invalid fake/malformed ACL payloads with canonical or non-ACL fixtures.
+- **Files modified:** `tests/app_test_support.py` and ten focused regression files.
+- **Commit:** `2bdb5c89e`
+
 ## Deferred Issues
 
-- Whole-repo scan found four stale test-only reads of removed `AccessControlService.required_permission` in `tests/test_etc_backend.py` and `tests/test_etc_invoice_pdf_bundle_service.py`. A precise ETC PDF test confirms the expected `AttributeError`. The plan's scope note forbids expanding beyond the listed files and assigns cross-page/full-repository cleanup to the later phase verification plan; details are in `deferred-items.md`.
+None. The four stale ETC test-only `required_permission` reads recorded by the initial plan were removed in the post-wave regression closure. Remaining literal mentions are negative sentinels that prove the legacy constructor/source fields stay absent.
 
 ## Authentication Gates
 
@@ -144,10 +158,10 @@ None.
 ## Next Phase Readiness
 
 - 13-07 implementation is complete; 13-08 was not started.
-- Later phase verification must replace the two out-of-scope ETC test fixtures' removed field reads with explicit canonical ACL seed.
+- Wave 5 may proceed from a clean 3821-test backend baseline; no ACL fixture debt remains.
 
 ## Self-Check: PASSED
 
-- All 12 modified implementation/test files and this SUMMARY exist.
-- Commits `060c4fe3f`, `a55193895`, `892ce9021`, `868ae6d1a`, and `c6f104a56` exist in repository history.
-- No goal-blocking stub or unplanned threat surface was found; the explicit out-of-scope ETC fixture debt is recorded in `deferred-items.md`.
+- All 21 modified implementation/test files and this SUMMARY exist.
+- Commits `060c4fe3f`, `a55193895`, `892ce9021`, `868ae6d1a`, `c6f104a56`, and `2bdb5c89e` exist in repository history.
+- No goal-blocking stub, unplanned threat surface, or open ACL fixture debt remains.
