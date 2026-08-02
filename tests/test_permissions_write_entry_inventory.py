@@ -2,9 +2,17 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+import ast
+from functools import lru_cache
+import inspect
 from pathlib import Path
 import re
 import unittest
+
+from fin_ops_platform.services.access_control_service import AccessControlService
+from fin_ops_platform.services.app_settings_service import AppSettingsService
+from fin_ops_platform.services.read_model_manifest import READ_MODEL_MANIFEST
+from fin_ops_platform.services.runtime_worker_registry import RUNTIME_WORKER_REGISTRY
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -17,6 +25,102 @@ FEATURES_DIR = REPO_ROOT / "web" / "src" / "features"
 COVERAGE_MATRIX_PATH = (
     REPO_ROOT / ".planning" / "phases" / "27-read-model-fan-out" / "27-COVERAGE-MATRIX.md"
 )
+AUTHORITY_SCAN_OWNER = Path(__file__).resolve()
+AUTHORITY_SCAN_ROOTS = tuple(REPO_ROOT / name for name in ("backend", "web", "tests", "deploy", "scripts", "docs"))
+AUTHORITY_TEXT_SUFFIXES = frozenset(
+    {".css", ".env", ".example", ".html", ".js", ".json", ".md", ".py", ".sh", ".sql", ".ts", ".tsx"}
+)
+RETIRED_ADMISSION_ENV = (
+    "FIN_OPS_" + "ALLOWED_USERNAMES",
+    "FIN_OPS_" + "ALLOWED_ROLES",
+    "FIN_OPS_" + "READONLY_EXPORT_USERNAMES",
+)
+OA_SELECTOR_ENV = "FIN_OPS_OA_" + "REQUIRED_PERMISSION"
+OA_MENU_PERMISSION = "finops:app:" + "view"
+RETIRED_ENV_ALLOWED_PATHS = frozenset(
+    {
+        "backend/src/fin_ops_platform/tools/settings_access_control_preflight.py",
+        "deploy/oa/README.md",
+        "deploy/oa/bin/finops-deploy-control.sh",
+        "docs/architecture/backend-refactor/platform-runtime-boundary-audit.md",
+        "tests/test_deploy_oa_script.py",
+        "tests/test_session_api.py",
+        "tests/test_settings_access_control_preflight.py",
+    }
+)
+OA_SELECTOR_ALLOWED_PATHS = frozenset(
+    {
+        "backend/src/fin_ops_platform/services/oa_role_sync_service.py",
+        "backend/src/fin_ops_platform/tools/settings_access_control_preflight.py",
+        "deploy/oa/README.md",
+        "deploy/oa/bin/finops-deploy-control.sh",
+        "deploy/oa/env/fin-ops.common.env.example",
+        "docs/architecture/backend-refactor/platform-runtime-boundary-audit.md",
+        "docs/architecture/oa-integration.md",
+        "tests/test_deploy_oa_script.py",
+        "tests/test_oa_role_sync_service.py",
+        "tests/test_settings_access_control_preflight.py",
+    }
+)
+OA_SELECTOR_BACKEND_PATHS = frozenset(
+    {
+        "backend/src/fin_ops_platform/services/oa_role_sync_service.py",
+        "backend/src/fin_ops_platform/tools/settings_access_control_preflight.py",
+    }
+)
+
+
+@lru_cache(maxsize=1)
+def _authority_source_paths() -> tuple[Path, ...]:
+    paths: list[Path] = []
+    for root in AUTHORITY_SCAN_ROOTS:
+        for path in root.rglob("*"):
+            if (
+                path.is_file()
+                and path.resolve() != AUTHORITY_SCAN_OWNER
+                and path.suffix.lower() in AUTHORITY_TEXT_SUFFIXES
+                and "node_modules" not in path.parts
+                and "__pycache__" not in path.parts
+            ):
+                paths.append(path)
+    return tuple(sorted(paths))
+
+
+@lru_cache(maxsize=None)
+def _authority_hits(token: str) -> tuple[tuple[str, int, str], ...]:
+    hits: list[tuple[str, int, str]] = []
+    for path in _authority_source_paths():
+        relative = path.relative_to(REPO_ROOT).as_posix()
+        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if token in line:
+                hits.append((relative, line_number, line.strip()))
+    return tuple(hits)
+
+
+def _access_control_constructor_authority_hits() -> list[str]:
+    forbidden_keywords = {"required_" + "permission", "allowed_" + "roles"}
+    hits: list[str] = []
+    for root in (REPO_ROOT / "backend", REPO_ROOT / "tests"):
+        for source_path in root.rglob("*.py"):
+            if source_path.resolve() == AUTHORITY_SCAN_OWNER:
+                continue
+            tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                if isinstance(node.func, ast.Name):
+                    callable_name = node.func.id
+                elif isinstance(node.func, ast.Attribute):
+                    callable_name = node.func.attr
+                else:
+                    continue
+                if callable_name != "AccessControlService":
+                    continue
+                for keyword in node.keywords:
+                    if keyword.arg in forbidden_keywords:
+                        relative = source_path.relative_to(REPO_ROOT).as_posix()
+                        hits.append(f"{relative}:{node.lineno}:AccessControlService({keyword.arg}=...)")
+    return sorted(hits)
 
 
 def _coverage_section(heading: str, next_heading: str) -> str:
@@ -398,17 +502,129 @@ class PermissionsWriteEntryInventoryTests(unittest.TestCase):
         auth_source = (REPO_ROOT / "backend/src/fin_ops_platform/app/auth.py").read_text(encoding="utf-8")
         forbidden = (
             "_parse_csv_environment",
-            "required_permission",
-            "allowed_roles",
-            "FIN_OPS_ALLOWED_USERNAMES",
-            "FIN_OPS_ALLOWED_ROLES",
-            "FIN_OPS_READONLY_EXPORT_USERNAMES",
-            "FIN_OPS_OA_REQUIRED_PERMISSION",
+            "required_" + "permission",
+            "allowed_" + "roles",
+            *RETIRED_ADMISSION_ENV,
+            OA_SELECTOR_ENV,
         )
 
         for token in forbidden:
             with self.subTest(token=token):
                 self.assertNotIn(token, access_control_source + auth_source)
+
+        self.assertEqual(
+            _access_control_constructor_authority_hits(),
+            [],
+            "AccessControlService constructor authority survived outside the single inventory owner.",
+        )
+
+    def test_retired_app_admission_environment_is_confined_to_explicit_rejection_or_history_paths(self) -> None:
+        unexpected: list[str] = []
+        for token in RETIRED_ADMISSION_ENV:
+            for path, line_number, line in _authority_hits(token):
+                if path not in RETIRED_ENV_ALLOWED_PATHS:
+                    unexpected.append(f"{path}:{line_number}:{token}: {line}")
+
+        self.assertEqual(
+            unexpected,
+            [],
+            "Retired APP admission env references must be rejection tests, migration history, or deploy guards; "
+            "extend the explicit path allowlist only after proving that disposition.",
+        )
+
+    def test_fixed_oa_selector_is_confined_to_oa_assets_preflight_deploy_docs_and_tests(self) -> None:
+        selector_hits = _authority_hits(OA_SELECTOR_ENV)
+        unexpected_paths = [
+            f"{path}:{line_number}:{line}"
+            for path, line_number, line in selector_hits
+            if path not in OA_SELECTOR_ALLOWED_PATHS
+        ]
+        self.assertEqual(
+            unexpected_paths,
+            [],
+            "FIN_OPS_OA_REQUIRED_PERMISSION is an OA selector only; new references need an explicit proven path.",
+        )
+
+        invalid_assignments: list[str] = []
+        assignment_pattern = re.compile(rf"{re.escape(OA_SELECTOR_ENV)}\s*=(?!=)\s*([^\s`\"']+)")
+        for path, line_number, line in selector_hits:
+            match = assignment_pattern.search(line)
+            if match is not None and match.group(1) != OA_MENU_PERMISSION:
+                invalid_assignments.append(f"{path}:{line_number}:{line}")
+        self.assertEqual(
+            invalid_assignments,
+            [],
+            f"{OA_SELECTOR_ENV} assignments must be exactly {OA_MENU_PERMISSION}.",
+        )
+
+        marker_hits = _authority_hits(OA_MENU_PERMISSION)
+        invalid_backend_marker_hits = [
+            f"{path}:{line_number}:{line}"
+            for path, line_number, line in marker_hits
+            if path.startswith("backend/") and path not in OA_SELECTOR_BACKEND_PATHS
+        ]
+        invalid_web_marker_hits = [
+            f"{path}:{line_number}:{line}"
+            for path, line_number, line in marker_hits
+            if path.startswith("web/src/") and not path.startswith("web/src/test/")
+        ]
+        self.assertEqual(
+            invalid_backend_marker_hits + invalid_web_marker_hits,
+            [],
+            "finops:app:view may identify the OA menu or test identity metadata, never APP runtime authority.",
+        )
+
+    def test_permissions_authority_whole_repo_scanner_has_one_owner(self) -> None:
+        duplicate_owners: list[str] = []
+        for path in (REPO_ROOT / "tests").glob("test_*.py"):
+            if path.resolve() == AUTHORITY_SCAN_OWNER:
+                continue
+            source = path.read_text(encoding="utf-8")
+            if "rglob(" in source and any(token in source for token in RETIRED_ADMISSION_ENV):
+                duplicate_owners.append(path.relative_to(REPO_ROOT).as_posix())
+        self.assertEqual(
+            duplicate_owners,
+            [],
+            "Authorization deletion scanning is owned only by test_permissions_write_entry_inventory.py.",
+        )
+
+    def test_acl_authorization_adds_no_runtime_or_mechanical_io_path(self) -> None:
+        evaluator_source = inspect.getsource(AccessControlService.evaluate)
+        provider_source = inspect.getsource(AccessControlService._load_access_control_snapshot)
+        generic_save_source = inspect.getsource(AppSettingsService.update_settings)
+        acl_save_source = inspect.getsource(AppSettingsService.update_access_control)
+
+        self.assertEqual(provider_source.count("provider()"), 1)
+        for token in ("identity.roles", "identity.permissions", "os.getenv"):
+            with self.subTest(token=token):
+                self.assertNotIn(token, evaluator_source)
+        self.assertNotIn("_oa_role_sync_service", generic_save_source)
+
+        no_op_return = acl_save_source.index('return {"changed": False')
+        self.assertLess(no_op_return, acl_save_source.index("sync_access_control"))
+        self.assertLess(no_op_return, acl_save_source.index("critical_section.commit"))
+        for token in (
+            "enqueue_read_model_refresh",
+            "outbox_events",
+            "read_model_dirty_scopes",
+            "redis",
+            "cache",
+        ):
+            with self.subTest(token=token):
+                self.assertNotIn(token, evaluator_source + acl_save_source)
+
+        self.assertEqual(tuple(READ_MODEL_MANIFEST), ("workbench", "workbench_relation"))
+        self.assertEqual(
+            tuple(registration.instance_name for registration in RUNTIME_WORKER_REGISTRY),
+            (
+                "oa-sync",
+                "workbench-matching",
+                "workbench",
+                "workbench-relation",
+                "import",
+                "settings-maintenance",
+            ),
+        )
 
     def test_phase_27_page_coverage_matches_current_page_registry_bidirectionally(self) -> None:
         self.assertEqual(
