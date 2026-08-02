@@ -29,8 +29,18 @@
 | 发票使用 | invoice usage pages | invoice usage canonical query routes | canonical 发票、使用状态、销项收款、ETC 发票、active pair relations | 页面进入/重进、查询变化、当前页写后重新 GET |
 | ETC 业务批次 | ETC pages/components | ETC business batch routes/service、invoice PDF bundle service | ETC 票据、人工业务批次、导入草稿、OA 提交确认、草稿后批次发票合并下载 | ETC 导入、OA 草稿创建、人工提交确认、对象存储 PDF 读取与只读下载审计 |
 | 成本统计 | cost statistics page | cost routes/query service | 项目、费用、发票、核销关系 | 项目范围变化、发票/流水关系变化 |
-| 设置 / 账户 / 项目 | settings pages | generic settings routes + admin-only access-control route | 普通设置、其他账户 full/read/denied、固定管理员、项目状态、规则配置 | 普通配置保存、版本化 ACL 变化、数据重置 |
+| 设置 / 账户 / 项目 | `web/src/pages/SettingsPage.tsx` | generic settings routes + admin-only access-control route | 普通设置、canonical Settings ACL、固定管理员、项目状态、规则配置；OA role/permission 不是 APP authority | 普通配置保存、版本化 ACL 变化、数据重置 |
 | App Health | shell/status components | app health routes、runtime queue、worker registry | queue、read model freshness、worker 状态、cache 状态 | worker heartbeat、refresh job、后台任务 |
+
+## 权限链路与跨页面影响
+
+- React bootstrap 由 `SessionProvider` 请求 `/api/session/me`，`SessionGate` 只消费后端 normalized `allowed` / `access_tier` / capabilities 决定是否 mount 业务 router。OA roles/permissions 可保留为信息，不在前端反推 APP tier。
+- 前端隐藏、禁用和 `SessionGate` 只是交互边界；backend global route policy 和模块自有 guard 才是 direct API 的权威边界。permission-bearing denied 账号直达 `/fin-ops/` 不 mount 业务页，直调受保护 API 返回 `403`。
+- `/settings` 的“访问账户权限”是唯一 ACL UI，仅固定 `YNSYLP005` 加载和保存专用 API。full-access 用户仍可保存普通设置，但无法查询/写入 ACL；read-export 用户只读；denied 用户无法进入 router。
+- APP tier 不写入 OA identity cache。账号从 ACL 删除后，同一 OA 身份的下一次 session/direct API 判断立即 denied。OA 菜单可见性由 canonical ACL 到三个专用角色的投影决定，以投影后的新 OA router/session 为验收边界，不承诺旧 DOM 无刷新消失。
+- `finops:app:view` 只定位 OA 菜单。runtime Settings command 只验证严格三角色投影并更新其 members；历史 non-dedicated menu binding 的 exact cleanup/rollback 由部署拥有，不由页面或运行时宽删。
+- 当前 17-route registry 的 admin/full/read/denied 回归由 `web/src/test/PageRouteHost.test.tsx` 和 `web/e2e/permissions-role-matrix.spec.ts` 锁定；App Health、OA 申请人凭据和 data reset 仍是 admin-only。这是已完成的自动化证据，不表示生产已发布。
+- 该权限收敛没有新增或改变任何页面 response shape、read model、worker、dirty scope、outbox、Redis 或 cache key。
 
 ## Global Runtime Status Plane 页面域
 
@@ -59,7 +69,7 @@ freshness gate。
 | `batch_accounting` | `/batch-accounting` | 单次 PostgreSQL repeatable-read canonical snapshot；无 Batch read model/worker |
 | `turnover_ledger` | `/turnover-ledger` | 单次 PostgreSQL repeatable-read canonical snapshot；无 Turnover read model/worker |
 | `etc_tickets` | `/etc-tickets` | ETC import jobs、ETC business batch manual OA status |
-| `settings` | `/settings` | OA identity/state store/settings refresh runtime dependencies |
+| `settings` | `/settings` | OA identity + canonical Settings ACL/ordinary settings store；ACL 不使用页面 read model、worker 或 cache |
 | `app_health_operations` | `/operations/app-health` | runtime health dependencies、workers、queue、state store |
 
 ## 页面职责边界

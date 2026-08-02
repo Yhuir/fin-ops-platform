@@ -64,6 +64,8 @@ React 启动时由 `SessionProvider` 调用 `fetchSessionMe()`，通过 `Session
 
 - 前端 `fetchSessionMe()` 必须使用 `apiRequestJson(..., { timeoutMs })` 设置明确 deadline；请求挂起时进入 `error` 状态并提供 `SessionProvider.refresh()` 重试入口，不能无限停留在“正在验证 OA 会话”。
 - 后端 `/api/session/me` 只做 HTTP mapping、错误码映射和 `resolve_oa_request_session(...)` 调用；OA 身份查询仍由 `OAIdentityService` 按 `FIN_OPS_OA_REQUEST_TIMEOUT_MS` 控制外部服务超时。
+- `OAIdentityService` 的 identity cache 可保留用户名、roles 和 permissions，但不缓存 APP tier。`AccessControlService` 对精确 `YNSYLP005` 固定返回 admin；对其他账号每次最多取一次 canonical Settings ACL snapshot，provider 缺失/非法/失败即 denied。
+- APP 级别判断不读 OA roles/permissions 或退役 env admission。`finops:app:view` 即使出现在 identity 中也只是 OA 菜单信息；`/api/session/me` 返回的 normalized access fields 和 backend guards 仍以 canonical ACL 为准。
 - `/api/oa-pending-payments*` 已由模块 route 的显式 read-session/write-auth ports 完整执行权限门，因此 global dispatcher 不再对该路径树重复解析同一 session；所有其它受保护页面继续经过原 global guard。该例外只去重 I/O，不缓存 identity、不改变共享权限策略或错误语义。
 - 会话失败不能伪装成 read model fresh，也不写 facts、audit、dirty scope、outbox 或 read model。全局 App Status 可以把 session 不可用展示为 blocked/red，但页面本地不能改写后端 runtime facts。
 - retry 只重新执行 session bootstrap；不会清理轻量页面 session state，除非返回的新用户 scope 或 session generation 触发前端缓存隔离规则。
@@ -81,7 +83,13 @@ authoritative integration snapshot 默认同样只提交 canonical facts/source 
 
 写模型、权限认证、冲突校验不做“分发 read model”；它们保留明确 command/service 边界。
 
-Settings ACL 是低频 control-plane command：generic settings route 不含 ACL I/O；admin-only access-control route 把 session actor 和 server request id 交给 `AppSettingsService`，由 settings repository 在 advisory lock/CAS 事务内合并 ACL keys 与 durable audit。`AccessControlService` 每次 session 判定最多读取一次 ACL snapshot；OA integration 只消费归一后的真实变化，不能反向决定管理员或读写 PostgreSQL。
+Settings ACL 是低频 control-plane command：generic settings route 不含 ACL I/O；`/settings` 的“访问账户权限”是唯一人工 UI，admin-only access-control route 把 session actor 和 server request id 交给 `AppSettingsService`。Settings repository 在 advisory lock/CAS critical section 内只合并 ACL keys 与 durable audit；semantic no-op 在 OA/PG write 前返回。用户名等值使用 casefold key，canonical spelling 仅由 OA `sys_user.user_name` 拥有；碰撞在 OA I/O 前 fail closed。
+
+OA integration 只消费归一后的真实变化：它在一个 OA transaction 内验证唯一 `finops:app:view` menu、三个唯一专用 role 和 exact 三绑定，然后只替换三类 `sys_user_role` members。它不能反向决定 APP tier、管理员或读写 PostgreSQL；runtime 发现 non-dedicated menu binding 时 fail closed，部署才拥有 approved before-image 约束下的 exact cleanup/read-back/rollback。
+
+真 ACL 变化只在 OA target 和 PostgreSQL ACL/audit 达到当前补偿合同后返回成功；OA 失败返回 `502`，补偿或 commit outcome 不一致返回 `503`。ACL 删除后，同一 cached OA identity 的下一次 session/global guard/module guard 立即读到 denied；新 OA router/session 用于验收菜单投影，旧浏览器 DOM 不是后端撤权边界。
+
+该链路没有新增 read model、worker、dirty scope、outbox、Redis 或 cache。backend direct API/管理页回归由 `tests/test_session_api.py`、`tests/test_auth_guard.py`、`tests/test_route_access_policy.py`、`tests/test_app_health_api.py`、`tests/test_oa_applicant_credentials_api.py` 和 `tests/test_settings_data_reset_job.py` 锁定；frontend/17-route 消费合同由 `web/src/test/SessionGate.test.tsx`、`web/src/test/PageRouteHost.test.tsx` 和 `web/e2e/permissions-role-matrix.spec.ts` 锁定。这些是已完成自动化证据，不代表生产已发布。
 
 任何写入 PostgreSQL canonical facts 的路径，都必须先落到 `../architecture/module-boundaries/canonical-facts.md` 登记的 owner 模块。非 owner 模块只能通过 owner service、facade、UoW 或明确 adapter 发起写入；不能把 `read_model.*`、Redis、RabbitMQ 或前端事件反向当作业务事实。
 
