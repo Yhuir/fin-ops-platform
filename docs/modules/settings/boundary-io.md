@@ -26,7 +26,7 @@
 - 不直接执行业务导入或 read model projection。
 - 不在前端保存敏感凭证。
 - 不绕过数据安全 reset service。
-- 不判定 APP tier；permissions-and-audit 拥有 evaluator，OA integration 只消费完整 normalized ACL snapshot，部署才拥有历史 menu binding cleanup/rollback。
+- 不判定 APP tier；permissions-and-audit 拥有 evaluator，OA integration 只消费完整 normalized ACL snapshot。历史 menu binding cleanup 已完成并退休，稳态部署只断言严格拓扑，不再提供 cleanup/rollback 写路径。
 
 ## 输入 I/O
 

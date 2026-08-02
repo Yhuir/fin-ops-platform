@@ -85,7 +85,7 @@ authoritative integration snapshot 默认同样只提交 canonical facts/source 
 
 Settings ACL 是低频 control-plane command：generic settings route 不含 ACL I/O；`/settings` 的“访问账户权限”是唯一人工 UI，admin-only access-control route 把 session actor 和 server request id 交给 `AppSettingsService`。Settings repository 在 advisory lock/CAS critical section 内只合并 ACL keys 与 durable audit；semantic no-op 在 OA/PG write 前返回。用户名等值使用 casefold key，canonical spelling 仅由 OA `sys_user.user_name` 拥有；碰撞在 OA I/O 前 fail closed。
 
-OA integration 只消费归一后的真实变化：它在一个 OA transaction 内验证唯一 `finops:app:view` menu、三个唯一专用 role 和 exact 三绑定，然后只替换三类 `sys_user_role` members。它不能反向决定 APP tier、管理员或读写 PostgreSQL；runtime 发现 non-dedicated menu binding 时 fail closed，部署才拥有 approved before-image 约束下的 exact cleanup/read-back/rollback。
+OA integration 只消费归一后的真实变化：它在一个 OA transaction 内验证唯一 `finops:app:view` menu、三个唯一专用 role 和 exact 三绑定，然后只替换三类 `sys_user_role` members。它不能反向决定 APP tier、管理员或读写 PostgreSQL；runtime 发现 non-dedicated menu binding 时 fail closed，部署只读验证 steady-state exact topology，不再拥有 cleanup/read-back/rollback 写路径。
 
 真 ACL 变化只在 OA target 和 PostgreSQL ACL/audit 达到当前补偿合同后返回成功；OA 失败返回 `502`，补偿或 commit outcome 不一致返回 `503`。ACL 删除后，同一 cached OA identity 的下一次 session/global guard/module guard 立即读到 denied；新 OA router/session 用于验收菜单投影，旧浏览器 DOM 不是后端撤权边界。
 

@@ -31,6 +31,9 @@
 | no-activate 只上传和校验，不激活、不清理、不启动 worker ensure | `tests/test_deploy_oa_script.py` | 已覆盖 |
 | legacy-current 覆盖式发布入口已移除，CLI 不接受 `--mode` 且脚本无 legacy archive/remote script | `tests/test_deploy_oa_script.py` | 已覆盖 |
 | deploy-control helper 使用 `/etc/fin-ops` secret contract、migration env、drop-in reset、worker readiness | `tests/test_deploy_oa_script.py` | 已覆盖 |
+| exact candidate 自动分类 frontend/runtime/ACL，普通发布只读取 005，ACL 自动要求专项 preflight | `tests/test_deploy_oa_script.py::test_release_gate_profile_is_automatic_and_fail_safe`、`test_frontend_release_gate_is_005_only_and_skips_runtime_audits` | 2026-08-03 新增 |
+| 纯前端门禁只执行 pre/T+0 ready/session/dist/shell/asset，不运行 RabbitMQ apply、runtime closure、page audit 或 T+60/T+300 | `tests/test_deploy_oa_script.py::test_frontend_release_gate_is_005_only_and_skips_runtime_audits` | 2026-08-03 新增 |
+| 一次性 retired env/OA binding cutover 已退出稳态链并删除历史 SQL | `tests/test_deploy_oa_script.py::test_release_gate_steady_state_rejects_retired_env_without_rewriting_files`、`test_retired_role_binding_cleanup_is_deleted_and_user_sync_stays_member_scoped` | 2026-08-03 新增 |
 | runtime worker ensure 从 manifest 派生 required workers/env/check command | `tests/test_deploy_oa_script.py`、`tests/test_runtime_worker_registry.py` | 已覆盖 |
 | Nginx SPA fallback、assets 404/cache、index no-store、API proxy 顺序 | `tests/test_deploy_oa_nginx_config.py` | 已覆盖 |
 | RabbitMQ dispatcher/env examples 覆盖 registry events | `tests/test_deploy_runtime_examples.py`、`tests/test_runtime_worker_registry.py` | 已覆盖 |
@@ -52,9 +55,9 @@
 
 | 日期 | 失败模式 | 回归测试 | 验证 |
 | --- | --- | --- | --- |
+| 2026-08-03 | 一次性 005/006 ACL cutover 被硬编码进每次发布，导致普通功能也要求 006、写 env/OA、等待 T+300 | `test_release_gate_profile_is_automatic_and_fail_safe`、`test_frontend_release_gate_is_005_only_and_skips_runtime_audits`、`test_release_gate_auto_escalates_acl_and_removes_one_time_cutover` | `PYTHONPATH=backend/src python3 -m unittest tests.test_deploy_oa_script -v`；`bash -n deploy/oa/bin/finops-deploy-control.sh` |
 | 2026-08-02 | ACL preflight 无条件要求 006 带 OA 菜单权限，导致合法的 steady/forward-repair `denied + no permission` 被阻断；post-deploy 又同时要求 denied/router 不可见，形成自相矛盾的初始契约 | `test_representative_bearer_requires_exact_identity_and_phase_matched_permission`、`test_post_deploy_role_matrix_restores_bearer_and_emits_redacted_evidence`、`test_post_deploy_rejects_initial_denied_bearer_with_oa_menu_permission` | `PYTHONPATH=backend/src python3 -m unittest tests.test_settings_access_control_preflight -v` |
 | 2026-08-02 | 0132 将 protected admin 追加到 `allowed_usernames` 尾部，违反应用 canonical 顺序并导致候选 page audit 失败；若 preflight 仍只查 0132 会误判 steady | `test_settings_access_control_canonical_order_repairs_0132_append_bug`、`SettingsAccessControlPostgresIntegrationTests.test_0133_repairs_0132_order_and_enforces_exact_acl_shape`、`test_database_guard_only_fails_closed_until_0133_check_is_validated` | `PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_migrations tests.test_settings_access_control_preflight -v`；`FIN_OPS_TEST_DATABASE_URL=<disposable> bash scripts/verify.sh settings-acl-postgres` |
-| 2026-08-02 | OA cleanup preflight producer 按 raw `(role_id, menu_id)` 排序多个 salted target hash，而 deploy-control consumer 要求 lowercase SHA-256 字典序，导致 activation 在 OA/DB/service mutation 前 fail closed | `test_fixed_menu_inventory_emits_exact_hashed_cleanup_and_rollback_targets`、`test_multiple_cleanup_targets_are_canonicalized_by_hash_not_raw_id`、`test_cleanup_consumer_rejects_tampered_duplicate_and_invalid_hashes` | `PYTHONPATH=backend/src python3 -m unittest tests.test_settings_access_control_preflight tests.test_deploy_oa_script -v`；`bash -n deploy/oa/bin/finops-deploy-control.sh` |
 | 2026-06-11 | nightly workflow 或 `verify.sh all` 被改坏后漏跑后端/前端/docs，导致远端 CI 失去门禁价值 | `tests/test_nightly_ci.py` | `PYTHONPATH=backend/src python3 -m unittest tests.test_nightly_ci -v` |
 | 2026-06-17 | nightly workflow 或 `verify.sh all` 被改坏后漏跑 deterministic Playwright browser smoke，导致真实浏览器 gate 失去保护 | `tests/test_nightly_ci.py`、`web/e2e/app-shell.spec.ts` | `PYTHONPATH=backend/src python3 -m unittest tests.test_nightly_ci -v`；`cd web && npm run e2e:smoke` |
 | 2026-06-19 | 新增模块后漏建 `e2e-spec.md` / `e2e-coverage.md`，或 Spec ID 没有 coverage 映射，导致 Spec-first E2E Audit 看似完整但后续 controller 无法追踪缺口 | `tests/test_spec_first_e2e_docs.py`、`tests/test_nightly_ci.py`、`bash scripts/verify.sh docs` | `PYTHONPATH=backend/src python3 -m unittest tests.test_spec_first_e2e_docs tests.test_nightly_ci -v`；`bash scripts/verify.sh docs` |
@@ -73,7 +76,7 @@
 - Nightly smoke：手动触发 GitHub Actions `Nightly CI`，确认 checkout、pip install、npm ci、Playwright Chromium install、`bash scripts/verify.sh all` 成功；该入口使用 clean app state，不读取本地 legacy app Mongo。
 - Runtime smoke：需要验证当前机器或服务器 runtime 状态时显式运行 `bash scripts/verify.sh runtime-check`，再结合 `/health`、worker 和关键页面 smoke 判断迁移残留。
 - Release dry-run：`./scripts/deploy-oa.sh --dry-run --no-activate --allow-dirty`，检查远端命令不执行激活但包含 release layout/check-release/storage preflight。
-- Staging release：上传 release -> check-release -> activate -> `/health/ready` ready -> worker readiness zero missing/stale/mismatch -> public session API returns JSON 401 without token。
+- Staging release：上传 release -> check-release -> auto profile -> profile-specific pre -> activate -> `/health/ready` ready -> 005 admin session -> worker readiness zero missing/stale/mismatch；frontend 到 T+0 结束，runtime/ACL 继续 T+60/T+300。
 - Nginx smoke：刷新 `/fin-ops/`、深链 route、hashed assets、`/fin-ops-api/api/session/me`、`/fin-ops/api/session/me`。
 - Worker smoke：required worker instances 来自 manifest；systemd active；App Health 无 missing/stale/mismatch worker；dirty scope backlog 不增长。
 - Rollback smoke：切回上一个 release 或恢复备份，确认 frontend hash、API release identity、worker drop-in 和 App Health 收敛。

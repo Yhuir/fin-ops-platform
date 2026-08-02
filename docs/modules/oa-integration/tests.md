@@ -17,7 +17,7 @@
 | 进项发票 OA 反提 | preview hash、idempotency、目标申请人、草稿创建失败恢复、version conflict、人工 submitted/not_submitted、提交历史脱敏 | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py`、`web/src/test/InputInvoiceUsagePage.test.tsx`、`web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx` |
 | ETC OA 草稿 / 人工状态 | 草稿 payload、撤销本地绑定、manual status、删除本地批次不删除真实 OA、前端 OA review URL 清洗 | `tests/test_etc_backend.py`、`tests/test_etc_reconciliation_service.py`、`web/src/test/EtcApi.test.ts`、`web/src/test/EtcTicketManagementPage.test.tsx`、`web/src/test/EtcOaNavigation.test.ts` |
 | Runtime OA role projection | fixed selector、unique menu/三 role/exact 三 binding、只替换 dedicated members、disabled/missing/drift/timeout fail closed、compensation | `tests/test_oa_role_sync_service.py`、`tests/test_app_settings_service.py`、`tests/test_workbench_settings_sync_api.py` |
-| Deploy exact cleanup / rollback | retired env rejection、salted before-image、non-dedicated exact targets、non-target invariant、read-back、rollback、secret-safe artifact | `tests/test_settings_access_control_preflight.py`、`tests/test_deploy_oa_script.py` |
+| Deploy ACL verification | 自动 profile、普通发布 005-only、retired env rejection、steady-state `eligible=true`、secret-safe artifact、OA exact topology | `tests/test_settings_access_control_preflight.py`、`tests/test_deploy_oa_script.py` |
 
 ## 七类测试适用性
 
@@ -50,7 +50,7 @@
 | --- | --- | --- |
 | OA permission/业务 role 被误当作 APP admission | `tests/test_session_api.py`、`tests/test_auth_guard.py`、`tests/test_permissions_write_entry_inventory.py` | permission-bearing `YNSYLP006` 缺席 canonical ACL 仍 denied；OA 信息字段不能 grant APP access；retired env/path 不得恢复。 |
 | Runtime 在 drift 下宽清理或部分更新 OA | `tests/test_oa_role_sync_service.py`、`tests/test_app_settings_service.py` | unique menu/三 role/exact binding 在 DML 前验证；runtime 只替换三 dedicated members，disabled/missing/drift/timeout rollback。 |
-| Deploy cleanup 删除业务 role/member 或无法对称恢复 | `tests/test_settings_access_control_preflight.py`、`tests/test_deploy_oa_script.py` | 只清理 approved salted exact non-dedicated binding；before-image、non-target fingerprint、read-back 与 rollback 全部绑定同一 artifact。 |
+| 稳态发布误恢复一次性 cleanup 或放行 cutover artifact | `tests/test_deploy_oa_script.py` | 历史 SQL/写路径必须不存在；ACL activation 只接受 `eligible=true`，topology/env 漂移零写阻断。 |
 | OA session 首次校验因代理/OA 慢响应短暂超时 | `web/src/test/SessionGate.test.tsx` | 首次 `request_timeout` 保持“正在验证 OA 会话...”并自动重试，不能立刻落到错误页；成功重试后进入业务页面。 |
 | OA Mongo 短暂断连导致页面误认为 fresh | `tests/test_mongo_oa_adapter.py` | 断连返回空结果但 read status 为 error，并进入 backoff。 |
 | OA lifecycle alias 导致附件发票 cross-OA blocker | `tests/test_audit_object_identity_tool.py::AuditObjectIdentityToolTests::test_active_oa_source_alias_downgrades_lifecycle_duplicate`、`tests/test_postgres_migrations.py::PostgresMigrationDiscoveryTests::test_expected_migration_files_are_present_and_ordered`、`tests/test_postgres_migrations.py::PostgresMigrationSqlTests::test_sql_contains_required_schemas_and_tables` | `flowRequestId/processId` 缺失的进行中文档与带 `flowRequestId` 的已完成文档内容一致时，只能通过 `app.oa_source_aliases.status='active'` 的显式 alias canonicalize；未批准 alias 仍 blocking，且不得删除 OA 投影/cache。 |
@@ -74,7 +74,7 @@
 3. 设置页保存目标 OA 申请人凭据 -> 进项发票选择 -> 创建 OA 草稿 -> OA 页面可见 draft -> 用户人工确认 submitted/not_submitted。
 4. ETC 业务批次创建 OA 草稿 -> 撤销本地绑定或人工确认 submitted -> 删除本地批次不删除真实 OA 草稿/流程。
 5. OA Mongo 临时不可用 -> 页面/API 不把旧投影伪装为 fresh，App Status 暴露 blocked/degraded。
-6. ACL role projection 后用新的 `/system/menu/getRouters` 或新 OA shell session 验证 menu；旧 DOM/旧 token 不作证据。deployment cleanup/rollback 另用 approved artifact、hash 和 read-back 验证。
+6. ACL role projection 后用新的 `/system/menu/getRouters` 或新 OA shell session 验证 menu；旧 DOM/旧 token 不作证据。自动 `acl` profile 另用 candidate-bound 双身份 artifact、hash 和 post-deploy restore 验证。
 
 P2/P3 一秒级闭环中，这些真实 OA 场景对应 `.planning/P2P3-CLOSURE-PLAN.md` 的 P2P3-013 staging gate。通过条件不是本地 mock 绿灯，而是真实 OA 登录、角色同步、目标申请人、草稿 URL、附件、人工 submitted/not_submitted、投影 freshness 和 App Status 语义均有 staging/production 证据。缺凭据、缺测试对象、只跑本地 stub 或只返回 `auth_missing` 时，状态保持 `staging-gated`。
 
@@ -118,7 +118,7 @@ bash scripts/verify.sh docs
 
 ## Nightly CI 覆盖
 
-ACL role sync 回归由 `tests.test_oa_role_sync_service` 和 `tests.test_app_settings_service` 保护：fixed selector、唯一 menu/三 role/exact 三 binding、固定 admin、target assignments、connect/read/write timeout、generic/no-op 零调用、真实变化一次 target、已知 DB failure 最多一次 compensation、compensation failure fail closed。`tests.test_settings_access_control_preflight` 与 `tests.test_deploy_oa_script` 保护 exact cleanup/before-image/rollback 合同。真实 OA 三角色成员和 fresh router 只由发布前 read-only preflight 与发布后 full→read→denied/restore evidence证明；当前文档不声称生产已部署。
+ACL role sync 回归由 `tests.test_oa_role_sync_service` 和 `tests.test_app_settings_service` 保护：fixed selector、唯一 menu/三 role/exact 三 binding、固定 admin、target assignments、connect/read/write timeout、generic/no-op 零调用、真实变化一次 target、已知 DB failure 最多一次 compensation、compensation failure fail closed。`tests.test_settings_access_control_preflight` 与 `tests.test_deploy_oa_script` 保护自动 profile、steady-state-only ACL activation 与旧 cleanup 链保持删除。真实 OA 三角色成员和 fresh router 只由 ACL 发布前 read-only preflight 与发布后 full→read→denied/restore evidence证明。
 
 Nightly CI 应至少覆盖：
 

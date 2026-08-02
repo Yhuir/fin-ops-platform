@@ -23,13 +23,17 @@
 | `upload_pending` | SSH remote script | 还未写入 `/opt/fin-ops/releases/<release>` |
 | `release_uploaded` | 远端 release dir | 已上传但未激活，可 `--no-activate` 停在此状态 |
 | `check_release_failed` | `finops-deploy-control check-release` | release layout/env contract 不满足，禁止激活 |
-| `preflight_succeeded` | storage/helper/env/release layout checks | 可进入激活 |
-| `migration_running` | `finops-deploy-control activate` | 正在用 migrator env 执行 PostgreSQL migration |
+| `profile_classified` | `release-gate-profile` | 自动得到 `frontend` / `runtime` / `acl`；无法证明 pure frontend 时为 runtime，ACL boundary drift 优先为 acl |
+| `acl_preflight_required` | profile=`acl` | 必须有 candidate-bound 005/006 artifact；普通 profile 不读取 006 |
+| `preflight_succeeded` | profile-specific pre checkpoint | frontend 证明 ready/005/shell/asset/dist；runtime/acl 证明完整 runtime closure |
+| `migration_running` | runtime/acl activation | 正在用 migrator env 执行 PostgreSQL migration；frontend 不进入此状态 |
 | `migration_failed` | migration command non-zero | 禁止继续发布；需要恢复/修复 schema 状态 |
 | `activation_running` | systemd drop-in/frontend publish/restart | 正在切换 API/worker/frontend |
 | `backend_ready` | `GET /health/ready status=ready` | API release readiness 通过 |
 | `workers_ready` | `/health.runtime_infrastructure` | required workers missing/stale/mismatch 全为 0 |
 | `public_routes_ready` | 公网 `/fin-ops-api/api/session/me`、`/fin-ops/api/session/me` | 未登录时应返回 JSON 401，不应返回 SPA HTML |
+| `frontend_t0_verified` | frontend T+0 evidence | active release、published dist、ready、005 session、公开 shell/asset 和 required workers 全通过；无需 T+60/T+300 |
+| `runtime_t300_verified` | runtime/acl evidence | pre、T+0、T+60、T+300 queue/read-model/audit 均稳定 |
 | `release_succeeded` | deploy script 退出 0 | 发布脚本范围完成；仍需业务 smoke |
 | `release_failed` | deploy trap step + exit code | 输出失败 step；不能吞错 |
 | `rollback_needed` | migration/activation/readiness/public route/业务 smoke 失败 | 需要按 runbook 切回 release 或恢复备份 |
@@ -44,6 +48,8 @@
 - API/worker unit 直接加载 migrator env 或旧 `/root` runtime env。
 - `scripts/deploy-oa.sh` 恢复 `--mode legacy-current` 或覆盖 `/opt/fin-ops/current/backend` 的发布流。
 - deploy helper 维护硬编码 worker 清单，绕过 `runtime_worker_manifest`。
+- 操作者手工指定/降级 profile，或普通 frontend/runtime 发布读取 006 token。
+- 在稳态发布中恢复 retired env rewrite、OA historical binding cleanup/rollback 或已删除 SQL。
 - 通过删除测试、skip、放松断言让 nightly 变绿。
 
 ## UI 状态
@@ -84,3 +90,4 @@
 | --- | --- | --- | --- |
 | 2026-06-11 | 补齐 deploy 状态机 | 明确 CI、release、migration、readiness、worker、public route 和 rollback 状态 | 待本轮模块验证 |
 | 2026-07-05 | 移除 `legacy-current` 覆盖式发布入口和旧单文件 env 模板 | 发布状态机只保留 versioned release；legacy current 仅可作为 activate 清理对象 | `tests.test_deploy_oa_script`、`tests.test_deploy_runtime_examples`、`tests.test_platform_runtime_boundary_guards` |
+| 2026-08-03 | 自动风险分级并拆分 frontend/runtime/ACL 门禁 | 普通发布只验证 005；纯前端走 pre/T+0 快速门；ACL 变更自动升级双身份专项门禁；一次性 env/OA cleanup 退出运行链 | `tests.test_deploy_oa_script`、`bash -n deploy/oa/bin/finops-deploy-control.sh` |

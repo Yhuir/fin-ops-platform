@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import copy
 import hashlib
 import json
-import os
 from pathlib import Path
-import subprocess
 import sys
 import tempfile
 import types
@@ -19,40 +16,6 @@ from fin_ops_platform.tools.settings_access_control_preflight import (
     run_post_deploy,
 )
 from fin_ops_platform.services.postgres_connection import PostgresSettings
-
-
-DEPLOY_CONTROL_SCRIPT_PATH = (
-    Path(__file__).resolve().parents[1] / "deploy/oa/bin/finops-deploy-control.sh"
-)
-
-
-def _run_cleanup_artifact_consumer(
-    report: dict[str, object],
-) -> tuple[subprocess.CompletedProcess[str], list[str]]:
-    script = DEPLOY_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
-    marker = '"$API_PYTHON" - "$artifact" "$values_file" <<\'PY\'\n'
-    consumer = script.split(marker, 1)[1].split("\nPY\n", 1)[0]
-    with tempfile.TemporaryDirectory() as temp_dir:
-        artifact = Path(temp_dir) / "preflight.json"
-        values = Path(temp_dir) / "values"
-        artifact.write_text(json.dumps(report), encoding="utf-8")
-        result = subprocess.run(
-            [sys.executable, "-", str(artifact), str(values)],
-            input=consumer,
-            text=True,
-            env={
-                **os.environ,
-                "ARTIFACT_RELEASE": str(report["release"]),
-                "ARTIFACT_OPERATION": "cleanup",
-            },
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
-        rendered_values = (
-            values.read_text(encoding="utf-8").splitlines() if result.returncode == 0 else []
-        )
-        return result, rendered_values
 
 
 class _ReadOnlyConnection:
@@ -281,7 +244,7 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
         self.assertFalse(report["oa"]["matches_target"])
         self.assertNotIn("ATTACKER", str(report))
 
-    def test_fixed_menu_inventory_emits_exact_hashed_cleanup_and_rollback_targets(self) -> None:
+    def test_fixed_menu_inventory_reports_secret_safe_binding_drift(self) -> None:
         report = self._report(
             oa_roles=self._oa_inventory(
                 extra_bindings=[
@@ -301,10 +264,8 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
         rendered = json.dumps(report, sort_keys=True)
         self.assertNotIn("business_accounting", rendered)
         self.assertNotIn("987654", rendered)
-        result, _ = _run_cleanup_artifact_consumer(report)
-        self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_multiple_cleanup_targets_are_canonicalized_by_hash_not_raw_id(self) -> None:
+    def test_multiple_binding_drift_targets_are_canonicalized_by_hash_not_raw_id(self) -> None:
         report = self._report(
             oa_roles=self._oa_inventory(
                 extra_bindings=[
@@ -324,40 +285,6 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
             preflight_module._hash_menu_binding(300, 101, salt),
             preflight_module._hash_menu_binding(307, 101, salt),
         )
-        result, values = _run_cleanup_artifact_consumer(report)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(values[1], ",".join(target_hashes))
-
-    def test_cleanup_consumer_rejects_tampered_duplicate_and_invalid_hashes(self) -> None:
-        report = self._report(
-            oa_roles=self._oa_inventory(
-                extra_bindings=[
-                    {"role_id": 300, "menu_id": 101},
-                    {"role_id": 307, "menu_id": 101},
-                ]
-            )
-        )
-        cleanup = report["oa"]["menu_binding_cleanup"]
-
-        tampered = copy.deepcopy(report)
-        tampered["oa"]["menu_binding_cleanup"]["target_set_sha256"] = "0" * 64
-        duplicate = copy.deepcopy(report)
-        duplicate_cleanup = duplicate["oa"]["menu_binding_cleanup"]
-        duplicate_cleanup["target_hashes"] = [cleanup["target_hashes"][0]] * 2
-        duplicate_cleanup["rollback_target_hashes"] = duplicate_cleanup["target_hashes"]
-        invalid = copy.deepcopy(report)
-        invalid_cleanup = invalid["oa"]["menu_binding_cleanup"]
-        invalid_cleanup["target_hashes"] = ["A" * 64, cleanup["target_hashes"][1]]
-        invalid_cleanup["rollback_target_hashes"] = invalid_cleanup["target_hashes"]
-
-        for name, mutated in {
-            "tampered fingerprint": tampered,
-            "duplicate hash": duplicate,
-            "invalid hash": invalid,
-        }.items():
-            with self.subTest(name=name):
-                result, _ = _run_cleanup_artifact_consumer(mutated)
-                self.assertNotEqual(result.returncode, 0)
 
     def test_selector_role_sync_menu_roles_bindings_and_members_fail_closed(self) -> None:
         cases: list[tuple[str, dict[str, object]]] = []

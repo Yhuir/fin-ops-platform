@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 13-15-PLAN.md
-last_updated: "2026-08-02T18:25:27.000Z"
-last_activity: 2026-08-03 -- Completed quick task 260803-2x7 Workbench pane equal-height contract
+last_updated: "2026-08-03T03:15:00.000Z"
+last_activity: 2026-08-03 -- Completed quick task 260803-3pf automatic release-gate profiles
 progress:
   total_phases: 38
   completed_phases: 11
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 Phase: 13 (settings-improvements) — EXECUTING
 Plan: 15 of 15
 Status: Ready to execute 13-05 production activation against exact 2298ba8c evidence
-Last activity: 2026-08-03 -- Completed quick task 260803-2x7 Workbench pane equal-height contract
+Last activity: 2026-08-03 -- Completed quick task 260803-3pf automatic release-gate profiles
 
 Progress: [█████████░] 14/15 plans complete; 13-05 remains
 
@@ -175,9 +175,9 @@ Progress: [█████████░] 14/15 plans complete; 13-05 remains
 - [Phase 13]: Only exact YNSYLP005 admin and canonical Settings ACL full/read memberships grant APP access. — OA roles, permissions, and environment lists are informational and cannot grant APP authority.
 - [Phase 13]: Provider absence, malformed payload, or provider failure denies every non-admin identity. — Authorization fails closed and warning logs use fixed secret-safe text.
 - [Phase 13]: FIN_OPS_OA_REQUIRED_PERMISSION must be exactly finops:app:view and remain confined to the OA adapter; it never grants APP access. — The same marker identifies the OA menu but canonical Settings ACL remains the only APP authority.
-- [Phase 13]: Runtime OA sync validates one menu, three unique dedicated roles, and the exact three bindings before changing only sys_user_role memberships. — Validation must fail before DML, while deployment cleanup remains a separate controlled operation.
-- [Phase 13]: Disabled or missing runtime projection fails real ACL mutations through the existing 502 contract; deployment cleanup remains owned by 13-10. — A canonical ACL change cannot report success while the OA menu projection is unavailable.
-- [Phase 13]: 普通 eligible 与 cleanup_eligible 分离；只有 fixed-menu non-dedicated binding 可进入 exact cleanup，selector/role/member/env 漂移仍阻断。
+- [Phase 13]: Runtime OA sync validates one menu, three unique dedicated roles, and the exact three bindings before changing only sys_user_role memberships. — Validation fails before DML；一次性 deployment cleanup 已退休，稳态只读验证 exact topology。
+- [Phase 13]: Disabled or missing runtime projection fails real ACL mutations through the existing 502 contract；稳态部署不提供 OA binding cleanup 写路径。 — A canonical ACL change cannot report success while the OA menu projection is unavailable.
+- [Phase 13]: 发布风险由 exact candidate/active payload 自动分级；普通 frontend/runtime 只要求 005，ACL profile 才要求 005/006 且只接受 steady-state `eligible=true`。
 - [Phase 13]: Rollback 只使用同一 approved before-image 的 salted target hashes，并在恢复 previous release 前完成 read-back。
 - [Phase 13]: 三项退休 APP admission env 只要存在即阻断 release；FIN_OPS_OA_REQUIRED_PERMISSION 仅保留固定 OA selector。
 - [Phase 13]: YNSYLP006 attack fixtures retain OA business and dedicated roles plus finops:app:view while canonical ACL absence still yields denied. — Negative tests must preserve hostile identity evidence instead of stripping it.
@@ -197,7 +197,7 @@ Progress: [█████████░] 14/15 plans complete; 13-05 remains
 - [Phase 13]: Candidate eligibility requires exact permission-bearing YNSYLP006 while APP access starts denied.
 - [Phase 13]: Zero-reupload activation recomputes uploaded source, deploy helper and migration hashes from a clean commit.
 - [Phase 13]: Expected auth browser errors are allowed only for exact endpoint/status pairs; all other browser errors remain fail closed.
-- [Phase 13]: Legacy runtime may be exact cutover-eligible without satisfying candidate strict steady state. — Every cutover fact remains exact and blockers must be empty.
+- [Phase 13]: `cutover_eligible` 只保留为历史诊断事实，不再是 release activation 通行条件；稳态 ACL candidate 必须 `eligible=true`。
 - [Phase 13]: Remove the four retired APP admission env keys atomically inside the approved activation window. — Restore their before-image on any pre-activation failure.
 - [Phase 13]: Bind activation only to candidate main-2298ba8c-settings-acl-20260802, bootstrap SHA c98c1f2b… and preflight SHA b031faea…; never auto-rollback to the unsafe active release. — Old db914/f12 evidence and approvals are prohibited; drift requires fresh facts, while failure remains in maintenance for forward repair.
 

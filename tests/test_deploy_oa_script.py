@@ -697,43 +697,13 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("@existing_finops_menu_count = 1", script)
         self.assertNotIn("ORDER BY menu_id DESC\n  LIMIT 1", script)
 
-    def test_role_binding_sql_is_exact_artifact_bound_and_reversible(self) -> None:
-        script = (OA_SQL_ROOT / "fin_ops_role_binding.mysql.sql").read_text(encoding="utf-8")
-        normalized = " ".join(script.lower().split())
-
-        for contract in (
-            "@finops_operation",
-            "@approved_target_hashes_csv",
-            "@approved_target_count",
-            "@approved_before_sha256",
-            "@approved_after_sha256",
-            "@current_before_sha256",
-            "@current_after_sha256",
-            "@cleanup_readback_ok",
-            "@rollback_readback_ok",
-        ):
-            self.assertIn(contract, script)
-        self.assertIn("CREATE TEMPORARY TABLE finops_exact_binding_targets", script)
-        self.assertIn("FIND_IN_SET", script)
-        self.assertIn("DELETE rm FROM sys_role_menu rm", script)
-        self.assertIn("JOIN finops_exact_binding_targets target", script)
-        self.assertIn("INSERT INTO sys_role_menu (role_id, menu_id)", script)
-        self.assertIn("SELECT target.role_id, target.menu_id", script)
-        self.assertIn("START TRANSACTION", script)
-        self.assertIn("ROLLBACK", script)
-        self.assertNotRegex(normalized, r"delete from sys_(role|menu|user_role)\b")
-        self.assertNotRegex(normalized, r"delete (?:rm )?from sys_role_menu where menu_id\s*=\s*@finops_menu_id")
-
-    def test_role_binding_sql_guards_non_targets_and_user_sync_stays_member_scoped(self) -> None:
-        binding = (OA_SQL_ROOT / "fin_ops_role_binding.mysql.sql").read_text(encoding="utf-8")
+    def test_retired_role_binding_cleanup_is_deleted_and_user_sync_stays_member_scoped(self) -> None:
         user_sync = (OA_SQL_ROOT / "fin_ops_user_role_sync.mysql.sql").read_text(encoding="utf-8")
+        deploy_control = DEPLOY_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
 
-        self.assertIn("@non_target_before_sha256", binding)
-        self.assertIn("@non_target_after_sha256", binding)
-        self.assertIn("@non_target_before_sha256 = @non_target_after_sha256", binding)
-        self.assertNotIn("DELETE FROM sys_role", binding)
-        self.assertNotIn("DELETE FROM sys_user_role", binding)
-        self.assertNotIn("UPDATE sys_menu", binding)
+        self.assertFalse((OA_SQL_ROOT / "fin_ops_role_binding.mysql.sql").exists())
+        self.assertNotIn("run_settings_access_control_binding_operation", deploy_control)
+        self.assertNotIn("rollback_settings_access_control_menu_bindings", deploy_control)
         self.assertIn("DELETE FROM sys_user_role", user_sync)
         self.assertNotIn("DELETE FROM sys_role_menu", user_sync)
         self.assertIn("finops_read_export", user_sync)
@@ -748,42 +718,25 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertNotIn(f"{RETIRED_ALLOWED_ROLES}=", common)
         self.assertNotIn(f"{RETIRED_READONLY_USERNAMES}=", common)
 
-    def test_release_gate_runs_artifact_bound_cleanup_and_rollback(self) -> None:
+    def test_release_gate_auto_escalates_acl_and_removes_one_time_cutover(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
         activate = script.split("release_gate_activate() {", 1)[1].split("\n}\n", 1)[0]
         rollback = script.split("rollback_release_gate() {", 1)[1].split("\n}\n", 1)[0]
 
-        self.assertIn("run_settings_access_control_binding_operation()", script)
-        self.assertIn('sha256sum --check "$artifact.sha256"', script)
-        self.assertIn('"$src/deploy/oa/fin_ops_role_binding.mysql.sql"', script)
-        self.assertIn("@approved_target_hashes_csv", script)
-        self.assertIn("@approved_before_sha256", script)
-        self.assertIn("@approved_after_sha256", script)
-        self.assertIn('MYSQL_PWD="$FIN_OPS_OA_ROLE_SYNC_PASSWORD"', script)
-        self.assertIn('apply_settings_access_control_menu_binding_cleanup "$release"', activate)
-        self.assertIn('prepare_settings_access_control_runtime_env "$release" "$env_backup_dir"', activate)
-        self.assertIn("assert_runtime_env_prerequisites", activate)
-        self.assertLess(
-            activate.index('release_gate_checkpoint "$previous_release" pre'),
-            activate.index('prepare_settings_access_control_runtime_env "$release" "$env_backup_dir"'),
-        )
-        self.assertLess(
-            activate.index('prepare_settings_access_control_runtime_env "$release" "$env_backup_dir"'),
-            activate.index("assert_runtime_env_contract"),
-        )
-        self.assertLess(
-            activate.index('release_gate_checkpoint "$previous_release" pre'),
-            activate.index('apply_settings_access_control_menu_binding_cleanup "$release"'),
-        )
-        self.assertLess(
-            activate.index('apply_settings_access_control_menu_binding_cleanup "$release"'),
-            activate.index('activate_release "$release"'),
-        )
-        self.assertIn('rollback_settings_access_control_menu_bindings "$candidate"', rollback)
-        self.assertLess(
-            rollback.index('rollback_settings_access_control_menu_bindings "$candidate"'),
-            rollback.index('activate_release "$previous_release"'),
-        )
+        self.assertIn("release_gate_profile()", script)
+        self.assertIn('if [[ "$release_profile" == "acl" ]]', activate)
+        self.assertIn('assert_settings_access_control_preflight "$release"', activate)
+        self.assertIn('approved.get("eligible") is not True', script)
+        self.assertNotIn('approved.get("cutover_eligible") is not True', script)
+        self.assertIn('if [[ "$release_profile" == "frontend" ]]', activate)
+        self.assertIn("release_gate_frontend_checkpoint", activate)
+        self.assertIn('assert_runtime_env_contract', activate)
+        self.assertNotIn("prepare_settings_access_control_runtime_env", script)
+        self.assertNotIn("restore_settings_access_control_runtime_env", script)
+        self.assertNotIn("run_settings_access_control_binding_operation", script)
+        self.assertNotIn("fin_ops_role_binding.mysql.sql", script)
+        self.assertIn('if [[ "$release_profile" == "acl" ]]', rollback)
+        self.assertIn("production remains in maintenance for forward repair", rollback)
 
     def test_activation_validates_0133_guard_after_migration_before_runtime_changes(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
@@ -823,141 +776,130 @@ class DeployOAScriptTest(unittest.TestCase):
             self.assertIn(retired, contract)
         self.assertIn("LEGACY_ADMIN_ENV", contract)
 
-    def test_release_gate_env_cleanup_is_exact_atomic_and_restored_only_before_activation(self) -> None:
+    def test_release_gate_steady_state_rejects_retired_env_without_rewriting_files(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
-        prepare = script.split("prepare_settings_access_control_runtime_env() {", 1)[1].split(
-            "\n}\n", 1
-        )[0]
-        restore = script.split("restore_settings_access_control_runtime_env() {", 1)[1].split(
-            "\n}\n", 1
-        )[0]
         activate = script.split("release_gate_activate() {", 1)[1].split("\n}\n", 1)[0]
 
-        for key in (
+        self.assertIn("assert_runtime_env_contract", activate)
+        self.assertNotIn("prepare_settings_access_control_runtime_env", script)
+        self.assertNotIn("restore_settings_access_control_runtime_env", script)
+        self.assertNotIn("/run/finops-settings-acl-env", script)
+        for retired in (
             RETIRED_ALLOWED_USERNAMES,
             RETIRED_ALLOWED_ROLES,
             RETIRED_READONLY_USERNAMES,
-            "LEGACY_ADMIN_ENV",
         ):
-            self.assertIn(key, prepare)
-        self.assertIn('mktemp "${path}.settings-acl.XXXXXX"', prepare)
-        self.assertIn('chown --reference="$path" "$temporary"', prepare)
-        self.assertIn('chmod --reference="$path" "$temporary"', prepare)
-        self.assertIn('mv -f -- "$temporary" "$path"', prepare)
-        self.assertIn('sha256sum "$COMMON_ENV"', prepare)
-        self.assertIn('sha256sum "$SECRETS_ENV"', prepare)
-        self.assertNotIn("sed -i", prepare)
-        self.assertIn('cp -a -- "$backup_dir/$(basename "$path")" "$temporary"', restore)
-        self.assertIn('mv -f -- "$temporary" "$path"', restore)
-        self.assertIn('restore_settings_access_control_runtime_env "$env_backup_dir"', activate)
-        self.assertLess(
-            activate.rindex('restore_settings_access_control_runtime_env "$env_backup_dir"'),
-            activate.index('activate_release "$release"'),
-        )
-        after_activation = activate.split('activate_release "$release"', 1)[1]
-        self.assertNotIn("restore_settings_access_control_runtime_env", after_activation)
+            self.assertIn(retired, script)
 
-    def test_runtime_env_cutover_removes_only_exact_keys_and_restores_before_image(self) -> None:
-        script = DEPLOY_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
-        definitions = script.split('\ncmd="${1:-}"', 1)[0]
+    def test_release_gate_profile_is_automatic_and_fail_safe(self) -> None:
+        definitions = DEPLOY_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8").split(
+            '\ncmd="${1:-}"', 1
+        )[0]
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            env_dir = root / "env"
-            evidence = root / "evidence"
-            backup = root / "backup"
-            env_dir.mkdir()
-            backup.mkdir()
-            common = env_dir / "fin-ops.common.env"
-            secrets = env_dir / "fin-ops.secrets.env"
-            common_before = (
-                "KEEP_COMMON=value\n"
-                f"{RETIRED_ALLOWED_USERNAMES}=legacy\n"
-                "FIN_OPS_" "ADMIN_USERNAMES=YNSYLP005\n"
-                f"NOT_{RETIRED_ALLOWED_ROLES}=keep\n"
-            )
-            secrets_before = (
-                "KEEP_SECRET=value\n"
-                f"{RETIRED_ALLOWED_ROLES}=legacy\n"
-                f"{RETIRED_READONLY_USERNAMES}=legacy\n"
-            )
-            common.write_text(common_before, encoding="utf-8")
-            secrets.write_text(secrets_before, encoding="utf-8")
-            common.chmod(0o600)
-            secrets.chmod(0o600)
-            harness = root / "cutover.sh"
+            releases = root / "releases"
+            for name in ("active", "candidate"):
+                src = releases / name / "src"
+                (src / "backend/src/fin_ops_platform").mkdir(parents=True)
+                (src / "backend/requirements.txt").write_text("same\n", encoding="utf-8")
+                (src / "web/dist/assets").mkdir(parents=True)
+                (src / "web/dist/assets/app.js").write_text("same\n", encoding="utf-8")
+                (src / "web/dist/index.html").write_text(
+                    f"<script src='/fin-ops/assets/{name}.js'></script>\n",
+                    encoding="utf-8",
+                )
+            harness = root / "profile.sh"
             harness.write_text(
                 definitions
-                + "\nassert_runtime_env_prerequisites() { :; }\n"
-                + "chown() { :; }\n"
-                + "chmod() {\n"
-                + '  if [[ "$1" == --reference=* ]]; then command chmod 600 "$2"; '
-                + 'else command chmod "$@"; fi\n'
-                + "}\n"
-                + "assert_runtime_env_contract() {\n"
-                + f'  ! grep -hE "^({RETIRED_ALLOWED_USERNAMES}|{RETIRED_ALLOWED_ROLES}|'
-                + f'{RETIRED_READONLY_USERNAMES}|${{LEGACY_ADMIN_ENV}})=" '
-                + '"$COMMON_ENV" "$SECRETS_ENV" >/dev/null\n'
-                + "}\n"
-                + f'prepare_settings_access_control_runtime_env test-release "{backup}"\n'
-                + 'grep -qx "KEEP_COMMON=value" "$COMMON_ENV"\n'
-                + f'grep -qx "NOT_{RETIRED_ALLOWED_ROLES}=keep" "$COMMON_ENV"\n'
-                + 'grep -qx "KEEP_SECRET=value" "$SECRETS_ENV"\n'
-                + 'restore_settings_access_control_runtime_env "'
-                + str(backup)
-                + '"\n',
+                + "\nactive_release_names() { printf 'active\\n'; }\n"
+                + "release_gate_profile candidate --json\n",
                 encoding="utf-8",
             )
-            result = subprocess.run(
-                ["bash", str(harness)],
-                env={
-                    **os.environ,
-                    "FINOPS_ENV_DIR": str(env_dir),
-                    "FINOPS_SETTINGS_ACL_EVIDENCE_ROOT": str(evidence),
-                    "FINOPS_API_PYTHON": sys.executable,
-                },
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=False,
-            )
+            env = {
+                **os.environ,
+                "FINOPS_RELEASE_ROOT": str(releases),
+                "FINOPS_API_PYTHON": sys.executable,
+            }
 
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(common.read_text(encoding="utf-8"), common_before)
-            self.assertEqual(secrets.read_text(encoding="utf-8"), secrets_before)
-            artifact = json.loads(
-                (evidence / "test-release/settings-access-control-env-cutover.json").read_text(
-                    encoding="utf-8"
+            def run_profile() -> dict[str, object]:
+                result = subprocess.run(
+                    ["bash", str(harness)],
+                    env=env,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=False,
                 )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                return json.loads(result.stdout)
+
+            frontend = run_profile()
+            self.assertEqual(frontend["profile"], "frontend")
+            self.assertFalse(frontend["acl_changed"])
+            self.assertFalse(frontend["runtime_changed"])
+            self.assertTrue(frontend["frontend_changed"])
+
+            (releases / "candidate/src/backend/requirements.txt").write_text(
+                "runtime-change\n", encoding="utf-8"
             )
-            self.assertEqual(artifact["files"]["common"]["removed_key_count"], 2)
-            self.assertEqual(artifact["files"]["secrets"]["removed_key_count"], 2)
+            self.assertEqual(run_profile()["profile"], "runtime")
+
+            (releases / "candidate/src/backend/requirements.txt").write_text(
+                "same\n", encoding="utf-8"
+            )
+            acl_path = Path(
+                "backend/src/fin_ops_platform/services/access_control_service.py"
+            )
+            for name, content in (("active", "base\n"), ("candidate", "changed\n")):
+                path = releases / name / "src" / acl_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+            acl = run_profile()
+            self.assertEqual(acl["profile"], "acl")
+            self.assertTrue(acl["acl_changed"])
+
+            (releases / "candidate/src" / acl_path).write_text("base\n", encoding="utf-8")
+            manual_template = Path("deploy/oa/fin_ops_user_role_sync.mysql.sql")
+            for name, content in (("active", "base\n"), ("candidate", "comment-only\n")):
+                path = releases / name / "src" / manual_template
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+            self.assertEqual(run_profile()["profile"], "runtime")
+
+    def test_frontend_release_gate_is_005_only_and_skips_runtime_audits(self) -> None:
+        script = DEPLOY_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
+        frontend = script.split("release_gate_frontend_checkpoint() (", 1)[1].split(
+            "\nrelease_gate_checkpoint() {", 1
+        )[0]
+        activate = script.split("release_gate_activate() {", 1)[1].split("\n}\n", 1)[0]
+
+        self.assertIn("release_gate_005", frontend)
+        self.assertIn("YNSYLP005", frontend)
+        self.assertIn("published_dist_exact", frontend)
+        self.assertIn("/health/ready", frontend)
+        self.assertIn("/fin-ops/api/session/me", frontend)
+        self.assertNotIn("rabbitmq_topology", frontend)
+        self.assertNotIn("runtime_sync_closure_gate", frontend)
+        self.assertNotIn("domain_contract_audit", frontend)
+        self.assertNotIn("sleep 60", frontend)
+        self.assertNotIn("sleep 240", frontend)
+        self.assertEqual(activate.count("IFS= read -r admin_token"), 1)
+        self.assertNotIn("bearer_token", activate)
+        self.assertIn('if [[ "$release_profile" == "acl" ]]', activate)
+        self.assertIn('assert_settings_access_control_preflight "$release"', activate)
 
     def test_release_gate_restores_stable_helpers_when_precheck_fails(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
-        start = script.index('if ! release_gate_checkpoint "$previous_release" pre')
-        end = script.index('if ! (activate_release "$release")', start)
-        pre_failure_branch = script[start:end]
+        activate = script.split("release_gate_activate() {", 1)[1].split("\n}\n", 1)[0]
 
-        self.assertIn(
-            'release_gate_checkpoint "$previous_release" pre "$admin_token" "$evidence_dir" preflight "$release"',
-            script,
-        )
-        self.assertIn(
-            'release_gate_checkpoint "$previous_release" rollback "$admin_token" "$evidence_dir" preflight "$candidate"',
-            script,
-        )
+        self.assertIn("release_gate_frontend_checkpoint", activate)
+        self.assertIn('"$previous_release" pre "$admin_token" "$evidence_dir" preflight "$release"', activate)
+        self.assertIn('"$previous_release" rollback "$admin_token" "$evidence_dir" preflight "$candidate"', script)
         self.assertIn('cat "$evidence_dir/$failure_checkpoint/checkpoint.json" >&2 || true', script)
-        self.assertIn(
-            'release_gate_checkpoint "$release" t0 "$admin_token" "$evidence_dir" full',
-            script,
-        )
-        self.assertIn(
-            'release_gate_checkpoint "$release" t300 "$admin_token" "$evidence_dir" stability',
-            script,
-        )
-        self.assertNotIn("install_deploy_control_helper", pre_failure_branch)
-        self.assertNotIn("install_runtime_worker_helper", pre_failure_branch)
-        self.assertIn('cat "$evidence_dir/pre/checkpoint.json" >&2', pre_failure_branch)
+        self.assertIn('release_gate_checkpoint "$release" t0 "$admin_token" "$evidence_dir" full', activate)
+        self.assertIn('release_gate_checkpoint "$release" t300 "$admin_token" "$evidence_dir" stability', activate)
+        self.assertNotIn("install_deploy_control_helper", activate)
+        self.assertIn('cat "$evidence_dir/pre/checkpoint.json" >&2', activate)
         self.assertIn('"component_statuses": {', script)
 
     def test_release_gate_loads_rabbitmq_env_without_automatic_business_write(self) -> None:

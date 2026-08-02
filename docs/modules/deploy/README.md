@@ -34,7 +34,6 @@
 - worker manifest：`backend/src/fin_ops_platform/tools/runtime_worker_manifest.py`
 - runtime registry：`backend/src/fin_ops_platform/services/runtime_worker_registry.py`
 - Settings ACL preflight collector：`backend/src/fin_ops_platform/tools/settings_access_control_preflight.py`
-- OA exact cleanup/rollback：`deploy/oa/fin_ops_role_binding.mysql.sql`
 
 ## 当前边界
 
@@ -66,16 +65,14 @@ bash scripts/verify.sh all
 
 它覆盖后端 `--check`、后端 unittest discovery、前端 Vitest、前端 build、deterministic Playwright browser smoke、docs 结构检查。
 
-## Settings ACL release-prep 边界
+## 自动发布风险门禁
 
-当前仓库已实现以下发布准备合同；真实 remote preflight、helper bootstrap、candidate activation 和 post-deploy evidence 仍需受控执行，本文不声称生产已部署：
-
-- existing collector 盘点 canonical PostgreSQL ACL、root env、唯一 `finops:app:view` menu、三个专用 roles/bindings/members，并输出 release-bound salted exact artifact。三项 APP admission env 已退役，任一 key 存在即阻断；fixed OA selector env 必须保留并精确指向 `finops:app:view`，但只定位 OA menu，不能 grant APP access。精确 env key 清单只由 canonical deploy runbook/preflight owner 维护。
-- 普通 `eligible` 与 `cleanup_eligible` 分开。只有 fixed-menu non-dedicated bindings 可进入 approved before-image 约束的 exact cleanup；selector/menu/role/member/env/identity/fingerprint drift 全部零写阻断。
-- release 上传不得更新 root helper。首次/升级 deploy-control 必须走 manual-root、candidate hash-pinned、同文件系统 temp + atomic `mv` 流程，并证明 runtime-worker helper、active release、service、DB/OA/ACL fingerprint 不变；禁止 legacy `self-update`。
-- candidate-bound remote preflight artifact/SHA-256 经批准后，激活前必须 just-in-time 重跑；任一事实/hash变化回审批 gate。current runtime checkpoint 通过后才 quiesce API/workers，再执行 migration/CHECK 和 ACL-safe candidate。
-- candidate 只通过 `./scripts/deploy-oa.sh --activate-existing --release-name <release>` 激活；该路径不 build/upload/replace/helper self-update。previous release 只有具备同等 ACL-safe capability/source/migration fingerprint 才可恢复。
-- cleanup/rollback/restore/router-session read-back 或 evidence hash 任一失败都保持 maintenance 并 forward repair；不能跳过审批继续 post-deploy，也不能启动 vulnerable previous binary。
+- `release-gate-profile` 比较 exact candidate 与当前唯一 active release 的实际包内容，自动判定 `frontend`、`runtime`、`acl`；没有手工 profile 或 skip 参数，无法证明纯前端时 fail-safe 为 `runtime`。
+- 三类发布都要求 exact SHA/fingerprint、strict runtime env、required worker inventory、`YNSYLP005` admin session、原子激活和 release evidence；普通发布不读取或要求 `YNSYLP006`。
+- `frontend` 只执行 pre/T+0 的 ready、005 session、公开 shell/asset、发布目录哈希和 active release 检查，不执行 RabbitMQ topology apply、全页面 canonical audit、read-model smoke 或 T+60/T+300 等待。
+- `runtime` 保留 production-equivalent pre/T+0/T+60/T+300；`acl` 在此基础上自动要求 candidate-bound 005/006 双身份 preflight，失败后保持 maintenance 并 forward repair。
+- 三项 retired admission env 和 legacy admin env 已完成一次性清理；稳态发布只读断言它们缺席。历史 OA non-dedicated binding cleanup/rollback SQL 与激活代码已经删除，migration 0132/0133 作为不可变历史保留。
+- release 上传不得更新 root helper。deploy-control 变更仍使用 candidate hash-pinned、同文件系统 temp + atomic `mv` bootstrap；禁止 `self-update`。
 
 完整命令、artifact 路径、secret stdin 和 operator gate 只以 `deploy/oa/README.md` 为 runbook，本模块不复制第二套操作步骤。
 
@@ -92,7 +89,7 @@ bash scripts/verify.sh all
 - App Health：worker missing/stale/mismatch、dirty scopes、RabbitMQ backlog、PostgreSQL runtime unavailable 必须可观测。
 - 权限/session：发布后 `/api/session/me` 必须保持 JSON API，不能被 SPA fallback 吃掉。
 - 数据安全：发布前备份、migration、rollback/PITR、runtime config 需要 staging 或生产 runbook，不能只靠 unittest。
-- ACL 安全：preflight/cleanup/cutover/post-deploy 必须绑定同一 candidate、approved artifact/hash 和 safe fingerprint；APP session/API 与 fresh OA router/role restore 必须分别 read-back。
+- ACL 安全：只有自动分类为 `acl` 的候选要求双身份 preflight/post-deploy；artifact/hash 必须绑定同一 candidate，APP session/API 与 fresh OA router/role restore 分别 read-back。
 
 ## 维护触发器
 

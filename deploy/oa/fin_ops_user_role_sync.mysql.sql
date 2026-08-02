@@ -1,5 +1,5 @@
 -- fin-ops user role sync helper
--- Use after fin_ops_menu.mysql.sql and fin_ops_role_binding.mysql.sql.
+-- Use only after the fixed menu and three dedicated role bindings already pass exact topology verification.
 -- This script updates one OA account at a time so its menu visibility matches
 -- the app-side access model.
 --

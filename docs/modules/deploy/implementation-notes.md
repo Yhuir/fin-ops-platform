@@ -2,6 +2,13 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
+## 2026-08-03 - 自动风险分级与 005-only 普通发布门禁
+
+- 根因：一次性 Settings ACL 切换逻辑被固化进每次发布，导致普通前端或 runtime 变更也读取 006、重写 env/OA binding，并无条件等待 T+300。
+- 修复：deploy-control 直接比较候选与唯一 active release 的实际包内容，自动判定 `frontend`、`runtime` 或 `acl`；不存在手工 profile/skip。无法证明纯前端时保守升级为 `runtime`，ACL 文件变化优先升级为 `acl`。
+- `frontend` 只执行 pre/T+0 的 exact dist、active release、worker inventory、ready、005 session 和公开 shell/asset；`runtime` 保留 pre/T+0/T+60/T+300；只有 `acl` 额外要求 candidate-bound 005/006 preflight。
+- 一次性 retired env/OA binding cleanup 已退出稳态激活链，历史 SQL 和 cleanup/rollback 实现删除；稳态只读断言 retired env 缺席，发现漂移直接失败关闭。
+
 ## 2026-08-01 - Production HTTP runtime 边界
 
 - systemd API unit 只启动 Gunicorn WSGI，使用单 worker/有界 threads、backlog、worker recycle 和 graceful timeout；Nginx 同步限制 client body 与 upstream timeout。

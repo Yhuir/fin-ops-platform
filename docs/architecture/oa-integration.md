@@ -23,7 +23,7 @@ OA identity adapter 只认证 token 对应的 canonical username，并保留 dis
 | OA identity | `OAIdentityService` / `auth.py` | 验证 token，取得 `sys_user.user_name` canonical spelling | 不授予 APP tier |
 | APP authorization | `AccessControlService` + Settings canonical ACL | 固定 `YNSYLP005` admin；其他账号按 ACL `full_access` / `read_export_only`，缺席即 denied | 不读取 OA role/permission/env 作为 fallback |
 | OA menu projection | `OARoleSyncService` | 把同一 canonical ACL 结果投影成一个固定菜单的三个专用角色成员 | 不写 APP ACL，不决定 API 权限 |
-| Deployment cleanup | preflight collector + deploy control/SQL | 只按 approved before-image 清理 fixed menu 的历史 non-dedicated bindings，并提供 read-back/rollback | 不做 runtime member sync，不宽删业务 role/member/menu |
+| Deployment verification | preflight collector + deploy control | 只在自动 `acl` profile 读取 candidate-bound 双身份证据并验证 fixed menu exact topology | 不做 runtime member sync，不清理业务 role/member/menu |
 
 菜单可见性、前端 `SessionGate` 和后端 direct API denial 是独立强制层，但必须投影同一 canonical ACL 结果。菜单可见不等于 APP 已授权；菜单暂时可见的 denied 用户仍必须被 APP session/API 拒绝。
 
@@ -67,19 +67,9 @@ runtime 不创建或删除 menu/role/binding，不修改业务 role、业务 rol
 
 该链路不新增 outbox、worker、read model、Redis 或 permission cache。
 
-## Deployment-owned exact cleanup
+## Deployment-owned exact verification
 
-Runtime 发现 non-dedicated fixed-menu binding 会拒绝变更，不会自行清理。部署 preflight 分开报告：
-
-- `eligible=true`：selector、menu、roles、bindings、members、env 全部 exact；
-- `cleanup_eligible=true`：唯一 drift 只是 fixed menu 上已收集的 non-dedicated bindings；
-- 其他 disabled、missing、selector、role、member、env、identity 或 fingerprint drift：阻断且零写。
-
-可清理目标必须来自 release-bound、salted、root-owned `0600` preflight artifact。artifact 记录 counts、rowset hashes、before/after/rollback fingerprints 和 SHA-256，不保存 token、DSN、密码、raw role/menu ID、业务 role key或非受保护用户名。
-
-清理 transaction 只删除 artifact 指定的 exact non-dedicated binding，并同时证明 fixed menu、三专用 role/binding 未漂移，业务 role/member、其他 menu/binding fingerprint 不变，且 write 后 read-back 精确匹配 approved after-image。任一不变量失败都 rollback。
-
-候选发布后失败时，release rollback 必须先用同一 approved before-image 恢复 exact rows并 read-back；恢复失败保持 maintenance，不能继续恢复旧 binary 后伪装成功。禁止 broad delete、legacy self-update 或任意手工 SQL fallback。
+Runtime 发现 non-dedicated fixed-menu binding 会拒绝变更，不会自行清理。一次性 cleanup 已完成并从稳态发布链删除；部署只在自动判定为 `acl` 的候选上读取 release-bound、root-owned `0600` 双身份 artifact，验证 canonical ACL、migration/CHECK、strict env、唯一 menu、三专用 role/binding/member 与 fresh OA router。任何额外 binding 或其它 topology 漂移都阻断，不能在发布过程中自动修复。禁止 broad delete、legacy self-update 或任意手工 SQL fallback。
 
 ## App shell and direct access enforcement
 
@@ -95,15 +85,13 @@ OA 菜单撤销必须用角色投影后的新 `/system/menu/getRouters` 响应�
 
 当前仓库已经实现 release-prep 合同，但本文不声称生产已部署：
 
-1. 生成并人工批准 candidate-bound read-only preflight artifact及 SHA-256。
-2. 必要时按 approved before-image 执行 exact cleanup。
-3. 通过 manual-root、hash-pinned、同文件系统原子流程 bootstrap deploy-control helper；release 禁止 self-update。
-4. just-in-time 重跑 remote preflight，任一 hash/fingerprint/identity drift 回到审批 gate。
-5. current runtime checkpoint 通过后 quiesce API/workers，再执行 migration/CHECK 和 ACL-safe candidate。
-6. candidate 完成 T+0/T+60/T+300、readiness、queue、audit 与 evidence/hash gate。
-7. post-deploy 使用 fresh admin/representative tokens，逐档证明 full → read → denied、direct API、fresh OA router、三专用 role exact set、non-target invariants、audit 和 finally restore/read-back。
+1. deploy-control 比较 exact candidate 与唯一 active release，自动判定 `frontend`、`runtime` 或 `acl`；普通发布只读取 005。
+2. 只有 `acl` profile 生成 candidate-bound 双身份 read-only preflight artifact 及 SHA-256。
+3. current runtime checkpoint 通过后 quiesce API/workers，再执行 profile 对应的 activation；runtime/ACL 执行 migration/CHECK，frontend 只发布 dist 和重启已有 runtime。
+4. frontend 完成 pre/T+0 exact dist、ready、005 session 与公开 shell/asset；runtime/ACL 完成 T+0/T+60/T+300、queue、audit 与 evidence/hash gate。
+5. ACL profile 才使用 fresh admin/representative tokens，逐档证明 full → read → denied、direct API、fresh OA router、三专用 role exact set、non-target invariants、audit 和 finally restore/read-back。
 
-任何 preflight、cleanup、rollback、router/session restore 或 evidence hash 失败都回审批 gate。previous release 缺少同等 ACL-safe capability/fingerprint 时保持 maintenance 并 forward repair，不能启动 vulnerable binary。
+任何 preflight、router/session restore 或 evidence hash 失败都 fail closed。ACL candidate 失败时保持 maintenance 并 forward repair，不能启动 vulnerable binary。
 
 生产操作、secret 传递、helper bootstrap 和完整命令以 `../../deploy/oa/README.md` 为唯一 runbook。token 只能经 stdin/受控 loader 传递，不得进入 argv、日志、release 或 artifact。
 
@@ -113,7 +101,7 @@ OA 菜单撤销必须用角色投影后的新 `/system/menu/getRouters` 响应�
 
 - backend identity/ACL/direct API/role projection/inventory：`tests/test_session_api.py`、`tests/test_auth_guard.py`、`tests/test_oa_role_sync_service.py`、`tests/test_permissions_write_entry_inventory.py`
 - frontend SessionGate/17-route/restore：`web/src/test/SessionGate.test.tsx`、`web/src/test/PageRouteHost.test.tsx`、`web/e2e/permissions-role-matrix.spec.ts`
-- deploy preflight/exact cleanup/rollback：`tests/test_settings_access_control_preflight.py`、`tests/test_deploy_oa_script.py`
+- deploy ACL preflight/steady-state topology：`tests/test_settings_access_control_preflight.py`、`tests/test_deploy_oa_script.py`
 
 本地证据不证明真实 OA schema、network、fresh router、同域 cookie 或 production restore。production 只有在 candidate-bound preflight、cutover、post-deploy artifact/hash 和人工验收全部通过后才可声明完成。
 
@@ -124,6 +112,6 @@ OA 菜单撤销必须用角色投影后的新 `/system/menu/getRouters` 响应�
 - Settings ACL command：`backend/src/fin_ops_platform/services/app_settings_service.py`
 - OA menu projection：`backend/src/fin_ops_platform/services/oa_role_sync_service.py`
 - Preflight/artifact：`backend/src/fin_ops_platform/tools/settings_access_control_preflight.py`
-- Exact cleanup/rollback：`deploy/oa/fin_ops_role_binding.mysql.sql`、`deploy/oa/bin/finops-deploy-control.sh`
+- Deployment verification：`backend/src/fin_ops_platform/tools/settings_access_control_preflight.py`、`deploy/oa/bin/finops-deploy-control.sh`
 - Canonical deploy runbook：`../../deploy/oa/README.md`
 - APP runtime ownership：`../app-architecture/runtime-and-ownership.md`

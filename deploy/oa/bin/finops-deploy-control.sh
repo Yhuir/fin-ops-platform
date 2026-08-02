@@ -48,6 +48,8 @@ commands:
   contract-version [--require VERSION] print or require the deploy-control safety contract
   candidate-status <release-name> --json
                                       validate candidate source and ACL safety fingerprints
+  release-gate-profile <release-name> --json
+                                      classify the exact candidate as frontend, runtime, or ACL
   settings-access-control-preflight <release-name> --http-tokens-stdin --dry-run --json
                                       write a secret-safe read-only DB/OA/session preflight artifact
   settings-access-control-post-deploy <release-name> --http-tokens-stdin --json
@@ -56,7 +58,7 @@ commands:
   rabbitmq-required-worker-cutover <release-name>
                                       switch exactly the required RabbitMQ-eligible workers, drain queues, rollback on failure
   release-gate-activate <release-name>
-                                      run production-equivalent gate, activate, watch through T+300, rollback on failure
+                                      auto-select frontend/runtime/ACL gate and activate exact release
   workbench-rehydrate <release-name> [args]
                                       rebuild Workbench SQL read models using runtime env
   workbench-audit-identity <release-name> [args]
@@ -187,6 +189,7 @@ EXCLUDED_PARTS = {
     "node_modules",
     "venv",
 }
+
 STRUCTURAL_DIRS = {Path("deploy"), Path("web")}
 
 def source_tree_sha256(root):
@@ -280,11 +283,139 @@ raise SystemExit(0 if candidate["safe"] else 1)
 PY
 }
 
+release_gate_profile() {
+  local release="${1:-}"
+  [[ "$#" -eq 2 && "$2" == "--json" ]] \
+    || die "release-gate-profile requires release name and --json"
+  local candidate_src previous_release active_count previous_src
+  candidate_src="$(release_src "$release")"
+  previous_release="$(active_release_names)"
+  active_count="$(printf '%s\n' "$previous_release" | sed '/^$/d' | wc -l | tr -d ' ')"
+  [[ "$active_count" == "1" ]] \
+    || die "release profile requires exactly one active release, found $active_count"
+  [[ "$previous_release" != "$release" ]] || die "candidate release is already active"
+  previous_src="$(release_src "$previous_release")"
+  "$API_PYTHON" - "$candidate_src" "$previous_src" "$release" "$previous_release" <<'PY'
+import hashlib
+import json
+import os
+from pathlib import Path
+import stat
+import sys
+
+candidate = Path(sys.argv[1])
+active = Path(sys.argv[2])
+candidate_name = sys.argv[3]
+active_name = sys.argv[4]
+
+ACL_PATHS = (
+    "backend/src/fin_ops_platform/app/auth.py",
+    "backend/src/fin_ops_platform/app/route_access_policy.py",
+    "backend/src/fin_ops_platform/app/routes_settings.py",
+    "backend/src/fin_ops_platform/services/access_control_service.py",
+    "backend/src/fin_ops_platform/services/app_settings_service.py",
+    "backend/src/fin_ops_platform/services/oa_role_sync_service.py",
+    "backend/src/fin_ops_platform/services/state_store.py",
+    "backend/src/fin_ops_platform/services/state_store_protocol.py",
+    "backend/src/fin_ops_platform/services/postgres_repositories/ops_tax_etc.py",
+    "backend/src/fin_ops_platform/tools/settings_access_control_preflight.py",
+    "backend/src/fin_ops_platform/postgres/migrations/0132_settings_access_control_guard.sql",
+    "backend/src/fin_ops_platform/postgres/migrations/0133_settings_access_control_canonical_order.sql",
+)
+EXCLUDED_PARTS = {
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".runtime",
+    ".venv",
+    "__pycache__",
+    "node_modules",
+    "venv",
+}
+
+def entry_map(root, selected_paths=None, *, exclude_frontend=False):
+    entries = {}
+
+    def add(path, relative):
+        if any(part in EXCLUDED_PARTS for part in relative.parts):
+            return
+        if relative == Path("RELEASE.json"):
+            return
+        if exclude_frontend and relative.parts[:2] == ("web", "dist"):
+            return
+        if path.is_symlink():
+            payload = os.readlink(path).encode("utf-8")
+            kind = "symlink"
+        elif path.is_file():
+            payload = path.read_bytes()
+            kind = "file"
+        elif path.is_dir():
+            for child in sorted(path.iterdir(), key=lambda item: item.name):
+                add(child, relative / child.name)
+            return
+        else:
+            payload = b""
+            kind = "missing"
+        mode = stat.S_IMODE(path.lstat().st_mode) if path.exists() or path.is_symlink() else 0
+        entries[relative.as_posix()] = hashlib.sha256(
+            f"{kind}\0{mode:04o}\0".encode("ascii") + payload
+        ).hexdigest()
+
+    if selected_paths is None:
+        for child in sorted(root.iterdir(), key=lambda item: item.name):
+            add(child, Path(child.name))
+    else:
+        for name in selected_paths:
+            path = root / name
+            if path.exists() or path.is_symlink():
+                add(path, Path(name))
+            else:
+                entries[name] = "missing"
+    return entries
+
+def digest(entries):
+    encoded = json.dumps(entries, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+candidate_acl = digest(entry_map(candidate, ACL_PATHS))
+active_acl = digest(entry_map(active, ACL_PATHS))
+candidate_runtime = digest(entry_map(candidate, exclude_frontend=True))
+active_runtime = digest(entry_map(active, exclude_frontend=True))
+candidate_frontend = digest(entry_map(candidate, ("web/dist",)))
+active_frontend = digest(entry_map(active, ("web/dist",)))
+
+acl_changed = candidate_acl != active_acl
+runtime_changed = candidate_runtime != active_runtime
+frontend_changed = candidate_frontend != active_frontend
+profile = "acl" if acl_changed else "runtime" if runtime_changed or not frontend_changed else "frontend"
+payload = {
+    "contract": "release-gate-profile-v1",
+    "candidate_release": candidate_name,
+    "active_release": active_name,
+    "profile": profile,
+    "acl_changed": acl_changed,
+    "runtime_changed": runtime_changed,
+    "frontend_changed": frontend_changed,
+    "digests": {
+        "candidate_acl": candidate_acl,
+        "active_acl": active_acl,
+        "candidate_runtime": candidate_runtime,
+        "active_runtime": active_runtime,
+        "candidate_frontend": candidate_frontend,
+        "active_frontend": active_frontend,
+    },
+}
+print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+PY
+}
+
 settings_acl_http_session_fact() {
   local token="$1"
   local credential_source="$2"
   local output="$3"
   local scratch="$4"
+  local url="${5:-http://127.0.0.1:18001/api/session/me}"
   local header_file="$scratch/${credential_source}.header"
   local raw_file="$scratch/${credential_source}.raw.json"
   local status=0
@@ -297,7 +428,7 @@ settings_acl_http_session_fact() {
         --header "@$header_file" \
         --output "$raw_file" \
         --write-out '%{http_code}' \
-        http://127.0.0.1:18001/api/session/me \
+        "$url" \
         || printf '0'
     )"
   fi
@@ -442,8 +573,8 @@ import sys
 
 approved = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 current = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
-if approved.get("eligible") is not True and approved.get("cutover_eligible") is not True:
-    raise SystemExit("settings access-control preflight is neither steady nor cutover eligible")
+if approved.get("eligible") is not True:
+    raise SystemExit("settings access-control preflight is not steady-state eligible")
 if approved.get("release") != current.get("candidate", {}).get("release"):
     raise SystemExit("settings access-control preflight release drifted")
 if approved.get("deployment") != current:
@@ -471,185 +602,6 @@ assert_settings_access_control_database_guard() (
         --json
   )
 )
-
-run_settings_access_control_binding_operation() (
-  local release="$1"
-  local operation="$2"
-  [[ "$operation" == "cleanup" || "$operation" == "rollback" ]] \
-    || die "settings access-control binding operation must be cleanup or rollback"
-  local src evidence_dir artifact values_file raw_result result_file sql_file
-  src="$(release_src "$release")"
-  evidence_dir="$SETTINGS_ACL_EVIDENCE_ROOT/$release"
-  artifact="$evidence_dir/settings-access-control-preflight.json"
-  values_file="$(mktemp /run/finops-settings-acl-binding-values.XXXXXX)"
-  raw_result="$(mktemp /run/finops-settings-acl-binding-result.XXXXXX)"
-  trap 'rm -f -- "$values_file" "$raw_result"' EXIT
-  [[ -f "$artifact" && -f "$artifact.sha256" ]] || die "approved settings access-control preflight is missing"
-  sha256sum --check "$artifact.sha256" >/dev/null
-  sql_file="$src/deploy/oa/fin_ops_role_binding.mysql.sql"
-  [[ -f "$sql_file" ]] || die "fixed OA role-binding SQL is missing"
-  ARTIFACT_RELEASE="$release" ARTIFACT_OPERATION="$operation" \
-    "$API_PYTHON" - "$artifact" "$values_file" <<'PY'
-import hashlib
-import json
-import os
-from pathlib import Path
-import re
-import sys
-
-artifact = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-release = os.environ["ARTIFACT_RELEASE"]
-operation = os.environ["ARTIFACT_OPERATION"]
-oa = artifact.get("oa", {}) if isinstance(artifact.get("oa"), dict) else {}
-cleanup = oa.get("menu_binding_cleanup", {}) if isinstance(oa.get("menu_binding_cleanup"), dict) else {}
-if artifact.get("contract") != "settings-access-control-v1" or artifact.get("release") != release:
-    raise SystemExit("approved OA cleanup artifact contract/release mismatch")
-required = cleanup.get("required") is True
-if required and oa.get("cleanup_eligible") is not True:
-    raise SystemExit("approved artifact is not exact-cleanup eligible")
-if not required and artifact.get("eligible") is not True and artifact.get("cutover_eligible") is not True:
-    raise SystemExit("approved artifact is not steady or cutover eligible")
-targets = cleanup.get("target_hashes", [])
-rollback_targets = cleanup.get("rollback_target_hashes", [])
-if not isinstance(targets, list) or targets != rollback_targets:
-    raise SystemExit("cleanup and rollback target hashes are not symmetric")
-if targets != sorted(set(targets)) or any(not re.fullmatch(r"[0-9a-f]{64}", item) for item in targets):
-    raise SystemExit("cleanup target hashes are not an exact lowercase SHA-256 set")
-count = cleanup.get("target_count")
-if not isinstance(count, int) or count != len(targets) or required != (count > 0):
-    raise SystemExit("cleanup target count does not match the approved rowset")
-fingerprint = hashlib.sha256("\n".join(targets).encode("ascii")).hexdigest()
-if cleanup.get("target_set_sha256") != fingerprint:
-    raise SystemExit("cleanup target-set fingerprint mismatch")
-before = cleanup.get("before_sha256")
-after = cleanup.get("after_sha256")
-if any(not isinstance(item, str) or not re.fullmatch(r"[0-9a-f]{64}", item) for item in (before, after)):
-    raise SystemExit("cleanup before/after fingerprints are invalid")
-salt = hashlib.sha256(f"settings-access-control-v1\0{release}".encode("utf-8")).hexdigest()
-Path(sys.argv[2]).write_text(
-    "\n".join((salt, ",".join(targets), str(count), fingerprint, before, after)) + "\n",
-    encoding="utf-8",
-)
-PY
-  [[ "$(wc -l <"$values_file" | tr -d ' ')" == "6" ]] \
-    || die "approved OA cleanup artifact values are incomplete"
-  local artifact_salt target_hashes_csv target_count target_set_sha256 before_sha256 after_sha256
-  artifact_salt="$(sed -n '1p' "$values_file")"
-  target_hashes_csv="$(sed -n '2p' "$values_file")"
-  target_count="$(sed -n '3p' "$values_file")"
-  target_set_sha256="$(sed -n '4p' "$values_file")"
-  before_sha256="$(sed -n '5p' "$values_file")"
-  after_sha256="$(sed -n '6p' "$values_file")"
-  result_file="$evidence_dir/settings-access-control-menu-binding-$operation.json"
-  if [[ "$target_count" == "0" ]]; then
-    ARTIFACT_PATH="$artifact" ARTIFACT_RELEASE="$release" ARTIFACT_OPERATION="$operation" \
-      "$API_PYTHON" - "$result_file" <<'PY'
-import hashlib
-import json
-import os
-from pathlib import Path
-import sys
-
-artifact = Path(os.environ["ARTIFACT_PATH"])
-payload = {
-    "contract": "settings-access-control-v1",
-    "release": os.environ["ARTIFACT_RELEASE"],
-    "operation": os.environ["ARTIFACT_OPERATION"],
-    "status": "pass",
-    "skipped": True,
-    "target_count": 0,
-    "preflight_sha256": hashlib.sha256(artifact.read_bytes()).hexdigest(),
-}
-output = Path(sys.argv[1])
-output.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
-output.chmod(0o600)
-PY
-    sha256sum "$result_file" >"$result_file.sha256"
-    return 0
-  fi
-  (
-    set -a
-    # shellcheck disable=SC1090
-    source "$COMMON_ENV"
-    # shellcheck disable=SC1090
-    source "$SECRETS_ENV"
-    set +a
-    command -v mysql >/dev/null || die "mysql client is required for exact OA binding cleanup"
-    {
-      printf "SET @finops_operation = '%s';\n" "$operation"
-      printf "SET @artifact_salt = '%s';\n" "$artifact_salt"
-      printf "SET @approved_target_hashes_csv = '%s';\n" "$target_hashes_csv"
-      printf "SET @approved_target_count = %s;\n" "$target_count"
-      printf "SET @approved_target_set_sha256 = '%s';\n" "$target_set_sha256"
-      printf "SET @approved_before_sha256 = '%s';\n" "$before_sha256"
-      printf "SET @approved_after_sha256 = '%s';\n" "$after_sha256"
-      cat "$sql_file"
-    } | MYSQL_PWD="$FIN_OPS_OA_ROLE_SYNC_PASSWORD" mysql \
-      --protocol=TCP \
-      --host="$FIN_OPS_OA_ROLE_SYNC_HOST" \
-      --port="${FIN_OPS_OA_ROLE_SYNC_PORT:-3306}" \
-      --user="$FIN_OPS_OA_ROLE_SYNC_USERNAME" \
-      --database="$FIN_OPS_OA_ROLE_SYNC_DATABASE" \
-      --batch --skip-column-names --raw >"$raw_result"
-  )
-  ARTIFACT_PATH="$artifact" ARTIFACT_RELEASE="$release" ARTIFACT_OPERATION="$operation" \
-  EXPECTED_BEFORE="$before_sha256" EXPECTED_AFTER="$after_sha256" \
-    "$API_PYTHON" - "$raw_result" "$result_file" <<'PY'
-import hashlib
-import json
-import os
-from pathlib import Path
-import sys
-
-lines = [line for line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines() if line.strip()]
-if len(lines) != 1:
-    raise SystemExit("exact OA binding SQL returned an unexpected result shape")
-result = json.loads(lines[0])
-operation = os.environ["ARTIFACT_OPERATION"]
-expected_before = os.environ["EXPECTED_BEFORE"]
-expected_after = os.environ["EXPECTED_AFTER"]
-expected_result_before = expected_before if operation == "cleanup" else expected_after
-expected_result_after = expected_after if operation == "cleanup" else expected_before
-readback_key = f"{operation}_readback_ok"
-if (
-    result.get("operation") != operation
-    or result.get("committed") not in (True, 1)
-    or result.get(readback_key) not in (True, 1)
-    or result.get("non_target_unchanged") not in (True, 1)
-    or result.get("before_sha256") != expected_result_before
-    or result.get("after_sha256") != expected_result_after
-):
-    raise SystemExit("exact OA binding operation failed its read-back contract")
-artifact = Path(os.environ["ARTIFACT_PATH"])
-payload = {
-    "contract": "settings-access-control-v1",
-    "release": os.environ["ARTIFACT_RELEASE"],
-    "operation": operation,
-    "status": "pass",
-    "skipped": False,
-    "target_count": int(result.get("target_count") or 0),
-    "affected_rows": int(result.get("affected_rows") or 0),
-    "before_sha256": result["before_sha256"],
-    "after_sha256": result["after_sha256"],
-    "non_target_unchanged": True,
-    "preflight_sha256": hashlib.sha256(artifact.read_bytes()).hexdigest(),
-}
-output = Path(sys.argv[2])
-temporary = output.with_suffix(".tmp")
-temporary.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
-temporary.replace(output)
-output.chmod(0o600)
-PY
-  sha256sum "$result_file" >"$result_file.sha256"
-)
-
-apply_settings_access_control_menu_binding_cleanup() {
-  run_settings_access_control_binding_operation "$1" cleanup
-}
-
-rollback_settings_access_control_menu_bindings() {
-  run_settings_access_control_binding_operation "$1" rollback
-}
 
 release_is_acl_safe() {
   local release="$1"
@@ -857,100 +809,6 @@ assert_runtime_env_contract() {
       die "retired APP admission env must be absent: $retired_key"
     fi
   done
-}
-
-restore_settings_access_control_runtime_env() {
-  local backup_dir="$1"
-  local path backup temporary
-  for path in "$COMMON_ENV" "$SECRETS_ENV"; do
-    backup="$backup_dir/$(basename "$path")"
-    [[ -f "$backup" && ! -L "$backup" ]] || return 1
-    temporary="$(mktemp "${path}.settings-acl.XXXXXX")" || return 1
-    if ! cp -a -- "$backup_dir/$(basename "$path")" "$temporary" \
-      || ! mv -f -- "$temporary" "$path"; then
-      rm -f -- "$temporary"
-      return 1
-    fi
-  done
-  [[ "$(sha256sum "$COMMON_ENV" | awk '{print $1}')" \
-      == "$(sha256sum "$backup_dir/$(basename "$COMMON_ENV")" | awk '{print $1}')" \
-    && "$(sha256sum "$SECRETS_ENV" | awk '{print $1}')" \
-      == "$(sha256sum "$backup_dir/$(basename "$SECRETS_ENV")" | awk '{print $1}')" ]]
-}
-
-prepare_settings_access_control_runtime_env() {
-  local release="$1"
-  local backup_dir="$2"
-  local evidence_dir="$SETTINGS_ACL_EVIDENCE_ROOT/$release"
-  local artifact="$evidence_dir/settings-access-control-env-cutover.json"
-  local path temporary before_common before_secrets after_common after_secrets
-  local removed_common removed_secrets
-  assert_runtime_env_prerequisites
-  install -d -m 0700 "$evidence_dir"
-  cp -a -- "$COMMON_ENV" "$backup_dir/$(basename "$COMMON_ENV")"
-  cp -a -- "$SECRETS_ENV" "$backup_dir/$(basename "$SECRETS_ENV")"
-  before_common="$(sha256sum "$COMMON_ENV" | awk '{print $1}')"
-  before_secrets="$(sha256sum "$SECRETS_ENV" | awk '{print $1}')"
-  removed_common="$((
-    $(grep -Ec '^(FIN_OPS_ALLOWED_USERNAMES|FIN_OPS_ALLOWED_ROLES|FIN_OPS_READONLY_EXPORT_USERNAMES)=' "$COMMON_ENV" || true)
-    + $(grep -Ec "^${LEGACY_ADMIN_ENV}=" "$COMMON_ENV" || true)
-  ))"
-  removed_secrets="$((
-    $(grep -Ec '^(FIN_OPS_ALLOWED_USERNAMES|FIN_OPS_ALLOWED_ROLES|FIN_OPS_READONLY_EXPORT_USERNAMES)=' "$SECRETS_ENV" || true)
-    + $(grep -Ec "^${LEGACY_ADMIN_ENV}=" "$SECRETS_ENV" || true)
-  ))"
-  for path in "$COMMON_ENV" "$SECRETS_ENV"; do
-    temporary="$(mktemp "${path}.settings-acl.XXXXXX")" || return 1
-    if ! awk -v legacy="$LEGACY_ADMIN_ENV" \
-      '$0 !~ /^(FIN_OPS_ALLOWED_USERNAMES|FIN_OPS_ALLOWED_ROLES|FIN_OPS_READONLY_EXPORT_USERNAMES)=/ && index($0, legacy "=") != 1' \
-      "$path" >"$temporary" \
-      || ! chown --reference="$path" "$temporary" \
-      || ! chmod --reference="$path" "$temporary" \
-      || ! mv -f -- "$temporary" "$path"; then
-      rm -f -- "$temporary"
-      restore_settings_access_control_runtime_env "$backup_dir" || true
-      return 1
-    fi
-  done
-  if ! (assert_runtime_env_contract); then
-    restore_settings_access_control_runtime_env "$backup_dir" || true
-    return 1
-  fi
-  after_common="$(sha256sum "$COMMON_ENV" | awk '{print $1}')"
-  after_secrets="$(sha256sum "$SECRETS_ENV" | awk '{print $1}')"
-  BEFORE_COMMON="$before_common" BEFORE_SECRETS="$before_secrets" \
-    AFTER_COMMON="$after_common" AFTER_SECRETS="$after_secrets" \
-    REMOVED_COMMON="$removed_common" REMOVED_SECRETS="$removed_secrets" \
-    ARTIFACT_RELEASE="$release" "$API_PYTHON" - "$artifact" <<'PY'
-import json
-import os
-from pathlib import Path
-import sys
-
-payload = {
-    "contract": "settings-access-control-v1",
-    "release": os.environ["ARTIFACT_RELEASE"],
-    "status": "prepared",
-    "files": {
-        "common": {
-            "before_sha256": os.environ["BEFORE_COMMON"],
-            "after_sha256": os.environ["AFTER_COMMON"],
-            "removed_key_count": int(os.environ["REMOVED_COMMON"]),
-        },
-        "secrets": {
-            "before_sha256": os.environ["BEFORE_SECRETS"],
-            "after_sha256": os.environ["AFTER_SECRETS"],
-            "removed_key_count": int(os.environ["REMOVED_SECRETS"]),
-        },
-    },
-}
-output = Path(sys.argv[1])
-temporary = output.with_suffix(".tmp")
-temporary.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
-temporary.replace(output)
-output.chmod(0o600)
-PY
-  sha256sum "$artifact" >"$artifact.sha256"
 }
 
 sync_python_envs() {
@@ -2134,11 +1992,24 @@ runtime_queue_resolve_covered() {
 
 activate_release() {
   local release="$1"
+  local release_profile="${2:-runtime}"
   local src
+  [[ "$release_profile" == "frontend" || "$release_profile" == "runtime" || "$release_profile" == "acl" ]] \
+    || die "unsupported activation profile: $release_profile"
   src="$(release_src "$release")"
   assert_runtime_env_contract
   systemctl stop fin-ops.service
   stop_runtime_worker_services_for_activation
+  if [[ "$release_profile" == "frontend" ]]; then
+    write_api_dropin "$src"
+    write_worker_dropin "$src"
+    write_dispatcher_dropin "$src"
+    publish_frontend "$src"
+    restart_services
+    wait_required_workers_ready
+    status
+    return 0
+  fi
   run_schema_migrations "$src"
   assert_settings_access_control_database_guard "$src"
   sync_python_envs "$src"
@@ -2175,6 +2046,145 @@ repair_active_api_runtime() {
   wait_required_workers_ready
   status
 }
+
+release_gate_frontend_checkpoint() (
+  local release="$1"
+  local label="$2"
+  local admin_token="$3"
+  local evidence_dir="$4"
+  local src checkpoint_dir scratch inventory_report candidate_report
+  local health_body health_metrics public_body public_metrics asset_url asset_body asset_metrics
+  local session_report active_releases dist_match=false
+  src="$(release_src "$release")"
+  checkpoint_dir="$evidence_dir/$label"
+  install -d -m 0700 "$checkpoint_dir"
+  scratch="$(mktemp -d /run/finops-frontend-gate.XXXXXX)"
+  chmod 0700 "$scratch"
+  trap 'rm -rf -- "$scratch"' EXIT
+  inventory_report="$checkpoint_dir/worker-inventory.json"
+  candidate_report="$checkpoint_dir/candidate-status.json"
+  session_report="$scratch/session.json"
+  health_body="$scratch/health.json"
+  public_body="$scratch/index.html"
+  asset_body="$scratch/asset"
+  worker_inventory_report "$src" "$inventory_report"
+  candidate_status "$release" --json >"$candidate_report"
+  active_releases="$(active_release_names)"
+  if diff -qr -- "$src/web/dist" "$FRONTEND_DIR" >/dev/null; then
+    dist_match=true
+  fi
+  if ! health_metrics="$(curl --silent --show-error --connect-timeout 5 --max-time 15 \
+    --output "$health_body" --write-out '%{http_code} %{time_total}' \
+    http://127.0.0.1:18001/health/ready)"; then
+    health_metrics="0 0"
+  fi
+  settings_acl_http_session_fact \
+    "$admin_token" release_gate_005 "$session_report" "$scratch" \
+    https://www.yn-sourcing.com/fin-ops/api/session/me
+  if ! public_metrics="$(curl --silent --show-error --location --connect-timeout 5 --max-time 15 \
+    --output "$public_body" --write-out '%{http_code} %{time_total}' \
+    https://www.yn-sourcing.com/fin-ops/)"; then
+    public_metrics="0 0"
+  fi
+  asset_url="$(grep -oE '/fin-ops/assets/[^"[:space:]]+' "$public_body" | head -n 1 || true)"
+  asset_metrics="0 0"
+  if [[ -n "$asset_url" ]]; then
+    if ! asset_metrics="$(curl --silent --show-error --location --connect-timeout 5 --max-time 15 \
+      --output "$asset_body" --write-out '%{http_code} %{time_total}' \
+      "https://www.yn-sourcing.com${asset_url}")"; then
+      asset_metrics="0 0"
+    fi
+  fi
+  RELEASE_NAME="$release" \
+  CHECKPOINT_LABEL="$label" \
+  ACTIVE_RELEASES="$active_releases" \
+  DIST_MATCH="$dist_match" \
+  HEALTH_METRICS="$health_metrics" \
+  PUBLIC_METRICS="$public_metrics" \
+  ASSET_METRICS="$asset_metrics" \
+  ASSET_URL="$asset_url" \
+  INVENTORY_REPORT="$inventory_report" \
+  CANDIDATE_REPORT="$candidate_report" \
+  SESSION_REPORT="$session_report" \
+  HEALTH_BODY="$health_body" \
+    "$API_PYTHON" - "$checkpoint_dir/checkpoint.json" <<'PY'
+from datetime import UTC, datetime
+import json
+import os
+from pathlib import Path
+import sys
+
+def load(path):
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+def metric(name):
+    parts = os.environ.get(name, "0 0").split()
+    try:
+        status = int(parts[0])
+        elapsed_ms = round(float(parts[1]) * 1000, 3)
+    except (IndexError, ValueError):
+        status, elapsed_ms = 0, 0.0
+    return {"http_status": status, "elapsed_ms": elapsed_ms}
+
+inventory = load(os.environ["INVENTORY_REPORT"])
+candidate = load(os.environ["CANDIDATE_REPORT"])
+session = load(os.environ["SESSION_REPORT"])
+health = load(os.environ["HEALTH_BODY"])
+health_request = metric("HEALTH_METRICS")
+public_request = metric("PUBLIC_METRICS")
+asset_request = metric("ASSET_METRICS")
+user = session.get("user", {}) if isinstance(session.get("user"), dict) else {}
+active_releases = [item for item in os.environ.get("ACTIVE_RELEASES", "").splitlines() if item]
+checks = {
+    "active_release_exact": active_releases == [os.environ["RELEASE_NAME"]],
+    "candidate_safe": candidate.get("candidate", {}).get("safe") is True,
+    "worker_inventory": inventory.get("status") == "PASS",
+    "health_ready": health_request["http_status"] == 200 and health.get("status") == "ready",
+    "admin_session": (
+        int(session.get("_preflight_http_status") or 0) == 200
+        and user.get("username") == "YNSYLP005"
+        and session.get("allowed") is True
+        and session.get("access_tier") == "admin"
+        and session.get("can_admin_access") is True
+    ),
+    "public_index": public_request["http_status"] == 200,
+    "public_asset": bool(os.environ.get("ASSET_URL")) and asset_request["http_status"] == 200,
+    "published_dist_exact": os.environ.get("DIST_MATCH") == "true",
+}
+passed = all(checks.values())
+payload = {
+    "release_gate_status": "PASS" if passed else "FAIL",
+    "release_name": os.environ["RELEASE_NAME"],
+    "checkpoint": os.environ["CHECKPOINT_LABEL"],
+    "profile": "frontend",
+    "checked_at": datetime.now(UTC).isoformat(),
+    "frontend_verified": passed,
+    "checks": checks,
+    "timings_ms": {
+        "health_ready": health_request["elapsed_ms"],
+        "admin_session": None,
+        "public_index": public_request["elapsed_ms"],
+        "public_asset": asset_request["elapsed_ms"],
+    },
+    "public_asset_path": os.environ.get("ASSET_URL") or None,
+    "unknown_worker_count": int(inventory.get("unknown_worker_count") or 0),
+    "required_worker_not_ready": int(inventory.get("required_worker_not_ready") or 0),
+    "reports": {
+        "worker_inventory": os.environ["INVENTORY_REPORT"],
+        "candidate_status": os.environ["CANDIDATE_REPORT"],
+    },
+}
+Path(sys.argv[1]).write_text(
+    json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+    encoding="utf-8",
+)
+raise SystemExit(0 if passed else 1)
+PY
+)
 
 release_gate_checkpoint() {
   local release="$1"
@@ -2490,12 +2500,14 @@ write_release_gate_evidence() {
   local evidence_dir="$3"
   local gate_status="$4"
   local rolled_back="$5"
-  local failure_checkpoint="${6:-}"
+  local release_profile="$6"
+  local failure_checkpoint="${7:-}"
   RELEASE_NAME="$release" \
   PREVIOUS_RELEASE="$previous_release" \
   EVIDENCE_DIR="$evidence_dir" \
   GATE_STATUS="$gate_status" \
   ROLLED_BACK="$rolled_back" \
+  RELEASE_PROFILE="$release_profile" \
   FAILURE_CHECKPOINT="$failure_checkpoint" \
     "$API_PYTHON" - "$RELEASE_ROOT/$release/src/RELEASE.json" "$evidence_dir/evidence.json" <<'PY'
 from datetime import UTC, datetime
@@ -2515,11 +2527,14 @@ latest = next((checkpoints[name] for name in ("t300", "t60", "t0", "pre") if nam
 t0_page_audit = checkpoints.get("t0", {}).get("page_canonical_audit", {})
 pre_dlq = int(checkpoints.get("pre", {}).get("dead_letter_count", 0))
 final_dlq = int(latest.get("dead_letter_count", pre_dlq))
-passed = os.environ["GATE_STATUS"] == "PASS" and "t300" in checkpoints
+profile = os.environ["RELEASE_PROFILE"]
+required_final_checkpoint = "t0" if profile == "frontend" else "t300"
+passed = os.environ["GATE_STATUS"] == "PASS" and required_final_checkpoint in checkpoints
 payload = {
     "release_gate_status": "PASS" if passed else "FAIL",
     "release_name": os.environ["RELEASE_NAME"],
     "git_commit": release_meta.get("git_commit"),
+    "release_profile": profile,
     "previous_release": os.environ["PREVIOUS_RELEASE"],
     "generated_at": datetime.now(UTC).isoformat(),
     "rolled_back": os.environ["ROLLED_BACK"] == "true",
@@ -2543,7 +2558,8 @@ payload = {
         if isinstance(t0_page_audit, dict)
         else None
     ),
-    "queue_stable_after_300_seconds": passed,
+    "frontend_verified": latest.get("frontend_verified") is True if profile == "frontend" else None,
+    "queue_stable_after_300_seconds": passed if profile != "frontend" else None,
     "checkpoints": checkpoints,
 }
 output = Path(sys.argv[2])
@@ -2560,28 +2576,34 @@ rollback_release_gate() {
   local admin_token="$3"
   local evidence_dir="$4"
   local failure_checkpoint="$5"
+  local release_profile="$6"
   local rolled_back=false
   cat "$evidence_dir/$failure_checkpoint/checkpoint.json" >&2 || true
+  if [[ "$release_profile" == "acl" ]]; then
+    systemctl stop fin-ops.service || true
+    stop_runtime_worker_services_for_activation || true
+    write_release_gate_evidence \
+      "$candidate" "$previous_release" "$evidence_dir" FAIL false "$release_profile" "$failure_checkpoint" || true
+    die "ACL release gate failed at $failure_checkpoint; production remains in maintenance for forward repair"
+  fi
   if ! release_is_acl_safe "$previous_release"; then
     systemctl stop fin-ops.service || true
     stop_runtime_worker_services_for_activation || true
     write_release_gate_evidence \
-      "$candidate" "$previous_release" "$evidence_dir" FAIL false "$failure_checkpoint" || true
+      "$candidate" "$previous_release" "$evidence_dir" FAIL false "$release_profile" "$failure_checkpoint" || true
     die "release gate failed at $failure_checkpoint; previous release lacks $SETTINGS_ACL_CONTRACT, production remains in maintenance for forward repair"
   fi
-  if ! rollback_settings_access_control_menu_bindings "$candidate"; then
-    systemctl stop fin-ops.service || true
-    stop_runtime_worker_services_for_activation || true
-    write_release_gate_evidence \
-      "$candidate" "$previous_release" "$evidence_dir" FAIL false "$failure_checkpoint" || true
-    die "release gate failed at $failure_checkpoint and OA menu binding rollback failed; production remains in maintenance"
-  fi
-  if (activate_release "$previous_release") \
-    && release_gate_checkpoint "$previous_release" rollback "$admin_token" "$evidence_dir" preflight "$candidate"; then
-    rolled_back=true
+  if (activate_release "$previous_release" "$release_profile"); then
+    if [[ "$release_profile" == "frontend" ]]; then
+      release_gate_frontend_checkpoint \
+        "$previous_release" rollback "$admin_token" "$evidence_dir" && rolled_back=true
+    elif release_gate_checkpoint \
+      "$previous_release" rollback "$admin_token" "$evidence_dir" preflight "$candidate"; then
+      rolled_back=true
+    fi
   fi
   write_release_gate_evidence \
-    "$candidate" "$previous_release" "$evidence_dir" FAIL "$rolled_back" "$failure_checkpoint"
+    "$candidate" "$previous_release" "$evidence_dir" FAIL "$rolled_back" "$release_profile" "$failure_checkpoint"
   [[ "$rolled_back" == true ]] \
     || die "release gate failed at $failure_checkpoint and automatic rollback validation also failed"
   die "release gate failed at $failure_checkpoint; previous release $previous_release was restored"
@@ -2590,10 +2612,10 @@ rollback_release_gate() {
 release_gate_activate() {
   local release="${1:-}"
   [[ -n "$release" && "$#" -eq 1 ]] || die "release-gate-activate accepts only release name"
-  local admin_token previous_release active_count evidence_dir env_backup_dir
+  local admin_token previous_release active_count evidence_dir profile_report release_profile
   release_src "$release" >/dev/null
-  assert_runtime_env_prerequisites
-  assert_settings_access_control_preflight "$release"
+  assert_runtime_env_contract
+  candidate_status "$release" --json >/dev/null
   IFS= read -r admin_token
   [[ -n "$admin_token" ]] || die "production admin token stdin is empty"
   previous_release="$(active_release_names)"
@@ -2601,52 +2623,72 @@ release_gate_activate() {
   [[ "$active_count" == "1" ]] \
     || die "release gate requires exactly one active release, found $active_count"
   [[ "$previous_release" != "$release" ]] || die "candidate release is already active"
+  profile_report="$(mktemp /run/finops-release-profile.XXXXXX)"
+  trap 'rm -f -- "$profile_report"' EXIT
+  release_gate_profile "$release" --json >"$profile_report"
+  release_profile="$("$API_PYTHON" - "$profile_report" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+profile = payload.get("profile")
+if profile not in {"frontend", "runtime", "acl"}:
+    raise SystemExit("release profile is invalid")
+print(profile)
+PY
+)"
+  if [[ "$release_profile" == "acl" ]]; then
+    assert_settings_access_control_preflight "$release"
+  fi
   evidence_dir="$RELEASE_GATE_EVIDENCE_ROOT/$release"
   [[ ! -e "$evidence_dir" ]] || die "release gate evidence already exists: $evidence_dir"
   install -d -m 0700 "$evidence_dir"
-  if ! release_gate_checkpoint "$previous_release" pre "$admin_token" "$evidence_dir" preflight "$release"; then
+  install -m 0600 "$profile_report" "$evidence_dir/profile.json"
+  if [[ "$release_profile" == "frontend" ]]; then
+    if ! release_gate_frontend_checkpoint \
+      "$previous_release" pre "$admin_token" "$evidence_dir"; then
+      cat "$evidence_dir/pre/checkpoint.json" >&2
+      write_release_gate_evidence \
+        "$release" "$previous_release" "$evidence_dir" FAIL false "$release_profile" pre
+      die "current production runtime failed the frontend pre-activation release gate"
+    fi
+  elif ! release_gate_checkpoint \
+    "$previous_release" pre "$admin_token" "$evidence_dir" preflight "$release"; then
     cat "$evidence_dir/pre/checkpoint.json" >&2
-    write_release_gate_evidence "$release" "$previous_release" "$evidence_dir" FAIL false pre
+    write_release_gate_evidence \
+      "$release" "$previous_release" "$evidence_dir" FAIL false "$release_profile" pre
     die "current production runtime failed the pre-activation release gate"
   fi
-  env_backup_dir="$(mktemp -d /run/finops-settings-acl-env.XXXXXX)"
-  chmod 0700 "$env_backup_dir"
-  trap "rm -rf -- '$env_backup_dir'" EXIT
-  if ! (prepare_settings_access_control_runtime_env "$release" "$env_backup_dir"); then
-    restore_settings_access_control_runtime_env "$env_backup_dir" \
-      || die "runtime env cleanup failed and its before-image could not be restored"
-    (assert_runtime_env_prerequisites) \
-      || die "runtime env cleanup failed and restored prerequisites did not read back"
-    die "runtime env cleanup failed before candidate activation; before-image restored"
+  if ! (activate_release "$release" "$release_profile"); then
+    rollback_release_gate \
+      "$release" "$previous_release" "$admin_token" "$evidence_dir" activation "$release_profile"
   fi
-  if ! (assert_runtime_env_contract); then
-    restore_settings_access_control_runtime_env "$env_backup_dir" \
-      || die "strict runtime env check failed and its before-image could not be restored"
-    die "runtime env cleanup did not reach the strict steady-state contract; before-image restored"
+  if [[ "$release_profile" == "frontend" ]]; then
+    if ! release_gate_frontend_checkpoint "$release" t0 "$admin_token" "$evidence_dir"; then
+      rollback_release_gate \
+        "$release" "$previous_release" "$admin_token" "$evidence_dir" t0 "$release_profile"
+    fi
+  else
+    if ! release_gate_checkpoint "$release" t0 "$admin_token" "$evidence_dir" full; then
+      rollback_release_gate \
+        "$release" "$previous_release" "$admin_token" "$evidence_dir" t0 "$release_profile"
+    fi
+    sleep 60
+    if ! release_gate_checkpoint "$release" t60 "$admin_token" "$evidence_dir" stability; then
+      rollback_release_gate \
+        "$release" "$previous_release" "$admin_token" "$evidence_dir" t60 "$release_profile"
+    fi
+    sleep 240
+    if ! release_gate_checkpoint "$release" t300 "$admin_token" "$evidence_dir" stability; then
+      rollback_release_gate \
+        "$release" "$previous_release" "$admin_token" "$evidence_dir" t300 "$release_profile"
+    fi
   fi
-  if ! apply_settings_access_control_menu_binding_cleanup "$release"; then
-    restore_settings_access_control_runtime_env "$env_backup_dir" \
-      || die "OA cleanup failed and runtime env before-image could not be restored"
-    (assert_runtime_env_prerequisites) \
-      || die "OA cleanup failed and restored runtime env prerequisites did not read back"
-    die "exact OA menu binding cleanup failed before candidate activation; runtime env restored"
-  fi
-  if ! (activate_release "$release"); then
-    rollback_release_gate "$release" "$previous_release" "$admin_token" "$evidence_dir" activation
-  fi
-  if ! release_gate_checkpoint "$release" t0 "$admin_token" "$evidence_dir" full; then
-    rollback_release_gate "$release" "$previous_release" "$admin_token" "$evidence_dir" t0
-  fi
-  sleep 60
-  if ! release_gate_checkpoint "$release" t60 "$admin_token" "$evidence_dir" stability; then
-    rollback_release_gate "$release" "$previous_release" "$admin_token" "$evidence_dir" t60
-  fi
-  sleep 240
-  if ! release_gate_checkpoint "$release" t300 "$admin_token" "$evidence_dir" stability; then
-    rollback_release_gate "$release" "$previous_release" "$admin_token" "$evidence_dir" t300
-  fi
-  if ! write_release_gate_evidence "$release" "$previous_release" "$evidence_dir" PASS false; then
-    rollback_release_gate "$release" "$previous_release" "$admin_token" "$evidence_dir" evidence
+  if ! write_release_gate_evidence \
+    "$release" "$previous_release" "$evidence_dir" PASS false "$release_profile"; then
+    rollback_release_gate \
+      "$release" "$previous_release" "$admin_token" "$evidence_dir" evidence "$release_profile"
   fi
   if ! "$API_PYTHON" - "$evidence_dir/evidence.json" <<'PY'
 import json
@@ -2654,30 +2696,48 @@ from pathlib import Path
 import sys
 
 evidence = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+profile = evidence.get("release_profile")
 required = {
     "release_gate_status": "PASS",
+    "release_profile": profile,
     "unknown_worker_count": 0,
     "required_worker_not_ready": 0,
-    "dirty_scope_count": 0,
-    "pending_outbox_count": 0,
-    "publishing_outbox_count": 0,
-    "dead_letter_delta": 0,
-    "terminal_publish_reconciliation_stable": True,
-    "page_canonical_audit_status": "pass",
-    "queue_stable_after_300_seconds": True,
 }
-violations = {key: {"expected": value, "actual": evidence.get(key)} for key, value in required.items() if evidence.get(key) != value}
+if profile == "frontend":
+    required["frontend_verified"] = True
+elif profile in {"runtime", "acl"}:
+    required.update(
+        {
+            "dirty_scope_count": 0,
+            "pending_outbox_count": 0,
+            "publishing_outbox_count": 0,
+            "dead_letter_delta": 0,
+            "terminal_publish_reconciliation_stable": True,
+            "page_canonical_audit_status": "pass",
+            "queue_stable_after_300_seconds": True,
+        }
+    )
+else:
+    raise SystemExit(f"unsupported release evidence profile: {profile!r}")
+violations = {
+    key: {"expected": value, "actual": evidence.get(key)}
+    for key, value in required.items()
+    if evidence.get(key) != value
+}
 if violations:
-    raise SystemExit(f"release gate evidence contract failed: {json.dumps(violations, ensure_ascii=False, sort_keys=True)}")
+    raise SystemExit(
+        "release gate evidence contract failed: "
+        + json.dumps(violations, ensure_ascii=False, sort_keys=True)
+    )
 print(json.dumps(evidence, ensure_ascii=False, indent=2, sort_keys=True))
 PY
   then
-    rollback_release_gate "$release" "$previous_release" "$admin_token" "$evidence_dir" evidence_contract
+    rollback_release_gate \
+      "$release" "$previous_release" "$admin_token" "$evidence_dir" evidence_contract "$release_profile"
   fi
-  rm -rf -- "$env_backup_dir"
+  rm -f -- "$profile_report"
   trap - EXIT
 }
-
 cmd="${1:-}"
 case "$cmd" in
   check-release)
@@ -2692,6 +2752,10 @@ case "$cmd" in
   candidate-status)
     shift
     candidate_status "$@"
+    ;;
+  release-gate-profile)
+    shift
+    release_gate_profile "$@"
     ;;
   settings-access-control-preflight)
     shift

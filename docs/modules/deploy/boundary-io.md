@@ -28,9 +28,10 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | Deploy command | `scripts/deploy-oa.sh` | 使用明确 release/remote/env；正常激活只允许调用 `finops-deploy-control release-gate-activate <release>`，公开 `activate` 入口已删除。`--no-activate` 只上传和校验，不生成门禁证据 |
-| Release-gate credential | 本机 `scripts/with-production-admin-token.sh` | Admin Token 只通过部署进程 stdin 交给 root helper，不写入 release、证据、命令行或日志；缺失时必须在任何生产切换前 fail closed |
-| ACL candidate/preflight | exact uploaded release + fresh admin/representative HTTP tokens + root runtime env/OA/PG read-only facts | remote collector 区分 steady `eligible` 与受控 `cutover_eligible`：006 必须缺席 canonical ACL 四集合；bearer 相位只接受有 pending DB/legacy env/OA cleanup 事实的 legacy `full_access + OA permission present`，或 steady/forward-repair `denied + OA permission absent`，交叉组合及 strict steady 下的 full-access 漂移均 fail closed；0133/CHECK 只能全 false 或全 true，避免只应用 0132 的尾部追加顺序被误判为 steady；legacy admin 只能空/005；retired env 只能三个 fixed keys；OA selector/menu/三 dedicated roles/bindings/members exact。artifact/SHA-256 绑定 release/source/migration/capability、identity hashes、state/blockers 与 exact cleanup targets；多个 target/rollback hash 必须由 producer 按 lowercase SHA-256 字典序输出，consumer 对未排序、重复、非法、不对称或 fingerprint 漂移继续 fail closed，任一 drift 都回审批 gate |
-| ACL env contract | `/etc/fin-ops/*.env` | prerequisite 检查 root-owned/non-writable env、DSN、fixed OA selector 与 role-sync config，允许已批准旧态 key；strict contract 复用 prerequisite 并要求三 retired admission key 和 legacy admin key 全部缺席。current-runtime checkpoint 后只以 before-image + 同目录 temp + atomic `mv` 删除四个 exact keys；进入 activation 前失败恢复/read-back，进入后保持 clean env用于 forward repair |
+| Release-gate credential | 本机 `scripts/with-production-admin-token.sh` | 所有发布只读取 005 Admin Token 并通过 stdin 交给 root helper，不写入 release、证据、命令行或日志；普通发布不读取 006。只有自动判定为 ACL 的候选额外要求既有双身份 preflight artifact |
+| Automatic release profile | exact candidate + current unique active release | 比较包内 ACL boundary、非前端 runtime 与 `web/dist` digest，自动输出 `acl` / `runtime` / `frontend`；不提供手工 profile/skip。ACL 优先级最高，runtime 或 no-op/unknown 次之，只有 runtime digest 相同且 dist 不同时才是 frontend |
+| ACL candidate/preflight | exact uploaded ACL release + fresh 005/006 tokens + root runtime env/OA/PG read-only facts | 只在 `acl` profile 校验 candidate-bound artifact/SHA-256、005 admin、006 denied、canonical Settings ACL、0133/CHECK、唯一 menu 与三个 dedicated roles/bindings/members；任一 drift 阻断激活。普通 `frontend`/`runtime` 不重复 006 验证 |
+| ACL env contract | `/etc/fin-ops/*.env` | prerequisite 检查 root-owned/non-writable env、DSN、fixed OA selector 与 role-sync config；strict contract要求三 retired admission key 和 legacy admin key 全部缺席。发布只读断言，不再在每次激活中重写 env |
 | Manual-root helper candidate | 已上传 exact release 的 `finops-deploy-control.sh` + approved SHA-256 | 只允许 root 以同文件系统 temp、`root:root 0755`、syntax/hash check 和 atomic `mv` bootstrap；release/activate 不得 self-update，也不得触碰 runtime-worker helper、service、DB/OA/ACL |
 | Release-gate RabbitMQ env | `/etc/fin-ops/fin-ops.rabbitmq-topology.env`、`/etc/fin-ops/fin-ops.rabbitmq-monitoring.env` | topology apply 与 runtime health/closure 分别加载自己的 systemd 运维边界；缺失或不可读必须 fail closed，不得读取 worker consumer 凭据代替 |
 | Runtime worker manifest | `runtime_worker_manifest.py` | 必须匹配 registry |
@@ -50,9 +51,8 @@
 | Release artifact | 生产服务器 | 可追踪版本 |
 | systemd/env files | deploy/oa | 与 registry 一致 |
 | Verification result | operator/CI | 失败不得伪装成功 |
-| Production-equivalent release evidence | `/opt/fin-ops/runtime-smoke/release-gates/<release>/evidence.json` | root-owned `0600` 原子写入，并绑定 release 名称、candidate Git commit 和 previous release。最终 PASS 必须同时证明 `unknown_worker_count=0`、`required_worker_not_ready=0`、`dirty_scope_count=0`、`pending_outbox_count=0`、`publishing_outbox_count=0`、`dead_letter_delta=0`、`queue_stable_after_300_seconds=true` |
-| Settings ACL preflight evidence | `/opt/fin-ops/evidence/<release>/settings-access-control-preflight.json` + `.sha256` | root-owned `0600`；只含 steady/cutover/blocked state、非敏感 blocker keys、salted hashes/counts/fingerprints 和 exact cleanup/rollback manifest，不含 token、DSN、密码、raw role/menu IDs、业务 role key或非受保护用户名 |
-| Settings ACL env cutover evidence | `/opt/fin-ops/evidence/<release>/settings-access-control-env-cutover.json` + `.sha256` | root-owned `0600`；只含 common/secrets before/after SHA-256 与 removed exact-key counts，不含 env 值；`/run` before-image 仅存活于 release gate 进程 |
+| Release evidence | `/opt/fin-ops/runtime-smoke/release-gates/<release>/evidence.json` | root-owned `0600` 原子写入并绑定 release、Git commit、previous release 和自动 profile。`frontend` PASS 证明 pre/T+0 exact dist、ready、005、shell/asset 与 worker inventory；`runtime`/`acl` 另要求 queue/read-model/audit T+300 稳定 |
+| Settings ACL preflight evidence | `/opt/fin-ops/evidence/<release>/settings-access-control-preflight.json` + `.sha256` | 仅 ACL profile 消费；root-owned `0600`，只含非敏感 hashes/counts/fingerprints，不含 token、DSN、密码或 raw role/menu IDs |
 | Settings ACL post-deploy evidence | `/opt/fin-ops/evidence/<release>/settings-access-control-post-deploy.json` + `.sha256` | 初始 006 必须 denied、非 admin、无 OA 菜单权限且 router 不可见；随后验证 fresh full→read→denied APP session/direct API、新 OA router/三 role exact set、non-target invariants、audit/latency 和 finally restore/read-back；任何 missing/failure/hash drift 重新阻断 |
 | Bounded request traceback | operator | 仅用于把已知生产 500 定位到 release 文件和行号；不得输出业务 payload、token 或任意日志窗口 |
 | Write smoke restore-point manifest | operator | 固定记录 release、run-id、UTC 时间、dump 路径、字节数、格式和 SHA-256；不得包含 DSN、token 或业务 payload |
@@ -72,7 +72,7 @@
 | Deploy control | `deploy/oa/bin/finops-deploy-control.sh`、`finops-ensure-runtime-workers.sh` |
 | Examples | `deploy/oa/nginx.fin-ops.conf.example`、`deploy/oa/systemd/*.service.example`、`deploy/oa/env/*.env.example` |
 | Worker manifest | `backend/src/fin_ops_platform/tools/runtime_worker_manifest.py`、`runtime_worker_registry.py` |
-| ACL evidence | `backend/src/fin_ops_platform/tools/settings_access_control_preflight.py`、`deploy/oa/fin_ops_role_binding.mysql.sql` |
+| ACL evidence | `backend/src/fin_ops_platform/tools/settings_access_control_preflight.py` |
 | Tests | `tests/test_deploy_*.py`、`tests/test_runtime_worker_registry.py`、`tests/test_write_operation_e2e_smoke.py` |
 
 ## 依赖方向
@@ -96,19 +96,19 @@
 - 禁止恢复 `--mode legacy-current`、`build_legacy_remote_deploy_script`、`create_legacy_release_archive` 或 `deploy/oa/fin_ops.env.example`。
 - 禁止在 systemd examples 或发布脚本中恢复 `/opt/fin-ops/current/backend` 作为运行目录。
 - `finops-deploy-control` 对 legacy current 的归档只用于 release 激活前清理历史 runtime，不得重新变成覆盖式发布入口。
-- 禁止恢复公开 `activate` 命令、helper `self-update` 或在上传脚本中直接切换 release。激活前必须完成 ACL steady/cutover preflight 和当前 release checkpoint，再执行 exact env cleanup、strict assertion 与 exact OA cleanup；候选激活后必须完成 T+0、T+60s、T+300s checkpoint。进入 activation 前失败恢复 env before-image；进入后禁止恢复 unsafe admission，只可恢复带相同 ACL-safe capability/fingerprint 的 previous release，否则保持 maintenance 并 forward repair。
-- 只允许 exact non-dedicated fixed-menu binding cleanup；runtime role projection、业务 role/member、三个 dedicated bindings、其他 menu/binding 都是 non-target。cleanup/rollback/restore/read-back 失败必须回到 candidate preflight approval gate，不能直接重跑后续 smoke。
+- 禁止恢复公开 `activate`、helper `self-update`、手工 profile/skip、每次发布的 env cleanup 或 OA binding cleanup。strict env 漂移直接 fail closed；历史 cleanup SQL 不得恢复。
+- 自动 `acl` profile 失败后保持 maintenance 并 forward repair；`frontend`/`runtime` 只可恢复 fingerprint 有效的 previous release。
 
 ## Production-equivalent Release Gate（2026-07-31）
 
-- 每个 checkpoint 复用现有权威工具，而不是维护第二套 SQL、worker 清单或页面审计：`runtime_worker_manifest`/systemd exact inventory、`rabbitmq_topology --apply`、`domain_contract_audit`、`RuntimeMonitoringRepository.health_summary()`、`runtime_sync_closure_gate`、隔离 PostgreSQL 可逆写探针和只读页面 canonical audit。
+- `runtime`/`acl` checkpoint 复用现有权威工具：`runtime_worker_manifest`/systemd exact inventory、`rabbitmq_topology --apply`、`domain_contract_audit`、`RuntimeMonitoringRepository.health_summary()`、`runtime_sync_closure_gate`、隔离 PostgreSQL 可逆写探针和只读页面 canonical audit。`frontend` 不调用这些重门禁，只复用 exact inventory、ready/session 与公开静态资源检查。
 - 门禁连接生产真实 PostgreSQL schema 和 RabbitMQ topology/management；RabbitMQ management 未配置、指标读取失败或 dead-letter 增量非零均 fail closed。Redis 不是本门禁事实源。
-- `runtime_sync_closure_gate` 使用三个明确 profile：`preflight` 检查当前 stable runtime readiness、worker/queue/RabbitMQ 收敛、隔离事务写入能力和只读 canonical audit；`full` 在 T+0 追加 critical read-model enqueue-to-fresh、API/health；`stability` 在 T+60/T+300 重跑读侧、性能和 runtime 收敛检查。页面 shell 使用公开 origin，API 使用内部服务 origin；旧 SSE route/tool 已退出 gate。
+- 对 `runtime`/`acl` 发布，`runtime_sync_closure_gate` 使用三个明确 profile：`preflight` 检查当前 stable runtime readiness、worker/queue/RabbitMQ 收敛、隔离事务写入能力和只读 canonical audit；`full` 在 T+0 追加 critical read-model enqueue-to-fresh、API/health；`stability` 在 T+60/T+300 重跑读侧、性能和 runtime 收敛检查。页面 shell 使用公开 origin，API 使用内部服务 origin；旧 SSE route/tool 已退出 gate。
 - 隔离写探针只在当前数据库连接的 `pg_temp` 临时表内执行 begin/insert/read/delete/rollback，验证真实 PostgreSQL 写事务、约束和回滚能力；它不接触 canonical facts、关系、read model、outbox 或 dirty scope。页面 canonical audit 只调用既有 admin audit API，不执行修复。
 - 登记过的 `test_owned` 可逆业务 scenario、standing approval 和 `write-operation-e2e-smoke` 只保留为显式 operator 工具，不属于自动 release gate。release activate 不读取 scenario，不接受 approval ticket，也不自动恢复或撤回任何业务关系。
 - 标准 scenario 的唯一写入口是 `finops-deploy-control write-operation-e2e-scenario-install`：输入仅接受 `/tmp/finops-write-e2e-*.json` 的 finops-deploy-owned、非链接、非 group/world-writable 文件和一个已存在 release；helper 使用该 release 的合同校验器验证后，原子安装 root-owned `0600` 文件并保留 `.previous`。输出只包含校验状态、scenario 名称/数量和内容摘要，不返回业务行内容。
 - runtime health 必须在 canonical audit 前完成收敛；`full`/`stability` 还必须在 read-model、HTTP 和隔离写探针之后采样。canonical audit 是每个 checkpoint 的最后一项只读证明。
-- pre checkpoint 在任何切换前完成。`runtime_sync_closure_gate` 允许通过既有 repository 幂等收敛一次已经 `done` 且 publish lock 为空或过期的 `publishing` 终态，但 reconciliation 必须写入 checkpoint evidence，并在同一 checkpoint 内再取得至少一个无残留、无再次 reconciliation 的干净采样才可 PASS；持续复发按 dispatcher/状态机故障 fail closed。部署 shell 不得在 gate 外隐式清理。pre 失败不修改 deploy-control/runtime-worker helper。候选激活后 T+0 运行 `full`，T+60s/T+300s 运行 `stability`；最终 evidence 要求每个 checkpoint 的 terminal publish reconciliation 已稳定、`publishing_outbox_count=0`，并证明真实 worker、queue、read model、dead-letter 与性能持续收敛。只有最终 evidence 验证成功，发布才返回成功。
+- `runtime`/`acl` 的 pre checkpoint 在切换前完成；候选激活后 T+0 运行 `full`，T+60s/T+300s 运行 `stability`。`frontend` 只做 pre/T+0 快速检查并以 exact dist/readiness/005/public asset 作为最终证据。所有 profile 都必须先验证最终 evidence 才返回成功。
 
 ## Phase 19 受控生产命令（2026-07-12）
 

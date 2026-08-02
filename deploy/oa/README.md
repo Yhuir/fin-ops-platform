@@ -97,7 +97,6 @@
 
 已提供模板：
 
-- `deploy/oa/fin_ops_role_binding.mysql.sql`
 - `deploy/oa/fin_ops_user_role_sync.mysql.sql`
 
 ## OA token 复用链路
@@ -382,10 +381,10 @@ python -m fin_ops_platform.app.worker \
 - 调用服务器 root-owned helper：
   - `/usr/local/sbin/finops-deploy-control check-release <release-name>`
   - `/usr/local/sbin/finops-deploy-control release-gate-activate <release-name>`
-- `release-gate-activate` 是唯一正常激活入口；公开 `activate` 命令已删除。ACL 安全发布必须先生成并校验双 token 的 read-only preflight artifact。它先对当前 release
+- `release-gate-activate` 是唯一正常激活入口；公开 `activate` 命令已删除。helper 比较 exact candidate 与唯一 active release 的实际包内容，自动判定 `frontend`、`runtime` 或 `acl`，没有手工 profile/skip。所有 profile 只读取 005；只有 `acl` 额外校验 candidate-bound 005/006 read-only preflight artifact。`runtime`/`acl` 先对当前 release
   执行 production-equivalent pre checkpoint，再用 `/etc/fin-ops/fin-ops.postgres-migrator.env`
-  停止旧 API 和 runtime workers，再执行 PostgreSQL schema migration/validated CHECK，
-  成功后才激活 API、RabbitMQ worker 和 dispatcher 指向该 release；重启前还会以 release registry
+  停止旧 API 和 runtime workers，执行 PostgreSQL schema migration/validated CHECK，
+  成功后才激活 API、RabbitMQ worker 和 dispatcher 指向该 release；`frontend` 只原子发布候选 dist 并重启已有 runtime。重启前都会以 release registry
   为白名单 stop/disable 已启用、运行或失败的未注册 `fin-ops-worker@*.service`，避免历史/WIP unit
   继续消费队列或 crash-loop。该动作不删除实例 env，保留受控回滚能力
 - API 和 dispatcher release drop-in 会先清空基础 unit 继承的 `EnvironmentFile`，再加载
@@ -409,18 +408,19 @@ python -m fin_ops_platform.app.worker \
 - 清理可删除的旧 release，默认保留最近 4 个，并始终保护当前 active release
 - 激活发布会在创建新 release 目录前先执行一次旧 release 清理，并检查 release 所在文件系统至少有
   512MB 可用空间；空间不足时会输出 `df` 和关键目录大小后停止，不会继续解包到半失败状态
-- 激活前运行 `preflight`：用候选 gate 代码检查当前 stable runtime、worker/queue/RabbitMQ 收敛、
+- `runtime`/`acl` 激活前运行 `preflight`：用候选 gate 代码检查当前 stable runtime、worker/queue/RabbitMQ 收敛、
   隔离 PostgreSQL 可逆写探针和只读页面 canonical audit，不执行业务 mutation。候选 gate 读取旧
   stable API 时，以候选内置页面 registry 对响应 summary 与逐页 proof 做严格对账；旧响应缺少 registry
   明细字段可以由完整逐页 proof 证明，字段只返回一部分、漏页或顺序漂移仍 fail closed
 - `preflight` 的 worker readiness 使用当前 stable release 的 required worker inventory；新增 required
   worker 由激活阶段的 ensure helper 安装，并从 T+0 起按候选 registry 严格校验，避免候选 registry 在
   激活前把尚未部署的新 worker 误报为旧 runtime 故障
-- 候选激活后 T+0 运行 `full`：连接真实 PostgreSQL 与 RabbitMQ，检查 exact worker inventory、
+- `runtime`/`acl` 候选激活后 T+0 运行 `full`：连接真实 PostgreSQL 与 RabbitMQ，检查 exact worker inventory、
   queue/dirty/dead-letter 收敛、critical read-model SLO、隔离事务写入能力、domain/page canonical
   audit 及 API/health 性能
-- T+60s、T+300s 运行 `stability`：重跑 critical read-model、性能、domain audit 和 runtime 收敛检查，
+- `runtime`/`acl` 在 T+60s、T+300s 运行 `stability`：重跑 critical read-model、性能、domain audit 和 runtime 收敛检查，
   全程不执行 confirm/withdraw；最终证据以 T+300 证明异步拓扑持续稳定
+- `frontend` 只执行 pre/T+0 的 exact dist、active release、worker inventory、ready、005 session 和公开 shell/首个 hashed asset；不执行 RabbitMQ apply、runtime closure、page audit 或 T+60/T+300 等待
 - 页面 shell 探针固定使用公开站点 origin；API 探针固定使用当前 release 的内部服务 origin，
   防止内部地址页面 404 或公开 Nginx fallback 被误判为业务 API 结果
 - 自动 release gate 不读取受控业务 scenario、standing approval，也不修改真实业务关系。隔离写探针只在
@@ -442,7 +442,7 @@ python -m fin_ops_platform.app.worker \
   `/etc/fin-ops/fin-ops.rabbitmq-monitoring.env`，任一缺失或不可读都 fail closed
 - 最终 PASS evidence 写入
   `/opt/fin-ops/runtime-smoke/release-gates/<release-name>/evidence.json`，绑定 release 与 Git commit；
-  任一 checkpoint 或 evidence 合同失败只允许恢复同样带 `settings-access-control-v1` capability 且 fingerprint 有效的 previous release；旧 release 不满足时保持 API maintenance/fail-closed，执行 forward repair，绝不重启 vulnerable binary。pre checkpoint 失败不改任何 helper
+  `frontend`/`runtime` 失败可恢复满足当前安全 capability/fingerprint 的 previous release；`acl` 失败保持 API maintenance/fail-closed 并执行 forward repair，绝不重启 vulnerable binary。pre checkpoint 失败不改任何 helper
 
 常用参数：
 
@@ -649,7 +649,7 @@ sudo /usr/local/sbin/finops-deploy-control candidate-status "$release" --json
 
 若 post-validation 失败，不能直接把 0600 backup 移回 live：把 backup `install` 到同目录 rollback temp，设为 `root:root 0755`，核验旧 approved hash 和 `bash -n` 后再 `mv -f` 原子恢复。整个 bootstrap 要记录 deploy-control before/after hash、runtime-worker helper hash、active release、service、DB/OA/ACL fingerprint 到 root-owned `/opt/fin-ops/evidence/<release>/settings-access-control-bootstrap.json` 并生成 sha256；任一非 helper 事实变化立即停止。
 
-`release-gate-activate` 先验证 approved preflight 与 candidate/active fingerprint 未漂移，并对当前旧进程执行 pre checkpoint。通过后以 root-owned before-image、同目录临时文件和 atomic `mv` 从 common/secrets env 只删除三项 retired admission key 与 legacy admin key，记录不含值的 before/after SHA-256 和 removed counts，再执行 strict env assertion 与 artifact-bound OA exact binding cleanup。环境清理或 OA cleanup 在进入 activation/maintenance 前失败时必须原子恢复 env 并 read-back；一旦开始 activation 则保留 clean env 用于 forward repair，禁止恢复不安全 admission。随后才停止 API 和上一版本 workers、执行 0133 和 validated CHECK、安装普通 runtime assets、发布候选并恢复服务。`0127_direct_canonical_page_runtime_retirement.sql` 只是 no-op 标记，不会改写 pending backlog、readiness 或回滚 projection 证据。不要手工创建业务表、
+`release-gate-activate` 先验证 candidate/active fingerprint 未漂移并自动判定 profile。三项 retired admission key 与 legacy admin key 的一次性清理已经完成；稳态发布只执行 strict env assertion，发现任一旧 key 立即失败关闭，不再重写 env。历史 OA binding cleanup/rollback SQL 与激活代码也已删除；OA topology 漂移只能阻断并由独立修复处理。`runtime`/`acl` 通过 current checkpoint 后才停止 API 和上一版本 workers、执行 migration/validated CHECK、安装 runtime assets、发布候选并恢复服务；`frontend` 只发布 exact dist 并重启已有 runtime。`0127_direct_canonical_page_runtime_retirement.sql` 只是 no-op 标记，不会改写 pending backlog、readiness 或回滚 projection 证据。不要手工创建业务表、
 不要用运行时账号代替 migrator 账号，也不要让旧 `/opt/fin-ops/fin-ops.env` 或 `/opt/fin-ops/current`
 参与 release 运行时。
 覆盖式 `legacy-current` 部署入口已经移除；`scripts/deploy-oa.sh` 只生成 versioned release payload，
@@ -679,7 +679,6 @@ release 会占用服务器磁盘。生产策略不是无限保留，而是默认
 权限与菜单的 SQL 模板：
 
 - `deploy/oa/fin_ops_menu.mysql.sql`
-- `deploy/oa/fin_ops_role_binding.mysql.sql`
 
 ## 反向代理示例
 
@@ -721,14 +720,15 @@ OA 菜单按当前同域 iframe 口径配置：
 如果生产环境更适合通过 DBA 执行 SQL，而不是通过 OA 菜单管理页面手工录入，可直接使用：
 
 - `deploy/oa/fin_ops_menu.mysql.sql`
-- `deploy/oa/fin_ops_role_binding.mysql.sql`
 - `deploy/oa/fin_ops_user_role_sync.mysql.sql`
 
 ## ACL 安全发布与生产证据
 
-1. 本地全回归和 clean commit 后上传但不激活：`./scripts/deploy-oa.sh --no-activate --release-name <release>`。
-2. 按上文 manual-root 流程原子 bootstrap deploy-control；禁止 `self-update`，并证明 runtime-worker helper、active release、service、DB、OA、ACL 不变。
-3. 本地 0600 token 文件必须同时提供 admin token 和专用、初始 denied 的 bearer token。两者经 SSH stdin 传递，不进入 argv、artifact 或日志：
+普通 `frontend`/`runtime` 发布不进入本节的双身份链路，只需要 005。以下步骤只适用于 helper 自动判定为 `acl` 的候选；不能由操作者手工指定、降级或跳过 profile。
+
+1. 本地全回归和 clean commit 后上传但不激活：`./scripts/deploy-oa.sh --no-activate --release-name <release>`，并用 `release-gate-profile <release> --json` 确认自动结果为 `acl`。
+2. 若候选包含 deploy-control 变更，按上文 manual-root 流程原子 bootstrap；禁止 `self-update`，并证明 runtime-worker helper、active release、service、DB、OA、ACL 不变。
+3. 本地 0600 token 文件同时提供 005 admin token 和 006 专用、初始 denied bearer token。两者经 SSH stdin 传递，不进入 argv、artifact 或日志：
 
 ```bash
 ./scripts/with-production-admin-token.sh --require-bearer sh -c '
@@ -739,27 +739,9 @@ ssh -o StrictHostKeyChecking=accept-new -o ControlMaster=no finops-deploy@finops
   'sudo -n sha256sum --check /opt/fin-ops/evidence/<release>/settings-access-control-preflight.json.sha256'
 ```
 
-Preflight 的 `eligible=true` 表示已经是 post-deploy 稳态；升级旧 runtime 时可以用
-`cutover_eligible=true` 表示唯一受控切换态。该切换态要求：admin session 精确为 `YNSYLP005/admin`；专用 bearer
-精确为 `YNSYLP006`、非 admin，且必须从 canonical Settings ACL 的 allowed/readonly/full/admin 四个集合全部缺席。
-身份相位只接受两个精确组合：存在 pending DB、legacy env 或 OA cleanup 事实的旧 runtime 切换态为
-`full_access` 且带 `finops:app:view`；steady/forward-repair
-态为 `denied` 且不带该 OA 菜单权限。`denied + permission` 或 `full_access + no permission` 都属于交叉漂移并
-fail closed。0133/CHECK 三项只能全 false（待迁移）或全 true，
-禁止 partial；legacy admin env 只能为空或恰好 005；retired env 只能是三个固定 key；OA selector、唯一 menu、
-三 dedicated roles/bindings/members 必须与 canonical ACL 精确一致。artifact 只含非敏感 state/blockers、salted
-hashes/counts/fingerprints。任何 token、identity、canonical ACL、partial DB、env、OA 或 fingerprint 漂移都阻断。
+Preflight 要求 admin session 精确为 `YNSYLP005/admin`；专用 bearer 精确为 `YNSYLP006`、非 admin，并从 canonical Settings ACL 的 allowed/readonly/full/admin 四个集合全部缺席。006 必须是 `denied` 且不带 `finops:app:view`；0133/CHECK 必须已全部生效，retired/legacy admission env 必须全部缺席，OA selector、唯一 menu、三 dedicated roles/bindings/members 必须与 canonical ACL 精确一致。artifact 只含非敏感 state/blockers、salted hashes/counts/fingerprints。任何 token、identity、canonical ACL、DB、env、OA 或 fingerprint 漂移都阻断且零写。历史 cutover/cleanup 状态不再被稳态发布接受。
 
-若 fixed menu 上仍有历史 non-dedicated role binding，普通 `eligible` 保持 false；只有整体
-`cutover_eligible=true` 时 artifact 才可标记 `oa.cleanup_eligible=true`，并给出 salted exact target hashes、before/after 与 rollback fingerprint。release gate
-只在 current-runtime pre checkpoint 通过后执行这些 exact rows；artifact SHA、current before-image、三专用 role exact set
-或 non-target fingerprint 任一漂移都在同一事务内零写/回滚。候选后续失败时，release rollback 会先用同一 before-image
-恢复 exact rows并 read-back；rollback 失败保持 maintenance，禁止继续恢复旧 binary 后伪装成功。
-多个 exact target 的 producer 必须按 lowercase SHA-256 字典序输出 `target_hashes` 与
-`rollback_target_hashes`，`target_set_sha256` 也基于该 canonical 顺序；consumer 继续拒绝未排序、重复、非法或不对称 hash set，
-不得用 consumer 端排序掩盖 artifact producer 漂移。
-
-4. 只用 exact candidate 零重传激活：`./scripts/deploy-oa.sh --activate-existing --release-name <release>`。顺序固定为 cutover/steady preflight assertion → current runtime checkpoint → exact env cleanup + strict assertion → exact OA binding cleanup → API/worker quiesce → 执行 migration → 独立 read-back 断言 0133 已应用且 `app_settings_access_control_canonical_order_guard` CHECK 已验证 → runtime sync/install → safe candidate → T+0/T+60/T+300 evidence。进入 activation 前失败恢复 env before-image；进入 activation 后保持 clean env，previous release 没有同等安全 capability 时保持 maintenance 并 forward repair。
+4. 只用 exact candidate 零重传激活：`./scripts/deploy-oa.sh --activate-existing --release-name <release>`。顺序固定为 ACL preflight assertion → current runtime checkpoint → strict env assertion → API/worker quiesce → migration/CHECK read-back → runtime sync/install → safe candidate → T+0/T+60/T+300 evidence。ACL 激活失败保持 maintenance 并 forward repair，不回滚到可能不具备当前 ACL 安全能力的旧 binary。
 5. 激活成功后用相同双 token 运行 `settings-access-control-post-deploy`。它把 `YNSYLP006` 专用 bearer 依次改为 full、read、denied，验证 generic save、两条直接提权攻击、AppHealth/OA credentials/data reset admin-only、OA 三角色、fresh OA router 菜单可见性、durable audit/request id 和 ACL GET/PUT latency，并在 finally/read-back 中恢复原 accounts/OA/denied session：
 
 ```bash

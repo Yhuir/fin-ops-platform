@@ -38,7 +38,7 @@
 - 前端隐藏、禁用和 `SessionGate` 只是交互边界；backend global route policy 和模块自有 guard 才是 direct API 的权威边界。permission-bearing denied 账号直达 `/fin-ops/` 不 mount 业务页，直调受保护 API 返回 `403`。
 - `/settings` 的“访问账户权限”是唯一 ACL UI，仅固定 `YNSYLP005` 加载和保存专用 API。full-access 用户仍可保存普通设置，但无法查询/写入 ACL；read-export 用户只读；denied 用户无法进入 router。
 - APP tier 不写入 OA identity cache。账号从 ACL 删除后，同一 OA 身份的下一次 session/direct API 判断立即 denied。OA 菜单可见性由 canonical ACL 到三个专用角色的投影决定，以投影后的新 OA router/session 为验收边界，不承诺旧 DOM 无刷新消失。
-- `finops:app:view` 只定位 OA 菜单。runtime Settings command 只验证严格三角色投影并更新其 members；历史 non-dedicated menu binding 的 exact cleanup/rollback 由部署拥有，不由页面或运行时宽删。
+- `finops:app:view` 只定位 OA 菜单。runtime Settings command 只验证严格三角色投影并更新其 members；历史 non-dedicated menu binding cleanup 已退休，部署只读验证 exact topology，不由页面、运行时或发布链宽删。
 - 当前 17-route registry 的 admin/full/read/denied 回归由 `web/src/test/PageRouteHost.test.tsx` 和 `web/e2e/permissions-role-matrix.spec.ts` 锁定；App Health、OA 申请人凭据和 data reset 仍是 admin-only。这是已完成的自动化证据，不表示生产已发布。
 - 该权限收敛没有新增或改变任何页面 response shape、read model、worker、dirty scope、outbox、Redis 或 cache key。
 

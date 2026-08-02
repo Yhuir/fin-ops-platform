@@ -123,16 +123,14 @@
 
 该同步是低频同步 I/O，不新增 outbox、worker、read model 或缓存。
 
-## Deployment exact cleanup / rollback 状态
+## Deployment ACL verification 状态
 
 | 状态 | 合同 |
 | --- | --- |
-| `preflight_blocked` | disabled/missing、wrong selector、menu/role/member/env/identity/fingerprint drift；零写并回审批 gate |
-| `preflight_exact` | selector/menu/三 role/三 binding/members 全部 exact，`eligible=true`，无需 cleanup |
-| `cleanup_approved` | 唯一 drift 为 artifact 中 salted non-dedicated fixed-menu binding targets；approved before-image/SHA-256 未漂移 |
-| `cleanup_applied` | 仅删除 exact targets，三 dedicated binding、业务 role/member 和其他 menu/binding fingerprint 不变，after-image read-back 成功 |
-| `cleanup_rolled_back` | 候选失败后用同一 before-image 恢复 exact rows并 read-back，之后才允许恢复 ACL-safe previous release |
-| `maintenance` | cleanup/restore/read-back/capability 任一失败；禁止启动旧 vulnerable binary，只能重新审批/forward repair |
+| `profile_skipped` | 自动 profile 为 `frontend`/`runtime`；不读取 006 或 ACL artifact |
+| `preflight_blocked` | disabled/missing、wrong selector、menu/role/member/env/identity/fingerprint drift，或 artifact 不是 `eligible=true`；零写并停止激活 |
+| `preflight_exact` | 自动 profile 为 `acl`，selector/menu/三 role/三 binding/members、strict env、0133/CHECK 与 005/006 identity 全部 steady-state exact |
+| `maintenance` | ACL candidate 激活后任一 gate/restore/read-back 失败；禁止启动旧 vulnerable binary，只能 forward repair |
 
 fresh OA menu 验收只接受角色投影后的新 `/system/menu/getRouters` 或新 shell session；旧 DOM 不构成状态事实。
 
@@ -153,3 +151,4 @@ facts、audit 和必要领域任务。它们不触发已退役页面 read-model 
 | --- | --- | --- | --- |
 | 2026-06-11 | 首轮测试闭环补齐 OA 集成状态机 | session、OA sync、凭据、进项 OA 反提、ETC OA 草稿、read model 状态 | `PYTHONPATH=backend/src python3 -m unittest ... -v`、`cd web && npm test -- --run ...`、`bash scripts/verify.sh docs` |
 | 2026-08-02 | 收敛 canonical ACL、fixed-menu 三角色 runtime projection 与 deployment exact cleanup/rollback | OA identity、APP authorization、菜单可见性和发布证据责任分离 | `tests.test_oa_role_sync_service`、`tests.test_settings_access_control_preflight`、`tests.test_deploy_oa_script`、`tests.test_permissions_write_entry_inventory` |
+| 2026-08-03 | 一次性 cleanup/rollback 退出稳态发布，ACL gate 只接受 `eligible=true` | 普通发布不读取 006；OA topology drift 阻断且零写 | `tests.test_deploy_oa_script` |
