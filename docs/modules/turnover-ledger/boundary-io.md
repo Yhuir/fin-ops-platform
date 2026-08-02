@@ -1,6 +1,6 @@
 # 外部往来款管理模块边界与 I/O
 
-日期：2026-07-29
+日期：2026-08-02
 
 ## 模块化状态
 
@@ -29,7 +29,7 @@
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| 页面 GET / 筛选 / 分页 / 导出 | `TurnoverLedgerPage.tsx`、`features/turnoverLedger/api.ts` | route 只校验 HTTP/权限并委托 `TurnoverLedgerQueryService`；不得回退 local builder、旧 read model 或 queue |
+| 页面 GET / 筛选 / 分页 / 导出 | `TurnoverLedgerPage.tsx`、`features/turnoverLedger/api.ts` | 列表按服务端页读取，页面固定发送 `page_size=50` 并消费 `pagination.page/page_size/total`；切 family 回到第 1 页，翻页只替换当前页，超过最后一页时回退到服务端有效末页。route 只校验 HTTP/权限并委托 `TurnoverLedgerQueryService`；不得回退 local builder、旧 read model 或 queue |
 | Canonical 页面快照 | `TurnoverLedgerQueryService` | 通过 `turnover_ledger_canonical_snapshot(...)` 开启单个只读 repeatable-read transaction；同次请求中的流水、分类、设置、关系和 extras 必须来自该快照 |
 | 银行流水 | `app.bank_transactions` / import fact repository | 只读取有效事实；ID 同时支持 storage UUID 与公开 legacy id 的既有规范 |
 | 有效分类和标签准入 | `app.bank_transaction_categories`、`app.bank_transaction_category_confirmations`、`app.app_settings` | 复用 Bank Details canonical classifier 的 set-based SQL 与 `AppSettingsService` 的无 I/O 选择映射；同一快照只返回当前选中 tag codes 的流水，query service 不复制匹配规则 |
@@ -42,10 +42,10 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 页面 rows/groups/summary/statistics | 前端页面 | 直接由当前 canonical snapshot 计算；页面 grouped DTO 保留 `summary_row` 与 `flow_rows`，不传输未被页面消费的 `allocation_lots` / `lot_rows`；API 不返回 `read_model_status`、`source_versions`、`refresh_enqueued` 或 refresh scope |
+| 页面 rows/groups/summary/statistics | 前端页面 | 直接由当前 canonical snapshot 计算；当前页只提交与 `{family,page}` 一致的最新请求响应，旧请求即使晚返回也不得覆盖新页。页面 grouped DTO 保留 `summary_row` 与 `flow_rows`，不传输未被页面消费的 `allocation_lots` / `lot_rows`；API 不返回 `read_model_status`、`source_versions`、`refresh_enqueued` 或 refresh scope |
 | 导出 grouped payload | XLSX export owner | 复用同一 canonical query，但明确包含 normalized `allocation_lots` / `lot_rows`，保证导出财务字段不因页面瘦身而丢失。 |
 | 统一配对与结算状态 | 外部往来款页面 | 每个 active canonical case 必须独立校验完整且唯一的 bank members、同一业务语义、现金差额和 `principal-settlement` 余额。非零 active case 输出 `cash_pair_linked=true` / `paired_unsettled=true` 及待还/待收余额；只有现金差额和业务余额都为零才输出 `cash_closure_linked=true`。relation mode/source 不得替代计算证明 |
-| 写操作结果 | 当前页面 | 按钮立即进入提交中/disabled；成功后当前页只发一次正常 GET。GET 失败提示“写入已成功、页面重载失败”，不得把成功写入改写为失败 |
+| 写操作结果 | 当前页面 | 按钮立即进入提交中/disabled；成功后按当前 family/current page 只发一次正常 GET，不回退第一页或本地拼接数组。GET 失败提示“写入已成功、页面重载失败”，不得把成功写入改写为失败 |
 | 关联台可见性 | 关联台 | 关联台在自己下一次访问/手动刷新时读取同一 `app.workbench_pair_relations`；外部往来款写路径不触发关联台读取 |
 | 导出 | 用户下载 | 复用同一 query owner、权限和筛选；不得另建投影读链 |
 
@@ -108,12 +108,12 @@
 - PostgreSQL canonical snapshot：`tests/test_turnover_ledger_postgres_integration.py`
 - API/write regression：`tests/test_turnover_ledger_api.py`、`tests/test_turnover_ledger_uow_contract.py`
 - Audit/architecture：`tests/test_audit_page_business_read_model_tool.py`、`tests/test_platform_runtime_boundary_guards.py`
-- Frontend：`web/src/test/TurnoverLedgerApi.test.ts`、`web/src/test/TurnoverLedgerPage.test.tsx`
+- Frontend：`web/src/test/TurnoverLedgerApi.test.ts`、`web/src/test/TurnoverLedgerPage.test.tsx`；Playwright：`web/e2e/turnover-ledger-flow.spec.ts`，以 121 组数据证明第 2/3 页和第 121 组可达。
 - 生产：使用 test-owned 可恢复 fixture 验证 confirm → 两页面手动刷新一致 → withdraw 恢复；同时验证 Audit、零 Turnover refresh outbox/dirty scope、接口耗时和 worker registry 无 Turnover 实例。
 
 ## 验收条件
 
-- 每次页面访问/手动刷新返回当前 snapshot 的完整数据和配对关系。
+- 每次页面访问/手动刷新返回当前 snapshot 的分页数据和配对关系；`total > 50/100` 时所有页均可达，不得只固定读取第一页。
 - 外部往来款和关联台对同一 active case、成员和撤回状态一致。
 - 不同 active case 的余额不跨 case 抵消；无 active relation 的零余额流水不显示闭环；`closed_amount` 固定为兼容值 `0.00`。
 - 旧 Turnover read model 中即使有残留错误行，也不能改变页面响应。

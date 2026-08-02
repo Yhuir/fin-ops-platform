@@ -40,6 +40,7 @@ type ApiMockOptions = {
   etcTicketBusinessBatchesFailuresBeforeSuccess?: number;
   etcTicketBusinessBatchDeleteFailOnce?: boolean;
   etcTicketBusinessBatchDeleteFailuresBeforeSuccess?: number;
+  etcTicketBusinessBatchTotal?: number;
   etcTicketInitialBusinessBatchStatus?: EtcBusinessBatchStatus;
   etcTicketSourceFileDeleteFailOnce?: boolean;
   etcTicketSourceFileDeleteFailuresBeforeSuccess?: number;
@@ -64,6 +65,7 @@ type ApiMockOptions = {
   turnoverCostFanout?: boolean;
   turnoverLedgerFailOnce?: boolean;
   turnoverLedgerFailuresBeforeSuccess?: number;
+  turnoverLedgerTotal?: number;
   bankDetailsClassificationMode?: BankDetailClassificationMockMode;
   bankDetailsLargeDataset?: boolean;
   bankDetailsTransactionsEmpty?: boolean;
@@ -2354,7 +2356,14 @@ function etcBusinessBatchPayload(status: EtcBusinessBatchStatus, includeItems = 
   };
 }
 
-function etcBusinessBatchListPayload(bucket: string | null, batchStatus: EtcBusinessBatchStatus, deleted = false) {
+function etcBusinessBatchListPayload(
+  bucket: string | null,
+  batchStatus: EtcBusinessBatchStatus,
+  deleted = false,
+  page = 1,
+  pageSize = 50,
+  total = 1,
+) {
   if (deleted) {
     return {
       items: [],
@@ -2364,8 +2373,8 @@ function etcBusinessBatchListPayload(bucket: string | null, batchStatus: EtcBusi
         submitted: 0,
       },
       pagination: {
-        page: 1,
-        page_size: 100,
+        page,
+        page_size: pageSize,
         total: 0,
       },
     };
@@ -2377,18 +2386,40 @@ function etcBusinessBatchListPayload(bucket: string | null, batchStatus: EtcBusi
       : "unsubmitted";
   const requestedBucket = bucket ?? "unsubmitted";
   const visible = requestedBucket === batchBucket;
+  const batches = visible ? Array.from({ length: total }, (_, index) => {
+    const sequence = String(index + 1).padStart(3, "0");
+    const batch = etcBusinessBatchPayload(batchStatus, false);
+    return index === 0 ? batch : {
+      ...batch,
+      business_batch_id: `etc-business-page-${sequence}`,
+      task_id: "",
+      title: `分页批次 ${sequence}`,
+      external_etc_batch_id: `ETC-PAGE-${sequence}`,
+    };
+  }) : [];
   return {
-    items: visible ? [etcBusinessBatchPayload(batchStatus, false)] : [],
+    items: batches.slice((page - 1) * pageSize, page * pageSize),
     counts: {
-      unsubmitted: batchBucket === "unsubmitted" ? 1 : 0,
-      staged: batchBucket === "staged" ? 1 : 0,
-      submitted: batchBucket === "submitted" ? 1 : 0,
+      unsubmitted: batchBucket === "unsubmitted" ? total : 0,
+      staged: batchBucket === "staged" ? total : 0,
+      submitted: batchBucket === "submitted" ? total : 0,
     },
     pagination: {
-      page: 1,
-      page_size: 100,
-      total: visible ? 1 : 0,
+      page,
+      page_size: pageSize,
+      total: visible ? total : 0,
     },
+  };
+}
+
+function etcBusinessBatchPagePayload(batchId: string, batchStatus: EtcBusinessBatchStatus) {
+  const sequence = batchId.split("-").at(-1) ?? "";
+  return {
+    ...etcBusinessBatchPayload(batchStatus, true),
+    business_batch_id: batchId,
+    task_id: "",
+    title: `分页批次 ${sequence}`,
+    external_etc_batch_id: `ETC-PAGE-${sequence}`,
   };
 }
 
@@ -8261,6 +8292,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/etc/business-batches") {
+      const requestedPage = Math.max(1, Number.parseInt(url.searchParams.get("page") ?? "1", 10) || 1);
+      const requestedPageSize = Math.max(1, Number.parseInt(url.searchParams.get("page_size") ?? "50", 10) || 50);
       if (etcTicketBusinessBatchesFailuresRemaining > 0) {
         etcTicketBusinessBatchesFailuresRemaining -= 1;
         return json(route, {
@@ -8272,10 +8305,17 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         return json(route, {
           items: [],
           counts: { unsubmitted: 0, staged: 0, submitted: 0 },
-          pagination: { page: 1, page_size: 100, total: 0 },
+          pagination: { page: requestedPage, page_size: requestedPageSize, total: 0 },
         });
       }
-      return json(route, etcBusinessBatchListPayload(url.searchParams.get("bucket"), etcBusinessBatchStatus, etcBusinessBatchDeleted));
+      return json(route, etcBusinessBatchListPayload(
+        url.searchParams.get("bucket"),
+        etcBusinessBatchStatus,
+        etcBusinessBatchDeleted,
+        requestedPage,
+        requestedPageSize,
+        options.etcTicketBusinessBatchTotal ?? 1,
+      ));
     }
 
     if (path === "/api/etc/business-batches/etc-business-e2e-001") {
@@ -8299,6 +8339,12 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         etcBusinessBatchDeleted = true;
         return json(route, { ok: true });
       }
+    }
+
+    if (/^\/api\/etc\/business-batches\/etc-business-page-\d+$/.test(path) && request.method() === "GET") {
+      return json(route, {
+        businessBatch: etcBusinessBatchPagePayload(path.split("/").at(-1) ?? "", etcBusinessBatchStatus),
+      });
     }
 
     if (path === "/api/etc/business-batches/etc-business-e2e-001/oa-draft") {
@@ -9166,7 +9212,24 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           message: "往来款台账加载暂时失败，请刷新后重试。",
         }, 503);
       }
-      return json(route, turnoverLedgerPayload(turnoverClosureConfirmed));
+      const payload = turnoverLedgerPayload(turnoverClosureConfirmed);
+      const requestedPage = Math.max(1, Number.parseInt(url.searchParams.get("page") ?? "1", 10) || 1);
+      const requestedPageSize = Math.max(1, Number.parseInt(url.searchParams.get("page_size") ?? "50", 10) || 50);
+      const total = options.turnoverLedgerTotal ?? 1;
+      if (total > 1) {
+        const template = payload.groups[0];
+        const groups = Array.from({ length: total }, (_, index) => {
+          const sequence = String(index + 1).padStart(3, "0");
+          return {
+            ...template,
+            group_id: `counterparty:company:page-${sequence}`,
+            counterparty_name: `分页往来方 ${sequence}`,
+          };
+        });
+        payload.groups = groups.slice((requestedPage - 1) * requestedPageSize, requestedPage * requestedPageSize);
+      }
+      payload.pagination = { page: requestedPage, page_size: requestedPageSize, total };
+      return json(route, payload);
     }
 
     if (path === "/api/turnover-ledger/closures/confirm") {

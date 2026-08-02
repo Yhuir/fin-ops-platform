@@ -305,7 +305,7 @@ describe("ETC ticket management page", () => {
     expect((await within(page).findAllByText("ETC-2026-001")).length).toBeGreaterThanOrEqual(1);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/etc/business-batches?bucket=unsubmitted&page=1&page_size=100",
+      "/api/etc/business-batches?bucket=unsubmitted&page=1&page_size=50",
       expect.objectContaining({ method: "GET" }),
     );
     expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/etc/invoices?"))).toBe(false);
@@ -314,6 +314,55 @@ describe("ETC ticket management page", () => {
       String(url) === "/api/etc/business-batches/etc-batch-unsubmitted-01"
     );
     expect(selectedDetailCalls).toHaveLength(1);
+  });
+
+  test("loads every server page beyond the first 100 ETC business batches", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const batches = Array.from({ length: 121 }, (_, index) => {
+      const sequence = String(index + 1).padStart(3, "0");
+      return businessBatchFixture({
+        businessBatchId: `etc-business-page-${sequence}`,
+        taskId: "",
+        title: `分页批次 ${sequence}`,
+        externalEtcBatchId: `ETC-PAGE-${sequence}`,
+        status: "imported",
+      });
+    });
+    const fetchBatches = vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockImplementation((query = {}) => {
+      const page = query.page ?? 1;
+      const pageSize = query.pageSize ?? 50;
+      return Promise.resolve({
+        counts: { unsubmitted: batches.length, staged: 0, submitted: 0 },
+        items: batches.slice((page - 1) * pageSize, page * pageSize),
+        pagination: { page, pageSize, total: batches.length },
+      } as never);
+    });
+    vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockImplementation((batchId: string) => Promise.resolve({
+      ...batches.find((batch) => batch.businessBatchId === batchId),
+      invoiceItems: [],
+    } as never));
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    expect(await within(page).findByTestId("etc-batch-row-etc-business-page-001")).toBeInTheDocument();
+    expect(within(page).getByText("121 批")).toBeInTheDocument();
+    expect(within(page).getByText("显示 1-50 / 121")).toBeInTheDocument();
+    await user.click(within(page).getByRole("button", { name: "下一页" }));
+    expect(await within(page).findByTestId("etc-batch-row-etc-business-page-051")).toBeInTheDocument();
+    expect(within(page).queryByTestId("etc-batch-row-etc-business-page-001")).not.toBeInTheDocument();
+    expect(within(page).getByText("显示 51-100 / 121")).toBeInTheDocument();
+    await user.click(within(page).getByRole("button", { name: "下一页" }));
+    expect(await within(page).findByTestId("etc-batch-row-etc-business-page-101")).toBeInTheDocument();
+    expect(within(page).getByTestId("etc-batch-row-etc-business-page-121")).toBeInTheDocument();
+    expect(within(page).getByText("显示 101-121 / 121")).toBeInTheDocument();
+
+    expect(fetchBatches.mock.calls.map(([query]) => [query?.page, query?.pageSize])).toEqual([
+      [1, 50],
+      [2, 50],
+      [3, 50],
+    ]);
   });
 
   test("recovers business batches after a transient list failure when refreshed", async () => {
@@ -383,7 +432,7 @@ describe("ETC ticket management page", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/etc/business-batches?bucket=unsubmitted&page=1&page_size=100",
+        "/api/etc/business-batches?bucket=unsubmitted&page=1&page_size=50",
         expect.objectContaining({ method: "GET" }),
       );
     });
@@ -392,7 +441,7 @@ describe("ETC ticket management page", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/etc/business-batches?bucket=submitted&page=1&page_size=100",
+        "/api/etc/business-batches?bucket=submitted&page=1&page_size=50",
         expect.objectContaining({ method: "GET" }),
       );
     });
@@ -413,7 +462,7 @@ describe("ETC ticket management page", () => {
     expect(within(page).queryByLabelText("月份")).not.toBeInTheDocument();
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/etc/business-batches?bucket=unsubmitted&page=1&page_size=100",
+        "/api/etc/business-batches?bucket=unsubmitted&page=1&page_size=50",
         expect.objectContaining({ method: "GET" }),
       );
     });
@@ -425,7 +474,7 @@ describe("ETC ticket management page", () => {
     await user.click(within(page).getByRole("radio", { name: "已提交 1" }));
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/etc/business-batches?bucket=submitted&page=1&page_size=100",
+        "/api/etc/business-batches?bucket=submitted&page=1&page_size=50",
         expect.objectContaining({ method: "GET" }),
       );
     });
@@ -2289,11 +2338,12 @@ describe("ETC ticket management page", () => {
       importAttempts: [],
     });
 
-    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
-      counts: { unsubmitted: 1, staged: 0, submitted: 0 },
-      items: [sourceBusinessBatch],
-      pagination: { page: 1, pageSize: 100, total: 1 },
-    } as never);
+    let listedBusinessBatches = [sourceBusinessBatch];
+    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockImplementation(() => Promise.resolve({
+      counts: { unsubmitted: listedBusinessBatches.length, staged: 0, submitted: 0 },
+      items: listedBusinessBatches,
+      pagination: { page: 1, pageSize: 50, total: listedBusinessBatches.length },
+    } as never));
     vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockImplementation((businessBatchId: string) => Promise.resolve({
       ...(businessBatchId === "etc-business-fresh-001" ? freshBusinessBatch : sourceBusinessBatch),
       invoiceItems: [],
@@ -2302,7 +2352,10 @@ describe("ETC ticket management page", () => {
       (taskId === "etc-recon-task-fresh-001" ? freshTask : taskWithSourceFiles) as never,
     ));
     vi.spyOn(etcApi as Record<string, unknown>, "deleteEtcReconciliationSourceFile").mockResolvedValue(taskAfterFileDelete as never);
-    const createBatch = vi.spyOn(etcApi, "createEtcBusinessBatch").mockResolvedValue(freshBusinessBatch as never);
+    const createBatch = vi.spyOn(etcApi, "createEtcBusinessBatch").mockImplementation(async () => {
+      listedBusinessBatches = [freshBusinessBatch, sourceBusinessBatch];
+      return freshBusinessBatch as never;
+    });
 
     renderAppAt("/etc-tickets");
 
@@ -3727,14 +3780,15 @@ describe("ETC ticket management page", () => {
       oaDraftId: "oa-draft-staged-b",
       oaDraftUrl: "https://oa.example.test/draft/b",
     });
+    let draftCreated = false;
     vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockImplementation((query = {}) => Promise.resolve({
       counts: {
-        unsubmitted: query.bucket === "unsubmitted" ? 1 : 0,
-        staged: query.bucket === "unsubmitted" ? 1 : 2,
+        unsubmitted: draftCreated ? 0 : 1,
+        staged: draftCreated ? 2 : 1,
         submitted: 0,
       },
-      items: query.bucket === "staged" ? [stagedA, stagedB] : query.bucket === "unsubmitted" ? [importedA] : [],
-      pagination: { page: 1, pageSize: 100, total: query.bucket === "staged" ? 2 : 1 },
+      items: query.bucket === "staged" ? [stagedA, stagedB] : query.bucket === "unsubmitted" && !draftCreated ? [importedA] : [],
+      pagination: { page: 1, pageSize: 50, total: query.bucket === "staged" ? (draftCreated ? 2 : 1) : draftCreated ? 0 : 1 },
     } as never));
     vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockImplementation((batchId) => Promise.resolve({
       ...(batchId === stagedB.businessBatchId ? stagedB : batchId === stagedA.businessBatchId ? stagedA : importedA),
@@ -3751,7 +3805,10 @@ describe("ETC ticket management page", () => {
       sourceFiles: [],
       parseIssues: [],
     } as never));
-    vi.spyOn(etcApi, "createEtcBusinessBatchOaDraft").mockResolvedValue(stagedA as never);
+    vi.spyOn(etcApi, "createEtcBusinessBatchOaDraft").mockImplementation(async () => {
+      draftCreated = true;
+      return stagedA as never;
+    });
     const manualStatus = vi.spyOn(etcApi, "manualEtcBusinessBatchOaStatus").mockResolvedValue({
       ...stagedB,
       status: "manually_marked_submitted",

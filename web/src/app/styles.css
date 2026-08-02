@@ -25837,6 +25837,15 @@ body.column-layout-dragging {
   border-radius: 0;
 }
 
+.etc-batch-pagination {
+  flex-wrap: wrap;
+  gap: var(--fp-space-2);
+}
+
+.etc-batch-pagination .finance-table-pagination__summary {
+  width: 100%;
+}
+
 .etc-batch-rail .etc-batch-row {
   border-bottom: 1px solid var(--fp-border);
 }

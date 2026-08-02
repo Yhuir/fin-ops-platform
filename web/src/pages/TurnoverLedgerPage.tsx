@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type SyntheticEvent 
 import { Download, RefreshCw } from "lucide-react";
 
 import AppDrawer from "../components/common/AppDrawer";
+import { FinanceTablePagination } from "../components/common/FinanceTable";
 import PageScaffold from "../components/common/PageScaffold";
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
@@ -40,7 +41,7 @@ import type {
   TurnoverRelationDetail,
 } from "../features/turnoverLedger/types";
 
-const DEFAULT_PAGE_SIZE = 100;
+const DEFAULT_PAGE_SIZE = 50;
 
 const FAMILY_TABS: Array<{ value: TurnoverLedgerFamily; label: string }> = [
   { value: "all", label: "全部" },
@@ -328,6 +329,7 @@ export default function TurnoverLedgerPage() {
   const { runOperation } = useGlobalOperationOverlay();
   const { canAdminAccess, canMutateData } = useSessionPermissions();
   const [family, setFamily] = useState<TurnoverLedgerFamily>("all");
+  const [page, setPage] = useState(1);
   const [ledger, setLedger] = useState<TurnoverLedgerGroupedResponse | null>(null);
   const [tagSelection, setTagSelection] = useState<TurnoverLedgerTagSelection>(EMPTY_TAG_SELECTION);
   const [tagDrawerOpen, setTagDrawerOpen] = useState(false);
@@ -354,6 +356,11 @@ export default function TurnoverLedgerPage() {
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportDownloading, setExportDownloading] = useState(false);
   const [toast, setToast] = useState<{ severity: TurnoverLedgerToastSeverity; message: string } | null>(null);
+  const activeLedgerRequestRef = useRef<{
+    family: TurnoverLedgerFamily;
+    page: number;
+    controller: AbortController;
+  } | null>(null);
   const activeExtraEditorRef = useRef<{ relationId: string; controller: AbortController } | null>(null);
 
   const summary = ledger?.summary ?? DEFAULT_SUMMARY;
@@ -404,6 +411,12 @@ export default function TurnoverLedgerPage() {
     && !selectedRowsContainCashClosure;
   const closureActionLabel = selectedRowsAllCashClosure ? "撤回闭环" : "确认闭环";
   const canRunClosurePrimaryAction = selectedRowsAllCashClosure ? canWithdrawSelectedCashClosure : canOpenClosureDrawer;
+  const ledgerNavigationDisabled = loading
+    || tagSaving
+    || savingExtra
+    || mutatingRelation
+    || closureSubmitting
+    || selectedRow !== null;
 
   const loadTagSelection = useCallback((signal?: AbortSignal) => {
     setTagLoading(true);
@@ -420,41 +433,89 @@ export default function TurnoverLedgerPage() {
       .finally(() => setTagLoading(false));
   }, []);
 
-  const fetchLedger = useCallback((signal?: AbortSignal) => fetchTurnoverLedgerGrouped({
-    family,
-    direction: "all",
-    page: 1,
-    pageSize: DEFAULT_PAGE_SIZE,
-    signal,
-  }), [family]);
+  const requestLedger = useCallback(async ({
+    surfaceError = true,
+    throwOnError = false,
+  }: { surfaceError?: boolean; throwOnError?: boolean } = {}) => {
+    activeLedgerRequestRef.current?.controller.abort();
+    const requestContext = { family, page, controller: new AbortController() };
+    activeLedgerRequestRef.current = requestContext;
+    setLoading(true);
+    if (surfaceError) {
+      setError(null);
+    }
+    try {
+      let requestedPage = page;
+      let nextLedger = await fetchTurnoverLedgerGrouped({
+        family,
+        direction: "all",
+        page: requestedPage,
+        pageSize: DEFAULT_PAGE_SIZE,
+        signal: requestContext.controller.signal,
+      });
+      if (activeLedgerRequestRef.current !== requestContext || requestContext.controller.signal.aborted) {
+        return null;
+      }
+      const totalPages = Math.max(1, Math.ceil(nextLedger.pagination.total / DEFAULT_PAGE_SIZE));
+      if (requestedPage > totalPages) {
+        requestedPage = totalPages;
+        nextLedger = await fetchTurnoverLedgerGrouped({
+          family,
+          direction: "all",
+          page: requestedPage,
+          pageSize: DEFAULT_PAGE_SIZE,
+          signal: requestContext.controller.signal,
+        });
+        if (activeLedgerRequestRef.current !== requestContext || requestContext.controller.signal.aborted) {
+          return null;
+        }
+      }
+      setLedger(nextLedger);
+      if (requestedPage !== page) {
+        setPage(requestedPage);
+      }
+      return nextLedger;
+    } catch (caught: unknown) {
+      if (
+        activeLedgerRequestRef.current !== requestContext
+        || requestContext.controller.signal.aborted
+        || isAbortLikeError(caught)
+      ) {
+        return null;
+      }
+      if (surfaceError) {
+        setError(caught instanceof Error ? caught.message : "往来款台账加载失败");
+      }
+      if (throwOnError) {
+        throw caught;
+      }
+      return null;
+    } finally {
+      if (activeLedgerRequestRef.current === requestContext) {
+        activeLedgerRequestRef.current = null;
+        setLoading(false);
+      }
+    }
+  }, [family, page]);
 
   const reloadLedgerAfterMutation = useCallback(async () => {
-    const nextLedger = await fetchLedger();
-    setLedger(nextLedger);
+    const nextLedger = await requestLedger({ surfaceError: false, throwOnError: true });
+    if (!nextLedger) {
+      throw new Error("往来款台账刷新请求已失效");
+    }
     return nextLedger;
-  }, [fetchLedger]);
+  }, [requestLedger]);
 
-  const loadLedger = useCallback((signal?: AbortSignal) => {
-    setLoading(true);
-    setError(null);
-    fetchLedger(signal)
-      .then(setLedger)
-      .catch((caught: unknown) => {
-        if (isAbortLikeError(caught)) {
-          return;
-        }
-        setError(caught instanceof Error ? caught.message : "往来款台账加载失败");
-      })
-      .finally(() => setLoading(false));
-  }, [fetchLedger]);
+  const loadLedger = useCallback(() => {
+    void requestLedger();
+  }, [requestLedger]);
 
   useEffect(() => {
     if (!active) {
       return undefined;
     }
-    const controller = new AbortController();
-    loadLedger(controller.signal);
-    return () => controller.abort();
+    loadLedger();
+    return () => activeLedgerRequestRef.current?.controller.abort();
   }, [active, activationGeneration, loadLedger]);
 
   useEffect(() => {
@@ -481,6 +542,10 @@ export default function TurnoverLedgerPage() {
     const activeEditor = activeExtraEditorRef.current;
     activeExtraEditorRef.current = null;
     activeEditor?.controller.abort();
+    const activeLedgerRequest = activeLedgerRequestRef.current;
+    activeLedgerRequestRef.current = null;
+    activeLedgerRequest?.controller.abort();
+    setLoading(false);
     setSelectedRow(null);
     setDetail(null);
     setExtraForm(DEFAULT_EXTRA);
@@ -493,6 +558,9 @@ export default function TurnoverLedgerPage() {
     const activeEditor = activeExtraEditorRef.current;
     activeExtraEditorRef.current = null;
     activeEditor?.controller.abort();
+    const activeLedgerRequest = activeLedgerRequestRef.current;
+    activeLedgerRequestRef.current = null;
+    activeLedgerRequest?.controller.abort();
   }, []);
 
   useEffect(() => {
@@ -515,12 +583,22 @@ export default function TurnoverLedgerPage() {
   }, [active, exportFamily, exportOpen]);
 
   const handleFamilyChange = (_event: SyntheticEvent, nextFamily: TurnoverLedgerFamily) => {
-    if (!nextFamily) {
+    if (!nextFamily || nextFamily === family || ledgerNavigationDisabled) {
       return;
     }
     setClosureSelection(null);
     setClosureDrawerOpen(false);
+    setPage(1);
     setFamily(nextFamily);
+  };
+
+  const handlePageChange = (nextPage: number) => {
+    if (ledgerNavigationDisabled || nextPage === page) {
+      return;
+    }
+    setClosureSelection(null);
+    setClosureDrawerOpen(false);
+    setPage(nextPage);
   };
 
   const handleToggleClosureRow = (group: { groupId: string; counterpartyName: string; familyLabel: string }, row: TurnoverLedgerGroupedRow) => {
@@ -946,7 +1024,7 @@ export default function TurnoverLedgerPage() {
           <>
             <button
               className="turnover-ledger-button"
-              disabled={loading}
+              disabled={ledgerNavigationDisabled}
               onClick={() => loadLedger()}
               type="button"
             >
@@ -1010,6 +1088,7 @@ export default function TurnoverLedgerPage() {
                   <button
                     aria-selected={family === tab.value}
                     className={`turnover-ledger-tabs__tab${family === tab.value ? " turnover-ledger-tabs__tab--active" : ""}`}
+                    disabled={ledgerNavigationDisabled}
                     key={tab.value}
                     onClick={(event) => handleFamilyChange(event, tab.value)}
                     role="tab"
@@ -1054,6 +1133,13 @@ export default function TurnoverLedgerPage() {
               selectedFlowRowIds={selectedFlowRowIds}
               onToggleFlowSelection={handleToggleClosureRow}
               actionsDisabled={!canMutateData}
+            />
+            <FinanceTablePagination
+              page={ledger?.pagination.page ?? page}
+              pageSize={ledger?.pagination.pageSize ?? DEFAULT_PAGE_SIZE}
+              total={ledger?.pagination.total ?? 0}
+              isDisabled={ledgerNavigationDisabled}
+              onPageChange={handlePageChange}
             />
           </div>
         </section>

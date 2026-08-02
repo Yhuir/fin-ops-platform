@@ -82,6 +82,34 @@ async function openEtcDisclosure(page: Page, name: RegExp | string) {
 }
 
 test.describe("ETC ticket management browser flow", () => {
+  test("reaches all ETC business batches after the first 100", async ({ page }) => {
+    const browserErrors = startStrictBrowserErrorCapture(page);
+    await installDeterministicApiMocks(page, {
+      etcTicketBusinessBatchTotal: 121,
+      sessionMode: "read_export_only",
+    });
+
+    await page.goto("/etc-tickets");
+    await expect(page.getByText("121 批")).toBeVisible();
+    await expect(page.getByText("显示 1-50 / 121")).toBeVisible();
+
+    const secondPageResponse = waitForEtcBusinessBatches(page);
+    await page.getByRole("button", { name: "下一页" }).click();
+    const secondPageUrl = new URL((await secondPageResponse).url());
+    expect(secondPageUrl.searchParams.get("page")).toBe("2");
+    expect(secondPageUrl.searchParams.get("page_size")).toBe("50");
+    await expect(page.getByTestId("etc-batch-row-etc-business-page-051")).toBeVisible();
+    await expect(page.getByText("显示 51-100 / 121")).toBeVisible();
+
+    const thirdPageResponse = waitForEtcBusinessBatches(page);
+    await page.getByRole("button", { name: "下一页" }).click();
+    const thirdPageUrl = new URL((await thirdPageResponse).url());
+    expect(thirdPageUrl.searchParams.get("page")).toBe("3");
+    await expect(page.getByTestId("etc-batch-row-etc-business-page-121")).toBeVisible();
+    await expect(page.getByText("显示 101-121 / 121")).toBeVisible();
+    expect(browserErrors).toEqual([]);
+  });
+
   test("downloads the merged invoice PDF after the OA draft exists", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     await installDeterministicApiMocks(page, {

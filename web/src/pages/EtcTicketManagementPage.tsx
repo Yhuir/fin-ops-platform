@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { Link as RouterLink } from "react-router-dom";
 
 import AppDialog from "../components/common/AppDialog";
+import { FinanceTablePagination } from "../components/common/FinanceTable";
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageScaffold from "../components/common/PageScaffold";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
@@ -64,6 +65,9 @@ const initialCounts: EtcBusinessBatchCounts = {
   staged: 0,
   submitted: 0,
 };
+
+const BUSINESS_BATCH_PAGE_SIZE = 50;
+const POST_MUTATION_RELOAD_WARNING = "操作已成功，但 ETC 批次列表重新加载失败，请刷新页面重试。";
 
 const MANUAL_OA_SUBMITTED_REASON = "用户确认已在 OA 系统完成 OA 草稿提交。";
 const MANUAL_OA_NOT_SUBMITTED_REASON = "用户确认已在 OA 系统删除 OA 草稿。";
@@ -275,38 +279,6 @@ function businessBatchListBucket(status: EtcBusinessBatchStatus): EtcBusinessBat
     return null;
   }
   return "unsubmitted";
-}
-
-function businessBatchBelongsToBatchStatus(status: EtcBusinessBatchStatus, activeStatus: EtcBusinessBatchBucket) {
-  return businessBatchListBucket(status) === activeStatus;
-}
-
-function transitionBusinessBatchCounts(
-  counts: EtcBusinessBatchCounts,
-  previousStatus: EtcBusinessBatchStatus | null,
-  nextStatus: EtcBusinessBatchStatus,
-): EtcBusinessBatchCounts {
-  const previousBucket = previousStatus ? businessBatchListBucket(previousStatus) : null;
-  const nextBucket = businessBatchListBucket(nextStatus);
-  if (previousBucket === nextBucket) {
-    return counts;
-  }
-  const nextCounts = { ...counts };
-  if (previousBucket === "submitted") {
-    nextCounts.submitted = Math.max(0, nextCounts.submitted - 1);
-  } else if (previousBucket === "staged") {
-    nextCounts.staged = Math.max(0, nextCounts.staged - 1);
-  } else if (previousBucket === "unsubmitted") {
-    nextCounts.unsubmitted = Math.max(0, nextCounts.unsubmitted - 1);
-  }
-  if (nextBucket === "submitted") {
-    nextCounts.submitted += 1;
-  } else if (nextBucket === "staged") {
-    nextCounts.staged += 1;
-  } else if (nextBucket === "unsubmitted") {
-    nextCounts.unsubmitted += 1;
-  }
-  return nextCounts;
 }
 
 function isOaConfirmationPendingStatus(status: EtcBusinessBatchStatus) {
@@ -717,6 +689,12 @@ export default function EtcTicketManagementPage() {
   const { jobs } = useBackgroundJobProgress();
   const { canMutateData } = useSessionPermissions();
   const [activeStatus, setActiveStatus] = useState<EtcBusinessBatchBucket>("unsubmitted");
+  const [batchPage, setBatchPage] = useState(1);
+  const [batchPagination, setBatchPagination] = useState({
+    page: 1,
+    pageSize: BUSINESS_BATCH_PAGE_SIZE,
+    total: 0,
+  });
   const [counts, setCounts] = useState(initialCounts);
   const [statistics, setStatistics] = useState<EtcPageStatistics | null>(null);
   const [businessBatches, setBusinessBatches] = useState<EtcBusinessBatchSummary[]>([]);
@@ -758,29 +736,81 @@ export default function EtcTicketManagementPage() {
   const refreshedImportJobIdsRef = useRef<Set<string>>(new Set());
   const oaDraftIntentRef = useRef<{ businessBatchId: string; idempotencyKey: string } | null>(null);
   const titleEditCancelRef = useRef(false);
+  const activeStatusRef = useRef(activeStatus);
+  const batchPageRef = useRef(batchPage);
+  const activeBatchListRequestRef = useRef<{
+    bucket: EtcBusinessBatchBucket;
+    page: number;
+    controller: AbortController;
+  } | null>(null);
   const selectedBatchIdRef = useRef(selectedBatchId);
+  activeStatusRef.current = activeStatus;
+  batchPageRef.current = batchPage;
   selectedBatchIdRef.current = selectedBatchId;
   const selectedBusinessBatchTaskId = businessBatches.find(
     (batch) => batch.businessBatchId === selectedBatchId,
   )?.taskId ?? "";
+  const batchNavigationDisabled = loading
+    || taskActionLoading
+    || deleteSubmitting
+    || draftCreating
+    || oaActionLoading
+    || supplementUploadSubmitting
+    || Boolean(editingBatchTitleId)
+    || Boolean(titleSavingBatchId);
 
-  const loadBatches = useCallback(async (
-    signal?: AbortSignal,
-    statusOverride?: EtcBusinessBatchBucket,
-  ) => {
+  const loadBatches = useCallback(async ({
+    bucket = activeStatusRef.current,
+    page = batchPageRef.current,
+    preferredBatchId,
+    clearActionError = true,
+  }: {
+    bucket?: EtcBusinessBatchBucket;
+    page?: number;
+    preferredBatchId?: string;
+    clearActionError?: boolean;
+  } = {}) => {
+    activeBatchListRequestRef.current?.controller.abort();
+    const requestContext = { bucket, page, controller: new AbortController() };
+    activeBatchListRequestRef.current = requestContext;
     setLoading(true);
     setBatchListError(null);
-    setActionError(null);
-    const effectiveStatus = statusOverride ?? activeStatus;
+    if (clearActionError) {
+      setActionError(null);
+    }
     try {
-      const payload = await fetchEtcBusinessBatches({
-        bucket: effectiveStatus,
-        signal,
+      let requestedPage = page;
+      let payload = await fetchEtcBusinessBatches({
+        bucket,
+        page: requestedPage,
+        pageSize: BUSINESS_BATCH_PAGE_SIZE,
+        signal: requestContext.controller.signal,
       });
+      if (activeBatchListRequestRef.current !== requestContext || requestContext.controller.signal.aborted) {
+        return null;
+      }
+      const totalPages = Math.max(1, Math.ceil(payload.pagination.total / BUSINESS_BATCH_PAGE_SIZE));
+      if (requestedPage > totalPages) {
+        requestedPage = totalPages;
+        payload = await fetchEtcBusinessBatches({
+          bucket,
+          page: requestedPage,
+          pageSize: BUSINESS_BATCH_PAGE_SIZE,
+          signal: requestContext.controller.signal,
+        });
+        if (activeBatchListRequestRef.current !== requestContext || requestContext.controller.signal.aborted) {
+          return null;
+        }
+      }
+      activeStatusRef.current = bucket;
+      batchPageRef.current = requestedPage;
+      setActiveStatus(bucket);
+      setBatchPage(requestedPage);
+      setBatchPagination(payload.pagination);
       setBusinessBatches(payload.items);
       setCounts(payload.counts);
       setStatistics(payload.statistics ?? null);
-      const currentSelection = selectedBatchIdRef.current;
+      const currentSelection = preferredBatchId ?? selectedBatchIdRef.current;
       const nextSelection = payload.items.some((batch) => batch.businessBatchId === currentSelection)
         ? currentSelection
         : payload.items[0]?.businessBatchId ?? "";
@@ -791,23 +821,52 @@ export default function EtcTicketManagementPage() {
       }
       selectedBatchIdRef.current = nextSelection;
       setSelectedBatchId(nextSelection);
+      return payload;
     } catch (caught) {
-      if (!(caught instanceof DOMException && caught.name === "AbortError")) {
-        setStatistics(null);
-        setBatchListError(formatEtcUiErrorMessage(caught, "ETC业务批次加载失败。"));
+      if (
+        activeBatchListRequestRef.current !== requestContext
+        || requestContext.controller.signal.aborted
+        || (caught instanceof DOMException && caught.name === "AbortError")
+      ) {
+        return null;
       }
+      setStatistics(null);
+      setBatchListError(formatEtcUiErrorMessage(caught, "ETC业务批次加载失败。"));
+      return null;
     } finally {
-      setLoading(false);
+      if (activeBatchListRequestRef.current === requestContext) {
+        activeBatchListRequestRef.current = null;
+        setLoading(false);
+      }
     }
-  }, [activeStatus]);
+  }, []);
+
+  const changeBatchQuery = useCallback((
+    bucket: EtcBusinessBatchBucket,
+    page: number,
+    preferredBatchId?: string,
+  ) => {
+    activeStatusRef.current = bucket;
+    batchPageRef.current = page;
+    selectedBatchIdRef.current = "";
+    setActiveStatus(bucket);
+    setBatchPage(page);
+    setBatchPagination({ page, pageSize: BUSINESS_BATCH_PAGE_SIZE, total: 0 });
+    setBusinessBatches([]);
+    setSelectedBatchId("");
+    setBusinessBatchDetail(null);
+    setSelectedTask(null);
+    setTaskListError(null);
+    setBatchDetailError(null);
+    return loadBatches({ bucket, page, preferredBatchId });
+  }, [loadBatches]);
 
   useEffect(() => {
     if (!active) {
       return undefined;
     }
-    const controller = new AbortController();
-    void loadBatches(controller.signal);
-    return () => controller.abort();
+    void loadBatches();
+    return () => activeBatchListRequestRef.current?.controller.abort();
   }, [active, activationGeneration, loadBatches]);
 
   useEffect(() => {
@@ -859,10 +918,9 @@ export default function EtcTicketManagementPage() {
       .catch((caught) => {
         if (!(caught instanceof DOMException && caught.name === "AbortError")) {
           if (isEtcBusinessBatchNotFoundError(caught, selectedBatchId)) {
-            setBusinessBatches((current) => current.filter((batch) => batch.businessBatchId !== selectedBatchId));
-            setSelectedBatchId((current) => (current === selectedBatchId ? "" : current));
             setBusinessBatchDetail(null);
             setBatchDetailError(null);
+            void loadBatches({ clearActionError: false });
             return;
           }
           setBatchDetailError(formatEtcUiErrorMessage(caught, "ETC业务批次明细加载失败。"));
@@ -874,7 +932,7 @@ export default function EtcTicketManagementPage() {
         }
       });
     return () => controller.abort();
-  }, [active, activationGeneration, detailReloadKey, selectedBatchId, selectedBusinessBatchTaskId]);
+  }, [active, activationGeneration, detailReloadKey, loadBatches, selectedBatchId, selectedBusinessBatchTaskId]);
 
   useEffect(() => {
     if (!active) {
@@ -905,20 +963,6 @@ export default function EtcTicketManagementPage() {
   const importedInvoiceCount = businessBatchDetail?.invoiceSummary.count ?? selectedTask?.importedInvoiceCount ?? 0;
   const importedInvoiceAmount = businessBatchDetail?.invoiceSummary.amount ?? selectedTask?.importedInvoiceAmount ?? "0.00";
   const showTaskImportedInvoices = Boolean(selectedTask && businessBatchDetail?.invoiceItems?.length);
-
-  useEffect(() => {
-    if (businessBatches.length === 0 && selectedBatchId) {
-      setSelectedBatchId("");
-      setBusinessBatchDetail(null);
-      return;
-    }
-    if (visibleBatches.some((batch) => batch.businessBatchId === selectedBatchId)) {
-      return;
-    }
-    const firstBusinessBatch = visibleBatches[0];
-    setBusinessBatchDetail(null);
-    setSelectedBatchId(firstBusinessBatch?.businessBatchId ?? "");
-  }, [businessBatches.length, selectedBatchId, visibleBatches]);
 
   const ticketRootManualSources = useMemo(
     () => (selectedTask?.sourceFiles ?? []).filter(isManualTicketRootSource),
@@ -1192,38 +1236,20 @@ export default function EtcTicketManagementPage() {
     setSelectedTask(task);
   }, []);
 
-  const mergeBusinessBatch = useCallback((
-    batch: EtcBusinessBatchDetail | EtcBusinessBatchSummary,
-    previousStatusOverride?: EtcBusinessBatchStatus | null,
-  ) => {
-    const previousBatch = businessBatches.find((item) => item.businessBatchId === batch.businessBatchId) ?? null;
-    setCounts((current) => transitionBusinessBatchCounts(current, previousStatusOverride ?? previousBatch?.status ?? null, batch.status));
-    const belongsToCurrentStatus = businessBatchBelongsToBatchStatus(batch.status, activeStatus);
-    setBusinessBatches((current) => {
-      const exists = current.some((item) => item.businessBatchId === batch.businessBatchId);
-      if (!belongsToCurrentStatus) {
-        return current.filter((item) => item.businessBatchId !== batch.businessBatchId);
-      }
-      if (!exists) {
-        return [batch, ...current];
-      }
-      return current.map((item) => (item.businessBatchId === batch.businessBatchId ? batch : item));
-    });
-    if (!belongsToCurrentStatus) {
-      setSelectedBatchId((current) => (current === batch.businessBatchId ? "" : current));
-      setBusinessBatchDetail((current) => (current?.businessBatchId === batch.businessBatchId ? null : current));
-    } else if ("invoiceItems" in batch) {
-      setBusinessBatchDetail(batch);
-    }
-  }, [activeStatus, businessBatches]);
+  const replaceBusinessBatch = useCallback((batch: EtcBusinessBatchDetail | EtcBusinessBatchSummary) => {
+    setBusinessBatches((current) => current.map((item) => (
+      item.businessBatchId === batch.businessBatchId ? batch : item
+    )));
+    setBusinessBatchDetail((current) => (
+      current?.businessBatchId === batch.businessBatchId ? { ...current, ...batch } : current
+    ));
+  }, []);
 
   const handleStatusChange = (nextStatus: EtcBusinessBatchBucket) => {
-    if (nextStatus === activeStatus) {
+    if (nextStatus === activeStatus || batchNavigationDisabled) {
       return;
     }
-    setActiveStatus(nextStatus);
-    setSelectedBatchId("");
-    setBusinessBatchDetail(null);
+    void changeBatchQuery(nextStatus, 1);
   };
 
   const startBusinessBatchTitleEdit = (businessBatch: EtcBusinessBatchSummary) => {
@@ -1264,7 +1290,7 @@ export default function EtcTicketManagementPage() {
         title,
         expectedVersion: businessBatch.version,
       });
-      mergeBusinessBatch(updatedBatch, businessBatch.status);
+      replaceBusinessBatch(updatedBatch);
       cancelBusinessBatchTitleEdit();
       setDetailReloadKey((current) => current + 1);
     } catch (caught) {
@@ -1296,23 +1322,11 @@ export default function EtcTicketManagementPage() {
     setActionError(null);
     try {
       const businessBatch = await createEtcBusinessBatch({});
-      setBusinessBatches((current) => [
-        businessBatch,
-        ...current.filter((item) => item.businessBatchId !== businessBatch.businessBatchId),
-      ]);
-      const bucket = businessBatchListBucket(businessBatch.status);
-      if (bucket === "unsubmitted") {
-        setCounts((current) => ({ ...current, unsubmitted: current.unsubmitted + 1 }));
-        setActiveStatus("unsubmitted");
-      } else if (bucket === "staged") {
-        setCounts((current) => ({ ...current, staged: current.staged + 1 }));
-        setActiveStatus("staged");
-      } else if (bucket === "submitted") {
-        setCounts((current) => ({ ...current, submitted: current.submitted + 1 }));
-        setActiveStatus("submitted");
+      const bucket = businessBatchListBucket(businessBatch.status) ?? "unsubmitted";
+      const payload = await changeBatchQuery(bucket, 1, businessBatch.businessBatchId);
+      if (!payload) {
+        setActionError(POST_MUTATION_RELOAD_WARNING);
       }
-      setSelectedBatchId(businessBatch.businessBatchId);
-      setBusinessBatchDetail(businessBatch);
     } catch (caught) {
       setActionError(formatEtcUiErrorMessage(caught, "新建 ETC 批次失败，请稍后重试。"));
     } finally {
@@ -1529,12 +1543,6 @@ export default function EtcTicketManagementPage() {
     setDeleteTarget({ kind: "sourceFile", task: taskMutationTarget, item: sourceFile });
   };
 
-  const removeDeletedBatchFromState = (batchId: string) => {
-    setBusinessBatches((current) => current.filter((batch) => batch.businessBatchId !== batchId));
-    setSelectedBatchId((current) => (current === batchId ? "" : current));
-    setBusinessBatchDetail((current) => (current?.businessBatchId === batchId ? null : current));
-  };
-
   const deleteBusinessBatchByPlan = async (plan: Extract<BatchDeletePlan, { kind: "businessBatch" }>) => {
     let payload: { expectedVersion?: number; reason: string } = {
       ...(plan.expectedVersion !== undefined ? { expectedVersion: plan.expectedVersion } : {}),
@@ -1542,7 +1550,6 @@ export default function EtcTicketManagementPage() {
     };
     try {
       const latestBusinessBatch = await fetchEtcBusinessBatchDetail(plan.batchId);
-      mergeBusinessBatch(latestBusinessBatch);
       if (!canDeleteBusinessBatch(latestBusinessBatch)) {
         throw new Error(deleteBusinessBatchDisabledReason(latestBusinessBatch));
       }
@@ -1565,7 +1572,6 @@ export default function EtcTicketManagementPage() {
         throw caught;
       }
     }
-    removeDeletedBatchFromState(plan.batchId);
   };
 
   const handleDeleteConfirmed = async () => {
@@ -1594,7 +1600,10 @@ export default function EtcTicketManagementPage() {
       } else {
         const { plan } = deleteTarget;
         await deleteBusinessBatchByPlan(plan);
-        await loadBatches();
+        const payload = await loadBatches({ clearActionError: false });
+        if (!payload) {
+          setActionError(POST_MUTATION_RELOAD_WARNING);
+        }
       }
       setDeleteTarget(null);
     } catch (caught) {
@@ -1621,8 +1630,11 @@ export default function EtcTicketManagementPage() {
         idempotencyKey: intent.idempotencyKey,
       });
       oaDraftIntentRef.current = null;
-      mergeBusinessBatch(result);
       setDraftResult(result);
+      const payload = await loadBatches({ clearActionError: false });
+      if (!payload) {
+        setActionError(POST_MUTATION_RELOAD_WARNING);
+      }
     } catch (caught) {
       if (caught instanceof EtcApiError && caught.code !== "oa_draft_outcome_unknown") {
         oaDraftIntentRef.current = null;
@@ -1685,13 +1697,13 @@ export default function EtcTicketManagementPage() {
         reason,
         expectedVersion: target.version,
       });
-      mergeBusinessBatch(result, target.status);
-      const nextStatus = decision === "submitted" ? "submitted" : "unsubmitted";
-      setActiveStatus(nextStatus);
-      setSelectedBatchId(result.businessBatchId);
       setDraftResult(null);
       setCreateDialogOpen(false);
-      setDetailReloadKey((current) => current + 1);
+      const nextStatus = businessBatchListBucket(result.status) ?? (decision === "submitted" ? "submitted" : "unsubmitted");
+      const payload = await changeBatchQuery(nextStatus, 1, result.businessBatchId);
+      if (!payload) {
+        setActionError(POST_MUTATION_RELOAD_WARNING);
+      }
     } catch (caught) {
       setActionError(formatEtcUiErrorMessage(caught, "人工处理失败。"));
     } finally {
@@ -1960,7 +1972,7 @@ export default function EtcTicketManagementPage() {
             />
             <Button
               className="etc-secondary-action"
-              isDisabled={loading || taskLoading}
+              isDisabled={batchNavigationDisabled || taskLoading}
               isPending={loading}
               onPress={() => {
                 void loadBatches();
@@ -1992,7 +2004,7 @@ export default function EtcTicketManagementPage() {
               <div className="etc-panel-heading">
                 <div className="etc-panel-heading__title">
                   <h2>批次列表</h2>
-                  <CountChip>{visibleBatches.length} 批</CountChip>
+                  <CountChip>{batchPagination.total} 批</CountChip>
                 </div>
                 {activeStatus === "unsubmitted" ? (
                   <Button
@@ -2015,6 +2027,7 @@ export default function EtcTicketManagementPage() {
                 selectedKeys={new Set<Key>([activeStatus])}
                 selectionMode="single"
                 size="sm"
+                isDisabled={batchNavigationDisabled}
                 onSelectionChange={(keys) => {
                   const [next] = Array.from(keys);
                   if (next === "submitted" || next === "staged" || next === "unsubmitted") {
@@ -2152,6 +2165,19 @@ export default function EtcTicketManagementPage() {
                   );
                 })}
               </ul>
+              <FinanceTablePagination
+                className="etc-batch-pagination"
+                compact
+                page={batchPagination.page}
+                pageSize={batchPagination.pageSize}
+                total={batchPagination.total}
+                isDisabled={batchNavigationDisabled}
+                onPageChange={(nextPage) => {
+                  if (!batchNavigationDisabled && nextPage !== batchPage) {
+                    void changeBatchQuery(activeStatus, nextPage);
+                  }
+                }}
+              />
             </section>
 
             <div className="etc-right-column">

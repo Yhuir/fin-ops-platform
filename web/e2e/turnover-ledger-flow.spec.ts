@@ -57,6 +57,35 @@ function responseFor(method: string, pathname: string) {
 }
 
 test.describe("turnover ledger browser flow", () => {
+  test("reaches all turnover groups after the first 100", async ({ page }) => {
+    const browserErrors = startStrictBrowserErrorCapture(page);
+    await installDeterministicApiMocks(page, {
+      sessionMode: "read_export_only",
+      turnoverLedgerTotal: 121,
+    });
+
+    await page.goto("/turnover-ledger");
+    await expect(page.getByText("分页往来方 001")).toBeVisible();
+    await expect(page.getByText("显示 1-50 / 121")).toBeVisible();
+
+    const secondPageResponse = waitForTurnoverLedger(page);
+    await page.getByRole("button", { name: "下一页" }).click();
+    const secondPageUrl = new URL((await secondPageResponse).url());
+    expect(secondPageUrl.searchParams.get("page")).toBe("2");
+    expect(secondPageUrl.searchParams.get("page_size")).toBe("50");
+    await expect(page.getByText("分页往来方 051")).toBeVisible();
+    await expect(page.getByText("分页往来方 001")).toHaveCount(0);
+    await expect(page.getByText("显示 51-100 / 121")).toBeVisible();
+
+    const thirdPageResponse = waitForTurnoverLedger(page);
+    await page.getByRole("button", { name: "下一页" }).click();
+    const thirdPageUrl = new URL((await thirdPageResponse).url());
+    expect(thirdPageUrl.searchParams.get("page")).toBe("3");
+    await expect(page.getByText("分页往来方 121")).toBeVisible();
+    await expect(page.getByText("显示 101-121 / 121")).toBeVisible();
+    expect(browserErrors).toEqual([]);
+  });
+
   test("recovers grouped ledger after a transient load failure when refreshed", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page, {
       allowedConsoleErrors: [/Failed to load resource: the server responded with a status of 503/],

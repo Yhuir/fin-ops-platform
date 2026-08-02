@@ -604,7 +604,7 @@ function groupedPayload(family: string, overrides: Record<string, unknown> = {})
     groups,
     pagination: {
       page: 1,
-      page_size: 100,
+      page_size: 50,
       total: groups.length,
     },
     ...overrides,
@@ -631,6 +631,27 @@ function groupedPayloadWithFlowCategoryVersions(
     });
   }
   return payload;
+}
+
+function paginatedGroupedPayload(page: number, pageSize: number, total = 121) {
+  const template = cloneJson(groupedPayload("personal").groups[0]);
+  const groups = Array.from({ length: total }, (_, index) => {
+    const sequence = String(index + 1).padStart(3, "0");
+    return {
+      ...cloneJson(template),
+      group_id: `counterparty:personal:page-${sequence}`,
+      counterparty_name: `分页往来方 ${sequence}`,
+      rows: template.rows.map((row: Record<string, unknown>, rowIndex: number) => ({
+        ...cloneJson(row),
+        relation_id: `rel-page-${sequence}-${rowIndex + 1}`,
+        bank_row_ids: [`bank-page-${sequence}-${rowIndex + 1}`],
+      })),
+    };
+  });
+  return groupedPayload("all", {
+    groups: groups.slice((page - 1) * pageSize, page * pageSize),
+    pagination: { page, page_size: pageSize, total },
+  });
 }
 
 function groupedPayloadWithWorkbenchRelation(family: string, bankRowId: string, relation: Record<string, unknown>) {
@@ -673,6 +694,7 @@ function groupedPayloadWithFlowRelation(family: string, bankRowId: string, relat
 function installTurnoverLedgerFetch(options: {
   groupedOverrides?: Record<string, unknown>;
   groupedPayloads?: Array<Record<string, unknown>>;
+  groupedResponse?: (url: URL) => Promise<Response> | Response;
   groupedFailuresBeforeSuccess?: number;
   missingDetailForRelationId?: string;
   exportDownloadResponse?: (url: URL) => Response;
@@ -771,6 +793,9 @@ function installTurnoverLedgerFetch(options: {
     }
     if (url.pathname === "/api/turnover-ledger" && method === "GET") {
       expect(url.searchParams.get("view")).toBe("grouped");
+      if (options.groupedResponse) {
+        return options.groupedResponse(url);
+      }
       if (groupedFailuresRemaining > 0) {
         groupedFailuresRemaining -= 1;
         return Response.json({
@@ -1111,6 +1136,39 @@ describe("Turnover ledger page", () => {
       amountRule,
       exportHeaderRule,
     ].join("\n")).not.toMatch(/#d8e8f8|#eef8f0|#fff5eb|#f3f5fb/i);
+  });
+
+  test("loads every server page beyond the first 100 turnover groups", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installTurnoverLedgerFetch({
+      groupedResponse: (url) => {
+        const page = Number(url.searchParams.get("page") ?? 1);
+        const pageSize = Number(url.searchParams.get("page_size") ?? 50);
+        return Response.json(paginatedGroupedPayload(page, pageSize));
+      },
+    });
+
+    renderTurnoverLedgerPage();
+
+    expect(await screen.findByText("分页往来方 001")).toBeInTheDocument();
+    expect(screen.getByText("显示 1-50 / 121")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "下一页" }));
+    expect(await screen.findByText("分页往来方 051")).toBeInTheDocument();
+    expect(screen.queryByText("分页往来方 001")).not.toBeInTheDocument();
+    expect(screen.getByText("显示 51-100 / 121")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "下一页" }));
+    expect(await screen.findByText("分页往来方 101")).toBeInTheDocument();
+    expect(screen.getByText("分页往来方 121")).toBeInTheDocument();
+    expect(screen.getByText("显示 101-121 / 121")).toBeInTheDocument();
+
+    expect(requestUrls(fetchMock, "/api/turnover-ledger").map((url) => [
+      url.searchParams.get("page"),
+      url.searchParams.get("page_size"),
+    ])).toEqual([
+      ["1", "50"],
+      ["2", "50"],
+      ["3", "50"],
+    ]);
   });
 
   test("renders grouped MUI table with collapsed summary rows, sticky left cells, and no status column", async () => {

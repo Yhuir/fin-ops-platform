@@ -156,6 +156,8 @@ type FinanceTablePaginationProps = {
   total: number;
   onPageChange: (page: number) => void;
   className?: string;
+  compact?: boolean;
+  isDisabled?: boolean;
 };
 
 type FinanceTablePageToken = number | `ellipsis-${number}`;
@@ -185,6 +187,8 @@ export function FinanceTablePagination({
   total,
   onPageChange,
   className,
+  compact = false,
+  isDisabled = false,
 }: FinanceTablePaginationProps) {
   const totalPages = Math.max(1, Math.ceil(total / Math.max(pageSize, 1)));
   const currentPage = Math.min(Math.max(page, 1), totalPages);
@@ -199,24 +203,40 @@ export function FinanceTablePagination({
       </Pagination.Summary>
       <Pagination.Content>
         <Pagination.Item>
-          <Pagination.Previous isDisabled={currentPage <= 1} onPress={() => onPageChange(currentPage - 1)}>
+          <Pagination.Previous
+            isDisabled={isDisabled || currentPage <= 1}
+            onPress={() => {
+              if (!isDisabled) onPageChange(currentPage - 1);
+            }}
+          >
             <Pagination.PreviousIcon />
             <span>上一页</span>
           </Pagination.Previous>
         </Pagination.Item>
-        {pageTokens.map((item) => (
+        {!compact ? pageTokens.map((item) => (
           <Pagination.Item key={item}>
             {typeof item === "number" ? (
-              <Pagination.Link isActive={item === currentPage} onPress={() => onPageChange(item)}>
+              <Pagination.Link
+                isActive={item === currentPage}
+                isDisabled={isDisabled}
+                onPress={() => {
+                  if (!isDisabled) onPageChange(item);
+                }}
+              >
                 {item}
               </Pagination.Link>
             ) : (
               <Pagination.Ellipsis aria-label="省略的页码" />
             )}
           </Pagination.Item>
-        ))}
+        )) : null}
         <Pagination.Item>
-          <Pagination.Next isDisabled={currentPage >= totalPages} onPress={() => onPageChange(currentPage + 1)}>
+          <Pagination.Next
+            isDisabled={isDisabled || currentPage >= totalPages}
+            onPress={() => {
+              if (!isDisabled) onPageChange(currentPage + 1);
+            }}
+          >
             <span>下一页</span>
             <Pagination.NextIcon />
           </Pagination.Next>

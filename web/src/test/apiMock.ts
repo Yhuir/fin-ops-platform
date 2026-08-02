@@ -576,7 +576,21 @@ function createEtcInvoiceStore(options: Pick<MockApiOptions, "etcInvoiceStoreBat
         },
       };
     },
-    listBusinessBatches({ bucket, month, plate, keyword }: { bucket?: string | null; month?: string | null; plate?: string | null; keyword?: string | null }) {
+    listBusinessBatches({
+      bucket,
+      month,
+      plate,
+      keyword,
+      page = 1,
+      pageSize = 100,
+    }: {
+      bucket?: string | null;
+      month?: string | null;
+      plate?: string | null;
+      keyword?: string | null;
+      page?: number;
+      pageSize?: number;
+    }) {
       const normalizedBucket = ["unsubmitted", "staged", "submitted"].includes(String(bucket)) ? bucket : "unsubmitted";
       const normalizedKeyword = String(keyword ?? "").trim().toLowerCase();
       const normalizedPlate = String(plate ?? "").trim().toLowerCase();
@@ -621,10 +635,10 @@ function createEtcInvoiceStore(options: Pick<MockApiOptions, "etcInvoiceStoreBat
             staged: filteredBatches.filter((batch) => businessBatchBucket(batch) === "staged").length,
             submitted: filteredBatches.filter((batch) => businessBatchBucket(batch) === "submitted").length,
           },
-          items: cloneJson(rows),
+          items: cloneJson(rows.slice((page - 1) * pageSize, page * pageSize)),
           pagination: {
-            page: 1,
-            page_size: 100,
+            page,
+            page_size: pageSize,
             total: rows.length,
           },
         },
@@ -5697,6 +5711,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           month: url.searchParams.get("month"),
           plate: url.searchParams.get("plate"),
           keyword: url.searchParams.get("keyword"),
+          page: Math.max(1, Number(url.searchParams.get("page") ?? 1) || 1),
+          pageSize: Math.max(1, Number(url.searchParams.get("page_size") ?? 100) || 100),
         }),
       };
     },

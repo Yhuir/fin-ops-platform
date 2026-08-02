@@ -1,6 +1,6 @@
 # ETC票据管理模块边界与 I/O
 
-日期：2026-07-22
+日期：2026-08-02
 
 ## 页面完整性统计合同
 
@@ -36,7 +36,7 @@
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| 页面查询/操作 | `EtcTicketManagementPage.tsx`、`features/etc/api.ts` | 进入 ETC routes/services；页面批次列表只发送 `unsubmitted/staged/submitted` bucket 与分页，不提供月份、车牌或关键词搜索框；后端可选 `month/plate/keyword` 参数作为兼容/运维查询合同保留。选择一个 business batch 后只读取一次精确 batch detail 和绑定 task，不调用 full reconciliation task list，不把详情数组塞入列表 DTO。task mutation target 必须同时满足“已加载 task ID = 当前选中 business batch 的 task ID”；bucket 切换或刷新响应自动迁移 selection 时必须同步失效旧 task，禁止旧 task I/O 泄漏到新批次。四阶段进度只读取当前 batch/task 内存事实，网络、持久化与全局 listener I/O 均为零 |
+| 页面查询/操作 | `EtcTicketManagementPage.tsx`、`features/etc/api.ts` | 进入 ETC routes/services；页面批次列表只发送 `unsubmitted/staged/submitted` bucket 与服务端分页，固定 `page_size=50`，消费 `pagination.page/pageSize/total`，bucket 切换回第 1 页，超过最后一页时回退有效末页；不提供月份、车牌或关键词搜索框。列表、counts、statistics 和 pagination 以同一次服务端响应为事实源，旧 `{bucket,page}` 请求不得晚到覆盖新查询，不允许本地 prepend/filter/count 算术伪造跨 bucket 状态。后端可选 `month/plate/keyword` 参数作为兼容/运维查询合同保留。选择一个 business batch 后只读取一次精确 batch detail 和绑定 task，不调用 full reconciliation task list，不把详情数组塞入列表 DTO。task mutation target 必须同时满足“已加载 task ID = 当前选中 business batch 的 task ID”；bucket/页切换或刷新响应自动迁移 selection 时必须同步失效旧 task，禁止旧 task I/O 泄漏到新批次。四阶段进度只读取当前 batch/task 内存事实，网络、持久化与全局 listener I/O 均为零 |
 | OA 草稿 command | `POST /api/etc/business-batches/{id}/oa-draft`、`.../oa-draft/recover` | create 请求携带稳定 idempotency key；prepare 在 ETC 锁内持久化 attempt，OA HTTP 在锁外执行，finalize 通过 `save_etc_oa_draft_attempt` 对单一 business batch 做 version CAS 并只合并该 attempt 改动的 business batch/submission/invoice/import 行；同 key 或同 recovery 结果重放只补齐 linked task 的 OA 元数据，不再次创建 OA 草稿。结果未知禁止自动重试；recover 仅管理员可用，布尔决定必须是严格 JSON boolean，并提供 reason/evidence 与互斥的采纳/未创建证据。历史 creating 行若缺 prepared submission，只能在权威 OA 查询为零后确认未创建并 CAS 回未提交 bucket；禁止采纳草稿或创建伪 attempt。OA draft create/replay/recover 不读取/写入 canonical invoice link，也不触发下游 read model |
 | OA 金额与发票金额展示 | linked reconciliation task `oaTotalAmount`、business batch `invoiceSummary` | `oaTotalAmount` 是 OA 草稿金额事实源；`invoiceSummary` 只从 business batch `invoice_ids` 对应 ETC 发票求数量和含税总额，不得被 submission/OA 金额覆盖。差额在浏览器内按分计算，只提示、不阻断、不写回；禁止为该展示新增共享 API、read model、queue 或跨页面写入 |
 | OA 草稿结果决定 | `POST /api/etc/business-batches/{id}/manual-oa-status` | `submitted` 表示用户已在 OA 完成草稿提交，批次进入已提交；`not_submitted` 表示用户已在 OA 删除草稿，批次回到未提交。结果弹窗只暴露这两个 command，草稿打开/PDF 下载属于暂存区只读工具。该 command 只写 business batch / reconciliation task / audit 与精确 affected scope，禁止 relink canonical invoice，也不写后投递 Workbench/matching/Tax/Cost/history 页面 refresh |
@@ -53,7 +53,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| ETC ticket/batch payload | 前端页面 | summary DTO 只含列表展示、三 bucket counts 和统一 `createOaDraftAction`；不含 invoice IDs、import attempts、audit events 或 task 嵌套详情。detail DTO 才包含当前业务批次明细 |
+| ETC ticket/batch payload | 前端页面 | summary DTO 只含当前页列表展示、三 bucket counts、全量 statistics、pagination 和统一 `createOaDraftAction`；页面 rail 的“批次数”展示 `pagination.total`，不是当前页 `items.length`。不含 invoice IDs、import attempts、audit events 或 task 嵌套详情。detail DTO 才包含当前业务批次明细 |
 | Worker 持久化后的查询可见性 | ETC 票据/导入页面 | PostgreSQL 模式的 task、business batch、invoice 查询在读取前重载正式 snapshot，保证独立 import worker 的完成结果无需 API 重启即可见；file/memory backend 保持原有进程内语义 |
 | ETC 发票合并 PDF | 浏览器下载 | `application/pdf`、RFC 5987 UTF-8 文件名、`private, no-store`；按开票日期/发票号/ID 稳定排序，每张发票恰好贡献一页；任一来源不可读、损坏、hash 不一致或不是单页时整包失败；成功记录 `etc_invoice_pdf_bundle_downloaded` 审计，不新增批次状态或 read model |
 | ETC OA 附件引用 | OA form draft | `HttpEtcOAClient` 在上传响应边界把已知 OA absolute `/fileManager/` / `/profile/` URL 归一为根相对路径；已有相对路径与 opaque file id 保持不变，未知 absolute host/path fail closed。现有 payload builder 把同一规范值写入 `response.data` 与 `response.extra.filePath`，页面/Nginx 不做补偿拼接 |
@@ -106,7 +106,7 @@
 - `tests/test_page_audit_registry.py`
 - `tests/test_app_health_api.py`
 - `web/src/test/EtcTicketManagementPage.test.tsx`
-- `web/e2e/etc-tickets-flow.spec.ts`
+- `web/e2e/etc-tickets-flow.spec.ts`，以 121 个业务批次验证第 2/3 页、第 121 条和 `page_size=50`。
 
 ## 当前缺口和删除条件
 

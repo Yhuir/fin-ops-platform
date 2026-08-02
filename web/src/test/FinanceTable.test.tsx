@@ -50,6 +50,35 @@ describe("FinanceTable shared primitives", () => {
     expect(screen.getAllByRole("button", { name: /^\d+$/ })).toHaveLength(5);
   });
 
+  test("renders compact pagination without numeric links", () => {
+    const onPageChange = vi.fn();
+
+    render(<FinanceTablePagination compact page={2} pageSize={50} total={121} onPageChange={onPageChange} />);
+
+    expect(screen.getByText("显示 51-100 / 121")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "1" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /上一页/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /下一页/ })).toBeEnabled();
+  });
+
+  test("disables every pagination action while a list request is active", async () => {
+    const user = userEvent.setup();
+    const onPageChange = vi.fn();
+
+    render(<FinanceTablePagination isDisabled page={2} pageSize={50} total={121} onPageChange={onPageChange} />);
+
+    const previous = screen.getByRole("button", { name: /上一页/ });
+    const current = screen.getByRole("button", { name: "2" });
+    const next = screen.getByRole("button", { name: /下一页/ });
+    expect(previous).toBeDisabled();
+    expect(current).toBeDisabled();
+    expect(next).toBeDisabled();
+    await user.click(previous);
+    await user.click(current);
+    await user.click(next);
+    expect(onPageChange).not.toHaveBeenCalled();
+  });
+
   test("keeps shared finance cell primitives semantically stable", () => {
     render(
       <div>

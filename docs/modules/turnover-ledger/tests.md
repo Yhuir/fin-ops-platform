@@ -10,7 +10,7 @@
 | Business composition | `TurnoverLedgerService` / relation context | 标签准入、分组、金额、闭环两侧一致、relation case |
 | Writes | facade/UoW/adapters/Workbench command | OCC、幂等、rollback、确认/撤回、零页面 fan-out |
 | API | `TurnoverLedgerApiRoutes` | 权限、DTO、错误、筛选、分页、导出、无 freshness metadata |
-| Frontend | `TurnoverLedgerPage.tsx` | loading/empty/error/retry、extra editor request identity、关闭/停用失效、保存 relation identity/OCC、即时按钮反馈、一次 reload、成功后 reload 失败语义 |
+| Frontend | `TurnoverLedgerPage.tsx` | loading/empty/error/retry、50 条服务端分页、`total > 100` 全页可达、family/page 请求身份、越界末页回退、extra editor request identity、关闭/停用失效、保存 relation identity/OCC、即时按钮反馈、当前页一次 reload、成功后 reload 失败语义 |
 | Audit/runtime | page audit / registries | canonical invariants、无 Turnover worker/read model/event |
 | Cross-page | Workbench relation | 两页读取同一 active case/members/status |
 
@@ -23,7 +23,7 @@
 | 3. API contract | 适用 | `tests/test_turnover_ledger_api.py` |
 | 4. Read model/cache/job | 适用但结论为删除 | PostgreSQL integration 证明退休 projection 不可见；manifest/worker/registry tests 证明 Turnover 不再登记 |
 | 5. Frontend interaction | 适用 | `web/src/test/TurnoverLedgerApi.test.ts`、`web/src/test/TurnoverLedgerPage.test.tsx` |
-| 6. E2E business flow | 适用 | Workbench integration + 部署后 test-owned fixture confirm/refresh/withdraw |
+| 6. E2E business flow | 适用 | `web/e2e/turnover-ledger-flow.spec.ts` 的 121 组分页链路 + Workbench integration + 部署后 test-owned fixture confirm/refresh/withdraw |
 | 7. Existing regression | 适用 | Audit、runtime registry、read-model manifest、platform boundary guards、关联台 relation tests |
 
 ## 关键回归
@@ -36,6 +36,7 @@
 - summary、family summary 和 group 的 `closed_amount` 固定为 `0.00`。
 - confirm/withdraw 的 canonical write 语义不因 read 链切换而改变。
 - 当前页写成功只 GET 一次；另一个页面/tab 不自动 I/O。
+- 列表固定请求 `page_size=50`；121 组 fixture 必须依次请求 `page=1/2/3`，第 51、101、121 组可见且旧页行被替换。
 - GET 失败可由普通刷新恢复；写成功后的 reload 失败不伪装写失败。
 - relation A 的 detail/extra 请求在 relation B 打开后即使忽略 abort 并晚返回，也不能改写 B 的 form/detail/error/loading。
 - extra drawer 关闭、页面停用或卸载后，pending editor GET 必须 abort，后续回调不能恢复旧抽屉。
