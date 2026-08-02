@@ -22,16 +22,13 @@ class AuthGuardTests(unittest.TestCase):
             nonlocal snapshot_reads
             snapshot_reads += 1
             return {
-                "allowed_usernames": ["ATTACKER"],
+                "allowed_usernames": ["YNSYLP005", "ATTACKER"],
                 "readonly_export_usernames": [],
-                "admin_usernames": ["ATTACKER"],
+                "admin_usernames": ["YNSYLP005"],
                 "full_access_usernames": ["ATTACKER"],
             }
 
-        service = AccessControlService(
-            required_permission="",
-            access_control_snapshot_provider=snapshot_provider,
-        )
+        service = AccessControlService(access_control_snapshot_provider=snapshot_provider)
         decision = service.evaluate(
             OAUserIdentity(
                 user_id="attacker-id",
@@ -46,6 +43,40 @@ class AuthGuardTests(unittest.TestCase):
         self.assertEqual(snapshot_reads, 1)
         self.assertEqual(decision.access_tier, "full_access")
         self.assertFalse(decision.can_admin_access)
+
+    def test_protected_admin_skips_snapshot_and_provider_failure_denies_others(self) -> None:
+        def failing_provider() -> dict[str, object]:
+            raise RuntimeError("provider secret must not be logged")
+
+        service = AccessControlService(access_control_snapshot_provider=failing_provider)
+        admin = service.evaluate(
+            OAUserIdentity("005", "YNSYLP005", "admin", "admin")
+        )
+        with self.assertLogs("fin_ops_platform.services.access_control_service", level="WARNING") as logs:
+            denied = service.evaluate(
+                OAUserIdentity(
+                    "outsider",
+                    "OUTSIDER001",
+                    "outsider",
+                    "outsider",
+                    roles=["finance"],
+                    permissions=["finops:app:view"],
+                )
+            )
+
+        self.assertEqual(admin.access_tier, "admin")
+        self.assertEqual(denied.access_tier, "denied")
+        self.assertNotIn("provider secret", "\n".join(logs.output))
+
+    def test_legacy_authority_constructor_fields_are_removed(self) -> None:
+        for field in (
+            "required_permission",
+            "allowed_usernames",
+            "allowed_roles",
+            "readonly_export_usernames",
+        ):
+            with self.subTest(field=field), self.assertRaises(TypeError):
+                AccessControlService(**{field: [] if field != "required_permission" else ""})
 
     @contextmanager
     def _without_default_test_auth(self):

@@ -33,6 +33,7 @@ class SessionApiTests(unittest.TestCase):
     def test_get_session_me_returns_current_user_roles_permissions_and_allowed(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            configure_access_control(app, full_access=["liuji"])
             app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
                 user_id="101",
                 username="liuji",
@@ -64,7 +65,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertTrue(payload["can_mutate_data"])
         self.assertFalse(payload["can_admin_access"])
 
-    def test_get_session_me_does_not_fail_when_dynamic_settings_provider_is_unavailable_for_permitted_user(self) -> None:
+    def test_get_session_me_fails_closed_when_dynamic_settings_provider_is_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._access_control_service.access_control_snapshot_provider = lambda: (_ for _ in ()).throw(
@@ -90,14 +91,15 @@ class SessionApiTests(unittest.TestCase):
             payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(payload["allowed"])
-        self.assertEqual(payload["access_tier"], "full_access")
-        self.assertTrue(payload["can_access_app"])
+        self.assertFalse(payload["allowed"])
+        self.assertEqual(payload["access_tier"], "denied")
+        self.assertFalse(payload["can_access_app"])
         self.assertTrue(any("snapshot provider failed" in message for message in logs.output))
 
     def test_get_session_me_accepts_admin_token_cookie(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            configure_access_control(app, full_access=["cookie-user"])
             observed_tokens: list[str] = []
 
             def resolve_identity(token: str) -> OAUserIdentity:
@@ -131,6 +133,7 @@ class SessionApiTests(unittest.TestCase):
             FIN_OPS_DEV_USERNAME="local_finops_admin",
         ), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            configure_access_control(app, full_access=["local_finops_admin"])
 
             response = app.handle_request("GET", "/api/session/me")
             payload = json.loads(response.body)
@@ -286,7 +289,7 @@ class SessionApiTests(unittest.TestCase):
                 "full": ("full_access", True, True, False),
                 "admin": ("denied", False, False, False),
                 "default-admin": ("admin", True, True, True),
-                "permission": ("full_access", True, True, False),
+                "permission": ("denied", False, False, False),
                 "outsider": ("denied", False, False, False),
             }
             payloads: dict[str, dict[str, object]] = {}
@@ -312,6 +315,51 @@ class SessionApiTests(unittest.TestCase):
 
         self.assertTrue(payloads["readonly"]["allowed"])
         self.assertFalse(payloads["outsider"]["allowed"])
+
+    def test_environment_and_oa_identity_roles_cannot_grant_app_access(self) -> None:
+        with self._temporary_env(
+            FIN_OPS_ALLOWED_USERNAMES="ENV001",
+            FIN_OPS_ALLOWED_ROLES="finance",
+            FIN_OPS_READONLY_EXPORT_USERNAMES="ENV001",
+        ), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
+                user_id="env-user",
+                username="ENV001",
+                nickname="env user",
+                display_name="env user",
+                roles=["finance"],
+                permissions=["finops:app:view"],
+            )
+
+            payload = json.loads(
+                app.handle_request(
+                    "GET",
+                    "/api/session/me",
+                    headers={"Authorization": "Bearer env-user"},
+                ).body
+            )
+
+        self.assertEqual(payload["access_tier"], "denied")
+        self.assertEqual(payload["roles"], ["finance"])
+        self.assertEqual(payload["permissions"], ["finops:app:view"])
+
+    def test_cached_identity_is_denied_immediately_after_acl_revocation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            configure_access_control(app, full_access=["CACHED001"])
+            identity = OAUserIdentity("cached", "CACHED001", "cached", "cached")
+            app._oa_identity_service.resolve_identity = lambda _token: identity
+            headers = {"Authorization": "Bearer cached-user"}
+
+            before = json.loads(app.handle_request("GET", "/api/session/me", headers=headers).body)
+            configure_access_control(app)
+            after = json.loads(app.handle_request("GET", "/api/session/me", headers=headers).body)
+            protected_response = app.handle_request("GET", "/api/workbench?month=2026-07", headers=headers)
+
+        self.assertEqual(before["access_tier"], "full_access")
+        self.assertEqual(after["access_tier"], "denied")
+        self.assertEqual(protected_response.status_code, 403)
 
     def test_get_session_me_returns_denied_tier_for_visible_but_unauthorized_user(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

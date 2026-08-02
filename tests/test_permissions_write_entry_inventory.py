@@ -391,6 +391,27 @@ def _coverage_lifecycle_enqueue_barrier_sites() -> Counter[tuple[str, str]]:
 
 
 class PermissionsWriteEntryInventoryTests(unittest.TestCase):
+    def test_app_authorization_runtime_has_no_permission_role_or_environment_admission(self) -> None:
+        access_control_source = (
+            REPO_ROOT / "backend/src/fin_ops_platform/services/access_control_service.py"
+        ).read_text(encoding="utf-8")
+        auth_source = (REPO_ROOT / "backend/src/fin_ops_platform/app/auth.py").read_text(encoding="utf-8")
+        forbidden = (
+            "_parse_csv_environment",
+            "required_permission",
+            "allowed_usernames",
+            "allowed_roles",
+            "readonly_export_usernames",
+            "FIN_OPS_ALLOWED_USERNAMES",
+            "FIN_OPS_ALLOWED_ROLES",
+            "FIN_OPS_READONLY_EXPORT_USERNAMES",
+            "FIN_OPS_OA_REQUIRED_PERMISSION",
+        )
+
+        for token in forbidden:
+            with self.subTest(token=token):
+                self.assertNotIn(token, access_control_source + auth_source)
+
     def test_phase_27_page_coverage_matches_current_page_registry_bidirectionally(self) -> None:
         self.assertEqual(
             _coverage_page_routes(),
