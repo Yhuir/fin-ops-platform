@@ -37,7 +37,9 @@
 - `PageRuntimeProvider` 对当前页面提供稳定的 `active: true`、`pageKey` 与初始 generation。它不监听 focus/visibility/BFCache，不协调业务页面刷新。
 - `AppPageRoute.preload()` 和 sidebar item `preload()` 只预加载 lazy route chunk。预加载失败不能改变当前 route，也不能阻塞点击导航。
 - 页面 session state 只保存当前浏览器标签页内的轻量 UI 状态，例如查询、筛选、分页、排序、tab、选中行、展开行和详情 drawer target；不保存 read model payload、业务事实、权限事实、loading/error/toast 或失败中的提交。
-- `SessionGate` 是 shell 级入口。会话 loading/forbidden/expired/error 会阻止业务 route 渲染，但侧栏和全局 shell 仍按现有布局显示。
+- `SessionGate` 是 shell 级入口。它只消费 canonical session 的 `allowed/access_tier/capabilities`；OA roles/permissions 与 `finops:app:view` 不能授予 APP access。会话 loading/forbidden/expired/error 会阻止业务 route 渲染，但侧栏和全局 shell 仍按现有布局显示。
+- `SessionGate` 和 OA menu 都是 UX/visibility 强制层，不替代 backend authorization。denied 用户直接输入 `/fin-ops/` 不挂载业务 route；直接调用受保护 API 仍由 backend canonical ACL guard 返回 `403 permission_denied`。
+- OA 菜单变更只以 role projection 后的新 `/system/menu/getRouters` 响应或新 OA shell session 验收；刷新前的旧 DOM、旧 router payload 或截图不能证明撤权成功/失败。
 - `AppStatusIndicator` 在 shell 中消费后端 app status projection；路由切换不能改变全局状态事实。
 - 侧栏账号区只消费 SessionContext 已归一化的 `displayName/username/deptName`，不加载 OA 头像、不重取 session、不提供业务写操作。
 - `GlobalOperationOverlayProvider` 是 shell 级交互保护层。它只承载写操作后的短暂等待和错误反馈，不保存业务 payload，不决定 freshness，不替代 App Status 或页面 read boundary。页面不得各自实现第二套全屏操作阻塞层。
@@ -54,6 +56,7 @@
 | `GlobalOperationOverlayContext.tsx` 语义 | 所有接入页面的写操作 loading/error 体验；不能污染普通页面 loading、App Status 或业务事实 |
 | `PageSessionStateContext.tsx` key/scope/TTL | 所有页面筛选/分页/排序/选中状态恢复、用户切换隔离 |
 | `PageRuntimeContext.tsx` runtime identity | 当前 route 身份；禁止承载业务刷新协调 |
+| `SessionGate` / OA embedded shell | canonical session 与 APP route mount；menu visibility 与 backend direct API denial 必须分别验证，不能互相代替 |
 
 ## 测试入口
 
@@ -65,6 +68,15 @@
 - `web/src/test/PageSessionStateContext.test.tsx`
 - `web/src/test/useFinanceTableSession.test.tsx`
 - `tests/test_platform_runtime_boundary_guards.py`
+- `tests/test_session_api.py`
+- `tests/test_auth_guard.py`
+- `web/e2e/permissions-role-matrix.spec.ts`
+
+## ACL 证据边界
+
+- 本地自动化已经由 `SessionGate.test.tsx`、`App.test.tsx`、`PageRouteHost.test.tsx` 和 `permissions-role-matrix.spec.ts` 证明 admin/full/read/denied、direct route、17-route registry 与 ACL restore；OA hostile roles/permissions 只保留为信息字段。
+- backend direct API denial 由 `tests/test_session_api.py`、`tests/test_auth_guard.py` 和 `tests/test_route_access_policy.py` 独立证明，不能用 sidebar/menu 隐藏替代。
+- 生产 fresh token、fresh `/system/menu/getRouters`、三专用 role exact set 与 finally restore 只接受 root-owned post-deploy artifact/hash；当前文档只记录已实现 release-prep 合同，不声称生产已部署或证据已采集。
 
 ## 维护触发器
 

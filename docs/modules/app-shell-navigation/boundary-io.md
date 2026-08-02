@@ -26,13 +26,15 @@
 - 不直接调用业务写 API。
 - 不决定 read model freshness，只展示来自页面/API 的状态。
 - 不监听 focus、visibility 或 BFCache 来触发业务刷新，不在 shell 内调用任何业务 load/rebuild API。
+- 不把 sidebar/menu visibility、OA role/permission 或旧 DOM 当作 APP authorization；不代替 backend global/module guards。
 
 ## 输入 I/O
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | Page registry | `pageRegistry.tsx` | 页面 key、route、component、权限元数据 |
-| Session payload | session API/context | 只传递权限和身份状态 |
+| Session payload | session API/context | 只消费 canonical `allowed/access_tier/capabilities` 和身份展示字段；OA roles/permissions/menu 不成为 APP authority |
+| OA router/menu payload | 新 `/system/menu/getRouters` 或新 shell session | 只验收菜单可见性；旧 DOM/旧 payload 不作证据，也不替代 APP session/API denial |
 | Route lifecycle | route mount/unmount | 只挂载当前 route；重新进入 route 会重新 mount 页面 |
 | Page runtime identity | page runtime context | 只传递 page key、稳定 active 与初始 activation generation，不携带业务 DTO |
 
@@ -45,6 +47,7 @@
 | Current OA identity | sidebar account footer | 只展示 `displayName/username/deptName`；弹层开关不产生 API、图片或业务 I/O |
 | Global runtime status entry | static local brand mark | 桌面展开态和 compact drawer 展示静态状态点并复用既有 App Status 弹层；桌面收缩态隐藏且退出交互；不使用无限动画 |
 | Runtime context | pages/components | 提供 `{pageKey, active, activationGeneration}` 兼容 shape；load 由页面 mount/query/retry owner 触发，shell 不改变 generation |
+| Forbidden route state | `SessionGate` | denied/expired/error 不挂载业务 route；backend direct API 403 是独立输出，不由 shell 伪造 |
 
 ## 持久化与投影
 
@@ -68,7 +71,7 @@
 
 - 允许依赖：SessionContext, app health context, page registry, HeroUI shell primitives。
 - 必须通过：registered page metadata。
-- 禁止绕过：shell 直接 import 页面 service business logic；sidebar 硬编码权限外业务规则。
+- 禁止绕过：shell 直接 import 页面 service business logic；sidebar 硬编码权限外业务规则；用菜单隐藏替代 direct API authorization；从 OA information fields 推导 APP tier。
 
 ## 测试与验证
 
@@ -76,7 +79,10 @@
 - `web/src/test/PageRouteHost.test.tsx`（17 route owner 注册、route mount 单次加载、focus/visibility/BFCache 零业务 reload、旧刷新模块静态删除守卫）
 - `web/src/test/AppSidebar.test.tsx`
 - `web/e2e/app-shell.spec.ts`
+- `web/e2e/permissions-role-matrix.spec.ts`
+- `tests/test_session_api.py`、`tests/test_auth_guard.py`（backend 独立 denial 边界）
 
 ## 当前缺口和删除条件
 
 - 新增页面必须同步 page registry、docs/modules、权限和 e2e routing smoke。
+- ACL/menu 发布验收必须同时有 fresh APP session/direct API 与 fresh OA router/shell 两类证据；任一缺失都不能由另一类推断。
