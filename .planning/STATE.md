@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 13-10-PLAN.md
-last_updated: "2026-08-02T07:41:25.700Z"
+stopped_at: Completed 13-09-PLAN.md
+last_updated: "2026-08-02T08:01:30.169Z"
 last_activity: 2026-08-02 -- Phase 13 execution started
 progress:
   total_phases: 38
   completed_phases: 11
   total_plans: 104
-  completed_plans: 70
+  completed_plans: 71
   percent: 29
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 ## Current Position
 
 Phase: 13 (settings-improvements) — EXECUTING
-Plan: 10 of 15
+Plan: 11 of 15
 Status: Ready to execute
 Last activity: 2026-08-02 -- Phase 13 execution started
 
@@ -57,6 +57,7 @@ Progress: [██░░░░░░░░] in progress
 | Phase 13 P07 | 19min | 2 tasks | 12 files |
 | Phase 13 P08 | 8min | 2 tasks | 6 files |
 | Phase 13 P10 | 18min | 3 tasks | 9 files |
+| Phase 13 P09 | 10min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -173,6 +174,9 @@ Progress: [██░░░░░░░░] in progress
 - [Phase 13]: 普通 eligible 与 cleanup_eligible 分离；只有 fixed-menu non-dedicated binding 可进入 exact cleanup，selector/role/member/env 漂移仍阻断。
 - [Phase 13]: Rollback 只使用同一 approved before-image 的 salted target hashes，并在恢复 previous release 前完成 read-back。
 - [Phase 13]: 三项退休 APP admission env 只要存在即阻断 release；FIN_OPS_OA_REQUIRED_PERMISSION 仅保留固定 OA selector。
+- [Phase 13]: YNSYLP006 attack fixtures retain OA business and dedicated roles plus finops:app:view while canonical ACL absence still yields denied. — Negative tests must preserve hostile identity evidence instead of stripping it.
+- [Phase 13]: test_permissions_write_entry_inventory.py is the only authorization whole-repo scanner. — One explicit allowlist prevents duplicated scanners and hidden retired authority.
+- [Phase 13]: Phase 13-09 adds no production authorization or runtime path. — Plans 07, 08 and 10 already supply the behavior; this plan owns regression and inventory only.
 
 ### Roadmap Evolution
 
@@ -251,6 +255,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-02T07:41:25.691Z
-Stopped at: Completed 13-10-PLAN.md
+Last session: 2026-08-02T08:01:30.160Z
+Stopped at: Completed 13-09-PLAN.md
 Resume file: None
