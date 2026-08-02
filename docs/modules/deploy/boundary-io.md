@@ -29,6 +29,9 @@
 | --- | --- | --- |
 | Deploy command | `scripts/deploy-oa.sh` | 使用明确 release/remote/env；正常激活只允许调用 `finops-deploy-control release-gate-activate <release>`，公开 `activate` 入口已删除。`--no-activate` 只上传和校验，不生成门禁证据 |
 | Release-gate credential | 本机 `scripts/with-production-admin-token.sh` | Admin Token 只通过部署进程 stdin 交给 root helper，不写入 release、证据、命令行或日志；缺失时必须在任何生产切换前 fail closed |
+| ACL candidate/preflight | exact uploaded release + fresh admin/representative HTTP tokens + root runtime env/OA/PG read-only facts | remote collector 必须绑定 release/source/migration/capability、identity hashes、唯一 fixed menu、三 dedicated roles/bindings/members、retired env absence 和 exact cleanup targets；artifact/SHA-256 经批准后任一 drift 都回审批 gate |
+| ACL env contract | `/etc/fin-ops/*.env` | 三项 retired APP admission env 任一 key 存在即阻断；fixed OA selector env 必须精确指向 `finops:app:view` 且仅作为 OA menu selector。精确 key 清单只由 canonical runbook/preflight owner 维护 |
+| Manual-root helper candidate | 已上传 exact release 的 `finops-deploy-control.sh` + approved SHA-256 | 只允许 root 以同文件系统 temp、`root:root 0755`、syntax/hash check 和 atomic `mv` bootstrap；release/activate 不得 self-update，也不得触碰 runtime-worker helper、service、DB/OA/ACL |
 | Release-gate RabbitMQ env | `/etc/fin-ops/fin-ops.rabbitmq-topology.env`、`/etc/fin-ops/fin-ops.rabbitmq-monitoring.env` | topology apply 与 runtime health/closure 分别加载自己的 systemd 运维边界；缺失或不可读必须 fail closed，不得读取 worker consumer 凭据代替 |
 | Runtime worker manifest | `runtime_worker_manifest.py` | 必须匹配 registry |
 | Verify command | `scripts/verify.sh` | 按 backend/web/docs/ops 分类执行 |
@@ -48,6 +51,8 @@
 | systemd/env files | deploy/oa | 与 registry 一致 |
 | Verification result | operator/CI | 失败不得伪装成功 |
 | Production-equivalent release evidence | `/opt/fin-ops/runtime-smoke/release-gates/<release>/evidence.json` | root-owned `0600` 原子写入，并绑定 release 名称、candidate Git commit 和 previous release。最终 PASS 必须同时证明 `unknown_worker_count=0`、`required_worker_not_ready=0`、`dirty_scope_count=0`、`pending_outbox_count=0`、`publishing_outbox_count=0`、`dead_letter_delta=0`、`queue_stable_after_300_seconds=true` |
+| Settings ACL preflight evidence | `/opt/fin-ops/evidence/<release>/settings-access-control-preflight.json` + `.sha256` | root-owned `0600`；只含 salted hashes/counts/fingerprints 和 exact cleanup/rollback manifest，不含 token、DSN、密码、raw role/menu IDs、业务 role key或非受保护用户名 |
+| Settings ACL post-deploy evidence | `/opt/fin-ops/evidence/<release>/settings-access-control-post-deploy.json` + `.sha256` | fresh full→read→denied APP session/direct API、新 OA router/三 role exact set、non-target invariants、audit/latency 和 finally restore/read-back；任何 missing/failure/hash drift 重新阻断 |
 | Bounded request traceback | operator | 仅用于把已知生产 500 定位到 release 文件和行号；不得输出业务 payload、token 或任意日志窗口 |
 | Write smoke restore-point manifest | operator | 固定记录 release、run-id、UTC 时间、dump 路径、字节数、格式和 SHA-256；不得包含 DSN、token 或业务 payload |
 
@@ -66,19 +71,22 @@
 | Deploy control | `deploy/oa/bin/finops-deploy-control.sh`、`finops-ensure-runtime-workers.sh` |
 | Examples | `deploy/oa/nginx.fin-ops.conf.example`、`deploy/oa/systemd/*.service.example`、`deploy/oa/env/*.env.example` |
 | Worker manifest | `backend/src/fin_ops_platform/tools/runtime_worker_manifest.py`、`runtime_worker_registry.py` |
+| ACL evidence | `backend/src/fin_ops_platform/tools/settings_access_control_preflight.py`、`deploy/oa/fin_ops_role_binding.mysql.sql` |
 | Tests | `tests/test_deploy_*.py`、`tests/test_runtime_worker_registry.py`、`tests/test_write_operation_e2e_smoke.py` |
 
 ## 依赖方向
 
 - 允许依赖：runtime worker registry, operations docs, CI verify scripts。
 - 必须通过：documented deploy scripts.
-- 禁止绕过：ad hoc production edits without operations docs; scripts embedding business fixes.
+- 禁止绕过：ad hoc production edits without operations docs；scripts embedding business fixes；token/secret in argv/log/artifact；broad OA delete；helper self-update；未审批 candidate 或 drift artifact 继续 cutover。
 
 ## 测试与验证
 
 - `tests/test_deploy_oa_script.py`
 - `tests/test_runtime_sync_closure_gate.py`
 - `tests/test_deploy_runtime_examples.py`
+- `tests/test_settings_access_control_preflight.py`
+- `tests/test_permissions_write_entry_inventory.py`
 - `bash scripts/verify.sh docs`
 
 ## 当前缺口和删除条件
@@ -88,6 +96,7 @@
 - 禁止在 systemd examples 或发布脚本中恢复 `/opt/fin-ops/current/backend` 作为运行目录。
 - `finops-deploy-control` 对 legacy current 的归档只用于 release 激活前清理历史 runtime，不得重新变成覆盖式发布入口。
 - 禁止恢复公开 `activate` 命令、helper `self-update` 或在上传脚本中直接切换 release。激活前必须完成 ACL preflight 和当前 release checkpoint；候选激活后必须完成 T+0、T+60s、T+300s checkpoint。失败只可恢复带相同 ACL-safe capability/fingerprint 的 previous release；否则保持 maintenance 并 forward repair。
+- 只允许 exact non-dedicated fixed-menu binding cleanup；runtime role projection、业务 role/member、三个 dedicated bindings、其他 menu/binding 都是 non-target。cleanup/rollback/restore/read-back 失败必须回到 candidate preflight approval gate，不能直接重跑后续 smoke。
 
 ## Production-equivalent Release Gate（2026-07-31）
 

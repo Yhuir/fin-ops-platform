@@ -33,6 +33,8 @@
 - env 示例：`deploy/oa/env/*.env.example`
 - worker manifest：`backend/src/fin_ops_platform/tools/runtime_worker_manifest.py`
 - runtime registry：`backend/src/fin_ops_platform/services/runtime_worker_registry.py`
+- Settings ACL preflight collector：`backend/src/fin_ops_platform/tools/settings_access_control_preflight.py`
+- OA exact cleanup/rollback：`deploy/oa/fin_ops_role_binding.mysql.sql`
 
 ## 当前边界
 
@@ -64,6 +66,19 @@ bash scripts/verify.sh all
 
 它覆盖后端 `--check`、后端 unittest discovery、前端 Vitest、前端 build、deterministic Playwright browser smoke、docs 结构检查。
 
+## Settings ACL release-prep 边界
+
+当前仓库已实现以下发布准备合同；真实 remote preflight、helper bootstrap、candidate activation 和 post-deploy evidence 仍需受控执行，本文不声称生产已部署：
+
+- existing collector 盘点 canonical PostgreSQL ACL、root env、唯一 `finops:app:view` menu、三个专用 roles/bindings/members，并输出 release-bound salted exact artifact。三项 APP admission env 已退役，任一 key 存在即阻断；fixed OA selector env 必须保留并精确指向 `finops:app:view`，但只定位 OA menu，不能 grant APP access。精确 env key 清单只由 canonical deploy runbook/preflight owner 维护。
+- 普通 `eligible` 与 `cleanup_eligible` 分开。只有 fixed-menu non-dedicated bindings 可进入 approved before-image 约束的 exact cleanup；selector/menu/role/member/env/identity/fingerprint drift 全部零写阻断。
+- release 上传不得更新 root helper。首次/升级 deploy-control 必须走 manual-root、candidate hash-pinned、同文件系统 temp + atomic `mv` 流程，并证明 runtime-worker helper、active release、service、DB/OA/ACL fingerprint 不变；禁止 legacy `self-update`。
+- candidate-bound remote preflight artifact/SHA-256 经批准后，激活前必须 just-in-time 重跑；任一事实/hash变化回审批 gate。current runtime checkpoint 通过后才 quiesce API/workers，再执行 migration/CHECK 和 ACL-safe candidate。
+- candidate 只通过 `./scripts/deploy-oa.sh --activate-existing --release-name <release>` 激活；该路径不 build/upload/replace/helper self-update。previous release 只有具备同等 ACL-safe capability/source/migration fingerprint 才可恢复。
+- cleanup/rollback/restore/router-session read-back 或 evidence hash 任一失败都保持 maintenance 并 forward repair；不能跳过审批继续 post-deploy，也不能启动 vulnerable previous binary。
+
+完整命令、artifact 路径、secret stdin 和 operator gate 只以 `deploy/oa/README.md` 为 runbook，本模块不复制第二套操作步骤。
+
 ## 影响面
 
 部署改动不能只看脚本本身，必须列出影响面：
@@ -77,6 +92,7 @@ bash scripts/verify.sh all
 - App Health：worker missing/stale/mismatch、dirty scopes、RabbitMQ backlog、PostgreSQL runtime unavailable 必须可观测。
 - 权限/session：发布后 `/api/session/me` 必须保持 JSON API，不能被 SPA fallback 吃掉。
 - 数据安全：发布前备份、migration、rollback/PITR、runtime config 需要 staging 或生产 runbook，不能只靠 unittest。
+- ACL 安全：preflight/cleanup/cutover/post-deploy 必须绑定同一 candidate、approved artifact/hash 和 safe fingerprint；APP session/API 与 fresh OA router/role restore 必须分别 read-back。
 
 ## 维护触发器
 

@@ -35,7 +35,7 @@ OA identity adapter 只认证 token 对应的 canonical username，并保留 dis
 - username 等值与去重使用 casefold comparison key，对外及 OA assignment 保留 `sys_user.user_name` canonical spelling。
 - 每次非管理员判断最多读取一次 canonical ACL snapshot；缺失、格式错误或 provider 失败全部 fail closed。
 - OA identity cache 只缓存身份信息，不缓存 APP access decision；ACL 删除后下一次 session/API 判断立即 denied。
-- `FIN_OPS_ALLOWED_USERNAMES`、`FIN_OPS_ALLOWED_ROLES`、`FIN_OPS_READONLY_EXPORT_USERNAMES` 已退役，存在即阻断 release，不能作为 fallback。
+- 三项历史 APP admission 环境名单已退役，任一 key 存在即阻断 release，不能作为 fallback；精确 key 清单只由 canonical deploy runbook/preflight owner 维护。
 
 `FIN_OPS_OA_REQUIRED_PERMISSION` 必须精确为 `finops:app:view`，但它只属于 OA integration：用于定位唯一 `财务运营平台` menu。它不能授予 APP access，也不能替代 Settings ACL。
 

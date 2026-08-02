@@ -33,7 +33,7 @@
 | --- | --- | --- |
 | OA session/token | `auth.py`、session API | 只认证 canonical username；roles/permissions 仅为信息，不能 grant APP access |
 | Canonical ACL snapshot | Settings owner | casefold-preserve-canonical 的 full/read assignments，加固定 `YNSYLP005` admin；是 role sync 唯一输入 |
-| Fixed menu target | `FIN_OPS_OA_REQUIRED_PERMISSION`、OA MySQL | selector 必须精确为 `finops:app:view`；唯一 menu、三个唯一专用 role和 exact 三 binding 必须在任何 DML 前成立 |
+| Fixed menu target | fixed OA selector env、OA MySQL | selector 必须精确为 `finops:app:view`；唯一 menu、三个唯一专用 role和 exact 三 binding 必须在任何 DML 前成立 |
 | Deployment cleanup artifact | preflight/deploy control | 只接受 release-bound salted exact non-dedicated target、approved before-image/SHA-256；runtime 不消费 |
 | OA Mongo/query | `mongo_oa_adapter.py` | projection sync 只调用 `load_sync_application_batch(scope_key, retention_cutoff_month=...)`：每个启用 form/scope 单次读取；`all` 在字段校验和附件解析前排除 retention cutoff 以前的文档，然后输出 `projection_records` 与 `admission_records` 两个不可变视图。前者遵守通用 OA form/status 配置；后者固定接纳 completed + in-progress，不受通用 status filter 污染。任一 form 读取失败或保留期内 status/identity 无法稳定判定时整批 fail-closed，不得提交部分集合。合法 in-progress 草稿允许未填写 amount/applicant/reason，仍按稳定 identity 进入 admission，空金额持久化为 `NULL`；保留期内 completed 缺既有必填业务字段仍 fail-closed |
 | OA sync event | `job.outbox_events(event_type='oa.sync')` / runtime worker | 手动同步、附件解析版本变化和 projection 版本变化都必须入 durable queue；HTTP 进程不得 inline sync 或自行轮询 Mongo |
