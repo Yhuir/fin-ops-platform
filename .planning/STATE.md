@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 13-07-PLAN.md
-last_updated: "2026-08-02T06:49:11.343Z"
+stopped_at: Completed 13-08-PLAN.md
+last_updated: "2026-08-02T07:16:34.904Z"
 last_activity: 2026-08-02 -- Phase 13 execution started
 progress:
   total_phases: 38
   completed_phases: 11
   total_plans: 104
-  completed_plans: 68
+  completed_plans: 69
   percent: 29
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 ## Current Position
 
 Phase: 13 (settings-improvements) — EXECUTING
-Plan: 8 of 15
+Plan: 9 of 15
 Status: Ready to execute
 Last activity: 2026-08-02 -- Phase 13 execution started
 
@@ -55,6 +55,7 @@ Progress: [██░░░░░░░░] in progress
 | Phase 38 P01 | 1h | 4 tasks | 21 files |
 | Phase 13 P06 | 2 min | 2 tasks | 1 files |
 | Phase 13 P07 | 19min | 2 tasks | 12 files |
+| Phase 13 P08 | 8min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -165,6 +166,9 @@ Progress: [██░░░░░░░░] in progress
 - [Phase 13]: Username equality and deduplication use one casefold comparison key while OA canonical spelling is preserved. — The 13-06 production contract locked casefold-preserve-canonical and one shared owner.
 - [Phase 13]: Only exact YNSYLP005 admin and canonical Settings ACL full/read memberships grant APP access. — OA roles, permissions, and environment lists are informational and cannot grant APP authority.
 - [Phase 13]: Provider absence, malformed payload, or provider failure denies every non-admin identity. — Authorization fails closed and warning logs use fixed secret-safe text.
+- [Phase 13]: FIN_OPS_OA_REQUIRED_PERMISSION must be exactly finops:app:view and remain confined to the OA adapter; it never grants APP access. — The same marker identifies the OA menu but canonical Settings ACL remains the only APP authority.
+- [Phase 13]: Runtime OA sync validates one menu, three unique dedicated roles, and the exact three bindings before changing only sys_user_role memberships. — Validation must fail before DML, while deployment cleanup remains a separate controlled operation.
+- [Phase 13]: Disabled or missing runtime projection fails real ACL mutations through the existing 502 contract; deployment cleanup remains owned by 13-10. — A canonical ACL change cannot report success while the OA menu projection is unavailable.
 
 ### Roadmap Evolution
 
@@ -243,6 +247,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-02T06:49:11.334Z
-Stopped at: Completed 13-07-PLAN.md
+Last session: 2026-08-02T07:16:34.895Z
+Stopped at: Completed 13-08-PLAN.md
 Resume file: None
