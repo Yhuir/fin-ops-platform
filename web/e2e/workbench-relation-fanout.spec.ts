@@ -6,7 +6,7 @@ import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions"
 import { confirmWorkbenchRelation } from "./fixtures/workbenchFlow";
 
 test.describe("workbench relation browser flow", () => {
-  test("shows a daily reimbursement as one selectable composite row with item-aligned invoices", async ({ page }) => {
+  test("keeps partial daily reimbursement invoices full-height while OA items remain selectable", async ({ page }) => {
     await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
       workbenchOaExpenseItemsScenario: true,
@@ -20,9 +20,23 @@ test.describe("workbench relation browser flow", () => {
       "candidate-group-segment-unpaired-row:oa-exp-2035-oa-exp-2035:item:1",
     );
     const projectItem = itemBand.getByText("云南溯源科技", { exact: true });
-    const attachmentInvoice = itemBand.getByText("中国石油云南销售公司", { exact: true });
     await expect(projectItem).toBeVisible();
+    await expect(itemBand.getByText("中国石油云南销售公司", { exact: true })).toHaveCount(0);
+
+    const group = page.getByTestId("candidate-group-unpaired-row:oa-exp-2035");
+    const invoicePane = page.getByTestId("candidate-scroll-unpaired-row:oa-exp-2035-invoice");
+    const attachmentInvoice = invoicePane.getByText("中国石油云南销售公司", { exact: true });
     await expect(attachmentInvoice).toBeVisible();
+    const [groupBox, invoicePaneBox, invoiceRowBox] = await Promise.all([
+      group.boundingBox(),
+      invoicePane.boundingBox(),
+      invoicePane.getByRole("row").boundingBox(),
+    ]);
+    expect(groupBox).not.toBeNull();
+    expect(invoicePaneBox).not.toBeNull();
+    expect(invoiceRowBox).not.toBeNull();
+    expect(Math.abs((invoicePaneBox?.height ?? 0) - (groupBox?.height ?? 0))).toBeLessThanOrEqual(2);
+    expect(Math.abs((invoiceRowBox?.height ?? 0) - (invoicePaneBox?.height ?? 0))).toBeLessThanOrEqual(2);
 
     await projectItem.click();
     await expect(page.getByText("OA 1 / 248.00")).toBeVisible();

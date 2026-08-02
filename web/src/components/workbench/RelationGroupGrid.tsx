@@ -16,6 +16,7 @@ import {
   collectWorkbenchFilterOptions,
   collectWorkbenchTimeFilterYears,
   createEmptyWorkbenchZoneDisplayState,
+  workbenchPaneUsesDisplaySegments,
   type WorkbenchPaneTimeFilter as WorkbenchPaneTimeFilterState,
   type WorkbenchZoneDisplayState,
 } from "../../features/workbench/groupDisplayModel";
@@ -517,6 +518,11 @@ function RelationGroupGrid({
         };
         const displaySegments = buildWorkbenchGroupDisplaySegments(group);
         const segmentCount = displaySegments?.length ?? 0;
+        const segmentedPaneIds = new Set(
+          panes
+            .map((pane) => pane.id as WorkbenchRecordType)
+            .filter((paneId) => workbenchPaneUsesDisplaySegments(group, paneId, displaySegments)),
+        );
 
         if (displaySegments) {
           return (
@@ -534,7 +540,7 @@ function RelationGroupGrid({
                 >
                   {panes.flatMap((pane, paneIndex) => {
                     const paneId = pane.id as WorkbenchRecordType;
-                    if (!isSourceSegmentedPane(paneId, displaySegments)) {
+                    if (!segmentedPaneIds.has(paneId)) {
                       return [];
                     }
                     return [
@@ -573,7 +579,7 @@ function RelationGroupGrid({
               ))}
               {panes.flatMap((pane, paneIndex) => {
                 const paneId = pane.id as WorkbenchRecordType;
-                if (isSourceSegmentedPane(paneId, displaySegments)) {
+                if (segmentedPaneIds.has(paneId)) {
                   return [];
                 }
                 return [
@@ -911,13 +917,6 @@ export default memo(RelationGroupGrid);
 
 function hasDefaultRowActions(row: WorkbenchRecord) {
   return row.availableActions.some((action) => action !== "detail" && action !== "view_relation");
-}
-
-function isSourceSegmentedPane(paneId: WorkbenchRecordType, segments: ReturnType<typeof buildWorkbenchGroupDisplaySegments>) {
-  if (paneId === "oa") {
-    return true;
-  }
-  return Boolean(segments?.some((segment) => segment.rows[paneId].length > 0));
 }
 
 function buildPaneSortActionLabel(paneId: "oa" | "bank" | "invoice", currentDirection: "asc" | "desc" | null) {

@@ -4,6 +4,7 @@ import {
   buildWorkbenchDisplayGroups,
   createEmptyWorkbenchZoneDisplayState,
   mergeWorkbenchGroupsById,
+  workbenchPaneUsesDisplaySegments,
   workbenchRowMatchesUnifiedSearch,
 } from "../features/workbench/groupDisplayModel";
 import type { WorkbenchRelationGroup, WorkbenchRecord } from "../features/workbench/types";
@@ -113,11 +114,10 @@ function buildGroup(id: string, transactionTime: string): WorkbenchRelationGroup
 }
 
 describe("groupDisplayModel time filter", () => {
-  test("builds source OA display segments for multi-OA attachment invoice groups", () => {
+  test("builds display segments only for complete one-to-one source coverage", () => {
     const oa248 = buildOaRow("oa-exp-248", "248.00");
     const oa292 = buildOaRow("oa-exp-292", "292.00");
-    const invoice120 = buildAttachmentInvoiceRow("invoice-120", "oa-exp-248", "120.00");
-    const invoice128 = buildAttachmentInvoiceRow("invoice-128", "oa-exp-248", "128.00");
+    const invoice248 = buildAttachmentInvoiceRow("invoice-248", "oa-exp-248", "248.00");
     const invoice292 = buildAttachmentInvoiceRow("invoice-292", "oa-exp-292", "292.00");
     const group: WorkbenchRelationGroup = {
       id: "case:source-segment",
@@ -128,7 +128,7 @@ describe("groupDisplayModel time filter", () => {
       rows: {
         oa: [oa248, oa292],
         bank: [buildBankRow("bank-001", "2026-03-28 10:18")],
-        invoice: [invoice120, invoice128, invoice292],
+        invoice: [invoice248, invoice292],
       },
     };
 
@@ -136,13 +136,15 @@ describe("groupDisplayModel time filter", () => {
 
     expect(segments?.map((segment) => segment.id)).toEqual(["oa-exp-248", "oa-exp-292"]);
     expect(segments?.[0].rows.oa).toEqual([oa248]);
-    expect(segments?.[0].rows.invoice).toEqual([invoice120, invoice128]);
+    expect(segments?.[0].rows.invoice).toEqual([invoice248]);
     expect(segments?.[1].rows.oa).toEqual([oa292]);
     expect(segments?.[1].rows.invoice).toEqual([invoice292]);
     expect(segments?.every((segment) => segment.rows.bank.length === 0)).toBe(true);
+    expect(workbenchPaneUsesDisplaySegments(group, "bank", segments)).toBe(false);
+    expect(workbenchPaneUsesDisplaySegments(group, "invoice", segments)).toBe(true);
   });
 
-  test("builds amount fallback display segments for unlinked rows in multi-OA groups", () => {
+  test("keeps unlinked same-amount and sum-matched rows at group level", () => {
     const oa469600 = buildOaRow("oa-exp-469600", "469600");
     const oa29350 = buildOaRow("oa-exp-29350", "29350");
     const oa88050 = buildOaRow("oa-exp-88050", "88050");
@@ -166,11 +168,29 @@ describe("groupDisplayModel time filter", () => {
 
     const segments = buildWorkbenchGroupDisplaySegments(group);
 
-    expect(segments?.map((segment) => segment.id)).toEqual(["oa-exp-469600", "oa-exp-29350", "oa-exp-88050"]);
-    expect(segments?.[0].rows.bank).toEqual([bank469600]);
-    expect(segments?.[1].rows.bank).toEqual([bank29350]);
-    expect(segments?.[1].rows.invoice).toEqual([invoice29350]);
-    expect(segments?.[2].rows.bank).toEqual([bank64996, bank23053]);
+    expect(segments).toBeNull();
+  });
+
+  test("keeps partial and duplicate source coverage at group level", () => {
+    const oa100 = buildOaRow("oa-exp-100", "100.00");
+    const oa200 = buildOaRow("oa-exp-200", "200.00");
+    const group: WorkbenchRelationGroup = {
+      id: "case:partial-source-segment",
+      groupType: "paired",
+      rawGroupType: "relation",
+      matchConfidence: "high",
+      reason: "existing_case_group",
+      rows: {
+        oa: [oa100, oa200],
+        bank: [],
+        invoice: [
+          buildAttachmentInvoiceRow("invoice-100-a", oa100.id, "50.00"),
+          buildAttachmentInvoiceRow("invoice-100-b", oa100.id, "50.00"),
+        ],
+      },
+    };
+
+    expect(buildWorkbenchGroupDisplaySegments(group)).toBeNull();
   });
 
   test("dedupes repeated paginated groups for paired and unpaired zones", () => {

@@ -589,7 +589,18 @@
 - 未测风险：未在本地执行真实生产 worker 写入重建；发布后需由常驻 `workbench-matching` worker 按新规则版本把 completed scope 重投 dirty，再刷新 Workbench active generation。不得手工改 decision 表替代重建。
 - 后续事项：如未来导入层新增 `sales_invoice`、`purchase_invoice` 之外的新枚举，必须先扩展统一 helper 和测试；未知枚举保持 fail closed。
 
+## 2026-08-03 - 三栏完整高度与严格一一对应
+
+- 目标：关联组内 OA、银行流水、发票栏分别占满完整高度；只有权威来源形成完整唯一双射的栏才共享行轨。截图中的 `4 OA / 2 流水 / 1 发票` 分别按 4/2/1 条记录等分整栏，不再把两条流水固定在前两个 OA 槽位。
+- 根因：`isSourceSegmentedPane` 只要任一 segment 有记录就把整栏切成 OA 行轨，部分映射会留下空槽；多记录样式同时使用 `flex: 0 0 auto`，即使回到 group-level 也不会填满剩余高度。
+- 影响范围：仅 `groupDisplayModel -> RelationGroupGrid -> RelationGroupCell` 既有前端展示边界和局部 sheet CSS；不改变 API、relation、read model、权限、选择、确认/撤回、数据库或 worker I/O。
+- 关键决策：完整一一对应必须让当前栏每条记录和每个目标各出现一次；部分、重复、一对多、多对一和未链接来源全部 group-level。删除前端金额相等/2～6 条金额组合 fallback 及其组合枚举；后端正式 row alignment metadata 保留。多项目报销继续显示虚拟子项，但部分附件发票不进入少数子项槽位。
+- 性能：布局判断使用已加载 DTO 的 Map/Set 线性扫描，不增加请求、React state/effect、DOM 测量、依赖或 DOM 节点；删除旧金额组合搜索热点。
+- 测试覆盖：`groupDisplayModel.test.ts` 覆盖完整双射、部分/重复来源和金额-only；`RelationGroupGrid.test.tsx` 覆盖 4/2/1、完整 2/2、部分附件、费用子项、单条拉伸、多条等分与旧交互回归；`workbench-relation-fanout.spec.ts` 用 Chromium 几何断言保护发票栏和单张发票实际占满组高。
+
 ## 2026-06-23 - 多 OA 大组缺 source 时按唯一金额分段展示
+
+> 已由 2026-08-03“三栏完整高度与严格一一对应”取代：前端金额 fallback 及其组合枚举已删除。当前视觉同行只消费正式来源 metadata，并要求完整唯一覆盖；本节仅保留历史背景。
 
 - 目标：修复关联台已配对大组内缺少 `sourceOaId` 的 OA、银行流水和发票没有同排的问题；例如 29350 OA 应与 29350 流水/发票同行，88050 OA 应与两条合计 88050 的流水同行。
 - 真实原因：`buildWorkbenchGroupDisplaySegments` 只在银行/发票 row 带有效 `sourceOaId` 且可归一到组内 OA 时才生成横向分段；截图中的相关银行流水没有 source link，因此函数返回 `null`，组件退回整组顺序渲染。

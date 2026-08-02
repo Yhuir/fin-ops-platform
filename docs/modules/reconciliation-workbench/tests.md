@@ -19,7 +19,7 @@
 ## 2026-07-28 日常报销付款明细复合行
 
 - Backend/API：`tests/test_workbench_query_service.py` 保护父 OA 行只发布精简稳定付款明细字段，附件发票继续携带显式 `source_expense_item_id`；不新增 relation member 或独立配对对象。
-- Frontend：`web/src/test/WorkbenchApi.test.ts` 保护 item/source ID DTO；`WorkbenchColumns.test.tsx` 保护申请类型移入申请人栏并清理项目栏 process/evidence chip；`RelationGroupGrid.test.tsx` 保护“多个项目 · N + 父 OA 金额”、逐项项目/金额、附件发票同带对齐，以及点击子项仍只选择父 OA。
+- Frontend：`web/src/test/WorkbenchApi.test.ts` 保护 item/source ID DTO；`WorkbenchColumns.test.tsx` 保护申请类型移入申请人栏并清理项目栏 process/evidence chip；`RelationGroupGrid.test.tsx` 保护“多个项目 · N + 父 OA 金额”、逐项项目/金额、完整一一对应才同行、部分附件发票独立占满发票栏，以及点击子项仍只选择父 OA。
 - Read model：Workbench schema 升级为 v8，使旧 generation/page cache 失效并经现有 exact/all freshness gateway 重建；没有新增表、worker、cache 或第二 read model。
 
 ## 2026-07-26 relation preview 真实 DTO、并发反馈与安全错误回归
@@ -186,7 +186,15 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_w
 - `tests/test_workbench_auth_context_idempotency.py` 保护 confirm 在同一 UoW 内重读 selected canonical rows、拒绝漂移/多 batch，并把合法 ETC summary 的 external batch identity 持久化。
 - `tests/test_workbench_page_audit.py` 保护合法 synthetic ETC summary 只有在 canonical batch + exact deterministic row id 双重证明时通过；任意 `etc-summary-*` 不得绕过 canonical integrity。
 - `tests/test_workbench_query_facade.py`、`tests/test_workbench_sql_runtime.py` 与 `web/src/test/WorkbenchSelection.test.tsx` 保护 refreshing 时继续显示上一版 active generation、禁止 Redis payload 写入，并阻止迟到 non-fresh 响应覆盖操作投影。
-- `web/src/test/WorkbenchApi.test.ts`、`web/src/test/RelationGroupGrid.test.tsx` 保护发票只按 exact `source_expense_item_id` 对齐，输入乱序不影响付款项顺序，费用内容/说明在申请事由列显示，点击子项仍选择父 OA。
+- `web/src/test/WorkbenchApi.test.ts`、`web/src/test/RelationGroupGrid.test.tsx` 保护发票只按 exact `source_expense_item_id` 参与完整一一对应；部分子项附件留在 group-level 并等分完整发票栏。输入乱序不影响付款项顺序，费用内容/说明在申请事由列显示，点击子项仍选择父 OA。
+
+## 2026-08-03 三栏完整高度与严格一一对应回归
+
+- Business/display core：`groupDisplayModel.test.ts` 证明只有权威来源对全部目标形成完整唯一双射时才返回共享 segments；部分来源、重复来源、同金额和金额合计不再建立视觉同行。
+- Frontend interaction：`RelationGroupGrid.test.tsx` 固定 `4 OA / 2 流水 / 1 发票` 为普通 group-level 布局，三栏分别拥有 4/2/1 条 row，单条拉伸、多条使用 `flex: 1 1 0` 等分完整栏高；完整 `2 OA / 2 流水` 仍逐行对齐。
+- Browser E2E：`workbench-relation-fanout.spec.ts` 用 Chromium `boundingBox()` 证明部分费用项发票栏与整个关联组等高、单张发票与该栏等高，同时项目子项仍可选择父 OA。
+- Expense-item regression：多项目报销的 OA 摘要、费用内容、选择父 OA 和项目顺序不变；部分附件发票不再占用少数子项槽位，而是独立等分完整发票栏。
+- Performance：测试和 whole-repo scan 保护旧 `assignRowsByAmountFallback` / `findUniqueAmountSubset` 组合枚举不存在；实现只使用已有 DTO 的 Map/Set 线性判断，没有新请求、state/effect、DOM 测量、依赖、read model 或 worker。
 - Workbench month/all schema 升至 v9，旧 v8 generation 与 page cache 必须返回 builder mismatch 并经既有 freshness gateway 重建。
 
 ## 2026-07-22 Workbench v6 与历史修复回归

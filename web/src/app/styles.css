@@ -13858,7 +13858,13 @@ body.column-layout-dragging {
   width: 100%;
 }
 
+.candidate-group-cell-sheet-multi {
+  display: flex;
+  align-items: stretch;
+}
+
 .candidate-group-cell-sheet-multi .candidate-group-stack-sheet-multi {
+  flex: 1 1 auto;
   width: 100%;
 }
 
@@ -13874,7 +13880,7 @@ body.column-layout-dragging {
 }
 
 .record-card-sheet-row-split {
-  flex: 0 0 auto;
+  flex: 1 1 0;
 }
 
 .record-card:last-child .record-card-cell {

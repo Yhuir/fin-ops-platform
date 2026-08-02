@@ -126,9 +126,7 @@ export function buildWorkbenchGroupDisplaySegments(
 
   const oaRowsById = new Map(group.rows.oa.map((row) => [row.id, row]));
   const bankRowsBySourceOaId = new Map<string, WorkbenchRecord[]>();
-  const unlinkedBankRows: WorkbenchRecord[] = [];
   const invoicesBySourceOaId = new Map<string, WorkbenchRecord[]>();
-  const unlinkedInvoiceRows: WorkbenchRecord[] = [];
 
   group.rows.bank.forEach((bankRow) => {
     const sourceOaId = normalizeSourceOaId(bankRow.sourceOaId);
@@ -136,9 +134,7 @@ export function buildWorkbenchGroupDisplaySegments(
       const rows = bankRowsBySourceOaId.get(sourceOaId) ?? [];
       rows.push(bankRow);
       bankRowsBySourceOaId.set(sourceOaId, rows);
-      return;
     }
-    unlinkedBankRows.push(bankRow);
   });
 
   group.rows.invoice.forEach((invoiceRow) => {
@@ -147,19 +143,8 @@ export function buildWorkbenchGroupDisplaySegments(
       const rows = invoicesBySourceOaId.get(sourceOaId) ?? [];
       rows.push(invoiceRow);
       invoicesBySourceOaId.set(sourceOaId, rows);
-      return;
     }
-    unlinkedInvoiceRows.push(invoiceRow);
   });
-
-  const remainingUnlinkedBankRows = assignRowsByAmountFallback(group.rows.oa, unlinkedBankRows, bankRowsBySourceOaId);
-  const remainingUnlinkedInvoiceRows = assignRowsByAmountFallback(group.rows.oa, unlinkedInvoiceRows, invoicesBySourceOaId);
-
-  const hasSegmentedBankRows = Array.from(bankRowsBySourceOaId.values()).some((rows) => rows.length > 0);
-  const hasSegmentedInvoiceRows = Array.from(invoicesBySourceOaId.values()).some((rows) => rows.length > 0);
-  if (!hasSegmentedBankRows && !hasSegmentedInvoiceRows && !hasExpenseClaimItems) {
-    return null;
-  }
 
   const parentSegments = group.rows.oa.map((oaRow) => ({
     id: oaRow.id,
@@ -170,21 +155,51 @@ export function buildWorkbenchGroupDisplaySegments(
     },
   }));
 
-  const groupLevelBankRows = hasSegmentedBankRows ? remainingUnlinkedBankRows : [];
-  const groupLevelInvoiceRows = hasSegmentedInvoiceRows ? remainingUnlinkedInvoiceRows : [];
-  if (groupLevelBankRows.length > 0 || groupLevelInvoiceRows.length > 0) {
-    parentSegments.push({
-      id: "unlinked-source-rows",
-      rows: {
-        oa: [],
-        bank: groupLevelBankRows,
-        invoice: groupLevelInvoiceRows,
-      },
-    });
+  const segments = parentSegments.flatMap(expandExpenseClaimSegment);
+  if (segments.length < 2) {
+    return null;
+  }
+  if (
+    !hasExpenseClaimItems
+    && !workbenchPaneUsesDisplaySegments(group, "bank", segments)
+    && !workbenchPaneUsesDisplaySegments(group, "invoice", segments)
+  ) {
+    return null;
+  }
+  return segments;
+}
+
+export function workbenchPaneUsesDisplaySegments(
+  group: WorkbenchRelationGroup,
+  paneId: WorkbenchRecordType,
+  segments: WorkbenchGroupDisplaySegment[] | null,
+): boolean {
+  if (!segments || segments.length === 0) {
+    return false;
+  }
+  if (paneId === "oa") {
+    return true;
   }
 
-  const segments = parentSegments.flatMap(expandExpenseClaimSegment);
-  return segments.length > 1 ? segments : null;
+  const hasExpenseClaimItems = group.rows.oa.some(hasMultiProjectExpenseItems);
+  if (paneId === "bank" && hasExpenseClaimItems) {
+    return false;
+  }
+  const targetSegments = paneId === "invoice" && hasExpenseClaimItems
+    ? segments.filter((segment) => segment.rows.oa[0]?.displayRole !== "expense-claim-summary")
+    : segments;
+  const expectedRows = group.rows[paneId];
+  if (expectedRows.length === 0 || targetSegments.length !== expectedRows.length) {
+    return false;
+  }
+
+  const expectedRowIds = new Set(expectedRows.map((row) => row.id));
+  if (expectedRowIds.size !== expectedRows.length || targetSegments.some((segment) => segment.rows[paneId].length !== 1)) {
+    return false;
+  }
+  const segmentedRowIds = targetSegments.map((segment) => segment.rows[paneId][0]?.id);
+  return segmentedRowIds.every((rowId) => rowId !== undefined && expectedRowIds.has(rowId))
+    && new Set(segmentedRowIds).size === expectedRows.length;
 }
 
 function expandExpenseClaimSegment(segment: WorkbenchGroupDisplaySegment): WorkbenchGroupDisplaySegment[] {
@@ -263,106 +278,6 @@ function hasMultiProjectExpenseItems(row: WorkbenchRecord) {
       .filter((projectName) => projectName && projectName !== "--" && projectName !== "—"),
   );
   return projectNames.size > 1;
-}
-
-function assignRowsByAmountFallback(
-  oaRows: WorkbenchRecord[],
-  candidateRows: WorkbenchRecord[],
-  rowsByOaId: Map<string, WorkbenchRecord[]>,
-): WorkbenchRecord[] {
-  if (candidateRows.length === 0) {
-    return [];
-  }
-
-  let remainingRows = [...candidateRows];
-  const oaAmountById = new Map<string, bigint>();
-  const oaIdsByAmount = new Map<string, string[]>();
-
-  oaRows.forEach((oaRow) => {
-    const amount = parseAmountCents(oaRow.amount);
-    if (amount === null) {
-      return;
-    }
-    oaAmountById.set(oaRow.id, amount);
-    const amountKey = amount.toString();
-    const ids = oaIdsByAmount.get(amountKey) ?? [];
-    ids.push(oaRow.id);
-    oaIdsByAmount.set(amountKey, ids);
-  });
-
-  const exactAssignedRows = new Set<WorkbenchRecord>();
-  remainingRows.forEach((row) => {
-    const amount = parseAmountCents(row.amount);
-    if (amount === null) {
-      return;
-    }
-    const matchingOaIds = (oaIdsByAmount.get(amount.toString()) ?? []).filter((oaId) => !rowsByOaId.has(oaId));
-    if (matchingOaIds.length !== 1) {
-      return;
-    }
-    const oaId = matchingOaIds[0];
-    rowsByOaId.set(oaId, [row]);
-    exactAssignedRows.add(row);
-  });
-  remainingRows = remainingRows.filter((row) => !exactAssignedRows.has(row));
-
-  oaRows.forEach((oaRow) => {
-    if (rowsByOaId.has(oaRow.id)) {
-      return;
-    }
-    const targetAmount = oaAmountById.get(oaRow.id);
-    if (targetAmount === undefined) {
-      return;
-    }
-    const matchedRows = findUniqueAmountSubset(remainingRows, targetAmount);
-    if (!matchedRows) {
-      return;
-    }
-    const matchedRowSet = new Set(matchedRows);
-    rowsByOaId.set(oaRow.id, matchedRows);
-    remainingRows = remainingRows.filter((row) => !matchedRowSet.has(row));
-  });
-
-  return remainingRows;
-}
-
-function parseAmountCents(value: string): bigint | null {
-  const normalizedValue = value.trim().replace(/,/g, "");
-  const unsignedValue = normalizedValue.replace(/^[-+]/, "");
-  if (!/^\d+(?:\.\d{1,4})?$/.test(unsignedValue)) {
-    return null;
-  }
-  const [integerPart, decimalPart = ""] = unsignedValue.split(".");
-  const amount = BigInt(integerPart) * 100n + BigInt((decimalPart + "00").slice(0, 2));
-  return amount > 0n ? amount : null;
-}
-
-function findUniqueAmountSubset(rows: WorkbenchRecord[], targetAmount: bigint): WorkbenchRecord[] | null {
-  const rowsWithAmount = rows
-    .map((row) => ({ row, amount: parseAmountCents(row.amount) }))
-    .filter((item): item is { row: WorkbenchRecord; amount: bigint } => item.amount !== null);
-  const matches: WorkbenchRecord[][] = [];
-  const maxRowsPerAmountMatch = 6;
-
-  function search(startIndex: number, selectedRows: WorkbenchRecord[], selectedAmount: bigint): void {
-    if (matches.length > 1 || selectedRows.length >= maxRowsPerAmountMatch || selectedAmount >= targetAmount) {
-      if (selectedAmount === targetAmount && selectedRows.length > 1) {
-        matches.push([...selectedRows]);
-      }
-      return;
-    }
-
-    for (let index = startIndex; index < rowsWithAmount.length; index += 1) {
-      const item = rowsWithAmount[index];
-      search(index + 1, [...selectedRows, item.row], selectedAmount + item.amount);
-      if (matches.length > 1) {
-        return;
-      }
-    }
-  }
-
-  search(0, [], 0n);
-  return matches.length === 1 ? matches[0] : null;
 }
 
 export function mergeWorkbenchGroupsById(

@@ -51,6 +51,13 @@ canonical fact repositories
 - Worker：`backend/src/fin_ops_platform/services/workbench_matching_dirty_scope_worker.py`、`workbench_read_model_refresh.py`
 - 固定契约版本：`backend/src/fin_ops_platform/services/workbench_read_model_version.py`
 
+## 三栏纵向展示合同
+
+- OA、银行流水、发票栏默认各自跨越完整关联组高度；同栏有 `N` 条可见记录时由 CSS Flex 等分可用高度，单条记录占满整栏。
+- 只有已有 `sourceOaId` / `sourceExpenseItemId` 对当前可见目标形成完整、唯一、无缺口的一一对应时，该栏才与 OA 或费用子项共享行轨。部分来源、一对多、多对一、重复来源或未链接记录一律保持 group-level，不制造空白来源槽位。
+- 前端不再按金额相等或 2～6 条金额组合推断视觉对齐；正式 relation alignment metadata 仍由后端事实源提供。布局判断只消费已加载 DTO，是 `O(OA + bank + invoice)` 纯计算，不增加 HTTP、数据库、cache、worker、React state/effect 或 DOM 测量 I/O。
+- 多项目报销继续显示父 OA 摘要和费用子项；只有全部目标子项与发票形成完整一一对应时发票才按子项同行，部分附件发票独立占满发票栏。银行流水不进入虚拟费用子项槽位。
+
 ## 不变量
 
 - `paired = complete active relation members`。
