@@ -375,7 +375,7 @@ python -m fin_ops_platform.app.worker \
 
 - 本地重新构建 `web/dist`
 - 打包生产运行所需的 `backend + web/dist + scripts + deploy/oa`
-- 生成 `src/RELEASE.json`，记录 release 名称、Git commit、分支、`settings-access-control-v1` capability、0132 migration sha256 和 deploy-control sha256
+- 生成 `src/RELEASE.json`，记录 release 名称、Git commit、分支、`settings-access-control-v1` capability、0133 migration sha256 和 deploy-control sha256
 - 通过 `finops-prod` 免密 SSH 推送到：
   - `/opt/fin-ops/releases/<release-name>/src`
 - release 上传路径不自更新 `/usr/local/sbin`。deploy-control 变更必须使用下文 hash-pinned、同文件系统 temp、`mv -f` 原子 bootstrap；禁止旧 `self-update`，也禁止在 bootstrap 中触碰 runtime-worker helper
@@ -649,7 +649,7 @@ sudo /usr/local/sbin/finops-deploy-control candidate-status "$release" --json
 
 若 post-validation 失败，不能直接把 0600 backup 移回 live：把 backup `install` 到同目录 rollback temp，设为 `root:root 0755`，核验旧 approved hash 和 `bash -n` 后再 `mv -f` 原子恢复。整个 bootstrap 要记录 deploy-control before/after hash、runtime-worker helper hash、active release、service、DB/OA/ACL fingerprint 到 root-owned `/opt/fin-ops/evidence/<release>/settings-access-control-bootstrap.json` 并生成 sha256；任一非 helper 事实变化立即停止。
 
-`release-gate-activate` 先验证 approved preflight 与 candidate/active fingerprint 未漂移，并对当前旧进程执行 pre checkpoint。通过后以 root-owned before-image、同目录临时文件和 atomic `mv` 从 common/secrets env 只删除三项 retired admission key 与 legacy admin key，记录不含值的 before/after SHA-256 和 removed counts，再执行 strict env assertion 与 artifact-bound OA exact binding cleanup。环境清理或 OA cleanup 在进入 activation/maintenance 前失败时必须原子恢复 env 并 read-back；一旦开始 activation 则保留 clean env 用于 forward repair，禁止恢复不安全 admission。随后才停止 API 和上一版本 workers、执行 0132 和 validated CHECK、安装普通 runtime assets、发布候选并恢复服务。`0127_direct_canonical_page_runtime_retirement.sql` 只是 no-op 标记，不会改写 pending backlog、readiness 或回滚 projection 证据。不要手工创建业务表、
+`release-gate-activate` 先验证 approved preflight 与 candidate/active fingerprint 未漂移，并对当前旧进程执行 pre checkpoint。通过后以 root-owned before-image、同目录临时文件和 atomic `mv` 从 common/secrets env 只删除三项 retired admission key 与 legacy admin key，记录不含值的 before/after SHA-256 和 removed counts，再执行 strict env assertion 与 artifact-bound OA exact binding cleanup。环境清理或 OA cleanup 在进入 activation/maintenance 前失败时必须原子恢复 env 并 read-back；一旦开始 activation 则保留 clean env 用于 forward repair，禁止恢复不安全 admission。随后才停止 API 和上一版本 workers、执行 0133 和 validated CHECK、安装普通 runtime assets、发布候选并恢复服务。`0127_direct_canonical_page_runtime_retirement.sql` 只是 no-op 标记，不会改写 pending backlog、readiness 或回滚 projection 证据。不要手工创建业务表、
 不要用运行时账号代替 migrator 账号，也不要让旧 `/opt/fin-ops/fin-ops.env` 或 `/opt/fin-ops/current`
 参与 release 运行时。
 覆盖式 `legacy-current` 部署入口已经移除；`scripts/deploy-oa.sh` 只生成 versioned release payload，
