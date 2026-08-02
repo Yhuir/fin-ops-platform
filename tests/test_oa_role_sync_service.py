@@ -40,6 +40,29 @@ class OARoleSyncServiceTests(unittest.TestCase):
             ],
         )
 
+    def test_sync_access_control_preserves_canonical_spelling_and_rejects_case_collisions(self) -> None:
+        executor = RecordingExecutor()
+        service = OARoleSyncService(executor=executor)
+
+        service.sync_access_control(
+            {
+                "allowed_usernames": ["YNSYLP005", "Full.User"],
+                "readonly_export_usernames": [],
+                "admin_usernames": ["YNSYLP005"],
+                "full_access_usernames": ["Full.User"],
+            }
+        )
+
+        self.assertIn(OARoleAssignment(username="Full.User", tier="full_access"), executor.assignments or [])
+
+        with self.assertRaises(ValueError):
+            service.sync_access_control(
+                {
+                    "full_access_usernames": ["Full.User"],
+                    "readonly_export_usernames": ["full.user"],
+                }
+            )
+
     def test_mysql_executor_parses_bounded_network_timeouts(self) -> None:
         with patch.dict(
             "os.environ",

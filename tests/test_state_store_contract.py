@@ -6,6 +6,7 @@ import unittest
 
 from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 from fin_ops_platform.services.state_store import ApplicationStateStore
+from fin_ops_platform.services.state_store_protocol import settings_access_control_from_payload
 
 
 def unwrap_jsonb(value):
@@ -131,6 +132,36 @@ class ContractFakePostgresConnection:
 
 
 class StateStoreContractTests(unittest.TestCase):
+    def test_settings_access_control_uses_casefold_comparison_and_preserves_canonical_spelling(self) -> None:
+        normalized = settings_access_control_from_payload(
+            {
+                "allowed_usernames": ["YNSYLP005", "Full.User", "Read.User"],
+                "full_access_usernames": ["Full.User"],
+                "readonly_export_usernames": ["Read.User"],
+                "admin_usernames": ["YNSYLP005"],
+            }
+        )
+
+        self.assertEqual(normalized["full_access_usernames"], ["Full.User"])
+        self.assertEqual(normalized["readonly_export_usernames"], ["Read.User"])
+        self.assertEqual(normalized["allowed_usernames"], ["YNSYLP005", "Full.User", "Read.User"])
+
+    def test_settings_access_control_rejects_invalid_or_ambiguous_usernames(self) -> None:
+        invalid_payloads = (
+            {"full_access_usernames": [""]},
+            {"full_access_usernames": ["FULL\x00USER"]},
+            {"full_access_usernames": ["Full.User", "full.user"]},
+            {
+                "full_access_usernames": ["Full.User"],
+                "readonly_export_usernames": ["full.user"],
+            },
+            {"full_access_usernames": ["ynsylp005"]},
+        )
+
+        for payload in invalid_payloads:
+            with self.subTest(payload=payload), self.assertRaises(ValueError):
+                settings_access_control_from_payload(payload)
+
     def _with_stores(self):
         temp_dirs: list[TemporaryDirectory] = []
         try:

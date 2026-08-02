@@ -1404,6 +1404,26 @@ class AppSettingsServiceTests(unittest.TestCase):
             ],
         )
 
+    def test_access_control_rejects_case_collisions_before_oa_sync(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            sync_service = RecordingSyncService()
+            app._app_settings_service._oa_role_sync_service = sync_service
+
+            with self.assertRaises(AppSettingsValidationError):
+                app._app_settings_service.update_access_control(
+                    expected_version=1,
+                    accounts=[
+                        {"username": "Full.User", "access_tier": "full_access"},
+                        {"username": "full.user", "access_tier": "read_export_only"},
+                    ],
+                    actor_id="YNSYLP005",
+                    actor_name="admin",
+                    request_id="case-collision",
+                )
+
+        self.assertEqual(sync_service.calls, [])
+
     def test_generic_settings_save_preserves_dedicated_access_control(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
