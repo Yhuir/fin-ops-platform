@@ -631,8 +631,11 @@ def _source_entries_sha256(entries: list[tuple[Path, Path]]) -> str:
             payload = path.read_bytes()
         else:
             raise RuntimeError(f"unsupported release source entry: {path}")
+        mode = stat.S_IMODE(metadata.st_mode)
+        if kind == "directory":
+            mode &= 0o777
         header = (
-            f"{relative_path.as_posix()}\0{kind}\0{stat.S_IMODE(metadata.st_mode):04o}\0{len(payload)}\0"
+            f"{relative_path.as_posix()}\0{kind}\0{mode:04o}\0{len(payload)}\0"
         ).encode("utf-8")
         digest.update(header)
         digest.update(payload)

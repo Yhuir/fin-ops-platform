@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 import tarfile
@@ -132,6 +133,14 @@ class DeployOAScriptTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as extracted_dir:
             with tarfile.open(archive_path, "r:gz") as archive:
                 archive.extractall(extracted_dir, filter="data")
+            self.assertEqual(
+                metadata["settings_access_control"]["source_sha256"],
+                self.module._source_tree_sha256(Path(extracted_dir) / "src"),
+            )
+
+            for path in (Path(extracted_dir) / "src").rglob("*"):
+                if path.is_dir():
+                    path.chmod(path.stat().st_mode | stat.S_ISGID)
             self.assertEqual(
                 metadata["settings_access_control"]["source_sha256"],
                 self.module._source_tree_sha256(Path(extracted_dir) / "src"),
@@ -284,6 +293,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('metadata.get("git_status_porcelain") == ""', script)
         self.assertIn('contract.get("source_sha256") == actual_source', script)
         self.assertIn('"source_sha256": actual_source', script)
+        self.assertIn('if kind == "directory":\n            mode &= 0o777', script)
 
     def test_production_token_wrapper_rejects_same_admin_and_bearer_token(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
