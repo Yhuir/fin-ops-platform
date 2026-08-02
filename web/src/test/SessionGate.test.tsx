@@ -29,12 +29,28 @@ describe("OA session gate", () => {
 
   test("renders a forbidden state when the current OA account is not allowed", async () => {
     window.history.pushState({}, "", "/");
-    installMockApiFetch({ sessionMode: "forbidden" });
+    const fetchMock = installMockApiFetch({
+      sessionMode: "forbidden",
+      sessionUsername: "YNSYLP006",
+    });
 
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: "无权访问财务运营平台" })).toBeInTheDocument();
     expect(screen.getByText("当前 OA 账号未开通访问权限，请联系管理员处理。")).toBeInTheDocument();
+    expect(screen.queryByTestId("settings-page")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /放大 未配对/ })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).startsWith("/api/workbench?"))).toBe(false);
+
+    const response = await fetch("/api/session/me");
+    const session = await response.json() as Record<string, unknown>;
+    expect(session).toMatchObject({
+      roles: ["finance", "business", "finops_full_access"],
+      permissions: ["finops:app:view"],
+      allowed: false,
+      access_tier: "denied",
+      can_access_app: false,
+    });
   });
 
   test("renders an expired-session state when the OA token is invalid", async () => {

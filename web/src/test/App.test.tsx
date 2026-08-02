@@ -33,6 +33,21 @@ function stubShellCompactMode(matches: boolean) {
 }
 
 describe("Finance operations shell", () => {
+  test("stops a denied direct /fin-ops/ visit before the business tree mounts", async () => {
+    window.history.pushState({}, "", "/fin-ops/");
+    const fetchMock = installMockApiFetch({
+      sessionMode: "forbidden",
+      sessionUsername: "YNSYLP006",
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "无权访问财务运营平台" })).toBeInTheDocument();
+    expect(screen.queryByTestId("settings-page")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /放大 未配对/ })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).startsWith("/api/workbench?"))).toBe(false);
+  });
+
   test("orders finance business above system operations in the sidebar", () => {
     expect(sidebarGroups.map((group) => group.title)).toEqual(["财务业务", "系统操作"]);
   });

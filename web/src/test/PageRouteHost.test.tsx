@@ -163,6 +163,25 @@ describe("PageRouteHost", () => {
     const systemItems = sidebarGroups.find((group) => group.title === "系统操作")?.items ?? [];
 
     expect(appPageRoutes).toHaveLength(17);
+    expect(appPageRoutes.map((route) => route.path)).toEqual([
+      "/",
+      "/cost-statistics",
+      "/bank-details",
+      "/oa-pending-payments",
+      "/bank-flow-rule-batches",
+      "/batch-accounting",
+      "/turnover-ledger",
+      "/etc-tickets",
+      "/tax-offset",
+      "/pending-invoices",
+      "/input-invoice-usage",
+      "/output-invoice-collections",
+      "/settings",
+      "/operations/app-health",
+      "/imports/bank-transactions",
+      "/imports/invoices",
+      "/imports/etc-invoices",
+    ]);
     expect(financeItems).toHaveLength(12);
     expect(systemItems).toHaveLength(5);
     expect(new Set(appPageRoutes.map((route) => route.pageKey))).toHaveLength(appPageRoutes.length);

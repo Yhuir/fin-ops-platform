@@ -61,6 +61,38 @@ describe("session api", () => {
     expect(payload.canAdminAccess).toBe(false);
   });
 
+  test("keeps OA roles and permission informational when the canonical session is denied", async () => {
+    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      user: {
+        user_id: "106",
+        username: "YNSYLP006",
+        display_name: "权限攻击样例",
+      },
+      roles: ["finance", "business", "finops_full_access"],
+      permissions: ["finops:app:view"],
+      allowed: false,
+      access_tier: "denied",
+      can_access_app: false,
+      can_mutate_data: false,
+      can_admin_access: false,
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    })) as typeof fetch;
+
+    const payload = await fetchSessionMe();
+
+    expect(payload).toMatchObject({
+      roles: ["finance", "business", "finops_full_access"],
+      permissions: ["finops:app:view"],
+      allowed: false,
+      accessTier: "denied",
+      canAccessApp: false,
+      canMutateData: false,
+      canAdminAccess: false,
+    });
+  });
+
   test("fails the OA session bootstrap when the session endpoint never returns", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn((_url: RequestInfo | URL, init?: RequestInit) => new Promise((_resolve, reject) => {
