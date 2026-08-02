@@ -1039,6 +1039,34 @@ test.describe("permissions browser role matrix", () => {
     const readonlySettingsTree = page.getByRole("tree", { name: "设置分类" });
     await expect(readonlySettingsTree.getByRole("treeitem", { name: /访问账户/ })).toHaveCount(0);
     await expect(readonlySettingsTree.getByRole("treeitem", { name: /数据重置/ })).toHaveCount(0);
+
+    api.startSession("YNSYLP005");
+    const restoreEvidence = await page.evaluate(async () => {
+      const response = await fetch("/api/workbench/settings/access-control", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expected_version: 2, accounts: [] }),
+      });
+      return { status: response.status, body: await response.json() };
+    });
+    expect(restoreEvidence).toEqual({
+      status: 200,
+      body: {
+        version: 3,
+        administrator: {
+          username: "YNSYLP005",
+          access_tier: "admin",
+          protected: true,
+        },
+        accounts: [],
+      },
+    });
+    expect(api.count("PUT /api/workbench/settings/access-control")).toBe(2);
     expect(browserErrors).toEqual([]);
+
+    api.startSession("READONLY_E2E_ADMIN");
+    await page.goto("/settings");
+    await expect(page.getByRole("heading", { name: "无权访问财务运营平台" })).toBeVisible();
+    await expect(page.getByTestId("settings-page")).toHaveCount(0);
   });
 });

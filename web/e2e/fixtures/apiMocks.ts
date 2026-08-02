@@ -7973,6 +7973,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
   let turnoverSelectedTagCodes = ["external_turnover_payment", "external_turnover_collection"];
   let turnoverTagSelectionVersion = 1;
   let settingsCompletedProjectIds: string[] = [];
+  let activeSessionUsername = options.sessionUsername
+    ?? (options.sessionMode === "admin" ? "YNSYLP005" : "E2EUSER001");
   let settingsAccessControl = {
     version: 1,
     administrator: {
@@ -7980,13 +7982,18 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       access_tier: "admin" as const,
       protected: true as const,
     },
-    accounts: [] as Array<{
+    accounts: (
+      options.sessionMode === "full_access" || options.sessionMode === "read_export_only"
+        ? [{
+            username: activeSessionUsername,
+            access_tier: options.sessionMode,
+          }]
+        : []
+    ) as Array<{
       username: string;
       access_tier: "full_access" | "read_export_only";
     }>,
   };
-  let activeSessionUsername = options.sessionUsername
-    ?? (options.sessionMode === "admin" ? "YNSYLP005" : "E2EUSER001");
   const configuredSessionTier = (): AccessTier => {
     if (activeSessionUsername === "YNSYLP005") {
       return "admin";
@@ -7995,11 +8002,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     if (configured) {
       return configured.access_tier;
     }
-    return options.sessionMode === "read_export_only"
-      ? "read_export_only"
-      : options.sessionMode === "forbidden"
-        ? "denied"
-        : "full_access";
+    return "denied";
   };
   let settingsDataResetJob: {
     action: SettingsDataResetAction;
@@ -8028,6 +8031,10 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         return json(route, { error: "session_error", message: "会话校验失败，请稍后重试。" }, 503);
       }
       return json(route, sessionPayload(configuredSessionTier(), activeSessionUsername));
+    }
+
+    if (configuredSessionTier() === "denied") {
+      return json(route, { error: "forbidden", message: "当前账号无权访问财务运营平台。" }, 403);
     }
 
     if (path === "/api/background-jobs/active") {
