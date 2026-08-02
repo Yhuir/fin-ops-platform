@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 13-06-PLAN.md
-last_updated: "2026-08-02T06:24:59.816Z"
+stopped_at: Completed 13-07-PLAN.md
+last_updated: "2026-08-02T06:49:11.343Z"
 last_activity: 2026-08-02 -- Phase 13 execution started
 progress:
   total_phases: 38
   completed_phases: 11
   total_plans: 104
-  completed_plans: 67
+  completed_plans: 68
   percent: 29
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 ## Current Position
 
 Phase: 13 (settings-improvements) — EXECUTING
-Plan: 7 of 15
+Plan: 8 of 15
 Status: Ready to execute
 Last activity: 2026-08-02 -- Phase 13 execution started
 
@@ -54,6 +54,7 @@ Progress: [██░░░░░░░░] in progress
 | Phase 37 P01 | 2h | 4 tasks | 24 files |
 | Phase 38 P01 | 1h | 4 tasks | 21 files |
 | Phase 13 P06 | 2 min | 2 tasks | 1 files |
+| Phase 13 P07 | 19min | 2 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -161,6 +162,9 @@ Progress: [██░░░░░░░░] in progress
 - [Phase 36]: Keep tax certified results as an accessible complementary rail with transform-opacity motion and inert collapse. — It is supporting persistent content, not a focus-trapped modal operation.
 - [Phase 36]: Migrate OA and bank-flow presentation shells without changing business I/O or module boundaries. — The requested motion does not require API, persistence, permission, worker, or read-model changes.
 - [Phase 13]: 用户名比较键锁定为 casefold-preserve-canonical；canonical spelling 仅由 sys_user.user_name 拥有。 — 目标 OA 脱敏只读 artifact 的机械决策结果唯一且非 BLOCK。
+- [Phase 13]: Username equality and deduplication use one casefold comparison key while OA canonical spelling is preserved. — The 13-06 production contract locked casefold-preserve-canonical and one shared owner.
+- [Phase 13]: Only exact YNSYLP005 admin and canonical Settings ACL full/read memberships grant APP access. — OA roles, permissions, and environment lists are informational and cannot grant APP authority.
+- [Phase 13]: Provider absence, malformed payload, or provider failure denies every non-admin identity. — Authorization fails closed and warning logs use fixed secret-safe text.
 
 ### Roadmap Evolution
 
@@ -239,6 +243,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-02T06:24:59.807Z
-Stopped at: Completed 13-06-PLAN.md
+Last session: 2026-08-02T06:49:11.334Z
+Stopped at: Completed 13-07-PLAN.md
 Resume file: None
