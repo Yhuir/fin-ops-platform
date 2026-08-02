@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 13-09-PLAN.md
-last_updated: "2026-08-02T08:01:30.169Z"
+stopped_at: Completed 13-11-PLAN.md
+last_updated: "2026-08-02T08:25:21.258Z"
 last_activity: 2026-08-02 -- Phase 13 execution started
 progress:
   total_phases: 38
   completed_phases: 11
   total_plans: 104
-  completed_plans: 71
+  completed_plans: 72
   percent: 29
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 ## Current Position
 
 Phase: 13 (settings-improvements) — EXECUTING
-Plan: 11 of 15
+Plan: 12 of 15
 Status: Ready to execute
 Last activity: 2026-08-02 -- Phase 13 execution started
 
@@ -58,6 +58,7 @@ Progress: [██░░░░░░░░] in progress
 | Phase 13 P08 | 8min | 2 tasks | 6 files |
 | Phase 13 P10 | 18min | 3 tasks | 9 files |
 | Phase 13 P09 | 10min | 2 tasks | 8 files |
+| Phase 13 P11 | 20min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -177,6 +178,8 @@ Progress: [██░░░░░░░░] in progress
 - [Phase 13]: YNSYLP006 attack fixtures retain OA business and dedicated roles plus finops:app:view while canonical ACL absence still yields denied. — Negative tests must preserve hostile identity evidence instead of stripping it.
 - [Phase 13]: test_permissions_write_entry_inventory.py is the only authorization whole-repo scanner. — One explicit allowlist prevents duplicated scanners and hidden retired authority.
 - [Phase 13]: Phase 13-09 adds no production authorization or runtime path. — Plans 07, 08 and 10 already supply the behavior; this plan owns regression and inventory only.
+- [Phase 13]: OA roles 与 permissions 只作为信息性证据；frontend fixture 仅使用 canonical allowed/access_tier/capabilities。 — 避免 permission marker 在前端或测试中制造授权假绿。
+- [Phase 13]: Deterministic E2E session tier 由同一 Settings ACL state 投影，未配置非管理员账号一律 denied。 — 保持 Settings 为唯一 ACL UI，并验证恢复与撤权即时生效。
 
 ### Roadmap Evolution
 
@@ -255,6 +258,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-02T08:01:30.160Z
-Stopped at: Completed 13-09-PLAN.md
+Last session: 2026-08-02T08:25:21.249Z
+Stopped at: Completed 13-11-PLAN.md
 Resume file: None
