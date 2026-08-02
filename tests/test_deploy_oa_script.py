@@ -21,6 +21,7 @@ ENSURE_WORKERS_SCRIPT_PATH = (
 DEPLOY_CONTROL_SCRIPT_PATH = (
     Path(__file__).resolve().parents[1] / "deploy" / "oa" / "bin" / "finops-deploy-control.sh"
 )
+OA_SQL_ROOT = Path(__file__).resolve().parents[1] / "deploy" / "oa"
 
 
 def load_deploy_module():
@@ -618,6 +619,57 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertNotIn("/root/fin_ops_stage23_postgres_runtime.env", script)
         self.assertNotIn("FIN_OPS_POSTGRES_DATABASE_URL=", script)
         self.assertNotIn("--worker-kind \\${FIN_OPS_WORKER_KIND}", script)
+
+    def test_oa_menu_sql_refuses_duplicate_fixed_permission_without_guessing_latest(self) -> None:
+        script = (OA_SQL_ROOT / "fin_ops_menu.mysql.sql").read_text(encoding="utf-8")
+
+        self.assertIn("SET @finops_menu_perms = 'finops:app:view'", script)
+        self.assertIn("SET @existing_finops_menu_count", script)
+        self.assertIn("@existing_finops_menu_count = 1", script)
+        self.assertNotIn("ORDER BY menu_id DESC\n  LIMIT 1", script)
+
+    def test_role_binding_sql_is_exact_artifact_bound_and_reversible(self) -> None:
+        script = (OA_SQL_ROOT / "fin_ops_role_binding.mysql.sql").read_text(encoding="utf-8")
+        normalized = " ".join(script.lower().split())
+
+        for contract in (
+            "@finops_operation",
+            "@approved_target_hashes_csv",
+            "@approved_target_count",
+            "@approved_before_sha256",
+            "@approved_after_sha256",
+            "@current_before_sha256",
+            "@current_after_sha256",
+            "@cleanup_readback_ok",
+            "@rollback_readback_ok",
+        ):
+            self.assertIn(contract, script)
+        self.assertIn("CREATE TEMPORARY TABLE finops_exact_binding_targets", script)
+        self.assertIn("FIND_IN_SET", script)
+        self.assertIn("DELETE rm FROM sys_role_menu rm", script)
+        self.assertIn("JOIN finops_exact_binding_targets target", script)
+        self.assertIn("INSERT INTO sys_role_menu (role_id, menu_id)", script)
+        self.assertIn("SELECT target.role_id, target.menu_id", script)
+        self.assertIn("START TRANSACTION", script)
+        self.assertIn("ROLLBACK", script)
+        self.assertNotRegex(normalized, r"delete from sys_(role|menu|user_role)\b")
+        self.assertNotRegex(normalized, r"delete (?:rm )?from sys_role_menu where menu_id\s*=\s*@finops_menu_id")
+
+    def test_role_binding_sql_guards_non_targets_and_user_sync_stays_member_scoped(self) -> None:
+        binding = (OA_SQL_ROOT / "fin_ops_role_binding.mysql.sql").read_text(encoding="utf-8")
+        user_sync = (OA_SQL_ROOT / "fin_ops_user_role_sync.mysql.sql").read_text(encoding="utf-8")
+
+        self.assertIn("@non_target_before_sha256", binding)
+        self.assertIn("@non_target_after_sha256", binding)
+        self.assertIn("@non_target_before_sha256 = @non_target_after_sha256", binding)
+        self.assertNotIn("DELETE FROM sys_role", binding)
+        self.assertNotIn("DELETE FROM sys_user_role", binding)
+        self.assertNotIn("UPDATE sys_menu", binding)
+        self.assertIn("DELETE FROM sys_user_role", user_sync)
+        self.assertNotIn("DELETE FROM sys_role_menu", user_sync)
+        self.assertIn("finops_read_export", user_sync)
+        self.assertIn("finops_full_access", user_sync)
+        self.assertIn("finops_admin", user_sync)
 
     def test_release_gate_restores_stable_helpers_when_precheck_fails(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
