@@ -21,6 +21,7 @@ ENSURE_WORKERS_SCRIPT_PATH = (
 DEPLOY_CONTROL_SCRIPT_PATH = (
     Path(__file__).resolve().parents[1] / "deploy" / "oa" / "bin" / "finops-deploy-control.sh"
 )
+TOKEN_WRAPPER_PATH = Path(__file__).resolve().parents[1] / "scripts" / "with-production-admin-token.sh"
 OA_SQL_ROOT = Path(__file__).resolve().parents[1] / "deploy" / "oa"
 
 
@@ -127,6 +128,14 @@ class DeployOAScriptTest(unittest.TestCase):
         )
         self.assertRegex(metadata["settings_access_control"]["migration_sha256"], r"^[0-9a-f]{64}$")
         self.assertRegex(metadata["settings_access_control"]["deploy_control_sha256"], r"^[0-9a-f]{64}$")
+        self.assertRegex(metadata["settings_access_control"]["source_sha256"], r"^[0-9a-f]{64}$")
+        with tempfile.TemporaryDirectory() as extracted_dir:
+            with tarfile.open(archive_path, "r:gz") as archive:
+                archive.extractall(extracted_dir, filter="data")
+            self.assertEqual(
+                metadata["settings_access_control"]["source_sha256"],
+                self.module._source_tree_sha256(Path(extracted_dir) / "src"),
+            )
 
     def test_release_remote_script_uses_versioned_release_and_deploy_control(self) -> None:
         config = self._deployment_config(Path("/Users/yu/Desktop/fin-ops-platform"))
@@ -245,7 +254,17 @@ class DeployOAScriptTest(unittest.TestCase):
 
     def test_activate_existing_rejects_upload_and_build_options(self) -> None:
         parser = self.module.build_parser()
-        for option in ("--no-activate", "--replace-release", "--skip-build", "--allow-dirty"):
+        for option in (
+            "--no-activate",
+            "--replace-release",
+            "--skip-build",
+            "--allow-dirty",
+            "--domain=example.invalid",
+            "--frontend-base-path=/other/",
+            "--remote-frontend-dir=/tmp/dist",
+            "--remote-releases-dir=/tmp/releases",
+            "--runtime-worker-ensure-path=/tmp/ensure-workers",
+        ):
             with self.subTest(option=option), self.assertRaisesRegex(ValueError, "cannot be combined"):
                 self.module.build_config(
                     parser.parse_args(
@@ -258,6 +277,43 @@ class DeployOAScriptTest(unittest.TestCase):
                 parser.parse_args(["--activate-existing"]),
                 root_dir=Path("/Users/yu/Desktop/fin-ops-platform"),
             )
+
+    def test_candidate_status_requires_clean_exact_uploaded_source_fingerprint(self) -> None:
+        script = DEPLOY_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
+
+        self.assertIn('metadata.get("git_status_porcelain") == ""', script)
+        self.assertIn('contract.get("source_sha256") == actual_source', script)
+        self.assertIn('"source_sha256": actual_source', script)
+
+    def test_production_token_wrapper_rejects_same_admin_and_bearer_token(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            secret_file = Path(temp_dir) / "admin-token.env"
+            secret_file.write_text(
+                "FIN_OPS_HTTP_SLO_ADMIN_TOKEN=same-token\n"
+                "FIN_OPS_E2E_ADMIN_TOKEN=same-token\n"
+                "FIN_OPS_HTTP_SLO_BEARER_TOKEN=same-token\n",
+                encoding="utf-8",
+            )
+            secret_file.chmod(0o600)
+            env = dict(os.environ)
+            env["FIN_OPS_LOCAL_ADMIN_TOKEN_ENV"] = str(secret_file)
+            for name in (
+                "FIN_OPS_HTTP_SLO_ADMIN_TOKEN",
+                "FIN_OPS_E2E_ADMIN_TOKEN",
+                "FIN_OPS_HTTP_SLO_BEARER_TOKEN",
+            ):
+                env.pop(name, None)
+
+            result = subprocess.run(
+                [str(TOKEN_WRAPPER_PATH), "--require-bearer", "true"],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("must be distinct", result.stderr)
 
     def test_release_gate_input_requires_local_admin_token(self) -> None:
         with patch.dict(
