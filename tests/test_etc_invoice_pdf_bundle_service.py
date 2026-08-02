@@ -13,7 +13,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 import fitz
 
-from tests.app_test_support import build_local_state_application
+from tests.app_test_support import build_local_state_application, configure_access_control
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.etc_invoice_pdf_bundle_service import (
     EtcInvoicePdfBundleError,
@@ -189,13 +189,14 @@ class EtcInvoicePdfBundleApiTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             app = build_local_state_application(data_dir=Path(temp_dir))
             try:
+                configure_access_control(app, full_access=["NORMAL"])
                 app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
                     user_id=f"{str(token).split('-')[0]}-id",
                     username="YNSYLP005" if token == "admin-token" else "NORMAL",
                     nickname="User",
                     display_name="User",
                     dept_id="D99",
-                    permissions=[app._access_control_service.required_permission],
+                    permissions=[],
                 )
                 batch = app._etc_service.create_business_batch(task_id="ETC-TASK-REPAIR", title="历史高速费")
                 invoice_number = "26537911970300092160"

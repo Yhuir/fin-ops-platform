@@ -8,7 +8,11 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from tests.app_test_support import build_local_state_application, install_durable_import_queue
+from tests.app_test_support import (
+    build_local_state_application,
+    configure_access_control,
+    install_durable_import_queue,
+)
 from fin_ops_platform.services.background_job_service import BackgroundJobService
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.runtime_worker_handlers import SettingsDataResetRuntimeFactory
@@ -91,6 +95,7 @@ class SettingsDataResetJobTests(unittest.TestCase):
         with patch.dict(os.environ, {"FIN_OPS_TEST_DEFAULT_AUTH": "0"}), tempfile.TemporaryDirectory() as temp_dir:
             app = build_local_state_application(data_dir=Path(temp_dir))
             queue = install_durable_import_queue(app)
+            configure_access_control(app, full_access=["FULL001"])
             app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
                 user_id="finance-id",
                 username="FULL001",

@@ -23,7 +23,10 @@ from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchP
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from openpyxl import load_workbook
 
-from tests.app_test_support import build_local_state_application as build_application
+from tests.app_test_support import (
+    build_local_state_application as build_application,
+    configure_access_control,
+)
 from tests.test_pending_invoice_service import FakeWorkbenchRelationFacade
 
 
@@ -656,6 +659,7 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
     def test_oa_reverse_full_flow_uses_admin_saved_target_applicant_credential(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            configure_access_control(app, full_access=["FULL001"])
             self._install_identity_resolver(app)
             client = FakeOaDraftClient()
             login_client = RecordingOaLoginClient()

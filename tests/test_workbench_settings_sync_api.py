@@ -81,6 +81,7 @@ class WorkbenchSettingsSyncApiTests(unittest.TestCase):
     def test_only_protected_admin_can_use_versioned_access_control_api(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            configure_access_control(app, full_access=["FULL001"])
             identities = {
                 "admin": OAUserIdentity(
                     user_id="admin-id",
@@ -118,8 +119,8 @@ class WorkbenchSettingsSyncApiTests(unittest.TestCase):
                 "/api/workbench/settings/access-control",
                 body=json.dumps(
                     {
-                        "expected_version": 1,
-                        "accounts": [{"username": "FULL001", "access_tier": "full_access"}],
+                        "expected_version": 2,
+                        "accounts": [],
                     }
                 ),
                 headers={"Authorization": "Bearer admin", "X-Request-ID": "spoofed-client-id"},
@@ -128,7 +129,7 @@ class WorkbenchSettingsSyncApiTests(unittest.TestCase):
             stale = app.handle_request(
                 "PUT",
                 "/api/workbench/settings/access-control",
-                body=json.dumps({"expected_version": 1, "accounts": []}),
+                body=json.dumps({"expected_version": 2, "accounts": []}),
                 headers={"Authorization": "Bearer admin"},
             )
             generic_payload = json.loads(app.handle_request("GET", "/api/workbench/settings").body)
@@ -140,9 +141,9 @@ class WorkbenchSettingsSyncApiTests(unittest.TestCase):
         self.assertEqual(json.loads(attack.body)["error"], "access_control_write_forbidden")
         self.assertEqual(forbidden.status_code, 403)
         self.assertEqual(updated.status_code, 200)
-        self.assertEqual(json.loads(updated.body)["version"], 2)
+        self.assertEqual(json.loads(updated.body)["version"], 3)
         self.assertEqual(stale.status_code, 409)
-        self.assertEqual(json.loads(stale.body)["current_version"], 2)
+        self.assertEqual(json.loads(stale.body)["current_version"], 3)
         self.assertNotIn("access_control", generic_payload)
         self.assertEqual(audit_events[-1]["request_id"], "server-request-id")
         self.assertNotEqual(audit_events[-1]["request_id"], "spoofed-client-id")

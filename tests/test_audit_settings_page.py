@@ -62,7 +62,7 @@ class SettingsPageAuditTests(unittest.TestCase):
     def test_non_normalized_settings_are_blocking(self) -> None:
         connection = FakeConnection()
         payload = connection.settings[0]["settings_payload"]
-        payload["allowed_usernames"] = ["duplicate", "duplicate"]
+        payload["oa_retention"] = {"cutoff_date": "not-a-date"}
         connection.settings[0]["raw_payload"] = {"normalized_payload": dict(payload)}
 
         report = settings_page_audit.audit_settings_page(connection)

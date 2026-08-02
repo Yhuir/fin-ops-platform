@@ -78,6 +78,21 @@ class AuthGuardTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(TypeError):
                 AccessControlService(**{field: [] if field != "required_permission" else ""})
 
+    def test_shared_local_fixture_admits_only_its_default_identity_without_persisting_acl(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            default_decision = app._access_control_service.evaluate(
+                OAUserIdentity("test-id", "test_finops_user", "test", "test")
+            )
+            outsider_decision = app._access_control_service.evaluate(
+                OAUserIdentity("outsider-id", "OUTSIDER001", "outsider", "outsider")
+            )
+            persisted_acl = app._app_settings_service.get_access_control_payload()
+
+        self.assertEqual(default_decision.access_tier, "full_access")
+        self.assertEqual(outsider_decision.access_tier, "denied")
+        self.assertEqual(persisted_acl["accounts"], [])
+
     @contextmanager
     def _without_default_test_auth(self):
         previous = os.environ.get("FIN_OPS_TEST_DEFAULT_AUTH")

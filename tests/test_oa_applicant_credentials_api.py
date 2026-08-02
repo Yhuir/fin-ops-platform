@@ -5,7 +5,10 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from tests.app_test_support import build_local_state_application as build_application
+from tests.app_test_support import (
+    build_local_state_application as build_application,
+    configure_access_control,
+)
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 
 
@@ -59,6 +62,7 @@ class OaApplicantCredentialApiTests(unittest.TestCase):
     def test_full_access_non_admin_cannot_maintain_credentials(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            configure_access_control(app, full_access=["FULL001"])
             self._install_identity_resolver(app)
 
             response = app.handle_request(

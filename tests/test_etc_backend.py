@@ -15,7 +15,11 @@ from types import SimpleNamespace
 import unittest
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from tests.app_test_support import build_local_state_application as _build_application, install_durable_import_queue
+from tests.app_test_support import (
+    build_local_state_application as _build_application,
+    configure_access_control,
+    install_durable_import_queue,
+)
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services import etc_service as etc_service_module
 from fin_ops_platform.services.etc_service import (
@@ -3768,6 +3772,7 @@ class EtcApiTests(unittest.TestCase):
     def test_etc_business_batch_scope_uses_session_dept_id(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            configure_access_control(app, full_access=["OWNER", "OTHER"])
 
             identities = {
                 "owner-token": OAUserIdentity(
@@ -3776,7 +3781,7 @@ class EtcApiTests(unittest.TestCase):
                     nickname="Owner",
                     display_name="Owner",
                     dept_id="D01",
-                    permissions=[app._access_control_service.required_permission],
+                    permissions=[],
                 ),
                 "other-token": OAUserIdentity(
                     user_id="other-id",
@@ -3784,7 +3789,7 @@ class EtcApiTests(unittest.TestCase):
                     nickname="Other",
                     display_name="Other",
                     dept_id="D02",
-                    permissions=[app._access_control_service.required_permission],
+                    permissions=[],
                 ),
                 "admin-token": OAUserIdentity(
                     user_id="admin-id",
@@ -3792,7 +3797,7 @@ class EtcApiTests(unittest.TestCase):
                     nickname="Admin",
                     display_name="Admin",
                     dept_id="D99",
-                    permissions=[app._access_control_service.required_permission],
+                    permissions=[],
                 ),
             }
             app._oa_identity_service.resolve_identity = lambda token: identities[str(token)]

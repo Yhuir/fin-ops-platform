@@ -11,6 +11,10 @@ from fin_ops_platform.app.server import build_application as _build_application
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.import_job_queue import IMPORT_PROCESS_REQUESTED_EVENT, ImportJob
 from fin_ops_platform.services.state_store import ApplicationStateStore
+from fin_ops_platform.services.state_store_protocol import (
+    settings_access_control_from_payload,
+    settings_username_comparison_key,
+)
 from fin_ops_platform.services.workbench_object_identity_arbitration import (
     WorkbenchObjectIdentityArbitrationService,
 )
@@ -23,7 +27,9 @@ def build_local_state_application(*args, **kwargs):
     if data_dir is None and args:
         data_dir = args[0]
     if data_dir is None:
-        return _build_application(*args, **kwargs)
+        application = _build_application(*args, **kwargs)
+        _install_default_test_access_provider(application)
+        return application
     def build_local_store(requested_data_dir: Path | None):
         if requested_data_dir is None:
             return None
@@ -39,7 +45,37 @@ def build_local_state_application(*args, **kwargs):
         patch.object(Application, "_runtime_bootstrap_state", load_local_bootstrap_state),
     ):
         application = _build_application(*args, **kwargs)
+    _install_default_test_access_provider(application)
     return application
+
+
+def _install_default_test_access_provider(application: Application) -> None:
+    """Admit the synthetic local test identity through the canonical ACL contract."""
+
+    service = application._access_control_service  # noqa: SLF001
+    canonical_provider = service.access_control_snapshot_provider
+
+    def test_snapshot_provider() -> dict[str, object]:
+        snapshot = settings_access_control_from_payload(canonical_provider())
+        default_username = "test_finops_user"
+        default_key = settings_username_comparison_key(default_username)
+        if any(
+            settings_username_comparison_key(username) == default_key
+            for username in snapshot["allowed_usernames"]
+        ):
+            return snapshot
+        return settings_access_control_from_payload(
+            {
+                **snapshot,
+                "allowed_usernames": [],
+                "full_access_usernames": [
+                    *snapshot["full_access_usernames"],
+                    default_username,
+                ],
+            }
+        )
+
+    service.access_control_snapshot_provider = test_snapshot_provider
 
 
 def configure_access_control(

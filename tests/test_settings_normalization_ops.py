@@ -35,7 +35,7 @@ class FakeRepository:
 class SettingsNormalizationOpsTests(unittest.TestCase):
     def test_dry_run_reports_only_changed_keys_and_hashes_without_writing(self) -> None:
         connection = FakeConnection()
-        repository = FakeRepository({"allowed_usernames": [" user ", "user"]})
+        repository = FakeRepository({"oa_retention": {"cutoff_date": "not-a-date"}})
         stdout = StringIO()
 
         with (
@@ -49,7 +49,7 @@ class SettingsNormalizationOpsTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(payload["mode"], "dry-run")
         self.assertTrue(payload["changed"])
-        self.assertIn("allowed_usernames", payload["changed_keys"])
+        self.assertIn("oa_retention", payload["changed_keys"])
         self.assertNotIn("normalized_payload", payload)
         self.assertEqual(connection.transaction_entries, 0)
         self.assertEqual(repository.saves, [])
