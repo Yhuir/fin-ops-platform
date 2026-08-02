@@ -706,6 +706,20 @@ class DeployOAScriptTest(unittest.TestCase):
             rollback.index('activate_release "$previous_release"'),
         )
 
+    def test_activation_validates_0132_guard_after_migration_before_runtime_changes(self) -> None:
+        script = DEPLOY_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
+        activate = script.split("activate_release() {", 1)[1].split("\n}\n", 1)[0]
+
+        self.assertIn('assert_settings_access_control_database_guard "$src"', activate)
+        self.assertLess(
+            activate.index('run_schema_migrations "$src"'),
+            activate.index('assert_settings_access_control_database_guard "$src"'),
+        )
+        self.assertLess(
+            activate.index('assert_settings_access_control_database_guard "$src"'),
+            activate.index('sync_python_envs "$src"'),
+        )
+
     def test_runtime_contract_requires_exact_role_sync_and_rejects_retired_env(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
         contract = script.split("assert_runtime_env_contract() {", 1)[1].split("\n}\n", 1)[0]

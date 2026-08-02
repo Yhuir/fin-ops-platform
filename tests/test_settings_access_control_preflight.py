@@ -47,6 +47,7 @@ def _session(
 ) -> dict[str, object]:
     return {
         "user": {"username": username},
+        "permissions": [] if admin else ["finops:app:view"],
         "access_tier": tier,
         "can_admin_access": admin,
         "_preflight_http_status": 200,
@@ -99,7 +100,7 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
             "environment": {},
             "oa_roles": self._oa_inventory(),
             "admin_session": _session("YNSYLP005", "admin", True),
-            "bearer_session": _session("SLO_DENIED", "denied", False),
+            "bearer_session": _session("YNSYLP006", "denied", False),
         }
         arguments.update(overrides)
         return build_report(**arguments)
@@ -110,7 +111,7 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
         self.assertTrue(report["eligible"])
         rendered = str(report)
         self.assertNotIn("FULL001", rendered)
-        self.assertNotIn("SLO_DENIED", rendered)
+        self.assertNotIn("YNSYLP006", rendered)
         self.assertNotIn("postgresql://", rendered)
         self.assertEqual(report["protected_administrator"], "YNSYLP005")
         self.assertTrue(report["oa"]["matches_target"])
@@ -150,6 +151,35 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
         for override in cases:
             with self.subTest(override=override):
                 self.assertFalse(self._report(**override)["eligible"])
+
+    def test_representative_bearer_requires_exact_006_with_menu_permission(self) -> None:
+        wrong_username = _session("SLO_DENIED", "denied", False)
+        missing_permission = _session("YNSYLP006", "denied", False)
+        missing_permission["permissions"] = []
+
+        self.assertFalse(self._report(bearer_session=wrong_username)["eligible"])
+        self.assertFalse(self._report(bearer_session=missing_permission)["eligible"])
+        self.assertTrue(self._report()["sessions"]["bearer"]["oa_menu_permission_present"])
+
+    def test_database_guard_only_fails_closed_until_0132_check_is_validated(self) -> None:
+        with (
+            patch.object(
+                preflight_module,
+                "collect_database_facts",
+                return_value={
+                    "migration_0132_applied": True,
+                    "constraint_present": True,
+                    "constraint_validated": False,
+                },
+            ),
+            patch.object(preflight_module, "_postgres_settings", return_value=object()),
+            patch.object(preflight_module, "PostgresConnection", return_value=object()),
+        ):
+            status = preflight_module.main(
+                ["--release", "main-safe", "--database-guard-only", "--json"]
+            )
+
+        self.assertEqual(status, 2)
 
     def test_oa_role_drift_fails_closed(self) -> None:
         oa_roles = self._oa_inventory()
@@ -347,11 +377,30 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
                 return response(
                     200,
                     {
-                        "user": {"username": "SLO_DENIED"},
+                        "user": {"username": "YNSYLP006"},
+                        "permissions": ["finops:app:view"],
                         "access_tier": tier,
                         "can_admin_access": False,
                         "can_mutate_data": tier == "full_access",
                         "can_access_app": tier != "denied",
+                    },
+                )
+            if path == "/system/menu/getRouters":
+                visible = token == "admin-token" or state["tier"] != "denied"
+                return response(
+                    200,
+                    {
+                        "code": 200,
+                        "data": (
+                            [
+                                {
+                                    "path": "https://www.yn-sourcing.com/fin-ops/?embedded=oa",
+                                    "meta": {"title": "财务运营平台"},
+                                }
+                            ]
+                            if visible
+                            else []
+                        ),
                     },
                 )
             if path == "/api/workbench/settings/access-control" and method == "GET":
@@ -372,7 +421,7 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
                     return response(403, {"error": "admin_only"})
                 state["accounts"] = list(payload["accounts"])
                 account = next(
-                    (item for item in state["accounts"] if item["username"] == "SLO_DENIED"),
+                    (item for item in state["accounts"] if item["username"] == "YNSYLP006"),
                     None,
                 )
                 state["tier"] = account["access_tier"] if account else "denied"
@@ -442,7 +491,7 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
             environment={},
             oa_roles=oa_facts(),
             admin_session=_session("YNSYLP005", "admin", True),
-            bearer_session=_session("SLO_DENIED", "denied", False),
+            bearer_session=_session("YNSYLP006", "denied", False),
         )
         with tempfile.TemporaryDirectory() as temp_dir:
             preflight_path = Path(temp_dir) / "preflight.json"
@@ -470,6 +519,7 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
                     output_path=str(output_path),
                     admin_token="admin-token",
                     bearer_token="bearer-token",
+                    oa_base_url="https://www.yn-sourcing.com/oa-api",
                 )
 
             rendered = output_path.read_text(encoding="utf-8")
@@ -477,8 +527,19 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertEqual(report["status"], "pass")
         self.assertTrue(report["restore"]["accounts_restored"])
+        self.assertTrue(report["restore"]["oa_router_restored"])
+        self.assertEqual(
+            report["checks"]["oa_router_visibility"],
+            {
+                "admin": True,
+                "initial_denied": False,
+                "full_access": True,
+                "read_export_only": True,
+                "denied": False,
+            },
+        )
         self.assertEqual(state["tier"], "denied")
-        self.assertNotIn("SLO_DENIED", rendered)
+        self.assertNotIn("YNSYLP006", rendered)
         self.assertNotIn("admin-token", rendered)
         self.assertNotIn("bearer-token", rendered)
 
