@@ -192,7 +192,9 @@ function json(route: Route, body: unknown, status = 200) {
 
 function sessionPayload(accessTier: AccessTier, username?: string) {
   const allowed = accessTier !== "denied";
-  const resolvedUsername = username ?? (accessTier === "admin" ? "YNSYLP005" : "E2EUSER001");
+  const resolvedUsername = username ?? (
+    accessTier === "admin" ? "YNSYLP005" : accessTier === "denied" ? "YNSYLP006" : "E2EUSER001"
+  );
   return {
     user: {
       user_id: "e2e-user",
@@ -203,7 +205,11 @@ function sessionPayload(accessTier: AccessTier, username?: string) {
       dept_name: "财务部",
       avatar: null,
     },
-    roles: accessTier === "admin" ? ["fin_ops_admin"] : ["fin_ops_user"],
+    roles: accessTier === "admin"
+      ? ["fin_ops_admin"]
+      : accessTier === "denied"
+        ? ["finance", "business", "finops_full_access"]
+        : ["fin_ops_user"],
     permissions: ["finops:app:view"],
     allowed,
     access_tier: accessTier,

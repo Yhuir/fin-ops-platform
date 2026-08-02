@@ -4710,31 +4710,28 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           },
         };
       }
+      const accessTier = options.sessionMode === "forbidden"
+        ? "denied"
+        : options.sessionAccessTier ?? "full_access";
+      const allowed = accessTier !== "denied";
       return {
         body: {
           user: {
             user_id: "101",
-            username: options.sessionUsername ?? "liuji",
-            nickname: options.sessionDisplayName ?? "刘际涛",
-            display_name: options.sessionDisplayName ?? "刘际涛",
+            username: options.sessionUsername ?? (allowed ? "liuji" : "YNSYLP006"),
+            nickname: options.sessionDisplayName ?? (allowed ? "刘际涛" : "权限攻击样例"),
+            display_name: options.sessionDisplayName ?? (allowed ? "刘际涛" : "权限攻击样例"),
             dept_id: "88",
             dept_name: "财务部",
             avatar: null,
           },
-          roles: ["finance"],
-          permissions: options.sessionMode === "forbidden" ? [] : ["finops:app:view"],
-          allowed: options.sessionMode !== "forbidden",
-          access_tier:
-            options.sessionMode === "forbidden"
-              ? "denied"
-              : options.sessionAccessTier ?? "full_access",
-          can_access_app: options.sessionMode !== "forbidden",
-          can_mutate_data:
-            options.sessionMode === "forbidden"
-              ? false
-              : (options.sessionAccessTier ?? "full_access") !== "read_export_only",
-          can_admin_access:
-            options.sessionMode !== "forbidden" && (options.sessionAccessTier ?? "full_access") === "admin",
+          roles: allowed ? ["finance"] : ["finance", "business", "finops_full_access"],
+          permissions: ["finops:app:view"],
+          allowed,
+          access_tier: accessTier,
+          can_access_app: allowed,
+          can_mutate_data: accessTier === "admin" || accessTier === "full_access",
+          can_admin_access: accessTier === "admin",
         },
       };
     },

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   ClipboardCheck,
@@ -33,6 +33,38 @@ function stubShellCompactMode(matches: boolean) {
 }
 
 describe("Finance operations shell", () => {
+  test.each([
+    ["admin", true, true],
+    ["full_access", true, false],
+    ["read_export_only", false, false],
+    ["denied", false, false],
+  ] as const)(
+    "keeps Settings ACL controls on the canonical %s tier",
+    async (accessTier, canSaveSettings, canAdminAccess) => {
+      window.history.pushState({}, "", "/settings");
+      installMockApiFetch({
+        sessionMode: accessTier === "denied" ? "forbidden" : "authorized",
+        sessionAccessTier: accessTier,
+        sessionUsername: accessTier === "admin" ? "YNSYLP005" : accessTier === "denied" ? "YNSYLP006" : "E2EUSER001",
+      });
+
+      render(<App />);
+
+      if (accessTier === "denied") {
+        expect(await screen.findByRole("heading", { name: "无权访问财务运营平台" })).toBeInTheDocument();
+        expect(screen.queryByTestId("settings-page")).not.toBeInTheDocument();
+        return;
+      }
+
+      expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
+      const settingsTree = screen.getByRole("tree", { name: "设置分类" });
+      expect(within(settingsTree).getAllByRole("treeitem").filter((item) => item.textContent?.includes("访问账户"))).toHaveLength(
+        canAdminAccess ? 1 : 0,
+      );
+      expect(screen.getByRole("button", { name: "保存设置" })).toHaveProperty("disabled", !canSaveSettings);
+    },
+  );
+
   test("stops a denied direct /fin-ops/ visit before the business tree mounts", async () => {
     window.history.pushState({}, "", "/fin-ops/");
     const fetchMock = installMockApiFetch({
