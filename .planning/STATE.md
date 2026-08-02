@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 13-11-PLAN.md
-last_updated: "2026-08-02T08:25:21.258Z"
+stopped_at: Completed 13-04-PLAN.md
+last_updated: "2026-08-02T08:39:44.761Z"
 last_activity: 2026-08-02 -- Phase 13 execution started
 progress:
   total_phases: 38
   completed_phases: 11
   total_plans: 104
-  completed_plans: 72
+  completed_plans: 73
   percent: 29
 ---
 
@@ -59,6 +59,7 @@ Progress: [██░░░░░░░░] in progress
 | Phase 13 P10 | 18min | 3 tasks | 9 files |
 | Phase 13 P09 | 10min | 2 tasks | 8 files |
 | Phase 13 P11 | 20min | 2 tasks | 7 files |
+| Phase 13 P04 | 8min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -180,6 +181,9 @@ Progress: [██░░░░░░░░] in progress
 - [Phase 13]: Phase 13-09 adds no production authorization or runtime path. — Plans 07, 08 and 10 already supply the behavior; this plan owns regression and inventory only.
 - [Phase 13]: OA roles 与 permissions 只作为信息性证据；frontend fixture 仅使用 canonical allowed/access_tier/capabilities。 — 避免 permission marker 在前端或测试中制造授权假绿。
 - [Phase 13]: Deterministic E2E session tier 由同一 Settings ACL state 投影，未配置非管理员账号一律 denied。 — 保持 Settings 为唯一 ACL UI，并验证恢复与撤权即时生效。
+- [Phase 13]: Only exact YNSYLP005 and canonical Settings ACL full/read membership grant APP access. — OA role, permission and retired env admission remain informational or rejected and never grant APP authority.
+- [Phase 13]: finops:app:view identifies only the OA menu; runtime owns strict three-role projection. — Deployment separately owns exact legacy binding cleanup, read-back and rollback.
+- [Phase 13]: Long-lived docs cite completed automated evidence without claiming production deployment. — Production preflight, fresh router/session and release evidence remain later gates.
 
 ### Roadmap Evolution
 
@@ -258,6 +262,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-02T08:25:21.249Z
-Stopped at: Completed 13-11-PLAN.md
+Last session: 2026-08-02T08:39:44.752Z
+Stopped at: Completed 13-04-PLAN.md
 Resume file: None
