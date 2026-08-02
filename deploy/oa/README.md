@@ -753,6 +753,9 @@ hashes/counts/fingerprints。任何 token、identity、canonical ACL、partial D
 只在 current-runtime pre checkpoint 通过后执行这些 exact rows；artifact SHA、current before-image、三专用 role exact set
 或 non-target fingerprint 任一漂移都在同一事务内零写/回滚。候选后续失败时，release rollback 会先用同一 before-image
 恢复 exact rows并 read-back；rollback 失败保持 maintenance，禁止继续恢复旧 binary 后伪装成功。
+多个 exact target 的 producer 必须按 lowercase SHA-256 字典序输出 `target_hashes` 与
+`rollback_target_hashes`，`target_set_sha256` 也基于该 canonical 顺序；consumer 继续拒绝未排序、重复、非法或不对称 hash set，
+不得用 consumer 端排序掩盖 artifact producer 漂移。
 
 4. 只用 exact candidate 零重传激活：`./scripts/deploy-oa.sh --activate-existing --release-name <release>`。顺序固定为 cutover/steady preflight assertion → current runtime checkpoint → exact env cleanup + strict assertion → exact OA binding cleanup → API/worker quiesce → 执行 migration → 独立 read-back 断言 0132 已应用且 `settings_access_control_policy_shape` CHECK 已验证 → runtime sync/install → safe candidate → T+0/T+60/T+300 evidence。进入 activation 前失败恢复 env before-image；进入 activation 后保持 clean env，previous release 没有同等安全 capability 时保持 maintenance 并 forward repair。
 5. 激活成功后用相同双 token 运行 `settings-access-control-post-deploy`。它把 `YNSYLP006` 专用 bearer 依次改为 full、read、denied，验证 generic save、两条直接提权攻击、AppHealth/OA credentials/data reset admin-only、OA 三角色、fresh OA router 菜单可见性、durable audit/request id 和 ACL GET/PUT latency，并在 finally/read-back 中恢复原 accounts/OA/denied session：

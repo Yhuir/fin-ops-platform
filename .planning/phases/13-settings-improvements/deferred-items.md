@@ -1,3 +1,4 @@
 # Phase 13 Deferred Items
 
 - Resolved by `2bdb5c89e`: the four stale test-only `AccessControlService.required_permission` reads in `tests/test_etc_backend.py` and `tests/test_etc_invoice_pdf_bundle_service.py` now use explicit canonical Settings ACL setup. No open 13-07 deferred item remains.
+- Open production closure item (2026-08-02): approved candidate `main-db914d7c-settings-acl-20260802` failed before OA cleanup/migration/service cutover because its two valid unique cleanup hashes were emitted in raw ID order rather than canonical hash order. Runtime env was restored; old API, dispatcher and six workers remain active; candidate was not activated and OA/migration mutations did not begin. The old candidate, bootstrap/preflight hashes and activation approval must not be reused. Rebuild from the canonical-order fix commit, rerun no-activate/bootstrap/read-only preflight, and obtain a new hash-bound activation approval before resuming 13-05.

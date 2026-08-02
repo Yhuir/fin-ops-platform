@@ -154,10 +154,10 @@ def build_report(
         _hash_menu_binding(role_id, menu_id, salt)
         for role_id, menu_id in sorted(expected_bindings)
     ]
-    cleanup_target_hashes = [
+    cleanup_target_hashes = sorted(
         _hash_menu_binding(role_id, menu_id, salt)
         for role_id, menu_id in non_dedicated_bindings
-    ]
+    )
     oa_matches_target = oa_enabled and oa_members == target_oa
     legacy_environment_admins = _strings(environment.get("admin_usernames"))
     retired_environment_input = sorted(

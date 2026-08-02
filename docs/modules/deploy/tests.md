@@ -52,6 +52,7 @@
 
 | 日期 | 失败模式 | 回归测试 | 验证 |
 | --- | --- | --- | --- |
+| 2026-08-02 | OA cleanup preflight producer 按 raw `(role_id, menu_id)` 排序多个 salted target hash，而 deploy-control consumer 要求 lowercase SHA-256 字典序，导致 activation 在 OA/DB/service mutation 前 fail closed | `test_fixed_menu_inventory_emits_exact_hashed_cleanup_and_rollback_targets`、`test_multiple_cleanup_targets_are_canonicalized_by_hash_not_raw_id`、`test_cleanup_consumer_rejects_tampered_duplicate_and_invalid_hashes` | `PYTHONPATH=backend/src python3 -m unittest tests.test_settings_access_control_preflight tests.test_deploy_oa_script -v`；`bash -n deploy/oa/bin/finops-deploy-control.sh` |
 | 2026-06-11 | nightly workflow 或 `verify.sh all` 被改坏后漏跑后端/前端/docs，导致远端 CI 失去门禁价值 | `tests/test_nightly_ci.py` | `PYTHONPATH=backend/src python3 -m unittest tests.test_nightly_ci -v` |
 | 2026-06-17 | nightly workflow 或 `verify.sh all` 被改坏后漏跑 deterministic Playwright browser smoke，导致真实浏览器 gate 失去保护 | `tests/test_nightly_ci.py`、`web/e2e/app-shell.spec.ts` | `PYTHONPATH=backend/src python3 -m unittest tests.test_nightly_ci -v`；`cd web && npm run e2e:smoke` |
 | 2026-06-19 | 新增模块后漏建 `e2e-spec.md` / `e2e-coverage.md`，或 Spec ID 没有 coverage 映射，导致 Spec-first E2E Audit 看似完整但后续 controller 无法追踪缺口 | `tests/test_spec_first_e2e_docs.py`、`tests/test_nightly_ci.py`、`bash scripts/verify.sh docs` | `PYTHONPATH=backend/src python3 -m unittest tests.test_spec_first_e2e_docs tests.test_nightly_ci -v`；`bash scripts/verify.sh docs` |

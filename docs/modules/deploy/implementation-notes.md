@@ -16,6 +16,15 @@
   stable release manifest 传入，T+0/T+60/T+300 仍使用候选 registry。没有预启动候选 worker，也没有绕过门禁。
 - 回归覆盖 stable inventory 透传、runtime monitoring scope 和 deploy-control 脚本合同。
 
+## 2026-08-02 - OA cleanup 多目标 artifact canonical hash 顺序
+
+- 生产 activation 在 OA cleanup consumer 校验阶段失败：两个 target hash 均合法且唯一，但 preflight producer 沿用 raw
+  `(role_id, menu_id)` 顺序，未满足 consumer 的 lowercase SHA-256 字典序合同。
+- 最小修复只在 authoritative preflight producer 排序 salted target hashes；rollback targets 和 target-set fingerprint 继续消费
+  同一 canonical 列表。deploy-control consumer 不放宽，仍拒绝未排序、重复、非法、不对称或 fingerprint 漂移。
+- 失败发生在 OA cleanup、migration、service cutover 前；runtime env 已恢复，旧 API、dispatcher 和六个 worker 保持 active，
+  candidate 未激活。本地修复不代表生产通过，必须用新 commit 重建 candidate、重新生成 preflight artifact 并重新批准。
+
 ## 当前决策
 
 - 生产发布入口保持 `./scripts/deploy-oa.sh`，只走 release-based 部署；`legacy-current` 覆盖式部署入口已经移除。

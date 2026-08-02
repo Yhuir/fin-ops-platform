@@ -167,12 +167,18 @@ None. The setgid normalization, cutover state, atomic env restoration and root a
 
 ## User Setup Required
 
-None. The required production identities, artifacts and explicit activation approval are present.
+The original activation approval is no longer reusable after the post-plan producer/consumer ordering fix. A new exact candidate, bootstrap/preflight artifacts and hash-bound approval are required before 13-05 resumes.
+
+## Post-Plan Production Incident — 2026-08-02
+
+- Activation stopped at the approved OA cleanup artifact consumer because the two individually valid, unique target hashes were emitted in raw `(role_id, menu_id)` order instead of canonical lowercase SHA-256 order.
+- The consumer remained fail closed. Runtime env was restored; the old API, dispatcher and six workers remain active; the candidate was not activated; migration 0132 and OA cleanup did not begin.
+- The producer fix and local regressions do not prove production success. The `db914d7cf` candidate and its bootstrap/preflight hashes must not be reused; the approval chain restarts from a new exact candidate and preflight artifact.
 
 ## Next Phase Readiness
 
-- 13-05 may execute the exact zero-reupload activation for `main-db914d7c-settings-acl-20260802`, bound to bootstrap SHA `c5a61c81…` and preflight SHA `ec63125a…`.
-- The authorized activation scope is exact: atomically remove four retired env keys, delete two approved OA menu bindings, apply migration 0132 and its CHECK, switch services, then run 005/006 post-deploy and restoration evidence.
+- 13-05 remains blocked until a candidate containing the canonical hash-order fix is uploaded and checked, new bootstrap/preflight artifacts are generated, and the user approves their exact hashes.
+- The earlier `main-db914d7c-settings-acl-20260802` candidate, bootstrap SHA `c5a61c81…`, preflight SHA `ec63125a…` and activation approval are stale and prohibited from reuse.
 - On failure, do not reactivate the unsafe old release. Keep maintenance and repair forward.
 - No activation or production data/config mutation was performed while completing this Summary.
 
