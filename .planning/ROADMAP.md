@@ -290,8 +290,8 @@ Plans:
 - [x] 13-12-PLAN.md — Wave 9：Settings与permissions/audit模块边界、状态机及测试文档同步。
 - [x] 13-13-PLAN.md — Wave 10：OA、app-shell与deploy架构/模块合同同步。
 - [x] 13-14-PLAN.md — Wave 11：candidate preflight/deploy-control、canonical activation gate与全回归准备。
-- [x] 13-15-PLAN.md — Wave 12：candidate upload、manual-root helper bootstrap、remote preflight与activation批准。
-- [ ] 13-05-PLAN.md — Wave 13：完整JIT preflight→activation→postdeploy/restore→最终验收生产序列。
+- [x] 13-15-PLAN.md — Wave 12：以exact `main-2298ba8c-settings-acl-20260802`重新闭合candidate upload、already-exact-noop bootstrap、双身份remote preflight与无漂移activation批准；旧db914/f12链不可复用。
+- [ ] 13-05-PLAN.md — Wave 13：基于2298ba8c exact artifacts执行完整JIT preflight→activation→postdeploy/restore→T0–T4及005/006最终验收生产序列。
 
 ### Phase 14: 完善系统状态页面：分析现状、风险、功能缺口和实施计划
 

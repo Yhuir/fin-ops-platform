@@ -33,7 +33,7 @@ key-files:
 key-decisions:
   - "A legacy runtime may be exactly cutover-eligible without being strict steady-state eligible; blockers still remain fail closed."
   - "The four retired APP admission keys are removed atomically only inside the approved activation window, with before-image restoration before activation on failure."
-  - "Activation is bound to bootstrap SHA c5a61c81… and preflight SHA ec63125a…; the unsafe active release is never an automatic rollback target."
+  - "Activation is bound only to candidate main-2298ba8c-settings-acl-20260802, bootstrap SHA c98c1f2b… and preflight SHA b031faea…; the unsafe active release is never an automatic rollback target."
 
 patterns-established:
   - "Candidate upload, root helper bootstrap, read-only preflight and activation are separate hash-bound authority boundaries."
@@ -48,7 +48,7 @@ completed: 2026-08-02
 
 # Phase 13 Plan 15: Production Candidate Bootstrap and Preflight Summary
 
-**The exact `db914d7cf` candidate, live deploy-control helper and secret-safe production cutover facts are hash-verified and explicitly approved for 13-05 activation while the application, database, OA and ACL remain unchanged.**
+**The exact `2298ba8c8` candidate, live deploy-control helper and secret-safe production cutover facts are hash-verified and approved for 13-05 activation while the application, database, OA and ACL remain unchanged.**
 
 ## Performance
 
@@ -60,26 +60,27 @@ completed: 2026-08-02
 
 ## Accomplishments
 
-- Uploaded and checked non-active candidate `main-db914d7c-settings-acl-20260802`, bound to Git `db914d7cf7263d2346995b5607b776ee124e55f9`, source SHA `ccf021936f80da74bbba35581e540e9b57912cbb18202bef69db3cefa7264959`, helper SHA `e6b79ecc477b612ae1292fffeda697f537aba67b50d9542321a371f32702fc2d`, migration SHA `95c584ef8fa9b98dd5bfdca36b2fb79224ad4daf29f170ceebb89ce56cb41f66` and candidate fingerprint `22364c795575c10651d28b06b19f6d65d80de0f60929d8e15c48d063570ddf36`.
+- Uploaded and checked non-active candidate `main-2298ba8c-settings-acl-20260802`, bound to Git `2298ba8c826084fd8512ae1d226f2ca5fc7366fc`, source SHA `b57df877d2a7085c0ecf71ee0169c92e31a32cfc5be425134ad2dc382def9cde`, helper SHA `e6b79ecc477b612ae1292fffeda697f537aba67b50d9542321a371f32702fc2d`, migration SHA `95c584ef8fa9b98dd5bfdca36b2fb79224ad4daf29f170ceebb89ce56cb41f66` and candidate fingerprint `a5357a0dda80eff02b38ee214606e2f3296687bfd473f428b5b29310b83cab05`.
 - Bootstrapped only `/usr/local/sbin/finops-deploy-control` through the approved same-filesystem, hash-pinned atomic runbook. Bootstrap evidence records all application, database, OA, ACL and runtime-worker-helper invariants as unchanged.
 - Produced a fresh dual-identity, read-only preflight with `cutover_eligible=true` and `blockers=[]`: exact `YNSYLP005/admin`; permission-bearing `YNSYLP006` absent from all four canonical ACL sets; database 0132/CHECK facts uniformly false rather than partial; fixed menu/three-role projection; four exact retired env keys; and two exact historical menu-binding cleanup targets.
-- User explicitly approved activation bound to bootstrap artifact SHA `c5a61c8174407302b158f7ef622df7766545caf83246e2c7a13f569d35802283` and preflight artifact SHA `ec63125ab7f106b5732bab793dfd2514fa55dc3a268d1b0393c05eb925561c11`, including exact env/OA cleanup, migration 0132/CHECK, service cutover, 005/006 verification and maintenance/forward-repair behavior.
+- Root evidence records bootstrap artifact SHA `c98c1f2b00c13abd0c583f0e98d2c0d6acba2494094d8f619f3be630cc8afeac` and preflight artifact SHA `b031faeaccf2b3c5f68de1c1accdda03c283c78b361060d8bb48f45ac4f6166c`; both are `root:root 0600` and independently pass `sha256sum --check`.
+- The user's blanket approval covers the current exact, no-drift 13-05 activation scope: atomic retired-env cleanup, the two canonically sorted exact OA cleanup targets, migration 0132/CHECK, service cutover, 005/006 verification and maintenance/forward-repair behavior. It does not permit reuse of stale candidate artifacts or facts after drift.
 - No activation, service restart, migration, OA mutation, env mutation or ACL mutation was performed in this plan. Current API, dispatcher and six workers remain active on `main-20a7bff3-20260802014647`; that old release remains classified `safe=false`.
 
 ## Task Commits
 
-Production checkpoint actions do not create repository commits. Two correctness fixes discovered while executing the checkpoints were committed atomically:
+Production checkpoint actions do not create repository commits. Three correctness fixes discovered while executing and re-closing the checkpoints were committed atomically:
 
 1. **Task 1: approve exact candidate upload/bootstrap boundary** — no repository commit (explicit user checkpoint).
 2. **Task 2: upload and validate non-active candidate** — `f12f287b0` (`fix`: normalize inherited directory setgid bits in deterministic source fingerprints).
 3. **Task 3: atomic root deploy-control bootstrap** — no repository commit (root control-plane operation; evidence artifact only).
-4. **Task 4: remote read-only preflight and final activation approval** — `db914d7cf` (`fix`: model exact legacy cutover state and atomic retired-env transition); final approval itself created no repository change.
+4. **Task 4: remote read-only preflight and final activation approval** — `db914d7cf` models the exact legacy cutover state and `2298ba8c8` canonicalizes OA cleanup target hashes; final approval itself created no repository change.
 
 ## Production Evidence
 
-- Candidate status was independently re-read after approval: candidate `safe=true`; source/helper/migration hashes and fingerprint match the approved values; the sole active release remains `main-20a7bff3-20260802014647` with `safe=false`.
+- Candidate status was independently re-read after approval: `main-2298ba8c-settings-acl-20260802` is `safe=true`; source/helper/migration hashes and fingerprint match the approved values; the active application was not changed by 13-15.
 - Root operator independently ran `sha256sum --check` for both artifacts; bootstrap and preflight returned `OK`. Actual artifact hashes exactly equal the approval-bound values above.
-- Bootstrap and preflight artifacts are `root:root 0600`. The bootstrap invariant set is all true; the preflight remains `cutover_eligible=true`, `blockers=[]`.
+- Bootstrap and preflight artifacts are `root:root 0600`. Bootstrap is `already-exact-noop`; the fresh preflight remains `cutover_eligible=true`, `blockers=[]`, with the two cleanup target hashes in canonical lowercase SHA-256 order and `YNSYLP006` absent from all four canonical ACL sets.
 - `fin-ops.service`, `fin-ops-rabbitmq-dispatcher.service` and the six required workers (`import`, `oa-sync`, `settings-maintenance`, `workbench-matching`, `workbench-relation`, `workbench`) are active. API `WorkingDirectory` still points to the old active release.
 - The deploy user cannot read the 0600 artifacts or invoke arbitrary root `sha256sum`; its NOPASSWD surface is correctly limited to the fixed deploy-control and runtime-worker helpers. Independent SHA verification therefore used the separate root-operator path.
 
@@ -112,10 +113,10 @@ Production checkpoint actions do not create repository commits. Two correctness 
 
 ## Verification
 
-- `PYTHONPATH=backend/src python3 -m unittest tests.test_settings_access_control_preflight tests.test_deploy_oa_script -v` — 58 passed for the final candidate.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_settings_access_control_preflight tests.test_deploy_oa_script -v` — 60 passed for the final candidate.
 - `bash scripts/verify.sh lint` — passed for the final candidate.
 - `sudo -n /usr/local/sbin/finops-deploy-control contract-version --require settings-access-control-v1` — passed through the deploy-user fixed-helper boundary.
-- `sudo -n /usr/local/sbin/finops-deploy-control candidate-status main-db914d7c-settings-acl-20260802 --json` — current candidate safe/fingerprints match and old active release remains unchanged.
+- `sudo -n /usr/local/sbin/finops-deploy-control candidate-status main-2298ba8c-settings-acl-20260802 --json` — current candidate is safe and all exact fingerprints match; active application state remains unchanged.
 - Root-operator `sha256sum --check` for `settings-access-control-bootstrap.json.sha256` and `settings-access-control-preflight.json.sha256` — both `OK`.
 - Read-only `systemctl` inventory — API, dispatcher and six workers active; API still uses the old release directory.
 
@@ -147,7 +148,7 @@ Production checkpoint actions do not create repository commits. Two correctness 
 ## Issues Encountered
 
 - The initial deploy-user attempt to run arbitrary `sudo -n sha256sum --check` failed because sudoers intentionally permits only fixed helpers and the root-owned 0600 artifacts are unreadable to the deploy user. The independent root-operator path completed both checks successfully; no sudo scope was widened.
-- The old candidate `f12f287b0` was not reused or activated after the cutover-state correction. The final uploaded candidate is bound only to `db914d7cf` and its exact hashes.
+- The old `f12f287b0` and `main-db914d7c-settings-acl-20260802` candidates were not reused or activated after their respective corrections. The only current candidate/approval chain is bound to `2298ba8c8` and the exact hashes recorded above.
 
 ## Documentation Impact
 
@@ -167,25 +168,26 @@ None. The setgid normalization, cutover state, atomic env restoration and root a
 
 ## User Setup Required
 
-The original activation approval is no longer reusable after the post-plan producer/consumer ordering fix. A new exact candidate, bootstrap/preflight artifacts and hash-bound approval are required before 13-05 resumes.
+None for 13-15. The user granted blanket approval for all remaining in-scope actions. 13-05 must still perform its mechanical JIT no-drift check and may proceed only while every approved fact and hash remains exact.
 
-## Post-Plan Production Incident — 2026-08-02
+## Post-Plan Production Incident and Re-closure — 2026-08-02
 
 - Activation stopped at the approved OA cleanup artifact consumer because the two individually valid, unique target hashes were emitted in raw `(role_id, menu_id)` order instead of canonical lowercase SHA-256 order.
 - The consumer remained fail closed. Runtime env was restored; the old API, dispatcher and six workers remain active; the candidate was not activated; migration 0132 and OA cleanup did not begin.
-- The producer fix and local regressions do not prove production success. The `db914d7cf` candidate and its bootstrap/preflight hashes must not be reused; the approval chain restarts from a new exact candidate and preflight artifact.
+- The producer fix is `2298ba8c826084fd8512ae1d226f2ca5fc7366fc`. A new no-activate upload, already-exact-noop bootstrap and fresh dual-identity read-only preflight completed for `main-2298ba8c-settings-acl-20260802`; the new artifact hashes are recorded above.
+- The old `f12f287b0`/`db914d7cf` candidates, artifacts and approvals remain historical and prohibited from reuse. Re-closure does not erase the fail-closed incident or claim activation success.
 
 ## Next Phase Readiness
 
-- 13-05 remains blocked until a candidate containing the canonical hash-order fix is uploaded and checked, new bootstrap/preflight artifacts are generated, and the user approves their exact hashes.
-- The earlier `main-db914d7c-settings-acl-20260802` candidate, bootstrap SHA `c5a61c81…`, preflight SHA `ec63125a…` and activation approval are stale and prohibited from reuse.
+- 13-15 is re-closed and 13-05 is ready to run its JIT no-drift gate against candidate `main-2298ba8c-settings-acl-20260802`, bootstrap SHA `c98c1f2b…` and preflight SHA `b031faea…`.
+- The earlier `main-db914d7c-settings-acl-20260802` and `f12f287b0` candidates, bootstrap SHA `c5a61c81…`, preflight SHA `ec63125a…` and all approvals bound to those facts are stale and prohibited from reuse.
 - On failure, do not reactivate the unsafe old release. Keep maintenance and repair forward.
 - No activation or production data/config mutation was performed while completing this Summary.
 
 ## Self-Check: PASSED
 
-- Corrective commits `f12f287b0` and `db914d7cf` exist in current history.
-- Final candidate status, active release identity, API/dispatcher/worker state and both root-owned artifact hashes were re-verified after approval.
+- Corrective commits `f12f287b0`, `db914d7cf` and `2298ba8c8` exist in current history.
+- Final candidate safety/exact fingerprints, canonical cleanup ordering, 006 ACL absence and both root-owned artifact hashes were re-verified after approval.
 - This Summary exists; no secret, token, generated artifact, tracked deletion or unrelated working-tree change was introduced.
 
 ---
