@@ -8,6 +8,7 @@ from fin_ops_platform.services.state_store_protocol import settings_access_contr
 
 
 OARoleTier = Literal["read_export_only", "full_access", "admin"]
+OA_MENU_PERMISSION = "finops:app:view"
 
 
 class OARoleSyncError(RuntimeError):
@@ -44,6 +45,7 @@ class OARoleSyncSettings:
     readonly_role_key: str
     full_access_role_key: str
     admin_role_key: str
+    required_permission: str
     read_timeout_seconds: int = 10
     write_timeout_seconds: int = 10
 
@@ -100,6 +102,17 @@ class OARoleSyncService:
 
 class MySQLOARoleSyncExecutor:
     def __init__(self, settings: OARoleSyncSettings) -> None:
+        if settings.required_permission != OA_MENU_PERMISSION:
+            raise OARoleSyncConfigurationError(
+                f"FIN_OPS_OA_REQUIRED_PERMISSION must equal {OA_MENU_PERMISSION}."
+            )
+        role_keys = {
+            settings.readonly_role_key,
+            settings.full_access_role_key,
+            settings.admin_role_key,
+        }
+        if len(role_keys) != 3:
+            raise OARoleSyncConfigurationError("OA role sync requires three distinct dedicated role keys.")
         self._settings = settings
 
     @classmethod
@@ -114,6 +127,11 @@ class MySQLOARoleSyncExecutor:
         if missing:
             raise OARoleSyncConfigurationError(
                 "Missing OA role sync configuration: " + ", ".join(sorted(missing))
+            )
+        required_permission = os.getenv("FIN_OPS_OA_REQUIRED_PERMISSION", "").strip()
+        if required_permission != OA_MENU_PERMISSION:
+            raise OARoleSyncConfigurationError(
+                f"FIN_OPS_OA_REQUIRED_PERMISSION must equal {OA_MENU_PERMISSION}."
             )
         return cls(
             OARoleSyncSettings(
@@ -132,6 +150,7 @@ class MySQLOARoleSyncExecutor:
                 or "finops_full_access",
                 admin_role_key=os.getenv("FIN_OPS_OA_ROLE_SYNC_ADMIN_ROLE_KEY", "finops_admin").strip()
                 or "finops_admin",
+                required_permission=required_permission,
             )
         )
 
@@ -143,21 +162,26 @@ class MySQLOARoleSyncExecutor:
                 "PyMySQL is required for OA role sync. Install backend requirements first."
             ) from exc
 
-        connection = pymysql.connect(
-            host=self._settings.host,
-            port=self._settings.port,
-            user=self._settings.username,
-            password=self._settings.password,
-            database=self._settings.database,
-            charset="utf8mb4",
-            autocommit=False,
-            connect_timeout=self._settings.connect_timeout_seconds,
-            read_timeout=self._settings.read_timeout_seconds,
-            write_timeout=self._settings.write_timeout_seconds,
-        )
+        try:
+            connection = pymysql.connect(
+                host=self._settings.host,
+                port=self._settings.port,
+                user=self._settings.username,
+                password=self._settings.password,
+                database=self._settings.database,
+                charset="utf8mb4",
+                autocommit=False,
+                connect_timeout=self._settings.connect_timeout_seconds,
+                read_timeout=self._settings.read_timeout_seconds,
+                write_timeout=self._settings.write_timeout_seconds,
+            )
+        except Exception as exc:  # pragma: no cover - exercised in deployed env
+            raise OARoleSyncExecutionError("Failed to connect to OA role database.") from exc
         try:
             with connection.cursor() as cursor:
                 role_ids = self._load_role_ids(cursor)
+                menu_id = self._load_menu_id(cursor)
+                self._validate_menu_bindings(cursor, menu_id, role_ids)
                 user_ids = self._load_user_ids(cursor, assignments)
                 self._delete_obsolete_assignments(cursor, role_ids, user_ids)
                 self._insert_assignments(cursor, role_ids, user_ids, assignments)
@@ -177,15 +201,42 @@ class MySQLOARoleSyncExecutor:
             self._settings.admin_role_key,
         ]
         cursor.execute(
-            f"SELECT role_id, role_key FROM sys_role WHERE role_key IN ({_placeholders(len(role_keys))})",
+            f"SELECT role_id, role_key FROM sys_role WHERE role_key IN ({_placeholders(len(role_keys))}) FOR UPDATE",
             role_keys,
         )
-        rows = cursor.fetchall()
+        rows = list(cursor.fetchall() or [])
         role_ids = {str(role_key): int(role_id) for role_id, role_key in rows}
         missing = sorted(set(role_keys).difference(role_ids))
         if missing:
             raise OARoleSyncExecutionError("Missing OA roles: " + ", ".join(missing))
+        if len(rows) != len(role_keys):
+            raise OARoleSyncExecutionError("OA dedicated role keys must each resolve exactly once.")
         return role_ids
+
+    def _load_menu_id(self, cursor) -> int:
+        cursor.execute(
+            "SELECT menu_id FROM sys_menu WHERE perms = %s FOR UPDATE",
+            (self._settings.required_permission,),
+        )
+        rows = list(cursor.fetchall() or [])
+        if len(rows) != 1:
+            raise OARoleSyncExecutionError(
+                f"OA menu permission {self._settings.required_permission} must resolve exactly once."
+            )
+        return int(rows[0][0])
+
+    def _validate_menu_bindings(self, cursor, menu_id: int, role_ids: dict[str, int]) -> None:
+        cursor.execute(
+            "SELECT role_id FROM sys_role_menu WHERE menu_id = %s FOR UPDATE",
+            (menu_id,),
+        )
+        rows = list(cursor.fetchall() or [])
+        actual_role_ids = [int(row[0]) for row in rows]
+        expected_role_ids = set(role_ids.values())
+        if len(actual_role_ids) != len(expected_role_ids) or set(actual_role_ids) != expected_role_ids:
+            raise OARoleSyncExecutionError(
+                "OA fin-ops menu bindings must contain exactly the three dedicated roles."
+            )
 
     def _load_user_ids(self, cursor, assignments: list[OARoleAssignment]) -> dict[str, int]:
         usernames = [assignment.username for assignment in assignments]
