@@ -21,8 +21,10 @@
 
 允许流转：
 
-- settings 保存 allowed/readonly/admin 后，下一次 session resolve 根据新配置产出新 tier。
-- dynamic provider 失败时，如果用户已有 required permission，仍允许 full access，并记录 warning。
+- 精确 `YNSYLP005` 在 provider 前直接产出 `admin`；该状态不能通过 APP 流转。
+- 其他账号在同一 `access_control_version` snapshot 的完整 full/read memberships 中分别产出 `full_access` / `read_export_only`，缺席产出 `denied`。
+- Settings ACL commit 后，下一次 session/global guard/module guard 读取新 snapshot；删除账号立即从允许层级流转到 `denied`，不等待 OA identity cache。
+- snapshot provider 缺失、payload 非法或调用失败均流转为 `denied` 并记录固定 secret-safe warning；OA role/permission/env 不提供恢复边。
 - local dev auth 仅在显式 env 开启；unittest default auth 仅测试场景。
 
 禁止流转：
@@ -38,6 +40,13 @@
 - `recorded`：业务事实、audit、dirty/outbox 在同一事务或等价原子边界内提交。
 - `rolled_back`：业务写入失败时 audit 不应单独留下。
 - `failed`：audit 或 outbox 失败应回滚对应业务事实，不能产生半写入。
+
+ACL command 的审计与 Settings 状态机使用同一 snapshot version/outcome：
+
+- `no_op` / `conflict` / `oa_target_failed`：无成功 audit。
+- `committed` / `commit_recovered`：canonical version 恰为 `expected_version + 1` 且 mutation audit 存在，actor/request id 与当前 command 一致。
+- `persistence_failed_compensated` / `commit_rolled_back_compensated`：canonical version 保持旧值、无成功 audit，OA 恢复旧 memberships。
+- `compensation_failed_or_unknown`：返回 `access_control_sync_inconsistent` 并 fail closed，不能从 OA marker 或不完整 audit 猜测成功。
 
 ## UI 状态
 
@@ -61,6 +70,15 @@
 
 页面隐藏只用于体验，所有状态都必须由后端再次判定。管理员身份没有 APP 内状态迁移。
 
+| evaluator 输入 | 结果 |
+| --- | --- |
+| username 精确为 `YNSYLP005` | `admin`；零 snapshot provider I/O |
+| username 在 snapshot full memberships | `full_access` |
+| username 在 snapshot read memberships | `read_export_only` |
+| username 缺席 | `denied` |
+| provider 缺失、payload 非法或失败 | `denied`；固定 secret-safe warning |
+| OA role/permission、三项退役 env、`finops:app:view` marker | 信息/selector only；不得改变上述结果 |
+
 - 权限和审计本身不生成 read model freshness。
 - App Status 会消费 session/permission 作为全局 blocked/red 的一部分，但不替代后端 API guard。
 - Worker/service 不得依赖 `Application`、`app.server`、`app.auth`、HTTP response、cookie/header。
@@ -70,6 +88,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-08-02 | 收敛 fixed 005 + canonical ACL evaluator 与审计结果 | 删除 permission/role/env grant；single snapshot fail closed；Settings 与 permissions 共用 version/no-op/conflict/projection/persistence/compensation outcome | `tests.test_session_api`、`tests.test_auth_guard`、`tests.test_permissions_write_entry_inventory`、`web/e2e/permissions-role-matrix.spec.ts` |
 | - | 初始骨架 | 待补充 | - |
 | 2026-06-17 | 补齐 Browser 权限角色矩阵 | 新增 read_export_only/full_access/admin 真实 Chromium 矩阵；只读用户逐页可读且不触发 mutation API，settings/tax/import/no-OA 写入口受控；同步修复导入页和免 OA 页 UI 权限门禁 | `cd web && npx playwright test e2e/permissions-role-matrix.spec.ts`、`cd web && npm test -- --run src/test/ImportCenterPage.test.tsx src/test/NoOaBankBatchPage.test.tsx src/test/WorkbenchSelection.test.tsx src/test/App.test.tsx src/test/SessionGate.test.tsx src/test/SessionApi.test.ts` |
 | 2026-06-11 | 补齐权限与审计测试闭环状态机 | 将 session、access tier、UI 权限、API guard、audit 原子性和敏感数据保护纳入统一维护边界 | `tests.test_auth_guard`、`tests.test_session_api`、`tests.test_audit_service`、`web/src/test/SessionGate.test.tsx`、`web/src/test/SettingsPage.test.tsx` |

@@ -34,7 +34,7 @@
 权限与审计是横切安全边界，不属于单个页面，也不走 read model 分发。当前边界包括：
 
 - OA 会话：前端从 `Admin-Token` cookie 读取 token 并发送 `Authorization: Bearer ...`；后端只信任 OA identity service 和 access control 判断。
-- 访问层级：`denied`、`read_export_only`、`full_access`、`admin`。
+- 访问层级：精确 `YNSYLP005` 固定为 `admin`；其他账号每次只从一份 canonical Settings ACL snapshot 得到 `read_export_only` / `full_access`，列表缺席或 provider 缺失/非法/失败均为 `denied`。OA role/permission、三项退役 env 和 `finops:app:view` 不授予 APP tier。
 - 后端 guard：所有 protected API 必须先解析 OA session；写入 API 必须二次判断 `can_mutate_data`；高风险 admin API 必须判断 `can_admin_access`。
 - 前端权限：页面按钮、drawer、导入、数据重置、运维入口按 session 权限隐藏或禁用，但不能替代后端校验。
 - 导出权限：只读导出用户可以查询和导出，不能写入、重置或运维修复。
@@ -50,16 +50,17 @@
 | `full_access` | true | true | false | 业务写入；不能访问账户管理、数据重置、运维 dashboard、OA 凭据 |
 | `admin` | true | true | true | 管理账户、数据重置、AppHealth 运维、OA 凭据 |
 
-`YNSYLP005` 是固定 admin；settings 中的 admin 用户也必须自动进入 allowed。
+`YNSYLP005` 是唯一固定 admin；Settings ACL 不提供可写 admin tier，其他账号只能由完整 full/read memberships 或列表缺席分别得到 full/read/denied。
 
 ## 维护触发器
 
 ## Protected administrator contract
 
 - `YNSYLP005` 是代码和数据库约束固定的唯一管理员；permissions 模块不提供动态 admin provider、环境变量 admin list 或可写 admin tier。
-- `AccessControlService` 每次 session 决策最多获取一次 normalized ACL snapshot；provider 失败时非 protected 用户 fail closed，protected admin 保留恢复入口。
+- `AccessControlService` 每次非管理员 session/API 决策最多获取一次带 `access_control_version` 的 normalized ACL snapshot；provider 失败时 fail closed，protected admin 不读取 provider并保留恢复入口。ACL 删除后同一 OA identity 的下一次判断立即撤权。
 - permissions 只拥有 identity/session/tier 判定和 audit 合同，不保存 ACL。ACL command/persistence 归 settings；OA 角色写入归 OA integration。
-- 成功 ACL audit 使用后端 session actor 和 server-generated request id；客户端 body actor 或 `X-Request-ID` 不能成为权威事实。
+- `finops:app:view` 只是 OA fixed-menu selector；permissions evaluator 不读取该 marker，OA integration 不能反向决定 APP tier。
+- 成功 ACL audit 与 canonical ACL/version 同事务，使用后端 session actor 和受信 HTTP adapter request id；客户端 body actor 或不受信 request-id header 不能成为权威事实，no-op/409/502/503 不留下成功 audit。
 
 发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：
 
