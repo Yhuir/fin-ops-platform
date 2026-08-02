@@ -82,10 +82,13 @@ def _session(
     admin: bool,
     *,
     credential_source: str | None = None,
+    permission_present: bool | None = None,
 ) -> dict[str, object]:
+    if permission_present is None:
+        permission_present = not admin and tier != "denied"
     return {
         "user": {"username": username},
-        "permissions": [] if admin else ["finops:app:view"],
+        "permissions": ["finops:app:view"] if permission_present else [],
         "access_tier": tier,
         "can_admin_access": admin,
         "_preflight_http_status": 200,
@@ -193,14 +196,61 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
             with self.subTest(override=override):
                 self.assertFalse(self._report(**override)["eligible"])
 
-    def test_representative_bearer_requires_exact_006_with_menu_permission(self) -> None:
+    def test_representative_bearer_requires_exact_identity_and_phase_matched_permission(self) -> None:
         wrong_username = _session("SLO_DENIED", "denied", False)
-        missing_permission = _session("YNSYLP006", "denied", False)
-        missing_permission["permissions"] = []
+        denied_with_permission = _session(
+            "YNSYLP006",
+            "denied",
+            False,
+            permission_present=True,
+        )
+        full_without_permission = _session(
+            "YNSYLP006",
+            "full_access",
+            False,
+            permission_present=False,
+        )
+        pending_database = {
+            "settings_payload": {
+                "allowed_usernames": ["YNSYLP005", "FULL001"],
+                "readonly_export_usernames": [],
+                "full_access_usernames": ["FULL001"],
+                "admin_usernames": ["YNSYLP005"],
+                "access_control_version": 2,
+            },
+            "migration_0133_applied": False,
+            "constraint_present": False,
+            "constraint_validated": False,
+        }
+        forward_repair = self._report(database=pending_database)
+        legacy_cutover = self._report(
+            database=pending_database,
+            bearer_session=_session("YNSYLP006", "full_access", False)
+        )
+        steady_runtime_drift = self._report(
+            bearer_session=_session("YNSYLP006", "full_access", False)
+        )
 
         self.assertFalse(self._report(bearer_session=wrong_username)["eligible"])
-        self.assertFalse(self._report(bearer_session=missing_permission)["eligible"])
-        self.assertTrue(self._report()["sessions"]["bearer"]["oa_menu_permission_present"])
+        self.assertFalse(
+            self._report(bearer_session=denied_with_permission)["cutover_eligible"]
+        )
+        self.assertFalse(
+            self._report(bearer_session=full_without_permission)["cutover_eligible"]
+        )
+        self.assertTrue(self._report()["eligible"])
+        self.assertFalse(
+            self._report()["sessions"]["bearer"]["oa_menu_permission_present"]
+        )
+        self.assertTrue(forward_repair["cutover_eligible"])
+        self.assertFalse(forward_repair["eligible"])
+        self.assertTrue(legacy_cutover["cutover_eligible"])
+        self.assertFalse(legacy_cutover["eligible"])
+        self.assertTrue(
+            legacy_cutover["sessions"]["bearer"]["oa_menu_permission_present"]
+        )
+        self.assertFalse(steady_runtime_drift["cutover_eligible"])
+        self.assertIn("bearer_session_invalid", steady_runtime_drift["blockers"])
 
     def test_database_guard_only_fails_closed_until_0133_check_is_validated(self) -> None:
         with (
@@ -577,7 +627,9 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
                     200,
                     {
                         "user": {"username": "YNSYLP006"},
-                        "permissions": ["finops:app:view"],
+                        "permissions": (
+                            ["finops:app:view"] if tier != "denied" else []
+                        ),
                         "access_tier": tier,
                         "can_admin_access": False,
                         "can_mutate_data": tier == "full_access",
@@ -741,6 +793,60 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
         self.assertNotIn("YNSYLP006", rendered)
         self.assertNotIn("admin-token", rendered)
         self.assertNotIn("bearer-token", rendered)
+
+    def test_post_deploy_rejects_initial_denied_bearer_with_oa_menu_permission(self) -> None:
+        def response(status: int, payload: dict[str, object]):
+            return {
+                "status": status,
+                "payload": payload,
+                "elapsed_ms": 1.0,
+                "request_id": "",
+            }
+
+        def http_request(*, path: str, token: str, **_kwargs):
+            self.assertEqual(path, "/api/session/me")
+            if token == "admin-token":
+                return response(
+                    200,
+                    {
+                        "user": {"username": "YNSYLP005"},
+                        "access_tier": "admin",
+                        "can_admin_access": True,
+                    },
+                )
+            return response(
+                200,
+                {
+                    "user": {"username": "YNSYLP006"},
+                    "permissions": ["finops:app:view"],
+                    "access_tier": "denied",
+                    "can_admin_access": False,
+                },
+            )
+
+        approved = self._report()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            preflight_path = Path(temp_dir) / "preflight.json"
+            output_path = Path(temp_dir) / "post.json"
+            preflight_path.write_text(json.dumps(approved), encoding="utf-8")
+            with patch.object(
+                preflight_module,
+                "_http_request",
+                side_effect=http_request,
+            ):
+                report, status = run_post_deploy(
+                    release="main-security-test",
+                    base_url="http://127.0.0.1:18001",
+                    preflight_path=str(preflight_path),
+                    output_path=str(output_path),
+                    admin_token="admin-token",
+                    bearer_token="bearer-token",
+                    oa_base_url="https://www.yn-sourcing.com/oa-api",
+                )
+
+        self.assertEqual(status, 2)
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(report["failure"], "RuntimeError")
 
 
 if __name__ == "__main__":

@@ -202,17 +202,32 @@ def build_report(
             admin["credential_source"] == "admin_stdin",
         )
     )
-    bearer_session_cutover_exact = all(
+    legacy_cutover_state = bool(
+        database_state == "pending"
+        or legacy_environment_admins
+        or retired_environment
+        or non_dedicated_bindings
+    )
+    bearer_session_identity_exact = all(
         (
             bearer["identity_present"],
             not bearer["is_protected_administrator"],
             bearer["is_representative_bearer"],
-            bearer["oa_menu_permission_present"],
-            bearer["access_tier"] in {"denied", "full_access"},
             not bearer["can_admin_access"],
             bearer["http_status"] == 200,
             bearer["credential_source"] == "dedicated_bearer_stdin",
         )
+    )
+    bearer_session_phase_exact = (
+        legacy_cutover_state
+        and bearer["access_tier"] == "full_access"
+        and bearer["oa_menu_permission_present"]
+    ) or (
+        bearer["access_tier"] == "denied"
+        and not bearer["oa_menu_permission_present"]
+    )
+    bearer_session_cutover_exact = (
+        bearer_session_identity_exact and bearer_session_phase_exact
     )
     oa_projection_exact = all(
         (
@@ -686,16 +701,22 @@ def run_post_deploy(
         bearer_session = session(bearer_token)
         bearer_username = str((bearer_session.get("user") or {}).get("username") or "").strip()
         bearer_fact = _session_fact(bearer_session, salt)
-        if not bearer_fact["is_representative_bearer"] or not bearer_fact["oa_menu_permission_present"]:
-            raise RuntimeError("dedicated bearer must be permission-bearing YNSYLP006")
+        if not bearer_fact["is_representative_bearer"]:
+            raise RuntimeError("dedicated bearer must be YNSYLP006")
         if _session_fact(admin_session, salt)["username_sha256"] != preflight["sessions"]["admin"]["username_sha256"]:
             raise RuntimeError("admin identity hash drifted from approved preflight")
         if _session_fact(bearer_session, salt)["username_sha256"] != preflight["sessions"]["bearer"]["username_sha256"]:
             raise RuntimeError("bearer identity hash drifted from approved preflight")
         if admin_session.get("access_tier") != "admin" or admin_session.get("can_admin_access") is not True:
             raise RuntimeError("admin session contract failed")
-        if bearer_session.get("access_tier") != "denied" or bearer_session.get("can_admin_access") is True:
-            raise RuntimeError("bearer must start denied and non-admin")
+        if (
+            bearer_session.get("access_tier") != "denied"
+            or bearer_session.get("can_admin_access") is True
+            or bearer_fact["oa_menu_permission_present"]
+        ):
+            raise RuntimeError(
+                "bearer must start denied, non-admin, and without OA menu permission"
+            )
         router_visibility.update(
             {
                 "admin": router_visible(admin_token),
@@ -867,7 +888,6 @@ def run_post_deploy(
             "http_call_counts": {key: len(values) for key, values in request_latencies.items()},
             "latency": latency,
         }
-        report["bearer_username_sha256"] = _hash_username(bearer_username, salt)
         report["status"] = "pass"
     except Exception as exc:
         report["failure"] = type(exc).__name__

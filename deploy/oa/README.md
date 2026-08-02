@@ -741,9 +741,11 @@ ssh -o StrictHostKeyChecking=accept-new -o ControlMaster=no finops-deploy@finops
 
 Preflight 的 `eligible=true` 表示已经是 post-deploy 稳态；升级旧 runtime 时可以用
 `cutover_eligible=true` 表示唯一受控切换态。该切换态要求：admin session 精确为 `YNSYLP005/admin`；专用 bearer
-精确为带 `finops:app:view` 的 `YNSYLP006`、非 admin，且必须从 canonical Settings ACL 的
-allowed/readonly/full/admin 四个集合全部缺席；旧 runtime 因已退休 OA permission fallback 暂时返回
-`full_access` 可以进入切换，但新 runtime 必须返回 denied。0133/CHECK 三项只能全 false（待迁移）或全 true，
+精确为 `YNSYLP006`、非 admin，且必须从 canonical Settings ACL 的 allowed/readonly/full/admin 四个集合全部缺席。
+身份相位只接受两个精确组合：存在 pending DB、legacy env 或 OA cleanup 事实的旧 runtime 切换态为
+`full_access` 且带 `finops:app:view`；steady/forward-repair
+态为 `denied` 且不带该 OA 菜单权限。`denied + permission` 或 `full_access + no permission` 都属于交叉漂移并
+fail closed。0133/CHECK 三项只能全 false（待迁移）或全 true，
 禁止 partial；legacy admin env 只能为空或恰好 005；retired env 只能是三个固定 key；OA selector、唯一 menu、
 三 dedicated roles/bindings/members 必须与 canonical ACL 精确一致。artifact 只含非敏感 state/blockers、salted
 hashes/counts/fingerprints。任何 token、identity、canonical ACL、partial DB、env、OA 或 fingerprint 漂移都阻断。
@@ -769,7 +771,7 @@ ssh -o StrictHostKeyChecking=accept-new -o ControlMaster=no finops-deploy@finops
   'sudo -n sha256sum --check /opt/fin-ops/evidence/<release>/settings-access-control-post-deploy.json.sha256'
 ```
 
-post-deploy 不接受旧 runtime 切换态作为最终结果。只有 strict env contract、`status=pass`、restore 全 true（包括 OA router 恢复为 denied 不可见）、migration/CHECK true、三档角色和攻击矩阵全通过、fresh OA router 只在 full/read 阶段可见、ACL GET p95≤1000ms、ACL PUT max≤5000ms 才完成。restore 失败必须非零并立即人工核对 DB/OA/session。
+post-deploy 不接受旧 runtime 切换态作为最终结果。初始 `YNSYLP006` 必须同时为 canonical denied、非 admin、无 `finops:app:view` 且 fresh OA router 不可见；只有 strict env contract、`status=pass`、restore 全 true（包括 OA router 恢复为 denied 不可见）、migration/CHECK true、三档角色和攻击矩阵全通过、fresh OA router 只在 full/read 阶段可见、ACL GET p95≤1000ms、ACL PUT max≤5000ms 才完成。restore 失败必须非零并立即人工核对 DB/OA/session。
 
 ## 权限同步操作顺序
 
