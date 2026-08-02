@@ -1632,7 +1632,8 @@ class AppSettingsServiceTests(unittest.TestCase):
                 )
 
             payload = app._app_settings_service.get_access_control_payload()
-            persisted = json.loads((Path(temp_dir) / "app_settings.json").read_text(encoding="utf-8"))
+            state_path = Path(temp_dir) / "app_settings.json"
+            persisted = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
 
         self.assertEqual(payload["accounts"], [])
         self.assertEqual(persisted.get("_settings_acl_audit_events", []), [])

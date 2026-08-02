@@ -10,6 +10,7 @@ from fin_ops_platform.app.server import Application
 from fin_ops_platform.app.server import build_application as _build_application
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.import_job_queue import IMPORT_PROCESS_REQUESTED_EVENT, ImportJob
+from fin_ops_platform.services.oa_role_sync_service import OARoleSyncService
 from fin_ops_platform.services.state_store import ApplicationStateStore
 from fin_ops_platform.services.state_store_protocol import (
     settings_access_control_from_payload,
@@ -85,6 +86,11 @@ def configure_access_control(
     read_export_only: list[str] | None = None,
 ) -> dict[str, object]:
     service = application._app_settings_service  # noqa: SLF001
+    sync_service = service._oa_role_sync_service  # noqa: SLF001
+    if sync_service is None or (isinstance(sync_service, OARoleSyncService) and not sync_service.enabled):
+        service._oa_role_sync_service = OARoleSyncService(  # noqa: SLF001
+            executor=SimpleNamespace(apply=lambda _assignments: None)
+        )
     current = service.get_access_control_payload()
     accounts = [
         *(

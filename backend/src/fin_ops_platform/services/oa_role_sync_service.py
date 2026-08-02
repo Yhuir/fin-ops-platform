@@ -96,7 +96,7 @@ class OARoleSyncService:
 
     def sync_access_control(self, snapshot: dict[str, Any]) -> None:
         if self._executor is None:
-            return
+            raise OARoleSyncConfigurationError("OA role sync is disabled or not configured.")
         self._executor.apply(self.build_assignments(snapshot))
 
 

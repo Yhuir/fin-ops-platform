@@ -23,7 +23,10 @@ from fin_ops_platform.services.input_invoice_usage_payment_rules import (
     SETTINGS_KEY as INPUT_INVOICE_USAGE_PAYMENT_RULES_SETTINGS_KEY,
     normalize_payment_status_rules_settings,
 )
-from fin_ops_platform.services.oa_role_sync_service import OARoleSyncService
+from fin_ops_platform.services.oa_role_sync_service import (
+    OARoleSyncConfigurationError,
+    OARoleSyncService,
+)
 from fin_ops_platform.services.pending_invoice_rules import (
     PENDING_INVOICE_GROUP_LABELS_BY_DIRECTION,
     active_pending_invoice_rule_tags,
@@ -276,8 +279,9 @@ class AppSettingsService:
                 if self._access_control_memberships(previous_acl) == self._access_control_memberships(next_acl):
                     self._snapshot = {**self._snapshot, **previous_acl}
                     return {"changed": False, **self._public_access_control_payload(previous_acl)}
-                if self._oa_role_sync_service is not None:
-                    self._oa_role_sync_service.sync_access_control(next_acl)
+                if self._oa_role_sync_service is None:
+                    raise OARoleSyncConfigurationError("OA role sync is disabled or not configured.")
+                self._oa_role_sync_service.sync_access_control(next_acl)
                 try:
                     committed_acl = critical_section.commit(
                         next_acl,
