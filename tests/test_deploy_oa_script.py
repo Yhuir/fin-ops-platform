@@ -407,7 +407,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("missing OA session runtime env", script)
         self.assertIn("FIN_OPS_OA_BASE_URL", script)
         self.assertIn("FIN_OPS_OA_USER_INFO_PATH", script)
-        self.assertIn("FIN_OPS_ALLOWED_USERNAMES", script)
+        self.assertIn("retired APP admission env must be absent", script)
         self.assertNotIn("FIN_OPS_ADMIN_USERNAMES", script)
         self.assertIn("EnvironmentFile=\nEnvironmentFile=$COMMON_ENV", script)
         self.assertGreaterEqual(script.count("EnvironmentFile=\nEnvironmentFile=$COMMON_ENV"), 2)
@@ -670,6 +670,62 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("finops_read_export", user_sync)
         self.assertIn("finops_full_access", user_sync)
         self.assertIn("finops_admin", user_sync)
+
+    def test_common_env_keeps_fixed_selector_and_retires_app_admission_lists(self) -> None:
+        common = (OA_SQL_ROOT / "env" / "fin-ops.common.env.example").read_text(encoding="utf-8")
+
+        self.assertIn("FIN_OPS_OA_REQUIRED_PERMISSION=finops:app:view", common)
+        self.assertNotIn("FIN_OPS_ALLOWED_USERNAMES=", common)
+        self.assertNotIn("FIN_OPS_ALLOWED_ROLES=", common)
+        self.assertNotIn("FIN_OPS_READONLY_EXPORT_USERNAMES=", common)
+
+    def test_release_gate_runs_artifact_bound_cleanup_and_rollback(self) -> None:
+        script = DEPLOY_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
+        activate = script.split("release_gate_activate() {", 1)[1].split("\n}\n", 1)[0]
+        rollback = script.split("rollback_release_gate() {", 1)[1].split("\n}\n", 1)[0]
+
+        self.assertIn("run_settings_access_control_binding_operation()", script)
+        self.assertIn('sha256sum --check "$artifact.sha256"', script)
+        self.assertIn('"$src/deploy/oa/fin_ops_role_binding.mysql.sql"', script)
+        self.assertIn("@approved_target_hashes_csv", script)
+        self.assertIn("@approved_before_sha256", script)
+        self.assertIn("@approved_after_sha256", script)
+        self.assertIn('MYSQL_PWD="$FIN_OPS_OA_ROLE_SYNC_PASSWORD"', script)
+        self.assertIn('apply_settings_access_control_menu_binding_cleanup "$release"', activate)
+        self.assertLess(
+            activate.index('release_gate_checkpoint "$previous_release" pre'),
+            activate.index('apply_settings_access_control_menu_binding_cleanup "$release"'),
+        )
+        self.assertLess(
+            activate.index('apply_settings_access_control_menu_binding_cleanup "$release"'),
+            activate.index('activate_release "$release"'),
+        )
+        self.assertIn('rollback_settings_access_control_menu_bindings "$candidate"', rollback)
+        self.assertLess(
+            rollback.index('rollback_settings_access_control_menu_bindings "$candidate"'),
+            rollback.index('activate_release "$previous_release"'),
+        )
+
+    def test_runtime_contract_requires_exact_role_sync_and_rejects_retired_env(self) -> None:
+        script = DEPLOY_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
+        contract = script.split("assert_runtime_env_contract() {", 1)[1].split("\n}\n", 1)[0]
+
+        for key in (
+            "FIN_OPS_OA_ROLE_SYNC_ENABLED",
+            "FIN_OPS_OA_ROLE_SYNC_HOST",
+            "FIN_OPS_OA_ROLE_SYNC_DATABASE",
+            "FIN_OPS_OA_ROLE_SYNC_USERNAME",
+            "FIN_OPS_OA_ROLE_SYNC_PASSWORD",
+            "FIN_OPS_OA_REQUIRED_PERMISSION",
+        ):
+            self.assertIn(key, contract)
+        self.assertIn('[[ "$FIN_OPS_OA_REQUIRED_PERMISSION" == "finops:app:view" ]]', contract)
+        for retired in (
+            "FIN_OPS_ALLOWED_USERNAMES",
+            "FIN_OPS_ALLOWED_ROLES",
+            "FIN_OPS_READONLY_EXPORT_USERNAMES",
+        ):
+            self.assertIn(retired, contract)
 
     def test_release_gate_restores_stable_helpers_when_precheck_fails(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
