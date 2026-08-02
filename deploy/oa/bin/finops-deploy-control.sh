@@ -375,14 +375,194 @@ import sys
 
 approved = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 current = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
-if approved.get("eligible") is not True:
-    raise SystemExit("settings access-control preflight is not eligible")
+oa = approved.get("oa", {}) if isinstance(approved.get("oa"), dict) else {}
+if approved.get("eligible") is not True and oa.get("cleanup_eligible") is not True:
+    raise SystemExit("settings access-control preflight is neither eligible nor exact-cleanup eligible")
 if approved.get("release") != current.get("candidate", {}).get("release"):
     raise SystemExit("settings access-control preflight release drifted")
 if approved.get("deployment") != current:
     raise SystemExit("settings access-control candidate or active release fingerprint drifted")
 PY
 )
+
+run_settings_access_control_binding_operation() (
+  local release="$1"
+  local operation="$2"
+  [[ "$operation" == "cleanup" || "$operation" == "rollback" ]] \
+    || die "settings access-control binding operation must be cleanup or rollback"
+  local src evidence_dir artifact values_file raw_result result_file sql_file
+  src="$(release_src "$release")"
+  evidence_dir="$SETTINGS_ACL_EVIDENCE_ROOT/$release"
+  artifact="$evidence_dir/settings-access-control-preflight.json"
+  values_file="$(mktemp /run/finops-settings-acl-binding-values.XXXXXX)"
+  raw_result="$(mktemp /run/finops-settings-acl-binding-result.XXXXXX)"
+  trap 'rm -f -- "$values_file" "$raw_result"' EXIT
+  [[ -f "$artifact" && -f "$artifact.sha256" ]] || die "approved settings access-control preflight is missing"
+  sha256sum --check "$artifact.sha256" >/dev/null
+  sql_file="$src/deploy/oa/fin_ops_role_binding.mysql.sql"
+  [[ -f "$sql_file" ]] || die "fixed OA role-binding SQL is missing"
+  ARTIFACT_RELEASE="$release" ARTIFACT_OPERATION="$operation" \
+    "$API_PYTHON" - "$artifact" "$values_file" <<'PY'
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import sys
+
+artifact = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+release = os.environ["ARTIFACT_RELEASE"]
+operation = os.environ["ARTIFACT_OPERATION"]
+oa = artifact.get("oa", {}) if isinstance(artifact.get("oa"), dict) else {}
+cleanup = oa.get("menu_binding_cleanup", {}) if isinstance(oa.get("menu_binding_cleanup"), dict) else {}
+if artifact.get("contract") != "settings-access-control-v1" or artifact.get("release") != release:
+    raise SystemExit("approved OA cleanup artifact contract/release mismatch")
+required = cleanup.get("required") is True
+if required and oa.get("cleanup_eligible") is not True:
+    raise SystemExit("approved artifact is not exact-cleanup eligible")
+if not required and artifact.get("eligible") is not True:
+    raise SystemExit("approved artifact is not release eligible")
+targets = cleanup.get("target_hashes", [])
+rollback_targets = cleanup.get("rollback_target_hashes", [])
+if not isinstance(targets, list) or targets != rollback_targets:
+    raise SystemExit("cleanup and rollback target hashes are not symmetric")
+if targets != sorted(set(targets)) or any(not re.fullmatch(r"[0-9a-f]{64}", item) for item in targets):
+    raise SystemExit("cleanup target hashes are not an exact lowercase SHA-256 set")
+count = cleanup.get("target_count")
+if not isinstance(count, int) or count != len(targets) or required != (count > 0):
+    raise SystemExit("cleanup target count does not match the approved rowset")
+fingerprint = hashlib.sha256("\n".join(targets).encode("ascii")).hexdigest()
+if cleanup.get("target_set_sha256") != fingerprint:
+    raise SystemExit("cleanup target-set fingerprint mismatch")
+before = cleanup.get("before_sha256")
+after = cleanup.get("after_sha256")
+if any(not isinstance(item, str) or not re.fullmatch(r"[0-9a-f]{64}", item) for item in (before, after)):
+    raise SystemExit("cleanup before/after fingerprints are invalid")
+salt = hashlib.sha256(f"settings-access-control-v1\0{release}".encode("utf-8")).hexdigest()
+Path(sys.argv[2]).write_text(
+    "\n".join((salt, ",".join(targets), str(count), fingerprint, before, after)) + "\n",
+    encoding="utf-8",
+)
+PY
+  [[ "$(wc -l <"$values_file" | tr -d ' ')" == "6" ]] \
+    || die "approved OA cleanup artifact values are incomplete"
+  local artifact_salt target_hashes_csv target_count target_set_sha256 before_sha256 after_sha256
+  artifact_salt="$(sed -n '1p' "$values_file")"
+  target_hashes_csv="$(sed -n '2p' "$values_file")"
+  target_count="$(sed -n '3p' "$values_file")"
+  target_set_sha256="$(sed -n '4p' "$values_file")"
+  before_sha256="$(sed -n '5p' "$values_file")"
+  after_sha256="$(sed -n '6p' "$values_file")"
+  result_file="$evidence_dir/settings-access-control-menu-binding-$operation.json"
+  if [[ "$target_count" == "0" ]]; then
+    ARTIFACT_PATH="$artifact" ARTIFACT_RELEASE="$release" ARTIFACT_OPERATION="$operation" \
+      "$API_PYTHON" - "$result_file" <<'PY'
+import hashlib
+import json
+import os
+from pathlib import Path
+import sys
+
+artifact = Path(os.environ["ARTIFACT_PATH"])
+payload = {
+    "contract": "settings-access-control-v1",
+    "release": os.environ["ARTIFACT_RELEASE"],
+    "operation": os.environ["ARTIFACT_OPERATION"],
+    "status": "pass",
+    "skipped": True,
+    "target_count": 0,
+    "preflight_sha256": hashlib.sha256(artifact.read_bytes()).hexdigest(),
+}
+output = Path(sys.argv[1])
+output.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+output.chmod(0o600)
+PY
+    sha256sum "$result_file" >"$result_file.sha256"
+    return 0
+  fi
+  (
+    set -a
+    # shellcheck disable=SC1090
+    source "$COMMON_ENV"
+    # shellcheck disable=SC1090
+    source "$SECRETS_ENV"
+    set +a
+    command -v mysql >/dev/null || die "mysql client is required for exact OA binding cleanup"
+    {
+      printf "SET @finops_operation = '%s';\n" "$operation"
+      printf "SET @artifact_salt = '%s';\n" "$artifact_salt"
+      printf "SET @approved_target_hashes_csv = '%s';\n" "$target_hashes_csv"
+      printf "SET @approved_target_count = %s;\n" "$target_count"
+      printf "SET @approved_target_set_sha256 = '%s';\n" "$target_set_sha256"
+      printf "SET @approved_before_sha256 = '%s';\n" "$before_sha256"
+      printf "SET @approved_after_sha256 = '%s';\n" "$after_sha256"
+      cat "$sql_file"
+    } | MYSQL_PWD="$FIN_OPS_OA_ROLE_SYNC_PASSWORD" mysql \
+      --protocol=TCP \
+      --host="$FIN_OPS_OA_ROLE_SYNC_HOST" \
+      --port="${FIN_OPS_OA_ROLE_SYNC_PORT:-3306}" \
+      --user="$FIN_OPS_OA_ROLE_SYNC_USERNAME" \
+      --database="$FIN_OPS_OA_ROLE_SYNC_DATABASE" \
+      --batch --skip-column-names --raw >"$raw_result"
+  )
+  ARTIFACT_PATH="$artifact" ARTIFACT_RELEASE="$release" ARTIFACT_OPERATION="$operation" \
+  EXPECTED_BEFORE="$before_sha256" EXPECTED_AFTER="$after_sha256" \
+    "$API_PYTHON" - "$raw_result" "$result_file" <<'PY'
+import hashlib
+import json
+import os
+from pathlib import Path
+import sys
+
+lines = [line for line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines() if line.strip()]
+if len(lines) != 1:
+    raise SystemExit("exact OA binding SQL returned an unexpected result shape")
+result = json.loads(lines[0])
+operation = os.environ["ARTIFACT_OPERATION"]
+expected_before = os.environ["EXPECTED_BEFORE"]
+expected_after = os.environ["EXPECTED_AFTER"]
+expected_result_before = expected_before if operation == "cleanup" else expected_after
+expected_result_after = expected_after if operation == "cleanup" else expected_before
+readback_key = f"{operation}_readback_ok"
+if (
+    result.get("operation") != operation
+    or result.get("committed") not in (True, 1)
+    or result.get(readback_key) not in (True, 1)
+    or result.get("non_target_unchanged") not in (True, 1)
+    or result.get("before_sha256") != expected_result_before
+    or result.get("after_sha256") != expected_result_after
+):
+    raise SystemExit("exact OA binding operation failed its read-back contract")
+artifact = Path(os.environ["ARTIFACT_PATH"])
+payload = {
+    "contract": "settings-access-control-v1",
+    "release": os.environ["ARTIFACT_RELEASE"],
+    "operation": operation,
+    "status": "pass",
+    "skipped": False,
+    "target_count": int(result.get("target_count") or 0),
+    "affected_rows": int(result.get("affected_rows") or 0),
+    "before_sha256": result["before_sha256"],
+    "after_sha256": result["after_sha256"],
+    "non_target_unchanged": True,
+    "preflight_sha256": hashlib.sha256(artifact.read_bytes()).hexdigest(),
+}
+output = Path(sys.argv[2])
+temporary = output.with_suffix(".tmp")
+temporary.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+temporary.replace(output)
+output.chmod(0o600)
+PY
+  sha256sum "$result_file" >"$result_file.sha256"
+)
+
+apply_settings_access_control_menu_binding_cleanup() {
+  run_settings_access_control_binding_operation "$1" cleanup
+}
+
+rollback_settings_access_control_menu_bindings() {
+  run_settings_access_control_binding_operation "$1" rollback
+}
 
 release_is_acl_safe() {
   local release="$1"
@@ -539,11 +719,50 @@ assert_runtime_env_contract() {
   for required_key in \
     FIN_OPS_OA_BASE_URL \
     FIN_OPS_OA_USER_INFO_PATH \
-    FIN_OPS_ALLOWED_USERNAMES; do
+    FIN_OPS_OA_REQUIRED_PERMISSION \
+    FIN_OPS_OA_ROLE_SYNC_ENABLED \
+    FIN_OPS_OA_ROLE_SYNC_HOST \
+    FIN_OPS_OA_ROLE_SYNC_DATABASE \
+    FIN_OPS_OA_ROLE_SYNC_USERNAME \
+    FIN_OPS_OA_ROLE_SYNC_PASSWORD; do
     if ! grep -hE "^${required_key}=" "$COMMON_ENV" "$SECRETS_ENV" >/dev/null; then
       die "missing OA session runtime env: $required_key in $COMMON_ENV or $SECRETS_ENV"
     fi
   done
+  local retired_key
+  for retired_key in \
+    FIN_OPS_ALLOWED_USERNAMES \
+    FIN_OPS_ALLOWED_ROLES \
+    FIN_OPS_READONLY_EXPORT_USERNAMES; do
+    if grep -hE "^${retired_key}=" "$COMMON_ENV" "$SECRETS_ENV" >/dev/null; then
+      die "retired APP admission env must be absent: $retired_key"
+    fi
+  done
+  (
+    set -a
+    # shellcheck disable=SC1090
+    source "$COMMON_ENV"
+    # shellcheck disable=SC1090
+    source "$SECRETS_ENV"
+    set +a
+    [[ "$FIN_OPS_OA_REQUIRED_PERMISSION" == "finops:app:view" ]] \
+      || die "FIN_OPS_OA_REQUIRED_PERMISSION must equal finops:app:view"
+    case "$FIN_OPS_OA_ROLE_SYNC_ENABLED" in
+      1|true|TRUE|yes|YES|on|ON) ;;
+      *) die "FIN_OPS_OA_ROLE_SYNC_ENABLED must be enabled for production release" ;;
+    esac
+    [[ -n "$FIN_OPS_OA_ROLE_SYNC_HOST" \
+      && -n "$FIN_OPS_OA_ROLE_SYNC_DATABASE" \
+      && -n "$FIN_OPS_OA_ROLE_SYNC_USERNAME" \
+      && -n "$FIN_OPS_OA_ROLE_SYNC_PASSWORD" ]] \
+      || die "OA role sync connection configuration is incomplete"
+    [[ "${FIN_OPS_OA_ROLE_SYNC_PORT:-3306}" =~ ^[0-9]+$ ]] \
+      || die "FIN_OPS_OA_ROLE_SYNC_PORT must be numeric"
+    [[ "${FIN_OPS_OA_ROLE_SYNC_READONLY_ROLE_KEY:-finops_read_export}" == "finops_read_export" \
+      && "${FIN_OPS_OA_ROLE_SYNC_FULL_ACCESS_ROLE_KEY:-finops_full_access}" == "finops_full_access" \
+      && "${FIN_OPS_OA_ROLE_SYNC_ADMIN_ROLE_KEY:-finops_admin}" == "finops_admin" ]] \
+      || die "OA role sync must use the three fixed fin-ops role keys"
+  )
 }
 
 sync_python_envs() {
@@ -2161,6 +2380,13 @@ rollback_release_gate() {
       "$candidate" "$previous_release" "$evidence_dir" FAIL false "$failure_checkpoint" || true
     die "release gate failed at $failure_checkpoint; previous release lacks $SETTINGS_ACL_CONTRACT, production remains in maintenance for forward repair"
   fi
+  if ! rollback_settings_access_control_menu_bindings "$candidate"; then
+    systemctl stop fin-ops.service || true
+    stop_runtime_worker_services_for_activation || true
+    write_release_gate_evidence \
+      "$candidate" "$previous_release" "$evidence_dir" FAIL false "$failure_checkpoint" || true
+    die "release gate failed at $failure_checkpoint and OA menu binding rollback failed; production remains in maintenance"
+  fi
   if (activate_release "$previous_release") \
     && release_gate_checkpoint "$previous_release" rollback "$admin_token" "$evidence_dir" preflight "$candidate"; then
     rolled_back=true
@@ -2194,6 +2420,8 @@ release_gate_activate() {
     write_release_gate_evidence "$release" "$previous_release" "$evidence_dir" FAIL false pre
     die "current production runtime failed the pre-activation release gate"
   fi
+  apply_settings_access_control_menu_binding_cleanup "$release" \
+    || die "exact OA menu binding cleanup failed before candidate activation"
   if ! (activate_release "$release"); then
     rollback_release_gate "$release" "$previous_release" "$admin_token" "$evidence_dir" activation
   fi

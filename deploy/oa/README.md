@@ -139,9 +139,6 @@ FIN_OPS_OA_PAYMENT_STATUS_DATABASE=smart_oa
 FIN_OPS_OA_PAYMENT_STATUS_USERNAME=<least-privilege mysql user>
 FIN_OPS_OA_PAYMENT_STATUS_PASSWORD=<least-privilege mysql password>
 FIN_OPS_OA_PAYMENT_STATUS_CONNECT_TIMEOUT_SECONDS=5
-FIN_OPS_ALLOWED_USERNAMES=YNSYLP005
-FIN_OPS_READONLY_EXPORT_USERNAMES=
-FIN_OPS_ALLOWED_ROLES=
 FIN_OPS_PROMETHEUS_BEARER_TOKEN=<root-only long random metrics token>
 VITE_APP_BASE_PATH=/fin-ops/
 ```
@@ -150,16 +147,17 @@ VITE_APP_BASE_PATH=/fin-ops/
 
 - `FIN_OPS_OA_BASE_URL` 必须指向 OA 网关对外地址
 - `finops-deploy-control check-release` 会在发布前校验 PostgreSQL DSN 以及
-  `FIN_OPS_OA_BASE_URL / FIN_OPS_OA_USER_INFO_PATH / FIN_OPS_ALLOWED_USERNAMES`，
+  `FIN_OPS_OA_BASE_URL / FIN_OPS_OA_USER_INFO_PATH / FIN_OPS_OA_REQUIRED_PERMISSION` 和 OA role sync，
   缺任一项都会停止发布，避免上线后才出现“未配置 OA 用户信息服务地址”
-- `FIN_OPS_OA_REQUIRED_PERMISSION` 默认就是 `finops:app:view`
+- `FIN_OPS_OA_REQUIRED_PERMISSION` 必须精确为 `finops:app:view`，它只定位 OA 菜单，不授予 APP 权限
 - `FIN_OPS_OA_LOGIN_PATH` 默认 `/auth/login`；`创建 OA 草稿` 会用目标 OA 申请人的账号密码登录 OA，并用返回 token 创建 `isDraft=true` 草稿
 - `FIN_OPS_OA_APPLICANT_CREDENTIAL_KEY` 用于 PostgreSQL `pgcrypto` 加密/解密目标 OA 申请人密码，必须放在 root-only secret env，且上线后保持稳定，轮换前需要先设计迁移方案
 - `FIN_OPS_OA_LOGIN_RSA_PUBLIC_KEY` 是 OA 登录接口使用的 RSA 公钥，可配置 PEM 或 base64 DER；后端登录目标申请人前会用该公钥加密密码，不发送明文密码
 - 服务器 runtime 必须能执行 `openssl`，用于目标申请人登录密码 RSA 加密；缺失时 `创建 OA 草稿` 会返回目标 OA 登录不可用
 - `FIN_OPS_OA_PAYMENT_STATUS_*` 用于进行中 OA “确认已支付”写回 OA MySQL `t_payment_simple`。2026-06-17 实机验证显示 `t_payment_simple.flow_id` 对应 OA Mongo `form_data._id`，不是 Flowable `PROC_INST_ID_`。应用正常运行时直接通过 MySQL 连接写回，不需要 SSH 登录 OA 服务器；如果 MySQL 只允许服务器本机访问，应将 app 部署在可访问该 MySQL 的同机/内网，或配置受控隧道/专用网络。未启用时页面仍可读取 OA 待付款数据，但 confirm-paid 会返回写回未配置。
-- `FIN_OPS_ALLOWED_USERNAMES / FIN_OPS_READONLY_EXPORT_USERNAMES` 是非管理员启动期兜底配置；
-  管理员固定为 `YNSYLP005`，不再接受环境变量或普通 settings payload 覆盖
+- `FIN_OPS_ALLOWED_USERNAMES / FIN_OPS_ALLOWED_ROLES / FIN_OPS_READONLY_EXPORT_USERNAMES` 已退休；
+  任一项即使为空，只要仍存在于 runtime env 就会阻断发布。APP admission 只来自 Settings ACL；管理员固定为
+  `YNSYLP005`，不接受环境变量或普通 settings payload 覆盖
 - `FIN_OPS_PROMETHEUS_BEARER_TOKEN` 用于 `/metrics` Prometheus scrape；未配置时 `/metrics`
   返回 `404`，配置后必须带 `Authorization: Bearer <token>`
 - 如果希望“访问账户管理”保存后自动同步 OA 菜单角色，还需要配置：
@@ -666,10 +664,7 @@ release 会占用服务器磁盘。生产策略不是无限保留，而是默认
 - 建议在生产机配置持久的 journald/logrotate 上限，避免 `/var/log/messages` 或 `/var/log/journal` 持续增长后把 `/` 填满。
 - 只有在确认业务影响后，才把 `--keep-releases` 降到 4 以下；降低 release 保留数只能释放 release 目录空间，不能解决日志或系统目录导致的根分区满。
 
-按当前业务要求，初始配置至少要包含：
-
-- `FIN_OPS_ALLOWED_USERNAMES=YNSYLP005`
-- 唯一受保护管理员固定为 `YNSYLP005`，无需且禁止通过 env 配置第二管理员
+按当前业务要求，唯一受保护管理员固定为 `YNSYLP005`，无需且禁止通过 env 配置第二管理员；生产必须启用并完整配置 OA role sync。
 
 后续再通过关联台里的“访问账户管理”维护：
 
@@ -677,11 +672,7 @@ release 会占用服务器磁盘。生产策略不是无限保留，而是默认
 - 只读导出账户
 - 全操作账户
 
-注意：
-
-- 默认情况下，当前 app 设置保存后不会自动改 OA 数据库角色绑定
-- 如果已配置 `FIN_OPS_OA_ROLE_SYNC_ENABLED=1` 和 OA MySQL 连接参数，则保存后会自动同步 OA 用户角色
-- 未启用自动同步时，仍需要按下文“权限同步操作顺序”手工同步
+注意：生产 `FIN_OPS_OA_ROLE_SYNC_ENABLED` 缺失、禁用或连接参数不完整都会 fail closed；不存在手工同步或 env allowlist fallback。
 
 权限与菜单的 SQL 模板：
 
@@ -746,7 +737,13 @@ ssh -o StrictHostKeyChecking=accept-new -o ControlMaster=no finops-deploy@finops
   'sudo -n sha256sum --check /opt/fin-ops/evidence/<release>/settings-access-control-preflight.json.sha256'
 ```
 
-Preflight 必须 `eligible=true`：admin session 是 `YNSYLP005/admin`；专用 bearer 是不同的非 admin identity 且初始 denied；DB ACL、root env 和 OA 三角色一致；artifact 只含 salted username hashes/counts/diff。任何 token/identity/OA/fingerprint 漂移都重新阻断。
+Preflight 必须 `eligible=true`，唯一例外是下述仅含 exact cleanup targets 的 `oa.cleanup_eligible=true`：admin session 是 `YNSYLP005/admin`；专用 bearer 是不同的非 admin identity 且初始 denied；DB ACL、root env 和 OA 三角色一致；artifact 只含 salted username/role/menu/binding hashes、counts 与 fingerprints。任何 token/identity/OA/fingerprint 漂移都重新阻断。
+
+若 fixed menu 上仍有历史 non-dedicated role binding，普通 `eligible` 保持 false，但 artifact 可单独标记
+`oa.cleanup_eligible=true`，并给出 salted exact target hashes、before/after 与 rollback fingerprint。release gate
+只在 current-runtime pre checkpoint 通过后执行这些 exact rows；artifact SHA、current before-image、三专用 role exact set
+或 non-target fingerprint 任一漂移都在同一事务内零写/回滚。候选后续失败时，release rollback 会先用同一 before-image
+恢复 exact rows并 read-back；rollback 失败保持 maintenance，禁止继续恢复旧 binary 后伪装成功。
 
 4. 只用 exact candidate 零重传激活：`./scripts/deploy-oa.sh --activate-existing --release-name <release>`。顺序固定为 preflight assertion → current runtime checkpoint → API/worker quiesce → 0132/CHECK → safe candidate → T+0/T+60/T+300 evidence。previous release 没有同等安全 capability 时失败保持 maintenance 并 forward repair。
 5. 激活成功后用相同双 token 运行 `settings-access-control-post-deploy`。它把专用 bearer 依次改为 full、read、denied，验证 generic save、两条直接提权攻击、AppHealth/OA credentials/data reset admin-only、OA 三角色、durable audit/request id 和 ACL GET/PUT latency，并在 finally/read-back 中恢复原 accounts/OA/denied session：
@@ -776,7 +773,7 @@ post-deploy 只有 `status=pass`、restore 全 true、migration/CHECK true、三
    - 全操作账户 -> `finops_full_access`
    - `YNSYLP005` -> `finops_admin`
 4. 把不再出现在 `allowed_usernames` 内的账户，从以上三类 OA 角色全部移除
-5. 用对应账号重新登录 OA 验证菜单和页面行为
+5. 用对应账号重新登录 OA 验证菜单和页面行为；这是验收，不是生产同步 fallback
 
 如果只改了 app 设置、没同步 OA 角色，会出现两类不一致：
 
@@ -873,7 +870,7 @@ curl -sI https://www.yn-sourcing.com/fin-ops/api/session/me | grep -Ei '401|appl
   - 只读导出账户
   - 全操作账户
 - [ ] 保存后 app 内权限立即生效
-- [ ] 保存后按手工同步步骤更新 OA 角色，再验证菜单可见性一致
+- [ ] 保存后 OA role sync 自动完成，并用 fresh OA router/session 验证菜单可见性一致
 
 ### 功能可用性
 
