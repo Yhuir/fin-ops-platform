@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 13-04-PLAN.md
-last_updated: "2026-08-02T08:39:44.761Z"
+stopped_at: Completed 13-12-PLAN.md
+last_updated: "2026-08-02T08:53:55.278Z"
 last_activity: 2026-08-02 -- Phase 13 execution started
 progress:
   total_phases: 38
   completed_phases: 11
   total_plans: 104
-  completed_plans: 73
+  completed_plans: 74
   percent: 29
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 ## Current Position
 
 Phase: 13 (settings-improvements) — EXECUTING
-Plan: 12 of 15
+Plan: 13 of 15
 Status: Ready to execute
 Last activity: 2026-08-02 -- Phase 13 execution started
 
@@ -60,6 +60,7 @@ Progress: [██░░░░░░░░] in progress
 | Phase 13 P09 | 10min | 2 tasks | 8 files |
 | Phase 13 P11 | 20min | 2 tasks | 7 files |
 | Phase 13 P04 | 8min | 2 tasks | 6 files |
+| Phase 13 P12 | 8min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -184,6 +185,9 @@ Progress: [██░░░░░░░░] in progress
 - [Phase 13]: Only exact YNSYLP005 and canonical Settings ACL full/read membership grant APP access. — OA role, permission and retired env admission remain informational or rejected and never grant APP authority.
 - [Phase 13]: finops:app:view identifies only the OA menu; runtime owns strict three-role projection. — Deployment separately owns exact legacy binding cleanup, read-back and rollback.
 - [Phase 13]: Long-lived docs cite completed automated evidence without claiming production deployment. — Production preflight, fresh router/session and release evidence remain later gates.
+- [Phase 13]: Settings owns the only human ACL I/O and dedicated versioned command; permissions-and-audit owns evaluator, enforcement and audit semantics.
+- [Phase 13]: Settings and permissions state machines share one snapshot version and the same no-op, conflict, projection, persistence, recovery and compensation outcomes.
+- [Phase 13]: Phase 13 authorization docs reuse the 13-09/13-11 evidence and keep test_permissions_write_entry_inventory.py as the sole whole-repo scanner.
 
 ### Roadmap Evolution
 
@@ -262,6 +266,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-02T08:39:44.752Z
-Stopped at: Completed 13-04-PLAN.md
+Last session: 2026-08-02T08:53:55.270Z
+Stopped at: Completed 13-12-PLAN.md
 Resume file: None
