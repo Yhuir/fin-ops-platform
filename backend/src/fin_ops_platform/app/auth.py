@@ -109,8 +109,8 @@ def resolve_oa_request_session(
                 username=dev_username,
                 nickname="本地开发用户",
                 display_name="本地开发用户",
-                roles=access_control_service.allowed_roles or ["finance"],
-                permissions=[access_control_service.required_permission],
+                roles=[],
+                permissions=[],
             )
             decision = access_control_service.evaluate(synthetic_identity)
             return OARequestSession(
@@ -128,8 +128,8 @@ def resolve_oa_request_session(
                 username="test_finops_user",
                 nickname="测试用户",
                 display_name="测试用户",
-                roles=access_control_service.allowed_roles or ["finance"],
-                permissions=[access_control_service.required_permission],
+                roles=[],
+                permissions=[],
             )
             decision = access_control_service.evaluate(synthetic_identity)
             return OARequestSession(

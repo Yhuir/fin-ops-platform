@@ -8,6 +8,7 @@ from pathlib import Path
 from tests.app_test_support import (
     build_local_state_application as build_application,
     configure_access_control,
+    configure_default_test_access,
 )
 from fin_ops_platform.services.oa_identity_service import OASessionExpiredError, OAUserIdentity
 
@@ -64,6 +65,16 @@ class SessionApiTests(unittest.TestCase):
         self.assertTrue(payload["can_access_app"])
         self.assertTrue(payload["can_mutate_data"])
         self.assertFalse(payload["can_admin_access"])
+
+    def test_default_test_identity_requires_explicit_canonical_acl_seed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            configure_default_test_access(app)
+
+            payload = json.loads(app.handle_request("GET", "/api/session/me").body)
+
+        self.assertEqual(payload["user"]["username"], "test_finops_user")
+        self.assertEqual(payload["access_tier"], "full_access")
 
     def test_get_session_me_fails_closed_when_dynamic_settings_provider_is_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

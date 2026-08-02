@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
-import os
-from typing import Any, Callable, Iterable, Literal
+from typing import Any, Callable, Literal
 
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.state_store_protocol import (
     PROTECTED_ADMIN_USERNAME,
     settings_access_control_from_payload,
+    settings_username_comparison_key,
 )
 
 
@@ -17,31 +17,8 @@ AccessTier = Literal["denied", "read_export_only", "full_access", "admin"]
 logger = logging.getLogger(__name__)
 
 
-def _normalize_values(values: Iterable[str]) -> list[str]:
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        item = str(value).strip()
-        if not item or item in seen:
-            continue
-        normalized.append(item)
-        seen.add(item)
-    return normalized
-
-
-def _parse_csv_environment(name: str) -> list[str]:
-    raw = os.getenv(name, "")
-    if not raw.strip():
-        return []
-    return _normalize_values(part.strip() for part in raw.split(","))
-
-
 @dataclass(slots=True)
 class AccessControlService:
-    required_permission: str = "finops:app:view"
-    allowed_usernames: list[str] | None = None
-    allowed_roles: list[str] | None = None
-    readonly_export_usernames: list[str] | None = None
     access_control_snapshot_provider: Callable[[], dict[str, Any]] | None = None
 
     @classmethod
@@ -50,21 +27,12 @@ class AccessControlService:
         *,
         access_control_snapshot_provider: Callable[[], dict[str, Any]] | None = None,
     ) -> "AccessControlService":
-        required_permission = os.getenv("FIN_OPS_OA_REQUIRED_PERMISSION", "finops:app:view").strip() or "finops:app:view"
-        return cls(
-            required_permission=required_permission,
-            allowed_usernames=_parse_csv_environment("FIN_OPS_ALLOWED_USERNAMES"),
-            allowed_roles=_parse_csv_environment("FIN_OPS_ALLOWED_ROLES"),
-            readonly_export_usernames=_parse_csv_environment("FIN_OPS_READONLY_EXPORT_USERNAMES"),
-            access_control_snapshot_provider=access_control_snapshot_provider,
-        )
+        return cls(access_control_snapshot_provider=access_control_snapshot_provider)
 
     def is_allowed(self, identity: OAUserIdentity) -> bool:
         return self.evaluate(identity).allowed
 
     def evaluate(self, identity: OAUserIdentity) -> "AccessDecision":
-        permissions = set(_normalize_values(identity.permissions))
-        roles = set(_normalize_values(identity.roles))
         username = identity.username.strip()
 
         if username == PROTECTED_ADMIN_USERNAME:
@@ -75,22 +43,8 @@ class AccessControlService:
                 can_admin_access=True,
             )
 
-        allowed_usernames = set(_normalize_values(self.allowed_usernames or []))
-        readonly_export_usernames = set(_normalize_values(self.readonly_export_usernames or []))
         snapshot = self._load_access_control_snapshot()
-        allowed_usernames.update(snapshot["allowed_usernames"])
-        readonly_export_usernames.update(snapshot["readonly_export_usernames"])
-
-        if self.required_permission and self.required_permission in permissions:
-            can_access_app = True
-        elif allowed_usernames and username in allowed_usernames:
-            can_access_app = True
-        elif self.allowed_roles and roles.intersection(self.allowed_roles):
-            can_access_app = True
-        else:
-            can_access_app = username in allowed_usernames
-
-        if not can_access_app:
+        if snapshot is None:
             return AccessDecision(
                 access_tier="denied",
                 can_access_app=False,
@@ -98,7 +52,19 @@ class AccessControlService:
                 can_admin_access=False,
             )
 
-        if username in readonly_export_usernames:
+        try:
+            username_key = settings_username_comparison_key(username)
+        except ValueError:
+            return AccessDecision(
+                access_tier="denied",
+                can_access_app=False,
+                can_mutate_data=False,
+                can_admin_access=False,
+            )
+
+        if username_key in {
+            settings_username_comparison_key(name) for name in snapshot["readonly_export_usernames"]
+        }:
             return AccessDecision(
                 access_tier="read_export_only",
                 can_access_app=True,
@@ -106,22 +72,31 @@ class AccessControlService:
                 can_admin_access=False,
             )
 
+        if username_key in {
+            settings_username_comparison_key(name) for name in snapshot["full_access_usernames"]
+        }:
+            return AccessDecision(
+                access_tier="full_access",
+                can_access_app=True,
+                can_mutate_data=True,
+                can_admin_access=False,
+            )
         return AccessDecision(
-            access_tier="full_access",
-            can_access_app=True,
-            can_mutate_data=True,
+            access_tier="denied",
+            can_access_app=False,
+            can_mutate_data=False,
             can_admin_access=False,
         )
 
-    def _load_access_control_snapshot(self) -> dict[str, Any]:
+    def _load_access_control_snapshot(self) -> dict[str, Any] | None:
         provider = self.access_control_snapshot_provider
         if provider is None:
-            return settings_access_control_from_payload({})
+            return None
         try:
             return settings_access_control_from_payload(provider())
         except Exception:
-            logger.warning("Access control snapshot provider failed.", exc_info=True)
-            return settings_access_control_from_payload({})
+            logger.warning("Access control snapshot provider failed; access denied.")
+            return None
 
 
 @dataclass(slots=True, frozen=True)

@@ -69,6 +69,10 @@ def configure_access_control(
     )
 
 
+def configure_default_test_access(application: Application) -> dict[str, object]:
+    return configure_access_control(application, full_access=["test_finops_user"])
+
+
 def seed_confirmed_import(
     application: Application,
     *,

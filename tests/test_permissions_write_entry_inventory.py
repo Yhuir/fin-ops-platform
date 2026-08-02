@@ -399,9 +399,7 @@ class PermissionsWriteEntryInventoryTests(unittest.TestCase):
         forbidden = (
             "_parse_csv_environment",
             "required_permission",
-            "allowed_usernames",
             "allowed_roles",
-            "readonly_export_usernames",
             "FIN_OPS_ALLOWED_USERNAMES",
             "FIN_OPS_ALLOWED_ROLES",
             "FIN_OPS_READONLY_EXPORT_USERNAMES",
