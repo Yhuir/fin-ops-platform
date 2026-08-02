@@ -18,6 +18,17 @@ from fin_ops_platform.services.postgres_connection import PostgresConnection, Po
 
 PROTECTED_ADMIN_USERNAME = "YNSYLP005"
 ROLE_TIERS = ("read_export_only", "full_access", "admin")
+OA_MENU_PERMISSION = "finops:app:view"
+ROLE_KEYS = {
+    "read_export_only": "finops_read_export",
+    "full_access": "finops_full_access",
+    "admin": "finops_admin",
+}
+RETIRED_ADMISSION_ENVS = (
+    "FIN_OPS_ALLOWED_ROLES",
+    "FIN_OPS_ALLOWED_USERNAMES",
+    "FIN_OPS_READONLY_EXPORT_USERNAMES",
+)
 LEGACY_ADMIN_ENV = "FIN_OPS_" + "ADMIN_USERNAMES"
 
 
@@ -37,6 +48,24 @@ def _hash_username(username: str, salt: str) -> str:
 
 def _hashed_usernames(usernames: list[str], salt: str) -> list[str]:
     return [_hash_username(username, salt) for username in sorted(usernames)]
+
+
+def _ids(value: object) -> list[int]:
+    return sorted({int(item) for item in list(value or [])})
+
+
+def _hash_oa_id(kind: str, value: int, salt: str) -> str:
+    return hashlib.sha256(f"{salt}\0{kind}\0{value}".encode("utf-8")).hexdigest()
+
+
+def _hash_menu_binding(role_id: int, menu_id: int, salt: str) -> str:
+    return hashlib.sha256(
+        f"{salt}\0role_menu\0{role_id}\0{menu_id}".encode("utf-8")
+    ).hexdigest()
+
+
+def _hash_fingerprint_set(values: list[str]) -> str:
+    return hashlib.sha256("\n".join(sorted(values)).encode("ascii")).hexdigest()
 
 
 def _session_fact(payload: dict[str, Any], salt: str) -> dict[str, Any]:
@@ -89,11 +118,52 @@ def build_report(
         "admin": target["admin"],
     }
     oa_enabled = oa_roles.get("enabled") is True
-    oa_matches_target = not oa_enabled or oa_members == target_oa
+    oa_configured = oa_roles.get("configured") is not False
+    selector = str(oa_roles.get("required_permission") or "")
+    selector_exact = selector == OA_MENU_PERMISSION
+    role_keys_exact = oa_roles.get("role_keys_exact") is not False
+    menu_ids = _ids(oa_roles.get("menu_ids"))
+    menu_unique = len(menu_ids) == 1
+    role_ids = {
+        tier: _ids((oa_roles.get("role_ids") or {}).get(tier))
+        for tier in ROLE_TIERS
+    }
+    roles_unique = all(len(values) == 1 for values in role_ids.values())
+    roles_distinct = roles_unique and len({values[0] for values in role_ids.values()}) == len(ROLE_TIERS)
+    bindings = {
+        (int(item["role_id"]), int(item["menu_id"]))
+        for item in list(oa_roles.get("bindings") or [])
+        if isinstance(item, dict) and item.get("role_id") is not None and item.get("menu_id") is not None
+    }
+    expected_bindings = (
+        {(role_ids[tier][0], menu_ids[0]) for tier in ROLE_TIERS}
+        if menu_unique and roles_distinct
+        else set()
+    )
+    dedicated_bindings_exact = bool(expected_bindings) and expected_bindings.issubset(bindings)
+    non_dedicated_bindings = sorted(bindings - expected_bindings) if dedicated_bindings_exact else []
+    binding_hashes = [
+        _hash_menu_binding(role_id, menu_id, salt)
+        for role_id, menu_id in sorted(bindings)
+    ]
+    expected_binding_hashes = [
+        _hash_menu_binding(role_id, menu_id, salt)
+        for role_id, menu_id in sorted(expected_bindings)
+    ]
+    cleanup_target_hashes = [
+        _hash_menu_binding(role_id, menu_id, salt)
+        for role_id, menu_id in non_dedicated_bindings
+    ]
+    oa_matches_target = oa_enabled and oa_members == target_oa
     legacy_environment_admins = _strings(environment.get("admin_usernames"))
+    retired_environment = sorted(
+        name
+        for name, present in dict(environment.get("retired_admission_env_present") or {}).items()
+        if name in RETIRED_ADMISSION_ENVS and present is True
+    )
     identities_distinct = bool(admin["username_sha256"] and bearer["username_sha256"])
     identities_distinct = identities_distinct and admin["username_sha256"] != bearer["username_sha256"]
-    eligible = all(
+    base_eligible = all(
         (
             admin["identity_present"],
             admin["is_protected_administrator"],
@@ -108,10 +178,20 @@ def build_report(
             bearer["http_status"] == 200,
             bearer["credential_source"] == "dedicated_bearer_stdin",
             identities_distinct,
+            oa_enabled,
+            oa_configured,
+            selector_exact,
+            role_keys_exact,
+            menu_unique,
+            roles_distinct,
+            dedicated_bindings_exact,
             oa_matches_target,
             not legacy_environment_admins,
+            not retired_environment,
         )
     )
+    cleanup_eligible = base_eligible and bool(non_dedicated_bindings)
+    eligible = base_eligible and not non_dedicated_bindings
     before_hash = hashlib.sha256(json.dumps(current, sort_keys=True).encode("utf-8")).hexdigest()
     after_hash = hashlib.sha256(json.dumps(target, sort_keys=True).encode("utf-8")).hexdigest()
     return {
@@ -128,17 +208,40 @@ def build_report(
             "member_hashes": {key: _hashed_usernames(value, salt) for key, value in current.items()},
         },
         "environment": {
-            "allowed_member_count": len(_strings(environment.get("allowed_usernames"))),
-            "readonly_member_count": len(_strings(environment.get("readonly_usernames"))),
             "admin_is_runtime_configurable": False,
             "legacy_admin_member_count": len(legacy_environment_admins),
             "legacy_admin_member_hashes": _hashed_usernames(legacy_environment_admins, salt),
+            "retired_admission_env_present": retired_environment,
         },
         "oa": {
             "enabled": oa_enabled,
+            "configured": oa_configured,
+            "selector_exact": selector_exact,
+            "selector_sha256": hashlib.sha256(selector.encode("utf-8")).hexdigest() if selector else "",
+            "role_keys_exact": role_keys_exact,
+            "menu_count": len(menu_ids),
+            "menu_id_hashes": [_hash_oa_id("menu", item, salt) for item in menu_ids],
+            "role_counts": {tier: len(values) for tier, values in role_ids.items()},
+            "role_id_hashes": {
+                tier: [_hash_oa_id("role", item, salt) for item in values]
+                for tier, values in role_ids.items()
+            },
             "matches_target": oa_matches_target,
             "member_counts": {key: len(value) for key, value in oa_members.items()},
             "member_hashes": {key: _hashed_usernames(value, salt) for key, value in oa_members.items()},
+            "dedicated_bindings_exact": dedicated_bindings_exact,
+            "cleanup_eligible": cleanup_eligible,
+            "menu_binding_cleanup": {
+                "required": bool(non_dedicated_bindings),
+                "current_count": len(bindings),
+                "dedicated_count": len(expected_bindings & bindings),
+                "target_count": len(cleanup_target_hashes),
+                "target_hashes": cleanup_target_hashes,
+                "rollback_target_hashes": cleanup_target_hashes,
+                "target_set_sha256": _hash_fingerprint_set(cleanup_target_hashes),
+                "before_sha256": _hash_fingerprint_set(binding_hashes),
+                "after_sha256": _hash_fingerprint_set(expected_binding_hashes),
+            },
         },
         "sessions": {
             "admin": admin,
@@ -184,15 +287,39 @@ def collect_database_facts(connection: Any) -> dict[str, Any]:
 
 def collect_oa_role_facts() -> dict[str, Any]:
     enabled = str(os.getenv("FIN_OPS_OA_ROLE_SYNC_ENABLED", "")).strip().lower() in {"1", "true", "yes", "on"}
+    required_permission = os.getenv("FIN_OPS_OA_REQUIRED_PERMISSION", "").strip()
+    role_keys_exact = all(
+        (os.getenv(env_name, expected).strip() or expected) == expected
+        for env_name, expected in (
+            ("FIN_OPS_OA_ROLE_SYNC_READONLY_ROLE_KEY", ROLE_KEYS["read_export_only"]),
+            ("FIN_OPS_OA_ROLE_SYNC_FULL_ACCESS_ROLE_KEY", ROLE_KEYS["full_access"]),
+            ("FIN_OPS_OA_ROLE_SYNC_ADMIN_ROLE_KEY", ROLE_KEYS["admin"]),
+        )
+    )
+    empty = {
+        "enabled": enabled,
+        "configured": False,
+        "required_permission": required_permission,
+        "role_keys_exact": role_keys_exact,
+        "menu_ids": [],
+        "role_ids": {tier: [] for tier in ROLE_TIERS},
+        "bindings": [],
+        "members": {tier: [] for tier in ROLE_TIERS},
+    }
     if not enabled:
-        return {"enabled": False, "members": {tier: [] for tier in ROLE_TIERS}}
+        return empty
+    required_connection = (
+        "FIN_OPS_OA_ROLE_SYNC_HOST",
+        "FIN_OPS_OA_ROLE_SYNC_DATABASE",
+        "FIN_OPS_OA_ROLE_SYNC_USERNAME",
+        "FIN_OPS_OA_ROLE_SYNC_PASSWORD",
+    )
+    if required_permission != OA_MENU_PERMISSION or not role_keys_exact or any(
+        not os.getenv(name, "").strip() for name in required_connection
+    ):
+        return empty
     import pymysql  # type: ignore
 
-    role_keys = {
-        "read_export_only": os.getenv("FIN_OPS_OA_ROLE_SYNC_READONLY_ROLE_KEY", "finops_read_export"),
-        "full_access": os.getenv("FIN_OPS_OA_ROLE_SYNC_FULL_ACCESS_ROLE_KEY", "finops_full_access"),
-        "admin": os.getenv("FIN_OPS_OA_ROLE_SYNC_ADMIN_ROLE_KEY", "finops_admin"),
-    }
     connection = pymysql.connect(
         host=os.environ["FIN_OPS_OA_ROLE_SYNC_HOST"],
         port=int(os.getenv("FIN_OPS_OA_ROLE_SYNC_PORT", "3306")),
@@ -208,6 +335,28 @@ def collect_oa_role_facts() -> dict[str, Any]:
     try:
         with connection.cursor() as cursor:
             cursor.execute(
+                "select menu_id from sys_menu where perms = %s order by menu_id",
+                (OA_MENU_PERMISSION,),
+            )
+            menu_rows = cursor.fetchall()
+            cursor.execute(
+                "select role_id, role_key from sys_role where role_key in (%s, %s, %s) order by role_key, role_id",
+                tuple(ROLE_KEYS.values()),
+            )
+            role_rows = cursor.fetchall()
+            cursor.execute(
+                """
+                select rm.role_id, rm.menu_id, r.role_key
+                from sys_role_menu rm
+                join sys_role r on r.role_id = rm.role_id
+                join sys_menu m on m.menu_id = rm.menu_id
+                where m.perms = %s
+                order by rm.menu_id, rm.role_id
+                """,
+                (OA_MENU_PERMISSION,),
+            )
+            binding_rows = cursor.fetchall()
+            cursor.execute(
                 """
                 select u.user_name, r.role_key
                 from sys_user_role ur
@@ -216,17 +365,33 @@ def collect_oa_role_facts() -> dict[str, Any]:
                 where r.role_key in (%s, %s, %s)
                 order by r.role_key, u.user_name
                 """,
-                tuple(role_keys.values()),
+                tuple(ROLE_KEYS.values()),
             )
-            rows = cursor.fetchall()
+            member_rows = cursor.fetchall()
     finally:
         connection.close()
-    tier_by_key = {role_key: tier for tier, role_key in role_keys.items()}
+    tier_by_key = {role_key: tier for tier, role_key in ROLE_KEYS.items()}
+    role_ids = {tier: [] for tier in ROLE_TIERS}
+    for role_id, role_key in role_rows:
+        if str(role_key) in tier_by_key:
+            role_ids[tier_by_key[str(role_key)]].append(int(role_id))
     members = {tier: [] for tier in ROLE_TIERS}
-    for username, role_key in rows:
+    for username, role_key in member_rows:
         if str(role_key) in tier_by_key:
             members[tier_by_key[str(role_key)]].append(str(username))
-    return {"enabled": True, "members": members}
+    return {
+        "enabled": True,
+        "configured": True,
+        "required_permission": required_permission,
+        "role_keys_exact": role_keys_exact,
+        "menu_ids": [int(row[0]) for row in menu_rows],
+        "role_ids": role_ids,
+        "bindings": [
+            {"role_id": int(role_id), "menu_id": int(menu_id), "role_key": str(role_key)}
+            for role_id, menu_id, role_key in binding_rows
+        ],
+        "members": members,
+    }
 
 
 def _load_json(path: str) -> dict[str, Any]:
@@ -642,9 +807,10 @@ def main(argv: list[str] | None = None) -> int:
         release=args.release,
         database=collect_database_facts(PostgresConnection(_postgres_settings())),
         environment={
-            "allowed_usernames": os.getenv("FIN_OPS_ALLOWED_USERNAMES", "").split(","),
-            "readonly_usernames": os.getenv("FIN_OPS_READONLY_EXPORT_USERNAMES", "").split(","),
             "admin_usernames": os.getenv(LEGACY_ADMIN_ENV, "").split(","),
+            "retired_admission_env_present": {
+                name: name in os.environ for name in RETIRED_ADMISSION_ENVS
+            },
         },
         oa_roles=collect_oa_role_facts(),
         admin_session=_load_json(args.admin_session_json),

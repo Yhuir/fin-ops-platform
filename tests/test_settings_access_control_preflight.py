@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sys
 import tempfile
+import types
 import unittest
 from unittest.mock import patch
 
@@ -125,7 +127,7 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
 
         report = self._report(database=database, oa_roles={"enabled": False, "members": {}})
 
-        self.assertTrue(report["eligible"])
+        self.assertFalse(report["eligible"])
         self.assertTrue(report["dry_run_cleanup"]["required"])
         self.assertEqual(report["dry_run_cleanup"]["removed_admin_count"], 1)
         self.assertNotIn("ATTACKER", str(report))
@@ -244,6 +246,66 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
             self.assertTrue(normalized.startswith("select"))
             self.assertNotRegex(normalized, r"\b(update|insert|delete|alter|drop|create)\b")
 
+    def test_oa_collector_executes_only_fixed_selector_selects(self) -> None:
+        queries: list[tuple[str, tuple[object, ...]]] = []
+
+        class Cursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def execute(self, sql: str, params: tuple[object, ...]):
+                queries.append((sql, params))
+
+            def fetchall(self):
+                sql = " ".join(queries[-1][0].lower().split())
+                if "from sys_menu" in sql and "sys_role_menu" not in sql:
+                    return [(101,)]
+                if "from sys_role where" in sql:
+                    return [(203, "finops_admin"), (202, "finops_full_access"), (201, "finops_read_export")]
+                if "from sys_role_menu" in sql:
+                    return [
+                        (201, 101, "finops_read_export"),
+                        (202, 101, "finops_full_access"),
+                        (203, 101, "finops_admin"),
+                    ]
+                return [("FULL001", "finops_full_access"), ("YNSYLP005", "finops_admin")]
+
+        class Connection:
+            def cursor(self):
+                return Cursor()
+
+            def close(self):
+                return None
+
+        pymysql = types.ModuleType("pymysql")
+        pymysql.connect = lambda **_kwargs: Connection()
+        environment = {
+            "FIN_OPS_OA_ROLE_SYNC_ENABLED": "1",
+            "FIN_OPS_OA_REQUIRED_PERMISSION": "finops:app:view",
+            "FIN_OPS_OA_ROLE_SYNC_HOST": "oa-db",
+            "FIN_OPS_OA_ROLE_SYNC_DATABASE": "oa",
+            "FIN_OPS_OA_ROLE_SYNC_USERNAME": "reader",
+            "FIN_OPS_OA_ROLE_SYNC_PASSWORD": "secret",
+        }
+        with (
+            patch.dict(preflight_module.os.environ, environment, clear=True),
+            patch.dict(sys.modules, {"pymysql": pymysql}),
+        ):
+            facts = preflight_module.collect_oa_role_facts()
+
+        self.assertTrue(facts["configured"])
+        self.assertEqual(facts["menu_ids"], [101])
+        self.assertEqual(len(queries), 4)
+        for sql, params in queries:
+            normalized = " ".join(sql.lower().split())
+            self.assertTrue(normalized.startswith("select"))
+            self.assertNotRegex(normalized, r"\b(update|insert|delete|alter|drop|create)\b")
+            if "sys_menu" in normalized:
+                self.assertIn("finops:app:view", params)
+
     def test_preflight_prefers_root_only_migrator_database_url(self) -> None:
         runtime = PostgresSettings(database_url="postgresql://runtime")
         with (
@@ -346,22 +408,21 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
             return response(200, {})
 
         def oa_facts():
-            return {
-                "enabled": True,
-                "members": {
-                    "admin": ["YNSYLP005"],
-                    "full_access": sorted(
-                        item["username"]
-                        for item in state["accounts"]
-                        if item["access_tier"] == "full_access"
-                    ),
-                    "read_export_only": sorted(
-                        item["username"]
-                        for item in state["accounts"]
-                        if item["access_tier"] == "read_export_only"
-                    ),
-                },
+            inventory = self._oa_inventory()
+            inventory["members"] = {
+                "admin": ["YNSYLP005"],
+                "full_access": sorted(
+                    item["username"]
+                    for item in state["accounts"]
+                    if item["access_tier"] == "full_access"
+                ),
+                "read_export_only": sorted(
+                    item["username"]
+                    for item in state["accounts"]
+                    if item["access_tier"] == "read_export_only"
+                ),
             }
+            return inventory
 
         class _AuditConnection:
             def fetch_one(self, _sql, _params):
