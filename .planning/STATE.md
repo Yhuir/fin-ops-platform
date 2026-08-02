@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 36-01-PLAN.md local implementation; production handoff to main orchestrator
-last_updated: "2026-08-02T05:27:53.465Z"
+stopped_at: Completed 13-06-PLAN.md
+last_updated: "2026-08-02T06:24:59.816Z"
 last_activity: 2026-08-02 -- Phase 13 execution started
 progress:
   total_phases: 38
   completed_phases: 11
   total_plans: 104
-  completed_plans: 66
+  completed_plans: 67
   percent: 29
 ---
 
@@ -26,8 +26,8 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 ## Current Position
 
 Phase: 13 (settings-improvements) — EXECUTING
-Plan: 1 of 15
-Status: Executing Phase 13
+Plan: 7 of 15
+Status: Ready to execute
 Last activity: 2026-08-02 -- Phase 13 execution started
 
 Progress: [██░░░░░░░░] in progress
@@ -53,6 +53,7 @@ Progress: [██░░░░░░░░] in progress
 | Phase 36 P01 | 20min | 4 tasks | 20 files |
 | Phase 37 P01 | 2h | 4 tasks | 24 files |
 | Phase 38 P01 | 1h | 4 tasks | 21 files |
+| Phase 13 P06 | 2 min | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -159,6 +160,7 @@ Progress: [██░░░░░░░░] in progress
 - [Phase 36]: Use HeroUI right Drawer and CSS individual translate without a third-party animation dependency. — HeroUI already owns modal placement, focus, dismissal, and enter-exit state.
 - [Phase 36]: Keep tax certified results as an accessible complementary rail with transform-opacity motion and inert collapse. — It is supporting persistent content, not a focus-trapped modal operation.
 - [Phase 36]: Migrate OA and bank-flow presentation shells without changing business I/O or module boundaries. — The requested motion does not require API, persistence, permission, worker, or read-model changes.
+- [Phase 13]: 用户名比较键锁定为 casefold-preserve-canonical；canonical spelling 仅由 sys_user.user_name 拥有。 — 目标 OA 脱敏只读 artifact 的机械决策结果唯一且非 BLOCK。
 
 ### Roadmap Evolution
 
@@ -237,6 +239,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-07-31T16:18:15.357Z
-Stopped at: Completed 36-01-PLAN.md local implementation; production handoff to main orchestrator
+Last session: 2026-08-02T06:24:59.807Z
+Stopped at: Completed 13-06-PLAN.md
 Resume file: None

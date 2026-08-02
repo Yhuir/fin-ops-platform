@@ -22,7 +22,7 @@
 - [ ] **PAGE-12**: No-OA bank batches page analysis is stored in its own phase artifacts.
 - [ ] **PAGE-13**: Batch accounting page analysis is stored in its own phase artifacts.
 - [x] **PAGE-14**: ETC tickets page analysis is stored in its own phase artifacts.
-- [ ] **PAGE-15**: Settings page analysis is stored in its own phase artifacts.
+- [x] **PAGE-15**: Settings page analysis is stored in its own phase artifacts.
 - [ ] **PAGE-16**: App Health operations page analysis is stored in its own phase artifacts.
 - [ ] **PAGE-17**: Bank transaction import page analysis is stored in its own phase artifacts.
 - [ ] **PAGE-18**: Invoice import page analysis is stored in its own phase artifacts.
@@ -127,7 +127,7 @@
 | PAGE-12 | Phase 10 | Pending |
 | PAGE-13 | Phase 11 | Pending |
 | PAGE-14 | Phase 12 | Complete |
-| PAGE-15 | Phase 13 | Pending |
+| PAGE-15 | Phase 13 | Complete |
 | PAGE-16 | Phase 14 | Pending |
 | PAGE-17 | Phase 15 | Pending |
 | PAGE-18 | Phase 16 | Pending |
