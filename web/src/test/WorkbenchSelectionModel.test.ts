@@ -1,6 +1,9 @@
 import { describe, expect, test } from "vitest";
 
-import { buildWorkbenchSelectionContext } from "../features/workbench/selectionModel";
+import {
+  buildWorkbenchSelectionContext,
+  workbenchComparableAmountCents,
+} from "../features/workbench/selectionModel";
 import type { WorkbenchRelationGroup, WorkbenchRecord } from "../features/workbench/types";
 
 function row(id: string, recordType: WorkbenchRecord["recordType"], amount = "100.00"): WorkbenchRecord {
@@ -38,6 +41,13 @@ function group(id: string): WorkbenchRelationGroup {
 }
 
 describe("buildWorkbenchSelectionContext", () => {
+  test("uses invoice gross amount as the comparable business amount", () => {
+    const invoice = row("invoice-gross", "invoice", "99.01");
+    invoice.tableValues.grossAmount = "100.00";
+
+    expect(workbenchComparableAmountCents(invoice)).toBe(10_000);
+  });
+
   test("unpaired zone selection keeps a singleton fact independent", () => {
     const sourceGroup = group("unpaired-1");
     const selectedBankRow = sourceGroup.rows.bank[0];

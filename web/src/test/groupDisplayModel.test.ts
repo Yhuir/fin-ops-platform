@@ -1,10 +1,9 @@
 import {
-  buildWorkbenchGroupDisplaySegments,
+  buildWorkbenchGroupDisplayLayout,
   buildWorkbenchServerPageQuery,
   buildWorkbenchDisplayGroups,
   createEmptyWorkbenchZoneDisplayState,
   mergeWorkbenchGroupsById,
-  workbenchPaneUsesDisplaySegments,
   workbenchRowMatchesUnifiedSearch,
 } from "../features/workbench/groupDisplayModel";
 import type { WorkbenchRelationGroup, WorkbenchRecord } from "../features/workbench/types";
@@ -114,7 +113,7 @@ function buildGroup(id: string, transactionTime: string): WorkbenchRelationGroup
 }
 
 describe("groupDisplayModel time filter", () => {
-  test("builds display segments only for complete one-to-one source coverage", () => {
+  test("builds exact source-aligned rows without requiring every pane to be complete", () => {
     const oa248 = buildOaRow("oa-exp-248", "248.00");
     const oa292 = buildOaRow("oa-exp-292", "292.00");
     const invoice248 = buildAttachmentInvoiceRow("invoice-248", "oa-exp-248", "248.00");
@@ -132,7 +131,8 @@ describe("groupDisplayModel time filter", () => {
       },
     };
 
-    const segments = buildWorkbenchGroupDisplaySegments(group);
+    const layout = buildWorkbenchGroupDisplayLayout(group);
+    const segments = layout?.segments;
 
     expect(segments?.map((segment) => segment.id)).toEqual(["oa-exp-248", "oa-exp-292"]);
     expect(segments?.[0].rows.oa).toEqual([oa248]);
@@ -140,18 +140,17 @@ describe("groupDisplayModel time filter", () => {
     expect(segments?.[1].rows.oa).toEqual([oa292]);
     expect(segments?.[1].rows.invoice).toEqual([invoice292]);
     expect(segments?.every((segment) => segment.rows.bank.length === 0)).toBe(true);
-    expect(workbenchPaneUsesDisplaySegments(group, "bank", segments)).toBe(false);
-    expect(workbenchPaneUsesDisplaySegments(group, "invoice", segments)).toBe(true);
+    expect(layout?.segmentedPaneIds).toEqual(["oa", "invoice"]);
   });
 
-  test("keeps unlinked same-amount and sum-matched rows at group level", () => {
+  test("aligns unique exact amounts and leaves sum-matched rows in a residual segment", () => {
     const oa469600 = buildOaRow("oa-exp-469600", "469600");
     const oa29350 = buildOaRow("oa-exp-29350", "29350");
     const oa88050 = buildOaRow("oa-exp-88050", "88050");
-    const bank469600 = { ...buildBankRow("bank-469600", "2026-05-13 11:42"), amount: "469600" };
-    const bank29350 = { ...buildBankRow("bank-29350", "2026-03-27 15:03"), amount: "29350" };
-    const bank64996 = { ...buildBankRow("bank-64996", "2026-04-23 15:28"), amount: "64996.69" };
-    const bank23053 = { ...buildBankRow("bank-23053", "2026-04-23 15:28"), amount: "23053.31" };
+    const bank469600 = { ...buildBankRow("bank-469600", "2026-05-13 11:42"), amount: "469600", tableValues: { direction: "支出" } };
+    const bank29350 = { ...buildBankRow("bank-29350", "2026-03-27 15:03"), amount: "29350", tableValues: { direction: "支出" } };
+    const bank64996 = { ...buildBankRow("bank-64996", "2026-04-23 15:28"), amount: "64996.69", tableValues: { direction: "支出" } };
+    const bank23053 = { ...buildBankRow("bank-23053", "2026-04-23 15:28"), amount: "23053.31", tableValues: { direction: "支出" } };
     const invoice29350 = buildInvoiceRow("invoice-29350", "29350");
     const group: WorkbenchRelationGroup = {
       id: "case:amount-fallback-segment",
@@ -159,6 +158,14 @@ describe("groupDisplayModel time filter", () => {
       rawGroupType: "relation",
       matchConfidence: "high",
       reason: "existing_case_group",
+      amountCheck: {
+        status: "matched",
+        direction: "expense",
+        bankAmount: "586450.00",
+        oaAmount: "586450.00",
+        amountDelta: "0.00",
+        requiresNote: false,
+      },
       rows: {
         oa: [oa469600, oa29350, oa88050],
         bank: [bank469600, bank64996, bank23053, bank29350],
@@ -166,9 +173,18 @@ describe("groupDisplayModel time filter", () => {
       },
     };
 
-    const segments = buildWorkbenchGroupDisplaySegments(group);
+    const layout = buildWorkbenchGroupDisplayLayout(group);
+    const segments = layout?.segments;
 
-    expect(segments).toBeNull();
+    expect(layout?.segmentedPaneIds).toEqual(["oa", "bank", "invoice"]);
+    expect(segments?.find((segment) => segment.id === oa469600.id)?.rows.bank).toEqual([bank469600]);
+    expect(segments?.find((segment) => segment.id === oa29350.id)?.rows.bank).toEqual([bank29350]);
+    expect(segments?.find((segment) => segment.id === oa29350.id)?.rows.invoice).toEqual([invoice29350]);
+    expect(segments?.find((segment) => segment.id === oa88050.id)?.rows.bank).toEqual([]);
+    expect(segments?.find((segment) => segment.id.endsWith(":bank:residual"))?.rows.bank).toEqual([
+      bank64996,
+      bank23053,
+    ]);
   });
 
   test("keeps partial and duplicate source coverage at group level", () => {
@@ -190,7 +206,90 @@ describe("groupDisplayModel time filter", () => {
       },
     };
 
-    expect(buildWorkbenchGroupDisplaySegments(group)).toBeNull();
+    expect(buildWorkbenchGroupDisplayLayout(group)).toBeNull();
+  });
+
+  test("does not invent a unique amount match when the unfiltered source group has a duplicate target", () => {
+    const oa100Visible = buildOaRow("oa-exp-100-visible", "100.00");
+    const oa200 = buildOaRow("oa-exp-200", "200.00");
+    const invoice100 = buildInvoiceRow("invoice-100", "100.00");
+    const displayGroup: WorkbenchRelationGroup = {
+      id: "case:hidden-duplicate",
+      groupType: "paired",
+      rawGroupType: "relation",
+      matchConfidence: "high",
+      reason: "existing_case_group",
+      amountCheck: {
+        status: "matched",
+        direction: "expense",
+        bankAmount: "0.00",
+        oaAmount: "300.00",
+        amountDelta: "0.00",
+        requiresNote: false,
+      },
+      rows: { oa: [oa100Visible, oa200], bank: [], invoice: [invoice100] },
+    };
+    const sourceGroup: WorkbenchRelationGroup = {
+      ...displayGroup,
+      rows: {
+        ...displayGroup.rows,
+        oa: [...displayGroup.rows.oa, buildOaRow("oa-exp-100-hidden", "100.00")],
+      },
+    };
+
+    expect(buildWorkbenchGroupDisplayLayout(displayGroup, sourceGroup)).toBeNull();
+  });
+
+  test("aligns the nine exact pairs in the 3061.64 reimbursement shape without losing residual invoices", () => {
+    const amounts = ["127", "1400", "300", "7.84", "450", "400", "12", "100", "14", "16", "76.8", "158"];
+    const parent = {
+      ...buildOaRow("oa-exp-3061", "3061.64"),
+      expenseItems: amounts.map((amount, index) => ({
+        id: `oa-exp-3061:item:${index}`,
+        rowIndex: String(index),
+        projectName: index % 2 === 0 ? "项目甲" : "项目乙",
+        amount,
+      })),
+    };
+    const invoice = (id: string, itemIndex: number, amount: string) => ({
+      ...buildAttachmentInvoiceRow(id, parent.id, amount),
+      sourceExpenseItemId: `oa-exp-3061:item:${itemIndex}`,
+      tableValues: { grossAmount: amount },
+    });
+    const invoices = [
+      invoice("iv-127", 0, "127"),
+      invoice("iv-1400", 1, "1400"),
+      invoice("iv-300", 2, "300"),
+      invoice("iv-8", 3, "8"),
+      invoice("iv-400", 5, "400"),
+      invoice("iv-12", 6, "12"),
+      invoice("iv-100", 7, "100"),
+      invoice("iv-14", 8, "14"),
+      invoice("iv-16", 9, "16"),
+      invoice("iv-29", 10, "29"),
+      invoice("iv-47.8", 10, "47.8"),
+      invoice("iv-158", 11, "158"),
+    ];
+    const group: WorkbenchRelationGroup = {
+      id: "case:oa-exp-3061",
+      groupType: "unpaired",
+      matchConfidence: "high",
+      reason: "canonical_unpaired",
+      rows: { oa: [parent], bank: [], invoice: invoices },
+    };
+
+    const layout = buildWorkbenchGroupDisplayLayout(group);
+    const alignedItemIds = layout?.segments
+      .filter((segment) => segment.rows.oa[0]?.displayRole === "expense-claim-item" && segment.rows.invoice.length === 1)
+      .map((segment) => segment.id);
+    const renderedInvoiceIds = layout?.segments.flatMap((segment) => segment.rows.invoice.map((row) => row.id));
+
+    expect(alignedItemIds).toEqual([0, 1, 2, 5, 6, 7, 8, 9, 11].map((index) => `oa-exp-3061:item:${index}`));
+    expect(renderedInvoiceIds).toHaveLength(12);
+    expect(new Set(renderedInvoiceIds).size).toBe(12);
+    expect(layout?.segments.find((segment) => segment.id === "oa-exp-3061:item:3")?.rows.invoice).toEqual([]);
+    expect(layout?.segments.find((segment) => segment.id === "oa-exp-3061:item:10:invoice:residual")?.rows.invoice)
+      .toEqual([invoices[9], invoices[10]]);
   });
 
   test("dedupes repeated paginated groups for paired and unpaired zones", () => {

@@ -54,9 +54,10 @@ canonical fact repositories
 ## 三栏纵向展示合同
 
 - OA、银行流水、发票栏默认各自跨越完整关联组高度；同栏有 `N` 条可见记录时由 CSS Flex 等分可用高度，单条记录占满整栏。
-- 只有已有 `sourceOaId` / `sourceExpenseItemId` 对当前可见目标形成完整、唯一、无缺口的一一对应时，该栏才与 OA 或费用子项共享行轨。部分来源、一对多、多对一、重复来源或未链接记录一律保持 group-level，不制造空白来源槽位。
-- 前端不再按金额相等或 2～6 条金额组合推断视觉对齐；正式 relation alignment metadata 仍由后端事实源提供。布局判断只消费已加载 DTO，是 `O(OA + bank + invoice)` 纯计算，不增加 HTTP、数据库、cache、worker、React state/effect 或 DOM 测量 I/O。
-- 多项目报销继续显示父 OA 摘要和费用子项；只有全部目标子项与发票形成完整一一对应时发票才按子项同行，部分附件发票独立占满发票栏。银行流水不进入虚拟费用子项槽位。
+- 单条银行流水/发票与 OA 或费用子项金额按分精确相等且双方唯一时共享行轨，不再要求整栏完整覆盖。显式 `sourceOaId` / `sourceExpenseItemId` 优先；缺少显式来源时，只允许在同一完整 source group、方向已知且金额双方都唯一时做展示级精确金额兜底。
+- 一对多、多对一、重复金额、金额不一致、零/非法金额、方向未知或冲突，以及 2～6 条金额合计都不建立同行；已分段栏中的这些记录进入独立残余展示带，完全没有精确配对的栏继续按 group-level 占满整组高度。金额兜底不写 relation、不改变 membership、selection 或 action identity。
+- 多项目报销继续显示父 OA 摘要和费用子项；满足上述单条精确条件的附件发票逐项同行，其余附件留在残余展示带。发票比较金额统一使用价税合计，银行流水使用当前方向金额。
+- 布局判断只消费已加载 DTO，是 `O(OA + bank + invoice)` 的 Map/Set 纯计算，不增加 HTTP、数据库、cache、worker、React state/effect、DOM 测量或依赖。
 
 ## 不变量
 

@@ -6,6 +6,7 @@ import type {
   WorkbenchRecordType,
   WorkbenchSourceKind,
 } from "./types";
+import { parseWorkbenchAmountCents, workbenchComparableAmountCents } from "./selectionModel";
 
 const workbenchPaneIds: WorkbenchRecordType[] = ["oa", "bank", "invoice"];
 const compactBankNameByPrefix: Record<string, string> = {
@@ -28,6 +29,11 @@ const compactBankNameByPrefix: Record<string, string> = {
 export type WorkbenchGroupDisplaySegment = {
   id: string;
   rows: WorkbenchPaneRows;
+};
+
+export type WorkbenchGroupDisplayLayout = {
+  segments: WorkbenchGroupDisplaySegment[];
+  segmentedPaneIds: WorkbenchRecordType[];
 };
 
 export type WorkbenchPaneTimeFilter =
@@ -113,7 +119,106 @@ export function buildWorkbenchPaneRows(groups: WorkbenchRelationGroup[]): Workbe
   };
 }
 
-export function buildWorkbenchGroupDisplaySegments(
+export function buildWorkbenchGroupDisplayLayout(
+  group: WorkbenchRelationGroup,
+  sourceGroup: WorkbenchRelationGroup = group,
+): WorkbenchGroupDisplayLayout | null {
+  const segments = buildWorkbenchGroupSourceSegments(group);
+  const sourceSegments = sourceGroup === group ? segments : buildWorkbenchGroupSourceSegments(sourceGroup);
+  if (!segments || !sourceSegments) {
+    return null;
+  }
+
+  const exactRowIdsByPane = {
+    bank: findExactRowIdsBySegment(sourceGroup, sourceSegments, "bank"),
+    invoice: findExactRowIdsBySegment(sourceGroup, sourceSegments, "invoice"),
+  };
+  const displayRowsByPane = {
+    bank: new Map(group.rows.bank.map((row) => [row.id, row])),
+    invoice: new Map(group.rows.invoice.map((row) => [row.id, row])),
+  };
+  const segmentedPaneIds = (["bank", "invoice"] as const).filter((paneId) => (
+    Array.from(exactRowIdsByPane[paneId].values()).some((rowId) => displayRowsByPane[paneId].has(rowId))
+  ));
+  const hasExpenseClaimItems = segments.some(
+    (segment) => segment.rows.oa[0]?.displayRole === "expense-claim-summary",
+  );
+  if (segmentedPaneIds.length === 0 && !hasExpenseClaimItems) {
+    return null;
+  }
+
+  const matchedRowIdsByPane = {
+    bank: new Set<string>(),
+    invoice: new Set<string>(),
+  };
+  const ownedRowIdsByPane = {
+    bank: new Set(segments.flatMap((segment) => segment.rows.bank.map((row) => row.id))),
+    invoice: new Set(segments.flatMap((segment) => segment.rows.invoice.map((row) => row.id))),
+  };
+  const displaySegments: WorkbenchGroupDisplaySegment[] = [];
+
+  segments.forEach((segment) => {
+    const exactRows = {
+      bank: [] as WorkbenchRecord[],
+      invoice: [] as WorkbenchRecord[],
+    };
+    segmentedPaneIds.forEach((paneId) => {
+      const rowId = exactRowIdsByPane[paneId].get(segment.id);
+      const row = rowId ? displayRowsByPane[paneId].get(rowId) : undefined;
+      if (row) {
+        exactRows[paneId].push(row);
+        matchedRowIdsByPane[paneId].add(row.id);
+      }
+    });
+    displaySegments.push({
+      id: segment.id,
+      rows: {
+        oa: segment.rows.oa,
+        bank: exactRows.bank,
+        invoice: exactRows.invoice,
+      },
+    });
+
+    segmentedPaneIds.forEach((paneId) => {
+      const residualRows = segment.rows[paneId].filter((row) => !matchedRowIdsByPane[paneId].has(row.id));
+      if (residualRows.length === 0) {
+        return;
+      }
+      displaySegments.push({
+        id: `${segment.id}:${paneId}:residual`,
+        rows: {
+          oa: [],
+          bank: paneId === "bank" ? residualRows : [],
+          invoice: paneId === "invoice" ? residualRows : [],
+        },
+      });
+    });
+  });
+
+  segmentedPaneIds.forEach((paneId) => {
+    const residualRows = group.rows[paneId].filter(
+      (row) => !matchedRowIdsByPane[paneId].has(row.id) && !ownedRowIdsByPane[paneId].has(row.id),
+    );
+    if (residualRows.length === 0) {
+      return;
+    }
+    displaySegments.push({
+      id: `${group.id}:${paneId}:residual`,
+      rows: {
+        oa: [],
+        bank: paneId === "bank" ? residualRows : [],
+        invoice: paneId === "invoice" ? residualRows : [],
+      },
+    });
+  });
+
+  return {
+    segments: displaySegments,
+    segmentedPaneIds: ["oa", ...segmentedPaneIds],
+  };
+}
+
+function buildWorkbenchGroupSourceSegments(
   group: WorkbenchRelationGroup,
 ): WorkbenchGroupDisplaySegment[] | null {
   if (group.displayMode === "collapsed_summary" || group.rows.oa.length === 0) {
@@ -159,47 +264,92 @@ export function buildWorkbenchGroupDisplaySegments(
   if (segments.length < 2) {
     return null;
   }
-  if (
-    !hasExpenseClaimItems
-    && !workbenchPaneUsesDisplaySegments(group, "bank", segments)
-    && !workbenchPaneUsesDisplaySegments(group, "invoice", segments)
-  ) {
-    return null;
-  }
   return segments;
 }
 
-export function workbenchPaneUsesDisplaySegments(
+function findExactRowIdsBySegment(
+  group: WorkbenchRelationGroup,
+  segments: WorkbenchGroupDisplaySegment[],
+  paneId: WorkbenchRecordType,
+): Map<string, string> {
+  const exactRowsBySegmentId = new Map<string, string>();
+  const explicitlyOwnedRowIds = new Set(segments.flatMap((segment) => segment.rows[paneId].map((row) => row.id)));
+
+  segments.forEach((segment) => {
+    const rows = segment.rows[paneId];
+    const targetAmount = segmentTargetAmountCents(segment);
+    if (
+      rows.length === 1
+      && targetAmount > 0
+      && workbenchComparableAmountCents(rows[0]) === targetAmount
+    ) {
+      exactRowsBySegmentId.set(segment.id, rows[0].id);
+    }
+  });
+
+  const fallbackTargetsByAmount = new Map<number, WorkbenchGroupDisplaySegment[]>();
+  segments.forEach((segment) => {
+    if (segment.rows[paneId].length > 0) {
+      return;
+    }
+    const amount = segmentTargetAmountCents(segment);
+    if (amount <= 0) {
+      return;
+    }
+    const targets = fallbackTargetsByAmount.get(amount) ?? [];
+    targets.push(segment);
+    fallbackTargetsByAmount.set(amount, targets);
+  });
+
+  const fallbackRowsByAmount = new Map<number, WorkbenchRecord[]>();
+  group.rows[paneId].forEach((row) => {
+    if (explicitlyOwnedRowIds.has(row.id) || !canUseAmountFallback(group, paneId, row)) {
+      return;
+    }
+    const amount = workbenchComparableAmountCents(row);
+    if (amount <= 0) {
+      return;
+    }
+    const rows = fallbackRowsByAmount.get(amount) ?? [];
+    rows.push(row);
+    fallbackRowsByAmount.set(amount, rows);
+  });
+
+  fallbackTargetsByAmount.forEach((targets, amount) => {
+    const rows = fallbackRowsByAmount.get(amount) ?? [];
+    if (targets.length === 1 && rows.length === 1) {
+      exactRowsBySegmentId.set(targets[0].id, rows[0].id);
+    }
+  });
+
+  return exactRowsBySegmentId;
+}
+
+function segmentTargetAmountCents(segment: WorkbenchGroupDisplaySegment) {
+  const row = segment.rows.oa[0];
+  if (!row) {
+    return 0;
+  }
+  if (row.displayRole === "expense-claim-item") {
+    return parseWorkbenchAmountCents(row.tableValues.amount ?? "");
+  }
+  return workbenchComparableAmountCents(row);
+}
+
+function canUseAmountFallback(
   group: WorkbenchRelationGroup,
   paneId: WorkbenchRecordType,
-  segments: WorkbenchGroupDisplaySegment[] | null,
-): boolean {
-  if (!segments || segments.length === 0) {
+  row: WorkbenchRecord,
+) {
+  const direction = group.amountCheck?.direction;
+  if (!direction || direction === "unknown") {
     return false;
   }
-  if (paneId === "oa") {
+  if (paneId !== "bank") {
     return true;
   }
-
-  const hasExpenseClaimItems = group.rows.oa.some(hasMultiProjectExpenseItems);
-  if (paneId === "bank" && hasExpenseClaimItems) {
-    return false;
-  }
-  const targetSegments = paneId === "invoice" && hasExpenseClaimItems
-    ? segments.filter((segment) => segment.rows.oa[0]?.displayRole !== "expense-claim-summary")
-    : segments;
-  const expectedRows = group.rows[paneId];
-  if (expectedRows.length === 0 || targetSegments.length !== expectedRows.length) {
-    return false;
-  }
-
-  const expectedRowIds = new Set(expectedRows.map((row) => row.id));
-  if (expectedRowIds.size !== expectedRows.length || targetSegments.some((segment) => segment.rows[paneId].length !== 1)) {
-    return false;
-  }
-  const segmentedRowIds = targetSegments.map((segment) => segment.rows[paneId][0]?.id);
-  return segmentedRowIds.every((rowId) => rowId !== undefined && expectedRowIds.has(rowId))
-    && new Set(segmentedRowIds).size === expectedRows.length;
+  const expectedDirection = direction === "receipt" ? "收入" : "支出";
+  return row.tableValues.direction === expectedDirection;
 }
 
 function expandExpenseClaimSegment(segment: WorkbenchGroupDisplaySegment): WorkbenchGroupDisplaySegment[] {
@@ -236,6 +386,7 @@ function expandExpenseClaimSegment(segment: WorkbenchGroupDisplaySegment): Workb
     rows: {
       oa: [{
         ...parent,
+        amount: item.amount,
         displayRole: "expense-claim-item" as const,
         tableValues: {
           ...parent.tableValues,

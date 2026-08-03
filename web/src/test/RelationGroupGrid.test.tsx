@@ -6,7 +6,7 @@ import RelationGroupGrid from "../components/workbench/RelationGroupGrid";
 import RelationGroupCell from "../components/workbench/RelationGroupCell";
 import WorkbenchRecordCard from "../components/workbench/WorkbenchRecordCard";
 import {
-  buildWorkbenchGroupDisplaySegments,
+  buildWorkbenchGroupDisplayLayout,
   createEmptyWorkbenchZoneDisplayState,
 } from "../features/workbench/groupDisplayModel";
 import { getWorkbenchColumns, getWorkbenchPaneGridStyle } from "../features/workbench/tableConfig";
@@ -969,7 +969,7 @@ describe("Workbench candidate grouping layout", () => {
     expect(within(groupRow).getByText("进")).toBeInTheDocument();
   });
 
-  test("keeps one-to-many source attachments in a full-height group-level pane", () => {
+  test("aligns the exact source attachment and keeps one-to-many attachments in a residual row", () => {
     const oa294 = createOaRecord("oa-294", "刘晓宇", "294.31");
     const oa135 = createOaRecord("oa-135", "陈雄兵", "135");
     const bank = createBankRecord();
@@ -1011,17 +1011,20 @@ describe("Workbench candidate grouping layout", () => {
     );
 
     const groupRow = screen.getByTestId("candidate-group-unpaired-case:CASE-MULTI-OA-ATTACHMENT");
-    const invoiceCell = within(groupRow).getByTestId(
-      "candidate-scroll-unpaired-case:CASE-MULTI-OA-ATTACHMENT-invoice",
+    const residualSegment = screen.getByTestId(
+      "candidate-group-segment-unpaired-case:CASE-MULTI-OA-ATTACHMENT-oa-294:invoice:residual",
     );
-    expect(groupRow).not.toHaveClass("candidate-group-row-segmented");
-    expect(invoiceCell).toHaveClass("candidate-group-cell-sheet-multi");
-    expect(within(invoiceCell).getAllByRole("row")).toHaveLength(4);
-    expect(within(invoiceCell).getByText("中山市安自康贸易有限公司")).toBeInTheDocument();
-    expect(within(invoiceCell).getByText("大理江尾老军饭店")).toBeInTheDocument();
+    const exactSegment = screen.getByTestId(
+      "candidate-group-segment-unpaired-case:CASE-MULTI-OA-ATTACHMENT-oa-135",
+    );
+    expect(groupRow).toHaveClass("candidate-group-row-segmented");
+    expect(within(residualSegment).getAllByRole("row")).toHaveLength(3);
+    expect(within(residualSegment).getByText("中山市安自康贸易有限公司")).toBeInTheDocument();
+    expect(within(exactSegment).getByText("大理江尾老军饭店")).toBeInTheDocument();
+    expect(within(exactSegment).getAllByText("135").length).toBeGreaterThan(1);
   });
 
-  test("fills a 4 OA, 2 bank, 1 invoice group without partial source row slots", () => {
+  test("aligns exact rows inside a partially covered 4 OA, 2 bank, 1 invoice group", () => {
     const oaRows = [
       createOaRecord("oa-1", "申请人1", "100"),
       createOaRecord("oa-2", "申请人2", "200"),
@@ -1064,19 +1067,18 @@ describe("Workbench candidate grouping layout", () => {
     );
 
     const groupRow = screen.getByTestId("candidate-group-paired-case:CASE-FOUR-TWO-ONE");
-    const oaCell = within(groupRow).getByTestId("candidate-scroll-paired-case:CASE-FOUR-TWO-ONE-oa");
-    const bankCell = within(groupRow).getByTestId("candidate-scroll-paired-case:CASE-FOUR-TWO-ONE-bank");
-    const invoiceCell = within(groupRow).getByTestId("candidate-scroll-paired-case:CASE-FOUR-TWO-ONE-invoice");
-    expect(groupRow).not.toHaveClass("candidate-group-row-segmented");
-    expect(within(oaCell).getAllByRole("row")).toHaveLength(4);
-    expect(within(bankCell).getAllByRole("row")).toHaveLength(2);
-    expect(within(invoiceCell).getAllByRole("row")).toHaveLength(1);
-    expect(oaCell).toHaveClass("candidate-group-cell-sheet-multi");
-    expect(bankCell).toHaveClass("candidate-group-cell-sheet-multi");
-    expect(invoiceCell).toHaveClass("candidate-group-cell-sheet-single");
+    const firstSegment = screen.getByTestId("candidate-group-segment-paired-case:CASE-FOUR-TWO-ONE-oa-1");
+    const secondSegment = screen.getByTestId("candidate-group-segment-paired-case:CASE-FOUR-TWO-ONE-oa-2");
+    const thirdSegment = screen.getByTestId("candidate-group-segment-paired-case:CASE-FOUR-TWO-ONE-oa-3");
+    expect(groupRow).toHaveClass("candidate-group-row-segmented");
+    expect(within(firstSegment).getAllByText("100").length).toBeGreaterThan(1);
+    expect(within(firstSegment).getByText("供应商1")).toBeInTheDocument();
+    expect(within(secondSegment).getAllByText("200").length).toBeGreaterThan(1);
+    expect(within(thirdSegment).getByText("申请人3")).toBeInTheDocument();
+    expect(within(thirdSegment).queryByRole("row", { name: /供应商1/ })).not.toBeInTheDocument();
   });
 
-  test("renders partial multi-item reimbursement invoices in a full-height group-level pane", () => {
+  test("aligns exact multi-item reimbursement invoices and keeps parent selection identity", () => {
     const selectRow = vi.fn();
     const parentOa: WorkbenchRecord = {
       ...createOaRecord("oa-exp-413", "吴云江", "413.00"),
@@ -1156,19 +1158,14 @@ describe("Workbench candidate grouping layout", () => {
       "candidate-group-segment-unpaired-row:oa-exp-413-oa-exp-413:item:2",
     );
     expect(within(invoiceItem).getByText("曲靖项目")).toBeInTheDocument();
-    expect(within(invoiceItem).getByText("60.00")).toBeInTheDocument();
+    expect(within(invoiceItem).getAllByText("60.00").length).toBeGreaterThan(1);
     expect(within(invoiceItem).getByText("费用内容：住宿费；费用说明：曲靖住宿")).toBeInTheDocument();
-    expect(within(invoiceItem).queryByText("曲靖市麒麟区捌陆捌商务酒店")).not.toBeInTheDocument();
+    expect(within(invoiceItem).getByText("曲靖市麒麟区捌陆捌商务酒店")).toBeInTheDocument();
 
     const logisticsItem = screen.getByTestId(
       "candidate-group-segment-unpaired-row:oa-exp-413-oa-exp-413:item:4",
     );
-    expect(within(logisticsItem).queryByText("云南云聚物流科技有限公司")).not.toBeInTheDocument();
-
-    const invoiceCell = screen.getByTestId("candidate-scroll-unpaired-row:oa-exp-413-invoice");
-    expect(invoiceCell).toHaveClass("candidate-group-cell-sheet-multi");
-    expect(within(invoiceCell).getByText("云南云聚物流科技有限公司")).toBeInTheDocument();
-    expect(within(invoiceCell).getByText("曲靖市麒麟区捌陆捌商务酒店")).toBeInTheDocument();
+    expect(within(logisticsItem).getByText("云南云聚物流科技有限公司")).toBeInTheDocument();
 
     fireEvent.click(within(invoiceItem).getByText("曲靖项目"));
     expect(selectRow).toHaveBeenCalledTimes(1);
@@ -1191,7 +1188,7 @@ describe("Workbench candidate grouping layout", () => {
       rows: { oa: [parentOa], bank: [], invoice: [] },
     };
 
-    expect(buildWorkbenchGroupDisplaySegments(group)).toBeNull();
+    expect(buildWorkbenchGroupDisplayLayout(group)).toBeNull();
   });
 
   test("keeps a partial attachment invoice source at group level inside a multi-OA group", () => {
@@ -1292,7 +1289,7 @@ describe("Workbench candidate grouping layout", () => {
     expect(within(siblingSegment).getByText("云南辰飞机电工程有限公司")).toBeInTheDocument();
   });
 
-  test("keeps unlinked same-amount and sum-matched rows in full-height panes", () => {
+  test("aligns unique unlinked exact amounts and keeps sum-matched rows residual", () => {
     const makeBankRow = (id: string, amount: string, counterparty: string): WorkbenchRecord => {
       const baseRecord = createBankRecord();
       return {
@@ -1330,6 +1327,14 @@ describe("Workbench candidate grouping layout", () => {
       rawGroupType: "relation",
       matchConfidence: "high",
       reason: "existing_case_group",
+      amountCheck: {
+        status: "matched",
+        direction: "expense",
+        bankAmount: "117400.00",
+        oaAmount: "117400.00",
+        amountDelta: "0.00",
+        requiresNote: false,
+      },
       rows: {
         oa: [oa29350, oa88050],
         bank: [bank64996, bank23053, bank29350],
@@ -1357,19 +1362,18 @@ describe("Workbench candidate grouping layout", () => {
     );
 
     const groupRow = screen.getByTestId("candidate-group-paired-case:CASE-MULTI-OA-AMOUNT-FALLBACK");
-    const bankCell = within(groupRow).getByTestId(
-      "candidate-scroll-paired-case:CASE-MULTI-OA-AMOUNT-FALLBACK-bank",
+    const exactSegment = screen.getByTestId(
+      "candidate-group-segment-paired-case:CASE-MULTI-OA-AMOUNT-FALLBACK-oa-exp-29350",
     );
-    const invoiceCell = within(groupRow).getByTestId(
-      "candidate-scroll-paired-case:CASE-MULTI-OA-AMOUNT-FALLBACK-invoice",
+    const residualSegment = screen.getByTestId(
+      "candidate-group-segment-paired-case:CASE-MULTI-OA-AMOUNT-FALLBACK-case:CASE-MULTI-OA-AMOUNT-FALLBACK:bank:residual",
     );
-    expect(groupRow).not.toHaveClass("candidate-group-row-segmented");
-    expect(bankCell).toHaveClass("candidate-group-cell-sheet-multi");
-    expect(within(bankCell).getAllByRole("row")).toHaveLength(3);
-    expect(within(bankCell).getByText("64996.69")).toBeInTheDocument();
-    expect(within(bankCell).getByText("23053.31")).toBeInTheDocument();
-    expect(invoiceCell).toHaveClass("candidate-group-cell-sheet-single");
-    expect(within(invoiceCell).getByText("INV-29350")).toBeInTheDocument();
+    expect(groupRow).toHaveClass("candidate-group-row-segmented");
+    expect(within(exactSegment).getAllByText("29350").length).toBeGreaterThan(1);
+    expect(within(exactSegment).getByText("INV-29350")).toBeInTheDocument();
+    expect(within(residualSegment).getAllByRole("row")).toHaveLength(2);
+    expect(within(residualSegment).getByText("64996.69")).toBeInTheDocument();
+    expect(within(residualSegment).getByText("23053.31")).toBeInTheDocument();
   });
 
   test("renders no-OA bank rows directly without collapse controls", () => {

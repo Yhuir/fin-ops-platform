@@ -103,17 +103,17 @@ export function formatWorkbenchAmountCents(cents: number): string {
 }
 
 function sumWorkbenchAmountCents(rows: WorkbenchRecord[]) {
-  return rows.reduce((total, row) => total + parseWorkbenchAmountCents(workbenchSummaryAmount(row)), 0);
+  return rows.reduce((total, row) => total + workbenchComparableAmountCents(row), 0);
 }
 
-function workbenchSummaryAmount(row: WorkbenchRecord) {
+export function workbenchComparableAmountCents(row: WorkbenchRecord): number {
   if (row.recordType === "invoice") {
     const grossAmount = row.tableValues.grossAmount?.trim();
     if (grossAmount && grossAmount !== "--" && grossAmount !== "—") {
-      return grossAmount;
+      return parseWorkbenchAmountCents(grossAmount);
     }
   }
-  return row.amount;
+  return parseWorkbenchAmountCents(row.amount);
 }
 
 function flattenWorkbenchGroups(groups: WorkbenchRelationGroup[]) {

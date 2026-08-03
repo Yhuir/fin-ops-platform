@@ -12,11 +12,10 @@ import {
 } from "react";
 
 import {
-  buildWorkbenchGroupDisplaySegments,
+  buildWorkbenchGroupDisplayLayout,
   collectWorkbenchFilterOptions,
   collectWorkbenchTimeFilterYears,
   createEmptyWorkbenchZoneDisplayState,
-  workbenchPaneUsesDisplaySegments,
   type WorkbenchPaneTimeFilter as WorkbenchPaneTimeFilterState,
   type WorkbenchZoneDisplayState,
 } from "../../features/workbench/groupDisplayModel";
@@ -309,6 +308,10 @@ function RelationGroupGrid({
       invoice: collectWorkbenchTimeFilterYears(filterSourceGroups, "invoice"),
     } satisfies Record<WorkbenchRecordType, string[]>;
   }, [groups, sourceGroups]);
+  const sourceGroupById = useMemo(
+    () => new Map((sourceGroups ?? groups).map((group) => [group.id, group])),
+    [groups, sourceGroups],
+  );
 
   const handleToggleFilterMenu = useCallback((paneId: WorkbenchRecordType, columnKey: string) => {
     setOpenFilterMenu((current) => (
@@ -516,13 +519,10 @@ function RelationGroupGrid({
             </Fragment>
           );
         };
-        const displaySegments = buildWorkbenchGroupDisplaySegments(group);
+        const displayLayout = buildWorkbenchGroupDisplayLayout(group, sourceGroupById.get(group.id) ?? group);
+        const displaySegments = displayLayout?.segments ?? null;
         const segmentCount = displaySegments?.length ?? 0;
-        const segmentedPaneIds = new Set(
-          panes
-            .map((pane) => pane.id as WorkbenchRecordType)
-            .filter((paneId) => workbenchPaneUsesDisplaySegments(group, paneId, displaySegments)),
-        );
+        const segmentedPaneIds = new Set(displayLayout?.segmentedPaneIds ?? []);
 
         if (displaySegments) {
           return (
@@ -747,6 +747,7 @@ function RelationGroupGrid({
     paneGridStyleByPane,
     panes,
     rowTemplateColumns,
+    sourceGroupById,
     trailingColumns,
     togglePaneGroupExpansion,
     zoneId,

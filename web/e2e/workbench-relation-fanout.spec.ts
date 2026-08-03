@@ -6,7 +6,7 @@ import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions"
 import { confirmWorkbenchRelation } from "./fixtures/workbenchFlow";
 
 test.describe("workbench relation browser flow", () => {
-  test("keeps partial daily reimbursement invoices full-height while OA items remain selectable", async ({ page }) => {
+  test("aligns an exact daily reimbursement invoice while OA items remain selectable", async ({ page }) => {
     await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
       workbenchOaExpenseItemsScenario: true,
@@ -21,21 +21,29 @@ test.describe("workbench relation browser flow", () => {
     );
     const projectItem = itemBand.getByText("云南溯源科技", { exact: true });
     await expect(projectItem).toBeVisible();
-    await expect(itemBand.getByText("中国石油云南销售公司", { exact: true })).toHaveCount(0);
+    await expect(itemBand.getByText("中国石油云南销售公司", { exact: true })).toBeVisible();
 
-    const group = page.getByTestId("candidate-group-unpaired-row:oa-exp-2035");
-    const invoicePane = page.getByTestId("candidate-scroll-unpaired-row:oa-exp-2035-invoice");
+    const unmatchedItemBand = page.getByTestId(
+      "candidate-group-segment-unpaired-row:oa-exp-2035-oa-exp-2035:item:0",
+    );
+    await expect(unmatchedItemBand.getByText("中国石油云南销售公司", { exact: true })).toHaveCount(0);
+    const invoicePane = page.getByTestId(
+      "candidate-scroll-unpaired-row:oa-exp-2035-oa-exp-2035:item:1-invoice",
+    );
+    const oaItemPane = page.getByTestId(
+      "candidate-scroll-unpaired-row:oa-exp-2035-oa-exp-2035:item:1-oa",
+    );
     const attachmentInvoice = invoicePane.getByText("中国石油云南销售公司", { exact: true });
     await expect(attachmentInvoice).toBeVisible();
-    const [groupBox, invoicePaneBox, invoiceRowBox] = await Promise.all([
-      group.boundingBox(),
+    const [oaItemPaneBox, invoicePaneBox, invoiceRowBox] = await Promise.all([
+      oaItemPane.boundingBox(),
       invoicePane.boundingBox(),
       invoicePane.getByRole("row").boundingBox(),
     ]);
-    expect(groupBox).not.toBeNull();
+    expect(oaItemPaneBox).not.toBeNull();
     expect(invoicePaneBox).not.toBeNull();
     expect(invoiceRowBox).not.toBeNull();
-    expect(Math.abs((invoicePaneBox?.height ?? 0) - (groupBox?.height ?? 0))).toBeLessThanOrEqual(2);
+    expect(Math.abs((invoicePaneBox?.height ?? 0) - (oaItemPaneBox?.height ?? 0))).toBeLessThanOrEqual(2);
     expect(Math.abs((invoiceRowBox?.height ?? 0) - (invoicePaneBox?.height ?? 0))).toBeLessThanOrEqual(2);
 
     await projectItem.click();

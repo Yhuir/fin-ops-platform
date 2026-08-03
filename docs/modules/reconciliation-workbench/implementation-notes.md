@@ -591,6 +591,8 @@
 
 ## 2026-08-03 - 三栏完整高度与严格一一对应
 
+> 已由下方“逐项精确金额混合同行”修订：保留无精确对栏的完整高度，但不再要求整栏完整双射。
+
 - 目标：关联组内 OA、银行流水、发票栏分别占满完整高度；只有权威来源形成完整唯一双射的栏才共享行轨。截图中的 `4 OA / 2 流水 / 1 发票` 分别按 4/2/1 条记录等分整栏，不再把两条流水固定在前两个 OA 槽位。
 - 根因：`isSourceSegmentedPane` 只要任一 segment 有记录就把整栏切成 OA 行轨，部分映射会留下空槽；多记录样式同时使用 `flex: 0 0 auto`，即使回到 group-level 也不会填满剩余高度。
 - 影响范围：仅 `groupDisplayModel -> RelationGroupGrid -> RelationGroupCell` 既有前端展示边界和局部 sheet CSS；不改变 API、relation、read model、权限、选择、确认/撤回、数据库或 worker I/O。
@@ -598,9 +600,18 @@
 - 性能：布局判断使用已加载 DTO 的 Map/Set 线性扫描，不增加请求、React state/effect、DOM 测量、依赖或 DOM 节点；删除旧金额组合搜索热点。
 - 测试覆盖：`groupDisplayModel.test.ts` 覆盖完整双射、部分/重复来源和金额-only；`RelationGroupGrid.test.tsx` 覆盖 4/2/1、完整 2/2、部分附件、费用子项、单条拉伸、多条等分与旧交互回归；`workbench-relation-fanout.spec.ts` 用 Chromium 几何断言保护发票栏和单张发票实际占满组高。
 
+## 2026-08-03 - 逐项精确金额混合同行
+
+- 目标：修复多付款明细 OA 中“多数发票与付款项金额精确相等，但因同组还存在一对多、金额差异或缺票而整栏全部错位”的问题；精确一对一项必须同行，其余记录继续独立占用残余展示带。
+- 真实原因：前端旧 `workbenchPaneUsesDisplaySegments` 要求目标数等于整栏记录数且每段恰好一条，任何局部不完整都会把整个栏降级。生产 `3061.64` 样例中 12 个付款项、12 张发票有 9 个单张精确对，但 `7.84/8.00`、`76.80/(29+47.80)` 和 `450/无票` 触发整栏降级。
+- 关键决策：删除整栏完整双射门禁，改由 `buildWorkbenchGroupDisplayLayout` 一次输出最终 segments 与实际分段栏。显式 source 优先且仍要求单条、按分同额；无显式 source 只在完整 source group、方向已知、目标金额桶和记录金额桶都唯一时做纯视觉精确金额兜底。发票比较复用现有价税合计优先口径。重复、冲突、金额差异、一对多、多对一、零/非法金额和金额组合都不同行；筛选隐藏重复项不能制造唯一性。
+- 边界：只修改 `groupDisplayModel -> RelationGroupGrid` 的纯前端展示模型并复用 `selectionModel` 金额 helper；不改变 API、relation membership、canonical facts、read model、worker、权限、选择/action identity、数据库或部署 migration。
+- 性能：每组只做 Map/Set 线性扫描，没有新请求、cache、state/effect、DOM 测量、依赖、后端 rebuild 或 worker I/O。旧 `workbenchPaneUsesDisplaySegments` 与整栏 all-or-nothing 测试合同删除，不恢复历史金额组合枚举。
+- 测试：模型覆盖显式精确、唯一金额兜底、隐藏重复、显式重复与组合残余；组件覆盖部分 4/2/1、一对多中的局部精确、多付款项发票逐项同行、父 OA 选择身份和残余记录不丢失；Chromium E2E 用几何断言保护 200 元子项与 200 元发票同高同行。
+
 ## 2026-06-23 - 多 OA 大组缺 source 时按唯一金额分段展示
 
-> 已由 2026-08-03“三栏完整高度与严格一一对应”取代：前端金额 fallback 及其组合枚举已删除。当前视觉同行只消费正式来源 metadata，并要求完整唯一覆盖；本节仅保留历史背景。
+> 已由 2026-08-03“逐项精确金额混合同行”取代：当前只保留方向已知、双方唯一的单条精确金额展示兜底；2～6 条组合枚举永久删除。本节仅保留历史背景。
 
 - 目标：修复关联台已配对大组内缺少 `sourceOaId` 的 OA、银行流水和发票没有同排的问题；例如 29350 OA 应与 29350 流水/发票同行，88050 OA 应与两条合计 88050 的流水同行。
 - 真实原因：`buildWorkbenchGroupDisplaySegments` 只在银行/发票 row 带有效 `sourceOaId` 且可归一到组内 OA 时才生成横向分段；截图中的相关银行流水没有 source link，因此函数返回 `null`，组件退回整组顺序渲染。
