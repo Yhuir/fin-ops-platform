@@ -10,6 +10,7 @@ from typing import Any
 from openpyxl import Workbook
 
 from fin_ops_platform.services.cost_statistics_policy import CostStatisticsPolicy
+from fin_ops_platform.services.search_query import normalize_money_search_query
 
 
 COST_STATISTICS_EXPORT_ROW_LIMIT = 20000
@@ -742,7 +743,9 @@ class CostStatisticsQueryService:
             raise ValueError(
                 "view must be time, project, bank, expense_type, or bank_tag"
             )
-        query = " ".join(str(filters.get("query") or "").split())
+        query = normalize_money_search_query(
+            " ".join(str(filters.get("query") or "").split())
+        )
         if len(query) > 200:
             raise ValueError("query must be at most 200 characters")
         return (

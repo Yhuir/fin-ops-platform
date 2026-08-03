@@ -6,6 +6,7 @@ import type {
   WorkbenchRecordType,
   WorkbenchSourceKind,
 } from "./types";
+import { normalizeMoneySearchQuery } from "../money";
 import { parseWorkbenchAmountCents, workbenchComparableAmountCents } from "./selectionModel";
 
 const workbenchPaneIds: WorkbenchRecordType[] = ["oa", "bank", "invoice"];
@@ -449,7 +450,7 @@ export function mergeWorkbenchGroupsById(
 
 export function buildWorkbenchServerPageQuery(state: WorkbenchZoneDisplayState): WorkbenchGroupsPageQuery {
   const query: WorkbenchGroupsPageQuery = {};
-  const search = state.searchQuery.trim();
+  const search = normalizeMoneySearchQuery(state.searchQuery);
   if (search) {
     query.search = search;
   }
@@ -733,7 +734,7 @@ function resolveBankAmountFilterValues(row: WorkbenchRecord) {
 }
 
 function normalizeWorkbenchSearchText(value: string) {
-  return value.trim().toLocaleLowerCase("zh-CN");
+  return normalizeMoneySearchQuery(value).toLocaleLowerCase("zh-CN");
 }
 
 export function workbenchRowMatchesUnifiedSearch(row: WorkbenchRecord, query: string) {
@@ -760,7 +761,10 @@ function matchesWorkbenchRowText(row: WorkbenchRecord, normalizedQuery: string) 
       ...(row.tags ?? []),
     ].join(" "),
   );
-  return normalizedHaystack.includes(normalizedQuery);
+  return (/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(normalizedQuery)
+    ? normalizedHaystack.replace(/,/g, "")
+    : normalizedHaystack
+  ).includes(normalizedQuery);
 }
 
 function workbenchRowDisplaySearchAliases(row: WorkbenchRecord) {

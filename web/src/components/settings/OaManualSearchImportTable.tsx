@@ -2,6 +2,7 @@ import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAppChrome } from "../../contexts/AppChromeContext";
+import { formatMoney } from "../../features/money";
 import {
   importManualOaRows,
   refreshManualOaImportAttachments,
@@ -31,10 +32,7 @@ function amountToNumber(value: string) {
 }
 
 function formatCurrency(value: number) {
-  return `¥${value.toLocaleString("zh-CN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
+  return `¥${formatMoney(value)}`;
 }
 
 function importStatusLabel(row: OaManualSearchRow) {
@@ -467,7 +465,7 @@ export default function OaManualSearchImportTable() {
                       <strong>{row.projectName}</strong>
                       <small>{row.reason}</small>
                     </td>
-                    <td className="settings-table-amount">{row.amount}</td>
+                    <td className="settings-table-amount">{formatMoney(row.amount)}</td>
                     <td className="settings-table-amount">{row.attachmentFileCount}</td>
                     <td className="settings-table-amount">{row.importableInvoiceCount}</td>
                     <td className="settings-table-amount">{row.unrecognizedAttachmentCount}</td>
@@ -513,7 +511,7 @@ export default function OaManualSearchImportTable() {
                             ) : row.items.map((item, index) => (
                               <tr key={`${row.rowId}-item-${index}`}>
                                 <td>{item.date}</td>
-                                <td className="settings-table-amount">{item.amount}</td>
+                                <td className="settings-table-amount">{formatMoney(item.amount)}</td>
                                 <td>{item.content}</td>
                                 <td>{item.projectName}</td>
                                 <td>{item.reason}</td>

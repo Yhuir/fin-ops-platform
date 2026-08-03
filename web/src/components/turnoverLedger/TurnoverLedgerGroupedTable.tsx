@@ -5,6 +5,9 @@ import type {
   TurnoverLedgerGroup,
   TurnoverLedgerGroupedRow,
 } from "../../features/turnoverLedger/types";
+import { formatMoney } from "../../features/money";
+
+export { formatMoney };
 
 type RuntimeGroupedRow = TurnoverLedgerGroupedRow & {
   rowKind?: "summary" | "lot" | string;
@@ -20,20 +23,6 @@ type RuntimeGroup = TurnoverLedgerGroup & {
   pendingCollectionAmount?: string;
   closedAmount?: string;
 };
-
-export function formatMoney(value: string | null | undefined) {
-  if (!value || !value.trim()) {
-    return "0.00";
-  }
-  const parsed = Number(value.replace(/,/g, ""));
-  if (!Number.isFinite(parsed)) {
-    return value;
-  }
-  return parsed.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
 
 export function formatNullable(value: string | number | null | undefined) {
   if (value === null || value === undefined || value === "") {

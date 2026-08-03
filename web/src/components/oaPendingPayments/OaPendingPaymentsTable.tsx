@@ -17,6 +17,7 @@ import type {
   OaPendingPaymentRow,
   OaPendingPaymentSortDirection,
 } from "../../features/oaPendingPayments/types";
+import { formatMoney } from "../../features/money";
 
 type OaColumnFilterValue = InputInvoiceUsageFilterValue;
 
@@ -795,7 +796,7 @@ function TextLine({
   strong?: boolean;
   numeric?: boolean;
 }) {
-  const text = value == null || value === "" ? "-" : String(value);
+  const text = value == null || value === "" ? "-" : numeric ? formatMoney(value, "-") : String(value);
   if (text === "-") {
     return <EmptyValue />;
   }

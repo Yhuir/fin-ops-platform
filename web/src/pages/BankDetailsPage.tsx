@@ -18,6 +18,7 @@ import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayCon
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
+import { formatMoney } from "../features/money";
 import BankCategoryTag from "../features/bankDetails/BankCategoryTag";
 import AutoTagRulesDrawer from "../features/bankDetails/AutoTagRulesDrawer";
 import {
@@ -421,20 +422,6 @@ function createYearOptions(activeYear: string) {
 
 function displayBalance(value: string | null) {
   return value && value.trim() ? formatMoney(value) : "余额为空";
-}
-
-function formatMoney(value: string | null) {
-  if (!value || !value.trim()) {
-    return "";
-  }
-  const parsed = Number(value.replace(/,/g, ""));
-  if (!Number.isFinite(parsed)) {
-    return value;
-  }
-  return parsed.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
 }
 
 function relationTagTone(tag: string) {

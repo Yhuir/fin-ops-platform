@@ -31,7 +31,7 @@
 | 输入 | Owner | 页面合同 |
 | --- | --- | --- |
 | OA session/token | permissions/auth owner | route 在任何查询/命令 I/O 前解析一次；拒绝未认证、无权限和只读写入 |
-| rows query | frontend/API | `month`、keyword、trade-date range、filters、sort、page/page_size、view mode；非法参数 fail closed |
+| rows query | frontend/API | `month`、keyword、trade-date range、filters、sort、page/page_size、view mode；非法参数 fail closed；纯金额 keyword 在 service 边界归一为无千分位文本，selector 搜索 OA、流水、已付和发票 canonical 金额。 |
 | bank candidate query | frontend/API | relation status、keyword、page/page_size、repeated oa_row_ids；全部支出流水池由 PostgreSQL 服务端分页 |
 | completed OA | OA integration | `app.oa_applications` 已提交 snapshot；页面不访问 Mongo |
 | in-progress admission | OA integration | `app.oa_pending_payment_admissions`，按 tenant 读取 |

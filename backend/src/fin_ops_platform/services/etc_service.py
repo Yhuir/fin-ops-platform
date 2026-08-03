@@ -33,6 +33,7 @@ from fin_ops_platform.services.etc_invoice_pdf_bundle_service import (
     EtcInvoicePdfBundleError,
     open_single_page_etc_invoice_pdf,
 )
+from fin_ops_platform.services.search_query import normalize_money_search_query
 
 
 class EtcInvoiceStatus(str, Enum):
@@ -3861,12 +3862,14 @@ class EtcService:
 
     @staticmethod
     def _invoice_matches_keyword(invoice: EtcInvoice, keyword: str) -> bool:
-        needle = keyword.lower()
+        needle = normalize_money_search_query(keyword).lower()
         fields = (
             invoice.invoice_number,
             invoice.seller_name or "",
             invoice.buyer_name or "",
             invoice.plate_number or "",
+            str(invoice.total_amount),
+            str(invoice.tax_amount),
         )
         return any(needle in field.lower() for field in fields)
 
@@ -4318,7 +4321,7 @@ class EtcService:
         return False
 
     def _batch_matches_keyword(self, batch: EtcBatch, keyword: str | None) -> bool:
-        normalized_keyword = str(keyword or "").strip().lower()
+        normalized_keyword = normalize_money_search_query(keyword).lower()
         if not normalized_keyword:
             return True
         fields = [

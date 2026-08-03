@@ -2411,7 +2411,7 @@ def _nonzero_decimal_or_none(value: object) -> Decimal | None:
 
 
 def _money_text(value: Decimal) -> str:
-    return f"{value.quantize(Decimal('0.01')):,.2f}"
+    return f"{value.quantize(Decimal('0.01')):.2f}"
 
 
 def _date_range_label(values: list[str]) -> str:

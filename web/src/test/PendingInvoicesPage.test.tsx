@@ -1084,7 +1084,7 @@ describe("Pending invoices page", () => {
     expect(within(page).queryByText("2026-04-19 10:52:02")).not.toBeInTheDocument();
     expect(within(page).getByText("货款 / 设备采购")).toBeInTheDocument();
     expect(within(page).getAllByText("支").length).toBeGreaterThan(0);
-    expect(within(page).getAllByText("1,200.00").length).toBeGreaterThan(0);
+    expect(within(page).getAllByText("1200.00").length).toBeGreaterThan(0);
     expect(within(page).getByText("建行 8106")).toBeInTheDocument();
     expect(within(page).queryByText("2026-04-19T10:52:02+08:00")).not.toBeInTheDocument();
     expect(within(page).queryByText("人民币元")).not.toBeInTheDocument();
@@ -1094,7 +1094,7 @@ describe("Pending invoices page", () => {
     expect(within(page).queryByText("发票价税合计大于已付合计")).not.toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: /打开规则设置/ })).not.toBeInTheDocument();
     const pendingRow = within(page).getByRole("row", { name: /云南开票供应商/ });
-    expect(within(pendingRow).getByText("1,200.00")).toBeInTheDocument();
+    expect(within(pendingRow).getByText("1200.00")).toBeInTheDocument();
     expect(within(pendingRow).queryByText("0.00")).not.toBeInTheDocument();
     expect(within(pendingRow).queryByRole("button", { name: /云南开票供应商 选择发票/ })).not.toBeInTheDocument();
     expect(within(pendingRow).queryByRole("button", { name: /云南开票供应商 补票/ })).not.toBeInTheDocument();
@@ -1104,9 +1104,9 @@ describe("Pending invoices page", () => {
     expect(within(page).queryByText("李四")).not.toBeInTheDocument();
     expect(within(page).getByText(/分期供应商二号/)).toBeInTheDocument();
     expect(within(page).getAllByText("+2")).toHaveLength(2);
-    expect(within(page).getByText("2,800.00")).toBeInTheDocument();
-    expect(within(page).getByText("已付 1,500.00")).toBeInTheDocument();
-    expect(within(page).getByText("待付 1,300.00")).toBeInTheDocument();
+    expect(within(page).getByText("2800.00")).toBeInTheDocument();
+    expect(within(page).getByText("已付 1500.00")).toBeInTheDocument();
+    expect(within(page).getByText("待付 1300.00")).toBeInTheDocument();
 
     const request = pendingInvoiceRowsRequests(fetchMock)[0];
     expect(request.searchParams.get("direction")).toBe("expense");
@@ -1299,7 +1299,7 @@ describe("Pending invoices page", () => {
     expect(screen.queryByRole("table", { name: "历史支付流水" })).not.toBeInTheDocument();
     expect(screen.queryByRole("table", { name: "已关联 OA" })).not.toBeInTheDocument();
     expect(await screen.findByText("已付合计")).toBeInTheDocument();
-    expect(screen.getAllByText("1,500.00").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("1500.00").length).toBeGreaterThan(0);
     expect(screen.getByText("DIG-002")).toBeInTheDocument();
     expect(screen.getByText("分期供应商二号")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭关系明细抽屉" }));
@@ -1662,12 +1662,12 @@ describe("Pending invoices page", () => {
     await user.click(await within(page).findByRole("checkbox", { name: "选择流水 云南开票供应商二号" }));
 
     expect(within(page).getByText("已选 2 条流水")).toBeInTheDocument();
-    expect(within(page).getByText("流水合计 1,236.00")).toBeInTheDocument();
+    expect(within(page).getByText("流水合计 1236.00")).toBeInTheDocument();
     await user.click(within(page).getByRole("button", { name: "选择发票" }));
 
     expect(await screen.findByRole("heading", { name: "选择已有进项发票" })).toBeInTheDocument();
     expect(screen.getByText("已选流水金额")).toBeInTheDocument();
-    expect(screen.getByText("1,236.00")).toBeInTheDocument();
+    expect(screen.getByText("1236.00")).toBeInTheDocument();
     await user.click(await screen.findByRole("checkbox", { name: "选择发票 DIG-CAND-001" }));
     await user.click(await screen.findByRole("checkbox", { name: "选择发票 DIG-CAND-002" }));
     expect(screen.getByText("已选发票金额")).toBeInTheDocument();

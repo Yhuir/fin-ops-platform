@@ -1,6 +1,7 @@
 import { memo, useMemo, useRef } from "react";
 
 import { getWorkbenchColumns, getWorkbenchPaneGridStyle } from "../../features/workbench/tableConfig";
+import { formatMoney } from "../../features/money";
 import type {
   WorkbenchRelationGroup,
   WorkbenchColumnLayouts,
@@ -341,10 +342,7 @@ function parseMoneyAmount(value: string) {
 }
 
 function formatMoneyDelta(value: number) {
-  return value.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+  return formatMoney(value);
 }
 
 function resolvePreviewSectionToneClass(testId: string | undefined, title: string) {
@@ -362,7 +360,7 @@ function formatDisplayAmount(value: string, hasRows: boolean) {
   if (!hasRows) {
     return "-";
   }
-  return parseMoneyAmount(value) === null ? "-" : value;
+  return parseMoneyAmount(value) === null ? "-" : formatMoney(value);
 }
 
 function resolveComparableAmounts(

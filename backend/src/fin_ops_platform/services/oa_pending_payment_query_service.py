@@ -22,6 +22,7 @@ from fin_ops_platform.services.oa_pending_payment_details import (
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
     PostgresOaPendingPaymentStatusSnapshotReader,
 )
+from fin_ops_platform.services.search_query import normalize_money_search_query
 
 
 class OaPendingPaymentQueryService:
@@ -53,7 +54,7 @@ class OaPendingPaymentQueryService:
             _query_value(query, "sort_direction") or "desc",
         )
         view_mode = parse_view_mode(_query_value(query, "view_mode"))
-        keyword = str(_query_value(query, "keyword") or "").strip() or None
+        keyword = normalize_money_search_query(_query_value(query, "keyword")) or None
         try:
             with repository.snapshot() as snapshot:
                 selected = snapshot.select_page(
@@ -94,7 +95,7 @@ class OaPendingPaymentQueryService:
         tenant_id: str,
     ) -> dict[str, Any]:
         relation_status = str(_query_value(query, "relation_status") or "all").strip() or "all"
-        keyword = str(_query_value(query, "keyword") or "").strip() or None
+        keyword = normalize_money_search_query(_query_value(query, "keyword")) or None
         page = parse_positive_int(_query_value(query, "page") or 1, "page")
         page_size = parse_positive_int(
             _query_value(query, "page_size") or _query_value(query, "pageSize") or 100,

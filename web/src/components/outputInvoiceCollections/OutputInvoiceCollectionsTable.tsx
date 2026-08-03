@@ -9,6 +9,7 @@ import type {
   OutputInvoiceCollectionRow,
   OutputInvoiceCollectionSortDirection,
 } from "../../features/outputInvoiceCollections/types";
+import { formatMoney } from "../../features/money";
 import ExpandableCellText from "./ExpandableCellText";
 import OutputInvoiceCollectionFilterMenu, { type OutputInvoiceCollectionFilterValue } from "./OutputInvoiceCollectionFilterMenu";
 
@@ -442,12 +443,6 @@ function taxSummary(taxAmount: string, taxRate: string) {
 function displayInvoiceNo(row: OutputInvoiceCollectionRow) {
   const invoice = row.invoice;
   return invoice.displayNo || invoice.digitalInvoiceNo || [invoice.invoiceCode, invoice.invoiceNo].filter(Boolean).join(" ") || "—";
-}
-
-function formatMoney(value: string) {
-  const parsed = Number(String(value ?? "").replace(/,/g, ""));
-  if (!Number.isFinite(parsed)) return value || "—";
-  return parsed.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function dateOnly(value: string) {

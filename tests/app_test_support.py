@@ -277,6 +277,16 @@ class FreshWorkbenchWriteGateRepository:
             "read_model_status": "fresh",
         }
 
+    def active_workbench_source_versions_by_scope(
+        self,
+        *,
+        scope_keys: list[str],
+    ) -> dict[str, dict[str, object]]:
+        return {
+            scope_key: self._source_versions_provider(scope_key)
+            for scope_key in scope_keys
+        }
+
 
 def install_fresh_workbench_write_gate(application: Application, *, version: str = "test-generation-1") -> str:
     """Install only the generation precondition I/O required by local write-contract tests."""
@@ -285,6 +295,13 @@ def install_fresh_workbench_write_gate(application: Application, *, version: str
         version,
         source_versions_provider=application._workbench_sql_read_model_source_versions,  # noqa: SLF001
         application=application,
+    )
+    application._workbench_sql_projection_builder = SimpleNamespace(  # noqa: SLF001
+        list_workbench_scope_shards=lambda _scope_key: ["2026-01"],
+        source_versions_for_scopes=lambda scope_keys: {
+            scope_key: application._workbench_sql_read_model_source_versions(scope_key)  # noqa: SLF001
+            for scope_key in scope_keys
+        },
     )
     return str(version)
 

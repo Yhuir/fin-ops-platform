@@ -145,7 +145,7 @@ test.describe("tax offset browser flow", () => {
     });
 
     await expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible();
-    await expect(statCard(page, "销项税额").getByText("41,600.00")).toBeVisible();
+    await expect(statCard(page, "销项税额").getByText("41600.00")).toBeVisible();
     await expect(page.getByRole("grid", { name: "销项票开票情况" })).toBeVisible();
     await expect(page.getByRole("grid", { name: "进项票认证计划" })).toBeVisible();
     await expect(page.getByRole("button", { name: "已认证发票导入" })).toHaveCount(0);
@@ -255,7 +255,7 @@ test.describe("tax offset browser flow", () => {
     });
 
     await expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible();
-    await expect(statCard(page, "销项税额").getByText("41,600.00")).toBeVisible();
+    await expect(statCard(page, "销项税额").getByText("41600.00")).toBeVisible();
     await expect(page.getByText("销项票 81 张按开票情况只读计入")).toBeVisible();
     await expectVisibleAndUncovered(page.getByRole("button", { name: "已认证发票导入" }), "certified import button");
     await expectVisibleAndUncovered(page.getByRole("button", { name: "保存计划" }), "save tax plan button");
@@ -371,7 +371,7 @@ test.describe("tax offset browser flow", () => {
       await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible());
     });
     await expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible();
-    await expect(statCard(page, "计划进项税额").getByText("18,240.00")).toBeVisible();
+    await expect(statCard(page, "计划进项税额").getByText("18240.00")).toBeVisible();
 
     await recordLatency({
       operationId: "tax-offset.toggle-input-plan-before-conflict",
@@ -381,9 +381,9 @@ test.describe("tax offset browser flow", () => {
       const calculateResponse = waitForTaxOffsetCalculate(page);
       await page.getByRole("row", { name: /11203491/ }).locator(".checkbox__control").click();
       expect((await mark("apiLatencyMs", calculateResponse)).status()).toBe(200);
-      await mark("finalSettledLatencyMs", expect(statCard(page, "计划进项税额").getByText("12,480.00")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(statCard(page, "计划进项税额").getByText("12480.00")).toBeVisible());
     });
-    await expect(statCard(page, "计划进项税额").getByText("12,480.00")).toBeVisible();
+    await expect(statCard(page, "计划进项税额").getByText("12480.00")).toBeVisible();
 
     const fetchCountBeforeSave = api.count("GET /api/tax-offset");
     await recordLatency({
@@ -423,8 +423,8 @@ test.describe("tax offset browser flow", () => {
       await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible());
     });
     await expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible();
-    await expect(statCard(page, "销项税额").getByText("41,600.00")).toBeVisible();
-    await expect(statCard(page, "计划进项税额").getByText("18,240.00")).toBeVisible();
+    await expect(statCard(page, "销项税额").getByText("41600.00")).toBeVisible();
+    await expect(statCard(page, "计划进项税额").getByText("18240.00")).toBeVisible();
     await expect(page.getByRole("grid", { name: "销项票开票情况" })).toBeVisible();
     await expect(page.getByRole("grid", { name: "进项票认证计划" })).toBeVisible();
 
@@ -436,10 +436,10 @@ test.describe("tax offset browser flow", () => {
       const calculateResponse = waitForTaxOffsetCalculate(page);
       await page.getByRole("row", { name: /11203491/ }).locator(".checkbox__control").click();
       expect((await mark("apiLatencyMs", calculateResponse)).status()).toBe(200);
-      await mark("finalSettledLatencyMs", expect(statCard(page, "计划进项税额").getByText("12,480.00")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(statCard(page, "计划进项税额").getByText("12480.00")).toBeVisible());
     });
-    await expect(statCard(page, "计划进项税额").getByText("12,480.00")).toBeVisible();
-    await expect(statCard(page, "本月应纳税额").getByText("29,120.00")).toBeVisible();
+    await expect(statCard(page, "计划进项税额").getByText("12480.00")).toBeVisible();
+    await expect(statCard(page, "本月应纳税额").getByText("29120.00")).toBeVisible();
     expect(api.count("POST /api/tax-offset/calculate")).toBe(1);
 
     await recordLatency({
@@ -512,7 +512,7 @@ test.describe("tax offset browser flow", () => {
     await expect.poll(() => api.count("POST /api/tax-offset/certified-import/confirm")).toBe(1);
     await expect.poll(() => api.count("GET /api/tax-offset")).toBeGreaterThan(taxOffsetFetchCountBeforeConfirm);
     await expect(page.getByText("已导入 2 条已认证记录，并已刷新当前税金抵扣页面。")).toBeVisible();
-    await expect(statCard(page, "已认证结果进项税额").getByText("14,080.00")).toBeVisible();
+    await expect(statCard(page, "已认证结果进项税额").getByText("14080.00")).toBeVisible();
     await expect(page.getByRole("complementary", { name: "已认证结果" }).getByText("高速通行服务商")).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);

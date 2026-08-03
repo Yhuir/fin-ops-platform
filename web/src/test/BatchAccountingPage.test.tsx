@@ -477,7 +477,7 @@ describe("BatchAccountingPage", () => {
     expect(within(bankList).queryByRole("table")).not.toBeInTheDocument();
     expect(within(bankList).getByText("2026-01-07 15:54:00")).toBeInTheDocument();
     expect(within(bankList).queryByText("2026-01-07T15:54:00+08")).not.toBeInTheDocument();
-    expect(within(bankList).getByRole("button", { name: /批量账务集中处理.*1,200.00.*2026-01-07 15:54:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true");
+    expect(within(bankList).getByRole("button", { name: /批量账务集中处理.*1200.00.*2026-01-07 15:54:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true");
 
     const oaTable = screen.getByRole("table", { name: "可关联OA项" });
     expect(within(oaTable).getByRole("checkbox", { name: "选择 刘晨 2026-01-06" })).toBeInTheDocument();
@@ -634,7 +634,7 @@ describe("BatchAccountingPage", () => {
 
     await user.click(screen.getByRole("button", { name: "刷新" }));
 
-    expect(await screen.findByRole("button", { name: /批量账务集中处理.*1,200.00.*2026-01-07 15:54:00.*支出.*建行 8106/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /批量账务集中处理.*1200.00.*2026-01-07 15:54:00.*支出.*建行 8106/ })).toBeInTheDocument();
     expect(screen.queryByText("批量账务数据加载暂时失败，请刷新后重试。")).not.toBeInTheDocument();
     expect(batchAccountingGetCount).toBe(2);
   });
@@ -658,7 +658,7 @@ describe("BatchAccountingPage", () => {
 
       await user.click(screen.getByRole("checkbox", { name: "选择 王青 2026-01-07" }));
       expect(screen.getByText("已选 OA 2 项")).toBeInTheDocument();
-      expect(screen.getByText("已选 OA 金额 1,200.00")).toBeInTheDocument();
+      expect(screen.getByText("已选 OA 金额 1200.00")).toBeInTheDocument();
       expect(screen.getByText("差额 0.00")).toBeInTheDocument();
       expect(screen.queryByLabelText("差额说明")).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeEnabled();
@@ -824,13 +824,13 @@ describe("BatchAccountingPage", () => {
 
     const oaTable = await screen.findByRole("table", { name: "可关联OA项" });
     expect(within(oaTable).getByText("陈雄兵")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /批量账务集中处理.*1,200.00.*2026-01-07 15:54:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /批量账务集中处理.*1200.00.*2026-01-07 15:54:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("已选 OA 1 项")).toBeInTheDocument();
     expect(screen.getByText("已选 OA 金额 700.00")).toBeInTheDocument();
 
     await user.click(await screen.findByRole("checkbox", { name: "选择 陈雄兵 2025-12-23" }));
     expect(screen.getByText("已选 OA 2 项")).toBeInTheDocument();
-    expect(screen.getByText("已选 OA 金额 1,200.00")).toBeInTheDocument();
+    expect(screen.getByText("已选 OA 金额 1200.00")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeEnabled();
 
     await user.click(screen.getByRole("button", { name: "关联OA项与流水" }));

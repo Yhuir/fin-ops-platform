@@ -33,6 +33,7 @@ from fin_ops_platform.services.oa_attachment_invoice_cache import (
 )
 from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
+from fin_ops_platform.services.search_query import normalize_money_search_query
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
@@ -2446,6 +2447,17 @@ class MongoOAAdapter(OAAdapter):
         if not query:
             return None
         regex = {"$regex": re.escape(query), "$options": "i"}
+        normalized_money_query = normalize_money_search_query(query)
+        amount_regex = regex
+        if normalized_money_query == query and re.fullmatch(r"[+-]?\d+(?:\.\d+)?", query):
+            sign = "-" if query.startswith("-") else "+" if query.startswith("+") else ""
+            unsigned = query[len(sign) :] if sign else query
+            integer, separator, fraction = unsigned.partition(".")
+            grouped = f"{int(integer):,}{separator}{fraction}"
+            amount_regex = {
+                "$regex": f"(?:{re.escape(query)}|{re.escape(sign + grouped)})",
+                "$options": "i",
+            }
         if form_type == OA_IMPORT_FORM_TYPE_PAYMENT:
             fields = [
                 "data.applicationDate",
@@ -2489,7 +2501,18 @@ class MongoOAAdapter(OAAdapter):
                 "data.schedule.detailReimbursementAttachment.files.fileName",
                 "data.schedule.detailReimbursementAttachment.list.name",
             ]
-        text_or = [{field: regex} for field in fields]
+        amount_fields = {
+            "data.amount",
+            "data.Amount",
+            "data.totalAmount",
+            "data.TotalAmount",
+            "data.schedule.detailReimbursementAmount",
+            "data.schedule.amount",
+        }
+        text_or = [
+            {field: amount_regex if field in amount_fields else regex}
+            for field in fields
+        ]
         if project_query_values:
             text_or.append({"data.projectName": {"$in": project_query_values}})
             text_or.append({"data.schedule.detailProjectName": {"$in": project_query_values}})
@@ -2940,10 +2963,12 @@ class MongoOAAdapter(OAAdapter):
 
     @classmethod
     def _record_matches_query(cls, record: OAApplicationRecord, q: str | None) -> bool:
-        query = clean_string(q).lower()
+        query = normalize_money_search_query(clean_string(q)).lower()
         if not query:
             return True
         haystack = "\n".join(cls._iter_record_search_text(record)).lower()
+        if re.fullmatch(r"[+-]?\d+(?:\.\d+)?", query):
+            haystack = haystack.replace(",", "")
         return query in haystack
 
     @classmethod

@@ -438,4 +438,4 @@ class TaxOffsetService:
 
     @staticmethod
     def _format_money(value: Decimal) -> str:
-        return f"{value:,.2f}"
+        return f"{value:.2f}"

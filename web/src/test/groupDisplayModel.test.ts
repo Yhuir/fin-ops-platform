@@ -327,6 +327,17 @@ describe("groupDisplayModel time filter", () => {
     });
   });
 
+  test("normalizes grouped amount queries for server and local workbench search", () => {
+    const state = {
+      ...createEmptyWorkbenchZoneDisplayState(),
+      searchQuery: "4,311.00",
+    } as ReturnType<typeof createEmptyWorkbenchZoneDisplayState>;
+    const row = buildOaRow("oa-money-search", "4,311.00");
+
+    expect(buildWorkbenchServerPageQuery(state)).toEqual({ search: "4311.00" });
+    expect(workbenchRowMatchesUnifiedSearch(row, "4311.00")).toBe(true);
+  });
+
   test("matches structured bank note labels and values shown in the grid", () => {
     const row = {
       ...buildBankRow("bank-searchable-text", "2026-07-21 11:30"),

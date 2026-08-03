@@ -1044,6 +1044,10 @@ canonical_rows as materialized (
         invoice_aggregates.existing_invoice_count,
         concat_ws(
             ' ',
+            group_oa.oa_amount::text,
+            bank_aggregates.bank_amount::text,
+            bank_aggregates.bank_paid_total::text,
+            invoice_aggregates.invoice_total_with_tax::text,
             group_oa.oa_search_payload::text,
             bank_aggregates.bank_search_payload::text,
             invoice_aggregates.invoice_search_payload::text

@@ -8,6 +8,7 @@ import StatePanel from "../components/common/StatePanel";
 import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
+import { formatMoney } from "../features/money";
 import {
   fetchBatchAccounting,
   submitBatchAccounting,
@@ -57,22 +58,8 @@ function parseMoneyCents(value: string | number | null | undefined) {
   return Math.round(numeric * 100);
 }
 
-function formatMoney(value: string | number | null | undefined) {
-  const numeric = Number(String(value ?? "0").replace(/,/g, "").trim());
-  if (!Number.isFinite(numeric)) {
-    return String(value ?? "0.00");
-  }
-  return numeric.toLocaleString("zh-CN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
 function formatCents(cents: number) {
-  return (cents / 100).toLocaleString("zh-CN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+  return formatMoney((cents / 100).toFixed(2));
 }
 
 function formatTradeTime(value: string | null | undefined) {

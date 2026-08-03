@@ -1,4 +1,5 @@
 import type { WorkbenchRelationGroup, WorkbenchRecord, WorkbenchRecordType } from "./types";
+import { formatMoney } from "../money";
 
 const paneIds: WorkbenchRecordType[] = ["oa", "bank", "invoice"];
 
@@ -96,10 +97,7 @@ export function parseWorkbenchAmountCents(value: string): number {
 }
 
 export function formatWorkbenchAmountCents(cents: number): string {
-  return new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(cents / 100);
+  return formatMoney((cents / 100).toFixed(2));
 }
 
 function sumWorkbenchAmountCents(rows: WorkbenchRecord[]) {

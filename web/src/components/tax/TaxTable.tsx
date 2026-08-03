@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { Button, Checkbox } from "@heroui/react";
 
 import type { TaxInvoiceRecord } from "../../features/tax/types";
+import { formatMoney, normalizeMoneySearchQuery } from "../../features/money";
 import {
   AmountCell,
   EmptyValue,
@@ -372,7 +373,7 @@ export default function TaxTable({
                 className={`${checked ? "tax-row-selected" : ""}${isLocked ? " tax-row-locked" : ""}${isHighlighted ? " tax-row-highlighted" : ""}`}
                 dataCertifiedHighlighted={isHighlighted}
                 id={row.id}
-                textValue={`${row.invoiceNo} ${row.counterparty} ${invoiceFlow.label} ${row.statusLabel ?? ""} ${row.issueDate} ${row.taxAmount} ${row.amount} ${row.taxRate}`}
+                textValue={`${row.invoiceNo} ${row.counterparty} ${invoiceFlow.label} ${row.statusLabel ?? ""} ${row.issueDate} ${formatMoney(row.taxAmount)} ${formatMoney(row.amount)} ${row.taxRate}`}
               >
                 {selectable ? (
                   <FinanceTableCell columnRole="selection" className="tax-check-column" textValue={`${row.invoiceNo} ${row.counterparty}`}>
@@ -403,7 +404,7 @@ export default function TaxTable({
                   />
                 </FinanceTableCell>
                 <FinanceTableCell columnRole="amount" className="tax-column-tax-amount" textValue={row.taxAmount}>
-                  {row.taxAmount}
+                  {formatMoney(row.taxAmount)}
                 </FinanceTableCell>
                 <FinanceTableCell columnRole="account" className="tax-column-counterparty" textValue={row.counterparty}>
                   {row.counterparty}
@@ -429,7 +430,7 @@ export default function TaxTable({
 }
 
 function normalizeTaxSearchText(value: string) {
-  return value.trim().toLowerCase();
+  return normalizeMoneySearchQuery(value).toLowerCase();
 }
 
 function buildTaxRowSearchText(row: TaxInvoiceRecord) {

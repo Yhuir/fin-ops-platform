@@ -448,7 +448,7 @@ def _decimal(value: Any) -> Decimal | None:
 
 
 def _money(value: Any) -> str:
-    return f"{(_decimal(value) or Decimal('0')):,.2f}"
+    return f"{(_decimal(value) or Decimal('0')):.2f}"
 
 
 def _is_output(value: Any) -> bool:

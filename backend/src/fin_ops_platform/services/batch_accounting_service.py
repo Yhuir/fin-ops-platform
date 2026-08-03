@@ -7,6 +7,7 @@ import re
 from time import perf_counter
 from typing import Any, Callable, Iterable
 
+from fin_ops_platform.services.search_query import normalize_money_search_query
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 
@@ -67,7 +68,7 @@ class BatchAccountingService:
             page=oa_page if oa_page is not None else page,
             page_size=oa_page_size if oa_page_size is not None else page_size,
         )
-        normalized_search = str(oa_search or "").strip()
+        normalized_search = normalize_money_search_query(oa_search)
         if len(normalized_search) > 200:
             raise BatchAccountingError("invalid_batch_accounting_search", "oa_search must be <= 200 characters.")
 

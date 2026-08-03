@@ -1,6 +1,8 @@
 import { Chip, Pagination, Table, Tooltip } from "@heroui/react";
 import type { CSSProperties, ReactNode, Ref } from "react";
 
+import { formatMoney } from "../../features/money";
+
 export type FinanceTableColumnRole =
   | "identity"
   | "amount"
@@ -264,7 +266,7 @@ export function TableCellStack({ primary, secondary, meta, className }: TableCel
 }
 
 type AmountCellProps = {
-  amount: ReactNode;
+  amount: string | number;
   direction?: ReactNode;
   account?: ReactNode;
   className?: string;
@@ -273,7 +275,7 @@ type AmountCellProps = {
 export function AmountCell({ amount, direction, account, className }: AmountCellProps) {
   return (
     <span className={cx("finance-amount-cell", className)}>
-      <span className="finance-amount-cell__value">{amount}</span>
+      <span className="finance-amount-cell__value">{formatMoney(amount, "-")}</span>
       {direction || account ? (
         <span className="finance-amount-cell__meta">
           {direction ? <span className="finance-amount-cell__direction">{direction}</span> : null}

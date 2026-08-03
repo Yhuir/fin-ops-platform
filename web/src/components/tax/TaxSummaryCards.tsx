@@ -1,4 +1,5 @@
 import type { TaxSummary } from "../../features/tax/types";
+import { formatMoney } from "../../features/money";
 
 type TaxSummaryCardsProps = {
   summary: TaxSummary;
@@ -25,7 +26,7 @@ export default function TaxSummaryCards({ summary }: TaxSummaryCardsProps) {
           className={`stat-card tax-summary-card${card.tone === "warn" ? " warn" : ""}${card.tone === "success" ? " success" : ""}`}
         >
           <span>{card.label}</span>
-          <strong>{card.value}</strong>
+          <strong>{formatMoney(card.value)}</strong>
         </section>
       ))}
     </div>

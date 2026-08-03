@@ -357,13 +357,13 @@ test.describe("cost statistics browser flow", () => {
     await expect(page.locator(".cost-page .stat-card")).toHaveCount(0);
     await expect(page.getByRole("button", { name: /项目范围：/ })).toHaveCount(0);
     await expect(page.getByLabel("时间统计方向金额")).toContainText("支出金额");
-    await expect(page.getByLabel("收入金额 8,888.00")).toBeVisible();
+    await expect(page.getByLabel("收入金额 8888.00")).toBeVisible();
     await expect(page.locator(".cost-direction-amount--income").first()).toHaveCSS("color", /rgb\(/);
     await expect(page.getByRole("button", { name: "查看流水 cost-income-e2e-001" })).toBeVisible();
     await page.getByRole("button", { name: "查看流水 cost-income-e2e-001" }).click();
     const incomeDetailDialog = page.getByRole("dialog", { name: "流水详情" });
     await expect(incomeDetailDialog).toContainText("收入");
-    await expect(incomeDetailDialog).toContainText("8,888.00");
+    await expect(incomeDetailDialog).toContainText("8888.00");
     await incomeDetailDialog.getByRole("button", { name: "关闭" }).click();
 
     const refreshResponse = waitForCostStatisticsExplorer(page, "2026-03", "active");
@@ -473,7 +473,7 @@ test.describe("cost statistics browser flow", () => {
     });
     await expect(page.getByRole("button", { name: "流水标签统计时间范围：2026年3月" })).toBeVisible();
     await expect(page.getByLabel("标签统计方向金额")).toContainText("支出金额");
-    await expect(page.getByLabel("收入金额 8,888.00")).toBeVisible();
+    await expect(page.getByLabel("收入金额 8888.00")).toBeVisible();
     await expect(page.getByRole("button", { name: /收入/ }).first()).toBeVisible();
     await recordLatency({
       operationId: "cost-statistics.drilldown-bank-tag",

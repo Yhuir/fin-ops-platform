@@ -161,9 +161,9 @@ describe("WorkbenchZone", () => {
 
     expect(toolbar).not.toBeNull();
     expect(within(toolbar as HTMLElement).getByText("带入 1")).toBeInTheDocument();
-    expect(within(toolbar as HTMLElement).getByText("OA 1 / 128,000.00")).toBeInTheDocument();
-    expect(within(toolbar as HTMLElement).getByText("流水 1 / 128,000.00")).toBeInTheDocument();
-    expect(within(toolbar as HTMLElement).getByText("发票 1 / 144,640.00")).toBeInTheDocument();
+    expect(within(toolbar as HTMLElement).getByText("OA 1 / 128000.00")).toBeInTheDocument();
+    expect(within(toolbar as HTMLElement).getByText("流水 1 / 128000.00")).toBeInTheDocument();
+    expect(within(toolbar as HTMLElement).getByText("发票 1 / 144640.00")).toBeInTheDocument();
     expect(within(toolbar as HTMLElement).getByRole("button", { name: "确认关联" })).toBeDisabled();
     expect(within(toolbar as HTMLElement).getByRole("status", {
       name: "OA 正在同步，完成后将自动恢复关联操作。",
@@ -455,8 +455,8 @@ describe("WorkbenchZone", () => {
 
     await user.click(icon);
     expect(await screen.findByText("金额不一致")).toBeInTheDocument();
-    expect(screen.getByText(/银行流水金额：3,617.41/)).toBeInTheDocument();
-    expect(screen.getByText(/OA合计：3,425.41/)).toBeInTheDocument();
+    expect(screen.getByText(/银行流水金额：3617.41/)).toBeInTheDocument();
+    expect(screen.getByText(/OA合计：3425.41/)).toBeInTheDocument();
     expect(screen.getByText(/差额：192.00/)).toBeInTheDocument();
     expect(screen.getByText(/差额说明：财务确认差额闭环/)).toBeInTheDocument();
   });

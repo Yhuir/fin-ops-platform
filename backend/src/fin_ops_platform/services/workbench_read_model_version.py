@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION = "2026-08-03-bank-category-projection-v16"
+WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION = "2026-08-03-ungrouped-money-search-v17"
 WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION = (
-    "workbench_sql_projection.composed_active_month_shards.bank_category_projection.v16"
+    "workbench_sql_projection.composed_active_month_shards.ungrouped_money_search.v17"
 )
 WORKBENCH_RELATION_PREVIEW_MAX_SELECTED_ROWS = 20
 WORKBENCH_RELATION_PREVIEW_MAX_CONTEXT_ROWS = 100

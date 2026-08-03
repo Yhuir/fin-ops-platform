@@ -6,6 +6,9 @@ import type {
   BankFlowRuleBatchTagDefinition,
   BankFlowRuleBatchTagSelection,
 } from "./types";
+import { formatMoney } from "../money";
+
+export { formatMoney };
 
 export const SELF_SUB_LABEL = "主标签本身";
 
@@ -47,17 +50,6 @@ export function isAbortLikeError(caught: unknown) {
     return true;
   }
   return caught instanceof Error && (caught.name === "AbortError" || /aborted|abort/i.test(caught.message));
-}
-
-export function formatMoney(value: string | number | null | undefined) {
-  const numeric = Number(String(value ?? "0").replace(/,/g, "").trim());
-  if (!Number.isFinite(numeric)) {
-    return String(value ?? "0.00");
-  }
-  return numeric.toLocaleString("zh-CN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
 }
 
 export function accountLabel(batch: BankFlowRuleBatch) {

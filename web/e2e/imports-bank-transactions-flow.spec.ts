@@ -229,7 +229,7 @@ test.describe("bank transaction import browser flow", () => {
     expect(accountBalancePayload.accounts).toEqual(expect.any(Array));
     const importedRow = page.getByRole("row", { name: /导入浏览器测试客户/ });
     await expect(importedRow).toBeVisible();
-    await expect(importedRow.getByText("1,688.00")).toBeVisible();
+    await expect(importedRow.getByText("1688.00")).toBeVisible();
     await expect(importedRow.getByText("银行流水导入 browser e2e")).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(unexpectedRuntimeErrors(browserErrors)).toEqual([]);
@@ -293,7 +293,7 @@ test.describe("bank transaction import browser flow", () => {
     });
     const importedCostProject = page.getByRole("button", { name: /银行导入成本项目/ });
     await expect(importedCostProject).toBeVisible();
-    await expect(importedCostProject).toContainText("1,688.00");
+    await expect(importedCostProject).toContainText("1688.00");
     await recordLatency({
       route: "/cost-statistics",
       pageKey: "cost-statistics",

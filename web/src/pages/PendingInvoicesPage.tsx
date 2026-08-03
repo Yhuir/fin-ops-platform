@@ -14,6 +14,7 @@ import PendingInvoicesTable from "../components/pendingInvoices/PendingInvoicesT
 import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
+import { formatMoney } from "../features/money";
 import {
   confirmAttachExistingInvoices,
   downloadPendingInvoiceExport,
@@ -121,11 +122,6 @@ function transactionIdForRow(row: PendingInvoiceRow) {
 function numericMoney(value: string | null | undefined) {
   const parsed = Number(String(value ?? "").replace(/,/g, ""));
   return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function formatMoney(value: number | string) {
-  const parsed = typeof value === "number" ? value : numericMoney(value);
-  return Number.isFinite(parsed) ? parsed.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : String(value || "-");
 }
 
 function setsEqual(left: Set<string>, right: Set<string>) {

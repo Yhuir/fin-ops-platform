@@ -967,8 +967,8 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(openOaRow);
     await user.click(openBankRow);
 
-    expect(within(unpairedZone).getByText("OA 1 / 6,000.00")).toBeInTheDocument();
-    expect(within(unpairedZone).getByText("流水 1 / 6,000.00")).toBeInTheDocument();
+    expect(within(unpairedZone).getByText("OA 1 / 6000.00")).toBeInTheDocument();
+    expect(within(unpairedZone).getByText("流水 1 / 6000.00")).toBeInTheDocument();
     expect(within(unpairedZone).queryByText(/发票 1/)).not.toBeInTheDocument();
 
     await user.click(within(openBankPane).getByRole("button", { name: "银行流水时间筛选" }));
@@ -978,8 +978,8 @@ describe("Workbench row selection and detail drawer", () => {
 
     expect(within(unpairedZone).queryByRole("row", { name: /王青.*维保续费项目/ })).not.toBeInTheDocument();
     expect(within(unpairedZone).queryByRole("row", { name: /2026-04-20.*杭州张三广告有限公司/ })).not.toBeInTheDocument();
-    expect(within(unpairedZone).getByText("OA 1 / 6,000.00")).toBeInTheDocument();
-    expect(within(unpairedZone).getByText("流水 1 / 6,000.00")).toBeInTheDocument();
+    expect(within(unpairedZone).getByText("OA 1 / 6000.00")).toBeInTheDocument();
+    expect(within(unpairedZone).getByText("流水 1 / 6000.00")).toBeInTheDocument();
     expect(within(unpairedZone).queryByText(/发票 1/)).not.toBeInTheDocument();
 
     await user.click(within(unpairedZone).getByRole("button", { name: "确认关联" }));
@@ -1016,8 +1016,8 @@ describe("Workbench row selection and detail drawer", () => {
 
     expect(within(unpairedZone).getByText("已选 2")).toBeInTheDocument();
     expect(within(unpairedZone).queryByText(/带入/)).not.toBeInTheDocument();
-    expect(within(unpairedZone).getByText("OA 1 / 58,000.00")).toBeInTheDocument();
-    expect(within(unpairedZone).getByText("流水 1 / 58,000.00")).toBeInTheDocument();
+    expect(within(unpairedZone).getByText("OA 1 / 58000.00")).toBeInTheDocument();
+    expect(within(unpairedZone).getByText("流水 1 / 58000.00")).toBeInTheDocument();
     expect(within(unpairedZone).queryByText(/发票 1/)).not.toBeInTheDocument();
 
     await user.click(within(unpairedZone).getByRole("button", { name: "确认关联" }));
@@ -1049,7 +1049,7 @@ describe("Workbench row selection and detail drawer", () => {
 
     await user.click(pairedBankRow);
     expect(within(pairedZone).getByRole("button", { name: "撤回关联" })).toBeEnabled();
-    expect(within(pairedZone).getByText("流水 1 / 128,000.00")).toBeInTheDocument();
+    expect(within(pairedZone).getByText("流水 1 / 128000.00")).toBeInTheDocument();
 
     await user.click(within(pairedBankPane).getByRole("button", { name: "银行流水时间筛选" }));
     const dialog = await screen.findByRole("dialog", { name: "银行流水时间筛选面板" });
@@ -1057,7 +1057,7 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(within(dialog).getByRole("button", { name: "4月" }));
 
     expect(within(pairedZone).queryByRole("row", { name: /2026-03-25 14:22.*华东设备供应商/ })).not.toBeInTheDocument();
-    expect(within(pairedZone).getByText("流水 1 / 128,000.00")).toBeInTheDocument();
+    expect(within(pairedZone).getByText("流水 1 / 128000.00")).toBeInTheDocument();
     expect(within(pairedZone).getByRole("button", { name: "撤回关联" })).toBeEnabled();
 
     await user.click(within(pairedZone).getByRole("button", { name: "撤回关联" }));
@@ -2701,7 +2701,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(screen.queryByRole("dialog", { name: "OA流水异常处理弹窗" })).not.toBeInTheDocument();
     expect(within(exceptionModal).getByText("金额摘要")).toBeInTheDocument();
     expect(within(exceptionModal).getByText("OA合计")).toBeInTheDocument();
-    expect(within(exceptionModal).getAllByText("58,000.00").length).toBeGreaterThanOrEqual(2);
+    expect(within(exceptionModal).getAllByText("58000.00").length).toBeGreaterThanOrEqual(2);
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/workbench/exception/preview",
       expect.objectContaining({

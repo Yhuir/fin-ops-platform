@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import type { PendingInvoiceRelationDetail, PendingInvoiceRelationDetailKind } from "../../features/pendingInvoices/types";
+import { formatMoney } from "../../features/money";
 import PendingInvoiceDrawerFrame from "./PendingInvoiceDrawerFrame";
 
 type PendingInvoiceRelationDrawerProps = {
@@ -10,11 +11,6 @@ type PendingInvoiceRelationDrawerProps = {
   loadDetail: (transactionId: string) => Promise<PendingInvoiceRelationDetail>;
   onClose: () => void;
 };
-
-function formatMoney(value: string) {
-  const parsed = Number(String(value ?? "").replace(/,/g, ""));
-  return Number.isFinite(parsed) ? parsed.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : value || "-";
-}
 
 function RelationStatusChip({ status }: { status?: string }) {
   if (!status) {

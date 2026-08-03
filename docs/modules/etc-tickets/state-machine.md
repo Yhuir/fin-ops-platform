@@ -57,7 +57,7 @@
 
 - ETC 业务批次列表直接读取业务批次事实源；关联台是否出现 `etc_invoice_summary` 由 Workbench SQL projection/read model 决定。
 - `submitted` 人工确认会隐藏散落 ETC 发票，并让 Workbench open 区投影一条合并行；投影失败时不应把批次回滚成未提交。
-- `etc_invoice_summary` 的展示金额可以保留千分位格式；read model 必须同时持久化结构化金额，用于 `workbench_rows.amount`、分组搜索文本和金额过滤。
+- `etc_invoice_summary` 与 ETC 页面金额统一显示无千分位的两位小数；read model 同时持久化结构化金额，用于 `workbench_rows.amount`、无分组金额搜索文本和金额过滤。
 - refresh 触发来源：ETC 导入确认、OA 草稿创建、人工提交确认、人工未提交确认、业务批次本地删除/重置、关联台普通配对关系确认或撤回。
 - canonical invoice identity：ETC 发票有稳定发票号/强 `source_unique_key` 时，不得同时持久化弱 `data_fingerprint`；runtime worker 和 API 导入确认只能把 ETC metadata 关联到已存在的 canonical invoice，不得从 ETC 专用表创建 canonical invoice。
 - 失败恢复：优先重跑相关 read model refresh；业务批次、ETC 发票占用和审计事实不得从前端临时修补。导入确认的同一 session 只有 queued/running 或近期 succeeded job 可复用；failed、acknowledged、cancelled 等旧 job 必须允许重新确认并创建新 job。

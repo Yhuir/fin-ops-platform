@@ -17,7 +17,9 @@ from fin_ops_platform.services.postgres_repositories.invoice_usage_collection_qu
     InvoiceUsageCollectionCanonicalSnapshot,
     PostgresInputInvoiceUsageQueryRepository,
     PostgresOutputInvoiceCollectionQueryRepository,
+    _INPUT_FIELDS,
     _facet_counts,
+    _where_sql,
 )
 
 
@@ -126,6 +128,21 @@ class RecordingInputRowAssembler:
 
 
 class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
+    def test_amount_keyword_is_ungrouped_and_searches_canonical_numeric_fields(self) -> None:
+        sql, params = _where_sql(
+            keyword="4,311.00",
+            invoice_date_from=None,
+            invoice_date_to=None,
+            filters=[],
+            field_sql=_INPUT_FIELDS,
+        )
+
+        self.assertEqual(params, ["%4311.00%"])
+        self.assertIn("total_with_tax::text", sql)
+        self.assertIn("amount::text", sql)
+        self.assertIn("tax_amount::text", sql)
+        self.assertIn("bank_amount::text", sql)
+
     def test_input_rows_summary_and_facets_share_one_bounded_canonical_snapshot(self) -> None:
         connection = RecordingConnection()
         repository = PostgresInputInvoiceUsageQueryRepository(connection)

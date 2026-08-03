@@ -542,14 +542,14 @@ describe("Workbench columns and inline actions", () => {
     const moneyValueRow = directionTag.closest(".money-cell-value");
     const moneyMetaRow = directionTag.closest(".money-cell-meta-row");
     const bankAmountHeader = within(bankPane).getByRole("columnheader", { name: "金额" });
-    const bankAmountCell = within(bankRow as HTMLElement).getByText("128000").closest(".record-card-cell");
+    const bankAmountCell = within(bankRow as HTMLElement).getByText("128000.00").closest(".record-card-cell");
 
     expect(directionTag).toHaveClass("direction-tag");
     expect(directionTag).toHaveClass("direction-tag-outflow");
     expect(within(pairedGroup).queryByText("资金方向")).not.toBeInTheDocument();
     expect(moneyValueRow).toBeNull();
     expect(moneyMetaRow).not.toBeNull();
-    expect(within(bankAmountCell as HTMLElement).getByText("128000")).toBeInTheDocument();
+    expect(within(bankAmountCell as HTMLElement).getByText("128000.00")).toBeInTheDocument();
     expect(bankAmountHeader).toHaveClass("column-money-centered");
     expect(bankAmountCell).toHaveClass("column-money-centered");
   });
@@ -851,8 +851,8 @@ describe("Workbench columns and inline actions", () => {
     expect(within(invoicePane).queryByRole("columnheader", { name: "不含税价格/税率（税额）" })).not.toBeInTheDocument();
     expect(within(invoicePane).queryByRole("button", { name: "筛选 价税合计" })).not.toBeInTheDocument();
     expect(within(invoiceRow as HTMLElement).getByText("2026-03-25")).toBeInTheDocument();
-    expect(within(invoiceRow as HTMLElement).getByText("144640")).toBeInTheDocument();
-    expect(within(invoiceRow as HTMLElement).getByText("128000 13% (16640)")).toBeInTheDocument();
+    expect(within(invoiceRow as HTMLElement).getByText("144640.00")).toBeInTheDocument();
+    expect(within(invoiceRow as HTMLElement).getByText("128000.00 13% (16640.00)")).toBeInTheDocument();
   });
 
   test("renders invoice gross amount column with net amount and tax meta on the second line", () => {

@@ -7,6 +7,7 @@ import type {
   PendingInvoiceCandidate,
   PendingInvoiceCandidatesResponse,
 } from "../../features/pendingInvoices/types";
+import { formatMoney } from "../../features/money";
 import PendingInvoiceDrawerFrame from "./PendingInvoiceDrawerFrame";
 
 type PendingInvoiceInvoicePickerDrawerProps = {
@@ -26,18 +27,9 @@ function createRequestId(prefix: string) {
   return `${prefix}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
 }
 
-function formatMoney(value: string) {
-  const parsed = Number(String(value ?? "").replace(/,/g, ""));
-  return Number.isFinite(parsed) ? parsed.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : value || "-";
-}
-
 function numericMoney(value: string | null | undefined) {
   const parsed = Number(String(value ?? "").replace(/,/g, ""));
   return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function formatMoneyNumber(value: number) {
-  return value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function invoiceNumber(candidate: PendingInvoiceCandidate) {
@@ -283,8 +275,8 @@ export default function PendingInvoiceInvoicePickerDrawer({
       ) : null}
       <section aria-label="选择汇总" className="pending-invoice-metric-grid pending-invoice-picker-summary">
         <Metric label="已选流水金额" value={formatMoney(selectedBankTotal)} />
-        <Metric label="已选发票金额" value={formatMoneyNumber(selectedInvoiceTotal)} />
-        <Metric label="本次选择差额" value={formatMoneyNumber(selectedDifference)} />
+        <Metric label="已选发票金额" value={formatMoney(selectedInvoiceTotal)} />
+        <Metric label="本次选择差额" value={formatMoney(selectedDifference)} />
         {preview ? <Metric label="关联后待付" value={formatMoney(preview.paymentImpact.remainingAmountAfter)} /> : null}
       </section>
       <section className="pending-invoice-panel pending-invoice-filter-panel" aria-label="发票候选筛选">

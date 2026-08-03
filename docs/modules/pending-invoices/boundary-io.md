@@ -31,7 +31,7 @@
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| direction/filter/date/keyword/field filters/sort/page/include_statistics | `PendingInvoicesPage.tsx`、`features/pendingInvoices/api.ts` | route 只传递解析后的 query；service 验证方向、筛选、日期、排序、过滤器、分页和统计开关；repository 负责 SQL |
+| direction/filter/date/keyword/field filters/sort/page/include_statistics | `PendingInvoicesPage.tsx`、`features/pendingInvoices/api.ts` | route 只传递解析后的 query；service 验证方向、筛选、日期、排序、过滤器、分页和统计开关；repository 负责 SQL。纯金额 keyword 使用无千分位文本并查询 canonical 流水、发票、已付和待付金额字段。 |
 | 页面 canonical facts | PostgreSQL `app.*` | 银行流水、分类/确认、settings、pending income overrides、invoice/OA snapshots；禁止读取 `read_model.pending_invoice_*`、`read_model.bank_detail_*`、`read_model.workbench_relation_*`、`read_model.search_*` |
 | 正式配对关系 | `app.workbench_pair_relations` | 只读取 `status='active'`；排除 `turnover_manual_closure`；跨月 relation 不按当前月份截断 |
 | 候选与详情 | 页面专属 API | 候选采用 canonical input invoices + selected canonical expense banks + active relation facts；object detail 按 canonical id 有界读取 |

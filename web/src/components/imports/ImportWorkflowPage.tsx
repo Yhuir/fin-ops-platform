@@ -25,6 +25,7 @@ import {
   resolveImportApiErrorMessage,
 } from "../../features/imports/api";
 import { confirmEtcImportSession, fetchReadyEtcReconciliationTasks, previewEtcZipFiles } from "../../features/etc/api";
+import { formatMoney } from "../../features/money";
 import { fetchWorkbenchSettings } from "../../features/workbench/api";
 import type {
   ImportBatchType,
@@ -311,7 +312,7 @@ function isMissingEtcRequirementIssue(issue: EtcReconciliationBlockingIssue) {
 
 function formatMissingRequirementLine(issue: EtcReconciliationBlockingIssue) {
   const transactionAt = displayValue(issue.transactionAt || issue.transactionDate);
-  const amount = displayValue(issue.amount);
+  const amount = formatMoney(issue.amount, "--");
   const plate = displayValue(issue.vehiclePlate);
   const invoiceCount = issue.invoiceCount ? ` / ${issue.invoiceCount} 张` : "";
   return `${transactionAt} / ${amount} / ${plate}${invoiceCount}`;
@@ -335,7 +336,7 @@ function buildBankAccountOptionLabel(bankOption: BankAccountMapping) {
 function buildEtcTaskOptionLabel(task: EtcReconciliationTaskSummary) {
   const period = task.periodStart && task.periodEnd ? `${task.periodStart} 至 ${task.periodEnd}` : "未设置期间";
   const plates = task.vehiclePlates.length > 0 ? ` / ${task.vehiclePlates.join("、")}` : "";
-  const amount = task.oaTotalAmount ? ` / OA ${task.oaTotalAmount}` : "";
+  const amount = task.oaTotalAmount ? ` / OA ${formatMoney(task.oaTotalAmount)}` : "";
   return `${task.title || task.taskId} / ${period} / ETC票 ${task.etcInvoiceCount} + 补充凭证 ${task.supplementCount}${amount}${plates}`;
 }
 
@@ -688,7 +689,7 @@ function ImportPreviewDetailTable({
               <FinanceTableCell columnRole="direction" textValue={direction}>
                 {direction === "--" ? <EmptyValue value="--" /> : <FinanceDirectionTag direction={direction}>{direction}</FinanceDirectionTag>}
               </FinanceTableCell>
-              <FinanceTableCell columnRole="amount" textValue={displayValue(row.amount)}>{displayValue(row.amount)}</FinanceTableCell>
+              <FinanceTableCell columnRole="amount" textValue={formatMoney(row.amount, "--")}>{formatMoney(row.amount, "--")}</FinanceTableCell>
               <FinanceTableCell columnRole="description" textValue={displayValue(row.counterpartyName)}>
                 <TruncatedCellText value={displayValue(row.counterpartyName)} />
               </FinanceTableCell>
@@ -1596,7 +1597,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                               >
                                 <div className="import-workflow-chip-row">
                                   <ImportChip color="warning">{displayValue(issue.transactionAt || issue.transactionDate)}</ImportChip>
-                                  <ImportChip>{displayValue(issue.amount)}</ImportChip>
+                                  <ImportChip>{formatMoney(issue.amount, "--")}</ImportChip>
                                   <ImportChip>{displayValue(issue.vehiclePlate)}</ImportChip>
                                   {issue.invoiceCount ? <ImportChip>{`${issue.invoiceCount} 张`}</ImportChip> : null}
                                   <span className="import-workflow-muted-text">

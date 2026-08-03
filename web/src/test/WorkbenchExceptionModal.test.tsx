@@ -68,7 +68,7 @@ describe("WorkbenchExceptionModal", () => {
     expect(within(dialog).getByText("支出")).toBeInTheDocument();
     expect(within(dialog).getByText("OA和支出流水一致，缺进项发票")).toBeInTheDocument();
     expect(within(dialog).getByText("OA合计")).toBeInTheDocument();
-    expect(within(dialog).getAllByText("100,000.00").length).toBeGreaterThanOrEqual(2);
+    expect(within(dialog).getAllByText("100000.00").length).toBeGreaterThanOrEqual(2);
     expect(within(dialog).getByText("支出流水合计")).toBeInTheDocument();
     expect(within(dialog).getByText("收入流水合计")).toBeInTheDocument();
     expect(within(dialog).getByText("进项发票合计")).toBeInTheDocument();

@@ -37,6 +37,7 @@ import type {
   LinkOaPendingPaymentBankTransactionsResponse,
   WritebackOaPendingPaymentPaidResponse,
 } from "../features/oaPendingPayments/types";
+import { formatMoney } from "../features/money";
 import { fetchPendingInvoiceRules, savePendingInvoiceRules } from "../features/pendingInvoices/api";
 
 const initialQuery: OaPendingPaymentQuery = {
@@ -713,7 +714,7 @@ function OaBankLinkDrawer({
                 </span>
                 <span className="oa-pending-payments-bank-drawer__summary">{[row.summary, row.remark].filter(Boolean).join(" / ") || "-"}</span>
               </span>
-              <span className="oa-pending-payments-bank-drawer__amount">{row.amount}</span>
+              <span className="oa-pending-payments-bank-drawer__amount">{formatMoney(row.amount, "-")}</span>
             </label>
           ))}
         </div>

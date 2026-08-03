@@ -11,6 +11,7 @@ from fin_ops_platform.services.mongo_oa_adapter import (
     OA_IMPORT_STATUS_IN_PROGRESS,
 )
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
+from fin_ops_platform.services.search_query import normalize_money_search_query
 
 
 SUPPORTED_FORM_TYPES = [OA_IMPORT_FORM_TYPE_PAYMENT, OA_IMPORT_FORM_TYPE_EXPENSE]
@@ -413,7 +414,7 @@ class OAManualImportService:
 
     @classmethod
     def _record_matches_query(cls, record: OAApplicationRecord, q: str | None) -> bool:
-        query = clean_string(q).lower()
+        query = normalize_money_search_query(clean_string(q)).lower()
         if not query:
             return True
         values: list[str] = [
@@ -448,7 +449,10 @@ class OAManualImportService:
         visit(record.attachment_invoices)
         visit(record.attachment_artifacts)
         visit(record.expense_items)
-        return query in "\n".join(values).lower()
+        haystack = "\n".join(values).lower()
+        if query.replace(".", "", 1).lstrip("+-").isdigit():
+            haystack = haystack.replace(",", "")
+        return query in haystack
 
     @classmethod
     def _record_matches_date_range(

@@ -645,8 +645,8 @@ describe("Input invoice usage page", () => {
     const firstRowCells = firstBodyRow.querySelectorAll("td");
 
     expect(await within(page).findByText("SD-INV-2026-0001")).toBeInTheDocument();
-    expect(within(firstRowCells[2] as HTMLElement).getByText("12,345.67")).toBeInTheDocument();
-    expect(within(firstRowCells[2] as HTMLElement).getByText("11,646.86 6% (698.81)")).toBeInTheDocument();
+    expect(within(firstRowCells[2] as HTMLElement).getByText("12345.67")).toBeInTheDocument();
+    expect(within(firstRowCells[2] as HTMLElement).getByText("11646.86 6% (698.81)")).toBeInTheDocument();
     expect(within(firstRowCells[3] as HTMLElement).getByText("很长很长的货物或应税劳务名称用于验证两行截断后出现展开按钮")).toBeInTheDocument();
     expect(within(page).getByText("2026-05-02")).toBeInTheDocument();
     const invoiceDetailButton = within(page).getByRole("button", { name: "查看发票 SD-INV-2026-0001 详情" });

@@ -967,7 +967,7 @@ describe("Workbench candidate grouping layout", () => {
 
     expect(within(groupRow).getByText("赵华")).toBeInTheDocument();
     expect(within(groupRow).getAllByText("华东设备供应商").length).toBeGreaterThan(0);
-    expect(within(groupRow).getAllByText("128000").length).toBeGreaterThan(0);
+    expect(within(groupRow).getAllByText("128000.00").length).toBeGreaterThan(0);
     expect(within(groupRow).getByText("进")).toBeInTheDocument();
   });
 
@@ -1023,7 +1023,7 @@ describe("Workbench candidate grouping layout", () => {
     expect(within(residualSegment).getAllByRole("row")).toHaveLength(3);
     expect(within(residualSegment).getByText("中山市安自康贸易有限公司")).toBeInTheDocument();
     expect(within(exactSegment).getByText("大理江尾老军饭店")).toBeInTheDocument();
-    expect(within(exactSegment).getAllByText("135").length).toBeGreaterThan(1);
+    expect(within(exactSegment).getAllByText("135.00").length).toBeGreaterThan(1);
   });
 
   test("aligns exact rows inside a partially covered 4 OA, 2 bank, 1 invoice group", () => {
@@ -1073,9 +1073,9 @@ describe("Workbench candidate grouping layout", () => {
     const secondSegment = screen.getByTestId("candidate-group-segment-paired-case:CASE-FOUR-TWO-ONE-oa-2");
     const thirdSegment = screen.getByTestId("candidate-group-segment-paired-case:CASE-FOUR-TWO-ONE-oa-3");
     expect(groupRow).toHaveClass("candidate-group-row-segmented");
-    expect(within(firstSegment).getAllByText("100").length).toBeGreaterThan(1);
+    expect(within(firstSegment).getAllByText("100.00").length).toBeGreaterThan(1);
     expect(within(firstSegment).getByText("供应商1")).toBeInTheDocument();
-    expect(within(secondSegment).getAllByText("200").length).toBeGreaterThan(1);
+    expect(within(secondSegment).getAllByText("200.00").length).toBeGreaterThan(1);
     expect(within(thirdSegment).getByText("申请人3")).toBeInTheDocument();
     expect(within(thirdSegment).queryByRole("row", { name: /供应商1/ })).not.toBeInTheDocument();
   });
@@ -1283,11 +1283,11 @@ describe("Workbench candidate grouping layout", () => {
     );
 
     const parentSegment = screen.getByTestId("candidate-group-segment-paired-case:CASE-MULTI-OA-SOURCE-BANK-oa-exp-1968");
-    expect(within(parentSegment).getAllByText("405").length).toBeGreaterThan(1);
+    expect(within(parentSegment).getAllByText("405.00").length).toBeGreaterThan(1);
     expect(within(parentSegment).getByText("云南辰飞机电工程有限公司")).toBeInTheDocument();
 
     const siblingSegment = screen.getByTestId("candidate-group-segment-paired-case:CASE-MULTI-OA-SOURCE-BANK-oa-exp-2001");
-    expect(within(siblingSegment).getAllByText("282").length).toBeGreaterThan(1);
+    expect(within(siblingSegment).getAllByText("282.00").length).toBeGreaterThan(1);
     expect(within(siblingSegment).getByText("云南辰飞机电工程有限公司")).toBeInTheDocument();
   });
 
@@ -1371,7 +1371,7 @@ describe("Workbench candidate grouping layout", () => {
       "candidate-group-segment-paired-case:CASE-MULTI-OA-AMOUNT-FALLBACK-case:CASE-MULTI-OA-AMOUNT-FALLBACK:bank:residual",
     );
     expect(groupRow).toHaveClass("candidate-group-row-segmented");
-    expect(within(exactSegment).getAllByText("29350").length).toBeGreaterThan(1);
+    expect(within(exactSegment).getAllByText("29350.00").length).toBeGreaterThan(1);
     expect(within(exactSegment).getByText("INV-29350")).toBeInTheDocument();
     expect(within(residualSegment).getAllByRole("row")).toHaveLength(2);
     expect(within(residualSegment).getByText("64996.69")).toBeInTheDocument();

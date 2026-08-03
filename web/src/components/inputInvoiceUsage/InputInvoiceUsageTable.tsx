@@ -10,6 +10,7 @@ import type {
   InputInvoiceUsageRow,
   InputInvoiceUsageSortDirection,
 } from "../../features/inputInvoiceUsage/types";
+import { formatMoney } from "../../features/money";
 import ExpandableCellText from "./ExpandableCellText";
 import InputInvoiceUsageFilterMenu from "./InputInvoiceUsageFilterMenu";
 import type { InputInvoiceUsageFilterValue } from "./InputInvoiceUsageFilterMenu";
@@ -47,17 +48,6 @@ function displayInvoiceNo(row: InputInvoiceUsageRow) {
     return invoice.digitalInvoiceNo;
   }
   return [invoice.invoiceCode, invoice.invoiceNo].filter(Boolean).join(" ") || "-";
-}
-
-function formatMoney(value: string) {
-  const parsed = Number(String(value ?? "").replace(/,/g, ""));
-  if (!Number.isFinite(parsed)) {
-    return value || "-";
-  }
-  return parsed.toLocaleString("zh-CN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
 }
 
 function dateOnly(value: string) {

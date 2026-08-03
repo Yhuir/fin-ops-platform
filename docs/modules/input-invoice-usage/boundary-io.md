@@ -30,7 +30,7 @@
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| rows 查询 | `InputInvoiceUsagePage.tsx` | `page`、`page_size`、keyword、日期/月、filters、sort；非法值返回 400 |
+| rows 查询 | `InputInvoiceUsagePage.tsx` | `page`、`page_size`、keyword、日期/月、filters、sort；非法值返回 400。纯金额 keyword 使用无千分位文本并查询价税合计、未税金额、税额和关联流水金额。 |
 | canonical invoices | `app.invoices` | 只取非删除 input invoices；金额和日期保持 canonical 口径 |
 | formal relations | `app.workbench_pair_relations` | 只取 `status='active'`；按 relation component 聚合 |
 | bank/OA facts | `app.bank_transactions`、`app.oa_applications` | 只读取已同步 PostgreSQL snapshot |
@@ -45,7 +45,7 @@
 | `/rows` | 页面 | 同一 snapshot 返回 `rows`、`summary`、`statistics`、`pagination`、`filterConfig`、`filterOptions` |
 | relation/details | drawer | 按 row/invoice/bank/OA id 定向读取；不存在返回 404 |
 | export preview/download | export drawer | 复用 canonical filters/sort；20,000 行上限和原错误合同不变 |
-| OA reverse preview/command | OA reverse drawer | preview 只读 canonical snapshot；命令只写 canonical facts |
+| OA reverse preview/command | OA reverse drawer | preview 只读 canonical snapshot；命令只写 canonical facts；候选金额展示与本地搜索都使用无千分位文本。 |
 | write result | 页面 | 不含 refresh target/barrier；页面成功后重跑当前 GET |
 
 `/rows` 不输出 `read_model_status`、`source_versions`、`refresh_enqueued`、scope 或 polling 字段。

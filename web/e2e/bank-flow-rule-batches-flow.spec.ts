@@ -393,13 +393,13 @@ test.describe("bank flow rule batches browser flow", () => {
 
     const firstBatch = page.locator(".bank-flow-rule-batches-batch").filter({ hasText: "光大银行8826" });
     await expect(firstBatch).toBeVisible();
-    await expect(firstBatch.getByText("2 条 · 合计 50,000.00")).toBeVisible();
+    await expect(firstBatch.getByText("2 条 · 合计 50000.00")).toBeVisible();
     await expect(page.getByRole("table", { name: "光大银行8826流水" })).toBeVisible();
     const secondBatch = page
       .locator(".bank-flow-rule-batches-batch")
       .filter({ hasText: "建设银行8106" })
-      .filter({ hasText: "2 条 · 合计 7,000.00" });
-    await expect(secondBatch.getByText("2 条 · 合计 7,000.00")).toBeVisible();
+      .filter({ hasText: "2 条 · 合计 7000.00" });
+    await expect(secondBatch.getByText("2 条 · 合计 7000.00")).toBeVisible();
 
     const submitRequest = page.waitForRequest((request) =>
       request.url().endsWith("/api/bank-flow-rule-batches/bank-flow-internal-ccb-8106/submit")

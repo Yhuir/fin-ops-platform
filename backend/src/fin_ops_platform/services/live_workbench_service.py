@@ -607,7 +607,7 @@ def unlinked_relation_payload() -> dict[str, str]:
 def format_decimal(value: Decimal | None) -> str:
     if value is None:
         return "—"
-    return f"{value.quantize(ZERO + Decimal('0.01')):,.2f}"
+    return f"{value.quantize(ZERO + Decimal('0.01')):.2f}"
 
 
 def payload_from_cache_row(row: dict[str, Any]) -> dict[str, Any]:

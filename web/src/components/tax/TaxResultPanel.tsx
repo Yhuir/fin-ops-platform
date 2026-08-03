@@ -1,5 +1,7 @@
 import { Button } from "@heroui/react";
 
+import { formatMoney } from "../../features/money";
+
 type TaxResultPanelProps = {
   outputCount: number;
   selectedPlanInputCount: number;
@@ -39,7 +41,7 @@ export default function TaxResultPanel({
           {resultLabel}
         </span>
         <strong>
-          {resultAmount}
+          {formatMoney(resultAmount)}
         </strong>
         {canSave ? (
           <Button

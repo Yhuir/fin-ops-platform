@@ -114,7 +114,7 @@ test.describe("pending invoices attach existing invoice browser flow", () => {
       await mark("finalSettledLatencyMs", expect(page.getByText("已选 2 条流水")).toBeVisible());
     });
     await expect(page.getByText("已选 2 条流水")).toBeVisible();
-    await expect(page.getByText("流水合计 65,540.00")).toBeVisible();
+    await expect(page.getByText("流水合计 65540.00")).toBeVisible();
 
     const picker = page.getByRole("dialog", { name: "选择已有进项发票" });
     await recordLatency({

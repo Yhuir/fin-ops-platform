@@ -2,6 +2,7 @@ import { Info } from "lucide-react";
 import { memo, useState, type FocusEvent, type MouseEvent, type ReactNode, type TouchEvent } from "react";
 
 import { getWorkbenchColumns } from "../../features/workbench/tableConfig";
+import { formatMoney } from "../../features/money";
 import {
   compactWorkbenchBankAccountLabel,
   workbenchInvoiceFlowLabel,
@@ -456,6 +457,7 @@ function renderBankMoneyValue(
   searchQuery = "",
 ) {
   const hasValue = value !== "--" && value !== "—" && value !== "";
+  const displayedValue = hasValue ? formatMoney(value) : "--";
   const normalizedDirection = resolveDirectionForMoneyCell(columnKey, direction, hasValue);
   const shouldShowDirectionTag = hasValue && normalizedDirection !== null;
   const shouldShowAccount = hasValue && paymentAccount !== "--" && paymentAccount !== "—" && paymentAccount !== "";
@@ -469,7 +471,7 @@ function renderBankMoneyValue(
   return (
     <span className="money-cell-stack">
       <span className="money-cell-value">
-        <span>{highlightSearchText(hasValue ? value : "--", searchQuery)}</span>
+        <span>{highlightSearchText(displayedValue, searchQuery)}</span>
         {columnKey === "amount" && zoneId === "paired" ? <BankAmountMismatchWarning row={row} /> : null}
       </span>
       {shouldShowDirectionTag || shouldShowAccount ? (
@@ -515,10 +517,11 @@ function renderOaMoneyValue(
   searchQuery = "",
 ) {
   const hasValue = value !== "--" && value !== "—" && value !== "";
+  const displayedValue = hasValue ? formatMoney(value) : "--";
   return (
     <span className="money-cell-stack">
       <span className="money-cell-value">
-        <span>{highlightSearchText(hasValue ? value : "--", searchQuery)}</span>
+        <span>{highlightSearchText(displayedValue, searchQuery)}</span>
       </span>
     </span>
   );
@@ -602,11 +605,7 @@ function formatMismatchAmount(value: string | undefined) {
     return normalizedValue;
   }
 
-  const sign = numericValue.startsWith("-") ? "-" : "";
-  const unsignedValue = sign ? numericValue.slice(1) : numericValue;
-  const [integerPart, decimalPart] = unsignedValue.split(".");
-  const formattedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return `${sign}${formattedInteger}${decimalPart === undefined ? "" : `.${decimalPart}`}`;
+  return formatMoney(numericValue);
 }
 
 function renderHighlightedBankAccount(value: string, searchQuery: string) {
@@ -811,11 +810,11 @@ function renderInvoiceAmountValue(grossAmount: string, amount: string, taxRate: 
 
   return (
     <span className="compound-cell-value invoice-amount-value">
-      <span className="compound-cell-primary cell-text-value cell-text-value-full">{highlightSearchText(grossAmount, searchQuery)}</span>
+      <span className="compound-cell-primary cell-text-value cell-text-value-full">{highlightSearchText(formatMoney(grossAmount, "--"), searchQuery)}</span>
       {hasAmount || showTaxMeta ? (
         <span className="compound-cell-secondary">
           <span className="cell-text-value cell-text-value-full cell-subtext-value">
-            {highlightSearchText(`${hasAmount ? amount : "--"}${showTaxMeta ? ` ${taxRate} (${taxAmount})` : ""}`, searchQuery)}
+            {highlightSearchText(`${hasAmount ? formatMoney(amount) : "--"}${showTaxMeta ? ` ${taxRate} (${formatMoney(taxAmount)})` : ""}`, searchQuery)}
           </span>
         </span>
       ) : null}

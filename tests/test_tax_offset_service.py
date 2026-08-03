@@ -420,7 +420,7 @@ class TaxOffsetServiceTests(unittest.TestCase):
         self.assertIn("locked_certified_input_ids", payload)
         self.assertEqual(payload["locked_certified_input_ids"], [payload["input_plan_items"][0]["id"]])
         self.assertEqual(len(payload["certified_outside_plan_rows"]), 1)
-        self.assertEqual(payload["summary"]["certified_input_tax"], "14,080.00")
+        self.assertEqual(payload["summary"]["certified_input_tax"], "14080.00")
 
     def test_calculate_uses_real_certified_records_even_when_not_selected(self) -> None:
         service = TaxOffsetService(
@@ -494,12 +494,12 @@ class TaxOffsetServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(result["summary"]["output_tax"], "0.00")
-        self.assertEqual(result["summary"]["input_tax"], "14,080.00")
+        self.assertEqual(result["summary"]["input_tax"], "14080.00")
         self.assertEqual(result["summary"]["planned_input_tax"], "0.00")
-        self.assertEqual(result["summary"]["certified_input_tax"], "14,080.00")
+        self.assertEqual(result["summary"]["certified_input_tax"], "14080.00")
         self.assertEqual(result["summary"]["deductible_tax"], "0.00")
         self.assertEqual(result["summary"]["result_label"], "本月留抵税额")
-        self.assertEqual(result["summary"]["result_amount"], "14,080.00")
+        self.assertEqual(result["summary"]["result_amount"], "14080.00")
 
     def test_match_certified_to_plan_supports_digital_invoice_then_code_number_then_fallback(self) -> None:
         service = TaxOffsetService(

@@ -12,6 +12,7 @@ import type {
   TaxSummary,
 } from "./types";
 import { apiRequestJson } from "../apiClient";
+import { formatMoney } from "../money";
 
 type ApiTaxSummary = {
   output_tax: string;
@@ -211,22 +212,15 @@ function stringList(value: unknown): string[] {
   return arrayValue(value).map((item) => String(item).trim()).filter(Boolean);
 }
 
-function formatMoney(value: number) {
-  return value.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
 function mapSummary(summary: ApiTaxSummary): TaxSummary {
   return {
-    outputTax: summary.output_tax,
-    certifiedInputTax: summary.certified_input_tax ?? "0.00",
-    plannedInputTax: summary.planned_input_tax ?? "0.00",
-    inputTax: summary.input_tax,
-    deductibleTax: summary.deductible_tax,
+    outputTax: formatMoney(summary.output_tax),
+    certifiedInputTax: formatMoney(summary.certified_input_tax ?? "0.00"),
+    plannedInputTax: formatMoney(summary.planned_input_tax ?? "0.00"),
+    inputTax: formatMoney(summary.input_tax),
+    deductibleTax: formatMoney(summary.deductible_tax),
     resultLabel: summary.result_label,
-    resultAmount: summary.result_amount,
+    resultAmount: formatMoney(summary.result_amount),
   };
 }
 
@@ -244,7 +238,7 @@ function mapOutputItem(item: ApiOutputItem): TaxInvoiceRecord {
     issueDate: item.issue_date,
     taxRate: item.tax_rate ?? "--",
     amount: deriveAmount(item.total_with_tax, item.tax_amount),
-    taxAmount: item.tax_amount,
+    taxAmount: formatMoney(item.tax_amount),
   };
 }
 
@@ -258,7 +252,7 @@ function mapInputItem(item: ApiInputItem): TaxInvoiceRecord {
     issueDate: item.issue_date,
     taxRate: item.tax_rate ?? "--",
     amount: deriveAmount(item.total_with_tax, item.tax_amount),
-    taxAmount: item.tax_amount,
+    taxAmount: formatMoney(item.tax_amount),
     statusLabel: item.certified_status ?? "待认证",
     isLocked: Boolean(item.is_locked_certified),
     isSelectable: !item.is_locked_certified,
@@ -275,7 +269,7 @@ function mapCertifiedItem(item: ApiCertifiedItem): TaxCertifiedInvoiceRecord {
     issueDate: item.issue_date,
     taxRate: item.tax_rate ?? "--",
     amount: deriveAmount(item.total_with_tax, item.tax_amount),
-    taxAmount: item.tax_amount,
+    taxAmount: formatMoney(item.tax_amount),
     statusLabel: item.status ?? "已认证",
     isLocked: true,
     isSelectable: false,
@@ -302,8 +296,8 @@ function mapPreviewRow(row: ApiTaxCertifiedImportPreviewRow): TaxCertifiedImport
     issueDate: row.issue_date ?? null,
     sellerTaxNo: row.seller_tax_no ?? null,
     sellerName: row.seller_name ?? null,
-    taxAmount: row.tax_amount ?? null,
-    deductibleTaxAmount: row.deductible_tax_amount ?? null,
+    taxAmount: row.tax_amount == null ? null : formatMoney(row.tax_amount),
+    deductibleTaxAmount: row.deductible_tax_amount == null ? null : formatMoney(row.deductible_tax_amount),
     selectionStatus: row.selection_status ?? null,
     invoiceStatus: row.invoice_status ?? null,
     selectionTime: row.selection_time ?? null,

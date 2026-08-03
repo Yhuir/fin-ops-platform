@@ -14,6 +14,19 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_query im
 
 
 class OaPendingPaymentQueryServiceTests(unittest.TestCase):
+    def test_amount_keywords_are_normalized_before_canonical_queries(self) -> None:
+        repository = CanonicalQueryRepository()
+        service = OaPendingPaymentQueryService(repository=repository)
+
+        service.rows({"keyword": ["4,311.00"]}, tenant_id="tenant-a")
+        service.bank_transaction_candidates(
+            {"keyword": ["4,311.00"]},
+            tenant_id="tenant-a",
+        )
+
+        self.assertEqual(repository.select_calls[0]["keyword"], "4311.00")
+        self.assertEqual(repository.candidate_calls[0]["keyword"], "4311.00")
+
     def test_rows_use_one_snapshot_and_return_only_canonical_page_contract(self) -> None:
         repository = CanonicalQueryRepository()
         service = OaPendingPaymentQueryService(repository=repository)

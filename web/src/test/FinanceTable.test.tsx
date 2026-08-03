@@ -91,7 +91,7 @@ describe("FinanceTable shared primitives", () => {
 
     expect(screen.getByText("云南溯源")).toHaveClass("finance-cell-stack__primary");
     expect(screen.getByText("工商银行")).toHaveClass("finance-cell-stack__secondary");
-    expect(screen.getByText("1,234.56")).toHaveClass("finance-amount-cell__value");
+    expect(screen.getByText("1234.56")).toHaveClass("finance-amount-cell__value");
     expect(screen.getByText("支出").closest(".finance-direction-tag")).toHaveAttribute("data-direction", "expense");
     expect(screen.getByText("刷新中").closest(".finance-status-tag")).toHaveAttribute("data-tone", "warning");
     expect(screen.getByText("-")).toHaveClass("finance-empty-value");

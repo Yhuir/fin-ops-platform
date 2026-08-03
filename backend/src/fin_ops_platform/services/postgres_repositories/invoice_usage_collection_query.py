@@ -14,6 +14,7 @@ from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRep
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
     PostgresOAProjectionRepository,
 )
+from fin_ops_platform.services.search_query import normalize_money_search_query
 
 
 _MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
@@ -1316,11 +1317,16 @@ def _where_sql(
 ) -> tuple[str, list[Any]]:
     clauses: list[str] = []
     params: list[Any] = []
-    if text := str(keyword or "").strip():
+    if text := normalize_money_search_query(keyword):
+        amount_columns = [
+            f"{field_sql[field]}::text"
+            for field in _NUMERIC_FILTER_FIELDS
+            if field in field_sql
+        ]
         clauses.append(
             "concat_ws(' ', invoice_no, seller_name, seller_tax_no, buyer_name, "
             "buyer_tax_no, taxable_item_name, oa_applicant, oa_project_name, "
-            "bank_counterparty_name, bank_summary) ilike %s"
+            f"bank_counterparty_name, bank_summary, {', '.join(amount_columns)}) ilike %s"
         )
         params.append(f"%{text}%")
     if text := str(invoice_date_from or "").strip():

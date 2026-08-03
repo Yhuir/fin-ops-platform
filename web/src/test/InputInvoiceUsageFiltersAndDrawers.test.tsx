@@ -585,6 +585,35 @@ describe("Input invoice usage workflow drawers", () => {
     expect(createDraftButton).toBeDisabled();
   });
 
+  test("OA reverse candidate search matches an ungrouped amount", async () => {
+    const user = userEvent.setup();
+    const amountPreview: OaReversePreviewPayload = {
+      ...previewPayload,
+      groups: [{
+        ...previewPayload.groups[0],
+        invoiceRows: previewPayload.groups[0].invoiceRows?.map((invoice, index) => (
+          index === 0 ? { ...invoice, totalWithTax: "4,311.00" } : invoice
+        )),
+      }],
+    };
+
+    render(
+      <OaReverseWorkspaceDrawer
+        open
+        sourceFilters={[]}
+        selectedInvoiceIds={["inv-001", "inv-002"]}
+        loadPreview={() => Promise.resolve(amountPreview)}
+        createDraftFromSelection={vi.fn()}
+        onClose={() => undefined}
+      />,
+    );
+
+    await user.type(await screen.findByLabelText("搜索候选发票"), "4311.00");
+    expect(screen.getByText("SD-INV-001")).toBeInTheDocument();
+    expect(screen.getByText("4311.00")).toBeInTheDocument();
+    expect(screen.queryByText("SD-INV-002")).not.toBeInTheDocument();
+  });
+
   test("OA reverse drawer creates OA draft directly and records submitted confirmation", async () => {
     const user = userEvent.setup();
     const initialPreview: OaReversePreviewPayload = {

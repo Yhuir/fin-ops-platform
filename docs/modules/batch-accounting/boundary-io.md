@@ -35,7 +35,7 @@
 | `bucket` | 页面/API | `unsubmitted` 或 `submitted` |
 | 银行分页 | `bank_page`、`bank_page_size` | 服务端执行；page/page size 必须为正数，page size 最大 200 |
 | OA 分页 | `oa_page`、`oa_page_size` | 仅未提交 bucket 使用；服务端执行，最大 200 |
-| OA 搜索 | `oa_search` | 最长 200 字符；在 canonical OA SQL 中匹配申请人、项目、金额、事由 |
+| OA 搜索 | `oa_search` | 最长 200 字符；纯金额输入归一为无千分位文本，在 canonical OA SQL 中匹配申请人、项目、金额、事由 |
 | 银行候选 | `app.bank_transactions` | 指定年份、未删除、对方户名“批量账务集中处理”、`txn_direction='outflow'`、金额大于 0、没有任何 active relation；银行名/尾号只取 normalized payload 的结构化银行字段，不得用账户户名冒充银行名 |
 | OA 候选 | `app.oa_applications` | 未删除、已完成状态别名、日常报销主单、不限年份、没有包含 canonical 银行成员的 active relation |
 | OA 附件发票 | `app.invoices.source_links` + `app.oa_attachments` | 只按当前可见或本次选中的 OA IDs 批量查询；不得扫描全量附件 |

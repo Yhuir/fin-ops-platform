@@ -40,9 +40,9 @@ test.describe("bank details initial browser state", () => {
     await expect(page.getByRole("button", { name: /时间选择 2026年/ })).toBeVisible();
 
     await expect(page.getByText("总余额")).toBeVisible();
-    await expect(page.getByText("130,500.50").first()).toBeVisible();
+    await expect(page.getByText("130500.50").first()).toBeVisible();
     await expect(page.getByRole("button", { name: /全部流水 1 条/ })).toHaveAttribute("aria-current", "true");
-    await expect(page.getByRole("button", { name: /建设银行 1138 余额 130,500.50 1 条/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /建设银行 1138 余额 130500.50 1 条/ })).toBeVisible();
 
     const grid = page.getByRole("grid", { name: "交易流水" });
     await expect(grid).toBeVisible();
@@ -62,9 +62,9 @@ test.describe("bank details initial browser state", () => {
     await expect(bankRow.getByText("无oa")).toBeVisible();
     await expect(bankRow.getByText("无发票")).toBeVisible();
     await expect(bankRow.getByText("设备款")).toBeVisible();
-    await expect(bankRow.getByText("58,000.00")).toBeVisible();
+    await expect(bankRow.getByText("58000.00")).toBeVisible();
     await expect(bankRow.getByText("建设银行 1138")).toBeVisible();
-    await expect(bankRow.getByText("130,500.50")).toBeVisible();
+    await expect(bankRow.getByText("130500.50")).toBeVisible();
     await expect(bankRow.getByText("设备尾款", { exact: true })).toBeVisible();
     await expect(bankRow.getByText("设备尾款待进项票")).toBeVisible();
     await expect(page.getByText("当前时间范围内没有流水。")).not.toBeVisible();
@@ -81,8 +81,8 @@ test.describe("bank details initial browser state", () => {
     await expect(page.getByTestId("bank-details-page")).toBeVisible();
 
     await expect(page.getByText("总余额")).toBeVisible();
-    await expect(page.getByText("130,500.50").first()).toBeVisible();
-    await expect(page.getByRole("button", { name: /建设银行 1138 余额 130,500.50 1 条/ })).toBeVisible();
+    await expect(page.getByText("130500.50").first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /建设银行 1138 余额 130500.50 1 条/ })).toBeVisible();
     await expect(page.getByRole("grid", { name: "交易流水" })).toBeVisible();
     await expect(page.getByText("当前时间范围内没有流水。")).toBeVisible();
     await expect(page.getByText("暂无银行流水，请先在银行流水导入页面导入。")).not.toBeVisible();

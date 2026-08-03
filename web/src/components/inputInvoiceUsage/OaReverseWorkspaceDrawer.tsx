@@ -11,6 +11,7 @@ import type {
   InputInvoiceUsageOaReverseTargetApplicant,
   ManualInputInvoiceUsageOaReverseStatusRequest,
 } from "../../features/inputInvoiceUsage/types";
+import { formatMoney, normalizeMoneySearchQuery } from "../../features/money";
 
 export type OaReversePreviewRequest = {
   sourceFilters: unknown[];
@@ -200,7 +201,10 @@ export default function OaReverseWorkspaceDrawer({
 
   const candidateInvoices = useMemo(() => (preview ? invoicesFromPreview(preview) : []), [preview]);
   const selectableCandidateInvoices = useMemo(() => candidateInvoices.filter((invoice) => invoice.selectable), [candidateInvoices]);
-  const normalizedCandidateSearch = useMemo(() => candidateSearch.trim().toLowerCase(), [candidateSearch]);
+  const normalizedCandidateSearch = useMemo(
+    () => normalizeMoneySearchQuery(candidateSearch).toLowerCase(),
+    [candidateSearch],
+  );
   const visibleCandidateInvoices = useMemo(
     () => candidateInvoices.filter((invoice) => {
       const businessStatus = oaRelationBusinessStatus(invoice.oaRelationStatus);
@@ -476,7 +480,7 @@ export default function OaReverseWorkspaceDrawer({
                     <SummaryMetric label="目标 OA 申请人" value={preview.targetApplicantName ?? "-"} />
                   )}
                   <SummaryMetric label="候选发票数" value={String(preview.invoiceCount)} />
-                  <SummaryMetric label="候选价税合计" value={preview.totalWithTax} />
+                  <SummaryMetric label="候选价税合计" value={formatMoney(preview.totalWithTax, "-")} />
                 </div>
                 <Section title="候选发票清单">
                   {candidateInvoices.length > 0 ? (
@@ -601,7 +605,7 @@ export default function OaReverseWorkspaceDrawer({
                             <td>{invoice.displayNo || invoice.invoiceNumber || invoice.invoiceId}</td>
                             <td>{invoice.sellerName || "-"}</td>
                             <td>{invoice.issueDate || "-"}</td>
-                            <td className="input-invoice-usage-oa-table__amount">{invoice.totalWithTax || "-"}</td>
+                            <td className="input-invoice-usage-oa-table__amount">{formatMoney(invoice.totalWithTax, "-")}</td>
                             <td>
                               <span className={oaRelationChipClassName(invoice.oaRelationStatus)}>
                                 {oaRelationChipLabel(invoice.oaRelationStatus)}
@@ -697,7 +701,7 @@ function invoiceMatchesSearch(invoice: OaReverseDisplayInvoice, searchTerm: stri
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
-  return haystack.includes(searchTerm);
+  return (/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(searchTerm) ? haystack.replace(/,/g, "") : haystack).includes(searchTerm);
 }
 
 type OaReverseHeaderNotice = {
@@ -1023,7 +1027,7 @@ function StagedDraftsPanel({
           <div className="input-invoice-usage-oa-history-item__header">
             <strong>{item.targetApplicantName || item.targetApplicantCode || "目标申请人"}</strong>
             <span className="input-invoice-usage-rules-tag">{item.invoiceIds.length || item.invoiceRows.length} 张</span>
-            <span className="input-invoice-usage-rules-tag input-invoice-usage-oa-amount-tag">{item.totalWithTax || "-"}</span>
+            <span className="input-invoice-usage-rules-tag input-invoice-usage-oa-amount-tag">{formatMoney(item.totalWithTax, "-")}</span>
           </div>
           <div className="input-invoice-usage-rules-table-shell">
             <table aria-label={`${item.targetApplicantName || "目标申请人"}暂存发票`} className="input-invoice-usage-oa-table">
@@ -1041,7 +1045,7 @@ function StagedDraftsPanel({
                     <td>{invoice.displayNo || invoice.invoiceNumber || invoice.invoiceId}</td>
                     <td>{invoice.sellerName || "-"}</td>
                     <td>{invoice.issueDate || "-"}</td>
-                    <td className="input-invoice-usage-oa-table__amount">{invoice.totalWithTax || "-"}</td>
+                    <td className="input-invoice-usage-oa-table__amount">{formatMoney(invoice.totalWithTax, "-")}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1116,7 +1120,7 @@ function SubmittedHistoryPanel({
             <strong>{item.targetApplicantName || "目标申请人"}</strong>
             <span>{formatSubmittedAt(item.submittedAt)}</span>
             <span className="input-invoice-usage-rules-tag">{item.invoiceCount} 张</span>
-            <span className="input-invoice-usage-rules-tag input-invoice-usage-oa-amount-tag">{item.totalWithTax || "-"}</span>
+            <span className="input-invoice-usage-rules-tag input-invoice-usage-oa-amount-tag">{formatMoney(item.totalWithTax, "-")}</span>
           </div>
           <div className="input-invoice-usage-rules-table-shell">
             <table aria-label={`${item.targetApplicantName || "目标申请人"}已提交发票`} className="input-invoice-usage-oa-table">
@@ -1134,7 +1138,7 @@ function SubmittedHistoryPanel({
                     <td>{invoice.invoiceNo || "-"}</td>
                     <td>{invoice.sellerName || "-"}</td>
                     <td>{invoice.invoiceDate || "-"}</td>
-                    <td className="input-invoice-usage-oa-table__amount">{invoice.totalWithTax || "-"}</td>
+                    <td className="input-invoice-usage-oa-table__amount">{formatMoney(invoice.totalWithTax, "-")}</td>
                   </tr>
                 ))}
               </tbody>

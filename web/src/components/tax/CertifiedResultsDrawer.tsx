@@ -1,6 +1,7 @@
 import { Button, Chip } from "@heroui/react";
 
 import type { TaxCertifiedInvoiceRecord } from "../../features/tax/types";
+import { formatMoney } from "../../features/money";
 
 type CertifiedResultsDrawerProps = {
   matchedRows: TaxCertifiedInvoiceRecord[];
@@ -44,7 +45,7 @@ function DrawerGroup({
             <span className="tax-certified-item-meta">
               <span>{row.counterparty}</span>
               <span>{row.issueDate}</span>
-              <span>{row.taxAmount}</span>
+              <span>{formatMoney(row.taxAmount)}</span>
             </span>
           </button>
         ))}

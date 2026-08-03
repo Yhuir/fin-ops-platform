@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import AppDrawer from "../common/AppDrawer";
 import { usePageSessionState } from "../../contexts/PageSessionStateContext";
+import { formatMoney } from "../../features/money";
 import { applyWorkbenchException, previewWorkbenchException } from "../../features/workbench/api";
 import type {
   WorkbenchExceptionAction,
@@ -670,14 +671,7 @@ function cleanInternalDisplayText(value?: string | null) {
 }
 
 function formatAmount(value: string) {
-  const numericValue = Number(value.replace(/,/g, ""));
-  if (!Number.isFinite(numericValue)) {
-    return value || "0.00";
-  }
-  return new Intl.NumberFormat("zh-CN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(numericValue);
+  return formatMoney(value);
 }
 
 function readErrorMessage(error: unknown) {

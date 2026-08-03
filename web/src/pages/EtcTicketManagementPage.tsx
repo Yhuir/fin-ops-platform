@@ -24,6 +24,7 @@ import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import { useBackgroundJobProgress } from "../features/backgroundJobs/BackgroundJobProgressProvider";
 import EtcBatchProgress from "../features/etc/EtcBatchProgress";
+import { formatMoney } from "../features/money";
 import {
   EtcApiError,
   confirmEtcReconciliationTask,
@@ -71,14 +72,6 @@ const POST_MUTATION_RELOAD_WARNING = "操作已成功，但 ETC 批次列表重�
 
 const MANUAL_OA_SUBMITTED_REASON = "用户确认已在 OA 系统完成 OA 草稿提交。";
 const MANUAL_OA_NOT_SUBMITTED_REASON = "用户确认已在 OA 系统删除 OA 草稿。";
-
-function formatMoney(value: string | number) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) {
-    return String(value);
-  }
-  return parsed.toFixed(2);
-}
 
 function moneyDifference(left: string | number, right: string | number) {
   const leftCents = Math.round(Number(left) * 100);
@@ -2399,7 +2392,7 @@ export default function EtcTicketManagementPage() {
                                               {sourceSummary ? (
                                                 <>
                                                   <span className="etc-status-tag">{sourceSummary.plateLabel} / 已解析 {sourceSummary.parsedCount} 条</span>
-                                                  <span className="etc-status-tag">金额合计 {sourceSummary.totalAmount}</span>
+                                                  <span className="etc-status-tag">金额合计 {formatMoney(sourceSummary.totalAmount)}</span>
                                                   <span className="etc-status-tag">日期 {sourceSummary.dateRange}</span>
                                                 </>
                                               ) : null}
@@ -2681,8 +2674,8 @@ export default function EtcTicketManagementPage() {
                             <EtcDisclosureSection
                               id="imported"
                               title="已导入发票"
-                              summary={importedInvoiceCount > 0 ? `${importedInvoiceCount} 张 / ${importedInvoiceAmount}` : "暂无明细"}
-                              meta={Number(importedInvoiceAmount) > 0 ? <StatusChip tone="success">合计 {importedInvoiceAmount}</StatusChip> : null}
+                              summary={importedInvoiceCount > 0 ? `${importedInvoiceCount} 张 / ${formatMoney(importedInvoiceAmount)}` : "暂无明细"}
+                              meta={Number(importedInvoiceAmount.replace(/,/g, "")) > 0 ? <StatusChip tone="success">合计 {formatMoney(importedInvoiceAmount)}</StatusChip> : null}
                             >
                               <section className="etc-task-imported-invoices" aria-label="已导入ETC发票">
                                 {renderEtcInvoiceTable(

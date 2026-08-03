@@ -240,7 +240,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         payload = self._payload([group])
 
         self.assertEqual(payload["summary"]["transaction_count"], 1)
-        self.assertEqual(payload["summary"]["total_amount"], "1,000.00")
+        self.assertEqual(payload["summary"]["total_amount"], "1000.00")
         self.assertEqual(payload["time_rows"][0]["project_id"], "P-001")
         self.assertEqual(payload["time_rows"][0]["expense_type"], "交通费")
         self.assertEqual(payload["time_rows"][0]["expense_content"], "项目现场往返交通")
@@ -271,7 +271,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
 
         payload = self._payload([only_in_progress, mixed])
 
-        self.assertEqual(payload["summary"], {"row_count": 1, "transaction_count": 1, "total_amount": "1,000.00"})
+        self.assertEqual(payload["summary"], {"row_count": 1, "transaction_count": 1, "total_amount": "1000.00"})
         self.assertEqual(payload["time_rows"][0]["group_id"], "mixed-status")
         self.assertEqual(payload["time_rows"][0]["project_name"], "已完成项目")
         self.assertEqual(payload["time_rows"][0]["expense_type"], "材料费")
@@ -295,7 +295,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                 )
                 payload = self._payload([group])
                 self.assertEqual(payload["summary"]["transaction_count"], 1)
-                self.assertEqual(payload["summary"]["total_amount"], "1,000.00")
+                self.assertEqual(payload["summary"]["total_amount"], "1000.00")
 
     def test_projection_keeps_loan_incomplete_and_conflicting_oa_contexts(self) -> None:
         cases = (
@@ -335,7 +335,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         payload = self._payload([hint, excluded])
 
         self.assertEqual(payload["summary"]["transaction_count"], 2)
-        self.assertEqual(payload["summary"]["total_amount"], "2,000.00")
+        self.assertEqual(payload["summary"]["total_amount"], "2000.00")
         self.assertEqual(
             {row["group_id"] for row in payload["time_rows"]},
             {"cash-hint", "cash-pass-through"},
@@ -397,7 +397,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
 
         self.assertEqual(
             payload["summary"],
-            {"row_count": 1, "transaction_count": 1, "total_amount": "1,000.00"},
+            {"row_count": 1, "transaction_count": 1, "total_amount": "1000.00"},
         )
 
     def test_projection_does_not_let_member_exclude_all_override_oa_pair(self) -> None:

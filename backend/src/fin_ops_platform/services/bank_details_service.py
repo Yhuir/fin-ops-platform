@@ -546,8 +546,6 @@ class BankDetailsService:
             "invoice_relation_tag",
         ):
             cls._append_search_value(values, row.get(key))
-            if key in {"amount", "balance"}:
-                cls._append_search_value(values, cls._format_money_for_search(row.get(key)))
         for key in (
             "manual_category_path",
             "manual_category_label_path",
@@ -577,15 +575,6 @@ class BankDetailsService:
     @staticmethod
     def _normalize_keyword(value: str | None) -> str:
         return str(value or "").strip()
-
-    @staticmethod
-    def _format_money_for_search(value: Any) -> str:
-        if value in (None, ""):
-            return ""
-        try:
-            return f"{Decimal(str(value)):,.2f}"
-        except Exception:
-            return ""
 
     @staticmethod
     def _direction(row: dict[str, Any]) -> str:

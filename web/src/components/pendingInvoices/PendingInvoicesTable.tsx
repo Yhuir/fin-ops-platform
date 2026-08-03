@@ -10,6 +10,7 @@ import {
   FinanceStatusTag,
   type FinanceTone,
 } from "../common/FinanceTable";
+import { formatMoney } from "../../features/money";
 import type {
   PendingInvoiceDirection,
   PendingInvoiceColumnFilter,
@@ -45,14 +46,6 @@ type PendingInvoicesTableProps = {
   emptyStateMessage?: string;
   tableWrapRef?: MutableRefObject<HTMLDivElement | null>;
 };
-
-function formatMoney(value: string) {
-  const parsed = Number(String(value ?? "").replace(/,/g, ""));
-  if (!Number.isFinite(parsed)) {
-    return value || "-";
-  }
-  return parsed.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
 
 function invoiceNumber(row: NonNullable<PendingInvoiceRow["inputInvoices"]["primary"]>) {
   return row.digitalInvoiceNo || [row.invoiceCode, row.invoiceNo].filter(Boolean).join(" ") || row.invoiceNo || "-";

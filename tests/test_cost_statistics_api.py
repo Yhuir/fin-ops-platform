@@ -117,7 +117,7 @@ class CostStatisticsApiTests(unittest.TestCase):
                 status, payload = self._json(path)
                 self.assertEqual(status, 200)
                 self.assertGreaterEqual(payload["row_count"], 1)
-                self.assertEqual(payload["summary"]["total_amount"], "1,250.00")
+                self.assertEqual(payload["summary"]["total_amount"], "1250.00")
                 self.assertNotIn("read_model_status", payload)
                 self.assertNotIn("read_model_version", payload)
                 self.assertNotIn("refresh_scope_keys", payload)
@@ -305,7 +305,7 @@ class CostStatisticsApiTests(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         self.assertEqual(time_payload["row_count"], 1)
-        self.assertEqual(time_payload["summary"]["total_amount"], "1,250.00")
+        self.assertEqual(time_payload["summary"]["total_amount"], "1250.00")
         self.assertEqual(time_payload["rows"][0]["project_name"], "")
         self.assertEqual(time_payload["rows"][0]["expense_type"], "")
 

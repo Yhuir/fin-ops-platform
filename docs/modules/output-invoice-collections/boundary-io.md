@@ -33,7 +33,7 @@
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| rows 查询 | `OutputInvoiceCollectionsPage.tsx` | `page`、`page_size`、keyword、月份、filters、sort；非法值返回 400 |
+| rows 查询 | `OutputInvoiceCollectionsPage.tsx` | `page`、`page_size`、keyword、月份、filters、sort；非法值返回 400。纯金额 keyword 使用无千分位文本并查询价税合计、税额、待收和关联收款金额。 |
 | canonical invoices | `app.invoices` | 只取非删除 output invoices；正票和负票分别保留 |
 | formal relations | `app.workbench_pair_relations` | 只取 `status='active'`；红蓝票关系识别 `mode=output_invoice_reversal` |
 | bank facts | `app.bank_transactions` | 只统计 active relation 中的收入流水；支出不计入已收金额 |

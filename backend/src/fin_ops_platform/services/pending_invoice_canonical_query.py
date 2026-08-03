@@ -34,6 +34,7 @@ from fin_ops_platform.services.pending_invoice_status import (
     pending_invoice_filter_status_codes,
     pending_invoice_status_payload,
 )
+from fin_ops_platform.services.search_query import normalize_money_search_query
 
 
 PAGE_SIZE_LIMIT = 200
@@ -765,6 +766,10 @@ classified as materialized (
         concat_ws(' ',
             source.row_id,
             source.counterparty_name,
+            source.amount::text,
+            source.balance::text,
+            source.invoice_total::text,
+            source.paid_total::text,
             source.summary,
             source.remark,
             source.category_code,
@@ -1075,6 +1080,8 @@ candidate_source as materialized (
             invoice.invoice_no,
             invoice.digital_invoice_no,
             invoice.seller_name,
+            coalesce(invoice.total_with_tax, invoice.amount)::text,
+            coalesce(bank_relation.paid_total, 0)::text,
             invoice.raw_payload->>'remark'
         )) as searchable_text
     from app.invoices invoice
@@ -1391,7 +1398,7 @@ class PostgresPendingInvoiceCanonicalRepository:
                     "invalid_direction",
                     "invoice candidates are only supported for expense rows.",
                 )
-            keyword = str(request.get("keyword") or "").lower()
+            keyword = normalize_money_search_query(request.get("keyword")).lower()
             seller_name = str(request.get("seller_name") or "").lower()
             date_from = request.get("issue_date_from")
             date_to = request.get("issue_date_to")
@@ -1980,7 +1987,7 @@ def _candidate_request(
         )
     return {
         "transaction_ids": normalized_ids,
-        "keyword": str(query.get("keyword", [""])[0] or "").strip(),
+        "keyword": normalize_money_search_query(query.get("keyword", [""])[0]),
         "seller_name": str(query.get("seller_name", [""])[0] or "").strip(),
         "issue_date_from": issue_date_from,
         "issue_date_to": issue_date_to,
@@ -2126,7 +2133,7 @@ def _where_sql(request: dict[str, Any]) -> tuple[str, list[Any]]:
         params.append(request["date_to"])
     if request.get("keyword"):
         clauses.append("searchable_text ilike %s")
-        params.append(f"%{request['keyword']}%")
+        params.append(f"%{normalize_money_search_query(request['keyword'])}%")
     if request.get("transaction_id"):
         clauses.append("row_id = %s")
         params.append(request["transaction_id"])

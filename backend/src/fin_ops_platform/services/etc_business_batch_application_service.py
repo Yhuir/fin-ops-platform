@@ -22,6 +22,7 @@ from fin_ops_platform.services.etc_service import (
     EtcService,
     UploadedEtcZipFile,
 )
+from fin_ops_platform.services.search_query import normalize_money_search_query
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,7 +103,7 @@ class EtcBusinessBatchApplicationService:
         task_id = (query.get("taskId") or query.get("task_id") or [None])[0]
         month = str((query.get("month") or [None])[0] or "").strip()
         plate = str((query.get("plate") or [None])[0] or "").strip().lower()
-        keyword = str((query.get("keyword") or [None])[0] or "").strip().lower()
+        keyword = normalize_money_search_query((query.get("keyword") or [None])[0]).lower()
         page = max(1, self._optional_int((query.get("page") or [1])[0]) or 1)
         page_size = max(1, min(500, self._optional_int((query.get("page_size") or query.get("pageSize") or [100])[0]) or 100))
         result = self._etc_service.list_business_batch_summaries(
@@ -715,6 +716,8 @@ class EtcBusinessBatchApplicationService:
             if not any(keyword in str(value or "").lower() for value in batch_fields) and not any(
                 keyword in str(getattr(invoice, "invoice_number", "") or "").lower()
                 or keyword in str(getattr(invoice, "plate_number", "") or "").lower()
+                or keyword in str(getattr(invoice, "total_amount", "") or "").lower()
+                or keyword in str(getattr(invoice, "tax_amount", "") or "").lower()
                 for invoice in invoices
             ):
                 return False

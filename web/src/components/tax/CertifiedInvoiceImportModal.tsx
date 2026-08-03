@@ -14,6 +14,7 @@ import {
   FinanceTableRow,
 } from "../common/FinanceTable";
 import { useSession } from "../../contexts/SessionContext";
+import { formatMoney } from "../../features/money";
 import {
   confirmTaxCertifiedImport,
   fetchTaxCertifiedImportJob,
@@ -353,8 +354,8 @@ export default function CertifiedInvoiceImportModal({
                                 <FinanceTableCell columnRole="account" textValue={sellerName}>
                                   {sellerName || <EmptyValue />}
                                 </FinanceTableCell>
-                                <FinanceTableCell columnRole="amount" textValue={taxAmount}>
-                                  {taxAmount || <EmptyValue />}
+                                <FinanceTableCell columnRole="amount" textValue={formatMoney(taxAmount, "-")}>
+                                  {taxAmount ? formatMoney(taxAmount) : <EmptyValue />}
                                 </FinanceTableCell>
                                 <FinanceTableCell columnRole="status" textValue={rowStatusLabel(row)}>
                                   <FinanceStatusTag tone={rowStatusTone(row)}>{rowStatusLabel(row)}</FinanceStatusTag>

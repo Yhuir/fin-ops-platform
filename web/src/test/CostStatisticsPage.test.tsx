@@ -239,11 +239,11 @@ describe("Cost statistics page", () => {
     expect(within(timeGrid).queryByText("2026-03-10T21:27:55+08:00")).not.toBeInTheDocument();
     expect(within(timeGrid).queryByRole("columnheader", { name: "资金方向" })).not.toBeInTheDocument();
     expect(within(timeGrid).getAllByText("支出")[0]).toHaveClass("direction-tag");
-    expect(screen.getByLabelText("支出金额 13,360.00")).toHaveClass("cost-direction-amount--expense");
-    expect(screen.getByLabelText("收入金额 2,000.00")).toHaveClass("cost-direction-amount--income");
-    expect(screen.queryByText("总金额 15,360.00")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("支出金额 13360.00")).toHaveClass("cost-direction-amount--expense");
+    expect(screen.getByLabelText("收入金额 2000.00")).toHaveClass("cost-direction-amount--income");
+    expect(screen.queryByText("总金额 15360.00")).not.toBeInTheDocument();
     expect(await within(timeGrid).findByRole("button", { name: "查看流水 cost-income-001" })).toBeInTheDocument();
-    expect(within(timeGrid).getByText("2,000.00").closest(".money-cell-value")).toHaveClass("cost-flow-amount--income");
+    expect(within(timeGrid).getByText("2000.00").closest(".money-cell-value")).toHaveClass("cost-flow-amount--income");
     expect(screen.getByRole("button", { name: "时间统计时间范围：2026年3月" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /加载更多/ })).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
@@ -380,7 +380,7 @@ describe("Cost statistics page", () => {
     const projectLane = screen.getByRole("heading", { name: "项目名" }).closest(".cost-explorer-lane");
     expect(projectLane).not.toBeNull();
     expect(within(projectLane as HTMLElement).getByText("58.2%")).toBeInTheDocument();
-    expect(within(projectLane as HTMLElement).getByLabelText("支出 13,360.00")).toHaveClass("cost-direction-amount--aligned");
+    expect(within(projectLane as HTMLElement).getByLabelText("支出 13360.00")).toHaveClass("cost-direction-amount--aligned");
     await user.click(within(projectLane as HTMLElement).getByRole("button", { name: /云南溯源科技/ }));
 
     const expenseLane = screen.getByRole("heading", { name: "费用类型" }).closest(".cost-explorer-lane");
@@ -424,8 +424,8 @@ describe("Cost statistics page", () => {
     expect(within(dialog).getByRole("heading", { name: "OA 成本拆分" })).toBeInTheDocument();
     expect(within(dialog).getByText("云南溯源科技 · 设备货款及材料费")).toBeInTheDocument();
     expect(within(dialog).getByText("昆明升级项目 · 安装服务费")).toBeInTheDocument();
-    expect(within(dialog).getByText(/6,000\.00/)).toBeInTheDocument();
-    expect(within(dialog).getByText(/4,000\.00/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/6000\.00/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/4000\.00/)).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "关闭" }));
     expect(screen.queryByRole("dialog", { name: "流水详情" })).not.toBeInTheDocument();
   });
@@ -620,8 +620,8 @@ describe("Cost statistics page", () => {
     expect(within(primaryLane as HTMLElement).getByText("项目开销")).toBeInTheDocument();
     expect(within(primaryLane as HTMLElement).getByText("差旅交通")).toBeInTheDocument();
     expect(within(primaryLane as HTMLElement).getByText("经营收入")).toBeInTheDocument();
-    expect(screen.getByLabelText("支出金额 13,360.00")).toHaveClass("cost-direction-amount--expense");
-    expect(screen.getByLabelText("收入金额 2,000.00")).toHaveClass("cost-direction-amount--income");
+    expect(screen.getByLabelText("支出金额 13360.00")).toHaveClass("cost-direction-amount--expense");
+    expect(screen.getByLabelText("收入金额 2000.00")).toHaveClass("cost-direction-amount--income");
     expect(within(primaryLane as HTMLElement).queryByText(/%$/)).not.toBeInTheDocument();
     const incomeCountRow = within(primaryLane as HTMLElement).getByRole("button", { name: /经营收入/ });
     expect(incomeCountRow).toHaveTextContent("支出 0 笔");
@@ -690,8 +690,8 @@ describe("Cost statistics page", () => {
 
     await user.click(within(dialog).getByRole("button", { name: "仅预览" }));
 
-    expect(await within(dialog).findByText("支出金额 13,360.00")).toHaveClass("cost-direction-amount--expense");
-    expect(within(dialog).getByText("收入金额 2,000.00")).toHaveClass("cost-direction-amount--income");
+    expect(await within(dialog).findByText("支出金额 13360.00")).toHaveClass("cost-direction-amount--expense");
+    expect(within(dialog).getByText("收入金额 2000.00")).toHaveClass("cost-direction-amount--income");
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/cost-statistics/export-preview?month=2026-03&view=bank_tag&project_scope=active",
       expect.any(Object),
@@ -736,8 +736,8 @@ describe("Cost statistics page", () => {
     expect(within(bankLane as HTMLElement).getByText("平安银行 账户 8821")).toBeInTheDocument();
     expect(within(bankLane as HTMLElement).getByText("民生银行 账户 9486")).toBeInTheDocument();
     expect(within(bankLane as HTMLElement).getByText("54.4%")).toBeInTheDocument();
-    expect(screen.getByLabelText("支出金额 22,960.00")).toBeInTheDocument();
-    expect(within(bankLane as HTMLElement).getByLabelText("支出 12,500.00")).toHaveClass("cost-direction-amount--aligned");
+    expect(screen.getByLabelText("支出金额 22960.00")).toBeInTheDocument();
+    expect(within(bankLane as HTMLElement).getByLabelText("支出 12500.00")).toHaveClass("cost-direction-amount--aligned");
 
     await user.click(within(bankLane as HTMLElement).getByRole("button", { name: /工商银行 账户 0001/ }));
 
@@ -773,7 +773,7 @@ describe("Cost statistics page", () => {
     expect(await within(monthBankLane as HTMLElement).findByText("平安银行 账户 8821")).toBeInTheDocument();
     expect(within(monthBankLane as HTMLElement).getByText("工商银行 账户 0001")).toBeInTheDocument();
     expect(within(monthBankLane as HTMLElement).getByText("民生银行 账户 9486")).toBeInTheDocument();
-    expect(screen.getByLabelText("支出金额 9,600.00")).toBeInTheDocument();
+    expect(screen.getByLabelText("支出金额 9600.00")).toBeInTheDocument();
   });
 
   test("time and expense type scopes stay independent with one range control per view", async () => {
@@ -1009,8 +1009,8 @@ describe("Cost statistics page", () => {
       expect.any(Object),
     );
     expect(within(dialog).getByText("预计导出 6 条流水")).toBeInTheDocument();
-    expect(within(dialog).getByText("支出金额 22,960.00")).toHaveClass("cost-direction-amount--expense");
-    expect(within(dialog).getByText("收入金额 2,000.00")).toHaveClass("cost-direction-amount--income");
+    expect(within(dialog).getByText("支出金额 22960.00")).toHaveClass("cost-direction-amount--expense");
+    expect(within(dialog).getByText("收入金额 2000.00")).toHaveClass("cost-direction-amount--income");
 
     await user.click(within(dialog).getByRole("button", { name: "导出" }));
     expect(await within(dialog).findByText("已导出 成本统计_2026-03-10至2026-04-16_按时间统计.xlsx")).toBeInTheDocument();

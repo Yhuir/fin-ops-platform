@@ -487,7 +487,7 @@ test.describe("turnover ledger browser flow", () => {
     });
     const turnoverCostProject = page.getByRole("button", { name: /外部往来闭环成本项目/ });
     await expect(turnoverCostProject).toBeVisible();
-    await expect(turnoverCostProject).toContainText("1,000.00");
+    await expect(turnoverCostProject).toContainText("1000.00");
     const projectRows = page.getByRole("grid", { name: "项目对应流水表" });
     await recordLatency({
       route: "/cost-statistics",

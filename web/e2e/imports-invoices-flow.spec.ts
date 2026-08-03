@@ -380,7 +380,7 @@ test.describe("invoice import browser flow", () => {
     });
     const importedCostProject = page.getByRole("button", { name: /发票导入成本项目/ });
     await expect(importedCostProject).toBeVisible();
-    await expect(importedCostProject).toContainText("18,320.00");
+    await expect(importedCostProject).toContainText("18320.00");
     await recordLatency({
       route: "/cost-statistics",
       pageKey: "cost-statistics",

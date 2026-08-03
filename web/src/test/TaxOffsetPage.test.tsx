@@ -329,7 +329,7 @@ describe("Tax offset workbench", () => {
     render(<App />);
 
     expect(await screen.findByText("销项税额")).toBeInTheDocument();
-    expect(within(getStatCard("本月应纳税额")).getByText("29,120.00")).toBeInTheDocument();
+    expect(within(getStatCard("本月应纳税额")).getByText("29120.00")).toBeInTheDocument();
 
     await user.click(screen.getByRole("link", { name: "设置" }));
     expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
@@ -426,7 +426,7 @@ describe("Tax offset workbench", () => {
     });
 
     expect(await screen.findByText("已导入 2 条已认证记录，并已刷新当前税金抵扣页面。")).toBeInTheDocument();
-    expect(within(getStatCard("已认证结果进项税额")).getByText("14,080.00")).toBeInTheDocument();
+    expect(within(getStatCard("已认证结果进项税额")).getByText("14080.00")).toBeInTheDocument();
 
     const inputTable = getTaxFinanceGrid("进项票认证计划");
     expect(within(inputTable).getByRole("checkbox", { name: /11203490/ })).toBeDisabled();
@@ -501,18 +501,18 @@ describe("Tax offset workbench", () => {
     render(<App />);
 
     expect(await screen.findByText("销项税额")).toBeInTheDocument();
-    expect(within(getStatCard("销项税额")).getByText("41,600.00")).toBeInTheDocument();
+    expect(within(getStatCard("销项税额")).getByText("41600.00")).toBeInTheDocument();
     expect(within(getStatCard("已认证结果进项税额")).getByText("0.00")).toBeInTheDocument();
-    expect(within(getStatCard("计划进项税额")).getByText("18,240.00")).toBeInTheDocument();
-    expect(within(getStatCard("本月抵扣额")).getByText("18,240.00")).toBeInTheDocument();
-    expect(within(getStatCard("本月应纳税额")).getByText("23,360.00")).toBeInTheDocument();
+    expect(within(getStatCard("计划进项税额")).getByText("18240.00")).toBeInTheDocument();
+    expect(within(getStatCard("本月抵扣额")).getByText("18240.00")).toBeInTheDocument();
+    expect(within(getStatCard("本月应纳税额")).getByText("23360.00")).toBeInTheDocument();
 
     await user.click(await screen.findByRole("checkbox", { name: /11203491/ }));
 
-    expect(await within(getStatCard("计划进项税额")).findByText("12,480.00")).toBeInTheDocument();
+    expect(await within(getStatCard("计划进项税额")).findByText("12480.00")).toBeInTheDocument();
     expect(within(getStatCard("已认证结果进项税额")).getByText("0.00")).toBeInTheDocument();
-    expect(within(getStatCard("本月抵扣额")).getByText("12,480.00")).toBeInTheDocument();
-    expect(within(getStatCard("本月应纳税额")).getByText("29,120.00")).toBeInTheDocument();
+    expect(within(getStatCard("本月抵扣额")).getByText("12480.00")).toBeInTheDocument();
+    expect(within(getStatCard("本月应纳税额")).getByText("29120.00")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/tax-offset/calculate",
       expect.objectContaining({
@@ -535,7 +535,7 @@ describe("Tax offset workbench", () => {
 
     expect(await screen.findByText("销项税额")).toBeInTheDocument();
     await user.click(await screen.findByRole("checkbox", { name: /11203491/ }));
-    expect(await within(getStatCard("计划进项税额")).findByText("12,480.00")).toBeInTheDocument();
+    expect(await within(getStatCard("计划进项税额")).findByText("12480.00")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "保存计划" }));
 
@@ -561,7 +561,7 @@ describe("Tax offset workbench", () => {
 
     expect(await screen.findByText("销项税额")).toBeInTheDocument();
     await user.click(await screen.findByRole("checkbox", { name: /11203491/ }));
-    expect(await within(getStatCard("计划进项税额")).findByText("12,480.00")).toBeInTheDocument();
+    expect(await within(getStatCard("计划进项税额")).findByText("12480.00")).toBeInTheDocument();
     const initialTaxReads = taxOffsetMonthRequests(fetchMock).length;
 
     await user.click(screen.getByRole("button", { name: "保存计划" }));
@@ -1346,6 +1346,6 @@ describe("Tax offset workbench", () => {
       expect(screen.queryByRole("dialog", { name: "已认证发票导入" })).not.toBeInTheDocument();
     });
     expect(await screen.findByText("已导入 1 条已认证记录，并已刷新当前税金抵扣页面。")).toBeInTheDocument();
-    expect(within(getStatCard("已认证结果进项税额")).getByText("12,480.00")).toBeInTheDocument();
+    expect(within(getStatCard("已认证结果进项税额")).getByText("12480.00")).toBeInTheDocument();
   });
 });

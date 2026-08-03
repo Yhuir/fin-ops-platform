@@ -1242,9 +1242,9 @@ describe("Turnover ledger page", () => {
     expect(within(groupCell).getByText("待还款合计：")).toBeInTheDocument();
     expect(within(groupCell).getByText("800.00")).toBeInTheDocument();
     const companyGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:company:yunnan");
-    expect(within(companyGroupCell).queryByText("待收款合计：2,000.00")).not.toBeInTheDocument();
+    expect(within(companyGroupCell).queryByText("待收款合计：2000.00")).not.toBeInTheDocument();
     expect(within(companyGroupCell).getByText("待收款合计：")).toBeInTheDocument();
-    expect(within(companyGroupCell).getByText("2,000.00")).toBeInTheDocument();
+    expect(within(companyGroupCell).getByText("2000.00")).toBeInTheDocument();
     expect(within(groupCell).queryByRole("button", { name: "展开 张三 批次明细" })).not.toBeInTheDocument();
     expect(within(groupCell).queryByRole("button", { name: "展开 张三 流水明细" })).not.toBeInTheDocument();
     expect(within(table).queryByText("招商银行批次账户")).not.toBeInTheDocument();
@@ -1253,7 +1253,7 @@ describe("Turnover ledger page", () => {
     const borrowAmountChip = within(table).getByTestId("amount-income-rel-personal-1-borrow");
     expect(borrowAmountChip).toHaveClass("turnover-amount-income");
     expect(within(borrowAmountChip).getByText("收")).toBeInTheDocument();
-    expect(within(borrowAmountChip).getByText("1,000.00")).toBeInTheDocument();
+    expect(within(borrowAmountChip).getByText("1000.00")).toBeInTheDocument();
     const repaymentAmountChip = within(table).getByTestId("amount-expense-rel-personal-1-repayment");
     expect(repaymentAmountChip).toHaveClass("turnover-amount-expense");
     expect(within(repaymentAmountChip).getByText("支")).toBeInTheDocument();
@@ -1316,15 +1316,15 @@ describe("Turnover ledger page", () => {
     expect(within(flowRows[0]).getByRole("button", { name: "编辑流水 bank-jia-income-200000" })).toBeInTheDocument();
     expect(within(table).queryByText("流水")).not.toBeInTheDocument();
     expect(within(table).queryByText("总览不应展示的还款备注")).not.toBeInTheDocument();
-    expect(within(flowRows[0]).getByText("200,000.00")).toBeInTheDocument();
+    expect(within(flowRows[0]).getByText("200000.00")).toBeInTheDocument();
     expect(within(flowRows[0]).getByTestId("amount-empty-rel-jiaxiaohua-repayment")).toHaveTextContent("-");
-    expect(within(flowRows[1]).getByText("100,000.00")).toBeInTheDocument();
+    expect(within(flowRows[1]).getByText("100000.00")).toBeInTheDocument();
     expect(within(flowRows[1]).getByTestId("amount-empty-rel-jiaxiaohua-repayment")).toHaveTextContent("-");
     expect(within(flowRows[2]).getByTestId("amount-empty-rel-jiaxiaohua-borrow")).toHaveTextContent("-");
-    expect(within(flowRows[2]).getByText("300,000.00")).toBeInTheDocument();
-    expect(within(table).getByText("200,000.00")).toBeInTheDocument();
-    expect(within(table).getByText("100,000.00")).toBeInTheDocument();
-    expect(within(table).getAllByText("300,000.00")).toHaveLength(3);
+    expect(within(flowRows[2]).getByText("300000.00")).toBeInTheDocument();
+    expect(within(table).getByText("200000.00")).toBeInTheDocument();
+    expect(within(table).getByText("100000.00")).toBeInTheDocument();
+    expect(within(table).getAllByText("300000.00")).toHaveLength(3);
     expect(within(table).getByText("2026-02-04 13:20:48")).toBeInTheDocument();
     expect(within(table).getByText("2026-02-04 17:07:45")).toBeInTheDocument();
     expect(within(table).getByText("2026-03-04 15:24:58")).toBeInTheDocument();
@@ -1499,8 +1499,8 @@ describe("Turnover ledger page", () => {
     expect(within(drawer).getByText("bank-jia-income-200000")).toBeInTheDocument();
     expect(within(drawer).getByText("bank-jia-income-100000")).toBeInTheDocument();
     expect(within(drawer).getByText("bank-jia-expense-300000")).toBeInTheDocument();
-    expect(within(drawer).getByText("收入合计").nextElementSibling).toHaveTextContent("300,000.00");
-    expect(within(drawer).getByText("支出合计").nextElementSibling).toHaveTextContent("300,000.00");
+    expect(within(drawer).getByText("收入合计").nextElementSibling).toHaveTextContent("300000.00");
+    expect(within(drawer).getByText("支出合计").nextElementSibling).toHaveTextContent("300000.00");
     expect(within(drawer).getByTestId("turnover-closure-delta")).toHaveTextContent("0.00");
     await user.click(within(drawer).getByRole("button", { name: "确定" }));
 
@@ -1589,8 +1589,8 @@ describe("Turnover ledger page", () => {
     const drawer = await screen.findByRole("dialog", { name: "确认外部往来闭环" });
     expect(within(drawer).getByText("支出")).toBeInTheDocument();
     expect(within(drawer).getByText("收入")).toBeInTheDocument();
-    expect(within(drawer).getByText("收入合计").nextElementSibling).toHaveTextContent("40,000.00");
-    expect(within(drawer).getByText("支出合计").nextElementSibling).toHaveTextContent("40,000.00");
+    expect(within(drawer).getByText("收入合计").nextElementSibling).toHaveTextContent("40000.00");
+    expect(within(drawer).getByText("支出合计").nextElementSibling).toHaveTextContent("40000.00");
     expect(within(drawer).getByTestId("turnover-closure-delta")).toHaveTextContent("0.00");
     await user.click(within(drawer).getByRole("button", { name: "确定" }));
 
@@ -1628,7 +1628,7 @@ describe("Turnover ledger page", () => {
     await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-jia-expense-300000" }));
     await user.click(within(page).getByRole("button", { name: "确认闭环" }));
     const drawer = await screen.findByRole("dialog", { name: "确认外部往来闭环" });
-    expect(within(drawer).getByTestId("turnover-closure-delta")).toHaveTextContent("100,000.00");
+    expect(within(drawer).getByTestId("turnover-closure-delta")).toHaveTextContent("100000.00");
     expect(within(drawer).getByRole("button", { name: "确定" })).toBeDisabled();
   });
 
@@ -1748,7 +1748,7 @@ describe("Turnover ledger page", () => {
     expect(within(drawer).getAllByText("bank-jia-income-200000").length).toBeGreaterThan(0);
     expect(within(drawer).getAllByText("建行 8106").length).toBeGreaterThan(0);
     expect(within(drawer).getAllByText("收").length).toBeGreaterThan(0);
-    expect(within(drawer).getAllByText("200,000.00").length).toBeGreaterThan(0);
+    expect(within(drawer).getAllByText("200000.00").length).toBeGreaterThan(0);
     expect(within(drawer).getByRole("button", { name: "确认归并" })).toBeDisabled();
     expect(within(drawer).getByRole("button", { name: "撤销归并" })).toBeEnabled();
 

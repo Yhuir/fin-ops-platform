@@ -1523,4 +1523,4 @@ def _decimal(value: Any) -> Decimal | None:
 
 def _money(value: Any) -> str:
     amount = _decimal(value) or ZERO
-    return f"{amount.quantize(MONEY_QUANTUM):,.2f}"
+    return f"{amount.quantize(MONEY_QUANTUM):.2f}"

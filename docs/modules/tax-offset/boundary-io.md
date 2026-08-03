@@ -28,7 +28,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | rows | 页面两张发票表与认证 drawer | 输出/进项/认证匹配/范围外 rows 使用同一 snapshot |
-| summary/statistics | 页面卡片与统计 popover | 与 rows 同一 snapshot；金额由 Decimal 业务策略计算 |
+| summary/statistics | 页面卡片与统计 popover | 与 rows 同一 snapshot；金额由 Decimal 业务策略计算并以无千分位两位小数输出 |
 | `canonical_snapshot_version` | 前端计划保存 CAS | 对发票与认证页面事实生成稳定 SHA-256 token，不含 read-model 版本语义 |
 | 计划保存结果 | 前端 | `status`、`plan`、`affected_scope_keys`；不含 read-model targets |
 | 认证导入结果 | 前端/job | batch/job 与 `affected_scope_keys`；不含 tax operation barrier |
@@ -44,7 +44,7 @@
 
 - PostgreSQL 页面 repository 固定三次 query，无逐行/逐组 N+1。
 - 三次 query 必须位于同一 read-only repeatable-read transaction。
-- 当前页面合同是单月完整工作集，搜索、日期排序和对方筛选在已有表格组件中保持原行为；当前没有独立 detail/export endpoint 或分页 UI，不新增推测性合同。若未来新增分页，必须在 SQL 层分页并同步 summary/facets snapshot 语义。
+- 当前页面合同是单月完整工作集，搜索、日期排序和对方筛选在已有表格组件中保持原行为；纯金额搜索按无千分位文本匹配。当前没有独立 detail/export endpoint 或分页 UI，不新增推测性合同。若未来新增分页，必须在 SQL 层分页并同步 summary/facets snapshot 语义。
 - 不新增 cache、worker、queue、materialized view 或索引 migration。
 
 ## 文件范围
