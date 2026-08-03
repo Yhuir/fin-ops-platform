@@ -1066,13 +1066,17 @@ publish_frontend() {
 }
 
 restart_services() {
+  local worker_services="${1:-}"
+  if [[ -z "$worker_services" ]]; then
+    worker_services="$(active_worker_services)"
+  fi
   systemctl daemon-reload
   systemctl restart fin-ops.service
   local svc
   while IFS= read -r svc; do
     [[ -n "$svc" ]] || continue
     systemctl restart "$svc"
-  done < <(active_worker_services)
+  done <<<"$worker_services"
   if systemctl is-active --quiet fin-ops-rabbitmq-dispatcher.service; then
     systemctl restart fin-ops-rabbitmq-dispatcher.service
   fi
@@ -1993,11 +1997,12 @@ runtime_queue_resolve_covered() {
 activate_release() {
   local release="$1"
   local release_profile="${2:-runtime}"
-  local src
+  local src active_workers
   [[ "$release_profile" == "frontend" || "$release_profile" == "runtime" || "$release_profile" == "acl" ]] \
     || die "unsupported activation profile: $release_profile"
   src="$(release_src "$release")"
   assert_runtime_env_contract
+  active_workers="$(active_worker_services)"
   systemctl stop fin-ops.service
   stop_runtime_worker_services_for_activation
   if [[ "$release_profile" == "frontend" ]]; then
@@ -2005,7 +2010,7 @@ activate_release() {
     write_worker_dropin "$src"
     write_dispatcher_dropin "$src"
     publish_frontend "$src"
-    restart_services
+    restart_services "$active_workers"
     wait_required_workers_ready
     status
     return 0

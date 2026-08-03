@@ -206,6 +206,19 @@ class DeployRuntimeExampleTests(unittest.TestCase):
             activate_case.index('run_schema_migrations "$src"'),
         )
 
+    def test_frontend_activation_restarts_the_workers_captured_before_stop(self) -> None:
+        deploy_control = DEPLOY_CONTROL.read_text(encoding="utf-8")
+        activate_case = deploy_control.split("activate_release() {", 1)[1].split("\n}", 1)[0]
+        restart_case = deploy_control.split("restart_services() {", 1)[1].split("\n}", 1)[0]
+
+        self.assertLess(
+            activate_case.index('active_workers="$(active_worker_services)"'),
+            activate_case.index("stop_runtime_worker_services_for_activation"),
+        )
+        self.assertIn('restart_services "$active_workers"', activate_case)
+        self.assertIn('worker_services="$(active_worker_services)"', restart_case)
+        self.assertIn('done <<<"$worker_services"', restart_case)
+
     def test_deploy_control_exposes_guarded_exact_etc_recovery_commands(self) -> None:
         deploy_control = DEPLOY_CONTROL.read_text(encoding="utf-8")
 

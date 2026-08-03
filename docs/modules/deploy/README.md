@@ -69,7 +69,7 @@ bash scripts/verify.sh all
 
 - `release-gate-profile` 比较 exact candidate 与当前唯一 active release 的实际包内容，自动判定 `frontend`、`runtime`、`acl`；没有手工 profile 或 skip 参数，无法证明纯前端时 fail-safe 为 `runtime`。
 - 三类发布都要求 exact SHA/fingerprint、strict runtime env、required worker inventory、`YNSYLP005` admin session、原子激活和 release evidence；普通发布不读取或要求 `YNSYLP006`。
-- `frontend` 只执行 pre/T+0 的 ready、005 session、公开 shell/asset、发布目录哈希和 active release 检查，不执行 RabbitMQ topology apply、全页面 canonical audit、read-model smoke 或 T+60/T+300 等待。
+- `frontend` 只执行 pre/T+0 的 ready、005 session、公开 shell/asset、发布目录哈希和 active release 检查，不执行 RabbitMQ topology apply、全页面 canonical audit、read-model smoke 或 T+60/T+300 等待。切换前固定捕获已通过 preflight 的 active worker 集合，切换与回退都必须重启同一集合，不得在 stop 之后重新从 active 状态推导。
 - `runtime` 保留 production-equivalent pre/T+0/T+60/T+300；`acl` 在此基础上自动要求 candidate-bound 005/006 双身份 preflight，失败后保持 maintenance 并 forward repair。
 - 三项 retired admission env 和 legacy admin env 已完成一次性清理；稳态发布只读断言它们缺席。历史 OA non-dedicated binding cleanup/rollback SQL 与激活代码已经删除，migration 0132/0133 作为不可变历史保留。
 - release 上传不得更新 root helper。deploy-control 变更仍使用 candidate hash-pinned、同文件系统 temp + atomic `mv` bootstrap；禁止 `self-update`。
