@@ -431,6 +431,54 @@ describe("workbench api bank amount mapping", () => {
     expect(result).not.toHaveProperty("operationBarrierTargets");
   });
 
+  test("maps snake-case unpaired groups from a two-pane confirm projection", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          action: "confirm_link",
+          month: "all",
+          affected_row_ids: ["bank-only", "invoice-only"],
+          affected_scope_keys: ["2026-06", "2026-07"],
+          operation_projection: {
+            after: {
+              paired_groups: [],
+              unpaired_groups: [
+                {
+                  group_id: "case:CASE-TWO-PANE",
+                  group_type: "relation",
+                  relation_mode: "manual_confirmed",
+                  bank_rows: [{ id: "bank-only", type: "bank" }],
+                  invoice_rows: [{ id: "invoice-only", type: "invoice" }],
+                  oa_rows: [],
+                },
+              ],
+            },
+          },
+          message: "已确认 2 条记录关联。",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const result = await confirmWorkbenchLink({
+      month: "all",
+      rowIds: ["bank-only", "invoice-only"],
+      expectedReadModelVersion: "generation-set-1",
+      caseId: "CASE-TWO-PANE",
+    });
+
+    expect(result.operationProjection?.after.pairedGroups).toEqual([]);
+    expect(result.operationProjection?.after.unpairedGroups).toHaveLength(1);
+    expect(result.operationProjection?.after.unpairedGroups[0]).toMatchObject({
+      id: "case:CASE-TWO-PANE",
+      rawGroupType: "relation",
+      relationMode: "manual_confirmed",
+    });
+    expect(result.operationProjection?.after.unpairedGroups[0].rows.bank.map((row) => row.id)).toEqual(["bank-only"]);
+    expect(result.operationProjection?.after.unpairedGroups[0].rows.invoice.map((row) => row.id)).toEqual(["invoice-only"]);
+  });
+
   test("coalesces concurrent identical initial workbench loads into one versioned request", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);

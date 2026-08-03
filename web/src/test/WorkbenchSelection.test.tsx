@@ -1361,6 +1361,69 @@ describe("Workbench row selection and detail drawer", () => {
     )).toBeInTheDocument();
   });
 
+  test("two-pane confirm uses the authoritative unpaired projection without waiting for all-scope refresh", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({
+      actionDelayMs: 20,
+      transformWorkbenchConfirmActionResponse: (body) => {
+        const projection = body.operation_projection as {
+          after: { paired_groups: unknown[] };
+        };
+        return {
+          ...body,
+          operation_projection: {
+            after: {
+              paired_groups: [],
+              unpaired_groups: projection.after.paired_groups,
+            },
+          },
+        };
+      },
+    });
+    const defaultFetch = fetchMock.getMockImplementation();
+    let confirmCommitted = false;
+    let refreshStatusCalls = 0;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (!defaultFetch) {
+        throw new Error("Mock API fetch is not installed.");
+      }
+      const path = fetchPath(input);
+      if (path === "/api/workbench/actions/confirm-link") {
+        const response = await defaultFetch(input, init);
+        confirmCommitted = true;
+        return response;
+      }
+      if (confirmCommitted && path.startsWith("/api/workbench/refresh-status")) {
+        refreshStatusCalls += 1;
+        return jsonResponse({ scope_key: "all", read_model_status: "refreshing" });
+      }
+      if (confirmCommitted && isWorkbenchInitialRequest(input)) {
+        const response = await defaultFetch(input, init) as Response;
+        const payload = await response.json() as Record<string, unknown>;
+        return jsonResponse({
+          ...payload,
+          read_model_status: "refreshing",
+          paired: { ...(payload.paired as Record<string, unknown>), read_model_status: "refreshing" },
+          unpaired: { ...(payload.unpaired as Record<string, unknown>), read_model_status: "refreshing" },
+        });
+      }
+      return defaultFetch(input, init);
+    });
+    renderWorkbenchPage();
+
+    await user.click(await screen.findByRole("row", { name: /2026-03-28.*智能工厂设备商/ }));
+    await user.click(screen.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ }));
+    await user.click(screen.getByRole("button", { name: "确认关联" }));
+    const preview = await screen.findByRole("dialog", { name: /^(确认|撤回)关联$/ });
+    await user.click(within(preview).getByRole("button", { name: "确认关联" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: /^(确认|撤回)关联$/ })).not.toBeInTheDocument();
+    }, { timeout: 2_000 });
+    expect(refreshStatusCalls).toBe(0);
+    expect(screen.queryByRole("dialog", { name: "操作失败" })).not.toBeInTheDocument();
+  });
+
   test("disables relation writes while the workbench generation is refreshing", async () => {
     const user = userEvent.setup();
     installMockApiFetch({

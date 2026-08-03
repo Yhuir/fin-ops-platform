@@ -2017,7 +2017,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(result["read_model_status"], "stale")
         self.assertEqual(result["refresh_scope_keys"], ["2026-03"])
 
-    def test_workbench_all_freshness_keeps_non_sql_fallback_contract(self) -> None:
+    def test_workbench_all_freshness_fails_closed_without_bulk_contract(self) -> None:
         calls: list[tuple[object, str | None]] = []
 
         def stale_reasons(
@@ -2049,10 +2049,42 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             scope_key="all",
         )
 
-        self.assertEqual(calls, [({"builder": "old"}, "all")])
-        self.assertEqual(result["read_model_status"], "stale")
-        self.assertEqual(result["read_model_stale_reasons"], ["builder_mismatch"])
+        self.assertEqual(calls, [])
+        self.assertEqual(result["read_model_status"], "unavailable")
+        self.assertEqual(
+            result["read_model_stale_reasons"],
+            ["bulk_freshness_contract_unavailable"],
+        )
         self.assertEqual(result["refresh_scope_keys"], [])
+
+    def test_production_repository_loads_active_workbench_versions_by_exact_scope(self) -> None:
+        class ActiveVersionsConnection:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, tuple]] = []
+
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
+                self.calls.append((" ".join(sql.lower().split()), params))
+                return [
+                    {"scope_key": "2026-06", "source_versions": {"source_version": 6}},
+                    {"scope_key": "2026-07", "source_versions": {"source_version": 7}},
+                ]
+
+        connection = ActiveVersionsConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        result = repository.active_workbench_source_versions_by_scope(
+            scope_keys=["2026-06", "2026-07", "2026-06"],
+        )
+
+        self.assertEqual(
+            result,
+            {
+                "2026-06": {"source_version": 6},
+                "2026-07": {"source_version": 7},
+            },
+        )
+        self.assertEqual(connection.calls[0][1], (["2026-06", "2026-07"],))
+        self.assertIn("scope_key = any(%s)", connection.calls[0][0])
 
     def test_workbench_v15_rejects_v14_month_all_and_cache_versions(self) -> None:
         app = object.__new__(Application)

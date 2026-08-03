@@ -35,8 +35,13 @@ class WorkbenchQueryFreshnessService:
 
         normalized_scope_key = str(scope_key or "").strip() or "all"
         refresh_scope_keys: list[str] = []
-        if normalized_scope_key == "all" and self._supports_bulk_proof():
-            reasons, refresh_scope_keys = self._all_scope_stale_reasons()
+        bulk_contract_unavailable = False
+        if normalized_scope_key == "all":
+            if self._supports_bulk_proof():
+                reasons, refresh_scope_keys = self._all_scope_stale_reasons()
+            else:
+                reasons = ["bulk_freshness_contract_unavailable"]
+                bulk_contract_unavailable = True
         else:
             reasons = self._single_scope_stale_reasons(
                 self._status_source_versions(status_payload),
@@ -57,7 +62,9 @@ class WorkbenchQueryFreshnessService:
             dict.fromkeys([*existing_reasons, *reasons])
         )
         result["refresh_scope_keys"] = list(dict.fromkeys(refresh_scope_keys))
-        if str(result.get("read_model_status") or "fresh") in {"fresh", "refreshing"}:
+        if bulk_contract_unavailable:
+            result["read_model_status"] = "unavailable"
+        elif str(result.get("read_model_status") or "fresh") in {"fresh", "refreshing"}:
             result["read_model_status"] = "stale"
         return result
 

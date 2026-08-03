@@ -2897,10 +2897,7 @@ function operationProjectionAffectedRowIds(result: WorkbenchActionResult) {
 }
 
 function hasOperationProjection(projection: WorkbenchOperationProjection | undefined) {
-  return Boolean(projection && (
-    projection.after.pairedGroups.length > 0
-    || projection.after.unpairedGroups.length > 0
-  ));
+  return Boolean(projection);
 }
 
 const LEGACY_HANDLED_EXCEPTION_CODES = new Set([

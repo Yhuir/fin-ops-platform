@@ -1465,3 +1465,10 @@
 - 生产 `month=all` 搜索已命中的 group 在最终分页查询报 PostgreSQL `column reference "zone" is ambiguous`；原因是 all-scope 的成员筛选 join 与 group 表同时暴露 `zone`，而共享分页投影仍使用裸列。
 - 修复只在既有 `PostgresReadModelRepository.get_workbench_groups_page(...)` 中把 group 投影字段限定为 `g.*`。搜索、来源类型、列筛选和时间筛选共用该根边界，因此无需为各入口增加分支或 fallback。
 - 不改 SQL 次数、索引、schema、API DTO、read model、worker、缓存、权限或前端；旧的裸列投影断言同步移除，避免旧 SQL 再次污染链路。
+
+## 2026-08-03 - 两栏确认投影与 all-scope 精确恢复闭环
+
+- 真实根因一：确认关联后端已经返回 `operation_projection.after.unpaired_groups`，但前端 mapper 只读取 camelCase `unpairedGroups`；流水 + 发票、无 OA 的两栏关系因此被映射为空投影，页面错误进入 10 秒 generation 等待并把“关系已写入、页面仍刷新”展示成需处理状态。
+- 真实根因二：`WorkbenchQueryFreshnessService` 的 all-scope 精确 proof 只在 repository 暴露批量 active-generation 版本方法时启用；测试 fake 有该方法，生产 `PostgresReadModelRepository` 却缺失，导致普通 `month=all` 读取退回单一 `all` proof。`WorkbenchQueryFacade` 又在没有 exact target 时无条件 enqueue `all`，最终把一次确认后的页面读取放大成全历史月份 fan-out。
+- 修复复用既有 operation projection 与 bulk freshness 边界：前端同时识别 snake/camel 两种正式 DTO 字段，字段存在即把空数组也视为权威 after-state；生产 repository 用一次 `scope_key = any(...)` 读取 exact active month source vectors。all-scope 批量合同缺失时 fail closed，不再调用旧 single-scope `all` fallback；普通 stale 且已有 active generation 时不 enqueue，只有明确 `active_generation_missing` 的冷启动仍保留既有 `all` 恢复入口。
+- 不新增 API、表、索引、migration、worker、queue、缓存、轮询或兼容链；确认 canonical command、CAS、幂等、审计、withdraw 必须等待真实 fresh 的合同均保持不变。

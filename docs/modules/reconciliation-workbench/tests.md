@@ -268,3 +268,9 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_w
 - 同文件保护健康 active generation 在相同 `source_versions` 下不重复发布；active consistency 失败时允许重建；任何可见非 summary row 缺少 `workbench_rows` 物化详情都必须在激活前失败，并进入 active consistency 报告。
 - `web/src/test/WorkbenchSelection.test.tsx` 保护 OA、流水、发票共享的详情入口：遇到 generation version conflict 或 row miss 时，只等待一次 combined initial 刷新并重试一次详情请求；成功后安装新 generation 详情，失败则保留明确错误，不循环请求。
 - 未运行无关完整 CI 或浏览器套件。未执行真实生产 confirm/withdraw mutation：现有 scenario 不是 test-owned 且缺完整恢复检查点，不能为了测速修改真实财务关系。
+
+## 2026-08-03 - 两栏确认与 all-scope fan-out 回归
+
+- `web/src/test/WorkbenchApi.test.ts` 保护后端 snake-case `unpaired_groups` 能映射为正式两栏 relation projection；`web/src/test/WorkbenchSelection.test.tsx` 让提交后的 generation 保持 refreshing，证明页面仍直接应用权威投影、关闭确认抽屉且不轮询 all-scope refresh status。
+- `tests/test_workbench_sql_runtime.py` 直接实例化生产 `PostgresReadModelRepository`，保护 exact scope 去重、一次批量 active source-version 查询，以及 bulk 合同缺失时 fail closed、禁止旧 single-scope `all` proof。
+- `tests/test_workbench_query_facade.py` 保护普通 all-scope stale 且已有 active generation 时返回零恢复 scope；只有明确缺少 active generation 的冷启动状态才允许保留 `all` fan-out。

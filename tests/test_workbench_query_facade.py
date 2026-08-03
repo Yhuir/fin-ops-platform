@@ -290,6 +290,32 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(result.payload["paired"]["groups"], [{"group_id": "stable-active-refresh"}])
         self.assertEqual(queue.refreshes, [])
 
+    def test_all_scope_stale_status_with_active_generation_does_not_fan_out(self) -> None:
+        self.assertEqual(
+            WorkbenchQueryFacade._refresh_scope_keys(
+                {
+                    "read_model_status": "stale",
+                    "active_generation_id": "generation-set-stable",
+                    "read_model_stale_reasons": ["bulk_freshness_contract_unavailable"],
+                },
+                requested_scope_key="all",
+            ),
+            [],
+        )
+
+    def test_all_scope_missing_active_generation_keeps_cold_start_recovery(self) -> None:
+        self.assertEqual(
+            WorkbenchQueryFacade._refresh_scope_keys(
+                {
+                    "read_model_status": "unavailable",
+                    "active_generation_id": None,
+                    "read_model_stale_reasons": ["active_generation_missing"],
+                },
+                requested_scope_key="all",
+            ),
+            ["all"],
+        )
+
     def test_month_initial_does_not_enqueue_unrelated_all_statistics_scopes(self) -> None:
         class Repository:
             @staticmethod

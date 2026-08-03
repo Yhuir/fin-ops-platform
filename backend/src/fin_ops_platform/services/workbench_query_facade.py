@@ -1061,7 +1061,17 @@ class WorkbenchQueryFacade:
             return exact_scope_keys
         if refresh_status_payload.get("active_refresh_in_progress") is True:
             return []
-        return ["all"]
+        stale_reasons = {
+            str(reason).strip()
+            for reason in list(refresh_status_payload.get("read_model_stale_reasons") or [])
+            if str(reason).strip()
+        }
+        if (
+            not str(refresh_status_payload.get("active_generation_id") or "").strip()
+            and "active_generation_missing" in stale_reasons
+        ):
+            return ["all"]
+        return []
 
     def _non_fresh_initial_page_result(
         self,

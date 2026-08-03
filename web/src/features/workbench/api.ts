@@ -515,6 +515,7 @@ type ApiWorkbenchOperationProjection = {
     pairedGroups?: ApiWorkbenchGroup[];
     paired_groups?: ApiWorkbenchGroup[];
     unpairedGroups?: ApiWorkbenchGroup[];
+    unpaired_groups?: ApiWorkbenchGroup[];
   };
 };
 
@@ -3051,12 +3052,19 @@ function mapWorkbenchOperationProjection(value: unknown): WorkbenchOperationProj
     ? after.pairedGroups
     : Array.isArray(after.paired_groups)
       ? after.paired_groups
-      : [];
-  const unpairedGroups = Array.isArray(after.unpairedGroups) ? after.unpairedGroups : [];
+      : undefined;
+  const unpairedGroups = Array.isArray(after.unpairedGroups)
+    ? after.unpairedGroups
+    : Array.isArray(after.unpaired_groups)
+      ? after.unpaired_groups
+      : undefined;
+  if (!pairedGroups && !unpairedGroups) {
+    return undefined;
+  }
   return {
     after: {
-      pairedGroups: pairedGroups.map((group) => mapGroup(group, "paired")),
-      unpairedGroups: unpairedGroups.map((group) => mapGroup(group, "unpaired")),
+      pairedGroups: (pairedGroups ?? []).map((group) => mapGroup(group, "paired")),
+      unpairedGroups: (unpairedGroups ?? []).map((group) => mapGroup(group, "unpaired")),
     },
   };
 }

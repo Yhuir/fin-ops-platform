@@ -2511,6 +2511,39 @@ class PostgresReadModelRepository:
         source_versions = row.get("source_versions") if isinstance(row, dict) else {}
         return dict(source_versions) if isinstance(source_versions, dict) else {}
 
+    def active_workbench_source_versions_by_scope(
+        self,
+        *,
+        scope_keys: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        normalized_scope_keys = _dedupe_preserve_order(
+            text(scope_key) for scope_key in list(scope_keys or [])
+        )
+        if any(not MONTH_SCOPE_RE.fullmatch(scope_key) for scope_key in normalized_scope_keys):
+            raise ValueError("workbench active source-version scope_keys must be month shards YYYY-MM.")
+        if not normalized_scope_keys:
+            return {}
+        rows = self._connection.fetch_all(
+            """
+            select distinct on (scope_key) scope_key, source_versions
+            from read_model.workbench_generations
+            where tenant_id = 'default'
+              and status = 'active'
+              and scope_key = any(%s)
+            order by scope_key, activated_at desc nulls last,
+                     completed_at desc nulls last, updated_at desc
+            """,
+            (normalized_scope_keys,),
+        )
+        return {
+            scope_key: dict(source_versions)
+            for row in rows
+            if isinstance(row, dict)
+            for scope_key in [text(row.get("scope_key"))]
+            for source_versions in [row.get("source_versions")]
+            if scope_key and isinstance(source_versions, dict)
+        }
+
     @staticmethod
     def _workbench_generation_source_versions(
         executor: Any,
