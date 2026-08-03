@@ -23,7 +23,7 @@
   - 暂存批次选择“我已在 OA 系统上完成 OA 草稿的提交”进入已提交；选择“我已在 OA 系统上删除该 OA 草稿”进入 `not_submitted`，清空 submission/draft 占用但保留批次、发票成员、源文件和核对数据。
   - 创建 OA 草稿后只能由 `manual-oa-status` 人工确认 `submitted` 或 `not_submitted`。
   - OA 草稿创建成功后，或 business batch 已进入 `oa_submitted` / `manually_marked_submitted` / `closed` 后，允许只读下载当前批次关联的 ETC 发票合并 PDF；历史已提交批次不要求补造 OA 草稿 ID。暂存区与已提交“发票明细”标题栏复用同一 API，下载不改变批次/折叠状态。`invoice_ids` 决定成员，稳定排序后每张发票必须恰好贡献一页，任一来源异常时整包失败。
-  - 历史已提交批次若 PDF/XML 对象缺失，管理员可用原始 ZIP、当前版本和原因执行受限附件恢复；只有与既有 hash 完全一致的缺失附件可写回。恢复不改变批次状态、成员、OA 或配对关系，重复执行必须幂等。
+  - 历史已提交批次若 PDF/XML 对象缺失，管理员可用原始 ZIP、当前版本和原因执行受限附件恢复。已有 hash 时只能写回完全一致内容；仅附件与导入来源全空、来源为 `canonical_invoice:*` 的历史后补成员，可在强身份、单页 PDF 发票号和 business/submission 成员一致校验后建立附件事实，并从原始 XML 纠正通行日期、车牌、车型和提交批次汇总。恢复不改变批次状态、成员、OA 或配对关系，失败必须回滚事实与新对象，重复执行必须幂等。
   - `submitted` 成功后，关联台 open 区生成一条 `source_kind=etc_invoice_summary` 折叠汇总发票行，金额取业务批次上报金额，等待未来 OA 和银行流水进入后普通配对。
   - 任意业务阶段允许删除本地批次记录；删除必须写入审计并校验 `expectedVersion` 防并发覆盖，但不得因 `importing`、`oa_draft_created`、`submitted_confirmed`、`closed` 等流程状态阻塞。
   - 删除未提交批次会清理本地导入批次、ETC metadata/附件关系和绑定任务；删除已提交批次会本地 reset 业务批次，释放 ETC 发票 `current_batch_id`，让 `etc_invoice_summary` 消失；只有原本已存在于统一发票池的发票才可能回到普通发票视图。
@@ -67,6 +67,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-08-03 | 已提交批次附件恢复支持对严格限定的历史 `canonical_invoice` 后补成员建立可信 PDF/XML 事实并纠正 ETC 元数据；保留已有 hash 的严格校验 | ETC 附件恢复 service、单页 PDF 校验复用、提交批次汇总和审计；不改成员/OA/relation/状态/read model/worker | `tests/test_etc_invoice_pdf_bundle_service.py` 68 张/4 张 bootstrap、身份拒绝、回滚、幂等与 68 页下载 |
 | 2026-08-01 | ETC 页面改为左侧批次 rail + 右侧连续工作面，删除车牌/关键词页面查询链路，并新增基于既有 batch/task 状态的四阶段只读进度 | 仅 ETC 前端页面结构、展示投影与页面请求参数；后端 API/状态机/read model/worker/权限/跨页 I/O 不变 | `web/src/test/EtcTicketManagementPage.test.tsx`；`web/src/test/EtcApi.test.ts`；`web/e2e/etc-tickets-flow.spec.ts`；production build |
 | 2026-07-19 | 固定 OA 草稿金额来自对账任务，业务批次发票汇总恢复为实际发票事实；结果弹窗收敛为两个明确决定并删除旧 batch DTO/伪金额映射 | ETC 页面与 business batch payload；无共享 read model/worker/跨页面 I/O 变化 | `tests.test_etc_backend.EtcApiTests.test_reconciliation_backed_oa_draft_uploads_supplements_and_uses_oa_total`；`tests.test_audit_etc_tickets_read_model_tool`；`web/src/test/EtcTicketManagementPage.test.tsx`；`web/e2e/etc-tickets-flow.spec.ts` |
 | 2026-07-14 | OA 草稿成功后新增批次 ETC 发票 PDF 合并下载；成员按 business batch 事实、单票单页、全有或全无，并写下载审计 | ETC 页面审批确认区、business batch read API、对象存储读取端口、PyMuPDF 合并边界 | `tests/test_etc_invoice_pdf_bundle_service.py`；`web/src/test/EtcApi.test.ts`；`web/src/test/EtcTicketManagementPage.test.tsx`；`web/e2e/etc-tickets-flow.spec.ts` |

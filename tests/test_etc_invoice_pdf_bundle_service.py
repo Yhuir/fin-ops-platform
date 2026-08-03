@@ -19,7 +19,12 @@ from fin_ops_platform.services.etc_invoice_pdf_bundle_service import (
     EtcInvoicePdfBundleError,
     EtcInvoicePdfBundleService,
 )
-from fin_ops_platform.services.etc_service import EtcBusinessBatchStatus, EtcInvoice
+from fin_ops_platform.services.etc_service import (
+    EtcBatchStatus,
+    EtcBusinessBatchStatus,
+    EtcInvoice,
+    EtcInvoiceStatus,
+)
 from fin_ops_platform.services.etc_service import (
     EtcBusinessBatchInvalidTransitionError,
     UploadedEtcZipFile,
@@ -68,6 +73,118 @@ def _repair_zip(invoice_number: str, pdf_content: bytes) -> bytes:
         archive.writestr(f"xml/{invoice_number}.xml", xml_content)
         archive.writestr(f"pdf/{invoice_number}.pdf", pdf_content)
     return buffer.getvalue()
+
+
+def _trusted_source_xml(spec: dict[str, str]) -> bytes:
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<Invoice>
+  <InvoiceNumber>{spec['invoice_number']}</InvoiceNumber>
+  <IssueDate>{spec['issue_date']}</IssueDate>
+  <PassageStartDate>{spec['passage_date']}</PassageStartDate>
+  <PassageEndDate>{spec['passage_date']}</PassageEndDate>
+  <PlateNumber>{spec['source_plate']}</PlateNumber>
+  <VehicleType>一型客车</VehicleType>
+  <AmountWithoutTax>{spec['amount_without_tax']}</AmountWithoutTax>
+  <TaxAmount>{spec['tax_amount']}</TaxAmount>
+  <TotalAmount>{spec['total_amount']}</TotalAmount>
+  <TaxRate>3%</TaxRate>
+  <SellerName>{spec['seller_name']}</SellerName>
+  <SellerTaxNo>{spec['seller_tax_no']}</SellerTaxNo>
+  <BuyerName>云南溯源科技有限公司</BuyerName>
+  <BuyerTaxNo>915300007194052520</BuyerTaxNo>
+</Invoice>
+""".encode()
+
+
+def _nested_trusted_source_zip(specs: list[dict[str, str]]) -> tuple[bytes, dict[str, tuple[bytes, bytes]]]:
+    attachments: dict[str, tuple[bytes, bytes]] = {}
+    inner_buffer = BytesIO()
+    with ZipFile(inner_buffer, "w", ZIP_DEFLATED) as inner:
+        for spec in specs:
+            invoice_number = spec["invoice_number"]
+            xml_content = _trusted_source_xml(spec)
+            pdf_content = _pdf_bytes(invoice_number)
+            inner.writestr(f"xml/{invoice_number}.xml", xml_content)
+            inner.writestr(f"pdf/{invoice_number}.pdf", pdf_content)
+            attachments[invoice_number] = (xml_content, pdf_content)
+    outer_buffer = BytesIO()
+    with ZipFile(outer_buffer, "w", ZIP_DEFLATED) as outer:
+        outer.writestr("trusted-source.zip", inner_buffer.getvalue())
+    return outer_buffer.getvalue(), attachments
+
+
+def _bootstrap_invoice(spec: dict[str, str], *, stored_plate: str) -> EtcInvoice:
+    return EtcInvoice(
+        id=f"etc-invoice-{spec['invoice_number']}",
+        invoice_number=spec["invoice_number"],
+        issue_date=spec["issue_date"],
+        passage_start_date=None,
+        passage_end_date=None,
+        plate_number=stored_plate,
+        vehicle_type=None,
+        seller_name=spec["seller_name"],
+        seller_tax_no=spec["seller_tax_no"],
+        buyer_name="云南溯源科技有限公司",
+        buyer_tax_no="915300007194052520",
+        amount_without_tax=Decimal(spec["amount_without_tax"]),
+        tax_amount=Decimal(spec["tax_amount"]),
+        total_amount=Decimal(spec["total_amount"]),
+        tax_rate="3%",
+        zip_source_name=f"canonical_invoice:{spec['invoice_number']}",
+        xml_file_path=None,
+        xml_file_hash=None,
+        pdf_file_path=None,
+        pdf_file_hash=None,
+    )
+
+
+def _trusted_specs() -> list[dict[str, str]]:
+    return [
+        {
+            "invoice_number": "26537911970600073086",
+            "issue_date": "2026-06-24",
+            "passage_date": "2026-06-24",
+            "source_plate": "云A546XL",
+            "seller_name": "云南昆玉高速公路开发有限公司",
+            "seller_tax_no": "91530000291993988P",
+            "amount_without_tax": "22.82",
+            "tax_amount": "0.68",
+            "total_amount": "23.50",
+        },
+        {
+            "invoice_number": "26537911970600093773",
+            "issue_date": "2026-06-28",
+            "passage_date": "2026-06-26",
+            "source_plate": "云A546XL",
+            "seller_name": "云南昆玉高速公路开发有限公司",
+            "seller_tax_no": "91530000291993988P",
+            "amount_without_tax": "22.82",
+            "tax_amount": "0.68",
+            "total_amount": "23.50",
+        },
+        {
+            "invoice_number": "26537911620600159674",
+            "issue_date": "2026-06-28",
+            "passage_date": "2026-06-26",
+            "source_plate": "云A546XL",
+            "seller_name": "昆明元朔建设发展有限公司",
+            "seller_tax_no": "915301005798417560",
+            "amount_without_tax": "3.15",
+            "tax_amount": "0.09",
+            "total_amount": "3.24",
+        },
+        {
+            "invoice_number": "26537911810600133419",
+            "issue_date": "2026-06-28",
+            "passage_date": "2026-06-26",
+            "source_plate": "云A546XL",
+            "seller_name": "昆明绕城高速公路开发有限公司",
+            "seller_tax_no": "91530100741459978R",
+            "amount_without_tax": "4.10",
+            "tax_amount": "0.12",
+            "total_amount": "4.22",
+        },
+    ]
 
 
 class EtcInvoicePdfBundleServiceTests(unittest.TestCase):
@@ -185,6 +302,254 @@ class EtcInvoicePdfBundleServiceTests(unittest.TestCase):
 
 
 class EtcInvoicePdfBundleApiTests(unittest.TestCase):
+    def test_admin_bootstraps_four_late_members_and_downloads_all_68_pages(self) -> None:
+        specs = _trusted_specs()
+        source_zip, attachments = _nested_trusted_source_zip(specs)
+        with TemporaryDirectory() as temp_dir:
+            app = build_local_state_application(data_dir=Path(temp_dir))
+            try:
+                configure_access_control(app, full_access=["NORMAL"])
+                app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
+                    user_id=f"{str(token).split('-')[0]}-id",
+                    username="YNSYLP005" if token == "admin-token" else "NORMAL",
+                    nickname="User",
+                    display_name="User",
+                    dept_id="D99",
+                    permissions=[],
+                )
+                batch = app._etc_service.create_business_batch(
+                    task_id="ETC-TASK-REPAIR-68",
+                    title="5、6月高速费",
+                )
+                invoices: list[EtcInvoice] = []
+                shared_xml_path = Path(temp_dir) / "complete-invoice.xml"
+                shared_xml_path.write_bytes(b"<Invoice />")
+                for index in range(64):
+                    invoice_number = f"COMPLETE-{index:03d}"
+                    pdf_content = _pdf_bytes(invoice_number)
+                    pdf_path = Path(temp_dir) / f"{invoice_number}.pdf"
+                    pdf_path.write_bytes(pdf_content)
+                    invoices.append(
+                        EtcInvoice(
+                            id=f"etc-invoice-{invoice_number}",
+                            invoice_number=invoice_number,
+                            issue_date="2026-05-01",
+                            passage_start_date="2026-05-01",
+                            passage_end_date="2026-05-01",
+                            plate_number="云ADA0381",
+                            vehicle_type="一型客车",
+                            seller_name="高速公路",
+                            seller_tax_no="TAX",
+                            buyer_name="云南溯源科技有限公司",
+                            buyer_tax_no="915300007194052520",
+                            amount_without_tax=Decimal("1.00"),
+                            tax_amount=Decimal("0.03"),
+                            total_amount=Decimal("1.03"),
+                            tax_rate="3%",
+                            zip_source_name="complete.zip",
+                            xml_file_path=str(shared_xml_path),
+                            xml_file_hash=hashlib.sha256(shared_xml_path.read_bytes()).hexdigest(),
+                            pdf_file_path=str(pdf_path),
+                            pdf_file_hash=hashlib.sha256(pdf_content).hexdigest(),
+                            status=EtcInvoiceStatus.SUBMITTED,
+                            business_batch_id=batch.business_batch_id,
+                            created_at=datetime.now(UTC),
+                            updated_at=datetime.now(UTC),
+                        )
+                    )
+                for index, spec in enumerate(specs):
+                    invoice = _bootstrap_invoice(
+                        spec,
+                        stored_plate="云ADA0381" if index < 2 else "云A546XL",
+                    )
+                    invoice.status = EtcInvoiceStatus.SUBMITTED
+                    invoice.business_batch_id = batch.business_batch_id
+                    invoices.append(invoice)
+                for invoice in invoices:
+                    app._etc_service._invoices[invoice.id] = invoice
+                    app._etc_service._invoice_numbers[invoice.invoice_number] = invoice.id
+
+                stored_batch = app._etc_service._business_batches[batch.business_batch_id]
+                stored_batch.invoice_ids = [invoice.id for invoice in invoices]
+                stored_batch.status = EtcBusinessBatchStatus.MANUALLY_MARKED_SUBMITTED.value
+                submission_batch = app._etc_service._create_batch(
+                    invoices,
+                    business_batch_id=batch.business_batch_id,
+                    persist=False,
+                )
+                submission_batch.status = EtcBatchStatus.SUBMITTED_CONFIRMED.value
+                stored_batch.submission_batch_id = submission_batch.id
+                app._etc_service._persist()
+                initial_version = stored_batch.version
+
+                body, content_type = self._multipart(
+                    "发票5、6月.zip",
+                    source_zip,
+                    expected_version=initial_version,
+                    reason="restore four trusted late-member attachments",
+                )
+                response = app.handle_request(
+                    "POST",
+                    f"/api/etc/business-batches/{batch.business_batch_id}/invoice-pdf/repair",
+                    body=body,
+                    headers={"Content-Type": content_type, "Authorization": "Bearer admin-token"},
+                )
+                payload = json.loads(response.body)
+                repaired_version = payload["data"]["version"]
+                download = app.handle_request(
+                    "GET",
+                    f"/api/etc/business-batches/{batch.business_batch_id}/invoice-pdf",
+                    headers={"Authorization": "Bearer admin-token"},
+                )
+                retry_body, retry_content_type = self._multipart(
+                    "发票5、6月.zip",
+                    source_zip,
+                    expected_version=repaired_version,
+                    reason="idempotent retry",
+                )
+                retry = app.handle_request(
+                    "POST",
+                    f"/api/etc/business-batches/{batch.business_batch_id}/invoice-pdf/repair",
+                    body=retry_body,
+                    headers={
+                        "Content-Type": retry_content_type,
+                        "Authorization": "Bearer admin-token",
+                    },
+                )
+
+                self.assertEqual(response.status_code, 200, response.body)
+                self.assertEqual(payload["data"]["pdfRepaired"], 4)
+                self.assertEqual(payload["data"]["xmlRepaired"], 4)
+                self.assertEqual(payload["data"]["sourceBootstrapped"], 4)
+                self.assertEqual(payload["data"]["metadataRepaired"], 4)
+                self.assertEqual(repaired_version, initial_version + 1)
+                for spec in specs:
+                    invoice = app._etc_service._invoices[f"etc-invoice-{spec['invoice_number']}"]
+                    xml_content, pdf_content = attachments[spec["invoice_number"]]
+                    self.assertTrue(app._etc_service._stored_invoice_file_exists(invoice.xml_file_path))
+                    self.assertTrue(app._etc_service._stored_invoice_file_exists(invoice.pdf_file_path))
+                    self.assertEqual(invoice.xml_file_hash, hashlib.sha256(xml_content).hexdigest())
+                    self.assertEqual(invoice.pdf_file_hash, hashlib.sha256(pdf_content).hexdigest())
+                    self.assertEqual(invoice.plate_number, "云A546XL")
+                    self.assertEqual(invoice.passage_start_date, spec["passage_date"])
+                    self.assertEqual(invoice.passage_end_date, spec["passage_date"])
+                    self.assertEqual(invoice.vehicle_type, "一型客车")
+                    self.assertEqual(invoice.zip_source_name, "发票5、6月.zip")
+                plate_summary = {
+                    str(item["plate_number"]): int(item["invoice_count"])
+                    for item in submission_batch.plate_summary
+                }
+                self.assertEqual(plate_summary["云A546XL"], 4)
+                self.assertEqual(plate_summary["云ADA0381"], 64)
+                audit_metadata = stored_batch.audit_events[-1]["metadata"]
+                self.assertEqual(audit_metadata["source_bootstrapped"], 4)
+                self.assertEqual(len(audit_metadata["metadata_repairs"]), 4)
+                self.assertEqual(download.status_code, 200)
+                self.assertEqual(download.headers["X-ETC-Invoice-Count"], "68")
+                self.assertEqual(download.headers["X-PDF-Page-Count"], "68")
+                document = fitz.open(stream=bytes(download.body), filetype="pdf")
+                try:
+                    self.assertEqual(document.page_count, 68)
+                finally:
+                    document.close()
+                self.assertEqual(retry.status_code, 200, retry.body)
+                retry_payload = json.loads(retry.body)["data"]
+                self.assertEqual(retry_payload["version"], repaired_version)
+                self.assertEqual(retry_payload["pdfRepaired"], 0)
+                self.assertEqual(retry_payload["xmlRepaired"], 0)
+            finally:
+                app.close()
+
+    def test_bootstrap_rejects_identity_mismatch_before_writing_objects(self) -> None:
+        spec = _trusted_specs()[0]
+        mismatched_spec = {**spec, "seller_tax_no": "WRONG-TAX-NUMBER"}
+        source_zip, _attachments = _nested_trusted_source_zip([mismatched_spec])
+        with TemporaryDirectory() as temp_dir:
+            app = build_local_state_application(data_dir=Path(temp_dir))
+            try:
+                batch = app._etc_service.create_business_batch(task_id="ETC-TASK-REPAIR-IDENTITY")
+                invoice = _bootstrap_invoice(spec, stored_plate="云ADA0381")
+                app._etc_service._invoices[invoice.id] = invoice
+                app._etc_service._invoice_numbers[invoice.invoice_number] = invoice.id
+                stored_batch = app._etc_service._business_batches[batch.business_batch_id]
+                stored_batch.invoice_ids = [invoice.id]
+                stored_batch.status = EtcBusinessBatchStatus.MANUALLY_MARKED_SUBMITTED.value
+                submission_batch = app._etc_service._create_batch([invoice], persist=False)
+                submission_batch.status = EtcBatchStatus.SUBMITTED_CONFIRMED.value
+                stored_batch.submission_batch_id = submission_batch.id
+                app._etc_service._persist()
+                initial_version = stored_batch.version
+                initial_audit_count = len(stored_batch.audit_events)
+
+                with self.assertRaises(EtcBusinessBatchInvalidTransitionError) as caught:
+                    app._etc_service.repair_business_batch_invoice_attachments(
+                        batch.business_batch_id,
+                        [UploadedEtcZipFile("source.zip", source_zip)],
+                        expected_version=initial_version,
+                        reason="mismatched source",
+                    )
+
+                self.assertEqual(caught.exception.code, "invoice_attachment_repair_identity_mismatch")
+                self.assertIsNone(invoice.pdf_file_path)
+                self.assertIsNone(invoice.xml_file_path)
+                self.assertEqual(stored_batch.version, initial_version)
+                self.assertEqual(len(stored_batch.audit_events), initial_audit_count)
+            finally:
+                app.close()
+
+    def test_bootstrap_rolls_back_metadata_and_objects_when_persistence_fails(self) -> None:
+        spec = _trusted_specs()[0]
+        source_zip, _attachments = _nested_trusted_source_zip([spec])
+        with TemporaryDirectory() as temp_dir:
+            app = build_local_state_application(data_dir=Path(temp_dir))
+            original_persist = app._etc_service._persist
+            original_store = app._etc_service._store_invoice_file
+            stored_paths: list[str] = []
+            try:
+                batch = app._etc_service.create_business_batch(task_id="ETC-TASK-REPAIR-ROLLBACK")
+                invoice = _bootstrap_invoice(spec, stored_plate="云ADA0381")
+                app._etc_service._invoices[invoice.id] = invoice
+                app._etc_service._invoice_numbers[invoice.invoice_number] = invoice.id
+                stored_batch = app._etc_service._business_batches[batch.business_batch_id]
+                stored_batch.invoice_ids = [invoice.id]
+                stored_batch.status = EtcBusinessBatchStatus.MANUALLY_MARKED_SUBMITTED.value
+                submission_batch = app._etc_service._create_batch([invoice], persist=False)
+                submission_batch.status = EtcBatchStatus.SUBMITTED_CONFIRMED.value
+                stored_batch.submission_batch_id = submission_batch.id
+                original_persist()
+                initial_version = stored_batch.version
+                initial_plate_summary = json.loads(json.dumps(submission_batch.plate_summary, default=str))
+
+                def record_store(parsed, file_name, content):
+                    path, digest = original_store(parsed, file_name, content)
+                    stored_paths.append(path)
+                    return path, digest
+
+                app._etc_service._store_invoice_file = record_store
+                app._etc_service._persist = lambda: (_ for _ in ()).throw(RuntimeError("persist failed"))
+                with self.assertRaisesRegex(RuntimeError, "persist failed"):
+                    app._etc_service.repair_business_batch_invoice_attachments(
+                        batch.business_batch_id,
+                        [UploadedEtcZipFile("source.zip", source_zip)],
+                        expected_version=initial_version,
+                        reason="exercise rollback",
+                    )
+
+                self.assertEqual(len(stored_paths), 2)
+                self.assertTrue(all(not app._etc_service._stored_invoice_file_exists(path) for path in stored_paths))
+                self.assertIsNone(invoice.pdf_file_path)
+                self.assertIsNone(invoice.xml_file_path)
+                self.assertEqual(invoice.plate_number, "云ADA0381")
+                self.assertEqual(stored_batch.version, initial_version)
+                self.assertEqual(
+                    json.loads(json.dumps(submission_batch.plate_summary, default=str)),
+                    initial_plate_summary,
+                )
+            finally:
+                app._etc_service._persist = original_persist
+                app._etc_service._store_invoice_file = original_store
+                app.close()
+
     def test_admin_repair_restores_submitted_batch_attachments_and_is_idempotent(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_local_state_application(data_dir=Path(temp_dir))

@@ -29,6 +29,10 @@ from fin_ops_platform.services.etc_import_session_store import (
     StoredEtcImportSession,
     StoredEtcImportUpload,
 )
+from fin_ops_platform.services.etc_invoice_pdf_bundle_service import (
+    EtcInvoicePdfBundleError,
+    open_single_page_etc_invoice_pdf,
+)
 
 
 class EtcInvoiceStatus(str, Enum):
@@ -718,6 +722,18 @@ class _ArchiveEntry:
 class _ArchiveBudget:
     entry_count: int = 0
     total_uncompressed_bytes: int = 0
+
+
+@dataclass(slots=True)
+class _InvoiceAttachmentRepairPlanItem:
+    invoice: EtcInvoice
+    parsed: ParsedEtcXml
+    xml_content: bytes
+    pdf_content: bytes | None
+    needs_xml: bool
+    needs_pdf: bool
+    source_bootstrap: bool
+    metadata_updates: dict[str, object]
 
 
 SAFE_PATH_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -2854,7 +2870,7 @@ class EtcService:
                     code="invoice_attachment_repair_empty_batch",
                 )
             target_numbers = {invoice.invoice_number for invoice in target_invoices}
-            sources: dict[str, tuple[ParsedEtcXml, bytes, bytes | None]] = {}
+            sources: dict[str, tuple[ParsedEtcXml, bytes, bytes | None, str]] = {}
             for upload in uploads:
                 try:
                     entries = self._extract_archive_entries(upload.file_name, upload.content)
@@ -2872,16 +2888,21 @@ class EtcService:
                     if parsed.invoice_number not in target_numbers:
                         continue
                     pdf_entry = self._match_pdf_entry(parsed.invoice_number, xml_entry.path, pdf_entries)
-                    candidate = (parsed, xml_entry.content, pdf_entry.content if pdf_entry is not None else None)
+                    candidate = (
+                        parsed,
+                        xml_entry.content,
+                        pdf_entry.content if pdf_entry is not None else None,
+                        xml_entry.source_name,
+                    )
                     previous = sources.get(parsed.invoice_number)
-                    if previous is not None and previous[1:] != candidate[1:]:
+                    if previous is not None and previous[1:3] != candidate[1:3]:
                         raise EtcBusinessBatchInvalidTransitionError(
                             f"原始 ZIP 中发票 {parsed.invoice_number} 的附件内容冲突。",
                             code="invoice_attachment_repair_source_conflict",
                         )
                     sources[parsed.invoice_number] = candidate
 
-            repair_plan: list[tuple[EtcInvoice, ParsedEtcXml, str, str, bytes]] = []
+            repair_plan: list[_InvoiceAttachmentRepairPlanItem] = []
             already_available = 0
             for invoice in target_invoices:
                 source = sources.get(invoice.invoice_number)
@@ -2895,10 +2916,19 @@ class EtcService:
                         f"原始 ZIP 缺少批次发票 {invoice.invoice_number}。",
                         code="invoice_attachment_repair_incomplete",
                     )
-                parsed, xml_content, pdf_content = source
-                for needs_repair, content, path_field, hash_field, file_name in (
-                    (needs_xml, xml_content, "xml_file_path", "xml_file_hash", "invoice.xml"),
-                    (needs_pdf, pdf_content, "pdf_file_path", "pdf_file_hash", "invoice.pdf"),
+                parsed, xml_content, pdf_content, source_name = source
+                source_bootstrap = self._invoice_attachment_source_bootstrap_allowed(invoice)
+                if source_bootstrap:
+                    if not needs_xml or not needs_pdf or pdf_content is None:
+                        raise EtcBusinessBatchInvalidTransitionError(
+                            f"后补发票 {invoice.invoice_number} 必须同时从原始 ZIP 恢复 PDF 和 XML。",
+                            code="invoice_attachment_repair_incomplete",
+                        )
+                    self._assert_invoice_attachment_source_identity(invoice, parsed)
+
+                for needs_repair, content, hash_field, file_name in (
+                    (needs_xml, xml_content, "xml_file_hash", "invoice.xml"),
+                    (needs_pdf, pdf_content, "pdf_file_hash", "invoice.pdf"),
                 ):
                     if not needs_repair:
                         continue
@@ -2909,12 +2939,50 @@ class EtcService:
                         )
                     expected_hash = str(getattr(invoice, hash_field) or "").strip().lower()
                     actual_hash = hashlib.sha256(content).hexdigest()
-                    if not expected_hash or expected_hash != actual_hash:
+                    if not source_bootstrap and (not expected_hash or expected_hash != actual_hash):
                         raise EtcBusinessBatchInvalidTransitionError(
                             f"发票 {invoice.invoice_number} 的 {file_name} 与原记录哈希不一致。",
                             code="invoice_attachment_repair_hash_mismatch",
                         )
-                    repair_plan.append((invoice, parsed, path_field, hash_field, content))
+
+                if needs_pdf and pdf_content is not None:
+                    try:
+                        with open_single_page_etc_invoice_pdf(
+                            pdf_content,
+                            invoice_number=invoice.invoice_number,
+                        ) as document:
+                            if source_bootstrap:
+                                pdf_text = "".join(document[0].get_text().split())
+                                if invoice.invoice_number not in pdf_text:
+                                    raise EtcBusinessBatchInvalidTransitionError(
+                                        f"原始 PDF 与发票 {invoice.invoice_number} 的号码不一致。",
+                                        code="invoice_attachment_repair_identity_mismatch",
+                                    )
+                    except EtcBusinessBatchInvalidTransitionError:
+                        raise
+                    except EtcInvoicePdfBundleError as exc:
+                        raise EtcBusinessBatchInvalidTransitionError(
+                            str(exc),
+                            code="invoice_attachment_repair_source_invalid",
+                        ) from exc
+
+                metadata_updates = (
+                    self._invoice_attachment_source_metadata_updates(parsed, source_name)
+                    if source_bootstrap
+                    else {}
+                )
+                repair_plan.append(
+                    _InvoiceAttachmentRepairPlanItem(
+                        invoice=invoice,
+                        parsed=parsed,
+                        xml_content=xml_content,
+                        pdf_content=pdf_content,
+                        needs_xml=needs_xml,
+                        needs_pdf=needs_pdf,
+                        source_bootstrap=source_bootstrap,
+                        metadata_updates=metadata_updates,
+                    )
+                )
 
             if not repair_plan:
                 return {
@@ -2924,18 +2992,37 @@ class EtcService:
                     "alreadyAvailable": already_available,
                     "pdfRepaired": 0,
                     "xmlRepaired": 0,
+                    "sourceBootstrapped": 0,
+                    "metadataRepaired": 0,
                 }
 
-            invoice_preimages = [
-                (
-                    invoice,
-                    path_field,
-                    hash_field,
-                    getattr(invoice, path_field),
-                    getattr(invoice, hash_field),
-                    invoice.updated_at,
+            bootstrap_items = [item for item in repair_plan if item.source_bootstrap]
+            submission_batch = self._batches.get(str(batch.submission_batch_id or "").strip())
+            if bootstrap_items and (
+                submission_batch is None
+                or set(str(invoice_id) for invoice_id in list(submission_batch.invoice_ids or []))
+                != set(str(invoice_id) for invoice_id in list(batch.invoice_ids or []))
+            ):
+                raise EtcBusinessBatchInvalidTransitionError(
+                    "ETC 业务批次与提交批次成员不一致，不能恢复后补发票附件。",
+                    code="invoice_attachment_repair_batch_invariant",
                 )
-                for invoice, _parsed, path_field, hash_field, _content in repair_plan
+
+            repaired_invoice_fields = (
+                "xml_file_path",
+                "xml_file_hash",
+                "pdf_file_path",
+                "pdf_file_hash",
+                "passage_start_date",
+                "passage_end_date",
+                "plate_number",
+                "vehicle_type",
+                "zip_source_name",
+                "updated_at",
+            )
+            invoice_preimages = [
+                (item.invoice, {field_name: getattr(item.invoice, field_name) for field_name in repaired_invoice_fields})
+                for item in repair_plan
             ]
             batch_preimage = (
                 batch.version,
@@ -2943,31 +3030,88 @@ class EtcService:
                 batch.task_active_key,
                 len(batch.audit_events),
             )
+            submission_batch_preimage = None
+            if submission_batch is not None:
+                submission_batch_preimage = {
+                    field_name: deepcopy(getattr(submission_batch, field_name))
+                    for field_name in (
+                        "issue_start_date",
+                        "issue_end_date",
+                        "passage_start_date",
+                        "passage_end_date",
+                        "plate_summary",
+                    )
+                }
             repaired_counts = {"pdf_file_path": 0, "xml_file_path": 0}
+            stored_paths: list[str] = []
+            metadata_repairs: list[dict[str, object]] = []
             try:
                 now = datetime.now(UTC)
-                for invoice, parsed, path_field, hash_field, content in repair_plan:
-                    file_name = "invoice.pdf" if path_field == "pdf_file_path" else "invoice.xml"
-                    stored_path, stored_hash = self._store_invoice_file(parsed, file_name, content)
-                    setattr(invoice, path_field, stored_path)
-                    setattr(invoice, hash_field, stored_hash)
-                    invoice.updated_at = now
-                    repaired_counts[path_field] += 1
+                for item in repair_plan:
+                    for needs_repair, content, path_field, hash_field, file_name in (
+                        (item.needs_xml, item.xml_content, "xml_file_path", "xml_file_hash", "invoice.xml"),
+                        (item.needs_pdf, item.pdf_content, "pdf_file_path", "pdf_file_hash", "invoice.pdf"),
+                    ):
+                        if not needs_repair or content is None:
+                            continue
+                        stored_path, stored_hash = self._store_invoice_file(item.parsed, file_name, content)
+                        stored_paths.append(stored_path)
+                        setattr(item.invoice, path_field, stored_path)
+                        setattr(item.invoice, hash_field, stored_hash)
+                        repaired_counts[path_field] += 1
+                    changes: dict[str, dict[str, object]] = {}
+                    for field_name, value in item.metadata_updates.items():
+                        before = getattr(item.invoice, field_name)
+                        if before == value:
+                            continue
+                        setattr(item.invoice, field_name, value)
+                        changes[field_name] = {"before": before, "after": value}
+                    item.invoice.updated_at = now
+                    if changes:
+                        metadata_repairs.append(
+                            {"invoice_number": item.invoice.invoice_number, "changes": changes}
+                        )
+
+                if submission_batch is not None and metadata_repairs:
+                    summary = self._batch_computed_summary(target_invoices)
+                    submission_batch.issue_start_date = summary["issue_start_date"]
+                    submission_batch.issue_end_date = summary["issue_end_date"]
+                    submission_batch.passage_start_date = summary["passage_start_date"]
+                    submission_batch.passage_end_date = summary["passage_end_date"]
+                    submission_batch.plate_summary = summary["plate_summary"]
                 self._bump_business_batch_version(
                     batch,
                     event_type="business_batch_invoice_attachments_repaired",
                     before_status=batch.status,
                     after_status=batch.status,
                     reason=normalized_reason,
+                    metadata={
+                        "pdf_repaired": repaired_counts["pdf_file_path"],
+                        "xml_repaired": repaired_counts["xml_file_path"],
+                        "source_bootstrapped": len(bootstrap_items),
+                        "metadata_repairs": metadata_repairs,
+                    },
                 )
                 self._persist()
-            except Exception:
-                for invoice, path_field, hash_field, old_path, old_hash, old_updated_at in invoice_preimages:
-                    setattr(invoice, path_field, old_path)
-                    setattr(invoice, hash_field, old_hash)
-                    invoice.updated_at = old_updated_at
+            except Exception as exc:
+                for invoice, preimage in invoice_preimages:
+                    for field_name, value in preimage.items():
+                        setattr(invoice, field_name, value)
                 batch.version, batch.updated_at, batch.task_active_key, audit_length = batch_preimage
                 del batch.audit_events[audit_length:]
+                if submission_batch is not None and submission_batch_preimage is not None:
+                    for field_name, value in submission_batch_preimage.items():
+                        setattr(submission_batch, field_name, value)
+                cleanup_errors: list[str] = []
+                for stored_path in dict.fromkeys(stored_paths):
+                    try:
+                        self._delete_stored_invoice_file(stored_path)
+                    except Exception as cleanup_exc:
+                        cleanup_errors.append(f"{stored_path}: {cleanup_exc}")
+                if cleanup_errors:
+                    raise EtcServiceError(
+                        "ETC 发票附件恢复失败，且新写入对象清理失败：" + "；".join(cleanup_errors)
+                    ) from exc
                 raise
 
             return {
@@ -2977,7 +3121,73 @@ class EtcService:
                 "alreadyAvailable": already_available,
                 "pdfRepaired": repaired_counts["pdf_file_path"],
                 "xmlRepaired": repaired_counts["xml_file_path"],
+                "sourceBootstrapped": len(bootstrap_items),
+                "metadataRepaired": len(metadata_repairs),
             }
+
+    @staticmethod
+    def _invoice_attachment_source_bootstrap_allowed(invoice: EtcInvoice) -> bool:
+        return (
+            not any(
+                str(value or "").strip()
+                for value in (
+                    invoice.xml_file_path,
+                    invoice.xml_file_hash,
+                    invoice.pdf_file_path,
+                    invoice.pdf_file_hash,
+                    invoice.import_batch_id,
+                    invoice.import_session_id,
+                )
+            )
+            and str(invoice.zip_source_name or "").startswith("canonical_invoice:")
+        )
+
+    @staticmethod
+    def _assert_invoice_attachment_source_identity(invoice: EtcInvoice, parsed: ParsedEtcXml) -> None:
+        text_fields = (
+            ("invoice_number", invoice.invoice_number, parsed.invoice_number),
+            ("issue_date", invoice.issue_date, parsed.issue_date),
+            ("seller_name", invoice.seller_name, parsed.seller_name),
+            ("seller_tax_no", invoice.seller_tax_no, parsed.seller_tax_no),
+            ("buyer_name", invoice.buyer_name, parsed.buyer_name),
+            ("buyer_tax_no", invoice.buyer_tax_no, parsed.buyer_tax_no),
+        )
+        amount_fields = (
+            ("amount_without_tax", invoice.amount_without_tax, parsed.amount_without_tax),
+            ("tax_amount", invoice.tax_amount, parsed.tax_amount),
+            ("total_amount", invoice.total_amount, parsed.total_amount),
+        )
+        mismatches = [
+            field_name
+            for field_name, current, source in text_fields
+            if not str(current or "").strip()
+            or not str(source or "").strip()
+            or str(current).strip() != str(source).strip()
+        ]
+        mismatches.extend(
+            field_name
+            for field_name, current, source in amount_fields
+            if Decimal(str(current)) != Decimal(str(source))
+        )
+        if not str(parsed.plate_number or "").strip():
+            mismatches.append("plate_number")
+        if mismatches:
+            raise EtcBusinessBatchInvalidTransitionError(
+                f"原始 ZIP 与后补发票 {invoice.invoice_number} 的业务身份不一致：{', '.join(mismatches)}。",
+                code="invoice_attachment_repair_identity_mismatch",
+            )
+
+    @staticmethod
+    def _invoice_attachment_source_metadata_updates(
+        parsed: ParsedEtcXml,
+        source_name: str,
+    ) -> dict[str, object]:
+        updates: dict[str, object] = {"zip_source_name": str(source_name or "").strip()}
+        for field_name in ("passage_start_date", "passage_end_date", "plate_number", "vehicle_type"):
+            value = getattr(parsed, field_name)
+            if value not in (None, ""):
+                updates[field_name] = value
+        return updates
 
     def list_invoices_by_numbers(self, invoice_numbers: list[str]) -> list[EtcInvoice]:
         normalized_numbers = [str(number).strip() for number in invoice_numbers if str(number).strip()]
@@ -3266,6 +3476,7 @@ class EtcService:
         submission_batch_id: str | None = None,
         oa_row_id: str | None = None,
         candidates: list[dict[str, object]] | None = None,
+        metadata: dict[str, object] | None = None,
     ) -> None:
         batch.version += 1
         batch.updated_at = datetime.now(UTC)
@@ -3279,6 +3490,7 @@ class EtcService:
             submission_batch_id=submission_batch_id,
             oa_row_id=oa_row_id,
             candidates=candidates,
+            metadata=metadata,
         )
 
     def _append_business_batch_audit(
@@ -3292,6 +3504,7 @@ class EtcService:
         submission_batch_id: str | None = None,
         oa_row_id: str | None = None,
         candidates: list[dict[str, object]] | None = None,
+        metadata: dict[str, object] | None = None,
     ) -> None:
         event = {
             "event_id": f"etc_business_audit_{uuid4().hex[:12]}",
@@ -3311,6 +3524,8 @@ class EtcService:
         }
         if candidates is not None:
             event["candidates"] = list(candidates)
+        if metadata is not None:
+            event["metadata"] = deepcopy(metadata)
         batch.audit_events.append(event)
 
     def _extract_archive_entries(

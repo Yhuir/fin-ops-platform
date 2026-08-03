@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 import hashlib
 import re
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Iterator
 
 import fitz
 
@@ -20,6 +21,31 @@ class EtcInvoicePdfBundleError(RuntimeError):
     def __init__(self, message: str, *, code: str) -> None:
         self.code = code
         super().__init__(message)
+
+
+@contextmanager
+def open_single_page_etc_invoice_pdf(content: bytes, *, invoice_number: str) -> Iterator[fitz.Document]:
+    try:
+        source = fitz.open(stream=content, filetype="pdf")
+    except Exception as exc:
+        raise EtcInvoicePdfBundleError(
+            f"ETC 发票 {invoice_number} 的 PDF 已损坏或格式无效，请重新导入该发票。",
+            code="invoice_pdf_invalid",
+        ) from exc
+    try:
+        if source.needs_pass:
+            raise EtcInvoicePdfBundleError(
+                f"ETC 发票 {invoice_number} 的 PDF 已加密，无法合并。",
+                code="invoice_pdf_invalid",
+            )
+        if source.page_count != 1:
+            raise EtcInvoicePdfBundleError(
+                f"ETC 发票 {invoice_number} 的 PDF 必须恰好为 1 页，当前为 {source.page_count} 页。",
+                code="invoice_pdf_page_count_invalid",
+            )
+        yield source
+    finally:
+        source.close()
 
 
 class EtcInvoicePdfBundleService:
@@ -92,20 +118,9 @@ class EtcInvoicePdfBundleService:
                         code="invoice_pdf_unavailable",
                     )
 
-                source = None
                 try:
-                    source = fitz.open(stream=content, filetype="pdf")
-                    if source.needs_pass:
-                        raise EtcInvoicePdfBundleError(
-                            f"ETC 发票 {invoice_number} 的 PDF 已加密，无法合并。",
-                            code="invoice_pdf_invalid",
-                        )
-                    if source.page_count != 1:
-                        raise EtcInvoicePdfBundleError(
-                            f"ETC 发票 {invoice_number} 的 PDF 必须恰好为 1 页，当前为 {source.page_count} 页。",
-                            code="invoice_pdf_page_count_invalid",
-                        )
-                    output.insert_pdf(source, from_page=0, to_page=0)
+                    with open_single_page_etc_invoice_pdf(content, invoice_number=invoice_number) as source:
+                        output.insert_pdf(source, from_page=0, to_page=0)
                 except EtcInvoicePdfBundleError:
                     raise
                 except Exception as exc:
@@ -113,9 +128,6 @@ class EtcInvoicePdfBundleService:
                         f"ETC 发票 {invoice_number} 的 PDF 已损坏或格式无效，请重新导入该发票。",
                         code="invoice_pdf_invalid",
                     ) from exc
-                finally:
-                    if source is not None:
-                        source.close()
 
             if output.page_count != len(ordered_invoices):
                 raise EtcInvoicePdfBundleError(

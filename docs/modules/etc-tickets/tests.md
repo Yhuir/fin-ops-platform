@@ -22,7 +22,7 @@
 
 - 可选文字或图像型信用卡 PDF 上传 -> 文本解析或布局 OCR -> 票根文件上传 -> reconciliation task ready -> ETC ZIP preview -> confirm import job -> business batch visible -> OA draft -> manual submitted -> Workbench open 区出现 `etc_invoice_summary`。
 - OA 草稿已创建 -> read-export 用户点击“下载发票PDF” -> `invoice-pdf` 读取 business batch 的 68 个 PDF -> 输出一份 68 页文件 -> 浏览器使用服务端 UTF-8 文件名保存；任一来源异常时不下载部分文件。
-- 历史 submitted 批次附件对象缺失 -> 管理员上传原始 ZIP + expectedVersion + reason -> 只恢复该批次已有发票且 hash 相同的 PDF/XML -> 再次执行零写入 -> 合并 PDF 恢复下载；普通用户、hash 不同或缺少成员必须失败且不改变发票事实。
+- 历史 submitted 批次附件对象缺失 -> 管理员上传原始 ZIP + expectedVersion + reason -> 已有 hash 严格相等；严格限定的 `canonical_invoice` 后补成员经强身份/PDF/成员校验后建立 PDF/XML 并纠正 ETC 元数据 -> 再次执行零写入 -> 68 张合并 PDF 恢复为 68 页；普通用户、hash/身份不同、成员不一致或持久化失败必须不留下半写事实。
 - Browser e2e：ETC 票据管理首屏 business-batches 暂时 503 -> 错误态且无普通空态 -> 点击刷新恢复未提交业务批次和发票明细；未提交业务批次删除第一次暂时 503 -> 错误可见且确认弹窗/批次行保持 -> 第二次成功后列表刷新为空；已提交业务批次 reset/delete 第一次暂时 503 -> expectedVersion/reason 使用已提交语义、错误可见且确认弹窗/已提交批次行/计数保持 -> 第二次成功后已提交列表刷新为空；source file 删除第一次暂时 503 -> 错误可见且确认弹窗/文件行保持 -> 第二次成功后文件列表刷新为空；ticket-root source upload 第一次暂时 503 -> 错误可见且不追加文件 -> 第二次成功后追加 TXT source file；创建 OA 草稿前显示对账任务 OA 金额、实际发票金额及非阻断差额，第一次暂时 503 -> 错误可见且不进入 OA 提交确认伪成功 -> dialog 保持可重试 -> 第二次成功；结果弹窗只提供“完成提交/删除草稿”两个决定；人工确认已提交第一次暂时 503 -> 错误可见且不切已提交 bucket -> OA 提交确认保持可重试 -> 第二次成功；未提交业务批次首屏 -> 展开发票明细 -> 创建 OA 草稿 -> 人工确认已提交 -> 已提交 bucket 展示人工确认状态；恢复、删除、上传、OA 草稿和人工确认成功后都检查无可见错误残留。
 - 用户点击“新建批次” -> `POST /api/etc/business-batches` 可省略 `taskId` -> 后端创建 task + active business batch -> 未提交列表只显示返回的 business batch；若 business batch 创建失败，新建 task 必须 tombstone，不得留下刷新后复活的 task-only 批次。
 - 用户在未提交列表点击批次标题 -> 内联编辑 -> `PATCH /api/etc/business-batches/{id}` 持久化 `title` 并同步 linked reconciliation task title -> ETC 发票导入页 ready task 下拉显示新标题；已提交批次标题不可编辑。
@@ -78,6 +78,16 @@
 - 类别 5（前端交互）：适用。Vitest 覆盖 blob、文件名、结构化错误、按钮点击和 URL 释放；Playwright 覆盖 read-export 用户可见按钮、浏览器 download event 和服务端文件名。
 - 类别 6（端到端）：适用。本地 API + 浏览器组合覆盖 OA 草稿存在 -> 合并 API -> 浏览器下载；生产 PostgreSQL + MinIO 真实对象属于发布后只读 smoke。
 - 类别 7（既有功能回归）：适用。复跑 ETC API/页面既有套件，保护 OA 人工确认、删除/reset、导入、页面按钮和代理 fallback 不受影响。
+
+## 2026-08-03 历史后补成员附件恢复回归增量
+
+- 类别 1（业务核心）：适用。真实目标发票号/金额组合覆盖 exact `canonical_invoice` bootstrap、发票身份不一致拒绝、已有 hash 严格分支和幂等版本。
+- 类别 2（service）：适用。覆盖嵌套 ZIP、对象写入、原始 XML 元数据、提交批次汇总、逐发票审计，以及持久化失败后的 preimage 与对象删除。
+- 类别 3（API 合同）：适用。管理员 multipart 恢复返回 `sourceBootstrapped/metadataRepaired`，随后下载响应为 68 张/68 页；既有普通用户 403 合同继续保留。
+- 类别 4（read model/cache/job）：不适用。恢复只写 ETC canonical batch/invoice 附件事实，不新增 read model、缓存、队列或 worker。
+- 类别 5（前端交互）：不适用。页面和前端 API 没有变更；该入口为管理员受控运维 API，用户下载按钮复用既有合同。
+- 类别 6（端到端）：适用。本地组合覆盖 64 张完整 + 4 张后补 -> 原始嵌套 ZIP 恢复 -> 68 页合并下载 -> 幂等重放；生产使用用户提供原始 ZIP 做同一受控闭环。
+- 类别 7（既有功能回归）：适用。已有 hash 恢复、hash mismatch、缺失/损坏/多页 PDF 和普通下载行为继续由同一测试文件保护，并复跑 ETC service/API/边界套件。
 
 ## 2026-07-14 慢解析并发删除回归增量
 

@@ -45,7 +45,7 @@
 | ETC 发票导入/识别 | imports/services/parsers | 输出批次、任务、附件识别结果 |
 | ETC invoice list | `GET /api/etc/invoices` | 只读查询入口；route owner 只接收 `etc_service`、`json_response`、`serialize_invoice` 三个读侧端口，不接收 JSON body、link refresh 或状态回退端口 |
 | OA 草稿/已提交批次发票 PDF 下载 | `GET /api/etc/business-batches/{id}/invoice-pdf` | 使用 read session；application service 校验 actor scope，并要求存在 OA 草稿或批次属于 `ETC_BUSINESS_BATCH_SUBMITTED_STATUSES`；历史已提交批次不因缺少 `oa_draft_id` 被拒绝。成员只取 `business_batch.invoice_ids`，再把发票元数据与 `EtcService.read_invoice_pdf_bytes` 读取端口交给 PDF bundle service；不直接读取 HTTP cookie/header，不写业务状态 |
-| 已提交批次附件恢复 | `POST /api/etc/business-batches/{id}/invoice-pdf/repair` | 仅管理员、仅 submitted 状态、仅 multipart 原始 ZIP；必须提交 `expectedVersion` 与 `reason`。只为该批次已有 `invoice_ids` 补回当前不可读的 PDF/XML，且内容 SHA-256 必须与既有发票事实完全一致；不创建发票、不改成员、不改 OA/配对/提交状态。成功按 CAS 递增批次版本并写恢复审计，重复执行返回零修复 |
+| 已提交批次附件恢复 | `POST /api/etc/business-batches/{id}/invoice-pdf/repair` | 仅管理员、仅 submitted 状态、仅 multipart 原始 ZIP；必须提交 `expectedVersion` 与 `reason`。已有 hash 的附件继续严格校验 SHA-256；只有附件路径/hash、导入来源全空且来源为 `canonical_invoice:*` 的历史后补成员可在强身份、单页 PDF 内发票号和 business/submission 成员一致校验后 bootstrap PDF/XML，并从原始 XML 纠正通行日期、车牌、车型、来源及提交批次汇总。对象先写、事实 CAS 持久化，失败恢复 preimage 并删除新对象；不创建发票、不改成员、不改 OA/配对/提交状态，重复执行返回零修复 |
 | 历史修复/迁移 | tools | 只作为显式运维入口。单批次 tombstone 恢复必须同时核对业务批次 ID、版本、OA row、发票数量与含税总额，并通过 dry-run fingerprint 执行；canonical invoice link backfill 必须限定同一 business batch 且核对严格候选数。已提交批次成员缺失修复必须同时绑定 business/submission/external 三个 owner、精确 canonical 发票号与车牌、目标金额、结果数量/金额和当前 fingerprint；事务内复用 ETC invoice/link/overlap 边界，重算成员事实与审计，禁止修改 OA 草稿、关闭任务、附件或 Workbench 投影 |
 | 页面 Audit | `GET /api/operations/app-health/page-audit?page=etc-tickets` | 管理员只读；同一 `REPEATABLE READ READ ONLY` snapshot 直接读取 canonical tables，不创建或刷新 read model |
 

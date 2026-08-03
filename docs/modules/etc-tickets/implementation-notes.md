@@ -949,3 +949,11 @@
 - 旧逻辑删除：删除页面 `plate/keyword` state、输入 DOM、列表请求参数/effect 依赖、旧筛选 CSS、重复批次标题/摘要/OA 状态区、旧外层卡片容器类和对应过期测试；后端/API client 可选查询参数作为兼容/运维合同保留。
 - 性能与隔离：阶段映射为固定四项 O(1) 纯函数；新增网络请求、timer、listener、store、依赖、缓存、read model、worker 和跨页面写入均为 0。保留既有 detail/task 并发、AbortController 和 stale selection 防护。
 - 测试覆盖：组件覆盖九组 task/batch 状态、无旧搜索 I/O、语义化四阶段、扁平 CSS 与刷新竞态；Playwright 覆盖真实 Chromium 可见四阶段、无旧搜索框及既有失败恢复主链路；独立 ETC 导入与 Workbench 回归按发布门禁执行。
+
+## 2026-08-03 - 已提交批次四张后补发票附件恢复
+
+- 目标：恢复 `etc_20260720_001` 后补 4 张成员的可信 PDF/XML，纠正其中两张错误车牌，使批次 68 张能够完整下载为 68 页。
+- 边界：复用现有管理员 `invoice-pdf/repair`，只放行附件路径/hash、导入 batch/session 全空且来源为 `canonical_invoice:*` 的历史合成成员；已有 hash 恢复合同保持严格相等。校验发票号、日期、双方名称税号、金额税额合计、单页 PDF 内发票号及 business/submission 成员一致后，才写附件并采用原始 XML 的通行日期、车牌、车型和来源。
+- 一致性：先写对象，再以 business batch version CAS 持久化发票、提交批次汇总和逐发票审计；失败恢复内存 preimage 并删除本次对象。重复上传只返回零修复且不递增版本；不改批次成员、OA、关联台 relation、submitted 状态、read model 或 worker。
+- 旧链路收敛：不生成 PDF/XML、不从 canonical 字段猜车牌、不增加第二个脚本/路由/fallback；此前成员补录工具保留其“缺附件不伪造”职责，附件恢复统一进入现有受控 API。
+- 测试覆盖：真实 68 张结构的 64 完整 + 4 后补组合、嵌套 ZIP、4 张 bootstrap、两张车牌纠正、68 页下载、身份不一致、持久化回滚、对象清理、已有 hash 和幂等重放。
