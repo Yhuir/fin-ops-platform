@@ -175,6 +175,8 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
         self.assertEqual(len(transaction.reads), 3)
         main_sql, main_params = transaction.reads[1]
         self.assertIn("canonical_rule_banks as materialized", main_sql)
+        self.assertIn("query_target_rows as materialized", main_sql)
+        self.assertIn("join query_target_rows target", main_sql)
         self.assertIn("from canonical_rule_banks base", main_sql)
         self.assertIn("page_keys as materialized", main_sql)
         self.assertIn("join classified_with_semantics page_rows", main_sql)
@@ -203,6 +205,56 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
             ],
         )
         self.assertEqual(payload["pagination"]["total"], 1)
+
+    def test_money_keyword_prefilters_rule_classification_candidates(self) -> None:
+        connection = _Connection()
+        repository = PostgresBankDetailsCanonicalQueryRepository(connection)
+
+        repository.transactions_snapshot(
+            account_key=None,
+            date_from="2026-01-01",
+            date_to="2026-12-31",
+            keyword="2100.00",
+            category_code=None,
+            category_primary_label=None,
+            category_sub_label=None,
+            category_third_label=None,
+            page=1,
+            page_size=50,
+        )
+
+        sql, params = connection.transaction_object.reads[1]
+        target_sql = sql.split("query_target_rows as materialized", 1)[1].split(
+            "canonical_rule_banks as materialized",
+            1,
+        )[0]
+        self.assertIn("amount::text", target_sql)
+        self.assertIn("balance::text", target_sql)
+        self.assertIn("%2100.00%", params)
+        self.assertEqual(sql.count("%s"), len(params))
+
+    def test_money_keyword_keeps_full_classifier_when_category_label_matches(self) -> None:
+        sql, params = _classification_cte(
+            definitions=[
+                {
+                    "code": "numeric-label",
+                    "label": "2100.00专项",
+                    "status": "active",
+                    "rules": {},
+                }
+            ],
+            date_from="2026-01-01",
+            date_to="2026-12-31",
+            keyword="2100.00",
+        )
+
+        target_sql = sql.split("query_target_rows as materialized", 1)[1].split(
+            "canonical_rule_banks as materialized",
+            1,
+        )[0]
+        self.assertNotIn("amount::text", target_sql)
+        self.assertNotIn("%2100.00%", params)
+        self.assertEqual(sql.count("%s"), len(params))
 
     def test_accounts_snapshot_aggregates_canonical_rows_in_sql(self) -> None:
         connection = _Connection()

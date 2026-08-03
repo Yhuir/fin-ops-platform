@@ -29,6 +29,10 @@ from fin_ops_platform.services.postgres_repositories.common import (
     text,
     text_list,
 )
+from fin_ops_platform.services.search_query import (
+    is_money_search_query,
+    normalize_money_search_query,
+)
 from fin_ops_platform.services.workbench_relation_modes import (
     TURNOVER_MANUAL_CLOSURE_RELATION_MODE,
 )
@@ -399,6 +403,8 @@ class PostgresBankDetailsCanonicalQueryRepository:
             definitions=definitions,
             date_from=date_from,
             date_to=date_to,
+            account_key=account_key,
+            keyword=keyword,
         )
         where_sql, where_params = _transaction_filter_sql(
             account_key=account_key,
@@ -823,6 +829,78 @@ def _compact_bank_detail_row(row: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in row.items() if key not in legacy_fields}
 
 
+def _transaction_prefilter_sql(
+    *,
+    definitions: list[dict[str, Any]],
+    account_key: str | None,
+    date_from: str | None,
+    date_to: str | None,
+    keyword: str | None,
+) -> tuple[str, list[Any]]:
+    if not any((account_key, date_from, date_to, str(keyword or "").strip())):
+        return "", []
+    clauses = [
+        "(%s::text is null or account_key = %s)",
+        "(%s::date is null or txn_date >= %s::date)",
+        "(%s::date is null or txn_date <= %s::date)",
+    ]
+    params: list[Any] = [
+        account_key,
+        account_key,
+        date_from,
+        date_from,
+        date_to,
+        date_to,
+    ]
+    normalized_keyword = normalize_money_search_query(keyword).lower()
+    definition_label_keys = (
+        "label",
+        "output_primary_label",
+        "category_primary_label",
+        "output_sub_label",
+        "category_sub_label",
+        "output_third_label",
+        "category_third_label",
+    )
+    configured_label_matches = bool(normalized_keyword) and any(
+        normalized_keyword in str(definition.get(key) or "").lower()
+        for definition in definitions
+        for key in definition_label_keys
+    )
+    if (
+        normalized_keyword
+        and is_money_search_query(keyword)
+        and not configured_label_matches
+    ):
+        clauses.append(
+            """
+            lower(concat_ws(
+              ' ',
+              counterparty_name_raw,
+              trade_time::text,
+              case when direction = 'income' then '收' else '支' end,
+              amount::text,
+              balance::text,
+              summary_text,
+              purpose_text,
+              note_text,
+              bank_name,
+              account_last4,
+              confirmation_raw_payload->'normalized_payload'->>'category_label',
+              confirmation_raw_payload->'normalized_payload'->>'category_primary_label',
+              confirmation_raw_payload->'normalized_payload'->>'category_sub_label',
+              confirmation_raw_payload->'normalized_payload'->>'category_third_label',
+              manual_category_raw_payload->'normalized_payload'->>'category_label',
+              manual_category_raw_payload->'normalized_payload'->>'category_primary_label',
+              manual_category_raw_payload->'normalized_payload'->>'category_sub_label',
+              manual_category_raw_payload->'normalized_payload'->>'category_third_label'
+            )) like %s
+            """
+        )
+        params.append(f"%{normalized_keyword}%")
+    return " and ".join(clauses), params
+
+
 def _classification_cte(
     *,
     definitions: list[dict[str, Any]],
@@ -830,6 +908,8 @@ def _classification_cte(
     date_to: str | None,
     candidate_category_codes: list[str] | None = None,
     candidate_transaction_ids: list[str] | None = None,
+    account_key: str | None = None,
+    keyword: str | None = None,
 ) -> tuple[str, list[Any]]:
     tag_definitions_json = json.dumps(
         definitions,
@@ -842,6 +922,29 @@ def _classification_cte(
     )
     candidate_codes = text_list(candidate_category_codes) or None
     target_ids = text_list(candidate_transaction_ids) or None
+    prefilter_sql, prefilter_params = _transaction_prefilter_sql(
+        definitions=definitions,
+        account_key=account_key,
+        date_from=date_from,
+        date_to=date_to,
+        keyword=keyword,
+    )
+    query_target_cte_sql = (
+        f"""
+        query_target_rows as materialized (
+          select row_id
+          from base
+          where {prefilter_sql}
+        ),
+        """
+        if prefilter_sql
+        else ""
+    )
+    query_target_join_sql = (
+        "join query_target_rows target on target.row_id = base.row_id"
+        if prefilter_sql
+        else ""
+    )
     params: list[Any] = [
         tag_definitions_json,
         target_ids,
@@ -859,6 +962,7 @@ def _classification_cte(
         target_ids,
         target_ids,
         target_ids,
+        *prefilter_params,
         [f"%{marker}%" for marker in INTERNAL_TRANSFER_MARKERS],
         [f"%{marker}%" for marker in INTERNAL_TRANSFER_MARKERS],
         [f"%{keyword}%" for keyword in COMPANY_NAME_KEYWORDS],
@@ -1081,6 +1185,7 @@ def _classification_cte(
             end as account_key
           from display_rows display
         ),
+        {query_target_cte_sql}
         canonical_rule_banks as materialized (
           select
             base.row_id,
@@ -1088,6 +1193,7 @@ def _classification_cte(
             base.account_key
             {normalization_sql}
           from base
+          {query_target_join_sql}
         ),
         internal_pair_candidates as materialized (
           select
@@ -1266,6 +1372,7 @@ def _classification_cte(
               else 'needs_confirmation'
             end as auto_resolution_status
           from base
+          {query_target_join_sql}
           left join internal_by_row internal on internal.row_id = base.row_id
           left join base counterpart on counterpart.row_id = internal.counterpart_id
           left join matched_definitions matches on matches.row_id = base.row_id

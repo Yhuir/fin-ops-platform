@@ -46,12 +46,12 @@
 | --- | --- | --- |
 | accounts payload | Bank Details 页面 | `accounts`、余额汇总、币种汇总与缺失余额计数来自有界 SQL 聚合；不含 read-model/status/source/job 字段。 |
 | transactions payload | Bank Details 页面 | `rows`、`statistics`、`category_counts`、pagination 和展示标签字典；rows/summary/facets/relations 在同一个 `REPEATABLE READ READ ONLY` snapshot 中一致。列表只输出 effective/auto/candidate/relationship 展示字段；旧 `category_*` / `manual_category_*` 重复别名、自动规则 evidence 和标签匹配 rules/account scope 不进入页面 DTO。 |
-
-金额和余额的页面文本统一为无千分位两位小数；keyword 搜索直接包含 canonical 金额/余额文本，不生成分组格式的重复搜索值。
 | relation tags | 页面/导出 | 只反映 active canonical relation membership；候选、withdrawn relation、Workbench raw payload 和 relation projection 不进入页面事实。 |
 | 导出文件 | 有导出权限的用户 | 复用同一筛选与 relation 语义；服务端生成 XLSX，不先向浏览器加载全量 rows。 |
 | 分类/规则写响应 | 当前页面 | 保留 `changed`、`affected_months`、version、error/message 等业务字段；不返回 freshness target、refresh job、operation barrier 或 202 refreshing envelope。 |
 | 写后重读 | 当前页面 | 成功后只触发一次当前 query GET；不轮询、不等待 worker、不触发页面 RM fan-out。 |
+
+金额和余额的页面文本统一为无千分位两位小数；keyword 搜索直接包含 canonical 金额/余额文本，不生成分组格式的重复搜索值。
 
 ## Snapshot 与查询次数
 
@@ -61,6 +61,7 @@
 - 关联台 generation builder 可对目标银行 identity 一次批量复用同一 canonical classifier，取得 effective category 与 resolution status；该调用由关联台 read model owner 负责 freshness/publish，银行明细写链不恢复跨页面 fan-out。
 - accounts 固定使用 settings、账户余额聚合和账户范围计数查询；不得在 Python 全量累计。
 - 内部转账匹配使用 SQL `±2 days` bounded context；自动规则只为实际使用的匹配字段构建文本 normalization。
+- 账户和精确日期先限定页面目标行；合法金额 keyword 在确认不可能命中配置标签文案后，可把 canonical 金额/余额及既有可搜索原始字段下推到规则分类候选。内部转账仍保留完整 bounded context，最终完整筛选不得删除。
 - 查询次数 guard 位于 `tests/test_bank_details_canonical_query.py`。
 
 ## 文件范围

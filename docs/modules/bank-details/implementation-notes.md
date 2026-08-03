@@ -26,6 +26,17 @@
 - 后续事项：
 ```
 
+## 2026-08-03 - 金额搜索分类候选过滤下推
+
+- 目标：修复银行明细金额关键字只命中少量流水时，仍先对全年流水执行全部自动分类规则造成的无效 SQL 开销。
+- 影响范围：仅 `PostgresBankDetailsCanonicalQueryRepository` 的 direct canonical 查询计划与共享金额搜索判断；API、DTO、筛选结果、分类语义、relation、权限、写链、read model/worker 和数据库 schema 不变。
+- 关键决策：账户与精确日期先形成目标行；只有关键字是合法金额且不可能命中配置标签文案时，才把 canonical 金额/余额与既有可搜索原始字段下推为目标行。内部转账仍在 `±2 days` 全上下文计算，最终完整 keyword/category filter 保留，避免改变结果集合。未增加缓存、fallback、表、索引或并行旧查询。
+- 文档影响：更新本实施记录与 `boundary-io.md` 查询次数/性能约束；产品和长期 API 合同不变。
+- 测试覆盖：新增金额候选下推、配置标签歧义禁用下推和金额查询识别测试；继续由银行明细 canonical query、API、前端交互与 Browser 回归保护完整链路。
+- 验证命令：见本轮最终说明；生产发布后必须复跑 `keyword=2100.00` 的 4 并发 HTTP p95、真实页面搜索渲染和只读 route smoke。
+- 未测风险：下推只优化合法金额关键字；普通文本搜索仍按原完整分类口径执行，不把性能优化扩大成分类架构重写。
+- 后续事项：无；若无筛选的全年列表在未来真实并发下稳定超 SLO，应基于生产 `EXPLAIN (ANALYZE, BUFFERS)` 单独设计分类事实投影，禁止在本查询上叠加短 TTL 缓存。
+
 ## 2026-07-27 - 页面 direct canonical read
 
 - 目标：移除 `/bank-details` 对 `bank_detail`、`bank_account_balance` 和 `workbench_relation` 页面投影/freshness/polling 的依赖。
