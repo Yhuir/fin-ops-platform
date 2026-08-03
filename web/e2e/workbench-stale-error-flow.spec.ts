@@ -14,7 +14,7 @@ async function openConfirmRelationPreview(page: Page) {
   await openZone.getByRole("button", { name: "确认关联" }).click();
   const previewDialog = page.getByRole("dialog", { name: "确认关联" });
   await expect(previewDialog.getByTestId("relation-preview-before").getByText("智能工厂设备商").first()).toBeVisible();
-  await expect(previewDialog.getByTestId("relation-preview-after").getByText("完全关联").first()).toBeVisible();
+  await expect(previewDialog.getByTestId("relation-preview-after").getByText("智能工厂设备商").first()).toBeVisible();
   return { openGroup, previewDialog };
 }
 

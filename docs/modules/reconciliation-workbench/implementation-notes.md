@@ -137,6 +137,13 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
+## 2026-08-03 - 流水分类展示与多记录高度闭环
+
+- 根因：Workbench generation 未消费银行 canonical 分类/确认事实，分类写入也不在 source proof；前端同时把 relation status 当作流水标签。多记录栏使用可收缩 flex item，cell 又固定 `height: 100%`，内容高于分配高度时 chip 被裁切。
+- 实现：generation rebuild 对当前银行 IDs 一次批量复用银行明细 classifier；分类与确认版本进入月份/all freshness vector，下一次正常 GET 通过既有 exact-scope gateway 更新。流水金额列改为金额、方向+账号、分类/待确认/待分类三层，并删除旧 relation status 渲染。布局只把记录项改为不可低于内容高度、cell 改为 `min-height`，不增加 DOM 测量或第二布局状态。
+- 边界：无新 API、表、migration、queue、worker、cache、轮询或写后 fan-out；关系事实、搜索字段和 relation ownership 不变。旧状态 helper 已删除，不保留兼容渲染分支。
+- 验证：canonical/service/freshness/架构边界后端回归、Workbench component/API/layout 前端回归和 production build 覆盖；最终生产 release、freshness、页面视觉与性能证据以本轮发布结果为准。
+
 ## 2026-07-25 - 写后恢复轻量状态等待
 
 - 真实原因：没有 operation projection 的关联台写操作在 active generation 恢复期间每 150ms 重复调用 combined initial；公开 refresh-status 同时仍走完整 consistency diagnostic，页面读 I/O 会与 worker 重建竞争。

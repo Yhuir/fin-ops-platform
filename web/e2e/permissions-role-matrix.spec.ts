@@ -561,7 +561,7 @@ const readExportSubmittedStateWriteControlOpeners: DynamicWriteControlOpener[] =
     verify: async (page) => {
       await page.goto("/");
       const { zoneLocator: pairedZone, group: pairedGroup } = await selectWorkbenchGroupRows(page, "paired");
-      await expect(pairedGroup.getByText("完全关联").first()).toBeVisible();
+      await expect(pairedGroup.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeVisible();
       await expect(pairedZone.getByRole("button", { name: "撤回关联" })).toBeDisabled();
       await expect(pairedGroup.getByRole("button", { name: "更多" })).toHaveCount(0);
       await expect(pairedGroup.getByRole("button", { name: "取消关联" })).toHaveCount(0);
@@ -577,7 +577,7 @@ const readExportSubmittedStateWriteControlOpeners: DynamicWriteControlOpener[] =
     verify: async (page) => {
       await page.goto("/");
       const { group: pairedGroup } = await selectWorkbenchGroupRows(page, "paired");
-      await expect(pairedGroup.getByText("完全关联").first()).toBeVisible();
+      await expect(pairedGroup.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeVisible();
       await expect(pairedGroup.getByRole("button", { name: "更多" })).toHaveCount(0);
       await expect(page.getByRole("menuitem", { name: "确认为过账" })).toHaveCount(0);
       await expect(page.getByRole("menuitem", { name: "确认为买票" })).toHaveCount(0);
@@ -614,7 +614,7 @@ const readExportWorkbenchRecoveryWriteControlOpeners: DynamicWriteControlOpener[
       await unpairedZone.getByRole("button", { name: /已处理异常3项/ }).click();
       const processedModal = page.getByRole("dialog", { name: "已处理异常弹窗" });
       await expect(processedModal).toBeVisible();
-      await expect(processedModal.getByText("追进项发票").first()).toBeVisible();
+      await expect(processedModal.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeVisible();
       await expect(processedModal.getByText("浏览器异常备注").first()).toBeVisible();
       await expect(processedModal.getByRole("button", { name: "取消异常处理" })).toHaveCount(0);
       await expectNoEnabledWriteControlCandidates(page);

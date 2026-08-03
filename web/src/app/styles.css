@@ -13811,7 +13811,7 @@ body.column-layout-dragging {
 }
 
 .candidate-group-cell {
-  height: 100%;
+  min-height: 100%;
   min-width: 0;
   border: 0;
   border-radius: 0;
@@ -13880,7 +13880,7 @@ body.column-layout-dragging {
 }
 
 .record-card-sheet-row-split {
-  flex: 1 1 0;
+  flex: 1 0 auto;
 }
 
 .record-card:last-child .record-card-cell {
@@ -14009,6 +14009,18 @@ body.column-layout-dragging {
   gap: 6px;
   flex-wrap: wrap;
   max-width: 100%;
+}
+
+.money-cell-category-row {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+}
+
+.bank-category-tag.bank-category-pending {
+  background: #fff4e5;
+  color: #8a4b08;
 }
 
 .record-warning-tooltip-wrap {

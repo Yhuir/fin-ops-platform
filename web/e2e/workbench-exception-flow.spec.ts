@@ -80,7 +80,7 @@ test.describe("workbench exception browser flow", () => {
     await openZone.getByRole("button", { name: /已处理异常3项/ }).click();
     const processedModal = page.getByRole("dialog", { name: "已处理异常弹窗" });
     await expect(processedModal).toBeVisible();
-    await expect(processedModal.getByText("追进项发票").first()).toBeVisible();
+    await expect(processedModal.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeVisible();
     await expect(processedModal.getByText("浏览器异常备注").first()).toBeVisible();
 
     const workbenchLoadsBeforeCancel = api.count("GET /api/workbench");

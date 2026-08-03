@@ -70,7 +70,7 @@ test.describe("workbench read-export permission browser flow", () => {
     await page.goto("/");
 
     const { zoneLocator: pairedZone, group: pairedGroup } = await selectWorkbenchGroupRows(page, "paired");
-    await expect(pairedGroup.getByText("完全关联").first()).toBeVisible();
+    await expect(pairedGroup.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeVisible();
 
     await expect(pairedZone.getByRole("button", { name: "撤回关联" })).toBeDisabled();
     await expect(pairedGroup.getByRole("button", { name: "更多" })).toHaveCount(0);
@@ -97,7 +97,7 @@ test.describe("workbench read-export permission browser flow", () => {
     await unpairedZone.getByRole("button", { name: /已处理异常3项/ }).click();
     const processedModal = page.getByRole("dialog", { name: "已处理异常弹窗" });
     await expect(processedModal).toBeVisible();
-    await expect(processedModal.getByText("追进项发票").first()).toBeVisible();
+    await expect(processedModal.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeVisible();
     await expect(processedModal.getByText("浏览器异常备注").first()).toBeVisible();
     await expect(processedModal.getByRole("button", { name: "取消异常处理" })).toHaveCount(0);
     await processedModal.getByRole("button", { name: "关闭" }).click();
@@ -169,7 +169,7 @@ test.describe("workbench App Health write-safety browser flow", () => {
 
     await expect(page.getByRole("button", { name: "写操作暂不可用" })).toBeVisible();
     const { zoneLocator: pairedZone, group: pairedGroup } = await selectWorkbenchGroupRows(page, "paired");
-    await expect(pairedGroup.getByText("完全关联").first()).toBeVisible();
+    await expect(pairedGroup.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeVisible();
     await expect(pairedZone.getByRole("button", { name: "撤回关联" })).toBeDisabled();
     await expect(pairedGroup.getByRole("button", { name: "更多" })).toHaveCount(0);
     await expect(pairedGroup.getByRole("button", { name: "取消关联" })).toHaveCount(0);

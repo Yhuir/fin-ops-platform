@@ -871,6 +871,8 @@ describe("Workbench candidate grouping layout", () => {
 
   test("allows invoice candidate rows to grow vertically while long text stays inside cells", () => {
     expect(getCssRuleBody(".record-card-invoice.record-card-has-action")).not.toMatch(/\bheight\s*:/);
+    expect(getCssRuleBody(".candidate-group-cell")).not.toMatch(/(?:^|\n)\s*height\s*:\s*100%/);
+    expect(getCssRuleBody(".candidate-group-cell")).toMatch(/min-height:\s*100%/);
     expect(getStandaloneCssRuleBody(".record-card-cell", 1)).toMatch(/overflow:\s*hidden/);
     expect(getStandaloneCssRuleBody(".record-card-cell-content")).not.toMatch(/(?:^|\n)\s*height\s*:\s*100%/);
     expect(getStandaloneCssRuleBody(".record-card-cell-content")).toMatch(/overflow:\s*hidden/);
@@ -1992,7 +1994,7 @@ describe("Workbench candidate grouping layout", () => {
     expect(getCssRuleBody(".candidate-group-cell-sheet-multi .candidate-group-stack-sheet-multi")).toMatch(
       /flex:\s*1 1 auto/,
     );
-    expect(getCssRuleBody(".record-card-sheet-row-split")).toMatch(/flex:\s*1 1 0/);
+    expect(getCssRuleBody(".record-card-sheet-row-split")).toMatch(/flex:\s*1 0 auto/);
   });
 
   test("keeps selected related and highlighted rows compatible with sheet state classes", () => {

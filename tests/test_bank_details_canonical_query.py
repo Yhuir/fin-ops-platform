@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import unittest
 from contextlib import contextmanager
 from decimal import Decimal
-import unittest
 
 from fin_ops_platform.services.bank_details_canonical_query import (
     BANK_DETAIL_EXPORT_ROW_LIMIT,
@@ -411,13 +411,77 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
 
         _sql, params = transaction.reads[0]
         self.assertEqual(
-            params[7:10],
+            params[10:13],
             (
                 ["turnover-personal"],
                 ["turnover-personal"],
                 ["turnover-personal"],
             ),
         )
+
+    def test_workbench_category_projection_reuses_bounded_canonical_classifier(self) -> None:
+        definition = {
+            "code": "fee",
+            "label": "手续费",
+            "status": "active",
+            "priority": 2,
+            "output_primary_label": "费用",
+            "output_sub_label": "手续费",
+            "rules": {"match_fields": ["summary_text"], "contains_any": ["手续费"]},
+        }
+
+        class Transaction:
+            def __init__(self) -> None:
+                self.reads: list[tuple[str, tuple[object, ...]]] = []
+
+            def fetch_all(
+                self,
+                sql: str,
+                params: tuple[object, ...] = (),
+            ) -> list[dict[str, object]]:
+                self.reads.append((sql, params))
+                return [
+                    {
+                        "row_id": "bank-legacy-1",
+                        "amount": Decimal("12.34"),
+                        "direction": "expense",
+                        "confirmation_id": "confirmation-1",
+                        "confirmed_category_code": "fee",
+                        "confirmation_version": 1,
+                        "confirmation_raw_payload": {},
+                        "auto_resolution_status": "needs_confirmation",
+                        "matched_definitions": [],
+                    }
+                ]
+
+        transaction = Transaction()
+        projections = PostgresBankDetailsCanonicalQueryRepository.workbench_category_projection_rows(
+            transaction,
+            settings={"bank_transaction_tags": {"definitions": [definition]}},
+            transaction_ids=["bank-legacy-1", "bank-legacy-1", ""],
+        )
+
+        self.assertEqual(
+            projections["bank-legacy-1"],
+            {
+                "category_code": "fee",
+                "category_label": "手续费",
+                "category_path": ["自动识别", "手续费"],
+                "category_primary_label": "费用",
+                "category_sub_label": "手续费",
+                "category_label_path": ["费用", "手续费"],
+                "category_source": "manual_confirmation",
+                "category_resolution_status": "manual_confirmed",
+            },
+        )
+        self.assertEqual(len(transaction.reads), 1)
+        sql, params = transaction.reads[0]
+        normalized_sql = " ".join(sql.split()).lower()
+        self.assertIn("target_bank_rows as materialized", normalized_sql)
+        self.assertIn("from classified_with_semantics", normalized_sql)
+        self.assertIn("row_id = any(%s::text[])", normalized_sql)
+        self.assertEqual(params[-1], ["bank-legacy-1"])
+        self.assertEqual(sql.count("%s"), len(params))
 
 
 if __name__ == "__main__":

@@ -41,7 +41,7 @@ test.describe("workbench withdraw browser flow", () => {
     const previewDialog = page.getByRole("dialog", { name: "撤回关联" });
     await expect(previewDialog).toBeVisible();
     await expect(previewDialog.getByText("所选记录已确认关联，可在此撤回这组配对关系。")).toBeVisible();
-    await expect(previewDialog.getByTestId("relation-preview-before").getByText("完全关联").first()).toBeVisible();
+    await expect(previewDialog.getByTestId("relation-preview-before").getByText("智能工厂设备商").first()).toBeVisible();
     const afterPreview = previewDialog.getByTestId("relation-preview-after");
     await expect(afterPreview.getByRole("row", { name: /陈涛.*智能工厂设备商/ })).toBeVisible();
     await expect(afterPreview.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeVisible();

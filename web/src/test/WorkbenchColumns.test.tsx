@@ -416,7 +416,7 @@ describe("Workbench columns and inline actions", () => {
     expect(within(bankRow as HTMLElement).getByText("14:22")).toBeInTheDocument();
   });
 
-  test("renders internal transfer matched status in bank counterparty metadata while keeping inline detail available", () => {
+  test("removes internal transfer relation status from bank counterparty metadata while keeping inline detail available", () => {
     render(
       <WorkbenchRecordCard
         actionMode="default"
@@ -456,11 +456,12 @@ describe("Workbench columns and inline actions", () => {
     );
 
     expect(screen.getByRole("button", { name: /查看银行流水 .* 详情/ })).toBeInTheDocument();
-    expect(screen.getByText("已匹配：")).toBeInTheDocument();
-    expect(screen.getByText("内部往来款")).toBeInTheDocument();
+    expect(screen.queryByText("已匹配：")).not.toBeInTheDocument();
+    expect(screen.queryByText("内部往来款")).not.toBeInTheDocument();
+    expect(screen.getByText("2026-03-20")).toBeInTheDocument();
   });
 
-  test("renders salary auto-match status as a two-line matched tag on the same metadata row as time", () => {
+  test("removes salary relation status while retaining bank transaction time", () => {
     render(
       <WorkbenchRecordCard
         actionMode="default"
@@ -500,15 +501,11 @@ describe("Workbench columns and inline actions", () => {
       />,
     );
 
-    const statusTag = screen.getByText("已匹配：").closest(".status-tag");
-    expect(statusTag).not.toBeNull();
-    expect(within(statusTag as HTMLElement).getByText("工资")).toBeInTheDocument();
-    const metadataRow = statusTag?.closest(".compound-cell-secondary");
-    expect(metadataRow).not.toBeNull();
-    expect(screen.getByText("2026-03-20").closest(".compound-cell-secondary")).toBe(metadataRow);
+    expect(screen.queryByText("已匹配：")).not.toBeInTheDocument();
+    expect(screen.getByText("2026-03-20").closest(".compound-cell-secondary")).not.toBeNull();
   });
 
-  test("renders bank invoice relation status on the same metadata row as the two-line datetime tag", async () => {
+  test("removes bank invoice relation status from counterparty metadata", async () => {
     installMockApiFetch();
     renderWorkbenchPage();
     await screen.findByText("赵华");
@@ -523,14 +520,12 @@ describe("Workbench columns and inline actions", () => {
     const counterpartyCell = within(bankRow as HTMLElement)
       .getByText("华东设备供应商")
       .closest(".compound-cell-value");
-    const relationStatus = within(bankRow as HTMLElement).getByText("完全关联");
     const timeDate = within(bankRow as HTMLElement).getByText("2026-03-25");
     const timeTag = timeDate.closest(".inline-meta-tag-datetime");
 
     expect(counterpartyCell).not.toBeNull();
     expect(timeTag).not.toBeNull();
-    expect(relationStatus.closest(".compound-cell-secondary")).not.toBeNull();
-    expect(timeTag?.closest(".compound-cell-secondary")).toBe(relationStatus.closest(".compound-cell-secondary"));
+    expect(within(bankRow as HTMLElement).queryByText("完全关联")).not.toBeInTheDocument();
   });
 
   test("renders a bank direction tag on the second line under the amount instead of a dedicated direction column", async () => {
@@ -577,7 +572,7 @@ describe("Workbench columns and inline actions", () => {
     expect(within(moneyMetaRow as HTMLElement).getByText("招行")).toBeInTheDocument();
   });
 
-  test("renders the bank detail category tag in the bank amount metadata row", () => {
+  test("renders the bank detail category tag on a dedicated third line under the amount", () => {
     render(
       <WorkbenchRecordCard
         actionMode="default"
@@ -604,6 +599,7 @@ describe("Workbench columns and inline actions", () => {
           availableActions: ["detail"],
           detailFields: [],
           categoryLabel: "公司暂借款：待还款",
+          categoryResolutionStatus: "manual_confirmed",
           categoryPath: ["借入", "公司往来款", "待还款"],
           tableValues: {
             counterparty: "梁希涛",
@@ -624,14 +620,62 @@ describe("Workbench columns and inline actions", () => {
 
     const categoryTag = screen.getByText("公司暂借款：待还款");
     const accountTag = screen.getByText("8106").closest(".bank-account-tag");
-    const metadataRow = categoryTag.closest(".money-cell-meta-row");
+    const categoryRow = categoryTag.closest(".money-cell-category-row");
+    const metadataRow = accountTag?.closest(".money-cell-meta-row");
 
     expect(categoryTag).toHaveClass("bank-category-tag");
     expect(categoryTag).toHaveClass("bank-chip-auto-size");
+    expect(categoryRow).not.toBeNull();
     expect(metadataRow).not.toBeNull();
-    expect(accountTag?.closest(".money-cell-meta-row")).toBe(metadataRow);
+    expect(categoryTag.closest(".money-cell-meta-row")).toBeNull();
     expect(within(metadataRow as HTMLElement).getByText("建行")).toBeInTheDocument();
     expect(within(metadataRow as HTMLElement).getByText("支出")).toHaveClass("direction-tag");
+  });
+
+  test.each([
+    ["unmatched", "待分类"],
+    ["needs_confirmation", "待确认"],
+  ] as const)("renders %s bank category resolution as %s", (categoryResolutionStatus, label) => {
+    render(
+      <WorkbenchRecordCard
+        actionMode="default"
+        canMutateData
+        columns={[{ key: "amount", label: "金额", kind: "money", track: "minmax(144px, 144fr)", minWidth: 144 }]}
+        onOpenDetail={() => {}}
+        onRowAction={() => {}}
+        onSelectRow={() => {}}
+        paneId="bank"
+        row={{
+          id: `bank-${categoryResolutionStatus}`,
+          recordType: "bank",
+          label: "银行流水",
+          status: "完全关联",
+          statusCode: "fully_linked",
+          statusTone: "success",
+          exceptionHandled: false,
+          amount: "100.00",
+          counterparty: "测试公司",
+          actionVariant: "detail-only",
+          availableActions: ["detail"],
+          detailFields: [],
+          categoryResolutionStatus,
+          tableValues: {
+            amount: "100.00",
+            direction: "支出",
+            paymentAccount: "建设银行 8106",
+            counterparty: "测试公司",
+            transactionTime: "2026-08-03 10:00:00",
+            invoiceRelationStatus: "完全关联",
+          },
+        }}
+        rowState="idle"
+        showWorkflowActions
+        zoneId="paired"
+      />,
+    );
+
+    expect(screen.getByText(label)).toHaveClass("bank-category-tag");
+    expect(screen.queryByText("完全关联")).not.toBeInTheDocument();
   });
 
   test("renders short bank names in bank row amount account tags", () => {

@@ -56,6 +56,7 @@
 - 事务必须显式执行 `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`。
 - transactions 固定使用 settings/read query、set-based rows/summary/facets query 和一次 bounded active relation overlap query；不得逐行查 relation/category。
 - 外部往来款可在自己的同一只读快照内复用 repository 的 set-based effective-category rows helper；该 helper 只返回指定 tag codes 的 canonical rows，不返回 Bank Details 页面 DTO、relation 标签或 freshness 状态。
+- 关联台 generation builder 可对目标银行 identity 一次批量复用同一 canonical classifier，取得 effective category 与 resolution status；该调用由关联台 read model owner 负责 freshness/publish，银行明细写链不恢复跨页面 fan-out。
 - accounts 固定使用 settings、账户余额聚合和账户范围计数查询；不得在 Python 全量累计。
 - 内部转账匹配使用 SQL `±2 days` bounded context；自动规则只为实际使用的匹配字段构建文本 normalization。
 - 查询次数 guard 位于 `tests/test_bank_details_canonical_query.py`。

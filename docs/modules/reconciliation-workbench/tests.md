@@ -197,6 +197,13 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_w
 - Performance：测试和 whole-repo scan 保护旧 `assignRowsByAmountFallback` / `findUniqueAmountSubset` 组合枚举不存在；实现只使用已有 DTO 的 Map/Set 线性判断，没有新请求、state/effect、DOM 测量、依赖、read model 或 worker。
 - Workbench month/all schema 升至 v9，旧 v8 generation 与 page cache 必须返回 builder mismatch 并经既有 freshness gateway 重建。
 
+## 2026-08-03 流水分类与内容高度回归
+
+- Business/service：`test_bank_details_canonical_query.py` 保护 Workbench 目标银行 IDs 通过同一 bounded canonical classifier 得到 effective category 与 `category_resolution_status`，包含人工确认优先级和 SQL 参数边界。
+- Read model/freshness：`test_workbench_sql_runtime.py` 保护单次批量 enrich、缺分类输出 `unmatched`、OA 不受影响；月份/all source proof 包含分类事实和确认/撤销版本，跨月 active relation 银行成员也进入对应月份 proof。month/all schema 升至 v16，旧 v15 generation 必须 stale。
+- Frontend/API/layout：`WorkbenchApi.test.ts` 保护 resolution status 映射；`WorkbenchColumns.test.tsx` 保护金额三层、待分类/待确认与旧 relation status chip 删除；`RelationGroupGrid.test.tsx` 保护 cell 使用内容驱动 `min-height`、多记录项不可收缩裁切。
+- Regression/performance：相关后端 404 条和前端 116 条回归通过；分类 enrich 是每 scope 一次 set-based query，不新增逐行 I/O、页面轮询、DOM 测量、worker、cache 或跨页写后 fan-out。
+
 ## 2026-08-03 all-scope 成员筛选 SQL 回归
 
 - `tests/test_workbench_sql_runtime.py` 保护 `month=all` 的搜索成员 join 只从 `g` 读取 group 投影字段，禁止重新生成会与成员 join 的 `zone` 冲突的裸列选择。

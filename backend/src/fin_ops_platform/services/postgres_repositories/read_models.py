@@ -12,12 +12,6 @@ from typing import Any
 from urllib.parse import unquote
 from uuid import uuid4
 
-from fin_ops_platform.services.read_model_freshness import normalize_source_versions
-from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
-    OA_PENDING_PAYMENT_COVERAGE_ONLY_SCHEMA_VERSION,
-    oa_pending_payment_coverage_only_source_versions,
-)
-from fin_ops_platform.services.postgres_repositories.oa_projection import COMPLETED_WORKFLOW_STATUS_SQL
 from fin_ops_platform.services.postgres_repositories.common import (
     decimal_text,
     int_value,
@@ -31,6 +25,12 @@ from fin_ops_platform.services.postgres_repositories.common import (
     text_list,
     without_keys,
 )
+from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
+    OA_PENDING_PAYMENT_COVERAGE_ONLY_SCHEMA_VERSION,
+    oa_pending_payment_coverage_only_source_versions,
+)
+from fin_ops_platform.services.postgres_repositories.oa_projection import COMPLETED_WORKFLOW_STATUS_SQL
+from fin_ops_platform.services.read_model_freshness import normalize_source_versions
 from fin_ops_platform.services.workbench_read_model_version import (
     WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION,
     WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION,
@@ -41,6 +41,7 @@ from fin_ops_platform.services.workbench_read_model_version import (
     WorkbenchRowDetailInvariantError,
 )
 from fin_ops_platform.services.workbench_relation_modes import TURNOVER_MANUAL_CLOSURE_RELATION_MODE
+
 MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
 WORKBENCH_PANES = ("oa", "bank", "invoice")
 WORKBENCH_FILTER_PLACEHOLDERS = {"", "--", "—"}
@@ -7869,6 +7870,8 @@ def _workbench_composed_all_source_versions(rows: list[dict[str, Any]]) -> dict[
         "workbench_row_overrides_updated_at",
         "oa_pending_payment_bank_claims_updated_at",
         "bank_transactions_updated_at",
+        "bank_transaction_categories_updated_at",
+        "bank_transaction_category_confirmations_updated_at",
         "invoices_updated_at",
         "oa_projection_updated_at",
         "etc_submission_batches_updated_at",

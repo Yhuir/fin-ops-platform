@@ -188,7 +188,6 @@ function buildRowAriaLabel(row: WorkbenchRecord, paneId: WorkbenchRecordType, co
   if (paneId === "bank") {
     pushValue(row.tableValues.paymentAccount);
     pushValue(row.categoryLabel);
-    pushValue(row.tableValues.invoiceRelationStatus);
   }
 
   return values.join(" ");
@@ -248,6 +247,7 @@ function renderCellValue(
       row.tableValues.direction ?? "",
       row.tableValues.paymentAccount ?? "",
       row.categoryLabel ?? "",
+      row.categoryResolutionStatus ?? "",
       row,
       zoneId,
       searchQuery,
@@ -269,7 +269,6 @@ function renderCellValue(
     return renderBankCounterpartyValue(
       value,
       row.tableValues.transactionTime ?? "",
-      row.tableValues.invoiceRelationStatus ?? "",
       showInlineDetail,
       onOpenDetail,
       searchQuery,
@@ -451,6 +450,7 @@ function renderBankMoneyValue(
   direction: string,
   paymentAccount: string,
   categoryLabel: string,
+  categoryResolutionStatus: string,
   row: WorkbenchRecord,
   zoneId: "paired" | "unpaired",
   searchQuery = "",
@@ -459,8 +459,12 @@ function renderBankMoneyValue(
   const normalizedDirection = resolveDirectionForMoneyCell(columnKey, direction, hasValue);
   const shouldShowDirectionTag = hasValue && normalizedDirection !== null;
   const shouldShowAccount = hasValue && paymentAccount !== "--" && paymentAccount !== "—" && paymentAccount !== "";
-  const normalizedCategoryLabel = categoryLabel.trim();
+  const normalizedCategoryLabel = resolveBankCategoryDisplayLabel(
+    categoryLabel,
+    categoryResolutionStatus,
+  );
   const shouldShowCategory = normalizedCategoryLabel !== "" && normalizedCategoryLabel !== "--" && normalizedCategoryLabel !== "—";
+  const pendingCategory = categoryResolutionStatus === "unmatched" || categoryResolutionStatus === "needs_confirmation";
 
   return (
     <span className="money-cell-stack">
@@ -468,7 +472,7 @@ function renderBankMoneyValue(
         <span>{highlightSearchText(hasValue ? value : "--", searchQuery)}</span>
         {columnKey === "amount" && zoneId === "paired" ? <BankAmountMismatchWarning row={row} /> : null}
       </span>
-      {shouldShowDirectionTag || shouldShowAccount || shouldShowCategory ? (
+      {shouldShowDirectionTag || shouldShowAccount ? (
         <span className="money-cell-meta-row">
           {shouldShowDirectionTag ? (
             <span className={`direction-tag direction-tag-${normalizedDirection === "收入" ? "inflow" : "outflow"}`}>
@@ -480,15 +484,30 @@ function renderBankMoneyValue(
               {renderHighlightedBankAccount(compactWorkbenchBankAccountLabel(paymentAccount), searchQuery)}
             </span>
           ) : null}
-          {shouldShowCategory ? (
-            <span className="inline-meta-tag bank-category-tag bank-chip-auto-size" title={normalizedCategoryLabel}>
-              {highlightSearchText(normalizedCategoryLabel, searchQuery)}
-            </span>
-          ) : null}
+        </span>
+      ) : null}
+      {shouldShowCategory ? (
+        <span className="money-cell-category-row">
+          <span
+            className={`inline-meta-tag bank-category-tag bank-chip-auto-size${pendingCategory ? " bank-category-pending" : ""}`}
+            title={normalizedCategoryLabel}
+          >
+            {highlightSearchText(normalizedCategoryLabel, searchQuery)}
+          </span>
         </span>
       ) : null}
     </span>
   );
+}
+
+function resolveBankCategoryDisplayLabel(categoryLabel: string, resolutionStatus: string) {
+  if (resolutionStatus === "needs_confirmation") {
+    return "待确认";
+  }
+  if (resolutionStatus === "unmatched") {
+    return "待分类";
+  }
+  return categoryLabel.trim();
 }
 
 function renderOaMoneyValue(
@@ -699,13 +718,11 @@ function highlightSearchText(value: string, query: string) {
 function renderBankCounterpartyValue(
   counterparty: string,
   transactionTime: string,
-  relationStatus: string,
   showInlineDetail: boolean,
   onOpenDetail: () => void,
   searchQuery = "",
 ) {
   const hasTransactionTime = transactionTime !== "--" && transactionTime !== "—" && transactionTime !== "";
-  const hasRelationStatus = relationStatus !== "--" && relationStatus !== "—" && relationStatus !== "";
 
   return (
     <span className="compound-cell-value">
@@ -726,36 +743,13 @@ function renderBankCounterpartyValue(
           </button>
         ) : null}
       </span>
-      {hasTransactionTime || hasRelationStatus ? (
+      {hasTransactionTime ? (
         <span className="compound-cell-secondary compound-cell-secondary-nowrap">
-          {hasTransactionTime ? renderInlineDateTimeTag(transactionTime, searchQuery) : null}
-          {hasRelationStatus ? renderBankRelationStatusTag(relationStatus, searchQuery) : null}
+          {renderInlineDateTimeTag(transactionTime, searchQuery)}
         </span>
       ) : null}
     </span>
   );
-}
-
-function renderBankRelationStatusTag(relationStatus: string, searchQuery = "") {
-  if (relationStatus === "已匹配：工资") {
-    return (
-      <span className="status-tag status-tag-split">
-        <span className="status-tag-line">{highlightSearchText("已匹配：", searchQuery)}</span>
-        <span className="status-tag-line">{highlightSearchText("工资", searchQuery)}</span>
-      </span>
-    );
-  }
-
-  if (relationStatus === "已匹配：内部往来款") {
-    return (
-      <span className="status-tag status-tag-split">
-        <span className="status-tag-line">{highlightSearchText("已匹配：", searchQuery)}</span>
-        <span className="status-tag-line">{highlightSearchText("内部往来款", searchQuery)}</span>
-      </span>
-    );
-  }
-
-  return <span className="status-tag">{highlightSearchText(relationStatus, searchQuery)}</span>;
 }
 
 function renderInlineDateTimeTag(value: string, searchQuery = "") {

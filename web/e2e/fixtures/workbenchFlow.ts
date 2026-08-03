@@ -101,7 +101,7 @@ export async function confirmWorkbenchRelation(
     await expect(previewDialog.getByTestId("relation-preview-before").getByText("智能工厂设备商").first()).toBeVisible();
     await mark(
       "finalSettledLatencyMs",
-      expect(previewDialog.getByTestId("relation-preview-after").getByText("完全关联").first()).toBeVisible(),
+      expect(previewDialog.getByTestId("relation-preview-after").getByText("智能工厂设备商").first()).toBeVisible(),
     );
   });
 

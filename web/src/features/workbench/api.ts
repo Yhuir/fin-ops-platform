@@ -131,6 +131,7 @@ type ApiWorkbenchRow = {
   category_sub_label?: string | null;
   category_label_path?: string[] | null;
   category_source?: string | null;
+  category_resolution_status?: string | null;
   bank_text_fields?: Array<{
     label?: string | null;
     value?: string | null;
@@ -1345,6 +1346,7 @@ function mapRow(row: ApiWorkbenchRow): WorkbenchRecord {
     categorySubLabel: toDisplayValue(row.category_sub_label, "") || undefined,
     categoryLabelPath: Array.isArray(row.category_label_path) ? row.category_label_path.map((item) => String(item).trim()).filter(Boolean) : undefined,
     categorySource: toDisplayValue(row.category_source, "") || undefined,
+    categoryResolutionStatus: toDisplayValue(row.category_resolution_status, "") || undefined,
     bankTextFields: row.type === "bank" ? mapBankTextFields(row) : undefined,
     relationNote: toDisplayValue(row.relation_note, "") || undefined,
     relationAmountCheck: mapRelationAmountCheck(row.relation_amount_check),

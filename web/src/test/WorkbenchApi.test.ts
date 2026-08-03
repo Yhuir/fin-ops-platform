@@ -713,6 +713,8 @@ describe("workbench api bank amount mapping", () => {
                   id: "bank-paired",
                   type: "bank",
                   debit_amount: "100.00",
+                  category_label: "手续费",
+                  category_resolution_status: "manual_confirmed",
                   invoice_relation: { code: "fully_linked", label: "完全关联", tone: "success" },
                   available_actions: ["detail"],
                 },
@@ -764,6 +766,10 @@ describe("workbench api bank amount mapping", () => {
         feeDescription: "",
       },
     ]);
+    expect(group.rows.bank[0]).toMatchObject({
+      categoryLabel: "手续费",
+      categoryResolutionStatus: "manual_confirmed",
+    });
     expect(group.rows.invoice[0].sourceExpenseItemId).toBe("oa-paired:item:1");
   });
 

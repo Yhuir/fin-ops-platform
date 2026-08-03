@@ -42,7 +42,7 @@ async function openConfirmRelationPreview(page: Page) {
   const previewDialog = page.getByRole("dialog", { name: "确认关联" });
   await expect(previewDialog).toBeVisible();
   await expect(previewDialog.getByTestId("relation-preview-before").getByText("智能工厂设备商").first()).toBeVisible();
-  await expect(previewDialog.getByTestId("relation-preview-after").getByText("完全关联").first()).toBeVisible();
+  await expect(previewDialog.getByTestId("relation-preview-after").getByText("智能工厂设备商").first()).toBeVisible();
   return { openZone, openGroup, previewDialog };
 }
 
@@ -60,7 +60,7 @@ async function openWithdrawRelationPreview(page: Page) {
   await pairedZone.getByRole("button", { name: "撤回关联" }).click();
   const previewDialog = page.getByRole("dialog", { name: "撤回关联" });
   await expect(previewDialog).toBeVisible();
-  await expect(previewDialog.getByTestId("relation-preview-before").getByText("完全关联").first()).toBeVisible();
+  await expect(previewDialog.getByTestId("relation-preview-before").getByText("智能工厂设备商").first()).toBeVisible();
   return { pairedGroup, pairedZone, previewDialog };
 }
 

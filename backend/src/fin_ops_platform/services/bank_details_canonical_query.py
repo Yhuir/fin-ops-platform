@@ -9,10 +9,10 @@ from typing import Any, Iterator
 from fin_ops_platform.services.bank_account_balance_canonical_rows import (
     BANK_ACCOUNT_BALANCE_CANONICAL_ROWS_SQL,
 )
-from fin_ops_platform.services.bank_details_service import BankDetailsService
 from fin_ops_platform.services.bank_details_export_service import (
     BANK_DETAIL_EXPORT_ROW_LIMIT,
 )
+from fin_ops_platform.services.bank_details_service import BankDetailsService
 from fin_ops_platform.services.bank_settings import bank_accounts_from_settings_payload
 from fin_ops_platform.services.bank_transaction_auto_category_service import (
     BankTransactionAutoCategoryService,
@@ -35,7 +35,6 @@ from fin_ops_platform.services.workbench_relation_modes import (
 from fin_ops_platform.services.workbench_row_identity import (
     row_type_for_workbench_row_id,
 )
-
 
 INVALID_BANK_TRANSACTION_STATUSES = (
     "deleted",
@@ -153,6 +152,67 @@ class PostgresBankDetailsCanonicalQueryRepository:
                 (*cte_params, normalized_codes),
             )
         )
+
+    @staticmethod
+    def workbench_category_projection_rows(
+        transaction: Any,
+        *,
+        settings: dict[str, Any],
+        transaction_ids: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        normalized_ids = list(dict.fromkeys(text_list(transaction_ids)))
+        if not normalized_ids:
+            return {}
+        tags = settings.get("bank_transaction_tags")
+        if not isinstance(tags, dict):
+            tags = default_bank_transaction_tag_dictionary_payload()
+        definitions = [
+            dict(item)
+            for item in list(tags.get("definitions") or [])
+            if isinstance(item, dict)
+        ]
+        cte_sql, cte_params = _classification_cte(
+            definitions=definitions,
+            date_from=None,
+            date_to=None,
+            candidate_transaction_ids=normalized_ids,
+        )
+        rows = list(
+            transaction.fetch_all(
+                f"""
+                with {cte_sql}
+                select *
+                from classified_with_semantics
+                where row_id = any(%s::text[])
+                order by row_id
+                """,
+                (*cte_params, normalized_ids),
+            )
+        )
+        payload = BankDetailsCanonicalQueryService._transactions_payload(
+            {
+                "settings": settings,
+                "rows": rows,
+                "relations": [],
+            },
+            account_key=None,
+            date_from=None,
+            date_to=None,
+        )
+        return {
+            str(row.get("id") or ""): {
+                "category_code": row.get("effective_category_code"),
+                "category_label": row.get("effective_category_label"),
+                "category_path": list(row.get("effective_category_path") or []),
+                "category_primary_label": row.get("effective_category_primary_label"),
+                "category_sub_label": row.get("effective_category_sub_label"),
+                "category_label_path": list(row.get("effective_category_label_path") or []),
+                "category_source": row.get("effective_category_source"),
+                "category_resolution_status": row.get("category_resolution_status") or "unmatched",
+            }
+            for row in list(payload.get("rows") or [])
+            if str(row.get("id") or "")
+        }
 
     def export_snapshot(
         self,
@@ -769,6 +829,7 @@ def _classification_cte(
     date_from: str | None,
     date_to: str | None,
     candidate_category_codes: list[str] | None = None,
+    candidate_transaction_ids: list[str] | None = None,
 ) -> tuple[str, list[Any]]:
     tag_definitions_json = json.dumps(
         definitions,
@@ -780,8 +841,12 @@ def _classification_cte(
         source_relation="canonical_rule_banks",
     )
     candidate_codes = text_list(candidate_category_codes) or None
+    target_ids = text_list(candidate_transaction_ids) or None
     params: list[Any] = [
         tag_definitions_json,
+        target_ids,
+        target_ids,
+        target_ids,
         "default",
         list(INVALID_BANK_TRANSACTION_STATUSES),
         date_from,
@@ -791,6 +856,9 @@ def _classification_cte(
         candidate_codes,
         candidate_codes,
         candidate_codes,
+        target_ids,
+        target_ids,
+        target_ids,
         [f"%{marker}%" for marker in INTERNAL_TRANSFER_MARKERS],
         [f"%{marker}%" for marker in INTERNAL_TRANSFER_MARKERS],
         [f"%{keyword}%" for keyword in COMPANY_NAME_KEYWORDS],
@@ -802,6 +870,17 @@ def _classification_cte(
         tag_definitions as materialized (
           select definition
           from jsonb_array_elements(%s::jsonb) as item(definition)
+        ),
+        target_bank_rows as materialized (
+          select
+            bank.amount,
+            coalesce(bank.trade_time, bank.txn_date::timestamptz) as trade_time_sort
+          from app.bank_transactions bank
+          where %s::text[] is not null
+            and (
+              bank.id::text = any(%s::text[])
+              or bank.legacy_mongo_id = any(%s::text[])
+            )
         ),
         source_rows as materialized (
           select
@@ -880,6 +959,22 @@ def _classification_cte(
               %s::text[] is null
               or confirmation.category_code = any(%s::text[])
               or manual.category = any(%s::text[])
+            )
+            and (
+              %s::text[] is null
+              or bank.id::text = any(%s::text[])
+              or bank.legacy_mongo_id = any(%s::text[])
+              or exists (
+                select 1
+                from target_bank_rows target
+                where round(abs(target.amount), 2) = round(abs(bank.amount), 2)
+                  and bank.txn_date between target.trade_time_sort::date - 4
+                                        and target.trade_time_sort::date + 4
+                  and abs(extract(epoch from (
+                    coalesce(bank.trade_time, bank.txn_date::timestamptz)
+                    - target.trade_time_sort
+                  ))) <= 345600
+              )
             )
         ),
         display_rows as materialized (

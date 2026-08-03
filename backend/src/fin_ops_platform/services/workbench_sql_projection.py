@@ -1,27 +1,32 @@
 from __future__ import annotations
 
+import re
 from collections import defaultdict
+from collections.abc import Callable
 from concurrent.futures import Future
 from copy import deepcopy
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
-import re
 from threading import Lock
 from typing import Any
 
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
+from fin_ops_platform.services.bank_batch_service import BANK_FLOW_RULE_BATCH_RELATION_MODE
+from fin_ops_platform.services.bank_details_canonical_query import (
+    PostgresBankDetailsCanonicalQueryRepository,
+)
 from fin_ops_platform.services.bank_settings import (
     bank_account_mappings_fingerprint_from_settings_payload,
     bank_auto_tag_rules_version_from_settings_payload,
 )
-from fin_ops_platform.services.bank_batch_service import BANK_FLOW_RULE_BATCH_RELATION_MODE
 from fin_ops_platform.services.no_oa_bank_batch_service import NO_OA_BANK_BATCH_RELATION_MODE
-from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
+from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
 from fin_ops_platform.services.oa_attachment_invoice_linking import (
     oa_attachment_best_source_link,
     oa_attachment_matches_oa,
     oa_attachment_parent_oa_id,
 )
+from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
     COMPLETED_WORKFLOW_STATUS_SQL,
@@ -30,26 +35,26 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
     PostgresOAProjectionRepository,
 )
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
-from fin_ops_platform.services.workbench_exception_case_service import ACTIVE_CASE_STATUSES
 from fin_ops_platform.services.workbench_etc_batch_link import relation_external_etc_batch_id
-from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
+from fin_ops_platform.services.workbench_exception_case_service import ACTIVE_CASE_STATUSES
+from fin_ops_platform.services.workbench_free_matching_engine import (
+    RULE_VERSION as WORKBENCH_FORMAL_RELATION_RULE_VERSION,
+)
 from fin_ops_platform.services.workbench_object_identity_arbitration import WorkbenchObjectIdentityArbitrationService
+from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
 from fin_ops_platform.services.workbench_query_service import (
     OA_ATTACHMENT_INVOICE_SOURCE_KIND,
     WorkbenchQueryService,
+)
+from fin_ops_platform.services.workbench_read_model_version import (
+    WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION,
+    WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION,
 )
 from fin_ops_platform.services.workbench_relation_alignment_service import WorkbenchRelationAlignmentService
 from fin_ops_platform.services.workbench_relation_grouping import WorkbenchRelationGroupingService
 from fin_ops_platform.services.workbench_relation_requirements import (
     evaluate_bank_relation_completion,
 )
-from fin_ops_platform.services.workbench_read_model_version import (
-    WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION,
-    WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION,
-)
-from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
-from fin_ops_platform.services.workbench_free_matching_engine import RULE_VERSION as WORKBENCH_FORMAL_RELATION_RULE_VERSION
-
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
@@ -77,16 +82,25 @@ class WorkbenchSqlProjectionBuilder:
         read_model_repository: PostgresReadModelRepository | None = None,
         oa_query_service: WorkbenchQueryService | None = None,
         bank_account_resolver: BankAccountResolver | None = None,
+        bank_category_projection_loader: Callable[
+            [list[str], dict[str, Any]], dict[str, dict[str, Any]]
+        ]
+        | None = None,
     ) -> None:
         self._connection = connection
         self._read_model_repository = read_model_repository or PostgresReadModelRepository(connection)
         self._bank_account_mapping_cache: dict[str, str] | None = None
+        self._settings_payload_cache: dict[str, Any] | None = None
         self._source_version_flights_lock = Lock()
         self._source_version_flights: dict[
             str,
             Future[dict[str, object] | None],
         ] = {}
         self._bank_account_resolver = bank_account_resolver or BankAccountResolver(self._bank_account_mapping_dict)
+        self._bank_category_projection_loader = (
+            bank_category_projection_loader
+            or self._load_bank_category_projection
+        )
         if oa_query_service is not None:
             self._oa_query_service = oa_query_service
         else:
@@ -140,12 +154,7 @@ class WorkbenchSqlProjectionBuilder:
     def _bank_account_mapping_dict(self) -> dict[str, str]:
         if self._bank_account_mapping_cache is not None:
             return dict(self._bank_account_mapping_cache)
-        row = self._connection.fetch_one(
-            "select settings_payload from app.app_settings where settings_key = %s",
-            ("app_settings",),
-        )
-        payload = row_payload(row, "settings_payload")
-        settings = payload if isinstance(payload, dict) else {}
+        settings = self._settings_payload()
         mappings: dict[str, str] = {}
         for item in list(settings.get("bank_account_mappings") or []):
             if not isinstance(item, dict):
@@ -156,6 +165,29 @@ class WorkbenchSqlProjectionBuilder:
                 mappings[last4] = bank_name
         self._bank_account_mapping_cache = mappings
         return dict(mappings)
+
+    def _settings_payload(self) -> dict[str, Any]:
+        if self._settings_payload_cache is not None:
+            return dict(self._settings_payload_cache)
+        row = self._connection.fetch_one(
+            "select settings_payload from app.app_settings where settings_key = %s",
+            ("app_settings",),
+        )
+        payload = row_payload(row, "settings_payload")
+        settings = payload if isinstance(payload, dict) else {}
+        self._settings_payload_cache = dict(settings)
+        return dict(settings)
+
+    def _load_bank_category_projection(
+        self,
+        transaction_ids: list[str],
+        settings: dict[str, Any],
+    ) -> dict[str, dict[str, Any]]:
+        return PostgresBankDetailsCanonicalQueryRepository.workbench_category_projection_rows(
+            self._connection,
+            settings=settings,
+            transaction_ids=transaction_ids,
+        )
 
     def rebuild_workbench_read_model_scope(
         self,
@@ -168,6 +200,7 @@ class WorkbenchSqlProjectionBuilder:
         if not MONTH_RE.match(normalized_scope):
             raise ValueError("workbench SQL projection scope_key must be a month shard YYYY-MM.")
         self._bank_account_mapping_cache = None
+        self._settings_payload_cache = None
         resolved_source_version = _int_or_none(source_version)
         if resolved_source_version is None:
             resolved_source_version = self._current_dirty_scope_source_version(normalized_scope)
@@ -178,6 +211,7 @@ class WorkbenchSqlProjectionBuilder:
         )
         relations = self._active_pair_relations_for_month(normalized_scope, set(rows_by_id))
         self._supplement_missing_relation_rows(rows_by_id, relations)
+        self._enrich_bank_category_projection(rows_by_id)
         payload = self._group_payload(
             normalized_scope,
             rows_by_id,
@@ -218,6 +252,27 @@ class WorkbenchSqlProjectionBuilder:
             "published": normalized_scope in set(published_scope_keys or set()),
         }
 
+    def _enrich_bank_category_projection(
+        self,
+        rows_by_id: dict[str, dict[str, Any]],
+    ) -> None:
+        transaction_ids = sorted(
+            row_id
+            for row_id, row in rows_by_id.items()
+            if str(row.get("type") or "") == "bank"
+        )
+        if not transaction_ids:
+            return
+        projections = self._bank_category_projection_loader(
+            transaction_ids,
+            self._settings_payload(),
+        )
+        for transaction_id in transaction_ids:
+            projection = projections.get(transaction_id) or {
+                "category_resolution_status": "unmatched"
+            }
+            rows_by_id[transaction_id].update(projection)
+
     def source_versions_for_scope(self, scope_key: str) -> dict[str, object]:
         """Return the canonical version proof used by both projection and query gates."""
         normalized_scope = str(scope_key or "").strip()
@@ -241,6 +296,14 @@ class WorkbenchSqlProjectionBuilder:
                 select max(updated_at)::text
                 from app.bank_transactions
               ), '') as bank_transactions_updated_at,
+              coalesce((
+                select max(updated_at)::text
+                from app.bank_transaction_categories
+              ), '') as bank_transaction_categories_updated_at,
+              coalesce((
+                select max(greatest(confirmed_at, coalesce(revoked_at, confirmed_at)))::text
+                from app.bank_transaction_category_confirmations
+              ), '') as bank_transaction_category_confirmations_updated_at,
               coalesce((
                 select max(updated_at)::text
                 from app.invoices
@@ -288,6 +351,12 @@ class WorkbenchSqlProjectionBuilder:
                 payload.get("oa_pending_payment_bank_claims_updated_at") or ""
             ),
             "bank_transactions_updated_at": str(payload.get("bank_transactions_updated_at") or ""),
+            "bank_transaction_categories_updated_at": str(
+                payload.get("bank_transaction_categories_updated_at") or ""
+            ),
+            "bank_transaction_category_confirmations_updated_at": str(
+                payload.get("bank_transaction_category_confirmations_updated_at") or ""
+            ),
             "invoices_updated_at": str(payload.get("invoices_updated_at") or ""),
             "oa_projection_updated_at": str(payload.get("oa_projection_updated_at") or ""),
             "etc_submission_batches_updated_at": str(
@@ -469,6 +538,38 @@ class WorkbenchSqlProjectionBuilder:
                 where relations.status = 'active'
                   and relations.object_kind is not null
             ),
+            scoped_bank_rows as (
+                select distinct
+                  scopes.scope_month,
+                  bank.id,
+                  coalesce(bank.legacy_mongo_id, bank.id::text) as row_id,
+                  bank.amount,
+                  coalesce(bank.trade_time, bank.txn_date::timestamptz) as trade_time_sort
+                from requested_scopes scopes
+                join app.bank_transactions bank on bank.txn_month = scopes.scope_month
+                union
+                select distinct
+                  ids.scope_month,
+                  bank.id,
+                  coalesce(bank.legacy_mongo_id, bank.id::text) as row_id,
+                  bank.amount,
+                  coalesce(bank.trade_time, bank.txn_date::timestamptz) as trade_time_sort
+                from active_relation_row_ids ids
+                join app.bank_transactions bank
+                  on coalesce(bank.legacy_mongo_id, bank.id::text) = ids.row_id
+            ),
+            bank_category_context_updates as (
+                select distinct targets.scope_month, candidate.updated_at
+                from scoped_bank_rows targets
+                join app.bank_transactions candidate
+                  on round(abs(candidate.amount), 2) = round(abs(targets.amount), 2)
+                 and candidate.txn_date between targets.trade_time_sort::date - 4
+                                            and targets.trade_time_sort::date + 4
+                 and abs(extract(epoch from (
+                   coalesce(candidate.trade_time, candidate.txn_date::timestamptz)
+                   - targets.trade_time_sort
+                 ))) <= 345600
+            ),
             relation_versions as (
                 select
                   scope_month,
@@ -532,11 +633,37 @@ class WorkbenchSqlProjectionBuilder:
                 select scope_month, updated_at
                 from active_relation_objects
                 where object_kind = 'bank'
+                union all
+                select scope_month, updated_at
+                from bank_category_context_updates
             ),
             bank_versions as (
                 select scope_month, max(updated_at)::text as bank_transactions_updated_at
                 from bank_updates
                 group by scope_month
+            ),
+            bank_category_versions as (
+                select
+                  bank.scope_month,
+                  max(category.updated_at)::text as bank_transaction_categories_updated_at
+                from scoped_bank_rows bank
+                join app.bank_transaction_categories category
+                  on category.bank_transaction_id = bank.id
+                  or category.legacy_transaction_id in (bank.row_id, bank.id::text)
+                group by bank.scope_month
+            ),
+            bank_confirmation_versions as (
+                select
+                  bank.scope_month,
+                  max(greatest(
+                    confirmation.confirmed_at,
+                    coalesce(confirmation.revoked_at, confirmation.confirmed_at)
+                  ))::text as bank_transaction_category_confirmations_updated_at
+                from scoped_bank_rows bank
+                join app.bank_transaction_category_confirmations confirmation
+                  on confirmation.bank_transaction_id = bank.id
+                  or confirmation.legacy_transaction_id in (bank.row_id, bank.id::text)
+                group by bank.scope_month
             ),
             invoice_updates as (
                 select scopes.scope_month, invoice.updated_at
@@ -633,6 +760,8 @@ class WorkbenchSqlProjectionBuilder:
               overrides.row_overrides_updated_at,
               claims.oa_pending_payment_bank_claims_updated_at,
               bank.bank_transactions_updated_at,
+              bank_category.bank_transaction_categories_updated_at,
+              bank_confirmation.bank_transaction_category_confirmations_updated_at,
               invoice.invoices_updated_at,
               oa.oa_projection_updated_at,
               etc_submission.etc_submission_batches_updated_at,
@@ -649,6 +778,8 @@ class WorkbenchSqlProjectionBuilder:
             left join override_versions overrides using (scope_month)
             left join claim_versions claims using (scope_month)
             left join bank_versions bank using (scope_month)
+            left join bank_category_versions bank_category using (scope_month)
+            left join bank_confirmation_versions bank_confirmation using (scope_month)
             left join invoice_versions invoice using (scope_month)
             left join oa_versions oa using (scope_month)
             left join etc_submission_versions etc_submission using (scope_month)
@@ -673,6 +804,12 @@ class WorkbenchSqlProjectionBuilder:
                     row.get("oa_pending_payment_bank_claims_updated_at") or ""
                 ),
                 "bank_transactions_updated_at": str(row.get("bank_transactions_updated_at") or ""),
+                "bank_transaction_categories_updated_at": str(
+                    row.get("bank_transaction_categories_updated_at") or ""
+                ),
+                "bank_transaction_category_confirmations_updated_at": str(
+                    row.get("bank_transaction_category_confirmations_updated_at") or ""
+                ),
                 "invoices_updated_at": str(row.get("invoices_updated_at") or ""),
                 "oa_projection_updated_at": str(row.get("oa_projection_updated_at") or ""),
                 "etc_submission_batches_updated_at": str(

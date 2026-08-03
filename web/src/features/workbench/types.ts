@@ -59,6 +59,14 @@ export type WorkbenchAmountCheck = {
 
 export type WorkbenchZoneId = "paired" | "unpaired";
 
+export type WorkbenchBankCategoryResolutionStatus =
+  | "unmatched"
+  | "auto_matched"
+  | "needs_confirmation"
+  | "internal_transfer"
+  | "manual_confirmed"
+  | (string & {});
+
 export type WorkbenchRecord = {
   id: string;
   caseId?: string;
@@ -88,6 +96,7 @@ export type WorkbenchRecord = {
   categorySubLabel?: string;
   categoryLabelPath?: string[];
   categorySource?: string;
+  categoryResolutionStatus?: WorkbenchBankCategoryResolutionStatus;
   bankTextFields?: WorkbenchBankTextField[];
   relationNote?: string;
   relationAmountCheck?: WorkbenchAmountCheck;
