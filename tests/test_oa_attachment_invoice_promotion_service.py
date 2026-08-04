@@ -97,6 +97,57 @@ class OAAttachmentInvoicePromotionServiceTests(unittest.TestCase):
         )
         self.assertEqual(repository.atomic_save_calls[0]["debounce_seconds"], 0)
 
+    def test_manual_refresh_reconciles_matching_when_canonical_invoices_are_unchanged(self) -> None:
+        payload = _attachment("26539150014000401220", "145.00", "item-0", "outbound.pdf")
+        repository = FakeAtomicInvoiceRepository([_invoice(payload)])
+        service = OAAttachmentInvoicePromotionService(
+            invoice_repository=repository,
+            promotion_mode_provider=lambda: OA_ATTACHMENT_INVOICE_PROMOTION_LINK_EXISTING_ONLY,
+        )
+        record = SimpleNamespace(
+            id="oa-exp-2321",
+            month="2026-06",
+            attachment_invoices=[payload],
+            attachment_evidences=[],
+        )
+
+        service.promote_records([record])
+        repository.atomic_save_calls.clear()
+        report = service.promote_records([record], ensure_matching=True)
+
+        self.assertEqual(report["summary"]["affected_invoice_count"], 0)
+        self.assertEqual(report["reason_counts"], {"already_linked": 1})
+        self.assertEqual(len(repository.atomic_save_calls), 1)
+        self.assertEqual(repository.atomic_save_calls[0]["invoices"], [])
+        self.assertEqual(
+            repository.atomic_save_calls[0]["scope_months"],
+            ["2026-04", "2026-05", "2026-06", "2026-07", "2026-08"],
+        )
+        self.assertEqual(
+            repository.atomic_save_calls[0]["reason"],
+            "oa_attachment_invoice_manual_refresh",
+        )
+        self.assertEqual(repository.atomic_save_calls[0]["debounce_seconds"], 0)
+
+    def test_manual_refresh_fails_closed_without_matching_reconciliation_support(self) -> None:
+        payload = _attachment("26539150014000401220", "145.00", "item-0", "outbound.pdf")
+        repository = FakeInvoiceRepository([_invoice(payload)])
+        service = OAAttachmentInvoicePromotionService(
+            invoice_repository=repository,
+            promotion_mode_provider=lambda: OA_ATTACHMENT_INVOICE_PROMOTION_LINK_EXISTING_ONLY,
+        )
+        record = SimpleNamespace(
+            id="oa-exp-2321",
+            month="2026-06",
+            attachment_invoices=[payload],
+            attachment_evidences=[],
+        )
+
+        service.promote_records([record])
+
+        with self.assertRaisesRegex(RuntimeError, "matching reconciliation support"):
+            service.promote_records([record], ensure_matching=True)
+
     def test_preloads_existing_invoice_when_attachment_only_has_bare_20_digit_invoice_no(self) -> None:
         payload = _attachment("26539150014000401220", "145.00", "item-0", "outbound.pdf")
         payload.pop("digital_invoice_no")

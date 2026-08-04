@@ -145,7 +145,10 @@ class OAManualImportService:
         promotion_summary: dict[str, object] = {}
         if self._attachment_invoice_promoter is not None and completed_records:
             try:
-                promotion = self._attachment_invoice_promoter.promote_records(completed_records)
+                promotion = self._attachment_invoice_promoter.promote_records(
+                    completed_records,
+                    ensure_matching=True,
+                )
                 promotion_summary = dict((promotion or {}).get("summary") or {})
             except Exception as exc:
                 errors.extend(

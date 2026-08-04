@@ -49,12 +49,14 @@ class OAAttachmentInvoicePromotionService:
         *,
         apply: bool = True,
         example_limit: int = 10,
+        ensure_matching: bool = False,
     ) -> dict[str, Any]:
         return self.promote_candidates(
             self.candidates_from_records(records),
             promotion_mode=self._promotion_mode(),
             apply=apply,
             example_limit=example_limit,
+            ensure_matching=ensure_matching,
         )
 
     def promote_candidates(
@@ -64,6 +66,7 @@ class OAAttachmentInvoicePromotionService:
         promotion_mode: str,
         apply: bool,
         example_limit: int = 10,
+        ensure_matching: bool = False,
     ) -> dict[str, Any]:
         normalized_mode = self._normalize_mode(promotion_mode)
         if normalized_mode == OA_ATTACHMENT_INVOICE_PROMOTION_DISABLED:
@@ -188,7 +191,7 @@ class OAAttachmentInvoicePromotionService:
             elif effective_action == LINK_EXISTING_INVOICE:
                 linked_invoice_ids.add(invoice.id)
 
-        if apply and affected_invoices:
+        if apply and (affected_invoices or (ensure_matching and candidates)):
             invoices_to_save = list(affected_invoices.values())
             save_with_matching_dirty = getattr(
                 self._invoice_repository,
@@ -196,17 +199,27 @@ class OAAttachmentInvoicePromotionService:
                 None,
             )
             if callable(save_with_matching_dirty):
-                scope_months = self._matching_scope_months(affected_candidates)
+                scope_months = self._matching_scope_months(
+                    affected_candidates if affected_invoices else candidates
+                )
                 if not scope_months:
                     raise RuntimeError("OA attachment invoice promotion requires a matching scope month.")
                 save_with_matching_dirty(
                     invoices_to_save,
                     scope_months=scope_months,
-                    reason="oa_attachment_invoice_promotion",
+                    reason=(
+                        "oa_attachment_invoice_manual_refresh"
+                        if ensure_matching
+                        else "oa_attachment_invoice_promotion"
+                    ),
                     debounce_seconds=0,
                 )
-            else:
+            elif affected_invoices:
                 self._invoice_repository.save_invoices(invoices_to_save)
+            else:
+                raise RuntimeError(
+                    "OA attachment invoice manual refresh requires matching reconciliation support."
+                )
         return self._report(
             candidates=candidates,
             existing_invoices=existing_invoices,

@@ -155,9 +155,16 @@ class RecordingWorkbenchQueryService:
 class RecordingAttachmentInvoicePromoter:
     def __init__(self) -> None:
         self.row_ids: list[str] = []
+        self.ensure_matching = False
 
-    def promote_records(self, records: list[OAApplicationRecord]) -> dict[str, object]:
+    def promote_records(
+        self,
+        records: list[OAApplicationRecord],
+        *,
+        ensure_matching: bool = False,
+    ) -> dict[str, object]:
         self.row_ids = [record.id for record in records]
+        self.ensure_matching = ensure_matching
         return {
             "summary": {
                 "cache_candidate_count": len(records),
@@ -334,6 +341,7 @@ class OAManualImportServiceTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["importable_invoice_count"], 1)
         self.assertEqual(payload["errors"], [{"row_id": "missing", "code": "not_found", "message": "OA row_id 不存在"}])
         self.assertEqual(promoter.row_ids, ["oa-exp-1981"])
+        self.assertTrue(promoter.ensure_matching)
         self.assertEqual(payload["promotion_summary"], {"cache_candidate_count": 1, "affected_invoice_count": 1})
 
     def test_refresh_attachments_does_not_promote_in_progress_records(self) -> None:
@@ -352,7 +360,12 @@ class OAManualImportServiceTests(unittest.TestCase):
 
     def test_refresh_attachments_reports_canonical_promotion_failure(self) -> None:
         class FailingPromoter:
-            def promote_records(self, records: list[OAApplicationRecord]) -> dict[str, object]:
+            def promote_records(
+                self,
+                records: list[OAApplicationRecord],
+                *,
+                ensure_matching: bool = False,
+            ) -> dict[str, object]:
                 raise RuntimeError(f"database unavailable for {len(records)} record")
 
         service = OAManualImportService(

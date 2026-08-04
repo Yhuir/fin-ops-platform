@@ -1507,3 +1507,9 @@
 - 根因修复：生产、手工刷新和 promotion repair 统一使用 `PostgresOAAttachmentInvoiceRepository`。它在同一 PostgreSQL 事务中保存发票并标记 OA 月份的既有五个月 matching window；失败整体回滚，成功由现有 matching worker 通过明确 `attachment_source` 扩展原 case，再由既有 Workbench active-generation 刷新发布。删除 PostgreSQL 运行时直接注入 `PostgresCoreRepository` 的旧 bypass，不在前端或 projection 合成非正式发票行。
 - 金额边界：本例附件合计 1080 元、OA/流水 1079.87 元，差额 0.13 元；明确附件来源仍允许扩展正式关系，`amount_minor=0` 保留金额不一致事实，不伪造金额闭合。5 张发票均保留原费用项绑定，其中首项两张发票同时绑定同一 `source_expense_item_id`。
 - 验证：service 回归覆盖 atomic persistence、五个月 scope 与双发票费用项；PostgreSQL repository 回归证明 invoice write 与 dirty marker 使用同一 transaction；matching core 回归覆盖 OA + 流水 active relation 在 0.13 元差异下仍一次扩展全部 5 张附件发票。
+
+## 2026-08-04 - 幂等附件刷新补发历史 matching reconciliation
+
+- 生产续查证明 `oa-exp-2321` 的 5 张 canonical 发票及费用项来源已经正确，但此前的幂等人工刷新因 `affected_invoice_count=0` 不再写 dirty scope，历史 `case:CASE-AUTO-0096` 仍没有机会执行新关系扩展规则。
+- 根因修复复用现有管理员精确 `refresh-attachments` 与同一 promotion/repository 边界：普通 `oa.sync` 仍保持无事实变化零写、零 dirty；只有显式人工刷新在 canonical 发票不变时，以空 invoice delta 补发该 OA 的既有五个月 matching window。没有新增 API、表、worker、迁移、全库扫描或前端临时关系。
+- 失败时人工刷新返回既有 `attachment_promotion_failed`，不伪装解析成功；PostgreSQL matching 能力缺失时 fail closed。回归测试同时保护零重复 invoice write、精确 scope、manual reason 和自动同步幂等语义。
