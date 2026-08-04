@@ -2199,13 +2199,10 @@ release_gate_checkpoint() {
   local profile="${5:-full}"
   local verification_release="${6:-$release}"
   local src verification_src checkpoint_dir rabbit_report domain_report closure_report inventory_report runtime_report
-  local required_worker_instance closure_timeout_seconds=120
+  local required_worker_instance
   local -a closure_args
   [[ "$profile" == "preflight" || "$profile" == "full" || "$profile" == "stability" ]] \
     || die "unsupported release gate profile: $profile"
-  if [[ "$profile" == "full" ]]; then
-    closure_timeout_seconds=600
-  fi
   src="$(release_src "$release")"
   verification_src="$(release_src "$verification_release")"
   checkpoint_dir="$evidence_dir/$label"
@@ -2270,7 +2267,7 @@ release_gate_checkpoint() {
       --write-target-ms 5000
       --http-target-ms 1000
       --health-ready-target-ms 1000
-      --timeout-seconds "$closure_timeout_seconds"
+      --timeout-seconds 120
       --output "$closure_report"
     )
     if [[ "$profile" == "preflight" ]]; then

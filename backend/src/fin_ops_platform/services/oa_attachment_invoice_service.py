@@ -61,7 +61,7 @@ OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 
 
 class OAAttachmentInvoiceService:
-    PARSER_VERSION = "2026-08-04-multi-page-invoice-v2"
+    PARSER_VERSION = "2026-05-28-attachment-status-v1"
 
     def __init__(
         self,

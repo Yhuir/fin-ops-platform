@@ -548,9 +548,6 @@ RabbitMQ dead letter、critical read-model enqueue-to-fresh SLO、domain audit �
 `preflight` 由候选 gate 代码执行，但 worker readiness 的 required instance 集合必须显式取自当前 stable
 release；候选新增 worker 只能在 `activate_release` 的 ensure 阶段安装，并在 T+0 以后按候选 registry 验证。
 这保证旧 runtime 按自己的已部署拓扑审计，同时不降低候选激活后的 exact inventory 门禁。
-T+0 `full` 只在所有 HTTP 请求成功、延迟达标且失败原因完全由 read model `refreshing` 构成时，
-允许最多等待 600 秒完成一次性版本升级重建；任何 HTTP、队列、worker、业务合同或非 transient freshness
-错误立即失败，最终仍必须 `fresh`。preflight 与 T+60/T+300 stability 保持 120 秒上限。
 RabbitMQ management 未配置或读取失败时 fail closed。checkpoint 必须按实际
 systemd I/O 边界分别加载 `/etc/fin-ops/fin-ops.rabbitmq-topology.env`（topology apply）和
 `/etc/fin-ops/fin-ops.rabbitmq-monitoring.env`（runtime health/closure）；文件缺失或不可读不得退回
