@@ -2749,7 +2749,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(workbenchRefreshCalls.length).toBeGreaterThan(0);
   });
 
-  test("processed exception rows move out of the unpaired zone and appear in the processed exception modal", async () => {
+  test("processed exception rows move out of the unpaired zone and appear in the exception drawer", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
     renderWorkbenchPage();
@@ -2787,16 +2787,17 @@ describe("Workbench row selection and detail drawer", () => {
 
     await user.click(await screen.findByRole("button", { name: /已处理异常\d+项/ }));
 
-    const processedModal = await screen.findByRole("dialog", { name: "已处理异常弹窗" });
-    expect(within(processedModal).getAllByText("追进项发票").length).toBeGreaterThanOrEqual(2);
-    expect(within(processedModal).getByText("OA")).toBeInTheDocument();
-    expect(within(processedModal).getByText("银行流水")).toBeInTheDocument();
-    expect(within(processedModal).queryByRole("button", { name: "详情" })).not.toBeInTheDocument();
-    expect(within(processedModal).queryByRole("button", { name: "更多" })).not.toBeInTheDocument();
-    expect(within(processedModal).getAllByRole("button", { name: "取消异常处理" }).length).toBeGreaterThan(0);
+    const exceptionDrawer = await screen.findByRole("dialog", { name: "异常处理" });
+    await user.click(within(exceptionDrawer).getByRole("button", { name: "已处理异常" }));
+    expect((await within(exceptionDrawer).findAllByText("追进项发票")).length).toBeGreaterThanOrEqual(2);
+    expect(within(exceptionDrawer).getByText("OA")).toBeInTheDocument();
+    expect(within(exceptionDrawer).getByText("银行流水")).toBeInTheDocument();
+    expect(within(exceptionDrawer).queryByRole("button", { name: "详情" })).not.toBeInTheDocument();
+    expect(within(exceptionDrawer).queryByRole("button", { name: "更多" })).not.toBeInTheDocument();
+    expect(within(exceptionDrawer).getAllByRole("button", { name: "撤回处理" }).length).toBeGreaterThan(0);
   });
 
-  test("processed exception modal cancels only the explicitly chosen singleton exception row", async () => {
+  test("exception drawer cancels only the explicitly chosen singleton exception row", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({ actionDelayMs: 80 });
     renderWorkbenchPage();
@@ -2827,15 +2828,16 @@ describe("Workbench row selection and detail drawer", () => {
 
     await user.click(await screen.findByRole("button", { name: /已处理异常\d+项/ }));
 
-    const processedModal = await screen.findByRole("dialog", { name: "已处理异常弹窗" });
-    await user.click(within(processedModal).getAllByRole("button", { name: "取消异常处理" })[0]);
+    const exceptionDrawer = await screen.findByRole("dialog", { name: "异常处理" });
+    await user.click(within(exceptionDrawer).getByRole("button", { name: "已处理异常" }));
+    await user.click((await within(exceptionDrawer).findAllByRole("button", { name: "撤回处理" }))[0]);
 
     const confirmModal = await screen.findByRole("dialog", { name: "取消异常处理确认弹窗" });
     expect(within(confirmModal).getByText("确认取消异常处理后，这组记录会回到未配对区域。")).toBeInTheDocument();
 
     await user.click(within(confirmModal).getByRole("button", { name: "确认取消异常处理" }));
 
-    expect(screen.queryByRole("dialog", { name: "已处理异常弹窗" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "异常处理" })).not.toBeInTheDocument();
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/workbench/actions/cancel-exception",
@@ -2845,7 +2847,7 @@ describe("Workbench row selection and detail drawer", () => {
             month: "all",
             row_ids: ["oa-o-202603-001"],
             expected_read_model_version: "mock-workbench-generation-1",
-            comment: "由已处理异常弹窗撤回异常处理",
+            comment: "由已处理异常抽屉撤回异常处理",
           }),
         }),
       );
@@ -2887,8 +2889,9 @@ describe("Workbench row selection and detail drawer", () => {
     fetchMock.mockClear();
 
     await user.click(within(unpairedZone).getByRole("button", { name: /已处理异常\d+项/ }));
-    const processedModal = await screen.findByRole("dialog", { name: "已处理异常弹窗" });
-    await user.click(within(processedModal).getAllByRole("button", { name: "取消异常处理" })[0]);
+    const exceptionDrawer = await screen.findByRole("dialog", { name: "异常处理" });
+    await user.click(within(exceptionDrawer).getByRole("button", { name: "已处理异常" }));
+    await user.click((await within(exceptionDrawer).findAllByRole("button", { name: "撤回处理" }))[0]);
 
     const confirmModal = await screen.findByRole("dialog", { name: "取消异常处理确认弹窗" });
     await user.click(within(confirmModal).getByRole("button", { name: "确认取消异常处理" }));

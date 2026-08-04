@@ -131,6 +131,7 @@ type ApiMockOptions = {
   workbenchHealthStatus?: WorkbenchHealthMockStatus;
   workbenchCashSpecialActions?: boolean;
   workbenchInitialExceptionApplied?: boolean;
+  workbenchAmountMismatchScenario?: boolean;
   workbenchInitialRelationConfirmed?: boolean;
   workbenchInitialRowIgnored?: boolean;
   workbenchWithdrawPreviewDelayMs?: number;
@@ -763,6 +764,30 @@ function buildPairedWorkbenchGroup(includeCashSpecialActions = false) {
   };
 }
 
+function buildAmountMismatchWorkbenchGroup(ignored: boolean) {
+  const group = buildPairedWorkbenchGroup();
+  const anomaly = {
+    code: "oa_invoice_amount_mismatch",
+    label: "金额不一致",
+    display_label: ignored ? "已忽略：金额不一致" : "金额不一致",
+    fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    state: ignored ? "ignored" : "active",
+    oa_total: "58000.00",
+    invoice_total: "57999.99",
+    amount_delta: "0.01",
+  };
+  return {
+    ...group,
+    amount_anomaly: anomaly,
+    invoice_rows: group.invoice_rows.map((row) => ({
+      ...row,
+      amount: "57999.99",
+      total_with_tax: "57999.99",
+      amount_anomaly: anomaly,
+    })),
+  };
+}
+
 function buildUnpairedWorkbenchGroup(
   rowType: "oa" | "bank" | "invoice",
   row: ReturnType<typeof workbenchRows>["oa" | "bank" | "invoice"],
@@ -1205,6 +1230,7 @@ function buildProcessedExceptionGroup() {
   return {
     group_id: "case:CASE-202603-101",
     group_type: "processed_exception",
+    exception_state: "processed",
     match_confidence: "medium",
     reason: "browser_e2e_processed_exception",
     oa_rows: [handledRows.oa],
@@ -1264,11 +1290,16 @@ function workbenchGroups(
   rowIgnored = false,
   largeDataset = false,
   includeCashSpecialActions = false,
+  amountMismatchScenario = false,
+  amountMismatchIgnored = false,
 ) {
   if (largeDataset) {
     return largeWorkbenchGroups(zone);
   }
   if (zone === "paired") {
+    if (relationConfirmed && amountMismatchScenario) {
+      return [buildAmountMismatchWorkbenchGroup(amountMismatchIgnored)];
+    }
     return relationConfirmed ? [buildPairedWorkbenchGroup(includeCashSpecialActions)] : [];
   }
   if (exceptionApplied) {
@@ -1415,6 +1446,8 @@ function workbenchSummary(
   rowIgnored = false,
   pageEmpty = false,
   largeDataset = false,
+  amountMismatchScenario = false,
+  amountMismatchIgnored = false,
 ) {
   if (pageEmpty) {
     return {
@@ -1444,7 +1477,7 @@ function workbenchSummary(
     invoice_count: 1,
     paired_count: relationConfirmed ? 1 : 0,
     unpaired_count: relationConfirmed || exceptionApplied ? 0 : 1,
-    exception_count: exceptionApplied ? 3 : 0,
+    exception_count: (exceptionApplied ? 3 : 0) + (amountMismatchScenario && !amountMismatchIgnored ? 1 : 0),
     ignored_count: rowIgnored ? 1 : 0,
   };
 }
@@ -1461,6 +1494,9 @@ function workbenchGroupsPayload(
   page = 1,
   pageSize = 50,
   search = "",
+  exceptionBucket = "",
+  amountMismatchScenario = false,
+  amountMismatchIgnored = false,
 ) {
   const readModelVersion = relationConfirmed || exceptionApplied || rowIgnored
     ? "workbench-generation-e2e-002"
@@ -1474,11 +1510,24 @@ function workbenchGroupsPayload(
       rowIgnored,
       largeDataset,
       includeCashSpecialActions,
+      amountMismatchScenario,
+      amountMismatchIgnored,
     );
   const normalizedSearch = search.trim().toLowerCase();
-  const groups = normalizedSearch
+  const searchedGroups = normalizedSearch
     ? allGroups.filter((group) => workbenchGroupMatchesSearch(group, normalizedSearch))
     : allGroups;
+  const groups = searchedGroups.filter((group) => {
+    if (exceptionBucket === "active") {
+      return ("exception_state" in group && group.exception_state === "active")
+        || ("amount_anomaly" in group && group.amount_anomaly?.state === "active");
+    }
+    if (exceptionBucket === "processed") {
+      return ("exception_state" in group && group.exception_state === "processed")
+        || ("amount_anomaly" in group && group.amount_anomaly?.state === "ignored");
+    }
+    return true;
+  });
   const boundedPage = Math.max(1, page);
   const boundedPageSize = Math.max(1, pageSize);
   const start = (boundedPage - 1) * boundedPageSize;
@@ -1617,13 +1666,23 @@ function workbenchInitialPayload(
   largeDataset = false,
   includeCashSpecialActions = false,
   zoneSearch: Partial<Record<WorkbenchZone, string>> = {},
+  amountMismatchScenario = false,
+  amountMismatchIgnored = false,
 ) {
   const readModelVersion = relationConfirmed || exceptionApplied || rowIgnored
     ? "workbench-generation-e2e-002"
     : "workbench-generation-e2e-001";
   return {
     month: "all",
-    summary: workbenchSummary(relationConfirmed, exceptionApplied, rowIgnored, pageEmpty, largeDataset),
+    summary: workbenchSummary(
+      relationConfirmed,
+      exceptionApplied,
+      rowIgnored,
+      pageEmpty,
+      largeDataset,
+      amountMismatchScenario,
+      amountMismatchIgnored,
+    ),
     oa_status: { code: "ready", message: "OA 已同步" },
     invoice_inventory: {
       system_total: largeDataset ? 210 : 1,
@@ -1646,6 +1705,9 @@ function workbenchInitialPayload(
       1,
       50,
       zoneSearch.paired ?? "",
+      "",
+      amountMismatchScenario,
+      amountMismatchIgnored,
     ),
     unpaired: workbenchGroupsPayload(
       "unpaired",
@@ -1659,6 +1721,9 @@ function workbenchInitialPayload(
       1,
       50,
       zoneSearch.unpaired ?? "",
+      "",
+      amountMismatchScenario,
+      amountMismatchIgnored,
     ),
     read_model_status: pageStatus,
     read_model_version: readModelVersion,
@@ -7932,6 +7997,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
   let relationConfirmed = options.workbenchInitialRelationConfirmed === true;
   let workbenchExceptionApplied = options.workbenchInitialExceptionApplied === true;
   let workbenchRowIgnored = options.workbenchInitialRowIgnored === true;
+  let workbenchAmountMismatchIgnored = false;
   let workbenchConfirmSubmitAttempts = 0;
   let workbenchGroupsFailuresRemaining = options.workbenchGroupsFailuresBeforeSuccess ?? 0;
   const workbenchPageStatus = options.workbenchPageStatus ?? "fresh";
@@ -9131,6 +9197,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           paired: initialZoneSearch("paired"),
           unpaired: initialZoneSearch("unpaired"),
         },
+        options.workbenchAmountMismatchScenario === true,
+        workbenchAmountMismatchIgnored,
       ));
     }
 
@@ -9360,6 +9428,9 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         Number.isFinite(requestedPage) ? requestedPage : 1,
         Number.isFinite(requestedPageSize) ? requestedPageSize : 50,
         url.searchParams.get("search") ?? "",
+        url.searchParams.get("exception_bucket") ?? "",
+        options.workbenchAmountMismatchScenario === true,
+        workbenchAmountMismatchIgnored,
       ));
     }
 
@@ -9506,6 +9577,30 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       await delay(200);
       workbenchRowIgnored = false;
       return json(route, workbenchExceptionActionResultPayload("unignore_row"));
+    }
+
+    if (path === "/api/workbench/exceptions/amount-mismatch/ignore") {
+      await delay(200);
+      workbenchAmountMismatchIgnored = true;
+      return json(route, {
+        status: "ignored",
+        changed: true,
+        affected_scope_keys: ["2026-03"],
+        read_model_status: "refreshing",
+        message: "已忽略金额异常。",
+      });
+    }
+
+    if (path === "/api/workbench/exceptions/amount-mismatch/restore") {
+      await delay(200);
+      workbenchAmountMismatchIgnored = false;
+      return json(route, {
+        status: "cancelled",
+        changed: true,
+        affected_scope_keys: ["2026-03"],
+        read_model_status: "refreshing",
+        message: "已恢复金额异常。",
+      });
     }
 
     if (path === "/api/workbench/actions/confirm-cash-pass-through") {

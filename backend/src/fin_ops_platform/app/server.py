@@ -382,6 +382,9 @@ from fin_ops_platform.services.workbench_write_facade import (
     WorkbenchWriteRelationSpecialMetadataMutationPort,
     WorkbenchWriteResult,
 )
+from fin_ops_platform.services.workbench_amount_mismatch_exception_service import (
+    WorkbenchAmountMismatchExceptionService,
+)
 from fin_ops_platform.services.workbench_exception_application_service import WorkbenchExceptionApplicationService
 from fin_ops_platform.services.workbench_exception_case_service import WorkbenchExceptionCaseService
 from fin_ops_platform.services.workbench_exception_projection import EXCEPTION_PROJECTION_VERSION
@@ -689,6 +692,14 @@ class Application:
         self._workbench_sql_read_repository = getattr(self._state_store, "workbench_sql_read_repository", None)
         self._workbench_sql_projection_builder = getattr(self._state_store, "workbench_sql_projection_builder", None)
         self._workbench_relation_sql_read_repository = getattr(self._state_store, "workbench_relation_sql_read_repository", None)
+        self._workbench_amount_mismatch_exception_service = (
+            WorkbenchAmountMismatchExceptionService(
+                group_repository=self._workbench_sql_read_repository,
+                decision_repository=PostgresWorkbenchRepository(postgres_connection),
+            )
+            if postgres_connection is not None and self._workbench_sql_read_repository is not None
+            else None
+        )
         state_connection = getattr(self._state_store, "_connection", None)
         has_postgres = (
             str(getattr(self._state_store, "storage_backend", "") or "").strip() == "postgres"
@@ -1026,6 +1037,7 @@ class Application:
         self._workbench_action_api_routes = WorkbenchActionApiRoutes(
             exception_service=self._workbench_exception_application_service,
             write_facade_provider=self._workbench_write_facade,
+            amount_mismatch_service=self._workbench_amount_mismatch_exception_service,
         )
         self._turnover_ledger_api_routes = TurnoverLedgerApiRoutes(
             ledger_service=self._turnover_ledger_service,
@@ -1509,6 +1521,7 @@ class Application:
                 detail_level=query.get("detail_level", [None])[0],
                 column_filters=query.get("column_filters", [None])[0],
                 time_filters=query.get("time_filters", [None])[0],
+                exception_bucket=query.get("exception_bucket", [None])[0],
                 expected_read_model_version=query.get("expected_read_model_version", [None])[0],
             )
             self._emit_workbench_api_metric(
@@ -1635,6 +1648,16 @@ class Application:
             return self._handle_api_workbench_exception_preview(body)
         if method == "POST" and route_path == "/api/workbench/exception/apply":
             return self._handle_api_workbench_exception_apply(body, request_id=request_id)
+        if method == "POST" and route_path in {
+            "/api/workbench/exceptions/amount-mismatch/ignore",
+            "/api/workbench/exceptions/amount-mismatch/restore",
+        }:
+            return self._handle_api_workbench_amount_mismatch_decision(
+                body,
+                ignored=route_path.endswith("/ignore"),
+                headers=headers,
+                access_session=access_session,
+            )
         if method == "POST" and route_path == "/api/workbench/actions/confirm-link":
             response = self._handle_api_workbench_confirm_link(
                 body,
@@ -2989,6 +3012,7 @@ class Application:
         detail_level: str | None = None,
         column_filters: str | None = None,
         time_filters: str | None = None,
+        exception_bucket: str | None = None,
         expected_read_model_version: str | None = None,
     ) -> Response:
         status_code, payload = self._workbench_read_routes().groups(
@@ -3003,9 +3027,42 @@ class Application:
             detail_level=detail_level,
             column_filters=column_filters,
             time_filters=time_filters,
+            exception_bucket=exception_bucket,
             expected_read_model_version=expected_read_model_version,
         )
         return self._json_response(status_code, payload)
+
+    def _handle_api_workbench_amount_mismatch_decision(
+        self,
+        body: str | None,
+        *,
+        ignored: bool,
+        headers: dict[str, str] | None,
+        access_session: OARequestSession | None,
+    ) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        freshness_error = self._workbench_write_freshness_guard(payload)
+        if freshness_error is not None:
+            return freshness_error
+        auth_context = self._workbench_write_auth_context(headers, session=access_session)
+        if isinstance(auth_context, Response):
+            return auth_context
+        actor_id, _tenant_id = auth_context
+        status_code, result = self._workbench_action_api_routes.set_amount_mismatch_ignored(
+            payload,
+            actor_id=actor_id,
+            ignored=ignored,
+        )
+        if status_code == HTTPStatus.OK:
+            for scope_key in list(result.get("affected_scope_keys") or []):
+                self._enqueue_workbench_read_model_refresh(
+                    str(scope_key),
+                    reason="amount_mismatch_decision",
+                )
+            result["read_model_status"] = "refreshing"
+        return self._json_response(status_code, result)
 
     def _handle_api_workbench_group_detail(
         self,
@@ -3072,6 +3129,7 @@ class Application:
         detail_level: str | None,
         column_filters: dict[str, object] | None = None,
         time_filters: dict[str, object] | None = None,
+        exception_bucket: str | None = None,
     ) -> str | None:
         cache_version_loader = getattr(repository, "workbench_groups_cache_version", None)
         if not callable(cache_version_loader):
@@ -3093,6 +3151,7 @@ class Application:
             detail_level=detail_level,
             column_filters=column_filters,
             time_filters=time_filters,
+            exception_bucket=exception_bucket,
         )
 
     @staticmethod
@@ -3118,6 +3177,7 @@ class Application:
         detail_level: str | None,
         column_filters: dict[str, object] | None = None,
         time_filters: dict[str, object] | None = None,
+        exception_bucket: str | None = None,
     ) -> str | None:
         return build_workbench_groups_redis_cache_key_from_version(
             cache_version=cache_version,
@@ -3133,6 +3193,7 @@ class Application:
             detail_level=detail_level,
             column_filters=column_filters,
             time_filters=time_filters,
+            exception_bucket=exception_bucket,
         )
 
     @staticmethod
@@ -6297,6 +6358,7 @@ class Application:
             self._workbench_action_api_routes = WorkbenchActionApiRoutes(
                 exception_service=getattr(self, "_workbench_exception_application_service", None),
                 write_facade_provider=self._workbench_write_facade,
+                amount_mismatch_service=getattr(self, "_workbench_amount_mismatch_exception_service", None),
             )
         result = self._workbench_action_api_routes.withdraw_link(
             payload,
@@ -8982,10 +9044,6 @@ class Application:
             add("待找流水" if has_etc_batch_oa else "待找流水与发票")
         elif has_bank and has_invoice and not has_oa:
             add("待找OA")
-
-        amount_check = relation.get("amount_check") if isinstance(relation, dict) else None
-        if isinstance(amount_check, dict) and str(amount_check.get("status")) == "mismatch":
-            add("金额不一致")
 
         row_type = str(row.get("type", ""))
         if row_type == "oa" and (self._is_etc_batch_oa_row(row) or relation_mode == "etc_batch_invoice_link"):

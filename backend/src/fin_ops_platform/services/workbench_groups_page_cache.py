@@ -8,7 +8,7 @@ from fin_ops_platform.services.workbench_read_model_version import WORKBENCH_MON
 
 
 WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION = (
-    f"{WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION}:relation-completion-v1:collapsed-summary-v2"
+    f"{WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION}:relation-completion-v1:collapsed-summary-v2:exception-filter-v1"
 )
 WORKBENCH_INITIAL_PAGE_CACHE_SCHEMA_VERSION = f"{WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION}:initial-v2"
 
@@ -101,6 +101,7 @@ def build_workbench_groups_redis_cache_key_from_version(
     detail_level: str | None,
     column_filters: dict[str, object] | None = None,
     time_filters: dict[str, object] | None = None,
+    exception_bucket: str | None = None,
     schema_version: str = WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION,
 ) -> str | None:
     if not cache_version:
@@ -119,6 +120,7 @@ def build_workbench_groups_redis_cache_key_from_version(
         "detail_level": normalize_workbench_group_detail_level(detail_level),
         "column_filters": stable_json_value(column_filters or {}),
         "time_filters": stable_json_value(time_filters or {}),
+        "exception_bucket": exception_bucket or "",
         "filter_semantics": "zone_search_scalar_multiselect_or_v3",
     }
     digest = hashlib.sha256(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]

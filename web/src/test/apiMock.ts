@@ -2124,10 +2124,34 @@ function buildGroups(
     }
   }
 
-  return Array.from(groups.values()).map((group) => ({
-    ...group,
-    can_withdraw: section === "paired" ? true : undefined,
-  }));
+  return Array.from(groups.values()).map((group) => {
+    const groupRows = [...group.oa_rows, ...group.bank_rows, ...group.invoice_rows];
+    const processedRow = groupRows.find((row) => row.handled_exception === true);
+    const relation = processedRow
+      ? (
+          processedRow.oa_bank_relation
+          ?? processedRow.invoice_relation
+          ?? processedRow.invoice_bank_relation
+        ) as { code?: string; label?: string } | undefined
+      : undefined;
+    const actionLabel = relation?.label ?? "已处理异常";
+    return {
+      ...group,
+      can_withdraw: section === "paired" ? true : undefined,
+      exception_state: processedRow ? "processed" : undefined,
+      processed_exception_summary: processedRow
+        ? {
+            resolution: {
+              action_code: relation?.code ?? "processed_exception",
+              action_label: actionLabel,
+              note: processedRow.relation_note ?? "",
+            },
+            detail_note: processedRow.relation_note ?? "",
+            display_tags: [actionLabel],
+          }
+        : undefined,
+    };
+  });
 }
 
 function groupHasDanger(group: {
@@ -4828,8 +4852,18 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const sort = String(url.searchParams.get("sort") ?? "").trim();
       const columnFilters = parseWorkbenchGroupJsonParam(url.searchParams.get("column_filters"));
       const timeFilters = parseWorkbenchGroupJsonParam(url.searchParams.get("time_filters"));
+      const exceptionBucket = url.searchParams.get("exception_bucket");
       const groups = sortMockWorkbenchGroups(
-        payload[zone].groups.filter((group) => mockWorkbenchGroupMatchesQuery(group, search, columnFilters, timeFilters)),
+        payload[zone].groups.filter((group) => (
+          mockWorkbenchGroupMatchesQuery(group, search, columnFilters, timeFilters)
+          && (
+            exceptionBucket === "active"
+              ? group.exception_state === "active"
+              : exceptionBucket === "processed"
+                ? group.exception_state === "processed"
+                : true
+          )
+        )),
         sort,
       );
       const offset = (page - 1) * pageSize;

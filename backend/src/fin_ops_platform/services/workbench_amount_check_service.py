@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
+from hashlib import sha256
 from typing import Any
 
 from fin_ops_platform.services.workbench_invoice_direction import invoice_flow_direction_from_row, normalize_invoice_kind_from_row
@@ -11,6 +12,37 @@ ZERO = Decimal("0.00")
 
 
 class WorkbenchAmountCheckService:
+    def oa_invoice_anomaly(
+        self,
+        rows_by_type: dict[str, list[dict[str, Any]]],
+        *,
+        relation_id: str,
+    ) -> dict[str, Any] | None:
+        oa_rows = list(rows_by_type.get("oa") or [])
+        invoice_rows = list(rows_by_type.get("invoice") or [])
+        if not oa_rows or not invoice_rows:
+            return None
+        oa_total = self._strict_sum_amounts(oa_rows)
+        invoice_total = self._strict_sum_amounts(invoice_rows)
+        if oa_total is None or invoice_total is None or oa_total == invoice_total:
+            return None
+        row_ids = sorted(
+            self._row_id(row)
+            for row in [*oa_rows, *invoice_rows]
+            if self._row_id(row)
+        )
+        fingerprint_source = "\0".join(
+            [str(relation_id or "").strip(), *row_ids, f"{oa_total:.2f}", f"{invoice_total:.2f}"]
+        )
+        return {
+            "code": "oa_invoice_amount_mismatch",
+            "label": "金额不一致",
+            "fingerprint": sha256(fingerprint_source.encode("utf-8")).hexdigest(),
+            "oa_total": self._format_amount(oa_total),
+            "invoice_total": self._format_amount(invoice_total),
+            "amount_delta": self._format_amount(abs(oa_total - invoice_total)),
+        }
+
     def summarize(self, rows_by_type: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
         normalized_rows = {
             "oa": list(rows_by_type.get("oa") or []),
@@ -188,6 +220,12 @@ class WorkbenchAmountCheckService:
         if not amounts:
             return None
         return sum(amounts, ZERO).quantize(CENT)
+
+    def _strict_sum_amounts(self, rows: list[dict[str, Any]]) -> Decimal | None:
+        amounts = [self._amount(row) for row in rows]
+        if not amounts or any(amount is None for amount in amounts):
+            return None
+        return sum((amount for amount in amounts if amount is not None), ZERO).quantize(CENT)
 
     def _directions(self, rows_by_type: dict[str, list[dict[str, Any]]]) -> set[str]:
         return {

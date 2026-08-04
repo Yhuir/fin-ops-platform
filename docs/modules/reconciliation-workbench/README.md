@@ -41,15 +41,22 @@ canonical fact repositories
 
 ## 代码入口
 
-- 前端：`web/src/pages/ReconciliationWorkbenchPage.tsx`、`web/src/components/workbench/RelationGroupGrid.tsx`、`RelationGroupCell.tsx`
+- 前端：`web/src/pages/ReconciliationWorkbenchPage.tsx`、`web/src/components/workbench/RelationGroupGrid.tsx`、`RelationGroupCell.tsx`、`WorkbenchExceptionDrawer.tsx`
 - API：`web/src/features/workbench/api.ts`、`backend/src/fin_ops_platform/app/routes_workbench.py`
 - 分组：`backend/src/fin_ops_platform/services/workbench_relation_grouping.py`
+- 金额异常：`backend/src/fin_ops_platform/services/workbench_amount_check_service.py`、`workbench_amount_mismatch_exception_service.py`
 - 匹配：`backend/src/fin_ops_platform/services/workbench_free_matching_engine.py`、`workbench_matching_orchestrator.py`
 - Matching I/O：`backend/src/fin_ops_platform/services/postgres_repositories/workbench_formal_relation.py`
 - 正式关系写入：`backend/src/fin_ops_platform/services/workbench_relation_command_service.py`、`workbench_uow.py`
 - SQL projection/read model：`backend/src/fin_ops_platform/services/workbench_sql_projection.py`、`postgres_repositories/read_models.py`
 - Worker：`backend/src/fin_ops_platform/services/workbench_matching_dirty_scope_worker.py`、`workbench_read_model_refresh.py`
 - 固定契约版本：`backend/src/fin_ops_platform/services/workbench_read_model_version.py`
+
+## 金额异常合同
+
+- OA 与发票金额只在现有关系组内按分精确合计；完整金额不相等时由分组 service 产生一个稳定 fingerprint，不创建第三种关系状态。
+- active/ignored 决定复用既有 exception case repository，但使用独立 `oa_invoice_amount_mismatch` scenario；通用旧异常 loader 必须排除该 scenario，避免两种 schema 互相污染。
+- 页面只保留统一 `WorkbenchExceptionDrawer`：进行中展示 active 金额异常和 legacy active 异常，已处理展示 ignored 金额异常和 legacy processed/ignored；旧 `IgnoredItemsModal`、`ProcessedExceptionsModal` 已删除。
 
 ## 三栏纵向展示合同
 

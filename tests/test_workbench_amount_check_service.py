@@ -210,6 +210,58 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
         self.assertEqual(result["bank_total"], "2038.02")
         self.assertEqual(result["amount_delta"], "0.00")
 
+    def test_oa_invoice_anomaly_uses_exact_cent_totals_across_all_rows(self) -> None:
+        anomaly = self.service.oa_invoice_anomaly(
+            {
+                "oa": [{**self._oa_row("1079.87"), "id": "oa-1"}],
+                "invoice": [
+                    {**self._invoice_row("290.00"), "id": "invoice-1"},
+                    {**self._invoice_row("789.86"), "id": "invoice-2"},
+                ],
+            },
+            relation_id="CASE-1",
+        )
+
+        self.assertIsNotNone(anomaly)
+        assert anomaly is not None
+        self.assertEqual(anomaly["label"], "金额不一致")
+        self.assertEqual(anomaly["oa_total"], "1079.87")
+        self.assertEqual(anomaly["invoice_total"], "1079.86")
+        self.assertEqual(anomaly["amount_delta"], "0.01")
+        self.assertEqual(len(anomaly["fingerprint"]), 64)
+
+    def test_oa_invoice_anomaly_is_absent_for_exact_match_or_missing_side(self) -> None:
+        self.assertIsNone(
+            self.service.oa_invoice_anomaly(
+                {
+                    "oa": [{**self._oa_row("76.80"), "id": "oa-1"}],
+                    "invoice": [
+                        {**self._invoice_row("29"), "id": "invoice-1"},
+                        {**self._invoice_row("47.8"), "id": "invoice-2"},
+                    ],
+                },
+                relation_id="CASE-1",
+            )
+        )
+        self.assertIsNone(
+            self.service.oa_invoice_anomaly(
+                {"oa": [{**self._oa_row("76.80"), "id": "oa-1"}], "invoice": []},
+                relation_id="CASE-1",
+            )
+        )
+        self.assertIsNone(
+            self.service.oa_invoice_anomaly(
+                {
+                    "oa": [{**self._oa_row("76.80"), "id": "oa-1"}],
+                    "invoice": [
+                        {**self._invoice_row("29.00"), "id": "invoice-1"},
+                        {"type": "invoice", "id": "invoice-without-amount"},
+                    ],
+                },
+                relation_id="CASE-1",
+            )
+        )
+
     @staticmethod
     def _oa_row(amount: str, *, reconciliation_amount: str | None = None) -> dict[str, str]:
         row = {

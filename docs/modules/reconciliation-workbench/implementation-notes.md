@@ -1513,3 +1513,9 @@
 - 生产续查证明 `oa-exp-2321` 的 5 张 canonical 发票及费用项来源已经正确，但此前的幂等人工刷新因 `affected_invoice_count=0` 不再写 dirty scope，历史 `case:CASE-AUTO-0096` 仍没有机会执行新关系扩展规则。
 - 根因修复复用现有管理员精确 `refresh-attachments` 与同一 promotion/repository 边界：普通 `oa.sync` 仍保持无事实变化零写、零 dirty；只有显式人工刷新在 canonical 发票不变时，以空 invoice delta 补发该 OA 的既有五个月 matching window。没有新增 API、表、worker、迁移、全库扫描或前端临时关系。
 - 失败时人工刷新返回既有 `attachment_promotion_failed`，不伪装解析成功；PostgreSQL matching 能力缺失时 fail closed。回归测试同时保护零重复 invoice write、精确 scope、manual reason 和自动同步幂等语义。
+
+## 2026-08-04 - OA/发票金额异常与统一异常抽屉
+
+- 产品合同：关系组 OA 与发票金额字段完整时按分精确合计，任何差异都显示 `金额不一致`，不推断真假、不设置容差；缺金额不误报。忽略后显示 `已忽略：金额不一致`，仍保留在主关系和“已处理异常”，可恢复。
+- 边界：分组 service 统一计算稳定 fingerprint；独立 amount-mismatch service 在 active generation 上重读、重算并做 CAS，repository 复用既有 `app.workbench_exception_cases` 但以独立 scenario 隔离。legacy loader 显式排除该 scenario，避免旧 schema 污染。查询只按 month 读取决定，抽屉使用数据库端 `exception_bucket` 有界分页。
+- 前端：复用 AppDrawer 与 RelationGroupGrid 形成统一三栏异常抽屉；旧已处理/已忽略双 modal、样式和测试删除。没有新增依赖、页面状态域、read model、worker、queue、表或 migration。

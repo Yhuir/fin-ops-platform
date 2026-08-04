@@ -2,7 +2,7 @@
 
 本文维护 `PERM-E2E-003` 的页面级写入口清单。目标是让后续新增页面按钮、抽屉、批量动作时，能明确判断它是否已经被 Browser role matrix 覆盖，而不是只依赖后端 guard 或组件测试。`tests/test_permissions_write_entry_inventory.py` 会双向校验 `pageRegistry.tsx` 与本清单 row 一致、`pageRegistry.tsx` 与 role matrix readable route 一致、每个非 admin route 都进入 role matrix read-export smoke、`covered-*` row 必须引用 Browser E2E 证据，并校验源码高风险写控件文案 sentinel 仍与关键词 registry 同步。
 
-Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.planning/phases/27-read-model-fan-out/27-COVERAGE-MATRIX.md`。它把本清单扩展到当前 17 个注册页面、110 个导出 POST/PUT/PATCH/DELETE 客户端函数、22 个业务 `Drawer.tsx`、23 个 Browser dynamic opener、15 个 manifest read model 和直接 lifecycle/enqueue/barrier 调用点，并由本文件对应测试与 `tests/test_read_model_manifest.py` 双向校验。该矩阵只用于规划、测试和删除审计，不进入生产 I/O，也不建立第二套 runtime registry；其中 `planned` 目标在对应 vertical slice 部署验证前不得描述为已上线。
+Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.planning/phases/27-read-model-fan-out/27-COVERAGE-MATRIX.md`。它把本清单扩展到当前 17 个注册页面、111 个导出 POST/PUT/PATCH/DELETE 客户端函数、23 个业务 `Drawer.tsx`、23 个 Browser dynamic opener、15 个 manifest read model 和直接 lifecycle/enqueue/barrier 调用点，并由本文件对应测试与 `tests/test_read_model_manifest.py` 双向校验。该矩阵只用于规划、测试和删除审计，不进入生产 I/O，也不建立第二套 runtime registry；其中 `planned` 目标在对应 vertical slice 部署验证前不得描述为已上线。
 
 后端独立 fail-closed 合同由 `route_access_policy.py` 和 `tests/test_route_access_policy.py`/`tests/test_auth_guard.py` 维护：除明确登记的纯读取 POST 外，受保护的 unsafe method 默认要求 mutation 权限。浏览器 inventory 证明 UI 不暴露写控件，后端合同证明手工构造 HTTP 请求也不能越权，二者不能互相替代。
 
@@ -47,6 +47,9 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `撤回批次` | no-OA batch withdraw |
 | `撤回关联` | workbench/batch relation withdraw |
 | `撤回忽略` | workbench ignored recovery |
+| `忽略` | workbench amount-mismatch ignore |
+| `恢复` | workbench amount-mismatch restore |
+| `撤回处理` | workbench processed exception recovery |
 | `删除` | ETC/settings destructive actions |
 | `新建批次` | ETC batch |
 | `创建 OA 草稿` | input/OA/ETC draft |
@@ -152,7 +155,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `batch-accounting:submitted-withdraw` | `batch-accounting` | 已提交 bucket 撤回入口 | read-export 下已提交 bucket 的撤回关联禁用，withdraw durable mutation 零调用，且复扫候选。 |
 | `turnover-ledger:tag-drawer` | `turnover-ledger` | 外部往来款标签设置抽屉 | read-export 下标签全选/清空/保存禁用，且复扫候选。 |
 | `turnover-ledger:detail-controls` | `turnover-ledger` | 外部往来款流水明细区 | read-export 下流水选择、编辑、确认闭环禁用，且复扫候选。 |
-| `reconciliation-workbench:processed-and-ignored-recovery` | `reconciliation-workbench` | 已处理异常和已忽略恢复弹窗 | read-export 下已处理异常弹窗无取消异常处理，已忽略弹窗无撤回忽略，且复扫候选。 |
+| `reconciliation-workbench:exception-drawer` | `reconciliation-workbench` | 统一异常处理右侧抽屉；进行中/已处理切换、金额异常忽略/恢复和 legacy 异常恢复 | read-export 下统一抽屉只读，无忽略、恢复、取消异常处理或撤回忽略按钮，相关 mutation 为零，且复扫候选。 |
 
 ## Role matrix 页面级静态覆盖 registry
 
@@ -171,7 +174,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 
 | Module | 写入口 | 当前状态 | 当前证据 | 下一步 |
 | --- | --- | --- | --- | --- |
-| `reconciliation-workbench` | confirm、withdraw、candidate split、exception apply/cancel/ignore/unignore、no-OA withdraw、cash pass-through/ticket purchase/cancel、column layout reorder/settings save | `covered-browser` | `web/e2e/workbench-permissions-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts`；本轮 role matrix 会在 read-export 下断言列拖拽 handle 全部 disabled、尝试拖拽不进入 dragging 且 `POST /api/workbench/settings` 零调用，也会选择未配对候选、已配对候选并打开已处理异常/已忽略恢复弹窗，断言确认/异常/撤回/取消关联/取消异常/撤回忽略类写入口隐藏或禁用；deterministic mock 暴露现金过账/买票/取消现金处理 action 后，read-export 下更多菜单和现金处理 menuitem/确认买票成本弹窗均不可见，三个现金处理 mutation 零调用，并复跑 DOM 写控件候选扫描 | 新增 relation command、现金处理 command 或隐式 settings 写入口时补同类 Browser 断言。 |
+| `reconciliation-workbench` | confirm、withdraw、candidate split、exception apply/cancel/ignore/unignore、amount-mismatch ignore/restore、no-OA withdraw、cash pass-through/ticket purchase/cancel、column layout reorder/settings save | `covered-browser` | `web/e2e/workbench-permissions-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts`；role matrix 在 read-export 下断言列拖拽 handle 全部 disabled、尝试拖拽不进入 dragging 且 `POST /api/workbench/settings` 零调用，也会选择未配对/已配对候选并打开统一异常抽屉，断言确认、撤回、金额异常忽略/恢复和 legacy 异常恢复入口隐藏或禁用；现金处理 mutation 同样为零，并复跑 DOM 写控件候选扫描。 | 新增 relation、异常、现金处理 command 或隐式 settings 写入口时补同类 Browser 断言。 |
 | `bank-details` | 分类保存/清除、候选确认/撤回、人工待分类、自动标签规则保存/reapply | `covered-browser` | `web/e2e/bank-details-filtered-export-permissions.spec.ts`、`web/e2e/bank-details-auto-tag-rules-flow.spec.ts`；本轮 `web/e2e/permissions-role-matrix.spec.ts` 会在 read-export 下打开自动标签规则抽屉并分别进入待确认分类和未匹配待分类状态，断言新增标签/reapply/保存禁用、待确认/待分类按钮禁用、分类菜单不打开、category-confirmation/category-assignment 零 mutation，并复跑 DOM 写控件候选扫描 | 新增批量分类或规则入口时补 read-export 零 mutation。 |
 | `imports-bank-transactions` | 文件选择、preview、confirm import、账户冲突确认 | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts` 覆盖 import controls disabled；`web/e2e/imports-bank-transactions-flow.spec.ts` 覆盖 full_access 主链路 | 新增清空/重试/批量导入 mutation 时补按钮矩阵。 |
 | `imports-invoices` | 文件选择、preview、confirm import | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts` 覆盖 import controls disabled；`web/e2e/imports-invoices-flow.spec.ts` 覆盖 full_access 主链路 | 同上。 |
@@ -197,4 +200,4 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 
 ## 仍未完全闭合
 
-`PERM-E2E-003` 仍不能标记为全量 `covered`：新增页面/route 漏登记、非 admin route 漏进 role matrix、covered row 缺 Browser 证据、dynamic opener 与 Playwright/inventory 不一致已由 `tests/test_permissions_write_entry_inventory.py` 自动拦截，read-export 首屏 visible enabled 写控件和当前 role matrix 已打开的关联台列顺序拖拽 settings 保存入口、关联台未配对候选动作、关联台已配对撤回动作、关联台现金处理行级菜单、关联台已处理/已忽略恢复、银行分类确认、银行人工待分类、银行自动标签、no-OA 标签、pending 规则、收入批量、进项支付规则、进项 OA reverse、销项 canonical 只读区域、OA pending 进行中/规则、ETC 对账流程、batch accounting 选择与已提交撤回、turnover 等动态区域已由 DOM 候选扫描拦截；但尚未由 role matrix 自动打开的页面特定抽屉/弹窗深层爬取尚未完成，真实 OA/代理/生产审计也不能由本地 Browser mock 证明。后续每轮新增按钮时，必须先更新本文件，再补对应 Browser 断言。
+`PERM-E2E-003` 仍不能标记为全量 `covered`：新增页面/route 漏登记、非 admin route 漏进 role matrix、covered row 缺 Browser 证据、dynamic opener 与 Playwright/inventory 不一致已由 `tests/test_permissions_write_entry_inventory.py` 自动拦截，read-export 首屏 visible enabled 写控件和当前 role matrix 已打开的关联台列顺序拖拽 settings 保存入口、关联台未配对候选动作、关联台已配对撤回动作、关联台现金处理行级菜单、关联台统一异常抽屉处理与恢复、银行分类确认、银行人工待分类、银行自动标签、no-OA 标签、pending 规则、收入批量、进项支付规则、进项 OA reverse、销项 canonical 只读区域、OA pending 进行中/规则、ETC 对账流程、batch accounting 选择与已提交撤回、turnover 等动态区域已由 DOM 候选扫描拦截；但尚未由 role matrix 自动打开的页面特定抽屉/弹窗深层爬取尚未完成，真实 OA/代理/生产审计也不能由本地 Browser mock 证明。后续每轮新增按钮时，必须先更新本文件，再补对应 Browser 断言。

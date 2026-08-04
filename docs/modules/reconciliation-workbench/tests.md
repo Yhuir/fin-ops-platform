@@ -1,6 +1,14 @@
 # 关联台测试与验证
 
-日期：2026-07-28
+日期：2026-08-04
+
+## 2026-08-04 OA/发票金额不一致异常闭环
+
+- Business core：`tests/test_workbench_amount_check_service.py` 覆盖按分精确相等、1 分差异、缺少任一侧和任一成员金额时不误报；`test_workbench_relation_grouping.py` 保护 active/ignored anomaly 在 group 与最终发票行上的一致传播。
+- Service/repository/API：`tests/test_workbench_amount_mismatch_exception_service.py` 覆盖 server actor、all-scope 实际 month、stale fingerprint/version、幂等 ignore/restore、审计、month-scoped decision read，并证明 legacy exception loader 排除独立 scenario；`test_workbench_query_facade.py` 保护 `exception_bucket` 透传，`test_auth_guard.py` 保护 read-export 拒绝两个写接口。
+- Read model/cache：现有 Workbench generation payload 增加 additive anomaly 字段；过滤在 PostgreSQL active generation group payload 上完成，按 bucket 先过滤再分页。没有新增 manifest、scope、worker、queue、Redis owner 或第二 read model。
+- Frontend：`WorkbenchApi.test.ts` 覆盖 DTO、bucket query 和 action contract；`WorkbenchExceptionDrawer.test.tsx` 覆盖 active ignore、发票来源下 chip、processed restore；`WorkbenchSelection.test.tsx` 保护统一抽屉替代旧双 modal 且旧恢复行为不丢失。
+- E2E/regression：`workbench-exception-flow.spec.ts` 覆盖精确 1 分金额差异从主表 chip、统一抽屉忽略、已处理、恢复到主表的完整链路；权限 Browser suites 继续证明 read-export 零 mutation。旧 `IgnoredItemsModal`、`ProcessedExceptionsModal` 与对应独立测试已删除。
 
 ## 2026-07-31 row detail 稳定代际纯读与错误分层
 

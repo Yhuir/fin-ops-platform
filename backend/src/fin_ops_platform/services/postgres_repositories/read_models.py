@@ -4420,6 +4420,7 @@ class PostgresReadModelRepository:
         detail_level: str | None = None,
         column_filters: Any = None,
         time_filters: Any = None,
+        exception_bucket: str | None = None,
         expected_read_model_version: str | None = None,
     ) -> dict[str, Any] | None:
         normalized_scope_key = str(scope_key or "").strip() or "all"
@@ -4456,6 +4457,9 @@ class PostgresReadModelRepository:
         normalized_column_filters = _normalize_workbench_column_filters(column_filters)
         normalized_time_filters = _normalize_workbench_time_filters(time_filters)
         normalized_search = (text(search) or "")[:200]
+        normalized_exception_bucket = text(exception_bucket)
+        if normalized_exception_bucket not in {None, "active", "processed"}:
+            raise ValueError("exception_bucket must be active or processed.")
         if composed_all_scope:
             requires_aggregated_metadata = bool(text(sort))
             groups_from_sql = _workbench_active_month_groups_sql(
@@ -4498,6 +4502,16 @@ class PostgresReadModelRepository:
             else:
                 clauses.append(_workbench_zone_search_exists_sql(group_id_sql=group_row_join_id_sql))
                 params.append(pattern)
+        if normalized_exception_bucket == "active":
+            clauses.append(
+                "(g.payload#>>'{amount_anomaly,state}' = 'active' "
+                "or g.payload->>'exception_state' = 'active')"
+            )
+        elif normalized_exception_bucket == "processed":
+            clauses.append(
+                "(g.payload#>>'{amount_anomaly,state}' = 'ignored' "
+                "or g.payload->>'exception_state' = 'processed')"
+            )
         if composed_all_scope:
             row_filter_joins, row_filter_params = _workbench_all_group_row_filter_joins_sql(
                 column_filters=normalized_column_filters,
@@ -4542,6 +4556,7 @@ class PostgresReadModelRepository:
                     normalized_search,
                     normalized_column_filters,
                     normalized_time_filters,
+                    normalized_exception_bucket,
                 )
             )
         )

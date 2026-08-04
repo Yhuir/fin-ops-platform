@@ -277,11 +277,18 @@ function renderCellValue(
   }
 
   if (paneId === "invoice" && column.key === "sellerName") {
-    return renderInvoicePartyValue(value, row.tableValues.sellerTaxId ?? "", row.tableValues.invoiceType ?? "", row.sourceKind, searchQuery);
+    return renderInvoicePartyValue(
+      value,
+      row.tableValues.sellerTaxId ?? "",
+      row.tableValues.invoiceType ?? "",
+      row.sourceKind,
+      row.amountAnomaly,
+      searchQuery,
+    );
   }
 
   if (paneId === "invoice" && column.key === "buyerName") {
-    return renderInvoicePartyValue(value, row.tableValues.buyerTaxId ?? "", "", undefined, searchQuery);
+    return renderInvoicePartyValue(value, row.tableValues.buyerTaxId ?? "", "", undefined, undefined, searchQuery);
   }
 
   if (paneId === "invoice" && column.key === "issueDate") {
@@ -772,6 +779,7 @@ function renderInvoicePartyValue(
   taxId: string,
   invoiceType: string,
   sourceKind?: WorkbenchSourceKind,
+  amountAnomaly?: WorkbenchRecord["amountAnomaly"],
   searchQuery = "",
 ) {
   const flowLabel = workbenchInvoiceFlowLabel(invoiceType);
@@ -790,6 +798,14 @@ function renderInvoicePartyValue(
                 <span className={`invoice-flow-tag invoice-flow-tag-${flowLabel === "销" ? "output" : "input"}`}>{highlightSearchText(flowLabel, searchQuery)}</span>
               ) : null}
               {sourceLabel ? <span className="inline-meta-tag invoice-source-tag">{highlightSearchText(sourceLabel, searchQuery)}</span> : null}
+            </span>
+          ) : null}
+          {amountAnomaly ? (
+            <span
+              className={`invoice-amount-anomaly-chip invoice-amount-anomaly-chip-${amountAnomaly.state}`}
+              title={`OA ${amountAnomaly.oaTotal} / 发票 ${amountAnomaly.invoiceTotal} / 差额 ${amountAnomaly.amountDelta}`}
+            >
+              {amountAnomaly.displayLabel}
             </span>
           ) : null}
         </span>

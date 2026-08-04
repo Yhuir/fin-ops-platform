@@ -94,19 +94,14 @@ test.describe("workbench read-export permission browser flow", () => {
     const unpairedZone = page.getByTestId("zone-unpaired");
     await expect(unpairedZone).toBeVisible();
 
-    await unpairedZone.getByRole("button", { name: /已处理异常3项/ }).click();
-    const processedModal = page.getByRole("dialog", { name: "已处理异常弹窗" });
-    await expect(processedModal).toBeVisible();
-    await expect(processedModal.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeVisible();
-    await expect(processedModal.getByText("浏览器异常备注").first()).toBeVisible();
-    await expect(processedModal.getByRole("button", { name: "取消异常处理" })).toHaveCount(0);
-    await processedModal.getByRole("button", { name: "关闭" }).click();
-
-    await unpairedZone.getByRole("button", { name: /已忽略1项/ }).click();
-    const ignoredModal = page.getByRole("dialog", { name: "已忽略弹窗" });
-    await expect(ignoredModal).toBeVisible();
-    await expect(ignoredModal.getByText("智能工厂设备商")).toBeVisible();
-    await expect(ignoredModal.getByRole("button", { name: "撤回忽略" })).toHaveCount(0);
+    await unpairedZone.getByRole("button", { name: /已处理异常\d+项/ }).click();
+    const exceptionDrawer = page.getByRole("dialog", { name: "异常处理" });
+    await expect(exceptionDrawer).toBeVisible();
+    await exceptionDrawer.getByRole("button", { name: "已处理异常" }).click();
+    await expect(exceptionDrawer.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeVisible();
+    await expect(exceptionDrawer.getByText("智能工厂设备商").first()).toBeVisible();
+    await expect(exceptionDrawer.getByRole("button", { name: "撤回处理" })).toHaveCount(0);
+    await expect(exceptionDrawer.getByRole("button", { name: "撤回忽略" })).toHaveCount(0);
 
     expectNoWorkbenchMutationCalls(api);
   });
@@ -175,18 +170,14 @@ test.describe("workbench App Health write-safety browser flow", () => {
     await expect(pairedGroup.getByRole("button", { name: "取消关联" })).toHaveCount(0);
 
     const unpairedZone = page.getByTestId("zone-unpaired");
-    await unpairedZone.getByRole("button", { name: /已处理异常3项/ }).click();
-    const processedModal = page.getByRole("dialog", { name: "已处理异常弹窗" });
-    await expect(processedModal).toBeVisible();
-    await expect(processedModal.getByText("浏览器异常备注").first()).toBeVisible();
-    await expect(processedModal.getByRole("button", { name: "取消异常处理" })).toHaveCount(0);
-    await processedModal.getByRole("button", { name: "关闭" }).click();
-
-    await unpairedZone.getByRole("button", { name: /已忽略1项/ }).click();
-    const ignoredModal = page.getByRole("dialog", { name: "已忽略弹窗" });
-    await expect(ignoredModal).toBeVisible();
-    await expect(ignoredModal.getByText("智能工厂设备商")).toBeVisible();
-    await expect(ignoredModal.getByRole("button", { name: "撤回忽略" })).toHaveCount(0);
+    await unpairedZone.getByRole("button", { name: /已处理异常\d+项/ }).click();
+    const exceptionDrawer = page.getByRole("dialog", { name: "异常处理" });
+    await expect(exceptionDrawer).toBeVisible();
+    await exceptionDrawer.getByRole("button", { name: "已处理异常" }).click();
+    await expect(exceptionDrawer.getByText("追进项发票").first()).toBeVisible();
+    await expect(exceptionDrawer.getByText("智能工厂设备商").first()).toBeVisible();
+    await expect(exceptionDrawer.getByRole("button", { name: "撤回处理" })).toHaveCount(0);
+    await expect(exceptionDrawer.getByRole("button", { name: "撤回忽略" })).toHaveCount(0);
 
     expectNoWorkbenchMutationCalls(api);
   });

@@ -7,9 +7,8 @@ import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import ActionStatusModal from "../components/workbench/ActionStatusModal";
 import CancelProcessedExceptionModal from "../components/workbench/CancelProcessedExceptionModal";
 import DetailDrawer from "../components/workbench/DetailDrawer";
-import IgnoredItemsModal from "../components/workbench/IgnoredItemsModal";
-import ProcessedExceptionsModal from "../components/workbench/ProcessedExceptionsModal";
 import RelationPreviewTriPane from "../components/workbench/RelationPreviewTriPane";
+import WorkbenchExceptionDrawer from "../components/workbench/WorkbenchExceptionDrawer";
 import WorkbenchExceptionModal from "../components/workbench/WorkbenchExceptionModal";
 import WorkbenchZone from "../components/workbench/WorkbenchZone";
 import type { WorkbenchPane } from "../components/workbench/ResizableTriPane";
@@ -25,7 +24,7 @@ import {
   confirmWorkbenchCashPassThrough,
   confirmWorkbenchCashTicketPurchase,
   confirmWorkbenchLink,
-  fetchIgnoredWorkbenchRows,
+  fetchWorkbenchExceptionGroups,
   fetchWorkbenchGroupDetail,
   fetchWorkbenchGroupsPage,
   fetchWorkbenchInitialPage,
@@ -37,6 +36,7 @@ import {
   previewWorkbenchConfirmLink,
   previewWorkbenchWithdrawLink,
   saveWorkbenchSettings,
+  setWorkbenchAmountMismatchIgnored,
   unignoreWorkbenchRow,
   withdrawWorkbenchLink,
   WorkbenchApiError,
@@ -60,7 +60,6 @@ import { reorderWorkbenchColumnLayout, type WorkbenchColumnDropPosition } from "
 import { buildWorkbenchSelectionContext } from "../features/workbench/selectionModel";
 import { resolveWorkbenchWriteGate } from "../features/workbench/writeGate";
 import type {
-  IgnoredWorkbenchData,
   WorkbenchRelationGroup,
   WorkbenchData,
   WorkbenchExceptionApplyResult,
@@ -427,10 +426,15 @@ export default function ReconciliationWorkbenchPage() {
   const [relationPreviewRequestKind, setRelationPreviewRequestKind] = useState<RelationPreviewRequestKind | null>(null);
   const relationPreviewRequestKindRef = useRef<RelationPreviewRequestKind | null>(null);
   const relationPreviewContextKeyRef = useRef("");
-  const [ignoredData, setIgnoredData] = useState<IgnoredWorkbenchData>({ month: WORKBENCH_VIEW_MONTH, rows: [] });
   const [workbenchSettings, setWorkbenchSettings] = useState<WorkbenchSettings | null>(null);
-  const [ignoredModalOpen, setIgnoredModalOpen] = useState(false);
-  const [processedExceptionsModalOpen, setProcessedExceptionsModalOpen] = useState(false);
+  const [exceptionDrawerOpen, setExceptionDrawerOpen] = useState(false);
+  const [exceptionDrawerBucket, setExceptionDrawerBucket] = useState<"active" | "processed">("active");
+  const [exceptionDrawerGroups, setExceptionDrawerGroups] = useState<WorkbenchRelationGroup[]>([]);
+  const [exceptionActiveCount, setExceptionActiveCount] = useState(0);
+  const [exceptionDrawerIgnoredRows, setExceptionDrawerIgnoredRows] = useState<WorkbenchRecord[]>([]);
+  const [exceptionDrawerLoading, setExceptionDrawerLoading] = useState(false);
+  const [exceptionDrawerError, setExceptionDrawerError] = useState<string | null>(null);
+  const exceptionDrawerRequestRef = useRef<AbortController | null>(null);
   const [workbenchExceptionDialog, setWorkbenchExceptionDialog] = useState<WorkbenchExceptionDialogState | null>(null);
   const [cashTicketPurchaseDialog, setCashTicketPurchaseDialog] = useState<CashTicketPurchaseDialogState | null>(null);
   const [cancelProcessedExceptionDialog, setCancelProcessedExceptionDialog] = useState<CancelProcessedExceptionDialogState | null>(null);
@@ -697,14 +701,10 @@ export default function ReconciliationWorkbenchPage() {
 
   async function loadWorkbenchAuxiliaryData(month: string, signal?: AbortSignal) {
     try {
-      const [ignoredRows, settings] = await Promise.all([
-        fetchIgnoredWorkbenchRows(month, signal),
-        fetchWorkbenchSettings(signal),
-      ]);
+      const settings = await fetchWorkbenchSettings(signal);
       if (signal?.aborted) {
         return;
       }
-      setIgnoredData(ignoredRows);
       setWorkbenchSettings(settings);
     } catch {
       if (signal?.aborted) {
@@ -760,6 +760,7 @@ export default function ReconciliationWorkbenchPage() {
     }
     activeWorkbenchReadModelVersionRef.current = nextVersion;
     setWorkbenchData(workbenchPayload.data);
+    setExceptionActiveCount(workbenchPayload.data.summary.exceptionCount);
     setStatistics(nextStatus === "fresh" ? workbenchPayload.statistics ?? null : null);
     setLoadedZoneServerPageQueryKeys(createWorkbenchZoneServerPageQueryKeys(resolvedZoneQueries));
     setZonePages(workbenchPayload.pages);
@@ -842,7 +843,9 @@ export default function ReconciliationWorkbenchPage() {
         activeWorkbenchReadModelVersionRef.current = "";
         setLoadedZoneServerPageQueryKeys(null);
         setZonePages(createInitialZonePages());
-        setIgnoredData({ month, rows: [] });
+        setExceptionDrawerGroups([]);
+        setExceptionDrawerIgnoredRows([]);
+        setExceptionActiveCount(0);
         setLoadError(normalizedError.message);
         setIsLoading(false);
       } else {
@@ -1284,19 +1287,9 @@ export default function ReconciliationWorkbenchPage() {
 
   useEffect(() => () => setWorkbenchStatus(null), [setWorkbenchStatus]);
 
-  const processedExceptionRows = useMemo(
-    () => flattenGroups(collectProcessedExceptionGroups(workbenchData?.unpaired.groups ?? [])),
-    [workbenchData],
-  );
-
   const visibleOpenGroups = useMemo(
-    () => removeProcessedExceptionRows(workbenchData?.unpaired.groups ?? []),
-    [workbenchData],
-  );
-
-  const processedExceptionGroups = useMemo(
-    () => collectProcessedExceptionGroups(workbenchData?.unpaired.groups ?? []),
-    [workbenchData],
+    () => (workbenchData?.unpaired.groups ?? []).filter((group) => !group.exceptionState),
+    [workbenchData?.unpaired.groups],
   );
 
   const displayPairedGroups = useMemo(
@@ -1523,21 +1516,67 @@ export default function ReconciliationWorkbenchPage() {
     setActionDialog((current) => (current?.phase === "result" ? null : current));
   };
 
-  const handleOpenIgnoredModal = () => {
-    setIgnoredModalOpen(true);
-  };
+  const loadExceptionDrawer = useCallback(async (bucket: "active" | "processed") => {
+    const version = activeWorkbenchReadModelVersionRef.current;
+    if (!version) {
+      setExceptionDrawerError("关联台数据尚未就绪，请稍后重试。");
+      return;
+    }
+    exceptionDrawerRequestRef.current?.abort();
+    const controller = new AbortController();
+    exceptionDrawerRequestRef.current = controller;
+    setExceptionDrawerLoading(true);
+    setExceptionDrawerError(null);
+    try {
+      const result = await fetchWorkbenchExceptionGroups(
+        WORKBENCH_VIEW_MONTH,
+        bucket,
+        version,
+        controller.signal,
+      );
+      if (!controller.signal.aborted) {
+        setExceptionDrawerGroups(result.groups);
+        setExceptionDrawerIgnoredRows(result.ignoredRows);
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        setExceptionDrawerError(error instanceof Error ? error.message : "异常数据加载失败，请稍后重试。");
+      }
+    } finally {
+      if (exceptionDrawerRequestRef.current === controller) {
+        exceptionDrawerRequestRef.current = null;
+        setExceptionDrawerLoading(false);
+      }
+    }
+  }, []);
 
-  const handleCloseIgnoredModal = () => {
-    setIgnoredModalOpen(false);
-  };
+  const handleOpenExceptionDrawer = useCallback(() => {
+    setExceptionDrawerOpen(true);
+    setExceptionDrawerBucket("active");
+  }, []);
 
-  const handleOpenProcessedExceptionsModal = () => {
-    setProcessedExceptionsModalOpen(true);
-  };
+  const handleExceptionDrawerBucketChange = useCallback((bucket: "active" | "processed") => {
+    setExceptionDrawerBucket(bucket);
+  }, []);
 
-  const handleCloseProcessedExceptionsModal = () => {
-    setProcessedExceptionsModalOpen(false);
-  };
+  const handleCloseExceptionDrawer = useCallback(() => {
+    exceptionDrawerRequestRef.current?.abort();
+    exceptionDrawerRequestRef.current = null;
+    setExceptionDrawerOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (!activeWorkbenchReadModelVersion || !exceptionDrawerOpen) {
+      return;
+    }
+    void loadExceptionDrawer(exceptionDrawerBucket);
+    return () => exceptionDrawerRequestRef.current?.abort();
+  }, [
+    activeWorkbenchReadModelVersion,
+    exceptionDrawerBucket,
+    exceptionDrawerOpen,
+    loadExceptionDrawer,
+  ]);
 
   const openActionResultDialog = useCallback((message: string, title = "操作提示") => {
     setActionDialog({
@@ -1556,7 +1595,7 @@ export default function ReconciliationWorkbenchPage() {
   }, [openActionResultDialog, workbenchWriteGate]);
 
   const openCancelProcessedExceptionDialog = useCallback((row: WorkbenchRecord) => {
-    const group = processedExceptionGroups.find((candidateGroup) =>
+    const group = exceptionDrawerGroups.find((candidateGroup) =>
       [...candidateGroup.rows.oa, ...candidateGroup.rows.bank, ...candidateGroup.rows.invoice].some(
         (candidateRow) => candidateRow.id === row.id,
       ),
@@ -1565,9 +1604,9 @@ export default function ReconciliationWorkbenchPage() {
       openActionResultDialog("未找到对应的异常分组。");
       return;
     }
-    setProcessedExceptionsModalOpen(false);
+    setExceptionDrawerOpen(false);
     setCancelProcessedExceptionDialog({ group });
-  }, [openActionResultDialog, processedExceptionGroups]);
+  }, [exceptionDrawerGroups, openActionResultDialog]);
 
   const handleCloseCancelProcessedExceptionDialog = () => {
     setCancelProcessedExceptionDialog(null);
@@ -2129,7 +2168,6 @@ export default function ReconciliationWorkbenchPage() {
     if (!ensureCanWriteWorkbench()) {
       return;
     }
-    setIgnoredModalOpen(false);
     await runBlockingAction({
       loadingMessage: "正在撤回忽略...",
       action: async () => {
@@ -2141,8 +2179,28 @@ export default function ReconciliationWorkbenchPage() {
         return result;
       },
     });
-    await loadWorkbenchAuxiliaryData(WORKBENCH_VIEW_MONTH);
+    await loadExceptionDrawer("processed");
   };
+
+  const handleAmountMismatchDecision = useCallback(async (
+    group: WorkbenchRelationGroup,
+    ignored: boolean,
+  ) => {
+    if (!ensureCanWriteWorkbench() || !group.amountAnomaly) {
+      return;
+    }
+    await runBlockingAction({
+      loadingMessage: ignored ? "正在忽略金额异常..." : "正在恢复金额异常...",
+      action: () => setWorkbenchAmountMismatchIgnored({
+        month: WORKBENCH_VIEW_MONTH,
+        zone: group.groupType,
+        groupId: group.id,
+        fingerprint: group.amountAnomaly!.fingerprint,
+        expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
+      }, ignored),
+    });
+    await loadExceptionDrawer(ignored ? "active" : "processed");
+  }, [ensureCanWriteWorkbench, loadExceptionDrawer, runBlockingAction]);
 
   const handleConfirmCancelProcessedException = async () => {
     if (!ensureCanWriteWorkbench()) {
@@ -2164,7 +2222,7 @@ export default function ReconciliationWorkbenchPage() {
           month: WORKBENCH_VIEW_MONTH,
           rowIds: rows.map((row) => row.id),
           expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
-          comment: "由已处理异常弹窗撤回异常处理",
+          comment: "由已处理异常抽屉撤回异常处理",
         });
         return result;
       },
@@ -2212,17 +2270,12 @@ export default function ReconciliationWorkbenchPage() {
   const openAuxiliaryHeaderActions = useMemo(
     () => [
       {
-        label: `已处理异常${processedExceptionRows.length}项`,
-        onClick: handleOpenProcessedExceptionsModal,
+        label: `已处理异常${exceptionActiveCount}项`,
+        onClick: handleOpenExceptionDrawer,
         tone: "danger" as const,
       },
-      {
-        label: `已忽略${ignoredData.rows.length}项`,
-        onClick: handleOpenIgnoredModal,
-        tone: "warning" as const,
-      },
     ],
-    [handleOpenIgnoredModal, handleOpenProcessedExceptionsModal, ignoredData.rows.length, processedExceptionRows.length],
+    [exceptionActiveCount, handleOpenExceptionDrawer],
   );
 
   const isWorkbenchPageFresh = workbenchPageReadModelStatus === "fresh";
@@ -2438,29 +2491,21 @@ export default function ReconciliationWorkbenchPage() {
           onAcknowledge={handleCloseActionDialog}
         />
       ) : null}
-      {ignoredModalOpen ? (
-        <IgnoredItemsModal
-          canMutateData={canWriteWorkbench}
-          highlightedRowId={null}
-          rows={ignoredData.rows}
-          onClose={handleCloseIgnoredModal}
-          onUnignore={handleUnignoreRow}
-        />
-      ) : null}
-      {processedExceptionsModalOpen ? (
-        <ProcessedExceptionsModal
-          canMutateData={canWriteWorkbench}
-          groups={processedExceptionGroups}
-          highlightedRowId={null}
-          panes={[
-            { id: "oa", title: "OA", rows: processedExceptionGroups.flatMap((group) => group.rows.oa) },
-            { id: "bank", title: "银行流水", rows: processedExceptionGroups.flatMap((group) => group.rows.bank) },
-            { id: "invoice", title: "进销项发票", rows: processedExceptionGroups.flatMap((group) => group.rows.invoice) },
-          ]}
-          onClose={handleCloseProcessedExceptionsModal}
-          onCancelException={openCancelProcessedExceptionDialog}
-        />
-      ) : null}
+      <WorkbenchExceptionDrawer
+        bucket={exceptionDrawerBucket}
+        canMutateData={canWriteWorkbench}
+        error={exceptionDrawerError}
+        groups={exceptionDrawerGroups}
+        ignoredRows={exceptionDrawerIgnoredRows}
+        loading={exceptionDrawerLoading}
+        open={exceptionDrawerOpen}
+        onBucketChange={handleExceptionDrawerBucketChange}
+        onCancelProcessedException={openCancelProcessedExceptionDialog}
+        onClose={handleCloseExceptionDrawer}
+        onIgnoreAmountMismatch={(group) => void handleAmountMismatchDecision(group, true)}
+        onRestoreAmountMismatch={(group) => void handleAmountMismatchDecision(group, false)}
+        onUnignoreRow={(row) => void handleUnignoreRow(row)}
+      />
       {cancelProcessedExceptionDialog ? (
         <CancelProcessedExceptionModal
           affectedCount={
@@ -2807,49 +2852,6 @@ function RelationPreviewDialog({
   );
 }
 
-function isProcessedExceptionRow(row: WorkbenchRecord) {
-  if (row.statusCode === "manual_review" || row.status === "待人工核查") {
-    return false;
-  }
-  if (row.exceptionHandled) {
-    return true;
-  }
-  if (row.statusTone !== "danger") {
-    return false;
-  }
-  return LEGACY_HANDLED_EXCEPTION_CODES.has(row.statusCode) || LEGACY_HANDLED_EXCEPTION_LABELS.has(row.status);
-}
-
-function collectProcessedExceptionGroups(groups: WorkbenchRelationGroup[]) {
-  return groups.flatMap((group) => {
-    const nextGroup: WorkbenchRelationGroup = {
-      ...group,
-      rows: {
-        oa: group.rows.oa.filter(isProcessedExceptionRow),
-        bank: group.rows.bank.filter(isProcessedExceptionRow),
-        invoice: group.rows.invoice.filter(isProcessedExceptionRow),
-      },
-    };
-    const visibleCount = nextGroup.rows.oa.length + nextGroup.rows.bank.length + nextGroup.rows.invoice.length;
-    return visibleCount > 0 ? [nextGroup] : [];
-  });
-}
-
-function removeProcessedExceptionRows(groups: WorkbenchRelationGroup[]) {
-  return groups.flatMap((group) => {
-    const nextGroup: WorkbenchRelationGroup = {
-      ...group,
-      rows: {
-        oa: group.rows.oa.filter((row) => !isProcessedExceptionRow(row)),
-        bank: group.rows.bank.filter((row) => !isProcessedExceptionRow(row)),
-        invoice: group.rows.invoice.filter((row) => !isProcessedExceptionRow(row)),
-      },
-    };
-    const visibleCount = nextGroup.rows.oa.length + nextGroup.rows.bank.length + nextGroup.rows.invoice.length;
-    return visibleCount > 0 ? [nextGroup] : [];
-  });
-}
-
 function flattenGroups(groups: WorkbenchRelationGroup[]) {
   return groups.flatMap((group) => [...group.rows.oa, ...group.rows.bank, ...group.rows.invoice]);
 }
@@ -2899,28 +2901,3 @@ function operationProjectionAffectedRowIds(result: WorkbenchActionResult) {
 function hasOperationProjection(projection: WorkbenchOperationProjection | undefined) {
   return Boolean(projection);
 }
-
-const LEGACY_HANDLED_EXCEPTION_CODES = new Set([
-  "pending_collection",
-  "bank_fee",
-  "oa_missing_bank",
-  "bank_missing_oa_fee",
-  "bank_missing_oa_loan",
-  "bank_missing_oa_interest",
-  "bank_missing_oa_misc",
-  "oa_bank_amount_mismatch",
-  "oa_one_to_many_bank",
-  "oa_many_to_one_bank",
-]);
-
-const LEGACY_HANDLED_EXCEPTION_LABELS = new Set([
-  "待人工处理",
-  "无对应流水（还没付钱）",
-  "无对应OA（补手续费）",
-  "无对应OA（补贷款）",
-  "无对应OA（补利息）",
-  "无对应OA（补电信托收薪资保险往来款标灰）",
-  "金额不一致，继续异常",
-  "一个OA多个流水",
-  "多个OA一笔流水",
-]);

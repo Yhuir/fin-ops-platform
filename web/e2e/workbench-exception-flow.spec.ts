@@ -55,7 +55,7 @@ test.describe("workbench exception browser flow", () => {
     await expect(page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001")).toHaveCount(0);
     await expect(page.getByTestId("candidate-group-unpaired-row:bk-o-202603-001")).toHaveCount(0);
     await expect(page.getByTestId("candidate-group-unpaired-row:iv-o-202603-001")).toHaveCount(0);
-    await expect(openZone.getByRole("button", { name: /已处理异常3项/ })).toBeVisible();
+    await expect(openZone.getByRole("button", { name: /已处理异常\d+项/ })).toBeVisible();
 
     const previewBody = api.lastBody("POST /api/workbench/exception/preview");
     expect(previewBody).toMatchObject({ month: "all" });
@@ -77,14 +77,15 @@ test.describe("workbench exception browser flow", () => {
     expect(api.count("GET /api/workbench")).toBeGreaterThan(workbenchLoadsBeforeApply);
     await expectNoUnexpectedSuccessUiErrors(page);
 
-    await openZone.getByRole("button", { name: /已处理异常3项/ }).click();
-    const processedModal = page.getByRole("dialog", { name: "已处理异常弹窗" });
-    await expect(processedModal).toBeVisible();
-    await expect(processedModal.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeVisible();
-    await expect(processedModal.getByText("浏览器异常备注").first()).toBeVisible();
+    await openZone.getByRole("button", { name: /已处理异常\d+项/ }).click();
+    const exceptionDrawer = page.getByRole("dialog", { name: "异常处理" });
+    await expect(exceptionDrawer).toBeVisible();
+    await exceptionDrawer.getByRole("button", { name: "已处理异常" }).click();
+    await expect(exceptionDrawer.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeVisible();
+    await expect(exceptionDrawer.getByText("追进项发票").first()).toBeVisible();
 
     const workbenchLoadsBeforeCancel = api.count("GET /api/workbench");
-    await processedModal.getByRole("button", { name: "取消异常处理" }).first().click();
+    await exceptionDrawer.getByRole("button", { name: "撤回处理" }).first().click();
 
     const cancelModal = page.getByRole("dialog", { name: "取消异常处理确认弹窗" });
     await expect(cancelModal.getByText("确认取消异常处理后，这组记录会回到未配对区域。")).toBeVisible();
@@ -93,12 +94,12 @@ test.describe("workbench exception browser flow", () => {
     await expect(page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001")).toBeVisible();
     await expect(page.getByTestId("candidate-group-unpaired-row:bk-o-202603-001")).toBeVisible();
     await expect(page.getByTestId("candidate-group-unpaired-row:iv-o-202603-001")).toBeVisible();
-    await expect(openZone.getByRole("button", { name: /已处理异常0项/ })).toBeVisible();
+    await expect(openZone.getByRole("button", { name: /已处理异常\d+项/ })).toBeVisible();
 
     const cancelBody = api.lastBody("POST /api/workbench/actions/cancel-exception");
     expect(cancelBody).toMatchObject({
       month: "all",
-      comment: "由已处理异常弹窗撤回异常处理",
+      comment: "由已处理异常抽屉撤回异常处理",
     });
     expect(cancelBody.row_ids).toEqual(expect.arrayContaining(workbenchRowIds));
     expect(cancelBody.row_ids).toHaveLength(workbenchRowIds.length);
@@ -108,7 +109,7 @@ test.describe("workbench exception browser flow", () => {
     await expectNoUnexpectedSuccessUiErrors(page);
   });
 
-  test("moves an ignored invoice through ignored modal and restores it after unignore", async ({ page }) => {
+  test("moves an ignored invoice through the processed drawer and restores it after unignore", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
 
     await page.goto("/");
@@ -123,7 +124,7 @@ test.describe("workbench exception browser flow", () => {
     await invoiceRow.getByRole("button", { name: "忽略" }).click();
 
     await expect(openGroup.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })).toHaveCount(0);
-    await expect(openZone.getByRole("button", { name: /已忽略1项/ })).toBeVisible();
+    await expect(openZone.getByRole("button", { name: /已处理异常\d+项/ })).toBeVisible();
     expect(api.count("POST /api/workbench/actions/ignore-row")).toBe(1);
     expect(api.lastBody("POST /api/workbench/actions/ignore-row")).toMatchObject({
       month: "all",
@@ -134,16 +135,17 @@ test.describe("workbench exception browser flow", () => {
     expect(api.count("GET /api/workbench")).toBeGreaterThan(workbenchLoadsBeforeIgnore);
     await expectNoUnexpectedSuccessUiErrors(page);
 
-    await openZone.getByRole("button", { name: /已忽略1项/ }).click();
-    const ignoredModal = page.getByRole("dialog", { name: "已忽略弹窗" });
-    await expect(ignoredModal).toBeVisible();
-    await expect(ignoredModal.getByText("智能工厂设备商")).toBeVisible();
+    await openZone.getByRole("button", { name: /已处理异常\d+项/ }).click();
+    const exceptionDrawer = page.getByRole("dialog", { name: "异常处理" });
+    await expect(exceptionDrawer).toBeVisible();
+    await exceptionDrawer.getByRole("button", { name: "已处理异常" }).click();
+    await expect(exceptionDrawer.getByText("智能工厂设备商")).toBeVisible();
 
     const workbenchLoadsBeforeUnignore = api.count("GET /api/workbench");
-    await ignoredModal.getByRole("button", { name: "撤回忽略" }).click();
+    await exceptionDrawer.getByRole("button", { name: "撤回忽略" }).click();
 
     await expect(openGroup.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })).toBeVisible();
-    await expect(openZone.getByRole("button", { name: /已忽略0项/ })).toBeVisible();
+    await expect(exceptionDrawer.getByRole("button", { name: "撤回忽略" })).toHaveCount(0);
     expect(api.count("POST /api/workbench/actions/unignore-row")).toBe(1);
     expect(api.lastBody("POST /api/workbench/actions/unignore-row")).toMatchObject({
       month: "all",
@@ -151,6 +153,51 @@ test.describe("workbench exception browser flow", () => {
     });
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
     expect(api.count("GET /api/workbench")).toBeGreaterThan(workbenchLoadsBeforeUnignore);
+    await expectNoUnexpectedSuccessUiErrors(page);
+  });
+
+  test("ignores and restores an exact-cent OA invoice amount mismatch", async ({ page }) => {
+    const api = await installDeterministicApiMocks(page, {
+      sessionMode: "full_access",
+      workbenchAmountMismatchScenario: true,
+      workbenchInitialRelationConfirmed: true,
+    });
+
+    await page.goto("/");
+
+    const pairedZone = page.getByTestId("zone-paired");
+    await expect(pairedZone.getByText("金额不一致")).toBeVisible();
+    await page
+      .getByTestId("zone-unpaired")
+      .getByRole("button", { name: /已处理异常\d+项/ })
+      .click();
+
+    const drawer = page.getByRole("dialog", { name: "异常处理" });
+    await expect(drawer.getByText("金额不一致").first()).toBeVisible();
+    await drawer.getByRole("button", { name: "忽略" }).click();
+
+    await expect(pairedZone.getByText("已忽略：金额不一致")).toBeVisible();
+    expect(api.count("POST /api/workbench/exceptions/amount-mismatch/ignore")).toBe(1);
+    expect(api.lastBody("POST /api/workbench/exceptions/amount-mismatch/ignore")).toMatchObject({
+      month: "all",
+      zone: "paired",
+      group_id: "case:CASE-202603-101",
+      fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    });
+
+    await drawer.getByRole("button", { name: "已处理异常" }).click();
+    await expect(drawer.getByText("已忽略：金额不一致").first()).toBeVisible();
+    await drawer.getByRole("button", { name: "恢复" }).click();
+
+    await expect(pairedZone.getByText("金额不一致")).toBeVisible();
+    expect(api.count("POST /api/workbench/exceptions/amount-mismatch/restore")).toBe(1);
+    expect(api.lastBody("POST /api/workbench/exceptions/amount-mismatch/restore")).toMatchObject({
+      month: "all",
+      zone: "paired",
+      group_id: "case:CASE-202603-101",
+      fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    });
+    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
     await expectNoUnexpectedSuccessUiErrors(page);
   });
 });

@@ -27,6 +27,7 @@ import type {
   WorkbenchOaStatus,
   WorkbenchColumnLayouts,
   WorkbenchAmountCheck,
+  WorkbenchAmountAnomaly,
   WorkbenchOaImportOption,
   WorkbenchOaSyncStatus,
   WorkbenchInvoiceInventory,
@@ -159,6 +160,18 @@ type ApiWorkbenchRow = {
   cost_excluded?: boolean | null;
   special_metadata?: Record<string, unknown> | null;
   source_expense_item_id?: string | null;
+  amount_anomaly?: ApiWorkbenchAmountAnomaly | null;
+};
+
+type ApiWorkbenchAmountAnomaly = {
+  code?: string | null;
+  label?: string | null;
+  display_label?: string | null;
+  fingerprint?: string | null;
+  state?: string | null;
+  oa_total?: string | number | null;
+  invoice_total?: string | number | null;
+  amount_delta?: string | number | null;
 };
 
 type ApiWorkbenchPayload = {
@@ -432,6 +445,8 @@ type ApiWorkbenchGroup = {
   can_withdraw?: boolean;
   relation_note?: string | null;
   amount_check?: ApiWorkbenchRelationAmountCheck | null;
+  amount_anomaly?: ApiWorkbenchAmountAnomaly | null;
+  exception_state?: "active" | "processed" | null;
   special_metadata?: Record<string, unknown> | null;
   processed_exception_summary?: Record<string, unknown> | null;
   completion?: {
@@ -725,6 +740,14 @@ type CancelExceptionPayload = {
   comment?: string;
 };
 
+type AmountMismatchDecisionPayload = {
+  month: string;
+  zone: WorkbenchZoneId;
+  groupId: string;
+  fingerprint: string;
+  expectedReadModelVersion: string;
+};
+
 type ConfirmCashPassThroughPayload = {
   month: string;
   rowIds: string[];
@@ -966,6 +989,30 @@ function mapRelationAmountCheck(value: ApiWorkbenchRelationAmountCheck | null | 
     oaAmount: toDisplayValue(value.oa_amount ?? value.oaAmount),
     amountDelta: toDisplayValue(value.amount_delta ?? value.amountDelta),
     requiresNote: value.requires_note === true || value.requiresNote === true,
+  };
+}
+
+function mapAmountAnomaly(value: ApiWorkbenchAmountAnomaly | null | undefined): WorkbenchAmountAnomaly | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const fingerprint = String(value.fingerprint ?? "").trim();
+  const state = value.state === "ignored" ? "ignored" : value.state === "active" ? "active" : null;
+  if (!fingerprint || !state) {
+    return undefined;
+  }
+  return {
+    code: toDisplayValue(value.code, "oa_invoice_amount_mismatch") as WorkbenchAmountAnomaly["code"],
+    label: toDisplayValue(value.label, "金额不一致"),
+    displayLabel: toDisplayValue(
+      value.display_label,
+      state === "ignored" ? "已忽略：金额不一致" : "金额不一致",
+    ),
+    fingerprint,
+    state,
+    oaTotal: toDisplayValue(value.oa_total),
+    invoiceTotal: toDisplayValue(value.invoice_total),
+    amountDelta: toDisplayValue(value.amount_delta),
   };
 }
 
@@ -1351,6 +1398,7 @@ function mapRow(row: ApiWorkbenchRow): WorkbenchRecord {
     relationNote: toDisplayValue(row.relation_note, "") || undefined,
     relationAmountCheck: mapRelationAmountCheck(row.relation_amount_check),
     specialMetadata: row.special_metadata && typeof row.special_metadata === "object" ? row.special_metadata : undefined,
+    amountAnomaly: mapAmountAnomaly(row.amount_anomaly),
   };
 }
 
@@ -1435,6 +1483,10 @@ function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): Workben
     collapsedRowCounts,
     relationNote: toDisplayValue(group.relation_note, "") || undefined,
     amountCheck: mapRelationAmountCheck(group.amount_check),
+    amountAnomaly: mapAmountAnomaly(group.amount_anomaly),
+    exceptionState: group.exception_state === "active" || group.exception_state === "processed"
+      ? group.exception_state
+      : undefined,
     specialMetadata: group.special_metadata && typeof group.special_metadata === "object" ? group.special_metadata : undefined,
     processedExceptionSummary: mapProcessedExceptionSummary(group.processed_exception_summary),
     completion: group.completion && typeof group.completion === "object"
@@ -2388,6 +2440,7 @@ function workbenchGroupsUrl(
   const detailLevel = query.detailLevel === "full" ? "full" : query.detailLevel === "summary" ? "summary" : "";
   const columnFilters = stableJsonQueryParam(query.filtersByPaneAndColumn);
   const timeFilters = stableJsonQueryParam(query.timeFilterByPane);
+  const exceptionBucket = query.exceptionBucket;
   if (search) {
     params.set("search", search);
   }
@@ -2408,6 +2461,9 @@ function workbenchGroupsUrl(
   }
   if (timeFilters) {
     params.set("time_filters", timeFilters);
+  }
+  if (exceptionBucket) {
+    params.set("exception_bucket", exceptionBucket);
   }
   if (expectedReadModelVersion?.trim()) {
     params.set("expected_read_model_version", expectedReadModelVersion.trim());
@@ -2497,6 +2553,43 @@ export async function fetchWorkbenchGroupsPage(
     zone: payload.zone,
     groups: payload.groups.map((group) => mapGroup(group, payload.zone)),
     page: mapWorkbenchZonePage(payload),
+  };
+}
+
+export async function fetchWorkbenchExceptionGroups(
+  month: string,
+  bucket: "active" | "processed",
+  expectedReadModelVersion: string,
+  signal?: AbortSignal,
+): Promise<{ groups: WorkbenchRelationGroup[]; ignoredRows: WorkbenchRecord[] }> {
+  const loadZone = async (zone: WorkbenchZoneId) => {
+    const groups: WorkbenchRelationGroup[] = [];
+    let page = 1;
+    while (true) {
+      const result = await fetchWorkbenchGroupsPage(
+        month,
+        zone,
+        page,
+        200,
+        signal,
+        { detailLevel: "full", exceptionBucket: bucket },
+        expectedReadModelVersion,
+      );
+      groups.push(...result.groups);
+      if (!result.page.hasMore) {
+        return groups;
+      }
+      page += 1;
+    }
+  };
+  const [paired, unpaired, ignored] = await Promise.all([
+    loadZone("paired"),
+    loadZone("unpaired"),
+    bucket === "processed" ? fetchIgnoredWorkbenchRows(month, signal) : Promise.resolve(null),
+  ]);
+  return {
+    groups: [...paired, ...unpaired],
+    ignoredRows: ignored?.rows ?? [],
   };
 }
 
@@ -3333,6 +3426,27 @@ export async function unignoreWorkbenchRow(payload: UnignoreRowPayload): Promise
       expected_read_model_version: payload.expectedReadModelVersion,
     }),
   });
+  return mapWorkbenchActionResult(result);
+}
+
+export async function setWorkbenchAmountMismatchIgnored(
+  payload: AmountMismatchDecisionPayload,
+  ignored: boolean,
+): Promise<WorkbenchActionResult> {
+  const result = await requestJson<ApiWorkbenchActionResult>(
+    `/api/workbench/exceptions/amount-mismatch/${ignored ? "ignore" : "restore"}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        month: payload.month,
+        zone: payload.zone,
+        group_id: payload.groupId,
+        fingerprint: payload.fingerprint,
+        expected_read_model_version: payload.expectedReadModelVersion,
+      }),
+    },
+  );
   return mapWorkbenchActionResult(result);
 }
 

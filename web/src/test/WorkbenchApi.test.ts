@@ -13,6 +13,7 @@ import {
   previewWorkbenchWithdrawLink,
   refreshManualOaImportAttachments,
   removeManualOaImport,
+  setWorkbenchAmountMismatchIgnored,
   WorkbenchApiError,
   WORKBENCH_GROUP_PAGE_SIZE,
 } from "../features/workbench/api";
@@ -163,6 +164,17 @@ describe("workbench api bank amount mapping", () => {
               group_type: "relation",
               match_confidence: "high",
               reason: "active_formal_relation",
+              exception_state: "processed",
+              amount_anomaly: {
+                code: "oa_invoice_amount_mismatch",
+                label: "金额不一致",
+                display_label: "已忽略：金额不一致",
+                fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                state: "ignored",
+                oa_total: "100.00",
+                invoice_total: "99.00",
+                amount_delta: "1.00",
+              },
               zone: "paired",
               status: "paired",
               oa_rows: [],
@@ -681,6 +693,16 @@ describe("workbench api bank amount mapping", () => {
               match_confidence: "high",
               reason: "active_formal_relation",
               completion: { is_complete: false, missing_row_types: ["oa", "invoice"] },
+              amount_anomaly: {
+                code: "oa_invoice_amount_mismatch",
+                label: "金额不一致",
+                display_label: "已忽略：金额不一致",
+                fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                state: "ignored",
+                oa_total: "100.00",
+                invoice_total: "99.00",
+                amount_delta: "1.00",
+              },
               oa_rows: [
                 {
                   id: "oa-paired",
@@ -726,6 +748,16 @@ describe("workbench api bank amount mapping", () => {
                   seller_name: "供应商A",
                   total_with_tax: "99.00",
                   source_expense_item_id: "oa-paired:item:1",
+                  amount_anomaly: {
+                    code: "oa_invoice_amount_mismatch",
+                    label: "金额不一致",
+                    display_label: "已忽略：金额不一致",
+                    fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    state: "ignored",
+                    oa_total: "100.00",
+                    invoice_total: "99.00",
+                    amount_delta: "1.00",
+                  },
                   invoice_bank_relation: { code: "fully_linked", label: "完全关联", tone: "success" },
                   available_actions: ["detail"],
                 },
@@ -771,6 +803,8 @@ describe("workbench api bank amount mapping", () => {
       categoryResolutionStatus: "manual_confirmed",
     });
     expect(group.rows.invoice[0].sourceExpenseItemId).toBe("oa-paired:item:1");
+    expect(group.amountAnomaly).toMatchObject({ state: "ignored", displayLabel: "已忽略：金额不一致" });
+    expect(group.rows.invoice[0].amountAnomaly).toMatchObject({ state: "ignored", amountDelta: "1.00" });
   });
 
   test("serializes workbench group page SQL query controls", async () => {
@@ -805,6 +839,7 @@ describe("workbench api bank amount mapping", () => {
       timeFilterByPane: {
         bank: { mode: "month", month: "2026-04" },
       },
+      exceptionBucket: "processed",
     }, "generation-set-1");
 
     const url = new URL(String(fetchSpy.mock.calls[0][0]), "http://localhost");
@@ -820,6 +855,7 @@ describe("workbench api bank amount mapping", () => {
     expect(url.searchParams.get("source_kind")).toBe("bank_transaction");
     expect(url.searchParams.get("sort")).toBe("bank:desc");
     expect(url.searchParams.get("detail_level")).toBe("summary");
+    expect(url.searchParams.get("exception_bucket")).toBe("processed");
     expect(url.searchParams.get("expected_read_model_version")).toBe("generation-set-1");
     expect(JSON.parse(url.searchParams.get("column_filters") ?? "{}")).toEqual({
       bank: { amount: ["建行 8106", "支出"], counterparty: ["云南溯源科技有限公司"] },
@@ -827,6 +863,41 @@ describe("workbench api bank amount mapping", () => {
     expect(JSON.parse(url.searchParams.get("time_filters") ?? "{}")).toEqual({
       bank: { mode: "month", month: "2026-04" },
     });
+  });
+
+  test("posts an amount mismatch decision without a client supplied actor", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          affected_scope_keys: ["2026-05"],
+          read_model_status: "refreshing",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await setWorkbenchAmountMismatchIgnored({
+      month: "all",
+      zone: "paired",
+      groupId: "case:CASE-1",
+      fingerprint: "a".repeat(64),
+      expectedReadModelVersion: "generation-set-1",
+    }, true);
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/api/workbench/exceptions/amount-mismatch/ignore",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          month: "all",
+          zone: "paired",
+          group_id: "case:CASE-1",
+          fingerprint: "a".repeat(64),
+          expected_read_model_version: "generation-set-1",
+        }),
+      }),
+    );
   });
 
   test("preserves the 409 version conflict contract for callers", async () => {

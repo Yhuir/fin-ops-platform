@@ -57,6 +57,17 @@ export type WorkbenchAmountCheck = {
   requiresNote: boolean;
 };
 
+export type WorkbenchAmountAnomaly = {
+  code: "oa_invoice_amount_mismatch" | (string & {});
+  label: string;
+  displayLabel: string;
+  fingerprint: string;
+  state: "active" | "ignored";
+  oaTotal: string;
+  invoiceTotal: string;
+  amountDelta: string;
+};
+
 export type WorkbenchZoneId = "paired" | "unpaired";
 
 export type WorkbenchBankCategoryResolutionStatus =
@@ -101,6 +112,7 @@ export type WorkbenchRecord = {
   relationNote?: string;
   relationAmountCheck?: WorkbenchAmountCheck;
   specialMetadata?: Record<string, unknown>;
+  amountAnomaly?: WorkbenchAmountAnomaly;
 };
 
 export type WorkbenchProjectSetting = {
@@ -217,6 +229,8 @@ export type WorkbenchRelationGroup = {
   canWithdraw?: boolean;
   relationNote?: string;
   amountCheck?: WorkbenchAmountCheck;
+  amountAnomaly?: WorkbenchAmountAnomaly;
+  exceptionState?: "active" | "processed";
   specialMetadata?: Record<string, unknown>;
   processedExceptionSummary?: WorkbenchProcessedExceptionSummary;
   completion?: {
@@ -331,6 +345,7 @@ export type WorkbenchGroupsPageQuery = {
   detailLevel?: "summary" | "full";
   filtersByPaneAndColumn?: Partial<Record<WorkbenchRecordType, Record<string, string[]>>>;
   timeFilterByPane?: Partial<Record<WorkbenchRecordType, { mode: "year"; year: string } | { mode: "month"; month: string }>>;
+  exceptionBucket?: "active" | "processed";
 };
 
 export type WorkbenchZonePageInfo = {

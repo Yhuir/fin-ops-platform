@@ -9,6 +9,7 @@ from fin_ops_platform.services.bank_batch_service import BANK_FLOW_RULE_BATCH_RE
 from fin_ops_platform.services.oa_attachment_invoice_linking import (
     canonical_oa_expense_item_id,
 )
+from fin_ops_platform.services.workbench_amount_check_service import WorkbenchAmountCheckService
 from fin_ops_platform.services.workbench_relation_requirements import (
     evaluate_bank_relation_completion,
 )
@@ -31,13 +32,19 @@ class WorkbenchRelationGroupingService:
         *,
         rows_by_id: dict[str, dict[str, Any]],
         active_relations: list[dict[str, Any]],
+        amount_mismatch_decisions: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         canonical_rows, display_rows = self._normalize_rows(rows_by_id)
         relations = self._normalize_relations(active_relations)
         ownership = self._active_ownership(relations, canonical_rows)
 
         relation_groups = [
-            self._relation_group(relation, canonical_rows, display_rows)
+            self._relation_group(
+                relation,
+                canonical_rows,
+                display_rows,
+                amount_mismatch_decisions=amount_mismatch_decisions or {},
+            )
             for relation in relations
         ]
         relation_groups = [group for group in relation_groups if self._group_member_count(group)]
@@ -64,7 +71,15 @@ class WorkbenchRelationGroupingService:
                 "invoice_count": counts["invoice"],
                 "paired_count": len(paired_groups),
                 "unpaired_count": len(unpaired_groups),
-                "exception_count": sum(1 for group in unpaired_groups if self._group_has_danger(group)),
+                "exception_count": sum(
+                    1
+                    for group in [*paired_groups, *unpaired_groups]
+                    if self._group_has_danger(group)
+                    or (
+                        isinstance(group.get("amount_anomaly"), dict)
+                        and group["amount_anomaly"].get("state") == "active"
+                    )
+                ),
             },
             "paired": {"groups": paired_groups},
             "unpaired": {"groups": unpaired_groups},
@@ -159,6 +174,8 @@ class WorkbenchRelationGroupingService:
         relation: dict[str, Any],
         rows_by_id: dict[str, dict[str, Any]],
         display_rows_by_case: dict[str, list[dict[str, Any]]],
+        *,
+        amount_mismatch_decisions: dict[str, str],
     ) -> dict[str, Any]:
         case_id = str(relation["case_id"])
         special_metadata = relation.get("special_metadata")
@@ -187,6 +204,19 @@ class WorkbenchRelationGroupingService:
         group["relation_mode"] = relation_mode
         group["case_id"] = case_id
         group["can_withdraw"] = True
+        anomaly = WorkbenchAmountCheckService().oa_invoice_anomaly(
+            {
+                "oa": group["oa_rows"],
+                "bank": group["bank_rows"],
+                "invoice": group["invoice_rows"],
+            },
+            relation_id=case_id,
+        )
+        if anomaly:
+            state = "ignored" if amount_mismatch_decisions.get(anomaly["fingerprint"]) == "ignored" else "active"
+            anomaly["state"] = state
+            anomaly["display_label"] = "已忽略：金额不一致" if state == "ignored" else "金额不一致"
+            group["amount_anomaly"] = anomaly
         if isinstance(relation.get("amount_check"), dict):
             group["amount_check"] = deepcopy(relation["amount_check"])
         if isinstance(special_metadata, dict):
@@ -204,6 +234,9 @@ class WorkbenchRelationGroupingService:
             canonical_etc_summaries or display_rows_by_case.get(case_id, []),
             zone=zone,
         )
+        if anomaly:
+            for invoice_row in group["invoice_rows"]:
+                invoice_row["amount_anomaly"] = deepcopy(anomaly)
         if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
             self._apply_bank_batch_summary(group, relation_mode=relation_mode, zone=zone)
         return group
@@ -283,7 +316,7 @@ class WorkbenchRelationGroupingService:
         by_type = {row_type: [] for row_type in ROW_TYPES}
         for row in rows:
             by_type[str(row["type"])].append(row)
-        return {
+        group = {
             "group_id": group_id,
             "group_type": group_type,
             "match_confidence": "high" if zone == "paired" else "none",
@@ -294,6 +327,20 @@ class WorkbenchRelationGroupingService:
             "bank_rows": by_type["bank"],
             "invoice_rows": by_type["invoice"],
         }
+        processed_summary = next(
+            (
+                deepcopy(row["processed_exception_summary"])
+                for row in rows
+                if isinstance(row.get("processed_exception_summary"), dict)
+            ),
+            None,
+        )
+        if processed_summary:
+            group["processed_exception_summary"] = processed_summary
+            group["exception_state"] = "processed"
+        elif any(bool(row.get("handled_exception")) for row in rows):
+            group["exception_state"] = "active"
+        return group
 
     @staticmethod
     def _display_tags(rows: list[dict[str, Any]], relation: dict[str, Any]) -> list[str]:

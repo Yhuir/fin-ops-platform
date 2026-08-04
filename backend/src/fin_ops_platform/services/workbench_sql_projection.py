@@ -35,6 +35,7 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
     PostgresOAProjectionRepository,
 )
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
+from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.workbench_etc_batch_link import relation_external_etc_batch_id
 from fin_ops_platform.services.workbench_exception_case_service import ACTIVE_CASE_STATUSES
 from fin_ops_platform.services.workbench_free_matching_engine import (
@@ -1388,6 +1389,11 @@ class WorkbenchSqlProjectionBuilder:
             month,
             rows_by_id=working_rows_by_id,
             active_relations=relations,
+            amount_mismatch_decisions=(
+                PostgresWorkbenchRepository(self._connection).load_workbench_amount_mismatch_decisions(
+                    scope_key=month,
+                )
+            ),
         )
         grouped["oa_status"] = {"code": "ready", "message": "OA projection ready"}
         grouped["workbench_read_model_schema_version"] = WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION

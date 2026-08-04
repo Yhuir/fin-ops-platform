@@ -26,6 +26,7 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
     PostgresOAProjectionAdapter,
     PostgresOAProjectionRepository,
 )
+from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.workbench_exception_case_service import ACTIVE_CASE_STATUSES
 from fin_ops_platform.services.workbench_etc_batch_link import relation_external_etc_batch_id
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
@@ -658,6 +659,11 @@ class WorkbenchCanonicalRowsBuilder:
             month,
             rows_by_id=working_rows_by_id,
             active_relations=relations,
+            amount_mismatch_decisions=(
+                PostgresWorkbenchRepository(self._connection).load_workbench_amount_mismatch_decisions(
+                    scope_key=month,
+                )
+            ),
         )
         grouped["oa_status"] = {"code": "ready", "message": "OA projection ready"}
         grouped["oa_attachment_invoice_parser_version"] = attachment_invoice_cache_parser_version()

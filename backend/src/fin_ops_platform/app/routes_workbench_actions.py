@@ -4,6 +4,11 @@ from http import HTTPStatus
 from typing import Any, Callable
 
 from fin_ops_platform.services.workbench_exception_application_service import WorkbenchExceptionApplicationService
+from fin_ops_platform.services.workbench_amount_mismatch_exception_service import (
+    WorkbenchAmountMismatchConflict,
+    WorkbenchAmountMismatchExceptionService,
+)
+from fin_ops_platform.services.workbench_read_model_version import WorkbenchReadModelVersionConflictError
 
 
 class WorkbenchActionApiRoutes:
@@ -14,9 +19,48 @@ class WorkbenchActionApiRoutes:
         *,
         exception_service: WorkbenchExceptionApplicationService,
         write_facade_provider: Callable[[], Any],
+        amount_mismatch_service: WorkbenchAmountMismatchExceptionService | None = None,
     ) -> None:
         self._exception_service = exception_service
         self._write_facade_provider = write_facade_provider
+        self._amount_mismatch_service = amount_mismatch_service
+
+    def set_amount_mismatch_ignored(
+        self,
+        payload: dict[str, Any],
+        *,
+        actor_id: str,
+        ignored: bool,
+    ) -> tuple[HTTPStatus, dict[str, object]]:
+        if self._amount_mismatch_service is None:
+            return HTTPStatus.SERVICE_UNAVAILABLE, {
+                "error": "workbench_amount_mismatch_service_unavailable",
+                "message": "金额异常处理服务暂时不可用。",
+            }
+        try:
+            result = self._amount_mismatch_service.set_ignored(
+                payload,
+                actor_id=actor_id,
+                ignored=ignored,
+            )
+        except WorkbenchReadModelVersionConflictError as error:
+            return HTTPStatus.CONFLICT, {
+                "error": "workbench_read_model_version_conflict",
+                "message": "关联台数据已变化，请刷新后重试。",
+                "expected_read_model_version": error.expected,
+                "read_model_version": error.current,
+            }
+        except WorkbenchAmountMismatchConflict as error:
+            return HTTPStatus.CONFLICT, {
+                "error": "workbench_amount_mismatch_changed",
+                "message": str(error),
+            }
+        except ValueError as error:
+            return HTTPStatus.BAD_REQUEST, {
+                "error": "invalid_workbench_amount_mismatch_request",
+                "message": str(error),
+            }
+        return HTTPStatus.OK, result
 
     def exception_preview(self, payload: dict[str, Any]) -> tuple[HTTPStatus, dict[str, Any]]:
         try:

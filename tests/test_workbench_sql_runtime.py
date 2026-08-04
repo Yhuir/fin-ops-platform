@@ -5584,8 +5584,9 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                     "sort": "bank:desc",
                     "detail_level": "summary",
                     "column_filters": {"bank": {"amount": ["支出"]}},
-                    "time_filters": {"bank": {"mode": "month", "month": "2026-04"}},
-                }
+                        "time_filters": {"bank": {"mode": "month", "month": "2026-04"}},
+                        "exception_bucket": None,
+                    }
             ],
         )
 

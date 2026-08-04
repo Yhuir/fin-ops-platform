@@ -78,6 +78,7 @@ type RelationGroupGridProps = {
     position: WorkbenchColumnDropPosition,
   ) => void;
   canMutateData: boolean;
+  readOnly?: boolean;
 };
 
 type CollapsedSummaryCopy = {
@@ -151,6 +152,7 @@ function RelationGroupGrid({
   onPaneTimeFilterChange = () => undefined,
   onReorderPaneColumns = () => undefined,
   canMutateData,
+  readOnly = false,
 }: RelationGroupGridProps) {
   const gridRef = useRef<HTMLDivElement | null>(null);
   const gridBodyRef = useRef<HTMLDivElement | null>(null);
@@ -570,6 +572,7 @@ function RelationGroupGrid({
                           showActionColumn={paneHasActionColumn(paneId)}
                           showWorkflowActions={zoneId !== "unpaired"}
                           canMutateData={canMutateData}
+                          readOnly={readOnly}
                           zoneId={zoneId}
                         />
                       </div>,
@@ -609,6 +612,7 @@ function RelationGroupGrid({
                       showActionColumn={paneHasActionColumn(paneId)}
                       showWorkflowActions={zoneId !== "unpaired"}
                       canMutateData={canMutateData}
+                      readOnly={readOnly}
                       zoneId={zoneId}
                     />
                   </div>,
@@ -692,6 +696,7 @@ function RelationGroupGrid({
                       showActionColumn={paneHasActionColumn(paneId)}
                       showWorkflowActions={zoneId !== "unpaired"}
                       canMutateData={canMutateData}
+                      readOnly={readOnly}
                       zoneId={zoneId}
                     />
                   </div>

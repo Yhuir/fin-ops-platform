@@ -1,6 +1,6 @@
 # 关联台 E2E 覆盖
 
-日期：2026-07-22
+日期：2026-08-04
 
 | Spec | 状态 | 证据 | 合同 |
 | --- | --- | --- | --- |
@@ -12,7 +12,7 @@
 | `RECON-WB-E2E-006` | covered | `web/e2e/workbench-stale-error-flow.spec.ts` | refreshing/stale/failed 不伪装 fresh，false-empty 与写入被阻止 |
 | `RECON-WB-E2E-007` | covered | `web/e2e/workbench-network-recovery-flow.spec.ts` | 写失败不移动；写成功而 refetch 失败时明确提示并避免重复写入 |
 | `RECON-WB-E2E-008` | covered | `web/e2e/workbench-permissions-flow.spec.ts`、`permissions-role-matrix.spec.ts` | read-export/full/admin 的读取和 mutation gate |
-| `RECON-WB-E2E-009` | covered | `web/e2e/workbench-exception-flow.spec.ts` | 未配对异常处理、取消、ignore/unignore 后状态恢复 |
+| `RECON-WB-E2E-009` | covered | `web/e2e/workbench-exception-flow.spec.ts` | 统一异常抽屉覆盖未配对异常处理/取消/ignore/unignore，以及 OA/发票 1 分差异的主表 chip、忽略进入已处理、恢复完整链路 |
 | `RECON-WB-E2E-010` | covered | `web/e2e/workbench-large-scroll-flow.spec.ts` | 首屏 50 组、滚动自动分页、失败停止/显式重试、跨未加载页全量搜索、详情、选择保持和三栏滚动 |
 | `RECON-WB-E2E-011` | covered | `web/e2e/workbench-network-recovery-flow.spec.ts` | 网络恢复、重试和幂等提交 |
 | `RECON-WB-E2E-012` | covered | `web/e2e/workbench-stale-error-flow.spec.ts`、`workbench-permissions-flow.spec.ts`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/WorkbenchWriteGate.test.ts` | App Health/OA dirty 写安全 gate、选择区禁用原因、专属 OA 状态恢复与只读诊断 |

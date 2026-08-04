@@ -576,7 +576,62 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
                 active_relations=[],
             )
 
+    def test_amount_mismatch_is_copied_to_invoice_rows_and_ignored_by_fingerprint(self) -> None:
+        rows = {
+            "oa-1": {
+                "id": "oa-1",
+                "type": "oa",
+                "object_identity_key": "oa-1",
+                "amount": "100.00",
+                "apply_type": "付款",
+            },
+            "invoice-1": {
+                "id": "invoice-1",
+                "type": "invoice",
+                "object_identity_key": "invoice-1",
+                "total_with_tax": "99.99",
+                "invoice_type": "input",
+            },
+            "bank-1": {
+                "id": "bank-1",
+                "type": "bank",
+                "object_identity_key": "bank-1",
+                "amount": "100.00",
+                "direction": "expense",
+            },
+        }
+        relation = {
+            "case_id": "CASE-AMOUNT-1",
+            "row_ids": list(rows),
+            "row_types": ["oa", "invoice", "bank"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+        }
 
+        active_payload = self.service.group_payload(
+            "2026-05",
+            rows_by_id=rows,
+            active_relations=[relation],
+        )
+        active_group = active_payload["paired"]["groups"][0]
+        fingerprint = active_group["amount_anomaly"]["fingerprint"]
+        self.assertEqual(active_payload["summary"]["exception_count"], 1)
+        self.assertEqual(active_group["amount_anomaly"]["state"], "active")
+        self.assertEqual(active_group["invoice_rows"][0]["amount_anomaly"]["display_label"], "金额不一致")
+
+        ignored_payload = self.service.group_payload(
+            "2026-05",
+            rows_by_id=rows,
+            active_relations=[relation],
+            amount_mismatch_decisions={fingerprint: "ignored"},
+        )
+        ignored_group = ignored_payload["paired"]["groups"][0]
+        self.assertEqual(ignored_payload["summary"]["exception_count"], 0)
+        self.assertEqual(ignored_group["amount_anomaly"]["state"], "ignored")
+        self.assertEqual(
+            ignored_group["invoice_rows"][0]["amount_anomaly"]["display_label"],
+            "已忽略：金额不一致",
+        )
 class WorkbenchRelationPreviewGroupingServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.service = WorkbenchRelationPreviewGroupingService(

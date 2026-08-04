@@ -122,6 +122,7 @@ class WorkbenchReadApiRoutes:
         detail_level: str | None = None,
         column_filters: str | None = None,
         time_filters: str | None = None,
+        exception_bucket: str | None = None,
         expected_read_model_version: str | None = None,
     ) -> tuple[HTTPStatus, dict[str, object]]:
         current_month = month or "all"
@@ -135,6 +136,9 @@ class WorkbenchReadApiRoutes:
             normalized_column_filters = self._normalize_json_query_param(column_filters, "column_filters")
             normalized_time_filters = self._normalize_json_query_param(time_filters, "time_filters")
             normalized_search = self._normalize_search_query(search, "search")
+            normalized_exception_bucket = str(exception_bucket or "").strip() or None
+            if normalized_exception_bucket not in {None, "active", "processed"}:
+                raise ValueError("exception_bucket must be active or processed.")
         except ValueError as error:
             return (
                 HTTPStatus.BAD_REQUEST,
@@ -151,6 +155,7 @@ class WorkbenchReadApiRoutes:
             "detail_level": normalize_workbench_group_detail_level(detail_level),
             "column_filters": normalized_column_filters,
             "time_filters": normalized_time_filters,
+            "exception_bucket": normalized_exception_bucket,
         }
         expected_version = str(expected_read_model_version or "").strip()
         if expected_version:

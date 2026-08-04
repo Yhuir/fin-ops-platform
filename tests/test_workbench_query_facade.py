@@ -1146,6 +1146,46 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(result.payload["groups"][0]["group_id"], "fresh-db")
         self.assertEqual(result.payload["read_model_status"], "fresh")
 
+    def test_groups_passes_exception_bucket_to_repository(self) -> None:
+        class Repository:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def get_workbench_groups_freshness_status(self, **_kwargs: object) -> dict[str, object]:
+                return {"read_model_status": "fresh", "read_model_version": "generation-set-1"}
+
+            def get_workbench_groups_page(self, **kwargs: object) -> dict[str, object]:
+                self.calls.append(dict(kwargs))
+                return {
+                    "month": "all",
+                    "zone": "paired",
+                    "groups": [],
+                    "read_model_status": "fresh",
+                    "read_model_version": "generation-set-1",
+                    "source_versions": {},
+                }
+
+        repository = Repository()
+        facade = WorkbenchQueryFacade(
+            repository=repository,
+            redis_helper=None,
+            enqueue_refresh=QueueRecorder().enqueue,
+            scope_key_for_month=scope_key_for_month,
+            stale_reasons=no_stale_reasons,
+            emit_status_metric=MetricRecorder().emit,
+            missing_read_model_error=lambda _error: False,
+        )
+
+        result = facade.groups(
+            "all",
+            zone="paired",
+            exception_bucket="processed",
+            expected_read_model_version="generation-set-1",
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(repository.calls[0]["exception_bucket"], "processed")
+
     def test_groups_reuses_source_freshness_from_refresh_status(self) -> None:
         class Repository:
             @staticmethod

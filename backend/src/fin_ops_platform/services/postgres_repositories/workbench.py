@@ -23,6 +23,7 @@ from fin_ops_platform.services.postgres_snapshot_contracts import (
 
 NO_OA_BANK_BATCH_RELATION_MODE = "no_oa_bank_batch"
 BANK_FLOW_RULE_BATCH_RELATION_MODE = "bank_flow_rule_batch"
+OA_INVOICE_AMOUNT_MISMATCH_SCENARIO = "oa_invoice_amount_mismatch"
 
 
 def _no_oa_batch_relation_mode(payload: Any) -> str:
@@ -521,10 +522,143 @@ class PostgresWorkbenchRepository:
         return {"case_counter": case_counter, "row_overrides": row_overrides}
 
     def load_workbench_exception_cases(self) -> dict[str, Any]:
-        rows = self._connection.fetch_all("select case_id as key, raw_payload from app.workbench_exception_cases order by case_id")
+        rows = self._connection.fetch_all(
+            """
+            select case_id as key, raw_payload
+            from app.workbench_exception_cases
+            where scenario is distinct from %s
+            order by case_id
+            """,
+            (OA_INVOICE_AMOUNT_MISMATCH_SCENARIO,),
+        )
         if not rows:
             return {}
         return {"cases": {str(row.get("key")): row_payload(row, "raw_payload") for row in rows}}
+
+    def load_workbench_amount_mismatch_decisions(self, *, scope_key: str | None = None) -> dict[str, str]:
+        normalized_scope_key = str(scope_key or "").strip()
+        scope_clause = "and scope_month = %s::date" if normalized_scope_key and normalized_scope_key != "all" else ""
+        params: tuple[Any, ...] = (OA_INVOICE_AMOUNT_MISMATCH_SCENARIO,)
+        if scope_clause:
+            params = (*params, month_start(normalized_scope_key))
+        rows = self._connection.fetch_all(
+            f"""
+            select raw_payload#>>'{{normalized_payload,fingerprint}}' as fingerprint, status
+            from app.workbench_exception_cases
+            where scenario = %s
+              and status = 'ignored'
+              {scope_clause}
+            """,
+            params,
+        )
+        return {
+            fingerprint: "ignored"
+            for row in rows
+            if (fingerprint := text(row.get("fingerprint")))
+        }
+
+    def set_workbench_amount_mismatch_decision(
+        self,
+        *,
+        fingerprint: str,
+        group_id: str,
+        scope_key: str,
+        actor_id: str,
+        ignored: bool,
+    ) -> dict[str, Any]:
+        normalized_fingerprint = str(fingerprint or "").strip().lower()
+        normalized_group_id = str(group_id or "").strip()
+        normalized_scope_key = str(scope_key or "").strip()
+        normalized_actor_id = str(actor_id or "").strip()
+        if len(normalized_fingerprint) != 64 or any(
+            character not in "0123456789abcdef" for character in normalized_fingerprint
+        ):
+            raise ValueError("fingerprint must be a SHA-256 hex digest.")
+        if not normalized_group_id or not normalized_scope_key or not normalized_actor_id:
+            raise ValueError("group_id, scope_key and actor_id are required.")
+        case_id = f"AMOUNT-MISMATCH-{normalized_fingerprint[:32]}"
+        desired_status = "ignored" if ignored else "cancelled"
+
+        def write(connection: Any) -> dict[str, Any]:
+            current = connection.fetch_one(
+                """
+                select id::text as id, status, version, created_by, created_at
+                from app.workbench_exception_cases
+                where case_id = %s
+                for update
+                """,
+                (case_id,),
+            )
+            current_status = text((current or {}).get("status"))
+            current_version = int_value((current or {}).get("version"), 0)
+            changed = current_status != desired_status
+            next_version = max(1, current_version + (1 if changed else 0))
+            normalized_payload = {
+                "case_id": case_id,
+                "status": desired_status,
+                "version": next_version,
+                "business_line": "reconciliation_workbench",
+                "scenario_code": OA_INVOICE_AMOUNT_MISMATCH_SCENARIO,
+                "fingerprint": normalized_fingerprint,
+                "group_id": normalized_group_id,
+                "scope_month": normalized_scope_key,
+                "row_ids": [],
+                "candidate_ids": [],
+                "updated_by": normalized_actor_id,
+            }
+            connection.execute(
+                """
+                insert into app.workbench_exception_cases(
+                    case_id, status, version, business_line, scenario, scope_month,
+                    row_ids, candidate_ids, created_by, updated_by, raw_payload
+                )
+                values (%s, %s, %s, 'reconciliation_workbench', %s, %s::date,
+                        array[]::text[], array[]::text[], %s, %s, %s)
+                on conflict (case_id) do update set
+                    status = excluded.status,
+                    version = excluded.version,
+                    scope_month = excluded.scope_month,
+                    updated_by = excluded.updated_by,
+                    updated_at = now(),
+                    raw_payload = excluded.raw_payload
+                """,
+                (
+                    case_id,
+                    desired_status,
+                    next_version,
+                    OA_INVOICE_AMOUNT_MISMATCH_SCENARIO,
+                    month_start(normalized_scope_key),
+                    normalized_actor_id,
+                    normalized_actor_id,
+                    jsonb({"normalized_payload": normalized_payload}),
+                ),
+            )
+            if changed:
+                connection.execute(
+                    """
+                    insert into app.workbench_exception_case_events(
+                        exception_case_id, case_id, event_type, actor_id, payload, raw_payload
+                    )
+                    values (
+                        (select id from app.workbench_exception_cases where case_id = %s),
+                        %s, %s, %s, %s, %s
+                    )
+                    """,
+                    (
+                        case_id,
+                        case_id,
+                        "amount_mismatch_ignored" if ignored else "amount_mismatch_restored",
+                        normalized_actor_id,
+                        jsonb(normalized_payload),
+                        jsonb({"normalized_payload": normalized_payload}),
+                    ),
+                )
+            return {
+                **normalized_payload,
+                "changed": changed,
+            }
+
+        return run_in_transaction(self._connection, write)
 
     def save_workbench_exception_cases(self, snapshot: dict[str, Any]) -> None:
         def write(connection: Any) -> None:

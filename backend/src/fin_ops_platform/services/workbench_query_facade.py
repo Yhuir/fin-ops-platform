@@ -444,6 +444,7 @@ class WorkbenchQueryFacade:
         detail_level: str | None = None,
         column_filters: dict[str, object] | None = None,
         time_filters: dict[str, object] | None = None,
+        exception_bucket: str | None = None,
         expected_read_model_version: str | None = None,
     ) -> WorkbenchQueryResult:
         current_month = month or "all"
@@ -517,6 +518,7 @@ class WorkbenchQueryFacade:
             "detail_level": detail_level,
             "column_filters": column_filters,
             "time_filters": time_filters,
+            "exception_bucket": exception_bucket,
         }
         cache_key = (
             self._groups_cache_key_from_version(cache_version=redis_cache_version, **cache_kwargs)

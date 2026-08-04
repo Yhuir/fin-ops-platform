@@ -242,6 +242,8 @@ class AuthGuardTests(unittest.TestCase):
             ("POST", "/api/workbench/actions/cancel-exception"),
             ("POST", "/api/workbench/actions/ignore-row"),
             ("POST", "/api/workbench/actions/unignore-row"),
+            ("POST", "/api/workbench/exceptions/amount-mismatch/ignore"),
+            ("POST", "/api/workbench/exceptions/amount-mismatch/restore"),
             ("POST", "/imports/files/preview"),
             ("POST", "/imports/files/confirm"),
             ("POST", "/imports/files/retry"),
