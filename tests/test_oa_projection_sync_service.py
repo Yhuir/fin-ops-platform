@@ -190,6 +190,70 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
 
         self.assertEqual(projection_repository.sync_runs[-1]["status"], "failed")
 
+    def test_attachment_invoice_promotion_only_reads_changed_completed_scopes(self) -> None:
+        records = [
+            _oa("oa-june", "2026-06", workflow_status="completed"),
+            _oa("oa-july", "2026-07", workflow_status="completed"),
+        ]
+        promoter = FakeAttachmentInvoicePromoter()
+
+        class JuneOnlySnapshotRepository(FakePendingPaymentSourceSnapshotRepository):
+            def commit_authoritative_snapshot(self, **kwargs: object) -> OaPendingPaymentSourceSnapshotResult:
+                self.calls.append(dict(kwargs))
+                return OaPendingPaymentSourceSnapshotResult(
+                    completed_projection_changed_scopes=("2026-06",),
+                    oa_pending_payment_changed_scopes=(),
+                    payment_status_count=0,
+                    admission_count=0,
+                    source_signatures={},
+                    upserted_completed_count=1,
+                )
+
+        service = OAProjectionSyncService(
+            source_adapter=FakeSourceAdapter(
+                months=["2026-06", "2026-07"],
+                records_by_month={"2026-06": [records[0]], "2026-07": [records[1]]},
+            ),
+            projection_repository=FakeProjectionRepository(),
+            attachment_invoice_promoter=promoter,
+            payment_status_repository=FakePaymentStatusRepository({}),
+            pending_payment_source_snapshot_repository=JuneOnlySnapshotRepository(),
+        )
+
+        service.handle_runtime_event(_event("all"))
+
+        self.assertEqual([record.id for record in promoter.completed_records], ["oa-june"])
+        self.assertEqual(promoter.call_count, 1)
+
+    def test_unchanged_completed_snapshot_skips_attachment_invoice_promotion(self) -> None:
+        records = [_oa("oa-unchanged", "2026-06", workflow_status="completed")]
+        promoter = FakeAttachmentInvoicePromoter()
+
+        class UnchangedSnapshotRepository(FakePendingPaymentSourceSnapshotRepository):
+            def commit_authoritative_snapshot(self, **kwargs: object) -> OaPendingPaymentSourceSnapshotResult:
+                self.calls.append(dict(kwargs))
+                return OaPendingPaymentSourceSnapshotResult(
+                    completed_projection_changed_scopes=(),
+                    oa_pending_payment_changed_scopes=(),
+                    payment_status_count=0,
+                    admission_count=0,
+                    source_signatures={},
+                    upserted_completed_count=0,
+                )
+
+        service = OAProjectionSyncService(
+            source_adapter=FakeSourceAdapter(months=["2026-06"], records_by_month={"2026-06": records}),
+            projection_repository=FakeProjectionRepository(),
+            attachment_invoice_promoter=promoter,
+            payment_status_repository=FakePaymentStatusRepository({}),
+            pending_payment_source_snapshot_repository=UnchangedSnapshotRepository(),
+        )
+
+        result = service.handle_runtime_event(_event("2026-06"))
+
+        self.assertEqual(promoter.call_count, 0)
+        self.assertEqual(result["scanned_oa_attachment_invoice_candidate_count"], 0)
+
     def test_oa_sync_replaces_payment_status_and_admission_snapshot_after_complete_external_reads(self) -> None:
         records = [
             _oa("oa-pay-completed", "2026-06", workflow_status="completed"),
@@ -417,8 +481,10 @@ class FakePendingPaymentRelationPromoter:
 class FakeAttachmentInvoicePromoter:
     def __init__(self) -> None:
         self.completed_records: list[OAApplicationRecord] = []
+        self.call_count = 0
 
     def promote_records(self, records: list[OAApplicationRecord]) -> dict[str, object]:
+        self.call_count += 1
         self.completed_records = list(records)
         return {
             "summary": {

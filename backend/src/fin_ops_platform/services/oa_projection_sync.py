@@ -85,7 +85,21 @@ class OAProjectionSyncService:
             pruned_months = self._prune_before_cutoff(scope_key, cutoff_month)
             source_snapshot_result = None
         promotion_result = self._promote_completed_pending_payment_relations(completed_records)
-        attachment_invoice_promotion_result = self._promote_completed_attachment_invoices(completed_records)
+        attachment_invoice_records = completed_records
+        if source_snapshot_result is not None:
+            changed_scopes = set(
+                getattr(source_snapshot_result, "completed_projection_changed_scopes", ())
+            )
+            attachment_invoice_records = [
+                record
+                for record in completed_records
+                if "all" in changed_scopes or str(record.month) in changed_scopes
+            ]
+        elif upserted_count == 0:
+            attachment_invoice_records = []
+        attachment_invoice_promotion_result = self._promote_completed_attachment_invoices(
+            attachment_invoice_records
+        )
         attachment_invoice_summary = dict(attachment_invoice_promotion_result.get("summary") or {})
         result = {
             "sync_type": "oa_projection",
@@ -151,7 +165,7 @@ class OAProjectionSyncService:
         self,
         completed_records: list[OAApplicationRecord],
     ) -> dict[str, Any]:
-        if self._attachment_invoice_promoter is None:
+        if self._attachment_invoice_promoter is None or not completed_records:
             return {"summary": {}}
         return dict(self._attachment_invoice_promoter.promote_records(completed_records) or {})
 

@@ -63,7 +63,7 @@ read model 刷新状态事实源，systemd 管 worker 进程，App 只负责写�
 - OA 待付款、进项使用和销项收款页面没有 read-model worker。OA 页面写回外部系统成功后，API 进程通过窄
   PostgreSQL canonical writer 更新状态与 watermark；失败返回可重试错误。运维不得恢复页面 refresh event、
   手工补 projection 或把外部系统当前值伪装成已提交 PostgreSQL 事实。
-- 周期性 `oa.sync` 必须是 change-driven canonical commit：相同 completed OA、status、admission snapshot 与附件发票 source context 不更新业务时间戳；真实变化只提交 canonical facts/source watermark。completed OA 的已缓存正式附件发票由 Worker 内统一 promotion service 以一次批量身份查询、一次受影响发票批量保存完成；in-progress 不解析/提升，跨 OA/expense-item 冲突 fail closed，promotion 异常使 event 失败重试。snapshot repository 与 sync service 不得 fan-out 页面 refresh。直接读取页面在下一次 GET 自然看到已提交事实；若 sync 后持续出现跨页面 dirty/outbox 或无变化时 canonical 时间戳漂移，按同步 owner 回归处理，禁止通过扩大 worker 数量掩盖写放大。
+- 周期性 `oa.sync` 必须是 change-driven canonical commit：相同 completed OA、status、admission snapshot 与附件发票 source context 不更新业务时间戳，也不得调用附件 promotion；真实变化只提交 canonical facts/source watermark。只有 `completed_projection_changed_scopes` 内 completed OA 的已缓存正式附件发票由 Worker 内统一 promotion service 以一次批量身份查询、一次受影响发票批量保存完成，禁止部署或 `all` sync 重扫全部历史附件；in-progress 不解析/提升，跨 OA/expense-item 冲突 fail closed，promotion 异常使 event 失败重试。snapshot repository 与 sync service 不得 fan-out 页面 refresh。直接读取页面在下一次 GET 自然看到已提交事实；若 sync 后持续出现跨页面 dirty/outbox 或无变化时 canonical 时间戳漂移，按同步 owner 回归处理，禁止通过扩大 worker 数量掩盖写放大。
 - PostgreSQL durable queue worker 的空轮询 heartbeat 必须节流。`idle` 只证明 worker 存活和当前无可 claim event，
   不能每个 0.05s poll 都写 `job.runtime_worker_heartbeats`；`processing`、`deferred`、`failed`、`stopping`、`stopped`
   必须即时写入，保证 App Health 和故障定位不丢关键状态。
