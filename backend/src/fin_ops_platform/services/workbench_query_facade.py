@@ -534,6 +534,7 @@ class WorkbenchQueryFacade:
             get_cached=get_cached,
             can_use_cache=can_use_groups_redis_cache,
             scope_key=scope_key,
+            expected_read_model_version=current_version,
         )
         if cached_result is not None:
             return cached_result
@@ -556,6 +557,7 @@ class WorkbenchQueryFacade:
             get_cached=get_cached,
             can_use_cache=can_use_groups_redis_cache,
             scope_key=scope_key,
+            expected_read_model_version=current_version,
         )
         if cached_result is not None:
             return cached_result
@@ -1140,6 +1142,7 @@ class WorkbenchQueryFacade:
         get_cached: object,
         can_use_cache: bool,
         scope_key: str,
+        expected_read_model_version: str,
     ) -> WorkbenchQueryResult | None:
         if not cache_key or not callable(get_cached) or not can_use_cache:
             return None
@@ -1147,6 +1150,9 @@ class WorkbenchQueryFacade:
         if not isinstance(cached, dict):
             return None
         payload = dict(cached.get("payload") if isinstance(cached.get("payload"), dict) else cached)
+        cached_version = str(payload.get("read_model_version") or payload.get("active_generation_id") or "").strip()
+        if expected_read_model_version and cached_version != expected_read_model_version:
+            return None
         payload["read_model_status"] = "fresh"
         payload["read_model_scope_key"] = scope_key
         return WorkbenchQueryResult(HTTPStatus.OK, payload)

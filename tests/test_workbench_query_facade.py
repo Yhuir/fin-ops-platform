@@ -1113,6 +1113,64 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(redis.get_text_calls, ["workbench:groups:version:all"])
         self.assertEqual(redis.get_json_calls, [cache_key])
 
+    def test_groups_rejects_cached_payload_from_previous_generation(self) -> None:
+        class Repository:
+            @staticmethod
+            def get_workbench_groups_freshness_status(**_kwargs: object) -> dict[str, object]:
+                return {
+                    "read_model_status": "fresh",
+                    "read_model_version": "generation-current",
+                    "scope_key": "all",
+                }
+
+            @staticmethod
+            def get_workbench_groups_page(**_kwargs: object) -> dict[str, object]:
+                return {
+                    "month": "all",
+                    "zone": "unpaired",
+                    "groups": [{"group_id": "current"}],
+                    "read_model_status": "fresh",
+                    "read_model_version": "generation-current",
+                    "source_versions": {"builder": "v1"},
+                }
+
+        cache_key = "workbench:old:groups:digest"
+        redis = RedisRecorder(
+            text_values={"workbench:groups:version:all": "old"},
+            json_values={
+                cache_key: {
+                    "payload": {
+                        "month": "all",
+                        "zone": "unpaired",
+                        "groups": [{"group_id": "stale"}],
+                        "read_model_version": "generation-old",
+                    }
+                }
+            },
+        )
+        facade = WorkbenchQueryFacade(
+            repository=Repository(),
+            redis_helper=redis,
+            enqueue_refresh=QueueRecorder().enqueue,
+            scope_key_for_month=scope_key_for_month,
+            stale_reasons=no_stale_reasons,
+            emit_status_metric=MetricRecorder().emit,
+            missing_read_model_error=lambda _error: False,
+            groups_redis_version_key=lambda scope_key: f"workbench:groups:version:{scope_key}",
+            groups_cache_key_from_version=lambda **_kwargs: cache_key,
+        )
+
+        result = facade.groups(
+            "all",
+            zone="unpaired",
+            expected_read_model_version="generation-current",
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(result.payload["groups"], [{"group_id": "current"}])
+        self.assertEqual(redis.get_json_calls, [cache_key, cache_key])
+        self.assertEqual(redis.set_json_calls[0][1]["payload"]["read_model_version"], "generation-current")
+
     def test_groups_uses_fast_freshness_status_instead_of_heavy_refresh_status(self) -> None:
         class Repository:
             def get_workbench_groups_freshness_status(self, **_kwargs: object) -> dict[str, object]:
