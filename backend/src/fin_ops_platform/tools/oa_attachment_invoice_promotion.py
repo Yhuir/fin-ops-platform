@@ -12,7 +12,6 @@ from fin_ops_platform.services.oa_attachment_invoice_promotion_service import (
     OAAttachmentInvoicePromotionService,
 )
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
-from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
 from fin_ops_platform.services.postgres_repositories.oa_attachment_invoice import (
     PostgresOAAttachmentInvoiceRepository,
 )
@@ -61,7 +60,7 @@ def audit_oa_attachment_invoice_promotion(
     oa_row_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     service = OAAttachmentInvoicePromotionService(
-        invoice_repository=PostgresCoreRepository(connection),
+        invoice_repository=PostgresOAAttachmentInvoiceRepository(connection),
     )
     return service.promote_candidates(
         _load_candidates(connection, oa_row_ids=oa_row_ids),

@@ -276,6 +276,9 @@ from fin_ops_platform.services.postgres_repositories.invoice_usage_collection_qu
 from fin_ops_platform.services.postgres_repositories.oa_applicant_credentials import (
     PostgresOaApplicantCredentialRepository,
 )
+from fin_ops_platform.services.postgres_repositories.oa_attachment_invoice import (
+    PostgresOAAttachmentInvoiceRepository,
+)
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_query import (
     PostgresOaPendingPaymentQueryRepository,
 )
@@ -845,7 +848,11 @@ class Application:
                 workbench_query_service=self._workbench_query_service,
                 attachment_invoice_promoter=(
                     OAAttachmentInvoicePromotionService(
-                        invoice_repository=import_fact_repository,
+                        invoice_repository=(
+                            PostgresOAAttachmentInvoiceRepository(state_connection)
+                            if has_postgres
+                            else import_fact_repository
+                        ),
                         promotion_mode_provider=self._app_settings_service.get_oa_attachment_invoice_promotion_mode,
                     )
                     if import_fact_repository is not None

@@ -2,10 +2,40 @@ from __future__ import annotations
 
 from typing import Any
 
+from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
+from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
+
 
 class PostgresOAAttachmentInvoiceRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
+
+    def find_invoices_by_identity_keys(self, *, canonical_keys: set[str]) -> list[Any]:
+        return PostgresCoreRepository(self._connection).find_invoices_by_identity_keys(
+            canonical_keys=canonical_keys,
+        )
+
+    def save_invoices(self, invoices: list[Any]) -> None:
+        PostgresCoreRepository(self._connection).save_invoices(invoices)
+
+    def save_invoices_and_mark_matching_dirty(
+        self,
+        invoices: list[Any],
+        *,
+        scope_months: list[str],
+        reason: str,
+        debounce_seconds: int,
+    ) -> list[str]:
+        with self._connection.transaction() as transaction:
+            PostgresCoreRepository(transaction).save_invoices(invoices)
+            return PostgresReadModelRepository.mark_workbench_matching_dirty_scopes_in_transaction(
+                transaction=transaction,
+                tenant_id="default",
+                scope_months=scope_months,
+                reason=reason,
+                source_versions={},
+                debounce_seconds=debounce_seconds,
+            )
 
     def list_promotion_source_rows(
         self,
@@ -25,7 +55,8 @@ class PostgresOAAttachmentInvoiceRepository:
                    context.source_expense_item_id,
                    context.source_expense_row_index,
                    context.source_attachment_key,
-                   context.source_attachment_name
+                   context.source_attachment_name,
+                   context.month
             from app.oa_attachment_invoice_cache cache
             left join lateral (
                 select distinct on (
@@ -39,7 +70,8 @@ class PostgresOAAttachmentInvoiceRepository:
                        source.source_expense_item_id,
                        source.source_expense_row_index,
                        source.source_attachment_key,
-                       source.source_attachment_name
+                       source.source_attachment_name,
+                       to_char(app.scope_month, 'YYYY-MM') as month
                 from app.oa_attachment_invoice_cache_sources source
                 left join app.oa_attachments attachment
                   on attachment.source_attachment_key = source.source_attachment_key

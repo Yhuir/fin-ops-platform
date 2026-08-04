@@ -40,7 +40,9 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
     OA_PROJECTION_SYNC_VERSION,
     PostgresOAProjectionRepository,
 )
-from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
+from fin_ops_platform.services.postgres_repositories.oa_attachment_invoice import (
+    PostgresOAAttachmentInvoiceRepository,
+)
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
@@ -229,7 +231,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             retention_cutoff_date_provider=lambda: str(oa_runtime_settings["cutoff_date"]),
             pending_payment_relation_promoter=pending_relation_promoter,
             attachment_invoice_promoter=OAAttachmentInvoicePromotionService(
-                invoice_repository=PostgresCoreRepository(connection),
+                invoice_repository=PostgresOAAttachmentInvoiceRepository(connection),
                 promotion_mode_provider=lambda: str(
                     oa_runtime_settings["oa_import"]["attachment_invoice_promotion_mode"]
                 ),

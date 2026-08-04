@@ -21,6 +21,7 @@ from fin_ops_platform.services.invoice_attachment_recognition_service import (
 )
 from fin_ops_platform.services.invoice_identity_service import InvoiceIdentityService
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
+from fin_ops_platform.services.workbench_reconciliation_dirty_queue import expand_scope_month_window
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +89,7 @@ class OAAttachmentInvoicePromotionService:
         created_identity_keys: set[str] = set()
         linked_invoice_ids: set[str] = set()
         affected_invoices: dict[str, Invoice] = {}
+        affected_candidates: list[OAAttachmentInvoiceCandidate] = []
 
         for candidate in candidates:
             decision = recognition_service.decide(candidate.attachment_invoice)
@@ -180,13 +182,31 @@ class OAAttachmentInvoicePromotionService:
             if not changed:
                 continue
             affected_invoices[invoice.id] = invoice
+            affected_candidates.append(candidate)
             if effective_action == CREATE_INVOICE_AND_LINK and decision.identity_key:
                 created_identity_keys.add(decision.identity_key)
             elif effective_action == LINK_EXISTING_INVOICE:
                 linked_invoice_ids.add(invoice.id)
 
         if apply and affected_invoices:
-            self._invoice_repository.save_invoices(list(affected_invoices.values()))
+            invoices_to_save = list(affected_invoices.values())
+            save_with_matching_dirty = getattr(
+                self._invoice_repository,
+                "save_invoices_and_mark_matching_dirty",
+                None,
+            )
+            if callable(save_with_matching_dirty):
+                scope_months = self._matching_scope_months(affected_candidates)
+                if not scope_months:
+                    raise RuntimeError("OA attachment invoice promotion requires a matching scope month.")
+                save_with_matching_dirty(
+                    invoices_to_save,
+                    scope_months=scope_months,
+                    reason="oa_attachment_invoice_promotion",
+                    debounce_seconds=0,
+                )
+            else:
+                self._invoice_repository.save_invoices(invoices_to_save)
         return self._report(
             candidates=candidates,
             existing_invoices=existing_invoices,
@@ -265,6 +285,24 @@ class OAAttachmentInvoicePromotionService:
         if not callable(self._promotion_mode_provider):
             return DEFAULT_OA_ATTACHMENT_INVOICE_PROMOTION_MODE
         return self._normalize_mode(self._promotion_mode_provider())
+
+    @staticmethod
+    def _matching_scope_months(candidates: list[OAAttachmentInvoiceCandidate]) -> list[str]:
+        months: set[str] = set()
+        for candidate in candidates:
+            raw_value = (
+                candidate.context.get("month")
+                or candidate.attachment_invoice.get("issue_date")
+                or candidate.attachment_invoice.get("invoice_date")
+            )
+            month = str(raw_value or "").strip()[:7]
+            if not month:
+                continue
+            try:
+                months.update(expand_scope_month_window(month))
+            except ValueError:
+                continue
+        return sorted(months)
 
     @staticmethod
     def _normalize_mode(value: Any) -> str:

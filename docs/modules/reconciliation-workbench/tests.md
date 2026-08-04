@@ -281,3 +281,8 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_w
 - `web/src/test/WorkbenchApi.test.ts` 保护后端 snake-case `unpaired_groups` 能映射为正式两栏 relation projection；`web/src/test/WorkbenchSelection.test.tsx` 让提交后的 generation 保持 refreshing，证明页面仍直接应用权威投影、关闭确认抽屉且不轮询 all-scope refresh status。
 - `tests/test_workbench_sql_runtime.py` 直接实例化生产 `PostgresReadModelRepository`，保护 exact scope 去重、一次批量 active source-version 查询，以及 bulk 合同缺失时 fail closed、禁止旧 single-scope `all` proof。
 - `tests/test_workbench_query_facade.py` 保护普通 all-scope stale 且已有 active generation 时返回零恢复 scope；只有明确缺少 active generation 的冷启动状态才允许保留 `all` fan-out。
+
+## 2026-08-04 - OA 附件发票正式关系扩展回归
+
+- `tests/test_oa_attachment_invoice_promotion_service.py` 保护一个费用项可绑定多张正式发票，promotion 写入时复用现有五个月 matching window，并证明 canonical invoice 与 durable dirty scope 在同一 PostgreSQL transaction 内提交。
+- `tests/test_workbench_free_matching_engine.py` 保护已有 OA + 流水 active relation 能按明确 `attachment_source` 一次扩展全部 5 张发票；附件合计与 OA 相差 0.13 元时保留金额不一致，不丢附件、不改 case id。

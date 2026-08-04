@@ -1499,3 +1499,11 @@
 - 真实根因二：`WorkbenchQueryFreshnessService` 的 all-scope 精确 proof 只在 repository 暴露批量 active-generation 版本方法时启用；测试 fake 有该方法，生产 `PostgresReadModelRepository` 却缺失，导致普通 `month=all` 读取退回单一 `all` proof。`WorkbenchQueryFacade` 又在没有 exact target 时无条件 enqueue `all`，最终把一次确认后的页面读取放大成全历史月份 fan-out。
 - 修复复用既有 operation projection 与 bulk freshness 边界：前端同时识别 snake/camel 两种正式 DTO 字段，字段存在即把空数组也视为权威 after-state；生产 repository 用一次 `scope_key = any(...)` 读取 exact active month source vectors。all-scope 批量合同缺失时 fail closed，不再调用旧 single-scope `all` fallback；普通 stale 且已有 active generation 时不 enqueue，只有明确 `active_generation_missing` 的冷启动仍保留既有 `all` 恢复入口。
 - 不新增 API、表、索引、migration、worker、queue、缓存、轮询或兼容链；确认 canonical command、CAS、幂等、审计、withdraw 必须等待真实 fresh 的合同均保持不变。
+
+## 2026-08-04 - OA 附件发票 promotion 驱动正式关系扩展
+
+- 生产事实：`oa-exp-2321` 的 5 张正式附件发票已经全部进入 canonical invoice pool，首个费用项保留两张 145 元发票，另外三项各保留一张；但既有 `case:CASE-AUTO-0096` 仍只有 OA + 流水成员，关联台因此显示发票 0 张。
+- 真实原因：旧 promotion 只调用 `save_invoices(...)`，没有写 `job.workbench_matching_dirty_scopes`；matching source version 又只跟踪规则版本，不跟踪每条 canonical invoice 数据版本，所以该 scope 不会被 stale scan 自动发现，现有 `attachment_source` 关系扩展规则根本没有机会运行。
+- 根因修复：生产、手工刷新和 promotion repair 统一使用 `PostgresOAAttachmentInvoiceRepository`。它在同一 PostgreSQL 事务中保存发票并标记 OA 月份的既有五个月 matching window；失败整体回滚，成功由现有 matching worker 通过明确 `attachment_source` 扩展原 case，再由既有 Workbench active-generation 刷新发布。删除 PostgreSQL 运行时直接注入 `PostgresCoreRepository` 的旧 bypass，不在前端或 projection 合成非正式发票行。
+- 金额边界：本例附件合计 1080 元、OA/流水 1079.87 元，差额 0.13 元；明确附件来源仍允许扩展正式关系，`amount_minor=0` 保留金额不一致事实，不伪造金额闭合。5 张发票均保留原费用项绑定，其中首项两张发票同时绑定同一 `source_expense_item_id`。
+- 验证：service 回归覆盖 atomic persistence、五个月 scope 与双发票费用项；PostgreSQL repository 回归证明 invoice write 与 dirty marker 使用同一 transaction；matching core 回归覆盖 OA + 流水 active relation 在 0.13 元差异下仍一次扩展全部 5 张附件发票。

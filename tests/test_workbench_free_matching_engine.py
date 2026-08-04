@@ -503,6 +503,49 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
         self.assertEqual(result.plans[0].target_case_id, "case:decision:historical-active")
         self.assertEqual(len(result.plans[0].member_keys), 3)
 
+    def test_active_oa_bank_relation_accepts_every_attachment_invoice_despite_rounding_delta(self) -> None:
+        oa = fact("oa", "oa-exp-2321", 107_987, evidence=())
+        bank = fact("bank", "bank-107987", 107_987, evidence=())
+        invoice_amounts = (14_500, 14_500, 48_200, 1_800, 29_000)
+        invoices = tuple(
+            fact(
+                "invoice",
+                f"invoice-attachment-{index}",
+                amount,
+                evidence=(),
+                references=(
+                    FormalRelationReference(
+                        kind="attachment_source",
+                        value=f"oa-exp-2321:item:{0 if index < 2 else index - 1}",
+                        target_row_type="oa",
+                        target_identity="oa-exp-2321",
+                    ),
+                ),
+            )
+            for index, amount in enumerate(invoice_amounts)
+        )
+        fixture = FormalRelationFactBatch(
+            facts=(oa, bank, *invoices),
+            active_relations=(
+                ActiveFormalRelationAnchor(
+                    case_id="case:CASE-AUTO-0096",
+                    member_keys=(oa.member_key, bank.member_key),
+                ),
+            ),
+        )
+
+        result = self.engine.plan_relations(fixture)
+
+        self.assertEqual(len(result.plans), 1)
+        plan = result.plans[0]
+        self.assertEqual(plan.target_case_id, "case:CASE-AUTO-0096")
+        self.assertEqual(len(plan.member_keys), 7)
+        self.assertEqual(plan.amount_minor, 0)
+        self.assertEqual(
+            plan.oa_attachment_bindings,
+            tuple(("oa-exp-2321", invoice.row_id) for invoice in invoices),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

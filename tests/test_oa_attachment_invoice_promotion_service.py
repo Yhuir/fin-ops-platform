@@ -3,6 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from fin_ops_platform.domain.enums import InvoiceType
 from fin_ops_platform.domain.models import Counterparty, Invoice
@@ -13,6 +14,9 @@ from fin_ops_platform.services.app_settings_service import (
 )
 from fin_ops_platform.services.oa_attachment_invoice_promotion_service import (
     OAAttachmentInvoicePromotionService,
+)
+from fin_ops_platform.services.postgres_repositories.oa_attachment_invoice import (
+    PostgresOAAttachmentInvoiceRepository,
 )
 
 
@@ -52,6 +56,46 @@ class OAAttachmentInvoicePromotionServiceTests(unittest.TestCase):
             for invoice in repository.invoices
         ]
         self.assertEqual(linked_items, ["item-0", "item-0", "item-1", "item-2", "item-3"])
+
+    def test_postgres_promotion_atomically_marks_expanded_matching_scopes_dirty(self) -> None:
+        unchanged_payload = _attachment("26539150014000401220", "145.00", "item-0", "outbound.pdf")
+        changed_payload = _attachment("26539148197001628598", "145.00", "item-1", "return.pdf")
+        repository = FakeAtomicInvoiceRepository([_invoice(unchanged_payload), _invoice(changed_payload)])
+        service = OAAttachmentInvoicePromotionService(
+            invoice_repository=repository,
+            promotion_mode_provider=lambda: OA_ATTACHMENT_INVOICE_PROMOTION_LINK_EXISTING_ONLY,
+        )
+        unchanged_record = SimpleNamespace(
+            id="oa-exp-old",
+            month="2024-01",
+            attachment_invoices=[unchanged_payload],
+            attachment_evidences=[],
+        )
+        service.promote_records([unchanged_record])
+        repository.atomic_save_calls.clear()
+
+        service.promote_records(
+            [
+                unchanged_record,
+                SimpleNamespace(
+                    id="oa-exp-2321",
+                    month="2026-06",
+                    attachment_invoices=[changed_payload],
+                    attachment_evidences=[],
+                )
+            ]
+        )
+
+        self.assertEqual(len(repository.atomic_save_calls), 1)
+        self.assertEqual(
+            repository.atomic_save_calls[0]["scope_months"],
+            ["2026-04", "2026-05", "2026-06", "2026-07", "2026-08"],
+        )
+        self.assertEqual(
+            repository.atomic_save_calls[0]["reason"],
+            "oa_attachment_invoice_promotion",
+        )
+        self.assertEqual(repository.atomic_save_calls[0]["debounce_seconds"], 0)
 
     def test_preloads_existing_invoice_when_attachment_only_has_bare_20_digit_invoice_no(self) -> None:
         payload = _attachment("26539150014000401220", "145.00", "item-0", "outbound.pdf")
@@ -183,6 +227,86 @@ class FakeInvoiceRepository:
         by_id = {invoice.id: invoice for invoice in self.invoices}
         by_id.update({invoice.id: invoice for invoice in invoices})
         self.invoices = list(by_id.values())
+
+
+class FakeAtomicInvoiceRepository(FakeInvoiceRepository):
+    def __init__(self, invoices: list[Invoice]) -> None:
+        super().__init__(invoices)
+        self.atomic_save_calls: list[dict[str, object]] = []
+
+    def save_invoices_and_mark_matching_dirty(
+        self,
+        invoices: list[Invoice],
+        *,
+        scope_months: list[str],
+        reason: str,
+        debounce_seconds: int,
+    ) -> list[str]:
+        self.atomic_save_calls.append(
+            {
+                "invoices": list(invoices),
+                "scope_months": list(scope_months),
+                "reason": reason,
+                "debounce_seconds": debounce_seconds,
+            }
+        )
+        super().save_invoices(invoices)
+        return list(scope_months)
+
+
+class PostgresOAAttachmentInvoiceRepositoryTests(unittest.TestCase):
+    def test_invoice_write_and_matching_dirty_marker_share_one_transaction(self) -> None:
+        transaction = object()
+        connection = _FakeTransactionalConnection(transaction)
+        repository = PostgresOAAttachmentInvoiceRepository(connection)
+
+        with (
+            patch(
+                "fin_ops_platform.services.postgres_repositories.oa_attachment_invoice.PostgresCoreRepository"
+            ) as core_repository,
+            patch(
+                "fin_ops_platform.services.postgres_repositories.oa_attachment_invoice."
+                "PostgresReadModelRepository.mark_workbench_matching_dirty_scopes_in_transaction",
+                return_value=["2026-06"],
+            ) as mark_dirty,
+        ):
+            result = repository.save_invoices_and_mark_matching_dirty(
+                ["invoice"],
+                scope_months=["2026-06"],
+                reason="oa_attachment_invoice_promotion",
+                debounce_seconds=0,
+            )
+
+        core_repository.assert_called_once_with(transaction)
+        core_repository.return_value.save_invoices.assert_called_once_with(["invoice"])
+        mark_dirty.assert_called_once_with(
+            transaction=transaction,
+            tenant_id="default",
+            scope_months=["2026-06"],
+            reason="oa_attachment_invoice_promotion",
+            source_versions={},
+            debounce_seconds=0,
+        )
+        self.assertEqual(result, ["2026-06"])
+
+
+class _FakeTransactionalConnection:
+    def __init__(self, transaction: object) -> None:
+        self._transaction = transaction
+
+    def transaction(self) -> "_FakeTransactionContext":
+        return _FakeTransactionContext(self._transaction)
+
+
+class _FakeTransactionContext:
+    def __init__(self, transaction: object) -> None:
+        self._transaction = transaction
+
+    def __enter__(self) -> object:
+        return self._transaction
+
+    def __exit__(self, *_args: object) -> None:
+        return None
 
 
 def _attachment(invoice_no: str, amount: str, item_id: str, filename: str) -> dict[str, str]:
