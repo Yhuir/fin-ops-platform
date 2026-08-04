@@ -53,6 +53,29 @@ class OAAttachmentInvoicePromotionServiceTests(unittest.TestCase):
         ]
         self.assertEqual(linked_items, ["item-0", "item-0", "item-1", "item-2", "item-3"])
 
+    def test_preloads_existing_invoice_when_attachment_only_has_bare_20_digit_invoice_no(self) -> None:
+        payload = _attachment("26539150014000401220", "145.00", "item-0", "outbound.pdf")
+        payload.pop("digital_invoice_no")
+        existing = _invoice({**payload, "digital_invoice_no": payload["invoice_no"]})
+        repository = FakeInvoiceRepository([existing])
+        service = OAAttachmentInvoicePromotionService(
+            invoice_repository=repository,
+            promotion_mode_provider=lambda: OA_ATTACHMENT_INVOICE_PROMOTION_LINK_EXISTING_ONLY,
+        )
+        record = SimpleNamespace(
+            id="oa-exp-2321",
+            month="2026-06",
+            attachment_invoices=[payload],
+            attachment_evidences=[],
+        )
+
+        report = service.promote_records([record])
+
+        self.assertEqual(report["summary"]["existing_invoice_count"], 1)
+        self.assertEqual(report["summary"]["linked_existing_invoice_count"], 1)
+        self.assertEqual(report["summary"]["created_invoice_count"], 0)
+        self.assertEqual(repository.invoices[0].id, existing.id)
+
     def test_create_mode_creates_missing_formal_invoice_and_disabled_mode_writes_nothing(self) -> None:
         payload = _attachment("26532000000000000600", "600.00", "item-1", "invoice.pdf")
         repository = FakeInvoiceRepository([])

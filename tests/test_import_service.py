@@ -193,6 +193,14 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         self.assertIsNone(weak_identity.canonical_key)
         self.assertEqual(weak_identity.suspected_key, "suspected:云南省交通投资建设集团有限公司:云南溯源科技有限公司:2026-02-05:41.75")
 
+    def test_invoice_identity_service_treats_bare_20_digit_invoice_number_as_digital_identity(self) -> None:
+        identity = InvoiceIdentityService().identity_for_mapping(
+            {"invoice_no": "26539150014000401220"}
+        )
+
+        self.assertEqual(identity.canonical_key, "26539150014000401220")
+        self.assertIsNone(identity.suspected_key)
+
     def test_upsert_etc_invoice_does_not_create_missing_canonical_invoice_by_default(self) -> None:
         existing = Invoice(
             id="inv_existing_etc",

@@ -646,6 +646,24 @@ def test_find_invoices_by_identity_keys_uses_single_bulk_lookup() -> None:
     assert "data_fingerprint = any(%s::text[])" in connection.fetch_all_sql[0]
 
 
+def test_invoice_read_prefers_canonical_legacy_id_over_stale_raw_payload_id() -> None:
+    connection = DuplicateInvoiceIdentityConnection()
+    original_fetch_all = connection.fetch_all
+
+    def fetch_all_with_stale_id(sql: str, params: tuple = ()) -> list[dict]:
+        rows = original_fetch_all(sql, params)
+        rows[0]["raw_payload"]["normalized_payload"]["id"] = "stale-id"
+        return rows
+
+    connection.fetch_all = fetch_all_with_stale_id  # type: ignore[method-assign]
+
+    matches = PostgresCoreRepository(connection).find_invoices_by_identity(
+        canonical_key="26532000000141671581"
+    )
+
+    assert matches[0].id == "invoice_duplicate_1"
+
+
 class SubmittedEtcInvoiceIdentityConnection:
     def __init__(self) -> None:
         self.fetch_one_sql: list[str] = []

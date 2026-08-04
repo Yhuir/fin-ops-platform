@@ -110,3 +110,4 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 - 税局导出的一张发票可以包含多条商品/服务/折扣明细。preview 在同一文件内按数电票号或代码+号码聚合互不重复的明细金额、税额和价税合计；完全相同的重复行仍保留给 duplicate audit；“部分重复 + 部分不同”或表头身份冲突必须 fail closed。
 - 当前严格合同 Audit 对历史多行发票按同一 batch + canonical invoice 重算合计后比较；不得把第一条物理明细误当整票金额，也不得把完全相同的重复行二次加总。
 - 历史金额恢复只能更新 source batch 仍一致的 canonical invoice，并由 repeatable-read dry-run fingerprint、serializable transaction 和 rollback manifest 约束；运行时导入链不调用该修复工具。
+- `0134` 是一次性 provenance 修复：仅当 canonical 发票已有 `oa_attachment_invoice`、正式 import row 仍精确指向该发票、对应 `manual_invoice_import(batch_id, source_id)` 却缺失时，从 durable batch/row 事实恢复全部来源边和原 owner。无 OA 交集、无行证据、多义或已完整的发票零写；运行时不保留扫描或 fallback。

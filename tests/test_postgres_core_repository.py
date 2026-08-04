@@ -43,7 +43,7 @@ class PostgresCoreRepositoryTests(unittest.TestCase):
             ),
         )
 
-    def test_save_invoice_drops_weak_fingerprint_when_source_unique_key_exists(self) -> None:
+    def test_save_invoice_drops_weak_fingerprint_and_keeps_canonical_legacy_id_owner(self) -> None:
         connection = _CaptureConnection()
         repository = PostgresCoreRepository(connection)
 
@@ -67,7 +67,8 @@ class PostgresCoreRepositoryTests(unittest.TestCase):
 
         self.assertEqual(len(connection.calls), 1)
         sql, params = connection.calls[0]
-        self.assertIn("on conflict (source_unique_key) where source_unique_key is not null", sql)
+        self.assertIn("on conflict (legacy_mongo_id)", sql)
+        self.assertNotIn("on conflict (source_unique_key)", sql)
         self.assertEqual(params[5], "26537911470300077680")
         self.assertIsNone(params[6])
 

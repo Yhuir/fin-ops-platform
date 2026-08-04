@@ -36,11 +36,13 @@ class InvoiceIdentityService:
 
     def canonical_key_for_mapping(self, values: dict[str, Any]) -> str | None:
         digital_invoice_no = self._clean(values.get("digital_invoice_no"))
+        invoice_no = self._clean(values.get("invoice_no"))
+        if not digital_invoice_no and invoice_no and len(invoice_no) == 20 and invoice_no.isdigit():
+            digital_invoice_no = invoice_no
         if digital_invoice_no:
             return digital_invoice_no
 
         invoice_code = self._clean(values.get("invoice_code"))
-        invoice_no = self._clean(values.get("invoice_no"))
         if invoice_code and invoice_no:
             return f"{invoice_code}:{invoice_no}"
 

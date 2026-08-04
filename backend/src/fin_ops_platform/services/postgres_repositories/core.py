@@ -1157,11 +1157,6 @@ class PostgresCoreRepository:
         if not invoice_id:
             return
         source_unique_key, data_fingerprint = self._invoice_identity_values(invoice)
-        conflict_target = (
-            "(source_unique_key) where source_unique_key is not null"
-            if source_unique_key
-            else "(legacy_mongo_id)"
-        )
         normalized_payload = self._invoice_payload_with_identity_values(
             invoice,
             source_unique_key=source_unique_key,
@@ -1169,7 +1164,7 @@ class PostgresCoreRepository:
         )
         counterparty = invoice.get("counterparty") if isinstance(invoice.get("counterparty"), dict) else {}
         connection.execute(
-            f"""
+            """
             insert into app.invoices(
                 legacy_mongo_id, invoice_type, invoice_no, invoice_code, digital_invoice_no,
                 source_unique_key, data_fingerprint, invoice_date, invoice_month, counterparty_id,
@@ -1182,7 +1177,7 @@ class PostgresCoreRepository:
                 %s, %s, %s, %s, %s, %s, %s, %s::date, date_trunc('month', %s::date)::date,
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
             )
-            on conflict {conflict_target} do update set
+            on conflict (legacy_mongo_id) do update set
                 invoice_type = excluded.invoice_type,
                 invoice_no = excluded.invoice_no,
                 invoice_code = excluded.invoice_code,
@@ -1445,7 +1440,7 @@ class PostgresCoreRepository:
             tax_no=self._text(counterparty_payload.get("tax_no") or row.get("seller_tax_no") or row.get("buyer_tax_no")),
         )
         return Invoice(
-            id=self._text(payload.get("id") or row.get("legacy_id")) or str(row.get("legacy_id")),
+            id=self._text(row.get("legacy_id") or payload.get("id")) or str(row.get("legacy_id")),
             invoice_type=InvoiceType(self._text(payload.get("invoice_type") or row.get("invoice_type")) or InvoiceType.INPUT.value),
             invoice_no=self._text(payload.get("invoice_no") or row.get("invoice_no")) or str(row.get("legacy_id")),
             counterparty=counterparty,
