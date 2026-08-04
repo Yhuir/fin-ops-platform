@@ -66,9 +66,29 @@ class PostgresCoreRepositoryTests(unittest.TestCase):
         )
 
         self.assertEqual(len(connection.calls), 1)
-        params = connection.calls[0][1]
+        sql, params = connection.calls[0]
+        self.assertIn("on conflict (source_unique_key) where source_unique_key is not null", sql)
         self.assertEqual(params[5], "26537911470300077680")
         self.assertIsNone(params[6])
+
+    def test_save_invoice_without_canonical_identity_keeps_legacy_id_conflict_target(self) -> None:
+        connection = _CaptureConnection()
+
+        PostgresCoreRepository(connection)._save_invoice(
+            connection,
+            {
+                "id": "inv_without_canonical_identity",
+                "invoice_type": "input",
+                "invoice_no": "legacy-invoice-no",
+                "invoice_date": "2026-03-31",
+                "counterparty": {"id": "cp_legacy", "name": "测试销方"},
+                "amount": "9.22",
+                "signed_amount": "9.22",
+            },
+        )
+
+        sql, _params = connection.calls[0]
+        self.assertIn("on conflict (legacy_mongo_id)", sql)
 
 
 if __name__ == "__main__":

@@ -23,6 +23,8 @@ bash scripts/verify.sh docs
 
 ## 当前静态 guard
 
+- `tests/test_postgres_core_repository.py::PostgresCoreRepositoryTests.test_save_invoice_drops_weak_fingerprint_when_source_unique_key_exists` 和 `test_save_invoice_without_canonical_identity_keeps_legacy_id_conflict_target`：证明 canonical 发票按 `source_unique_key` upsert，只有无强身份发票沿用 `legacy_mongo_id`，防止历史 persistence ID 差异触发重复插入。
+
 - `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests.test_canonical_fact_legacy_source_paths_stay_in_removal_baseline`：锁定 production app/API/worker 相关文件中的旧 source-of-truth 引用基线，禁止未登记的 `ApplicationStateStore`、local pickle、`load_bootstrap_snapshot`、`state:*` JSON fallback 回到生产 orchestration 文件；后续删除旧链路时必须同步降低 baseline count。
 - `tests/test_turnover_ledger_api.py::TurnoverLedgerApiTests.test_bank_row_tags_request_boundary_fails_fast_without_write_facade`：证明 Turnover bank-row-tags request boundary 缺少新 write facade 时 fail fast，不再进入 legacy fallback。
 - `tests/test_turnover_ledger_api.py::TurnoverLedgerApiTests.test_turnover_bank_row_tags_legacy_fallback_facade_is_removed`：证明 `Application` 不再暴露 Turnover bank-row-tags legacy fallback factory。
