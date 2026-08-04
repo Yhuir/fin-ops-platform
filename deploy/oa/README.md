@@ -417,9 +417,10 @@ python -m fin_ops_platform.app.worker \
   激活前把尚未部署的新 worker 误报为旧 runtime 故障
 - `runtime`/`acl` 候选激活后 T+0 运行 `full`：连接真实 PostgreSQL 与 RabbitMQ，检查 exact worker inventory、
   queue/dirty/dead-letter 收敛、critical read-model SLO、隔离事务写入能力、domain/page canonical
-  audit 及 API/health 性能
+  audit 及 API/health 性能。若 API 全部成功且延迟达标、唯一失败原因是 read model 暂处于
+  `refreshing`，T+0 最多等待 600 秒收敛后再判定；其他错误立即失败，最终仍必须为 `fresh`
 - `runtime`/`acl` 在 T+60s、T+300s 运行 `stability`：重跑 critical read-model、性能、domain audit 和 runtime 收敛检查，
-  全程不执行 confirm/withdraw；最终证据以 T+300 证明异步拓扑持续稳定
+  全程不执行 confirm/withdraw；preflight 与 stability 的等待上限仍为 120 秒，最终证据以 T+300 证明异步拓扑持续稳定
 - `frontend` 只执行 pre/T+0 的 exact dist、active release、worker inventory、ready、005 session 和公开 shell/首个 hashed asset；不执行 RabbitMQ apply、runtime closure、page audit 或 T+60/T+300 等待
 - 页面 shell 探针固定使用公开站点 origin；API 探针固定使用当前 release 的内部服务 origin，
   防止内部地址页面 404 或公开 Nginx fallback 被误判为业务 API 结果

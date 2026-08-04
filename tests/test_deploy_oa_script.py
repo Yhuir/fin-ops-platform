@@ -906,6 +906,10 @@ class DeployOAScriptTest(unittest.TestCase):
     def test_release_gate_restores_stable_helpers_when_precheck_fails(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
         activate = script.split("release_gate_activate() {", 1)[1].split("\n}\n", 1)[0]
+        checkpoint = script.split("release_gate_checkpoint() {", 1)[1].split(
+            "\nrelease_gate_checkpoint_passed() {",
+            1,
+        )[0]
 
         self.assertIn("release_gate_frontend_checkpoint", activate)
         self.assertIn('"$previous_release" pre "$admin_token" "$evidence_dir" preflight "$release"', activate)
@@ -913,6 +917,10 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('cat "$evidence_dir/$failure_checkpoint/checkpoint.json" >&2 || true', script)
         self.assertIn('release_gate_checkpoint "$release" t0 "$admin_token" "$evidence_dir" full', activate)
         self.assertIn('release_gate_checkpoint "$release" t300 "$admin_token" "$evidence_dir" stability', activate)
+        self.assertIn("closure_timeout_seconds=120", checkpoint)
+        self.assertIn('[[ "$profile" == "full" ]]', checkpoint)
+        self.assertIn("closure_timeout_seconds=600", checkpoint)
+        self.assertIn('--timeout-seconds "$closure_timeout_seconds"', checkpoint)
         self.assertNotIn("install_deploy_control_helper", activate)
         self.assertIn('cat "$evidence_dir/pre/checkpoint.json" >&2', activate)
         self.assertIn('"component_statuses": {', script)
