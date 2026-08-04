@@ -218,6 +218,52 @@ class PostgresBankDetailsCanonicalQueryRepository:
             if str(row.get("id") or "")
         }
 
+    @staticmethod
+    def effective_category_projection_rows(
+        transaction: Any,
+        *,
+        settings: dict[str, Any],
+        transaction_ids: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        """Return the canonical effective category for a bounded bank-row set."""
+        normalized_ids = list(dict.fromkeys(text_list(transaction_ids)))
+        if not normalized_ids:
+            return {}
+        tags = settings.get("bank_transaction_tags")
+        if not isinstance(tags, dict):
+            tags = default_bank_transaction_tag_dictionary_payload()
+        definitions = [
+            dict(item)
+            for item in list(tags.get("definitions") or [])
+            if isinstance(item, dict)
+        ]
+        cte_sql, cte_params = _classification_cte(
+            definitions=definitions,
+            date_from=None,
+            date_to=None,
+            candidate_transaction_ids=normalized_ids,
+        )
+        rows = transaction.fetch_all(
+            f"""
+            with {cte_sql}
+            select
+                row_id,
+                effective_category_code,
+                effective_category_label,
+                effective_category_primary_label,
+                effective_category_sub_label,
+                effective_category_source
+            from classified_with_semantics
+            where row_id = any(%s::text[])
+            """,
+            (*cte_params, normalized_ids),
+        )
+        return {
+            str(row.get("row_id") or ""): dict(row)
+            for row in rows
+            if str(row.get("row_id") or "").strip()
+        }
+
     def export_snapshot(
         self,
         *,

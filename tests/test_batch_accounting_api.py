@@ -45,6 +45,10 @@ def bank_row(
         "bank_name": "建设银行",
         "account_last4": "8106",
         "account_no": "6227000012348106",
+        "tag_code": "fee",
+        "tag_label": "手续费",
+        "tag_primary_label": "费用",
+        "tag_sub_label": "手续费",
         "version": 1,
     }
 
@@ -136,12 +140,16 @@ class FakeBatchAccountingQueryRepository:
                 "bank_rows": {"page": 1, "page_size": 200, "pageSize": 200, "total": 1},
                 "oa_rows": {"page": 1, "page_size": 200, "pageSize": 200, "total": 1},
             },
+            "tag_selection_version": 1,
         }
         self.submission_payload: dict[str, object] = {
             "bank_rows": [bank_row()],
             "oa_rows": [oa_row()],
             "invoice_rows": [invoice_row()],
+            "tag_selection_version": 1,
+            "selected_tag_codes": ["fee"],
         }
+        self.tag_rules_payload: dict[str, object] = {"observed_tag_codes": ["fee"]}
 
     def list_snapshot(self, **kwargs: object) -> dict[str, object]:
         self.list_calls.append(dict(kwargs))
@@ -150,6 +158,55 @@ class FakeBatchAccountingQueryRepository:
     def load_submission_context(self, **kwargs: object) -> dict[str, object]:
         self.submission_calls.append(dict(kwargs))
         return deepcopy(self.submission_payload)
+
+    def tag_rules_snapshot(self) -> dict[str, object]:
+        return deepcopy(self.tag_rules_payload)
+
+
+class FakeBatchAccountingSettingsService:
+    def __init__(self) -> None:
+        self.update_calls: list[dict[str, object]] = []
+
+    def get_batch_accounting_tag_selection_payload(
+        self,
+        *,
+        observed_tag_codes: list[str],
+        can_save: bool,
+    ) -> dict[str, object]:
+        return {
+            "version": 1,
+            "bank_auto_tag_rules_version": 7,
+            "selected_tag_codes": list(observed_tag_codes),
+            "active_tags": [
+                {
+                    "code": "fee",
+                    "label": "手续费",
+                    "path": ["费用", "手续费"],
+                    "output_primary_label": "费用",
+                    "output_sub_label": "手续费",
+                }
+            ],
+            "can_save": can_save,
+        }
+
+    def update_batch_accounting_tag_selection(
+        self,
+        payload: dict[str, object],
+        *,
+        actor_id: str,
+        observed_tag_codes: list[str],
+    ) -> dict[str, object]:
+        self.update_calls.append(
+            {
+                "payload": deepcopy(payload),
+                "actor_id": actor_id,
+                "observed_tag_codes": list(observed_tag_codes),
+            }
+        )
+        return self.get_batch_accounting_tag_selection_payload(
+            observed_tag_codes=observed_tag_codes,
+            can_save=True,
+        )
 
 
 class RecordingRelationCommandService:
@@ -211,10 +268,12 @@ class RecordingRelationCommandService:
 def service(
     repository: FakeBatchAccountingQueryRepository | None = None,
     command_service: RecordingRelationCommandService | None = None,
+    settings_service: FakeBatchAccountingSettingsService | None = None,
 ) -> BatchAccountingService:
     return BatchAccountingService(
         query_repository=repository or FakeBatchAccountingQueryRepository(),
         relation_command_service=command_service or RecordingRelationCommandService(),
+        app_settings_service=settings_service,
     )
 
 
@@ -271,6 +330,7 @@ class BatchAccountingServiceTests(unittest.TestCase):
                 "bank_rows": {"page": 1, "page_size": 100, "pageSize": 100, "total": 0},
                 "oa_rows": {"page": 1, "page_size": 100, "pageSize": 100, "total": 0},
             },
+            "tag_selection_version": 1,
         }
 
         payload = service(repository).build_payload(bank_year="2026", bucket="unsubmitted")
@@ -307,6 +367,7 @@ class BatchAccountingServiceTests(unittest.TestCase):
                 "bank_rows": {"page": 1, "page_size": 200, "pageSize": 200, "total": 200},
                 "oa_rows": {"page": 1, "page_size": 200, "pageSize": 200, "total": 200},
             },
+            "tag_selection_version": 1,
         }
 
         started_at = perf_counter()
@@ -348,6 +409,7 @@ class BatchAccountingServiceTests(unittest.TestCase):
             "pagination": {
                 "bank_rows": {"page": 1, "page_size": 200, "pageSize": 200, "total": 1}
             },
+            "tag_selection_version": 1,
         }
 
         payload = service(repository).build_payload(bank_year="2026", bucket="submitted")
@@ -418,9 +480,59 @@ class BatchAccountingServiceTests(unittest.TestCase):
                 "oa_years": ["2026"],
                 "affected_scope_keys": ["2026-01"],
                 "created_by": "finance-user",
+                "bank_tag_code": "fee",
+                "tag_selection_version": 1,
             },
         )
         self.assertEqual(result["relation_id"], RELATION_ID)
+
+    def test_submit_revalidates_tag_rule_version_and_current_effective_tag(self) -> None:
+        repository = FakeBatchAccountingQueryRepository()
+
+        with self.assertRaises(BatchAccountingError) as stale:
+            service(repository).submit(
+                bank_year="2026",
+                bank_row_id=BANK_ROW_ID,
+                oa_row_ids=[OA_ROW_ID],
+                actor="finance-user",
+                expected_tag_selection_version=2,
+            )
+        self.assertEqual(stale.exception.code, "batch_accounting_tag_selection_version_conflict")
+
+        repository.submission_payload["selected_tag_codes"] = []
+        with self.assertRaises(BatchAccountingError) as removed:
+            service(repository).submit(
+                bank_year="2026",
+                bank_row_id=BANK_ROW_ID,
+                oa_row_ids=[OA_ROW_ID],
+                actor="finance-user",
+                expected_tag_selection_version=1,
+            )
+        self.assertEqual(removed.exception.code, "batch_accounting_bank_tag_not_selected")
+
+    def test_tag_rules_use_observed_canonical_tags_and_delegate_single_settings_write(self) -> None:
+        repository = FakeBatchAccountingQueryRepository()
+        settings = FakeBatchAccountingSettingsService()
+        target = service(repository, settings_service=settings)
+
+        read_payload = target.tag_rules_payload(can_save=False)
+        saved_payload = target.update_tag_rules(
+            {"expected_version": 1, "selected_tag_codes": ["fee"]},
+            actor="finance-user",
+        )
+
+        self.assertFalse(read_payload["can_save"])
+        self.assertTrue(saved_payload["can_save"])
+        self.assertEqual(
+            settings.update_calls,
+            [
+                {
+                    "payload": {"expected_version": 1, "selected_tag_codes": ["fee"]},
+                    "actor_id": "finance-user",
+                    "observed_tag_codes": ["fee"],
+                }
+            ],
+        )
 
     def test_submit_requires_note_for_amount_mismatch_and_rejects_stale_version(self) -> None:
         repository = FakeBatchAccountingQueryRepository()
@@ -606,8 +718,32 @@ class BatchAccountingApiRouteTests(unittest.TestCase):
         self.assertEqual(repository.list_calls[0]["oa_search"], "项目")
         self.assertEqual(
             set(payload),
-            {"summary", "bank_rows", "oa_rows", "relations_by_bank_row_id", "pagination"},
+            {
+                "summary",
+                "bank_rows",
+                "oa_rows",
+                "relations_by_bank_row_id",
+                "pagination",
+                "tag_selection_version",
+            },
         )
+
+    def test_tag_rule_routes_expose_read_only_state_and_save_with_actor(self) -> None:
+        repository = FakeBatchAccountingQueryRepository()
+        settings = FakeBatchAccountingSettingsService()
+        routes = BatchAccountingApiRoutes(lambda: service(repository, settings_service=settings))
+
+        read_status, read_payload = routes.tag_rules(can_save=False)
+        save_status, save_payload = routes.update_tag_rules(
+            {"expected_version": 1, "selected_tag_codes": ["fee"]},
+            session=self._session(),
+        )
+
+        self.assertEqual(read_status, 200)
+        self.assertFalse(read_payload["can_save"])
+        self.assertEqual(save_status, 200)
+        self.assertTrue(save_payload["can_save"])
+        self.assertEqual(settings.update_calls[0]["actor_id"], "finance-user")
 
     def test_route_maps_invalid_query_conflict_and_unavailable_dependencies(self) -> None:
         routes = BatchAccountingApiRoutes(lambda: BatchAccountingService())
@@ -663,7 +799,7 @@ class BatchAccountingApiRouteTests(unittest.TestCase):
         ):
             self.assertNotIn(old_field, payload)
 
-    def test_read_export_only_session_cannot_submit(self) -> None:
+    def test_read_export_only_session_cannot_submit_or_update_tag_rules(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             configure_access_control(app, read_export_only=["READONLY001"])
@@ -687,9 +823,17 @@ class BatchAccountingApiRouteTests(unittest.TestCase):
                 ),
                 headers={"Authorization": "Bearer readonly-user"},
             )
+            tag_rules_response = app.handle_request(
+                "PUT",
+                "/api/batch-accounting/tag-rules",
+                body=json.dumps({"expected_version": 1, "selected_tag_codes": []}),
+                headers={"Authorization": "Bearer readonly-user"},
+            )
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(json.loads(response.body)["error"], "permission_denied")
+        self.assertEqual(tag_rules_response.status_code, 403)
+        self.assertEqual(json.loads(tag_rules_response.body)["error"], "permission_denied")
 
 
 if __name__ == "__main__":

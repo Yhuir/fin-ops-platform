@@ -4,6 +4,10 @@ from http import HTTPStatus
 from typing import Any, Callable
 
 from fin_ops_platform.app.auth import OARequestSession
+from fin_ops_platform.services.app_settings_service import (
+    AppSettingsPersistenceError,
+    AppSettingsValidationError,
+)
 from fin_ops_platform.services.batch_accounting_service import BatchAccountingError, BatchAccountingService
 
 
@@ -53,6 +57,9 @@ class BatchAccountingApiRoutes:
                 actor=actor,
                 note=str(payload.get("note") or ""),
                 expected_version=self._optional_int(payload.get("expected_version")),
+                expected_tag_selection_version=self._optional_int(
+                    payload.get("expected_tag_selection_version")
+                ),
             )
         except BatchAccountingError as exc:
             return self._batch_accounting_error_response(exc)
@@ -64,6 +71,39 @@ class BatchAccountingApiRoutes:
             **result,
             "affected_months": changed_scope_keys,
         }
+
+    def tag_rules(self, *, can_save: bool) -> tuple[HTTPStatus, dict[str, Any]]:
+        try:
+            return HTTPStatus.OK, self._service_factory().tag_rules_payload(can_save=can_save)
+        except BatchAccountingError as exc:
+            return self._batch_accounting_error_response(exc)
+
+    def update_tag_rules(
+        self,
+        payload: dict[str, Any],
+        *,
+        session: OARequestSession,
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        try:
+            result = self._service_factory().update_tag_rules(
+                payload,
+                actor=self._actor(payload, session),
+            )
+        except AppSettingsValidationError as exc:
+            status = (
+                HTTPStatus.CONFLICT
+                if exc.error_code == "batch_accounting_tag_selection_version_conflict"
+                else HTTPStatus.BAD_REQUEST
+            )
+            return status, {"error": exc.error_code, "message": str(exc)}
+        except AppSettingsPersistenceError as exc:
+            return HTTPStatus.SERVICE_UNAVAILABLE, {
+                "error": "batch_accounting_tag_selection_persistence_failed",
+                "message": str(exc),
+            }
+        except BatchAccountingError as exc:
+            return self._batch_accounting_error_response(exc)
+        return HTTPStatus.OK, result
 
     def withdraw(
         self,
@@ -95,7 +135,8 @@ class BatchAccountingApiRoutes:
 
     @staticmethod
     def _actor(payload: dict[str, Any], session: OARequestSession) -> str:
-        return str(payload.get("actor") or session.identity.username or session.identity.user_id or "web_finance_user")
+        del payload
+        return str(session.identity.username or session.identity.user_id or "web_finance_user")
 
     @staticmethod
     def _optional_int(value: Any) -> int | None:
@@ -145,6 +186,8 @@ class BatchAccountingApiRoutes:
             "batch_accounting_version_conflict",
             "batch_accounting_relation_conflict",
             "batch_accounting_bank_row_already_linked",
+            "batch_accounting_tag_selection_version_conflict",
+            "batch_accounting_bank_tag_not_selected",
         }:
             status = HTTPStatus.CONFLICT
         elif exc.code in {

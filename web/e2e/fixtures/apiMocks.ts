@@ -7915,6 +7915,10 @@ function batchAccountingBankRow(relationSubmitted: boolean) {
     amount: "1200.00",
     bank_name: "建行",
     account_last4: "8106",
+    tag_code: "fee",
+    tag_label: "手续费",
+    tag_primary_label: "费用",
+    tag_sub_label: "手续费",
     relation_id: relationSubmitted ? "BA-REL-202604-001" : "",
     version: relationSubmitted ? 2 : 1,
   };
@@ -7934,17 +7938,25 @@ function batchAccountingPagination(url: URL, bucket: BatchAccountingBucket, bank
   return pagination;
 }
 
-function batchAccountingPayload(url: URL, relationSubmitted: boolean) {
+function batchAccountingPayload(
+  url: URL,
+  relationSubmitted: boolean,
+  selectedTagCodes: string[],
+  tagSelectionVersion: number,
+) {
   const bucket: BatchAccountingBucket = url.searchParams.get("bucket") === "submitted" ? "submitted" : "unsubmitted";
   const oaRows = batchAccountingOaRows();
   const bankRow = batchAccountingBankRow(relationSubmitted);
   const showSubmittedRelation = bucket === "submitted" && relationSubmitted;
-  const showUnsubmittedRows = bucket === "unsubmitted" && !relationSubmitted;
+  const showUnsubmittedRows = bucket === "unsubmitted"
+    && !relationSubmitted
+    && selectedTagCodes.includes(bankRow.tag_code);
+  const unsubmittedCount = !relationSubmitted && selectedTagCodes.includes(bankRow.tag_code) ? 1 : 0;
   const bankRows = showSubmittedRelation || showUnsubmittedRows ? [bankRow] : [];
   const visibleOaRows = showUnsubmittedRows ? oaRows : [];
   return {
     summary: {
-      unsubmitted_count: relationSubmitted ? 0 : 1,
+      unsubmitted_count: unsubmittedCount,
       submitted_count: relationSubmitted ? 1 : 0,
     },
     bank_rows: bankRows,
@@ -7968,6 +7980,7 @@ function batchAccountingPayload(url: URL, relationSubmitted: boolean) {
       },
     } : {},
     pagination: batchAccountingPagination(url, bucket, bankRows.length, visibleOaRows.length),
+    tag_selection_version: tagSelectionVersion,
   };
 }
 
@@ -8032,6 +8045,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     options.pendingInvoiceRulesSaveFailuresBeforeSuccess
     ?? (options.pendingInvoiceRulesSaveFailOnce ? 1 : 0);
   let batchAccountingSubmitted = Boolean(options.batchAccountingInitialSubmitted);
+  let batchAccountingSelectedTagCodes = ["fee", "travel"];
+  let batchAccountingTagSelectionVersion = 1;
   let batchAccountingFailuresRemaining =
     options.batchAccountingFailuresBeforeSuccess ?? (options.batchAccountingFailOnce ? 1 : 0);
   let turnoverClosureConfirmed = false;
@@ -9932,7 +9947,53 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           message: "批量账务数据加载暂时失败，请刷新后重试。",
         }, 503);
       }
-      return json(route, batchAccountingPayload(url, batchAccountingSubmitted));
+      return json(route, batchAccountingPayload(
+        url,
+        batchAccountingSubmitted,
+        batchAccountingSelectedTagCodes,
+        batchAccountingTagSelectionVersion,
+      ));
+    }
+
+    if (path === "/api/batch-accounting/tag-rules") {
+      if (request.method() === "PUT") {
+        const body = parseJsonBody(request.postData()) as Record<string, unknown>;
+        if (body.expected_version !== batchAccountingTagSelectionVersion) {
+          return json(route, {
+            error: "batch_accounting_tag_selection_version_conflict",
+            message: "批量账务标签规则已变化，请刷新后重试。",
+          }, 409);
+        }
+        const nextCodes = Array.isArray(body.selected_tag_codes)
+          ? body.selected_tag_codes.map(String)
+          : [];
+        if (JSON.stringify(nextCodes) !== JSON.stringify(batchAccountingSelectedTagCodes)) {
+          batchAccountingSelectedTagCodes = nextCodes;
+          batchAccountingTagSelectionVersion += 1;
+        }
+      }
+      return json(route, {
+        version: batchAccountingTagSelectionVersion,
+        bank_auto_tag_rules_version: 9,
+        selected_tag_codes: batchAccountingSelectedTagCodes,
+        active_tags: [
+          {
+            code: "fee",
+            label: "手续费",
+            path: ["费用", "手续费"],
+            output_primary_label: "费用",
+            output_sub_label: "手续费",
+          },
+          {
+            code: "travel",
+            label: "差旅费",
+            path: ["费用", "差旅费"],
+            output_primary_label: "费用",
+            output_sub_label: "差旅费",
+          },
+        ],
+        can_save: configuredSessionTier() !== "read_export_only",
+      });
     }
 
     if (path === "/api/batch-accounting/submit") {

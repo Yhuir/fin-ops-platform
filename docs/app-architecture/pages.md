@@ -66,7 +66,7 @@ freshness gate。
 | `tax_offset` | `/tax-offset` | 单次 PostgreSQL repeatable-read canonical snapshot；页面无 Tax Offset read model/worker 依赖 |
 | `cost_statistics` | `/cost-statistics` | 单次 PostgreSQL repeatable-read canonical snapshot；无 Cost read model/worker |
 | `bank_flow_rule_batches` | `/bank-flow-rule-batches` | 单次 PostgreSQL repeatable-read canonical snapshot；无页面 read model/worker |
-| `batch_accounting` | `/batch-accounting` | 单次 PostgreSQL repeatable-read canonical snapshot；无 Batch read model/worker |
+| `batch_accounting` | `/batch-accounting` | 单次 PostgreSQL repeatable-read canonical snapshot；复用银行明细 effective-category classifier + Settings 标签选择；无 Batch read model/worker |
 | `turnover_ledger` | `/turnover-ledger` | 单次 PostgreSQL repeatable-read canonical snapshot；无 Turnover read model/worker |
 | `etc_tickets` | `/etc-tickets` | ETC import jobs、ETC business batch manual OA status |
 | `settings` | `/settings` | OA identity + canonical Settings ACL/ordinary settings store；ACL 不使用页面 read model、worker 或 cache |

@@ -178,6 +178,10 @@ class ApplicationStateStore:
             normalized_payload["turnover_ledger_tag_selection"] = dict(
                 loaded.get("turnover_ledger_tag_selection") or {}
             )
+        if "batch_accounting_tag_selection" in loaded:
+            normalized_payload["batch_accounting_tag_selection"] = dict(
+                loaded.get("batch_accounting_tag_selection") or {}
+            )
         if LOCAL_SETTINGS_ACL_AUDIT_KEY in loaded:
             normalized_payload[LOCAL_SETTINGS_ACL_AUDIT_KEY] = list(
                 loaded.get(LOCAL_SETTINGS_ACL_AUDIT_KEY) or []
@@ -220,6 +224,10 @@ class ApplicationStateStore:
         if "turnover_ledger_tag_selection" in payload:
             normalized_payload["turnover_ledger_tag_selection"] = dict(
                 payload.get("turnover_ledger_tag_selection") or {}
+            )
+        if "batch_accounting_tag_selection" in payload:
+            normalized_payload["batch_accounting_tag_selection"] = dict(
+                payload.get("batch_accounting_tag_selection") or {}
             )
         if LOCAL_SETTINGS_ACL_AUDIT_KEY in payload:
             normalized_payload[LOCAL_SETTINGS_ACL_AUDIT_KEY] = list(

@@ -2,7 +2,7 @@
 
 本文维护 `PERM-E2E-003` 的页面级写入口清单。目标是让后续新增页面按钮、抽屉、批量动作时，能明确判断它是否已经被 Browser role matrix 覆盖，而不是只依赖后端 guard 或组件测试。`tests/test_permissions_write_entry_inventory.py` 会双向校验 `pageRegistry.tsx` 与本清单 row 一致、`pageRegistry.tsx` 与 role matrix readable route 一致、每个非 admin route 都进入 role matrix read-export smoke、`covered-*` row 必须引用 Browser E2E 证据，并校验源码高风险写控件文案 sentinel 仍与关键词 registry 同步。
 
-Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.planning/phases/27-read-model-fan-out/27-COVERAGE-MATRIX.md`。它把本清单扩展到当前 17 个注册页面、111 个导出 POST/PUT/PATCH/DELETE 客户端函数、23 个业务 `Drawer.tsx`、23 个 Browser dynamic opener、15 个 manifest read model 和直接 lifecycle/enqueue/barrier 调用点，并由本文件对应测试与 `tests/test_read_model_manifest.py` 双向校验。该矩阵只用于规划、测试和删除审计，不进入生产 I/O，也不建立第二套 runtime registry；其中 `planned` 目标在对应 vertical slice 部署验证前不得描述为已上线。
+Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.planning/phases/27-read-model-fan-out/27-COVERAGE-MATRIX.md`。它把本清单扩展到当前 17 个注册页面、112 个导出 POST/PUT/PATCH/DELETE 客户端函数、24 个业务 `Drawer.tsx`、23 个 Browser dynamic opener、15 个 manifest read model 和直接 lifecycle/enqueue/barrier 调用点，并由本文件对应测试与 `tests/test_read_model_manifest.py` 双向校验。该矩阵只用于规划、测试和删除审计，不进入生产 I/O，也不建立第二套 runtime registry；其中 `planned` 目标在对应 vertical slice 部署验证前不得描述为已上线。
 
 后端独立 fail-closed 合同由 `route_access_policy.py` 和 `tests/test_route_access_policy.py`/`tests/test_auth_guard.py` 维护：除明确登记的纯读取 POST 外，受保护的 unsafe method 默认要求 mutation 权限。浏览器 inventory 证明 UI 不暴露写控件，后端合同证明手工构造 HTTP 请求也不能越权，二者不能互相替代。
 
@@ -114,7 +114,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | --- | --- | --- |
 | `backgroundJobs/api.ts` | `app-health-operations`, `settings` | 后台任务用于运维、数据重置和长任务轮询/控制。 |
 | `bankDetails/api.ts` | `bank-details` | 银行明细分类、自动标签、关系入口等写入口。 |
-| `batchAccounting/api.ts` | `batch-accounting` | 批量账务提交和撤回。 |
+| `batchAccounting/api.ts` | `batch-accounting` | 批量账务标签规则保存、提交和撤回。 |
 | `cost-statistics/api.ts` | `cost-statistics` | 成本统计标签准入规则 PUT；导出仍为只读能力。 |
 | `etc/api.ts` | `etc-tickets`, `imports-etc-invoices` | ETC 票据管理、ETC 导入、对账和业务批次写入口。 |
 | `imports/api.ts` | `imports-bank-transactions`, `imports-invoices`, `imports-etc-invoices` | 通用导入 preview/confirm/template 写链路。 |
@@ -181,7 +181,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `pending-invoices` | 选择已有发票、收入批量状态、规则保存 | `covered-browser` | 本轮 `web/e2e/permissions-role-matrix.spec.ts` 覆盖 read-export 下选择已有发票、支出/收入规则保存、收入状态按钮禁用且零 mutation；`web/e2e/pending-invoices-*` 覆盖 full_access 主链路；后端/API guard 覆盖 mutation 拒绝 | 新增待找发票写入口时补同类 Browser 断言。 |
 | `tax-offset` | 保存计划、已认证发票导入 | `covered-browser` | `web/e2e/tax-offset-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 新增税金 mutation 时补。 |
 | `bank-flow-rule-batches` | 标签规则保存、提交批次、撤回批次、内部往来迁移底座提交 | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts`、`web/e2e/bank-flow-rule-batches-flow.spec.ts`、组件/API tests | 新增 batch command 时补。 |
-| `batch-accounting` | 关联 OA 项与流水、撤回关联 | `covered-browser` | 本轮 `web/e2e/permissions-role-matrix.spec.ts` 覆盖 read-export 下选择 OA 后 submit disabled、已提交 bucket 撤回关联 disabled 且 submit/withdraw 零 mutation；`web/e2e/batch-accounting-flow.spec.ts` 覆盖 full_access submit/withdraw | 新增 batch accounting command 时补同类 Browser 断言。 |
+| `batch-accounting` | 标签规则保存、关联 OA 项与流水、撤回关联 | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts` 覆盖 read-export 下选择 OA 后 submit disabled、已提交 bucket 撤回关联 disabled 且 submit/withdraw 零 mutation；`web/src/test/BatchAccountingPage.test.tsx` 覆盖 read-export 标签规则只读与 full-access CAS 保存；`web/e2e/batch-accounting-flow.spec.ts` 覆盖 full_access 标签规则、submit/withdraw 主链路 | 新增 batch accounting command 时补同类 Browser 断言。 |
 | `turnover-ledger` | 标签准入保存、确认闭环、撤回闭环、extra 保存/confirm/withdraw、导出 | `covered-browser` | 本轮 `web/e2e/permissions-role-matrix.spec.ts` 覆盖标签抽屉保存 disabled、flow checkbox disabled、extra 编辑入口 disabled、确认闭环 disabled 且零 mutation；extra 抽屉内部保存/confirm/withdraw 因只读角色无法进入写入口，组件/API 覆盖内部按钮和 guard；`web/e2e/turnover-ledger-flow.spec.ts` 覆盖 full_access 主链路 | 新增 turnover 写入口或把 extra 改成只读可打开时，必须补对应 Browser 断言。 |
 | `input-invoice-usage` | 支付规则保存、OA reverse 草稿创建 | `covered-browser` | `web/e2e/input-invoice-usage-flow.spec.ts`；本轮 `web/e2e/permissions-role-matrix.spec.ts` 会在 read-export 下打开支付状态规则抽屉和以发票反提 OA 工作流，断言规则只读、OA reverse preview 不可创建草稿、durable write endpoints 零调用并复跑 DOM 写控件候选扫描 | 新增 payment/OA 写入口时补。 |
 | `output-invoice-collections` | 无业务写入口；仅 canonical 查询、详情和导出 | `covered-browser` | `web/e2e/output-invoice-collections-flow.spec.ts`、`web/e2e/output-invoice-red-relation-fanout.spec.ts`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx`、API tests；`web/e2e/permissions-role-matrix.spec.ts` 通过 `output-invoice-collections:canonical-read-only` 证明三种角色均无旧状态/提醒/人工红蓝票/收据写入口且 durable mutation 为 0。 | 若新增写入口，必须先恢复权限、API、审计和回滚合同；当前保持只读。 |

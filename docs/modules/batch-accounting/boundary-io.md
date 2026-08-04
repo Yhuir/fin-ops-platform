@@ -1,6 +1,6 @@
 # 批量账务模块边界与 I/O
 
-日期：2026-07-30
+日期：2026-08-05
 
 ## 模块化状态
 
@@ -17,6 +17,7 @@
 - 批量账务页面、银行/OA 双分页、OA 搜索、选择、金额校验、提交和撤回交互。
 - canonical 候选资格和 active batch relation 列表的业务组合。
 - 页面专属 PostgreSQL 查询以及一次请求内一致快照。
+- 左栏银行流水的 current effective tag 展示、未提交规则筛选和规则抽屉。
 - 写前 active relation 冲突、expected version、差额说明和跨月 scope 计算。
 
 ### 不负责
@@ -37,6 +38,9 @@
 | OA 分页 | `oa_page`、`oa_page_size` | 仅未提交 bucket 使用；服务端执行，最大 200 |
 | OA 搜索 | `oa_search` | 最长 200 字符；纯金额输入归一为无千分位文本，在 canonical OA SQL 中匹配申请人、项目、金额、事由 |
 | 银行候选 | `app.bank_transactions` | 指定年份、未删除、对方户名“批量账务集中处理”、`txn_direction='outflow'`、金额大于 0、没有任何 active relation；银行名/尾号只取 normalized payload 的结构化银行字段，不得用账户户名冒充银行名 |
+| effective category | Bank Details canonical classifier | 对本次精确业务流水 ID 集合一次 set-based 分类；使用当前 active category/confirmation/自动标签设置，禁止复制第二套标签算法 |
+| 标签选择规则 | `app.app_settings.batch_accounting_tag_selection` | stable tag codes + version；未持久化时默认当前 active definitions 全选，迁移后新增标签默认不选；归档标签从选择中原子移除 |
+| 标签规则 command | `expected_version + selected_tag_codes[]` | full/admin 可写，read-export 只读；CAS、semantic no-op、未知/非 active code 校验和 audit 由 Settings owner 承担 |
 | OA 候选 | `app.oa_applications` | 未删除、已完成状态别名、日常报销主单、不限年份、没有包含 canonical 银行成员的 active relation |
 | OA 附件发票 | `app.invoices.source_links` + `app.oa_attachments` | 只按当前可见或本次选中的 OA IDs 批量查询；不得扫描全量附件 |
 | submitted relations | `app.workbench_pair_relations` | 只读 `status='active' and relation_mode='batch_accounting'`，并要求关系包含指定年份的 canonical 银行成员 |
@@ -51,6 +55,9 @@
 | --- | --- | --- |
 | `summary` | 页面 | `unsubmitted_count`、`submitted_count`、`bank_year` 与 rows 在同一 snapshot |
 | `bank_rows` | 页面 | 当前 bucket 的服务端分页银行行；`bank_name + account_last4` 是银行 chip，`trade_time` 是 canonical 时间文本，页面只做无时区换算的展示归一化 |
+| bank tag fields | 页面左栏 | `tag_code/tag_label/tag_primary_label/tag_sub_label/tag_source` 来自当前 canonical classifier；页面只展示，不自行推断 |
+| `tag_selection_version` | 页面 submit | 当前列表采用的规则版本；submit 必须原样回传，后端在窄 snapshot 内重新分类并检查版本与选中状态 |
+| tag-rules payload | HeroUI drawer | `version`、`active_tags`、`selected_tag_codes`、`can_save`；active tags 仅限业务流水实际出现且当前 active 的标签，selected 保留其它当前 active stable codes，保存不可误删隐藏选择 |
 | `oa_rows` | 页面 | 未提交 bucket 的服务端分页 OA 候选；submitted 返回空列表 |
 | `relations_by_bank_row_id` | 页面 | submitted 当前页 active batch relation 及 canonical OA/发票成员详情 |
 | `pagination` | 页面 | 银行分页始终返回；未提交同时返回 OA 分页 |
@@ -72,10 +79,9 @@ set transaction isolation level repeatable read read only
 ```
 
 - rows、summary、count、pagination 和 relation member detail 使用同一个 snapshot。
-- 未提交 GET：固定最多 5 条语句（含 isolation）。
-- 已提交 GET：固定最多 4 条语句（含 isolation）。
-- submit context：固定最多 4 条语句（含 isolation）。
-- 查询必须使用 `LIMIT/OFFSET`；禁止 Python/浏览器全量过滤分页、N+1、逐月或逐 scope 循环。
+- 未提交、已提交和 submit context：固定最多 5 条语句（含 isolation 和一次 set-based classifier）。
+- tag-rules snapshot：固定最多 3 条语句（含 isolation）。
+- 标签筛选只在指定年份且对方户名精确命中的业务候选集合内完成，再做服务端分页；禁止读取全量银行流水、浏览器过滤、N+1、逐月或逐 scope 循环。
 
 ## 依赖方向
 
@@ -85,6 +91,8 @@ BatchAccountingPage
   -> BatchAccountingApiRoutes
   -> BatchAccountingService
      -> PostgresBatchAccountingQueryRepository (read only)
+        -> Bank Details canonical effective-category projection (read only)
+     -> AppSettingsService (tag-selection owner)
      -> WorkbenchRelationCommandService (write owner)
 ```
 
@@ -95,12 +103,14 @@ BatchAccountingPage
 ### 页面模块拥有
 
 - `web/src/pages/BatchAccountingPage.tsx`
+- `web/src/components/batchAccounting/BatchAccountingTagRulesDrawer.tsx`
 - `web/src/features/batchAccounting/api.ts`
 - `web/src/features/batchAccounting/types.ts`
 - `backend/src/fin_ops_platform/app/routes_batch_accounting.py`
 - `backend/src/fin_ops_platform/services/batch_accounting_service.py`
 - `backend/src/fin_ops_platform/services/postgres_repositories/batch_accounting.py`
 - 页面专属 backend/frontend/E2E tests
+- `backend/src/fin_ops_platform/postgres/migrations/0135_batch_accounting_tag_selection.sql`
 - `docs/modules/batch-accounting/`
 
 ### 仅最小接线

@@ -6,8 +6,10 @@ import type {
   BatchAccountingPageInfo,
   BatchAccountingRelation,
   BatchAccountingResponse,
+  BatchAccountingTagRules,
   FetchBatchAccountingRequest,
   SubmitBatchAccountingRequest,
+  SaveBatchAccountingTagRulesRequest,
   WithdrawBatchAccountingRequest,
 } from "./types";
 import { apiRequestJson } from "../apiClient";
@@ -29,6 +31,14 @@ type ApiBankRow = {
   relation_id?: string | null;
   relationId?: string | null;
   version?: number | null;
+  tag_code?: string | null;
+  tagCode?: string | null;
+  tag_label?: string | null;
+  tagLabel?: string | null;
+  tag_primary_label?: string | null;
+  tagPrimaryLabel?: string | null;
+  tag_sub_label?: string | null;
+  tagSubLabel?: string | null;
 };
 
 type ApiOaRow = {
@@ -81,6 +91,30 @@ type ApiResponse = {
   relations_by_bank_row_id?: ApiRelationsByBankRowId | null;
   relationsByBankRowId?: ApiRelationsByBankRowId | null;
   pagination?: ApiPagination | null;
+  tag_selection_version?: number | null;
+  tagSelectionVersion?: number | null;
+};
+
+type ApiTagRule = {
+  code?: string | null;
+  label?: string | null;
+  path?: string[] | null;
+  output_primary_label?: string | null;
+  outputPrimaryLabel?: string | null;
+  output_sub_label?: string | null;
+  outputSubLabel?: string | null;
+};
+
+type ApiTagRules = {
+  version?: number | null;
+  bank_auto_tag_rules_version?: number | null;
+  bankAutoTagRulesVersion?: number | null;
+  selected_tag_codes?: string[] | null;
+  selectedTagCodes?: string[] | null;
+  active_tags?: ApiTagRule[] | null;
+  activeTags?: ApiTagRule[] | null;
+  can_save?: boolean | null;
+  canSave?: boolean | null;
 };
 
 type ApiPageInfo = {
@@ -160,6 +194,10 @@ function mapBankRow(row: ApiBankRow = {}): BatchAccountingBankRow {
     accountLast4: text(row.account_last4 ?? row.accountLast4),
     relationId: text(row.relation_id ?? row.relationId),
     version: nullableNumberValue(row.version),
+    tagCode: text(row.tag_code ?? row.tagCode),
+    tagLabel: text(row.tag_label ?? row.tagLabel),
+    tagPrimaryLabel: text(row.tag_primary_label ?? row.tagPrimaryLabel),
+    tagSubLabel: text(row.tag_sub_label ?? row.tagSubLabel),
   };
 }
 
@@ -299,7 +337,54 @@ export async function fetchBatchAccounting({
       bankRows: mapPageInfo(pagination?.bank_rows ?? pagination?.bankRows),
       oaRows: mapPageInfo(pagination?.oa_rows ?? pagination?.oaRows),
     },
+    tagSelectionVersion: positiveNumberValue(
+      payload.tag_selection_version ?? payload.tagSelectionVersion,
+      1,
+    ),
   };
+}
+
+function mapTagRules(payload: ApiTagRules): BatchAccountingTagRules {
+  const tags = payload.active_tags ?? payload.activeTags ?? [];
+  return {
+    version: positiveNumberValue(payload.version, 1),
+    bankAutoTagRulesVersion: positiveNumberValue(
+      payload.bank_auto_tag_rules_version ?? payload.bankAutoTagRulesVersion,
+      1,
+    ),
+    selectedTagCodes: stringList(payload.selected_tag_codes ?? payload.selectedTagCodes),
+    activeTags: Array.isArray(tags) ? tags.map((tag) => ({
+      code: text(tag.code),
+      label: text(tag.label ?? tag.code),
+      path: stringList(tag.path),
+      outputPrimaryLabel: text(tag.output_primary_label ?? tag.outputPrimaryLabel ?? tag.label ?? tag.code),
+      outputSubLabel: text(tag.output_sub_label ?? tag.outputSubLabel),
+    })).filter((tag) => Boolean(tag.code)) : [],
+    canSave: Boolean(payload.can_save ?? payload.canSave),
+  };
+}
+
+export async function fetchBatchAccountingTagRules(signal?: AbortSignal) {
+  return mapTagRules(await requestJson<ApiTagRules>("/api/batch-accounting/tag-rules", {
+    method: "GET",
+    signal,
+  }));
+}
+
+export async function saveBatchAccountingTagRules({
+  expectedVersion,
+  selectedTagCodes,
+  signal,
+}: SaveBatchAccountingTagRulesRequest) {
+  return mapTagRules(await requestJson<ApiTagRules>("/api/batch-accounting/tag-rules", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      expected_version: expectedVersion,
+      selected_tag_codes: selectedTagCodes,
+    }),
+    signal,
+  }));
 }
 
 export async function submitBatchAccounting({
@@ -307,6 +392,7 @@ export async function submitBatchAccounting({
   bankRowId,
   oaRowIds,
   expectedVersion,
+  expectedTagSelectionVersion,
   note,
   signal,
 }: SubmitBatchAccountingRequest): Promise<BatchAccountingMutationResult> {
@@ -318,6 +404,7 @@ export async function submitBatchAccounting({
       bank_row_id: bankRowId,
       oa_row_ids: oaRowIds,
       expected_version: expectedVersion,
+      expected_tag_selection_version: expectedTagSelectionVersion,
       note: String(note ?? "").trim(),
     }),
     signal,

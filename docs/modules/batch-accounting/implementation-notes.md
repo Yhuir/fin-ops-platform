@@ -1,5 +1,14 @@
 # 批量账务 实施记录
 
+## 2026-08-05 - canonical 标签 chip 与批量账务标签规则
+
+- 目标：左栏显示银行明细当前 effective tag；未提交列表只保留规则勾选标签，提供紧凑 HeroUI 右侧抽屉管理选择。
+- 边界：复用 Bank Details canonical classifier，不复制标签逻辑；Settings owner 持久化 stable codes/version、CAS、semantic no-op 和 audit；Batch repository 只在精确业务候选集合内 set-based 分类并过滤。已提交列表不受规则过滤。
+- 写安全：submit 回传列表的 tag-selection version，后端窄 snapshot 重新分类并验证该标签仍被选中，避免规则/分类变化后提交陈旧候选。
+- 旧链路：没有客户端过滤、第二套标签状态、polling、cache、read model、worker 或兼容 fallback；迁移 `0135` 只在 setting 缺失时初始化当前 active definitions，后续新增标签默认不选。
+- UI：复用 `AppDrawer` 与 HeroUI Button/Checkbox/Chip/Spinner，单层紧凑列表，无大卡片、无解释性海报文案。
+- 验证：backend service/API/migration/PostgreSQL integration、frontend API/component、Chromium E2E、build、lint 与生产只读/semantic no-op/performance smoke。
+
 ## 2026-07-30 - 银行 chip、短时区时间与请求竞态修复
 
 - 根因：页面三条 canonical 银行查询只返回账户户名，service 又把 `account_name` 当银行名兜底，导致 chip 显示“云南溯源科技有限公司 8106”；PostgreSQL `to_char(...OF)` 返回 `+08`，旧前端格式器只识别 `+08:00/+0800`；快速搜索或翻页时，已中止旧请求的 `finally` 还可能提前结束新请求 loading。

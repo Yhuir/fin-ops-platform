@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent, type MouseEvent } from "react";
+import { Button, Chip } from "@heroui/react";
 import { AlertTriangle, ChevronLeft, ChevronRight, RefreshCw, Search, X } from "lucide-react";
 
+import BatchAccountingTagRulesDrawer from "../components/batchAccounting/BatchAccountingTagRulesDrawer";
 import AppDialog from "../components/common/AppDialog";
 import PageScaffold from "../components/common/PageScaffold";
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
@@ -11,6 +13,8 @@ import { useSessionPermissions } from "../contexts/SessionContext";
 import { formatMoney } from "../features/money";
 import {
   fetchBatchAccounting,
+  fetchBatchAccountingTagRules,
+  saveBatchAccountingTagRules,
   submitBatchAccounting,
   withdrawBatchAccounting,
 } from "../features/batchAccounting/api";
@@ -20,6 +24,7 @@ import type {
   BatchAccountingAmountCheck,
   BatchAccountingOaRow,
   BatchAccountingResponse,
+  BatchAccountingTagRules,
 } from "../features/batchAccounting/types";
 
 const EMPTY_PAYLOAD: BatchAccountingResponse = {
@@ -31,6 +36,7 @@ const EMPTY_PAYLOAD: BatchAccountingResponse = {
   oaRows: [],
   relationsByBankRowId: {},
   pagination: {},
+  tagSelectionVersion: 1,
 };
 
 const BATCH_ACCOUNTING_PAGE_SIZE = 200;
@@ -233,7 +239,14 @@ export default function BatchAccountingPage() {
   const [oaSearchQuery, setOaSearchQuery] = useState("");
   const [differenceNote, setDifferenceNote] = useState("");
   const [feedback, setFeedback] = useState<{ severity: "success" | "error"; message: string } | null>(null);
+  const [tagRulesOpen, setTagRulesOpen] = useState(false);
+  const [tagRules, setTagRules] = useState<BatchAccountingTagRules | null>(null);
+  const [selectedTagCodes, setSelectedTagCodes] = useState<Set<string>>(() => new Set());
+  const [tagRulesLoading, setTagRulesLoading] = useState(false);
+  const [tagRulesSaving, setTagRulesSaving] = useState(false);
+  const [tagRulesError, setTagRulesError] = useState<string | null>(null);
   const loadRequestIdRef = useRef(0);
+  const tagRulesRequestIdRef = useRef(0);
 
   const selectedBankRow = useMemo(
     () => (
@@ -473,6 +486,7 @@ export default function BatchAccountingPage() {
             bankRowId: selectedBankRow.id,
             oaRowIds: selectedOaRows.map((row) => row.id),
             expectedVersion: selectedBankRow.version,
+            expectedTagSelectionVersion: payload.tagSelectionVersion,
             note: isAmountMismatch ? differenceNote : "",
           });
           setMessage("正在加载批量账务最新数据...");
@@ -540,6 +554,72 @@ export default function BatchAccountingPage() {
     }
   };
 
+  const handleOpenTagRules = async () => {
+    setTagRulesOpen(true);
+    setTagRulesLoading(true);
+    setTagRulesError(null);
+    const requestId = tagRulesRequestIdRef.current + 1;
+    tagRulesRequestIdRef.current = requestId;
+    try {
+      const nextRules = await fetchBatchAccountingTagRules();
+      if (requestId !== tagRulesRequestIdRef.current) {
+        return;
+      }
+      setTagRules(nextRules);
+      setSelectedTagCodes(new Set(nextRules.selectedTagCodes));
+    } catch (caught) {
+      if (requestId === tagRulesRequestIdRef.current) {
+        setTagRulesError(mutationErrorMessage(caught, "批量账务标签规则加载失败"));
+      }
+    } finally {
+      if (requestId === tagRulesRequestIdRef.current) {
+        setTagRulesLoading(false);
+      }
+    }
+  };
+
+  const handleSaveTagRules = async () => {
+    if (!tagRules || !tagRules.canSave || tagRulesSaving) {
+      return;
+    }
+    setTagRulesSaving(true);
+    setTagRulesError(null);
+    try {
+      const nextRules = await saveBatchAccountingTagRules({
+        expectedVersion: tagRules.version,
+        selectedTagCodes: Array.from(selectedTagCodes),
+      });
+      setTagRules(nextRules);
+      setSelectedTagCodes(new Set(nextRules.selectedTagCodes));
+      setTagRulesOpen(false);
+      setBankPage(1);
+      setSelectedBankRowId(null);
+      setSelectedOaRowIds(new Set());
+      try {
+        const nextPayload = await fetchBatchAccounting({
+          bankYear,
+          bucket,
+          bankPage: 1,
+          bankPageSize: BATCH_ACCOUNTING_PAGE_SIZE,
+          oaPage: bucket === "unsubmitted" ? oaPage : undefined,
+          oaPageSize: bucket === "unsubmitted" ? BATCH_ACCOUNTING_PAGE_SIZE : undefined,
+          oaSearch: bucket === "unsubmitted" ? oaSearchQuery : undefined,
+        });
+        applyBatchAccountingPayload(nextPayload);
+        setFeedback({ severity: "success", message: "批量账务标签规则已更新。" });
+      } catch {
+        setFeedback({
+          severity: "success",
+          message: mutationReloadFailedMessage(undefined, "批量账务标签规则已更新。"),
+        });
+      }
+    } catch (caught) {
+      setTagRulesError(mutationErrorMessage(caught, "批量账务标签规则保存失败"));
+    } finally {
+      setTagRulesSaving(false);
+    }
+  };
+
   const titleAccessory = canAdminAccess ? (
     <PageBusinessAuditIcon
       ariaLabel="Audit 日常报销批量账务管理"
@@ -553,15 +633,20 @@ export default function BatchAccountingPage() {
       title="日常报销批量账务管理"
       titleAccessory={titleAccessory}
       actions={(
-        <button
-          className="batch-accounting-button batch-accounting-button--secondary"
-          disabled={loading}
-          onClick={() => loadData()}
-          type="button"
-        >
-          <RefreshCw aria-hidden="true" size={16} strokeWidth={2.2} />
-          刷新
-        </button>
+        <div className="batch-accounting-page-actions">
+          <Button onPress={handleOpenTagRules} size="sm" variant="secondary">
+            批量账务标签规则
+          </Button>
+          <button
+            className="batch-accounting-button batch-accounting-button--secondary"
+            disabled={loading}
+            onClick={() => loadData()}
+            type="button"
+          >
+            <RefreshCw aria-hidden="true" size={16} strokeWidth={2.2} />
+            刷新
+          </button>
+        </div>
       )}
     >
       <div aria-label="批量账务筛选" className="batch-accounting-filter" role="region">
@@ -644,7 +729,14 @@ export default function BatchAccountingPage() {
                   type="button"
                 >
                   <span className="batch-accounting-bank-row__main">
-                    <span className="batch-accounting-bank-row__title">批量账务集中处理</span>
+                    <span className="batch-accounting-bank-row__identity">
+                      <span className="batch-accounting-bank-row__title">批量账务集中处理</span>
+                      {row.tagLabel ? (
+                        <Chip color="accent" size="sm" variant="soft">
+                          <Chip.Label>{row.tagLabel}</Chip.Label>
+                        </Chip>
+                      ) : null}
+                    </span>
                     <span className="batch-accounting-bank-row__amount">{formatMoney(row.amount)}</span>
                   </span>
                   <span className="batch-accounting-bank-row__tags">
@@ -840,6 +932,31 @@ export default function BatchAccountingPage() {
           />
         </label>
       </AppDialog>
+
+      <BatchAccountingTagRulesDrawer
+        error={tagRulesError}
+        loading={tagRulesLoading}
+        onClose={() => {
+          tagRulesRequestIdRef.current += 1;
+          setTagRulesOpen(false);
+        }}
+        onSave={handleSaveTagRules}
+        onToggle={(code, selected) => {
+          setSelectedTagCodes((current) => {
+            const next = new Set(current);
+            if (selected) {
+              next.add(code);
+            } else {
+              next.delete(code);
+            }
+            return next;
+          });
+        }}
+        open={tagRulesOpen}
+        rules={tagRules}
+        saving={tagRulesSaving}
+        selectedCodes={selectedTagCodes}
+      />
 
       {feedback ? (
         <div

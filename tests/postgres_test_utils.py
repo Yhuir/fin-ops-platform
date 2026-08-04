@@ -146,6 +146,7 @@ EXPECTED_MIGRATION_FILES = [
     "0132_settings_access_control_guard.sql",
     "0133_settings_access_control_canonical_order.sql",
     "0134_restore_invoice_import_provenance.sql",
+    "0135_batch_accounting_tag_selection.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (

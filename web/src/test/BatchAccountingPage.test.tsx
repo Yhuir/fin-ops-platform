@@ -54,6 +54,10 @@ const unsubmittedPayload = {
       amount: "1200.00",
       bank_name: "建行",
       account_last4: "8106",
+      tag_code: "fee",
+      tag_label: "手续费",
+      tag_primary_label: "费用",
+      tag_sub_label: "手续费",
       relation_id: "",
       version: 1,
     },
@@ -66,10 +70,15 @@ const unsubmittedPayload = {
       amount: "800.00",
       bank_name: "招行",
       account_last4: "1888",
+      tag_code: "travel",
+      tag_label: "差旅费",
+      tag_primary_label: "费用",
+      tag_sub_label: "差旅费",
       relation_id: "",
       version: 1,
     },
   ],
+  tag_selection_version: 3,
   oa_rows: [
     {
       id: "oa-exp-1001",
@@ -107,6 +116,10 @@ const submittedPayload = {
       amount: "900.00",
       bank_name: "建行",
       account_last4: "8106",
+      tag_code: "fee",
+      tag_label: "手续费",
+      tag_primary_label: "费用",
+      tag_sub_label: "手续费",
       relation_id: "CASE-202602-001",
       version: 2,
     },
@@ -156,6 +169,7 @@ const submittedPayload = {
       ],
     },
   },
+  tag_selection_version: 3,
 };
 
 const oa2025Rows = [
@@ -243,9 +257,14 @@ function largeUnsubmittedPayload(total = 205) {
       amount: "10.00",
       bank_name: "建行",
       account_last4: index.toString().padStart(4, "0"),
+      tag_code: "fee",
+      tag_label: "手续费",
+      tag_primary_label: "费用",
+      tag_sub_label: "手续费",
       relation_id: "",
       version: 1,
     })),
+    tag_selection_version: 3,
     oa_rows: Array.from({ length: total }, (_, index) => ({
       id: `oa-large-${index.toString().padStart(3, "0")}`,
       applicant: `申请人${index.toString().padStart(3, "0")}`,
@@ -298,6 +317,30 @@ function installFetchMock() {
         message: "已关联批量账务流水与 2 项 OA。",
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
+    if (url.pathname === "/api/batch-accounting/tag-rules") {
+      return new Response(JSON.stringify({
+        version: init?.method === "PUT" ? 4 : 3,
+        bank_auto_tag_rules_version: 9,
+        selected_tag_codes: init?.method === "PUT" ? ["fee"] : ["fee", "travel"],
+        active_tags: [
+          {
+            code: "fee",
+            label: "手续费",
+            path: ["费用", "手续费"],
+            output_primary_label: "费用",
+            output_sub_label: "手续费",
+          },
+          {
+            code: "travel",
+            label: "差旅费",
+            path: ["费用", "差旅费"],
+            output_primary_label: "费用",
+            output_sub_label: "差旅费",
+          },
+        ],
+        can_save: true,
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
     if (url.pathname === "/api/batch-accounting/CASE-202602-001/withdraw") {
       return new Response(JSON.stringify({
         success: true,
@@ -342,7 +385,7 @@ describe("BatchAccountingPage", () => {
     });
     const forbiddenLegacySurfaces = batchAccountingSourceFiles.flatMap((path) => {
       const source = sourceByPath[path];
-      return /ClearOutlinedIcon|RefreshOutlinedIcon|SearchOutlinedIcon|WarningAmberRoundedIcon|ToggleButton|TextField|TableCell|TableRow|TableHead|TableBody|DialogTitle|DialogContent|DialogActions|Snackbar|Chip|IconButton|Tooltip/.test(source)
+      return /ClearOutlinedIcon|RefreshOutlinedIcon|SearchOutlinedIcon|WarningAmberRoundedIcon|ToggleButton|TextField|TableCell|TableRow|TableHead|TableBody|DialogTitle|DialogContent|DialogActions|Snackbar|IconButton|Tooltip/.test(source)
         ? [path]
         : [];
     });
@@ -472,6 +515,8 @@ describe("BatchAccountingPage", () => {
 
     const bankList = screen.getByRole("region", { name: "批量账务流水" });
     expect(within(bankList).getAllByRole("button", { name: /批量账务集中处理/ })).toHaveLength(2);
+    expect(within(bankList).getByText("手续费")).toBeInTheDocument();
+    expect(within(bankList).getByText("差旅费")).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "批量账务流水分页" })).toHaveTextContent("1-2 / 2");
     expect(screen.getByRole("group", { name: "可关联OA项分页" })).toHaveTextContent("1-3 / 3");
     expect(within(bankList).queryByRole("table")).not.toBeInTheDocument();
@@ -486,6 +531,37 @@ describe("BatchAccountingPage", () => {
     expect(within(oaTable).getByText("品牌广告投放；市场活动项目")).toBeInTheDocument();
     expect(within(oaTable).getByText("700.00")).toBeInTheDocument();
     expect(within(oaTable).getByText("1月日常报销，包含广告素材制作和渠道投放费用")).toBeInTheDocument();
+  });
+
+  test("opens the compact tag drawer and saves the checked canonical tags", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetchMock();
+    renderPage();
+
+    await screen.findByRole("heading", { name: "日常报销批量账务管理" });
+    await user.click(screen.getByRole("button", { name: "批量账务标签规则" }));
+
+    const drawer = await screen.findByRole("dialog", { name: "批量账务标签规则" });
+    const travel = within(drawer).getByRole("checkbox", { name: /费用 \/ 差旅费/ });
+    expect(travel).toBeChecked();
+    await user.click(travel);
+    await user.click(within(drawer).getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      const saveCall = fetchMock.mock.calls.find(([input, init]) => {
+        const url = new URL(
+          typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url,
+          "http://localhost",
+        );
+        return url.pathname === "/api/batch-accounting/tag-rules" && init?.method === "PUT";
+      });
+      expect(saveCall?.[1]?.body).toBe(JSON.stringify({
+        expected_version: 3,
+        selected_tag_codes: ["fee"],
+      }));
+    });
+    expect(await screen.findByText("批量账务标签规则已更新。")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "批量账务标签规则" })).not.toBeInTheDocument();
   });
 
   test("uses backend pagination for bank and OA first screens", async () => {
@@ -675,6 +751,7 @@ describe("BatchAccountingPage", () => {
               bank_row_id: "bank-row-001",
               oa_row_ids: ["oa-exp-1001", "oa-exp-1002"],
               expected_version: 1,
+              expected_tag_selection_version: 3,
               note: "",
             }),
           }),
@@ -708,6 +785,7 @@ describe("BatchAccountingPage", () => {
         bank_row_id: "bank-row-001",
         oa_row_ids: ["oa-exp-1001"],
         expected_version: 1,
+        expected_tag_selection_version: 3,
         note: "财务确认差额闭环",
       });
     });
@@ -845,6 +923,7 @@ describe("BatchAccountingPage", () => {
             bank_row_id: "bank-row-001",
             oa_row_ids: ["oa-exp-1001", "oa-exp-1981"],
             expected_version: 1,
+            expected_tag_selection_version: 3,
             note: "",
           }),
         }),

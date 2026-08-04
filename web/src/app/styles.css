@@ -5335,6 +5335,22 @@ textarea {
   gap: var(--fp-space-2);
 }
 
+.batch-accounting-bank-row__identity,
+.batch-accounting-page-actions {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--fp-space-2);
+}
+
+.batch-accounting-bank-row__identity {
+  overflow: hidden;
+}
+
+.batch-accounting-page-actions {
+  justify-content: flex-end;
+}
+
 .batch-accounting-bank-row__title,
 .batch-accounting-bank-row__amount {
   min-width: 0;
@@ -5698,6 +5714,84 @@ textarea {
 
 .batch-accounting-feedback__close:active {
   transform: translateY(1px);
+}
+
+.batch-accounting-rules-drawer .finance-drawer__body {
+  padding: 0;
+}
+
+.batch-accounting-rules-drawer__body {
+  min-height: 120px;
+}
+
+.batch-accounting-rules-drawer__state,
+.batch-accounting-rules-drawer__error {
+  display: flex;
+  min-height: 88px;
+  align-items: center;
+  justify-content: center;
+  gap: var(--fp-space-2);
+  color: var(--fp-text-muted);
+  font-size: var(--fp-text-body);
+}
+
+.batch-accounting-rules-drawer__error {
+  margin: var(--fp-space-3);
+  min-height: 0;
+  justify-content: flex-start;
+  border: 1px solid color-mix(in srgb, var(--fp-danger) 30%, var(--fp-border));
+  border-radius: var(--fp-radius-sm);
+  background: color-mix(in srgb, var(--fp-danger) 7%, var(--fp-surface));
+  color: var(--fp-danger);
+  padding: var(--fp-space-2) var(--fp-space-3);
+}
+
+.batch-accounting-rules-drawer__list {
+  display: grid;
+}
+
+.batch-accounting-rules-drawer__item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  min-height: 42px;
+  align-items: center;
+  gap: var(--fp-space-2);
+  border-bottom: 1px solid var(--fp-border-subtle);
+  padding: var(--fp-space-2) var(--fp-space-3);
+}
+
+.batch-accounting-rules-drawer__item:last-child {
+  border-bottom: 0;
+}
+
+.batch-accounting-rules-drawer__label {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-body);
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-accounting-rules-drawer__footer {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--fp-space-3);
+}
+
+.batch-accounting-rules-drawer__count {
+  color: var(--fp-text-muted);
+  font-size: var(--fp-text-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.batch-accounting-rules-drawer__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fp-space-2);
 }
 
 @media (max-width: 1100px) {

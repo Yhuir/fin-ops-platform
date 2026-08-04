@@ -1,12 +1,12 @@
 # 批量账务状态机
 
-日期：2026-07-27
+日期：2026-08-05
 
 ## 业务关系状态
 
 | 当前状态 | 事件 | 校验 | 下一状态 |
 | --- | --- | --- | --- |
-| `unsubmitted` | submit | 银行/OA 资格、权限、金额说明、active relation 冲突、expected version | `active batch_accounting` |
+| `unsubmitted` | submit | 银行/OA 资格、当前 effective tag 仍被选中、标签规则 version、权限、金额说明、active relation 冲突、relation expected version | `active batch_accounting` |
 | `active batch_accounting` | withdraw | 权限、active mode、撤回原因、expected version | `cancelled` |
 | `cancelled` | 页面重新 GET | canonical 银行/OA 重新满足候选资格 | `unsubmitted` |
 
@@ -23,6 +23,8 @@
 | `submitting` / `withdrawing` | 全局操作层阻止重复写；等待 command HTTP 完成 |
 | `reloading_after_write` | command 成功后执行一次普通 GET |
 | `write_succeeded_reload_failed` | 保留成功 message，并提示最新列表加载失败、需手动刷新 |
+| `tag_rules_loading/error` | 抽屉独立加载并显示错误；不把规则加载失败伪装成空标签 |
+| `tag_rules_saving` | 保存按钮 loading；成功关闭抽屉并只重新 GET 当前页一次 |
 
 不存在 `refreshing/stale/missing read model`、refresh enqueue、202 polling 或 operation barrier 状态。
 
@@ -32,10 +34,12 @@
 - 切换银行、OA 选择或 bucket 时清理差额说明，避免将旧说明用于新关系。
 - OA search 变化时 OA 页码重置为 1，并发中的旧 GET 由 AbortController 取消。
 - submit/withdraw 成功后的唯一自动收敛动作是当前页一次 GET。
+- 标签规则仅过滤未提交 bucket；已提交 bucket 不变化。规则保存或银行明细分类变化后，当前页下一次 GET 使用最新 canonical 标签。
 
 ## 冲突与错误
 
 - 非法参数、候选资格和必填说明返回 400。
 - canonical active relation/version 冲突返回 409。
+- 标签规则 CAS 冲突或提交时规则已变化返回 409，页面刷新后重试；无标签或标签已取消选择的流水不能提交。
 - query repository 或 command service 不可用返回 503。
 - command 已成功但后置 GET 失败不回滚、不改写为 command 失败。

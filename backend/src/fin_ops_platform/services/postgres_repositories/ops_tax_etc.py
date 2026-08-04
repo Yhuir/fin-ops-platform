@@ -318,6 +318,49 @@ class PostgresOpsTaxEtcRepository:
         self._save_settings_with_executor(transaction, APP_SETTINGS_KEY, persisted_payload)
         return persisted_payload
 
+    def save_app_settings_for_batch_accounting_tag_selection_version_in_transaction(
+        self,
+        payload: dict[str, Any],
+        *,
+        expected_version: int,
+        transaction: Any,
+    ) -> dict[str, Any] | None:
+        transaction.execute(
+            "select pg_advisory_xact_lock(hashtextextended(%s, 0))",
+            (SETTINGS_ACL_ADVISORY_LOCK_KEY,),
+        )
+        row = transaction.fetch_one(
+            """
+            select settings_payload
+            from app.app_settings
+            where settings_key = %s
+            for update
+            """,
+            (APP_SETTINGS_KEY,),
+        )
+        current_payload = row_payload(row, "settings_payload") if row is not None else {}
+        current_payload = {
+            **default_settings_access_control(),
+            **(current_payload if isinstance(current_payload, dict) else {}),
+            **settings_access_control_from_payload(current_payload),
+        }
+        current_selection = current_payload.get("batch_accounting_tag_selection")
+        current_version = int_value(
+            current_selection.get("version") if isinstance(current_selection, dict) else 1,
+            1,
+        )
+        if current_version != int(expected_version):
+            return None
+        next_selection = payload.get("batch_accounting_tag_selection")
+        if not isinstance(next_selection, dict):
+            raise ValueError("batch_accounting_tag_selection payload is required.")
+        persisted_payload = {
+            **current_payload,
+            "batch_accounting_tag_selection": dict(next_selection),
+        }
+        self._save_settings_with_executor(transaction, APP_SETTINGS_KEY, persisted_payload)
+        return persisted_payload
+
     def _save_app_settings(self, payload: dict[str, Any]) -> None:
         connection_factory = getattr(self._connection, "connection", None)
         if not callable(connection_factory):

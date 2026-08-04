@@ -2,6 +2,8 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   fetchBatchAccounting,
+  fetchBatchAccountingTagRules,
+  saveBatchAccountingTagRules,
   submitBatchAccounting,
 } from "../features/batchAccounting/api";
 
@@ -20,6 +22,7 @@ describe("batch accounting API", () => {
         bank_rows: { page: 2, page_size: 50, total: 0 },
         oa_rows: { page: 3, page_size: 25, total: 0 },
       },
+      tag_selection_version: 4,
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal(
       "fetch",
@@ -39,6 +42,7 @@ describe("batch accounting API", () => {
     expect(payload.summary).toEqual({ unsubmittedCount: 0, submittedCount: 2 });
     expect(payload.pagination.bankRows).toEqual({ page: 2, pageSize: 50, total: 0 });
     expect(payload.pagination.oaRows).toEqual({ page: 3, pageSize: 25, total: 0 });
+    expect(payload.tagSelectionVersion).toBe(4);
     expect(payload).not.toHaveProperty("readModelStatus");
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/batch-accounting?bank_year=2026&bucket=unsubmitted&bank_page=2&bank_page_size=50&oa_page=3&oa_page_size=25&oa_search=%E4%B8%8A%E6%B5%B7%E5%AE%A2%E6%88%B7",
@@ -64,6 +68,7 @@ describe("batch accounting API", () => {
       bankRowId: "bank-1",
       oaRowIds: ["oa-1"],
       expectedVersion: 3,
+      expectedTagSelectionVersion: 4,
       note: "确认",
     });
 
@@ -78,8 +83,46 @@ describe("batch accounting API", () => {
           bank_row_id: "bank-1",
           oa_row_ids: ["oa-1"],
           expected_version: 3,
+          expected_tag_selection_version: 4,
           note: "确认",
         }),
+      }),
+    );
+  });
+
+  test("maps and saves canonical tag rules with one versioned request", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => new Response(JSON.stringify({
+      version: init?.method === "PUT" ? 3 : 2,
+      bank_auto_tag_rules_version: 9,
+      selected_tag_codes: ["fee"],
+      active_tags: [{
+        code: "fee",
+        label: "手续费",
+        path: ["费用", "手续费"],
+        output_primary_label: "费用",
+        output_sub_label: "手续费",
+      }],
+      can_save: true,
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const current = await fetchBatchAccountingTagRules();
+    const saved = await saveBatchAccountingTagRules({
+      expectedVersion: current.version,
+      selectedTagCodes: [],
+    });
+
+    expect(current.activeTags[0]).toMatchObject({
+      code: "fee",
+      outputPrimaryLabel: "费用",
+      outputSubLabel: "手续费",
+    });
+    expect(saved.version).toBe(3);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/batch-accounting/tag-rules",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({ expected_version: 2, selected_tag_codes: [] }),
       }),
     );
   });

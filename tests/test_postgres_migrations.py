@@ -148,6 +148,7 @@ EXPECTED_MIGRATIONS = [
     "0132_settings_access_control_guard.sql",
     "0133_settings_access_control_canonical_order.sql",
     "0134_restore_invoice_import_provenance.sql",
+    "0135_batch_accounting_tag_selection.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -303,7 +304,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 135)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 136)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -1907,6 +1908,22 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "alter table read_model.",
         ):
             self.assertNotIn(forbidden, normalized_sql)
+
+    def test_batch_accounting_tag_selection_initializes_once_from_active_tags(self) -> None:
+        sql = strip_sql_comments(
+            (MIGRATIONS_DIR / "0135_batch_accounting_tag_selection.sql").read_text(encoding="utf-8")
+        ).lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn("'{batch_accounting_tag_selection}'", normalized_sql)
+        self.assertIn("'selected_tag_codes'", normalized_sql)
+        self.assertIn("coalesce(definition->>'status', 'active') = 'active'", normalized_sql)
+        self.assertIn("not (settings_payload ? 'batch_accounting_tag_selection')", normalized_sql)
+        self.assertIn("raw_payload = jsonb_set", normalized_sql)
+        self.assertIn("'{normalized_payload}'", normalized_sql)
+        self.assertIn("target.next_payload", normalized_sql)
+        self.assertNotIn("delete ", normalized_sql)
+        self.assertNotIn("drop ", normalized_sql)
 
 
 

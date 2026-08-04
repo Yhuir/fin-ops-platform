@@ -141,15 +141,17 @@
 | `summary.submitted_count` | 当前银行年份下已提交批量账务关系数量。 |
 | `summary.bank_year` | 后端实际使用的银行流水年份；OA 候选不再按年份过滤。 |
 | `bank_rows` | 当前 bucket 的服务端分页银行流水列表。 |
+| `bank_rows[].tag_*` | 当前 canonical effective tag 的 code/label/主子标签/source；页面不得自行推断。 |
 | `oa_rows` | `unsubmitted` bucket 的可选 OA 日常报销单据列表；候选必须没有关联银行流水，只有发票关系或无流水候选关系时仍可进入右侧 OA 栏。 |
 | `relations_by_bank_row_id` | `submitted` bucket 中按银行流水 ID 索引的 active batch relation 及 canonical OA/发票成员详情。 |
 | `pagination` | 银行分页；`unsubmitted` 同时包含 OA 分页。 |
+| `tag_selection_version` | 本次未提交候选使用的标签规则版本；submit 必须回传。 |
 
 该响应不返回 `read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys`、`source_versions`、`refresh_enqueued`、refresh targets 或 operation barrier targets。loading、empty 和 error 由一次普通页面请求的真实结果决定。
 
 列表由页面专属 query repository 在一个显式 `REPEATABLE READ / READ ONLY` PostgreSQL snapshot 内读取 canonical facts：
 
-- `unsubmitted` 读取指定年份、对方户名为“批量账务集中处理”、支出且没有 active relation 的 `app.bank_transactions`；OA 读取已完成日常报销 `app.oa_applications`，不按年份过滤，且没有包含 canonical 银行成员的 active relation。
+- `unsubmitted` 读取指定年份、对方户名为“批量账务集中处理”、支出的 `app.bank_transactions`，复用银行明细 current effective-category classifier，并只保留规则已选且没有 active relation 的流水；无标签/待分类/待确认/未选标签不进入。OA 读取已完成日常报销 `app.oa_applications`，不按年份过滤，且没有包含 canonical 银行成员的 active relation。
 - 附件发票只按当前 OA page IDs 查询 `app.invoices.source_links` / `app.oa_attachments`。
 - `submitted` 只读取 `app.workbench_pair_relations` 中 `status='active' and relation_mode='batch_accounting'` 且包含指定年份 canonical 银行成员的关系，再一次批量读取其 canonical OA/发票成员。
 - submitted relation 的成员唯一事实源是对齐、去重的 `row_ids + row_types`；API 不读取或返回 `special_metadata.bank_row_id`、`oa_row_ids`、`invoice_row_ids`、旧 `year` alias，也不透传 raw relation metadata。
@@ -161,7 +163,15 @@
 
 `POST /api/batch-accounting/{relation_id}/withdraw`
 
-写操作通过同一页面 query repository 的窄 snapshot 读取 `bank_row_id + oa_row_ids` 及所选 OA 附件发票，再由 canonical `WorkbenchRelationCommandService` 校验 active relation/version/idempotency/owner 状态并持久化 relation/history/audit。query repository 或 command service 缺失返回 `503 batch_accounting_canonical_query_unavailable` / `503 batch_accounting_relation_command_unavailable`；canonical conflict/version conflict 返回 409。
+`GET /api/batch-accounting/tag-rules`
+
+返回实际批量账务业务流水中出现的 `active_tags`、完整 active `selected_tag_codes`、`version` 和 `can_save`；暂时未出现的已选 stable code 继续保留，保存其它选项时不得被隐式删除。读取权限可查看；read-export 的 `can_save=false`。
+
+`PUT /api/batch-accounting/tag-rules`
+
+请求为完整 `selected_tag_codes[] + expected_version`。仅 full/admin 可写；未知/非 active code 返回 400，stale version 返回 409，持久化失败返回 503，semantic no-op 返回 200 且 version 不变。保存后页面只重新 GET 当前列表一次。
+
+写操作通过同一页面 query repository 的窄 snapshot 读取 `bank_row_id + oa_row_ids` 及所选 OA 附件发票，并重新校验 current effective tag、`expected_tag_selection_version` 和 selected status，再由 canonical `WorkbenchRelationCommandService` 校验 active relation/version/idempotency/owner 状态并持久化 relation/history/audit。query repository 或 command service 缺失返回 `503 batch_accounting_canonical_query_unavailable` / `503 batch_accounting_relation_command_unavailable`；canonical conflict/version conflict 返回 409。
 
 成功响应返回业务结果和信息性 `affected_months` / `affected_scope_keys`，不返回 freshness 或 operation barrier targets。写成功后当前页面恰好重新调用一次普通 GET；不轮询、不等待 read model、不触发跨页面刷新。后置 GET 失败不能回滚或改写已成功 command。
 

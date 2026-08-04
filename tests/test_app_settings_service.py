@@ -180,6 +180,104 @@ class AppSettingsServiceTests(unittest.TestCase):
             self.assertTrue(tag["output_sub_label"])
             self.assertTrue(tag["turnover_action_type"])
 
+    def test_batch_accounting_tag_selection_defaults_to_all_active_then_keeps_new_tags_unchecked(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self._seed_settings(
+                temp_dir,
+                definitions=[
+                    self._custom_auto_rule("fee", "手续费"),
+                    self._custom_auto_rule("travel", "差旅费"),
+                ],
+            )
+            app = build_application(data_dir=Path(temp_dir))
+            initial = app._app_settings_service.get_batch_accounting_tag_selection_payload(
+                observed_tag_codes=["fee", "travel"],
+            )
+            only_fee_observed = app._app_settings_service.get_batch_accounting_tag_selection_payload(
+                observed_tag_codes=["fee"],
+            )
+            saved = app._app_settings_service.update_batch_accounting_tag_selection(
+                {
+                    "expected_version": initial["version"],
+                    "selected_tag_codes": ["fee"],
+                },
+                actor_id="settings-owner",
+                observed_tag_codes=["fee", "travel"],
+            )
+
+            snapshot = app._state_store.load_app_settings()
+            snapshot["bank_transaction_tags"]["definitions"].append(
+                self._custom_auto_rule("salary", "工资")
+            )
+            app._state_store.save_app_settings(snapshot)
+            refreshed = app._app_settings_service.get_batch_accounting_tag_selection_payload(
+                observed_tag_codes=["fee", "travel", "salary"],
+            )
+
+        self.assertTrue({"fee", "travel"}.issubset(set(initial["selected_tag_codes"])))
+        self.assertEqual(only_fee_observed["selected_tag_codes"], initial["selected_tag_codes"])
+        self.assertEqual([tag["code"] for tag in only_fee_observed["active_tags"]], ["fee"])
+        self.assertEqual(saved["version"], initial["version"] + 1)
+        self.assertEqual(refreshed["selected_tag_codes"], ["fee"])
+        self.assertEqual(
+            {tag["code"] for tag in refreshed["active_tags"]},
+            {"fee", "travel", "salary"},
+        )
+
+    def test_batch_accounting_tag_selection_version_validation_noop_and_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self._seed_settings(
+                temp_dir,
+                definitions=[
+                    self._custom_auto_rule("fee", "手续费"),
+                    self._custom_auto_rule("salary", "工资"),
+                ],
+            )
+            app = build_application(data_dir=Path(temp_dir))
+            current = app._app_settings_service.get_batch_accounting_tag_selection_payload(
+                observed_tag_codes=["fee", "salary"],
+            )
+            saved = app._app_settings_service.update_batch_accounting_tag_selection(
+                {
+                    "expected_version": current["version"],
+                    "selected_tag_codes": ["fee"],
+                },
+                actor_id="settings-owner",
+                observed_tag_codes=["fee", "salary"],
+            )
+            audit_count = len(app._audit_service.as_dicts())
+            noop = app._app_settings_service.update_batch_accounting_tag_selection(
+                {
+                    "expected_version": saved["version"],
+                    "selected_tag_codes": ["fee"],
+                },
+                actor_id="settings-owner",
+                observed_tag_codes=["fee", "salary"],
+            )
+
+            with self.assertRaises(AppSettingsValidationError) as stale:
+                app._app_settings_service.update_batch_accounting_tag_selection(
+                    {
+                        "expected_version": current["version"],
+                        "selected_tag_codes": ["salary"],
+                    },
+                    actor_id="settings-owner",
+                )
+            with self.assertRaises(AppSettingsValidationError) as invalid:
+                app._app_settings_service.update_batch_accounting_tag_selection(
+                    {
+                        "expected_version": saved["version"],
+                        "selected_tag_codes": ["missing"],
+                    },
+                    actor_id="settings-owner",
+                )
+
+        self.assertEqual(saved["version"], current["version"] + 1)
+        self.assertEqual(noop["version"], saved["version"])
+        self.assertEqual(len(app._audit_service.as_dicts()), audit_count)
+        self.assertEqual(stale.exception.error_code, "batch_accounting_tag_selection_version_conflict")
+        self.assertEqual(invalid.exception.error_code, "invalid_batch_accounting_tag")
+
     def test_turnover_selected_codes_map_an_existing_snapshot_without_state_io(self) -> None:
         rule = self._external_rule("external_rule_borrow_out")
         codes = AppSettingsService.turnover_ledger_selected_tag_codes_from_settings(

@@ -1574,13 +1574,26 @@ class Application:
             bank_flow_rule_batch_response = self._bank_flow_rule_batch_routes().route(method, route_path, query, body, headers)
             if bank_flow_rule_batch_response is not None:
                 return bank_flow_rule_batch_response
+        if method == "GET" and route_path == "/api/batch-accounting/tag-rules":
+            return self._handle_api_batch_accounting_tag_rules(headers, access_session=access_session)
+        if method == "PUT" and route_path == "/api/batch-accounting/tag-rules":
+            return self._handle_api_batch_accounting_tag_rules_update(
+                body,
+                headers,
+                access_session=access_session,
+            )
         if method == "GET" and route_path == "/api/batch-accounting":
             return self._handle_api_batch_accounting(query)
         if method == "POST" and route_path == "/api/batch-accounting/submit":
-            return self._handle_api_batch_accounting_submit(body, headers)
+            return self._handle_api_batch_accounting_submit(body, headers, access_session=access_session)
         if method == "POST" and route_path.startswith("/api/batch-accounting/") and route_path.endswith("/withdraw"):
             relation_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._handle_api_batch_accounting_withdraw(relation_id, body, headers)
+            return self._handle_api_batch_accounting_withdraw(
+                relation_id,
+                body,
+                headers,
+                access_session=access_session,
+            )
         if route_path == "/api/turnover-ledger" or route_path.startswith("/api/turnover-ledger/"):
             turnover_ledger_response = self._turnover_ledger_api_routes.route(method, route_path, query, body, headers)
             if turnover_ledger_response is not None:
@@ -1913,6 +1926,7 @@ class Application:
                 "/api/bank-flow-rule-batches/{batch_id}/submit",
                 "/api/bank-flow-rule-batches/{batch_id}/withdraw",
                 "/api/batch-accounting",
+                "/api/batch-accounting/tag-rules",
                 "/api/batch-accounting/submit",
                 "/api/batch-accounting/{relation_id}/withdraw",
                 "/api/session/me",
@@ -6777,6 +6791,7 @@ class Application:
         return BatchAccountingService(
             query_repository=getattr(self, "_batch_accounting_query_repository", None),
             relation_command_service=self._batch_accounting_relation_command_service(),
+            app_settings_service=self._app_settings_service,
         )
 
     def _batch_accounting_relation_command_service(self) -> WorkbenchRelationCommandService:
@@ -6819,8 +6834,10 @@ class Application:
         self,
         body: str | bytes | None,
         headers: dict[str, str] | None,
+        *,
+        access_session: OARequestSession | None = None,
     ) -> Response:
-        session = self._batch_accounting_mutation_session(headers)
+        session = self._batch_accounting_mutation_session(headers, session=access_session)
         if isinstance(session, Response):
             return session
         payload, error = self._load_json_body(body)
@@ -6829,13 +6846,50 @@ class Application:
         status_code, result = self._batch_accounting_routes().submit(payload, session=session)
         return self._json_response(status_code, result)
 
+    def _handle_api_batch_accounting_tag_rules(
+        self,
+        headers: dict[str, str] | None,
+        *,
+        access_session: OARequestSession | None = None,
+    ) -> Response:
+        session = access_session or resolve_oa_request_session(
+            headers,
+            identity_service=self._oa_identity_service,
+            access_control_service=self._access_control_service,
+        )
+        status_code, result = self._batch_accounting_routes().tag_rules(
+            can_save=session.can_mutate_data,
+        )
+        return self._json_response(status_code, result)
+
+    def _handle_api_batch_accounting_tag_rules_update(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+        *,
+        access_session: OARequestSession | None = None,
+    ) -> Response:
+        session = self._batch_accounting_mutation_session(headers, session=access_session)
+        if isinstance(session, Response):
+            return session
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        status_code, result = self._batch_accounting_routes().update_tag_rules(
+            payload,
+            session=session,
+        )
+        return self._json_response(status_code, result)
+
     def _handle_api_batch_accounting_withdraw(
         self,
         relation_id: str,
         body: str | bytes | None,
         headers: dict[str, str] | None,
+        *,
+        access_session: OARequestSession | None = None,
     ) -> Response:
-        session = self._batch_accounting_mutation_session(headers)
+        session = self._batch_accounting_mutation_session(headers, session=access_session)
         if isinstance(session, Response):
             return session
         payload, error = self._load_json_body(body)
@@ -6844,8 +6898,13 @@ class Application:
         status_code, result = self._batch_accounting_routes().withdraw(relation_id, payload, session=session)
         return self._json_response(status_code, result)
 
-    def _batch_accounting_mutation_session(self, headers: dict[str, str] | None) -> OARequestSession | Response:
-        session = resolve_oa_request_session(
+    def _batch_accounting_mutation_session(
+        self,
+        headers: dict[str, str] | None,
+        *,
+        session: OARequestSession | None = None,
+    ) -> OARequestSession | Response:
+        session = session or resolve_oa_request_session(
             headers,
             identity_service=self._oa_identity_service,
             access_control_service=self._access_control_service,

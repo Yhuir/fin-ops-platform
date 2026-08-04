@@ -28,6 +28,8 @@ class _SubmissionContext:
     rows_by_id: dict[str, dict[str, Any]]
     oa_rows: list[dict[str, Any]]
     invoice_ids_by_oa_id: dict[str, list[str]]
+    tag_selection_version: int
+    selected_tag_codes: frozenset[str]
 
 
 class BatchAccountingService:
@@ -37,10 +39,12 @@ class BatchAccountingService:
         query_repository: Any | None = None,
         case_id_provider: Callable[[str], str] | None = None,
         relation_command_service: Any | None = None,
+        app_settings_service: Any | None = None,
     ) -> None:
         self._query_repository = query_repository
         self._case_id_provider = case_id_provider or self._default_case_id_for_bank_row
         self._relation_command_service = relation_command_service
+        self._app_settings_service = app_settings_service
 
     def build_payload(
         self,
@@ -122,6 +126,7 @@ class BatchAccountingService:
             "oa_rows": oa_rows,
             "relations_by_bank_row_id": relations_by_bank_row_id,
             "pagination": pagination,
+            "tag_selection_version": self._optional_int(snapshot.get("tag_selection_version")) or 1,
         }
         self._record_read_timing(timing_observer, "payload_assembly", assembly_started_at)
         return payload
@@ -136,6 +141,7 @@ class BatchAccountingService:
         actor: str,
         note: str | None = None,
         expected_version: int | None = None,
+        expected_tag_selection_version: int | None = None,
     ) -> dict[str, Any]:
         resolved_bank_year = self._validate_year(bank_year or year or "")
         normalized_bank_row_id = self._required_id(bank_row_id, "bank_row_id")
@@ -152,6 +158,20 @@ class BatchAccountingService:
             row_version = self._optional_int(bank_row.get("version"))
             if row_version is not None and row_version != expected_version:
                 raise BatchAccountingError("batch_accounting_version_conflict", "银行流水版本已变化，请刷新后重试。")
+        if (
+            expected_tag_selection_version is not None
+            and context.tag_selection_version != expected_tag_selection_version
+        ):
+            raise BatchAccountingError(
+                "batch_accounting_tag_selection_version_conflict",
+                "批量账务标签规则已变化，请刷新后重试。",
+            )
+        tag_code = self._clean_text(bank_row.get("tag_code"))
+        if not tag_code or tag_code not in context.selected_tag_codes:
+            raise BatchAccountingError(
+                "batch_accounting_bank_tag_not_selected",
+                "该流水的当前标签已不在批量账务规则中，请刷新后重试。",
+            )
 
         eligible_oa_by_id = {
             str(row.get("id") or ""): row
@@ -206,6 +226,8 @@ class BatchAccountingService:
             "oa_years": self._selected_oa_years(selected_oa_rows),
             "affected_scope_keys": affected_scope_keys,
             "created_by": actor_id,
+            "bank_tag_code": tag_code,
+            "tag_selection_version": context.tag_selection_version,
         }
         case_id = self._case_id_provider(normalized_bank_row_id)
         command_service = self._require_relation_command_service()
@@ -340,6 +362,43 @@ class BatchAccountingService:
             rows_by_id=rows_by_id,
             oa_rows=oa_rows,
             invoice_ids_by_oa_id=self._invoice_ids_by_oa_id(invoice_rows),
+            tag_selection_version=self._optional_int(payload.get("tag_selection_version")) or 1,
+            selected_tag_codes=frozenset(
+                str(code)
+                for code in list(payload.get("selected_tag_codes") or [])
+                if str(code).strip()
+            ),
+        )
+
+    def tag_rules_payload(self, *, can_save: bool) -> dict[str, Any]:
+        repository = self._require_query_repository()
+        loader = getattr(repository, "tag_rules_snapshot", None)
+        settings_service = self._app_settings_service
+        if not callable(loader) or settings_service is None:
+            raise BatchAccountingError(
+                "batch_accounting_canonical_query_unavailable",
+                "批量账务标签规则暂时不可用，请稍后重试。",
+            )
+        snapshot = loader()
+        return settings_service.get_batch_accounting_tag_selection_payload(
+            observed_tag_codes=list(snapshot.get("observed_tag_codes") or []),
+            can_save=can_save,
+        )
+
+    def update_tag_rules(self, payload: dict[str, Any], *, actor: str) -> dict[str, Any]:
+        repository = self._require_query_repository()
+        loader = getattr(repository, "tag_rules_snapshot", None)
+        settings_service = self._app_settings_service
+        if not callable(loader) or settings_service is None:
+            raise BatchAccountingError(
+                "batch_accounting_canonical_query_unavailable",
+                "批量账务标签规则暂时不可用，请稍后重试。",
+            )
+        observed = list(loader().get("observed_tag_codes") or [])
+        return settings_service.update_batch_accounting_tag_selection(
+            payload,
+            actor_id=str(actor or "batch_accounting").strip() or "batch_accounting",
+            observed_tag_codes=observed,
         )
 
     def _require_relation_command_service(self) -> Any:
@@ -508,6 +567,10 @@ class BatchAccountingService:
             "account_last4": account_last4,
             "relation_id": relation_id or str(row.get("relation_id") or ""),
             "version": version or self._optional_int(row.get("version")) or 1,
+            "tag_code": self._clean_text(row.get("tag_code")),
+            "tag_label": self._clean_text(row.get("tag_label")),
+            "tag_primary_label": self._clean_text(row.get("tag_primary_label")),
+            "tag_sub_label": self._clean_text(row.get("tag_sub_label")),
         }
 
     def _oa_row_payload(self, row: dict[str, Any], linked_invoice_row_ids: list[str]) -> dict[str, Any]:

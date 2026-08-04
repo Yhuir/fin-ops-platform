@@ -20,6 +20,7 @@
 - 设置变更只提交 setting facts、version 与审计；普通保存不触发跨页面
   read-model fan-out，canonical 页面在下次 normal GET 读取最新设置。
 - app settings 中跨模块只读/写控制面事实，例如成本统计标签规则。
+- 拥有批量账务标签选择的 stable codes/version、CAS、semantic no-op、audit 与归档标签清理；不拥有批量账务候选查询。
 
 ### 不负责
 
@@ -56,6 +57,8 @@
 | 银行账户映射只读 payload | cost statistics canonical query | `AppSettingsService.get_cost_statistics_source_settings_payload()` 一次输出 `bank_account_mappings` 与 `bank_transaction_tags`；下游不得直接读取设置页前端状态 |
 | 成本统计标签规则 payload | cost_statistics query/filter route | `AppSettingsService.get_cost_statistics_tag_selection_payload()` 输出归一后的收入/支出主子标签、虚拟 `__uncategorized__` 未分类标签、selection schema version 和 selected leaf codes；schema v2 默认全选当前有效收支标签，legacy 显式选择保留原支出选择并一次性加入当前有效收入标签。`update_cost_statistics_tag_selection(...)` 只持久化 `app.app_settings.cost_statistics_tag_selection` 并记录 audit，不写成本统计 read model、不入队 dirty scope |
 | 外部往来标签选择事务端口 | turnover ledger local write UoW | 只允许调用 `get_turnover_ledger_tag_selection_state()`、`commit_turnover_ledger_tag_selection_update(...)`、`restore_turnover_ledger_tag_selection_state(...)`；rollback 只恢复该 setting family，禁止读取/保存整份私有 `_snapshot` |
+| 批量账务标签规则 payload | batch-accounting route/service | 输出实际出现的 active labels、stable selected codes、version 和 `can_save`；更新只接受完整 `selected_tag_codes[] + expected_version`，semantic no-op 不递增 version |
+| 批量账务标签规则 result | batch-accounting drawer/list | `update_batch_accounting_tag_selection(...)` 只合并 `app.app_settings.batch_accounting_tag_selection`；PostgreSQL 在同一事务内检查 expected version，归档标签由 bank-tag owner 写链原子剔除，不写页面 read model 或 queue |
 
 ## 持久化与投影
 
@@ -79,7 +82,7 @@
 | Frontend API | `web/src/features/workbench/api.ts`；普通 mapper/serializer 与专用 ACL client 分离 |
 | Backend route | `backend/src/fin_ops_platform/app/routes_settings.py`；`server.py` 只负责 route owner 与 session/runtime ports 组装 |
 | Backend service | `app_settings_service.py`、`oa_role_sync_service.py`、`settings_data_reset_service.py`、`oa_applicant_credentials.py`、`target_oa_applicant_token_provider.py` |
-| Repository | `postgres_repositories/oa_applicant_credentials.py`、`postgres_repositories/ops_tax_etc.py`；`0118_bank_flow_rule_batch_settings_raw_alignment.sql` 只修复 `bank_flow_rule_batch_tag_rules` 的 formal/raw 镜像一致性，不改变 canonical rule value |
+| Repository | `postgres_repositories/oa_applicant_credentials.py`、`postgres_repositories/ops_tax_etc.py`；`0118_bank_flow_rule_batch_settings_raw_alignment.sql` 只修复 `bank_flow_rule_batch_tag_rules` 的 formal/raw 镜像一致性，不改变 canonical rule value；`0135_batch_accounting_tag_selection.sql` 只初始化缺失的批量账务选择，并在同一 SQL 保持 formal/raw normalized mirror 相等 |
 | Audit proof owner | `postgres_repositories/settings_page_audit.py`、`page_audit_registry.py`、`postgres_repositories/operations_audit.py` |
 | Lifecycle | `derived_data_lifecycle_service.py`、`app_status_domain_registry.py`、`app_status_read_model_registry.py` |
 | Tests | `tests/test_app_settings_service.py`、`tests/test_workbench_settings_sync_api.py`、`tests/test_oa_role_sync_service.py`、`tests/test_permissions_write_entry_inventory.py`、`tests/test_settings_data_reset_service.py`、`web/src/test/Settings*.test.*`、`web/e2e/permissions-role-matrix.spec.ts` |

@@ -16,6 +16,10 @@ export type BatchAccountingBankRow = {
   accountLast4: string;
   relationId: string;
   version: number | null;
+  tagCode: string;
+  tagLabel: string;
+  tagPrimaryLabel: string;
+  tagSubLabel: string;
 };
 
 export type BatchAccountingOaRow = {
@@ -66,6 +70,23 @@ export type BatchAccountingResponse = {
   oaRows: BatchAccountingOaRow[];
   relationsByBankRowId: Record<string, BatchAccountingRelationBucket>;
   pagination: BatchAccountingPagination;
+  tagSelectionVersion: number;
+};
+
+export type BatchAccountingTagRule = {
+  code: string;
+  label: string;
+  path: string[];
+  outputPrimaryLabel: string;
+  outputSubLabel: string;
+};
+
+export type BatchAccountingTagRules = {
+  version: number;
+  bankAutoTagRulesVersion: number;
+  selectedTagCodes: string[];
+  activeTags: BatchAccountingTagRule[];
+  canSave: boolean;
 };
 
 export type FetchBatchAccountingRequest = {
@@ -84,7 +105,14 @@ export type SubmitBatchAccountingRequest = {
   bankRowId: string;
   oaRowIds: string[];
   expectedVersion?: number | null;
+  expectedTagSelectionVersion?: number | null;
   note?: string;
+  signal?: AbortSignal;
+};
+
+export type SaveBatchAccountingTagRulesRequest = {
+  expectedVersion: number;
+  selectedTagCodes: string[];
   signal?: AbortSignal;
 };
 

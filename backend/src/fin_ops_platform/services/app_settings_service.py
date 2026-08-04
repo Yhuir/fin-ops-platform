@@ -87,6 +87,10 @@ DEFAULT_TURNOVER_LEDGER_TAG_SELECTION = {
     "version": 1,
     "selected_tag_codes": None,
 }
+DEFAULT_BATCH_ACCOUNTING_TAG_SELECTION = {
+    "version": 1,
+    "selected_tag_codes": [],
+}
 COST_STATISTICS_UNCATEGORIZED_TAG_CODE = "__uncategorized__"
 COST_STATISTICS_TAG_SELECTION_SCHEMA_VERSION = 2
 DEFAULT_COST_STATISTICS_TAG_SELECTION = {
@@ -219,6 +223,10 @@ class AppSettingsService:
             ),
             "turnover_ledger_tag_selection": self._public_turnover_ledger_tag_selection(
                 self._snapshot["turnover_ledger_tag_selection"],
+                bank_transaction_tags=self._snapshot["bank_transaction_tags"],
+            ),
+            "batch_accounting_tag_selection": self._public_batch_accounting_tag_selection(
+                self._snapshot["batch_accounting_tag_selection"],
                 bank_transaction_tags=self._snapshot["bank_transaction_tags"],
             ),
             "cost_statistics_tag_selection": self._public_cost_statistics_tag_selection(
@@ -473,6 +481,7 @@ class AppSettingsService:
                 "no_oa_bank_batch_tag_selection": self._snapshot.get("no_oa_bank_batch_tag_selection", {}),
                 "bank_flow_rule_batch_tag_rules": self._snapshot.get("bank_flow_rule_batch_tag_rules", {}),
                 "turnover_ledger_tag_selection": self._snapshot.get("turnover_ledger_tag_selection", {}),
+                "batch_accounting_tag_selection": self._snapshot.get("batch_accounting_tag_selection", {}),
                 "cost_statistics_tag_selection": self._snapshot.get("cost_statistics_tag_selection", {}),
                 INPUT_INVOICE_USAGE_PAYMENT_RULES_SETTINGS_KEY: self._snapshot.get(
                     INPUT_INVOICE_USAGE_PAYMENT_RULES_SETTINGS_KEY,
@@ -633,6 +642,12 @@ class AppSettingsService:
             previous_snapshot["cost_statistics_tag_selection"],
             tag_codes=set(normalized["changes"].get("archived_codes") or []),
         )
+        next_batch_accounting_selection, detached_batch_accounting_references = (
+            self._detach_turnover_ledger_tag_references(
+                previous_snapshot["batch_accounting_tag_selection"],
+                tag_codes=set(normalized["changes"].get("archived_codes") or []),
+            )
+        )
         if (
             not normalized["changes"]["changed"]
             and not detached_pending_invoice_references
@@ -641,6 +656,7 @@ class AppSettingsService:
             and not detached_bank_flow_rule_batch_references
             and not detached_turnover_references
             and not detached_cost_statistics_references
+            and not detached_batch_accounting_references
         ):
             return self.get_bank_auto_tag_rules_payload(can_save=True)
 
@@ -666,6 +682,7 @@ class AppSettingsService:
         next_snapshot["bank_flow_rule_batch_tag_rules"] = next_bank_flow_rule_batch_tag_rules
         next_snapshot["turnover_ledger_tag_selection"] = next_turnover_selection
         next_snapshot["cost_statistics_tag_selection"] = next_cost_statistics_selection
+        next_snapshot["batch_accounting_tag_selection"] = next_batch_accounting_selection
         saved_snapshot = self._save_and_verify_bank_auto_tag_rules_snapshot(next_snapshot)
         self._snapshot = saved_snapshot
         self._configure_category_service(saved_snapshot)
@@ -680,6 +697,7 @@ class AppSettingsService:
             "detached_bank_flow_rule_batch_tag_rule_references": detached_bank_flow_rule_batch_references,
             "detached_turnover_ledger_tag_references": detached_turnover_references,
             "detached_cost_statistics_tag_references": detached_cost_statistics_references,
+            "detached_batch_accounting_tag_references": detached_batch_accounting_references,
         }
         self._record_bank_auto_tag_rules_audit(event)
         return self.get_bank_auto_tag_rules_payload(can_save=True)
@@ -728,6 +746,12 @@ class AppSettingsService:
             previous_snapshot["cost_statistics_tag_selection"],
             tag_codes=archived_codes,
         )
+        next_batch_accounting_selection, detached_batch_accounting_references = (
+            self._detach_turnover_ledger_tag_references(
+                previous_snapshot["batch_accounting_tag_selection"],
+                tag_codes=archived_codes,
+            )
+        )
         if (
             not normalized["changes"]["changed"]
             and not detached_pending_invoice_references
@@ -736,6 +760,7 @@ class AppSettingsService:
             and not detached_bank_flow_rule_batch_references
             and not detached_turnover_references
             and not detached_cost_statistics_references
+            and not detached_batch_accounting_references
         ):
             return self.get_bank_auto_tag_rules_payload(can_save=True)
 
@@ -761,6 +786,7 @@ class AppSettingsService:
         next_snapshot["bank_flow_rule_batch_tag_rules"] = next_bank_flow_rule_batch_tag_rules
         next_snapshot["turnover_ledger_tag_selection"] = next_turnover_selection
         next_snapshot["cost_statistics_tag_selection"] = next_cost_statistics_selection
+        next_snapshot["batch_accounting_tag_selection"] = next_batch_accounting_selection
         saved_snapshot = self._save_and_verify_bank_auto_tag_rules_snapshot(next_snapshot)
         self._snapshot = saved_snapshot
         self._configure_category_service(saved_snapshot)
@@ -775,6 +801,7 @@ class AppSettingsService:
             "detached_bank_flow_rule_batch_tag_rule_references": detached_bank_flow_rule_batch_references,
             "detached_turnover_ledger_tag_references": detached_turnover_references,
             "detached_cost_statistics_tag_references": detached_cost_statistics_references,
+            "detached_batch_accounting_tag_references": detached_batch_accounting_references,
         }
         self._record_bank_auto_tag_rules_audit(event)
         return self.get_bank_auto_tag_rules_payload(can_save=True)
@@ -964,6 +991,102 @@ class AppSettingsService:
         return self._public_turnover_ledger_tag_selection(
             self._snapshot["turnover_ledger_tag_selection"],
             bank_transaction_tags=self._snapshot["bank_transaction_tags"],
+        )
+
+    def get_batch_accounting_tag_selection_payload(
+        self,
+        *,
+        observed_tag_codes: list[str] | None = None,
+        can_save: bool = True,
+    ) -> dict[str, Any]:
+        self._refresh_snapshot_from_state_store()
+        payload = self._public_batch_accounting_tag_selection(
+            self._snapshot["batch_accounting_tag_selection"],
+            bank_transaction_tags=self._snapshot["bank_transaction_tags"],
+            observed_tag_codes=observed_tag_codes,
+        )
+        payload["can_save"] = bool(can_save)
+        return payload
+
+    def update_batch_accounting_tag_selection(
+        self,
+        payload: dict[str, Any],
+        *,
+        actor_id: str,
+        observed_tag_codes: list[str] | None = None,
+    ) -> dict[str, Any]:
+        self._refresh_snapshot_from_state_store()
+        current = self._snapshot["batch_accounting_tag_selection"]
+        requested_version = BankTransactionCategoryService._normalize_version(
+            payload.get("expected_version", payload.get("version", 0))
+        )
+        if requested_version != int(current.get("version") or 1):
+            raise AppSettingsValidationError(
+                "batch_accounting_tag_selection_version_conflict",
+                "Batch accounting tag selection version conflict.",
+            )
+        next_selection = self._normalize_batch_accounting_tag_selection(
+            {
+                "version": int(current.get("version") or 1) + 1,
+                "selected_tag_codes": payload.get("selected_tag_codes"),
+            },
+            bank_transaction_tags=self._snapshot["bank_transaction_tags"],
+            validate=True,
+        )
+        current_codes = list(current.get("selected_tag_codes") or [])
+        next_codes = list(next_selection.get("selected_tag_codes") or [])
+        if current_codes == next_codes:
+            return self.get_batch_accounting_tag_selection_payload(
+                observed_tag_codes=observed_tag_codes,
+                can_save=True,
+            )
+        next_snapshot = dict(self._snapshot)
+        next_snapshot["batch_accounting_tag_selection"] = next_selection
+        saved_snapshot = next_snapshot
+        if self._state_store is not None:
+            storage_backend = str(getattr(self._state_store, "storage_backend", "") or "").strip()
+            save_versioned = getattr(
+                self._state_store,
+                "save_app_settings_for_batch_accounting_tag_selection_version_in_transaction",
+                None,
+            )
+            connection = getattr(self._state_store, "_connection", None)
+            if storage_backend == "postgres":
+                if connection is None or not callable(save_versioned):
+                    raise AppSettingsPersistenceError(
+                        "Batch accounting tag selection transaction boundary is unavailable."
+                    )
+                with connection.transaction() as transaction:
+                    persisted = save_versioned(
+                        next_snapshot,
+                        expected_version=int(current.get("version") or 1),
+                        transaction=transaction,
+                    )
+                if not isinstance(persisted, dict):
+                    raise AppSettingsValidationError(
+                        "batch_accounting_tag_selection_version_conflict",
+                        "Batch accounting tag selection version conflict.",
+                    )
+                saved_snapshot = self._normalize_settings(
+                    persisted,
+                    validate_pending_invoice_tag_groups=False,
+                )
+            else:
+                self._state_store.save_app_settings(next_snapshot)
+        self._snapshot = saved_snapshot
+        self._configure_category_service(saved_snapshot)
+        self._record_batch_accounting_tag_selection_audit(
+            {
+                "actor_id": actor_id,
+                "old_version": int(current.get("version") or 1),
+                "new_version": int(next_selection.get("version") or 1),
+                "old_selected_tag_codes": current_codes,
+                "new_selected_tag_codes": next_codes,
+            }
+        )
+        return self.get_batch_accounting_tag_selection_payload(
+            observed_tag_codes=observed_tag_codes,
+            can_save=True,
         )
 
     def get_turnover_ledger_tag_selection_state(self) -> dict[str, Any]:
@@ -1285,6 +1408,7 @@ class AppSettingsService:
             "no_oa_bank_batch_tag_selection",
             "bank_flow_rule_batch_tag_rules",
             "turnover_ledger_tag_selection",
+            "batch_accounting_tag_selection",
             "cost_statistics_tag_selection",
         )
         try:
@@ -1679,6 +1803,12 @@ class AppSettingsService:
             validate=False,
             default_all_external="turnover_ledger_tag_selection" not in raw_payload,
         )
+        batch_accounting_tag_selection = AppSettingsService._normalize_batch_accounting_tag_selection(
+            raw_payload.get("batch_accounting_tag_selection"),
+            bank_transaction_tags=bank_transaction_tags,
+            validate=False,
+            default_all_active="batch_accounting_tag_selection" not in raw_payload,
+        )
         cost_statistics_tag_selection = AppSettingsService._normalize_cost_statistics_tag_selection(
             raw_payload.get("cost_statistics_tag_selection", DEFAULT_COST_STATISTICS_TAG_SELECTION),
             bank_transaction_tags=bank_transaction_tags,
@@ -1707,6 +1837,7 @@ class AppSettingsService:
             "no_oa_bank_batch_tag_selection": no_oa_bank_batch_tag_selection,
             "bank_flow_rule_batch_tag_rules": bank_flow_rule_batch_tag_rules,
             "turnover_ledger_tag_selection": turnover_ledger_tag_selection,
+            "batch_accounting_tag_selection": batch_accounting_tag_selection,
             "cost_statistics_tag_selection": cost_statistics_tag_selection,
             INPUT_INVOICE_USAGE_PAYMENT_RULES_SETTINGS_KEY: input_invoice_usage_payment_rules,
         }
@@ -2287,6 +2418,98 @@ class AppSettingsService:
         }
 
     @staticmethod
+    def _normalize_batch_accounting_tag_selection(
+        value: Any,
+        *,
+        bank_transaction_tags: dict[str, Any],
+        validate: bool,
+        default_all_active: bool = False,
+    ) -> dict[str, Any]:
+        raw_payload = value if isinstance(value, dict) else {}
+        version = BankTransactionCategoryService._normalize_version(
+            raw_payload.get("version", DEFAULT_BATCH_ACCOUNTING_TAG_SELECTION["version"])
+        )
+        if version <= 0:
+            version = int(DEFAULT_BATCH_ACCOUNTING_TAG_SELECTION["version"])
+        definitions = AppSettingsService._active_bank_transaction_tag_definitions(bank_transaction_tags)
+        definitions_by_code = {
+            str(definition.get("code") or "").strip(): definition
+            for definition in definitions
+            if str(definition.get("code") or "").strip()
+        }
+        raw_codes = (
+            list(definitions_by_code)
+            if default_all_active and "selected_tag_codes" not in raw_payload
+            else list(raw_payload.get("selected_tag_codes") or [])
+        )
+        selected: list[str] = []
+        seen: set[str] = set()
+        for item in raw_codes:
+            code = str(item or "").strip()
+            if not code or code in seen:
+                continue
+            if code not in definitions_by_code:
+                if validate:
+                    raise AppSettingsValidationError(
+                        "invalid_batch_accounting_tag",
+                        f"Bank transaction tag cannot enter batch accounting: {code}",
+                    )
+                continue
+            seen.add(code)
+            selected.append(code)
+        return {"version": version, "selected_tag_codes": selected}
+
+    @staticmethod
+    def _public_batch_accounting_tag_selection(
+        payload: dict[str, Any],
+        *,
+        bank_transaction_tags: dict[str, Any],
+        observed_tag_codes: list[str] | None = None,
+    ) -> dict[str, Any]:
+        observed = {
+            str(code or "").strip()
+            for code in list(observed_tag_codes or [])
+            if str(code or "").strip()
+        }
+        filter_observed = observed_tag_codes is not None
+        active_definitions = AppSettingsService._active_bank_transaction_tag_definitions(
+            bank_transaction_tags
+        )
+        active_tags = [
+            {
+                "code": str(definition.get("code") or ""),
+                "label": str(definition.get("label") or definition.get("code") or ""),
+                "path": list(definition.get("path") or []),
+                "source": str(definition.get("source") or ""),
+                "output_primary_label": str(
+                    definition.get("output_primary_label")
+                    or definition.get("label")
+                    or definition.get("code")
+                    or ""
+                ),
+                "output_sub_label": str(definition.get("output_sub_label") or ""),
+            }
+            for definition in active_definitions
+            if not filter_observed or str(definition.get("code") or "") in observed
+        ]
+        active_codes = {
+            str(definition.get("code") or "")
+            for definition in active_definitions
+            if str(definition.get("code") or "")
+        }
+        selected = [
+            str(code)
+            for code in list(payload.get("selected_tag_codes") or [])
+            if str(code) in active_codes
+        ]
+        return {
+            "version": int(payload.get("version") or 1),
+            "bank_auto_tag_rules_version": int(bank_transaction_tags.get("version") or 1),
+            "selected_tag_codes": selected,
+            "active_tags": active_tags,
+        }
+
+    @staticmethod
     def _public_turnover_ledger_tag_selection(
         payload: dict[str, Any],
         *,
@@ -2585,6 +2808,9 @@ class AppSettingsService:
                 "detached_cost_statistics_tag_references": list(
                     event.get("detached_cost_statistics_tag_references") or []
                 ),
+                "detached_batch_accounting_tag_references": list(
+                    event.get("detached_batch_accounting_tag_references") or []
+                ),
             },
         )
 
@@ -2632,6 +2858,22 @@ class AppSettingsService:
             action="turnover_ledger_tag_selection_updated",
             entity_type="app_settings",
             entity_id="turnover_ledger_tag_selection",
+            metadata={
+                "old_version": int(event.get("old_version") or 0),
+                "new_version": int(event.get("new_version") or 0),
+                "old_selected_tag_codes": list(event.get("old_selected_tag_codes") or []),
+                "new_selected_tag_codes": list(event.get("new_selected_tag_codes") or []),
+            },
+        )
+
+    def _record_batch_accounting_tag_selection_audit(self, event: dict[str, Any]) -> None:
+        if self._audit_service is None:
+            return
+        self._audit_service.record_action(
+            actor_id=str(event.get("actor_id") or "batch_accounting_tag_selection"),
+            action="batch_accounting_tag_selection_updated",
+            entity_type="app_settings",
+            entity_id="batch_accounting_tag_selection",
             metadata={
                 "old_version": int(event.get("old_version") or 0),
                 "new_version": int(event.get("new_version") or 0),

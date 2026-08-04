@@ -1,6 +1,6 @@
 # 批量账务 E2E 覆盖映射
 
-日期：2026-07-27
+日期：2026-08-05
 
 | Spec ID | Browser E2E | Frontend component/API | Backend/API/repository | 状态 |
 | --- | --- | --- | --- | --- |
@@ -11,6 +11,7 @@
 | BA-E2E-005 | submitted/withdraw flow | submitted detail、withdraw dialog、一次 GET | active batch relation、canonical members、withdraw | covered |
 | BA-E2E-006 | permissions role matrix | 只读 session 交互 | `read_export_only` API rejection | covered |
 | BA-E2E-007 | narrow viewport、failure recovery | 200 行分页、selection cleanup、reload failure | 固定 query-count guard、page-size validation | covered |
+| BA-E2E-008 | compact canonical tag drawer + 保存后左栏过滤 | 标签 chip、checkbox、只读保存、规则 error/no-op | tag-rules GET/PUT、Settings CAS/audit、提交时二次校验、canonical classifier integration | covered |
 
 ## 旧契约清理证据
 

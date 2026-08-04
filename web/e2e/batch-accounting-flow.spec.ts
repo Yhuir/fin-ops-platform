@@ -154,6 +154,52 @@ test.describe("batch accounting browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
+  test("filters the bank rail through the compact canonical tag drawer", async ({ page }, testInfo) => {
+    const browserErrors = startStrictBrowserErrorCapture(page);
+    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const recordLatency = createBatchAccountingLatencyRecorder(page, testInfo);
+
+    await page.goto("/batch-accounting");
+    const bankPanel = page.getByRole("region", { name: "批量账务流水" });
+    await expect(bankPanel.getByText("手续费")).toBeVisible();
+
+    await recordLatency({
+      operationId: "batch-accounting.open-tag-rules-drawer",
+      visibleLabel: "批量账务标签规则",
+      actionType: "click",
+    }, async (mark) => {
+      const response = page.waitForResponse(responseFor("GET", "/api/batch-accounting/tag-rules"));
+      await page.getByRole("button", { name: "批量账务标签规则" }).click();
+      await mark("apiLatencyMs", response);
+      await mark("finalSettledLatencyMs", expect(page.getByRole("dialog", { name: "批量账务标签规则" })).toBeVisible());
+    });
+
+    const drawer = page.getByRole("dialog", { name: "批量账务标签规则" });
+    const feeCheckbox = drawer.getByRole("checkbox", { name: /费用 \/ 手续费/ });
+    await drawer.getByText("费用 / 手续费", { exact: true }).click();
+    await expect(feeCheckbox).not.toBeChecked();
+    await recordLatency({
+      operationId: "batch-accounting.save-tag-rules",
+      visibleLabel: "保存",
+      actionType: "click",
+    }, async (mark) => {
+      const saveResponse = page.waitForResponse(responseFor("PUT", "/api/batch-accounting/tag-rules"));
+      const listResponse = waitForBatchAccountingList(page);
+      await drawer.getByRole("button", { name: "保存" }).click();
+      await mark("apiLatencyMs", saveResponse);
+      await mark("finalSettledLatencyMs", listResponse);
+    });
+
+    expect(api.lastBody("PUT /api/batch-accounting/tag-rules")).toEqual({
+      expected_version: 1,
+      selected_tag_codes: ["travel"],
+    });
+    await expect(page.getByText("批量账务标签规则已更新。")).toBeVisible();
+    await expect(page.getByText("当前年份暂无批量账务流水")).toBeVisible();
+    expect(api.count("PUT /api/batch-accounting/tag-rules")).toBe(1);
+    expect(browserErrors).toEqual([]);
+  });
+
   test("submits and withdraws daily reimbursement rows through page-access convergence", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
