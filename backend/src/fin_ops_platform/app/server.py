@@ -3055,7 +3055,7 @@ class Application:
             actor_id=actor_id,
             ignored=ignored,
         )
-        if status_code == HTTPStatus.OK:
+        if status_code == HTTPStatus.OK and result.get("changed") is not False:
             for scope_key in list(result.get("affected_scope_keys") or []):
                 self._enqueue_workbench_read_model_refresh(
                     str(scope_key),

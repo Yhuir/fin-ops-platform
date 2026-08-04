@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from fin_ops_platform.app.routes_workbench_actions import WorkbenchActionApiRoutes
+from fin_ops_platform.app.server import Application
 from fin_ops_platform.services.postgres_repositories.workbench import (
     PostgresWorkbenchRepository,
 )
@@ -135,6 +136,10 @@ def test_repository_separates_amount_decisions_from_legacy_cases_and_scopes_read
     assert decisions == {FINGERPRINT: "ignored"}
     decision_sql, decision_params = decision_connection.fetch_all_calls[0]
     assert "scope_month = %s::date" in decision_sql
+    assert "row_number() over" in decision_sql
+    assert "partition by raw_payload#>>'{normalized_payload,fingerprint}'" in decision_sql
+    assert "order by updated_at desc, version desc, case_id desc" in decision_sql
+    assert decision_sql.index("decision_rank = 1") < decision_sql.index("status = 'ignored'")
     assert decision_params == ("oa_invoice_amount_mismatch", "2026-05-01")
 
 
@@ -159,10 +164,60 @@ def test_repository_write_is_idempotent_and_audits_only_state_changes() -> None:
         ignored=True,
     )
     assert unchanged["changed"] is False
-    assert not any(
-        "insert into app.workbench_exception_case_events" in sql
-        for sql, _ in unchanged_connection.execute_calls
+    assert unchanged_connection.execute_calls == []
+
+
+class AmountMismatchHandlerHarness:
+    _handle_api_workbench_amount_mismatch_decision = Application._handle_api_workbench_amount_mismatch_decision
+
+    def __init__(self, *, changed: bool) -> None:
+        self.changed = changed
+        self.enqueued: list[tuple[str, str]] = []
+        self._workbench_action_api_routes = self
+
+    def _load_json_body(self, _body: str | None) -> tuple[dict[str, object], None]:
+        return {"group_id": "case:CASE-1"}, None
+
+    def _workbench_write_freshness_guard(self, _payload: dict[str, object]) -> None:
+        return None
+
+    def _workbench_write_auth_context(self, _headers: object, *, session: object) -> tuple[str, str]:
+        return "YNSYLP005", "default"
+
+    def set_amount_mismatch_ignored(self, *_args: object, **_kwargs: object) -> tuple[int, dict[str, object]]:
+        return 200, {"changed": self.changed, "affected_scope_keys": ["2026-05"]}
+
+    def _enqueue_workbench_read_model_refresh(self, scope_key: str, *, reason: str) -> None:
+        self.enqueued.append((scope_key, reason))
+
+    def _json_response(self, status_code: object, payload: dict[str, object]) -> tuple[object, dict[str, object]]:
+        return status_code, payload
+
+
+@pytest.mark.parametrize(
+    ("changed", "expected_status", "expected_enqueued"),
+    [
+        (True, "refreshing", [("2026-05", "amount_mismatch_decision")]),
+        (False, None, []),
+    ],
+)
+def test_server_refreshes_amount_mismatch_projection_only_after_state_changes(
+    changed: bool,
+    expected_status: str | None,
+    expected_enqueued: list[tuple[str, str]],
+) -> None:
+    harness = AmountMismatchHandlerHarness(changed=changed)
+
+    status_code, payload = harness._handle_api_workbench_amount_mismatch_decision(
+        "{}",
+        ignored=True,
+        headers=None,
+        access_session=None,
     )
+
+    assert status_code == 200
+    assert payload.get("read_model_status") == expected_status
+    assert harness.enqueued == expected_enqueued
 
 
 def test_action_route_returns_service_contract_without_accepting_client_actor() -> None:

@@ -543,11 +543,21 @@ class PostgresWorkbenchRepository:
             params = (*params, month_start(normalized_scope_key))
         rows = self._connection.fetch_all(
             f"""
-            select raw_payload#>>'{{normalized_payload,fingerprint}}' as fingerprint, status
-            from app.workbench_exception_cases
-            where scenario = %s
+            select fingerprint, status
+            from (
+                select
+                    raw_payload#>>'{{normalized_payload,fingerprint}}' as fingerprint,
+                    status,
+                    row_number() over (
+                        partition by raw_payload#>>'{{normalized_payload,fingerprint}}'
+                        order by updated_at desc, version desc, case_id desc
+                    ) as decision_rank
+                from app.workbench_exception_cases
+                where scenario = %s
+                  {scope_clause}
+            ) latest_decisions
+            where decision_rank = 1
               and status = 'ignored'
-              {scope_clause}
             """,
             params,
         )
@@ -606,6 +616,11 @@ class PostgresWorkbenchRepository:
                 "candidate_ids": [],
                 "updated_by": normalized_actor_id,
             }
+            if not changed:
+                return {
+                    **normalized_payload,
+                    "changed": False,
+                }
             connection.execute(
                 """
                 insert into app.workbench_exception_cases(
@@ -633,26 +648,25 @@ class PostgresWorkbenchRepository:
                     jsonb({"normalized_payload": normalized_payload}),
                 ),
             )
-            if changed:
-                connection.execute(
-                    """
-                    insert into app.workbench_exception_case_events(
-                        exception_case_id, case_id, event_type, actor_id, payload, raw_payload
-                    )
-                    values (
-                        (select id from app.workbench_exception_cases where case_id = %s),
-                        %s, %s, %s, %s, %s
-                    )
-                    """,
-                    (
-                        case_id,
-                        case_id,
-                        "amount_mismatch_ignored" if ignored else "amount_mismatch_restored",
-                        normalized_actor_id,
-                        jsonb(normalized_payload),
-                        jsonb({"normalized_payload": normalized_payload}),
-                    ),
+            connection.execute(
+                """
+                insert into app.workbench_exception_case_events(
+                    exception_case_id, case_id, event_type, actor_id, payload, raw_payload
                 )
+                values (
+                    (select id from app.workbench_exception_cases where case_id = %s),
+                    %s, %s, %s, %s, %s
+                )
+                """,
+                (
+                    case_id,
+                    case_id,
+                    "amount_mismatch_ignored" if ignored else "amount_mismatch_restored",
+                    normalized_actor_id,
+                    jsonb(normalized_payload),
+                    jsonb({"normalized_payload": normalized_payload}),
+                ),
+            )
             return {
                 **normalized_payload,
                 "changed": changed,
