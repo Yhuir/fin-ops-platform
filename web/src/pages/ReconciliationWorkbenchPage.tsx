@@ -1788,19 +1788,10 @@ export default function ReconciliationWorkbenchPage() {
     if (!succeeded) {
       return;
     }
-    await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
-      background: true,
-      includeAuxiliary: false,
-      zoneQueries: zoneServerPageQueries,
-    });
-    await loadExceptionDrawer("processed");
   }, [
     ensureCanWriteWorkbench,
-    loadExceptionDrawer,
-    loadWorkbenchData,
     openActionResultDialog,
     runBlockingAction,
-    zoneServerPageQueries,
   ]);
 
   const handleRowAction = useCallback(async (row: WorkbenchRecord, action: WorkbenchInlineAction) => {
@@ -2213,12 +2204,6 @@ export default function ReconciliationWorkbenchPage() {
     if (!succeeded) {
       return;
     }
-    await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
-      background: true,
-      includeAuxiliary: false,
-      zoneQueries: zoneServerPageQueries,
-    });
-    await loadExceptionDrawer("processed");
   };
 
   const handleAmountMismatchDecision = useCallback(async (
@@ -2241,18 +2226,9 @@ export default function ReconciliationWorkbenchPage() {
     if (!succeeded) {
       return;
     }
-    await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
-      background: true,
-      includeAuxiliary: false,
-      zoneQueries: zoneServerPageQueries,
-    });
-    await loadExceptionDrawer(ignored ? "active" : "processed");
   }, [
     ensureCanWriteWorkbench,
-    loadExceptionDrawer,
-    loadWorkbenchData,
     runBlockingAction,
-    zoneServerPageQueries,
   ]);
 
   const pairedPanes = useMemo<WorkbenchPane[]>(

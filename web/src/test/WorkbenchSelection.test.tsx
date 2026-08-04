@@ -2878,6 +2878,8 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(within(exceptionDrawer).getByRole("radio", { name: "已忽略的异常" }));
     expect((await within(exceptionDrawer).findAllByRole("button", { name: "撤回忽略" })).length)
       .toBeGreaterThan(0);
+    expect(fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input as RequestInfo | URL)))
+      .toHaveLength(4);
     expect(fetchMock.mock.calls.some(([input]) => {
       const url = new URL(fetchPath(input as RequestInfo | URL), "http://localhost");
       return url.pathname === "/api/workbench/groups"
