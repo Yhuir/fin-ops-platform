@@ -8127,6 +8127,7 @@ class Application:
         payload.setdefault("base_scope_key", normalized_scope_key)
         payload["projection"] = "sql"
         self._invalidate_workbench_groups_redis_scope(normalized_scope_key)
+        self._invalidate_workbench_groups_redis_scope("all")
         return payload
 
     @staticmethod

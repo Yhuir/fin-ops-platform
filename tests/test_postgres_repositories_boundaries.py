@@ -838,7 +838,9 @@ def test_bank_flow_rule_batch_affected_scope_lookup_is_one_set_based_query() -> 
 def test_bank_flow_rule_settings_version_check_locks_and_saves_in_caller_transaction() -> None:
     connection = RecordingConnection()
     current_settings = {
-        "allowed_usernames": ["concurrent-user"],
+        "allowed_usernames": ["YNSYLP005", "concurrent-user"],
+        "admin_usernames": ["YNSYLP005"],
+        "full_access_usernames": ["concurrent-user"],
         "bank_flow_rule_batch_tag_rules": {"version": 1},
     }
     connection.fetch_one = lambda sql, params=(): (  # type: ignore[method-assign]
@@ -860,10 +862,10 @@ def test_bank_flow_rule_settings_version_check_locks_and_saves_in_caller_transac
     )
 
     assert saved == {
-        "allowed_usernames": ["concurrent-user", "YNSYLP005"],
+        "allowed_usernames": ["YNSYLP005", "concurrent-user"],
         "readonly_export_usernames": [],
         "admin_usernames": ["YNSYLP005"],
-        "full_access_usernames": [],
+        "full_access_usernames": ["concurrent-user"],
         "access_control_version": 1,
         "bank_flow_rule_batch_tag_rules": {"version": 2},
     }
@@ -873,7 +875,7 @@ def test_bank_flow_rule_settings_version_check_locks_and_saves_in_caller_transac
     writes = [(sql, params) for sql, params in connection.executed if "insert into app.app_settings" in sql]
     assert len(writes) == 1
     persisted_payload = writes[0][1][1].obj
-    assert persisted_payload["allowed_usernames"] == ["concurrent-user", "YNSYLP005"]
+    assert persisted_payload["allowed_usernames"] == ["YNSYLP005", "concurrent-user"]
 
 
 def test_settings_generic_writer_preserves_acl_under_shared_session_lock() -> None:

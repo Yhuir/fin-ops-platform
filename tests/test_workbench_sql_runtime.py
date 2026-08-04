@@ -1552,6 +1552,29 @@ class ReadModelSnapshotRecorder:
 
 
 class WorkbenchSqlRuntimeTests(unittest.TestCase):
+    def test_month_projection_rebuild_invalidates_month_and_all_groups_cache(self) -> None:
+        class FakeBuilder:
+            @staticmethod
+            def rebuild_workbench_read_model_scope(scope_key: str) -> dict[str, object]:
+                return {"scope_key": scope_key, "row_count": 1}
+
+        class RebuildHarness:
+            _rebuild_workbench_sql_projection_scope = Application._rebuild_workbench_sql_projection_scope
+
+            def __init__(self) -> None:
+                self._workbench_sql_projection_builder = FakeBuilder()
+                self.invalidated_scopes: list[str] = []
+
+            def _invalidate_workbench_groups_redis_scope(self, scope_key: str) -> None:
+                self.invalidated_scopes.append(scope_key)
+
+        app = RebuildHarness()
+
+        result = app._rebuild_workbench_sql_projection_scope("2026-08")
+
+        self.assertEqual(result["scope_key"], "2026-08")
+        self.assertEqual(app.invalidated_scopes, ["2026-08", "all"])
+
     def test_workbench_zone_search_escapes_ilike_wildcards_as_literals(self) -> None:
         self.assertEqual(_workbench_literal_ilike_pattern(r"100%_\vendor"), r"%100\%\_\\vendor%")
 
