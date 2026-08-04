@@ -123,14 +123,14 @@
 
 该同步是低频同步 I/O，不新增 outbox、worker、read model 或缓存。
 
-## Deployment ACL verification 状态
+## Deployment ACL 专项验收状态
 
 | 状态 | 合同 |
 | --- | --- |
-| `profile_skipped` | 自动 profile 为 `frontend`/`runtime`；不读取 006 或 ACL artifact |
-| `preflight_blocked` | disabled/missing、wrong selector、menu/role/member/env/identity/fingerprint drift，或 artifact 不是 `eligible=true`；零写并停止激活 |
-| `preflight_exact` | 自动 profile 为 `acl`，selector/menu/三 role/三 binding/members、strict env、0133/CHECK 与 005/006 identity 全部 steady-state exact |
-| `maintenance` | ACL candidate 激活后任一 gate/restore/read-back 失败；禁止启动旧 vulnerable binary，只能 forward repair |
+| `not_requested` | 标准发布路径；任何 profile 都只读取 005，不读取 006 或 ACL artifact |
+| `preflight_blocked` | 显式专项验收遇到 disabled/missing、wrong selector、menu/role/member/env/identity/fingerprint drift，或 artifact 不是 `eligible=true`；零写并终止专项验收，不改变标准激活状态 |
+| `preflight_exact` | 显式专项验收证明 selector/menu/三 role/三 binding/members、strict env、0133/CHECK 与 005/006 identity 全部 steady-state exact |
+| `maintenance` | 真正 ACL profile 激活后标准 runtime gate 失败；禁止启动旧 vulnerable binary，只能 forward repair |
 
 fresh OA menu 验收只接受角色投影后的新 `/system/menu/getRouters` 或新 shell session；旧 DOM 不构成状态事实。
 
@@ -152,3 +152,4 @@ facts、audit 和必要领域任务。它们不触发已退役页面 read-model 
 | 2026-06-11 | 首轮测试闭环补齐 OA 集成状态机 | session、OA sync、凭据、进项 OA 反提、ETC OA 草稿、read model 状态 | `PYTHONPATH=backend/src python3 -m unittest ... -v`、`cd web && npm test -- --run ...`、`bash scripts/verify.sh docs` |
 | 2026-08-02 | 收敛 canonical ACL、fixed-menu 三角色 runtime projection 与 deployment exact cleanup/rollback | OA identity、APP authorization、菜单可见性和发布证据责任分离 | `tests.test_oa_role_sync_service`、`tests.test_settings_access_control_preflight`、`tests.test_deploy_oa_script`、`tests.test_permissions_write_entry_inventory` |
 | 2026-08-03 | 一次性 cleanup/rollback 退出稳态发布，ACL gate 只接受 `eligible=true` | 普通发布不读取 006；OA topology drift 阻断且零写 | `tests.test_deploy_oa_script` |
+| 2026-08-05 | 双身份验证退出标准激活前置条件 | 所有 profile 只读取 005；005/006 artifact 仅用于显式权限专项验收 | `tests.test_deploy_oa_script` |

@@ -313,11 +313,7 @@ ACL_PATHS = (
     "backend/src/fin_ops_platform/app/route_access_policy.py",
     "backend/src/fin_ops_platform/app/routes_settings.py",
     "backend/src/fin_ops_platform/services/access_control_service.py",
-    "backend/src/fin_ops_platform/services/app_settings_service.py",
     "backend/src/fin_ops_platform/services/oa_role_sync_service.py",
-    "backend/src/fin_ops_platform/services/state_store.py",
-    "backend/src/fin_ops_platform/services/state_store_protocol.py",
-    "backend/src/fin_ops_platform/services/postgres_repositories/ops_tax_etc.py",
     "backend/src/fin_ops_platform/tools/settings_access_control_preflight.py",
     "backend/src/fin_ops_platform/postgres/migrations/0132_settings_access_control_guard.sql",
     "backend/src/fin_ops_platform/postgres/migrations/0133_settings_access_control_canonical_order.sql",
@@ -2643,9 +2639,6 @@ if profile not in {"frontend", "runtime", "acl"}:
 print(profile)
 PY
 )"
-  if [[ "$release_profile" == "acl" ]]; then
-    assert_settings_access_control_preflight "$release"
-  fi
   evidence_dir="$RELEASE_GATE_EVIDENCE_ROOT/$release"
   [[ ! -e "$evidence_dir" ]] || die "release gate evidence already exists: $evidence_dir"
   install -d -m 0700 "$evidence_dir"

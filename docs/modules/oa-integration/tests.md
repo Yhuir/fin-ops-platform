@@ -75,7 +75,7 @@
 3. 设置页保存目标 OA 申请人凭据 -> 进项发票选择 -> 创建 OA 草稿 -> OA 页面可见 draft -> 用户人工确认 submitted/not_submitted。
 4. ETC 业务批次创建 OA 草稿 -> 撤销本地绑定或人工确认 submitted -> 删除本地批次不删除真实 OA 草稿/流程。
 5. OA Mongo 临时不可用 -> 页面/API 不把旧投影伪装为 fresh，App Status 暴露 blocked/degraded。
-6. ACL role projection 后用新的 `/system/menu/getRouters` 或新 OA shell session 验证 menu；旧 DOM/旧 token 不作证据。自动 `acl` profile 另用 candidate-bound 双身份 artifact、hash 和 post-deploy restore 验证。
+6. ACL role projection 后用新的 `/system/menu/getRouters` 或新 OA shell session 验证 menu；旧 DOM/旧 token 不作证据。需要专项复验时显式使用 candidate-bound 双身份 artifact、hash 和 post-deploy restore；标准发布不重复 006 验证。
 
 P2/P3 一秒级闭环中，这些真实 OA 场景对应 `.planning/P2P3-CLOSURE-PLAN.md` 的 P2P3-013 staging gate。通过条件不是本地 mock 绿灯，而是真实 OA 登录、角色同步、目标申请人、草稿 URL、附件、人工 submitted/not_submitted、投影 freshness 和 App Status 语义均有 staging/production 证据。缺凭据、缺测试对象、只跑本地 stub 或只返回 `auth_missing` 时，状态保持 `staging-gated`。
 

@@ -538,7 +538,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("candidate-status <release-name> --json", script)
         self.assertIn("settings-access-control-preflight <release-name>", script)
         self.assertIn("settings-access-control-post-deploy <release-name>", script)
-        self.assertIn('assert_settings_access_control_preflight "$release"', script)
+        self.assertNotIn('assert_settings_access_control_preflight "$release"', script)
         self.assertIn("previous release lacks $SETTINGS_ACL_CONTRACT", script)
         activate = script.split("activate_release() {", 1)[1].split("\n}\n", 1)[0]
         self.assertLess(activate.index("systemctl stop fin-ops.service"), activate.index('run_schema_migrations "$src"'))
@@ -718,14 +718,13 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertNotIn(f"{RETIRED_ALLOWED_ROLES}=", common)
         self.assertNotIn(f"{RETIRED_READONLY_USERNAMES}=", common)
 
-    def test_release_gate_auto_escalates_acl_and_removes_one_time_cutover(self) -> None:
+    def test_release_gate_auto_escalates_acl_without_requiring_006(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
         activate = script.split("release_gate_activate() {", 1)[1].split("\n}\n", 1)[0]
         rollback = script.split("rollback_release_gate() {", 1)[1].split("\n}\n", 1)[0]
 
         self.assertIn("release_gate_profile()", script)
-        self.assertIn('if [[ "$release_profile" == "acl" ]]', activate)
-        self.assertIn('assert_settings_access_control_preflight "$release"', activate)
+        self.assertNotIn('assert_settings_access_control_preflight "$release"', activate)
         self.assertIn('approved.get("eligible") is not True', script)
         self.assertNotIn('approved.get("cutover_eligible") is not True', script)
         self.assertIn('if [[ "$release_profile" == "frontend" ]]', activate)
@@ -847,6 +846,22 @@ class DeployOAScriptTest(unittest.TestCase):
             (releases / "candidate/src/backend/requirements.txt").write_text(
                 "same\n", encoding="utf-8"
             )
+            shared_settings_path = Path(
+                "backend/src/fin_ops_platform/services/app_settings_service.py"
+            )
+            (releases / "candidate/src" / shared_settings_path).parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+            (releases / "candidate/src" / shared_settings_path).write_text(
+                "general-settings-change\n",
+                encoding="utf-8",
+            )
+            shared_settings = run_profile()
+            self.assertEqual(shared_settings["profile"], "runtime")
+            self.assertFalse(shared_settings["acl_changed"])
+
+            (releases / "candidate/src" / shared_settings_path).unlink()
             acl_path = Path(
                 "backend/src/fin_ops_platform/services/access_control_service.py"
             )
@@ -900,8 +915,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertNotIn("sleep 240", frontend)
         self.assertEqual(activate.count("IFS= read -r admin_token"), 1)
         self.assertNotIn("bearer_token", activate)
-        self.assertIn('if [[ "$release_profile" == "acl" ]]', activate)
-        self.assertIn('assert_settings_access_control_preflight "$release"', activate)
+        self.assertNotIn('assert_settings_access_control_preflight "$release"', activate)
 
     def test_release_gate_restores_stable_helpers_when_precheck_fails(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()

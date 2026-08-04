@@ -68,9 +68,9 @@ bash scripts/verify.sh all
 ## 自动发布风险门禁
 
 - `release-gate-profile` 比较 exact candidate 与当前唯一 active release 的实际包内容，自动判定 `frontend`、`runtime`、`acl`；没有手工 profile 或 skip 参数，无法证明纯前端时 fail-safe 为 `runtime`。
-- 三类发布都要求 exact SHA/fingerprint、strict runtime env、required worker inventory、`YNSYLP005` admin session、原子激活和 release evidence；普通发布不读取或要求 `YNSYLP006`。
+- 三类发布都要求 exact SHA/fingerprint、strict runtime env、required worker inventory、`YNSYLP005` admin session、原子激活和 release evidence；标准激活不读取或要求 `YNSYLP006`。
 - `frontend` 只执行 pre/T+0 的 ready、005 session、公开 shell/asset、发布目录哈希和 active release 检查，不执行 RabbitMQ topology apply、全页面 canonical audit、read-model smoke 或 T+60/T+300 等待。切换前固定捕获已通过 preflight 的 active worker 集合，切换与回退都必须重启同一集合，不得在 stop 之后重新从 active 状态推导。
-- `runtime` 保留 production-equivalent pre/T+0/T+60/T+300；`acl` 在此基础上自动要求 candidate-bound 005/006 双身份 preflight，失败后保持 maintenance 并 forward repair。
+- `runtime` 保留 production-equivalent pre/T+0/T+60/T+300；`acl` 使用相同的 005-only 门禁，并在失败后保持 maintenance、仅允许 forward repair。
 - 三项 retired admission env 和 legacy admin env 已完成一次性清理；稳态发布只读断言它们缺席。历史 OA non-dedicated binding cleanup/rollback SQL 与激活代码已经删除，migration 0132/0133 作为不可变历史保留。
 - release 上传不得更新 root helper。deploy-control 变更仍使用 candidate hash-pinned、同文件系统 temp + atomic `mv` bootstrap；禁止 `self-update`。
 
@@ -89,7 +89,7 @@ bash scripts/verify.sh all
 - App Health：worker missing/stale/mismatch、dirty scopes、RabbitMQ backlog、PostgreSQL runtime unavailable 必须可观测。
 - 权限/session：发布后 `/api/session/me` 必须保持 JSON API，不能被 SPA fallback 吃掉。
 - 数据安全：发布前备份、migration、rollback/PITR、runtime config 需要 staging 或生产 runbook，不能只靠 unittest。
-- ACL 安全：只有自动分类为 `acl` 的候选要求双身份 preflight/post-deploy；artifact/hash 必须绑定同一 candidate，APP session/API 与 fresh OA router/role restore 分别 read-back。
+- ACL 安全：真正的鉴权、权限 route/service、OA role sync 或 ACL migration 变更才分类为 `acl`；标准激活仍只验证 005、strict env、migration/CHECK、数据库 guard 与完整 runtime closure。005/006 双身份 preflight/post-deploy 保留为显式专项验收工具，不再是任何发布的激活前置条件。
 
 ## 维护触发器
 

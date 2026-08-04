@@ -381,7 +381,7 @@ python -m fin_ops_platform.app.worker \
 - 调用服务器 root-owned helper：
   - `/usr/local/sbin/finops-deploy-control check-release <release-name>`
   - `/usr/local/sbin/finops-deploy-control release-gate-activate <release-name>`
-- `release-gate-activate` 是唯一正常激活入口；公开 `activate` 命令已删除。helper 比较 exact candidate 与唯一 active release 的实际包内容，自动判定 `frontend`、`runtime` 或 `acl`，没有手工 profile/skip。所有 profile 只读取 005；只有 `acl` 额外校验 candidate-bound 005/006 read-only preflight artifact。`runtime`/`acl` 先对当前 release
+- `release-gate-activate` 是唯一正常激活入口；公开 `activate` 命令已删除。helper 比较 exact candidate 与唯一 active release 的实际包内容，自动判定 `frontend`、`runtime` 或 `acl`，没有手工 profile/skip。所有 profile 的标准激活都只读取 005，不读取 006，也不依赖双身份 artifact。`runtime`/`acl` 先对当前 release
   执行 production-equivalent pre checkpoint，再用 `/etc/fin-ops/fin-ops.postgres-migrator.env`
   停止旧 API 和 runtime workers，执行 PostgreSQL schema migration/validated CHECK，
   成功后才激活 API、RabbitMQ worker 和 dispatcher 指向该 release；`frontend` 只原子发布候选 dist 并重启已有 runtime。重启前都会以 release registry
@@ -724,7 +724,7 @@ OA 菜单按当前同域 iframe 口径配置：
 
 ## ACL 安全发布与生产证据
 
-普通 `frontend`/`runtime` 发布不进入本节的双身份链路，只需要 005。以下步骤只适用于 helper 自动判定为 `acl` 的候选；不能由操作者手工指定、降级或跳过 profile。
+所有 `frontend`/`runtime`/`acl` 的标准激活都只需要 005。以下双身份步骤是权限链路发生变化后可显式运行的专项验收，不是 `release-gate-activate` 的前置条件，也不能用于手工指定或降级 profile。
 
 1. 本地全回归和 clean commit 后上传但不激活：`./scripts/deploy-oa.sh --no-activate --release-name <release>`，并用 `release-gate-profile <release> --json` 确认自动结果为 `acl`。
 2. 若候选包含 deploy-control 变更，按上文 manual-root 流程原子 bootstrap；禁止 `self-update`，并证明 runtime-worker helper、active release、service、DB、OA、ACL 不变。
@@ -741,7 +741,7 @@ ssh -o StrictHostKeyChecking=accept-new -o ControlMaster=no finops-deploy@finops
 
 Preflight 要求 admin session 精确为 `YNSYLP005/admin`；专用 bearer 精确为 `YNSYLP006`、非 admin，并从 canonical Settings ACL 的 allowed/readonly/full/admin 四个集合全部缺席。006 必须是 `denied` 且不带 `finops:app:view`；0133/CHECK 必须已全部生效，retired/legacy admission env 必须全部缺席，OA selector、唯一 menu、三 dedicated roles/bindings/members 必须与 canonical ACL 精确一致。artifact 只含非敏感 state/blockers、salted hashes/counts/fingerprints。任何 token、identity、canonical ACL、DB、env、OA 或 fingerprint 漂移都阻断且零写。历史 cutover/cleanup 状态不再被稳态发布接受。
 
-4. 只用 exact candidate 零重传激活：`./scripts/deploy-oa.sh --activate-existing --release-name <release>`。顺序固定为 ACL preflight assertion → current runtime checkpoint → strict env assertion → API/worker quiesce → migration/CHECK read-back → runtime sync/install → safe candidate → T+0/T+60/T+300 evidence。ACL 激活失败保持 maintenance 并 forward repair，不回滚到可能不具备当前 ACL 安全能力的旧 binary。
+4. 只用 exact candidate 零重传激活：`./scripts/deploy-oa.sh --activate-existing --release-name <release>`。顺序固定为 current runtime checkpoint → strict env assertion → API/worker quiesce → migration/CHECK read-back → runtime sync/install → safe candidate → T+0/T+60/T+300 evidence。ACL 激活失败保持 maintenance 并 forward repair，不回滚到可能不具备当前 ACL 安全能力的旧 binary。
 5. 激活成功后用相同双 token 运行 `settings-access-control-post-deploy`。它把 `YNSYLP006` 专用 bearer 依次改为 full、read、denied，验证 generic save、两条直接提权攻击、AppHealth/OA credentials/data reset admin-only、OA 三角色、fresh OA router 菜单可见性、durable audit/request id 和 ACL GET/PUT latency，并在 finally/read-back 中恢复原 accounts/OA/denied session：
 
 ```bash

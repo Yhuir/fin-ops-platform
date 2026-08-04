@@ -24,7 +24,7 @@
 | `release_uploaded` | 远端 release dir | 已上传但未激活，可 `--no-activate` 停在此状态 |
 | `check_release_failed` | `finops-deploy-control check-release` | release layout/env contract 不满足，禁止激活 |
 | `profile_classified` | `release-gate-profile` | 自动得到 `frontend` / `runtime` / `acl`；无法证明 pure frontend 时为 runtime，ACL boundary drift 优先为 acl |
-| `acl_preflight_required` | profile=`acl` | 必须有 candidate-bound 005/006 artifact；普通 profile 不读取 006 |
+| `acl_profile_classified` | profile=`acl` | 直接鉴权/权限、OA role sync 或 ACL migration 发生变化；仍使用 005-only 标准门禁，失败后只允许 forward repair |
 | `preflight_succeeded` | profile-specific pre checkpoint | frontend 证明 ready/005/shell/asset/dist；runtime/acl 证明完整 runtime closure |
 | `migration_running` | runtime/acl activation | 正在用 migrator env 执行 PostgreSQL migration；frontend 不进入此状态 |
 | `migration_failed` | migration command non-zero | 禁止继续发布；需要恢复/修复 schema 状态 |
@@ -48,7 +48,7 @@
 - API/worker unit 直接加载 migrator env 或旧 `/root` runtime env。
 - `scripts/deploy-oa.sh` 恢复 `--mode legacy-current` 或覆盖 `/opt/fin-ops/current/backend` 的发布流。
 - deploy helper 维护硬编码 worker 清单，绕过 `runtime_worker_manifest`。
-- 操作者手工指定/降级 profile，或普通 frontend/runtime 发布读取 006 token。
+- 操作者手工指定/降级 profile，或任何标准发布读取 006 token。
 - 在稳态发布中恢复 retired env rewrite、OA historical binding cleanup/rollback 或已删除 SQL。
 - 通过删除测试、skip、放松断言让 nightly 变绿。
 
@@ -91,3 +91,4 @@
 | 2026-06-11 | 补齐 deploy 状态机 | 明确 CI、release、migration、readiness、worker、public route 和 rollback 状态 | 待本轮模块验证 |
 | 2026-07-05 | 移除 `legacy-current` 覆盖式发布入口和旧单文件 env 模板 | 发布状态机只保留 versioned release；legacy current 仅可作为 activate 清理对象 | `tests.test_deploy_oa_script`、`tests.test_deploy_runtime_examples`、`tests.test_platform_runtime_boundary_guards` |
 | 2026-08-03 | 自动风险分级并拆分 frontend/runtime/ACL 门禁 | 普通发布只验证 005；纯前端走 pre/T+0 快速门；ACL 变更自动升级双身份专项门禁；一次性 env/OA cleanup 退出运行链 | `tests.test_deploy_oa_script`、`bash -n deploy/oa/bin/finops-deploy-control.sh` |
+| 2026-08-05 | 标准发布统一为 005-only，并收窄 ACL 自动分类边界 | 通用 Settings service/store/repository 变更归入 runtime；005/006 双身份工具保留为显式专项验收，不再阻断激活 | `test_release_gate_auto_escalates_acl_without_requiring_006`、`test_release_gate_profile_is_automatic_and_fail_safe` |

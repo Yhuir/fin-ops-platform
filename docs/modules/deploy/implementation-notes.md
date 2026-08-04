@@ -6,7 +6,13 @@
 
 - 根因：一次性 Settings ACL 切换逻辑被固化进每次发布，导致普通前端或 runtime 变更也读取 006、重写 env/OA binding，并无条件等待 T+300。
 - 修复：deploy-control 直接比较候选与唯一 active release 的实际包内容，自动判定 `frontend`、`runtime` 或 `acl`；不存在手工 profile/skip。无法证明纯前端时保守升级为 `runtime`，ACL 文件变化优先升级为 `acl`。
-- `frontend` 只执行 pre/T+0 的 exact dist、active release、worker inventory、ready、005 session 和公开 shell/asset；`runtime` 保留 pre/T+0/T+60/T+300；只有 `acl` 额外要求 candidate-bound 005/006 preflight。
+- `frontend` 只执行 pre/T+0 的 exact dist、active release、worker inventory、ready、005 session 和公开 shell/asset；`runtime`/`acl` 保留 pre/T+0/T+60/T+300；标准激活统一只读取 005。
+
+## 2026-08-05：移除 006 标准发布依赖并收窄 ACL profile
+
+- 根因：`ACL_PATHS` 包含通用 Settings service/store/repository，普通设置扩展会被误判为 ACL；`release-gate-activate` 随后强制要求旧的 005/006 preflight artifact。
+- 决策：ACL hash 只保留直接鉴权、权限 route/service、OA role sync、专项工具和 ACL migration；标准激活不再消费双身份 artifact。数据库 ACL guard、strict env、005 session、完整 runtime checkpoint 和 ACL 失败后的 forward-repair 语义保持不变。
+- 005/006 preflight/post-deploy 命令仅保留为显式专项验收工具；不删除工具，避免丢失需要人工复验权限矩阵时的既有能力。
 - 一次性 retired env/OA binding cleanup 已退出稳态激活链，历史 SQL 和 cleanup/rollback 实现删除；稳态只读断言 retired env 缺席，发现漂移直接失败关闭。
 
 ## 2026-08-01 - Production HTTP runtime 边界
