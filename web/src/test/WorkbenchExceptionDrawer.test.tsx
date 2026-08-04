@@ -52,7 +52,7 @@ const group: WorkbenchRelationGroup = {
 };
 
 describe("Workbench amount mismatch exception UI", () => {
-  test("renders one right drawer with three panes and an ignore action", async () => {
+  test("renders a collapsed three-pane outline and expands all details together", async () => {
     const user = userEvent.setup();
     const onIgnore = vi.fn();
 
@@ -75,11 +75,17 @@ describe("Workbench amount mismatch exception UI", () => {
     );
 
     const drawer = await screen.findByRole("dialog", { name: "异常处理" });
-    expect(within(drawer).getByText("OA")).toBeInTheDocument();
-    expect(within(drawer).getByText("银行流水")).toBeInTheDocument();
-    expect(within(drawer).getByText("进销项发票")).toBeInTheDocument();
-    expect(within(drawer).getByRole("button", { name: "进行中的异常" })).toHaveAttribute("aria-pressed", "true");
-    expect(within(drawer).queryByText("已忽略异常")).not.toBeInTheDocument();
+    expect(within(drawer).getByText("OA · 0项")).toBeInTheDocument();
+    expect(within(drawer).getByText("流水 · 0项")).toBeInTheDocument();
+    expect(within(drawer).getByText("发票 · 1项")).toBeInTheDocument();
+    expect(within(drawer).getByText("99.99")).toBeInTheDocument();
+    expect(within(drawer).getByRole("radio", { name: "进行中的异常" })).toHaveAttribute("aria-checked", "true");
+    expect(within(drawer).getByRole("radio", { name: "已忽略的异常" })).toBeInTheDocument();
+    expect(within(drawer).queryByTestId("pane-invoice")).not.toBeInTheDocument();
+
+    await user.click(within(drawer).getByRole("button", { name: "展开异常明细" }));
+    expect(await within(drawer).findByText("测试供应商")).toBeInTheDocument();
+    expect(within(drawer).queryByTestId("pane-invoice")).not.toBeInTheDocument();
 
     await user.click(within(drawer).getByRole("button", { name: "忽略" }));
     expect(onIgnore).toHaveBeenCalledWith(group);
@@ -107,7 +113,7 @@ describe("Workbench amount mismatch exception UI", () => {
     expect(chip).toHaveAttribute("title", "OA 100.00 / 发票 99.99 / 差额 0.01");
   });
 
-  test("shows ignored mismatch inside processed anomalies and restores it", async () => {
+  test("shows ignored mismatch and withdraws the ignore without a confirmation modal", async () => {
     const user = userEvent.setup();
     const ignoredAnomaly = {
       ...anomaly,
@@ -144,7 +150,45 @@ describe("Workbench amount mismatch exception UI", () => {
 
     const drawer = await screen.findByRole("dialog", { name: "异常处理" });
     expect(within(drawer).getAllByText("已忽略：金额不一致").length).toBeGreaterThan(0);
-    await user.click(within(drawer).getByRole("button", { name: "恢复" }));
+    await user.click(within(drawer).getByRole("button", { name: "撤回忽略" }));
     expect(onRestore).toHaveBeenCalledWith(ignoredGroup);
+    expect(screen.queryByRole("dialog", { name: "取消异常处理确认弹窗" })).not.toBeInTheDocument();
+  });
+
+  test("keeps only one relation group expanded", async () => {
+    const user = userEvent.setup();
+    const secondGroup: WorkbenchRelationGroup = {
+      ...group,
+      id: "case:CASE-2",
+      rows: {
+        ...group.rows,
+        invoice: [{ ...invoiceRow, id: "invoice-2", counterparty: "第二供应商" }],
+      },
+    };
+
+    render(
+      <WorkbenchExceptionDrawer
+        bucket="active"
+        canMutateData
+        error={null}
+        groups={[group, secondGroup]}
+        ignoredRows={[]}
+        loading={false}
+        open
+        onBucketChange={vi.fn()}
+        onCancelProcessedException={vi.fn()}
+        onClose={vi.fn()}
+        onIgnoreAmountMismatch={vi.fn()}
+        onRestoreAmountMismatch={vi.fn()}
+        onUnignoreRow={vi.fn()}
+      />,
+    );
+
+    const drawer = await screen.findByRole("dialog", { name: "异常处理" });
+    const triggers = within(drawer).getAllByRole("button", { name: "展开异常明细" });
+    await user.click(triggers[0]);
+    expect(triggers[0]).toHaveAttribute("aria-expanded", "true");
+    await user.click(within(drawer).getAllByRole("button", { name: "展开异常明细" })[0]);
+    expect(triggers[0]).toHaveAttribute("aria-expanded", "false");
   });
 });

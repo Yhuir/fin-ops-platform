@@ -188,6 +188,7 @@ type ApiWorkbenchPayload = {
     paired_count: number;
     unpaired_count: number;
     exception_count: number;
+    ignored_exception_count?: number;
     zone_counts?: Partial<Record<WorkbenchZoneId, Partial<WorkbenchZoneCounts>>>;
   };
   paired: {
@@ -460,8 +461,14 @@ type ApiWorkbenchRelationAmountCheck = {
   direction?: string | null;
   bank_amount?: string | number | null;
   bankAmount?: string | number | null;
+  bank_total?: string | number | null;
+  bankTotal?: string | number | null;
   oa_amount?: string | number | null;
   oaAmount?: string | number | null;
+  oa_total?: string | number | null;
+  oaTotal?: string | number | null;
+  invoice_total?: string | number | null;
+  invoiceTotal?: string | number | null;
   amount_delta?: string | number | null;
   amountDelta?: string | number | null;
   requires_note?: boolean | null;
@@ -987,6 +994,9 @@ function mapRelationAmountCheck(value: ApiWorkbenchRelationAmountCheck | null | 
     direction: toDisplayValue(value.direction, "unknown") as WorkbenchAmountCheck["direction"],
     bankAmount: toDisplayValue(value.bank_amount ?? value.bankAmount),
     oaAmount: toDisplayValue(value.oa_amount ?? value.oaAmount),
+    oaTotal: firstNonPlaceholderDisplayValue(value.oa_total, value.oaTotal, value.oa_amount, value.oaAmount),
+    bankTotal: firstNonPlaceholderDisplayValue(value.bank_total, value.bankTotal, value.bank_amount, value.bankAmount),
+    invoiceTotal: firstNonPlaceholderDisplayValue(value.invoice_total, value.invoiceTotal),
     amountDelta: toDisplayValue(value.amount_delta ?? value.amountDelta),
     requiresNote: value.requires_note === true || value.requiresNote === true,
   };
@@ -1792,6 +1802,7 @@ function mapSummaryCounts(summary: ApiWorkbenchPayload["summary"]): WorkbenchSum
     pairedCount: toCount(summary.paired_count),
     unpairedCount: toCount(summary.unpaired_count),
     exceptionCount: toCount(summary.exception_count),
+    ignoredExceptionCount: toCount(summary.ignored_exception_count),
     totalCount: oaCount + bankCount + invoiceCount,
     zoneCounts,
   };

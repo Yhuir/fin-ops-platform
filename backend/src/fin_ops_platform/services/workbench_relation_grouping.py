@@ -80,6 +80,16 @@ class WorkbenchRelationGroupingService:
                         and group["amount_anomaly"].get("state") == "active"
                     )
                 ),
+                "ignored_exception_count": sum(
+                    1
+                    for group in [*paired_groups, *unpaired_groups]
+                    if (
+                        isinstance(group.get("amount_anomaly"), dict)
+                        and group["amount_anomaly"].get("state") == "ignored"
+                    )
+                    or group.get("exception_state") == "processed"
+                    or self._group_has_ignored(group)
+                ),
             },
             "paired": {"groups": paired_groups},
             "unpaired": {"groups": unpaired_groups},
@@ -452,6 +462,19 @@ class WorkbenchRelationGroupingService:
             if isinstance(row, dict)
             for field in ("oa_bank_relation", "invoice_relation", "invoice_bank_relation")
             if isinstance((relation := row.get(field)), dict)
+        )
+
+    @staticmethod
+    def _group_has_ignored(group: dict[str, Any]) -> bool:
+        collapsed_rows = group.get("collapsed_rows") if isinstance(group.get("collapsed_rows"), dict) else {}
+        return any(
+            bool(row.get("ignored"))
+            for row_type in ROW_TYPES
+            for row in [
+                *list(group.get(f"{row_type}_rows") or []),
+                *list(collapsed_rows.get(row_type) or []),
+            ]
+            if isinstance(row, dict)
         )
 
     @staticmethod

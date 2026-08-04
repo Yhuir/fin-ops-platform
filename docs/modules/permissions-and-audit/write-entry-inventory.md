@@ -49,7 +49,6 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `撤回忽略` | workbench ignored recovery |
 | `忽略` | workbench amount-mismatch ignore |
 | `恢复` | workbench amount-mismatch restore |
-| `撤回处理` | workbench processed exception recovery |
 | `删除` | ETC/settings destructive actions |
 | `新建批次` | ETC batch |
 | `创建 OA 草稿` | input/OA/ETC draft |
@@ -155,7 +154,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `batch-accounting:submitted-withdraw` | `batch-accounting` | 已提交 bucket 撤回入口 | read-export 下已提交 bucket 的撤回关联禁用，withdraw durable mutation 零调用，且复扫候选。 |
 | `turnover-ledger:tag-drawer` | `turnover-ledger` | 外部往来款标签设置抽屉 | read-export 下标签全选/清空/保存禁用，且复扫候选。 |
 | `turnover-ledger:detail-controls` | `turnover-ledger` | 外部往来款流水明细区 | read-export 下流水选择、编辑、确认闭环禁用，且复扫候选。 |
-| `reconciliation-workbench:exception-drawer` | `reconciliation-workbench` | 统一异常处理右侧抽屉；进行中/已处理切换、金额异常忽略/恢复和 legacy 异常恢复 | read-export 下统一抽屉只读，无忽略、恢复、取消异常处理或撤回忽略按钮，相关 mutation 为零，且复扫候选。 |
+| `reconciliation-workbench:exception-drawer` | `reconciliation-workbench` | 异常处理右侧抽屉；进行中/已忽略切换、金额异常忽略和统一撤回忽略 | read-export 下抽屉只读，无忽略或撤回忽略按钮，相关 mutation 为零，且复扫候选。 |
 
 ## Role matrix 页面级静态覆盖 registry
 

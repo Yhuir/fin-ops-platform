@@ -506,6 +506,7 @@ describe("workbench api bank amount mapping", () => {
                 paired_count: 1,
                 unpaired_count: 1,
                 exception_count: 0,
+                ignored_exception_count: 3,
                 zone_counts: {
                   paired: { groups: 1, oa: 0, bank: 7, invoice: 0, rows: 7 },
                   unpaired: { groups: 1, oa: 3, bank: 0, invoice: 5, rows: 8 },
@@ -646,6 +647,7 @@ describe("workbench api bank amount mapping", () => {
     ]);
 
     expect(result.data.summary.pairedCount).toBe(1);
+    expect(result.data.summary.ignoredExceptionCount).toBe(3);
     expect(duplicateResult).toEqual(result);
     expect(result.data.summary.zoneCounts.paired.bank).toBe(7);
     expect(result.pages.paired.rowCounts.bank).toBe(7);
@@ -693,6 +695,15 @@ describe("workbench api bank amount mapping", () => {
               match_confidence: "high",
               reason: "active_formal_relation",
               completion: { is_complete: false, missing_row_types: ["oa", "invoice"] },
+              amount_check: {
+                status: "mismatch",
+                direction: "expense",
+                oa_total: "100.00",
+                bank_total: "100.00",
+                invoice_total: "99.00",
+                amount_delta: "1.00",
+                requires_note: true,
+              },
               amount_anomaly: {
                 code: "oa_invoice_amount_mismatch",
                 label: "金额不一致",
@@ -804,6 +815,7 @@ describe("workbench api bank amount mapping", () => {
     });
     expect(group.rows.invoice[0].sourceExpenseItemId).toBe("oa-paired:item:1");
     expect(group.amountAnomaly).toMatchObject({ state: "ignored", displayLabel: "已忽略：金额不一致" });
+    expect(group.amountCheck).toMatchObject({ oaTotal: "100.00", bankTotal: "100.00", invoiceTotal: "99.00" });
     expect(group.rows.invoice[0].amountAnomaly).toMatchObject({ state: "ignored", amountDelta: "1.00" });
   });
 

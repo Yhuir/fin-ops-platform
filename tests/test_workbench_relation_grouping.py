@@ -616,6 +616,7 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         active_group = active_payload["paired"]["groups"][0]
         fingerprint = active_group["amount_anomaly"]["fingerprint"]
         self.assertEqual(active_payload["summary"]["exception_count"], 1)
+        self.assertEqual(active_payload["summary"]["ignored_exception_count"], 0)
         self.assertEqual(active_group["amount_anomaly"]["state"], "active")
         self.assertEqual(active_group["invoice_rows"][0]["amount_anomaly"]["display_label"], "金额不一致")
 
@@ -627,6 +628,7 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         )
         ignored_group = ignored_payload["paired"]["groups"][0]
         self.assertEqual(ignored_payload["summary"]["exception_count"], 0)
+        self.assertEqual(ignored_payload["summary"]["ignored_exception_count"], 1)
         self.assertEqual(ignored_group["amount_anomaly"]["state"], "ignored")
         self.assertEqual(
             ignored_group["invoice_rows"][0]["amount_anomaly"]["display_label"],

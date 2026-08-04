@@ -1457,6 +1457,7 @@ function workbenchSummary(
       paired_count: 0,
       unpaired_count: 0,
       exception_count: 0,
+      ignored_exception_count: rowIgnored ? 1 : 0,
       ignored_count: rowIgnored ? 1 : 0,
     };
   }
@@ -1468,6 +1469,7 @@ function workbenchSummary(
       paired_count: 5,
       unpaired_count: 205,
       exception_count: 0,
+      ignored_exception_count: rowIgnored ? 1 : 0,
       ignored_count: rowIgnored ? 1 : 0,
     };
   }
@@ -1478,6 +1480,7 @@ function workbenchSummary(
     paired_count: relationConfirmed ? 1 : 0,
     unpaired_count: relationConfirmed || exceptionApplied ? 0 : 1,
     exception_count: (exceptionApplied ? 3 : 0) + (amountMismatchScenario && !amountMismatchIgnored ? 1 : 0),
+    ignored_exception_count: (exceptionApplied ? 3 : 0) + (rowIgnored ? 1 : 0) + (amountMismatchIgnored ? 1 : 0),
     ignored_count: rowIgnored ? 1 : 0,
   };
 }
@@ -6302,7 +6305,7 @@ function workbenchExceptionPreviewPayload() {
       {
         code: "missing_input_invoice",
         severity: "warning",
-        message: "当前候选缺进项发票，提交后进入已处理异常。",
+        message: "当前候选缺进项发票，提交后进入已忽略的异常。",
       },
     ],
     workflow_projection: {
@@ -9599,7 +9602,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         changed: true,
         affected_scope_keys: ["2026-03"],
         read_model_status: "refreshing",
-        message: "已恢复金额异常。",
+        message: "已撤回忽略。",
       });
     }
 

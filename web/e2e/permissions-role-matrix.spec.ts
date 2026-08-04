@@ -16,7 +16,7 @@ type DynamicWriteControlOpener = {
 };
 
 const mutationCallPattern = /^(POST|PUT|PATCH|DELETE) /;
-const enabledWriteControlPattern = /^保存$|保存设置|保存计划|保存规则|保存并刷新|保存外部往来款|保存补充信息|保存凭据|清空密码|新增账户|重新应用规则|新增标签|拖动 .* 列|确认导入|确认对账|确认闭环|确认关联|确认已支付|确认拆分|确认撤回|确认买票|确认为买票|确认为过账|写回|撤回批次|撤回关联|撤回忽略|撤回处理|^忽略$|^恢复$|删除|新建批次|创建 OA 草稿|创建OA草稿|上传|关联OA项|关联支出流水|关联所选记录|接受推荐票根|选择发票|标记无需开票|标记现金收入|标记异常|异常处理|取消异常处理|取消现金处理|提交异常|继续报异常|排除非ETC|手工确认|已认证发票导入|开始预览|数据重置|重置数据|提交OA|提交 OA|提交审批|提交批次|人工提交/;
+const enabledWriteControlPattern = /^保存$|保存设置|保存计划|保存规则|保存并刷新|保存外部往来款|保存补充信息|保存凭据|清空密码|新增账户|重新应用规则|新增标签|拖动 .* 列|确认导入|确认对账|确认闭环|确认关联|确认已支付|确认拆分|确认撤回|确认买票|确认为买票|确认为过账|写回|撤回批次|撤回关联|撤回忽略|^忽略$|^恢复$|删除|新建批次|创建 OA 草稿|创建OA草稿|上传|关联OA项|关联支出流水|关联所选记录|接受推荐票根|选择发票|标记无需开票|标记现金收入|标记异常|异常处理|取消异常处理|取消现金处理|提交异常|继续报异常|排除非ETC|手工确认|已认证发票导入|开始预览|数据重置|重置数据|提交OA|提交 OA|提交审批|提交批次|人工提交/;
 const etcReadOnlyDisclosureControls = [/^上传文件/, /^已上传文件/];
 
 const readablePages: PageExpectation[] = [
@@ -611,14 +611,14 @@ const readExportWorkbenchRecoveryWriteControlOpeners: DynamicWriteControlOpener[
       const unpairedZone = page.getByTestId("zone-unpaired");
       await expect(unpairedZone).toBeVisible();
 
-      await unpairedZone.getByRole("button", { name: /已处理异常\d+项/ }).click();
+      await unpairedZone.getByRole("button", { name: /已忽略的异常\d+项/ }).click();
       const exceptionDrawer = page.getByRole("dialog", { name: "异常处理" });
       await expect(exceptionDrawer).toBeVisible();
-      await exceptionDrawer.getByRole("button", { name: "已处理异常" }).click();
+      await exceptionDrawer.getByRole("radio", { name: "已忽略的异常" }).click();
+      await exceptionDrawer.getByRole("button", { name: "展开异常明细" }).first().click();
       await expect(exceptionDrawer.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeVisible();
       await expect(exceptionDrawer.getByText("追进项发票").first()).toBeVisible();
       await expect(exceptionDrawer.getByText("智能工厂设备商").first()).toBeVisible();
-      await expect(exceptionDrawer.getByRole("button", { name: "撤回处理" })).toHaveCount(0);
       await expect(exceptionDrawer.getByRole("button", { name: "撤回忽略" })).toHaveCount(0);
       await expectNoEnabledWriteControlCandidates(page);
     },

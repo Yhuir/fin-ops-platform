@@ -1,6 +1,12 @@
 # 关联台测试与验证
 
-日期：2026-08-04
+日期：2026-08-05
+
+## 2026-08-05 紧凑异常抽屉与撤回忽略
+
+- Business core / repository：`tests/test_workbench_relation_grouping.py` 与 `tests/test_workbench_sql_runtime.py` 保护进行中、已忽略关系组和独立 ignored row 的互斥计数，已忽略列表只认 payload 的 durable `ignored=true`，不再读取废弃 status 字段。
+- API / frontend：`WorkbenchApi.test.ts` 保护 additive `ignored_exception_count` 与三栏总金额映射；`WorkbenchExceptionDrawer.test.tsx` 保护 HeroUI 单选状态、默认折叠摘要、单组展开、无重复三栏表头、ignore/撤回忽略和只读权限；`WorkbenchSelection.test.tsx` 保护撤回忽略直接调用 canonical action、刷新主表和抽屉且不再打开旧确认 modal。
+- E2E / regression：`workbench-exception-flow.spec.ts` 与权限 Browser suites 覆盖“进行中的异常/已忽略的异常”、折叠展开、写权限和撤回忽略；旧 `CancelProcessedExceptionModal` 已删除，不保留兼容入口。
 
 ## 2026-08-04 OA/发票金额不一致异常闭环
 

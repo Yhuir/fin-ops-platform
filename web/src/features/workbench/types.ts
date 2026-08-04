@@ -53,6 +53,9 @@ export type WorkbenchAmountCheck = {
   direction: "expense" | "payment" | "receipt" | "unknown" | (string & {});
   bankAmount: string;
   oaAmount: string;
+  oaTotal?: string;
+  bankTotal?: string;
+  invoiceTotal?: string;
   amountDelta: string;
   requiresNote: boolean;
 };
@@ -279,6 +282,7 @@ export type WorkbenchSummary = {
   pairedCount: number;
   unpairedCount: number;
   exceptionCount: number;
+  ignoredExceptionCount: number;
   totalCount: number;
   zoneCounts: Record<WorkbenchZoneId, WorkbenchZoneCounts>;
 };

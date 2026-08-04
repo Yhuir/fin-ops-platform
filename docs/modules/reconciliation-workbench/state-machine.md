@@ -93,4 +93,4 @@ ignored --restore--> active
 成员/金额变化 -> fingerprint 变化 -> 旧 ignored 决定失效，按新事实重新计算
 ```
 
-该状态机只描述异常处置，不是第三种关系状态；它与 `paired|unpaired` 正交。ignore/restore 不修改 relation、canonical facts 或金额，只持久化 fingerprint-bound 决定和 audit。进行中与已处理由同一个右侧抽屉读取；已忽略不再有独立入口。
+该状态机只描述异常处置，不是第三种关系状态；它与 `paired|unpaired` 正交。ignore/restore 不修改 relation、canonical facts 或金额，只持久化 fingerprint-bound 决定和 audit。“进行中的异常”与“已忽略的异常”由同一个右侧抽屉读取；后者可按关系组执行“撤回忽略”。

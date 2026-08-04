@@ -212,6 +212,7 @@ class WorkbenchReadApiRoutesTests(unittest.TestCase):
                     "detail_level": "summary",
                     "column_filters": {"amount": {"min": 10}},
                     "time_filters": {"trade_date": {"from": "2026-05-01"}},
+                    "exception_bucket": None,
                 }
             ],
         )

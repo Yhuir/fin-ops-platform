@@ -118,7 +118,7 @@ describe("WorkbenchZone", () => {
 
     render(
       <WorkbenchZone
-        auxiliaryHeaderActions={[{ label: "查看已处理异常", onClick: onAuxiliaryAction, tone: "warning" }]}
+        auxiliaryHeaderActions={[{ label: "查看已忽略异常", onClick: onAuxiliaryAction, tone: "warning" }]}
         getRowState={() => "idle"}
         isExpanded={false}
         isVisible
@@ -172,7 +172,7 @@ describe("WorkbenchZone", () => {
     await user.click(within(toolbar as HTMLElement).getByRole("button", { name: "清空选择" }));
     await user.click(within(toolbar as HTMLElement).getByRole("button", { name: "异常处理" }));
     await user.click(within(toolbar as HTMLElement).getByRole("button", { name: "取消异常" }));
-    await user.click(within(zone).getByRole("button", { name: "查看已处理异常" }));
+    await user.click(within(zone).getByRole("button", { name: "查看已忽略异常" }));
 
     expect(onClearSelection).toHaveBeenCalledTimes(1);
     expect(onPrimarySelectionAction).not.toHaveBeenCalled();

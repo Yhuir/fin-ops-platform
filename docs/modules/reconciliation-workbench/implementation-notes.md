@@ -1520,3 +1520,9 @@
 - 边界：分组 service 统一计算稳定 fingerprint；独立 amount-mismatch service 在 active generation 上重读、重算并做 CAS，repository 复用既有 `app.workbench_exception_cases` 但以独立 scenario 隔离。legacy loader 显式排除该 scenario，避免旧 schema 污染。查询只按 month 读取决定，抽屉使用数据库端 `exception_bucket` 有界分页。
 - 前端：复用 AppDrawer 与 RelationGroupGrid 形成统一三栏异常抽屉；旧已处理/已忽略双 modal、样式和测试删除。没有新增依赖、页面状态域、read model、worker、queue、表或 migration。
 - 生产前向修复：`month=all` 异常桶计数不能继续读取不含 `payload` 的 group-key 快路径；仅异常过滤复用既有非聚合 canonical group 查询，普通查询仍保持 group-key 快路径。投影 schema 升级为 v18，使 v17 历史 generation fail closed 并通过既有 Workbench refresh/rehydrate 发布 `amount_anomaly`，禁止把缺少新字段的旧 payload 标记为 fresh。
+
+## 2026-08-05 - 紧凑异常抽屉与已忽略语义收口
+
+- 用户口径统一为“进行中的异常 / 已忽略的异常”“忽略 / 撤回忽略”；后端既有 `active|processed` transport 保持不变，不新增状态、API 或迁移。summary 增加准确 `ignored_exception_count`，同时统计 ignored 金额异常、legacy processed relation group 和 payload `ignored=true` 的独立行。
+- 抽屉复用 HeroUI `ToggleButtonGroup`、`DisclosureGroup`、`Chip`、`Button` 与既有 `AppDrawer`/`RelationGroupGrid`。每组默认一行展示 OA/流水/发票成员数与总金额，只展开一组完整三栏；删除重复 pane 表头、说明副标题、大卡片和旧撤回确认 modal。
+- 撤回忽略直接对当前完整关系组执行 canonical cancel action，成功后刷新当前关联台和已忽略桶；read-export 不显示写按钮。删除 `CancelProcessedExceptionModal.tsx`，不保留旧 UI 或 fallback。

@@ -3383,6 +3383,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             "count(distinct (canonical_members.pane, canonical_members.object_identity_key))",
             canonical_query,
         )
+        self.assertIn("ignored_exception_count", canonical_query)
+        self.assertIn("ignored_rows.payload->>'ignored'", canonical_query)
         self.assertNotIn(
             "partition by active_groups.zone, active_groups.all_scope_group_id",
             canonical_query,
@@ -6219,6 +6221,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(connection.calls[0][1], ("2026-05",))
         self.assertIn("join read_model.workbench_generations", connection.calls[0][0])
         self.assertIn("generation.status = 'active'", connection.calls[0][0])
+        self.assertIn("rows.payload->>'ignored'", connection.calls[0][0])
+        self.assertNotIn("rows.status = 'ignored'", connection.calls[0][0])
 
     def test_workbench_write_ignored_row_loader_requires_sql_repository(self) -> None:
         app = object.__new__(Application)

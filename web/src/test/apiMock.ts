@@ -2053,7 +2053,7 @@ function toGroupedWorkbenchPayload(payload: {
   };
   paired: Record<"oa" | "bank" | "invoice", Array<Record<string, unknown>>>;
   unpaired: Record<"oa" | "bank" | "invoice", Array<Record<string, unknown>>>;
-}, oaStatus?: MockApiOptions["workbenchOaStatus"]) {
+}, oaStatus?: MockApiOptions["workbenchOaStatus"], ignoredRowCount = 0) {
   const pairedGroups = buildGroups(payload.paired, "paired");
   const unpairedGroups = buildGroups(payload.unpaired, "unpaired");
 
@@ -2067,6 +2067,9 @@ function toGroupedWorkbenchPayload(payload: {
       paired_count: pairedGroups.length,
       unpaired_count: unpairedGroups.length,
       exception_count: unpairedGroups.filter((group) => groupHasDanger(group)).length,
+      ignored_exception_count: [...pairedGroups, ...unpairedGroups].filter(
+        (group) => group.exception_state === "processed",
+      ).length + ignoredRowCount,
     },
     invoice_inventory: {
       system_total: 9,
@@ -2134,7 +2137,7 @@ function buildGroups(
           ?? processedRow.invoice_bank_relation
         ) as { code?: string; label?: string } | undefined
       : undefined;
-    const actionLabel = relation?.label ?? "已处理异常";
+    const actionLabel = relation?.label ?? "已忽略异常";
     return {
       ...group,
       can_withdraw: section === "paired" ? true : undefined,
@@ -4791,6 +4794,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const payload = toGroupedWorkbenchPayload(
         mockWorkbenchPayloadForMonth(workbenchStateStore, month, options),
         options.workbenchOaStatus,
+        ignoredRowStore.get(month).length,
       );
       const pageForZone = (zone: "paired" | "unpaired") => {
         const query = parseWorkbenchGroupJsonParam(url.searchParams.get(`${zone}_query`));

@@ -56,7 +56,7 @@ canonical fact repositories
 
 - OA 与发票金额只在现有关系组内按分精确合计；完整金额不相等时由分组 service 产生一个稳定 fingerprint，不创建第三种关系状态。
 - active/ignored 决定复用既有 exception case repository，但使用独立 `oa_invoice_amount_mismatch` scenario；通用旧异常 loader 必须排除该 scenario，避免两种 schema 互相污染。
-- 页面只保留统一 `WorkbenchExceptionDrawer`：进行中展示 active 金额异常和 legacy active 异常，已处理展示 ignored 金额异常和 legacy processed/ignored；旧 `IgnoredItemsModal`、`ProcessedExceptionsModal` 已删除。
+- 页面只保留统一 `WorkbenchExceptionDrawer`：进行中展示 active 金额异常和 legacy active 异常，已忽略展示 ignored 金额异常和 legacy processed/ignored。每个关系组默认只显示三栏成员数与总金额，按需展开完整三栏，忽略/撤回忽略直接作用于该关系组；旧确认 modal、`IgnoredItemsModal` 和 `ProcessedExceptionsModal` 均不得恢复。
 
 ## 三栏纵向展示合同
 

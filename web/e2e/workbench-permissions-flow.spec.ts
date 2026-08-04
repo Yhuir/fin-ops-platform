@@ -94,13 +94,13 @@ test.describe("workbench read-export permission browser flow", () => {
     const unpairedZone = page.getByTestId("zone-unpaired");
     await expect(unpairedZone).toBeVisible();
 
-    await unpairedZone.getByRole("button", { name: /已处理异常\d+项/ }).click();
+    await unpairedZone.getByRole("button", { name: /已忽略的异常\d+项/ }).click();
     const exceptionDrawer = page.getByRole("dialog", { name: "异常处理" });
     await expect(exceptionDrawer).toBeVisible();
-    await exceptionDrawer.getByRole("button", { name: "已处理异常" }).click();
+    await exceptionDrawer.getByRole("radio", { name: "已忽略的异常" }).click();
+    await exceptionDrawer.getByRole("button", { name: "展开异常明细" }).first().click();
     await expect(exceptionDrawer.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeVisible();
     await expect(exceptionDrawer.getByText("智能工厂设备商").first()).toBeVisible();
-    await expect(exceptionDrawer.getByRole("button", { name: "撤回处理" })).toHaveCount(0);
     await expect(exceptionDrawer.getByRole("button", { name: "撤回忽略" })).toHaveCount(0);
 
     expectNoWorkbenchMutationCalls(api);
@@ -170,13 +170,13 @@ test.describe("workbench App Health write-safety browser flow", () => {
     await expect(pairedGroup.getByRole("button", { name: "取消关联" })).toHaveCount(0);
 
     const unpairedZone = page.getByTestId("zone-unpaired");
-    await unpairedZone.getByRole("button", { name: /已处理异常\d+项/ }).click();
+    await unpairedZone.getByRole("button", { name: /已忽略的异常\d+项/ }).click();
     const exceptionDrawer = page.getByRole("dialog", { name: "异常处理" });
     await expect(exceptionDrawer).toBeVisible();
-    await exceptionDrawer.getByRole("button", { name: "已处理异常" }).click();
+    await exceptionDrawer.getByRole("radio", { name: "已忽略的异常" }).click();
+    await exceptionDrawer.getByRole("button", { name: "展开异常明细" }).first().click();
     await expect(exceptionDrawer.getByText("追进项发票").first()).toBeVisible();
     await expect(exceptionDrawer.getByText("智能工厂设备商").first()).toBeVisible();
-    await expect(exceptionDrawer.getByRole("button", { name: "撤回处理" })).toHaveCount(0);
     await expect(exceptionDrawer.getByRole("button", { name: "撤回忽略" })).toHaveCount(0);
 
     expectNoWorkbenchMutationCalls(api);

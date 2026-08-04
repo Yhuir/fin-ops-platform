@@ -2755,7 +2755,7 @@ describe("Workbench row selection and detail drawer", () => {
     renderWorkbenchPage();
 
     const unpairedZone = await screen.findByTestId("zone-unpaired");
-    expect(within(unpairedZone).getByRole("button", { name: /已处理异常\d+项/ })).toBeInTheDocument();
+    expect(within(unpairedZone).getByRole("button", { name: /已忽略的异常\d+项/ })).toBeInTheDocument();
     const openOaRow = await within(unpairedZone).findByRole("row", {
       name: /陈涛.*智能工厂设备商/,
     });
@@ -2785,16 +2785,16 @@ describe("Workbench row selection and detail drawer", () => {
       ).not.toBeInTheDocument();
     });
 
-    await user.click(await screen.findByRole("button", { name: /已处理异常\d+项/ }));
+    await user.click(await screen.findByRole("button", { name: /已忽略的异常\d+项/ }));
 
     const exceptionDrawer = await screen.findByRole("dialog", { name: "异常处理" });
-    await user.click(within(exceptionDrawer).getByRole("button", { name: "已处理异常" }));
-    expect((await within(exceptionDrawer).findAllByText("追进项发票")).length).toBeGreaterThanOrEqual(2);
-    expect(within(exceptionDrawer).getByText("OA")).toBeInTheDocument();
-    expect(within(exceptionDrawer).getByText("银行流水")).toBeInTheDocument();
+    await user.click(within(exceptionDrawer).getByRole("radio", { name: "已忽略的异常" }));
+    expect((await within(exceptionDrawer).findAllByText(/追进项发票/)).length).toBeGreaterThanOrEqual(1);
+    expect(within(exceptionDrawer).getAllByText(/OA · \d+项/).length).toBeGreaterThan(0);
+    expect(within(exceptionDrawer).getAllByText(/流水 · \d+项/).length).toBeGreaterThan(0);
     expect(within(exceptionDrawer).queryByRole("button", { name: "详情" })).not.toBeInTheDocument();
     expect(within(exceptionDrawer).queryByRole("button", { name: "更多" })).not.toBeInTheDocument();
-    expect(within(exceptionDrawer).getAllByRole("button", { name: "撤回处理" }).length).toBeGreaterThan(0);
+    expect(within(exceptionDrawer).getAllByRole("button", { name: "撤回忽略" }).length).toBeGreaterThan(0);
   });
 
   test("exception drawer cancels only the explicitly chosen singleton exception row", async () => {
@@ -2826,18 +2826,13 @@ describe("Workbench row selection and detail drawer", () => {
       expect(screen.queryByRole("dialog", { name: "统一异常处理" })).not.toBeInTheDocument();
     });
 
-    await user.click(await screen.findByRole("button", { name: /已处理异常\d+项/ }));
+    await user.click(await screen.findByRole("button", { name: /已忽略的异常\d+项/ }));
 
     const exceptionDrawer = await screen.findByRole("dialog", { name: "异常处理" });
-    await user.click(within(exceptionDrawer).getByRole("button", { name: "已处理异常" }));
-    await user.click((await within(exceptionDrawer).findAllByRole("button", { name: "撤回处理" }))[0]);
+    await user.click(within(exceptionDrawer).getByRole("radio", { name: "已忽略的异常" }));
+    await user.click((await within(exceptionDrawer).findAllByRole("button", { name: "撤回忽略" }))[0]);
 
-    const confirmModal = await screen.findByRole("dialog", { name: "取消异常处理确认弹窗" });
-    expect(within(confirmModal).getByText("确认取消异常处理后，这组记录会回到未配对区域。")).toBeInTheDocument();
-
-    await user.click(within(confirmModal).getByRole("button", { name: "确认取消异常处理" }));
-
-    expect(screen.queryByRole("dialog", { name: "异常处理" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "取消异常处理确认弹窗" })).not.toBeInTheDocument();
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/workbench/actions/cancel-exception",
@@ -2847,11 +2842,12 @@ describe("Workbench row selection and detail drawer", () => {
             month: "all",
             row_ids: ["oa-o-202603-001"],
             expected_read_model_version: "mock-workbench-generation-1",
-            comment: "由已处理异常抽屉撤回异常处理",
+            comment: "由已忽略异常抽屉撤回忽略",
           }),
         }),
       );
     });
+    await user.click(within(exceptionDrawer).getByRole("button", { name: "关闭抽屉" }));
     await waitFor(() => {
       expect(
         within(unpairedZone).getByRole("row", {
@@ -2888,13 +2884,10 @@ describe("Workbench row selection and detail drawer", () => {
     });
     fetchMock.mockClear();
 
-    await user.click(within(unpairedZone).getByRole("button", { name: /已处理异常\d+项/ }));
+    await user.click(within(unpairedZone).getByRole("button", { name: /已忽略的异常\d+项/ }));
     const exceptionDrawer = await screen.findByRole("dialog", { name: "异常处理" });
-    await user.click(within(exceptionDrawer).getByRole("button", { name: "已处理异常" }));
-    await user.click((await within(exceptionDrawer).findAllByRole("button", { name: "撤回处理" }))[0]);
-
-    const confirmModal = await screen.findByRole("dialog", { name: "取消异常处理确认弹窗" });
-    await user.click(within(confirmModal).getByRole("button", { name: "确认取消异常处理" }));
+    await user.click(within(exceptionDrawer).getByRole("radio", { name: "已忽略的异常" }));
+    await user.click((await within(exceptionDrawer).findAllByRole("button", { name: "撤回忽略" }))[0]);
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -2908,6 +2901,7 @@ describe("Workbench row selection and detail drawer", () => {
       });
       expect(workbenchRefreshCalls.length).toBeGreaterThan(0);
     });
+    await user.click(within(exceptionDrawer).getByRole("button", { name: "关闭抽屉" }));
 
     await waitFor(() => {
       expect(

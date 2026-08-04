@@ -5,7 +5,6 @@ import AppDrawer from "../components/common/AppDrawer";
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import ActionStatusModal from "../components/workbench/ActionStatusModal";
-import CancelProcessedExceptionModal from "../components/workbench/CancelProcessedExceptionModal";
 import DetailDrawer from "../components/workbench/DetailDrawer";
 import RelationPreviewTriPane from "../components/workbench/RelationPreviewTriPane";
 import WorkbenchExceptionDrawer from "../components/workbench/WorkbenchExceptionDrawer";
@@ -109,10 +108,6 @@ type WorkbenchExceptionDialogState = {
 type CashTicketPurchaseDialogState = {
   rowIds: string[];
   cashAmount: string;
-};
-
-type CancelProcessedExceptionDialogState = {
-  group: WorkbenchRelationGroup;
 };
 
 type WorkbenchLoadProgressState = {
@@ -430,14 +425,13 @@ export default function ReconciliationWorkbenchPage() {
   const [exceptionDrawerOpen, setExceptionDrawerOpen] = useState(false);
   const [exceptionDrawerBucket, setExceptionDrawerBucket] = useState<"active" | "processed">("active");
   const [exceptionDrawerGroups, setExceptionDrawerGroups] = useState<WorkbenchRelationGroup[]>([]);
-  const [exceptionActiveCount, setExceptionActiveCount] = useState(0);
+  const [ignoredExceptionCount, setIgnoredExceptionCount] = useState(0);
   const [exceptionDrawerIgnoredRows, setExceptionDrawerIgnoredRows] = useState<WorkbenchRecord[]>([]);
   const [exceptionDrawerLoading, setExceptionDrawerLoading] = useState(false);
   const [exceptionDrawerError, setExceptionDrawerError] = useState<string | null>(null);
   const exceptionDrawerRequestRef = useRef<AbortController | null>(null);
   const [workbenchExceptionDialog, setWorkbenchExceptionDialog] = useState<WorkbenchExceptionDialogState | null>(null);
   const [cashTicketPurchaseDialog, setCashTicketPurchaseDialog] = useState<CashTicketPurchaseDialogState | null>(null);
-  const [cancelProcessedExceptionDialog, setCancelProcessedExceptionDialog] = useState<CancelProcessedExceptionDialogState | null>(null);
   const pairedDisplaySession = usePageSessionState<WorkbenchZoneDisplayState>({
     pageKey: "reconciliation-workbench",
     stateKey: "pairedDisplayState",
@@ -756,11 +750,10 @@ export default function ReconciliationWorkbenchPage() {
       setRelationPreviewDialog(null);
       setWorkbenchExceptionDialog(null);
       setCashTicketPurchaseDialog(null);
-      setCancelProcessedExceptionDialog(null);
     }
     activeWorkbenchReadModelVersionRef.current = nextVersion;
     setWorkbenchData(workbenchPayload.data);
-    setExceptionActiveCount(workbenchPayload.data.summary.exceptionCount);
+    setIgnoredExceptionCount(workbenchPayload.data.summary.ignoredExceptionCount);
     setStatistics(nextStatus === "fresh" ? workbenchPayload.statistics ?? null : null);
     setLoadedZoneServerPageQueryKeys(createWorkbenchZoneServerPageQueryKeys(resolvedZoneQueries));
     setZonePages(workbenchPayload.pages);
@@ -845,7 +838,7 @@ export default function ReconciliationWorkbenchPage() {
         setZonePages(createInitialZonePages());
         setExceptionDrawerGroups([]);
         setExceptionDrawerIgnoredRows([]);
-        setExceptionActiveCount(0);
+        setIgnoredExceptionCount(0);
         setLoadError(normalizedError.message);
         setIsLoading(false);
       } else {
@@ -1537,6 +1530,9 @@ export default function ReconciliationWorkbenchPage() {
       if (!controller.signal.aborted) {
         setExceptionDrawerGroups(result.groups);
         setExceptionDrawerIgnoredRows(result.ignoredRows);
+        if (bucket === "processed") {
+          setIgnoredExceptionCount(result.groups.length + result.ignoredRows.length);
+        }
       }
     } catch (error) {
       if (!controller.signal.aborted) {
@@ -1593,24 +1589,6 @@ export default function ReconciliationWorkbenchPage() {
     }
     return true;
   }, [openActionResultDialog, workbenchWriteGate]);
-
-  const openCancelProcessedExceptionDialog = useCallback((row: WorkbenchRecord) => {
-    const group = exceptionDrawerGroups.find((candidateGroup) =>
-      [...candidateGroup.rows.oa, ...candidateGroup.rows.bank, ...candidateGroup.rows.invoice].some(
-        (candidateRow) => candidateRow.id === row.id,
-      ),
-    );
-    if (!group) {
-      openActionResultDialog("未找到对应的异常分组。");
-      return;
-    }
-    setExceptionDrawerOpen(false);
-    setCancelProcessedExceptionDialog({ group });
-  }, [exceptionDrawerGroups, openActionResultDialog]);
-
-  const handleCloseCancelProcessedExceptionDialog = () => {
-    setCancelProcessedExceptionDialog(null);
-  };
 
   const openWorkbenchExceptionDialog = useCallback((rows: WorkbenchRecord[]) => {
     if (!ensureCanWriteWorkbench()) {
@@ -1729,6 +1707,7 @@ export default function ReconciliationWorkbenchPage() {
     });
     if (outcome.status === "success") {
       setLastActionMessage(outcome.value);
+      return true;
     } else if (isWorkbenchReadModelRejected(outcome.error)) {
       await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
         background: true,
@@ -1737,6 +1716,7 @@ export default function ReconciliationWorkbenchPage() {
       });
       setLastActionMessage("关联台数据版本已更新，页面已重新加载。");
     }
+    return false;
   }, [executeWorkbenchActionWithFreshness, handleCloseDetail, loadWorkbenchData, runOperation, zoneServerPageQueries]);
 
   const refreshAfterReadModelRejection = useCallback((error: unknown) => {
@@ -1771,6 +1751,44 @@ export default function ReconciliationWorkbenchPage() {
     clearOpenSelection();
     setLastActionMessage(result.message ?? "已提交统一异常处理。");
   }, [clearOpenSelection, waitForWorkbenchFreshAfterOperation]);
+
+  const handleCancelProcessedException = useCallback(async (target: WorkbenchRelationGroup | WorkbenchRecord) => {
+    if (!ensureCanWriteWorkbench()) {
+      return;
+    }
+    const rowIds = ("rows" in target ? flattenExceptionGroupRows(target) : [target]).map(
+      (candidateRow) => candidateRow.id,
+    );
+    if (rowIds.length === 0) {
+      openActionResultDialog("异常分组没有可撤回的记录。");
+      return;
+    }
+    const succeeded = await runBlockingAction({
+      loadingMessage: "正在撤回忽略...",
+      action: () => cancelWorkbenchException({
+        month: WORKBENCH_VIEW_MONTH,
+        rowIds,
+        expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
+        comment: "由已忽略异常抽屉撤回忽略",
+      }),
+    });
+    if (!succeeded) {
+      return;
+    }
+    await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
+      background: true,
+      includeAuxiliary: false,
+      zoneQueries: zoneServerPageQueries,
+    });
+    await loadExceptionDrawer("processed");
+  }, [
+    ensureCanWriteWorkbench,
+    loadExceptionDrawer,
+    loadWorkbenchData,
+    openActionResultDialog,
+    runBlockingAction,
+    zoneServerPageQueries,
+  ]);
 
   const handleRowAction = useCallback(async (row: WorkbenchRecord, action: WorkbenchInlineAction) => {
     if (action === "relation-status") {
@@ -1881,14 +1899,14 @@ export default function ReconciliationWorkbenchPage() {
     }
 
     if (action === "cancel-exception") {
-      openCancelProcessedExceptionDialog(row);
+      await handleCancelProcessedException(row);
     }
   }, [
     clearOpenSelection,
     collectCaseRowIds,
     ensureCanWriteWorkbench,
     openActionResultDialog,
-    openCancelProcessedExceptionDialog,
+    handleCancelProcessedException,
     openWorkbenchExceptionDialog,
     refreshWorkbenchDataInBackground,
     runBlockingAction,
@@ -2168,7 +2186,7 @@ export default function ReconciliationWorkbenchPage() {
     if (!ensureCanWriteWorkbench()) {
       return;
     }
-    await runBlockingAction({
+    const succeeded = await runBlockingAction({
       loadingMessage: "正在撤回忽略...",
       action: async () => {
         const result = await unignoreWorkbenchRow({
@@ -2178,6 +2196,14 @@ export default function ReconciliationWorkbenchPage() {
         });
         return result;
       },
+    });
+    if (!succeeded) {
+      return;
+    }
+    await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
+      background: true,
+      includeAuxiliary: false,
+      zoneQueries: zoneServerPageQueries,
     });
     await loadExceptionDrawer("processed");
   };
@@ -2189,8 +2215,8 @@ export default function ReconciliationWorkbenchPage() {
     if (!ensureCanWriteWorkbench() || !group.amountAnomaly) {
       return;
     }
-    await runBlockingAction({
-      loadingMessage: ignored ? "正在忽略金额异常..." : "正在恢复金额异常...",
+    const succeeded = await runBlockingAction({
+      loadingMessage: ignored ? "正在忽略金额异常..." : "正在撤回忽略...",
       action: () => setWorkbenchAmountMismatchIgnored({
         month: WORKBENCH_VIEW_MONTH,
         zone: group.groupType,
@@ -2199,35 +2225,22 @@ export default function ReconciliationWorkbenchPage() {
         expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
       }, ignored),
     });
-    await loadExceptionDrawer(ignored ? "active" : "processed");
-  }, [ensureCanWriteWorkbench, loadExceptionDrawer, runBlockingAction]);
-
-  const handleConfirmCancelProcessedException = async () => {
-    if (!ensureCanWriteWorkbench()) {
+    if (!succeeded) {
       return;
     }
-    if (!cancelProcessedExceptionDialog) {
-      return;
-    }
-    const rows = [
-      ...cancelProcessedExceptionDialog.group.rows.oa,
-      ...cancelProcessedExceptionDialog.group.rows.bank,
-      ...cancelProcessedExceptionDialog.group.rows.invoice,
-    ];
-    setCancelProcessedExceptionDialog(null);
-    await runBlockingAction({
-      loadingMessage: "正在取消异常处理...",
-      action: async () => {
-        const result = await cancelWorkbenchException({
-          month: WORKBENCH_VIEW_MONTH,
-          rowIds: rows.map((row) => row.id),
-          expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
-          comment: "由已处理异常抽屉撤回异常处理",
-        });
-        return result;
-      },
+    await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
+      background: true,
+      includeAuxiliary: false,
+      zoneQueries: zoneServerPageQueries,
     });
-  };
+    await loadExceptionDrawer(ignored ? "active" : "processed");
+  }, [
+    ensureCanWriteWorkbench,
+    loadExceptionDrawer,
+    loadWorkbenchData,
+    runBlockingAction,
+    zoneServerPageQueries,
+  ]);
 
   const pairedPanes = useMemo<WorkbenchPane[]>(
     () => {
@@ -2270,12 +2283,12 @@ export default function ReconciliationWorkbenchPage() {
   const openAuxiliaryHeaderActions = useMemo(
     () => [
       {
-        label: `已处理异常${exceptionActiveCount}项`,
+        label: `已忽略的异常${ignoredExceptionCount}项`,
         onClick: handleOpenExceptionDrawer,
         tone: "danger" as const,
       },
     ],
-    [exceptionActiveCount, handleOpenExceptionDrawer],
+    [handleOpenExceptionDrawer, ignoredExceptionCount],
   );
 
   const isWorkbenchPageFresh = workbenchPageReadModelStatus === "fresh";
@@ -2500,23 +2513,12 @@ export default function ReconciliationWorkbenchPage() {
         loading={exceptionDrawerLoading}
         open={exceptionDrawerOpen}
         onBucketChange={handleExceptionDrawerBucketChange}
-        onCancelProcessedException={openCancelProcessedExceptionDialog}
+        onCancelProcessedException={handleCancelProcessedException}
         onClose={handleCloseExceptionDrawer}
-        onIgnoreAmountMismatch={(group) => void handleAmountMismatchDecision(group, true)}
-        onRestoreAmountMismatch={(group) => void handleAmountMismatchDecision(group, false)}
-        onUnignoreRow={(row) => void handleUnignoreRow(row)}
+        onIgnoreAmountMismatch={(group) => handleAmountMismatchDecision(group, true)}
+        onRestoreAmountMismatch={(group) => handleAmountMismatchDecision(group, false)}
+        onUnignoreRow={handleUnignoreRow}
       />
-      {cancelProcessedExceptionDialog ? (
-        <CancelProcessedExceptionModal
-          affectedCount={
-            cancelProcessedExceptionDialog.group.rows.oa.length
-            + cancelProcessedExceptionDialog.group.rows.bank.length
-            + cancelProcessedExceptionDialog.group.rows.invoice.length
-          }
-          onClose={handleCloseCancelProcessedExceptionDialog}
-          onConfirm={handleConfirmCancelProcessedException}
-        />
-      ) : null}
       {workbenchExceptionDialog ? (
         <WorkbenchExceptionModal
           month={WORKBENCH_VIEW_MONTH}
@@ -2854,6 +2856,12 @@ function RelationPreviewDialog({
 
 function flattenGroups(groups: WorkbenchRelationGroup[]) {
   return groups.flatMap((group) => [...group.rows.oa, ...group.rows.bank, ...group.rows.invoice]);
+}
+
+function flattenExceptionGroupRows(group: WorkbenchRelationGroup) {
+  return (["oa", "bank", "invoice"] as const).flatMap(
+    (paneId) => group.collapsedRows?.[paneId] ?? group.rows[paneId],
+  );
 }
 
 function mergeWorkbenchGroupsByIdReplacingExisting(

@@ -79,6 +79,7 @@ type RelationGroupGridProps = {
   ) => void;
   canMutateData: boolean;
   readOnly?: boolean;
+  hidePaneHeaders?: boolean;
 };
 
 type CollapsedSummaryCopy = {
@@ -153,6 +154,7 @@ function RelationGroupGrid({
   onReorderPaneColumns = () => undefined,
   canMutateData,
   readOnly = false,
+  hidePaneHeaders = false,
 }: RelationGroupGridProps) {
   const gridRef = useRef<HTMLDivElement | null>(null);
   const gridBodyRef = useRef<HTMLDivElement | null>(null);
@@ -760,7 +762,7 @@ function RelationGroupGrid({
 
   return (
     <div ref={gridRef} className="candidate-grid">
-      <div className="candidate-grid-head" style={{ gridTemplateColumns: rowTemplateColumns }}>
+      {!hidePaneHeaders ? <div className="candidate-grid-head" style={{ gridTemplateColumns: rowTemplateColumns }}>
         {panes.map((pane, paneIndex) => (
           <Fragment key={pane.id}>
             <section className="candidate-pane-head pane-card" data-testid={`pane-${pane.id}`}>
@@ -881,7 +883,7 @@ function RelationGroupGrid({
             <span className="candidate-columnheader-label">{column.label}</span>
           </div>
         ))}
-      </div>
+      </div> : null}
 
       {gridBody}
 

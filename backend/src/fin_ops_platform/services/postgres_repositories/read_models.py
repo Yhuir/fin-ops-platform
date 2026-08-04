@@ -3686,15 +3686,35 @@ class PostgresReadModelRepository:
                     where canonical_members.pane = 'invoice'
                 )::bigint as invoice_count,
                 count(distinct canonical_groups.group_id) filter (
-                    where canonical_groups.zone = 'unpaired'
-                      and (
+                    where canonical_groups.payload #>> '{{amount_anomaly,state}}' = 'active'
+                       or canonical_groups.payload->>'exception_state' = 'active'
+                       or (
+                        canonical_groups.zone = 'unpaired' and (
                         coalesce(canonical_groups.payload->>'match_confidence', '') = 'danger'
                         or jsonb_path_exists(
                             coalesce(canonical_groups.payload, '{{}}'::jsonb),
                             '$.** ? (@.tone == "danger")'
                         )
+                       )
                       )
                 )::bigint as exception_count,
+                (
+                    count(distinct canonical_groups.group_id) filter (
+                        where canonical_groups.payload #>> '{{amount_anomaly,state}}' = 'ignored'
+                           or canonical_groups.payload->>'exception_state' = 'processed'
+                    )
+                    + (
+                        select count(distinct ignored_rows.row_id)
+                        from read_model.workbench_rows ignored_rows
+                        join read_model.workbench_generations ignored_generation
+                          on ignored_generation.tenant_id = 'default'
+                         and ignored_generation.scope_key = ignored_rows.scope_key
+                         and ignored_generation.generation_id = ignored_rows.generation_id
+                         and ignored_generation.status = 'active'
+                        where ignored_rows.scope_key <> 'all'
+                          and lower(coalesce(ignored_rows.payload->>'ignored', 'false')) = 'true'
+                    )
+                )::bigint as ignored_exception_count,
                 count(distinct (canonical_members.pane, canonical_members.object_identity_key)) filter (
                     where canonical_members.zone = 'paired' and canonical_members.pane = 'oa'
                 )::bigint as paired_oa_count,
@@ -3809,6 +3829,7 @@ class PostgresReadModelRepository:
             "paired_count": paired_count,
             "unpaired_count": int_value(row.get("unpaired_count"), 0),
             "exception_count": int_value(row.get("exception_count"), 0),
+            "ignored_exception_count": int_value(row.get("ignored_exception_count"), 0),
             "zone_counts": zone_counts,
             "statistics": {
                 "oa_count": oa_count,
@@ -4392,7 +4413,7 @@ class PostgresReadModelRepository:
              and generation.generation_id = rows.generation_id
              and generation.status = 'active'
             where {scope_clause}
-              and rows.status = 'ignored'
+              and lower(coalesce(rows.payload->>'ignored', 'false')) = 'true'
             order by rows.generated_at desc, rows.updated_at desc, rows.row_id
             """,
             tuple(params),
@@ -6339,6 +6360,8 @@ def _empty_workbench_zone_counts() -> dict[str, dict[str, int]]:
 
 def _normalize_workbench_summary_counts(summary: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(summary)
+    normalized["exception_count"] = int_value(normalized.get("exception_count"), 0)
+    normalized["ignored_exception_count"] = int_value(normalized.get("ignored_exception_count"), 0)
     zone_counts = normalized.get("zone_counts")
     if not isinstance(zone_counts, dict):
         zone_counts = _empty_workbench_zone_counts()
@@ -7459,6 +7482,7 @@ def _summarize_workbench_payload_groups(payload: dict[str, Any]) -> dict[str, An
         "paired_count": 0,
         "unpaired_count": 0,
         "exception_count": 0,
+        "ignored_exception_count": 0,
         "zone_counts": _empty_workbench_zone_counts(),
     }
     seen_rows: set[tuple[str, str]] = set()
@@ -7474,8 +7498,10 @@ def _summarize_workbench_payload_groups(payload: dict[str, Any]) -> dict[str, An
         for group in groups:
             if not isinstance(group, dict):
                 continue
-            if zone == "unpaired" and _workbench_group_has_danger(group):
+            if _workbench_group_is_active_exception(group, zone=zone):
                 summary["exception_count"] += 1
+            if _workbench_group_is_ignored_exception(group):
+                summary["ignored_exception_count"] += 1
             for pane, row_role, _row_index, row in _iter_typed_group_rows_with_metadata(group):
                 if row_role == "summary":
                     continue
@@ -7514,6 +7540,24 @@ def _workbench_group_has_danger(group: dict[str, Any]) -> bool:
             if isinstance(relation, dict) and text(relation.get("tone")) == "danger":
                 return True
     return False
+
+
+def _workbench_group_is_active_exception(group: dict[str, Any], *, zone: str) -> bool:
+    amount_anomaly = group.get("amount_anomaly")
+    return (
+        (isinstance(amount_anomaly, dict) and text(amount_anomaly.get("state")) == "active")
+        or text(group.get("exception_state")) == "active"
+        or (zone == "unpaired" and _workbench_group_has_danger(group))
+    )
+
+
+def _workbench_group_is_ignored_exception(group: dict[str, Any]) -> bool:
+    amount_anomaly = group.get("amount_anomaly")
+    return (
+        (isinstance(amount_anomaly, dict) and text(amount_anomaly.get("state")) == "ignored")
+        or text(group.get("exception_state")) == "processed"
+        or any(bool(row.get("ignored")) for row in _iter_group_rows(group))
+    )
 
 
 def _workbench_groups_order_by(sort: str | None) -> str:
