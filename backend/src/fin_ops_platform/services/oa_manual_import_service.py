@@ -38,10 +38,12 @@ class OAManualImportService:
         state_store: ManualOAImportStateStore,
         oa_adapter: object,
         workbench_query_service: object,
+        attachment_invoice_promoter: object | None = None,
     ) -> None:
         self._state_store = state_store
         self._oa_adapter = oa_adapter
         self._workbench_query_service = workbench_query_service
+        self._attachment_invoice_promoter = attachment_invoice_promoter
 
     def search(
         self,
@@ -135,7 +137,26 @@ class OAManualImportService:
             for row_id in normalized_row_ids
             if row_id not in records_by_id
         ]
-        return {"rows": rows, "errors": errors}
+        completed_records = [
+            record
+            for record in refreshed_records
+            if self._record_status(record) == OA_IMPORT_STATUS_COMPLETED
+        ]
+        promotion_summary: dict[str, object] = {}
+        if self._attachment_invoice_promoter is not None and completed_records:
+            try:
+                promotion = self._attachment_invoice_promoter.promote_records(completed_records)
+                promotion_summary = dict((promotion or {}).get("summary") or {})
+            except Exception as exc:
+                errors.extend(
+                    self._error(
+                        record.id,
+                        "attachment_promotion_failed",
+                        self._failure_message(exc, "附件发票写入统一发票池失败"),
+                    )
+                    for record in completed_records
+                )
+        return {"rows": rows, "errors": errors, "promotion_summary": promotion_summary}
 
     def import_row_ids(self, row_ids: list[str], *, actor_id: str) -> dict[str, object]:
         normalized_row_ids = self._dedupe_row_ids(row_ids)

@@ -215,6 +215,9 @@ from fin_ops_platform.services.oa_attachment_invoice_linking import (
     oa_attachment_row_id_matches_oa,
     oa_row_source_ids,
 )
+from fin_ops_platform.services.oa_attachment_invoice_promotion_service import (
+    OAAttachmentInvoicePromotionService,
+)
 from fin_ops_platform.services.oa_identity_service import (
     OAIdentityConfigurationError,
     OAIdentityService,
@@ -840,6 +843,14 @@ class Application:
                 state_store=self._state_store,
                 oa_adapter=oa_adapter,
                 workbench_query_service=self._workbench_query_service,
+                attachment_invoice_promoter=(
+                    OAAttachmentInvoicePromotionService(
+                        invoice_repository=import_fact_repository,
+                        promotion_mode_provider=self._app_settings_service.get_oa_attachment_invoice_promotion_mode,
+                    )
+                    if import_fact_repository is not None
+                    else None
+                ),
             )
             if self._state_store is not None and oa_adapter is not None
             else None

@@ -16,6 +16,7 @@ from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.oa_manual_import_service import OAManualImportService
 from tests.test_oa_manual_import_service import (
     MemoryManualImportStore,
+    RecordingAttachmentInvoicePromoter,
     RecordingOAAdapter,
     RecordingWorkbenchQueryService,
     oa_record,
@@ -33,6 +34,7 @@ class OAManualImportApiTests(unittest.TestCase):
         adapter: RecordingOAAdapter,
         store: MemoryManualImportStore | None = None,
         workbench: RecordingWorkbenchQueryService | None = None,
+        promoter: RecordingAttachmentInvoicePromoter | None = None,
     ) -> Application:
         app = build_application(data_dir=Path(self._temp_dir.name))
         self.addCleanup(app.close)
@@ -41,6 +43,7 @@ class OAManualImportApiTests(unittest.TestCase):
             state_store=store or MemoryManualImportStore(),
             oa_adapter=adapter,
             workbench_query_service=workbench or RecordingWorkbenchQueryService(),
+            attachment_invoice_promoter=promoter,
         )
         return app
 
@@ -98,7 +101,11 @@ class OAManualImportApiTests(unittest.TestCase):
         self.assertEqual(json.loads(oversize_page.body)["error"], "invalid_oa_manual_search_request")
 
     def test_refresh_endpoint_returns_counts_and_invalidates_affected_scopes(self) -> None:
-        app = self._build_app_with_service(adapter=RecordingOAAdapter([oa_record("oa-exp-1981", month="2025-12", invoices=[])]))
+        promoter = RecordingAttachmentInvoicePromoter()
+        app = self._build_app_with_service(
+            adapter=RecordingOAAdapter([oa_record("oa-exp-1981", month="2025-12", invoices=[])]),
+            promoter=promoter,
+        )
 
         response = app.handle_request(
             "POST",
@@ -110,6 +117,8 @@ class OAManualImportApiTests(unittest.TestCase):
         payload = json.loads(response.body)
         self.assertEqual(payload["rows"][0]["row_id"], "oa-exp-1981")
         self.assertEqual(payload["rows"][0]["importable_invoice_count"], 1)
+        self.assertEqual(payload["promotion_summary"]["affected_invoice_count"], 1)
+        self.assertEqual(promoter.row_ids, ["oa-exp-1981"])
         self._assert_oa_manual_targets(payload, month="2025-12")
 
     def test_import_endpoint_imports_completed_rejects_in_progress_and_is_idempotent(self) -> None:
