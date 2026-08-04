@@ -13,7 +13,9 @@ from fin_ops_platform.services.oa_attachment_invoice_promotion_service import (
 )
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
-from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
+from fin_ops_platform.services.postgres_repositories.oa_attachment_invoice import (
+    PostgresOAAttachmentInvoiceRepository,
+)
 
 
 APPLY_CONFIRMATION_FLAG = "--confirm-apply-oa-attachment-invoices"
@@ -74,7 +76,7 @@ def _load_candidates(
     *,
     oa_row_ids: list[str] | None = None,
 ) -> list[OAAttachmentInvoiceCandidate]:
-    rows = PostgresOpsTaxEtcRepository(connection).list_oa_attachment_invoice_promotion_source_rows(
+    rows = PostgresOAAttachmentInvoiceRepository(connection).list_promotion_source_rows(
         oa_row_ids=oa_row_ids,
     )
     candidates: list[OAAttachmentInvoiceCandidate] = []

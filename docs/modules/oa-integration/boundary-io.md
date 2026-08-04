@@ -64,7 +64,7 @@
 - OA projection sync 由 runtime worker 一次读取 dual-view source batch、条件写 `app.oa_*` projection，并在同一 Worker 主链路把 completed record 已解析的正式附件发票提升到 canonical invoice pool，随后记录 `app.oa_sync_runs` / `app.oa_sync_watermarks`；无论 change cause 如何都不标记页面 dirty scope。周期性相同输入必须是零 projection/invoice rewrite；变化输入也只提交 canonical facts。`all` 替换必须把旧 watermark scopes 纳入删除比较，不能漏掉最后一条 completed 被删除的月份。
 - `OA_PROJECTION_SYNC_VERSION=2026-07-28-expense-item-display-fields-v3` 触发一次存量重投，确保历史日常报销的 item/source binding 与 `fee_content` / `fee_description` 保真字段符合当前合同；重投仍由 durable `oa.sync` worker 执行且必须幂等。
 - External system：OA Mongo / OA app。
-- Repository：`postgres_repositories/oa_projection.py`、`oa_applicant_credentials.py`。
+- Repository：`postgres_repositories/oa_projection.py`、`postgres_repositories/oa_attachment_invoice.py`、`oa_applicant_credentials.py`。
 
 ## 文件范围
 
@@ -73,7 +73,7 @@
 | Auth/session | `backend/src/fin_ops_platform/app/auth.py`、`web/src/features/session/api.ts` |
 | Menu projection | `backend/src/fin_ops_platform/services/oa_role_sync_service.py`、`backend/src/fin_ops_platform/tools/settings_access_control_preflight.py` |
 | Deployment verification | `backend/src/fin_ops_platform/tools/settings_access_control_preflight.py`、`deploy/oa/bin/finops-deploy-control.sh` |
-| Adapter/projection | `mongo_oa_adapter.py`、`oa_projection_sync.py`、`oa_attachment_invoice_promotion_service.py`、`postgres_repositories/oa_projection.py`、`runtime_worker_registry.py` |
+| Adapter/projection | `mongo_oa_adapter.py`、`oa_projection_sync.py`、`oa_attachment_invoice_promotion_service.py`、`postgres_repositories/oa_projection.py`、`postgres_repositories/oa_attachment_invoice.py`、`runtime_worker_registry.py` |
 | OA services | `oa_identity_service.py`、`oa_manual_import_service.py`、`oa_attachment_invoice_service.py`、`oa_attachment_invoice_promotion_service.py`、`oa_applicant_credentials.py`、`target_oa_applicant_token_provider.py` |
 | Related routes | `routes_oa_pending_payments.py`、`routes_etc.py`、`routes_input_invoice_usage_oa_reverse.py`、`server.py` |
 | Related modules | OA pending payments、ETC、input invoice usage、settings、permissions |

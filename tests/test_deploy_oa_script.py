@@ -859,6 +859,21 @@ class DeployOAScriptTest(unittest.TestCase):
             self.assertTrue(acl["acl_changed"])
 
             (releases / "candidate/src" / acl_path).write_text("base\n", encoding="utf-8")
+            oa_attachment_repository = Path(
+                "backend/src/fin_ops_platform/services/postgres_repositories/oa_attachment_invoice.py"
+            )
+            (releases / "candidate/src" / oa_attachment_repository).parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+            (releases / "candidate/src" / oa_attachment_repository).write_text(
+                "runtime-only\n",
+                encoding="utf-8",
+            )
+            runtime = run_profile()
+            self.assertEqual(runtime["profile"], "runtime")
+            self.assertFalse(runtime["acl_changed"])
+
             manual_template = Path("deploy/oa/fin_ops_user_role_sync.mysql.sql")
             for name, content in (("active", "base\n"), ("candidate", "comment-only\n")):
                 path = releases / name / "src" / manual_template
