@@ -517,6 +517,8 @@ type ApiWorkbenchActionResult = {
   success: boolean;
   action: string;
   month: string;
+  read_model_status?: string;
+  read_model_version?: string | number | null;
   affected_row_ids: string[];
   case_id?: string;
   exception_case_id?: string;

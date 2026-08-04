@@ -2797,6 +2797,95 @@ describe("Workbench row selection and detail drawer", () => {
     expect(within(exceptionDrawer).getAllByRole("button", { name: "撤回忽略" }).length).toBeGreaterThan(0);
   });
 
+  test("amount mismatch ignore waits for a new generation before loading ignored exceptions", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({
+      workbenchReadModelVersions: ["generation-v1", "generation-v1", "generation-v1", "generation-v2"],
+    });
+    const defaultFetch = fetchMock.getMockImplementation();
+    let amountMismatchState: "active" | "ignored" = "active";
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const requestUrl = new URL(fetchPath(input), "http://localhost");
+      if (requestUrl.pathname === "/api/workbench/exceptions/amount-mismatch/ignore") {
+        amountMismatchState = "ignored";
+        return jsonResponse({
+          success: true,
+          action: "amount_mismatch_ignored",
+          month: "all",
+          affected_row_ids: [],
+          affected_scope_keys: ["2026-03"],
+          read_model_status: "refreshing",
+          read_model_version: "generation-v1",
+          message: "已忽略金额异常。",
+        });
+      }
+      const exceptionBucket = requestUrl.searchParams.get("exception_bucket");
+      if (requestUrl.pathname === "/api/workbench/groups" && exceptionBucket) {
+        if (!defaultFetch) {
+          throw new Error("Mock API fetch is not installed.");
+        }
+        const sourceUrl = new URL(requestUrl);
+        sourceUrl.searchParams.delete("exception_bucket");
+        const sourceResponse = await defaultFetch(`${sourceUrl.pathname}${sourceUrl.search}`, init) as Response;
+        const sourcePayload = await sourceResponse.json() as Record<string, unknown>;
+        const sourceGroups = Array.isArray(sourcePayload.groups) ? sourcePayload.groups : [];
+        const expectedVersion = requestUrl.searchParams.get("expected_read_model_version");
+        const shouldInclude = requestUrl.searchParams.get("zone") === "paired" && (
+          (exceptionBucket === "active" && amountMismatchState === "active" && expectedVersion === "generation-v1")
+          || (exceptionBucket === "processed" && amountMismatchState === "ignored" && expectedVersion === "generation-v2")
+        );
+        const groups = shouldInclude && sourceGroups[0]
+          ? [{
+              ...(sourceGroups[0] as Record<string, unknown>),
+              amount_anomaly: {
+                code: "oa_invoice_amount_mismatch",
+                label: "金额不一致",
+                display_label: amountMismatchState === "ignored" ? "已忽略：金额不一致" : "金额不一致",
+                fingerprint: "a".repeat(64),
+                state: amountMismatchState,
+                oa_total: "100.00",
+                invoice_total: "99.90",
+                amount_delta: "0.10",
+              },
+            }]
+          : [];
+        return jsonResponse({
+          ...sourcePayload,
+          groups,
+          total: groups.length,
+          has_more: false,
+          read_model_version: expectedVersion,
+        });
+      }
+      if (!defaultFetch) {
+        throw new Error("Mock API fetch is not installed.");
+      }
+      return defaultFetch(input, init);
+    });
+    renderWorkbenchPage();
+
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    await within(unpairedZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ });
+    await user.click(within(unpairedZone).getByRole("button", { name: /已忽略的异常\d+项/ }));
+    const exceptionDrawer = await screen.findByRole("dialog", { name: "异常处理" });
+    await user.click((await within(exceptionDrawer).findAllByRole("button", { name: "忽略" }))[0]);
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input as RequestInfo | URL)).length)
+        .toBeGreaterThanOrEqual(4);
+    });
+    await user.click(within(exceptionDrawer).getByRole("radio", { name: "已忽略的异常" }));
+    expect((await within(exceptionDrawer).findAllByRole("button", { name: "撤回忽略" })).length)
+      .toBeGreaterThan(0);
+    expect(fetchMock.mock.calls.some(([input]) => {
+      const url = new URL(fetchPath(input as RequestInfo | URL), "http://localhost");
+      return url.pathname === "/api/workbench/groups"
+        && url.searchParams.get("exception_bucket") === "processed"
+        && url.searchParams.get("expected_read_model_version") === "generation-v2";
+    })).toBe(true);
+  });
+
   test("exception drawer cancels only the explicitly chosen singleton exception row", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({ actionDelayMs: 80 });

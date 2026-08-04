@@ -264,8 +264,15 @@ function actionResultMessage(result: string | WorkbenchActionResult) {
   return typeof result === "string" ? result : result.message;
 }
 
-function workbenchInitialPageIsFresh(result: WorkbenchInitialPageResult | null) {
-  return result?.pages.paired.readModelStatus === "fresh" && result.pages.unpaired.readModelStatus === "fresh";
+function workbenchInitialPageIsFresh(
+  result: WorkbenchInitialPageResult | null,
+  previousReadModelVersion = "",
+) {
+  if (result?.pages.paired.readModelStatus !== "fresh" || result.pages.unpaired.readModelStatus !== "fresh") {
+    return false;
+  }
+  const nextVersion = workbenchActiveReadModelVersion(result.pages);
+  return !previousReadModelVersion || Boolean(nextVersion && nextVersion !== previousReadModelVersion);
 }
 
 function workbenchZonePagesReadModelStatus(pages: Record<"paired" | "unpaired", WorkbenchZonePageInfo>) {
@@ -855,10 +862,12 @@ export default function ReconciliationWorkbenchPage() {
 
   const waitForWorkbenchFreshAfterOperation = useCallback(async (options?: {
     deferStateApply?: boolean;
+    afterReadModelVersion?: string;
   }) => {
     const startedAt = Date.now();
     let lastReadModelStatus = "";
     const deferStateApply = options?.deferStateApply ?? false;
+    const afterReadModelVersion = options?.afterReadModelVersion ?? "";
 
     const initialResult = await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
       background: true,
@@ -872,7 +881,7 @@ export default function ReconciliationWorkbenchPage() {
     lastReadModelStatus = initialPairedStatus === initialOpenStatus
       ? initialPairedStatus
       : `${initialPairedStatus}/${initialOpenStatus}`;
-    if (workbenchInitialPageIsFresh(initialResult)) {
+    if (workbenchInitialPageIsFresh(initialResult, afterReadModelVersion)) {
       return initialResult;
     }
 
@@ -900,7 +909,7 @@ export default function ReconciliationWorkbenchPage() {
       const pairedStatus = result?.pages.paired.readModelStatus ?? "unknown";
       const openStatus = result?.pages.unpaired.readModelStatus ?? "unknown";
       lastReadModelStatus = pairedStatus === openStatus ? pairedStatus : `${pairedStatus}/${openStatus}`;
-      if (workbenchInitialPageIsFresh(result)) {
+      if (workbenchInitialPageIsFresh(result, afterReadModelVersion)) {
         return result;
       }
       await delayWorkbenchOperationPoll();
@@ -1665,6 +1674,7 @@ export default function ReconciliationWorkbenchPage() {
     onFreshWorkbenchPayload?: (payload: WorkbenchInitialPageResult) => void;
   }) => {
     onProgress?.({ phase: "submitting", message: loadingMessage, committed: false });
+    const submittedReadModelVersion = activeWorkbenchReadModelVersionRef.current;
     const result = await action();
     const actionResult = typeof result === "string" ? null : result;
     const committed = Boolean(actionResult);
@@ -1675,6 +1685,9 @@ export default function ReconciliationWorkbenchPage() {
       onProgress?.({ phase: "loading", message: "正在加载关联台最新数据...", committed });
       const freshWorkbenchPayload = await waitForWorkbenchFreshAfterOperation({
         deferStateApply: deferFreshWorkbenchApply,
+        afterReadModelVersion: actionResult?.read_model_status === "refreshing"
+          ? submittedReadModelVersion
+          : undefined,
       });
       if (deferFreshWorkbenchApply && freshWorkbenchPayload) {
         onFreshWorkbenchPayload?.(freshWorkbenchPayload);

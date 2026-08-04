@@ -1501,9 +1501,11 @@ function workbenchGroupsPayload(
   amountMismatchScenario = false,
   amountMismatchIgnored = false,
 ) {
-  const readModelVersion = relationConfirmed || exceptionApplied || rowIgnored
-    ? "workbench-generation-e2e-002"
-    : "workbench-generation-e2e-001";
+  const readModelVersion = amountMismatchIgnored
+    ? "workbench-generation-e2e-003"
+    : relationConfirmed || exceptionApplied || rowIgnored
+      ? "workbench-generation-e2e-002"
+      : "workbench-generation-e2e-001";
   const allGroups = pageEmpty
     ? []
     : workbenchGroups(
@@ -1672,9 +1674,11 @@ function workbenchInitialPayload(
   amountMismatchScenario = false,
   amountMismatchIgnored = false,
 ) {
-  const readModelVersion = relationConfirmed || exceptionApplied || rowIgnored
-    ? "workbench-generation-e2e-002"
-    : "workbench-generation-e2e-001";
+  const readModelVersion = amountMismatchIgnored
+    ? "workbench-generation-e2e-003"
+    : relationConfirmed || exceptionApplied || rowIgnored
+      ? "workbench-generation-e2e-002"
+      : "workbench-generation-e2e-001";
   return {
     month: "all",
     summary: workbenchSummary(
