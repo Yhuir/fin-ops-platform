@@ -240,7 +240,7 @@ describe("groupDisplayModel time filter", () => {
     expect(buildWorkbenchGroupDisplayLayout(displayGroup, sourceGroup)).toBeNull();
   });
 
-  test("aligns the nine exact pairs in the 3061.64 reimbursement shape without losing residual invoices", () => {
+  test("aligns exact and explicitly owned composite invoices in the 3061.64 reimbursement shape", () => {
     const amounts = ["127", "1400", "300", "7.84", "450", "400", "12", "100", "14", "16", "76.8", "158"];
     const parent = {
       ...buildOaRow("oa-exp-3061", "3061.64"),
@@ -280,16 +280,63 @@ describe("groupDisplayModel time filter", () => {
 
     const layout = buildWorkbenchGroupDisplayLayout(group);
     const alignedItemIds = layout?.segments
-      .filter((segment) => segment.rows.oa[0]?.displayRole === "expense-claim-item" && segment.rows.invoice.length === 1)
+      .filter((segment) => segment.rows.oa[0]?.displayRole === "expense-claim-item" && segment.rows.invoice.length > 0)
       .map((segment) => segment.id);
     const renderedInvoiceIds = layout?.segments.flatMap((segment) => segment.rows.invoice.map((row) => row.id));
 
-    expect(alignedItemIds).toEqual([0, 1, 2, 5, 6, 7, 8, 9, 11].map((index) => `oa-exp-3061:item:${index}`));
+    expect(alignedItemIds).toEqual([0, 1, 2, 5, 6, 7, 8, 9, 10, 11].map((index) => `oa-exp-3061:item:${index}`));
     expect(renderedInvoiceIds).toHaveLength(12);
     expect(new Set(renderedInvoiceIds).size).toBe(12);
     expect(layout?.segments.find((segment) => segment.id === "oa-exp-3061:item:3")?.rows.invoice).toEqual([]);
-    expect(layout?.segments.find((segment) => segment.id === "oa-exp-3061:item:10:invoice:residual")?.rows.invoice)
+    expect(layout?.segments.find((segment) => segment.id === "oa-exp-3061:item:10")?.rows.invoice)
       .toEqual([invoices[9], invoices[10]]);
+    expect(layout?.segments.find((segment) => segment.id === "oa-exp-3061:item:10:invoice:residual"))
+      .toBeUndefined();
+  });
+
+  test("does not align a partial display of an explicitly owned composite", () => {
+    const parent = {
+      ...buildOaRow("oa-exp-partial-composite", "76.80"),
+      expenseItems: [
+        {
+          id: "oa-exp-partial-composite:item:0",
+          rowIndex: "0",
+          projectName: "项目甲",
+          amount: "76.80",
+        },
+        {
+          id: "oa-exp-partial-composite:item:1",
+          rowIndex: "1",
+          projectName: "项目乙",
+          amount: "10.00",
+        },
+      ],
+    };
+    const invoice = (id: string, amount: string) => ({
+      ...buildAttachmentInvoiceRow(id, parent.id, amount),
+      sourceExpenseItemId: "oa-exp-partial-composite:item:0",
+      tableValues: { grossAmount: amount },
+    });
+    const invoice29 = invoice("iv-partial-29", "29.00");
+    const invoice47 = invoice("iv-partial-47", "47.80");
+    const sourceGroup: WorkbenchRelationGroup = {
+      id: "case:partial-composite",
+      groupType: "unpaired",
+      matchConfidence: "high",
+      reason: "canonical_unpaired",
+      rows: { oa: [parent], bank: [], invoice: [invoice29, invoice47] },
+    };
+    const displayGroup: WorkbenchRelationGroup = {
+      ...sourceGroup,
+      rows: { ...sourceGroup.rows, invoice: [invoice29] },
+    };
+
+    const layout = buildWorkbenchGroupDisplayLayout(displayGroup, sourceGroup);
+
+    expect(layout?.segments.find((segment) => segment.id === "oa-exp-partial-composite:item:0")?.rows.invoice)
+      .toEqual([]);
+    expect(layout?.segmentedPaneIds).not.toContain("invoice");
+    expect(displayGroup.rows.invoice).toEqual([invoice29]);
   });
 
   test("dedupes repeated paginated groups for paired and unpaired zones", () => {

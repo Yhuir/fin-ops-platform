@@ -14,8 +14,8 @@ test.describe("workbench relation browser flow", () => {
 
     await page.goto("/");
 
-    await expect(page.getByText("多个项目 · 2")).toBeVisible();
-    await expect(page.getByText("¥248.00")).toBeVisible();
+    await expect(page.getByText("多个项目 · 3")).toBeVisible();
+    await expect(page.getByText("¥324.80")).toBeVisible();
     const itemBand = page.getByTestId(
       "candidate-group-segment-unpaired-row:oa-exp-2035-oa-exp-2035:item:1",
     );
@@ -46,8 +46,37 @@ test.describe("workbench relation browser flow", () => {
     expect(Math.abs((invoicePaneBox?.height ?? 0) - (oaItemPaneBox?.height ?? 0))).toBeLessThanOrEqual(2);
     expect(Math.abs((invoiceRowBox?.height ?? 0) - (invoicePaneBox?.height ?? 0))).toBeLessThanOrEqual(2);
 
+    const compositeBand = page.getByTestId(
+      "candidate-group-segment-unpaired-row:oa-exp-2035-oa-exp-2035:item:2",
+    );
+    const compositeOaPane = page.getByTestId(
+      "candidate-scroll-unpaired-row:oa-exp-2035-oa-exp-2035:item:2-oa",
+    );
+    const compositeInvoicePane = page.getByTestId(
+      "candidate-scroll-unpaired-row:oa-exp-2035-oa-exp-2035:item:2-invoice",
+    );
+    await expect(compositeBand.getByText("76.80", { exact: true })).toBeVisible();
+    await expect(compositeInvoicePane.getByText("29.00", { exact: true })).toBeVisible();
+    await expect(compositeInvoicePane.getByText("47.80", { exact: true })).toBeVisible();
+    const [compositeOaBox, compositeInvoiceBox, compositeInvoiceRowBoxes] = await Promise.all([
+      compositeOaPane.boundingBox(),
+      compositeInvoicePane.boundingBox(),
+      compositeInvoicePane.getByRole("row").evaluateAll((rows) => rows.map((row) => {
+        const box = row.getBoundingClientRect();
+        return { y: box.y, height: box.height };
+      })),
+    ]);
+    expect(compositeOaBox).not.toBeNull();
+    expect(compositeInvoiceBox).not.toBeNull();
+    expect(compositeInvoiceRowBoxes).toHaveLength(2);
+    expect(Math.abs((compositeInvoiceBox?.height ?? 0) - (compositeOaBox?.height ?? 0))).toBeLessThanOrEqual(2);
+    expect(Math.abs(
+      compositeInvoiceRowBoxes.reduce((height, row) => height + row.height, 0)
+      - (compositeInvoiceBox?.height ?? 0),
+    )).toBeLessThanOrEqual(4);
+
     await projectItem.click();
-    await expect(page.getByText("OA 1 / 248.00")).toBeVisible();
+    await expect(page.getByText("OA 1 / 324.80")).toBeVisible();
   });
 
   test("confirms a relation in workbench and reflects it in bank details", async ({ page }, testInfo) => {

@@ -57,7 +57,7 @@ describe("Finance operations shell", () => {
       }
 
       expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
-      const settingsTree = screen.getByRole("tree", { name: "设置分类" });
+      const settingsTree = await screen.findByRole("tree", { name: "设置分类" });
       expect(within(settingsTree).getAllByRole("treeitem").filter((item) => item.textContent?.includes("访问账户"))).toHaveLength(
         canAdminAccess ? 1 : 0,
       );

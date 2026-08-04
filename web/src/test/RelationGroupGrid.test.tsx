@@ -971,7 +971,7 @@ describe("Workbench candidate grouping layout", () => {
     expect(within(groupRow).getByText("进")).toBeInTheDocument();
   });
 
-  test("aligns the exact source attachment and keeps one-to-many attachments in a residual row", () => {
+  test("aligns the exact source attachment and keeps parent-level one-to-many attachments residual", () => {
     const oa294 = createOaRecord("oa-294", "刘晓宇", "294.31");
     const oa135 = createOaRecord("oa-135", "陈雄兵", "135");
     const bank = createBankRecord();

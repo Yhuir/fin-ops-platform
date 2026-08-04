@@ -130,16 +130,18 @@ export function buildWorkbenchGroupDisplayLayout(
     return null;
   }
 
-  const exactRowIdsByPane = {
-    bank: findExactRowIdsBySegment(sourceGroup, sourceSegments, "bank"),
-    invoice: findExactRowIdsBySegment(sourceGroup, sourceSegments, "invoice"),
-  };
   const displayRowsByPane = {
     bank: new Map(group.rows.bank.map((row) => [row.id, row])),
     invoice: new Map(group.rows.invoice.map((row) => [row.id, row])),
   };
+  const alignedRowIdsByPane = {
+    bank: findAlignedRowIdsBySegment(sourceGroup, sourceSegments, "bank"),
+    invoice: findAlignedRowIdsBySegment(sourceGroup, sourceSegments, "invoice"),
+  };
   const segmentedPaneIds = (["bank", "invoice"] as const).filter((paneId) => (
-    Array.from(exactRowIdsByPane[paneId].values()).some((rowId) => displayRowsByPane[paneId].has(rowId))
+    Array.from(alignedRowIdsByPane[paneId].values()).some((rowIds) => (
+      rowIds.length > 0 && rowIds.every((rowId) => displayRowsByPane[paneId].has(rowId))
+    ))
   ));
   const hasExpenseClaimItems = segments.some(
     (segment) => segment.rows.oa[0]?.displayRole === "expense-claim-summary",
@@ -159,24 +161,24 @@ export function buildWorkbenchGroupDisplayLayout(
   const displaySegments: WorkbenchGroupDisplaySegment[] = [];
 
   segments.forEach((segment) => {
-    const exactRows = {
+    const alignedRows = {
       bank: [] as WorkbenchRecord[],
       invoice: [] as WorkbenchRecord[],
     };
     segmentedPaneIds.forEach((paneId) => {
-      const rowId = exactRowIdsByPane[paneId].get(segment.id);
-      const row = rowId ? displayRowsByPane[paneId].get(rowId) : undefined;
-      if (row) {
-        exactRows[paneId].push(row);
-        matchedRowIdsByPane[paneId].add(row.id);
+      const rowIds = alignedRowIdsByPane[paneId].get(segment.id) ?? [];
+      const rows = rowIds.map((rowId) => displayRowsByPane[paneId].get(rowId));
+      if (rows.length > 0 && rows.every((row): row is WorkbenchRecord => Boolean(row))) {
+        alignedRows[paneId].push(...rows);
+        rows.forEach((row) => matchedRowIdsByPane[paneId].add(row.id));
       }
     });
     displaySegments.push({
       id: segment.id,
       rows: {
         oa: segment.rows.oa,
-        bank: exactRows.bank,
-        invoice: exactRows.invoice,
+        bank: alignedRows.bank,
+        invoice: alignedRows.invoice,
       },
     });
 
@@ -268,23 +270,31 @@ function buildWorkbenchGroupSourceSegments(
   return segments;
 }
 
-function findExactRowIdsBySegment(
+function findAlignedRowIdsBySegment(
   group: WorkbenchRelationGroup,
   segments: WorkbenchGroupDisplaySegment[],
   paneId: WorkbenchRecordType,
-): Map<string, string> {
-  const exactRowsBySegmentId = new Map<string, string>();
+): Map<string, string[]> {
+  const alignedRowsBySegmentId = new Map<string, string[]>();
   const explicitlyOwnedRowIds = new Set(segments.flatMap((segment) => segment.rows[paneId].map((row) => row.id)));
 
   segments.forEach((segment) => {
     const rows = segment.rows[paneId];
     const targetAmount = segmentTargetAmountCents(segment);
+    const rowAmounts = rows.map(workbenchComparableAmountCents);
+    const canAlignComposite = rows.length === 1 || (
+      paneId === "invoice"
+      && segment.rows.oa[0]?.displayRole === "expense-claim-item"
+      && rows.every((row) => row.sourceExpenseItemId === segment.id)
+    );
     if (
-      rows.length === 1
+      rows.length > 0
+      && canAlignComposite
       && targetAmount > 0
-      && workbenchComparableAmountCents(rows[0]) === targetAmount
+      && rowAmounts.every((amount) => amount > 0)
+      && rowAmounts.reduce((total, amount) => total + amount, 0) === targetAmount
     ) {
-      exactRowsBySegmentId.set(segment.id, rows[0].id);
+      alignedRowsBySegmentId.set(segment.id, rows.map((row) => row.id));
     }
   });
 
@@ -319,11 +329,11 @@ function findExactRowIdsBySegment(
   fallbackTargetsByAmount.forEach((targets, amount) => {
     const rows = fallbackRowsByAmount.get(amount) ?? [];
     if (targets.length === 1 && rows.length === 1) {
-      exactRowsBySegmentId.set(targets[0].id, rows[0].id);
+      alignedRowsBySegmentId.set(targets[0].id, [rows[0].id]);
     }
   });
 
-  return exactRowsBySegmentId;
+  return alignedRowsBySegmentId;
 }
 
 function segmentTargetAmountCents(segment: WorkbenchGroupDisplaySegment) {

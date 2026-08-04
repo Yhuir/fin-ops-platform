@@ -596,6 +596,15 @@
 - 未测风险：未在本地执行真实生产 worker 写入重建；发布后需由常驻 `workbench-matching` worker 按新规则版本把 completed scope 重投 dirty，再刷新 Workbench active generation。不得手工改 decision 表替代重建。
 - 后续事项：如未来导入层新增 `sales_invoice`、`purchase_invoice` 之外的新枚举，必须先扩展统一 helper 和测试；未知枚举保持 fail closed。
 
+## 2026-08-04 - 显式费用子项附件发票复合同行
+
+- 目标：生产 `3061.64` 报销样例中，费用子项 `76.80` 与明确绑定该 `sourceExpenseItemId` 的附件发票 `29.00 + 47.80` 使用同一复合行轨；费用子项占满复合轨高度，两张发票在轨内等分。
+- 真实原因：旧 `findExactRowIdsBySegment` 只返回单个 row id，并以 `rows.length === 1` 拒绝所有一对多；既有回归测试还显式要求这两张发票进入 `invoice:residual`，所以不是缓存、read model 或部署失效。
+- 关键决策：布局结果改为每个 segment 可返回多个 row id，但多行分支只允许 `invoice` 栏、OA 虚拟费用子项和每张发票的 `sourceExpenseItemId === segment.id`；各金额必须合法且价税合计按分等于子项金额，当前显示缺少任一组成项时不建立部分复合同行。父 OA 级重复来源、银行流水和无来源金额组合仍保持原 residual/group-level 合同。
+- 旧链路清理：删除单 row-id Map 与调用方单值假设，更新 `76.80/(29+47.80)` 的旧 residual 测试合同；不恢复历史 2～6 条 subset-sum、顺序或项目名猜测。
+- 边界与性能：只修改 `groupDisplayModel` 的纯展示投影并复用现有 segment/Flex 渲染；保持 `O(OA + bank + invoice)`，不增加 HTTP、API DTO、read model、worker、cache、state/effect、DOM 测量、依赖、数据库或 migration。
+- 测试：模型覆盖真实 `3061.64` 形状、记录不丢不重和筛选部分可见；组件保留父 OA 一对多 residual 与无来源组合 residual；Chromium 同时保护单张 `200.00` 同行和 `76.80/(29.00+47.80)` 复合轨几何。
+
 ## 2026-08-03 - 三栏完整高度与严格一一对应
 
 > 已由下方“逐项精确金额混合同行”修订：保留无精确对栏的完整高度，但不再要求整栏完整双射。

@@ -47,7 +47,7 @@
 | `unpaired.groups` | 前端 | 无 active owner 的 canonical fact 为 `group_type=unpaired` singleton；冻结要求未满足的 active relation 保持同 case、`group_type=relation`，并返回 `completion.is_complete=false` 与 `missing_row_types` |
 | OA expense-item display | 前端 | 父 OA 是唯一可选/可撤回成员；投影在同一 active formal relation 内先用父 OA 自身字段及其 FK-owned 付款明细/附件的显式 source alias 识别附件，再用唯一 `source_expense_row_index` 把发票展示字段归一为 `expense_items.id`，前端以一次 item-id 索引按原付款项顺序构造复合展示带，并在“申请事由”列显示该项的费用内容/费用说明。canonical 发票事实仍保留原始 `source_expense_item_id`；冲突、缺失或重复 row index 保留在父 OA 摘要行，不按金额、项目名或顺序猜测。子项 UI 复用父 OA selection id，不能产生虚拟 canonical row、独立 action 或第二关系链路。 |
 | bank category display | 前端 | 流水金额列固定为金额、方向+付款账号、分类 chip 三层；`needs_confirmation` 显示“待确认”，`unmatched` 显示“待分类”，其余显示 canonical effective category。对方户名列不再渲染“完全关联/已关联/待补发票”等 relation status chip；关系事实仍保留在 DTO/业务链路中，不能用展示删除改变搜索、分区或 relation ownership。 |
-| tri-pane vertical layout | 前端 `groupDisplayModel -> RelationGroupGrid -> RelationGroupCell` | 三栏默认各自跨越完整关联组高度并让同栏 `N` 条可见记录等分可用高度。单条记录与 OA/费用子项按分精确同额且双方唯一时使用共享行轨，不要求整栏完整覆盖；显式 `sourceOaId` / `sourceExpenseItemId` 优先，缺来源时仅允许在完整 source group、已知方向和唯一金额桶内做展示级兜底。发票金额取价税合计。一对多、多对一、重复/冲突/非法金额和金额组合进入独立残余带；某栏没有任何精确对时仍保持 group-level。该纯展示合同不改变 relation membership、API DTO、read model、选择/action identity 或任何持久化 I/O。 |
+| tri-pane vertical layout | 前端 `groupDisplayModel -> RelationGroupGrid -> RelationGroupCell` | 三栏默认各自跨越完整关联组高度并让同栏 `N` 条可见记录等分可用高度。单条记录与 OA/费用子项按分精确同额且双方唯一时使用共享行轨，不要求整栏完整覆盖；显式 `sourceOaId` / `sourceExpenseItemId` 优先，缺来源时仅允许在完整 source group、已知方向和唯一金额桶内做展示级兜底。同一费用子项下的多张附件发票只有全部显式绑定该 `sourceExpenseItemId`、金额合法且价税合计按分精确等于子项金额、当前显示未缺组成项时，才进入同一复合行轨。其他一对多、多对一、父 OA 级重复来源、重复/冲突/非法金额和无显式费用子项归属的金额组合进入独立残余带；某栏没有任何精确对时仍保持 group-level。该纯展示合同不改变 relation membership、API DTO、read model、选择/action identity 或任何持久化 I/O。 |
 | combined initial | 前端/App Health | `GET /api/workbench` 在同一 active generation-set 快照返回 summary 与 paired/unpaired 各 50 组首页；summary 含 `paired_count`、`unpaired_count`、OA/流水/发票事实数与 exception count；用户滚动接近每区列表底部时，前端才通过既有 `/groups` 自动读取下一页，不显示“已加载 N / total”或手动“加载更多”；搜索仍由服务端查询该区全部 active generation 数据，不受前端当前已加载页限制 |
 | operation recovery read | 前端 / 生产可逆写验证 | 缺少 backend operation projection、必须等待完整 generation 的操作只允许一次 combined initial 触发 exact recovery；若未 fresh，改用公开轻量 refresh status 等待，canonical proof 返回 fresh 后再读取一次 combined initial 并安装 payload。等待期间不得重复读取 paired/unpaired groups，最终 load 再次 non-fresh 时继续 fail closed。生产 relation confirm/withdraw 的页面 consumer 必须测量真实 `GET /api/workbench` combined initial，并在 `paired` / `unpaired` 根下绑定 test-owned identity；不得把滚动分页 `/groups` 的耗时登记为关联台首屏恢复耗时。 |
 | formal relation write result | caller | before/after、version、affected months、audit；普通操作的 outbox/barrier targets 为空 |
@@ -70,7 +70,7 @@
 - `WorkbenchRelationCommandService` 拥有正式关系状态转换；repository/UoW 拥有 SQL 与事务，普通关系写入不拥有下游 durable outbox。
 - `WorkbenchRelationGroupingService` 只消费 canonical rows + active relations；relation requirement snapshot 是唯一可改变关联台 zone 的业务 metadata，其他 display decorations 不得改变 membership 或 zone。
 - 前端只消费 API，不读取 relation provenance 推断分区。
-- 前端三栏只从已加载 DTO 线性计算单条精确一一对应、残余展示和等分高度；允许完整 source group 内方向已知、双方唯一的单条精确金额展示兜底，禁止金额组合/顺序猜测、栏位级额外请求、DOM 测量或第二套布局状态。
+- 前端三栏只从已加载 DTO 线性计算单条精确一一对应、显式 `sourceExpenseItemId` 费用子项附件发票合计同行、残余展示和等分高度；允许完整 source group 内方向已知、双方唯一的单条精确金额展示兜底，禁止无显式费用子项归属的金额组合/顺序猜测、栏位级额外请求、DOM 测量或第二套布局状态。
 - 列筛选弹层只在打开/resize/scroll 时读取当前 `.app-sidebar` 的真实几何来约束视口 inset；不消费继承 CSS 变量、不持有 shell state，也不触发业务 I/O。
 
 ## Read model 与 worker
