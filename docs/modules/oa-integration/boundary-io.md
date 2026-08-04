@@ -1,6 +1,6 @@
 # OA 集成模块边界与 I/O
 
-日期：2026-08-02
+日期：2026-08-04
 
 ## 模块化状态
 
@@ -36,8 +36,8 @@
 | Fixed menu target | fixed OA selector env、OA MySQL | selector 必须精确为 `finops:app:view`；唯一 menu、三个唯一专用 role和 exact 三 binding 必须在任何 DML 前成立 |
 | Deployment ACL preflight artifact | preflight/deploy control | 只在自动 `acl` profile 接受 release-bound、secret-safe、SHA-256 绑定的 canonical ACL、migration/env 与 OA exact topology 只读证据；普通 frontend/runtime 不消费 006 或该 artifact |
 | OA Mongo/query | `mongo_oa_adapter.py` | projection sync 只调用 `load_sync_application_batch(scope_key, retention_cutoff_month=...)`：每个启用 form/scope 单次读取；`all` 在字段校验和附件解析前排除 retention cutoff 以前的文档，然后输出 `projection_records` 与 `admission_records` 两个不可变视图。前者遵守通用 OA form/status 配置；后者固定接纳 completed + in-progress，不受通用 status filter 污染。任一 form 读取失败或保留期内 status/identity 无法稳定判定时整批 fail-closed，不得提交部分集合。合法 in-progress 草稿允许未填写 amount/applicant/reason，仍按稳定 identity 进入 admission，空金额持久化为 `NULL`；保留期内 completed 缺既有必填业务字段仍 fail-closed |
-| OA sync event | `job.outbox_events(event_type='oa.sync')` / runtime worker | 手动同步、附件解析版本变化和 projection 版本变化都必须入 durable queue；HTTP 进程不得 inline sync 或自行轮询 Mongo |
-| OA attachment/import | OA attachment services | 识别结果必须审计和可追踪 |
+| OA sync event | `job.outbox_events(event_type='oa.sync')` / runtime worker | 手动同步、附件解析版本变化和 projection 版本变化都必须入 durable queue；HTTP 进程不得 inline sync、自行轮询 Mongo 或承担附件发票 canonical promotion |
+| OA attachment/import | OA attachment services | 单文件逐页保留解析 segment，同一子付款项允许绑定多张具有强发票身份的正式发票；识别结果必须保留 attachment、expense item 与 OA row 来源并可追踪 |
 | ETC OA attachment upload response | `HttpEtcOAClient` | 外部 upload adapter 在返回 ETC service 前把同源或 OA 内部 absolute `/fileManager/` / `/profile/` 地址归一为根相对路径；已有根相对路径与 opaque file id 保持不变，未知 absolute host/path fail closed。业务 service、页面和 Nginx 不得各自实现 URL 修补 |
 | OA source alias | canonical OA row 的 `row_id`、`normalized_payload` 显式身份字段，以及该 OA 通过 FK 拥有的 `app.oa_application_items` / `app.oa_attachments` 来源付款项身份；`app.oa_source_aliases` | Mongo 文档 ID、OA/流程请求 ID、来源付款项 parent ID 与 canonical row id 必须由同一纯函数生成确定性 alias map；同一 alias 指向多个 canonical row 时 fail closed。`app.oa_source_aliases` 仍只允许 `active` alias 参与 duplicate canonicalization；任何链路不得按金额、申请人、项目或顺序自动合并 |
 
@@ -52,6 +52,7 @@
 | Dedicated role assignments | OA `sys_user_role` | 只替换三个专用 role members；menu/role/binding、业务 role/member 与其他 menu 零写 |
 | ACL preflight/post-deploy evidence | root-owned release artifact | identity/tier/topology counts、hashes、fingerprints 与 restore 结果；不含 raw IDs、业务 role key、token、密码、DSN 或非受保护用户名 |
 | Attachment invoice result | invoice/ETC/input usage modules | 经 service 边界传递 |
+| Completed OA attachment invoice promotion | canonical invoice repository / Workbench | `oa.sync` 只对 completed records 调用统一 promotion service；按本批强身份一次批量加载 canonical 发票，依据 Settings mode link/create，保留 `derived_from_oa_id + source_expense_item_id + source_attachment_key`。同一发票跨 OA 或跨非空 expense item 冲突时 fail closed；重复同步零写。promotion 异常使本次 `oa.sync` 失败并由 durable event 重试，不在 HTTP `Application` 保留第二套提升逻辑 |
 | ETC OA form attachment value | OA form draft | 同一规范化引用同时写入 `response.data` 与 `response.extra.filePath`；历史错误 absolute 引用只能由受控 dry-run/backup/CAS repair 操作修改，不重新提交 OA、不改金额、流程或附件成员 |
 | OA source alias canonicalization | formal matching、Workbench relation alignment、object identity audit / downstream duplicate classifier | 附件来源引用先去掉 `:item:` 子项后缀，再以父 OA 自身显式 alias 归一到 canonical OA row id；原始 `source_expense_item_id` 保留在发票 canonical fact。页面只在同一正式 relation 内按显式 alias + 唯一 `source_expense_row_index` 映射 canonical item id；冲突或缺失保持父 OA 级证据 |
 | OA manual import mutation result | settings/workbench frontend | `refresh-attachments`、`manual-imports` create/remove 返回业务结果与 affected scope hints；freshness targets 和 operation barrier targets 为空，当前/后续页面通过正常 GET 收敛 |
@@ -60,7 +61,7 @@
 
 - Own read model：无单一页面 read model；影响 `oa_pending_payment`、`input_invoice_usage`、`invoice_lifecycle` 等。
 - OA manual import/create/refresh/remove 逻辑上影响 `workbench`、`workbench_relation`、invoice lifecycle、tax offset 和 cost statistics，但写路径不 enqueue、不等待 operation barrier；消费页面访问时按 owner contract 读取。
-- OA projection sync 由 runtime worker 一次读取 dual-view source batch、条件写 `app.oa_*` projection并记录 `app.oa_sync_runs` / `app.oa_sync_watermarks`；无论 change cause 如何都不标记页面 dirty scope。周期性相同输入必须是零 projection rewrite；变化输入也只提交 canonical facts。`all` 替换必须把旧 watermark scopes 纳入删除比较，不能漏掉最后一条 completed 被删除的月份。
+- OA projection sync 由 runtime worker 一次读取 dual-view source batch、条件写 `app.oa_*` projection，并在同一 Worker 主链路把 completed record 已解析的正式附件发票提升到 canonical invoice pool，随后记录 `app.oa_sync_runs` / `app.oa_sync_watermarks`；无论 change cause 如何都不标记页面 dirty scope。周期性相同输入必须是零 projection/invoice rewrite；变化输入也只提交 canonical facts。`all` 替换必须把旧 watermark scopes 纳入删除比较，不能漏掉最后一条 completed 被删除的月份。
 - `OA_PROJECTION_SYNC_VERSION=2026-07-28-expense-item-display-fields-v3` 触发一次存量重投，确保历史日常报销的 item/source binding 与 `fee_content` / `fee_description` 保真字段符合当前合同；重投仍由 durable `oa.sync` worker 执行且必须幂等。
 - External system：OA Mongo / OA app。
 - Repository：`postgres_repositories/oa_projection.py`、`oa_applicant_credentials.py`。
@@ -72,8 +73,8 @@
 | Auth/session | `backend/src/fin_ops_platform/app/auth.py`、`web/src/features/session/api.ts` |
 | Menu projection | `backend/src/fin_ops_platform/services/oa_role_sync_service.py`、`backend/src/fin_ops_platform/tools/settings_access_control_preflight.py` |
 | Deployment verification | `backend/src/fin_ops_platform/tools/settings_access_control_preflight.py`、`deploy/oa/bin/finops-deploy-control.sh` |
-| Adapter/projection | `mongo_oa_adapter.py`、`oa_projection_sync.py`、`postgres_repositories/oa_projection.py`、`runtime_worker_registry.py` |
-| OA services | `oa_identity_service.py`、`oa_manual_import_service.py`、`oa_attachment_invoice_service.py`、`oa_applicant_credentials.py`、`target_oa_applicant_token_provider.py` |
+| Adapter/projection | `mongo_oa_adapter.py`、`oa_projection_sync.py`、`oa_attachment_invoice_promotion_service.py`、`postgres_repositories/oa_projection.py`、`runtime_worker_registry.py` |
+| OA services | `oa_identity_service.py`、`oa_manual_import_service.py`、`oa_attachment_invoice_service.py`、`oa_attachment_invoice_promotion_service.py`、`oa_applicant_credentials.py`、`target_oa_applicant_token_provider.py` |
 | Related routes | `routes_oa_pending_payments.py`、`routes_etc.py`、`routes_input_invoice_usage_oa_reverse.py`、`server.py` |
 | Related modules | OA pending payments、ETC、input invoice usage、settings、permissions |
 | Tests | `tests/test_oa_*.py`、`tests/test_mongo_oa_adapter.py`、`tests/test_session_api.py` |
@@ -88,6 +89,9 @@
 
 - `tests/test_mongo_oa_adapter.py`
 - `tests/test_oa_projection_sync_service.py`
+- `tests/test_oa_attachment_invoice_service.py`
+- `tests/test_oa_attachment_invoice_promotion_service.py`
+- `tests/test_oa_attachment_invoice_promotion_tool.py`
 - `tests/test_oa_manual_import_api.py`
 - `tests/test_oa_pending_payment_api.py`
 - `tests/test_target_oa_applicant_token_provider.py`
@@ -110,4 +114,4 @@
 - Allowed reads: OA projection adapters/read ports、OA integration APIs。
 - Downstream outputs: canonical/source versions 与信息性 changed scopes；各消费页自己的 access-time freshness gateway 决定是否创建精确 dirty scope。
 - Forbidden paths: production API 不得直接读 OA Mongo；HTTP 进程不得启动 OA polling、热重建 Workbench read model 或 fallback inline sync；OA cache 不得当作正式发票池；OA source alias 不得由弱业务指纹自动激活；OA credential 不得通过 settings snapshot fallback 写入。
-- Old code deletion: direct Mongo runtime adapter fallback、OA snapshot fallback、进程内 `OASyncService` polling/hot rebuild、无调用方 fingerprint polling、sync service 多 list 扫描、snapshot repository queue dependency 和 sync downstream fan-out 必须保持删除；migration/audit/rollback 工具保留不算 closure。
+- Old code deletion: direct Mongo runtime adapter fallback、OA snapshot fallback、进程内 `OASyncService` polling/hot rebuild、HTTP `Application` 附件发票 promotion、无调用方 fingerprint polling、sync service 多 list 扫描、snapshot repository queue dependency 和 sync downstream fan-out 必须保持删除；migration/audit/rollback 工具保留不算 closure。

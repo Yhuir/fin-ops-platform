@@ -66,8 +66,6 @@ from fin_ops_platform.services.api_performance_metrics import ApiPerformanceReco
 from fin_ops_platform.services.app_health_alert_service import AppHealthAlertService
 from fin_ops_platform.services.app_health_service import AppHealthService
 from fin_ops_platform.services.app_settings_service import (
-    OA_ATTACHMENT_INVOICE_PROMOTION_CREATE_MISSING,
-    OA_ATTACHMENT_INVOICE_PROMOTION_DISABLED,
     AppSettingsService,
     AppSettingsValidationError,
 )
@@ -182,11 +180,6 @@ from fin_ops_platform.services.input_invoice_usage_service import (
     InputInvoiceUsageQueryService,
 )
 from fin_ops_platform.services.integrations import IntegrationHubService
-from fin_ops_platform.services.invoice_attachment_recognition_service import (
-    CREATE_INVOICE_AND_LINK,
-    IGNORE,
-    InvoiceAttachmentRecognitionService,
-)
 from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
 from fin_ops_platform.services.ledgers import LedgerReminderService
 from fin_ops_platform.services.live_workbench_service import LiveWorkbenchService
@@ -4864,81 +4857,6 @@ class Application:
             flush=True,
         )
 
-
-    def _handle_oa_attachment_invoice_cache_updated(self, months: list[str]) -> None:
-        scope_keys = {
-            str(month).strip()
-            for month in list(months or [])
-            if str(month).strip()
-        }
-        if not scope_keys:
-            return
-        self._promote_oa_attachment_invoices_to_canonical(scope_keys)
-        scope_keys.add("all")
-        normalized_scope_keys = sorted(scope_keys)
-        for scope_key in normalized_scope_keys:
-            self._enqueue_oa_projection_sync_refresh(scope_key, reason="oa_attachment_invoice_cache")
-
-    def _promote_oa_attachment_invoices_to_canonical(self, scope_keys: set[str]) -> int:
-        promotion_mode = self._app_settings_service.get_oa_attachment_invoice_promotion_mode()
-        if promotion_mode == OA_ATTACHMENT_INVOICE_PROMOTION_DISABLED:
-            return 0
-        adapter = getattr(self._workbench_query_service, "_oa_adapter", None)
-        list_application_records = getattr(adapter, "list_application_records", None)
-        if not callable(list_application_records):
-            return 0
-        recognition_service = InvoiceAttachmentRecognitionService(invoice_repository=self._import_service)
-        promoted_count = 0
-        promoted_invoices: dict[str, object] = {}
-        for month in sorted(scope_keys):
-            if not MONTH_SCOPE_RE.match(month):
-                continue
-            for record in list_application_records(month):
-                record_id = str(getattr(record, "id", "") or "").strip()
-                if not record_id:
-                    continue
-                for index, attachment_invoice in enumerate(self._formal_oa_attachment_invoice_candidates(record)):
-                    if not isinstance(attachment_invoice, dict):
-                        continue
-                    row_id = self._import_service.oa_attachment_invoice_row_id(record_id, index, attachment_invoice)
-                    decision = recognition_service.decide(attachment_invoice)
-                    if decision.action == IGNORE:
-                        continue
-                    if (
-                        decision.action == CREATE_INVOICE_AND_LINK
-                        and promotion_mode != OA_ATTACHMENT_INVOICE_PROMOTION_CREATE_MISSING
-                    ):
-                        continue
-                    invoice = self._import_service.upsert_oa_attachment_invoice(
-                        attachment_invoice,
-                        oa_form_id=record_id,
-                        oa_row_id=record_id,
-                        source_workbench_row_id=row_id,
-                        allow_create=decision.action == CREATE_INVOICE_AND_LINK,
-                    )
-                    if invoice is not None:
-                        promoted_count += 1
-                        promoted_invoices[str(getattr(invoice, "id", "") or row_id)] = invoice
-        if promoted_invoices:
-            persist = getattr(self._state_store, "save_invoices", None)
-            if not callable(persist):
-                raise RuntimeError("OA attachment promotion requires the canonical invoice persistence port.")
-            persist(list(promoted_invoices.values()))
-        return promoted_count
-
-    def _formal_oa_attachment_invoice_candidates(self, record: object) -> list[dict[str, object]]:
-        attachment_invoices = [
-            dict(invoice)
-            for invoice in list(getattr(record, "attachment_invoices", []) or [])
-            if isinstance(invoice, dict)
-        ]
-        if attachment_invoices:
-            return attachment_invoices
-        return [
-            dict(evidence)
-            for evidence in list(getattr(record, "attachment_evidences", []) or [])
-            if isinstance(evidence, dict)
-        ]
 
     @staticmethod
     def _normalize_oa_sync_scope_keys(scope_keys: list[str]) -> list[str]:

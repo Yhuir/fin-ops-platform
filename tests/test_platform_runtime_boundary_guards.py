@@ -6696,7 +6696,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
     def test_oa_attachment_invoice_create_permission_is_gated_by_recognition_service(self) -> None:
         violations: list[str] = []
-        allowed_path = "backend/src/fin_ops_platform/app/server.py"
+        allowed_path = (
+            "backend/src/fin_ops_platform/services/"
+            "oa_attachment_invoice_promotion_service.py"
+        )
 
         for path in _python_files(APP_ROOT, SERVICES_ROOT, TOOLS_ROOT):
             rel_path = _relative(path)
@@ -6706,13 +6709,22 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             if rel_path != allowed_path:
                 violations.append(f"{rel_path} passes allow_create to OA attachment invoice upsert")
 
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        promote_method = _function_source(_parse(server_path), server_source, "_promote_oa_attachment_invoices_to_canonical")
+        service_path = SERVICES_ROOT / "oa_attachment_invoice_promotion_service.py"
+        service_source = service_path.read_text(encoding="utf-8")
+        promote_method = _function_source(_parse(service_path), service_source, "promote_candidates")
         if "InvoiceAttachmentRecognitionService" not in promote_method:
-            violations.append("server.py OA attachment promotion does not use InvoiceAttachmentRecognitionService")
-        if "allow_create=decision.action == CREATE_INVOICE_AND_LINK" not in promote_method:
-            violations.append("server.py OA attachment promotion does not gate allow_create on CREATE_INVOICE_AND_LINK")
+            violations.append("OA attachment promotion service does not use InvoiceAttachmentRecognitionService")
+        if "allow_create=action == CREATE_INVOICE_AND_LINK" not in promote_method:
+            violations.append("OA attachment promotion service does not gate create on CREATE_INVOICE_AND_LINK")
+
+        server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
+        for legacy_name in (
+            "_handle_oa_attachment_invoice_cache_updated",
+            "_promote_oa_attachment_invoices_to_canonical",
+            "_formal_oa_attachment_invoice_candidates",
+        ):
+            if legacy_name in server_source:
+                violations.append(f"server.py retains legacy OA attachment promotion path {legacy_name}")
 
         self.assertEqual(violations, [])
 

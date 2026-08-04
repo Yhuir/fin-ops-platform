@@ -8,13 +8,18 @@ from types import SimpleNamespace
 from typing import Any
 
 from fin_ops_platform.services.app_settings_service import (
+    DEFAULT_OA_ATTACHMENT_INVOICE_PROMOTION_MODE,
     DEFAULT_OA_IMPORT_FORM_TYPES,
     DEFAULT_OA_IMPORT_STATUSES,
     DEFAULT_OA_RETENTION_CUTOFF_DATE,
+    OA_ATTACHMENT_INVOICE_PROMOTION_MODES,
 )
 from fin_ops_platform.services.import_job_queue import IMPORT_PROCESS_REQUESTED_EVENT
 from fin_ops_platform.services.mongo_oa_adapter import load_mongo_oa_settings
 from fin_ops_platform.services.oa_payment_status_service import MySQLOAPaymentStatusRepository
+from fin_ops_platform.services.oa_attachment_invoice_promotion_service import (
+    OAAttachmentInvoicePromotionService,
+)
 from fin_ops_platform.services.oa_pending_payment_relation_promotion_service import (
     OaPendingPaymentRelationPromotionService,
 )
@@ -35,6 +40,7 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
     OA_PROJECTION_SYNC_VERSION,
     PostgresOAProjectionRepository,
 )
+from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
@@ -222,6 +228,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             projection_repository=projection_repository,
             retention_cutoff_date_provider=lambda: str(oa_runtime_settings["cutoff_date"]),
             pending_payment_relation_promoter=pending_relation_promoter,
+            attachment_invoice_promoter=OAAttachmentInvoicePromotionService(
+                invoice_repository=PostgresCoreRepository(connection),
+                promotion_mode_provider=lambda: str(
+                    oa_runtime_settings["oa_import"]["attachment_invoice_promotion_mode"]
+                ),
+            ),
             payment_status_repository=payment_status_repository,
             pending_payment_source_snapshot_repository=pending_payment_source_snapshot_repository,
         )
@@ -453,6 +465,9 @@ def _load_oa_runtime_settings(connection: PostgresConnection) -> dict[str, Any]:
         "cutoff_date": str(retention_settings.get("cutoff_date") or DEFAULT_OA_RETENTION_CUTOFF_DATE).strip()
         or DEFAULT_OA_RETENTION_CUTOFF_DATE,
         "oa_import": {
+            "attachment_invoice_promotion_mode": _normalize_oa_attachment_invoice_promotion_mode(
+                import_settings.get("attachment_invoice_promotion_mode")
+            ),
             "form_types": _normalize_option_list(
                 import_settings.get("form_types"),
                 allowed_values=OA_IMPORT_FORM_TYPES,
@@ -465,6 +480,11 @@ def _load_oa_runtime_settings(connection: PostgresConnection) -> dict[str, Any]:
             ),
         },
     }
+
+
+def _normalize_oa_attachment_invoice_promotion_mode(value: Any) -> str:
+    mode = str(value or "").strip()
+    return mode if mode in OA_ATTACHMENT_INVOICE_PROMOTION_MODES else DEFAULT_OA_ATTACHMENT_INVOICE_PROMOTION_MODE
 
 
 def _normalize_option_list(value: Any, *, allowed_values: set[str], default_values: list[str]) -> list[str]:

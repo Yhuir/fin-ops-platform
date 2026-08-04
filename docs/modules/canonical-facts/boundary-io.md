@@ -1,6 +1,6 @@
 # Canonical Facts 模块边界与 I/O
 
-日期：2026-06-28
+日期：2026-08-04
 
 ## 模块化状态
 
@@ -52,6 +52,7 @@
 - Runtime/audit facts 在 `job.*` 和 `audit.*`。
 - Read model 投影在 `read_model.*`，不属于 canonical facts。
 - 外部源如 OA Mongo、Excel/PDF/ZIP 不是 app 内部 canonical facts；app 只保存导入或投影后的受控事实。
+- OA 附件解析 cache 不是正式发票池。只有 `OAAttachmentInvoicePromotionService` 可按强发票身份和显式 OA/expense-item/attachment source context 调用 canonical invoice repository；同批身份一次查询、批量保存，重复输入不得刷新 `app.invoices.updated_at`。
 - `0103_etc_reconciliation_task_timestamps.sql` 是 ETC owner 的一次性确定性 payload backfill：只把 `app.etc_reconciliation_tasks` 同行 typed `created_at/updated_at` 复制到缺失的 normalized payload 字段，不改变状态、版本、scope、typed 时间或任何下游 read model/queue 事实。
 - `0129`、`0130` 先以 `NOT VALID` 保护 canonical outbox/fact/relation/job 的新写入；只读领域合同审计归零后，`0131` 仅把历史 background job 的退休月份标记 `all` 归一化为空或保留的真实 `YYYY-MM`，同步其 normalized raw payload，并验证全部 28 个约束。该迁移不修改业务金额、关系状态或页面 read model。
 

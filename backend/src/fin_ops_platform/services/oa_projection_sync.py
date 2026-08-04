@@ -21,6 +21,7 @@ class OAProjectionSyncService:
         projection_repository: Any,
         retention_cutoff_date_provider: Any | None = None,
         pending_payment_relation_promoter: Any | None = None,
+        attachment_invoice_promoter: Any | None = None,
         payment_status_repository: Any | None = None,
         pending_payment_source_snapshot_repository: Any | None = None,
     ) -> None:
@@ -32,6 +33,7 @@ class OAProjectionSyncService:
         self._projection_repository = projection_repository
         self._retention_cutoff_date_provider = retention_cutoff_date_provider
         self._pending_payment_relation_promoter = pending_payment_relation_promoter
+        self._attachment_invoice_promoter = attachment_invoice_promoter
         self._payment_status_repository = payment_status_repository
         self._pending_payment_source_snapshot_repository = pending_payment_source_snapshot_repository
 
@@ -83,6 +85,8 @@ class OAProjectionSyncService:
             pruned_months = self._prune_before_cutoff(scope_key, cutoff_month)
             source_snapshot_result = None
         promotion_result = self._promote_completed_pending_payment_relations(completed_records)
+        attachment_invoice_promotion_result = self._promote_completed_attachment_invoices(completed_records)
+        attachment_invoice_summary = dict(attachment_invoice_promotion_result.get("summary") or {})
         result = {
             "sync_type": "oa_projection",
             "scope_key": scope_key,
@@ -104,6 +108,18 @@ class OAProjectionSyncService:
             "skipped_pending_payment_relation_promotion_count": int(promotion_result.get("skipped_count") or 0),
             "pending_payment_relation_promotion_error_count": int(promotion_result.get("error_count") or 0),
             "pending_payment_relation_promotion_errors": list(promotion_result.get("errors") or []),
+            "scanned_oa_attachment_invoice_candidate_count": int(
+                attachment_invoice_summary.get("cache_candidate_count") or 0
+            ),
+            "promoted_oa_attachment_invoice_count": int(
+                attachment_invoice_summary.get("affected_invoice_count") or 0
+            ),
+            "linked_existing_oa_attachment_invoice_count": int(
+                attachment_invoice_summary.get("linked_existing_invoice_count") or 0
+            ),
+            "created_oa_attachment_invoice_count": int(
+                attachment_invoice_summary.get("created_invoice_count") or 0
+            ),
             "error_count": int(promotion_result.get("error_count") or 0),
             "pending_payment_source_snapshot_count": (
                 int(getattr(source_snapshot_result, "payment_status_count", 0))
@@ -130,6 +146,14 @@ class OAProjectionSyncService:
         if callable(record_sync_run):
             record_sync_run(result)
         return result
+
+    def _promote_completed_attachment_invoices(
+        self,
+        completed_records: list[OAApplicationRecord],
+    ) -> dict[str, Any]:
+        if self._attachment_invoice_promoter is None:
+            return {"summary": {}}
+        return dict(self._attachment_invoice_promoter.promote_records(completed_records) or {})
 
     def _record_failed_sync_run(self, *, scope_key: str, error: Exception) -> None:
         record_sync_run = getattr(self._projection_repository, "record_sync_run", None)

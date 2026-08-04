@@ -1796,6 +1796,23 @@ class ImportNormalizationService:
                 and existing.get("source_id") == source_link.get("source_id")
                 and existing.get("batch_id") == source_link.get("batch_id")
             ):
+                incoming_item_id = str(source_link.get("source_expense_item_id") or "").strip()
+                existing_item_id = str(existing.get("source_expense_item_id") or "").strip()
+                if incoming_item_id and not existing_item_id:
+                    for key in (
+                        "source_workbench_row_id",
+                        "derived_from_oa_id",
+                        "source_attachment_key",
+                        "source_attachment_name",
+                        "source_expense_item_id",
+                        "source_expense_row_index",
+                        "source_region_key",
+                        "evidence_type",
+                        "document_kind",
+                    ):
+                        value = str(source_link.get(key) or "").strip()
+                        if value:
+                            existing[key] = value
                 return
         invoice.source_links.append(source_link)
 

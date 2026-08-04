@@ -144,6 +144,52 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         self.assertEqual(result["pending_payment_relation_promotion_error_count"], 0)
         self.assertFalse(hasattr(service, "_queue_repository"))
 
+    def test_oa_sync_promotes_attachment_invoices_from_completed_records(self) -> None:
+        records = [
+            _oa("oa-pay-completed", "2026-06", workflow_status="completed"),
+            _oa("oa-pay-progress", "2026-06", workflow_status="in_progress"),
+        ]
+        promoter = FakeAttachmentInvoicePromoter()
+        service = OAProjectionSyncService(
+            source_adapter=FakeSourceAdapter(
+                months=["2026-06"],
+                records_by_month={"2026-06": records},
+            ),
+            projection_repository=FakeProjectionRepository(),
+            attachment_invoice_promoter=promoter,
+        )
+
+        result = service.handle_runtime_event(_event("2026-06"))
+
+        self.assertEqual([record.id for record in promoter.completed_records], ["oa-pay-completed"])
+        self.assertEqual(result["scanned_oa_attachment_invoice_candidate_count"], 5)
+        self.assertEqual(result["promoted_oa_attachment_invoice_count"], 5)
+        self.assertEqual(result["linked_existing_oa_attachment_invoice_count"], 5)
+        self.assertEqual(result["created_oa_attachment_invoice_count"], 0)
+
+    def test_attachment_invoice_promotion_failure_marks_oa_sync_failed_for_retry(self) -> None:
+        projection_repository = FakeProjectionRepository()
+
+        class FailingPromoter:
+            def promote_records(self, records: list[OAApplicationRecord]) -> dict[str, object]:
+                raise RuntimeError(f"promotion failed for {len(records)} record")
+
+        service = OAProjectionSyncService(
+            source_adapter=FakeSourceAdapter(
+                months=["2026-06"],
+                records_by_month={
+                    "2026-06": [_oa("oa-pay-completed", "2026-06", workflow_status="completed")]
+                },
+            ),
+            projection_repository=projection_repository,
+            attachment_invoice_promoter=FailingPromoter(),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "promotion failed"):
+            service.handle_runtime_event(_event("2026-06"))
+
+        self.assertEqual(projection_repository.sync_runs[-1]["status"], "failed")
+
     def test_oa_sync_replaces_payment_status_and_admission_snapshot_after_complete_external_reads(self) -> None:
         records = [
             _oa("oa-pay-completed", "2026-06", workflow_status="completed"),
@@ -366,6 +412,22 @@ class FakePendingPaymentRelationPromoter:
         self.completed_records = list(records)
         self.actor_id = actor_id
         return dict(self.result)
+
+
+class FakeAttachmentInvoicePromoter:
+    def __init__(self) -> None:
+        self.completed_records: list[OAApplicationRecord] = []
+
+    def promote_records(self, records: list[OAApplicationRecord]) -> dict[str, object]:
+        self.completed_records = list(records)
+        return {
+            "summary": {
+                "cache_candidate_count": 5,
+                "affected_invoice_count": 5,
+                "linked_existing_invoice_count": 5,
+                "created_invoice_count": 0,
+            }
+        }
 
 
 class FakePaymentStatusRepository:

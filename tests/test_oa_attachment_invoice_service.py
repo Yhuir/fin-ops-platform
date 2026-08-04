@@ -356,6 +356,34 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
         self.assertEqual([invoice["invoice_no"] for invoice in invoices], ["40512344", "40512345"])
         self.assertTrue(all(invoice["attachment_name"] == "多张发票.docx" for invoice in invoices))
 
+    def test_parse_files_keeps_every_invoice_page_from_one_pdf_attachment(self) -> None:
+        service = OAAttachmentInvoiceService()
+        file_entry = {
+            "fileName": "往返火车票.pdf",
+            "filePath": "/往返火车票.pdf",
+            "suffix": "pdf",
+        }
+        return_ticket = RAILWAY_E_TICKET_TEXT.replace(
+            "26539148631000016633",
+            "26539148631000016634",
+        )
+
+        with (
+            patch.object(service, "_download_content", return_value=b"fake-pdf-bytes"),
+            patch.object(
+                service,
+                "_extract_pdf_text_segments",
+                return_value=[RAILWAY_E_TICKET_TEXT, return_ticket],
+            ),
+        ):
+            invoices = service.parse_files([file_entry])
+
+        self.assertEqual(
+            [invoice["invoice_no"] for invoice in invoices],
+            ["26539148631000016633", "26539148631000016634"],
+        )
+        self.assertTrue(all(invoice["attachment_name"] == "往返火车票.pdf" for invoice in invoices))
+
     def test_parse_files_skips_image_attachment_when_ocr_returns_empty_text(self) -> None:
         service = OAAttachmentInvoiceService()
         file_entry = {

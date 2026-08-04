@@ -61,7 +61,7 @@ OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 
 
 class OAAttachmentInvoiceService:
-    PARSER_VERSION = "2026-05-28-attachment-status-v1"
+    PARSER_VERSION = "2026-08-04-multi-page-invoice-v2"
 
     def __init__(
         self,
@@ -216,7 +216,7 @@ class OAAttachmentInvoiceService:
 
     def _extract_text_segments(self, content: bytes, suffix: str) -> list[str]:
         if suffix == "pdf":
-            return [self._extract_pdf_text(content)]
+            return self._extract_pdf_text_segments(content)
         if suffix == "docx":
             return self._extract_docx_text_segments(content)
         return [self._extract_image_text(content)]
@@ -259,10 +259,13 @@ class OAAttachmentInvoiceService:
         return content
 
     def _extract_pdf_text(self, content: bytes) -> str:
-        text = self._extract_pdf_text_with_pdfplumber(content)
-        if text:
-            return text
-        return self._extract_pdf_text_with_fitz(content)
+        return "\n".join(self._extract_pdf_text_segments(content)).strip()
+
+    def _extract_pdf_text_segments(self, content: bytes) -> list[str]:
+        segments = self._extract_pdf_text_segments_with_pdfplumber(content)
+        if segments:
+            return segments
+        return self._extract_pdf_text_segments_with_fitz(content)
 
     def _extract_image_text(self, content: bytes) -> str:
         for image_content in self._iter_image_ocr_inputs(content):
@@ -317,28 +320,40 @@ class OAAttachmentInvoiceService:
 
     @staticmethod
     def _extract_pdf_text_with_pdfplumber(content: bytes) -> str:
+        return "\n".join(OAAttachmentInvoiceService._extract_pdf_text_segments_with_pdfplumber(content)).strip()
+
+    @staticmethod
+    def _extract_pdf_text_segments_with_pdfplumber(content: bytes) -> list[str]:
         if pdfplumber is None:
-            return ""
+            return []
         try:
             with pdfplumber.open(BytesIO(content)) as pdf:
-                return "\n".join(filter(None, (page.extract_text() for page in pdf.pages))).strip()
+                return [
+                    text
+                    for page in pdf.pages
+                    if (text := clean_string(page.extract_text() or ""))
+                ]
         except Exception:
-            return ""
+            return []
 
     @staticmethod
     def _extract_pdf_text_with_fitz(content: bytes) -> str:
+        return "\n".join(OAAttachmentInvoiceService._extract_pdf_text_segments_with_fitz(content)).strip()
+
+    @staticmethod
+    def _extract_pdf_text_segments_with_fitz(content: bytes) -> list[str]:
         if fitz is None:
-            return ""
+            return []
         try:
             document = fitz.open(stream=content, filetype="pdf")
         except Exception:
-            return ""
+            return []
         try:
-            return "\n".join(
-                page.get_text().strip()
+            return [
+                text
                 for page in document
-                if page.get_text().strip()
-            ).strip()
+                if (text := clean_string(page.get_text() or ""))
+            ]
         finally:
             document.close()
 
