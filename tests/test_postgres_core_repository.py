@@ -1,4 +1,5 @@
 import unittest
+from decimal import Decimal
 
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
 
@@ -90,6 +91,55 @@ class PostgresCoreRepositoryTests(unittest.TestCase):
 
         sql, _params = connection.calls[0]
         self.assertIn("on conflict (legacy_mongo_id)", sql)
+
+    def test_invoice_read_restores_all_merge_fields_from_normalized_payload(self) -> None:
+        invoice = PostgresCoreRepository(_CaptureConnection())._invoice_from_row(
+            {
+                "legacy_id": "inv_imported_0700",
+                "invoice_type": "input",
+                "invoice_no": "26539150014000401220",
+                "counterparty_name": "中国铁路昆明局集团有限公司",
+                "amount": "145.00",
+                "signed_amount": "145.00",
+                "written_off_amount": "0",
+                "status": "pending",
+                "raw_payload": {
+                    "normalized_payload": {
+                        "tax_classification_code": "3010101",
+                        "specific_business_type": "铁路客运",
+                        "taxable_item_name": "客运服务",
+                        "specification_model": "G2842",
+                        "unit": "张",
+                        "quantity": "1",
+                        "unit_price": "145.00",
+                        "invoice_source": "OA附件解析",
+                        "invoice_kind": "铁路电子客票",
+                        "is_positive_invoice": "是",
+                        "risk_level": "正常",
+                        "issuer": "中国铁路昆明局集团有限公司",
+                        "remark": "昆明至大理",
+                        "project_id": "project-1",
+                        "department_id": "department-1",
+                    }
+                },
+            }
+        )
+
+        self.assertEqual(invoice.tax_classification_code, "3010101")
+        self.assertEqual(invoice.specific_business_type, "铁路客运")
+        self.assertEqual(invoice.taxable_item_name, "客运服务")
+        self.assertEqual(invoice.specification_model, "G2842")
+        self.assertEqual(invoice.unit, "张")
+        self.assertEqual(invoice.quantity, Decimal("1"))
+        self.assertEqual(invoice.unit_price, Decimal("145.00"))
+        self.assertEqual(invoice.invoice_source, "OA附件解析")
+        self.assertEqual(invoice.invoice_kind, "铁路电子客票")
+        self.assertEqual(invoice.is_positive_invoice, "是")
+        self.assertEqual(invoice.risk_level, "正常")
+        self.assertEqual(invoice.issuer, "中国铁路昆明局集团有限公司")
+        self.assertEqual(invoice.remark, "昆明至大理")
+        self.assertEqual(invoice.project_id, "project-1")
+        self.assertEqual(invoice.department_id, "department-1")
 
 
 if __name__ == "__main__":
