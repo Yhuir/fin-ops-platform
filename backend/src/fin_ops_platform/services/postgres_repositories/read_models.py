@@ -4571,8 +4571,12 @@ class PostgresReadModelRepository:
         )
         if materialized_counts is None:
             if composed_all_scope:
-                groups_for_counts_sql = _workbench_active_month_group_keys_sql(
-                    include_aggregated_searchable_text=False
+                groups_for_counts_sql = (
+                    _workbench_active_month_groups_sql(include_aggregated_metadata=False)
+                    if normalized_exception_bucket
+                    else _workbench_active_month_group_keys_sql(
+                        include_aggregated_searchable_text=False
+                    )
                 )
                 distinct_row_sql = "(r.pane, coalesce(nullif(r.object_identity_key, ''), r.row_id))"
                 count_row = self._connection.fetch_one(

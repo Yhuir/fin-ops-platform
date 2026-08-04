@@ -4075,6 +4075,28 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         )
         self.assertFalse(any("scope_key = %s" in sql and params[:1] == ("all",) for sql, params in group_queries))
 
+    def test_repository_all_scope_exception_filter_count_query_includes_group_payload(self) -> None:
+        for exception_bucket, expected_state in (("active", "active"), ("processed", "ignored")):
+            with self.subTest(exception_bucket=exception_bucket):
+                connection = WorkbenchSummaryGroupsConnection()
+                repository = PostgresReadModelRepository(connection)
+
+                repository.get_workbench_groups_page(
+                    scope_key="all",
+                    zone="paired",
+                    page=1,
+                    page_size=25,
+                    exception_bucket=exception_bucket,
+                )
+
+                count_sql = next(
+                    sql
+                    for sql, _params in connection.fetch_one_calls
+                    if "filtered_workbench_groups as materialized" in sql
+                )
+                self.assertIn("ranked_groups.payload", count_sql)
+                self.assertIn(f"g.payload#>>'{{amount_anomaly,state}}' = '{expected_state}'", count_sql)
+
     def test_repository_composed_all_scope_prefixes_non_mergeable_group_ids(self) -> None:
         class NonMergeableGroupConnection(WorkbenchSummaryGroupsConnection):
             def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
