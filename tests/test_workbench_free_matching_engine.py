@@ -631,6 +631,85 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
         self.assertNotIn(wrong_bank.member_key, plan.member_keys)
         self.assertEqual(result.resource_limited_component_count, 1)
 
+    def test_active_extension_resource_limit_does_not_discard_independent_exact_case(self) -> None:
+        dense_evidence = (("employee_reimbursement_payee", "高密度候选"),)
+        dense_oa = fact("oa", "oa-dense", 100_000, evidence=dense_evidence)
+        dense_invoice = fact("invoice", "invoice-dense", 100_000, evidence=dense_evidence)
+        dense_banks = tuple(
+            fact("bank", f"bank-dense-{index}", index + 1, evidence=dense_evidence)
+            for index in range(18)
+        )
+
+        target_evidence = (("employee_reimbursement_payee", "樊祖芳"),)
+        target_oa = fact("oa", "oa-target", 74_706, evidence=target_evidence)
+        target_invoice = fact("invoice", "invoice-target", 74_706, evidence=target_evidence)
+        target_bank = fact("bank", "bank-target", 74_706, evidence=target_evidence)
+        fixture = FormalRelationFactBatch(
+            facts=(
+                dense_oa,
+                dense_invoice,
+                *dense_banks,
+                target_oa,
+                target_invoice,
+                target_bank,
+            ),
+            active_relations=(
+                ActiveFormalRelationAnchor(
+                    case_id="case:000-dense",
+                    member_keys=(dense_oa.member_key, dense_invoice.member_key),
+                ),
+                ActiveFormalRelationAnchor(
+                    case_id="case:999-target",
+                    member_keys=(target_oa.member_key, target_invoice.member_key),
+                ),
+            ),
+        )
+
+        result = self.engine.plan_relations(fixture)
+
+        self.assertEqual(len(result.plans), 1)
+        self.assertEqual(result.plans[0].target_case_id, "case:999-target")
+        self.assertIn(target_bank.member_key, result.plans[0].member_keys)
+        self.assertGreaterEqual(result.resource_limited_component_count, 1)
+
+    def test_same_row_type_noise_does_not_consume_cross_pane_edge_budget(self) -> None:
+        evidence = (("employee_reimbursement_payee", "樊祖芳"),)
+        target_oa = fact("oa", "oa-target-noise", 74_706, evidence=evidence)
+        target_invoice = fact(
+            "invoice",
+            "invoice-target-noise",
+            74_706,
+            evidence=(),
+            references=(
+                FormalRelationReference(
+                    kind="attachment_source",
+                    value="oa-target-noise:item:0",
+                    target_row_type="oa",
+                    target_identity="oa-target-noise",
+                ),
+            ),
+        )
+        target_bank = fact("bank", "bank-target-noise", 74_706, evidence=evidence)
+        noisy_oas = tuple(
+            fact("oa", f"oa-same-type-noise-{index}", 100_000 + index, evidence=evidence)
+            for index in range(700)
+        )
+        fixture = FormalRelationFactBatch(
+            facts=(target_oa, target_invoice, target_bank, *noisy_oas),
+            active_relations=(
+                ActiveFormalRelationAnchor(
+                    case_id="case:target-noise",
+                    member_keys=(target_oa.member_key, target_invoice.member_key),
+                ),
+            ),
+        )
+
+        result = self.engine.plan_relations(fixture)
+
+        self.assertEqual(len(result.plans), 1)
+        self.assertEqual(result.plans[0].target_case_id, "case:target-noise")
+        self.assertIn(target_bank.member_key, result.plans[0].member_keys)
+
     def test_active_extension_preserves_exact_sum_with_multiple_missing_pane_rows(self) -> None:
         evidence = (("employee_reimbursement_payee", "樊祖芳"),)
         oa = fact("oa", "oa-active-many-banks", 10_000, evidence=evidence)

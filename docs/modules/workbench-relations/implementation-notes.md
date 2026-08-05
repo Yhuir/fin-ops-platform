@@ -4766,3 +4766,10 @@ FIN_OPS_TEST_DATABASE_URL=<disposable-db> PYTHONPATH=backend/src:. python3 -m py
 - 最小修复：active relation 组合扩展只让当前缺失 pane 的未配对事实进入可达图与子集搜索；既有 pane 继续作为 anchor 和证据图成员。缺失 pane 内的多笔事实仍复用原有精确分币合计、强证据、日期窗口、唯一候选、active owner 与撤回指纹门禁。
 - 版本与边界：matching rule 升至 `2026-08-05-employee-reimbursement-v9`，触发既有 completed scope stale-scan；不新增 API、表、worker、队列、fallback 或依赖，relation command/UoW 与 Workbench read model I/O 不变。
 - 回归：生产形状用例加入 20 条同员工无关 OA 和错误金额流水；即使剩余无关组件触发有界资源保护，仍只把 747.06 流水补入原 case。另覆盖两笔银行流水合计补齐同一 OA+发票关系。
+
+## 2026-08-05 - active relation 资源预算按 case 隔离
+
+- 真实原因：v9 已把 active extension 限制到缺失 pane，但建边和所有 active case 的组合搜索仍共用一份全批次状态预算。前序高密度 case 或同类型事实两两比较可先耗尽预算，导致后续唯一 exact case 的已生成计划被整批丢弃；生产 747.06 OA + 3 张附件发票 + 同额流水因此持续未补全。
+- 最小修复：证据桶只遍历跨 pane 类型组合；active extension 为每个 case 创建独立且同上限的搜索预算，单 case 超限时认领其可达候选并 fail closed，同时继续处理其它 case。金额分币精确合计、强证据、30/365 天窗口、候选唯一、跨 case 竞争、撤回指纹和 active owner 门禁均未放宽。
+- 版本与边界：matching rule 升至 `2026-08-05-isolated-active-extension-v10`；不新增 API、表、worker、queue、fallback 或依赖，relation command/UoW 与 Workbench read model I/O 不变。
+- 回归：新增“前序 18 个候选的高密度 case 资源受限但后续唯一 case 仍生成计划”与“700 条同类型 OA 噪声不耗尽建边预算”两组保护，并保留一对多精确合计、歧义、跨 case overlap 与撤回 fail-closed 用例。

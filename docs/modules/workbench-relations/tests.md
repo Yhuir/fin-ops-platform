@@ -34,7 +34,7 @@
 - ambiguous/unsafe/resource-limited 结果零 relation write。
 - active case 保持稳定；显式引用或唯一 exact composite 扩展均使用原 case 并在一次 UoW 原子替换；撤回 exact set 不自动重建。
 - 日常报销申请人与银行对方户名使用独立员工强证据：2～3 字真实姓名可用，支付申请不得误用；OA 完成/审批日期优先、申请日期兜底；30 天接受、31 天拒绝，通用公司证据继续保持 365/366 天边界。已有 OA+附件发票关系补银行时，只搜索缺失的银行 pane；同员工大量未配对 OA 即使形成独立资源受限组件也不得阻断目标 relation 扩展，缺失 pane 内多笔流水精确合计仍可一次补全。
-- 已有 OA+附件发票 relation 可由唯一同额员工流水补齐第三栏；流水必须与 OA 合计一致，附件发票差额继续进入异常链路，currency/direction、连通性和 `target_case_id` 必须同时成立。多个同额流水、跨 case 竞争、完整三栏、撤回 fingerprint 与资源受限均 fail closed。
+- 已有 OA+附件发票 relation 可由唯一同额员工流水补齐第三栏；流水必须与 OA 合计一致，附件发票差额继续进入异常链路，currency/direction、连通性和 `target_case_id` 必须同时成立。多个同额流水、跨 case 竞争、完整三栏、撤回 fingerprint 与资源受限均 fail closed。高密度 active case 的资源保护不得丢弃同批其它独立 exact case；大量同类型 OA 噪声不得消耗跨 pane 建边预算。
 - changed-case 持久化后只替换或删除目标 case/history；无关关系与审计保持不变，且 adapter 不得调用全局 `snapshot()` 做镜像重建。
 - active case 校验只执行一条 relation query，不查询 history；in-memory fallback 直接按 case 读取，不能复制全局 snapshot。
 - confirm overlap 校验只执行 active relation query，不加载 cancelled relation/history；command delta 只携带本次 history event，数据库不删除或重写旧 history，重复 operation id 保持幂等。
