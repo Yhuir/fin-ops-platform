@@ -23,6 +23,10 @@ from fin_ops_platform.services.oa_applicant_credentials import (
     OaApplicantCredentialValidationError,
 )
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncError
+from fin_ops_platform.services.oa_draft_prefill import (
+    ETC_OA_DRAFT_PREFILL_FAMILY,
+    INPUT_INVOICE_USAGE_OA_DRAFT_PREFILL_FAMILY,
+)
 from fin_ops_platform.services.settings_data_reset_service import (
     RESET_BANK_TRANSACTIONS_ACTION,
     RESET_INVOICES_ACTION,
@@ -109,6 +113,12 @@ class SettingsApiRoutes:
             return self.access_control(headers)
         if method == "PUT" and route_path == "/api/workbench/settings/access-control":
             return self.update_access_control(body, headers, request_id=request_id or uuid4().hex)
+        if route_path.startswith("/api/workbench/settings/oa-draft-prefill/"):
+            family_slug = unquote(route_path.rsplit("/", 1)[-1])
+            if method == "GET":
+                return self.oa_draft_prefill(family_slug, headers)
+            if method == "PUT":
+                return self.update_oa_draft_prefill(family_slug, body, headers)
         if method == "GET" and route_path == "/api/workbench/settings/oa-applicant-credentials":
             return self.oa_applicant_credentials(headers)
         if route_path.startswith("/api/workbench/settings/oa-applicant-credentials/"):
@@ -264,6 +274,82 @@ class SettingsApiRoutes:
             HTTPStatus.OK,
             self._app_settings_service().get_access_control_payload(),
         )
+
+    def oa_draft_prefill(self, family_slug: str, headers: dict[str, str] | None) -> Any:
+        session, auth_error = self._resolve_read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        family = self._oa_draft_prefill_family(family_slug)
+        if family is None:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "oa_draft_prefill_family_not_found", "message": "OA draft prefill family was not found."},
+            )
+        identity = session.identity if session is not None else None
+        return self._json_response(
+            HTTPStatus.OK,
+            self._app_settings_service().get_oa_draft_prefill_payload(
+                family,
+                can_save=bool(session and session.can_admin_access),
+                applicant_name=str(
+                    getattr(identity, "display_name", "")
+                    or getattr(identity, "nickname", "")
+                    or getattr(identity, "username", "")
+                    or ""
+                ),
+            ),
+        )
+
+    def update_oa_draft_prefill(
+        self,
+        family_slug: str,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Any:
+        family = self._oa_draft_prefill_family(family_slug)
+        if family is None:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "oa_draft_prefill_family_not_found", "message": "OA draft prefill family was not found."},
+            )
+        session, auth_error = self._resolve_admin_session(headers)
+        if auth_error is not None:
+            return auth_error
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        if set(payload) != {"expected_version", "configuration"}:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "invalid_oa_draft_prefill_request",
+                    "message": "Request must contain only expected_version and configuration.",
+                },
+            )
+        try:
+            identity = session.identity if session is not None else None
+            result = self._app_settings_service().update_oa_draft_prefill(
+                family,
+                payload,
+                actor_id=actor_id_for_session(session) if session is not None else "system",
+                applicant_name=str(
+                    getattr(identity, "display_name", "")
+                    or getattr(identity, "nickname", "")
+                    or getattr(identity, "username", "")
+                    or ""
+                ),
+            )
+        except AppSettingsValidationError as exc:
+            status = HTTPStatus.CONFLICT if exc.error_code == "oa_draft_prefill_version_conflict" else HTTPStatus.BAD_REQUEST
+            return self._json_response(status, {"error": exc.error_code, "message": str(exc)})
+        return self._json_response(HTTPStatus.OK, result)
+
+    @staticmethod
+    def _oa_draft_prefill_family(family_slug: str) -> str | None:
+        return {
+            "etc": ETC_OA_DRAFT_PREFILL_FAMILY,
+            "input-invoice-usage": INPUT_INVOICE_USAGE_OA_DRAFT_PREFILL_FAMILY,
+        }.get(str(family_slug or "").strip())
 
     def update_access_control(
         self,

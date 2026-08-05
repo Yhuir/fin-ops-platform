@@ -122,6 +122,13 @@
 - OA 未配置、超时或专用 role/menu exact-set 验证失败返回 `502 oa_role_sync_failed`，且不写 PostgreSQL/audit。OA 目标成功后 PG 失败会补偿到旧 membership；补偿或 commit outcome 无法确认返回 `503 access_control_sync_inconsistent`，普通持久化失败返回 `503 access_control_persistence_failed`。
 - `finops:app:view` 只是 OA menu selector。APP evaluator 不读 OA role/permission/env authority；部署负责历史 non-dedicated menu binding 的 exact-target 清理和回滚，runtime API 只验证严格投影目标并同步三个专用角色成员。
 
+### OA 草稿预填专用 API
+
+- `GET /api/workbench/settings/oa-draft-prefill/etc` 与 `GET /api/workbench/settings/oa-draft-prefill/input-invoice-usage` 对已授权 APP 账号可读，返回 `{family, version, configuration, dynamic_fields, options, can_save}`；`can_save` 只对 admin 为 true。
+- `PUT` 同路径仅 admin 可用，只接受 `{expected_version, configuration}`；`expected_version` 必须为正整数，`configuration` 必须提交当前合同的完整且精确字段集合，缺失或未知字段返回 400。stale version 返回 `409 oa_draft_prefill_version_conflict`；semantic no-op 返回 200 且不推进 version/audit。
+- 两个 family 在 `app.app_settings` 中独立 CAS 保存；ETC/反提 OA 在 prepare/create batch 时保存配置快照，锁外 OA I/O 不重读配置。申请人、当天日期、批次金额、反提唯一销方等运行时值不写死在配置中。
+- 新 OA 草稿的可见申请事由不得包含 ETC Batch ID、Business Batch ID 或 input-invoice reverse batch ID；这些关联键只写结构化 payload。历史 OA 文本 ID 解析只作为旧数据只读兼容保留。
+
 ## 日常报销批量账务管理 API
 
 `GET /api/batch-accounting?bank_year=YYYY&bucket=unsubmitted|submitted`

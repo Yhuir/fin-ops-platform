@@ -313,6 +313,12 @@ class EtcBusinessBatchApiRoutes:
         return EtcBusinessBatchActor(
             user_id=session.identity.user_id,
             username=session.identity.username,
+            display_name=str(
+                session.identity.display_name
+                or getattr(session.identity, "nickname", "")
+                or session.identity.username
+                or ""
+            ),
             dept_id=session.identity.dept_id,
             can_admin_access=session.can_admin_access,
             can_mutate_data=session.can_mutate_data,

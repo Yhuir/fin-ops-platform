@@ -34,6 +34,12 @@ from fin_ops_platform.services.etc_invoice_pdf_bundle_service import (
     open_single_page_etc_invoice_pdf,
 )
 from fin_ops_platform.services.search_query import normalize_money_search_query
+from fin_ops_platform.services.oa_draft_prefill import (
+    ETC_OA_DRAFT_PREFILL_FAMILY,
+    default_oa_draft_prefill,
+    normalize_oa_draft_prefill,
+    render_oa_draft_reason,
+)
 
 
 class EtcInvoiceStatus(str, Enum):
@@ -207,6 +213,8 @@ class EtcBusinessBatchOADraftAttempt:
     invoices: tuple[EtcInvoice, ...]
     submission_batch: EtcBatch
     reconciliation_task: object | None
+    applicant_name: str
+    prefill: dict[str, object]
 
 
 class NotConfiguredEtcOAClient:
@@ -665,8 +673,12 @@ class EtcOAFormFieldMapping:
     application_date: str = "applicationDate"
     category: str = "category"
     payment_proof: str = "paymentProof"
+    payment_method: str = "paymentMethod"
     project_name: str = "projectName"
     amount: str = "amount"
+    beneficiary: str = "beneficiary"
+    bank: str = "bank"
+    bank_account: str = "payeeAccount"
     cause: str = "cause"
     attachments: str = "field101"
     category_value: str = "s5"
@@ -680,8 +692,12 @@ class EtcOAFormFieldMapping:
             application_date=os.getenv("FIN_OPS_ETC_OA_FIELD_APPLICATION_DATE", "applicationDate"),
             category=os.getenv("FIN_OPS_ETC_OA_FIELD_CATEGORY", "category"),
             payment_proof=os.getenv("FIN_OPS_ETC_OA_FIELD_PAYMENT_PROOF", "paymentProof"),
+            payment_method=os.getenv("FIN_OPS_ETC_OA_FIELD_PAYMENT_METHOD", "paymentMethod"),
             project_name=os.getenv("FIN_OPS_ETC_OA_FIELD_PROJECT_NAME", "projectName"),
             amount=os.getenv("FIN_OPS_ETC_OA_FIELD_AMOUNT", "amount"),
+            beneficiary=os.getenv("FIN_OPS_ETC_OA_FIELD_BENEFICIARY", "beneficiary"),
+            bank=os.getenv("FIN_OPS_ETC_OA_FIELD_BANK", "bank"),
+            bank_account=os.getenv("FIN_OPS_ETC_OA_FIELD_BANK_ACCOUNT", "payeeAccount"),
             cause=os.getenv("FIN_OPS_ETC_OA_FIELD_CAUSE", "cause"),
             attachments=os.getenv("FIN_OPS_ETC_OA_FIELD_ATTACHMENTS", "field101"),
             category_value=os.getenv("FIN_OPS_ETC_OA_CATEGORY_VALUE", "s5").strip() or "s5",
@@ -772,6 +788,7 @@ class EtcService:
         import_session_store: EtcImportSessionStorePort | None = None,
         oa_client: EtcOAClient | None = None,
         form_mapping: EtcOAFormFieldMapping | None = None,
+        oa_prefill_provider: Callable[[], dict[str, object]] | None = None,
     ) -> None:
         root = data_dir or getattr(state_store, "data_dir", None)
         self._data_dir = Path(root) if root is not None else Path.cwd() / ".runtime" / "fin_ops_platform"
@@ -782,6 +799,9 @@ class EtcService:
         self._invoice_file_root.mkdir(parents=True, exist_ok=True)
         self.oa_client: EtcOAClient = oa_client or NotConfiguredEtcOAClient()
         self._form_mapping = form_mapping or EtcOAFormFieldMapping.from_environment()
+        self._oa_prefill_provider = oa_prefill_provider or (
+            lambda: default_oa_draft_prefill(ETC_OA_DRAFT_PREFILL_FAMILY)
+        )
         self._invoice_counter = 0
         self._batch_counter = 0
         self._import_batch_counter = 0
@@ -1081,12 +1101,14 @@ class EtcService:
         expected_version: int | None = None,
         oa_client: EtcOAClient | None = None,
         reconciliation_task: object | None = None,
+        applicant_name: str = "",
     ) -> EtcBusinessBatch:
         attempt = self.prepare_business_batch_oa_draft(
             business_batch_id,
             idempotency_key=idempotency_key,
             expected_version=expected_version,
             reconciliation_task=reconciliation_task,
+            applicant_name=applicant_name,
         )
         if attempt is None:
             return self.get_business_batch(business_batch_id)
@@ -1110,6 +1132,7 @@ class EtcService:
         idempotency_key: str,
         expected_version: int | None,
         reconciliation_task: object | None,
+        applicant_name: str = "",
     ) -> EtcBusinessBatchOADraftAttempt | None:
         normalized_key = str(idempotency_key or "").strip()
         if not normalized_key:
@@ -1190,6 +1213,11 @@ class EtcService:
                 invoices=tuple(deepcopy(invoices)),
                 submission_batch=deepcopy(submission_batch),
                 reconciliation_task=deepcopy(reconciliation_task),
+                applicant_name=str(applicant_name or "").strip(),
+                prefill=normalize_oa_draft_prefill(
+                    ETC_OA_DRAFT_PREFILL_FAMILY,
+                    self._oa_prefill_provider(),
+                ),
             )
 
     def execute_business_batch_oa_draft(
@@ -1205,7 +1233,13 @@ class EtcService:
                 resolved_oa_client,
                 reconciliation_task=attempt.reconciliation_task,
             )
-            payload = self._build_oa_draft_payload(attempt.submission_batch, attachments)
+            payload = self._build_oa_draft_payload(
+                attempt.submission_batch,
+                attachments,
+                business_batch_id=attempt.business_batch_id,
+                applicant_name=attempt.applicant_name,
+                prefill=attempt.prefill,
+            )
             oa_draft_id, oa_draft_url = resolved_oa_client.create_form_draft(form_id=2, payload=payload)
         except EtcOADraftOutcomeUnknownError:
             raise
@@ -4080,19 +4114,50 @@ class EtcService:
                 )
         return attachments
 
-    def _build_oa_draft_payload(self, batch: EtcBatch, attachments: list[EtcUploadedAttachment]) -> dict[str, object]:
-        cause = batch.oa_marker
+    def _build_oa_draft_payload(
+        self,
+        batch: EtcBatch,
+        attachments: list[EtcUploadedAttachment],
+        *,
+        business_batch_id: str = "",
+        applicant_name: str = "",
+        prefill: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        profile = normalize_oa_draft_prefill(
+            ETC_OA_DRAFT_PREFILL_FAMILY,
+            prefill or self._oa_prefill_provider(),
+        )
+        bill_date = date.today()
+        raw_bill_date = batch.statement_period_start or batch.passage_start_date or batch.issue_start_date
+        if raw_bill_date:
+            try:
+                bill_date = date.fromisoformat(str(raw_bill_date)[:10])
+            except ValueError:
+                pass
+        cause = render_oa_draft_reason(
+            ETC_OA_DRAFT_PREFILL_FAMILY,
+            profile["reason_template"],
+            submission_date=date.today(),
+            bill_date=bill_date,
+        )
         data = {
+            self._form_mapping.applicant: str(applicant_name or "").strip(),
             self._form_mapping.application_date: date.today().isoformat(),
-            self._form_mapping.category: self._form_mapping.category_value,
-            self._form_mapping.payment_proof: self._form_mapping.payment_proof_value,
-            self._form_mapping.project_name: self._form_mapping.project_name_value,
+            self._form_mapping.category: profile["application_type"],
+            self._form_mapping.payment_method: profile["payment_method"],
+            self._form_mapping.payment_proof: profile["invoice_kind"],
+            self._form_mapping.project_name: profile["project_id"],
             self._form_mapping.amount: f"{batch.total_amount:.2f}",
+            self._form_mapping.beneficiary: profile["payee"],
+            self._form_mapping.bank: profile["bank"],
+            self._form_mapping.bank_account: profile["bank_account"],
             "invoiceCount": batch.invoice_count,
             "invoice_count": batch.invoice_count,
             "etcInvoiceCount": batch.invoice_count,
             self._form_mapping.cause: cause,
             self._form_mapping.attachments: self._build_oa_upload_custom_value(attachments),
+            "etcBatchId": batch.etc_batch_id,
+            "businessBatchId": str(business_batch_id or "").strip(),
         }
         return {
             "formId": 2,

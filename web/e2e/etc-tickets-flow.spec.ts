@@ -82,6 +82,39 @@ async function openEtcDisclosure(page: Page, name: RegExp | string) {
 }
 
 test.describe("ETC ticket management browser flow", () => {
+  test("administrator saves ETC OA draft prefill without exposing internal ids", async ({ page }) => {
+    const browserErrors = startStrictBrowserErrorCapture(page);
+    const api = await installDeterministicApiMocks(page, { sessionMode: "admin" });
+
+    await page.goto("/etc-tickets");
+    await expect(page.getByTestId("etc-ticket-management-page")).toBeVisible();
+    const loadResponse = page.waitForResponse((response) =>
+      response.request().method() === "GET"
+      && new URL(response.url()).pathname === "/api/workbench/settings/oa-draft-prefill/etc",
+    );
+    await page.getByRole("button", { name: "OA 草稿预填管理" }).click();
+    await loadResponse;
+
+    const drawer = page.getByRole("dialog", { name: "OA 草稿预填管理" });
+    await expect(drawer.getByLabel("申请人")).toHaveValue("杨丽萍");
+    await expect(drawer.getByLabel("申请人")).toBeDisabled();
+    await drawer.getByLabel("开户行").fill("中国建设银行");
+    const saveResponse = page.waitForResponse((response) =>
+      response.request().method() === "PUT"
+      && new URL(response.url()).pathname === "/api/workbench/settings/oa-draft-prefill/etc",
+    );
+    await drawer.getByRole("button", { name: "保存" }).click();
+    await saveResponse;
+
+    const body = api.lastBody("PUT /api/workbench/settings/oa-draft-prefill/etc") as {
+      configuration?: { bank?: string; reason_template?: string };
+    };
+    expect(body.configuration?.bank).toBe("中国建设银行");
+    expect(body.configuration?.reason_template).not.toContain("batch_id");
+    await expect(drawer.getByText("已保存。")).toBeVisible();
+    expect(browserErrors).toEqual([]);
+  });
+
   test("reaches all ETC business batches after the first 100", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     await installDeterministicApiMocks(page, {

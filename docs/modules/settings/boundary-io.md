@@ -36,6 +36,7 @@
 | 设置表单 | `SettingsPage.tsx`、`components/settings/*` | API 负责校验和权限 |
 | 普通 settings GET/POST | Settings page、Workbench 列布局等既有 caller | 不读取、返回或写 ACL；任一历史 ACL key 明确 `400 access_control_write_forbidden` |
 | ACL GET/PUT | 仅 `YNSYLP005` 的后端 admin session | GET 返回完整 snapshot；PUT 只接受正整数 `expected_version` 与完整 `accounts[]`，tier 仅 `full_access\|read_export_only`，列表缺席表示 denied |
+| OA 草稿预填 GET/PUT | ETC 票据、进项发票使用页面 | 两个独立 family 均允许已授权账号读取，只有 admin 可保存；PUT 只接受 `expected_version + configuration`，校验 OA 真实枚举 code、项目和申请事由模板 token |
 | OA canonical username | normalized ACL snapshot / OA `sys_user.user_name` | 共享 casefold key 负责比较与去重并保留 canonical spelling；collision、跨 tier overlap、控制字符和 protected admin 输入在 OA I/O 前失败 |
 | OA credentials | settings/OA credential API | secret 不进入日志 |
 | 数据重置请求 | settings data reset dialogs | 必须走 job/control service |
@@ -59,6 +60,7 @@
 | 外部往来标签选择事务端口 | turnover ledger local write UoW | 只允许调用 `get_turnover_ledger_tag_selection_state()`、`commit_turnover_ledger_tag_selection_update(...)`、`restore_turnover_ledger_tag_selection_state(...)`；rollback 只恢复该 setting family，禁止读取/保存整份私有 `_snapshot` |
 | 批量账务标签规则 payload | batch-accounting route/service | 输出实际出现的 active labels、stable selected codes、version 和 `can_save`；更新只接受完整 `selected_tag_codes[] + expected_version`，semantic no-op 不递增 version |
 | 批量账务标签规则 result | batch-accounting drawer/list | `update_batch_accounting_tag_selection(...)` 只合并 `app.app_settings.batch_accounting_tag_selection`；PostgreSQL 在同一事务内检查 expected version，归档标签由 bank-tag owner 写链原子剔除，不写页面 read model 或 queue |
+| OA 草稿预填 result | ETC / 进项发票使用抽屉与 OA draft service | 分别输出 `etc_oa_draft_prefill`、`input_invoice_usage_oa_draft_prefill` 的 version/configuration/options/dynamic fields；semantic no-op 不递增 version、不写 audit，stale 返回 409；保存只合并目标 family，不覆盖其它 settings |
 
 ## 持久化与投影
 
@@ -78,10 +80,10 @@
 | 层 | 文件或目录 |
 | --- | --- |
 | Frontend page | `web/src/pages/SettingsPage.tsx` |
-| Frontend components | `web/src/components/settings/*`、`web/src/components/workbench/WorkbenchSettingsModal.tsx` |
-| Frontend API | `web/src/features/workbench/api.ts`；普通 mapper/serializer 与专用 ACL client 分离 |
+| Frontend components | `web/src/components/settings/*`、`web/src/components/workbench/WorkbenchSettingsModal.tsx`、`web/src/components/common/OaDraftPrefillDrawer.tsx` |
+| Frontend API | `web/src/features/workbench/api.ts`、`web/src/features/oaDraftPrefill.ts`；普通 mapper/serializer 与专用 versioned client 分离 |
 | Backend route | `backend/src/fin_ops_platform/app/routes_settings.py`；`server.py` 只负责 route owner 与 session/runtime ports 组装 |
-| Backend service | `app_settings_service.py`、`oa_role_sync_service.py`、`settings_data_reset_service.py`、`oa_applicant_credentials.py`、`target_oa_applicant_token_provider.py` |
+| Backend service | `app_settings_service.py`、`oa_draft_prefill.py`、`oa_role_sync_service.py`、`settings_data_reset_service.py`、`oa_applicant_credentials.py`、`target_oa_applicant_token_provider.py` |
 | Repository | `postgres_repositories/oa_applicant_credentials.py`、`postgres_repositories/ops_tax_etc.py`；`0118_bank_flow_rule_batch_settings_raw_alignment.sql` 只修复 `bank_flow_rule_batch_tag_rules` 的 formal/raw 镜像一致性，不改变 canonical rule value；`0135_batch_accounting_tag_selection.sql` 只初始化缺失的批量账务选择，并在同一 SQL 保持 formal/raw normalized mirror 相等 |
 | Audit proof owner | `postgres_repositories/settings_page_audit.py`、`page_audit_registry.py`、`postgres_repositories/operations_audit.py` |
 | Lifecycle | `derived_data_lifecycle_service.py`、`app_status_domain_registry.py`、`app_status_read_model_registry.py` |

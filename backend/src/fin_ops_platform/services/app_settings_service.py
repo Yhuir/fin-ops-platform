@@ -27,6 +27,16 @@ from fin_ops_platform.services.oa_role_sync_service import (
     OARoleSyncConfigurationError,
     OARoleSyncService,
 )
+from fin_ops_platform.services.oa_draft_prefill import (
+    DEFAULT_OA_PROJECT_ID,
+    DEFAULT_OA_PROJECT_NAME,
+    ETC_OA_DRAFT_PREFILL_FAMILY,
+    INPUT_INVOICE_USAGE_OA_DRAFT_PREFILL_FAMILY,
+    OADraftPrefillValidationError,
+    default_oa_draft_prefill,
+    normalize_oa_draft_prefill,
+    oa_draft_prefill_options,
+)
 from fin_ops_platform.services.pending_invoice_rules import (
     PENDING_INVOICE_GROUP_LABELS_BY_DIRECTION,
     active_pending_invoice_rule_tags,
@@ -97,6 +107,10 @@ DEFAULT_COST_STATISTICS_TAG_SELECTION = {
     "version": 1,
     "selection_schema_version": COST_STATISTICS_TAG_SELECTION_SCHEMA_VERSION,
     "selected_tag_codes": None,
+}
+OA_DRAFT_PREFILL_SETTINGS_KEYS = {
+    ETC_OA_DRAFT_PREFILL_FAMILY: "etc_oa_draft_prefill",
+    INPUT_INVOICE_USAGE_OA_DRAFT_PREFILL_FAMILY: "input_invoice_usage_oa_draft_prefill",
 }
 
 
@@ -1008,6 +1022,165 @@ class AppSettingsService:
         payload["can_save"] = bool(can_save)
         return payload
 
+    def get_oa_draft_prefill_payload(
+        self,
+        family: str,
+        *,
+        can_save: bool,
+        applicant_name: str = "",
+    ) -> dict[str, Any]:
+        self._refresh_snapshot_from_state_store()
+        settings_key = self._oa_draft_prefill_settings_key(family)
+        profile = dict(self._snapshot[settings_key])
+        projects = {
+            str(project.id): str(project.project_name)
+            for project in self._list_known_projects()
+            if str(project.id).strip() and str(project.project_name).strip()
+        }
+        projects.setdefault(DEFAULT_OA_PROJECT_ID, DEFAULT_OA_PROJECT_NAME)
+        return {
+            "family": family,
+            "version": int(profile.pop("version", 1)),
+            "configuration": profile,
+            "dynamic_fields": {
+                "applicant": str(applicant_name or "").strip(),
+                "application_date": datetime.now().date().isoformat(),
+                "amount": "",
+                "payee": "" if family == ETC_OA_DRAFT_PREFILL_FAMILY else "按所选发票销方自动填充",
+            },
+            "options": {
+                **oa_draft_prefill_options(),
+                "projects": [
+                    {"value": project_id, "label": project_name}
+                    for project_id, project_name in sorted(projects.items(), key=lambda item: item[1])
+                ],
+            },
+            "can_save": bool(can_save),
+        }
+
+    def get_oa_draft_prefill_configuration(self, family: str) -> dict[str, object]:
+        self._refresh_snapshot_from_state_store()
+        return dict(self._snapshot[self._oa_draft_prefill_settings_key(family)])
+
+    def update_oa_draft_prefill(
+        self,
+        family: str,
+        payload: dict[str, Any],
+        *,
+        actor_id: str,
+        applicant_name: str = "",
+    ) -> dict[str, Any]:
+        self._refresh_snapshot_from_state_store()
+        settings_key = self._oa_draft_prefill_settings_key(family)
+        current = dict(self._snapshot[settings_key])
+        expected_version = payload.get("expected_version")
+        if (
+            isinstance(expected_version, bool)
+            or not isinstance(expected_version, int)
+            or expected_version < 1
+        ):
+            raise AppSettingsValidationError(
+                "invalid_oa_draft_prefill_request",
+                "expected_version must be a positive integer.",
+            )
+        if expected_version != int(current.get("version") or 1):
+            raise AppSettingsValidationError(
+                "oa_draft_prefill_version_conflict",
+                "OA draft prefill version conflict.",
+            )
+        configuration = payload.get("configuration")
+        if not isinstance(configuration, dict):
+            raise AppSettingsValidationError(
+                "invalid_oa_draft_prefill_request",
+                "configuration must be an object.",
+            )
+        expected_fields = set(current) - {"version"}
+        if set(configuration) != expected_fields:
+            raise AppSettingsValidationError(
+                "invalid_oa_draft_prefill_request",
+                "configuration fields must match the current OA draft prefill contract.",
+            )
+        try:
+            next_profile = normalize_oa_draft_prefill(
+                family,
+                {
+                    **configuration,
+                    "version": int(current.get("version") or 1) + 1,
+                },
+                validate=True,
+            )
+        except OADraftPrefillValidationError as exc:
+            raise AppSettingsValidationError("invalid_oa_draft_prefill_request", str(exc)) from exc
+
+        known_projects = {
+            str(project.id): str(project.project_name)
+            for project in self._list_known_projects()
+            if str(project.id).strip() and str(project.project_name).strip()
+        }
+        known_projects.setdefault(DEFAULT_OA_PROJECT_ID, DEFAULT_OA_PROJECT_NAME)
+        project_id = str(next_profile["project_id"])
+        if project_id not in known_projects:
+            raise AppSettingsValidationError(
+                "invalid_oa_draft_prefill_project",
+                "OA draft prefill project is not available.",
+            )
+        next_profile["project_name"] = known_projects[project_id]
+        comparable_fields = sorted(key for key in current if key != "version")
+        changed_fields = [key for key in comparable_fields if current.get(key) != next_profile.get(key)]
+        if not changed_fields:
+            return self.get_oa_draft_prefill_payload(
+                family,
+                can_save=True,
+                applicant_name=applicant_name,
+            )
+
+        next_snapshot = dict(self._snapshot)
+        next_snapshot[settings_key] = next_profile
+        saved_snapshot = next_snapshot
+        if self._state_store is not None:
+            storage_backend = str(getattr(self._state_store, "storage_backend", "") or "").strip()
+            save_versioned = getattr(
+                self._state_store,
+                "save_app_settings_for_versioned_family_in_transaction",
+                None,
+            )
+            connection = getattr(self._state_store, "_connection", None)
+            if storage_backend == "postgres":
+                if connection is None or not callable(save_versioned):
+                    raise AppSettingsPersistenceError("OA draft prefill transaction boundary is unavailable.")
+                with connection.transaction() as transaction:
+                    persisted = save_versioned(
+                        next_snapshot,
+                        family_key=settings_key,
+                        expected_version=int(current.get("version") or 1),
+                        transaction=transaction,
+                    )
+                if not isinstance(persisted, dict):
+                    raise AppSettingsValidationError(
+                        "oa_draft_prefill_version_conflict",
+                        "OA draft prefill version conflict.",
+                    )
+                saved_snapshot = self._normalize_settings(
+                    persisted,
+                    validate_pending_invoice_tag_groups=False,
+                )
+            else:
+                self._state_store.save_app_settings(next_snapshot)
+        self._snapshot = saved_snapshot
+        self._configure_category_service(saved_snapshot)
+        self._record_oa_draft_prefill_audit(
+            actor_id=actor_id,
+            family=family,
+            old_version=int(current.get("version") or 1),
+            new_version=int(next_profile.get("version") or 1),
+            changed_fields=changed_fields,
+        )
+        return self.get_oa_draft_prefill_payload(
+            family,
+            can_save=True,
+            applicant_name=applicant_name,
+        )
+
     def update_batch_accounting_tag_selection(
         self,
         payload: dict[str, Any],
@@ -1817,6 +1990,10 @@ class AppSettingsService:
         input_invoice_usage_payment_rules = normalize_payment_status_rules_settings(
             raw_payload.get(INPUT_INVOICE_USAGE_PAYMENT_RULES_SETTINGS_KEY)
         )
+        oa_draft_prefill_profiles = {
+            settings_key: normalize_oa_draft_prefill(family, raw_payload.get(settings_key))
+            for family, settings_key in OA_DRAFT_PREFILL_SETTINGS_KEYS.items()
+        }
         return {
             "completed_project_ids": completed_ids,
             "manual_projects": manual_projects,
@@ -1840,6 +2017,7 @@ class AppSettingsService:
             "batch_accounting_tag_selection": batch_accounting_tag_selection,
             "cost_statistics_tag_selection": cost_statistics_tag_selection,
             INPUT_INVOICE_USAGE_PAYMENT_RULES_SETTINGS_KEY: input_invoice_usage_payment_rules,
+            **oa_draft_prefill_profiles,
         }
 
     @staticmethod
@@ -2881,6 +3059,40 @@ class AppSettingsService:
                 "new_selected_tag_codes": list(event.get("new_selected_tag_codes") or []),
             },
         )
+
+    def _record_oa_draft_prefill_audit(
+        self,
+        *,
+        actor_id: str,
+        family: str,
+        old_version: int,
+        new_version: int,
+        changed_fields: list[str],
+    ) -> None:
+        if self._audit_service is None:
+            return
+        self._audit_service.record_action(
+            actor_id=actor_id or "oa_draft_prefill",
+            action="oa_draft_prefill_updated",
+            entity_type="app_settings",
+            entity_id=self._oa_draft_prefill_settings_key(family),
+            metadata={
+                "family": family,
+                "old_version": old_version,
+                "new_version": new_version,
+                "changed_fields": list(changed_fields),
+            },
+        )
+
+    @staticmethod
+    def _oa_draft_prefill_settings_key(family: str) -> str:
+        settings_key = OA_DRAFT_PREFILL_SETTINGS_KEYS.get(str(family or "").strip())
+        if settings_key is None:
+            raise AppSettingsValidationError(
+                "invalid_oa_draft_prefill_family",
+                "Unsupported OA draft prefill family.",
+            )
+        return settings_key
 
     def _record_cost_statistics_tag_selection_audit(self, event: dict[str, Any]) -> None:
         if self._audit_service is None:

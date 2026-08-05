@@ -325,6 +325,21 @@ class PostgresOpsTaxEtcRepository:
         expected_version: int,
         transaction: Any,
     ) -> dict[str, Any] | None:
+        return self.save_app_settings_for_versioned_family_in_transaction(
+            payload,
+            family_key="batch_accounting_tag_selection",
+            expected_version=expected_version,
+            transaction=transaction,
+        )
+
+    def save_app_settings_for_versioned_family_in_transaction(
+        self,
+        payload: dict[str, Any],
+        *,
+        family_key: str,
+        expected_version: int,
+        transaction: Any,
+    ) -> dict[str, Any] | None:
         transaction.execute(
             "select pg_advisory_xact_lock(hashtextextended(%s, 0))",
             (SETTINGS_ACL_ADVISORY_LOCK_KEY,),
@@ -344,20 +359,17 @@ class PostgresOpsTaxEtcRepository:
             **(current_payload if isinstance(current_payload, dict) else {}),
             **settings_access_control_from_payload(current_payload),
         }
-        current_selection = current_payload.get("batch_accounting_tag_selection")
+        current_family = current_payload.get(family_key)
         current_version = int_value(
-            current_selection.get("version") if isinstance(current_selection, dict) else 1,
+            current_family.get("version") if isinstance(current_family, dict) else 1,
             1,
         )
         if current_version != int(expected_version):
             return None
-        next_selection = payload.get("batch_accounting_tag_selection")
-        if not isinstance(next_selection, dict):
-            raise ValueError("batch_accounting_tag_selection payload is required.")
-        persisted_payload = {
-            **current_payload,
-            "batch_accounting_tag_selection": dict(next_selection),
-        }
+        next_family = payload.get(family_key)
+        if not isinstance(next_family, dict):
+            raise ValueError(f"{family_key} payload is required.")
+        persisted_payload = {**current_payload, family_key: dict(next_family)}
         self._save_settings_with_executor(transaction, APP_SETTINGS_KEY, persisted_payload)
         return persisted_payload
 

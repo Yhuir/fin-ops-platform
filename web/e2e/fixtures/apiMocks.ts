@@ -8097,6 +8097,31 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
   let turnoverSelectedTagCodes = ["external_turnover_payment", "external_turnover_collection"];
   let turnoverTagSelectionVersion = 1;
   let settingsCompletedProjectIds: string[] = [];
+  const oaDraftPrefillVersions = { etc: 1, input_invoice_usage: 1 };
+  const oaDraftPrefillConfigurations: Record<"etc" | "input_invoice_usage", Record<string, string>> = {
+    etc: {
+      application_type: "s5",
+      payment_method: "Bank_transfer",
+      invoice_kind: "Special_invoice",
+      project_id: "6486ca70cd6cae5d4e2b0b48",
+      project_name: "云南溯源科技",
+      payee: "刘树刚",
+      bank: "建设银行",
+      bank_account: "6217003860012460901",
+      reason_template: "{bill_month}月账单{submission_month}月{submission_day}日 支付 ETC批里提交",
+    },
+    input_invoice_usage: {
+      application_type: "s5",
+      payment_method: "Bank_transfer",
+      invoice_kind: "Special_invoice",
+      project_id: "6486ca70cd6cae5d4e2b0b48",
+      project_name: "云南溯源科技",
+      payee: "",
+      bank: "",
+      bank_account: "",
+      reason_template: "进项发票反提 OA，发票数={invoice_count}；发票号码={invoice_numbers}",
+    },
+  };
   let activeSessionUsername = options.sessionUsername
     ?? (options.sessionMode === "admin" ? "YNSYLP005" : "E2EUSER001");
   let settingsAccessControl = {
@@ -8236,6 +8261,43 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         }
       }
       return json(route, settingsAccessControl);
+    }
+
+    const oaDraftPrefillMatch = path.match(/^\/api\/workbench\/settings\/oa-draft-prefill\/(etc|input-invoice-usage)$/);
+    if (oaDraftPrefillMatch) {
+      const family = oaDraftPrefillMatch[1] === "etc" ? "etc" : "input_invoice_usage";
+      if (request.method() === "PUT") {
+        if (configuredSessionTier() !== "admin") {
+          return json(route, { error: "forbidden", message: "当前账号无权执行此操作。" }, 403);
+        }
+        const body = parseJsonBody(request.postData()) as {
+          expected_version?: number;
+          configuration?: Record<string, string>;
+        };
+        if (body.expected_version !== oaDraftPrefillVersions[family] || !body.configuration) {
+          return json(route, { error: "oa_draft_prefill_version_conflict", message: "version conflict" }, 409);
+        }
+        oaDraftPrefillConfigurations[family] = { ...body.configuration };
+        oaDraftPrefillVersions[family] += 1;
+      }
+      return json(route, {
+        family,
+        version: oaDraftPrefillVersions[family],
+        configuration: oaDraftPrefillConfigurations[family],
+        dynamic_fields: {
+          applicant: "杨丽萍",
+          application_date: "2026-08-05",
+          amount: "",
+          payee: family === "etc" ? "" : "按所选发票销方自动填充",
+        },
+        options: {
+          application_types: [{ value: "s5", label: "车辆使用费（汽油、过路、保险、维修、税费等）" }],
+          payment_methods: [{ value: "Bank_transfer", label: "银行转账" }],
+          invoice_kinds: [{ value: "Special_invoice", label: "普通发票/行政收据" }],
+          projects: [{ value: "6486ca70cd6cae5d4e2b0b48", label: "云南溯源科技" }],
+        },
+        can_save: configuredSessionTier() === "admin",
+      });
     }
 
     if (path === "/api/workbench/settings") {

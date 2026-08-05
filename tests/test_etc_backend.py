@@ -594,8 +594,12 @@ class EtcServiceTests(unittest.TestCase):
             self.assertEqual(first.oa_draft_id, "oa-draft-001")
             self.assertEqual(second.status, EtcBusinessBatchStatus.OA_CONFIRMATION_PENDING.value)
             self.assertEqual(len(fake_oa.draft_payloads), 1)
-            cause = str(fake_oa.draft_payloads[0]["payload"]["data"]["cause"])
-            self.assertIn(f"business_batch_id={batch.business_batch_id}", cause)
+            payload = fake_oa.draft_payloads[0]["payload"]
+            cause = str(payload["data"]["cause"])
+            self.assertNotIn("business_batch_id=", cause)
+            self.assertNotIn("etc_batch_id=", cause)
+            self.assertEqual(payload["data"]["etcBatchId"], first.external_etc_batch_id)
+            self.assertEqual(payload["data"]["businessBatchId"], batch.business_batch_id)
 
     def test_oa_draft_finalize_only_updates_its_target_batch(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -1876,9 +1880,15 @@ class EtcServiceTests(unittest.TestCase):
         self.assertEqual(payload["formId"], 2)
         self.assertEqual(data["applicationDate"], date.today().isoformat())
         self.assertEqual(data["category"], "s5")
-        self.assertEqual(data["paymentProof"], "")
+        self.assertEqual(data["paymentMethod"], "Bank_transfer")
+        self.assertEqual(data["paymentProof"], "Special_invoice")
         self.assertEqual(data["projectName"], "6486ca70cd6cae5d4e2b0b48")
-        self.assertEqual(data["cause"], f"ETC批量提交\netc_batch_id={draft.etc_batch_id}")
+        self.assertEqual(data["beneficiary"], "刘树刚")
+        self.assertEqual(data["bank"], "建设银行")
+        self.assertEqual(data["payeeAccount"], "6217003860012460901")
+        self.assertIn("支付 ETC批里提交", data["cause"])
+        self.assertNotIn("etc_batch_id=", data["cause"])
+        self.assertEqual(data["etcBatchId"], draft.etc_batch_id)
         self.assertEqual(data["invoiceCount"], 2)
         self.assertEqual(data["invoice_count"], 2)
         self.assertEqual(data["etcInvoiceCount"], 2)

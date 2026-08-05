@@ -142,6 +142,8 @@ class ApplicationStateStore:
             "bank_flow_rule_batch_tag_rules": {},
             "cost_statistics_tag_selection": {},
             "input_invoice_usage_payment_status_rules": {},
+            "etc_oa_draft_prefill": {},
+            "input_invoice_usage_oa_draft_prefill": {},
         }
         if not self._app_settings_path.exists():
             return default_payload
@@ -168,6 +170,10 @@ class ApplicationStateStore:
             "cost_statistics_tag_selection": dict(loaded.get("cost_statistics_tag_selection") or {}),
             "input_invoice_usage_payment_status_rules": dict(
                 loaded.get("input_invoice_usage_payment_status_rules") or {}
+            ),
+            "etc_oa_draft_prefill": dict(loaded.get("etc_oa_draft_prefill") or {}),
+            "input_invoice_usage_oa_draft_prefill": dict(
+                loaded.get("input_invoice_usage_oa_draft_prefill") or {}
             ),
         }
         if "no_oa_bank_batch_tag_selection" in loaded:
@@ -215,6 +221,10 @@ class ApplicationStateStore:
             "cost_statistics_tag_selection": dict(payload.get("cost_statistics_tag_selection") or {}),
             "input_invoice_usage_payment_status_rules": dict(
                 payload.get("input_invoice_usage_payment_status_rules") or {}
+            ),
+            "etc_oa_draft_prefill": dict(payload.get("etc_oa_draft_prefill") or {}),
+            "input_invoice_usage_oa_draft_prefill": dict(
+                payload.get("input_invoice_usage_oa_draft_prefill") or {}
             ),
         }
         if "no_oa_bank_batch_tag_selection" in payload:

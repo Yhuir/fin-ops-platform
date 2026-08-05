@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { Link as RouterLink } from "react-router-dom";
 
 import AppDialog from "../components/common/AppDialog";
+import OaDraftPrefillDrawer from "../components/common/OaDraftPrefillDrawer";
 import { FinanceTablePagination } from "../components/common/FinanceTable";
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageScaffold from "../components/common/PageScaffold";
@@ -680,7 +681,7 @@ function ReconciliationDescriptionCell({
 export default function EtcTicketManagementPage() {
   const { active, activationGeneration } = useOptionalPageActivation("etc-tickets");
   const { jobs } = useBackgroundJobProgress();
-  const { canMutateData } = useSessionPermissions();
+  const { canAdminAccess, canMutateData } = useSessionPermissions();
   const [activeStatus, setActiveStatus] = useState<EtcBusinessBatchBucket>("unsubmitted");
   const [batchPage, setBatchPage] = useState(1);
   const [batchPagination, setBatchPagination] = useState({
@@ -726,6 +727,7 @@ export default function EtcTicketManagementPage() {
   const [editingBatchTitleId, setEditingBatchTitleId] = useState("");
   const [editingBatchTitle, setEditingBatchTitle] = useState("");
   const [titleSavingBatchId, setTitleSavingBatchId] = useState("");
+  const [oaPrefillOpen, setOaPrefillOpen] = useState(false);
   const refreshedImportJobIdsRef = useRef<Set<string>>(new Set());
   const oaDraftIntentRef = useRef<{ businessBatchId: string; idempotencyKey: string } | null>(null);
   const titleEditCancelRef = useRef(false);
@@ -1963,6 +1965,16 @@ export default function EtcTicketManagementPage() {
               label="ETC票据管理"
               pageKey="etc-tickets"
             />
+            {canAdminAccess ? (
+              <Button
+                className="etc-secondary-action"
+                onPress={() => setOaPrefillOpen(true)}
+                size="sm"
+                variant="secondary"
+              >
+                OA 草稿预填管理
+              </Button>
+            ) : null}
             <Button
               className="etc-secondary-action"
               isDisabled={batchNavigationDisabled || taskLoading}
@@ -2903,6 +2915,7 @@ export default function EtcTicketManagementPage() {
           )}
         </AppDialog>
       </PageScaffold>
+      <OaDraftPrefillDrawer family="etc" onClose={() => setOaPrefillOpen(false)} open={oaPrefillOpen} />
     </div>
   );
 }

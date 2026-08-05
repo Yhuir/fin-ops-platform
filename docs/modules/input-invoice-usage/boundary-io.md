@@ -37,6 +37,7 @@
 | payment rules | `app.app_settings` | 使用现有 input invoice payment rule contract |
 | OA reverse facts | `app.input_invoice_usage_oa_reverse_batches` | statistics、preview 和命令状态 |
 | lifecycle command | 页面专属写 API | 保持原权限、审计、CAS/idempotency；成功后 GET |
+| OA 草稿预填配置 | `GET/PUT /api/workbench/settings/oa-draft-prefill/input-invoice-usage` | 页面右上角 admin-only 抽屉读取/保存独立 versioned family；创建 reverse batch 时固化当次配置快照，后续 OA draft 创建不受并发设置变更影响。多销方或缺失销方 fail closed |
 
 ## 输出 I/O
 
@@ -45,7 +46,7 @@
 | `/rows` | 页面 | 同一 snapshot 返回 `rows`、`summary`、`statistics`、`pagination`、`filterConfig`、`filterOptions` |
 | relation/details | drawer | 按 row/invoice/bank/OA id 定向读取；不存在返回 404 |
 | export preview/download | export drawer | 复用 canonical filters/sort；20,000 行上限和原错误合同不变 |
-| OA reverse preview/command | OA reverse drawer | preview 只读 canonical snapshot；命令只写 canonical facts；候选金额展示与本地搜索都使用无千分位文本。 |
+| OA reverse preview/command | OA reverse drawer | preview 只读 canonical snapshot；命令只写 canonical facts；候选金额展示与本地搜索都使用无千分位文本。OA payload 动态写目标申请人、当天日期、所选总额和唯一销方，申请事由只显示发票数/发票号码，内部 reverse batch ID 仅保留结构化字段。 |
 | write result | 页面 | 不含 refresh target/barrier；页面成功后重跑当前 GET |
 
 `/rows` 不输出 `read_model_status`、`source_versions`、`refresh_enqueued`、scope 或 polling 字段。
@@ -62,7 +63,7 @@
 
 | 层 | 文件或目录 |
 | --- | --- |
-| Frontend | `web/src/pages/InputInvoiceUsagePage.tsx`、`web/src/features/inputInvoiceUsage/*`、`web/src/components/inputInvoiceUsage/*` |
+| Frontend | `web/src/pages/InputInvoiceUsagePage.tsx`、`web/src/features/inputInvoiceUsage/*`、`web/src/features/oaDraftPrefill.ts`、`web/src/components/inputInvoiceUsage/*`、`web/src/components/common/OaDraftPrefillDrawer.tsx` |
 | Route | `backend/src/fin_ops_platform/app/routes_input_invoice_usage.py` |
 | Query service | `input_invoice_usage_canonical_query_service.py` |
 | Business assembler | `input_invoice_usage_service.py` |

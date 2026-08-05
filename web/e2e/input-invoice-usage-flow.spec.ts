@@ -128,6 +128,40 @@ function decodedFilters(url: URL) {
 }
 
 test.describe("input invoice usage browser flow", () => {
+  test("administrator saves reverse-OA prefill while runtime payee stays canonical", async ({ page }) => {
+    const browserErrors = startStrictBrowserErrorCapture(page);
+    const api = await installDeterministicApiMocks(page, { sessionMode: "admin" });
+
+    await page.goto("/input-invoice-usage");
+    await expect(page.getByTestId("input-invoice-usage-page")).toBeVisible();
+    const loadResponse = page.waitForResponse((response) =>
+      response.request().method() === "GET"
+      && new URL(response.url()).pathname === "/api/workbench/settings/oa-draft-prefill/input-invoice-usage",
+    );
+    await page.getByRole("button", { name: "OA 草稿预填管理" }).click();
+    await loadResponse;
+
+    const drawer = page.getByRole("dialog", { name: "OA 草稿预填管理" });
+    await expect(drawer.getByLabel("收款方")).toHaveValue("按所选发票销方自动填充");
+    await expect(drawer.getByLabel("收款方")).toBeDisabled();
+    await drawer.getByLabel("开户行").fill("招商银行");
+    const saveResponse = page.waitForResponse((response) =>
+      response.request().method() === "PUT"
+      && new URL(response.url()).pathname === "/api/workbench/settings/oa-draft-prefill/input-invoice-usage",
+    );
+    await drawer.getByRole("button", { name: "保存" }).click();
+    await saveResponse;
+
+    const body = api.lastBody("PUT /api/workbench/settings/oa-draft-prefill/input-invoice-usage") as {
+      configuration?: { bank?: string; payee?: string; reason_template?: string };
+    };
+    expect(body.configuration?.bank).toBe("招商银行");
+    expect(body.configuration?.payee).toBe("");
+    expect(body.configuration?.reason_template).not.toContain("batch_id");
+    await expect(drawer.getByText("已保存。")).toBeVisible();
+    expect(browserErrors).toEqual([]);
+  });
+
   test("recovers rows after a transient load failure when refreshed", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page, {
       allowedConsoleErrors: [/Failed to load resource: the server responded with a status of 503/],

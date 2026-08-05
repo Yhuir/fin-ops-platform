@@ -26356,3 +26356,109 @@ body.column-layout-dragging {
     border-bottom: 0;
   }
 }
+.oa-prefill-drawer__body {
+  padding: 12px 16px 20px;
+}
+
+.oa-prefill-drawer__state,
+.oa-prefill-drawer__alert,
+.oa-prefill-drawer__feedback {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line, #d9e0ea);
+  border-radius: 8px;
+  color: var(--text-secondary, #526078);
+  font-size: 13px;
+}
+
+.oa-prefill-drawer__alert {
+  border-color: #f2c6c3;
+  background: #fff6f5;
+  color: #a63f37;
+}
+
+.oa-prefill-drawer__feedback {
+  border-color: #b9dfca;
+  background: #f2fbf6;
+  color: #276b46;
+}
+
+.oa-prefill-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.oa-prefill-field {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.oa-prefill-field > span {
+  color: var(--text-secondary, #526078);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.oa-prefill-field input,
+.oa-prefill-field select,
+.oa-prefill-field textarea {
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 1px solid var(--line, #d9e0ea);
+  border-radius: 8px;
+  outline: none;
+  background: var(--surface, #fff);
+  color: var(--text-primary, #172238);
+  font: inherit;
+  font-size: 13px;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.oa-prefill-field textarea {
+  min-height: 76px;
+  resize: vertical;
+}
+
+.oa-prefill-field input:focus,
+.oa-prefill-field select:focus,
+.oa-prefill-field textarea:focus {
+  border-color: #7797df;
+  box-shadow: 0 0 0 2px rgb(65 105 225 / 12%);
+}
+
+.oa-prefill-field input:disabled,
+.oa-prefill-field select:disabled,
+.oa-prefill-field textarea:disabled {
+  cursor: default;
+  background: var(--surface-subtle, #f5f7fa);
+  color: var(--text-secondary, #526078);
+  opacity: 1;
+}
+
+.oa-prefill-field--wide {
+  grid-column: 1 / -1;
+}
+
+.oa-prefill-drawer__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  .oa-prefill-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .oa-prefill-field--wide {
+    grid-column: auto;
+  }
+}

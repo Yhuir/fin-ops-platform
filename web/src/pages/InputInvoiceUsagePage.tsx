@@ -5,6 +5,7 @@ import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageScaffold from "../components/common/PageScaffold";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import PageToolbar from "../components/common/PageToolbar";
+import OaDraftPrefillDrawer from "../components/common/OaDraftPrefillDrawer";
 import StatePanel from "../components/common/StatePanel";
 import InputInvoiceUsageDetailDrawer from "../components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer";
 import InputInvoiceUsageExportDrawer from "../components/inputInvoiceUsage/InputInvoiceUsageExportDrawer";
@@ -169,6 +170,7 @@ export default function InputInvoiceUsagePage() {
   const [error, setError] = useState<string | null>(null);
   const [expandedCells, setExpandedCells] = useState<Set<string>>(() => new Set());
   const [keywordDraft, setKeywordDraft] = useState(query.keyword);
+  const [oaPrefillOpen, setOaPrefillOpen] = useState(false);
   const requestIdRef = useRef(0);
   const hasLoadedRef = useRef(false);
 
@@ -393,6 +395,15 @@ export default function InputInvoiceUsagePage() {
       >
         发票与支付状态规则设置
       </button>
+      {canAdminAccess ? (
+        <button
+          className="input-invoice-usage-button"
+          onClick={() => setOaPrefillOpen(true)}
+          type="button"
+        >
+          OA 草稿预填管理
+        </button>
+      ) : null}
       <button
         className="input-invoice-usage-button"
         disabled={exportDisabled}
@@ -403,7 +414,7 @@ export default function InputInvoiceUsagePage() {
         筛选内容导出
       </button>
     </PageToolbar>
-  ), [exportDisabled, loadRows, loading, refreshing, setQuery]);
+  ), [canAdminAccess, exportDisabled, loadRows, loading, refreshing, setQuery]);
   const visibleStatistics = statistics;
   const titleAccessory = useMemo(() => (
     <div className="page-title-accessory-group">
@@ -557,6 +568,11 @@ export default function InputInvoiceUsagePage() {
         loadPreview={loadExportPreview}
         downloadExport={downloadExport}
         onClose={handleCloseWorkflow}
+      />
+      <OaDraftPrefillDrawer
+        family="input-invoice-usage"
+        onClose={() => setOaPrefillOpen(false)}
+        open={oaPrefillOpen}
       />
     </>
   );

@@ -17,6 +17,12 @@ from fin_ops_platform.services.input_invoice_usage_service import (
     TARGET_APPLICANTS,
 )
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
+from fin_ops_platform.services.oa_draft_prefill import (
+    INPUT_INVOICE_USAGE_OA_DRAFT_PREFILL_FAMILY,
+    default_oa_draft_prefill,
+    normalize_oa_draft_prefill,
+    render_oa_draft_reason,
+)
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 
 
@@ -224,6 +230,7 @@ class InputInvoiceUsageOaReverseBatch:
     preview_hash: str
     preview_summary: dict[str, object]
     invoice_display_rows: list[dict[str, object]]
+    oa_prefill: dict[str, object] = field(default_factory=dict)
     idempotency_key: str | None = None
     operation_idempotency: dict[str, str] = field(default_factory=dict)
     oa_form_id: int = DEFAULT_OA_FORM_ID
@@ -306,6 +313,7 @@ class InputInvoiceUsageOaReverseService:
         audit_recorder: Callable[[dict[str, object]], None] | None = None,
         rows_loader: Callable[[dict[str, list[Any]]], dict[str, object] | None] | None = None,
         rows_by_invoice_ids_loader: Callable[[list[str]], dict[str, object] | None] | None = None,
+        oa_prefill_provider: Callable[[], dict[str, object]] | None = None,
     ) -> None:
         self._repository = repository
         self._oa_client = oa_client or NotConfiguredInputInvoiceUsageOaDraftClient()
@@ -314,6 +322,9 @@ class InputInvoiceUsageOaReverseService:
         self._audit_recorder = audit_recorder
         self._rows_loader = rows_loader
         self._rows_by_invoice_ids_loader = rows_by_invoice_ids_loader
+        self._oa_prefill_provider = oa_prefill_provider or (
+            lambda: default_oa_draft_prefill(INPUT_INVOICE_USAGE_OA_DRAFT_PREFILL_FAMILY)
+        )
 
     def preview(self, request: dict[str, Any] | None, *, can_create_draft: bool = False) -> dict[str, object]:
         payload = dict(request or {})
@@ -343,7 +354,21 @@ class InputInvoiceUsageOaReverseService:
         }
         preview_hash = _stable_hash(fingerprint)
         preview_id = f"oa_reverse_preview_{preview_hash[:16]}"
-        can_submit = bool(can_create_draft and candidate_ids)
+        seller_names = sorted(
+            {
+                str(row.get("sellerName") or "").strip()
+                for row in display_rows
+                if str(row.get("sellerName") or "").strip()
+            }
+        )
+        payee_resolvable = len(seller_names) == 1 and all(
+            str(row.get("sellerName") or "").strip()
+            for row in display_rows
+        )
+        warnings = [] if payee_resolvable or not candidate_ids else [
+            "所选发票必须属于同一销方且销方名称不能为空，才能生成 OA 草稿。"
+        ]
+        can_submit = bool(can_create_draft and candidate_ids and payee_resolvable)
         return {
             "previewId": preview_id,
             "previewHash": preview_hash,
@@ -366,7 +391,9 @@ class InputInvoiceUsageOaReverseService:
                     "rejectedInvoices": rejected,
                 }
             ],
-            "warnings": [],
+            "sellerNames": seller_names,
+            "payeeResolvable": payee_resolvable,
+            "warnings": warnings,
             "canCreateDraft": can_submit,
             "nextAction": "create_batch" if can_submit else "no_valid_candidates",
         }
@@ -399,6 +426,11 @@ class InputInvoiceUsageOaReverseService:
         invoice_ids = [str(row.get("invoiceId") or "") for row in invoice_rows if str(row.get("invoiceId") or "").strip()]
         if not invoice_ids:
             raise InputInvoiceUsageOaReverseInvalidTransitionError("OA reverse batch requires at least one candidate invoice.", code="empty_oa_reverse_batch")
+        if not bool(preview_payload.get("payeeResolvable")):
+            raise InputInvoiceUsageOaReverseInvalidTransitionError(
+                "所选发票必须属于同一销方且销方名称不能为空。",
+                code="oa_reverse_payee_ambiguous",
+            )
 
         now = datetime.now(UTC)
         batch = InputInvoiceUsageOaReverseBatch(
@@ -416,6 +448,10 @@ class InputInvoiceUsageOaReverseService:
                 "source": str(preview_payload["source"]),
             },
             invoice_display_rows=[dict(row) for row in invoice_rows if isinstance(row, dict)],
+            oa_prefill=normalize_oa_draft_prefill(
+                INPUT_INVOICE_USAGE_OA_DRAFT_PREFILL_FAMILY,
+                self._oa_prefill_provider(),
+            ),
             idempotency_key=idempotency_key,
             created_by=actor_id,
             updated_by=actor_id,
@@ -876,35 +912,54 @@ class InputInvoiceUsageOaReverseService:
             for code, name in TARGET_APPLICANTS.items()
         ]
 
-    @staticmethod
-    def _build_oa_draft_payload(batch: InputInvoiceUsageOaReverseBatch) -> dict[str, object]:
+    def _build_oa_draft_payload(self, batch: InputInvoiceUsageOaReverseBatch) -> dict[str, object]:
         mapping = EtcOAFormFieldMapping.from_environment()
+        profile = normalize_oa_draft_prefill(
+            INPUT_INVOICE_USAGE_OA_DRAFT_PREFILL_FAMILY,
+            batch.oa_prefill or self._oa_prefill_provider(),
+        )
         total_with_tax = str(batch.preview_summary.get("totalWithTax") or "")
         invoice_numbers = [
             str(row.get("invoiceNo") or row.get("displayNo") or row.get("invoiceNumber") or "").strip()
             for row in list(batch.invoice_display_rows or [])
             if str(row.get("invoiceNo") or row.get("displayNo") or row.get("invoiceNumber") or "").strip()
         ]
-        cause_parts = [
-            "进项发票反提 OA",
-            f"input_invoice_usage_oa_reverse_batch_id={batch.batch_id}",
-            f"发票数={len(batch.invoice_ids)}",
-        ]
-        if invoice_numbers:
-            cause_parts.append(f"发票号码={';'.join(invoice_numbers[:20])}")
+        seller_names = sorted(
+            {
+                str(row.get("sellerName") or "").strip()
+                for row in list(batch.invoice_display_rows or [])
+                if str(row.get("sellerName") or "").strip()
+            }
+        )
+        if len(seller_names) != 1 or any(
+            not str(row.get("sellerName") or "").strip()
+            for row in list(batch.invoice_display_rows or [])
+        ):
+            raise InputInvoiceUsageOaReverseInvalidTransitionError(
+                "所选发票必须属于同一销方且销方名称不能为空。",
+                code="oa_reverse_payee_ambiguous",
+            )
         data = {
             mapping.applicant: batch.target_applicant_name,
             "applicant": batch.target_applicant_name,
             "targetApplicantCode": batch.target_applicant_code,
             mapping.application_date: date.today().isoformat(),
-            mapping.category: mapping.category_value,
-            mapping.payment_proof: mapping.payment_proof_value,
-            mapping.project_name: mapping.project_name_value,
+            mapping.category: profile["application_type"],
+            mapping.payment_method: profile["payment_method"],
+            mapping.payment_proof: profile["invoice_kind"],
+            mapping.project_name: profile["project_id"],
             mapping.amount: total_with_tax,
+            mapping.beneficiary: seller_names[0],
+            mapping.bank: profile["bank"],
+            mapping.bank_account: profile["bank_account"],
             "invoiceCount": len(batch.invoice_ids),
             "invoice_count": len(batch.invoice_ids),
             "inputInvoiceUsageOaReverseBatchId": batch.batch_id,
-            mapping.cause: "；".join(cause_parts),
+            mapping.cause: render_oa_draft_reason(
+                INPUT_INVOICE_USAGE_OA_DRAFT_PREFILL_FAMILY,
+                profile["reason_template"],
+                invoice_numbers=invoice_numbers,
+            ),
         }
         return {
             "formId": batch.oa_form_id,
@@ -1026,6 +1081,7 @@ def _copy_batch(batch: InputInvoiceUsageOaReverseBatch | None) -> InputInvoiceUs
         invoice_ids=list(batch.invoice_ids),
         preview_summary=dict(batch.preview_summary or {}),
         invoice_display_rows=[dict(row) for row in list(batch.invoice_display_rows or [])],
+        oa_prefill=dict(batch.oa_prefill or {}),
         operation_idempotency=dict(batch.operation_idempotency or {}),
         oa_detection_payload=dict(batch.oa_detection_payload or {}),
         audit_events=[dict(event) for event in list(batch.audit_events or [])],
@@ -1069,6 +1125,7 @@ def _batch_to_storage(batch: InputInvoiceUsageOaReverseBatch) -> dict[str, objec
         "preview_hash": batch.preview_hash,
         "preview_summary": dict(batch.preview_summary or {}),
         "invoice_display_rows": [dict(row) for row in list(batch.invoice_display_rows or [])],
+        "oa_prefill": dict(batch.oa_prefill or {}),
         "idempotency_key": batch.idempotency_key,
         "operation_idempotency": dict(batch.operation_idempotency or {}),
         "oa_form_id": batch.oa_form_id,
@@ -1103,6 +1160,7 @@ def _batch_from_storage(value: Any) -> InputInvoiceUsageOaReverseBatch | None:
         preview_hash=str(value.get("preview_hash") or ""),
         preview_summary=dict(value.get("preview_summary") if isinstance(value.get("preview_summary"), dict) else {}),
         invoice_display_rows=[dict(row) for row in list(value.get("invoice_display_rows") or []) if isinstance(row, dict)],
+        oa_prefill=dict(value.get("oa_prefill") if isinstance(value.get("oa_prefill"), dict) else {}),
         idempotency_key=str(value.get("idempotency_key") or "") or None,
         operation_idempotency=dict(value.get("operation_idempotency") if isinstance(value.get("operation_idempotency"), dict) else {}),
         oa_form_id=int(value.get("oa_form_id") or DEFAULT_OA_FORM_ID),

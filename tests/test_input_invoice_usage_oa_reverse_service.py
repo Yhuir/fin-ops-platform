@@ -292,6 +292,28 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             [{"invoiceId": "inv-missing", "reasonCode": "invoice_not_found", "reason": "发票不存在"}],
         )
 
+    def test_preview_blocks_multiple_sellers_instead_of_choosing_the_first_payee(self) -> None:
+        first = self._read_model_row("inv-1", "9101")
+        second = self._read_model_row("inv-2", "9102")
+        second["invoice"] = {**second["invoice"], "sellerName": "另一供应商"}
+        service = InputInvoiceUsageOaReverseService(
+            repository=InMemoryInputInvoiceUsageOaReverseBatchRepository(),
+            rows_by_invoice_ids_loader=lambda _invoice_ids: {
+                "rows": [first, second],
+                "missing_invoice_ids": [],
+            },
+        )
+
+        preview = service.preview(
+            {"invoiceIds": ["inv-1", "inv-2"], "targetApplicantCode": "chen_xiuyun"},
+            can_create_draft=True,
+        )
+
+        self.assertFalse(preview["payeeResolvable"])
+        self.assertFalse(preview["canCreateDraft"])
+        self.assertEqual(preview["sellerNames"], ["供应商", "另一供应商"])
+        self.assertTrue(preview["warnings"])
+
     def test_preview_ignores_removed_read_model_metadata(self) -> None:
         service = InputInvoiceUsageOaReverseService(
             repository=InMemoryInputInvoiceUsageOaReverseBatchRepository(),
@@ -541,7 +563,16 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         self.assertIs(request_payload["isDraft"], True)
         self.assertEqual(form_data["userName"], "周洁莹")
         self.assertEqual(form_data["applicant"], "周洁莹")
-        self.assertIn(str(batch["batchId"]), form_data["cause"])
+        self.assertNotIn(str(batch["batchId"]), form_data["cause"])
+        self.assertNotIn("input_invoice_usage_oa_reverse_batch_id", form_data["cause"])
+        self.assertEqual(form_data["cause"], "进项发票反提 OA，发票数=1；发票号码=1001")
+        self.assertEqual(form_data["beneficiary"], "供应商")
+        self.assertEqual(form_data["paymentMethod"], "Bank_transfer")
+        self.assertEqual(form_data["paymentProof"], "Special_invoice")
+        self.assertEqual(form_data["projectName"], "6486ca70cd6cae5d4e2b0b48")
+        self.assertEqual(form_data["bank"], "")
+        self.assertEqual(form_data["payeeAccount"], "")
+        self.assertEqual(form_data["inputInvoiceUsageOaReverseBatchId"], batch["batchId"])
 
         confirmed = service.manual_oa_status(
             str(batch["batchId"]),

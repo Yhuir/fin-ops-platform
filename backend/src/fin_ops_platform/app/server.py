@@ -69,6 +69,10 @@ from fin_ops_platform.services.app_settings_service import (
     AppSettingsService,
     AppSettingsValidationError,
 )
+from fin_ops_platform.services.oa_draft_prefill import (
+    ETC_OA_DRAFT_PREFILL_FAMILY,
+    INPUT_INVOICE_USAGE_OA_DRAFT_PREFILL_FAMILY,
+)
 from fin_ops_platform.services.app_status_overview_service import AppStatusOverviewService
 from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.background_job_service import (
@@ -954,6 +958,9 @@ class Application:
         self._etc_service = EtcService(
             state_store=self._state_store,
             import_session_store=self._etc_import_session_store,
+            oa_prefill_provider=lambda: self._app_settings_service.get_oa_draft_prefill_configuration(
+                ETC_OA_DRAFT_PREFILL_FAMILY
+            ),
         )
         self._etc_service.set_canonical_invoice_key_exists(self._canonical_invoice_key_exists_for_etc_import)
         self._etc_reconciliation_task_service = EtcReconciliationTaskService(state_store=self._state_store)
@@ -5277,6 +5284,9 @@ class Application:
             rows_loader=lambda query: self._input_invoice_usage_page_query_service().rows(query),
             rows_by_invoice_ids_loader=lambda invoice_ids: self._input_invoice_usage_page_query_service().rows_by_invoice_ids(
                 invoice_ids
+            ),
+            oa_prefill_provider=lambda: self._app_settings_service.get_oa_draft_prefill_configuration(
+                INPUT_INVOICE_USAGE_OA_DRAFT_PREFILL_FAMILY
             ),
         )
         self._input_invoice_usage_oa_reverse_service_instance = service

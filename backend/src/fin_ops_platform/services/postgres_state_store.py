@@ -312,6 +312,21 @@ class PostgresStateStore:
             transaction=transaction,
         )
 
+    def save_app_settings_for_versioned_family_in_transaction(
+        self,
+        payload: dict[str, Any],
+        *,
+        family_key: str,
+        expected_version: int,
+        transaction: Any,
+    ) -> dict[str, Any] | None:
+        return self._ops_tax_etc_repository.save_app_settings_for_versioned_family_in_transaction(
+            payload,
+            family_key=family_key,
+            expected_version=expected_version,
+            transaction=transaction,
+        )
+
     def load_pending_invoice_commands(self) -> dict[str, Any]:
         snapshot = self._ops_tax_etc_repository.load_pending_invoice_commands()
         if snapshot:

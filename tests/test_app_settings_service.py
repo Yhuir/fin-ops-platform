@@ -22,6 +22,10 @@ from fin_ops_platform.services.oa_role_sync_service import (
     OARoleAssignment,
     OARoleSyncConfigurationError,
 )
+from fin_ops_platform.services.oa_draft_prefill import (
+    ETC_OA_DRAFT_PREFILL_FAMILY,
+    INPUT_INVOICE_USAGE_OA_DRAFT_PREFILL_FAMILY,
+)
 from fin_ops_platform.services.state_store import ApplicationStateStore
 
 
@@ -277,6 +281,198 @@ class AppSettingsServiceTests(unittest.TestCase):
         self.assertEqual(len(app._audit_service.as_dicts()), audit_count)
         self.assertEqual(stale.exception.error_code, "batch_accounting_tag_selection_version_conflict")
         self.assertEqual(invalid.exception.error_code, "invalid_batch_accounting_tag")
+
+    def test_oa_draft_prefill_families_save_independently_with_noop_and_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            etc_before = app._app_settings_service.get_oa_draft_prefill_payload(
+                ETC_OA_DRAFT_PREFILL_FAMILY,
+                can_save=True,
+                applicant_name="杨丽萍",
+            )
+            reverse_before = app._app_settings_service.get_oa_draft_prefill_payload(
+                INPUT_INVOICE_USAGE_OA_DRAFT_PREFILL_FAMILY,
+                can_save=True,
+            )
+            saved = app._app_settings_service.update_oa_draft_prefill(
+                ETC_OA_DRAFT_PREFILL_FAMILY,
+                {
+                    "expected_version": etc_before["version"],
+                    "configuration": {
+                        **etc_before["configuration"],
+                        "bank": "中国建设银行",
+                    },
+                },
+                actor_id="YNSYLP005",
+            )
+            audit_count = len(app._audit_service.as_dicts())
+            noop = app._app_settings_service.update_oa_draft_prefill(
+                ETC_OA_DRAFT_PREFILL_FAMILY,
+                {
+                    "expected_version": saved["version"],
+                    "configuration": dict(saved["configuration"]),
+                },
+                actor_id="YNSYLP005",
+            )
+            reverse_after = app._app_settings_service.get_oa_draft_prefill_payload(
+                INPUT_INVOICE_USAGE_OA_DRAFT_PREFILL_FAMILY,
+                can_save=True,
+            )
+
+        self.assertEqual(saved["version"], etc_before["version"] + 1)
+        self.assertEqual(saved["configuration"]["bank"], "中国建设银行")
+        self.assertEqual(noop["version"], saved["version"])
+        self.assertEqual(len(app._audit_service.as_dicts()), audit_count)
+        self.assertEqual(reverse_after["version"], reverse_before["version"])
+        self.assertEqual(reverse_after["configuration"], reverse_before["configuration"])
+        audit = app._audit_service.as_dicts()[-1]
+        self.assertEqual(audit["action"], "oa_draft_prefill_updated")
+        self.assertEqual(audit["metadata"]["family"], ETC_OA_DRAFT_PREFILL_FAMILY)
+        self.assertEqual(audit["metadata"]["changed_fields"], ["bank"])
+
+    def test_oa_draft_prefill_rejects_stale_version(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            current = app._app_settings_service.get_oa_draft_prefill_payload(
+                ETC_OA_DRAFT_PREFILL_FAMILY,
+                can_save=True,
+            )
+            with self.assertRaises(AppSettingsValidationError) as stale:
+                app._app_settings_service.update_oa_draft_prefill(
+                    ETC_OA_DRAFT_PREFILL_FAMILY,
+                    {
+                        "expected_version": current["version"] + 1,
+                        "configuration": current["configuration"],
+                    },
+                    actor_id="YNSYLP005",
+                )
+
+        self.assertEqual(stale.exception.error_code, "oa_draft_prefill_version_conflict")
+
+    def test_oa_draft_prefill_rejects_invalid_version_and_configuration_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            current = app._app_settings_service.get_oa_draft_prefill_payload(
+                ETC_OA_DRAFT_PREFILL_FAMILY,
+                can_save=True,
+            )
+            for payload in (
+                {"expected_version": 0, "configuration": current["configuration"]},
+                {
+                    "expected_version": current["version"],
+                    "configuration": {
+                        **current["configuration"],
+                        "unknown_field": "ignored-before-this-guard",
+                    },
+                },
+                {
+                    "expected_version": current["version"],
+                    "configuration": {
+                        key: value
+                        for key, value in current["configuration"].items()
+                        if key != "bank"
+                    },
+                },
+            ):
+                with self.subTest(payload=payload), self.assertRaises(AppSettingsValidationError) as invalid:
+                    app._app_settings_service.update_oa_draft_prefill(
+                        ETC_OA_DRAFT_PREFILL_FAMILY,
+                        payload,
+                        actor_id="YNSYLP005",
+                    )
+                self.assertEqual(invalid.exception.error_code, "invalid_oa_draft_prefill_request")
+
+    def test_oa_draft_prefill_api_is_readable_but_only_administrator_can_save(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            routes = app._settings_routes()
+            identity = SimpleNamespace(
+                user_id="admin-id",
+                username="YNSYLP005",
+                nickname="杨丽萍",
+                display_name="杨丽萍",
+            )
+            admin = SimpleNamespace(identity=identity, can_admin_access=True)
+            reader = SimpleNamespace(identity=identity, can_admin_access=False)
+            forbidden = app._json_response(403, {"error": "admin_access_required", "message": "forbidden"})
+            try:
+                routes._resolve_read_session = lambda _headers: (reader, None)
+                routes._resolve_admin_session = lambda _headers: (None, forbidden)
+                readable = routes.route(
+                    "GET",
+                    "/api/workbench/settings/oa-draft-prefill/etc",
+                    {},
+                    None,
+                    None,
+                )
+                denied = routes.route(
+                    "PUT",
+                    "/api/workbench/settings/oa-draft-prefill/etc",
+                    {},
+                    json.dumps({"expected_version": 1, "configuration": {}}),
+                    None,
+                )
+
+                readable_payload = json.loads(readable.body)
+                routes._resolve_admin_session = lambda _headers: (admin, None)
+                saved = routes.route(
+                    "PUT",
+                    "/api/workbench/settings/oa-draft-prefill/etc",
+                    {},
+                    json.dumps(
+                        {
+                            "expected_version": readable_payload["version"],
+                            "configuration": {
+                                **readable_payload["configuration"],
+                                "bank": "中国建设银行",
+                            },
+                        }
+                    ),
+                    None,
+                )
+                saved_payload = json.loads(saved.body)
+                stale = routes.route(
+                    "PUT",
+                    "/api/workbench/settings/oa-draft-prefill/etc",
+                    {},
+                    json.dumps(
+                        {
+                            "expected_version": readable_payload["version"],
+                            "configuration": saved_payload["configuration"],
+                        }
+                    ),
+                    None,
+                )
+                invalid = routes.route(
+                    "PUT",
+                    "/api/workbench/settings/oa-draft-prefill/etc",
+                    {},
+                    json.dumps(
+                        {
+                            "expected_version": saved_payload["version"],
+                            "configuration": {
+                                **saved_payload["configuration"],
+                                "unknown_field": "must-not-be-ignored",
+                            },
+                        }
+                    ),
+                    None,
+                )
+            finally:
+                app.close()
+
+        self.assertEqual(readable.status_code, 200)
+        self.assertFalse(readable_payload["can_save"])
+        self.assertEqual(readable_payload["dynamic_fields"]["applicant"], "杨丽萍")
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(saved.status_code, 200)
+        self.assertTrue(saved_payload["can_save"])
+        self.assertEqual(saved_payload["dynamic_fields"]["applicant"], "杨丽萍")
+        self.assertEqual(saved_payload["configuration"]["bank"], "中国建设银行")
+        self.assertEqual(stale.status_code, 409)
+        self.assertEqual(json.loads(stale.body)["error"], "oa_draft_prefill_version_conflict")
+        self.assertEqual(invalid.status_code, 400)
+        self.assertEqual(json.loads(invalid.body)["error"], "invalid_oa_draft_prefill_request")
 
     def test_turnover_selected_codes_map_an_existing_snapshot_without_state_io(self) -> None:
         rule = self._external_rule("external_rule_borrow_out")

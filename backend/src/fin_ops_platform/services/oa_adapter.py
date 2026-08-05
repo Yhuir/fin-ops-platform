@@ -182,6 +182,13 @@ def _attachment_evidence_closure_status(invoice_total: float, payment_total: flo
 
 
 def detect_etc_batch_metadata(*values: Any) -> dict[str, Any]:
+    structured_id = _find_structured_etc_batch_id(values)
+    if structured_id:
+        return {
+            "source": ETC_BATCH_SOURCE,
+            "etc_batch_id": structured_id,
+            "tags": [ETC_BATCH_TAG],
+        }
     text = "\n".join(_iter_text_values(values))
     if ETC_BATCH_TAG not in text:
         return {}
@@ -196,6 +203,29 @@ def detect_etc_batch_metadata(*values: Any) -> dict[str, Any]:
         "etc_batch_id": etc_batch_id,
         "tags": [ETC_BATCH_TAG],
     }
+
+
+def _find_structured_etc_batch_id(values: Any) -> str:
+    found = ""
+
+    def visit(value: Any) -> None:
+        nonlocal found
+        if found or value in (None, ""):
+            return
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if str(key).replace("_", "").lower() == "etcbatchid":
+                    found = clean_string(child)
+                    if found:
+                        return
+                visit(child)
+            return
+        if isinstance(value, (list, tuple, set)):
+            for child in value:
+                visit(child)
+
+    visit(values)
+    return found
 
 
 def _iter_text_values(values: Any) -> list[str]:

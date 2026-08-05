@@ -29,6 +29,7 @@ from fin_ops_platform.services.search_query import normalize_money_search_query
 class EtcBusinessBatchActor:
     user_id: str | None = None
     username: str | None = None
+    display_name: str | None = None
     dept_id: str | None = None
     can_admin_access: bool = False
     can_mutate_data: bool = False
@@ -331,6 +332,7 @@ class EtcBusinessBatchApplicationService:
             expected_version=expected_version,
             oa_client=oa_client,
             reconciliation_task=reconciliation_task,
+            applicant_name=str(actor.display_name or actor.username or "").strip(),
         )
         self._ensure_reconciliation_task_oa_draft_metadata(batch, reconciliation_task, actor=actor)
         return {"businessBatch": self.business_batch_payload(batch)}
