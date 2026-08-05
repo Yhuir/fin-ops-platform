@@ -209,6 +209,36 @@ describe("Workbench amount mismatch exception UI", () => {
     expect(screen.queryByRole("dialog", { name: "取消异常处理确认弹窗" })).not.toBeInTheDocument();
   });
 
+  test("keeps an active legacy exception in the active state", async () => {
+    render(
+      <WorkbenchExceptionDrawer
+        bucket="active"
+        canMutateData
+        error={null}
+        groups={[{
+          ...group,
+          rawGroupType: "unpaired",
+          exceptionState: "active",
+          oaInvoiceAnomaly: undefined,
+        }]}
+        ignoredRows={[]}
+        loading={false}
+        open
+        onBucketChange={vi.fn()}
+        onCancelProcessedException={vi.fn()}
+        onClose={vi.fn()}
+        onIgnoreOaInvoiceAnomaly={vi.fn()}
+        onRestoreOaInvoiceAnomaly={vi.fn()}
+        onUnignoreRow={vi.fn()}
+      />,
+    );
+
+    const drawer = await screen.findByRole("dialog", { name: "异常处理" });
+    expect(within(drawer).getByText("进行中")).toBeInTheDocument();
+    expect(within(drawer).queryByText("已忽略")).not.toBeInTheDocument();
+    expect(within(drawer).queryByRole("button", { name: "撤回忽略" })).not.toBeInTheDocument();
+  });
+
   test("keeps only one relation group expanded", async () => {
     const user = userEvent.setup();
     const secondGroup: WorkbenchRelationGroup = {

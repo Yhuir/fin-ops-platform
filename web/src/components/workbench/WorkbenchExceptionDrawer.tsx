@@ -272,6 +272,9 @@ function exceptionLabels(group: WorkbenchRelationGroup) {
           : "danger" as const,
     }])).values());
   }
+  if (group.exceptionState === "active") {
+    return [{ text: "进行中", color: "warning" as const }];
+  }
   if (group.rawGroupType === "ignored_row") {
     return [{ text: "已忽略", color: "default" as const }];
   }
