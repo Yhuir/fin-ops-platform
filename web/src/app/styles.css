@@ -3061,11 +3061,6 @@ textarea {
   text-overflow: ellipsis;
 }
 
-.oa-pending-payments-column-filter {
-  position: relative;
-  display: inline-flex;
-}
-
 .oa-pending-payments-column-filter__trigger {
   display: inline-flex;
   width: 22px;
@@ -3095,17 +3090,33 @@ textarea {
 }
 
 .oa-pending-payments-column-filter__panel {
-  position: fixed;
   z-index: 1200;
-  display: grid;
-  overflow: auto;
-  gap: var(--fp-space-2);
+  width: min(320px, calc(100vw - 24px));
+  max-height: min(360px, calc(100vh - 24px));
+  overflow: hidden;
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
   box-shadow: var(--fp-shadow-2);
-  padding: var(--fp-space-3);
+  padding: 0;
   text-align: left;
+}
+
+.oa-pending-payments-column-filter__dialog {
+  display: grid;
+  max-height: inherit;
+  grid-template-rows: minmax(0, 1fr) auto;
+  overflow: hidden;
+  padding: 0;
+  outline: none;
+}
+
+.oa-pending-payments-column-filter__menu {
+  display: grid;
+  min-height: 0;
+  overflow-y: auto;
+  gap: var(--fp-space-2);
+  padding: var(--fp-space-3);
 }
 
 .oa-pending-payments-column-filter__title,
@@ -3171,10 +3182,12 @@ textarea {
 
 .oa-pending-payments-column-filter__actions {
   display: flex;
+  flex: 0 0 auto;
   justify-content: flex-end;
   gap: var(--fp-space-2);
   border-top: 1px solid var(--fp-border);
-  padding-top: var(--fp-space-2);
+  background: var(--fp-surface);
+  padding: var(--fp-space-2) var(--fp-space-3) var(--fp-space-3);
 }
 
 .oa-pending-payments-column-filter__actions button {

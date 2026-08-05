@@ -2,6 +2,12 @@
 
 日期：2026-07-28
 
+## 2026-08-06 列筛选浮层视口回归
+
+- `web/src/test/OaPendingPaymentsPage.test.tsx` 锁定列筛选统一使用 HeroUI `Popover`，删除旧 `position: fixed`、`getBoundingClientRect` 与全局 scroll/resize 监听，并覆盖 Escape 关闭和草稿重置。
+- `web/e2e/oa-pending-payments-flow.spec.ts` 覆盖 1024×420、1024×608 视口下浮层、滚动内容和固定操作区均不越界，首次挂载宽度稳定，Escape 后焦点归还触发器，且打开/关闭筛选不产生写请求。
+- 适用第 5 类 frontend interaction 与第 7 类 existing regression；本次没有业务规则、service、API、read model 或跨模块数据流变更，第 1–4 类和第 6 类不适用。
+
 ## 2026-07-31 关联支出流水抽屉回归
 
 - `web/src/test/OaPendingPaymentsPage.test.tsx` 保护共享 `AppDrawer` 复用、560px 宽度、busy close guard、搜索/筛选/分页/选择/提交、候选 503 抽屉内反馈与同查询重试清理、页面 mutation 错误隔离，以及旧自定义 shell 删除。

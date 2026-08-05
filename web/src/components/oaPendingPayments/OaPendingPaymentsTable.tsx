@@ -1,6 +1,12 @@
+import {
+  PopoverContent,
+  PopoverDialog,
+  PopoverRoot,
+  PopoverTrigger,
+} from "@heroui/react";
 import { ArrowUpDown, Filter, Info, Search } from "lucide-react";
-import type { CSSProperties, MutableRefObject, ReactNode } from "react";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import type { MutableRefObject, ReactNode } from "react";
+import { useMemo, useState } from "react";
 
 import {
   EmptyValue,
@@ -600,64 +606,16 @@ function OaColumnFilterMenu({
   onApply: (filter: OaColumnFilterValue) => void;
   onClear: (field: string) => void;
 }) {
-  const menuId = useId();
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<Record<string, string[]>>(() => selectedValuesByField(filters, fieldRefs));
-  const [panelStyle, setPanelStyle] = useState<CSSProperties | undefined>();
   const active = fieldRefs.some((fieldRef) => selectedValues(filters, fieldRef.field).length > 0);
 
-  const updatePanelPosition = useCallback(() => {
-    const trigger = triggerRef.current;
-    if (!trigger) {
-      return;
-    }
-    const rect = trigger.getBoundingClientRect();
-    const panelWidth = Math.min(320, Math.max(240, window.innerWidth - 24));
-    const left = Math.min(Math.max(12, rect.left), window.innerWidth - panelWidth - 12);
-    const top = Math.min(rect.bottom + 8, window.innerHeight - 88);
-    setPanelStyle({
-      left,
-      maxHeight: `min(360px, calc(100vh - ${Math.max(24, top + 12)}px))`,
-      top,
-      width: panelWidth,
-    });
-  }, []);
-
-  useEffect(() => {
-    if (open) {
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (nextOpen) {
       setDraft(selectedValuesByField(filters, fieldRefs));
-      updatePanelPosition();
     }
-  }, [fieldRefs, filters, open, updatePanelPosition]);
-
-  useEffect(() => {
-    if (!open) {
-      return undefined;
-    }
-    const closeOnOutsidePointer = (event: PointerEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node)) {
-        return;
-      }
-      if (triggerRef.current?.contains(target)) {
-        return;
-      }
-      const panel = document.getElementById(menuId);
-      if (panel?.contains(target)) {
-        return;
-      }
-      setOpen(false);
-    };
-    window.addEventListener("resize", updatePanelPosition);
-    window.addEventListener("scroll", updatePanelPosition, true);
-    document.addEventListener("pointerdown", closeOnOutsidePointer);
-    return () => {
-      window.removeEventListener("resize", updatePanelPosition);
-      window.removeEventListener("scroll", updatePanelPosition, true);
-      document.removeEventListener("pointerdown", closeOnOutsidePointer);
-    };
-  }, [menuId, open, updatePanelPosition]);
+    setOpen(nextOpen);
+  };
 
   const toggleValue = (field: string, value: string) => {
     setDraft((current) => {
@@ -689,72 +647,63 @@ function OaColumnFilterMenu({
   };
 
   return (
-    <span className="oa-pending-payments-column-filter">
-      <button
-        aria-controls={open ? menuId : undefined}
-        aria-expanded={open}
-        aria-haspopup="menu"
+    <PopoverRoot isOpen={open} onOpenChange={handleOpenChange}>
+      <PopoverTrigger
         aria-label={`筛选 ${columnLabel}`}
         className={cx(
           "oa-pending-payments-column-filter__trigger",
           active && "oa-pending-payments-column-filter__trigger--active",
         )}
-        ref={triggerRef}
-        onClick={() => setOpen((current) => !current)}
-        type="button"
       >
         <Filter aria-hidden="true" size={13} strokeWidth={2.4} />
-      </button>
-      {open ? (
-        <div
-          aria-label={`${columnLabel}筛选`}
-          className="oa-pending-payments-column-filter__panel"
-          id={menuId}
-          style={panelStyle}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              setOpen(false);
-            }
-          }}
-          role="menu"
-        >
-          <div className="oa-pending-payments-column-filter__title">{columnLabel}</div>
-          {fieldRefs.map((fieldRef) => {
-            const config = configsByField.get(fieldRef.field);
-            const options = filterOptions[fieldRef.field] ?? [];
-            const selected = new Set(draft[fieldRef.field] ?? []);
-            return (
-              <div className="oa-pending-payments-column-filter__section" key={fieldRef.field}>
-                <div className="oa-pending-payments-column-filter__section-title">{fieldRef.label}</div>
-                {config && config.mode !== "enum_multi" ? (
-                  <DisabledChoice>该字段暂不支持枚举筛选</DisabledChoice>
-                ) : null}
-                {options.length === 0 ? <DisabledChoice>暂无可选项</DisabledChoice> : null}
-                {options.map((option) => (
-                  <button
-                    key={option.value}
-                    aria-checked={selected.has(option.value)}
-                    className="oa-pending-payments-column-filter__item"
-                    onClick={() => toggleValue(fieldRef.field, option.value)}
-                    role="menuitemcheckbox"
-                    type="button"
-                  >
-                    <span aria-hidden="true" className="oa-pending-payments-column-filter__checkmark">
-                      {selected.has(option.value) ? "✓" : ""}
-                    </span>
-                    <span>{fieldRef.label}：{optionLabel(option)}</span>
-                  </button>
-                ))}
-              </div>
-            );
-          })}
+      </PopoverTrigger>
+      <PopoverContent
+        className="oa-pending-payments-column-filter__panel"
+        containerPadding={12}
+        maxHeight={360}
+        offset={8}
+        placement="bottom start"
+      >
+        <PopoverDialog aria-label={`${columnLabel}筛选`} className="oa-pending-payments-column-filter__dialog">
+          <div aria-label={`${columnLabel}筛选`} className="oa-pending-payments-column-filter__menu" role="menu">
+            <div className="oa-pending-payments-column-filter__title">{columnLabel}</div>
+            {fieldRefs.map((fieldRef) => {
+              const config = configsByField.get(fieldRef.field);
+              const options = filterOptions[fieldRef.field] ?? [];
+              const selected = new Set(draft[fieldRef.field] ?? []);
+              return (
+                <div className="oa-pending-payments-column-filter__section" key={fieldRef.field}>
+                  <div className="oa-pending-payments-column-filter__section-title">{fieldRef.label}</div>
+                  {config && config.mode !== "enum_multi" ? (
+                    <DisabledChoice>该字段暂不支持枚举筛选</DisabledChoice>
+                  ) : null}
+                  {options.length === 0 ? <DisabledChoice>暂无可选项</DisabledChoice> : null}
+                  {options.map((option) => (
+                    <button
+                      key={option.value}
+                      aria-checked={selected.has(option.value)}
+                      className="oa-pending-payments-column-filter__item"
+                      onClick={() => toggleValue(fieldRef.field, option.value)}
+                      role="menuitemcheckbox"
+                      type="button"
+                    >
+                      <span aria-hidden="true" className="oa-pending-payments-column-filter__checkmark">
+                        {selected.has(option.value) ? "✓" : ""}
+                      </span>
+                      <span>{fieldRef.label}：{optionLabel(option)}</span>
+                    </button>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
           <div className="oa-pending-payments-column-filter__actions">
             <button onClick={clear} type="button">清除</button>
             <button className="oa-pending-payments-column-filter__apply" onClick={apply} type="button">应用筛选</button>
           </div>
-        </div>
-      ) : null}
-    </span>
+        </PopoverDialog>
+      </PopoverContent>
+    </PopoverRoot>
   );
 }
 

@@ -744,9 +744,10 @@ describe("OA pending payments page", () => {
     const missingPrimitiveTargets = [
       sourceByPath["src/pages/OaPendingPaymentsPage.tsx"].includes("PageScaffold") ? null : "OaPendingPaymentsPage.tsx should keep PageScaffold",
       sourceByPath["src/pages/OaPendingPaymentsPage.tsx"].includes("StatePanel") ? null : "OaPendingPaymentsPage.tsx should keep project empty/error state primitives",
-      sourceByPath["src/components/oaPendingPayments/OaPendingPaymentsTable.tsx"].includes("InputInvoiceUsageFilterMenu")
+      ["PopoverRoot", "PopoverTrigger", "PopoverContent", "PopoverDialog"].every((symbol) =>
+        sourceByPath["src/components/oaPendingPayments/OaPendingPaymentsTable.tsx"].includes(symbol))
         ? null
-        : "OaPendingPaymentsTable.tsx should preserve shared InputInvoiceUsageFilterMenu contract",
+        : "OaPendingPaymentsTable.tsx should use the native HeroUI popover contract",
       /FinanceTable|oa-pending-payments-table/.test(sourceByPath["src/components/oaPendingPayments/OaPendingPaymentsTable.tsx"])
         ? null
         : "OaPendingPaymentsTable.tsx should use a project table primitive or project table class",
@@ -767,6 +768,7 @@ describe("OA pending payments page", () => {
 
   test("keeps premium compact table and interaction CSS contracts", () => {
     const styles = readWebSource("src/app/styles.css");
+    const tableSource = readWebSource("src/components/oaPendingPayments/OaPendingPaymentsTable.tsx");
     const button = cssRule(styles, ".oa-pending-payments-button");
     const fieldControls = cssRule(styles, ".oa-pending-payments-field input,\\n.oa-pending-payments-field select");
     const monthPicker = cssRule(styles, ".oa-pending-payments-month-picker");
@@ -789,6 +791,10 @@ describe("OA pending payments page", () => {
     const groupOa = cssRule(styles, ".oa-pending-payments-table-group-header--oa");
     const groupStatus = cssRule(styles, ".oa-pending-payments-table-group-header--status");
     const groupBank = cssRule(styles, ".oa-pending-payments-table-group-header--bank");
+    const filterPanel = cssRule(styles, ".oa-pending-payments-column-filter__panel");
+    const filterDialog = cssRule(styles, ".oa-pending-payments-column-filter__dialog");
+    const filterMenu = cssRule(styles, ".oa-pending-payments-column-filter__menu");
+    const filterActions = cssRule(styles, ".oa-pending-payments-column-filter__actions");
 
     expect(button).toContain("var(--motion-fast)");
     expect(button).toContain("var(--ease-out-quart)");
@@ -817,6 +823,15 @@ describe("OA pending payments page", () => {
     expect(groupOa).toContain("color-mix(in srgb, var(--fp-surface-muted)");
     expect(groupStatus).toContain("color-mix(in srgb, var(--fp-warning-soft)");
     expect(groupBank).toContain("color-mix(in srgb, var(--fp-primary-soft)");
+    expect(filterPanel).toContain("width: min(320px, calc(100vw - 24px))");
+    expect(filterPanel).toContain("overflow: hidden");
+    expect(filterPanel).not.toContain("position: fixed");
+    expect(filterDialog).toContain("grid-template-rows: minmax(0, 1fr) auto");
+    expect(filterMenu).toContain("overflow-y: auto");
+    expect(filterActions).toContain("flex: 0 0 auto");
+    expect(tableSource).not.toContain("getBoundingClientRect");
+    expect(tableSource).not.toContain("addEventListener(\"scroll\"");
+    expect(tableSource).not.toContain("addEventListener(\"resize\"");
   });
 
   test("keeps bank amount and direction chip in a non-overlapping layout slot", async () => {
@@ -1017,8 +1032,18 @@ describe("OA pending payments page", () => {
 
     const page = await screen.findByTestId("oa-pending-payments-page");
 
-    await user.click(await within(page).findByRole("button", { name: "筛选 支付状态" }));
+    const paymentStatusTrigger = await within(page).findByRole("button", { name: "筛选 支付状态" });
+    await user.click(paymentStatusTrigger);
     await user.click(await screen.findByRole("menuitemcheckbox", { name: "支付状态：已支付 3" }));
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("menu", { name: "支付状态筛选" })).not.toBeInTheDocument();
+
+    await user.click(paymentStatusTrigger);
+    expect(await screen.findByRole("menuitemcheckbox", { name: "支付状态：已支付 3" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "支付状态：已支付 3" }));
     await user.click(screen.getByRole("button", { name: "应用筛选" }));
     await waitFor(() => {
       const filters = JSON.parse(decodeURIComponent(rowsRequests(fetchMock).at(-1)?.searchParams.get("filters") ?? "[]"));

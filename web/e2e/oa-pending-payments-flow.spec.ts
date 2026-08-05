@@ -15,7 +15,11 @@ function filtersFromRequest(requestUrl: string) {
 async function expectMenuInsideViewport(page: Page, name: string) {
   const menu = page.getByRole("menu", { name });
   await expect(menu).toBeVisible();
-  const box = await menu.boundingBox();
+  const panel = page.locator(".oa-pending-payments-column-filter__panel").filter({ has: menu });
+  const actions = panel.locator(".oa-pending-payments-column-filter__actions");
+  await expect(actions).toBeVisible();
+  await expect(actions.getByRole("button", { name: "应用筛选" })).toBeInViewport();
+  const box = await panel.boundingBox();
   const viewport = page.viewportSize();
   expect(box).not.toBeNull();
   expect(viewport).not.toBeNull();
@@ -147,6 +151,7 @@ test.describe("OA pending payments browser flow", () => {
       await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("menu", { name: "支付状态筛选" })).toBeVisible());
       await mark("finalSettledLatencyMs", expect(page.getByRole("menuitemcheckbox", { name: "支付状态：已支付 1" })).toBeVisible());
     });
+    await expectMenuInsideViewport(page, "支付状态筛选");
     await page.getByRole("menuitemcheckbox", { name: "支付状态：已支付 1" }).click();
     const filterRequest = page.waitForRequest((request) => {
       const url = new URL(request.url());
@@ -341,5 +346,49 @@ test.describe("OA pending payments browser flow", () => {
     expect(api.count("GET /api/oa-pending-payments/oa/oa-payment-e2e-001/detail")).toBe(1);
     expect(api.count("GET /api/oa-pending-payments/bank-transactions/bank-payment-e2e-001/detail")).toBe(1);
     expect(api.count("GET /api/oa-pending-payments/invoices/invoice-payment-e2e-001/detail")).toBe(1);
+  });
+
+  test("keeps column filter actions visible in compact viewports without mutation requests", async ({ page }) => {
+    await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const mutationRequests: string[] = [];
+    page.on("request", (request) => {
+      if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method())) {
+        mutationRequests.push(`${request.method()} ${new URL(request.url()).pathname}`);
+      }
+    });
+
+    for (const viewport of [{ width: 1024, height: 420 }, { width: 1024, height: 608 }]) {
+      await page.setViewportSize(viewport);
+      await page.goto("/oa-pending-payments");
+      const trigger = page.getByRole("button", { name: "筛选 支付状态" });
+      await expect(trigger).toBeVisible();
+      await page.evaluate(() => {
+        const state = window as Window & { __oaPendingFilterFirstWidth?: number };
+        delete state.__oaPendingFilterFirstWidth;
+        const observer = new MutationObserver(() => {
+          const panel = document.querySelector<HTMLElement>(".oa-pending-payments-column-filter__panel");
+          if (!panel) {
+            return;
+          }
+          state.__oaPendingFilterFirstWidth = Number.parseFloat(getComputedStyle(panel).width);
+          observer.disconnect();
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+      });
+
+      await trigger.focus();
+      await page.keyboard.press("Enter");
+      await expectMenuInsideViewport(page, "支付状态筛选");
+      const firstWidth = await page.evaluate(() =>
+        (window as Window & { __oaPendingFilterFirstWidth?: number }).__oaPendingFilterFirstWidth);
+      expect(firstWidth).toBeGreaterThanOrEqual(239);
+      expect(firstWidth).toBeLessThanOrEqual(321);
+
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("menu", { name: "支付状态筛选" })).toHaveCount(0);
+      await expect(trigger).toBeFocused();
+    }
+
+    expect(mutationRequests).toEqual([]);
   });
 });

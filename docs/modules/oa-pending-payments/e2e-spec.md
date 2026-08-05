@@ -24,6 +24,7 @@
 | `OA-PENDING-E2E-007` | in-progress link-bank | 候选携带 oa_row_ids；只允许未占用 outflow；pending relation/claim/自动写回保持幂等与冲突语义；成功后 normal GET |
 | `OA-PENDING-E2E-008` | active relation withdraw | canonical relation 改为 withdrawn 后下一次 GET 不展示银行/发票 relation；无需 worker |
 | `OA-PENDING-E2E-009` | Audit | pass/checking/integrity fail/unavailable 文案正确；单次请求且无 page barrier |
+| `OA-PENDING-E2E-010` | 列筛选浮层 | HeroUI Popover 在窄高视口自动避让；内容可滚动、操作区始终可见；Escape 关闭并归还焦点；零业务写请求 |
 
 ## 基础设施边界
 
