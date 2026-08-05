@@ -4984,10 +4984,6 @@ textarea {
     transform var(--motion-fast) var(--ease-out-quart);
 }
 
-.batch-accounting-button--secondary {
-  color: var(--fp-primary-hover);
-}
-
 .batch-accounting-button--primary {
   border-color: var(--fp-primary);
   background: var(--fp-primary);

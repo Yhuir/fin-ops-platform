@@ -511,7 +511,10 @@ describe("BatchAccountingPage", () => {
     expect(screen.queryByLabelText("年份")).not.toBeInTheDocument();
     expect(screen.getByLabelText("流水年份")).toHaveValue(2026);
     expect(screen.queryByLabelText("OA年份")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "刷新" })).toBeInTheDocument();
+    const tagRulesButton = screen.getByRole("button", { name: "批量账务标签规则" });
+    const refreshButton = screen.getByRole("button", { name: "刷新" });
+    expect(tagRulesButton).toHaveClass("button--outline", "button--sm");
+    expect(refreshButton).toHaveClass("button--outline", "button--sm");
 
     const bankList = screen.getByRole("region", { name: "批量账务流水" });
     expect(within(bankList).getAllByRole("button", { name: /批量账务集中处理/ })).toHaveLength(2);

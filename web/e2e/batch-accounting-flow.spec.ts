@@ -129,8 +129,24 @@ test.describe("batch accounting browser flow", () => {
     const subtitle = bankPanel.locator(".batch-accounting-bank-panel__subtitle");
     const yearInput = page.getByLabel("流水年份");
     const pagination = page.getByRole("group", { name: "批量账务流水分页" });
+    const tagRulesButton = page.getByRole("button", { name: "批量账务标签规则" });
+    const refreshButton = page.getByRole("button", { name: "刷新" });
 
     await expect(bankPanel.getByRole("button", { name: /批量账务集中处理.*1200.00.*建行 8106/ })).toBeVisible();
+
+    const actionButtonStyle = async (button: typeof tagRulesButton) => button.evaluate((element) => {
+      const style = window.getComputedStyle(element);
+      return {
+        backgroundColor: style.backgroundColor,
+        borderRadius: style.borderRadius,
+        borderStyle: style.borderStyle,
+        borderWidth: style.borderWidth,
+        color: style.color,
+        fontSize: style.fontSize,
+        height: style.height,
+      };
+    });
+    expect(await actionButtonStyle(tagRulesButton)).toEqual(await actionButtonStyle(refreshButton));
 
     const headerBox = await bankHeader.boundingBox();
     const titleBox = await title.boundingBox();
