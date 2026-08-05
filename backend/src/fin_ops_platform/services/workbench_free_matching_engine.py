@@ -7,13 +7,14 @@ import json
 from typing import Iterable, Literal
 
 
-RULE_VERSION = "2026-07-31-output-invoice-reversal-v6"
+RULE_VERSION = "2026-08-05-employee-reimbursement-v7"
 MATCHABLE_ROW_TYPES = frozenset({"oa", "bank", "invoice"})
 ROW_TYPE_ORDER = {"oa": 0, "bank": 1, "invoice": 2}
 STRONG_COMPOSITE_EVIDENCE_KINDS = frozenset(
     {
         "business_reference",
         "counterparty",
+        "employee_reimbursement_payee",
         "invoice_number",
         "project_reference",
         "tax_no",
@@ -326,12 +327,21 @@ class WorkbenchFreeMatchingEngine:
             for fact in available
             if fact.reversal_polarity != "red"
         } - reversal_claimed
-        extension_plans, extension_claimed, extension_ambiguous = self._active_extension_plans(
-            batch=batch,
-            edges=edges,
-            facts_by_key=facts_by_key,
-            active_by_member=active_by_member,
-        )
+        try:
+            extension_plans, extension_claimed, extension_ambiguous = self._active_extension_plans(
+                batch=batch,
+                edges=edges,
+                facts_by_key=facts_by_key,
+                active_by_member=active_by_member,
+                eligible_new_keys=available_keys,
+                budget=budget,
+            )
+        except _ResourceLimited:
+            return FormalRelationMatchResult(
+                resource_limited_component_count=1,
+                preserved_active_count=preserved_active_count,
+                blocked_reason_counts=(("resource_limited", 1),),
+            )
         if extension_ambiguous:
             blocked["ambiguous_active_extension"] = extension_ambiguous
 
@@ -490,7 +500,8 @@ class WorkbenchFreeMatchingEngine:
             )
             for index, left in enumerate(dated):
                 for right in dated[index + 1 :]:
-                    if (right.fact_date - left.fact_date).days > 365:
+                    window_days = 30 if evidence_kind == "employee_reimbursement_payee" else 365
+                    if (right.fact_date - left.fact_date).days > window_days:
                         break
                     budget.consume()
                     if left.row_type == right.row_type:
@@ -538,6 +549,8 @@ class WorkbenchFreeMatchingEngine:
         edges: list[_Edge],
         facts_by_key: dict[MemberKey, FormalRelationFact],
         active_by_member: dict[MemberKey, ActiveFormalRelationAnchor],
+        eligible_new_keys: set[MemberKey],
+        budget: _Budget,
     ) -> tuple[list[FormalRelationPlan], set[MemberKey], int]:
         new_members_by_case: dict[str, set[MemberKey]] = {}
         ambiguous_members: set[MemberKey] = set()
@@ -582,7 +595,112 @@ class WorkbenchFreeMatchingEngine:
             )
             plans.append(plan)
             claimed.update(new_members)
-        return plans, claimed, len(ambiguous_members)
+
+        composite_candidates: dict[str, tuple[frozenset[MemberKey], set[str]]] = {}
+        ambiguous_cases: set[str] = set()
+        ambiguous_composite_members: set[MemberKey] = set()
+        eligible = eligible_new_keys - claimed
+        composite_adjacency: dict[MemberKey, set[MemberKey]] = {}
+        for edge in edges:
+            if edge.explicit:
+                continue
+            composite_adjacency.setdefault(edge.left, set()).add(edge.right)
+            composite_adjacency.setdefault(edge.right, set()).add(edge.left)
+        for case_id, anchor in sorted(anchors.items()):
+            anchor_members = set(anchor.member_keys)
+            if case_id in new_members_by_case or {row_type for row_type, _identity in anchor_members} == MATCHABLE_ROW_TYPES:
+                continue
+            if not anchor_members.issubset(facts_by_key):
+                continue
+
+            allowed_members = anchor_members | eligible
+            reachable = set(anchor_members)
+            pending = list(anchor_members)
+            while pending:
+                current = pending.pop()
+                for neighbor in (composite_adjacency.get(current, set()) & allowed_members) - reachable:
+                    reachable.add(neighbor)
+                    pending.append(neighbor)
+            ordered_new = tuple(sorted(reachable - anchor_members, key=_member_sort_key))
+            if not ordered_new:
+                continue
+            budget.consume(working_bytes=len(ordered_new) * 128)
+            remaining_states = min(
+                budget.limits.max_search_states,
+                budget.limits.max_deadline_states,
+            ) - budget.states
+            if remaining_states < 1 or len(ordered_new) > (remaining_states + 1).bit_length() - 1:
+                raise _ResourceLimited
+
+            candidates: dict[frozenset[MemberKey], set[str]] = {}
+            missing_row_types = MATCHABLE_ROW_TYPES - {row_type for row_type, _identity in anchor_members}
+            for mask in range(1, 1 << len(ordered_new)):
+                budget.consume()
+                new_members = frozenset(
+                    ordered_new[index]
+                    for index in range(len(ordered_new))
+                    if mask & (1 << index)
+                )
+                if not ({row_type for row_type, _identity in new_members} & missing_row_types):
+                    continue
+                full_members = anchor_members | set(new_members)
+                selected_edges = [
+                    edge
+                    for edge in edges
+                    if edge.left in full_members and edge.right in full_members
+                ]
+                if not self._is_connected(full_members, selected_edges):
+                    continue
+                if not self._safe_exact_closure(
+                    [facts_by_key[member] for member in full_members],
+                    selected_edges,
+                ):
+                    continue
+                candidates[new_members] = {edge.evidence_kind for edge in selected_edges}
+
+            if len(candidates) != 1:
+                if candidates:
+                    ambiguous_cases.add(case_id)
+                    ambiguous_composite_members.update(
+                        member for candidate in candidates for member in candidate
+                    )
+                continue
+            new_members, evidence_kinds = next(iter(candidates.items()))
+            composite_candidates[case_id] = (new_members, evidence_kinds)
+
+        cases_by_new_member: dict[MemberKey, set[str]] = {}
+        for case_id, (new_members, _evidence_kinds) in composite_candidates.items():
+            for member in new_members:
+                cases_by_new_member.setdefault(member, set()).add(case_id)
+        for case_ids in cases_by_new_member.values():
+            if len(case_ids) > 1:
+                ambiguous_cases.update(case_ids)
+        for case_id, (new_members, _evidence_kinds) in composite_candidates.items():
+            if new_members & ambiguous_composite_members:
+                ambiguous_cases.add(case_id)
+        claimed.update(ambiguous_composite_members)
+
+        for case_id, (new_members, evidence_kinds) in sorted(composite_candidates.items()):
+            if case_id in ambiguous_cases:
+                claimed.update(new_members)
+                continue
+            anchor = anchors[case_id]
+            full_members = tuple(sorted(set(anchor.member_keys) | set(new_members), key=_member_sort_key))
+            if relation_fingerprint(full_members) in batch.withdrawal_fingerprints:
+                claimed.update(new_members)
+                continue
+            plans.append(
+                self._plan(
+                    batch=batch,
+                    member_keys=full_members,
+                    facts_by_key=facts_by_key,
+                    rule_code="strong_evidence_exact_extension",
+                    evidence_kinds=evidence_kinds,
+                    target_case_id=case_id,
+                )
+            )
+            claimed.update(new_members)
+        return plans, claimed, len(ambiguous_members) + len(ambiguous_cases)
 
     def _plans_for_component(
         self,
@@ -802,12 +920,6 @@ class WorkbenchFreeMatchingEngine:
             oa_attachment_bindings=tuple(sorted(attachment_bindings)),
             relation_mode=relation_mode,
         )
-
-
-def _within_composite_window(left: date | None, right: date | None) -> bool:
-    if left is None or right is None:
-        return False
-    return abs((left - right).days) <= 365
 
 
 def _is_immutable_oa_attachment_relation(

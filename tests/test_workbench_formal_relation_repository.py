@@ -69,17 +69,21 @@ def oa_row(
     *,
     amount: object = Decimal("520.00"),
     payload: dict[str, object] | None = None,
+    applicant: str = "张三",
+    fact_date: date = date(2026, 5, 7),
+    approved_at: datetime | None = None,
 ) -> dict[str, object]:
     return {
         "canonical_object_identity": row_id,
         "row_id": row_id,
         "amount": amount,
         "currency": "CNY",
-        "fact_date": date(2026, 5, 7),
+        "fact_date": fact_date,
+        "approved_at": approved_at,
         "workflow_no": "OA-2026-001",
         "project_id": "PROJECT-001",
         "project_name": "项目一",
-        "applicant": "张三",
+        "applicant": applicant,
         "status": "active",
         "workflow_status": "completed",
         "normalized_payload": payload
@@ -91,7 +95,12 @@ def oa_row(
     }
 
 
-def bank_row(row_id: str = "txn-1", *, direction: str = "outflow") -> dict[str, object]:
+def bank_row(
+    row_id: str = "txn-1",
+    *,
+    direction: str = "outflow",
+    counterparty: str = "云南立孚科技有限公司",
+) -> dict[str, object]:
     return {
         "canonical_object_identity": row_id,
         "row_id": row_id,
@@ -100,8 +109,8 @@ def bank_row(row_id: str = "txn-1", *, direction: str = "outflow") -> dict[str, 
         "currency": "CNY",
         "fact_date": date(2026, 5, 8),
         "txn_direction": direction,
-        "counterparty_name_raw": "云南立孚科技有限公司",
-        "normalized_counterparty_name": "云南立孚科技有限公司",
+        "counterparty_name_raw": counterparty,
+        "normalized_counterparty_name": counterparty,
         "project_id": "PROJECT-001",
         "bank_serial_no": "SERIAL-001",
         "source_unique_key": "BANK-SOURCE-001",
@@ -535,6 +544,41 @@ class PostgresWorkbenchFormalRelationFactRepositoryTests(unittest.TestCase):
         self.assertEqual({fact.direction for fact in result.facts}, {"expenditure"})
         self.assertTrue(all(fact.source_version.startswith("2026-05-") for fact in result.facts))
         self.assertNotIn("secret", repr(facts["invoice"]))
+
+    def test_daily_reimbursement_applicant_and_bank_payee_are_strong_employee_evidence(self) -> None:
+        connection = FakeConnection(
+            oa_rows=[
+                oa_row(
+                    "oa-exp-2363",
+                    applicant="樊祖芳",
+                    payload={"apply_type": "日常报销"},
+                    fact_date=date(2026, 7, 17),
+                    approved_at=datetime(2026, 8, 1, 9, 30, tzinfo=timezone.utc),
+                )
+            ],
+            bank_rows=[bank_row("txn_imported_1061", counterparty="樊祖芳")],
+        )
+
+        result = PostgresWorkbenchFormalRelationFactRepository(connection).load_batch(["2026-07"])
+        facts = {fact.row_type: fact for fact in result.facts}
+
+        self.assertIn(("employee_reimbursement_payee", "樊祖芳"), facts["oa"].evidence_keys)
+        self.assertIn(("employee_reimbursement_payee", "樊祖芳"), facts["bank"].evidence_keys)
+        self.assertNotIn(("counterparty", "樊祖芳"), facts["bank"].evidence_keys)
+        self.assertEqual(facts["oa"].fact_date, date(2026, 8, 1))
+        self.assertIn("oa.approved_at", connection.queries[0][0])
+
+    def test_payment_application_applicant_is_not_employee_reimbursement_evidence(self) -> None:
+        connection = FakeConnection(
+            oa_rows=[oa_row(applicant="樊祖芳", payload={"apply_type": "支付申请"})],
+        )
+
+        result = PostgresWorkbenchFormalRelationFactRepository(connection).load_batch(["2026-05"])
+
+        self.assertNotIn(
+            ("employee_reimbursement_payee", "樊祖芳"),
+            result.facts[0].evidence_keys,
+        )
 
     def test_invalid_scope_duplicate_identity_and_fractional_minor_unit_fail_fast(self) -> None:
         repository = PostgresWorkbenchFormalRelationFactRepository(FakeConnection())

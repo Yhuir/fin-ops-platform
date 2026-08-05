@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from datetime import UTC, date, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fin_ops_platform.services.bank_batch_service import (
     BANK_FLOW_RULE_BATCH_ID_PREFIX,
@@ -18,6 +20,53 @@ from fin_ops_platform.services.bank_transaction_effective_category_provider impo
     BankTransactionEffectiveCategoryProvider,
 )
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+
+
+_BUSINESS_TIMEZONE = ZoneInfo("Asia/Shanghai")
+
+
+def _candidate_datetime(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, date):
+        parsed = datetime.combine(value, datetime.min.time())
+    else:
+        raw = str(value or "").strip().replace("/", "-")
+        if not raw:
+            return None
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return parsed.replace(tzinfo=_BUSINESS_TIMEZONE) if parsed.tzinfo is None else parsed
+
+
+def _candidate_trade_time_proof(value: object) -> str:
+    raw = str(value or "").strip()
+    parsed = _candidate_datetime(value)
+    if parsed is None:
+        return raw
+    return (
+        parsed.astimezone(UTC)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+def _candidate_scope_month(row: dict[str, object]) -> str:
+    explicit_month = (
+        row.get("scope_month") or row.get("month") or row.get("txn_month")
+    )
+    if explicit_month:
+        return str(explicit_month).strip()[:7]
+    trade_time = (
+        row.get("trade_time") or row.get("pay_receive_time") or row.get("txn_date")
+    )
+    parsed = _candidate_datetime(trade_time)
+    if parsed is not None:
+        return parsed.astimezone(_BUSINESS_TIMEZONE).strftime("%Y-%m")
+    return str(trade_time or "").strip()[:7]
 
 
 def eligible_bank_flow_rule_batch_codes(tag_policy: dict[str, object]) -> set[str]:
@@ -165,18 +214,16 @@ def bank_flow_rule_batch_selected_row_proofs(
             raise ValueError(
                 "bank_flow_rule_batch_selection_invalid_direction"
             )
-        raw_month = str(
-            row.get("scope_month")
-            or row.get("month")
-            or row.get("txn_month")
-            or row.get("trade_time")
+        trade_time = (
+            row.get("trade_time")
+            or row.get("pay_receive_time")
             or row.get("txn_date")
             or ""
-        ).strip()
+        )
         proofs.append(
             {
                 "row_id": row_id,
-                "scope_month": raw_month[:7],
+                "scope_month": _candidate_scope_month(row),
                 "category_code": str(
                     category.get("effective_category_code")
                     or category.get("category_code")
@@ -186,12 +233,7 @@ def bank_flow_rule_batch_selected_row_proofs(
                 "amount": BankBatchService._format_amount(amount),
                 "direction": "income" if direction == "inflow" else "expense",
                 "account_key": str(row.get("account_key") or "").strip(),
-                "trade_time": str(
-                    row.get("trade_time")
-                    or row.get("pay_receive_time")
-                    or row.get("txn_date")
-                    or ""
-                ).strip(),
+                "trade_time": _candidate_trade_time_proof(trade_time),
             }
         )
     return sorted(proofs, key=lambda proof: proof["row_id"])

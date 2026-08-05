@@ -1,5 +1,12 @@
 # 流水规则批量处理实施记录
 
+## 2026-08-05 selected-row 时间语义与冲突恢复
+
+- 根因是 submit-selection 初读 proof 保留银行导入的空格时间，而事务内 canonical 重读把同一 `timestamptz` 输出为 ISO 8601 offset；旧 guard 直接比较字符串，误把同一时刻判为候选变化。
+- proof 现统一比较 UTC 秒级时刻；无时区文本按 `Asia/Shanghai` 解释，非法时间保留原文 fail closed。金额、分类、方向、账户、月份、成员、占用和真实时间漂移的并发保护不放宽。
+- 页面复用共享时间展示 helper；真实 candidate conflict 清空旧选择/详情并只刷新一次列表，禁止自动重提。
+- 回归覆盖等价序列化通过、真实时间漂移拒绝、ISO 时间无 `T/+08:00` 裸显，以及冲突后一次 GET/一次 POST/选择清空。
+
 ## 2026-07-31 标签管理抽屉迁移到共享壳
 
 - 只把标签管理的自定义 backdrop/aside/header/close/footer 壳替换为共享 `AppDrawer`，保留 `min(960px, 92vw)`、表格、权限、dirty/busy、nested dialog、规则 CAS 与保存后回读时机。

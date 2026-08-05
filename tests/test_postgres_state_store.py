@@ -13,6 +13,7 @@ from fin_ops_platform.services.postgres_repositories.bank_flow_rule_batch_canoni
 )
 from fin_ops_platform.services.bank_flow_rule_batch_canonical_query import (
     bank_flow_rule_batch_candidate_guard,
+    bank_flow_rule_batch_selected_row_proofs,
     build_live_bank_flow_rule_batch_service,
 )
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
@@ -817,6 +818,125 @@ class PostgresStateStoreTests(unittest.TestCase):
                             "trade_time": "2026-06-03 10:20:00",
                         }
                     ],
+                },
+            )
+
+    def test_selected_row_guard_accepts_equivalent_trade_time_serializations(
+        self,
+    ) -> None:
+        class Transaction:
+            def execute(self, _sql: str, _params: tuple[object, ...] = ()) -> int:
+                return 0
+
+            def fetch_all(
+                self,
+                _sql: str,
+                _params: tuple[object, ...] = (),
+            ) -> list[dict[str, object]]:
+                return []
+
+        initial_row = {
+            "id": "bank-fee-1",
+            "trade_time": "2026-08-01 15:24:03",
+            "account_key": "ccb:8106",
+            "direction": "expense",
+            "amount": "4.50",
+            "category_code": "fee",
+        }
+        canonical_row = {
+            **initial_row,
+            "trade_time": "2026-08-01T15:24:03+08:00",
+        }
+        source = {
+            "candidate_rows": [canonical_row],
+            "active_relations": [],
+            "formal_items": [],
+            "tag_policy": {
+                "active_tags": [{"code": "fee"}],
+                "requirements_by_tag_code": {
+                    "fee": {"requires_oa": False, "requires_invoice": False}
+                },
+            },
+        }
+
+        with patch.object(
+            BankFlowRuleBatchCanonicalQueryRepository,
+            "read_candidate_guard_source",
+            return_value=source,
+        ):
+            PostgresStateStore._assert_bank_flow_rule_batch_candidate_guard(
+                Transaction(),
+                {
+                    "batch_id": "bank_flow_rule_batch_selected",
+                    "scope_month": "2026-08",
+                    "batch_type": "fee",
+                    "row_ids": ["bank-fee-1"],
+                    "total_amount": "4.50",
+                    "version": 1,
+                    "guard_mode": "selected_rows",
+                    "selected_row_proofs": bank_flow_rule_batch_selected_row_proofs(
+                        [initial_row],
+                        {"bank-fee-1": {"effective_category_code": "fee"}},
+                    ),
+                },
+            )
+
+    def test_selected_row_guard_still_rejects_real_trade_time_drift(self) -> None:
+        class Transaction:
+            def execute(self, _sql: str, _params: tuple[object, ...] = ()) -> int:
+                return 0
+
+            def fetch_all(
+                self,
+                _sql: str,
+                _params: tuple[object, ...] = (),
+            ) -> list[dict[str, object]]:
+                return []
+
+        initial_row = {
+            "id": "bank-fee-1",
+            "trade_time": "2026-08-01 15:24:03",
+            "account_key": "ccb:8106",
+            "direction": "expense",
+            "amount": "4.50",
+            "category_code": "fee",
+        }
+        source = {
+            "candidate_rows": [
+                {**initial_row, "trade_time": "2026-08-01T15:24:04+08:00"}
+            ],
+            "active_relations": [],
+            "formal_items": [],
+            "tag_policy": {
+                "active_tags": [{"code": "fee"}],
+                "requirements_by_tag_code": {
+                    "fee": {"requires_oa": False, "requires_invoice": False}
+                },
+            },
+        }
+
+        with patch.object(
+            BankFlowRuleBatchCanonicalQueryRepository,
+            "read_candidate_guard_source",
+            return_value=source,
+        ), self.assertRaisesRegex(
+            RuntimeError,
+            "bank_flow_rule_batch_candidate_guard_conflict",
+        ):
+            PostgresStateStore._assert_bank_flow_rule_batch_candidate_guard(
+                Transaction(),
+                {
+                    "batch_id": "bank_flow_rule_batch_selected",
+                    "scope_month": "2026-08",
+                    "batch_type": "fee",
+                    "row_ids": ["bank-fee-1"],
+                    "total_amount": "4.50",
+                    "version": 1,
+                    "guard_mode": "selected_rows",
+                    "selected_row_proofs": bank_flow_rule_batch_selected_row_proofs(
+                        [initial_row],
+                        {"bank-fee-1": {"effective_category_code": "fee"}},
+                    ),
                 },
             )
 

@@ -1,6 +1,6 @@
 # Workbench 正式关系边界与 I/O
 
-日期：2026-07-23
+日期：2026-08-05
 
 ## Owner
 
@@ -56,11 +56,11 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 - confirm/withdraw preview 的 derived active-generation selection 不是 relation fact source。preview route 可以用它构造 selection groups、金额与 OA alias；submit 必须丢弃该 DTO，并保留服务端 actor/tenant、preview identity、expected relation versions、canonical repository 与 UoW 原子写合同。
 - case id 重用、active member overlap、row type 对齐、expected version 和 idempotency fingerprint 必须在写入边界校验。
 - 任意 `N:M:K` member set 都合法，只要上游业务规则已证明安全并且成员非空、唯一、typed。
-- 自动扩展既有 active case 必须使用 `target_case_id` 并原子 replace；不得创建重叠的第二条 active relation。
+- 自动扩展既有 active case 必须使用 `target_case_id` 并原子 replace；显式引用保持既有扩展口径。组合证据只允许补全缺少至少一个 pane 的 active relation，并要求扩展后所有已出现 pane 按分合计完全相等、currency/direction 一致、证据图连通、候选唯一且不占用其他 active case；三栏已完整的 active relation 不再自动追加成员。不得创建重叠的第二条 active relation。
 - 精确 typed member set 的人工撤回历史阻止 deterministic engine 自动重建同一关系。
 - OA 附件 binding 写入 `special_metadata.oa_attachment_bindings`；纯 OA+附件关系不可撤回，混合关系撤回或扩展时必须恢复 exact binding。canonical invoice row id 不要求 `oa-att-inv-*` 前缀，旧前缀识别只作为历史兼容，不得替代显式 binding metadata。
 - 历史普通关系的人工撤回 fingerprint 继续阻止同一成员集合被自动重建；仅成员类型严格为 OA+invoice 且全部连边均为显式 `attachment_source` 的不可拆分归属关系不受旧撤回 fingerprint 污染。
-- matching 先按 currency、direction 与强 evidence 建索引，只在相同强证据且 365 天窗口内比较跨类型事实；禁止恢复对全部 canonical facts 的 O(n²) 两两扫描，否则大数据量会在显式 OA 来源关系进入规划前耗尽状态预算。
+- matching 先按 currency、direction 与强 evidence 建索引。公司对方户名、税号、业务号、项目号和发票号仍只在 365 天窗口内比较跨类型事实；日常报销额外把 OA 申请人与银行对方户名归一为 `employee_reimbursement_payee` 强证据，该专用证据允许至少 2 个有效字符、使用 OA 完成/审批日期（缺失才回退申请日期）与银行交易日期，并严格限制在 30 个自然日内。通用 `counterparty` 至少 4 字的保护不放宽，员工证据不依赖银行标签。禁止恢复对全部 canonical facts 的 O(n²) 两两扫描，否则大数据量会在显式 OA 来源关系进入规划前耗尽状态预算。
 - 同轮 deterministic relation 创建/扩展必须在首次保存前合并 ETC metadata；已有 active relation 的补全必须是一次 changed-case save。canonical revalidation 冲突时整批回滚，不允许部分写。
 - manual confirm 与 deterministic matching 必须在 relation UoW 写入前，通过 bank-tag read facade 的一次批量 fresh I/O 冻结 requirement metadata；non-fresh 或任一 bank row 缺失时整批不写。读投影不得回查 settings、不得按 row 逐条读取标签。
 

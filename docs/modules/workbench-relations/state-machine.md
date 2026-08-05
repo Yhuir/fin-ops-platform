@@ -28,12 +28,13 @@ validate canonical typed members
 
 ```text
 active case + unique safe new members
+ -> explicit reference, or exact composite closure that fills a missing pane
  -> lock current version
  -> supersede/replace snapshot atomically under same case identity
  -> history records exact before/after
 ```
 
-不能把一个 active member 同时分配到两个 case。
+不能把一个 active member 同时分配到两个 case。组合证据扩展对候选集合、跨 case 重叠、撤回 fingerprint 或资源预算任一项无法唯一证明时均零写；完整三栏 case 保持不变。
 
 ## 撤回
 

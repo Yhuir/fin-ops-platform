@@ -10,6 +10,7 @@ import StatePanel from "../components/common/StatePanel";
 import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
+import { formatDateTimeText } from "../features/dateTime";
 import { formatMoney } from "../features/money";
 import {
   fetchBatchAccounting,
@@ -66,19 +67,6 @@ function parseMoneyCents(value: string | number | null | undefined) {
 
 function formatCents(cents: number) {
   return formatMoney((cents / 100).toFixed(2));
-}
-
-function formatTradeTime(value: string | null | undefined) {
-  const text = String(value ?? "").trim();
-  if (!text) {
-    return "-";
-  }
-  const isoMatch = text.match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2}(?::\d{2})?)(?:\.\d+)?(?:Z|[+-]\d{2}(?::?\d{2})?)?$/);
-  if (!isoMatch) {
-    return text;
-  }
-  const time = isoMatch[2].length === 5 ? `${isoMatch[2]}:00` : isoMatch[2];
-  return `${isoMatch[1]} ${time}`;
 }
 
 function accountLabel(row: BatchAccountingBankRow) {
@@ -719,7 +707,7 @@ export default function BatchAccountingPage() {
           <div className="batch-accounting-bank-list">
             {payload.bankRows.map((row) => {
               const selected = row.id === selectedBankRowId;
-              const tradeTimeLabel = formatTradeTime(row.tradeTime);
+              const tradeTimeLabel = formatDateTimeText(row.tradeTime);
               return (
                 <button
                   aria-label={`批量账务集中处理 ${formatMoney(row.amount)} ${tradeTimeLabel} ${row.directionLabel || "支出"} ${accountLabel(row)}`}

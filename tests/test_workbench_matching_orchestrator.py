@@ -352,6 +352,62 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
         self.assertEqual(summary["relation_ids"], [case_id])
         self.assertEqual(set(uow.snapshot["pair_relations"][case_id]["row_ids"]), {"oa-active", "invoice-active", "bank-new"})
 
+    def test_employee_reimbursement_extension_replaces_active_relation_atomically(self) -> None:
+        evidence = (("employee_reimbursement_payee", "樊祖芳"),)
+        oa = fact("oa", "oa-exp-2363", 74_706, evidence=evidence)
+        invoice = fact(
+            "invoice",
+            "invoice-74706",
+            74_706,
+            evidence=(),
+            references=(
+                FormalRelationReference(
+                    kind="attachment_source",
+                    value="oa-exp-2363:item:0",
+                    target_row_type="oa",
+                    target_identity="oa-exp-2363",
+                ),
+            ),
+        )
+        bank = fact("bank", "txn_imported_1061", 74_706, evidence=evidence)
+        case_id = "CASE-AUTO-0076EC3CA6BA0F837824"
+        fixture = FormalRelationFactBatch(
+            facts=(oa, invoice, bank),
+            active_relations=(ActiveFormalRelationAnchor(case_id, (oa.member_key, invoice.member_key)),),
+        )
+        existing_snapshot = {
+            "pair_relations": {
+                case_id: {
+                    "case_id": case_id,
+                    "row_ids": [oa.row_id, invoice.row_id],
+                    "row_types": [oa.row_type, invoice.row_type],
+                    "relation_mode": "manual_confirmed",
+                    "status": "active",
+                    "version": 1,
+                    "month_scope": "2026-05",
+                }
+            },
+            "pair_relation_history": [],
+        }
+        orchestrator, _repository, uow = self._orchestrator(
+            fixture,
+            uow=RecordingUow(existing_snapshot),
+        )
+
+        summary = orchestrator.run(
+            changed_scope_months=["2026-05"],
+            reason="dirty_scope_retry",
+            request_id="request-employee-extension",
+        )
+
+        self.assertEqual(summary["created_relation_count"], 0)
+        self.assertEqual(summary["extended_relation_count"], 1)
+        self.assertEqual(summary["relation_ids"], [case_id])
+        relation = uow.snapshot["pair_relations"][case_id]
+        self.assertEqual(set(relation["row_ids"]), {oa.row_id, invoice.row_id, bank.row_id})
+        self.assertEqual(uow.save_count, 1)
+        self.assertEqual(len(uow.snapshot["pair_relation_history"]), 1)
+
     def test_summary_and_command_contract_have_no_candidate_or_decision_state(self) -> None:
         fixture = FormalRelationFactBatch(facts=(fact("oa", "oa-clean"), fact("invoice", "invoice-clean")))
         orchestrator, _repository, uow = self._orchestrator(fixture)

@@ -1,6 +1,6 @@
 # Bank Transaction Paired Policy / 流水规则批量处理模块边界与 I/O
 
-日期：2026-07-30
+日期：2026-08-05
 
 ## 模块化状态
 
@@ -42,7 +42,7 @@
 | 标签与 paired policy | `app.app_settings` | active tags 与 `requirements_by_tag_code` 同一次 canonical snapshot 读取；缺规则默认需要 OA 和发票。 |
 | 正式关系 | `app.workbench_pair_relations` | 只接受 `status='active'`。active relation 决定占用和 submitted 可撤回；禁止使用 `workbench_relation` projection。 |
 | 规则写入 | `GET/PUT /api/bank-flow-rule-batches/tag-rules` | PUT 使用 `expected_version` CAS；未知、停用、重复标签 fail fast；语义 no-op 不递增版本。 |
-| 批量提交 | `submit-selection` / `submit` | 非空、去重、同月/账户/标签、资格与 active relation 占用重查；relation command、幂等/CAS、审计和 batch delta writer 原子提交。 |
+| 批量提交 | `submit-selection` / `submit` | 非空、去重、同月/账户/标签、资格与 active relation 占用重查；selected-row proof 的时间先规范为同一 UTC 秒级时刻，业务无时区文本按 `Asia/Shanghai` 解释，避免等价 PostgreSQL `timestamptz` 序列化误报冲突；无法解析的时间仍按原文 fail closed。relation command、幂等/CAS、审计和 batch delta writer 原子提交。 |
 | 撤回/reset | `withdraw` / `reset-submitted` | 保持一次 relation command/bulk cancel 与一次 changed-batch delta 保存；不直接改表，不同步 rebuild。 |
 | 权限/session | session / permissions | 读、规则写、提交、撤回和 reset 分别 fail closed。 |
 
@@ -55,7 +55,7 @@
 | 详情 | 返回 batch、银行 rows、tag/direction counts、行级分类与 events。正式批次读取持久化历史；live candidate 使用列表项 `scope_month` 从同一 canonical snapshot 重算，列表生成的 candidate 不得因没有 persisted draft 而返回“批次不存在”。linked 提示可携带机器用 `relation_case_ids`，页面只展示业务提示和 OA/发票数量。 |
 | 规则保存 | 返回规则版本、资格变化和信息性的 `affected_months` / `affected_scope_keys`；不返回页面 refresh target。 |
 | 写命令 receipt | 保留 batch、relation command 结果、affected months、幂等/CAS/冲突合同；删除 read-model/freshness/operation-barrier envelope。 |
-| 写后页面状态 | submit-selection、submit、withdraw、reset 和规则保存成功后，各执行一次当前列表 GET；不先本地伪造最终批次，不 polling。 |
+| 写后页面状态 | submit-selection、submit、withdraw、reset 和规则保存成功后，各执行一次当前列表 GET；不先本地伪造最终批次，不 polling。真实 selected-row candidate conflict 会先清空旧选择与旧详情，再只执行一次当前列表 GET，禁止自动重提。 |
 | 关联台 | relation metadata 保持 `source=bank_flow_rule_batch`、`relation_mode=bank_flow_rule_batch`、`source_batch_id`、`flow_rule_tag_code/version`、冻结 `requires_oa/requires_invoice`、`source_row_count` 和 `collapsed_bank_rows`。银行行数 `>3` 只在银行栏使用 bank-flow summary；1 到 3 行直接完整展示。 |
 
 ## 一致性与查询预算
@@ -102,7 +102,7 @@ Canonical facts：
 | 层 | 文件 |
 | --- | --- |
 | Frontend page | `web/src/pages/BankFlowRuleBatchPage.tsx` |
-| Frontend feature | `web/src/features/bankFlowRuleBatches/api.ts`、`types.ts`、`policy.ts`、`viewModel.ts`、`components.tsx` |
+| Frontend feature | `web/src/features/bankFlowRuleBatches/api.ts`、`types.ts`、`policy.ts`、`viewModel.ts`、`components.tsx`；共享时间展示复用 `web/src/features/dateTime.ts`。 |
 | Backend route | `backend/src/fin_ops_platform/app/routes_bank_flow_rule_batches.py` |
 | Backend service | `backend/src/fin_ops_platform/services/bank_flow_rule_batch_application_service.py` |
 | Canonical query repository | `backend/src/fin_ops_platform/services/postgres_repositories/bank_flow_rule_batch_canonical_query.py` |
@@ -126,6 +126,7 @@ Canonical facts：
 - 列表生成的 live candidate id 与详情按 `batch_id + scope_month` 重算出的 identity 必须一致；前端详情请求必须携带列表项的 `scope_month`。
 - 候选 identity、成员、金额与内部往来匹配必须确定性；歧义 fail closed，内部往来金额只计单边。内部往来的 ±2 天查询窗口只用于发现跨月配对，配对 owner month 固定为最早成员月份，相邻月份查询不得重复返回。
 - 提交必须携带合法 `scope_month` 并在写事务内重读、重算、锁定和复核；遗留 persisted draft 不能被恢复或提交。
+- selected-row proof 比较的是同一绝对时刻，不比较等价时间字符串的表面格式；金额、方向、账户、分类、月份、成员、active relation 占用和真实秒级时间漂移仍必须冲突。
 - 撤回释放关系后，若当前事实仍合格，下一次 GET 自动重新生成候选。
 - 旧 no-OA read model/worker 已退役；仅独立的 canonical no-OA API/关系域继续存在，当前 bank-flow
   页面不得读取或回退到该域。

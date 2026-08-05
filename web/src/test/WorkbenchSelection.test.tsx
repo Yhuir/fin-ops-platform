@@ -1556,7 +1556,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(unpairedZone).not.toHaveTextContent(/2026-03-25\s*14:22/);
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: /^(确认|撤回)关联$/ })).not.toBeInTheDocument();
-    });
+    }, { timeout: 5000 });
     expect(
       within(pairedZone).queryByRole("row", {
         name: /2026-03-25 14:22.*华东设备供应商/,

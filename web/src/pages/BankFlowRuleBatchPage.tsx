@@ -10,6 +10,7 @@ import StatePanel from "../components/common/StatePanel";
 import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
+import { ApiClientError } from "../features/apiClient";
 import {
   fetchBankFlowRuleBatchDetail,
   fetchBankFlowRuleBatchTagSelection,
@@ -62,6 +63,7 @@ import type {
   BankFlowRuleBatchTagRule,
   BankFlowRuleBatchTagSelection,
 } from "../features/bankFlowRuleBatches/types";
+import { formatDateTimeText } from "../features/dateTime";
 
 const EMPTY_BATCHES: BankFlowRuleBatchesResponse = {
   summary: {
@@ -94,6 +96,12 @@ const EMPTY_TAG_SELECTION: BankFlowRuleBatchTagSelection = {
 
 const SELF_SUB_LABEL = "主标签本身";
 const BANK_FLOW_RULE_BATCH_PAGE_SIZE = 50;
+const CANDIDATE_CONFLICT_CODE = "bank_flow_rule_batch_candidate_conflict";
+const CANDIDATE_CONFLICT_MESSAGE = "候选已更新，请重新选择。";
+
+function isCandidateConflict(caught: unknown) {
+  return caught instanceof ApiClientError && caught.code === CANDIDATE_CONFLICT_CODE;
+}
 
 export default function BankFlowRuleBatchPage() {
   const { runOperation } = useGlobalOperationOverlay();
@@ -475,16 +483,34 @@ export default function BankFlowRuleBatchPage() {
           setMessage("正在加载流水规则批次最新数据...");
           await reloadBatchesAfterMutation();
           return submitResult;
+        } catch (caught) {
+          if (isCandidateConflict(caught)) {
+            suppressNextAutoSelectRef.current = true;
+            setSelectedBatchId("");
+            clearSelection();
+            setDetails({});
+            setDetailErrors({});
+            setMessage("候选已变化，正在刷新流水规则批次...");
+            await reloadBatchesAfterMutation();
+          }
+          throw caught;
         } finally {
           setMutating(false);
         }
       },
-      errorMessage: (caught) => caught instanceof Error ? caught.message : "提交选中流水失败",
+      errorMessage: (caught) => isCandidateConflict(caught)
+        ? CANDIDATE_CONFLICT_MESSAGE
+        : caught instanceof Error ? caught.message : "提交选中流水失败",
     });
     if (result.status === "success") {
       handleMutationComplete("选中流水已提交");
     } else {
-      setFeedback({ severity: "error", message: result.error instanceof Error ? result.error.message : "提交选中流水失败" });
+      setFeedback({
+        severity: "error",
+        message: isCandidateConflict(result.error)
+          ? CANDIDATE_CONFLICT_MESSAGE
+          : result.error instanceof Error ? result.error.message : "提交选中流水失败",
+      });
     }
   };
 
@@ -984,7 +1010,7 @@ export default function BankFlowRuleBatchPage() {
                                       />
                                     </td>
                                   ) : null}
-                                  <td>{row.tradeTime || "-"}</td>
+                                  <td>{formatDateTimeText(row.tradeTime)}</td>
                                   <td>{row.counterpartyName || "-"}</td>
                                   <td className="bank-flow-rule-batches-table__amount">
                                     <div className="bank-flow-rule-batches-amount-cell">

@@ -34,6 +34,7 @@
 - active relation 只从 `app.workbench_pair_relations` 读取，禁止使用 Workbench page read model 或 relation projection。
 - 内部转账必须保持一收一支、不同账户、48 小时窗口；批次金额只计单边金额。跨月配对由最早成员月份唯一拥有，±2 天窗口只用于发现配对，后一个月份不得生成重复 candidate。
 - submit/submit-selection/withdraw/reset 必须继续通过 relation command、占用检查、幂等/CAS、审计和 changed-batch delta writer 原子提交。PostgreSQL 由 `save_bank_flow_rule_batch_mutation(...)` 持有唯一 caller-owned transaction，relation/history 与 batch/events 共用该 transaction；任一步失败整体 rollback。
+- submit-selection 的初读与事务内重读时间证明统一到 UTC 秒级时刻；无时区业务时间按 `Asia/Shanghai` 解释。只有表面格式从空格时间变为 ISO 8601 offset 不构成漂移，真实时刻、金额、标签、账户、成员或占用变化仍 fail closed。
 - reset 使用一次 bulk relation cancel 和一次 batch delta 保存；禁止手写 SQL 改状态。
 - 每次写成功后，当前页只执行一次普通列表 GET。
 
@@ -58,7 +59,7 @@
 | `editing_rules` | 抽屉打开；标签列只读，OA/发票 checkbox 可编辑。 |
 | `saving_rules` | 规则保存中，禁用重复提交。 |
 | `selection_dirty` | 已选择银行流水；切换月份、标签、账户、分页或 bucket 清空选择。 |
-| `submitting` | command 进行中；成功后执行一次列表 GET。 |
+| `submitting` | command 进行中；成功后执行一次列表 GET。真实 candidate conflict 时清空旧选择/详情并执行一次列表 GET，提示用户重新选择；不自动重试 POST。 |
 | `resetting_submitted` | bulk withdraw 进行中；成功后执行一次列表 GET。 |
 
 列表响应只包含 `summary`、`batches`、`pagination`。一次请求中的 rows、total 和 summary 必须处于同一显式 `REPEATABLE READ / READ ONLY` snapshot；repository 以固定数量集合查询读取请求月份窗口，application service 对同一 live candidate 集合执行过滤、排序和分页。

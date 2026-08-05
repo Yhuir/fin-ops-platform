@@ -241,6 +241,18 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
         self.assertEqual(len(accepted.plans), 1)
         self.assertEqual(rejected.plans, ())
 
+    def test_employee_reimbursement_evidence_uses_thirty_day_window(self) -> None:
+        evidence = (("employee_reimbursement_payee", "樊祖芳"),)
+        oa = fact("oa", "oa-employee", 74_706, fact_date=date(2026, 7, 1), evidence=evidence)
+        bank_30 = fact("bank", "bank-30", 74_706, fact_date=date(2026, 7, 31), evidence=evidence)
+        bank_31 = fact("bank", "bank-31", 74_706, fact_date=date(2026, 8, 1), evidence=evidence)
+
+        accepted = self.engine.plan_relations(batch(oa, bank_30))
+        rejected = self.engine.plan_relations(batch(oa, bank_31))
+
+        self.assertEqual(len(accepted.plans), 1)
+        self.assertEqual(rejected.plans, ())
+
     def test_more_than_six_members_can_form_one_unique_three_pane_closure(self) -> None:
         facts = (
             fact("oa", "oa-11", 1_100),
@@ -545,6 +557,136 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
             plan.oa_attachment_bindings,
             tuple(("oa-exp-2321", invoice.row_id) for invoice in invoices),
         )
+
+    def test_employee_reimbursement_bank_completes_existing_oa_invoice_relation(self) -> None:
+        employee_evidence = (("employee_reimbursement_payee", "樊祖芳"),)
+        oa = fact(
+            "oa",
+            "oa-exp-2363",
+            74_706,
+            fact_date=date(2026, 7, 17),
+            evidence=employee_evidence,
+        )
+        invoices = tuple(
+            fact(
+                "invoice",
+                f"invoice-74706-{index}",
+                amount,
+                evidence=(),
+                references=(
+                    FormalRelationReference(
+                        kind="attachment_source",
+                        value=f"oa-exp-2363:item:{index}",
+                        target_row_type="oa",
+                        target_identity="oa-exp-2363",
+                    ),
+                ),
+            )
+            for index, amount in enumerate((30_590, 23_166, 20_950))
+        )
+        bank = fact(
+            "bank",
+            "txn_imported_1061",
+            74_706,
+            fact_date=date(2026, 8, 3),
+            evidence=employee_evidence,
+        )
+        fixture = FormalRelationFactBatch(
+            facts=(oa, bank, *invoices),
+            active_relations=(
+                ActiveFormalRelationAnchor(
+                    case_id="CASE-AUTO-0076EC3CA6BA0F837824",
+                    member_keys=(oa.member_key, *(invoice.member_key for invoice in invoices)),
+                ),
+            ),
+        )
+
+        result = self.engine.plan_relations(fixture)
+
+        self.assertEqual(len(result.plans), 1)
+        plan = result.plans[0]
+        self.assertEqual(plan.target_case_id, "CASE-AUTO-0076EC3CA6BA0F837824")
+        self.assertEqual(plan.case_id, "CASE-AUTO-0076EC3CA6BA0F837824")
+        self.assertEqual(plan.rule_code, "strong_evidence_exact_extension")
+        self.assertEqual(plan.amount_minor, 74_706)
+        self.assertEqual(set(plan.row_types), {"oa", "bank", "invoice"})
+
+    def test_composite_extension_is_fail_closed_for_ambiguous_or_complete_relations(self) -> None:
+        evidence = (("employee_reimbursement_payee", "樊祖芳"),)
+        oa = fact("oa", "oa-active-ambiguous", 74_706, evidence=evidence)
+        invoice = fact("invoice", "invoice-active-ambiguous", 74_706, evidence=evidence)
+        bank_a = fact("bank", "bank-active-a", 74_706, evidence=evidence)
+        bank_b = fact("bank", "bank-active-b", 74_706, evidence=evidence)
+        incomplete = FormalRelationFactBatch(
+            facts=(oa, invoice, bank_a, bank_b),
+            active_relations=(
+                ActiveFormalRelationAnchor(
+                    case_id="case:incomplete",
+                    member_keys=(oa.member_key, invoice.member_key),
+                ),
+            ),
+        )
+
+        ambiguous = self.engine.plan_relations(incomplete)
+
+        self.assertEqual(ambiguous.plans, ())
+        self.assertGreaterEqual(ambiguous.ambiguous_component_count, 1)
+
+        complete = FormalRelationFactBatch(
+            facts=(oa, invoice, bank_a, bank_b),
+            active_relations=(
+                ActiveFormalRelationAnchor(
+                    case_id="case:complete",
+                    member_keys=(oa.member_key, invoice.member_key, bank_a.member_key),
+                ),
+            ),
+        )
+
+        preserved = self.engine.plan_relations(complete)
+
+        self.assertEqual(preserved.plans, ())
+        self.assertEqual(preserved.preserved_active_count, 1)
+
+    def test_exact_withdrawal_blocks_composite_active_extension(self) -> None:
+        evidence = (("employee_reimbursement_payee", "樊祖芳"),)
+        oa = fact("oa", "oa-active-withdrawn", 74_706, evidence=evidence)
+        invoice = fact("invoice", "invoice-active-withdrawn", 74_706, evidence=evidence)
+        bank = fact("bank", "bank-active-withdrawn", 74_706, evidence=evidence)
+        full_members = (oa.member_key, invoice.member_key, bank.member_key)
+        fixture = FormalRelationFactBatch(
+            facts=(oa, invoice, bank),
+            active_relations=(
+                ActiveFormalRelationAnchor(
+                    case_id="case:withdrawn-extension",
+                    member_keys=(oa.member_key, invoice.member_key),
+                ),
+            ),
+            withdrawal_fingerprints=frozenset({relation_fingerprint(full_members)}),
+        )
+
+        result = self.engine.plan_relations(fixture)
+
+        self.assertEqual(result.plans, ())
+
+    def test_composite_active_extension_rejects_cross_case_member_overlap(self) -> None:
+        evidence = (("employee_reimbursement_payee", "樊祖芳"),)
+        oa_a = fact("oa", "oa-overlap-a", 74_706, evidence=evidence)
+        invoice_a = fact("invoice", "invoice-overlap-a", 74_706, evidence=evidence)
+        oa_b = fact("oa", "oa-overlap-b", 74_706, evidence=evidence)
+        invoice_b = fact("invoice", "invoice-overlap-b", 74_706, evidence=evidence)
+        bank = fact("bank", "bank-overlap", 74_706, evidence=evidence)
+        fixture = FormalRelationFactBatch(
+            facts=(oa_a, invoice_a, oa_b, invoice_b, bank),
+            active_relations=(
+                ActiveFormalRelationAnchor("case:overlap-a", (oa_a.member_key, invoice_a.member_key)),
+                ActiveFormalRelationAnchor("case:overlap-b", (oa_b.member_key, invoice_b.member_key)),
+            ),
+        )
+
+        result = self.engine.plan_relations(fixture)
+
+        self.assertEqual(result.plans, ())
+        self.assertEqual(result.ambiguous_component_count, 2)
 
 
 if __name__ == "__main__":

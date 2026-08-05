@@ -207,7 +207,7 @@ const feeDetailPayload = {
   rows: [
     {
       transaction_id: "bank-row-001",
-      trade_time: "2026-05-03 10:20:00",
+      trade_time: "2026-05-03T10:20:00+08:00",
       counterparty_name: "建设银行",
       direction: "expense",
       direction_label: "支",
@@ -683,6 +683,8 @@ describe("BankFlowRuleBatchPage", () => {
     const transactionRegion = screen.getByRole("region", { name: "流水" });
     expect(within(transactionRegion).getByText("建设银行8106")).toBeInTheDocument();
     expect(await within(transactionRegion).findByText("网银手续费")).toBeInTheDocument();
+    expect(within(transactionRegion).getByText("2026-05-03 10:20:00")).toBeInTheDocument();
+    expect(within(transactionRegion).queryByText("2026-05-03T10:20:00+08:00")).not.toBeInTheDocument();
     const detailGet = fetchMock.mock.calls.find(([input]) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       return url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee";
@@ -1143,6 +1145,47 @@ describe("BankFlowRuleBatchPage", () => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       return url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee-next";
     })).toBe(false);
+  });
+
+  test("clears stale selection and refreshes once after a candidate conflict without resubmitting", async () => {
+    const user = userEvent.setup();
+    let listRequestCount = 0;
+    let submitRequestCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      if (url.pathname === "/api/bank-flow-rule-batches/tag-rules") {
+        return jsonResponse(tagSelectionPayload);
+      }
+      if (url.pathname === "/api/bank-flow-rule-batches" && (!init?.method || init.method === "GET")) {
+        listRequestCount += 1;
+        return jsonResponse(withPagination(listPayload, url));
+      }
+      if (url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee") {
+        return jsonResponse(feeDetailPayload);
+      }
+      if (url.pathname === "/api/bank-flow-rule-batches/submit-selection") {
+        submitRequestCount += 1;
+        return jsonResponse({
+          error: "bank_flow_rule_batch_candidate_conflict",
+          message: "流水规则候选已变化或被占用，请刷新后重试。",
+        }, 409);
+      }
+      return jsonResponse({ message: `Unhandled ${url.pathname}` }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+
+    const rowCheckbox = await screen.findByRole("checkbox", { name: "选择流水 bank-row-001" });
+    await user.click(rowCheckbox);
+    const listRequestsBeforeSubmit = listRequestCount;
+    await user.click(screen.getByRole("button", { name: "提交批次" }));
+
+    expect((await screen.findAllByText("候选已更新，请重新选择。")).length).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(listRequestCount).toBe(listRequestsBeforeSubmit + 1);
+      expect(submitRequestCount).toBe(1);
+      expect(screen.getByRole("button", { name: "提交批次" })).toBeDisabled();
+    });
   });
 
   test("keeps draft row selection available when legacy read model rows omit can_submit", async () => {

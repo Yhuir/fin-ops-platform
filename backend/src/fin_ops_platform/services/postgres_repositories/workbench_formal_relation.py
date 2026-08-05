@@ -94,6 +94,7 @@ class PostgresWorkbenchFormalRelationFactRepository:
                 oa.amount,
                 oa.currency,
                 oa.application_date as fact_date,
+                oa.approved_at,
                 oa.workflow_no,
                 oa.project_id,
                 oa.project_name,
@@ -508,6 +509,7 @@ class PostgresWorkbenchFormalRelationFactRepository:
                 oa.amount,
                 oa.currency,
                 oa.application_date as fact_date,
+                oa.approved_at,
                 oa.workflow_no,
                 oa.project_id,
                 oa.project_name,
@@ -636,6 +638,7 @@ def _oa_fact(
     payload = row_payload(row, "normalized_payload")
     payload = payload if isinstance(payload, dict) else {}
     detail = payload.get("detail_fields") if isinstance(payload.get("detail_fields"), dict) else {}
+    summary = payload.get("summary_fields") if isinstance(payload.get("summary_fields"), dict) else {}
     apply_type = text(payload.get("apply_type") or payload.get("application_type") or detail.get("报销/支付")) or ""
     direction = "income" if "收" in apply_type and "付" not in apply_type else "expenditure"
     evidence = _evidence_keys(
@@ -648,6 +651,25 @@ def _oa_fact(
         ),
         project_references=(row.get("project_id"), payload.get("project_no")),
     )
+    fact_date_value = row.get("fact_date")
+    if "日常报销" in apply_type:
+        evidence = tuple(sorted({*evidence, *_employee_reimbursement_evidence(row.get("applicant"))}))
+        fact_date_value = next(
+            (
+                value
+                for value in (
+                    payload.get("completed_at"),
+                    detail.get("审批完成时间"),
+                    summary.get("审批完成时间"),
+                    row.get("approved_at"),
+                    payload.get("submitted_at"),
+                    payload.get("modified_time"),
+                    payload.get("modifiedTime"),
+                )
+                if value not in (None, "")
+            ),
+            fact_date_value,
+        )
     return FormalRelationFact(
         row_type="oa",
         canonical_object_identity=_required_identity(row),
@@ -655,7 +677,7 @@ def _oa_fact(
         amount_minor=_minor_units(row.get("amount")),
         currency=text(row.get("currency")) or "CNY",
         direction=direction,
-        fact_date=_date_value(row.get("fact_date")),
+        fact_date=_date_value(fact_date_value),
         evidence_keys=evidence,
         references=_references_from_payload(payload, oa_aliases=oa_aliases),
         source_version=_source_version(row),
@@ -678,6 +700,16 @@ def _bank_fact(
         business_references=(row.get("bank_serial_no"), row.get("source_unique_key")),
         project_references=(row.get("project_id"),),
         invoice_numbers=_invoice_numbers_in_bank_payload(row, payload),
+    )
+    evidence = tuple(
+        sorted(
+            {
+                *evidence,
+                *_employee_reimbursement_evidence(
+                    row.get("normalized_counterparty_name") or row.get("counterparty_name_raw")
+                ),
+            }
+        )
     )
     return FormalRelationFact(
         row_type="bank",
@@ -856,6 +888,13 @@ def _evidence_keys(
         if len(normalized) >= 8:
             evidence.add(("invoice_number", normalized))
     return tuple(sorted(evidence))
+
+
+def _employee_reimbursement_evidence(value: Any) -> tuple[tuple[str, str], ...]:
+    normalized = normalize_match_text(value)
+    if len(normalized) < 2 or normalized in _WEAK_SUBJECT_VALUES:
+        return ()
+    return (("employee_reimbursement_payee", normalized),)
 
 
 def _invoice_numbers_in_bank_payload(row: dict[str, Any], payload: dict[str, Any]) -> tuple[str, ...]:
