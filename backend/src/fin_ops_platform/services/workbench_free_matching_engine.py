@@ -7,7 +7,7 @@ import json
 from typing import Iterable, Literal
 
 
-RULE_VERSION = "2026-08-05-employee-reimbursement-v8"
+RULE_VERSION = "2026-08-05-employee-reimbursement-v9"
 MATCHABLE_ROW_TYPES = frozenset({"oa", "bank", "invoice"})
 ROW_TYPE_ORDER = {"oa": 0, "bank": 1, "invoice": 2}
 STRONG_COMPOSITE_EVIDENCE_KINDS = frozenset(
@@ -613,7 +613,10 @@ class WorkbenchFreeMatchingEngine:
             if not anchor_members.issubset(facts_by_key):
                 continue
 
-            allowed_members = anchor_members | eligible
+            missing_row_types = MATCHABLE_ROW_TYPES - {row_type for row_type, _identity in anchor_members}
+            allowed_members = anchor_members | {
+                member for member in eligible if member[0] in missing_row_types
+            }
             reachable = set(anchor_members)
             pending = list(anchor_members)
             while pending:
@@ -633,7 +636,6 @@ class WorkbenchFreeMatchingEngine:
                 raise _ResourceLimited
 
             candidates: dict[frozenset[MemberKey], set[str]] = {}
-            missing_row_types = MATCHABLE_ROW_TYPES - {row_type for row_type, _identity in anchor_members}
             for mask in range(1, 1 << len(ordered_new)):
                 budget.consume()
                 new_members = frozenset(

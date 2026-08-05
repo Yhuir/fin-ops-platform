@@ -56,7 +56,7 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 - confirm/withdraw preview 的 derived active-generation selection 不是 relation fact source。preview route 可以用它构造 selection groups、金额与 OA alias；submit 必须丢弃该 DTO，并保留服务端 actor/tenant、preview identity、expected relation versions、canonical repository 与 UoW 原子写合同。
 - case id 重用、active member overlap、row type 对齐、expected version 和 idempotency fingerprint 必须在写入边界校验。
 - 任意 `N:M:K` member set 都合法，只要上游业务规则已证明安全并且成员非空、唯一、typed。
-- 自动扩展既有 active case 必须使用 `target_case_id` 并原子 replace；显式引用保持既有扩展口径。组合证据只允许补全缺少至少一个 pane 的 active relation，并要求扩展后所有已出现 pane 按分合计完全相等、currency/direction 一致、证据图连通、候选唯一且不占用其他 active case；三栏已完整的 active relation 不再自动追加成员。不得创建重叠的第二条 active relation。
+- 自动扩展既有 active case 必须使用 `target_case_id` 并原子 replace；显式引用保持既有扩展口径。组合证据只允许补全缺少至少一个 pane 的 active relation，候选搜索只接纳该关系当前缺失 pane 的新事实，避免同一强证据下其它已存在 pane 的未配对事实扩大或污染搜索空间；缺失 pane 内仍允许有界一对多/多对一/多对多精确合计。扩展后所有已出现 pane 必须按分合计完全相等、currency/direction 一致、证据图连通、候选唯一且不占用其他 active case；三栏已完整的 active relation 不再自动追加成员。不得创建重叠的第二条 active relation。
 - 精确 typed member set 的人工撤回历史阻止 deterministic engine 自动重建同一关系。
 - OA 附件 binding 写入 `special_metadata.oa_attachment_bindings`；纯 OA+附件关系不可撤回，混合关系撤回或扩展时必须恢复 exact binding。canonical invoice row id 不要求 `oa-att-inv-*` 前缀，旧前缀识别只作为历史兼容，不得替代显式 binding metadata。
 - 历史普通关系的人工撤回 fingerprint 继续阻止同一成员集合被自动重建；仅成员类型严格为 OA+invoice 且全部连边均为显式 `attachment_source` 的不可拆分归属关系不受旧撤回 fingerprint 污染。

@@ -4759,3 +4759,10 @@ FIN_OPS_TEST_DATABASE_URL=<disposable-db> PYTHONPATH=backend/src:. python3 -m py
 - 旧链删除：删除 `ExistingEtcBatchLinkService`、`HistoricalEtcBusinessBatchMigrationService`、对应两条 CLI 与专属测试；保留 `HistoricalEtcRepairService`。whole-repo 生产调用方扫描为零，禁止恢复 operator-only 平行写链。
 - Audit：新增 exact OA/batch 反向 expected-owner、marker conflict、external batch 多 active owner 与 matching dirty scope 阻断；只有 integrity pass、matching/read-model queue drained 才显示通过。
 - UI 数量：折叠标签只使用 canonical collapsed detail count；aggregate summary row 不再把 34 张显示为 35 张。
+
+## 2026-08-05 - active relation 缺失 pane 搜索隔离
+
+- 真实原因：已有 OA+附件发票关系补银行时，旧组合搜索把同一员工强证据下所有未配对 OA 也放入候选空间。生产 747.06 样本虽然 OA、三张发票与银行流水严格等额且日期同日，但大量无关 OA 令有界子集搜索资源保护触发，matching 正常完成却保持零写。
+- 最小修复：active relation 组合扩展只让当前缺失 pane 的未配对事实进入可达图与子集搜索；既有 pane 继续作为 anchor 和证据图成员。缺失 pane 内的多笔事实仍复用原有精确分币合计、强证据、日期窗口、唯一候选、active owner 与撤回指纹门禁。
+- 版本与边界：matching rule 升至 `2026-08-05-employee-reimbursement-v9`，触发既有 completed scope stale-scan；不新增 API、表、worker、队列、fallback 或依赖，relation command/UoW 与 Workbench read model I/O 不变。
+- 回归：生产形状用例加入 20 条同员工无关 OA 和错误金额流水；即使剩余无关组件触发有界资源保护，仍只把 747.06 流水补入原 case。另覆盖两笔银行流水合计补齐同一 OA+发票关系。

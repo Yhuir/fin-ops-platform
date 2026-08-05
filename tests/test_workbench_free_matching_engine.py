@@ -591,8 +591,25 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
             fact_date=date(2026, 8, 3),
             evidence=employee_evidence,
         )
+        noisy_oas = tuple(
+            fact(
+                "oa",
+                f"unpaired-employee-oa-{index}",
+                10_000 + index,
+                fact_date=date(2026, 8, 3),
+                evidence=employee_evidence,
+            )
+            for index in range(20)
+        )
+        wrong_bank = fact(
+            "bank",
+            "txn_imported_wrong_amount",
+            13_600,
+            fact_date=date(2026, 8, 3),
+            evidence=employee_evidence,
+        )
         fixture = FormalRelationFactBatch(
-            facts=(oa, bank, *invoices),
+            facts=(oa, bank, wrong_bank, *invoices, *noisy_oas),
             active_relations=(
                 ActiveFormalRelationAnchor(
                     case_id="CASE-AUTO-0076EC3CA6BA0F837824",
@@ -610,6 +627,46 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
         self.assertEqual(plan.rule_code, "strong_evidence_exact_extension")
         self.assertEqual(plan.amount_minor, 0)
         self.assertEqual(set(plan.row_types), {"oa", "bank", "invoice"})
+        self.assertIn(bank.member_key, plan.member_keys)
+        self.assertNotIn(wrong_bank.member_key, plan.member_keys)
+        self.assertEqual(result.resource_limited_component_count, 1)
+
+    def test_active_extension_preserves_exact_sum_with_multiple_missing_pane_rows(self) -> None:
+        evidence = (("employee_reimbursement_payee", "樊祖芳"),)
+        oa = fact("oa", "oa-active-many-banks", 10_000, evidence=evidence)
+        invoice = fact(
+            "invoice",
+            "invoice-active-many-banks",
+            10_000,
+            evidence=(),
+            references=(
+                FormalRelationReference(
+                    kind="attachment_source",
+                    value="oa-active-many-banks:item:0",
+                    target_row_type="oa",
+                    target_identity="oa-active-many-banks",
+                ),
+            ),
+        )
+        bank_a = fact("bank", "bank-active-many-a", 3_000, evidence=evidence)
+        bank_b = fact("bank", "bank-active-many-b", 7_000, evidence=evidence)
+        fixture = FormalRelationFactBatch(
+            facts=(oa, invoice, bank_a, bank_b),
+            active_relations=(
+                ActiveFormalRelationAnchor(
+                    case_id="case:active-many-banks",
+                    member_keys=(oa.member_key, invoice.member_key),
+                ),
+            ),
+        )
+
+        result = self.engine.plan_relations(fixture)
+
+        self.assertEqual(len(result.plans), 1)
+        self.assertEqual(
+            set(result.plans[0].member_keys),
+            {oa.member_key, invoice.member_key, bank_a.member_key, bank_b.member_key},
+        )
 
     def test_active_extension_rejects_new_pane_that_matches_no_anchor_total(self) -> None:
         employee_evidence = (("employee_reimbursement_payee", "樊祖芳"),)
