@@ -1180,13 +1180,6 @@ export default function EtcTicketManagementPage() {
     && currentBusinessBatch.createOaDraftAction?.enabled === true
     && hasCurrentOaAmountContract
     && !detailLoading;
-  const submitDisabledReason = !canMutateData
-    ? "当前账号仅支持查看和导出，不能创建审批草稿。"
-    : !hasCurrentOaAmountContract
-      ? "正在加载对账任务金额。"
-    : detailLoading
-      ? "正在加载批次详情。"
-      : currentBusinessBatch?.createOaDraftAction?.message || "当前批次缺少审批资格信息，请刷新后重试。";
   const currentOaActionBatch = useMemo(() => {
     if (draftResult) {
       return draftResult;
@@ -2029,6 +2022,7 @@ export default function EtcTicketManagementPage() {
                 aria-label="ETC批次状态"
                 className="etc-status-segmented"
                 disallowEmptySelection
+                fullWidth
                 selectedKeys={new Set<Key>([activeStatus])}
                 selectionMode="single"
                 size="sm"
@@ -2200,7 +2194,7 @@ export default function EtcTicketManagementPage() {
                     </div>
                     {selectedBatch ? (
                       <p>
-                        {selectedTask ? `流程 ${selectedTask.taskId} / v${selectedTask.version}` : `批次 ${selectedBatch.businessBatchId}`}
+                        {selectedTask ? `流程 ${selectedTask.taskId}` : `批次 ${selectedBatch.businessBatchId}`}
                         {selectedBatch.oaRowId ? ` · OA ${selectedBatch.oaRowId}` : ""}
                       </p>
                     ) : (
@@ -2234,7 +2228,7 @@ export default function EtcTicketManagementPage() {
                         className="etc-primary-action"
                         isDisabled={!canSubmitCurrentBatch || draftCreating}
                         isPending={draftCreating}
-                        aria-label={canSubmitCurrentBatch ? "提交审批" : submitDisabledReason}
+                        aria-label="提交审批"
                         onPress={() => setCreateDialogOpen(true)}
                         size="sm"
                         variant="primary"
@@ -2244,9 +2238,6 @@ export default function EtcTicketManagementPage() {
                     </div>
                   ) : null}
                 </div>
-                {activeStatus === "unsubmitted" && currentBusinessBatch && !canSubmitCurrentBatch ? (
-                  <span className="etc-action-disabled-reason" role="status">{submitDisabledReason}</span>
-                ) : null}
               </header>
 
               <EtcBatchProgress
@@ -2300,7 +2291,7 @@ export default function EtcTicketManagementPage() {
                   <div className="etc-current-task-heading">
                     <div>
                       <h3>核对工作区</h3>
-                      <p>{selectedTask ? `${formatTaskTitle(selectedTask)} / v${selectedTask.version}` : "选择左侧批次，或新建批次。"}</p>
+                      <p>{selectedTask ? formatTaskTitle(selectedTask) : "选择左侧批次，或新建批次。"}</p>
                     </div>
                   </div>
 
@@ -2328,20 +2319,14 @@ export default function EtcTicketManagementPage() {
                           <div>
                             <span>OA 草稿金额</span>
                             <strong>{formatMoney(oaDraftAmount)} 元</strong>
-                            <small>来自已完成的对账任务</small>
                           </div>
                           <div>
                             <span>已导入 ETC 发票</span>
                             <strong>{importedInvoiceCount} 张 / {formatMoney(importedInvoiceAmount)} 元</strong>
-                            <small>来自当前业务批次的实际发票</small>
                           </div>
                           {hasOaInvoiceAmountDifference ? (
-                            <p role="status">
-                              两者相差 {oaInvoiceAmountDifference} 元；OA 草稿仍按对账任务金额创建。
-                            </p>
-                          ) : (
-                            <p>两项金额一致。</p>
-                          )}
+                            <p role="status">差额 {oaInvoiceAmountDifference} 元</p>
+                          ) : null}
                         </section>
 
                         <DisclosureGroup
@@ -2868,7 +2853,6 @@ export default function EtcTicketManagementPage() {
               <p>文件：{deleteTarget.item.originalName || deleteTarget.item.fileId}</p>
               <p>类型：{sourceKindLabel(deleteTarget.item.sourceKind)}</p>
               <p>批次：{formatTaskTitle(deleteTarget.task)}</p>
-              <p>版本：v{deleteTarget.task.version}</p>
             </div>
           ) : deleteTarget?.kind === "batch" ? (
             <div className="etc-dialog-detail-list">
@@ -2905,10 +2889,10 @@ export default function EtcTicketManagementPage() {
             </div>
           ) : (
             <div className="etc-dialog-detail-list etc-oa-create-summary">
-              <p>OA 草稿金额：<strong>{formatMoney(oaDraftAmount)} 元</strong>（来自已完成的对账任务）</p>
+              <p>OA 草稿金额：<strong>{formatMoney(oaDraftAmount)} 元</strong></p>
               <p>已导入 ETC 发票：{importedInvoiceCount} 张 / {formatMoney(importedInvoiceAmount)} 元</p>
               {hasOaInvoiceAmountDifference ? (
-                <p className="etc-dialog-warning">两者相差 {oaInvoiceAmountDifference} 元；OA 草稿仍按对账任务金额创建。</p>
+                <p className="etc-dialog-warning">差额 {oaInvoiceAmountDifference} 元</p>
               ) : null}
               <p>批次：{currentOaDraftBatchLabel || "-"}</p>
             </div>

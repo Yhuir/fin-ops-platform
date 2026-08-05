@@ -784,6 +784,10 @@ test.describe("ETC ticket management browser flow", () => {
     await expect(page.getByRole("radio", { name: "未提交 1" })).toHaveAttribute("aria-checked", "true");
     await expect(page.getByRole("radio", { name: "暂存 0" })).toBeVisible();
     await expect(page.getByRole("radio", { name: "已提交 0" })).toBeVisible();
+    const statusWidths = await page.getByRole("radio", { name: /未提交|暂存|已提交/ }).evaluateAll((buttons) =>
+      buttons.map((button) => Math.round(button.getBoundingClientRect().width)),
+    );
+    expect(Math.max(...statusWidths) - Math.min(...statusWidths)).toBeLessThanOrEqual(1);
 
     const row = page.getByTestId("etc-batch-row-etc-business-e2e-001");
     await expect(row).toBeVisible();
@@ -807,7 +811,7 @@ test.describe("ETC ticket management browser flow", () => {
     });
     await expect(createDialog.getByText(/OA 草稿金额：120\.00 元/)).toBeVisible();
     await expect(createDialog.getByText("已导入 ETC 发票：2 张 / 32.26 元")).toBeVisible();
-    await expect(createDialog.getByText("两者相差 87.74 元；OA 草稿仍按对账任务金额创建。")).toBeVisible();
+    await expect(createDialog.getByText("差额 87.74 元")).toBeVisible();
     await expect(createDialog.getByText("批次：3月批次")).toBeVisible();
 
     const draftResponse = page.waitForResponse((response) =>

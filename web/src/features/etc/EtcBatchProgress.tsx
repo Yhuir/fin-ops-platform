@@ -195,7 +195,7 @@ export default function EtcBatchProgress({ batch, task, taskLoading = false, tas
             </span>
             <span className="etc-batch-progress__copy">
               <strong>{step.label}</strong>
-              <span>{stateLabels[step.state]} · {step.description}</span>
+              {step.state !== "complete" ? <span>{stateLabels[step.state]} · {step.description}</span> : null}
             </span>
           </li>
         );

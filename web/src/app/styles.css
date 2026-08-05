@@ -24639,8 +24639,7 @@ body.column-layout-dragging {
   gap: 3px;
 }
 
-.etc-oa-amount-summary span,
-.etc-oa-amount-summary small {
+.etc-oa-amount-summary span {
   color: var(--fp-text-secondary);
 }
 
@@ -26006,12 +26005,6 @@ body.column-layout-dragging {
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
-}
-
-.etc-batch-rail .etc-status-segmented {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  width: 100%;
 }
 
 .etc-batch-rail .etc-status-segmented__button {
