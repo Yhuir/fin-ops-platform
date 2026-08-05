@@ -1082,6 +1082,18 @@ describe("Workbench candidate grouping layout", () => {
 
   test("aligns exact multi-item reimbursement invoices and keeps parent selection identity", () => {
     const selectRow = vi.fn();
+    const missingAnomaly = {
+      code: "oa_invoice_attachment_missing" as const,
+      label: "OA发票附件缺失",
+      displayLabel: "OA发票附件缺失",
+      fingerprint: "c".repeat(64),
+      comparisonUnitId: "oa-exp-413:item:0",
+      sourceOaId: "oa-exp-413",
+      sourceExpenseItemId: "oa-exp-413:item:0",
+      oaTotal: "33.00",
+      invoiceRowIds: [],
+      attachmentFileCount: 1,
+    };
     const parentOa: WorkbenchRecord = {
       ...createOaRecord("oa-exp-413", "吴云江", "413.00"),
       tableValues: {
@@ -1089,7 +1101,14 @@ describe("Workbench candidate grouping layout", () => {
         applicationType: "日常报销",
       },
       expenseItems: [
-        { id: "oa-exp-413:item:0", rowIndex: "0", projectName: "曲靖项目", amount: "33.00" },
+        {
+          id: "oa-exp-413:item:0",
+          rowIndex: "0",
+          projectName: "曲靖项目",
+          amount: "33.00",
+          attachmentFileCount: 1,
+          oaInvoiceAnomaly: missingAnomaly,
+        },
         { id: "oa-exp-413:item:1", rowIndex: "1", projectName: "曲靖项目", amount: "33.00" },
         {
           id: "oa-exp-413:item:2",
@@ -1110,7 +1129,7 @@ describe("Workbench candidate grouping layout", () => {
       reason: "canonical_unpaired",
       rows: {
         oa: [parentOa],
-        bank: [],
+        bank: [createSourceBankRecord("bank-oa-exp-413", "413.00", parentOa.id)],
         invoice: [
           createAttachmentInvoiceRecord(
             "iv-142",
@@ -1155,6 +1174,17 @@ describe("Workbench candidate grouping layout", () => {
     expect(within(summary).getByText("多个项目 · 2")).toBeInTheDocument();
     expect(within(summary).getByText("¥413.00")).toHaveClass("oa-expense-summary-total");
     expect(within(summary).getByText("日常报销")).toBeInTheDocument();
+    expect(within(summary).queryByText("云南辰飞机电工程有限公司")).not.toBeInTheDocument();
+
+    const bankPane = screen.getByTestId("candidate-scroll-unpaired-row:oa-exp-413-bank");
+    expect(bankPane.parentElement).toHaveStyle({ gridRow: "1 / span 6" });
+    expect(within(bankPane).getByText("云南辰飞机电工程有限公司")).toBeInTheDocument();
+
+    const missingInvoiceItem = screen.getByTestId(
+      "candidate-group-segment-unpaired-row:oa-exp-413-oa-exp-413:item:0",
+    );
+    expect(within(missingInvoiceItem).getByText("OA发票附件缺失")).toBeInTheDocument();
+    expect(within(missingInvoiceItem).queryByText("未识别附件")).not.toBeInTheDocument();
 
     const invoiceItem = screen.getByTestId(
       "candidate-group-segment-unpaired-row:oa-exp-413-oa-exp-413:item:2",

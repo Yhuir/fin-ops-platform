@@ -141,14 +141,15 @@ export function buildWorkbenchGroupDisplayLayout(
     bank: findAlignedRowIdsBySegment(sourceGroup, sourceSegments, "bank"),
     invoice: findAlignedRowIdsBySegment(sourceGroup, sourceSegments, "invoice"),
   };
-  const segmentedPaneIds = (["bank", "invoice"] as const).filter((paneId) => (
-    Array.from(alignedRowIdsByPane[paneId].values()).some((rowIds) => (
-      rowIds.length > 0 && rowIds.every((rowId) => displayRowsByPane[paneId].has(rowId))
-    ))
-  ));
   const hasExpenseClaimItems = segments.some(
     (segment) => segment.rows.oa[0]?.displayRole === "expense-claim-summary",
   );
+  const segmentedPaneIds = (["bank", "invoice"] as const).filter((paneId) => (
+    !(paneId === "bank" && hasExpenseClaimItems && sourceGroup.rows.oa.length === 1)
+    && Array.from(alignedRowIdsByPane[paneId].values()).some((rowIds) => (
+      rowIds.length > 0 && rowIds.every((rowId) => displayRowsByPane[paneId].has(rowId))
+    ))
+  ));
   if (segmentedPaneIds.length === 0 && !hasExpenseClaimItems) {
     return null;
   }
@@ -876,7 +877,7 @@ export function workbenchInvoiceSourceLabel(sourceKind: WorkbenchSourceKind | un
     return "付款凭证";
   }
   if (sourceKind === "oa_attachment_unknown") {
-    return "未识别附件";
+    return null;
   }
   return "人工导入";
 }

@@ -48,6 +48,7 @@
 
 - Backend/API：`tests/test_workbench_query_service.py` 保护父 OA 行只发布精简稳定付款明细字段，附件发票继续携带显式 `source_expense_item_id`；不新增 relation member 或独立配对对象。
 - Frontend：`web/src/test/WorkbenchApi.test.ts` 保护 item/source ID DTO；`WorkbenchColumns.test.tsx` 保护申请类型移入申请人栏并清理项目栏 process/evidence chip；`RelationGroupGrid.test.tsx` 保护“多个项目 · N + 父 OA 金额”、逐项项目/金额、单条精确金额才同行、部分精确覆盖与残余发票独立展示，以及点击子项仍只选择父 OA。
+- Frontend display：`groupDisplayModel.test.ts` 以 `174.94 = 78.34 + 12.00 + 28.80 + 55.80` 的生产形状保护显式发票逐付款项同行、父 OA 级银行流水不参与子项分段，以及缺失项只保留 `OA发票附件缺失`；`RelationGroupGrid.test.tsx` 保护该父级流水复用既有整栏 CSS grid 跨越全部展开行。
 - Read model：Workbench schema 升级为 v8，使旧 generation/page cache 失效并经现有 exact/all freshness gateway 重建；没有新增表、worker、cache 或第二 read model。
 
 ## 2026-07-26 relation preview 真实 DTO、并发反馈与安全错误回归

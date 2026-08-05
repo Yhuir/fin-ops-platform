@@ -4,6 +4,7 @@ import {
   buildWorkbenchDisplayGroups,
   createEmptyWorkbenchZoneDisplayState,
   mergeWorkbenchGroupsById,
+  workbenchInvoiceSourceLabel,
   workbenchRowMatchesUnifiedSearch,
 } from "../features/workbench/groupDisplayModel";
 import type { WorkbenchRelationGroup, WorkbenchRecord } from "../features/workbench/types";
@@ -366,6 +367,74 @@ describe("groupDisplayModel time filter", () => {
       displayOnly: true,
       label: "OA发票附件缺失",
       oaInvoiceAnomaly: missingAnomaly,
+    });
+    expect(workbenchInvoiceSourceLabel(invoiceRows?.[0].sourceKind)).toBeNull();
+  });
+
+  test("spans a parent bank row while keeping reimbursement invoices aligned to their owned items", () => {
+    const missingAnomaly = {
+      code: "oa_invoice_attachment_missing" as const,
+      label: "OA发票附件缺失",
+      displayLabel: "OA发票附件缺失",
+      fingerprint: "b".repeat(64),
+      comparisonUnitId: "item-28.80",
+      sourceOaId: "oa-exp-174.94",
+      sourceExpenseItemId: "item-28.80",
+      oaTotal: "28.80",
+      invoiceRowIds: [],
+      attachmentFileCount: 1,
+    };
+    const parent = {
+      ...buildOaRow("oa-exp-174.94", "174.94"),
+      expenseItems: [
+        { id: "item-78.34", rowIndex: "0", projectName: "项目甲", amount: "78.34" },
+        { id: "item-12.00", rowIndex: "1", projectName: "项目乙", amount: "12.00" },
+        {
+          id: "item-28.80",
+          rowIndex: "2",
+          projectName: "项目丙",
+          amount: "28.80",
+          attachmentFileCount: 1,
+          oaInvoiceAnomaly: missingAnomaly,
+        },
+        { id: "item-55.80", rowIndex: "3", projectName: "项目丁", amount: "55.80" },
+      ],
+    };
+    const bank = {
+      ...buildBankRow("bank-174.94", "2026-08-03 11:17:39"),
+      sourceOaId: parent.id,
+      amount: "174.94",
+      tableValues: { direction: "支出", amount: "174.94" },
+    };
+    const invoice = (id: string, itemId: string, amount: string) => ({
+      ...buildAttachmentInvoiceRow(id, parent.id, amount),
+      sourceExpenseItemId: itemId,
+      tableValues: { grossAmount: amount },
+    });
+    const invoices = [
+      invoice("invoice-78.34", "item-78.34", "78.34"),
+      invoice("invoice-12.39", "item-12.00", "12.39"),
+      invoice("invoice-55.80", "item-55.80", "55.80"),
+    ];
+    const group: WorkbenchRelationGroup = {
+      id: "case:oa-exp-174.94",
+      groupType: "paired",
+      rawGroupType: "relation",
+      matchConfidence: "high",
+      reason: "existing_case_group",
+      rows: { oa: [parent], bank: [bank], invoice: invoices },
+    };
+
+    const layout = buildWorkbenchGroupDisplayLayout(group);
+
+    expect(layout?.segmentedPaneIds).toEqual(["oa", "invoice"]);
+    expect(layout?.segments.every((segment) => segment.rows.bank.length === 0)).toBe(true);
+    expect(layout?.segments.find(({ id }) => id === "item-78.34")?.rows.invoice).toEqual([invoices[0]]);
+    expect(layout?.segments.find(({ id }) => id === "item-12.00")?.rows.invoice).toEqual([invoices[1]]);
+    expect(layout?.segments.find(({ id }) => id === "item-55.80")?.rows.invoice).toEqual([invoices[2]]);
+    expect(layout?.segments.find(({ id }) => id === "item-28.80")?.rows.invoice[0]).toMatchObject({
+      displayOnly: true,
+      label: "OA发票附件缺失",
     });
   });
 
