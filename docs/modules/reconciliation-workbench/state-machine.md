@@ -83,14 +83,16 @@ repository / migration / timeout 不可用         -> 503，显示详情暂不�
 
 row detail GET 是纯读操作：稳定 generation 即使处于 `refreshing/stale` 也可读取，不执行第二次 canonical freshness proof，不触发 dirty scope、outbox、refresh 或 generation 切换。ETC 与流水规则 summary 只负责展开完整成员，不进入 row detail 状态机。
 
-## OA/发票金额异常状态
+## OA/发票异常状态
 
 ```text
-金额字段不完整或 OA 合计 = 发票合计 -> absent
-OA/发票金额完整且按分合计不等       -> active（金额不一致）
-active --ignore--> ignored（已忽略：金额不一致）
+日常报销 item 金额 = 显式绑定发票合计          -> absent
+日常报销 item 金额完整且与绑定发票合计不等      -> active（金额不一致）
+日常报销 item 有附件且零已解析绑定发票           -> active（OA发票附件缺失）
+支付申请 OA/发票总额完整且不等                  -> active（金额不一致）
+active --ignore--> ignored（已忽略：对应异常）
 ignored --restore--> active
-成员/金额变化 -> fingerprint 变化 -> 旧 ignored 决定失效，按新事实重新计算
+比较单元/成员/金额/附件状态变化 -> fingerprint 变化 -> 旧 ignored 决定失效
 ```
 
 该状态机只描述异常处置，不是第三种关系状态；它与 `paired|unpaired` 正交。ignore/restore 不修改 relation、canonical facts 或金额，只持久化 fingerprint-bound 决定和 audit。“进行中的异常”与“已忽略的异常”由同一个右侧抽屉读取；后者可按关系组执行“撤回忽略”。

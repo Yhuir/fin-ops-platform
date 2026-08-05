@@ -576,7 +576,7 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
                 active_relations=[],
             )
 
-    def test_amount_mismatch_is_copied_to_invoice_rows_and_ignored_by_fingerprint(self) -> None:
+    def test_oa_invoice_anomaly_is_group_scoped_and_ignored_by_fingerprint(self) -> None:
         rows = {
             "oa-1": {
                 "id": "oa-1",
@@ -614,11 +614,12 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
             active_relations=[relation],
         )
         active_group = active_payload["paired"]["groups"][0]
-        fingerprint = active_group["amount_anomaly"]["fingerprint"]
+        fingerprint = active_group["oa_invoice_anomaly"]["fingerprint"]
         self.assertEqual(active_payload["summary"]["exception_count"], 1)
         self.assertEqual(active_payload["summary"]["ignored_exception_count"], 0)
-        self.assertEqual(active_group["amount_anomaly"]["state"], "active")
-        self.assertEqual(active_group["invoice_rows"][0]["amount_anomaly"]["display_label"], "金额不一致")
+        self.assertEqual(active_group["oa_invoice_anomaly"]["state"], "active")
+        self.assertEqual(active_group["oa_invoice_anomaly"]["items"][0]["display_label"], "金额不一致")
+        self.assertNotIn("amount_anomaly", active_group["invoice_rows"][0])
 
         ignored_payload = self.service.group_payload(
             "2026-05",
@@ -629,11 +630,55 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         ignored_group = ignored_payload["paired"]["groups"][0]
         self.assertEqual(ignored_payload["summary"]["exception_count"], 0)
         self.assertEqual(ignored_payload["summary"]["ignored_exception_count"], 1)
-        self.assertEqual(ignored_group["amount_anomaly"]["state"], "ignored")
+        self.assertEqual(ignored_group["oa_invoice_anomaly"]["state"], "ignored")
         self.assertEqual(
-            ignored_group["invoice_rows"][0]["amount_anomaly"]["display_label"],
+            ignored_group["oa_invoice_anomaly"]["items"][0]["display_label"],
             "已忽略：金额不一致",
         )
+
+    def test_uploaded_expense_item_without_parsed_invoice_is_an_active_group_exception(self) -> None:
+        rows = {
+                "oa-1": {
+                    "id": "oa-1",
+                    "type": "oa",
+                    "object_identity_key": "oa-1",
+                    "amount": "38.00",
+                    "apply_type": "日常报销",
+                    "expense_items": [{
+                        "id": "oa-1:item:0",
+                        "amount": "38.00",
+                        "attachment_file_count": "1",
+                    }],
+                },
+                "bank-1": {
+                    "id": "bank-1",
+                    "type": "bank",
+                    "object_identity_key": "bank-1",
+                    "amount": "38.00",
+                    "direction": "expense",
+                },
+            }
+        payload = self.service.group_payload(
+            "2026-05",
+            rows_by_id=rows,
+            active_relations=[{
+                "case_id": "CASE-MISSING-1",
+                "row_ids": list(rows),
+                "row_types": ["oa", "bank"],
+                "status": "active",
+                "relation_mode": "manual_confirmed",
+                "special_metadata": {"requires_oa": True, "requires_invoice": True},
+            }],
+        )
+
+        group = payload["unpaired"]["groups"][0]
+        item = group["oa_invoice_anomaly"]["items"][0]
+        self.assertEqual(payload["summary"]["exception_count"], 1)
+        self.assertEqual(group["oa_invoice_anomaly"]["state"], "active")
+        self.assertEqual(item["code"], "oa_invoice_attachment_missing")
+        self.assertEqual(item["display_label"], "OA发票附件缺失")
+        self.assertEqual(item["source_expense_item_id"], "oa-1:item:0")
+        self.assertEqual(item["invoice_row_ids"], [])
 class WorkbenchRelationPreviewGroupingServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.service = WorkbenchRelationPreviewGroupingService(

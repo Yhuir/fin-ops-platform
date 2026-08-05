@@ -44,7 +44,7 @@ canonical fact repositories
 - 前端：`web/src/pages/ReconciliationWorkbenchPage.tsx`、`web/src/components/workbench/RelationGroupGrid.tsx`、`RelationGroupCell.tsx`、`WorkbenchExceptionDrawer.tsx`
 - API：`web/src/features/workbench/api.ts`、`backend/src/fin_ops_platform/app/routes_workbench.py`
 - 分组：`backend/src/fin_ops_platform/services/workbench_relation_grouping.py`
-- 金额异常：`backend/src/fin_ops_platform/services/workbench_amount_check_service.py`、`workbench_amount_mismatch_exception_service.py`
+- OA/发票异常：`backend/src/fin_ops_platform/services/workbench_amount_check_service.py`、`workbench_amount_mismatch_exception_service.py`
 - 匹配：`backend/src/fin_ops_platform/services/workbench_free_matching_engine.py`、`workbench_matching_orchestrator.py`
 - Matching I/O：`backend/src/fin_ops_platform/services/postgres_repositories/workbench_formal_relation.py`
 - 正式关系写入：`backend/src/fin_ops_platform/services/workbench_relation_command_service.py`、`workbench_uow.py`
@@ -52,18 +52,18 @@ canonical fact repositories
 - Worker：`backend/src/fin_ops_platform/services/workbench_matching_dirty_scope_worker.py`、`workbench_read_model_refresh.py`
 - 固定契约版本：`backend/src/fin_ops_platform/services/workbench_read_model_version.py`
 
-## 金额异常合同
+## OA/发票异常合同
 
-- OA 与发票金额只在现有关系组内按分精确合计；完整金额不相等时由分组 service 产生一个稳定 fingerprint，不创建第三种关系状态。
+- 日常报销按 OA 子付款项与全部显式绑定发票比较；支付申请按关系组 OA/发票总额比较。金额完整且不相等时生成 `金额不一致`；子付款项有上传附件但零已解析绑定发票时生成 `OA发票附件缺失`。每个比较单元只投影一个 chip，不创建第三种关系状态或展示级发票事实。
 - active/ignored 决定复用既有 exception case repository，但使用独立 `oa_invoice_amount_mismatch` scenario；通用旧异常 loader 必须排除该 scenario，避免两种 schema 互相污染。
-- 页面只保留统一 `WorkbenchExceptionDrawer`：进行中展示 active 金额异常和 legacy active 异常，已忽略展示 ignored 金额异常和 legacy processed/ignored。每个关系组默认只显示三栏成员数与总金额，按需展开完整三栏，忽略/撤回忽略直接作用于该关系组；旧确认 modal、`IgnoredItemsModal` 和 `ProcessedExceptionsModal` 均不得恢复。
+- 页面只保留统一 `WorkbenchExceptionDrawer`：进行中展示 active OA/发票异常和 legacy active 异常，已忽略展示 ignored OA/发票异常和 legacy processed/ignored。每个关系组默认只显示三栏成员数与总金额，按需展开完整三栏，忽略/撤回忽略直接作用于该关系组；入口文案固定为 `异常 n | 已忽略 m`，旧确认 modal、`IgnoredItemsModal` 和 `ProcessedExceptionsModal` 均不得恢复。
 
 ## 三栏纵向展示合同
 
 - OA、银行流水、发票栏默认各自跨越完整关联组高度；同栏有 `N` 条可见记录时由 CSS Flex 等分可用高度，单条记录占满整栏。
-- 单条银行流水/发票与 OA 或费用子项金额按分精确相等且双方唯一时共享行轨，不再要求整栏完整覆盖。显式 `sourceOaId` / `sourceExpenseItemId` 优先；缺少显式来源时，只允许在同一完整 source group、方向已知且金额双方都唯一时做展示级精确金额兜底。
-- 同一费用子项下的多张附件发票仅在每张发票都显式绑定该 `sourceExpenseItemId`、金额均合法且价税合计按分精确等于费用子项金额时，共享一个复合行轨；费用子项占满该轨高度，发票在轨内等分。筛选后缺少任一组成发票时不建立部分复合同行。
-- 其他一对多、多对一、父 OA 级重复来源、重复金额、金额不一致、零/非法金额、方向未知或冲突，以及无显式费用子项归属的 2～6 条金额合计都不建立同行；已分段栏中的这些记录进入独立残余展示带，完全没有精确配对的栏继续按 group-level 占满整组高度。金额兜底不写 relation、不改变 membership、selection 或 action identity。
+- 单条银行流水/发票与 OA 或费用子项金额按分精确相等且双方唯一时共享行轨，不再要求整栏完整覆盖。显式 `sourceOaId` / `sourceExpenseItemId` 优先；显式费用子项 ownership 不以金额相等为前提。缺少显式来源时，只允许在同一完整 source group、方向已知且金额双方都唯一时做展示级精确金额兜底。
+- 同一费用子项下的所有显式绑定附件发票共享一个复合行轨；费用子项占满该轨高度，发票在轨内等分。即使合计金额不等，也保持同行并由异常 chip 表达差异。筛选后缺少任一组成发票时不建立部分复合同行。
+- 其他父 OA 级一对多/多对一、重复来源、重复金额、零/非法金额、方向未知或冲突，以及无显式费用子项归属的 2～6 条金额合计都不建立同行；已分段栏中的这些记录进入独立残余展示带，完全没有精确配对的栏继续按 group-level 占满整组高度。金额兜底不写 relation、不改变 membership、selection 或 action identity。
 - 多项目报销继续显示父 OA 摘要和费用子项；满足单条精确条件或上述显式费用子项复合条件的附件发票逐项同行，其余附件留在残余展示带。发票比较金额统一使用价税合计，银行流水使用当前方向金额。
 - 布局判断只消费已加载 DTO，是 `O(OA + bank + invoice)` 的 Map/Set 纯计算，不增加 HTTP、数据库、cache、worker、React state/effect、DOM 测量或依赖。
 

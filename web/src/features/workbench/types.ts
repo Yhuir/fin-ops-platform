@@ -46,6 +46,8 @@ export type WorkbenchExpenseItem = {
   amount: string;
   feeContent?: string;
   feeDescription?: string;
+  attachmentFileCount?: number;
+  oaInvoiceAnomaly?: WorkbenchOaInvoiceAnomalyItem;
 };
 
 export type WorkbenchAmountCheck = {
@@ -60,15 +62,26 @@ export type WorkbenchAmountCheck = {
   requiresNote: boolean;
 };
 
-export type WorkbenchAmountAnomaly = {
-  code: "oa_invoice_amount_mismatch" | (string & {});
+export type WorkbenchOaInvoiceAnomalyItem = {
+  code: "oa_invoice_amount_mismatch" | "oa_invoice_attachment_missing" | (string & {});
   label: string;
   displayLabel: string;
   fingerprint: string;
+  comparisonUnitId: string;
+  sourceOaId?: string;
+  sourceExpenseItemId?: string;
+  oaTotal?: string;
+  invoiceTotal?: string;
+  amountDelta?: string;
+  invoiceRowIds: string[];
+  attachmentFileCount: number;
+};
+
+export type WorkbenchOaInvoiceAnomaly = {
+  code: "oa_invoice_anomaly" | (string & {});
+  fingerprint: string;
   state: "active" | "ignored";
-  oaTotal: string;
-  invoiceTotal: string;
-  amountDelta: string;
+  items: WorkbenchOaInvoiceAnomalyItem[];
 };
 
 export type WorkbenchZoneId = "paired" | "unpaired";
@@ -115,7 +128,8 @@ export type WorkbenchRecord = {
   relationNote?: string;
   relationAmountCheck?: WorkbenchAmountCheck;
   specialMetadata?: Record<string, unknown>;
-  amountAnomaly?: WorkbenchAmountAnomaly;
+  oaInvoiceAnomaly?: WorkbenchOaInvoiceAnomalyItem;
+  displayOnly?: boolean;
 };
 
 export type WorkbenchProjectSetting = {
@@ -232,7 +246,7 @@ export type WorkbenchRelationGroup = {
   canWithdraw?: boolean;
   relationNote?: string;
   amountCheck?: WorkbenchAmountCheck;
-  amountAnomaly?: WorkbenchAmountAnomaly;
+  oaInvoiceAnomaly?: WorkbenchOaInvoiceAnomaly;
   exceptionState?: "active" | "processed";
   specialMetadata?: Record<string, unknown>;
   processedExceptionSummary?: WorkbenchProcessedExceptionSummary;

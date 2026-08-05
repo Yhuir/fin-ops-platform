@@ -663,6 +663,7 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
                     "amount": "1000.00",
                     "fee_content": "设备材料",
                     "fee_description": "设备采购说明",
+                    "attachment_file_count": "0",
                 },
                 {
                     "id": "oa-exp-exp-agg-001:item:1:postage",
@@ -671,6 +672,7 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
                     "amount": "500.00",
                     "fee_content": "邮寄费用",
                     "fee_description": "",
+                    "attachment_file_count": "0",
                 },
             ],
         )

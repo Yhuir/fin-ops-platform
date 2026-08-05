@@ -284,14 +284,89 @@ describe("groupDisplayModel time filter", () => {
       .map((segment) => segment.id);
     const renderedInvoiceIds = layout?.segments.flatMap((segment) => segment.rows.invoice.map((row) => row.id));
 
-    expect(alignedItemIds).toEqual([0, 1, 2, 5, 6, 7, 8, 9, 10, 11].map((index) => `oa-exp-3061:item:${index}`));
+    expect(alignedItemIds).toEqual([0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11].map((index) => `oa-exp-3061:item:${index}`));
     expect(renderedInvoiceIds).toHaveLength(12);
     expect(new Set(renderedInvoiceIds).size).toBe(12);
-    expect(layout?.segments.find((segment) => segment.id === "oa-exp-3061:item:3")?.rows.invoice).toEqual([]);
+    expect(layout?.segments.find((segment) => segment.id === "oa-exp-3061:item:3")?.rows.invoice)
+      .toEqual([invoices[3]]);
     expect(layout?.segments.find((segment) => segment.id === "oa-exp-3061:item:10")?.rows.invoice)
       .toEqual([invoices[9], invoices[10]]);
     expect(layout?.segments.find((segment) => segment.id === "oa-exp-3061:item:10:invoice:residual"))
       .toBeUndefined();
+  });
+
+  test("keeps explicitly bound composite invoices on the expense-item row when totals differ", () => {
+    const parent = {
+      ...buildOaRow("oa-exp-405", "405.00"),
+      expenseItems: [
+        { id: "item-405", rowIndex: "0", projectName: "项目甲", amount: "405.00" },
+        { id: "item-other", rowIndex: "1", projectName: "项目乙", amount: "10.00" },
+      ],
+    };
+    const invoice350 = {
+      ...buildAttachmentInvoiceRow("invoice-350", parent.id, "350.00"),
+      sourceExpenseItemId: "item-405",
+    };
+    const invoice5499 = {
+      ...buildAttachmentInvoiceRow("invoice-54.99", parent.id, "54.99"),
+      sourceExpenseItemId: "item-405",
+    };
+    const group: WorkbenchRelationGroup = {
+      id: "case:explicit-mismatch",
+      groupType: "unpaired",
+      matchConfidence: "high",
+      reason: "explicit attachment ownership",
+      rows: { oa: [parent], bank: [], invoice: [invoice350, invoice5499] },
+    };
+
+    const segment = buildWorkbenchGroupDisplayLayout(group)?.segments.find(({ id }) => id === "item-405");
+
+    expect(segment?.rows.invoice).toEqual([invoice350, invoice5499]);
+    expect(segment?.rows.oa[0].tableValues.amount).toBe("405.00");
+  });
+
+  test("renders one display-only invoice placeholder for an uploaded item with no parsed invoice", () => {
+    const missingAnomaly = {
+      code: "oa_invoice_attachment_missing" as const,
+      label: "OA发票附件缺失",
+      displayLabel: "OA发票附件缺失",
+      fingerprint: "a".repeat(64),
+      comparisonUnitId: "item-missing",
+      sourceOaId: "oa-exp-missing",
+      sourceExpenseItemId: "item-missing",
+      oaTotal: "38.00",
+      invoiceRowIds: [],
+      attachmentFileCount: 1,
+    };
+    const parent = {
+      ...buildOaRow("oa-exp-missing", "38.00"),
+      expenseItems: [{
+        id: "item-missing",
+        rowIndex: "0",
+        projectName: "项目甲",
+        amount: "38.00",
+        attachmentFileCount: 1,
+        oaInvoiceAnomaly: missingAnomaly,
+      }],
+    };
+    const group: WorkbenchRelationGroup = {
+      id: "case:missing-attachment",
+      groupType: "unpaired",
+      matchConfidence: "high",
+      reason: "explicit attachment missing",
+      rows: { oa: [parent], bank: [], invoice: [] },
+    };
+
+    const layout = buildWorkbenchGroupDisplayLayout(group);
+    const invoiceRows = layout?.segments.find(({ id }) => id === "item-missing")?.rows.invoice;
+
+    expect(layout?.segmentedPaneIds).toContain("invoice");
+    expect(invoiceRows).toHaveLength(1);
+    expect(invoiceRows?.[0]).toMatchObject({
+      displayOnly: true,
+      label: "OA发票附件缺失",
+      oaInvoiceAnomaly: missingAnomaly,
+    });
   });
 
   test("does not align a partial display of an explicitly owned composite", () => {

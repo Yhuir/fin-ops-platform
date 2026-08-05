@@ -3686,7 +3686,7 @@ class PostgresReadModelRepository:
                     where canonical_members.pane = 'invoice'
                 )::bigint as invoice_count,
                 count(distinct canonical_groups.group_id) filter (
-                    where canonical_groups.payload #>> '{{amount_anomaly,state}}' = 'active'
+                    where canonical_groups.payload #>> '{{oa_invoice_anomaly,state}}' = 'active'
                        or canonical_groups.payload->>'exception_state' = 'active'
                        or (
                         canonical_groups.zone = 'unpaired' and (
@@ -3700,7 +3700,7 @@ class PostgresReadModelRepository:
                 )::bigint as exception_count,
                 (
                     count(distinct canonical_groups.group_id) filter (
-                        where canonical_groups.payload #>> '{{amount_anomaly,state}}' = 'ignored'
+                        where canonical_groups.payload #>> '{{oa_invoice_anomaly,state}}' = 'ignored'
                            or canonical_groups.payload->>'exception_state' = 'processed'
                     )
                     + (
@@ -4525,12 +4525,12 @@ class PostgresReadModelRepository:
                 params.append(pattern)
         if normalized_exception_bucket == "active":
             clauses.append(
-                "(g.payload#>>'{amount_anomaly,state}' = 'active' "
+                "(g.payload#>>'{oa_invoice_anomaly,state}' = 'active' "
                 "or g.payload->>'exception_state' = 'active')"
             )
         elif normalized_exception_bucket == "processed":
             clauses.append(
-                "(g.payload#>>'{amount_anomaly,state}' = 'ignored' "
+                "(g.payload#>>'{oa_invoice_anomaly,state}' = 'ignored' "
                 "or g.payload->>'exception_state' = 'processed')"
             )
         if composed_all_scope:
@@ -7543,18 +7543,18 @@ def _workbench_group_has_danger(group: dict[str, Any]) -> bool:
 
 
 def _workbench_group_is_active_exception(group: dict[str, Any], *, zone: str) -> bool:
-    amount_anomaly = group.get("amount_anomaly")
+    oa_invoice_anomaly = group.get("oa_invoice_anomaly")
     return (
-        (isinstance(amount_anomaly, dict) and text(amount_anomaly.get("state")) == "active")
+        (isinstance(oa_invoice_anomaly, dict) and text(oa_invoice_anomaly.get("state")) == "active")
         or text(group.get("exception_state")) == "active"
         or (zone == "unpaired" and _workbench_group_has_danger(group))
     )
 
 
 def _workbench_group_is_ignored_exception(group: dict[str, Any]) -> bool:
-    amount_anomaly = group.get("amount_anomaly")
+    oa_invoice_anomaly = group.get("oa_invoice_anomaly")
     return (
-        (isinstance(amount_anomaly, dict) and text(amount_anomaly.get("state")) == "ignored")
+        (isinstance(oa_invoice_anomaly, dict) and text(oa_invoice_anomaly.get("state")) == "ignored")
         or text(group.get("exception_state")) == "processed"
         or any(bool(row.get("ignored")) for row in _iter_group_rows(group))
     )

@@ -766,24 +766,31 @@ function buildPairedWorkbenchGroup(includeCashSpecialActions = false) {
 
 function buildAmountMismatchWorkbenchGroup(ignored: boolean) {
   const group = buildPairedWorkbenchGroup();
-  const anomaly = {
+  const anomalyItem = {
     code: "oa_invoice_amount_mismatch",
     label: "金额不一致",
     display_label: ignored ? "已忽略：金额不一致" : "金额不一致",
-    fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    state: ignored ? "ignored" : "active",
+    fingerprint: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    comparison_unit_id: "case:CASE-202603-101",
     oa_total: "58000.00",
     invoice_total: "57999.99",
     amount_delta: "0.01",
+    invoice_row_ids: [group.invoice_rows[0].id],
+    attachment_file_count: 0,
+  };
+  const anomaly = {
+    code: "oa_invoice_anomaly",
+    fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    state: ignored ? "ignored" : "active",
+    items: [anomalyItem],
   };
   return {
     ...group,
-    amount_anomaly: anomaly,
+    oa_invoice_anomaly: anomaly,
     invoice_rows: group.invoice_rows.map((row) => ({
       ...row,
       amount: "57999.99",
       total_with_tax: "57999.99",
-      amount_anomaly: anomaly,
     })),
   };
 }
@@ -1525,11 +1532,11 @@ function workbenchGroupsPayload(
   const groups = searchedGroups.filter((group) => {
     if (exceptionBucket === "active") {
       return ("exception_state" in group && group.exception_state === "active")
-        || ("amount_anomaly" in group && group.amount_anomaly?.state === "active");
+        || ("oa_invoice_anomaly" in group && group.oa_invoice_anomaly?.state === "active");
     }
     if (exceptionBucket === "processed") {
       return ("exception_state" in group && group.exception_state === "processed")
-        || ("amount_anomaly" in group && group.amount_anomaly?.state === "ignored");
+        || ("oa_invoice_anomaly" in group && group.oa_invoice_anomaly?.state === "ignored");
     }
     return true;
   });

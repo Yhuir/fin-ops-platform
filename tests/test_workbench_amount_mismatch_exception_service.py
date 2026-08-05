@@ -43,7 +43,7 @@ def test_service_uses_actual_month_from_all_scope_group_and_server_actor() -> No
             "group_id": "case:CASE-1",
             "scope_key": "all",
             "source_scope_key": "2026-05",
-            "amount_anomaly": {"fingerprint": FINGERPRINT, "state": "active"},
+            "oa_invoice_anomaly": {"fingerprint": FINGERPRINT, "state": "active"},
         }
     )
     decision_repository = DecisionRepository()
@@ -80,7 +80,7 @@ def test_service_uses_actual_month_from_all_scope_group_and_server_actor() -> No
 def test_service_rejects_stale_or_changed_anomaly() -> None:
     service = WorkbenchAmountMismatchExceptionService(
         group_repository=GroupRepository(
-            {"amount_anomaly": {"fingerprint": "b" * 64}, "source_scope_key": "2026-05"}
+            {"oa_invoice_anomaly": {"fingerprint": "b" * 64}, "source_scope_key": "2026-05"}
         ),
         decision_repository=DecisionRepository(),
     )

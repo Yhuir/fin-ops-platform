@@ -14429,26 +14429,10 @@ body.column-layout-dragging {
   white-space: nowrap;
 }
 
-.invoice-amount-anomaly-chip {
-  display: inline-flex;
+.invoice-oa-anomaly-chip {
   max-width: 100%;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid #efb8aa;
-  border-radius: 999px;
-  padding: 2px 7px;
-  background: #fff1ed;
-  color: #b33f2e;
   font-size: 10px;
-  font-weight: 750;
-  line-height: 1.25;
   white-space: normal;
-}
-
-.invoice-amount-anomaly-chip-ignored {
-  border-color: #cbd3dc;
-  background: #f1f4f7;
-  color: #647181;
 }
 
 .workbench-anomaly-drawer .finance-drawer__body {
@@ -14496,7 +14480,7 @@ body.column-layout-dragging {
 
 .workbench-anomaly-drawer__group-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 132px;
+  grid-template-columns: minmax(0, 1fr) 220px;
   min-height: 62px;
   align-items: center;
 }
@@ -14550,14 +14534,22 @@ body.column-layout-dragging {
 
 .workbench-anomaly-drawer__action {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
   align-self: stretch;
   gap: 5px;
   border-left: 1px solid #d9e2eb;
   padding: 6px 8px;
   text-align: center;
+}
+
+.workbench-anomaly-drawer__chips {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
 }
 
 .workbench-anomaly-drawer__details {

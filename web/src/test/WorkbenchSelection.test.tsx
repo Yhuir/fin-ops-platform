@@ -2755,7 +2755,7 @@ describe("Workbench row selection and detail drawer", () => {
     renderWorkbenchPage();
 
     const unpairedZone = await screen.findByTestId("zone-unpaired");
-    expect(within(unpairedZone).getByRole("button", { name: /已忽略的异常\d+项/ })).toBeInTheDocument();
+    expect(within(unpairedZone).getByRole("button", { name: /异常 \d+ \| 已忽略 \d+/ })).toBeInTheDocument();
     const openOaRow = await within(unpairedZone).findByRole("row", {
       name: /陈涛.*智能工厂设备商/,
     });
@@ -2785,7 +2785,7 @@ describe("Workbench row selection and detail drawer", () => {
       ).not.toBeInTheDocument();
     });
 
-    await user.click(await screen.findByRole("button", { name: /已忽略的异常\d+项/ }));
+    await user.click(await screen.findByRole("button", { name: /异常 \d+ \| 已忽略 \d+/ }));
 
     const exceptionDrawer = await screen.findByRole("dialog", { name: "异常处理" });
     await user.click(within(exceptionDrawer).getByRole("radio", { name: "已忽略的异常" }));
@@ -2797,7 +2797,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(within(exceptionDrawer).getAllByRole("button", { name: "撤回忽略" }).length).toBeGreaterThan(0);
   });
 
-  test("amount mismatch ignore waits for a new generation before loading ignored exceptions", async () => {
+  test("OA invoice anomaly ignore waits for a new generation before loading ignored exceptions", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({
       workbenchReadModelVersions: ["generation-v1", "generation-v1", "generation-v1", "generation-v2"],
@@ -2838,15 +2838,22 @@ describe("Workbench row selection and detail drawer", () => {
         const groups = shouldInclude && sourceGroups[0]
           ? [{
               ...(sourceGroups[0] as Record<string, unknown>),
-              amount_anomaly: {
-                code: "oa_invoice_amount_mismatch",
-                label: "金额不一致",
-                display_label: amountMismatchState === "ignored" ? "已忽略：金额不一致" : "金额不一致",
+              oa_invoice_anomaly: {
+                code: "oa_invoice_anomaly",
                 fingerprint: "a".repeat(64),
                 state: amountMismatchState,
-                oa_total: "100.00",
-                invoice_total: "99.90",
-                amount_delta: "0.10",
+                items: [{
+                  code: "oa_invoice_amount_mismatch",
+                  label: "金额不一致",
+                  display_label: amountMismatchState === "ignored" ? "已忽略：金额不一致" : "金额不一致",
+                  fingerprint: "b".repeat(64),
+                  comparison_unit_id: "case:CASE-1",
+                  oa_total: "100.00",
+                  invoice_total: "99.90",
+                  amount_delta: "0.10",
+                  invoice_row_ids: [],
+                  attachment_file_count: 0,
+                }],
               },
             }]
           : [];
@@ -2867,7 +2874,7 @@ describe("Workbench row selection and detail drawer", () => {
 
     const unpairedZone = await screen.findByTestId("zone-unpaired");
     await within(unpairedZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ });
-    await user.click(within(unpairedZone).getByRole("button", { name: /已忽略的异常\d+项/ }));
+    await user.click(within(unpairedZone).getByRole("button", { name: /异常 \d+ \| 已忽略 \d+/ }));
     const exceptionDrawer = await screen.findByRole("dialog", { name: "异常处理" });
     await user.click((await within(exceptionDrawer).findAllByRole("button", { name: "忽略" }))[0]);
 
@@ -2917,7 +2924,7 @@ describe("Workbench row selection and detail drawer", () => {
       expect(screen.queryByRole("dialog", { name: "统一异常处理" })).not.toBeInTheDocument();
     });
 
-    await user.click(await screen.findByRole("button", { name: /已忽略的异常\d+项/ }));
+    await user.click(await screen.findByRole("button", { name: /异常 \d+ \| 已忽略 \d+/ }));
 
     const exceptionDrawer = await screen.findByRole("dialog", { name: "异常处理" });
     await user.click(within(exceptionDrawer).getByRole("radio", { name: "已忽略的异常" }));
@@ -2975,7 +2982,7 @@ describe("Workbench row selection and detail drawer", () => {
     });
     fetchMock.mockClear();
 
-    await user.click(within(unpairedZone).getByRole("button", { name: /已忽略的异常\d+项/ }));
+    await user.click(within(unpairedZone).getByRole("button", { name: /异常 \d+ \| 已忽略 \d+/ }));
     const exceptionDrawer = await screen.findByRole("dialog", { name: "异常处理" });
     await user.click(within(exceptionDrawer).getByRole("radio", { name: "已忽略的异常" }));
     await user.click((await within(exceptionDrawer).findAllByRole("button", { name: "撤回忽略" }))[0]);

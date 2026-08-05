@@ -40,7 +40,7 @@ class WorkbenchAmountMismatchExceptionService:
         )
         if not isinstance(group, dict):
             raise WorkbenchAmountMismatchConflict("金额异常关系组已变化，请刷新后重试。")
-        anomaly = group.get("amount_anomaly")
+        anomaly = group.get("oa_invoice_anomaly")
         if not isinstance(anomaly, dict) or str(anomaly.get("fingerprint") or "") != fingerprint:
             raise WorkbenchAmountMismatchConflict("金额异常已变化或已消失，请刷新后重试。")
         group_scope = str(

@@ -29,8 +29,8 @@ type WorkbenchExceptionDrawerProps = {
   canMutateData: boolean;
   onBucketChange: (bucket: "active" | "processed") => void;
   onClose: () => void;
-  onIgnoreAmountMismatch: (group: WorkbenchRelationGroup) => Promise<void> | void;
-  onRestoreAmountMismatch: (group: WorkbenchRelationGroup) => Promise<void> | void;
+  onIgnoreOaInvoiceAnomaly: (group: WorkbenchRelationGroup) => Promise<void> | void;
+  onRestoreOaInvoiceAnomaly: (group: WorkbenchRelationGroup) => Promise<void> | void;
   onCancelProcessedException: (group: WorkbenchRelationGroup) => Promise<void> | void;
   onUnignoreRow: (row: WorkbenchRecord) => Promise<void> | void;
 };
@@ -53,8 +53,8 @@ export default function WorkbenchExceptionDrawer({
   canMutateData,
   onBucketChange,
   onClose,
-  onIgnoreAmountMismatch,
-  onRestoreAmountMismatch,
+  onIgnoreOaInvoiceAnomaly,
+  onRestoreOaInvoiceAnomaly,
   onCancelProcessedException,
   onUnignoreRow,
 }: WorkbenchExceptionDrawerProps) {
@@ -84,7 +84,7 @@ export default function WorkbenchExceptionDrawer({
       className="workbench-anomaly-drawer"
       open={open}
       title="异常处理"
-      width="min(1220px, 96vw)"
+      width="min(1160px, 96vw)"
       onClose={onClose}
     >
       <div className="workbench-anomaly-drawer__toolbar">
@@ -159,8 +159,8 @@ export default function WorkbenchExceptionDrawer({
                       pending={pendingGroupId === group.id}
                       onAction={(action) => runGroupAction(group.id, action)}
                       onCancelProcessedException={onCancelProcessedException}
-                      onIgnoreAmountMismatch={onIgnoreAmountMismatch}
-                      onRestoreAmountMismatch={onRestoreAmountMismatch}
+                      onIgnoreOaInvoiceAnomaly={onIgnoreOaInvoiceAnomaly}
+                      onRestoreOaInvoiceAnomaly={onRestoreOaInvoiceAnomaly}
                       onUnignoreRow={onUnignoreRow}
                     />
                   </div>
@@ -202,15 +202,15 @@ function ExceptionAction({
   group,
   pending,
   onAction,
-  onIgnoreAmountMismatch,
-  onRestoreAmountMismatch,
+  onIgnoreOaInvoiceAnomaly,
+  onRestoreOaInvoiceAnomaly,
   onCancelProcessedException,
   onUnignoreRow,
 }: Pick<
   WorkbenchExceptionDrawerProps,
   | "canMutateData"
-  | "onIgnoreAmountMismatch"
-  | "onRestoreAmountMismatch"
+  | "onIgnoreOaInvoiceAnomaly"
+  | "onRestoreOaInvoiceAnomaly"
   | "onCancelProcessedException"
   | "onUnignoreRow"
 > & {
@@ -218,16 +218,16 @@ function ExceptionAction({
   pending: boolean;
   onAction: (action: () => Promise<void> | void) => void;
 }) {
-  const label = exceptionLabel(group);
+  const labels = exceptionLabels(group);
   const firstRow = allGroupRows(group)[0];
   let action: (() => Promise<void> | void) | null = null;
   let actionLabel = "";
 
-  if (group.amountAnomaly?.state === "active") {
-    action = () => onIgnoreAmountMismatch(group);
+  if (group.oaInvoiceAnomaly?.state === "active") {
+    action = () => onIgnoreOaInvoiceAnomaly(group);
     actionLabel = "忽略";
-  } else if (group.amountAnomaly?.state === "ignored") {
-    action = () => onRestoreAmountMismatch(group);
+  } else if (group.oaInvoiceAnomaly?.state === "ignored") {
+    action = () => onRestoreOaInvoiceAnomaly(group);
     actionLabel = "撤回忽略";
   } else if (firstRow && group.rawGroupType === "ignored_row") {
     action = () => onUnignoreRow(firstRow);
@@ -239,9 +239,13 @@ function ExceptionAction({
 
   return (
     <div className="workbench-anomaly-drawer__action">
-      <Chip color={group.amountAnomaly?.state === "active" ? "danger" : "default"} size="sm" variant="soft">
-        <Chip.Label>{label}</Chip.Label>
-      </Chip>
+      <div className="workbench-anomaly-drawer__chips">
+        {labels.map((label) => (
+          <Chip color={label.color} key={label.text} size="sm" variant="soft">
+            <Chip.Label>{label.text}</Chip.Label>
+          </Chip>
+        ))}
+      </div>
       {canMutateData && action ? (
         <Button
           isDisabled={pending}
@@ -257,16 +261,26 @@ function ExceptionAction({
   );
 }
 
-function exceptionLabel(group: WorkbenchRelationGroup) {
-  if (group.amountAnomaly) {
-    return group.amountAnomaly.displayLabel;
+function exceptionLabels(group: WorkbenchRelationGroup) {
+  if (group.oaInvoiceAnomaly) {
+    return Array.from(new Map(group.oaInvoiceAnomaly.items.map((item) => [item.displayLabel, {
+      text: item.displayLabel,
+      color: group.oaInvoiceAnomaly?.state === "ignored"
+        ? "default" as const
+        : item.code === "oa_invoice_attachment_missing"
+          ? "warning" as const
+          : "danger" as const,
+    }])).values());
   }
   if (group.rawGroupType === "ignored_row") {
-    return "已忽略";
+    return [{ text: "已忽略", color: "default" as const }];
   }
   const detail = group.processedExceptionSummary?.displayTags?.[0]
     ?? group.processedExceptionSummary?.resolution?.action_label;
-  return typeof detail === "string" && detail.trim() ? `已忽略：${detail.trim()}` : "已忽略";
+  return [{
+    text: typeof detail === "string" && detail.trim() ? `已忽略：${detail.trim()}` : "已忽略",
+    color: "default" as const,
+  }];
 }
 
 function groupPaneRows(group: WorkbenchRelationGroup, paneId: WorkbenchRecordType) {
@@ -288,13 +302,8 @@ function paneSummary(group: WorkbenchRelationGroup, paneId: WorkbenchRecordType)
     : paneId === "bank"
       ? group.amountCheck?.bankTotal
       : group.amountCheck?.invoiceTotal;
-  const anomalyTotal = paneId === "oa"
-    ? group.amountAnomaly?.oaTotal
-    : paneId === "invoice"
-      ? group.amountAnomaly?.invoiceTotal
-      : undefined;
   const fallbackTotal = summarizeWorkbenchRows(rows).amounts[paneId];
-  return { count, total: formatMoney(amountCheckTotal || anomalyTotal || fallbackTotal) };
+  return { count, total: formatMoney(amountCheckTotal || fallbackTotal) };
 }
 
 function materializeDetailGroup(group: WorkbenchRelationGroup): WorkbenchRelationGroup {

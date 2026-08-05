@@ -55,7 +55,7 @@ test.describe("workbench exception browser flow", () => {
     await expect(page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001")).toHaveCount(0);
     await expect(page.getByTestId("candidate-group-unpaired-row:bk-o-202603-001")).toHaveCount(0);
     await expect(page.getByTestId("candidate-group-unpaired-row:iv-o-202603-001")).toHaveCount(0);
-    await expect(openZone.getByRole("button", { name: /已忽略的异常\d+项/ })).toBeVisible();
+    await expect(openZone.getByRole("button", { name: /异常 \d+ \| 已忽略 \d+/ })).toBeVisible();
 
     const previewBody = api.lastBody("POST /api/workbench/exception/preview");
     expect(previewBody).toMatchObject({ month: "all" });
@@ -77,7 +77,7 @@ test.describe("workbench exception browser flow", () => {
     expect(api.count("GET /api/workbench")).toBeGreaterThan(workbenchLoadsBeforeApply);
     await expectNoUnexpectedSuccessUiErrors(page);
 
-    await openZone.getByRole("button", { name: /已忽略的异常\d+项/ }).click();
+    await openZone.getByRole("button", { name: /异常 \d+ \| 已忽略 \d+/ }).click();
     const exceptionDrawer = page.getByRole("dialog", { name: "异常处理" });
     await expect(exceptionDrawer).toBeVisible();
     await exceptionDrawer.getByRole("radio", { name: "已忽略的异常" }).click();
@@ -92,7 +92,7 @@ test.describe("workbench exception browser flow", () => {
     await expect(page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001")).toBeVisible();
     await expect(page.getByTestId("candidate-group-unpaired-row:bk-o-202603-001")).toBeVisible();
     await expect(page.getByTestId("candidate-group-unpaired-row:iv-o-202603-001")).toBeVisible();
-    await expect(openZone.getByRole("button", { name: /已忽略的异常\d+项/ })).toBeVisible();
+    await expect(openZone.getByRole("button", { name: /异常 \d+ \| 已忽略 \d+/ })).toBeVisible();
 
     const cancelBody = api.lastBody("POST /api/workbench/actions/cancel-exception");
     expect(cancelBody).toMatchObject({
@@ -122,7 +122,7 @@ test.describe("workbench exception browser flow", () => {
     await invoiceRow.getByRole("button", { name: "忽略" }).click();
 
     await expect(openGroup.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })).toHaveCount(0);
-    await expect(openZone.getByRole("button", { name: /已忽略的异常\d+项/ })).toBeVisible();
+    await expect(openZone.getByRole("button", { name: /异常 \d+ \| 已忽略 \d+/ })).toBeVisible();
     expect(api.count("POST /api/workbench/actions/ignore-row")).toBe(1);
     expect(api.lastBody("POST /api/workbench/actions/ignore-row")).toMatchObject({
       month: "all",
@@ -133,7 +133,7 @@ test.describe("workbench exception browser flow", () => {
     expect(api.count("GET /api/workbench")).toBeGreaterThan(workbenchLoadsBeforeIgnore);
     await expectNoUnexpectedSuccessUiErrors(page);
 
-    await openZone.getByRole("button", { name: /已忽略的异常\d+项/ }).click();
+    await openZone.getByRole("button", { name: /异常 \d+ \| 已忽略 \d+/ }).click();
     const exceptionDrawer = page.getByRole("dialog", { name: "异常处理" });
     await expect(exceptionDrawer).toBeVisible();
     await exceptionDrawer.getByRole("radio", { name: "已忽略的异常" }).click();
@@ -168,7 +168,7 @@ test.describe("workbench exception browser flow", () => {
     await expect(pairedZone.getByText("金额不一致")).toBeVisible();
     await page
       .getByTestId("zone-unpaired")
-      .getByRole("button", { name: /已忽略的异常\d+项/ })
+      .getByRole("button", { name: /异常 \d+ \| 已忽略 \d+/ })
       .click();
 
     const drawer = page.getByRole("dialog", { name: "异常处理" });

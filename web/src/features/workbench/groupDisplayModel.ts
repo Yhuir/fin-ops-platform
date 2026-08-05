@@ -132,7 +132,10 @@ export function buildWorkbenchGroupDisplayLayout(
 
   const displayRowsByPane = {
     bank: new Map(group.rows.bank.map((row) => [row.id, row])),
-    invoice: new Map(group.rows.invoice.map((row) => [row.id, row])),
+    invoice: new Map([
+      ...group.rows.invoice,
+      ...segments.flatMap((segment) => segment.rows.invoice.filter((row) => row.displayOnly)),
+    ].map((row) => [row.id, row])),
   };
   const alignedRowIdsByPane = {
     bank: findAlignedRowIdsBySegment(sourceGroup, sourceSegments, "bank"),
@@ -227,7 +230,7 @@ function buildWorkbenchGroupSourceSegments(
   if (group.displayMode === "collapsed_summary" || group.rows.oa.length === 0) {
     return null;
   }
-  const hasExpenseClaimItems = group.rows.oa.some(hasMultiProjectExpenseItems);
+  const hasExpenseClaimItems = group.rows.oa.some(hasExpandableExpenseItems);
   if (group.rows.oa.length < 2 && !hasExpenseClaimItems) {
     return null;
   }
@@ -280,16 +283,18 @@ function findAlignedRowIdsBySegment(
 
   segments.forEach((segment) => {
     const rows = segment.rows[paneId];
+    const hasExplicitExpenseItemOwnership = paneId === "invoice"
+      && segment.rows.oa[0]?.displayRole === "expense-claim-item"
+      && rows.length > 0
+      && rows.every((row) => row.sourceExpenseItemId === segment.id);
+    if (hasExplicitExpenseItemOwnership) {
+      alignedRowsBySegmentId.set(segment.id, rows.map((row) => row.id));
+      return;
+    }
     const targetAmount = segmentTargetAmountCents(segment);
     const rowAmounts = rows.map(workbenchComparableAmountCents);
-    const canAlignComposite = rows.length === 1 || (
-      paneId === "invoice"
-      && segment.rows.oa[0]?.displayRole === "expense-claim-item"
-      && rows.every((row) => row.sourceExpenseItemId === segment.id)
-    );
     if (
-      rows.length > 0
-      && canAlignComposite
+      rows.length === 1
       && targetAmount > 0
       && rowAmounts.every((amount) => amount > 0)
       && rowAmounts.reduce((total, amount) => total + amount, 0) === targetAmount
@@ -366,7 +371,7 @@ function canUseAmountFallback(
 function expandExpenseClaimSegment(segment: WorkbenchGroupDisplaySegment): WorkbenchGroupDisplaySegment[] {
   const parent = segment.rows.oa[0];
   const items = parent?.expenseItems ?? [];
-  if (!parent || !hasMultiProjectExpenseItems(parent)) {
+  if (!parent || !hasExpandableExpenseItems(parent)) {
     return [segment];
   }
 
@@ -388,7 +393,7 @@ function expandExpenseClaimSegment(segment: WorkbenchGroupDisplaySegment): Workb
     displayRole: "expense-claim-summary",
     tableValues: {
       ...parent.tableValues,
-      projectName: `多个项目 · ${new Set(items.map((item) => item.projectName)).size}`,
+      projectName: expenseItemSummaryLabel(items),
       amount: "—",
     },
   };
@@ -416,7 +421,7 @@ function expandExpenseClaimSegment(segment: WorkbenchGroupDisplaySegment): Workb
         availableActions: [],
       }],
       bank: [],
-      invoice: invoicesByItemId.get(item.id) ?? [],
+      invoice: invoicesByItemId.get(item.id) ?? missingInvoicePlaceholder(parent, item),
     },
   }));
 
@@ -433,13 +438,56 @@ function expandExpenseClaimSegment(segment: WorkbenchGroupDisplaySegment): Workb
   ];
 }
 
-function hasMultiProjectExpenseItems(row: WorkbenchRecord) {
+function missingInvoicePlaceholder(
+  parent: WorkbenchRecord,
+  item: NonNullable<WorkbenchRecord["expenseItems"]>[number],
+) {
+  const anomaly = item.oaInvoiceAnomaly;
+  if (anomaly?.code !== "oa_invoice_attachment_missing") {
+    return [];
+  }
+  return [{
+    id: `${parent.id}:missing-invoice:${item.id}`,
+    caseId: parent.caseId,
+    recordType: "invoice" as const,
+    sourceKind: "oa_attachment_unknown" as const,
+    sourceOaId: parent.id,
+    sourceExpenseItemId: item.id,
+    label: "OA发票附件缺失",
+    status: "待处理",
+    statusCode: "oa_invoice_attachment_missing",
+    statusTone: "danger",
+    exceptionHandled: false,
+    amount: "—",
+    counterparty: "—",
+    tableValues: {
+      sellerName: "—",
+      sellerTaxId: "—",
+      buyerName: "—",
+      buyerTaxId: "—",
+      grossAmount: "—",
+      amount: "—",
+    },
+    detailFields: [],
+    actionVariant: "detail-only" as const,
+    availableActions: [],
+    oaInvoiceAnomaly: anomaly,
+    displayOnly: true,
+  }];
+}
+
+function hasExpandableExpenseItems(row: WorkbenchRecord) {
+  const items = row.expenseItems ?? [];
+  return items.length > 1 || items.some((item) => item.oaInvoiceAnomaly?.code === "oa_invoice_attachment_missing");
+}
+
+function expenseItemSummaryLabel(items: NonNullable<WorkbenchRecord["expenseItems"]>) {
   const projectNames = new Set(
-    (row.expenseItems ?? [])
+    items
       .map((item) => item.projectName.trim())
       .filter((projectName) => projectName && projectName !== "--" && projectName !== "—"),
   );
-  return projectNames.size > 1;
+  return projectNames.size > 1 ? `多个项目 · ${projectNames.size}` : `多个明细 · ${items.length}`;
 }
 
 export function mergeWorkbenchGroupsById(

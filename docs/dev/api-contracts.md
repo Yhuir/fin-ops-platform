@@ -462,13 +462,15 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 如果选中银行流水中只有部分为 `internal_transfer`，接口返回 `400 no_oa_bank_batch_selection_internal_transfer_conflict`，不得静默写入 `manual_confirmed`。非内部往来的银行-only 平衡确认保持原有关联台普通确认语义，可写入 `relation_mode=manual_confirmed`。
 
-### Workbench 金额异常 API
+### Workbench OA/发票异常 API
 
-`GET /api/workbench/groups` 保持现有 month/zone/search/filter/sort/pagination/generation 合同，并新增可选 `exception_bucket=active|processed`。`active` 返回 active 金额异常或 legacy active exception 的完整关系组；`processed` 返回 ignored 金额异常或 legacy processed/ignored exception。过滤在 total/row counts 和分页之前完成。
+`GET /api/workbench/groups` 保持现有 month/zone/search/filter/sort/pagination/generation 合同，并支持可选 `exception_bucket=active|processed`。`active` 返回 active OA/发票异常或 legacy active exception 的完整关系组；`processed` 返回 ignored OA/发票异常或 legacy processed/ignored exception。过滤在 total/row counts 和分页之前完成。
 
-关系组及其发票行可携带 additive `amount_anomaly`：`code=oa_invoice_amount_mismatch`、`label`、`display_label`、`state=active|ignored`、`fingerprint`、`oa_total_minor`、`invoice_total_minor`、`delta_minor`。缺失该字段表示当前关系没有可比较的金额差异。
+关系组可携带 additive `oa_invoice_anomaly`：`{code="oa_invoice_anomaly",fingerprint,state="active|ignored",items[]}`。每个 item 包含 `code="oa_invoice_amount_mismatch|oa_invoice_attachment_missing"`、`label`、`display_label`、`fingerprint`、`comparison_unit_id`、`source_oa_id`、`source_expense_item_id`、`oa_total`、`invoice_total`、`amount_delta`、`invoice_row_ids[]` 和 `attachment_file_count`。日常报销每个子付款项只产生一个异常 item；支付申请没有子项时按关系组总额生成一个 item。缺失 bundle 表示当前关系没有 OA/发票异常；旧 `amount_anomaly` 和发票行复制字段不再发布。
 
-`POST /api/workbench/exceptions/amount-mismatch/ignore` 与 `POST /api/workbench/exceptions/amount-mismatch/restore` 接受 `{month,zone,group_id,fingerprint,expected_read_model_version}`。后端 actor 只来自 session；read-export 返回 403；非法 body 返回 400；active generation 或 fingerprint 漂移返回 409；当前状态的幂等重复成功但不重复写 audit。成功后返回决定与精确 affected Workbench scope，页面重新 GET，不修改正式关系或 canonical 金额。
+OA row 的 additive `expense_items[]` 同步返回 `attachment_file_count`。前端只把异常 item 绑定到一个比较单元展示：金额差异显示在该 item 的第一条绑定发票来源下；附件存在但零解析发票时合成不可选择的 display-only 发票栏占位，不能把它提交到任何 mutation API。
+
+`POST /api/workbench/exceptions/amount-mismatch/ignore` 与 `POST /api/workbench/exceptions/amount-mismatch/restore` 保留既有持久化命令路径，接受 `{month,zone,group_id,fingerprint,expected_read_model_version}`；fingerprint 是整个 `oa_invoice_anomaly` bundle 的当前指纹。后端 actor 只来自 session；read-export 返回 403；非法 body 返回 400；active generation 或 fingerprint 漂移返回 409；当前状态的幂等重复成功但不重复写 audit。成功后返回决定与精确 affected Workbench scope，页面重新 GET，不修改正式关系、canonical 金额、附件或发票事实。
 
 `POST /api/no-oa-bank-batches/submit-selection`
 

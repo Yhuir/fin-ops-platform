@@ -2143,13 +2143,13 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(connection.calls[0][1], (["2026-06", "2026-07"],))
         self.assertIn("scope_key = any(%s)", connection.calls[0][0])
 
-    def test_workbench_v18_rejects_v17_month_all_and_cache_versions(self) -> None:
+    def test_workbench_v19_rejects_v17_month_all_and_cache_versions(self) -> None:
         app = object.__new__(Application)
         old_month = "2026-08-03-ungrouped-money-search-v17"
         old_all = "workbench_sql_projection.composed_active_month_shards.ungrouped_money_search.v17"
 
-        self.assertIn("v18", WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION)
-        self.assertIn("v18", WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
+        self.assertIn("v19", WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION)
+        self.assertIn("v19", WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
         self.assertIn(WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION, WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION)
         self.assertIn(WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION, WORKBENCH_INITIAL_PAGE_CACHE_SCHEMA_VERSION)
         self.assertIn(
@@ -4120,7 +4120,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                     if "filtered_workbench_groups as materialized" in sql
                 )
                 self.assertIn("ranked_groups.payload", count_sql)
-                self.assertIn(f"g.payload#>>'{{amount_anomaly,state}}' = '{expected_state}'", count_sql)
+                self.assertIn(f"g.payload#>>'{{oa_invoice_anomaly,state}}' = '{expected_state}'", count_sql)
 
     def test_repository_composed_all_scope_prefixes_non_mergeable_group_ids(self) -> None:
         class NonMergeableGroupConnection(WorkbenchSummaryGroupsConnection):

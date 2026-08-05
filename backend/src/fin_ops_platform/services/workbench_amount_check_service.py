@@ -20,28 +20,165 @@ class WorkbenchAmountCheckService:
     ) -> dict[str, Any] | None:
         oa_rows = list(rows_by_type.get("oa") or [])
         invoice_rows = list(rows_by_type.get("invoice") or [])
-        if not oa_rows or not invoice_rows:
+        if not oa_rows:
+            return None
+
+        items = self._expense_item_anomalies(
+            oa_rows,
+            invoice_rows,
+            relation_id=relation_id,
+        )
+        if items is None:
+            item = self._payment_application_anomaly(
+                oa_rows,
+                invoice_rows,
+                relation_id=relation_id,
+            )
+            items = [item] if item else []
+        if not items:
+            return None
+        fingerprint_source = "\0".join(
+            [str(relation_id or "").strip(), *sorted(str(item["fingerprint"]) for item in items)]
+        )
+        return {
+            "code": "oa_invoice_anomaly",
+            "fingerprint": sha256(fingerprint_source.encode("utf-8")).hexdigest(),
+            "items": items,
+        }
+
+    def _expense_item_anomalies(
+        self,
+        oa_rows: list[dict[str, Any]],
+        invoice_rows: list[dict[str, Any]],
+        *,
+        relation_id: str,
+    ) -> list[dict[str, Any]] | None:
+        expense_units = [
+            (oa_row, item)
+            for oa_row in oa_rows
+            for item in list(oa_row.get("expense_items") or [])
+            if isinstance(item, dict) and str(item.get("id") or "").strip()
+        ]
+        if not expense_units:
+            return None
+
+        anomalies: list[dict[str, Any]] = []
+        for oa_row, expense_item in expense_units:
+            expense_item_id = str(expense_item["id"]).strip()
+            bound_invoices = [
+                row
+                for row in invoice_rows
+                if str(row.get("source_expense_item_id") or "").strip() == expense_item_id
+            ]
+            attachment_count = self._non_negative_int(expense_item.get("attachment_file_count"))
+            if attachment_count > 0 and not bound_invoices:
+                anomalies.append(
+                    self._anomaly_item(
+                        code="oa_invoice_attachment_missing",
+                        relation_id=relation_id,
+                        comparison_unit_id=expense_item_id,
+                        source_oa_id=self._row_id(oa_row),
+                        source_expense_item_id=expense_item_id,
+                        oa_total=self._decimal(expense_item.get("amount")),
+                        invoice_total=None,
+                        invoice_rows=[],
+                        attachment_file_count=attachment_count,
+                    )
+                )
+                continue
+
+            oa_total = self._decimal(expense_item.get("amount"))
+            invoice_total = self._strict_sum_amounts(bound_invoices)
+            if oa_total is None or invoice_total is None or oa_total == invoice_total:
+                continue
+            anomalies.append(
+                self._anomaly_item(
+                    code="oa_invoice_amount_mismatch",
+                    relation_id=relation_id,
+                    comparison_unit_id=expense_item_id,
+                    source_oa_id=self._row_id(oa_row),
+                    source_expense_item_id=expense_item_id,
+                    oa_total=oa_total,
+                    invoice_total=invoice_total,
+                    invoice_rows=bound_invoices,
+                    attachment_file_count=attachment_count,
+                )
+            )
+        return anomalies
+
+    def _payment_application_anomaly(
+        self,
+        oa_rows: list[dict[str, Any]],
+        invoice_rows: list[dict[str, Any]],
+        *,
+        relation_id: str,
+    ) -> dict[str, Any] | None:
+        if not invoice_rows:
             return None
         oa_total = self._strict_sum_amounts(oa_rows)
         invoice_total = self._strict_sum_amounts(invoice_rows)
         if oa_total is None or invoice_total is None or oa_total == invoice_total:
             return None
-        row_ids = sorted(
-            self._row_id(row)
-            for row in [*oa_rows, *invoice_rows]
-            if self._row_id(row)
+        return self._anomaly_item(
+            code="oa_invoice_amount_mismatch",
+            relation_id=relation_id,
+            comparison_unit_id=str(relation_id or "").strip(),
+            source_oa_id=self._row_id(oa_rows[0]) if len(oa_rows) == 1 else "",
+            source_expense_item_id="",
+            oa_total=oa_total,
+            invoice_total=invoice_total,
+            invoice_rows=invoice_rows,
+            attachment_file_count=0,
         )
+
+    def _anomaly_item(
+        self,
+        *,
+        code: str,
+        relation_id: str,
+        comparison_unit_id: str,
+        source_oa_id: str,
+        source_expense_item_id: str,
+        oa_total: Decimal | None,
+        invoice_total: Decimal | None,
+        invoice_rows: list[dict[str, Any]],
+        attachment_file_count: int,
+    ) -> dict[str, Any]:
+        invoice_row_ids = sorted(self._row_id(row) for row in invoice_rows if self._row_id(row))
+        label = "OA发票附件缺失" if code == "oa_invoice_attachment_missing" else "金额不一致"
         fingerprint_source = "\0".join(
-            [str(relation_id or "").strip(), *row_ids, f"{oa_total:.2f}", f"{invoice_total:.2f}"]
+            [
+                str(relation_id or "").strip(),
+                code,
+                comparison_unit_id,
+                self._format_amount(oa_total) or "",
+                self._format_amount(invoice_total) or "",
+                str(attachment_file_count),
+                *invoice_row_ids,
+            ]
         )
         return {
-            "code": "oa_invoice_amount_mismatch",
-            "label": "金额不一致",
+            "code": code,
+            "label": label,
             "fingerprint": sha256(fingerprint_source.encode("utf-8")).hexdigest(),
+            "comparison_unit_id": comparison_unit_id,
+            "source_oa_id": source_oa_id or None,
+            "source_expense_item_id": source_expense_item_id or None,
             "oa_total": self._format_amount(oa_total),
             "invoice_total": self._format_amount(invoice_total),
-            "amount_delta": self._format_amount(abs(oa_total - invoice_total)),
+            "amount_delta": self._format_amount(abs(oa_total - invoice_total))
+            if oa_total is not None and invoice_total is not None
+            else None,
+            "invoice_row_ids": invoice_row_ids,
+            "attachment_file_count": attachment_file_count,
         }
+
+    @staticmethod
+    def _non_negative_int(value: Any) -> int:
+        try:
+            return max(0, int(str(value or "0")))
+        except ValueError:
+            return 0
 
     def summarize(self, rows_by_type: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
         normalized_rows = {

@@ -611,7 +611,7 @@ const readExportWorkbenchRecoveryWriteControlOpeners: DynamicWriteControlOpener[
       const unpairedZone = page.getByTestId("zone-unpaired");
       await expect(unpairedZone).toBeVisible();
 
-      await unpairedZone.getByRole("button", { name: /已忽略的异常\d+项/ }).click();
+      await unpairedZone.getByRole("button", { name: /异常 \d+ \| 已忽略 \d+/ }).click();
       const exceptionDrawer = page.getByRole("dialog", { name: "异常处理" });
       await expect(exceptionDrawer).toBeVisible();
       await exceptionDrawer.getByRole("radio", { name: "已忽略的异常" }).click();

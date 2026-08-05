@@ -35,7 +35,7 @@ import {
   previewWorkbenchConfirmLink,
   previewWorkbenchWithdrawLink,
   saveWorkbenchSettings,
-  setWorkbenchAmountMismatchIgnored,
+  setWorkbenchOaInvoiceAnomalyIgnored,
   unignoreWorkbenchRow,
   withdrawWorkbenchLink,
   WorkbenchApiError,
@@ -2206,20 +2206,20 @@ export default function ReconciliationWorkbenchPage() {
     }
   };
 
-  const handleAmountMismatchDecision = useCallback(async (
+  const handleOaInvoiceAnomalyDecision = useCallback(async (
     group: WorkbenchRelationGroup,
     ignored: boolean,
   ) => {
-    if (!ensureCanWriteWorkbench() || !group.amountAnomaly) {
+    if (!ensureCanWriteWorkbench() || !group.oaInvoiceAnomaly) {
       return;
     }
     const succeeded = await runBlockingAction({
-      loadingMessage: ignored ? "正在忽略金额异常..." : "正在撤回忽略...",
-      action: () => setWorkbenchAmountMismatchIgnored({
+      loadingMessage: ignored ? "正在忽略异常..." : "正在撤回忽略...",
+      action: () => setWorkbenchOaInvoiceAnomalyIgnored({
         month: WORKBENCH_VIEW_MONTH,
         zone: group.groupType,
         groupId: group.id,
-        fingerprint: group.amountAnomaly!.fingerprint,
+        fingerprint: group.oaInvoiceAnomaly!.fingerprint,
         expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
       }, ignored),
     });
@@ -2272,12 +2272,12 @@ export default function ReconciliationWorkbenchPage() {
   const openAuxiliaryHeaderActions = useMemo(
     () => [
       {
-        label: `已忽略的异常${ignoredExceptionCount}项`,
+        label: `异常 ${workbenchData?.summary.exceptionCount ?? 0} | 已忽略 ${ignoredExceptionCount}`,
         onClick: handleOpenExceptionDrawer,
         tone: "danger" as const,
       },
     ],
-    [handleOpenExceptionDrawer, ignoredExceptionCount],
+    [handleOpenExceptionDrawer, ignoredExceptionCount, workbenchData?.summary.exceptionCount],
   );
 
   const isWorkbenchPageFresh = workbenchPageReadModelStatus === "fresh";
@@ -2504,8 +2504,8 @@ export default function ReconciliationWorkbenchPage() {
         onBucketChange={handleExceptionDrawerBucketChange}
         onCancelProcessedException={handleCancelProcessedException}
         onClose={handleCloseExceptionDrawer}
-        onIgnoreAmountMismatch={(group) => handleAmountMismatchDecision(group, true)}
-        onRestoreAmountMismatch={(group) => handleAmountMismatchDecision(group, false)}
+        onIgnoreOaInvoiceAnomaly={(group) => handleOaInvoiceAnomalyDecision(group, true)}
+        onRestoreOaInvoiceAnomaly={(group) => handleOaInvoiceAnomalyDecision(group, false)}
         onUnignoreRow={handleUnignoreRow}
       />
       {workbenchExceptionDialog ? (

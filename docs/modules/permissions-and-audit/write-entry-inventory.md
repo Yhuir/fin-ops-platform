@@ -47,8 +47,8 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `撤回批次` | no-OA batch withdraw |
 | `撤回关联` | workbench/batch relation withdraw |
 | `撤回忽略` | workbench ignored recovery |
-| `忽略` | workbench amount-mismatch ignore |
-| `恢复` | workbench amount-mismatch restore |
+| `忽略` | workbench OA/发票异常 ignore |
+| `恢复` | workbench OA/发票异常 restore |
 | `删除` | ETC/settings destructive actions |
 | `新建批次` | ETC batch |
 | `创建 OA 草稿` | input/OA/ETC draft |
@@ -174,7 +174,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 
 | Module | 写入口 | 当前状态 | 当前证据 | 下一步 |
 | --- | --- | --- | --- | --- |
-| `reconciliation-workbench` | confirm、withdraw、candidate split、exception apply/cancel/ignore/unignore、amount-mismatch ignore/restore、no-OA withdraw、cash pass-through/ticket purchase/cancel、column layout reorder/settings save | `covered-browser` | `web/e2e/workbench-permissions-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts`；role matrix 在 read-export 下断言列拖拽 handle 全部 disabled、尝试拖拽不进入 dragging 且 `POST /api/workbench/settings` 零调用，也会选择未配对/已配对候选并打开统一异常抽屉，断言确认、撤回、金额异常忽略/恢复和 legacy 异常恢复入口隐藏或禁用；现金处理 mutation 同样为零，并复跑 DOM 写控件候选扫描。 | 新增 relation、异常、现金处理 command 或隐式 settings 写入口时补同类 Browser 断言。 |
+| `reconciliation-workbench` | confirm、withdraw、candidate split、exception apply/cancel/ignore/unignore、OA/发票异常 ignore/restore、no-OA withdraw、cash pass-through/ticket purchase/cancel、column layout reorder/settings save | `covered-browser` | `web/e2e/workbench-permissions-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts`；role matrix 在 read-export 下断言列拖拽 handle 全部 disabled、尝试拖拽不进入 dragging 且 `POST /api/workbench/settings` 零调用，也会选择未配对/已配对候选并打开统一异常抽屉，断言确认、撤回、OA/发票异常忽略/恢复和 legacy 异常恢复入口隐藏或禁用；现金处理 mutation 同样为零，并复跑 DOM 写控件候选扫描。 | 新增 relation、异常、现金处理 command 或隐式 settings 写入口时补同类 Browser 断言。 |
 | `bank-details` | 分类保存/清除、候选确认/撤回、人工待分类、自动标签规则保存/reapply | `covered-browser` | `web/e2e/bank-details-filtered-export-permissions.spec.ts`、`web/e2e/bank-details-auto-tag-rules-flow.spec.ts`；本轮 `web/e2e/permissions-role-matrix.spec.ts` 会在 read-export 下打开自动标签规则抽屉并分别进入待确认分类和未匹配待分类状态，断言新增标签/reapply/保存禁用、待确认/待分类按钮禁用、分类菜单不打开、category-confirmation/category-assignment 零 mutation，并复跑 DOM 写控件候选扫描 | 新增批量分类或规则入口时补 read-export 零 mutation。 |
 | `imports-bank-transactions` | 文件选择、preview、confirm import、账户冲突确认 | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts` 覆盖 import controls disabled；`web/e2e/imports-bank-transactions-flow.spec.ts` 覆盖 full_access 主链路 | 新增清空/重试/批量导入 mutation 时补按钮矩阵。 |
 | `imports-invoices` | 文件选择、preview、confirm import | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts` 覆盖 import controls disabled；`web/e2e/imports-invoices-flow.spec.ts` 覆盖 full_access 主链路 | 同上。 |

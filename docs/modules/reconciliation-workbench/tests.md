@@ -2,6 +2,13 @@
 
 日期：2026-08-05
 
+## 2026-08-05 OA/发票比较单元与附件缺失异常
+
+- Business core：`tests/test_workbench_amount_check_service.py` 保护日常报销逐 `source_expense_item_id` 比较全部显式绑定发票，覆盖 `290=145+145`、`405=350+55`、一项多发票差异只生成一个 anomaly item、附件数大于零且零绑定发票生成 `OA发票附件缺失`；支付申请继续按关系组总额比较，缺金额不误报。
+- Service/read model/API：`tests/test_workbench_relation_grouping.py` 保护 bundle `oa_invoice_anomaly.items[]`、active/ignored 计数和旧逐发票 `amount_anomaly` 不再发布；`tests/test_workbench_query_service.py` 保护 item `attachment_file_count`；`tests/test_workbench_sql_runtime.py` 保护 v19 淘汰 v18 generation/cache，且异常桶在分页前过滤。
+- Frontend：`groupDisplayModel.test.ts` 保护显式 ownership 与金额判断解耦、组合发票同行、部分筛选不伪造同行、附件缺失生成不可选择 display-only 发票占位；`WorkbenchApi.test.ts` 保护新 DTO 与一个 comparison unit 只装饰一行；`WorkbenchExceptionDrawer.test.tsx` 和 `WorkbenchSelection.test.tsx` 保护 HeroUI chip、`异常 n | 已忽略 m`、折叠/展开、忽略/撤回及只读行为。
+- Regression：没有新增表、migration、read model、worker、queue、cache owner、HTTP 详情链路或依赖；旧逐关系总额、逐发票复制字段和金额决定显式 ownership 的判断已删除。
+
 ## 2026-08-05 紧凑异常抽屉与撤回忽略
 
 - Business core / repository：`tests/test_workbench_relation_grouping.py` 与 `tests/test_workbench_sql_runtime.py` 保护进行中、已忽略关系组和独立 ignored row 的互斥计数，已忽略列表只认 payload 的 durable `ignored=true`，不再读取废弃 status 字段。
@@ -10,7 +17,7 @@
 
 ## 2026-08-04 OA/发票金额不一致异常闭环
 
-- Business core：`tests/test_workbench_amount_check_service.py` 覆盖按分精确相等、1 分差异、缺少任一侧和任一成员金额时不误报；`test_workbench_relation_grouping.py` 保护 active/ignored anomaly 在 group 与最终发票行上的一致传播。
+- Business core：`tests/test_workbench_amount_check_service.py` 覆盖按分精确相等、1 分差异、缺少任一侧和任一成员金额时不误报；`test_workbench_relation_grouping.py` 保护 active/ignored anomaly 在 group payload 中传播。
 - Service/repository/API：`tests/test_workbench_amount_mismatch_exception_service.py` 覆盖 server actor、all-scope 实际 month、stale fingerprint/version、幂等 ignore/restore、审计、month-scoped decision read，并证明 legacy exception loader 排除独立 scenario；`test_workbench_query_facade.py` 保护 `exception_bucket` 透传，`test_auth_guard.py` 保护 read-export 拒绝两个写接口。
 - Read model/cache：现有 Workbench generation payload 增加 additive anomaly 字段；过滤在 PostgreSQL active generation group payload 上完成，按 bucket 先过滤再分页。没有新增 manifest、scope、worker、queue、Redis owner 或第二 read model。
 - Frontend：`WorkbenchApi.test.ts` 覆盖 DTO、bucket query 和 action contract；`WorkbenchExceptionDrawer.test.tsx` 覆盖 active ignore、发票来源下 chip、processed restore；`WorkbenchSelection.test.tsx` 保护统一抽屉替代旧双 modal 且旧恢复行为不丢失。
@@ -200,11 +207,11 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_w
 - `tests/test_workbench_auth_context_idempotency.py` 保护 confirm 在同一 UoW 内重读 selected canonical rows、拒绝漂移/多 batch，并把合法 ETC summary 的 external batch identity 持久化。
 - `tests/test_workbench_page_audit.py` 保护合法 synthetic ETC summary 只有在 canonical batch + exact deterministic row id 双重证明时通过；任意 `etc-summary-*` 不得绕过 canonical integrity。
 - `tests/test_workbench_query_facade.py`、`tests/test_workbench_sql_runtime.py` 与 `web/src/test/WorkbenchSelection.test.tsx` 保护 refreshing 时继续显示上一版 active generation、禁止 Redis payload 写入，并阻止迟到 non-fresh 响应覆盖操作投影。
-- `web/src/test/WorkbenchApi.test.ts`、`web/src/test/RelationGroupGrid.test.tsx` 保护显式 `source_expense_item_id` 与价税合计精确同额的单张发票逐项同行；部分覆盖不再阻止其它精确项，一对多、金额不一致和组合金额进入残余带。输入乱序不影响付款项顺序，费用内容/说明在申请事由列显示，点击子项仍选择父 OA。
+- `web/src/test/WorkbenchApi.test.ts`、`web/src/test/RelationGroupGrid.test.tsx` 和 `groupDisplayModel.test.ts` 保护显式 `source_expense_item_id` 的单张/多张发票逐项同行；显式 ownership 不再被金额差异拆开，只有缺少显式来源的唯一单条兜底仍要求精确同额。输入乱序不影响付款项顺序，费用内容/说明在申请事由列显示，点击子项仍选择父 OA。
 
 ## 2026-08-03 三栏完整高度与严格一一对应回归
 
-- Business/display core：`groupDisplayModel.test.ts` 证明显式来源或方向已知的唯一单条精确金额可逐项同行，不要求整栏双射；完整 source group 中存在隐藏重复项、显式重复、一对多或金额组合时 fail closed 并进入残余带。
+- Business/display core：`groupDisplayModel.test.ts` 证明显式费用子项 ownership 可承载一对多同行且不要求金额相等；缺少显式来源时，方向已知的唯一单条精确金额才可逐项同行。完整 source group 中存在隐藏组成项、重复金额或无显式归属的金额组合时 fail closed 并进入残余带。
 - Frontend interaction：`RelationGroupGrid.test.tsx` 固定 `4 OA / 2 流水 / 1 发票` 的精确行逐项同行，其余 OA 保持独立；一对多来源只让其中唯一精确项同行，其它记录不伪装为同排。
 - Browser E2E：`workbench-relation-fanout.spec.ts` 用 Chromium `boundingBox()` 证明部分费用项中的 200 元 OA 子项与 200 元发票实际同高同行，未匹配子项不出现该发票，同时点击子项仍选择父 OA。
 - Expense-item regression：多项目报销的 OA 摘要、费用内容、选择父 OA 和项目顺序不变；发票比较使用价税合计，部分精确附件可同行，其余附件独立残余显示且不丢失。

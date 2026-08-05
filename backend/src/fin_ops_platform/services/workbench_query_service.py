@@ -565,6 +565,7 @@ class WorkbenchQueryService:
                     "amount": str(item.get("amount") or "").strip(),
                     "fee_content": str(item.get("fee_content") or "").strip(),
                     "fee_description": str(item.get("fee_description") or "").strip(),
+                    "attachment_file_count": str(item.get("attachment_file_count") or "0").strip(),
                 }
             )
         return result

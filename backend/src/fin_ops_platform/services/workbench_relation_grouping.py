@@ -76,16 +76,16 @@ class WorkbenchRelationGroupingService:
                     for group in [*paired_groups, *unpaired_groups]
                     if self._group_has_danger(group)
                     or (
-                        isinstance(group.get("amount_anomaly"), dict)
-                        and group["amount_anomaly"].get("state") == "active"
+                        isinstance(group.get("oa_invoice_anomaly"), dict)
+                        and group["oa_invoice_anomaly"].get("state") == "active"
                     )
                 ),
                 "ignored_exception_count": sum(
                     1
                     for group in [*paired_groups, *unpaired_groups]
                     if (
-                        isinstance(group.get("amount_anomaly"), dict)
-                        and group["amount_anomaly"].get("state") == "ignored"
+                        isinstance(group.get("oa_invoice_anomaly"), dict)
+                        and group["oa_invoice_anomaly"].get("state") == "ignored"
                     )
                     or group.get("exception_state") == "processed"
                     or self._group_has_ignored(group)
@@ -225,8 +225,9 @@ class WorkbenchRelationGroupingService:
         if anomaly:
             state = "ignored" if amount_mismatch_decisions.get(anomaly["fingerprint"]) == "ignored" else "active"
             anomaly["state"] = state
-            anomaly["display_label"] = "已忽略：金额不一致" if state == "ignored" else "金额不一致"
-            group["amount_anomaly"] = anomaly
+            for item in anomaly["items"]:
+                item["display_label"] = f"已忽略：{item['label']}" if state == "ignored" else item["label"]
+            group["oa_invoice_anomaly"] = anomaly
         if isinstance(relation.get("amount_check"), dict):
             group["amount_check"] = deepcopy(relation["amount_check"])
         if isinstance(special_metadata, dict):
@@ -244,9 +245,6 @@ class WorkbenchRelationGroupingService:
             canonical_etc_summaries or display_rows_by_case.get(case_id, []),
             zone=zone,
         )
-        if anomaly:
-            for invoice_row in group["invoice_rows"]:
-                invoice_row["amount_anomaly"] = deepcopy(anomaly)
         if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
             self._apply_bank_batch_summary(group, relation_mode=relation_mode, zone=zone)
         return group

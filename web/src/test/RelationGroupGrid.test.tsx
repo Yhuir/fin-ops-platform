@@ -1174,7 +1174,7 @@ describe("Workbench candidate grouping layout", () => {
     expect(selectRow.mock.calls[0][0].id).toBe(parentOa.id);
   });
 
-  test("keeps a same-project reimbursement on the ordinary single-row path", () => {
+  test("expands same-project reimbursement items into independent comparison rows", () => {
     const parentOa = {
       ...createOaRecord("oa-exp-same-project", "吴云江", "66.00"),
       expenseItems: [
@@ -1190,7 +1190,10 @@ describe("Workbench candidate grouping layout", () => {
       rows: { oa: [parentOa], bank: [], invoice: [] },
     };
 
-    expect(buildWorkbenchGroupDisplayLayout(group)).toBeNull();
+    const layout = buildWorkbenchGroupDisplayLayout(group);
+    expect(layout?.segments).toHaveLength(3);
+    expect(layout?.segments[0]?.rows.oa[0]?.tableValues.projectName).toBe("多个明细 · 2");
+    expect(layout?.segments.slice(1).map((segment) => segment.rows.oa[0]?.amount)).toEqual(["33.00", "33.00"]);
   });
 
   test("keeps a partial attachment invoice source at group level inside a multi-OA group", () => {

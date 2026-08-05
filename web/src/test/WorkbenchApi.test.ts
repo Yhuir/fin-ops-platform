@@ -13,7 +13,7 @@ import {
   previewWorkbenchWithdrawLink,
   refreshManualOaImportAttachments,
   removeManualOaImport,
-  setWorkbenchAmountMismatchIgnored,
+  setWorkbenchOaInvoiceAnomalyIgnored,
   WorkbenchApiError,
   WORKBENCH_GROUP_PAGE_SIZE,
 } from "../features/workbench/api";
@@ -165,15 +165,22 @@ describe("workbench api bank amount mapping", () => {
               match_confidence: "high",
               reason: "active_formal_relation",
               exception_state: "processed",
-              amount_anomaly: {
-                code: "oa_invoice_amount_mismatch",
-                label: "金额不一致",
-                display_label: "已忽略：金额不一致",
+              oa_invoice_anomaly: {
+                code: "oa_invoice_anomaly",
                 fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 state: "ignored",
-                oa_total: "100.00",
-                invoice_total: "99.00",
-                amount_delta: "1.00",
+                items: [{
+                  code: "oa_invoice_amount_mismatch",
+                  label: "金额不一致",
+                  display_label: "已忽略：金额不一致",
+                  fingerprint: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  comparison_unit_id: "case:CASE-1",
+                  oa_total: "100.00",
+                  invoice_total: "99.00",
+                  amount_delta: "1.00",
+                  invoice_row_ids: [],
+                  attachment_file_count: 0,
+                }],
               },
               zone: "paired",
               status: "paired",
@@ -704,15 +711,24 @@ describe("workbench api bank amount mapping", () => {
                 amount_delta: "1.00",
                 requires_note: true,
               },
-              amount_anomaly: {
-                code: "oa_invoice_amount_mismatch",
-                label: "金额不一致",
-                display_label: "已忽略：金额不一致",
+              oa_invoice_anomaly: {
+                code: "oa_invoice_anomaly",
                 fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 state: "ignored",
-                oa_total: "100.00",
-                invoice_total: "99.00",
-                amount_delta: "1.00",
+                items: [{
+                  code: "oa_invoice_amount_mismatch",
+                  label: "金额不一致",
+                  display_label: "已忽略：金额不一致",
+                  fingerprint: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  comparison_unit_id: "oa-paired:item:1",
+                  source_oa_id: "oa-paired",
+                  source_expense_item_id: "oa-paired:item:1",
+                  oa_total: "60.00",
+                  invoice_total: "59.00",
+                  amount_delta: "1.00",
+                  invoice_row_ids: ["invoice-paired"],
+                  attachment_file_count: 1,
+                }],
               },
               oa_rows: [
                 {
@@ -728,6 +744,7 @@ describe("workbench api bank amount mapping", () => {
                       amount: "40.00",
                       fee_content: "差旅费",
                       fee_description: "曲靖出差",
+                      attachment_file_count: 0,
                     },
                     {
                       id: "oa-paired:item:1",
@@ -736,6 +753,7 @@ describe("workbench api bank amount mapping", () => {
                       amount: 60,
                       fee_content: "住宿费",
                       fee_description: null,
+                      attachment_file_count: 1,
                     },
                   ],
                   available_actions: ["detail"],
@@ -759,16 +777,6 @@ describe("workbench api bank amount mapping", () => {
                   seller_name: "供应商A",
                   total_with_tax: "99.00",
                   source_expense_item_id: "oa-paired:item:1",
-                  amount_anomaly: {
-                    code: "oa_invoice_amount_mismatch",
-                    label: "金额不一致",
-                    display_label: "已忽略：金额不一致",
-                    fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                    state: "ignored",
-                    oa_total: "100.00",
-                    invoice_total: "99.00",
-                    amount_delta: "1.00",
-                  },
                   invoice_bank_relation: { code: "fully_linked", label: "完全关联", tone: "success" },
                   available_actions: ["detail"],
                 },
@@ -799,6 +807,7 @@ describe("workbench api bank amount mapping", () => {
         amount: "40",
         feeContent: "差旅费",
         feeDescription: "曲靖出差",
+        attachmentFileCount: 0,
       },
       {
         id: "oa-paired:item:1",
@@ -807,6 +816,8 @@ describe("workbench api bank amount mapping", () => {
         amount: "60",
         feeContent: "住宿费",
         feeDescription: "",
+        attachmentFileCount: 1,
+        oaInvoiceAnomaly: expect.objectContaining({ displayLabel: "已忽略：金额不一致" }),
       },
     ]);
     expect(group.rows.bank[0]).toMatchObject({
@@ -814,9 +825,9 @@ describe("workbench api bank amount mapping", () => {
       categoryResolutionStatus: "manual_confirmed",
     });
     expect(group.rows.invoice[0].sourceExpenseItemId).toBe("oa-paired:item:1");
-    expect(group.amountAnomaly).toMatchObject({ state: "ignored", displayLabel: "已忽略：金额不一致" });
+    expect(group.oaInvoiceAnomaly).toMatchObject({ state: "ignored" });
     expect(group.amountCheck).toMatchObject({ oaTotal: "100.00", bankTotal: "100.00", invoiceTotal: "99.00" });
-    expect(group.rows.invoice[0].amountAnomaly).toMatchObject({ state: "ignored", amountDelta: "1.00" });
+    expect(group.rows.invoice[0].oaInvoiceAnomaly).toMatchObject({ displayLabel: "已忽略：金额不一致", amountDelta: "1.00" });
   });
 
   test("serializes workbench group page SQL query controls", async () => {
@@ -889,7 +900,7 @@ describe("workbench api bank amount mapping", () => {
       ),
     );
 
-    await setWorkbenchAmountMismatchIgnored({
+    await setWorkbenchOaInvoiceAnomalyIgnored({
       month: "all",
       zone: "paired",
       groupId: "case:CASE-1",

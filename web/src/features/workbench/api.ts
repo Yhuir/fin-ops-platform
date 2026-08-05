@@ -27,7 +27,8 @@ import type {
   WorkbenchOaStatus,
   WorkbenchColumnLayouts,
   WorkbenchAmountCheck,
-  WorkbenchAmountAnomaly,
+  WorkbenchOaInvoiceAnomaly,
+  WorkbenchOaInvoiceAnomalyItem,
   WorkbenchOaImportOption,
   WorkbenchOaSyncStatus,
   WorkbenchInvoiceInventory,
@@ -111,6 +112,7 @@ type ApiWorkbenchRow = {
     amount?: string | number | null;
     fee_content?: string | null;
     fee_description?: string | null;
+    attachment_file_count?: string | number | null;
   }> | null;
   apply_type?: string | null;
   amount?: string | null;
@@ -160,18 +162,28 @@ type ApiWorkbenchRow = {
   cost_excluded?: boolean | null;
   special_metadata?: Record<string, unknown> | null;
   source_expense_item_id?: string | null;
-  amount_anomaly?: ApiWorkbenchAmountAnomaly | null;
 };
 
-type ApiWorkbenchAmountAnomaly = {
+type ApiWorkbenchOaInvoiceAnomalyItem = {
   code?: string | null;
   label?: string | null;
   display_label?: string | null;
   fingerprint?: string | null;
-  state?: string | null;
+  comparison_unit_id?: string | null;
+  source_oa_id?: string | null;
+  source_expense_item_id?: string | null;
   oa_total?: string | number | null;
   invoice_total?: string | number | null;
   amount_delta?: string | number | null;
+  invoice_row_ids?: unknown[] | null;
+  attachment_file_count?: string | number | null;
+};
+
+type ApiWorkbenchOaInvoiceAnomaly = {
+  code?: string | null;
+  fingerprint?: string | null;
+  state?: string | null;
+  items?: ApiWorkbenchOaInvoiceAnomalyItem[] | null;
 };
 
 type ApiWorkbenchPayload = {
@@ -446,7 +458,7 @@ type ApiWorkbenchGroup = {
   can_withdraw?: boolean;
   relation_note?: string | null;
   amount_check?: ApiWorkbenchRelationAmountCheck | null;
-  amount_anomaly?: ApiWorkbenchAmountAnomaly | null;
+  oa_invoice_anomaly?: ApiWorkbenchOaInvoiceAnomaly | null;
   exception_state?: "active" | "processed" | null;
   special_metadata?: Record<string, unknown> | null;
   processed_exception_summary?: Record<string, unknown> | null;
@@ -749,7 +761,7 @@ type CancelExceptionPayload = {
   comment?: string;
 };
 
-type AmountMismatchDecisionPayload = {
+type OaInvoiceAnomalyDecisionPayload = {
   month: string;
   zone: WorkbenchZoneId;
   groupId: string;
@@ -1004,27 +1016,53 @@ function mapRelationAmountCheck(value: ApiWorkbenchRelationAmountCheck | null | 
   };
 }
 
-function mapAmountAnomaly(value: ApiWorkbenchAmountAnomaly | null | undefined): WorkbenchAmountAnomaly | undefined {
+function mapOaInvoiceAnomaly(
+  value: ApiWorkbenchOaInvoiceAnomaly | null | undefined,
+): WorkbenchOaInvoiceAnomaly | undefined {
   if (!value || typeof value !== "object") {
     return undefined;
   }
   const fingerprint = String(value.fingerprint ?? "").trim();
   const state = value.state === "ignored" ? "ignored" : value.state === "active" ? "active" : null;
-  if (!fingerprint || !state) {
+  const items = (Array.isArray(value.items) ? value.items : []).flatMap((item) => {
+    if (!item || typeof item !== "object") {
+      return [];
+    }
+    const itemFingerprint = String(item.fingerprint ?? "").trim();
+    const comparisonUnitId = String(item.comparison_unit_id ?? "").trim();
+    const code = String(item.code ?? "").trim();
+    if (!itemFingerprint || !comparisonUnitId || !code) {
+      return [];
+    }
+    const label = toDisplayValue(
+      item.label,
+      code === "oa_invoice_attachment_missing" ? "OA发票附件缺失" : "金额不一致",
+    );
+    return [{
+      code: code as WorkbenchOaInvoiceAnomalyItem["code"],
+      label,
+      displayLabel: toDisplayValue(item.display_label, state === "ignored" ? `已忽略：${label}` : label),
+      fingerprint: itemFingerprint,
+      comparisonUnitId,
+      sourceOaId: toDisplayValue(item.source_oa_id, "") || undefined,
+      sourceExpenseItemId: toDisplayValue(item.source_expense_item_id, "") || undefined,
+      oaTotal: toDisplayValue(item.oa_total, "") || undefined,
+      invoiceTotal: toDisplayValue(item.invoice_total, "") || undefined,
+      amountDelta: toDisplayValue(item.amount_delta, "") || undefined,
+      invoiceRowIds: (Array.isArray(item.invoice_row_ids) ? item.invoice_row_ids : [])
+        .map((rowId) => String(rowId).trim())
+        .filter(Boolean),
+      attachmentFileCount: toCount(item.attachment_file_count),
+    }];
+  });
+  if (!fingerprint || !state || items.length === 0) {
     return undefined;
   }
   return {
-    code: toDisplayValue(value.code, "oa_invoice_amount_mismatch") as WorkbenchAmountAnomaly["code"],
-    label: toDisplayValue(value.label, "金额不一致"),
-    displayLabel: toDisplayValue(
-      value.display_label,
-      state === "ignored" ? "已忽略：金额不一致" : "金额不一致",
-    ),
+    code: toDisplayValue(value.code, "oa_invoice_anomaly") as WorkbenchOaInvoiceAnomaly["code"],
     fingerprint,
     state,
-    oaTotal: toDisplayValue(value.oa_total),
-    invoiceTotal: toDisplayValue(value.invoice_total),
-    amountDelta: toDisplayValue(value.amount_delta),
+    items,
   };
 }
 
@@ -1410,7 +1448,6 @@ function mapRow(row: ApiWorkbenchRow): WorkbenchRecord {
     relationNote: toDisplayValue(row.relation_note, "") || undefined,
     relationAmountCheck: mapRelationAmountCheck(row.relation_amount_check),
     specialMetadata: row.special_metadata && typeof row.special_metadata === "object" ? row.special_metadata : undefined,
-    amountAnomaly: mapAmountAnomaly(row.amount_anomaly),
   };
 }
 
@@ -1430,6 +1467,7 @@ function mapExpenseItems(items: ApiWorkbenchRow["expense_items"]) {
       amount: toWorkbenchAmountDisplayValue(item.amount),
       feeContent: toDisplayValue(item.fee_content, ""),
       feeDescription: toDisplayValue(item.fee_description, ""),
+      attachmentFileCount: toCount(item.attachment_file_count),
     }];
   });
   return mapped.length > 0 ? mapped : undefined;
@@ -1473,6 +1511,8 @@ function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): Workben
     bank: group.bank_rows.map(mapRow),
     invoice: group.invoice_rows.map(mapRow),
   };
+  const oaInvoiceAnomaly = mapOaInvoiceAnomaly(group.oa_invoice_anomaly);
+  decorateOaInvoiceAnomaly(rows, oaInvoiceAnomaly);
   const rawGroupType = String(group.group_type || "").trim();
   const mapped: WorkbenchRelationGroup = {
     id: group.group_id,
@@ -1495,7 +1535,7 @@ function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): Workben
     collapsedRowCounts,
     relationNote: toDisplayValue(group.relation_note, "") || undefined,
     amountCheck: mapRelationAmountCheck(group.amount_check),
-    amountAnomaly: mapAmountAnomaly(group.amount_anomaly),
+    oaInvoiceAnomaly,
     exceptionState: group.exception_state === "active" || group.exception_state === "processed"
       ? group.exception_state
       : undefined,
@@ -1518,6 +1558,32 @@ function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): Workben
     ),
   };
   return mapped;
+}
+
+function decorateOaInvoiceAnomaly(
+  rows: WorkbenchPaneRows,
+  anomaly: WorkbenchOaInvoiceAnomaly | undefined,
+) {
+  if (!anomaly) {
+    return;
+  }
+  anomaly.items.forEach((item) => {
+    const invoiceRow = item.invoiceRowIds
+      .map((rowId) => rows.invoice.find((row) => row.id === rowId))
+      .find((row): row is WorkbenchRecord => Boolean(row));
+    if (invoiceRow) {
+      invoiceRow.oaInvoiceAnomaly = item;
+    }
+    if (!item.sourceExpenseItemId) {
+      return;
+    }
+    rows.oa.forEach((oaRow) => {
+      const expenseItem = oaRow.expenseItems?.find((candidate) => candidate.id === item.sourceExpenseItemId);
+      if (expenseItem) {
+        expenseItem.oaInvoiceAnomaly = item;
+      }
+    });
+  });
 }
 
 function mapPaneRowCounts(counts: ApiWorkbenchGroup["row_counts"]): WorkbenchRelationGroup["rowCounts"] | undefined {
@@ -3442,8 +3508,8 @@ export async function unignoreWorkbenchRow(payload: UnignoreRowPayload): Promise
   return mapWorkbenchActionResult(result);
 }
 
-export async function setWorkbenchAmountMismatchIgnored(
-  payload: AmountMismatchDecisionPayload,
+export async function setWorkbenchOaInvoiceAnomalyIgnored(
+  payload: OaInvoiceAnomalyDecisionPayload,
   ignored: boolean,
 ): Promise<WorkbenchActionResult> {
   const result = await requestJson<ApiWorkbenchActionResult>(

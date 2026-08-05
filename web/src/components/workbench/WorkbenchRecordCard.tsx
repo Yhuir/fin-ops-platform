@@ -1,5 +1,6 @@
 import { Info } from "lucide-react";
 import { memo, useState, type FocusEvent, type MouseEvent, type ReactNode, type TouchEvent } from "react";
+import { Chip } from "@heroui/react";
 
 import { getWorkbenchColumns } from "../../features/workbench/tableConfig";
 import { formatMoney } from "../../features/money";
@@ -65,7 +66,7 @@ function WorkbenchRecordCard({
   const columns = columnsProp ?? getWorkbenchColumns(paneId);
   const hasActionColumn = !readOnly && showActionColumn;
   const isSummaryRow = row.sourceKind === "etc_invoice_summary" || row.sourceKind === "bank_flow_rule_batch_summary";
-  const showInlineDetail = !isSummaryRow && !readOnly && actionMode === "default" && (paneId === "oa" || paneId === "bank" || paneId === "invoice");
+  const showInlineDetail = !row.displayOnly && !isSummaryRow && !readOnly && actionMode === "default" && (paneId === "oa" || paneId === "bank" || paneId === "invoice");
   const sheetStateClass =
     rowState === "selected"
       ? " record-card-sheet-selected"
@@ -83,7 +84,7 @@ function WorkbenchRecordCard({
       data-search-highlighted={highlighted ? "true" : "false"}
       role="row"
       style={columnGridStyle}
-      onClick={readOnly ? undefined : () => onSelectRow(row, zoneId)}
+      onClick={readOnly || row.displayOnly ? undefined : () => onSelectRow(row, zoneId)}
     >
       {columns.map((column, columnIndex) => {
         const value = row.tableValues[column.key] ?? "--";
@@ -282,7 +283,7 @@ function renderCellValue(
       row.tableValues.sellerTaxId ?? "",
       row.tableValues.invoiceType ?? "",
       row.sourceKind,
-      row.amountAnomaly,
+      row.oaInvoiceAnomaly,
       searchQuery,
     );
   }
@@ -779,7 +780,7 @@ function renderInvoicePartyValue(
   taxId: string,
   invoiceType: string,
   sourceKind?: WorkbenchSourceKind,
-  amountAnomaly?: WorkbenchRecord["amountAnomaly"],
+  anomaly?: WorkbenchRecord["oaInvoiceAnomaly"],
   searchQuery = "",
 ) {
   const flowLabel = workbenchInvoiceFlowLabel(invoiceType);
@@ -800,18 +801,28 @@ function renderInvoicePartyValue(
               {sourceLabel ? <span className="inline-meta-tag invoice-source-tag">{highlightSearchText(sourceLabel, searchQuery)}</span> : null}
             </span>
           ) : null}
-          {amountAnomaly ? (
-            <span
-              className={`invoice-amount-anomaly-chip invoice-amount-anomaly-chip-${amountAnomaly.state}`}
-              title={`OA ${amountAnomaly.oaTotal} / 发票 ${amountAnomaly.invoiceTotal} / 差额 ${amountAnomaly.amountDelta}`}
+          {anomaly ? (
+            <Chip
+              className="invoice-oa-anomaly-chip"
+              color={anomaly.code === "oa_invoice_attachment_missing" ? "warning" : "danger"}
+              size="sm"
+              title={anomalyTitle(anomaly)}
+              variant="soft"
             >
-              {amountAnomaly.displayLabel}
-            </span>
+              <Chip.Label>{anomaly.displayLabel}</Chip.Label>
+            </Chip>
           ) : null}
         </span>
       </span>
     </span>
   );
+}
+
+function anomalyTitle(anomaly: NonNullable<WorkbenchRecord["oaInvoiceAnomaly"]>) {
+  if (anomaly.code === "oa_invoice_attachment_missing") {
+    return `OA子付款项已上传 ${anomaly.attachmentFileCount} 个附件，但未解析出发票`;
+  }
+  return `OA ${anomaly.oaTotal ?? "—"} / 发票 ${anomaly.invoiceTotal ?? "—"} / 差额 ${anomaly.amountDelta ?? "—"}`;
 }
 
 function renderInvoiceAmountValue(grossAmount: string, amount: string, taxRate: string, taxAmount: string, searchQuery = "") {

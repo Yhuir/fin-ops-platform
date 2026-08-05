@@ -6,15 +6,24 @@ import WorkbenchExceptionDrawer from "../components/workbench/WorkbenchException
 import WorkbenchRecordCard from "../components/workbench/WorkbenchRecordCard";
 import type { WorkbenchRecord, WorkbenchRelationGroup } from "../features/workbench/types";
 
-const anomaly = {
+const anomalyItem = {
   code: "oa_invoice_amount_mismatch" as const,
   label: "金额不一致",
   displayLabel: "金额不一致",
   fingerprint: "a".repeat(64),
-  state: "active" as const,
+  comparisonUnitId: "case:CASE-1",
   oaTotal: "100.00",
   invoiceTotal: "99.99",
   amountDelta: "0.01",
+  invoiceRowIds: ["invoice-1"],
+  attachmentFileCount: 0,
+};
+
+const anomaly = {
+  code: "oa_invoice_anomaly" as const,
+  fingerprint: "b".repeat(64),
+  state: "active" as const,
+  items: [anomalyItem],
 };
 
 const invoiceRow: WorkbenchRecord = {
@@ -38,7 +47,7 @@ const invoiceRow: WorkbenchRecord = {
   detailFields: [],
   actionVariant: "detail-only",
   availableActions: ["detail"],
-  amountAnomaly: anomaly,
+  oaInvoiceAnomaly: anomalyItem,
 };
 
 const group: WorkbenchRelationGroup = {
@@ -48,7 +57,7 @@ const group: WorkbenchRelationGroup = {
   matchConfidence: "high",
   reason: "active_formal_relation",
   rows: { oa: [], bank: [], invoice: [invoiceRow] },
-  amountAnomaly: anomaly,
+  oaInvoiceAnomaly: anomaly,
 };
 
 describe("Workbench amount mismatch exception UI", () => {
@@ -68,8 +77,8 @@ describe("Workbench amount mismatch exception UI", () => {
         onBucketChange={vi.fn()}
         onCancelProcessedException={vi.fn()}
         onClose={vi.fn()}
-        onIgnoreAmountMismatch={onIgnore}
-        onRestoreAmountMismatch={vi.fn()}
+        onIgnoreOaInvoiceAnomaly={onIgnore}
+        onRestoreOaInvoiceAnomaly={vi.fn()}
         onUnignoreRow={vi.fn()}
       />,
     );
@@ -108,24 +117,69 @@ describe("Workbench amount mismatch exception UI", () => {
     );
 
     const source = screen.getByText("人工导入");
-    const chip = screen.getByText("金额不一致");
+    const chip = screen.getByText("金额不一致").closest('[data-slot="chip"]');
     expect(source.closest(".invoice-chip-row")?.nextElementSibling).toBe(chip);
     expect(chip).toHaveAttribute("title", "OA 100.00 / 发票 99.99 / 差额 0.01");
   });
 
+  test("renders a missing OA attachment as one non-interactive invoice anomaly row", async () => {
+    const missingItem = {
+      ...anomalyItem,
+      code: "oa_invoice_attachment_missing" as const,
+      label: "OA发票附件缺失",
+      displayLabel: "OA发票附件缺失",
+      invoiceTotal: undefined,
+      amountDelta: undefined,
+      invoiceRowIds: [],
+      attachmentFileCount: 1,
+    };
+    const onSelectRow = vi.fn();
+
+    render(
+      <WorkbenchRecordCard
+        canMutateData
+        columns={[{ key: "sellerName", label: "销方", track: "1fr", minWidth: 120 }]}
+        paneId="invoice"
+        row={{
+          ...invoiceRow,
+          id: "missing-item",
+          displayOnly: true,
+          sourceKind: "oa_attachment_unknown",
+          label: "OA发票附件缺失",
+          oaInvoiceAnomaly: missingItem,
+        }}
+        rowState="idle"
+        showWorkflowActions={false}
+        zoneId="unpaired"
+        onOpenDetail={vi.fn()}
+        onRowAction={vi.fn()}
+        onSelectRow={onSelectRow}
+      />,
+    );
+
+    const chip = screen.getByText("OA发票附件缺失").closest('[data-slot="chip"]');
+    expect(chip).toHaveAttribute("title", "OA子付款项已上传 1 个附件，但未解析出发票");
+    await userEvent.click(chip!.closest('[role="row"]') as HTMLElement);
+    expect(onSelectRow).not.toHaveBeenCalled();
+  });
+
   test("shows ignored mismatch and withdraws the ignore without a confirmation modal", async () => {
     const user = userEvent.setup();
+    const ignoredItem = {
+      ...anomalyItem,
+      displayLabel: "已忽略：金额不一致",
+    };
     const ignoredAnomaly = {
       ...anomaly,
-      displayLabel: "已忽略：金额不一致",
       state: "ignored" as const,
+      items: [ignoredItem],
     };
     const ignoredGroup: WorkbenchRelationGroup = {
       ...group,
-      amountAnomaly: ignoredAnomaly,
+      oaInvoiceAnomaly: ignoredAnomaly,
       rows: {
         ...group.rows,
-        invoice: [{ ...invoiceRow, amountAnomaly: ignoredAnomaly }],
+        invoice: [{ ...invoiceRow, oaInvoiceAnomaly: ignoredItem }],
       },
     };
     const onRestore = vi.fn();
@@ -142,8 +196,8 @@ describe("Workbench amount mismatch exception UI", () => {
         onBucketChange={vi.fn()}
         onCancelProcessedException={vi.fn()}
         onClose={vi.fn()}
-        onIgnoreAmountMismatch={vi.fn()}
-        onRestoreAmountMismatch={onRestore}
+        onIgnoreOaInvoiceAnomaly={vi.fn()}
+        onRestoreOaInvoiceAnomaly={onRestore}
         onUnignoreRow={vi.fn()}
       />,
     );
@@ -178,8 +232,8 @@ describe("Workbench amount mismatch exception UI", () => {
         onBucketChange={vi.fn()}
         onCancelProcessedException={vi.fn()}
         onClose={vi.fn()}
-        onIgnoreAmountMismatch={vi.fn()}
-        onRestoreAmountMismatch={vi.fn()}
+        onIgnoreOaInvoiceAnomaly={vi.fn()}
+        onRestoreOaInvoiceAnomaly={vi.fn()}
         onUnignoreRow={vi.fn()}
       />,
     );
