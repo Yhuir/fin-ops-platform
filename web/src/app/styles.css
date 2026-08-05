@@ -19639,9 +19639,9 @@ body.column-layout-dragging {
   font-size: 14px;
 }
 
-.cost-section-heading span,
-.cost-explorer-lane-header span,
-.cost-section-heading-copy span {
+.cost-section-heading > span,
+.cost-explorer-lane-header > span,
+.cost-section-heading-copy > span:not(.cost-direction-amount) {
   color: var(--fp-text-muted);
   font-size: 11px;
   font-weight: 800;
@@ -19649,9 +19649,9 @@ body.column-layout-dragging {
 
 .cost-direction-summary {
   display: grid;
-  grid-template-columns: repeat(2, minmax(150px, max-content));
+  grid-template-columns: minmax(0, max-content);
   align-items: center;
-  gap: var(--fp-space-3);
+  gap: var(--fp-space-1);
 }
 
 .cost-direction-amount {
@@ -20969,11 +20969,6 @@ body.column-layout-dragging {
 }
 
 @media (max-width: 720px) {
-  .cost-direction-summary {
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--fp-space-1);
-  }
-
   .cost-view-divider {
     display: none;
   }

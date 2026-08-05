@@ -163,6 +163,10 @@ describe("Cost statistics page", () => {
     expect(css).not.toMatch(/\.cost-lock-overlay\s*{[^}]*backdrop-filter/s);
     expect(css).not.toMatch(/\.cost-lock-overlay\s*{[^}]*animation:/s);
     expect(css).not.toContain("cost-lock-breathe");
+    expect(css).toMatch(/\.cost-direction-summary\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*max-content\)[^}]*gap:\s*var\(--fp-space-1\)/s);
+    expect(css).not.toMatch(/\.cost-direction-summary\s*{[^}]*repeat\(2,/s);
+    expect(css).toMatch(/\.cost-section-heading > span,[\s\S]*\.cost-section-heading-copy > span:not\(\.cost-direction-amount\)\s*{[^}]*color:\s*var\(--fp-text-muted\)/s);
+    expect(css).not.toMatch(/\.cost-section-heading span,/);
     expect(css).toMatch(/\.cost-direction-amount--aligned\s*{[^}]*grid-template-columns:\s*auto minmax\(82px,\s*max-content\)/s);
     expect(css).toMatch(/\.export-center-modal\s*{[^}]*border-radius:\s*var\(--fp-radius-lg\)/s);
     expect(css).toMatch(/\.cost-detail-modal\s*{[^}]*border-radius:\s*var\(--fp-radius-lg\)/s);
@@ -241,6 +245,9 @@ describe("Cost statistics page", () => {
     expect(within(timeGrid).getAllByText("支出")[0]).toHaveClass("direction-tag");
     expect(screen.getByLabelText("支出金额 13360.00")).toHaveClass("cost-direction-amount--expense");
     expect(screen.getByLabelText("收入金额 2000.00")).toHaveClass("cost-direction-amount--income");
+    expect(
+      Array.from(screen.getByLabelText("时间统计方向金额").children).map((node) => node.getAttribute("aria-label")),
+    ).toEqual(["支出金额 13360.00", "收入金额 2000.00"]);
     expect(screen.queryByText("总金额 15360.00")).not.toBeInTheDocument();
     expect(await within(timeGrid).findByRole("button", { name: "查看流水 cost-income-001" })).toBeInTheDocument();
     expect(within(timeGrid).getByText("2000.00").closest(".money-cell-value")).toHaveClass("cost-flow-amount--income");
@@ -622,6 +629,9 @@ describe("Cost statistics page", () => {
     expect(within(primaryLane as HTMLElement).getByText("经营收入")).toBeInTheDocument();
     expect(screen.getByLabelText("支出金额 13360.00")).toHaveClass("cost-direction-amount--expense");
     expect(screen.getByLabelText("收入金额 2000.00")).toHaveClass("cost-direction-amount--income");
+    expect(
+      Array.from(screen.getByLabelText("标签统计方向金额").children).map((node) => node.getAttribute("aria-label")),
+    ).toEqual(["支出金额 13360.00", "收入金额 2000.00"]);
     expect(within(primaryLane as HTMLElement).queryByText(/%$/)).not.toBeInTheDocument();
     const incomeCountRow = within(primaryLane as HTMLElement).getByRole("button", { name: /经营收入/ });
     expect(incomeCountRow).toHaveTextContent("支出 0 笔");
