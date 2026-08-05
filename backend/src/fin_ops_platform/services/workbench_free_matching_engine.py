@@ -7,7 +7,7 @@ import json
 from typing import Iterable, Literal
 
 
-RULE_VERSION = "2026-08-05-isolated-active-extension-v10"
+RULE_VERSION = "2026-08-05-exact-singleton-first-v11"
 MATCHABLE_ROW_TYPES = frozenset({"oa", "bank", "invoice"})
 ROW_TYPE_ORDER = {"oa": 0, "bank": 1, "invoice": 2}
 STRONG_COMPOSITE_EVIDENCE_KINDS = frozenset(
@@ -311,22 +311,39 @@ class WorkbenchFreeMatchingEngine:
         if reversal_ambiguous:
             blocked["ambiguous_output_invoice_reversal"] = reversal_ambiguous
 
+        facts_by_key = {fact.member_key: fact for fact in batch.facts}
+        singleton_plans, singleton_claimed = self._exact_singleton_active_extension_plans(
+            batch=batch,
+            facts_by_key=facts_by_key,
+            eligible_new_facts=[
+                fact
+                for fact in available
+                if fact.reversal_polarity != "red" and fact.member_key not in reversal_claimed
+            ],
+        )
         try:
             budget.consume(working_bytes=len(available) * 512)
             edges = self._build_edges(batch.facts, budget)
         except _ResourceLimited:
+            blocked["resource_limited"] = 1
             return FormalRelationMatchResult(
+                plans=tuple(
+                    sorted(
+                        [*reversal_plans, *singleton_plans],
+                        key=lambda plan: plan.relation_fingerprint,
+                    )
+                ),
+                ambiguous_component_count=reversal_ambiguous,
                 resource_limited_component_count=1,
                 preserved_active_count=preserved_active_count,
-                blocked_reason_counts=(("resource_limited", 1),),
+                blocked_reason_counts=tuple(sorted(blocked.items())),
             )
 
-        facts_by_key = {fact.member_key: fact for fact in batch.facts}
         available_keys = {
             fact.member_key
             for fact in available
             if fact.reversal_polarity != "red"
-        } - reversal_claimed
+        } - reversal_claimed - singleton_claimed
         (
             extension_plans,
             extension_claimed,
@@ -339,6 +356,11 @@ class WorkbenchFreeMatchingEngine:
             active_by_member=active_by_member,
             eligible_new_keys=available_keys,
             budget=budget,
+            preplanned_case_ids={
+                plan.target_case_id
+                for plan in singleton_plans
+                if plan.target_case_id is not None
+            },
         )
         if extension_ambiguous:
             blocked["ambiguous_active_extension"] = extension_ambiguous
@@ -351,7 +373,7 @@ class WorkbenchFreeMatchingEngine:
             if edge.left in available_keys - extension_claimed and edge.right in available_keys - extension_claimed
         ]
         components = self._components(available_keys - extension_claimed, graph_edges)
-        plans = [*reversal_plans, *extension_plans]
+        plans = [*reversal_plans, *singleton_plans, *extension_plans]
         ambiguous_components = extension_ambiguous + reversal_ambiguous
         resource_limited_components = extension_resource_limited
         unsafe_components = 0
@@ -563,6 +585,7 @@ class WorkbenchFreeMatchingEngine:
         active_by_member: dict[MemberKey, ActiveFormalRelationAnchor],
         eligible_new_keys: set[MemberKey],
         budget: _Budget,
+        preplanned_case_ids: set[str],
     ) -> tuple[list[FormalRelationPlan], set[MemberKey], int, int]:
         new_members_by_case: dict[str, set[MemberKey]] = {}
         ambiguous_members: set[MemberKey] = set()
@@ -576,7 +599,7 @@ class WorkbenchFreeMatchingEngine:
                 continue
             anchor = left_anchor or right_anchor
             new_member = edge.right if left_anchor else edge.left
-            if anchor is None:
+            if anchor is None or anchor.case_id in preplanned_case_ids:
                 continue
             cases_by_new_member.setdefault(new_member, set()).add(anchor.case_id)
         for member_key, case_ids in cases_by_new_member.items():
@@ -622,7 +645,11 @@ class WorkbenchFreeMatchingEngine:
             composite_adjacency.setdefault(edge.right, set()).add(edge.left)
         for case_id, anchor in sorted(anchors.items()):
             anchor_members = set(anchor.member_keys)
-            if case_id in new_members_by_case or {row_type for row_type, _identity in anchor_members} == MATCHABLE_ROW_TYPES:
+            if (
+                case_id in preplanned_case_ids
+                or case_id in new_members_by_case
+                or {row_type for row_type, _identity in anchor_members} == MATCHABLE_ROW_TYPES
+            ):
                 continue
             if not anchor_members.issubset(facts_by_key):
                 continue
@@ -730,6 +757,97 @@ class WorkbenchFreeMatchingEngine:
             len(ambiguous_members) + len(ambiguous_cases),
             resource_limited_cases,
         )
+
+    def _exact_singleton_active_extension_plans(
+        self,
+        *,
+        batch: FormalRelationFactBatch,
+        facts_by_key: dict[MemberKey, FormalRelationFact],
+        eligible_new_facts: list[FormalRelationFact],
+    ) -> tuple[list[FormalRelationPlan], set[MemberKey]]:
+        candidates_by_amount: dict[tuple[str, str, str, int], list[FormalRelationFact]] = {}
+        for fact in eligible_new_facts:
+            if fact.amount_minor > 0 and fact.fact_date is not None:
+                candidates_by_amount.setdefault(
+                    (fact.row_type, fact.currency, fact.direction, fact.amount_minor),
+                    [],
+                ).append(fact)
+
+        candidates_by_case: dict[str, tuple[FormalRelationFact, set[str]]] = {}
+        for anchor in batch.active_relations:
+            anchor_facts = [facts_by_key[key] for key in anchor.member_keys if key in facts_by_key]
+            if len(anchor_facts) != len(anchor.member_keys):
+                continue
+            missing_row_types = MATCHABLE_ROW_TYPES - {fact.row_type for fact in anchor_facts}
+            if len(missing_row_types) != 1 or any(fact.amount_minor <= 0 for fact in anchor_facts):
+                continue
+            currencies = {fact.currency for fact in anchor_facts}
+            directions = {fact.direction for fact in anchor_facts}
+            if len(currencies) != 1 or len(directions) != 1:
+                continue
+
+            missing_row_type = next(iter(missing_row_types))
+            amount_totals: dict[str, int] = {}
+            for fact in anchor_facts:
+                amount_totals[fact.row_type] = amount_totals.get(fact.row_type, 0) + fact.amount_minor
+            matching: dict[MemberKey, tuple[FormalRelationFact, set[str]]] = {}
+            for amount_minor in set(amount_totals.values()):
+                for candidate in candidates_by_amount.get(
+                    (missing_row_type, next(iter(currencies)), next(iter(directions)), amount_minor),
+                    (),
+                ):
+                    evidence_kinds = self._shared_composite_evidence_kinds(candidate, anchor_facts)
+                    if evidence_kinds:
+                        matching[candidate.member_key] = (candidate, evidence_kinds)
+            if len(matching) == 1:
+                candidates_by_case[anchor.case_id] = next(iter(matching.values()))
+
+        cases_by_member: dict[MemberKey, set[str]] = {}
+        for case_id, (candidate, _evidence_kinds) in candidates_by_case.items():
+            cases_by_member.setdefault(candidate.member_key, set()).add(case_id)
+
+        plans: list[FormalRelationPlan] = []
+        claimed: set[MemberKey] = set()
+        anchors = {anchor.case_id: anchor for anchor in batch.active_relations}
+        for case_id, (candidate, evidence_kinds) in sorted(candidates_by_case.items()):
+            if len(cases_by_member[candidate.member_key]) != 1:
+                continue
+            full_members = tuple(
+                sorted((*anchors[case_id].member_keys, candidate.member_key), key=_member_sort_key)
+            )
+            if relation_fingerprint(full_members) in batch.withdrawal_fingerprints:
+                claimed.add(candidate.member_key)
+                continue
+            plans.append(
+                self._plan(
+                    batch=batch,
+                    member_keys=full_members,
+                    facts_by_key=facts_by_key,
+                    rule_code="strong_evidence_exact_singleton_extension",
+                    evidence_kinds=evidence_kinds,
+                    target_case_id=case_id,
+                )
+            )
+            claimed.add(candidate.member_key)
+        return plans, claimed
+
+    @staticmethod
+    def _shared_composite_evidence_kinds(
+        candidate: FormalRelationFact,
+        anchor_facts: list[FormalRelationFact],
+    ) -> set[str]:
+        candidate_evidence = set(candidate.evidence_keys)
+        evidence_kinds: set[str] = set()
+        for anchor_fact in anchor_facts:
+            if candidate.fact_date is None or anchor_fact.fact_date is None:
+                continue
+            for evidence_kind, _evidence_value in candidate_evidence.intersection(
+                anchor_fact.evidence_keys
+            ):
+                window_days = 30 if evidence_kind == "employee_reimbursement_payee" else 365
+                if abs((candidate.fact_date - anchor_fact.fact_date).days) <= window_days:
+                    evidence_kinds.add(evidence_kind)
+        return evidence_kinds
 
     def _plans_for_component(
         self,

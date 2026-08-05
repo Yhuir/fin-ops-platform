@@ -624,11 +624,98 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
         plan = result.plans[0]
         self.assertEqual(plan.target_case_id, "CASE-AUTO-0076EC3CA6BA0F837824")
         self.assertEqual(plan.case_id, "CASE-AUTO-0076EC3CA6BA0F837824")
-        self.assertEqual(plan.rule_code, "strong_evidence_exact_extension")
+        self.assertEqual(plan.rule_code, "strong_evidence_exact_singleton_extension")
         self.assertEqual(plan.amount_minor, 0)
         self.assertEqual(set(plan.row_types), {"oa", "bank", "invoice"})
         self.assertIn(bank.member_key, plan.member_keys)
         self.assertNotIn(wrong_bank.member_key, plan.member_keys)
+        self.assertEqual(result.resource_limited_component_count, 1)
+
+    def test_exact_singleton_extension_wins_over_equal_multi_row_partition(self) -> None:
+        evidence = (("employee_reimbursement_payee", "樊祖芳"),)
+        oa = fact(
+            "oa",
+            "oa-singleton-priority",
+            74_706,
+            fact_date=date(2026, 7, 17),
+            evidence=evidence,
+        )
+        invoice = fact(
+            "invoice",
+            "invoice-singleton-priority",
+            73_967,
+            fact_date=date(2026, 7, 17),
+            evidence=(),
+        )
+        exact_bank = fact(
+            "bank",
+            "bank-singleton-priority",
+            74_706,
+            fact_date=date(2026, 8, 3),
+            evidence=evidence,
+        )
+        split_banks = (
+            fact(
+                "bank",
+                "bank-singleton-split-a",
+                30_000,
+                fact_date=date(2026, 8, 3),
+                evidence=evidence,
+            ),
+            fact(
+                "bank",
+                "bank-singleton-split-b",
+                44_706,
+                fact_date=date(2026, 8, 3),
+                evidence=evidence,
+            ),
+        )
+        fixture = FormalRelationFactBatch(
+            facts=(oa, invoice, exact_bank, *split_banks),
+            active_relations=(
+                ActiveFormalRelationAnchor(
+                    case_id="case:singleton-priority",
+                    member_keys=(oa.member_key, invoice.member_key),
+                ),
+            ),
+        )
+
+        result = self.engine.plan_relations(fixture)
+
+        self.assertEqual(len(result.plans), 1)
+        self.assertEqual(result.plans[0].target_case_id, "case:singleton-priority")
+        self.assertIn(exact_bank.member_key, result.plans[0].member_keys)
+        self.assertTrue(
+            all(bank.member_key not in result.plans[0].member_keys for bank in split_banks)
+        )
+
+    def test_exact_singleton_extension_survives_global_graph_budget_exhaustion(self) -> None:
+        evidence = (("employee_reimbursement_payee", "樊祖芳"),)
+        oa = fact("oa", "oa-budget-priority", 74_706, evidence=evidence)
+        invoice = fact("invoice", "invoice-budget-priority", 73_967, evidence=())
+        bank = fact("bank", "bank-budget-priority", 74_706, evidence=evidence)
+        fixture = FormalRelationFactBatch(
+            facts=(oa, invoice, bank),
+            active_relations=(
+                ActiveFormalRelationAnchor(
+                    case_id="case:budget-priority",
+                    member_keys=(oa.member_key, invoice.member_key),
+                ),
+            ),
+        )
+
+        result = self.engine.plan_relations(
+            fixture,
+            FormalRelationSearchLimits(
+                max_search_states=1,
+                max_deadline_states=1,
+                max_working_bytes=1,
+            ),
+        )
+
+        self.assertEqual(len(result.plans), 1)
+        self.assertEqual(result.plans[0].target_case_id, "case:budget-priority")
+        self.assertIn(bank.member_key, result.plans[0].member_keys)
         self.assertEqual(result.resource_limited_component_count, 1)
 
     def test_active_extension_resource_limit_does_not_discard_independent_exact_case(self) -> None:

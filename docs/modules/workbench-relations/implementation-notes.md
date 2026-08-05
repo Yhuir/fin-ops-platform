@@ -4773,3 +4773,10 @@ FIN_OPS_TEST_DATABASE_URL=<disposable-db> PYTHONPATH=backend/src:. python3 -m py
 - 最小修复：证据桶只遍历跨 pane 类型组合；active extension 为每个 case 创建独立且同上限的搜索预算，单 case 超限时认领其可达候选并 fail closed，同时继续处理其它 case。金额分币精确合计、强证据、30/365 天窗口、候选唯一、跨 case 竞争、撤回指纹和 active owner 门禁均未放宽。
 - 版本与边界：matching rule 升至 `2026-08-05-isolated-active-extension-v10`；不新增 API、表、worker、queue、fallback 或依赖，relation command/UoW 与 Workbench read model I/O 不变。
 - 回归：新增“前序 18 个候选的高密度 case 资源受限但后续唯一 case 仍生成计划”与“700 条同类型 OA 噪声不耗尽建边预算”两组保护，并保留一对多精确合计、歧义、跨 case overlap 与撤回 fail-closed 用例。
+
+## 2026-08-05 - 唯一同额单笔优先补全
+
+- 真实原因：v10 只隔离了搜索预算，仍先为全量事实建图并枚举缺失 pane 的所有组合。生产 747.06 样本同时存在唯一同额银行流水和同员工大量共享证据时，建图可先触发资源保护；即使未超限，较小流水组合与唯一单笔并存也会被当作多解，最简单的安全闭包被复杂搜索阻断。
+- 最小修复：active relation 仅缺一个 pane 时，先按 `(row_type, currency, direction, amount_minor)` 索引查找与任一既有 pane 合计相同的单笔，再复用原有强证据与 30/365 天窗口。只有候选和 owner case 均唯一才生成计划；重复同额、跨 case 争用、撤回指纹继续 fail closed。命中后该 case 不再进入组合搜索；未命中则保留原有一对多、多对一和多对多精确合计兜底。
+- 版本与边界：matching rule 升至 `2026-08-05-exact-singleton-first-v11`。没有新增 API、表、worker、queue、依赖、fallback 或第二事实源；全局建图资源受限时仍保留此前已经证明安全的 reversal/唯一单笔计划。
+- 回归：覆盖生产 747.06 OA+三张附件发票+同额流水形状、唯一单笔与同额多笔组合竞争、全局图预算耗尽后计划保留，并继续覆盖重复同额、跨 case 竞争、多笔精确合计与撤回。
